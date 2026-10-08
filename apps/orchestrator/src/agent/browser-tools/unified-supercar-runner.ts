@@ -288,8 +288,28 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
         };
-      case 'cancelled':
-        return controller.signal.aborted && opts.timeoutMs && !(await opts.isTaskCancelled?.())
+      case 'cancelled': {
+        const timedOut =
+          controller.signal.aborted && Boolean(opts.timeoutMs) && !(await opts.isTaskCancelled?.());
+        // Out of time during the remediation turn: deliver the held answer for
+        // verification (it explains what is missing) instead of a bare timeout.
+        if (timedOut && outcome.heldAnswer) {
+          await safe(() =>
+            opts.onEvidence?.({
+              fact: outcome.heldAnswer?.evidence ?? '',
+              sourceType: 'browser_state',
+              sourceDetail: page.url(),
+              confidence: 'observed',
+            }),
+          );
+          return {
+            status: 'completed',
+            summary: outcome.heldAnswer.summary,
+            iterations: outcome.steps,
+            toolsUsed: [...toolsUsed],
+          };
+        }
+        return timedOut
           ? {
               status: 'timeout',
               reason: '任务超时，请把任务拆小一些再试。',
@@ -297,6 +317,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
               toolsUsed: [...toolsUsed],
             }
           : { status: 'cancelled', iterations: outcome.steps, toolsUsed: [...toolsUsed] };
+      }
       default:
         return {
           status: 'failed',

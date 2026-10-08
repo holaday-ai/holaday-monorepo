@@ -429,7 +429,21 @@
       },
       "publicSite": true,
       "expectHandoff": false
+    },
+    {
+      "id": "be-36",
+      "category": "list_sources",
+      "startUrl": "https://re.jd.com/search?keyword=%E9%99%8D%E5%99%AA%E8%80%B3%E6%9C%BA",
+      "instruction": "在当前京东降噪耳机搜索页，告诉我前三个商品的名称和价格，并附商品链接。只读查看，不登录、不购买、不加购物车。",
+      "success": {
+        "type": "list_with_sources",
+        "minItems": 3,
+        "domains": ["jd.com"],
+        "keyField": "price"
+      },
+      "publicSite": true,
+      "expectHandoff": false
     }
   ],
-  "listSourcesIds": ["be-31", "be-32", "be-33", "be-34", "be-35"]
+  "listSourcesIds": ["be-31", "be-32", "be-33", "be-34", "be-35", "be-36"]
 }

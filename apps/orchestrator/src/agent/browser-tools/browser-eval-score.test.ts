@@ -12,9 +12,9 @@ const suite = JSON.parse(
 ) as { smokeIds: string[]; listSourcesIds: string[]; tasks: BrowserEvalTask[] };
 
 describe('browser eval suite', () => {
-  it('ships 35 tasks across the required categories with 5 public smoke tasks', () => {
-    expect(suite.tasks).toHaveLength(35);
-    expect(new Set(suite.tasks.map((task) => task.id)).size).toBe(35);
+  it('ships 36 tasks across the required categories with 5 public smoke tasks', () => {
+    expect(suite.tasks).toHaveLength(36);
+    expect(new Set(suite.tasks.map((task) => task.id)).size).toBe(36);
     expect(new Set(suite.tasks.map((task) => task.category))).toEqual(
       new Set([
         'ecommerce',
@@ -26,7 +26,7 @@ describe('browser eval suite', () => {
         'list_sources',
       ]),
     );
-    expect(suite.listSourcesIds).toEqual(['be-31', 'be-32', 'be-33', 'be-34', 'be-35']);
+    expect(suite.listSourcesIds).toEqual(['be-31', 'be-32', 'be-33', 'be-34', 'be-35', 'be-36']);
     expect(suite.smokeIds).toHaveLength(5);
     for (const id of suite.smokeIds)
       expect(suite.tasks.find((task) => task.id === id)?.publicSite).toBe(true);

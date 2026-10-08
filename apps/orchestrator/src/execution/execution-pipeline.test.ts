@@ -1589,7 +1589,11 @@ describe('extractFailedChecks — surfaces criterionType for SPA banner', () => 
 
 describe('persistence re-check after a failed verdict (FIX-BATCH-A)', () => {
   const enable = () =>
-    setFeatureFlagsForTest({ EVIDENCE_LEDGER: true, EXECUTION_CONTRACT: true, EXECUTION_VERIFIER: true });
+    setFeatureFlagsForTest({
+      EVIDENCE_LEDGER: true,
+      EXECUTION_CONTRACT: true,
+      EXECUTION_VERIFIER: true,
+    });
 
   it('never turns the safety notice of a failed answer into a verified completion', async () => {
     enable();
@@ -1629,5 +1633,45 @@ describe('persistence re-check after a failed verdict (FIX-BATCH-A)', () => {
       ]),
     );
     disposeExecution(taskId);
+  });
+});
+
+describe('list failures keep a draft that declares its gaps (FIX-BATCH-A)', () => {
+  const run = async (taskId: string, answerText: string) => {
+    setFeatureFlagsForTest({
+      EVIDENCE_LEDGER: true,
+      EXECUTION_CONTRACT: true,
+      EXECUTION_VERIFIER: true,
+    });
+    initExecution({
+      taskId,
+      intent: '在当前京东降噪耳机搜索页，告诉我前三个商品的名称和价格，并附商品链接。',
+      executionMode: 'browser',
+    });
+    const out = await verifyAndFinalize({ taskId, answerText });
+    disposeExecution(taskId);
+    return out;
+  };
+
+  it('fails, but keeps names and prices when the links are declared missing', async () => {
+    const answer = [1, 2, 3]
+      .map(
+        (i) =>
+          `${i}. **名称**：耳机${i}\n   **价格**：¥${i}299.00\n   **商品链接**：未获取到（推广页没有商品详情链接）`,
+      )
+      .join('\n\n');
+    const out = await run('tsk_jd_declared', answer);
+    expect(deriveFinalStatus('completed', out.verification)).toBe('failed');
+    expect(out.finalText).toContain('未能给出可验证的结果');
+    expect(out.finalText).toContain('已保留的中间结果');
+    expect(out.finalText).toContain('¥3299.00');
+  });
+
+  it('does not keep a draft that hides the gap behind a reused link', async () => {
+    const answer = [1, 2, 3]
+      .map((i) => `${i}. 耳机${i} ¥${i}99 https://re.jd.com/search?keyword=x`)
+      .join('\n');
+    const out = await run('tsk_jd_hidden', answer);
+    expect(out.finalText).not.toContain('已保留的中间结果');
   });
 });

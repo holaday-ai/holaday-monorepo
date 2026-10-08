@@ -1013,6 +1013,8 @@ function runFixLoop(
   };
 }
 
+const LIST_GAP_CHECKS = new Set(['list_item_sources', 'ecommerce_rows', 'result_count']);
+
 /** First line of the text that replaces an answer which failed verification. */
 const SAFE_BOUNDARY_HEADER = '未能给出可验证的结果，本次不会把未通过校验的内容作为结论。';
 
@@ -1023,11 +1025,16 @@ function buildSafeVerificationBoundary(
   const failed = verification.checks.find((check) => !check.passed);
   const reason = failed?.detail ?? verification.suggestedFix ?? '关键条件尚未验证';
   const failedChecks = verification.checks.filter((check) => !check.passed);
+  // A list that only misses per-item links/fields, and says so ("未获取到"),
+  // still carries observed names, prices and dates the user can act on.
+  const declaredListGapsOnly =
+    failedChecks.length > 0 &&
+    failedChecks.every((check) => LIST_GAP_CHECKS.has(check.criterionType ?? '')) &&
+    /未获取到|无法获取|未能获取|拿不到/.test(answerText);
   const canPreserveDraft =
     verification.failureLevel === 'needs_clarification' &&
-    failedChecks.every(
-      (check) => !check.criterionType && check.severity !== 'hard_fail',
-    );
+    (declaredListGapsOnly ||
+      failedChecks.every((check) => !check.criterionType && check.severity !== 'hard_fail'));
   const parts = [
     SAFE_BOUNDARY_HEADER,
     '',

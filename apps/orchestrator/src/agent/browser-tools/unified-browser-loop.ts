@@ -123,7 +123,16 @@ export type UnifiedBrowserOutcome =
   | { status: 'completed'; summary: string; evidence: string; steps: number }
   | { status: 'failed'; reason: string; steps: number }
   | { status: 'awaiting_user'; reason: string; message: string; steps: number }
-  | { status: 'cancelled'; steps: number };
+  | {
+      status: 'cancelled';
+      steps: number;
+      /**
+       * The answer held back for remediation when the run was aborted during
+       * that turn. The caller decides: a timeout delivers it for verification
+       * (remediation never makes the outcome worse), a user cancel does not.
+       */
+      heldAnswer?: { summary: string; evidence: string };
+    };
 
 const MAX_CONTEXT_IMAGES = 2;
 
@@ -136,8 +145,15 @@ export async function runUnifiedBrowserLoop(
   /** Latest page text seen by snapshot/extract; evidence must come from it. */
   let lastPageText = '';
   let remediationsLeft = input.reviewFinish ? 1 : 0;
+  /** A completed answer held back for its remediation turn. */
+  let held: { summary: string; evidence: string } | null = null;
+  const cancelled = (steps: number): UnifiedBrowserOutcome =>
+    held ? { status: 'cancelled', steps, heldAnswer: held } : { status: 'cancelled', steps };
+  /** Remediation must not end worse than the held answer would have. */
+  const heldOr = (outcome: UnifiedBrowserOutcome, steps: number): UnifiedBrowserOutcome =>
+    held ? { status: 'completed', ...held, steps } : outcome;
   for (let step = 0; step < maxSteps; step += 1) {
-    if (input.signal?.aborted) return { status: 'cancelled', steps: step };
+    if (input.signal?.aborted) return cancelled(step);
     let response: Awaited<ReturnType<MessagesAdapter['create']>>;
     try {
       response = await input.adapter.create(
@@ -155,8 +171,11 @@ export async function runUnifiedBrowserLoop(
         },
       );
     } catch {
-      if (input.signal?.aborted) return { status: 'cancelled', steps: step };
-      return { status: 'failed', reason: '模型服务暂时不可用，请稍后重试。', steps: step };
+      if (input.signal?.aborted) return cancelled(step);
+      return heldOr(
+        { status: 'failed', reason: '模型服务暂时不可用，请稍后重试。', steps: step },
+        step,
+      );
     }
     const calls = response.content.filter((block) => block.type === 'tool_use');
     if (calls.length === 0) {
@@ -195,11 +214,13 @@ export async function runUnifiedBrowserLoop(
           const gaps = remediationsLeft > 0 ? (input.reviewFinish?.(summary) ?? null) : null;
           if (gaps) {
             remediationsLeft -= 1;
+            held = { summary, evidence };
             results.push(toolResult(call.id, remediationPrompt(gaps), true));
             continue;
           }
           return { status: 'completed', summary, evidence, steps: step + 1 };
         }
+        // The model's own failure explains why the gaps could not be filled.
         return { status: 'failed', reason: summary || '任务未完成。', steps: step + 1 };
       }
       if (call.name === 'request_human') {
@@ -269,11 +290,14 @@ export async function runUnifiedBrowserLoop(
     }
     messages.push({ role: 'user', content: [...results, ...images] });
   }
-  return {
-    status: 'failed',
-    reason: '超过最大步数仍未完成，请把任务拆小一些再试。',
-    steps: maxSteps,
-  };
+  return heldOr(
+    {
+      status: 'failed',
+      reason: '超过最大步数仍未完成，请把任务拆小一些再试。',
+      steps: maxSteps,
+    },
+    maxSteps,
+  );
 }
 
 const INVALID_ARGUMENTS = Symbol('invalid-arguments');

@@ -297,6 +297,58 @@ describe('pre-delivery review (FIX-BATCH-A)', () => {
   });
 });
 
+describe('remediation never ends worse than the held answer (FIX-BATCH-A)', () => {
+  const held = { summary: '1. 耳机A ¥99（未获取到商品链接）', evidence: '耳机A' };
+  const firstFinish = () => [
+    call('finish', { status: 'completed', summary: held.summary, evidence: held.evidence }, 'f1'),
+  ];
+
+  it('returns the held answer when the remediation runs out of steps', async () => {
+    const adapter = scriptedAdapter([firstFinish, () => [call('snapshot', {}, 's1')]]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '京东前三个商品价格和链接',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+      reviewFinish: () => '第 1 行缺少链接',
+      maxSteps: 2,
+    });
+    expect(outcome).toEqual({ status: 'completed', ...held, steps: 2 });
+  });
+
+  it('hands the held answer to the caller when aborted during remediation', async () => {
+    const controller = new AbortController();
+    const adapter = scriptedAdapter([
+      firstFinish,
+      () => {
+        controller.abort();
+        return [call('snapshot', {}, 's1')];
+      },
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '京东前三个商品价格和链接',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+      reviewFinish: () => '第 1 行缺少链接',
+      signal: controller.signal,
+    });
+    expect(outcome).toEqual({ status: 'cancelled', steps: 2, heldAnswer: held });
+  });
+
+  it("keeps the model's own failure after remediation", async () => {
+    const adapter = scriptedAdapter([
+      firstFinish,
+      () => [call('finish', { status: 'failed', summary: '商品卡片没有公开链接' }, 'f2')],
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '京东前三个商品价格和链接',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+      reviewFinish: () => '第 1 行缺少链接',
+    });
+    expect(outcome).toMatchObject({ status: 'failed', reason: '商品卡片没有公开链接' });
+  });
+});
+
 describe('unified loop context size (batch 11.0)', () => {
   it('keeps only the two latest page-sized results in full, so request size stays bounded', async () => {
     const page = (n: number) => `PAGE-${n} ${'x'.repeat(20_000)}`;
