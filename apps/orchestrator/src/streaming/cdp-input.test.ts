@@ -1,5 +1,5 @@
 import { pino } from 'pino';
-import type { CDPSession } from 'playwright';
+import type { CDPSession, Page } from 'playwright';
 import { describe, expect, it, vi } from 'vitest';
 import { BrowserControl } from '../agent/supercar/browser-control.js';
 import { CdpInputHandler } from './cdp-input.js';
@@ -466,4 +466,31 @@ describe('CdpInputHandler keyboard input', () => {
       unmodifiedText: 'x',
     });
   });
+});
+
+it('V2 viewport resize preserves the current remote DPR instead of silently resetting to one', async()=>{
+ const send=vi.fn(async(method:string)=>method==='Runtime.evaluate'?{result:{value:2}}:{});
+ const handler=new CdpInputHandler(()=>({send,detach:async()=>{}} as unknown as CDPSession),pino({level:'silent'}),undefined,undefined,true);
+ await handler.handle({type:'viewport',width:1600,height:900});
+ expect(send).toHaveBeenCalledWith('Emulation.setDeviceMetricsOverride',expect.objectContaining({width:1600,height:900,deviceScaleFactor:2,mobile:false}));
+});
+
+it('V2 reconnect restores the same Page DPR after a parallel CDP detach reset',async()=>{
+ const page={} as Page;
+ for(const ratio of [2,1]) {
+  const send=vi.fn(async(method:string)=>method==='Runtime.evaluate'?{result:{value:ratio}}:{});
+  const h=new CdpInputHandler(()=>({send,detach:async()=>{}} as unknown as CDPSession),pino({level:'silent'}),undefined,undefined,true,async()=>page);
+  await h.handle({type:'viewport',width:1600,height:900});
+  expect(send).toHaveBeenCalledWith('Emulation.setDeviceMetricsOverride',expect.objectContaining({deviceScaleFactor:2}));
+ }
+});
+
+
+it('applies tall V2 device metrics while retaining legacy and maximum bounds',async()=>{
+ const send=vi.fn(async(method:string)=>method==='Runtime.evaluate'?{result:{value:1}}:{});
+ const session=()=>({send,detach:async()=>{}} as unknown as CDPSession);
+ await new CdpInputHandler(session,pino({level:'silent'})).handle({type:'viewport',width:1024,height:2300});expect(send).not.toHaveBeenCalled();
+ const v2=new CdpInputHandler(session,pino({level:'silent'}),undefined,undefined,true,undefined,2400);
+ await v2.handle({type:'viewport',width:1024,height:2300});expect(send).toHaveBeenCalledWith('Emulation.setDeviceMetricsOverride',expect.objectContaining({width:1024,height:2300,mobile:false}));
+ const before=send.mock.calls.length;await v2.handle({type:'viewport',width:1024,height:2401});expect(send).toHaveBeenCalledTimes(before);
 });

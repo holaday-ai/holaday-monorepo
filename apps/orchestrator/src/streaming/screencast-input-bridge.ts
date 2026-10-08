@@ -1,3 +1,4 @@
+import type { BrowserFrameReference } from '@holaday/shared-types';
 import type { InputMessage } from './cdp-input.js';
 
 export interface ScreencastInputSink {
@@ -10,7 +11,10 @@ export interface AppliedBrowserViewport {
 }
 
 interface DeferredScreencastInputBridgeOptions {
+  maxViewportHeight?: number;
   onViewportApplied?: (viewport: AppliedBrowserViewport) => void;
+  onViewportRequested?: () => void;
+  beforeDispatch?: (envelope: InputEnvelope, signal?: AbortSignal) => Promise<void>;
   /** Optional until the session/route and frontend negotiate owner leases. */
   runOwnedInput?: (
     lease: string | undefined,
@@ -20,10 +24,12 @@ interface DeferredScreencastInputBridgeOptions {
   queueViewport?: (action: (signal: AbortSignal) => Promise<void>) => void;
 }
 
-interface InputEnvelope {
+export interface InputEnvelope {
   type?: string;
   payload?: InputMessage;
   controlLease?: string;
+  observation?: BrowserFrameReference;
+  confirmationNonce?: string;
 }
 
 /**
@@ -33,6 +39,9 @@ interface InputEnvelope {
  */
 export class DeferredScreencastInputBridge {
   private sink: ScreencastInputSink | null = null;
+  private readonly maxViewportHeight: number;
+  private readonly onViewportRequested?: () => void;
+  private readonly beforeDispatch?: DeferredScreencastInputBridgeOptions["beforeDispatch"];
   private sinkGeneration = 0;
   private latestViewport: Extract<InputMessage, { type: 'viewport' }> | null = null;
   private readonly onViewportApplied?: (viewport: AppliedBrowserViewport) => void;
@@ -40,7 +49,10 @@ export class DeferredScreencastInputBridge {
   private readonly queueViewport?: DeferredScreencastInputBridgeOptions['queueViewport'];
 
   constructor(options: DeferredScreencastInputBridgeOptions = {}) {
+    this.maxViewportHeight = options.maxViewportHeight ?? 1600;
     this.onViewportApplied = options.onViewportApplied;
+    this.beforeDispatch = options.beforeDispatch;
+    this.onViewportRequested = options.onViewportRequested;
     this.runOwnedInput = options.runOwnedInput;
     this.queueViewport = options.queueViewport;
   }
@@ -62,9 +74,10 @@ export class DeferredScreencastInputBridge {
         width < 240 ||
         width > 1920 ||
         height < 240 ||
-        height > 1600
+        height > this.maxViewportHeight
       )
         return;
+      this.onViewportRequested?.();
       this.latestViewport = envelope.payload;
     }
 
@@ -75,6 +88,7 @@ export class DeferredScreencastInputBridge {
     await this.dispatch(
       envelope.payload,
       typeof envelope.controlLease === 'string' ? envelope.controlLease : undefined,
+      envelope,
     );
   }
 
@@ -94,12 +108,13 @@ export class DeferredScreencastInputBridge {
     this.latestViewport = null;
   }
 
-  private async dispatch(message: InputMessage, lease?: string): Promise<void> {
+  private async dispatch(message: InputMessage, lease?: string, envelope?: InputEnvelope): Promise<void> {
     const sink = this.sink;
     if (!sink) return;
     const generation = this.sinkGeneration;
     const action = async (signal?: AbortSignal): Promise<void> => {
       if (this.sink !== sink || this.sinkGeneration !== generation) return;
+      await this.beforeDispatch?.(envelope ?? {type:"input",payload:message}, signal);
       await sink.handle(message, signal);
       if (message.type === 'viewport' && this.sink === sink && this.sinkGeneration === generation) {
         this.onViewportApplied?.({

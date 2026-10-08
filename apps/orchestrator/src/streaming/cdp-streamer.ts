@@ -39,6 +39,9 @@
  */
 
 import type { CDPSession, Page } from 'playwright';
+import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
+import type { BrowserFrameGeometry } from '@holaday/shared-types';
 import type { Logger } from 'pino';
 import type { WebSocket } from 'ws';
 
@@ -60,6 +63,9 @@ export interface CdpStreamerOptions {
   logger: Logger;
   /** JPEG quality 0..100. Default 60. */
   quality?: number;
+  viewportV2?: boolean;
+  onFrame?: (frame: BrowserFrameGeometry) => void;
+  onObservationInvalidated?: () => void;
   /** Cap frame width. Default 1440 — matches the largest workbench viewport. */
   maxWidth?: number;
   /** Cap frame height. Default 1200 — matches the largest workbench viewport. */
@@ -75,6 +81,7 @@ export interface CdpStreamerOptions {
 export interface ScreencastFrameMessage {
   type: 'frame';
   data: string;
+  geometry?: BrowserFrameGeometry;
   metadata: {
     offsetTop?: number;
     pageScaleFactor?: number;
@@ -93,6 +100,25 @@ export interface ScreencastUrlMessage {
 
 export class CdpStreamer {
   private cdpSession: CDPSession | null = null;
+  private viewportRevision = 0;
+  private observationSequence = 0;
+  private tabId = '';
+  private boundPage: Page | null = null;
+  matchesPage(page: Page): boolean { return this.boundPage === page && !page.isClosed(); }
+  private readonly pageIds = new WeakMap<Page, string>();
+
+  invalidateObservation(): void {
+    this.viewportRevision++;
+    this.observationSequence++;
+    this.opts.onObservationInvalidated?.();
+  }
+  private bindPage(page: Page): void {
+    this.boundPage = page;
+    let id = this.pageIds.get(page);
+    if (!id) { id = randomUUID(); this.pageIds.set(page, id); }
+    this.tabId = id;
+    this.invalidateObservation();
+  }
   private streaming = false;
   private hasReceivedFrame = false;
   private lastFrameAt = 0;
@@ -120,15 +146,18 @@ export class CdpStreamer {
   private readonly inputRefreshDelayMs = 160;
   private readonly captureScreenshotTimeoutMs = 2500;
   private readonly opts: Required<
-    Omit<CdpStreamerOptions, 'logger' | 'onViewportMayReset'>
+    Omit<CdpStreamerOptions, 'logger' | 'onViewportMayReset' | 'onFrame' | 'onObservationInvalidated'>
   > & {
     logger: Logger;
+    onFrame?: CdpStreamerOptions['onFrame'];
+    onObservationInvalidated?: CdpStreamerOptions['onObservationInvalidated'];
     onViewportMayReset?: () => Promise<void> | void;
   };
 
   constructor(opts: CdpStreamerOptions) {
     this.opts = {
       quality: 60,
+      viewportV2: false,
       maxWidth: 1440,
       maxHeight: 1200,
       ...opts,
@@ -149,6 +178,7 @@ export class CdpStreamer {
     this.streaming = true;
     try {
       const page = await this.opts.getPage();
+      this.bindPage(page);
       this.cdpSession = await page.context().newCDPSession(page);
       this.wireListeners(this.cdpSession);
       await this.cdpSession.send('Page.enable');
@@ -203,6 +233,7 @@ export class CdpStreamer {
       // A screenshot started on the prior document must never become the first
       // frame of the new page, even when Chromium keeps the same CDP session.
       this.invalidateCaptureRequests();
+      this.invalidateObservation();
       const msg: ScreencastUrlMessage = {
         type: 'url-changed',
         url: params.frame.url,
@@ -288,8 +319,7 @@ export class CdpStreamer {
       await cdp.send('Page.startScreencast', {
         format: 'jpeg',
         quality: this.opts.quality,
-        maxWidth: this.opts.maxWidth,
-        maxHeight: this.opts.maxHeight,
+        ...(this.opts.viewportV2 ? {} : { maxWidth: this.opts.maxWidth, maxHeight: this.opts.maxHeight }),
         everyNthFrame: 1,
       });
       if (
@@ -338,6 +368,10 @@ export class CdpStreamer {
     this.frameSequence += 1;
     this.clearInitialFrameTimer();
     const frame: ScreencastFrameMessage = { type: 'frame', data, metadata };
+    if (this.opts.viewportV2) {
+      void this.publishGeometryFrame(frame, ++this.observationSequence);
+      return;
+    }
     try {
       this.opts.ws.send(JSON.stringify(frame));
     } catch (err) {
@@ -345,6 +379,35 @@ export class CdpStreamer {
         { err: errMsg(err) },
         'cdp-streamer: frame send failed (ws closed?)',
       );
+    }
+  }
+
+  private async publishGeometryFrame(frame: ScreencastFrameMessage, sequence: number): Promise<void> {
+    const session = this.cdpSession;
+    const revision = this.viewportRevision;
+    const tabId = this.tabId;
+    const capturedAt = frame.metadata.timestamp ? frame.metadata.timestamp * 1000 : Date.now();
+    try {
+      const dimensions = await sharp(Buffer.from(frame.data, 'base64')).metadata();
+      const m = frame.metadata;
+      const metrics = (!m.deviceWidth || !m.deviceHeight) && session
+        ? await session.send('Page.getLayoutMetrics') : null;
+      const cssWidth = m.deviceWidth ?? metrics?.cssLayoutViewport?.clientWidth;
+      const cssHeight = m.deviceHeight ?? metrics?.cssLayoutViewport?.clientHeight;
+      if (!this.streaming || this.cdpSession !== session || sequence !== this.observationSequence || revision !== this.viewportRevision) return;
+      if (!cssWidth || !cssHeight || !dimensions.width || !dimensions.height) return;
+      const geometry: BrowserFrameGeometry = {
+        frameId: `${tabId}:${revision}:${sequence}`, tabId, viewportRevision: revision,
+        cssWidth, cssHeight, imageWidth: dimensions.width, imageHeight: dimensions.height,
+        pageScaleFactor: m.pageScaleFactor ?? metrics?.cssVisualViewport?.scale ?? 1,
+        offsetTop: m.offsetTop ?? 0,
+        scrollOffset: {x:m.scrollOffsetX ?? metrics?.cssLayoutViewport?.pageX ?? 0,y:m.scrollOffsetY ?? metrics?.cssLayoutViewport?.pageY ?? 0},
+        capturedAt,
+      };
+      this.opts.onFrame?.(geometry);
+      this.opts.ws.send(JSON.stringify({...frame,geometry}));
+    } catch {
+      this.opts.logger.debug('cdp-streamer: V2 frame dimensions unavailable');
     }
   }
 
@@ -541,6 +604,9 @@ export class CdpStreamer {
     if (!cdp) return false;
     try {
       const page = await this.opts.getPage();
+      // Matching URLs do not prove target identity: a replacement tab may open
+      // the same URL. Only start/restart may bind an observation to its session.
+      if (this.opts.viewportV2 && !this.matchesPage(page)) return false;
       const response = await cdp.send('Runtime.evaluate', {
         expression: 'window.location.href',
         returnByValue: true,
@@ -568,6 +634,7 @@ export class CdpStreamer {
    * even if the old one was bound to a dead RFH.
    */
   private async hardRestart(): Promise<void> {
+    this.invalidateObservation();
     this.armSequence += 1;
     this.invalidateCaptureRequests();
     this.clearInitialFrameTimer();
@@ -596,6 +663,7 @@ export class CdpStreamer {
     // (a fresh ctx.newPage() in the reset case), which is the
     // page the agent is now operating on.
     const page = await this.opts.getPage();
+    this.bindPage(page);
     this.cdpSession = await page.context().newCDPSession(page);
     this.wireListeners(this.cdpSession);
     await this.cdpSession.send('Page.enable');
@@ -611,6 +679,8 @@ export class CdpStreamer {
    */
   async stop(): Promise<void> {
     this.streaming = false;
+    this.boundPage = null;
+    this.invalidateObservation();
     this.armSequence += 1;
     this.invalidateCaptureRequests();
     this.stopWatchdog();

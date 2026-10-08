@@ -501,6 +501,7 @@ function CloudBrowserPanel({
   // a live socket on every render.
   const streamTransport = React.useMemo(() => readStreamTransport(), []);
   const usingCdp = streamTransport === 'cdp';
+  const viewportV2 = import.meta.env.VITE_BROWSER_VIEWPORT_V2 === 'true';
   // Phase 24 diagnostic — log the current task scope so DevTools can
   // confirm the panel is actually receiving the expected taskId from
   // its parent. Re-fires whenever the user picks a different task.
@@ -1621,7 +1622,7 @@ function CloudBrowserPanel({
             ref={screencastHostRef}
             className={cn(
               'relative flex min-h-0 min-w-0 flex-1 items-center',
-              isSheet ? 'justify-start overflow-auto' : 'justify-center overflow-hidden',
+              isSheet && !viewportV2 ? 'justify-start overflow-auto' : 'justify-center overflow-hidden',
               fullscreen || (useVnc && !isSheet) ? 'p-0' : isSheet ? 'p-1' : 'p-3',
               'bg-[#F6F7F9] dark:bg-white/[0.03]',
             )}
@@ -1653,11 +1654,11 @@ function CloudBrowserPanel({
               <div
                 className={cn(
                   'relative h-full min-h-0 min-w-0',
-                  isSheet ? 'shrink-0' : 'w-full',
-                  isSheet ? 'overflow-auto' : 'overflow-hidden',
+                  isSheet && !viewportV2 ? 'shrink-0' : 'w-full',
+                  isSheet && !viewportV2 ? 'overflow-auto' : 'overflow-hidden',
                 )}
                 style={
-                  isSheet
+                  isSheet && !viewportV2
                     ? {
                         // noVNC handles its own internal canvas scale.
                         // In a portrait sheet, giving it only the
@@ -1677,7 +1678,8 @@ function CloudBrowserPanel({
                     reconnectSignal={reconnectEpoch}
                     viewOnly={!interactiveActive}
                     controlLease={ownership.lease}
-                    fitMode={isSheet ? 'readable' : 'contain'}
+                    viewportV2={viewportV2}
+                    fitMode={isSheet && !viewportV2 ? 'readable' : 'contain'}
                     onStatusChange={(s: CdpScreencastStatus) =>
                       // Reuse the VNC status state — the enum values
                       // overlap exactly so the existing
@@ -1700,9 +1702,10 @@ function CloudBrowserPanel({
                     // Codex Pack B2 — same reconnect-via-remount key.
                     key={`vnc-${reconnectEpoch}`}
                     wsUrl={vncUrl}
-                    viewOnly={!interactiveActive}
+                    viewOnly={viewportV2 || !interactiveActive}
                     onStatusChange={handleVncStatus}
-                    fitMode={isSheet ? 'readable' : 'contain'}
+                    viewportV2={viewportV2}
+                    fitMode={isSheet && !viewportV2 ? 'readable' : 'contain'}
                     className={cn(
                       isSheet && 'rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
                       interactiveActive
@@ -1924,12 +1927,12 @@ function CloudBrowserPanel({
               />
             )}
           </div>
-          {liveBrowserCanPan && !terminalSessionUnavailable && !hibernated && !interactiveActive && !showLiveOverlay && (
+          {!viewportV2 && liveBrowserCanPan && !terminalSessionUnavailable && !hibernated && !interactiveActive && !showLiveOverlay && (
             <div className="pointer-events-none absolute left-1/2 top-20 z-20 max-w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded-full bg-black/45 px-3 py-1 text-[11px] font-medium text-white shadow-sm backdrop-blur">
               左右滑动查看页面
             </div>
           )}
-          {!fullscreen && useVnc && showHeader && (
+          {!fullscreen && useVnc && showHeader && !(isSheet && viewportV2) && (
             <footer
               className={cn(
                 'flex items-center justify-between border-t bg-white/78 text-muted-foreground backdrop-blur dark:bg-background/75',

@@ -19,7 +19,10 @@
  */
 
 import type { Logger } from 'pino';
-import type { CDPSession } from 'playwright';
+import type { CDPSession, Page } from 'playwright';
+// Detaching a parallel CDP session clears device metrics even though Playwright's
+// Page survives. Retain the explicitly observed remote pixel ratio per Page.
+const pagePixelRatios = new WeakMap<Page, number>();
 import { BrowserInputOutcomeUnknownError } from '../agent/supercar/browser-control.js';
 
 export type InputMessage =
@@ -146,6 +149,9 @@ export class CdpInputHandler {
     private readonly onInputDispatched?: (message: InputMessage) => void,
     /** Revoke ownership immediately; this is NOT a physical-stop receipt. */
     private readonly onInputUncertain?: () => void,
+    private readonly preserveDeviceScaleFactor = false,
+    private readonly getPage?: () => Promise<Page>,
+    private readonly maxViewportHeight = 1600,
   ) {}
 
   /**
@@ -198,16 +204,22 @@ export class CdpInputHandler {
             msg.width < 240 ||
             msg.width > 1920 ||
             msg.height < 240 ||
-            msg.height > 1600
+            msg.height > this.maxViewportHeight
           ) {
             return;
           }
           const width = Math.round(msg.width);
           const height = Math.round(msg.height);
+          const pixelRatio = this.preserveDeviceScaleFactor
+            ? (await send('Runtime.evaluate', {expression:'window.devicePixelRatio',returnByValue:true})).result.value : 1;
+          const page = this.preserveDeviceScaleFactor ? await this.getPage?.() : undefined;
+          const observedRatio = typeof pixelRatio === 'number' && Number.isFinite(pixelRatio) && pixelRatio>0 && pixelRatio<=4 ? pixelRatio : 1;
+          const deviceScaleFactor = page ? (pagePixelRatios.get(page) ?? observedRatio) : observedRatio;
+          if (page) pagePixelRatios.set(page,deviceScaleFactor);
           await send('Emulation.setDeviceMetricsOverride', {
             width,
             height,
-            deviceScaleFactor: 1,
+            deviceScaleFactor,
             mobile: false,
             screenWidth: width,
             screenHeight: height,
