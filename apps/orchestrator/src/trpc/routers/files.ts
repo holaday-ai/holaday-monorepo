@@ -13,6 +13,7 @@ import { and, desc, eq, gt, isNull, like, lt, notLike, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { users } from '../../db/schema/users.js';
+import { getSharedStorageProvider, type StorageProvider } from '../../files/storage-provider.js';
 import { FileService, decodeUploadFilename } from '../../files/file-service.js';
 import { protectedProcedure, router } from '../trpc.js';
 
@@ -66,6 +67,22 @@ async function saveLibraryOutput(
     throw new TRPCError({ code: 'NOT_FOUND', message: 'file not found' });
   }
   return { ok: true };
+}
+
+type Availability = 'available' | 'unavailable' | 'unknown';
+async function libraryAvailability(storage: StorageProvider, rows: Array<{ storagePath: string; status: string; expiresAt: Date | null }>, ownerExternalId: string): Promise<Availability[]> {
+  const result: Availability[] = rows.map(() => 'unknown');
+  const signal = AbortSignal.timeout(2_000);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(3, rows.length) }, async () => {
+    while (cursor < rows.length && !signal.aborted) {
+      const index = cursor++; const row = rows[index]!;
+      if (!fileIsAvailableInLibrary(row)) { result[index] = 'unavailable'; continue; }
+      try { result[index] = await storage.stat(row.storagePath, { signal, ownerExternalId }) ? 'available' : 'unavailable'; }
+      catch { result[index] = 'unknown'; }
+    }
+  }));
+  return result;
 }
 
 export const filesRouter = router({
@@ -151,6 +168,7 @@ export const filesRouter = router({
           createdAt: taskFiles.createdAt,
           status: taskFiles.status,
           expiresAt: taskFiles.expiresAt,
+          storagePath: taskFiles.storagePath,
         })
         .from(taskFiles)
         .where(and(...conds))
@@ -158,13 +176,15 @@ export const filesRouter = router({
         .limit(input.limit + 1);
       const hasMore = rows.length > input.limit;
       const page = rows.slice(0, input.limit);
+      const availability = await libraryAvailability(getSharedStorageProvider({ logger: ctx.logger }), page, ctx.userId);
       return {
-        items: page.map((r) => ({
+        items: page.map((r, index) => ({
           fileId: r.externalId,
           filename: normalizeLibraryFilename(r.filename),
           mimetype: r.mimetype,
           sizeBytes: Number(r.sizeBytes),
           createdAt: r.createdAt,
+          availability: availability[index]!,
         })),
         nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
       };
@@ -218,6 +238,7 @@ function libraryFilenameSearchTerms(query: string): string[] {
 
 export const __filesRouterInternals = {
   deleteLibraryFile,
+  libraryAvailability,
   fileAvailabilityItems,
   fileIsAvailableInLibrary,
   fileMatchesLibraryFilter,

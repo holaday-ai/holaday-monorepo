@@ -19,6 +19,11 @@ function mount(entry = '/files') {
  render(<ToastProvider><RouterProvider router={router}/></ToastProvider>); return router;
 }
 describe('file library view integration',()=>{
+ it('shows a listed file with missing bytes as unavailable before preview or attachment',async()=>{
+  api.list.mockResolvedValue({items:[{...files[0],fileId:'file_storage_gone',filename:'Missing-photo.png',mimetype:'image/png',availability:'unavailable'}],nextCursor:null});mount();
+  const button=(await screen.findByText('Missing-photo.png')).closest('button');
+  expect((button as HTMLButtonElement).disabled).toBe(true);expect(screen.getByText('已失效')).toBeTruthy();
+ });
  it('keeps preview and task attachment actions available after switching view and sorting',async()=>{
   const user=userEvent.setup();const router=mount();
   await screen.findByRole('button',{name:'Z-notes.pdf'});

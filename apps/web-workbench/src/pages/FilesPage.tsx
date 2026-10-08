@@ -121,6 +121,7 @@ export function FilesPage(): JSX.Element {
         limit: 50,
       }));
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
+      page.items.forEach(file => { if (file.availability === 'unavailable') markFileUnavailable(file.fileId); });
       setFiles(page.items);
       setNextCursor(page.nextCursor);
     } catch (err) {
@@ -151,6 +152,7 @@ export function FilesPage(): JSX.Element {
       ) {
         return;
       }
+      page.items.forEach(file => { if (file.availability === 'unavailable') markFileUnavailable(file.fileId); });
       setFiles((current) => {
         const seen = new Set(current.map((file) => file.fileId));
         return [...current, ...page.items.filter((file) => !seen.has(file.fileId))];
