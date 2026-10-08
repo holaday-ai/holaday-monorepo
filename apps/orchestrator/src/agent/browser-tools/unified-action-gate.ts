@@ -1,4 +1,4 @@
-import type { ElementHandle, Frame, Locator, Page } from 'playwright';
+import type { CDPSession, ElementHandle, Frame, Locator, Page } from 'playwright';
 import { buildAuthParkQuestion } from '../login-detector.js';
 import type { RunSupercarOptions, SupercarAwaitingKind } from '../supercar/agent-loop.js';
 import { isAffirmativeActionConfirmation } from '../supercar/runtime-action-policy.js';
@@ -32,12 +32,20 @@ interface ElementSignals {
   type: string | null;
   tagName: string | null;
   url: string | null;
+  /** What the action acts on, bound into a confirmation: link target, form submission. */
+  href?: string | null;
+  formAction?: string | null;
+  formMethod?: string | null;
+  /** The hit is a host whose internals cannot be seen (closed shadow / custom element). */
+  opaque?: boolean;
 }
 
 /** What Enter in a field submits: the real form semantics, not just a button. */
 interface SubmitContext {
   hasForm: boolean;
   action: string | null;
+  /** The `action` attribute as written (a relative target is still bound). */
+  rawAction: string | null;
   method: string | null;
   submitControl: ElementSignals | null;
   fieldSignal: string;
@@ -46,50 +54,73 @@ interface SubmitContext {
 }
 
 /**
- * Signals of the element a click really acts on: the node at the point (in its
- * own frame) climbed to its closest actionable ancestor, so an icon inside a
- * button reads as the button. Returns `{ iframe: true }` when the point hits a
- * frame element (the caller descends into it). Inline and free of named inner
- * helpers: bundlers' `__name` wrappers must not be serialised into the page.
+ * Signals of the element a click on `node` acts on: `node` is the deepest hit
+ * (CDP hit-testing pierces open and closed shadow roots and in-process frames),
+ * climbed to its closest actionable ancestor across shadow boundaries, so an
+ * icon inside a button inside a web component reads as the button. Includes
+ * the action's object (link href, form action/method). `{ iframe: true }` when
+ * the hit is a frame element the caller must descend into.
+ * Serialised into the page via `toString()`: no closures, no named inner
+ * helpers (bundlers' `__name` wrappers must not be serialised).
  */
-const READ_TARGET = (
-  node: Element,
-  point: { x: number | null; y: number | null },
+const READ_ACTIONABLE = (
+  node: Node,
 ): (ElementSignals & { iframe?: false }) | { iframe: true } | null => {
-  let el: Element | null = node;
-  if (point.x !== null && point.y !== null) {
-    el = document.elementFromPoint(point.x, point.y);
-  } else if (node.getBoundingClientRect) {
-    const r = node.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0) {
-      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      // What the click lands on, even an overlay covering the node.
-      if (hit) el = hit;
-    }
-  }
-  if (!el || el === document.body || el === document.documentElement) return null;
+  const el = (node.nodeType === 1 ? node : node.parentElement) as Element | null;
+  if (!el) return null;
+  const doc = el.ownerDocument;
   const tag = String(el.tagName || '').toLowerCase();
   if (tag === 'iframe' || tag === 'frame') return { iframe: true };
-  const actionable =
-    el.closest(
-      'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [onclick]',
-    ) ?? el;
-  const text = String((actionable as HTMLElement).innerText || actionable.textContent || '')
+  if (el === doc.body || el === doc.documentElement) return null;
+  const selector =
+    'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [onclick]';
+  let actionable: Element | null = null;
+  let cur: Element | null = el;
+  for (let hops = 0; cur && hops < 200; hops += 1) {
+    if (cur.matches(selector)) {
+      actionable = cur;
+      break;
+    }
+    const parent: Element | null = cur.parentElement;
+    if (parent) cur = parent;
+    else {
+      const root = cur.getRootNode() as ShadowRoot | Document;
+      cur = 'host' in root ? root.host : null;
+    }
+  }
+  const target = actionable ?? el;
+  const text = String((target as HTMLElement).innerText || target.textContent || '')
     .trim()
     .slice(0, 200);
+  const input = target as HTMLInputElement;
   const value =
-    actionable instanceof HTMLInputElement && ['submit', 'button'].includes(actionable.type)
-      ? actionable.value
-      : '';
+    target.tagName === 'INPUT' && ['submit', 'button'].includes(input.type) ? input.value : '';
+  const link = target.closest('a[href]') as HTMLAnchorElement | null;
+  const form = (input.form ?? target.closest('form')) as HTMLFormElement | null;
+  const submitter = target.tagName === 'BUTTON' || target.tagName === 'INPUT';
   return {
     visibleText: text || value || null,
-    ariaLabel: actionable.getAttribute('aria-label'),
-    title: actionable.getAttribute('title'),
-    placeholder: actionable.getAttribute('placeholder'),
-    name: actionable.getAttribute('name'),
-    type: actionable.getAttribute('type'),
-    tagName: String(actionable.tagName || '').toLowerCase() || null,
-    url: document.location ? document.location.href : null,
+    ariaLabel: target.getAttribute('aria-label'),
+    title: target.getAttribute('title'),
+    placeholder: target.getAttribute('placeholder'),
+    name: target.getAttribute('name'),
+    type: target.getAttribute('type'),
+    tagName: String(target.tagName || '').toLowerCase() || null,
+    url: doc.location ? doc.location.href : null,
+    href: link ? `${link.href} ${link.getAttribute('href') ?? ''}` : null,
+    formAction: form
+      ? [
+          (submitter && input.formAction) || form.action || '',
+          target.getAttribute('formaction') ?? form.getAttribute('action') ?? '',
+        ].join(' ') || null
+      : null,
+    formMethod: form ? (form.getAttribute('method') || 'get').toLowerCase() : null,
+    // A custom element (or host) with no readable content and no open shadow
+    // root: whatever is inside it cannot be seen from here.
+    opaque:
+      !actionable && !text && String(el.tagName || '').includes('-') && !el.shadowRoot
+        ? true
+        : undefined,
   };
 };
 
@@ -159,6 +190,7 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
   return {
     hasForm: Boolean(form),
     action: form ? (form as HTMLFormElement).action || null : null,
+    rawAction: form ? form.getAttribute('action') : null,
     method: form ? method : null,
     submitControl: submit
       ? {
@@ -214,27 +246,115 @@ async function withTimeout<T>(work: Promise<T>): Promise<T | null> {
   }
 }
 
+/** Ties a confirmation to the node it was given for (not just its label). */
+type TargetBinding =
+  | { kind: 'cdp'; session: CDPSession; objectId: string }
+  | { kind: 'handle'; handle: ElementHandle };
+
+interface ReadTarget {
+  signals: ElementSignals;
+  binding: TargetBinding;
+}
+
 /**
- * The element at viewport point (x, y), descending through iframes: each hit
- * frame element is resolved to its frame and the point re-based to that
- * frame's content box. Null when any hop cannot be read.
+ * Per-gate-call helper owning the CDP session used for hit-testing and for
+ * comparing bound nodes; closed when the gate decision is made.
  */
-async function signalsAtPoint(page: Page, x: number, y: number): Promise<ElementSignals | null> {
+export class TargetProbe {
+  private session: CDPSession | null | undefined;
+  constructor(private readonly page: Page) {}
+  async cdp(): Promise<CDPSession | null> {
+    if (this.session === undefined) {
+      this.session = await withTimeout(
+        (async () => {
+          const session = await this.page.context().newCDPSession(this.page);
+          await session.send('DOM.getDocument', { depth: 0 });
+          return session;
+        })(),
+      );
+    }
+    return this.session;
+  }
+  async close(): Promise<void> {
+    await this.session?.detach().catch(() => {});
+    this.session = undefined;
+  }
+}
+
+const READ_ACTIONABLE_CALL = `function () { return (${READ_ACTIONABLE.toString()})(this); }`;
+
+/**
+ * The real target at viewport point (x, y) via Chromium hit-testing
+ * (`DOM.getNodeForLocation`), which pierces open and closed shadow roots and
+ * in-process frames. `undefined` when CDP is unavailable or the hit is an
+ * out-of-process frame (the caller falls back), null when nothing is there.
+ */
+async function cdpTargetAt(
+  probe: TargetProbe,
+  x: number,
+  y: number,
+): Promise<ReadTarget | null | undefined> {
+  const session = await probe.cdp();
+  if (!session) return undefined;
+  const read = await withTimeout(
+    (async () => {
+      const hit = await session.send('DOM.getNodeForLocation', {
+        x: Math.round(x),
+        y: Math.round(y),
+        includeUserAgentShadowDOM: false,
+        ignorePointerEventsNone: true,
+      });
+      const { object } = await session.send('DOM.resolveNode', {
+        backendNodeId: hit.backendNodeId,
+      });
+      if (!object.objectId) return null;
+      const result = await session.send('Runtime.callFunctionOn', {
+        objectId: object.objectId,
+        functionDeclaration: READ_ACTIONABLE_CALL,
+        returnByValue: true,
+      });
+      return {
+        objectId: object.objectId,
+        value: result.result.value as ReturnType<typeof READ_ACTIONABLE>,
+      };
+    })(),
+  );
+  if (!read) return undefined;
+  if (!read.value) return null;
+  if (read.value.iframe) return undefined;
+  return { signals: read.value, binding: { kind: 'cdp', session, objectId: read.objectId } };
+}
+
+/**
+ * Fallback without CDP (or into an out-of-process frame): the element at the
+ * point, descending through iframes and open shadow roots. A closed shadow
+ * root or unreadable custom element ends as an `opaque` host. Null when any
+ * hop cannot be read.
+ */
+async function fallbackTargetAt(page: Page, x: number, y: number): Promise<ReadTarget | null> {
   let frame: Frame = page.mainFrame();
   let px = x;
   let py = y;
   for (let depth = 0; depth <= MAX_FRAME_DEPTH; depth += 1) {
     const handle = (await withTimeout(
-      frame.evaluateHandle((point) => document.elementFromPoint(point.x, point.y), {
-        x: px,
-        y: py,
-      }),
+      frame.evaluateHandle(
+        (point) => {
+          let el = document.elementFromPoint(point.x, point.y);
+          for (let level = 0; el?.shadowRoot && level < 32; level += 1) {
+            const inner = el.shadowRoot.elementFromPoint(point.x, point.y);
+            if (!inner || inner === el) break;
+            el = inner;
+          }
+          return el;
+        },
+        { x: px, y: py },
+      ),
     )) as ElementHandle<Element> | null;
     const element = handle?.asElement() ?? null;
     if (!element) return null;
-    const read = await withTimeout(element.evaluate(READ_TARGET, { x: null, y: null }));
+    const read = await withTimeout(element.evaluate(READ_ACTIONABLE));
     if (!read) return null;
-    if (!read.iframe) return read;
+    if (!read.iframe) return { signals: read, binding: { kind: 'handle', handle: element } };
     const child = await withTimeout(element.contentFrame());
     const offset = await withTimeout(
       element.evaluate((frameEl) => {
@@ -254,17 +374,45 @@ async function signalsAtPoint(page: Page, x: number, y: number): Promise<Element
   return null;
 }
 
-/** Signals of a ref'd element's click point, in its own frame (iframes included). */
-async function signalsAtRef(locator: Locator): Promise<ElementSignals | null> {
-  // The click scrolls its target into view first; read it where it will be hit.
+async function targetAtPoint(
+  probe: TargetProbe,
+  page: Page,
+  x: number,
+  y: number,
+): Promise<ReadTarget | null> {
+  const viaCdp = await cdpTargetAt(probe, x, y);
+  return viaCdp === undefined ? fallbackTargetAt(page, x, y) : viaCdp;
+}
+
+/** A ref'd element is clicked at its centre after scrolling: read what is hit there. */
+async function targetAtRef(probe: TargetProbe, locator: Locator): Promise<ReadTarget | null> {
   await withTimeout(locator.scrollIntoViewIfNeeded({ timeout: DESCRIBE_TIMEOUT_MS }));
-  const read = await withTimeout(locator.evaluate(READ_TARGET, { x: null, y: null }));
-  if (!read) return null;
-  if (!read.iframe) return read;
-  // The ref'd node's centre is covered by a frame: descend from that point.
   const box = await withTimeout(locator.boundingBox());
-  const page = locator.page();
-  return box ? signalsAtPoint(page, box.x + box.width / 2, box.y + box.height / 2) : null;
+  if (!box) return null;
+  return targetAtPoint(probe, locator.page(), box.x + box.width / 2, box.y + box.height / 2);
+}
+
+/** Whether two bindings are the very same node (never true across kinds/sessions). */
+async function sameTarget(a: TargetBinding | null, b: TargetBinding | null): Promise<boolean> {
+  if (!a || !b) return a === b;
+  if (a.kind === 'cdp' && b.kind === 'cdp') {
+    if (a.session !== b.session) return false;
+    const result = await withTimeout(
+      a.session.send('Runtime.callFunctionOn', {
+        objectId: b.objectId,
+        functionDeclaration: 'function (other) { return this === other; }',
+        arguments: [{ objectId: a.objectId }],
+        returnByValue: true,
+      }),
+    );
+    return result?.result.value === true;
+  }
+  if (a.kind === 'handle' && b.kind === 'handle') {
+    return (
+      (await withTimeout(b.handle.evaluate((node, other) => node === other, a.handle))) === true
+    );
+  }
+  return false;
 }
 
 /** Descriptors for one action plus why its target could not be verified, if so. */
@@ -274,6 +422,32 @@ export interface UnifiedActionDescription {
   unverified: string | null;
   /** Gate-level reason that this submission is transactional regardless of labels. */
   transactional: string | null;
+  /** The node(s) a confirmation is bound to; re-checked before acting. */
+  bindings?: Array<TargetBinding | null>;
+  /** What the action acts on (link target, form action/method/fields), bound too. */
+  objects?: string;
+}
+
+const UNREADABLE_HOST = '目标位于无法读取内部内容的页面组件中';
+
+function clickDescription(
+  target: ReadTarget | null,
+  fallbackLabel: string | null,
+  pageUrl: string,
+  unreadable: string,
+): UnifiedActionDescription {
+  const signals = target?.signals ?? null;
+  return {
+    descriptors: [descriptor('click', signals, fallbackLabel, pageUrl)],
+    unverified: !signals ? unreadable : signals.opaque ? UNREADABLE_HOST : null,
+    transactional: null,
+    bindings: [target?.binding ?? null],
+    objects: JSON.stringify([
+      signals?.href ?? null,
+      signals?.formAction ?? null,
+      signals?.formMethod ?? null,
+    ]),
+  };
 }
 
 /**
@@ -282,13 +456,15 @@ export interface UnifiedActionDescription {
  * navigation by its URL. Unified-only shapes map onto those kinds: `click_at`
  * and `download` are clicks, `select` is a click on the chosen option, and
  * `type` with `submit` also submits the field's form (judged by its real
- * semantics, not only a visible submit button). A target that cannot be read
- * is reported as unverified — never treated as harmless.
+ * semantics, not only a visible submit button). Click targets are the real
+ * hit (shadow roots and frames pierced). A target that cannot be read is
+ * reported as unverified — never treated as harmless.
  */
 export async function describeUnifiedAction(
   page: Page,
   action: UnifiedBrowserAction,
   labelForRef: (ref: string) => string | null,
+  probe: TargetProbe = new TargetProbe(page),
 ): Promise<UnifiedActionDescription> {
   const pageUrl = page.url();
   const plain = (descriptors: RuntimeActionDescriptor[]): UnifiedActionDescription => ({
@@ -304,39 +480,52 @@ export async function describeUnifiedAction(
     case 'navigate':
       return plain([{ kind: 'navigate', url: action.url }]);
     case 'click':
-    case 'download': {
-      const signals = locator ? await signalsAtRef(locator) : null;
-      return {
-        descriptors: [descriptor('click', signals, labelForRef(action.ref), pageUrl)],
-        unverified: signals ? null : '无法读取要点击的元素',
-        transactional: null,
-      };
-    }
-    case 'click_at': {
-      const signals = await signalsAtPoint(page, action.x, action.y);
-      return {
-        descriptors: [descriptor('click', signals, null, pageUrl)],
-        unverified: signals ? null : '无法识别该坐标处的元素（可能位于无法读取的嵌入页面中）',
-        transactional: null,
-      };
-    }
+    case 'download':
+      return clickDescription(
+        locator ? await targetAtRef(probe, locator) : null,
+        labelForRef(action.ref),
+        pageUrl,
+        '无法读取要点击的元素',
+      );
+    case 'click_at':
+      return clickDescription(
+        await targetAtPoint(probe, page, action.x, action.y),
+        null,
+        pageUrl,
+        '无法识别该坐标处的元素（可能位于无法读取的嵌入页面中）',
+      );
     case 'select': {
-      const signals = locator ? await withTimeout(locator.evaluate(READ_SELF)) : null;
+      const handle = locator ? await withTimeout(locator.elementHandle()) : null;
+      const signals = handle ? await withTimeout(handle.evaluate(READ_SELF)) : null;
       return {
         descriptors: [{ ...descriptor('click', signals, null, pageUrl), label: action.value }],
         unverified: signals ? null : '无法读取下拉框',
         transactional: null,
+        bindings: [handle ? { kind: 'handle', handle } : null],
+        objects: JSON.stringify([action.value]),
       };
     }
     case 'type': {
-      const signals = locator ? await withTimeout(locator.evaluate(READ_SELF)) : null;
+      const handle = locator ? await withTimeout(locator.elementHandle()) : null;
+      const signals = handle ? await withTimeout(handle.evaluate(READ_SELF)) : null;
       const typed = descriptor('type', signals, labelForRef(action.ref), pageUrl);
+      const binding: TargetBinding | null = handle ? { kind: 'handle', handle } : null;
       if (!signals)
-        return { descriptors: [typed], unverified: '无法读取输入框', transactional: null };
-      if (!action.submit) return plain([typed]);
-      const form = locator ? await withTimeout(locator.evaluate(READ_SUBMIT_CONTEXT)) : null;
+        return {
+          descriptors: [typed],
+          unverified: '无法读取输入框',
+          transactional: null,
+          bindings: [binding],
+        };
+      if (!action.submit) return { ...plain([typed]), bindings: [binding] };
+      const form = handle ? await withTimeout(handle.evaluate(READ_SUBMIT_CONTEXT)) : null;
       if (!form)
-        return { descriptors: [typed], unverified: '无法读取所属表单', transactional: null };
+        return {
+          descriptors: [typed],
+          unverified: '无法读取所属表单',
+          transactional: null,
+          bindings: [binding],
+        };
       const submit = descriptor(
         'click',
         form.submitControl ?? { ...signals, tagName: 'button', type: 'submit' },
@@ -354,7 +543,19 @@ export async function describeUnifiedAction(
         !transactional && !form.submitControl && !form.searchLike
           ? '无法确认回车会提交什么（表单没有可识别的提交按钮）'
           : null;
-      return { descriptors: [typed, submit], unverified, transactional };
+      return {
+        descriptors: [typed, submit],
+        unverified,
+        transactional,
+        bindings: [binding],
+        objects: JSON.stringify([
+          form.action,
+          form.rawAction,
+          form.method,
+          form.fieldSignal,
+          form.submitControl?.visibleText ?? null,
+        ]),
+      };
     }
     default:
       // snapshot / extract / screenshot / wait_for / back / scroll / upload:
@@ -383,8 +584,9 @@ export interface UnifiedActionGateOptions {
 
 /** Comparable identity of the targets a confirmation was given for. */
 function targetSignature(description: UnifiedActionDescription): string {
-  return JSON.stringify(
-    description.descriptors.map((d) => [
+  return JSON.stringify([
+    description.objects ?? null,
+    ...description.descriptors.map((d) => [
       d.kind,
       d.label ?? null,
       d.ariaLabel ?? null,
@@ -393,7 +595,23 @@ function targetSignature(description: UnifiedActionDescription): string {
       d.url ?? null,
       d.pageUrl ?? null,
     ]),
-  );
+  ]);
+}
+
+/** The confirmed action still acts on the same node(s) and the same object. */
+async function sameConfirmedTarget(
+  confirmed: UnifiedActionDescription,
+  fresh: UnifiedActionDescription,
+): Promise<boolean> {
+  if (fresh.unverified !== confirmed.unverified) return false;
+  if (targetSignature(fresh) !== targetSignature(confirmed)) return false;
+  const before = confirmed.bindings ?? [];
+  const after = fresh.bindings ?? [];
+  if (before.length !== after.length) return false;
+  for (const [index, binding] of before.entries()) {
+    if (!(await sameTarget(binding, after[index] ?? null))) return false;
+  }
+  return true;
 }
 
 /**
@@ -475,9 +693,22 @@ export function createUnifiedActionGate(options: UnifiedActionGateOptions) {
     action: UnifiedBrowserAction,
     phase: 'before' | 'after',
   ): Promise<ActionGateDecision> => {
+    const probe = new TargetProbe(options.page);
+    try {
+      return await decide(action, phase, probe);
+    } finally {
+      await probe.close();
+    }
+  };
+
+  async function decide(
+    action: UnifiedBrowserAction,
+    phase: 'before' | 'after',
+    probe: TargetProbe,
+  ): Promise<ActionGateDecision> {
     const description =
       phase === 'before'
-        ? await describeUnifiedAction(options.page, action, options.labelForRef)
+        ? await describeUnifiedAction(options.page, action, options.labelForRef, probe)
         : LANDING_TOOLS.has(action.tool)
           ? {
               descriptors: [{ kind: 'navigate' as const, url: options.page.url() }],
@@ -501,15 +732,14 @@ export function createUnifiedActionGate(options: UnifiedActionGateOptions) {
     // live and the target must be the one they confirmed.
     if (options.aborted() || options.page.isClosed()) return cancelled;
     if (options.stillLive && !(await options.stillLive())) return cancelled;
-    const fresh = await describeUnifiedAction(options.page, action, options.labelForRef);
-    if (
-      fresh.unverified !== description.unverified ||
-      targetSignature(fresh) !== targetSignature(description)
-    ) {
+    // Same node and same object as confirmed — a same-name replacement or a
+    // changed href / form action is a different action: re-observe, re-confirm.
+    const fresh = await describeUnifiedAction(options.page, action, options.labelForRef, probe);
+    if (!(await sameConfirmedTarget(description, fresh))) {
       return { kind: 'skip', message: TARGET_CHANGED_MESSAGE };
     }
     return { kind: 'proceed' };
-  };
+  }
 }
 
 /** Actions after which the landed URL is re-judged (a click can navigate or redirect). */

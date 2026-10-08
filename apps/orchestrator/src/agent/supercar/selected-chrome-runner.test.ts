@@ -13,6 +13,7 @@ import { BrowserControl } from './browser-control.js';
 import { SelectedChromeClient } from './selected-chrome-client.js';
 import {
   UNVERIFIED_TARGET_REASON,
+  isActivationKey,
   runSelectedChromeTask,
   selectedChromeActionVerdict,
   toCapturedToolCall,
@@ -949,6 +950,32 @@ describe('runSelectedChromeTask', () => {
       h.control.returnToAgent(lease);
       expect(await running).toMatchObject({ status: 'completed' });
       expect(h.commands.filter((c) => c.op === 'act')).toHaveLength(0);
+    },
+  );
+
+  it.each([
+    'Enter',
+    'Space',
+    ' ',
+    'NumpadEnter',
+    'Control+Enter',
+    'Shift+Space',
+    'Meta+Enter',
+    'Alt+Space',
+    'Control+Shift+Enter',
+    'Shift+ ',
+  ])('treats %j as an activating key (modifiers included)', (key) => {
+    expect(isActivationKey(key)).toBe(true);
+    expect(selectedChromeActionVerdict({ kind: 'key', payload: { key } })).toEqual({
+      allowed: false,
+      reason: UNVERIFIED_TARGET_REASON,
+    });
+  });
+
+  it.each(['Tab', 'Shift+Tab', 'Control+a', 'ArrowDown', 'Escape', 'Control++'])(
+    'does not treat %j as activating',
+    (key) => {
+      expect(isActivationKey(key)).toBe(false);
     },
   );
 

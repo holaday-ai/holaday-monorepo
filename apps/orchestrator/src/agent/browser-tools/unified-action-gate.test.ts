@@ -256,3 +256,146 @@ describe('confirmation never outranks a cancel', () => {
     await page.close();
   }, 60_000);
 });
+
+describe('shadow DOM targets (PR #248 review 2, P1-1)', () => {
+  const host = (mode: 'open' | 'closed', inner: string) =>
+    `<div id="host" style="position:absolute;left:10px;top:10px;width:300px;height:80px"></div>
+     <script>document.querySelector('#host').attachShadow({mode:'${mode}'}).innerHTML=${JSON.stringify(inner)}</script>`;
+  const PAY = `<button style='width:300px;height:80px' onclick='window.effects=1'>确认支付</button>`;
+
+  it.each(['open', 'closed'] as const)(
+    'reads the real "确认支付" button inside a %s shadow root and parks',
+    async (mode) => {
+      const page = await browser.newPage();
+      await page.setContent(host(mode, PAY));
+      const { gate, park } = gateFor(page);
+      const decision = await gate({ tool: 'click_at', x: 30, y: 30 }, 'before');
+      expect(park).toHaveBeenCalledWith(expect.stringContaining('确认支付'), 'browser_action');
+      expect(decision).toMatchObject({ kind: 'stop' });
+      expect(await page.evaluate(() => (window as { effects?: number }).effects ?? 0)).toBe(0);
+      await page.close();
+    },
+    60_000,
+  );
+
+  it('reads through nested shadow roots and climbs out of them to the actionable host', async () => {
+    const page = await browser.newPage();
+    // An icon in an inner shadow root, inside a button that lives in an outer one.
+    await page.setContent(
+      host(
+        'open',
+        `<button aria-label="删除项目" style="width:300px;height:80px"><x-icon id="i"></x-icon></button>`,
+      ),
+    );
+    await page.evaluate(() => {
+      const outer = document.querySelector('#host')?.shadowRoot;
+      const icon = outer?.querySelector('#i');
+      icon
+        ?.attachShadow({ mode: 'closed' })
+        .append(Object.assign(document.createElement('span'), { textContent: '🗑' }));
+    });
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click_at', x: 30, y: 30 }, 'before');
+    expect(park).toHaveBeenCalledWith(expect.stringContaining('删除项目'), 'browser_action');
+    await page.close();
+  }, 60_000);
+
+  it('treats a custom element whose internals cannot be read as unverified', async () => {
+    const page = await browser.newPage();
+    await page.setContent('<x-pay style="display:block;width:300px;height:80px"></x-pay>');
+    const description = await describeUnifiedAction(
+      page,
+      { tool: 'click_at', x: 30, y: 30 },
+      () => null,
+    );
+    expect(description.unverified).toContain('无法读取内部内容');
+    await page.close();
+  }, 60_000);
+});
+
+describe('a confirmation is bound to the real node and object (PR #248 review 2, P1-2)', () => {
+  it('does not run the confirmation for a same-position, same-name replacement', async () => {
+    const page = await browser.newPage();
+    await page.setContent(
+      `<button id="a" style="position:absolute;left:10px;top:10px;width:300px;height:80px" onclick="window.effects=1">删除项目</button>`,
+    );
+    const gate = createUnifiedActionGate({
+      page,
+      onBeforeAction: classifyRuntimeAction,
+      labelForRef: () => null,
+      aborted: () => false,
+      park: async () => {
+        await page.evaluate(() => {
+          const old = document.querySelector('button');
+          if (old)
+            old.outerHTML = `<button id="b" style="position:absolute;left:10px;top:10px;width:300px;height:80px" onclick="window.effects=2">删除项目</button>`;
+        });
+        return '确认执行';
+      },
+    });
+    expect(await gate({ tool: 'click_at', x: 30, y: 30 }, 'before')).toMatchObject({
+      kind: 'skip',
+      message: expect.stringContaining('页面已变化'),
+    });
+    expect(await page.evaluate(() => (window as { effects?: number }).effects ?? 0)).toBe(0);
+    await page.close();
+  }, 60_000);
+
+  it('does not run it when the same link node now points elsewhere', async () => {
+    const page = await browser.newPage();
+    await page.setContent(
+      `<a id="l" href="/project/1/delete" style="position:absolute;left:10px;top:10px;width:300px;height:80px;display:block">删除项目</a>`,
+    );
+    const ref = await refOf(page, /link "删除项目"/);
+    const gate = createUnifiedActionGate({
+      page,
+      onBeforeAction: classifyRuntimeAction,
+      labelForRef: () => null,
+      aborted: () => false,
+      park: async () => {
+        await page.evaluate(() =>
+          document.querySelector('#l')?.setAttribute('href', '/project/2/delete'),
+        );
+        return '确认执行';
+      },
+    });
+    expect(await gate({ tool: 'click', ref }, 'before')).toMatchObject({ kind: 'skip' });
+    await page.close();
+  }, 60_000);
+
+  it('does not run an Enter whose form action changed while parked', async () => {
+    const page = await browser.newPage();
+    await page.setContent(
+      `<form id="f" action="/payment/1"><label>金额<input type="text"></label></form>`,
+    );
+    const ref = await refOf(page, /textbox "金额"/);
+    const gate = createUnifiedActionGate({
+      page,
+      onBeforeAction: classifyRuntimeAction,
+      labelForRef: () => null,
+      aborted: () => false,
+      park: async () => {
+        await page.evaluate(() =>
+          document.querySelector('#f')?.setAttribute('action', '/payment/2'),
+        );
+        return '确认执行';
+      },
+    });
+    expect(await gate({ tool: 'type', ref, text: '1', submit: true }, 'before')).toMatchObject({
+      kind: 'skip',
+    });
+    await page.close();
+  }, 60_000);
+
+  it('still runs a confirmed action whose node and object are unchanged', async () => {
+    const page = await browser.newPage();
+    await page.setContent(
+      `<a id="l" href="/project/1/delete" style="position:absolute;left:10px;top:10px;width:300px;height:80px;display:block">删除项目</a>`,
+    );
+    const ref = await refOf(page, /link "删除项目"/);
+    const { gate, park } = gateFor(page, '确认执行');
+    expect(await gate({ tool: 'click', ref }, 'before')).toEqual({ kind: 'proceed' });
+    expect(park).toHaveBeenCalledTimes(1);
+    await page.close();
+  }, 60_000);
+});
