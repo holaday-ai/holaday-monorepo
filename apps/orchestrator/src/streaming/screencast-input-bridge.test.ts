@@ -248,3 +248,18 @@ describe('DeferredScreencastInputBridge', () => {
     expect(onViewportApplied).toHaveBeenCalledWith({ width: 383, height: 1020 });
   });
 });
+
+it('checks current observation within the owned dispatch checkpoint, after queue delay', async () => {
+  let live=true;
+  let queued: (()=>Promise<void>) | null=null;
+  let effects=0;
+  const bridge=new DeferredScreencastInputBridge({
+    beforeDispatch: async ()=>{if(!live)throw new Error('expired');},
+    runOwnedInput: async (_, action)=>{queued=()=>action(new AbortController().signal);},
+  });
+  await bridge.attach({handle:async()=>{effects++;}});
+  await bridge.receive(JSON.stringify({type:'input',payload:{type:'mouseDown',x:100,y:100},controlLease:'lease'}));
+  live=false;
+  await expect(queued!()).rejects.toThrow('expired');
+  expect(effects).toBe(0);
+});

@@ -1,3 +1,4 @@
+import { installVncPointerPrecisionBridge } from '@/lib/vnc-pointer-precision';
 import * as React from 'react';
 import {
   placeScreencastReadableTop,
@@ -60,6 +61,7 @@ interface Props {
    *  show "connecting…" / retry banners without reaching inside. */
   onStatusChange?: (status: VncStatus) => void;
   fitMode?: 'contain' | 'readable';
+  viewportV2?: boolean;
   className?: string;
 }
 
@@ -88,8 +90,12 @@ export function VncViewport({
   password = null,
   onStatusChange,
   fitMode = 'contain',
+  viewportV2 = false,
   className,
 }: Props): JSX.Element {
+  const [localMode,setLocalMode]=React.useState<'contain'|'original'>('contain');
+  const [zoom,setZoom]=React.useState(1);
+  const [pan,setPan]=React.useState({x:0,y:0});
   const viewportRef = React.useRef<HTMLDivElement | null>(null);
   const targetRef = React.useRef<HTMLDivElement | null>(null);
   const rfbRef = React.useRef<RFBInstance | null>(null);
@@ -179,7 +185,7 @@ export function VncViewport({
         rfb.resizeSession = false;
         // Read viewOnly off the current prop at construction time.
         // Later flips are handled by the secondary effect.
-        rfb.viewOnly = viewOnlyRef.current;
+        rfb.viewOnly = viewportV2 || viewOnlyRef.current;
         rfb.background = 'transparent';
         rfb.addEventListener('connect', onConnect);
         rfb.addEventListener('disconnect', onDisconnect);
@@ -216,20 +222,30 @@ export function VncViewport({
     // `reconnectEpoch` IS — bumping it forces a fresh RFB with the
     // same wsUrl, which is how auto-reconnect lands.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsUrl, password, reconnectEpoch]);
+  }, [wsUrl, password, reconnectEpoch, viewportV2]);
 
   React.useEffect(() => {
     viewOnlyRef.current = viewOnly;
     const rfb = rfbRef.current;
-    if (rfb) rfb.viewOnly = viewOnly;
-  }, [viewOnly]);
+    if (rfb) rfb.viewOnly = viewportV2 || viewOnly;
+  }, [viewOnly, viewportV2]);
 
   const recomputeReadableFrame = React.useCallback((): void => {
     const viewport = viewportRef.current;
     const target = targetRef.current;
     if (!viewport || !target) return;
 
-    if (fitMode !== 'readable') {
+    if (viewportV2 && localMode==='original') {
+      const canvas=target.querySelector('canvas');
+      if(canvas?.width && canvas?.height) {
+        target.style.width=`${canvas.width*zoom}px`; target.style.height=`${canvas.height*zoom}px`;
+        target.style.position='absolute';target.style.left=`${pan.x}px`;target.style.top=`${pan.y}px`;
+        target.style.maxWidth='none';target.style.maxHeight='none';
+      }
+      return;
+    }
+    target.style.position='';target.style.left='';target.style.top='';target.style.maxWidth='';target.style.maxHeight='';
+    if (viewportV2 || fitMode !== 'readable') {
       target.style.width = '100%';
       target.style.height = '100%';
       target.style.marginLeft = '';
@@ -278,7 +294,7 @@ export function VncViewport({
         top: 0,
       });
     }
-  }, [fitMode, wsUrl]);
+  }, [fitMode, wsUrl, viewportV2, localMode, zoom, pan]);
 
   // Re-trigger noVNC's scale calculation whenever the container
   // resizes. noVNC only recomputes on window 'resize' and on
@@ -304,7 +320,13 @@ export function VncViewport({
     let raf = 0;
     let t = 0;
     let mutationTimer = 0;
+    let precisionCanvas: HTMLCanvasElement | null = null;
+    let disposePrecision: (() => void) | null = null;
     const forceScale = () => {
+      if(viewportV2) {
+        const canvas=target.querySelector('canvas');
+        if(canvas && canvas!==precisionCanvas) {disposePrecision?.();precisionCanvas=canvas;disposePrecision=installVncPointerPrecisionBridge(canvas);}
+      }
       recomputeReadableFrame();
       const rfb = rfbRef.current;
       if (rfb) rfb.scaleViewport = true;
@@ -330,16 +352,17 @@ export function VncViewport({
     return () => {
       ro.disconnect();
       mo.disconnect();
+      disposePrecision?.();
       cancelAnimationFrame(raf);
       clearTimeout(t);
       clearTimeout(mutationTimer);
     };
-  }, [recomputeReadableFrame]);
+  }, [recomputeReadableFrame, viewportV2]);
 
   return (
     <div
       ref={viewportRef}
-      data-fit-mode={fitMode}
+      data-fit-mode={viewportV2 && localMode==='original' ? 'readable' : fitMode}
       // `min-h-0 min-w-0` — needed so this div can SHRINK inside a
       // flex parent; without them the intrinsic size of the canvas
       // child would push the parent wider than intended, defeating
@@ -350,10 +373,20 @@ export function VncViewport({
       // bleeding out of the panel.
       className={cn(
         'vnc-viewport-host relative h-full w-full min-h-0 min-w-0',
-        fitMode === 'readable' ? 'overflow-auto' : 'overflow-hidden',
+        !viewportV2 && fitMode === 'readable' ? 'overflow-auto' : 'overflow-hidden',
         className,
       )}
     >
+      {viewportV2 && <div className="absolute bottom-2 left-2 right-2 z-10 flex flex-wrap items-center gap-1 rounded-md border bg-white/95 p-1 text-xs text-gray-700" aria-label="VNC 画面显示设置">
+        <button type="button" onClick={()=>{setLocalMode('contain');setPan({x:0,y:0});}}>适应画面</button>
+        <button type="button" onClick={()=>{setLocalMode('original');setZoom(1);setPan({x:0,y:0});}}>原尺寸 / 放大</button>
+        {localMode==='original' && <>
+          <button type="button" aria-label="缩小画面" title="缩小画面" onClick={()=>setZoom(z=>Math.max(.25,z-.25))}>−</button><span>{Math.round(zoom*100)}%</span>
+          <button type="button" aria-label="放大画面" title="放大画面" onClick={()=>setZoom(z=>Math.min(4,z+.25))}>+</button>
+          {([['左',80,0],['右',-80,0],['上',0,80],['下',0,-80]] as const).map(([label,x,y])=><button type="button" key={label} aria-label={`平移画面${label}`} title={`平移画面${label}`} onClick={()=>setPan(p=>({x:p.x+x,y:p.y+y}))}>{label}</button>)}
+        </>}
+        <span>当前窗口 · 仅支持查看</span>
+      </div>}
       <div
         ref={targetRef}
         className="vnc-viewport-target relative h-full w-full min-h-0 min-w-0"

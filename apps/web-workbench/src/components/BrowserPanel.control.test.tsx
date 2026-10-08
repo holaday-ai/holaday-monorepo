@@ -90,3 +90,14 @@ it('does not automatically retake control while the login banner awaits its stat
   expect(api.mutate.mock.calls.filter(([args]) => args.action === 'takeover')).toHaveLength(1);
   expect(screen.getByTestId('viewport').dataset.lease).toBe('');
 });
+
+it('V2 portrait sheet owns only the visible width and defaults to contain', async () => {
+  vi.stubEnv('VITE_BROWSER_VIEWPORT_V2','true');
+  try {
+    render(<BrowserPanel {...base} layout="sheet" />);
+    const viewport=await screen.findByTestId('viewport');
+    expect(viewport.parentElement?.style.width).toBe('');
+    expect(viewport.parentElement?.className).toContain('w-full');
+    expect(viewport.parentElement?.className).not.toContain('shrink-0');
+  } finally {vi.unstubAllEnvs();}
+});

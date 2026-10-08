@@ -1,4 +1,5 @@
 export * from './ws.js';
+export * from './browser-viewport-v2.js';
 export * from './occupations.js';
 export * from './selector.js';
 export * from './ids.js';
