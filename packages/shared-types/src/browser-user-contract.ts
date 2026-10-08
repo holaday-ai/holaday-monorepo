@@ -53,6 +53,8 @@ export const userBrowserElementSignalsSchema = z
 export const userBrowserTargetDescriptionSchema = z
   .object({
     token: z.string().uuid(),
+    elementId: z.string().uuid(),
+    objectDigest: z.string().regex(/^[a-f0-9]{64}$/),
     tabId: z.number().int().nonnegative(),
     frameId: z.string().min(1).max(128),
     origin: exactWebOriginSchema,

@@ -137,4 +137,31 @@ describe('real target tickets in Chromium', () => {
     await page.goto(origin.replace('127.0.0.1', 'localhost'));
     await expect(r.observe()).rejects.toThrow('origin_grant_required');
   });
+  it('binds shadow node identity and redacted action query; blocks pointer-events retargeting', async () => {
+    await page.setContent('<div id="host"></div>');
+    await page.locator('#host').evaluate((el) => {
+      el.attachShadow({ mode: 'open' }).innerHTML = '<a id="link" href="/delete?id=1">删除</a>';
+    });
+    const r = new SelectedTargetResolver(page as never, 3, [origin]);
+    await r.observe();
+    const action = { kind: 'click' as const, selector: selector('#link'), deadlineMs: 100 };
+    const first = await r.describe(action, 1);
+    await page.locator('#link').evaluate((el) => el.setAttribute('href', '/delete?id=2'));
+    const second = await r.describe(action, 1);
+    expect(second.elementId).toBe(first.elementId);
+    expect(second.objectDigest).not.toBe(first.objectDigest);
+    await page.locator('#link').evaluate((el) => el.replaceWith(el.cloneNode(true)));
+    const replacement = await r.describe(action, 1);
+    expect(replacement.elementId).not.toBe(second.elementId);
+    await page.setContent(
+      '<button id="behind" onclick="document.body.dataset.effects=1" style="position:absolute;inset:0">删除</button><button id="front" style="position:absolute;inset:0;pointer-events:none">Search</button>',
+    );
+    await r.observe();
+    const blocked = { kind: 'click' as const, selector: selector('#front'), deadlineMs: 100 };
+    const ticket = await r.describe(blocked, 2);
+    await expect(
+      r.execute(blocked, { token: ticket.token, observationRevision: 2 }),
+    ).rejects.toThrow();
+    expect(await page.locator('body').getAttribute('data-effects')).toBeNull();
+  });
 });

@@ -17,6 +17,8 @@ const observation = {
 };
 const target = {
   token: id,
+  elementId: '22222222-2222-4222-8222-222222222222',
+  objectDigest: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   tabId: 3,
   frameId: 'main',
   origin: observation.origin,

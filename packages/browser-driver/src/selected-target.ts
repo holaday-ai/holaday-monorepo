@@ -20,11 +20,51 @@ const readVersion = (): DocumentVersion => {
   }
   return { ...win.__holadayV2Document };
 };
-const readElement = (node: Element): Pick<UserBrowserTargetDescription, 'element' | 'form'> => {
-  const el =
-    node.closest(
-      'button,a[href],input,select,textarea,summary,label,[role=button],[role=link],[role=menuitem],[role=option],[role=tab],[onclick]',
-    ) ?? node;
+const readElement = async (
+  node: Element,
+): Promise<
+  Pick<UserBrowserTargetDescription, 'elementId' | 'objectDigest' | 'element' | 'form'>
+> => {
+  const selector =
+    'button,a[href],input,select,textarea,summary,label,[role=button],[role=link],[role=menuitem],[role=option],[role=tab],[onclick]';
+  let el = node;
+  for (let cur: Element | null = node, hops = 0; cur && hops < 200; hops++) {
+    if (cur.matches(selector)) {
+      el = cur;
+      break;
+    }
+    const root = cur.getRootNode();
+    cur = cur.parentElement ?? ('host' in root ? (root as ShadowRoot).host : null);
+  }
+  const win = window as typeof window & { __holadayV2Nodes?: WeakMap<Element, string> };
+  const ids = win.__holadayV2Nodes ?? new WeakMap<Element, string>();
+  win.__holadayV2Nodes = ids;
+  let elementId = ids.get(el);
+  if (!elementId) {
+    elementId = crypto.randomUUID();
+    ids.set(el, elementId);
+  }
+  const input = el as HTMLInputElement;
+  const owner = input.form ?? el.closest('form');
+  const link = el.closest('a[href]') as HTMLAnchorElement | null;
+  const objects = JSON.stringify([
+    link?.href,
+    link?.getAttribute('href'),
+    (owner as HTMLFormElement | null)?.action,
+    owner?.getAttribute('action'),
+    owner?.getAttribute('method'),
+    el.getAttribute('formaction'),
+    el.getAttribute('formmethod'),
+    ...Array.from(owner?.querySelectorAll('[formaction],[formmethod]') ?? []).map((control) => [
+      control.getAttribute('formaction'),
+      control.getAttribute('formmethod'),
+    ]),
+  ]);
+  // Only an opaque digest leaves the page; URL query credentials never enter the model.
+  const objectDigest = Array.from(
+    new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(objects))),
+    (byte) => byte.toString(16).padStart(2, '0'),
+  ).join('');
   const tag = el.tagName.toLowerCase();
   const text = String((el as HTMLElement).innerText || el.textContent || '')
     .trim()
@@ -67,7 +107,7 @@ const readElement = (node: Element): Pick<UserBrowserTargetDescription, 'element
     tagName: tag,
   };
   const form = (el as HTMLInputElement).form ?? el.closest('form');
-  if (!form) return { element, form: null };
+  if (!form) return { elementId, objectDigest, element, form: null };
   const allFields = Array.from((form as HTMLFormElement).elements).filter((field) =>
     /^(INPUT|TEXTAREA|SELECT)$/.test(field.tagName),
   );
@@ -114,6 +154,8 @@ const readElement = (node: Element): Pick<UserBrowserTargetDescription, 'element
   action.username = '';
   action.password = '';
   return {
+    elementId,
+    objectDigest,
     element,
     form: {
       action: action.href.slice(0, 1200),
@@ -294,7 +336,7 @@ export class SelectedTargetResolver {
       await this.assertFresh(frame, expected);
       const signals = (await handle.evaluate(readElement)) as Pick<
         UserBrowserTargetDescription,
-        'element' | 'form'
+        'elementId' | 'objectDigest' | 'element' | 'form'
       >;
       if (!(await handle.isVisible())) throw new Error('target_unreadable');
       let frameId = this.frames.get(frame);
@@ -337,7 +379,12 @@ export class SelectedTargetResolver {
       if (
         !(await ticket.handle.isVisible()) ||
         JSON.stringify(fresh) !==
-          JSON.stringify({ element: ticket.target.element, form: ticket.target.form })
+          JSON.stringify({
+            elementId: ticket.target.elementId,
+            objectDigest: ticket.target.objectDigest,
+            element: ticket.target.element,
+            form: ticket.target.form,
+          })
       )
         throw new Error('target_changed');
       if (action.kind === 'key') {
@@ -358,7 +405,12 @@ export class SelectedTargetResolver {
           const afterTrial = await ticket.handle.evaluate(readElement);
           if (
             JSON.stringify(afterTrial) !==
-            JSON.stringify({ element: ticket.target.element, form: ticket.target.form })
+            JSON.stringify({
+              elementId: ticket.target.elementId,
+              objectDigest: ticket.target.objectDigest,
+              element: ticket.target.element,
+              form: ticket.target.form,
+            })
           )
             throw new Error('target_changed');
           await ticket.handle.click({ timeout });

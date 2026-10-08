@@ -56,3 +56,9 @@ Interfaces: decide route -> cloud/user Chrome/awaiting_user; explicit public-clo
 - Verification: frozen-source backend 565 files / 9162 passed / 1 existing skip; Node prelude 73 passed; driver 58, extension 465, related UI 162, real extension Chromium 7 passed. All typechecks and builds exit 0; backend typecheck uses 2048 MiB after the initial 1536 MiB OOM.
 
 - Delivery: implementation 73a15038 pushed normally; draft PR https://github.com/holaday-ai/holaday-monorepo/pull/250 created against claude/fix-unified-action-gate and attached to this chat. No merge/deploy.
+
+## Rebase delivery 2026-10-08
+
+Rebased on `84ab12947e171c4eb121d54cb49a26fd41846843` (`claude/capability-recovery`, includes merged #248/#249). Latest CDP/shadow hit testing, pointer-events behavior, object/node binding and modifier keys retained. Added stable Chrome node identity and opaque object digest to confirmations.
+
+Validation: backend full 576 files, 9368 passed / 1 existing skipped, Node prelude 73 passed; related backend 53 passed; driver 58, extension 465, related frontend 166; extension Chromium synthetic E2E 7/7. Five package typechecks and backend/extension/frontend builds passed. Source frozen for full run; subsequent cleanup only rewrites assignment-expression syntax, then re-runs targeted tests and extension E2E. Seven changed safety files pass Biome. No real account, production or deployment verification.

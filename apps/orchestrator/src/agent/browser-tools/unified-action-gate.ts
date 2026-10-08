@@ -253,7 +253,8 @@ async function withTimeout<T>(work: Promise<T>): Promise<T | null> {
 /** Ties a confirmation to the node it was given for (not just its label). */
 type TargetBinding =
   | { kind: 'cdp'; session: CDPSession; objectId: string }
-  | { kind: 'handle'; handle: ElementHandle };
+  | { kind: 'handle'; handle: ElementHandle }
+  | { kind: 'remote'; elementId: string; tabId: number; frameId: string; origin: string };
 
 interface ReadTarget {
   signals: ElementSignals;
@@ -402,6 +403,13 @@ async function targetAtRef(probe: TargetProbe, locator: Locator): Promise<ReadTa
 /** Whether two bindings are the very same node (never true across kinds/sessions). */
 async function sameTarget(a: TargetBinding | null, b: TargetBinding | null): Promise<boolean> {
   if (!a || !b) return a === b;
+  if (a.kind === 'remote' && b.kind === 'remote')
+    return (
+      a.elementId === b.elementId &&
+      a.tabId === b.tabId &&
+      a.frameId === b.frameId &&
+      a.origin === b.origin
+    );
   if (a.kind === 'cdp' && b.kind === 'cdp') {
     if (a.session !== b.session) return false;
     const result = await withTimeout(
@@ -780,6 +788,18 @@ export function describeUserBrowserAction(
   action: UserAction,
   target: UserBrowserTargetDescription,
 ): UnifiedActionDescription {
+  const identity = {
+    bindings: [
+      {
+        kind: 'remote' as const,
+        elementId: target.elementId,
+        tabId: target.tabId,
+        frameId: target.frameId,
+        origin: target.origin,
+      },
+    ],
+    objects: target.objectDigest,
+  };
   const element = target.element;
   const descriptor: RuntimeActionDescriptor = {
     kind: action.kind === 'type' ? 'type' : 'click',
@@ -805,6 +825,7 @@ export function describeUserBrowserAction(
           (element.tagName === 'button' && element.inputType !== 'button'))));
   if (!submit || !form)
     return {
+      ...identity,
       descriptors: [descriptor],
       unverified:
         (action.kind === 'click' || activates) &&
@@ -822,6 +843,7 @@ export function describeUserBrowserAction(
     form.hasAmountField;
   const control = form.submitControl;
   return {
+    ...identity,
     descriptors: [
       descriptor,
       {

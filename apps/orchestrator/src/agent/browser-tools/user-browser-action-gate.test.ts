@@ -12,6 +12,8 @@ const action = {
 };
 const target = {
   token: '00000000-0000-4000-8000-000000000001',
+  elementId: '22222222-2222-4222-8222-222222222222',
+  objectDigest: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   tabId: 3,
   frameId: 'main',
   origin: 'https://fixture.test',
@@ -104,4 +106,23 @@ describe('Chrome uses unified onBeforeAction on host-read targets', () => {
       expect((await gate(action, 'before')).kind).toBe(cancelled ? 'stop' : 'skip');
     }
   });
+  it.each(['elementId', 'objectDigest'] as const)(
+    'rejects changed %s after confirmation',
+    async (field) => {
+      let calls = 0;
+      const initial = { ...target, element: { ...target.element, visibleText: '删除项目' } };
+      const changed = {
+        ...initial,
+        [field]: field === 'elementId' ? '33333333-3333-4333-8333-333333333333' : 'b'.repeat(64),
+      };
+      const gate = createDescriptionActionGate({
+        describe: async () => describeUserBrowserAction(action, calls++ ? changed : initial),
+        onBeforeAction: classifyRuntimeAction,
+        pageUrl: () => target.origin,
+        park: async () => '确认执行',
+        aborted: () => false,
+      });
+      expect((await gate(action, 'before')).kind).toBe('skip');
+    },
+  );
 });
