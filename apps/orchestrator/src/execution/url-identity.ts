@@ -10,7 +10,10 @@
  * (`#/…`, `#!/…`) selects a different view and is kept.
  */
 
-/** Exact tracking parameter names (case-insensitive). */
+/**
+ * Exact tracking parameter names (case-insensitive). `from` is deliberately
+ * absent: travel and OTA URLs use it for the departure city (?from=SHA&to=PEK).
+ */
 export const DEFAULT_TRACKING_PARAMS: readonly string[] = [
   'gclid',
   'gclsrc',
@@ -27,7 +30,6 @@ export const DEFAULT_TRACKING_PARAMS: readonly string[] = [
   '_hsmi',
   'spm',
   'scm',
-  'from',
   'ref_src',
   'share',
   'sharesource',

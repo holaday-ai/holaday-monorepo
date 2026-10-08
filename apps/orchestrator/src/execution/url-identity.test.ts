@@ -39,9 +39,17 @@ describe('stripTrackingFromUrl', () => {
   it('removes a query made only of tracking parameters', () => {
     expect(
       stripTrackingFromUrl(
-        'https://example.test/p/1?utm_source=a&utm_medium=b&gclid=c&fbclid=d&share_token=e&from=timeline',
+        'https://example.test/p/1?utm_source=a&utm_medium=b&gclid=c&fbclid=d&share_token=e',
       ),
     ).toBe('https://example.test/p/1');
+  });
+
+  it('keeps travel route parameters such as from / to', () => {
+    const route = 'https://flights.example.test/search?from=SHA&to=PEK&date=2026-10-20';
+    expect(stripTrackingFromUrl(`${route}&utm_source=app`)).toBe(route);
+    expect(urlResourceIdentity('https://trains.example.test/list?from=SHA&to=PEK')).not.toBe(
+      urlResourceIdentity('https://trains.example.test/list?from=PEK&to=SHA'),
+    );
   });
 
   it('keeps relative forms and accepts a custom tracking list', () => {
