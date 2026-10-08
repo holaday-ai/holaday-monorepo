@@ -665,6 +665,14 @@ function decide(
     }
   }
 
+  // 0. Product-listing / comparison shopping tasks need the supercar
+  // loop so it can use search_ecommerce and preserve source URLs.
+  // Firecrawl/generate lanes repeatedly produced price rows with
+  // empty URLs for "前5结果（名称/价格/链接）" style prompts.
+  if (isEcommerceListingIntent(routingIntent)) {
+    return { mode: 'browser', source: 'kw:ecommerce-listing' };
+  }
+
   // A downloadable writing artifact is a local output, not a website
   // download. Keep real website actions ahead of this attachment shortcut.
   if (ctx.hasFileAttachment &&
@@ -674,17 +682,17 @@ function decide(
       .replace(/(?:我(?:本次)?上传的|已上传的|上传的)\s*[\w.-]+\.(?:png|jpe?g|webp|pdf|docx?|txt)\b/gi, '现有配图')
       .replace(/\b[\w.-]+\.(?:png|jpe?g|webp|pdf|docx?|txt)\b/gi, '附件')
       .replace(/(?:提供|生成|导出|呈现).{0,12}(?:可下载|下载的).{0,24}(?:文件|文档|文章|报告)/g, '');
-    if (!matchInteractionPattern(actions) && !matchSearchPattern(actions) && !matchSearchVerb(actions)) {
-      return { mode: 'generate', source: 'kw:attachment-writing' };
+    if (!matchInteractionPattern(actions)) {
+      // Uploaded filenames were removed above; an actual domain or freshness
+      // instruction must use live information even when writing a local file.
+      if (URL_REGEX.test(actions) || /\b[a-z0-9](?:[a-z0-9-]*\.)+[a-z]{2,24}\b/i.test(actions) ||
+          /今天|最新|现在|实时|当前|\b(?:today|latest|current|real[ -]?time|now)\b/i.test(actions)) {
+        return { mode: 'scrape', source: 'kw:attachment-live-source' };
+      }
+      if (!matchSearchPattern(actions) && !matchSearchVerb(actions)) {
+        return { mode: 'generate', source: 'kw:attachment-writing' };
+      }
     }
-  }
-
-  // 0. Product-listing / comparison shopping tasks need the supercar
-  // loop so it can use search_ecommerce and preserve source URLs.
-  // Firecrawl/generate lanes repeatedly produced price rows with
-  // empty URLs for "前5结果（名称/价格/链接）" style prompts.
-  if (isEcommerceListingIntent(routingIntent)) {
-    return { mode: 'browser', source: 'kw:ecommerce-listing' };
   }
 
   // A negated commit is part of the execution contract for travel tasks:
@@ -806,6 +814,7 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
     'kw:template_fill',
     'kw:template_fill_file',
     'kw:attachment-writing',
+    'kw:attachment-live-source',
     'kw:image',
     'kw:interaction',
     'kw:url',

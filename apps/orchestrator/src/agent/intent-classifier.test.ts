@@ -1272,3 +1272,25 @@ describe('attachment writing deliverables', () => {
     expect(await classifyExecutionMode({intent, hasFileAttachment: true, logger: fakeLogger()})).toBe('browser');
   });
 });
+
+describe('attachment writing with live sources', () => {
+  it.each([
+    '根据附件和 jd.com 的价格写报告',
+    '根据附件写今天的新闻报告',
+    '根据附件写最新市场报告',
+    '根据附件写现在的行情报告',
+    '根据附件整理实时价格报告',
+    'Use the attached image to write a report about latest prices',
+  ])('keeps live-source writing online: %s', async (intent) => {
+    expect(await classifyExecutionMode({intent, hasFileAttachment:true, logger:fakeLogger()})).toBe('scrape');
+  });
+});
+
+describe('live-source attachment writing precedence', () => {
+ it('fresh data overrides a local-writing skill',async()=>{
+  expect(await classifyExecutionMode({intent:'根据附件写最新新闻报告并列明数据来源',hasFileAttachment:true,skillId:'wechat-article-ops',logger:fakeLogger()})).toBe('scrape');
+ });
+ it('price rows and links keep the browser shopping lane',async()=>{
+  expect(await classifyExecutionMode({intent:'根据附件和 jd.com 写前5个商品价格和链接报告',hasFileAttachment:true,logger:fakeLogger()})).toBe('browser');
+ });
+});

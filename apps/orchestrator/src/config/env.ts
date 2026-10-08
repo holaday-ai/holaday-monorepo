@@ -327,6 +327,9 @@ const baseEnvSchema = z.object({
     .enum(['fal-ai/sync-lipsync/v2', 'fal-ai/sync-lipsync/v3'])
     .default('fal-ai/sync-lipsync/v3'),
   QWEN_TTS_VC_MODEL: z.string().default('qwen3-tts-vc-2026-01-22'),
+  VIDEO_REJECT_RETRY_LIMIT: z.coerce.number().int().min(1).max(100).default(3),
+  VIDEO_REJECT_FRAME_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+
   /**
    * Video-creation lane gate. Default OFF — video_creation intents fall
    * through to the generate lane (the model honestly says it can't produce

@@ -182,3 +182,12 @@ it('offers pet image-to-video separately from human action remake', async () => 
   expect(screen.queryByRole('button', {name:/参考视频 2–30秒/})).toBeNull();
   expect(mocks.createTask).not.toHaveBeenCalled();
 });
+
+
+it.each(['自由创作', '动作复刻', '宠物动起来', '人物口播'])('shows refund and retry limits before submitting in %s mode', async (mode) => {
+  const user = userEvent.setup();
+  renderPage();
+  await user.click(await screen.findByRole('tab', { name: mode }));
+  expect(screen.getByText('质量不合格会自动退款，最多可重试 3 次')).toBeTruthy();
+  expect(mocks.createTask).not.toHaveBeenCalled();
+});

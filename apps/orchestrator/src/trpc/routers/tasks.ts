@@ -1,3 +1,4 @@
+import { videoRejectionReason } from '../../agent/video/video-retry-policy.js';
 import { createHash } from 'node:crypto';
 import type Anthropic from '@anthropic-ai/sdk';
 import {
@@ -8214,9 +8215,14 @@ export const tasksRouter = router({
         isBypass,
         intent: row.intent,
         executionMetadata,
+        rejectRetryLimit: appEnv.VIDEO_REJECT_RETRY_LIMIT,
       });
       if (atomicCreate.kind === 'quota_denied') {
         throw quotaErrorFor(atomicCreate.reason);
+      }
+
+      if (atomicCreate.kind === 'reject_retry_limit') {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: '同一制作要求已连续多次未通过质检。请修改素材或描述；本次未扣费。' });
       }
 
       // video|image — 报价消费、扣额度和生成任务写入同一事务。
@@ -8331,7 +8337,7 @@ export const tasksRouter = router({
           if (verdict.status === 'fail') {
             const { retainRejectedVideoFrames } = await import('../../agent/video/video-quality-audit.js');
             try {
-              const auditId = await retainRejectedVideoFrames({ taskId: newTaskId, workdir: qualityInput.workdir, verdict });
+              const auditId = await retainRejectedVideoFrames({ taskId: newTaskId, workdir: qualityInput.workdir, verdict, retentionDays: appEnv.VIDEO_REJECT_FRAME_RETENTION_DAYS });
               logger.info({ taskId: newTaskId, auditId, failedChecks: verdict.failedChecks }, 'video: rejected frames retained for internal review');
             } catch (error) {
               logger.error({ taskId: newTaskId, err: error }, 'video: rejected frame retention failed');
@@ -8722,8 +8728,11 @@ export const tasksRouter = router({
           // Full error to the server log (internal); a SAFE whitelisted reason
           // to the user — never leak stack / detail / urls / file ids.
           logger.error({ err, taskId: newTaskId }, 'video_creation: lane failed');
-          const friendlyReason = mapVideoFailureReason(err);
           const qualityFailure = videoQualityFailureOutcome(err);
+          const mappedReason = mapVideoFailureReason(err);
+          const friendlyReason = qualityFailure.metadata
+            ? videoRejectionReason(mappedReason, atomicCreate.kind === 'created' ? atomicCreate.priorQualityRejects : 0, appEnv.VIDEO_REJECT_RETRY_LIMIT)
+            : mappedReason;
           const persisted = await repo
             .persistVisionOutcome(newTaskId, {
               status: 'failed',

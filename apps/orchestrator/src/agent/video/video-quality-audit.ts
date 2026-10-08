@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { chmod, mkdir, mkdtemp, open, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, open, readdir, rm, lstat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { VideoQualityResult } from './video-quality-verifier.js';
@@ -10,27 +10,14 @@ export async function retainRejectedVideoFrames(input: {
   workdir: string;
   verdict: VideoQualityResult;
   root?: string;
+  retentionDays?: number;
 }): Promise<string> {
   if (!/^tsk_[a-zA-Z0-9_-]{1,100}$/.test(input.taskId)) throw new Error('invalid task id');
   if (input.verdict.status !== 'fail') throw new Error('only rejected video evidence is retained');
   const root = input.root ?? join(tmpdir(), 'hd-video-quality-audit');
   await mkdir(root, { recursive: true, mode: 0o700 });
   await chmod(root, 0o700);
-  // Bound retention to seven days / 100 recent rejects. Do not remove an in-flight audit.
-  const entries = (await readdir(root, { withFileTypes: true })).filter(
-    (e) => e.isDirectory() && /^tsk_[\w-]+-/.test(e.name),
-  );
-  const dated = [];
-  for (const entry of entries) {
-    const info = await stat(join(root, entry.name));
-    dated.push({ name: entry.name, time: info.mtimeMs });
-  }
-  dated.sort((a, b) => b.time - a.time);
-  for (const [index, entry] of dated.entries()) {
-    const age = Date.now() - entry.time;
-    if (age > 7 * 86_400_000 || (index >= 99 && age > 3_600_000))
-      await rm(join(root, entry.name), { recursive: true, force: true });
-  }
+  await cleanupRejectedVideoFrames({ root, retentionDays: input.retentionDays });
   const directory = await mkdtemp(join(root, `${input.taskId}-`));
   await chmod(directory, 0o700);
   const frames: string[] = [];
@@ -72,4 +59,72 @@ export async function retainRejectedVideoFrames(input: {
     await rm(directory, { recursive: true, force: true });
     throw error;
   }
+}
+
+/** Only complete, expired rejection audits in the dedicated private root. */
+export async function cleanupRejectedVideoFrames(
+  options: {
+    root?: string;
+    retentionDays?: number;
+    now?: number;
+  } = {},
+): Promise<number> {
+  const root = options.root ?? join(tmpdir(), 'hd-video-quality-audit');
+  const days = options.retentionDays ?? 7;
+  if (!Number.isInteger(days) || days < 1 || days > 365) throw new Error('invalid audit retention');
+  try {
+    if (!(await lstat(root)).isDirectory()) return 0;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+    throw error;
+  }
+  const now = options.now ?? Date.now();
+  let deleted = 0;
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^tsk_[a-zA-Z0-9_-]{1,100}-[a-zA-Z0-9]{6}$/.test(entry.name))
+      continue;
+    const directory = join(root, entry.name);
+    let manifestFile: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      manifestFile = await open(
+        join(directory, 'manifest.json'),
+        constants.O_RDONLY | constants.O_NOFOLLOW,
+      );
+      const info = await manifestFile.stat();
+      if (!info.isFile() || info.size > 16_384) continue;
+      const manifest = JSON.parse(await manifestFile.readFile('utf8'));
+      if (
+        manifest.status !== 'fail' ||
+        !/^tsk_[a-zA-Z0-9_-]{1,100}$/.test(manifest.taskId) ||
+        !entry.name.startsWith(manifest.taskId + '-') ||
+        !Array.isArray(manifest.frames) ||
+        !manifest.frames.length ||
+        manifest.frames.length > 9 ||
+        !manifest.frames.every(
+          (f: unknown) => typeof f === 'string' && /^quality-frame-0[1-9]\.jpg$/.test(f),
+        )
+      )
+        continue;
+      const time = Date.parse(manifest.recordedAt);
+      if (!Number.isFinite(time) || now - time <= days * 86_400_000) continue;
+      const allowed = new Set<string>(['manifest.json', ...manifest.frames]);
+      const contents = await readdir(directory, { withFileTypes: true });
+      // Any delivered file, unknown content or symlink makes this directory
+      // ineligible. Never traverse or recursively delete user artifacts.
+      if (contents.some((f) => !f.isFile() || !allowed.has(f.name))) continue;
+      await rm(directory, { recursive: true, force: true });
+      deleted++;
+    } catch (error) {
+      // Missing, partial or invalid manifests are not cleanup authority.
+      if (
+        error instanceof SyntaxError ||
+        ['ENOENT', 'ELOOP'].includes((error as NodeJS.ErrnoException).code ?? '')
+      )
+        continue;
+      throw error;
+    } finally {
+      await manifestFile?.close();
+    }
+  }
+  return deleted;
 }

@@ -964,6 +964,7 @@ function CreativeStudioPage({
       <PageContainer width="wide" className="hd-creative-container max-w-[1220px] pb-14 pt-7 md:px-10 md:pt-9">
         <div className="relative overflow-hidden rounded-none">
           <header className="hd-creative-heading"><span>HOLADAY VIDEO</span><h1>把想法，拍成画面。</h1><p>从一句描述、一张参考图开始。</p></header>
+          <p className="hd-mode-help">质量不合格会自动退款，最多可重试 3 次</p>
           {onVideoTabChange && <div className="hd-creative-tabs hd-video-types" role="tablist" aria-label="视频创作模式" style={{ '--active-tab': videoTab === 'normal' ? 0 : videoTab === 'pet' ? 1 : videoTab === 'pet_i2v' ? 2 : 3 } as React.CSSProperties}>
             {([{id:'normal', label:'自由创作', scenario:'product_highlight'},{id:'pet',label:'动作复刻',scenario:'action_remake'},{id:'pet_i2v',label:'宠物动起来',scenario:'pet_motion'},{id:'ip',label:'人物口播',scenario:'ip_presenter'}] as const).map(tab => <button key={tab.id} type="button" role="tab" aria-selected={videoTab === tab.id} disabled={submitting} onClick={() => handleScenarioChange(tab.scenario)}>{tab.label}</button>)}
           </div>}
@@ -2316,7 +2317,7 @@ function CurrentVideoTaskPanel({
 
           {task.status === 'awaiting_user' && awaitingKind === 'video_quote' && (
             <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-[#FFC910]/55 bg-[var(--creative-surface,#fff)] px-3 py-3 text-[12px]">
-              <span className="mr-auto text-muted-foreground">确认后才会开始制作并消耗额度。</span>
+              <span className="mr-auto text-muted-foreground">确认后才会开始制作并消耗额度。质量不合格会自动退款，最多可重试 3 次。</span>
               <Button
                 type="button"
                 size="sm"

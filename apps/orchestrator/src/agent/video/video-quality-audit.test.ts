@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import * as auditModule from './video-quality-audit.js';
 import { retainRejectedVideoFrames } from './video-quality-audit.js';
 
 describe('private rejected video evidence', () => {
@@ -46,5 +47,47 @@ describe('private rejected video evidence', () => {
         verdict: { status: 'fail', failedChecks: [], reason: '' },
       }),
     ).rejects.toThrow('task id');
+  });
+});
+
+describe('scheduled rejected frame expiry', () => {
+  it('expires only completed rejected evidence, preserves delivered output and symlinks, and obeys retention', async () => {
+    expect(typeof auditModule.cleanupRejectedVideoFrames).toBe('function');
+    const root = await mkdtemp(join(tmpdir(), 'qa-reaper-'));
+    const workdir = await mkdtemp(join(tmpdir(), 'qa-workdir-'));
+    try {
+      await writeFile(join(workdir, 'quality-frame-01.jpg'), 'frame');
+      const id = await retainRejectedVideoFrames({
+        root,
+        workdir,
+        taskId: 'tsk_expired',
+        verdict: { status: 'fail', failedChecks: [], reason: 'rejected' },
+      });
+      const manifest = join(root, id, 'manifest.json');
+      const m = JSON.parse(await readFile(manifest, 'utf8'));
+      const protectedId = await retainRejectedVideoFrames({
+        root,
+        workdir,
+        taskId: 'tsk_output',
+        verdict: { status: 'fail', failedChecks: [], reason: 'rejected' },
+      });
+      await writeFile(join(root, protectedId, 'video.mp4'), 'delivered');
+      m.recordedAt = new Date(Date.now() - 8 * 86400000).toISOString();
+      await writeFile(manifest, JSON.stringify(m));
+      const protectedManifest = join(root, protectedId, 'manifest.json');
+      const pm = JSON.parse(await readFile(protectedManifest, 'utf8'));
+      pm.recordedAt = m.recordedAt;
+      await writeFile(protectedManifest, JSON.stringify(pm));
+      await symlink(workdir, join(root, 'tsk_link-abcdef'));
+      expect(await auditModule.cleanupRejectedVideoFrames({ root, retentionDays: 10 })).toBe(0);
+      expect(await auditModule.cleanupRejectedVideoFrames({ root })).toBe(1);
+      await expect(stat(join(root, id))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readFile(join(root, protectedId, 'video.mp4'), 'utf8')).toBe('delivered');
+      expect(await readFile(join(workdir, 'quality-frame-01.jpg'), 'utf8')).toBe('frame');
+      expect(await auditModule.cleanupRejectedVideoFrames({ root })).toBe(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(workdir, { recursive: true, force: true });
+    }
   });
 });

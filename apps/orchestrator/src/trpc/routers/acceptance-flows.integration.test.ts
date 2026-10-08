@@ -215,6 +215,21 @@ describe('acceptance generation, cancel and refund flows', () => {
       });
       expect(confirmed).toMatchObject({ status: 'executing' });
       expect(queued).toHaveBeenCalledTimes(1);
+      const { quotaRefunds } = await import('../../db/schema/quota-refunds.js');
+      const { QuotaService } = await import('../../quota/quota-service.js');
+      const { refundTaskOnce } = await import('../../quota/platform-failure-refunds.js');
+      const { TaskRepository } = await import('../../agent/task-repository.js');
+      const quota = new QuotaService(db);
+      const chargedBalance = (await quota.snapshot(actor.id, 'pro')).tasksRemaining;
+      const [charge] = await db.select().from(quotaRefunds).where(eq(quotaRefunds.taskExternalId, confirmed.taskId));
+      expect(charge).toMatchObject({ userId: actor.id, refundedAt: null });
+      await new TaskRepository(db).persistVisionOutcome(confirmed.taskId, {
+        status: 'failed', errorCode: 'MEDIA_VIDEO_QUALITY_REJECTED', reason: 'quality fixture', tickCount: 1,
+      });
+      expect(await refundTaskOnce(db, quota, confirmed.taskId, 'MEDIA_VIDEO_QUALITY_REJECTED')).toBe(true);
+      expect(await refundTaskOnce(db, quota, confirmed.taskId, 'MEDIA_VIDEO_QUALITY_REJECTED')).toBe(false);
+      expect((await quota.snapshot(actor.id, 'pro')).tasksRemaining).toBe(chargedBalance + 1);
+
     } finally {
       await files.deleteForUser(file.externalId, actor.id);
       Object.assign(env, oldEnv);
