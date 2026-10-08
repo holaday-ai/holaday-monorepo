@@ -1706,6 +1706,34 @@ describe('selectTask detail hydration', () => {
 });
 
 describe('loadMoreTasks', () => {
+  it('stops after five hidden pages, blocks repeat clicks, and resets on refresh', async () => {
+    useTaskStore.setState({ tasks: [], tasksCursor: 51, tasksHasMore: true });
+    let pages = 0;
+    listQuery.mockImplementation(async () => {
+      pages += 1;
+      return { tasks: [taskRow({ taskId: `hidden_${pages}` })], nextCursor: pages < 6 ? 51 + pages * 50 : null } as never;
+    });
+    await useTaskStore.getState().loadMoreTasks(() => new Set());
+    expect(listQuery).toHaveBeenCalledTimes(5);
+    expect(useTaskStore.getState()).toMatchObject({ tasksVisiblePageLimitReached: true, tasksHasMore: true, tasksCursor: 301, loadingMore: false, error: null });
+    await useTaskStore.getState().loadMoreTasks(() => new Set());
+    expect(listQuery).toHaveBeenCalledTimes(5);
+    listQuery.mockResolvedValue({ tasks: [], nextCursor: 51 } as never);
+    await useTaskStore.getState().refreshTaskList();
+    expect(useTaskStore.getState().tasksVisiblePageLimitReached).toBe(false);
+  });
+  it('keeps pagination available when the fifth page adds a visible task', async () => {
+    useTaskStore.setState({ tasks: [], tasksCursor: 51, tasksHasMore: true });
+    let pages = 0;
+    listQuery.mockImplementation(async () => {
+      pages += 1;
+      return { tasks: [taskRow({ taskId: pages === 5 ? 'visible_last' : `hidden_${pages}` })], nextCursor: 51 + pages * 50 } as never;
+    });
+    await useTaskStore.getState().loadMoreTasks(rows => new Set(rows.filter(row => row.taskId.startsWith('visible')).map(row => row.taskId)));
+    expect(listQuery).toHaveBeenCalledTimes(5);
+    expect(useTaskStore.getState()).toMatchObject({ tasksVisiblePageLimitReached: false, tasksHasMore: true });
+  });
+
   it('skips fully hidden pages until a new visible task arrives while holding one loading lock', async () => {
     useTaskStore.setState({ tasks: [task({ taskId: 'visible_first' })], tasksCursor: 51, tasksHasMore: true });
     listQuery.mockResolvedValueOnce({ tasks: [taskRow({ taskId: 'hidden_old' })], nextCursor: 101 } as never);

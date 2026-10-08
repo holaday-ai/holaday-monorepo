@@ -52,6 +52,7 @@ import { copyTextToClipboard, hasCopyableText } from '@/lib/copy-text';
 import { shouldRenderLiveSubStatus } from '@/lib/live-substatus';
 import {
   downloadFailureMessage,
+  isUnavailableFileStatus,
   downloadFileAuthed,
   fetchFileBlobAuthed,
 } from '@/lib/download-file';
@@ -2130,7 +2131,7 @@ function ScreenshotThumbnailCard({
       setDownloadState('idle');
     } else {
       setDownloadState('failed');
-      toast.show(downloadFailureMessage(result.status), 'error');
+      if (!isUnavailableFileStatus(result.status)) toast.show(downloadFailureMessage(result.status), 'error');
     }
   };
   const metaLabel = downloadFileMetaLabel({

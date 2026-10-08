@@ -54,7 +54,7 @@ describe('file-download-card-copy', () => {
         formattedSize: '1 KB',
         availability: 'unavailable',
       }),
-    ).toBe('表格文件 · 1 KB · 文件已失效');
+    ).toBe('表格文件 · 1 KB · 文件已不可用');
   });
 
   it('states the retention policy without claiming unknown files are active', () => {

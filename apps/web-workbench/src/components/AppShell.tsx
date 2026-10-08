@@ -207,6 +207,7 @@ export function AppShell(): JSX.Element {
   const tasks = useTaskStore((s) => s.tasks);
   const tasksHasMore = useTaskStore((s) => s.tasksHasMore);
   const loadingMoreTasks = useTaskStore((s) => s.loadingMore);
+  const tasksVisiblePageLimitReached = useTaskStore((s) => s.tasksVisiblePageLimitReached);
   const loadMoreTasks = useTaskStore((s) => s.loadMoreTasks);
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
   const selectTask = useTaskStore((s) => s.selectTask);
@@ -718,7 +719,7 @@ export function AppShell(): JSX.Element {
   }, [loadMoreProjectTasks, projectFilter, projectTaskFilter]);
 
   const retentionPagerOverride = {
-    hasMore: tasksHasMore,
+    hasMore: tasksHasMore && !tasksVisiblePageLimitReached,
     loadingMore: loadingMoreTasks,
     onLoadMore: () => {
       void loadMoreTasks(rows => {
@@ -727,7 +728,7 @@ export function AppShell(): JSX.Element {
         return new Set(applyHistoryRetention(rows, historyDays, pinned).visible.map(row => row.taskId));
       });
     },
-    exhaustedCopy: hiddenByRetentionCount > 0
+    exhaustedCopy: tasksVisiblePageLimitReached ? '没有更多可见任务' : hiddenByRetentionCount > 0
       ? `没有更多可见任务（${hiddenByRetentionCount} 条已超出保留期）`
       : undefined,
   };

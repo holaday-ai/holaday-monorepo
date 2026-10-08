@@ -60,6 +60,8 @@ it('prevents referencing a file whose authenticated preview reports it gone', as
   );
   await userEvent.setup().click(screen.getByRole('button', { name: '用于新任务' }));
   expect(onUse).not.toHaveBeenCalled();
+  expect(screen.getByText('文件已不可用')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /下载|已失效/ })).toBeNull();
 });
 it('initially focuses the preview surface rather than a download tooltip trigger', async () => {
   fetchBlob.mockResolvedValue({ ok: false, status: 503 });

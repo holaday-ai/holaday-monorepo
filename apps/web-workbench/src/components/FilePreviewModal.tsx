@@ -210,7 +210,7 @@ export function FilePreviewModal({
           setErrorMessage(downloadFailureMessage(res.status));
           onUnavailableRef.current?.(payload.fileId);
         }
-        toast.show(downloadFailureMessage(res.status), 'error');
+        if (!isUnavailableFileStatus(res.status)) toast.show(downloadFailureMessage(res.status), 'error');
       }
     } finally {
       if (mountedRef.current) {
@@ -244,16 +244,16 @@ export function FilePreviewModal({
                 {formatFileSize(payload.sizeBytes)} · {mime || '未知类型'}
               </div>
             </div>
-            <IconTooltip
-              label={unavailable ? '文件已失效' : downloading ? '下载中' : '下载'}
+            {!unavailable && <IconTooltip
+              label={downloading ? '下载中' : '下载'}
             >
               <button
                 type="button"
                 onClick={() => void handleDownload()}
-                disabled={downloading || unavailable}
-                aria-label={unavailable ? '文件已失效' : '下载到本地'}
+                disabled={downloading}
+                aria-label="下载到本地"
                 title={
-                  unavailable ? '文件已失效' : downloading ? '下载中' : '下载'
+                  downloading ? '下载中' : '下载'
                 }
                 className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
               >
@@ -263,7 +263,7 @@ export function FilePreviewModal({
                   <Download className="h-3.5 w-3.5" />
                 )}
               </button>
-            </IconTooltip>
+            </IconTooltip>}
             <IconTooltip label="关闭">
               <button
                 type="button"
@@ -289,7 +289,7 @@ export function FilePreviewModal({
                   <ExternalLink className="h-8 w-8 text-[#FF0061]" />
                 )}
                 <div className="font-medium text-foreground/85">
-                  {unavailable ? '文件已失效' : '无法加载预览'}
+                  {unavailable ? '文件已不可用' : '无法加载预览'}
                 </div>
                 <div className="max-w-sm text-xs">
                   {unavailable
@@ -360,7 +360,7 @@ export function FilePreviewModal({
             <dl><dt>格式</dt><dd>{mime || '未知类型'}</dd><dt>大小</dt><dd>{formatFileSize(payload.sizeBytes)}</dd>
               {createdAt && Number.isFinite(new Date(createdAt).getTime()) ? <><dt>添加</dt><dd>{new Date(createdAt).toLocaleString('zh-CN')}</dd></> : null}
             </dl>
-            {onUse && <><button type="button" disabled={unavailable} onClick={onUse}>用于新任务</button><small>{unavailable ? '文件已失效，无法作为参考资料' : '把这份文件作为参考资料'}</small></>}
+            {onUse && <><button type="button" disabled={unavailable} onClick={onUse}>用于新任务</button><small>{unavailable ? '文件已不可用，无法作为参考资料' : '把这份文件作为参考资料'}</small></>}
           </aside>}
           </div>
         </div>
