@@ -1,15 +1,15 @@
 // @vitest-environment happy-dom
 
-import { act, cleanup, render, renderHook, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTaskFailureContext } from '@/hooks/useTaskFailureContext';
 import {
+  type TaskFailureContext,
   canLoadFailureContext,
   refundStatusCopy,
   retryAttachmentNote,
-  type TaskFailureContext,
 } from '@/lib/task-failure-recovery';
+import { act, cleanup, render, renderHook, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FailureHeaderCard } from './FailureHeaderCard';
 
 const mocks = vi.hoisted(() => ({ failureContext: vi.fn() }));
@@ -133,5 +133,16 @@ describe('useTaskFailureContext', () => {
     });
     expect(ensured).toBeNull();
     expect(failed.result.current.context).toBeNull();
+  });
+});
+
+describe('media quality failure recovery', () => {
+  it('shows the verified refund state and an accessible regenerate action without browser advice', async () => {
+    const retry = vi.fn();
+    render(<FailureHeaderCard status="failed" errorText="画面出现了未要求的文字或品牌，视频未交付。请调整描述后重新生成。" executionMode="video_creation" refund={refundStatusCopy('refunded')} onRetry={retry} />);
+    expect(screen.getByTestId('failure-refund-status').textContent).toContain('额度已退还');
+    expect(screen.queryByText(/换个网址/)).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: '重新生成' }));
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 });

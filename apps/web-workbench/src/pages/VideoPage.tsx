@@ -1,13 +1,16 @@
+import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
+import { CreativeDisclosure } from '@/components/CreativeDisclosure';
+import { CreativeInspiration } from '@/components/CreativeInspiration';
+import { CreativePopover } from '@/components/CreativePopover';
 import { useCreativeProject } from '@/components/CreativeProjectPicker';
 import { CreativeReferenceLibrary } from '@/components/CreativeReferenceLibrary';
-import { CreativePopover } from '@/components/CreativePopover';
-import { CreativeInspiration } from '@/components/CreativeInspiration';
-import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
+import { FailureHeaderCard } from '@/components/FailureHeaderCard';
 import { FileDownloadCard, type FileDownloadPayload } from '@/components/FileDownloadCard';
 import { LazyPosterImg } from '@/components/LazyPosterImg';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
+import { PetMotionForm } from '@/components/video/PetMotionForm';
 import { VideoCreationStoryboard } from '@/components/video/VideoCreationStoryboard';
 import {
   type VideoCreationScenarioId,
@@ -19,9 +22,11 @@ import {
   canContinueEditing,
   createVideoEditingProject,
 } from '@/features/video-editing/video-edit-entry';
+import { useTaskFailureContext } from '@/hooks/useTaskFailureContext';
 import { revokeCreativePreviewUrls } from '@/lib/creative-preview-urls';
 import { createMediaActionGuard } from '@/lib/media-action-guard';
 import { filterAvailableOptions, useMediaModels } from '@/lib/media-models';
+import { refundStatusCopy } from '@/lib/task-failure-recovery';
 import { normalizeTaskHubCursor } from '@/lib/task-hub-state';
 import { trpc } from '@/lib/trpc';
 import {
@@ -79,6 +84,7 @@ import {
   normalVideoModelFromSelection,
 } from '@/types/video';
 import { type NormalVideoModelId, reconcileNormalVideoParameters } from '@holaday/shared-types';
+import * as Dialog from '@radix-ui/react-dialog';
 import {
   AlertCircle,
   Check,
@@ -87,15 +93,15 @@ import {
   CircleSlash,
   Clapperboard,
   Clock,
-  ImagePlus,
   Files,
-  Plus,
+  ImagePlus,
   Lightbulb,
   Loader2,
   Mic,
   Palette,
   Pin,
   Play,
+  Plus,
   Scissors,
   Sparkles,
   Video as VideoIcon,
@@ -103,8 +109,6 @@ import {
   XCircle,
 } from 'lucide-react';
 import * as React from 'react';
-import * as Dialog from '@radix-ui/react-dialog';
-import { CreativeDisclosure } from '@/components/CreativeDisclosure';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 /**
@@ -140,7 +144,7 @@ export function currentMediaDownloadPayload(attachment: UiTerminalAttachment): F
 const CREATIVE_HISTORY_VISIBLE_PAGE_SIZE = 4;
 const CREATIVE_HISTORY_SCAN_PAGES_PER_CLICK = 5;
 export const IP_VIDEO_ASPECT_RATIO: VideoAspect = '9:16';
-type VideoTab = 'normal' | 'pet' | 'ip';
+type VideoTab = 'normal' | 'pet' | 'pet_i2v' | 'ip';
 type CreativeModelValue = VideoModel;
 type CreativeStyleGroup = 'vibe' | 'lighting' | 'color';
 type CreativeStylePreviewSubject = 'default' | 'human';
@@ -622,9 +626,9 @@ export function VideoPage(): JSX.Element {
 
   React.useEffect(() => {
     if (!taskId) return;
-    const taskTab = videoTabForTaskType(currentTask?.videoType);
+    const taskTab = currentTask?.videoCreationMode === 'pet_i2v' ? 'pet_i2v' : videoTabForTaskType(currentTask?.videoType);
     if (taskTab) setVideoTab(taskTab);
-  }, [currentTask?.videoType, taskId]);
+  }, [currentTask?.videoType, currentTask?.videoCreationMode, taskId]);
 
   return (
     <CreativeStudioPage
@@ -960,8 +964,9 @@ function CreativeStudioPage({
       <PageContainer width="wide" className="hd-creative-container max-w-[1220px] pb-14 pt-7 md:px-10 md:pt-9">
         <div className="relative overflow-hidden rounded-none">
           <header className="hd-creative-heading"><span>HOLADAY VIDEO</span><h1>把想法，拍成画面。</h1><p>从一句描述、一张参考图开始。</p></header>
-          {onVideoTabChange && <div className="hd-creative-tabs" role="tablist" aria-label="视频创作模式" style={{ '--active-tab': videoTab === 'normal' ? 0 : videoTab === 'pet' ? 1 : 2 } as React.CSSProperties}>
-            {([{id:'normal', label:'自由创作', scenario:'product_highlight'},{id:'pet',label:'动作复刻',scenario:'action_remake'},{id:'ip',label:'人物口播',scenario:'ip_presenter'}] as const).map(tab => <button key={tab.id} type="button" role="tab" aria-selected={videoTab === tab.id} disabled={submitting} onClick={() => handleScenarioChange(tab.scenario)}>{tab.label}</button>)}
+          <p className="hd-mode-help">质量不合格会自动退款，最多可重试 3 次</p>
+          {onVideoTabChange && <div className="hd-creative-tabs hd-video-types" role="tablist" aria-label="视频创作模式" style={{ '--active-tab': videoTab === 'normal' ? 0 : videoTab === 'pet' ? 1 : videoTab === 'pet_i2v' ? 2 : 3 } as React.CSSProperties}>
+            {([{id:'normal', label:'自由创作', scenario:'product_highlight'},{id:'pet',label:'动作复刻',scenario:'action_remake'},{id:'pet_i2v',label:'宠物动起来',scenario:'pet_motion'},{id:'ip',label:'人物口播',scenario:'ip_presenter'}] as const).map(tab => <button key={tab.id} type="button" role="tab" aria-selected={videoTab === tab.id} disabled={submitting} onClick={() => handleScenarioChange(tab.scenario)}>{tab.label}</button>)}
           </div>}
           {videoTab === 'normal' && <CreativeInspiration kind="video" disabled={submitting} onPick={idea => { setPrompt(idea.prompt); setAspectRatio(idea.image === 'vlog' ? '9:16' : '16:9'); }} />}
           {videoTab === 'normal' && modelControl}
@@ -980,13 +985,14 @@ function CreativeStudioPage({
           <div className="hd-media-mode" hidden={videoTab === 'normal'}>
               <div className="hd-special-video relative z-10 mt-5 rounded-[26px] border border-[var(--creative-line,#EFEFEF)] bg-[var(--creative-surface,#fff)] p-5 shadow-[0_16px_42px_rgba(17,24,39,0.05)]">
                 <div className="hd-media-mode" hidden={videoTab !== 'pet'}><PetVideoForm onTaskCreated={handleCreated} model={model} modelControl={modelControl} projectAction={project.renderPicker(submitting)} /></div>
+                <div className="hd-media-mode" hidden={videoTab !== 'pet_i2v'}><PetMotionForm onTaskCreated={handleCreated} /></div>
                 <div className="hd-media-mode" hidden={videoTab !== 'ip'}><IpOnboardingWizard onTaskCreated={handleCreated} modelControl={modelControl} projectAction={project.renderPicker(submitting)} /></div>
                 {currentTaskPanel && videoTab !== 'normal' ? <div className="mt-6">{currentTaskPanel}</div> : null}
               </div>
               {videoTab !== 'normal' && <VideoHistory
                 accent={accent}
                 softBg={softBg}
-                videoType={videoTab === 'pet' ? 'pet' : 'ip_person'}
+                videoType={videoTab === 'pet' || videoTab === 'pet_i2v' ? 'pet' : 'ip_person'}
                 refreshKey={historyRefreshKey}
               />}
           </div>
@@ -2166,6 +2172,7 @@ function CurrentVideoTaskPanel({
   const [videoEditingEnabled, setVideoEditingEnabled] = React.useState(false);
   const [editingFileId, setEditingFileId] = React.useState<string | null>(null);
   const [actionGuard] = React.useState(createMediaActionGuard);
+  const failureContext = useTaskFailureContext(taskId, task?.status ?? 'unknown');
   const awaitingKind = resolveVideoAwaitingKind(task?.awaitingKind, awaiting?.awaitingKind);
   const latestStep = steps[steps.length - 1];
   const liveText = currentMediaTaskText({
@@ -2310,7 +2317,7 @@ function CurrentVideoTaskPanel({
 
           {task.status === 'awaiting_user' && awaitingKind === 'video_quote' && (
             <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-[#FFC910]/55 bg-[var(--creative-surface,#fff)] px-3 py-3 text-[12px]">
-              <span className="mr-auto text-muted-foreground">确认后才会开始制作并消耗额度。</span>
+              <span className="mr-auto text-muted-foreground">确认后才会开始制作并消耗额度。质量不合格会自动退款，最多可重试 3 次。</span>
               <Button
                 type="button"
                 size="sm"
@@ -2360,17 +2367,13 @@ function CurrentVideoTaskPanel({
 
           {/* A2 — 失败态：透传后端白名单友好 reason（在 task.resultText 里）+ 重试入口。 */}
           {task.status === 'failed' && (
-            <div className="rounded-[8px] border border-[#FF0061]/30 bg-[#FF0061]/5 px-3 py-3 text-[12px]">
-              <div className="text-[13px] font-medium text-[var(--creative-muted,#FF0061)]">生成失败</div>
-              <p className="mt-1 whitespace-pre-wrap leading-relaxed text-[var(--creative-ink,#595757)]">
-                {task.resultText?.trim() || '生成失败，请重试。'}
-              </p>
-              <div className="mt-2.5">
-                <Button type="button" variant="outline" size="sm" onClick={() => retryFailed()}>
-                  重新制作
-                </Button>
-              </div>
-            </div>
+            <FailureHeaderCard
+              status={task.status}
+              errorText={task.resultText?.trim() || '生成失败，请重试。'}
+              executionMode="video_creation"
+              refund={refundStatusCopy(failureContext.context?.refund.state)}
+              onRetry={retryFailed}
+            />
           )}
 
           {task.attachments && task.attachments.length > 0 && (

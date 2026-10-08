@@ -10,6 +10,7 @@ import { tasks } from '../db/schema/tasks.js';
 const PLATFORM_ERROR_CODES: ReadonlySet<string> = new Set([
   'provider_error',
   'PROVIDER_ERROR',
+  'MEDIA_VIDEO_QUALITY_REJECTED',
   'timeout',
   'TIMEOUT',
   'EXECUTION_TIMEOUT',
@@ -42,6 +43,7 @@ export function platformFailureReason(task: {
 
 export interface QuotaRefunder {
   refund(userId: number, plan: PlanId, isOpus: boolean): Promise<void>;
+  refundInTransaction?(db: DB, userId: number, plan: PlanId, isOpus: boolean): Promise<void>;
 }
 
 /** Best-effort charge record for a task that just consumed quota. Idempotent per task. */
@@ -66,8 +68,8 @@ export const SWEEP_WINDOW_MS = 7 * 24 * 60 * 60_000;
 /**
  * Refunds each charged task that failed for a platform reason exactly once.
  * Covers every failure writer (core settlement, legacy lanes, the zombie
- * reaper and the restart sweep) from one place. User cancellations
- * (status 'cancelled') and content/quality failures are never refunded.
+ * reaper and the restart sweep) from one place. User cancellations and policy violations are not refunded. Generated video
+ * rejected by our quality gate is refundable when nothing was delivered.
  */
 export async function sweepPlatformFailureRefunds(
   db: DB,
@@ -78,6 +80,7 @@ export async function sweepPlatformFailureRefunds(
   const rows = await db
     .select({
       id: quotaRefunds.id,
+      taskExternalId: quotaRefunds.taskExternalId,
       userId: quotaRefunds.userId,
       plan: quotaRefunds.plan,
       isOpus: quotaRefunds.isOpus,
@@ -99,13 +102,7 @@ export async function sweepPlatformFailureRefunds(
   for (const row of rows) {
     const reason = platformFailureReason(row);
     if (!reason) continue;
-    const claim = await db
-      .update(quotaRefunds)
-      .set({ refundedAt: new Date(now()), refundReason: reason })
-      .where(and(eq(quotaRefunds.id, row.id), isNull(quotaRefunds.refundedAt)));
-    if (readAffectedRows(claim) !== 1) continue;
-    await quota.refund(row.userId, row.plan as PlanId, row.isOpus);
-    refunded += 1;
+    if (await refundTaskOnce(db, quota, row.taskExternalId, reason, now)) refunded += 1;
   }
   return refunded;
 }
@@ -121,22 +118,27 @@ export async function refundTaskOnce(
   reason: string,
   now: () => number = Date.now,
 ): Promise<boolean> {
-  const [row] = await db
-    .select({
-      id: quotaRefunds.id,
-      userId: quotaRefunds.userId,
-      plan: quotaRefunds.plan,
-      isOpus: quotaRefunds.isOpus,
-    })
-    .from(quotaRefunds)
-    .where(and(eq(quotaRefunds.taskExternalId, taskExternalId), isNull(quotaRefunds.refundedAt)))
-    .limit(1);
-  if (!row) return false;
-  const claim = await db
-    .update(quotaRefunds)
-    .set({ refundedAt: new Date(now()), refundReason: reason.slice(0, 64) })
-    .where(and(eq(quotaRefunds.id, row.id), isNull(quotaRefunds.refundedAt)));
-  if (readAffectedRows(claim) !== 1) return false;
-  await quota.refund(row.userId, row.plan as PlanId, row.isOpus);
-  return true;
+  return db.transaction(async (transaction) => {
+    const tx = transaction as unknown as DB;
+    const [row] = await tx
+      .select({
+        id: quotaRefunds.id,
+        userId: quotaRefunds.userId,
+        plan: quotaRefunds.plan,
+        isOpus: quotaRefunds.isOpus,
+      })
+      .from(quotaRefunds)
+      .where(and(eq(quotaRefunds.taskExternalId, taskExternalId), isNull(quotaRefunds.refundedAt)))
+      .limit(1);
+    if (!row) return false;
+    const claim = await tx
+      .update(quotaRefunds)
+      .set({ refundedAt: new Date(now()), refundReason: reason.slice(0, 64) })
+      .where(and(eq(quotaRefunds.id, row.id), isNull(quotaRefunds.refundedAt)));
+    if (readAffectedRows(claim) !== 1) return false;
+    if (quota.refundInTransaction)
+      await quota.refundInTransaction(tx, row.userId, row.plan as PlanId, row.isOpus);
+    else await quota.refund(row.userId, row.plan as PlanId, row.isOpus);
+    return true;
+  });
 }

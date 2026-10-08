@@ -1,3 +1,4 @@
+import { cleanupRejectedVideoFrames } from './agent/video/video-quality-audit.js';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { setMediaFailureRefundHook } from './agent/video/media-failure-refund.js';
 import { refundTaskOnce, sweepPlatformFailureRefunds } from './quota/platform-failure-refunds.js';
@@ -1112,6 +1113,15 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
     // server is what holds the process up.
     zombieReaperTimer?.unref?.();
     resources?.add(() => clearInterval(zombieReaperTimer));
+
+    registerPeriodic('video-quality-audit', 60 * 60_000, async () => {
+      try {
+        const count = await cleanupRejectedVideoFrames({ retentionDays: env.VIDEO_REJECT_FRAME_RETENTION_DAYS });
+        if (count) logger.info({ count }, 'video: expired rejected frames removed');
+      } catch {
+        logger.warn('video: rejected frame cleanup failed');
+      }
+    });
 
     // Platform-failure refunds: each charged task that failed on our side
     // (provider error, timeout, restart, missing config) gets its quota back

@@ -48,7 +48,7 @@ import {
   classifyRole,
 } from './supercar/prompt-layers.js';
 
-type AttachmentBlock =
+export type AttachmentBlock =
   | { type: 'text'; text: string }
   | {
       type: 'image';
@@ -136,7 +136,7 @@ function requiresFreshResearch(intent: string): boolean {
   return FRESH_RESEARCH_RE.test(intent);
 }
 
-function attachmentContent(
+export function attachmentContent(
   attachments: ReadonlyArray<AttachmentBlock> | undefined,
   intent: string,
 ): NeutralResponseInputContent[] {

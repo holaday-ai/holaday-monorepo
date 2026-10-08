@@ -634,6 +634,27 @@ interface RouteDecision {
   match?: string;
 }
 
+const WEB_TLDS = new Set(
+  'com org net edu gov io ai co cn uk de fr jp au us ca app dev tech site info biz me xyz online shop store cloud tv cc'.split(
+    ' ',
+  ),
+);
+
+function attachmentNeedsLiveSource(intent: string): boolean {
+  if (URL_REGEX.test(intent)) return true;
+  for (const match of intent.matchAll(/\b[a-z0-9](?:[a-z0-9-]*\.)+[a-z]{2,24}\b/gi)) {
+    const domain = match[0].toLowerCase();
+    // Technology names/file extensions are not a request to visit a host.
+    if (/^(?:asp|ado|vb)\.net$/.test(domain)) continue;
+    if (WEB_TLDS.has(domain.split('.').at(-1) ?? '')) return true;
+  }
+  // "now write" / "latest quarterly report" describe the writing request,
+  // whereas today's news/stock price/weather explicitly requires external facts.
+  return /(?:今天|最新|当前|现在|实时|近期|本周|今年)(?:的)?[^，。；！？\n]{0,6}(?:股价|行情|天气|新闻|汇率|市场|航班|票价|价格)|\b(?:today(?:'s)?|latest|current|real[ -]?time|recent)\b.{0,16}\b(?:news|stock\s+prices?|prices?|weather|exchange\s+rates?|market)\b/i.test(
+    intent,
+  );
+}
+
 function decide(
   intent: string,
   ctx: { hasFileAttachment: boolean },
@@ -671,6 +692,28 @@ function decide(
   // empty URLs for "前5结果（名称/价格/链接）" style prompts.
   if (isEcommerceListingIntent(routingIntent)) {
     return { mode: 'browser', source: 'kw:ecommerce-listing' };
+  }
+
+  // A downloadable writing artifact is a local output, not a website
+  // download. Keep real website actions ahead of this attachment shortcut.
+  if (ctx.hasFileAttachment &&
+      /(?:写|撰写|生成|整理).{0,24}(?:短文|文章|文案|故事|报告|文档)|\b(?:write|draft|compose|generate)\b.{0,48}\b(?:story|article|essay|report|document)\b/i.test(routingIntent)) {
+    const actions = routingIntent
+      .replace(/(?:不调用|不使用|禁止调用|不要调用)[^，。；,;！？!?\n]*/g, ' ')
+      .replace(/(?:我(?:本次)?上传的|已上传的|上传的)\s*[\w.-]+\.(?:png|jpe?g|webp|pdf|docx?|txt)\b/gi, '现有配图')
+      .replace(/(?:我(?:本次)?|已|当前|刚刚)?上传的(?:图片|照片|图像|文件|附件|素材|文档|视频)/g, '附件')
+      .replace(/\b[\w.-]+\.(?:png|jpe?g|webp|pdf|docx?|txt)\b/gi, '附件')
+      .replace(/(?:提供|生成|导出|呈现).{0,12}(?:可下载|下载的).{0,24}(?:文件|文档|文章|报告)/g, '');
+    if (!matchInteractionPattern(actions)) {
+      // Uploaded filenames were removed above; an actual domain or freshness
+      // instruction must use live information even when writing a local file.
+      if (attachmentNeedsLiveSource(actions)) {
+        return { mode: 'scrape', source: 'kw:attachment-live-source' };
+      }
+      if (!matchSearchPattern(actions) && !matchSearchVerb(actions)) {
+        return { mode: 'generate', source: 'kw:attachment-writing' };
+      }
+    }
   }
 
   // A negated commit is part of the execution contract for travel tasks:
@@ -791,6 +834,8 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
   const STRONG_SIGNAL_SOURCES = new Set([
     'kw:template_fill',
     'kw:template_fill_file',
+    'kw:attachment-writing',
+    'kw:attachment-live-source',
     'kw:image',
     'kw:interaction',
     'kw:url',

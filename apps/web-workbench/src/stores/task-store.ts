@@ -1,14 +1,13 @@
-import { getSelectedBrainId } from '@/lib/brain-preference';
-import type { BrowserViewportProfile, ServerMessage } from '@holaday/shared-types';
-import { create } from 'zustand';
-import { batchConfirmQuestion, singleConfirmQuestion } from '@/lib/batch-confirm-copy';
+import { parseImageTaskMeta } from '@/components/image/image-task-meta';
 import { normaliseAttachmentDownloadUrl } from '@/lib/attachment-download-url';
+import { batchConfirmQuestion, singleConfirmQuestion } from '@/lib/batch-confirm-copy';
+import { getSelectedBrainId } from '@/lib/brain-preference';
 import { pickDefaultBrowserViewportProfile } from '@/lib/browser-viewport-profile';
 import { humaniseTaskError } from '@/lib/error-copy';
-import { pageErrorMessage } from '@/lib/page-error-copy';
 import { hdDebug } from '@/lib/hd-debug';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
-import { parseImageTaskMeta } from '@/components/image/image-task-meta';
+import type { ImageCreationOptions } from '@/types/image';
 import type {
   UiAwaitingUser,
   UiCaptchaWait,
@@ -23,9 +22,10 @@ import type {
   UiWebSearchEvent,
 } from '@/types/task';
 import { isTerminalStatus } from '@/types/task';
-import type { ImageCreationOptions } from '@/types/image';
 import type { VideoCreationOptions } from '@/types/video';
-import { type ExecutionIdentity, readExecutionIdentity, TaskExecutionOrder } from './task-execution-order';
+import type { BrowserViewportProfile, ServerMessage } from '@holaday/shared-types';
+import { create } from 'zustand';
+import { type ExecutionIdentity, TaskExecutionOrder, readExecutionIdentity } from './task-execution-order';
 
 /**
  * The surface where a task began. This is routing context, not user-authored
@@ -301,7 +301,7 @@ export interface TaskStore {
      */
     fileIds?: string[],
   ): Promise<{ ok: boolean } | { error: string }>;
-  abortTask(taskId: string): Promise<{ ok: boolean } | { error: string }>;
+  abortTask(taskId: string): Promise<{ ok: boolean; state?: string } | { error: string }>;
   applyServerMessage(msg: ServerMessage): void;
   reset(): void;
 }
@@ -1479,7 +1479,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     const generation = captureSessionGeneration();
     try {
       const res = await trpc.tasks.abort.mutate({ taskId });
-      if (!isCurrentSession(generation)) return { ok: res.ok };
+      if (!isCurrentSession(generation)) return { ok: res.ok, state: res.state };
       // Optimistic status flip so the UI doesn't keep showing the
       // task as executing until the terminal frame arrives. The
       // server's own terminal broadcast (status='cancelled') will
@@ -1513,7 +1513,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           };
         });
       }
-      return { ok: res.ok };
+      return { ok: res.ok, state: res.state };
     } catch (err) {
       const msg = taskStoreError(err);
       if (!isCurrentSession(generation)) return { error: msg };
@@ -1589,6 +1589,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       .toString(36)
       .slice(2, 8)}`;
     const createdAt = new Date();
+    const videoTaskMeta: Partial<UiTask> = videoOptions?.tab ? { videoType: videoOptions.tab, ...(videoOptions.tab === 'pet' && videoOptions.petModel && !videoOptions.referenceVideoFileId ? { videoCreationMode: 'pet_i2v' as const } : {}) } : {};
     const pendingTask: UiTask = {
       taskId: localTaskId,
       intent,
@@ -1597,6 +1598,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       tickCount: 0,
       createdAt,
       executionMode: inferExecutionModeFromIntent(intent),
+      ...videoTaskMeta,
       ...(replyToTaskId ? { replyToTaskId } : {}),
     };
     set((prev) => ({
@@ -1661,6 +1663,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         tickCount: 0,
         createdAt,
         executionMode: serverExecutionMode ?? inferExecutionModeFromIntent(intent),
+        ...videoTaskMeta,
         ...(replyToTaskId ? { replyToTaskId } : {}),
       };
       // composerMode flips back to 'task' here. Without this, a user
@@ -2772,6 +2775,9 @@ function extractExecutionMode(
 ): UiTask['executionMode'] | undefined {
   if (!result || typeof result !== 'object') return undefined;
   const r = result as Record<string, unknown>;
+  // Core requirements only belong to the non-browser generation state machine.
+  // Keep the actual lane after a refresh even when settlement has no legacy metadata.
+  if (isTaskListRecord(r.coreRequirements) && r.coreRequirements.schemaVersion === 1) return 'generate';
   const direct = r.executionMode;
   if (direct === 'browser' || direct === 'generate' || direct === 'scrape' || direct === 'image') {
     return direct;
@@ -2933,7 +2939,7 @@ export function toUiTask(row: ListRow): UiTask {
   // Generation (success) tasks carry metadata.videoType; the quote task
   // (awaiting video_quote) carries metadata.videoOptions.tab instead — fall
   // back to it so the quote card can hide 图片版 for ip_person (B2).
-  const videoMeta = metadata as { videoType?: unknown; videoOptions?: { tab?: unknown } };
+  const videoMeta = metadata as { videoType?: unknown; petModel?: unknown; videoOptions?: { tab?: unknown; petModel?: unknown; referenceVideoFileId?: unknown } };
   const videoTypeRaw = videoMeta.videoType ?? videoMeta.videoOptions?.tab;
   const videoType =
     videoTypeRaw === 'normal' || videoTypeRaw === 'pet' || videoTypeRaw === 'ip_person'
@@ -3002,6 +3008,7 @@ export function toUiTask(row: ListRow): UiTask {
     ...(executionMode ? { executionMode } : {}),
     ...((row as { browserSource?: string }).browserSource === 'local-chrome' || (isTaskListRecord(rowResult) && isTaskListRecord(rowResult.metadata) && rowResult.metadata.browserSource === 'local-chrome') ? { browserSource: 'local-chrome' as const } : {}),
     ...(videoType ? { videoType } : {}),
+    ...(videoType === 'pet' && !videoMeta.videoOptions?.referenceVideoFileId && (videoMeta.petModel || videoMeta.videoOptions?.petModel) ? { videoCreationMode: 'pet_i2v' as const } : {}),
     ...(attachments ? { attachments } : {}),
     ...(expertWorkflowId ? { expertWorkflowId } : {}),
     ...(expertMode ? { expertMode } : {}),

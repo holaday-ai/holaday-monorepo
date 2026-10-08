@@ -327,6 +327,7 @@ export async function runCloneVideoCreation(
         audioUrl,
         extra: cloneLipSyncExtra(falLipsyncModel),
         maxWaitMs: lipSyncMaxWaitMs(referenceDurationMs),
+        billableDurationSeconds: referenceDurationMs / 1000,
       });
       finalVideoUrl = lipSync.videoUrl;
       lipSyncRequestId = lipSync.requestId;

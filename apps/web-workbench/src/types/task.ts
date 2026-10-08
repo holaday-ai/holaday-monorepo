@@ -136,6 +136,7 @@ export interface UiTask {
    * isolation, the type chip, and the IP-only "生成中较慢" hint.
    */
   videoType?: 'normal' | 'pet' | 'ip_person';
+  videoCreationMode?: 'pet_i2v';
   /** Validated image generation settings persisted with image tasks. */
   imageOptions?: ImageCreationOptions;
   /** Aggregate-only identity verification counts. Internal model reasons are never exposed. */

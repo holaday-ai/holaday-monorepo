@@ -32,15 +32,15 @@
 
 import {
   ADDON_PACK_CATALOGUE,
-  PLAN_CATALOGUE,
   type AddonPackId,
+  PLAN_CATALOGUE,
   type PlanId,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
-import { taskQuotas, type TaskQuota } from '../db/schema/task-quotas.js';
+import { type TaskQuota, taskQuotas } from '../db/schema/task-quotas.js';
 import { tasks } from '../db/schema/tasks.js';
 import { TASK_ACTIVE_STATUSES } from '../task-status.js';
 
@@ -260,7 +260,11 @@ export class QuotaService {
    * burned the slot). Best-effort: a failed rollback never throws,
    * since it's already a degraded path.
    */
-  async refund(userId: number, plan: PlanId, isOpus: boolean): Promise<void> {
+  async refundInTransaction(db: DB, userId: number, plan: PlanId, isOpus: boolean): Promise<void> {
+    await new QuotaService(db).refund(userId, plan, isOpus, true);
+  }
+
+  async refund(userId: number, plan: PlanId, isOpus: boolean, strict = false): Promise<void> {
     try {
       const row = await this.getOrCreateActiveQuota(userId, plan);
       if (isOpus) {
@@ -292,8 +296,9 @@ export class QuotaService {
             .where(eq(taskQuotas.id, row.id));
         }
       }
-    } catch {
-      // refund is best-effort.
+    } catch (error) {
+      if (strict) throw error;
+      // Other rollback callers retain their existing best-effort behavior.
     }
   }
 

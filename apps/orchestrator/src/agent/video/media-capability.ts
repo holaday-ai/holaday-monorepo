@@ -16,6 +16,7 @@ export type MediaCapabilityRequest =
       kind: 'video';
       tab: 'normal' | 'pet' | 'ip_person';
       model: VideoSource;
+      petI2v?: boolean;
     }
   | { kind: 'video_confirmation'; choice: 'video' | 'image' };
 
@@ -39,6 +40,8 @@ export function mediaCapabilityIssue(
   }
 
   if (request.tab === 'pet') {
+    if (request.petI2v)
+      return readiness.hasDashscope ? null : '宠物动画服务尚未就绪，未创建报价或扣除额度。';
     return readiness.hasDashscope && readiness.hasFal
       ? null
       : '复刻视频服务尚未就绪，未创建报价或扣除额度。';

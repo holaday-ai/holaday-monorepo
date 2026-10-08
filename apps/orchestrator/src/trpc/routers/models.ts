@@ -1,8 +1,3 @@
-/**
- * Model catalog ("模型管理"): which brains users can pick, and the admin
- * one-click switches. Visibility and the default live in the database
- * (`model_catalog`, migration 0061) — no env change or restart is needed.
- */
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
@@ -19,6 +14,12 @@ import {
   listBrainsForViewer,
   selectDefaultBrain,
 } from '../../llm/model-catalog.js';
+/**
+ * Model catalog ("模型管理"): which brains users can pick, and the admin
+ * one-click switches. Visibility and the default live in the database
+ * (`model_catalog`, migration 0061) — no env change or restart is needed.
+ */
+import { loadModelPrices } from '../../llm/model-pricing.js';
 import { adminProcedure, protectedProcedure, router } from '../trpc.js';
 
 const laneModelsInput = z
@@ -53,12 +54,13 @@ export const modelsRouter = router({
     };
   }),
 
-  adminList: adminProcedure.query(async () => {
+  adminList: adminProcedure.query(async ({ ctx }) => {
     modelCatalogService.invalidate();
     const entries = await modelCatalogService.list();
     const defaultId = selectDefaultBrain(entries).id;
     return {
       lanes: [...BRAIN_LANES],
+      pricing: await loadModelPrices(ctx.db),
       items: entries.map((entry) => adminView(entry, defaultId)),
     };
   }),

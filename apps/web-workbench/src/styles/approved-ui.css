@@ -4306,3 +4306,11 @@
 .hd-file-preview-info button:disabled {opacity:.45;cursor:not-allowed}
 @media(max-width:600px){.hd-approved-file-preview>div{width:calc(100vw - 24px);height:calc(100dvh - 24px)}.hd-approved-file-preview header{padding:14px}.hd-file-preview-body{flex-direction:column;overflow:auto}.hd-file-preview-canvas{min-height:200px}.hd-file-preview-info{width:auto;padding:18px 20px}.hd-file-preview-info h2{margin-bottom:8px}.hd-file-preview-info dl{grid-template-columns:55px 1fr;align-items:center;gap:8px}.hd-file-preview-info dt{margin:0}.hd-file-preview-info button{margin-top:18px}}
 @media(prefers-reduced-motion:reduce){.hd-approved-file-preview>div{animation:none}}
+
+/* Four video types remain reachable on narrow screens. */
+.hd-video-types { overflow-x: auto; }
+@media (max-width: 600px) {
+  .hd-video-types { --video-tab-width: calc((100% - 24px) / 4); gap: 8px; }
+  .hd-video-types button { flex: 0 0 var(--video-tab-width); width: var(--video-tab-width); padding: 0 4px; font-size: 12px; }
+  .hd-video-types::after { width: var(--video-tab-width); left: calc(var(--active-tab) * (var(--video-tab-width) + 8px)); }
+}

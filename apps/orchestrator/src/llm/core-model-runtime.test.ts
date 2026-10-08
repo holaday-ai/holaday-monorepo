@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { withMediaCallContext } from '../agent/media-call-recorder.js';
 import * as observationSink from './core-model-observation.js';
 import { resolveCoreModelRuntime } from './core-model-runtime.js';
 import type { MessagesAdapter } from './messages-adapter.js';
@@ -409,4 +410,50 @@ describe('resolveCoreModelRuntime', () => {
     );
     expect(JSON.stringify(observe.mock.calls)).not.toContain('private');
   });
+});
+
+it('records actual non-browser adapter usage in the task scope without duplicating the browser recorder', async () => {
+  const record = vi.fn().mockResolvedValue(undefined);
+  await withMediaCallContext(
+    { recorder: { record }, userExternalId: 'usr_allowed', taskExternalId: 'tsk_cost' },
+    async () => {
+      const runtime = resolveCoreModelRuntime(
+        baseInput({
+          createResponses: () => {
+            const adapter = buildResponsesAdapter();
+            adapter.stream = async () => ({
+              id: 'resp_cost',
+              metadata: adapter.metadata,
+              text: 'ok',
+              sources: [],
+              usage: { inputTokens: 20, outputTokens: 6, cachedInputTokens: 5 },
+              status: 'completed',
+            });
+            return adapter;
+          },
+        }),
+      );
+      if (runtime.kind !== 'ready') throw new Error('fixture unavailable');
+      await runtime.responses('standard').stream({ input: 'private fixture' });
+      const browser = resolveCoreModelRuntime(
+        baseInput({
+          lane: 'browser',
+          environment: { ...ENVIRONMENT, QWEN_CORE_ENABLED_LANES: 'browser' },
+        }),
+      );
+      if (browser.kind !== 'ready') throw new Error('browser fixture unavailable');
+      await browser
+        .messages('vision')
+        .create({ messages: [{ role: 'user', content: 'fixture' }], maxTokens: 10 });
+    },
+  );
+  expect(record).toHaveBeenCalledTimes(1);
+  expect(record.mock.calls[0]?.[0]).toMatchObject({
+    taskExternalId: 'tsk_cost',
+    inputTokens: 15,
+    outputTokens: 6,
+    cacheReadInputTokens: 5,
+    cacheCreationInputTokens: 0,
+  });
+  expect(JSON.stringify(record.mock.calls)).not.toContain('private fixture');
 });

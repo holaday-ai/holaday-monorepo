@@ -1,3 +1,4 @@
+import { dashscopeCostRegion, recordMediaUsage } from '../media-call-recorder.js';
 /**
  * DashScope (Alibaba Cloud Model Studio) image client — Qwen Image and
  * Wan 2.7 Image over the synchronous multimodal-generation endpoint.
@@ -161,8 +162,9 @@ function mimeFrom(contentType: string | undefined, url: string): string {
   return 'image/png';
 }
 
-export async function generateDashScopeImages(
+async function generateDashScopeImagesImpl(
   p: DashScopeImageParams,
+  recorded: () => void,
 ): Promise<ImageGenerateResult> {
   if (!p.apiKey || !p.apiKey.trim()) {
     throw new ImageProviderError(
@@ -173,6 +175,7 @@ export async function generateDashScopeImages(
       'dashscope',
     );
   }
+  const costStartedAt = Date.now();
   const url = `${(p.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '')}${GENERATION_PATH}`;
   const fetchImpl = p.fetchImpl ?? fetch;
   const maxRetries = p.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -288,6 +291,20 @@ export async function generateDashScopeImages(
       'dashscope',
     );
   }
+  recorded();
+  await recordMediaUsage({
+    provider: 'alibaba-model-studio',
+    model: p.model,
+    purpose: 'media.image',
+    region: dashscopeCostRegion(p.baseUrl),
+    latencyMs: Date.now() - costStartedAt,
+    status: 'ok',
+    mediaUsage: {
+      unit: 'image',
+      quantity: (json as { usage?: { image_count?: number } }).usage?.image_count ?? urls.length,
+      basis: 'provider',
+    },
+  });
   const download = p.download ?? downloadToBuffer;
   const images = [];
   for (const imageUrl of urls) {
@@ -311,4 +328,27 @@ export async function generateDashScopeImages(
     }
   }
   return { images, model: p.model, ...(text ? { text } : {}) };
+}
+
+export async function generateDashScopeImages(
+  p: DashScopeImageParams,
+): Promise<ImageGenerateResult> {
+  let billed = false;
+  const start = Date.now();
+  try {
+    return await generateDashScopeImagesImpl(p, () => {
+      billed = true;
+    });
+  } catch (error) {
+    if (!billed && p.apiKey.trim())
+      await recordMediaUsage({
+        provider: 'alibaba-model-studio',
+        model: p.model,
+        purpose: 'media.image',
+        region: dashscopeCostRegion(p.baseUrl),
+        latencyMs: Date.now() - start,
+        status: 'error',
+      });
+    throw error;
+  }
 }

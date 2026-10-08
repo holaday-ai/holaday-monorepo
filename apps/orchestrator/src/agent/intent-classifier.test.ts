@@ -11,10 +11,10 @@
  * is caught at unit time.
  */
 
-import { describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
-import { classifyExecutionMode } from './intent-classifier.js';
+import { describe, expect, it, vi } from 'vitest';
 import { classifyLightweightTask } from '../execution/lightweight-task.js';
+import { classifyExecutionMode } from './intent-classifier.js';
 
 function fakeLogger(): Logger {
   const noop = vi.fn();
@@ -1255,4 +1255,42 @@ describe('classifyExecutionMode — video_creation (Phase 1 #4)', () => {
       expect(out, intent).not.toBe('video_creation');
     }
   });
+});
+
+describe('attachment writing deliverables', () => {
+  it.each([
+    '用这张图写短文，并提供可下载的文章文件',
+    '写一篇约350字的短文，配图只能使用我上传的cat.png，不调用图片生成、浏览器或搜索，提供可下载的文章文件',
+    'Use the attached image to write a story and provide a downloadable document',
+  ])('uses the generate lane for attached writing: %s', async (intent) => {
+    expect(await classifyExecutionMode({intent, hasFileAttachment: true, logger: fakeLogger()})).toBe('generate');
+  });
+  it.each([
+    '用这张图写短文，并打开 https://example.com 上传文件',
+    'Use the attached image to write a story and upload it to github.com',
+  ])('preserves explicit website actions: %s', async (intent) => {
+    expect(await classifyExecutionMode({intent, hasFileAttachment: true, logger: fakeLogger()})).toBe('browser');
+  });
+});
+
+describe('attachment writing with live sources', () => {
+  it.each([
+    '根据附件和 jd.com 的价格写报告',
+    '根据附件写今天的新闻报告',
+    '根据附件写最新市场报告',
+    '根据附件写现在的行情报告',
+    '根据附件整理实时价格报告',
+    'Use the attached image to write a report about latest prices',
+  ])('keeps live-source writing online: %s', async (intent) => {
+    expect(await classifyExecutionMode({intent, hasFileAttachment:true, logger:fakeLogger()})).toBe('scrape');
+  });
+});
+
+describe('live-source attachment writing precedence', () => {
+ it('fresh data overrides a local-writing skill',async()=>{
+  expect(await classifyExecutionMode({intent:'根据附件写最新新闻报告并列明数据来源',hasFileAttachment:true,skillId:'wechat-article-ops',logger:fakeLogger()})).toBe('scrape');
+ });
+ it('price rows and links keep the browser shopping lane',async()=>{
+  expect(await classifyExecutionMode({intent:'根据附件和 jd.com 写前5个商品价格和链接报告',hasFileAttachment:true,logger:fakeLogger()})).toBe('browser');
+ });
 });

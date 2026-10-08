@@ -283,6 +283,7 @@ function fakeDbForAtomicVideoConfirm(affectedRows = 1) {
     from: () => ({
       where: () => ({
         limit: async () => [{ id: 11 }],
+        for: async () => [{ id: 7 }],
       }),
     }),
   });
@@ -1703,7 +1704,7 @@ describe('TaskRepository task terminal state persistence', () => {
       executionMetadata: { lane: 'video_creation' },
     });
 
-    expect(result).toEqual({ kind: 'created', taskInternalId: 22 });
+    expect(result).toEqual({ kind: 'created', taskInternalId: 22, priorQualityRejects: 0 });
     expect(captured.transactionRan).toBe(true);
     expect(collectSqlText(captured.statements[0])).toContain('video_creation_consumed');
     expect(captured.inserts).toHaveLength(2);

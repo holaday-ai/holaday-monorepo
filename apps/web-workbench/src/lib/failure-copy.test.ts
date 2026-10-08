@@ -210,3 +210,27 @@ describe('classifyFriendlyFailure', () => {
     expect(friendlyFailureDetail('目标网站要求登录')).toBe('目标网站要求登录');
   });
 });
+
+describe('non-browser failure recovery', () => {
+  it('does not prescribe browser navigation for attached writing failure', () => {
+    const copy = classifyFriendlyFailure('浏览器页面为空白 about:blank，未检测到 cat.png 附件', { executionMode: 'generate', errorCode: 'INPUT_ATTACHMENT_UNAVAILABLE' });
+    expect([copy.title,copy.subtitle,copy.nextStep].join(' ')).not.toMatch(/浏览器|网址|网站/);
+    expect(copy.nextStep).toMatch(/附件|上传/);
+  });
+  it('reports video quality rejection without turning unauthorized branding into a login failure', () => {
+    const copy = classifyFriendlyFailure('unauthorized_text_or_brand', { executionMode: 'video_creation', errorCode: 'VIDEO_QUALITY_FAILED' });
+    expect(copy.title).not.toMatch(/登录|浏览器/);
+    expect(copy.nextStep).toMatch(/重新生成/);
+  });
+});
+
+it('shows a safe, specific reason for unwanted text and branding in a rejected video', () => {
+  const copy = classifyFriendlyFailure('画面出现了未要求的文字或品牌，视频未交付。请调整描述后重新生成。', { executionMode: 'video_creation' });
+  expect(copy.subtitle).toContain('未要求的文字或品牌');
+  expect(copy.nextStep).toContain('重新生成');
+  expect(JSON.stringify(copy)).not.toMatch(/浏览器|网址/);
+});
+
+it.each([['scrape','网页采集'],['image','图片生成'],['video_creation','视频生成'],['generate','生成']])('names the actual %s lane for generic failures', (executionMode, label) => {
+ const copy = classifyFriendlyFailure('request failed', { executionMode }); expect(copy.title).toContain(label); expect(JSON.stringify(copy)).not.toMatch(/浏览器|换.*网址/);
+});
