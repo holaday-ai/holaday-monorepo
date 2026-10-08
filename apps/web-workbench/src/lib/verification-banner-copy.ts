@@ -24,6 +24,7 @@ const CHECK_TYPE_LABELS: Record<string, string> = {
   result_count: '结果数量不足',
   price_sort: '价格排序不正确',
   ecommerce_rows: '商品行字段不完整',
+  list_item_sources: '列表条目缺少独立来源或关键字段',
   'generic.url_grounding': '回复中存在未验证的链接',
   'generic.empty_result': '回复内容近似为空',
   'generic.constraints': '未完全满足约束条件',
@@ -52,7 +53,7 @@ export function shouldShowVerificationBanner(task: {
 
 export function verificationCheckLabel(check: VerificationCheck): string {
   const detail = check.detail.trim();
-  if (check.type === 'ecommerce_rows' && detail) return detail;
+  if ((check.type === 'ecommerce_rows' || check.type === 'list_item_sources') && detail) return detail;
   if (
     (check.type === 'url_count' || check.type === 'source_count') &&
     /only\s+0\s+URL|链接数减少|0\s*→|缺少来源链接/i.test(detail)

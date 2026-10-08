@@ -379,6 +379,15 @@ export function buildRecoveryActions(input: RecoveryInput): RecoveryAction[] {
     });
   }
 
+  if (checkTypes.has('list_item_sources')) {
+    actions.push({
+      kind: 'prefill',
+      label: '逐条补齐来源',
+      detail: '要求每条结果附自己的详情页链接，并写明缺失的字段。',
+      prompt: withIntent(intent, '请逐条列出，每条附该条自己的详情页链接（不要用首页或搜索页），拿不到的写明未获取到：'),
+    });
+  }
+
   if (
     checkTypes.has('ecommerce_rows') ||
     checkTypes.has('result_count') ||
