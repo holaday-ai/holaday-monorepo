@@ -399,3 +399,73 @@ describe('a confirmation is bound to the real node and object (PR #248 review 2,
     await page.close();
   }, 60_000);
 });
+
+describe('the gate hits what a real click hits (PR #248 review 3, pointer-events)', () => {
+  const OVERLAY = (events: 'none' | 'auto', text = '提示') =>
+    `<div id="ov" style="position:absolute;left:20px;top:20px;width:220px;height:80px;z-index:2;pointer-events:${events}">${text}</div>`;
+  const BUTTON = (label: string) =>
+    `<button style="position:absolute;left:20px;top:20px;width:220px;height:80px" onclick="window.effects=(window.effects||0)+1">${label}</button>`;
+  const effects = (page: Page) =>
+    page.evaluate(() => Number((window as { effects?: number }).effects ?? 0));
+
+  it('reads the payment button under a pointer-events:none overlay (click_at)', async () => {
+    const page = await browser.newPage();
+    await page.setContent(`${BUTTON('确认支付')}${OVERLAY('none')}`);
+    const description = await describeUnifiedAction(
+      page,
+      { tool: 'click_at', x: 40, y: 40 },
+      () => null,
+    );
+    expect(description.descriptors[0]).toMatchObject({ label: '确认支付', tagName: 'button' });
+    const { gate, park } = gateFor(page);
+    const decision = await gate({ tool: 'click_at', x: 40, y: 40 }, 'before');
+    expect(park).toHaveBeenCalledTimes(1);
+    expect(decision).toMatchObject({ kind: 'stop' });
+    if (decision.kind === 'proceed') await page.mouse.click(40, 40);
+    expect(await effects(page)).toBe(0);
+    await page.close();
+  }, 60_000);
+
+  it('reads the payment button under the overlay for a ref click too', async () => {
+    const page = await browser.newPage();
+    await page.setContent(`${BUTTON('确认支付')}${OVERLAY('none')}`);
+    const ref = await refOf(page, /button "确认支付"/);
+    const { gate, park } = gateFor(page);
+    expect(await gate({ tool: 'click', ref }, 'before')).toMatchObject({ kind: 'stop' });
+    expect(park).toHaveBeenCalledWith(expect.stringContaining('确认支付'), 'browser_action');
+    await page.close();
+  }, 60_000);
+
+  it('does not ask for an ordinary button under a pointer-events:none overlay', async () => {
+    const page = await browser.newPage();
+    await page.setContent(`${BUTTON('下一页')}${OVERLAY('none', '确认支付')}`);
+    const { gate, park } = gateFor(page);
+    // The overlay text is not what the click acts on.
+    expect(await gate({ tool: 'click_at', x: 40, y: 40 }, 'before')).toEqual({ kind: 'proceed' });
+    expect(park).not.toHaveBeenCalled();
+    await page.close();
+  }, 60_000);
+
+  it('reads an overlay that does take pointer events (it is what gets clicked)', async () => {
+    const page = await browser.newPage();
+    await page.setContent(`${BUTTON('下一页')}${OVERLAY('auto', '删除项目')}`);
+    const description = await describeUnifiedAction(
+      page,
+      { tool: 'click_at', x: 40, y: 40 },
+      () => null,
+    );
+    expect(description.descriptors[0]).toMatchObject({ label: '删除项目' });
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click_at', x: 40, y: 40 }, 'before');
+    expect(park).toHaveBeenCalledTimes(1);
+    await page.close();
+  }, 60_000);
+
+  it('the no-CDP fallback uses the same click hit semantics', async () => {
+    const page = await browser.newPage();
+    await page.setContent(`${BUTTON('确认支付')}${OVERLAY('none')}`);
+    const hit = await page.evaluate(() => document.elementFromPoint(40, 40)?.textContent);
+    expect(hit).toBe('确认支付');
+    await page.close();
+  }, 60_000);
+});

@@ -286,7 +286,7 @@ const READ_ACTIONABLE_CALL = `function () { return (${READ_ACTIONABLE.toString()
 /**
  * The real target at viewport point (x, y) via Chromium hit-testing
  * (`DOM.getNodeForLocation`), which pierces open and closed shadow roots and
- * in-process frames. `undefined` when CDP is unavailable or the hit is an
+ * in-process frames and, like a click, skips pointer-events:none elements. `undefined` when CDP is unavailable or the hit is an
  * out-of-process frame (the caller falls back), null when nothing is there.
  */
 async function cdpTargetAt(
@@ -302,7 +302,10 @@ async function cdpTargetAt(
         x: Math.round(x),
         y: Math.round(y),
         includeUserAgentShadowDOM: false,
-        ignorePointerEventsNone: true,
+        // Hit-test like a real click: pointer-events:none overlays (tooltips,
+        // decorations) are transparent to the mouse, so they must be to the
+        // gate too, or it reads the overlay while the click lands beneath.
+        ignorePointerEventsNone: false,
       });
       const { object } = await session.send('DOM.resolveNode', {
         backendNodeId: hit.backendNodeId,
