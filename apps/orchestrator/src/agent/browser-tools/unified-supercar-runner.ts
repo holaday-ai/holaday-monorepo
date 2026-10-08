@@ -5,6 +5,7 @@ import type {
   SupercarOutcome,
 } from '../supercar/agent-loop.js';
 import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
+import { createUnifiedActionGate } from './unified-action-gate.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
@@ -154,6 +155,47 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     }
   };
 
+  /** Parks until the user replies (supercarReply); null on timeout or abort. */
+  const parkForReply = async (
+    question: string,
+    awaitingKind: SupercarAwaitingKind,
+  ): Promise<string | null> => {
+    await safe(() =>
+      opts.onAwaitingUser?.({
+        question,
+        at: new Date(),
+        currentUrl: page.url(),
+        awaitingKind,
+      }),
+    );
+    if (controller.signal.aborted) return null;
+    return new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => {
+        parked.delete(opts.taskId);
+        resolve(null);
+      }, HANDOFF_WAIT_MS);
+      parked.set(opts.taskId, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        abort: () => resolve(null),
+        intent: opts.intent,
+      });
+    });
+  };
+  // Runtime safety boundary (tasks.create passes classifyRuntimeAction): the
+  // same LIVE-VETO the legacy loop applies before each live write.
+  const gateAction = opts.onBeforeAction
+    ? createUnifiedActionGate({
+        page,
+        onBeforeAction: opts.onBeforeAction,
+        labelForRef: (ref) => labelForRef(lastSnapshot, ref),
+        park: parkForReply,
+        aborted: () => controller.signal.aborted,
+      })
+    : null;
+
   try {
     const outcome = await runUnifiedBrowserLoop({
       intent: opts.intent,
@@ -203,31 +245,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         }
         return result;
       },
-      requestHuman: async ({ reason, message }) => {
-        await safe(() =>
-          opts.onAwaitingUser?.({
-            question: message,
-            at: new Date(),
-            currentUrl: page.url(),
-            awaitingKind: awaitingKindFor(reason),
-          }),
-        );
-        const reply = await new Promise<string | null>((resolve) => {
-          const timer = setTimeout(() => {
-            parked.delete(opts.taskId);
-            resolve(null);
-          }, HANDOFF_WAIT_MS);
-          parked.set(opts.taskId, {
-            resolve: (value) => {
-              clearTimeout(timer);
-              resolve(value);
-            },
-            abort: () => resolve(null),
-            intent: opts.intent,
-          });
-        });
-        return reply !== null;
-      },
+      ...(gateAction ? { gateAction } : {}),
+      requestHuman: async ({ reason, message }) =>
+        (await parkForReply(message, awaitingKindFor(reason))) !== null,
     });
     switch (outcome.status) {
       case 'completed':
@@ -260,7 +280,12 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
               iterations: outcome.steps,
               toolsUsed: [...toolsUsed],
             }
-          : { status: 'cancelled', iterations: outcome.steps, toolsUsed: [...toolsUsed] };
+          : {
+              status: 'cancelled',
+              ...(outcome.reason ? { reason: outcome.reason } : {}),
+              iterations: outcome.steps,
+              toolsUsed: [...toolsUsed],
+            };
       default:
         return {
           status: 'failed',

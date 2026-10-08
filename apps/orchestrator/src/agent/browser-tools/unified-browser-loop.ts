@@ -101,13 +101,32 @@ export interface UnifiedBrowserLoopInput {
   /** Per model-turn timeout; the shared transport retries 429/5xx within it. */
   turnTimeoutMs?: number;
   onStep?: (step: { index: number; tool: string; ok: boolean }) => void;
+  /**
+   * Called before every browser action and again after a successful one
+   * (`after`: the landed page). Irreversible actions park here for the user's
+   * confirmation; absent → no gate.
+   */
+  gateAction?: (
+    action: UnifiedBrowserAction,
+    phase: 'before' | 'after',
+  ) => Promise<ActionGateDecision>;
 }
 
 export type UnifiedBrowserOutcome =
   | { status: 'completed'; summary: string; evidence: string; steps: number }
   | { status: 'failed'; reason: string; steps: number }
   | { status: 'awaiting_user'; reason: string; message: string; steps: number }
-  | { status: 'cancelled'; steps: number };
+  | { status: 'cancelled'; steps: number; reason?: string };
+
+/**
+ * Safety gate around a live browser action (legacy LIVE-VETO parity).
+ * `proceed` runs it, `skip` answers the call without running it (e.g. after a
+ * user takeover the pending action is stale), `stop` ends the task.
+ */
+export type ActionGateDecision =
+  | { kind: 'proceed' }
+  | { kind: 'skip'; message: string }
+  | { kind: 'stop'; outcome: UnifiedBrowserOutcome };
 
 const MAX_CONTEXT_IMAGES = 2;
 
@@ -150,8 +169,16 @@ export async function runUnifiedBrowserLoop(
     messages.push({ role: 'assistant', content: response.content });
     const results: NeutralInputContentBlock[] = [];
     const images: NeutralInputContentBlock[] = [];
+    /** Set when a gated action was skipped: later calls in this turn are stale. */
+    let staleTurn = false;
     for (const call of calls) {
       if (call.type !== 'tool_use') continue;
+      if (staleTurn) {
+        results.push(
+          toolResult(call.id, '未执行：页面状态已变化，请重新 snapshot 后再决定。', true),
+        );
+        continue;
+      }
       const normalized = normalizeToolInput(call.input);
       if (normalized === INVALID_ARGUMENTS) {
         results.push(
@@ -233,8 +260,24 @@ export async function runUnifiedBrowserLoop(
         );
         continue;
       }
+      const gate = await input.gateAction?.(action, 'before');
+      if (gate?.kind === 'stop') return { ...gate.outcome, steps: step + 1 };
+      if (gate?.kind === 'skip') {
+        results.push(toolResult(call.id, gate.message));
+        staleTurn = true;
+        continue;
+      }
       const outcome = await input.execute(action);
       input.onStep?.({ index: step, tool: action.tool, ok: outcome.ok });
+      if (outcome.ok && input.gateAction) {
+        const landed = await input.gateAction(action, 'after');
+        if (landed.kind === 'stop') return { ...landed.outcome, steps: step + 1 };
+        if (landed.kind === 'skip') {
+          results.push(toolResult(call.id, `${outcome.text}\n${landed.message}`));
+          staleTurn = true;
+          continue;
+        }
+      }
       if (outcome.ok && (action.tool === 'snapshot' || action.tool === 'extract'))
         lastPageText = outcome.text;
       results.push(toolResult(call.id, outcome.text, !outcome.ok));
