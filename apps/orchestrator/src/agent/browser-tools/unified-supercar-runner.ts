@@ -5,6 +5,7 @@ import type {
   SupercarOutcome,
 } from '../supercar/agent-loop.js';
 import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
+import { classifyRuntimeAction } from '../supercar/runtime-action-policy.js';
 import { createUnifiedActionGate } from './unified-action-gate.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
@@ -184,17 +185,19 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       });
     });
   };
-  // Runtime safety boundary (tasks.create passes classifyRuntimeAction): the
-  // same LIVE-VETO the legacy loop applies before each live write.
-  const gateAction = opts.onBeforeAction
-    ? createUnifiedActionGate({
-        page,
-        onBeforeAction: opts.onBeforeAction,
-        labelForRef: (ref) => labelForRef(lastSnapshot, ref),
-        park: parkForReply,
-        aborted: () => controller.signal.aborted,
-      })
-    : null;
+  // Runtime safety boundary: the same LIVE-VETO the legacy loop applies before
+  // each live write. tasks.create passes classifyRuntimeAction; a caller that
+  // passes nothing still gets it — the gate is never silently off.
+  const gateAction = createUnifiedActionGate({
+    page,
+    onBeforeAction: opts.onBeforeAction ?? classifyRuntimeAction,
+    labelForRef: (ref) => labelForRef(lastSnapshot, ref),
+    park: parkForReply,
+    aborted: () => controller.signal.aborted,
+    stillLive: async () =>
+      !controller.signal.aborted &&
+      !(await Promise.resolve(opts.isTaskCancelled?.()).catch(() => true)),
+  });
 
   try {
     const outcome = await runUnifiedBrowserLoop({
@@ -245,7 +248,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         }
         return result;
       },
-      ...(gateAction ? { gateAction } : {}),
+      gateAction,
       requestHuman: async ({ reason, message }) =>
         (await parkForReply(message, awaitingKindFor(reason))) !== null,
     });

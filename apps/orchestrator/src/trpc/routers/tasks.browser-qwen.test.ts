@@ -107,7 +107,7 @@ it.each([
       if (call.extensionClientId !== '48a8a099-0987-40e3-aa14-fb4545f9a003')
         throw new Error('wrong connection');
       const command = call.args?.session;
-      if (command?.op === 'act') effects.push('local-click');
+      if (command?.op === 'act') effects.push('local-act');
       const observation = {
         tabId: 42,
         origin: 'https://work.example',
@@ -184,8 +184,11 @@ it.each([
                                 '[{"name":"Alpha","score":2},{"name":"Beta, Inc","score":3}]',
                             }
                           : {
+                              // Clicks in the user's Chrome go to a human handoff
+                              // until targets are host-verified; typing still runs.
                               action: {
-                                kind: 'click',
+                                kind: 'type',
+                                payload: { text: '已修改' },
                                 selector: {
                                   description: 'Save',
                                   strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
@@ -456,7 +459,7 @@ it.each([
         terminal: terminal.mock.calls,
       }),
       // Qwen emits 0..1000 coordinates: floor(120*1280/1000), floor(80*720/1000).
-    ).toEqual(scenario === 'local' ? ['local-click'] : ['153,57']),
+    ).toEqual(scenario === 'local' ? ['local-act'] : ['153,57']),
   );
   await vi.waitFor(() => expect(terminal).toHaveBeenCalled());
   if (scenario === 'ordinary') {

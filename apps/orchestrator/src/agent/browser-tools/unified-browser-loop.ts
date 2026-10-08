@@ -262,6 +262,9 @@ export async function runUnifiedBrowserLoop(
       }
       const gate = await input.gateAction?.(action, 'before');
       if (gate?.kind === 'stop') return { ...gate.outcome, steps: step + 1 };
+      // A cancel that arrived while the gate waited (e.g. for confirmation)
+      // wins over the action: nothing runs after it.
+      if (input.signal?.aborted) return { status: 'cancelled', steps: step + 1 };
       if (gate?.kind === 'skip') {
         results.push(toolResult(call.id, gate.message));
         staleTurn = true;

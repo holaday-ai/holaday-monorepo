@@ -11,7 +11,12 @@ import type { LlmCallRecord, LlmCallRecorder } from '../llm-call-recorder.js';
 import { friendlyTaskFailureReason } from '../task-failure-copy.js';
 import { BrowserControl } from './browser-control.js';
 import { SelectedChromeClient } from './selected-chrome-client.js';
-import { runSelectedChromeTask, toCapturedToolCall } from './selected-chrome-runner.js';
+import {
+  UNVERIFIED_TARGET_REASON,
+  runSelectedChromeTask,
+  selectedChromeActionVerdict,
+  toCapturedToolCall,
+} from './selected-chrome-runner.js';
 
 const sessionId = 'a249b41c-fd70-47fb-883d-2b70f033234f';
 const selectionId = '5d09732c-d41d-421b-a61f-287093fc440b';
@@ -527,7 +532,7 @@ describe('runSelectedChromeTask', () => {
             type: 'tool_use',
             id: 'act',
             name: 'browser_act',
-            input: { action: { kind: 'key', payload: { key: 'Enter' } } },
+            input: { action: { kind: 'key', payload: { key: 'Tab' } } },
           },
         ]),
         finish('Saved'),
@@ -570,7 +575,7 @@ describe('runSelectedChromeTask', () => {
           type: 'tool_use',
           id: 'act',
           name: 'browser_act',
-          input: { action: { kind: 'key', payload: { key: 'Enter' } } },
+          input: { action: { kind: 'key', payload: { key: 'Tab' } } },
         },
       ]),
       finish('Draft'),
@@ -602,7 +607,7 @@ describe('runSelectedChromeTask', () => {
     ]);
     expect(JSON.stringify(h.requests.at(-1)?.messages)).toContain('human');
   });
-  it.each(['click', 'wait'] as const)(
+  it.each(['type', 'wait'] as const)(
     'does not turn a %s not_applied receipt into a completed action',
     async (kind) => {
       const action =
@@ -614,6 +619,7 @@ describe('runSelectedChromeTask', () => {
                 description: 'Save',
                 strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
               },
+              payload: { text: 'Draft' },
             };
       const h = createHarness(
         [
@@ -652,7 +658,8 @@ describe('runSelectedChromeTask', () => {
 
   it('stops with a clear reason when the selected tab was closed', async () => {
     const action = {
-      kind: 'click',
+      kind: 'type',
+      payload: { text: 'Draft' },
       selector: {
         description: 'Save',
         strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
@@ -721,7 +728,8 @@ describe('runSelectedChromeTask', () => {
             name: 'browser_act',
             input: {
               action: {
-                kind: 'click',
+                kind: 'type',
+                payload: { text: 'Draft' },
                 selector: {
                   description: 'Save',
                   strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
@@ -771,7 +779,8 @@ describe('runSelectedChromeTask', () => {
             name: 'browser_act',
             input: {
               action: {
-                kind: 'click',
+                kind: 'type',
+                payload: { text: 'Draft' },
                 selector: {
                   description: 'Save',
                   strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
@@ -809,7 +818,7 @@ describe('runSelectedChromeTask', () => {
           name: 'browser_act',
           input: {
             action:
-              '{"kind":"click","selector":{"description":"Save button","strategies":[{"kind":"role","role":"button","name":"Save"}]}}',
+              '{"kind":"type","selector":{"description":"Save button","strategies":[{"kind":"role","role":"button","name":"Save"}]},"payload":{"text":"Draft"}}',
           },
         },
       ]),
@@ -827,7 +836,8 @@ describe('runSelectedChromeTask', () => {
     expect(h.commands.filter((c) => c.op === 'act')).toMatchObject([
       expect.objectContaining({
         action: {
-          kind: 'click',
+          kind: 'type',
+          payload: { text: 'Draft' },
           selector: {
             description: 'Save button',
             scope: { timeoutMs: 5000 },
@@ -889,6 +899,80 @@ describe('runSelectedChromeTask', () => {
     expect(JSON.stringify(h.requests[1]?.messages)).toContain('invalid_tool_input');
   });
 
+  it.each([
+    [
+      'click',
+      {
+        kind: 'click',
+        selector: {
+          description: 'Save',
+          strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
+        },
+      },
+    ],
+    ['Enter', { kind: 'key', payload: { key: 'Enter' } }],
+    [
+      'Space on a control',
+      {
+        kind: 'key',
+        selector: {
+          description: 'Save',
+          strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
+        },
+        payload: { key: ' ' },
+      },
+    ],
+  ] as const)(
+    'hands an unverified %s to the user and never dispatches it (fail closed)',
+    async (_label, action) => {
+      // Only model selector hints are known here, not the real target.
+      expect(selectedChromeActionVerdict(action as never)).toEqual({
+        allowed: false,
+        reason: UNVERIFIED_TARGET_REASON,
+      });
+      const h = createHarness([
+        response('act', [{ type: 'tool_use', id: 'act', name: 'browser_act', input: { action } }]),
+        finish('Draft'),
+      ]);
+      const running = runSelectedChromeTask({
+        taskId: `unverified-${_label}`,
+        intent: 'Save the draft',
+        messagesAdapter: h.messagesAdapter,
+        client: h.client,
+        control: h.control,
+        target,
+      });
+      await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'), { timeout: 500 });
+      const lease = h.control.snapshot().lease;
+      if (!lease) throw new Error('missing human lease');
+      expect(h.commands.filter((c) => c.op === 'act')).toHaveLength(0);
+      h.control.returnToAgent(lease);
+      expect(await running).toMatchObject({ status: 'completed' });
+      expect(h.commands.filter((c) => c.op === 'act')).toHaveLength(0);
+    },
+  );
+
+  it('keeps non-activating input on the policy verdict', () => {
+    expect(selectedChromeActionVerdict({ kind: 'key', payload: { key: 'Tab' } })).toEqual({
+      allowed: true,
+    });
+    expect(
+      selectedChromeActionVerdict({
+        kind: 'type',
+        selector: {
+          description: '标题',
+          strategies: [{ kind: 'label', value: '标题' }],
+          scope: { timeoutMs: 5000 },
+          selfHeal: true,
+        },
+        payload: { text: '草稿' },
+      }),
+    ).toEqual({ allowed: true });
+    expect(
+      selectedChromeActionVerdict({ kind: 'goto', payload: { url: 'https://example.test/' } }),
+    ).toEqual({ allowed: true });
+  });
+
   it('routes decoded string payment actions through the existing human handoff', async () => {
     const h = createHarness([
       response('string-payment', [
@@ -921,7 +1005,7 @@ describe('runSelectedChromeTask', () => {
     expect(h.commands.filter((c) => c.op === 'act')).toHaveLength(0);
   });
 
-  it('opens Draft, applies one click, observes Saved evidence, finishes, and closes', async () => {
+  it('opens Draft, applies one input, observes Saved evidence, finishes, and closes', async () => {
     const h = createHarness([
       response('model-1', [
         {
@@ -930,7 +1014,8 @@ describe('runSelectedChromeTask', () => {
           name: 'browser_act',
           input: {
             action: {
-              kind: 'click',
+              kind: 'type',
+              payload: { text: 'Draft' },
               selector: {
                 description: 'Save button',
                 strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
@@ -1079,7 +1164,7 @@ describe('runSelectedChromeTask', () => {
             input: {
               action: {
                 kind: 'key',
-                payload: { key: 'Enter' },
+                payload: { key: 'Tab' },
               },
             },
           },
@@ -1461,7 +1546,8 @@ describe('runSelectedChromeTask', () => {
             name: 'browser_act',
             input: {
               action: {
-                kind: 'click',
+                kind: 'type',
+                payload: { text: 'Draft' },
                 selector: {
                   description: 'Save button',
                   strategies: [{ kind: 'text', value: 'Save' }],
@@ -1515,7 +1601,8 @@ describe('runSelectedChromeTask', () => {
             name: 'browser_act',
             input: {
               action: {
-                kind: 'click',
+                kind: 'type',
+                payload: { text: 'Draft' },
                 selector: {
                   description: 'Save button',
                   strategies: [{ kind: 'text', value: 'Save' }],
@@ -1555,7 +1642,8 @@ describe('runSelectedChromeTask', () => {
       name: 'browser_act',
       input: {
         action: {
-          kind: 'click',
+          kind: 'type',
+          payload: { text: 'Draft' },
           selector: {
             description: 'Save button',
             strategies: [{ kind: 'text', value: 'Save' }],

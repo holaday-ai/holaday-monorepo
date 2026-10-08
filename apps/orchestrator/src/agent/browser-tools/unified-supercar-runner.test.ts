@@ -329,6 +329,31 @@ describe('unified runtime safety gate (legacy LIVE-VETO parity)', () => {
     await page.close();
   }, 60_000);
 
+  it('applies the runtime policy even when the caller passes no onBeforeAction', async () => {
+    const page = await browser.newPage();
+    await page.setContent(ORDER);
+    const onAwaitingUser = vi.fn();
+    const running = runSupercarTask({
+      taskId: 't_gate_default',
+      intent: '处理订单',
+      executor: { getPage: async () => page } as never,
+      messagesAdapter: scripted([
+        () => [call('snapshot', {})],
+        (request) => [call('click', { ref: refIn(request, /button \\"提交订单\\"/) })],
+      ]),
+      onAwaitingUser,
+    });
+    await vi.waitFor(() => expect(hasParkedSupercarHandle('t_gate_default')).toBe(true));
+    expect(onAwaitingUser).toHaveBeenCalledWith(
+      expect.objectContaining({ awaitingKind: 'browser_action' }),
+    );
+    expect(await page.textContent('#state')).toBe('待提交');
+    expect(supercarAbort('t_gate_default')).toBe(true);
+    expect(await running).toMatchObject({ status: 'cancelled' });
+    expect(await page.textContent('#state')).toBe('待提交');
+    await page.close();
+  }, 60_000);
+
   it('fails the task when the policy refuses outright', async () => {
     const { page, running, state } = await start(
       't_gate_refuse',
