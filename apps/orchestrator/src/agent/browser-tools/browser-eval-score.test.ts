@@ -1,22 +1,34 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { reviewListAnswer } from '../../execution/answer-verifier.js';
+import { buildContract } from '../../execution/execution-contract.js';
 import {
   type BrowserEvalTask,
   classifyFailure,
   scoreBrowserEval,
+  scoreListWithSources,
 } from '../../../scripts/browser-eval/score.js';
 
 const suite = JSON.parse(
   readFileSync(new URL('../../../scripts/browser-eval/tasks.json', import.meta.url), 'utf8'),
-) as { smokeIds: string[]; tasks: BrowserEvalTask[] };
+) as { smokeIds: string[]; listSourcesIds: string[]; tasks: BrowserEvalTask[] };
 
 describe('browser eval suite', () => {
-  it('ships 30 tasks across the required categories with 5 public smoke tasks', () => {
-    expect(suite.tasks).toHaveLength(30);
-    expect(new Set(suite.tasks.map((task) => task.id)).size).toBe(30);
+  it('ships 36 tasks across the required categories with 5 public smoke tasks', () => {
+    expect(suite.tasks).toHaveLength(36);
+    expect(new Set(suite.tasks.map((task) => task.id)).size).toBe(36);
     expect(new Set(suite.tasks.map((task) => task.category))).toEqual(
-      new Set(['ecommerce', 'form', 'table', 'multipage', 'login_wall', 'ai_web_app']),
+      new Set([
+        'ecommerce',
+        'form',
+        'table',
+        'multipage',
+        'login_wall',
+        'ai_web_app',
+        'list_sources',
+      ]),
     );
+    expect(suite.listSourcesIds).toEqual(['be-31', 'be-32', 'be-33', 'be-34', 'be-35', 'be-36']);
     expect(suite.smokeIds).toHaveLength(5);
     for (const id of suite.smokeIds)
       expect(suite.tasks.find((task) => task.id === id)?.publicSite).toBe(true);
@@ -98,5 +110,127 @@ describe('browser eval suite', () => {
         { durationMs: 240_000, taskTimeoutMs: 240_000 },
       ),
     ).toBe('model_layer');
+  });
+});
+
+describe('list answers with per-item sources (FIX-BATCH-A)', () => {
+  const news = {
+    type: 'list_with_sources',
+    minItems: 3,
+    domains: ['36kr.com'],
+    keyField: 'date',
+  } as const;
+  const item = (i: number, link: string) =>
+    `${i}. **原标题**：标题${i}\n   **发布日期**：2026-10-08 1${i}:00\n   **链接**：${link}`;
+
+  it('rejects homepage links reused by every item (acceptance A2)', () => {
+    const answer = [1, 2, 3].map((i) => item(i, 'https://36kr.com/')).join('\n\n');
+    expect(scoreListWithSources(answer, news)).toMatchObject({
+      ok: false,
+      problems: [
+        '第 1 条只有首页/搜索页链接',
+        '第 2 条只有首页/搜索页链接',
+        '第 3 条只有首页/搜索页链接',
+      ],
+    });
+  });
+
+  it('accepts distinct detail links with the key field, in lists and tables', () => {
+    const answer = [1, 2, 3].map((i) => item(i, `https://36kr.com/p/${i}`)).join('\n\n');
+    expect(scoreListWithSources(answer, news)).toMatchObject({
+      ok: true,
+      urls: ['https://36kr.com/p/1', 'https://36kr.com/p/2', 'https://36kr.com/p/3'],
+    });
+    const table = [
+      '| 商品 | 价格 | 链接 |',
+      '|---|---|---|',
+      ...[1, 2, 3].map((i) => `| 耳机${i} | ¥${i}99 | https://item.jd.com/${i}.html |`),
+    ].join('\n');
+    expect(
+      scoreListWithSources(table, {
+        type: 'list_with_sources',
+        minItems: 3,
+        domains: ['jd.com'],
+        keyField: 'price',
+      }).ok,
+    ).toBe(true);
+  });
+
+  it('flags search pages, missing fields and reused links', () => {
+    const answer = [
+      '1. 耳机A ¥99 https://re.jd.com/search?keyword=x',
+      '2. 耳机B https://item.jd.com/2.html',
+      '3. 耳机C ¥199 https://item.jd.com/2.html',
+    ].join('\n');
+    expect(
+      scoreListWithSources(answer, {
+        type: 'list_with_sources',
+        minItems: 3,
+        domains: ['jd.com'],
+        keyField: 'price',
+      }).problems,
+    ).toEqual(['第 1 条只有首页/搜索页链接', '第 2 条缺少价格', '第 3 条与前面条目复用同一链接']);
+  });
+});
+
+it('scores anchor variants of one article as one source', () => {
+  const answer = [1, 2, 3]
+    .map((i) => `${i}. 标题${i} 2026-10-08 https://36kr.com/p/1#section${i}`)
+    .join('\n');
+  expect(
+    scoreListWithSources(answer, {
+      type: 'list_with_sources',
+      minItems: 3,
+      domains: ['36kr.com'],
+      keyField: 'date',
+    }).problems,
+  ).toEqual(['第 2 条与前面条目复用同一链接', '第 3 条与前面条目复用同一链接']);
+});
+
+describe('eval scorer and production verifier agree on detail sources (PR #247 review 2, P2-5)', () => {
+  const contract = buildContract({
+    taskId: 't-agree',
+    intent: '打开新闻首页，总结今天前三条新闻，提供原标题、发布日期和可核实链接。',
+    executionMode: 'browser',
+  });
+  const answer = (links: string[]) =>
+    links
+      .map((link, i) => `${i + 1}. 标题${i + 1}\n   发布日期：2026-10-08\n   链接：${link}`)
+      .join('\n');
+  it.each([
+    ['ordinary articles', [1, 2, 3].map((i) => `https://news.example.test/article/${i}`), true],
+    ['root query-id details', [1, 2, 3].map((i) => `https://news.example.test/?id=${i}`), true],
+    ['SPA details', [1, 2, 3].map((i) => `https://news.example.test/#/post/${i}`), true],
+    [
+      'SPA tracking variants',
+      [1, 2, 3].map((i) => `https://news.example.test/#/post/7?utm_source=f${i}`),
+      false,
+    ],
+    [
+      'SPA home',
+      [
+        'https://news.example.test/#/',
+        'https://news.example.test/#/',
+        'https://news.example.test/#/',
+      ],
+      false,
+    ],
+    ['SPA search', [1, 2, 3].map((i) => `https://news.example.test/#/search?q=${i}`), false],
+    [
+      'site homepage',
+      ['https://news.example.test/', 'https://news.example.test/', 'https://news.example.test/'],
+      false,
+    ],
+  ])('%s', (_label, links, accepted) => {
+    const text = answer(links);
+    expect(reviewListAnswer(contract, text) === null).toBe(accepted);
+    expect(
+      scoreListWithSources(text, {
+        type: 'list_with_sources',
+        minItems: 3,
+        domains: ['news.example.test'],
+        keyField: 'date',
+      }).ok,
+    ).toBe(accepted);
   });
 });

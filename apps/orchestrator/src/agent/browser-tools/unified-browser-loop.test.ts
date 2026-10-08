@@ -248,6 +248,107 @@ describe('unified browser loop', () => {
   });
 });
 
+describe('pre-delivery review (FIX-BATCH-A)', () => {
+  const finish = (summary: string, id: string) =>
+    call('finish', { status: 'completed', summary, evidence: '开源的火' }, id);
+
+  it('gives one remediation turn naming the gaps, then returns the second answer', async () => {
+    const reviewFinish = vi.fn((summary: string) =>
+      summary.includes('/p/') ? null : '第 1 条缺少独立来源链接',
+    );
+    const adapter = scriptedAdapter([
+      () => [finish('1. 开源的火 https://36kr.com/', 'f1')],
+      (request) => {
+        const text = JSON.stringify(request.messages.at(-1));
+        expect(text).toContain('结果还不能交付：第 1 条缺少独立来源链接');
+        expect(text).toContain('详情页');
+        return [finish('1. 开源的火 https://36kr.com/p/1', 'f2')];
+      },
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '36kr 前三条新闻',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+      reviewFinish,
+    });
+    expect(outcome).toMatchObject({
+      status: 'completed',
+      summary: '1. 开源的火 https://36kr.com/p/1',
+    });
+    // The remediated answer is not re-reviewed; the verifier judges it.
+    expect(reviewFinish).toHaveBeenCalledTimes(1);
+  });
+
+  it('remediates only once: a second gap-filled answer goes to the verifier as-is', async () => {
+    const reviewFinish = vi.fn(() => '第 1 条缺少独立来源链接');
+    const adapter = scriptedAdapter([
+      () => [finish('1. 开源的火 https://36kr.com/', 'f1')],
+      () => [finish('1. 开源的火 https://36kr.com/（未获取到独立链接）', 'f2')],
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '36kr 前三条新闻',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+      reviewFinish,
+    });
+    expect(outcome).toMatchObject({ status: 'completed' });
+    expect(reviewFinish).toHaveBeenCalledTimes(1);
+    expect(adapter.requests).toHaveLength(2);
+  });
+});
+
+describe('remediation never ends worse than the held answer (FIX-BATCH-A)', () => {
+  const held = { summary: '1. 耳机A ¥99（未获取到商品链接）', evidence: '耳机A' };
+  const firstFinish = () => [
+    call('finish', { status: 'completed', summary: held.summary, evidence: held.evidence }, 'f1'),
+  ];
+
+  it('returns the held answer when the remediation runs out of steps', async () => {
+    const adapter = scriptedAdapter([firstFinish, () => [call('snapshot', {}, 's1')]]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '京东前三个商品价格和链接',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+      reviewFinish: () => '第 1 行缺少链接',
+      maxSteps: 2,
+    });
+    expect(outcome).toEqual({ status: 'completed', ...held, steps: 2 });
+  });
+
+  it('hands the held answer to the caller when aborted during remediation', async () => {
+    const controller = new AbortController();
+    const adapter = scriptedAdapter([
+      firstFinish,
+      () => {
+        controller.abort();
+        return [call('snapshot', {}, 's1')];
+      },
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '京东前三个商品价格和链接',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+      reviewFinish: () => '第 1 行缺少链接',
+      signal: controller.signal,
+    });
+    expect(outcome).toEqual({ status: 'cancelled', steps: 2, heldAnswer: held });
+  });
+
+  it("keeps the model's own failure after remediation", async () => {
+    const adapter = scriptedAdapter([
+      firstFinish,
+      () => [call('finish', { status: 'failed', summary: '商品卡片没有公开链接' }, 'f2')],
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '京东前三个商品价格和链接',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+      reviewFinish: () => '第 1 行缺少链接',
+    });
+    expect(outcome).toMatchObject({ status: 'failed', reason: '商品卡片没有公开链接' });
+  });
+});
+
 describe('unified loop context size (batch 11.0)', () => {
   it('keeps only the two latest page-sized results in full, so request size stays bounded', async () => {
     const page = (n: number) => `PAGE-${n} ${'x'.repeat(20_000)}`;

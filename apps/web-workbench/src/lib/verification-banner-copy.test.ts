@@ -15,6 +15,18 @@ describe('verificationCheckLabel', () => {
     ).toBe('第 3 行缺少商品链接');
   });
 
+  it('keeps per-item list source details', () => {
+    expect(
+      verificationCheckLabel({
+        type: 'list_item_sources',
+        detail: '第 1 条缺少独立来源链接（不能用首页或搜索页）',
+      }),
+    ).toBe('第 1 条缺少独立来源链接（不能用首页或搜索页）');
+    expect(verificationCheckLabel({ type: 'list_item_sources', detail: '' })).toBe(
+      '列表条目缺少独立来源或关键字段',
+    );
+  });
+
   it('maps unknown second-opinion details without exposing model names', () => {
     const label = verificationCheckLabel({
       type: 'unknown',

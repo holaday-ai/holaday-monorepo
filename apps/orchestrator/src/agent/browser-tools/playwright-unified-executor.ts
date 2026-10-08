@@ -1,4 +1,5 @@
 import type { Page } from 'playwright';
+import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { PageRedactionError, REDACTION_FAILED_COPY, redactPageText } from './page-redaction.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
@@ -9,6 +10,14 @@ export interface UnifiedToolResult {
   image?: { mediaType: 'image/jpeg'; data: string };
   /** Present on `download`: where the file was saved by the host. */
   download?: { filename: string; path: string };
+  /**
+   * Present on `snapshot`: absolute link targets on the page (full, before the
+   * model-facing shortening) and the shortened forms the model saw. Host-only
+   * evidence for grounding the answer's per-item links; never sent to the model.
+   */
+  links?: string[];
+  /** Page URL after the action. */
+  url?: string;
 }
 
 export interface UnifiedExecutorOptions {
@@ -27,23 +36,149 @@ const DEFAULT_ACTION_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_SNAPSHOT_CHARS = 40_000;
 const DEFAULT_MAX_EXTRACT_CHARS = 20_000;
 const DEFAULT_MAX_URL_CHARS = 100;
+/** How long a click waits to see whether it opened a new tab or navigated. */
+const POPUP_WAIT_MS = 1_500;
 const URL_LINE = /^(\s*- \/url: )(.*)$/;
 
 /**
  * Link URLs are 20–35% of a real page's AI snapshot (batch 12, eval sites),
  * mostly tracking parameters. Clicks go by ref, so a shortened URL keeps the
  * page readable at a fraction of the tokens.
+ *
+ * With `baseUrl` (the page's `document.baseURI`, which honours `<base href>`)
+ * every link is first resolved the way the browser resolves it, so the model
+ * sees the same absolute address that is recorded as observed evidence:
+ * `article?id=42` on `/news/index` reads `…/news/article?id=42`.
  */
-export function shortenSnapshotUrls(tree: string, maxUrlChars: number): string {
+export function shortenSnapshotUrls(tree: string, maxUrlChars: number, baseUrl?: string): string {
   if (maxUrlChars <= 0) return tree;
   return tree
     .split('\n')
     .map((line) => {
       const match = URL_LINE.exec(line);
-      if (!match || (match[2] ?? '').length <= maxUrlChars) return line;
-      return `${match[1]}${(match[2] ?? '').slice(0, maxUrlChars)}…`;
+      if (!match) return line;
+      const raw = match[2] ?? '';
+      const href = yamlScalar(raw);
+      const absolute = baseUrl ? resolveHref(href, baseUrl) : null;
+      const short = shortenUrl(absolute ?? href, maxUrlChars);
+      return short === href ? line : `${match[1]}${short}`;
     })
     .join('\n');
+}
+
+/**
+ * ariaSnapshot is YAML: a value such as `?id=2` or one containing `: ` is
+ * written quoted (`"?id=2"`). The link is the scalar, not the quotes.
+ */
+export function yamlScalar(raw: string): string {
+  const value = raw.trim();
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    try {
+      return JSON.parse(value) as string;
+    } catch {
+      return value.slice(1, -1);
+    }
+  }
+  if (value.length >= 2 && value.startsWith("'") && value.endsWith("'"))
+    return value.slice(1, -1).replace(/''/g, "'");
+  return value;
+}
+
+/**
+ * The absolute http(s) address a link points at, resolved against the page's
+ * base URL exactly as the browser does (existing percent-escapes are kept).
+ * Null for other schemes (mailto:, javascript:) or unparseable hrefs.
+ */
+export function resolveHref(href: string, baseUrl: string): string | null {
+  try {
+    const absolute = new URL(href.trim(), baseUrl).href;
+    return /^https?:/i.test(absolute) ? absolute : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The link the model sees: tracking parameters (utm_*, gclid, spm, …) and
+ * in-page anchors removed, everything that identifies the resource kept (ids,
+ * search terms, signatures, SPA hash routes). If that is still too long it is
+ * cut and marked with `…` — a cut link is never shown as if it were usable,
+ * and it is never recorded as observed evidence.
+ */
+export function shortenUrl(url: string, maxUrlChars: number): string {
+  if (maxUrlChars <= 0) return url;
+  const cleaned = stripTrackingFromUrl(url);
+  if (cleaned.length <= maxUrlChars) return cleaned;
+  return `${cleaned.slice(0, maxUrlChars)}…`;
+}
+
+/**
+ * The observed form of a link for grounding: the page's own URL without
+ * tracking parameters (what the model is shown when it fits), never a cut
+ * display form. With shortening off the model sees the raw URL, so that is it.
+ */
+export function observedLinkEvidence(absolute: string, maxUrlChars: number): string {
+  return maxUrlChars <= 0 ? absolute : stripTrackingFromUrl(absolute);
+}
+
+const MAX_SNAPSHOT_LINKS = 400;
+const MAX_EXTRACT_LINKS = 150;
+const MAX_LINK_TEXT_CHARS = 60;
+
+/** Visible text links on the page (absolute http(s) hrefs, first occurrence wins). */
+async function pageLinks(
+  page: Page,
+  timeout: number,
+): Promise<Array<{ text: string; url: string }>> {
+  const collect = page
+    .locator('a[href]')
+    .evaluateAll(
+      (nodes, limits) => {
+        const seen = new Set<string>();
+        const out: Array<{ text: string; url: string }> = [];
+        for (const node of nodes) {
+          const anchor = node as HTMLAnchorElement;
+          const text = (anchor.innerText || anchor.getAttribute('title') || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, limits.text);
+          if (!text || !/^https?:/i.test(anchor.href) || seen.has(anchor.href)) continue;
+          if (anchor.getClientRects().length === 0) continue;
+          seen.add(anchor.href);
+          out.push({ text, url: anchor.href });
+          if (out.length >= limits.count) break;
+        }
+        return out;
+      },
+      { text: MAX_LINK_TEXT_CHARS, count: MAX_EXTRACT_LINKS },
+    )
+    .catch(() => []);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<Array<{ text: string; url: string }>>((resolve) => {
+    timer = setTimeout(() => resolve([]), timeout);
+  });
+  try {
+    return await Promise.race([collect, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Observed link targets in an AI aria snapshot: resolved against the page's
+ * base URL (`document.baseURI`), tracking tokens removed — the same address
+ * `shortenSnapshotUrls` shows the model whenever it fits.
+ */
+export function snapshotLinks(tree: string, baseUrl: string, maxUrlChars: number): string[] {
+  const links = new Set<string>();
+  for (const line of tree.split('\n')) {
+    const raw = URL_LINE.exec(line)?.[2];
+    const href = raw ? yamlScalar(raw) : '';
+    if (!href || links.size >= MAX_SNAPSHOT_LINKS) continue;
+    const absolute = resolveHref(href, baseUrl);
+    if (absolute) links.add(observedLinkEvidence(absolute, maxUrlChars));
+  }
+  return [...links];
 }
 
 /**
@@ -59,28 +194,57 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   const maxUrlChars = options.maxUrlChars ?? DEFAULT_MAX_URL_CHARS;
   const byRef = (ref: string) => page.locator(`aria-ref=${ref}`);
 
-  const snapshotText = async (): Promise<string> => {
+  const snapshotWithLinks = async (): Promise<{ text: string; links: string[] }> => {
     // Redact before truncating: a secret straddling the cut must not survive.
-    const tree = shortenSnapshotUrls(
-      await redactPageText(
-        page as never,
-        await page.locator('body').ariaSnapshot({ mode: 'ai', timeout }),
-      ),
-      maxUrlChars,
+    const redacted = await redactPageText(
+      page as never,
+      await page.locator('body').ariaSnapshot({ mode: 'ai', timeout }),
     );
+    // Links resolve against document.baseURI (honours <base href>), not page.url().
+    const baseUrl = await page.evaluate(() => document.baseURI).catch(() => page.url());
+    const tree = shortenSnapshotUrls(redacted, maxUrlChars, baseUrl);
     const header = `URL: ${page.url()}\n标题: ${await page.title()}\n`;
-    const body = tree.length > maxSnapshot ? `${tree.slice(0, maxSnapshot)}\n…（已截断）` : tree;
-    return `${header}${body}`;
+    const visible = tree.length > maxSnapshot ? tree.slice(0, maxSnapshot) : tree;
+    const body = visible === tree ? tree : `${visible}\n…（已截断）`;
+    // Shortening maps lines 1:1, so the visible lines of the full tree are the
+    // links the model saw; links past the cut ground nothing.
+    const seen = redacted.split('\n').slice(0, visible.split('\n').length).join('\n');
+    return { text: `${header}${body}`, links: snapshotLinks(seen, baseUrl, maxUrlChars) };
+  };
+  const snapshotText = async (): Promise<string> => (await snapshotWithLinks()).text;
+
+  /**
+   * A link with target=_blank opens a tab the model never sees, so the page
+   * looked unchanged after clicking a product (acceptance A1). Load the new
+   * tab's URL in the controlled page and close the tab.
+   */
+  const clickFollowingNewTab = async (ref: string): Promise<UnifiedToolResult> => {
+    const before = page.url();
+    const popup = page.waitForEvent('popup', { timeout: POPUP_WAIT_MS }).catch(() => null);
+    const navigated = page
+      .waitForEvent('framenavigated', { timeout: POPUP_WAIT_MS })
+      .then(() => null)
+      .catch(() => null);
+    await byRef(ref).click({ timeout });
+    const opened = await Promise.race([popup, navigated]);
+    if (!opened) return done(`已点击 ${ref}`);
+    await opened.waitForLoadState('domcontentloaded', { timeout }).catch(() => {});
+    const target = opened.url();
+    await opened.close().catch(() => {});
+    if (!/^https?:/i.test(target) || target === before) return done(`已点击 ${ref}`);
+    await page.goto(target, { timeout: Math.max(timeout, 30_000), waitUntil: 'domcontentloaded' });
+    return done(`已点击 ${ref}，新标签页内容已在当前页打开：${page.url()}`);
   };
 
   async function execute(action: UnifiedBrowserAction): Promise<UnifiedToolResult> {
     try {
       switch (action.tool) {
-        case 'snapshot':
-          return { ok: true, text: await snapshotText() };
+        case 'snapshot': {
+          const snapshot = await snapshotWithLinks();
+          return { ok: true, text: snapshot.text, links: snapshot.links, url: page.url() };
+        }
         case 'click':
-          await byRef(action.ref).click({ timeout });
-          return done(`已点击 ${action.ref}`);
+          return { ...(await clickFollowingNewTab(action.ref)), url: page.url() };
         case 'type': {
           const target = byRef(action.ref);
           await target.fill(action.text, { timeout });
@@ -109,11 +273,18 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
             timeout: Math.max(timeout, 30_000),
             waitUntil: 'domcontentloaded',
           });
-          return done(`已打开 ${page.url()}`);
+          return { ...done(`已打开 ${page.url()}`), url: page.url() };
         case 'extract': {
           const content = (
             await redactPageText(page as never, await page.locator('body').innerText({ timeout }))
           ).slice(0, maxExtract);
+          // innerText drops hrefs; list answers need each item's own link.
+          const anchors = await pageLinks(page, timeout);
+          const links: Array<{ text: string; url: string }> = [];
+          for (const anchor of anchors) {
+            const text = await redactPageText(page as never, anchor.text);
+            if (text) links.push({ text, url: shortenUrl(anchor.url, maxUrlChars) });
+          }
           return {
             ok: true,
             text: JSON.stringify({
@@ -121,7 +292,10 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
               fields: action.fields ?? [],
               url: page.url(),
               content,
+              links,
             }),
+            links: anchors.map((anchor) => observedLinkEvidence(anchor.url, maxUrlChars)),
+            url: page.url(),
           };
         }
         case 'screenshot': {

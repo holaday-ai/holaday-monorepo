@@ -311,4 +311,15 @@ describe('recovery actions', () => {
     expect(actions.some((a) => a.kind === 'retry')).toBe(false);
     expect(actions.find((a) => a.label === '拆成小步骤')?.prompt).toContain('请先只完成第一步');
   });
+
+  it('offers a per-item source retry when list items lack their own links', () => {
+    const actions = buildRecoveryActions({
+      status: 'failed',
+      intent: '打开36kr首页，总结今天前三条新闻',
+      failedChecks: [{ type: 'list_item_sources', detail: '第 1 条缺少独立来源链接（不能用首页或搜索页）' }],
+    });
+    expect(actions.find((action) => action.label === '逐条补齐来源')?.prompt).toContain(
+      '每条附该条自己的详情页链接',
+    );
+  });
 });

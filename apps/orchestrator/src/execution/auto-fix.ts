@@ -23,6 +23,7 @@ import type { ExecutionContract } from './execution-contract.js';
 import type { EvidenceLedger } from './evidence-ledger.js';
 import type { VerificationResult } from './answer-verifier.js';
 import type { ExpertWorkflowContract } from './expert-workflow-contract.js';
+import { isNonDetailUrl } from './answer-verifier.js';
 
 const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
 
@@ -312,7 +313,11 @@ export function pickSimilarUrl(
     const gHost = hostOf(g);
     if (!gHost) continue;
     const gPath = pathOf(g);
-    if (isStrictParentPath(gPath, fabPath)) {
+    // A shallower page (the homepage included) or a search / listing page is
+    // not the cited item: substituting it turns a per-item source into a
+    // generic link that still "passes" grounding (acceptance A2: three news
+    // links all became https://36kr.com/). Drop the URL instead.
+    if (isStrictParentPath(gPath, fabPath) || (isNonDetailUrl(g) && !isNonDetailUrl(fabricated))) {
       continue;
     }
     let score = 0;
@@ -361,7 +366,7 @@ function pathOverlap(a: string, b: string): number {
 function isStrictParentPath(candidate: string, target: string): boolean {
   const candidateSegs = candidate.split('/').filter(Boolean);
   const targetSegs = target.split('/').filter(Boolean);
-  if (candidateSegs.length === 0) return false;
+  // The root is the parent of every deeper path.
   if (candidateSegs.length >= targetSegs.length) return false;
   return candidateSegs.every((seg, idx) => seg === targetSegs[idx]);
 }

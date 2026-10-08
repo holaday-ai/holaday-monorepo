@@ -395,7 +395,7 @@ export function deriveFinalStatus(
     const hasCriticalStructuralFailure = verification.checks.some(
       (check) =>
         !check.passed &&
-        ['url_count', 'ecommerce_rows', 'result_count'].includes(
+        ['url_count', 'ecommerce_rows', 'result_count', 'list_item_sources'].includes(
           check.criterionType ?? '',
         ),
     );
@@ -789,6 +789,17 @@ function finalizeResolvedExecution(
 ): VerifyOutput {
   const { priorVerification, semanticMetadata, ...verifyInputs } = inputs;
 
+  // The primary pass already replaced a failed answer with the safety boundary
+  // (which states the real reason). Re-verifying that notice would replace the
+  // reason with artefacts such as "只解析到 0 条" — keep the primary verdict.
+  if (
+    priorVerification &&
+    !priorVerification.passed &&
+    verifyInputs.answerText.startsWith(SAFE_BOUNDARY_HEADER)
+  ) {
+    return { verification: priorVerification, finalText: verifyInputs.answerText };
+  }
+
   const workflowContract = verificationWorkflow(contract, inputs.verificationContext);
   const deterministic = verifyDeterministic({
     contract,
@@ -1002,6 +1013,11 @@ function runFixLoop(
   };
 }
 
+const LIST_GAP_CHECKS = new Set(['list_item_sources', 'ecommerce_rows', 'result_count']);
+
+/** First line of the text that replaces an answer which failed verification. */
+const SAFE_BOUNDARY_HEADER = '未能给出可验证的结果，本次不会把未通过校验的内容作为结论。';
+
 function buildSafeVerificationBoundary(
   verification: VerificationResult,
   answerText: string,
@@ -1009,13 +1025,18 @@ function buildSafeVerificationBoundary(
   const failed = verification.checks.find((check) => !check.passed);
   const reason = failed?.detail ?? verification.suggestedFix ?? '关键条件尚未验证';
   const failedChecks = verification.checks.filter((check) => !check.passed);
+  // A list that only misses per-item links/fields, and says so ("未获取到"),
+  // still carries observed names, prices and dates the user can act on.
+  const declaredListGapsOnly =
+    failedChecks.length > 0 &&
+    failedChecks.every((check) => LIST_GAP_CHECKS.has(check.criterionType ?? '')) &&
+    /未获取到|无法获取|未能获取|拿不到/.test(answerText);
   const canPreserveDraft =
     verification.failureLevel === 'needs_clarification' &&
-    failedChecks.every(
-      (check) => !check.criterionType && check.severity !== 'hard_fail',
-    );
+    (declaredListGapsOnly ||
+      failedChecks.every((check) => !check.criterionType && check.severity !== 'hard_fail'));
   const parts = [
-    '未能给出可验证的结果，本次不会把未通过校验的内容作为结论。',
+    SAFE_BOUNDARY_HEADER,
     '',
     `原因：${reason}`,
     '',

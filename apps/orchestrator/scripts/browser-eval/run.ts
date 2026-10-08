@@ -18,7 +18,7 @@
  *
  * Needs the provider key in the environment. Never prints env values.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createPlaywrightUnifiedExecutor } from '../../src/agent/browser-tools/playwright-unified-executor.js';
 import {
@@ -32,7 +32,13 @@ import { env } from '../../src/config/env.js';
 import type { MessagesAdapter } from '../../src/llm/messages-adapter.js';
 import { BUILTIN_MODEL_CATALOG } from '../../src/llm/model-catalog.js';
 import { createProductionModelRuntimeWiring } from '../../src/llm/model-runtime-wiring.js';
-import { type BrowserEvalTask, classifyFailure, scoreBrowserEval } from './score.js';
+import { runPipelineTask } from './pipeline.js';
+import {
+  type BrowserEvalTask,
+  classifyFailure,
+  scoreBrowserEval,
+  scoreListWithSources,
+} from './score.js';
 
 function arg(name: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);
@@ -48,9 +54,20 @@ const out =
   `scripts/browser-eval/results/${process.argv.includes('--paired') ? 'paired' : executorKind}-${brainId}-${Date.now()}.csv`;
 const suite = JSON.parse(readFileSync(new URL('./tasks.json', import.meta.url), 'utf8')) as {
   smokeIds: string[];
+  listSourcesIds: string[];
   tasks: BrowserEvalTask[];
 };
-const ids = process.argv.includes('--smoke') ? suite.smokeIds : arg('ids')?.split(',');
+const ids = process.argv.includes('--smoke')
+  ? suite.smokeIds
+  : process.argv.includes('--list-sources')
+    ? suite.listSourcesIds
+    : arg('ids')?.split(',');
+/**
+ * --pipeline (FIX-BATCH-A): run the production unified runner and score the
+ * text the user would receive after contract / verifier / auto-fix, with the
+ * terminal status from deriveFinalStatus. Unified executor only.
+ */
+const pipelineMode = process.argv.includes('--pipeline');
 const tasks = ids ? suite.tasks.filter((task) => ids.includes(task.id)) : suite.tasks;
 const catalogBrain = BUILTIN_MODEL_CATALOG.find((entry) => entry.id === brainId);
 if (!catalogBrain) throw new Error(`unknown brain ${brainId}`);
@@ -183,6 +200,26 @@ async function runUnified(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Delivered item links must resolve (2xx/3xx); network errors stay `unknown`. */
+async function checkLinks(urls: readonly string[]) {
+  const results: Array<{ url: string; status: number | 'unknown' }> = [];
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(10_000),
+        headers: { 'user-agent': 'Mozilla/5.0 (holaday browser-eval link check)' },
+      });
+      results.push({ url, status: response.status });
+      await response.body?.cancel().catch(() => {});
+    } catch {
+      results.push({ url, status: 'unknown' });
+    }
+  }
+  return results;
 }
 
 /** --resume: keep finished runs from an existing --out CSV and skip them. */
@@ -326,6 +363,7 @@ async function runTask(
   };
   const started = Date.now();
   let outcome: UnifiedBrowserOutcome;
+  let pipelineResult: Awaited<ReturnType<typeof runPipelineTask>> | null = null;
   try {
     await executor.resetPageForTask().catch(() => {});
     const page = await executor.getPage();
@@ -341,10 +379,44 @@ async function runTask(
         await new Promise((resolve) => setTimeout(resolve, 2_000));
       }
     }
-    outcome =
-      kind === 'legacy'
-        ? await runLegacy(executor, task, adapter)
-        : await runUnified(executor, task, adapter, trace, runtime);
+    if (pipelineMode && kind === 'unified') {
+      const result = await runPipelineTask({
+        taskId: `eval_${task.id}_${Date.now()}`,
+        intent: task.instruction,
+        executor,
+        adapter,
+        webSearch: createResponsesWebSearch(runtime.responses('fast')),
+        maxSteps: 30,
+        timeoutMs: taskTimeoutMs,
+        onStep: (step) => trace.push({ type: 'tool', ...step }),
+      });
+      pipelineResult = result;
+      outcome =
+        result.status === 'completed'
+          ? {
+              status: 'completed',
+              summary: result.deliveredText,
+              evidence: '',
+              steps: result.steps,
+            }
+          : result.status === 'awaiting_user'
+            ? {
+                status: 'awaiting_user',
+                reason: HANDOFF_RE.test(result.handoff ?? '') ? 'login' : 'other',
+                message: result.handoff ?? '',
+                steps: result.steps,
+              }
+            : {
+                status: 'failed',
+                reason: `${result.status}: ${result.failureSummary ?? result.runnerStatus}`,
+                steps: result.steps,
+              };
+    } else {
+      outcome =
+        kind === 'legacy'
+          ? await runLegacy(executor, task, adapter)
+          : await runUnified(executor, task, adapter, trace, runtime);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message.slice(0, 80) : 'error';
     outcome = { status: 'failed', reason: `harness: ${message}`, steps: 0 };
@@ -356,6 +428,39 @@ async function runTask(
     `${trace.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
   );
   const success = scoreBrowserEval(task, outcome);
+  if (pipelineResult) {
+    // What the user received, the verifier verdict and the independent list score.
+    const scored =
+      task.success.type === 'list_with_sources'
+        ? scoreListWithSources(pipelineResult.rawSummary, task.success)
+        : null;
+    const delivered =
+      task.success.type === 'list_with_sources'
+        ? scoreListWithSources(pipelineResult.deliveredText, task.success)
+        : null;
+    const links = delivered ? await checkLinks(delivered.urls) : [];
+    const record = {
+      id: task.id,
+      at: new Date().toISOString(),
+      status: pipelineResult.status,
+      runnerStatus: pipelineResult.runnerStatus,
+      verificationPassed: pipelineResult.verificationPassed,
+      success,
+      // completed + verified while the delivered list misses sources/fields.
+      falsePass: pipelineResult.status === 'completed' && delivered !== null && !delivered.ok,
+      deliveredProblems: delivered?.problems ?? [],
+      rawProblems: scored?.problems ?? [],
+      failedChecks: pipelineResult.failedChecks,
+      failureSummary: pipelineResult.failureSummary,
+      links,
+      finalUrl: pipelineResult.finalUrl,
+      rawSummary: pipelineResult.rawSummary,
+      deliveredText: pipelineResult.deliveredText,
+    };
+    trace.push({ type: 'pipeline', ...record });
+    mkdirSync(dirname(out), { recursive: true });
+    appendFileSync(`${out.replace(/\.csv$/, '')}.pipeline.jsonl`, `${JSON.stringify(record)}\n`);
+  }
   const failureClass = classifyFailure(success, outcome, trace, {
     durationMs: Date.now() - started,
     taskTimeoutMs,

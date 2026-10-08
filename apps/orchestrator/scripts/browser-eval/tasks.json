@@ -359,6 +359,91 @@
       },
       "publicSite": false,
       "expectHandoff": true
+    },
+    {
+      "id": "be-31",
+      "category": "list_sources",
+      "startUrl": "https://www.jd.com",
+      "instruction": "去京东搜索降噪耳机，告诉我前三个商品的名称和价格，并附商品链接。只读查看，不登录、不购买、不加购物车。",
+      "success": {
+        "type": "list_with_sources",
+        "minItems": 3,
+        "domains": ["jd.com"],
+        "keyField": "price"
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-32",
+      "category": "list_sources",
+      "startUrl": "https://36kr.com/",
+      "instruction": "打开36kr首页，总结今天前三条新闻，提供原标题、发布日期和可核实链接。只读查看，不登录、不提交表单。",
+      "success": {
+        "type": "list_with_sources",
+        "minItems": 3,
+        "domains": ["36kr.com"],
+        "keyField": "date"
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-33",
+      "category": "list_sources",
+      "startUrl": "https://news.ycombinator.com/",
+      "instruction": "打开 Hacker News 首页，列出排名前三的帖子：标题、发布时间和该帖子的讨论页链接。",
+      "success": {
+        "type": "list_with_sources",
+        "minItems": 3,
+        "domains": ["ycombinator.com"],
+        "keyField": "date"
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-34",
+      "category": "list_sources",
+      "startUrl": "https://github.com/trending",
+      "instruction": "打开 GitHub Trending，列出今天排名前三的仓库：仓库名、今日新增 star 数和仓库链接。",
+      "success": {
+        "type": "list_with_sources",
+        "minItems": 3,
+        "domains": ["github.com"],
+        "keyField": "stars"
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-35",
+      "category": "list_sources",
+      "startUrl": "https://www.ithome.com/",
+      "instruction": "打开 IT之家首页，总结最新的三条新闻，给出标题、发布时间和每条新闻的原文链接。",
+      "success": {
+        "type": "list_with_sources",
+        "minItems": 3,
+        "domains": ["ithome.com"],
+        "keyField": "date"
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-36",
+      "category": "list_sources",
+      "startUrl": "https://re.jd.com/search?keyword=%E9%99%8D%E5%99%AA%E8%80%B3%E6%9C%BA",
+      "instruction": "在当前京东降噪耳机搜索页，告诉我前三个商品的名称和价格，并附商品链接。只读查看，不登录、不购买、不加购物车。",
+      "success": {
+        "type": "list_with_sources",
+        "minItems": 3,
+        "domains": ["jd.com"],
+        "keyField": "price"
+      },
+      "publicSite": true,
+      "expectHandoff": false
     }
-  ]
+  ],
+  "listSourcesIds": ["be-31", "be-32", "be-33", "be-34", "be-35", "be-36"]
 }
