@@ -1,4 +1,9 @@
 import {
+  createDescriptionActionGate,
+  describeUserBrowserAction,
+} from '../browser-tools/unified-action-gate.js';
+import { createExternalBrowserPark } from './agent-loop.js';
+import {
   type SelectedChromeSessionCommand,
   selectedChromeSessionCommandSchema,
 } from '@holaday/shared-types';
@@ -51,6 +56,12 @@ export interface RunSelectedChromeTaskOptions {
   onCreateFile?: RunSupercarOptions['onCreateFile'];
   /** Batch 09 — self-evolution capture (ACTION_CAPTURE); best-effort, never awaited by the task. */
   capture?: Pick<BrowserActionCaptureRecorder, 'recordToolCall' | 'recordOutcome'>;
+  onBeforeAction?: RunSupercarOptions['onBeforeAction'];
+  onAwaitingUser?: RunSupercarOptions['onAwaitingUser'];
+  park?: (
+    question: string,
+    kind: import('./agent-loop.js').SupercarAwaitingKind,
+  ) => Promise<string | null>;
 }
 
 const DEFAULT_MAX_ITERATIONS = 24;
@@ -145,9 +156,43 @@ function taskFileRequirements(intent: string): FileRequirement[] {
 
 function taskTools(options: RunSelectedChromeTaskOptions): ReadonlyArray<NeutralToolDefinition> {
   const formats = options.createFileFormats ?? [];
-  if (!options.onCreateFile || formats.length === 0) return browserTools;
+  const chromeTools = options.client.routingV2
+    ? [
+        ...browserTools,
+        {
+          name: 'browser_tabs',
+          description:
+            'List task tabs, create a task tab in the granted exact origin, or switch between task tabs. Other user tabs are protected.',
+          inputSchema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              operation: { type: 'string', enum: ['list', 'new', 'switch'] },
+              url: { type: 'string' },
+              tabId: { type: 'integer', minimum: 0 },
+            },
+            required: ['operation'],
+          },
+        },
+      ]
+    : browserTools.map((tool) =>
+        tool.name === 'browser_act'
+          ? {
+              ...tool,
+              inputSchema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  action: { ...actionInputSchema, oneOf: actionInputSchema.oneOf.slice(2) },
+                },
+                required: ['action'],
+              },
+            }
+          : tool,
+      );
+  if (!options.onCreateFile || formats.length === 0) return chromeTools;
   return [
-    ...browserTools,
+    ...chromeTools,
     {
       name: 'create_file',
       description: `根据已观察到的内容生成可下载文件。当前可用格式：${formats.join('/')}。文件引擎支持的全部格式：${ALL_FORMATS.join('/')}。用户明确要求的格式不可用时如实报告未完成，不自动替换格式；引擎不支持的格式不能通过升级套餐获得，不要猜测升级或重试能够解决。`,
@@ -217,6 +262,38 @@ const selectorInputSchema = {
 const actionInputSchema = {
   type: 'object',
   oneOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        kind: { const: 'scroll' },
+        payload: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            deltaX: { type: 'number', minimum: -4000, maximum: 4000 },
+            deltaY: { type: 'number', minimum: -4000, maximum: 4000 },
+          },
+          required: ['deltaY'],
+        },
+      },
+      required: ['kind', 'payload'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        kind: { const: 'select' },
+        selector: selectorInputSchema,
+        payload: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { text: { type: 'string' } },
+          required: ['text'],
+        },
+      },
+      required: ['kind', 'selector', 'payload'],
+    },
     {
       type: 'object',
       additionalProperties: false,
@@ -351,8 +428,9 @@ const HUMAN_HANDBACK_CONTEXT =
 type ExecutionRecord = NonNullable<SupercarTickEvent['execution']>;
 
 export async function runSelectedChromeTask(
-  options: RunSelectedChromeTaskOptions,
+  inputOptions: RunSelectedChromeTaskOptions,
 ): Promise<SupercarOutcome> {
+  let options = inputOptions;
   const maxIterations = normalizePositiveInteger(options.maxIterations, DEFAULT_MAX_ITERATIONS);
   const timeoutMs = normalizePositiveInteger(options.timeoutMs, DEFAULT_TIMEOUT_MS);
   const deadline = Date.now() + timeoutMs;
@@ -366,6 +444,18 @@ export async function runSelectedChromeTask(
     toolsUsed: [],
   };
   const toolsUsed = new Set<string>();
+
+  const parking =
+    options.client.routingV2 && !options.park
+      ? createExternalBrowserPark({
+          taskId: options.taskId,
+          intent: options.intent,
+          signal: modelAbort.signal,
+          onAwaitingUser: options.onAwaitingUser,
+          aborted: () => modelAbort.signal.aborted,
+        })
+      : null;
+  if (parking) options = { ...options, park: parking.park };
 
   const stop = (kind: 'abort' | 'timeout') => {
     if (kind === 'timeout') timedOut = true;
@@ -403,6 +493,7 @@ export async function runSelectedChromeTask(
       : failed(modelFailureReason(error), outcome.iterations, toolsUsed);
   } finally {
     clearTimeout(timer);
+    parking?.close();
     let closeConfirmed = false;
     try {
       const closed = await options.client.close();
@@ -462,6 +553,21 @@ async function runLoop(input: {
 
   const opened = await options.client.open(options.target);
   if (!opened.ok) {
+    if (
+      options.client.routingV2 &&
+      ['origin_grant_required', 'capability_missing', 'target_extension_unavailable'].includes(
+        opened.error,
+      )
+    )
+      return {
+        status: 'awaiting_user',
+        question:
+          opened.error === 'capability_missing'
+            ? 'capability_missing：请更新、连接 HOLADAY Chrome 扩展并保持电脑在线。'
+            : '请重新连接 Chrome，选择页面并授权该 exact origin 后重新提交任务。',
+        iterations,
+        toolsUsed: [...toolsUsed],
+      };
     const state = terminalState(input.stopped(), options.control);
     return state
       ? terminalOutcome(state, iterations, toolsUsed)
@@ -701,6 +807,20 @@ async function processTools(
         terminal = afterEvidenceRead;
         continue;
       }
+      if (
+        !observed.ok &&
+        ['origin_grant_required', 'capability_missing'].includes(observed.error)
+      ) {
+        terminal = {
+          status: 'awaiting_user',
+          question:
+            observed.error === 'capability_missing'
+              ? 'capability_missing：请更新并重新连接 HOLADAY Chrome 扩展。'
+              : '页面跳转到新的站点，请重新选择 Chrome 页面并授权该 exact origin。',
+          iterations,
+          toolsUsed: [...toolsUsed],
+        };
+      }
       if (!observed.ok || !observed.observation) {
         await publish(errorResult(tool.id, observed.ok ? 'missing_observation' : observed.error));
         if (!observed.ok && observed.error === 'tab_closed')
@@ -716,6 +836,54 @@ async function processTools(
       continue;
     }
 
+    if (tool.name === 'browser_tabs' && options.client.routingV2) {
+      const parsed = z
+        .object({
+          operation: z.enum(['list', 'new', 'switch']),
+          url: z.string().url().optional(),
+          tabId: z.number().int().nonnegative().optional(),
+        })
+        .strict()
+        .safeParse(tool.input);
+      if (!parsed.success || mutationClaimed) {
+        await publish(errorResult(tool.id, 'invalid_tool_input'));
+        continue;
+      }
+      if (parsed.data.operation !== 'list') mutationClaimed = true;
+      if (parsed.data.operation === 'new' && parsed.data.url) {
+        const verdict = await (options.onBeforeAction ?? classifyRuntimeAction)({
+          kind: 'navigate',
+          url: parsed.data.url,
+        });
+        if (!verdict.allowed) {
+          terminal = {
+            status: 'awaiting_user',
+            question: verdict.question ?? verdict.reason ?? '新标签导航需要用户处理。',
+            iterations,
+            toolsUsed: [...toolsUsed],
+          };
+          await publish(errorResult(tool.id, 'action_gate_stopped'));
+          continue;
+        }
+      }
+      const result = await options.client.tabs(parsed.data);
+      if (!result.ok && ['origin_grant_required', 'capability_missing'].includes(result.error)) {
+        terminal = {
+          status: 'awaiting_user',
+          question:
+            result.error === 'origin_grant_required'
+              ? '新标签需要站点授权。请在 Chrome 页面选择器中选择该站点，确认仅授权这个 exact origin 后重新提交任务。'
+              : '插件能力不足，请安装或更新并重新连接插件，保持电脑在线后重新提交任务。',
+          iterations,
+          toolsUsed: [...toolsUsed],
+        };
+      }
+      await publish(
+        result.ok ? successResult(tool.id, result) : errorResult(tool.id, result.error),
+      );
+      continue;
+    }
+
     if (tool.name === 'browser_act') {
       if (mutationClaimed) {
         await publish(errorResult(tool.id, 'replan_required'));
@@ -727,7 +895,59 @@ async function processTools(
         await publish(errorResult(tool.id, 'invalid_tool_input'));
         continue;
       }
-      const verdict = selectedChromeActionVerdict(parsed.action);
+      let verdict = selectedChromeActionVerdict(parsed.action);
+      if (options.client.routingV2) {
+        const action = parsed.action;
+        if (['click', 'type', 'key', 'select'].includes(action.kind)) {
+          let unavailable = false;
+          const gate = createDescriptionActionGate<typeof action>({
+            pageUrl: () => options.target.expectedUrl,
+            onBeforeAction: options.onBeforeAction ?? classifyRuntimeAction,
+            aborted: () => run.modelAbort.signal.aborted,
+            stillLive: async () =>
+              !(await cancellationRequested(options)) && options.control.canAgentAct(),
+            park: options.park ?? (async () => null),
+            describe: async () => {
+              const described = await options.client.describe(action, options.client.revision);
+              if (!described.ok || !described.target) {
+                unavailable = true;
+                return { descriptors: [], unverified: null, transactional: null };
+              }
+              return describeUserBrowserAction(action, described.target);
+            },
+          });
+          const decision = await gate(action, 'before');
+          if (unavailable) verdict = { allowed: false, reason: UNVERIFIED_TARGET_REASON };
+          else if (decision.kind === 'stop') {
+            const stopped = decision.outcome;
+            terminal =
+              stopped.status === 'cancelled'
+                ? cancelled(iterations, toolsUsed)
+                : stopped.status === 'awaiting_user'
+                  ? {
+                      status: 'awaiting_user',
+                      question: stopped.message ?? '请确认浏览器操作。',
+                      iterations,
+                      toolsUsed: [...toolsUsed],
+                    }
+                  : failed(
+                      ('reason' in stopped ? stopped.reason : undefined) ?? '浏览器门禁拒绝操作。',
+                      iterations,
+                      toolsUsed,
+                    );
+            await publish(errorResult(tool.id, 'action_gate_stopped'));
+            continue;
+          } else if (decision.kind === 'skip') {
+            await publish(errorResult(tool.id, 'replan_required'));
+            continue;
+          } else verdict = { allowed: true };
+        } else if (action.kind === 'goto')
+          verdict = await (options.onBeforeAction ?? classifyRuntimeAction)({
+            kind: 'navigate',
+            url: action.payload.url,
+          });
+        else verdict = { allowed: true };
+      }
       if (!verdict.allowed) {
         options.control.requestHuman();
         await safelyCall(
@@ -751,6 +971,12 @@ async function processTools(
         continue;
       }
 
+      const afterGate = await boundaryState({ options, toolsUsed, ...run }, iterations);
+      if (afterGate) {
+        terminal = afterGate;
+        await publish(errorResult(tool.id, afterGate.status));
+        continue;
+      }
       const acted = await options.client.execute(parsed.action, options.client.revision);
       if (!acted.ok) {
         await publish(
@@ -758,7 +984,15 @@ async function processTools(
             ...(acted.actionOutcome ? { actionOutcome: acted.actionOutcome } : {}),
           }),
         );
-        if (acted.error === 'tab_closed') {
+        if (acted.error === 'origin_grant_required') {
+          terminal = {
+            status: 'awaiting_user',
+            question:
+              '页面需要新的站点授权。请在 Chrome 页面选择器中选择该站点，确认仅授权这个 exact origin 后重新提交任务。',
+            iterations,
+            toolsUsed: [...toolsUsed],
+          };
+        } else if (acted.error === 'tab_closed') {
           terminal = failed(TAB_CLOSED_REASON, iterations, toolsUsed);
         } else if (acted.actionOutcome === 'unknown') {
           terminal = failed(
@@ -831,6 +1065,20 @@ async function processTools(
         await publish(errorResult(tool.id, afterEvidenceRead.status));
         terminal = afterEvidenceRead;
         continue;
+      }
+      if (
+        !observed.ok &&
+        ['origin_grant_required', 'capability_missing'].includes(observed.error)
+      ) {
+        terminal = {
+          status: 'awaiting_user',
+          question:
+            observed.error === 'capability_missing'
+              ? 'capability_missing：请更新并重新连接 HOLADAY Chrome 扩展。'
+              : '页面跳转到新的站点，请重新选择 Chrome 页面并授权该 exact origin。',
+          iterations,
+          toolsUsed: [...toolsUsed],
+        };
       }
       if (!observed.ok || !observed.observation) {
         await publish(errorResult(tool.id, observed.ok ? 'missing_observation' : observed.error));
@@ -1084,7 +1332,14 @@ function observationMessage(observation: Observation, revision: number): string 
 
 function containsEvidence(observation: Observation, evidenceText: string): boolean {
   return (
-    observation.bodyText.includes(evidenceText) || observation.ariaSnapshot.includes(evidenceText)
+    observation.bodyText.includes(evidenceText) ||
+    observation.ariaSnapshot.includes(evidenceText) ||
+    Boolean(
+      observation.frames?.some(
+        (frame) =>
+          frame.bodyText.includes(evidenceText) || frame.ariaSnapshot.includes(evidenceText),
+      ),
+    )
   );
 }
 

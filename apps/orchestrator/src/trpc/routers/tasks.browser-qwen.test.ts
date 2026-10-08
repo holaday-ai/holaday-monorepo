@@ -33,6 +33,8 @@ afterEach(() => {
 });
 
 it.each([
+  'v2-offline',
+  'v2-grant',
   'ready',
   'timeout',
   'disabled',
@@ -43,6 +45,14 @@ it.each([
   'local-file',
   'ordinary',
 ] as const)('formal Qwen browser task admission and execution: %s', async (scenario) => {
+  const isV2 = scenario === 'v2-offline' || scenario === 'v2-grant';
+  if (isV2) {
+    vi.stubEnv('USER_BROWSER_ROUTING_V2', 'true');
+    vi.spyOn(extensionWs, 'hasConnectedExtension').mockReturnValue(scenario === 'v2-grant');
+  }
+  const awaiting = vi
+    .spyOn(TaskRepository.prototype, 'persistAwaitingUser')
+    .mockResolvedValue({ persisted: true });
   const isLocal = scenario === 'local' || scenario === 'local-file';
   Object.assign(env, {
     ANTHROPIC_API_KEY: '',
@@ -271,13 +281,25 @@ it.each([
                 modelDataRegion: scenario === 'region' ? null : 'cn',
               },
             ]
-          : 'count' in projection
-            ? [{ count: 0 }]
-            : scenario === 'local-file' && 'id' in projection && 'userId' in projection
-              ? [{ id: 41, userId: 41 }]
-              : Object.keys(projection).length === 1 && 'id' in projection
-                ? [{ id: 41 }]
-                : [];
+          : isV2 && 'status' in projection
+            ? [
+                {
+                  id: 77,
+                  status: 'awaiting_user',
+                  intent: '查看我的京东订单',
+                  result: { metadata: { browserSource: 'local-chrome' } },
+                  awaitingQuestion: '请连接插件并重新选择页面',
+                },
+              ]
+            : isV2 && 'modelDataRegion' in projection
+              ? [{ id: 41, modelDataRegion: 'cn' }]
+              : 'count' in projection
+                ? [{ count: 0 }]
+                : scenario === 'local-file' && 'id' in projection && 'userId' in projection
+                  ? [{ id: 41, userId: 41 }]
+                  : Object.keys(projection).length === 1 && 'id' in projection
+                    ? [{ id: 41 }]
+                    : [];
       const query = {
         where: () => query,
         orderBy: () => query,
@@ -321,7 +343,7 @@ it.each([
     req: {},
     res: {},
     planner: {},
-    playwrightExecutor: scenario === 'executor' || isLocal ? null : executor,
+    playwrightExecutor: scenario === 'executor' || isLocal || isV2 ? null : executor,
     executionRouter: null,
     browserPool: null,
     taskQueue: null,
@@ -341,8 +363,11 @@ it.each([
       : {}),
   } as unknown as Context;
   const pending = tasksRouter.createCaller(ctx).create({
-    intent:
-      scenario === 'local-file' ? '从当前 Chrome 页面生成可下载 CSV' : '查看网页内容并点击详情',
+    intent: isV2
+      ? '查看我的京东订单'
+      : scenario === 'local-file'
+        ? '从当前 Chrome 页面生成可下载 CSV'
+        : '查看网页内容并点击详情',
     mode: 'auto',
     expertMode: 'normal',
     ...(isLocal
@@ -363,6 +388,22 @@ it.each([
     return;
   }
   const result = await pending;
+  if (isV2) {
+    expect(result.status).toBe('awaiting_user');
+    expect(consume).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
+    expect(createAdapter).not.toHaveBeenCalled();
+    expect(terminal).not.toHaveBeenCalled();
+    expect(awaiting).toHaveBeenCalledWith(expect.objectContaining({ awaitingKind: 'permission' }));
+    const replied = await tasksRouter
+      .createCaller(ctx)
+      .reply({ taskId: result.taskId, message: '继续' });
+    expect(replied).toEqual({ ok: true, state: 'stillAwaiting' });
+    expect(consume).not.toHaveBeenCalled();
+    expect(createAdapter).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
+    return;
+  }
   if (scenario === 'disabled' || scenario === 'region' || scenario === 'credentials') {
     expect(result.status).toBe('failed');
     expect(consume).not.toHaveBeenCalled();

@@ -1,4 +1,6 @@
 import { videoRejectionReason } from '../../agent/video/video-retry-policy.js';
+import { decideUserBrowserRoute } from '../../agent/supercar/user-browser-routing.js';
+import { runOtaUserBrowserTask } from '../../agent/supercar/ota-user-browser-runner.js';
 import { createHash } from 'node:crypto';
 import type Anthropic from '@anthropic-ai/sdk';
 import {
@@ -642,6 +644,7 @@ export const imageCreationOptionsInput = z.object({
 
 const createInput = z.object({
   localChrome: localChromeSelectionSchema.optional(),
+  browserPreference: z.enum(['cloud-public']).optional(),
   /**
    * Model catalog brain the user picked (e.g. `qwen`). Validated server-side
    * by `resolveBrain`; an unknown, hidden or unconfigured brain falls back to
@@ -1784,6 +1787,36 @@ export const tasksRouter = router({
           ? 'video_creation'
           : null,
     });
+
+    const browserRoute = executionMode === 'browser'
+      ? decideUserBrowserRoute({
+          enabled: getExecutionFeatureFlags().USER_BROWSER_ROUTING_V2,
+          intent: input.intent,
+          extensionOnline: hasConnectedExtension(ctx.userId),
+          selectionOrigin: input.localChrome ? new URL(input.localChrome.expectedUrl).origin : undefined,
+          publicCloudRequested: input.browserPreference === 'cloud-public',
+        })
+      : { lane: 'legacy' as const, reason: 'flag_off' as const };
+    // Resolve identity/grant requirements before model preflight, quota or any cloud allocation.
+    if (browserRoute.lane === 'awaiting_user') {
+      const taskId = newExternalId('task');
+      await repo.insertTask(
+        { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
+        { userId: userRow.id, intent: input.intent, roleId: dispatchRoleId, opusUsed: false,
+          sourceContext: { browserSource: 'local-chrome' } },
+      );
+      const question = browserRoute.question ?? '请连接 Chrome 并重新选择页面。';
+      const persisted = await repo.persistAwaitingUser({
+        taskExternalId: taskId, question, awaitingKind: 'permission',
+        result: { executionMode: 'browser', metadata: {
+          browserSource: 'local-chrome', browserRoutingAwaiting: browserRoute.reason,
+        } },
+      });
+      if (!persisted.persisted) throw new TRPCError({ code: 'CONFLICT', message: '任务状态已变化，请重新提交。' });
+      broadcastToUser(ctx.userId, { type: 'server.supercar.awaiting_user', taskId, question, awaitingKind: 'permission' });
+      return { taskId, status: 'awaiting_user' as const, question, awaitingKind: 'permission' as const,
+        steps: [], executionMode: 'browser' as const, browserSource: 'local-chrome' as const };
+    }
 
     await parseCreateAttachments(executionMode === 'generate' || executionMode === 'scrape');
     // Preserve the existing specialized stock candidate path (including its
@@ -6076,7 +6109,7 @@ export const tasksRouter = router({
         allowedUserIds: parseOtaAllowlist(process.env.OTA_USER_BROWSER_ALLOWED_USER_IDS),
         allowedDomains: otaAllowedDomains,
       });
-      const useOtaUserBrowser = otaCanary.lane === 'user-browser';
+      const useOtaUserBrowser = !getExecutionFeatureFlags().USER_BROWSER_ROUTING_V2 && otaCanary.lane === 'user-browser';
       if (otaCanary.lane !== null) {
         // Rollout audit — every OTA-prefer task records its gate outcome.
         ctx.logger.info(
@@ -6149,7 +6182,9 @@ export const tasksRouter = router({
               logger: ctx.logger,
             })
           : null;
-        return runSelectedChromeTask({
+        const runChrome = getExecutionFeatureFlags().USER_BROWSER_ROUTING_V2 && /携程|ctrip\.com/i.test(input.intent)
+          ? runOtaUserBrowserTask : runSelectedChromeTask;
+        return runChrome({
             ...(capture ? { capture } : {}),
             taskId, intent: effectiveIntent, messagesAdapter: browserMessagesAdapter,
             client: session.client, control: session.control, target,
@@ -6158,6 +6193,7 @@ export const tasksRouter = router({
             onTick: supercarArgs.onTick, onThinking: supercarArgs.onThinking,
             createFileFormats: supercarArgs.createFileFormats,
             onCreateFile: supercarArgs.onCreateFile,
+            onBeforeAction: supercarArgs.onBeforeAction, onAwaitingUser: supercarArgs.onAwaitingUser,
         });
       };
       const runFn = () =>
@@ -6165,7 +6201,11 @@ export const tasksRouter = router({
           ? runUserBrowserReadonly()
           : runSupercarWithRetry(supercarArgs, { userId, taskId, logger: ctx.logger })
         )
-          .then(async (outcome) => {
+          .then(async (rawOutcome) => {
+            let outcome = rawOutcome;
+            if (browserRoute.limitation && outcome.status === 'completed') {
+              outcome = { ...outcome, summary: `${browserRoute.limitation}\n\n${outcome.summary}` };
+            }
             ctx.logger.info(
                 {
                   taskId,
@@ -6432,6 +6472,7 @@ export const tasksRouter = router({
             // downstream parsing is uniform.
             const elapsedMs = Date.now() - browserStartedAt;
             const metadata: Record<string, unknown> = {
+              ...(browserRoute.limitation ? { browserLimitation: browserRoute.limitation } : {}),
               ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
               executionMode: executionMode === 'browser' ? 'browser' : executionMode,
               finalExecutionMode: executionMode === 'browser' ? 'browser' : executionMode,
@@ -9299,6 +9340,17 @@ export const tasksRouter = router({
         .limit(1);
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
+      }
+      if (
+        getExecutionFeatureFlags().USER_BROWSER_ROUTING_V2 && taskRow.status === 'awaiting_user' &&
+        z.object({ metadata: z.object({ browserSource: z.literal('local-chrome') }) })
+          .safeParse(normalizeOutput(taskRow.result)).success && !hasParkedSupercarHandle(input.taskId)
+      ) {
+        // An expired Chrome seat cannot become a generate or unauthenticated cloud run.
+        broadcastToUser(ctx.userId, { type: 'server.supercar.awaiting_user', taskId: input.taskId,
+          question: taskRow.awaitingQuestion ?? '请连接 Chrome，重新选择页面授权后重新提交原任务。',
+          awaitingKind: 'permission' });
+        return { ok: true, state: 'stillAwaiting' as const };
       }
       // A follow-up keeps the brain its task started with. Resolved only after
       // the user and task ownership checks so they stay the first lookups.

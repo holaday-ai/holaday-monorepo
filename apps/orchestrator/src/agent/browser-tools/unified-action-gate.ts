@@ -1,3 +1,7 @@
+import type {
+  SelectedChromeSessionCommand,
+  UserBrowserTargetDescription,
+} from '@holaday/shared-types';
 import type { CDPSession, ElementHandle, Frame, Locator, Page } from 'playwright';
 import { buildAuthParkQuestion } from '../login-detector.js';
 import type { RunSupercarOptions, SupercarAwaitingKind } from '../supercar/agent-loop.js';
@@ -597,6 +601,10 @@ function targetSignature(description: UnifiedActionDescription): string {
       d.inputType ?? null,
       d.url ?? null,
       d.pageUrl ?? null,
+      d.name ?? null,
+      d.title ?? null,
+      d.placeholder ?? null,
+      d.pageTxSignal ?? null,
     ]),
   ]);
 }
@@ -606,7 +614,8 @@ async function sameConfirmedTarget(
   confirmed: UnifiedActionDescription,
   fresh: UnifiedActionDescription,
 ): Promise<boolean> {
-  if (fresh.unverified !== confirmed.unverified) return false;
+  if (fresh.unverified !== confirmed.unverified || fresh.transactional !== confirmed.transactional)
+    return false;
   if (targetSignature(fresh) !== targetSignature(confirmed)) return false;
   const before = confirmed.bindings ?? [];
   const after = fresh.bindings ?? [];
@@ -631,6 +640,40 @@ async function sameConfirmedTarget(
  * confirmation the task must still be live and the target unchanged.
  */
 export function createUnifiedActionGate(options: UnifiedActionGateOptions) {
+  return async (
+    action: UnifiedBrowserAction,
+    phase: 'before' | 'after',
+  ): Promise<ActionGateDecision> => {
+    const probe = new TargetProbe(options.page);
+    try {
+      return await createDescriptionActionGate<UnifiedBrowserAction>({
+        ...options,
+        pageUrl: () => options.page.url(),
+        stillLive: async () =>
+          !options.page.isClosed() && (!options.stillLive || (await options.stillLive())),
+        describe: async (nextAction, nextPhase) =>
+          nextPhase === 'before'
+            ? describeUnifiedAction(options.page, nextAction, options.labelForRef, probe)
+            : LANDING_TOOLS.has(nextAction.tool)
+              ? {
+                  descriptors: [{ kind: 'navigate', url: options.page.url() }],
+                  unverified: null,
+                  transactional: null,
+                }
+              : { descriptors: [], unverified: null, transactional: null },
+      })(action, phase);
+    } finally {
+      await probe.close();
+    }
+  };
+}
+
+export interface DescriptionActionGateOptions<Action>
+  extends Omit<UnifiedActionGateOptions, 'page' | 'labelForRef'> {
+  pageUrl: () => string;
+  describe: (action: Action, phase: 'before' | 'after') => Promise<UnifiedActionDescription>;
+}
+export function createDescriptionActionGate<Action>(options: DescriptionActionGateOptions<Action>) {
   const cancelled: ActionGateDecision = {
     kind: 'stop',
     outcome: { status: 'cancelled', steps: 0 },
@@ -666,7 +709,7 @@ export function createUnifiedActionGate(options: UnifiedActionGateOptions) {
     failClosed: string | null,
   ): Promise<'proceed' | 'confirmed' | ActionGateDecision> => {
     const verdict = await options.onBeforeAction(item);
-    const where = item.pageUrl ?? item.url ?? options.page.url();
+    const where = item.pageUrl ?? item.url ?? options.pageUrl();
     if (!verdict.allowed && verdict.requiresTakeover) {
       const kind = verdict.awaitingKind ?? 'login';
       const question = buildAuthParkQuestion(kind, where);
@@ -692,33 +735,8 @@ export function createUnifiedActionGate(options: UnifiedActionGateOptions) {
     return 'proceed';
   };
 
-  return async (
-    action: UnifiedBrowserAction,
-    phase: 'before' | 'after',
-  ): Promise<ActionGateDecision> => {
-    const probe = new TargetProbe(options.page);
-    try {
-      return await decide(action, phase, probe);
-    } finally {
-      await probe.close();
-    }
-  };
-
-  async function decide(
-    action: UnifiedBrowserAction,
-    phase: 'before' | 'after',
-    probe: TargetProbe,
-  ): Promise<ActionGateDecision> {
-    const description =
-      phase === 'before'
-        ? await describeUnifiedAction(options.page, action, options.labelForRef, probe)
-        : LANDING_TOOLS.has(action.tool)
-          ? {
-              descriptors: [{ kind: 'navigate' as const, url: options.page.url() }],
-              unverified: null,
-              transactional: null,
-            }
-          : { descriptors: [], unverified: null, transactional: null };
+  return async (action: Action, phase: 'before' | 'after'): Promise<ActionGateDecision> => {
+    const description = await options.describe(action, phase);
     let confirmed = false;
     const last = description.descriptors.length - 1;
     for (const [index, item] of description.descriptors.entries()) {
@@ -733,16 +751,16 @@ export function createUnifiedActionGate(options: UnifiedActionGateOptions) {
     if (!confirmed || phase === 'after') return { kind: 'proceed' };
     // The user said yes while parked: before acting, the task must still be
     // live and the target must be the one they confirmed.
-    if (options.aborted() || options.page.isClosed()) return cancelled;
+    if (options.aborted()) return cancelled;
     if (options.stillLive && !(await options.stillLive())) return cancelled;
     // Same node and same object as confirmed — a same-name replacement or a
     // changed href / form action is a different action: re-observe, re-confirm.
-    const fresh = await describeUnifiedAction(options.page, action, options.labelForRef, probe);
+    const fresh = await options.describe(action, 'before');
     if (!(await sameConfirmedTarget(description, fresh))) {
       return { kind: 'skip', message: TARGET_CHANGED_MESSAGE };
     }
     return { kind: 'proceed' };
-  }
+  };
 }
 
 /** Actions after which the landed URL is re-judged (a click can navigate or redirect). */
@@ -755,3 +773,68 @@ const LANDING_TOOLS = new Set<UnifiedBrowserAction['tool']>([
   'download',
   'back',
 ]);
+
+type UserAction = Extract<SelectedChromeSessionCommand, { op: 'act' }>['action'];
+/** Decode only extension-read signals. Model hints never enter this descriptor. */
+export function describeUserBrowserAction(
+  action: UserAction,
+  target: UserBrowserTargetDescription,
+): UnifiedActionDescription {
+  const element = target.element;
+  const descriptor: RuntimeActionDescriptor = {
+    kind: action.kind === 'type' ? 'type' : 'click',
+    label: element.visibleText,
+    ariaLabel: element.ariaLabel,
+    title: element.title,
+    placeholder: element.placeholder,
+    name: element.name,
+    inputType: element.inputType,
+    tagName: element.tagName,
+    pageUrl: target.origin,
+  };
+  const form = target.form;
+  const activates =
+    action.kind === 'key' &&
+    /(?:^|\+)(enter|numpadenter|return|space|spacebar| )$/i.test(action.payload.key);
+  const submit =
+    Boolean(form) &&
+    (activates ||
+      (action.kind === 'click' &&
+        (element.inputType === 'submit' ||
+          element.inputType === 'image' ||
+          (element.tagName === 'button' && element.inputType !== 'button'))));
+  if (!submit || !form)
+    return {
+      descriptors: [descriptor],
+      unverified:
+        (action.kind === 'click' || activates) &&
+        /删除|提交|保存|\b(?:delete|submit|save)\b/i.test(
+          [element.visibleText, element.ariaLabel, element.title].join(' '),
+        )
+          ? '写入或提交操作需要用户确认'
+          : null,
+      transactional: null,
+    };
+  const transactional =
+    form.transactionalAction ||
+    TRANSACTION_ACTION_RE.test(form.action || '') ||
+    TRANSACTION_FIELD_RE.test(form.fieldSignal || '') ||
+    form.hasAmountField;
+  const control = form.submitControl;
+  return {
+    descriptors: [
+      descriptor,
+      {
+        kind: 'click',
+        label: control?.visibleText ?? element.visibleText,
+        ariaLabel: control?.ariaLabel ?? element.ariaLabel,
+        tagName: control?.tagName ?? 'button',
+        inputType: control?.inputType ?? 'submit',
+        pageUrl: form.action ?? target.origin,
+        pageTxSignal: form.fieldSignal,
+      },
+    ],
+    transactional: transactional ? '这次操作会提交涉及付款、订单或删除的表单' : null,
+    unverified: !form.searchLike ? '提交表单需要用户确认' : null,
+  };
+}

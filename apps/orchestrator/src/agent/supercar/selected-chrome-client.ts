@@ -1,4 +1,10 @@
-import type { SelectedChromeSessionCommand } from '@holaday/shared-types';
+import {
+  USER_BROWSER_PROTOCOL,
+  userBrowserProtocolSchema,
+  userBrowserTargetDescriptionSchema,
+  type UserBrowserTargetDescription,
+  type SelectedChromeSessionCommand,
+} from '@holaday/shared-types';
 import { z } from 'zod';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
 import type { BrowserControl } from './browser-control.js';
@@ -10,6 +16,7 @@ type Options = {
   taskId: string;
   extensionClientId: string;
   control: BrowserControl;
+  routingV2?: boolean;
   send: (userId: string, options: ExtensionToolCallOptions) => Promise<ExtensionToolCallOutcome>;
 };
 
@@ -24,6 +31,21 @@ const observationSchema = z.object({
   bodyText: z.string().max(8000),
   ariaSnapshot: z.string().max(16000),
   truncated: z.boolean(),
+  observationRevision: z.number().int().positive().optional(),
+  sourceURL: z.string().url().max(2048).optional(),
+  capturedAt: z.number().int().positive().optional(),
+  frameId: z.string().max(128).optional(),
+  frames: z
+    .array(
+      z.object({
+        frameId: z.string().max(128),
+        origin: z.string().url(),
+        bodyText: z.string().max(2000),
+        ariaSnapshot: z.string().max(4000),
+      }),
+    )
+    .max(5)
+    .optional(),
 });
 const failureSchema = z.object({
   ok: z.literal(false),
@@ -47,6 +69,8 @@ export type SelectedChromeClientReply =
       revision?: number;
       actionOutcome?: 'applied' | 'not_applied';
       closed?: true;
+      target?: UserBrowserTargetDescription;
+      tabs?: Array<{ tabId: number; origin: string; ownership: 'selected' | 'task' }>;
     }
   | { ok: false; error: string; actionOutcome?: 'applied' | 'not_applied' | 'unknown' };
 
@@ -54,6 +78,20 @@ export type SelectedChromeClientReply =
  * planning and carries revision into execute to invalidate pre-handback plans. */
 export class SelectedChromeClient {
   private sessionId: string | null = null;
+  private extensionRevision = 0;
+  private origins: readonly string[] = [];
+  private prepared: {
+    target: UserBrowserTargetDescription;
+    action: string;
+    revision: number;
+  } | null = null;
+  private taskTabs = new Set<number>();
+  get routingV2(): boolean {
+    return this.options.routingV2 === true;
+  }
+  get grantedOrigins(): readonly string[] {
+    return this.origins;
+  }
   private tabId: number | null = null;
   private pending: Promise<SelectedChromeClientReply> | null = null;
   private closeAttempt: Promise<SelectedChromeClientReply> | null = null;
@@ -71,10 +109,27 @@ export class SelectedChromeClient {
     if (this.sessionId || this.openSent || this.pending || this.closing)
       return fail('session_unavailable');
     this.tabId = target.tabId;
+    this.origins = [new URL(target.expectedUrl).origin];
+    this.taskTabs.add(target.tabId);
     return this.track(async () => {
       if (this.closing || !this.options.control.canAgentAct()) return fail('replan_required');
       this.openSent = true;
-      return this.accept(await this.send({ op: 'open', target }), 'open');
+      return this.accept(
+        await this.send({
+          op: 'open',
+          target,
+          ...(this.routingV2
+            ? {
+                protocol: {
+                  ...USER_BROWSER_PROTOCOL,
+                  capabilities: [...USER_BROWSER_PROTOCOL.capabilities],
+                },
+                grantedOrigins: [...this.origins],
+              }
+            : {}),
+        }),
+        'open',
+      );
     });
   }
 
@@ -92,11 +147,130 @@ export class SelectedChromeClient {
         expectedRevision !== this.revisionValue
       )
         return fail('replan_required');
+      const prepared = this.prepared;
+      this.prepared = null;
+      if (
+        this.routingV2 &&
+        ['click', 'type', 'key', 'select'].includes(action.kind) &&
+        (!prepared ||
+          prepared.revision !== expectedRevision ||
+          prepared.action !== JSON.stringify(action))
+      )
+        return { ok: false, error: 'target_binding_required', actionOutcome: 'not_applied' };
       return this.accept(
-        await this.send({ op: 'act', sessionId: this.sessionId, action }),
+        await this.send({
+          op: 'act',
+          sessionId: this.sessionId,
+          action,
+          ...(prepared
+            ? {
+                binding: {
+                  token: prepared.target.token,
+                  observationRevision: prepared.target.observationRevision,
+                },
+              }
+            : {}),
+        }),
         'act',
         action.kind === 'wait',
       );
+    });
+  }
+
+  async describe(action: Action, expectedRevision: number): Promise<SelectedChromeClientReply> {
+    if (!this.routingV2) return fail('capability_missing');
+    if (!this.sessionId || this.closing) return fail('session_unavailable');
+    if (this.pending) return fail('browser_busy');
+    if (
+      !this.ready ||
+      !this.options.control.canAgentAct() ||
+      expectedRevision !== this.revisionValue
+    )
+      return fail('replan_required');
+    return this.track(async () => {
+      this.prepared = null;
+      const outcome = await this.send({
+        op: 'describe',
+        sessionId: this.sessionId ?? '',
+        action,
+        observationRevision: this.extensionRevision,
+      });
+      const parsed = z
+        .object({
+          ok: z.literal(true),
+          sessionId: z.string().uuid(),
+          target: userBrowserTargetDescriptionSchema,
+        })
+        .safeParse(outcome.result);
+      if (!outcome.ok || !parsed.success) {
+        const failed = failureSchema.safeParse(outcome.result);
+        return fail(failed.success ? failed.data.error : 'target_unreadable');
+      }
+      const target = parsed.data.target;
+      if (
+        parsed.data.sessionId !== this.sessionId ||
+        target.tabId !== this.tabId ||
+        target.observationRevision !== this.extensionRevision ||
+        !this.origins.includes(target.origin) ||
+        this.closing ||
+        !this.options.control.canAgentAct()
+      )
+        return fail('stale_observation');
+      this.prepared = { target, action: JSON.stringify(action), revision: expectedRevision };
+      return { ok: true, target };
+    });
+  }
+  async tabs(
+    command: Omit<Extract<SelectedChromeSessionCommand, { op: 'tabs' }>, 'op' | 'sessionId'>,
+  ): Promise<SelectedChromeClientReply> {
+    if (!this.routingV2) return fail('capability_missing');
+    if (!this.sessionId || this.closing) return fail('session_unavailable');
+    if (this.pending || !this.options.control.canAgentAct()) return fail('replan_required');
+    if (command.operation === 'switch' && !this.taskTabs.has(command.tabId ?? -1))
+      return fail('task_tab_required');
+    if (
+      command.operation === 'new' &&
+      (!command.url || !this.origins.includes(new URL(command.url).origin))
+    )
+      return fail('origin_grant_required');
+    return this.track(async () => {
+      this.prepared = null;
+      const outcome = await this.send({ op: 'tabs', sessionId: this.sessionId ?? '', ...command });
+      const parsed = z
+        .object({
+          ok: z.literal(true),
+          sessionId: z.string().uuid(),
+          tabs: z
+            .array(
+              z.object({
+                tabId: z.number().int().nonnegative(),
+                origin: z.string().url(),
+                ownership: z.enum(['selected', 'task']),
+              }),
+            )
+            .max(10),
+          observation: observationSchema.optional(),
+        })
+        .safeParse(outcome.result);
+      if (!outcome.ok || !parsed.success || parsed.data.sessionId !== this.sessionId) {
+        const f = failureSchema.safeParse(outcome.result);
+        return fail(f.success ? f.data.error : 'invalid_receipt');
+      }
+      if (command.operation === 'list') return { ok: true, tabs: parsed.data.tabs };
+      const obs = parsed.data.observation;
+      if (
+        !obs ||
+        !this.origins.includes(obs.origin) ||
+        !parsed.data.tabs.some(
+          (t) => t.tabId === obs.tabId && (command.operation !== 'new' || t.ownership === 'task'),
+        )
+      )
+        return this.uncertain('invalid_receipt', 'act');
+      if (command.operation === 'switch' && obs.tabId !== command.tabId)
+        return this.uncertain('invalid_receipt', 'act');
+      this.taskTabs.add(obs.tabId);
+      this.tabId = obs.tabId;
+      return this.accept(outcome, 'observe');
     });
   }
 
@@ -149,6 +323,7 @@ export class SelectedChromeClient {
   private async refresh(): Promise<SelectedChromeClientReply> {
     if (!this.sessionId || this.closing) return fail('session_unavailable');
     this.ready = false;
+    this.prepared = null;
     return this.accept(await this.send({ op: 'observe', sessionId: this.sessionId }), 'observe');
   }
 
@@ -228,7 +403,22 @@ export class SelectedChromeClient {
       (op === 'act' && !reply.actionOutcome)
     )
       return this.uncertain('invalid_receipt', op);
+    if (this.routingV2) {
+      const protocol = userBrowserProtocolSchema.safeParse(
+        (outcome.result as Record<string, unknown>).protocol,
+      );
+      if (!protocol.success || !reply.observation.observationRevision) {
+        this.ready = false;
+        return fail('capability_missing');
+      }
+      if (!this.origins.includes(reply.observation.origin)) {
+        this.ready = false;
+        return fail('origin_grant_required');
+      }
+      this.extensionRevision = reply.observation.observationRevision;
+    }
     this.ready = true;
+    this.prepared = null;
     this.revisionValue++;
     return {
       ok: true,

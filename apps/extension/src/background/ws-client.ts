@@ -1,3 +1,4 @@
+import { USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
 import {
   type ClientMessage,
   HEARTBEAT_INTERVAL_MS,
@@ -514,7 +515,7 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
     void persistReconnectAttempts(0);
     void persistCappedAt(null);
     // Header path may have been stripped by some proxies; fallback hello.
-    send({ type: 'client.hello', token, extensionVersion: chrome.runtime.getManifest().version });
+    send({ type: 'client.hello', token, extensionVersion: chrome.runtime.getManifest().version,userBrowserProtocol:{...USER_BROWSER_PROTOCOL,capabilities:[...USER_BROWSER_PROTOCOL.capabilities]} });
 
     state.pingTimer = setInterval(() => {
       send({ type: 'client.pong', at: Date.now() });

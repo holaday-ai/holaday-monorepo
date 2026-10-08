@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  userBrowserProtocolSchema,
+  exactWebOriginSchema,
+  userBrowserBindingSchema,
+} from './browser-user-contract.js';
 import { resilientSelectorSchema } from './selector.js';
 
 // Legacy lanes omit these fields. Core text publishers always send both;
@@ -12,10 +17,7 @@ const httpUrlSchema = z
   .string()
   .url()
   .max(2048)
-  .refine(
-    (raw) => /^https?:\/\//i.test(raw),
-    { message: 'expected http(s) URL' },
-  );
+  .refine((raw) => /^https?:\/\//i.test(raw), { message: 'expected http(s) URL' });
 
 const selectedChromeTargetSchema = z.object({
   tabId: z.number().int().nonnegative(),
@@ -58,22 +60,69 @@ const selectedChromeActionSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({
+      kind: z.literal('scroll'),
+      payload: z
+        .object({
+          deltaX: z.number().min(-4000).max(4000).default(0),
+          deltaY: z.number().min(-4000).max(4000),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('select'),
+      selector: resilientSelectorSchema,
+      payload: z.object({ text: z.string().max(16000) }).strict(),
+      deadlineMs: selectedChromeActionDeadline,
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal('wait'),
       selector: resilientSelectorSchema.optional(),
-      payload: z.object({ ms: z.number().int().min(0).max(10_000) }).strict().optional(),
+      payload: z
+        .object({ ms: z.number().int().min(0).max(10_000) })
+        .strict()
+        .optional(),
       deadlineMs: selectedChromeActionDeadline,
     })
     .strict(),
 ]);
 
 export const selectedChromeSessionCommandSchema = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('open'), target: selectedChromeTargetSchema }).strict(),
+  z
+    .object({
+      op: z.literal('open'),
+      target: selectedChromeTargetSchema,
+      protocol: userBrowserProtocolSchema.optional(),
+      grantedOrigins: z.array(exactWebOriginSchema).min(1).max(20).optional(),
+    })
+    .strict(),
   z.object({ op: z.literal('observe'), sessionId: z.string().uuid() }).strict(),
+  z
+    .object({
+      op: z.literal('describe'),
+      sessionId: z.string().uuid(),
+      action: selectedChromeActionSchema,
+      observationRevision: z.number().int().positive(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('tabs'),
+      sessionId: z.string().uuid(),
+      operation: z.enum(['list', 'new', 'switch']),
+      url: httpUrlSchema.optional(),
+      tabId: z.number().int().nonnegative().optional(),
+    })
+    .strict(),
   z
     .object({
       op: z.literal('act'),
       sessionId: z.string().uuid(),
       action: selectedChromeActionSchema,
+      binding: userBrowserBindingSchema.optional(),
     })
     .strict(),
   z.object({ op: z.literal('close'), sessionId: z.string().uuid() }).strict(),
@@ -94,6 +143,7 @@ export const clientHelloSchema = z.object({
   type: z.literal('client.hello'),
   token: z.string().min(1).max(4096),
   extensionVersion: z.string().max(128).optional(),
+  userBrowserProtocol: userBrowserProtocolSchema.optional(),
   userAgent: z.string().max(512).optional(),
 });
 
@@ -858,14 +908,7 @@ export const serverTaskProgressSchema = z.object({
    *                图片…" not the generic "正在生成回答…"
    */
   subStatus: z
-    .enum([
-      'planning',
-      'browsing',
-      'extracting',
-      'verifying',
-      'generating',
-      'generating_image',
-    ])
+    .enum(['planning', 'browsing', 'extracting', 'verifying', 'generating', 'generating_image'])
     .optional(),
 });
 
@@ -892,14 +935,7 @@ export const serverBatchProgressSchema = z.object({
     .object({
       batchItemId: z.string(),
       seq: z.number().int().nonnegative(),
-      status: z.enum([
-        'pending',
-        'running',
-        'completed',
-        'partial_success',
-        'failed',
-        'cancelled',
-      ]),
+      status: z.enum(['pending', 'running', 'completed', 'partial_success', 'failed', 'cancelled']),
       taskId: z.string().optional(),
       errorMessage: z.string().optional(),
     })

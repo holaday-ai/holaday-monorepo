@@ -1,3 +1,4 @@
+import { getFeatureFlags } from '../../execution/feature-flags.js';
 import type { SelectedChromeSessionCommand } from '@holaday/shared-types';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
 import { BrowserControl } from './browser-control.js';
@@ -67,6 +68,7 @@ export class LocalChromeTaskSessions {
       taskId,
       extensionClientId: selection.extensionClientId,
       control,
+      routingV2: getFeatureFlags().USER_BROWSER_ROUTING_V2,
       send,
     });
     const session = {
