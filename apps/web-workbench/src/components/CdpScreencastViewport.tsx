@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { BrowserViewportToolbar } from '@/components/BrowserViewportToolbar';
 import type { BrowserFrameGeometry } from '@holaday/shared-types';
 import {
   INITIAL_CDP_INPUT_BRIDGE_STATE,
@@ -17,6 +18,7 @@ import {
   browserViewportV2ForHost,
   shouldSendBrowserViewport,
   type BrowserViewportSize,
+  type BrowserViewportRenderMode,
 } from '@/lib/browser-workspace-viewport';
 import {
   mapClientPointToScreencast,
@@ -150,9 +152,10 @@ export function CdpScreencastViewport({
   const observationEpochRef = React.useRef(0);
   const viewportPendingRef = React.useRef(false);
   const requestedViewportRef = React.useRef<BrowserViewportSize | null>(null);
-  const [renderMode, setRenderMode] = React.useState<'desktop' | 'panel'>('desktop');
+  const [renderMode, setRenderMode] = React.useState<BrowserViewportRenderMode>('auto');
   const [localMode, setLocalMode] = React.useState<'contain' | 'original'>('contain');
   const [zoom, setZoom] = React.useState(1);
+  const [displayScale, setDisplayScale] = React.useState(1);
   const [pan, setPan] = React.useState({x:0,y:0});
   const invalidateGeometry = React.useCallback(() => { geometryRef.current = null; observationEpochRef.current++; if(canvasRef.current)delete canvasRef.current.dataset.frameId; }, []);
   const hiddenInputRef = React.useRef<HTMLInputElement>(null);
@@ -314,6 +317,7 @@ export function CdpScreencastViewport({
       // center the first view on the readable region and recompute it
       // when the host changes size.
       const scale = viewportV2 && localMode === 'original' ? zoom : placement.scale;
+      setDisplayScale(scale);
       canvas.style.setProperty('--hd-scale', String(scale));
       canvas.style.setProperty('--hd-offset-x', `${viewportV2 && localMode === 'original' ? pan.x : placement.offsetX}px`);
       canvas.style.setProperty('--hd-offset-y', `${viewportV2 && localMode === 'original' ? pan.y : placement.offsetY}px`);
@@ -758,27 +762,23 @@ export function CdpScreencastViewport({
   };
 
   return (
-    <div
-      ref={hostRef}
-      className={cn(
-        'cdp-screencast-host relative h-full w-full min-h-0 min-w-0',
+    <div className={cn('relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden', className)}>
+      {viewportV2 && <BrowserViewportToolbar
+        mode={localMode} zoom={zoom} displayScale={displayScale}
+        onFit={() => { setLocalMode('contain'); setPan({x:0,y:0}); }}
+        onOriginal={() => { setLocalMode('original'); setZoom(1); setPan({x:0,y:0}); }}
+        onZoom={() => { setLocalMode('original'); setZoom(localMode === 'contain' ? 1.25 : Math.min(4, zoom + .25)); }}
+        onZoomOut={() => setZoom(z => Math.max(.25, z - .25))}
+        onPan={(x,y) => setPan(p => ({x:p.x+x,y:p.y+y}))}
+        renderMode={renderMode}
+        onRenderMode={mode => { lastViewportRef.current = null; setRenderMode(mode); }}
+        readOnly={viewOnly || !writeReady}
+        readOnlyLabel="点击和输入暂未开放"
+      />}
+      <div ref={hostRef} className={cn(
+        'cdp-screencast-host relative w-full min-h-0 min-w-0 flex-1',
         !viewportV2 && fitMode === 'readable' ? 'overflow-auto' : 'overflow-hidden',
-        className,
-      )}
-    >
-      {viewportV2 && <div className="absolute bottom-2 left-2 right-2 z-10 flex flex-wrap items-center gap-1 rounded-md border bg-white/95 p-1 text-xs text-gray-700" aria-label="画面显示设置">
-        <button type="button" onClick={()=>{setLocalMode('contain');setPan({x:0,y:0});}}>适应画面</button>
-        <button type="button" onClick={()=>{setLocalMode('original');setZoom(1);setPan({x:0,y:0});}}>原尺寸 / 放大</button>
-        <label><input type="checkbox" checked={renderMode==='panel'} onChange={e=>{lastViewportRef.current=null;setRenderMode(e.target.checked?'panel':'desktop');}}/>按面板宽度渲染</label>
-        {localMode==='original' && <>
-          <button type="button" aria-label="缩小画面" title="缩小画面" onClick={()=>setZoom(z=>Math.max(.25,z-.25))}>−</button>
-          <span>{Math.round(zoom*100)}%</span>
-          <button type="button" aria-label="放大画面" title="放大画面" onClick={()=>setZoom(z=>Math.min(4,z+.25))}>+</button>
-          {([['左',80,0],['右',-80,0],['上',0,80],['下',0,-80]] as const).map(([label,x,y])=><button type="button" key={label} aria-label={`平移画面${label}`} title={`平移画面${label}`} onClick={()=>setPan(p=>({x:p.x+x,y:p.y+y}))}>{label}</button>)}
-        </>}
-        <span>当前窗口 · 滚轮 / 触摸滚动网页</span>
-        <span>{writeReady ? "" : "可滚动查看，暂不支持点击和输入"}</span>
-      </div>}
+      )}>
       <div
         aria-hidden="true"
         className="pointer-events-none"
@@ -849,6 +849,7 @@ export function CdpScreencastViewport({
         className="absolute h-px w-px opacity-0"
         style={{ pointerEvents: 'none', top: 0, left: 0 }}
       />
+      </div>
     </div>
   );
 }

@@ -18,16 +18,52 @@ describe('V2 full frame placement and reversible coordinates', () => {
       }
     }
   });
-  it('keeps desktop width until panel rendering is explicitly selected', () => {
+  it('fills portrait panels with a desktop-width viewport while landscape keeps 1280×800', () => {
+    for (const [hostWidth, hostHeight] of [
+      [380, 690],
+      [420, 810],
+      [750, 990],
+    ]) {
+      const remote = viewport.browserViewportV2ForHost({
+        hostWidth,
+        hostHeight,
+        renderMode: 'auto',
+      });
+      expect(remote?.width).toBe(1024);
+      if (!remote) throw new Error('expected valid viewport');
+      const placement = fit.placeScreencastContainTop({
+        hostWidth,
+        hostHeight,
+        sourceWidth: remote.width,
+        sourceHeight: remote.height,
+      });
+      if (!placement) throw new Error('expected valid frame placement');
+      expect(
+        (placement.width * placement.height) / (hostWidth * hostHeight),
+      ).toBeGreaterThanOrEqual(0.85);
+    }
+    expect(
+      viewport.browserViewportV2ForHost({ hostWidth: 1440, hostHeight: 800, renderMode: 'auto' }),
+    ).toEqual({ width: 1280, height: 800 });
+  });
+  it('keeps explicit desktop profiles and a manual 1280 width, with bounded portrait height', () => {
     expect(
       viewport.browserViewportV2ForHost({ hostWidth: 390, hostHeight: 760, renderMode: 'desktop' }),
-    ).toEqual({ width: 1280, height: 800 });
+    ).toEqual({ width: 1280, height: 2400 });
+    expect(
+      viewport.browserViewportV2ForHost({
+        hostWidth: 390,
+        hostHeight: 760,
+        renderMode: 'auto',
+        desktopViewport: { width: 1600, height: 900 },
+      }),
+    ).toEqual({ width: 1600, height: 900 });
+    expect(
+      viewport.browserViewportV2ForHost({ hostWidth: 390, hostHeight: 10000, renderMode: 'auto' }),
+    ).toEqual({ width: 1024, height: 2400 });
     expect(
       viewport.browserViewportV2ForHost({ hostWidth: 390, hostHeight: 760, renderMode: 'panel' }),
     ).toEqual({ width: 390, height: 760 });
-    expect(
-      viewport.browserViewportV2ForHost({ hostWidth: 1600, hostHeight: 900, renderMode: 'panel' }),
-    ).toEqual({ width: 1600, height: 900 });
   });
   it('maps displayed image coordinates to CSS independently of image resolution, DPR, local zoom and pan', () => {
     for (const imageWidth of [800, 1440, 1600, 3200])

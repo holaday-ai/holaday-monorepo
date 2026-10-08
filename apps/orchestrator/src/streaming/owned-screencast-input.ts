@@ -9,6 +9,7 @@ import {
 
 export function createOwnedScreencastInputBridge(options: {
   instance: BrowserInstance;
+  maxViewportHeight?: number;
   peek: (taskId: string) => BrowserInstance | null;
   onViewportApplied?: (viewport: AppliedBrowserViewport) => void;
   onViewportRequested?: () => void;
@@ -31,6 +32,7 @@ export function createOwnedScreencastInputBridge(options: {
     return browserControlSessions.get(instance, instance.userId, instance.taskId);
   };
   return new DeferredScreencastInputBridge({
+    maxViewportHeight: options.maxViewportHeight,
     onViewportApplied: options.onViewportApplied,
     beforeDispatch: options.beforeDispatch,
     onViewportRequested: options.onViewportRequested,

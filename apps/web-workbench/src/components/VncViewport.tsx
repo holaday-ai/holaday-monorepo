@@ -1,5 +1,6 @@
 import { installVncPointerPrecisionBridge } from '@/lib/vnc-pointer-precision';
 import * as React from 'react';
+import { BrowserViewportToolbar } from '@/components/BrowserViewportToolbar';
 import {
   placeScreencastReadableTop,
   readableScreencastAutoScrollKey,
@@ -95,6 +96,7 @@ export function VncViewport({
 }: Props): JSX.Element {
   const [localMode,setLocalMode]=React.useState<'contain'|'original'>('contain');
   const [zoom,setZoom]=React.useState(1);
+  const [displayScale,setDisplayScale]=React.useState(1);
   const [pan,setPan]=React.useState({x:0,y:0});
   const viewportRef = React.useRef<HTMLDivElement | null>(null);
   const targetRef = React.useRef<HTMLDivElement | null>(null);
@@ -241,6 +243,7 @@ export function VncViewport({
         target.style.width=`${canvas.width*zoom}px`; target.style.height=`${canvas.height*zoom}px`;
         target.style.position='absolute';target.style.left=`${pan.x}px`;target.style.top=`${pan.y}px`;
         target.style.maxWidth='none';target.style.maxHeight='none';
+        setDisplayScale(zoom);
       }
       return;
     }
@@ -248,6 +251,8 @@ export function VncViewport({
     if (viewportV2 || fitMode !== 'readable') {
       target.style.width = '100%';
       target.style.height = '100%';
+      const canvas=target.querySelector('canvas');
+      if(canvas?.width && canvas?.height) setDisplayScale(Math.min(viewport.clientWidth/canvas.width,viewport.clientHeight/canvas.height));
       target.style.marginLeft = '';
       target.style.marginRight = '';
       readableAutoScrollKeyRef.current = null;
@@ -360,37 +365,26 @@ export function VncViewport({
   }, [recomputeReadableFrame, viewportV2]);
 
   return (
-    <div
-      ref={viewportRef}
-      data-fit-mode={viewportV2 && localMode==='original' ? 'readable' : fitMode}
-      // `min-h-0 min-w-0` — needed so this div can SHRINK inside a
-      // flex parent; without them the intrinsic size of the canvas
-      // child would push the parent wider than intended, defeating
-      // the whole draggable-split layout.
-      // `overflow-hidden` — canvas has fixed intrinsic dimensions
-      // (remote Xvfb geometry), and without overflow clipping a
-      // brief sizing gap at mount shows a full 1920x1080 canvas
-      // bleeding out of the panel.
-      className={cn(
-        'vnc-viewport-host relative h-full w-full min-h-0 min-w-0',
-        !viewportV2 && fitMode === 'readable' ? 'overflow-auto' : 'overflow-hidden',
-        className,
-      )}
-    >
-      {viewportV2 && <div className="absolute bottom-2 left-2 right-2 z-10 flex flex-wrap items-center gap-1 rounded-md border bg-white/95 p-1 text-xs text-gray-700" aria-label="VNC 画面显示设置">
-        <button type="button" onClick={()=>{setLocalMode('contain');setPan({x:0,y:0});}}>适应画面</button>
-        <button type="button" onClick={()=>{setLocalMode('original');setZoom(1);setPan({x:0,y:0});}}>原尺寸 / 放大</button>
-        {localMode==='original' && <>
-          <button type="button" aria-label="缩小画面" title="缩小画面" onClick={()=>setZoom(z=>Math.max(.25,z-.25))}>−</button><span>{Math.round(zoom*100)}%</span>
-          <button type="button" aria-label="放大画面" title="放大画面" onClick={()=>setZoom(z=>Math.min(4,z+.25))}>+</button>
-          {([['左',80,0],['右',-80,0],['上',0,80],['下',0,-80]] as const).map(([label,x,y])=><button type="button" key={label} aria-label={`平移画面${label}`} title={`平移画面${label}`} onClick={()=>setPan(p=>({x:p.x+x,y:p.y+y}))}>{label}</button>)}
-        </>}
-        <span>当前窗口 · 仅支持查看</span>
-      </div>}
+    <div className={cn('relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden', className)}>
+      {viewportV2 && <BrowserViewportToolbar
+        mode={localMode} zoom={zoom} displayScale={displayScale}
+        onFit={() => { setLocalMode('contain'); setPan({x:0,y:0}); }}
+        onOriginal={() => { setLocalMode('original'); setZoom(1); setPan({x:0,y:0}); }}
+        onZoom={() => { setLocalMode('original'); setZoom(localMode === 'contain' ? 1.25 : Math.min(4,zoom+.25)); }}
+        onZoomOut={() => setZoom(z=>Math.max(.25,z-.25))}
+        onPan={(x,y)=>setPan(p=>({x:p.x+x,y:p.y+y}))}
+        readOnly
+      />}
+      <div ref={viewportRef}
+        data-fit-mode={viewportV2 && localMode==='original' ? 'readable' : fitMode}
+        className={cn('vnc-viewport-host relative w-full min-h-0 min-w-0 flex-1',
+          !viewportV2 && fitMode === 'readable' ? 'overflow-auto' : 'overflow-hidden',
+        )}>
       <div
         ref={targetRef}
         className="vnc-viewport-target relative h-full w-full min-h-0 min-w-0"
       />
+      </div>
     </div>
   );
 }

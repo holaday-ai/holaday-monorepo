@@ -57,8 +57,8 @@ wsserver.on('connection',(ws,req)=>{
  if(req.url.startsWith('/rfb')){void rfbFixture(ws);return;}
  serverWs=ws;const currentSource=source;ws.send(JSON.stringify({type:'viewport-v2-ready',controlReady:true}));const guard=new BrowserFrameGuard();
  const currentStreamer=new CdpStreamer({getPage:async()=>currentSource,ws,logger:pino({level:'silent'}),viewportV2:true,onFrame:g=>{latest=g;guard.observe(g);},onObservationInvalidated:()=>{guard.invalidate();if(ws.readyState===1)ws.send(JSON.stringify({type:'observation-invalidated'}));}});
- const currentHandler=new CdpInputHandler(()=>currentStreamer.getSession(),pino({level:'silent'}),()=>currentStreamer.requestFrameRefresh(),undefined,true,async()=>currentSource);
- const bridge=new DeferredScreencastInputBridge({onViewportApplied:v=>{currentStreamer.invalidateObservation();ws.send(JSON.stringify({type:'viewport-applied',...v}));currentStreamer.requestFrameRefresh();},beforeDispatch:async envelope=>{if(envelope.payload.type==='viewport'){currentStreamer.invalidateObservation();return;}if(!guard.validate(envelope.observation))throw new Error('stale');},runOwnedInput:async(_,act)=>act(new AbortController().signal),queueViewport:act=>void act(new AbortController().signal)});
+ const currentHandler=new CdpInputHandler(()=>currentStreamer.getSession(),pino({level:'silent'}),()=>currentStreamer.requestFrameRefresh(),undefined,true,async()=>currentSource,2400);
+ const bridge=new DeferredScreencastInputBridge({maxViewportHeight:2400,onViewportApplied:v=>{currentStreamer.invalidateObservation();ws.send(JSON.stringify({type:'viewport-applied',...v}));currentStreamer.requestFrameRefresh();},beforeDispatch:async envelope=>{if(envelope.payload.type==='viewport'){currentStreamer.invalidateObservation();return;}if(!guard.validate(envelope.observation))throw new Error('stale');},runOwnedInput:async(_,act)=>act(new AbortController().signal),queueViewport:act=>void act(new AbortController().signal)});
  ws.on('message',raw=>{const m=JSON.parse(String(raw));if(m.type==='observe'){currentStreamer.requestFrameRefresh();return;}if(m.payload)received.push(m.payload);void bridge.receive(String(raw)).catch(()=>{rejected++;});});
  streamer=currentStreamer;
  void currentStreamer.start().then(()=>bridge.attach(currentHandler));ws.on('close',()=>{bridge.detach();void currentStreamer.stop();});
@@ -114,8 +114,8 @@ try {
  const inner=await source.frameLocator('#frame').locator('#inner').boundingBox();await clickRemote(inner.x+inner.width/2,inner.y+inner.height/2);assert(await source.frameLocator('#frame').locator('#inner').evaluate(el=>el===document.activeElement));
  records.push({chinese:true,fixed:true,iframe:true});
  // Local original/zoom/pan controls preserve the remote viewport.
- await viewer.getByRole('button',{name:'原尺寸 / 放大',exact:true}).click();await viewer.getByRole('button',{name:'放大画面'}).click();await viewer.getByRole('button',{name:'平移画面右'}).click();await viewer.screenshot({path:out+'/screens/cdp-local-zoom-pan.png'});assert(!received.some(m=>m.type==='viewport'&&m.width!==1600));
- await viewer.getByRole('button',{name:'适应画面',exact:true}).click();await viewer.getByLabel('按面板宽度渲染').check();await viewer.waitForTimeout(700);assert(received.some(m=>m.type==='viewport'&&m.width===430));
+ await viewer.getByRole('button',{name:'100%',exact:true}).click();await viewer.getByRole('button',{name:'放大',exact:true}).click();await viewer.getByRole('button',{name:'平移画面',exact:true}).click();await viewer.getByRole('menuitem',{name:'平移画面右',exact:true}).click();await viewer.screenshot({path:out+'/screens/cdp-local-zoom-pan.png'});assert(!received.some(m=>m.type==='viewport'&&m.width!==1600));
+ await viewer.getByRole('button',{name:'适应',exact:true}).click();await viewer.getByRole('button',{name:'网页显示模式'}).click();await viewer.getByRole('menuitem',{name:'按面板宽度渲染',exact:true}).click();await viewer.waitForTimeout(700);assert(received.some(m=>m.type==='viewport'&&m.width===430));
  records.push({explicitPanelRendering:true,localPanZoom:true});
  await streamer.stop();await viewer.close();await source.close();await ctx.close();
  }
@@ -126,8 +126,9 @@ try {
   records.push({transport:'VNC',panel,framebufferWidth:width,dpr,error});await v.screenshot({path:out+`/screens/vnc-panel${panel}-fb${width}-dpr${dpr}.png`});
  }await v.close();await context.close();}
 
- // Narrow portrait before/after, including the actual BrowserPanel parent.
- const parentContext=await browser.newContext({viewport:{width:390,height:844},hasTouch:true});
+ // Actual BrowserPanel: portrait coverage, toolbar layout, mode and ACK flow.
+ const portraitDpr=Number(process.env.PR1_PORTRAIT_DPR ?? 1);
+ const parentContext=await browser.newContext({hasTouch:true,deviceScaleFactor:portraitDpr});
  await setSource(parentContext,1280,1);const parentViewer=await parentContext.newPage();
  await parentViewer.addInitScript(()=>localStorage.setItem('holaday.access_token','local-fixture'));
  await parentViewer.route('**/api/**', async route=>{
@@ -135,21 +136,34 @@ try {
   const paths=new URL(route.request().url()).pathname.split('/').at(-1).split(',');
   return route.fulfill({json:paths.map(()=>({result:{data:{taskId:'tsk_fixture',phase:'agent',lease:null,supported:true,error:null,mode:'running'}}}))});
  });
- await parentViewer.goto(`http://127.0.0.1:${port}/?width=390&source=1280&v2=0&ws=${encodeURIComponent('ws://127.0.0.1:'+wsport+'/cdp')}`);
- await parentViewer.waitForFunction(()=>window.__frames>0);await parentViewer.waitForTimeout(450);
- await parentViewer.screenshot({path:out+'/screens/portrait-before.png'});
- await streamer.stop();
- await parentViewer.goto(`http://127.0.0.1:${port}/?parent=1`);
- await parentViewer.waitForSelector('canvas[data-frame-id]',{timeout:15000});
- const parentBounds=await parentViewer.evaluate(()=>{
-  const c=document.querySelector('canvas'),rect=c.getBoundingClientRect(),host=c.closest('.cdp-screencast-host');
-  return {bodyWidth:document.documentElement.clientWidth,bodyScrollWidth:document.documentElement.scrollWidth,hostWidth:host.clientWidth,hostScrollWidth:host.scrollWidth,frameLeft:rect.left,frameRight:rect.right};
- });
- assert.equal(parentBounds.bodyWidth,parentBounds.bodyScrollWidth);assert.equal(parentBounds.hostWidth,parentBounds.hostScrollWidth);
- assert(parentBounds.frameLeft>=0&&parentBounds.frameRight<=390);
- await parentViewer.screenshot({path:out+'/screens/portrait-after-actual-browser-panel.png'});
- records.push({actualBrowserPanelPortrait:parentBounds});
- await streamer.stop();await parentViewer.close();await source.close();await parentContext.close();
+ for(const [panel,height] of [[390,844],[430,932],[760,1100]]) {
+  await parentViewer.setViewportSize({width:panel,height});
+  await parentViewer.goto(`http://127.0.0.1:${port}/?parent=1`);
+  await parentViewer.waitForSelector('canvas[data-frame-id]',{timeout:15000});
+  const bounds=await parentViewer.evaluate(()=>{
+   const c=document.querySelector('canvas'),rect=c.getBoundingClientRect(),host=c.closest('.cdp-screencast-host'),toolbar=document.querySelector('[role="toolbar"][aria-label="画面工具栏"]'),tr=toolbar.getBoundingClientRect();
+   const br=toolbar.querySelector('button').getBoundingClientRect(),surface=toolbar.parentElement;
+   const section=c.closest('section'),sr=section.getBoundingClientRect();
+   return {bodyWidth:document.documentElement.clientWidth,bodyScrollWidth:document.documentElement.scrollWidth,hostWidth:host.clientWidth,hostHeight:host.clientHeight,hostScrollWidth:host.scrollWidth,frameLeft:rect.left,frameRight:rect.right,frameTop:rect.top,frameBottom:rect.bottom,coverage:rect.width*rect.height/(host.clientWidth*host.clientHeight),coverageIncludingToolbar:rect.width*rect.height/(surface.clientWidth*surface.clientHeight),fullPanelCoverage:rect.width*rect.height/(sr.width*sr.height),toolbarBottom:tr.bottom,toolbarHeight:tr.height,toolbarWidth:toolbar.clientWidth,toolbarScrollWidth:toolbar.scrollWidth,buttonHeight:br.height,checkboxes:toolbar.querySelectorAll('input[type="checkbox"]').length};
+  });
+  assert.equal(bounds.bodyWidth,bounds.bodyScrollWidth);assert.equal(bounds.hostWidth,bounds.hostScrollWidth);assert(bounds.frameLeft>=0&&bounds.frameRight<=panel);
+  assert(bounds.coverage>=.85,`portrait coverage ${panel}: ${bounds.coverage}`);assert(bounds.coverageIncludingToolbar>=.85);assert(bounds.fullPanelCoverage>=.85,`full panel coverage ${panel}: ${bounds.fullPanelCoverage}`);assert.equal(bounds.toolbarWidth,bounds.toolbarScrollWidth);assert(bounds.toolbarBottom<=bounds.frameTop+.1);assert(bounds.toolbarHeight<=42);assert(bounds.buttonHeight<=30);assert.equal(bounds.checkboxes,0);
+  assert.equal(latest.cssWidth,1024);assert(latest.cssHeight<=2400);
+  const active=parentViewer.getByRole('button',{name:'适应',exact:true});assert.equal(await active.getAttribute('aria-pressed'),'true');
+  assert.equal(await active.evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(255, 0, 97)');
+  await parentViewer.screenshot({path:out+`/screens/portrait-fix-${panel}.png`});
+  if(panel===390)await parentViewer.getByRole('toolbar',{name:'画面工具栏'}).screenshot({path:out+'/screens/toolbar-fix-closeup.png'});
+  assert.equal(await source.evaluate(()=>window.devicePixelRatio),portraitDpr);
+  records.push({portraitFix:true,panel,height,dpr:portraitDpr,remoteWidth:latest.cssWidth,remoteHeight:latest.cssHeight,...bounds});
+  // Manual desktop-width fallback must preserve a confirmed matching frame.
+  await parentViewer.getByRole('button',{name:'网页显示模式'}).click();await parentViewer.getByRole('menuitem',{name:'桌面宽度 1280',exact:true}).click();
+  const deadline=Date.now()+15000;while(latest.cssWidth!==1280&&Date.now()<deadline)await new Promise(r=>setTimeout(r,25));assert.equal(latest.cssWidth,1280);
+  // Screencast JPEG dimensions are authoritative and need not equal CSS×DPR.
+  const confirmed=latest;
+  await parentViewer.waitForFunction(g=>{const c=document.querySelector('canvas');return c?.dataset.frameId?.startsWith(`${g.tabId}:${g.viewportRevision}:`)&&c.width===g.imageWidth&&c.height===g.imageHeight;},confirmed,{timeout:15000});
+  await streamer.stop();
+ }
+ await parentViewer.close();await source.close();await parentContext.close();
  await writeFile(out+(process.env.PR1_EXTRA_ONLY?'/extra-acceptance.json':'/acceptance.json'),JSON.stringify({scope:'Local actual Chromium/CDP/component plus synthetic RFB with actual noVNC; no production or account validation',records,rejected},null,2));
  console.log(JSON.stringify({cases:records.length,cdp:records.filter(r=>r.transport==='CDP').length,vnc:records.filter(r=>r.transport==='VNC').length,maxError:Math.max(...records.map(r=>r.error||0))}));
 } finally {await streamer?.stop();await browser.close();await vite.close();for(const ws of wsserver.clients)ws.terminate();await new Promise(r=>wsserver.close(r));}

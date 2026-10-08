@@ -1932,7 +1932,7 @@ function CloudBrowserPanel({
               左右滑动查看页面
             </div>
           )}
-          {!fullscreen && useVnc && showHeader && (
+          {!fullscreen && useVnc && showHeader && !(isSheet && viewportV2) && (
             <footer
               className={cn(
                 'flex items-center justify-between border-t bg-white/78 text-muted-foreground backdrop-blur dark:bg-background/75',

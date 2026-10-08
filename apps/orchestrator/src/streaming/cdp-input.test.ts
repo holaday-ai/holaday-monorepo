@@ -484,3 +484,13 @@ it('V2 reconnect restores the same Page DPR after a parallel CDP detach reset',a
   expect(send).toHaveBeenCalledWith('Emulation.setDeviceMetricsOverride',expect.objectContaining({deviceScaleFactor:2}));
  }
 });
+
+
+it('applies tall V2 device metrics while retaining legacy and maximum bounds',async()=>{
+ const send=vi.fn(async(method:string)=>method==='Runtime.evaluate'?{result:{value:1}}:{});
+ const session=()=>({send,detach:async()=>{}} as unknown as CDPSession);
+ await new CdpInputHandler(session,pino({level:'silent'})).handle({type:'viewport',width:1024,height:2300});expect(send).not.toHaveBeenCalled();
+ const v2=new CdpInputHandler(session,pino({level:'silent'}),undefined,undefined,true,undefined,2400);
+ await v2.handle({type:'viewport',width:1024,height:2300});expect(send).toHaveBeenCalledWith('Emulation.setDeviceMetricsOverride',expect.objectContaining({width:1024,height:2300,mobile:false}));
+ const before=send.mock.calls.length;await v2.handle({type:'viewport',width:1024,height:2401});expect(send).toHaveBeenCalledTimes(before);
+});

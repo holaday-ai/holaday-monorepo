@@ -263,3 +263,13 @@ it('checks current observation within the owned dispatch checkpoint, after queue
   await expect(queued!()).rejects.toThrow('expired');
   expect(effects).toBe(0);
 });
+
+
+it('accepts taller V2 viewports through the applied ACK path without relaxing legacy limits',async()=>{
+ const tall=JSON.stringify({type:'input',payload:{type:'viewport',width:1024,height:2300}});
+ const handle=vi.fn(async()=>{}),applied=vi.fn();
+ const legacy=new DeferredScreencastInputBridge();await legacy.attach({handle});await legacy.receive(tall);expect(handle).not.toHaveBeenCalled();
+ const v2=new DeferredScreencastInputBridge({maxViewportHeight:2400,onViewportApplied:applied});await v2.attach({handle});await v2.receive(tall);
+ expect(handle).toHaveBeenCalledWith({type:'viewport',width:1024,height:2300},undefined);expect(applied).toHaveBeenCalledWith({width:1024,height:2300});
+ await v2.receive(JSON.stringify({type:'input',payload:{type:'viewport',width:1024,height:2401}}));expect(handle).toHaveBeenCalledTimes(1);
+});

@@ -151,6 +151,7 @@ export class CdpInputHandler {
     private readonly onInputUncertain?: () => void,
     private readonly preserveDeviceScaleFactor = false,
     private readonly getPage?: () => Promise<Page>,
+    private readonly maxViewportHeight = 1600,
   ) {}
 
   /**
@@ -203,7 +204,7 @@ export class CdpInputHandler {
             msg.width < 240 ||
             msg.width > 1920 ||
             msg.height < 240 ||
-            msg.height > 1600
+            msg.height > this.maxViewportHeight
           ) {
             return;
           }

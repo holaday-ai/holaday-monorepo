@@ -47,14 +47,36 @@ export function shouldSendBrowserViewport(
   );
 }
 
+export type BrowserViewportRenderMode = 'auto' | 'desktop' | 'panel';
+
+/** Keep desktop breakpoints, but fill the visible portrait surface instead of
+ * shrinking a landscape page into the top third. Explicit profiles are useful
+ * to callers that need a fixed source viewport (including transport tests). */
 export function browserViewportV2ForHost(input: {
-  hostWidth: number; hostHeight: number; renderMode: 'desktop' | 'panel'; desktopViewport?: BrowserViewportSize;
+  hostWidth: number;
+  hostHeight: number;
+  renderMode: BrowserViewportRenderMode;
+  desktopViewport?: BrowserViewportSize;
 }): BrowserViewportSize | null {
-  if (![input.hostWidth,input.hostHeight].every(v=>Number.isFinite(v)&&v>0)) return null;
-  if (input.renderMode === 'desktop') {
-    const desktop=input.desktopViewport ?? {width:1280,height:800};
-    if (![desktop.width,desktop.height].every(v=>Number.isFinite(v)&&v>0)) return null;
-    return {width:clamp(Math.round(desktop.width),320,1920),height:clamp(Math.round(desktop.height),360,1600)};
+  const { hostWidth, hostHeight, renderMode, desktopViewport } = input;
+  if (![hostWidth, hostHeight].every((v) => Number.isFinite(v) && v > 0)) return null;
+  if (renderMode === 'auto' && desktopViewport) {
+    if (![desktopViewport.width, desktopViewport.height].every((v) => Number.isFinite(v) && v > 0))
+      return null;
+    return {
+      width: clamp(Math.round(desktopViewport.width), 320, 1920),
+      height: clamp(Math.round(desktopViewport.height), 360, 2400),
+    };
   }
-  return {width:clamp(Math.round(input.hostWidth),320,1920),height:clamp(Math.round(input.hostHeight),360,1600)};
+  if (renderMode === 'panel')
+    return {
+      width: clamp(Math.round(hostWidth), 320, 1920),
+      height: clamp(Math.round(hostHeight), 360, 2400),
+    };
+  const portrait = hostHeight > hostWidth;
+  const width = renderMode === 'desktop' || !portrait ? 1280 : 1024;
+  return {
+    width,
+    height: portrait ? clamp(Math.round((width * hostHeight) / hostWidth), 360, 2400) : 800,
+  };
 }

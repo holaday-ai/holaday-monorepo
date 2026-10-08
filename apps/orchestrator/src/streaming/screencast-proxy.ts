@@ -246,6 +246,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     if (args.viewportV2) args.ws.send(JSON.stringify({type:'viewport-v2-ready',controlReady:Boolean(opts.beforeViewportAction)}));
     const inputBridge = createOwnedScreencastInputBridge({
       instance: args.instance,
+      maxViewportHeight: args.viewportV2 ? 2400 : 1600,
       onViewportRequested: args.viewportV2 ? () => {viewportPending=true;invalidate();streamer?.invalidateObservation();} : undefined,
       beforeDispatch: args.viewportV2 ? async (envelope, signal) => {
         if (!streamer?.matchesPage(await args.instance.executor.getPage())) { invalidate(); throw new Error('browser_tab_changed'); }
@@ -370,6 +371,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         },
         args.viewportV2,
         () => executor.getPage(),
+        args.viewportV2 ? 2400 : 1600,
       );
       await inputBridge.attach(inputHandler);
 
