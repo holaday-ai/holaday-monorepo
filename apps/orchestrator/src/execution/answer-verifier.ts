@@ -35,6 +35,7 @@ import {
   type OutputFileDescriptor,
 } from './file-artifact-consistency.js';
 import { evaluateSourceDomain } from './source-domain-consistency.js';
+import { isHashRoute, urlResourceIdentity } from './url-identity.js';
 import { evaluateTemplateFill } from './template-fill-consistency.js';
 import { classifyLightweightTask } from './lightweight-task.js';
 import type { VerificationInputCoverage } from './verification-input-budget.js';
@@ -960,7 +961,8 @@ function checkEcommerceRows(
   const uniqueUrls = new Set(
     rows
       .map((row) => row.url)
-      .filter((url): url is string => Boolean(url)),
+      .filter((url): url is string => Boolean(url))
+      .map((url) => urlResourceIdentity(stripTrailingPunct(url)) ?? url),
   );
   const tooFewUniqueUrls =
     minUniqueUrls > 0 && rows.length >= minItems && uniqueUrls.size < minUniqueUrls;
@@ -1026,7 +1028,9 @@ function isLikelyEcommerceAggregateUrl(url: string): boolean {
 export function isNonDetailUrl(raw: string): boolean {
   try {
     const url = new URL(stripTrailingPunct(raw));
-    const path = url.pathname.replace(/\/+$/, '').toLowerCase();
+    // An SPA hash route (#/post/7) is the page's real path.
+    const route = isHashRoute(url.hash) ? url.hash.replace(/^#!?/, '').split('?')[0] ?? '' : '';
+    const path = (route && route !== '/' ? route : url.pathname).replace(/\/+$/, '').toLowerCase();
     if (path === '' || /^\/(?:index|default|home)(?:\.(?:s?html?|php|aspx?))?$/.test(path)) {
       return !/[?&](?:id|p|aid|itemid|item_id|article_id)=/i.test(url.search);
     }
@@ -1070,10 +1074,13 @@ function checkListItemSources(criterion: SuccessCriterion, answerText: string): 
       missing.push('来源链接');
     } else if (isNonDetailUrl(url)) {
       missing.push('独立来源链接（不能用首页或搜索页）');
-    } else if (seen.has(url)) {
-      missing.push(`独立来源链接（与第 ${seen.get(url)} 条相同）`);
     } else {
-      seen.set(url, n);
+      // Same resource, not same string: /article/42#s1 and #s2, or a utm_*
+      // variant, are one source (see url-identity.ts).
+      const identity = urlResourceIdentity(url) ?? url;
+      const first = seen.get(identity);
+      if (first !== undefined) missing.push(`独立来源链接（与第 ${first} 条相同）`);
+      else seen.set(identity, n);
     }
     for (const field of keyFields) {
       const pattern = LIST_KEY_FIELD_PATTERNS[field];

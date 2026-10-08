@@ -170,3 +170,17 @@ describe('list answers with per-item sources (FIX-BATCH-A)', () => {
     ).toEqual(['第 1 条只有首页/搜索页链接', '第 2 条缺少价格', '第 3 条与前面条目复用同一链接']);
   });
 });
+
+it('scores anchor variants of one article as one source', () => {
+  const answer = [1, 2, 3]
+    .map((i) => `${i}. 标题${i} 2026-10-08 https://36kr.com/p/1#section${i}`)
+    .join('\n');
+  expect(
+    scoreListWithSources(answer, {
+      type: 'list_with_sources',
+      minItems: 3,
+      domains: ['36kr.com'],
+      keyField: 'date',
+    }).problems,
+  ).toEqual(['第 2 条与前面条目复用同一链接', '第 3 条与前面条目复用同一链接']);
+});

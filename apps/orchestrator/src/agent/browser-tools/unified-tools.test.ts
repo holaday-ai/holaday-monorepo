@@ -114,7 +114,7 @@ describe('Playwright unified executor (local static page)', () => {
 
 describe('snapshot URL shortening (batch 12)', () => {
   it('cuts long link URLs and leaves everything else alone', () => {
-    const long = `https://example.com/item?${'utm=x&'.repeat(40)}`;
+    const long = `https://example.com/item?${'utm_source=x&'.repeat(40)}`;
     const tree = [
       '- link "商品" [ref=e3]:',
       `  - /url: ${long}`,
@@ -123,6 +123,7 @@ describe('snapshot URL shortening (batch 12)', () => {
     ].join('\n');
     const out = shortenSnapshotUrls(tree, 40).split('\n');
     // Tracking query dropped, the item link itself still works.
+    // Only tracking parameters were long; the item link itself is kept whole.
     expect(out[1]).toBe('  - /url: https://example.com/item');
     expect(out[2]).toBe('  - /url: https://example.com/short');
     expect(out[3]).toBe('- text: /url: not a url line');
@@ -131,31 +132,38 @@ describe('snapshot URL shortening (batch 12)', () => {
 });
 
 describe('snapshot links for grounding (FIX-BATCH-A)', () => {
-  it('keeps a usable link when only the query is long, cuts a long path with …', () => {
-    expect(shortenUrl(`https://item.jd.com/100.html?bbtf=1&ext=${'x'.repeat(200)}`, 40)).toBe(
-      'https://item.jd.com/100.html',
-    );
-    const longPath = `https://ccc-x.jd.com/dsp/${'a'.repeat(80)}`;
-    expect(shortenUrl(longPath, 40)).toBe(`${longPath.slice(0, 40)}…`);
-    // A bare host is not a usable item link, so the query stays (cut) instead.
-    expect(shortenUrl(`https://jd.com/?${'q'.repeat(80)}`, 40).endsWith('…')).toBe(true);
-    expect(shortenUrl('https://a.com/x', 0)).toBe('https://a.com/x');
+  it('drops only tracking parameters; a resource id in the query survives', () => {
+    // PR #247 review P1: ?id=42 used to be cut off with the whole query.
+    const article = `https://news.example.test/article?id=42&utm_source=${'x'.repeat(120)}`;
+    expect(shortenUrl(article, 100)).toBe('https://news.example.test/article?id=42');
+    expect(shortenUrl('https://a.test/p/1?spm=a.b#top', 100)).toBe('https://a.test/p/1');
+    expect(shortenUrl('https://app.test/#/item/42', 100)).toBe('https://app.test/#/item/42');
+    expect(shortenUrl('https://a.test/x?utm_source=1', 0)).toBe('https://a.test/x?utm_source=1');
   });
 
-  it('resolves relative hrefs against the page and adds the form the model saw', () => {
+  it('cuts, never re-routes, a link whose meaningful part is too long', () => {
+    const signed = `https://cdn.example.test/v.mp4?sign=${'s'.repeat(120)}&expires=1791400000`;
+    expect(shortenUrl(signed, 60)).toBe(`${signed.slice(0, 60)}…`);
+    const opaque = `https://news.example.test/article?id=42&tracking=${'t'.repeat(120)}`;
+    expect(shortenUrl(opaque, 100)).toBe(`${opaque.slice(0, 100)}…`);
+  });
+
+  it('records the page URL without tracking parameters, never a cut display form', () => {
+    const signed = `/v.mp4?sign=${'s'.repeat(120)}&expires=1&utm_medium=share`;
     const tree = [
       '- link "文章" [ref=e3]:',
-      '  - /url: /p/4016638963421319',
-      '- link "商品" [ref=e4]:',
-      `  - /url: //item.jd.com/100.html?bbtf=${'1'.repeat(120)}`,
+      '  - /url: /p/4016638963421319?spm=a.b#comments',
+      '- link "视频" [ref=e4]:',
+      `  - /url: ${signed}`,
       '- link "邮件" [ref=e5]:',
       '  - /url: mailto:a@b.c',
     ].join('\n');
-    expect(snapshotLinks(tree, 'https://36kr.com/', 100)).toEqual([
+    const links = snapshotLinks(tree, 'https://36kr.com/', 100);
+    expect(links).toEqual([
       'https://36kr.com/p/4016638963421319',
-      `https://item.jd.com/100.html?bbtf=${'1'.repeat(120)}`,
-      'https://item.jd.com/100.html',
+      `https://36kr.com/v.mp4?sign=${'s'.repeat(120)}&expires=1`,
     ]);
+    expect(links.some((link) => link.includes('…'))).toBe(false);
   });
 });
 

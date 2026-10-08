@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractStructuredItems, verifyDeterministic } from './answer-verifier.js';
+import { extractStructuredItems, reviewListAnswer, verifyDeterministic } from './answer-verifier.js';
 import { CONTENT_TOPIC_WORKFLOW } from './expert-workflow-content-topic.js';
 import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
 import type { ExecutionContract } from './execution-contract.js';
@@ -1876,5 +1876,59 @@ describe('concise browser action confirmations (FIX-BATCH-A)', () => {
   it('still rejects a stub and short answers to retrieval tasks', () => {
     expect(verifyShort('打开订单详情并点击保存', '完成')).toMatchObject({ passed: false });
     expect(verifyShort('打开36kr首页总结今天的新闻', '已打开。')).toMatchObject({ passed: false });
+  });
+});
+
+describe('distinct sources are distinct resources, not strings (PR #247 review P1)', () => {
+  const contract = buildContract({
+    taskId: 't-identity',
+    intent: '打开新闻首页，总结今天前三条新闻，提供原标题、发布日期和可核实链接。',
+    executionMode: 'browser',
+  });
+  const answer = (links: string[]) =>
+    links
+      .map((link, i) => `${i + 1}. 标题${i + 1}\n   发布日期：2026-10-08 1${i}:00\n   链接：${link}`)
+      .join('\n\n');
+  const review = (links: string[]) => reviewListAnswer(contract, answer(links));
+
+  it('counts one article cited with three anchors as one source', () => {
+    expect(
+      review([
+        'https://news.example.test/article/42#section1',
+        'https://news.example.test/article/42#section2',
+        'https://news.example.test/article/42#section3',
+      ]),
+    ).toBe(
+      '第 2 条缺少独立来源链接（与第 1 条相同）；第 3 条缺少独立来源链接（与第 1 条相同）',
+    );
+  });
+
+  it('counts tracking-parameter variants of one page as one source', () => {
+    expect(
+      review([
+        'https://news.example.test/article/42?utm_source=a',
+        'https://www.news.example.test/article/42?spm=b',
+        'https://news.example.test/article/42/?gclid=c',
+      ]),
+    ).toContain('第 3 条缺少独立来源链接（与第 1 条相同）');
+  });
+
+  it('keeps different query ids and SPA routes as different sources', () => {
+    expect(
+      review([1, 2, 3].map((id) => `https://news.example.test/article?id=${id}&utm_source=x`)),
+    ).toBeNull();
+    expect(review([1, 2, 3].map((id) => `https://app.example.test/#/post/${id}`))).toBeNull();
+  });
+
+  it('applies the same identity to product rows', () => {
+    const jd = buildContract({
+      taskId: 't-identity-jd',
+      intent: '去京东搜索降噪耳机，告诉我前三个商品的名称和价格，并附商品链接。',
+      executionMode: 'browser',
+    });
+    const rows = ['a', 'b', 'c']
+      .map((anchor, i) => `${i + 1}. 耳机${i}\n   价格：¥${i}99\n   链接：https://item.jd.com/100.html#${anchor}`)
+      .join('\n');
+    expect(reviewListAnswer(jd, rows)).toContain('只解析到 1 个唯一商品链接');
   });
 });

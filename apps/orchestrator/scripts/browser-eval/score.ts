@@ -1,4 +1,5 @@
 import type { UnifiedBrowserOutcome } from '../../src/agent/browser-tools/unified-browser-loop.js';
+import { urlResourceIdentity } from '../../src/execution/url-identity.js';
 
 export interface BrowserEvalTask {
   id: string;
@@ -149,6 +150,7 @@ export function scoreListWithSources(
   if (items.length < spec.minItems)
     problems.push(`只有 ${items.length} 条，要求 ${spec.minItems} 条`);
   const urls: string[] = [];
+  const identities = new Set<string>();
   items.forEach((item, index) => {
     const candidates = (item.match(URL_IN_TEXT) ?? []).map((url) => url.replace(/[.,;:!?]+$/, ''));
     const onSite = candidates.filter((url) => {
@@ -165,9 +167,10 @@ export function scoreListWithSources(
           ? `第 ${index + 1} 条只有首页/搜索页链接`
           : `第 ${index + 1} 条没有站内来源链接`,
       );
-    } else if (urls.includes(detail)) {
+    } else if (identities.has(urlResourceIdentity(detail) ?? detail)) {
       problems.push(`第 ${index + 1} 条与前面条目复用同一链接`);
     } else {
+      identities.add(urlResourceIdentity(detail) ?? detail);
       urls.push(detail);
     }
     if (spec.keyField && !KEY_FIELD[spec.keyField].test(item))

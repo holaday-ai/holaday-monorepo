@@ -1,4 +1,5 @@
 import type { Page } from 'playwright';
+import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { PageRedactionError, REDACTION_FAILED_COPY, redactPageText } from './page-redaction.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
@@ -58,18 +59,26 @@ export function shortenSnapshotUrls(tree: string, maxUrlChars: number): string {
 }
 
 /**
- * A long link keeps working when only its query/fragment (mostly tracking) is
- * dropped: `https://item.jd.com/1.html?bbtf=…` → `https://item.jd.com/1.html`,
- * which the model can still cite as the item's link. Only when the path itself
- * is too long is it cut and marked with `…`.
+ * The link the model sees: tracking parameters (utm_*, gclid, spm, …) and
+ * in-page anchors removed, everything that identifies the resource kept (ids,
+ * search terms, signatures, SPA hash routes). If that is still too long it is
+ * cut and marked with `…` — a cut link is never shown as if it were usable,
+ * and it is never recorded as observed evidence.
  */
 export function shortenUrl(url: string, maxUrlChars: number): string {
-  if (maxUrlChars <= 0 || url.length <= maxUrlChars) return url;
-  const bare = url.replace(/[?#].*$/, '');
-  if (bare !== url && bare.length <= maxUrlChars && !/^(?:https?:)?\/\/[^/]+\/?$/.test(bare)) {
-    return bare;
-  }
-  return `${url.slice(0, maxUrlChars)}…`;
+  if (maxUrlChars <= 0) return url;
+  const cleaned = stripTrackingFromUrl(url);
+  if (cleaned.length <= maxUrlChars) return cleaned;
+  return `${cleaned.slice(0, maxUrlChars)}…`;
+}
+
+/**
+ * The observed form of a link for grounding: the page's own URL without
+ * tracking parameters (what the model is shown when it fits), never a cut
+ * display form. With shortening off the model sees the raw URL, so that is it.
+ */
+export function observedLinkEvidence(absolute: string, maxUrlChars: number): string {
+  return maxUrlChars <= 0 ? absolute : stripTrackingFromUrl(absolute);
 }
 
 const MAX_SNAPSHOT_LINKS = 400;
@@ -115,7 +124,7 @@ async function pageLinks(
   }
 }
 
-/** Absolute link targets in an AI aria snapshot, plus the forms the model saw. */
+/** Observed link targets in an AI aria snapshot (absolute, tracking parameters removed). */
 export function snapshotLinks(tree: string, pageUrl: string, maxUrlChars: number): string[] {
   const links = new Set<string>();
   for (const line of tree.split('\n')) {
@@ -128,9 +137,7 @@ export function snapshotLinks(tree: string, pageUrl: string, maxUrlChars: number
       continue;
     }
     if (!/^https?:/i.test(absolute)) continue;
-    links.add(absolute);
-    const shown = shortenUrl(absolute, maxUrlChars);
-    if (!shown.endsWith('…')) links.add(shown);
+    links.add(observedLinkEvidence(absolute, maxUrlChars));
   }
   return [...links];
 }
@@ -246,10 +253,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
               content,
               links,
             }),
-            links: [
-              ...anchors.map((anchor) => anchor.url),
-              ...links.map((link) => link.url).filter((url) => !url.endsWith('…')),
-            ],
+            links: anchors.map((anchor) => observedLinkEvidence(anchor.url, maxUrlChars)),
             url: page.url(),
           };
         }
