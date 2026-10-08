@@ -43,7 +43,7 @@ Interfaces: decide route -> cloud/user Chrome/awaiting_user; explicit public-clo
 ### Task 4: Delivery
 - [x] Full backend suite, relevant extension/shared/driver/UI suites; typechecks and builds serially.
 - [x] Review diff and safety boundaries, diff --check; evidence report.
-- [ ] Ordinary push and draft stacked PR; attach PR. Rebase only after #248 merges.
+- [x] Ordinary push and draft stacked PR; attach PR. Rebase only after #248 merges.
 
 ## Execution record
 - Tasks 1–3 implemented serially; protocol/gate/route RED → GREEN evidence retained in /private/tmp/holaday-tasks/browser-pr2.
@@ -54,3 +54,5 @@ Interfaces: decide route -> cloud/user Chrome/awaiting_user; explicit public-clo
 - Final backend test uses Node 22, sanitized dummy test environment, 1536 MiB old-space, one Vitest thread, bounded Chromium renderers.
 
 - Verification: frozen-source backend 565 files / 9162 passed / 1 existing skip; Node prelude 73 passed; driver 58, extension 465, related UI 162, real extension Chromium 7 passed. All typechecks and builds exit 0; backend typecheck uses 2048 MiB after the initial 1536 MiB OOM.
+
+- Delivery: implementation 73a15038 pushed normally; draft PR https://github.com/holaday-ai/holaday-monorepo/pull/250 created against claude/fix-unified-action-gate and attached to this chat. No merge/deploy.
