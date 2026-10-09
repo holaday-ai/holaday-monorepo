@@ -23,7 +23,11 @@ import type {
 } from '@/types/task';
 import { isTerminalStatus } from '@/types/task';
 import type { VideoCreationOptions } from '@/types/video';
-import type { BrowserViewportProfile, ServerMessage } from '@holaday/shared-types';
+import {
+  type BrowserViewportProfile,
+  type ServerMessage,
+  browserConnectionWaitSchema,
+} from '@holaday/shared-types';
 import { create } from 'zustand';
 import { type ExecutionIdentity, TaskExecutionOrder, readExecutionIdentity } from './task-execution-order';
 
@@ -304,6 +308,12 @@ export interface TaskStore {
     fileIds?: string[],
   ): Promise<{ ok: boolean } | { error: string }>;
   abortTask(taskId: string): Promise<{ ok: boolean; state?: string } | { error: string }>;
+  /**
+   * FIX-D11 — a task waiting for the Chrome extension that does NOT need the
+   * user's own login: re-submit it explicitly as a public (logged-out) cloud
+   * task, then cancel the waiting one. Refused for identity-required tasks.
+   */
+  continueInPublicCloud(taskId: string): Promise<{ taskId: string } | { error: string }>;
   applyServerMessage(msg: ServerMessage): void;
   reset(): void;
 }
@@ -845,6 +855,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ? safeTaskListText(detail.awaitingQuestion) || null
             : null;
         const awaitingKind = normalizeAwaitingKind(detail.awaitingKind);
+        const browserConnection = extractBrowserConnection(detail.result);
         const executionMode = extractExecutionMode(detail.result);
         const failedChecks = extractFailedChecks(detail.result);
         const stockContext = normalizeStockTaskContext(detail.stockContext);
@@ -871,6 +882,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                 question: awaitingQuestion,
                 at: Date.now(),
                 ...(awaitingKind ? { awaitingKind } : {}),
+                ...(browserConnection ? { browserConnection } : {}),
               },
             }
           : (() => {
@@ -1478,6 +1490,38 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
   },
 
+  async continueInPublicCloud(taskId) {
+    const wait = get().awaitingUserByTask[taskId];
+    const task = get().tasks.find((item) => item.taskId === taskId);
+    if (!task || !wait?.browserConnection?.publicCloudAllowed)
+      return { error: '这个任务需要你的登录状态，不能改用无登录态的公开云端。' };
+    if (get().localChromeSelection)
+      return { error: '输入框已选择 Chrome 页面，请先移除该选择后再改用公开云端。' };
+    let fileIds: string[] = [];
+    const generation = captureSessionGeneration();
+    try {
+      const context = await trpc.taskRecovery.failureContext.query({ taskId });
+      if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
+      if (context.unavailableInputCount) return { error: '附件已失效，请重新上传' };
+      fileIds = context.inputFiles.map((file) => file.fileId);
+    } catch {
+      return { error: '无法恢复原任务输入，请稍后重试。' };
+    }
+    const previousPreference = get().browserPreference;
+    set({ browserPreference: 'cloud-public' });
+    let created: { taskId: string } | { error: string };
+    try {
+      created = await get().createTask(task.intent, fileIds);
+    } finally {
+      set({ browserPreference: previousPreference });
+    }
+    if ('error' in created) return created;
+    // The waiting task can no longer progress; cancel it so it is not left open.
+    await get()
+      .abortTask(taskId)
+      .catch(() => undefined);
+    return created;
+  },
   async abortTask(taskId) {
     const generation = captureSessionGeneration();
     try {
@@ -1710,6 +1754,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               question: (res as { question: string }).question,
               at: Date.now(),
               awaitingKind: 'permission' as const,
+              ...((res as { browserConnection?: UiAwaitingUser['browserConnection'] })
+                .browserConnection
+                ? {
+                    browserConnection: (
+                      res as { browserConnection: UiAwaitingUser['browserConnection'] }
+                    ).browserConnection,
+                  }
+                : {}),
             },
           },
         } : {}),
@@ -2487,6 +2539,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               question: msg.question,
               at: Date.now(),
               ...(awaitingKind ? { awaitingKind } : {}),
+              ...(msg.browserConnection ? { browserConnection: msg.browserConnection } : {}),
             },
           },
           subStatusByTask: nextSubStatus,
@@ -2800,6 +2853,14 @@ function inferExecutionModeFromIntent(
   if (hasAction && hasSite) return 'browser';
   if (hasAction) return 'browser';
   return 'generate';
+}
+
+/** FIX-D11 — a persisted "waiting for the Chrome extension" marker (survives refresh). */
+function extractBrowserConnection(result: unknown): UiAwaitingUser['browserConnection'] | null {
+  const parsed = browserConnectionWaitSchema.safeParse(
+    (result as { metadata?: { browserConnection?: unknown } } | null)?.metadata?.browserConnection,
+  );
+  return parsed.success ? parsed.data : null;
 }
 
 function extractExecutionMode(

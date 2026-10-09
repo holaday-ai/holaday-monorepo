@@ -413,6 +413,29 @@ it.each([
     expect(result.status).toBe('awaiting_user');
     expect(consume).not.toHaveBeenCalled();
     expect(requests).toEqual([]);
+    // FIX-D11: every identity wait carries the connection marker; no public-cloud fallback.
+    if (scenario !== 'v2-grant') {
+      const connection = {
+        reason: scenario === 'v2-inbox-public-cloud' ? 'selection_required' : 'extension_offline',
+        publicCloudAllowed: false,
+      };
+      expect((result as { browserConnection?: unknown }).browserConnection).toEqual(connection);
+      expect(broadcast).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          type: 'server.supercar.awaiting_user',
+          browserConnection: connection,
+        }),
+      );
+      expect(awaiting).toHaveBeenCalledWith(
+        expect.objectContaining({
+          result: expect.objectContaining({
+            metadata: expect.objectContaining({ browserConnection: connection }),
+          }),
+        }),
+      );
+      expect((result as { question: string }).question).toContain('需要连接 HOLA DAY Chrome 插件');
+    }
     expect(createAdapter).not.toHaveBeenCalled();
     expect(terminal).not.toHaveBeenCalled();
     expect(awaiting).toHaveBeenCalledWith(expect.objectContaining({ awaitingKind: 'permission' }));

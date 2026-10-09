@@ -64,6 +64,20 @@ const corpus = [
   ['用附件写产品说明书', true, 'generate'],
   ['根据上传的文件回答几个问题', true, 'generate'],
   ['写一篇关于消息传到美国后反应的文章', false, 'generate'],
+  // FIX-D11-ROUTING: Deploy-11 A3 original + variants. Negated tool mentions and
+  // "可下载…文件" (an output format) are not browser signals.
+  [
+    '【Deploy-11验收 文章】使用我本次上传的cat.png写一篇约350字的虚构温馨短文《窗边橘猫的一天》，含标题、3个短段落和1句图片说明。带且仅带我上传的这一张配图，把文章和配图一起呈现，并提供含这张图的可下载文章文件。不要调用图片生成、浏览器或搜索，不编造外部链接。',
+    true,
+    'generate',
+  ],
+  ['带上我上传的这张配图，写一篇三段的小故事，并提供可下载的Word文件', true, 'generate'],
+  ['用我本次上传的photo.jpg写一篇游记，不用浏览器也不用搜索', true, 'generate'],
+  ['根据上传的这份资料写一份总结，别上网搜索，提供可下载的PDF', true, 'generate'],
+  ['用附件写一篇介绍，生成可下载的 markdown 文件，不要下载任何网页', true, 'generate'],
+  ['写一篇关于秋天的散文，不要用浏览器也不要搜索', false, 'generate'],
+  ['写一份年终总结并提供可下载的文档', false, 'generate'],
+  ['起草一封感谢信，提供下载', false, 'generate'],
 ] as const;
 
 it.each(corpus)(

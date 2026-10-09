@@ -701,9 +701,20 @@ function neutralizeUploadTopics(intent: string): string {
  */
 function neutralizeAttachmentReferences(intent: string): string {
   return intent.replace(
-    /(?:我|你)?(?:本次|刚才|刚刚|已经|已|当前)?上传(?:了)?的(?:这(?:个|份|张|些))?\s*(?:图片|照片|图像|文件|附件|素材|文档|视频|资料|表格|截图|录音|音频|pdf|PDF|word|Word|excel|Excel)/g,
+    /(?:我|你)?(?:本次|刚才|刚刚|已经|已|当前)?上传(?:了)?的\s*(?:这(?:一)?(?:个|份|张|些|幅|篇))?\s*(?:[\w.-]+\.(?:png|jpe?g|webp|gif|bmp|heic|pdf|docx?|xlsx?|pptx?|txt|csv|md|mp4|mov|mp3|wav)\b|配图|图片|照片|图像|图|文件|附件|素材|文档|视频|资料|表格|截图|录音|音频|pdf|word|excel)/gi,
     '附件',
   );
+}
+
+/**
+ * "提供可下载的文章文件 / 生成可下载 Word / 并提供下载" names the OUTPUT format of
+ * the task, not a website download. A real website download keeps its verb
+ * ("下载这个页面的 PDF", "去官网下载安装包") and still routes to the browser.
+ */
+const DOWNLOADABLE_OUTPUT_RE =
+  /(?:可供?下载|下载用)的?[^，。；,;\n]{0,16}?(?:文件|文档|版本|文章|报告|附件|word|pdf|docx|markdown|md|excel|xlsx|pptx?|压缩包)|(?:并|再)?提供(?:文件)?下载/gi;
+function neutralizeDownloadableOutput(intent: string): string {
+  return intent.replace(DOWNLOADABLE_OUTPUT_RE, ' ');
 }
 
 function decide(
@@ -717,7 +728,10 @@ function decide(
   // With a file attached, "上传的文档/图片…" names that attachment — material
   // for the task, not a website upload. A real upload ("上传到…/上传至…")
   // keeps its wording and still routes as a website action.
-  const affirmativeIntent = stripNegatedRoutingClauses(neutralizeUploadTopics(intent));
+  // "可下载的文章文件" is the deliverable's format, not a browser download.
+  const affirmativeIntent = neutralizeDownloadableOutput(
+    stripNegatedRoutingClauses(neutralizeUploadTopics(intent)),
+  );
   const routingIntent = ctx.hasFileAttachment
     ? neutralizeAttachmentReferences(affirmativeIntent)
     : affirmativeIntent;

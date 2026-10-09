@@ -52,3 +52,45 @@ it('one cancel click removes the waiting banner and updates the rendered termina
   expect(screen.queryByText('需要补充什么？')).toBeNull();
   expect(screen.getAllByText(/已取消/).length).toBeGreaterThan(0);
 });
+
+it('shows "用公开云端（无登录态）继续" only for a non-identity Chrome-extension wait (FIX-D11)', async () => {
+  const continueSpy = vi.fn().mockResolvedValue({ taskId: 'tsk_public' });
+  for (const publicCloudAllowed of [false, true]) {
+    useTaskStore.setState({
+      tasks: [
+        {
+          taskId: 'tsk_conn',
+          title: '查询',
+          intent: '在京东查一下价格',
+          status: 'awaiting_user',
+          tickCount: 0,
+          createdAt: new Date(),
+        },
+      ],
+      awaitingUserByTask: {
+        tsk_conn: {
+          question: '需要连接 HOLA DAY Chrome 插件：请安装或连接插件。',
+          awaitingKind: 'permission',
+          at: Date.now(),
+          browserConnection: { reason: 'extension_offline', publicCloudAllowed },
+        },
+      },
+      continueInPublicCloud: continueSpy,
+    });
+    function Harness() {
+      const task = useTaskStore((s) => s.tasks[0]);
+      return task ? <TaskStream task={task} /> : null;
+    }
+    render(<Harness />);
+    expect(screen.getAllByText('需要连接 HOLA DAY Chrome 插件').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/拒绝访问/)).toBeNull();
+    const button = screen.queryByRole('button', { name: '用公开云端（无登录态）继续' });
+    if (!publicCloudAllowed) expect(button).toBeNull();
+    else {
+      expect(button).not.toBeNull();
+      await userEvent.click(button as HTMLElement);
+      await waitFor(() => expect(continueSpy).toHaveBeenCalledWith('tsk_conn'));
+    }
+    cleanup();
+  }
+});

@@ -356,6 +356,15 @@ export interface UiAwaitingUser {
   question: string;
   at: number;
   /**
+   * FIX-D11 — the task waits for the HOLA DAY Chrome extension / page
+   * selection. `publicCloudAllowed` is false when it needs the user's own
+   * login (no "用公开云端（无登录态）继续" then).
+   */
+  browserConnection?: {
+    reason: 'extension_offline' | 'selection_required' | 'origin_grant_required';
+    publicCloudAllowed: boolean;
+  };
+  /**
    * P2-A — kind of input we're waiting on. The store mirrors this
    * onto the task's awaitingKind so refreshing tasks.detail
    * preserves the BrowserPanel's expand/banner decision.

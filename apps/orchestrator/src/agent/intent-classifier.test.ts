@@ -1379,3 +1379,18 @@ it('treats an unquoted upload meaning question as explanation', async () => {
     await classifyExecutionMode({ intent: '上传到服务器是什么意思？', logger: fakeLogger() }),
   ).toBe('generate');
 });
+
+describe('downloads: output format vs website action (FIX-D11-ROUTING)', () => {
+  it.each([
+    ['去 nodejs.org 官网下载最新版安装包', false],
+    ['下载这个页面的 PDF https://example.com/report', false],
+    ['打开证监会网站下载这份年报的原文', false],
+    ['把附件上传到 github.com 的仓库', true],
+    ['把上传的文件上传到 Google Drive', true],
+  ])('real website download/upload stays on the browser lane: %s', async (intent, hasFileAttachment) => {
+    expect(await classifyExecutionMode({ intent, hasFileAttachment, logger: fakeLogger() })).toBe(
+      'browser',
+    );
+  });
+});
+

@@ -1028,8 +1028,9 @@ function AwaitingUserBanner({
     | null
   >(null);
   const kind = wait.awaitingKind ?? 'clarification';
-  const copy = awaitingUserCopy(kind);
-  const message = awaitingUserStreamMessage(kind, wait.question);
+  const copy = awaitingUserCopy(kind, wait.browserConnection);
+  const message = awaitingUserStreamMessage(kind, wait.question, wait.browserConnection);
+  const [continuingPublic, setContinuingPublic] = React.useState(false);
   const Icon = AWAITING_KIND_ICON[kind] ?? AWAITING_KIND_ICON.clarification;
   const batchConfirm = wait.batchConfirm;
   const singleConfirm = wait.singleConfirm;
@@ -1062,6 +1063,20 @@ function AwaitingUserBanner({
       }
     }
   }, [cancelling, mountedRef, taskId, toast]);
+  // FIX-D11 — only a request that does not need the user's own login may be
+  // re-submitted to the public (logged-out) cloud browser.
+  const handleContinuePublicCloud = React.useCallback(async () => {
+    if (continuingPublic) return;
+    setContinuingPublic(true);
+    try {
+      const res = await useTaskStore.getState().continueInPublicCloud(taskId);
+      if (!mountedRef.current) return;
+      if ('error' in res) toast.show(res.error, 'error');
+      else toast.show('已改用公开云端（无登录态）继续', 'info', 2000);
+    } finally {
+      if (mountedRef.current) setContinuingPublic(false);
+    }
+  }, [continuingPublic, mountedRef, taskId, toast]);
   // Phase 1 #4 — 视频报价确认:结构化按钮硬绑【这张卡的 taskId】(不绑"最近任务")。
   // 前端不解析确认意图、不算价 — 只把选择透传给后端 confirmVideo(Veo 在后端确认后才烧)。
   const handleConfirmVideo = React.useCallback(
@@ -1260,6 +1275,16 @@ function AwaitingUserBanner({
               <span className="text-muted-foreground">
                 {copy.streamHint}
               </span>
+              {wait.browserConnection?.publicCloudAllowed && (
+                <button
+                  type="button"
+                  onClick={() => void handleContinuePublicCloud()}
+                  disabled={continuingPublic || cancelling}
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-[#57479C] bg-[#57479C] px-3 font-medium text-white transition-colors hover:bg-[#473a82] disabled:opacity-60"
+                >
+                  {continuingPublic ? '提交中…' : '用公开云端（无登录态）继续'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => void handleCancel()}

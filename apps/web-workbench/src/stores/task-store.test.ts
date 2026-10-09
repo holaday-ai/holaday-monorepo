@@ -3630,3 +3630,44 @@ it('keeps pet i2v selected before the server list hydrates the new quote', async
  await useTaskStore.getState().createTask('轻轻眨眼', undefined, undefined, undefined, undefined, undefined, { tab: 'pet', petModel: 'wan_i2v', petImageFileId: 'file_pet', durationSeconds: 5 });
  expect(useTaskStore.getState().tasks[0]).toMatchObject({ taskId: 'tsk_pet_quote', videoType: 'pet', videoCreationMode: 'pet_i2v' });
 });
+
+describe('continue a Chrome-extension wait in the public cloud (FIX-D11)', () => {
+  const waiting: UiTask = {
+    taskId: 'tsk_wait', title: '京东价格', intent: '在京东查一下 iPhone 价格', status: 'awaiting_user',
+    tickCount: 0, createdAt: new Date(), browserSource: 'local-chrome',
+  };
+  it('refuses an identity-required wait', async () => {
+    useTaskStore.setState({
+      tasks: [waiting],
+      awaitingUserByTask: { tsk_wait: { question: 'q', at: 1, awaitingKind: 'permission', browserConnection: { reason: 'extension_offline', publicCloudAllowed: false } } },
+    });
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ error: expect.stringMatching(/登录状态/) });
+    expect(createMutate).not.toHaveBeenCalled();
+  });
+  it('re-submits a non-identity wait as explicit public cloud, then cancels the wait', async () => {
+    useTaskStore.setState({
+      tasks: [waiting],
+      awaitingUserByTask: { tsk_wait: { question: 'q', at: 1, awaitingKind: 'permission', browserConnection: { reason: 'extension_offline', publicCloudAllowed: true } } },
+    });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_public', status: 'pending' } as never);
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    listQuery.mockResolvedValue({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValue({ taskId: 'tsk_public', status: 'pending', steps: [], result: null } as never);
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ taskId: 'tsk_public' });
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({ intent: waiting.intent, browserPreference: 'cloud-public' });
+    expect(createMutate.mock.calls[0]?.[0]?.localChrome).toBeUndefined();
+    expect(abortMutate).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'tsk_wait' }));
+    expect(useTaskStore.getState().browserPreference).toBeNull();
+  });
+  it('keeps the connection marker from tasks.detail after a refresh', async () => {
+    detailQuery.mockResolvedValueOnce({
+      taskId: 'tsk_wait', status: 'awaiting_user', intent: waiting.intent, steps: [],
+      awaitingQuestion: '需要连接 HOLA DAY Chrome 插件：…', awaitingKind: 'permission',
+      result: { executionMode: 'browser', metadata: { browserSource: 'local-chrome', browserConnection: { reason: 'extension_offline', publicCloudAllowed: false } } },
+    } as never);
+    useTaskStore.setState({ tasks: [{ ...waiting, status: 'executing' }] });
+    useTaskStore.getState().selectTask('tsk_wait', 'ui');
+    await flushPromises();
+    expect(useTaskStore.getState().awaitingUserByTask.tsk_wait?.browserConnection).toEqual({ reason: 'extension_offline', publicCloudAllowed: false });
+  });
+});

@@ -234,3 +234,16 @@ it('shows a safe, specific reason for unwanted text and branding in a rejected v
 it.each([['scrape','网页采集'],['image','图片生成'],['video_creation','视频生成'],['generate','生成']])('names the actual %s lane for generic failures', (executionMode, label) => {
  const copy = classifyFriendlyFailure('request failed', { executionMode }); expect(copy.title).toContain(label); expect(JSON.stringify(copy)).not.toMatch(/浏览器|换.*网址/);
 });
+
+describe('executor gave up for lack of a capability (FIX-D11)', () => {
+  it('does not blame the website or suggest another URL', () => {
+    const errorText =
+      '任务执行失败：无法完成任务：当前浏览器环境为空白页（about:blank），没有任何可操作的上传入口或编辑器；同时尝试使用 upload 工具时返回"当前环境不支持上传附件"，因此无法将您本次上传的 cat.png 嵌入文章。';
+    const copy = classifyFriendlyFailure(errorText, { executionMode: 'browser', errorCode: 'VISION_GAVE_UP' });
+    expect(copy.title).toBe('任务未能完成');
+    expect(`${copy.title}${copy.subtitle}${copy.nextStep}`).not.toMatch(/浏览器遇到问题|网址/);
+    // A generate-lane failure never shows browser copy (A7).
+    const generated = classifyFriendlyFailure('浏览器 timeout', { executionMode: 'generate' });
+    expect(`${generated.title}${generated.subtitle}${generated.nextStep}`).not.toMatch(/浏览器遇到问题|网址/);
+  });
+});

@@ -12,6 +12,7 @@ import { runOtaUserBrowserTask } from '../../agent/supercar/ota-user-browser-run
 import { createHash } from 'node:crypto';
 import type Anthropic from '@anthropic-ai/sdk';
 import {
+  browserConnectionWaitSchema,
   BASIC_ROLE_PICK_LIMIT,
   HOLADAY_SKILLS,
   OPEN_POOL_ROLE_IDS,
@@ -1653,16 +1654,23 @@ export const tasksRouter = router({
         { userId: userRow.id, intent: input.intent, roleId: dispatchRoleId, opusUsed: false,
           sourceContext: { browserSource: 'local-chrome' } },
       );
-      const question = browserRoute.question ?? '请连接 Chrome 并重新选择页面。';
+      const question = browserRoute.question ?? '需要连接 HOLA DAY Chrome 插件，请连接后重新选择页面。';
+      // Only a request that does not need the user's own login may continue in
+      // the public cloud (logged out); the UI offers that button from this flag.
+      const browserConnection = {
+        reason: browserRoute.reason as 'extension_offline' | 'selection_required' | 'origin_grant_required',
+        publicCloudAllowed: browserRoute.identityRequired === false,
+      };
       const persisted = await repo.persistAwaitingUser({
         taskExternalId: taskId, question, awaitingKind: 'permission',
         result: { executionMode: 'browser', metadata: {
-          browserSource: 'local-chrome', browserRoutingAwaiting: browserRoute.reason,
+          browserSource: 'local-chrome', browserRoutingAwaiting: browserRoute.reason, browserConnection,
         } },
       });
       if (!persisted.persisted) throw new TRPCError({ code: 'CONFLICT', message: '任务状态已变化，请重新提交。' });
-      broadcastToUser(ctx.userId, { type: 'server.supercar.awaiting_user', taskId, question, awaitingKind: 'permission' });
+      broadcastToUser(ctx.userId, { type: 'server.supercar.awaiting_user', taskId, question, awaitingKind: 'permission', browserConnection });
       return { taskId, status: 'awaiting_user' as const, question, awaitingKind: 'permission' as const,
+        browserConnection,
         steps: [], executionMode: 'browser' as const, browserSource: 'local-chrome' as const };
     }
 
@@ -9209,6 +9217,7 @@ export const tasksRouter = router({
           metadata: z.object({
             browserSource: z.literal('local-chrome'),
             browserRoutingAwaiting: z.string().optional(),
+            browserConnection: browserConnectionWaitSchema.optional(),
           }),
         })
         .safeParse(normalizeOutput(taskRow.result));
@@ -9221,9 +9230,10 @@ export const tasksRouter = router({
         !hasParkedSupercarHandle(input.taskId)
       ) {
         // An expired Chrome seat cannot become a generate or unauthenticated cloud run.
+        const browserConnection = localChromeWait.data?.metadata.browserConnection;
         broadcastToUser(ctx.userId, { type: 'server.supercar.awaiting_user', taskId: input.taskId,
-          question: taskRow.awaitingQuestion ?? '请连接 Chrome，重新选择页面授权后重新提交原任务。',
-          awaitingKind: 'permission' });
+          question: taskRow.awaitingQuestion ?? '需要连接 HOLA DAY Chrome 插件，请连接后重新选择页面并重新提交原任务。',
+          awaitingKind: 'permission', ...(browserConnection ? { browserConnection } : {}) });
         return { ok: true, state: 'stillAwaiting' as const };
       }
       // A follow-up keeps the brain its task started with. Resolved only after
