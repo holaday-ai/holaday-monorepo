@@ -22,17 +22,17 @@ import { signStreamToken } from './auth/jwt.js';
 import { bearerAuth } from './auth/middleware.js';
 import { AuthService, isClosureRecoveryResult } from './auth/service.js';
 import type { BrowserPool } from './browser-pool/index.js';
+import {
+  VAULT_IMPORT_BODY_LIMIT,
+  VAULT_IMPORT_PATH,
+  installVaultRoutes,
+  vaultBodyErrorHandler,
+} from './browser-session-vault/http.js';
+import { purgeLegacyCookiesForVault } from './browser-session-vault/legacy.js';
+import type { VaultRuntime } from './browser-session-vault/runtime.js';
 import { browsingHistorySchema, replaceUserSiteStats } from './browsing-history/service.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
-import {
-  MAX_COOKIES_PER_SYNC,
-  type SyncableCookie,
-  injectPendingCookies,
-  isAllowedCookieDomain,
-  syncableCookieSchema,
-  upsertPendingCookies,
-} from './cookies/sync-service.js';
 import { db } from './db/client.js';
 import { payments } from './db/schema/payments.js';
 import { users } from './db/schema/users.js';
@@ -66,6 +66,7 @@ import { completePaymentInTransaction, lockSettlementContext } from './trpc/rout
 import { tasksRouter } from './trpc/routers/tasks.js';
 
 export interface HttpAppDeps {
+  browserVault?: VaultRuntime;
   /** Original boot controller only; absence preserves the pre-drain deployment. */
   executionDrain?: import('./execution/execution-admission.js').ExecutionAdmission;
   ordinaryMaintenance?: import('./execution/ordinary-maintenance.js').OrdinaryMaintenance;
@@ -124,8 +125,30 @@ export function createHttpApp(deps: HttpAppDeps) {
   // Server-side duration (and handler phases) for latency triage, before auth.
   app.use(lifetime.middleware(serverTimingMiddleware));
   app.use(lifetime.middleware(pinoHttp({ logger })));
-  app.use(lifetime.middleware(express.json({ limit: '1mb' })));
+  // Global 1MB JSON cap; only the session-import route gets its own 2MB cap.
+  const defaultJson = express.json({ limit: '1mb' });
+  const vaultImportJson = express.json({ limit: VAULT_IMPORT_BODY_LIMIT });
+  app.use(
+    lifetime.middleware((req, res, next) =>
+      (req.method === 'POST' && VAULT_IMPORT_PATH.test(req.path) ? vaultImportJson : defaultJson)(
+        req,
+        res,
+        next,
+      ),
+    ),
+  );
+  app.use(vaultBodyErrorHandler);
   app.use(lifetime.handler(bearerAuth));
+  installVaultRoutes({
+    get,
+    post: (path, handler) => post(path, handler),
+    runtime: deps.browserVault,
+    importEnabled: env.BROWSER_SESSION_IMPORT_V2,
+    profileEnabled: env.BROWSER_PROFILE_PERSIST_V1,
+    send: async (user, options) =>
+      (await import('./ws/server.js')).sendExtensionToolCall(user, options),
+    purgeLegacy: (user) => purgeLegacyCookiesForVault(db, user),
+  });
 
   get('/stock-news/source-cover', async (req, res) => {
     const result = await fetchSourceCover(req.query.url);
@@ -971,124 +994,10 @@ export function createHttpApp(deps: HttpAppDeps) {
   // ---------------------------------------------------------------------
   // Phase 17 — extension cookie sync.
   //
-  //   POST /cookies/sync
-  //   Headers: Authorization: Bearer <jwt>
-  //   Body: { cookies: SyncableCookie[] }
-  //
-  // Two paths from receipt: if the user has a live Brave instance,
-  // inject immediately so the next agent task is already logged in.
-  // Otherwise upsert into pending_cookies and let BrowserPool's
-  // onInstanceReady hook drain on the next allocate.
-  //
-  // Per-route json parser bumps the limit to 5MB — power users can
-  // legitimately ship a few hundred KB of cookies across the
-  // curated domain list, comfortably above the global 1MB cap.
-  // ---------------------------------------------------------------------
-  post('/cookies/sync', express.json({ limit: '5mb' }), async (req, res) => {
-    const userExternalId = (req as express.Request & { userId?: string }).userId;
-    if (!userExternalId) {
-      res.status(401).json({ error: 'unauthorized' });
-      return;
-    }
-    const body = (req.body ?? {}) as { cookies?: unknown };
-    if (!Array.isArray(body.cookies)) {
-      res.status(400).json({ error: 'body.cookies must be an array' });
-      return;
-    }
-    if (body.cookies.length === 0) {
-      res.json({ synced: 0, domains: [], deferred: false });
-      return;
-    }
-    if (body.cookies.length > MAX_COOKIES_PER_SYNC) {
-      res.status(400).json({
-        error: 'too_many_cookies',
-        message: `最多同步 ${MAX_COOKIES_PER_SYNC} 条`,
-      });
-      return;
-    }
-    // zod-validate + domain-whitelist server-side. The extension's
-    // own TRACKED_DOMAINS gate is enforced HERE too so a tampered
-    // or repurposed extension can't widen the scope to arbitrary
-    // sites. Off-list cookies and malformed entries get dropped
-    // silently (logged) — never cause a 4xx, since users blame
-    // "the cookie sync broke" not "site X isn't tracked".
-    const validated: SyncableCookie[] = [];
-    let skippedSchema = 0;
-    let skippedDomain = 0;
-    for (const raw of body.cookies) {
-      const parsed = syncableCookieSchema.safeParse(raw);
-      if (!parsed.success) {
-        skippedSchema += 1;
-        continue;
-      }
-      if (!isAllowedCookieDomain(parsed.data.domain)) {
-        skippedDomain += 1;
-        continue;
-      }
-      validated.push(parsed.data);
-    }
-    if (skippedSchema > 0 || skippedDomain > 0) {
-      logger.warn(
-        { userExternalId, skippedSchema, skippedDomain, kept: validated.length },
-        'cookie-sync: dropped entries failing schema or domain whitelist',
-      );
-    }
-    const cookies = validated;
-    if (cookies.length === 0) {
-      res.json({
-        synced: 0,
-        domains: [],
-        deferred: false,
-        dropped: { schema: skippedSchema, domain: skippedDomain },
-      });
-      return;
-    }
-    const [user] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.externalId, userExternalId))
-      .limit(1);
-    if (!user) {
-      res.status(401).json({ error: 'unknown user' });
-      return;
-    }
-    const domains = Array.from(
-      new Set(cookies.map((c) => c.domain).filter((d): d is string => typeof d === 'string')),
-    );
-    // Upsert into pending_cookies first — that way even if the
-    // immediate-inject path throws (transient executor death),
-    // the next allocate still drains them.
-    await upsertPendingCookies(db, user.id, cookies);
-
-    // Try the immediate inject when the user has a live executor.
-    // Phase 24 — peekActiveForUser finds whichever active task
-    // instance the user currently has (if any). Cookies get
-    // injected into that task's context immediately; if no task
-    // is active, deferred=true means the next task spawn will
-    // pick them up via onInstanceReady.
-    let deferred = true;
-    const live = deps.browserPool?.peekActiveForUser(userExternalId);
-    if (live && live.status === 'ready') {
-      try {
-        const page = await live.executor.getPage();
-        const ctx = page.context();
-        await injectPendingCookies({ db, context: ctx, userExternalId });
-        deferred = false;
-      } catch (err) {
-        logger.warn(
-          {
-            err: err instanceof Error ? err.message : String(err),
-            userExternalId,
-          },
-          'cookie-sync: immediate inject failed; will retry on next allocate',
-        );
-      }
-    }
-    res.json({
-      synced: cookies.length,
-      domains,
-      deferred,
-    });
+  // Legacy unscoped ingress is retired even when V2 is off.
+  // New imports require an explicit, one-use site grant.
+  post('/cookies/sync', (_req, res) => {
+    res.status(410).json({ error: 'explicit_site_grant_required' });
   });
 
   // ---------------------------------------------------------------------

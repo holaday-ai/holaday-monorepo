@@ -39,6 +39,9 @@ it.each([
   // explicit public-cloud choice, is held before model preflight and quota.
   'v2-private-repo',
   'v2-inbox-public-cloud',
+  // FIX-PR252: routing flag OFF — the retired cookie sync must not send a
+  // login-required task to a logged-out cloud browser.
+  'v2-flag-off-identity',
   'ready',
   'timeout',
   'disabled',
@@ -51,7 +54,7 @@ it.each([
 ] as const)('formal Qwen browser task admission and execution: %s', async (scenario) => {
   const isV2 = scenario.startsWith('v2-');
   if (isV2) {
-    vi.stubEnv('USER_BROWSER_ROUTING_V2', 'true');
+    if (scenario !== 'v2-flag-off-identity') vi.stubEnv('USER_BROWSER_ROUTING_V2', 'true');
     vi.spyOn(extensionWs, 'hasConnectedExtension').mockReturnValue(
       scenario === 'v2-grant' || scenario === 'v2-inbox-public-cloud',
     );
@@ -293,7 +296,14 @@ it.each([
                   id: 77,
                   status: 'awaiting_user',
                   intent: '查看我的京东订单',
-                  result: { metadata: { browserSource: 'local-chrome' } },
+                  result: {
+                    metadata: {
+                      browserSource: 'local-chrome',
+                      ...(scenario === 'v2-flag-off-identity'
+                        ? { browserRoutingAwaiting: 'extension_offline' }
+                        : {}),
+                    },
+                  },
                   awaitingQuestion: '请连接插件并重新选择页面',
                 },
               ]

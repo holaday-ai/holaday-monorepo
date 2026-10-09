@@ -103,7 +103,7 @@ export const ACCOUNT_CLOSURE_TABLE_OWNERSHIP: readonly AccountClosureTableOwners
   ...own('feedback_support', 'feedback_cases'),
   ...own('external_notifications', 'notification_channels', 'notifications'),
   ...own('extension_site_stats', 'user_site_stats'),
-  ...own('extension_login_cookies', 'pending_cookies'),
+  ...own('extension_login_cookies', 'pending_cookies', 'browser_session_vaults'),
   ...own('payments_entitlements', 'payments', 'task_quotas'),
   ...own(
     'partner_kyc_ledger',

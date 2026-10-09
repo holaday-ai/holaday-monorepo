@@ -78,6 +78,11 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
   viewportProfile?: BrowserViewportProfile;
 }
 
+/** What the task will browse; only a matching site grant applies to it. */
+export interface BrowserSessionTarget {
+  targetUrl?: string | null;
+}
+
 export interface PoolConfig {
   maxInstances: number;
   idleTimeoutMs: number;
@@ -102,6 +107,16 @@ export interface PoolConfig {
    * `executor.getPage().then(p => p.context())`. Optional — pool
    * boots without it for tests / smoke environments.
    */
+  /** Security-critical, awaited before publishing a ready instance. */
+  prepareSession?: (
+    userId: string,
+    executor: import('../agent/vision-loop/playwright-executor.js').PlaywrightExecutor,
+    session?: BrowserSessionTarget,
+  ) => Promise<void>;
+  /** Capture/close the isolated context before the browser process is destroyed. */
+  finishSession?: (
+    executor: import('../agent/vision-loop/playwright-executor.js').PlaywrightExecutor,
+  ) => Promise<void>;
   onInstanceReady?: (
     userExternalId: string,
     executor: import('../agent/vision-loop/playwright-executor.js').PlaywrightExecutor,

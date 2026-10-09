@@ -141,11 +141,14 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
       const inst = await pool.allocate('tsk_panel', 'usr_panel', 'sidepanel');
 
       expect(inst.viewportProfile).toBe('sidepanel');
-      expect(spawnSpy).toHaveBeenCalledWith(
-        'tsk_panel',
-        'usr_panel',
-        'sidepanel',
-      );
+      expect(spawnSpy).toHaveBeenCalledWith('tsk_panel', 'usr_panel', 'sidepanel', undefined);
+    });
+
+    it('passes the task target site to session preparation (FIX-PR252)', async () => {
+      await pool.allocate('tsk_target', 'usr_panel', undefined, { targetUrl: 'https://www.jd.com' });
+      expect(spawnSpy).toHaveBeenCalledWith('tsk_target', 'usr_panel', undefined, {
+        targetUrl: 'https://www.jd.com',
+      });
     });
 
     it('deduplicates concurrent allocation attempts for the same task', async () => {

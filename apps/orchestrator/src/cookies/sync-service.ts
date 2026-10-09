@@ -1,20 +1,7 @@
-/**
- * Phase 17 — extension-driven cookie sync.
- *
- * The Chrome extension reads cookies for a curated list of high-
- * frequency sites and POSTs them here. Two paths from receipt:
- *
- *   1. User has a live Brave instance in the BrowserPool → inject
- *      via Playwright's BrowserContext.addCookies() immediately so
- *      the next agent task on jd.com / taobao.com is already
- *      logged in.
- *   2. No live instance → park the payload in `pending_cookies`.
- *      BrowserPool's spawn path drains the row on next allocate.
- *
- * The send shape mirrors chrome.cookies.Cookie. We translate to
- * Playwright's expected shape inside `injectCookies` — Playwright
- * normalises sameSite + path defaults itself, so the helper is
- * thin on purpose.
+import { env } from '../config/env.js';
+/** Retired legacy transport helpers, retained for compatibility tests and cleanup.
+ * Runtime ingress and pool injection are disabled. Writers are ciphertext-only;
+ * readers never load or fall back to the retired plaintext column.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -169,25 +156,23 @@ export const MAX_COOKIES_PER_SYNC = 5_000;
  * across retries — the unique index on user_id makes this a true
  * upsert via ON DUPLICATE KEY UPDATE.
  *
- * Spec B rollout — dual-write phase. We write the four envelope-
- * encryption columns AND the legacy `cookies_json` column. The new
- * read path prefers encrypted; the old read path (if rolled back to)
- * still finds plaintext in cookies_json. Once the 30-day soak ends
- * the next migration will drop cookies_json and the second branch
- * here becomes a no-op to delete.
+ * Compatibility encryption helper: never writes the retired plaintext column.
+ * Production HTTP and automatic injection are disabled; new imports require a site grant.
  */
 export async function upsertPendingCookies(
   db: typeof DbHandle,
   userInternalId: number,
   cookies: readonly SyncableCookie[],
 ): Promise<{ count: number }> {
+  if (env.BROWSER_SESSION_IMPORT_V2 || env.BROWSER_PROFILE_PERSIST_V1)
+    throw new Error('legacy_cookie_sync_disabled');
   const json = JSON.stringify(cookies);
   const enc = encryptCookieJson(json);
   await db
     .insert(pendingCookies)
     .values({
       userId: userInternalId,
-      cookiesJson: json,
+      cookiesJson: null,
       encryptedBlob: enc.encryptedBlob,
       encryptionIv: enc.encryptionIv,
       encryptionTag: enc.encryptionTag,
@@ -196,7 +181,7 @@ export async function upsertPendingCookies(
     })
     .onDuplicateKeyUpdate({
       set: {
-        cookiesJson: json,
+        cookiesJson: null,
         encryptedBlob: enc.encryptedBlob,
         encryptionIv: enc.encryptionIv,
         encryptionTag: enc.encryptionTag,
@@ -221,6 +206,7 @@ export async function injectPendingCookies(opts: {
   context: BrowserContext;
   userExternalId: string;
 }): Promise<number> {
+  if (env.BROWSER_SESSION_IMPORT_V2 || env.BROWSER_PROFILE_PERSIST_V1) return 0;
   const [userRow] = await runCookieDatabase(() =>
     opts.db
       .select({ id: users.id })
@@ -233,7 +219,6 @@ export async function injectPendingCookies(opts: {
     opts.db
       .select({
         id: pendingCookies.id,
-        cookiesJson: pendingCookies.cookiesJson,
         encryptedBlob: pendingCookies.encryptedBlob,
         encryptionIv: pendingCookies.encryptionIv,
         encryptionTag: pendingCookies.encryptionTag,
@@ -245,8 +230,7 @@ export async function injectPendingCookies(opts: {
   );
   if (!row) return 0;
 
-  // Spec B — prefer the encrypted columns when present, fall back to
-  // legacy plaintext. Decrypt failure (auth tag mismatch, wrong key,
+  // Compatibility encrypted rows only. Plaintext has no runtime fallback. Decrypt failure (auth tag mismatch, wrong key,
   // corrupted blob) drops the row + logs rather than returning stale
   // data; the user's next sync repopulates.
   let payloadJson: string | null = null;
@@ -258,16 +242,14 @@ export async function injectPendingCookies(opts: {
         encryptionTag: row.encryptionTag,
         encryptedKey: row.encryptedKey,
       });
-    } catch (err) {
+    } catch {
       logger.warn(
-        { err: errMsg(err), userExternalId: opts.userExternalId },
+        { reason: 'cookie_operation_failed', userExternalId: opts.userExternalId },
         'cookie-sync: encrypted payload failed to decrypt; dropping row',
       );
       await deletePendingCookie(opts.db, row.id);
       return 0;
     }
-  } else if (row.cookiesJson) {
-    payloadJson = row.cookiesJson;
   } else {
     // Empty row (no plaintext, no ciphertext) — drop and skip.
     await deletePendingCookie(opts.db, row.id);
@@ -277,9 +259,9 @@ export async function injectPendingCookies(opts: {
   let parsed: unknown;
   try {
     parsed = JSON.parse(payloadJson);
-  } catch (err) {
+  } catch {
     logger.warn(
-      { err: errMsg(err), userExternalId: opts.userExternalId },
+      { reason: 'cookie_operation_failed', userExternalId: opts.userExternalId },
       'cookie-sync: pending row had invalid JSON; dropping',
     );
     await deletePendingCookie(opts.db, row.id);
@@ -320,22 +302,22 @@ export async function injectCookies(
   if (playwrightCookies.length === 0) return;
   try {
     await addCookieBatch(context, playwrightCookies);
-  } catch (err) {
+  } catch {
     // An owned ambiguous submission must be reconciled, not retried or deleted.
     assertCookieDispatch();
     // Single shot fails on the first invalid cookie — fall back to
     // per-cookie loop so one bad entry doesn't poison the batch.
     logger.warn(
-      { err: errMsg(err), batchSize: playwrightCookies.length },
+      { reason: 'cookie_operation_failed', batchSize: playwrightCookies.length },
       'cookie-sync: bulk addCookies failed, falling back to per-cookie',
     );
     for (const cookie of playwrightCookies) {
       try {
         await addCookieBatch(context, [cookie]);
-      } catch (perErr) {
+      } catch {
         assertCookieDispatch();
         logger.debug(
-          { err: errMsg(perErr), domain: cookie.domain, name: cookie.name },
+          { reason: 'cookie_operation_failed' },
           'cookie-sync: per-cookie inject failed',
         );
       }
@@ -384,8 +366,4 @@ function mapSameSite(s?: string): 'Strict' | 'Lax' | 'None' | undefined {
     default:
       return undefined;
   }
-}
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

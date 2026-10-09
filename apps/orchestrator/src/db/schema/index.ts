@@ -66,3 +66,4 @@ export * from './model-catalog.js';
 export * from './quota-refunds.js';
 
 export * from './auth-sessions.js';
+export * from './browser-session-vaults.js';

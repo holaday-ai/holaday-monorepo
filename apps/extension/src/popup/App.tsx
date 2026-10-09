@@ -52,6 +52,7 @@ import {
 } from '../shared/storage.js';
 import {
   type ExtensionStatusResponse,
+  SITE_LOGIN_NOTICE,
   type WsConnectionStatus,
   getConnectionStatusCopy,
   mergeConnectionStatusPoll,
@@ -404,6 +405,7 @@ export function App() {
       <UserCard user={user} theme={t} />
       <ConnectionStatusBlock theme={t} refreshSignal={statusRefreshSignal} />
       <BrowsingStatusBlock theme={t} />
+      <SiteLoginNotice theme={t} />
       <BottomBar theme={t} onOpenWeb={openWebLogin} onReset={retryConnection} resetting={resetting} />
     </div>
   );
@@ -445,6 +447,23 @@ function LoggedOutView({
         </button>
       </div>
       <BottomBar theme={theme} onOpenWeb={onLogin} onReset={onReset} resetting={resetting} hideOpenWeb />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Site login notice (replaces the retired silent cookie sync)
+// ---------------------------------------------------------------------------
+
+function SiteLoginNotice({ theme }: { theme: ThemeTokens }) {
+  return (
+    <div style={card(theme)} data-testid="site-login-notice">
+      <div style={{ fontSize: 13, fontWeight: 600, color: theme.textPrimary, marginBottom: 4 }}>
+        {SITE_LOGIN_NOTICE.title}
+      </div>
+      <div style={{ fontSize: 12, lineHeight: 1.5, color: theme.textSecondary }}>
+        {SITE_LOGIN_NOTICE.detail}
+      </div>
     </div>
   );
 }

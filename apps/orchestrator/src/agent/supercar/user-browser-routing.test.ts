@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decideUserBrowserRoute } from './user-browser-routing.js';
+import { browserTaskTargetUrl, decideUserBrowserRoute } from './user-browser-routing.js';
 const base = { enabled: true, extensionOnline: true };
 describe('identity-aware user Chrome route', () => {
   it.each([
@@ -106,5 +106,42 @@ describe('ordinary login / private-data wording needs the user Chrome (FIX-PR250
       lane: 'cloud',
       reason: 'public_site',
     });
+  });
+});
+
+describe('retired automatic cookie sync and vault sessions (FIX-PR252)', () => {
+  const off = { enabled: false, extensionOnline: false, legacyCookieSyncRetired: true };
+  it('with the routing flag off, login-required tasks wait for the user Chrome', () => {
+    for (const intent of ['查看我的京东订单', '看看淘宝购物车', '登录 GitHub 后读取私有仓库列表'])
+      expect(decideUserBrowserRoute({ ...off, intent })).toMatchObject({
+        lane: 'awaiting_user',
+        reason: 'extension_offline',
+      });
+  });
+  it('with the routing flag off, public and site-only queries keep the legacy route', () => {
+    for (const intent of ['在京东查价格', '打开36kr首页', '查询北京明天的天气'])
+      expect(decideUserBrowserRoute({ ...off, intent })).toEqual({
+        lane: 'legacy',
+        reason: 'flag_off',
+      });
+    expect(
+      decideUserBrowserRoute({
+        ...off,
+        legacyCookieSyncRetired: false,
+        intent: '查看我的京东订单',
+      }),
+    ).toEqual({ lane: 'legacy', reason: 'flag_off' });
+  });
+  it('a connected site grant serves an identity task from the cloud session', () => {
+    expect(
+      decideUserBrowserRoute({ ...off, intent: '查看我的京东订单', cloudSessionAvailable: true }),
+    ).toMatchObject({ lane: 'cloud', reason: 'vault_session', origin: 'https://www.jd.com' });
+  });
+  it('derives the task target site from an explicit URL or a known site name', () => {
+    expect(browserTaskTargetUrl('打开 https://item.jd.com/1.html 看看')).toBe(
+      'https://item.jd.com/1.html',
+    );
+    expect(browserTaskTargetUrl('查看我的京东订单')).toBe('https://www.jd.com');
+    expect(browserTaskTargetUrl('搜索今天的新闻')).toBeNull();
   });
 });

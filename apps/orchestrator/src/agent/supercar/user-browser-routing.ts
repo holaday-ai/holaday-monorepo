@@ -24,6 +24,19 @@ const IDENTITY =
  */
 const IDENTITY_LIKELY =
   /gmail|outlook|hotmail|qq\s*邮箱|163\s*邮箱|网易邮箱|飞书|钉钉|企业微信|notion|slack|语雀|网银|网上银行|支付宝|微信(?!公众号文章)|linkedin|领英/i;
+const URL_IN_TEXT = /https?:\/\/[^\s<>"'，。；）]+/i;
+/** The site a browser task targets: an explicit URL, else a first-cohort site name. */
+export function browserTaskTargetUrl(intent: string): string | null {
+  const raw = intent.match(URL_IN_TEXT)?.[0];
+  if (raw)
+    try {
+      const url = new URL(raw);
+      if (/^https?:$/.test(url.protocol)) return url.href;
+    } catch {
+      /* normal URL validation owns malformed input */
+    }
+  return COHORT.find((site) => site.name.test(intent))?.origin ?? null;
+}
 export interface UserBrowserRoute {
   lane: 'legacy' | 'cloud' | 'user-chrome' | 'awaiting_user';
   question?: string;
@@ -36,7 +49,8 @@ export interface UserBrowserRoute {
     | 'extension_offline'
     | 'selection_required'
     | 'origin_grant_required'
-    | 'selected';
+    | 'selected'
+    | 'vault_session';
 }
 export function decideUserBrowserRoute(input: {
   enabled: boolean;
@@ -44,8 +58,20 @@ export function decideUserBrowserRoute(input: {
   extensionOnline: boolean;
   selectionOrigin?: string;
   publicCloudRequested?: boolean;
+  /**
+   * The automatic cookie sync is retired: with the routing flag off, a task
+   * that explicitly needs a login still goes to the user's Chrome instead of
+   * a logged-out cloud browser. Other tasks keep the legacy route.
+   */
+  legacyCookieSyncRetired?: boolean;
+  /** A connected site grant covers the target: the cloud browser has its session. */
+  cloudSessionAvailable?: boolean;
 }): UserBrowserRoute {
-  if (!input.enabled) return { lane: 'legacy', reason: 'flag_off' };
+  const identityRequired = IDENTITY.test(
+    input.intent.replace(/https?:\/\/[^\s<>"'，。；）]+/gi, ' '),
+  );
+  if (!input.enabled && !(input.legacyCookieSyncRetired && identityRequired))
+    return { lane: 'legacy', reason: 'flag_off' };
   const raw = input.intent.match(/https?:\/\/[^\s<>"'，。；）]+/i)?.[0];
   let url: URL | null = null;
   try {
@@ -65,7 +91,7 @@ export function decideUserBrowserRoute(input: {
       )
     : COHORT.find((site) => site.name.test(input.intent));
   // Words, not addresses: "/login" in a URL names a page, not a login need.
-  const identity = IDENTITY.test(input.intent.replace(/https?:\/\/[^\s<>"'，。；）]+/gi, ' '));
+  const identity = identityRequired;
   const likely = !identity && IDENTITY_LIKELY.test(input.intent);
   // Unsure whether a login is needed → wait for the user's Chrome (or an explicit public choice).
   const preferred = Boolean(cohort) || identity || likely;
@@ -77,6 +103,9 @@ export function decideUserBrowserRoute(input: {
     };
   if (!preferred && !input.selectionOrigin) return { lane: 'cloud', reason: 'public_site' };
   const origin = url?.origin ?? cohort?.origin ?? input.selectionOrigin;
+  // The user already authorized this site's session for the cloud browser.
+  if (input.cloudSessionAvailable && !input.selectionOrigin)
+    return { lane: 'cloud', reason: 'vault_session', origin };
   if (!input.extensionOnline)
     return {
       lane: 'awaiting_user',

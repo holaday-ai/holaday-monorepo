@@ -2,5 +2,5 @@ import { createRelationalDeleteHandler, directUserRows } from '../handler-contra
 
 export const extensionLoginCookiesClosureHandler = createRelationalDeleteHandler({
   categoryId: 'extension_login_cookies',
-  targets: [directUserRows('pending_cookies')],
+  targets: [directUserRows('pending_cookies'), directUserRows('browser_session_vaults')],
 });
