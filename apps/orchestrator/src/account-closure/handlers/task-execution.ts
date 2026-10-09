@@ -287,7 +287,22 @@ export const taskExecutionClosureHandler: AccountClosureHandler = {
   retentionOutcomes: ['deleted', 'anonymized', 'not_present'],
   async run(context) {
     context.signal.throwIfAborted();
-    await browserReplayStore.removeOwner(context.request.userExternalId);
+    try {
+      await browserReplayStore.removeOwner(context.request.userExternalId);
+    } catch (error) {
+      // Local replay cleanup is best-effort; account closure must remain available.
+      context.signal.throwIfAborted();
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+      const storageCode =
+        typeof code === 'string' &&
+        ['EACCES', 'EPERM', 'EROFS', 'ENOSPC', 'EDQUOT', 'EIO', 'ENOENT'].includes(code)
+          ? code
+          : 'UNKNOWN';
+      context.logger.warn(
+        { reasonCode: 'browser_replay_cleanup_failed', storageCode },
+        'Browser replay cleanup unavailable during account closure',
+      );
+    }
     const pageSize = Math.min(context.pageSize, 100);
     if (!Number.isSafeInteger(pageSize) || pageSize <= 0) {
       throw new ClosureHandlerError('INVARIANT_VIOLATION');

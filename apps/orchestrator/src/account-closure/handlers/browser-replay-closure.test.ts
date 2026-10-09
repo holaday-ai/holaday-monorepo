@@ -27,3 +27,26 @@ it('account closure purges replay owner before task relational cleanup', async (
   expect(result.kind).toBe('continue');
   expect(removeOwner).toHaveBeenCalledWith('synthetic-owner');
 });
+
+it('continues account closure and logs only a reason code if replay marker storage fails', async () => {
+  removeOwner.mockRejectedValueOnce(
+    Object.assign(new Error('private/path/should/not/be/logged'), { code: 'EACCES' }),
+  );
+  const warn = vi.fn();
+  const context = {
+    request: { userId: 1, userExternalId: 'synthetic-owner' },
+    signal: new AbortController().signal,
+    pageSize: 100,
+    checkpoint: null,
+    db: {},
+    storage: {},
+    logger: { warn },
+  } as unknown as ClosureHandlerContext;
+  const result = await taskExecutionClosureHandler.run(context);
+  expect(result.kind).toBe('continue');
+  expect(warn).toHaveBeenCalledWith(
+    { reasonCode: 'browser_replay_cleanup_failed', storageCode: 'EACCES' },
+    expect.any(String),
+  );
+  expect(JSON.stringify(warn.mock.calls)).not.toContain('private/path');
+});

@@ -8,7 +8,7 @@ import { type UnifiedBrowserAction, isMutatingBrowserAction } from './unified-to
 
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 const SENSITIVE_URL_PARAMETER =
-  /^(?:ticket|token|access_token|id_token|refresh_token|auth|authorization|sig|sign|signature|secret|password|api_key|apikey|auth_key|session_token|session_id|cookie|code)$/i;
+  /^(?:ticket|token|access_token|id_token|refresh_token|auth|authorization|sig|sign|signature|secret|password|api_key|apikey|auth_key|session_token|session_id|cookie)$/i;
 /** Model-facing copy only; raw accessible addresses stay in host-only evidence. */
 export function safeObservationUrl(value: string, base?: string): string {
   try {
@@ -51,6 +51,101 @@ function transactionRequest(url: URL) {
   }
   return false;
 }
+/** Only the operation kind survives this bounded, host-local body inspection. */
+function graphqlOperation(request: Request): 'query' | 'mutation' | 'unknown' {
+  const parse = (document: string, operationName?: string): 'query' | 'mutation' | 'unknown' => {
+    if (document.length > 65536) return 'unknown';
+    const token =
+      /(?:#[^\n\r]*|[\s,\uFEFF]+)|(?:"""[\s\S]*?"""|"(?:\\.|[^"\\\r\n])*")|(?:[_A-Za-z][_0-9A-Za-z]*|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|\.\.\.|[!$():=@\[\]{|}&])/y;
+    const tokens: string[] = [];
+    for (let offset = 0; offset < document.length; ) {
+      token.lastIndex = offset;
+      const match = token.exec(document);
+      if (!match) return 'unknown';
+      offset = token.lastIndex;
+      if (!/^(?:#|[\s,\uFEFF])/.test(match[0])) tokens.push(match[0]);
+    }
+    let index = 0;
+    const name = () => /^[_A-Za-z][_0-9A-Za-z]*$/.test(tokens[index] ?? '');
+    const group = (): boolean => {
+      const stack: string[] = [];
+      do {
+        const current = tokens[index++];
+        if (!current) return false;
+        if (current === '(' || current === '[' || current === '{') stack.push(current);
+        if (current === ')' || current === ']' || current === '}') {
+          const opening = stack.pop();
+          if (opening !== ({ ')': '(', ']': '[', '}': '{' } as Record<string, string>)[current])
+            return false;
+        }
+      } while (stack.length && index < tokens.length);
+      return stack.length === 0;
+    };
+    const directives = (): boolean => {
+      while (tokens[index] === '@') {
+        index++;
+        if (!name()) return false;
+        index++;
+        if (tokens[index] === '(' && !group()) return false;
+      }
+      return true;
+    };
+    const operations: Array<{ kind: 'query' | 'mutation'; name?: string }> = [];
+    while (index < tokens.length) {
+      const kind = tokens[index++];
+      if (kind === '{') {
+        index--;
+        if (!group()) return 'unknown';
+        operations.push({ kind: 'query' });
+        continue;
+      }
+      if (kind === 'fragment') {
+        if (!name()) return 'unknown';
+        index++;
+        if (tokens[index++] !== 'on' || !name()) return 'unknown';
+        index++;
+        if (!directives() || tokens[index] !== '{' || !group()) return 'unknown';
+        continue;
+      }
+      if (kind !== 'query' && kind !== 'mutation' && kind !== 'subscription') return 'unknown';
+      const opName = name() ? tokens[index++] : undefined;
+      if (tokens[index] === '(' && !group()) return 'unknown';
+      if (!directives() || tokens[index] !== '{' || !group()) return 'unknown';
+      operations.push({ kind: kind === 'query' ? 'query' : 'mutation', name: opName });
+    }
+    const selected = operationName
+      ? operations.filter((op) => op.name === operationName)
+      : operations;
+    return selected.length === 1 ? (selected[0]?.kind ?? 'unknown') : 'unknown';
+  };
+  try {
+    const body = request.postData();
+    if (!body || body.length > 65536) return 'unknown';
+    let payload: unknown;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      return parse(body);
+    }
+    const entries = Array.isArray(payload) ? payload : [payload];
+    if (!entries.length) return 'unknown';
+    const kinds = entries.map((entry) => {
+      if (
+        !entry ||
+        typeof entry !== 'object' ||
+        typeof entry.query !== 'string' ||
+        (entry.operationName != null && typeof entry.operationName !== 'string')
+      )
+        return 'unknown';
+      return parse(entry.query, entry.operationName ?? undefined);
+    });
+    if (kinds.includes('mutation')) return 'mutation';
+    return kinds.every((kind) => kind === 'query') ? 'query' : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 const TRANSACTION_RECEIPT_RE =
   /(?:下单|付款|支付|提交|删除|发送)(?:成功|完成)|订单号|(?:order|payment|purchase|booking)\s+(?:created|placed|confirmed|completed|number)|(?:deleted|sent)\s+successfully/i;
 
@@ -98,7 +193,56 @@ export async function observationState(frame: Frame) {
       for (const element of Array.from(currentRoot.querySelectorAll('*')).slice(0, 10000))
         if (element.shadowRoot) roots.push(element.shadowRoot);
     }
+    const visible = (element: Element) => {
+      const style = getComputedStyle(element);
+      return (
+        element.getClientRects().length > 0 &&
+        style.visibility !== 'hidden' &&
+        style.display !== 'none'
+      );
+    };
+    const keypads = new Map<Element, Set<string>>();
+    for (const currentRoot of roots.slice(0, 100)) {
+      for (const key of Array.from(
+        currentRoot.querySelectorAll('button,[role="button"],[role="gridcell"],td'),
+      ).slice(0, 2000)) {
+        const digit = key.textContent?.trim() ?? '';
+        if (!/^[0-9]$/.test(digit) || !visible(key)) continue;
+        const container = key.closest('.keypad,[role="grid"],[role="group"]') ?? key.parentElement;
+        if (!container) continue;
+        const digits = keypads.get(container) ?? new Set<string>();
+        digits.add(digit);
+        keypads.set(container, digits);
+      }
+    }
+    const sensitiveKeypad =
+      [...keypads].some(
+        ([container, digits]) =>
+          digits.size === 10 &&
+          /密码|支付|付款|验证|password|payment|verification/i.test(
+            (((container.parentElement ?? container) as HTMLElement).innerText || '').slice(
+              0,
+              2000,
+            ),
+          ),
+      ) ||
+      roots
+        .slice(0, 100)
+        .some((currentRoot) =>
+          Array.from(currentRoot.querySelectorAll('.keypad,[role="grid"],[role="group"]')).some(
+            (container) =>
+              visible(container) &&
+              /(?:[●•*]\s*){4,}/.test(container.textContent ?? '') &&
+              /支付密码|付款密码|payment password/i.test(
+                (((container.parentElement ?? container) as HTMLElement).innerText || '').slice(
+                  0,
+                  2000,
+                ),
+              ),
+          ),
+        );
     const sensitive =
+      sensitiveKeypad ||
       fields.some((element) => {
         const input = element as HTMLInputElement;
         const style = getComputedStyle(input);
@@ -158,6 +302,15 @@ export async function observationState(frame: Frame) {
   return { ...state, forms: hash(state.forms), dom: hash(state.text), url: frame.url() };
 }
 
+type ActionWindow = {
+  frame: Frame;
+  origin: string;
+  pages: Set<Page>;
+  priorRequests: Set<string>;
+  inFlight: Set<Request>;
+  lastActivity: number;
+};
+
 export class CloudObservation {
   private tabs = new Map<string, Page>();
   private frames = new Map<string, Frame>();
@@ -173,21 +326,26 @@ export class CloudObservation {
   private requests: Array<{ category: string; write: boolean }> = [];
 
   private active: Page;
-  private backgroundRequests = new Set<string>();
-  private actionWindow: {
-    action: UnifiedBrowserAction;
-    frame: Frame;
-    origin: string;
-    priorRequests: Set<string>;
-  } | null = null;
-  // Interruptions belong to the action result, never to a background request.
+  private backgroundRequests = new Map<string, number>();
+  private actionWindow: ActionWindow | null = null;
+  private pendingAction: ActionWindow | null = null;
+  private pendingWrite = false;
+  private requestWindows = new Map<Request, ActionWindow>();
   interruption(): { reason: string; message: string } | undefined {
-    return undefined;
+    return this.pendingWrite
+      ? {
+          reason: 'unexpected_effect',
+          message:
+            '检测到写请求，已暂停后续操作。第一次副作用无法事前阻止，请核对结果后确认如何继续。',
+        }
+      : undefined;
   }
   constructor(page: Page) {
     this.active = page;
     this.register(page);
     page.context().on('request', this.onRequest);
+    page.context().on('requestfinished', this.onRequestSettled);
+    page.context().on('requestfailed', this.onRequestSettled);
   }
   get page() {
     return this.active;
@@ -196,7 +354,7 @@ export class CloudObservation {
     if ([...this.tabs.values()].includes(page)) return;
     this.tabs.set(`tab_${randomUUID()}`, page);
   }
-  private recordRequest(r: Request, window = this.actionWindow) {
+  private recordRequest(r: Request, window = this.actionWindow ?? this.pendingAction) {
     let url: URL;
     try {
       url = new URL(r.url());
@@ -205,40 +363,46 @@ export class CloudObservation {
     }
     const signature = hash(`${r.method()}:${r.resourceType()}:${url.origin}${url.pathname}`);
     if (!window) {
-      this.backgroundRequests.add(signature);
+      this.backgroundRequests.set(signature, (this.backgroundRequests.get(signature) ?? 0) + 1);
       if (this.backgroundRequests.size > 400)
-        this.backgroundRequests.delete(this.backgroundRequests.values().next().value ?? '');
+        this.backgroundRequests.delete(this.backgroundRequests.keys().next().value ?? '');
       return;
     }
-    if (window !== this.actionWindow) return;
+    if (window !== this.actionWindow && window !== this.pendingAction) return;
     const navigation = r.isNavigationRequest();
-    const transactional = transactionRequest(url);
-    if (!navigation && !transactional && url.origin !== window.origin) return;
-    if (!navigation) {
-      try {
-        if (!transactional && r.frame() !== window.frame) return;
-      } catch {
-        /* initial popup */
-      }
+    const graphql =
+      r.method() === 'POST' && /(?:^|\/)(?:graphql|gql)(?:\/|$)/i.test(url.pathname)
+        ? graphqlOperation(r)
+        : null;
+    const transactional =
+      transactionRequest(url) || graphql === 'mutation' || graphql === 'unknown';
+    try {
+      if (!window.pages.has(r.frame().page())) return;
+    } catch {
+      /* A task popup's initial navigation may not have a frame yet. */
     }
-    const ignored =
-      r.resourceType() === 'ping' ||
-      /(?:^|\/)(?:collect|track|log|logs|beacon|heartbeat|ping)(?:\/|$)/i.test(url.pathname) ||
+    const telemetryPath = /(?:^|\/)(?:collect|track|log|logs|beacon|heartbeat|ping)(?:\/|$)/i.test(
+      url.pathname,
+    );
+    const telemetryHost =
       /(?:^|\.)(?:google-analytics\.com|googletagmanager\.com|sentry\.io|mixpanel\.com|segment\.(?:com|io)|sensorsdata\.cn)$/i.test(
         url.hostname,
-      ) ||
-      (!navigation && window.priorRequests.has(signature)) ||
-      (window.action.tool === 'scroll_until' &&
-        /(?:^|\/)(?:graphql|query|search|list|feed)(?:\/|$)/i.test(url.pathname));
+      );
+    const ignored =
+      (telemetryPath && (url.origin === window.origin || telemetryHost)) ||
+      (!navigation && window.priorRequests.has(signature));
     if (ignored && !transactional) return;
-    this.requests.push({
-      category: `${r.method()}:${r.resourceType()}`,
-      write: transactional || !['GET', 'HEAD', 'OPTIONS'].includes(r.method()),
-    });
+    const write =
+      transactional || (graphql !== 'query' && !['GET', 'HEAD', 'OPTIONS'].includes(r.method()));
+    window.lastActivity = Date.now();
+    window.inFlight.add(r);
+    this.requestWindows.set(r, window);
+    if (write) this.pendingWrite = true;
+    this.requests.push({ category: `${r.method()}:${r.resourceType()}`, write });
     if (this.requests.length > 400) this.requests.shift();
   }
   private onRequest = (request: Request) => {
-    const window = this.actionWindow;
+    const window = this.actionWindow ?? this.pendingAction;
     let page: Page;
     try {
       page = request.frame().page();
@@ -255,13 +419,33 @@ export class CloudObservation {
       .then((opener) => {
         if (opener && [...this.tabs.values()].includes(opener)) {
           this.register(page);
+          if (window?.pages.has(opener)) window.pages.add(page);
           this.recordRequest(request, window);
         }
       })
       .catch(() => {});
   };
+  private onRequestSettled = (request: Request) => {
+    const window = this.requestWindows.get(request);
+    if (!window) return;
+    window.inFlight.delete(request);
+    window.lastActivity = Date.now();
+    this.requestWindows.delete(request);
+  };
+  private async waitForNetworkQuiet(window: ActionWindow) {
+    const deadline = Date.now() + 3000;
+    window.lastActivity = Date.now();
+    while (Date.now() < deadline) {
+      if (window.inFlight.size === 0 && Date.now() - window.lastActivity >= 500) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
   dispose() {
     this.active.context().off('request', this.onRequest);
+    this.active.context().off('requestfinished', this.onRequestSettled);
+    this.active.context().off('requestfailed', this.onRequestSettled);
+    this.requestWindows.clear();
+    this.pendingAction = this.actionWindow = null;
     this.cursors.clear();
   }
   private frameId(frame: Frame) {
@@ -631,17 +815,31 @@ export class CloudObservation {
     try {
       origin = new URL(before.url).origin;
     } catch {}
-    this.actionWindow = { action, frame, origin, priorRequests: new Set(this.backgroundRequests) };
+    const pending = this.interruption();
+    if (pending) return { ok: false, text: pending.message, interruption: pending };
+    const window: ActionWindow = {
+      frame,
+      origin,
+      pages: new Set([page]),
+      priorRequests: new Set(
+        [...this.backgroundRequests].filter(([, count]) => count >= 2).map(([key]) => key),
+      ),
+      inFlight: new Set(),
+      lastActivity: Date.now(),
+    };
+    this.actionWindow = window;
+    this.pendingAction = window;
     const opened: Page[] = [];
     const popup = (p: Page) => {
       this.register(p);
+      window.pages.add(p);
       opened.push(p);
     };
     page.on('popup', popup);
     let result: UnifiedToolResult;
     try {
       result = await execute();
-      await page.waitForTimeout(200).catch(() => {});
+      await this.waitForNetworkQuiet(window);
     } finally {
       page.off('popup', popup);
       this.actionWindow = null;
