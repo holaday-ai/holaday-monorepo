@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { classifyGeometry, measurePage } from '../lib/checks.mjs';
 import { inspectControls, observeControl } from '../lib/interaction.mjs';
+import { isPopupNavigation } from '../lib/network.mjs';
 const require = createRequire(path.resolve('apps/web-workbench/package.json'));
 const { chromium } = require('playwright');
 test('real browser detects dead button, records working state change, and detects clipped/truncated control', async () => {
@@ -509,6 +510,71 @@ test('browser launch button is not the browser workspace panel', async () => {
     assert.equal((await measurePage(page)).browserPanelVisible, false);
     await page.setContent('<section aria-label="浏览器工作区">panel</section>');
     assert.equal((await measurePage(page)).browserPanelVisible, true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('native modal dialog excludes intentionally covered background controls', async () => {
+  const browser = await chromium.launch({ args: ['--renderer-process-limit=2'] });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(
+      '<button>background</button><dialog open aria-modal="true" aria-label="Native"><button>inside</button></dialog>',
+    );
+    const m = await measurePage(page);
+    assert.equal(m.elements.find((x) => x.label === 'background').intentionalOverlay, true);
+    assert.equal(m.elements.find((x) => x.label === 'inside').scope, 'Native');
+  } finally {
+    await browser.close();
+  }
+});
+
+test('closed details hide menu controls until the summary is expanded', async () => {
+  const browser = await chromium.launch({ args: ['--renderer-process-limit=2'] });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(
+      '<details><summary>menu</summary><div style="position:absolute;display:block"><button>hidden item</button></div></details>',
+    );
+    assert.ok(!(await measurePage(page)).elements.some((x) => x.tag === 'button'));
+    await page.locator('summary').click();
+    assert.ok((await measurePage(page)).elements.some((x) => x.label === 'hidden item'));
+  } finally {
+    await browser.close();
+  }
+});
+
+test('repeatable batch cloning exercises first and second rows without unbounded recursion', async () => {
+  const browser = await chromium.launch({ args: ['--renderer-process-limit=2'] });
+  try {
+    const page = await browser.newPage();
+    const html = `<div role="dialog" aria-label="新建批量任务"><button aria-label="复用任务 1 的步骤和输出" onclick="add()">clone</button></div><script>window.n=1;function add(){n++;const b=document.createElement('button');b.setAttribute('aria-label','复用任务 '+n+' 的步骤和输出');b.textContent='clone';b.onclick=add;document.querySelector('div').append(b)}</script>`;
+    const reset = () => page.setContent(html);
+    await reset();
+    const result = await inspectControls(page, { reset, maxDepth: 4, maxControls: 20 });
+    assert.equal(result.filter((x) => x.status === 'passed').length, 2);
+    assert.ok(result.some((x) => x.status === 'shared-reference' && x.repeatFamilyKey));
+    assert.ok(!result.some((x) => x.status === 'uncovered'));
+  } finally {
+    await browser.close();
+  }
+});
+
+test('early noopener popup navigation is fulfilled locally before its frame exists', async () => {
+  const browser = await chromium.launch({ args: ['--renderer-process-limit=2'] });
+  try {
+    const page = await browser.newPage();
+    await page.context().route('**/*', async (route) => {
+      assert.equal(isPopupNavigation(route.request(), page), true);
+      await route.fulfill({ contentType: 'text/html', body: 'local popup target' });
+    });
+    await page.setContent(
+      `<button onclick="window.open('https://popup.example.test/target','_blank','noopener,noreferrer')">open</button>`,
+    );
+    const result = await observeControl(page, (await measurePage(page)).elements[0]);
+    assert.equal(result.status, 'passed');
+    assert.deepEqual(result.popupUrls, ['https://popup.example.test/target']);
   } finally {
     await browser.close();
   }

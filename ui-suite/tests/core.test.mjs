@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { assertLocalUrl, classifyGeometry, evaluateGate } from '../lib/checks.mjs';
 import { canonicalUrl, discoverRoutes, scanControls, scenarioSlug } from '../lib/inventory.mjs';
+import { isPopupNavigation } from '../lib/network.mjs';
 import { createSeed, dispatch } from '../lib/seed.mjs';
 test('new JSX routes and native/custom controls cannot silently disappear from inventory', () => {
   assert.deepEqual(
@@ -108,4 +109,38 @@ test('canonical routes retain settings hash sections', () => {
     canonicalUrl('http://localhost/settings#account'),
   );
   assert.equal(canonicalUrl('http://localhost/settings#memory'), '/settings#memory');
+});
+
+test('astrology empty trend uses the actual nullable shape and batch creation persists its response', () => {
+  const seed = createSeed();
+  for (const period of ['daily', 'weekly', 'monthly', 'yearly'])
+    assert.equal(dispatch(seed, `astrology.${period}`, {}).sevenDayTrend, null);
+  const created = dispatch(seed, 'batchTasks.create', { prompts: ['one', 'two', 'one'] }, 'POST');
+  assert.equal(created.itemsTotal, 2);
+  assert.equal(dispatch(seed, 'batchTasks.detail', { batchId: created.batchId }).items.length, 2);
+  assert.ok(dispatch(seed, 'batchTasks.list', {}).items.some((x) => x.batchId === created.batchId));
+});
+
+test('popup classification accepts only navigation and handles the pre-frame request race', () => {
+  const main = {};
+  assert.equal(isPopupNavigation({ isNavigationRequest: () => false }, main), false);
+  assert.equal(
+    isPopupNavigation(
+      { isNavigationRequest: () => true, frame: () => ({ page: () => main }) },
+      main,
+    ),
+    false,
+  );
+  assert.equal(
+    isPopupNavigation(
+      {
+        isNavigationRequest: () => true,
+        frame: () => {
+          throw Error('Frame for this navigation request is not available');
+        },
+      },
+      main,
+    ),
+    true,
+  );
 });

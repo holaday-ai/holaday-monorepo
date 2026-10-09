@@ -94,6 +94,7 @@ export function createSeed() {
     }
   return {
     tasks,
+    batches: [],
     memories: [
       {
         externalId: 'mem_ui',
@@ -763,17 +764,47 @@ export function dispatch(s, name, input = {}, method = 'GET') {
       return row ?? { ok: true };
     }
 
-    case 'batchTasks.list':
-      return { batches: [], nextCursor: null };
-    case 'batchTasks.detail':
-      return {
-        batchId: 'bat_ui',
-        title: '测试批量任务',
-        status: 'completed',
-        tasks: [],
-        items: [],
+    case 'batchTasks.create': {
+      const prompts = [...new Set(input.prompts)];
+      const batchId = `bat_ui_${s.batches.length + 1}`;
+      s.batches.push({
+        batchId,
+        name: input.name ?? null,
+        status: 'pending',
+        concurrency: 3,
+        itemsTotal: prompts.length,
+        itemsDone: 0,
+        itemsReview: 0,
+        itemsFailed: 0,
+        itemsCancelled: 0,
         createdAt: at,
-      };
+        completedAt: null,
+        items: prompts.map((prompt, seq) => ({
+          batchItemId: `${batchId}_${seq}`,
+          seq,
+          prompt,
+          status: 'pending',
+          taskId: null,
+          errorMessage: null,
+          createdAt: at,
+          completedAt: null,
+        })),
+      });
+      return { batchId, itemsTotal: prompts.length, concurrency: 3 };
+    }
+    case 'batchTasks.list':
+      return { items: s.batches, nextCursor: null };
+    case 'batchTasks.detail':
+      return (
+        s.batches.find((x) => x.batchId === input.batchId) ?? {
+          batchId: 'bat_ui',
+          title: '测试批量任务',
+          status: 'completed',
+          tasks: [],
+          items: [],
+          createdAt: at,
+        }
+      );
     case 'memory.list':
     case 'memory.listMemories':
       return { memories: s.memories };
@@ -1023,7 +1054,7 @@ export function dispatch(s, name, input = {}, method = 'GET') {
         luckyNumbers: [3],
         luckyLetters: ['A'],
         suitableTimes: ['上午'],
-        sevenDayTrend: [],
+        sevenDayTrend: null,
         cosmicTip: '测试内容仅用于界面验收',
         singlesTip: '保持交流',
         couplesTip: '一起散步',

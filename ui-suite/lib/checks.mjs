@@ -77,6 +77,13 @@ export function classifyGeometry(elements, width, _height) {
 }
 export async function measurePage(page) {
   return page.evaluate(() => {
+    const hiddenInClosedDetails = (e) => {
+      for (let a = e.parentElement; a; a = a.parentElement) {
+        if (a.tagName === 'DETAILS' && !a.open && !a.querySelector(':scope > summary')?.contains(e))
+          return true;
+      }
+      return false;
+    };
     const selectors =
       'button,a,input,textarea,select,summary,[role="button"],[role="tab"],[role="combobox"],[role="menuitem"],[role="switch"],[role="checkbox"],[role="radio"],.fc-daygrid-day[data-date]';
     const seen = new Set(
@@ -86,6 +93,7 @@ export async function measurePage(page) {
     );
     const elements = [...document.querySelectorAll(selectors)]
       .filter((e) => {
+        if (hiddenInClosedDetails(e)) return false;
         const r = e.getBoundingClientRect();
         return (
           r.width > 0 &&
@@ -159,7 +167,7 @@ export async function measurePage(page) {
           ![...(e.labels ?? [])].some((l) => l.contains(hit));
         const overlay = [
           ...document.querySelectorAll(
-            '[role="dialog"],[role="menu"],[data-state="open"][data-radix-popper-content-wrapper]',
+            'dialog[open],[role="dialog"],[role="menu"],[data-state="open"][data-radix-popper-content-wrapper]',
           ),
         ].find((e) => {
           const r = e.getBoundingClientRect();
@@ -178,6 +186,12 @@ export async function measurePage(page) {
         return {
           id,
           label,
+          repeatFamilyKey: (() => {
+            const m = label.match(/^复用任务 (\d+) 的步骤和输出$/);
+            return m && e.closest('[aria-label="新建批量任务"]')
+              ? `batch-copy-${Math.min(2, Number(m[1]))}`
+              : undefined;
+          })(),
           exclusivePressed: (() => {
             if (
               e.getAttribute('aria-pressed') !== 'true' ||
@@ -227,7 +241,9 @@ export async function measurePage(page) {
           })(),
           adornment: e.tagName === 'BUTTON' && /^(显示密码|隐藏密码)$/.test(label),
           scope: (() => {
-            const layer = e.closest('[role=dialog],[role=alertdialog],[role=menu],[role=tabpanel]');
+            const layer = e.closest(
+              'dialog[open],[role=dialog],[role=alertdialog],[role=menu],[role=tabpanel]',
+            );
             return (
               layer?.getAttribute('aria-label') ||
               layer?.querySelector('h1,h2,h3')?.textContent?.trim() ||
@@ -267,9 +283,11 @@ export async function measurePage(page) {
           inViewport: visibleVertically,
           layer: (() => {
             const dialogs = [
-              ...document.querySelectorAll('[role=dialog],[role=alertdialog],[role=menu]'),
+              ...document.querySelectorAll(
+                'dialog[open],[role=dialog],[role=alertdialog],[role=menu]',
+              ),
             ];
-            const layer = e.closest('[role=dialog],[role=alertdialog],[role=menu]');
+            const layer = e.closest('dialog[open],[role=dialog],[role=alertdialog],[role=menu]');
             if (layer) return layer.id || `overlay-${dialogs.indexOf(layer)}`;
             const live = e.closest('[aria-live=polite]');
             if (live && getComputedStyle(live).position === 'fixed') return 'fixed-toast';
@@ -319,6 +337,7 @@ export async function measurePage(page) {
     const truncatedText = [...document.querySelectorAll('p,span,h1,h2,h3,td,div')]
       .filter(
         (e) =>
+          !hiddenInClosedDetails(e) &&
           e.childElementCount === 0 &&
           e.textContent.trim() &&
           getComputedStyle(e).overflow !== 'visible' &&

@@ -113,7 +113,7 @@ export async function observeControl(page, control, { checkDismissal = true } = 
   )
     return { ...control, status: 'idempotent', reason: 'already on empty new-task composer' };
   const overlaySelector =
-    '[role=dialog]:visible,[role=alertdialog]:visible,[role=menu]:visible,[role=listbox]:visible';
+    'dialog[open]:visible,[role=dialog]:visible,[role=alertdialog]:visible,[role=menu]:visible,[role=listbox]:visible';
   const overlaysBefore = await page.locator(overlaySelector).count();
   const before = await fingerprint(page);
   const rowsBefore = await rowKeys(page);
@@ -269,7 +269,9 @@ export async function observeControl(page, control, { checkDismissal = true } = 
       const popup =
         Boolean(await locator.getAttribute('aria-haspopup')) ||
         (await page
-          .locator('[role="menu"]:visible,[role="dialog"]:visible,[role="listbox"]:visible')
+          .locator(
+            'dialog[open]:visible,[role="menu"]:visible,[role="dialog"]:visible,[role="listbox"]:visible',
+          )
           .count()) > 0;
       await locator.click({ timeout: 1800 }).catch(() => {});
       await page.waitForTimeout(60);
@@ -397,6 +399,8 @@ export async function inspectControls(
     .map((control) => ({ control, path: [] }));
   const seen = new Set();
   const outcomes = new Map();
+  const repeatReferences = new Map();
+  const reportedRepeatIds = new Set();
   const invalidPaths = [];
   while (queue.length) {
     if (results.length >= maxControls) {
@@ -407,9 +411,25 @@ export async function inspectControls(
       break;
     }
     const { control, path } = queue.shift();
-    const key = JSON.stringify([control.scope, control.id]);
-    if (seen.has(key) && !(outcomes.get(key) === 'disabled' && path.length)) continue;
+    const key = JSON.stringify([control.scope, control.repeatFamilyKey ?? control.id]);
+    if (seen.has(key) && !(outcomes.get(key) === 'disabled' && path.length)) {
+      if (control.repeatFamilyKey && !reportedRepeatIds.has(control.id)) {
+        results.push({
+          ...control,
+          status: 'shared-reference',
+          reference: repeatReferences.get(key),
+          referencedStatus: outcomes.get(key),
+          reason: 'same batch clone action already exercised on first and second rows',
+        });
+        reportedRepeatIds.add(control.id);
+      }
+      continue;
+    }
     seen.add(key);
+    if (control.repeatFamilyKey) {
+      repeatReferences.set(key, control.id);
+      reportedRepeatIds.add(control.id);
+    }
     const isShared = control.shared || path[0]?.shared;
     if (isShared && shared.has(key)) {
       results.push({ ...control, status: 'shared-reference', ...shared.get(key) });

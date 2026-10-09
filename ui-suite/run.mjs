@@ -12,6 +12,7 @@ import {
 } from './lib/checks.mjs';
 import { inspectControls } from './lib/interaction.mjs';
 import { canonicalUrl, inventory, scenarioSlug, writeInventory } from './lib/inventory.mjs';
+import { isPopupNavigation } from './lib/network.mjs';
 import { saveReport } from './lib/report.mjs';
 import { SEED_VERSION } from './lib/seed.mjs';
 import { startSeedServer } from './lib/server.mjs';
@@ -167,7 +168,14 @@ try {
       taskMode: mode,
     })),
   );
-  const scenarios = [...routes, ...(!selected ? taskScenarios : [])];
+  const allScenarios = [...(!selected ? taskScenarios : []), ...routes];
+  const cases = process.env.UI_AUDIT_CASES ? JSON.parse(process.env.UI_AUDIT_CASES) : null;
+  if (cases?.some((value) => !allScenarios.some((s) => s.pattern === value)))
+    throw Error('UNKNOWN_CASE_FILTER');
+  if (cases) report.coverageGaps.push('Case-filtered run: not full release acceptance');
+  report.selectedCases = cases;
+  report.selectedWidths = widths;
+  const scenarios = cases ? allScenarios.filter((s) => cases.includes(s.pattern)) : allScenarios;
   report.expectedPages = scenarios.length * widths.length;
   for (const width of widths) {
     const shared = new Map();
@@ -225,35 +233,44 @@ try {
         },
         { authed: !publicRoute },
       );
-      await context.route('**/*', async (route) => {
-        const req = route.request();
-        const u = new URL(req.url());
-        if (u.origin === server.origin || ['data:', 'blob:'].includes(u.protocol))
-          return route.continue();
-        if (
-          u.origin === 'https://assets.holaday.ai' &&
-          /^\/logo\/(?:HD-logo-black|HD-logo-white|HD-single-logo|HOLA-DAY-text-black|HOLA-DAY-text-white)\.png$/.test(
-            u.pathname,
+      await context.route('**/*', (route) =>
+        (async () => {
+          const req = route.request();
+          const u = new URL(req.url());
+          if (u.origin === server.origin || ['data:', 'blob:'].includes(u.protocol))
+            return route.continue();
+          if (
+            u.origin === 'https://assets.holaday.ai' &&
+            /^\/logo\/(?:HD-logo-black|HD-logo-white|HD-single-logo|HOLA-DAY-text-black|HOLA-DAY-text-white)\.png$/.test(
+              u.pathname,
+            )
           )
-        )
-          return route.fulfill({
-            status: 200,
-            contentType: 'image/svg+xml',
-            body: '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="40"><rect width="40" height="40" rx="8" fill="#FF0061"/><text x="7" y="27" fill="white" font-size="20">HD</text><text x="48" y="27" font-size="20">HOLA DAY</text></svg>',
+            return route.fulfill({
+              status: 200,
+              contentType: 'image/svg+xml',
+              body: '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="40"><rect width="40" height="40" rx="8" fill="#FF0061"/><text x="7" y="27" fill="white" font-size="20">HD</text><text x="48" y="27" font-size="20">HOLA DAY</text></svg>',
+            });
+          if (isPopupNavigation(req, page))
+            return route.fulfill({
+              status: 200,
+              contentType: 'text/html',
+              body: '<!doctype html><title>Local external target fixture</title><p>Target navigation reached.</p>',
+            });
+          entry.issues.push({
+            rule: 'external-network-attempt',
+            severity: 'P1',
+            detail: u.origin + u.pathname,
           });
-        if (req.isNavigationRequest() && (await req.frame().page().opener()))
-          return route.fulfill({
-            status: 200,
-            contentType: 'text/html',
-            body: '<!doctype html><title>Local external target fixture</title><p>Target navigation reached.</p>',
+          await route.abort('blockedbyclient');
+        })().catch(async (error) => {
+          entry.issues.push({
+            rule: 'audit-route-error',
+            severity: 'P1',
+            detail: String(error.message).slice(0, 240),
           });
-        entry.issues.push({
-          rule: 'external-network-attempt',
-          severity: 'P1',
-          detail: u.origin + u.pathname,
-        });
-        await route.abort('blockedbyclient');
-      });
+          await route.abort('blockedbyclient').catch(() => {});
+        }),
+      );
       await context.routeWebSocket('**/*', (ws) => {
         if (new URL(ws.url()).origin.replace(/^ws/, 'http') !== server.origin) {
           entry.issues.push({ rule: 'external-websocket', severity: 'P1' });
