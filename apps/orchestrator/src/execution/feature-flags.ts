@@ -44,6 +44,8 @@ interface FeatureFlags {
    * the disabled P0 chrome.debugger path.
    */
   OTA_USER_BROWSER: boolean;
+  /** Real target binding and identity-aware Chrome routing; default off. */
+  USER_BROWSER_ROUTING_V2: boolean;
   /**
    * Phase 1 #3 Pack B — Evidence Ledger DB write path. When true, the
    * task terminal hook mirrors the in-memory EvidenceLedger into the
@@ -106,6 +108,7 @@ function readFlagsFromEnv(): FeatureFlags {
     EVIDENCE_LEDGER: process.env.EVIDENCE_LEDGER_ENABLED !== 'false',
     EXPERT_WORKFLOW: process.env.EXPERT_WORKFLOW_ENABLED === 'true',
     OTA_USER_BROWSER: process.env.OTA_USER_BROWSER_ENABLED === 'true',
+    USER_BROWSER_ROUTING_V2: process.env.USER_BROWSER_ROUTING_V2 === 'true',
     LEDGER_DB_WRITE: process.env.LEDGER_DB_WRITE_ENABLED === 'true',
     ACTION_CAPTURE: process.env.ACTION_CAPTURE_ENABLED === 'true',
     B4_SCREENSHOT_ANCHOR: process.env.B4_SCREENSHOT_ANCHOR_ENABLED === 'true',

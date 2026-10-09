@@ -52,6 +52,7 @@ export interface StockTaskContextInput {
  * surface is small and the hot path is a single selector.
  */
 export interface TaskStore {
+  browserPreference: 'cloud-public' | null;
   localChromeSelection: { extensionClientId: string; tabId: number; expectedUrl: string; selectionId: string; title: string } | null;
   tasks: UiTask[];
   selectedTaskId: string | null;
@@ -993,6 +994,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   return {
   tasks: [],
   selectedTaskId: null,
+  browserPreference: null,
   localChromeSelection: null,
   composerMode: 'new',
   loading: false,
@@ -1610,6 +1612,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       const res = await trpc.tasks.create.mutate({
         ...(chromeSelection ? { localChrome: { extensionClientId: chromeSelection.extensionClientId, tabId: chromeSelection.tabId, expectedUrl: chromeSelection.expectedUrl, selectionId: chromeSelection.selectionId } } : {}),
         intent,
+        ...(get().browserPreference ? { browserPreference: get().browserPreference ?? undefined } : {}),
         clientRequestId: localTaskId,
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
         ...(replyToTaskId ? { replyToTaskId } : {}),
@@ -1682,6 +1685,16 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             (t) => t.taskId !== res.taskId && t.taskId !== localTaskId,
           ),
         ],
+        ...((res as { question?: string }).question ? {
+          awaitingUserByTask: {
+            ...prev.awaitingUserByTask,
+            [res.taskId]: {
+              question: (res as { question: string }).question,
+              at: Date.now(),
+              awaitingKind: 'permission' as const,
+            },
+          },
+        } : {}),
         selectedTaskId: res.taskId,
         ...(prev.localChromeSelection === chromeSelection ? { localChromeSelection: null } : {}),
         composerMode: 'task' as const,
@@ -2542,6 +2555,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     abortInFlightHydrate();
     set({
       localChromeSelection: null,
+      browserPreference: null,
       tasks: [],
       selectedTaskId: null,
       loading: false,

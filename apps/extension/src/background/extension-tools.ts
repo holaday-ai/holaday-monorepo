@@ -1,3 +1,4 @@
+import { USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
 /**
  * Phase 25 — extension-side tool executor (Mode B v0.1).
  *
@@ -888,6 +889,7 @@ async function computeExtensionToolResult(
         result: {
           ...(typeof result === 'object' && result !== null ? result : {}),
           selectedSessionVersion: extensionToolRuntime.transport ? 1 : 0,
+          ...(extensionToolRuntime.transport ? {userBrowserProtocol:USER_BROWSER_PROTOCOL} : {}),
         },
       };
     }

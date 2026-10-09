@@ -19,7 +19,13 @@ it('keeps an unanswered discovery unavailable without asserting that a timeout p
   const result = await router({ tabs: localChromeTabsProcedure })
     .createCaller({ userId: 'alice' } as Context)
     .tabs();
-  expect(result).toEqual({ tabs: [], connected: true, unavailable: true, needsUpdate: false });
+  expect(result).toEqual({
+    tabs: [],
+    connected: true,
+    unavailable: true,
+    needsUpdate: false,
+    routingV2: false,
+  });
 });
 it('rejects a read-only old extension before task admission', async () => {
   vi.spyOn(ws, 'sendExtensionToolCall').mockResolvedValue({

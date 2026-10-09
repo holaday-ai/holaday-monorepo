@@ -11,6 +11,8 @@
  * task; tab multiplexing comes with the Skill's own plan.
  */
 
+import type { UserBrowserBinding } from '@holaday/shared-types';
+import { SelectedTargetResolver } from './selected-target.js';
 import { type CrxApplication, type Locator, type Page, crx } from 'playwright-crx';
 import {
   DRIVER_ERRORS,
@@ -106,11 +108,17 @@ export interface CurrentPageObservation {
   bodyText: string;
   ariaSnapshot: string;
   truncated: boolean;
+  observationRevision?: number;
+  sourceURL?: string;
+  capturedAt?: number;
+  frameId?: string;
+  frames?: Array<{ frameId: string; origin: string; bodyText: string; ariaSnapshot: string }>;
 }
 
 export interface PlaywrightCrxAdapterOptions {
   /** Origin allowlist from the active Skill's `allowedOrigins`. */
   allowedOrigins?: readonly string[];
+  userBrowserRoutingV2?: boolean;
   /** Per-strategy waitFor budget in ms (total plan timeout is honored separately). */
   perStrategyTimeoutMs?: number;
   /** If set, attach to this chrome.tabs tabId instead of opening a new tab on first goto. */
@@ -119,6 +127,7 @@ export interface PlaywrightCrxAdapterOptions {
 
 export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private app: CrxApplication | null = null;
+  private targets: SelectedTargetResolver | null = null;
   private page: Page | null = null;
   private selectedAttachedListener: ((data: { page: Page; tabId: number }) => void) | null = null;
   private selectedDisposeRequested = false;
@@ -136,6 +145,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   constructor(opts: PlaywrightCrxAdapterOptions = {}) {
     this.opts = {
       allowedOrigins: opts.allowedOrigins ?? [],
+      userBrowserRoutingV2: opts.userBrowserRoutingV2 ?? false,
       perStrategyTimeoutMs: opts.perStrategyTimeoutMs ?? 2_000,
       attachToTabId: opts.attachToTabId ?? null,
     };
@@ -161,7 +171,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     try {
       const page = existingPage ?? (await this.ensurePage());
       const currentUrl = page.url();
-      if (!isOriginAllowed(currentUrl, this.opts.allowedOrigins)) {
+      if (!this.isAllowed(currentUrl, this.opts.allowedOrigins)) {
         if (!existingPage) {
           try {
             await this.detachExplicitPage(page);
@@ -174,6 +184,19 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
           `current origin ${httpUrlOrigin(currentUrl) ?? '<invalid>'} not in Skill allowedOrigins: [${this.opts.allowedOrigins.join(', ')}]`,
         );
       }
+      if (this.opts.userBrowserRoutingV2)
+        this.targets = new SelectedTargetResolver(
+          page,
+          requestedTabId,
+          this.opts.allowedOrigins,
+          // Hit testing rides the debugger session playwright-crx attached.
+          (method, params) =>
+            chrome.debugger.sendCommand(
+              { tabId: requestedTabId },
+              method,
+              params,
+            ) as Promise<unknown>,
+        );
       return { status: 'ok', data: { tabId: requestedTabId } };
     } catch (err) {
       if (!existingPage && this.page) {
@@ -201,7 +224,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
 
     try {
       const currentUrl = page.url();
-      if (!isOriginAllowed(currentUrl, this.opts.allowedOrigins)) {
+      if (!this.isAllowed(currentUrl, this.opts.allowedOrigins)) {
         return driverError(
           DRIVER_ERRORS.ORIGIN_BLOCKED,
           `current origin ${httpUrlOrigin(currentUrl) ?? '<invalid>'} not in Skill allowedOrigins: [${this.opts.allowedOrigins.join(', ')}]`,
@@ -215,6 +238,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         );
       }
 
+      if (this.targets) await this.targets.observe();
       const body = page.locator('body');
       // ariaSnapshot renders textbox values verbatim (password / OTP too).
       // Collect sensitive field values alongside and mask them before the
@@ -247,9 +271,41 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         );
       }
 
+      const frames: NonNullable<CurrentPageObservation['frames']> = [];
+      if (this.targets)
+        for (const context of this.targets.frameContexts().slice(1, 6)) {
+          const body = context.frame.locator('body');
+          const values = await context.frame.evaluate(collectSensitiveFieldValues);
+          if (!Array.isArray(values) || !values.every((value) => typeof value === 'string'))
+            throw new Error('frame redaction unavailable');
+          frames.push({
+            frameId: context.frameId,
+            origin: context.origin,
+            bodyText: redactSensitiveValues(
+              await body.innerText({ timeout: OBSERVATION_TIMEOUT_MS }),
+              values,
+            ).slice(0, 2000),
+            ariaSnapshot: redactSensitiveValues(
+              await body.ariaSnapshot({ timeout: OBSERVATION_TIMEOUT_MS }),
+              values,
+            ).slice(0, 4000),
+          });
+        }
+      await this.targets?.assertObservationFresh();
+      if (page.isClosed() || page.url() !== currentUrl)
+        throw new Error('page changed during observation');
       const data: CurrentPageObservation = {
         tabId: this.tabId,
         origin,
+        ...(this.targets
+          ? {
+              observationRevision: this.targets.observationRevision,
+              sourceURL: currentUrl,
+              capturedAt: Date.now(),
+              frameId: this.targets.frameContexts()[0]?.frameId,
+              frames,
+            }
+          : {}),
         title: title.slice(0, OBSERVATION_TITLE_CAP),
         bodyText: bodyText.slice(0, OBSERVATION_BODY_TEXT_CAP),
         ariaSnapshot: ariaSnapshot.slice(0, OBSERVATION_ARIA_SNAPSHOT_CAP),
@@ -271,6 +327,18 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     if (this.opts.attachToTabId !== null && this.selectedDisposeRequested) {
       return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab adapter is disposing');
     }
+    if (this.targets && ['click', 'type', 'key', 'select'].includes(action.kind))
+      return {
+        status: 'error',
+        error: { code: 'target_binding_required', message: 'Bound target required' },
+      };
+    if (this.targets && action.kind === 'scroll') {
+      await this.targets.scroll(
+        Number(action.payload?.deltaX || 0),
+        Number(action.payload?.deltaY || 0),
+      );
+      return { status: 'ok' };
+    }
     try {
       // Pre-step origin guard for NON-goto actions. `goto` handles its
       // own validation inside doGoto (we need to check payload.url,
@@ -285,7 +353,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         const allowlist = action.allowedOrigins ?? this.opts.allowedOrigins;
         if (allowlist.length > 0) {
           const currentUrl = currentPage.url();
-          if (!isOriginAllowed(currentUrl, allowlist)) {
+          if (!this.isAllowed(currentUrl, allowlist)) {
             return driverError(
               DRIVER_ERRORS.ORIGIN_BLOCKED,
               `current page ${currentUrl} not in Skill allowedOrigins: [${allowlist.join(', ')}]`,
@@ -327,7 +395,41 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     }
   }
 
+  async describeTarget(action: DriverAction, revision: number): Promise<DriverResult> {
+    if (!this.targets)
+      return {
+        status: 'error',
+        error: { code: 'capability_missing', message: 'Real targets unavailable' },
+      };
+    try {
+      return { status: 'ok', data: await this.targets.describe(action, revision) };
+    } catch (error) {
+      return {
+        status: 'error',
+        error: { code: safeTargetError(error), message: 'Target cannot be verified' },
+      };
+    }
+  }
+  async executeBound(action: DriverAction, binding: UserBrowserBinding): Promise<DriverResult> {
+    if (!this.targets)
+      return {
+        status: 'error',
+        error: { code: 'capability_missing', message: 'Real targets unavailable' },
+      };
+    try {
+      await this.targets.execute(action, binding);
+      return { status: 'ok' };
+    } catch (error) {
+      return {
+        status: 'error',
+        error: { code: safeTargetError(error), message: 'Bound input was rejected or unconfirmed' },
+      };
+    }
+  }
+
   async dispose(): Promise<void> {
+    await this.targets?.dispose();
+    this.targets = null;
     if (this.opts.attachToTabId !== null) {
       this.selectedDisposeRequested = true;
       const app = this.app;
@@ -363,7 +465,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     // constructor default; both respect the "empty = unrestricted"
     // contract from isOriginAllowed.
     const allowlist = action.allowedOrigins ?? this.opts.allowedOrigins;
-    if (!isOriginAllowed(url, allowlist)) {
+    if (!this.isAllowed(url, allowlist)) {
       return driverError(
         DRIVER_ERRORS.ORIGIN_BLOCKED,
         `origin not in Skill allowedOrigins: ${url} (allowlist: [${allowlist.join(', ')}])`,
@@ -766,6 +868,21 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   // ---------- private helpers ----------
+
+  private isAllowed(raw: string, legacyOrigins: readonly string[]): boolean {
+    if (!this.opts.userBrowserRoutingV2) return isOriginAllowed(raw, legacyOrigins);
+    try {
+      const url = new URL(raw);
+      return (
+        /^https?:$/.test(url.protocol) &&
+        !url.username &&
+        !url.password &&
+        this.opts.allowedOrigins.includes(url.origin)
+      );
+    } catch {
+      return false;
+    }
+  }
 
   private async ensureApp(): Promise<CrxApplication> {
     if (this.app) return this.app;
@@ -1231,4 +1348,20 @@ async function captureViaVisibleTabFallback(tabId: number | null): Promise<Scree
 function base64ByteLength(b64: string): number {
   const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
   return Math.floor((b64.length * 3) / 4) - padding;
+}
+
+function safeTargetError(error: unknown): string {
+  const known = [
+    'target_binding_required',
+    'target_changed',
+    'stale_observation',
+    'target_ambiguous',
+    'target_missing',
+    'target_unreadable',
+    'origin_grant_required',
+    'unsupported_action',
+  ];
+  return error instanceof Error && known.includes(error.message)
+    ? error.message
+    : 'input_outcome_unknown';
 }

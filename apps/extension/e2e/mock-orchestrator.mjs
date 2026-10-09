@@ -147,7 +147,8 @@ export class MockOrchestrator {
 
   #onHttp(req, res) {
     const path = new URL(req.url ?? '/', 'http://x').pathname;
-    if (process.env.HOLADAY_E2E_DEBUG === '1') console.log(`[mock] ${Date.now() % 100000} ${req.method} ${path}`);
+    if (process.env.HOLADAY_E2E_DEBUG === '1')
+      console.log(`[mock] ${Date.now() % 100000} ${req.method} ${path}`);
     if (path === '/healthz') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end('{"ok":true}');
@@ -158,7 +159,16 @@ export class MockOrchestrator {
       res.end('upgrade required');
       return;
     }
-    const page = path === '/page.html' ? PAGE_ONE : path === '/page2.html' ? PAGE_TWO : null;
+    const page =
+      path === '/v2.html'
+        ? V2_PAGE
+        : path === '/frame.html'
+          ? '<button id=inside>删除项目</button>'
+          : path === '/page.html'
+            ? PAGE_ONE
+            : path === '/page2.html'
+              ? PAGE_TWO
+              : null;
     if (page) {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(page);
@@ -174,7 +184,8 @@ export class MockOrchestrator {
       .map((p) => p.trim());
     const bearer = offered.find((p) => p.startsWith('jwt.'))?.slice(4) ?? null;
     const connection = { bearer, helloAt: null, pongs: 0, closedAt: null };
-    if (process.env.HOLADAY_E2E_DEBUG === '1') console.log(`[mock] ${Date.now() % 100000} ws connection`);
+    if (process.env.HOLADAY_E2E_DEBUG === '1')
+      console.log(`[mock] ${Date.now() % 100000} ws connection`);
     this.connections.push(connection);
     this.sockets.add(ws);
     ws.on('close', () => {
@@ -216,3 +227,16 @@ export class MockOrchestrator {
     });
   }
 }
+
+const V2_PAGE = `<!doctype html><html><head><title>V2 fixture</title></head><body>
+<button id="search" type="button" onclick="document.querySelector('#effects').textContent='1'">搜索</button>
+<button id="pay" type="button" onclick="document.querySelector('#effects').textContent='paid'">确认支付</button>
+<button id="delete" type="button" onclick="document.querySelector('#effects').textContent='deleted'"><span id="icon">✕</span><span>删除项目</span></button>
+<button class="ambiguous">搜索</button><button class="ambiguous">搜索</button>
+<form action="/payment" method="post" onsubmit="event.preventDefault();document.querySelector('#effects').textContent='submitted'">
+<label>转账金额<input id="amount" name="amount" type="number"></label></form>
+<form action="/search" role="search" onsubmit="event.preventDefault();document.querySelector('#effects').textContent='searched'"><input id="query" name="q"></form>
+<select id="choice"><option value="a">One</option><option value="b">Two</option></select>
+<iframe src="/frame.html"></iframe><div id="host"></div><p id="effects">0</p><div style="height:1800px"></div>
+<script>document.querySelector('#host').attachShadow({mode:'open'}).innerHTML='<button id="shadow">Shadow search</button>';</script>
+</body></html>`;

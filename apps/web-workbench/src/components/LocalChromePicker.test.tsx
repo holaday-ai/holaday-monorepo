@@ -5,9 +5,19 @@ const api = vi.hoisted(() => ({ tabs: vi.fn() }));
 vi.mock('@/lib/trpc', () => ({ trpc: { tasks: { localChromeTabs: { query: api.tabs } } } }));
 import { LocalChromePicker } from './LocalChromePicker';
 import { useTaskStore } from '@/stores/task-store';
-afterEach(() => { cleanup(); vi.resetAllMocks(); useTaskStore.setState({ localChromeSelection: null }); });
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+  useTaskStore.setState({ localChromeSelection: null, browserPreference: null });
+});
 it('never auto-selects and retains the exact user-selected connection and tab', async () => {
-  const tab = { extensionClientId: 'connection', tabId: 42, expectedUrl: 'https://work.example', selectionId: 'e2215e8d-7b6c-4711-ab15-460f51e558a4', title: '工作页面' };
+  const tab = {
+    extensionClientId: 'connection',
+    tabId: 42,
+    expectedUrl: 'https://work.example',
+    selectionId: 'e2215e8d-7b6c-4711-ab15-460f51e558a4',
+    title: '工作页面',
+  };
   api.tabs.mockResolvedValue({ tabs: [tab], connected: true, unavailable: false });
   render(<LocalChromePicker />);
   expect(api.tabs).not.toHaveBeenCalled();
@@ -44,4 +54,15 @@ it('shows a definite update instruction only for an incompatible extension respo
   expect(alert.textContent).toMatch(/请更新并重新连接/);
   expect(screen.queryAllByRole('menuitem')).toHaveLength(0);
   expect(useTaskStore.getState().localChromeSelection).toBeNull();
+});
+
+it('v2 guides offline connection and requires an explicit public cloud choice', async () => {
+  api.tabs.mockResolvedValue({ tabs: [], connected: false, unavailable: false, routingV2: true });
+  render(<LocalChromePicker />);
+  fireEvent.keyDown(screen.getByRole('button', { name: '选择 Chrome 页面' }), { key: 'Enter' });
+  expect(await screen.findByText(/请安装或连接.*在线/)).toBeTruthy();
+  expect(useTaskStore.getState().browserPreference).toBeNull();
+  fireEvent.click(screen.getByRole('menuitem', { name: '公开查询改用云端（无登录态）' }));
+  expect(useTaskStore.getState().browserPreference).toBe('cloud-public');
+  expect(screen.getByRole('button', { name: '选择 Chrome 页面' }).textContent).toMatch(/无登录态/);
 });

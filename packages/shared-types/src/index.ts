@@ -12,3 +12,5 @@ export * from './skills.js';
 export * from './partner.js';
 export * from './video-capabilities.js';
 export * from './research-intent.js';
+
+export * from './browser-user-contract.js';

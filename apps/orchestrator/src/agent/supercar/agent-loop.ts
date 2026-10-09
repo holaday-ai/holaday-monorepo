@@ -1092,6 +1092,58 @@ interface RunHandle {
 
 const handles = new Map<string, RunHandle>();
 
+/** Register a non-cloud browser lane with the existing task reply lifecycle. */
+export function createExternalBrowserPark(options: {
+  taskId: string;
+  intent: string;
+  signal?: AbortSignal;
+  onAwaitingUser?: RunSupercarOptions['onAwaitingUser'];
+  aborted: () => boolean;
+  timeoutMs?: number;
+}) {
+  const handle: RunHandle = {
+    resolveReply: null,
+    abort: () => handle.resolveReply?.('__SUPERCAR_ABORT__'),
+    handoffMessage: null,
+    originalIntent: options.intent,
+    pendingAttachmentBlocks: null,
+  };
+  if (handles.has(options.taskId)) throw new Error('browser_task_already_running');
+  handles.set(options.taskId, handle);
+  const abort = () => handle.abort();
+  options.signal?.addEventListener('abort', abort);
+  return {
+    async park(question: string, awaitingKind: SupercarAwaitingKind): Promise<string | null> {
+      if (options.aborted() || options.signal?.aborted) return null;
+      let resolve!: (text: string) => void;
+      const reply = new Promise<string>((r) => {
+        resolve = r;
+      });
+      handle.resolveReply = resolve;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await options.onAwaitingUser?.({ question, awaitingKind, at: new Date(), currentUrl: '' });
+        if (options.aborted() || options.signal?.aborted) return null;
+        const value = await Promise.race([
+          reply,
+          new Promise<null>((r) => {
+            timer = setTimeout(() => r(null), options.timeoutMs ?? 300_000);
+          }),
+        ]);
+        return value === '__SUPERCAR_ABORT__' ? null : value;
+      } finally {
+        if (timer) clearTimeout(timer);
+        if (handle.resolveReply === resolve) handle.resolveReply = null;
+      }
+    },
+    close() {
+      options.signal?.removeEventListener('abort', abort);
+      handle.abort();
+      if (handles.get(options.taskId) === handle) handles.delete(options.taskId);
+    },
+  };
+}
+
 /**
  * Resume a supercar run that's parked on `onAwaitingUser`. Returns
  * true if the task accepted the reply, false if the task isn't

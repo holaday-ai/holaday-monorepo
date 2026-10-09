@@ -397,3 +397,5 @@ export async function runOtaUserBrowserReadonly(opts: {
     toolsUsed,
   };
 }
+/** V2 OTA and selected Chrome share the same observe/act/confirm/task-tab port. */
+export { runSelectedChromeTask as runOtaUserBrowserTask } from './selected-chrome-runner.js';
