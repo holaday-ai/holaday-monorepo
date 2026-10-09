@@ -407,7 +407,7 @@ describe('createAnthropicCompatibleMessagesAdapter', () => {
       expect.objectContaining({
         code: 'PROVIDER_ERROR',
         status: 403,
-        message: 'Message provider request failed',
+        message: '模型服务拒绝访问，请联系管理员检查工作空间和模型权限。',
       }),
     );
   });

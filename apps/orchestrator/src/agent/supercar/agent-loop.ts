@@ -1,3 +1,4 @@
+import { modelProviderFailureMessage } from '../../llm/provider-error-diagnostics.js';
 /**
  * Supercar agent loop.
  *
@@ -2282,7 +2283,9 @@ async function runSupercarTaskInternal(
           ? '模型响应超时，本次执行已停止；已完成动作不会自动重放。'
           : isTimeout
             ? '请求处理时间过长，正在重试。'
-            : translateError(message, opts.intent);
+            : err instanceof MessagesAdapterError && err.code === 'PROVIDER_ERROR'
+              ? modelProviderFailureMessage(err.status)
+              : translateError(message, opts.intent);
         return {
           status: qwenTimeout ? 'timeout' : 'failed',
           reason: friendly,

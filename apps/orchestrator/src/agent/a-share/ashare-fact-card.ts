@@ -48,6 +48,8 @@ import type {
   FundamentalsRow,
   KlineRow,
   NorthboundRow,
+  StockNewsRow,
+  StockQuoteRow,
   UnlockRow,
   ValuationRow,
 } from './briefing-types.js';
@@ -325,6 +327,7 @@ function contextBlock(p: PerStock, dt: AkEnvelope<DragonTigerRow>, annCap: numbe
           .join('；')}`,
       );
   }
+  if (p.unlock.error) b.push('- 解禁：数据暂不可用');
   if (!p.unlock.error && p.unlock.data.length > 0) {
     // P2：把解禁**股数 + 全部合计**喂给 ⑦，使其能点出"大额解禁=潜在抛压"，不止罗列。
     // 合计口径与 ③ 渲染一致（全部笔数），避免 ③ 与 ⑦ 合计对不上。
@@ -394,7 +397,7 @@ function northboundContextLine(nb: AkEnvelope<NorthboundRow>): string {
 /** 报告期 'YYYY-MM-DD' → "2026Q1财报 / 2025年报 / 2026中报"（时效标注）。 */
 function reportLabel(iso: string | null | undefined): string {
   const m = String(iso ?? '').match(/(\d{4})-(\d{2})-\d{2}/);
-  if (!m) return '最新财报';
+  if (!m) return '报告期暂不可用';
   const [, y, mo] = m;
   if (mo === '03') return `${y}Q1财报`;
   if (mo === '06') return `${y}中报`;
@@ -573,6 +576,8 @@ function valuationContext(env: AkEnvelope<ValuationRow> | undefined): string {
 
 /** 全景取数：①②③（fetchFactData）+ 每股 ④基本面/⑤估值。 */
 export interface PanoramaStockData {
+  quote?: AkEnvelope<StockQuoteRow>;
+  news?: AkEnvelope<StockNewsRow>;
   fundamentals: AkEnvelope<FundamentalsRow>;
   valuation: AkEnvelope<ValuationRow>;
 }
@@ -591,6 +596,8 @@ export async function fetchPanoramaData(
         [
           s.symbol,
           {
+            quote: await client.getStockQuote(s.symbol),
+            news: await client.getStockNews?.(s.symbol),
             fundamentals: await client.getFundamentals(s.symbol),
             valuation: await client.getValuation(s.symbol),
           },
@@ -598,6 +605,39 @@ export async function fetchPanoramaData(
     ),
   ]);
   return { ...base, bySymbol: Object.fromEntries(pairs) };
+}
+
+function quoteLines(quote: AkEnvelope<StockQuoteRow> | undefined, mode: BriefingMode): string[] {
+  const row = quote?.error ? undefined : quote?.data[0];
+  if (!quote || !row || toNum(row.最新价) === null)
+    return [unavailableLine('最新报价', quote ?? ({ error: '' } as AkEnvelope), mode)];
+  const time =
+    typeof row.行情时间 === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(row.行情时间)
+      ? row.行情时间.slice(0, 19)
+      : '未提供';
+  return [
+    `- 最新价 ${fmtNum(row.最新价)}，涨跌幅 ${fmtPct(row.涨跌幅)}；行情时间 ${time}（${sourceTag(quote)}）`,
+  ];
+}
+function newsLines(news: AkEnvelope<StockNewsRow> | undefined, asOf: string): string[] {
+  if (!news || news.error) return ['- 新闻：数据暂不可用'];
+  const lines = news.data.slice(0, 5).flatMap((row) => {
+    const date = String(row.发布时间 ?? '').slice(0, 10);
+    let url = '';
+    try {
+      const parsed = new URL(String(row.新闻链接 ?? ''));
+      if (['https:', 'http:'].includes(parsed.protocol) && !parsed.username && !parsed.password)
+        url = safeLinkUrl(parsed.href);
+    } catch {
+      /* no invented source */
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > asOf || !url) return [];
+    const title = String(row.新闻标题 ?? '公开资讯')
+      .replace(/[\[\]\r\n]/g, ' ')
+      .slice(0, 160);
+    return [`- ${date} [${title}](${url})（${sourceTag(news)}）`];
+  });
+  return lines.length ? lines : ['- 新闻：未取得含链接和日期的可核验资讯'];
 }
 
 /** 全景版 ①-⑤ 确定性 body（每股；②资金=龙虎榜+北向，③消息=公告+解禁，④基本面，⑤估值）。 */
@@ -610,24 +650,41 @@ export function renderPanoramaBody(
 ): string {
   const lines: string[] = [
     `# 📈 HOLA DAY · A股全景速览（${dateHeader(match.dateIso)}）`,
-    `> 生成于 ${fmtClock(now.toISOString())} ｜ ①-⑤ 为公开信息客观聚合，⑦ 为分析师判断·未经证实；**均不构成投资建议**。`,
+    `> 提交于 ${new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(now)} ${fmtClock(now.toISOString())} ｜ ①-⑤ 为公开信息客观聚合，⑦ 为分析师判断·未经证实；**均不构成投资建议**。`,
     '',
   ];
   for (const p of data.perStock) {
     const pano = data.bySymbol[p.stock.symbol];
     lines.push(`## ${stockLabel(p.stock)}`, '');
-    lines.push('**① 盘面事实**', ...marketFactLines(p, mode), '');
+    lines.push(
+      '**① 盘面事实**',
+      ...quoteLines(pano?.quote, mode),
+      ...marketFactLines(p, mode).map((line) =>
+        line.replace(
+          '- 收盘 ',
+          `- 最近收盘（${String(p.kline.data.at(-1)?.日期 ?? '日期未提供')}） `,
+        ),
+      ),
+      '',
+    );
     lines.push('**② 资金面**');
     lines.push(...dragonTigerLines(p.stock.symbol, data.dragonTiger, mode));
     const nb = northboundLine(data.northbound);
     lines.push(
-      ...(nb.length ? nb : ['- 北向资金：沪深股通净买额自 2024-08 停披露，暂无可展示口径']),
+      ...(data.northbound.error
+        ? ['- 北向资金：数据暂不可用']
+        : nb.length
+          ? nb
+          : ['- 北向资金：沪深股通净买额自 2024-08 停披露，暂无可展示口径']),
     );
     lines.push('');
     lines.push('**③ 消息面**');
     lines.push(...announcementLines(p, mode));
+    lines.push(...newsLines(pano?.news, match.dateIso));
     const ul = unlockLines(p, seethrough);
-    lines.push(...(ul.length ? ul : ['- 限售解禁：近期无']));
+    lines.push(
+      ...(p.unlock.error ? ['- 限售解禁：数据暂不可用'] : ul.length ? ul : ['- 限售解禁：近期无']),
+    );
     lines.push('');
     lines.push(...fundamentalsLines(pano?.fundamentals, mode, seethrough), '');
     lines.push(...valuationLines(pano?.valuation, mode, seethrough));
@@ -642,6 +699,8 @@ export function buildPanoramaContext(data: PanoramaData, match: AshareQaMatch): 
   for (const p of data.perStock) {
     const pano = data.bySymbol[p.stock.symbol];
     blocks.push(`【${stockLabel(p.stock)} · 基本面/估值】`);
+    blocks.push(quoteLines(pano?.quote, 'prod').join('\n'));
+    blocks.push(newsLines(pano?.news, match.dateIso).join('\n'));
     blocks.push(fundamentalsContext(pano?.fundamentals));
     blocks.push(valuationContext(pano?.valuation));
   }
@@ -725,6 +784,7 @@ export function renderStarSeethrough(
 // 问询函/大股东减持计划 = 公告标题 keyword（用更长窗口 90 天，单独取，不复用③的近7日）。
 
 export interface RiskData {
+  unavailableBySymbol?: Record<string, boolean>;
   bySymbol: Record<string, RiskSignal[]>;
 }
 
@@ -736,6 +796,7 @@ export async function fetchRiskData(
   const dateCompact = match.dateCompact;
   const annStart = shiftCompact(match.dateIso, -90); // 风险公告(问询/减持)看更长窗口
   const bySymbol: Record<string, RiskSignal[]> = {};
+  const unavailableBySymbol: Record<string, boolean> = {};
   await Promise.all(
     match.stocks.map(async (s) => {
       const [pledge, goodwill, forecast, insider, ann, fund] = await Promise.all([
@@ -746,6 +807,9 @@ export async function fetchRiskData(
         client.getStockAnnouncements(s.symbol, annStart, dateCompact),
         client.getFundamentals(s.symbol), // R4 占比：近似总股本(净利润/EPS)；TTL 缓存，全景已取=命中
       ]);
+      unavailableBySymbol[s.symbol] = [pledge, goodwill, forecast, insider, ann, fund].some((env) =>
+        Boolean(env.error),
+      );
       const fr = fund.error ? undefined : fund.data[0];
       // P2 R4：近似总股本 = 净利润 ÷ 基本每股收益（EPS>0 才有意义；否则 null → 减持只给股数）。
       const totalShares =
@@ -765,7 +829,7 @@ export async function fetchRiskData(
       });
     }),
   );
-  return { bySymbol };
+  return { bySymbol, unavailableBySymbol };
 }
 
 /** 单股风险组（命中项才显；无 → 「未检测到上述风险信号」）。 */
@@ -782,7 +846,10 @@ export function renderRiskSection(data: FactData, risk: RiskData): string[] {
     const sigs = risk.bySymbol[p.stock.symbol] ?? [];
     out.push('');
     out.push(multi ? `**⑥ 风险信号 · ${stockLabel(p.stock)}**` : '**⑥ 风险信号**');
-    out.push(...renderRiskGroup(sigs));
+    if (risk.unavailableBySymbol?.[p.stock.symbol]) {
+      out.push('- 风险数据暂不可用，部分来源缺失，不能据此判断没有风险。');
+      if (sigs.length) out.push(...renderRiskGroup(sigs));
+    } else out.push(...renderRiskGroup(sigs));
   }
   return out;
 }

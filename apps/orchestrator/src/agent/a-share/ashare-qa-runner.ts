@@ -361,6 +361,29 @@ export async function runAsharePanorama(
   const now = deps.now ?? new Date();
   const mode = deps.mode ?? 'prod';
   const data = await fetchPanoramaData(deps.client, match);
+  deps.logger.info(
+    {
+      ...deps.context,
+      dimensions: data.perStock.map((p) => ({
+        symbol: p.stock.symbol,
+        sources: Object.entries({
+          kline: p.kline,
+          dragonTiger: data.dragonTiger,
+          northbound: data.northbound,
+          announcements: p.ann,
+          unlock: p.unlock,
+          ...data.bySymbol[p.stock.symbol],
+        }).map(([dimension, env]) => ({
+          dimension,
+          rows: env?.error ? 0 : (env?.data.length ?? 0),
+          source: env?.source,
+          fetchedAt: env?.fetched_at,
+          unavailable: !env || Boolean(env.error),
+        })),
+      })),
+    },
+    'ashare-panorama: fetched dimension evidence',
+  );
   let body = renderPanoramaBody(data, match, now, mode, deps.seethrough ?? false);
   // ④ 风险雷达 P1（flag 注入）：全景挂 ⑥ 风险信号组（命中才显，无→未检测到；插在 ⑤ 与 ⑦ 之间）。
   // 腿A 确定性、零新增 LLM、不进 ⑦ 上下文（腿B 跨项串联留后续）；取数失败仅跳过该组。

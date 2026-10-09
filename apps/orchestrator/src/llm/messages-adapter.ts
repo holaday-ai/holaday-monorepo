@@ -1,4 +1,9 @@
 import type { ModelDataRegion } from './model-data-region.js';
+import {
+  type ProviderErrorDiagnostics,
+  modelProviderFailureMessage,
+  safeProviderDiagnostics,
+} from './provider-error-diagnostics.js';
 import { QwenTransportError, createQwenMessagesTransport } from './qwen-messages-transport.js';
 import {
   type QwenPurpose,
@@ -21,6 +26,9 @@ export class MessagesAdapterError extends Error {
     message: string,
     /** Provider HTTP status when known (e.g. 403 quota exhausted); diagnostics only. */
     public readonly status: number | null = null,
+    public readonly diagnostics: ProviderErrorDiagnostics = safeProviderDiagnostics({
+      httpStatus: status,
+    }),
   ) {
     super(message);
     this.name = 'MessagesAdapterError';
@@ -479,17 +487,33 @@ function normalizeProviderError(
   if (error instanceof QwenTransportError) {
     switch (error.code) {
       case 'REQUEST_ABORTED':
-        return new MessagesAdapterError('REQUEST_ABORTED', 'Message provider request was aborted');
+        return new MessagesAdapterError(
+          'REQUEST_ABORTED',
+          'Message provider request was aborted',
+          error.status,
+          error.diagnostics,
+        );
       case 'REQUEST_TIMEOUT':
-        return new MessagesAdapterError('REQUEST_TIMEOUT', 'Message provider request timed out');
+        return new MessagesAdapterError(
+          'REQUEST_TIMEOUT',
+          '模型服务请求超时，请稍后重试。',
+          error.status,
+          error.diagnostics,
+        );
       case 'INVALID_RESPONSE':
-        return new MessagesAdapterError('INVALID_RESPONSE', 'Message provider response is invalid');
+        return new MessagesAdapterError(
+          'INVALID_RESPONSE',
+          'Message provider response is invalid',
+          error.status,
+          error.diagnostics,
+        );
       case 'INVALID_ROUTE':
       case 'PROVIDER_ERROR':
         return new MessagesAdapterError(
           'PROVIDER_ERROR',
-          'Message provider request failed',
+          modelProviderFailureMessage(error.status),
           error.status,
+          error.diagnostics,
         );
     }
   }

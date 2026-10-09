@@ -1,3 +1,4 @@
+import { modelProviderFailureMessage } from '../../llm/provider-error-diagnostics.js';
 import {
   createDescriptionActionGate,
   describeUserBrowserAction,
@@ -1434,6 +1435,7 @@ function modelFailureReason(error: unknown): string {
     if (error.code === 'REQUEST_TIMEOUT')
       return '模型响应超时，本次执行已停止；已完成动作不会自动重放。';
     if (error.code === 'REQUEST_ABORTED') return '模型请求已取消。';
+    if (error.code === 'PROVIDER_ERROR') return modelProviderFailureMessage(error.status);
     return `模型调用失败：${error.code}`;
   }
   return '模型调用失败，本次执行已停止。';

@@ -160,3 +160,48 @@ describe('ashare-model-callers（模型目录 generate 通道）', () => {
     expect('judge' in callers).toBe(false);
   });
 });
+
+it('records stock interpretation exactly once in its task scope, preserving unknown usage', async () => {
+  const { withMediaCallContext } = await import('../media-call-recorder.js');
+  const record = vi.fn();
+  const adapter: MessagesAdapter = {
+    metadata: {
+      provider: 'alibaba-model-studio',
+      model: 'qwen3.7-plus',
+      region: 'cn',
+      deploymentScope: 'china_mainland',
+      endpointKind: 'public',
+      protocol: 'messages',
+    },
+    create: vi.fn(async () => textResponse('公开事实解读')),
+  };
+  const runtime = createProductionModelRuntimeWiring(ASHARE_SYNTHETIC_MODEL_ENV, {
+    createMessages: () => adapter,
+  }).resolveCore({
+    actorExternalId: 'usr_stock',
+    lane: 'generate',
+    ownership: { scope: 'personal', userRegion: 'cn' },
+  });
+  const observed = ashareMessagesAdapter(runtime);
+  expect(observed).not.toBeNull();
+  if (!observed) throw new Error('missing stock model adapter');
+  await withMediaCallContext(
+    { recorder: { record }, userExternalId: 'usr_stock', taskExternalId: 'tsk_stock' },
+    async () =>
+      createAshareModelCallers(observed, { judgeEnabled: false }).interpret({
+        system: '公开事实',
+        user: '600519',
+      }),
+  );
+  expect(record).toHaveBeenCalledTimes(1);
+  expect(record.mock.calls[0]?.[0]).toMatchObject({
+    userExternalId: 'usr_stock',
+    taskExternalId: 'tsk_stock',
+    provider: 'alibaba-model-studio',
+    model: 'qwen3.7-plus',
+    status: 'ok',
+    inputTokens: null,
+    outputTokens: null,
+    requestMeta: { lane: 'generate', protocol: 'messages' },
+  });
+});

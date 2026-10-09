@@ -102,7 +102,7 @@ describe('createQwenMessagesTransport', () => {
   });
 
   it('does not retry non-retryable HTTP responses', async () => {
-    const fetchImpl = vi.fn(async () => new Response(null, { status: 500 }));
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 401 }));
     const transport = createQwenMessagesTransport({
       route: INTL_ROUTE,
       fetchImpl,
@@ -111,7 +111,7 @@ describe('createQwenMessagesTransport', () => {
 
     await expect(transport.messages.create(REQUEST, { maxRetries: 3 })).rejects.toMatchObject({
       code: 'PROVIDER_ERROR',
-      status: 500,
+      status: 401,
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
@@ -187,4 +187,108 @@ describe('createQwenMessagesTransport', () => {
     ).rejects.toMatchObject({ code: 'PROVIDER_ERROR' });
     expect(down).toHaveBeenCalledTimes(3);
   });
+});
+
+it('retains only safe provider diagnostics across adapter and browser accounting', async () => {
+  const { createAnthropicCompatibleMessagesAdapter } = await import('./messages-adapter.js');
+  const { recordedBrowserAdapter } = await import('../agent/supercar/recorded-browser-adapter.js');
+  const fetchImpl = vi.fn(
+    async () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'InvalidApiKey',
+            type: 'authentication_error',
+            message: 'private provider body',
+          },
+          request_id: 'req-fixture-401',
+        }),
+        { status: 401, headers: { 'x-request-id': 'req-fixture-401' } },
+      ),
+  );
+  const transport = createQwenMessagesTransport({
+    route: INTL_ROUTE,
+    fetchImpl,
+    retryBaseDelayMs: 0,
+  });
+  const adapter = createAnthropicCompatibleMessagesAdapter({
+    client: transport,
+    metadata: {
+      provider: 'alibaba-model-studio',
+      model: INTL_ROUTE.model,
+      region: 'intl',
+      deploymentScope: 'international',
+      endpointKind: 'public',
+      protocol: 'messages',
+    },
+  });
+  const record = vi.fn();
+  const observed = recordedBrowserAdapter(adapter, {
+    recorder: { record },
+    userExternalId: 'usr_fixture',
+    taskId: 'tsk_fixture',
+    iteration: 1,
+    onRecordError: () => {},
+  });
+  await expect(
+    observed.create({ maxTokens: 20, messages: [{ role: 'user', content: 'private prompt' }] }),
+  ).rejects.toMatchObject({
+    status: 401,
+    diagnostics: {
+      httpStatus: 401,
+      providerCode: 'InvalidApiKey',
+      providerType: 'authentication_error',
+      requestId: 'req-fixture-401',
+      retryCount: 0,
+    },
+  });
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+  expect(record.mock.calls[0]?.[0]).toMatchObject({
+    providerRequestId: 'req-fixture-401',
+    requestMeta: {
+      providerError: { httpStatus: 401, providerCode: 'InvalidApiKey', retryCount: 0 },
+    },
+  });
+  expect(JSON.stringify(record.mock.calls)).not.toMatch(
+    /private provider body|private prompt|private-intl-key/,
+  );
+});
+
+it('retries HTTP 500 within a capped budget and reports retry count safely', async () => {
+  const fetchImpl = vi.fn(async () => new Response('{"code":"InternalError"}', { status: 500 }));
+  const transport = createQwenMessagesTransport({
+    route: INTL_ROUTE,
+    fetchImpl,
+    retryBaseDelayMs: 0,
+  });
+  await expect(transport.messages.create(REQUEST, { maxRetries: 20 })).rejects.toMatchObject({
+    diagnostics: { httpStatus: 500, providerCode: 'InternalError', retryCount: 2 },
+  });
+  expect(fetchImpl).toHaveBeenCalledTimes(3);
+});
+
+it('bounds an omitted timeout and reports its elapsed budget without retrying a spent deadline', async () => {
+  vi.useFakeTimers();
+  try {
+    const fetchImpl = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit): Promise<Response> =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('synthetic timeout')), {
+            once: true,
+          });
+        }),
+    );
+    const transport = createQwenMessagesTransport({ route: INTL_ROUTE, fetchImpl });
+    const result = expect(transport.messages.create(REQUEST)).rejects.toMatchObject({
+      code: 'REQUEST_TIMEOUT',
+      diagnostics: { elapsedMs: 120000, retryCount: 0 },
+    });
+    await vi.advanceTimersByTimeAsync(120000);
+    // A stalled request must settle at the default deadline.
+    expect(fetchImpl.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    await result;
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
 });

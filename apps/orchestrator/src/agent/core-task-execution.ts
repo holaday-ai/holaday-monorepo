@@ -20,6 +20,7 @@ import {
   renderVerificationUserIntent,
 } from '../execution/task-verification-context.js';
 import { VERIFICATION_INPUT_LIMITS } from '../execution/verification-input-budget.js';
+import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 import type { MessagesAdapter } from '../llm/messages-adapter.js';
 import type { ResponsesAdapter } from '../llm/responses-adapter.js';
 import {
@@ -68,6 +69,7 @@ export interface CoreExecutionInput {
   blocks: readonly Anthropic.Beta.BetaContentBlockParam[];
   actorExternalId: string;
   responsesAdapter: ResponsesAdapter | null;
+  firecrawl?: FirecrawlLane | null;
   semanticAdapter?: MessagesAdapter;
   logger: Logger;
   registry?: CoreExecutionRegistry;
@@ -277,6 +279,7 @@ async function executeCoreTask(
               skillId: resume.skillId ?? undefined,
               expertMode: resume.expertMode,
               responsesAdapter: input.responsesAdapter,
+              firecrawl: input.firecrawl ?? null,
               logger: input.logger,
               onStreamDelta: (delta) => {
                 if (registry.read(handle))

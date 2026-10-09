@@ -114,6 +114,7 @@ export async function createCoreGenerateTask(args: {
       logger: ctx.logger,
       repo,
       responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
+      firecrawl: ctx.firecrawl ?? null,
       semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
       publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
       ...(args.resultNotice ? { resultNotice: args.resultNotice } : {}),
