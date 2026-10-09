@@ -135,7 +135,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   let sampling = false;
   const replayTimer = replay
     ? setInterval(() => {
-        if (sampling) return;
+        if (sampling || replay.isPaused) return;
         sampling = true;
         void replay.capture(page, `sample-${replayActionId}`, 'sample').finally(() => {
           sampling = false;
@@ -211,29 +211,34 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     question: string,
     awaitingKind: SupercarAwaitingKind,
   ): Promise<string | null> => {
-    await safe(() =>
-      opts.onAwaitingUser?.({
-        question,
-        at: new Date(),
-        currentUrl: page.url(),
-        awaitingKind,
-      }),
-    );
-    if (controller.signal.aborted) return null;
-    return new Promise<string | null>((resolve) => {
-      const timer = setTimeout(() => {
-        parked.delete(opts.taskId);
-        resolve(null);
-      }, HANDOFF_WAIT_MS);
-      parked.set(opts.taskId, {
-        resolve: (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        abort: () => resolve(null),
-        intent: opts.intent,
+    await replay?.pause();
+    try {
+      await safe(() =>
+        opts.onAwaitingUser?.({
+          question,
+          at: new Date(),
+          currentUrl: page.url(),
+          awaitingKind,
+        }),
+      );
+      if (controller.signal.aborted) return null;
+      return await new Promise<string | null>((resolve) => {
+        const timer = setTimeout(() => {
+          parked.delete(opts.taskId);
+          resolve(null);
+        }, HANDOFF_WAIT_MS);
+        parked.set(opts.taskId, {
+          resolve: (value) => {
+            clearTimeout(timer);
+            resolve(value);
+          },
+          abort: () => resolve(null),
+          intent: opts.intent,
+        });
       });
-    });
+    } finally {
+      replay?.resume();
+    }
   };
   // Runtime safety boundary: the same LIVE-VETO the legacy loop applies before
   // each live write. tasks.create passes classifyRuntimeAction; a caller that

@@ -1,3 +1,4 @@
+import { browserReplayStore } from '../../agent/browser-tools/browser-replay-service.js';
 import { deleteUserFilesPage } from '../../files/file-service.js';
 import {
   type AccountClosureHandler,
@@ -286,6 +287,7 @@ export const taskExecutionClosureHandler: AccountClosureHandler = {
   retentionOutcomes: ['deleted', 'anonymized', 'not_present'],
   async run(context) {
     context.signal.throwIfAborted();
+    await browserReplayStore.removeOwner(context.request.userExternalId);
     const pageSize = Math.min(context.pageSize, 100);
     if (!Number.isSafeInteger(pageSize) || pageSize <= 0) {
       throw new ClosureHandlerError('INVARIANT_VIOLATION');

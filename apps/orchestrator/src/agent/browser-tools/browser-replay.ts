@@ -39,6 +39,33 @@ export class BrowserReplayStore {
   private path(owner: string, task: string) {
     return join(this.root, digest(owner), digest(task));
   }
+  private deletedOwners = new Set<string>();
+  private async ownerDeleted(owner: string) {
+    const dir = join(this.root, digest(owner));
+    if (this.deletedOwners.has(dir)) return true;
+    try {
+      await readFile(join(dir, '.deleted'));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  /** Account closure fences every late writer, including a reopened store. */
+  removeOwner(owner: string) {
+    const dir = join(this.root, digest(owner));
+    this.deletedOwners.add(dir);
+    return this.enqueue(dir, async () => {
+      await mkdir(dir, { recursive: true, mode: 0o700 });
+      await chmod(dir, 0o700);
+      await writeFile(join(dir, '.deleted'), 'deleted', { mode: 0o600 });
+      await Promise.all(
+        [...this.queues].filter(([key]) => key.startsWith(`${dir}/`)).map(([, pending]) => pending),
+      );
+      for (const task of await readdir(dir))
+        if (/^[a-f0-9]{64}$/.test(task))
+          await rm(join(dir, task), { recursive: true, force: true });
+    });
+  }
   private deleted = new Set<string>();
   private async load(owner: string, task: string): Promise<Manifest | null> {
     try {
@@ -79,7 +106,7 @@ export class BrowserReplayStore {
     limits: { maxFrames: number; maxBytes: number; maxMs: number },
   ) {
     const dir = this.path(owner, task);
-    if (this.deleted.has(dir)) return;
+    if (this.deleted.has(dir) || (await this.ownerDeleted(owner))) return;
     try {
       await readFile(join(dir, '.deleted'));
       return;
@@ -116,6 +143,10 @@ export class BrowserReplayStore {
       }
       manifest.frames.push({ ...frame, ...(image ? { image: frame.id + '.jpg' } : {}) });
     }
+    if (await this.ownerDeleted(owner)) {
+      if (image) await rm(join(dir, frame.id + '.jpg'), { force: true });
+      return;
+    }
     try {
       await readFile(join(dir, '.deleted'));
       if (image) await rm(join(dir, frame.id + '.jpg'), { force: true });
@@ -129,6 +160,7 @@ export class BrowserReplayStore {
   async read(owner: string, task: string, offset = 0, limit = 20) {
     const dir = this.path(owner, task);
     await this.queues.get(dir);
+    if (await this.ownerDeleted(owner)) return null;
     try {
       await readFile(join(dir, '.deleted'));
       return null;
@@ -192,6 +224,17 @@ export class BrowserReplayStore {
 }
 
 export class BrowserReplayRecorder {
+  private paused = false;
+  get isPaused() {
+    return this.paused;
+  }
+  async pause() {
+    this.paused = true;
+    await this.serial;
+  }
+  resume() {
+    this.paused = false;
+  }
   private serial: Promise<void> = Promise.resolve();
   private queued = 0;
   private observer: CloudObservation | null = null;
@@ -214,10 +257,11 @@ export class BrowserReplayRecorder {
     phase: ReplayFrame['phase'],
     result?: string,
   ): Promise<void> {
-    if (this.queued >= 2) return this.serial;
+    if (this.paused || this.queued >= 2) return this.serial;
     this.queued++;
     this.serial = this.serial
       .then(async () => {
+        if (this.paused) return;
         this.observer ??= new CloudObservation(page);
         this.observer.register(page);
         let allowed = false;
@@ -255,6 +299,7 @@ export class BrowserReplayRecorder {
           image = undefined;
           gap = true;
         }
+        if (this.paused) return;
         await this.store.append(
           this.owner,
           this.task,
@@ -284,6 +329,7 @@ export class BrowserReplayRecorder {
     return this.serial;
   }
   async dispose() {
+    this.paused = true;
     await this.serial;
     this.observer?.dispose();
   }

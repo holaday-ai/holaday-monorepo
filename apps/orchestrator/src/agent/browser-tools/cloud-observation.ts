@@ -1,26 +1,58 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Frame, Page, Request } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
+import { TRANSACTION_PAGE_RE } from '../supercar/runtime-action-policy.js';
 import { redactPageText } from './page-redaction.js';
-import { isMutatingBrowserAction, type UnifiedBrowserAction } from './unified-tools.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
+import { type UnifiedBrowserAction, isMutatingBrowserAction } from './unified-tools.js';
 
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
-export function safeObservationUrl(value: string): string {
+const SENSITIVE_URL_PARAMETER =
+  /^(?:ticket|token|access_token|id_token|refresh_token|auth|authorization|sig|sign|signature|secret|password|api_key|apikey|auth_key|session_token|session_id|cookie|code)$/i;
+/** Model-facing copy only; raw accessible addresses stay in host-only evidence. */
+export function safeObservationUrl(value: string, base?: string): string {
   try {
-    const url = new URL(value);
-    url.username = '';
-    url.password = '';
-    for (const key of [...url.searchParams.keys()]) {
-      if (/token|secret|password|signature|authorization|cookie|code|key|session/i.test(key))
-        url.searchParams.set(key, '[redacted]');
-    }
-    if (/token|secret|password|access_token|id_token/i.test(url.hash)) url.hash = '[redacted]';
-    return stripTrackingFromUrl(url.href);
+    const parsed = new URL(value, base);
+    if (!/^https?:$/.test(parsed.protocol)) return 'about:blank';
+    const absolute = /^https?:\/\//i.test(value) ? value : parsed.href;
+    const accessible = stripTrackingFromUrl(absolute);
+    return accessible
+      .replace(/^(https?:\/\/)[^/?#]*@/i, '$1')
+      .replace(/([?&#])([^&?#=]+)=([^&#]*)/g, (token, separator, rawName) => {
+        let name = rawName;
+        try {
+          name = decodeURIComponent(rawName.replace(/\+/g, ' '));
+        } catch {}
+        return SENSITIVE_URL_PARAMETER.test(name) ? `${separator}${rawName}=[redacted]` : token;
+      });
   } catch {
     return 'about:blank';
   }
 }
+
+/** Endpoint/operation semantics only; never read a body, header or cookie. */
+function transactionRequest(url: URL) {
+  if (
+    TRANSACTION_PAGE_RE.test(url.pathname) ||
+    /(?:^|[/_-])(?:create|submit|confirm|delete|remove|purchase|place[-_]?order|write|send)(?:$|[/_.-])/i.test(
+      url.pathname,
+    )
+  )
+    return true;
+  for (const [name, value] of url.searchParams) {
+    if (
+      /^(?:action|op|operation|method|cmd|command)$/i.test(name) &&
+      /(?:order|pay|submit|confirm|delete|remove|create|purchase|send)/i.test(value)
+    )
+      return true;
+    if (/^(?:place_order|submit_order|create_order|delete|payment|pay)$/i.test(name)) return true;
+    if (/^(?:order|order_id|orderid)$/i.test(name) && /(?:pixel|order|buy)/i.test(url.pathname))
+      return true;
+  }
+  return false;
+}
+const TRANSACTION_RECEIPT_RE =
+  /(?:下单|付款|支付|提交|删除|发送)(?:成功|完成)|订单号|(?:order|payment|purchase|booking)\s+(?:created|placed|confirmed|completed|number)|(?:deleted|sent)\s+successfully/i;
 
 /** No raw form values or network payloads leave this host-side verifier. */
 export async function observationState(frame: Frame) {
@@ -57,13 +89,47 @@ export async function observationState(frame: Frame) {
         return [input.type, input.name, input.value, input.checked];
       });
     const text = (document.body?.innerText || '').slice(0, 100_000);
+    const roots: ParentNode[] = [document];
+    const fields: Element[] = [];
+    for (let i = 0; i < roots.length && i < 100; i++) {
+      const currentRoot = roots[i];
+      if (!currentRoot) break;
+      fields.push(...Array.from(currentRoot.querySelectorAll('input,textarea')));
+      for (const element of Array.from(currentRoot.querySelectorAll('*')).slice(0, 10000))
+        if (element.shadowRoot) roots.push(element.shadowRoot);
+    }
     const sensitive =
-      !!document.querySelector(
-        'input[type="password"],input[autocomplete="one-time-code"],input[autocomplete^="cc-"],input[name*="otp" i],input[name*="card" i],input[name*="cvv" i]',
-      ) ||
-      /\b(login|signin|sign-in|checkout|payment|2fa|verify-identity)\b/i.test(location.pathname) ||
-      /登录|验证码|两步验证|信用卡|银行卡|支付密码|\b(sign in|log in|verification code|card number|CVV)\b/i.test(
-        text,
+      fields.some((element) => {
+        const input = element as HTMLInputElement;
+        const style = getComputedStyle(input);
+        if (
+          input.disabled ||
+          input.readOnly ||
+          input.type === 'hidden' ||
+          !input.getClientRects().length ||
+          style.visibility === 'hidden' ||
+          style.display === 'none'
+        )
+          return false;
+        const identity = [
+          input.name,
+          input.id,
+          input.getAttribute('aria-label'),
+          input.labels?.[0]?.innerText,
+          input.placeholder,
+        ]
+          .filter(Boolean)
+          .join(' ');
+        return (
+          input.type === 'password' ||
+          /^(?:one-time-code|cc-)/i.test(input.autocomplete) ||
+          /(?:otp|cvv|cvc|card[-_ ]?(?:number|no)|credit[-_ ]?card|pay(?:ment)?[-_ ]?(?:password|pin)|验证码|两步验证|银行卡|卡号|支付密码)/i.test(
+            identity,
+          )
+        );
+      }) ||
+      /(?:^|\/)(?:login|signin|sign-in|log-in|checkout|payment|cashier|pay|2fa|verify-identity)(?:\/|$)/i.test(
+        location.pathname,
       );
     return {
       documentId: root.__holadayObservation.id,
@@ -71,6 +137,20 @@ export async function observationState(frame: Frame) {
       interceptedEnter: root.__holadayObservation.interceptedEnter,
       forms: JSON.stringify(form),
       text,
+      receiptRegions: Array.from(
+        document.querySelectorAll(
+          '[role="status"],[role="alert"],dialog,p,h1,h2,main,article,[data-result],[data-status]',
+        ),
+      )
+        .filter((n) => !n.closest('nav,header,footer') && n.getClientRects().length)
+        .slice(0, 200)
+        .flatMap((n) =>
+          ((n as HTMLElement).innerText || '')
+            .slice(0, 8000)
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean),
+        ),
       sensitive,
       geometry: [scrollX, scrollY, innerWidth, innerHeight],
     };
@@ -93,15 +173,16 @@ export class CloudObservation {
   private requests: Array<{ category: string; write: boolean }> = [];
 
   private active: Page;
-  private pendingWrite = false;
-  interruption() {
-    return this.pendingWrite
-      ? {
-          reason: 'unexpected_effect',
-          message:
-            '检测到写请求，已暂停后续操作。第一次副作用无法事前阻止，请核对结果后确认如何继续。',
-        }
-      : undefined;
+  private backgroundRequests = new Set<string>();
+  private actionWindow: {
+    action: UnifiedBrowserAction;
+    frame: Frame;
+    origin: string;
+    priorRequests: Set<string>;
+  } | null = null;
+  // Interruptions belong to the action result, never to a background request.
+  interruption(): { reason: string; message: string } | undefined {
+    return undefined;
   }
   constructor(page: Page) {
     this.active = page;
@@ -115,26 +196,58 @@ export class CloudObservation {
     if ([...this.tabs.values()].includes(page)) return;
     this.tabs.set(`tab_${randomUUID()}`, page);
   }
-  private recordRequest(r: Request) {
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(r.method())) this.pendingWrite = true;
+  private recordRequest(r: Request, window = this.actionWindow) {
+    let url: URL;
+    try {
+      url = new URL(r.url());
+    } catch {
+      return;
+    }
+    const signature = hash(`${r.method()}:${r.resourceType()}:${url.origin}${url.pathname}`);
+    if (!window) {
+      this.backgroundRequests.add(signature);
+      if (this.backgroundRequests.size > 400)
+        this.backgroundRequests.delete(this.backgroundRequests.values().next().value ?? '');
+      return;
+    }
+    if (window !== this.actionWindow) return;
+    const navigation = r.isNavigationRequest();
+    const transactional = transactionRequest(url);
+    if (!navigation && !transactional && url.origin !== window.origin) return;
+    if (!navigation) {
+      try {
+        if (!transactional && r.frame() !== window.frame) return;
+      } catch {
+        /* initial popup */
+      }
+    }
+    const ignored =
+      r.resourceType() === 'ping' ||
+      /(?:^|\/)(?:collect|track|log|logs|beacon|heartbeat|ping)(?:\/|$)/i.test(url.pathname) ||
+      /(?:^|\.)(?:google-analytics\.com|googletagmanager\.com|sentry\.io|mixpanel\.com|segment\.(?:com|io)|sensorsdata\.cn)$/i.test(
+        url.hostname,
+      ) ||
+      (!navigation && window.priorRequests.has(signature)) ||
+      (window.action.tool === 'scroll_until' &&
+        /(?:^|\/)(?:graphql|query|search|list|feed)(?:\/|$)/i.test(url.pathname));
+    if (ignored && !transactional) return;
     this.requests.push({
       category: `${r.method()}:${r.resourceType()}`,
-      write: !['GET', 'HEAD', 'OPTIONS'].includes(r.method()),
+      write: transactional || !['GET', 'HEAD', 'OPTIONS'].includes(r.method()),
     });
     if (this.requests.length > 400) this.requests.shift();
   }
   private onRequest = (request: Request) => {
+    const window = this.actionWindow;
     let page: Page;
     try {
       page = request.frame().page();
     } catch {
-      // Popup navigation and service-worker requests may have no Frame yet.
-      // No payload is read; an unattributed write conservatively pauses this context.
-      if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) this.recordRequest(request);
+      this.recordRequest(request, window);
       return;
     }
     if ([...this.tabs.values()].includes(page)) {
-      this.recordRequest(request);
+      this.recordRequest(request, window);
       return;
     }
     void page
@@ -142,7 +255,7 @@ export class CloudObservation {
       .then((opener) => {
         if (opener && [...this.tabs.values()].includes(opener)) {
           this.register(page);
-          this.recordRequest(request);
+          this.recordRequest(request, window);
         }
       })
       .catch(() => {});
@@ -262,9 +375,10 @@ export class CloudObservation {
       return json({
         ...(await this.metadata(frame)),
         redacted: true,
-        tree: '敏感页面：请用户接管',
-        end: true,
-        truncated: false,
+        tree: '已遮挡，未读取：敏感输入页面，请用户接管',
+        status: 'redacted_unread',
+        end: false,
+        truncated: true,
       });
     if (action.tool === 'scroll_until') {
       const budget = Math.min(action.maxChars ?? 8000, Math.floor((action.maxTokens ?? 8000) / 4));
@@ -341,7 +455,7 @@ export class CloudObservation {
       // Rewrite only URL scalar lines; never shorten real resource identities.
       const safeTree = tree.replace(
         /^(\s*- \/url: )(.*)$/gm,
-        (_m, p, u) => p + safeObservationUrl(String(u).replace(/^"|"$/g, '')),
+        (_m, p, u) => p + safeObservationUrl(String(u).replace(/^"|"$/g, ''), frame.url()),
       );
       const meta = await this.metadata(frame);
       const current = this.observations.get(frame)!;
@@ -421,10 +535,15 @@ export class CloudObservation {
       );
       const start = action.start ?? 0,
         limit = action.limit ?? 50;
-      const items = raw
+      const accessibleItems = raw
         .filter((item) => /^https?:/.test(item.url))
         .slice(start, start + limit)
-        .map((item) => ({ ...item, url: safeObservationUrl(item.url) }));
+        .map((item) => ({ ...item, url: stripTrackingFromUrl(item.url) }));
+      const items = accessibleItems.map((item) => ({
+        ...item,
+        url: safeObservationUrl(item.url),
+        containsSensitiveParameters: safeObservationUrl(item.url) !== item.url,
+      }));
       const clean = JSON.parse(await redactPageText(frame, JSON.stringify(items)));
       const meta = await this.metadata(frame);
       if (before !== (await this.fingerprint(frame))) throw new Error('stale_observation');
@@ -437,9 +556,8 @@ export class CloudObservation {
           end: start + items.length >= raw.length,
           truncated: start + items.length < raw.length,
         }),
-        links: clean
-          .map((i: { url: string }) => i.url)
-          .filter((u: string) => !/(?:\[redacted\]|%5Bredacted%5D)/i.test(u)),
+        // Host-only: never serialised into the tool text or model messages.
+        links: accessibleItems.map((item) => item.url),
       };
     }
     if (action.tool === 'tables') {
@@ -488,7 +606,7 @@ export class CloudObservation {
       );
       for (const item of items) {
         item.sourceURL = safeObservationUrl(item.sourceURL);
-        item.paginationSource = item.paginationSource.map(safeObservationUrl);
+        item.paginationSource = item.paginationSource.map((url) => safeObservationUrl(url));
       }
       const clean = JSON.parse(await redactPageText(frame, JSON.stringify(items)));
       const meta = await this.metadata(frame);
@@ -509,6 +627,11 @@ export class CloudObservation {
     const { page, frame } = this.resolve(action);
     const before = await observationState(frame);
     this.requests = [];
+    let origin = '';
+    try {
+      origin = new URL(before.url).origin;
+    } catch {}
+    this.actionWindow = { action, frame, origin, priorRequests: new Set(this.backgroundRequests) };
     const opened: Page[] = [];
     const popup = (p: Page) => {
       this.register(p);
@@ -521,21 +644,23 @@ export class CloudObservation {
       await page.waitForTimeout(200).catch(() => {});
     } finally {
       page.off('popup', popup);
+      this.actionWindow = null;
     }
     const after = await observationState(frame).catch(() => null);
     const writes = this.requests.filter((r) => r.write).map((r) => r.category);
-    const dangerous = (s: string) =>
-      /\b(payment|checkout|purchase|order|deleted|sent)\b|支付|付款|订单|已删除|已发送/i.test(s);
+    const newReceipt =
+      after?.receiptRegions.some(
+        (text) => TRANSACTION_RECEIPT_RE.test(text) && !before.receiptRegions.includes(text),
+      ) ?? false;
     const unexpected =
-      this.pendingWrite ||
       writes.length > 0 ||
       !after ||
       (action.tool === 'type' &&
         action.submit &&
         after.interceptedEnter > before.interceptedEnter) ||
-      opened.some((p) => dangerous(p.url())) ||
-      (dangerous(after.url) && after.url !== before.url) ||
-      (after.dom !== before.dom && dangerous(after.text) && !dangerous(before.text));
+      opened.some((p) => TRANSACTION_PAGE_RE.test(p.url())) ||
+      (TRANSACTION_PAGE_RE.test(after.url) && after.url !== before.url) ||
+      (after.dom !== before.dom && newReceipt);
     const effect = {
       urlChanged: before.url !== after?.url,
       formChanged: before.forms !== after?.forms,
