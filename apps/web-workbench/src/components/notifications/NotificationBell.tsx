@@ -335,15 +335,15 @@ export function NotificationBell({
               )
             ) : (
               <>
-                {groupNotifications(items).map(({key, members}) => members.length === 1 ? (
+                {groupNotifications(items).map(({key, dateLabel, members}) => members.length === 1 ? (
                   <NotificationItem key={key} row={members[0]!} onClick={() => void handleItemClick(members[0]!)} />
                 ) : (
                   <details key={key} className="border-b border-border/60 px-3 py-2.5 last:border-0">
                     <summary className="cursor-pointer text-sm text-foreground" title="展开相同通知，逐条查看">
-                      {members[0]!.title} · {members.length} 条相同通知
+                      {dateLabel} · {sanitizeForRender(members[0]!.title)} · {members.length} 条相同通知
                       <span className="ml-2 text-xs text-muted-foreground">{members.filter(row => !row.isRead).length} 条未读</span>
                     </summary>
-                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{members[0]!.message}</p>
+                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{sanitizeForRender(members[0]!.message)}</p>
                     {members.map(row => <NotificationItem key={row.notificationId} row={row} onClick={() => void handleItemClick(row)} />)}
                   </details>
                 ))}

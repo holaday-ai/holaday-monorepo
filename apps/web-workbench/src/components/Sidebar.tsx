@@ -401,16 +401,9 @@ export function Sidebar({
           </SidebarMenu>
         </SidebarHeader>
 
-        {/* SidebarNav lives INSIDE SidebarContent so it shares the
-            same overflow-y-auto scroll area as the task list. BOSS
-            bug fix — when viewport height ≤ 800px the previous
-            "FeatureNav as a fixed band between header and content"
-            layout ate ~225px, leaving only a few pixels for the
-            task list. Now FeatureNav scrolls along with the task
-            list when space is tight; tall windows behave identically
-            because the content fits and there's no scroll. */}
-        <SidebarContent className="px-0 bg-white/45 dark:bg-transparent">
-            <FeatureNav userRole={userRole} projects={projectsProp ?? []} onCreateProject={onCreateProject} onNavigate={() => { setOpenMobile(false); onMobileClose?.(); }} />
+        {/* Main navigation stays visible; only task history scrolls. */}
+        <FeatureNav userRole={userRole} projects={projectsProp ?? []} onCreateProject={onCreateProject} onNavigate={() => { setOpenMobile(false); onMobileClose?.(); }} />
+        <SidebarContent className="hd-task-history-scroll px-0 bg-white/45 dark:bg-transparent">
             {projectFilter && (
               <div
                 className={cn(

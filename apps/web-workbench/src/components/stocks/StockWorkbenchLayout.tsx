@@ -28,6 +28,7 @@ const STOCK_WORKSPACE_TASKS: ReadonlyArray<{
 
 export function StockTaskWorkspaceLayout({
   highlights,
+  composer,
   riskRadar,
   screening,
   preferenceProfile,
@@ -37,6 +38,7 @@ export function StockTaskWorkspaceLayout({
   onTaskChange,
 }: {
   highlights: React.ReactNode;
+  composer?: React.ReactNode;
   riskRadar: React.ReactNode;
   screening: React.ReactNode;
   preferenceProfile: React.ReactNode;
@@ -172,6 +174,7 @@ export function StockTaskWorkspaceLayout({
         ) : null}
         {activeTask === 'briefing' ? <div className="min-w-0">{briefing}</div> : null}
       </div>
+      {composer}
     </section>
   );
 }

@@ -942,11 +942,8 @@ function CloudBrowserPanel({
     activeTaskId ? s.stepsByTask[activeTaskId] : undefined,
   );
   const recentSteps = React.useMemo(
-    () =>
-      (steps ?? EMPTY_STEPS)
-        .filter((s) => !TERMINAL_KINDS.has(s.actionKind ?? ''))
-        .slice(-3),
-    [steps],
+    () => recentActivitySteps(steps ?? EMPTY_STEPS, taskTerminal),
+    [steps, taskTerminal],
   );
   const [activityVisible, setActivityVisible] = React.useState(false);
   // Click-ripple visualisation on the screencast image. When the
@@ -2233,6 +2230,11 @@ function TerminalEvidenceView({
  * Shows up to 3 most-recent non-terminal actions so users can see the
  * agent narrate its work without reading the left-panel step stream.
  */
+export function recentActivitySteps(steps: readonly UiStep[], taskTerminal: boolean): UiStep[] {
+  if (taskTerminal) return [];
+  return steps.filter((s) => !TERMINAL_KINDS.has(s.actionKind ?? '')).slice(-3);
+}
+
 function ActivityOverlay({
   steps,
   terminal,

@@ -96,6 +96,8 @@ export interface InsertTaskContext {
    * false when omitted.
    */
   opusUsed?: boolean;
+  /** Persist the browser lane before dispatch, including queued tasks. */
+  executionMode?: 'browser';
   /** Immutable, server-validated context from a dedicated product surface. */
   sourceContext?: Record<string, unknown> | null;
 }
@@ -184,6 +186,7 @@ export class TaskRepository {
         plan: serializePlan(state.plan),
         roleId: ctx.roleId ?? null,
         opusUsed: ctx.opusUsed ?? false,
+        ...(ctx.executionMode ? { result: { executionMode: ctx.executionMode } } : {}),
         sourceContext: ctx.sourceContext ?? null,
       });
       const taskRowId = readInsertId(insert);

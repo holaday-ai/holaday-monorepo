@@ -1784,6 +1784,22 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         }));
       }
     }
+    if ('taskId' in msg && [
+      'server.vision.tick.start', 'server.vision.tick.end', 'server.vision.screencast',
+      'server.supercar.thinking', 'server.supercar.web_search',
+    ].includes(msg.type)) {
+      set(prev => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+        return {
+          tasks: prev.tasks.map(task => task.taskId === msg.taskId
+            ? { ...task, executionMode: 'browser' as const } : task),
+          subStatusByTask: { ...prev.subStatusByTask, [msg.taskId]:
+            prev.subStatusByTask[msg.taskId]?.subStatus === 'browsing'
+              ? prev.subStatusByTask[msg.taskId]!
+              : { subStatus: 'browsing' as const, since: Date.now() } },
+        };
+      });
+    }
     if (msg.type === 'server.error') {
       set({
         error: msg.message.trim() || `服务器连接错误：${msg.code}`,
@@ -2529,11 +2545,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       set((prev) => {
         if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
         return {
-          subStatusByTask: { ...prev.subStatusByTask, [msg.taskId]: {
-            subStatus: 'extracting',
-            since: prev.subStatusByTask[msg.taskId]?.subStatus === 'extracting'
-              ? prev.subStatusByTask[msg.taskId]!.since : Date.now(),
-          } },
           webSearchByTask: {
             ...prev.webSearchByTask,
             [msg.taskId]: {
@@ -2551,11 +2562,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       set((prev) => {
         if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
         return {
-          subStatusByTask: { ...prev.subStatusByTask, [msg.taskId]: {
-            subStatus: 'planning',
-            since: prev.subStatusByTask[msg.taskId]?.subStatus === 'planning'
-              ? prev.subStatusByTask[msg.taskId]!.since : Date.now(),
-          } },
           thinkingByTask: {
             ...prev.thinkingByTask,
             [msg.taskId]: { summary: msg.summary, at: Date.now() },

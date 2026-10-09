@@ -4315,21 +4315,24 @@
   .hd-video-types::after { width: var(--video-tab-width); left: calc(var(--active-tab) * (var(--video-tab-width) + 8px)); }
 }
 
-/* The composer owns space, so research cards never sit beneath its controls. */
-.hd-stocks-page { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding-bottom: 0; }
-.hd-stocks-page > .hd-stock-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 98px 32px 24px; }
-.hd-stocks-page > .hd-stock-dock { position: relative; inset: auto; transform: none; flex: none; width: min(750px, calc(100% - 48px)); margin: 44px auto 20px; padding: 0; z-index: 25; }
-.hd-market-lead > *, .hd-market-breadth { min-width: 0; }
-.hd-market-breadth { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.hd-market-breadth span, .hd-market-breadth small { white-space: normal; overflow-wrap: anywhere; }
-@media (max-width: 1280px) {
-  .hd-stocks-page > .hd-stock-scroll { padding-left: 24px; padding-right: 24px; }
-  .hd-market-lead { grid-template-columns: minmax(0, 1fr) 160px; gap: 20px; }
+/* Desktop research and composer share normal document flow. */
+@media (min-width: 769px) {
+  .hd-stocks-page { display:block; padding-bottom:0; }
+  .hd-stocks-page > div.hd-stock-scroll:not([aria-hidden]) { padding:80px 32px 32px; margin-top:0; gap:20px; }
+  .hd-stocks-page .hd-stock-workspace > .hd-stock-dock { position:static; inset:auto; transform:none; flex:none; width:min(750px, calc(100% - 32px)); margin:20px auto 24px; padding:0; z-index:auto; }
+  .hd-stocks-page .hd-stock-dock-meta { position:static; inset:auto; margin-bottom:12px; }
+  .hd-market-lead > *, .hd-market-breadth { min-width:0; }
+  .hd-market-breadth { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .hd-market-breadth span, .hd-market-breadth small { white-space:normal; overflow-wrap:anywhere; }
+  .hd-stocks-page .hd-market-lead h2 { max-width:470px; }
 }
-.hd-stock-scroll > * { flex-shrink: 0; }
-.hd-stocks-page .hd-market-lead h2 { max-width: 470px; }
-
-.hd-stocks-page > .hd-stock-scroll { margin-top: 64px; padding-top: 34px; }
+@media (min-width:769px) and (max-width:1280px) {
+  .hd-stocks-page > div.hd-stock-scroll:not([aria-hidden]) { padding-left:24px; padding-right:24px; }
+  .hd-market-lead { grid-template-columns:minmax(0,1fr) 160px; gap:20px; }
+}
+.holaday-sidebar .hd-task-history-scroll { overscroll-behavior:contain; }
+.dark .holaday-shell:has(.hd-stocks-page) .hd-workbench-breadcrumb,
+.dark .holaday-shell:has(.hd-stocks-page) .hd-workbench-breadcrumb * { color:#595757; }
 
 /* Approved light surfaces need explicit dark counterparts: keep layout/motion. */
 .dark .hd-start-intro { text-shadow:none; }

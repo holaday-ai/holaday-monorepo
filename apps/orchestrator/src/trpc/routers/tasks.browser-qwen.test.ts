@@ -508,7 +508,7 @@ it.each([
     expect(consume).toHaveBeenCalledTimes(charged);
     expect(TaskRepository.prototype.insertTask).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ sourceContext: { browserSource: 'local-chrome' } }),
+      expect.objectContaining({ executionMode: 'browser', sourceContext: { browserSource: 'local-chrome' } }),
     );
     releaseModel();
   }

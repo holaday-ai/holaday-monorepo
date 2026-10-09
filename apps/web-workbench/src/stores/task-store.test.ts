@@ -1,4 +1,5 @@
 import { trpc } from '@/lib/trpc';
+import { shouldConnectTaskBrowserForWorkbench } from '@/lib/workbench-state';
 import { showImageOption } from '@/lib/video-history-row';
 import type { UiTask } from '@/types/task';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -3632,17 +3633,30 @@ it('keeps pet i2v selected before the server list hydrates the new quote', async
 });
 
 
-describe('frontend audit observed generation phases', () => {
-  it('uses received search / analysis / stream events, then clears the phase at completion', () => {
-    useTaskStore.setState({ tasks: [task({taskId:'tsk_phase',status:'executing',executionMode:'generate'})], terminalTaskIds: new Set(), subStatusByTask: {} });
+describe('frontend audit transport lane recovery', () => {
+  it.each(['去京东查一下 iPhone 15 的价格', '【验收 GitHub】打开 https://github.com/holaday-ai'])('restores browser lane after reopen: %s', intent => {
+    useTaskStore.setState({ tasks: [task({taskId:'tsk_phase', intent, status:'executing', executionMode:undefined})], terminalTaskIds:new Set(), subStatusByTask:{} });
     const store = useTaskStore.getState();
-    store.applyServerMessage({type:'server.supercar.web_search',taskId:'tsk_phase',iteration:1,query:'公开财报'});
-    expect(useTaskStore.getState().subStatusByTask.tsk_phase?.subStatus).toBe('extracting');
-    store.applyServerMessage({type:'server.supercar.thinking',taskId:'tsk_phase',summary:'核对数据'});
-    expect(useTaskStore.getState().subStatusByTask.tsk_phase?.subStatus).toBe('planning');
+    store.applyServerMessage({type:'server.vision.tick.start',taskId:'tsk_phase',tickIndex:0,mode:'screenshot'});
+    expect(useTaskStore.getState().tasks[0].executionMode).toBe('browser');
+    expect(shouldConnectTaskBrowserForWorkbench({task:useTaskStore.getState().tasks[0],hasRuntimeTextSignal:false})).toBe(true);
+    const phase=useTaskStore.getState().subStatusByTask.tsk_phase;
+    store.applyServerMessage({type:'server.supercar.thinking',taskId:'tsk_phase',summary:'检查页面'});
+    store.applyServerMessage({type:'server.supercar.web_search',taskId:'tsk_phase',iteration:1,query:'价格'});
+    expect(useTaskStore.getState().subStatusByTask.tsk_phase).toEqual(phase);
+    expect(phase?.subStatus).toBe('browsing');
+  });
+  it('retains the durable browser lane after list refresh without inspecting intent', () => {
+    expect(toUiTask({taskId:'tsk_refresh', intent:'去京东查价格',status:'executing',createdAt:new Date(),result:{executionMode:'browser'}} as never).executionMode).toBe('browser');
+  });
+  it('maps real generation stream and clears the phase at completion', () => {
+    useTaskStore.setState({ tasks:[task({taskId:'tsk_phase',status:'executing',executionMode:'generate'})],terminalTaskIds:new Set(),subStatusByTask:{} });
+    const store=useTaskStore.getState();
     store.applyServerMessage({type:'server.task.stream',taskId:'tsk_phase',delta:'结果'});
     expect(useTaskStore.getState().subStatusByTask.tsk_phase?.subStatus).toBe('generating');
     store.applyServerMessage({type:'server.task.terminal',taskId:'tsk_phase',status:'completed',summary:'结果'});
+    store.applyServerMessage({type:'server.supercar.thinking',taskId:'tsk_phase',summary:'迟到事件'});
     expect(useTaskStore.getState().subStatusByTask.tsk_phase).toBeUndefined();
+    expect(useTaskStore.getState().tasks[0].executionMode).toBe('generate');
   });
 });

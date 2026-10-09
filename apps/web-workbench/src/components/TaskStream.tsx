@@ -1457,9 +1457,9 @@ function LiveSubStatusChip({
   since: number;
 }): JSX.Element {
   const labels: Record<typeof subStatus, string> = {
-    planning: '正在分析与规划',
+    planning: '正在规划任务',
     browsing: '正在操作浏览器',
-    extracting: '正在获取与整理数据',
+    extracting: '正在提取数据',
     verifying: '正在验证结果',
     generating: '正在生成回答',
     generating_image: '正在生成图片',

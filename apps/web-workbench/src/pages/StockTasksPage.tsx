@@ -666,7 +666,7 @@ export function StockTasksPage(): JSX.Element {
   }, [briefingBusy, briefingUnavailable, enabled, loadingDashboard]);
 
   return (
-    <div className="hd-stocks-page h-full bg-[#FFFCFA] text-[#25233A]">
+    <div className="hd-stocks-page min-h-full bg-[#FFFCFA] text-[#25233A]">
       <div
         data-stock-mobile-chrome=""
         aria-hidden
@@ -809,6 +809,39 @@ export function StockTasksPage(): JSX.Element {
                 temporalCopy={temporalCopy}
                 temporalMode={dashboardTrust.tone}
               />}
+              composer={
+        <div className="hd-stock-dock">
+        <StockAiCommandComposer
+          approved
+          researchStocks={sampleWatchlist ? [] : stocks.map(stock=>({symbol:stock.symbol,name:stock.name}))}
+          dataDateLabel={dashboardTrust.dataDateLabel}
+          onManageWatchlist={() => setWatchlistSheetOpen(true)}
+          value={prompt}
+          placeholder={temporalCopy.promptPlaceholder}
+          assistantStatus={temporalCopy.assistantStatus}
+          commands={commands}
+          submitting={submitting}
+          submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}
+          onValueChange={setPrompt}
+          onSubmit={draft => void submitPrompt(prompt, draft)}
+          onCommand={(command) => {
+            setPrompt(command);
+            if (command === temporalCopy.briefingCommand && dashboardTrust.tone === 'current') {
+              void generateBriefing();
+            }
+            else void submitPrompt(command);
+          }}
+          isCommandDisabled={(command) =>
+            loadingDashboard ||
+            stockPromptUnavailable ||
+            (command === temporalCopy.briefingCommand &&
+              dashboardTrust.tone === 'current' &&
+              briefingUnavailable)}
+          commandTitle={(command) =>
+            command === temporalCopy.briefingCommand ? briefingUnavailableTitle : undefined}
+        />
+        </div>
+              }
               screeningView={screeningView}
             />
             <StockMarketContextLayout
@@ -858,38 +891,8 @@ export function StockTasksPage(): JSX.Element {
           <span>仅供信息分析，不构成投资建议</span>
           <span>数据来源：AkShare / Holaday 分析层 · {dashboardTrust.dataDateLabel} · {dashboardTrust.refreshLabel}</span>
         </footer>
+
       </div>
-        <div className="hd-stock-dock">
-        <StockAiCommandComposer
-          approved
-          researchStocks={sampleWatchlist ? [] : stocks.map(stock=>({symbol:stock.symbol,name:stock.name}))}
-          dataDateLabel={dashboardTrust.dataDateLabel}
-          onManageWatchlist={() => setWatchlistSheetOpen(true)}
-          value={prompt}
-          placeholder={temporalCopy.promptPlaceholder}
-          assistantStatus={temporalCopy.assistantStatus}
-          commands={commands}
-          submitting={submitting}
-          submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}
-          onValueChange={setPrompt}
-          onSubmit={draft => void submitPrompt(prompt, draft)}
-          onCommand={(command) => {
-            setPrompt(command);
-            if (command === temporalCopy.briefingCommand && dashboardTrust.tone === 'current') {
-              void generateBriefing();
-            }
-            else void submitPrompt(command);
-          }}
-          isCommandDisabled={(command) =>
-            loadingDashboard ||
-            stockPromptUnavailable ||
-            (command === temporalCopy.briefingCommand &&
-              dashboardTrust.tone === 'current' &&
-              briefingUnavailable)}
-          commandTitle={(command) =>
-            command === temporalCopy.briefingCommand ? briefingUnavailableTitle : undefined}
-        />
-        </div>
       <WatchlistManagerSheet
         open={watchlistSheetOpen}
         onOpenChange={setWatchlistSheetOpen}

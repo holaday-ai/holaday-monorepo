@@ -179,14 +179,14 @@ export function safeNotificationCount(value: unknown): number {
 /** Group only exact duplicates on the same day and same task reference.
  * Keep all members so none of the unread records or navigation targets vanish. */
 export function groupNotifications(rows: readonly NormalizedNotificationRow[]): Array<{
-  key: string; members: NormalizedNotificationRow[];
+  key: string; dateLabel: string; members: NormalizedNotificationRow[];
 }> {
-  const groups = new Map<string, {key: string; members: NormalizedNotificationRow[]}>();
+  const groups = new Map<string, {key: string; dateLabel: string; members: NormalizedNotificationRow[]}>();
   for (const row of rows) {
     const date = new Date(row.createdAt);
     const day = Number.isNaN(date.getTime()) ? row.notificationId : date.toLocaleDateString('en-CA');
     const key = JSON.stringify([day, row.type, row.title, row.message, row.scheduledTaskInternalId, row.plannedTaskId]);
-    const group = groups.get(key) ?? {key, members: []};
+    const group = groups.get(key) ?? {key, dateLabel: Number.isNaN(date.getTime()) ? '日期未知' : day, members: []};
     group.members.push(row);
     groups.set(key, group);
   }
