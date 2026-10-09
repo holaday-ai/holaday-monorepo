@@ -159,12 +159,17 @@ export function createQwenMessagesTransport(input: {
                 }
               }
 
+              let disposed: Promise<unknown> = Promise.resolve();
               const diagnostics = await operation.run(() =>
                 responseErrorDiagnostics(
                   response,
                   Date.now() - startedAt,
                   attempt,
-                  operation.cleanup,
+                  (cleanup) =>
+                    operation.cleanup(() => {
+                      disposed = Promise.resolve().then(cleanup);
+                      return disposed;
+                    }),
                   [input.route.apiKey, input.route.workspaceId ?? ''],
                 ),
               );
@@ -172,6 +177,16 @@ export function createQwenMessagesTransport(input: {
               if (!isRetryableStatus(response.status) || attempt >= maxRetries) {
                 throw new QwenTransportError('PROVIDER_ERROR', response.status, diagnostics);
               }
+
+              // A retry may acquire another connection only after the previous
+              // body is consumed/cancelled and its reader released. Final errors
+              // still return independently of the tracked physical cleanup.
+              try {
+                await disposed;
+              } catch {
+                throw new QwenTransportError('PROVIDER_ERROR', response.status, diagnostics);
+              }
+              if (controller.signal.aborted) throwAbortError({ callerAborted, timedOut });
 
               await waitForRetry(retryBaseDelayMs * 2 ** attempt, controller.signal, () => ({
                 callerAborted,
