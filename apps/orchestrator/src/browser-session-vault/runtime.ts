@@ -9,7 +9,15 @@ import { type ContextFactory, VaultBrowserWorker, type VaultTask } from './worke
 export interface VaultRuntime {
   vault: SessionVault;
   worker: VaultBrowserWorker;
-  prepare(userId: string, executor: PlaywrightExecutor): Promise<void>;
+  /**
+   * Only a task whose target site is covered by a connected grant gets the
+   * vault context; every other task (no target, other site) is untouched.
+   */
+  prepare(
+    userId: string,
+    executor: PlaywrightExecutor,
+    session?: { targetUrl?: string | null },
+  ): Promise<void>;
   sweep(): Promise<void>;
   finish(executor: PlaywrightExecutor): Promise<void>;
 }
@@ -57,30 +65,33 @@ export function createVaultRuntime(options: {
       }
     });
   // A site adapter must explicitly prove login. No provider/site is silently chosen.
-  const worker = new VaultBrowserWorker(vault, { context, probes: options.probes ?? new Map() });
+  const worker = new VaultBrowserWorker(vault, {
+    context,
+    probes: options.probes ?? new Map(),
+    onWriteBack: (reason) => logger.info({ reason }, 'browser-vault: session write-back'),
+    onDiscard: (reason) =>
+      logger.info({ reason }, 'browser-vault: read-only task changes discarded'),
+  });
   const tasks = new WeakMap<PlaywrightExecutor, VaultTask>();
-  let cursor = 0;
   return {
     vault,
     worker,
     async sweep() {
       if (!(store instanceof SqlVaultStore)) return;
-      const owners = await store.owners(cursor);
-      for (const owner of owners) {
+      // Indexed: only owners with a live grant already past its earliest expiry, bounded batch.
+      for (const owner of await store.due(Date.now(), 100)) {
         try {
           await vault.list(owner.userId);
         } catch {
           logger.warn({ reason: 'vault_expiry_cleanup_failed' }, 'browser-vault');
         }
       }
-      cursor = owners.length === 100 ? (owners.at(-1)?.id ?? 0) : 0;
     },
-    async prepare(userId, executor) {
-      const grants = (await vault.list(userId)).filter((g) => g.status === 'connected');
-      if (!grants.length) return;
-      if (grants.length !== 1) throw new VaultError('grant_selection_required');
-      const grant = grants[0];
-      if (!grant) throw new VaultError('grant_selection_required');
+    async prepare(userId, executor, session) {
+      const targetUrl = session?.targetUrl;
+      if (!targetUrl) return;
+      const grant = await vault.match(userId, targetUrl);
+      if (!grant) return;
       const task = await worker.open(userId, grant.id, (config) =>
         executor.createSessionVaultContext(config),
       );

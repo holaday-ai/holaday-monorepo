@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { BrowserGrantMetadata, BrowserSessionState } from '@holaday/shared-types';
 import type { BrowserContext, BrowserContextOptions, Page } from 'playwright';
 import {
@@ -5,13 +6,19 @@ import {
   defaultBrowserNetworkPolicy,
 } from '../agent/browser-network-policy.js';
 import { detectCaptchaPage, detectLoginPage } from '../agent/login-detector.js';
+import { cookieDomainInScope, hostInScope } from './cookie-scope.js';
 import { type Checkout, type SessionVault, VaultError } from './vault.js';
 
 type Probe = { path: string; selector: string };
+/** Revocation status poll for running vault tasks (lock-free read, no write). */
+export const STATUS_POLL_MS = 5000;
+/** Minimum interval between mid-task write-backs of a changed session. */
+export const CHECKPOINT_MS = 30000;
 export type ContextFactory = (options: BrowserContextOptions) => Promise<BrowserContext>;
 export interface VaultTask {
   page: Page;
   context: BrowserContext;
+  mode: 'writer' | 'readonly';
   close(save?: boolean): Promise<void>;
 }
 /** Only trusted site adapters define login evidence. A 200 response alone is never login proof. */
@@ -22,6 +29,12 @@ export class VaultBrowserWorker {
       context: ContextFactory;
       probes: ReadonlyMap<string, Probe>;
       networkPolicy?: Pick<BrowserNetworkPolicy, 'check'>;
+      statusPollMs?: number;
+      checkpointMs?: number;
+      /** Reason code when a write-back happened (never values). */
+      onWriteBack?: (reason: 'interval' | 'site_change') => void;
+      /** Reason code when a task's session changes were discarded (never values). */
+      onDiscard?: (reason: string) => void;
     },
   ) {}
   private browserState(
@@ -44,26 +57,39 @@ export class VaultBrowserWorker {
       origins: [{ origin: grant.origin, localStorage: state.storage }],
     };
   }
+  /**
+   * Network + liveness guard for a vault context. No DB access per request:
+   * requests consult in-memory state; revocation is detected by the in-process
+   * tracker immediately and by a lock-free status read every few seconds.
+   */
   private async guard(
     userId: string,
     grant: BrowserGrantMetadata,
     context: BrowserContext,
     task?: Checkout,
   ) {
-    const check = () =>
-      task
-        ? this.vault.check(userId, grant.id, task)
-        : this.vault.authorize(userId, grant.id, grant.version, true);
+    const scope = grant.cookieDomains;
+    let live = true;
+    const check = async () => {
+      if (!task) return this.vault.authorize(userId, grant.id, grant.version, true);
+      const status = await this.vault.status(userId, grant.id, task);
+      if (status !== 'live') throw new VaultError(status);
+    };
     await context.route('**/*', async (route) => {
       try {
-        await check();
         const req = route.request();
+        const url = new URL(req.url());
         if (
+          !live ||
+          !['GET', 'HEAD'].includes(req.method()) ||
+          !(
+            url.protocol === 'https:' ||
+            (url.protocol === 'http:' && grant.origin.startsWith('http:'))
+          ) ||
+          !hostInScope(url.hostname, scope) ||
           !(await (this.options.networkPolicy ?? defaultBrowserNetworkPolicy).check(req.url()))
             .allowed
         )
-          return await route.abort('blockedbyclient');
-        if (new URL(req.url()).origin !== grant.origin || !['GET', 'HEAD'].includes(req.method()))
           return await route.abort('blockedbyclient');
         await route.continue();
       } catch {
@@ -75,6 +101,7 @@ export class VaultBrowserWorker {
     let closed = false;
     let checking = false;
     const stop = async () => {
+      live = false;
       if (closed) return;
       closed = true;
       clearInterval(timer);
@@ -90,9 +117,10 @@ export class VaultBrowserWorker {
         .finally(() => {
           checking = false;
         });
-    }, 1000);
+    }, this.options.statusPollMs ?? STATUS_POLL_MS);
     timer.unref();
     context.on('close', () => {
+      live = false;
       closed = true;
       clearInterval(timer);
       untrack();
@@ -104,6 +132,45 @@ export class VaultBrowserWorker {
       throw error;
     }
     return stop;
+  }
+  /** Current context state restricted to the grant's scope (cookies + selected storage keys). */
+  private async capture(context: BrowserContext, page: Page, grant: BrowserGrantMetadata) {
+    const captured = await context.storageState();
+    const cdp = await context.newCDPSession(page);
+    try {
+      const raw = await cdp.send('Network.getAllCookies');
+      if (
+        raw.cookies.some(
+          (c) =>
+            ('partitionKey' in c && c.partitionKey) ||
+            ('partitionKeyOpaque' in c && c.partitionKeyOpaque),
+        )
+      )
+        throw new VaultError('partition_unsupported');
+    } finally {
+      await cdp.detach();
+    }
+    const state: BrowserSessionState = {
+      cookies: captured.cookies
+        .filter((c) => cookieDomainInScope(c.domain, grant.cookieDomains))
+        .map((c) => ({
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path,
+          secure: c.secure,
+          httpOnly: c.httpOnly,
+          hostOnly: !c.domain.startsWith('.'),
+          sameSite:
+            c.sameSite === 'None' ? 'no_restriction' : c.sameSite === 'Strict' ? 'strict' : 'lax',
+          session: c.expires === -1,
+          ...(c.expires > 0 ? { expirationDate: c.expires } : {}),
+        })),
+      storage: (captured.origins.find((o) => o.origin === grant.origin)?.localStorage ?? []).filter(
+        (s) => grant.storageKeys.includes(s.name),
+      ),
+    };
+    return { state, digest: createHash('sha256').update(JSON.stringify(state)).digest('hex') };
   }
   async verify(
     userId: string,
@@ -140,8 +207,20 @@ export class VaultBrowserWorker {
       await context?.close().catch(() => {});
     }
   }
-  async open(userId: string, id: string, factory = this.options.context): Promise<VaultTask> {
-    const task = await this.vault.checkout(userId, id);
+  /**
+   * Open a task context from the grant's snapshot. The writer (at most one
+   * task per grant) accumulates changes in memory and writes back only when
+   * the state actually changed: at most every `checkpointMs`, when the page
+   * leaves the current site, and at the end. Read-only forks never write;
+   * their changes are discarded with a reason code.
+   */
+  async open(
+    userId: string,
+    id: string,
+    factory = this.options.context,
+    options: { write?: boolean } = {},
+  ): Promise<VaultTask> {
+    const task = await this.vault.checkout(userId, id, options);
     let context: BrowserContext | undefined;
     try {
       context = await factory({
@@ -152,60 +231,78 @@ export class VaultBrowserWorker {
       const ownedContext = context;
       const stop = await this.guard(userId, task.grant, ownedContext, task);
       const page = await context.newPage();
+      const writer = task.mode === 'writer';
       let ended = false;
+      let lastDigest = writer
+        ? ((await this.capture(ownedContext, page, task.grant).catch(() => null))?.digest ?? null)
+        : null;
+      let lastWrite = Date.now();
+      let flushing: Promise<void> | null = null;
+      const flush = async (reason: 'interval' | 'site_change') => {
+        if (!writer || ended || flushing) return;
+        if (reason === 'interval' && Date.now() - lastWrite < this.checkpointMs) return;
+        flushing = (async () => {
+          try {
+            const { state, digest } = await this.capture(ownedContext, page, task.grant);
+            if (digest === lastDigest) return;
+            task.version = await this.vault.save(userId, id, task, state, { keepLease: true });
+            lastDigest = digest;
+            lastWrite = Date.now();
+            this.options.onWriteBack?.(reason);
+          } catch {
+            // Lost lease/revoked: the final close discards; never retry with stale state.
+          } finally {
+            flushing = null;
+          }
+        })();
+        await flushing;
+      };
+      const interval = writer
+        ? setInterval(() => void flush('interval'), Math.min(this.checkpointMs, 30000))
+        : undefined;
+      interval?.unref();
+      // Leaving the current site (main-frame origin change) writes back pending changes.
+      let siteOrigin: string | null = null;
+      const onNavigate = (frame: import('playwright').Frame) => {
+        if (frame !== page.mainFrame()) return;
+        let origin: string | null = null;
+        try {
+          const url = new URL(frame.url());
+          if (/^https?:$/.test(url.protocol)) origin = url.origin;
+        } catch {}
+        if (origin && siteOrigin && origin !== siteOrigin) void flush('site_change');
+        if (origin) siteOrigin = origin;
+      };
+      page.on('framenavigated', onNavigate);
       return {
         page,
         context,
+        mode: task.mode,
         close: async (save = true) => {
           if (ended) return;
+          if (interval) clearInterval(interval);
+          page.off('framenavigated', onNavigate);
+          await flushing;
           ended = true;
           let state: BrowserSessionState | undefined;
           try {
-            if (save) {
-              await this.vault.check(userId, id, task);
-              const captured = await ownedContext.storageState();
-              const cdp = await ownedContext.newCDPSession(page);
-              try {
-                const raw = await cdp.send('Network.getAllCookies');
-                if (
-                  raw.cookies.some(
-                    (c) =>
-                      ('partitionKey' in c && c.partitionKey) ||
-                      ('partitionKeyOpaque' in c && c.partitionKeyOpaque),
-                  )
-                )
-                  throw new VaultError('partition_unsupported');
-              } finally {
-                await cdp.detach();
-              }
-              const host = new URL(task.grant.origin).hostname;
-              state = {
-                cookies: captured.cookies
-                  .filter((c) => c.domain.replace(/^\./, '') === host)
-                  .map((c) => ({
-                    name: c.name,
-                    value: c.value,
-                    domain: c.domain,
-                    path: c.path,
-                    secure: c.secure,
-                    httpOnly: c.httpOnly,
-                    hostOnly: !c.domain.startsWith('.'),
-                    sameSite:
-                      c.sameSite === 'None'
-                        ? 'no_restriction'
-                        : c.sameSite === 'Strict'
-                          ? 'strict'
-                          : 'lax',
-                    session: c.expires === -1,
-                    ...(c.expires > 0 ? { expirationDate: c.expires } : {}),
-                  })),
-                storage: (
-                  captured.origins.find((o) => o.origin === task.grant.origin)?.localStorage ?? []
-                ).filter((s) => task.grant.storageKeys.includes(s.name)),
-              };
+            if (save && writer) {
+              const captured = await this.capture(ownedContext, page, task.grant).catch(
+                (error: unknown) => {
+                  // Already stopped (revoked/expired/closed): nothing to write back.
+                  if (error instanceof VaultError) throw error;
+                  return null;
+                },
+              );
+              if (captured && captured.digest !== lastDigest) state = captured.state;
             }
           } finally {
             await stop();
+          }
+          if (!writer) {
+            // A read-only fork never writes back; record why, never the values.
+            if (save) this.options.onDiscard?.(task.reason ?? 'readonly');
+            return;
           }
           // Commit only after Chromium confirms context.close. CAS/revocation is checked again.
           if (state) await this.vault.save(userId, id, task, state);
@@ -217,5 +314,8 @@ export class VaultBrowserWorker {
       await this.vault.release(userId, id, task).catch(() => {});
       throw error;
     }
+  }
+  private get checkpointMs() {
+    return this.options.checkpointMs ?? CHECKPOINT_MS;
   }
 }

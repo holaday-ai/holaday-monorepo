@@ -217,6 +217,11 @@ export function BrowserDataSection() {
                 <p>
                   {grant.origin} · {statuses[grant.status] ?? '状态待确认'}
                 </p>
+                {grant.cookieDomains?.length ? (
+                  <p className="text-xs text-muted-foreground">
+                    授权范围：{grant.cookieDomains.join('、')}
+                  </p>
+                ) : null}
                 <p className="text-xs text-muted-foreground">
                   {grant.cookieCount} 条 Cookie · 到期 {new Date(grant.expiresAt).toLocaleString()}{' '}
                   · 最近使用{' '}

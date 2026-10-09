@@ -78,6 +78,11 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
   viewportProfile?: BrowserViewportProfile;
 }
 
+/** What the task will browse; only a matching site grant applies to it. */
+export interface BrowserSessionTarget {
+  targetUrl?: string | null;
+}
+
 export interface PoolConfig {
   maxInstances: number;
   idleTimeoutMs: number;
@@ -106,6 +111,7 @@ export interface PoolConfig {
   prepareSession?: (
     userId: string,
     executor: import('../agent/vision-loop/playwright-executor.js').PlaywrightExecutor,
+    session?: BrowserSessionTarget,
   ) => Promise<void>;
   /** Capture/close the isolated context before the browser process is destroyed. */
   finishSession?: (

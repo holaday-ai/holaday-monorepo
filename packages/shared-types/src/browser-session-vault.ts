@@ -57,6 +57,8 @@ export interface BrowserGrantMetadata {
   id: string;
   origin: string;
   originSet: string[];
+  /** Registrable domain of the site plus reviewed related login domains (no payment domains). */
+  cookieDomains: string[];
   importScope: { cookies: true; localStorageKeys: string[]; indexedDB: false };
   purposes: BrowserGrantPurpose[];
   storageKeys: string[];

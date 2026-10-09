@@ -6,6 +6,7 @@ import {
   browserGrantRequestSchema,
   browserSessionStateSchema,
 } from '@holaday/shared-types';
+import { cookieDomainInScope, cookieScopeForOrigin, hostInScope } from './cookie-scope.js';
 import {
   type EncryptionContext,
   type Envelope,
@@ -17,7 +18,11 @@ import {
 export const SESSION_TTL = 7 * 86400000;
 export const PROFILE_IDLE_TTL = 7 * 86400000;
 export const PROFILE_ABSOLUTE_TTL = 30 * 86400000;
-const LEASE_TTL = 120000;
+/** Writer lease. Renewed only by a write-back, so an idle task never writes. */
+export const LEASE_TTL = 15 * 60000;
+/** Active (usable or awaiting) grants per user; inactive history is pruned. */
+export const MAX_ACTIVE_GRANTS = 100;
+const MAX_INACTIVE_KEPT = 20;
 export class VaultError extends Error {
   constructor(readonly code: string) {
     super(code);
@@ -41,8 +46,25 @@ export interface GrantRecord extends BrowserGrantMetadata {
 export interface VaultDocument {
   grants: GrantRecord[];
 }
+/** Earliest moment a live grant in `doc` can expire (drives the indexed sweep). */
+export function nextExpiryAt(doc: VaultDocument): number | null {
+  let next = Number.POSITIVE_INFINITY;
+  for (const g of doc.grants) {
+    if (g.status === 'revoked' || g.status === 'expired') continue;
+    next = Math.min(next, g.expiresAt, g.snapshot?.expiresAt ?? Number.POSITIVE_INFINITY);
+    if (g.profileCreatedAt)
+      next = Math.min(
+        next,
+        g.profileCreatedAt + PROFILE_ABSOLUTE_TTL,
+        (g.lastUsedAt ?? g.issuedAt) + PROFILE_IDLE_TTL,
+      );
+  }
+  return Number.isFinite(next) ? next : null;
+}
 export interface VaultStore {
   update<T>(userId: string, change: (doc: VaultDocument) => Promise<T>): Promise<T>;
+  /** Consistent read without locks or writes (status checks, matching, listing). */
+  read<T>(userId: string, view: (doc: VaultDocument) => T | Promise<T>): Promise<T>;
 }
 /** Only for synthetic tests; the runtime uses the transactional SQL adapter. */
 export class MemoryVaultStore implements VaultStore {
@@ -64,6 +86,10 @@ export class MemoryVaultStore implements VaultStore {
     this.queues.set(userId, run);
     return run;
   }
+  async read<T>(userId: string, view: (doc: VaultDocument) => T | Promise<T>): Promise<T> {
+    await this.queues.get(userId)?.catch(() => {});
+    return view(structuredClone(this.docs.get(userId) ?? { grants: [] }));
+  }
   async dump(userId: string) {
     await this.queues.get(userId)?.catch(() => {});
     return structuredClone(this.docs.get(userId) ?? { grants: [] });
@@ -71,9 +97,13 @@ export class MemoryVaultStore implements VaultStore {
 }
 export interface Checkout {
   state: BrowserSessionState;
-  token: string;
+  /** null for a read-only fork: no lease, changes are discarded at the end. */
+  token: string | null;
   version: number;
   grant: BrowserGrantMetadata;
+  mode: 'writer' | 'readonly';
+  /** Why a fork is read-only (reason code only). */
+  reason: 'session_only' | 'writer_busy' | null;
 }
 type Verify = (
   state: BrowserSessionState,
@@ -123,7 +153,7 @@ export class SessionVault {
   }
   private metadata(grant: GrantRecord): BrowserGrantMetadata {
     const { snapshot: _s, writer: _w, consumed: _c, profileCreatedAt: _p, ...metadata } = grant;
-    return structuredClone(metadata);
+    return structuredClone({ ...metadata, cookieDomains: this.scope(grant) });
   }
   private audit(userId: string, grant: GrantRecord, kind: string) {
     try {
@@ -157,15 +187,19 @@ export class SessionVault {
   private requireLive(grant: GrantRecord) {
     if (!this.usable(grant)) fail('grant_unavailable');
   }
+  /** Cookie scope recorded at grant time (older records: derived from the origin). */
+  private scope(grant: GrantRecord): string[] {
+    return grant.cookieDomains?.length ? grant.cookieDomains : cookieScopeForOrigin(grant.origin);
+  }
   private state(grant: GrantRecord, raw: unknown): BrowserSessionState {
     const parsed = browserSessionStateSchema.safeParse(raw);
     if (!parsed.success) fail('invalid_session');
     const state = parsed.data;
-    const host = new URL(grant.origin).hostname;
     if (Buffer.byteLength(JSON.stringify(state)) > 2 * 1024 * 1024) fail('invalid_session');
+    const scope = this.scope(grant);
     for (const c of state.cookies) {
       if (
-        c.domain.replace(/^\./, '') !== host ||
+        !cookieDomainInScope(c.domain, scope) ||
         c.domain !== c.domain.toLowerCase() ||
         /[^a-z0-9.:-]/.test(c.domain) ||
         (c.secure && !grant.origin.startsWith('https:')) ||
@@ -220,12 +254,26 @@ export class SessionVault {
     const max = now + (profileOnly ? PROFILE_ABSOLUTE_TTL : SESSION_TTL);
     const expiresAt = input.expiresAt ?? max;
     if (expiresAt <= now || expiresAt > max) fail('invalid_grant');
+    let cookieDomains: string[];
+    try {
+      cookieDomains = cookieScopeForOrigin(input.origin);
+    } catch {
+      fail('invalid_grant');
+    }
     return this.options.store.update(userId, async (doc) => {
-      if (doc.grants.length >= 100) fail('grant_limit');
+      // Only usable or pending grants count; revoked/expired history is pruned.
+      const active = doc.grants.filter((g) => g.status !== 'revoked' && this.usable(g));
+      if (active.length >= MAX_ACTIVE_GRANTS) fail('grant_limit');
+      const inactive = doc.grants
+        .filter((g) => !active.includes(g))
+        .sort((a, b) => b.issuedAt - a.issuedAt)
+        .slice(0, MAX_INACTIVE_KEPT);
+      doc.grants = [...active, ...inactive];
       const grant: GrantRecord = {
         id: randomUUID(),
         origin: input.origin,
         originSet: [input.origin],
+        cookieDomains,
         importScope: { cookies: true, localStorageKeys: input.storageKeys, indexedDB: false },
         purposes: [...new Set(input.purposes)],
         storageKeys: input.storageKeys,
@@ -246,10 +294,16 @@ export class SessionVault {
   }
   async list(userId: string): Promise<BrowserGrantMetadata[]> {
     this.ensureEnabled();
+    // Read first: listing and sweeps only write when something actually expired.
+    const stale = await this.options.store.read(userId, (doc) =>
+      doc.grants.some((g) => !this.usable(g) && g.status !== 'revoked' && g.status !== 'expired'),
+    );
+    if (!stale)
+      return this.options.store.read(userId, (doc) => doc.grants.map((g) => this.metadata(g)));
     const result = await this.options.store.update(userId, async (doc) => {
       const expired: string[] = [];
       for (const g of doc.grants)
-        if (!this.usable(g) && g.status !== 'revoked') {
+        if (!this.usable(g) && g.status !== 'revoked' && g.status !== 'expired') {
           g.status = 'expired';
           g.snapshot = undefined;
           g.writer = undefined;
@@ -337,21 +391,84 @@ export class SessionVault {
         fail('grant_unavailable');
     });
   }
-  async checkout(userId: string, id: string): Promise<Checkout> {
+  /** The newest connected, usable grant whose cookie scope covers `targetUrl`'s host. */
+  async match(userId: string, targetUrl: string): Promise<BrowserGrantMetadata | null> {
+    this.ensureEnabled();
+    let host: string;
+    try {
+      const url = new URL(targetUrl);
+      if (!/^https?:$/.test(url.protocol)) return null;
+      host = url.hostname;
+    } catch {
+      return null;
+    }
+    return this.options.store.read(userId, (doc) => {
+      const found = doc.grants
+        .filter(
+          (g) =>
+            g.status === 'connected' &&
+            g.snapshot &&
+            this.usable(g) &&
+            g.purposes.includes('read') &&
+            hostInScope(host, this.scope(g)),
+        )
+        .sort((a, b) => b.issuedAt - a.issuedAt)[0];
+      return found ? this.metadata(found) : null;
+    });
+  }
+  /**
+   * A task's copy of the session. Only a profile-persist grant with a free
+   * lease checks out as the writer; every other task gets a read-only fork of
+   * the same snapshot version (never a writer_busy allocation failure).
+   */
+  async checkout(userId: string, id: string, options: { write?: boolean } = {}): Promise<Checkout> {
     this.ensureEnabled();
     return this.options.store.update(userId, async (doc) => {
       const g = this.find(doc, id);
       this.requireLive(g);
       if (g.status !== 'connected' || !g.snapshot || !g.purposes.includes('read'))
         fail('grant_unavailable');
-      if (g.writer && g.writer.expiresAt > this.now()) fail('writer_busy');
       const state = this.state(
         g,
         await unseal(this.options.keys, this.context(userId, g, g.snapshot), g.snapshot.envelope),
       );
-      g.writer = { token: randomUUID(), expiresAt: this.now() + LEASE_TTL };
       g.lastUsedAt = this.now();
-      return { state, token: g.writer.token, version: g.snapshot.version, grant: this.metadata(g) };
+      const persist = g.purposes.includes('profile-persist') && this.options.profileEnabled;
+      const busy = Boolean(g.writer && g.writer.expiresAt > this.now());
+      if (options.write !== false && persist && !busy) {
+        g.writer = { token: randomUUID(), expiresAt: this.now() + LEASE_TTL };
+        return {
+          state,
+          token: g.writer.token,
+          version: g.snapshot.version,
+          grant: this.metadata(g),
+          mode: 'writer' as const,
+          reason: null,
+        };
+      }
+      return {
+        state,
+        token: null,
+        version: g.snapshot.version,
+        grant: this.metadata(g),
+        mode: 'readonly' as const,
+        reason: persist ? ('writer_busy' as const) : ('session_only' as const),
+      };
+    });
+  }
+  /**
+   * Read-only liveness check for a running task (no lock, no write): the
+   * grant is still usable and, for the writer, still holds this lease/version.
+   */
+  async status(userId: string, id: string, task: Pick<Checkout, 'token' | 'version'>) {
+    this.ensureEnabled();
+    return this.options.store.read(userId, (doc) => {
+      const g = doc.grants.find((grant) => grant.id === id);
+      if (!g || !this.usable(g) || g.status !== 'connected') return 'grant_unavailable' as const;
+      if (task.token === null) return 'live' as const;
+      if (g.writer?.token !== task.token || g.snapshot?.version !== task.version)
+        return 'cas_conflict' as const;
+      return 'live' as const;
     });
   }
   async release(
@@ -359,6 +476,7 @@ export class SessionVault {
     id: string,
     task: Pick<Checkout, 'token' | 'version'>,
   ): Promise<void> {
+    if (task.token === null) return;
     await this.options.store.update(userId, async (doc) => {
       const g = this.find(doc, id);
       if (g.writer?.token === task.token) g.writer = undefined;
@@ -369,37 +487,26 @@ export class SessionVault {
       if (key.startsWith(`${userId}:`))
         await this.closeActive(userId, key.slice(userId.length + 1));
   }
-  async check(
-    userId: string,
-    id: string,
-    task: Pick<Checkout, 'token' | 'version'>,
-  ): Promise<void> {
-    this.ensureEnabled();
-    await this.options.store.update(userId, async (doc) => {
-      const g = this.find(doc, id);
-      this.requireLive(g);
-      if (
-        g.status !== 'connected' ||
-        g.writer?.token !== task.token ||
-        g.writer.expiresAt <= this.now() ||
-        g.snapshot?.version !== task.version
-      )
-        fail('cas_conflict');
-      g.writer.expiresAt = this.now() + LEASE_TTL;
-    });
-  }
+  /**
+   * Writer write-back. `keepLease` is a mid-task checkpoint (renews the lease,
+   * returns the new version); otherwise the lease is released. CAS on
+   * token + version; a revoked/expired grant always wins.
+   */
   async save(
     userId: string,
     id: string,
     task: Pick<Checkout, 'token' | 'version'>,
     raw: unknown,
-  ): Promise<void> {
+    options: { keepLease?: boolean } = {},
+  ): Promise<number> {
     this.ensureEnabled();
     let loggedOut = false;
+    let saved = task.version;
     await this.options.store.update(userId, async (doc) => {
       const g = this.find(doc, id);
       this.requireLive(g);
       if (
+        task.token === null ||
         g.writer?.token !== task.token ||
         g.writer.expiresAt <= this.now() ||
         g.snapshot?.version !== task.version
@@ -415,6 +522,7 @@ export class SessionVault {
         g.writer = undefined;
         return;
       }
+      saved = task.version + 1;
       g.profileCreatedAt ??= this.now();
       const snapshot = {
         version: task.version + 1,
@@ -429,10 +537,13 @@ export class SessionVault {
       g.snapshot = snapshot;
       g.cookieCount = state.cookies.length;
       g.lastUsedAt = this.now();
-      g.writer = undefined;
-      this.audit(userId, g, 'save');
+      g.writer = options.keepLease
+        ? { token: task.token, expiresAt: this.now() + LEASE_TTL }
+        : undefined;
+      this.audit(userId, g, options.keepLease ? 'checkpoint' : 'save');
     });
     if (loggedOut) await this.closeActive(userId, id);
+    return saved;
   }
   private tombstone(g: GrantRecord, reason: string) {
     g.revokedAt = this.now();

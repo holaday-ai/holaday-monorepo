@@ -13,6 +13,10 @@ const dispatch = z
   })
   .strict();
 
+/** The one route whose body is a whole session state (schema caps it at 2MB). */
+export const VAULT_IMPORT_PATH = /^\/browser-data\/grants\/[^/]+\/import$/;
+export const VAULT_IMPORT_BODY_LIMIT = '2mb';
+
 /** Parser errors may embed request bytes. Never pass vault payload errors to default logs. */
 export const vaultBodyErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
   if (!req.path.startsWith('/browser-data')) return next(error);

@@ -22,7 +22,12 @@ import { signStreamToken } from './auth/jwt.js';
 import { bearerAuth } from './auth/middleware.js';
 import { AuthService, isClosureRecoveryResult } from './auth/service.js';
 import type { BrowserPool } from './browser-pool/index.js';
-import { installVaultRoutes, vaultBodyErrorHandler } from './browser-session-vault/http.js';
+import {
+  VAULT_IMPORT_BODY_LIMIT,
+  VAULT_IMPORT_PATH,
+  installVaultRoutes,
+  vaultBodyErrorHandler,
+} from './browser-session-vault/http.js';
 import { purgeLegacyCookiesForVault } from './browser-session-vault/legacy.js';
 import type { VaultRuntime } from './browser-session-vault/runtime.js';
 import { browsingHistorySchema, replaceUserSiteStats } from './browsing-history/service.js';
@@ -120,7 +125,18 @@ export function createHttpApp(deps: HttpAppDeps) {
   // Server-side duration (and handler phases) for latency triage, before auth.
   app.use(lifetime.middleware(serverTimingMiddleware));
   app.use(lifetime.middleware(pinoHttp({ logger })));
-  app.use(lifetime.middleware(express.json({ limit: '1mb' })));
+  // Global 1MB JSON cap; only the session-import route gets its own 2MB cap.
+  const defaultJson = express.json({ limit: '1mb' });
+  const vaultImportJson = express.json({ limit: VAULT_IMPORT_BODY_LIMIT });
+  app.use(
+    lifetime.middleware((req, res, next) =>
+      (req.method === 'POST' && VAULT_IMPORT_PATH.test(req.path) ? vaultImportJson : defaultJson)(
+        req,
+        res,
+        next,
+      ),
+    ),
+  );
   app.use(vaultBodyErrorHandler);
   app.use(lifetime.handler(bearerAuth));
   installVaultRoutes({

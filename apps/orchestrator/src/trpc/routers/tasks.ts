@@ -3,7 +3,11 @@ import { selectStockAnalysisInput } from '../../stocks/stock-analysis-input.js';
 import { looksLikeCodeIntent } from '../../agent/code-intent.js';
 import { readCoreTaskRecord } from '../../agent/core-task-record.js';
 import { videoRejectionReason } from '../../agent/video/video-retry-policy.js';
-import { decideUserBrowserRoute } from '../../agent/supercar/user-browser-routing.js';
+import {
+  browserTaskTargetUrl,
+  decideUserBrowserRoute,
+} from '../../agent/supercar/user-browser-routing.js';
+import { getVaultRuntime } from '../../browser-session-vault/runtime.js';
 import { runOtaUserBrowserTask } from '../../agent/supercar/ota-user-browser-runner.js';
 import { createHash } from 'node:crypto';
 import type Anthropic from '@anthropic-ai/sdk';
@@ -1621,6 +1625,15 @@ export const tasksRouter = router({
           : null,
     });
 
+    const browserTargetUrl =
+      executionMode === 'browser' ? browserTaskTargetUrl(input.intent) : null;
+    // A connected site grant (vault, default off) gives the cloud browser that site's session.
+    const vaultRuntime = getVaultRuntime();
+    const cloudSessionAvailable = Boolean(
+      vaultRuntime &&
+        browserTargetUrl &&
+        (await vaultRuntime.vault.match(ctx.userId, browserTargetUrl).catch(() => null)),
+    );
     const browserRoute = executionMode === 'browser'
       ? decideUserBrowserRoute({
           enabled: getExecutionFeatureFlags().USER_BROWSER_ROUTING_V2,
@@ -1628,6 +1641,8 @@ export const tasksRouter = router({
           extensionOnline: hasConnectedExtension(ctx.userId),
           selectionOrigin: input.localChrome ? new URL(input.localChrome.expectedUrl).origin : undefined,
           publicCloudRequested: input.browserPreference === 'cloud-public',
+          legacyCookieSyncRetired: true,
+          cloudSessionAvailable,
         })
       : { lane: 'legacy' as const, reason: 'flag_off' as const };
     // Resolve identity/grant requirements before model preflight, quota or any cloud allocation.
@@ -4599,7 +4614,9 @@ export const tasksRouter = router({
               : null;
             const instance =
               adopted ??
-              (await ctx.browserPool.allocate(taskId, ctx.userId, input.viewportProfile));
+              (await ctx.browserPool.allocate(taskId, ctx.userId, input.viewportProfile, {
+                targetUrl: browserTargetUrl,
+              }));
             executor = instance.executor;
             allocatedPool = true;
             adoptedBrowserSession = adopted != null;
@@ -4965,7 +4982,9 @@ export const tasksRouter = router({
           let allocatedForContinuation = false;
           const instance = adopted
             ? adopted
-              : await ctx.browserPool.allocate(taskId, ctx.userId, input.viewportProfile);
+              : await ctx.browserPool.allocate(taskId, ctx.userId, input.viewportProfile, {
+                  targetUrl: browserTargetUrl,
+                });
           allocatedForContinuation = adopted == null;
           const continuation = resolveBrowserFollowUpContinuation({
             hasParentTask: Boolean(input.replyToTaskId),
@@ -9185,10 +9204,21 @@ export const tasksRouter = router({
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
+      const localChromeWait = z
+        .object({
+          metadata: z.object({
+            browserSource: z.literal('local-chrome'),
+            browserRoutingAwaiting: z.string().optional(),
+          }),
+        })
+        .safeParse(normalizeOutput(taskRow.result));
       if (
-        getExecutionFeatureFlags().USER_BROWSER_ROUTING_V2 && taskRow.status === 'awaiting_user' &&
-        z.object({ metadata: z.object({ browserSource: z.literal('local-chrome') }) })
-          .safeParse(normalizeOutput(taskRow.result)).success && !hasParkedSupercarHandle(input.taskId)
+        // A routing wait (also created with the routing flag off for login-required
+        // tasks, since the cookie sync is retired) never becomes a cloud/text run.
+        (getExecutionFeatureFlags().USER_BROWSER_ROUTING_V2 ||
+          Boolean(localChromeWait.data?.metadata.browserRoutingAwaiting)) &&
+        taskRow.status === 'awaiting_user' && localChromeWait.success &&
+        !hasParkedSupercarHandle(input.taskId)
       ) {
         // An expired Chrome seat cannot become a generate or unauthenticated cloud run.
         broadcastToUser(ctx.userId, { type: 'server.supercar.awaiting_user', taskId: input.taskId,
@@ -10227,7 +10257,9 @@ export const tasksRouter = router({
 
           let allocated = false;
           try {
-          const instance = await browserPool.allocate(input.taskId, ctx.userId);
+          const instance = await browserPool.allocate(input.taskId, ctx.userId, undefined, {
+            targetUrl: target.url,
+          });
             allocated = true;
             await instance.executor.resetPageForTask();
             const page = (await instance.executor.getPage()) as unknown as PageLike;

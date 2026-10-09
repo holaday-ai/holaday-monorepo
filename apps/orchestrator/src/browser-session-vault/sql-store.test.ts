@@ -51,7 +51,7 @@ describe('durable vault transaction boundary', () => {
     expect(f.locks).toEqual(['update', 'update']);
     const predicate = new MySqlDialect().sqlToQuery(f.where[2] as never);
     expect(predicate.params).toEqual([5, 9, 7]);
-    expect(f.updates).toEqual([{ revision: 8, document: { grants: [] } }]);
+    expect(f.updates).toEqual([{ revision: 8, document: { grants: [] }, nextExpiryAt: null }]);
   });
   it('rejects closure owners and lost CAS before committing', async () => {
     const f = fake('closure_pending');

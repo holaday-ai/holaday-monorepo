@@ -165,3 +165,10 @@ export function formatRelativeTime(at: number): string {
   const minutes = Math.round(absSeconds / 60);
   return deltaMs >= 0 ? `${minutes} 分钟后` : `${minutes} 分钟前`;
 }
+
+/** Shown where the retired automatic cookie sync used to run silently. */
+export const SITE_LOGIN_NOTICE = {
+  title: '网站登录状态',
+  detail:
+    '已改为按站点授权导入（功能即将开放），不再自动同步 Cookie。需要登录的网站请用“连接 Chrome”在你自己的 Chrome 中完成。',
+} as const;

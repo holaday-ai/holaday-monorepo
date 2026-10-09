@@ -6,7 +6,7 @@ import {
   seal,
   unseal,
 } from './crypto.js';
-import { MemoryVaultStore, SessionVault } from './vault.js';
+import { LEASE_TTL, MemoryVaultStore, SessionVault } from './vault.js';
 
 const DAY = 86400000;
 const origin = 'https://fixture.test';
@@ -95,7 +95,11 @@ describe('session vault lifecycle', () => {
     const grant = await f.vault.grant('alice', request);
     await f.vault.import('alice', grant.id, state, async () => 'connected');
     const first = await f.vault.checkout('alice', grant.id);
-    await expect(f.vault.checkout('alice', grant.id)).rejects.toThrow('writer_busy');
+    expect(first.mode).toBe('writer');
+    // A concurrent task is a read-only fork (never an allocation failure) and cannot write back.
+    const fork = await f.vault.checkout('alice', grant.id);
+    expect(fork).toMatchObject({ mode: 'readonly', reason: 'writer_busy', token: null });
+    await expect(f.vault.save('alice', grant.id, fork, state)).rejects.toThrow('cas_conflict');
     await f.vault.save('alice', grant.id, first, state);
     await expect(f.vault.save('alice', grant.id, first, state)).rejects.toThrow('cas_conflict');
     const next = await f.vault.checkout('alice', grant.id);
@@ -158,7 +162,7 @@ describe('session vault lifecycle', () => {
     ]);
     expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
     const stale = await f.vault.checkout('alice', grant.id);
-    f.advance(120001);
+    f.advance(LEASE_TTL + 1);
     const current = await f.vault.checkout('alice', grant.id);
     await expect(f.vault.save('alice', grant.id, stale, state)).rejects.toThrow('cas_conflict');
     await f.vault.save('alice', grant.id, current, state);

@@ -37,6 +37,7 @@ describe('selected site import direct HTTP boundary', () => {
             origin: 'https://fixture.test',
             storageKeys: [],
             purposes: ['session-import'],
+            cookieDomains: ['fixture.test'],
           }),
         ),
       )
@@ -79,6 +80,7 @@ describe('selected site import direct HTTP boundary', () => {
               origin: 'https://other.test',
               storageKeys: [],
               purposes: ['session-import'],
+              cookieDomains: ['other.test'],
             }),
           ),
       ),
@@ -87,6 +89,83 @@ describe('selected site import direct HTTP boundary', () => {
       importSelectedSession({
         grantId: '11111111-1111-4111-8111-111111111111',
         target: { tabId: 1, selectionId: 'selection', expectedUrl: 'https://fixture.test' },
+      }),
+    ).rejects.toThrow('session_import_failed');
+    expect(getAll).not.toHaveBeenCalled();
+  });
+  it('collects parent-domain cookies of the registrable domain, never look-alike domains (FIX-PR252)', async () => {
+    mocks.validate.mockResolvedValue({ url: 'https://www.jd.com/' });
+    const base = {
+      name: 'thor',
+      value: 'SYNTHETIC_ONLY',
+      path: '/',
+      secure: true,
+      httpOnly: true,
+      hostOnly: false,
+      session: true,
+      sameSite: 'lax',
+    };
+    const getAll = vi.fn(async () => [
+      { ...base, domain: '.jd.com' },
+      { ...base, name: 'pin', domain: 'passport.jd.com', hostOnly: true },
+      { ...base, name: 'x', domain: '.evil-jd.com' },
+      { ...base, name: 'y', domain: '.jd.com.evil.net' },
+    ]);
+    vi.stubGlobal('chrome', {
+      cookies: { getAll, getAllCookieStores: async () => [{ id: 'selected-store', tabIds: [1] }] },
+      scripting: { executeScript: vi.fn() },
+    });
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            origin: 'https://www.jd.com',
+            storageKeys: [],
+            purposes: ['session-import'],
+            cookieDomains: ['jd.com'],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'connected', cookieCount: 2 })));
+    vi.stubGlobal('fetch', fetcher);
+    await importSelectedSession({
+      grantId: '11111111-1111-4111-8111-111111111111',
+      target: { tabId: 1, selectionId: 'selection', expectedUrl: 'https://www.jd.com' },
+    });
+    expect(getAll).toHaveBeenCalledWith({
+      domain: 'jd.com',
+      storeId: 'selected-store',
+      partitionKey: {},
+    });
+    const sent = JSON.parse(fetcher.mock.calls[1]?.[1].body);
+    expect(sent.cookies.map((c: { domain: string }) => c.domain).sort()).toEqual([
+      '.jd.com',
+      'passport.jd.com',
+    ]);
+  });
+  it('refuses a scope that does not contain the selected site', async () => {
+    mocks.validate.mockResolvedValue({ url: 'https://www.jd.com/' });
+    const getAll = vi.fn();
+    vi.stubGlobal('chrome', { cookies: { getAll } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              origin: 'https://www.jd.com',
+              storageKeys: [],
+              purposes: ['session-import'],
+              cookieDomains: ['taobao.com'],
+            }),
+          ),
+      ),
+    );
+    await expect(
+      importSelectedSession({
+        grantId: '11111111-1111-4111-8111-111111111111',
+        target: { tabId: 1, selectionId: 'selection', expectedUrl: 'https://www.jd.com' },
       }),
     ).rejects.toThrow('session_import_failed');
     expect(getAll).not.toHaveBeenCalled();

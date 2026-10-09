@@ -461,6 +461,7 @@ it.each(['dispatchDirectOpen', 'dispatchToBrave'])(
         bound: context('fresh'),
         directOpenFallbackExecutor: null,
         directOpenUsesBrowserPool: true,
+        browserTargetUrl: null,
         input: {},
         taskId: 'synthetic-task',
         executionMode: 'browser',

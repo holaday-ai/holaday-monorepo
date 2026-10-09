@@ -37,14 +37,31 @@ export async function importSelectedSession(
       !('purposes' in scope)
     )
       throw new Error();
-    const grant = scope as { origin: string; storageKeys: string[]; purposes: string[] };
+    const grant = scope as {
+      origin: string;
+      storageKeys: string[];
+      purposes: string[];
+      cookieDomains?: unknown;
+    };
+    // The server computes the cookie scope (registrable domain via the public
+    // suffix list + reviewed related login domains); the extension only checks shape.
+    const cookieDomains = grant.cookieDomains;
     if (
       !Array.isArray(grant.storageKeys) ||
       grant.storageKeys.length > 20 ||
       grant.storageKeys.some((k) => typeof k !== 'string') ||
-      !grant.purposes.includes('session-import')
+      !grant.purposes.includes('session-import') ||
+      !Array.isArray(cookieDomains) ||
+      cookieDomains.length < 1 ||
+      cookieDomains.length > 5 ||
+      cookieDomains.some((d) => typeof d !== 'string' || !/^[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(d))
     )
       throw new Error();
+    const domains = cookieDomains as string[];
+    const inDomain = (value: string, domain: string) => {
+      const bare = value.replace(/^\./, '').toLowerCase();
+      return bare === domain || bare.endsWith(`.${domain}`);
+    };
     phase = 'selection';
     const tab = await validateSelectedTab(command.target);
     if (
@@ -52,27 +69,40 @@ export async function importSelectedSession(
       new URL(command.target.expectedUrl).origin !== grant.origin
     )
       throw new Error();
-    const host = new URL(grant.origin).hostname;
+    // The selected site itself must be inside the first (its own registrable) domain.
+    const [siteDomain] = domains;
+    if (!siteDomain || !inDomain(new URL(grant.origin).hostname, siteDomain)) throw new Error();
     phase = 'cookie_store';
     const stores = await chrome.cookies.getAllCookieStores();
     const store = stores.find((s) => s.tabIds.includes(command.target.tabId));
     if (!store) throw new Error();
-    const all = await chrome.cookies.getAll({ domain: host, storeId: store.id, partitionKey: {} });
-    const cookies = all
-      .filter((c) => c.domain.replace(/^\./, '') === host)
-      .map((c) => ({
-        name: c.name,
-        value: c.value,
-        domain: c.domain,
-        path: c.path,
-        secure: c.secure,
-        httpOnly: c.httpOnly,
-        hostOnly: c.hostOnly,
-        sameSite: c.sameSite,
-        session: c.session,
-        ...(c.expirationDate ? { expirationDate: c.expirationDate } : {}),
-        ...(c.partitionKey ? { partitionKey: c.partitionKey } : {}),
-      }));
+    const seen = new Set<string>();
+    const all: chrome.cookies.Cookie[] = [];
+    for (const domain of domains)
+      for (const cookie of await chrome.cookies.getAll({
+        domain,
+        storeId: store.id,
+        partitionKey: {},
+      })) {
+        const key = JSON.stringify([cookie.name, cookie.domain, cookie.path, cookie.partitionKey]);
+        if (!seen.has(key) && domains.some((d) => inDomain(cookie.domain, d))) {
+          seen.add(key);
+          all.push(cookie);
+        }
+      }
+    const cookies = all.map((c) => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain,
+      path: c.path,
+      secure: c.secure,
+      httpOnly: c.httpOnly,
+      hostOnly: c.hostOnly,
+      sameSite: c.sameSite,
+      session: c.session,
+      ...(c.expirationDate ? { expirationDate: c.expirationDate } : {}),
+      ...(c.partitionKey ? { partitionKey: c.partitionKey } : {}),
+    }));
     phase = 'selected_storage';
     let storage: Array<{ name: string; value: string }> = [];
     if (grant.storageKeys.length) {

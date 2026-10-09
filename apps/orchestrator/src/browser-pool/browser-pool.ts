@@ -78,7 +78,13 @@ import {
   spawnXvfb,
   waitForCdpReady,
 } from './spawn.js';
-import type { BrowserInstance, BrowserSlot, PoolConfig, PoolStats } from './types.js';
+import type {
+  BrowserInstance,
+  BrowserSessionTarget,
+  BrowserSlot,
+  PoolConfig,
+  PoolStats,
+} from './types.js';
 
 /** Thrown by allocate() when capacity is reached. Callers should
  *  map this to a 503-equivalent user-facing error, not a 500. */
@@ -285,6 +291,7 @@ export class BrowserPool {
     userId: string,
     viewportProfile?: BrowserViewportProfile,
     pendingVeto?: () => void,
+    session?: BrowserSessionTarget,
   ): Promise<BrowserInstance> {
     const allocation = currentOperationLifetime();
     this.#checkBroker();
@@ -333,7 +340,7 @@ export class BrowserPool {
       const connected = await record.executor.connect(cdp.endpoint, { cdpHeaders: cdp.headers });
       this.#checkBroker(record);
       if (!connected.ok) throw brokerInvalid();
-      await this.config.prepareSession?.(userId, record.executor);
+      await this.config.prepareSession?.(userId, record.executor, session);
       this.#checkBroker(record);
       const now = Date.now();
       const instance: BrowserInstance = {
@@ -493,6 +500,8 @@ export class BrowserPool {
     taskId: string,
     userId: string,
     viewportProfile?: BrowserViewportProfile,
+    /** The task's target site: only a matching site grant applies (default: none). */
+    session?: BrowserSessionTarget,
   ): Promise<BrowserInstance> {
     const caller = this.#strict ? currentOperationLifetime() : undefined;
     let originalScopeVeto: (() => void) | undefined;
@@ -565,12 +574,12 @@ export class BrowserPool {
         caller.drain.assertDispatch(caller.owner);
         this.#checkBroker();
         pendingVeto();
-        return this.#spawnBroker(taskId, userId, viewportProfile, pendingVeto);
+        return this.#spawnBroker(taskId, userId, viewportProfile, pendingVeto, session);
       }
       if (!this.#strict && this.allocator.isFull()) {
         await this.releaseOldestRetained('capacity-reclaim');
       }
-      return this.spawnInstance(taskId, userId, viewportProfile);
+      return this.spawnInstance(taskId, userId, viewportProfile, session);
     })().then(resolve, reject);
     try {
       return await promise;
@@ -1145,6 +1154,7 @@ export class BrowserPool {
     taskId: string,
     userId: string,
     viewportProfile?: BrowserViewportProfile,
+    session?: BrowserSessionTarget,
   ): Promise<BrowserInstance> {
     const lifetime = currentOperationLifetime();
     if (this.allocator.isFull()) {
@@ -1284,7 +1294,7 @@ export class BrowserPool {
       if (!connectResult.ok) {
         throw new Error(`PlaywrightExecutor.connect failed: ${connectResult.error}`);
       }
-      await this.config.prepareSession?.(userId, executor);
+      await this.config.prepareSession?.(userId, executor, session);
       assertActive();
       const now = Date.now();
       instance = {

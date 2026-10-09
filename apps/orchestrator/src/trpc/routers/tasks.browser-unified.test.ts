@@ -205,7 +205,8 @@ it.each(['ready', 'timeout'] as const)(
 
     try {
       const result = await tasksRouter.createCaller(ctx).create({
-        intent: '打开订单详情并点击保存',
+        // Executor path under test; an explicit order/login need would route to the user's Chrome.
+        intent: '打开详情页并点击保存',
         mode: 'auto',
         expertMode: 'normal',
       });
