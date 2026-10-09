@@ -34,6 +34,10 @@ const CLOSE_STORE_TIMEOUT_MS = 3000;
 /** Reason code when a context is stopped because its status could not be confirmed. */
 export const REVOCATION_UNVERIFIED = 'revocation_status_unverified';
 const DEFINITIVE = new Set(['grant_unavailable', 'cas_conflict', 'user_unavailable']);
+/** Reason code when the grant was revoked, expired or its owner closed (task-facing). */
+export const SESSION_REVOKED = 'session_revoked';
+const taskReason = (code: string) =>
+  code === 'grant_unavailable' || code === 'user_unavailable' ? SESSION_REVOKED : code;
 /** Resolves `work`, or `timeout` after `ms` (the pending work is abandoned, never awaited). */
 function within<T>(work: Promise<T>, ms: number): Promise<T | 'timeout'> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -112,6 +116,9 @@ export class VaultBrowserWorker {
     let closed = false;
     let checking = false;
     let uncertain = false;
+    // When the newest successful check was ISSUED: a result only proves the grant
+    // was live when its read started, so a late (pre-revocation) snapshot can never
+    // move the freshness window or the close deadline past the revocation.
     let lastConfirmed = Date.now();
     let lastAttempt = Date.now();
     let held: Array<(proceed: boolean) => void> = [];
@@ -138,18 +145,20 @@ export class VaultBrowserWorker {
     };
     const interrupt = async (reason: string) => {
       if (closed) return;
-      onInterrupted?.(reason);
+      onInterrupted?.(taskReason(reason));
       await stop();
     };
     const attempt = async () => {
       if (closed || checking) return;
       checking = true;
-      lastAttempt = Date.now();
+      const issuedAt = Date.now();
+      lastAttempt = issuedAt;
       try {
         // A hung query is abandoned at the deadline; `checking` never waits on it.
         if ((await within(check(), timeoutMs)) === 'timeout') uncertain = true;
-        else {
-          lastConfirmed = Date.now();
+        else if (issuedAt > lastConfirmed) {
+          // Renew only from the issue time, and only with a check newer than the last one.
+          lastConfirmed = issuedAt;
           uncertain = false;
           settleHeld(true);
         }
@@ -210,9 +219,10 @@ export class VaultBrowserWorker {
       untrack();
     });
     try {
+      const firstIssuedAt = Date.now();
       const first = await within(check(), timeoutMs);
       if (first === 'timeout') throw new VaultError(REVOCATION_UNVERIFIED);
-      lastConfirmed = Date.now();
+      lastConfirmed = firstIssuedAt;
     } catch (error) {
       await stop();
       throw error;

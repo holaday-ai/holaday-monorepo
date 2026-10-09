@@ -8,12 +8,14 @@ import type { AddressInfo } from 'node:net';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runUnifiedSupercarTask } from '../agent/browser-tools/unified-supercar-runner.js';
+import { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import type { MessagesAdapter } from '../llm/messages-adapter.js';
 import { TestKeyProvider } from './crypto.js';
 import { MemoryVaultStore, SessionVault, type VaultDocument, type VaultStore } from './vault.js';
 import {
   MAX_UNVERIFIED_MS,
   REVOCATION_UNVERIFIED,
+  SESSION_REVOKED,
   STATUS_POLL_MS,
   STATUS_TIMEOUT_MS,
   VaultBrowserWorker,
@@ -218,7 +220,7 @@ describe('revocation upper bound with a hung / failing / slow status query (defa
     while (!f.task.page.isClosed() && Date.now() - revokedAt < 10000)
       await new Promise((r) => setTimeout(r, 100));
     expect(Date.now() - revokedAt).toBeLessThanOrEqual(STATUS_POLL_MS + STATUS_TIMEOUT_MS);
-    expect(f.interrupted).toEqual(['grant_unavailable']);
+    expect(f.interrupted).toEqual([SESSION_REVOKED]);
   }, 30000);
 });
 
@@ -261,5 +263,101 @@ describe('a stopped vault session parks the task instead of continuing', () => {
     expect((result as { question: string }).question).toContain(REVOCATION_UNVERIFIED);
     expect(hits).toHaveLength(0);
     await page.close();
+  });
+});
+
+describe('FIX-PR252-3: a late pre-revocation snapshot cannot extend the deadline', () => {
+  it.each([1, 2, 3])(
+    'run %i: valid snapshot returned after 1.9s, revoked meanwhile, then reads hang → stop ≤6s, close ≤10s',
+    async () => {
+      const f = await openTask();
+      let first = true;
+      let snapshotTaken!: (at: number) => void;
+      const taken = new Promise<number>((resolve) => {
+        snapshotTaken = resolve;
+      });
+      f.store.read = async (userId, view) => {
+        if (!first) return new Promise(() => {});
+        first = false;
+        const snapshot = await f.store.inner.read(userId, view);
+        snapshotTaken(Date.now());
+        await new Promise((resolve) => setTimeout(resolve, 1900));
+        return snapshot;
+      };
+      let closedAt: number | undefined;
+      f.task.context.once('close', () => {
+        closedAt = Date.now();
+      });
+      await taken;
+      const revokedAt = Date.now();
+      await f.other.revoke('alice', f.grant.id);
+      hits.length = 0;
+      const stopProbe = probeLoop(f.task);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 11500));
+        const lastAdmitted = Math.max(
+          0,
+          ...hits.filter((t) => t >= revokedAt).map((t) => t - revokedAt),
+        );
+        if (process.env.REVOCATION_TIMING_LOG)
+          (await import('node:fs')).appendFileSync(
+            process.env.REVOCATION_TIMING_LOG,
+            `${JSON.stringify({ lastAdmittedMs: lastAdmitted, closedAfterMs: closedAt ? closedAt - revokedAt : null })}\n`,
+          );
+        expect(lastAdmitted).toBeLessThanOrEqual(6000);
+        expect(closedAt).toBeDefined();
+        expect((closedAt ?? Number.POSITIVE_INFINITY) - revokedAt).toBeLessThanOrEqual(10000);
+        expect(f.interrupted).toEqual([REVOCATION_UNVERIFIED]);
+      } finally {
+        stopProbe();
+        await f.task.close(false);
+      }
+    },
+    30000,
+  );
+});
+
+describe('FIX-PR252-3: an actually closed vault context parks the task', () => {
+  it.each([REVOCATION_UNVERIFIED, SESSION_REVOKED])(
+    'real executor, context closed (%s): awaiting_user with the reason, model never runs',
+    async (reason) => {
+      const executor = new PlaywrightExecutor();
+      Object.assign(executor, { browser });
+      const context = await executor.createSessionVaultContext({});
+      await context.newPage();
+      executor.markSessionInterrupted(reason);
+      await context.close();
+      let modelCalls = 0;
+      const adapter = {
+        create: async () => {
+          modelCalls++;
+          throw new Error('model_must_not_run');
+        },
+      } as unknown as MessagesAdapter;
+      const outcome = await runUnifiedSupercarTask({
+        taskId: `closed-${reason}`,
+        intent: '只读查看页面',
+        executor,
+        messagesAdapter: adapter,
+        maxIterations: 1,
+      });
+      expect(modelCalls).toBe(0);
+      expect(outcome).toMatchObject({ status: 'awaiting_user' });
+      expect((outcome as { question: string }).question).toContain(reason);
+    },
+  );
+  it('without an interruption a broken page is still a plain failure', async () => {
+    const executor = new PlaywrightExecutor();
+    Object.assign(executor, { browser });
+    const context = await executor.createSessionVaultContext({});
+    await context.close();
+    const outcome = await runUnifiedSupercarTask({
+      taskId: 'closed-no-reason',
+      intent: '只读查看页面',
+      executor,
+      messagesAdapter: { create: async () => ({ content: [] }) } as unknown as MessagesAdapter,
+      maxIterations: 1,
+    });
+    expect(outcome.status).toBe('failed');
   });
 });

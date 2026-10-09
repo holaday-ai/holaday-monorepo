@@ -113,10 +113,26 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       toolsUsed: [],
     };
   }
+  // The session vault stopped this task's logged-in context (revoked or its
+  // status could not be confirmed): nothing more runs; the task waits for the user.
+  const sessionStopped = () => opts.executor?.sessionInterruption ?? null;
+  const sessionStoppedQuestion = (reason: string) =>
+    `站点登录授权已撤销或暂时无法确认（原因码 ${reason}），已停止并关闭该登录会话，未保存的会话变更已丢弃。请在“浏览器登录与数据”中确认授权状态后重新提交任务。`;
+  const parkedForSession = (reason: string, iterations = 0): SupercarOutcome => ({
+    status: 'awaiting_user',
+    question: sessionStoppedQuestion(reason),
+    iterations,
+    toolsUsed: [],
+  });
+  const stoppedBefore = sessionStopped();
+  if (stoppedBefore) return parkedForSession(stoppedBefore);
   let page: Awaited<ReturnType<NonNullable<RunSupercarOptions['executor']>['getPage']>>;
   try {
     page = await opts.executor.getPage();
   } catch {
+    // A closed vault context fails getPage(): report why instead of a generic failure.
+    const stopped = sessionStopped();
+    if (stopped) return parkedForSession(stopped);
     return {
       status: 'failed',
       reason: '浏览器暂时不可用，请稍后重试。',
@@ -243,11 +259,6 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   // Runtime safety boundary: the same LIVE-VETO the legacy loop applies before
   // each live write. tasks.create passes classifyRuntimeAction; a caller that
   // passes nothing still gets it — the gate is never silently off.
-  // The session vault stopped this task's logged-in context (revoked or its
-  // status could not be confirmed): nothing more runs; the task waits for the user.
-  const sessionStopped = () => opts.executor?.sessionInterruption ?? null;
-  const sessionStoppedQuestion = (reason: string) =>
-    `站点登录授权已撤销或暂时无法确认（原因码 ${reason}），已停止并关闭该登录会话，未保存的会话变更已丢弃。请在“浏览器登录与数据”中确认授权状态后重新提交任务。`;
   const baseGateAction = (targetPage: typeof page) =>
     createUnifiedActionGate({
       page: targetPage,
