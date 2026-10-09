@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { BROWSER_FRAME } from './frame.mjs';
 import { ExpectedSeedError, createSeed, dispatch } from './seed.mjs';
 const mime = {
   '.html': 'text/html',
@@ -17,6 +18,7 @@ const mime = {
 };
 export async function startSeedServer(appDir, { port = 0 } = {}) {
   let seed = createSeed();
+  let broadcastBrowser = () => {};
   const uploads = new Map();
   const dist = path.resolve(appDir, 'dist');
   const server = createServer(async (req, res) => {
@@ -71,6 +73,7 @@ export async function startSeedServer(appDir, { port = 0 } = {}) {
             };
           }
         });
+        if (names.some((name) => name === 'tasks.browserNav')) broadcastBrowser();
         return json(url.searchParams.has('batch') ? output : output[0], status);
       }
       if (url.pathname === '/api/browser-data')
@@ -161,7 +164,37 @@ export async function startSeedServer(appDir, { port = 0 } = {}) {
   server.on('upgrade', (req, socket, head) =>
     sockets.handleUpgrade(req, socket, head, (ws) => sockets.emit('connection', ws, req)),
   );
-  sockets.on('connection', (ws) => ws.on('message', () => {}));
+  const frame = BROWSER_FRAME;
+  const sendFrame = (ws) => {
+    const state = seed.browserSessions[ws.localTaskId];
+    if (ws.readyState !== 1 || !state) return;
+    ws.send(JSON.stringify({ type: 'url-changed', url: state.url }));
+    ws.send(JSON.stringify({ type: 'frame', data: frame }));
+  };
+  broadcastBrowser = () => {
+    for (const ws of sockets.clients) sendFrame(ws);
+  };
+  sockets.on('connection', (ws, req) => {
+    const taskId = new URL(req.url, 'http://127.0.0.1').pathname.match(
+      /^\/screencast-ws\/(tsk_ui_browser_[a-z_]+)$/,
+    )?.[1];
+    ws.localTaskId = taskId;
+    sendFrame(ws);
+    ws.on('message', (bytes) => {
+      let msg;
+      try {
+        msg = JSON.parse(bytes.toString());
+      } catch {
+        return;
+      }
+      if (msg.type === 'input' && msg.payload?.type === 'viewport') sendFrame(ws);
+      if (taskId)
+        seed.requests.push({
+          name: 'local.browser.input',
+          input: { taskId, type: msg.payload?.type ?? msg.type },
+        });
+    });
+  });
   await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
   return {
     origin: `http://127.0.0.1:${server.address().port}`,

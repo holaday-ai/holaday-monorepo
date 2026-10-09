@@ -340,6 +340,19 @@ try {
         await page.goto(server.origin + scenario.path, { waitUntil: 'load' });
         await page.evaluate(() => document.fonts.ready);
         await page.waitForTimeout(300);
+        if (
+          scenario.taskMode === 'browser' &&
+          ['executing', 'awaiting_user'].includes(scenario.status)
+        ) {
+          await page.waitForFunction(
+            () =>
+              [...document.querySelectorAll('canvas')].some(
+                (c) => c.width === 960 && c.height === 600,
+              ),
+            null,
+            { timeout: 4000 },
+          );
+        }
         loaded = true;
       };
       try {

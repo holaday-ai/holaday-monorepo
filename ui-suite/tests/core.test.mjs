@@ -144,3 +144,43 @@ test('popup classification accepts only navigation and handles the pre-frame req
     true,
   );
 });
+
+test('browser seed exposes real ownership contract and persists takeover and navigation', () => {
+  const s = createSeed();
+  const taskId = 'tsk_ui_browser_executing';
+  assert.deepEqual(dispatch(s, 'tasks.browserControlState', { taskId }), {
+    taskId,
+    supported: true,
+    mode: 'running',
+    phase: 'agent',
+    lease: null,
+    error: null,
+  });
+  const human = dispatch(s, 'tasks.browserControl', { taskId, action: 'takeover' });
+  assert.equal(human.phase, 'human');
+  assert.ok(human.lease);
+  assert.equal(
+    dispatch(s, 'tasks.browserNav', {
+      taskId,
+      direction: 'goto',
+      url: 'https://example.test/new',
+      controlLease: 'wrong',
+    }).ok,
+    false,
+  );
+  assert.equal(
+    dispatch(s, 'tasks.browserNav', {
+      taskId,
+      direction: 'goto',
+      url: 'https://example.test/new',
+      controlLease: human.lease,
+    }).ok,
+    true,
+  );
+  assert.equal(s.browserSessions[taskId].url, 'https://example.test/new');
+  assert.equal(
+    dispatch(s, 'tasks.browserControl', { taskId, action: 'return', controlLease: human.lease })
+      .phase,
+    'agent',
+  );
+});

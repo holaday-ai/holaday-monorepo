@@ -1,4 +1,5 @@
-export const SEED_VERSION = '2026-10-09-v1';
+import { BROWSER_FRAME } from './frame.mjs';
+export const SEED_VERSION = '2026-10-09-v2';
 const at = '2026-10-09T10:00:00.000Z';
 export function createSeed() {
   const statuses = ['executing', 'completed', 'failed', 'awaiting_user', 'cancelled'];
@@ -37,10 +38,9 @@ export function createSeed() {
           metadata: { executionMode: mode, attachments: [] },
           ...(mode === 'browser' && ['completed', 'failed', 'cancelled'].includes(status)
             ? {
-                finalScreenshot:
-                  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0u8AAAAASUVORK5CYII=',
+                finalScreenshot: BROWSER_FRAME,
                 finalUrl: 'https://example.com',
-                finalViewport: { width: 1440, height: 900 },
+                finalViewport: { width: 960, height: 600 },
               }
             : {}),
         },
@@ -95,6 +95,23 @@ export function createSeed() {
   return {
     tasks,
     batches: [],
+    browserHistory: {},
+    browserSessions: Object.fromEntries(
+      tasks
+        .filter((t) => t.executionMode === 'browser')
+        .map((t) => [
+          t.taskId,
+          {
+            taskId: t.taskId,
+            supported: true,
+            mode: ['completed', 'failed', 'cancelled'].includes(t.status) ? 'review' : 'running',
+            phase: 'agent',
+            lease: null,
+            error: null,
+            url: 'https://example.test/local-browser',
+          },
+        ]),
+    ),
     memories: [
       {
         externalId: 'mem_ui',
@@ -333,8 +350,54 @@ export function dispatch(s, name, input = {}, method = 'GET') {
     case 'tasks.moveToProject':
     case 'tasks.clearUnsuccessful':
       return { ok: true, count: 0 };
-    case 'tasks.browserControlState':
-      return { controlMode: 'agent', owner: 'agent', userTakeover: false, available: false };
+    case 'tasks.browserControlState': {
+      const session = s.browserSessions[input.taskId];
+      if (!session)
+        return {
+          taskId: input.taskId,
+          supported: false,
+          mode: 'running',
+          phase: 'closed',
+          lease: null,
+          error: 'session_unavailable',
+        };
+      const { url, ...state } = session;
+      return state;
+    }
+    case 'tasks.browserControl': {
+      const session = s.browserSessions[input.taskId];
+      if (!session) throw new Error('unknown local browser task');
+      if (input.action === 'return' && input.controlLease !== session.lease)
+        throw new Error('local browser lease mismatch');
+      session.phase = input.action === 'takeover' ? 'human' : 'agent';
+      session.lease = session.phase === 'human' ? 'local-only-control-lease' : null;
+      return dispatch(s, 'tasks.browserControlState', { taskId: input.taskId });
+    }
+    case 'tasks.browserNav': {
+      const session = s.browserSessions[input.taskId];
+      if (!session || session.phase !== 'human' || input.controlLease !== session.lease)
+        return { ok: false, reason: 'browser_control_not_owned' };
+      s.browserHistory[input.taskId] ??= {
+        urls: ['https://example.test/previous', session.url, 'https://example.test/next'],
+        index: 1,
+      };
+      const history = s.browserHistory[input.taskId];
+      if (input.direction === 'back' || input.direction === 'forward') {
+        const next = history.index + (input.direction === 'back' ? -1 : 1);
+        if (next < 0 || next >= history.urls.length) return { ok: false, reason: 'no_history' };
+        history.index = next;
+        session.url = history.urls[next];
+      }
+      if (input.direction === 'goto') {
+        const url = new URL(input.url);
+        if (!['http:', 'https:'].includes(url.protocol)) return { ok: false, reason: 'bad_scheme' };
+        session.url = url.href;
+        history.urls = history.urls.slice(0, history.index + 1);
+        history.urls.push(url.href);
+        history.index = history.urls.length - 1;
+      }
+      return { ok: true };
+    }
     case 'projects.list':
       return s.projects.filter((p) =>
         input.organizationId ? p.organizationId === input.organizationId : p.scope === 'personal',
