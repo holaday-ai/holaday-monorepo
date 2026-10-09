@@ -55,8 +55,8 @@ import {
 import type { Logger } from 'pino';
 import { defaultBrowserNetworkPolicy } from '../agent/browser-network-policy.js';
 import { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
-import { ExecutionDrain } from '../execution/execution-drain.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
+import { ExecutionDrain } from '../execution/execution-drain.js';
 import {
   type OperationLifetime,
   captureOperationScopeVeto,
@@ -333,6 +333,8 @@ export class BrowserPool {
       const connected = await record.executor.connect(cdp.endpoint, { cdpHeaders: cdp.headers });
       this.#checkBroker(record);
       if (!connected.ok) throw brokerInvalid();
+      await this.config.prepareSession?.(userId, record.executor);
+      this.#checkBroker(record);
       const now = Date.now();
       const instance: BrowserInstance = {
         transport: 'broker',
@@ -374,12 +376,19 @@ export class BrowserPool {
     if (record.instance) record.instance.status = 'draining';
     // Cleanup may not depend on dispatch permission or erase physical slots.
     record.stopping = Promise.resolve().then(async () => {
-      const outcomes = await Promise.allSettled([
+      const background = await Promise.allSettled([
         record.instance && this.backgroundWork.get(record.instance)?.stop(),
+      ]);
+      const session = await Promise.allSettled([
+        record.executor && this.config.finishSession?.(record.executor),
+      ]);
+      const outcomes = await Promise.allSettled([
         Promise.resolve().then(() => record.executor?.disconnect()),
         Promise.resolve().then(() => record.group?.close()),
       ]);
-      if (outcomes.some((outcome) => outcome.status === 'rejected')) {
+      if (
+        [...background, ...session, ...outcomes].some((outcome) => outcome.status === 'rejected')
+      ) {
         const lifetime = this.#brokerLifetime;
         if (lifetime) lifetime.drain.markUnknown(lifetime.owner);
         throw brokerInvalid();
@@ -862,7 +871,10 @@ export class BrowserPool {
   private scheduleRetentionExpiry(taskId: string): void {
     const existingTimer = this.retentionTimers.get(taskId);
     if (existingTimer) clearTimeout(existingTimer);
-    if (this.maintenancePaused) { this.retentionTimers.delete(taskId); return; }
+    if (this.maintenancePaused) {
+      this.retentionTimers.delete(taskId);
+      return;
+    }
 
     const inst = this.instances.get(taskId);
     const bound = inst && this.#brokerBindings.get(inst);
@@ -968,13 +980,22 @@ export class BrowserPool {
     this.gcTimer = setInterval(() => {
       let original: Promise<void>;
       try {
-        original = admission ? admission.runRoot(async () => this.runGcSweep()).result : this.runGcSweep();
-      } catch { return; /* Admission rejected before GC dispatched. */ }
+        original = admission
+          ? admission.runRoot(async () => this.runGcSweep()).result
+          : this.runGcSweep();
+      } catch {
+        return; /* Admission rejected before GC dispatched. */
+      }
       this.gcRuns.add(original);
-      void original.then(() => { this.gcRuns.delete(original); }, () => {
-        this.gcFailed = true;
-        this.gcRuns.delete(original);
-      });
+      void original.then(
+        () => {
+          this.gcRuns.delete(original);
+        },
+        () => {
+          this.gcFailed = true;
+          this.gcRuns.delete(original);
+        },
+      );
     }, GC_INTERVAL_MS);
     this.gcTimer.unref?.();
   }
@@ -998,9 +1019,19 @@ export class BrowserPool {
     return this.maintenancePause;
   }
   assertMaintenanceIdle(): void {
-    if (this.#strict || !this.maintenancePaused || this.gcTimer || this.gcRuns.size || this.gcFailed ||
-      this.instances.size || this.allocationPromises.size || this.releasePromises.size ||
-      this.processRecords.size || this.retentionTimers.size || this.allocator.usedCount())
+    if (
+      this.#strict ||
+      !this.maintenancePaused ||
+      this.gcTimer ||
+      this.gcRuns.size ||
+      this.gcFailed ||
+      this.instances.size ||
+      this.allocationPromises.size ||
+      this.releasePromises.size ||
+      this.processRecords.size ||
+      this.retentionTimers.size ||
+      this.allocator.usedCount()
+    )
       throw new Error('MAINTENANCE_POOL_UNPROVEN');
   }
 
@@ -1253,6 +1284,8 @@ export class BrowserPool {
       if (!connectResult.ok) {
         throw new Error(`PlaywrightExecutor.connect failed: ${connectResult.error}`);
       }
+      await this.config.prepareSession?.(userId, executor);
+      assertActive();
       const now = Date.now();
       instance = {
         ...slot,
@@ -1340,6 +1373,7 @@ export class BrowserPool {
   private async tearDownInstance(inst: BrowserInstance): Promise<void> {
     if (this.#strict || inst.transport === 'broker') throw brokerInvalid();
     const background = await Promise.allSettled([this.backgroundWork.get(inst)?.stop()]);
+    background.push(...(await Promise.allSettled([this.config.finishSession?.(inst.executor)])));
     const record = this.instanceProcesses.get(inst);
     if (record?.strict) {
       const disconnected = await Promise.allSettled([

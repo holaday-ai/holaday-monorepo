@@ -241,23 +241,31 @@ export const dataCategories: readonly DataCategoryDefinition[] = [
   {
     id: 'extension_login_cookies',
     displayName: '扩展登录态',
-    description: '固定同步域名清单内、用于任务浏览器继承登录状态的真实 Cookie。',
+    description: '旧版固定清单 Cookie，以及用户逐站授权的加密登录状态；新版默认关闭。',
     dataElements: ['真实 Cookie 值', 'Cookie 名称', '域名', '路径', '安全与同站标记', '到期时间'],
-    sources: ['登录状态下的扩展固定同步域名清单'],
+    sources: ['旧版固定同步域名清单的遗留数据；新版用户明确选择的单站字段'],
     purposes: ['让 HOLA DAY 任务浏览器继承 Chrome 中已有的登录状态'],
     sensitivity: 'highly_sensitive',
-    storageLocations: ['HOLA DAY 待注入 Cookie 存储', 'HOLA DAY 任务浏览器执行环境'],
+    storageLocations: [
+      'HOLA DAY 待注入 Cookie 存储',
+      'HOLA DAY 加密会话 vault',
+      'HOLA DAY 隔离任务浏览器执行环境',
+    ],
     processorIds: ['holaday_internal'],
     retentionPolicyId: 'cookie_injection_mixed',
     rightsCapabilityId: 'extension_cookie_mixed',
     evidence: [
       source(
         'apps/extension/src/background/cookie-sync.ts',
-        '扩展读取固定同步域名清单内的 Cookie。',
+        '固定同步域名清单的旧自动入口已停用。',
       ),
       source(
         'apps/orchestrator/src/cookies/sync-service.ts',
         'Cookie 同步服务验证并处理同步记录。',
+      ),
+      source(
+        'apps/orchestrator/src/browser-session-vault/vault.ts',
+        '新版按站点授权、加密存储、撤销和期限校验，默认关闭。',
       ),
       source(
         'apps/orchestrator/src/db/schema/pending-cookies.ts',

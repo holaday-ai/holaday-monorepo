@@ -1,6 +1,7 @@
-import { cleanupRejectedVideoFrames } from './agent/video/video-quality-audit.js';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { setMediaFailureRefundHook } from './agent/video/media-failure-refund.js';
+import { cleanupRejectedVideoFrames } from './agent/video/video-quality-audit.js';
+import { createVaultRuntime, installVaultRuntime } from './browser-session-vault/runtime.js';
 import { refundTaskOnce, sweepPlatformFailureRefunds } from './quota/platform-failure-refunds.js';
 import { QuotaService } from './quota/quota-service.js';
 const _proxy = process.env.HTTPS_PROXY;
@@ -28,7 +29,6 @@ import { BrowserPool, reapOrphans } from './browser-pool/index.js';
 import { createVncProxy } from './browser-pool/vnc-proxy.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
-import { injectPendingCookies } from './cookies/sync-service.js';
 import { pool as databasePool, db } from './db/client.js';
 import {
   startEnergyAnalyticsCleanup,
@@ -64,6 +64,13 @@ import { currentOperationLifetime } from './execution/owned-operation.js';
 import { createPeriodicWork } from './execution/periodic-work.js';
 
 export async function startApplication(boot?: ApplicationBoot, ordinary?: OrdinaryApplication) {
+  // No production KeyProvider is selected in this PR: enabling either flag fails closed.
+  const browserVault = createVaultRuntime({
+    importEnabled: env.BROWSER_SESSION_IMPORT_V2,
+    profileEnabled: env.BROWSER_PROFILE_PERSIST_V1,
+    db,
+  });
+  installVaultRuntime(browserVault);
   if (boot && ordinary) throw new Error('MAINTENANCE_MODE_CONFLICT');
   const ordinaryMaintenance = ordinary?.coordinator;
   const executionDrain = ordinaryMaintenance ?? boot?.controller;
@@ -129,6 +136,7 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
       },
     );
   };
+  if (browserVault) registerPeriodic('browser-vault-expiry', 60000, () => browserVault.sweep());
   try {
     // Qwen-only production boot must never construct a legacy provider client.
     // Browser execution remains explicitly unavailable until its commander lane
@@ -266,6 +274,8 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
       if (boot || env.MULTI_USER || useNativeDevelopmentPool) {
         try {
           const poolConfig = {
+            prepareSession: browserVault?.prepare,
+            finishSession: browserVault?.finish,
             maxInstances: useNativeDevelopmentPool
               ? Math.min(env.MAX_BROWSER_INSTANCES, 3)
               : env.MAX_BROWSER_INSTANCES,
@@ -277,24 +287,6 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
             displayStart: env.BROWSER_DISPLAY_START,
             screenSize: env.BROWSER_SCREEN_SIZE,
             vncEnabled: env.BROWSER_VNC_WS_ENABLED,
-            // Phase 17 — drain pending cookies (extension-shipped) into
-            // the freshly-spawned context. Best-effort: errors logged
-            // inside the helper, never bubble up to block allocate.
-            onInstanceReady: async (
-              userExternalId: string,
-              executor: PlaywrightExecutor,
-            ): Promise<void> => {
-              try {
-                const page = await executor.getPage();
-                const ctx = page.context();
-                await injectPendingCookies({ db, context: ctx, userExternalId });
-              } catch (err) {
-                logger.warn(
-                  { err: err instanceof Error ? err.message : String(err), userExternalId },
-                  'pool: onInstanceReady cookie-sync drain failed',
-                );
-              }
-            },
           };
           if (boot) {
             browserPool = BrowserPool.dormantStrict(
@@ -470,6 +462,7 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
     );
 
     const app = createHttpApp({
+      browserVault,
       executionDrain,
       ordinaryMaintenance,
       planner,
@@ -1116,7 +1109,9 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
 
     registerPeriodic('video-quality-audit', 60 * 60_000, async () => {
       try {
-        const count = await cleanupRejectedVideoFrames({ retentionDays: env.VIDEO_REJECT_FRAME_RETENTION_DAYS });
+        const count = await cleanupRejectedVideoFrames({
+          retentionDays: env.VIDEO_REJECT_FRAME_RETENTION_DAYS,
+        });
         if (count) logger.info({ count }, 'video: expired rejected frames removed');
       } catch {
         logger.warn('video: rejected frame cleanup failed');
@@ -1232,24 +1227,29 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
       );
       const evolutionConfig = readEvolutionConfig();
       if (anyEvolutionBackgroundEnabled(evolutionConfig)) {
-        const [{ createEvolutionScheduler, createBullmqFactories }, { createEvolutionJobHandlers }] =
-          await Promise.all([
-            import('./playbook/evolution/evolution-scheduler.js'),
-            import('./playbook/evolution/evolution-runtime.js'),
-          ]);
-        const [{ createProductionModelRuntimeWiring }, { modelCatalogService }] = await Promise.all([
-          import('./llm/model-runtime-wiring.js'),
-          import('./llm/model-catalog-runtime.js'),
+        const [
+          { createEvolutionScheduler, createBullmqFactories },
+          { createEvolutionJobHandlers },
+        ] = await Promise.all([
+          import('./playbook/evolution/evolution-scheduler.js'),
+          import('./playbook/evolution/evolution-runtime.js'),
         ]);
+        const [{ createProductionModelRuntimeWiring }, { modelCatalogService }] = await Promise.all(
+          [import('./llm/model-runtime-wiring.js'), import('./llm/model-catalog-runtime.js')],
+        );
         const evolutionLogger = logger.child({ component: 'playbook-evolution' });
         const evolutionScheduler = createEvolutionScheduler({
           config: evolutionConfig,
           handlers: createEvolutionJobHandlers({
             db,
             config: evolutionConfig,
-            wiring: createProductionModelRuntimeWiring(env, {}, {
-              catalog: () => modelCatalogService.snapshot(),
-            }),
+            wiring: createProductionModelRuntimeWiring(
+              env,
+              {},
+              {
+                catalog: () => modelCatalogService.snapshot(),
+              },
+            ),
             ...(firecrawlLane
               ? {
                   scrapeDoc: async (url: string) => {
@@ -1266,12 +1266,14 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
         registerProducer(
           'playbook-evolution',
           () => {
-            void evolutionScheduler.start().catch((err: unknown) =>
-              evolutionLogger.warn(
-                { err: err instanceof Error ? err.message : String(err) },
-                'playbook evolution: scheduler failed to start (non-fatal)',
-              ),
-            );
+            void evolutionScheduler
+              .start()
+              .catch((err: unknown) =>
+                evolutionLogger.warn(
+                  { err: err instanceof Error ? err.message : String(err) },
+                  'playbook evolution: scheduler failed to start (non-fatal)',
+                ),
+              );
           },
           () => evolutionScheduler.stop(),
         );

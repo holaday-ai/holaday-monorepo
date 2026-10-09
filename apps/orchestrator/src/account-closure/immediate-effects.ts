@@ -1,10 +1,13 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { supercarAbort } from '../agent/supercar/qwen-only-agent-loop.js';
 import { cancelUserTasksForAccountClosure } from '../agent/task-repository.js';
+import { getVaultRuntime } from '../browser-session-vault/runtime.js';
+import { env } from '../config/env.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { accountClosureEffects, accountClosureRequests } from '../db/schema/account-closures.js';
 import { batchTaskItems, batchTasks } from '../db/schema/batch-tasks.js';
+import { browserSessionVaults } from '../db/schema/browser-session-vaults.js';
 import { notificationChannels } from '../db/schema/notifications.js';
 import { plannedTasks } from '../db/schema/planned-tasks.js';
 import { scheduledTasks } from '../db/schema/scheduled-tasks.js';
@@ -179,6 +182,16 @@ export async function applyImmediateClosureEffects(
     } catch {
       abortFailures.push(taskId);
     }
+  }
+  if (env.BROWSER_SESSION_IMPORT_V2 || env.BROWSER_PROFILE_PERSIST_V1) {
+    const cleanup = await Promise.allSettled([
+      Promise.resolve().then(() =>
+        db.delete(browserSessionVaults).where(eq(browserSessionVaults.userId, input.userId)),
+      ),
+      Promise.resolve().then(() => getVaultRuntime()?.vault.stopUser(input.userExternalId)),
+    ]);
+    for (const result of cleanup)
+      if (result.status === 'rejected') abortFailures.push('browser-vault');
   }
   if (abortFailures.length > 0) {
     throw new ImmediateClosureEffectsRetryableError(abortFailures.length);

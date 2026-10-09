@@ -538,8 +538,8 @@ export function hasConnectedExtension(userId: string): boolean {
 
 export function getConnectedExtensionClientIds(userId: string): string[] {
   return [...(clientsByUser.get(userId) ?? [])]
-    .filter(client => client.isExtension && client.socket.readyState === WebSocket.OPEN)
-    .map(client => client.id);
+    .filter((client) => client.isExtension && client.socket.readyState === WebSocket.OPEN)
+    .map((client) => client.id);
 }
 
 function pickExtensionClientForUser(
@@ -651,31 +651,49 @@ export async function sendExtensionToolCall(
   const timeoutMs = Math.max(1000, Math.min(60_000, opts.timeoutMs ?? 30_000));
 
   if (opts.kind === 'read' && (!opts.extensionClientId || !opts.args?.target)) {
-    return { ok: false, error: { code: 'target_required', message: '请先选择 Chrome 连接和标签页' } };
+    return {
+      ok: false,
+      error: { code: 'target_required', message: '请先选择 Chrome 连接和标签页' },
+    };
   }
+  if (opts.kind === 'session_import' && (!opts.extensionClientId || !opts.args?.sessionImport))
+    return { ok: false, error: { code: 'target_required', message: '请重新选择授权站点' } };
   if (opts.kind === 'session') {
     if (!opts.extensionClientId || !opts.args?.session)
-      return { ok: false, error: { code: 'target_required', message: '请先选择 Chrome 连接和会话' } };
+      return {
+        ok: false,
+        error: { code: 'target_required', message: '请先选择 Chrome 连接和会话' },
+      };
     if (!selectedChromeSessionCommandSchema.safeParse(opts.args.session).success)
-      return { ok: false, error: { code: 'invalid_session_command', message: '浏览器会话操作无效' } };
+      return {
+        ok: false,
+        error: { code: 'invalid_session_command', message: '浏览器会话操作无效' },
+      };
   }
   // An explicitly targeted operation must never fall through to the legacy
   // active-tab tools, even if a caller accidentally chooses the wrong kind.
   if (opts.args?.target && opts.kind !== 'read') {
-    return { ok: false, error: { code: 'target_unsupported', message: '此工具暂不支持指定标签页' } };
+    return {
+      ok: false,
+      error: { code: 'target_unsupported', message: '此工具暂不支持指定标签页' },
+    };
   }
   const target = pickExtensionClientForUser(userId, new Set(), opts.extensionClientId);
   if (!target) {
     if (opts.extensionClientId !== undefined) {
       return {
         ok: false,
-        error: { code: 'target_extension_unavailable', message: '所选 Chrome 连接已断开，请重新选择' },
+        error: {
+          code: 'target_extension_unavailable',
+          message: '所选 Chrome 连接已断开，请重新选择',
+        },
       };
     }
     return { ok: false, error: { message: extensionNoClientMessage(), code: 'no_extension' } };
   }
   const withConnectionIdentity = (outcome: ExtensionToolCallOutcome, clientId: string) =>
-    outcome.ok && (opts.kind === 'tabs' || opts.kind === 'read' || opts.extensionClientId !== undefined)
+    outcome.ok &&
+    (opts.kind === 'tabs' || opts.kind === 'read' || opts.extensionClientId !== undefined)
       ? { ...outcome, extensionClientId: clientId }
       : outcome;
 
@@ -1029,8 +1047,10 @@ async function handleConnection(
       });
       return;
     }
-    if (isReceiptOrMemoryMessage(result.data) &&
-      !(work.ordinaryMaintenance && result.data.type === 'client.extension.login_states')) {
+    if (
+      isReceiptOrMemoryMessage(result.data) &&
+      !(work.ordinaryMaintenance && result.data.type === 'client.extension.login_states')
+    ) {
       // Matching a pre-existing resolver is not admission of a new operation.
       await action();
       return;

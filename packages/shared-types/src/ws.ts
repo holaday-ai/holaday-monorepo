@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import {
-  userBrowserProtocolSchema,
   exactWebOriginSchema,
   userBrowserBindingSchema,
+  userBrowserProtocolSchema,
 } from './browser-user-contract.js';
 import { resilientSelectorSchema } from './selector.js';
 
@@ -19,7 +19,7 @@ const httpUrlSchema = z
   .max(2048)
   .refine((raw) => /^https?:\/\//i.test(raw), { message: 'expected http(s) URL' });
 
-const selectedChromeTargetSchema = z.object({
+export const selectedChromeTargetSchema = z.object({
   tabId: z.number().int().nonnegative(),
   expectedUrl: httpUrlSchema,
   selectionId: z.string().uuid(),
@@ -964,7 +964,7 @@ export const serverExtensionToolCallSchema = z.object({
   type: z.literal('server.extension.tool_call'),
   taskId: z.string().min(1).max(64),
   requestId: z.string().min(1).max(64),
-  kind: z.enum(['navigate', 'screenshot', 'tabs', 'read', 'session']),
+  kind: z.enum(['navigate', 'screenshot', 'tabs', 'read', 'session', 'session_import']),
   /** `url` is for legacy navigate; `target` is required for read only. */
   args: z
     .object({
@@ -973,6 +973,10 @@ export const serverExtensionToolCallSchema = z.object({
       target: selectedChromeTargetSchema.optional(),
       /** Selected-tab mutation/observation command. Required by the session handler. */
       session: selectedChromeSessionCommandSchema.optional(),
+      sessionImport: z
+        .object({ grantId: z.string().uuid(), target: selectedChromeTargetSchema })
+        .strict()
+        .optional(),
       /**
        * Optional ms to wait after navigation before reading body text.
        * Default 1500 in the extension if omitted. Range guarded

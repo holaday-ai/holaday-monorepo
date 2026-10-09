@@ -265,7 +265,18 @@ const baseEnvSchema = z.object({
   BROWSER_OBSERVATION_V2: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
   BROWSER_REPLAY_V1: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
   BROWSER_EXECUTOR: z.enum(['legacy', 'unified']).default('unified'),
-  BROWSER_VIEWPORT_V2: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
+  BROWSER_SESSION_IMPORT_V2: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  BROWSER_PROFILE_PERSIST_V1: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  BROWSER_VIEWPORT_V2: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   QWEN_CORE_ENABLED_LANES: z.string().default(''),
   QWEN_CORE_ALLOWLIST: z.string().default(''),
   QWEN_RESPONSES_ADAPTER_ENABLED: z
