@@ -251,7 +251,7 @@ export function shouldShowTrustSummary(input: TrustSummaryInput): boolean {
   if (input.verificationPassed === false) return true;
   if (failedCheckCount > 0) return true;
   if (input.failureLevel) return true;
-  return hasEvidence;
+  return input.verificationPassed === true && hasEvidence;
 }
 
 export function hasTrustEvidence(input: TrustEvidenceInput): boolean {

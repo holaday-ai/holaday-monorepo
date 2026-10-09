@@ -19,7 +19,7 @@ vi.mock('@/components/CdpScreencastViewport', () => ({ CdpScreencastViewport: (p
   return <div data-testid="viewport" data-lease={props.controlLease ?? ''} data-readonly={String(props.viewOnly)} />;
 } }));
 import { useTaskStore } from '@/stores/task-store';
-import { BrowserPanel } from './BrowserPanel';
+import { BrowserPanel, summariseAction } from './BrowserPanel';
 const control = (phase = 'agent', lease: string | null = null) => ({ taskId: 'tsk_one', phase, lease, supported: true, error: null, mode: 'running' });
 const base = { activeTaskId: 'tsk_one', taskStatus: 'executing' as const, poolUserId: 'usr_one', onToggleFullscreen: vi.fn() };
 beforeEach(() => {
@@ -100,4 +100,10 @@ it('V2 portrait sheet owns only the visible width and defaults to contain', asyn
     expect(viewport.parentElement?.className).toContain('w-full');
     expect(viewport.parentElement?.className).not.toContain('shrink-0');
   } finally {vi.unstubAllEnvs();}
+});
+
+
+it('does not retain processing text in terminal browser activity', () => {
+  const step = { tickIndex: 2, status: 'running' as const, actionSummary: '正在处理…' };
+  expect(summariseAction(step as Parameters<typeof summariseAction>[0], true)).toBe('步骤 3 · 已结束');
 });

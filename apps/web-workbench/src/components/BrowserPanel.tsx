@@ -1,3 +1,4 @@
+import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
 import { BrowserReplay } from './BrowserReplay';
 import {
   ArrowLeft,
@@ -947,7 +948,7 @@ function CloudBrowserPanel({
         .slice(-3),
     [steps],
   );
-  const [activityVisible, setActivityVisible] = React.useState(true);
+  const [activityVisible, setActivityVisible] = React.useState(false);
   // Click-ripple visualisation on the screencast image. When the
   // agent (or the user in interactive mode) clicks, we animate a red
   // dot at the mapped coordinates for ~600ms so viewers can trace the
@@ -1106,7 +1107,7 @@ function CloudBrowserPanel({
     fallbackOpen: cjkFallbackOpen,
   });
   React.useEffect(() => {
-    setActivityVisible(true);
+    setActivityVisible(false);
     setCjkFallbackOpen(false);
   }, [activeTaskId]);
   const handleUserTakeoverClick = React.useCallback(() => {
@@ -1769,6 +1770,7 @@ function CloudBrowserPanel({
                   {activityVisible && recentSteps.length > 0 && (
                     <ActivityOverlay
                       steps={recentSteps}
+                      terminal={taskIsTerminal}
                       compact={isSheet}
                       onClose={() => setActivityVisible(false)}
                     />
@@ -1895,6 +1897,7 @@ function CloudBrowserPanel({
             {useVnc && activityVisible && recentSteps.length > 0 && (
               <ActivityOverlay
                 steps={recentSteps}
+                terminal={taskIsTerminal}
                 compact={isSheet}
                 onClose={() => setActivityVisible(false)}
               />
@@ -2232,10 +2235,12 @@ function TerminalEvidenceView({
  */
 function ActivityOverlay({
   steps,
+  terminal,
   compact = false,
   onClose,
 }: {
   steps: UiStep[];
+  terminal: boolean;
   compact?: boolean;
   onClose: () => void;
 }): JSX.Element {
@@ -2270,7 +2275,7 @@ function ActivityOverlay({
         {visibleSteps.map((s) => (
           <li key={s.tickIndex} className="flex items-start gap-1.5">
             <span className="shrink-0 text-white/50">{activityGlyph(s.actionKind)}</span>
-            <span className="min-w-0 flex-1 truncate">{summariseAction(s)}</span>
+            <span className="min-w-0 flex-1 truncate">{summariseAction(s, terminal)}</span>
           </li>
         ))}
       </ul>
@@ -2659,13 +2664,17 @@ function SafeExternalLinkButton({
   title?: string;
 }): JSX.Element | null {
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
+  const requestExternalLink = (href: string) => {
+    if (needsExternalLinkConfirmation(href)) setPendingHref(href);
+    else openExternalLink(href);
+  };
   const safeHref = safeExternalHttpHref(href);
   if (!safeHref) return null;
   return (
     <>
       <button
         type="button"
-        onClick={() => setPendingHref(safeHref)}
+        onClick={() => requestExternalLink(safeHref)}
         className={className}
         aria-label={ariaLabel}
         title={title}
@@ -2684,7 +2693,7 @@ function SafeExternalLinkButton({
         onConfirm={() => {
           const target = pendingHref;
           setPendingHref(null);
-          if (target) window.open(target, '_blank', 'noopener,noreferrer');
+          if (target) openExternalLink(target);
         }}
       />
     </>
@@ -2723,7 +2732,8 @@ function activityGlyph(kind?: string): string {
  * progress text ("正在操作浏览器…" etc.). Last-resort "步骤 N"
  * stays so the row is never empty.
  */
-function summariseAction(step: UiStep): string {
+export function summariseAction(step: UiStep, terminal = false): string {
+  if (terminal) return `步骤 ${step.tickIndex + 1} · ${step.status === 'done' ? '已完成' : step.status === 'failed' ? '未完成' : '已结束'}`;
   const s = step.actionSummary?.trim();
   if (s && !/^[a-z_][a-z0-9_]*$/.test(s)) return s;
   if (step.actionKind) return liveStatusLabel(step.actionKind);

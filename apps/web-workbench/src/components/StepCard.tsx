@@ -1,3 +1,4 @@
+import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
 import { AlertTriangle, Check, CircleDot, CircleSlash, Loader2, X } from 'lucide-react';
 import * as React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -141,7 +142,7 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
           onConfirm={() => {
             const href = pendingHref;
             setPendingHref(null);
-            if (href) window.open(href, '_blank', 'noopener,noreferrer');
+            if (href) openExternalLink(href);
           }}
         />
       </div>
@@ -163,7 +164,8 @@ function makeStepMarkdownComponents(
           rel="noopener noreferrer"
           onClick={(e) => {
             e.preventDefault();
-            setPendingHref(safeHref);
+            if (needsExternalLinkConfirmation(safeHref)) setPendingHref(safeHref);
+            else openExternalLink(safeHref);
           }}
           {...rest}
         >

@@ -1,3 +1,4 @@
+import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
 import { ChevronDown, ChevronUp, ExternalLink, Globe2 } from 'lucide-react';
 import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -33,6 +34,10 @@ interface Props {
 export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.Element | null {
   const [expanded, setExpanded] = React.useState(false);
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
+  const requestExternalLink = (href: string) => {
+    if (needsExternalLinkConfirmation(href)) setPendingHref(href);
+    else openExternalLink(href);
+  };
   const safeSources = React.useMemo(
     () =>
       sources
@@ -66,7 +71,7 @@ export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.El
             index={i + 1}
             source={source}
             link={link}
-            onOpen={setPendingHref}
+            onOpen={requestExternalLink}
           />
         ))}
       </div>
@@ -100,7 +105,7 @@ export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.El
         onConfirm={() => {
           const href = pendingHref;
           setPendingHref(null);
-          if (href) window.open(href, '_blank', 'noopener,noreferrer');
+          if (href) openExternalLink(href);
         }}
       />
     </div>

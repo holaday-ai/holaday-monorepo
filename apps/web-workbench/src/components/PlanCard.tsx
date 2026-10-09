@@ -1,3 +1,4 @@
+import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
 import { Check, ChevronDown, ChevronRight, ListChecks, Loader2, X } from 'lucide-react';
 import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -54,6 +55,10 @@ export function PlanCard({
 }: Props): JSX.Element {
   const [expanded, setExpanded] = React.useState(defaultExpanded);
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
+  const requestExternalLink = (href: string) => {
+    if (needsExternalLinkConfirmation(href)) setPendingHref(href);
+    else openExternalLink(href);
+  };
   // Re-sync expansion when the caller's default flips — happens when
   // a task transitions in-flight → terminal, where we want the plan
   // to fold itself on first render of the terminal state. If the
@@ -139,7 +144,7 @@ export function PlanCard({
                     rel="noopener noreferrer"
                     onClick={(e) => {
                       e.preventDefault();
-                      setPendingHref(safeHref);
+                      requestExternalLink(safeHref);
                     }}
                     className="text-[#FF0061] underline decoration-[#FF0061]/35 underline-offset-2 hover:text-[#FF0061] dark:text-[#FF0061]"
                     {...rest}
@@ -166,7 +171,7 @@ export function PlanCard({
         onConfirm={() => {
           const href = pendingHref;
           setPendingHref(null);
-          if (href) window.open(href, '_blank', 'noopener,noreferrer');
+          if (href) openExternalLink(href);
         }}
       />
     </div>

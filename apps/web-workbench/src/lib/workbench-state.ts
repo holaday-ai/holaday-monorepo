@@ -47,7 +47,7 @@ export function realtimeConnectionTransition(input: {
   return { hadDisconnect: input.hadDisconnect, toast: null };
 }
 
-const BROWSER_TASK_VERBS = ['打开', '登录', '访问', '点击', '下载', '搜索'];
+const BROWSER_TASK_REQUEST = /^(?:请)?(?:帮我)?(?:用浏览器|打开|访问|登录|点击网页|在网页上)/;
 
 /**
  * Legacy task rows may predate executionMode while still owning browser
@@ -60,8 +60,7 @@ export function hasBrowserRecordForWorkbench(task: UiTask | null): boolean {
   if (task.executionMode) return false;
   if (task.finalUrl?.trim() || task.finalScreenshot) return true;
   const intent = task.intent ?? '';
-  if (/https?:\/\//i.test(intent)) return true;
-  return BROWSER_TASK_VERBS.some((verb) => intent.includes(verb));
+  return BROWSER_TASK_REQUEST.test(intent.trim());
 }
 
 export function shouldConnectTaskBrowserForWorkbench(input: {
@@ -71,7 +70,7 @@ export function shouldConnectTaskBrowserForWorkbench(input: {
   if (!input.task) return false;
   if (hasBrowserRecordForWorkbench(input.task)) return true;
   if (input.task.executionMode) return false;
-  return !input.hasRuntimeTextSignal;
+  return false;
 }
 
 export function taskFrameForWorkbench(

@@ -3630,3 +3630,19 @@ it('keeps pet i2v selected before the server list hydrates the new quote', async
  await useTaskStore.getState().createTask('轻轻眨眼', undefined, undefined, undefined, undefined, undefined, { tab: 'pet', petModel: 'wan_i2v', petImageFileId: 'file_pet', durationSeconds: 5 });
  expect(useTaskStore.getState().tasks[0]).toMatchObject({ taskId: 'tsk_pet_quote', videoType: 'pet', videoCreationMode: 'pet_i2v' });
 });
+
+
+describe('frontend audit observed generation phases', () => {
+  it('uses received search / analysis / stream events, then clears the phase at completion', () => {
+    useTaskStore.setState({ tasks: [task({taskId:'tsk_phase',status:'executing',executionMode:'generate'})], terminalTaskIds: new Set(), subStatusByTask: {} });
+    const store = useTaskStore.getState();
+    store.applyServerMessage({type:'server.supercar.web_search',taskId:'tsk_phase',iteration:1,query:'公开财报'});
+    expect(useTaskStore.getState().subStatusByTask.tsk_phase?.subStatus).toBe('extracting');
+    store.applyServerMessage({type:'server.supercar.thinking',taskId:'tsk_phase',summary:'核对数据'});
+    expect(useTaskStore.getState().subStatusByTask.tsk_phase?.subStatus).toBe('planning');
+    store.applyServerMessage({type:'server.task.stream',taskId:'tsk_phase',delta:'结果'});
+    expect(useTaskStore.getState().subStatusByTask.tsk_phase?.subStatus).toBe('generating');
+    store.applyServerMessage({type:'server.task.terminal',taskId:'tsk_phase',status:'completed',summary:'结果'});
+    expect(useTaskStore.getState().subStatusByTask.tsk_phase).toBeUndefined();
+  });
+});

@@ -2164,6 +2164,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ...prev.streamingByTask,
             [msg.taskId]: (prev.streamingByTask[msg.taskId] ?? '') + msg.delta,
           },
+          subStatusByTask: { ...prev.subStatusByTask, [msg.taskId]: {
+            subStatus: 'generating',
+            since: prev.subStatusByTask[msg.taskId]?.subStatus === 'generating'
+              ? prev.subStatusByTask[msg.taskId]!.since : Date.now(),
+          } },
           // Stream deltas only come from the generate / scrape runners
           // (browser path uses screencast, not text streaming). Stamp
           // executionMode='generate' on first delta so the BrowserPanel
@@ -2524,6 +2529,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       set((prev) => {
         if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
         return {
+          subStatusByTask: { ...prev.subStatusByTask, [msg.taskId]: {
+            subStatus: 'extracting',
+            since: prev.subStatusByTask[msg.taskId]?.subStatus === 'extracting'
+              ? prev.subStatusByTask[msg.taskId]!.since : Date.now(),
+          } },
           webSearchByTask: {
             ...prev.webSearchByTask,
             [msg.taskId]: {
@@ -2541,6 +2551,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       set((prev) => {
         if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
         return {
+          subStatusByTask: { ...prev.subStatusByTask, [msg.taskId]: {
+            subStatus: 'planning',
+            since: prev.subStatusByTask[msg.taskId]?.subStatus === 'planning'
+              ? prev.subStatusByTask[msg.taskId]!.since : Date.now(),
+          } },
           thinkingByTask: {
             ...prev.thinkingByTask,
             [msg.taskId]: { summary: msg.summary, at: Date.now() },
