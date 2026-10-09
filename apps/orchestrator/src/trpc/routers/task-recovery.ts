@@ -14,8 +14,9 @@
  */
 
 import { TRPCError } from '@trpc/server';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
+import { readCoreTaskRecord } from '../../agent/core-task-record.js';
 import { quotaRefunds } from '../../db/schema/quota-refunds.js';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
@@ -110,6 +111,10 @@ export const taskRecoveryRouter = router({
           status: tasksTable.status,
           errorCode: tasksTable.errorCode,
           errorMessage: tasksTable.errorMessage,
+          result: tasksTable.result,
+          executionId: tasksTable.executionId,
+          executionRevision: tasksTable.executionRevision,
+          coreRecordVersion: tasksTable.coreRecordVersion,
         })
         .from(tasksTable)
         .where(
@@ -135,6 +140,21 @@ export const taskRecoveryRouter = router({
         )
         .limit(1);
 
+      const record = readCoreTaskRecord({
+        head: {
+          status: taskRow.status,
+          executionId: taskRow.executionId,
+          executionRevision: taskRow.executionRevision,
+          recordVersion: taskRow.coreRecordVersion,
+        },
+        result: taskRow.result,
+      });
+      if (record.kind === 'invalid')
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '原任务输入无法恢复，请重新上传附件后新建任务。',
+        });
+      const originalIds = record.kind === 'core' ? record.requirements.fileIds : null;
       const inputRows = await ctx.db
         .select({
           externalId: taskFiles.externalId,
@@ -147,13 +167,19 @@ export const taskRecoveryRouter = router({
         .where(
           and(
             eq(taskFiles.userId, userRow.id),
-            eq(taskFiles.taskId, taskRow.id),
-            eq(taskFiles.kind, 'input'),
+            originalIds
+              ? inArray(taskFiles.externalId, originalIds.length ? [...originalIds] : [''])
+              : eq(taskFiles.taskId, taskRow.id),
+            originalIds ? undefined : eq(taskFiles.kind, 'input'),
           ),
         )
         .orderBy(asc(taskFiles.id));
 
-      const { files, unavailableCount } = retryableInputFiles(inputRows);
+      const orderedRows = originalIds
+        ? originalIds.flatMap((id) => inputRows.filter((row) => row.externalId === id))
+        : inputRows;
+      const { files, unavailableCount } = retryableInputFiles(orderedRows);
+      const missing = originalIds ? originalIds.length - orderedRows.length : 0;
       return {
         taskId: taskRow.externalId,
         refund: {
@@ -161,7 +187,8 @@ export const taskRecoveryRouter = router({
           refundedAt: ledger?.refundedAt ?? null,
         },
         inputFiles: files,
-        unavailableInputCount: unavailableCount,
+        unavailableInputCount: unavailableCount + missing,
+        executionMode: record.kind === 'core' ? ('generate' as const) : null,
       };
     }),
 });

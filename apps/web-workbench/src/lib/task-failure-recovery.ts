@@ -15,6 +15,7 @@ export interface TaskFailureContext {
   refund: { state: TaskRefundState; refundedAt: Date | string | null };
   inputFiles: ReadonlyArray<{ fileId: string; filename: string; mimetype: string }>;
   unavailableInputCount: number;
+  executionMode?: 'generate' | null;
 }
 
 export interface RefundStatusCopy {
@@ -28,12 +29,22 @@ export interface RefundStatusCopy {
  * honest to say (follow-ups are free, test accounts are unmetered, older
  * tasks predate the ledger) and an empty claim reads like a billing bug.
  */
-export function refundStatusCopy(state: TaskRefundState | null | undefined): RefundStatusCopy | null {
+export function refundStatusCopy(
+  state: TaskRefundState | null | undefined,
+): RefundStatusCopy | null {
   switch (state) {
     case 'refunded':
-      return { label: '额度已退还', detail: '这次失败由平台原因导致，消耗的额度已自动退回。', tone: 'positive' };
+      return {
+        label: '额度已退还',
+        detail: '这次失败由平台原因导致，消耗的额度已自动退回。',
+        tone: 'positive',
+      };
     case 'pending':
-      return { label: '额度退还中', detail: '这次失败由平台原因导致，额度会在几分钟内自动退回。', tone: 'pending' };
+      return {
+        label: '额度退还中',
+        detail: '这次失败由平台原因导致，额度会在几分钟内自动退回。',
+        tone: 'pending',
+      };
     case 'contact_support':
       return {
         label: '额度未自动退还',
@@ -41,7 +52,11 @@ export function refundStatusCopy(state: TaskRefundState | null | undefined): Ref
         tone: 'neutral',
       };
     case 'not_refundable':
-      return { label: '额度不退还', detail: '这次失败与任务内容或取消操作有关，不属于平台原因。', tone: 'neutral' };
+      return {
+        label: '额度不退还',
+        detail: '这次失败与任务内容或取消操作有关，不属于平台原因。',
+        tone: 'neutral',
+      };
     default:
       return null;
   }
@@ -59,7 +74,10 @@ export function retryAttachmentNote(context: TaskFailureContext | null | undefin
 }
 
 /** Local optimistic rows (`local_pending_*`) have no server record yet. */
-export function canLoadFailureContext(taskId: string | undefined, status: string): taskId is string {
+export function canLoadFailureContext(
+  taskId: string | undefined,
+  status: string,
+): taskId is string {
   return (
     typeof taskId === 'string' &&
     taskId.length > 0 &&

@@ -243,7 +243,7 @@ export interface TaskStore {
      * Batch 10.2 — original input attachments (from
      * `taskRecovery.failureContext`) so a retry resends the same files.
      */
-    options?: { fileIds?: readonly string[] },
+    options?: { fileIds?: readonly string[]; retryOfTaskId?: string },
   ): Promise<{ taskId: string } | { error: string }>;
   createTask(
     intent: string,
@@ -282,6 +282,7 @@ export interface TaskStore {
     imageOptions?: ImageCreationOptions,
     taskSource?: TaskCreationSource,
     stockContext?: StockTaskContextInput,
+    retryOfTaskId?: string,
   ): Promise<{ taskId: string } | { error: string }>;
   /** Submit from the stock dashboard without mutating the user's wording. */
   createStockTask(
@@ -1535,7 +1536,19 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     if (get().localChromeSelection) {
       return { error: '输入框已选择 Chrome 页面，请先移除该选择，再重新执行原任务。' };
     }
-    const fileIds = [...new Set(options?.fileIds ?? [])].slice(0, 5);
+    let retryOptions = options;
+    // All retry entry points recover the original inputs before creating a task.
+    if (!retryOptions) {
+      const generation = captureSessionGeneration();
+      try {
+        const context = await trpc.taskRecovery.failureContext.query({ taskId });
+        if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
+        if (context.unavailableInputCount) return { error: '附件已失效，请重新上传' };
+        retryOptions = { fileIds: context.inputFiles.map(file => file.fileId),
+          ...(context.executionMode === 'generate' && (task.status === 'failed' || task.status === 'cancelled') ? { retryOfTaskId: taskId } : {}) };
+      } catch { return { error: '无法恢复原任务输入，请稍后重试。' }; }
+    }
+    const fileIds = [...new Set(retryOptions?.fileIds ?? [])].slice(0, 5);
     // Image tasks route on imageOptions, not intent text: without them a
     // retry would silently fall into the generic lane.
     const imageOptions =
@@ -1550,6 +1563,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       undefined,
       undefined,
       imageOptions,
+      undefined,
+      undefined,
+      retryOptions?.retryOfTaskId,
     );
   },
 
@@ -1565,6 +1581,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     imageOptions,
     taskSource,
     stockContext,
+    retryOfTaskId,
   ) {
     // Reject intents that are obviously control commands typed into
     // the wrong box (e.g. user typing "停止" into the composer
@@ -1616,6 +1633,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         clientRequestId: localTaskId,
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
         ...(replyToTaskId ? { replyToTaskId } : {}),
+        ...(retryOfTaskId ? { retryOfTaskId } : {}),
         ...(mode === 'plan' ? { mode } : {}),
         ...(expertMode && expertMode !== 'auto' ? { expertMode } : {}),
         ...(getSelectedBrainId() ? { brainId: getSelectedBrainId() ?? undefined } : {}),

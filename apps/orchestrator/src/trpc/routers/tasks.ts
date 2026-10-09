@@ -1,5 +1,7 @@
 import { withMediaCallContext } from '../../agent/media-call-recorder.js';
 import { selectStockAnalysisInput } from '../../stocks/stock-analysis-input.js';
+import { looksLikeCodeIntent } from '../../agent/code-intent.js';
+import { readCoreTaskRecord } from '../../agent/core-task-record.js';
 import { videoRejectionReason } from '../../agent/video/video-retry-policy.js';
 import { decideUserBrowserRoute } from '../../agent/supercar/user-browser-routing.js';
 import { runOtaUserBrowserTask } from '../../agent/supercar/ota-user-browser-runner.js';
@@ -679,6 +681,7 @@ const createInput = z.object({
    * block, and prepends them to the agent's first user message.
    */
   fileIds: z.array(z.string()).max(5).optional(),
+  retryOfTaskId: z.string().min(1).max(32).optional(),
   /**
    * Phase 14 audit follow-up — multi-turn追问. When the user is
    * looking at a terminal task and types a follow-up
@@ -873,180 +876,6 @@ function buildPlannerIntent(intent: string, taskSkillId: string | undefined): st
 }
 
 /**
- * O15 — friendly refusal for coding / app-building intents. HOLA DAY
- * is a browser-task agent, not a code IDE; trying to satisfy a "帮我
- * 写一个 React 组件" prompt burns Anthropic budget on something Claude
- * Code or Cursor does much better. Match BEFORE quota consumption so
- * the user sees a fast no-cost rejection instead of "executing → fail
- * after 8 turns".
- *
- * Pattern: requires a CODE keyword (write/build/develop/debug/deploy
- * + 中文 写代码/编程/开发) AND a SUBJECT keyword (网站/网页/app/组件/
- * 接口/api/sdk/库). A standalone "写" without subject is too vague to
- * reject; "做个网站" alone could be a website-research task. Both
- * dimensions in the same intent → refuse.
- */
-const CODE_VERBS = [
-  '写代码',
-  '写程序',
-  '编程',
-  '编写',
-  '写一个',
-  '写一段',
-  '写个',
-  '做',
-  '做个',
-  '做一个',
-  '开发',
-  '搭建',
-  '搭一个',
-  '搭个',
-  '建',
-  '建个',
-  '建一个',
-  '构建',
-  '调试',
-  '部署',
-  '上线',
-  '修复 bug',
-  '修 bug',
-  'debug',
-  '重构',
-  '实现一个',
-  'write code',
-  'build a',
-  'build me',
-  'develop',
-  'deploy',
-  'compile',
-  'refactor',
-];
-const CODE_SUBJECTS = [
-  '网站',
-  '网页',
-  '后台',
-  '前端',
-  '后端',
-  '应用',
-  '系统',
-  '组件',
-  '函数',
-  '接口',
-  'api',
-  'sdk',
-  '库',
-  '插件',
-  '扩展',
-  '小程序',
-  '页面',
-  '脚本',
-  '程序',
-  '代码',
-  '小工具',
-  '数据库',
-  '服务器',
-  'website',
-  'webapp',
-  'web app',
-  'app',
-  'component',
-  'function',
-  'script',
-  'plugin',
-  'package',
-  'module',
-  'library',
-];
-// Full-phrase fast-path. The verb-AND-subject double-keyword check
-// can miss compact intents like "做个网站" because "做" is too
-// generic to whitelist on its own (BOSS reported false-negative).
-// These exact substrings light up regardless of the strict pair check.
-const CODE_PHRASES = [
-  '做个网站',
-  '做一个网站',
-  '建个网站',
-  '建一个网站',
-  '搭个网站',
-  '搭一个网站',
-  '帮我做网站',
-  '帮我建网站',
-  '帮我搭网站',
-  '帮我建站',
-  '建站',
-  '写个网站',
-  '写个 app',
-  '写个app',
-  '写个应用',
-  '做个 app',
-  '做个app',
-  '做个小程序',
-  '建个小程序',
-  '帮我开发',
-  '帮我编程',
-  '帮我写代码',
-  'build me a website',
-  'build a website',
-  'make me an app',
-  'build a webapp',
-];
-/**
- * Phase 1 follow-up — analysis-intent whitelist. The verb+subject
- * heuristic was too aggressive: prompts like "总结人工智能应用系统的
- * 发展趋势" matched `开发` (verb) + `应用系统` (subject) and triggered
- * the rejection. Real users asking for analysis got told to use
- * Cursor.
- *
- * The whitelist applies ONLY to the verb+subject pair; CODE_PHRASES
- * (full unambiguous phrases like "做个网站") still always trigger.
- * The user's analytical framing is the signal — if any of these
- * words is present, the intent is "explain / analyze / report ON
- * the technology" rather than "build the technology for me".
- */
-const ANALYSIS_INTENT_WORDS = [
-  '分析',
-  '总结',
-  '复盘',
-  '报告',
-  '研究',
-  '调研',
-  '调查',
-  '说明',
-  '解释',
-  '介绍',
-  '描述',
-  '阐述',
-  '讲讲',
-  '讲一下',
-  '方法',
-  '方法论',
-  '方案',
-  '策略',
-  '思路',
-  '趋势',
-  '现状',
-  '特点',
-  '特征',
-  '原理',
-  '架构思路',
-  '本质',
-  '是什么',
-  '什么是',
-  '如何理解',
-  '怎么看',
-  // English
-  'analyze ',
-  'analyse ',
-  'summarize ',
-  'summarise ',
-  'explain ',
-  'describe ',
-  'compare ',
-  'overview',
-  'introduction',
-  'what is',
-  'how does',
-];
-/**
  * Codex Pack B1 — broadcast a transient sub-status marker for the
  * SPA's live-progress chip. Wraps `server.task.progress` so the
  * existing handler in task-store picks it up; the new `subStatus`
@@ -1093,24 +922,6 @@ function broadcastSubStatus(
   } catch {
     /* best-effort */
   }
-}
-
-function hasAnalysisIntent(lower: string): boolean {
-  return ANALYSIS_INTENT_WORDS.some((w) => lower.includes(w));
-}
-function looksLikeCodeIntent(intent: string): boolean {
-  const lower = intent.toLowerCase();
-  // Unambiguous full phrases always trigger — the user explicitly
-  // said "build me a website" / "做个网站". No whitelist for these.
-  if (CODE_PHRASES.some((p) => lower.includes(p))) return true;
-  const hasVerb = CODE_VERBS.some((v) => lower.includes(v));
-  if (!hasVerb) return false;
-  if (!CODE_SUBJECTS.some((s) => lower.includes(s))) return false;
-  // Verb + subject pair matched — but if the prompt also has an
-  // analysis-intent word, the user is asking ABOUT the tech, not
-  // asking us to build it. Skip the rejection.
-  if (hasAnalysisIntent(lower)) return false;
-  return true;
 }
 
 type ModeBPingOutcome = {
@@ -1379,6 +1190,25 @@ export const tasksRouter = router({
         return result;
       }) as typeof repo.insertTask;
     }
+    let retryCore = false;
+    let retryRequirements: CoreAcceptedRequirements | null = null;
+    if (input.retryOfTaskId) {
+      if (input.replyToTaskId || input.localChrome || input.imageOptions || input.videoOptions || input.taskSource)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '不能更改原任务的执行方式。' });
+      const [original] = await ctx.db.select({ status: tasksTable.status, result: tasksTable.result,
+        executionId: tasksTable.executionId, executionRevision: tasksTable.executionRevision,
+        coreRecordVersion: tasksTable.coreRecordVersion, intent: tasksTable.intent,
+      }).from(tasksTable).where(and(eq(tasksTable.externalId, input.retryOfTaskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, ctx.taskOrigin))).limit(1);
+      if (!original) throw new TRPCError({ code: 'NOT_FOUND', message: '原任务不存在。' });
+      const record = readCoreTaskRecord({ head: { status: original.status, executionId: original.executionId, executionRevision: original.executionRevision, recordVersion: original.coreRecordVersion }, result: original.result });
+      if (!['failed', 'cancelled'].includes(original.status) || record.kind !== 'core')
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '原任务不可重试，请重新创建任务。' });
+      input = { ...input, intent: original.intent, fileIds: [...record.requirements.fileIds],
+        expertMode: record.requirements.resume?.expertMode ?? 'auto',
+        skillId: record.requirements.resume?.skillId ?? undefined };
+      retryCore = true;
+      retryRequirements = record.requirements;
+    }
     let validatedStockContext: ValidatedStockTaskContext | null = null;
     if (input.taskSource === 'stock_dashboard') {
       if (!input.stockContext) {
@@ -1406,6 +1236,7 @@ export const tasksRouter = router({
     // subjects are a hard input contract: a missing, non-image, or unreadable
     // anchor must return BAD_REQUEST without charging the task.
     const fileService = new FileService(ctx.db, ctx.logger);
+    const inputFileMetadata: { fileId: string; filename: string; mimetype: string }[] = [];
     const attachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
     let orderedFileIds: string[];
     try {
@@ -1427,11 +1258,12 @@ export const tasksRouter = router({
       if (orderedFileIds.length === 0) return;
       const loaded = await fileService.loadMany(orderedFileIds, userRow.id);
       const requestedFileIds = [...new Set(orderedFileIds)];
+      inputFileMetadata.push(...loaded.map(({ row }) => ({ fileId: row.externalId, filename: row.filename, mimetype: row.mimetype })));
       const loadedFileIds = new Set(loaded.map((file) => file.row.externalId));
       if (requestedFileIds.some((fileId) => !loadedFileIds.has(fileId))) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: '有附件已失效或无法读取，请重新上传后再提交',
+          message: '附件已失效，请重新上传',
         });
       }
       if (input.imageOptions?.mode === 'lock_subject' && input.imageOptions.subjectFileId) {
@@ -1721,7 +1553,7 @@ export const tasksRouter = router({
     // browser/generate budgets). Adds ~500ms latency on cache miss;
     // skill-hint + keyword fast paths inside the classifier short-
     // circuit most cases for free.
-    const classifiedExecutionMode = await classifyExecutionMode({
+    const classifiedExecutionMode = retryCore ? 'generate' as const : await classifyExecutionMode({
       intent: input.intent,
       skillId: taskSkillId,
       // §5 fileIds-aware soft template-fill: an attachment + a fill clue
@@ -1777,7 +1609,7 @@ export const tasksRouter = router({
       routingWorkflowId: typedRoutingWorkflow?.workflowId,
       legacyWorkflowId: expertWorkflow?.id,
     });
-    const executionMode = input.localChrome ? 'browser' as const : resolveFollowUpExecutionMode({
+    const executionMode = retryCore ? 'generate' as const : input.localChrome ? 'browser' as const : resolveFollowUpExecutionMode({
       parentHasBrowserContext,
       typedWorkflowOverride,
       expertRouteOverride: expertWorkflow?.routeOverride,
@@ -1823,12 +1655,12 @@ export const tasksRouter = router({
     // Preserve the existing specialized stock candidate path (including its
     // generic fallback) until the remaining first-create migration is done.
     const specializedStockLaneEligible =
-      shouldAllowSpecializedLaneOverride(typedRoutingWorkflow) &&
+      !retryCore && shouldAllowSpecializedLaneOverride(typedRoutingWorkflow) &&
       (appEnv.ASHARE_QA_ENABLED || validatedStockContext !== null) &&
       ashareQaHandlesMode(executionMode) &&
       (ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId));
     const coreCreateRequirements: CoreAcceptedRequirements | null =
-      executionMode === 'generate' &&
+      retryRequirements ? { ...retryRequirements, inputFiles: inputFileMetadata } : executionMode === 'generate' &&
       !specializedStockLaneEligible
         ? {
             initialRequest: parentUserContext + input.intent,
@@ -1840,6 +1672,7 @@ export const tasksRouter = router({
               : null,
             referencePlan: null,
             fileIds: orderedFileIds,
+            inputFiles: inputFileMetadata,
             ...(expertWorkflow ? { legacyWorkflow: restoreCoreLegacyWorkflow(expertWorkflow.id, {
               initialRequest: parentUserContext + input.intent,
               userTurns: [],

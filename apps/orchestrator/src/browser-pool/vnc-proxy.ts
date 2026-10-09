@@ -339,6 +339,7 @@ function pipe(
   }
 
   upstream.on('open', () => {
+    if (client.readyState !== WebSocket.OPEN) { upstream.close(); return; }
     upstreamReady = true;
     for (const [data, isBinary] of clientBacklog) {
       upstream.send(data, { binary: isBinary });
@@ -364,6 +365,7 @@ function pipe(
   });
 
   client.on('message', (data, isBinary) => {
+    if (client.readyState !== WebSocket.OPEN) return;
     let buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
     if (readOnlyFilter) {
       try { buf = readOnlyFilter.receive(buf); } catch { client.close(1008, 'browser_vnc_read_only'); upstream.close(); return; }

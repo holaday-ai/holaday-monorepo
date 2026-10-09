@@ -1,14 +1,11 @@
-import * as React from 'react';
+import { type TaskFailureContext, canLoadFailureContext } from '@/lib/task-failure-recovery';
 import { trpc } from '@/lib/trpc';
-import {
-  type TaskFailureContext,
-  canLoadFailureContext,
-} from '@/lib/task-failure-recovery';
+import * as React from 'react';
 
 /**
  * Loads refund status + original inputs for a failed / cancelled task.
  * Failures are swallowed into `null`: the card still renders its friendly
- * reason and the retry still works, just without the extras.
+ * reason; retry must stop when the original inputs cannot be recovered.
  */
 export function useTaskFailureContext(
   taskId: string | undefined,

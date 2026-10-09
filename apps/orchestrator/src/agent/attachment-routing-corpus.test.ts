@@ -1,6 +1,7 @@
 import { pino } from 'pino';
 import { expect, it } from 'vitest';
 import type { NeutralResponseInputContent, ResponsesAdapter } from '../llm/responses-adapter.js';
+import { looksLikeCodeIntent } from './code-intent.js';
 import { runGenerateTask } from './generate-runner.js';
 import { classifyExecutionMode } from './intent-classifier.js';
 import { runScrapeTask } from './scrape-runner.js';
@@ -68,6 +69,7 @@ const corpus = [
 it.each(corpus)(
   'routes and delivers material: %s (attached=%s)',
   async (intent, attached, lane) => {
+    expect(looksLikeCodeIntent(intent)).toBe(false);
     const logger = pino({ level: 'silent' });
     const mode = await classifyExecutionMode({ intent, hasFileAttachment: attached, logger });
     expect(mode).toBe(lane);

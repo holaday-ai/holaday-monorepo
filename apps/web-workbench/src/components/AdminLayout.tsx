@@ -277,7 +277,8 @@ function AdminNavItem({
 export type { AdminOutletContext };
 
 // Logout helper for any admin page that wants it.
-export function logoutAndGoHome(): void {
+export async function logoutAndGoHome(): Promise<void> {
+  await trpc.auth.logout.mutate();
   clearAccessToken();
   window.location.href = '/login';
 }

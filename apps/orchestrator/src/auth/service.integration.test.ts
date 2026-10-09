@@ -46,7 +46,12 @@ describe('AuthService against real MySQL', () => {
     expect(reg.user.plan).toBe('free');
 
     const claims = await verifyAccessToken(reg.accessToken);
-    expect(claims).toEqual({ sub: reg.user.externalId, plan: 'free', authVersion: 0 });
+    expect(claims).toMatchObject({
+      sub: reg.user.externalId,
+      plan: 'free',
+      authVersion: 0,
+      sid: expect.any(String),
+    });
 
     const login = await svc.login({ email, password: 'hunter22hunter22' });
     expect(login.user.externalId).toBe(reg.user.externalId);

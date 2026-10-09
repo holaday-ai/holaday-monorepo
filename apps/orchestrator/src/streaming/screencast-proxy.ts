@@ -311,6 +311,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     // spawn-time 430x760 profile. The bridge retains only the newest viewport
     // and deliberately drops stale pointer/keyboard input.
     args.ws.on('message', (raw) => {
+      if (args.ws.readyState !== WebSocket.OPEN) return;
       if (args.viewportV2 && raw.toString() === '{"type":"observe"}') { streamer?.requestFrameRefresh(); return; }
       void inputBridge.receive(raw.toString()).catch((err: unknown) => {
         userLog.debug({ err: errMsg(err) }, 'screencast: input dispatch failed');

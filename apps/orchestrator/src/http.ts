@@ -665,7 +665,11 @@ export function createHttpApp(deps: HttpAppDeps) {
       return;
     }
     try {
-      const { token, expiresIn } = await signStreamToken(userExternalId, authVersion);
+      const { token, expiresIn } = await signStreamToken(
+        userExternalId,
+        authVersion,
+        (req as express.Request & { userSessionId?: string }).userSessionId,
+      );
       res.json({ token, expiresIn });
     } catch (err) {
       logger.error(

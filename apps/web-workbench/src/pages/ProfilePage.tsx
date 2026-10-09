@@ -27,6 +27,8 @@ export function ProfilePage(): JSX.Element {
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [email, setEmail] = React.useState('');
   const [displayName, setDisplayName] = React.useState('');
+  const [loggingOutAll, setLoggingOutAll] = React.useState(false);
+  const [logoutError, setLogoutError] = React.useState<string | null>(null);
   const [passwordOpen, setPasswordOpen] = React.useState(false);
   const [passwordCode, setPasswordCode] = React.useState('');
   const [newPassword, setNewPassword] = React.useState('');
@@ -367,6 +369,32 @@ export function ProfilePage(): JSX.Element {
           title="账号安全"
           className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
         >
+          <Row label="登录设备" description="退出所有设备，包括当前设备">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={loggingOutAll}
+              onClick={async () => {
+                setLoggingOutAll(true);
+                setLogoutError(null);
+                try {
+                  await trpc.auth.logoutAll.mutate();
+                  clearAccessToken();
+                  window.location.assign('/login');
+                } catch {
+                  setLogoutError('退出未完成，请重试。');
+                  setLoggingOutAll(false);
+                }
+              }}
+            >
+              {loggingOutAll ? '正在退出…' : '退出所有设备'}
+            </Button>
+          </Row>
+          {logoutError && (
+            <p role="alert" className="text-sm text-destructive">
+              {logoutError}
+            </p>
+          )}
           <Row label="密码" description="使用邮箱验证码验证当前账号">
             <Button
               type="button"
