@@ -48,6 +48,7 @@ import {
   isMacroOfficeUpload,
   uploadByteLimit,
 } from './files/file-service.js';
+import { serverTimingMiddleware } from './http-server-timing.js';
 import { partnerConfig } from './partner/partner-config.js';
 import {
   PartnerPaymentConfirmConflictError,
@@ -120,6 +121,8 @@ export function createHttpApp(deps: HttpAppDeps) {
   });
 
   app.use(lifetime.admit);
+  // Server-side duration (and handler phases) for latency triage, before auth.
+  app.use(lifetime.middleware(serverTimingMiddleware));
   app.use(lifetime.middleware(pinoHttp({ logger })));
   app.use(lifetime.middleware(express.json({ limit: '1mb' })));
   app.use(lifetime.handler(bearerAuth));

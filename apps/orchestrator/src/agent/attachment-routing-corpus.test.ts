@@ -48,6 +48,21 @@ const corpus = [
   ['总结 https://example.com 的内容', false, 'scrape'],
   ['Summarize www.example.com', false, 'scrape'],
   ['帮我整理一份运维 SOP', false, 'generate'],
+  // SMALL-FIXES-1: more writing deliverables; "上传的X" is the attachment.
+  ['根据上传的文档写一份会议纪要', true, 'generate'],
+  ['用附件整理会议记录', true, 'generate'],
+  ['根据附件写本周周报', true, 'generate'],
+  ['根据上传的表格写日报', true, 'generate'],
+  ['用附件做一个项目复盘总结', true, 'generate'],
+  ['根据附件写一份活动方案', true, 'generate'],
+  ['根据附件写一份讲稿提纲', true, 'generate'],
+  ['用附件写演讲稿', true, 'generate'],
+  ['用这张图写一段产品文案', true, 'generate'],
+  ['根据附件起草一封给客户的邮件', true, 'generate'],
+  ['根据上传的资料写一份简历', true, 'generate'],
+  ['用附件写产品说明书', true, 'generate'],
+  ['根据上传的文件回答几个问题', true, 'generate'],
+  ['写一篇关于消息传到美国后反应的文章', false, 'generate'],
 ] as const;
 
 it.each(corpus)(
