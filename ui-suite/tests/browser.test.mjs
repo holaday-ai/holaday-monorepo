@@ -579,3 +579,27 @@ test('early noopener popup navigation is fulfilled locally before its frame exis
     await browser.close();
   }
 });
+
+test('non-hit-testable disabled control is not occluded by its own parent', async () => {
+  const browser = await chromium.launch({ args: ['--renderer-process-limit=2'] });
+  try {
+    const page = await browser.newPage();
+    await page.setContent('<div><button disabled style="pointer-events:none">send</button></div>');
+    const m = await measurePage(page);
+    assert.equal(m.elements[0].hitBlocked, false);
+    assert.ok(
+      !classifyGeometry(m.elements, m.width, m.height).some((f) => f.rule === 'control-occluded'),
+    );
+    await page.setContent(
+      '<div style="position:relative"><button>send</button><div style="position:absolute;inset:0">cover</div></div>',
+    );
+    const covered = await measurePage(page);
+    assert.ok(
+      classifyGeometry(covered.elements, covered.width, covered.height).some(
+        (f) => f.rule === 'control-occluded',
+      ),
+    );
+  } finally {
+    await browser.close();
+  }
+});

@@ -160,6 +160,7 @@ export async function measurePage(page) {
           r.x + r.width / 2 >= clip.left &&
           r.x + r.width / 2 <= clip.right;
         const covered =
+          style.pointerEvents !== 'none' &&
           visibleVertically &&
           hit &&
           !e.contains(hit) &&
