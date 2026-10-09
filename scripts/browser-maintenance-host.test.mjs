@@ -242,6 +242,8 @@ function fixture(fault) {
           throw new Error('sql failure secret');
         return '';
       }
+      if (command === 'bash' && args[0] === '-c') return '';
+      if (command === 'curl') return JSON.stringify({status:'ok', adapter_ready:true})+'\n200';
       if (command === 'pm2') {
         assert.equal(settings.env.PM2_HOME, '/root/.pm2');
         if (args[0] === 'start') {
@@ -253,10 +255,10 @@ function fixture(fault) {
           started = true;
           mode = 'closed';
         }
-        return args[0] === 'jlist' ? '[{"name":"holaday-orchestrator"}]' : '';
+        return args[0] === 'jlist' ? JSON.stringify([{name:'holaday-orchestrator'}, {name:'akshare-mcp-http',pid:42,pm2_env:{status:'online',restart_time:0}}]) : '';
       }
       if (command === '/opt/node22/bin/node' && args[0].endsWith('/secure-pm2-logs.mjs')) {
-        assert.equal(settings.input, '[{"name":"holaday-orchestrator"}]');
+        assert.ok(JSON.parse(settings.input).some(p=>p.name==='holaday-orchestrator'));
         return '';
       }
       throw new Error(`UNEXPECTED_COMMAND ${line}`);
@@ -599,4 +601,19 @@ test('normal host refuses a foreign post-open status and closes the intended can
   assert.ok(f.events.at(-1).includes(`control.mjs close ${next.candidate}`));
   assert.equal(result.closeAcknowledged, true);
   assert.equal(f.events.includes('phase:opened'), false);
+});
+
+test('missing stock service stops preflight before closing or retiring runtime', async()=>{
+ const f=fixture();const exec=f.io.exec;f.io.exec=async(command,args,options)=> command==='pm2'&&args[0]==='jlist'?'[]':exec(command,args,options);
+ const adapter=createHostReleaseAdapter(options,f.io);
+ await assert.rejects(adapter.preflight(old), /AKSHARE_PROCESS_UNAVAILABLE/);
+ assert.ok(!f.events.some(e=>e==='retire'||e.includes('control.mjs close')));
+});
+test('stock outage blocks readiness before opening the candidate', async()=>{
+ const f=fixture();const exec=f.io.exec;let reads=0;f.io.exec=async(command,args,settings)=>{
+  if(command==='curl'&&++reads>1)throw Error('connection refused with secret');
+  return exec(command,args,settings);
+ };
+ const result=await performMaintenanceRelease({candidate:next.candidate,adapter:createHostReleaseAdapter(options,f.io)});
+ assert.equal(result.ok,false);assert.ok(!f.events.some(e=>e.includes('control.mjs open')));
 });
