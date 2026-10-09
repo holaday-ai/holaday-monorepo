@@ -32,6 +32,8 @@ Debugging case filter: `UI_AUDIT_CASES='["task:generate:completed", "/projects/:
 
 Debugging filters: `UI_AUDIT_ROUTES='["/stocks"]' UI_AUDIT_WIDTHS='[1440]' pnpm ui:audit --screens-only`. Filters/screens-only **always leave a coverage gap** and cannot satisfy the release gate. `--skip-build` requires an exact candidate + source stamp from a previous build.
 
+Current delivery evidence and limitations: [validation ledger](validation.md). The complete frozen baseline and later targeted calibration are kept distinct.
+
 ## What the evidence means
 
 - Static route/import scanning supplies candidates; actual Playwright traversal supplies observations. Conditional states not reachable from fixtures are not certified.

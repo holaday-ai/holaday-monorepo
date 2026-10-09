@@ -1,0 +1,6 @@
+{"case":"schedule-delete-escape","before":["删除定时任务？删除后该任务的执行计划会被永久移除，已经创建的实际任务不受影响。取消删除"],"after":["删除定时任务？删除后该任务的执行计划会被永久移除，已经创建的实际任务不受影响。取消删除"]}
+{"case":"schedule-scroll-header","scrollY":0,"createBox":{"x":1104,"y":107.75,"width":144,"height":36}}
+{"case":"settings-switch-count","count":1}
+{"case":"settings-switch-direct","passed":false,"reason":"locator.click: Timeout 2500ms exceeded."}
+{"case":"settings-switch-label","before":false,"after":true}
+{"case":"stock-hidden-checkbox-visible-label","before":false,"after":true}

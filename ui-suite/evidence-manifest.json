@@ -1,0 +1,2112 @@
+{
+  "schemaVersion": 1,
+  "productBase": "434417b42711c6cf2251787cdd86fee3aa407c6e",
+  "productSourceUnchanged": true,
+  "deliveryContainsProductFixes": false,
+  "releaseGate": "failed",
+  "runs": [
+    {
+      "report": "report.json",
+      "candidate": "935348a472a77852ff0fd5636a981de4d8a5e806",
+      "sourceHash": "345eb8b47855551898ea5f1e0f49e55e1b9ac197ce1d7262fea418b0fc5243a4",
+      "suiteSourceHash": "e292454956ec4f6b4097c5fb0a8fffb8f494633c6a392c4de9487d2654a69a31",
+      "seed": "2026-10-09-v2",
+      "startedAt": "2026-10-09T16:46:04.243Z",
+      "finishedAt": "2026-10-09T19:31:42.619Z",
+      "mode": "baseline-create",
+      "screenOnly": false,
+      "expectedPages": 240,
+      "status": "failed",
+      "buildHash": "f8a3ea427b5f5777cb14e3d583db14c25f1ba974ef442403464ca0cffd632e39",
+      "browserVersion": "147.0.7727.15",
+      "platform": "darwin",
+      "completedPages": 240,
+      "coverageGaps": [],
+      "rawSignals": 1044,
+      "exitCode": 1
+    },
+    {
+      "report": "calibration/followup/report.json",
+      "candidate": "ff1e30d9b357c7d499335f47f1604cb108030a49",
+      "sourceHash": "345eb8b47855551898ea5f1e0f49e55e1b9ac197ce1d7262fea418b0fc5243a4",
+      "suiteSourceHash": "ea71676782cf114c00ae00a876a49cbe5752c749e823d8a580c9c6feda616395",
+      "seed": "2026-10-09-v2",
+      "startedAt": "2026-10-09T19:36:30.101Z",
+      "finishedAt": "2026-10-09T20:36:08.257Z",
+      "mode": "verify",
+      "screenOnly": false,
+      "expectedPages": 27,
+      "status": "failed",
+      "buildHash": "f8a3ea427b5f5777cb14e3d583db14c25f1ba974ef442403464ca0cffd632e39",
+      "browserVersion": "147.0.7727.15",
+      "platform": "darwin",
+      "completedPages": 27,
+      "coverageGaps": [
+        "Case-filtered run: not full release acceptance"
+      ],
+      "rawSignals": 546,
+      "exitCode": 1
+    },
+    {
+      "report": "calibration/visual-repeat/report.json",
+      "candidate": "ff1e30d9b357c7d499335f47f1604cb108030a49",
+      "sourceHash": "345eb8b47855551898ea5f1e0f49e55e1b9ac197ce1d7262fea418b0fc5243a4",
+      "suiteSourceHash": "ea71676782cf114c00ae00a876a49cbe5752c749e823d8a580c9c6feda616395",
+      "seed": "2026-10-09-v2",
+      "startedAt": "2026-10-09T20:39:29.932Z",
+      "finishedAt": "2026-10-09T20:39:35.735Z",
+      "mode": "verify",
+      "screenOnly": true,
+      "expectedPages": 9,
+      "status": "failed",
+      "buildHash": "f8a3ea427b5f5777cb14e3d583db14c25f1ba974ef442403464ca0cffd632e39",
+      "browserVersion": "147.0.7727.15",
+      "platform": "darwin",
+      "completedPages": 9,
+      "coverageGaps": [
+        "Filtered run: not full release acceptance",
+        "Screens-only exploration: controls not exercised"
+      ],
+      "rawSignals": 16,
+      "exitCode": 1
+    }
+  ],
+  "checks": {
+    "framework": {
+      "passed": 55,
+      "failed": 0,
+      "exitCode": 0
+    },
+    "frontendTests": {
+      "files": 280,
+      "passed": 2645,
+      "failed": 0,
+      "exitCode": 0
+    },
+    "frontendTypecheck": {
+      "exitCode": 0
+    },
+    "frontendLint": {
+      "exitCode": 0
+    },
+    "frontendBuild": {
+      "exitCode": 0,
+      "seconds": 12.38,
+      "warning": "Existing bundle-size warning"
+    }
+  },
+  "files": {
+    "report.json": {
+      "bytes": 32704736,
+      "sha256": "f548ec818fa5d8f6dc2072e53c03492c9ef4f20614f9260f60daaf7f9a5a415b"
+    },
+    "report.md": {
+      "bytes": 196279,
+      "sha256": "a088525fe1a2959639deaffab27e9b08fffe4e30cdf9c9e6e005bc39a722a97d"
+    },
+    "validation.md": {
+      "bytes": 8249,
+      "sha256": "f1d1941b778a15e6c5e58cec5505f7fcee13fdf3db27d6ff554d42b5234cbe44"
+    },
+    "baselines/2026-10-09-v2/1024-_500.png": {
+      "bytes": 26403,
+      "sha256": "b2ee63b7dc4974204bb0f2b918648cc12d9cf50c3eceeacc691b346639804a26"
+    },
+    "baselines/2026-10-09-v2/1024-_account_closure-recovery.png": {
+      "bytes": 159881,
+      "sha256": "cde3b7a27626aaf21413ad120720e3d4d9a7d279794542ae21e5d595f43f9d2e"
+    },
+    "baselines/2026-10-09-v2/1024-_admin.png": {
+      "bytes": 64062,
+      "sha256": "699b74af952d1d526611332e9960e3fc022c4e02e06e36a320a7216b9cbb59bf"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_finance.png": {
+      "bytes": 108822,
+      "sha256": "64cf69c2c3fe40af09b8ad3d5b71ec718599fd909d7881cde0758c6d0f128c8e"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_learning.png": {
+      "bytes": 94997,
+      "sha256": "45c4c3dc79eb63ad97a437baf4e257b113bfbc5ac8a82c39ec6a10321aa9e859"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_learning_domain.png": {
+      "bytes": 76272,
+      "sha256": "548742d648bc4a25047a06d4c15fdb59edb7cd387ec97ffaf710f2444e43e798"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_models.png": {
+      "bytes": 81753,
+      "sha256": "9041ebf9ae33b65c5cffed77f333405c8454a24fa2db2e1457b0436dd79eade9"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_partners.png": {
+      "bytes": 38417,
+      "sha256": "2d4a017748846b58481be0584481721df96acb95f612b2336b092a9e71e3c89d"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_self-check.png": {
+      "bytes": 48630,
+      "sha256": "9910508026182a9a70627d766f42adb231fbf10779e8a04ddc48418936ec6f40"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_users.png": {
+      "bytes": 53480,
+      "sha256": "e7cf29e04b8851bb26d5da066f62f68a51c19d83f99d173fd2f58ce962c361d6"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_users_userId.png": {
+      "bytes": 57292,
+      "sha256": "51aac5735f5f687c6a79fd252539b35dac0b80532c5f2eb108e837109ea3d9d4"
+    },
+    "baselines/2026-10-09-v2/1024-_app.png": {
+      "bytes": 136866,
+      "sha256": "d325e293eed72cfa07c44eba62edf18999a2ac9ade346ab9e625dd8b2e538dfa"
+    },
+    "baselines/2026-10-09-v2/1024-_batch.png": {
+      "bytes": 96760,
+      "sha256": "3c8eccaf253e93ffabbf90c01c0194d13249ce278aa91f931980de8f3ff09cef"
+    },
+    "baselines/2026-10-09-v2/1024-_batch_batchId.png": {
+      "bytes": 66137,
+      "sha256": "3eaa09ff935c4dfb87daca27ce1b2e44fc1ae95ed8c768902650f4a9cfb2f2ae"
+    },
+    "baselines/2026-10-09-v2/1024-_billing.png": {
+      "bytes": 111182,
+      "sha256": "72320439054a991a6f3ee003ad2d220e911f6099c93b9cfd1c0fb5ae98748167"
+    },
+    "baselines/2026-10-09-v2/1024-_calendar.png": {
+      "bytes": 84078,
+      "sha256": "9841cf9745493847f7a6471294925aaa891432fbe8ab70eedfa168bac002e18e"
+    },
+    "baselines/2026-10-09-v2/1024-_connections.png": {
+      "bytes": 79903,
+      "sha256": "f5124e18feab1ce9c89e3900eb0ef3d2168664e0afba863d63b4e3bc0d997361"
+    },
+    "baselines/2026-10-09-v2/1024-_cosmic-preview.png": {
+      "bytes": 581223,
+      "sha256": "2e071b66297c453344e70e86815ca1106d7413616e8b86287127bc3ad95a0e66"
+    },
+    "baselines/2026-10-09-v2/1024-_cosmic.png": {
+      "bytes": 508351,
+      "sha256": "13a400d62084ddf59488bdd60f2957bbdaf8f2ce7e654336aaa63eb95000fe20"
+    },
+    "baselines/2026-10-09-v2/1024-_experts.png": {
+      "bytes": 71699,
+      "sha256": "c7765e753432da28f6f9f86748bfffc81e3e58baa6e02bced8d0ec457eac578a"
+    },
+    "baselines/2026-10-09-v2/1024-_files.png": {
+      "bytes": 76074,
+      "sha256": "8331b032f4a7a279d4b2a5790fd9d10eaf329346c76a5e7e6147a83e78bdaffb"
+    },
+    "baselines/2026-10-09-v2/1024-_history.png": {
+      "bytes": 105989,
+      "sha256": "b0417d0d26d6a605a88f99a5038e77f6422be1423097e5e793425e3c9cf8af72"
+    },
+    "baselines/2026-10-09-v2/1024-_image.png": {
+      "bytes": 461990,
+      "sha256": "f08a5d2dc188c2e0b472662b8d42cd3cce68f10c3a984b585a665e570e124690"
+    },
+    "baselines/2026-10-09-v2/1024-_login.png": {
+      "bytes": 28698,
+      "sha256": "c056a7cbe34b2955db101e07864f75040566739b88e94b606f2a536cf2809016"
+    },
+    "baselines/2026-10-09-v2/1024-_organizations_invitations_accept.png": {
+      "bytes": 69229,
+      "sha256": "3d67458a16c0e10e097523bc6bb08487a7f99c4b3e5f457f48bdb0d2ec312559"
+    },
+    "baselines/2026-10-09-v2/1024-_partner.png": {
+      "bytes": 69592,
+      "sha256": "af9fd019be004e02e52224d1e863664ece56bc1ef58258f3cb2f3a960dc93637"
+    },
+    "baselines/2026-10-09-v2/1024-_partner_ledger.png": {
+      "bytes": 69592,
+      "sha256": "af9fd019be004e02e52224d1e863664ece56bc1ef58258f3cb2f3a960dc93637"
+    },
+    "baselines/2026-10-09-v2/1024-_partner_recharge.png": {
+      "bytes": 69592,
+      "sha256": "af9fd019be004e02e52224d1e863664ece56bc1ef58258f3cb2f3a960dc93637"
+    },
+    "baselines/2026-10-09-v2/1024-_partner_withdraw.png": {
+      "bytes": 69592,
+      "sha256": "af9fd019be004e02e52224d1e863664ece56bc1ef58258f3cb2f3a960dc93637"
+    },
+    "baselines/2026-10-09-v2/1024-_plan.png": {
+      "bytes": 161789,
+      "sha256": "1900a4c8c4200fb51714cc88dd532d852292cb4870a7213e106fb2229f6743b2"
+    },
+    "baselines/2026-10-09-v2/1024-_planned.png": {
+      "bytes": 96773,
+      "sha256": "88771b85887dc07c7918aad7ccb9252a1f7f908460fbbc55901f0b4317294420"
+    },
+    "baselines/2026-10-09-v2/1024-_planned_legacy-batch.png": {
+      "bytes": 74458,
+      "sha256": "c727411e89b8579f701bb7090f7110030af28fa2ac5be85302c2b4e7c908eb39"
+    },
+    "baselines/2026-10-09-v2/1024-_planned_legacy-scheduled.png": {
+      "bytes": 84078,
+      "sha256": "9841cf9745493847f7a6471294925aaa891432fbe8ab70eedfa168bac002e18e"
+    },
+    "baselines/2026-10-09-v2/1024-_plugins.png": {
+      "bytes": 71699,
+      "sha256": "c7765e753432da28f6f9f86748bfffc81e3e58baa6e02bced8d0ec457eac578a"
+    },
+    "baselines/2026-10-09-v2/1024-_privacy.png": {
+      "bytes": 192575,
+      "sha256": "b5f9a55f82846ded9d73c7e54ba000798af435ab03b7948db7b7eb75660ffaf0"
+    },
+    "baselines/2026-10-09-v2/1024-_profile.png": {
+      "bytes": 103443,
+      "sha256": "7ed0d9633fca4d75d0846bec8e505e94d3af7a1cb05ef5dd33557cf626056e7d"
+    },
+    "baselines/2026-10-09-v2/1024-_projects.png": {
+      "bytes": 83497,
+      "sha256": "042fb5b83702f4cf8148484565f74d0c9ed3227b3264d93f1da51efe26482032"
+    },
+    "baselines/2026-10-09-v2/1024-_projects_projectId.png": {
+      "bytes": 88056,
+      "sha256": "844ec5f76a8b5e962e682485e4e0a8b87a311ea95107c910595c0388f7afa6a5"
+    },
+    "baselines/2026-10-09-v2/1024-_register.png": {
+      "bytes": 23038,
+      "sha256": "7920603843929dcc9384bbcd4496e8a522dfe92328f7fcedcc81d3fdc96c80e2"
+    },
+    "baselines/2026-10-09-v2/1024-_roles.png": {
+      "bytes": 77312,
+      "sha256": "348490fff69eb7192f7d765f3819e482a5bfc35944a368124335f0720d03d9b3"
+    },
+    "baselines/2026-10-09-v2/1024-_schedule.png": {
+      "bytes": 84078,
+      "sha256": "9841cf9745493847f7a6471294925aaa891432fbe8ab70eedfa168bac002e18e"
+    },
+    "baselines/2026-10-09-v2/1024-_scheduled.png": {
+      "bytes": 84070,
+      "sha256": "25f91e2db2247a0136d4c35b41c21e31526d2348b343d3f69c86a94cf6b04235"
+    },
+    "baselines/2026-10-09-v2/1024-_settings.png": {
+      "bytes": 107787,
+      "sha256": "173daec788eebee48fd1ce4d12494f822a30925aa8aed3dcb8490751090a8823"
+    },
+    "baselines/2026-10-09-v2/1024-_settings_account.png": {
+      "bytes": 136928,
+      "sha256": "7ea77433a730a7307fa0986d28198d805cbebeb138ee13c1ad2ca35ee9ae87f5"
+    },
+    "baselines/2026-10-09-v2/1024-_settings_api-keys.png": {
+      "bytes": 131123,
+      "sha256": "46579b6f3db803042816a726abbf9e50866d5284e2ac1465e46c4bb006e0b7af"
+    },
+    "baselines/2026-10-09-v2/1024-_settings_appearance.png": {
+      "bytes": 108525,
+      "sha256": "65e565aaaa74f2bdea2c86d58a0e4395ad1b42f45c9c29f3ce6b03a55af52390"
+    },
+    "baselines/2026-10-09-v2/1024-_settings_memory.png": {
+      "bytes": 146826,
+      "sha256": "88594ecfbe8475bdb6092e54a90d2daa31763df925cccb5e38f5c35fcd401005"
+    },
+    "baselines/2026-10-09-v2/1024-_settings_notifications.png": {
+      "bytes": 136836,
+      "sha256": "fe03b273cb8f11833fe83b486478b5c3d0e2d3dff68e3635b77fc4668a0fa22e"
+    },
+    "baselines/2026-10-09-v2/1024-_settings_roles.png": {
+      "bytes": 77312,
+      "sha256": "348490fff69eb7192f7d765f3819e482a5bfc35944a368124335f0720d03d9b3"
+    },
+    "baselines/2026-10-09-v2/1024-_skills.png": {
+      "bytes": 71699,
+      "sha256": "c7765e753432da28f6f9f86748bfffc81e3e58baa6e02bced8d0ec457eac578a"
+    },
+    "baselines/2026-10-09-v2/1024-_starred.png": {
+      "bytes": 75923,
+      "sha256": "1fab9f1094c228d4c90d682d8210c106b8c833631b796aad3a268ae8009efa78"
+    },
+    "baselines/2026-10-09-v2/1024-_stocks.png": {
+      "bytes": 149040,
+      "sha256": "429598e4d751e432d5c5b39135dd613d83e95aeb810f2300720d20483130ccbd"
+    },
+    "baselines/2026-10-09-v2/1024-_stocks_discovery.png": {
+      "bytes": 100339,
+      "sha256": "7cc661319bced1e0c33725562e8f95916e1aceae7109347b6d76e44b0660b26c"
+    },
+    "baselines/2026-10-09-v2/1024-_tasks.png": {
+      "bytes": 105989,
+      "sha256": "b0417d0d26d6a605a88f99a5038e77f6422be1423097e5e793425e3c9cf8af72"
+    },
+    "baselines/2026-10-09-v2/1024-_terms.png": {
+      "bytes": 148372,
+      "sha256": "5f0de07dfbddf7a0e8c1b58d4ba06cb579aa9fe95d482696569f023636398b4e"
+    },
+    "baselines/2026-10-09-v2/1024-_usage.png": {
+      "bytes": 90783,
+      "sha256": "29bb3fcb1743c6d02eb4ed210e6292aa54a682d4f6273a0a6cc004870b2d5dcb"
+    },
+    "baselines/2026-10-09-v2/1024-_video.png": {
+      "bytes": 489640,
+      "sha256": "de42fa30b5c36370b619d5d59b8c19f1d09f5b5e495755e8d56ceef6b60dfe1a"
+    },
+    "baselines/2026-10-09-v2/1024-_video_edit_projectId.png": {
+      "bytes": 57960,
+      "sha256": "f08c397369e3dcde95489c2557a16db36303a5f3eb77f5305ca95eb57853b485"
+    },
+    "baselines/2026-10-09-v2/1024-home.png": {
+      "bytes": 136866,
+      "sha256": "d325e293eed72cfa07c44eba62edf18999a2ac9ade346ab9e625dd8b2e538dfa"
+    },
+    "baselines/2026-10-09-v2/1024-not-found.png": {
+      "bytes": 62591,
+      "sha256": "ef9edcc5f609f40715dcbb7ce5802ba0695e498cf287cbbe710b52e5c29a04d0"
+    },
+    "baselines/2026-10-09-v2/1024-task_browser_awaiting_user.png": {
+      "bytes": 58546,
+      "sha256": "966ce9ff319bce2191000d61fc8b8738d8c1fa474a42e51635026cb1d6894f7e"
+    },
+    "baselines/2026-10-09-v2/1024-task_browser_cancelled.png": {
+      "bytes": 123970,
+      "sha256": "1eb8ca737094f381d7cd63901619ab7c9dceafa8aad26b69e57f0b79f996e89e"
+    },
+    "baselines/2026-10-09-v2/1024-task_browser_completed.png": {
+      "bytes": 114117,
+      "sha256": "aa830423bb5ec59cd829ae7bfd6e3fe1e3832d243364c14ea2e4a67af9319f9d"
+    },
+    "baselines/2026-10-09-v2/1024-task_browser_executing.png": {
+      "bytes": 59653,
+      "sha256": "9d409f016ffc75b6ed9eaf2e937b21bdec15494e648f6a49050d3b0d452b72c4"
+    },
+    "baselines/2026-10-09-v2/1024-task_browser_failed.png": {
+      "bytes": 124555,
+      "sha256": "b26634125793def24d8997a812a288e7c1a0cff68b5e68345e9fbca578744763"
+    },
+    "baselines/2026-10-09-v2/1024-task_generate_awaiting_user.png": {
+      "bytes": 61636,
+      "sha256": "11a10928b85c23c1ca54617db451f4bc94de03cd33131d2f53444f982ad9e60c"
+    },
+    "baselines/2026-10-09-v2/1024-task_generate_cancelled.png": {
+      "bytes": 72779,
+      "sha256": "f1c6001d310d4310a79bbb4f2cd8dea785dfb23f22d1659b3106e1619d8d1b4e"
+    },
+    "baselines/2026-10-09-v2/1024-task_generate_completed.png": {
+      "bytes": 92726,
+      "sha256": "81b8289fc0ff4b71a885c15eebaac2a596cf1d0e4369d124c5dfd4e1fd801110"
+    },
+    "baselines/2026-10-09-v2/1024-task_generate_executing.png": {
+      "bytes": 64927,
+      "sha256": "d150664fa4cc611836dd0309cd4e3d3669b1fc68f50fa36224836b84d70f7f37"
+    },
+    "baselines/2026-10-09-v2/1024-task_generate_failed.png": {
+      "bytes": 85234,
+      "sha256": "508e37f0266c0f278cf1c3d12cfa64b5d95e58788aaea4d5b505e10218789eb3"
+    },
+    "baselines/2026-10-09-v2/1024-task_image_awaiting_user.png": {
+      "bytes": 62652,
+      "sha256": "2360b367574d40622140d9e251c9b9312a04ffd8a8525e493aecb8e33a465b81"
+    },
+    "baselines/2026-10-09-v2/1024-task_image_cancelled.png": {
+      "bytes": 73609,
+      "sha256": "26503fc3aef156a416014ee5bab1cb1648f24279d8ffc84693754c5166d6595f"
+    },
+    "baselines/2026-10-09-v2/1024-task_image_completed.png": {
+      "bytes": 93033,
+      "sha256": "70339e97e726f7d57ead29ada69d70d1e3d961b9275d0f12334931b4b01ab6bf"
+    },
+    "baselines/2026-10-09-v2/1024-task_image_executing.png": {
+      "bytes": 65665,
+      "sha256": "aaa6258cff8b8367b6293ba571ff88451463384df5f2296ca47be6d91dc0d9c3"
+    },
+    "baselines/2026-10-09-v2/1024-task_image_failed.png": {
+      "bytes": 84293,
+      "sha256": "589174caf59127054cf69e54c2ac9847390f726176bb769e749ef9eef334ff3a"
+    },
+    "baselines/2026-10-09-v2/1024-task_scrape_awaiting_user.png": {
+      "bytes": 84340,
+      "sha256": "7c8f8dceb71b9291ca959bd5c7a6fb3571c74d4816aecd0713b7a8df609c8234"
+    },
+    "baselines/2026-10-09-v2/1024-task_scrape_cancelled.png": {
+      "bytes": 95540,
+      "sha256": "13f0a8051b2c1c6107bb838f4d508fe48d5d4ca422bec97e9a314629373950f4"
+    },
+    "baselines/2026-10-09-v2/1024-task_scrape_completed.png": {
+      "bytes": 115301,
+      "sha256": "d5f30d2f6c838455387cdc94e97b6dd9b887d52f2ee32157bc5f52d746f0285b"
+    },
+    "baselines/2026-10-09-v2/1024-task_scrape_executing.png": {
+      "bytes": 87404,
+      "sha256": "e369619c15f32d7cf3055a4c4877274f3e8a33f0a12f9108ed53648d09dce6f9"
+    },
+    "baselines/2026-10-09-v2/1024-task_scrape_failed.png": {
+      "bytes": 106548,
+      "sha256": "273e004143e43338662e4d5778953fa9170c17ccc011ba11fb20007d9d74aab1"
+    },
+    "baselines/2026-10-09-v2/1280-_500.png": {
+      "bytes": 27099,
+      "sha256": "6dd7e1d75fd07e295d097919d496b4335b6055297129ff4b4118e24cc32d6b87"
+    },
+    "baselines/2026-10-09-v2/1280-_account_closure-recovery.png": {
+      "bytes": 186285,
+      "sha256": "db87fe6f0df6dd496155fadcd6f92e9dbaa5044cd1afdfaa95fe633b975e6927"
+    },
+    "baselines/2026-10-09-v2/1280-_admin.png": {
+      "bytes": 66532,
+      "sha256": "d7e4b7473a9c5bdc0068ecb2115cdadaa7d5e3b30eb0d7a4c8a7306c03c89430"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_finance.png": {
+      "bytes": 115789,
+      "sha256": "20757fcc6d3ea7e7af1a3881d21549ce482c3f6aaf6b6a9cc5e81a582ee3ba9e"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_learning.png": {
+      "bytes": 99191,
+      "sha256": "dd1021c9520c068db1fcccf1aa7bb7b41fc9e81d94ee9980225345034312480c"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_learning_domain.png": {
+      "bytes": 77364,
+      "sha256": "630676e9cd521a007ca24af474cb93a5dd6461d6985dfa0746ca9860bb30d4f4"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_models.png": {
+      "bytes": 84070,
+      "sha256": "dc9043ae78b05e212fa659340ae4297a85bb556f6d8cf7cebf439fa1e65eb3a0"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_partners.png": {
+      "bytes": 39252,
+      "sha256": "0168c7fb872fa38835082bf811f5b16e8abaa06cccbf34fee3684e21971e27e2"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_self-check.png": {
+      "bytes": 48544,
+      "sha256": "2945b8cabb195120166b5d21e90eaab210d6b303b449f4a2bd6a3fd407499899"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_users.png": {
+      "bytes": 54174,
+      "sha256": "9ca87867b8cba86a0b813152f6c956e0fece4fb70711538c2711855cfc883c5b"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_users_userId.png": {
+      "bytes": 58903,
+      "sha256": "1c9753893ed0bb8d20e6bd36045e3ee08dd11d1fc7bff72d2f9569cfad3433e2"
+    },
+    "baselines/2026-10-09-v2/1280-_app.png": {
+      "bytes": 147752,
+      "sha256": "fc46746fa36227545e9f41542f7b1d69b15227db8491a843330802e17bfc3dd2"
+    },
+    "baselines/2026-10-09-v2/1280-_batch.png": {
+      "bytes": 99610,
+      "sha256": "1d61e8b3b5d55c524d0fec152d2bf534417cd9bd7b063b3b2d4a5298fcc57b84"
+    },
+    "baselines/2026-10-09-v2/1280-_batch_batchId.png": {
+      "bytes": 67348,
+      "sha256": "a36de66e6a7878fec8fb4f2c0a5af1c0683eba26e9c0c3e1e8a6ff55256196b7"
+    },
+    "baselines/2026-10-09-v2/1280-_billing.png": {
+      "bytes": 111867,
+      "sha256": "9f682779e98bfe7aaf05e22a22233f6c34d25c2cf7e499c1a2dab4c62411fd7d"
+    },
+    "baselines/2026-10-09-v2/1280-_calendar.png": {
+      "bytes": 86628,
+      "sha256": "a7c5571fdb2738af01931a55d9f133121a382974d617accbb8e73e65978cc0f6"
+    },
+    "baselines/2026-10-09-v2/1280-_connections.png": {
+      "bytes": 80952,
+      "sha256": "c529e7b79ab4bd5d20b757a72cd3621e0141749c509ec46d703c8bc1e55dbd8a"
+    },
+    "baselines/2026-10-09-v2/1280-_cosmic-preview.png": {
+      "bytes": 640169,
+      "sha256": "0008383db8e328b4c0eadb6252f5d4ba1cc7a089e2c6d755b59cc9dd5cd02cdd"
+    },
+    "baselines/2026-10-09-v2/1280-_cosmic.png": {
+      "bytes": 559054,
+      "sha256": "f3cde73092c9483e181e55fed609c4ca50af6632ab9a350f5d7dd24596116672"
+    },
+    "baselines/2026-10-09-v2/1280-_experts.png": {
+      "bytes": 72796,
+      "sha256": "6bbb6a7046ca1801b10a4350fe7fe7b8641462779639a7241fca56b8caf4e501"
+    },
+    "baselines/2026-10-09-v2/1280-_files.png": {
+      "bytes": 77553,
+      "sha256": "53740f5d1948bd93c01730a9f1f47c03c137a71afe1cceba7ae1eb156ce387a6"
+    },
+    "baselines/2026-10-09-v2/1280-_history.png": {
+      "bytes": 106608,
+      "sha256": "436b106745a114e2f16481acb6211365edc2c81963c4625475ff26bdc1740bad"
+    },
+    "baselines/2026-10-09-v2/1280-_image.png": {
+      "bytes": 587895,
+      "sha256": "7b1c15f38b97641673e6dff3088dc51f3dbfbcfa6743c28ea6c9c38d3490b050"
+    },
+    "baselines/2026-10-09-v2/1280-_login.png": {
+      "bytes": 29453,
+      "sha256": "ef260264f17e9122de9de5e5ab50c996c4bdf0a05acb913285dc596cf03e193d"
+    },
+    "baselines/2026-10-09-v2/1280-_organizations_invitations_accept.png": {
+      "bytes": 70279,
+      "sha256": "149a2d087262289947df21b49a1c014cd5f363837655fcc543e7e8e310c414f9"
+    },
+    "baselines/2026-10-09-v2/1280-_partner.png": {
+      "bytes": 70686,
+      "sha256": "2bc3d87bbff70356e4ffd70c6621af067c6203f59152cc41dec1a2ebf3446f2f"
+    },
+    "baselines/2026-10-09-v2/1280-_partner_ledger.png": {
+      "bytes": 70686,
+      "sha256": "2bc3d87bbff70356e4ffd70c6621af067c6203f59152cc41dec1a2ebf3446f2f"
+    },
+    "baselines/2026-10-09-v2/1280-_partner_recharge.png": {
+      "bytes": 70686,
+      "sha256": "2bc3d87bbff70356e4ffd70c6621af067c6203f59152cc41dec1a2ebf3446f2f"
+    },
+    "baselines/2026-10-09-v2/1280-_partner_withdraw.png": {
+      "bytes": 70686,
+      "sha256": "2bc3d87bbff70356e4ffd70c6621af067c6203f59152cc41dec1a2ebf3446f2f"
+    },
+    "baselines/2026-10-09-v2/1280-_plan.png": {
+      "bytes": 147647,
+      "sha256": "278331cdfdade6913579b941007fdb221ae579305b409cd7fa7471e82722ef29"
+    },
+    "baselines/2026-10-09-v2/1280-_planned.png": {
+      "bytes": 99617,
+      "sha256": "7e7d70164878c13f51e06fb811a8b220a5f6b7b1d8998fad2b2a0a1811a510f9"
+    },
+    "baselines/2026-10-09-v2/1280-_planned_legacy-batch.png": {
+      "bytes": 75878,
+      "sha256": "8a27ea642677b497d95ce0054e1828834bf9f8cfb5f71d76f78e7d86fe12b5ba"
+    },
+    "baselines/2026-10-09-v2/1280-_planned_legacy-scheduled.png": {
+      "bytes": 86638,
+      "sha256": "1b65ddf8ab39dce08feb2a4054685ab44042752ff33c88d9e9a52502275480d1"
+    },
+    "baselines/2026-10-09-v2/1280-_plugins.png": {
+      "bytes": 72787,
+      "sha256": "ffd9d5ea7a18ec3807e6db1595dd0af67ba9d3cdbe40eb2500d638d0e2ff0114"
+    },
+    "baselines/2026-10-09-v2/1280-_privacy.png": {
+      "bytes": 196576,
+      "sha256": "d85c72ce28be8db1acf4b3171eb811ae1295d4f2fae2a51aba934f198c416160"
+    },
+    "baselines/2026-10-09-v2/1280-_profile.png": {
+      "bytes": 104826,
+      "sha256": "40e5813b2d034758667dbd5f01b6452979bd3b858e85b28e092bbe4ad2bdf589"
+    },
+    "baselines/2026-10-09-v2/1280-_projects.png": {
+      "bytes": 84900,
+      "sha256": "cffd11452c7997562d0672d24e4e42beb472d0ee9288a9e513cb8525b3d80f96"
+    },
+    "baselines/2026-10-09-v2/1280-_projects_projectId.png": {
+      "bytes": 89213,
+      "sha256": "9874bda89d4b18b0244b8531f6ab26231db209a51de356e6630d77110f128856"
+    },
+    "baselines/2026-10-09-v2/1280-_register.png": {
+      "bytes": 23741,
+      "sha256": "d680ca9038bfeeb03820b9e1d9f34da5cd1c7b5ccd0f433786517fce099ded48"
+    },
+    "baselines/2026-10-09-v2/1280-_roles.png": {
+      "bytes": 78457,
+      "sha256": "691e8a61f292e815ce72d8af96edd42b9163cafdf0e8f89d4a8256578d29653f"
+    },
+    "baselines/2026-10-09-v2/1280-_schedule.png": {
+      "bytes": 86628,
+      "sha256": "a7c5571fdb2738af01931a55d9f133121a382974d617accbb8e73e65978cc0f6"
+    },
+    "baselines/2026-10-09-v2/1280-_scheduled.png": {
+      "bytes": 86628,
+      "sha256": "a7c5571fdb2738af01931a55d9f133121a382974d617accbb8e73e65978cc0f6"
+    },
+    "baselines/2026-10-09-v2/1280-_settings.png": {
+      "bytes": 109675,
+      "sha256": "e29d6394e5ac5966bb4c30a5d4cbb2de951d56b0a344978ff9480554e3568cac"
+    },
+    "baselines/2026-10-09-v2/1280-_settings_account.png": {
+      "bytes": 139322,
+      "sha256": "3a9ae892b87556e86e6d3ee5ebbe96f7b3d6d5858e28196337d3ac049f012c0c"
+    },
+    "baselines/2026-10-09-v2/1280-_settings_api-keys.png": {
+      "bytes": 134079,
+      "sha256": "9b3746435dc4afbbd2a77e3fe44d6195e8e0dae325305c948488c06b2d84b125"
+    },
+    "baselines/2026-10-09-v2/1280-_settings_appearance.png": {
+      "bytes": 110704,
+      "sha256": "4e17a1436222f2ae5ad1c6f5caf0f3aef9599f50e98f2c6359fd48bdf2dcbeb5"
+    },
+    "baselines/2026-10-09-v2/1280-_settings_memory.png": {
+      "bytes": 147981,
+      "sha256": "7a57b83c31bb79a2655519dda58eb9ca7ec839a68a96f7be5db41d551936ac98"
+    },
+    "baselines/2026-10-09-v2/1280-_settings_notifications.png": {
+      "bytes": 139595,
+      "sha256": "513e2120eb0618dfb7653274cf367a86d7cc9736ed6ebf890044e9c75c27a8e9"
+    },
+    "baselines/2026-10-09-v2/1280-_settings_roles.png": {
+      "bytes": 78457,
+      "sha256": "691e8a61f292e815ce72d8af96edd42b9163cafdf0e8f89d4a8256578d29653f"
+    },
+    "baselines/2026-10-09-v2/1280-_skills.png": {
+      "bytes": 72796,
+      "sha256": "6bbb6a7046ca1801b10a4350fe7fe7b8641462779639a7241fca56b8caf4e501"
+    },
+    "baselines/2026-10-09-v2/1280-_starred.png": {
+      "bytes": 76999,
+      "sha256": "8e5e6a112d1314297f7682bc300f20fac9aa5a349968ad5823859579203d8370"
+    },
+    "baselines/2026-10-09-v2/1280-_stocks.png": {
+      "bytes": 155089,
+      "sha256": "f12e9bb6a470bd7c6546427d5797d1f8a76918d29808ec16998b9418baacb704"
+    },
+    "baselines/2026-10-09-v2/1280-_stocks_discovery.png": {
+      "bytes": 100514,
+      "sha256": "acb6064d5d8dac2570c5d77e6da9ef04f9908b97c67b3b52e5ff4f502e3b4b3a"
+    },
+    "baselines/2026-10-09-v2/1280-_tasks.png": {
+      "bytes": 106608,
+      "sha256": "436b106745a114e2f16481acb6211365edc2c81963c4625475ff26bdc1740bad"
+    },
+    "baselines/2026-10-09-v2/1280-_terms.png": {
+      "bytes": 150865,
+      "sha256": "378d3426d365b7a0491c157972cf3c0f13c78a0c6b36b327bd75c5f1d55f9068"
+    },
+    "baselines/2026-10-09-v2/1280-_usage.png": {
+      "bytes": 90925,
+      "sha256": "ec3e4bae0dcf1c884572a2145bf30f9e90a056062c459c792f2517ea525e508b"
+    },
+    "baselines/2026-10-09-v2/1280-_video.png": {
+      "bytes": 604855,
+      "sha256": "8bdc51d21909ac0ba4f16b0dda957aa8df2990913f28387f52fdca138c20ac2b"
+    },
+    "baselines/2026-10-09-v2/1280-_video_edit_projectId.png": {
+      "bytes": 58857,
+      "sha256": "0f50e8006acdd6040d33884e99fbd3471b23535cce55c9861e7aaf5a9e4d73a9"
+    },
+    "baselines/2026-10-09-v2/1280-home.png": {
+      "bytes": 147752,
+      "sha256": "fc46746fa36227545e9f41542f7b1d69b15227db8491a843330802e17bfc3dd2"
+    },
+    "baselines/2026-10-09-v2/1280-not-found.png": {
+      "bytes": 63717,
+      "sha256": "5c8c25668ae57e54f87852a0f8e29a26c841c7cce118cf66be759a2d06bc068a"
+    },
+    "baselines/2026-10-09-v2/1280-task_browser_awaiting_user.png": {
+      "bytes": 62952,
+      "sha256": "22d4761b45a8e59d2de7b0fc459b72c2fdc9a4e6b0cfbed25877193d8abda943"
+    },
+    "baselines/2026-10-09-v2/1280-task_browser_cancelled.png": {
+      "bytes": 125796,
+      "sha256": "83a41bb62caadd439be722bee298c3a7b2dee9ea7a43510152fbae5cbe8f2a3d"
+    },
+    "baselines/2026-10-09-v2/1280-task_browser_completed.png": {
+      "bytes": 116012,
+      "sha256": "e437f24d5ef218fd1ab0d28013439762de7874f15c722214a0474fe855a69411"
+    },
+    "baselines/2026-10-09-v2/1280-task_browser_executing.png": {
+      "bytes": 63953,
+      "sha256": "41783c88ee194602dc732bc4867bebd927de4a52237f9b9f0aa81a21fad68379"
+    },
+    "baselines/2026-10-09-v2/1280-task_browser_failed.png": {
+      "bytes": 126372,
+      "sha256": "ec8a4ba6b70b819391e2eab8adeb78c12514c3bce9630074692a28ee34620003"
+    },
+    "baselines/2026-10-09-v2/1280-task_generate_awaiting_user.png": {
+      "bytes": 62725,
+      "sha256": "45094e1e165487f34de8e8257a42b03cbe594658df52f08ae7d30f887d21366a"
+    },
+    "baselines/2026-10-09-v2/1280-task_generate_cancelled.png": {
+      "bytes": 73947,
+      "sha256": "62f312c761f245c82bfcd660647b3820e4f30183be8dd2914f2957cc1091e5f6"
+    },
+    "baselines/2026-10-09-v2/1280-task_generate_completed.png": {
+      "bytes": 93991,
+      "sha256": "7025244a33e970c515a00d4a98b8d862c2f566cfa80786a4087485e01817b00f"
+    },
+    "baselines/2026-10-09-v2/1280-task_generate_executing.png": {
+      "bytes": 66095,
+      "sha256": "e32326e9e79d40d24edab722c03c95bc0616d782be752a81f12c567781a6e035"
+    },
+    "baselines/2026-10-09-v2/1280-task_generate_failed.png": {
+      "bytes": 86271,
+      "sha256": "a81674e97ec10e31e4d2ddd7d05f8f42e86b9b85717f53abba3817f9f55288f5"
+    },
+    "baselines/2026-10-09-v2/1280-task_image_awaiting_user.png": {
+      "bytes": 63734,
+      "sha256": "1a75cab6da8ccafdce3a7601555a270122708e019b1e416a63daf956e99c1b05"
+    },
+    "baselines/2026-10-09-v2/1280-task_image_cancelled.png": {
+      "bytes": 74818,
+      "sha256": "dbbbd6e3aed70f538ad0f61f068e3210315257a5be489bf8efb70d4d9b041fe1"
+    },
+    "baselines/2026-10-09-v2/1280-task_image_completed.png": {
+      "bytes": 94340,
+      "sha256": "25c880ad84eff8900c3640c86cbf3f25879b4dbd7e823d33942e03818193193b"
+    },
+    "baselines/2026-10-09-v2/1280-task_image_executing.png": {
+      "bytes": 66861,
+      "sha256": "9dd78093d10081ddef35c4c934a885c6436b0a1ba9fc8104aa337ecd582c2661"
+    },
+    "baselines/2026-10-09-v2/1280-task_image_failed.png": {
+      "bytes": 85328,
+      "sha256": "f94f7c90d4bbaca0f1087451ae1943fa5f337db6d710051b32869e0b26c8dfc6"
+    },
+    "baselines/2026-10-09-v2/1280-task_scrape_awaiting_user.png": {
+      "bytes": 85474,
+      "sha256": "fd61a8decb11144f2f9d02f12fa04b4e1db744eedc5159da3ce5dcce64f82ff9"
+    },
+    "baselines/2026-10-09-v2/1280-task_scrape_cancelled.png": {
+      "bytes": 96788,
+      "sha256": "2432ed2c59ca08f71684f1bc029b94e6806bad412b8dfb883d9b262dd8ecf532"
+    },
+    "baselines/2026-10-09-v2/1280-task_scrape_completed.png": {
+      "bytes": 116724,
+      "sha256": "ae1b9a8c2670736464dc7a560a9dbf038eee5505e1903f776d27f55c255d87b0"
+    },
+    "baselines/2026-10-09-v2/1280-task_scrape_executing.png": {
+      "bytes": 88626,
+      "sha256": "d26c7ae7db629fb82f47cc479b18a66e381e1d4ed8cf61f08460aa0c117e8da6"
+    },
+    "baselines/2026-10-09-v2/1280-task_scrape_failed.png": {
+      "bytes": 107851,
+      "sha256": "afb1d7e58490f35df5a266da69515450c62c9b20341a93db0a05caacb9a444e4"
+    },
+    "baselines/2026-10-09-v2/1440-_500.png": {
+      "bytes": 28056,
+      "sha256": "db782d5177bd781f4ad5ebf0ae9ba54edfbf9b7ff976b9bd6f883ed36e6ebc6d"
+    },
+    "baselines/2026-10-09-v2/1440-_account_closure-recovery.png": {
+      "bytes": 205908,
+      "sha256": "d66b26e94dcad2e63073a62cc71f52a608d0eb65c397b87e3ba27bf563a1c322"
+    },
+    "baselines/2026-10-09-v2/1440-_admin.png": {
+      "bytes": 69991,
+      "sha256": "b3342ba9a933ed2052bb04a6f9d9543732a85a094593c2ec91cb708addbf0b9d"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_finance.png": {
+      "bytes": 123721,
+      "sha256": "8b67cbc19e3bc3263bbbc54030945c20a97ad3610e2761495df09880513b0e5b"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_learning.png": {
+      "bytes": 102560,
+      "sha256": "d55ace92a08843114e9d55620953d9bd586da4f710cccb1486c13a2f49c5b3d5"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_learning_domain.png": {
+      "bytes": 79677,
+      "sha256": "23fedab44b50462763d3e98b602277f11055cc0defde08ba65e53e418ca6a1bc"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_models.png": {
+      "bytes": 86292,
+      "sha256": "a27343a79cd68b4bfc64341733e07e4b5299b00385bcd4b698e62850765e735b"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_partners.png": {
+      "bytes": 40393,
+      "sha256": "3fee0c6fcb325430d4b90e49e5ecfc9b5f56fbf3854e36773d339f9d1852dafa"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_self-check.png": {
+      "bytes": 49884,
+      "sha256": "b43943d5165d68ddd0ffa1d8edbebea81028dd3f1fa4ff915e01e3f728c84cb3"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_users.png": {
+      "bytes": 55944,
+      "sha256": "b460becc06b9cb09135ffcd00a8386fe757fa37cca0242afaf007f6c849dde50"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_users_userId.png": {
+      "bytes": 60414,
+      "sha256": "edddc1a8cbfe3397b96ddaf73b5a9ad4a876b4bd020e65aff04e1bc0649c02ee"
+    },
+    "baselines/2026-10-09-v2/1440-_app.png": {
+      "bytes": 153401,
+      "sha256": "158a88fb07ab41a9010a04ec3bab78466ee3c6aaf0bf94315e43c2408cfe9f60"
+    },
+    "baselines/2026-10-09-v2/1440-_batch.png": {
+      "bytes": 102449,
+      "sha256": "6ecd6f6b5ec6513a55b369fba2d3998624070774798056c82bb47271a4f92631"
+    },
+    "baselines/2026-10-09-v2/1440-_batch_batchId.png": {
+      "bytes": 68893,
+      "sha256": "d7ee759663c20eb7249f7a5ed72ec4fb333fe061cb08df79c5c23a2ed81395a9"
+    },
+    "baselines/2026-10-09-v2/1440-_billing.png": {
+      "bytes": 114554,
+      "sha256": "297c784fa6aaa9e2a6f133c8fc9d23eff344bd209572eaba1cee7bc5f3db9809"
+    },
+    "baselines/2026-10-09-v2/1440-_calendar.png": {
+      "bytes": 88860,
+      "sha256": "1e4d83b1312ce972dd69f6d4f45aa7ea5b7d26ca75fb8e57d4008a45750cab14"
+    },
+    "baselines/2026-10-09-v2/1440-_connections.png": {
+      "bytes": 82842,
+      "sha256": "46b24a97665a6f65fba07082658bc6c7cdc01d1261d0b8fa375f8b768f2ce66b"
+    },
+    "baselines/2026-10-09-v2/1440-_cosmic-preview.png": {
+      "bytes": 647533,
+      "sha256": "33b7c562ced5441740873b3594516f65e527cf2ec430dd573a181a5ade6ac635"
+    },
+    "baselines/2026-10-09-v2/1440-_cosmic.png": {
+      "bytes": 654333,
+      "sha256": "fa8f66aeab3a43ae24198d9f7e91e07056341d3961cc2cb760ed3b9f278a5e3b"
+    },
+    "baselines/2026-10-09-v2/1440-_experts.png": {
+      "bytes": 74806,
+      "sha256": "4d3ced1a393ebef288d63c187b079d883700bce16a6d2c3e0b15d2ce24753036"
+    },
+    "baselines/2026-10-09-v2/1440-_files.png": {
+      "bytes": 79578,
+      "sha256": "e7fc04ea2c17c0d5e77826761568d285c1e079615c1d17a58df1e4fa9a7b4358"
+    },
+    "baselines/2026-10-09-v2/1440-_history.png": {
+      "bytes": 108673,
+      "sha256": "9823e1cd6a76f1b37c51273438397a06824fb3dc625bf54cd56d0d12f0639d6f"
+    },
+    "baselines/2026-10-09-v2/1440-_image.png": {
+      "bytes": 660964,
+      "sha256": "bc3e32502c5adc9bba3031323456182e07ea00bd55a4eaae73e1ff2dfd3afb3b"
+    },
+    "baselines/2026-10-09-v2/1440-_login.png": {
+      "bytes": 30282,
+      "sha256": "c6b32a4ef9a8a0711dfff7f45a29e52898b76cdcf2c33a83c0d3609cc0bf0ccc"
+    },
+    "baselines/2026-10-09-v2/1440-_organizations_invitations_accept.png": {
+      "bytes": 72044,
+      "sha256": "888c7ca29861842d8a9b6b62c0d1ae829d589c6587208db638276555020bae35"
+    },
+    "baselines/2026-10-09-v2/1440-_partner.png": {
+      "bytes": 72423,
+      "sha256": "7ab517add0e22c003473f86a57e6fbcd5ef7a6002e41a600b54ca6c889eaa1fc"
+    },
+    "baselines/2026-10-09-v2/1440-_partner_ledger.png": {
+      "bytes": 72423,
+      "sha256": "7ab517add0e22c003473f86a57e6fbcd5ef7a6002e41a600b54ca6c889eaa1fc"
+    },
+    "baselines/2026-10-09-v2/1440-_partner_recharge.png": {
+      "bytes": 72423,
+      "sha256": "7ab517add0e22c003473f86a57e6fbcd5ef7a6002e41a600b54ca6c889eaa1fc"
+    },
+    "baselines/2026-10-09-v2/1440-_partner_withdraw.png": {
+      "bytes": 72423,
+      "sha256": "7ab517add0e22c003473f86a57e6fbcd5ef7a6002e41a600b54ca6c889eaa1fc"
+    },
+    "baselines/2026-10-09-v2/1440-_plan.png": {
+      "bytes": 158626,
+      "sha256": "bb7568f626307b2be17ede68b7a76d09c1b185e9733ad8385407a0144825afd4"
+    },
+    "baselines/2026-10-09-v2/1440-_planned.png": {
+      "bytes": 102442,
+      "sha256": "b0d70b6c120378589f1a398021ef912b1efc69487a31f156205ee2ca24093746"
+    },
+    "baselines/2026-10-09-v2/1440-_planned_legacy-batch.png": {
+      "bytes": 77843,
+      "sha256": "f9120c06525719570fe8235cf106671498031bf04c9474e6d612cdfb28ed0f73"
+    },
+    "baselines/2026-10-09-v2/1440-_planned_legacy-scheduled.png": {
+      "bytes": 88861,
+      "sha256": "57c0969b7f4db390428a5f28e107092fef5b941a75fb92a894b70213e4ab5a8d"
+    },
+    "baselines/2026-10-09-v2/1440-_plugins.png": {
+      "bytes": 74800,
+      "sha256": "f226d0172536b7abbb0640a75a078f11ccd6910f631792b64ca3280c3908efd0"
+    },
+    "baselines/2026-10-09-v2/1440-_privacy.png": {
+      "bytes": 201198,
+      "sha256": "75287cb724a230c712df23a33f3ccef7d439faca5d3b1a7071c2ce82c2024cd7"
+    },
+    "baselines/2026-10-09-v2/1440-_profile.png": {
+      "bytes": 107191,
+      "sha256": "0fb24cf431e8e239bb66f6ec927215a702b6c8031d8359be3ac2fb2b6ffb493a"
+    },
+    "baselines/2026-10-09-v2/1440-_projects.png": {
+      "bytes": 86730,
+      "sha256": "f993ed45ec500042338e821cd4a6f1902f8d9d6d3cac252cd5bd4b6c00d366e3"
+    },
+    "baselines/2026-10-09-v2/1440-_projects_projectId.png": {
+      "bytes": 91284,
+      "sha256": "f5b29a17f5c52c2d2585058243cf2f8e31f7b613950508748dc52fe05619764a"
+    },
+    "baselines/2026-10-09-v2/1440-_register.png": {
+      "bytes": 24490,
+      "sha256": "627fc3085bccab2d4353eee10a234bcbd14518adc64952e7ec5ae42a889072c6"
+    },
+    "baselines/2026-10-09-v2/1440-_roles.png": {
+      "bytes": 80198,
+      "sha256": "a70f8b19e382e77622d97fe55c1d227af5cc21d459f859a0c829536044caf2c7"
+    },
+    "baselines/2026-10-09-v2/1440-_schedule.png": {
+      "bytes": 88854,
+      "sha256": "1b50d668d8ccf2125b99496d320720cbd2aa35d4c2ec1b172c15022631cf7444"
+    },
+    "baselines/2026-10-09-v2/1440-_scheduled.png": {
+      "bytes": 88854,
+      "sha256": "44ef26d44cb9b9b3f79ea2d26c70903c1a5d3cda9622532fd73be3b7b645b571"
+    },
+    "baselines/2026-10-09-v2/1440-_settings.png": {
+      "bytes": 112391,
+      "sha256": "2d6bb5da8b6ad0ed640be7dbb68550607b9449263ec439c2e8569b6c35fa68ae"
+    },
+    "baselines/2026-10-09-v2/1440-_settings_account.png": {
+      "bytes": 142875,
+      "sha256": "20be34c6db3b97fed379895702fde122492eeaa2b80ae045e988c4d49e6ede58"
+    },
+    "baselines/2026-10-09-v2/1440-_settings_api-keys.png": {
+      "bytes": 137424,
+      "sha256": "b88ffcfaf82c5241efc3cd9d3e02e9e5d1124fc5e7a9f11f275a46a87a7b6e68"
+    },
+    "baselines/2026-10-09-v2/1440-_settings_appearance.png": {
+      "bytes": 113477,
+      "sha256": "94ef4c5b704effef9f8bca9707ec22ba962d4b2c3459efd415171f093b5a3906"
+    },
+    "baselines/2026-10-09-v2/1440-_settings_memory.png": {
+      "bytes": 151730,
+      "sha256": "cef53aba763b12fe60adf5c10f93323e503364e74d705922b01908904616b540"
+    },
+    "baselines/2026-10-09-v2/1440-_settings_notifications.png": {
+      "bytes": 142930,
+      "sha256": "31b7549ef7fbf4698a5d0cbb7f90ab795702c4312fed73731a1259df49ecfec1"
+    },
+    "baselines/2026-10-09-v2/1440-_settings_roles.png": {
+      "bytes": 80198,
+      "sha256": "a70f8b19e382e77622d97fe55c1d227af5cc21d459f859a0c829536044caf2c7"
+    },
+    "baselines/2026-10-09-v2/1440-_skills.png": {
+      "bytes": 74800,
+      "sha256": "f226d0172536b7abbb0640a75a078f11ccd6910f631792b64ca3280c3908efd0"
+    },
+    "baselines/2026-10-09-v2/1440-_starred.png": {
+      "bytes": 78682,
+      "sha256": "23085b3e133f0f50aea6403bedaa0249d7fb4c60ad88ab67962f2c77a338e660"
+    },
+    "baselines/2026-10-09-v2/1440-_stocks.png": {
+      "bytes": 170287,
+      "sha256": "2281af4e68f53fe27dea1f0308864d86f797bb1a1118543d8c8818eef04d125f"
+    },
+    "baselines/2026-10-09-v2/1440-_stocks_discovery.png": {
+      "bytes": 102744,
+      "sha256": "8a5f0cb471e39178473de9aab79b6351d9460e4377bc8da302a1f4fb0c49f28b"
+    },
+    "baselines/2026-10-09-v2/1440-_tasks.png": {
+      "bytes": 108673,
+      "sha256": "9823e1cd6a76f1b37c51273438397a06824fb3dc625bf54cd56d0d12f0639d6f"
+    },
+    "baselines/2026-10-09-v2/1440-_terms.png": {
+      "bytes": 154623,
+      "sha256": "f8bf01beadb3bb0b3d81a84e65c2a326e029c7ef903d361c6cb51c9f02db3a2d"
+    },
+    "baselines/2026-10-09-v2/1440-_usage.png": {
+      "bytes": 93819,
+      "sha256": "b04d068cc5fd70261a6bd3e1a7fd0c4649a8b0415e7f7e21850881d91578b0e5"
+    },
+    "baselines/2026-10-09-v2/1440-_video.png": {
+      "bytes": 676115,
+      "sha256": "f1c8272fd0193d6f245064989b2d33f94444876a4b1deff0a40006c988ffe3d8"
+    },
+    "baselines/2026-10-09-v2/1440-_video_edit_projectId.png": {
+      "bytes": 60369,
+      "sha256": "40debd1e6f020328346d1801377f9e59ee5c0db74a0d91f2f37180e5ff2a8548"
+    },
+    "baselines/2026-10-09-v2/1440-home.png": {
+      "bytes": 153401,
+      "sha256": "158a88fb07ab41a9010a04ec3bab78466ee3c6aaf0bf94315e43c2408cfe9f60"
+    },
+    "baselines/2026-10-09-v2/1440-not-found.png": {
+      "bytes": 65271,
+      "sha256": "0ddd7ee27a5f1fdd78240bcb83d4f0fb0b67cc3038faf282355d8fb91c980c01"
+    },
+    "baselines/2026-10-09-v2/1440-task_browser_awaiting_user.png": {
+      "bytes": 95061,
+      "sha256": "d7367113f943eb8270d44ddd0f9e6ef925b92bd795786091bdbd3b2e4decd3f5"
+    },
+    "baselines/2026-10-09-v2/1440-task_browser_cancelled.png": {
+      "bytes": 128850,
+      "sha256": "f3e50a892fdb58c18b690b2bc398e085ade28add2aa84694658a2a498ee8b789"
+    },
+    "baselines/2026-10-09-v2/1440-task_browser_completed.png": {
+      "bytes": 118916,
+      "sha256": "6bd483db944b7c3dd5ed4fe58dfaa584d9eae22b2ea30eaa5055200a45dae5ef"
+    },
+    "baselines/2026-10-09-v2/1440-task_browser_executing.png": {
+      "bytes": 95231,
+      "sha256": "45681a68e1f2150472522d67aa5129c2e7761c1f7bd9ff4b46e63add0f65645a"
+    },
+    "baselines/2026-10-09-v2/1440-task_browser_failed.png": {
+      "bytes": 129281,
+      "sha256": "3eb6c2880854312493434e948acb8d2261a056ff6e5d6d669913b914a54412ce"
+    },
+    "baselines/2026-10-09-v2/1440-task_generate_awaiting_user.png": {
+      "bytes": 64363,
+      "sha256": "a67383599e42ca8fbaa8d60976d91befd012fed6553da6cf9731801c9d6b75b7"
+    },
+    "baselines/2026-10-09-v2/1440-task_generate_cancelled.png": {
+      "bytes": 75900,
+      "sha256": "ddfc211d3a633efd684b2b1fcc6bde8a5362893f1e31a044825119461901c7cc"
+    },
+    "baselines/2026-10-09-v2/1440-task_generate_completed.png": {
+      "bytes": 96547,
+      "sha256": "f556ee28560688c472c7f5d280534d1990609c7bc8c83ce768e8704fa34691d2"
+    },
+    "baselines/2026-10-09-v2/1440-task_generate_executing.png": {
+      "bytes": 67801,
+      "sha256": "a51c46a71df897d5077ca9642090c1e52ba6a68465aa6324ac49ea6a6536fa63"
+    },
+    "baselines/2026-10-09-v2/1440-task_generate_failed.png": {
+      "bytes": 88347,
+      "sha256": "d8516dbdf49e66f7b3713bad53ef97446672a2670319798a2f4d82e638f94482"
+    },
+    "baselines/2026-10-09-v2/1440-task_image_awaiting_user.png": {
+      "bytes": 65343,
+      "sha256": "55976f13ca76d3a1d67849a7b6a774f814aae395b4c3de041f121b3336bbbb2d"
+    },
+    "baselines/2026-10-09-v2/1440-task_image_cancelled.png": {
+      "bytes": 76724,
+      "sha256": "b639a0844d9a90e2b0bfd8ea77a0604992ec0309c863de3c3e0105b1456d4a96"
+    },
+    "baselines/2026-10-09-v2/1440-task_image_completed.png": {
+      "bytes": 96861,
+      "sha256": "dd1e6ebd3d407ba0142d481bb0e1e64cd3f6b333829d00cc9a584b42b7d9d24e"
+    },
+    "baselines/2026-10-09-v2/1440-task_image_executing.png": {
+      "bytes": 68564,
+      "sha256": "5b6beedcf4865de1bd3fbd7eb9bda9006008f2855b1136f8a076dc888a7e66b6"
+    },
+    "baselines/2026-10-09-v2/1440-task_image_failed.png": {
+      "bytes": 87348,
+      "sha256": "41f49055a2e83ddbb6998445752102566e75b7b2397ec90a3efb2838bf983851"
+    },
+    "baselines/2026-10-09-v2/1440-task_scrape_awaiting_user.png": {
+      "bytes": 87676,
+      "sha256": "34672d2cff650e23ce925f6e3e0a11084a66b4d8abe081e1899274c83dc418d9"
+    },
+    "baselines/2026-10-09-v2/1440-task_scrape_cancelled.png": {
+      "bytes": 99186,
+      "sha256": "c6233645626c25333c066ac6da3ad4807803b40d3d9543625f8e9c179f7d2f08"
+    },
+    "baselines/2026-10-09-v2/1440-task_scrape_completed.png": {
+      "bytes": 119641,
+      "sha256": "180cb456366dd95fe2736a3a71b21b9d5dd5df3881b9fbdb7ab9c9890836e43a"
+    },
+    "baselines/2026-10-09-v2/1440-task_scrape_executing.png": {
+      "bytes": 90818,
+      "sha256": "e8206704dd714c16d74e24f36c947626edfee628d99d7c33992ecf1a875889a1"
+    },
+    "baselines/2026-10-09-v2/1440-task_scrape_failed.png": {
+      "bytes": 110473,
+      "sha256": "910eb231e33c3fd932569a59b66700d39b99e45567e2acbd338ba19ffae8c1d2"
+    },
+    "baselines/2026-10-09-v2/1024-_500.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_account_closure-recovery.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_admin.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_finance.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_learning.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_learning_domain.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_models.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_partners.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_self-check.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_users.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_admin_users_userId.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_app.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_batch.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_batch_batchId.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_billing.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_calendar.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_connections.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_cosmic-preview.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_cosmic.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_experts.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_files.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_history.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_image.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_login.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_organizations_invitations_accept.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_partner.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_partner_ledger.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_partner_recharge.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_partner_withdraw.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_plan.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_planned.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_planned_legacy-batch.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_planned_legacy-scheduled.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_plugins.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_privacy.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_profile.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_projects.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_projects_projectId.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_register.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_roles.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_schedule.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_scheduled.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_settings.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_settings_account.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_settings_api-keys.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_settings_appearance.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_settings_memory.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_settings_notifications.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_settings_roles.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_skills.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_starred.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_stocks.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_stocks_discovery.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_tasks.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_terms.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_usage.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_video.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-_video_edit_projectId.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-home.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-not-found.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_browser_awaiting_user.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_browser_cancelled.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_browser_completed.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_browser_executing.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_browser_failed.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_generate_awaiting_user.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_generate_cancelled.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_generate_completed.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_generate_executing.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_generate_failed.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_image_awaiting_user.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_image_cancelled.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_image_completed.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_image_executing.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_image_failed.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_scrape_awaiting_user.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_scrape_cancelled.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_scrape_completed.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_scrape_executing.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1024-task_scrape_failed.png.json": {
+      "bytes": 224,
+      "sha256": "3a9d6f8ea780d0f5bcf3ffbdfece7cdf7a59590a93f8ba406ee8d9de4359f921"
+    },
+    "baselines/2026-10-09-v2/1280-_500.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_account_closure-recovery.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_admin.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_finance.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_learning.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_learning_domain.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_models.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_partners.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_self-check.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_users.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_admin_users_userId.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_app.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_batch.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_batch_batchId.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_billing.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_calendar.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_connections.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_cosmic-preview.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_cosmic.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_experts.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_files.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_history.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_image.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_login.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_organizations_invitations_accept.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_partner.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_partner_ledger.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_partner_recharge.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_partner_withdraw.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_plan.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_planned.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_planned_legacy-batch.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_planned_legacy-scheduled.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_plugins.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_privacy.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_profile.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_projects.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_projects_projectId.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_register.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_roles.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_schedule.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_scheduled.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_settings.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_settings_account.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_settings_api-keys.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_settings_appearance.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_settings_memory.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_settings_notifications.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_settings_roles.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_skills.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_starred.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_stocks.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_stocks_discovery.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_tasks.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_terms.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_usage.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_video.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-_video_edit_projectId.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-home.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-not-found.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_browser_awaiting_user.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_browser_cancelled.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_browser_completed.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_browser_executing.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_browser_failed.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_generate_awaiting_user.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_generate_cancelled.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_generate_completed.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_generate_executing.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_generate_failed.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_image_awaiting_user.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_image_cancelled.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_image_completed.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_image_executing.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_image_failed.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_scrape_awaiting_user.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_scrape_cancelled.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_scrape_completed.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_scrape_executing.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1280-task_scrape_failed.png.json": {
+      "bytes": 224,
+      "sha256": "2e2e57f7528b6354f048d2153791fa00500a6c6c74da9e574d4753c2030a22de"
+    },
+    "baselines/2026-10-09-v2/1440-_500.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_account_closure-recovery.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_admin.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_finance.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_learning.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_learning_domain.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_models.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_partners.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_self-check.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_users.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_admin_users_userId.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_app.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_batch.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_batch_batchId.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_billing.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_calendar.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_connections.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_cosmic-preview.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_cosmic.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_experts.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_files.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_history.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_image.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_login.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_organizations_invitations_accept.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_partner.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_partner_ledger.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_partner_recharge.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_partner_withdraw.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_plan.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_planned.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_planned_legacy-batch.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_planned_legacy-scheduled.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_plugins.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_privacy.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_profile.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_projects.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_projects_projectId.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_register.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_roles.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_schedule.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_scheduled.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_settings.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_settings_account.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_settings_api-keys.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_settings_appearance.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_settings_memory.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_settings_notifications.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_settings_roles.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_skills.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_starred.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_stocks.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_stocks_discovery.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_tasks.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_terms.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_usage.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_video.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-_video_edit_projectId.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-home.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-not-found.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_browser_awaiting_user.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_browser_cancelled.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_browser_completed.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_browser_executing.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_browser_failed.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_generate_awaiting_user.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_generate_cancelled.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_generate_completed.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_generate_executing.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_generate_failed.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_image_awaiting_user.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_image_cancelled.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_image_completed.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_image_executing.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_image_failed.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_scrape_awaiting_user.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_scrape_cancelled.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_scrape_completed.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_scrape_executing.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "baselines/2026-10-09-v2/1440-task_scrape_failed.png.json": {
+      "bytes": 224,
+      "sha256": "c7673ec514d199667bb3b8c81bbd105cb7bef9a38ebeb2073785560a87ed26f3"
+    },
+    "verification/README.md": {
+      "bytes": 1297,
+      "sha256": "4a318abf4ab2f0992659a0815c47c2d33d597d9cf7319c6638ca3f861b6a7fd7"
+    },
+    "verification/calibration-followup.txt": {
+      "bytes": 7898,
+      "sha256": "53957bc9bcdb657211996bb92f957ec1901e6094f7674140fcda43eb73cb6445"
+    },
+    "verification/calibration-freeze.sha256": {
+      "bytes": 1202,
+      "sha256": "42914607fcea2be4583b60b67089b4000673e73edb866e67249c23fad7c97240"
+    },
+    "verification/calibration-green.txt": {
+      "bytes": 822,
+      "sha256": "ba93a1369d8f567b36fda1c562521e79f6efec5bced8eb4f523289fc84961690"
+    },
+    "verification/calibration-red.txt": {
+      "bytes": 3075,
+      "sha256": "d2a6478e5075c19fffe104296fd361353e09d6e31708adc59e9da00d70658b20"
+    },
+    "verification/framework-tests.txt": {
+      "bytes": 12887,
+      "sha256": "7ab4ae05f6b18c1cba246a746289b7808ef566fecd70fc355444adcdfd5abf26"
+    },
+    "verification/frontend-build.txt": {
+      "bytes": 10089,
+      "sha256": "809e71c0a0d13743ef2fb7cc041cc13f0666f55fc6f41ca37cb7a3bd77ebae1f"
+    },
+    "verification/frontend-lint.txt": {
+      "bytes": 154,
+      "sha256": "4321666303f008ce0f78231127667b1eeae4efa681dd80a82c5be7ff23319dc2"
+    },
+    "verification/frontend-tests.txt": {
+      "bytes": 32009,
+      "sha256": "10a49bdc78fb345b2d01f5367e3bcdc24daf6490a028e59e8ef133f18efbd957"
+    },
+    "verification/frontend-typecheck.txt": {
+      "bytes": 183,
+      "sha256": "7be8433d14ffa09fa00c108aa22db62ceb3793dfaf9d736812f5fbc3f0ef09df"
+    },
+    "verification/full-baseline-freeze.sha256": {
+      "bytes": 1202,
+      "sha256": "1b1c0321e90c3302a172724880bfc68f9b846e59beff1f09b83cd5d886035a2e"
+    },
+    "verification/full-baseline.txt": {
+      "bytes": 31425,
+      "sha256": "aa8e8b972b528605f88496d562ae72b92bf43f705d1df9398e0869210e673863"
+    },
+    "verification/independent-controls.txt": {
+      "bytes": 702,
+      "sha256": "714dde158f2b6c5c995da3a46a5caf23af87a4ec0d1adb50070b8c549ef6b4c5"
+    },
+    "verification/independent-energy.txt": {
+      "bytes": 729,
+      "sha256": "28028d3b07ad8b2e78e14942ab905f8bb8211cc587559a1a5a4a0577d9509eb7"
+    },
+    "verification/independent-scroll.txt": {
+      "bytes": 541,
+      "sha256": "b27f37acaf0b47488c9de6794b8fb802358a02a67b826e88e00549e51f6d4495"
+    },
+    "verification/visual-repeat.txt": {
+      "bytes": 797,
+      "sha256": "06be2201da4e02283a181b8e1c3f47f854a710d435c1b69e3153917731f707f0"
+    },
+    "calibration/followup/report.json": {
+      "bytes": 7128816,
+      "sha256": "6d48d5d1ea0b386c5d5c8fe857cc4fadfcc8fa0aec256c986c609989c7cc8143"
+    },
+    "calibration/followup/report.md": {
+      "bytes": 98653,
+      "sha256": "4d2ebd0ff8340a20b56f1c599ce49db356c141c0eaedae2464138333c59f4158"
+    },
+    "calibration/visual-repeat/report.json": {
+      "bytes": 489732,
+      "sha256": "9a19a5a6437ebc525594c6e87e6fc0ac24c6d86f9a462d7bac3bc0c95d173ec5"
+    },
+    "calibration/visual-repeat/report.md": {
+      "bytes": 4290,
+      "sha256": "684ed2797aacb0b6d8d88f559f1286ada310f04f9b635c3ce606baa2c68d79e9"
+    }
+  }
+}
