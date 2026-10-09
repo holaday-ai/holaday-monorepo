@@ -82,7 +82,13 @@ export async function responseErrorDiagnostics(
       /* malformed or stalled diagnostics never mask the HTTP status */
     } finally {
       clearTimeout(timer);
-      cleanup(() => reader.cancel());
+      cleanup(async () => {
+        try {
+          await reader.cancel();
+        } finally {
+          reader.releaseLock();
+        }
+      });
     }
   }
   const error =
