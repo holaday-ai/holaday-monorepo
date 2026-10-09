@@ -310,6 +310,13 @@ describe('Supercar browser ownership checkpoints', () => {
     expect(JSON.stringify(bodies[1])).toContain('viewport changed');
   });
 
+  it('shows a safe authentication reason without the provider body', async () => {
+    const adapter = qwenTransport(async () => { throw new Error('unused'); });
+    adapter.create = async () => { throw new MessagesAdapterError('PROVIDER_ERROR', 'private provider body', 401); };
+    const result = await runProductionBrowser({ taskId: 'qwen-auth', intent: '核对网页', messagesAdapter: adapter, executor: fixture(async () => {}).executor });
+    expect(result).toMatchObject({ status: 'failed', reason: '模型服务认证失败，请联系管理员检查服务配置。' });
+  });
+
   it('classifies Qwen transport timeout as timeout rather than generic failure', async () => {
     const adapter = qwenTransport(async () => {
       throw new Error('unused network boundary');

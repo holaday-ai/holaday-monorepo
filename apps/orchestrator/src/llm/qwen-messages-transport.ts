@@ -1,6 +1,11 @@
 import type { AnthropicCompatibleClient } from './messages-adapter.js';
 import { type ModelConcurrencyGate, modelConcurrencyGate } from './model-concurrency.js';
 import { runModelOperation } from './model-operation.js';
+import {
+  type ProviderErrorDiagnostics,
+  responseErrorDiagnostics,
+  safeProviderDiagnostics,
+} from './provider-error-diagnostics.js';
 import type { QwenRoute } from './qwen-route.js';
 
 export type QwenTransportErrorCode =
@@ -18,12 +23,16 @@ const SAFE_ERROR_MESSAGES: Record<QwenTransportErrorCode, string> = {
   PROVIDER_ERROR: 'Qwen transport request failed',
 };
 
-const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504]);
+const isRetryableStatus = (status: number) =>
+  status === 408 || status === 429 || (status >= 500 && status <= 599);
 
 export class QwenTransportError extends Error {
   constructor(
     public readonly code: QwenTransportErrorCode,
     public readonly status: number | null = null,
+    public readonly diagnostics: ProviderErrorDiagnostics = safeProviderDiagnostics({
+      httpStatus: status,
+    }),
   ) {
     super(SAFE_ERROR_MESSAGES[code]);
     this.name = 'QwenTransportError';
@@ -48,6 +57,7 @@ export function createQwenMessagesTransport(input: {
     messages: {
       async create(request, options) {
         return runModelOperation(async (operation) => {
+          const startedAt = Date.now();
           const maxRetries = normalizeMaxRetries(options?.maxRetries);
           const controller = new AbortController();
           let callerAborted = options?.signal?.aborted ?? false;
@@ -60,16 +70,19 @@ export function createQwenMessagesTransport(input: {
           };
           options?.signal?.addEventListener('abort', abortFromCaller, { once: true });
 
-          const timeoutId =
-            options?.timeout !== undefined && options.timeout > 0
-              ? setTimeout(() => {
-                  timedOut = true;
-                  operation.markUnknown();
-                  controller.abort();
-                }, options.timeout)
-              : undefined;
+          // Includes queue wait, all retries, backoff and response-body consumption.
+          const timeoutMs =
+            Number.isFinite(options?.timeout) && (options?.timeout ?? 0) > 0
+              ? Math.min(120_000, options?.timeout ?? 120_000)
+              : 120_000;
+          const timeoutId = setTimeout(() => {
+            timedOut = true;
+            operation.markUnknown();
+            controller.abort();
+          }, timeoutMs);
 
           let releaseSlot: (() => void) | undefined;
+          let retries = 0;
           try {
             if (callerAborted) throw new QwenTransportError('REQUEST_ABORTED');
             try {
@@ -85,6 +98,7 @@ export function createQwenMessagesTransport(input: {
             }
 
             for (let attempt = 0; ; attempt += 1) {
+              retries = attempt;
               if (controller.signal.aborted) throwAbortError({ callerAborted, timedOut });
               let response: Response;
               try {
@@ -111,7 +125,16 @@ export function createQwenMessagesTransport(input: {
                 }
                 // A network error before any response (reset, refused, TLS
                 // failure) is retried like a 502/503 within the same deadline.
-                if (attempt >= maxRetries) throw new QwenTransportError('PROVIDER_ERROR');
+                if (attempt >= maxRetries)
+                  throw new QwenTransportError(
+                    'PROVIDER_ERROR',
+                    null,
+                    safeProviderDiagnostics({
+                      retryCount: attempt,
+                      elapsedMs: Date.now() - startedAt,
+                      providerType: 'network_error',
+                    }),
+                  );
                 await waitForRetry(retryBaseDelayMs * 2 ** attempt, controller.signal, () => ({
                   callerAborted,
                   timedOut,
@@ -136,21 +159,18 @@ export function createQwenMessagesTransport(input: {
                 }
               }
 
-              // Dispose the previous HTTP body before starting a retry. The final
-              // error remains independent of disposal so callers are not delayed.
-              let disposed!: Promise<unknown>;
-              operation.cleanup(() => {
-                disposed = Promise.resolve().then(() => response.body?.cancel());
-                return disposed;
-              });
-
-              if (!RETRYABLE_STATUS_CODES.has(response.status) || attempt >= maxRetries) {
-                throw new QwenTransportError('PROVIDER_ERROR', response.status);
-              }
-              try {
-                await disposed;
-              } catch {
-                throw new QwenTransportError('PROVIDER_ERROR', response.status);
+              const diagnostics = await operation.run(() =>
+                responseErrorDiagnostics(
+                  response,
+                  Date.now() - startedAt,
+                  attempt,
+                  operation.cleanup,
+                  [input.route.apiKey, input.route.workspaceId ?? ''],
+                ),
+              );
+              if (controller.signal.aborted) throwAbortError({ callerAborted, timedOut });
+              if (!isRetryableStatus(response.status) || attempt >= maxRetries) {
+                throw new QwenTransportError('PROVIDER_ERROR', response.status, diagnostics);
               }
 
               await waitForRetry(retryBaseDelayMs * 2 ** attempt, controller.signal, () => ({
@@ -158,6 +178,18 @@ export function createQwenMessagesTransport(input: {
                 timedOut,
               }));
             }
+          } catch (error) {
+            if (error instanceof QwenTransportError)
+              throw new QwenTransportError(
+                error.code,
+                error.status,
+                safeProviderDiagnostics({
+                  ...error.diagnostics,
+                  elapsedMs: Date.now() - startedAt,
+                  retryCount: retries,
+                }),
+              );
+            throw error;
           } finally {
             releaseSlot?.();
             if (timeoutId !== undefined) clearTimeout(timeoutId);
@@ -170,11 +202,19 @@ export function createQwenMessagesTransport(input: {
 }
 
 function normalizeMaxRetries(value: number | undefined): number {
-  return value === undefined ? 2 : Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  return value === undefined
+    ? 2
+    : Number.isSafeInteger(value) && value >= 0
+      ? Math.min(2, value)
+      : 0;
 }
 
 function normalizeRetryBaseDelay(value: number | undefined): number {
-  return value === undefined ? 250 : Number.isFinite(value) && value >= 0 ? value : 0;
+  return value === undefined
+    ? 250
+    : Number.isFinite(value) && value >= 0
+      ? Math.min(2000, value)
+      : 0;
 }
 
 async function waitForRetry(

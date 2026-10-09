@@ -1,5 +1,6 @@
 import { recordScopedModelCall } from '../agent/media-call-recorder.js';
 import { recordCoreModelObservation } from './core-model-observation.js';
+import { MessagesAdapterError } from './messages-adapter.js';
 import {
   type MessagesAdapter,
   type QwenMessagesEnvironment,
@@ -16,6 +17,7 @@ import {
   type ModelRuntimePolicy,
   resolveCoreModelLaneAccess,
 } from './model-runtime-policy.js';
+import { safeProviderDiagnostics } from './provider-error-diagnostics.js';
 import { type QwenPurpose, QwenRouteError, resolveQwenRoute } from './qwen-route.js';
 import { type ResponsesAdapter, createQwenResponsesAdapter } from './responses-adapter.js';
 
@@ -203,7 +205,17 @@ function observeMessagesAdapter(
             outputTokens: null,
             latencyMs,
             status: 'error',
-            requestMeta: { lane },
+            errorMessage: error instanceof MessagesAdapterError ? error.code : 'PROVIDER_ERROR',
+            providerRequestId:
+              error instanceof MessagesAdapterError
+                ? (error.diagnostics.requestId ?? undefined)
+                : undefined,
+            requestMeta: {
+              lane,
+              ...(error instanceof MessagesAdapterError
+                ? { providerError: safeProviderDiagnostics(error.diagnostics) }
+                : {}),
+            },
           });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),

@@ -3,6 +3,7 @@ import {
   MessagesAdapterError,
   type NeutralMessagesResponse,
 } from '../../llm/messages-adapter.js';
+import { safeProviderDiagnostics } from '../../llm/provider-error-diagnostics.js';
 import type { LlmCallRecord, LlmCallRecorder } from '../llm-call-recorder.js';
 
 /** Record at the actual adapter boundary, even when the loop discards a stale response. */
@@ -52,6 +53,15 @@ export function recordedBrowserAdapter(
           status: 'error',
           // No provider bodies, credentials, prompts or URLs in the accounting record.
           errorMessage: error instanceof MessagesAdapterError ? error.code : 'PROVIDER_ERROR',
+          ...(error instanceof MessagesAdapterError
+            ? {
+                providerRequestId: error.diagnostics.requestId ?? undefined,
+                requestMeta: {
+                  ...base.requestMeta,
+                  providerError: safeProviderDiagnostics(error.diagnostics),
+                },
+              }
+            : {}),
         });
         throw error;
       }

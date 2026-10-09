@@ -1028,3 +1028,58 @@ describe('批次 11.1：⑦ 报告期一致性（勿删）', () => {
     expect(warns.some((w) => w.obj?.subReason === 'period_mismatch')).toBe(false);
   });
 });
+
+it('uses actual quote and report period in both deterministic seven-dimension report and model input', async () => {
+  const client = fakeClient();
+  client.getStockQuote = async () =>
+    env([{ 代码: '600519', 最新价: 1272.08, 涨跌幅: 1.3, 行情时间: '2026-10-09 11:30:00' }]);
+  client.getStockAnnouncements = async () =>
+    env(
+      [1, 2, 3].map((i) => ({
+        公告标题: `录制契约公告${i}`,
+        公告时间: '2026-10-09',
+        公告链接: `https://www.cninfo.com.cn/new/disclosure/detail?announcementId=fixture${i}`,
+      })),
+    );
+  let input = '';
+  const r = await runAsharePanorama(
+    {
+      client,
+      now: new Date('2026-10-09T03:41:00Z'),
+      riskRadar: true,
+      logger: fakeLogger().logger,
+      interpret: async (x) => {
+        input = x.user;
+        return '';
+      },
+    },
+    { ...MATCH, dateIso: '2026-10-09', dateCompact: '20261009' },
+  );
+  expect(r.answer).toContain('1,272.08');
+  expect(r.answer).toContain('2026-10-09 11:30:00');
+  expect(r.answer).toContain('11:41');
+  expect(r.answer).toContain('2026Q1财报');
+  expect(r.answer.match(/\]\(https:\/\/www.cninfo.com.cn/g)?.length).toBeGreaterThanOrEqual(3);
+  expect(input).toContain('1,272.08');
+  expect(input).toContain('2026Q1');
+});
+
+it('failed risk sources are unavailable rather than negative evidence', async () => {
+  const client = fakeClient();
+  const unavailable = async () => ({
+    ...env([]),
+    error: 'unavailable',
+    error_code: 'UPSTREAM_TIMEOUT',
+  });
+  client.getRiskPledge = unavailable;
+  client.getRiskGoodwill = unavailable;
+  client.getRiskForecast = unavailable;
+  client.getRiskInsider = unavailable;
+  client.getStockAnnouncements = unavailable;
+  const r = await runAsharePanorama(
+    { client, now: NOW, riskRadar: true, logger: fakeLogger().logger, interpret: async () => '' },
+    MATCH,
+  );
+  expect(r.answer).toContain('风险数据暂不可用');
+  expect(r.answer).not.toContain('未检测到上述风险信号');
+});

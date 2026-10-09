@@ -1,3 +1,5 @@
+import { withMediaCallContext } from '../../agent/media-call-recorder.js';
+import { selectStockAnalysisInput } from '../../stocks/stock-analysis-input.js';
 import { videoRejectionReason } from '../../agent/video/video-retry-policy.js';
 import { decideUserBrowserRoute } from '../../agent/supercar/user-browser-routing.js';
 import { runOtaUserBrowserTask } from '../../agent/supercar/ota-user-browser-runner.js';
@@ -270,7 +272,6 @@ import {
   runResponseLayerForLane,
   stampResponseLayerColumns,
 } from '../../response-layer/lane-integration.js';
-import { SnapshotAkshareClient } from '../../stocks/snapshot-akshare-client.js';
 import {
   type ValidatedStockTaskContext,
   publicStockTaskContext,
@@ -2914,15 +2915,16 @@ export const tasksRouter = router({
             symbol: stock.symbol,
             displayName: stock.displayName,
           }));
-      const aksClient = validatedStockContext
-        ? new SnapshotAkshareClient(validatedStockContext.snapshotPayload)
-        : new (await import('../../agent/a-share/akshare-http-client.js')).HttpAkshareClient({
-            baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
-            logger: ctx.logger,
-          });
-      const stockAnalysisNow = validatedStockContext
-        ? new Date(`${validatedStockContext.dataAsOf}T07:00:00.000Z`)
-        : new Date();
+      const stockAnalysis = selectStockAnalysisInput(
+        validatedStockContext,
+        new (await import('../../agent/a-share/akshare-http-client.js')).HttpAkshareClient({
+          baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+          logger: ctx.logger,
+        }),
+        new Date(),
+      );
+      const aksClient = stockAnalysis.client;
+      const stockAnalysisNow = stockAnalysis.submittedAt;
       const publicValidatedStockContext = publicStockTaskContext(validatedStockContext);
       const stockAnswerPrefix = validatedStockContext
         ? `分析基于 ${validatedStockContext.dataAsOf} 数据。\n\n`
@@ -2943,7 +2945,7 @@ export const tasksRouter = router({
         // 上下文内：命中个股 → 个股 lane；指数/大盘问句 → 指数 lane；命中信号但无个股/非
         // 指数 → 引导兜底；无信号 → 放行通用。
         const r = await resolveAshareInContext(
-          { intent: input.intent, watchlist, now: stockAnalysisNow },
+          { intent: input.intent, watchlist, now: stockAnalysis.matchNow },
           searchFn,
         );
         ashareQaMatch = r.match;
@@ -2956,7 +2958,7 @@ export const tasksRouter = router({
             intent: input.intent,
             roleId: taskSkillId ?? null,
             watchlist,
-            now: stockAnalysisNow,
+            now: stockAnalysis.matchNow,
           },
           searchFn,
         );
@@ -3022,7 +3024,13 @@ export const tasksRouter = router({
           };
         }
 
-        void runTaskBackground(ctx, async (ctx) => (async () => {
+        void runTaskBackground(ctx, async (ctx) => withMediaCallContext({
+          recorder: new DrizzleLlmCallRecorder(ctx.db, {
+            onError: () => ctx.logger.warn({ taskId, code: 'LLM_ACCOUNTING_WRITE_FAILED' }, 'ashare: accounting unavailable'),
+          }),
+          userExternalId: ctx.userId,
+          taskExternalId: taskId,
+        }, async () => {
           const { runAshareQa, runAsharePanorama } = await import(
             '../../agent/a-share/ashare-qa-runner.js'
           );
@@ -3132,7 +3140,7 @@ export const tasksRouter = router({
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-qa: persist/broadcast failed');
           }
-        })());
+        }));
 
         return {
           taskId,
@@ -3734,6 +3742,7 @@ export const tasksRouter = router({
                 skillId: dispatchSkillId,
                 expertMode: expertModeOverride,
                 responsesAdapter: generateResponsesAdapter,
+                firecrawl: ctx.firecrawl ?? null,
                 ...(executionPlan ? { executionPlan } : {}),
                 logger: ctx.logger,
                 ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
@@ -4358,6 +4367,7 @@ export const tasksRouter = router({
                   skillId: dispatchSkillId,
                   expertMode: expertModeOverride,
                   responsesAdapter: fallbackGenerateResponsesAdapter,
+                  firecrawl: ctx.firecrawl ?? null,
                   logger: ctx.logger,
                   ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
                   onStreamDelta: (delta) => {
@@ -6282,6 +6292,7 @@ export const tasksRouter = router({
                       skillId: dispatchSkillId,
                       expertMode: expertModeOverride,
                       responsesAdapter: handoffGenerateResponsesAdapter,
+                      firecrawl: ctx.firecrawl ?? null,
                       logger: ctx.logger,
                       ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
                       onStreamDelta: (delta) => {
@@ -9942,6 +9953,7 @@ export const tasksRouter = router({
                   ...(parkRow!.roleId ? { skillId: parkRow!.roleId } : {}),
                   expertMode: parkedExpertMode,
                   responsesAdapter: resumeGenerateResponsesAdapter,
+                  firecrawl: ctx.firecrawl ?? null,
                   logger: ctx.logger,
                   // F2 — pass user-uploaded attachments through to the
                   // generate runner so a parked-from-generate task that
