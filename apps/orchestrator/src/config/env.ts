@@ -262,6 +262,8 @@ const baseEnvSchema = z.object({
    */
   // Batch 08 (qwen3.8-max, 30 tasks): unified 85.7% vs legacy 60.7% → default
   // unified; BROWSER_EXECUTOR=legacy is the rollback to the coordinate loop.
+  BROWSER_OBSERVATION_V2: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
+  BROWSER_REPLAY_V1: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
   BROWSER_EXECUTOR: z.enum(['legacy', 'unified']).default('unified'),
   BROWSER_VIEWPORT_V2: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
   QWEN_CORE_ENABLED_LANES: z.string().default(''),

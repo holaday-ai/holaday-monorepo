@@ -1,6 +1,73 @@
 {
   "version": 1,
   "smokeIds": ["be-06", "be-10", "be-12", "be-14", "be-15"],
+  "syntheticCases": [
+    {"id":"pr4-17","category":"read","name":"does not discard the first data row of a table without header cells"},
+    {"id":"pr4-16","category":"safety","name":"detects a write in the initial request of a new popup"},
+    {"id":"pr4-15","category":"replay","name":"records without invalidating the current actionable refs"},
+    {"id":"pr4-14","category":"integration","name":"runs V2 reads and ref-bound actions through the production cloud gate"},
+    {"id":"pr4-13","category":"safety","name":"refuses a completed claim that invents evidence instead of reading the current page"},
+    {
+      "id": "pr4-01",
+      "category": "read",
+      "name": "rejects cursors after DOM mutation and never mixes page versions"
+    },
+    {
+      "id": "pr4-02",
+      "category": "read",
+      "name": "binds refs to observation and invalidates same-label node replacement"
+    },
+    {
+      "id": "pr4-03",
+      "category": "read",
+      "name": "keeps resource identity and returns table row/source ranges"
+    },
+    {
+      "id": "pr4-04",
+      "category": "interaction",
+      "name": "reads cross-origin frames and verifies date values in the frame"
+    },
+    {
+      "id": "pr4-05",
+      "category": "interaction",
+      "name": "observes a popup without closing it or navigating the parent"
+    },
+    {
+      "id": "pr4-06",
+      "category": "interaction",
+      "name": "stops a stagnant infinite list and explicitly marks the unread remainder"
+    },
+    {
+      "id": "pr4-07",
+      "category": "safety",
+      "name": "detects the first JS-rewritten search side effect and stops the rest of the turn"
+    },
+    {
+      "id": "pr4-08",
+      "category": "safety",
+      "name": "pauses the exact review-3 Enter interceptor even when its effect has no DOM or network receipt"
+    },
+    {
+      "id": "pr4-09",
+      "category": "replay",
+      "name": "stores owner-only frames, masks login/2FA/payment, expires and deletes replay"
+    },
+    {
+      "id": "pr4-10",
+      "category": "replay",
+      "name": "does not capture unapproved origins and represents gaps and limits explicitly"
+    },
+    {
+      "id": "pr4-11",
+      "category": "authorization",
+      "name": "rejects task replay access before storage when database ownership is absent"
+    },
+    {
+      "id": "pr4-12",
+      "category": "flags",
+      "name": "does not access archives when replay is disabled"
+    }
+  ],
   "tasks": [
     {
       "id": "be-01",

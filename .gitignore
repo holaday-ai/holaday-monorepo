@@ -62,3 +62,7 @@ apps/web-workbench/e2e/.auth/
 apps/web-workbench/e2e/artifacts/
 apps/web-workbench/test-results/
 apps/web-workbench/playwright-report/
+
+# Private browser replay archives
+var/browser-replay/
+apps/orchestrator/var/browser-replay/

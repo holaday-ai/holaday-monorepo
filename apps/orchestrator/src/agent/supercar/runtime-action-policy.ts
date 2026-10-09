@@ -25,7 +25,7 @@ export interface RuntimeActionVerdict {
 const IRREVERSIBLE_CONTROL_RE =
   /确认付款|确认支付|立即支付|去支付|付款|支付|提交订单|确认订单|立即下单|下单|购买|立即购买|结算|确认预订|提交预订|立即预订|转账|汇款|提现|充值|永久删除|删除账号|删除账户|删除文件|删除任务|删除项目|清空|发送消息|发送邮件|发送|发布|发表|公开分享|分享给|转发|授权扣款|自动扣费|confirm\w*(?:pay|order|booking)|paynow|proceed\w*pay|place\w*order|submit\w*order|checkout|purchase|buy\w*now|transfer|withdraw|delete|remove|publish|send|share/i;
 
-const TRANSACTION_PAGE_RE =
+export const TRANSACTION_PAGE_RE =
   /(?:\/|\b)(?:checkout|payment|cashier|order[-_/]?confirm|confirm[-_/]?order|order[-_/]?submit|submit[-_/]?order|booking\/confirm|settlement|pay)(?:\/|\b)|订单提交/i;
 
 const TRANSACTION_CONTEXT_RE =

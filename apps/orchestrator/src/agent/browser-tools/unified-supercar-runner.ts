@@ -1,3 +1,6 @@
+import { env } from '../../config/env.js';
+import { browserReplayStore } from './browser-replay-service.js';
+import { BrowserReplayRecorder } from './browser-replay.js';
 import { reviewListAnswer } from '../../execution/answer-verifier.js';
 import { browserOutputGuidance } from '../../execution/execution-contract.js';
 import { getContract } from '../../execution/execution-pipeline.js';
@@ -121,7 +124,24 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       toolsUsed: [],
     };
   }
-  const tools = createPlaywrightUnifiedExecutor(page);
+  const tools = createPlaywrightUnifiedExecutor(page, {
+    observationV2: env.BROWSER_OBSERVATION_V2,
+  });
+  const replay =
+    env.BROWSER_REPLAY_V1 && opts.userExternalId
+      ? new BrowserReplayRecorder(browserReplayStore, opts.userExternalId, opts.taskId, new Set())
+      : null;
+  let replayActionId = 0;
+  let sampling = false;
+  const replayTimer = replay
+    ? setInterval(() => {
+        if (sampling || replay.isPaused) return;
+        sampling = true;
+        void replay.capture(page, `sample-${replayActionId}`, 'sample').finally(() => {
+          sampling = false;
+        });
+      }, 1000)
+    : undefined;
   // Same llm_calls accounting as the legacy loop (cost, usage, per-task totals).
   const baseAdapter = opts.messagesAdapter;
   let modelTurn = 0;
@@ -191,46 +211,79 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     question: string,
     awaitingKind: SupercarAwaitingKind,
   ): Promise<string | null> => {
-    await safe(() =>
-      opts.onAwaitingUser?.({
-        question,
-        at: new Date(),
-        currentUrl: page.url(),
-        awaitingKind,
-      }),
-    );
-    if (controller.signal.aborted) return null;
-    return new Promise<string | null>((resolve) => {
-      const timer = setTimeout(() => {
-        parked.delete(opts.taskId);
-        resolve(null);
-      }, HANDOFF_WAIT_MS);
-      parked.set(opts.taskId, {
-        resolve: (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        abort: () => resolve(null),
-        intent: opts.intent,
+    await replay?.pause();
+    try {
+      await safe(() =>
+        opts.onAwaitingUser?.({
+          question,
+          at: new Date(),
+          currentUrl: page.url(),
+          awaitingKind,
+        }),
+      );
+      if (controller.signal.aborted) return null;
+      return await new Promise<string | null>((resolve) => {
+        const timer = setTimeout(() => {
+          parked.delete(opts.taskId);
+          resolve(null);
+        }, HANDOFF_WAIT_MS);
+        parked.set(opts.taskId, {
+          resolve: (value) => {
+            clearTimeout(timer);
+            resolve(value);
+          },
+          abort: () => resolve(null),
+          intent: opts.intent,
+        });
       });
-    });
+    } finally {
+      replay?.resume();
+    }
   };
   // Runtime safety boundary: the same LIVE-VETO the legacy loop applies before
   // each live write. tasks.create passes classifyRuntimeAction; a caller that
   // passes nothing still gets it — the gate is never silently off.
-  const gateAction = createUnifiedActionGate({
-    page,
-    onBeforeAction: opts.onBeforeAction ?? classifyRuntimeAction,
-    labelForRef: (ref) => labelForRef(lastSnapshot, ref),
-    park: parkForReply,
-    aborted: () => controller.signal.aborted,
-    stillLive: async () =>
-      !controller.signal.aborted &&
-      !(await Promise.resolve(opts.isTaskCancelled?.()).catch(() => true)),
-  });
+  const baseGateAction = (targetPage: typeof page) =>
+    createUnifiedActionGate({
+      page: targetPage,
+      locatorForAction: (action, ref) =>
+        tools.observation?.locator(tools.observation.resolve(action).frame, ref) ??
+        targetPage.locator(`aria-ref=${ref}`),
+      frameForAction: (action) =>
+        tools.observation?.resolve(action).frame ?? targetPage.mainFrame(),
+      onBeforeAction: opts.onBeforeAction ?? classifyRuntimeAction,
+      labelForRef: (ref) => labelForRef(lastSnapshot, ref),
+      park: parkForReply,
+      aborted: () => controller.signal.aborted,
+      stillLive: async () =>
+        !controller.signal.aborted &&
+        !(await Promise.resolve(opts.isTaskCancelled?.()).catch(() => true)),
+    });
 
+  const gateAction = async (action: UnifiedBrowserAction, phase: 'before' | 'after') => {
+    if (phase === 'before' && tools.observation) {
+      try {
+        await tools.observation.validate(action);
+      } catch {
+        return { kind: 'skip' as const, message: '页面或 ref 已失效，请重新 read_page。' };
+      }
+    }
+    const targetPage = tools.observation?.resolve(action).page ?? page;
+    const result = await baseGateAction(targetPage)(action, phase);
+    if (result.kind === 'proceed' && replay) {
+      try {
+        // Authorization comes from the host gate, never from page text.
+        const url =
+          action.tool === 'navigate' && phase === 'before' ? action.url : targetPage.url();
+        if (/^https?:/.test(url)) replay.authorize(new URL(url).origin);
+      } catch {}
+    }
+    return result;
+  };
   try {
     const outcome = await runUnifiedBrowserLoop({
+      observationV2: env.BROWSER_OBSERVATION_V2,
+      checkInterruption: () => tools.observation?.interruption(),
       intent: guidance ? `${opts.intent}\n\n【结果要求】\n${guidance}` : opts.intent,
       ...(contract && guidance
         ? { reviewFinish: (summary: string) => reviewListAnswer(contract, summary) }
@@ -241,7 +294,17 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       maxSteps: opts.maxIterations ?? 40,
       signal: controller.signal,
       async execute(action) {
+        const id = `action-${++replayActionId}`;
+        const targetPage = tools.observation?.page ?? page;
+        await replay?.capture(targetPage, id, 'before');
         const result = await tools.execute(action);
+        page = tools.observation?.page ?? page;
+        await replay?.capture(
+          page,
+          id,
+          result.ok && !result.interruption ? 'after' : 'failure',
+          result.ok ? 'ok' : 'failed',
+        );
         iteration += 1;
         toolsUsed.add(action.tool);
         if (action.tool === 'snapshot' && result.ok) lastSnapshot = result.text;
@@ -355,6 +418,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         };
     }
   } finally {
+    if (replayTimer) clearInterval(replayTimer);
+    await replay?.dispose();
+    tools.dispose();
     if (timeout) clearTimeout(timeout);
     clearInterval(cancelPoll);
     running.delete(opts.taskId);

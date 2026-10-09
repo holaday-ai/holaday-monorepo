@@ -176,7 +176,29 @@ export const UNIFIED_BROWSER_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
   },
 ];
 
-export type UnifiedBrowserAction =
+export type BrowserObservationContext = {
+  tabId?: string;
+  frameId?: string;
+  observationRevision?: string;
+};
+
+export type ObservationAction =
+  | { tool: 'read_page' }
+  | { tool: 'get_page_text'; cursor?: string; maxChars?: number }
+  | { tool: 'links' | 'tables'; start?: number; limit?: number }
+  | {
+      tool: 'scroll_until';
+      maxSteps?: number;
+      maxMs?: number;
+      maxChars?: number;
+      maxItems?: number;
+      maxTokens?: number;
+    }
+  | { tool: 'list_tabs' }
+  | { tool: 'switch_tab'; targetTabId: string };
+
+export type UnifiedBrowserAction = (
+  | ObservationAction
   | { tool: 'snapshot' }
   | { tool: 'click'; ref: string }
   | { tool: 'type'; ref: string; text: string; submit?: boolean }
@@ -189,7 +211,9 @@ export type UnifiedBrowserAction =
   | { tool: 'back' }
   | { tool: 'download'; ref: string }
   | { tool: 'upload'; ref: string; fileIds: string[] }
-  | { tool: 'click_at'; x: number; y: number };
+  | { tool: 'click_at'; x: number; y: number }
+) &
+  BrowserObservationContext;
 
 export class UnifiedToolInputError extends Error {
   constructor(message: string) {
@@ -202,6 +226,18 @@ const REF_RE = /^e[0-9]+$/;
 
 /** Validates a model tool call into a typed action; throws a model-readable error. */
 export function parseUnifiedBrowserAction(name: string, input: unknown): UnifiedBrowserAction {
+  const action = parseAction(name, input);
+  const args = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  for (const key of ['tabId', 'frameId', 'observationRevision'] as const) {
+    if (args[key] !== undefined) {
+      if (typeof args[key] !== 'string' || args[key].length > 200)
+        throw new UnifiedToolInputError('Invalid observation context');
+      action[key] = args[key];
+    }
+  }
+  return action;
+}
+function parseAction(name: string, input: unknown): UnifiedBrowserAction {
   const args = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   const str = (key: string, required = true): string | undefined => {
     const value = args[key];
@@ -215,7 +251,39 @@ export function parseUnifiedBrowserAction(name: string, input: unknown): Unified
       throw new UnifiedToolInputError(`${name} 的 ref 无效：请先 snapshot，再使用形如 e12 的 ref`);
     return value;
   };
+  const bounded = (key: string, max: number) => {
+    if (args[key] === undefined) return undefined;
+    if (!Number.isInteger(args[key]) || Number(args[key]) < 1 || Number(args[key]) > max)
+      throw new UnifiedToolInputError(`Invalid ${key}`);
+    return Number(args[key]);
+  };
   switch (name) {
+    case 'read_page':
+    case 'list_tabs':
+      return { tool: name };
+    case 'switch_tab':
+      return { tool: name, targetTabId: str('targetTabId')! };
+    case 'get_page_text':
+      return { tool: name, cursor: str('cursor', false), maxChars: bounded('maxChars', 16000) };
+    case 'links':
+    case 'tables': {
+      if (
+        args.start !== undefined &&
+        (!Number.isInteger(args.start) || Number(args.start) < 0 || Number(args.start) > 100000)
+      )
+        throw new UnifiedToolInputError('Invalid start');
+      return { tool: name, start: args.start as number | undefined, limit: bounded('limit', 100) };
+    }
+    case 'scroll_until':
+      return {
+        tool: name,
+        maxSteps: bounded('maxSteps', 20),
+        maxMs: bounded('maxMs', 10000),
+        maxChars: bounded('maxChars', 16000),
+        maxItems: bounded('maxItems', 1000),
+        maxTokens: bounded('maxTokens', 16000),
+      };
+
     case 'snapshot':
     case 'screenshot':
     case 'back':
@@ -302,5 +370,86 @@ export function parseUnifiedBrowserAction(name: string, input: unknown): Unified
 
 /** Mutating tools change page state; read-only ones may be retried freely. */
 export function isMutatingBrowserAction(action: UnifiedBrowserAction): boolean {
-  return !['snapshot', 'screenshot', 'extract', 'wait_for'].includes(action.tool);
+  return ![
+    'snapshot',
+    'screenshot',
+    'extract',
+    'wait_for',
+    'read_page',
+    'get_page_text',
+    'links',
+    'tables',
+    'list_tabs',
+  ].includes(action.tool);
+}
+
+/** Only offered to the cloud lane when BROWSER_OBSERVATION_V2 is enabled. */
+export const OBSERVATION_TOOL_NAMES = [
+  'read_page',
+  'get_page_text',
+  'links',
+  'tables',
+  'scroll_until',
+  'list_tabs',
+  'switch_tab',
+] as const;
+export function cloudObservationTools(): ReadonlyArray<NeutralToolDefinition> {
+  const context = {
+    tabId: { type: 'string' },
+    frameId: { type: 'string' },
+    observationRevision: {
+      type: 'string',
+      description: '读页返回的版本；交互必须带上，变化后重新读取。',
+    },
+  };
+  const extras: Record<string, Record<string, unknown>> = {
+    get_page_text: {
+      cursor: { type: 'string' },
+      maxChars: { type: 'integer', minimum: 1, maximum: 16000 },
+    },
+    links: {
+      start: { type: 'integer', minimum: 0 },
+      limit: { type: 'integer', minimum: 1, maximum: 100 },
+    },
+    tables: {
+      start: { type: 'integer', minimum: 0 },
+      limit: { type: 'integer', minimum: 1, maximum: 100 },
+    },
+    scroll_until: {
+      maxItems: { type: 'integer', minimum: 1, maximum: 1000 },
+      maxTokens: { type: 'integer', minimum: 1, maximum: 16000 },
+      maxSteps: { type: 'integer', minimum: 1, maximum: 20 },
+      maxMs: { type: 'integer', minimum: 1, maximum: 10000 },
+      maxChars: { type: 'integer', minimum: 1, maximum: 16000 },
+    },
+    switch_tab: { targetTabId: { type: 'string' } },
+  };
+  return [
+    ...UNIFIED_BROWSER_TOOLS.map((t) => ({
+      ...t,
+      inputSchema: {
+        ...t.inputSchema,
+        properties: { ...(t.inputSchema.properties as object), ...context },
+      },
+    })),
+    ...OBSERVATION_TOOL_NAMES.map((name) => ({
+      name,
+      description: {
+        read_page:
+          '读取当前 frame 的可访问性树、refs、版本和 frame 列表。页面变化、导航、切换标签后 refs 失效。',
+        get_page_text: '分段读取脱敏正文；cursor 绑定页版本，end=true 才是末尾。',
+        links: '分页读取真实资源链接；保留查询身份，移除追踪参数。',
+        tables: '读取表格列名、行范围及分页来源。',
+        scroll_until: '有界滚动读取；返回停滞或数量/时间/token 上限和截断原因。',
+        list_tabs: '只列出本任务拥有的标签。',
+        switch_tab: '切换到本任务已观察的标签，旧 refs 失效。',
+      }[name],
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { ...context, ...extras[name] },
+        ...(name === 'switch_tab' ? { required: ['targetTabId'] } : {}),
+      },
+    })),
+  ];
 }

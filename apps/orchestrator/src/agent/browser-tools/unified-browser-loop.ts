@@ -10,6 +10,8 @@ import {
   type UnifiedBrowserAction,
   UnifiedToolInputError,
   parseUnifiedBrowserAction,
+  isMutatingBrowserAction,
+  cloudObservationTools,
 } from './unified-tools.js';
 
 /** Chinese-first; the reply language follows the user. */
@@ -85,6 +87,8 @@ export interface WebSearchHit {
 }
 
 export interface UnifiedBrowserLoopInput {
+  observationV2?: boolean;
+  checkInterruption?: () => { reason: string; message: string } | undefined;
   intent: string;
   adapter: MessagesAdapter;
   execute: (action: UnifiedBrowserAction) => Promise<UnifiedToolResult>;
@@ -179,9 +183,18 @@ export async function runUnifiedBrowserLoop(
       response = await input.adapter.create(
         {
           maxTokens: 4_096,
-          system: UNIFIED_BROWSER_SYSTEM_PROMPT,
+          system:
+            UNIFIED_BROWSER_SYSTEM_PROMPT +
+            (input.observationV2
+              ? '\n当前启用云端读取：每次交互带上 read_page 返回的 observationRevision/tabId/frameId；动作后重新读取，只有实际页面证据才能完成。cursor/ref 过期须重读。'
+              : ''),
           messages: trimImages(compactToolResults(messages, input.fullPageResults)),
-          tools: input.readPage ? [...UNIFIED_LOOP_TOOLS, READ_URL_TOOL] : UNIFIED_LOOP_TOOLS,
+          tools: [
+            ...(input.observationV2
+              ? [...cloudObservationTools(), ...CONTROL_TOOLS]
+              : UNIFIED_LOOP_TOOLS),
+            ...(input.readPage ? [READ_URL_TOOL] : []),
+          ],
           toolChoice: { type: 'any' },
         },
         {
@@ -210,6 +223,8 @@ export async function runUnifiedBrowserLoop(
     let staleTurn = false;
     for (const call of calls) {
       if (call.type !== 'tool_use') continue;
+      const interruption = input.checkInterruption?.();
+      if (interruption) return { status: 'awaiting_user', ...interruption, steps: step + 1 };
       if (staleTurn) {
         results.push(
           toolResult(call.id, '未执行：页面状态已变化，请重新 snapshot 后再决定。', true),
@@ -229,6 +244,20 @@ export async function runUnifiedBrowserLoop(
         if (args.status === 'completed') {
           const given = typeof args.evidence === 'string' ? args.evidence.trim() : '';
           const evidence = given || deriveEvidence(summary, lastPageText);
+          if (
+            input.observationV2 &&
+            (!lastPageText ||
+              (given && !lastPageText.replace(/\s+/g, ' ').includes(given.replace(/\s+/g, ' '))))
+          ) {
+            results.push(
+              toolResult(
+                call.id,
+                '完成证据必须来自操作后最新 read_page/get_page_text 的实际内容，请重新读取。',
+                true,
+              ),
+            );
+            continue;
+          }
           if (!evidence) {
             results.push(
               toolResult(
@@ -316,6 +345,14 @@ export async function runUnifiedBrowserLoop(
         continue;
       }
       const outcome = await input.execute(action);
+      if (outcome.interruption)
+        return {
+          status: 'awaiting_user',
+          reason: outcome.interruption.reason,
+          message: outcome.interruption.message,
+          steps: step + 1,
+        };
+      if (input.observationV2 && isMutatingBrowserAction(action)) lastPageText = '';
       input.onStep?.({ index: step, tool: action.tool, ok: outcome.ok });
       if (outcome.ok && input.gateAction) {
         const landed = await input.gateAction(action, 'after');
@@ -326,7 +363,12 @@ export async function runUnifiedBrowserLoop(
           continue;
         }
       }
-      if (outcome.ok && (action.tool === 'snapshot' || action.tool === 'extract'))
+      if (
+        outcome.ok &&
+        ['snapshot', 'extract', 'read_page', 'get_page_text', 'tables', 'links'].includes(
+          action.tool,
+        )
+      )
         lastPageText = outcome.text;
       results.push(toolResult(call.id, outcome.text, !outcome.ok));
       if (outcome.image)
