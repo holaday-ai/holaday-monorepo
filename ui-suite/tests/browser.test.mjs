@@ -603,3 +603,22 @@ test('non-hit-testable disabled control is not occluded by its own parent', asyn
     await browser.close();
   }
 });
+
+test('native fullscreen excludes its intentionally hidden background but checks foreground overlap', async () => {
+  const browser = await chromium.launch({ args: ['--renderer-process-limit=2'] });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(
+      `<button style="position:absolute;left:-50px;top:400px">background</button><section id="full"><button onclick="document.querySelector('#full').requestFullscreen()">enter</button><button style="position:absolute;left:100px;top:100px">a</button><button style="position:absolute;left:100px;top:100px">b</button></section>`,
+    );
+    await page.getByText('enter', { exact: true }).click();
+    await page.waitForFunction(() => Boolean(document.fullscreenElement), null, { timeout: 2000 });
+    const m = await measurePage(page);
+    assert.equal(m.elements.find((e) => e.label === 'background').intentionalOverlay, true);
+    const findings = classifyGeometry(m.elements, m.width, m.height);
+    assert.ok(!findings.some((f) => f.control?.includes('background')));
+    assert.ok(findings.some((f) => f.rule === 'control-overlap'));
+  } finally {
+    await browser.close();
+  }
+});

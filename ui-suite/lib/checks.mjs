@@ -24,7 +24,7 @@ export function evaluateGate({
 export function classifyGeometry(elements, width, _height) {
   const findings = [];
   for (const e of elements) {
-    if (e.width < 1 || e.height < 1 || e.visuallyHidden) continue;
+    if (e.width < 1 || e.height < 1 || e.visuallyHidden || e.intentionalOverlay) continue;
     if (!e.horizontalScroll && (e.x < -2 || e.x + e.width > width + 2))
       findings.push({
         rule: 'viewport-clipping',
@@ -60,6 +60,8 @@ export function classifyGeometry(elements, width, _height) {
         b.paddingFor?.includes(a.id) ||
         a.visuallyHidden ||
         b.visuallyHidden ||
+        a.intentionalOverlay ||
+        b.intentionalOverlay ||
         a.inViewport === false ||
         b.inViewport === false ||
         a.layer !== b.layer ||
@@ -166,24 +168,26 @@ export async function measurePage(page) {
           !e.contains(hit) &&
           !hit.contains(e) &&
           ![...(e.labels ?? [])].some((l) => l.contains(hit));
-        const overlay = [
-          ...document.querySelectorAll(
-            'dialog[open],[role="dialog"],[role="menu"],[data-state="open"][data-radix-popper-content-wrapper]',
-          ),
-        ].find((e) => {
-          const r = e.getBoundingClientRect();
-          return (
-            r.width > 0 &&
-            r.height > 0 &&
-            getComputedStyle(e).visibility !== 'hidden' &&
-            !(
-              e.tagName === 'A' &&
-              !e.hasAttribute('href') &&
-              !e.hasAttribute('role') &&
-              !e.hasAttribute('tabindex')
-            )
-          );
-        });
+        const overlay =
+          document.fullscreenElement ??
+          [
+            ...document.querySelectorAll(
+              'dialog[open],[role="dialog"],[role="menu"],[data-state="open"][data-radix-popper-content-wrapper]',
+            ),
+          ].find((e) => {
+            const r = e.getBoundingClientRect();
+            return (
+              r.width > 0 &&
+              r.height > 0 &&
+              getComputedStyle(e).visibility !== 'hidden' &&
+              !(
+                e.tagName === 'A' &&
+                !e.hasAttribute('href') &&
+                !e.hasAttribute('role') &&
+                !e.hasAttribute('tabindex')
+              )
+            );
+          });
         return {
           id,
           label,
