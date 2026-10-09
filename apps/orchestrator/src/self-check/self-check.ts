@@ -548,13 +548,33 @@ async function timed<T>(
   }
 }
 
+/** Same-host stock adapter liveness. Root PM2 online is checked by the deployment gate. */
+export async function checkAkshare(deps: SelfCheckDeps): Promise<SelfCheckItem> {
+  let available = false;
+  try {
+    const response = await deps.fetchImpl('http://127.0.0.1:8848/health', {
+      redirect: 'error', signal: AbortSignal.timeout(deps.timeoutMs ?? 5_000),
+    });
+    if (response.status === 200) {
+      const body = await response.json() as { status?: unknown; adapter_ready?: unknown };
+      available = body?.status === 'ok' && body?.adapter_ready === true;
+    }
+  } catch { /* Never expose adapter errors or environment values. */ }
+  return item({ id: 'infra.akshare', group: 'infra', label: '股票数据服务（AkShare）' },
+    available ? { status: 'ok', reason: 'loopback 8848 健康，适配器就绪' }
+      : { status: 'fail', reason: 'loopback 8848 不可用或适配器未就绪',
+          advice: '由运维核对 akshare-mcp-http 原配置与状态；不要自动重启其他服务' });
+}
+
 export async function checkInfrastructure(deps: SelfCheckDeps): Promise<SelfCheckItem[]> {
-  const [mysql, redis, chromium] = await Promise.all([
+  const [mysql, redis, chromium, akshare] = await Promise.all([
     timed(deps, () => deps.mysqlQuery('SELECT 1 AS ok')),
     timed(deps, () => deps.redisPing()),
     timed(deps, () => deps.launchChromium()),
+    checkAkshare(deps),
   ]);
   return [
+    akshare,
     item(
       { id: 'infra.mysql', group: 'infra', label: 'MySQL 数据库' },
       mysql.ok

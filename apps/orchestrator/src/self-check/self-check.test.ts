@@ -6,6 +6,7 @@ import {
   MIGRATION_MARKERS,
   type SelfCheckDeps,
   checkMedia,
+  checkAkshare,
   checkMigrations,
   checkModelLanes,
   classifyModelProbe,
@@ -63,7 +64,7 @@ function deps(
   return {
     env: ENV as never,
     flags: { BROWSER_EXECUTOR: 'legacy' },
-    fetchImpl: vi.fn(fetchImpl) as unknown as typeof fetch,
+    fetchImpl: vi.fn((url: string, init?: RequestInit) => url === 'http://127.0.0.1:8848/health' ? Promise.resolve(json(200, {status:'ok', adapter_ready:true})) : fetchImpl(url, init)) as unknown as typeof fetch,
     now: Date.now,
     catalog: () => BUILTIN_MODEL_CATALOG,
     wiring: createProductionModelRuntimeWiring(ENV as never),
@@ -304,4 +305,23 @@ describe('runSelfCheck + service', () => {
     expect(flags.BROWSER_EXECUTOR).toBe('unified');
     expect(JSON.stringify(flags)).not.toContain(INTL_KEY);
   });
+});
+
+describe('AkShare loopback self-check',()=>{
+ it('requires a ready adapter, rather than accepting generic HTTP 200',async()=>{
+  for(const body of [{},{status:'ok',adapter_ready:false}]) {
+   expect((await checkAkshare(deps(async()=>json(200,body), {fetchImpl:(async()=>json(200,body)) as typeof fetch}))).status).toBe('fail');
+  }
+  expect((await checkAkshare(deps(async()=>json(200,{status:'ok',adapter_ready:true})))).status).toBe('ok');
+ });
+ it('does not expose upstream errors or follow redirects',async()=>{
+  const d=deps(async(_url,init)=>{expect(init?.redirect).toBe('error');throw Error('secret');});
+  d.fetchImpl=(async(_url,init)=>{expect(init?.redirect).toBe('error');throw Error('secret');}) as typeof fetch;
+  const result=await checkAkshare(d);expect(result.status).toBe('fail');expect(JSON.stringify(result)).not.toContain('secret');
+ });
+});
+
+it.each([204,302,503])('AkShare rejects status %s despite an otherwise healthy body',async(status)=>{
+ const d=deps(async()=>json(200,{}), {fetchImpl:(async()=>status===204?new Response(null,{status}):json(status,{status:'ok',adapter_ready:true})) as typeof fetch});
+ expect((await checkAkshare(d)).status).toBe('fail');
 });
