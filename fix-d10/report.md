@@ -26,11 +26,27 @@
 
 ## 迁移与后续部署顺序
 
-- 新迁移：`apps/orchestrator/drizzle/0067_auth_sessions.sql`。
+- 新迁移：`apps/orchestrator/drizzle/0069_auth_sessions.sql`。
 - 使用幂等 `CREATE TABLE IF NOT EXISTS`；包含自增主键、唯一 sid、用户/有效期索引及用户外键。
-- **本轮未对任何数据库执行该迁移。** 后续获批部署顺序：先应用 0067 → 发布后端 → 发布前端。新后端签发 sid 令牌依赖该表，前端退出调用依赖新接口。
+- **本轮未对任何数据库执行该迁移。** 后续获批部署顺序：0067 → 0068 → 0069 → 后端 → 前端。新后端签发 sid 令牌依赖该表，前端退出调用依赖新接口。
 
-## 验证
+## PR #255 迁移编号修正
+
+按 `FIX-PR255-MIGRATION.md`，0067、0068 保留给 PR #252；本 PR 会话表迁移改为 `0069_auth_sessions.sql`。SQL 内容逐字节保持不变，只有文件名变化。
+
+迁移执行器 `scripts/apply-numbered-migrations.ts` 从 `drizzle/` 扫描编号 SQL 并排序；没有额外的静态清单引用该文件。Drizzle journal 与快照仅记录 0000–0002，不含本次会话表迁移，因此无需改写历史元数据。全仓库已检查旧文件名引用并同步报告。
+
+本轮验证：
+
+- 迁移发布契约原生测试：33 项通过。
+- 编号迁移执行器、schema 契约与会话清理专项测试：3 文件、16 项通过。
+- 结合 PR #252 的 `0067_browser_session_vault.sql`、`0068_purge_legacy_cookie_queue.sql` 校验编号无重复，顺序为 0067 → 0068 → 0069。
+- 逐字节核对 SQL 未变；解析后仅一条 `CREATE TABLE IF NOT EXISTS`，无非增量 SQL，保留重复执行时表已存在即跳过的幂等语义。未连接数据库执行迁移。
+- 旧迁移文件名引用清零；`git diff --check` 通过。
+
+本轮仅改迁移文件名和报告，未修改 TS/TSX 或 SQL 内容，因此未重跑首轮完整测试与构建；下节结果属于首轮实现验证。self-check 缺少 eval 配置仍按原状态标注，本轮按要求不补跑。
+
+## 首轮实现验证（实现提交 dee72142）
 
 冻结修改源码后使用 Node 22、单 worker 串行验证；结束后哈希核对确认源码未变。
 
