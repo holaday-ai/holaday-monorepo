@@ -480,15 +480,17 @@ export async function describeUnifiedAction(
   action: UnifiedBrowserAction,
   labelForRef: (ref: string) => string | null,
   probe: TargetProbe = new TargetProbe(page),
+  root: Frame = page.mainFrame(),
+  resolveRef?: (ref:string) => Locator,
 ): Promise<UnifiedActionDescription> {
-  const pageUrl = page.url();
+  const pageUrl = root.url();
   const plain = (descriptors: RuntimeActionDescriptor[]): UnifiedActionDescription => ({
     descriptors,
     unverified: null,
     transactional: null,
   });
   const ref = 'ref' in action && action.ref ? action.ref : null;
-  const locator = ref ? page.locator(`aria-ref=${ref}`) : null;
+  const locator = ref ? resolveRef?.(ref) ?? root.locator(`aria-ref=${ref}`) : null;
   // A ref that resolves to nothing cannot act; the executor reports it stale.
   if (locator && (await withTimeout(locator.count())) === 0) return plain([]);
   switch (action.tool) {
@@ -580,6 +582,8 @@ export async function describeUnifiedAction(
 }
 
 export interface UnifiedActionGateOptions {
+  locatorForAction?: (action:UnifiedBrowserAction, ref:string)=>Locator;
+  frameForAction?: (action: UnifiedBrowserAction) => Frame;
   page: Page;
   onBeforeAction: BeforeAction;
   labelForRef: (ref: string) => string | null;
@@ -661,7 +665,7 @@ export function createUnifiedActionGate(options: UnifiedActionGateOptions) {
           !options.page.isClosed() && (!options.stillLive || (await options.stillLive())),
         describe: async (nextAction, nextPhase) =>
           nextPhase === 'before'
-            ? describeUnifiedAction(options.page, nextAction, options.labelForRef, probe)
+            ? describeUnifiedAction(options.page, nextAction, options.labelForRef, probe, options.frameForAction?.(nextAction), options.locatorForAction ? ref => options.locatorForAction!(nextAction, ref) : undefined)
             : LANDING_TOOLS.has(nextAction.tool)
               ? {
                   descriptors: [{ kind: 'navigate', url: options.page.url() }],

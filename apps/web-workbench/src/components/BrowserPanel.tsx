@@ -1,3 +1,4 @@
+import { BrowserReplay } from './BrowserReplay';
 import {
   ArrowLeft,
   ArrowRight,
@@ -1564,6 +1565,7 @@ function CloudBrowserPanel({
               )}
             </header>
           )}
+          {activeTaskId && <BrowserReplay key={activeTaskId} taskId={activeTaskId} />}
           {browserAwaiting && !fullscreen && (
             <div
               role="alert"

@@ -1,3 +1,4 @@
+import { browserReplayRouter } from './routers/browser-replay.js';
 import { accountClosureRouter } from './routers/account-closure.js';
 import { adminRouter } from './routers/admin.js';
 import { apiKeysRouter } from './routers/api-keys.js';
@@ -33,6 +34,7 @@ import { watchlistsRouter } from './routers/watchlists.js';
 import { publicProcedure, router } from './trpc.js';
 
 export const appRouter = router({
+  browserReplay: browserReplayRouter,
   health: publicProcedure.query(() => ({
     status: 'ok' as const,
     time: new Date().toISOString(),

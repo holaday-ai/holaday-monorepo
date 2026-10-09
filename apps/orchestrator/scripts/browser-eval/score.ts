@@ -1,6 +1,22 @@
 import type { UnifiedBrowserOutcome } from '../../src/agent/browser-tools/unified-browser-loop.js';
 import { isNonDetailUrl, urlResourceIdentity } from '../../src/execution/url-identity.js';
 
+/** Synthetic acceptance always keeps the declared denominator, including unavailable cases. */
+export function scoreSyntheticSuite(
+  cases:ReadonlyArray<{id:string;category:string}>,
+  results:ReadonlyArray<{id:string;status:'passed'|'failed'|'unsupported'}>,
+) {
+  let passed=0,failed=0,unsupported=0;
+  const failureComposition:Record<string,number>={};
+  for(const test of cases){
+    const result=results.find(r=>r.id===test.id);
+    if(result?.status==='passed'){passed++;continue;}
+    if(result?.status==='failed'){failed++;failureComposition[test.category]=(failureComposition[test.category]??0)+1;}
+    else {unsupported++;failureComposition.unsupported=(failureComposition.unsupported??0)+1;}
+  }
+  return {denominator:cases.length,passed,failed,unsupported,successRate:cases.length?passed/cases.length:0,failureComposition};
+}
+
 export interface BrowserEvalTask {
   id: string;
   category: string;
