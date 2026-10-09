@@ -622,6 +622,14 @@ export class PlaywrightExecutor {
    * stops clean mode from leaking into the shared context (adversarial review
    * CAMERA-3/6 blocker: resetPageForTask/reopenActivePage used contexts()[0] directly).
    */
+  private vaultInterruption: string | null = null;
+  /** The session vault stopped this task's logged-in context (reason code only). */
+  markSessionInterrupted(reason: string): void {
+    this.vaultInterruption ??= reason;
+  }
+  get sessionInterruption(): string | null {
+    return this.vaultInterruption;
+  }
   /** Default-off vault: create an incognito context, never reuse userDataDir/default cookies. */
   async createSessionVaultContext(
     options: Parameters<Browser['newContext']>[0],

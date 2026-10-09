@@ -92,8 +92,17 @@ export function createVaultRuntime(options: {
       if (!targetUrl) return;
       const grant = await vault.match(userId, targetUrl);
       if (!grant) return;
-      const task = await worker.open(userId, grant.id, (config) =>
-        executor.createSessionVaultContext(config),
+      const task = await worker.open(
+        userId,
+        grant.id,
+        (config) => executor.createSessionVaultContext(config),
+        {
+          // Revoked or unverifiable: the task parks for the user instead of continuing.
+          onInterrupted: (reason) => {
+            executor.markSessionInterrupted(reason);
+            logger.info({ reason }, 'browser-vault: task session stopped');
+          },
+        },
       );
       tasks.set(executor, task);
     },
