@@ -134,7 +134,14 @@ describe('stock-dashboard task creation contract', () => {
 
   it('degrades missing provider data instead of inventing quote, financial period or sources', async () => {
     const { result, modelInput, evidence } = await dashboardReport('current', true);
-    expect(result.answer).toContain('数据暂不可用');
+    const quoteSection = result.answer.split('**① 盘面事实**')[1]?.split('**② 资金面**')[0];
+    const fundamentalsSection = result.answer.split('**④ 基本面**')[1]?.split('**⑤ 估值**')[0];
+    expect(quoteSection).toContain('最新报价：数据暂不可用');
+    expect(quoteSection).not.toMatch(/最新价\s*[+-]?\d/);
+    expect(fundamentalsSection).toContain('基本面：数据暂不可用');
+    expect(fundamentalsSection).not.toMatch(
+      /报告期\s*\d|(?:19|20)\d{2}(?:年报|中报|Q[1-4]|三季报)|(?:营收|营业总收入|归母净利润)\s*[+-]?\d/,
+    );
     expect(result.answer).toContain('11:42');
     expect(result.answer).not.toContain('1,377.12');
     expect(result.answer).not.toContain('777.12');
