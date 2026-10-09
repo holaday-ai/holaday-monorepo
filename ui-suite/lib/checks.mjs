@@ -330,22 +330,22 @@ export async function measurePage(page) {
         hasHint: Boolean(e.title || e.getAttribute('aria-describedby') || e.closest('[title]')),
       }));
     return {
-      browserPanelVisible: [...document.querySelectorAll('[aria-label="浏览器工作区"]')].some(
-        (e) => {
-          const r = e.getBoundingClientRect();
-          return (
-            r.width > 0 &&
-            r.height > 0 &&
-            getComputedStyle(e).visibility !== 'hidden' &&
-            !(
-              e.tagName === 'A' &&
-              !e.hasAttribute('href') &&
-              !e.hasAttribute('role') &&
-              !e.hasAttribute('tabindex')
-            )
-          );
-        },
-      ),
+      browserPanelVisible: [
+        ...document.querySelectorAll('section[aria-label="浏览器工作区"]'),
+      ].some((e) => {
+        const r = e.getBoundingClientRect();
+        return (
+          r.width > 0 &&
+          r.height > 0 &&
+          getComputedStyle(e).visibility !== 'hidden' &&
+          !(
+            e.tagName === 'A' &&
+            !e.hasAttribute('href') &&
+            !e.hasAttribute('role') &&
+            !e.hasAttribute('tabindex')
+          )
+        );
+      }),
       elements,
       truncatedText,
       width: innerWidth,

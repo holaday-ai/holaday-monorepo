@@ -102,12 +102,12 @@ export async function observeControl(page, control, { checkDismissal = true } = 
     !new URL(page.url()).search &&
     (await page.evaluate(() => {
       const composer = document.querySelector('textarea[placeholder="说说你想做的事..."]');
-      const visibleBrowser = [...document.querySelectorAll('[aria-label="浏览器工作区"]')].some(
-        (e) => {
-          const r = e.getBoundingClientRect();
-          return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden';
-        },
-      );
+      const visibleBrowser = [
+        ...document.querySelectorAll('section[aria-label="浏览器工作区"]'),
+      ].some((e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden';
+      });
       return composer && !composer.value && !visibleBrowser;
     }))
   )

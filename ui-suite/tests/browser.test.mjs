@@ -424,7 +424,7 @@ test('hidden browser DOM does not invalidate an already-empty new-task composer'
     await page.route('http://127.0.0.1:45999/**', (route) =>
       route.fulfill({
         contentType: 'text/html; charset=utf-8',
-        body: `<button>新任务</button><textarea placeholder="说说你想做的事..."></textarea><div aria-label="浏览器工作区" style="display:none">隐藏浏览器</div>`,
+        body: `<button>新任务</button><textarea placeholder="说说你想做的事..."></textarea><button aria-label="浏览器工作区">打开浏览器</button><section aria-label="浏览器工作区" style="display:none">隐藏浏览器</section>`,
       }),
     );
     await page.goto('http://127.0.0.1:45999/');
@@ -432,7 +432,7 @@ test('hidden browser DOM does not invalidate an already-empty new-task composer'
       (await observeControl(page, (await measurePage(page)).elements[0])).status,
       'idempotent',
     );
-    await page.locator('[aria-label="浏览器工作区"]').evaluate((e) => {
+    await page.locator('section[aria-label="浏览器工作区"]').evaluate((e) => {
       e.style.display = 'block';
     });
     assert.equal(
@@ -496,6 +496,19 @@ test('selected matched skill is an idempotent choice', async () => {
       (await observeControl(page, (await measurePage(page)).elements[0])).status,
       'idempotent',
     );
+  } finally {
+    await browser.close();
+  }
+});
+
+test('browser launch button is not the browser workspace panel', async () => {
+  const browser = await chromium.launch({ args: ['--renderer-process-limit=2'] });
+  try {
+    const page = await browser.newPage();
+    await page.setContent('<button aria-label="浏览器工作区">打开浏览器</button>');
+    assert.equal((await measurePage(page)).browserPanelVisible, false);
+    await page.setContent('<section aria-label="浏览器工作区">panel</section>');
+    assert.equal((await measurePage(page)).browserPanelVisible, true);
   } finally {
     await browser.close();
   }
