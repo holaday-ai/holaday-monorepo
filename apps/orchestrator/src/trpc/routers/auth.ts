@@ -4,8 +4,11 @@ import { z } from 'zod';
 import { currentMediaModels } from '../../agent/video/media-models.js';
 import { isVideoEnabledFor } from '../../agent/video/video-access.js';
 import { EmailCodeError, createEmailCodeService } from '../../auth/email-code.js';
+import { verifyAccessToken } from '../../auth/jwt.js';
 import { MfaError, MfaService } from '../../auth/mfa-service.js';
+import { authenticateAccessTokenSession } from '../../auth/middleware.js';
 import { AuthError, AuthService } from '../../auth/service.js';
+import { issueSessionAccessToken, revokeAllSessions, revokeSession } from '../../auth/sessions.js';
 import { users } from '../../db/schema/users.js';
 import {
   ModelDataRegionAssignmentError,
@@ -64,6 +67,20 @@ const verifyMfaChallengeInput = z.object({
 const emailCodeService = createEmailCodeService();
 
 export const authRouter = router({
+  logout: protectedProcedure.mutation(async ({ ctx }) => {
+    const header = ctx.req.header('authorization');
+    const session = header?.startsWith('Bearer ')
+      ? await authenticateAccessTokenSession(ctx.db, header.slice(7).trim())
+      : null;
+    if (!session || session.userId !== ctx.userId) throw new TRPCError({ code: 'UNAUTHORIZED' });
+    if (session.sid) await revokeSession(ctx.db, ctx.userId, session.sid);
+    // Legacy JWTs deliberately keep their pre-rollout expiry; never revoke other devices here.
+    return { ok: true as const, legacyToken: !session.sid };
+  }),
+  logoutAll: protectedProcedure.mutation(async ({ ctx }) => {
+    await revokeAllSessions(ctx.db, ctx.userId);
+    return { ok: true as const };
+  }),
   /**
    * Lists which login methods this deployment has enabled. Frontend
    * hides Google / email-code buttons when the matching env vars are
@@ -197,7 +214,7 @@ export const authRouter = router({
         code: z.string().regex(/^\d{6}$/),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const url = process.env.ALIYUN_SMS_URL;
       if (!url) {
         throw new TRPCError({
@@ -249,7 +266,11 @@ export const authRouter = router({
           message: '网关响应缺少 token',
         });
       }
-      return { user: body.user, accessToken: body.accessToken, mfaRequired: false as const };
+      const session = await authenticateAccessTokenSession(ctx.db, body.accessToken);
+      const claims = await verifyAccessToken(body.accessToken);
+      if (!session || !claims) throw new TRPCError({ code: 'UNAUTHORIZED' });
+      const accessToken = await issueSessionAccessToken(ctx.db, claims);
+      return { user: body.user, accessToken, mfaRequired: false as const };
     }),
 
   /**

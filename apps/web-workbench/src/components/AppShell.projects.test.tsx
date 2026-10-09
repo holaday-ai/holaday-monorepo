@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { ToastProvider } from '@/components/ui/toast';
+import { clearAccessToken } from '@/lib/auth';
 import type { AppRouter } from '@/lib/trpc';
 import { ProjectsPage } from '@/pages/ProjectsPage';
 import { useTaskStore } from '@/stores/task-store';
@@ -21,6 +22,7 @@ async function chooseWorkspace(user: ReturnType<typeof userEvent.setup>, name: R
 }
 
 const api = vi.hoisted(() => ({
+  logout: vi.fn(),
   authMe: vi.fn<Client['auth']['me']['query']>(),
   unsuccessfulCount: vi.fn<Client['tasks']['unsuccessfulCount']['query']>(),
   tasksList: vi.fn<Client['tasks']['list']['query']>(),
@@ -36,7 +38,7 @@ vi.mock('@/lib/auth', () => ({
 
 vi.mock('@/lib/trpc', () => ({
   trpc: {
-    auth: { me: { query: api.authMe } },
+    auth: { me: { query: api.authMe }, logout: { mutate: api.logout } },
     tasks: {
       unsuccessfulCount: { query: api.unsuccessfulCount },
       list: { query: api.tasksList },
@@ -67,7 +69,11 @@ vi.mock('@/components/QuotaIndicator', () => ({ QuotaIndicator: () => null }));
 vi.mock('@/components/SearchOverlay', () => ({ SearchOverlay: () => null }));
 vi.mock('@/components/Skeleton', () => ({ AppSkeleton: () => <div>启动中</div> }));
 vi.mock('@/components/UpdateBanner', () => ({ UpdateBanner: () => null }));
-vi.mock('@/components/UserMenu', () => ({ UserMenu: () => null }));
+vi.mock('@/components/UserMenu', () => ({
+  UserMenu: ({ onLogout }: { onLogout: () => void }) => (
+    <button type="button" onClick={onLogout}>测试退出登录</button>
+  ),
+}));
 
 const AUTH_ME = {
   userId: 'usr_current',
@@ -206,41 +212,69 @@ describe('AppShell personal project collection isolation', () => {
 });
 
 describe('approved sidebar disclosure', () => {
- it('opens Projects from another page, toggles the whole row, and keeps global task history', async () => {
-  const user = userEvent.setup();
-  const router = createMemoryRouter([{ element: <AppShell />, children: [
-   { path: '/files', element: <main>文件库内容</main> },
-   { path: '/projects', element: <main>项目内容</main> },
-   { path: '/', element: <main>任务工作台</main> },
-  ] }], { initialEntries: ['/files'] });
-  render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
-  const projects = await screen.findByRole('button', { name: '项目' });
-  await user.click(projects);
-  expect(router.state.location.pathname).toBe('/projects');
-  expect(projects.getAttribute('aria-expanded')).toBe('true');
-  expect(await screen.findByRole('button', { name: '个人研究' })).toBeTruthy();
-  expect(screen.getByRole('button', { name: '文件库' }).getAttribute('data-active')).toBe('false');
-  await user.click(projects);
-  expect(projects.getAttribute('aria-expanded')).toBe('false');
-  expect(screen.queryByRole('button', { name: '个人研究' })).toBeNull();
-  await user.click(projects);
-  expect(projects.getAttribute('aria-expanded')).toBe('true');
-  expect(screen.getByRole('button', { name: '个人项目任务' })).toBeTruthy();
-  await user.click(screen.getByRole('button', { name: '个人研究' }));
-  expect(router.state.location.search).toBe('?project=prj_personal');
- });
+  it('opens Projects from another page, toggles the whole row, and keeps global task history', async () => {
+    const user = userEvent.setup();
+    const router = createMemoryRouter(
+      [
+        {
+          element: <AppShell />,
+          children: [
+            { path: '/files', element: <main>文件库内容</main> },
+            { path: '/projects', element: <main>项目内容</main> },
+            { path: '/', element: <main>任务工作台</main> },
+          ],
+        },
+      ],
+      { initialEntries: ['/files'] },
+    );
+    render(
+      <ToastProvider>
+        <RouterProvider router={router} />
+      </ToastProvider>,
+    );
+    const projects = await screen.findByRole('button', { name: '项目' });
+    await user.click(projects);
+    expect(router.state.location.pathname).toBe('/projects');
+    expect(projects.getAttribute('aria-expanded')).toBe('true');
+    expect(await screen.findByRole('button', { name: '个人研究' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '文件库' }).getAttribute('data-active')).toBe(
+      'false',
+    );
+    await user.click(projects);
+    expect(projects.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('button', { name: '个人研究' })).toBeNull();
+    await user.click(projects);
+    expect(projects.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('button', { name: '个人项目任务' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '个人研究' }));
+    expect(router.state.location.search).toBe('?project=prj_personal');
+  });
 });
 
-
 describe('approved shell review navigation', () => {
-  it.each([['设置', '/settings'], ['本月用量', '/usage']])('routes %s through the application router', async (label, path) => {
+  it.each([
+    ['设置', '/settings'],
+    ['本月用量', '/usage'],
+  ])('routes %s through the application router', async (label, path) => {
     const user = userEvent.setup();
-    const router = createMemoryRouter([{ element: <AppShell />, children: [
-      { path: '/files', element: <main>文件库内容</main> },
-      { path: '/settings', element: <main>设置内容</main> },
-      { path: '/usage', element: <main>用量内容</main> },
-    ] }], { initialEntries: ['/files'] });
-    render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+    const router = createMemoryRouter(
+      [
+        {
+          element: <AppShell />,
+          children: [
+            { path: '/files', element: <main>文件库内容</main> },
+            { path: '/settings', element: <main>设置内容</main> },
+            { path: '/usage', element: <main>用量内容</main> },
+          ],
+        },
+      ],
+      { initialEntries: ['/files'] },
+    );
+    render(
+      <ToastProvider>
+        <RouterProvider router={router} />
+      </ToastProvider>,
+    );
     await user.click(await screen.findByTitle('更多操作'));
     await user.click(await screen.findByRole('menuitem', { name: label }));
     expect(router.state.location.pathname).toBe(path);
@@ -248,21 +282,81 @@ describe('approved shell review navigation', () => {
   });
 
   it('shows the energy breadcrumb on the actual cosmic route', async () => {
-    const router = createMemoryRouter([{ element: <AppShell />, children: [
-      { path: '/cosmic', element: <main>能量内容</main> },
-    ] }], { initialEntries: ['/cosmic'] });
-    render(<ToastProvider><RouterProvider router={router} /></ToastProvider>);
+    const router = createMemoryRouter(
+      [{ element: <AppShell />, children: [{ path: '/cosmic', element: <main>能量内容</main> }] }],
+      { initialEntries: ['/cosmic'] },
+    );
+    render(
+      <ToastProvider>
+        <RouterProvider router={router} />
+      </ToastProvider>,
+    );
     await screen.findByText('能量内容');
-    expect(screen.getByText('今日能量', { selector: '.hd-workbench-breadcrumb strong' })).toBeTruthy();
+    expect(
+      screen.getByText('今日能量', { selector: '.hd-workbench-breadcrumb strong' }),
+    ).toBeTruthy();
   });
 });
 
-
 it('replaces load more with an honest visible-task limit message', async () => {
- const router = createMemoryRouter([{element:<AppShell/>,children:[{path:'/files',element:<main>文件库内容</main>}]}],{initialEntries:['/files']});
- render(<ToastProvider><RouterProvider router={router}/></ToastProvider>);
- await screen.findByText('文件库内容');
- act(()=>useTaskStore.setState({ tasksHasMore:true, tasksCursor:301, tasksVisiblePageLimitReached:true }));
- expect(screen.getByText('没有更多可见任务')).toBeTruthy();
- expect(screen.queryByRole('button',{name:'加载更多任务'})).toBeNull();
+  const router = createMemoryRouter(
+    [{ element: <AppShell />, children: [{ path: '/files', element: <main>文件库内容</main> }] }],
+    { initialEntries: ['/files'] },
+  );
+  render(
+    <ToastProvider>
+      <RouterProvider router={router} />
+    </ToastProvider>,
+  );
+  await screen.findByText('文件库内容');
+  act(() =>
+    useTaskStore.setState({
+      tasksHasMore: true,
+      tasksCursor: 301,
+      tasksVisiblePageLimitReached: true,
+    }),
+  );
+  expect(screen.getByText('没有更多可见任务')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '加载更多任务' })).toBeNull();
+});
+
+describe('D10 server logout', () => {
+  it('waits for revocation before clearing local credentials', async () => {
+    vi.mocked(clearAccessToken).mockClear();
+    let revoke!: () => void;
+    api.logout.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          revoke = resolve;
+        }),
+    );
+    const router = createMemoryRouter([
+      { element: <AppShell />, children: [{ path: '/', element: <main>任务</main> }] },
+    ]);
+    render(
+      <ToastProvider>
+        <RouterProvider router={router} />
+      </ToastProvider>,
+    );
+    await userEvent.click(await screen.findByRole('button', { name: '测试退出登录' }));
+    expect(api.logout).toHaveBeenCalledTimes(1);
+    expect(clearAccessToken).not.toHaveBeenCalled();
+    await act(async () => revoke());
+    expect(clearAccessToken).toHaveBeenCalledTimes(1);
+  });
+  it('keeps credentials available for retry if server revocation fails', async () => {
+    vi.mocked(clearAccessToken).mockClear();
+    api.logout.mockRejectedValue(new Error('synthetic outage'));
+    const router = createMemoryRouter([
+      { element: <AppShell />, children: [{ path: '/', element: <main>任务</main> }] },
+    ]);
+    render(
+      <ToastProvider>
+        <RouterProvider router={router} />
+      </ToastProvider>,
+    );
+    await userEvent.click(await screen.findByRole('button', { name: '测试退出登录' }));
+    expect(await screen.findByText('退出未完成，请重试。')).toBeTruthy();
+    expect(clearAccessToken).not.toHaveBeenCalled();
+  });
 });

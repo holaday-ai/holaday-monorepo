@@ -2575,8 +2575,11 @@ function TerminalSummary({
       try {
         const context = await ensureFailureContext();
         if (!mountedRef.current) return;
+        if (!context) { toast.show('无法恢复原任务输入，请稍后重试。', 'error'); return; }
+        if (context.unavailableInputCount) { toast.show('附件已失效，请重新上传', 'error'); return; }
         const result = await rerunTask(taskId, undefined, {
           fileIds: context?.inputFiles.map((file) => file.fileId) ?? [],
+          retryOfTaskId: context?.executionMode === 'generate' ? taskId : undefined,
         });
         if (!mountedRef.current) return;
         if ('error' in result) {

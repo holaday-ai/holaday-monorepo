@@ -85,3 +85,64 @@ describe('retryableInputFiles', () => {
     expect(out.unavailableCount).toBe(1);
   });
 });
+
+describe('D10 core attachments', () => {
+  it('reads the canonical file list even without legacy task-file links', async () => {
+    const { taskRecoveryRouter } = await import('./task-recovery.js');
+    const task = {
+      id: 1,
+      externalId: 'tsk_original',
+      status: 'failed',
+      errorCode: null,
+      errorMessage: null,
+      executionId: 'execution_original',
+      executionRevision: 1,
+      coreRecordVersion: 2,
+      result: {
+        coreRequirements: {
+          initialRequest: '整理附件',
+          userTurns: [],
+          phase: 'direct',
+          workflow: null,
+          referencePlan: null,
+          fileIds: ['file_original', 'file_deleted'],
+        },
+      },
+    };
+    const batches = [
+      [{ id: 7 }],
+      [task],
+      [],
+      [
+        {
+          externalId: 'file_original',
+          filename: 'original.txt',
+          mimetype: 'text/plain',
+          status: 'active',
+          expiresAt: null,
+        },
+      ],
+    ];
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => {
+            const rows = batches.shift();
+            return { limit: async () => rows, orderBy: async () => rows };
+          },
+        }),
+      }),
+    };
+    const caller = taskRecoveryRouter.createCaller({
+      db,
+      userId: 'usr_owner',
+      taskOrigin: 'user',
+    } as never);
+    const result = await caller.failureContext({ taskId: 'tsk_original' });
+    expect(result.inputFiles).toEqual([
+      { fileId: 'file_original', filename: 'original.txt', mimetype: 'text/plain' },
+    ]);
+    expect(result.unavailableInputCount).toBe(1);
+    expect(result).toMatchObject({ executionMode: 'generate' });
+  });
+});

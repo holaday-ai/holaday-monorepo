@@ -547,14 +547,16 @@ export function AppShell(): JSX.Element {
     navigate,
   ]);
 
-  const handleLogout = React.useCallback(() => {
+  const handleLogout = React.useCallback(async () => {
+    try { await trpc.auth.logout.mutate(); }
+    catch { toast.show('退出未完成，请重试。', 'error'); return; }
     clearAccessToken();
     disconnect();
     reset();
     setMe(null);
     setAuthed(false);
     setBootstrapped(false);
-  }, [reset]);
+  }, [reset, toast]);
 
   // Project filter chip — driven by ?project= in URL, surfaced in
   // sidebar header so the user knows the task list is scoped.

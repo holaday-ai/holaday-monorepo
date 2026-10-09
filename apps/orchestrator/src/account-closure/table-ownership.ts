@@ -27,6 +27,7 @@ export const ACCOUNT_CLOSURE_TABLE_OWNERSHIP: readonly AccountClosureTableOwners
     'account_closure_requests',
     'account_closure_steps',
     'api_keys',
+    'auth_sessions',
     'sessions',
     'user_mfa_recovery_codes',
     'user_profiles',

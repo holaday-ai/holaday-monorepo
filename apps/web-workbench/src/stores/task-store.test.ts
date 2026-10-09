@@ -17,6 +17,7 @@ import {
 
 vi.mock('@/lib/trpc', () => ({
   trpc: {
+    taskRecovery: { failureContext: { query: vi.fn() } },
     tasks: {
       list: { query: vi.fn() },
       detail: { query: vi.fn() },
@@ -40,6 +41,7 @@ const moveToProjectMutate = vi.mocked(trpc.tasks.moveToProject.mutate);
 const starMutate = vi.mocked(trpc.tasks.star.mutate);
 
 beforeEach(() => {
+  vi.mocked(trpc.taskRecovery.failureContext.query).mockReset().mockResolvedValue({ taskId: 'tsk_original', refund: { state: 'not_charged', refundedAt: null }, inputFiles: [], unavailableInputCount: 0, executionMode: null });
   listQuery.mockReset();
   detailQuery.mockReset();
   createMutate.mockReset();
@@ -102,9 +104,20 @@ describe('rerun execution target', () => {
     createMutate.mockResolvedValueOnce({ taskId: 'tsk_retry_files', status: 'pending' } as never);
     listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
     detailQuery.mockResolvedValueOnce({ taskId: 'tsk_retry_files', status: 'pending', steps: [], result: null } as never);
-    await useTaskStore.getState().rerunTask(original.taskId, undefined, { fileIds: ['fil_a', 'fil_b', 'fil_a'] });
-    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({ intent: '读取选定页面', fileIds: ['fil_a', 'fil_b'] });
+    await useTaskStore.getState().rerunTask(original.taskId, undefined, { fileIds: ['fil_a', 'fil_b', 'fil_a'], retryOfTaskId: original.taskId });
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({ intent: '读取选定页面', fileIds: ['fil_a', 'fil_b'], retryOfTaskId: original.taskId });
     expect(createMutate.mock.calls[0]?.[0]?.imageOptions).toBeUndefined();
+  });
+
+  it('keeps completed-task reruns on the existing create path', async () => {
+    useTaskStore.setState({ tasks: [{ ...original, status: 'completed' }] });
+    vi.mocked(trpc.taskRecovery.failureContext.query).mockResolvedValueOnce({ taskId: original.taskId, refund: { state: 'not_charged', refundedAt: null }, inputFiles: [{ fileId: 'fil_original', filename: 'original.txt', mimetype: 'text/plain' }], unavailableInputCount: 0, executionMode: 'generate' });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_repeat', status: 'pending' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValueOnce({ taskId: 'tsk_repeat', status: 'pending', steps: [], result: null } as never);
+    expect(await useTaskStore.getState().rerunTask(original.taskId)).toEqual({ taskId: 'tsk_repeat' });
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({ fileIds: ['fil_original'] });
+    expect(createMutate.mock.calls[0]?.[0]?.retryOfTaskId).toBeUndefined();
   });
 
   it('keeps image routing options when retrying a failed image task', async () => {
