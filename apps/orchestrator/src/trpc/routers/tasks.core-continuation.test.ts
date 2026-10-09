@@ -1286,3 +1286,25 @@ describe('D10 original input retry', () => {
     expect(f.charge).not.toHaveBeenCalled();
   });
 });
+
+it.each(['帮我建站', '帮我写一个 TypeScript 函数', '帮我编写 Python 脚本'])(
+  'rejects explicit development before quota or model use: %s',
+  async (intent) => {
+    const f = fixture();
+    await expect(f.createDirect(intent)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.charge).not.toHaveBeenCalled();
+    expect(f.requests).toHaveLength(0);
+  },
+);
+it('admits reading an existing PR through the real task scope guard', async () => {
+  const f = fixture();
+  // Stop at the classifier after the real scope guard, without starting a browser.
+  const nextStage = vi
+    .spyOn(classifier, 'classifyExecutionMode')
+    .mockRejectedValueOnce(new Error('scope guard passed'));
+  await expect(
+    f.createDirect('Open the PR #123 on GitHub and read its discussion'),
+  ).rejects.toMatchObject({ message: 'scope guard passed' });
+  expect(nextStage).toHaveBeenCalledOnce();
+  expect(f.charge).not.toHaveBeenCalled();
+});

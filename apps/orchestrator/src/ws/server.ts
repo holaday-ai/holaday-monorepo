@@ -16,6 +16,7 @@ import { failTaskWithEventIfStatus } from '../agent/task-maintenance.js';
 import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
 import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import { authenticateAccessToken } from '../auth/middleware.js';
+import { startWebSocketSessionRevalidation } from '../auth/websocket-session-revalidation.js';
 import type { BrowserPool } from '../browser-pool/browser-pool.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
@@ -41,7 +42,7 @@ interface ClientState {
   socket: WebSocket;
   lastPongAt: number;
   authed: boolean;
-  sessionRevalidationInFlight: boolean;
+  refreshSessionLease: () => void;
   // taskId -> state. Phase 0 in-memory; persistence writes through on every
   // transition. Restart recovery rehydrates this map per-user at auth time.
   tasks: Map<string, TaskState>;
@@ -162,7 +163,7 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
 
   wss.on('connection', (socket, req) => {
     const pending = work.run(() =>
-      handleConnection(socket, req, authenticateToken, clientStates, work),
+      handleConnection(socket, req, authenticateToken, clientStates, work, opts.sessionRevalidationIntervalMs),
     );
     if (!pending) socket.close(1013, 'service unavailable');
     else void pending.catch(() => socket.close(1011, 'request failed'));
@@ -173,11 +174,7 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
     HEARTBEAT_INTERVAL_MS,
   );
   heartbeat.unref();
-  const sessionRevalidation = setInterval(
-    () => revalidateSessions(wss, clientStates, authenticateToken),
-    opts.sessionRevalidationIntervalMs ?? HEARTBEAT_INTERVAL_MS,
-  );
-  sessionRevalidation.unref();
+
 
   let closing: Promise<void> | undefined;
   return {
@@ -187,7 +184,6 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
       const settled = work.stop();
       if (closing) return closing;
       clearInterval(heartbeat);
-      clearInterval(sessionRevalidation);
       const workResults = Promise.allSettled([settled]);
       closing = (async () => {
         // ws.close removes its underlying HTTP event forwarding; retain that
@@ -918,6 +914,7 @@ async function handleConnection(
   authenticateToken: (token: string) => Promise<string | null>,
   clientStates: WeakMap<WebSocket, ClientState>,
   work: WsWork,
+  sessionRevalidationIntervalMs?: number,
 ) {
   const state: ClientState = {
     work,
@@ -927,16 +924,36 @@ async function handleConnection(
     socket,
     lastPongAt: Date.now(),
     authed: false,
-    sessionRevalidationInFlight: false,
+    refreshSessionLease,
     tasks: new Map(),
     healedStepIds: new Set(),
     isExtension: false,
   };
+  let stopSessionLease: (() => void) | undefined;
+  function refreshSessionLease(): void {
+    stopSessionLease?.();
+    const token = state.authToken;
+    const userId = state.userId;
+    if (!token || !userId) return;
+    stopSessionLease = startWebSocketSessionRevalidation({
+      socket, expectedUserId: userId, logger, intervalMs: sessionRevalidationIntervalMs,
+      revalidateSession: async () => {
+        let valid = false;
+        const pending = work.run(async () => {
+          valid = (await authenticateToken(token)) === userId && state.authToken === token && state.userId === userId;
+        });
+        if (!pending) return false;
+        await pending;
+        return valid;
+      },
+    });
+  }
   clientStates.set(socket, state);
   // biome-ignore lint/style/useConst: The close callback is installed before authentication awaits and timer assignment.
   let authTimer: NodeJS.Timeout | undefined;
   // Install cleanup before authentication's first await, not after it.
   socket.on('close', () => {
+    stopSessionLease?.();
     clearTimeout(authTimer);
     socket.off('message', onMessage);
     state.authed = false;
@@ -969,6 +986,7 @@ async function handleConnection(
       state.userId = userId;
       state.authToken = token;
       state.authed = true;
+      state.refreshSessionLease();
       addClientForUser(userId, state);
       send(socket, {
         type: 'server.welcome',
@@ -1076,6 +1094,7 @@ async function handleClientMessage(
     state.userId = userId;
     state.authToken = msg.token;
     state.authed = true;
+    state.refreshSessionLease();
     // Phase 25 — flag this socket as a Chrome extension only when the
     // hello frame carries a real extension version. The web app sends a
     // legacy source marker (`web-workbench`) in the same field, so keep
@@ -1713,52 +1732,4 @@ function send(socket: WebSocket, msg: ServerMessage): boolean {
     }
   }
   return false;
-}
-
-function revalidateSessions(
-  wss: WebSocketServer,
-  clientStates: WeakMap<WebSocket, ClientState>,
-  authenticateToken: (token: string) => Promise<string | null>,
-): void {
-  for (const socket of wss.clients) {
-    if (socket.readyState !== WebSocket.OPEN) continue;
-    const state = clientStates.get(socket);
-    if (!state?.authed || !state.userId || !state.authToken || state.sessionRevalidationInFlight) {
-      continue;
-    }
-    const pending = state.work.run(() => revalidateSession(state, authenticateToken));
-    if (pending) void pending.catch(() => state.socket.close(1011, 'session check failed'));
-  }
-}
-
-async function revalidateSession(
-  state: ClientState,
-  authenticateToken: (token: string) => Promise<string | null>,
-): Promise<void> {
-  const token = state.authToken;
-  const expectedUserId = state.userId;
-  if (!token || !expectedUserId) return;
-
-  state.sessionRevalidationInFlight = true;
-  try {
-    const userId = await authenticateToken(token);
-    if (
-      state.socket.readyState !== WebSocket.OPEN ||
-      !state.authed ||
-      state.authToken !== token ||
-      state.userId !== expectedUserId
-    ) {
-      return;
-    }
-    if (userId !== expectedUserId) {
-      send(state.socket, {
-        type: 'server.error',
-        code: 'UNAUTHORIZED',
-        message: 'session revoked',
-      });
-      state.socket.close(4401, 'session revoked');
-    }
-  } finally {
-    state.sessionRevalidationInFlight = false;
-  }
 }
