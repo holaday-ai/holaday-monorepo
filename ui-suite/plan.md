@@ -16,11 +16,15 @@ Spec: /private/tmp/holaday-tasks/UI-REGRESSION-SUITE.md. The user explicitly req
 1. [x] Build inventory generation and seeded backend contracts; unit tests first for route gaps, unsupported RPC and local-only request policy.
 2. [x] Build observable control/geometry/console/visual auditors; red/green browser fixtures for dead buttons, clipping, overlap, escaped dropdowns, popup blank, stale terminal labels and pixel differences.
 3. [x] Add pnpm ui:audit orchestration, all routes and states, serial widths, local safety, deterministic screenshots, Markdown/JSON gate report and deployment-template integration.
-4. [ ] Run 434417b4 candidate, triage P1/P2/P3 against known nine issues; write frontend-audit-1/extra-from-suite.md and preserve evidence.
-5. [ ] Verify unit/browser tests, frontend checks and clean source scope; commit, push own branch, create draft PR and attach it.
+4. [x] Run 434417b4 candidate, triage P1/P2/P3 against known nine issues; write frontend-audit-1/extra-from-suite.md and preserve evidence.
+5. [x] Verify unit/browser tests, frontend checks and clean source scope; commit, push own branch, create draft PR and attach it.
 
 ## Review focus
 Mutation detection must not confuse a no-op with a click. Generic query mocks must not fake feature success. Intentional overlays must not cause blanket geometry exemptions. Uncovered routes/states and swallowed exceptions must make coverage incomplete. Screenshot baseline creation must be explicit and independently distinguishable from a passed comparison.
 
 ## Ledger
 - Task-file scope is the approved implementation brief; continuing without repeating authorization. No parallel agents or heavy parallel execution.
+
+## Delivery
+
+Draft PR: https://github.com/holaday-ai/holaday-monorepo/pull/261. Runtime verification is frozen at 935348a4 (full matrix) and ff1e30d9 (calibration). Complete evidence was pushed and the remote SHA was verified. The product release gate remains red; see validation.md.
