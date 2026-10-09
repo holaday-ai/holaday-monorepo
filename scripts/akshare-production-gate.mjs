@@ -33,7 +33,7 @@ export async function checkHostAkshare(exec) {
     env: { PATH: '/opt/node22/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
       HOME: '/root', PM2_HOME: '/root/.pm2' } };
   try {
-    await exec('bash', ['-c', 'read -r p < /root/.pm2/pm2.pid && [[ "$p" =~ ^[1-9][0-9]*$ ]] && kill -0 "$p"'], options);
+    await exec('bash', ['-c', 'p=; { read -r p < /root/.pm2/pm2.pid || [[ -n "$p" ]]; } && [[ "$p" =~ ^[1-9][0-9]*$ ]] && kill -0 "$p"'], options);
   } catch { throw new Error('AKSHARE_PROCESS_UNAVAILABLE'); }
   return verifyAkshareProduction({
     readProcessList: () => exec('pm2', ['jlist'], options),
