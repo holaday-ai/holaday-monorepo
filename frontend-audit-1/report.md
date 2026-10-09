@@ -1,7 +1,7 @@
 # FRONTEND-AUDIT-1 前端走查与修复
 
 - 分支：`codex/frontend-audit-1`；基线：`claude/capability-recovery` / `434417b42711c6cf2251787cdd86fee3aa407c6e`。
-- PR：待创建草稿 PR 后补入。
+- PR：[草稿 #260](https://github.com/holaday-ai/holaday-monorepo/pull/260)。
 - 本轮只修改前端及前端测试。未部署、未 SSH、未登录生产、未修改后端或生产数据、未读取密钥文件。
 - 本地前端 `127.0.0.1:4331`、后端 `127.0.0.1:3131`，独立测试数据库 `holaday_web_qa_frontend_audit1_m`、独立 Redis `6391`。使用合成管理员账号、7 个任务状态样本、188 条合成通知、1 个项目和2个本地测试文本文件。未调用付费模型。
 - 桌面截图尺寸为 1024/1280/1440 × 900；手机版未验收。截图由本轮本地页面真实捕获；加载中截图不代表真实任务执行成功。
