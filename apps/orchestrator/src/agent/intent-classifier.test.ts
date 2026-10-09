@@ -1315,3 +1315,67 @@ describe('attachment references vs real uploads (SMALL-FIXES-1)', () => {
     },
   );
 });
+
+
+describe('FIX-PR251 upload topic boundaries', () => {
+  it.each([
+    ['根据附件写一篇“把爱传到每个人心里”的演讲稿', true, 'generate'],
+    ['写一篇关于“把知识传到乡村”的文章', false, 'generate'],
+    ['根据附件写一份文件上传到服务器的操作说明，不要真的上传', true, 'generate'],
+    ['帮我写一份将照片上传至云盘的教程', false, 'generate'],
+    ['参考附件起草一封邮件，主题是“资料上传到服务器后的注意事项”', true, 'generate'],
+    ['把附件上传到 github.com 的仓库', true, 'browser'],
+    ['把本机文件上传至 Google Drive', false, 'browser'],
+    ['把附件传到同事指定的网页表单', true, 'browser'],
+    ['根据我刚刚上传的这份文档整理会议纪要', true, 'generate'],
+    ['写一段“上传至”是什么意思的说明', false, 'generate'],
+  ] as const)('classifies the strict review case: %s', async (intent, hasFileAttachment, mode) => {
+    expect(await classifyExecutionMode({ intent, hasFileAttachment, logger: fakeLogger() })).toBe(
+      mode,
+    );
+  });
+
+  it.each([
+    ['整理「把附件上传到 github.com 的仓库」这句话的说明', true, 'generate'],
+    ['撰写《把附件上传到 Google Drive》教程', false, 'generate'],
+    ['写一段关于 "上传到服务器" 和 \'上传至云盘\' 的说明', false, 'generate'],
+    ['教我怎么把附件传到 Google Drive', true, 'generate'],
+    ['写完后帮我上传到 github.com', true, 'browser'],
+    ['写一份操作说明，然后把附件上传到 Google Drive', true, 'browser'],
+  ] as const)(
+    'separates instructional topics from compound execution: %s',
+    async (intent, hasFileAttachment, mode) => {
+      expect(await classifyExecutionMode({ intent, hasFileAttachment, logger: fakeLogger() })).toBe(
+        mode,
+      );
+    },
+  );
+});
+
+describe('upload actions with written-file descriptions', () => {
+  it.each([
+    '把撰写的文章上传到 github.com',
+    '把拟好的讲稿上传至云盘',
+    '将整理好的纪要上传至云盘',
+    '上传我写好的文件到 Google Drive',
+    '根据附件写一篇最新新闻报告，然后帮我把文件上传至 Google Drive',
+  ])('does not mistake the file description for a writing request: %s', async (intent) => {
+    expect(
+      await classifyExecutionMode({ intent, hasFileAttachment: true, logger: fakeLogger() }),
+    ).toBe('browser');
+  });
+  it.each(['不要真的把附件上传到 github.com', '别上传附件到 Google Drive，给我一份说明'])(
+    'does not execute a negated upload: %s',
+    async (intent) => {
+      expect(
+        await classifyExecutionMode({ intent, hasFileAttachment: true, logger: fakeLogger() }),
+      ).toBe('generate');
+    },
+  );
+});
+
+it('treats an unquoted upload meaning question as explanation', async () => {
+  expect(
+    await classifyExecutionMode({ intent: '上传到服务器是什么意思？', logger: fakeLogger() }),
+  ).toBe('generate');
+});

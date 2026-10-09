@@ -193,8 +193,8 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:上传|下载|导出|分享|移动|重命名|复制链接|改权限|授权).{0,48}(?:文件|附件|pdf|csv|xlsx|表格|资料|文档|图片|链接|权限|这个|这|该).{0,48}(?:google drive|dropbox|onedrive|icloud drive)/i, '中文云盘对象操作'],
   [/(?:把|将).{0,24}(?:文件|附件|文档|pdf|这个|这|该).{0,32}(?:上传|下载|导出|分享|移动|重命名|复制链接|改成|设为|设置为|共享为).{0,48}(?:google drive|dropbox|onedrive|icloud drive|任何有链接|可查看|可编辑|权限)/i, '中文文件权限操作'],
   [/(?:上传|下载|导出|分享|移动|重命名|复制链接|改权限|授权).{0,32}(?:文件|附件|pdf|csv|xlsx|表格|资料|文档|图片|链接|权限|这个|这|该)(?!.*(?:策略|模板|方案|分析|报告))/i, '中文文件执行操作'],
-  // "上传到 / 上传至 <site>" names a destination: a website action even when
-  // the uploaded thing is the attachment ("把附件上传到 github.com 的仓库").
+  // Match upload destinations only after quoted and instructional upload
+  // topics have been neutralized; compound delivery requests stay actionable.
   [/上传(?:到|至)\s*\S|把.{0,24}传(?:到|至)\s*\S/, '中文上传到目标'],
   [/(?:创建|新建|添加|更新|编辑|回复|下载|上传|导出|查找|退款|安排|预约).{0,48}(?:github\s*issue|asana\s*任务|trello\s*卡片|zendesk\s*工单|hubspot\s*联系人|salesforce\s*客户|stripe\s*(?:付款|收据|发票)|google\s*doc|google\s*文档|notion\s*页面|airtable\s*(?:行|记录)|figma\s*设计|cloudinary\s*图片|buffer\s*帖子|mailchimp\s*campaign|shopify\s*折扣码|日历|日程|会议邀请|日程邀请)/i, '中文对象式 SaaS 操作'],
   [/(?:在|到).{0,8}(?:日历|calendar).{0,32}(?:添加|安排|创建|新建).{0,32}(?:会议|日程|邀请|event|meeting)/i, '中文日历对象操作'],
@@ -660,7 +660,40 @@ function attachmentNeedsLiveSource(intent: string): boolean {
 
 /** Writing deliverables made from an attachment (the attachment-writing shortcut). */
 const ATTACHMENT_WRITING_RE =
-  /(?:写|撰写|起草|拟|编写|生成|整理|输出|做)(?:一下|一份|一篇|一个|一封|一段|个|份|篇|封|段)?.{0,24}(?:短文|文章|文案|故事|报告|文档|会议纪要|纪要|会议记录|周报|日报|月报|总结|复盘|方案|提纲|大纲|讲稿|演讲稿|邮件|简历|说明书|说明|介绍|摘要|笔记|心得|读后感|新闻稿|通知|公告|诗|稿)|\b(?:write|draft|compose|generate|prepare)\b.{0,48}\b(?:story|article|essay|report|document|minutes|summary|email|resume|cv|outline|speech|proposal|memo|manual|poem)\b/i;
+  /(?:写|撰写|起草|拟|编写|生成|整理|输出|做)(?:一下|一份|一篇|一个|一封|一段|个|份|篇|封|段)?.{0,24}(?:短文|文章|文案|故事|报告|文档|会议纪要|纪要|会议记录|周报|日报|月报|总结|复盘|方案|提纲|大纲|讲稿|演讲稿|邮件|简历|说明书|说明|教程|介绍|摘要|笔记|心得|读后感|新闻稿|通知|公告|诗|稿)|\b(?:write|draft|compose|generate|prepare)\b.{0,48}\b(?:story|article|essay|report|document|minutes|summary|email|resume|cv|outline|speech|proposal|memo|manual|poem)\b/i;
+
+/** Keep upload topics out of action matching without suppressing other actions. */
+function neutralizeUploadTopics(intent: string): string {
+  // Only upload-bearing quotations are removed from routing. Quoted control
+  // labels / other destinations still belong to their established action rules.
+  const unquoted = intent.replace(/“[^”]*”|「[^」]*」|"[^"]*"|'[^']*'|《[^》]*》/g, (quoted) =>
+    /上传|传(?:到|至)/.test(quoted) ? ' ' : quoted,
+  );
+  // A second imperative is an actual delivery step, even after a writing
+  // request. Existing compound-task precedence routes the whole task to browser.
+  const delivery =
+    /(?:[，。；,;]\s*(?:然后|接着|再)?|然后|接着|并且|并|(?:写|撰写|起草|整理|生成)完后)\s*(?:请|帮我|替我|给我|为我)?\s*(?:上传(?:到|至)?|(?:把|将)[^，。；,;\n]{0,24}(?:上传(?:到|至)?|传(?:到|至)))/.exec(
+      unquoted,
+    );
+  const topicEnd = delivery?.index ?? unquoted.length;
+  const topic = unquoted.slice(0, topicEnd);
+  const uploadAt = /(?:把|将).{0,24}(?:上传|传(?:到|至))|上传/.exec(topic)?.index;
+  if (uploadAt === undefined) return unquoted;
+  const writingAt = ATTACHMENT_WRITING_RE.exec(topic)?.index;
+  const explanationAt = /怎么|如何|什么意思/.exec(topic)?.index;
+  const meaningQuestion = /^[^，。；,;\n]*(?:是什么意思|什么意思)[？?]?$/.test(topic);
+  if (
+    (writingAt !== undefined && writingAt < uploadAt) ||
+    (explanationAt !== undefined && explanationAt < uploadAt) ||
+    meaningQuestion
+  ) {
+    return (
+      topic.replace(/上传(?:到|至)?|(?:把|将).{0,24}传(?:到|至)/g, '主题') +
+      unquoted.slice(topicEnd)
+    );
+  }
+  return unquoted;
+}
 
 /**
  * "上传的X / 我上传的X / 已上传的X" refers to the attached file. Rewritten to
@@ -684,9 +717,10 @@ function decide(
   // With a file attached, "上传的文档/图片…" names that attachment — material
   // for the task, not a website upload. A real upload ("上传到…/上传至…")
   // keeps its wording and still routes as a website action.
+  const affirmativeIntent = stripNegatedRoutingClauses(neutralizeUploadTopics(intent));
   const routingIntent = ctx.hasFileAttachment
-    ? neutralizeAttachmentReferences(stripNegatedRoutingClauses(intent))
-    : stripNegatedRoutingClauses(intent);
+    ? neutralizeAttachmentReferences(affirmativeIntent)
+    : affirmativeIntent;
 
   // 0a. Template-fill (STRICT) — the user wants to fill THEIR uploaded Office
   // template. Checked first: the patterns require an explicit 模板/
