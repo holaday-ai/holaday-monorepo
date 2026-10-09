@@ -3,7 +3,7 @@
 - 基线：`origin/claude/capability-recovery@ac59a3310`。
 - 分支：`codex/fix-d10`；独立 worktree：`/Users/yaleiqi/.codex/worktrees/fix-d10`。
 - 实现提交：`dee7214203068e09c95a9b5cce5b5e8f0d2b7bf4`。
-- 草稿 PR：待创建（目标 `claude/capability-recovery`）。
+- 草稿 PR：[ #255 ](https://github.com/holaday-ai/holaday-monorepo/pull/255)（目标 `claude/capability-recovery`）。
 - 边界：未合并、未部署、未 SSH、未执行迁移或修改生产；未改动其他会话分支。
 
 ## D10-1：附件失败恢复与重试
