@@ -35,6 +35,10 @@ afterEach(() => {
 it.each([
   'v2-offline',
   'v2-grant',
+  // FIX-PR250: ordinary login / private-data wording, with and without an
+  // explicit public-cloud choice, is held before model preflight and quota.
+  'v2-private-repo',
+  'v2-inbox-public-cloud',
   'ready',
   'timeout',
   'disabled',
@@ -45,10 +49,12 @@ it.each([
   'local-file',
   'ordinary',
 ] as const)('formal Qwen browser task admission and execution: %s', async (scenario) => {
-  const isV2 = scenario === 'v2-offline' || scenario === 'v2-grant';
+  const isV2 = scenario.startsWith('v2-');
   if (isV2) {
     vi.stubEnv('USER_BROWSER_ROUTING_V2', 'true');
-    vi.spyOn(extensionWs, 'hasConnectedExtension').mockReturnValue(scenario === 'v2-grant');
+    vi.spyOn(extensionWs, 'hasConnectedExtension').mockReturnValue(
+      scenario === 'v2-grant' || scenario === 'v2-inbox-public-cloud',
+    );
   }
   const awaiting = vi
     .spyOn(TaskRepository.prototype, 'persistAwaitingUser')
@@ -364,12 +370,17 @@ it.each([
   } as unknown as Context;
   const pending = tasksRouter.createCaller(ctx).create({
     intent: isV2
-      ? '查看我的京东订单'
+      ? scenario === 'v2-private-repo'
+        ? '登录 GitHub 后读取私有仓库列表'
+        : scenario === 'v2-inbox-public-cloud'
+          ? '查看 Gmail 收件箱'
+          : '查看我的京东订单'
       : scenario === 'local-file'
         ? '从当前 Chrome 页面生成可下载 CSV'
         : '查看网页内容并点击详情',
     mode: 'auto',
     expertMode: 'normal',
+    ...(scenario === 'v2-inbox-public-cloud' ? { browserPreference: 'cloud-public' as const } : {}),
     ...(isLocal
       ? {
           localChrome: {

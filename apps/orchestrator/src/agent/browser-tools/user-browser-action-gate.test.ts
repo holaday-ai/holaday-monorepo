@@ -17,6 +17,7 @@ const target = {
   tabId: 3,
   frameId: 'main',
   origin: 'https://fixture.test',
+  page: { url: 'https://fixture.test/search', transactional: false },
   observationRevision: 1,
   capturedAt: 1,
   element: {
@@ -125,4 +126,77 @@ describe('Chrome uses unified onBeforeAction on host-read targets', () => {
       expect((await gate(action, 'before')).kind).toBe('skip');
     },
   );
+});
+
+describe('transaction page context read by the extension (FIX-PR250)', () => {
+  const next = (url: string, transactional = false, visibleText = '继续') => ({
+    ...target,
+    page: { url, transactional },
+    element: { ...target.element, visibleText, inputType: 'button' },
+  });
+  const run = async (
+    targets: Array<ReturnType<typeof next>>,
+    reply: string | null,
+    aborted = () => false,
+  ) => {
+    let call = 0;
+    const park = vi.fn(async () => reply);
+    const gate = createDescriptionActionGate({
+      // Model-supplied page notes never reach here; only extension-read targets.
+      describe: async () =>
+        describeUserBrowserAction(
+          action,
+          targets[Math.min(call++, targets.length - 1)] ?? next(''),
+        ),
+      onBeforeAction: classifyRuntimeAction,
+      pageUrl: () => target.origin,
+      park,
+      aborted,
+    });
+    return { decision: await gate(action, 'before'), parked: park.mock.calls.length };
+  };
+  it.each([
+    'https://fixture.test/checkout',
+    'https://fixture.test/pay',
+    'https://fixture.test/order/confirm',
+  ])('a neutral 继续/下一步 button on %s asks first; refusal and timeout stop', async (url) => {
+    for (const label of ['继续', '下一步']) {
+      const refused = await run([next(url, false, label)], '不要');
+      expect(refused).toMatchObject({ parked: 1, decision: { kind: 'stop' } });
+      const timedOut = await run([next(url, false, label)], null);
+      expect(timedOut).toMatchObject({
+        parked: 1,
+        decision: { kind: 'stop', outcome: { status: 'awaiting_user' } },
+      });
+    }
+  });
+  it('a transaction flag computed from query/hash counts too; ordinary pages auto-click', async () => {
+    expect(await run([next('https://fixture.test/list', true)], '不要')).toMatchObject({
+      parked: 1,
+      decision: { kind: 'stop' },
+    });
+    expect(await run([next('https://fixture.test/list')], '不要')).toMatchObject({
+      parked: 0,
+      decision: { kind: 'proceed' },
+    });
+    expect(
+      await run([next('https://fixture.test/checkout', false, '查看详情')], '不要'),
+    ).toMatchObject({ parked: 0, decision: { kind: 'proceed' } });
+  });
+  it('confirmation proceeds only while the confirmed page path is unchanged', async () => {
+    const checkout = next('https://fixture.test/checkout');
+    expect(await run([checkout, checkout], '确认执行')).toMatchObject({
+      parked: 1,
+      decision: { kind: 'proceed' },
+    });
+    const moved = await run([checkout, next('https://fixture.test/checkout/pay')], '确认执行');
+    expect(moved).toMatchObject({ parked: 1, decision: { kind: 'skip' } });
+    const cancelled = await run([checkout, checkout], '确认执行', () => true);
+    expect(cancelled.decision).toMatchObject({ kind: 'stop', outcome: { status: 'cancelled' } });
+  });
+  it('the page path stays separate from the origin used for the binding', () => {
+    const description = describeUserBrowserAction(action, next('https://fixture.test/checkout'));
+    expect(description.descriptors[0]?.pageUrl).toBe('https://fixture.test/checkout');
+    expect(description.bindings?.[0]).toMatchObject({ origin: 'https://fixture.test' });
+  });
 });

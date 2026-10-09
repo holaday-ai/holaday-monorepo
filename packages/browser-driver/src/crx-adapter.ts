@@ -185,7 +185,18 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         );
       }
       if (this.opts.userBrowserRoutingV2)
-        this.targets = new SelectedTargetResolver(page, requestedTabId, this.opts.allowedOrigins);
+        this.targets = new SelectedTargetResolver(
+          page,
+          requestedTabId,
+          this.opts.allowedOrigins,
+          // Hit testing rides the debugger session playwright-crx attached.
+          (method, params) =>
+            chrome.debugger.sendCommand(
+              { tabId: requestedTabId },
+              method,
+              params,
+            ) as Promise<unknown>,
+        );
       return { status: 'ok', data: { tabId: requestedTabId } };
     } catch (err) {
       if (!existingPage && this.page) {

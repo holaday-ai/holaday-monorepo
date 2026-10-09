@@ -783,6 +783,8 @@ const LANDING_TOOLS = new Set<UnifiedBrowserAction['tool']>([
 ]);
 
 type UserAction = Extract<SelectedChromeSessionCommand, { op: 'act' }>['action'];
+/** Transaction-context marker for the policy when the page address is a payment/order step. */
+const USER_PAGE_TRANSACTION_SIGNAL = '交易页面 checkout';
 /** Decode only extension-read signals. Model hints never enter this descriptor. */
 export function describeUserBrowserAction(
   action: UserAction,
@@ -798,9 +800,14 @@ export function describeUserBrowserAction(
         origin: target.origin,
       },
     ],
-    objects: target.objectDigest,
+    // The confirmed page is part of what the action acts on.
+    objects: JSON.stringify([target.objectDigest, target.page.url, target.page.transactional]),
   };
   const element = target.element;
+  // Authorization stays the frame's exact origin (bindings); business context
+  // is the tab's current page as read by the extension — path only, plus a
+  // transaction flag computed there over the full address.
+  const pageTxSignal = target.page.transactional ? USER_PAGE_TRANSACTION_SIGNAL : null;
   const descriptor: RuntimeActionDescriptor = {
     kind: action.kind === 'type' ? 'type' : 'click',
     label: element.visibleText,
@@ -810,7 +817,8 @@ export function describeUserBrowserAction(
     name: element.name,
     inputType: element.inputType,
     tagName: element.tagName,
-    pageUrl: target.origin,
+    pageUrl: target.page.url,
+    pageTxSignal,
   };
   const form = target.form;
   const activates =
@@ -852,8 +860,8 @@ export function describeUserBrowserAction(
         ariaLabel: control?.ariaLabel ?? element.ariaLabel,
         tagName: control?.tagName ?? 'button',
         inputType: control?.inputType ?? 'submit',
-        pageUrl: form.action ?? target.origin,
-        pageTxSignal: form.fieldSignal,
+        pageUrl: form.action ?? target.page.url,
+        pageTxSignal: [form.fieldSignal, pageTxSignal].filter(Boolean).join(' ') || null,
       },
     ],
     transactional: transactional ? '这次操作会提交涉及付款、订单或删除的表单' : null,

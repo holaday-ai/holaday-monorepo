@@ -273,6 +273,158 @@ test(
       await observe();
       assert.equal((await bound(action, old)).result.actionOutcome, 'not_applied');
     });
+    await t.test(
+      'real hit target and page context: shadow, overlays, transaction pages, closed-shadow focus',
+      async () => {
+        const { createDescriptionActionGate, describeUserBrowserAction } = await loadServerModule(
+          'agent/browser-tools/unified-action-gate.ts',
+        );
+        const { classifyRuntimeAction } = await loadServerModule(
+          'agent/supercar/runtime-action-policy.ts',
+        );
+        const effects = () => page.evaluate(() => Number(window.effects || 0));
+        // One action through describe → unified gate → bound act, like the runner.
+        const run = async (action, { reply = '不要', during } = {}) => {
+          let parked = 0;
+          let target;
+          const gate = createDescriptionActionGate({
+            pageUrl: () => page.url(),
+            onBeforeAction: classifyRuntimeAction,
+            aborted: () => false,
+            park: async () => {
+              parked++;
+              await during?.();
+              return reply;
+            },
+            describe: async () => {
+              const described = await describe(action);
+              assert.equal(described.ok, true, described.result?.error);
+              target = described.result.target;
+              return describeUserBrowserAction(action, target);
+            },
+          });
+          const decision = await gate(action, 'before');
+          const receipt = decision.kind === 'proceed' ? await bound(action, target) : null;
+          if (receipt?.ok) revision = receipt.result.observation.observationRevision;
+          return { parked, decision, receipt, target, effects: await effects() };
+        };
+        const scene = async (path, html) => {
+          await page.evaluate((next) => history.replaceState(null, '', next), path);
+          await page.setContent(html);
+          await page.evaluate(() => {
+            window.effects = 0;
+          });
+          await observe();
+        };
+        const click = (selector) => ({ kind: 'click', selector: css(selector), deadlineMs: 500 });
+        const pay = `<button style='width:220px;height:80px' onclick='window.effects++'>确认支付</button>`;
+        const shadow = (mode, nested) =>
+          `<div id='host' style='position:absolute;left:10px;top:10px;width:220px;height:80px'></div><script>
+            ((root) => {
+              if (${nested}) {
+                root.innerHTML = "<div id='inner' style='width:220px;height:80px'></div>";
+                root.querySelector('#inner').attachShadow({ mode: 'closed' }).innerHTML = \`${pay}\`;
+              } else root.innerHTML = \`${pay}\`;
+            })(document.querySelector('#host').attachShadow({ mode: '${mode}' }));
+          </script>`;
+        for (const [mode, nested] of [
+          ['open', false],
+          ['closed', false],
+          ['open', true],
+        ]) {
+          await scene('/v2.html', shadow(mode, nested));
+          const refused = await run(click('#host'));
+          assert.equal(refused.target.element.visibleText, '确认支付');
+          assert.deepEqual(
+            [refused.parked, refused.decision.kind, refused.effects],
+            [1, 'stop', 0],
+          );
+          await observe();
+          // Confirmed: the click lands on exactly the described inner button.
+          const confirmed = await run(click('#host'), { reply: '确认执行' });
+          assert.deepEqual([confirmed.parked, confirmed.decision.kind], [1, 'proceed']);
+          assert.equal(confirmed.receipt.ok, true, confirmed.receipt.result?.error);
+          assert.equal(confirmed.effects, 1);
+        }
+        await scene(
+          '/v2.html',
+          `<button id='pay' style='width:220px;height:80px' onclick='window.effects++'>确认支付</button><div style='position:absolute;left:8px;top:8px;width:220px;height:80px;pointer-events:none'>提示</div>`,
+        );
+        const overlay = await run(click('#pay'));
+        assert.deepEqual(
+          [overlay.target.element.visibleText, overlay.parked, overlay.effects],
+          ['确认支付', 1, 0],
+        );
+        for (const path of ['/checkout', '/pay', '/order/confirm']) {
+          const next = `<button id='next' type='button' style='width:220px;height:80px' onclick='window.effects++'>继续</button>`;
+          await scene(`${path}?coupon=SYNTHETIC#step`, next);
+          const refused = await run(click('#next'));
+          assert.deepEqual(refused.target.page, {
+            url: `${server.origin}${path}`,
+            transactional: true,
+          });
+          assert.deepEqual(
+            [refused.parked, refused.decision.kind, refused.effects],
+            [1, 'stop', 0],
+          );
+          await observe();
+          const timedOut = await run(click('#next'), { reply: null });
+          assert.equal(timedOut.decision.outcome.status, 'awaiting_user');
+          assert.deepEqual([timedOut.parked, timedOut.effects], [1, 0]);
+          await observe();
+          const moved = await run(click('#next'), {
+            reply: '确认执行',
+            during: () => page.evaluate(() => history.pushState(null, '', '/elsewhere')),
+          });
+          assert.deepEqual([moved.parked, moved.decision.kind, moved.effects], [1, 'skip', 0]);
+          await scene(path, next);
+          const confirmed = await run(click('#next'), { reply: '确认执行' });
+          assert.deepEqual(
+            [confirmed.parked, confirmed.decision.kind, confirmed.effects],
+            [1, 'proceed', 1],
+          );
+        }
+        await scene('/v2.html', shadow('closed', false));
+        await page.mouse.click(30, 30);
+        await page.evaluate(() => {
+          window.effects = 0;
+        });
+        await observe();
+        for (const key of ['Enter', 'Space']) {
+          const keyed = await run({ kind: 'key', payload: { key } });
+          assert.equal(keyed.target.element.visibleText, '确认支付');
+          assert.deepEqual([keyed.parked, keyed.decision.kind, keyed.effects], [1, 'stop', 0]);
+        }
+        // Ordinary controls — plain, under a decorative overlay, inside shadow
+        // roots, on a list page — still click without any confirmation.
+        const ordinary = [
+          ['/list?q=shoes', `<button id='t' onclick='window.effects++'>下一页</button>`],
+          [
+            '/v2.html',
+            `<button id='t' style='width:220px;height:80px' onclick='window.effects++'>展开</button><div style='position:absolute;left:8px;top:8px;width:220px;height:80px;pointer-events:none'>提示</div>`,
+          ],
+          [
+            '/v2.html',
+            shadow('closed', false)
+              .replaceAll('确认支付', '查看详情')
+              .replace("id='host'", "id='t'")
+              .replace("'#host'", "'#t'"),
+          ],
+          ['/checkout', `<a id='t' href='#detail' onclick='window.effects++'>查看商品详情</a>`],
+        ];
+        for (const [path, html] of ordinary) {
+          await scene(path, html);
+          const done = await run(click('#t'));
+          assert.deepEqual(
+            [done.parked, done.decision.kind, done.effects],
+            [0, 'proceed', 1],
+            path,
+          );
+        }
+        await page.goto(`${server.origin}/v2.html`);
+        await observe();
+      },
+    );
     await t.test('scroll/select and list/new/switch never admit unrelated user tabs', async () => {
       const unrelated = await context.newPage();
       await unrelated.goto(`${server.origin}/page2.html`);

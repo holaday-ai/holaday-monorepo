@@ -192,11 +192,77 @@ const readElement = async (
     },
   };
 };
+/** Opaque per-node id shared by every read in the page's main world. */
+const nodeId = (node: Element): string => {
+  const win = window as typeof window & { __holadayV2Nodes?: WeakMap<Element, string> };
+  const ids = win.__holadayV2Nodes ?? new WeakMap<Element, string>();
+  win.__holadayV2Nodes = ids;
+  let id = ids.get(node);
+  if (!id) {
+    id = crypto.randomUUID();
+    ids.set(node, id);
+  }
+  return id;
+};
+type Signals = Pick<
+  UserBrowserTargetDescription,
+  'elementId' | 'objectDigest' | 'element' | 'form'
+>;
+/**
+ * Runs on the node Chromium hit-tests at the click point (`this`), which can be
+ * inside open or closed shadow roots. `inside`: the hit is the selected
+ * element or a shadow-including descendant of it; `document`: the observed
+ * document it belongs to (bridges back to the Playwright frame). `opaque`:
+ * hit testing stopped at an embedded document it cannot see into (an
+ * out-of-process or cross-origin frame, e.g. a third-party payment widget).
+ */
+const HIT_READ = `async function (selectedId) {
+  const node = this.nodeType === 1 ? this : this.parentElement;
+  if (!node) return null;
+  const ids = window.__holadayV2Nodes;
+  let inside = false;
+  for (let cur = node, hops = 0; cur && hops < 400; hops++) {
+    if (ids && ids.get(cur) === selectedId) { inside = true; break; }
+    const root = cur.getRootNode();
+    cur = cur.parentElement || (root && 'host' in root ? root.host : null);
+  }
+  const version = window.__holadayV2Document;
+  return {
+    inside,
+    opaque: /^(?:IFRAME|FRAME|OBJECT|EMBED|PORTAL|FENCEDFRAME)$/.test(node.tagName),
+    document: version ? version.document : null,
+    read: inside ? await (${readElement.toString()})(node) : null,
+  };
+}`;
+/** Same read for the deepest focused element (key actions). */
+const FOCUS_READ = `async function () {
+  const version = window.__holadayV2Document;
+  return {
+    document: version ? version.document : null,
+    read: await (${readElement.toString()})(this),
+  };
+}`;
+/** Tabs/addresses that are a payment or order step; the full address
+ * (path, query and hash) is tested in the extension, only a boolean leaves. */
+const TRANSACTION_URL_RE =
+  /(?:\/|\b)(?:checkout|payment|cashier|order[-_/]?confirm|confirm[-_/]?order|order[-_/]?submit|submit[-_/]?order|booking\/confirm|settlement|pay)(?:\/|\b)|订单提交|确认订单|提交订单|收银台|支付|付款|结算/i;
+/** Key-order independent: chrome.debugger returns by-value objects with sorted keys. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v,
+  );
+}
+/** Raw CDP on the selected tab (`chrome.debugger.sendCommand` in the extension). */
+export type SelectedTabCdp = (method: string, params?: Record<string, unknown>) => Promise<unknown>;
 interface Ticket {
   target: UserBrowserTargetDescription;
   action: string;
-  handle: ElementHandle<Element>;
+  handle: ElementHandle<Element> | null;
   frame: Frame;
+  /** Clicks: the exact point described and later clicked, and the selected node. */
+  point?: { x: number; y: number; selectedId: string };
 }
 
 /** One selected page; no selector healing or first-match execution in v2. */
@@ -209,6 +275,7 @@ export class SelectedTargetResolver {
     private readonly page: Page,
     private readonly tabId: number,
     private readonly origins: readonly string[],
+    private readonly cdp: SelectedTabCdp,
   ) {}
   get observationRevision(): number {
     return this.revision;
@@ -265,7 +332,7 @@ export class SelectedTargetResolver {
   private async clearTicket(): Promise<void> {
     const ticket = this.ticket;
     this.ticket = null;
-    await ticket?.handle.dispose().catch(() => undefined);
+    await ticket?.handle?.dispose().catch(() => undefined);
   }
   private async assertFresh(frame: Frame, expected: number): Promise<void> {
     this.origin(this.page.mainFrame());
@@ -276,31 +343,170 @@ export class SelectedTargetResolver {
     if (JSON.stringify(current) !== JSON.stringify(this.documents.get(frame)))
       throw new Error('stale_observation');
   }
-  private async focused(): Promise<{ handle: ElementHandle<Element>; frame: Frame }> {
-    let frame = this.page.mainFrame();
-    for (let depth = 0; depth < 6; depth++) {
-      this.origin(frame);
-      const js = await frame.evaluateHandle(() => {
-        let el = document.activeElement;
-        while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
-        return el && el !== document.body && el !== document.documentElement ? el : null;
+  private frameFor(documentId: unknown): Frame {
+    for (const [frame, version] of this.documents)
+      if (typeof documentId === 'string' && version.document === documentId) return frame;
+    // Not an observed, granted document (or observed before it was replaced).
+    throw new Error('stale_observation');
+  }
+  /** Runs one CDP read and maps transport/page failures to `target_unreadable`. */
+  private async withObjects<T>(work: (track: (id: string) => string) => Promise<T>): Promise<T> {
+    const objects: string[] = [];
+    try {
+      return await work((id) => {
+        objects.push(id);
+        return id;
       });
-      const handle = js.asElement() as ElementHandle<Element> | null;
-      if (!handle) {
-        await js.dispose();
-        throw new Error('target_missing');
-      }
-      const child = await handle.contentFrame();
-      if (!child) return { handle, frame };
-      await handle.dispose();
-      frame = child;
+    } catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      if (/^(?:target_[a-z_]+|stale_observation|origin_grant_required)$/.test(code)) throw error;
+      throw new Error('target_unreadable');
+    } finally {
+      for (const objectId of objects)
+        await this.cdp('Runtime.releaseObject', { objectId }).catch(() => undefined);
     }
-    throw new Error('target_missing');
+  }
+  private async callOn(objectId: string, functionDeclaration: string, args: unknown[] = []) {
+    const result = (await this.cdp('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration,
+      arguments: args.map((value) => ({ value })),
+      awaitPromise: true,
+      returnByValue: true,
+    })) as { result?: { value?: unknown }; exceptionDetails?: unknown };
+    if (result.exceptionDetails) throw new Error('target_unreadable');
+    return result.result?.value;
+  }
+  private async objectFrom(objectId: string, functionDeclaration: string): Promise<string | null> {
+    const result = (await this.cdp('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration,
+      returnByValue: false,
+    })) as { result?: { objectId?: string; subtype?: string }; exceptionDetails?: unknown };
+    if (result.exceptionDetails) throw new Error('target_unreadable');
+    return result.result?.subtype === 'null' ? null : (result.result?.objectId ?? null);
+  }
+  /**
+   * What a real click at viewport point (x, y) lands on: Chromium hit testing
+   * pierces open and closed shadow roots and same-process frames and, like
+   * the mouse, skips pointer-events:none overlays. The hit must be the
+   * selected element or inside it; anything else (an overlay, an
+   * out-of-process frame, an unobserved document) is not described.
+   */
+  private async readAt(
+    point: { x: number; y: number },
+    selectedId: string,
+  ): Promise<{ frame: Frame; signals: Signals }> {
+    return this.withObjects(async (track) => {
+      const hit = (await this.cdp('DOM.getNodeForLocation', {
+        x: point.x,
+        y: point.y,
+        includeUserAgentShadowDOM: false,
+        ignorePointerEventsNone: false,
+      })) as { backendNodeId?: number };
+      const resolved = (await this.cdp('DOM.resolveNode', {
+        backendNodeId: hit.backendNodeId,
+      })) as { object?: { objectId?: string } };
+      if (!resolved.object?.objectId) throw new Error('target_unreadable');
+      const value = (await this.callOn(track(resolved.object.objectId), HIT_READ, [
+        selectedId,
+      ])) as {
+        inside: boolean;
+        opaque: boolean;
+        document: unknown;
+        read: Signals | null;
+      } | null;
+      if (!value) throw new Error('target_unreadable');
+      if (!value.inside || !value.read) throw new Error('target_obscured');
+      // What a click inside it would hit is unknown: the user decides.
+      if (value.opaque) throw new Error('target_unreadable');
+      return { frame: this.frameFor(value.document), signals: value.read };
+    });
+  }
+  /**
+   * The deepest focused element, through open and closed shadow roots and
+   * same-process frames: Enter/Space act on it, not on a shadow host.
+   */
+  private async focusTarget(): Promise<{ frame: Frame; signals: Signals }> {
+    return this.withObjects(async (track) => {
+      const start = (await this.cdp('Runtime.evaluate', {
+        expression: 'document.activeElement',
+        returnByValue: false,
+      })) as { result?: { objectId?: string; subtype?: string } };
+      let current = start.result?.subtype === 'null' ? null : (start.result?.objectId ?? null);
+      for (let depth = 0; current && depth < 32; depth++) {
+        track(current);
+        const { node } = (await this.cdp('DOM.describeNode', {
+          objectId: current,
+          depth: 0,
+          pierce: true,
+        })) as {
+          node: {
+            nodeName: string;
+            shadowRoots?: Array<{ backendNodeId: number; shadowRootType?: string }>;
+          };
+        };
+        let next: string | null = null;
+        const root = node.shadowRoots?.find((r) => r.shadowRootType !== 'user-agent');
+        if (root) {
+          const resolved = (await this.cdp('DOM.resolveNode', {
+            backendNodeId: root.backendNodeId,
+          })) as { object?: { objectId?: string } };
+          if (!resolved.object?.objectId) throw new Error('target_unreadable');
+          next = await this.objectFrom(
+            track(resolved.object.objectId),
+            'function () { return this.activeElement; }',
+          );
+        } else if (/^i?frame$/i.test(node.nodeName)) {
+          next = await this.objectFrom(
+            current,
+            'function () { const d = this.contentDocument; return d ? d.activeElement : undefined; }',
+          );
+          // An out-of-process frame cannot be read from this tab session.
+          if (!next) throw new Error('target_unreadable');
+        }
+        if (!next) {
+          const value = (await this.callOn(current, FOCUS_READ)) as {
+            document: unknown;
+            read: Signals;
+          } | null;
+          if (!value?.read || /^(?:body|html)$/.test(value.read.element.tagName ?? ''))
+            throw new Error('target_missing');
+          return { frame: this.frameFor(value.document), signals: value.read };
+        }
+        current = next;
+      }
+      throw new Error('target_missing');
+    });
+  }
+  /** The point a click is sent to: the centre of the (scrolled-into-view) element. */
+  private async clickPoint(handle: ElementHandle<Element>): Promise<{ x: number; y: number }> {
+    await handle.scrollIntoViewIfNeeded({ timeout: 2000 });
+    const box = await handle.boundingBox();
+    if (!box || box.width < 1 || box.height < 1) throw new Error('target_unreadable');
+    return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };
+  }
+  /** The tab's current page: path only (no query/hash values) plus transaction context. */
+  private pageContext(frame: Frame): UserBrowserTargetDescription['page'] {
+    const main = new URL(this.page.mainFrame().url());
+    const decoded = (raw: string) => {
+      try {
+        return decodeURIComponent(raw);
+      } catch {
+        return raw;
+      }
+    };
+    return {
+      url: `${main.origin}${main.pathname}`.slice(0, 2048),
+      transactional: [this.page.mainFrame().url(), frame.url()].some((raw) =>
+        TRANSACTION_URL_RE.test(decoded(raw)),
+      ),
+    };
   }
   private async resolve(
     action: DriverAction,
   ): Promise<{ handle: ElementHandle<Element>; frame: Frame }> {
-    if (action.kind === 'key') return this.focused();
+    if (action.kind === 'key') throw new Error('target_missing');
     if (!action.selector) throw new Error('target_missing');
     const plan = buildSelectorPlan(action.selector);
     for (const spec of plan.attempts) {
@@ -331,14 +537,31 @@ export class SelectedTargetResolver {
   }
   async describe(action: DriverAction, expected: number): Promise<UserBrowserTargetDescription> {
     await this.clearTicket();
-    const { handle, frame } = await this.resolve(action);
+    let handle: ElementHandle<Element> | null = null;
     try {
-      await this.assertFresh(frame, expected);
-      const signals = (await handle.evaluate(readElement)) as Pick<
-        UserBrowserTargetDescription,
-        'elementId' | 'objectDigest' | 'element' | 'form'
-      >;
-      if (!(await handle.isVisible())) throw new Error('target_unreadable');
+      let frame: Frame;
+      let signals: Signals;
+      let point: Ticket['point'];
+      if (action.kind === 'key') {
+        ({ frame, signals } = await this.focusTarget());
+        await this.assertFresh(frame, expected);
+      } else {
+        const resolved = await this.resolve(action);
+        handle = resolved.handle;
+        frame = resolved.frame;
+        await this.assertFresh(frame, expected);
+        if (!(await handle.isVisible())) throw new Error('target_unreadable');
+        if (action.kind === 'click') {
+          // Describe what the click will actually hit, not the selector's node:
+          // a shadow host's inner payment button is the real target.
+          const selectedId = String(await handle.evaluate(nodeId));
+          const at = await this.clickPoint(handle);
+          const hit = await this.readAt(at, selectedId);
+          if (hit.frame !== frame) throw new Error('target_obscured');
+          signals = hit.signals;
+          point = { ...at, selectedId };
+        } else signals = (await handle.evaluate(readElement)) as Signals;
+      }
       let frameId = this.frames.get(frame);
       if (!frameId) {
         frameId = crypto.randomUUID();
@@ -352,12 +575,13 @@ export class SelectedTargetResolver {
         observationRevision: expected,
         capturedAt: Date.now(),
         ...signals,
+        page: this.pageContext(frame),
       };
       await this.assertFresh(frame, expected);
-      this.ticket = { target, action: JSON.stringify(action), handle, frame };
+      this.ticket = { target, action: JSON.stringify(action), handle, frame, point };
       return target;
     } catch (error) {
-      await handle.dispose();
+      await handle?.dispose();
       throw error;
     }
   }
@@ -370,61 +594,57 @@ export class SelectedTargetResolver {
       ticket.target.observationRevision !== binding.observationRevision ||
       ticket.action !== JSON.stringify(action)
     ) {
-      await ticket?.handle.dispose();
+      await ticket?.handle?.dispose();
       throw new Error('target_binding_required');
     }
+    const expected = canonical({
+      elementId: ticket.target.elementId,
+      objectDigest: ticket.target.objectDigest,
+      element: ticket.target.element,
+      form: ticket.target.form,
+    });
     try {
       await this.assertFresh(ticket.frame, binding.observationRevision);
-      const fresh = await ticket.handle.evaluate(readElement);
-      if (
-        !(await ticket.handle.isVisible()) ||
-        JSON.stringify(fresh) !==
-          JSON.stringify({
-            elementId: ticket.target.elementId,
-            objectDigest: ticket.target.objectDigest,
-            element: ticket.target.element,
-            form: ticket.target.form,
-          })
-      )
+      // The confirmed page context is part of the action (a pushState to
+      // /pay keeps the DOM but changes what "继续" means).
+      if (canonical(this.pageContext(ticket.frame)) !== canonical(ticket.target.page))
         throw new Error('target_changed');
-      if (action.kind === 'key') {
-        const focused = await this.focused();
-        const same = await ticket.handle.evaluate(
-          (el: Element, other: Element) => el === other,
-          focused.handle,
-        );
-        await focused.handle.dispose();
-        if (!same) throw new Error('target_changed');
-      }
       const timeout = action.deadlineMs ?? 2000;
       switch (action.kind) {
         case 'click': {
-          // Trial performs actionability/hit testing without generating input.
-          await ticket.handle.click({ trial: true, timeout });
-          await this.assertFresh(ticket.frame, binding.observationRevision);
-          const afterTrial = await ticket.handle.evaluate(readElement);
-          if (
-            JSON.stringify(afterTrial) !==
-            JSON.stringify({
-              elementId: ticket.target.elementId,
-              objectDigest: ticket.target.objectDigest,
-              element: ticket.target.element,
-              form: ticket.target.form,
-            })
-          )
+          const point = ticket.point;
+          if (!point) throw new Error('target_binding_required');
+          // Re-hit-test the very point that will be clicked: same node, same
+          // semantics, still inside the selected element.
+          const hit = await this.readAt(point, point.selectedId);
+          if (hit.frame !== ticket.frame || canonical(hit.signals) !== expected)
             throw new Error('target_changed');
-          await ticket.handle.click({ timeout });
+          await this.assertFresh(ticket.frame, binding.observationRevision);
+          await this.page.mouse.click(point.x, point.y);
+          break;
+        }
+        case 'key': {
+          // The key goes to the focused element; it must be the described one.
+          const focus = await this.focusTarget();
+          if (focus.frame !== ticket.frame || canonical(focus.signals) !== expected)
+            throw new Error('target_changed');
+          await this.assertFresh(ticket.frame, binding.observationRevision);
+          await this.page.keyboard.press(String(action.payload?.key ?? ''));
           break;
         }
         case 'type':
-          await ticket.handle.fill(String(action.payload?.text ?? ''), { timeout });
-          break;
-        case 'key':
-          await ticket.handle.press(String(action.payload?.key ?? ''), { timeout });
-          break;
         case 'select': {
+          const handle = ticket.handle;
+          if (!handle) throw new Error('target_binding_required');
+          const fresh = await handle.evaluate(readElement);
+          if (!(await handle.isVisible()) || canonical(fresh) !== expected)
+            throw new Error('target_changed');
+          if (action.kind === 'type') {
+            await handle.fill(String(action.payload?.text ?? ''), { timeout });
+            break;
+          }
           const text = String(action.payload?.text ?? '');
-          const options = (await ticket.handle.evaluate((el: Element) =>
+          const options = (await handle.evaluate((el: Element) =>
             Array.from((el as HTMLSelectElement).options || [])
               .filter((option) => !option.disabled)
               .map((option) => ({ label: option.label, value: option.value })),
@@ -433,14 +653,14 @@ export class SelectedTargetResolver {
             (option) => option.label === text || option.value === text,
           );
           if (matching.length !== 1 || !matching[0]) throw new Error('target_ambiguous');
-          await ticket.handle.selectOption(matching[0], { timeout });
+          await handle.selectOption(matching[0], { timeout });
           break;
         }
         default:
           throw new Error('unsupported_action');
       }
     } finally {
-      await ticket.handle.dispose();
+      await ticket.handle?.dispose();
     }
   }
   async scroll(deltaX: number, deltaY: number): Promise<void> {

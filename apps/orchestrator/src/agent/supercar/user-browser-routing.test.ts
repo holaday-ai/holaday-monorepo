@@ -61,3 +61,50 @@ describe('identity-aware user Chrome route', () => {
     ).toBe('cloud');
   });
 });
+
+describe('ordinary login / private-data wording needs the user Chrome (FIX-PR250)', () => {
+  const offline = { enabled: true, extensionOnline: false };
+  it.each([
+    '登录 GitHub 后读取私有仓库列表',
+    '查看 Gmail 收件箱',
+    '看看京东购物车里有什么',
+    '查一下我淘宝的订单',
+    '读取私有仓库的 issue',
+    '打开邮箱看看有没有新邮件',
+    '查看我的账户余额',
+    '看下微博私信和消息列表',
+    '整理我收藏的小红书笔记',
+    '打开个人中心查看会员到期时间',
+    '去后台看看今天的销售数据',
+    'check my inbox',
+    'list my private repositories on github.com',
+    'log in to github.com and open notifications',
+  ])('%s: waits for Chrome, and a public-cloud choice cannot override it', (intent) => {
+    for (const publicCloudRequested of [false, true]) {
+      const route = decideUserBrowserRoute({ ...offline, intent, publicCloudRequested });
+      expect(route.lane).toBe('awaiting_user');
+      expect(route.reason).toBe('extension_offline');
+    }
+    expect(decideUserBrowserRoute({ ...base, intent }).lane).toBe('awaiting_user');
+  });
+  it('a usually-logged-in service without explicit wording waits; an explicit public choice is honoured', () => {
+    for (const intent of ['打开 Notion 看看这周的计划', '在飞书文档里找到上线清单']) {
+      expect(decideUserBrowserRoute({ ...offline, intent }).lane).toBe('awaiting_user');
+      expect(
+        decideUserBrowserRoute({ ...offline, intent, publicCloudRequested: true }),
+      ).toMatchObject({ lane: 'cloud', reason: 'explicit_public_cloud' });
+    }
+  });
+  it.each([
+    '打开36kr首页',
+    '搜索今天的科技新闻',
+    '打开 https://example.com/login 页面截图登录页',
+    '查询北京明天的天气',
+    '打开 https://github.com/vercel/next.js 看最新 release',
+  ])('public task %s still uses the cloud', (intent) => {
+    expect(decideUserBrowserRoute({ ...offline, intent })).toMatchObject({
+      lane: 'cloud',
+      reason: 'public_site',
+    });
+  });
+});

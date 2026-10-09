@@ -61,6 +61,32 @@ export const userBrowserTargetDescriptionSchema = z
     observationRevision: z.number().int().positive(),
     capturedAt: z.number().int().positive(),
     element: userBrowserElementSignalsSchema,
+    /** The tab's current document, read by the extension (never the model):
+     * origin + path only — query and hash values never leave the page — and
+     * whether the full address (including query/hash) is a transaction page. */
+    page: z
+      .object({
+        url: z
+          .string()
+          .url()
+          .max(2048)
+          .refine((raw) => {
+            try {
+              const url = new URL(raw);
+              return (
+                /^https?:$/.test(url.protocol) &&
+                !url.search &&
+                !url.hash &&
+                !url.username &&
+                !url.password
+              );
+            } catch {
+              return false;
+            }
+          }),
+        transactional: z.boolean(),
+      })
+      .strict(),
     form: z
       .object({
         action: signal,

@@ -22,6 +22,7 @@ const target = {
   tabId: 3,
   frameId: 'main',
   origin: observation.origin,
+  page: { url: `${observation.origin}/`, transactional: false },
   observationRevision: 1,
   capturedAt: 1,
   element: {

@@ -14,8 +14,16 @@ const COHORT = [
   { name: /微博|\bweibo\.(?:com|cn)\b/i, domain: 'weibo.com', origin: 'https://weibo.com' },
   { name: /携程|\bctrip\.com\b/i, domain: 'ctrip.com', origin: 'https://www.ctrip.com' },
 ] as const;
+/** Explicit login / private-data need: never served from a logged-out cloud browser. */
 const IDENTITY =
-  /我的|本人|已登录|登录态|会员|收藏|账号|账户|订单|账单|私信|购物车|余额|my\s+(?:account|orders|profile)|logged[ -]?in|sign[ -]?in/i;
+  /我的|本人|已登录|登录态|登录(?!页|入口|按钮|界面|框|注册页)|登陆(?!页)|会员|收藏|账号|账户|订单|账单|私信|站内信|购物车|余额|私有|私密|私人|收件箱|邮箱|邮件(?!模板|格式)|未读|个人(?:中心|主页|资料|信息|设置)|(?:消息|通知)(?:中心|列表)|我关注的|关注列表|粉丝列表|草稿箱|(?:管理)?后台|控制台|工作台|\binbox\b|\bmy\s+(?:account|orders?|profile|cart|messages|notifications|favou?rites|repos?(?:itor(?:y|ies))?|subscriptions)\b|\bprivate\s+(?:repos?(?:itor(?:y|ies))?|projects?|messages?)\b|\blog(?:ged)?[ -]?in\b|\bsign(?:ed)?[ -]?in\b|\bdashboard\b|\bnotifications\b/i;
+/**
+ * Services that are normally behind a login. Not certain enough to refuse an
+ * explicit public-cloud choice, but without one the task waits for the user's
+ * Chrome instead of silently running logged out.
+ */
+const IDENTITY_LIKELY =
+  /gmail|outlook|hotmail|qq\s*邮箱|163\s*邮箱|网易邮箱|飞书|钉钉|企业微信|notion|slack|语雀|网银|网上银行|支付宝|微信(?!公众号文章)|linkedin|领英/i;
 export interface UserBrowserRoute {
   lane: 'legacy' | 'cloud' | 'user-chrome' | 'awaiting_user';
   question?: string;
@@ -56,8 +64,11 @@ export function decideUserBrowserRoute(input: {
           (site.domain === 'weibo.com' && /(^|\.)weibo\.cn$/.test(host ?? '')),
       )
     : COHORT.find((site) => site.name.test(input.intent));
-  const identity = IDENTITY.test(input.intent);
-  const preferred = Boolean(cohort) || identity;
+  // Words, not addresses: "/login" in a URL names a page, not a login need.
+  const identity = IDENTITY.test(input.intent.replace(/https?:\/\/[^\s<>"'，。；）]+/gi, ' '));
+  const likely = !identity && IDENTITY_LIKELY.test(input.intent);
+  // Unsure whether a login is needed → wait for the user's Chrome (or an explicit public choice).
+  const preferred = Boolean(cohort) || identity || likely;
   if (input.publicCloudRequested && !identity && !input.selectionOrigin)
     return {
       lane: 'cloud',

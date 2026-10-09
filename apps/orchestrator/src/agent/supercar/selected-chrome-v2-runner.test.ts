@@ -47,6 +47,7 @@ function fixture(label: string, missing = false) {
                   tabId: 3,
                   frameId: 'main',
                   origin: target.expectedUrl,
+                  page: { url: `${target.expectedUrl}/`, transactional: false },
                   observationRevision: revision,
                   capturedAt: 1,
                   element: {
