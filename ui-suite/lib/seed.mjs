@@ -350,6 +350,22 @@ export function dispatch(s, name, input = {}, method = 'GET') {
     case 'tasks.moveToProject':
     case 'tasks.clearUnsuccessful':
       return { ok: true, count: 0 };
+    case 'tasks.checkpointBrowserSession': {
+      let url;
+      try {
+        url = new URL(input.url);
+      } catch {
+        return { ok: false, reason: 'invalid_or_unavailable' };
+      }
+      if (!['http:', 'https:'].includes(url.protocol))
+        return { ok: false, reason: 'invalid_or_unavailable' };
+      if (!s.browserSessions[input.taskId]) return { ok: false, reason: 'session_not_live' };
+      const task = s.tasks.find((t) => t.taskId === input.taskId);
+      if (!task || !['completed', 'failed', 'cancelled', 'timeout'].includes(task.status))
+        return { ok: false, reason: 'task_not_terminal' };
+      task.result.finalUrl = input.url;
+      return { ok: true };
+    }
     case 'tasks.browserControlState': {
       const session = s.browserSessions[input.taskId];
       if (!session)

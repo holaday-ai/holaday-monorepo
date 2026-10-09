@@ -622,3 +622,30 @@ test('native fullscreen excludes its intentionally hidden background but checks 
     await browser.close();
   }
 });
+
+test('newest nested portal is audited even when its z-index incorrectly hides it', async () => {
+  const browser = await chromium.launch({ args: ['--renderer-process-limit=2'] });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(
+      `<button style="position:absolute;left:600px">background</button><div role="dialog" style="position:fixed;inset:100px;background:white;z-index:71"><button>dialog action</button></div><div role="menu" style="position:fixed;left:150px;top:150px;background:white;z-index:50"><button>nested item</button></div>`,
+    );
+    let m = await measurePage(page);
+    assert.equal(m.elements.find((e) => e.label === 'nested item').intentionalOverlay, false);
+    assert.equal(m.elements.find((e) => e.label === 'nested item').hitBlocked, true);
+    assert.ok(
+      classifyGeometry(m.elements, m.width, m.height).some((f) => f.rule === 'control-occluded'),
+    );
+    await page.locator('[role=menu]').evaluate((e) => {
+      e.style.zIndex = '80';
+    });
+    m = await measurePage(page);
+    assert.equal(m.elements.find((e) => e.label === 'nested item').hitBlocked, false);
+    assert.equal(m.elements.find((e) => e.label === 'dialog action').intentionalOverlay, true);
+    assert.ok(
+      !classifyGeometry(m.elements, m.width, m.height).some((f) => f.rule === 'control-occluded'),
+    );
+  } finally {
+    await browser.close();
+  }
+});

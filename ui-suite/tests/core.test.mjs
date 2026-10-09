@@ -184,3 +184,27 @@ test('browser seed exposes real ownership contract and persists takeover and nav
     'agent',
   );
 });
+
+test('terminal browser checkpoint persists its safe URL and rejects invalid or active tasks', () => {
+  const s = createSeed();
+  const taskId = 'tsk_ui_browser_completed';
+  assert.deepEqual(
+    dispatch(s, 'tasks.checkpointBrowserSession', { taskId, url: 'https://example.test/review' }),
+    { ok: true },
+  );
+  assert.equal(
+    s.tasks.find((t) => t.taskId === taskId).result.finalUrl,
+    'https://example.test/review',
+  );
+  assert.equal(
+    dispatch(s, 'tasks.checkpointBrowserSession', { taskId, url: 'javascript:alert(1)' }).ok,
+    false,
+  );
+  assert.deepEqual(
+    dispatch(s, 'tasks.checkpointBrowserSession', {
+      taskId: 'tsk_ui_browser_executing',
+      url: 'https://example.test/review',
+    }),
+    { ok: false, reason: 'task_not_terminal' },
+  );
+});

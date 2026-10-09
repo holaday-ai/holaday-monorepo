@@ -172,22 +172,25 @@ export async function measurePage(page) {
           document.fullscreenElement ??
           [
             ...document.querySelectorAll(
-              'dialog[open],[role="dialog"],[role="menu"],[data-state="open"][data-radix-popper-content-wrapper]',
+              'dialog[open],[role="dialog"],[role="alertdialog"],[role="menu"],[role="listbox"],[data-state="open"][data-radix-popper-content-wrapper]',
             ),
-          ].find((e) => {
-            const r = e.getBoundingClientRect();
-            return (
-              r.width > 0 &&
-              r.height > 0 &&
-              getComputedStyle(e).visibility !== 'hidden' &&
-              !(
-                e.tagName === 'A' &&
-                !e.hasAttribute('href') &&
-                !e.hasAttribute('role') &&
-                !e.hasAttribute('tabindex')
-              )
-            );
-          });
+          ]
+            .filter((e) => {
+              const r = e.getBoundingClientRect();
+              return (
+                r.width > 0 &&
+                r.height > 0 &&
+                getComputedStyle(e).visibility !== 'hidden' &&
+                e.getAttribute('data-state') !== 'closed' &&
+                !(
+                  e.tagName === 'A' &&
+                  !e.hasAttribute('href') &&
+                  !e.hasAttribute('role') &&
+                  !e.hasAttribute('tabindex')
+                )
+              );
+            })
+            .at(-1);
         return {
           id,
           label,
