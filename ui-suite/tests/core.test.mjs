@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { assertLocalUrl, classifyGeometry, evaluateGate } from '../lib/checks.mjs';
 import { canonicalUrl, discoverRoutes, scanControls, scenarioSlug } from '../lib/inventory.mjs';
-import { isPopupNavigation } from '../lib/network.mjs';
+import {
+  isPopupNavigation,
+  isExpectedDisabledEditorFailure,
+  isExpectedDisabledEditorConsole,
+} from '../lib/network.mjs';
 import { createSeed, dispatch } from '../lib/seed.mjs';
 test('new JSX routes and native/custom controls cannot silently disappear from inventory', () => {
   assert.deepEqual(
@@ -207,4 +211,29 @@ test('terminal browser checkpoint persists its safe URL and rejects invalid or a
     }),
     { ok: false, reason: 'task_not_terminal' },
   );
+});
+
+test('disabled-editor whitelist matches the exact pathname with query and rejects unrelated failures', () => {
+  const route = '/video/edit/:projectId';
+  const url = 'http://127.0.0.1:4321/api/trpc/videoEditing.getProject';
+  assert.equal(isExpectedDisabledEditorFailure(route, url + '?input=%7B%7D', 403), true);
+  assert.equal(isExpectedDisabledEditorFailure(route, url, 403), true);
+  for (const [r, u, status] of [
+    ['/video', url, 403],
+    [route, url, 500],
+    [route, url + '/other', 403],
+    [route, 'http://127.0.0.1:4321/api/trpc/other?path=' + url, 403],
+    [route, 'invalid', 403],
+  ])
+    assert.equal(isExpectedDisabledEditorFailure(r, u, status), false);
+});
+
+test('editor console whitelist accepts the real Chromium line but not arbitrary error text', () => {
+  const route = '/video/edit/:projectId';
+  const url = 'http://127.0.0.1:4321/api/trpc/videoEditing.getProject?input=fixture';
+  const message = 'Failed to load resource: the server responded with a status of 403 (Forbidden)';
+  assert.equal(isExpectedDisabledEditorConsole(route, url, message), true);
+  assert.equal(isExpectedDisabledEditorConsole(route, url, 'Unhandled error 403'), false);
+  assert.equal(isExpectedDisabledEditorConsole('/video', url, message), false);
+  assert.equal(isExpectedDisabledEditorConsole(route, url, message.replace('403', '500')), false);
 });

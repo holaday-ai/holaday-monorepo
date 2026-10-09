@@ -236,6 +236,14 @@ export async function measurePage(page) {
                 /^(按月|按年)/.test(label) &&
                 has('bg-white') &&
                 has('text-[#FF0061]')) ||
+              (p === '/video' &&
+                /^选择(氛围|光感|色彩)$/.test(
+                  e.closest('[role=dialog]')?.getAttribute('aria-label') ?? '',
+                ) &&
+                /^(氛围|光感|色彩)/.test(label) &&
+                has('border-b-2') &&
+                has('text-white') &&
+                Boolean(e.style.borderColor)) ||
               (p === '/history' &&
                 /^(全部|已完成|需复核|失败|进行中|近 7 天|近 30 天)$/.test(label) &&
                 has('bg-white') &&

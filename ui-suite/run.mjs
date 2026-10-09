@@ -12,7 +12,11 @@ import {
 } from './lib/checks.mjs';
 import { inspectControls } from './lib/interaction.mjs';
 import { canonicalUrl, inventory, scenarioSlug, writeInventory } from './lib/inventory.mjs';
-import { isPopupNavigation } from './lib/network.mjs';
+import {
+  isPopupNavigation,
+  isExpectedDisabledEditorFailure,
+  isExpectedDisabledEditorConsole,
+} from './lib/network.mjs';
 import { saveReport } from './lib/report.mjs';
 import { SEED_VERSION } from './lib/seed.mjs';
 import { startSeedServer } from './lib/server.mjs';
@@ -284,11 +288,7 @@ try {
       page.on('console', (m) => {
         if (
           m.type() === 'error' &&
-          !(
-            scenario.pattern === '/video/edit/:projectId' &&
-            m.location().url.endsWith('/api/trpc/videoEditing.getProject') &&
-            m.text().includes('403')
-          )
+          !isExpectedDisabledEditorConsole(scenario.pattern, m.location().url, m.text())
         )
           entry.issues.push({
             rule: 'console-error',
@@ -306,11 +306,7 @@ try {
       page.on('response', (r) => {
         if (
           r.status() >= 400 &&
-          !(
-            scenario.pattern === '/video/edit/:projectId' &&
-            r.status() === 403 &&
-            new URL(r.url()).pathname === '/api/trpc/videoEditing.getProject'
-          )
+          !isExpectedDisabledEditorFailure(scenario.pattern, r.url(), r.status())
         )
           entry.issues.push({
             rule: r.status() === 501 ? 'seed-contract-error' : 'http-error',

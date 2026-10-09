@@ -649,3 +649,48 @@ test('newest nested portal is audited even when its z-index incorrectly hides it
     await browser.close();
   }
 });
+
+test('hidden native toggles use their visible wrapping or associated label', async () => {
+  const browser = await chromium.launch({ args: ['--renderer-process-limit=2'] });
+  const page = await browser.newPage();
+  try {
+    await page.setContent(
+      `<style>.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0 } label { display:inline-block; padding:12px; background:#ddd }</style><label><input type="checkbox" class="sr-only" aria-label="通知开关">通知开关</label><input type="checkbox" id="external" class="sr-only"><label for="external">选股偏好</label>`,
+    );
+    const controls = (await measurePage(page)).elements.filter((x) => x.type === 'checkbox');
+    assert.equal(controls.length, 2);
+    for (const control of controls) {
+      assert.equal(control.visuallyHidden, true);
+      const result = await observeControl(page, control);
+      assert.equal(result.status, 'passed');
+      assert.equal(
+        await page.locator(`[data-ui-audit-id=${JSON.stringify(control.id)}]`).isChecked(),
+        true,
+      );
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test('video style current category is idempotent while another category still changes state', async () => {
+  const browser = await chromium.launch({ args: ['--renderer-process-limit=2'] });
+  const page = await browser.newPage();
+  try {
+    await page.route('http://127.0.0.1:45678/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: `<div role="dialog" aria-label="选择氛围"><button class="border-b-2 text-white" style="border-color:rgb(255,0,97)">氛围<span>风格基调</span></button><button class="border-b-2 text-white/55" onclick="document.querySelector('output').textContent='光感已选择'">光感<span>光线效果</span></button><output></output></div>`,
+      }),
+    );
+    await page.goto('http://127.0.0.1:45678/video');
+    const controls = (await measurePage(page)).elements;
+    const active = controls.find((x) => x.label.startsWith('氛围'));
+    assert.ok(active, JSON.stringify(controls.map((x) => ({ id: x.id, label: x.label }))));
+    const inactive = controls.find((x) => x.label.startsWith('光感'));
+    assert.equal((await observeControl(page, active)).status, 'idempotent');
+    assert.equal((await observeControl(page, inactive)).status, 'passed');
+  } finally {
+    await browser.close();
+  }
+});

@@ -196,6 +196,16 @@ export async function observeControl(page, control, { checkDismissal = true } = 
             )
           : Buffer.from('local UI seed'),
       });
+    } else if (control.visuallyHidden && ['checkbox', 'radio'].includes(type)) {
+      // The visible label is the pointer target for sr-only native toggles.
+      // Use a real click, preserving occlusion/disabled checks; never force it.
+      let labels = locator.locator('xpath=ancestor::label[1]');
+      if (!(await labels.count())) {
+        const id = await locator.getAttribute('id');
+        if (id) labels = page.locator(`label[for=${JSON.stringify(id)}]`);
+      }
+      if (await labels.count()) await labels.first().click({ timeout: 1800 });
+      else await locator.click({ timeout: 1800 });
     } else await locator.click({ timeout: 1800 });
     await Promise.all(chooserActions);
     let changed = false;

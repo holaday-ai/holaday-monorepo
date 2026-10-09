@@ -9,3 +9,20 @@ export function isPopupNavigation(request, mainPage) {
     throw error;
   }
 }
+
+// Kept narrow to the explicitly default-off editor contract.
+export function isExpectedDisabledEditorFailure(scenario, url, status) {
+  if (scenario !== '/video/edit/:projectId' || status !== 403) return false;
+  try {
+    return new URL(url).pathname === '/api/trpc/videoEditing.getProject';
+  } catch {
+    return false;
+  }
+}
+
+export function isExpectedDisabledEditorConsole(scenario, url, message) {
+  return (
+    /^Failed to load resource: the server responded with a status of 403\b/.test(message) &&
+    isExpectedDisabledEditorFailure(scenario, url, 403)
+  );
+}
