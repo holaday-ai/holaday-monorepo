@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { needsExternalLinkConfirmation, openExternalLink } from './external-link-copy';
 import { hasBrowserRecordForWorkbench } from './workbench-state';
 import { shouldShowTrustSummary } from './trust-summary';
-import { formatSourceAttribution } from './source-attribution';
+import { formatSourceAttribution, formatSourceTitle } from './source-attribution';
 import { groupNotifications } from './notification-bell-state';
 import type { UiTask } from '@/types/task';
 
@@ -31,6 +31,9 @@ describe('frontend audit regressions', () => {
     expect(opener).toHaveBeenCalledTimes(1);
   });
   it('formats source metadata without rewriting links or quoted identifiers', () => {
+    expect(formatSourceTitle('eastmoney:stock-news-search')).toBe('东方财富');
+    expect(formatSourceTitle('unknown:search')).toBe('unknown:search');
+    expect(formatSourceTitle('https://example.com/eastmoney:stock-news-search')).toContain('https://');
     expect(formatSourceAttribution('来源 eastmoney:stock-news-search · 抓取 21:06')).toBe('东方财富 · 抓取于 21:06');
     expect(formatSourceAttribution('[原文](https://example.com/eastmoney:stock-news-search)')).toContain('https://example.com/eastmoney:stock-news-search');
   });

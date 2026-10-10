@@ -277,6 +277,7 @@ export function ScheduledTaskDialog({
                   key={o.value}
                   type="button"
                   disabled={submitting}
+                  aria-pressed={repeatType === o.value}
                   onClick={() => setRepeatType(o.value)}
                   className={cn(
                     'rounded-[8px] border px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
@@ -301,6 +302,7 @@ export function ScheduledTaskDialog({
                   key={o.value}
                   type="button"
                   disabled={submitting}
+                  aria-pressed={reminderValue === o.value}
                   onClick={() => setReminderValue(o.value)}
                   className={cn(
                     'rounded-[8px] border px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
@@ -410,7 +412,7 @@ export function ScheduledTaskDialog({
         confirmLabel="放弃草稿"
         cancelLabel="继续编辑"
         destructive
-        overlayClassName="z-[110]"
+        overlayClassName="z-[var(--z-confirm)]"
         onClose={() => setConfirmDiscardOpen(false)}
         onConfirm={() => {
           setConfirmDiscardOpen(false);

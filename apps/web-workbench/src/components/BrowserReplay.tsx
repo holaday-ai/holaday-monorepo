@@ -47,7 +47,7 @@ export function BrowserReplay({ taskId }: { taskId: string }) {
           type="button"
           disabled={busy}
           onClick={() => void load()}
-          className="text-muted-foreground hover:text-foreground"
+          className="inline-flex min-h-8 items-center justify-center rounded-md border border-border bg-background px-3 font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
         >
           查看回放
         </button>
@@ -56,7 +56,7 @@ export function BrowserReplay({ taskId }: { taskId: string }) {
             type="button"
             disabled={busy}
             onClick={() => void remove()}
-            className="text-muted-foreground hover:text-foreground"
+            className="inline-flex min-h-8 items-center justify-center rounded-md border border-border bg-background px-3 font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
           >
             删除回放
           </button>

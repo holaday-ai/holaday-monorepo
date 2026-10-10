@@ -420,7 +420,7 @@ export function QuickCreatePopover({
         confirmLabel="放弃草稿"
         cancelLabel="继续编辑"
         destructive
-        overlayClassName="z-[110]"
+        overlayClassName="z-[var(--z-confirm)]"
         onClose={() => setConfirmDiscardOpen(false)}
         onConfirm={() => {
           setConfirmDiscardOpen(false);

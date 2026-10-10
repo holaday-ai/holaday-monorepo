@@ -3111,14 +3111,9 @@
   color: #776b7b;
   font-size: 11px;
   line-height: 1.65;
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.energy-explore-feed__grid article[data-layout="landscape"] > p {
-  -webkit-line-clamp: 1;
+  display: block;
+  overflow: visible;
+  overflow-wrap: anywhere;
 }
 
 .energy-explore-feed__grid article > button {
@@ -4423,3 +4418,48 @@
 @keyframes energy-overlay-in{from{opacity:0}to{opacity:1}}
 @keyframes energy-overlay-out{to{opacity:0}}
 @media(prefers-reduced-motion:reduce){.energy-approved-overlay[data-state]{animation:none}}
+
+
+/* The persistent desktop task dock has its own row, outside scrolling cards. */
+.energy-page__content {
+  display: contents;
+}
+
+@media (min-width: 769px) {
+  .holaday-main .hd-energy-page {
+    display: flex;
+    height: 100svh;
+    min-height: 0;
+    flex: none;
+    flex-direction: column;
+    padding-bottom: 14px;
+  }
+
+  .hd-energy-page > .holaday-page-header {
+    flex: none;
+  }
+
+  .hd-energy-page .energy-page {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    padding-bottom: 0;
+  }
+
+  .hd-energy-page .energy-page__content {
+    display: grid;
+    min-height: 0;
+    flex: 1;
+    gap: 18px;
+    overflow-y: auto;
+    padding: 2px 8px 24px 2px;
+    overscroll-behavior-y: contain;
+  }
+
+  .hd-energy-page .energy-running-task-dock {
+    position: relative;
+    bottom: auto;
+    flex: none;
+  }
+}

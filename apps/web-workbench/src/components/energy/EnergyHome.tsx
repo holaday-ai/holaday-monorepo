@@ -305,111 +305,113 @@ export function EnergyHome({
 
   return (
     <div className="energy-page" data-profile-scope={profileStorageScope ? 'user' : 'guest'}>
-      <div id="energy-recharge" className="energy-section-anchor">
-        <EnergyHero
-          mode={completedToday.length > 0 ? 'compact' : 'full'}
-          value={energyNeed}
-          completedCount={completedToday.length}
-          totalCount={5}
-          continueLabel={canOpenLastTarget ? '继续上次' : '继续今日内容'}
-          onChange={handleEnergyNeedChange}
-          onContinue={(trigger) => {
-            if (
-              canOpenLastTarget &&
-              progress.continuation.lastTarget &&
-              executeTarget(progress.continuation.lastTarget, trigger)
-            ) {
-              return;
-            }
-            todayContentRef.current?.scrollIntoView?.({
-              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
-              block: 'start',
+      <div className="energy-page__content">
+        <div id="energy-recharge" className="energy-section-anchor">
+          <EnergyHero
+            mode={completedToday.length > 0 ? 'compact' : 'full'}
+            value={energyNeed}
+            completedCount={completedToday.length}
+            totalCount={5}
+            continueLabel={canOpenLastTarget ? '继续上次' : '继续今日内容'}
+            onChange={handleEnergyNeedChange}
+            onContinue={(trigger) => {
+              if (
+                canOpenLastTarget &&
+                progress.continuation.lastTarget &&
+                executeTarget(progress.continuation.lastTarget, trigger)
+              ) {
+                return;
+              }
+              todayContentRef.current?.scrollIntoView?.({
+                behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+                block: 'start',
+              });
+            }}
+            onStart={(need, trigger) => {
+              if (!recharge || recharge.status !== 'active' || !recharge.actionable) return;
+              setEnergyNeed(need);
+              openExperience(recharge, trigger);
+            }}
+          />
+        </div>
+
+        <EnergySectionNav
+          sections={ENERGY_SECTION_LINKS}
+          onNavigate={(sectionId) => {
+            void eventReporter.report({
+              type: 'energy_section_navigated',
+              section: analyticsSection(sectionId),
             });
           }}
-          onStart={(need, trigger) => {
-            if (!recharge || recharge.status !== 'active' || !recharge.actionable) return;
-            setEnergyNeed(need);
-            openExperience(recharge, trigger);
-          }}
         />
-      </div>
 
-      <EnergySectionNav
-        sections={ENERGY_SECTION_LINKS}
-        onNavigate={(sectionId) => {
-          void eventReporter.report({
-            type: 'energy_section_navigated',
-            section: analyticsSection(sectionId),
-          });
-        }}
-      />
+        <div id="energy-play" className="energy-section-anchor">
+          <EnergyExperienceDeck experiences={experiences} onOpen={openExperience} />
+        </div>
 
-      <div id="energy-play" className="energy-section-anchor">
-        <EnergyExperienceDeck experiences={experiences} onOpen={openExperience} />
-      </div>
+        <div id="energy-growth" ref={growthRef} className="energy-insight-grid">
+          <EnergyGrowthPanel progress={progress} />
+          <EnergyAstrologyPanel
+            profile={profile}
+            astrology={astrology}
+            canEditProfile={canUseProfileStorage}
+            onOpen={() => {
+              astrologyWorldRef.current?.scrollIntoView?.({
+                behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+                block: 'start',
+              });
+            }}
+            onEditProfile={(trigger) => {
+              profileTriggerRef.current = trigger;
+              setProfileOpen(true);
+            }}
+          />
+        </div>
 
-      <div id="energy-growth" ref={growthRef} className="energy-insight-grid">
-        <EnergyGrowthPanel progress={progress} />
-        <EnergyAstrologyPanel
-          profile={profile}
+        <AstrologyWorld
+          ref={astrologyWorldRef}
           astrology={astrology}
-          canEditProfile={canUseProfileStorage}
-          onOpen={() => {
-            astrologyWorldRef.current?.scrollIntoView?.({
-              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
-              block: 'start',
-            });
+          onOpenEnergyCard={(trigger) => {
+            if (!tarot || tarot.status !== 'active' || !tarot.actionable) return;
+            openExperience(tarot, trigger);
           }}
-          onEditProfile={(trigger) => {
-            profileTriggerRef.current = trigger;
-            setProfileOpen(true);
+          onOpenLightTest={(trigger) => {
+            if (!lightTest || lightTest.status !== 'active' || !lightTest.actionable) return;
+            openExperience(lightTest, trigger);
           }}
         />
-      </div>
 
-      <AstrologyWorld
-        ref={astrologyWorldRef}
-        astrology={astrology}
-        onOpenEnergyCard={(trigger) => {
-          if (!tarot || tarot.status !== 'active' || !tarot.actionable) return;
-          openExperience(tarot, trigger);
-        }}
-        onOpenLightTest={(trigger) => {
-          if (!lightTest || lightTest.status !== 'active' || !lightTest.actionable) return;
-          openExperience(lightTest, trigger);
-        }}
-      />
+        <div
+          id="energy-today-content"
+          ref={todayContentRef}
+          className="energy-section-anchor"
+          tabIndex={-1}
+        >
+          <EnergyExploreFeed
+            key={storageScope ?? 'preview'}
+            storageScope={storageScope}
+            mood={null}
+            energyNeed={energyNeed}
+            zodiacSign={profile.zodiacSign}
+            favoriteContentIds={progress.continuation.favoriteContentIds}
+            onEvent={reportHubEvent}
+            onActionTarget={executeTarget}
+            onProgressChange={setProgress}
+            onCompleteToday={() => {
+              growthRef.current?.scrollIntoView?.({
+                behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+                block: 'start',
+              });
+            }}
+          />
+        </div>
 
-      <div
-        id="energy-today-content"
-        ref={todayContentRef}
-        className="energy-section-anchor"
-        tabIndex={-1}
-      >
-        <EnergyExploreFeed
-          key={storageScope ?? 'preview'}
-          storageScope={storageScope}
-          mood={null}
-          energyNeed={energyNeed}
-          zodiacSign={profile.zodiacSign}
-          favoriteContentIds={progress.continuation.favoriteContentIds}
-          onEvent={reportHubEvent}
-          onActionTarget={executeTarget}
-          onProgressChange={setProgress}
-          onCompleteToday={() => {
-            growthRef.current?.scrollIntoView?.({
-              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
-              block: 'start',
-            });
-          }}
+        <EnergyShelf
+          model={shelfModel}
+          onOpen={openShelfItem}
+          onRemoveFavorite={removeShelfFavorite}
         />
       </div>
-
-      <EnergyShelf
-        model={shelfModel}
-        onOpen={openShelfItem}
-        onRemoveFavorite={removeShelfFavorite}
-      />
 
       {tasks.length > 0 ? <RunningTaskDock tasks={tasks} onEvent={reportHubEvent} /> : null}
 

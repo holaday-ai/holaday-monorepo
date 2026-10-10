@@ -61,7 +61,7 @@ export function SettingsPage(): JSX.Element {
   // Memory drops to the bottom (above 账号) since it's read-only
   // curation; users don't need it on every visit.
   return (
-    <PageContainer width="form">
+    <PageContainer width="form" className="hd-settings-page">
       <PageHeader title="设置" description="外观、角色、数据区域、开发者、记忆与账号" />
       <SettingsSectionNav active={activeSection} />
       <div className="space-y-6">
@@ -163,7 +163,7 @@ function SettingsSectionNav({ active }: { active: SettingsSectionId }): JSX.Elem
   return (
     <nav
       aria-label="设置分区"
-      className="sticky top-3 z-10 mb-5 rounded-lg border border-border bg-background/90 p-1 shadow-sm backdrop-blur"
+      className="hd-settings-nav sticky top-3 z-10 mb-5 rounded-lg border border-border bg-background/90 p-1 shadow-sm backdrop-blur"
     >
       <div className="grid grid-cols-3 gap-1 sm:grid-cols-8">
         {SETTINGS_SECTIONS.map((section) => (

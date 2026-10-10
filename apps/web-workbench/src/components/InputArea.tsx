@@ -206,7 +206,8 @@ export function InputArea({
 }: Props): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
-  const showChromePicker = useTaskStore(s => !s.selectedTaskId || hasBrowserRecordForWorkbench(s.tasks.find(task => task.taskId === s.selectedTaskId) ?? null));
+  const hasExistingTask = useTaskStore(s => Boolean(s.selectedTaskId));
+  const showChromePicker = useTaskStore(s => hasBrowserRecordForWorkbench(s.tasks.find(task => task.taskId === s.selectedTaskId) ?? null));
   const toast = useToast();
   const [value, setValue] = React.useState('');
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
@@ -802,7 +803,7 @@ export function InputArea({
           placeholder={
             replyMode
               ? awaitingUserCopy(replyKind).composerPlaceholder
-              : followUpTarget
+              : followUpTarget || hasExistingTask
                 ? '补充问题或下一步指令...'
                 : expertWorkflow
                   ? '补充直播场次、数据来源或你想要的报告形式...'

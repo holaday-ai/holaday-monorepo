@@ -1769,6 +1769,7 @@ function CloudBrowserPanel({
                       steps={recentSteps}
                       terminal={taskIsTerminal}
                       compact={isSheet}
+                      reserveInputSpace={interactiveActive && cjkFallbackOpen}
                       onClose={() => setActivityVisible(false)}
                     />
                   )}
@@ -1776,7 +1777,11 @@ function CloudBrowserPanel({
                     <button
                       type="button"
                       onClick={() => setActivityVisible(true)}
-                      className="absolute bottom-2 right-2 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
+                      className={cn(
+                        'absolute right-2 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60',
+                        'bottom-2',
+                        interactiveActive && cjkFallbackOpen && 'min-[769px]:bottom-16',
+                      )}
                       aria-label="显示操作日志"
                       title="显示操作日志"
                     >
@@ -1896,6 +1901,7 @@ function CloudBrowserPanel({
                 steps={recentSteps}
                 terminal={taskIsTerminal}
                 compact={isSheet}
+                reserveInputSpace={inputFallbackMode === 'bar'}
                 onClose={() => setActivityVisible(false)}
               />
             )}
@@ -1903,7 +1909,11 @@ function CloudBrowserPanel({
               <button
                 type="button"
                 onClick={() => setActivityVisible(true)}
-                className="absolute bottom-2 right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
+                className={cn(
+                  'absolute right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60',
+                  'bottom-2',
+                  inputFallbackMode === 'bar' && 'min-[769px]:bottom-16',
+                )}
                 aria-label="显示操作日志"
                 title="显示操作日志"
               >
@@ -2239,11 +2249,13 @@ function ActivityOverlay({
   steps,
   terminal,
   compact = false,
+  reserveInputSpace = false,
   onClose,
 }: {
   steps: UiStep[];
   terminal: boolean;
   compact?: boolean;
+  reserveInputSpace?: boolean;
   onClose: () => void;
 }): JSX.Element {
   const visibleSteps = compact ? steps.slice(-1) : steps;
@@ -2252,8 +2264,10 @@ function ActivityOverlay({
       className={cn(
         'pointer-events-none absolute rounded-md bg-black/55 text-white backdrop-blur-md',
         compact
-          ? 'inset-x-1 bottom-1 px-2.5 py-1.5 text-[11px]'
-          : 'inset-x-2 bottom-2 px-3 py-2 text-[11px]',
+          ? 'inset-x-1 px-2.5 py-1.5 text-[11px]'
+          : 'inset-x-2 px-3 py-2 text-[11px]',
+        compact ? 'bottom-1' : 'bottom-2',
+        reserveInputSpace && 'min-[769px]:bottom-16',
       )}
     >
       <div
@@ -2915,7 +2929,8 @@ function UrlBar({
   // Local editing state. Resync to the prop whenever the agent
   // navigates (or the user clicks back/forward) so the bar always
   // reflects the live page url unless the user is mid-edit.
-  const [draft, setDraft] = React.useState(displayUrl);
+  const visibleAddress = isBlankUrl(displayUrl) ? '' : displayUrl;
+  const [draft, setDraft] = React.useState(visibleAddress);
   const [editing, setEditing] = React.useState(false);
   const [pending, setPending] = React.useState(false);
   const mountedRef = React.useRef(false);
@@ -2926,8 +2941,8 @@ function UrlBar({
     };
   }, []);
   React.useEffect(() => {
-    if (!editing) setDraft(displayUrl);
-  }, [displayUrl, editing]);
+    if (!editing) setDraft(visibleAddress);
+  }, [visibleAddress, editing]);
   const normalizedDraft = draft.trim().toLowerCase();
   const isSecurePage = normalizedDraft.startsWith('https://');
   const isPageUrl =
@@ -2965,12 +2980,12 @@ function UrlBar({
       if (!res.ok) {
         const message = browserNavFailureMessage(res.reason, 'goto');
         if (message) toast.show(message, 'error');
-        setDraft(displayUrl);
+        setDraft(visibleAddress);
       }
     } catch (err) {
       toast.show(browserNavExceptionMessage(err, 'goto'), 'error');
       if (mountedRef.current) {
-        setDraft(displayUrl);
+        setDraft(visibleAddress);
       }
     } finally {
       if (mountedRef.current) {
@@ -3006,7 +3021,7 @@ function UrlBar({
         spellCheck={false}
         autoComplete="off"
         value={draft}
-        placeholder={onLaunchTask ? '输入网址或搜索内容' : '输入网址回车跳转'}
+        placeholder={onLaunchTask ? '输入网址或搜索内容' : !visibleAddress ? '尚未打开网页' : '输入网址回车跳转'}
         readOnly={readOnly || (!onLaunchTask && !controlLease)}
         onFocus={() => {
           if (!readOnly) setEditing(true);
@@ -3025,7 +3040,7 @@ function UrlBar({
             e.preventDefault();
             void submit();
           } else if (e.key === 'Escape') {
-            setDraft(displayUrl);
+            setDraft(visibleAddress);
             (e.target as HTMLInputElement).blur();
           }
         }}

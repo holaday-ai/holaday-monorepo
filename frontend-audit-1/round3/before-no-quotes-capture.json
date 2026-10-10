@@ -1,0 +1,20 @@
+[
+  {
+    "item": 7,
+    "width": 1440,
+    "ok": true,
+    "breadthCount": 1
+  },
+  {
+    "item": 7,
+    "width": 1280,
+    "ok": true,
+    "breadthCount": 1
+  },
+  {
+    "item": 7,
+    "width": 1024,
+    "ok": true,
+    "breadthCount": 1
+  }
+]

@@ -444,7 +444,7 @@ function trustVerdict(input: {
     return '自动审核发现问题，请优先查看检查项和恢复建议。';
   }
   if (input.failureLevel) return '任务带有审核结论，请结合下方证据边界使用。';
-  return '未收到自动审核结论；本卡只展示已知证据，不给额外确定性。';
+  return '以下仅展示已保留的证据，关键事实请结合来源核对。';
 }
 
 function countVisibleSourceUrls(text?: string, currentUrl?: string | null): number {

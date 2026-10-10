@@ -48,7 +48,7 @@
  * — without it the title bumps into the page top. */
 .hd-calendar-sticky-band {
   position: sticky;
-  top: 0;
+  top: var(--shell-header-height, 0px);
   z-index: 10;
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(12px);
@@ -65,7 +65,7 @@
  * the first paint before the observer fires. */
 .hd-calendar .fc-scrollgrid-section-header > * {
   position: sticky;
-  top: var(--hd-band-h, 120px);
+  top: calc(var(--shell-header-height, 0px) + var(--hd-band-h, 120px));
   z-index: 9;
   background: rgba(255, 255, 255, 0.96);
 }

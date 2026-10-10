@@ -113,3 +113,10 @@ it('clears recent live actions when the task is terminal (PR259 semantics)', () 
   expect(recentActivitySteps(steps,false)).toHaveLength(1);
   expect(recentActivitySteps(steps,true)).toEqual([]);
 });
+
+it('renders a blank browser address as an empty state instead of about:blank', async () => {
+  render(<BrowserPanel {...base} />);
+  const input = await screen.findByRole('textbox', { name: /浏览器地址栏/ });
+  expect((input as HTMLInputElement).value).toBe('');
+  expect(input.getAttribute('placeholder')).toBe('尚未打开网页');
+});

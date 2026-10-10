@@ -1,0 +1,388 @@
+
+> holaday-monorepo@0.0.0 test:ui-suite /Users/yaleiqi/.codex/worktrees/frontend-audit-1/holaday-monorepo
+> node --test --test-concurrency=1 ui-suite/tests/*.test.mjs
+
+TAP version 13
+# Subtest: real browser detects dead button, records working state change, and detects clipped/truncated control
+ok 1 - real browser detects dead button, records working state change, and detects clipped/truncated control
+  ---
+  duration_ms: 2031.775709
+  type: 'test'
+  ...
+# Subtest: menus require second-click and Escape dismissal; pagination must append rows
+ok 2 - menus require second-click and Escape dismissal; pagination must append rows
+  ---
+  duration_ms: 2022.249833
+  type: 'test'
+  ...
+# Subtest: control identity survives text changes and pagination requires a new item
+ok 3 - control identity survives text changes and pagination requires a new item
+  ---
+  duration_ms: 876.468
+  type: 'test'
+  ...
+# Subtest: password type changes are observable; padded reveal button is an intentional adornment
+ok 4 - password type changes are observable; padded reveal button is an intentional adornment
+  ---
+  duration_ms: 596.02975
+  type: 'test'
+  ...
+# Subtest: request-only and protocol actions are distinguished from dead buttons
+ok 5 - request-only and protocol actions are distinguished from dead buttons
+  ---
+  duration_ms: 621.90075
+  type: 'test'
+  ...
+# {"phase":"controls","done":0,"queued":1,"url":"blank"}
+# Subtest: multiple paths to one scoped menu do not multiply control coverage
+ok 6 - multiple paths to one scoped menu do not multiply control coverage
+  ---
+  duration_ms: 2603.516708
+  type: 'test'
+  ...
+# Subtest: inline expanded sections need a collapse action but do not require Escape
+ok 7 - inline expanded sections need a collapse action but do not require Escape
+  ---
+  duration_ms: 813.211041
+  type: 'test'
+  ...
+# Subtest: external popup must leave about:blank and preserve its requested URL
+ok 8 - external popup must leave about:blank and preserve its requested URL
+  ---
+  duration_ms: 2527.332209
+  type: 'test'
+  ...
+# {"phase":"controls","done":0,"queued":1,"url":"blank"}
+# Subtest: numeric phone inputs preserve phone length and newly enabled buttons get replayed
+ok 9 - numeric phone inputs preserve phone length and newly enabled buttons get replayed
+  ---
+  duration_ms: 1653.718167
+  type: 'test'
+  ...
+# {"phase":"controls","done":0,"queued":0,"url":"blank"}
+# Subtest: background controls created behind a dialog wait for dismissal
+ok 10 - background controls created behind a dialog wait for dismissal
+  ---
+  duration_ms: 2943.141666
+  type: 'test'
+  ...
+# Subtest: measurement excludes inert anchors, separates unnamed dialogs, and detects vertical clipped text
+ok 11 - measurement excludes inert anchors, separates unnamed dialogs, and detects vertical clipped text
+  ---
+  duration_ms: 199.039792
+  type: 'test'
+  ...
+# Subtest: style-only toggles and chooser uploads have observable effects
+ok 12 - style-only toggles and chooser uploads have observable effects
+  ---
+  duration_ms: 971.268541
+  type: 'test'
+  ...
+# Subtest: reserved textarea padding permits toolbar buttons but does not hide actual overlap
+ok 13 - reserved textarea padding permits toolbar buttons but does not hide actual overlap
+  ---
+  duration_ms: 167.626417
+  type: 'test'
+  ...
+# Subtest: Escape dismisses popup when modal blocks a second trigger click
+ok 14 - Escape dismisses popup when modal blocks a second trigger click
+  ---
+  duration_ms: 2600.046208
+  type: 'test'
+  ...
+# Subtest: calendar slots retain identity when month data changes
+ok 15 - calendar slots retain identity when month data changes
+  ---
+  duration_ms: 179.409375
+  type: 'test'
+  ...
+# Subtest: a pressed toggle is clicked; it is not mistaken for a selected radio option
+ok 16 - a pressed toggle is clicked; it is not mistaken for a selected radio option
+  ---
+  duration_ms: 589.545875
+  type: 'test'
+  ...
+# {"phase":"controls","done":0,"queued":0,"url":"blank"}
+# Subtest: failed ancestor replay never executes dependent controls
+ok 17 - failed ancestor replay never executes dependent controls
+  ---
+  duration_ms: 1519.974667
+  type: 'test'
+  ...
+# Subtest: dialogs without expanded semantics must support Escape before clean replay
+ok 18 - dialogs without expanded semantics must support Escape before clean replay
+  ---
+  duration_ms: 685.256416
+  type: 'test'
+  ...
+# Subtest: file grid action layer is an explicit overlap exception
+ok 19 - file grid action layer is an explicit overlap exception
+  ---
+  duration_ms: 187.493875
+  type: 'test'
+  ...
+# Subtest: hidden browser DOM does not invalidate an already-empty new-task composer
+ok 20 - hidden browser DOM does not invalidate an already-empty new-task composer
+  ---
+  duration_ms: 1153.324584
+  type: 'test'
+  ...
+# {"phase":"controls","done":0,"queued":0,"url":"/next"}
+# Subtest: navigation target layout is checked by its own scenario, not during source-page transition
+ok 21 - navigation target layout is checked by its own scenario, not during source-page transition
+  ---
+  duration_ms: 608.563125
+  type: 'test'
+  ...
+# {"phase":"controls","done":0,"queued":0,"url":"blank"}
+# Subtest: popup children are explored after clean replay and delayed Escape settles
+ok 22 - popup children are explored after clean replay and delayed Escape settles
+  ---
+  duration_ms: 1895.272958
+  type: 'test'
+  ...
+# Subtest: selected matched skill is an idempotent choice
+ok 23 - selected matched skill is an idempotent choice
+  ---
+  duration_ms: 198.278958
+  type: 'test'
+  ...
+# Subtest: browser launch button is not the browser workspace panel
+ok 24 - browser launch button is not the browser workspace panel
+  ---
+  duration_ms: 180.25275
+  type: 'test'
+  ...
+# Subtest: native modal dialog excludes intentionally covered background controls
+ok 25 - native modal dialog excludes intentionally covered background controls
+  ---
+  duration_ms: 160.580667
+  type: 'test'
+  ...
+# Subtest: closed details hide menu controls until the summary is expanded
+ok 26 - closed details hide menu controls until the summary is expanded
+  ---
+  duration_ms: 225.761792
+  type: 'test'
+  ...
+# {"phase":"controls","done":0,"queued":0,"url":"blank"}
+# Subtest: repeatable batch cloning exercises first and second rows without unbounded recursion
+ok 27 - repeatable batch cloning exercises first and second rows without unbounded recursion
+  ---
+  duration_ms: 1356.621916
+  type: 'test'
+  ...
+# Subtest: early noopener popup navigation is fulfilled locally before its frame exists
+ok 28 - early noopener popup navigation is fulfilled locally before its frame exists
+  ---
+  duration_ms: 580.251459
+  type: 'test'
+  ...
+# Subtest: non-hit-testable disabled control is not occluded by its own parent
+ok 29 - non-hit-testable disabled control is not occluded by its own parent
+  ---
+  duration_ms: 203.18175
+  type: 'test'
+  ...
+# Subtest: native fullscreen excludes its intentionally hidden background but checks foreground overlap
+ok 30 - native fullscreen excludes its intentionally hidden background but checks foreground overlap
+  ---
+  duration_ms: 278.056166
+  type: 'test'
+  ...
+# Subtest: newest nested portal is audited even when its z-index incorrectly hides it
+ok 31 - newest nested portal is audited even when its z-index incorrectly hides it
+  ---
+  duration_ms: 189.3425
+  type: 'test'
+  ...
+# Subtest: hidden native toggles use their visible wrapping or associated label
+ok 32 - hidden native toggles use their visible wrapping or associated label
+  ---
+  duration_ms: 970.269125
+  type: 'test'
+  ...
+# Subtest: video style current category is idempotent while another category still changes state
+ok 33 - video style current category is idempotent while another category still changes state
+  ---
+  duration_ms: 578.999291
+  type: 'test'
+  ...
+# Subtest: the real confirmation stays visible and dismissible in native fullscreen
+ok 34 - the real confirmation stays visible and dismissible in native fullscreen
+  ---
+  duration_ms: 532.3765
+  type: 'test'
+  ...
+# Subtest: new JSX routes and native/custom controls cannot silently disappear from inventory
+ok 35 - new JSX routes and native/custom controls cannot silently disappear from inventory
+  ---
+  duration_ms: 1.755625
+  type: 'test'
+  ...
+# Subtest: unhandled seed RPC remains an explicit coverage error
+ok 36 - unhandled seed RPC remains an explicit coverage error
+  ---
+  duration_ms: 1.100584
+  type: 'test'
+  ...
+# Subtest: pagination appends seeded rows; mutation persists only in isolated seed state
+ok 37 - pagination appends seeded rows; mutation persists only in isolated seed state
+  ---
+  duration_ms: 0.189917
+  type: 'test'
+  ...
+# Subtest: overlap exemption is explicit; clipping, truncation and dead coverage stay blocking
+ok 38 - overlap exemption is explicit; clipping, truncation and dead coverage stay blocking
+  ---
+  duration_ms: 0.164459
+  type: 'test'
+  ...
+# Subtest: audits reject non-loopback targets including misleading hosts
+ok 39 - audits reject non-loopback targets including misleading hosts
+  ---
+  duration_ms: 0.168083
+  type: 'test'
+  ...
+# Subtest: overlapping independent controls fail while nested controls and intentional overlay layers do not
+ok 40 - overlapping independent controls fail while nested controls and intentional overlay layers do not
+  ---
+  duration_ms: 0.175125
+  type: 'test'
+  ...
+# Subtest: an interrupted or partial report cannot pass even with zero findings
+ok 41 - an interrupted or partial report cannot pass even with zero findings
+  ---
+  duration_ms: 0.052125
+  type: 'test'
+  ...
+# Subtest: settings and Chrome fixtures expose real response shapes and isolated mutations
+ok 42 - settings and Chrome fixtures expose real response shapes and isolated mutations
+  ---
+  duration_ms: 0.114875
+  type: 'test'
+  ...
+# Subtest: home and catch-all screenshots never share a filename
+ok 43 - home and catch-all screenshots never share a filename
+  ---
+  duration_ms: 0.25375
+  type: 'test'
+  ...
+# Subtest: canonical routes retain settings hash sections
+ok 44 - canonical routes retain settings hash sections
+  ---
+  duration_ms: 0.294541
+  type: 'test'
+  ...
+# Subtest: astrology empty trend uses the actual nullable shape and batch creation persists its response
+ok 45 - astrology empty trend uses the actual nullable shape and batch creation persists its response
+  ---
+  duration_ms: 0.619125
+  type: 'test'
+  ...
+# Subtest: popup classification accepts only navigation and handles the pre-frame request race
+ok 46 - popup classification accepts only navigation and handles the pre-frame request race
+  ---
+  duration_ms: 0.099375
+  type: 'test'
+  ...
+# Subtest: browser seed exposes real ownership contract and persists takeover and navigation
+ok 47 - browser seed exposes real ownership contract and persists takeover and navigation
+  ---
+  duration_ms: 0.125458
+  type: 'test'
+  ...
+# Subtest: terminal browser checkpoint persists its safe URL and rejects invalid or active tasks
+ok 48 - terminal browser checkpoint persists its safe URL and rejects invalid or active tasks
+  ---
+  duration_ms: 0.110166
+  type: 'test'
+  ...
+# Subtest: disabled-editor whitelist matches the exact pathname with query and rejects unrelated failures
+ok 49 - disabled-editor whitelist matches the exact pathname with query and rejects unrelated failures
+  ---
+  duration_ms: 0.0805
+  type: 'test'
+  ...
+# Subtest: editor console whitelist accepts the real Chromium line but not arbitrary error text
+ok 50 - editor console whitelist accepts the real Chromium line but not arbitrary error text
+  ---
+  duration_ms: 0.090625
+  type: 'test'
+  ...
+# Subtest: current page navigation is idempotent, while inactive and disclosure controls must act
+ok 51 - current page navigation is idempotent, while inactive and disclosure controls must act
+  ---
+  duration_ms: 2604.163584
+  type: 'test'
+  ...
+# Subtest: date traversal changes an already seeded date and still rejects inputs which discard edits
+ok 52 - date traversal changes an already seeded date and still rejects inputs which discard edits
+  ---
+  duration_ms: 1687.375666
+  type: 'test'
+  ...
+# Subtest: local HTTP seed persists mutations, rejects unknown contracts and resets deterministically
+ok 53 - local HTTP seed persists mutations, rejects unknown contracts and resets deterministically
+  ---
+  duration_ms: 40.073
+  type: 'test'
+  ...
+# Subtest: uploads preserve PNG bytes; missing asset and unknown file API are rejected
+ok 54 - uploads preserve PNG bytes; missing asset and unknown file API are rejected
+  ---
+  duration_ms: 12.939708
+  type: 'test'
+  ...
+# Subtest: local screencast sends a valid deterministic frame and consumes only local input
+ok 55 - local screencast sends a valid deterministic frame and consumes only local input
+  ---
+  duration_ms: 26.126042
+  type: 'test'
+  ...
+# Subtest: completed generation cannot retain working status or browser failure instructions
+ok 56 - completed generation cannot retain working status or browser failure instructions
+  ---
+  duration_ms: 1.210167
+  type: 'test'
+  ...
+# Subtest: visual drift above the declared pixel threshold is flagged and identical images remain green
+ok 57 - visual drift above the declared pixel threshold is flagged and identical images remain green
+  ---
+  duration_ms: 0.576667
+  type: 'test'
+  ...
+# Subtest: empty visible browser workspace is forbidden on a generation task
+ok 58 - empty visible browser workspace is forbidden on a generation task
+  ---
+  duration_ms: 0.141125
+  type: 'test'
+  ...
+# Subtest: clipped-off scroll content is not an overlap, but visible obstruction remains a P1
+ok 59 - clipped-off scroll content is not an overlap, but visible obstruction remains a P1
+  ---
+  duration_ms: 786.485333
+  type: 'test'
+  ...
+# Subtest: scrollable content behind a pinned navigation is clipped, while fixed controls still fail
+ok 60 - scrollable content behind a pinned navigation is clipped, while fixed controls still fail
+  ---
+  duration_ms: 285.044875
+  type: 'test'
+  ...
+# {"phase":"controls","done":0,"queued":0,"url":"blank"}
+# Subtest: a dismissible live notice is an intentional overlay; an undismissible obstruction still fails
+ok 61 - a dismissible live notice is an intentional overlay; an undismissible obstruction still fails
+  ---
+  duration_ms: 1020.777542
+  type: 'test'
+  ...
+1..61
+# tests 61
+# suites 0
+# pass 61
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 40721.934334
