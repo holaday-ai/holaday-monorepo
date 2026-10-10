@@ -1,3 +1,4 @@
+import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
 import { BrowserReplay } from './BrowserReplay';
 import {
   ArrowLeft,
@@ -950,7 +951,7 @@ function CloudBrowserPanel({
     () => recentActivitySteps(steps ?? EMPTY_STEPS, taskTerminal),
     [steps, taskTerminal],
   );
-  const [activityVisible, setActivityVisible] = React.useState(true);
+  const [activityVisible, setActivityVisible] = React.useState(false);
   // Click-ripple visualisation on the screencast image. When the
   // agent (or the user in interactive mode) clicks, we animate a red
   // dot at the mapped coordinates for ~600ms so viewers can trace the
@@ -1109,7 +1110,7 @@ function CloudBrowserPanel({
     fallbackOpen: cjkFallbackOpen,
   });
   React.useEffect(() => {
-    setActivityVisible(true);
+    setActivityVisible(false);
     setCjkFallbackOpen(false);
   }, [activeTaskId]);
   const handleUserTakeoverClick = React.useCallback(() => {
@@ -1772,7 +1773,9 @@ function CloudBrowserPanel({
                   {activityVisible && recentSteps.length > 0 && (
                     <ActivityOverlay
                       steps={recentSteps}
+                      terminal={taskIsTerminal}
                       compact={isSheet}
+                      reserveInputSpace={interactiveActive && cjkFallbackOpen}
                       onClose={() => setActivityVisible(false)}
                     />
                   )}
@@ -1780,7 +1783,11 @@ function CloudBrowserPanel({
                     <button
                       type="button"
                       onClick={() => setActivityVisible(true)}
-                      className="absolute bottom-2 right-2 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
+                      className={cn(
+                        'absolute right-2 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60',
+                        'bottom-2',
+                        interactiveActive && cjkFallbackOpen && 'min-[769px]:bottom-16',
+                      )}
                       aria-label="显示操作日志"
                       title="显示操作日志"
                     >
@@ -1898,7 +1905,9 @@ function CloudBrowserPanel({
             {useVnc && activityVisible && recentSteps.length > 0 && (
               <ActivityOverlay
                 steps={recentSteps}
+                terminal={taskIsTerminal}
                 compact={isSheet}
+                reserveInputSpace={inputFallbackMode === 'bar'}
                 onClose={() => setActivityVisible(false)}
               />
             )}
@@ -1906,7 +1915,11 @@ function CloudBrowserPanel({
               <button
                 type="button"
                 onClick={() => setActivityVisible(true)}
-                className="absolute bottom-2 right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
+                className={cn(
+                  'absolute right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60',
+                  'bottom-2',
+                  inputFallbackMode === 'bar' && 'min-[769px]:bottom-16',
+                )}
                 aria-label="显示操作日志"
                 title="显示操作日志"
               >
@@ -2242,13 +2255,18 @@ export function recentActivitySteps(steps: readonly UiStep[], taskTerminal: bool
  * Shows up to 3 most-recent non-terminal actions so users can see the
  * agent narrate its work without reading the left-panel step stream.
  */
+
 function ActivityOverlay({
   steps,
+  terminal,
   compact = false,
+  reserveInputSpace = false,
   onClose,
 }: {
   steps: UiStep[];
+  terminal: boolean;
   compact?: boolean;
+  reserveInputSpace?: boolean;
   onClose: () => void;
 }): JSX.Element {
   const visibleSteps = compact ? steps.slice(-1) : steps;
@@ -2257,8 +2275,10 @@ function ActivityOverlay({
       className={cn(
         'pointer-events-none absolute rounded-md bg-black/55 text-white backdrop-blur-md',
         compact
-          ? 'inset-x-1 bottom-1 px-2.5 py-1.5 text-[11px]'
-          : 'inset-x-2 bottom-2 px-3 py-2 text-[11px]',
+          ? 'inset-x-1 px-2.5 py-1.5 text-[11px]'
+          : 'inset-x-2 px-3 py-2 text-[11px]',
+        compact ? 'bottom-1' : 'bottom-2',
+        reserveInputSpace && 'min-[769px]:bottom-16',
       )}
     >
       <div
@@ -2282,7 +2302,7 @@ function ActivityOverlay({
         {visibleSteps.map((s) => (
           <li key={s.tickIndex} className="flex items-start gap-1.5">
             <span className="shrink-0 text-white/50">{activityGlyph(s.actionKind)}</span>
-            <span className="min-w-0 flex-1 truncate">{summariseAction(s)}</span>
+            <span className="min-w-0 flex-1 truncate">{summariseAction(s, terminal)}</span>
           </li>
         ))}
       </ul>
@@ -2671,13 +2691,17 @@ function SafeExternalLinkButton({
   title?: string;
 }): JSX.Element | null {
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
+  const requestExternalLink = (href: string) => {
+    if (needsExternalLinkConfirmation(href)) setPendingHref(href);
+    else openExternalLink(href);
+  };
   const safeHref = safeExternalHttpHref(href);
   if (!safeHref) return null;
   return (
     <>
       <button
         type="button"
-        onClick={() => setPendingHref(safeHref)}
+        onClick={() => requestExternalLink(safeHref)}
         className={className}
         aria-label={ariaLabel}
         title={title}
@@ -2696,7 +2720,7 @@ function SafeExternalLinkButton({
         onConfirm={() => {
           const target = pendingHref;
           setPendingHref(null);
-          if (target) window.open(target, '_blank', 'noopener,noreferrer');
+          if (target) openExternalLink(target);
         }}
       />
     </>
@@ -2735,7 +2759,8 @@ function activityGlyph(kind?: string): string {
  * progress text ("正在操作浏览器…" etc.). Last-resort "步骤 N"
  * stays so the row is never empty.
  */
-function summariseAction(step: UiStep): string {
+export function summariseAction(step: UiStep, terminal = false): string {
+  if (terminal) return `步骤 ${step.tickIndex + 1} · ${step.status === 'done' ? '已完成' : step.status === 'failed' ? '未完成' : '已结束'}`;
   const s = step.actionSummary?.trim();
   if (s && !/^[a-z_][a-z0-9_]*$/.test(s)) return s;
   if (step.actionKind) return liveStatusLabel(step.actionKind);
@@ -2915,7 +2940,8 @@ function UrlBar({
   // Local editing state. Resync to the prop whenever the agent
   // navigates (or the user clicks back/forward) so the bar always
   // reflects the live page url unless the user is mid-edit.
-  const [draft, setDraft] = React.useState(displayUrl);
+  const visibleAddress = isBlankUrl(displayUrl) ? '' : displayUrl;
+  const [draft, setDraft] = React.useState(visibleAddress);
   const [editing, setEditing] = React.useState(false);
   const [pending, setPending] = React.useState(false);
   const mountedRef = React.useRef(false);
@@ -2926,8 +2952,8 @@ function UrlBar({
     };
   }, []);
   React.useEffect(() => {
-    if (!editing) setDraft(displayUrl);
-  }, [displayUrl, editing]);
+    if (!editing) setDraft(visibleAddress);
+  }, [visibleAddress, editing]);
   const normalizedDraft = draft.trim().toLowerCase();
   const isSecurePage = normalizedDraft.startsWith('https://');
   const isPageUrl =
@@ -2965,12 +2991,12 @@ function UrlBar({
       if (!res.ok) {
         const message = browserNavFailureMessage(res.reason, 'goto');
         if (message) toast.show(message, 'error');
-        setDraft(displayUrl);
+        setDraft(visibleAddress);
       }
     } catch (err) {
       toast.show(browserNavExceptionMessage(err, 'goto'), 'error');
       if (mountedRef.current) {
-        setDraft(displayUrl);
+        setDraft(visibleAddress);
       }
     } finally {
       if (mountedRef.current) {
@@ -3006,7 +3032,7 @@ function UrlBar({
         spellCheck={false}
         autoComplete="off"
         value={draft}
-        placeholder={onLaunchTask ? '输入网址或搜索内容' : '输入网址回车跳转'}
+        placeholder={onLaunchTask ? '输入网址或搜索内容' : !visibleAddress ? '尚未打开网页' : '输入网址回车跳转'}
         readOnly={readOnly || (!onLaunchTask && !controlLease)}
         onFocus={() => {
           if (!readOnly) setEditing(true);
@@ -3025,7 +3051,7 @@ function UrlBar({
             e.preventDefault();
             void submit();
           } else if (e.key === 'Escape') {
-            setDraft(displayUrl);
+            setDraft(visibleAddress);
             (e.target as HTMLInputElement).blur();
           }
         }}

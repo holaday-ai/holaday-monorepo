@@ -34,6 +34,7 @@ import {
 } from './event-mapping';
 
 interface Props {
+  suspended?: boolean;
   anchor: { x: number; y: number };
   row: ScheduledTaskRow;
   mobile: boolean;
@@ -57,6 +58,7 @@ export function EventDetailPopover({
   mobile,
   onClose,
   onToggle,
+  suspended = false,
   onRunNow,
   onDeleteRequest,
   onNotifyPrefsChange,
@@ -72,6 +74,7 @@ export function EventDetailPopover({
   // handler then opens the new one. Listeners on `document` per the
   // popover spec.
   React.useEffect(() => {
+    if (suspended) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && busy === null) onClose();
     };
@@ -84,7 +87,7 @@ export function EventDetailPopover({
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('mousedown', onClickOutside);
     };
-  }, [busy, onClose]);
+  }, [busy, onClose, suspended]);
 
   const wrap = async (kind: 'toggle' | 'run' | 'notify', fn: () => Promise<void>) => {
     if (busy !== null) return;

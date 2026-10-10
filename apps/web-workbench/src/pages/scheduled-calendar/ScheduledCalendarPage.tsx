@@ -970,6 +970,7 @@ export function ScheduledCalendarPage(): JSX.Element {
       )}
       {eventDetail && (
         <EventDetailPopover
+          suspended={confirmDelete !== null}
           anchor={eventDetail.anchor}
           row={eventDetail.row}
           mobile={isMobile}

@@ -1,3 +1,5 @@
+import { useTaskStore } from '@/stores/task-store';
+import { hasBrowserRecordForWorkbench } from '@/lib/workbench-state';
 import {
   ArrowUp,
   ChevronDown,
@@ -204,6 +206,8 @@ export function InputArea({
 }: Props): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
+  const hasExistingTask = useTaskStore(s => Boolean(s.selectedTaskId));
+  const showChromePicker = useTaskStore(s => hasBrowserRecordForWorkbench(s.tasks.find(task => task.taskId === s.selectedTaskId) ?? null));
   const toast = useToast();
   const [value, setValue] = React.useState('');
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
@@ -790,7 +794,7 @@ export function InputArea({
             ) : null}
           </div>
         )}
-        {!approved && !replyMode && !followUpTarget ? <LocalChromePicker disabled={disabled} /> : null}
+        {!approved && showChromePicker && !replyMode && !followUpTarget ? <LocalChromePicker disabled={disabled} /> : null}
         <Textarea
           ref={setTextareaRef}
           value={value}
@@ -799,7 +803,7 @@ export function InputArea({
           placeholder={
             replyMode
               ? awaitingUserCopy(replyKind).composerPlaceholder
-              : followUpTarget
+              : followUpTarget || hasExistingTask
                 ? '补充问题或下一步指令...'
                 : expertWorkflow
                   ? '补充直播场次、数据来源或你想要的报告形式...'
@@ -1004,7 +1008,7 @@ export function InputArea({
                   {mentionSkills.length ? mentionSkills.map(skill => <DropdownMenuItem key={skill.id} onSelect={() => applySkillMention(skill)}><Sparkles className="h-4 w-4" />{skill.name}</DropdownMenuItem>) : <p className="px-3 py-2 text-xs text-muted-foreground">暂无可用技能</p>}
                 </DropdownMenuContent>
               </DropdownMenu>
-              {!replyMode && !followUpTarget && <LocalChromePicker disabled={disabled} compact />}
+              {showChromePicker && !replyMode && !followUpTarget && <LocalChromePicker disabled={disabled} compact />}
             </>}
         </div>
         {approved && <div className="hd-composer-actions">

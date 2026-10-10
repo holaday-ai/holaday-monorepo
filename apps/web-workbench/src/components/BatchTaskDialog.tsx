@@ -313,7 +313,7 @@ export function BatchTaskDialog({
                     <div className="flex items-start justify-between gap-2">
                       <button
                         type="button"
-                        onClick={() => setActiveIndex(index)}
+                        onClick={() => setActiveIndex(current => current === index ? -1 : index)}
                         disabled={submitting}
                         aria-expanded={isActive}
                         className="min-h-8 min-w-0 flex-1 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/15 disabled:pointer-events-none"
@@ -487,7 +487,7 @@ export function BatchTaskDialog({
         confirmLabel="放弃草稿"
         cancelLabel="继续编辑"
         destructive
-        overlayClassName="z-[110]"
+        overlayClassName="z-[var(--z-confirm)]"
         onClose={() => setConfirmDiscardOpen(false)}
         onConfirm={() => {
           setConfirmDiscardOpen(false);

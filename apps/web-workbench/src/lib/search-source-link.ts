@@ -45,3 +45,15 @@ function safeDecode(value: string): string {
     return value;
   }
 }
+
+/** Publisher identity is a host label, not an assertion that the content is verified. */
+export function sourcePublisherName(domain: string): string {
+  const host = domain.toLowerCase().replace(/\.$/, '');
+  const names: Record<string, string> = {
+    'eastmoney.com': '东方财富', 'cninfo.com.cn': '巨潮资讯',
+    'sse.com.cn': '上海证券交易所', 'szse.cn': '深圳证券交易所',
+    'sina.com.cn': '新浪财经', 'akshare.akfamily.xyz': 'AkShare',
+  };
+  const match = Object.keys(names).find(name => host === name || host.endsWith(`.${name}`));
+  return match ? names[match] : domain;
+}

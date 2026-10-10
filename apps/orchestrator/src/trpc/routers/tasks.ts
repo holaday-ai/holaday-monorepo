@@ -4671,6 +4671,7 @@ export const tasksRouter = router({
           intent: input.intent,
           roleId: dispatchRoleId,
           opusUsed: opusActuallyConsumed,
+          executionMode: 'browser',
         },
       );
 
@@ -4933,6 +4934,7 @@ export const tasksRouter = router({
           intent: input.intent,
           roleId: dispatchRoleId,
           opusUsed: opusActuallyConsumed,
+          executionMode: 'browser',
           ...(input.localChrome ? { sourceContext: { browserSource: 'local-chrome' } } : {}),
         },
       );

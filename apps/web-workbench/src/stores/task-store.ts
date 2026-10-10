@@ -1923,6 +1923,22 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         }));
       }
     }
+    if ('taskId' in msg && [
+      'server.vision.tick.start', 'server.vision.tick.end', 'server.vision.screencast',
+      'server.supercar.thinking', 'server.supercar.web_search',
+    ].includes(msg.type)) {
+      set(prev => {
+        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+        return {
+          tasks: prev.tasks.map(task => task.taskId === msg.taskId
+            ? { ...task, executionMode: 'browser' as const } : task),
+          subStatusByTask: { ...prev.subStatusByTask, [msg.taskId]:
+            prev.subStatusByTask[msg.taskId]?.subStatus === 'browsing'
+              ? prev.subStatusByTask[msg.taskId]!
+              : { subStatus: 'browsing' as const, since: Date.now() } },
+        };
+      });
+    }
     if (msg.type === 'server.error') {
       set({
         error: msg.message.trim() || `服务器连接错误：${msg.code}`,
@@ -2303,6 +2319,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ...prev.streamingByTask,
             [msg.taskId]: (prev.streamingByTask[msg.taskId] ?? '') + msg.delta,
           },
+          subStatusByTask: { ...prev.subStatusByTask, [msg.taskId]: {
+            subStatus: 'generating',
+            since: prev.subStatusByTask[msg.taskId]?.subStatus === 'generating'
+              ? prev.subStatusByTask[msg.taskId]!.since : Date.now(),
+          } },
           // Stream deltas only come from the generate / scrape runners
           // (browser path uses screencast, not text streaming). Stamp
           // executionMode='generate' on first delta so the BrowserPanel

@@ -731,6 +731,12 @@ export function PlannedTasksPage(): JSX.Element {
     }
   }
 
+  const calendarDay = calendarRef.current?.getApi().getDate();
+  const today = new Date();
+  const alreadyOnToday = selectedDay.toDateString() === today.toDateString() &&
+    calendarDay?.getFullYear() === today.getFullYear() &&
+    calendarDay?.getMonth() === today.getMonth();
+
   const selectedPlan = editor?.plannedTaskId
     ? (plans.find((plan) => plan.plannedTaskId === editor.plannedTaskId) ?? null)
     : null;
@@ -743,24 +749,6 @@ export function PlannedTasksPage(): JSX.Element {
         description="安排一次，Holaday 在合适的时候开始。"
         action={
           <>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="hd-legacy-plans" title="旧任务记录" aria-label="旧任务记录">
-                  <History aria-hidden />
-                  <span className="sr-only">旧任务记录</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => navigate('/planned/legacy-scheduled')}>
-                  <CalendarClock aria-hidden />
-                  原定时任务
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => navigate('/planned/legacy-batch')}>
-                  <ListChecks aria-hidden />
-                  原批量任务
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
             <Button onClick={() => openCreate(selectedDay)}>
               <Plus aria-hidden />
               新建规划
@@ -787,7 +775,26 @@ export function PlannedTasksPage(): JSX.Element {
                 日程
               </button>
             </div>
-<label className="hd-planned-search"><Search /><input aria-label="查找规划" placeholder="查找规划" value={calendarQuery} onChange={event => setCalendarQuery(event.target.value)} /></label></div>
+<div className="hd-planned-tools"><label className="hd-planned-search"><Search /><input aria-label="查找规划" placeholder="查找规划" value={calendarQuery} onChange={event => setCalendarQuery(event.target.value)} /></label>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="hd-legacy-plans" title="旧任务记录" aria-label="旧任务记录">
+                  <History aria-hidden />
+                  <span className="sr-only">旧任务记录</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => navigate('/planned/legacy-scheduled')}>
+                  <CalendarClock aria-hidden />
+                  原定时任务
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => navigate('/planned/legacy-batch')}>
+                  <ListChecks aria-hidden />
+                  原批量任务
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+</div></div>
       <div
         className="planned-summary"
         aria-label="规划任务概览"
@@ -828,7 +835,7 @@ export function PlannedTasksPage(): JSX.Element {
               >
                 <ChevronLeft aria-hidden />
               </Button>
-              <Button variant="outline" onClick={() => { calendarRef.current?.getApi().today(); setSelectedDay(new Date()); }}>
+              <Button variant="outline" disabled={alreadyOnToday} onClick={() => { calendarRef.current?.getApi().today(); setSelectedDay(new Date()); }}>
                 今天
               </Button>
               <Button

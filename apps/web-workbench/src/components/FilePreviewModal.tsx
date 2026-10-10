@@ -322,7 +322,7 @@ export function FilePreviewModal({
               />
             )}
             {!loading && !errorMessage && textBody !== null && (
-              <pre className="m-0 max-h-full w-full overflow-auto whitespace-pre-wrap break-words bg-white px-6 py-4 font-mono text-[12px] text-[#2F2F2F] dark:bg-card dark:text-foreground">
+              <pre className="m-0 h-full w-full overflow-auto whitespace-pre-wrap break-words bg-white px-6 py-4 font-mono text-[12px] text-[#2F2F2F] dark:bg-card dark:text-foreground">
                 {textBody}
               </pre>
             )}

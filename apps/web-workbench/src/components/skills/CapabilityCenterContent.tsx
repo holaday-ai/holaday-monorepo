@@ -382,7 +382,7 @@ export function CapabilityCenterContent({
               align="start"
               sideOffset={8}
               collisionPadding={16}
-              className="w-[min(340px,calc(100vw-32px))] rounded-[16px] border border-black/[0.06] bg-white p-2 text-[#302C2F] shadow-[0_18px_50px_rgba(43,38,41,0.16)]"
+              className="z-[var(--z-popover-in-dialog)] w-[min(340px,calc(100vw-32px))] rounded-[16px] border border-black/[0.06] bg-white p-2 text-[#302C2F] shadow-[0_18px_50px_rgba(43,38,41,0.16)]"
             >
               <div
                 className="mb-1 flex h-9 items-center gap-2 rounded-[10px] bg-[#F5F3F1] px-3"

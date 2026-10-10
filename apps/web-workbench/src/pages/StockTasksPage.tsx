@@ -672,7 +672,7 @@ export function StockTasksPage(): JSX.Element {
         aria-hidden
         className="pointer-events-none fixed inset-x-0 top-0 z-[35] h-12 border-b border-[#EFE7F1] bg-[#FFFCFA]/95 shadow-[0_2px_12px_rgba(103,75,121,0.06)] backdrop-blur-xl min-[769px]:hidden"
       />
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-3 px-4 pb-5 pt-14 sm:gap-4 sm:px-5 min-[769px]:pt-4 lg:px-6">
+      <div className="hd-stock-scroll mx-auto flex w-full max-w-[1440px] flex-col gap-3 px-4 pb-5 pt-14 sm:gap-4 sm:px-5 min-[769px]:pt-4 lg:px-6">
         <header className="flex flex-col gap-3 border-b border-[#EFE7F1] pb-3 min-[769px]:pr-[12rem] md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-[22px] font-semibold tracking-[-0.025em] text-[#3E3154]">
@@ -737,42 +737,12 @@ export function StockTasksPage(): JSX.Element {
 
         <section className="hd-market-lead" aria-label="市场概览">
           <div><span className="hd-page-eyebrow">{dashboardTrust.dataDateLabel} / {dashboardTrust.statusLabel}</span><h2>{dashboardTrust.tone === 'unverified' ? '等待行情，先看清来源。' : '关注变化，核对每一个信号。'}</h2><p>{dashboardTrust.refreshLabel}。{sampleWatchlist ? '当前为示例关注列表。' : '以关注列表中的有效报价汇总涨跌，结合新闻、公告与风险证据继续研究。'}</p><div className="hd-market-lead-actions"><button type="button" onClick={() => setWorkspaceTask('risk')}>查看风险证据</button><button type="button" onClick={() => setWorkspaceTask('briefing')}>阅读{temporalCopy.briefingTabLabel}</button></div></div>
-          <div className="hd-market-breadth"><div><strong>{stocks.some(stock => stock.price !== '—') ? stocks.filter(stock => stock.price !== '—' && stock.changePct > 0).length : '—'}</strong><span>关注股上涨</span></div><div><strong>{stocks.some(stock => stock.price !== '—') ? stocks.filter(stock => stock.price !== '—' && stock.changePct < 0).length : '—'}</strong><span>关注股回落</span></div><small>{sampleWatchlist ? '示例关注列表' : '仅统计已有报价的关注股'}</small></div>
+          {stocks.some(stock => stock.price !== '—') && (<div className="hd-market-breadth"><div><strong>{stocks.some(stock => stock.price !== '—') ? stocks.filter(stock => stock.price !== '—' && stock.changePct > 0).length : '—'}</strong><span>关注股上涨</span></div><div><strong>{stocks.some(stock => stock.price !== '—') ? stocks.filter(stock => stock.price !== '—' && stock.changePct < 0).length : '—'}</strong><span>关注股回落</span></div><small>{sampleWatchlist ? '示例关注列表' : '仅统计已有报价的关注股'}</small></div>)}
         </section>
         {marketIndices.length > 0 && <section className="hd-market-index-strip" aria-label="市场指数">{marketIndices.map(index => <button key={index.name} type="button" onClick={() => setInsightSheet(marketInsight(marketIndices, dashboardTrust.tone))}><span>{index.name}</span><strong>{index.price}</strong><small data-up={index.changePct > 0}>{index.changePct > 0 ? '+' : ''}{index.changePct.toFixed(2)}%</small></button>)}</section>}
 
 
-        <div className="hd-stock-dock">
-        <StockAiCommandComposer
-          approved
-          researchStocks={sampleWatchlist ? [] : stocks.map(stock=>({symbol:stock.symbol,name:stock.name}))}
-          dataDateLabel={dashboardTrust.dataDateLabel}
-          onManageWatchlist={() => setWatchlistSheetOpen(true)}
-          value={prompt}
-          placeholder={temporalCopy.promptPlaceholder}
-          assistantStatus={temporalCopy.assistantStatus}
-          commands={commands}
-          submitting={submitting}
-          submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}
-          onValueChange={setPrompt}
-          onSubmit={draft => void submitPrompt(prompt, draft)}
-          onCommand={(command) => {
-            setPrompt(command);
-            if (command === temporalCopy.briefingCommand && dashboardTrust.tone === 'current') {
-              void generateBriefing();
-            }
-            else void submitPrompt(command);
-          }}
-          isCommandDisabled={(command) =>
-            loadingDashboard ||
-            stockPromptUnavailable ||
-            (command === temporalCopy.briefingCommand &&
-              dashboardTrust.tone === 'current' &&
-              briefingUnavailable)}
-          commandTitle={(command) =>
-            command === temporalCopy.briefingCommand ? briefingUnavailableTitle : undefined}
-        />
-        </div>
+
 
         {initialDashboardLoading ? (
           <InitialDashboardSkeleton />
@@ -839,6 +809,39 @@ export function StockTasksPage(): JSX.Element {
                 temporalCopy={temporalCopy}
                 temporalMode={dashboardTrust.tone}
               />}
+              composer={
+        <div className="hd-stock-dock">
+        <StockAiCommandComposer
+          approved
+          researchStocks={sampleWatchlist ? [] : stocks.map(stock=>({symbol:stock.symbol,name:stock.name}))}
+          dataDateLabel={dashboardTrust.dataDateLabel}
+          onManageWatchlist={() => setWatchlistSheetOpen(true)}
+          value={prompt}
+          placeholder={temporalCopy.promptPlaceholder}
+          assistantStatus={temporalCopy.assistantStatus}
+          commands={commands}
+          submitting={submitting}
+          submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}
+          onValueChange={setPrompt}
+          onSubmit={draft => void submitPrompt(prompt, draft)}
+          onCommand={(command) => {
+            setPrompt(command);
+            if (command === temporalCopy.briefingCommand && dashboardTrust.tone === 'current') {
+              void generateBriefing();
+            }
+            else void submitPrompt(command);
+          }}
+          isCommandDisabled={(command) =>
+            loadingDashboard ||
+            stockPromptUnavailable ||
+            (command === temporalCopy.briefingCommand &&
+              dashboardTrust.tone === 'current' &&
+              briefingUnavailable)}
+          commandTitle={(command) =>
+            command === temporalCopy.briefingCommand ? briefingUnavailableTitle : undefined}
+        />
+        </div>
+              }
               screeningView={screeningView}
             />
             <StockMarketContextLayout
@@ -888,6 +891,7 @@ export function StockTasksPage(): JSX.Element {
           <span>仅供信息分析，不构成投资建议</span>
           <span>数据来源：AkShare / Holaday 分析层 · {dashboardTrust.dataDateLabel} · {dashboardTrust.refreshLabel}</span>
         </footer>
+
       </div>
       <WatchlistManagerSheet
         open={watchlistSheetOpen}

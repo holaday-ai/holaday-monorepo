@@ -1,3 +1,4 @@
+import { formatSourceAttribution } from '@/lib/source-attribution';
 /**
  * Phase 1 follow-up — SPA render-time sanitiser.
  *
@@ -208,5 +209,5 @@ export function sanitizeForRender(input: string | null | undefined): string {
   text = text.replace(STOP_REASON_RE, '');
   // 7. Collapse blank-line gaps left by the strips.
   text = text.replace(TRIPLE_BLANK_RE, '\n\n');
-  return text.trim();
+  return formatSourceAttribution(text.trim());
 }

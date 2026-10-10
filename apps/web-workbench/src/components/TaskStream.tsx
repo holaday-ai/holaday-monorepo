@@ -1,3 +1,5 @@
+import { hasBrowserRecordForWorkbench } from '@/lib/workbench-state';
+import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FailureHeaderCard } from '@/components/FailureHeaderCard';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
@@ -1575,6 +1577,7 @@ export function liveSubStatusLongRunningHint(
     | 'generating_image',
   elapsedSec: number,
 ): string | null {
+  if (elapsedSec >= 30 && subStatus === 'generating') return '正在生成内容，尚未收到下一阶段更新；你可以继续等待或停止任务。';
   if (elapsedSec < 120) return null;
   if (elapsedSec >= 300) {
     if (subStatus === 'browsing') {
@@ -1583,10 +1586,10 @@ export function liveSubStatusLongRunningHint(
     return '仍在处理当前任务。你可以继续等待，HOLA DAY 会在完成或需要你配合时更新状态。';
   }
   if (subStatus === 'browsing') {
-    return '仍在执行网页操作，不是卡死。遇到登录、风控或慢页面时会多花一点时间。';
+    return '尚未收到下一阶段更新。遇到登录、风控或慢页面时会多花一点时间。';
   }
   if (subStatus === 'extracting' || subStatus === 'verifying') {
-    return '仍在整理和核对结果，不是卡死。';
+    return '尚未收到下一阶段更新，正在等待数据或核验结果。';
   }
   return null;
 }
@@ -2597,7 +2600,7 @@ function TerminalSummary({
   // their actual result text unchanged.
   const failureExecutionMode = useTaskStore((state) => {
     const task = state.tasks.find((item) => item.taskId === taskId);
-    return task?.videoType ? 'video_creation' : task?.executionMode;
+    return task?.videoType ? 'video_creation' : task?.executionMode ?? (hasBrowserRecordForWorkbench(task ?? null) ? 'browser' : 'generate');
   });
   const copyBodyText = React.useMemo(
     () => (status === 'failed' ? failureResultCopyText(displayText, {executionMode: failureExecutionMode}) : displayText),
@@ -2794,7 +2797,10 @@ function TerminalSummary({
         >
           <button
             type="button"
-            onClick={() => setPendingLink(safeCurrentUrl)}
+            onClick={() => {
+              if (needsExternalLinkConfirmation(safeCurrentUrl)) setPendingLink(safeCurrentUrl);
+              else openExternalLink(safeCurrentUrl);
+            }}
             className="group flex min-h-12 w-full min-w-0 items-start gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
           >
             <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#EFEFEF]/70 text-[#595757] transition-colors group-hover:bg-white dark:bg-white/10 dark:text-foreground/80">
@@ -2998,7 +3004,7 @@ function TerminalSummary({
         onClose={() => setPendingLink(null)}
         onConfirm={(href) => {
           setPendingLink(null);
-          window.open(href, '_blank', 'noopener,noreferrer');
+          openExternalLink(href);
         }}
       />
       {/* Phase 5a — schedule-this-task dialog. `initialIntent` pre-
@@ -3153,7 +3159,7 @@ function makeMarkdownComponents(opts: {
           target="_blank"
           rel="noopener noreferrer"
           onClick={
-            opts.onExternalClick
+            opts.onExternalClick && needsExternalLinkConfirmation(safeHref)
               ? (e) => {
                   e.preventDefault();
                   opts.onExternalClick?.(safeHref);

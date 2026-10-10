@@ -38,3 +38,23 @@ function truncateMiddle(value: string, maxLength: number): string {
   const keepTail = Math.floor((maxLength - 1) * 0.36);
   return `${value.slice(0, keepHead)}…${value.slice(-keepTail)}`;
 }
+
+// Deliberately narrow: trusted publisher hosts, HTTPS, no embedded credentials
+// or redirect parameters. Unknown links retain the existing confirmation.
+export function needsExternalLinkConfirmation(href: string): boolean {
+  const safe = safeExternalHttpHref(href);
+  if (!safe) return true;
+  const url = new URL(safe);
+  const publishers = ['eastmoney.com', 'cninfo.com.cn', 'sse.com.cn', 'szse.cn', 'gov.cn', 'holaday.ai'];
+  return url.protocol !== 'https:' || Boolean(url.username || url.password) ||
+    [...url.searchParams.keys()].some(key => /redirect|url|target|return|next|continue/i.test(key)) ||
+    !publishers.some(host => url.hostname === host || url.hostname.endsWith(`.${host}`));
+}
+
+export function openExternalLink(
+  href: string,
+  opener: (url: string, target: string, features: string) => unknown = window.open.bind(window),
+): void {
+  const safe = safeExternalHttpHref(href);
+  if (safe) opener(safe, '_blank', 'noopener,noreferrer');
+}
