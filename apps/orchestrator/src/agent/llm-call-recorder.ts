@@ -4,6 +4,12 @@ import type { DB } from '../db/client.js';
 import { llmCalls } from '../db/schema/llm-calls.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
+import {
+  type MediaUsage,
+  type ModelPriceCatalog,
+  loadModelPrices,
+  officialCost,
+} from '../llm/model-pricing.js';
 
 /**
  * Single-call observation shape. Recorders translate this into a
@@ -47,7 +53,12 @@ export interface LlmCallRecord {
     | 'commander.replan'
     | 'skill.body'
     | 'safety.filter'
-    | 'supercar.turn';
+    | 'supercar.turn'
+    | 'media.image'
+    | 'media.video'
+    | 'media.tts';
+  mediaUsage?: MediaUsage;
+  cacheMode?: 'implicit' | 'explicit';
   inputTokens: number | null;
   outputTokens: number | null;
   cacheReadInputTokens?: number | null;
@@ -125,7 +136,7 @@ function tokenCount(value: number | null | undefined): number | null {
 }
 
 /** Provider-aware persistence/budget contract. Never applies fallback Opus rates. */
-export function accountLlmCall(call: LlmCallRecord) {
+export function accountLlmCall(call: LlmCallRecord, catalog?: ModelPriceCatalog) {
   const promptTokens = tokenCount(call.inputTokens);
   const completionTokens = tokenCount(call.outputTokens);
   // Legacy Anthropic callers omit unsupported cache counters; explicit null stays unknown.
@@ -142,23 +153,37 @@ export function accountLlmCall(call: LlmCallRecord) {
   // Base prompt/completion coverage, matching NeutralMessagesResponse. Cache
   // counters stay independently nullable; combined totals require all four.
   const usageStatus =
-    promptTokens === null && completionTokens === null
-      ? 'missing'
-      : promptTokens === null || completionTokens === null
-        ? 'partial'
-        : 'complete';
+    call.mediaUsage && Number.isFinite(call.mediaUsage.quantity) && call.mediaUsage.quantity >= 0
+      ? 'complete'
+      : promptTokens === null && completionTokens === null
+        ? 'missing'
+        : promptTokens === null || completionTokens === null
+          ? 'partial'
+          : 'complete';
+  const official = officialCost(
+    call,
+    { promptTokens, completionTokens, cacheReadTokens, cacheWriteTokens },
+    catalog,
+  );
   const priced =
     call.provider === 'anthropic' && Object.hasOwn(MODEL_PRICES, baseModelId(call.model));
   const costStatus =
-    usageStatus !== 'complete'
-      ? 'usage_missing'
-      : !priced
-        ? 'unpriced'
-        : cacheReadTokens === null || cacheWriteTokens === null
+    official.costUsd !== null
+      ? 'estimated'
+      : usageStatus !== 'complete'
+        ? 'usage_missing'
+        : official.source &&
+            !call.mediaUsage &&
+            (cacheReadTokens === null || cacheWriteTokens === null)
           ? 'usage_missing'
-          : 'estimated';
+          : !priced
+            ? 'unpriced'
+            : cacheReadTokens === null || cacheWriteTokens === null
+              ? 'usage_missing'
+              : 'estimated';
   const costUsd =
-    costStatus === 'estimated' &&
+    official.costUsd ??
+    (costStatus === 'estimated' &&
     promptTokens !== null &&
     completionTokens !== null &&
     cacheReadTokens !== null &&
@@ -170,7 +195,7 @@ export function accountLlmCall(call: LlmCallRecord) {
           cacheReadTokens,
           cacheWriteTokens,
         )
-      : null;
+      : null);
   return {
     promptTokens,
     completionTokens,
@@ -219,7 +244,8 @@ export class DrizzleLlmCallRecorder implements LlmCallRecorder {
         taskInternalId = taskRow?.id ?? null;
       }
 
-      const accounting = accountLlmCall(call);
+      const catalog = await loadModelPrices(this.db);
+      const accounting = accountLlmCall(call, catalog);
 
       await this.db.insert(llmCalls).values({
         externalId: newExternalId('llmCall'),
@@ -237,9 +263,13 @@ export class DrizzleLlmCallRecorder implements LlmCallRecorder {
         ...(call.errorMessage ? { errorMessage: call.errorMessage } : {}),
         requestMeta: {
           ...call.requestMeta,
-          accountingVersion: 1,
+          accountingVersion: 2,
+          ...(call.cacheMode ? { cacheMode: call.cacheMode } : {}),
+          ...(call.mediaUsage ? { mediaUsage: call.mediaUsage } : {}),
+          pricingVersion: catalog.version,
           pricingSource:
-            accounting.costStatus === 'estimated' ? 'legacy-anthropic-table-2026-04-15' : null,
+            officialCost(call, accounting, catalog).source ??
+            (accounting.costStatus === 'estimated' ? 'legacy-anthropic-table-2026-04-15' : null),
         },
       });
     } catch (err) {

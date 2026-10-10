@@ -1,3 +1,4 @@
+import { dashscopeCostRegion, observeMediaCall } from '../media-call-recorder.js';
 const DEFAULT_BASE_URL = 'https://dashscope-intl.aliyuncs.com';
 const DEFAULT_MODEL = 'wan2.2-animate-mix';
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
@@ -123,7 +124,7 @@ function validate(params: GenerateWanAnimateMixParams): void {
  * the reference video's action, expression, environment, and audio while
  * replacing its main subject with the uploaded character image.
  */
-export async function generateWanAnimateMix(params: GenerateWanAnimateMixParams): Promise<WanAnimateMixResult> {
+async function generateWanAnimateMixImpl(params: GenerateWanAnimateMixParams): Promise<WanAnimateMixResult> {
   validate(params);
   const fetchImpl = params.fetchImpl ?? fetch;
   const baseUrl = trimBaseUrl(params.baseUrl);
@@ -183,4 +184,10 @@ export async function generateWanAnimateMix(params: GenerateWanAnimateMixParams)
     }
     await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
   }
+}
+
+export async function generateWanAnimateMix(params: GenerateWanAnimateMixParams): Promise<WanAnimateMixResult> {
+  return observeMediaCall({ provider: 'alibaba-model-studio', model: params.model ?? DEFAULT_MODEL, region: dashscopeCostRegion(params.baseUrl), purpose: 'media.video' }, () => generateWanAnimateMixImpl(params), result => ({ providerRequestId: result.taskId,
+    ...(result.durationSeconds !== undefined ? { mediaUsage: { unit: 'second', quantity: result.durationSeconds, mode: result.mode, basis: 'provider' } } : {}),
+  }));
 }

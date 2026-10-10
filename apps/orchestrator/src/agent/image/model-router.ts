@@ -127,3 +127,88 @@ export function pickImageModel(
     reason: '默认 → Nano Banana 2（快速出图）',
   };
 }
+
+// ---------------------------------------------------------------------------
+// Capability recovery (2026-10) — task-type routing across the production
+// image providers. Pure: availability + ids are injected by the caller.
+//
+//   explicit UI choice (if usable)          → that model
+//   lock_subject / reference images (edit)  → Wan 2.7 Image (主体一致、编辑)
+//   poster / on-image text / 中文排版        → Qwen Image
+//   everything else                         → configured default (NB2 by default)
+// Remaining usable models become ordered fallbacks for transient failures.
+// ---------------------------------------------------------------------------
+
+export type ProductImageModelKey = 'qwen_image' | 'wan_image' | 'nano_banana_2';
+
+export interface ImageTaskRouteInput {
+  /** Usable models in the current deployment (credentials present). */
+  readonly available: readonly ProductImageModelKey[];
+  readonly defaultModel: ProductImageModelKey;
+  readonly hasInputs: boolean;
+  readonly mode?: 'free' | 'lock_subject';
+  /** Raw UI selection; legacy values ('nano_banana_pro') are tolerated. */
+  readonly preferredModel?: string;
+}
+
+export interface ImageTaskRoute {
+  readonly primary: ProductImageModelKey;
+  readonly fallbacks: ProductImageModelKey[];
+  readonly tier: ImageModelTier;
+  readonly reason: string;
+  /** Set when an explicit selection could not be honoured. */
+  readonly preferredUnavailable?: boolean;
+}
+
+const TEXT_ORDER: readonly ProductImageModelKey[] = ['qwen_image', 'wan_image', 'nano_banana_2'];
+const EDIT_ORDER: readonly ProductImageModelKey[] = ['wan_image', 'nano_banana_2', 'qwen_image'];
+
+function generalOrder(defaultModel: ProductImageModelKey): ProductImageModelKey[] {
+  const order: ProductImageModelKey[] = [defaultModel, 'nano_banana_2', 'wan_image', 'qwen_image'];
+  return order.filter((key, index) => order.indexOf(key) === index);
+}
+
+export function needsTextRendering(intent: string): boolean {
+  return PRO_HINTS.some((re) => re.test(intent ?? ''));
+}
+
+function normalizePreferred(value: string | undefined): ProductImageModelKey | null {
+  if (value === 'qwen_image' || value === 'wan_image' || value === 'nano_banana_2') return value;
+  return null;
+}
+
+export function pickImageModelForTask(
+  intent: string,
+  input: ImageTaskRouteInput,
+): ImageTaskRoute | null {
+  const available = new Set(input.available);
+  if (available.size === 0) return null;
+  const textHeavy = needsTextRendering(intent);
+  const tier: ImageModelTier = textHeavy ? 'pro' : 'flash';
+  const editing = input.hasInputs || input.mode === 'lock_subject';
+  const order = editing ? EDIT_ORDER : textHeavy ? TEXT_ORDER : generalOrder(input.defaultModel);
+  const usable = order.filter((key) => available.has(key));
+
+  const preferred = normalizePreferred(input.preferredModel);
+  if (preferred && available.has(preferred)) {
+    return {
+      primary: preferred,
+      fallbacks: usable.filter((key) => key !== preferred),
+      tier,
+      reason: '用户选择的图片模型',
+    };
+  }
+  const [primary, ...fallbacks] = usable;
+  if (!primary) return null;
+  return {
+    primary,
+    fallbacks,
+    tier,
+    reason: editing
+      ? '参考图编辑/锁定主角 → 万相 Wan 2.7 Image 优先'
+      : textHeavy
+        ? '海报/带字/排版需求 → 千问 Qwen Image 优先'
+        : '通用出图 → 默认模型',
+    ...(preferred ? { preferredUnavailable: true } : {}),
+  };
+}

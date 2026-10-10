@@ -1,0 +1,471 @@
+[
+  {
+    "id": "be-10",
+    "category": "form",
+    "model": "qwen3.6-flash",
+    "legacy": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 35180,
+      "quota403": false,
+      "rateLimited": false,
+      "row": [
+        "be-10",
+        "form",
+        "legacy",
+        "qwen",
+        "qwen3.6-flash",
+        "failed",
+        false,
+        "model_layer",
+        6,
+        303981,
+        34253,
+        927,
+        6,
+        false,
+        "\"模型响应超时，本次执行已停止；已完成动作不会自动重放。\""
+      ]
+    },
+    "unified": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 12837,
+      "quota403": false,
+      "rateLimited": false,
+      "row": [
+        "be-10",
+        "form",
+        "unified",
+        "qwen",
+        "qwen3.6-flash",
+        "completed",
+        true,
+        "none",
+        5,
+        24961,
+        12635,
+        202,
+        5,
+        false,
+        "\"\""
+      ]
+    }
+  },
+  {
+    "id": "be-11",
+    "category": "table",
+    "model": "qwen3.6-flash",
+    "legacy": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 0,
+      "quota403": false,
+      "rateLimited": false,
+      "row": [
+        "be-11",
+        "table",
+        "legacy",
+        "qwen",
+        "qwen3.6-flash",
+        "failed",
+        false,
+        "model_layer",
+        1,
+        68484,
+        0,
+        0,
+        1,
+        false,
+        "\"任务执行中遇到了问题，正在尝试其他方式完成。如果持续失败，请尝试换一种方式描述您的需求。\""
+      ]
+    },
+    "unified": {
+      "success": false,
+      "failureClass": "browser",
+      "tokens": 543180,
+      "quota403": false,
+      "rateLimited": false,
+      "row": [
+        "be-11",
+        "table",
+        "unified",
+        "qwen",
+        "qwen3.6-flash",
+        "completed",
+        false,
+        "browser",
+        30,
+        230901,
+        541126,
+        2054,
+        30,
+        false,
+        "\"\""
+      ]
+    }
+  },
+  {
+    "id": "be-12",
+    "category": "table",
+    "model": "qwen3.6-flash",
+    "legacy": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 35607,
+      "quota403": false,
+      "rateLimited": false,
+      "row": [
+        "be-12",
+        "table",
+        "legacy",
+        "qwen",
+        "qwen3.6-flash",
+        "completed",
+        true,
+        "none",
+        5,
+        40277,
+        34781,
+        826,
+        5,
+        false,
+        "\"\""
+      ]
+    },
+    "unified": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 17604,
+      "quota403": false,
+      "rateLimited": false,
+      "row": [
+        "be-12",
+        "table",
+        "unified",
+        "qwen",
+        "qwen3.6-flash",
+        "failed",
+        false,
+        "model_layer",
+        2,
+        128321,
+        17447,
+        157,
+        3,
+        false,
+        "\"模型服务暂时不可用，请稍后重试。\""
+      ]
+    }
+  },
+  {
+    "id": "be-13",
+    "category": "table",
+    "model": "qwen3.6-flash",
+    "legacy": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 0,
+      "quota403": false,
+      "rateLimited": false,
+      "row": [
+        "be-13",
+        "table",
+        "legacy",
+        "qwen",
+        "qwen3.6-flash",
+        "failed",
+        false,
+        "model_layer",
+        1,
+        244827,
+        0,
+        0,
+        1,
+        false,
+        "\"模型响应超时，本次执行已停止；已完成动作不会自动重放。\""
+      ]
+    },
+    "unified": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 11915,
+      "quota403": false,
+      "rateLimited": false,
+      "row": [
+        "be-13",
+        "table",
+        "unified",
+        "qwen",
+        "qwen3.6-flash",
+        "completed",
+        true,
+        "none",
+        3,
+        16433,
+        11382,
+        533,
+        3,
+        false,
+        "\"\""
+      ]
+    }
+  },
+  {
+    "id": "be-14",
+    "category": "table",
+    "model": "qwen3.6-flash",
+    "legacy": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 11559,
+      "quota403": false,
+      "rateLimited": false,
+      "row": [
+        "be-14",
+        "table",
+        "legacy",
+        "qwen",
+        "qwen3.6-flash",
+        "failed",
+        false,
+        "model_layer",
+        3,
+        139165,
+        11106,
+        453,
+        3,
+        false,
+        "\"模型响应超时，本次执行已停止；已完成动作不会自动重放。\""
+      ]
+    },
+    "unified": {
+      "success": false,
+      "failureClass": "browser",
+      "tokens": 24924,
+      "quota403": false,
+      "rateLimited": false,
+      "row": [
+        "be-14",
+        "table",
+        "unified",
+        "qwen",
+        "qwen3.6-flash",
+        "cancelled",
+        false,
+        "browser",
+        10,
+        274645,
+        24619,
+        305,
+        10,
+        false,
+        "\"\""
+      ]
+    }
+  },
+  {
+    "id": "be-15",
+    "category": "table",
+    "model": "qwen3.6-flash",
+    "legacy": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 5144,
+      "quota403": false,
+      "rateLimited": false,
+      "row": [
+        "be-15",
+        "table",
+        "legacy",
+        "qwen",
+        "qwen3.6-flash",
+        "failed",
+        false,
+        "model_layer",
+        2,
+        161672,
+        5069,
+        75,
+        2,
+        false,
+        "\"模型响应超时，本次执行已停止；已完成动作不会自动重放。\""
+      ]
+    },
+    "unified": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 28985,
+      "quota403": false,
+      "rateLimited": false,
+      "row": [
+        "be-15",
+        "table",
+        "unified",
+        "qwen",
+        "qwen3.6-flash",
+        "cancelled",
+        false,
+        "model_layer",
+        6,
+        240134,
+        28694,
+        291,
+        7,
+        false,
+        "\"\""
+      ]
+    }
+  },
+  {
+    "id": "be-16",
+    "category": "multipage",
+    "model": "qwen3.6-flash",
+    "legacy": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 43588,
+      "quota403": false,
+      "rateLimited": false,
+      "row": [
+        "be-16",
+        "multipage",
+        "legacy",
+        "qwen",
+        "qwen3.6-flash",
+        "completed",
+        true,
+        "none",
+        6,
+        104398,
+        42624,
+        964,
+        6,
+        false,
+        "\"\""
+      ]
+    },
+    "unified": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 0,
+      "quota403": true,
+      "rateLimited": false,
+      "row": [
+        "be-16",
+        "multipage",
+        "unified",
+        "qwen",
+        "qwen3.6-flash",
+        "failed",
+        false,
+        "model_layer",
+        0,
+        14062,
+        0,
+        0,
+        1,
+        true,
+        "\"模型服务暂时不可用，请稍后重试。\""
+      ]
+    }
+  },
+  {
+    "id": "be-17",
+    "category": "multipage",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  },
+  {
+    "id": "be-18",
+    "category": "multipage",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  },
+  {
+    "id": "be-19",
+    "category": "multipage",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  },
+  {
+    "id": "be-20",
+    "category": "multipage",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  },
+  {
+    "id": "be-21",
+    "category": "login_wall",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  },
+  {
+    "id": "be-22",
+    "category": "login_wall",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  },
+  {
+    "id": "be-23",
+    "category": "login_wall",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  },
+  {
+    "id": "be-24",
+    "category": "login_wall",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  },
+  {
+    "id": "be-25",
+    "category": "login_wall",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  },
+  {
+    "id": "be-26",
+    "category": "ai_web_app",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  },
+  {
+    "id": "be-27",
+    "category": "ai_web_app",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  },
+  {
+    "id": "be-28",
+    "category": "ai_web_app",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  },
+  {
+    "id": "be-29",
+    "category": "ai_web_app",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  },
+  {
+    "id": "be-30",
+    "category": "ai_web_app",
+    "model": "",
+    "legacy": null,
+    "unified": null
+  }
+]

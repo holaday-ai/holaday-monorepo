@@ -2,7 +2,7 @@
   "name": "holaday-monorepo",
   "version": "0.0.0",
   "private": true,
-  "description": "HOLA DAY — Browser Agent monorepo (Phase 0)",
+  "description": "HOLA DAY \u2014 Browser Agent monorepo (Phase 0)",
   "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": ">=20.11.0",
@@ -15,13 +15,15 @@
     "governance:audit": "pnpm --filter @holaday/orchestrator exec tsx scripts/governance-audit.ts",
     "typecheck": "turbo run typecheck",
     "lint": "biome check .",
-    "test:ops": "node --test ops/aliyun-edge/*.test.mjs ops/cloudflare-geo-redirect/*.test.mjs scripts/account-closure-rollout-preflight.test.mjs scripts/cn-payment-production-preflight.test.mjs scripts/paypal-production-preflight.test.mjs scripts/qwen-core-production-preflight.test.mjs scripts/qwen-initial-cutover-policy.test.mjs scripts/team-task-lifecycle-deploy-safety.test.mjs scripts/team-task-lifecycle-production-preflight.test.mjs && bash scripts/verify-account-closure-production.test.sh && bash scripts/verify-cn-payment-production.test.sh && bash scripts/verify-paypal-production.test.sh && bash scripts/deploy-cn-payment.test.sh && bash scripts/deploy-rollback-target.test.sh && bash scripts/orchestrator-runtime.test.sh && bash scripts/deploy-migration-gate.test.sh",
+    "test:ops": "node --test --test-concurrency=1 scripts/akshare-production-gate.test.mjs ops/aliyun-edge/*.test.mjs ops/cloudflare-geo-redirect/*.test.mjs scripts/account-closure-rollout-preflight.test.mjs scripts/cn-payment-production-preflight.test.mjs scripts/paypal-production-preflight.test.mjs scripts/qwen-core-production-preflight.test.mjs scripts/qwen-initial-cutover-policy.test.mjs scripts/team-task-lifecycle-deploy-safety.test.mjs scripts/team-task-lifecycle-production-preflight.test.mjs && bash scripts/verify-account-closure-production.test.sh && bash scripts/verify-cn-payment-production.test.sh && bash scripts/verify-paypal-production.test.sh && bash scripts/deploy-cn-payment.test.sh && bash scripts/deploy-rollback-target.test.sh && bash scripts/orchestrator-runtime.test.sh && bash scripts/deploy-migration-gate.test.sh",
     "test:video-editing-preflight": "node --test scripts/video-editing-production-preflight.test.mjs && node scripts/video-editing-production-preflight.mjs",
     "qwen-core:preflight": "node scripts/qwen-core-production-preflight.mjs",
     "preflight:video-editing": "node scripts/video-editing-production-preflight.mjs",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "clean": "turbo run clean && rimraf node_modules"
+    "clean": "turbo run clean && rimraf node_modules",
+    "ui:audit": "node ui-suite/run.mjs",
+    "test:ui-suite": "node --test --test-concurrency=1 ui-suite/tests/*.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",

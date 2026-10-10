@@ -11,10 +11,10 @@
  * is caught at unit time.
  */
 
-import { describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
-import { classifyExecutionMode } from './intent-classifier.js';
+import { describe, expect, it, vi } from 'vitest';
 import { classifyLightweightTask } from '../execution/lightweight-task.js';
+import { classifyExecutionMode } from './intent-classifier.js';
 
 function fakeLogger(): Logger {
   const noop = vi.fn();
@@ -1256,3 +1256,141 @@ describe('classifyExecutionMode — video_creation (Phase 1 #4)', () => {
     }
   });
 });
+
+describe('attachment writing deliverables', () => {
+  it.each([
+    '用这张图写短文，并提供可下载的文章文件',
+    '写一篇约350字的短文，配图只能使用我上传的cat.png，不调用图片生成、浏览器或搜索，提供可下载的文章文件',
+    'Use the attached image to write a story and provide a downloadable document',
+  ])('uses the generate lane for attached writing: %s', async (intent) => {
+    expect(await classifyExecutionMode({intent, hasFileAttachment: true, logger: fakeLogger()})).toBe('generate');
+  });
+  it.each([
+    '用这张图写短文，并打开 https://example.com 上传文件',
+    'Use the attached image to write a story and upload it to github.com',
+  ])('preserves explicit website actions: %s', async (intent) => {
+    expect(await classifyExecutionMode({intent, hasFileAttachment: true, logger: fakeLogger()})).toBe('browser');
+  });
+});
+
+describe('attachment writing with live sources', () => {
+  it.each([
+    '根据附件和 jd.com 的价格写报告',
+    '根据附件写今天的新闻报告',
+    '根据附件写最新市场报告',
+    '根据附件写现在的行情报告',
+    '根据附件整理实时价格报告',
+    'Use the attached image to write a report about latest prices',
+  ])('keeps live-source writing online: %s', async (intent) => {
+    expect(await classifyExecutionMode({intent, hasFileAttachment:true, logger:fakeLogger()})).toBe('scrape');
+  });
+});
+
+describe('live-source attachment writing precedence', () => {
+ it('fresh data overrides a local-writing skill',async()=>{
+  expect(await classifyExecutionMode({intent:'根据附件写最新新闻报告并列明数据来源',hasFileAttachment:true,skillId:'wechat-article-ops',logger:fakeLogger()})).toBe('scrape');
+ });
+ it('price rows and links keep the browser shopping lane',async()=>{
+  expect(await classifyExecutionMode({intent:'根据附件和 jd.com 写前5个商品价格和链接报告',hasFileAttachment:true,logger:fakeLogger()})).toBe('browser');
+ });
+});
+
+describe('attachment references vs real uploads (SMALL-FIXES-1)', () => {
+  it.each([
+    '把附件上传到 Google Drive',
+    '把上传的文件上传到 github.com 的仓库',
+    '把附件上传到 github.com 的仓库',
+    '打开 https://example.com 上传附件',
+  ])('keeps a real upload destination on the browser lane: %s', async (intent) => {
+    expect(
+      await classifyExecutionMode({ intent, hasFileAttachment: true, logger: fakeLogger() }),
+    ).toBe('browser');
+  });
+  it.each(['上传文件到网盘', '把这份报告传到飞书'])(
+    'routes %s without an attachment to browser',
+    async (intent) => {
+      expect(
+        await classifyExecutionMode({ intent, hasFileAttachment: false, logger: fakeLogger() }),
+      ).toBe('browser');
+    },
+  );
+});
+
+
+describe('FIX-PR251 upload topic boundaries', () => {
+  it.each([
+    ['根据附件写一篇“把爱传到每个人心里”的演讲稿', true, 'generate'],
+    ['写一篇关于“把知识传到乡村”的文章', false, 'generate'],
+    ['根据附件写一份文件上传到服务器的操作说明，不要真的上传', true, 'generate'],
+    ['帮我写一份将照片上传至云盘的教程', false, 'generate'],
+    ['参考附件起草一封邮件，主题是“资料上传到服务器后的注意事项”', true, 'generate'],
+    ['把附件上传到 github.com 的仓库', true, 'browser'],
+    ['把本机文件上传至 Google Drive', false, 'browser'],
+    ['把附件传到同事指定的网页表单', true, 'browser'],
+    ['根据我刚刚上传的这份文档整理会议纪要', true, 'generate'],
+    ['写一段“上传至”是什么意思的说明', false, 'generate'],
+  ] as const)('classifies the strict review case: %s', async (intent, hasFileAttachment, mode) => {
+    expect(await classifyExecutionMode({ intent, hasFileAttachment, logger: fakeLogger() })).toBe(
+      mode,
+    );
+  });
+
+  it.each([
+    ['整理「把附件上传到 github.com 的仓库」这句话的说明', true, 'generate'],
+    ['撰写《把附件上传到 Google Drive》教程', false, 'generate'],
+    ['写一段关于 "上传到服务器" 和 \'上传至云盘\' 的说明', false, 'generate'],
+    ['教我怎么把附件传到 Google Drive', true, 'generate'],
+    ['写完后帮我上传到 github.com', true, 'browser'],
+    ['写一份操作说明，然后把附件上传到 Google Drive', true, 'browser'],
+  ] as const)(
+    'separates instructional topics from compound execution: %s',
+    async (intent, hasFileAttachment, mode) => {
+      expect(await classifyExecutionMode({ intent, hasFileAttachment, logger: fakeLogger() })).toBe(
+        mode,
+      );
+    },
+  );
+});
+
+describe('upload actions with written-file descriptions', () => {
+  it.each([
+    '把撰写的文章上传到 github.com',
+    '把拟好的讲稿上传至云盘',
+    '将整理好的纪要上传至云盘',
+    '上传我写好的文件到 Google Drive',
+    '根据附件写一篇最新新闻报告，然后帮我把文件上传至 Google Drive',
+  ])('does not mistake the file description for a writing request: %s', async (intent) => {
+    expect(
+      await classifyExecutionMode({ intent, hasFileAttachment: true, logger: fakeLogger() }),
+    ).toBe('browser');
+  });
+  it.each(['不要真的把附件上传到 github.com', '别上传附件到 Google Drive，给我一份说明'])(
+    'does not execute a negated upload: %s',
+    async (intent) => {
+      expect(
+        await classifyExecutionMode({ intent, hasFileAttachment: true, logger: fakeLogger() }),
+      ).toBe('generate');
+    },
+  );
+});
+
+it('treats an unquoted upload meaning question as explanation', async () => {
+  expect(
+    await classifyExecutionMode({ intent: '上传到服务器是什么意思？', logger: fakeLogger() }),
+  ).toBe('generate');
+});
+
+describe('downloads: output format vs website action (FIX-D11-ROUTING)', () => {
+  it.each([
+    ['去 nodejs.org 官网下载最新版安装包', false],
+    ['下载这个页面的 PDF https://example.com/report', false],
+    ['打开证监会网站下载这份年报的原文', false],
+    ['把附件上传到 github.com 的仓库', true],
+    ['把上传的文件上传到 Google Drive', true],
+  ])('real website download/upload stays on the browser lane: %s', async (intent, hasFileAttachment) => {
+    expect(await classifyExecutionMode({ intent, hasFileAttachment, logger: fakeLogger() })).toBe(
+      'browser',
+    );
+  });
+});
+

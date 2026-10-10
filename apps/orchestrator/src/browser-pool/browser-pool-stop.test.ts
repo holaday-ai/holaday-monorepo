@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { BrowserPool } from './browser-pool.js';
-import { BrowserEgressProxy } from './egress-proxy.js';
 import { ExecutionDrain } from '../execution/execution-drain.js';
 import { startOwnedOperation } from '../execution/owned-operation.js';
+import { BrowserPool } from './browser-pool.js';
+import { BrowserEgressProxy } from './egress-proxy.js';
 
 const transport = vi.hoisted(() => ({
   ready: async () => 'synthetic',
@@ -83,6 +83,8 @@ async function flush() {
 function fixture(
   options: {
     onReady?: () => void;
+    prepareSession?: () => Promise<void>;
+    finishSession?: () => Promise<void>;
     onInfo?: (message: string) => void;
     onDebug?: () => void;
     onWarn?: () => void;
@@ -114,6 +116,8 @@ function fixture(
       displayStart: 100,
       screenSize: '1280x800x24',
       onInstanceReady: options.onReady,
+      prepareSession: options.prepareSession,
+      finishSession: options.finishSession,
     },
     logger,
   );
@@ -187,8 +191,19 @@ it('maintenance waits for the original GC release without shutting down live tas
   const drain = new ExecutionDrain();
   drain.open();
   const held = deferred();
-  const release = vi.spyOn(f.pool, 'release').mockImplementationOnce(async () => { await held.promise; return true; });
-  f.pool.startGc({ drain, tick() {}, runRoot: (action) => startOwnedOperation(drain, 'request', async (owner) => action({ drain, owner }), { dispatch: 'immediate', errorOutcome: 'unknown' }) });
+  const release = vi.spyOn(f.pool, 'release').mockImplementationOnce(async () => {
+    await held.promise;
+    return true;
+  });
+  f.pool.startGc({
+    drain,
+    tick() {},
+    runRoot: (action) =>
+      startOwnedOperation(drain, 'request', async (owner) => action({ drain, owner }), {
+        dispatch: 'immediate',
+        errorOutcome: 'unknown',
+      }),
+  });
   await vi.advanceTimersByTimeAsync(15_000);
   expect(release).toHaveBeenCalledOnce();
   const paused = observe(f.pool.pauseMaintenanceProducers());
@@ -556,4 +571,30 @@ it.each(['gc', 'retention'] as const)('shutdown waits for %s-triggered release',
   await vi.advanceTimersByTimeAsync(3_000);
   await stop.finished;
   expect(f.pool.peek('task')).toBeNull();
+});
+
+it('does not publish a ready browser until the vault is prepared; closes profile before teardown', async () => {
+  const prepared = deferred();
+  const finished = deferred();
+  const finish = vi.fn(async () => finished.promise);
+  const f = fixture({ prepareSession: async () => prepared.promise, finishSession: finish });
+  const allocation = observe(f.pool.allocate('vault-task', 'owner'));
+  await flush();
+  expect(allocation.state.done).toBe(false);
+  expect(f.pool.peek('vault-task')).toBeNull();
+  prepared.resolve();
+  await flush();
+  await allocation.finished;
+  expect(allocation.state.error).toBeUndefined();
+  expect(f.pool.peek('vault-task')?.status).toBe('ready');
+  const release = observe(f.pool.release('vault-task'));
+  await flush();
+  expect(finish).toHaveBeenCalledOnce();
+  expect(release.state.done).toBe(false);
+  finished.resolve();
+  await flush();
+  await vi.advanceTimersByTimeAsync(5000);
+  await release.finished;
+  expect(release.state.error).toBeUndefined();
+  expect(f.pool.peek('vault-task')).toBeNull();
 });

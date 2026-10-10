@@ -1,0 +1,3 @@
+
+> @holaday/web-workbench@0.0.0 lint /Users/yaleiqi/.codex/worktrees/ui-regression-suite/holaday-monorepo/apps/web-workbench
+> eslint 'src/**/*.{ts,tsx}'

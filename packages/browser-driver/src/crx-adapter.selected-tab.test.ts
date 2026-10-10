@@ -17,6 +17,7 @@ function createCrxBoundary(
     title?: string;
     bodyText?: string;
     ariaSnapshot?: string;
+    sensitiveValues?: string[];
   } = {},
 ) {
   type AttachedListener = (data: { page: unknown; tabId: number }) => void;
@@ -38,6 +39,7 @@ function createCrxBoundary(
     isClosed: vi.fn(() => false),
     url: vi.fn(() => overrides.url ?? 'https://allowed.example/private/path?token=secret'),
     title: vi.fn(async () => overrides.title ?? 'Selected tab'),
+    evaluate: vi.fn(async (): Promise<unknown> => overrides.sensitiveValues ?? []),
     locator: vi.fn((selector: string) => (selector === 'body' ? bodyLocator : actionLocator)),
     getByRole: vi.fn(() => actionLocator),
     goto: vi.fn(async () => undefined),
@@ -340,6 +342,48 @@ describe('PlaywrightCrxAdapter selected-tab bridge', () => {
     expect(bodyLocator.ariaSnapshot).toHaveBeenCalledWith({ timeout: 5_000 });
     expect(JSON.stringify(result)).not.toContain('/private/path');
     expect(JSON.stringify(result)).not.toContain('token=secret');
+  });
+
+  it('masks password and OTP values that ariaSnapshot renders verbatim', async () => {
+    const { page } = createCrxBoundary({
+      bodyText: 'Login',
+      ariaSnapshot: [
+        '- textbox "搜索词": hola',
+        '- textbox "密码": hunter2-secret',
+        '- textbox "验证码": "934211"',
+      ].join('\n'),
+      sensitiveValues: ['hunter2-secret', '934211'],
+    });
+    const adapter = new PlaywrightCrxAdapter({ attachToTabId: 42 });
+    await adapter.attachExistingTab();
+
+    const result = await adapter.observeCurrentPage();
+
+    expect(page.evaluate).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      status: 'ok',
+      data: {
+        ariaSnapshot: [
+          '- textbox "搜索词": hola',
+          '- textbox "密码": [REDACTED]',
+          '- textbox "验证码": [REDACTED]',
+        ].join('\n'),
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('hunter2-secret');
+    expect(JSON.stringify(result)).not.toContain('934211');
+  });
+
+  it('fails closed when sensitive field values cannot be read', async () => {
+    const { page } = createCrxBoundary({ ariaSnapshot: '- textbox "密码": hunter2-secret' });
+    page.evaluate.mockRejectedValueOnce(new Error('execution context destroyed'));
+    const adapter = new PlaywrightCrxAdapter({ attachToTabId: 42 });
+    await adapter.attachExistingTab();
+
+    const result = await adapter.observeCurrentPage();
+
+    expect(result).toMatchObject({ status: 'error', error: { code: DRIVER_ERRORS.EXTRACT_FAILED } });
+    expect(JSON.stringify(result)).not.toContain('hunter2-secret');
   });
 
   it('returns an error instead of empty success when observation fails', async () => {

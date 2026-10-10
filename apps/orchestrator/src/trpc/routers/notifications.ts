@@ -40,7 +40,10 @@ import {
 import { tryAcquire as rateLimitTryAcquire } from '../../quota/rate-limiter.js';
 import { protectedProcedure, router } from '../trpc.js';
 
-const PLATFORMS = ['wecom', 'feishu', 'dingtalk', 'custom'] as const;
+// Batch 10.3 — only official IM-bot platforms are accepted. The legacy
+// free-form 'custom' platform cannot satisfy a host allowlist; existing custom
+// rows stay listable/deletable but can't be created, edited, enabled or sent.
+const PLATFORMS = ['wecom', 'feishu', 'dingtalk'] as const;
 const MAX_NOTIFICATION_CHANNELS_PER_USER = 10;
 const MAX_CUSTOM_TEMPLATE_BYTES = 32 * 1024;
 const NOTIFICATION_CHANNEL_CREATE_RATE = {
@@ -119,9 +122,12 @@ function requireNotificationRateLimit(
   });
 }
 
-async function requireSafeWebhookTarget(webhookUrl: string): Promise<void> {
+async function requireSafeWebhookTarget(
+  webhookUrl: string,
+  platform: string,
+): Promise<void> {
   try {
-    await validateWebhookTarget(webhookUrl);
+    await validateWebhookTarget(webhookUrl, { platform });
   } catch (err) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
@@ -298,7 +304,7 @@ export const notificationChannelsRouter = router({
       );
       const userId = await requireUserId(ctx);
       const template = normaliseTemplate(input.platform, input.customTemplate);
-      await requireSafeWebhookTarget(input.webhookUrl);
+      await requireSafeWebhookTarget(input.webhookUrl, input.platform);
       const existingChannels = await ctx.db
         .select({ id: notificationChannels.id })
         .from(notificationChannels)
@@ -339,6 +345,7 @@ export const notificationChannelsRouter = router({
       const [row] = await ctx.db
         .select({
           platform: notificationChannels.platform,
+          webhookUrl: notificationChannels.webhookUrl,
         })
         .from(notificationChannels)
         .where(
@@ -351,19 +358,21 @@ export const notificationChannelsRouter = router({
       if (!row) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '通知渠道不存在' });
       }
-      if (input.webhookUrl !== undefined) {
-        await requireSafeWebhookTarget(input.webhookUrl);
+      // Re-check the (platform, url) pair whenever either side changes, and
+      // before (re-)enabling a row, so a legacy non-allowlisted channel can't
+      // be revived by flipping `enabled` alone.
+      if (
+        input.webhookUrl !== undefined ||
+        input.platform !== undefined ||
+        input.enabled === true
+      ) {
+        await requireSafeWebhookTarget(
+          input.webhookUrl ?? row.webhookUrl,
+          input.platform ?? row.platform,
+        );
       }
       const updates: Partial<typeof notificationChannels.$inferInsert> = {};
       const effectivePlatform = (input.platform ?? row.platform) as NotificationPlatform;
-      if (
-        effectivePlatform === 'custom' &&
-        input.platform === 'custom' &&
-        row.platform !== 'custom' &&
-        input.customTemplate === undefined
-      ) {
-        normaliseTemplate('custom', undefined);
-      }
       if (input.platform !== undefined) updates.platform = input.platform;
       if (input.webhookUrl !== undefined) updates.webhookUrl = input.webhookUrl;
       if (input.customTemplate !== undefined) {
@@ -371,7 +380,7 @@ export const notificationChannelsRouter = router({
           effectivePlatform,
           input.customTemplate,
         ) as Record<string, unknown> | null;
-      } else if (input.platform !== undefined && input.platform !== 'custom') {
+      } else if (input.platform !== undefined) {
         // Switching to a preset platform — clear any leftover
         // template so the wire shape isn't ambiguous.
         updates.customTemplate = null;
@@ -472,7 +481,7 @@ export const notificationChannelsRouter = router({
         // surface the "must include template" error via SendResult.
         customTemplate = input.customTemplate;
       }
-      await requireSafeWebhookTarget(webhookUrl);
+      await requireSafeWebhookTarget(webhookUrl, platform);
       const ctxBody: WebhookContext = {
         title: 'HOLA DAY 测试消息',
         message: '这是一条来自 HOLA DAY 的测试消息，证明你的 webhook 配置可用。',

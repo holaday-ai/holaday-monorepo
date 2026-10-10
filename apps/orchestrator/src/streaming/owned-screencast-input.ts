@@ -3,13 +3,17 @@ import type { BrowserInstance } from '../browser-pool/types.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import {
   type AppliedBrowserViewport,
+  type InputEnvelope,
   DeferredScreencastInputBridge,
 } from './screencast-input-bridge.js';
 
 export function createOwnedScreencastInputBridge(options: {
   instance: BrowserInstance;
+  maxViewportHeight?: number;
   peek: (taskId: string) => BrowserInstance | null;
   onViewportApplied?: (viewport: AppliedBrowserViewport) => void;
+  onViewportRequested?: () => void;
+  beforeDispatch?: (envelope: InputEnvelope, signal?: AbortSignal) => Promise<void>;
   releasePressed?: (signal: AbortSignal) => Promise<void>;
   executionDrain?: ExecutionAdmission;
 }): DeferredScreencastInputBridge {
@@ -28,7 +32,10 @@ export function createOwnedScreencastInputBridge(options: {
     return browserControlSessions.get(instance, instance.userId, instance.taskId);
   };
   return new DeferredScreencastInputBridge({
+    maxViewportHeight: options.maxViewportHeight,
     onViewportApplied: options.onViewportApplied,
+    beforeDispatch: options.beforeDispatch,
+    onViewportRequested: options.onViewportRequested,
     runOwnedInput: async (lease, action) => {
       if (!allowed()) throw new Error('MAINTENANCE_INPUT_CLOSED');
       const session = current();

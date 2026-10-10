@@ -38,6 +38,7 @@ import {
   withOperationDispatchScope,
 } from '../../execution/owned-operation.js';
 import type { BrowserNetworkPolicy } from '../browser-network-policy.js';
+import { REDACTION_FAILED_COPY, redactPageText } from '../browser-tools/page-redaction.js';
 import { runBrowserOperation } from './browser-operation.js';
 import type { BrowserRequestControl } from './browser-request-guard.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
@@ -621,6 +622,42 @@ export class PlaywrightExecutor {
    * stops clean mode from leaking into the shared context (adversarial review
    * CAMERA-3/6 blocker: resetPageForTask/reopenActivePage used contexts()[0] directly).
    */
+  private vaultInterruption: string | null = null;
+  /** The session vault stopped this task's logged-in context (reason code only). */
+  markSessionInterrupted(reason: string): void {
+    this.vaultInterruption ??= reason;
+  }
+  get sessionInterruption(): string | null {
+    return this.vaultInterruption;
+  }
+  /** Default-off vault: create an incognito context, never reuse userDataDir/default cookies. */
+  async createSessionVaultContext(
+    options: Parameters<Browser['newContext']>[0],
+  ): Promise<BrowserContext> {
+    if (!this.browser || this.cleanMode || this.connectionSetup || this.disconnection)
+      throw new Error('vault_context_unavailable');
+    const generation = this.cleanContextGeneration;
+    this.cleanMode = true;
+    this.activePage = null;
+    const lease = createOwnedCleanContext(this.browser, options);
+    this.cleanContextLease = lease;
+    try {
+      const context = await lease.ready;
+      this.assertContextGeneration(generation);
+      this.cleanContext = context;
+      context.on('close', () => {
+        if (this.cleanContext === context) {
+          this.cleanContext = null;
+          this.activePage = null;
+        }
+      });
+      return context;
+    } catch {
+      await lease.dispose();
+      throw new Error('vault_context_unavailable');
+    }
+  }
+
   private browseContext(browser: Browser): BrowserContext | undefined {
     if (this.cleanMode) return this.cleanContext ?? undefined;
     return browser.contexts()[0];
@@ -1133,6 +1170,19 @@ export class PlaywrightExecutor {
         url: safeUrl(page),
         title: '',
         error: `ariaSnapshot failed: ${errMsg(err)}`,
+      };
+    }
+    // Batch 10 fixes: mask password / OTP values before the snapshot reaches
+    // the model; if they cannot be read, return no snapshot at all.
+    try {
+      yaml = await redactPageText(page, yaml);
+    } catch {
+      return {
+        text: '',
+        refs: [],
+        url: safeUrl(page),
+        title: '',
+        error: REDACTION_FAILED_COPY,
       };
     }
     const { text, refs } = annotateAriaSnapshot(yaml);

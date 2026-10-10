@@ -61,6 +61,23 @@ describe('pickSimilarUrl', () => {
   });
 });
 
+describe('pickSimilarUrl — never a homepage or search page for an item (A2)', () => {
+  it('does not replace an article link with the site root', () => {
+    // Acceptance A2: three 36kr article links all became https://36kr.com/.
+    expect(
+      pickSimilarUrl('https://36kr.com/p/4016638963421319', ['https://36kr.com/']),
+    ).toBeUndefined();
+  });
+
+  it('does not replace a product link with a search page', () => {
+    expect(
+      pickSimilarUrl('https://item.jd.com/100012345.html', [
+        'https://item.jd.com/search?keyword=x',
+      ]),
+    ).toBeUndefined();
+  });
+});
+
 describe('autoFix — URL fabrication', () => {
   function setup(answer: string, groundedUrls: string[]) {
     const taskId = 'tsk_af';

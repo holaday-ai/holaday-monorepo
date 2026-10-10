@@ -21,6 +21,7 @@ import {
   verifyCoreAndFinalize,
 } from './execution-pipeline.js';
 import type { GenerationCompletion } from './generation-completion.js';
+import { canDeliverUnverifiedIntermediate } from './intermediate-delivery.js';
 import {
   VerificationContextError,
   renderVerificationUserIntent,
@@ -153,9 +154,13 @@ export async function reviewGenerateOutcome(
           intent,
           resultText: outcome.status === 'completed' ? outcome.summary : '',
         });
+  // A waiting plan/clarification that could not be fully verified is still
+  // delivered (with a notice added at settlement); only serious failures fail.
   const qualityStatus =
     core && outcome.status === 'awaiting_user' && !verification?.passed
-      ? 'failed'
+      ? canDeliverUnverifiedIntermediate(verification)
+        ? 'awaiting_user'
+        : 'failed'
       : deriveFinalStatus(outcome.status, verification, sourceTrust);
   const generationPartial = outcome.generation?.completeness === 'partial';
   const terminalStatus =

@@ -8,6 +8,7 @@ import {
   createQwenMessagesAdapter,
   serializeMessagesRequest,
 } from './messages-adapter.js';
+import { QwenTransportError } from './qwen-messages-transport.js';
 import type { QwenRuntimeEnvironment } from './qwen-route.js';
 
 const QWEN_ENVIRONMENT: QwenRuntimeEnvironment & {
@@ -41,6 +42,48 @@ function buildClient(response: unknown): AnthropicCompatibleClient {
     },
   };
 }
+
+describe('forced tool choice on Qwen hybrid reasoning models', () => {
+  const qwenMeta = (model: string) =>
+    ({
+      provider: 'alibaba-model-studio',
+      model,
+      region: 'intl',
+      deploymentScope: 'international',
+      endpointKind: 'public',
+      protocol: 'messages',
+    }) as const;
+  const tools = [{ name: 'act', description: 'x', inputSchema: { type: 'object' } }];
+  const base = { maxTokens: 64, messages: [{ role: 'user' as const, content: 'go' }], tools };
+
+  it.each([
+    [{ type: 'any' as const }, { type: 'disabled' }],
+    [{ type: 'tool' as const, name: 'act' }, { type: 'disabled' }],
+    [{ type: 'auto' as const }, undefined],
+  ])(
+    'tool_choice %j → thinking %j (DashScope rejects forced tools while thinking)',
+    (toolChoice, thinking) => {
+      const wire = JSON.parse(
+        serializeMessagesRequest({ ...base, toolChoice }, qwenMeta('qwen3.7-plus')),
+      );
+      expect(wire.thinking).toEqual(thinking);
+    },
+  );
+
+  it('keeps an explicit thinking choice and never adds it for models without the switch', () => {
+    const explicit = JSON.parse(
+      serializeMessagesRequest(
+        { ...base, toolChoice: { type: 'any' }, thinking: { type: 'enabled' } as never },
+        qwenMeta('qwen3.7-plus'),
+      ),
+    );
+    expect(explicit.thinking).toEqual({ type: 'enabled' });
+    const noSwitch = JSON.parse(
+      serializeMessagesRequest({ ...base, toolChoice: { type: 'any' } }, qwenMeta('qwen-max')),
+    );
+    expect(noSwitch.thinking).toBeUndefined();
+  });
+});
 
 describe('semantic wire budget serialization', () => {
   it('uses the same serialization as the compatible adapter for Qwen metadata', async () => {
@@ -346,6 +389,27 @@ describe('createAnthropicCompatibleMessagesAdapter', () => {
 
     const request = vi.mocked(client.messages.create).mock.calls[0]?.[0];
     expect(request).toMatchObject({ tool_choice: { type: 'none' } });
+  });
+
+  it('keeps the provider HTTP status (e.g. 403 quota exhausted) on a sanitized error', async () => {
+    const client: AnthropicCompatibleClient = {
+      messages: {
+        create: vi.fn().mockRejectedValue(new QwenTransportError('PROVIDER_ERROR', 403)),
+      },
+    };
+    const adapter = createAnthropicCompatibleMessagesAdapter({
+      client,
+      metadata: { provider: 'anthropic', model: 'claude-haiku-4-5' },
+    });
+    await expect(
+      adapter.create({ maxTokens: 8, messages: [{ role: 'user', content: 'test' }] }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: 'PROVIDER_ERROR',
+        status: 403,
+        message: '模型服务拒绝访问，请联系管理员检查工作空间和模型权限。',
+      }),
+    );
   });
 
   it('fails closed with sanitized errors for provider failures and malformed payloads', async () => {

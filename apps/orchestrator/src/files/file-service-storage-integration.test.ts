@@ -23,11 +23,12 @@
  * the R2 path's correctness.
  */
 
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileService } from './file-service.js';
+import { libraryAvailability } from './library-availability.js';
 import {
   LocalStorageProvider,
   _resetSharedStorageProviderForTesting,
@@ -148,5 +149,35 @@ describe('FileService → shared StorageProvider plumbing (Codex P5 fix)', () =>
       expiresInSeconds: 900,
     });
     vi.useRealTimers();
+  });
+  it('rechecks bytes on download and preview even when list evidence is cached as available', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'holaday-list-read-'));
+    try {
+      const storagePath = path.join(root, 'file.bin');
+      await writeFile(storagePath, Buffer.from('real bytes'));
+      const row = {
+        id: 31,
+        externalId: 'file_owned',
+        userId: 7,
+        kind: 'input',
+        status: 'active',
+        expiresAt: null,
+        storagePath,
+        filename: 'file.bin',
+      };
+      const db = {
+        select: () => ({ from: () => ({ where: () => ({ limit: async () => [row] }) }) }),
+      };
+      const storage = new LocalStorageProvider(root, fakeLogger);
+      const service = new FileService(db as never, fakeLogger, storage);
+      expect(await libraryAvailability(storage, [row], 'usr_owner')).toEqual(['available']);
+      await unlink(storagePath);
+      expect(await libraryAvailability(storage, [row], 'usr_owner')).toEqual(['available']);
+      expect(await service.loadForUser(row.externalId, 7)).toBeNull();
+      expect(await service.getScopedPreviewForUser(row.externalId, 7, 900)).toBeNull();
+      expect(await service.loadForUser(row.externalId, 8)).toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

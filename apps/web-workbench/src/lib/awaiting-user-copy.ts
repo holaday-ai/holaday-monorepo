@@ -76,6 +76,21 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
   },
 };
 
+export type BrowserConnectionWait = NonNullable<UiAwaitingUser['browserConnection']>;
+
+/** One message for every surface while a task waits for the Chrome extension. */
+const BROWSER_CONNECTION_COPY: AwaitingUserCopy = {
+  title: '需要连接 HOLA DAY Chrome 插件',
+  streamBody:
+    '需要连接 HOLA DAY Chrome 插件：请安装或连接插件，并在 Chrome 中选择目标页面后重新提交原任务。',
+  streamHint: '连接插件后重新提交',
+  panelTitle: '需要连接 HOLA DAY Chrome 插件',
+  panelBody:
+    '这个任务需要在你自己的 Chrome 中执行。请安装或连接 HOLA DAY Chrome 插件，选择目标页面后重新提交原任务。',
+  toolbarLabel: '需要连接插件',
+  composerPlaceholder: '连接插件并选择页面后，可重新提交原任务...',
+};
+
 export function normalizeAwaitingKind(
   kind: UiAwaitingUser['awaitingKind'] | undefined,
 ): AwaitingKind {
@@ -84,17 +99,29 @@ export function normalizeAwaitingKind(
 
 export function awaitingUserCopy(
   kind: UiAwaitingUser['awaitingKind'] | undefined,
+  browserConnection?: BrowserConnectionWait | null,
 ): AwaitingUserCopy {
-  return COPY_BY_KIND[normalizeAwaitingKind(kind)];
+  const normalized = normalizeAwaitingKind(kind);
+  if (normalized === 'permission' && browserConnection) return BROWSER_CONNECTION_COPY;
+  return COPY_BY_KIND[normalized];
 }
 
 export function awaitingUserStreamMessage(
   kind: UiAwaitingUser['awaitingKind'] | undefined,
   question: string | null | undefined,
+  browserConnection?: BrowserConnectionWait | null,
 ): AwaitingUserStreamMessage {
   const normalized = normalizeAwaitingKind(kind);
-  const copy = awaitingUserCopy(normalized);
+  const copy = awaitingUserCopy(normalized, browserConnection);
   const trimmedQuestion = question?.trim();
+  if (normalized === 'permission' && browserConnection) {
+    return {
+      body: trimmedQuestion || copy.streamBody,
+      followUp: browserConnection.publicCloudAllowed
+        ? '只需要公开信息时，可以点“用公开云端（无登录态）继续”，无法读取你的个人信息。'
+        : '这个任务需要你的登录状态，不会改用无登录态的云端浏览器。',
+    };
+  }
   if (normalized === 'clarification' && trimmedQuestion) {
     return {
       body: trimmedQuestion,

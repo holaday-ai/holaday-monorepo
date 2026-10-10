@@ -174,3 +174,13 @@ describe('fileReferenceText', () => {
     ).toContain('application/octet-stream');
   });
 });
+
+describe('server file availability', () => {
+  it('preserves a confirmed missing object while keeping unknown availability distinct', () => {
+    const rows = normalizeFileRows([
+      { fileId: 'file_gone', filename: 'old.png', availability: 'unavailable' },
+      { fileId: 'file_pending', filename: 'new.png', availability: 'unknown' },
+    ]);
+    expect(rows.map(row => (row as unknown as { availability: string }).availability)).toEqual(['unavailable', 'unknown']);
+  });
+});

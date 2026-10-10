@@ -1,0 +1,87 @@
+[
+  {
+    "id": "be-06",
+    "category": "form",
+    "model": "qwen3.7-plus",
+    "legacy": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 49414,
+      "quota403": false
+    },
+    "unified": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 8894,
+      "quota403": false
+    }
+  },
+  {
+    "id": "be-10",
+    "category": "form",
+    "model": "qwen3.7-plus",
+    "legacy": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 77792,
+      "quota403": false
+    },
+    "unified": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 4384,
+      "quota403": false
+    }
+  },
+  {
+    "id": "be-12",
+    "category": "table",
+    "model": "qwen3.7-plus",
+    "legacy": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 8444,
+      "quota403": false
+    },
+    "unified": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 30113,
+      "quota403": false
+    }
+  },
+  {
+    "id": "be-14",
+    "category": "table",
+    "model": "qwen3.7-plus",
+    "legacy": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 13330,
+      "quota403": false
+    },
+    "unified": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 7875,
+      "quota403": false
+    }
+  },
+  {
+    "id": "be-15",
+    "category": "table",
+    "model": "qwen3.7-plus",
+    "legacy": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 90050,
+      "quota403": false
+    },
+    "unified": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 23549,
+      "quota403": false
+    }
+  }
+]

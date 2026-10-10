@@ -74,3 +74,24 @@ describe('awaiting user copy', () => {
     });
   });
 });
+
+describe('waiting for the HOLA DAY Chrome extension (FIX-D11)', () => {
+  const connection = { reason: 'extension_offline' as const, publicCloudAllowed: false };
+  it('uses one connection message instead of "当前页面拒绝访问"', () => {
+    const copy = awaitingUserCopy('permission', connection);
+    expect(copy.title).toBe('需要连接 HOLA DAY Chrome 插件');
+    expect(copy.panelBody).toContain('HOLA DAY Chrome 插件');
+    expect(JSON.stringify(copy)).not.toContain('拒绝访问');
+    // Without a connection marker a real permission wait keeps its own copy.
+    expect(awaitingUserCopy('permission').title).toBe('需要权限');
+  });
+  it('offers the public cloud only for non-identity requests', () => {
+    const identity = awaitingUserStreamMessage('permission', '需要连接 HOLA DAY Chrome 插件：…', connection);
+    expect(identity.followUp).toContain('不会改用无登录态的云端');
+    const open = awaitingUserStreamMessage('permission', '需要连接 HOLA DAY Chrome 插件：…', {
+      ...connection,
+      publicCloudAllowed: true,
+    });
+    expect(open.followUp).toContain('用公开云端（无登录态）继续');
+  });
+});

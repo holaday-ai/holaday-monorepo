@@ -134,6 +134,7 @@ const coordinatorModules = [
   'browser-first-cutover-startup.mjs',
   'browser-first-cutover-transition.mjs',
   'browser-maintenance-host.mjs',
+  'akshare-production-gate.mjs',
   'browser-maintenance-journal.mjs',
   'browser-maintenance-linux.mjs',
   'browser-maintenance-manifest.mjs',

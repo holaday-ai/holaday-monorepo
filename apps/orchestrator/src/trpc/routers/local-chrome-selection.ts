@@ -1,3 +1,5 @@
+import { userBrowserProtocolSchema } from '@holaday/shared-types';
+import { getFeatureFlags } from '../../execution/feature-flags.js';
 import { randomUUID } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
@@ -43,6 +45,14 @@ export const localChromeTabsProcedure = protectedProcedure.query(async ({ ctx })
         timeoutMs: 5000,
       });
       const parsed = tabsSchema.safeParse(reply.result);
+      if (
+        getFeatureFlags().USER_BROWSER_ROUTING_V2 &&
+        reply.ok &&
+        !userBrowserProtocolSchema.safeParse(
+          (reply.result as Record<string, unknown>)?.userBrowserProtocol,
+        ).success
+      )
+        return { tabs: [], unavailable: true, needsUpdate: true };
       if (!reply.ok || reply.extensionClientId !== extensionClientId || !parsed.success)
         return {
           tabs: [],
@@ -67,6 +77,7 @@ export const localChromeTabsProcedure = protectedProcedure.query(async ({ ctx })
     connected: connections.length > 0,
     unavailable: results.some((result) => result.unavailable),
     needsUpdate: results.some((result) => result.needsUpdate),
+    routingV2: getFeatureFlags().USER_BROWSER_ROUTING_V2,
   };
 });
 
@@ -75,6 +86,26 @@ export async function assertLocalChromeSelection(
   selection: z.infer<typeof localChromeSelectionSchema>,
 ) {
   const { extensionClientId, ...target } = selection;
+  if (getFeatureFlags().USER_BROWSER_ROUTING_V2) {
+    // Capability handshake contains tab metadata only, before reading page content.
+    const handshake = await sendExtensionToolCall(userId, {
+      taskId: `capabilities-${randomUUID()}`,
+      kind: 'tabs',
+      extensionClientId,
+      timeoutMs: 5000,
+    });
+    if (
+      !handshake.ok ||
+      !userBrowserProtocolSchema.safeParse(
+        (handshake.result as Record<string, unknown>)?.userBrowserProtocol,
+      ).success
+    )
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message:
+          'capability_missing：请安装、更新并重新连接 HOLADAY Chrome 扩展，保持电脑在线。未扣除额度。',
+      });
+  }
   const reply = await sendExtensionToolCall(userId, {
     taskId: `preflight-${randomUUID()}`,
     kind: 'read',

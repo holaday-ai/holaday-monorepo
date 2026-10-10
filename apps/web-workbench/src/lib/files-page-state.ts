@@ -1,5 +1,6 @@
 export interface NormalizedFileRow {
   readonly fileId: string;
+  readonly availability?: 'available' | 'unavailable' | 'unknown';
   readonly filename: string;
   readonly mimetype: string;
   readonly sizeBytes: number;
@@ -81,6 +82,7 @@ function normalizeFileRow(value: unknown): NormalizedFileRow | null {
     mimetype: safeFileMime(value.mimetype),
     sizeBytes: safeFileSizeBytes(value.sizeBytes),
     createdAt: safeFileDate(value.createdAt) ?? '',
+    ...(value.availability === 'available' || value.availability === 'unavailable' || value.availability === 'unknown' ? { availability: value.availability } : {}),
   };
 }
 

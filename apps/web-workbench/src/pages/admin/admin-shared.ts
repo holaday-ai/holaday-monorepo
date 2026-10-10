@@ -8,8 +8,8 @@
 
 import * as React from 'react';
 
-export const ADMIN_MAGENTA = '#EA1F59';
-export const ADMIN_MAGENTA_SOFT = 'rgba(234,31,89,0.12)';
+export const ADMIN_MAGENTA = '#FF0061';
+export const ADMIN_MAGENTA_SOFT = 'rgba(255,0,97,0.12)';
 export const ADMIN_BORDER = '#DCDDDD';
 export const ADMIN_DIVIDER = '#EFEFEF';
 export const ADMIN_TEXT_MUTED = '#595757';
@@ -35,8 +35,8 @@ const STATUS_MAP: Record<string, StatusToken> = {
   },
   failed: {
     label: '失败',
-    textClass: 'text-[#EA1F59]',
-    bgClass: 'bg-[#EA1F59]/10',
+    textClass: 'text-[#FF0061]',
+    bgClass: 'bg-[#FF0061]/10',
   },
   cancelled: {
     label: '已取消',

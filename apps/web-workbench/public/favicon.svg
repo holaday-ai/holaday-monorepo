@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="HOLA DAY">
-  <rect x="6" y="6" width="52" height="52" rx="14" fill="#ea1f59" />
+  <rect x="6" y="6" width="52" height="52" rx="14" fill="#FF0061" />
   <rect x="18" y="18" width="8" height="8" rx="1.5" fill="#fff" />
   <rect x="18" y="38" width="8" height="8" rx="1.5" fill="#fff" />
   <rect x="30" y="18" width="8" height="8" rx="1.5" fill="#fff" />
   <rect x="30" y="38" width="8" height="8" rx="1.5" fill="#fff" />
   <path d="M44 19h3.5C53.3 19 57 24.1 57 32s-3.7 13-9.5 13H44V19Z" fill="#fff" />
-  <rect x="42" y="28" width="11" height="8" rx="1.5" fill="#ea1f59" />
+  <rect x="42" y="28" width="11" height="8" rx="1.5" fill="#FF0061" />
 </svg>

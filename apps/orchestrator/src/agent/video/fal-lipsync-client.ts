@@ -1,3 +1,4 @@
+import { observeMediaCall } from '../media-call-recorder.js';
 /**
  * fal.ai lip-sync client — redraw a real-human video's mouth from an audio
  * track. The caller selects the provider model through config.
@@ -25,7 +26,7 @@
  * tell the user "top up fal billing" vs "key misconfigured".
  */
 
-import { fetchWithTimeout, safeText, sleep, VideoHttpError } from './video-http.js';
+import { VideoHttpError, fetchWithTimeout, safeText, sleep } from './video-http.js';
 
 const DEFAULT_BASE_URL = 'https://queue.fal.run';
 const DEFAULT_MODEL = 'fal-ai/latentsync';
@@ -272,6 +273,8 @@ export async function getLipSyncResult(
 }
 
 export interface RunLipSyncParams extends SubmitLipSyncParams {
+  /** Measured audio/output timeline passed by the lane; never quoted duration. */
+  billableDurationSeconds?: number;
   readonly pollIntervalMs?: number;
   readonly maxWaitMs?: number;
   /** Called after each status poll (for WS progress). */
@@ -284,7 +287,7 @@ export interface RunLipSyncParams extends SubmitLipSyncParams {
  * coroutine (never await in a request handler). Throws 'timeout' if
  * maxWaitMs elapses while still IN_QUEUE/IN_PROGRESS.
  */
-export async function runLipSync(
+async function runLipSyncImpl(
   p: RunLipSyncParams,
 ): Promise<LipSyncResult & { requestId: string; elapsedMs: number }> {
   const startedAt = Date.now();
@@ -319,4 +322,10 @@ export async function runLipSync(
     }
     await sleep(pollIntervalMs);
   }
+}
+
+export async function runLipSync(p: RunLipSyncParams): Promise<LipSyncResult & { requestId: string; elapsedMs: number }> {
+  return observeMediaCall({ provider: 'fal', model: p.model ?? DEFAULT_MODEL, purpose: 'media.video' }, () => runLipSyncImpl(p), result => ({ providerRequestId: result.requestId,
+    ...(p.billableDurationSeconds !== undefined ? { mediaUsage: { unit: 'second', quantity: p.billableDurationSeconds, basis: 'measured' } } : {}),
+  }));
 }

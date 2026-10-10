@@ -514,8 +514,9 @@ describe('generate plan mode durable approval boundary', () => {
       expect(f.complete).not.toHaveBeenCalled();
       await f.reply('确认');
       await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
+      // Semantic review unavailable is recorded but no longer downgrades delivery.
       expect(f.complete.mock.calls[0]?.[1]).toMatchObject({
-        status: 'partial_success',
+        status: 'completed',
         summary: expect.stringContaining(report),
       });
       expect(f.state.result.coreRequirements).toMatchObject({ userTurns: [edit, '确认'], workflow: { id: 'content-topic' } });
@@ -758,7 +759,8 @@ describe('generate plan mode durable approval boundary', () => {
     expect(f.complete).not.toHaveBeenCalled();
     await f.reply('执行');
     await vi.waitFor(() => expect(f.complete).toHaveBeenCalledTimes(1));
-    expect(f.complete.mock.calls[0]?.[1]).toMatchObject({ status: 'partial_success', summary: texts[2] });
+    // Semantic review unavailable is recorded but no longer downgrades delivery.
+    expect(f.complete.mock.calls[0]?.[1]).toMatchObject({ status: 'completed', summary: texts[2] });
     expect(f.state.result.coreRequirements).toMatchObject({
       userTurns: ['不要增加截止时间，修改方案第二步', '执行'],
       referencePlan: expect.stringContaining('不增加截止时间'),

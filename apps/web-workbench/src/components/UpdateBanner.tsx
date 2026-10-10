@@ -59,12 +59,12 @@ export function UpdateBanner(): JSX.Element | null {
 
   return (
     <div className="fixed inset-x-0 bottom-3 z-[90] flex justify-center px-3">
-      <div className="inline-flex max-w-[calc(100vw-1.5rem)] items-center gap-3 rounded-[10px] border border-[#EA1F59]/25 bg-white/95 px-3.5 py-2 text-[12px] font-medium text-[#595757] shadow-[0_12px_30px_rgba(89,87,87,0.16)] backdrop-blur dark:border-[#EA1F59]/35 dark:bg-card/95 dark:text-foreground/85">
+      <div className="inline-flex max-w-[calc(100vw-1.5rem)] items-center gap-3 rounded-[10px] border border-[#FF0061]/25 bg-white/95 px-3.5 py-2 text-[12px] font-medium text-[#595757] shadow-[0_12px_30px_rgba(89,87,87,0.16)] backdrop-blur dark:border-[#FF0061]/35 dark:bg-card/95 dark:text-foreground/85">
         <span className="shrink-0">有新版本可用</span>
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-[7px] bg-[#EA1F59] px-2.5 py-1 text-[12px] font-medium text-white transition-colors hover:bg-[#d11a50]"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-[7px] bg-[#FF0061] px-2.5 py-1 text-[12px] font-medium text-white transition-colors hover:bg-[#d11a50]"
         >
           <RefreshCw className="h-3.5 w-3.5" />
           刷新

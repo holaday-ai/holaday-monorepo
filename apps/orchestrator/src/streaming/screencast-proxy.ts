@@ -40,6 +40,9 @@ import { CdpInputHandler } from './cdp-input.js';
 import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { CdpStreamer } from './cdp-streamer.js';
+import { BrowserFrameGuard, BrowserActionConfirmations } from './browser-viewport-v2.js';
+import type { InputEnvelope } from './screencast-input-bridge.js';
+import type { BrowserActionRequest, BrowserActionDecision } from '@holaday/shared-types';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
 
 /**
@@ -90,6 +93,9 @@ export function pickInstanceForRoute(args: {
 
 export interface ScreencastProxyOptions {
   pool: BrowserPool;
+  /** Server-only adapter: must derive the exact target/digest from the live page,
+   * then invoke #248's onBeforeAction. No adapter means V2 writes are read-only. */
+  beforeViewportAction?: (instance: BrowserInstance, envelope: InputEnvelope, signal?: AbortSignal) => Promise<{request: BrowserActionRequest; decision: BrowserActionDecision}>;
   logger: Logger;
   executionDrain?: ExecutionAdmission;
   /** Override route. Default: `/screencast-ws/:userId`. */
@@ -124,6 +130,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     const url = req.url ?? '';
     const m = pathPattern.exec(url);
     if (!m) return; // not our path; leave for next handler
+    const v2Requested = new URL(url, 'http://localhost').searchParams.get('viewportV2') === '1';
+    if (v2Requested && process.env.BROWSER_VIEWPORT_V2 !== 'true') return reject(socket,409,'browser viewport v2 disabled');
     if (!admissionOpen()) return reject(socket, 503, 'maintenance');
 
     const urlArg = decodeURIComponent(m[1] ?? '');
@@ -202,7 +210,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             logger: log,
             intervalMs: opts.sessionRevalidationIntervalMs,
           });
-          void wireUpClient({ ws, callerUserId, instance }).then(resolve, rejectSetup);
+          // The server flag enforces V2 guards even for a legacy URL; dropping
+          // the negotiation parameter must never restore unguarded writes.
+          void wireUpClient({ ws, callerUserId, instance, viewportV2: process.env.BROWSER_VIEWPORT_V2 === 'true' }).then(resolve, rejectSetup);
         }));
       },
       (err: unknown) => {
@@ -219,18 +229,47 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
   async function wireUpClient(args: {
     ws: WebSocket;
     callerUserId: string;
+    viewportV2: boolean;
     instance: ReturnType<BrowserPool['peek']> & object;
   }): Promise<void> {
     const userLog = log.child({ userId: args.callerUserId });
     let streamer: CdpStreamer | null = null;
     let inputHandler: CdpInputHandler | null = null;
     let stopped = false;
+    let viewportPending = false;
+    const frameGuard = new BrowserFrameGuard();
+    const confirmations = new BrowserActionConfirmations();
+    const invalidate = () => {
+      frameGuard.invalidate(); confirmations.invalidate();
+      if (args.viewportV2 && args.ws.readyState === WebSocket.OPEN) args.ws.send(JSON.stringify({type:'observation-invalidated'}));
+    };
+    if (args.viewportV2) args.ws.send(JSON.stringify({type:'viewport-v2-ready',controlReady:Boolean(opts.beforeViewportAction)}));
     const inputBridge = createOwnedScreencastInputBridge({
       instance: args.instance,
+      maxViewportHeight: args.viewportV2 ? 2400 : 1600,
+      onViewportRequested: args.viewportV2 ? () => {viewportPending=true;invalidate();streamer?.invalidateObservation();} : undefined,
+      beforeDispatch: args.viewportV2 ? async (envelope, signal) => {
+        if (!streamer?.matchesPage(await args.instance.executor.getPage())) { invalidate(); throw new Error('browser_tab_changed'); }
+        const message = envelope.payload;
+        if (!message) throw new Error('browser_input_missing');
+        if (message.type === 'viewport') { viewportPending = true; invalidate(); streamer?.invalidateObservation(); return; }
+        if (('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y))) || viewportPending || !frameGuard.validate(envelope.observation)) {
+          streamer?.requestFrameRefresh(); throw new Error('browser_observation_expired');
+        }
+        if (message.type === 'scroll' || message.type === 'mouseMove') return;
+        if (!opts.beforeViewportAction) throw new Error('browser_action_gate_unavailable');
+        const result = await opts.beforeViewportAction(args.instance, envelope, signal);
+        // Recheck after the asynchronous policy: resize/navigation may have happened.
+        if (!streamer.matchesPage(await args.instance.executor.getPage()) || !frameGuard.validate(envelope.observation)) throw new Error('browser_observation_expired');
+        if(result.request.taskId!==args.instance.taskId || result.request.actor!=='human' || result.request.lane!=='cdp' || result.request.tabId!==envelope.observation?.tabId || result.request.observationRevision!==envelope.observation?.viewportRevision || result.request.lease!==envelope.controlLease) throw new Error('browser_action_binding_invalid');
+        if (result.decision.kind !== 'allow') throw new Error('browser_action_confirmation_required');
+        if (result.decision.sensitive && !confirmations.consume(envelope.confirmationNonce,result.request)) throw new Error('browser_confirmation_invalid');
+      } : undefined,
       executionDrain: opts.executionDrain,
       peek: (taskId) => opts.pool.peek(taskId),
       releasePressed: async (signal) => { await inputHandler?.releasePressed(signal); },
       onViewportApplied: (viewport) => {
+        if (args.viewportV2) { viewportPending=false; streamer?.invalidateObservation(); streamer?.requestFrameRefresh(); }
         if (args.ws.readyState !== WebSocket.OPEN) return;
         try {
           args.ws.send(JSON.stringify({ type: 'viewport-applied', ...viewport }));
@@ -243,6 +282,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     async function teardown(reason: string): Promise<void> {
       if (stopped) return;
       stopped = true;
+      invalidate();
       inputBridge.detach();
       userLog.info({ reason }, 'screencast: tearing down');
       try {
@@ -271,6 +311,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     // spawn-time 430x760 profile. The bridge retains only the newest viewport
     // and deliberately drops stale pointer/keyboard input.
     args.ws.on('message', (raw) => {
+      if (args.ws.readyState !== WebSocket.OPEN) return;
+      if (args.viewportV2 && raw.toString() === '{"type":"observe"}') { streamer?.requestFrameRefresh(); return; }
       void inputBridge.receive(raw.toString()).catch((err: unknown) => {
         userLog.debug({ err: errMsg(err) }, 'screencast: input dispatch failed');
       });
@@ -301,6 +343,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         getPage: () => executor.getPage(),
         ws: args.ws,
         logger: userLog,
+        viewportV2: args.viewportV2,
+        onFrame: (frame) => { if (!viewportPending) frameGuard.observe(frame); },
+        onObservationInvalidated: invalidate,
         onViewportMayReset: () => inputBridge.reapplyViewport(),
       });
       await streamer.start();
@@ -325,6 +370,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             .catch((err: unknown) => userLog.warn({ err: errMsg(err) }, 'screencast: browser stop unconfirmed'));
           void teardown('input-outcome-unknown');
         },
+        args.viewportV2,
+        () => executor.getPage(),
+        args.viewportV2 ? 2400 : 1600,
       );
       await inputBridge.attach(inputHandler);
 

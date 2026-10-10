@@ -3,12 +3,35 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useTaskStore } from '@/stores/task-store';
+import type { UiTask } from '@/types/task';
 import { InputArea } from './InputArea';
 import { ToastProvider } from './ui/toast';
 
-vi.mock('@/lib/trpc', () => ({ trpc: { skills: { list: { query: async () => [] } } } }));
+vi.mock('@/lib/trpc', () => ({
+  trpc: {
+    skills: { list: { query: async () => [] } },
+    models: {
+      list: {
+        query: async () => ({
+          items: [
+            {
+              id: 'qwen',
+              label: '千问',
+              provider: 'alibaba-model-studio',
+              isDefault: true,
+              adminOnly: false,
+              configured: true,
+            },
+          ],
+        }),
+      },
+    },
+  },
+}));
 afterEach(() => {
   cleanup();
+  useTaskStore.setState({tasks:[], selectedTaskId:null});
   vi.restoreAllMocks();
 });
 function mount(attachmentsAllowed: boolean) {
@@ -49,5 +72,25 @@ describe('composer task choices independent of attachment entitlement', () => {
     await user.click(screen.getByRole('menuitem', { name: '添加照片和文件' }));
     expect(open).toHaveBeenCalledOnce();
     expect(screen.queryByText(/免费版不支持附件/)).toBeNull();
+  });
+
+  it('shows 千问 as a static model label when it is the only brain', async () => {
+    const { user } = mount(true);
+    await user.click(screen.getByRole('button', { name: '附件与任务选项' }));
+    expect(await screen.findByText('模型')).toBeTruthy();
+    expect(screen.getByText('千问')).toBeTruthy();
+  });
+});
+
+describe('existing task composer and Chrome entry', () => {
+  it.each(['generate', 'image', 'scrape'] as const)('uses follow-up copy and hides Chrome for %s tasks', (executionMode) => {
+    useTaskStore.setState({selectedTaskId:'task-existing', tasks:[{taskId:'task-existing',status:'failed',executionMode} as UiTask]});
+    mount(false);
+    expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('补充问题或下一步指令...');
+    expect(screen.queryByText('连接 Chrome')).toBeNull();
+  });
+  it('does not offer Chrome in an untyped new task', () => {
+    useTaskStore.setState({selectedTaskId:null,tasks:[]}); mount(false);
+    expect(screen.queryByText('连接 Chrome')).toBeNull();
   });
 });

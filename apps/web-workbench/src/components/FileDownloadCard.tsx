@@ -1,11 +1,13 @@
 import { CircleSlash, Clock3, Download, File, FileSpreadsheet, FileText, Film, Image as ImageIcon, Loader2, Presentation, RotateCcw } from 'lucide-react';
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
+import { useNearViewport } from '@/hooks/useNearViewport';
 import {
   blobToDataUrl,
   downloadFailureMessage,
   downloadFileAuthed,
   fetchFileBlobAuthed,
+  isUnavailableFileStatus,
 } from '@/lib/download-file';
 import {
   classifyDownloadFileKind,
@@ -83,6 +85,10 @@ export function FileDownloadCard({
   const expired = knownAvailability === 'expired';
   const unavailable = knownUnavailable || registryUnavailable;
   const inactive = expired || unavailable;
+  const mediaPreview = showPreview && (kind === 'image' || kind === 'video');
+  // Batch 10.2 — history lists render many cards; only fetch a preview
+  // blob (up to a full 5MB video) once the card nears the viewport.
+  const [cardRef, nearViewport] = useNearViewport<HTMLDivElement>(mediaPreview && !inactive);
   const metaLabel = downloadFileMetaLabel({
     filename: payload.filename,
     formattedSize: formatFileSize(payload.size),
@@ -127,6 +133,11 @@ export function FileDownloadCard({
       return;
     }
     if (kind !== 'image' && kind !== 'video') {
+      setPreviewUrl(null);
+      setPreviewState('idle');
+      return;
+    }
+    if (!nearViewport) {
       setPreviewUrl(null);
       setPreviewState('idle');
       return;
@@ -181,6 +192,7 @@ export function FileDownloadCard({
     kind,
     fileReference,
     knownAvailability,
+    nearViewport,
     payload.downloadUrl,
     previewRetryKey,
     showPreview,
@@ -199,22 +211,24 @@ export function FileDownloadCard({
       setState('idle');
     } else {
       markFileUnavailableFromStatus(fileReference, result.status);
-      setState('failed');
-      toast.show(downloadFailureMessage(result.status), 'error');
+      setState(isUnavailableFileStatus(result.status) ? 'idle' : 'failed');
+      if (!isUnavailableFileStatus(result.status)) toast.show(downloadFailureMessage(result.status), 'error');
     }
   };
   const actionLabel = inactive
-    ? `${kindLabel}${expired ? '已过期' : '已失效'} ${payload.filename}`
+    ? `${kindLabel}${expired ? '已过期' : '已不可用'} ${payload.filename}`
     : `下载${kindLabel} ${payload.filename}`;
 
   return (
     <div
+      ref={cardRef}
+      data-preview-deferred={mediaPreview && !inactive && !nearViewport ? 'true' : undefined}
       className={cn(
         'group my-2 flex w-full max-w-md flex-col gap-2 rounded-[8px] border bg-white px-3 py-3 text-left text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85 sm:px-4',
         inactive
           ? 'border-[#DCDDDD] bg-[#EFEFEF]/35'
           : state === 'failed'
-          ? 'border-[#EA1F59]/40 bg-[#EA1F59]/5'
+          ? 'border-[#FF0061]/40 bg-[#FF0061]/5'
           : state === 'loading'
             ? 'border-[#57479C]/40 bg-[#57479C]/5 opacity-90'
             : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
@@ -222,7 +236,7 @@ export function FileDownloadCard({
     >
       {showPreview && inactive && (kind === 'image' || kind === 'video') ? (
         <span className="flex h-40 w-full items-center justify-center rounded-[6px] border border-dashed border-[#DCDDDD] bg-[#EFEFEF]/35 px-4 text-center text-[11px] leading-5 text-muted-foreground dark:border-white/10 dark:bg-white/5">
-          {expired ? '文件已过期，无法预览。' : '文件已失效，无法预览。'}
+          {expired ? '文件已过期，无法预览。' : '文件已不可用'}
         </span>
       ) : showPreview && previewState === 'ready' && previewUrl ? (
         kind === 'video' ? (
@@ -254,6 +268,13 @@ export function FileDownloadCard({
           <Loader2 className="h-4 w-4 animate-spin text-[#57479C]" />
           {kind === 'video' ? '视频加载中…' : '图片加载中…'}
         </span>
+      ) : mediaPreview && !nearViewport ? (
+        <span
+          aria-label={kind === 'video' ? '视频预览待加载' : '图片预览待加载'}
+          className="flex h-40 w-full items-center justify-center rounded-[6px] border border-[#DCDDDD] bg-[#EFEFEF]/50 text-muted-foreground/50 dark:border-white/10 dark:bg-white/5"
+        >
+          {kind === 'video' ? <Film className="h-5 w-5" aria-hidden /> : <ImageIcon className="h-5 w-5" aria-hidden />}
+        </span>
       ) : showPreview && previewState === 'failed' ? (
         <div className="flex h-40 w-full flex-col items-center justify-center gap-3 rounded-[6px] border border-dashed border-[#DCDDDD] bg-[#EFEFEF]/35 px-4 text-center text-[11px] leading-5 text-muted-foreground dark:border-white/10 dark:bg-white/5">
           <span>
@@ -264,7 +285,7 @@ export function FileDownloadCard({
           <button
             type="button"
             onClick={() => setPreviewRetryKey((value) => value + 1)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[#DCDDDD] bg-white px-3 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:border-white/10 dark:bg-white/10 dark:text-foreground"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[#DCDDDD] bg-white px-3 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#FF0061]/35 hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 dark:border-white/10 dark:bg-white/10 dark:text-foreground"
           >
             <RotateCcw className="h-3.5 w-3.5" aria-hidden />
             重新加载预览
@@ -286,7 +307,7 @@ export function FileDownloadCard({
             inactive
               ? 'border-[#DCDDDD] bg-[#EFEFEF]/70 text-[#ADADAD]'
               : state === 'failed'
-              ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
+              ? 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]'
               : state === 'loading'
                 ? 'border-[#57479C]/30 bg-[#57479C]/10 text-[#57479C]'
                 : 'border-[#DCDDDD] bg-[#EFEFEF]/55 text-[#595757] group-hover:border-[#42C0EF]/45 group-hover:bg-[#42C0EF]/10 group-hover:text-[#42C0EF] dark:border-white/10 dark:bg-white/10 dark:text-foreground',
@@ -302,7 +323,7 @@ export function FileDownloadCard({
             className={cn(
               'text-[11px]',
               state === 'failed' && !inactive
-                ? 'text-[#EA1F59]'
+                ? 'text-[#FF0061]'
                 : 'text-muted-foreground',
             )}
           >
@@ -322,14 +343,14 @@ export function FileDownloadCard({
             <CircleSlash className="h-4 w-4 shrink-0 text-[#ADADAD]" aria-hidden />
           )
         ) : state === 'loading' ? (
-          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" />
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#FF0061]" />
         ) : (
           <Download
             className={cn(
               'h-4 w-4 shrink-0 transition-colors',
               state === 'failed'
-                ? 'text-[#EA1F59]'
-                : 'text-muted-foreground group-hover:text-[#EA1F59]',
+                ? 'text-[#FF0061]'
+                : 'text-muted-foreground group-hover:text-[#FF0061]',
             )}
           />
         )}

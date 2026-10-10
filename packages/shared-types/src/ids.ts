@@ -48,6 +48,8 @@ export const ID_PREFIXES = {
   // taken by siteCapability, so this uses 'tac' (task-action-capture) to
   // keep external-id prefixes collision-free for isExternalId().
   taskActionCapture: 'tac',
+  // Batch 06 — one reuse attempt of a verified operation path.
+  operationPathReplay: 'oprp',
   // Phase 1 #2 — A股自选股 (watchlist row).
   watchlist: 'wl',
   // Deterministic stock-risk monitor linked one-to-one with a planned task.

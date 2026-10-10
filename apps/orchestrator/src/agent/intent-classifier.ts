@@ -193,6 +193,9 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:上传|下载|导出|分享|移动|重命名|复制链接|改权限|授权).{0,48}(?:文件|附件|pdf|csv|xlsx|表格|资料|文档|图片|链接|权限|这个|这|该).{0,48}(?:google drive|dropbox|onedrive|icloud drive)/i, '中文云盘对象操作'],
   [/(?:把|将).{0,24}(?:文件|附件|文档|pdf|这个|这|该).{0,32}(?:上传|下载|导出|分享|移动|重命名|复制链接|改成|设为|设置为|共享为).{0,48}(?:google drive|dropbox|onedrive|icloud drive|任何有链接|可查看|可编辑|权限)/i, '中文文件权限操作'],
   [/(?:上传|下载|导出|分享|移动|重命名|复制链接|改权限|授权).{0,32}(?:文件|附件|pdf|csv|xlsx|表格|资料|文档|图片|链接|权限|这个|这|该)(?!.*(?:策略|模板|方案|分析|报告))/i, '中文文件执行操作'],
+  // Match upload destinations only after quoted and instructional upload
+  // topics have been neutralized; compound delivery requests stay actionable.
+  [/上传(?:到|至)\s*\S|把.{0,24}传(?:到|至)\s*\S/, '中文上传到目标'],
   [/(?:创建|新建|添加|更新|编辑|回复|下载|上传|导出|查找|退款|安排|预约).{0,48}(?:github\s*issue|asana\s*任务|trello\s*卡片|zendesk\s*工单|hubspot\s*联系人|salesforce\s*客户|stripe\s*(?:付款|收据|发票)|google\s*doc|google\s*文档|notion\s*页面|airtable\s*(?:行|记录)|figma\s*设计|cloudinary\s*图片|buffer\s*帖子|mailchimp\s*campaign|shopify\s*折扣码|日历|日程|会议邀请|日程邀请)/i, '中文对象式 SaaS 操作'],
   [/(?:在|到).{0,8}(?:日历|calendar).{0,32}(?:添加|安排|创建|新建).{0,32}(?:会议|日程|邀请|event|meeting)/i, '中文日历对象操作'],
   [/(?:回复|处理|更新).{0,24}(?:工单|ticket)(?!.*(?:模板|策略|方案|分析|报告))/i, '中文工单执行操作'],
@@ -634,6 +637,86 @@ interface RouteDecision {
   match?: string;
 }
 
+const WEB_TLDS = new Set(
+  'com org net edu gov io ai co cn uk de fr jp au us ca app dev tech site info biz me xyz online shop store cloud tv cc'.split(
+    ' ',
+  ),
+);
+
+function attachmentNeedsLiveSource(intent: string): boolean {
+  if (URL_REGEX.test(intent)) return true;
+  for (const match of intent.matchAll(/\b[a-z0-9](?:[a-z0-9-]*\.)+[a-z]{2,24}\b/gi)) {
+    const domain = match[0].toLowerCase();
+    // Technology names/file extensions are not a request to visit a host.
+    if (/^(?:asp|ado|vb)\.net$/.test(domain)) continue;
+    if (WEB_TLDS.has(domain.split('.').at(-1) ?? '')) return true;
+  }
+  // "now write" / "latest quarterly report" describe the writing request,
+  // whereas today's news/stock price/weather explicitly requires external facts.
+  return /(?:今天|最新|当前|现在|实时|近期|本周|今年)(?:的)?[^，。；！？\n]{0,6}(?:股价|行情|天气|新闻|汇率|市场|航班|票价|价格)|\b(?:today(?:'s)?|latest|current|real[ -]?time|recent)\b.{0,16}\b(?:news|stock\s+prices?|prices?|weather|exchange\s+rates?|market)\b/i.test(
+    intent,
+  );
+}
+
+/** Writing deliverables made from an attachment (the attachment-writing shortcut). */
+const ATTACHMENT_WRITING_RE =
+  /(?:写|撰写|起草|拟|编写|生成|整理|输出|做)(?:一下|一份|一篇|一个|一封|一段|个|份|篇|封|段)?.{0,24}(?:短文|文章|文案|故事|报告|文档|会议纪要|纪要|会议记录|周报|日报|月报|总结|复盘|方案|提纲|大纲|讲稿|演讲稿|邮件|简历|说明书|说明|教程|介绍|摘要|笔记|心得|读后感|新闻稿|通知|公告|诗|稿)|\b(?:write|draft|compose|generate|prepare)\b.{0,48}\b(?:story|article|essay|report|document|minutes|summary|email|resume|cv|outline|speech|proposal|memo|manual|poem)\b/i;
+
+/** Keep upload topics out of action matching without suppressing other actions. */
+function neutralizeUploadTopics(intent: string): string {
+  // Only upload-bearing quotations are removed from routing. Quoted control
+  // labels / other destinations still belong to their established action rules.
+  const unquoted = intent.replace(/“[^”]*”|「[^」]*」|"[^"]*"|'[^']*'|《[^》]*》/g, (quoted) =>
+    /上传|传(?:到|至)/.test(quoted) ? ' ' : quoted,
+  );
+  // A second imperative is an actual delivery step, even after a writing
+  // request. Existing compound-task precedence routes the whole task to browser.
+  const delivery =
+    /(?:[，。；,;]\s*(?:然后|接着|再)?|然后|接着|并且|并|(?:写|撰写|起草|整理|生成)完后)\s*(?:请|帮我|替我|给我|为我)?\s*(?:上传(?:到|至)?|(?:把|将)[^，。；,;\n]{0,24}(?:上传(?:到|至)?|传(?:到|至)))/.exec(
+      unquoted,
+    );
+  const topicEnd = delivery?.index ?? unquoted.length;
+  const topic = unquoted.slice(0, topicEnd);
+  const uploadAt = /(?:把|将).{0,24}(?:上传|传(?:到|至))|上传/.exec(topic)?.index;
+  if (uploadAt === undefined) return unquoted;
+  const writingAt = ATTACHMENT_WRITING_RE.exec(topic)?.index;
+  const explanationAt = /怎么|如何|什么意思/.exec(topic)?.index;
+  const meaningQuestion = /^[^，。；,;\n]*(?:是什么意思|什么意思)[？?]?$/.test(topic);
+  if (
+    (writingAt !== undefined && writingAt < uploadAt) ||
+    (explanationAt !== undefined && explanationAt < uploadAt) ||
+    meaningQuestion
+  ) {
+    return (
+      topic.replace(/上传(?:到|至)?|(?:把|将).{0,24}传(?:到|至)/g, '主题') +
+      unquoted.slice(topicEnd)
+    );
+  }
+  return unquoted;
+}
+
+/**
+ * "上传的X / 我上传的X / 已上传的X" refers to the attached file. Rewritten to
+ * "附件" for routing only; "上传到 / 上传至 / 把…上传" stay untouched.
+ */
+function neutralizeAttachmentReferences(intent: string): string {
+  return intent.replace(
+    /(?:我|你)?(?:本次|刚才|刚刚|已经|已|当前)?上传(?:了)?的\s*(?:这(?:一)?(?:个|份|张|些|幅|篇))?\s*(?:[\w.-]+\.(?:png|jpe?g|webp|gif|bmp|heic|pdf|docx?|xlsx?|pptx?|txt|csv|md|mp4|mov|mp3|wav)\b|配图|图片|照片|图像|图|文件|附件|素材|文档|视频|资料|表格|截图|录音|音频|pdf|word|excel)/gi,
+    '附件',
+  );
+}
+
+/**
+ * "提供可下载的文章文件 / 生成可下载 Word / 并提供下载" names the OUTPUT format of
+ * the task, not a website download. A real website download keeps its verb
+ * ("下载这个页面的 PDF", "去官网下载安装包") and still routes to the browser.
+ */
+const DOWNLOADABLE_OUTPUT_RE =
+  /(?:可供?下载|下载用)的?[^，。；,;\n]{0,16}?(?:文件|文档|版本|文章|报告|附件|word|pdf|docx|markdown|md|excel|xlsx|pptx?|压缩包)|(?:并|再)?提供(?:文件)?下载/gi;
+function neutralizeDownloadableOutput(intent: string): string {
+  return intent.replace(DOWNLOADABLE_OUTPUT_RE, ' ');
+}
+
 function decide(
   intent: string,
   ctx: { hasFileAttachment: boolean },
@@ -642,7 +725,16 @@ function decide(
   // "不要打开网页" still contains the positive trigger "打开网页" and
   // unnecessarily allocates a browser. Clause boundaries preserve a later
   // explicit action such as "不要登录，但打开链接并截图".
-  const routingIntent = stripNegatedRoutingClauses(intent);
+  // With a file attached, "上传的文档/图片…" names that attachment — material
+  // for the task, not a website upload. A real upload ("上传到…/上传至…")
+  // keeps its wording and still routes as a website action.
+  // "可下载的文章文件" is the deliverable's format, not a browser download.
+  const affirmativeIntent = neutralizeDownloadableOutput(
+    stripNegatedRoutingClauses(neutralizeUploadTopics(intent)),
+  );
+  const routingIntent = ctx.hasFileAttachment
+    ? neutralizeAttachmentReferences(affirmativeIntent)
+    : affirmativeIntent;
 
   // 0a. Template-fill (STRICT) — the user wants to fill THEIR uploaded Office
   // template. Checked first: the patterns require an explicit 模板/
@@ -671,6 +763,27 @@ function decide(
   // empty URLs for "前5结果（名称/价格/链接）" style prompts.
   if (isEcommerceListingIntent(routingIntent)) {
     return { mode: 'browser', source: 'kw:ecommerce-listing' };
+  }
+
+  // A downloadable writing artifact is a local output, not a website
+  // download. Keep real website actions ahead of this attachment shortcut.
+  if (ctx.hasFileAttachment && ATTACHMENT_WRITING_RE.test(routingIntent)) {
+    const actions = routingIntent
+      .replace(/(?:不调用|不使用|禁止调用|不要调用)[^，。；,;！？!?\n]*/g, ' ')
+      .replace(/(?:我(?:本次)?上传的|已上传的|上传的)\s*[\w.-]+\.(?:png|jpe?g|webp|pdf|docx?|txt)\b/gi, '现有配图')
+      .replace(/(?:我(?:本次)?|已|当前|刚刚)?上传的(?:图片|照片|图像|文件|附件|素材|文档|视频)/g, '附件')
+      .replace(/\b[\w.-]+\.(?:png|jpe?g|webp|pdf|docx?|txt)\b/gi, '附件')
+      .replace(/(?:提供|生成|导出|呈现).{0,12}(?:可下载|下载的).{0,24}(?:文件|文档|文章|报告)/g, '');
+    if (!matchInteractionPattern(actions)) {
+      // Uploaded filenames were removed above; an actual domain or freshness
+      // instruction must use live information even when writing a local file.
+      if (attachmentNeedsLiveSource(actions)) {
+        return { mode: 'scrape', source: 'kw:attachment-live-source' };
+      }
+      if (!matchSearchPattern(actions) && !matchSearchVerb(actions)) {
+        return { mode: 'generate', source: 'kw:attachment-writing' };
+      }
+    }
   }
 
   // A negated commit is part of the execution contract for travel tasks:
@@ -791,6 +904,8 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
   const STRONG_SIGNAL_SOURCES = new Set([
     'kw:template_fill',
     'kw:template_fill_file',
+    'kw:attachment-writing',
+    'kw:attachment-live-source',
     'kw:image',
     'kw:interaction',
     'kw:url',

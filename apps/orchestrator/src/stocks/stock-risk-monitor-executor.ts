@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, ne, or } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { plannedTaskRunItems, plannedTaskRuns, plannedTasks } from '../db/schema/planned-tasks.js';
@@ -413,6 +413,27 @@ function latestSnapshot(value: unknown): LatestStockRiskSnapshot | null {
   }
 }
 
+/** Latest validated display snapshot used by risk-monitor dispatch. */
+export async function loadLatestStockRiskSnapshot(
+  db: DB,
+  userId: number,
+): Promise<LatestStockRiskSnapshot | null> {
+  const rows = await db
+    .select({ snapshotJson: stockDashboardSnapshots.snapshotJson })
+    .from(stockDashboardSnapshots)
+    .where(and(
+      eq(stockDashboardSnapshots.userId, userId),
+      sql`JSON_EXTRACT(${stockDashboardSnapshots.snapshotJson}, '$.kind') IS NULL`,
+    ))
+    .orderBy(desc(stockDashboardSnapshots.updatedAt))
+    .limit(20);
+  for (const row of rows) {
+    const snapshot = latestSnapshot(row.snapshotJson);
+    if (snapshot) return snapshot;
+  }
+  return null;
+}
+
 export function createStockRiskMonitorSpecialDispatcher(args: {
   db: DB;
   client: StockRiskRadarClient;
@@ -452,19 +473,7 @@ export function createStockRiskMonitorSpecialDispatcher(args: {
         .limit(1);
       return user?.status === 'active';
     },
-    async loadLatestSnapshot(userId, _symbol) {
-      const rows = await args.db
-        .select({ snapshotJson: stockDashboardSnapshots.snapshotJson })
-        .from(stockDashboardSnapshots)
-        .where(eq(stockDashboardSnapshots.userId, userId))
-        .orderBy(desc(stockDashboardSnapshots.updatedAt))
-        .limit(20);
-      for (const row of rows) {
-        const snapshot = latestSnapshot(row.snapshotJson);
-        if (snapshot) return snapshot;
-      }
-      return null;
-    },
+    loadLatestSnapshot: (userId, _symbol) => loadLatestStockRiskSnapshot(args.db, userId),
     runRadar: (snapshot, monitor) =>
       runStockRiskRadar({
         client: args.client,

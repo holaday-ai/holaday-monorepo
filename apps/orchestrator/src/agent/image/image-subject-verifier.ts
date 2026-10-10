@@ -1,4 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import type {
   SubjectConsistencyVerdict,
   VerifySubjectFn,
@@ -113,6 +114,98 @@ export function createAnthropicSubjectConsistencyVerifier(
       return unknown(error instanceof Error ? error.message : '主体一致性复核请求失败');
     }
   };
+}
+
+function verdictFromToolInput(input: unknown): SubjectConsistencyVerdict {
+  if (!input || typeof input !== 'object') return unknown('复核模型未返回结构化结论');
+  const value = input as Record<string, unknown>;
+  const sameSubject = value.same_subject === true;
+  const confidence =
+    typeof value.confidence === 'number' && Number.isFinite(value.confidence)
+      ? Math.max(0, Math.min(1, value.confidence))
+      : null;
+  const reason =
+    typeof value.reason === 'string' && value.reason.trim()
+      ? value.reason.trim().slice(0, 500)
+      : '复核模型未说明原因';
+  if (confidence === null) return unknown(reason);
+  return {
+    status: sameSubject && confidence >= PASS_CONFIDENCE ? 'pass' : 'fail',
+    confidence,
+    reason,
+  };
+}
+
+/**
+ * Provider-neutral twin of the Anthropic verifier for the Qwen-only runtime:
+ * the caller passes the model-catalog Messages adapter for the vision purpose
+ * (QWEN_VISION_MODEL, default qwen3.8-max). Same prompt, tool and thresholds.
+ */
+export function createMessagesSubjectConsistencyVerifier(
+  adapter: MessagesAdapter,
+): VerifySubjectFn {
+  return async ({ subject, candidate, intent }) => {
+    try {
+      const response = await adapter.create(
+        {
+          maxTokens: 256,
+          tools: [
+            {
+              name: TOOL_NAME,
+              description: SUBJECT_CONSISTENCY_TOOL.description,
+              inputSchema: SUBJECT_CONSISTENCY_TOOL.input_schema,
+            },
+          ],
+          toolChoice: { type: 'tool', name: TOOL_NAME },
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: '图 A：用户明确指定的身份锚点。' },
+                {
+                  type: 'image',
+                  source: {
+                    kind: 'base64',
+                    mediaType: normalizeMediaType(subject.mimeType),
+                    data: subject.data,
+                  },
+                },
+                { type: 'text', text: '图 B：待交付的生成结果。' },
+                {
+                  type: 'image',
+                  source: {
+                    kind: 'base64',
+                    mediaType: normalizeMediaType(candidate.mimeType),
+                    data: candidate.buffer.toString('base64'),
+                  },
+                },
+                { type: 'text', text: subjectPrompt(intent) },
+              ],
+            },
+          ],
+        },
+        { timeoutMs: 45_000, maxRetries: 2 },
+      );
+      const block = response.content.find(
+        (item) => item.type === 'tool_use' && item.name === TOOL_NAME,
+      );
+      return block && block.type === 'tool_use'
+        ? verdictFromToolInput(block.input)
+        : unknown('复核模型未返回结构化结论');
+    } catch (error) {
+      return unknown(error instanceof Error ? error.message : '主体一致性复核请求失败');
+    }
+  };
+}
+
+function subjectPrompt(intent: string): string {
+  return [
+    `用户要求：${intent}\n\n`,
+    '严格判断图 B 是否仍是图 A 的同一主体。主体可能是人物、宠物、商品或 IP。',
+    '允许背景、光线、姿态、动作、镜头与绘画风格变化；不得因风格变化而放宽身份判断。',
+    '重点比较脸型五官、毛色花纹、体态比例、商品结构、Logo/包装关键特征或 IP 核心造型。',
+    '若关键身份特征被替换、重塑、混入其他参考图主体，same_subject 必须为 false。',
+  ].join('');
 }
 
 export { PASS_CONFIDENCE as SUBJECT_CONSISTENCY_PASS_CONFIDENCE };

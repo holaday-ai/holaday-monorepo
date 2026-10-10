@@ -225,3 +225,11 @@ describe('formatWsCloseReason', () => {
     );
   });
 });
+
+describe('retired cookie sync notice (FIX-PR252)', () => {
+  it('tells the user the site-grant import replaces automatic cookie sync', async () => {
+    const { SITE_LOGIN_NOTICE } = await import('./connection-copy.js');
+    expect(SITE_LOGIN_NOTICE.detail).toContain('已改为按站点授权导入（功能即将开放）');
+    expect(SITE_LOGIN_NOTICE.detail).toContain('连接 Chrome');
+  });
+});

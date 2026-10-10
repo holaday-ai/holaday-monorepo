@@ -1,7 +1,6 @@
 import { cn } from '@/lib/utils';
 import {
   ArrowRight,
-  ChevronDown,
   Circle,
   CircleDot,
   ClipboardList,
@@ -13,7 +12,7 @@ import {
 import * as React from 'react';
 import type { StockScreeningViewState } from './StockScreeningWorkbench';
 
-type StockWorkspaceTask = 'watchlist' | 'screening' | 'risk' | 'briefing';
+export type StockWorkspaceTask = 'watchlist' | 'screening' | 'risk' | 'briefing';
 
 const STOCK_WORKSPACE_TASKS: ReadonlyArray<{
   id: StockWorkspaceTask;
@@ -29,21 +28,28 @@ const STOCK_WORKSPACE_TASKS: ReadonlyArray<{
 
 export function StockTaskWorkspaceLayout({
   highlights,
+  composer,
   riskRadar,
   screening,
   preferenceProfile,
   briefing,
   briefingLabel = '今日简报',
+  activeTask: controlledTask,
+  onTaskChange,
 }: {
   highlights: React.ReactNode;
+  composer?: React.ReactNode;
   riskRadar: React.ReactNode;
   screening: React.ReactNode;
   preferenceProfile: React.ReactNode;
   briefing: React.ReactNode;
   briefingLabel?: string;
   screeningView: StockScreeningViewState;
+  activeTask?: StockWorkspaceTask;
+  onTaskChange?(task: StockWorkspaceTask): void;
 }): JSX.Element {
-  const [activeTask, setActiveTask] = React.useState<StockWorkspaceTask>('watchlist');
+  const [internalTask, setActiveTask] = React.useState<StockWorkspaceTask>('watchlist');
+  const activeTask = controlledTask ?? internalTask;
   const [riskWarmed, setRiskWarmed] = React.useState(false);
   const tabRefs = React.useRef<Record<StockWorkspaceTask, HTMLButtonElement | null>>({
     watchlist: null,
@@ -59,10 +65,11 @@ export function StockTaskWorkspaceLayout({
 
   const activateTask = React.useCallback((task: StockWorkspaceTask, focusTab = false) => {
     setActiveTask(task);
+    onTaskChange?.(task);
     if (focusTab) {
       queueMicrotask(() => tabRefs.current[task]?.focus());
     }
-  }, []);
+  }, [onTaskChange]);
 
   const handleTabKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -88,8 +95,9 @@ export function StockTaskWorkspaceLayout({
   return (
     <section
       aria-label="核心股市任务"
-      className="min-w-0 overflow-hidden rounded-[22px] border border-[#E9E0EC] bg-[#FFFCFA] shadow-[0_18px_48px_rgba(103,75,121,0.07)]"
+      className="hd-stock-workspace min-w-0 overflow-hidden rounded-[22px] border border-[#E9E0EC] bg-[#FFFCFA] shadow-[0_18px_48px_rgba(103,75,121,0.07)]"
     >
+      <header className="hd-stock-section-heading"><span>RESEARCH</span><h2>关注研究</h2><p>从表现到原因</p></header>
       <nav
         aria-label="股市任务视图"
         role="tablist"
@@ -116,14 +124,14 @@ export function StockTaskWorkspaceLayout({
               onClick={() => activateTask(task.id)}
               onKeyDown={handleTabKeyDown}
               className={cn(
-                'group relative flex h-11 min-w-0 items-center justify-center gap-2 rounded-[13px] px-2 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 motion-reduce:transition-none sm:px-3',
+                'group relative flex h-11 min-w-0 items-center justify-center gap-2 rounded-[13px] px-2 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 motion-reduce:transition-none sm:px-3',
                 selected
                   ? 'bg-[#FFF0F4] text-[#C9184A] shadow-[0_6px_18px_rgba(220,48,93,0.08)]'
                   : 'text-[#566074] hover:bg-[#F7F4FC] hover:text-[#332842]',
               )}
             >
               <Icon
-                className={cn('h-4 w-4 shrink-0', selected ? 'text-[#EA1F59]' : 'text-[#7A8192]')}
+                className={cn('h-4 w-4 shrink-0', selected ? 'text-[#FF0061]' : 'text-[#7A8192]')}
                 aria-hidden
               />
               <span className="min-w-0">
@@ -141,7 +149,7 @@ export function StockTaskWorkspaceLayout({
         role="tabpanel"
         aria-labelledby={`stock-task-tab-${activeTask}`}
         tabIndex={0}
-        className="min-w-0 p-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#EA1F59]/20 sm:p-3"
+        className="min-w-0 p-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#FF0061]/20 sm:p-3"
       >
         {activeTask === 'watchlist' ? (
           <div className="min-w-0 space-y-3">
@@ -166,6 +174,7 @@ export function StockTaskWorkspaceLayout({
         ) : null}
         {activeTask === 'briefing' ? <div className="min-w-0">{briefing}</div> : null}
       </div>
+      {composer}
     </section>
   );
 }
@@ -214,7 +223,7 @@ function NextStepRail({
                 if (action.task) onNavigate(action.task);
               }}
               className={cn(
-                'group inline-flex h-11 min-[769px]:h-9 min-w-0 items-center justify-center gap-2 rounded-[10px] border px-3 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 motion-reduce:transition-none sm:min-w-[154px]',
+                'group inline-flex h-11 min-[769px]:h-9 min-w-0 items-center justify-center gap-2 rounded-[10px] border px-3 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 motion-reduce:transition-none sm:min-w-[154px]',
                 isPrimary
                   ? 'border-[#F2CCD7] bg-[#FFF0F4] text-[#B4234D] hover:border-[#EBAFC0] hover:bg-[#FFE8EF]'
                   : 'border-[#DDE5F1] bg-[#F7FAFF] text-[#475467] hover:border-[#C7D6EA] hover:bg-[#EEF6FF]',
@@ -274,17 +283,17 @@ export function StockResearchTable({
                   selected ? 'bg-[#FFF1F5]' : 'bg-white hover:bg-[#FBF9FC]',
                 )}
               >
-                <td className={cn('px-3 py-2.5', selected ? 'shadow-[inset_3px_0_0_#EA1F59]' : '')}>
+                <td className={cn('px-3 py-2.5', selected ? 'shadow-[inset_3px_0_0_#FF0061]' : '')}>
                   <button
                     type="button"
                     aria-label={`查看${row.name}研究详情`}
                     title={row.note || `查看 ${row.name} 研究详情`}
                     aria-current={selected ? 'true' : undefined}
                     onClick={() => onSelect(row.symbol)}
-                    className="flex min-w-0 items-center gap-2.5 text-left transition hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25"
+                    className="flex min-w-0 items-center gap-2.5 text-left transition hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25"
                   >
                     {selected ? (
-                      <CircleDot className="h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
+                      <CircleDot className="h-4 w-4 shrink-0 text-[#FF0061]" aria-hidden />
                     ) : (
                       <Circle className="h-4 w-4 shrink-0 text-[#C9C5D1]" aria-hidden />
                     )}
@@ -339,56 +348,8 @@ export function StockMarketContextLayout({
   marketTable: React.ReactNode;
   starStocks: React.ReactNode;
 }): JSX.Element {
-  const [expanded, setExpanded] = React.useState(false);
-  return (
-    <section
-      aria-labelledby="stock-market-context-title"
-      className="min-w-0 rounded-[18px] border border-[#E8E1EC] bg-[#FFFDFB] p-3.5 shadow-[0_10px_28px_rgba(91,70,118,0.045)]"
-    >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="px-0.5">
-          <h2
-            id="stock-market-context-title"
-            className="text-[15px] font-semibold tracking-[-0.015em] text-[#3E3154]"
-          >
-            市场背景
-          </h2>
-          <p className="mt-1 text-[11px] text-[#7D718A]">
-            需要横向参照时再展开，不打断当前研究任务
-          </p>
-        </div>
-        <button
-          type="button"
-          aria-label={expanded ? '收起市场背景' : '展开市场背景'}
-          title={expanded ? '收起市场背景' : '展开市场背景'}
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-          className="inline-flex h-11 min-[769px]:h-8 shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-[#DED5E6] bg-[#F8F5FC] px-3 text-[11px] font-medium text-[#6B587D] transition hover:border-[#CDBCD8] hover:bg-[#F2EBF8] motion-reduce:transition-none"
-        >
-          {expanded ? '收起资料' : '查看市场资料'}
-          <ChevronDown
-            className={cn(
-              'h-3.5 w-3.5 transition-transform motion-reduce:transition-none',
-              expanded ? 'rotate-180' : '',
-            )}
-            aria-hidden
-          />
-        </button>
-      </div>
-      {expanded ? (
-        <div className="mt-4 space-y-4 border-t border-[#EFEAF2] pt-4">
-          <div className="min-w-0">{discovery}</div>
-          <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="min-w-0 [&>section]:h-full">{temperature}</div>
-            <div className="min-w-0 [&>section]:h-full">{sectors}</div>
-            <div className="min-w-0 [&>section]:h-full">{leaderboard}</div>
-          </div>
-          <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="min-w-0">{marketTable}</div>
-            <div className="min-w-0">{starStocks}</div>
-          </div>
-        </div>
-      ) : null}
-    </section>
-  );
+  return <div className="hd-stock-context">
+    <section id="stock-news" aria-label="新闻与公告"><header className="hd-stock-section-heading"><span>NEWSROOM</span><h2>新闻与公告</h2><p>先看与你关注的股票相关的变化</p></header>{discovery}</section>
+    <section id="stock-panorama" aria-label="市场全景"><header className="hd-stock-section-heading"><span>MARKET</span><h2>市场全景</h2><p>把个股放回市场背景里看</p></header><div className="hd-market-panorama-grid"><div>{temperature}</div><div>{sectors}</div><div>{leaderboard}</div><div>{marketTable}</div></div><div>{starStocks}</div></section>
+  </div>;
 }

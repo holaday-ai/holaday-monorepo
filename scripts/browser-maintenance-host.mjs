@@ -1,3 +1,4 @@
+import { checkHostAkshare } from './akshare-production-gate.mjs';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants, realpathSync } from 'node:fs';
@@ -28,7 +29,7 @@ const same = (a, b) =>
   a.bootId === b?.bootId;
 const rootFor = (candidate) => `/opt/holaday-releases/${candidate}`;
 const stable = (error) =>
-  /^(MAINTENANCE_[A-Z_]+|LEGACY_DRAIN_UNSUPPORTED)$/.test(error?.message)
+  /^(MAINTENANCE_[A-Z_]+|AKSHARE_[A-Z_]+|LEGACY_DRAIN_UNSUPPORTED)$/.test(error?.message)
     ? error.message
     : 'MAINTENANCE_RELEASE_FAILED';
 
@@ -327,6 +328,7 @@ export function createHostReleaseAdapter(options, io = system) {
     return { attempt: current.attempt, candidate, configDigest, migrationDigest, inventoryDigest };
   };
   const readiness = async (identity, serviceOnly = false) => {
+    await checkHostAkshare(io.exec);
     await assertEvidenceOwnership();
     assertEvidenceWindow();
     const context = {
@@ -390,6 +392,7 @@ export function createHostReleaseAdapter(options, io = system) {
     preflight: async (identity) => {
       if (!same(identity, oldIdentity) || candidate === oldIdentity.candidate)
         throw new Error('MAINTENANCE_IDENTITY_MISMATCH');
+      await checkHostAkshare(io.exec);
       if (
         ![
           'readWindow',

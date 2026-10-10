@@ -26,8 +26,9 @@ import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { type TaskFile, taskFiles } from '../db/schema/task-files.js';
 import { tasks } from '../db/schema/tasks.js';
-import type { StorageProvider } from './storage-provider.js';
-import { deleteStorageObjectForClosure, getSharedStorageProvider } from './storage-provider.js';
+import { users } from '../db/schema/users.js';
+import type { StorageProvider, StorageReadOptions } from './storage-provider.js';
+import { R2StorageProvider, deleteStorageObjectForClosure, getSharedStorageProvider } from './storage-provider.js';
 
 export type FileKind = 'input' | 'output';
 
@@ -713,7 +714,7 @@ export class FileService {
     if (row.status !== 'pending' || (row.expiresAt && row.expiresAt <= new Date())) {
       return { status: 'not_found' };
     }
-    const meta = await this.storage.stat(row.storagePath);
+    const meta = await this.storage.stat(row.storagePath, ...(await this.legacyReadOwnerArgs(row)));
     if (!meta || meta.sizeBytes <= 0) return { status: 'not_uploaded' };
     if (meta.sizeBytes > MAX_CLIENT_VIDEO_EXPORT_BYTES) return { status: 'too_large' };
     if (meta.contentType && meta.contentType.split(';', 1)[0]?.trim() !== 'video/mp4') {
@@ -777,7 +778,7 @@ export class FileService {
       .where(eq(taskFiles.externalId, opts.fileExternalId))
       .limit(1);
     if (!row || row.userId !== opts.userIdInternal) return { ok: false, reason: 'not_found' };
-    const meta = await this.storage.stat(row.storagePath);
+    const meta = await this.storage.stat(row.storagePath, ...(await this.legacyReadOwnerArgs(row)));
     if (!meta) return { ok: false, reason: 'not_uploaded' };
     // Cap is derived from the STORED mime/filename (what actually landed),
     // not anything the client re-sends at confirm time.
@@ -1114,7 +1115,7 @@ export class FileService {
   ): Promise<string | null> {
     const row = await this.readableRowForUser(fileExternalId, userIdInternal);
     if (!row) return null;
-    return this.storage.getSignedUrl(row.storagePath, { expiresInSeconds });
+    return this.storage.getSignedUrl(row.storagePath, { ...(await this.legacyReadOwnerArgs(row))[0], expiresInSeconds });
   }
 
   /**
@@ -1137,6 +1138,7 @@ export class FileService {
     if (!row) return null;
     const boundedTtlSeconds = Math.min(3_600, Math.max(60, Math.floor(ttlSeconds)));
     const signedUrl = await this.storage.getSignedUrl(row.storagePath, {
+      ...(await this.legacyReadOwnerArgs(row))[0],
       expiresInSeconds: boundedTtlSeconds,
     });
     return {
@@ -1144,6 +1146,18 @@ export class FileService {
       expiresAt: new Date(Date.now() + boundedTtlSeconds * 1_000),
       delivery: signedUrl ? 'signed' : 'authenticated',
     };
+  }
+
+  /** Bind legacy R2 reads to the database owner, not a user segment in the path. */
+  private async legacyReadOwnerArgs(row: TaskFile): Promise<[] | [StorageReadOptions]> {
+    if (!(this.storage instanceof R2StorageProvider) || !row.storagePath.startsWith('/')) return [];
+    const [owner] = await this.db
+      .select({ externalId: users.externalId })
+      .from(users)
+      .where(eq(users.id, row.userId))
+      .limit(1);
+    if (!owner?.externalId) throw new Error('Storage file owner unavailable');
+    return [{ ownerExternalId: owner.externalId }];
   }
 
   private async readableRowForUser(
@@ -1158,7 +1172,7 @@ export class FileService {
     if (!row || row.userId !== userIdInternal) return null;
     if (row.status !== 'active') return null;
     if (row.expiresAt && row.expiresAt < new Date()) return null;
-    const meta = await this.storage.stat(row.storagePath);
+    const meta = await this.storage.stat(row.storagePath, ...(await this.legacyReadOwnerArgs(row)));
     return meta ? row : null;
   }
 
@@ -1201,7 +1215,7 @@ export class FileService {
     if (row.userId !== userIdInternal) return null;
     if (row.status !== 'active') return null;
     if (row.expiresAt && row.expiresAt < new Date()) return null;
-    const buffer = await this.storage.get(row.storagePath);
+    const buffer = await this.storage.get(row.storagePath, ...(await this.legacyReadOwnerArgs(row)));
     if (!buffer) return null;
     return { row, buffer };
   }
@@ -1228,7 +1242,7 @@ export class FileService {
       if (row.userId !== userIdInternal) continue;
       if (row.status !== 'active') continue;
       if (row.expiresAt && row.expiresAt < new Date()) continue;
-      const buffer = await this.storage.get(row.storagePath);
+      const buffer = await this.storage.get(row.storagePath, ...(await this.legacyReadOwnerArgs(row)));
       if (buffer) {
         out.push({ row, buffer });
       } else {

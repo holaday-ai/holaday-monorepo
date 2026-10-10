@@ -1,3 +1,4 @@
+import { browserReplayRouter } from './routers/browser-replay.js';
 import { accountClosureRouter } from './routers/account-closure.js';
 import { adminRouter } from './routers/admin.js';
 import { apiKeysRouter } from './routers/api-keys.js';
@@ -10,6 +11,7 @@ import { feedbackRouter } from './routers/feedback.js';
 import { filesRouter } from './routers/files.js';
 import { llmCallsRouter } from './routers/llm-calls.js';
 import { memoryRouter } from './routers/memory.js';
+import { modelsRouter } from './routers/models.js';
 import { notificationChannelsRouter, notificationsRouter } from './routers/notifications.js';
 import { organizationsRouter } from './routers/organizations.js';
 import { partnerRouter } from './routers/partner.js';
@@ -19,8 +21,10 @@ import { projectsRouter } from './routers/projects.js';
 import { quotaRouter } from './routers/quota.js';
 import { rolesRouter } from './routers/roles.js';
 import { scheduledTasksRouter } from './routers/scheduled-tasks.js';
+import { selfCheckRouter } from './routers/self-check.js';
 import { skillsRouter } from './routers/skills.js';
 import { stocksRouter } from './routers/stocks.js';
+import { taskRecoveryRouter } from './routers/task-recovery.js';
 import { tasksRouter } from './routers/tasks.js';
 import { teamTasksRouter } from './routers/team-tasks.js';
 import { usageRouter } from './routers/usage.js';
@@ -30,6 +34,7 @@ import { watchlistsRouter } from './routers/watchlists.js';
 import { publicProcedure, router } from './trpc.js';
 
 export const appRouter = router({
+  browserReplay: browserReplayRouter,
   health: publicProcedure.query(() => ({
     status: 'ok' as const,
     time: new Date().toISOString(),
@@ -39,6 +44,7 @@ export const appRouter = router({
   energy: energyRouter,
   auth: authRouter,
   tasks: tasksRouter,
+  taskRecovery: taskRecoveryRouter,
   teamTasks: teamTasksRouter,
   llmCalls: llmCallsRouter,
   feedback: feedbackRouter,
@@ -61,6 +67,8 @@ export const appRouter = router({
   notificationChannels: notificationChannelsRouter,
   partner: partnerRouter,
   admin: adminRouter,
+  models: modelsRouter,
+  selfCheck: selfCheckRouter,
   watchlists: watchlistsRouter,
   videoOnboarding: videoOnboardingRouter,
   videoEditing: videoEditingRouter,

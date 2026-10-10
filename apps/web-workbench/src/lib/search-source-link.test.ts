@@ -39,3 +39,12 @@ describe('buildSearchSourceLink', () => {
     expect(buildSearchSourceLink('   ')).toBeNull();
   });
 });
+
+// Exact hosts and genuine subdomains only; lookalikes retain their actual host label.
+import { sourcePublisherName } from './search-source-link';
+it('names known publishers without trusting lookalike hosts', () => {
+  expect(sourcePublisherName('finance.eastmoney.com')).toBe('东方财富');
+  expect(sourcePublisherName('eastmoney.com')).toBe('东方财富');
+  expect(sourcePublisherName('eastmoney.com.evil.test')).toBe('eastmoney.com.evil.test');
+  expect(sourcePublisherName('fake-eastmoney.com')).toBe('fake-eastmoney.com');
+});

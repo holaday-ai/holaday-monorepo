@@ -1,3 +1,4 @@
+import { stockResearchIntent, type StockResearchDraft } from '@/components/stocks/ApprovedStockComposer';
 import {
   ArrowRight,
   Bell,
@@ -25,6 +26,7 @@ import {
 import type { StockScreeningViewState } from '@/components/stocks/StockScreeningWorkbench';
 import {
   StockMarketContextLayout,
+  type StockWorkspaceTask,
   StockResearchTable,
   StockTaskWorkspaceLayout,
 } from '@/components/stocks/StockWorkbenchLayout';
@@ -217,6 +219,7 @@ export function StockTasksPage(): JSX.Element {
   });
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [prompt, setPrompt] = React.useState('');
+  const [workspaceTask, setWorkspaceTask] = React.useState<StockWorkspaceTask>('watchlist');
   const [loadingDashboard, setLoadingDashboard] = React.useState(true);
   const [refreshingDashboard, setRefreshingDashboard] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
@@ -623,7 +626,7 @@ export function StockTasksPage(): JSX.Element {
   }, [loadPageData, resetDiscoveryExtensions, toast, watchlistSaving]);
 
   const submitPrompt = React.useCallback(
-    async (value: string) => {
+    async (value: string, draft?: StockResearchDraft) => {
       const trimmed = value.trim();
       if (!trimmed || submitting) return;
       if (stockPromptUnavailable) {
@@ -635,7 +638,9 @@ export function StockTasksPage(): JSX.Element {
         return;
       }
       setSubmitting(true);
-      const result = await createStockTask(trimmed, stockTaskContext);
+      const fileIds = draft?.attachments.map(file => file.fileId) ?? [];
+      const intent = stockResearchIntent(trimmed, draft);
+      const result = fileIds.length ? await createStockTask(intent, stockTaskContext, fileIds) : draft?.changed ? await createStockTask(intent, stockTaskContext) : await createStockTask(trimmed, stockTaskContext);
       setSubmitting(false);
       if ('taskId' in result) {
         navigate(`/?task=${encodeURIComponent(result.taskId)}`);
@@ -661,18 +666,19 @@ export function StockTasksPage(): JSX.Element {
   }, [briefingBusy, briefingUnavailable, enabled, loadingDashboard]);
 
   return (
-    <div className="min-h-full bg-[#FFFCFA] text-[#25233A]">
+    <div className="hd-stocks-page min-h-full bg-[#FFFCFA] text-[#25233A]">
       <div
         data-stock-mobile-chrome=""
         aria-hidden
         className="pointer-events-none fixed inset-x-0 top-0 z-[35] h-12 border-b border-[#EFE7F1] bg-[#FFFCFA]/95 shadow-[0_2px_12px_rgba(103,75,121,0.06)] backdrop-blur-xl min-[769px]:hidden"
       />
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-3 px-4 pb-5 pt-14 sm:gap-4 sm:px-5 min-[769px]:pt-4 lg:px-6">
+      <div className="hd-stock-scroll mx-auto flex w-full max-w-[1440px] flex-col gap-3 px-4 pb-5 pt-14 sm:gap-4 sm:px-5 min-[769px]:pt-4 lg:px-6">
         <header className="flex flex-col gap-3 border-b border-[#EFE7F1] pb-3 min-[769px]:pr-[12rem] md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-[22px] font-semibold tracking-[-0.025em] text-[#3E3154]">
               股市任务
             </h1>
+            <p className="hd-stock-heading-description">关注变化，也看清变化的背景。</p>
             <span
               className={cn(
                 'inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-medium',
@@ -694,7 +700,7 @@ export function StockTasksPage(): JSX.Element {
               type="button"
               onClick={() => void loadPageData('manual')}
               disabled={refreshingDashboard || loadingDashboard}
-              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#FF0061]/30 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <RefreshCw className={cn('h-3.5 w-3.5', refreshingDashboard || loadingDashboard ? 'animate-spin' : '')} aria-hidden />
               刷新
@@ -704,7 +710,7 @@ export function StockTasksPage(): JSX.Element {
               onClick={toggleBriefing}
               disabled={briefingBusy || loadingDashboard || briefingUnavailable}
               title={briefingUnavailableTitle}
-              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#FF0061]/30 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {briefingBusy ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -719,7 +725,7 @@ export function StockTasksPage(): JSX.Element {
         </header>
 
         {loadError ? (
-          <div className="rounded-[8px] border border-[#EA1F59]/25 bg-white px-4 py-3 text-[13px] text-[#EA1F59]">
+          <div className="rounded-[8px] border border-[#FF0061]/25 bg-white px-4 py-3 text-[13px] text-[#FF0061]">
             部分股票数据暂时无法加载：{loadError}
           </div>
         ) : null}
@@ -729,37 +735,20 @@ export function StockTasksPage(): JSX.Element {
           </div>
         ) : null}
 
-        <StockAiCommandComposer
-          value={prompt}
-          placeholder={temporalCopy.promptPlaceholder}
-          assistantStatus={temporalCopy.assistantStatus}
-          commands={commands}
-          submitting={submitting}
-          submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}
-          onValueChange={setPrompt}
-          onSubmit={() => void submitPrompt(prompt)}
-          onCommand={(command) => {
-            setPrompt(command);
-            if (command === temporalCopy.briefingCommand && dashboardTrust.tone === 'current') {
-              void generateBriefing();
-            }
-            else void submitPrompt(command);
-          }}
-          isCommandDisabled={(command) =>
-            loadingDashboard ||
-            stockPromptUnavailable ||
-            (command === temporalCopy.briefingCommand &&
-              dashboardTrust.tone === 'current' &&
-              briefingUnavailable)}
-          commandTitle={(command) =>
-            command === temporalCopy.briefingCommand ? briefingUnavailableTitle : undefined}
-        />
+        <section className="hd-market-lead" aria-label="市场概览">
+          <div><span className="hd-page-eyebrow">{dashboardTrust.dataDateLabel} / {dashboardTrust.statusLabel}</span><h2>{dashboardTrust.tone === 'unverified' ? '等待行情，先看清来源。' : '关注变化，核对每一个信号。'}</h2><p>{dashboardTrust.refreshLabel}。{sampleWatchlist ? '当前为示例关注列表。' : '以关注列表中的有效报价汇总涨跌，结合新闻、公告与风险证据继续研究。'}</p><div className="hd-market-lead-actions"><button type="button" onClick={() => setWorkspaceTask('risk')}>查看风险证据</button><button type="button" onClick={() => setWorkspaceTask('briefing')}>阅读{temporalCopy.briefingTabLabel}</button></div></div>
+          {stocks.some(stock => stock.price !== '—') && (<div className="hd-market-breadth"><div><strong>{stocks.some(stock => stock.price !== '—') ? stocks.filter(stock => stock.price !== '—' && stock.changePct > 0).length : '—'}</strong><span>关注股上涨</span></div><div><strong>{stocks.some(stock => stock.price !== '—') ? stocks.filter(stock => stock.price !== '—' && stock.changePct < 0).length : '—'}</strong><span>关注股回落</span></div><small>{sampleWatchlist ? '示例关注列表' : '仅统计已有报价的关注股'}</small></div>)}
+        </section>
+        {marketIndices.length > 0 && <section className="hd-market-index-strip" aria-label="市场指数">{marketIndices.map(index => <button key={index.name} type="button" onClick={() => setInsightSheet(marketInsight(marketIndices, dashboardTrust.tone))}><span>{index.name}</span><strong>{index.price}</strong><small data-up={index.changePct > 0}>{index.changePct > 0 ? '+' : ''}{index.changePct.toFixed(2)}%</small></button>)}</section>}
+
+
+
 
         {initialDashboardLoading ? (
           <InitialDashboardSkeleton />
         ) : (
           <div className="min-w-0 space-y-5">
-            <StockTaskWorkspaceLayout
+            <StockTaskWorkspaceLayout activeTask={workspaceTask} onTaskChange={setWorkspaceTask}
               briefingLabel={temporalCopy.briefingTabLabel}
               highlights={<MarketHighlights
                 stocks={stocks}
@@ -820,6 +809,39 @@ export function StockTasksPage(): JSX.Element {
                 temporalCopy={temporalCopy}
                 temporalMode={dashboardTrust.tone}
               />}
+              composer={
+        <div className="hd-stock-dock">
+        <StockAiCommandComposer
+          approved
+          researchStocks={sampleWatchlist ? [] : stocks.map(stock=>({symbol:stock.symbol,name:stock.name}))}
+          dataDateLabel={dashboardTrust.dataDateLabel}
+          onManageWatchlist={() => setWatchlistSheetOpen(true)}
+          value={prompt}
+          placeholder={temporalCopy.promptPlaceholder}
+          assistantStatus={temporalCopy.assistantStatus}
+          commands={commands}
+          submitting={submitting}
+          submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}
+          onValueChange={setPrompt}
+          onSubmit={draft => void submitPrompt(prompt, draft)}
+          onCommand={(command) => {
+            setPrompt(command);
+            if (command === temporalCopy.briefingCommand && dashboardTrust.tone === 'current') {
+              void generateBriefing();
+            }
+            else void submitPrompt(command);
+          }}
+          isCommandDisabled={(command) =>
+            loadingDashboard ||
+            stockPromptUnavailable ||
+            (command === temporalCopy.briefingCommand &&
+              dashboardTrust.tone === 'current' &&
+              briefingUnavailable)}
+          commandTitle={(command) =>
+            command === temporalCopy.briefingCommand ? briefingUnavailableTitle : undefined}
+        />
+        </div>
+              }
               screeningView={screeningView}
             />
             <StockMarketContextLayout
@@ -869,6 +891,7 @@ export function StockTasksPage(): JSX.Element {
           <span>仅供信息分析，不构成投资建议</span>
           <span>数据来源：AkShare / Holaday 分析层 · {dashboardTrust.dataDateLabel} · {dashboardTrust.refreshLabel}</span>
         </footer>
+
       </div>
       <WatchlistManagerSheet
         open={watchlistSheetOpen}
@@ -1040,7 +1063,7 @@ function DiscoveryPanel({
               className={cn(
                 'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12px] font-medium transition',
                 activeFeed === tab.label
-                  ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                  ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
                   : 'border-[#E1E3E8] bg-white text-[#667085] hover:border-[#C9CDD6] hover:text-[#121826]',
                 tab.count === 0 && 'cursor-not-allowed opacity-45',
               )}
@@ -1048,7 +1071,7 @@ function DiscoveryPanel({
               {tab.label}
               <span className={cn(
                 'tabular-nums',
-                activeFeed === tab.label ? 'text-[#EA1F59]/80' : 'text-[#8B92A1]',
+                activeFeed === tab.label ? 'text-[#FF0061]/80' : 'text-[#8B92A1]',
               )}>
                 {tab.count}
               </span>
@@ -1079,7 +1102,7 @@ function DiscoveryPanel({
             type="button"
             onClick={goPrevious}
             disabled={safePage === 0}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="上一页动态"
             title="上一页"
           >
@@ -1090,7 +1113,7 @@ function DiscoveryPanel({
               type="button"
               onClick={() => void requestMore()}
               disabled={loadingMore}
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[#E7E7EB] bg-white px-3 text-[12px] font-medium text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[#E7E7EB] bg-white px-3 text-[12px] font-medium text-[#667085] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
               {loadingMore ? '正在加载' : '加载更多'}
@@ -1119,7 +1142,7 @@ function DiscoveryPanel({
             type="button"
             onClick={goNext}
             disabled={(safePage >= pageCount - 1 && !hasMore) || loadingMore}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="下一页动态"
             title="下一页"
           >
@@ -1186,7 +1209,7 @@ function MarketHighlights({
             <button
               type="button"
               onClick={onEdit}
-              className="inline-flex h-9 shrink-0 items-center justify-center rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59]"
+              className="inline-flex h-9 shrink-0 items-center justify-center rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[12px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/25 hover:text-[#FF0061]"
             >
               管理关注
             </button>
@@ -1225,7 +1248,7 @@ function MarketHighlights({
               <button
                 type="button"
                 onClick={onEdit}
-                className="inline-flex h-11 min-[769px]:h-8 items-center rounded-[7px] px-2 text-[10px] font-semibold text-[#7A5A8E] transition hover:bg-[#F8F3FA] hover:text-[#C9184A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 motion-reduce:transition-none"
+                className="inline-flex h-11 min-[769px]:h-8 items-center rounded-[7px] px-2 text-[10px] font-semibold text-[#7A5A8E] transition hover:bg-[#F8F3FA] hover:text-[#C9184A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 motion-reduce:transition-none"
               >
                 管理列表
               </button>
@@ -1396,7 +1419,7 @@ function StockHighlightCard({
                 type="button"
                 disabled={!canGenerateBriefing || briefingGenerating}
                 onClick={onGenerateBriefing}
-                className="mt-2 inline-flex h-11 min-[769px]:h-8 items-center justify-center rounded-[7px] border border-[#EA1F59]/20 bg-[#EA1F59]/10 px-2.5 text-[12px] font-medium text-[#EA1F59] transition hover:border-[#EA1F59]/40 hover:bg-[#EA1F59]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
+                className="mt-2 inline-flex h-11 min-[769px]:h-8 items-center justify-center rounded-[7px] border border-[#FF0061]/20 bg-[#FF0061]/10 px-2.5 text-[12px] font-medium text-[#FF0061] transition hover:border-[#FF0061]/40 hover:bg-[#FF0061]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
               >
                 {briefingGenerating ? '生成中…' : temporalCopy.briefingCommand}
               </button>
@@ -1616,7 +1639,7 @@ function WatchlistManagerSheet({
             <button
               type="submit"
               disabled={!canAdd}
-              className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-[8px] bg-[#EA1F59] px-3 text-[13px] font-semibold text-white shadow-[0_10px_24px_rgba(234,31,89,0.18)] transition disabled:cursor-not-allowed disabled:opacity-55"
+              className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-[8px] bg-[#FF0061] px-3 text-[13px] font-semibold text-white shadow-[0_10px_24px_rgba(255,0,97,0.18)] transition disabled:cursor-not-allowed disabled:opacity-55"
             >
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Plus className="h-3.5 w-3.5" aria-hidden />}
               {duplicateSymbol ? '已在关注列表' : '添加关注'}
@@ -1688,7 +1711,7 @@ function WatchlistManagerSheet({
                         type="button"
                         disabled={saving || !changed}
                         onClick={() => onUpdate(row.symbol, draft.displayName, draft.note)}
-                        className="inline-flex h-8 items-center justify-center rounded-[8px] border border-[#E1E3E8] px-2 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-8 items-center justify-center rounded-[8px] border border-[#E1E3E8] px-2 text-[12px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/30 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         保存
                       </button>
@@ -1696,7 +1719,7 @@ function WatchlistManagerSheet({
                         type="button"
                         disabled={saving}
                         onClick={() => onRemove(row.symbol)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E1E3E8] text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E1E3E8] text-[#667085] transition hover:border-[#FF0061]/30 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
                         aria-label={`移除 ${row.symbol}`}
                         title={`移除 ${row.symbol}`}
                       >
@@ -1899,13 +1922,13 @@ function DailyBriefing({
       {briefing ? (
         <div className="mt-4 rounded-[8px] border border-[#ECEEF3] bg-[#FCFCFD] px-4 py-3">
           <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-[#121826]">
-            <FileText className="h-3.5 w-3.5 text-[#EA1F59]" aria-hidden />
+            <FileText className="h-3.5 w-3.5 text-[#FF0061]" aria-hidden />
             {briefing.title} · {formatUpdateTime(briefing.generatedAt)}
           </div>
           <ul className="space-y-1.5">
             {previewLines.map((line) => (
               <li key={line} className="flex gap-2 text-[12px] leading-relaxed text-[#344054]">
-                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#EA1F59]" />
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#FF0061]" />
                 <span>{line}</span>
               </li>
             ))}
@@ -2128,7 +2151,7 @@ function MarketTemperature({
       <div className="mt-4 flex items-center gap-4">
         <div className="relative h-[118px] w-[118px] shrink-0">
           <div className="absolute inset-0 rounded-full border-[11px] border-[#E8EBF0]" />
-          <div className="absolute inset-0 rounded-full border-[11px] border-transparent border-l-[#18A76F] border-t-[#E0B30C] border-r-[#EA1F59] rotate-45" />
+          <div className="absolute inset-0 rounded-full border-[11px] border-transparent border-l-[#18A76F] border-t-[#E0B30C] border-r-[#FF0061] rotate-45" />
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <div className="text-[34px] font-semibold tabular-nums text-[#121826]">{score}</div>
             <div className="text-[12px] font-medium text-[#4F5868]">{mood}</div>
@@ -2176,7 +2199,7 @@ function Leaderboard({
             className={cn(
               'border-b-2 px-0.5 pb-2 text-[12px] font-medium transition-colors',
               active === tab.label
-                ? 'border-[#EA1F59] text-[#EA1F59]'
+                ? 'border-[#FF0061] text-[#FF0061]'
                 : 'border-transparent text-[#667085] hover:text-[#121826]',
               !tab.enabled && 'cursor-not-allowed opacity-45 hover:text-[#667085]',
             )}
@@ -2197,7 +2220,7 @@ function Leaderboard({
             <span
               className={cn(
                 'flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold',
-                leader.rank <= 3 ? 'bg-[#EA1F59] text-white' : 'bg-[#F2F3F6] text-[#667085]',
+                leader.rank <= 3 ? 'bg-[#FF0061] text-white' : 'bg-[#F2F3F6] text-[#667085]',
               )}
             >
               {leader.rank}
@@ -2217,7 +2240,7 @@ function Leaderboard({
         type="button"
         onClick={onInspect}
         disabled={leaders.length === 0}
-        className="mt-3 inline-flex w-full items-center justify-center gap-1 border-t border-[#F1F2F5] pt-3 text-[12px] font-medium text-[#4F5868] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+        className="mt-3 inline-flex w-full items-center justify-center gap-1 border-t border-[#F1F2F5] pt-3 text-[12px] font-medium text-[#4F5868] hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
       >
         查看全部榜单
         <ChevronRight className="h-3.5 w-3.5" aria-hidden />
@@ -2254,7 +2277,7 @@ function SectionHeader({
           type="button"
           onClick={onAction}
           disabled={actionDisabled || actionBusy || !onAction}
-          className="inline-flex h-11 min-[769px]:h-8 shrink-0 items-center gap-1 rounded-[8px] px-2 text-[12px] font-medium text-[#4F5868] transition-colors hover:bg-[#FFF5F7] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none"
+          className="inline-flex h-11 min-[769px]:h-8 shrink-0 items-center gap-1 rounded-[8px] px-2 text-[12px] font-medium text-[#4F5868] transition-colors hover:bg-[#FFF5F7] hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none"
         >
           {actionBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
           {action}
@@ -2314,7 +2337,7 @@ function BriefingLane({
   }[tone];
   const bulletClass = {
     green: 'bg-[#0E9F6E]',
-    red: 'bg-[#EA1F59]',
+    red: 'bg-[#FF0061]',
     blue: 'bg-[#175CD3]',
   }[tone];
   return (

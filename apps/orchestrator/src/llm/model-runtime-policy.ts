@@ -42,6 +42,10 @@ export function parseCoreModelLaneCsv(value: string): CoreModelLane[] {
   return [...new Set(lanes)] as CoreModelLane[];
 }
 
+/**
+ * Retained for callers that want the historical check. The model catalog now
+ * decides which brain runs, so startup and task resolution no longer call it.
+ */
 export function assertProductionModelRuntimePolicy(
   nodeEnv: NodeEnvironment,
   policy: ModelRuntimePolicy,
@@ -58,7 +62,11 @@ export function resolveCoreModelLaneAccess(input: {
   actorExternalId: string;
   lane: CoreModelLane;
 }): CoreModelLaneAccess {
-  const enabledLanes = new Set(parseCoreModelLaneCsv(input.enabledLanes));
+  // Qwen lanes are on by default. The env can only narrow them (emergency off):
+  // an empty lane list means every lane, a non-empty list keeps only those.
+  const enabledLanes: ReadonlySet<string> = input.enabledLanes.trim()
+    ? new Set(parseCoreModelLaneCsv(input.enabledLanes))
+    : CORE_MODEL_LANE_SET;
   if (input.mode === 'off' || !enabledLanes.has(input.lane)) {
     return { kind: 'unavailable', reason: 'LANE_DISABLED' };
   }

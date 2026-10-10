@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 const { createMessage } = vi.hoisted(() => ({ createMessage: vi.fn() }));
 vi.mock('@anthropic-ai/sdk', () => ({
   default: class {
@@ -94,6 +94,16 @@ function qwenTransport(fetchImpl: typeof fetch) {
 }
 
 describe('Supercar browser ownership checkpoints', () => {
+  // These cover the legacy coordinate loop behind the production entry; the
+  // default executor is unified since batch 08, so pin the rollback mode.
+  const executorBefore = env.BROWSER_EXECUTOR;
+  beforeAll(() => {
+    Object.assign(env, { BROWSER_EXECUTOR: 'legacy' });
+  });
+  afterAll(() => {
+    Object.assign(env, { BROWSER_EXECUTOR: executorBefore });
+  });
+
   it.each([
     { provider: 'qwen', coordinate: [500, 500], pixels: [640, 360] },
     { provider: 'anthropic', coordinate: [500, 500], pixels: [500, 500] },
@@ -298,6 +308,13 @@ describe('Supercar browser ownership checkpoints', () => {
     });
     expect(click).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(bodies[1])).toContain('viewport changed');
+  });
+
+  it('shows a safe authentication reason without the provider body', async () => {
+    const adapter = qwenTransport(async () => { throw new Error('unused'); });
+    adapter.create = async () => { throw new MessagesAdapterError('PROVIDER_ERROR', 'private provider body', 401); };
+    const result = await runProductionBrowser({ taskId: 'qwen-auth', intent: '核对网页', messagesAdapter: adapter, executor: fixture(async () => {}).executor });
+    expect(result).toMatchObject({ status: 'failed', reason: '模型服务认证失败，请联系管理员检查服务配置。' });
   });
 
   it('classifies Qwen transport timeout as timeout rather than generic failure', async () => {

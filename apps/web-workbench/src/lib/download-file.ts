@@ -164,7 +164,7 @@ export function downloadFailureMessage(status: number | null): string {
     return '下载失败，请刷新页面后重试。';
   }
   if (isUnavailableFileStatus(status)) {
-    return '文件已失效，无法下载。';
+    return '文件已不可用';
   }
   return '下载失败，或链接已过期。';
 }

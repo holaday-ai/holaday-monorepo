@@ -1,0 +1,87 @@
+[
+  {
+    "id": "be-06",
+    "category": "form",
+    "model": "qwen3.7-plus",
+    "legacy": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 31253,
+      "quota403": false
+    },
+    "unified": {
+      "success": false,
+      "failureClass": "environment",
+      "tokens": 0,
+      "quota403": false
+    }
+  },
+  {
+    "id": "be-10",
+    "category": "form",
+    "model": "qwen3.7-plus",
+    "legacy": {
+      "success": false,
+      "failureClass": "browser",
+      "tokens": 131528,
+      "quota403": false
+    },
+    "unified": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 0,
+      "quota403": false
+    }
+  },
+  {
+    "id": "be-12",
+    "category": "table",
+    "model": "qwen3.7-plus",
+    "legacy": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 4948,
+      "quota403": false
+    },
+    "unified": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 0,
+      "quota403": false
+    }
+  },
+  {
+    "id": "be-14",
+    "category": "table",
+    "model": "qwen3.7-plus",
+    "legacy": {
+      "success": false,
+      "failureClass": "browser",
+      "tokens": 0,
+      "quota403": false
+    },
+    "unified": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 0,
+      "quota403": false
+    }
+  },
+  {
+    "id": "be-15",
+    "category": "table",
+    "model": "qwen3.7-plus",
+    "legacy": {
+      "success": true,
+      "failureClass": "none",
+      "tokens": 5024,
+      "quota403": false
+    },
+    "unified": {
+      "success": false,
+      "failureClass": "model_layer",
+      "tokens": 0,
+      "quota403": false
+    }
+  }
+]

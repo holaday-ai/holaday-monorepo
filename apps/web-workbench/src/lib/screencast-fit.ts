@@ -1,3 +1,4 @@
+import type { BrowserFrameGeometry } from '@holaday/shared-types';
 export interface ScreencastFitInput {
   hostWidth: number;
   hostHeight: number;
@@ -223,4 +224,30 @@ export function mapClientPointToScreencast({
 
 function isPositiveFinite(value: number): boolean {
   return Number.isFinite(value) && value > 0;
+}
+
+interface DisplayRect { left: number; top: number; width: number; height: number }
+export function mapClientPointToBrowserFrame(input: {
+  clientX: number; clientY: number; rect: DisplayRect; frame: BrowserFrameGeometry;
+}): ScreencastPoint | null {
+  const { rect, frame } = input;
+  if (![rect.width,rect.height,frame.cssWidth,frame.cssHeight,frame.imageWidth,frame.imageHeight,frame.pageScaleFactor].every(isPositiveFinite)) return null;
+  const u = (input.clientX - rect.left) / rect.width;
+  const v = (input.clientY - rect.top) / rect.height;
+  if (!Number.isFinite(u) || !Number.isFinite(v) || u < 0 || v < 0 || u >= 1 || v >= 1) return null;
+  // Screencast pixels include compositor page scale. Input coordinates are
+  // unscaled viewport CSS coordinates. Scroll belongs only to document refs.
+  const x = u * frame.cssWidth / frame.pageScaleFactor;
+  const y = (v * frame.cssHeight - frame.offsetTop) / frame.pageScaleFactor;
+  return y < 0 ? null : {x,y};
+}
+export function mapClientPointToFramebuffer(input: {
+  clientX: number; clientY: number; rect: DisplayRect; width: number; height: number;
+}): ScreencastPoint | null {
+  const { rect } = input;
+  if (![rect.width,rect.height,input.width,input.height].every(isPositiveFinite)) return null;
+  const x=(input.clientX-rect.left)*input.width/rect.width;
+  const y=(input.clientY-rect.top)*input.height/rect.height;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x<0 || y<0 || x>=input.width || y>=input.height) return null;
+  return {x,y};
 }

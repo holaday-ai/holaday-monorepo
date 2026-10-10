@@ -91,7 +91,7 @@ export function StockRiskMonitorSheet({
             type="button"
             disabled={pending || !stock}
             onClick={() => void onConfirm()}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-[8px] bg-[#EA1F59] px-4 text-[12px] font-semibold text-white shadow-[0_5px_14px_rgba(234,31,89,0.18)] hover:bg-[#D91B51] disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-[8px] bg-[#FF0061] px-4 text-[12px] font-semibold text-white shadow-[0_5px_14px_rgba(255,0,97,0.18)] hover:bg-[#D91B51] disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
           >
             {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
             {pending ? '正在建立监控' : '确认开始监控'}

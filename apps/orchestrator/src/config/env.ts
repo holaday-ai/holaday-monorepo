@@ -1,10 +1,7 @@
 import { resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
-import {
-  assertProductionModelRuntimePolicy,
-  parseCoreModelLaneCsv,
-} from '../llm/model-runtime-policy.js';
+import { parseCoreModelLaneCsv } from '../llm/model-runtime-policy.js';
 import {
   type ModelDataRegion,
   type QwenProtocol,
@@ -128,6 +125,9 @@ const baseEnvSchema = z.object({
     .default(''),
 
   ANTHROPIC_API_KEY: z.string().optional().default(''),
+  /** Catalog-gated GPT brain (admin "模型管理"). Key and base URL only. */
+  OPENAI_API_KEY: z.string().optional().default(''),
+  OPENAI_BASE_URL: z.string().optional().default(''),
 
   /**
    * Phase 24 RC follow-up — Firecrawl API key. When set, the
@@ -166,6 +166,31 @@ const baseEnvSchema = z.object({
   GEMINI_IMAGE_MODEL_PRO: z.string().default('gemini-3-pro-image'),
   /** Independent multimodal review for final lip-synced video artifacts. */
   GEMINI_VIDEO_REVIEW_MODEL: z.string().default('gemini-3.6-flash'),
+
+  /**
+   * Image lane provider models (capability recovery, 2026-10). The production
+   * image runner routes per task between these; Gemini above stays dormant.
+   * Ids verified against the official docs (see agent/image/image-providers.ts):
+   *   Qwen Image  — help.aliyun.com/zh/model-studio/qwen-image-api (+ -edit-api)
+   *   Wan 2.7     — help.aliyun.com/zh/model-studio/wan-image-generation-and-editing-api-reference
+   *   NB2 on fal  — fal.ai/models/fal-ai/nano-banana-2 (+ /edit)
+   * Both DashScope models use DASHSCOPE_API_KEY / DASHSCOPE_BASE_URL; NB2 uses FAL_KEY.
+   */
+  QWEN_IMAGE_MODEL: z.string().min(1).default('qwen-image-2.0-pro'),
+  WAN_IMAGE_MODEL: z.string().min(1).default('wan2.7-image'),
+  FAL_NANO_BANANA_2_MODEL: z.string().min(1).default('fal-ai/nano-banana-2'),
+  FAL_NANO_BANANA_2_EDIT_MODEL: z.string().min(1).default('fal-ai/nano-banana-2/edit'),
+  /** General-purpose (no poster text, no edit) default image model. */
+  IMAGE_DEFAULT_MODEL: z
+    .enum(['qwen_image', 'wan_image', 'nano_banana_2'])
+    .default('nano_banana_2'),
+  /**
+   * Veo 3.1 via fal (optional normal-video source; replaces the Gemini
+   * Developer API path). Ids from fal.ai/models/fal-ai/veo3.1{,/fast,/lite}.
+   */
+  FAL_VEO_FAST_MODEL: z.string().min(1).default('fal-ai/veo3.1/fast'),
+  FAL_VEO_LITE_MODEL: z.string().min(1).default('fal-ai/veo3.1/lite'),
+  FAL_VEO_STANDARD_MODEL: z.string().min(1).default('fal-ai/veo3.1'),
 
   /**
    * Phase 1 #4 — video creation pipeline (script → Qwen3-TTS-VC voice
@@ -225,25 +250,48 @@ const baseEnvSchema = z.object({
   QWEN_VERIFY_STRICT_MODEL: z.string().min(1).default('qwen3.8-max'),
   QWEN_VISION_MODEL: z.string().min(1).default('qwen3.8-max'),
   MODEL_RUNTIME_POLICY: z.enum(['qwen_only', 'legacy_fixture']).default('qwen_only'),
-  QWEN_CORE_ROLLOUT_MODE: z.enum(['off', 'synthetic', 'internal', 'all']).default('off'),
+  /**
+   * Qwen lanes run by default. QWEN_CORE_ROLLOUT_MODE / QWEN_CORE_ENABLED_LANES /
+   * QWEN_*_ADAPTER_ENABLED are emergency kill switches only: 'off', 'false' or a
+   * narrower lane list can disable lanes; none is a prerequisite for Qwen to work.
+   */
+  QWEN_CORE_ROLLOUT_MODE: z.enum(['off', 'synthetic', 'internal', 'all']).default('all'),
+  /**
+   * Cloud browser executor: 'legacy' = supercar coordinate protocol (default
+   * until the batch-08 eval passes), 'unified' = batch-04 unified tool loop.
+   */
+  // Batch 08 (qwen3.8-max, 30 tasks): unified 85.7% vs legacy 60.7% → default
+  // unified; BROWSER_EXECUTOR=legacy is the rollback to the coordinate loop.
+  BROWSER_OBSERVATION_V2: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
+  BROWSER_REPLAY_V1: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
+  BROWSER_EXECUTOR: z.enum(['legacy', 'unified']).default('unified'),
+  BROWSER_SESSION_IMPORT_V2: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  BROWSER_PROFILE_PERSIST_V1: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  BROWSER_VIEWPORT_V2: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   QWEN_CORE_ENABLED_LANES: z.string().default(''),
   QWEN_CORE_ALLOWLIST: z.string().default(''),
   QWEN_RESPONSES_ADAPTER_ENABLED: z
     .enum(['true', 'false'])
-    .default('false')
+    .default('true')
     .transform((value) => value === 'true'),
   /** Synthetic benchmark lane only. It is not wired to production task execution. */
   QWEN_SHADOW_EVAL_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
-  /**
-   * Provider-neutral Messages/Tools adapter construction gate. Each production
-   * callsite also requires its own disabled-by-default canary and allowlist.
-   */
+  /** Provider-neutral Messages/Tools adapter gate. On by default; 'false' is an emergency off. */
   QWEN_MESSAGES_ADAPTER_ENABLED: z
     .enum(['true', 'false'])
-    .default('false')
+    .default('true')
     .transform((value) => value === 'true'),
   /**
    * Post-task suggestions canary. Both Qwen flags and
@@ -275,12 +323,14 @@ const baseEnvSchema = z.object({
   /** HappyHorse-1.1 文生视频(同 DashScope intl 端点/同 key,仅改 model). */
   HAPPYHORSE_T2V_MODEL: z.string().default('happyhorse-1.1-t2v'),
   /**
-   * 图生视频 i2v (Phase 2 第二期 宠物视频). 同 DashScope video-synthesis 端点,
-   * input.img_url 走单图. 默认 wan2.2-i2v-flash(更省 + 已证同 intl 端点/key);
+   * 图生视频 i2v (Phase 2 第二期 宠物视频). 同 DashScope video-synthesis 端点.
+   * 默认 wan2.7-i2v(Wan 2.7 首帧生视频, input.media[{type:'first_frame'}],
+   * 来源 help.aliyun.com/zh/model-studio/image-to-video-general-api-reference);
+   * 旧 wan2.2-i2v-flash 仍可经 env 指回(img_url 协议).
    * happyhorse-1.0-i2v 作高质量可选(⚠️ intl 区可达性未核,examples 用 CN host,
    * 灰度前需 console 核 region). 价表见 video-confirm.ts。
    */
-  WANXIANG_I2V_MODEL: z.string().default('wan2.2-i2v-flash'),
+  WANXIANG_I2V_MODEL: z.string().default('wan2.7-i2v'),
   HAPPYHORSE_I2V_MODEL: z.string().default('happyhorse-1.0-i2v'),
   FAL_LIPSYNC_MODEL: z.literal('fal-ai/sync-lipsync/v3').default('fal-ai/sync-lipsync/v3'),
   /**
@@ -291,6 +341,9 @@ const baseEnvSchema = z.object({
     .enum(['fal-ai/sync-lipsync/v2', 'fal-ai/sync-lipsync/v3'])
     .default('fal-ai/sync-lipsync/v3'),
   QWEN_TTS_VC_MODEL: z.string().default('qwen3-tts-vc-2026-01-22'),
+  VIDEO_REJECT_RETRY_LIMIT: z.coerce.number().int().min(1).max(100).default(3),
+  VIDEO_REJECT_FRAME_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+
   /**
    * Video-creation lane gate. Default OFF — video_creation intents fall
    * through to the generate lane (the model honestly says it can't produce
@@ -610,19 +663,8 @@ const baseEnvSchema = z.object({
 
 export const envSchema = baseEnvSchema
   .superRefine((environment, ctx) => {
-    try {
-      assertProductionModelRuntimePolicy(environment.NODE_ENV, environment.MODEL_RUNTIME_POLICY);
-    } catch (error) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['MODEL_RUNTIME_POLICY'],
-        message:
-          error instanceof Error
-            ? error.message
-            : 'MODEL_RUNTIME_POLICY must be qwen_only in production',
-      });
-    }
-
+    // MODEL_RUNTIME_POLICY no longer blocks startup: the admin model catalog
+    // decides which brain runs (assertProductionModelRuntimePolicy is retained).
     try {
       parseCoreModelLaneCsv(environment.QWEN_CORE_ENABLED_LANES);
     } catch (error) {
@@ -698,6 +740,12 @@ export const envSchema = baseEnvSchema
   })
   .transform((environment) => ({
     ...environment,
+    // Media clients (images, Wanxiang video, voice clone) call the Singapore
+    // DashScope endpoint with DASHSCOPE_API_KEY. That key is the legacy alias of
+    // the intl key (see qwen-route), so an intl-only deployment works for media too.
+    DASHSCOPE_API_KEY: environment.DASHSCOPE_API_KEY || environment.DASHSCOPE_INTL_API_KEY,
+    DASHSCOPE_WORKSPACE_ID:
+      environment.DASHSCOPE_WORKSPACE_ID || environment.DASHSCOPE_INTL_WORKSPACE_ID,
     HOLADAY_PUBLIC_BASE_URL: parseHoladayPublicBaseUrl(
       environment.HOLADAY_PUBLIC_BASE_URL,
       environment.NODE_ENV,

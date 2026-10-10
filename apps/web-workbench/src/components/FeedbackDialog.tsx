@@ -146,14 +146,14 @@ export function FeedbackDialog({ open, onClose, onSubmit }: Props): JSX.Element 
             rows={5}
             maxLength={MAX_FEEDBACK_MESSAGE_LENGTH}
             disabled={pending}
-            className="mt-3 w-full resize-none rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm shadow-none placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
+            className="mt-3 w-full resize-none rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm shadow-none placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:border-white/10 dark:bg-card"
           />
           <div className="mt-1 flex items-center justify-between gap-3">
             <span
               id="feedback-dialog-counter"
               className={cn(
                 'text-[11px] text-muted-foreground',
-                messageState.remaining <= 80 && 'text-[#EA1F59]',
+                messageState.remaining <= 80 && 'text-[#FF0061]',
               )}
             >
               {feedbackCounterLabel(value)}
@@ -175,7 +175,7 @@ export function FeedbackDialog({ open, onClose, onSubmit }: Props): JSX.Element 
             {error && (
               <div
                 role="alert"
-                className="mt-2 rounded-md border border-[#EA1F59]/30 bg-[#EA1F59]/10 px-3 py-2 text-xs text-[#EA1F59]"
+                className="mt-2 rounded-md border border-[#FF0061]/30 bg-[#FF0061]/10 px-3 py-2 text-xs text-[#FF0061]"
               >
                 {error}
               </div>
@@ -194,7 +194,7 @@ export function FeedbackDialog({ open, onClose, onSubmit }: Props): JSX.Element 
             <Button
               type="submit"
               disabled={pending || !messageState.canSubmit}
-              className="bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] hover:bg-[#EA1F59]/90"
+              className="bg-[#FF0061] text-white shadow-[0_4px_12px_rgba(255,0,97,0.16)] hover:bg-[#FF0061]/90"
             >
               {pending ? (
                 <>

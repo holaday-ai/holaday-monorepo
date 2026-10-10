@@ -14,9 +14,9 @@ import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 import type { UiProject } from '@/types/task';
 import type { inferRouterClient } from '@trpc/client';
-import { FolderKanban, RefreshCw } from 'lucide-react';
+import { ChevronLeft, FolderKanban, RefreshCw } from 'lucide-react';
 import * as React from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 
 type ProjectMemberRole = 'lead' | 'member' | 'viewer';
 
@@ -553,7 +553,8 @@ export function TeamProjectPage(): JSX.Element {
   const membersLoading = members.projectId === projectId && members.loading;
 
   return (
-    <PageContainer width="workspace">
+    <PageContainer width="workspace" className="hd-project-detail hd-personal-project-detail">
+      <Link to="/projects" className="hd-project-back"><ChevronLeft />全部项目</Link>
       <PageHeader
         title={detail.project.name}
         description={detail.project.description || '这个团队项目还没有添加说明。'}
@@ -577,9 +578,12 @@ export function TeamProjectPage(): JSX.Element {
 
       <div className="space-y-4">
         {detail.error ? <StaleNotice message={detail.error} /> : null}
-        <ProjectOverview project={detail.project} />
+        {!teamTaskLifecycleEnabled && <ProjectOverview project={detail.project} />}
         {teamTaskLifecycleEnabled ? (
           <TeamTaskWorkbench
+            approved
+            projectDescription={detail.project.description}
+            projectOverview={<ProjectOverview project={detail.project} />}
             currentUserId={me?.userId ?? ''}
             role={detail.project.memberRole ?? 'viewer'}
             rows={tasks.rows}
@@ -612,7 +616,7 @@ function ProjectOverview({ project }: { readonly project: UiProject }): JSX.Elem
       className="flex flex-col gap-4 border-y border-[#ECEEF2] bg-white px-1 py-4 sm:flex-row sm:items-center"
     >
       <div className="flex min-w-0 items-center gap-3 sm:mr-auto">
-        <div className="rounded-[8px] bg-[#FFF0F4] p-2.5 text-[#EA1F59]">
+        <div className="rounded-[8px] bg-[#FFF0F4] p-2.5 text-[#FF0061]">
           <FolderKanban className="h-5 w-5" aria-hidden />
         </div>
         <div className="min-w-0">

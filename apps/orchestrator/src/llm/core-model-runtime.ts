@@ -1,4 +1,6 @@
+import { recordScopedModelCall } from '../agent/media-call-recorder.js';
 import { recordCoreModelObservation } from './core-model-observation.js';
+import { MessagesAdapterError } from './messages-adapter.js';
 import {
   type MessagesAdapter,
   type QwenMessagesEnvironment,
@@ -13,9 +15,9 @@ import {
   type CoreModelLane,
   type CoreRolloutMode,
   type ModelRuntimePolicy,
-  assertProductionModelRuntimePolicy,
   resolveCoreModelLaneAccess,
 } from './model-runtime-policy.js';
+import { safeProviderDiagnostics } from './provider-error-diagnostics.js';
 import { type QwenPurpose, QwenRouteError, resolveQwenRoute } from './qwen-route.js';
 import { type ResponsesAdapter, createQwenResponsesAdapter } from './responses-adapter.js';
 
@@ -81,11 +83,6 @@ export interface CoreModelRuntimeInput {
 const RESPONSES_LANES: ReadonlySet<CoreModelLane> = new Set(['generate', 'scrape']);
 
 export function resolveCoreModelRuntime(input: CoreModelRuntimeInput): CoreModelRuntimeResolution {
-  assertProductionModelRuntimePolicy(
-    input.environment.NODE_ENV,
-    input.environment.MODEL_RUNTIME_POLICY,
-  );
-
   const access = resolveCoreModelLaneAccess({
     mode: input.environment.QWEN_CORE_ROLLOUT_MODE,
     enabledLanes: input.environment.QWEN_CORE_ENABLED_LANES,
@@ -168,6 +165,24 @@ function observeMessagesAdapter(
       const startedAt = now();
       try {
         const result = await adapter.create(request, options);
+        const latencyMs = elapsedMs(startedAt, now());
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: 'supercar.turn',
+            ...result.usage,
+            cacheMode:
+              Array.isArray(request.system) &&
+              request.system.some((block) => block.cacheControl === 'ephemeral')
+                ? 'explicit'
+                : 'implicit',
+            providerRequestId: result.id,
+            latencyMs,
+            status: 'ok',
+            requestMeta: { lane, protocol: 'messages' },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -175,10 +190,33 @@ function observeMessagesAdapter(
           outcome: 'success',
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         return result;
       } catch (error) {
+        const latencyMs = elapsedMs(startedAt, now());
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: 'supercar.turn',
+            inputTokens: null,
+            outputTokens: null,
+            latencyMs,
+            status: 'error',
+            errorMessage: error instanceof MessagesAdapterError ? error.code : 'PROVIDER_ERROR',
+            providerRequestId:
+              error instanceof MessagesAdapterError
+                ? (error.diagnostics.requestId ?? undefined)
+                : undefined,
+            requestMeta: {
+              lane,
+              ...(error instanceof MessagesAdapterError
+                ? { providerError: safeProviderDiagnostics(error.diagnostics) }
+                : {}),
+            },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -186,7 +224,7 @@ function observeMessagesAdapter(
           outcome: 'error',
           inputTokens: null,
           outputTokens: null,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         throw error;
       }
@@ -207,6 +245,24 @@ function observeResponsesAdapter(
       const startedAt = now();
       try {
         const result = await adapter.stream(request, options);
+        const latencyMs = elapsedMs(startedAt, now());
+        const cached = result.usage.cachedInputTokens ?? null;
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: 'supercar.turn',
+            inputTokens:
+              cached === null ? result.usage.inputTokens : result.usage.inputTokens - cached,
+            outputTokens: result.usage.outputTokens,
+            cacheReadInputTokens: cached,
+            cacheCreationInputTokens: 0,
+            providerRequestId: result.id,
+            latencyMs,
+            status: 'ok',
+            requestMeta: { lane, protocol: 'responses' },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -214,10 +270,23 @@ function observeResponsesAdapter(
           outcome: result.status === 'incomplete' ? 'incomplete' : 'success',
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         return result;
       } catch (error) {
+        const latencyMs = elapsedMs(startedAt, now());
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: 'supercar.turn',
+            inputTokens: null,
+            outputTokens: null,
+            latencyMs,
+            status: 'error',
+            requestMeta: { lane },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -225,7 +294,7 @@ function observeResponsesAdapter(
           outcome: 'error',
           inputTokens: null,
           outputTokens: null,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         throw error;
       }

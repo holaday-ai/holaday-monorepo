@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
+  WanxiangError,
   createImageTask,
   createVideoTask,
   generateBrollImage,
   generateBrollVideo,
   getTaskStatus,
-  WanxiangError,
 } from './wanxiang-client.js';
 
 /** A fetch stub that returns queued JSON responses in order, recording calls. */
@@ -72,9 +72,7 @@ describe('createImageTask', () => {
       },
     ]);
 
-    await expect(
-      createImageTask({ apiKey: KEY, prompt: 'x', fetchImpl }),
-    ).rejects.toMatchObject({
+    await expect(createImageTask({ apiKey: KEY, prompt: 'x', fetchImpl })).rejects.toMatchObject({
       name: 'WanxiangError',
       kind: 'http',
       status: 400,
@@ -95,11 +93,24 @@ describe('createImageTask', () => {
 
   it('sends X-DashScope-WorkSpace header only when workspaceId is set', async () => {
     const q1 = jsonQueue([{ body: { output: { task_id: 't', task_status: 'PENDING' } } }]);
-    await createImageTask({ apiKey: KEY, prompt: 'x', workspaceId: 'ws_123', fetchImpl: q1.fetchImpl });
-    expect((q1.calls[0]?.init as RequestInit & { headers: Record<string, string> }).headers['x-dashscope-workspace']).toBe('ws_123');
+    await createImageTask({
+      apiKey: KEY,
+      prompt: 'x',
+      workspaceId: 'ws_123',
+      fetchImpl: q1.fetchImpl,
+    });
+    expect(
+      (q1.calls[0]?.init as RequestInit & { headers: Record<string, string> }).headers[
+        'x-dashscope-workspace'
+      ],
+    ).toBe('ws_123');
     const q2 = jsonQueue([{ body: { output: { task_id: 't', task_status: 'PENDING' } } }]);
     await createImageTask({ apiKey: KEY, prompt: 'x', fetchImpl: q2.fetchImpl });
-    expect((q2.calls[0]?.init as RequestInit & { headers: Record<string, string> }).headers['x-dashscope-workspace']).toBeUndefined();
+    expect(
+      (q2.calls[0]?.init as RequestInit & { headers: Record<string, string> }).headers[
+        'x-dashscope-workspace'
+      ],
+    ).toBeUndefined();
   });
 });
 
@@ -127,8 +138,35 @@ describe('createVideoTask — i2v 图生 (Phase 2 第二期)', () => {
     });
   });
 
+  it('wan2.7-i2v → input.media first_frame + resolution, no img_url/size', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      { body: { output: { task_id: 'v27', task_status: 'PENDING' } } },
+    ]);
+    await createVideoTask({
+      apiKey: KEY,
+      model: 'wan2.7-i2v',
+      prompt: '小猫眨眨眼',
+      imageUrl: 'https://r2/pet.jpg',
+      size: '1080*1920',
+      resolution: '720P',
+      durationSeconds: 5,
+      fetchImpl,
+    });
+    const body = JSON.parse((calls[0]?.init as RequestInit).body as string);
+    expect(body).toEqual({
+      model: 'wan2.7-i2v',
+      input: {
+        prompt: '小猫眨眨眼',
+        media: [{ type: 'first_frame', url: 'https://r2/pet.jpg' }],
+      },
+      parameters: { resolution: '720P', duration: 5 },
+    });
+  });
+
   it('t2v defaults to the pinned Wan 2.7 release and omits optional parameters', async () => {
-    const { fetchImpl, calls } = jsonQueue([{ body: { output: { task_id: 'v2', task_status: 'PENDING' } } }]);
+    const { fetchImpl, calls } = jsonQueue([
+      { body: { output: { task_id: 'v2', task_status: 'PENDING' } } },
+    ]);
     await createVideoTask({ apiKey: KEY, prompt: 'a beach', fetchImpl });
     const body = JSON.parse((calls[0]?.init as RequestInit).body as string);
     expect(body.model).toBe('wan2.7-t2v-2026-06-12');
@@ -168,7 +206,9 @@ describe('getTaskStatus', () => {
           output: {
             task_id: 't',
             task_status: 'SUCCEEDED',
-            results: [{ url: 'https://dashscope-result-sgp.oss-ap-southeast-1.aliyuncs.com/a.png' }],
+            results: [
+              { url: 'https://dashscope-result-sgp.oss-ap-southeast-1.aliyuncs.com/a.png' },
+            ],
           },
           usage: { image_count: 1 },
         },
@@ -182,7 +222,9 @@ describe('getTaskStatus', () => {
 
   it('surfaces FAILED status + code/message', async () => {
     const { fetchImpl } = jsonQueue([
-      { body: { output: { task_status: 'FAILED', code: 'DataInspectionFailed', message: 'nsfw' } } },
+      {
+        body: { output: { task_status: 'FAILED', code: 'DataInspectionFailed', message: 'nsfw' } },
+      },
     ]);
     const s = await getTaskStatus({ apiKey: KEY, taskId: 't', fetchImpl });
     expect(s.taskStatus).toBe('FAILED');
@@ -197,7 +239,11 @@ describe('generateBrollImage (create + poll)', () => {
       { body: { output: { task_id: 't', task_status: 'RUNNING' } } }, // poll 1
       {
         body: {
-          output: { task_id: 't', task_status: 'SUCCEEDED', results: [{ url: 'https://r2/x.png' }] },
+          output: {
+            task_id: 't',
+            task_status: 'SUCCEEDED',
+            results: [{ url: 'https://r2/x.png' }],
+          },
           usage: { image_count: 1 },
         },
       }, // poll 2
@@ -212,9 +258,9 @@ describe('generateBrollImage (create + poll)', () => {
       { body: { output: { task_id: 't', task_status: 'PENDING' } } },
       { body: { output: { task_status: 'FAILED', message: 'boom' } } },
     ]);
-    await expect(generateBrollImage({ apiKey: KEY, prompt: 'x', fetchImpl, ...TINY })).rejects.toMatchObject(
-      { kind: 'task_failed' },
-    );
+    await expect(
+      generateBrollImage({ apiKey: KEY, prompt: 'x', fetchImpl, ...TINY }),
+    ).rejects.toMatchObject({ kind: 'task_failed' });
   });
 
   it('throws timeout if it never finishes within maxWaitMs', async () => {
@@ -232,7 +278,11 @@ describe('generateBrollVideo', () => {
   it('returns the video_url on SUCCEEDED', async () => {
     const { fetchImpl, calls } = jsonQueue([
       { body: { output: { task_id: 'v', task_status: 'PENDING' } } },
-      { body: { output: { task_id: 'v', task_status: 'SUCCEEDED', video_url: 'https://oss/v.mp4' } } },
+      {
+        body: {
+          output: { task_id: 'v', task_status: 'SUCCEEDED', video_url: 'https://oss/v.mp4' },
+        },
+      },
     ]);
     const out = await generateBrollVideo({ apiKey: KEY, prompt: 'clip', fetchImpl, ...TINY });
     expect(out.videoUrl).toBe('https://oss/v.mp4');
@@ -242,17 +292,33 @@ describe('generateBrollVideo', () => {
   it('passes negative_prompt into the t2v input when supplied (no-text constraint)', async () => {
     const { fetchImpl, calls } = jsonQueue([
       { body: { output: { task_id: 'v', task_status: 'PENDING' } } },
-      { body: { output: { task_id: 'v', task_status: 'SUCCEEDED', video_url: 'https://oss/v.mp4' } } },
+      {
+        body: {
+          output: { task_id: 'v', task_status: 'SUCCEEDED', video_url: 'https://oss/v.mp4' },
+        },
+      },
     ]);
-    await generateBrollVideo({ apiKey: KEY, prompt: 'clip', negativePrompt: '乱码, gibberish', fetchImpl, ...TINY });
+    await generateBrollVideo({
+      apiKey: KEY,
+      prompt: 'clip',
+      negativePrompt: '乱码, gibberish',
+      fetchImpl,
+      ...TINY,
+    });
     const init = calls[0]?.init as RequestInit;
-    expect(JSON.parse(init.body as string)).toMatchObject({ input: { negative_prompt: '乱码, gibberish' } });
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      input: { negative_prompt: '乱码, gibberish' },
+    });
   });
 
   it('passes the selected HappyHorse duration instead of using the provider default', async () => {
     const { fetchImpl, calls } = jsonQueue([
       { body: { output: { task_id: 'v', task_status: 'PENDING' } } },
-      { body: { output: { task_id: 'v', task_status: 'SUCCEEDED', video_url: 'https://oss/v.mp4' } } },
+      {
+        body: {
+          output: { task_id: 'v', task_status: 'SUCCEEDED', video_url: 'https://oss/v.mp4' },
+        },
+      },
     ]);
     await generateBrollVideo({
       apiKey: KEY,
@@ -276,5 +342,41 @@ describe('WanxiangError', () => {
     const e = new WanxiangError('x', 'no_result');
     expect(e).toBeInstanceOf(Error);
     expect(e.kind).toBe('no_result');
+  });
+});
+
+describe('waitForTask resilience (batch 08 fixes)', () => {
+  it('keeps polling an already-created task through transient poll failures', async () => {
+    let call = 0;
+    const fetchImpl = (async () => {
+      call += 1;
+      if (call === 1)
+        return new Response(JSON.stringify({ output: { task_id: 't1', task_status: 'PENDING' } }), {
+          status: 200,
+        });
+      if (call === 2) throw new TypeError('fetch failed');
+      if (call === 3) return new Response('busy', { status: 503 });
+      return new Response(
+        JSON.stringify({
+          output: { task_id: 't1', task_status: 'SUCCEEDED', video_url: 'https://x/v.mp4' },
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+    const out = await generateBrollVideo({ apiKey: KEY, prompt: 'p', fetchImpl, ...TINY });
+    expect(out.videoUrl).toBe('https://x/v.mp4');
+    expect(call).toBe(4);
+  });
+
+  it('does not retry a create request whose response was lost', async () => {
+    let posts = 0;
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      if (init.method === 'POST') posts += 1;
+      throw new TypeError('fetch failed');
+    }) as unknown as typeof fetch;
+    await expect(
+      generateBrollVideo({ apiKey: KEY, prompt: 'p', fetchImpl, ...TINY }),
+    ).rejects.toBeInstanceOf(WanxiangError);
+    expect(posts).toBe(1);
   });
 });

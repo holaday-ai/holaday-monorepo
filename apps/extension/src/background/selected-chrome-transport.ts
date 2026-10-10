@@ -1,5 +1,9 @@
 import type { DriverAction } from '@holaday/browser-driver';
-import type { SelectedChromeSessionCommand } from '@holaday/shared-types';
+import type {
+  UserBrowserProtocol,
+  UserBrowserBinding,
+  SelectedChromeSessionCommand,
+} from '@holaday/shared-types';
 import type {
   BrowserExecutionOwnership,
   SelectedBrowserExecutionLease,
@@ -17,9 +21,26 @@ export interface SelectedChromeBridge {
   open(
     taskId: string,
     target: Extract<SelectedChromeSessionCommand, { op: 'open' }>['target'],
+    options?: { protocol?: UserBrowserProtocol; grantedOrigins?: readonly string[] },
+  ): Promise<SessionReply>;
+  describe?(
+    taskId: string,
+    sessionId: string,
+    action: DriverAction,
+    revision: number,
+  ): Promise<SessionReply>;
+  tabs?(
+    taskId: string,
+    sessionId: string,
+    command: Extract<SelectedChromeSessionCommand, { op: 'tabs' }>,
   ): Promise<SessionReply>;
   observe(taskId: string, sessionId: string): Promise<SessionReply>;
-  execute(taskId: string, sessionId: string, action: DriverAction): Promise<SessionReply>;
+  execute(
+    taskId: string,
+    sessionId: string,
+    action: DriverAction,
+    binding?: UserBrowserBinding,
+  ): Promise<SessionReply>;
   close(taskId: string, sessionId: string): Promise<{ ok: boolean }>;
   stopTask(taskId: string): Promise<void>;
 }
@@ -148,7 +169,10 @@ export function createSelectedChromeTransport(deps: {
       entry.bridgeStarted = true;
       let reply: SessionReply;
       try {
-        reply = await deps.bridge.open(taskId, command.target);
+        reply = await deps.bridge.open(taskId, command.target, {
+          protocol: command.protocol,
+          grantedOrigins: command.grantedOrigins,
+        });
       } catch {
         try {
           await cleanup(entry);
@@ -238,6 +262,25 @@ export function createSelectedChromeTransport(deps: {
       );
     }
 
+    if (command.op === 'describe')
+      return run(
+        entry,
+        () =>
+          deps.bridge.describe?.(
+            taskId,
+            command.sessionId,
+            command.action,
+            command.observationRevision,
+          ) ?? Promise.resolve({ ok: false, error: 'capability_missing' }),
+      );
+    if (command.op === 'tabs')
+      return run(
+        entry,
+        () =>
+          deps.bridge.tabs?.(taskId, command.sessionId, command) ??
+          Promise.resolve({ ok: false, error: 'capability_missing' }),
+      );
+
     const reply = await run(entry, async () => {
       if (entry.stopping) {
         return {
@@ -247,7 +290,12 @@ export function createSelectedChromeTransport(deps: {
         };
       }
       try {
-        return await deps.bridge.execute(taskId, command.sessionId, command.action);
+        return await deps.bridge.execute(
+          taskId,
+          command.sessionId,
+          command.action,
+          command.binding,
+        );
       } catch {
         return {
           ok: false,

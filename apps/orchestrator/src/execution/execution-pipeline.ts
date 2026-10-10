@@ -395,7 +395,7 @@ export function deriveFinalStatus(
     const hasCriticalStructuralFailure = verification.checks.some(
       (check) =>
         !check.passed &&
-        ['url_count', 'ecommerce_rows', 'result_count'].includes(
+        ['url_count', 'ecommerce_rows', 'result_count', 'list_item_sources'].includes(
           check.criterionType ?? '',
         ),
     );
@@ -514,6 +514,9 @@ export function summariseVerificationFailure(
   return '质量校验未通过';
 }
 
+/** Informational marker for research answers whose sources were listed but not fetched. */
+export const OBSERVED_SOURCES_NOTE = '（来源已列出，未逐条抓取原文。）';
+
 export type CoreVerifyInputs = Omit<VerifyInputs, 'taskId' | 'verificationContext'> & {
   handle: CoreExecutionHandle;
   registry?: CoreExecutionRegistry;
@@ -527,16 +530,9 @@ export async function verifyCoreAndFinalize(inputs: CoreVerifyInputs): Promise<V
   const registry = inputs.registry ?? coreExecutionRegistry;
   const state = registry.read(inputs.handle);
   if (!state || !coreVerificationEnabled()) return unavailableCoreOutput(inputs.handle);
-  const verificationContext = inputs.observedSourceUrls?.length
-    ? {
-        ...state.context,
-        materials: [
-          ...state.context.materials,
-          { kind: 'unavailable' as const, source: 'provider' as const,
-            key: 'provider:observed-url-only', reason: 'source_body_unavailable' as const },
-        ],
-      }
-    : state.context;
+  // Observed search URLs without fetched bodies are an informational marker
+  // ("来源已列出"), not a verification failure: semantic review decides.
+  const verificationContext = state.context;
   let output = inputs.runnerStatus === 'awaiting_user' || inputs.runnerStatus === 'failed'
     ? await verifyCoreIntermediate({ state, verificationContext,
         runnerStatus: inputs.runnerStatus, answerText: inputs.answerText,
@@ -562,21 +558,14 @@ export async function verifyCoreAndFinalize(inputs: CoreVerifyInputs): Promise<V
       }),
     };
   }
-  if (inputs.observedSourceUrls?.length && output.verification) {
-    // This is an observed property of the delivery, not an inference from a
-    // successfully serialized request. Preserve it even if context admission
-    // or deterministic validation exited before material assessment.
-    return bindCoreVerification({
-      ...output,
-      verification: mergeDeterministicAndSemantic(output.verification, {
-        status: output.verification.semanticStatus ?? 'unavailable',
-        issues: [],
-        inputCoverage: {
-          complete: false,
-          codes: [...new Set([...(output.verification.inputCoverage?.codes ?? []), 'VERIFICATION_MATERIALS_INCOMPLETE' as const])],
-        },
-      }),
-    }, state.handle);
+  if (
+    inputs.observedSourceUrls?.length &&
+    inputs.runnerStatus !== 'awaiting_user' &&
+    inputs.runnerStatus !== 'failed' &&
+    output.finalText.trim() &&
+    !output.finalText.includes(OBSERVED_SOURCES_NOTE)
+  ) {
+    output = { ...output, finalText: `${output.finalText.trimEnd()}\n\n${OBSERVED_SOURCES_NOTE}` };
   }
   return bindCoreVerification(output, state.handle);
 }
@@ -800,6 +789,17 @@ function finalizeResolvedExecution(
 ): VerifyOutput {
   const { priorVerification, semanticMetadata, ...verifyInputs } = inputs;
 
+  // The primary pass already replaced a failed answer with the safety boundary
+  // (which states the real reason). Re-verifying that notice would replace the
+  // reason with artefacts such as "只解析到 0 条" — keep the primary verdict.
+  if (
+    priorVerification &&
+    !priorVerification.passed &&
+    verifyInputs.answerText.startsWith(SAFE_BOUNDARY_HEADER)
+  ) {
+    return { verification: priorVerification, finalText: verifyInputs.answerText };
+  }
+
   const workflowContract = verificationWorkflow(contract, inputs.verificationContext);
   const deterministic = verifyDeterministic({
     contract,
@@ -836,11 +836,8 @@ function finalizeResolvedExecution(
         : priorVerification?.inputCoverage?.complete === false
           ? priorVerification.inputCoverage
           : { complete: false, codes: ['VERIFICATION_CONTEXT_INVALID' as const] };
-    // The model field and provider-specific options are part of the wire budget.
-    // A lost route cannot certify complete coverage using an empty model placeholder.
-    if (inputCoverage?.complete && !semanticMetadata?.model) {
-      inputCoverage = { complete: false, codes: ['VERIFICATION_CONTEXT_INVALID'] };
-    }
+    // An unavailable semantic lane is recorded as semanticStatus 'unavailable';
+    // it no longer downgrades an otherwise verified answer to partial_success.
     if (priorVerification?.inputCoverage?.codes.includes('VERIFICATION_MATERIALS_INCOMPLETE')) {
       inputCoverage = {
         complete: false,
@@ -1016,6 +1013,11 @@ function runFixLoop(
   };
 }
 
+const LIST_GAP_CHECKS = new Set(['list_item_sources', 'ecommerce_rows', 'result_count']);
+
+/** First line of the text that replaces an answer which failed verification. */
+const SAFE_BOUNDARY_HEADER = '未能给出可验证的结果，本次不会把未通过校验的内容作为结论。';
+
 function buildSafeVerificationBoundary(
   verification: VerificationResult,
   answerText: string,
@@ -1023,13 +1025,18 @@ function buildSafeVerificationBoundary(
   const failed = verification.checks.find((check) => !check.passed);
   const reason = failed?.detail ?? verification.suggestedFix ?? '关键条件尚未验证';
   const failedChecks = verification.checks.filter((check) => !check.passed);
+  // A list that only misses per-item links/fields, and says so ("未获取到"),
+  // still carries observed names, prices and dates the user can act on.
+  const declaredListGapsOnly =
+    failedChecks.length > 0 &&
+    failedChecks.every((check) => LIST_GAP_CHECKS.has(check.criterionType ?? '')) &&
+    /未获取到|无法获取|未能获取|拿不到/.test(answerText);
   const canPreserveDraft =
     verification.failureLevel === 'needs_clarification' &&
-    failedChecks.every(
-      (check) => !check.criterionType && check.severity !== 'hard_fail',
-    );
+    (declaredListGapsOnly ||
+      failedChecks.every((check) => !check.criterionType && check.severity !== 'hard_fail'));
   const parts = [
-    '未能给出可验证的结果，本次不会把未通过校验的内容作为结论。',
+    SAFE_BOUNDARY_HEADER,
     '',
     `原因：${reason}`,
     '',

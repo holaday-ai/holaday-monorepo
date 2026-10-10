@@ -39,7 +39,12 @@ export function SkillLogo({
   className,
 }: SkillLogoProps): JSX.Element {
   const known = KNOWN_LOGOS.has(logoId);
-  const theme = logoTheme(known ? logoId : 'fallback');
+  if (known) return (
+    <span role="img" aria-label={label} data-logo-id={logoId} data-logo-known="true" className={cn('inline-flex shrink-0 overflow-hidden', SIZE_CLASS[size], className)}>
+      <img src={`${import.meta.env.BASE_URL}holaday-ui/skill-logos/${logoId}.svg`} alt="" aria-hidden className="h-full w-full" />
+    </span>
+  );
+  const theme = logoTheme('fallback');
 
   return (
     <span
@@ -48,7 +53,7 @@ export function SkillLogo({
       data-logo-id={logoId}
       data-logo-known={known ? 'true' : 'false'}
       className={cn(
-        'relative inline-flex shrink-0 items-center justify-center overflow-hidden border border-white/80 shadow-[0_1px_2px_rgba(15,23,42,0.05),0_6px_16px_rgba(234,31,89,0.055)]',
+        'relative inline-flex shrink-0 items-center justify-center overflow-hidden border border-white/80 shadow-[0_1px_2px_rgba(15,23,42,0.05),0_6px_16px_rgba(255,0,97,0.055)]',
         SIZE_CLASS[size],
         className,
       )}
@@ -185,7 +190,7 @@ function logoMark(logoId: string, accent: string): React.ReactNode {
         <>
           <path d="M18 13v22l17-11L18 13Z" fill="currentColor" />
           <path d="M33 14c3 3 4.5 6.5 4.5 10s-1.5 7-4.5 10" fill="none" stroke={accent} strokeLinecap="round" strokeWidth="4" />
-          <path d="M11 18c-2 4-2 8 0 12" fill="none" stroke="#EA1F59" strokeLinecap="round" strokeWidth="4" />
+          <path d="M11 18c-2 4-2 8 0 12" fill="none" stroke="#FF0061" strokeLinecap="round" strokeWidth="4" />
         </>
       );
     case 'xiaohongshu-seeding-ops':

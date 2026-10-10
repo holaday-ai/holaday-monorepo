@@ -1,5 +1,6 @@
 import { CircleSlash, Download, ExternalLink, FileText, Loader2, X } from 'lucide-react';
 import * as React from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import {
   downloadFailureMessage,
   downloadFileAuthed,
@@ -35,6 +36,10 @@ interface Props {
   payload: FilePreviewPayload | null;
   onClose(): void;
   onUnavailable?(fileId: string): void;
+  /** Only the approved file-library page opts into its reference composition. */
+  approved?: boolean;
+  createdAt?: string | number | Date;
+  onUse?(): void;
 }
 
 /**
@@ -54,6 +59,9 @@ export function FilePreviewModal({
   payload,
   onClose,
   onUnavailable,
+  approved = false,
+  createdAt,
+  onUse,
 }: Props): JSX.Element | null {
   const toast = useToast();
   const mountedRef = React.useRef(false);
@@ -177,13 +185,13 @@ export function FilePreviewModal({
   }, [objectUrl]);
 
   React.useEffect(() => {
-    if (!payload) return;
+    if (!payload || approved) return;
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [payload, onClose]);
+  }, [payload, onClose, approved]);
 
   if (!payload) return null;
 
@@ -202,7 +210,7 @@ export function FilePreviewModal({
           setErrorMessage(downloadFailureMessage(res.status));
           onUnavailableRef.current?.(payload.fileId);
         }
-        toast.show(downloadFailureMessage(res.status), 'error');
+        if (!isUnavailableFileStatus(res.status)) toast.show(downloadFailureMessage(res.status), 'error');
       }
     } finally {
       if (mountedRef.current) {
@@ -216,8 +224,9 @@ export function FilePreviewModal({
 
   return (
     <TooltipProvider delayDuration={120}>
+      <PreviewFocusSurface approved={approved} onClose={onClose} name={payload.filename}>
       <div
-        className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm"
+        className={`${approved ? 'hd-approved-file-preview ' : ''}fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm`}
         role="dialog"
         aria-modal
         onClick={onClose}
@@ -235,16 +244,16 @@ export function FilePreviewModal({
                 {formatFileSize(payload.sizeBytes)} · {mime || '未知类型'}
               </div>
             </div>
-            <IconTooltip
-              label={unavailable ? '文件已失效' : downloading ? '下载中' : '下载'}
+            {!unavailable && <IconTooltip
+              label={downloading ? '下载中' : '下载'}
             >
               <button
                 type="button"
                 onClick={() => void handleDownload()}
-                disabled={downloading || unavailable}
-                aria-label={unavailable ? '文件已失效' : '下载到本地'}
+                disabled={downloading}
+                aria-label="下载到本地"
                 title={
-                  unavailable ? '文件已失效' : downloading ? '下载中' : '下载'
+                  downloading ? '下载中' : '下载'
                 }
                 className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
               >
@@ -254,7 +263,7 @@ export function FilePreviewModal({
                   <Download className="h-3.5 w-3.5" />
                 )}
               </button>
-            </IconTooltip>
+            </IconTooltip>}
             <IconTooltip label="关闭">
               <button
                 type="button"
@@ -267,19 +276,20 @@ export function FilePreviewModal({
               </button>
             </IconTooltip>
           </header>
-          <div className="relative flex flex-1 items-center justify-center overflow-auto bg-[#EFEFEF]/45 dark:bg-background/40">
+          <div className={approved ? "hd-file-preview-body" : "contents"}>
+          <div className="hd-file-preview-canvas relative flex flex-1 items-center justify-center overflow-auto bg-[#EFEFEF]/45 dark:bg-background/40">
             {loading && (
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <span role="status" aria-label="正在加载预览"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground motion-reduce:animate-none" /></span>
             )}
             {!loading && errorMessage && (
               <div className="flex flex-col items-center gap-2 px-6 text-center text-sm text-muted-foreground">
                 {unavailable ? (
                   <CircleSlash className="h-8 w-8 text-[#8B93A6]" />
                 ) : (
-                  <ExternalLink className="h-8 w-8 text-[#EA1F59]" />
+                  <ExternalLink className="h-8 w-8 text-[#FF0061]" />
                 )}
                 <div className="font-medium text-foreground/85">
-                  {unavailable ? '文件已失效' : '无法加载预览'}
+                  {unavailable ? '文件已不可用' : '无法加载预览'}
                 </div>
                 <div className="max-w-sm text-xs">
                   {unavailable
@@ -312,7 +322,7 @@ export function FilePreviewModal({
               />
             )}
             {!loading && !errorMessage && textBody !== null && (
-              <pre className="m-0 max-h-full w-full overflow-auto whitespace-pre-wrap break-words bg-white px-6 py-4 font-mono text-[12px] text-[#2F2F2F] dark:bg-card dark:text-foreground">
+              <pre className="m-0 h-full w-full overflow-auto whitespace-pre-wrap break-words bg-white px-6 py-4 font-mono text-[12px] text-[#2F2F2F] dark:bg-card dark:text-foreground">
                 {textBody}
               </pre>
             )}
@@ -345,8 +355,17 @@ export function FilePreviewModal({
                 </div>
               )}
           </div>
+          {approved && <aside className="hd-file-preview-info">
+            <h2>文件信息</h2>
+            <dl><dt>格式</dt><dd>{mime || '未知类型'}</dd><dt>大小</dt><dd>{formatFileSize(payload.sizeBytes)}</dd>
+              {createdAt && Number.isFinite(new Date(createdAt).getTime()) ? <><dt>添加</dt><dd>{new Date(createdAt).toLocaleString('zh-CN')}</dd></> : null}
+            </dl>
+            {onUse && <><button type="button" disabled={unavailable} onClick={onUse}>用于新任务</button><small>{unavailable ? '文件已不可用，无法作为参考资料' : '把这份文件作为参考资料'}</small></>}
+          </aside>}
+          </div>
         </div>
       </div>
+      </PreviewFocusSurface>
     </TooltipProvider>
   );
 }
@@ -364,4 +383,16 @@ function IconTooltip({
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
+}
+
+function PreviewFocusSurface({approved, onClose, name, children}: {approved: boolean; onClose(): void; name: string; children: React.ReactElement}) {
+  const trigger = React.useRef(document.activeElement as HTMLElement | null);
+  const surface = React.useRef<HTMLDivElement>(null);
+  if (!approved) return children;
+  return <Dialog.Root open onOpenChange={open => !open && onClose()}><Dialog.Portal>
+    <Dialog.Content ref={surface} asChild onOpenAutoFocus={event => { event.preventDefault(); surface.current?.focus(); }} aria-label={name} aria-describedby={undefined} onCloseAutoFocus={event => { event.preventDefault(); if (trigger.current?.isConnected) trigger.current.focus(); }}>
+      {children}
+    </Dialog.Content>
+    <Dialog.Title className="sr-only">{name}</Dialog.Title>
+  </Dialog.Portal></Dialog.Root>;
 }

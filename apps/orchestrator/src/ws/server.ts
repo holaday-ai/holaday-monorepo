@@ -3,7 +3,6 @@ import type { IncomingMessage } from 'node:http';
 import {
   type ClientMessage,
   HEARTBEAT_INTERVAL_MS,
-  HEARTBEAT_TIMEOUT_MS,
   type ServerMessage,
   WS_SUBPROTOCOL,
   parseClientMessage,
@@ -17,6 +16,7 @@ import { failTaskWithEventIfStatus } from '../agent/task-maintenance.js';
 import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
 import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import { authenticateAccessToken } from '../auth/middleware.js';
+import { startWebSocketSessionRevalidation } from '../auth/websocket-session-revalidation.js';
 import type { BrowserPool } from '../browser-pool/browser-pool.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
@@ -31,6 +31,7 @@ import {
   extensionSocketClosedMessage,
   extensionToolTimeoutMessage,
 } from './extension-tool-copy.js';
+import { sweepHeartbeats } from './heartbeat-sweep.js';
 import { type WsWork, createWsWork } from './server-work.js';
 
 interface ClientState {
@@ -41,7 +42,7 @@ interface ClientState {
   socket: WebSocket;
   lastPongAt: number;
   authed: boolean;
-  sessionRevalidationInFlight: boolean;
+  refreshSessionLease: () => void;
   // taskId -> state. Phase 0 in-memory; persistence writes through on every
   // transition. Restart recovery rehydrates this map per-user at auth time.
   tasks: Map<string, TaskState>;
@@ -67,8 +68,6 @@ interface ClientState {
 
 const taskController = new TaskController();
 const taskRepository = new TaskRepository(db);
-
-const lastPingAt = new WeakMap<WebSocket, number>();
 
 /**
  * Per-user rehydrated TaskStates loaded at boot from MySQL. When a WS client
@@ -164,19 +163,18 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
 
   wss.on('connection', (socket, req) => {
     const pending = work.run(() =>
-      handleConnection(socket, req, authenticateToken, clientStates, work),
+      handleConnection(socket, req, authenticateToken, clientStates, work, opts.sessionRevalidationIntervalMs),
     );
     if (!pending) socket.close(1013, 'service unavailable');
     else void pending.catch(() => socket.close(1011, 'request failed'));
   });
 
-  const heartbeat = setInterval(() => sweep(wss), HEARTBEAT_INTERVAL_MS);
-  heartbeat.unref();
-  const sessionRevalidation = setInterval(
-    () => revalidateSessions(wss, clientStates, authenticateToken),
-    opts.sessionRevalidationIntervalMs ?? HEARTBEAT_INTERVAL_MS,
+  const heartbeat = setInterval(
+    () => sweepHeartbeats(wss.clients, (client) => clientStates.get(client)?.lastPongAt),
+    HEARTBEAT_INTERVAL_MS,
   );
-  sessionRevalidation.unref();
+  heartbeat.unref();
+
 
   let closing: Promise<void> | undefined;
   return {
@@ -186,7 +184,6 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
       const settled = work.stop();
       if (closing) return closing;
       clearInterval(heartbeat);
-      clearInterval(sessionRevalidation);
       const workResults = Promise.allSettled([settled]);
       closing = (async () => {
         // ws.close removes its underlying HTTP event forwarding; retain that
@@ -541,8 +538,8 @@ export function hasConnectedExtension(userId: string): boolean {
 
 export function getConnectedExtensionClientIds(userId: string): string[] {
   return [...(clientsByUser.get(userId) ?? [])]
-    .filter(client => client.isExtension && client.socket.readyState === WebSocket.OPEN)
-    .map(client => client.id);
+    .filter((client) => client.isExtension && client.socket.readyState === WebSocket.OPEN)
+    .map((client) => client.id);
 }
 
 function pickExtensionClientForUser(
@@ -654,31 +651,49 @@ export async function sendExtensionToolCall(
   const timeoutMs = Math.max(1000, Math.min(60_000, opts.timeoutMs ?? 30_000));
 
   if (opts.kind === 'read' && (!opts.extensionClientId || !opts.args?.target)) {
-    return { ok: false, error: { code: 'target_required', message: '请先选择 Chrome 连接和标签页' } };
+    return {
+      ok: false,
+      error: { code: 'target_required', message: '请先选择 Chrome 连接和标签页' },
+    };
   }
+  if (opts.kind === 'session_import' && (!opts.extensionClientId || !opts.args?.sessionImport))
+    return { ok: false, error: { code: 'target_required', message: '请重新选择授权站点' } };
   if (opts.kind === 'session') {
     if (!opts.extensionClientId || !opts.args?.session)
-      return { ok: false, error: { code: 'target_required', message: '请先选择 Chrome 连接和会话' } };
+      return {
+        ok: false,
+        error: { code: 'target_required', message: '请先选择 Chrome 连接和会话' },
+      };
     if (!selectedChromeSessionCommandSchema.safeParse(opts.args.session).success)
-      return { ok: false, error: { code: 'invalid_session_command', message: '浏览器会话操作无效' } };
+      return {
+        ok: false,
+        error: { code: 'invalid_session_command', message: '浏览器会话操作无效' },
+      };
   }
   // An explicitly targeted operation must never fall through to the legacy
   // active-tab tools, even if a caller accidentally chooses the wrong kind.
   if (opts.args?.target && opts.kind !== 'read') {
-    return { ok: false, error: { code: 'target_unsupported', message: '此工具暂不支持指定标签页' } };
+    return {
+      ok: false,
+      error: { code: 'target_unsupported', message: '此工具暂不支持指定标签页' },
+    };
   }
   const target = pickExtensionClientForUser(userId, new Set(), opts.extensionClientId);
   if (!target) {
     if (opts.extensionClientId !== undefined) {
       return {
         ok: false,
-        error: { code: 'target_extension_unavailable', message: '所选 Chrome 连接已断开，请重新选择' },
+        error: {
+          code: 'target_extension_unavailable',
+          message: '所选 Chrome 连接已断开，请重新选择',
+        },
       };
     }
     return { ok: false, error: { message: extensionNoClientMessage(), code: 'no_extension' } };
   }
   const withConnectionIdentity = (outcome: ExtensionToolCallOutcome, clientId: string) =>
-    outcome.ok && (opts.kind === 'tabs' || opts.kind === 'read' || opts.extensionClientId !== undefined)
+    outcome.ok &&
+    (opts.kind === 'tabs' || opts.kind === 'read' || opts.extensionClientId !== undefined)
       ? { ...outcome, extensionClientId: clientId }
       : outcome;
 
@@ -917,6 +932,7 @@ async function handleConnection(
   authenticateToken: (token: string) => Promise<string | null>,
   clientStates: WeakMap<WebSocket, ClientState>,
   work: WsWork,
+  sessionRevalidationIntervalMs?: number,
 ) {
   const state: ClientState = {
     work,
@@ -926,16 +942,36 @@ async function handleConnection(
     socket,
     lastPongAt: Date.now(),
     authed: false,
-    sessionRevalidationInFlight: false,
+    refreshSessionLease,
     tasks: new Map(),
     healedStepIds: new Set(),
     isExtension: false,
   };
+  let stopSessionLease: (() => void) | undefined;
+  function refreshSessionLease(): void {
+    stopSessionLease?.();
+    const token = state.authToken;
+    const userId = state.userId;
+    if (!token || !userId) return;
+    stopSessionLease = startWebSocketSessionRevalidation({
+      socket, expectedUserId: userId, logger, intervalMs: sessionRevalidationIntervalMs,
+      revalidateSession: async () => {
+        let valid = false;
+        const pending = work.run(async () => {
+          valid = (await authenticateToken(token)) === userId && state.authToken === token && state.userId === userId;
+        });
+        if (!pending) return false;
+        await pending;
+        return valid;
+      },
+    });
+  }
   clientStates.set(socket, state);
   // biome-ignore lint/style/useConst: The close callback is installed before authentication awaits and timer assignment.
   let authTimer: NodeJS.Timeout | undefined;
   // Install cleanup before authentication's first await, not after it.
   socket.on('close', () => {
+    stopSessionLease?.();
     clearTimeout(authTimer);
     socket.off('message', onMessage);
     state.authed = false;
@@ -968,6 +1004,7 @@ async function handleConnection(
       state.userId = userId;
       state.authToken = token;
       state.authed = true;
+      state.refreshSessionLease();
       addClientForUser(userId, state);
       send(socket, {
         type: 'server.welcome',
@@ -1010,8 +1047,10 @@ async function handleConnection(
       });
       return;
     }
-    if (isReceiptOrMemoryMessage(result.data) &&
-      !(work.ordinaryMaintenance && result.data.type === 'client.extension.login_states')) {
+    if (
+      isReceiptOrMemoryMessage(result.data) &&
+      !(work.ordinaryMaintenance && result.data.type === 'client.extension.login_states')
+    ) {
       // Matching a pre-existing resolver is not admission of a new operation.
       await action();
       return;
@@ -1075,6 +1114,7 @@ async function handleClientMessage(
     state.userId = userId;
     state.authToken = msg.token;
     state.authed = true;
+    state.refreshSessionLease();
     // Phase 25 — flag this socket as a Chrome extension only when the
     // hello frame carries a real extension version. The web app sends a
     // legacy source marker (`web-workbench`) in the same field, so keep
@@ -1712,66 +1752,4 @@ function send(socket: WebSocket, msg: ServerMessage): boolean {
     }
   }
   return false;
-}
-
-function sweep(wss: WebSocketServer) {
-  const now = Date.now();
-  for (const client of wss.clients) {
-    if (client.readyState !== WebSocket.OPEN) continue;
-    const previous = lastPingAt.get(client) ?? now;
-    if (now - previous > HEARTBEAT_TIMEOUT_MS) {
-      client.terminate();
-      continue;
-    }
-    client.ping();
-    lastPingAt.set(client, now);
-  }
-}
-
-function revalidateSessions(
-  wss: WebSocketServer,
-  clientStates: WeakMap<WebSocket, ClientState>,
-  authenticateToken: (token: string) => Promise<string | null>,
-): void {
-  for (const socket of wss.clients) {
-    if (socket.readyState !== WebSocket.OPEN) continue;
-    const state = clientStates.get(socket);
-    if (!state?.authed || !state.userId || !state.authToken || state.sessionRevalidationInFlight) {
-      continue;
-    }
-    const pending = state.work.run(() => revalidateSession(state, authenticateToken));
-    if (pending) void pending.catch(() => state.socket.close(1011, 'session check failed'));
-  }
-}
-
-async function revalidateSession(
-  state: ClientState,
-  authenticateToken: (token: string) => Promise<string | null>,
-): Promise<void> {
-  const token = state.authToken;
-  const expectedUserId = state.userId;
-  if (!token || !expectedUserId) return;
-
-  state.sessionRevalidationInFlight = true;
-  try {
-    const userId = await authenticateToken(token);
-    if (
-      state.socket.readyState !== WebSocket.OPEN ||
-      !state.authed ||
-      state.authToken !== token ||
-      state.userId !== expectedUserId
-    ) {
-      return;
-    }
-    if (userId !== expectedUserId) {
-      send(state.socket, {
-        type: 'server.error',
-        code: 'UNAUTHORIZED',
-        message: 'session revoked',
-      });
-      state.socket.close(4401, 'session revoked');
-    }
-  } finally {
-    state.sessionRevalidationInFlight = false;
-  }
 }

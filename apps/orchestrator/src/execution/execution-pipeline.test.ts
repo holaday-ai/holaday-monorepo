@@ -17,13 +17,15 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { MessagesAdapter } from '../llm/messages-adapter.js';
+import { serializeMessagesRequest } from '../llm/messages-adapter.js';
 import { _resetLedgerRegistryForTest, getLedger } from './evidence-ledger.js';
 import {
   _resetExecutionPipelineForTest,
-  assessResultTrust,
   assessResearchSourceTrust,
-  disposeExecution,
+  assessResultTrust,
   deriveFinalStatus,
+  disposeExecution,
   extractFailedChecks,
   finalizeAnswerForPersistence,
   getContract,
@@ -33,14 +35,9 @@ import {
   recordEvidence,
   verifyAndFinalize,
 } from './execution-pipeline.js';
-import {
-  reloadFeatureFlagsForTest,
-  setFeatureFlagsForTest,
-} from './feature-flags.js';
-import type { MessagesAdapter } from '../llm/messages-adapter.js';
-import { createTaskVerificationContext } from './task-verification-context.js';
+import { reloadFeatureFlagsForTest, setFeatureFlagsForTest } from './feature-flags.js';
 import { prepareLlmVerificationInput } from './llm-verifier.js';
-import { serializeMessagesRequest } from '../llm/messages-adapter.js';
+import { createTaskVerificationContext } from './task-verification-context.js';
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -464,7 +461,7 @@ describe('complete delivery coverage', () => {
     expect(deriveFinalStatus('completed', output.verification)).toBe('partial_success');
   });
 
-  it('does not certify a full wire budget after losing the safe model metadata', async () => {
+  it('does not downgrade a verified answer when the semantic model metadata is unavailable', async () => {
     flagsAllOn();
     const taskId = 'tsk_final_missing_model';
     initExecution({ taskId, intent: '解释概念', executionMode: 'generate' });
@@ -480,8 +477,10 @@ describe('complete delivery coverage', () => {
         inputCoverage: { complete: true, codes: [] },
       },
     });
-    expect(output.verification?.inputCoverage?.complete).toBe(false);
-    expect(deriveFinalStatus('completed', output.verification)).toBe('partial_success');
+    // An unavailable semantic lane is recorded as such but no longer turns a
+    // deterministically verified answer into partial_success.
+    expect(output.verification?.inputCoverage?.complete).toBe(true);
+    expect(deriveFinalStatus('completed', output.verification)).toBe('completed');
   });
 });
 
@@ -591,8 +590,7 @@ describe('flags off (default)', () => {
   it('fails an ecommerce ranking that claims a winner without verifiable product links', () => {
     const review = assessResultTrust({
       intent: '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
-      resultText:
-        '唯一最佳选择是 iPhone 16 128GB，价格 4599 元。其余结果与链接暂时无法获取。',
+      resultText: '唯一最佳选择是 iPhone 16 128GB，价格 4599 元。其余结果与链接暂时无法获取。',
     });
 
     expect(review.requiresReview).toBe(true);
@@ -727,7 +725,8 @@ describe('all flags on — generate happy path', () => {
     });
     const out = await verifyAndFinalize({
       taskId: 'tsk_g1',
-      answerText: 'Today the weather is really nice and the build is green and the tests are passing.',
+      answerText:
+        'Today the weather is really nice and the build is green and the tests are passing.',
     });
     expect(out.verification).not.toBeNull();
     expect(out.verification!.passed).toBe(true);
@@ -768,9 +767,7 @@ describe('all flags on — generate happy path', () => {
       intent: '研究 2026 年 AI 行业趋势',
       resultText: out.finalText,
     });
-    expect(deriveFinalStatus('completed', out.verification, sourceTrust)).toBe(
-      'partial_success',
-    );
+    expect(deriveFinalStatus('completed', out.verification, sourceTrust)).toBe('partial_success');
   });
 });
 
@@ -975,9 +972,7 @@ describe('all flags on — URL fabrication autoFix loop', () => {
     expect(out.finalText).toContain('https://example.com/help/index');
     expect(out.finalText).not.toContain('wrong-page');
     // The verification record retains the autoFix annotation.
-    const fixOps = out.verification!.checks.filter((c) =>
-      c.criterionId.startsWith('autoFix.'),
-    );
+    const fixOps = out.verification!.checks.filter((c) => c.criterionId.startsWith('autoFix.'));
     expect(fixOps.length).toBeGreaterThan(0);
     expect(fixOps[0]!.criterionId).toBe('autoFix.url_substitute');
   });
@@ -1003,8 +998,7 @@ describe('all flags on — URL fabrication autoFix loop', () => {
     });
     const out = await verifyAndFinalize({
       taskId: 'tsk_f2',
-      answerText:
-        'Citation: https://totally-unrelated.example.org/x. ' + 'x'.repeat(60),
+      answerText: 'Citation: https://totally-unrelated.example.org/x. ' + 'x'.repeat(60),
     });
     // Phase 1 follow-up: url_drop now removes the fabricated URL
     // entirely (no placeholder text). The recheck passes because
@@ -1143,8 +1137,7 @@ describe('full tier triggers Qwen semantic verifier', () => {
       confidence: 'observed',
     });
     const semanticAdapter = makeStubClient('{"status":"pass","issues":[]}');
-    const answerText =
-      '本场 GMV ¥100000，客单价 ¥80。' + 'x'.repeat(220);
+    const answerText = '本场 GMV ¥100000，客单价 ¥80。' + 'x'.repeat(220);
     const out = await verifyAndFinalize({
       taskId: 'tsk_full1',
       answerText,
@@ -1501,7 +1494,8 @@ describe('recheckPostFormat — formatter-induced regressions', () => {
 
   it('does not flag when content actually grew (cosmetic re-format)', () => {
     const before = '1. iPhone ¥6999 https://a.com\n2. iPad ¥4999 https://b.com';
-    const after = '推荐如下：\n1. iPhone ¥6999 https://a.com\n2. iPad ¥4999 https://b.com\n\n以上数据更新于 2026 年。';
+    const after =
+      '推荐如下：\n1. iPhone ¥6999 https://a.com\n2. iPad ¥4999 https://b.com\n\n以上数据更新于 2026 年。';
     const res = recheckPostFormat(before, after);
     expect(res.downgrade).toBe(false);
   });
@@ -1590,5 +1584,94 @@ describe('extractFailedChecks — surfaces criterionType for SPA banner', () => 
       ],
     });
     expect(out).toEqual([{ type: 'unknown', detail: 'something broke' }]);
+  });
+});
+
+describe('persistence re-check after a failed verdict (FIX-BATCH-A)', () => {
+  const enable = () =>
+    setFeatureFlagsForTest({
+      EVIDENCE_LEDGER: true,
+      EXECUTION_CONTRACT: true,
+      EXECUTION_VERIFIER: true,
+    });
+
+  it('never turns the safety notice of a failed answer into a verified completion', async () => {
+    enable();
+    const taskId = 'tsk_notice_recheck';
+    initExecution({
+      taskId,
+      intent: '打开36kr首页，总结今天前三条新闻，提供原标题、发布日期和可核实链接。',
+      executionMode: 'browser',
+    });
+    recordEvidence(taskId, {
+      fact: 'final_url=https://36kr.com/',
+      sourceType: 'browser_state',
+      sourceDetail: 'terminal',
+      confidence: 'observed',
+    });
+    const answer = [1, 2, 3]
+      .map((i) => `${i}. 标题${i}\n   发布日期：2026-10-08\n   链接：https://36kr.com/`)
+      .join('\n');
+    const primary = await verifyAndFinalize({ taskId, answerText: answer });
+    expect(primary.verification?.passed).toBe(false);
+    expect(primary.finalText).toContain('未能给出可验证的结果');
+    const persisted = await finalizeAnswerForPersistence({
+      taskId,
+      answerText: primary.finalText,
+      priorVerification: primary.verification,
+    });
+    // Before: the notice itself re-verified as a pass → completed + verified.
+    expect(persisted.verification?.passed).toBe(false);
+    expect(deriveFinalStatus('completed', persisted.verification)).toBe('failed');
+    if (!persisted.verification) throw new Error('expected a verdict');
+    expect(extractFailedChecks(persisted.verification)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'list_item_sources',
+          detail: expect.stringContaining('第 1 条缺少独立来源链接'),
+        }),
+      ]),
+    );
+    disposeExecution(taskId);
+  });
+});
+
+describe('list failures keep a draft that declares its gaps (FIX-BATCH-A)', () => {
+  const run = async (taskId: string, answerText: string) => {
+    setFeatureFlagsForTest({
+      EVIDENCE_LEDGER: true,
+      EXECUTION_CONTRACT: true,
+      EXECUTION_VERIFIER: true,
+    });
+    initExecution({
+      taskId,
+      intent: '在当前京东降噪耳机搜索页，告诉我前三个商品的名称和价格，并附商品链接。',
+      executionMode: 'browser',
+    });
+    const out = await verifyAndFinalize({ taskId, answerText });
+    disposeExecution(taskId);
+    return out;
+  };
+
+  it('fails, but keeps names and prices when the links are declared missing', async () => {
+    const answer = [1, 2, 3]
+      .map(
+        (i) =>
+          `${i}. **名称**：耳机${i}\n   **价格**：¥${i}299.00\n   **商品链接**：未获取到（推广页没有商品详情链接）`,
+      )
+      .join('\n\n');
+    const out = await run('tsk_jd_declared', answer);
+    expect(deriveFinalStatus('completed', out.verification)).toBe('failed');
+    expect(out.finalText).toContain('未能给出可验证的结果');
+    expect(out.finalText).toContain('已保留的中间结果');
+    expect(out.finalText).toContain('¥3299.00');
+  });
+
+  it('does not keep a draft that hides the gap behind a reused link', async () => {
+    const answer = [1, 2, 3]
+      .map((i) => `${i}. 耳机${i} ¥${i}99 https://re.jd.com/search?keyword=x`)
+      .join('\n');
+    const out = await run('tsk_jd_hidden', answer);
+    expect(out.finalText).not.toContain('已保留的中间结果');
   });
 });

@@ -100,8 +100,8 @@ const STATUS_TOKENS: Record<AdminPartnerStatusKind, Record<string, AdminPartnerS
     },
     rejected: {
       label: '已拒绝',
-      textClass: 'text-[#EA1F59]',
-      bgClass: 'bg-[#EA1F59]/10',
+      textClass: 'text-[#FF0061]',
+      bgClass: 'bg-[#FF0061]/10',
     },
   },
   order: {
@@ -112,8 +112,8 @@ const STATUS_TOKENS: Record<AdminPartnerStatusKind, Record<string, AdminPartnerS
     },
     review_required: {
       label: '需复核',
-      textClass: 'text-[#EA1F59]',
-      bgClass: 'bg-[#EA1F59]/10',
+      textClass: 'text-[#FF0061]',
+      bgClass: 'bg-[#FF0061]/10',
     },
     completed: {
       label: '已完成',
@@ -144,8 +144,8 @@ const STATUS_TOKENS: Record<AdminPartnerStatusKind, Record<string, AdminPartnerS
     },
     rejected: {
       label: '已拒绝',
-      textClass: 'text-[#EA1F59]',
-      bgClass: 'bg-[#EA1F59]/10',
+      textClass: 'text-[#FF0061]',
+      bgClass: 'bg-[#FF0061]/10',
     },
     returned: {
       label: '已退回',
@@ -171,8 +171,8 @@ const STATUS_TOKENS: Record<AdminPartnerStatusKind, Record<string, AdminPartnerS
     },
     frozen: {
       label: '已冻结',
-      textClass: 'text-[#EA1F59]',
-      bgClass: 'bg-[#EA1F59]/10',
+      textClass: 'text-[#FF0061]',
+      bgClass: 'bg-[#FF0061]/10',
     },
   },
 };

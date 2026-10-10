@@ -1,3 +1,4 @@
+import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
 import { Check, ChevronDown, ChevronRight, ListChecks, Loader2, X } from 'lucide-react';
 import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -54,6 +55,10 @@ export function PlanCard({
 }: Props): JSX.Element {
   const [expanded, setExpanded] = React.useState(defaultExpanded);
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
+  const requestExternalLink = (href: string) => {
+    if (needsExternalLinkConfirmation(href)) setPendingHref(href);
+    else openExternalLink(href);
+  };
   // Re-sync expansion when the caller's default flips — happens when
   // a task transitions in-flight → terminal, where we want the plan
   // to fold itself on first render of the terminal state. If the
@@ -91,7 +96,7 @@ export function PlanCard({
         aria-expanded={expanded}
       >
         <span className="flex min-w-0 items-start gap-2.5">
-          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white text-[#EA1F59]">
+          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white text-[#FF0061]">
             <ListChecks className="h-3.5 w-3.5" />
           </span>
           <span className="min-w-0">
@@ -139,9 +144,9 @@ export function PlanCard({
                     rel="noopener noreferrer"
                     onClick={(e) => {
                       e.preventDefault();
-                      setPendingHref(safeHref);
+                      requestExternalLink(safeHref);
                     }}
-                    className="text-[#EA1F59] underline decoration-[#EA1F59]/35 underline-offset-2 hover:text-[#EA1F59] dark:text-[#EA1F59]"
+                    className="text-[#FF0061] underline decoration-[#FF0061]/35 underline-offset-2 hover:text-[#FF0061] dark:text-[#FF0061]"
                     {...rest}
                   >
                     {children}
@@ -166,7 +171,7 @@ export function PlanCard({
         onConfirm={() => {
           const href = pendingHref;
           setPendingHref(null);
-          if (href) window.open(href, '_blank', 'noopener,noreferrer');
+          if (href) openExternalLink(href);
         }}
       />
     </div>
@@ -221,14 +226,14 @@ function StatusPill({
   }
   if (state === 'failed') {
     return (
-      <span className={cn(cls, 'bg-[#EA1F59] text-white')} aria-label="failed">
+      <span className={cn(cls, 'bg-[#FF0061] text-white')} aria-label="failed">
         <X className="h-2.5 w-2.5" strokeWidth={3} />
       </span>
     );
   }
   if (state === 'running') {
     return (
-      <span className={cn(cls, 'animate-pulse-dot bg-[#EA1F59] text-white')} aria-label="running">
+      <span className={cn(cls, 'animate-pulse-dot bg-[#FF0061] text-white')} aria-label="running">
         <Loader2 className="h-2.5 w-2.5 animate-spin" />
       </span>
     );
@@ -241,5 +246,5 @@ function StatusPill({
 function planProgressFillTone(tone: 'idle' | 'running' | 'done' | 'failed'): string {
   if (tone === 'done') return 'bg-[#42C0EF]';
   if (tone === 'idle') return 'bg-[#ADADAD]';
-  return 'bg-[#EA1F59]';
+  return 'bg-[#FF0061]';
 }

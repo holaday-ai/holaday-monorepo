@@ -65,16 +65,7 @@ const PLATFORM_CARDS: ReadonlyArray<{
     label: NOTIFICATION_PLATFORM_LABEL.dingtalk,
     hint: 'oapi.dingtalk.com',
   },
-  {
-    value: 'custom',
-    label: NOTIFICATION_PLATFORM_LABEL.custom,
-    hint: '自定义通知地址 + 模板',
-  },
 ];
-
-const DEFAULT_CUSTOM_TEMPLATE = `{
-  "text": "{{title}}\\n{{message}}"
-}`;
 
 export function AddChannelModal({
   open,
@@ -88,16 +79,6 @@ export function AddChannelModal({
     initial?.platform ?? 'wecom',
   );
   const [webhookUrl, setWebhookUrl] = React.useState(initial?.webhookUrl ?? '');
-  const [templateJson, setTemplateJson] = React.useState(() => {
-    if (initial?.customTemplate) {
-      try {
-        return JSON.stringify(initial.customTemplate, null, 2);
-      } catch {
-        return DEFAULT_CUSTOM_TEMPLATE;
-      }
-    }
-    return DEFAULT_CUSTOM_TEMPLATE;
-  });
   const [testing, setTesting] = React.useState(false);
   const [testResult, setTestResult] = React.useState<
     { ok: boolean; message: string } | null
@@ -127,11 +108,6 @@ export function AddChannelModal({
     if (!open) return;
     setPlatform(initial?.platform ?? 'wecom');
     setWebhookUrl(initial?.webhookUrl ?? '');
-    setTemplateJson(
-      initial?.customTemplate
-        ? safeStringify(initial.customTemplate)
-        : DEFAULT_CUSTOM_TEMPLATE,
-    );
     setTestResult(null);
     setSaving(false);
   }, [open, initial]);
@@ -148,11 +124,7 @@ export function AddChannelModal({
   if (!open) return null;
 
   const buildDraft = (): ChannelDraft | { error: string } => {
-    return buildNotificationChannelDraft({
-      platform,
-      webhookUrl,
-      templateJson,
-    });
+    return buildNotificationChannelDraft({ platform, webhookUrl });
   };
 
   const handleTest = async (): Promise<void> => {
@@ -165,12 +137,10 @@ export function AddChannelModal({
     setTesting(true);
     setTestResult(null);
     try {
+      if (draft.platform === 'custom') return;
       const res = await trpc.notificationChannels.test.mutate({
         platform: draft.platform,
         webhookUrl: draft.webhookUrl,
-        ...(draft.platform === 'custom'
-          ? { customTemplate: draft.customTemplate }
-          : {}),
       });
       if (!mountedRef.current) return;
       if (res.ok) {
@@ -247,7 +217,7 @@ export function AddChannelModal({
             <label className="mb-2 block text-xs font-medium text-muted-foreground">
               平台
             </label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {PLATFORM_CARDS.map((p) => (
                 <button
                   type="button"
@@ -259,14 +229,14 @@ export function AddChannelModal({
                   className={cn(
                     'rounded-md border px-2 py-2 text-left transition-colors',
                     platform === p.value
-                      ? 'border-[#EA1F59]/70 bg-[#EA1F59]/10 shadow-[0_1px_3px_rgba(17,24,39,0.05)]'
-                      : 'border-[#DCDDDD] bg-white hover:border-[#EA1F59]/45 hover:bg-[#EFEFEF]/30 dark:border-white/10 dark:bg-card/85 dark:hover:bg-white/10',
+                      ? 'border-[#FF0061]/70 bg-[#FF0061]/10 shadow-[0_1px_3px_rgba(17,24,39,0.05)]'
+                      : 'border-[#DCDDDD] bg-white hover:border-[#FF0061]/45 hover:bg-[#EFEFEF]/30 dark:border-white/10 dark:bg-card/85 dark:hover:bg-white/10',
                   )}
                 >
                   <div
                     className={cn(
                       'text-sm font-medium',
-                      platform === p.value ? 'text-[#EA1F59]' : 'text-foreground',
+                      platform === p.value ? 'text-[#FF0061]' : 'text-foreground',
                     )}
                   >
                     {p.label}
@@ -296,32 +266,16 @@ export function AddChannelModal({
               }}
               placeholder="https://..."
               disabled={saving || testing}
-              className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none placeholder:text-muted-foreground/55 focus:border-[#EA1F59]/45 focus:ring-2 focus:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
+              className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none placeholder:text-muted-foreground/55 focus:border-[#FF0061]/45 focus:ring-2 focus:ring-[#FF0061]/10 dark:border-white/10 dark:bg-card"
               maxLength={2000}
               autoFocus
             />
           </div>
 
           {platform === 'custom' && (
-            <div>
-              <label
-                htmlFor="customTemplate"
-                className="mb-1 block text-xs font-medium text-muted-foreground"
-              >
-                自定义 JSON 模板（占位符：{'{{title}}'} {'{{message}}'} {'{{status}}'} {'{{taskName}}'}）
-              </label>
-              <textarea
-                id="customTemplate"
-                value={templateJson}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  updateDraft(() => setTemplateJson(next));
-                }}
-                rows={6}
-                disabled={saving || testing}
-                className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 font-mono text-xs outline-none focus:border-[#EA1F59]/45 focus:ring-2 focus:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
-              />
-            </div>
+            <p className="rounded-md border border-[#DCDDDD] bg-[#EFEFEF]/40 px-3 py-2 text-xs text-muted-foreground dark:border-white/10 dark:bg-white/5">
+              自定义 Webhook 已停用。请改选企业微信、飞书或钉钉，并粘贴官方机器人地址。
+            </p>
           )}
 
           <div className="flex items-center gap-3">
@@ -343,7 +297,7 @@ export function AddChannelModal({
                   'rounded-md border px-2.5 py-1.5',
                   testResult.ok
                     ? 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#595757] dark:text-foreground'
-                    : 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]',
+                    : 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]',
                 )}
               >
                 {testResult.ok ? (
@@ -369,7 +323,7 @@ export function AddChannelModal({
             <Button
               type="submit"
               disabled={saving || testing}
-              className="bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] hover:bg-[#EA1F59]/90"
+              className="bg-[#FF0061] text-white shadow-[0_4px_12px_rgba(255,0,97,0.16)] hover:bg-[#FF0061]/90"
             >
               {saving ? (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />
@@ -381,12 +335,4 @@ export function AddChannelModal({
       </div>
     </div>
   );
-}
-
-function safeStringify(v: unknown): string {
-  try {
-    return JSON.stringify(v, null, 2);
-  } catch {
-    return DEFAULT_CUSTOM_TEMPLATE;
-  }
 }

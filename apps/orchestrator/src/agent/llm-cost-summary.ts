@@ -5,7 +5,7 @@ import { llmCalls } from '../db/schema/llm-calls.js';
 export function costCoverageSelection() {
   return {
     unknownCostCalls: sql<number>`COUNT(*) - COUNT(${llmCalls.costUsd})`,
-    incompleteUsageCalls: sql<number>`COALESCE(SUM(CASE WHEN ${llmCalls.promptTokens} IS NULL OR ${llmCalls.completionTokens} IS NULL OR ${llmCalls.cacheReadTokens} IS NULL OR ${llmCalls.cacheWriteTokens} IS NULL THEN 1 ELSE 0 END), 0)`,
+    incompleteUsageCalls: sql<number>`COALESCE(SUM(CASE WHEN NOT (${llmCalls.purpose} IN ('media.image', 'media.video', 'media.tts') AND ${llmCalls.usageStatus} = 'complete') AND (${llmCalls.promptTokens} IS NULL OR ${llmCalls.completionTokens} IS NULL OR ${llmCalls.cacheReadTokens} IS NULL OR ${llmCalls.cacheWriteTokens} IS NULL  ) THEN 1 ELSE 0 END), 0)`,
   };
 }
 

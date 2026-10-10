@@ -251,7 +251,7 @@ export function shouldShowTrustSummary(input: TrustSummaryInput): boolean {
   if (input.verificationPassed === false) return true;
   if (failedCheckCount > 0) return true;
   if (input.failureLevel) return true;
-  return hasEvidence;
+  return input.verificationPassed === true && hasEvidence;
 }
 
 export function hasTrustEvidence(input: TrustEvidenceInput): boolean {
@@ -379,6 +379,15 @@ export function buildRecoveryActions(input: RecoveryInput): RecoveryAction[] {
     });
   }
 
+  if (checkTypes.has('list_item_sources')) {
+    actions.push({
+      kind: 'prefill',
+      label: '逐条补齐来源',
+      detail: '要求每条结果附自己的详情页链接，并写明缺失的字段。',
+      prompt: withIntent(intent, '请逐条列出，每条附该条自己的详情页链接（不要用首页或搜索页），拿不到的写明未获取到：'),
+    });
+  }
+
   if (
     checkTypes.has('ecommerce_rows') ||
     checkTypes.has('result_count') ||
@@ -435,7 +444,7 @@ function trustVerdict(input: {
     return '自动审核发现问题，请优先查看检查项和恢复建议。';
   }
   if (input.failureLevel) return '任务带有审核结论，请结合下方证据边界使用。';
-  return '未收到自动审核结论；本卡只展示已知证据，不给额外确定性。';
+  return '以下仅展示已保留的证据，关键事实请结合来源核对。';
 }
 
 function countVisibleSourceUrls(text?: string, currentUrl?: string | null): number {

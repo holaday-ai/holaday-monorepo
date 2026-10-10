@@ -13,7 +13,7 @@ import {
 
 describe('searchOverlayRowTone — P2-B resting tone', () => {
   it('failed → subtle red left border', () => {
-    expect(searchOverlayRowTone('failed')).toContain('rgba(234,31,89');
+    expect(searchOverlayRowTone('failed')).toContain('rgba(255,0,97');
   });
   it('partial_success → subtle amber left border', () => {
     expect(searchOverlayRowTone('partial_success')).toContain('rgba(255,201,16');

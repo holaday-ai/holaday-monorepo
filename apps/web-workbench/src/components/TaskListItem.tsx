@@ -117,6 +117,8 @@ export function TaskListItem({
       : `${taskDisplaySource(task)}\n${taskListItemSubtitle(task, liveSubStatus, elapsedNow)}`;
   return (
     <div
+      data-task-status={task.status}
+      data-selected={selected && !batchMode}
       onContextMenu={
         onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined
       }
@@ -129,9 +131,9 @@ export function TaskListItem({
       role={batchMode ? 'button' : undefined}
       title={rowTitle}
       className={cn(
-        'group relative flex w-full items-center gap-2 rounded-[8px] border border-transparent px-2.5 py-0.5 text-left transition-colors',
-        'hover:border-[#EA1F59]/14 hover:bg-[#EA1F59]/[0.035] dark:hover:border-[#EA1F59]/30 dark:hover:bg-[#EA1F59]/10',
-        selected && !batchMode && 'border-[#EA1F59]/22 bg-white/70 shadow-[0_8px_22px_rgba(234,31,89,0.06)] dark:bg-white/[0.05]',
+        'holaday-task-row group relative flex w-full items-center gap-2 rounded-[8px] border border-transparent px-2.5 py-0.5 text-left transition-colors',
+        'hover:border-[#FF0061]/14 hover:bg-[#FF0061]/[0.035] dark:hover:border-[#FF0061]/30 dark:hover:bg-[#FF0061]/10',
+        selected && !batchMode && 'border-[#FF0061]/22 bg-white/70 shadow-[0_8px_22px_rgba(255,0,97,0.06)] dark:bg-white/[0.05]',
         batchMode && batchChecked && 'border-[#57479C]/22 bg-[#57479C]/10 dark:bg-[#57479C]/20',
         batchMode && batchDisabled && 'opacity-50',
         batchMode && !batchDisabled && 'cursor-pointer',
@@ -140,7 +142,7 @@ export function TaskListItem({
       {selected && !batchMode && (
         <span
           aria-hidden
-          className="absolute inset-y-1.5 left-0 w-[2px] rounded-r bg-[#EA1F59]"
+          className="absolute inset-y-1.5 left-0 w-[2px] rounded-r bg-[#FF0061]"
         />
       )}
       {batchMode && (
@@ -178,9 +180,9 @@ export function TaskListItem({
           }}
           aria-pressed={selected && !batchMode ? true : undefined}
           className={cn(
-            'flex h-8 min-w-0 flex-1 items-center truncate bg-transparent text-left text-[13px] leading-5 outline-none focus-visible:ring-1 focus-visible:ring-[#EA1F59]/45',
+            'flex h-8 min-w-0 flex-1 items-center truncate bg-transparent text-left text-[13px] leading-5 outline-none focus-visible:ring-1 focus-visible:ring-[#FF0061]/45',
             task.status === 'failed' ? 'text-[#ADADAD]' : 'text-[#595757] dark:text-foreground/85',
-            selected && 'font-medium text-[#EA1F59] dark:text-[#EA1F59]',
+            selected && 'font-medium text-[#FF0061] dark:text-[#FF0061]',
           )}
         >
           {taskDisplayTitle(task)}
@@ -204,7 +206,7 @@ export function TaskListItem({
           e.stopPropagation();
           onContextMenu(task.taskId, e);
         }}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[#ADADAD] opacity-100 transition-opacity hover:bg-white hover:text-[#EA1F59] focus-visible:opacity-100 dark:hover:bg-white/10 lg:opacity-0 lg:group-hover:opacity-100"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[#ADADAD] opacity-100 transition-opacity hover:bg-white hover:text-[#FF0061] focus-visible:opacity-100 dark:hover:bg-white/10 lg:opacity-0 lg:group-hover:opacity-100"
         >
           <MoreHorizontal className="h-3.5 w-3.5" />
         </button>
@@ -259,7 +261,7 @@ function RenameInput({
         }
       }}
       onBlur={() => onCommit(value)}
-      className="min-w-0 flex-1 rounded border border-[#EA1F59]/40 bg-white px-1.5 py-0 text-[13px] leading-5 shadow-sm focus-visible:outline-none dark:bg-card"
+      className="min-w-0 flex-1 rounded border border-[#FF0061]/40 bg-white px-1.5 py-0 text-[13px] leading-5 shadow-sm focus-visible:outline-none dark:bg-card"
     />
   );
 }
@@ -268,7 +270,7 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
   return (
     <span
       className={cn(
-        'inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/35',
+        'holaday-status-dot inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/35',
         status === 'queued' && 'animate-pulse-dot bg-[#FFC910]',
         status === 'executing' && 'animate-pulse-dot bg-[#42C0EF]',
         // Awaiting-user + failed stand out — these are the rows the
@@ -281,7 +283,7 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
         // Codex Pack A4 — partial_success uses the brand yellow to
         // signal "look again" without reading as destructive.
         status === 'partial_success' && 'h-2 w-2 bg-[#FFC910]',
-        status === 'failed' && 'h-2 w-2 bg-[#EA1F59]',
+        status === 'failed' && 'h-2 w-2 bg-[#FF0061]',
         status === 'cancelled' && 'bg-muted-foreground/25',
       )}
       aria-hidden

@@ -9,6 +9,7 @@ import * as React from 'react';
  */
 export type ThemeMode = 'light' | 'dark' | 'system';
 const STORAGE_KEY = 'holaday.theme';
+let creativePageUsers = 0;
 
 function readStored(): ThemeMode {
   if (typeof localStorage === 'undefined') return 'system';
@@ -24,8 +25,10 @@ function systemPrefersDark(): boolean {
 
 function applyThemeClass(effective: 'light' | 'dark'): void {
   const root = document.documentElement;
-  if (effective === 'dark') root.classList.add('dark');
-  else root.classList.remove('dark');
+  const dark = creativePageUsers > 0 || effective === 'dark';
+  root.classList.toggle('dark', dark);
+  root.classList.toggle('holaday-creative-theme', creativePageUsers > 0);
+  root.style.colorScheme = dark ? 'dark' : 'light';
 }
 
 /**
@@ -83,4 +86,20 @@ export function bootstrapTheme(): void {
   const stored = readStored();
   const effective = stored === 'system' ? (systemPrefersDark() ? 'dark' : 'light') : stored;
   applyThemeClass(effective);
+}
+
+/** Apply the creative route theme to body portals as well as the shell, without
+ * persisting an override. Restore the latest saved/system preference on exit. */
+export function useCreativePageTheme(pathname: string): boolean {
+  const active = /^\/(video|image)\/?$/.test(pathname);
+  React.useLayoutEffect(() => {
+    if (!active) return;
+    creativePageUsers += 1;
+    bootstrapTheme();
+    return () => {
+      creativePageUsers -= 1;
+      bootstrapTheme();
+    };
+  }, [active]);
+  return active;
 }

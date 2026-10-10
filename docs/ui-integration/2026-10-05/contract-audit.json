@@ -1,0 +1,61 @@
+{
+  "base": "85329cb3",
+  "apiCallsitesChanged": [],
+  "protectedFiles": [
+    {
+      "file": "src/App.tsx",
+      "unchanged": true,
+      "brandColorOnly": false,
+      "sha256": "1a217e0378bca879bae94fab65fd30d7996cdfe0191455d7a4fd28b8ec793dcc"
+    },
+    {
+      "file": "src/components/BrowserPanel.tsx",
+      "unchanged": false,
+      "brandColorOnly": true,
+      "sha256": "81b9482b8f23bf82d54616232ea3fbc14b05c971a4bd6429dc28c30bfea6039a"
+    },
+    {
+      "file": "src/components/VncViewport.tsx",
+      "unchanged": true,
+      "brandColorOnly": false,
+      "sha256": "210a9fbb4337cf67f461dba848fd51104054d41c452f28c8171b1ef966aff762"
+    },
+    {
+      "file": "src/components/FailureHeaderCard.tsx",
+      "unchanged": false,
+      "brandColorOnly": true,
+      "sha256": "12538d52a1fcdd6aaee09097fdb49fbfd0ebd918444fe3f555fc512d683b1f29"
+    },
+    {
+      "file": "src/lib/task-failure-recovery.ts",
+      "unchanged": true,
+      "brandColorOnly": false,
+      "sha256": "528f86332e825319b6394723990ef49c3f18c2b0a717e580fd427bf76b37b3f6"
+    },
+    {
+      "file": "src/pages/admin/AdminModelsPage.tsx",
+      "unchanged": false,
+      "brandColorOnly": true,
+      "sha256": "b22820182fcf2407629bcd31278e2dfc689e055d29ee5677daea2a63780cc1ed"
+    },
+    {
+      "file": "src/pages/admin/AdminSelfCheckPage.tsx",
+      "unchanged": false,
+      "brandColorOnly": true,
+      "sha256": "b44d4752ab691929d8fa4f7ef05321f431e388755faadd169df7f3f4445db2d7"
+    },
+    {
+      "file": "src/lib/trpc.ts",
+      "unchanged": true,
+      "brandColorOnly": false,
+      "sha256": "c9ca622702828039a1f890c0a0f065e1952a794699587c22f409ba5a7e14b2a6"
+    },
+    {
+      "file": "src/lib/ws.ts",
+      "unchanged": true,
+      "brandColorOnly": false,
+      "sha256": "6f1bf62078cc27dcce475e945a1564aee6ddf465451c902a9ed3326bf85a7c6b"
+    }
+  ],
+  "backendSharedOpsChanges": []
+}

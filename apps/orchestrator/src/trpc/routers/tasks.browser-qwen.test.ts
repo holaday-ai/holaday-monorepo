@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as classifier from '../../agent/intent-classifier.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { env } from '../../config/env.js';
@@ -20,6 +20,11 @@ import type { Context } from '../context.js';
 import { tasksRouter } from './tasks.js';
 
 const original = { ...env };
+// The scripted Qwen fixture speaks the legacy coordinate protocol; the default
+// executor is unified since batch 08, so pin the rollback mode here.
+beforeEach(() => {
+  Object.assign(env, { BROWSER_EXECUTOR: 'legacy' });
+});
 afterEach(() => {
   vi.unstubAllEnvs();
   reloadFeatureFlagsForTest();
@@ -28,6 +33,15 @@ afterEach(() => {
 });
 
 it.each([
+  'v2-offline',
+  'v2-grant',
+  // FIX-PR250: ordinary login / private-data wording, with and without an
+  // explicit public-cloud choice, is held before model preflight and quota.
+  'v2-private-repo',
+  'v2-inbox-public-cloud',
+  // FIX-PR252: routing flag OFF — the retired cookie sync must not send a
+  // login-required task to a logged-out cloud browser.
+  'v2-flag-off-identity',
   'ready',
   'timeout',
   'disabled',
@@ -38,13 +52,24 @@ it.each([
   'local-file',
   'ordinary',
 ] as const)('formal Qwen browser task admission and execution: %s', async (scenario) => {
+  const isV2 = scenario.startsWith('v2-');
+  if (isV2) {
+    if (scenario !== 'v2-flag-off-identity') vi.stubEnv('USER_BROWSER_ROUTING_V2', 'true');
+    vi.spyOn(extensionWs, 'hasConnectedExtension').mockReturnValue(
+      scenario === 'v2-grant' || scenario === 'v2-inbox-public-cloud',
+    );
+  }
+  const awaiting = vi
+    .spyOn(TaskRepository.prototype, 'persistAwaitingUser')
+    .mockResolvedValue({ persisted: true });
   const isLocal = scenario === 'local' || scenario === 'local-file';
   Object.assign(env, {
     ANTHROPIC_API_KEY: '',
     AGENT_MODE: 'legacy',
-    QWEN_CORE_ROLLOUT_MODE: 'synthetic',
     QWEN_CORE_ALLOWLIST: 'usr_browser_qwen',
-    QWEN_CORE_ENABLED_LANES: scenario === 'disabled' ? '' : 'browser',
+    // Qwen is on by default; the env can only switch it off (kill switch).
+    QWEN_CORE_ROLLOUT_MODE: scenario === 'disabled' ? 'off' : 'synthetic',
+    QWEN_CORE_ENABLED_LANES: 'browser',
     QWEN_MESSAGES_ADAPTER_ENABLED: true,
     DASHSCOPE_CN_API_KEY: scenario === 'credentials' ? '' : 'synthetic-cn',
     DASHSCOPE_API_KEY: '',
@@ -101,7 +126,7 @@ it.each([
       if (call.extensionClientId !== '48a8a099-0987-40e3-aa14-fb4545f9a003')
         throw new Error('wrong connection');
       const command = call.args?.session;
-      if (command?.op === 'act') effects.push('local-click');
+      if (command?.op === 'act') effects.push('local-act');
       const observation = {
         tabId: 42,
         origin: 'https://work.example',
@@ -178,8 +203,11 @@ it.each([
                                 '[{"name":"Alpha","score":2},{"name":"Beta, Inc","score":3}]',
                             }
                           : {
+                              // Clicks in the user's Chrome go to a human handoff
+                              // until targets are host-verified; typing still runs.
                               action: {
-                                kind: 'click',
+                                kind: 'type',
+                                payload: { text: '已修改' },
                                 selector: {
                                   description: 'Save',
                                   strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
@@ -262,13 +290,32 @@ it.each([
                 modelDataRegion: scenario === 'region' ? null : 'cn',
               },
             ]
-          : 'count' in projection
-            ? [{ count: 0 }]
-            : scenario === 'local-file' && 'id' in projection && 'userId' in projection
-              ? [{ id: 41, userId: 41 }]
-              : Object.keys(projection).length === 1 && 'id' in projection
-                ? [{ id: 41 }]
-                : [];
+          : isV2 && 'status' in projection
+            ? [
+                {
+                  id: 77,
+                  status: 'awaiting_user',
+                  intent: '查看我的京东订单',
+                  result: {
+                    metadata: {
+                      browserSource: 'local-chrome',
+                      ...(scenario === 'v2-flag-off-identity'
+                        ? { browserRoutingAwaiting: 'extension_offline' }
+                        : {}),
+                    },
+                  },
+                  awaitingQuestion: '请连接插件并重新选择页面',
+                },
+              ]
+            : isV2 && 'modelDataRegion' in projection
+              ? [{ id: 41, modelDataRegion: 'cn' }]
+              : 'count' in projection
+                ? [{ count: 0 }]
+                : scenario === 'local-file' && 'id' in projection && 'userId' in projection
+                  ? [{ id: 41, userId: 41 }]
+                  : Object.keys(projection).length === 1 && 'id' in projection
+                    ? [{ id: 41 }]
+                    : [];
       const query = {
         where: () => query,
         orderBy: () => query,
@@ -312,7 +359,7 @@ it.each([
     req: {},
     res: {},
     planner: {},
-    playwrightExecutor: scenario === 'executor' || isLocal ? null : executor,
+    playwrightExecutor: scenario === 'executor' || isLocal || isV2 ? null : executor,
     executionRouter: null,
     browserPool: null,
     taskQueue: null,
@@ -332,10 +379,18 @@ it.each([
       : {}),
   } as unknown as Context;
   const pending = tasksRouter.createCaller(ctx).create({
-    intent:
-      scenario === 'local-file' ? '从当前 Chrome 页面生成可下载 CSV' : '查看网页内容并点击详情',
+    intent: isV2
+      ? scenario === 'v2-private-repo'
+        ? '登录 GitHub 后读取私有仓库列表'
+        : scenario === 'v2-inbox-public-cloud'
+          ? '查看 Gmail 收件箱'
+          : '查看我的京东订单'
+      : scenario === 'local-file'
+        ? '从当前 Chrome 页面生成可下载 CSV'
+        : '查看网页内容并点击详情',
     mode: 'auto',
     expertMode: 'normal',
+    ...(scenario === 'v2-inbox-public-cloud' ? { browserPreference: 'cloud-public' as const } : {}),
     ...(isLocal
       ? {
           localChrome: {
@@ -354,6 +409,45 @@ it.each([
     return;
   }
   const result = await pending;
+  if (isV2) {
+    expect(result.status).toBe('awaiting_user');
+    expect(consume).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
+    // FIX-D11: every identity wait carries the connection marker; no public-cloud fallback.
+    if (scenario !== 'v2-grant') {
+      const connection = {
+        reason: scenario === 'v2-inbox-public-cloud' ? 'selection_required' : 'extension_offline',
+        publicCloudAllowed: false,
+      };
+      expect((result as { browserConnection?: unknown }).browserConnection).toEqual(connection);
+      expect(broadcast).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          type: 'server.supercar.awaiting_user',
+          browserConnection: connection,
+        }),
+      );
+      expect(awaiting).toHaveBeenCalledWith(
+        expect.objectContaining({
+          result: expect.objectContaining({
+            metadata: expect.objectContaining({ browserConnection: connection }),
+          }),
+        }),
+      );
+      expect((result as { question: string }).question).toContain('需要连接 HOLA DAY Chrome 插件');
+    }
+    expect(createAdapter).not.toHaveBeenCalled();
+    expect(terminal).not.toHaveBeenCalled();
+    expect(awaiting).toHaveBeenCalledWith(expect.objectContaining({ awaitingKind: 'permission' }));
+    const replied = await tasksRouter
+      .createCaller(ctx)
+      .reply({ taskId: result.taskId, message: '继续' });
+    expect(replied).toEqual({ ok: true, state: 'stillAwaiting' });
+    expect(consume).not.toHaveBeenCalled();
+    expect(createAdapter).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
+    return;
+  }
   if (scenario === 'disabled' || scenario === 'region' || scenario === 'credentials') {
     expect(result.status).toBe('failed');
     expect(consume).not.toHaveBeenCalled();
@@ -437,7 +531,7 @@ it.each([
     expect(consume).toHaveBeenCalledTimes(charged);
     expect(TaskRepository.prototype.insertTask).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ sourceContext: { browserSource: 'local-chrome' } }),
+      expect.objectContaining({ executionMode: 'browser', sourceContext: { browserSource: 'local-chrome' } }),
     );
     releaseModel();
   }
@@ -450,7 +544,7 @@ it.each([
         terminal: terminal.mock.calls,
       }),
       // Qwen emits 0..1000 coordinates: floor(120*1280/1000), floor(80*720/1000).
-    ).toEqual(scenario === 'local' ? ['local-click'] : ['153,57']),
+    ).toEqual(scenario === 'local' ? ['local-act'] : ['153,57']),
   );
   await vi.waitFor(() => expect(terminal).toHaveBeenCalled());
   if (scenario === 'ordinary') {

@@ -6,6 +6,7 @@ import {
   imageResultActions,
 } from '@/lib/image-history-row';
 import { trpc } from '@/lib/trpc';
+import { imageModelLabel } from '@/types/image';
 import type { UiTask } from '@/types/task';
 import {
   Archive,
@@ -55,10 +56,10 @@ export function ImageResultPanel({
       <section
         role="status"
         aria-live="polite"
-        className="rounded-[22px] border border-[#E8E0E8] bg-white px-5 py-5 shadow-[0_12px_32px_rgba(62,48,69,0.05)]"
+        className="rounded-[22px] border border-[var(--creative-line,#E8E0E8)] bg-[var(--creative-surface,#fff)] px-5 py-5 shadow-[0_12px_32px_rgba(62,48,69,0.05)]"
       >
         <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#F0E9FA] text-[#73529B]">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--creative-surface,#F0E9FA)] text-[var(--creative-muted,#73529B)]">
             {state.spinning ? (
               <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
             ) : (
@@ -66,8 +67,8 @@ export function ImageResultPanel({
             )}
           </span>
           <div>
-            <h2 className="text-sm font-semibold text-[#403743]">{state.title}</h2>
-            <p className="mt-1 text-xs leading-5 text-[#7B717F]">{state.detail}</p>
+            <h2 className="text-sm font-semibold text-[var(--creative-ink,#403743)]">{state.title}</h2>
+            <p className="mt-1 text-xs leading-5 text-[var(--creative-muted,#7B717F)]">{state.detail}</p>
           </div>
         </div>
       </section>
@@ -103,40 +104,40 @@ export function ImageResultPanel({
       aria-live={compact ? undefined : 'polite'}
       className={
         compact
-          ? 'rounded-[20px] border border-[#E8E0E8] bg-[#FFFDF9] p-4'
-          : 'rounded-[24px] border border-[#E8E0E8] bg-[#FFFDF9] p-5 shadow-[0_14px_36px_rgba(62,48,69,0.05)] sm:p-6'
+          ? 'rounded-[20px] border border-[var(--creative-line,#E8E0E8)] bg-[var(--creative-surface,#FFFDF9)] p-4'
+          : 'rounded-[24px] border border-[var(--creative-line,#E8E0E8)] bg-[var(--creative-surface,#FFFDF9)] p-5 shadow-[0_14px_36px_rgba(62,48,69,0.05)] sm:p-6'
       }
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-semibold text-[#3E3542]">
+            <h2 className="text-base font-semibold text-[var(--creative-ink,#3E3542)]">
               {imageHistoryDisplayTitle(row)}
             </h2>
             {row.status === 'partial_success' ? (
-              <span className="rounded-full bg-[#FFF0D8] px-2.5 py-1 text-[11px] font-semibold text-[#9A6226]">
+              <span className="rounded-full bg-[#FFF0D8] px-2.5 py-1 text-[11px] font-semibold text-[var(--creative-muted,#9A6226)]">
                 部分完成
               </span>
             ) : (
-              <span className="rounded-full bg-[#F0EBF9] px-2.5 py-1 text-[11px] font-semibold text-[#725495]">
+              <span className="rounded-full bg-[var(--creative-surface,#F0EBF9)] px-2.5 py-1 text-[11px] font-semibold text-[var(--creative-muted,#725495)]">
                 已完成
               </span>
             )}
             {verified ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-[#E9F8F1] px-2.5 py-1 text-[11px] font-semibold text-[#28745C]">
+              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--creative-surface,#E9F8F1)] px-2.5 py-1 text-[11px] font-semibold text-[#28745C]">
                 <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
                 已核对主角一致性
               </span>
             ) : null}
             {filteredCount > 0 ? (
-              <span className="rounded-full bg-[#FFF0D8] px-2.5 py-1 text-[11px] font-semibold text-[#9A6226]">
+              <span className="rounded-full bg-[#FFF0D8] px-2.5 py-1 text-[11px] font-semibold text-[var(--creative-muted,#9A6226)]">
                 已筛除 {filteredCount} 张
               </span>
             ) : null}
           </div>
-          <p className="mt-1 text-xs text-[#837985]">
+          <p className="mt-1 text-xs text-[var(--creative-muted,#837985)]">
             实际生成 {row.downloads.length} 张 · {row.imageOptions.aspectRatio} ·{' '}
-            {row.imageOptions.model === 'nano_banana_pro' ? 'Nano Banana Pro' : 'Nano Banana 2'}
+            {imageModelLabel(row.imageOptions.model)}
           </p>
         </div>
       </div>
@@ -150,10 +151,10 @@ export function ImageResultPanel({
           return (
             <div
               key={download.fileId}
-              className="rounded-[18px] border border-[#E9E2E8] bg-white p-3"
+              className="rounded-[18px] border border-[var(--creative-line,#E9E2E8)] bg-[var(--creative-surface,#fff)] p-3"
             >
               {expired ? (
-                <div className="flex min-h-24 items-center justify-center gap-2 rounded-[14px] bg-[#FFF5E8] px-4 text-sm font-medium text-[#93612D]">
+                <div className="flex min-h-24 items-center justify-center gap-2 rounded-[14px] bg-[var(--creative-surface,#FFF5E8)] px-4 text-sm font-medium text-[var(--creative-muted,#93612D)]">
                   <Clock3 className="h-4 w-4" aria-hidden />
                   成片已过期
                 </div>
@@ -165,7 +166,7 @@ export function ImageResultPanel({
                   type="button"
                   disabled={continuationDisabled || !actions.continueEdit}
                   onClick={() => void onContinue('continue_edit', row, download.fileId)}
-                  className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#DDCFE7] bg-[#F8F3FB] px-3 text-xs font-semibold text-[#6F4E8B] transition-colors hover:bg-[#F2EAF8] disabled:cursor-not-allowed disabled:opacity-45 motion-reduce:transition-none"
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[var(--creative-line,#DDCFE7)] bg-[var(--creative-surface,#F8F3FB)] px-3 text-xs font-semibold text-[var(--creative-muted,#6F4E8B)] transition-colors hover:bg-[var(--creative-surface,#F2EAF8)] disabled:cursor-not-allowed disabled:opacity-45 motion-reduce:transition-none"
                 >
                   <RefreshCcw className="h-3.5 w-3.5" aria-hidden />
                   继续改这张
@@ -180,7 +181,7 @@ export function ImageResultPanel({
                   }
                   title={saved ? '已保存到文件库' : '保存到文件库'}
                   onClick={() => void saveOutput(download.fileId)}
-                  className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#E4DFE4] bg-white px-3 text-xs font-semibold text-[#5F5762] transition-colors hover:bg-[#F9F6F8] disabled:cursor-not-allowed disabled:opacity-55 motion-reduce:transition-none"
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[var(--creative-line,#E4DFE4)] bg-[var(--creative-surface,#fff)] px-3 text-xs font-semibold text-[var(--creative-ink,#5F5762)] transition-colors hover:bg-[var(--creative-surface,#F9F6F8)] disabled:cursor-not-allowed disabled:opacity-55 motion-reduce:transition-none"
                 >
                   {saved ? (
                     <Check className="h-3.5 w-3.5" aria-hidden />
@@ -195,13 +196,13 @@ export function ImageResultPanel({
         })}
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2 border-t border-[#EEE7ED] pt-4">
+      <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--creative-line,#EEE7ED)] pt-4">
         {actions.keepSubject ? (
           <button
             type="button"
             disabled={continuationDisabled}
             onClick={() => void onContinue('keep_subject', row)}
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#D9CFE5] bg-[#F7F2FB] px-3 text-xs font-semibold text-[#6F4E8B] transition-colors hover:bg-[#F1EAF7] disabled:cursor-wait disabled:opacity-45 motion-reduce:transition-none"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[var(--creative-line,#D9CFE5)] bg-[var(--creative-surface,#F7F2FB)] px-3 text-xs font-semibold text-[var(--creative-muted,#6F4E8B)] transition-colors hover:bg-[var(--creative-surface,#F1EAF7)] disabled:cursor-wait disabled:opacity-45 motion-reduce:transition-none"
           >
             <Sparkles className="h-3.5 w-3.5" aria-hidden />
             保持主角
@@ -211,14 +212,14 @@ export function ImageResultPanel({
           type="button"
           disabled={continuationDisabled}
           onClick={() => void onContinue('reuse_settings', row)}
-          className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#E4DFE4] bg-white px-3 text-xs font-semibold text-[#5F5762] transition-colors hover:bg-[#F9F6F8] disabled:cursor-wait disabled:opacity-45 motion-reduce:transition-none"
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[var(--creative-line,#E4DFE4)] bg-[var(--creative-surface,#fff)] px-3 text-xs font-semibold text-[var(--creative-ink,#5F5762)] transition-colors hover:bg-[var(--creative-surface,#F9F6F8)] disabled:cursor-wait disabled:opacity-45 motion-reduce:transition-none"
         >
           <Copy className="h-3.5 w-3.5" aria-hidden />
           复用设置
         </button>
       </div>
       {saveError ? (
-        <p role="alert" className="mt-3 text-xs text-[#B4234D]">
+        <p role="alert" className="mt-3 text-xs text-[var(--creative-muted,#B4234D)]">
           {saveError}
         </p>
       ) : null}

@@ -11,6 +11,27 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectsPage } from './ProjectsPage';
 
+async function chooseWorkspace(user: ReturnType<typeof userEvent.setup>, name: RegExp | string) {
+  await user.click(screen.getByTitle('切换工作区'));
+  await user.click(await screen.findByRole('menuitem', { name }));
+}
+
+// Inspect the actual menu, including while a pending mutation has a modal open.
+async function workspaceOption(name: RegExp | string) {
+  const trigger = screen.queryByTitle('切换工作区');
+  if (!trigger) return null;
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerId: 1, pointerType: 'mouse' });
+  const menu = await screen.findByRole('menu');
+  const option = within(menu).queryByRole('menuitem', { name });
+  fireEvent.keyDown(menu, { key: 'Escape' });
+  return option;
+}
+
+async function switchPendingWorkspace(name: RegExp | string) {
+  fireEvent.pointerDown(screen.getByTitle('切换工作区'), { button: 0, ctrlKey: false, pointerId: 1, pointerType: 'mouse' });
+  fireEvent.click(await screen.findByRole('menuitem', { name }));
+}
+
 const workspaceSwitcherCapture = vi.hoisted(() => ({
   onSelectOrganization: null as ((organizationId: string | null) => void) | null,
 }));
@@ -63,6 +84,7 @@ vi.mock('@/components/AppShell', () => ({
 
 vi.mock('@/lib/trpc', () => ({
   trpc: {
+    tasks: { list: { query: vi.fn(async () => ({ tasks: [], nextCursor: null })) } },
     organizations: {
       list: { query: api.organizationsList },
       create: { mutate: api.organizationsCreate },
@@ -412,13 +434,13 @@ async function openDesignAlongsideOperations(): Promise<ReturnType<typeof userEv
   );
   api.organizationMembers.mockResolvedValue(ORGANIZATION_MEMBERS);
   renderPage();
-  await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+  await chooseWorkspace(user, /设计团队/);
   await screen.findByText('增长计划');
   return user;
 }
 
 function expectPersonalSurfaceWithoutTeamControls(): void {
-  expect(screen.getByText('按项目分组管理你的任务')).toBeTruthy();
+  expect(screen.getByText('让相关的任务与资料，有一个共同的归处。')).toBeTruthy();
   expect(screen.getByText('个人研究')).toBeTruthy();
   expect(screen.getByRole('button', { name: '新建项目' })).toBeTruthy();
   expect(screen.queryByRole('region', { name: '工作区切换' })).toBeNull();
@@ -438,7 +460,7 @@ async function openOrganization(
   api.projectsList.mockResolvedValue([TEAM_PROJECT_RESPONSE]);
   api.organizationMembers.mockResolvedValue(ORGANIZATION_MEMBERS);
   renderPage();
-  await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+  await chooseWorkspace(user, /设计团队/);
   await screen.findByText('增长计划');
   await screen.findByRole('region', { name: '团队成员' });
   return user;
@@ -451,7 +473,7 @@ async function selectOrganization(
   shell.teamProjectsEnabled = true;
   api.organizationsList.mockResolvedValue([ORGANIZATION_FIXTURES[role]]);
   renderPage();
-  await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+  await chooseWorkspace(user, /设计团队/);
   return user;
 }
 
@@ -460,7 +482,7 @@ describe('ProjectsPage team workspace gate', () => {
     const user = userEvent.setup();
     renderPage();
 
-    expect(screen.getByText('按项目分组管理你的任务')).toBeTruthy();
+    expect(screen.getByText('让相关的任务与资料，有一个共同的归处。')).toBeTruthy();
     expect(screen.getByRole('button', { name: '新建项目' })).toBeTruthy();
     expect(screen.getByText('个人研究')).toBeTruthy();
     expect(screen.queryByRole('region', { name: '工作区切换' })).toBeNull();
@@ -476,12 +498,12 @@ describe('ProjectsPage team workspace gate', () => {
     expect(document.activeElement).toBe(nameInput);
   });
 
-  it('restores the gate-off personal grid to three columns at the 1024px lg breakpoint', () => {
+  it('uses the approved two-column personal project grid', () => {
     renderPage();
 
     const personalCard = screen.getByText('个人研究').closest('article');
     const projectGrid = personalCard?.parentElement;
-    expect(projectGrid?.classList.contains('lg:grid-cols-3')).toBe(true);
+    expect(projectGrid?.classList.contains('sm:grid-cols-2')).toBe(true);
     expect(projectGrid?.classList.contains('xl:grid-cols-3')).toBe(false);
   });
 
@@ -516,7 +538,7 @@ describe('ProjectsPage team workspace gate', () => {
 
     resolvePersonal?.({ ok: true, projects: [] });
     resolveOrganizations?.([]);
-    await user.click(screen.getByRole('button', { name: '个人空间' }));
+    await chooseWorkspace(user, '个人空间');
   });
 
   it('keeps the existing delete explanation that returns personal tasks to the default list', async () => {
@@ -531,7 +553,7 @@ describe('ProjectsPage team workspace gate', () => {
     expect(within(dialog).getByText(/任务本身不会被删除/)).toBeTruthy();
   });
 
-  it('keeps the legacy personal-card destination on the workbench project query', async () => {
+  it('opens personal project details while preserving the project query', async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -539,7 +561,7 @@ describe('ProjectsPage team workspace gate', () => {
     expect(personalProjectButton).toBeTruthy();
     await user.click(personalProjectButton as HTMLButtonElement);
 
-    expect(screen.getByTestId('location-probe').textContent).toBe('/?project=prj_personal');
+    expect(screen.getByTestId('location-probe').textContent).toBe('/projects?project=prj_personal');
   });
 
   it('fails closed to the personal workspace if the rollout gate turns off after organization selection', async () => {
@@ -549,13 +571,13 @@ describe('ProjectsPage team workspace gate', () => {
     api.projectsList.mockResolvedValue([TEAM_PROJECT_RESPONSE]);
     api.organizationMembers.mockResolvedValue(ORGANIZATION_MEMBERS);
     const view = renderPage();
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     expect(await screen.findByText('增长计划')).toBeTruthy();
 
     shell.teamProjectsEnabled = false;
     view.rerender(pageElement());
 
-    expect(screen.getByText('按项目分组管理你的任务')).toBeTruthy();
+    expect(screen.getByText('让相关的任务与资料，有一个共同的归处。')).toBeTruthy();
     expect(screen.getByText('个人研究')).toBeTruthy();
     expect(screen.queryByRole('region', { name: '工作区切换' })).toBeNull();
     expect(screen.queryByRole('button', { name: '邀请成员' })).toBeNull();
@@ -585,8 +607,8 @@ describe('ProjectsPage organization workspace', () => {
     );
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: '个人项目' })).toBeTruthy();
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    expect(await screen.findByRole('heading', { name: '最近使用' })).toBeTruthy();
+    await chooseWorkspace(user, /设计团队/);
 
     await waitFor(() => expect(api.projectsList).toHaveBeenCalledTimes(1));
     expect(api.projectsList).toHaveBeenCalledWith({ organizationId: 'org_design' });
@@ -664,7 +686,7 @@ describe('ProjectsPage organization workspace', () => {
       },
     ]);
     renderPage();
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     await user.click(screen.getByRole('button', { name: '邀请成员' }));
     const ownerDialog = screen.getByRole('dialog', { name: '邀请成员加入设计团队' });
     expect(
@@ -672,7 +694,7 @@ describe('ProjectsPage organization workspace', () => {
     ).toBe('admin');
     await user.click(within(ownerDialog).getByRole('button', { name: '关闭邀请对话框' }));
 
-    await user.click(screen.getByRole('button', { name: /运营团队/ }));
+    await chooseWorkspace(user, /运营团队/);
     api.createInvitation.mockResolvedValue({
       invitationId: 'oinv_manager',
       inviteUrl: '/organizations/invitations/accept#token=manager-secret',
@@ -734,7 +756,7 @@ describe('ProjectsPage organization workspace', () => {
 
     expect(document.activeElement).toBe(select);
     expect(select.classList.contains('focus-visible:ring-2')).toBe(true);
-    expect(select.classList.contains('focus-visible:ring-[#EA1F59]/30')).toBe(true);
+    expect(select.classList.contains('focus-visible:ring-[#FF0061]/30')).toBe(true);
   });
 
   it('keeps new workspace, member, invitation, and creation targets at least 44px tall', async () => {
@@ -744,8 +766,7 @@ describe('ProjectsPage organization workspace', () => {
     const workspaceTargets = [
       within(workspace).getByRole('button', { name: '刷新团队空间' }),
       within(workspace).getByRole('button', { name: '创建团队' }),
-      within(workspace).getByRole('button', { name: '个人空间' }),
-      within(workspace).getByRole('button', { name: /设计团队/ }),
+      within(workspace).getByTitle('切换工作区'),
     ];
     const memberTargets = [
       within(members).getByRole('button', { name: '刷新团队成员' }),
@@ -823,7 +844,7 @@ describe('ProjectsPage organization workspace', () => {
       api.projectsList.mockResolvedValue([teamProject]);
       api.organizationMembers.mockResolvedValue(ORGANIZATION_MEMBERS);
       renderPage();
-      await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+      await chooseWorkspace(user, /设计团队/);
       await screen.findByText('增长计划');
 
       await user.click(screen.getByRole('button', { name: '项目 增长计划 操作' }));
@@ -852,7 +873,7 @@ describe('ProjectsPage organization workspace', () => {
     await user.click(within(organizationDialog).getByRole('button', { name: '创建团队' }));
     await waitFor(() => expect(api.organizationsCreate).toHaveBeenCalledWith({ name: '新团队' }));
 
-    await user.click(screen.getByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     await user.click(screen.getByRole('button', { name: '新建团队项目' }));
     const projectDialog = screen.getByRole('dialog', { name: '新建团队项目' });
     await user.type(within(projectDialog).getByLabelText('项目名称'), '发布节奏');
@@ -892,8 +913,7 @@ describe('ProjectsPage invitation plaintext lifecycle', () => {
     });
     renderPage();
 
-    const operationsWorkspace = await screen.findByRole('button', { name: /运营团队/ });
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     await user.click(screen.getByRole('button', { name: '邀请成员' }));
     const designDialog = screen.getByRole('dialog', { name: '邀请成员加入设计团队' });
     await user.selectOptions(
@@ -902,7 +922,7 @@ describe('ProjectsPage invitation plaintext lifecycle', () => {
     );
     await user.click(within(designDialog).getByRole('button', { name: '生成邀请链接' }));
 
-    fireEvent.click(operationsWorkspace);
+    await switchPendingWorkspace(/运营团队/);
     await user.click(await screen.findByRole('button', { name: '邀请成员' }));
     const operationsDialog = screen.getByRole('dialog', { name: '邀请成员加入运营团队' });
     expect(
@@ -1039,8 +1059,8 @@ describe('ProjectsPage invitation plaintext lifecycle', () => {
     await user.selectOptions(within(dialog).getByLabelText('直属上级（可选）'), 'omem_manager');
     await user.click(within(dialog).getByRole('button', { name: '生成邀请链接' }));
 
-    expect(await screen.findByRole('heading', { name: '个人项目' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+    expect(await screen.findByRole('heading', { name: '最近使用' })).toBeTruthy();
+    expect(await workspaceOption(/设计团队/)).toBeNull();
     expect(screen.queryByRole('dialog', { name: '邀请成员加入设计团队' })).toBeNull();
     expect(screen.queryByText('增长计划')).toBeNull();
     expect(screen.queryByText('Member')).toBeNull();
@@ -1106,12 +1126,12 @@ describe('ProjectsPage organization collection states', () => {
       .mockResolvedValueOnce([ORGANIZATION_FIXTURES.owner])
       .mockRejectedValueOnce(new Error('organization offline'));
     renderPage();
-    const organizationButton = await screen.findByRole('button', { name: /设计团队/ });
+    await waitFor(() => expect(api.organizationsList).toHaveBeenCalled());
 
     await user.click(screen.getByRole('button', { name: '刷新团队空间' }));
 
     expect(await screen.findByText('团队工作区列表更新失败，当前保留上次结果')).toBeTruthy();
-    expect(organizationButton.isConnected).toBe(true);
+    expect(await workspaceOption(/设计团队/)).toBeTruthy();
   });
 
   it.each([
@@ -1269,7 +1289,7 @@ describe('ProjectsPage organization collection states', () => {
         await Promise.resolve();
       });
 
-      expect(await screen.findByRole('button', { name: /设计团队/ })).toBeTruthy();
+      expect(await workspaceOption(/设计团队/)).toBeTruthy();
       expect(api.organizationsList).toHaveBeenCalledTimes(2);
       expect(screen.queryByText(/旧周期团队/)).toBeNull();
       expect(screen.queryByText(/已创建团队/)).toBeNull();
@@ -1328,7 +1348,7 @@ describe('ProjectsPage selected team-project collection states', () => {
           .mockRejectedValueOnce(new Error('projects offline'));
       }
       renderPage();
-      await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+      await chooseWorkspace(user, /设计团队/);
 
       if (state === 'stale-error') {
         await screen.findByText('增长计划');
@@ -1359,7 +1379,7 @@ describe('ProjectsPage selected team-project collection states', () => {
       expect(screen.getByRole('dialog', { name: '邀请成员加入设计团队' })).toBeTruthy();
       fireEvent.click(refreshWorkspace);
 
-      expect(await screen.findByRole('heading', { name: '个人项目' })).toBeTruthy();
+      expect(await screen.findByRole('heading', { name: '最近使用' })).toBeTruthy();
       expect(screen.queryByText('增长计划')).toBeNull();
       expect(screen.queryByText('Member')).toBeNull();
       expect(screen.queryByRole('dialog', { name: '邀请成员加入设计团队' })).toBeNull();
@@ -1456,8 +1476,8 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
         );
       }
 
-      expect(await screen.findByRole('heading', { name: '个人项目' })).toBeTruthy();
-      expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+      expect(await screen.findByRole('heading', { name: '最近使用' })).toBeTruthy();
+      expect(await workspaceOption(/设计团队/)).toBeNull();
       expect(screen.queryByText('增长计划')).toBeNull();
       expect(screen.queryByText('Member')).toBeNull();
       expect(screen.queryByRole('button', { name: '邀请成员' })).toBeNull();
@@ -1543,11 +1563,11 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     });
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     await screen.findByText('增长计划');
     await user.selectOptions(screen.getByLabelText('更改 Member 的角色'), 'manager');
     await waitFor(() => expect(api.updateMemberRole).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole('button', { name: /运营团队/ }));
+    await chooseWorkspace(user, /运营团队/);
     expect(await screen.findByText('运营节奏')).toBeTruthy();
     const operationsRole = screen.getByLabelText('更改 Ops Member 的角色') as HTMLSelectElement;
     expect(operationsRole.disabled).toBe(false);
@@ -1643,10 +1663,10 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     });
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     await user.selectOptions(screen.getByLabelText('更改 Current Admin 的角色'), 'member');
     await waitFor(() => expect(api.updateMemberRole).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole('button', { name: /运营团队/ }));
+    await chooseWorkspace(user, /运营团队/);
     expect(await screen.findByText('运营节奏')).toBeTruthy();
 
     await act(async () => {
@@ -1657,7 +1677,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     });
 
     await waitFor(() => expect(api.organizationsList).toHaveBeenCalledTimes(2));
-    await user.click(screen.getByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     expect(await screen.findByText('当前身份：管理员 · 3 位活跃成员')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '邀请成员' })).toBeNull();
     expect(screen.queryByRole('button', { name: '新建团队项目' })).toBeNull();
@@ -1710,8 +1730,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     api.deactivateMember.mockImplementation(() => lateDeactivation.promise);
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
-    const operationsWorkspace = screen.getByRole('button', { name: /运营团队/ });
+    await chooseWorkspace(user, /设计团队/);
     await user.click(screen.getByRole('button', { name: '移除 Current Admin' }));
     await user.click(
       within(screen.getByRole('dialog', { name: '移除这位团队成员？' })).getByRole('button', {
@@ -1719,7 +1738,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       }),
     );
     await waitFor(() => expect(api.deactivateMember).toHaveBeenCalledTimes(1));
-    fireEvent.click(operationsWorkspace);
+    await switchPendingWorkspace(/运营团队/);
     expect(await screen.findByText('运营节奏')).toBeTruthy();
 
     await act(async () => {
@@ -1730,7 +1749,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     });
 
     await waitFor(() => expect(api.organizationsList).toHaveBeenCalledTimes(2));
-    await user.click(screen.getByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     expect(await screen.findByText('当前身份：管理员 · 3 位活跃成员')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '邀请成员' })).toBeNull();
     expect(screen.queryByRole('button', { name: '新建团队项目' })).toBeNull();
@@ -1743,8 +1762,8 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       await Promise.resolve();
     });
 
-    expect(await screen.findByRole('heading', { name: '个人项目' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+    expect(await screen.findByRole('heading', { name: '最近使用' })).toBeTruthy();
+    expect(await workspaceOption(/设计团队/)).toBeNull();
   });
 
   it.each(OFFSCREEN_MUTATION_CASES)(
@@ -1753,11 +1772,10 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       const lateMutation = deferred<never>();
       deferWorkspaceMutation(action, lateMutation.promise);
       const user = await openDesignAlongsideOperations();
-      const operationsWorkspace = screen.getByRole('button', { name: /运营团队/ });
 
       await beginWorkspaceMutation(user, action);
       await waitFor(() => expect(workspaceMutationCallCount(action)).toBe(1));
-      fireEvent.click(operationsWorkspace);
+      await switchPendingWorkspace(/运营团队/);
       expect(await screen.findByText('运营节奏')).toBeTruthy();
 
       await act(async () => {
@@ -1768,7 +1786,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       });
 
       expect(screen.getByText('运营节奏')).toBeTruthy();
-      expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+      expect(await workspaceOption(/设计团队/)).toBeNull();
       expect(screen.queryByText(/失败/)).toBeNull();
     },
   );
@@ -1779,11 +1797,10 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     const user = await openDesignAlongsideOperations();
     const staleSelectWorkspace = workspaceSwitcherCapture.onSelectOrganization;
     expect(staleSelectWorkspace).not.toBeNull();
-    const operationsWorkspace = screen.getByRole('button', { name: /运营团队/ });
 
     await user.selectOptions(screen.getByLabelText('更改 Member 的角色'), 'manager');
     await waitFor(() => expect(api.updateMemberRole).toHaveBeenCalledTimes(1));
-    fireEvent.click(operationsWorkspace);
+    await switchPendingWorkspace(/运营团队/);
     expect(await screen.findByText('运营节奏')).toBeTruthy();
     await act(async () => {
       lateRoleUpdate.reject(trpcError('FORBIDDEN'));
@@ -1791,7 +1808,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+    expect(await workspaceOption(/设计团队/)).toBeNull();
     await act(async () => {
       staleSelectWorkspace?.(ORGANIZATION_FIXTURES.owner.organizationId);
       await Promise.resolve();
@@ -1801,8 +1818,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
 
     await user.click(screen.getByRole('button', { name: '刷新团队空间' }));
 
-    const restoredWorkspace = await screen.findByRole('button', { name: /设计团队/ });
-    await user.click(restoredWorkspace);
+    await chooseWorkspace(user, /设计团队/);
     expect(await screen.findByText('增长计划')).toBeTruthy();
   });
 
@@ -1826,10 +1842,10 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     api.updateMemberRole.mockImplementation(() => lateRoleUpdate.promise);
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     await user.selectOptions(screen.getByLabelText('更改 Member 的角色'), 'manager');
     await waitFor(() => expect(api.updateMemberRole).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole('button', { name: /运营团队/ }));
+    await chooseWorkspace(user, /运营团队/);
     expect(await screen.findByText('运营节奏')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '刷新团队空间' }));
     await waitFor(() => expect(api.organizationsList).toHaveBeenCalledTimes(2));
@@ -1840,7 +1856,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+    expect(await workspaceOption(/设计团队/)).toBeNull();
 
     await act(async () => {
       olderOrganizationList.resolve([ORGANIZATION_FIXTURES.owner, OPERATIONS_ORGANIZATION]);
@@ -1848,10 +1864,10 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+    expect(await workspaceOption(/设计团队/)).toBeNull();
 
     await user.click(screen.getByRole('button', { name: '刷新团队空间' }));
-    expect(await screen.findByRole('button', { name: /设计团队/ })).toBeTruthy();
+    expect(await workspaceOption(/设计团队/)).toBeTruthy();
   });
 
   it.each(OFFSCREEN_MUTATION_CASES)(
@@ -1860,11 +1876,10 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       const lateMutation = deferred<never>();
       deferWorkspaceMutation(action, lateMutation.promise);
       const user = await openDesignAlongsideOperations();
-      const operationsWorkspace = screen.getByRole('button', { name: /运营团队/ });
 
       await beginWorkspaceMutation(user, action);
       await waitFor(() => expect(workspaceMutationCallCount(action)).toBe(1));
-      fireEvent.click(operationsWorkspace);
+      await switchPendingWorkspace(/运营团队/);
       expect(await screen.findByText('运营节奏')).toBeTruthy();
 
       await act(async () => {
@@ -1875,8 +1890,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       });
 
       expect(screen.queryByText(new RegExp(failureCopy))).toBeNull();
-      const designWorkspace = screen.getByRole('button', { name: /设计团队/ });
-      await user.click(designWorkspace);
+      await chooseWorkspace(user, /设计团队/);
       expect(await screen.findByText('增长计划')).toBeTruthy();
     },
   );
@@ -1886,11 +1900,10 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     async (_label, action) => {
       const lateMutation = deferSuccessfulWorkspaceMutation(action);
       const user = await openDesignAlongsideOperations();
-      const operationsWorkspace = screen.getByRole('button', { name: /运营团队/ });
 
       await beginWorkspaceMutation(user, action);
       await waitFor(() => expect(workspaceMutationCallCount(action)).toBe(1));
-      fireEvent.click(operationsWorkspace);
+      await switchPendingWorkspace(/运营团队/);
       expect(await screen.findByText('运营节奏')).toBeTruthy();
 
       await act(async () => {
@@ -1902,7 +1915,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
 
       expect(screen.getByText('运营节奏')).toBeTruthy();
       expect(screen.queryByText(workspaceMutationSuccessCopy(action))).toBeNull();
-      expect(screen.getByRole('button', { name: /设计团队/ })).toBeTruthy();
+      expect(await workspaceOption(/设计团队/)).toBeTruthy();
     },
   );
 
@@ -1942,10 +1955,10 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     });
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     await user.selectOptions(screen.getByLabelText('更改 Member 的角色'), 'manager');
     await waitFor(() => expect(api.updateMemberRole).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole('button', { name: /运营团队/ }));
+    await chooseWorkspace(user, /运营团队/);
     expect(await screen.findByText('运营节奏')).toBeTruthy();
 
     await act(async () => {
@@ -2016,7 +2029,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     api.updateMemberRole.mockResolvedValue({ ok: true });
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     await user.selectOptions(screen.getByLabelText('更改 Current Admin 的角色'), 'member');
 
     expect(await screen.findByText('当前身份：成员 · 3 位活跃成员')).toBeTruthy();
@@ -2057,11 +2070,11 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     api.updateMemberRole.mockResolvedValue({ ok: true });
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     await user.selectOptions(screen.getByLabelText('更改 Renamed Account 的角色'), 'member');
 
     expect(await screen.findByText('团队工作区列表更新失败，当前保留上次结果')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /设计团队/ })).toBeTruthy();
+    expect(await workspaceOption(/设计团队/)).toBeTruthy();
     expect(screen.getByText('增长计划')).toBeTruthy();
     expect(screen.getByRole('region', { name: '团队成员' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '邀请成员' })).toBeNull();
@@ -2073,7 +2086,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     await user.keyboard('{Escape}');
 
     await user.click(screen.getByRole('button', { name: '刷新团队空间' }));
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     expect(await screen.findByText('当前身份：成员 · 3 位活跃成员')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '邀请成员' })).toBeNull();
     expect(screen.queryByRole('button', { name: '新建团队项目' })).toBeNull();
@@ -2110,7 +2123,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     api.updateReportingLine.mockResolvedValue({ ok: true });
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     await screen.findByText('增长计划');
     await user.selectOptions(screen.getByLabelText('设置 Member 的直属上级'), 'omem_owner');
     await waitFor(() => expect(api.organizationsList).toHaveBeenCalledTimes(2));
@@ -2120,7 +2133,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     await user.type(within(dialog).getByLabelText('团队名称'), '新团队');
     await user.click(within(dialog).getByRole('button', { name: '创建团队' }));
     await waitFor(() => expect(api.organizationsList).toHaveBeenCalledTimes(3));
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     expect(await screen.findByText('增长计划')).toBeTruthy();
 
     await act(async () => {
@@ -2130,7 +2143,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByRole('button', { name: /设计团队/ })).toBeTruthy();
+    expect(await workspaceOption(/设计团队/)).toBeTruthy();
     expect(screen.getByText('增长计划')).toBeTruthy();
     expect(screen.getByRole('button', { name: '邀请成员' })).toBeTruthy();
     expect(screen.queryByText(/团队工作区.*失败/)).toBeNull();
@@ -2149,7 +2162,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     api.deactivateMember.mockResolvedValue({ ok: true });
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     await user.click(await screen.findByRole('button', { name: '移除 Member' }));
     await user.click(
       within(screen.getByRole('dialog', { name: '移除这位团队成员？' })).getByRole('button', {
@@ -2183,7 +2196,7 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
     api.deactivateMember.mockResolvedValue({ ok: true });
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /设计团队/ }));
+    await chooseWorkspace(user, /设计团队/);
     await user.click(await screen.findByRole('button', { name: '移除 Current Admin' }));
     await user.click(
       within(screen.getByRole('dialog', { name: '移除这位团队成员？' })).getByRole('button', {
@@ -2191,9 +2204,19 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
       }),
     );
 
-    expect(await screen.findByRole('heading', { name: '个人项目' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /设计团队/ })).toBeNull();
+    expect(await screen.findByRole('heading', { name: '最近使用' })).toBeTruthy();
+    expect(await workspaceOption(/设计团队/)).toBeNull();
     expect(screen.queryByText('增长计划')).toBeNull();
     expect(screen.queryByRole('region', { name: '团队成员' })).toBeNull();
   });
+});
+
+it('hydrates project search from the URL and preserves other query parameters while typing', async () => {
+ const user=userEvent.setup();renderPage('/projects?q=研究&keep=1');
+ const input=screen.getByRole('textbox',{name:'搜索项目'});
+ expect((input as HTMLInputElement).value).toBe('研究');
+ await user.clear(input);await user.type(input,'保留');
+ const url=new URL(screen.getByTestId('location-probe').textContent!, 'https://example.test');
+ expect(url.searchParams.get('q')).toBe('保留');
+ expect(url.searchParams.get('keep')).toBe('1');
 });

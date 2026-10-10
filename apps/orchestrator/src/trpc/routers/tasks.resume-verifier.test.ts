@@ -276,22 +276,25 @@ describe('clarification resume semantic verification', () => {
       const f = fixture(options);
       await f.start();
       await vi.waitFor(() => expect(f.persistedVerification).toHaveLength(1));
+      // A missing verifier lane is recorded as semanticStatus 'unavailable' but
+      // no longer turns a deterministic pass into a failure or partial result.
       expect(f.persistedVerification[0]).toMatchObject({
-        passed: !('lanes' in options),
+        passed: true,
         semanticStatus: 'unavailable',
       });
       if ('lanes' in options) {
-        // With no regional verifier model, wire coverage cannot be certified.
         expect(f.persistedVerification[0]).toMatchObject({
-          inputCoverage: { complete: false, codes: ['VERIFICATION_CONTEXT_INVALID'] },
+          inputCoverage: { complete: true, codes: [] },
         });
-        expect(f.saved[0]?.status).not.toBe('completed');
+        expect(f.saved[0]?.status).toBe('completed');
       } else
         expect(f.saved[0]).toMatchObject({
           status: 'completed',
           summary: expect.stringContaining('语义复核暂不可用'),
         });
-      expect(f.calls).toHaveLength('lanes' in options ? 0 : 1);
+      // A network error before any response is retried once (llm-verifier
+      // maxRetries: 1); a bad JSON body is a real answer and is not retried.
+      expect(f.calls).toHaveLength('lanes' in options ? 0 : 'transportFailure' in options ? 2 : 1);
       expect(
         JSON.stringify({ saved: f.saved, frames: f.frames, logs: f.logger.error.mock.calls }),
       ).not.toMatch(/PRIVATE_PROVIDER_BODY|PRIVATE_INVALID_JSON/);

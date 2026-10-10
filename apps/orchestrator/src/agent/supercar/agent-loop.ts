@@ -1,3 +1,4 @@
+import { modelProviderFailureMessage } from '../../llm/provider-error-diagnostics.js';
 /**
  * Supercar agent loop.
  *
@@ -762,6 +763,10 @@ export interface SupercarEvidenceEvent {
 }
 
 export interface RunSupercarOptions {
+  /** BROWSER_EXECUTOR=unified only: web search (Qwen built-in, Firecrawl fallback). */
+  unifiedWebSearch?: (query: string) => Promise<Array<{ title: string; url: string }>>;
+  /** BROWSER_EXECUTOR=unified only: read-only page text (Firecrawl scrape). */
+  unifiedReadPage?: (url: string) => Promise<{ url: string; title: string; markdown: string }>;
   /** Region-resolved production model. Omission retains the legacy fixture path. */
   messagesAdapter?: MessagesAdapter;
   /** Opt-in until navigation and input channels share the same owner receipt. */
@@ -1087,6 +1092,58 @@ interface RunHandle {
 }
 
 const handles = new Map<string, RunHandle>();
+
+/** Register a non-cloud browser lane with the existing task reply lifecycle. */
+export function createExternalBrowserPark(options: {
+  taskId: string;
+  intent: string;
+  signal?: AbortSignal;
+  onAwaitingUser?: RunSupercarOptions['onAwaitingUser'];
+  aborted: () => boolean;
+  timeoutMs?: number;
+}) {
+  const handle: RunHandle = {
+    resolveReply: null,
+    abort: () => handle.resolveReply?.('__SUPERCAR_ABORT__'),
+    handoffMessage: null,
+    originalIntent: options.intent,
+    pendingAttachmentBlocks: null,
+  };
+  if (handles.has(options.taskId)) throw new Error('browser_task_already_running');
+  handles.set(options.taskId, handle);
+  const abort = () => handle.abort();
+  options.signal?.addEventListener('abort', abort);
+  return {
+    async park(question: string, awaitingKind: SupercarAwaitingKind): Promise<string | null> {
+      if (options.aborted() || options.signal?.aborted) return null;
+      let resolve!: (text: string) => void;
+      const reply = new Promise<string>((r) => {
+        resolve = r;
+      });
+      handle.resolveReply = resolve;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await options.onAwaitingUser?.({ question, awaitingKind, at: new Date(), currentUrl: '' });
+        if (options.aborted() || options.signal?.aborted) return null;
+        const value = await Promise.race([
+          reply,
+          new Promise<null>((r) => {
+            timer = setTimeout(() => r(null), options.timeoutMs ?? 300_000);
+          }),
+        ]);
+        return value === '__SUPERCAR_ABORT__' ? null : value;
+      } finally {
+        if (timer) clearTimeout(timer);
+        if (handle.resolveReply === resolve) handle.resolveReply = null;
+      }
+    },
+    close() {
+      options.signal?.removeEventListener('abort', abort);
+      handle.abort();
+      if (handles.get(options.taskId) === handle) handles.delete(options.taskId);
+    },
+  };
+}
 
 /**
  * Resume a supercar run that's parked on `onAwaitingUser`. Returns
@@ -1476,8 +1533,10 @@ async function runSupercarTaskInternal(
   const SCREENSHOT_MAX_ATTEMPTS = 3;
   const SCREENSHOT_RETRY_GAP_MS = 2_000;
   let initialShot: Awaited<ReturnType<typeof executor.screenshot>> | null = null;
+  let lastShotError: string | undefined;
   for (let attempt = 1; attempt <= SCREENSHOT_MAX_ATTEMPTS; attempt++) {
     const shot = await executor.screenshot(page);
+    lastShotError = shot.error ?? (shot.base64 ? undefined : 'empty screenshot');
     if (!shot.error && shot.base64) {
       if (attempt > 1) {
         logger.info(
@@ -1509,7 +1568,7 @@ async function runSupercarTaskInternal(
   if (!initialShot || initialShot.error || !initialShot.base64) {
     return {
       status: 'failed',
-      reason: `initial screenshot failed after ${SCREENSHOT_MAX_ATTEMPTS} attempts: ${initialShot?.error ?? 'unknown'}`,
+      reason: `initial screenshot failed after ${SCREENSHOT_MAX_ATTEMPTS} attempts: ${initialShot?.error ?? lastShotError ?? 'unknown'}`,
       iterations: 0,
       toolsUsed: [],
     };
@@ -1941,6 +2000,8 @@ async function runSupercarTaskInternal(
       // SUPERCAR_TIMEOUT_MS deadline only fires between iterations,
       // never during an in-flight await).
       const API_TIMEOUT_MS = 120_000;
+      /** Transport retries per model turn (429/502/503/504) inside the turn deadline. */
+      const BROWSER_MODEL_MAX_RETRIES = 2;
       try {
         // Phase 10 Tier 1 betas: server-side compaction + advisory
         // task budgets. Each is appended only when the master flag is
@@ -2183,7 +2244,9 @@ async function runSupercarTaskInternal(
           response = await createBrowserMessage(recordedAdapter, apiRequest, {
             signal: lifecycle.modelAbort.signal,
             timeoutMs: Math.min(API_TIMEOUT_MS, Math.max(1, deadline - Date.now())),
-            maxRetries: 0,
+            // Model turns have no external side effects (tools run afterwards), so
+            // the shared transport may retry 429/5xx within the same deadline.
+            maxRetries: BROWSER_MODEL_MAX_RETRIES,
           });
         } else {
           if (!client) throw new Error('Legacy browser client unavailable');
@@ -2220,7 +2283,9 @@ async function runSupercarTaskInternal(
           ? '模型响应超时，本次执行已停止；已完成动作不会自动重放。'
           : isTimeout
             ? '请求处理时间过长，正在重试。'
-            : translateError(message, opts.intent);
+            : err instanceof MessagesAdapterError && err.code === 'PROVIDER_ERROR'
+              ? modelProviderFailureMessage(err.status)
+              : translateError(message, opts.intent);
         return {
           status: qwenTimeout ? 'timeout' : 'failed',
           reason: friendly,

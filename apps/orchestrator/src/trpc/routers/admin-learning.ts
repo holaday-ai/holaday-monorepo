@@ -25,6 +25,7 @@ import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { executionMemory } from '../../db/schema/execution-memory.js';
 import { tasks } from '../../db/schema/tasks.js';
+import { readEvolutionMetrics } from '../../playbook/evolution/drizzle-evolution-store.js';
 import { adminProcedure, router } from '../trpc.js';
 import {
   classifyTaskError,
@@ -193,6 +194,13 @@ function selectRecentDomainRows<T extends { createdAt: Date }>(
 }
 
 export const adminLearningRouter = router({
+  // ───────────────────────────────────────────────────────── evolution ──
+  // Batch 06 — self-evolution loop: template path counts, canary pass rate,
+  // reuse hit rate, and estimated model calls saved by deterministic replay.
+  evolution: adminProcedure
+    .input(z.object({ windowDays: z.number().int().min(1).max(365).default(30) }).optional())
+    .query(async ({ ctx, input }) => readEvolutionMetrics(ctx.db, input?.windowDays ?? 30)),
+
   // ────────────────────────────────────────────────────────── overview ──
   overview: adminProcedure
     .input(

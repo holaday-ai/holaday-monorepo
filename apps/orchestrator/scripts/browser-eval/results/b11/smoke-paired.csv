@@ -1,0 +1,11 @@
+id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,quota403,reason
+be-06,form,legacy,qwen,qwen3.7-plus,failed,false,model_layer,12,241576,47905,1509,12,false,"模型响应超时，本次执行已停止；已完成动作不会自动重放。"
+be-06,form,unified,qwen,qwen3.7-plus,completed,true,none,8,25373,8535,359,8,false,""
+be-10,form,legacy,qwen,qwen3.7-plus,failed,false,model_layer,24,250660,74656,3136,24,false,"模型响应超时，本次执行已停止；已完成动作不会自动重放。"
+be-10,form,unified,qwen,qwen3.7-plus,completed,true,none,4,68667,4238,146,4,false,""
+be-12,table,legacy,qwen,qwen3.7-plus,completed,true,none,3,20982,7966,478,3,false,""
+be-12,table,unified,qwen,qwen3.7-plus,completed,true,none,3,11317,29794,319,3,false,""
+be-14,table,legacy,qwen,qwen3.7-plus,completed,true,none,5,36319,12506,824,5,false,""
+be-14,table,unified,qwen,qwen3.7-plus,completed,true,none,3,9264,7665,210,3,false,""
+be-15,table,legacy,qwen,qwen3.7-plus,completed,true,none,24,159208,84367,5683,24,false,""
+be-15,table,unified,qwen,qwen3.7-plus,completed,true,none,3,13970,23088,461,3,false,""

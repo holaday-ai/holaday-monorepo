@@ -20,7 +20,12 @@ function unsupportedOutputFormats(errorText: string): string | undefined {
  * so recovery copy must point to retrying the task, not "continue"
  * flows that only exist while the agent is still awaiting_user.
  */
-export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
+export interface FailureContext {
+  executionMode?: string;
+  errorCode?: string;
+}
+
+export function classifyFriendlyFailure(errorText: string, context: FailureContext = {}): FriendlyFailure {
   const unsupportedFormats = unsupportedOutputFormats(errorText ?? '');
   if (unsupportedFormats) {
     return {
@@ -29,7 +34,41 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
       nextStep: '请确认是否接受其他可用格式，或使用支持该格式的工具。',
     };
   }
+  if (context.executionMode && context.executionMode !== 'browser') {
+    const label = context.executionMode === 'scrape' ? '网页采集' : context.executionMode === 'image' ? '图片生成' : context.executionMode === 'video_creation' ? '视频生成' : '生成';
+    const qualityTitle = context.executionMode === 'video_creation' ? '成片未通过质量检查' : '生成内容未通过质量检查';
+    if (/未要求的文字或品牌/i.test(errorText) || /unauthorized_text_or_brand/i.test(context.errorCode ?? '')) {
+      return { title: qualityTitle, subtitle: '画面出现了未要求的文字或品牌，问题成片没有交付。', nextStep: '调整描述后重新生成。' };
+    }
+    if (/QUALITY|质量|unauthorized_text_or_brand/i.test(`${context.errorCode ?? ''} ${errorText}`)) {
+      return { title: qualityTitle, subtitle: '生成内容未满足要求，问题内容没有交付。额度处理状态见下方。', nextStep: '调整描述后重新生成。' };
+    }
+    if (/attachment|附件|文件.*不可用|未检测到.*\.(?:png|jpg|pdf)/i.test(`${context.errorCode ?? ''} ${errorText}`)) {
+      return { title: '无法读取任务附件', subtitle: '生成流程未能读取所需的文件。', nextStep: '确认附件可用，必要时重新上传后再执行。' };
+    }
+    if (/429|rate.limit|限速|繁忙/i.test(errorText)) {
+      return { title: `${label}服务繁忙`, subtitle: '服务暂时限速，请稍后再试。', nextStep: '稍后重新生成。' };
+    }
+    if (/timeout|超时|timed.out/i.test(errorText)) {
+      return { title: `${label}处理超时`, subtitle: '生成服务没有及时完成此次请求。', nextStep: '稍后重试，或缩小生成内容的范围。' };
+    }
+    return { title: `${label}任务未能完成`, subtitle: `这次${label}没有完成，请检查输入与要求后重试。`, nextStep: context.executionMode === 'video_creation' || context.executionMode === 'image' ? '调整描述后重新生成。' : context.executionMode === 'scrape' ? '确认采集来源与范围后重新执行。' : '确认要求和附件后重新执行。' };
+  }
   const haystack = (errorText ?? '').toLowerCase();
+  // FIX-D11 — the executor gave up because the task needed something the
+  // browser lane cannot do (e.g. "当前环境不支持上传附件"). Not a site problem:
+  // never suggest switching to another URL.
+  if (
+    /VISION_GAVE_UP|vision_gave_up|无法完成任务|不支持上传|不支持.{0,8}附件|not supported in this environment/i.test(
+      `${context.errorCode ?? ''} ${errorText}`,
+    )
+  ) {
+    return {
+      title: '任务未能完成',
+      subtitle: '执行时缺少完成这个任务所需的条件（例如当前环境不支持上传附件），不是网站本身的问题。',
+      nextStep: '确认任务是否真的需要浏览器操作；写文章或根据附件生成内容时，直接说明要求后重新执行。',
+    };
+  }
   const browserKind = classifyBrowserErrorKind(errorText);
   if (/ORCHESTRATOR_RESTART|orchestrator_restart|服务重启导致任务中断|orchestrator restarted/i.test(errorText)) {
     return {
@@ -228,8 +267,8 @@ export function friendlyFailureDetail(errorText: string): string {
  * always renders as clean Chinese (it has a catch-all), so copying a
  * failed result never yields raw English or an empty string.
  */
-export function failureResultCopyText(errorText: string): string {
-  const friendly = classifyFriendlyFailure(errorText);
+export function failureResultCopyText(errorText: string, context: FailureContext = {}): string {
+  const friendly = classifyFriendlyFailure(errorText, context);
   return [friendly.title, friendly.subtitle, `下一步：${friendly.nextStep}`].join('\n');
 }
 

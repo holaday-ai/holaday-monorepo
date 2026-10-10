@@ -43,11 +43,11 @@ type LoginOutcome =
 const LOGIN_SURFACE =
   'border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90';
 const LOGIN_INPUT =
-  'border-[#DCDDDD] bg-white shadow-none placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card';
+  'border-[#DCDDDD] bg-white shadow-none placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:border-white/10 dark:bg-card';
 const LOGIN_PRIMARY =
-  'bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] hover:bg-[#EA1F59]/90';
+  'bg-[#FF0061] text-white shadow-[0_4px_12px_rgba(255,0,97,0.16)] hover:bg-[#FF0061]/90';
 const LOGIN_LINK =
-  'inline-flex min-h-8 min-w-8 items-center justify-center text-[#EA1F59] underline-offset-2 hover:underline';
+  'inline-flex min-h-8 min-w-8 items-center justify-center text-[#FF0061] underline-offset-2 hover:underline';
 
 /**
  * Login / register / forgot-password card. Modes:
@@ -687,7 +687,7 @@ function InlineMessage({
       className={cn(
         'rounded-md border px-3 py-2 text-xs',
         tone === 'error'
-          ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+          ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
           : 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#595757] dark:text-foreground',
       )}
     >

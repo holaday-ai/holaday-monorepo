@@ -1,0 +1,7 @@
+model,status,code,toolUse,ms
+qwen3.7-plus,200,,true,2856
+qwen3.6-plus,200,,true,1540
+qwen-max,200,,false,1943
+qwen3-vl-235b-a22b-instruct,200,,false,1072
+qwen3-vl-235b-a22b-thinking,200,,false,4203
+qwen3.6-flash,200,,true,1839

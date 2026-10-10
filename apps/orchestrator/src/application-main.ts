@@ -1,4 +1,9 @@
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
+import { setMediaFailureRefundHook } from './agent/video/media-failure-refund.js';
+import { cleanupRejectedVideoFrames } from './agent/video/video-quality-audit.js';
+import { createVaultRuntime, installVaultRuntime } from './browser-session-vault/runtime.js';
+import { refundTaskOnce, sweepPlatformFailureRefunds } from './quota/platform-failure-refunds.js';
+import { QuotaService } from './quota/quota-service.js';
 const _proxy = process.env.HTTPS_PROXY;
 if (_proxy) setGlobalDispatcher(new ProxyAgent(_proxy));
 import { bootstrap } from 'global-agent';
@@ -24,8 +29,7 @@ import { BrowserPool, reapOrphans } from './browser-pool/index.js';
 import { createVncProxy } from './browser-pool/vnc-proxy.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
-import { injectPendingCookies } from './cookies/sync-service.js';
-import { db, pool as databasePool } from './db/client.js';
+import { pool as databasePool, db } from './db/client.js';
 import {
   startEnergyAnalyticsCleanup,
   stopEnergyAnalyticsCleanup,
@@ -34,9 +38,14 @@ import { createEnergyAnalyticsStore } from './energy/analytics-store.js';
 import { runRetentionReaper } from './evidence/retention-reaper.js';
 import { createHttpListener } from './execution/http-listener.js';
 import { createHttpApp } from './http.js';
-import { buildScheduledDispatchNotification } from './notifications/scheduled-copy.js';
+import {
+  buildTaskOutcomeNotification,
+  scheduledOutcomeKind,
+} from './notifications/scheduled-copy.js';
+import { decideTaskOutcomeNotification } from './notifications/task-outcome-policy.js';
 import { createPayPalAdapter } from './payment/index.js';
 import {
+  configurePlannedOutcomeNotifier,
   configurePlannedRunSpecialDispatcher,
   queuePlannedRun,
   recoverStuckRunningPlannedTasks,
@@ -49,19 +58,29 @@ import { createWsServer, loadRehydratedTasks } from './ws/server.js';
 
 import type { ApplicationBoot } from './execution/application-boot.js';
 import { createApplicationResources } from './execution/application-resources.js';
-import { currentOperationLifetime } from './execution/owned-operation.js';
 import type { OrdinaryApplication } from './execution/ordinary-application.js';
 import { createMaintenanceBackground } from './execution/ordinary-maintenance-background.js';
+import { currentOperationLifetime } from './execution/owned-operation.js';
 import { createPeriodicWork } from './execution/periodic-work.js';
 
 export async function startApplication(boot?: ApplicationBoot, ordinary?: OrdinaryApplication) {
+  // No production KeyProvider is selected in this PR: enabling either flag fails closed.
+  const browserVault = createVaultRuntime({
+    importEnabled: env.BROWSER_SESSION_IMPORT_V2,
+    profileEnabled: env.BROWSER_PROFILE_PERSIST_V1,
+    db,
+  });
+  installVaultRuntime(browserVault);
   if (boot && ordinary) throw new Error('MAINTENANCE_MODE_CONFLICT');
   const ordinaryMaintenance = ordinary?.coordinator;
   const executionDrain = ordinaryMaintenance ?? boot?.controller;
   if (
     boot &&
     (process.env.RETENTION_REAPER_ENABLED === 'true' ||
-      process.env.USER_TASK_CRYSTALLIZE_ENABLED === 'true')
+      process.env.USER_TASK_CRYSTALLIZE_ENABLED === 'true' ||
+      process.env.PLAYBOOK_SEDIMENT_ENABLED === 'true' ||
+      process.env.PLAYBOOK_CANARY_ENABLED === 'true' ||
+      process.env.PLAYBOOK_EXPLORER_SCHEDULE_ENABLED === 'true')
   )
     throw new Error('CONTROLLED_BACKGROUND_UNPROVEN');
   const resources = boot ? createApplicationResources(boot) : undefined;
@@ -117,6 +136,7 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
       },
     );
   };
+  if (browserVault) registerPeriodic('browser-vault-expiry', 60000, () => browserVault.sweep());
   try {
     // Qwen-only production boot must never construct a legacy provider client.
     // Browser execution remains explicitly unavailable until its commander lane
@@ -254,6 +274,8 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
       if (boot || env.MULTI_USER || useNativeDevelopmentPool) {
         try {
           const poolConfig = {
+            prepareSession: browserVault?.prepare,
+            finishSession: browserVault?.finish,
             maxInstances: useNativeDevelopmentPool
               ? Math.min(env.MAX_BROWSER_INSTANCES, 3)
               : env.MAX_BROWSER_INSTANCES,
@@ -265,24 +287,6 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
             displayStart: env.BROWSER_DISPLAY_START,
             screenSize: env.BROWSER_SCREEN_SIZE,
             vncEnabled: env.BROWSER_VNC_WS_ENABLED,
-            // Phase 17 — drain pending cookies (extension-shipped) into
-            // the freshly-spawned context. Best-effort: errors logged
-            // inside the helper, never bubble up to block allocate.
-            onInstanceReady: async (
-              userExternalId: string,
-              executor: PlaywrightExecutor,
-            ): Promise<void> => {
-              try {
-                const page = await executor.getPage();
-                const ctx = page.context();
-                await injectPendingCookies({ db, context: ctx, userExternalId });
-              } catch (err) {
-                logger.warn(
-                  { err: err instanceof Error ? err.message : String(err), userExternalId },
-                  'pool: onInstanceReady cookie-sync drain failed',
-                );
-              }
-            },
           };
           if (boot) {
             browserPool = BrowserPool.dormantStrict(
@@ -458,6 +462,7 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
     );
 
     const app = createHttpApp({
+      browserVault,
       executionDrain,
       ordinaryMaintenance,
       planner,
@@ -574,7 +579,9 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
                     // P1 非交易日：未投递，回带 skip → runner 记 last_run_status='skipped' + note。
                     if (r.skipped)
                       return { skipped: true as const, note: r.reason ?? '非交易日，未投递' };
-                    return scheduledTaskId; // 非 null = 成功（简报无 task 行）
+                    // 同步完成、无 task 行：不能把 scheduledTaskId 冒充 task id 写进
+                    // last_task_id（会链到别人的任务 / 被 settle 误结算）。
+                    return { completed: true as const };
                   } catch (err) {
                     const fails = (briefingFailCounts.get(scheduledTaskId) ?? 0) + 1;
                     briefingFailCounts.set(scheduledTaskId, fails);
@@ -674,27 +681,39 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
             // dispatch attempts land in the user's inbox + fire any
             // configured webhooks. The notify hook is best-effort; the
             // runner ignores its return value and never blocks on it.
-            notify: async ({
-              userInternalId,
-              scheduledTaskInternalId,
-              intent,
-              ok,
-              error,
-              skipped,
-            }) => {
+            // Batch 10.3 — fold finished dispatched tasks into the failure
+            // streak and emit task_terminal outcomes through `notify` below.
+            settleTaskOutcomes: true,
+            notify: async (input) => {
               // 简报 intent 的通知由 dispatch 分支自管（成功投递简报 + 3 连败错误）→ 跳过通用。
-              if (isBriefingIntent(intent)) return;
+              if (isBriefingIntent(input.intent)) return;
+              const kind = scheduledOutcomeKind(input);
+              // 失败按连续 N 次阈值推送；成功默认静默（按任务可开）；启动/跳过仅站内。
+              const decision = decideTaskOutcomeNotification(kind, {
+                consecutiveFailures: input.consecutiveFailures ?? (kind === 'failed' ? 1 : 0),
+                failureNotifyThreshold: input.failureNotifyThreshold,
+                notifyOnSuccess: input.notifyOnSuccess,
+              });
+              if (!decision.notify) return;
               const { notify } = await import('./notifications/notification-service.js');
-              const payload = buildScheduledDispatchNotification({ intent, ok, error, skipped });
+              const payload = buildTaskOutcomeNotification({
+                label: '定时任务',
+                name: input.intent,
+                kind,
+                phase: input.phase ?? 'dispatch',
+                error: input.error,
+                consecutiveFailures: input.consecutiveFailures,
+              });
               await notify(
                 { db, logger },
                 {
-                  userInternalId,
-                  scheduledTaskInternalId,
+                  userInternalId: input.userInternalId,
+                  scheduledTaskInternalId: input.scheduledTaskInternalId,
                   type: payload.type,
                   title: payload.title,
                   message: payload.message,
                   taskName: payload.taskName,
+                  delivery: decision.delivery,
                 },
               );
             },
@@ -793,6 +812,34 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
           }),
         }),
       );
+      // Batch 10.3 — planned-run outcomes (dispatch failure / task terminal)
+      // → inbox + IM webhook per the per-plan threshold & success opt-in.
+      configurePlannedOutcomeNotifier(async (input) => {
+        const decision = decideTaskOutcomeNotification(input.outcome, input);
+        if (!decision.notify) return;
+        const { notify } = await import('./notifications/notification-service.js');
+        const payload = buildTaskOutcomeNotification({
+          label: '规划任务',
+          name: input.title,
+          kind: input.outcome,
+          phase: input.phase,
+          error: input.error,
+          consecutiveFailures: input.consecutiveFailures,
+        });
+        await notify(
+          { db, logger },
+          {
+            userInternalId: input.userInternalId,
+            scheduledTaskInternalId: null,
+            plannedTaskInternalId: input.plannedTaskInternalId,
+            type: payload.type,
+            title: payload.title,
+            message: payload.message,
+            taskName: payload.taskName,
+            delivery: decision.delivery,
+          },
+        );
+      });
       const { plannedTasks: plannedTasksTable } = await import('./db/schema/planned-tasks.js');
       const { users: usersTable } = await import('./db/schema/users.js');
       const { eq } = await import('drizzle-orm');
@@ -887,8 +934,11 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
         // CDP is always available. VNC is an explicit emergency-only
         // fallback because it exposes a full interactive desktop surface.
         // See streaming/screencast-proxy.ts for the protocol contract.
-        const screencastProxy = createScreencastProxy({ pool: browserPool, logger,
-          ...(ordinary ? { executionDrain: ordinary.coordinator } : {}) });
+        const screencastProxy = createScreencastProxy({
+          pool: browserPool,
+          logger,
+          ...(ordinary ? { executionDrain: ordinary.coordinator } : {}),
+        });
         httpServer.on('upgrade', (req, socket, head) => {
           // No auth/DB work from a streaming upgrade while controlled admission is closed.
           if (executionDrain && executionDrain.drain.snapshot().mode !== 'open') {
@@ -1057,6 +1107,49 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
     zombieReaperTimer?.unref?.();
     resources?.add(() => clearInterval(zombieReaperTimer));
 
+    registerPeriodic('video-quality-audit', 60 * 60_000, async () => {
+      try {
+        const count = await cleanupRejectedVideoFrames({
+          retentionDays: env.VIDEO_REJECT_FRAME_RETENTION_DAYS,
+        });
+        if (count) logger.info({ count }, 'video: expired rejected frames removed');
+      } catch {
+        logger.warn('video: rejected frame cleanup failed');
+      }
+    });
+
+    // Platform-failure refunds: each charged task that failed on our side
+    // (provider error, timeout, restart, missing config) gets its quota back
+    // exactly once. Runs after the reaper so its EXECUTION_TIMEOUT rows count.
+    const refundSweepTimer = ordinary
+      ? undefined
+      : setInterval(() => {
+          if (boot) return;
+          void sweepPlatformFailureRefunds(db, new QuotaService(db))
+            .then((count) => {
+              if (count > 0) logger.info({ count }, 'quota: platform-failure refunds issued');
+            })
+            .catch((err: unknown) => {
+              logger.warn(
+                { err: err instanceof Error ? err.message : String(err) },
+                'quota: refund sweep failed (non-fatal)',
+              );
+            });
+        }, 60_000);
+    refundSweepTimer?.unref?.();
+    resources?.add(() => clearInterval(refundSweepTimer));
+    // Media lanes (batch 05) report their own platform failures for an
+    // immediate refund through the same exactly-once ledger.
+    setMediaFailureRefundHook(async (failure) => {
+      await refundTaskOnce(
+        db,
+        new QuotaService(db),
+        failure.taskId,
+        `MEDIA_${failure.lane.toUpperCase()}_FAILED`,
+      );
+    });
+    resources?.add(() => setMediaFailureRefundHook(null));
+
     // Phase 1 #3 Pack B — Evidence retention reaper. Nightly sweep of
     // expired evidence_artifacts (delete R2 object then MySQL row; skip
     // manual_hold). Gated by RETENTION_REAPER_ENABLED (default off: no
@@ -1122,6 +1215,69 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
         })();
       const userCrystallizeTimer = setInterval(runSweep, USER_CRYSTALLIZE_INTERVAL_MS);
       userCrystallizeTimer.unref?.();
+    }
+
+    // Batch 06 — playbook self-evolution loop (sediment / canary / scheduled
+    // explorer) on BullMQ. Every switch defaults OFF; with all off nothing is
+    // imported and no Redis connection is opened. See
+    // playbook/evolution/evolution-config.ts for the switches.
+    {
+      const { readEvolutionConfig, anyEvolutionBackgroundEnabled } = await import(
+        './playbook/evolution/evolution-config.js'
+      );
+      const evolutionConfig = readEvolutionConfig();
+      if (anyEvolutionBackgroundEnabled(evolutionConfig)) {
+        const [
+          { createEvolutionScheduler, createBullmqFactories },
+          { createEvolutionJobHandlers },
+        ] = await Promise.all([
+          import('./playbook/evolution/evolution-scheduler.js'),
+          import('./playbook/evolution/evolution-runtime.js'),
+        ]);
+        const [{ createProductionModelRuntimeWiring }, { modelCatalogService }] = await Promise.all(
+          [import('./llm/model-runtime-wiring.js'), import('./llm/model-catalog-runtime.js')],
+        );
+        const evolutionLogger = logger.child({ component: 'playbook-evolution' });
+        const evolutionScheduler = createEvolutionScheduler({
+          config: evolutionConfig,
+          handlers: createEvolutionJobHandlers({
+            db,
+            config: evolutionConfig,
+            wiring: createProductionModelRuntimeWiring(
+              env,
+              {},
+              {
+                catalog: () => modelCatalogService.snapshot(),
+              },
+            ),
+            ...(firecrawlLane
+              ? {
+                  scrapeDoc: async (url: string) => {
+                    const r = await firecrawlLane.scrape(url);
+                    return r.ok ? { markdown: r.markdown, title: r.title ?? '' } : null;
+                  },
+                }
+              : {}),
+            logger: evolutionLogger,
+          }),
+          factories: () => createBullmqFactories(env.REDIS_URL),
+          logger: evolutionLogger,
+        });
+        registerProducer(
+          'playbook-evolution',
+          () => {
+            void evolutionScheduler
+              .start()
+              .catch((err: unknown) =>
+                evolutionLogger.warn(
+                  { err: err instanceof Error ? err.message : String(err) },
+                  'playbook evolution: scheduler failed to start (non-fatal)',
+                ),
+              );
+          },
+          () => evolutionScheduler.stop(),
+        );
+      }
     }
 
     if (!boot && !ordinary) {

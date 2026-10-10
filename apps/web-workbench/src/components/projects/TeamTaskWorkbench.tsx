@@ -1,3 +1,4 @@
+import { CharacterAvatar } from '@/components/CharacterAvatar';
 import { Button } from '@/components/ui/button';
 import {
   type ProjectMemberRole,
@@ -25,6 +26,8 @@ import {
   List,
   Plus,
   RefreshCw,
+  Search,
+  SlidersHorizontal,
   Sparkles,
   Users,
   X,
@@ -35,6 +38,7 @@ interface WorkbenchMember {
   readonly userId: string;
   readonly organizationMemberId?: string;
   readonly displayName: string;
+  readonly avatarUrl?: string | null;
   readonly role: ProjectMemberRole;
 }
 
@@ -110,6 +114,9 @@ export type TeamTaskExecutionInput =
     };
 
 interface TeamTaskWorkbenchProps {
+  readonly approved?: boolean;
+  readonly projectDescription?: string | null;
+  readonly projectOverview?: React.ReactNode;
   readonly currentUserId: string;
   readonly role: ProjectMemberRole;
   readonly rows: readonly TeamTaskWorkbenchRow[];
@@ -159,6 +166,7 @@ const STATUS_TONE: Record<TeamTaskState, string> = {
 };
 
 export function TeamTaskWorkbench({
+  approved = false, projectDescription, projectOverview,
   currentUserId,
   role,
   rows,
@@ -186,7 +194,10 @@ export function TeamTaskWorkbench({
   const detailRequestRef = React.useRef(0);
   const restoreFocusRef = React.useRef<HTMLElement | null>(null);
   const selected = selectedDetail ?? rows.find((row) => row.id === selectedId);
-  const visibleRows = groups[scope];
+  const [phase, setPhase] = React.useState('all');
+  const [search, setSearch] = React.useState('');
+  const [detailed, setDetailed] = React.useState(false);
+  const visibleRows = groups[scope].filter(row => !approved || ((phase === 'all' || projectTaskPhase(row.state) === phase) && `${row.title} ${row.description ?? ''}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())));
 
   React.useEffect(() => {
     setScope(defaultTaskScope(role));
@@ -246,13 +257,15 @@ export function TeamTaskWorkbench({
   return (
     <section
       aria-label="团队任务工作台"
-      className="overflow-hidden rounded-[10px] border border-[#E2E4E9] bg-white"
+      className={approved ? "hd-approved-team-workbench" : "overflow-hidden rounded-[10px] border border-[#E2E4E9] bg-white"}
     >
-      <SummaryRail groups={groups} />
-      <div className="border-t border-[#ECEEF2]">
-        <TaskTabs scope={scope} groups={groups} onChange={setScope} />
-        <div className="flex min-h-[580px] min-w-0">
+      {!approved && <SummaryRail groups={groups} />}
+      <div className={approved ? undefined : "border-t border-[#ECEEF2]"}>
+        {!approved && <TaskTabs scope={scope} groups={groups} onChange={setScope} />}
+        <div className={approved ? "hd-project-detail-columns" : "flex min-h-[580px] min-w-0"}>
           <div className="min-w-0 flex-1">
+            {approved && <div className="hd-project-task-tabs"><div role="tablist" aria-label="项目任务状态">{[['all','全部任务'],['running','进行中'],['waiting','待确认'],['done','已完成']].map(([id,label])=><button type="button" key={id} role="tab" aria-selected={phase===id} onClick={()=>setPhase(id)}>{label}</button>)}</div><label><Search /><input aria-label="搜索项目任务" placeholder="搜索" value={search} onChange={e=>setSearch(e.target.value)} /></label></div>}
+            {approved && <div className="hd-team-secondary-tools"><details><summary><SlidersHorizontal />{SCOPE_META.find(item=>item.id===scope)?.label}</summary><div role="group" aria-label="任务分组">{SCOPE_META.map(item=><button type="button" key={item.id} aria-pressed={scope===item.id} onClick={()=>{setScope(item.id);setPhase('all');}}>{item.label}<small>{groups[item.id].length}</small></button>)}</div></details><button type="button" aria-pressed={detailed} onClick={()=>setDetailed(value=>!value)}>{detailed?'简洁列表':'验收表格'}</button></div>}
             <Toolbar
               view={view}
               onViewChange={setView}
@@ -267,13 +280,13 @@ export function TeamTaskWorkbench({
             {error ? <TaskError error={error} stale={stale} onRetry={onRetry} /> : null}
             {!loading && !error && visibleRows.length === 0 ? <TaskEmpty scope={scope} /> : null}
             {visibleRows.length > 0 && view === 'list' ? (
-              <TaskTable rows={visibleRows} onSelect={openDetail} />
+              approved && !detailed ? <ApprovedTaskList rows={visibleRows} onSelect={openDetail} /> : <TaskTable rows={visibleRows} onSelect={openDetail} />
             ) : null}
             {visibleRows.length > 0 && view === 'board' ? (
               <TaskBoard rows={visibleRows} onSelect={openDetail} />
             ) : null}
           </div>
-          <MembersRail members={members} loading={membersLoading} error={memberError} />
+          {approved ? <aside className="hd-project-info hd-team-info"><section><h2>项目说明</h2><p>{projectDescription || '还没有项目说明。'}</p></section><section><h2>参考资料</h2><div className="hd-project-coming-soon"><span>即将上线</span><p>将文件集中到项目，随时供任务参考。</p></div></section><MembersRail members={members} loading={membersLoading} error={memberError} /><details><summary>项目进展与权限</summary>{projectOverview}<SummaryRail groups={groups} /></details></aside> : <MembersRail members={members} loading={membersLoading} error={memberError} />}
         </div>
       </div>
       {selected ? (
@@ -302,6 +315,15 @@ export function TeamTaskWorkbench({
       ) : null}
     </section>
   );
+}
+
+function projectTaskPhase(state: TeamTaskState): string {
+  if (['completed','accepted','archived'].includes(state)) return 'done';
+  if (['in_progress','accepted_by_member'].includes(state)) return 'running';
+  return 'waiting';
+}
+function ApprovedTaskList({rows,onSelect}:{rows:readonly TeamTaskWorkbenchRow[];onSelect:(id:string)=>void}) {
+  return <div aria-label="团队任务列表">{rows.map(row=><button type="button" className="hd-project-task-item" key={row.id} data-status={projectTaskPhase(row.state)==='running'?'executing':projectTaskPhase(row.state)==='done'?'completed':'awaiting_user'} aria-label={`查看 ${row.title}`} title={`查看 ${row.title}`} onClick={()=>onSelect(row.id)}><i /><span><strong>{row.title}</strong><small>{row.description || `${row.responsibleDisplayName || '待认领'} · 截止 ${shortDate(row.dueAt)}${row.milestone ? ` · ${row.milestone}` : ''}`}</small></span><em>{taskStateLabel(row.state)}</em></button>)}</div>;
 }
 
 function SummaryRail({ groups }: { readonly groups: ReturnType<typeof groupTeamTasks> }) {
@@ -517,7 +539,7 @@ function TaskTable({
                     aria-label={`查看 ${row.title}`}
                     title={`查看 ${row.title}`}
                     onClick={() => onSelect(row.id)}
-                    className="flex h-11 w-11 items-center justify-center rounded-[8px] text-[#858892] hover:bg-[#F4F4F6] hover:text-[#EA1F59]"
+                    className="flex h-11 w-11 items-center justify-center rounded-[8px] text-[#858892] hover:bg-[#F4F4F6] hover:text-[#FF0061]"
                   >
                     <ChevronRight className="h-4 w-4" aria-hidden />
                   </button>
@@ -642,9 +664,7 @@ function MembersRail({
       <ul className="mt-4 space-y-3">
         {members.map((member) => (
           <li key={member.userId} className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FFF0F2] text-[11px] font-semibold text-[#D94255]">
-              {member.displayName.slice(0, 1)}
-            </span>
+            <CharacterAvatar name={member.displayName} seed={member.userId} src={member.avatarUrl} className="h-8 w-8" />
             <span className="min-w-0">
               <span className="block truncate text-[12px] font-medium text-[#3B3C42]">
                 {member.displayName}
@@ -988,7 +1008,7 @@ function ContractSummary({ task }: { readonly task: TaskDetail }) {
   return (
     <section aria-label="验收契约">
       <div className="flex items-center gap-2">
-        <FileCheck2 className="h-4 w-4 text-[#EA1F59]" aria-hidden />
+        <FileCheck2 className="h-4 w-4 text-[#FF0061]" aria-hidden />
         <h3 className="text-[14px] font-semibold text-[#34353B]">验收契约</h3>
         <span className="text-[11px] text-[#898B94]">v{contract.version}</span>
       </div>
@@ -1096,7 +1116,7 @@ function ReviewPanel({
     <section aria-label="验收操作" className="border-t border-[#ECEEF2] pt-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <ClipboardCheck className="h-4 w-4 text-[#EA1F59]" aria-hidden />
+          <ClipboardCheck className="h-4 w-4 text-[#FF0061]" aria-hidden />
           <h3 className="text-[14px] font-semibold text-[#34353B]">验收操作</h3>
         </div>
         <span className="text-[11px] text-[#7D7F88]">修订轮次 {task.revisionRound} / 2</span>
@@ -1625,7 +1645,7 @@ function TaskError({
 function TaskEmpty({ scope }: { readonly scope: TaskScope }) {
   return (
     <div className="px-5 py-16 text-center">
-      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-[#FFF1F3] text-[#EA1F59]">
+      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-[#FFF1F3] text-[#FF0061]">
         <ClipboardCheck className="h-5 w-5" aria-hidden />
       </div>
       <h3 className="mt-3 text-[14px] font-semibold text-[#36373D]">这个分组还没有任务</h3>

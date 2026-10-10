@@ -507,7 +507,7 @@ describe('TeamProjectPage normalized detail states', () => {
 
     expect(await screen.findByRole('heading', { name: '增长计划' })).toBeTruthy();
     expect(screen.getByText('设计团队')).toBeTruthy();
-    expect(screen.getByText('梳理团队下一阶段的发布节奏')).toBeTruthy();
+    expect(screen.getAllByText('梳理团队下一阶段的发布节奏')).toHaveLength(2);
     expect(screen.getByRole('complementary', { name: '项目成员' })).toBeTruthy();
     expect(screen.getByText('Lin')).toBeTruthy();
     expect(screen.getByText('当前角色：仅查看')).toBeTruthy();
@@ -698,12 +698,12 @@ describe('TeamProjectPage rollout and viewer boundaries', () => {
 
     expect(await screen.findByRole('heading', { name: '增长计划' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /重命名项目|删除项目|移除 Lin/ })).toBeNull();
-    expect(screen.getByRole('tab', { name: /团队任务/ }).getAttribute('aria-selected')).toBe(
+    expect(screen.getByRole('tab', { name: '全部任务' }).getAttribute('aria-selected')).toBe(
       'true',
     );
     expect(screen.queryByRole('button', { name: '新建任务' })).toBeNull();
     expect(screen.queryByText('团队任务执行将在后续阶段开放')).toBeNull();
-    expect(screen.getAllByText('完成官网发布复盘')).toHaveLength(2);
+    expect(screen.getAllByText('完成官网发布复盘')).toHaveLength(1);
   });
 
   it('keeps overview and members usable when task loading fails', async () => {
@@ -720,7 +720,8 @@ describe('TeamProjectPage rollout and viewer boundaries', () => {
   it('shows submitted-on-time and accepted as independent facts and never labels AI as accepted', async () => {
     renderPage();
 
-    expect(await screen.findAllByText('完成官网发布复盘')).toHaveLength(2);
+    expect(await screen.findAllByText('完成官网发布复盘')).toHaveLength(1);
+    await userEvent.setup().click(screen.getByRole('button', { name: '验收表格' }));
     expect(screen.getByRole('cell', { name: '按时提交：是' })).toBeTruthy();
     expect(screen.getByRole('cell', { name: '验收通过：—' })).toBeTruthy();
 

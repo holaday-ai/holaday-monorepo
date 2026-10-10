@@ -277,7 +277,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           type="button"
           onClick={() => void refresh()}
           disabled={loading || pendingAction !== null}
-          className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-[13px] font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-[13px] font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -289,8 +289,8 @@ export function AdminPartnerReviewPage(): JSX.Element {
       </header>
 
       {error && (
-        <div className="mb-4 rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/5 px-4 py-3 text-sm">
-          <div className="font-medium text-[#EA1F59]">数据暂时无法加载</div>
+        <div className="mb-4 rounded-[8px] border border-[#FF0061]/20 bg-[#FF0061]/5 px-4 py-3 text-sm">
+          <div className="font-medium text-[#FF0061]">数据暂时无法加载</div>
           <div className="mt-1 text-xs text-[#595757]">{error}</div>
         </div>
       )}
@@ -488,7 +488,7 @@ function EnabledAdminPartnerReview({
                   Math.min(PARTNER_QUEUE_LIMIT_MAX, current + 50),
                 )
               }
-              className="rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-1.5 text-[12px] font-medium text-[#595757] hover:border-[#ADADAD] hover:text-[#EA1F59]"
+              className="rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-1.5 text-[12px] font-medium text-[#595757] hover:border-[#ADADAD] hover:text-[#FF0061]"
             >
               加载更多
             </button>
@@ -528,7 +528,7 @@ function EnabledAdminPartnerReview({
       />
 
       <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-4">
-        <label className="flex min-w-0 items-center gap-2 rounded-[8px] border border-[#DCDDDD] px-3 focus-within:border-[#EA1F59] focus-within:ring-2 focus-within:ring-[#EA1F59]/15">
+        <label className="flex min-w-0 items-center gap-2 rounded-[8px] border border-[#DCDDDD] px-3 focus-within:border-[#FF0061] focus-within:ring-2 focus-within:ring-[#FF0061]/15">
           <Search className="h-4 w-4 shrink-0 text-[#595757]" aria-hidden />
           <input
             value={queueSearch}
@@ -618,14 +618,14 @@ function ReconciliationPanel({
             type="date"
             value={from}
             onChange={(event) => setFrom(event.target.value)}
-            className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+            className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
             aria-label="对账开始日期"
           />
           <input
             type="date"
             value={to}
             onChange={(event) => setTo(event.target.value)}
-            className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+            className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
             aria-label="对账结束日期"
           />
           <ActionButton icon={RefreshCw} label="刷新" compact pending={loading} onClick={onRefresh} />
@@ -635,7 +635,7 @@ function ReconciliationPanel({
 
       <div className="space-y-4 px-5 py-4">
         {error && (
-          <div className="rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/5 px-3 py-2 text-[13px] text-[#EA1F59]">
+          <div className="rounded-[8px] border border-[#FF0061]/20 bg-[#FF0061]/5 px-3 py-2 text-[13px] text-[#FF0061]">
             {error}
           </div>
         )}
@@ -713,7 +713,7 @@ function ReconciliationMetric({
   return (
     <div className="min-w-0">
       <div className="text-[12px] text-muted-foreground">{label}</div>
-      <div className={cn('mt-1 truncate text-[16px] font-semibold tabular-nums', tone === 'danger' && 'text-[#EA1F59]')}>
+      <div className={cn('mt-1 truncate text-[16px] font-semibold tabular-nums', tone === 'danger' && 'text-[#FF0061]')}>
         {value}
       </div>
     </div>
@@ -754,7 +754,7 @@ function ManualKycPanel({
   return (
     <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-4">
       <div className="mb-3 flex items-center gap-2">
-        <ShieldCheck className="h-4 w-4 text-[#EA1F59]" aria-hidden />
+        <ShieldCheck className="h-4 w-4 text-[#FF0061]" aria-hidden />
         <h2 className="text-[15px] font-semibold">实名状态</h2>
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_0.8fr_0.9fr_1fr_1fr_1.2fr_auto]">
@@ -762,12 +762,12 @@ function ManualKycPanel({
           value={userExternalId}
           onChange={(e) => setUserExternalId(e.target.value)}
           placeholder="用户 ID"
-          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
         />
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value as KycStatusInput)}
-          className="h-9 rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
         >
           <option value="passed">已通过</option>
           <option value="pending">待实名</option>
@@ -778,25 +778,25 @@ function ManualKycPanel({
           value={provider}
           onChange={(e) => setProvider(e.target.value)}
           placeholder="provider"
-          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
         />
         <input
           value={providerRef}
           onChange={(e) => setProviderRef(e.target.value)}
           placeholder="认证流水"
-          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
         />
         <input
           value={bankCardHash}
           onChange={(e) => setBankCardHash(e.target.value)}
           placeholder="银行卡哈希"
-          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
         />
         <input
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="备注"
-          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
         />
         <ActionButton
           icon={ShieldCheck}
@@ -953,7 +953,7 @@ function OrderQueue({
                         }))
                       }
                       placeholder="放行备注"
-                      className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                      className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                     />
                   )}
                   {!reviewRequired && (
@@ -966,7 +966,7 @@ function OrderQueue({
                         }))
                       }
                       placeholder="支付流水"
-                      className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                      className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                     />
                   )}
                   <ActionButton
@@ -1094,7 +1094,7 @@ function WithdrawalQueue({
                       }))
                     }
                     placeholder="审核 / 拒绝原因"
-                    className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                    className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                   />
                   <ActionButton
                     icon={XCircle}
@@ -1133,7 +1133,7 @@ function WithdrawalQueue({
                           }))
                         }
                         placeholder="出款流水"
-                        className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                        className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                       />
                       <ActionButton
                         icon={Banknote}
@@ -1227,7 +1227,7 @@ function WithdrawalHistory({
                         }))
                       }
                       placeholder="退回原因"
-                      className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                      className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                     />
                     <ActionButton
                       icon={RefreshCw}
@@ -1347,7 +1347,7 @@ function RiskLotQueue({
                           }))
                         }
                         placeholder="风险备注"
-                        className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                        className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                       />
                       <ActionButton
                         icon={action.action === 'freeze' ? ShieldCheck : RefreshCw}
@@ -1396,7 +1396,7 @@ function RiskLotQueue({
                           }))
                         }
                         aria-label="关闭处理类型"
-                        className="h-8 w-24 rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                        className="h-8 w-24 rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                       >
                         <option value="manual">人工</option>
                         <option value="refund">退款</option>
@@ -1411,7 +1411,7 @@ function RiskLotQueue({
                           }))
                         }
                         placeholder="处理凭证"
-                        className="h-8 w-32 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                        className="h-8 w-32 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                       />
                       <ActionButton
                         icon={XCircle}
@@ -1506,7 +1506,7 @@ function MetricCard({
   return (
     <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-4 py-3">
       <div className="text-[12px] text-muted-foreground">{label}</div>
-      <div className={cn('mt-2 text-2xl font-semibold tabular-nums', tone === 'danger' && 'text-[#EA1F59]')}>
+      <div className={cn('mt-2 text-2xl font-semibold tabular-nums', tone === 'danger' && 'text-[#FF0061]')}>
         {formatInteger(value)}{truncated ? '+' : ''}
       </div>
     </div>
@@ -1583,7 +1583,7 @@ function UserCell({
   return (
     <td className="px-5 py-3">
       <div className="min-w-0">
-        <Link to={`/admin/users/${userExternalId}`} className="font-medium text-foreground hover:text-[#EA1F59]">
+        <Link to={`/admin/users/${userExternalId}`} className="font-medium text-foreground hover:text-[#FF0061]">
           {displayName !== '—' ? truncate(displayName, 18) : truncate(userExternalId, 18)}
         </Link>
         <div className="mt-0.5 text-[12px] text-muted-foreground">{truncate(email, 30)}</div>
@@ -1636,8 +1636,8 @@ function ActionButton({
         'inline-flex items-center justify-center gap-1.5 rounded-[8px] border text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
         compact ? 'h-8 px-2.5' : 'h-9 px-3',
         tone === 'danger'
-          ? 'border-[#EA1F59]/20 bg-white text-[#EA1F59] hover:bg-[#EA1F59]/5'
-          : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-[#EA1F59]',
+          ? 'border-[#FF0061]/20 bg-white text-[#FF0061] hover:bg-[#FF0061]/5'
+          : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-[#FF0061]',
       )}
     >
       {pending ? (

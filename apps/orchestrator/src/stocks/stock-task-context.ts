@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { stockDashboardSnapshots } from '../db/schema/stock-dashboard-snapshots.js';
+
+import { findServedStockSnapshot } from './served-stock-snapshot.js';
 
 type Db = typeof import('../db/client.js').db;
 
@@ -227,10 +229,12 @@ export async function validateStockTaskContext(args: {
   intent: string;
   logger?: { warn(obj: Record<string, unknown>, msg: string): void };
 }): Promise<ValidatedStockTaskContext> {
-  const rows = await args.db
+  assertContextInput(args.input);
+  const served = await findServedStockSnapshot(args);
+  const rows = served.state === 'valid' ? [{ snapshotJson: served.snapshot }] : await args.db
     .select({ snapshotJson: stockDashboardSnapshots.snapshotJson })
     .from(stockDashboardSnapshots)
-    .where(eq(stockDashboardSnapshots.userId, args.userId))
+    .where(and(eq(stockDashboardSnapshots.userId, args.userId), sql`JSON_EXTRACT(${stockDashboardSnapshots.snapshotJson}, '$.kind') IS NULL`))
     .orderBy(desc(stockDashboardSnapshots.updatedAt))
     .limit(20);
   const row = rows.find((candidate) => {
@@ -242,13 +246,13 @@ export async function validateStockTaskContext(args: {
       {
         userId: args.userId,
         snapshotId: args.input.snapshotId,
-        rejectionCode: 'SNAPSHOT_NOT_OWNED',
+        rejectionCode: served.state === 'expired' ? 'SNAPSHOT_EXPIRED' : 'SNAPSHOT_NOT_OWNED',
       },
       'stocks-task: context rejected',
     );
     throw new TRPCError({
       code: 'BAD_REQUEST',
-      message: '找不到属于你的股票快照，请刷新页面后重试。',
+      message: served.state === 'expired' ? '股票快照已过期，请刷新页面后重试。' : '找不到属于你的股票快照，请刷新页面后重试。',
     });
   }
   try {

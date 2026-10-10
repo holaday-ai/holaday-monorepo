@@ -1,5 +1,6 @@
 import { Film } from 'lucide-react';
 import * as React from 'react';
+import { useNearViewport } from '@/hooks/useNearViewport';
 import {
   blobToDataUrl,
   fetchFileBlobAuthed,
@@ -32,38 +33,15 @@ export function LazyPosterImg({
   className?: string;
   onUnavailable?: (status: 404 | 410) => void;
 }): JSX.Element {
-  const ref = React.useRef<HTMLDivElement>(null);
+  const [ref, visible] = useNearViewport<HTMLDivElement>();
   const onUnavailableRef = React.useRef(onUnavailable);
   const unavailable = useFileUnavailable(posterUrl);
-  const [visible, setVisible] = React.useState(false);
   const [state, setState] = React.useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   const [url, setUrl] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     onUnavailableRef.current = onUnavailable;
   }, [onUnavailable]);
-
-  // Reveal once scrolled near the viewport.
-  React.useEffect(() => {
-    if (visible) return;
-    const el = ref.current;
-    if (!el) return;
-    if (typeof IntersectionObserver === 'undefined') {
-      setVisible(true);
-      return;
-    }
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setVisible(true);
-          io.disconnect();
-        }
-      },
-      { rootMargin: '200px' },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [visible]);
 
   // Authed blob fetch — runs once when first visible (deps exclude `state` so
   // setState inside can't re-trigger it → no render churn).

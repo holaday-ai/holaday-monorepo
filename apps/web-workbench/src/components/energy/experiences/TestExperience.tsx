@@ -136,18 +136,20 @@ export function TestExperience({
             18 个一分钟轻测试，可以继续换题、测关联主题，没有分数高低。
           </p>
         </div>
-        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <div className="energy-test-directory mt-6 grid gap-6">
           {CATEGORY_ORDER.map((category) => {
             const Icon = TEST_ICONS[category];
             const tests = LIGHT_TESTS.filter((test) => test.category === category);
+            const sharedDuration = tests.every(test => test.estimatedSeconds === tests[0]?.estimatedSeconds) ? tests[0]?.estimatedSeconds : null;
             return (
               <section
                 key={category}
-                className="rounded-2xl border border-[#eadfe5] bg-white/80 p-4"
+                className="energy-test-category"
               >
                 <header className="mb-3 flex items-center gap-2 text-[#83536b]">
                   <Icon className="h-4 w-4" aria-hidden="true" />
                   <h4 className="text-sm font-semibold">{CATEGORY_LABELS[category]}</h4>
+                  {sharedDuration && <small className="ml-auto text-xs font-normal text-[#817582]">约 {sharedDuration} 秒</small>}
                 </header>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {tests.map((test) => {
@@ -166,7 +168,7 @@ export function TestExperience({
                           {test.description}
                         </span>
                         <small className="mt-2 block text-[11px] font-medium text-[#9b6a81]">
-                          {completed ? '已完成' : `约 ${test.estimatedSeconds} 秒`}
+                          {completed ? '已完成' : sharedDuration ? null : `约 ${test.estimatedSeconds} 秒`}
                         </small>
                       </button>
                     );

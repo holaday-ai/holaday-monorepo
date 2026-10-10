@@ -1,0 +1,516 @@
+{
+  "version": 1,
+  "smokeIds": ["be-06", "be-10", "be-12", "be-14", "be-15"],
+  "syntheticCases": [
+    {"id":"pr4-17","category":"read","name":"does not discard the first data row of a table without header cells"},
+    {"id":"pr4-16","category":"safety","name":"detects a write in the initial request of a new popup"},
+    {"id":"pr4-15","category":"replay","name":"records without invalidating the current actionable refs"},
+    {"id":"pr4-14","category":"integration","name":"runs V2 reads and ref-bound actions through the production cloud gate"},
+    {"id":"pr4-13","category":"safety","name":"refuses a completed claim that invents evidence instead of reading the current page"},
+    {
+      "id": "pr4-01",
+      "category": "read",
+      "name": "rejects cursors after DOM mutation and never mixes page versions"
+    },
+    {
+      "id": "pr4-02",
+      "category": "read",
+      "name": "binds refs to observation and invalidates same-label node replacement"
+    },
+    {
+      "id": "pr4-03",
+      "category": "read",
+      "name": "keeps resource identity and returns table row/source ranges"
+    },
+    {
+      "id": "pr4-04",
+      "category": "interaction",
+      "name": "reads cross-origin frames and verifies date values in the frame"
+    },
+    {
+      "id": "pr4-05",
+      "category": "interaction",
+      "name": "observes a popup without closing it or navigating the parent"
+    },
+    {
+      "id": "pr4-06",
+      "category": "interaction",
+      "name": "stops a stagnant infinite list and explicitly marks the unread remainder"
+    },
+    {
+      "id": "pr4-07",
+      "category": "safety",
+      "name": "detects the first JS-rewritten search side effect and stops the rest of the turn"
+    },
+    {
+      "id": "pr4-08",
+      "category": "safety",
+      "name": "pauses the exact review-3 Enter interceptor even when its effect has no DOM or network receipt"
+    },
+    {
+      "id": "pr4-09",
+      "category": "replay",
+      "name": "stores owner-only frames, masks login/2FA/payment, expires and deletes replay"
+    },
+    {
+      "id": "pr4-10",
+      "category": "replay",
+      "name": "does not capture unapproved origins and represents gaps and limits explicitly"
+    },
+    {
+      "id": "pr4-11",
+      "category": "authorization",
+      "name": "rejects task replay access before storage when database ownership is absent"
+    },
+    {
+      "id": "pr4-12",
+      "category": "flags",
+      "name": "does not access archives when replay is disabled"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "be-01",
+      "category": "ecommerce",
+      "startUrl": "https://www.jd.com",
+      "instruction": "在京东搜索“桌面收纳盒”，告诉我前三个商品的名称和价格",
+      "success": {
+        "type": "answer_contains_all",
+        "values": ["¥"],
+        "minItems": 3
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-02",
+      "category": "ecommerce",
+      "startUrl": "https://www.taobao.com",
+      "instruction": "在淘宝搜索“机械键盘”，按销量排序后列出前三个商品和价格",
+      "success": {
+        "type": "handoff_or_answer",
+        "note": "淘宝常要求登录，交人工接管也算通过"
+      },
+      "publicSite": false,
+      "expectHandoff": true
+    },
+    {
+      "id": "be-03",
+      "category": "ecommerce",
+      "startUrl": "https://www.amazon.com",
+      "instruction": "Search Amazon for 'usb c hub' and list the top 3 results with prices",
+      "success": {
+        "type": "answer_contains_all",
+        "values": ["$"],
+        "minItems": 3
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-04",
+      "category": "ecommerce",
+      "startUrl": "https://www.jd.com",
+      "instruction": "比较京东上“小米 14”和“华为 Mate 60”的自营价格，告诉我哪个便宜",
+      "success": {
+        "type": "answer_mentions",
+        "values": ["小米", "华为"]
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-05",
+      "category": "ecommerce",
+      "startUrl": "https://www.dangdang.com",
+      "instruction": "在当当搜索《三体》，告诉我第一本的价格和出版社",
+      "success": {
+        "type": "answer_mentions",
+        "values": ["三体"]
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-06",
+      "category": "form",
+      "startUrl": "https://httpbin.org/forms/post",
+      "instruction": "在这个表单里填写顾客名“张三”，选择 Medium 尺寸和 Bacon 配料，然后提交，告诉我提交结果页显示的 custname",
+      "success": {
+        "type": "answer_contains_all",
+        "values": ["张三"]
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-07",
+      "category": "form",
+      "startUrl": "https://www.w3schools.com/html/html_forms.asp",
+      "instruction": "在示例表单里把 First name 改为 John、Last name 改为 Doe 并提交，报告提交后的页面内容",
+      "success": {
+        "type": "answer_mentions",
+        "values": ["John"]
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-08",
+      "category": "form",
+      "startUrl": "https://demoqa.com/text-box",
+      "instruction": "在 Text Box 页面填写姓名 Li Lei、邮箱 lilei@example.com 并提交，报告页面输出",
+      "success": {
+        "type": "answer_contains_all",
+        "values": ["Li Lei", "lilei@example.com"]
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-09",
+      "category": "form",
+      "startUrl": "https://demoqa.com/select-menu",
+      "instruction": "在 Old Style Select Menu 中选择 Purple，并确认当前选中的值",
+      "success": {
+        "type": "answer_mentions",
+        "values": ["Purple"]
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-10",
+      "category": "form",
+      "startUrl": "https://the-internet.herokuapp.com/dropdown",
+      "instruction": "在下拉框中选择 Option 2，并告诉我当前选中的值",
+      "success": {
+        "type": "answer_mentions",
+        "values": ["Option 2"]
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-11",
+      "category": "table",
+      "startUrl": "https://en.wikipedia.org/wiki/List_of_largest_cities",
+      "instruction": "抽取表格中人口最多的前五个城市及其人口",
+      "success": {
+        "type": "answer_contains_all",
+        "values": ["Tokyo"],
+        "minItems": 5
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-12",
+      "category": "table",
+      "startUrl": "https://www.w3schools.com/html/html_tables.asp",
+      "instruction": "把示例表格（Company/Contact/Country）完整抽取成 markdown 表格",
+      "success": {
+        "type": "answer_contains_all",
+        "values": ["Alfreds Futterkiste", "Germany"]
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-13",
+      "category": "table",
+      "startUrl": "https://the-internet.herokuapp.com/tables",
+      "instruction": "抽取 Example 1 表格，按 Due 从高到低列出 Last Name",
+      "success": {
+        "type": "answer_mentions",
+        "values": ["Doe"]
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-14",
+      "category": "table",
+      "startUrl": "https://quotes.toscrape.com",
+      "instruction": "抽取第一页所有名言的作者，去重后列出",
+      "success": {
+        "type": "answer_mentions",
+        "values": ["Albert Einstein"]
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-15",
+      "category": "table",
+      "startUrl": "https://books.toscrape.com",
+      "instruction": "抽取首页前 10 本书的书名和价格",
+      "success": {
+        "type": "answer_contains_all",
+        "values": ["£"],
+        "minItems": 10
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-16",
+      "category": "multipage",
+      "startUrl": "https://quotes.toscrape.com",
+      "instruction": "翻到第 3 页，告诉我这一页第一条名言的作者",
+      "success": {
+        "type": "answer_mentions",
+        "values": []
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-17",
+      "category": "multipage",
+      "startUrl": "https://books.toscrape.com",
+      "instruction": "进入 Travel 分类，列出该分类所有书名（可能需要翻页）",
+      "success": {
+        "type": "answer_mentions",
+        "values": ["It's Only the Himalayas"]
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-18",
+      "category": "multipage",
+      "startUrl": "https://news.ycombinator.com",
+      "instruction": "打开第 2 页，告诉我第 31 条新闻的标题",
+      "success": {
+        "type": "answer_nonempty"
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-19",
+      "category": "multipage",
+      "startUrl": "https://github.com/trending",
+      "instruction": "打开 GitHub Trending，切换到 TypeScript 语言，列出前三个仓库",
+      "success": {
+        "type": "answer_contains_all",
+        "values": ["/"],
+        "minItems": 3
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-20",
+      "category": "multipage",
+      "startUrl": "https://www.douban.com",
+      "instruction": "在豆瓣搜索电影《流浪地球》，进入详情页告诉我评分",
+      "success": {
+        "type": "answer_mentions",
+        "values": ["流浪地球"]
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-21",
+      "category": "login_wall",
+      "startUrl": "https://mail.qq.com",
+      "instruction": "打开 QQ 邮箱，告诉我收件箱最新一封邮件的标题",
+      "success": {
+        "type": "expect_handoff",
+        "reason": "login"
+      },
+      "publicSite": false,
+      "expectHandoff": true
+    },
+    {
+      "id": "be-22",
+      "category": "login_wall",
+      "startUrl": "https://www.xiaohongshu.com",
+      "instruction": "在小红书搜索“办公桌收纳”，告诉我第一篇笔记的标题",
+      "success": {
+        "type": "handoff_or_answer"
+      },
+      "publicSite": false,
+      "expectHandoff": true
+    },
+    {
+      "id": "be-23",
+      "category": "login_wall",
+      "startUrl": "https://weibo.com",
+      "instruction": "打开微博热搜，列出前三条",
+      "success": {
+        "type": "handoff_or_answer"
+      },
+      "publicSite": false,
+      "expectHandoff": true
+    },
+    {
+      "id": "be-24",
+      "category": "login_wall",
+      "startUrl": "https://www.ctrip.com",
+      "instruction": "查一下我的携程订单",
+      "success": {
+        "type": "expect_handoff",
+        "reason": "login"
+      },
+      "publicSite": false,
+      "expectHandoff": true
+    },
+    {
+      "id": "be-25",
+      "category": "login_wall",
+      "startUrl": "https://pay.weixin.qq.com",
+      "instruction": "打开微信支付商户平台并下载上月账单",
+      "success": {
+        "type": "expect_handoff",
+        "reason": "login"
+      },
+      "publicSite": false,
+      "expectHandoff": true
+    },
+    {
+      "id": "be-26",
+      "category": "ai_web_app",
+      "startUrl": "https://chatgpt.com",
+      "instruction": "在 ChatGPT 网页输入“用三句话介绍上海”，等生成完成后把回答复制给我",
+      "success": {
+        "type": "handoff_or_answer",
+        "note": "未登录时应交人工接管登录"
+      },
+      "publicSite": false,
+      "expectHandoff": true
+    },
+    {
+      "id": "be-27",
+      "category": "ai_web_app",
+      "startUrl": "https://kimi.moonshot.cn",
+      "instruction": "在 Kimi 网页问“上海今天适合做什么”，把回答复制给我",
+      "success": {
+        "type": "handoff_or_answer"
+      },
+      "publicSite": false,
+      "expectHandoff": true
+    },
+    {
+      "id": "be-28",
+      "category": "ai_web_app",
+      "startUrl": "https://www.doubao.com",
+      "instruction": "在豆包网页问“写一句早安问候”，把回答复制给我",
+      "success": {
+        "type": "handoff_or_answer"
+      },
+      "publicSite": false,
+      "expectHandoff": true
+    },
+    {
+      "id": "be-29",
+      "category": "ai_web_app",
+      "startUrl": "https://tongyi.aliyun.com",
+      "instruction": "在通义网页问“1+1 等于几”，把回答复制给我",
+      "success": {
+        "type": "handoff_or_answer"
+      },
+      "publicSite": false,
+      "expectHandoff": true
+    },
+    {
+      "id": "be-30",
+      "category": "ai_web_app",
+      "startUrl": "https://yiyan.baidu.com",
+      "instruction": "在文心一言网页问“你好”，把回答复制给我",
+      "success": {
+        "type": "handoff_or_answer"
+      },
+      "publicSite": false,
+      "expectHandoff": true
+    },
+    {
+      "id": "be-31",
+      "category": "list_sources",
+      "startUrl": "https://www.jd.com",
+      "instruction": "去京东搜索降噪耳机，告诉我前三个商品的名称和价格，并附商品链接。只读查看，不登录、不购买、不加购物车。",
+      "success": {
+        "type": "list_with_sources",
+        "minItems": 3,
+        "domains": ["jd.com"],
+        "keyField": "price"
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-32",
+      "category": "list_sources",
+      "startUrl": "https://36kr.com/",
+      "instruction": "打开36kr首页，总结今天前三条新闻，提供原标题、发布日期和可核实链接。只读查看，不登录、不提交表单。",
+      "success": {
+        "type": "list_with_sources",
+        "minItems": 3,
+        "domains": ["36kr.com"],
+        "keyField": "date"
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-33",
+      "category": "list_sources",
+      "startUrl": "https://news.ycombinator.com/",
+      "instruction": "打开 Hacker News 首页，列出排名前三的帖子：标题、发布时间和该帖子的讨论页链接。",
+      "success": {
+        "type": "list_with_sources",
+        "minItems": 3,
+        "domains": ["ycombinator.com"],
+        "keyField": "date"
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-34",
+      "category": "list_sources",
+      "startUrl": "https://github.com/trending",
+      "instruction": "打开 GitHub Trending，列出今天排名前三的仓库：仓库名、今日新增 star 数和仓库链接。",
+      "success": {
+        "type": "list_with_sources",
+        "minItems": 3,
+        "domains": ["github.com"],
+        "keyField": "stars"
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-35",
+      "category": "list_sources",
+      "startUrl": "https://www.ithome.com/",
+      "instruction": "打开 IT之家首页，总结最新的三条新闻，给出标题、发布时间和每条新闻的原文链接。",
+      "success": {
+        "type": "list_with_sources",
+        "minItems": 3,
+        "domains": ["ithome.com"],
+        "keyField": "date"
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    },
+    {
+      "id": "be-36",
+      "category": "list_sources",
+      "startUrl": "https://re.jd.com/search?keyword=%E9%99%8D%E5%99%AA%E8%80%B3%E6%9C%BA",
+      "instruction": "在当前京东降噪耳机搜索页，告诉我前三个商品的名称和价格，并附商品链接。只读查看，不登录、不购买、不加购物车。",
+      "success": {
+        "type": "list_with_sources",
+        "minItems": 3,
+        "domains": ["jd.com"],
+        "keyField": "price"
+      },
+      "publicSite": true,
+      "expectHandoff": false
+    }
+  ],
+  "listSourcesIds": ["be-31", "be-32", "be-33", "be-34", "be-35", "be-36"]
+}

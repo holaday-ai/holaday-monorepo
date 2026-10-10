@@ -204,7 +204,7 @@ export function CnPaymentDialog({
 
         <div className="border-b border-[#EFEFEF] px-5 py-4">
           <div className="flex items-start gap-3 pr-8">
-            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/10 text-sm font-semibold text-[#EA1F59]">
+            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-[#FF0061]/20 bg-[#FF0061]/10 text-sm font-semibold text-[#FF0061]">
               {providerMark}
             </div>
             <div className="min-w-0">
@@ -243,7 +243,7 @@ export function CnPaymentDialog({
         <div className="space-y-3 px-5 py-5">
           {phase === 'creating' && (
             <div className="flex items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-3 text-sm text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-              <Loader2 className="h-4 w-4 animate-spin text-[#EA1F59]" />
+              <Loader2 className="h-4 w-4 animate-spin text-[#FF0061]" />
               正在创建订单…
             </div>
           )}
@@ -285,14 +285,14 @@ export function CnPaymentDialog({
                 <button
                   type="button"
                   onClick={reopenAlipay}
-                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-1.5 text-sm font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/30 hover:bg-[#EA1F59]/10"
+                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-1.5 text-sm font-medium text-[#FF0061] transition-colors hover:border-[#FF0061]/30 hover:bg-[#FF0061]/10"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                   电脑打开支付宝
                 </button>
               )}
               {popupBlocked && (
-                <div className="rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/[0.06] px-3 py-2 text-xs text-[#EA1F59]">
+                <div className="rounded-[8px] border border-[#FF0061]/20 bg-[#FF0061]/[0.06] px-3 py-2 text-xs text-[#FF0061]">
                   浏览器拦截了付款窗口，请使用上方二维码扫码支付。
                 </div>
               )}
@@ -307,8 +307,8 @@ export function CnPaymentDialog({
           )}
 
           {phase === 'failed' && errorText && (
-            <div className="flex items-start gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-3 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" />
+            <div className="flex items-start gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#FF0061] bg-white px-3 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0061]" />
               <span>{errorText}</span>
             </div>
           )}

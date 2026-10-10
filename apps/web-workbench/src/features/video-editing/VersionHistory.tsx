@@ -83,7 +83,7 @@ export function VersionHistory({
                         setPendingRestoreId(null);
                         onRestore(version.id);
                       }}
-                      className="rounded-[8px] bg-[#EA1F59] px-2.5 py-1.5 font-semibold text-white disabled:opacity-50"
+                      className="rounded-[8px] bg-[#FF0061] px-2.5 py-1.5 font-semibold text-white disabled:opacity-50"
                     >
                       确认恢复
                     </button>

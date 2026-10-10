@@ -72,6 +72,7 @@ import {
   useTaskStore,
 } from '@/stores/task-store';
 import type { UiProject, UiTask } from '@/types/task';
+import { useCreativePageTheme } from '@/stores/theme-store';
 import { applyHistoryRetention } from '@/utils/time-buckets';
 import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
 
@@ -119,6 +120,7 @@ type ProjectRefreshResult =
 export function AppShell(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
+  const creativeTheme = useCreativePageTheme(location.pathname);
   const [searchParams] = useSearchParams();
   const toast = useToast();
 
@@ -203,6 +205,10 @@ export function AppShell(): JSX.Element {
 
   // Task store selectors.
   const tasks = useTaskStore((s) => s.tasks);
+  const tasksHasMore = useTaskStore((s) => s.tasksHasMore);
+  const loadingMoreTasks = useTaskStore((s) => s.loadingMore);
+  const tasksVisiblePageLimitReached = useTaskStore((s) => s.tasksVisiblePageLimitReached);
+  const loadMoreTasks = useTaskStore((s) => s.loadMoreTasks);
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
   const selectTask = useTaskStore((s) => s.selectTask);
   const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
@@ -541,18 +547,20 @@ export function AppShell(): JSX.Element {
     navigate,
   ]);
 
-  const handleLogout = React.useCallback(() => {
+  const handleLogout = React.useCallback(async () => {
+    try { await trpc.auth.logout.mutate(); }
+    catch { toast.show('退出未完成，请重试。', 'error'); return; }
     clearAccessToken();
     disconnect();
     reset();
     setMe(null);
     setAuthed(false);
     setBootstrapped(false);
-  }, [reset]);
+  }, [reset, toast]);
 
   // Project filter chip — driven by ?project= in URL, surfaced in
   // sidebar header so the user knows the task list is scoped.
-  const projectFilter = searchParams.get('project');
+  const projectFilter = location.pathname === '/' ? searchParams.get('project') : null;
   const activeProject = React.useMemo(
     () => projects.find((p) => p.projectId === projectFilter) ?? null,
     [projects, projectFilter],
@@ -712,6 +720,21 @@ export function AppShell(): JSX.Element {
     };
   }, [loadMoreProjectTasks, projectFilter, projectTaskFilter]);
 
+  const retentionPagerOverride = {
+    hasMore: tasksHasMore && !tasksVisiblePageLimitReached,
+    loadingMore: loadingMoreTasks,
+    onLoadMore: () => {
+      void loadMoreTasks(rows => {
+        const pinned = new Set(rows.filter(row => row.starred).map(row => row.taskId));
+        if (selectedTaskId) pinned.add(selectedTaskId);
+        return new Set(applyHistoryRetention(rows, historyDays, pinned).visible.map(row => row.taskId));
+      });
+    },
+    exhaustedCopy: tasksVisiblePageLimitReached ? '没有更多可见任务' : hiddenByRetentionCount > 0
+      ? `没有更多可见任务（${hiddenByRetentionCount} 条已超出保留期）`
+      : undefined,
+  };
+
   if (!authed) {
     return (
       <LoginGate
@@ -737,9 +760,10 @@ export function AppShell(): JSX.Element {
   return (
     <SidebarProvider
       defaultOpen={true}
+      className={`holaday-shell${creativeTheme ? ' dark holaday-creative-shell' : ''}`}
       style={
         {
-          '--sidebar-width': '304px',
+          '--sidebar-width': '318px',
           '--sidebar-width-icon': '64px',
         } as React.CSSProperties
       }
@@ -752,7 +776,7 @@ export function AppShell(): JSX.Element {
           projectFilterChip
         }
         onClearProjectFilter={() => navigate('/')}
-        pagerOverride={projectPagerOverride}
+        pagerOverride={projectPagerOverride ?? retentionPagerOverride}
         selectedTaskId={selectedTaskId}
         onSelectTask={(taskId) => {
           if (location.pathname !== '/') {
@@ -834,7 +858,9 @@ export function AppShell(): JSX.Element {
           Pages that need internal scroll still get it via their own
           flex-1 + overflow-y-auto blocks (WorkbenchApp, scheduled
           calendar). */}
-      <SidebarInset className="h-svh overflow-y-auto bg-background">
+      <SidebarInset className="holaday-main h-svh overflow-y-auto bg-background">
+        <div className="hd-shell-topbar" aria-hidden="true" />
+        {!selectedTaskId && <WorkbenchBreadcrumb />}
         <Outlet context={ctx} />
       </SidebarInset>
       <DesktopAccountDock
@@ -842,6 +868,7 @@ export function AppShell(): JSX.Element {
         onToggleBrowserWorkbench={toggleBrowserWorkbench}
         taskSelected={Boolean(selectedTaskId)}
         displayName={displayName}
+        avatarUrl={me?.avatarUrl}
         email={me?.email ?? null}
         plan={me?.plan ?? 'free'}
         unsuccessfulTaskCount={serverUnsuccessfulCount}
@@ -1020,8 +1047,8 @@ export function AppShell(): JSX.Element {
           aria-live="polite"
           className="pointer-events-none fixed inset-x-0 bottom-20 z-[90] flex justify-center px-3 sm:bottom-4"
         >
-          <div className="inline-flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-[8px] border border-[#EA1F59]/20 bg-white/90 px-3 py-2 text-[12px] font-medium text-[#595757] shadow-[0_12px_30px_rgba(89,87,87,0.12)] backdrop-blur dark:border-[#EA1F59]/35 dark:bg-card/90 dark:text-foreground/85">
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#EA1F59]/10 text-[#EA1F59]">
+          <div className="inline-flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-[8px] border border-[#FF0061]/20 bg-white/90 px-3 py-2 text-[12px] font-medium text-[#595757] shadow-[0_12px_30px_rgba(89,87,87,0.12)] backdrop-blur dark:border-[#FF0061]/35 dark:bg-card/90 dark:text-foreground/85">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#FF0061]/10 text-[#FF0061]">
               <WifiOff className="h-3 w-3" aria-hidden />
             </span>
             <span className="truncate">当前离线，暂时无法创建新任务</span>
@@ -1045,7 +1072,7 @@ function MobileSubpageSidebarSlot(): JSX.Element | null {
         onClick={() => setOpenMobile(true)}
         aria-label="打开任务列表"
         title="打开任务列表"
-        className="h-9 w-9 rounded-[9px] border-[#DCDDDD] bg-white/92 text-[#595757] shadow-[0_1px_3px_rgba(17,24,39,0.05)] backdrop-blur hover:bg-[#EFEFEF] hover:text-[#EA1F59] dark:border-white/10 dark:bg-card/90 dark:text-foreground/75 dark:hover:bg-white/10"
+        className="h-9 w-9 rounded-[9px] border-[#DCDDDD] bg-white/92 text-[#595757] shadow-[0_1px_3px_rgba(17,24,39,0.05)] backdrop-blur hover:bg-[#EFEFEF] hover:text-[#FF0061] dark:border-white/10 dark:bg-card/90 dark:text-foreground/75 dark:hover:bg-white/10"
       >
         <Menu className="h-4 w-4" aria-hidden />
       </Button>
@@ -1081,6 +1108,7 @@ function DesktopAccountDock({
   onToggleBrowserWorkbench,
   taskSelected,
   displayName,
+  avatarUrl,
   email,
   plan,
   unsuccessfulTaskCount,
@@ -1092,6 +1120,7 @@ function DesktopAccountDock({
   onToggleBrowserWorkbench(): void;
   taskSelected: boolean;
   displayName: string;
+  avatarUrl?: string | null;
   email: string | null;
   plan: string;
   unsuccessfulTaskCount: number;
@@ -1115,6 +1144,7 @@ function DesktopAccountDock({
       <UserMenu
         placement="topbar"
         displayName={displayName}
+        avatarUrl={avatarUrl}
         email={email}
         plan={plan}
         onLogout={onLogout}
@@ -1164,4 +1194,12 @@ function BrowserWorkbenchButton({
  */
 export function useAppShellContext(): OutletContext {
   return useOutletContext<OutletContext>();
+}
+
+function WorkbenchBreadcrumb() {
+  const { pathname } = useLocation();
+  const labels: Record<string, string> = { '/': '新任务', '/skills': '技能', '/stocks': '股市任务', '/cosmic': '今日能量', '/video': '视频', '/image': '图片', '/planned': '规划任务', '/files': '文件库', '/projects': '项目' };
+  const path = pathname.replace(/\/$/, '') || '/';
+  if (!labels[path]) return null;
+  return <div className="hd-workbench-breadcrumb"><span>{path === '/video' || path === '/image' ? '创作' : '个人空间'}</span><span>/</span><strong>{labels[path]}</strong></div>;
 }

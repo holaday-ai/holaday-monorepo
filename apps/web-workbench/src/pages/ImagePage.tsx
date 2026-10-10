@@ -1,12 +1,17 @@
+import { useCreativeProject } from '@/components/CreativeProjectPicker';
+import { CreativeReferenceLibrary } from '@/components/CreativeReferenceLibrary';
+import { CreativeInspiration } from '@/components/CreativeInspiration';
 import { ImageBriefComposer } from '@/components/image/ImageBriefComposer';
 import { ImageGenerationSettings } from '@/components/image/ImageGenerationSettings';
 import { ImageGoalPicker } from '@/components/image/ImageGoalPicker';
 import { ImageHistory } from '@/components/image/ImageHistory';
 import { ImageResultPanel } from '@/components/image/ImageResultPanel';
 import {
+  availableImageModelOptions,
   buildImageCreationOptions,
   buildImageFileOrder,
   buildImageIntentForSubmit,
+  usableImageModel,
 } from '@/components/image/image-studio-options';
 import {
   type ImageContinuationAction,
@@ -22,15 +27,17 @@ import { useToast } from '@/components/ui/toast';
 import { revokeCreativePreviewUrls } from '@/lib/creative-preview-urls';
 import { type ImageHistoryRow, toImageHistoryRow } from '@/lib/image-history-row';
 import { createMediaActionGuard } from '@/lib/media-action-guard';
+import { useMediaModels } from '@/lib/media-models';
 import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { useTaskStore } from '@/stores/task-store';
-import type { CommercialImageUse, ImageChangeTarget } from '@/types/image';
-import { ArrowRight, Loader2, Settings2, Sparkles } from 'lucide-react';
+import { type CommercialImageUse, type ImageChangeTarget, imageModelLabel } from '@/types/image';
+import { Loader2, Settings2, Sparkles, Files, ChevronDown } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 
 export function ImagePage(): JSX.Element {
+  const project = useCreativeProject();
   const navigate = useNavigate();
   const toast = useToast();
   const createTask = useTaskStore((state) => state.createTask);
@@ -38,12 +45,20 @@ export function ImagePage(): JSX.Element {
   const selectedTaskId = useTaskStore((state) => state.selectedTaskId);
   const refreshTasks = useTaskStore((state) => state.refreshTasks);
   const [draft, setDraft] = React.useState(() => createImageStudioDraft('inspiration'));
+  const mediaModels = useMediaModels();
+  const imageModelOptions = React.useMemo(
+    () => availableImageModelOptions(mediaModels?.image),
+    [mediaModels],
+  );
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [libraryOpen, setLibraryOpen] = React.useState(false);
+  const libraryAnchor = React.useRef<HTMLButtonElement | null>(null);
+  const [settingsMode, setSettingsMode] = React.useState<'models' | 'specs'>('specs');
   const [uploading, setUploading] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [inlineError, setInlineError] = React.useState<string | null>(null);
   const [submitGuard] = React.useState(createMediaActionGuard);
-  const settingsTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const settingsTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const attachmentCounterRef = React.useRef(0);
   const uploadInFlightRef = React.useRef(false);
@@ -324,12 +339,16 @@ export function ImagePage(): JSX.Element {
         undefined,
         undefined,
         undefined,
-        buildImageCreationOptions(draft, subject?.fileId),
+        buildImageCreationOptions(
+          { ...draft, model: usableImageModel(draft.model, mediaModels?.image) },
+          subject?.fileId,
+        ),
       );
       if ('error' in result) {
         setInlineError(result.error || '提交失败，请重试');
         return;
       }
+      await project.associate(result.taskId);
       const submittedAttachments = attachmentsRef.current;
       attachmentsRef.current = [];
       revokeCreativePreviewUrls(submittedAttachments);
@@ -391,15 +410,11 @@ export function ImagePage(): JSX.Element {
   const draftLocked = uploading || submitting;
 
   return (
-    <main className="min-h-full bg-[#FBFAF7] px-4 py-5 text-[#342E39] sm:px-6 lg:px-8">
+    <main className="hd-creative-page hd-image-page min-h-full bg-[var(--creative-surface,#FBFAF7)] px-4 py-5 text-[var(--creative-ink,#342E39)] sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-[1220px]">
-        <header className="mb-5 px-1">
-          <h1 className="text-[32px] font-semibold tracking-[-0.04em] text-[#27212D] sm:text-[38px]">
-            图片任务
-          </h1>
-        </header>
+        <header className="hd-creative-heading"><span>HOLADAY IMAGE</span><h1>让想象，有了模样。</h1><p>从一段灵感出发，或让熟悉的主角走进新画面。</p></header>
 
-        <div className="rounded-[26px] border border-[#E8E1E7] bg-white p-4 shadow-[0_14px_38px_rgba(62,48,69,0.05)] sm:p-5 lg:p-7">
+        <div className="hd-image-workspace rounded-[26px] border border-[var(--creative-line,#E8E1E7)] bg-[var(--creative-surface,#fff)] p-4 shadow-[0_14px_38px_rgba(62,48,69,0.05)] sm:p-5 lg:p-7">
           <ImageGoalPicker
             value={draft.goal}
             commercialUse={draft.commercialUse}
@@ -408,7 +423,9 @@ export function ImagePage(): JSX.Element {
             onCommercialUseChange={switchCommercialUse}
           />
 
-          <div ref={composerRef} className="mt-4">
+          {draft.goal === 'inspiration' && <CreativeInspiration kind="image" disabled={draftLocked} onPick={idea => { if (draftIsLocked()) return; invalidatePendingContinuation(); setDraft(current => ({ ...current, prompt: idea.prompt, aspectRatio: idea.aspectRatio, style: idea.style ?? current.style })); }} />}
+
+          <div ref={composerRef} id="image-creative-stage" className="hd-image-stage" role="tabpanel">
             <input
               ref={fileInputRef}
               type="file"
@@ -419,37 +436,21 @@ export function ImagePage(): JSX.Element {
               className="sr-only"
               onChange={(event) => void handleFilesSelected(event)}
             />
-            <ImageBriefComposer
+            {project.notice}
+            <ImageBriefComposer settings={<div className="hd-composer-meta"><button ref={settingsTriggerRef} type="button" className="hd-glass-pill" title="选择图片模型" aria-label="选择图片模型" disabled={draftLocked} onClick={event => { settingsTriggerRef.current = event.currentTarget; setSettingsMode('models'); setSettingsOpen(open => settingsMode === 'models' ? !open : true); }}><Settings2 className="h-4 w-4" />{imageModelLabel(usableImageModel(draft.model, mediaModels?.image))}<ChevronDown className="h-3 w-3" /></button><button type="button" className="hd-glass-pill" title="生成设置" aria-label="生成设置" onClick={event => { settingsTriggerRef.current = event.currentTarget; setSettingsMode('specs'); setSettingsOpen(open => settingsMode === 'specs' ? !open : true); }} disabled={draftLocked}>{settingSummary({ ...draft, model: usableImageModel(draft.model, mediaModels?.image) })}</button></div>} referenceAction={<><button ref={libraryAnchor} type="button" title="添加参考资料" disabled={draftLocked} onClick={() => setLibraryOpen(open => !open)}><Files className="h-4 w-4" />参考资料</button>{project.renderPicker(draftLocked)}</>}
               draft={draft}
               uploading={uploading}
               disabled={draftLocked}
               inlineError={inlineError}
               actions={
                 <>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <button
-                      ref={settingsTriggerRef}
-                      type="button"
-                      disabled={draftLocked}
-                      onClick={() => setSettingsOpen(true)}
-                      className="inline-flex min-h-11 items-center gap-3 rounded-xl border border-[#E2DAE3] bg-[#FBF9FC] px-3 text-left transition-colors hover:border-[#CFC1D2] hover:bg-white disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
-                    >
-                      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#F0E9FA] text-[#73529B]">
-                        <Settings2 className="h-4 w-4" aria-hidden />
-                      </span>
-                      <span>
-                        <span className="block text-sm font-semibold text-[#423A46]">生成设置</span>
-                        <span className="mt-0.5 block text-xs text-[#7A707D]">
-                          {settingSummary(draft)}
-                        </span>
-                      </span>
-                    </button>
+                  <div className="hd-creative-generation-actions">
 
                     <Button
                       type="button"
                       onClick={() => void handleSubmit()}
                       disabled={Boolean(validationMessage) || submitting}
-                      className="min-h-12 rounded-xl bg-[#D62958] px-8 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(214,41,88,0.2)] hover:bg-[#BE214B] sm:w-[48%]"
+                      className="hd-generate min-h-12 rounded-xl bg-[#D62958] px-8 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(214,41,88,0.2)] hover:bg-[#BE214B] sm:w-[48%]"
                     >
                       {submitting ? (
                         <Loader2
@@ -459,10 +460,10 @@ export function ImagePage(): JSX.Element {
                       ) : (
                         <Sparkles className="mr-2 h-4 w-4" aria-hidden />
                       )}
-                      {submitting ? '提交中…' : '开始生成'}
+                      {submitting ? '提交中…' : '准备生成'}
                     </Button>
                   </div>
-                  <p className="mt-2 min-h-5 text-right text-xs text-[#7D737F]" aria-live="polite">
+                  <p className="mt-2 min-h-5 text-right text-xs text-[var(--creative-muted,#7D737F)]" aria-live="polite">
                     {validationMessage ?? '设置已就绪，可以开始生成'}
                   </p>
                 </>
@@ -483,27 +484,7 @@ export function ImagePage(): JSX.Element {
             />
           </div>
 
-          {!currentTask ? (
-            <section className="mt-4 grid gap-4 rounded-[20px] border border-[#E8E1E8] bg-[#FCFBFD] px-5 py-4 sm:grid-cols-[minmax(240px,0.9fr)_minmax(320px,1.1fr)] sm:items-center">
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-[#433A47]">生成后可以继续修改</h2>
-                <p className="mt-1 text-xs leading-5 text-[#7B717F]">
-                  围绕同一张结果继续调整背景、风格、光线或构图，不必从头开始。
-                </p>
-                <span className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#755990]">
-                  继续改这张 · 保持主角 · 复用设置
-                  <ArrowRight className="h-4 w-4" aria-hidden />
-                </span>
-              </div>
-              <img
-                src="/design-ref/image-continuation-preview.jpg"
-                alt="同一主角在城市、雪景和暖阳场景中的连续创作示意"
-                loading="lazy"
-                decoding="async"
-                className="h-[96px] w-full rounded-[14px] object-cover shadow-[0_6px_18px_rgba(51,43,59,0.1)]"
-              />
-            </section>
-          ) : null}
+
         </div>
 
         {currentTask ? (
@@ -524,10 +505,13 @@ export function ImagePage(): JSX.Element {
         />
       </div>
 
+      <CreativeReferenceLibrary open={libraryOpen} onOpenChange={setLibraryOpen} anchorRef={libraryAnchor} disabled={draftLocked || draft.attachments.length >= 5} selectedFileIds={draft.attachments.map(file => file.fileId)} onChooseLocal={() => fileInputRef.current?.click()} onPick={file => { if (draftIsLocked()) return; setDraft(current => current.attachments.some(item => item.fileId === file.fileId) || current.attachments.length >= 5 ? current : { ...current, attachments: [...current.attachments, file] }); }} />
       <ImageGenerationSettings
         open={settingsOpen}
-        draft={draft}
+        mode={settingsMode}
+        draft={{ ...draft, model: usableImageModel(draft.model, mediaModels?.image) }}
         returnFocusRef={settingsTriggerRef}
+        modelOptions={imageModelOptions}
         onOpenChange={setSettingsOpen}
         onSettingChange={changeSetting}
       />
@@ -536,8 +520,7 @@ export function ImagePage(): JSX.Element {
 }
 
 function settingSummary(draft: ImageStudioDraft): string {
-  const model = draft.model === 'nano_banana_pro' ? 'Nano Banana Pro' : 'Nano Banana 2';
-  return `${model} · ${draft.aspectRatio} · ${draft.imageCount} 张`;
+  return `${draft.aspectRatio} · ${draft.imageCount} 张`;
 }
 
 export default ImagePage;

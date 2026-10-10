@@ -1,4 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// No real DNS in unit tests: allowlisted bot hosts resolve to a public IP.
+const lookupMock = vi.hoisted(() =>
+  vi.fn(async () => [{ address: '93.184.216.34', family: 4 }]),
+);
+vi.mock('node:dns/promises', () => ({ lookup: lookupMock, default: { lookup: lookupMock } }));
 import { _resetAllBucketsForTesting } from '../../quota/rate-limiter.js';
 import { notificationChannelsRouter, notificationsRouter } from './notifications.js';
 
@@ -90,18 +96,61 @@ function makeContext(options: {
 describe('notificationChannelsRouter — webhook target safety', () => {
   beforeEach(() => {
     _resetAllBucketsForTesting();
+    lookupMock.mockClear();
   });
+
+  const WECOM_URL =
+    'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=693a91f6-7aaa-4bc4-97a0-0ec2bbfa5aaa';
 
   it('create rejects a private target as BAD_REQUEST before persistence', async () => {
     const { ctx, inserted } = makeContext();
     await expect(
       notificationChannelsRouter.createCaller(ctx).create({
-        platform: 'custom',
-        webhookUrl: 'http://127.0.0.1/internal',
+        platform: 'wecom',
+        webhookUrl: 'https://127.0.0.1/cgi-bin/webhook/send?key=abcdefgh-1234',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(inserted).toEqual([]);
+    expect(lookupMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['third-party domain', 'https://hooks.example.com/cgi-bin/webhook/send?key=abcdefgh-1234'],
+    ['spoofed domain', 'https://qyapi.weixin.qq.com.evil.com/cgi-bin/webhook/send?key=abcdefgh-1234'],
+    ['http', 'http://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdefgh-1234'],
+    ['non-443 port', 'https://qyapi.weixin.qq.com:8443/cgi-bin/webhook/send?key=abcdefgh-1234'],
+    ['internal IP', 'https://10.0.0.7/cgi-bin/webhook/send?key=abcdefgh-1234'],
+  ])('create rejects %s before DNS or persistence', async (_label, webhookUrl) => {
+    const { ctx, inserted } = makeContext();
+    await expect(
+      notificationChannelsRouter.createCaller(ctx).create({ platform: 'wecom', webhookUrl }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(inserted).toEqual([]);
+    expect(lookupMock).not.toHaveBeenCalled();
+  });
+
+  it('create rejects the legacy custom platform at input validation', async () => {
+    const { ctx, inserted } = makeContext();
+    await expect(
+      notificationChannelsRouter.createCaller(ctx).create({
+        platform: 'custom' as never,
+        webhookUrl: 'https://hooks.example.com/notify',
         customTemplate: { text: '{{message}}' },
       }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(inserted).toEqual([]);
+  });
+
+  it('create accepts an official wecom bot URL after DNS verification', async () => {
+    const { ctx, inserted } = makeContext({ channels: [] });
+    await expect(
+      notificationChannelsRouter.createCaller(ctx).create({
+        platform: 'wecom',
+        webhookUrl: WECOM_URL,
+      }),
+    ).resolves.toMatchObject({ channelId: expect.any(String) });
+    expect(lookupMock).toHaveBeenCalledWith('qyapi.weixin.qq.com', expect.anything());
+    expect(inserted).toHaveLength(1);
   });
 
   it('update rejects a private target as BAD_REQUEST before persistence', async () => {
@@ -115,13 +164,47 @@ describe('notificationChannelsRouter — webhook target safety', () => {
     expect(updated).toEqual([]);
   });
 
+  it('update re-checks the stored URL against a newly selected platform', async () => {
+    const { ctx, updated } = makeContext({
+      channels: [{ platform: 'wecom', webhookUrl: WECOM_URL, customTemplate: null }],
+    });
+    await expect(
+      notificationChannelsRouter.createCaller(ctx).update({
+        channelId: 'nch_test',
+        platform: 'feishu',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(updated).toEqual([]);
+  });
+
+  it('refuses to re-enable a legacy custom channel', async () => {
+    const { ctx, updated } = makeContext();
+    await expect(
+      notificationChannelsRouter.createCaller(ctx).update({
+        channelId: 'nch_test',
+        enabled: true,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(updated).toEqual([]);
+  });
+
+  it('still lets a legacy custom channel be disabled', async () => {
+    const { ctx, updated } = makeContext();
+    await expect(
+      notificationChannelsRouter.createCaller(ctx).update({
+        channelId: 'nch_test',
+        enabled: false,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(updated).toEqual([{ enabled: false }]);
+  });
+
   it('inline test rejects a private target as BAD_REQUEST before sending', async () => {
     const { ctx } = makeContext();
     await expect(
       notificationChannelsRouter.createCaller(ctx).test({
-        platform: 'custom',
-        webhookUrl: 'http://169.254.169.254/latest/meta-data',
-        customTemplate: { text: '{{message}}' },
+        platform: 'feishu',
+        webhookUrl: 'https://169.254.169.254/open-apis/bot/v2/hook/abcdefgh-1234',
       }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
@@ -162,70 +245,32 @@ describe('notificationChannelsRouter — webhook target safety', () => {
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 
-  it('requires a custom template when switching a saved channel to custom', async () => {
-    const { ctx, updated } = makeContext({
-      channels: [
-        {
-          platform: 'wecom',
-          webhookUrl: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test',
-          customTemplate: null,
-        },
-      ],
-    });
-
-    await expect(
-      notificationChannelsRouter.createCaller(ctx).update({
-        channelId: 'nch_test',
-        platform: 'custom',
-      }),
-    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    expect(updated).toEqual([]);
-  });
-
-  it('rejects oversized custom templates before persistence', async () => {
-    const { ctx, inserted } = makeContext();
-
-    await expect(
-      notificationChannelsRouter.createCaller(ctx).create({
-        platform: 'custom',
-        webhookUrl: 'https://93.184.216.34/notify',
-        customTemplate: { text: 'x'.repeat(32_769) },
-      }),
-    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    expect(inserted).toEqual([]);
-  });
-
   it('caps saved notification channels per account', async () => {
-    const channels = Array.from({ length: 10 }, (_, index) => ({
-      platform: 'custom',
-      webhookUrl: `https://93.184.216.34/notify/${index}`,
-      customTemplate: { text: '{{message}}' },
+    const channels = Array.from({ length: 10 }, () => ({
+      platform: 'wecom',
+      webhookUrl: WECOM_URL,
+      customTemplate: null,
     }));
     const { ctx, inserted } = makeContext({ channels });
 
     await expect(
       notificationChannelsRouter.createCaller(ctx).create({
-        platform: 'custom',
-        webhookUrl: 'https://93.184.216.34/notify/new',
-        customTemplate: { text: '{{message}}' },
+        platform: 'wecom',
+        webhookUrl: WECOM_URL,
       }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(inserted).toEqual([]);
   });
 
   it('rate-limits repeated channel creation attempts per account', async () => {
-    const channels = Array.from({ length: 10 }, (_, index) => ({
-      platform: 'custom',
-      webhookUrl: `https://93.184.216.34/notify/${index}`,
-      customTemplate: { text: '{{message}}' },
+    const channels = Array.from({ length: 10 }, () => ({
+      platform: 'wecom',
+      webhookUrl: WECOM_URL,
+      customTemplate: null,
     }));
     const { ctx } = makeContext({ channels });
     const caller = notificationChannelsRouter.createCaller(ctx);
-    const input = {
-      platform: 'custom' as const,
-      webhookUrl: 'https://93.184.216.34/notify/new',
-      customTemplate: { text: '{{message}}' },
-    };
+    const input = { platform: 'wecom' as const, webhookUrl: WECOM_URL };
 
     for (let attempt = 0; attempt < 10; attempt += 1) {
       await expect(caller.create(input)).rejects.toMatchObject({
@@ -241,9 +286,8 @@ describe('notificationChannelsRouter — webhook target safety', () => {
     const { ctx } = makeContext();
     const caller = notificationChannelsRouter.createCaller(ctx);
     const input = {
-      platform: 'custom' as const,
-      webhookUrl: 'http://127.0.0.1/internal',
-      customTemplate: { text: '{{message}}' },
+      platform: 'wecom' as const,
+      webhookUrl: 'https://127.0.0.1/cgi-bin/webhook/send?key=abcdefgh-1234',
     };
 
     for (let attempt = 0; attempt < 10; attempt += 1) {

@@ -10,6 +10,7 @@ import type { CoreAdmission } from '../../agent/core-task-admission.js';
 import * as planning from '../../agent/core-task-plan.js';
 import { CoreTaskRepository } from '../../agent/core-task-repository.js';
 import type { CoreSettlement } from '../../agent/core-task-settlement.js';
+import * as classifier from '../../agent/intent-classifier.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import * as createClaims from '../../api-keys/webhook-idempotency-service.js';
 import { env } from '../../config/env.js';
@@ -271,10 +272,16 @@ function fixture(options: { suggestions?: boolean; plan?: boolean; generatedText
       intent = '整理合成资料为会议说明，不要发送邮件。',
       fileIds?: string[],
       replyToTaskId?: string,
+      retryOfTaskId?: string,
     ) =>
-      tasksRouter
-        .createCaller(ctx)
-        .create({ intent, mode: 'auto', expertMode: 'expert', fileIds, replyToTaskId }),
+      tasksRouter.createCaller(ctx).create({
+        intent,
+        mode: 'auto',
+        expertMode: 'expert',
+        fileIds,
+        replyToTaskId,
+        retryOfTaskId,
+      }),
     create: (
       intent = '整理合成资料为会议说明，不要发送邮件。',
       fileIds?: string[],
@@ -583,9 +590,10 @@ describe('real reply core routing and execution', () => {
       expect(f.frames.some((frame) => frame.type === 'server.task.progress')).toBe(true),
     );
     expect(f.planWrites).not.toHaveBeenCalled();
-    expect(f.requests).toHaveLength(0);
-    expect(f.settlements).toHaveLength(0);
     expect(f.frames.some((frame) => frame.type === 'server.task.plan')).toBe(false);
+    // The display-only plan is dropped; the main generation still runs and settles.
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
+    expect(f.settlements[0]?.status).toBe('completed');
   });
   it.each(['plan', 'head'] as const)(
     'bounds a stalled advisory %s and ignores its late success',
@@ -627,9 +635,9 @@ describe('real reply core routing and execution', () => {
       finish();
       await vi.advanceTimersByTimeAsync(1);
       expect(f.planWrites).not.toHaveBeenCalled();
-      expect(f.requests).toHaveLength(0);
-      expect(f.settlements).toHaveLength(0);
       expect(f.frames.some((frame) => frame.type === 'server.task.plan')).toBe(false);
+      // A stalled display-only plan no longer blocks the main generation.
+      await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
     },
   );
   it('rejects a shell success past the monotonic deadline before the timeout callback runs', async () => {
@@ -758,6 +766,11 @@ describe('real reply core routing and execution', () => {
         })) as Awaited<ReturnType<FileService['loadMany']>>,
     );
     const initial = await f.create(undefined, ['fil_original']);
+    expect(f.admissions[0]?.requirements).toMatchObject({
+      inputFiles: [
+        { fileId: 'fil_original', filename: 'fil_original.txt', mimetype: 'text/plain' },
+      ],
+    });
     expect(initial).toMatchObject({
       executionRevision: 1,
       executionMode: 'generate',
@@ -980,8 +993,8 @@ describe('real task route durable ownership', () => {
       close();
       await vi.waitFor(() => expect(controller.drain.snapshot().active).toBe(0));
       expect(controller.drain.snapshot().unknown).toBeGreaterThan(0);
-      expect(f.requests).toHaveLength(1);
-      expect(f.settlements).toHaveLength(0);
+      // The late plan stays uncertain, but the main generation is not blocked by it.
+      expect(f.requests.length).toBeGreaterThan(1);
     });
   });
 
@@ -999,8 +1012,8 @@ describe('real task route durable ownership', () => {
       close();
       await vi.waitFor(() => expect(controller.drain.snapshot().active).toBe(0));
       expect(controller.drain.snapshot().unknown).toBeGreaterThan(0);
-      expect(f.requests).toHaveLength(1);
-      expect(f.settlements).toHaveLength(0);
+      // The late plan stays uncertain, but the main generation is not blocked by it.
+      expect(f.requests.length).toBeGreaterThan(1);
     });
   });
 
@@ -1032,7 +1045,8 @@ describe('real task route durable ownership', () => {
         ).length;
         release();
         await vi.advanceTimersByTimeAsync(0);
-        expect(terminalCount).toBe(lane === 'plan' ? 0 : 1);
+        // Neither optional lane delays the terminal (the plan no longer blocks generation).
+        expect(terminalCount).toBe(1);
         expect(pending.byKind.model).toBe(1);
         expect(pending.unknown).toBeGreaterThan(0);
         expect(controller.drain.snapshot()).toMatchObject({ active: 0, idle: false });
@@ -1080,8 +1094,7 @@ describe('real task route durable ownership', () => {
         expect(pending.active).toBeGreaterThan(0);
         expect(pending.unknown).toBeGreaterThan(0);
         expect(controller.drain.snapshot()).toMatchObject({ active: 0, idle: false });
-        expect(f.requests).toHaveLength(1);
-        expect(f.settlements).toHaveLength(0);
+        expect(f.requests.length).toBeGreaterThan(1);
         expect(f.frames.some((frame) => frame.type === 'server.task.plan')).toBe(false);
       });
     },
@@ -1237,4 +1250,61 @@ describe('real task route durable ownership', () => {
       });
     },
   );
+});
+
+describe('D10 original input retry', () => {
+  it('keeps original attachment IDs and generate mode even when the classifier would choose browser', async () => {
+    const f = fixture();
+    f.files.mockImplementation(
+      async (ids) =>
+        ids.map((id) => ({
+          row: { externalId: id, filename: 'original.txt', mimetype: 'text/plain' },
+          buffer: Buffer.from('原输入材料'),
+        })) as Awaited<ReturnType<FileService['loadMany']>>,
+    );
+    const first = await f.createDirect(undefined, ['fil_original']);
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
+    f.row.status = 'failed';
+    const classify = vi.spyOn(classifier, 'classifyExecutionMode').mockResolvedValue('browser');
+    const retry = await f.createDirect(f.row.intent, [], undefined, first.taskId);
+    expect(retry).toMatchObject({ executionMode: 'generate' });
+    expect(classify).not.toHaveBeenCalled();
+    expect(f.admissions[1]?.requirements.fileIds).toEqual(['fil_original']);
+    expect(f.admissions[1]?.requirements.inputFiles).toEqual([
+      { fileId: 'fil_original', filename: 'original.txt', mimetype: 'text/plain' },
+    ]);
+    await vi.waitFor(() => expect(f.settlements).toHaveLength(2));
+  });
+  it('rejects a deleted original attachment before creating or charging a retry', async () => {
+    const f = fixture();
+    f.row.status = 'failed';
+    (f.row.result.coreRequirements as { fileIds: string[] }).fileIds = ['fil_deleted'];
+    await expect(
+      f.createDirect(f.row.intent, [], undefined, 'tsk_core_resume'),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: '附件已失效，请重新上传' });
+    expect(f.insert).not.toHaveBeenCalled();
+    expect(f.charge).not.toHaveBeenCalled();
+  });
+});
+
+it.each(['帮我建站', '帮我写一个 TypeScript 函数', '帮我编写 Python 脚本'])(
+  'rejects explicit development before quota or model use: %s',
+  async (intent) => {
+    const f = fixture();
+    await expect(f.createDirect(intent)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.charge).not.toHaveBeenCalled();
+    expect(f.requests).toHaveLength(0);
+  },
+);
+it('admits reading an existing PR through the real task scope guard', async () => {
+  const f = fixture();
+  // Stop at the classifier after the real scope guard, without starting a browser.
+  const nextStage = vi
+    .spyOn(classifier, 'classifyExecutionMode')
+    .mockRejectedValueOnce(new Error('scope guard passed'));
+  await expect(
+    f.createDirect('Open the PR #123 on GitHub and read its discussion'),
+  ).rejects.toMatchObject({ message: 'scope guard passed' });
+  expect(nextStage).toHaveBeenCalledOnce();
+  expect(f.charge).not.toHaveBeenCalled();
 });

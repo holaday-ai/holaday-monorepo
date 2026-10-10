@@ -58,6 +58,7 @@ import {
   executeCdpAction,
   getActiveTabId,
   prepareSelectedChromeCdp,
+  releaseStaleDebuggerAttachments,
 } from './cdp-actions.js';
 import { buildLoginStatesMessage, readLoginStates } from './cookie-bridge.js';
 import { runCookieSync } from './cookie-sync.js';
@@ -82,6 +83,7 @@ import { sendCriticalClientMessage } from './critical-send.js';
 import { withDeadline } from '../shared/deadline.js';
 import { compactLogErrorReason } from '../shared/log-error.js';
 import {
+  armCappedSlowRetry,
   connect as connectWs,
   disconnect as disconnectWs,
   getWsConnectionStatus,
@@ -168,6 +170,11 @@ async function getDriver(): Promise<HolaDayBrowserDriver> {
   });
   return driverPromise;
 }
+
+// A (re)started worker owns no debugger session; release any the previous
+// worker left attached so selected-tab / vision attaches do not fail with
+// "Another debugger is already attached" after an MV3 recycle.
+void releaseStaleDebuggerAttachments();
 
 /** Runs only while selected ownership is already reserved and before the
  * selected bridge attaches. Any cleanup failure blocks the new attachment. */
@@ -1465,38 +1472,18 @@ async function ensureConnectedInner(): Promise<{ token: string | null; frozen?: 
 const LOGIN_STATES_PERIOD_MS = 5 * 60 * 1000;
 let lastLoginStatesAt = 0;
 
-/**
- * Phase 17 — cookie-value sync throttle. Welcome + alarm both call
- * this; the timestamp dedupes so a tight reconnect cycle doesn't
- * burn the orchestrator with redundant POSTs.
- *
- * The interval matches the `30 * 60 * 1000` spec target (30 min)
- * for the alarm path; the welcome path is allowed to fire whenever
- * it does so freshly-authed users get an instant sync.
- */
-const COOKIE_SYNC_PERIOD_MS = 30 * 60 * 1000;
+/** Phase 17 cookie-value sync is retired; this only dedupes the one-time notice. */
 let lastCookieSyncAt = 0;
 
 async function maybeRunCookieSync(reason: 'welcome' | 'alarm' | 'manual'): Promise<void> {
-  const now = Date.now();
-  if (reason === 'alarm' && now - lastCookieSyncAt < COOKIE_SYNC_PERIOD_MS) return;
-  lastCookieSyncAt = now;
-  try {
-    const res = await runCookieSync();
-    if (res === null) {
-      // No token — silent skip, sync will retry on next welcome.
-      return;
-    }
-    console.info(
-      `[holaday] cookie-sync (${reason}): synced ${res.synced} cookies across ${res.domains.length} domains${
-        res.deferred ? ' (parked, no live Brave)' : ' (immediate inject)'
-      }`,
-    );
-  } catch (err) {
-    console.warn('[holaday] cookie-sync failed', compactLogErrorReason(err));
-    // Reset throttle so the next attempt isn't gated by the failed run.
-    lastCookieSyncAt = 0;
-  }
+  // Retired: cookies are no longer synced automatically. Say so once instead
+  // of failing silently; the popup shows the same notice to the user.
+  if (lastCookieSyncAt) return;
+  lastCookieSyncAt = Date.now();
+  await runCookieSync();
+  console.info(
+    `[holaday] cookie-sync (${reason}): 已改为按站点授权导入（功能即将开放），不再自动同步 Cookie`,
+  );
 }
 
 /**
@@ -1737,15 +1724,18 @@ onUnauthorized(() => {
 // kick off a fresh reconnect cycle EVERY tick after the in-memory
 // cap fired — defeating the persistent-cap fix in ws-client. With
 // it, three failed attempts → silence until the user explicitly
-// re-engages via the popup or chrome.runtime.onStartup.
+// re-engages via the popup or chrome.runtime.onStartup, except for one
+// slow probe per WS_CAPPED_RETRY_INTERVAL_MS (armCappedSlowRetry).
 chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: KEEPALIVE_PERIOD_MIN });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === KEEPALIVE_ALARM) {
     void (async () => {
-      if (await isReconnectCapped()) {
+      if ((await isReconnectCapped()) && !(await armCappedSlowRetry())) {
         // Persistent cap is hit — don't burn another connect cycle on
         // a known-unreachable orchestrator. The popup's manual retry
-        // path will clear the cap when the user is ready.
+        // path clears the cap immediately; otherwise one slow probe is
+        // allowed every WS_CAPPED_RETRY_INTERVAL_MS (self-heal after an
+        // orchestrator restart / network outage).
         return;
       }
       await ensureConnected();

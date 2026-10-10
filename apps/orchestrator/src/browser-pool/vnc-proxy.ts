@@ -20,6 +20,7 @@
  * on the client side so the handshake stays symmetrical.
  */
 
+import { VncReadOnlyFilter } from '../streaming/vnc-readonly.js';
 import type { IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
@@ -326,6 +327,7 @@ function pipe(
   // Don't relay frames until upstream has finished its handshake.
   // Buffer a small window in case the client races the
   // initial-RFB-VERSION bytes.
+  const readOnlyFilter = process.env.BROWSER_VIEWPORT_V2 === 'true' ? new VncReadOnlyFilter() : null;
   const clientBacklog: Array<[data: Buffer, isBinary: boolean]> = [];
   let upstreamReady = false;
   let lastTouchAt = Date.now();
@@ -337,6 +339,7 @@ function pipe(
   }
 
   upstream.on('open', () => {
+    if (client.readyState !== WebSocket.OPEN) { upstream.close(); return; }
     upstreamReady = true;
     for (const [data, isBinary] of clientBacklog) {
       upstream.send(data, { binary: isBinary });
@@ -362,7 +365,12 @@ function pipe(
   });
 
   client.on('message', (data, isBinary) => {
-    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+    if (client.readyState !== WebSocket.OPEN) return;
+    let buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+    if (readOnlyFilter) {
+      try { buf = readOnlyFilter.receive(buf); } catch { client.close(1008, 'browser_vnc_read_only'); upstream.close(); return; }
+      if (!buf.length) return;
+    }
     if (!upstreamReady) {
       clientBacklog.push([buf, isBinary]);
       return;

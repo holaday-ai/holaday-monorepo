@@ -1,0 +1,18 @@
+{
+  "base": "85329cb3",
+  "failures": [
+    [
+      "components/energy/energy-progress.test.ts",
+      "energy progress keeps scoped progress in memory when local storage is unavailable"
+    ],
+    [
+      "components/energy/energy-progress.test.ts",
+      "energy progress removes saved cards and test actions without deleting completion history"
+    ],
+    [
+      "lib/task-hub-state.test.ts",
+      "task hub state helpers formats dates and errors defensively"
+    ]
+  ],
+  "newFailures": []
+}

@@ -68,7 +68,7 @@ describe('TaskStream live phase copy', () => {
   });
 
   it('reassures users when browser work runs past two minutes', () => {
-    expect(liveSubStatusLongRunningHint('browsing', 120)).toContain('不是卡死');
+    expect(liveSubStatusLongRunningHint('browsing', 120)).toContain('尚未收到下一阶段更新');
   });
 
   it('offers a calmer long-running browser explanation after five minutes', () => {
@@ -77,7 +77,7 @@ describe('TaskStream live phase copy', () => {
 
   it('uses a concise processing hint for extraction and verification phases', () => {
     expect(liveSubStatusLongRunningHint('verifying', 180)).toBe(
-      '仍在整理和核对结果，不是卡死。',
+      '尚未收到下一阶段更新，正在等待数据或核验结果。',
     );
   });
 

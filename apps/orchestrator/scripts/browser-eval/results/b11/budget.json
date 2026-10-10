@@ -1,0 +1,18 @@
+{
+  "qwen3.7-plus": {
+    "tokens": 486598,
+    "exhausted": true
+  },
+  "qwen3.6-plus": {
+    "tokens": 936276,
+    "exhausted": false
+  },
+  "qwen3-vl-235b-a22b-instruct": {
+    "tokens": 879339,
+    "exhausted": true
+  },
+  "qwen3.6-flash": {
+    "tokens": 901363,
+    "exhausted": true
+  }
+}

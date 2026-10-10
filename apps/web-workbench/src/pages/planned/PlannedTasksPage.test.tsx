@@ -36,7 +36,7 @@ vi.mock('@fullcalendar/react', async () => {
   const React = await import('react');
   const Calendar = React.forwardRef(function CalendarMock(_props, ref) {
     React.useImperativeHandle(ref, () => ({
-      getApi: () => ({ changeView: vi.fn(), next: vi.fn(), prev: vi.fn(), today: vi.fn() }),
+      getApi: () => ({ getDate: () => new Date(), changeView: vi.fn(), next: vi.fn(), prev: vi.fn(), today: vi.fn() }),
     }));
     return <div aria-label="测试日历" />;
   });

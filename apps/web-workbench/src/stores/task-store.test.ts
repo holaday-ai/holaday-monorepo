@@ -1,14 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { trpc } from '@/lib/trpc';
+import { shouldConnectTaskBrowserForWorkbench } from '@/lib/workbench-state';
 import { showImageOption } from '@/lib/video-history-row';
 import type { UiTask } from '@/types/task';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   mergeFirstPageWithPreservedSelection,
   mergeTaskPagesReplacingDuplicates,
+  normaliseDetailStepStatus,
   normalizeTaskDetailSteps,
   normalizeTaskListCursor,
   normalizeTaskListRows,
-  normaliseDetailStepStatus,
   pruneRuntimeStateForTerminalTasks,
   setStoreNavigate,
   toUiTask,
@@ -17,6 +18,7 @@ import {
 
 vi.mock('@/lib/trpc', () => ({
   trpc: {
+    taskRecovery: { failureContext: { query: vi.fn() } },
     tasks: {
       list: { query: vi.fn() },
       detail: { query: vi.fn() },
@@ -40,6 +42,7 @@ const moveToProjectMutate = vi.mocked(trpc.tasks.moveToProject.mutate);
 const starMutate = vi.mocked(trpc.tasks.star.mutate);
 
 beforeEach(() => {
+  vi.mocked(trpc.taskRecovery.failureContext.query).mockReset().mockResolvedValue({ taskId: 'tsk_original', refund: { state: 'not_charged', refundedAt: null }, inputFiles: [], unavailableInputCount: 0, executionMode: null });
   listQuery.mockReset();
   detailQuery.mockReset();
   createMutate.mockReset();
@@ -95,6 +98,37 @@ describe('rerun execution target', () => {
     expect(createMutate).toHaveBeenCalledTimes(1);
     expect(createMutate.mock.calls[0]?.[0]).toMatchObject({ intent: '读取选定页面' });
     expect(createMutate.mock.calls[0]?.[0]?.localChrome).toBeUndefined();
+  });
+
+  it('resends the original input attachments on retry (batch 10.2)', async () => {
+    useTaskStore.setState({ tasks: [original] });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_retry_files', status: 'pending' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValueOnce({ taskId: 'tsk_retry_files', status: 'pending', steps: [], result: null } as never);
+    await useTaskStore.getState().rerunTask(original.taskId, undefined, { fileIds: ['fil_a', 'fil_b', 'fil_a'], retryOfTaskId: original.taskId });
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({ intent: '读取选定页面', fileIds: ['fil_a', 'fil_b'], retryOfTaskId: original.taskId });
+    expect(createMutate.mock.calls[0]?.[0]?.imageOptions).toBeUndefined();
+  });
+
+  it('keeps completed-task reruns on the existing create path', async () => {
+    useTaskStore.setState({ tasks: [{ ...original, status: 'completed' }] });
+    vi.mocked(trpc.taskRecovery.failureContext.query).mockResolvedValueOnce({ taskId: original.taskId, refund: { state: 'not_charged', refundedAt: null }, inputFiles: [{ fileId: 'fil_original', filename: 'original.txt', mimetype: 'text/plain' }], unavailableInputCount: 0, executionMode: 'generate' });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_repeat', status: 'pending' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValueOnce({ taskId: 'tsk_repeat', status: 'pending', steps: [], result: null } as never);
+    expect(await useTaskStore.getState().rerunTask(original.taskId)).toEqual({ taskId: 'tsk_repeat' });
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({ fileIds: ['fil_original'] });
+    expect(createMutate.mock.calls[0]?.[0]?.retryOfTaskId).toBeUndefined();
+  });
+
+  it('keeps image routing options when retrying a failed image task', async () => {
+    const imageOptions = { goal: 'free', model: 'auto', aspectRatio: '1:1', imageCount: 1, mode: 'free' } as unknown as NonNullable<UiTask['imageOptions']>;
+    useTaskStore.setState({ tasks: [{ ...original, executionMode: 'image', imageOptions }] });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_retry_image', status: 'pending' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValueOnce({ taskId: 'tsk_retry_image', status: 'pending', steps: [], result: null } as never);
+    await useTaskStore.getState().rerunTask(original.taskId, undefined, { fileIds: ['fil_subject'] });
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({ fileIds: ['fil_subject'], imageOptions });
   });
 
   it('preserves the combined user context when rebuilding an ordinary interrupted task', async () => {
@@ -1251,6 +1285,14 @@ describe('selectTask detail hydration', () => {
     });
   });
 
+  it('keeps research attachments and the trusted snapshot when creating a stock task', async () => {
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_stock_files', status: 'executing', executionMode: 'generate' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    const context = { snapshotId: 'stkshot_0123456789abcdef01234567', dataAsOf: '2026-08-11', trustMode: 'historical' as const, evidenceIds: ['quote:603528:2026-08-11'] };
+    await useTaskStore.getState().createStockTask('结合财报比较股票', context, ['file_report']);
+    expect(createMutate).toHaveBeenCalledWith(expect.objectContaining({ intent: '结合财报比较股票', fileIds: ['file_report'], taskSource: 'stock_dashboard', stockContext: context }));
+  });
+
   it('uses the current workbench viewport profile for direct retry entry points', async () => {
     createMutate.mockResolvedValueOnce({
       taskId: 'tsk_new',
@@ -1678,6 +1720,63 @@ describe('selectTask detail hydration', () => {
 });
 
 describe('loadMoreTasks', () => {
+  it('stops after five hidden pages, blocks repeat clicks, and resets on refresh', async () => {
+    useTaskStore.setState({ tasks: [], tasksCursor: 51, tasksHasMore: true });
+    let pages = 0;
+    listQuery.mockImplementation(async () => {
+      pages += 1;
+      return { tasks: [taskRow({ taskId: `hidden_${pages}` })], nextCursor: pages < 6 ? 51 + pages * 50 : null } as never;
+    });
+    await useTaskStore.getState().loadMoreTasks(() => new Set());
+    expect(listQuery).toHaveBeenCalledTimes(5);
+    expect(useTaskStore.getState()).toMatchObject({ tasksVisiblePageLimitReached: true, tasksHasMore: true, tasksCursor: 301, loadingMore: false, error: null });
+    await useTaskStore.getState().loadMoreTasks(() => new Set());
+    expect(listQuery).toHaveBeenCalledTimes(5);
+    listQuery.mockResolvedValue({ tasks: [], nextCursor: 51 } as never);
+    await useTaskStore.getState().refreshTaskList();
+    expect(useTaskStore.getState().tasksVisiblePageLimitReached).toBe(false);
+  });
+  it('keeps pagination available when the fifth page adds a visible task', async () => {
+    useTaskStore.setState({ tasks: [], tasksCursor: 51, tasksHasMore: true });
+    let pages = 0;
+    listQuery.mockImplementation(async () => {
+      pages += 1;
+      return { tasks: [taskRow({ taskId: pages === 5 ? 'visible_last' : `hidden_${pages}` })], nextCursor: 51 + pages * 50 } as never;
+    });
+    await useTaskStore.getState().loadMoreTasks(rows => new Set(rows.filter(row => row.taskId.startsWith('visible')).map(row => row.taskId)));
+    expect(listQuery).toHaveBeenCalledTimes(5);
+    expect(useTaskStore.getState()).toMatchObject({ tasksVisiblePageLimitReached: false, tasksHasMore: true });
+  });
+
+  it('skips fully hidden pages until a new visible task arrives while holding one loading lock', async () => {
+    useTaskStore.setState({ tasks: [task({ taskId: 'visible_first' })], tasksCursor: 51, tasksHasMore: true });
+    listQuery.mockResolvedValueOnce({ tasks: [taskRow({ taskId: 'hidden_old' })], nextCursor: 101 } as never);
+    listQuery.mockImplementationOnce(async () => {
+      expect(useTaskStore.getState().loadingMore).toBe(true);
+      await useTaskStore.getState().loadMoreTasks();
+      return { tasks: [taskRow({ taskId: 'visible_next' })], nextCursor: 151 } as never;
+    });
+    await useTaskStore.getState().loadMoreTasks(rows => new Set(rows.filter(row => row.taskId.startsWith('visible')).map(row => row.taskId)));
+    expect(useTaskStore.getState().tasks.map(row => row.taskId)).toEqual(['visible_first', 'hidden_old', 'visible_next']);
+    expect(useTaskStore.getState().tasksCursor).toBe(151);
+    expect(useTaskStore.getState().loadingMore).toBe(false);
+    expect(listQuery).toHaveBeenCalledTimes(2);
+  });
+  it('exhausts hidden pages and terminates a repeated cursor without spinning', async () => {
+    useTaskStore.setState({ tasks: [], tasksCursor: 51, tasksHasMore: true });
+    listQuery.mockResolvedValueOnce({ tasks: [taskRow({ taskId: 'hidden_1' })], nextCursor: 101 } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [taskRow({ taskId: 'hidden_2' })], nextCursor: null } as never);
+    await useTaskStore.getState().loadMoreTasks(() => new Set());
+    expect(useTaskStore.getState().tasks).toHaveLength(2);
+    expect(useTaskStore.getState().tasksHasMore).toBe(false);
+    listQuery.mockReset().mockResolvedValue({ tasks: [], nextCursor: 51 } as never);
+    useTaskStore.setState({ tasksCursor: 51, tasksHasMore: true });
+    await useTaskStore.getState().loadMoreTasks(() => new Set());
+    expect(listQuery).toHaveBeenCalledTimes(1);
+    expect(useTaskStore.getState().error).toBeTruthy();
+    expect(useTaskStore.getState().loadingMore).toBe(false);
+  });
+
   it('does not let a rejected old page clear the current execution runtime', async () => {
     useTaskStore.setState({ tasks: [task({ taskId: 'tsk_page', status: 'executing', executionId: 'new', executionRevision: 2 })], tasksCursor: 51, tasksHasMore: true,
       streamingByTask: { tsk_page: '新输出' }, progressByTask: { tsk_page: '新进度' } });
@@ -3515,3 +3614,168 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   });
   return { promise, resolve };
 }
+
+it.each([false, true])('retains the existing pet i2v subtype after hydration while a reference clip remains clone (%s)', clone => {
+ const task = toUiTask({ taskId: 'tsk_pet_hydration', intent: '眨眼', status: 'awaiting_user', createdAt: new Date(), result: { metadata: { lane: 'video_creation_confirm', petModel: 'wan_i2v', videoOptions: { tab: 'pet', petModel: 'wan_i2v', ...(clone ? { referenceVideoFileId: 'file_clip' } : {}) } } } } as never);
+ expect(task.videoType).toBe('pet'); expect(task.videoCreationMode).toBe(clone ? undefined : 'pet_i2v');
+});
+
+it('restores the real generation lane from durable core requirements after failure refresh', () => {
+ const task = toUiTask({ taskId: 'tsk_core_fail', intent: '写短文', status: 'failed', createdAt: new Date(), result: { reason: '生成未完成', coreRequirements: { schemaVersion: 1, phase: 'direct' } } } as never);
+ expect(task.executionMode).toBe('generate');
+});
+
+it('keeps pet i2v selected before the server list hydrates the new quote', async () => {
+ createMutate.mockResolvedValueOnce({ taskId: 'tsk_pet_quote', status: 'awaiting_user', executionMode: 'generate' } as never);
+ listQuery.mockImplementationOnce(() => new Promise(() => {}));
+ await useTaskStore.getState().createTask('轻轻眨眼', undefined, undefined, undefined, undefined, undefined, { tab: 'pet', petModel: 'wan_i2v', petImageFileId: 'file_pet', durationSeconds: 5 });
+ expect(useTaskStore.getState().tasks[0]).toMatchObject({ taskId: 'tsk_pet_quote', videoType: 'pet', videoCreationMode: 'pet_i2v' });
+});
+
+describe('continue a Chrome-extension wait in the public cloud (FIX-D11)', () => {
+  const waiting: UiTask = {
+    taskId: 'tsk_wait', title: '京东价格', intent: '在京东查一下 iPhone 价格', status: 'awaiting_user',
+    tickCount: 0, createdAt: new Date(), browserSource: 'local-chrome',
+  };
+  it('refuses an identity-required wait', async () => {
+    useTaskStore.setState({
+      tasks: [waiting],
+      awaitingUserByTask: { tsk_wait: { question: 'q', at: 1, awaitingKind: 'permission', browserConnection: { reason: 'extension_offline', publicCloudAllowed: false } } },
+    });
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ error: expect.stringMatching(/登录状态/) });
+    expect(createMutate).not.toHaveBeenCalled();
+  });
+  const publicWait = () => useTaskStore.setState({
+    tasks: [waiting],
+    awaitingUserByTask: { tsk_wait: { question: 'q', at: 1, awaitingKind: 'permission', browserConnection: { reason: 'extension_offline', publicCloudAllowed: true } } },
+  });
+  const quietRefresh = () => {
+    listQuery.mockResolvedValue({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValue({ taskId: 'tsk_public', status: 'pending', steps: [], result: null } as never);
+  };
+  it('cancels the wait first, then creates one public-cloud task bound to the original', async () => {
+    publicWait();
+    quietRefresh();
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_public', status: 'pending' } as never);
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ taskId: 'tsk_public' });
+    const [cancelledAt] = abortMutate.mock.invocationCallOrder;
+    const [createdAt] = createMutate.mock.invocationCallOrder;
+    expect(cancelledAt).toBeLessThan(createdAt ?? 0);
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({
+      intent: waiting.intent,
+      browserPreference: 'cloud-public',
+      clientRequestId: 'cloud-continue:tsk_wait',
+      publicCloudContinuationOf: 'tsk_wait',
+    });
+    expect(createMutate.mock.calls[0]?.[0]?.localChrome).toBeUndefined();
+    expect(useTaskStore.getState().browserPreference).toBeNull();
+    // Re-opening the original and pressing again returns the same replacement.
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ taskId: 'tsk_public' });
+    expect(abortMutate).toHaveBeenCalledTimes(1);
+    expect(createMutate).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    ['HTTP 503', () => abortMutate.mockRejectedValueOnce(Object.assign(new Error('Service Unavailable'), { data: { httpStatus: 503 } }))],
+    ['ok:false (stale)', () => abortMutate.mockResolvedValueOnce({ ok: false, state: 'stale' } as never)],
+    ['still aborting', () => abortMutate.mockResolvedValueOnce({ ok: true, state: 'aborting' } as never)],
+  ])('creates nothing when the cancel is not confirmed (%s), and stays retryable', async (_label, failCancel) => {
+    publicWait();
+    quietRefresh();
+    failCancel();
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ error: expect.stringMatching(/未能确认取消，没有创建新任务/) });
+    expect(createMutate).not.toHaveBeenCalled();
+    expect(useTaskStore.getState().publicCloudContinuationByTask.tsk_wait).toBeUndefined();
+    // A later retry with a confirmed cancel creates exactly one task.
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_public', status: 'pending' } as never);
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ taskId: 'tsk_public' });
+    expect(createMutate).toHaveBeenCalledTimes(1);
+  });
+  it('a double click shares one attempt: one cancel, one create', async () => {
+    publicWait();
+    quietRefresh();
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    let releaseCreate!: (value: unknown) => void;
+    createMutate.mockReturnValueOnce(new Promise((resolve) => { releaseCreate = resolve; }) as never);
+    const first = useTaskStore.getState().continueInPublicCloud('tsk_wait');
+    const second = useTaskStore.getState().continueInPublicCloud('tsk_wait');
+    await flushPromises();
+    releaseCreate({ taskId: 'tsk_public', status: 'pending' });
+    expect(await first).toEqual({ taskId: 'tsk_public' });
+    expect(await second).toEqual({ taskId: 'tsk_public' });
+    expect(abortMutate).toHaveBeenCalledTimes(1);
+    expect(createMutate).toHaveBeenCalledTimes(1);
+  });
+  it('a network failure after the cancel retries with the same server key and no second cancel', async () => {
+    publicWait();
+    quietRefresh();
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    createMutate.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ error: expect.stringMatching(/原任务已取消.*不会重复创建/) });
+    expect(useTaskStore.getState().publicCloudContinuationByTask.tsk_wait).toEqual({ stage: 'cancelled' });
+    // The unknown write may have reached the server: the resend carries the same
+    // key, so the server replays that task instead of creating another.
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_public', status: 'pending' } as never);
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ taskId: 'tsk_public' });
+    expect(abortMutate).toHaveBeenCalledTimes(1);
+    expect(createMutate).toHaveBeenCalledTimes(2);
+    expect(createMutate.mock.calls.map((call) => call[0]?.clientRequestId)).toEqual(['cloud-continue:tsk_wait', 'cloud-continue:tsk_wait']);
+    expect(useTaskStore.getState().tasks.filter((task) => task.taskId.startsWith('local_pending_'))).toEqual([]);
+  });
+  it('the public-cloud choice never leaks into another task created meanwhile', async () => {
+    publicWait();
+    quietRefresh();
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    let releaseCreate!: (value: unknown) => void;
+    createMutate.mockReturnValueOnce(new Promise((resolve) => { releaseCreate = resolve; }) as never);
+    const continuing = useTaskStore.getState().continueInPublicCloud('tsk_wait');
+    await flushPromises();
+    expect(useTaskStore.getState().browserPreference).toBeNull();
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_other', status: 'pending' } as never);
+    await useTaskStore.getState().createTask('打开淘宝查看 iPhone 价格');
+    expect(createMutate.mock.calls[1]?.[0]).not.toHaveProperty('browserPreference');
+    expect(createMutate.mock.calls[1]?.[0]).not.toHaveProperty('publicCloudContinuationOf');
+    releaseCreate({ taskId: 'tsk_public', status: 'pending' });
+    expect(await continuing).toEqual({ taskId: 'tsk_public' });
+  });
+  it('keeps the connection marker from tasks.detail after a refresh', async () => {
+    detailQuery.mockResolvedValueOnce({
+      taskId: 'tsk_wait', status: 'awaiting_user', intent: waiting.intent, steps: [],
+      awaitingQuestion: '需要连接 HOLA DAY Chrome 插件：…', awaitingKind: 'permission',
+      result: { executionMode: 'browser', metadata: { browserSource: 'local-chrome', browserConnection: { reason: 'extension_offline', publicCloudAllowed: false } } },
+    } as never);
+    useTaskStore.setState({ tasks: [{ ...waiting, status: 'executing' }] });
+    useTaskStore.getState().selectTask('tsk_wait', 'ui');
+    await flushPromises();
+    expect(useTaskStore.getState().awaitingUserByTask.tsk_wait?.browserConnection).toEqual({ reason: 'extension_offline', publicCloudAllowed: false });
+  });
+});
+
+describe('frontend audit transport lane recovery', () => {
+  it.each(['去京东查一下 iPhone 15 的价格', '【验收 GitHub】打开 https://github.com/holaday-ai'])('restores browser lane after reopen: %s', intent => {
+    useTaskStore.setState({ tasks: [task({taskId:'tsk_phase', intent, status:'executing', executionMode:undefined})], terminalTaskIds:new Set(), subStatusByTask:{} });
+    const store = useTaskStore.getState();
+    store.applyServerMessage({type:'server.vision.tick.start',taskId:'tsk_phase',tickIndex:0,mode:'screenshot'});
+    expect(useTaskStore.getState().tasks[0].executionMode).toBe('browser');
+    expect(shouldConnectTaskBrowserForWorkbench({task:useTaskStore.getState().tasks[0],hasRuntimeTextSignal:false})).toBe(true);
+    const phase=useTaskStore.getState().subStatusByTask.tsk_phase;
+    store.applyServerMessage({type:'server.supercar.thinking',taskId:'tsk_phase',summary:'检查页面'});
+    store.applyServerMessage({type:'server.supercar.web_search',taskId:'tsk_phase',iteration:1,query:'价格'});
+    expect(useTaskStore.getState().subStatusByTask.tsk_phase).toEqual(phase);
+    expect(phase?.subStatus).toBe('browsing');
+  });
+  it('retains the durable browser lane after list refresh without inspecting intent', () => {
+    expect(toUiTask({taskId:'tsk_refresh', intent:'去京东查价格',status:'executing',createdAt:new Date(),result:{executionMode:'browser'}} as never).executionMode).toBe('browser');
+  });
+  it('maps real generation stream and clears the phase at completion', () => {
+    useTaskStore.setState({ tasks:[task({taskId:'tsk_phase',status:'executing',executionMode:'generate'})],terminalTaskIds:new Set(),subStatusByTask:{} });
+    const store=useTaskStore.getState();
+    store.applyServerMessage({type:'server.task.stream',taskId:'tsk_phase',delta:'结果'});
+    expect(useTaskStore.getState().subStatusByTask.tsk_phase?.subStatus).toBe('generating');
+    store.applyServerMessage({type:'server.task.terminal',taskId:'tsk_phase',status:'completed',summary:'结果'});
+    store.applyServerMessage({type:'server.supercar.thinking',taskId:'tsk_phase',summary:'迟到事件'});
+    expect(useTaskStore.getState().subStatusByTask.tsk_phase).toBeUndefined();
+    expect(useTaskStore.getState().tasks[0].executionMode).toBe('generate');
+  });
+});

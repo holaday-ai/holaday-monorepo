@@ -1042,3 +1042,100 @@ describe('ws-client send', () => {
     expect(sockets).toHaveLength(1);
   });
 });
+
+describe('ws-client capped slow retry', () => {
+  const store = new Map<string, unknown>();
+
+  beforeEach(() => {
+    vi.resetModules();
+    configMock.wsHealthUrl = null;
+    configMock.deriveHealthUrl = false;
+    configMock.endpoints = ['wss://primary.test/ws'];
+    installGlobals();
+    store.clear();
+    const local = chrome.storage.local as unknown as {
+      get: ReturnType<typeof vi.fn>;
+      set: ReturnType<typeof vi.fn>;
+      remove: ReturnType<typeof vi.fn>;
+    };
+    local.get.mockImplementation(async (keys: string | string[]) => {
+      const out: Record<string, unknown> = {};
+      for (const key of Array.isArray(keys) ? keys : [keys]) {
+        if (store.has(key)) out[key] = store.get(key);
+      }
+      return out;
+    });
+    local.set.mockImplementation(async (items: Record<string, unknown>) => {
+      for (const [key, value] of Object.entries(items)) store.set(key, value);
+    });
+    local.remove.mockImplementation(async (key: string) => {
+      store.delete(key);
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('does nothing while the reconnect counter is below the cap', async () => {
+    store.set('holaday.ws.reconnectAttempts', 2);
+    const { armCappedSlowRetry } = await import('./ws-client.js');
+
+    await expect(armCappedSlowRetry(1_000_000)).resolves.toBe(false);
+    expect(store.get('holaday.ws.reconnectAttempts')).toBe(2);
+  });
+
+  it('waits for the slow-retry interval after the cap was hit', async () => {
+    const { armCappedSlowRetry, WS_CAPPED_RETRY_INTERVAL_MS } = await import('./ws-client.js');
+    store.set('holaday.ws.reconnectAttempts', 4);
+    store.set('holaday.ws.cappedAt', 1_000_000);
+
+    await expect(
+      armCappedSlowRetry(1_000_000 + WS_CAPPED_RETRY_INTERVAL_MS - 1),
+    ).resolves.toBe(false);
+    expect(store.get('holaday.ws.reconnectAttempts')).toBe(4);
+
+    await expect(armCappedSlowRetry(1_000_000 + WS_CAPPED_RETRY_INTERVAL_MS)).resolves.toBe(true);
+    expect(store.get('holaday.ws.reconnectAttempts')).toBe(3);
+  });
+
+  it('allows exactly one attempt per slow retry and re-caps on failure', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    store.set('holaday.ws.reconnectAttempts', 4);
+    const { armCappedSlowRetry, connect, isReconnectCapped } = await import('./ws-client.js');
+    await vi.advanceTimersByTimeAsync(0);
+
+    await expect(armCappedSlowRetry(Date.now())).resolves.toBe(true);
+    await expect(isReconnectCapped()).resolves.toBe(false);
+    connect('token');
+    const [socket] = sockets;
+    if (!socket) throw new Error('expected websocket');
+    socket.readyState = FakeWebSocket.CLOSED;
+    socket.dispatch('close', { code: 1006, reason: '' });
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(sockets).toHaveLength(1);
+    await expect(isReconnectCapped()).resolves.toBe(true);
+    expect(store.get('holaday.ws.cappedAt')).toEqual(expect.any(Number));
+    await expect(armCappedSlowRetry(Date.now())).resolves.toBe(false);
+  });
+
+  it('clears the capped timestamp when a socket opens or the user resets', async () => {
+    store.set('holaday.ws.reconnectAttempts', 4);
+    store.set('holaday.ws.cappedAt', 123);
+    const { connect, resetWsReconnectAttempts } = await import('./ws-client.js');
+
+    await resetWsReconnectAttempts();
+    expect(store.has('holaday.ws.cappedAt')).toBe(false);
+
+    store.set('holaday.ws.cappedAt', 456);
+    connect('token');
+    sockets[0]?.dispatch('open');
+    await Promise.resolve();
+    expect(store.has('holaday.ws.cappedAt')).toBe(false);
+  });
+});

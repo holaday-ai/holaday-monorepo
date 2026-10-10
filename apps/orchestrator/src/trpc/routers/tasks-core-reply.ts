@@ -13,6 +13,7 @@ import { parseFileForPrompt } from '../../files/parsers.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
 import { broadcastToUser } from '../../ws/server.js';
 import type { Context } from '../context.js';
+import { withTaskCostContext } from './media-task-background.js';
 import { publishCoreSettledSuggestions } from './tasks-core-suggestions.js';
 
 /** Receives exactly the already owner/origin-authorized row read by tasks.reply. */
@@ -138,7 +139,7 @@ export async function handleCoreTaskReply(args: {
   const generation = resolve('generate');
   const semantic = resolve('verifier');
   const repo = new CoreTaskRepository(ctx.db);
-  const execution = await startCoreTaskExecution({
+  const execution = await withTaskCostContext(ctx, input.taskId, () => startCoreTaskExecution({
     lifetime: ctx.executionLifetime,
     scope: { taskId: input.taskId, userId: args.userId },
     before: head,
@@ -150,6 +151,7 @@ export async function handleCoreTaskReply(args: {
     logger: ctx.logger,
     repo,
     responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
+    firecrawl: ctx.firecrawl ?? null,
     semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
     publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
     afterSettlement: (op) =>
@@ -162,7 +164,7 @@ export async function handleCoreTaskReply(args: {
         modelDataRegion: args.modelDataRegion,
         rawIntent: input.message,
       }),
-  });
+  }));
   void execution.completion.catch(() => {});
   return {
     ok: execution.ack.state === 'resumed',

@@ -50,7 +50,7 @@ function Preview(): JSX.Element {
                   : 'flex h-11 items-center gap-3 rounded-xl px-3 text-[13px] text-[#5F5A5E]'
               }
             >
-              <Icon className={active ? 'h-[17px] w-[17px] text-[#EA1F59]' : 'h-[17px] w-[17px]'} aria-hidden />
+              <Icon className={active ? 'h-[17px] w-[17px] text-[#FF0061]' : 'h-[17px] w-[17px]'} aria-hidden />
               {label}
             </div>
           ))}

@@ -46,16 +46,25 @@ export function ExperiencePlayer({
 }: ExperiencePlayerProps): JSX.Element | null {
   const startRef = React.useRef<HTMLButtonElement>(null);
 
-  if (!experience) return null;
+  const retained = React.useRef<{ experience: EnergyExperienceDefinition; children: React.ReactNode } | null>(null);
+  React.useLayoutEffect(() => {
+    if (open && experience) retained.current = { experience, children };
+  }, [open, experience, children]);
+  const visibleExperience = experience ?? retained.current?.experience;
+  const visibleChildren = experience ? children : retained.current?.children;
+  if (!visibleExperience) return null;
+  const directEntry = ['recharge', 'tarot', 'light-test'].includes(visibleExperience.id);
 
   return (
     <Dialog.Root open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[90] bg-[#141218]/35 backdrop-blur-[2px] data-[state=open]:animate-fade-in motion-reduce:animate-none" />
+        <Dialog.Overlay className="energy-approved-overlay fixed inset-0 z-[90] bg-[#141218]/35 backdrop-blur-[2px] data-[state=open]:animate-fade-in motion-reduce:animate-none" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 z-[91] flex max-h-[min(760px,calc(100dvh-24px))] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[24px] border border-white/70 bg-[#fffdfb] shadow-[0_28px_90px_rgba(49,40,58,0.24)] outline-none"
+          data-energy-experience={visibleExperience.id}
+          {...(!open ? { inert: '' } : {})}
+          className="energy-approved-player fixed left-1/2 top-1/2 z-[91] flex max-h-[min(760px,calc(100dvh-24px))] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[24px] border border-white/70 bg-[#fffdfb] shadow-[0_28px_90px_rgba(49,40,58,0.24)] outline-none"
           onOpenAutoFocus={(event) => {
-            if (phase !== 'intro') return;
+            if (phase !== 'intro' || directEntry) return;
             event.preventDefault();
             startRef.current?.focus();
           }}
@@ -65,9 +74,11 @@ export function ExperiencePlayer({
               returnFocusRef.current.focus();
               return;
             }
-            document
-              .querySelector<HTMLButtonElement>('[data-energy-focus-fallback="true"]')
-              ?.focus();
+            // Explicit "return to content" may already have placed focus outside the retiring dialog.
+            const active = document.activeElement;
+            if (!active || active === document.body || active.closest('.energy-approved-player')) {
+              document.querySelector<HTMLButtonElement>('[data-energy-focus-fallback="true"]')?.focus();
+            }
           }}
           onEscapeKeyDown={(event) => {
             event.preventDefault();
@@ -77,10 +88,10 @@ export function ExperiencePlayer({
           <div className="flex items-start gap-4 border-b border-[#eee9e5] px-6 py-5 pr-16">
             <div className="min-w-0">
               <Dialog.Title className="text-xl font-semibold tracking-[-0.02em] text-[#2f2933]">
-                {experience.title}
+                {visibleExperience.title}
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-sm leading-6 text-[#736a76]">
-                {durationLabel(experience.estimatedSeconds)} · {experience.description}
+                {durationLabel(visibleExperience.estimatedSeconds)} · {visibleExperience.description}
               </Dialog.Description>
             </div>
           </div>
@@ -99,7 +110,7 @@ export function ExperiencePlayer({
           </Dialog.Close>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-            {phase === 'intro' ? (
+            {phase === 'intro' && !directEntry ? (
               <div className="flex min-h-56 flex-col items-center justify-center text-center">
                 <p className="max-w-md text-[15px] leading-7 text-[#5f5663]">
                   给自己留一点空白。准备好时再开始，没有标准答案。
@@ -115,7 +126,7 @@ export function ExperiencePlayer({
               </div>
             ) : null}
 
-            {phase === 'active' || phase === 'result' ? children : null}
+            {phase === 'active' || phase === 'result' || (phase === 'intro' && directEntry) ? visibleChildren : null}
 
             {phase === 'error' ? (
               <div className="flex min-h-56 flex-col items-center justify-center text-center">

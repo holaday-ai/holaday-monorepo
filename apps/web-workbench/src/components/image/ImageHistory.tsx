@@ -152,13 +152,13 @@ export function ImageHistory({
   );
 
   return (
-    <section className="mt-8 rounded-[28px] border border-[#E8E0E8] bg-white/80 p-5 shadow-[0_16px_42px_rgba(62,48,69,0.045)] sm:p-6">
+    <section className="hd-media-history mt-8 rounded-[28px] border border-[var(--creative-line,#E8E0E8)] bg-white/80 p-5 shadow-[0_16px_42px_rgba(62,48,69,0.045)] sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold tracking-[0.08em] text-[#8A659F]">你的图片作品</p>
-          <h2 className="mt-1 text-xl font-semibold text-[#3D3441]">继续上次的创作</h2>
+          <p className="text-xs font-semibold tracking-[0.08em] text-[var(--creative-muted,#8A659F)]">你的图片作品</p>
+          <h2 className="mt-1 text-xl font-semibold text-[var(--creative-ink,#3D3441)]">继续上次的创作</h2>
         </div>
-        <fieldset className="flex rounded-xl bg-[#F4EFF6] p-1">
+        <fieldset className="flex rounded-xl bg-[var(--creative-surface,#F4EFF6)] p-1">
           <legend className="sr-only">筛选图片历史</legend>
           {(
             [
@@ -172,7 +172,7 @@ export function ImageHistory({
               type="button"
               aria-pressed={filter === value}
               onClick={() => setFilter(value)}
-              className="min-h-11 rounded-lg px-3 text-xs font-semibold text-[#6D6370] transition-colors aria-pressed:bg-white aria-pressed:text-[#6F4D8B] aria-pressed:shadow-sm motion-reduce:transition-none"
+              className="min-h-11 rounded-lg px-3 text-xs font-semibold text-[var(--creative-muted,#6D6370)] transition-colors aria-pressed:bg-[var(--creative-surface,#fff)] aria-pressed:text-[var(--creative-muted,#6F4D8B)] aria-pressed:shadow-sm motion-reduce:transition-none"
             >
               {label}
             </button>
@@ -181,7 +181,7 @@ export function ImageHistory({
       </div>
 
       {loading && !visible ? (
-        <div className="mt-5 flex min-h-36 items-center justify-center gap-2 text-sm text-[#7D727F]">
+        <div className="mt-5 flex min-h-36 items-center justify-center gap-2 text-sm text-[var(--creative-muted,#7D727F)]">
           <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
           正在读取作品…
         </div>
@@ -190,7 +190,7 @@ export function ImageHistory({
       {error ? (
         <div
           role="alert"
-          className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#FFF1E5] px-4 py-3 text-xs text-[#8C5828]"
+          className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[var(--creative-surface,#FFF1E5)] px-4 py-3 text-xs text-[var(--creative-muted,#8C5828)]"
         >
           <span>历史读取失败，已保留上次成功内容。</span>
           <button
@@ -214,7 +214,7 @@ export function ImageHistory({
                 title={row.starred ? '取消置顶' : '置顶'}
                 disabled={pinningTaskId !== null}
                 onClick={() => void toggleRowPin(row)}
-                className="absolute right-3 top-3 z-10 flex h-11 w-11 items-center justify-center rounded-xl border border-[#E6DFE6] bg-white/90 text-[#7B6E7E] shadow-sm transition-colors hover:bg-white disabled:opacity-50 motion-reduce:transition-none"
+                className="absolute right-3 top-3 z-10 flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--creative-line,#E6DFE6)] bg-white/90 text-[var(--creative-muted,#7B6E7E)] shadow-sm transition-colors hover:bg-[var(--creative-surface,#fff)] disabled:opacity-50 motion-reduce:transition-none"
               >
                 <Pin className={row.starred ? 'h-4 w-4 fill-current' : 'h-4 w-4'} aria-hidden />
               </button>
@@ -228,7 +228,7 @@ export function ImageHistory({
           ))}
         </div>
       ) : visible ? (
-        <div className="mt-5 rounded-[20px] border border-dashed border-[#DDD3DF] bg-[#FCF9FC] px-5 py-10 text-center text-sm text-[#807482]">
+        <div className="mt-5 rounded-[20px] border border-dashed border-[var(--creative-line,#DDD3DF)] bg-[var(--creative-surface,#FCF9FC)] px-5 py-10 text-center text-sm text-[var(--creative-muted,#807482)]">
           {filter === 'pinned'
             ? '暂无置顶图片作品。'
             : filter === 'recent'
@@ -243,7 +243,7 @@ export function ImageHistory({
             type="button"
             disabled={loadingMore}
             onClick={() => void loadMore()}
-            className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#DED4E2] bg-white px-5 text-sm font-semibold text-[#6F4D8B] disabled:opacity-50"
+            className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--creative-line,#DED4E2)] bg-[var(--creative-surface,#fff)] px-5 text-sm font-semibold text-[var(--creative-muted,#6F4D8B)] disabled:opacity-50"
           >
             {loadingMore ? (
               <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />

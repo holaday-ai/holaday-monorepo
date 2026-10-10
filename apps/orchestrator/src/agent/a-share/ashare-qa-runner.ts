@@ -32,6 +32,7 @@ import {
 } from './ashare-fact-card.js';
 import type { BriefingMode } from './ashare-format.js';
 import { judgeIntent } from './ashare-intent-judge.js';
+import { checkPeriodConsistency, periodFactsFromFundamentals } from './ashare-period-check.js';
 import { type GateReason, complianceGate, isSoftGateReason } from './ashare-qa-gate.js';
 import type { AshareQaMatch } from './ashare-qa-types.js';
 
@@ -290,6 +291,10 @@ export const SECTION7_SYSTEM = `# 角色
 - **严禁给出任何"倍数/比值"**（如"是行业的X倍""PE是PB的X倍""估值高出N倍"）——那是换算出的新数；只说"高于/低于行业中位"，不带倍数。
 - **数字务必逐位照抄、不许漏位错位**（1981.72 不能写成 981、4848 不能写成 484）；拿不准就不写数字，改用纯状态词（"估值站在历史高位""比行业中位明显贵"）。
 - ⚠️ PE/PB/分位/倍数这类无单位小数（如 67.2/12.21/85%/35）一旦写错就是用户看不出的硬幻觉——同样：拿不准就只用状态词。
+## 红线3b · 财务数字必须带报告期，期间不许混（系统会逐个核对，对不上整段丢弃）
+- 上文每个财务数字前都标了报告期（如「2026Q1 归母净利润」「2025年报 归母净利润」）。⑦ 引用任何财务数字，都要在同一句里写出它的报告期，原样用「2026Q1」「2025年报」这种标签。
+- 一季报/中报/三季报是当年累计值，年报是全年值，不同报告期不能混说：「2025年报盈利」不等于「今年盈利」；最新一期还在亏时，不能写「今年已扭亏/今年赚钱了/目前已盈利」。
+- 不要用「今年/本季度/最近/目前」代替报告期去说财务数字或盈亏状态；要说扭亏或亏损，就写清是哪一期（如「2025年报扭亏，但2026Q1又亏了」）。
 ## 红线4 · 必须标数据时效
 - 收尾按口径分别标，如：（盘面截至收盘、财务基于2026Q1财报、估值截至06-14）。具体期次以上文为准；某维度缺时效就不引用其数字。
 ## 红线5 · 固定收尾（原样照抄）
@@ -356,6 +361,29 @@ export async function runAsharePanorama(
   const now = deps.now ?? new Date();
   const mode = deps.mode ?? 'prod';
   const data = await fetchPanoramaData(deps.client, match);
+  deps.logger.info(
+    {
+      ...deps.context,
+      dimensions: data.perStock.map((p) => ({
+        symbol: p.stock.symbol,
+        sources: Object.entries({
+          kline: p.kline,
+          dragonTiger: data.dragonTiger,
+          northbound: data.northbound,
+          announcements: p.ann,
+          unlock: p.unlock,
+          ...data.bySymbol[p.stock.symbol],
+        }).map(([dimension, env]) => ({
+          dimension,
+          rows: env?.error ? 0 : (env?.data.length ?? 0),
+          source: env?.source,
+          fetchedAt: env?.fetched_at,
+          unavailable: !env || Boolean(env.error),
+        })),
+      })),
+    },
+    'ashare-panorama: fetched dimension evidence',
+  );
   let body = renderPanoramaBody(data, match, now, mode, deps.seethrough ?? false);
   // ④ 风险雷达 P1（flag 注入）：全景挂 ⑥ 风险信号组（命中才显，无→未检测到；插在 ⑤ 与 ⑦ 之间）。
   // 腿A 确定性、零新增 LLM、不进 ⑦ 上下文（腿B 跨项串联留后续）；取数失败仅跳过该组。
@@ -420,6 +448,36 @@ export async function runAsharePanorama(
     reason,
     interpreted: false,
   });
+
+  // ── 批次 11.1：报告期一致性（确定性，零 LLM）──
+  //   在判官之前：期间说混（Q1 亏却说「今年已扭亏」、年报数字标成季度…）属于事实错误，判官只管
+  //   买卖/预测，救不了，也不必再花一次调用。HARD 红线已失败的交给下面原路径（原因以合规为准）。
+  const gateHard = !gate.passed && !isSoftGateReason(gate.subReason);
+  if (!gateHard) {
+    const period = checkPeriodConsistency({
+      text: interpretation,
+      factsByStock: match.stocks.map((s) =>
+        periodFactsFromFundamentals(data.bySymbol[s.symbol]?.fundamentals?.data?.[0]),
+      ),
+      now,
+    });
+    if (!period.passed) {
+      deps.logger.warn(
+        {
+          ...deps.context,
+          event: 'ashare_qa_degrade',
+          reason: 'ungrounded',
+          subReason: 'period_mismatch',
+          lane: 'panorama',
+          layer: 'period-check',
+          hits: period.hits,
+          stocks,
+        },
+        'ashare-qa:period-consistency-degradation（⑦ 数字/盈亏状态与报告期对不上）',
+      );
+      return mkDegrade('ungrounded');
+    }
+  }
 
   // ── 第二层：LLM 意图判官（deps.judge 注入即启用，tasks.ts 按 ASHARE_INTENT_JUDGE_ENABLED 控制）──
   //   regex PASS                          → judge 仅"明确 block"才否决（补 regex 漏网的语义暗示）

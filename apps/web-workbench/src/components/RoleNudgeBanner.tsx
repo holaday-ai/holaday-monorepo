@@ -70,7 +70,7 @@ export function RoleNudgeBanner({ plan, selectedRoles }: Props): JSX.Element | n
         )}
       >
         <div className="flex min-w-0 items-start gap-2.5 text-sm">
-          <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#EA1F59]/7 text-[#EA1F59]">
+          <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#FF0061]/7 text-[#FF0061]">
             <Sparkles className="h-3 w-3" />
           </span>
           <div className="min-w-0 leading-snug">
@@ -86,7 +86,7 @@ export function RoleNudgeBanner({ plan, selectedRoles }: Props): JSX.Element | n
           <button
             type="button"
             onClick={() => navigate('/settings/roles')}
-            className="rounded-[6px] border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-3 py-1.5 text-xs font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/40 hover:bg-[#EA1F59]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+            className="rounded-[6px] border border-[#FF0061]/25 bg-[#FF0061]/5 px-3 py-1.5 text-xs font-medium text-[#FF0061] transition-colors hover:border-[#FF0061]/40 hover:bg-[#FF0061]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20"
           >
             去选择
           </button>

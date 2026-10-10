@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { withMediaCallContext } from '../agent/media-call-recorder.js';
 import * as observationSink from './core-model-observation.js';
 import { resolveCoreModelRuntime } from './core-model-runtime.js';
 import type { MessagesAdapter } from './messages-adapter.js';
@@ -230,8 +231,8 @@ describe('resolveCoreModelRuntime', () => {
     ).toThrow('does not belong to the cn region');
   });
 
-  it('rejects legacy_fixture in production before evaluating rollout', () => {
-    expect(() =>
+  it('does not block production resolution on MODEL_RUNTIME_POLICY (the model catalog decides)', () => {
+    expect(
       resolveCoreModelRuntime(
         baseInput({
           environment: {
@@ -240,8 +241,27 @@ describe('resolveCoreModelRuntime', () => {
             MODEL_RUNTIME_POLICY: 'legacy_fixture',
           },
         }),
+      ).kind,
+    ).toBe('ready');
+  });
+
+  it('treats an empty enabled-lane list as every lane (env can only narrow)', () => {
+    expect(
+      resolveCoreModelRuntime(
+        baseInput({
+          environment: {
+            ...ENVIRONMENT,
+            QWEN_CORE_ROLLOUT_MODE: 'all',
+            QWEN_CORE_ENABLED_LANES: '',
+          },
+        }),
+      ).kind,
+    ).toBe('ready');
+    expect(
+      resolveCoreModelRuntime(
+        baseInput({ environment: { ...ENVIRONMENT, QWEN_CORE_ROLLOUT_MODE: 'off' } }),
       ),
-    ).toThrow('MODEL_RUNTIME_POLICY must be qwen_only in production');
+    ).toEqual({ kind: 'unavailable', reason: 'LANE_DISABLED' });
   });
 
   it('constructs only the requested adapter and records one bounded success observation', async () => {
@@ -390,4 +410,50 @@ describe('resolveCoreModelRuntime', () => {
     );
     expect(JSON.stringify(observe.mock.calls)).not.toContain('private');
   });
+});
+
+it('records actual non-browser adapter usage in the task scope without duplicating the browser recorder', async () => {
+  const record = vi.fn().mockResolvedValue(undefined);
+  await withMediaCallContext(
+    { recorder: { record }, userExternalId: 'usr_allowed', taskExternalId: 'tsk_cost' },
+    async () => {
+      const runtime = resolveCoreModelRuntime(
+        baseInput({
+          createResponses: () => {
+            const adapter = buildResponsesAdapter();
+            adapter.stream = async () => ({
+              id: 'resp_cost',
+              metadata: adapter.metadata,
+              text: 'ok',
+              sources: [],
+              usage: { inputTokens: 20, outputTokens: 6, cachedInputTokens: 5 },
+              status: 'completed',
+            });
+            return adapter;
+          },
+        }),
+      );
+      if (runtime.kind !== 'ready') throw new Error('fixture unavailable');
+      await runtime.responses('standard').stream({ input: 'private fixture' });
+      const browser = resolveCoreModelRuntime(
+        baseInput({
+          lane: 'browser',
+          environment: { ...ENVIRONMENT, QWEN_CORE_ENABLED_LANES: 'browser' },
+        }),
+      );
+      if (browser.kind !== 'ready') throw new Error('browser fixture unavailable');
+      await browser
+        .messages('vision')
+        .create({ messages: [{ role: 'user', content: 'fixture' }], maxTokens: 10 });
+    },
+  );
+  expect(record).toHaveBeenCalledTimes(1);
+  expect(record.mock.calls[0]?.[0]).toMatchObject({
+    taskExternalId: 'tsk_cost',
+    inputTokens: 15,
+    outputTokens: 6,
+    cacheReadInputTokens: 5,
+    cacheCreationInputTokens: 0,
+  });
+  expect(JSON.stringify(record.mock.calls)).not.toContain('private fixture');
 });
