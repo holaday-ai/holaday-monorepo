@@ -341,6 +341,9 @@ function AgentBlock({
   webSearch: UiWebSearchEvent | undefined;
   serverSuggestions?: string[];
 }): JSX.Element {
+  const publicCloudRetryPending = useTaskStore(
+    (s) => s.publicCloudContinuationByTask[task.taskId]?.stage === 'cancelled',
+  );
   const [detailOpen, setDetailOpen] = React.useState(false);
   // Phase 24 RC follow-up — generate / scrape streaming output. The
   // buffer accumulates `server.task.stream` deltas; the progress
@@ -501,6 +504,10 @@ function AgentBlock({
             taskId={task.taskId}
             taskTickCount={task.tickCount}
           />
+        )}
+
+        {!awaitingUser && publicCloudRetryPending && (
+          <PublicCloudRetryNotice taskId={task.taskId} />
         )}
 
         {task.status === 'paused' && <PausedTaskNotice reason={task.resultText} />}
@@ -1312,6 +1319,43 @@ const AWAITING_KIND_ICON: Record<
   browser_action: MousePointerClick,
   video_quote: Clapperboard,
 };
+
+/**
+ * FIX-PR259-2 — the original was cancelled for a public-cloud continuation but
+ * the replacement was not confirmed. Retrying reuses the same server key, so it
+ * replays or completes the one replacement instead of creating another.
+ */
+function PublicCloudRetryNotice({ taskId }: { taskId: string }): JSX.Element {
+  const toast = useToast();
+  const [submitting, setSubmitting] = React.useState(false);
+  const retry = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const res = await useTaskStore.getState().continueInPublicCloud(taskId);
+      if ('error' in res) toast.show(res.error, 'error');
+      else toast.show('已改用公开云端（无登录态）继续', 'info', 2000);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return (
+    <div className="rounded-lg border border-[#DCDDDD] bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
+      <p className="text-sm text-foreground">原任务已取消，公开云端任务还没有创建成功。</p>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void retry()}
+          disabled={submitting}
+          className="inline-flex h-7 items-center gap-1 rounded-md border border-[#57479C] bg-[#57479C] px-3 text-xs font-medium text-white transition-colors hover:bg-[#473a82] disabled:opacity-60"
+        >
+          {submitting ? '提交中…' : '重试用公开云端（无登录态）继续'}
+        </button>
+        <span className="text-[11px] text-muted-foreground">重试不会重复创建任务。</span>
+      </div>
+    </div>
+  );
+}
 
 function PausedTaskNotice({ reason }: { reason?: string }): JSX.Element {
   const copy = pausedTaskNoticeCopy(reason);

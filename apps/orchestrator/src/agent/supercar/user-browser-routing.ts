@@ -39,9 +39,13 @@ const IDENTITY = new RegExp(
   ].join('|'),
   'i',
 );
-/** "不登录 GitHub" / "无需登录" / "without logging in" is a constraint, not a login need. */
+/**
+ * "不登录 GitHub" / "无需登录" / "without logging in" is a constraint, not a login
+ * need. Only the negated login phrase itself is removed: whatever follows it
+ * ("无需登录直接查看我的订单") is still checked for a personal-data need.
+ */
 const NEGATED_LOGIN =
-  /(?:不|不要|无需|不需要|不用|别|勿|无须|不必|免)\s*(?:要|用|必)?\s*(?:登录|登陆|登入|注册|sign\s*in|log\s*in)[^，。；,;！？!?\n、]{0,16}|\b(?:without|no need to|don'?t|do not|never)\s+(?:logging|signing|log|sign)(?:\s*(?:in|into))?\b[^,.;!?\n]{0,24}|\bno\s+(?:login|sign[ -]?in)\b/gi;
+  /(?:不|不要|无需|不需要|不用|别|勿|无须|不必|免)\s*(?:要|用|必)?\s*(?:登录|登陆|登入|注册|sign\s*in|log\s*in)|\b(?:without|no need to|don'?t|do not|never)\s+(?:logging|signing|log|sign)(?:\s*(?:in|into))?\b|\bno\s+(?:login|sign[ -]?in)\b/gi;
 /** Whether the request explicitly needs the user's own login / private data. */
 export function requiresUserIdentity(intent: string): boolean {
   return IDENTITY.test(

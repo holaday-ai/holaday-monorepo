@@ -102,3 +102,41 @@ describe('identity routing corpus (≥40 sentences, half public / half private)'
     expect(route.question).toContain('用公开云端（无登录态）继续');
   });
 });
+
+/**
+ * FIX-PR259-2 P1-1: a negated login only cancels the login itself. A personal /
+ * private request after it ("无需登录直接查看我的订单") still needs the user's Chrome.
+ */
+const NEGATED_LOGIN_PRIVATE = [
+  '打开京东网页，无需登录直接查看我的订单', // review B04
+  '打开 GitHub 不用登录直接读取私有仓库',
+  '不登录也帮我看看购物车里有什么',
+  "don't sign in again, just open my orders on jd.com",
+];
+const NEGATED_LOGIN_PUBLIC = [
+  '打开 GitHub 不用登录直接读取公开仓库 README',
+  '无需登录直接查看京东首页的促销活动',
+];
+describe('negated login keeps the personal-data request that follows it', () => {
+  it.each(NEGATED_LOGIN_PRIVATE)('still waits for the user Chrome: %s', (intent) => {
+    expect(requiresUserIdentity(intent)).toBe(true);
+    for (const enabled of [false, true]) {
+      expect(
+        decideUserBrowserRoute({
+          enabled,
+          intent,
+          extensionOnline: false,
+          legacyCookieSyncRetired: true,
+          publicCloudRequested: true,
+        }),
+      ).toMatchObject({
+        lane: 'awaiting_user',
+        reason: 'extension_offline',
+        identityRequired: true,
+      });
+    }
+  });
+  it.each(NEGATED_LOGIN_PUBLIC)('a negated login on a public page stays public: %s', (intent) => {
+    expect(requiresUserIdentity(intent)).toBe(false);
+  });
+});

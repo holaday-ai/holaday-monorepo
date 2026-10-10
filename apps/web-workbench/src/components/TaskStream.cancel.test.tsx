@@ -94,3 +94,41 @@ it('shows "用公开云端（无登录态）继续" only for a non-identity Chro
     cleanup();
   }
 });
+
+it('offers one retry when the original is cancelled but the public-cloud task was not created (FIX-PR259-2)', async () => {
+  let release!: (value: { taskId: string }) => void;
+  const continueSpy = vi.fn(
+    () =>
+      new Promise<{ taskId: string }>((resolve) => {
+        release = resolve;
+      }),
+  );
+  useTaskStore.setState({
+    tasks: [
+      {
+        taskId: 'tsk_conn',
+        title: '查询',
+        intent: '在京东查一下价格',
+        status: 'cancelled',
+        tickCount: 0,
+        createdAt: new Date(),
+      },
+    ],
+    awaitingUserByTask: {},
+    publicCloudContinuationByTask: { tsk_conn: { stage: 'cancelled' } },
+    continueInPublicCloud: continueSpy,
+  });
+  function Harness() {
+    const task = useTaskStore((s) => s.tasks[0]);
+    return task ? <TaskStream task={task} /> : null;
+  }
+  render(<Harness />);
+  const retry = screen.getByRole('button', { name: '重试用公开云端（无登录态）继续' });
+  await userEvent.click(retry);
+  await userEvent.click(screen.getByRole('button', { name: '提交中…' }));
+  expect(continueSpy).toHaveBeenCalledTimes(1);
+  release({ taskId: 'tsk_public' });
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: '重试用公开云端（无登录态）继续' })).toBeTruthy(),
+  );
+});
