@@ -823,6 +823,13 @@ export const serverSupercarWebSearchSchema = z.object({
     .optional(),
 });
 
+export const browserConnectionWaitSchema = z
+  .object({
+    reason: z.enum(['extension_offline', 'selection_required', 'origin_grant_required']),
+    publicCloudAllowed: z.boolean(),
+  })
+  .strict();
+export type BrowserConnectionWait = z.infer<typeof browserConnectionWaitSchema>;
 export const serverSupercarAwaitingUserSchema = z.object({
   ...executionIdentityFields,
   type: z.literal('server.supercar.awaiting_user'),
@@ -838,6 +845,12 @@ export const serverSupercarAwaitingUserSchema = z.object({
   awaitingKind: z
     .enum(['clarification', 'login', 'captcha', 'permission', 'browser_action', 'video_quote'])
     .optional(),
+  /**
+   * The task waits for the HOLA DAY Chrome extension / page selection.
+   * `publicCloudAllowed` is false when the request needs the user's own
+   * login: the UI must not offer "用公开云端（无登录态）继续" then.
+   */
+  browserConnection: browserConnectionWaitSchema.optional(),
 });
 
 /**

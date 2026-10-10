@@ -23,7 +23,11 @@ import type {
 } from '@/types/task';
 import { isTerminalStatus } from '@/types/task';
 import type { VideoCreationOptions } from '@/types/video';
-import type { BrowserViewportProfile, ServerMessage } from '@holaday/shared-types';
+import {
+  type BrowserViewportProfile,
+  type ServerMessage,
+  browserConnectionWaitSchema,
+} from '@holaday/shared-types';
 import { create } from 'zustand';
 import { type ExecutionIdentity, TaskExecutionOrder, readExecutionIdentity } from './task-execution-order';
 
@@ -32,6 +36,19 @@ import { type ExecutionIdentity, TaskExecutionOrder, readExecutionIdentity } fro
  * task text: it must never be prepended to or persisted as the user's intent.
  */
 export type TaskCreationSource = 'stock_dashboard';
+
+/** Mirrors the server: one public-cloud replacement per original task. */
+export function publicCloudContinuationRequestId(originalTaskId: string): string {
+  return `cloud-continue:${originalTaskId}`;
+}
+
+/** FIX-PR259-2 — options that apply to one task creation only. */
+export interface TaskCreateOverrides {
+  browserPreference?: 'cloud-public';
+  /** Server idempotency key; a repeated request replays the first task. */
+  clientRequestId?: string;
+  publicCloudContinuationOf?: string;
+}
 
 export interface StockTaskContextInput {
   snapshotId: string;
@@ -80,6 +97,15 @@ export interface TaskStore {
   degradeByTask: Record<string, UiDegradeEvent>;
   /** Supercar: current "agent asked a question" state per task. Cleared on reply. */
   awaitingUserByTask: Record<string, UiAwaitingUser>;
+  /**
+   * FIX-PR259-2 — public-cloud continuation per ORIGINAL task: `cancelled`
+   * once the original's cancel is confirmed (the replacement may still need a
+   * retry), `created` with the one replacement the server allowed.
+   */
+  publicCloudContinuationByTask: Record<
+    string,
+    { stage: 'cancelled' } | { stage: 'created'; replacementTaskId: string }
+  >;
   /**
    * Follow-up user messages for a task. The initial intent renders as
    * the first user bubble; every `tasks.reply` succeeds pushes the
@@ -283,6 +309,8 @@ export interface TaskStore {
     taskSource?: TaskCreationSource,
     stockContext?: StockTaskContextInput,
     retryOfTaskId?: string,
+    /** Per-creation overrides; never written to the global browser preference. */
+    overrides?: TaskCreateOverrides,
   ): Promise<{ taskId: string } | { error: string }>;
   /** Submit from the stock dashboard without mutating the user's wording. */
   createStockTask(
@@ -304,6 +332,12 @@ export interface TaskStore {
     fileIds?: string[],
   ): Promise<{ ok: boolean } | { error: string }>;
   abortTask(taskId: string): Promise<{ ok: boolean; state?: string } | { error: string }>;
+  /**
+   * FIX-D11 — a task waiting for the Chrome extension that does NOT need the
+   * user's own login: re-submit it explicitly as a public (logged-out) cloud
+   * task, then cancel the waiting one. Refused for identity-required tasks.
+   */
+  continueInPublicCloud(taskId: string): Promise<{ taskId: string } | { error: string }>;
   applyServerMessage(msg: ServerMessage): void;
   reset(): void;
 }
@@ -643,6 +677,81 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   const uncertainReplies = new Map<string, ExecutionIdentity | 'invalid'>();
   const observedExecutions = new Map<string, ExecutionIdentity>();
   const uncertainCreations = new Map<string, string>();
+  // One continuation attempt per original task at a time, across every button.
+  const publicCloudFlights = new Map<string, Promise<{ taskId: string } | { error: string }>>();
+  const publicCloudEligible = new Set<string>();
+  /**
+   * FIX-PR259-2 — cancel the waiting task, confirm the cancel, then create the
+   * public-cloud replacement under a key bound to the original task. A failed
+   * cancel creates nothing; a failed or unknown create can be retried and the
+   * server replays (or refuses) instead of creating a second task.
+   */
+  async function continueOnce(taskId: string): Promise<{ taskId: string } | { error: string }> {
+    const progress = get().publicCloudContinuationByTask[taskId];
+    if (progress?.stage === 'created') return { taskId: progress.replacementTaskId };
+    const task = get().tasks.find((item) => item.taskId === taskId);
+    // An unconfirmed cancel may still clear the wait marker; remember that this
+    // original was eligible so the retry is not mistaken for an identity task.
+    if (get().awaitingUserByTask[taskId]?.browserConnection?.publicCloudAllowed === true)
+      publicCloudEligible.add(taskId);
+    const allowed = progress?.stage === 'cancelled' || publicCloudEligible.has(taskId);
+    if (!task || !allowed)
+      return { error: '这个任务需要你的登录状态，不能改用无登录态的公开云端。' };
+    if (get().localChromeSelection)
+      return { error: '输入框已选择 Chrome 页面，请先移除该选择后再改用公开云端。' };
+    let fileIds: string[] = [];
+    const generation = captureSessionGeneration();
+    try {
+      const context = await trpc.taskRecovery.failureContext.query({ taskId });
+      if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
+      if (context.unavailableInputCount) return { error: '附件已失效，请重新上传' };
+      fileIds = context.inputFiles.map((file) => file.fileId);
+    } catch {
+      return { error: '无法恢复原任务输入，请稍后重试。' };
+    }
+    if (progress?.stage !== 'cancelled') {
+      const cancelled = await get().abortTask(taskId);
+      if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
+      // `ok:false, state:'cancelled'` = an earlier attempt already cancelled it.
+      const confirmed = !('error' in cancelled) && cancelled.state === 'cancelled';
+      if (!confirmed)
+        return { error: '原任务未能确认取消，没有创建新任务。请稍后重试，或先手动取消原任务。' };
+      set((prev) => ({
+        publicCloudContinuationByTask: {
+          ...prev.publicCloudContinuationByTask,
+          [taskId]: { stage: 'cancelled' as const },
+        },
+      }));
+    }
+    const created = await get().createTask(
+      task.intent,
+      fileIds,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        browserPreference: 'cloud-public',
+        clientRequestId: publicCloudContinuationRequestId(taskId),
+        publicCloudContinuationOf: taskId,
+      },
+    );
+    if ('error' in created)
+      return { error: `原任务已取消，但公开云端任务没有创建成功：${created.error}。可以再次点击重试，不会重复创建。` };
+    set((prev) => ({
+      publicCloudContinuationByTask: {
+        ...prev.publicCloudContinuationByTask,
+        [taskId]: { stage: 'created' as const, replacementTaskId: created.taskId },
+      },
+    }));
+    return created;
+  }
   const uncertainWriteMessage = '任务接收或创建状态未确认，请保留输入并刷新核对，不要重复提交。';
   function seedExecutionOrder(taskId: string): void {
     const task = get().tasks.find(t => t.taskId === taskId);
@@ -845,6 +954,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ? safeTaskListText(detail.awaitingQuestion) || null
             : null;
         const awaitingKind = normalizeAwaitingKind(detail.awaitingKind);
+        const browserConnection = extractBrowserConnection(detail.result);
         const executionMode = extractExecutionMode(detail.result);
         const failedChecks = extractFailedChecks(detail.result);
         const stockContext = normalizeStockTaskContext(detail.stockContext);
@@ -871,6 +981,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                 question: awaitingQuestion,
                 at: Date.now(),
                 ...(awaitingKind ? { awaitingKind } : {}),
+                ...(browserConnection ? { browserConnection } : {}),
               },
             }
           : (() => {
@@ -1011,6 +1122,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   executorFallbackByTask: {},
   degradeByTask: {},
   awaitingUserByTask: {},
+  publicCloudContinuationByTask: {},
   userRepliesByTask: {},
   webSearchByTask: {},
   thinkingByTask: {},
@@ -1478,6 +1590,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
   },
 
+  continueInPublicCloud(taskId) {
+    // Double clicks, a second button or a re-render share the attempt in flight.
+    const inFlight = publicCloudFlights.get(taskId);
+    if (inFlight) return inFlight;
+    const attempt = continueOnce(taskId).finally(() => publicCloudFlights.delete(taskId));
+    publicCloudFlights.set(taskId, attempt);
+    return attempt;
+  },
   async abortTask(taskId) {
     const generation = captureSessionGeneration();
     try {
@@ -1582,6 +1702,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     taskSource,
     stockContext,
     retryOfTaskId,
+    overrides,
   ) {
     // Reject intents that are obviously control commands typed into
     // the wrong box (e.g. user typing "停止" into the composer
@@ -1598,15 +1719,20 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return { error: '本地 Chrome 会话已结束，请新建任务并重新选择 Chrome 页面后发送。' };
     }
     if (chromeSelection && (mode === 'plan' || fileIds?.length || replyToTaskId || videoOptions || imageOptions || taskSource || stockContext)) return { error: '本地 Chrome 当前支持新建网页操作任务，请移除附件并使用自动执行模式。' };
-    const creationKey = JSON.stringify([intent, fileIds ?? [], replyToTaskId, mode, expertMode, videoOptions, skillSelection, imageOptions, taskSource, stockContext, chromeSelection]);
-    if (uncertainCreations.has(creationKey)) return { error: uncertainWriteMessage };
+    const creationKey = JSON.stringify([intent, fileIds ?? [], replyToTaskId, mode, expertMode, videoOptions, skillSelection, imageOptions, taskSource, stockContext, chromeSelection, overrides]);
+    // A caller-supplied server idempotency key makes a resend safe: the server
+    // replays the first task instead of creating another.
+    const idempotentResend = Boolean(overrides?.clientRequestId);
+    if (!idempotentResend && uncertainCreations.has(creationKey)) return { error: uncertainWriteMessage };
     const pickedViewportProfile =
       viewportProfile ??
       get().defaultViewportProfile ??
       pickDefaultBrowserViewportProfile();
-    const localTaskId = `${LOCAL_PENDING_TASK_PREFIX}${Date.now().toString(36)}_${Math.random()
-      .toString(36)
-      .slice(2, 8)}`;
+    const localTaskId = overrides?.clientRequestId
+      ? `${LOCAL_PENDING_TASK_PREFIX}${overrides.clientRequestId.replace(/[^A-Za-z0-9_]/g, '_')}`
+      : `${LOCAL_PENDING_TASK_PREFIX}${Date.now().toString(36)}_${Math.random()
+          .toString(36)
+          .slice(2, 8)}`;
     const createdAt = new Date();
     const videoTaskMeta: Partial<UiTask> = videoOptions?.tab ? { videoType: videoOptions.tab, ...(videoOptions.tab === 'pet' && videoOptions.petModel && !videoOptions.referenceVideoFileId ? { videoCreationMode: 'pet_i2v' as const } : {}) } : {};
     const pendingTask: UiTask = {
@@ -1621,7 +1747,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       ...(replyToTaskId ? { replyToTaskId } : {}),
     };
     set((prev) => ({
-      tasks: [pendingTask, ...prev.tasks],
+      tasks: [pendingTask, ...prev.tasks.filter((t) => t.taskId !== localTaskId)],
       browserInteractive: false,
       error: null,
     }));
@@ -1629,8 +1755,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       const res = await trpc.tasks.create.mutate({
         ...(chromeSelection ? { localChrome: { extensionClientId: chromeSelection.extensionClientId, tabId: chromeSelection.tabId, expectedUrl: chromeSelection.expectedUrl, selectionId: chromeSelection.selectionId } } : {}),
         intent,
-        ...(get().browserPreference ? { browserPreference: get().browserPreference ?? undefined } : {}),
-        clientRequestId: localTaskId,
+        ...((overrides?.browserPreference ?? get().browserPreference)
+          ? { browserPreference: overrides?.browserPreference ?? get().browserPreference ?? undefined }
+          : {}),
+        clientRequestId: overrides?.clientRequestId ?? localTaskId,
+        ...(overrides?.publicCloudContinuationOf
+          ? { publicCloudContinuationOf: overrides.publicCloudContinuationOf }
+          : {}),
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
         ...(replyToTaskId ? { replyToTaskId } : {}),
         ...(retryOfTaskId ? { retryOfTaskId } : {}),
@@ -1710,6 +1841,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               question: (res as { question: string }).question,
               at: Date.now(),
               awaitingKind: 'permission' as const,
+              ...((res as { browserConnection?: UiAwaitingUser['browserConnection'] })
+                .browserConnection
+                ? {
+                    browserConnection: (
+                      res as { browserConnection: UiAwaitingUser['browserConnection'] }
+                    ).browserConnection,
+                  }
+                : {}),
             },
           },
         } : {}),
@@ -1733,7 +1872,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
       const unknownWrite = !isDefiniteWriteRejection(err);
       const msg = unknownWrite ? uncertainWriteMessage : taskStoreError(err);
-      if (unknownWrite) uncertainCreations.set(creationKey, localTaskId);
+      if (unknownWrite && !idempotentResend) uncertainCreations.set(creationKey, localTaskId);
       set((prev) => ({
         ...(unknownWrite ? { error: msg } : {}),
         tasks: unknownWrite
@@ -2487,6 +2626,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               question: msg.question,
               at: Date.now(),
               ...(awaitingKind ? { awaitingKind } : {}),
+              ...(msg.browserConnection ? { browserConnection: msg.browserConnection } : {}),
             },
           },
           subStatusByTask: nextSubStatus,
@@ -2568,6 +2708,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     uncertainReplies.clear();
     observedExecutions.clear();
     uncertainCreations.clear();
+    publicCloudEligible.clear();
+    publicCloudFlights.clear();
     pendingReplies.clear();
     failedLocalReplies.clear();
     abortInFlightHydrate();
@@ -2588,6 +2730,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       executorFallbackByTask: {},
       degradeByTask: {},
       awaitingUserByTask: {},
+      publicCloudContinuationByTask: {},
       userRepliesByTask: {},
       webSearchByTask: {},
       thinkingByTask: {},
@@ -2800,6 +2943,14 @@ function inferExecutionModeFromIntent(
   if (hasAction && hasSite) return 'browser';
   if (hasAction) return 'browser';
   return 'generate';
+}
+
+/** FIX-D11 — a persisted "waiting for the Chrome extension" marker (survives refresh). */
+function extractBrowserConnection(result: unknown): UiAwaitingUser['browserConnection'] | null {
+  const parsed = browserConnectionWaitSchema.safeParse(
+    (result as { metadata?: { browserConnection?: unknown } } | null)?.metadata?.browserConnection,
+  );
+  return parsed.success ? parsed.data : null;
 }
 
 function extractExecutionMode(

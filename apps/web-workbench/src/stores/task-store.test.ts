@@ -3630,3 +3630,123 @@ it('keeps pet i2v selected before the server list hydrates the new quote', async
  await useTaskStore.getState().createTask('轻轻眨眼', undefined, undefined, undefined, undefined, undefined, { tab: 'pet', petModel: 'wan_i2v', petImageFileId: 'file_pet', durationSeconds: 5 });
  expect(useTaskStore.getState().tasks[0]).toMatchObject({ taskId: 'tsk_pet_quote', videoType: 'pet', videoCreationMode: 'pet_i2v' });
 });
+
+describe('continue a Chrome-extension wait in the public cloud (FIX-D11)', () => {
+  const waiting: UiTask = {
+    taskId: 'tsk_wait', title: '京东价格', intent: '在京东查一下 iPhone 价格', status: 'awaiting_user',
+    tickCount: 0, createdAt: new Date(), browserSource: 'local-chrome',
+  };
+  it('refuses an identity-required wait', async () => {
+    useTaskStore.setState({
+      tasks: [waiting],
+      awaitingUserByTask: { tsk_wait: { question: 'q', at: 1, awaitingKind: 'permission', browserConnection: { reason: 'extension_offline', publicCloudAllowed: false } } },
+    });
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ error: expect.stringMatching(/登录状态/) });
+    expect(createMutate).not.toHaveBeenCalled();
+  });
+  const publicWait = () => useTaskStore.setState({
+    tasks: [waiting],
+    awaitingUserByTask: { tsk_wait: { question: 'q', at: 1, awaitingKind: 'permission', browserConnection: { reason: 'extension_offline', publicCloudAllowed: true } } },
+  });
+  const quietRefresh = () => {
+    listQuery.mockResolvedValue({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValue({ taskId: 'tsk_public', status: 'pending', steps: [], result: null } as never);
+  };
+  it('cancels the wait first, then creates one public-cloud task bound to the original', async () => {
+    publicWait();
+    quietRefresh();
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_public', status: 'pending' } as never);
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ taskId: 'tsk_public' });
+    const [cancelledAt] = abortMutate.mock.invocationCallOrder;
+    const [createdAt] = createMutate.mock.invocationCallOrder;
+    expect(cancelledAt).toBeLessThan(createdAt ?? 0);
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({
+      intent: waiting.intent,
+      browserPreference: 'cloud-public',
+      clientRequestId: 'cloud-continue:tsk_wait',
+      publicCloudContinuationOf: 'tsk_wait',
+    });
+    expect(createMutate.mock.calls[0]?.[0]?.localChrome).toBeUndefined();
+    expect(useTaskStore.getState().browserPreference).toBeNull();
+    // Re-opening the original and pressing again returns the same replacement.
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ taskId: 'tsk_public' });
+    expect(abortMutate).toHaveBeenCalledTimes(1);
+    expect(createMutate).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    ['HTTP 503', () => abortMutate.mockRejectedValueOnce(Object.assign(new Error('Service Unavailable'), { data: { httpStatus: 503 } }))],
+    ['ok:false (stale)', () => abortMutate.mockResolvedValueOnce({ ok: false, state: 'stale' } as never)],
+    ['still aborting', () => abortMutate.mockResolvedValueOnce({ ok: true, state: 'aborting' } as never)],
+  ])('creates nothing when the cancel is not confirmed (%s), and stays retryable', async (_label, failCancel) => {
+    publicWait();
+    quietRefresh();
+    failCancel();
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ error: expect.stringMatching(/未能确认取消，没有创建新任务/) });
+    expect(createMutate).not.toHaveBeenCalled();
+    expect(useTaskStore.getState().publicCloudContinuationByTask.tsk_wait).toBeUndefined();
+    // A later retry with a confirmed cancel creates exactly one task.
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_public', status: 'pending' } as never);
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ taskId: 'tsk_public' });
+    expect(createMutate).toHaveBeenCalledTimes(1);
+  });
+  it('a double click shares one attempt: one cancel, one create', async () => {
+    publicWait();
+    quietRefresh();
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    let releaseCreate!: (value: unknown) => void;
+    createMutate.mockReturnValueOnce(new Promise((resolve) => { releaseCreate = resolve; }) as never);
+    const first = useTaskStore.getState().continueInPublicCloud('tsk_wait');
+    const second = useTaskStore.getState().continueInPublicCloud('tsk_wait');
+    await flushPromises();
+    releaseCreate({ taskId: 'tsk_public', status: 'pending' });
+    expect(await first).toEqual({ taskId: 'tsk_public' });
+    expect(await second).toEqual({ taskId: 'tsk_public' });
+    expect(abortMutate).toHaveBeenCalledTimes(1);
+    expect(createMutate).toHaveBeenCalledTimes(1);
+  });
+  it('a network failure after the cancel retries with the same server key and no second cancel', async () => {
+    publicWait();
+    quietRefresh();
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    createMutate.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ error: expect.stringMatching(/原任务已取消.*不会重复创建/) });
+    expect(useTaskStore.getState().publicCloudContinuationByTask.tsk_wait).toEqual({ stage: 'cancelled' });
+    // The unknown write may have reached the server: the resend carries the same
+    // key, so the server replays that task instead of creating another.
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_public', status: 'pending' } as never);
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({ taskId: 'tsk_public' });
+    expect(abortMutate).toHaveBeenCalledTimes(1);
+    expect(createMutate).toHaveBeenCalledTimes(2);
+    expect(createMutate.mock.calls.map((call) => call[0]?.clientRequestId)).toEqual(['cloud-continue:tsk_wait', 'cloud-continue:tsk_wait']);
+    expect(useTaskStore.getState().tasks.filter((task) => task.taskId.startsWith('local_pending_'))).toEqual([]);
+  });
+  it('the public-cloud choice never leaks into another task created meanwhile', async () => {
+    publicWait();
+    quietRefresh();
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    let releaseCreate!: (value: unknown) => void;
+    createMutate.mockReturnValueOnce(new Promise((resolve) => { releaseCreate = resolve; }) as never);
+    const continuing = useTaskStore.getState().continueInPublicCloud('tsk_wait');
+    await flushPromises();
+    expect(useTaskStore.getState().browserPreference).toBeNull();
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_other', status: 'pending' } as never);
+    await useTaskStore.getState().createTask('打开淘宝查看 iPhone 价格');
+    expect(createMutate.mock.calls[1]?.[0]).not.toHaveProperty('browserPreference');
+    expect(createMutate.mock.calls[1]?.[0]).not.toHaveProperty('publicCloudContinuationOf');
+    releaseCreate({ taskId: 'tsk_public', status: 'pending' });
+    expect(await continuing).toEqual({ taskId: 'tsk_public' });
+  });
+  it('keeps the connection marker from tasks.detail after a refresh', async () => {
+    detailQuery.mockResolvedValueOnce({
+      taskId: 'tsk_wait', status: 'awaiting_user', intent: waiting.intent, steps: [],
+      awaitingQuestion: '需要连接 HOLA DAY Chrome 插件：…', awaitingKind: 'permission',
+      result: { executionMode: 'browser', metadata: { browserSource: 'local-chrome', browserConnection: { reason: 'extension_offline', publicCloudAllowed: false } } },
+    } as never);
+    useTaskStore.setState({ tasks: [{ ...waiting, status: 'executing' }] });
+    useTaskStore.getState().selectTask('tsk_wait', 'ui');
+    await flushPromises();
+    expect(useTaskStore.getState().awaitingUserByTask.tsk_wait?.browserConnection).toEqual({ reason: 'extension_offline', publicCloudAllowed: false });
+  });
+});

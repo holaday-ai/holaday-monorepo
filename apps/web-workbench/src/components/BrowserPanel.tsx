@@ -342,6 +342,10 @@ function CloudBrowserPanel({
     awaitingKind !== 'clarification' &&
     // video_quote 是聊天内的报价卡(无浏览器会话)→ 不触发浏览器面板接管。
     awaitingKind !== 'video_quote';
+  // FIX-D11 — waiting for the Chrome extension has its own copy (not "拒绝访问").
+  const browserConnection = useTaskStore((s) =>
+    activeTaskId ? (s.awaitingUserByTask[activeTaskId]?.browserConnection ?? null) : null,
+  );
   const toast = useToast();
   const mountedRef = React.useRef(false);
   const activeTaskIdRef = React.useRef<string | null>(activeTaskId ?? null);
@@ -940,12 +944,11 @@ function CloudBrowserPanel({
   const steps = useTaskStore((s) =>
     activeTaskId ? s.stepsByTask[activeTaskId] : undefined,
   );
+  // FIX-D11 — "最近操作" narrates live work only: once the task is terminal no
+  // step may keep showing as "正在处理…".
   const recentSteps = React.useMemo(
-    () =>
-      (steps ?? EMPTY_STEPS)
-        .filter((s) => !TERMINAL_KINDS.has(s.actionKind ?? ''))
-        .slice(-3),
-    [steps],
+    () => recentActivitySteps(steps ?? EMPTY_STEPS, taskTerminal),
+    [steps, taskTerminal],
   );
   const [activityVisible, setActivityVisible] = React.useState(true);
   // Click-ripple visualisation on the screencast image. When the
@@ -1584,10 +1587,10 @@ function CloudBrowserPanel({
               </span>
               <div className="min-w-0 flex-1">
                 <div className={cn('font-semibold', isSheet ? 'text-[13px]' : 'text-sm')}>
-                  {awaitingUserCopy(awaitingKind).panelTitle}
+                  {awaitingUserCopy(awaitingKind, browserConnection).panelTitle}
                 </div>
                 <div className={cn('mt-0.5 text-muted-foreground', isSheet ? 'text-[11px] leading-snug' : 'text-xs')}>
-                  {awaitingUserCopy(awaitingKind).panelBody}
+                  {awaitingUserCopy(awaitingKind, browserConnection).panelBody}
                 </div>
                 {/* Phase 1 follow-up — login park resume affordance.
                     Surfaces ONLY when:
@@ -2223,6 +2226,15 @@ function TerminalEvidenceView({
       )}
     </div>
   );
+}
+
+/**
+ * FIX-D11 — the up-to-3 live actions shown in "最近操作". A terminal task has
+ * no live action left, so nothing keeps reading "正在处理…" after it ended.
+ */
+export function recentActivitySteps(steps: readonly UiStep[], taskTerminal: boolean): UiStep[] {
+  if (taskTerminal) return [];
+  return steps.filter((s) => !TERMINAL_KINDS.has(s.actionKind ?? '')).slice(-3);
 }
 
 /**

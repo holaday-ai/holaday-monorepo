@@ -55,6 +55,20 @@ export function classifyFriendlyFailure(errorText: string, context: FailureConte
     return { title: `${label}任务未能完成`, subtitle: `这次${label}没有完成，请检查输入与要求后重试。`, nextStep: context.executionMode === 'video_creation' || context.executionMode === 'image' ? '调整描述后重新生成。' : context.executionMode === 'scrape' ? '确认采集来源与范围后重新执行。' : '确认要求和附件后重新执行。' };
   }
   const haystack = (errorText ?? '').toLowerCase();
+  // FIX-D11 — the executor gave up because the task needed something the
+  // browser lane cannot do (e.g. "当前环境不支持上传附件"). Not a site problem:
+  // never suggest switching to another URL.
+  if (
+    /VISION_GAVE_UP|vision_gave_up|无法完成任务|不支持上传|不支持.{0,8}附件|not supported in this environment/i.test(
+      `${context.errorCode ?? ''} ${errorText}`,
+    )
+  ) {
+    return {
+      title: '任务未能完成',
+      subtitle: '执行时缺少完成这个任务所需的条件（例如当前环境不支持上传附件），不是网站本身的问题。',
+      nextStep: '确认任务是否真的需要浏览器操作；写文章或根据附件生成内容时，直接说明要求后重新执行。',
+    };
+  }
   const browserKind = classifyBrowserErrorKind(errorText);
   if (/ORCHESTRATOR_RESTART|orchestrator_restart|服务重启导致任务中断|orchestrator restarted/i.test(errorText)) {
     return {
