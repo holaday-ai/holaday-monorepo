@@ -38,6 +38,22 @@ remote() {
 
 echo "== release-simple $STAMP → $RELEASE_REF on $DEPLOY_HOST:$DEPLOY_DIR (execute=$EXECUTE)"
 
+# Check the exact local candidate before any remote operation. Production
+# installs can omit dev dependencies, including the root Biome executable.
+if [[ $EXECUTE -eq 1 ]]; then
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  LOCAL_REF="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  REQUESTED_REF="$(git -C "$REPO_ROOT" rev-parse "${RELEASE_REF}^{commit}")"
+  [[ "$LOCAL_REF" == "$REQUESTED_REF" ]] || { echo '!! local HEAD must match RELEASE_REF'; exit 1; }
+  test -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
+  (cd "$REPO_ROOT" && pnpm lint)
+  [[ "$(git -C "$REPO_ROOT" rev-parse HEAD)" == "$LOCAL_REF" ]]
+  test -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
+  RELEASE_REF="$LOCAL_REF"
+else
+  echo '[dry-run] verify clean local candidate and run pnpm lint before SSH'
+fi
+
 # 0. Refuse to deploy over uncommitted server-side changes; remember the rollback point.
 remote "cd '$DEPLOY_DIR' && test -z \"\$(git status --porcelain --untracked-files=no)\" && git rev-parse HEAD > '$DEPLOY_DIR/.release-previous-ref'"
 
@@ -48,10 +64,10 @@ remote "mkdir -p '$BACKUP_DIR' && cd '$DEPLOY_DIR/apps/orchestrator' && set -a &
       mysqldump --single-transaction --routines --no-tablespaces -h \"\$h\" -P \"\$p\" -u \"\$user\" \"\$db\" | gzip > '$BACKUP_DIR/holaday-$STAMP.sql.gz'; } && \
   test -s '$BACKUP_DIR/holaday-$STAMP.sql.gz'"
 
-# 2. Deploy code (fetch + lint + build). The previous build stays until restart;
-#    a lint error (root `biome check .`) stops the release like a build error.
+# 2. Deploy the immutable, locally linted ref (fetch + build).
+#    Root lint already passed locally; do not require Biome on the server.
 remote "cd '$DEPLOY_DIR' && git fetch --prune origin && git checkout --detach '$RELEASE_REF' && \
-  pnpm install --frozen-lockfile && pnpm lint && \
+  pnpm install --frozen-lockfile && \
   pnpm --filter @holaday/orchestrator build && pnpm --filter @holaday/web-workbench build"
 
 # 3. Migrations BEFORE restart (schema first, then code). All are additive.
