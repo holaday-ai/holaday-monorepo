@@ -412,7 +412,7 @@ function matchingControl(elements, wanted) {
 }
 // Seeded business content must be present before measuring the initial scene.
 export async function waitForSeedContent(page, text, timeout = 4000) {
-  if (text) await page.getByText(text, { exact: false }).first().waitFor({ state: 'visible', timeout });
+  if (text) await page.getByText(text, { exact: false }).filter({ visible: true }).first().waitFor({ state: 'visible', timeout });
 }
 
 // Poll the same semantic identity used for traversal; asynchronous list hydration

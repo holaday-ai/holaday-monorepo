@@ -38,13 +38,13 @@ test('canonical aliases cannot reuse failed, uncovered or P1-obscured coverage',
  assert.equal(reusableControls([]),false);
 });
 
-test('initial scene waits for delayed seed content and rejects permanently absent data',async()=>{
+test('initial scene ignores hidden duplicates, waits for delayed visible seed content and rejects absent data',async()=>{
  const browser=await chromium.launch();try{
-  const page=await browser.newPage();await page.setContent('<main>加载中</main>');
+  const page=await browser.newPage();await page.setContent('<aside hidden>每日测试计划</aside><main>加载中</main>');
   await page.evaluate(()=>{setTimeout(()=>{document.querySelector('main').textContent='每日测试计划'},120)});
   await waitForSeedContent(page,'每日测试计划',800);
-  assert.equal(await page.getByText('每日测试计划').isVisible(),true);
-  await page.setContent('<main>加载中</main>');
+  assert.equal(await page.getByText('每日测试计划').filter({visible:true}).first().isVisible(),true);
+  await page.setContent('<aside hidden>每日测试计划</aside><main>加载中</main>');
   await assert.rejects(()=>waitForSeedContent(page,'每日测试计划',150));
  }finally{await browser.close()}
 });
