@@ -521,7 +521,6 @@ async function onVisionObserve(
     await pending.promise;
     return;
   }
-  let trackedPromise: Promise<VisionObservationPayload>;
   const next = computeVisionObservationPayload(msg)
     .catch((err): VisionObservationPayload => {
       console.warn('[holaday] vision observation failed unexpectedly', compactLogErrorReason(err));
@@ -543,7 +542,7 @@ async function onVisionObserve(
         inFlightVisionObservations.delete(dedupeKey);
       }
     });
-  trackedPromise = next;
+  const trackedPromise = next;
   inFlightVisionObservations.set(dedupeKey, {
     generation: controlGeneration,
     ownerToken,
@@ -658,7 +657,6 @@ async function onVisionAct(
     await pending.promise;
     return;
   }
-  let trackedPromise: Promise<VisionActResultPayload>;
   const next = computeVisionActResult(msg)
     .catch((err): VisionActResultPayload => {
       console.warn('[holaday] vision act failed unexpectedly', compactLogErrorReason(err));
@@ -673,7 +671,7 @@ async function onVisionAct(
         inFlightVisionActResults.delete(dedupeKey);
       }
     });
-  trackedPromise = next;
+  const trackedPromise = next;
   inFlightVisionActResults.set(dedupeKey, {
     generation: controlGeneration,
     ownerToken,
@@ -964,7 +962,6 @@ async function runStep(
     await pending.promise;
     return;
   }
-  let trackedPromise: Promise<StepResultPayload>;
   const next = computeStepResult(msg)
     .then((payload) => {
       rememberStepResult(dedupeKey, payload, controlGeneration, ownerToken);
@@ -975,7 +972,7 @@ async function runStep(
         inFlightStepResults.delete(dedupeKey);
       }
     });
-  trackedPromise = next;
+  const trackedPromise = next;
   inFlightStepResults.set(dedupeKey, {
     generation: controlGeneration,
     ownerToken,

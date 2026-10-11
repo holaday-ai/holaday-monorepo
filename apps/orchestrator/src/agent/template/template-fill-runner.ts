@@ -382,7 +382,7 @@ export function buildUserPrompt(
 ): string {
   const parts = ['模板占位符 schema：', describeSchema(schema), ''];
   parts.push('用户指令 / 内联数据：', (intent || '（无）').trim(), '');
-  if (dataText && dataText.trim()) {
+  if (dataText?.trim()) {
     parts.push('数据文件内容：', dataText.trim(), '');
   }
   parts.push('请输出填充 JSON。');

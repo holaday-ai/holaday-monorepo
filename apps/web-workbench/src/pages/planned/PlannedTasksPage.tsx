@@ -746,12 +746,10 @@ export function PlannedTasksPage(): JSX.Element {
         title="把时间，留给重要的事。"
         description="安排一次，Holaday 在合适的时候开始。"
         action={
-          <>
-            <Button onClick={() => openCreate(selectedDay)}>
-              <Plus aria-hidden />
-              新建规划
-            </Button>
-          </>
+          <Button onClick={() => openCreate(selectedDay)}>
+            <Plus aria-hidden />
+            新建规划
+          </Button>
         }
       />
 

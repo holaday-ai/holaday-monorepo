@@ -716,7 +716,8 @@ export function WorkbenchApp(): JSX.Element {
               if ('error' in res) {
                 toast.show(taskActionError('回复失败', res.error), 'error');
                 return keepComposerOnSubmitFailure;
-              } else if (!res.ok) {
+              }
+              if (!res.ok) {
                 setConfirmRebuildTask({
                   taskId: selectedTaskId,
                   intent: selectedTask?.intent ?? '',

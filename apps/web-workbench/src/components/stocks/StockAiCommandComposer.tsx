@@ -120,29 +120,27 @@ export function StockAiCommandComposer({
       </div>
 
       {approved && (
-        <>
-          <div className="hd-stock-dock-meta">
-            <button type="button" title="管理研究范围" onClick={onManageWatchlist}>
-              <Layers />
-              我的关注
-              <ChevronDown />
-            </button>
-            <span>
-              <Clock3 />
-              {dataDateLabel ?? '数据日期待核验'}
-            </span>
-            <button
-              type="button"
-              className="hd-dock-collapse"
-              title={collapsed ? '展开输入框' : '收起输入框'}
-              aria-label={collapsed ? '展开输入框' : '收起输入框'}
-              aria-expanded={!collapsed}
-              onClick={() => setCollapsed((current) => !current)}
-            >
-              <ChevronDown />
-            </button>
-          </div>
-        </>
+        <div className="hd-stock-dock-meta">
+          <button type="button" title="管理研究范围" onClick={onManageWatchlist}>
+            <Layers />
+            我的关注
+            <ChevronDown />
+          </button>
+          <span>
+            <Clock3 />
+            {dataDateLabel ?? '数据日期待核验'}
+          </span>
+          <button
+            type="button"
+            className="hd-dock-collapse"
+            title={collapsed ? '展开输入框' : '收起输入框'}
+            aria-label={collapsed ? '展开输入框' : '收起输入框'}
+            aria-expanded={!collapsed}
+            onClick={() => setCollapsed((current) => !current)}
+          >
+            <ChevronDown />
+          </button>
+        </div>
       )}
       <div
         className={approved ? 'hd-stock-dock-fold' : undefined}

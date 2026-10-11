@@ -428,7 +428,6 @@ export function browserLiveStatusLabel(status: BrowserLiveStatus): string {
       return '浏览器画面已断开';
     case 'error':
       return '浏览器画面连接失败';
-    case 'idle':
     default:
       return '等待浏览器画面';
   }
@@ -440,7 +439,6 @@ export function browserPanelDotLabel(status: 'idle' | 'live' | 'error'): string 
       return browserLiveStatusLabel('connected');
     case 'error':
       return '需要处理';
-    case 'idle':
     default:
       return browserLiveStatusLabel('idle');
   }

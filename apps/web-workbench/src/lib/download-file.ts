@@ -24,6 +24,7 @@ export interface DownloadResult {
 export function safeDownloadFilename(filename: string): string {
   const trimmed = filename.trim();
   const cleaned = trimmed
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips control characters from download file names by design
     .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-')
     .replace(/\s+/g, ' ')
     .replace(/^[.-]+|-+$/g, '')

@@ -1090,7 +1090,7 @@ export const tasksRouter = router({
   create: protectedProcedure
     .input(pureTaskInput(createInput))
     .use(async ({ ctx, input, next }) => {
-      let localChromeReservation;
+      let localChromeReservation: ReturnType<typeof localChromeTaskSessions.reserve> | undefined;
       try {
         localChromeReservation = input.localChrome
           ? localChromeTaskSessions.reserve(ctx.userId, input.localChrome)
@@ -2657,6 +2657,7 @@ export const tasksRouter = router({
             // tasks.confirmVideo(结构化按钮)。Veo 烧钱严格在 confirmVideo 的原子抢占之后。
             // 默认 VIDEO_CREATION_ENABLED=false：视频意图会在扣额前硬拒绝，
             // 绝不静默降级到通用 generate。
+            // biome-ignore lint/complexity/noUselessLoneBlockStatements: scopes the video-creation fork; Biome's fix would drop the section comments above
             {
               // 视频意图:分类器命中 video_creation,或选了 video-creator 技能,**或**前端「视频任务」
               // 界面显式带了 videoOptions.tab(普通/宠物/IP)。后者是关键——宠物动作 prompt / IP 口播文案
@@ -11708,7 +11709,8 @@ async function persistSupercarOutcome(
         ...finalFields,
         ...(metadata ? { metadata } : {}),
       });
-    } else if (outcome.status === 'cancelled') {
+    }
+    if (outcome.status === 'cancelled') {
       // Phase 1 follow-up — capture terminal frame on cancel too.
       // Users sometimes cancel mid-task and want to see the last
       // visible state.
@@ -11718,7 +11720,8 @@ async function persistSupercarOutcome(
         ...finalFields,
         ...(metadata ? { metadata } : {}),
       });
-    } else if (outcome.status === 'timeout') {
+    }
+    if (outcome.status === 'timeout') {
       return await repo.persistVisionOutcome(taskId, {
         status: 'failed',
         reason: friendlyTaskFailureReason(
@@ -11729,19 +11732,15 @@ async function persistSupercarOutcome(
         ...finalFields,
         ...(metadata ? { metadata } : {}),
       });
-    } else {
-      // 'failed'
-      return await repo.persistVisionOutcome(taskId, {
-        status: 'failed',
-        reason: friendlyTaskFailureReason(
-          outcome.status,
-          outcome.reason ?? 'supercar: task failed',
-        ),
-        tickCount: outcome.iterations,
-        ...finalFields,
-        ...(metadata ? { metadata } : {}),
-      });
     }
+    // 'failed'
+    return await repo.persistVisionOutcome(taskId, {
+      status: 'failed',
+      reason: friendlyTaskFailureReason(outcome.status, outcome.reason ?? 'supercar: task failed'),
+      tickCount: outcome.iterations,
+      ...finalFields,
+      ...(metadata ? { metadata } : {}),
+    });
   } catch (err) {
     // Best-effort — persistence failure is logged by the caller's .then().
     // Rethrow so the caller's logger catches it.

@@ -1571,13 +1571,13 @@ async function buildDashboardSnapshot(args: {
       ? mapWithConcurrency(
           [
             discoveryClient
-              .getMarketNews('cn', 1, MARKET_DISCOVERY_PAGE_SIZES['A股要闻'])
+              .getMarketNews('cn', 1, MARKET_DISCOVERY_PAGE_SIZES.A股要闻)
               .then((env) => ({ feed: 'A股要闻' as const, env })),
             discoveryClient
-              .getMarketNews('us', 1, MARKET_DISCOVERY_PAGE_SIZES['美股要闻'])
+              .getMarketNews('us', 1, MARKET_DISCOVERY_PAGE_SIZES.美股要闻)
               .then((env) => ({ feed: '美股要闻' as const, env })),
             discoveryClient
-              .getMarketNews('hk', 1, MARKET_DISCOVERY_PAGE_SIZES['港股要闻'])
+              .getMarketNews('hk', 1, MARKET_DISCOVERY_PAGE_SIZES.港股要闻)
               .then((env) => ({ feed: '港股要闻' as const, env })),
           ],
           3,

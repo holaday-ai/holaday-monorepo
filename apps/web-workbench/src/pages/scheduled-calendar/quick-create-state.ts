@@ -16,7 +16,6 @@ export function quickCreateRepeatLabel(repeatType: QuickCreateRepeatType): strin
       return '每月重复';
     case 'custom':
       return '自定义重复';
-    case 'once':
     default:
       return '只运行一次';
   }

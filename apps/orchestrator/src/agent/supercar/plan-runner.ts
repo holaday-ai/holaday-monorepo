@@ -25,7 +25,7 @@ export async function generatePlanForUser(
   },
   factories: PlanAdapterFactories = DEFAULT_FACTORIES,
 ): Promise<PlanGenerateResult> {
-  let route;
+  let route: ReturnType<typeof resolvePlanProviderRoute>;
   try {
     route = resolvePlanProviderRoute({
       environment: input.environment,

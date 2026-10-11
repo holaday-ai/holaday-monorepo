@@ -489,7 +489,7 @@ function tryExtractJsonItems(answerText: string): ParsedItem[] {
           };
         });
     } catch {
-      continue;
+      // Not JSON: try the next candidate.
     }
   }
   return [];
@@ -754,7 +754,7 @@ function parsePriceText(s: string): number | null {
 
 function extractUrlFromCell(c: string): string | null {
   const md = c.match(/\[[^\]]+\]\((https?:\/\/[^)]+)\)/);
-  if (md && md[1]) return md[1];
+  if (md?.[1]) return md[1];
   const direct = c.match(/https?:\/\/\S+/);
   if (direct) return direct[0].replace(/[)\].,;:]+$/, '');
   return null;
@@ -1513,7 +1513,7 @@ function checkConstraints(constraints: string[], ledger: EvidenceLedger): CheckR
     }
     for (const key of canonicalised) {
       const checker = CONSTRAINT_CHECKERS[key];
-      if (checker && checker(e.fact)) {
+      if (checker?.(e.fact)) {
         violations.push(`${key}: "${e.fact.slice(0, 80)}"`);
       }
     }

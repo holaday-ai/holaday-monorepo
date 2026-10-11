@@ -130,7 +130,7 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
     for (const s of out.segments) {
       expect(s.type).toBe('broll');
       expect(s.text.length).toBeGreaterThan(0);
-      expect(s.visual && s.visual.length).toBeGreaterThan(0);
+      expect(s.visual?.length).toBeGreaterThan(0);
     }
   });
 

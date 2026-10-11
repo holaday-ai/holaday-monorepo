@@ -67,7 +67,7 @@ export function applyHistoryRetention(
   const visible: UiTask[] = [];
   let hiddenCount = 0;
   for (const t of tasks) {
-    if (pinnedIds && pinnedIds.has(t.taskId)) {
+    if (pinnedIds?.has(t.taskId)) {
       visible.push(t);
       continue;
     }

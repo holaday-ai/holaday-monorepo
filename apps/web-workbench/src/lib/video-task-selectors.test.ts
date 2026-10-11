@@ -36,7 +36,7 @@ function snapshotStabilises(getSnapshot: () => unknown, maxChecks = 100): boolea
 describe('selectStepsFor — #185 regression (referentially-stable snapshot)', () => {
   it('documents the BUG: an inline `?? []` selector is NOT stable (this is what looped)', () => {
     const state: StepsState = { stepsByTask: {} };
-    const buggy = (s: StepsState): readonly UiStep[] => s.stepsByTask['tsk_x'] ?? [];
+    const buggy = (s: StepsState): readonly UiStep[] => s.stepsByTask.tsk_x ?? [];
     // Two calls, identical state → two DIFFERENT array refs. This is the
     // useSyncExternalStore contract violation that crashed VideoPage.
     expect(buggy(state)).not.toBe(buggy(state));

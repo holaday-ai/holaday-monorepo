@@ -94,9 +94,10 @@ export function StockDiscoveryPage(): JSX.Element {
     } catch (err) {
       if (alive.current) setError(pageErrorMessage(err));
     } finally {
-      if (!alive.current) return;
-      setLoading(false);
-      setRefreshing(false);
+      if (alive.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 

@@ -349,14 +349,13 @@ if (browse) {
       // (任务流程 + 能力清单 + 断点报告); any other termination (maxIter / soft / HARD force-abort /
       // veto-halt / connect-fail) gets a DETERMINISTIC one (step trail + stop reason) so the
       // exploration_run is never left without "免登录够不够" evidence (the batch-2 force-abort 白烧).
-      const summary =
-        outcome.summary && outcome.summary.trim()
-          ? outcome.summary
-          : buildBreakpointSummary({
-              status: outcome.status,
-              reason: outcome.reason,
-              steps: browseSteps,
-            });
+      const summary = outcome.summary?.trim()
+        ? outcome.summary
+        : buildBreakpointSummary({
+            status: outcome.status,
+            reason: outcome.reason,
+            steps: browseSteps,
+          });
       return { status: outcome.status, reason: outcome.reason, costUsd: recorder.total, summary };
     },
     newTaskExternalId: () => newExternalId('task'),

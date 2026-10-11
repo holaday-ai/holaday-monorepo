@@ -73,6 +73,7 @@ test('default facts compose real writer records and refuse preserved or unattrib
   database.sessionAttribution.processes[0].identityDigest = createHash('sha256')
     .update(JSON.stringify({ bootId: host.bootId, owner: host.processes[0] }))
     .digest('hex');
+  // biome-ignore lint/style/useConst: assigned later in the test, after the reader closures capture it
   let persisted;
   const facts = m.createFirstCutoverProductionFacts(
     {

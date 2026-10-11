@@ -218,7 +218,7 @@ export function AdminLearningDomainPage(): JSX.Element {
                 <th className="py-2 pr-3 font-medium">任务</th>
                 <th className="py-2 pr-3 font-medium">状态</th>
                 <th className="py-2 pr-3 font-medium text-right">耗时</th>
-                <th className="py-2 pr-3 font-medium"></th>
+                <th className="py-2 pr-3 font-medium" />
               </tr>
             </thead>
             <tbody>

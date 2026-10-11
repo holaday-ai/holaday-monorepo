@@ -409,7 +409,7 @@ interface ParsedVerdict {
 function parseJsonVerdict(raw: string): ParsedVerdict | null {
   let s = raw.trim();
   const fence = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(s);
-  if (fence && fence[1]) s = fence[1].trim();
+  if (fence?.[1]) s = fence[1].trim();
   let obj: unknown;
   try {
     obj = JSON.parse(s);

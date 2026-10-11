@@ -145,7 +145,8 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
     // a stale query.
     const token = extractBearerFromSubprotocol(req) ?? extractTokenFromQuery(url);
     if (!token) {
-      return reject(socket, 401, 'missing bearer token');
+      reject(socket, 401, 'missing bearer token');
+      return;
     }
 
     // authenticateStreamOrAccessToken accepts either a short-lived stream

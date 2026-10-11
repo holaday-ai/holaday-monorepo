@@ -321,9 +321,10 @@ export function StockTasksPage(): JSX.Element {
         if (pageAlive.current) setLoadError(pageErrorMessage(err));
       } finally {
         if (isRefresh) dashboardRefreshInFlight.current = false;
-        if (!pageAlive.current) return;
-        if (mode === 'initial') setLoadingDashboard(false);
-        if (mode === 'manual') setRefreshingDashboard(false);
+        if (pageAlive.current) {
+          if (mode === 'initial') setLoadingDashboard(false);
+          if (mode === 'manual') setRefreshingDashboard(false);
+        }
       }
     },
     [],

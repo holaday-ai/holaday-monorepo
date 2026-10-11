@@ -1140,7 +1140,7 @@ export function supercarReply(
  */
 export function hasParkedSupercarHandle(taskId: string): boolean {
   const handle = handles.get(taskId);
-  return Boolean(handle && handle.resolveReply);
+  return Boolean(handle?.resolveReply);
 }
 
 /**

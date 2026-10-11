@@ -135,9 +135,14 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     const m = pathPattern.exec(url);
     if (!m) return; // not our path; leave for next handler
     const v2Requested = new URL(url, 'http://localhost').searchParams.get('viewportV2') === '1';
-    if (v2Requested && process.env.BROWSER_VIEWPORT_V2 !== 'true')
-      return reject(socket, 409, 'browser viewport v2 disabled');
-    if (!admissionOpen()) return reject(socket, 503, 'maintenance');
+    if (v2Requested && process.env.BROWSER_VIEWPORT_V2 !== 'true') {
+      reject(socket, 409, 'browser viewport v2 disabled');
+      return;
+    }
+    if (!admissionOpen()) {
+      reject(socket, 503, 'maintenance');
+      return;
+    }
 
     const urlArg = decodeURIComponent(m[1] ?? '');
     // Log every upgrade attempt at info so BOSS can correlate
@@ -154,7 +159,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     );
     const token = extractBearerFromSubprotocol(req) ?? extractTokenFromQuery(url);
     if (!token) {
-      return reject(socket, 401, 'missing bearer token');
+      reject(socket, 401, 'missing bearer token');
+      return;
     }
 
     const authenticateConnection = customAuthenticateToken

@@ -4097,9 +4097,12 @@ async function readProtectedFirstCutoverApproval(options, io, reconciliation) {
       !Number.isSafeInteger(record.maintenanceEndsAtMs) ||
       !Number.isSafeInteger(record.reconcileByMs) ||
       record.reconcileByMs < record.maintenanceEndsAtMs ||
+      // biome-ignore lint/style/noCommaOperator: records the failing stage while the fence check short-circuits
       (!Number.isSafeInteger(now) && ((stage = 'APPROVAL_CLOCK'), true)) ||
+      // biome-ignore lint/style/noCommaOperator: records the failing stage while the fence check short-circuits
       (now < began && ((stage = 'APPROVAL_CLOCK'), true)) ||
       (now >= (reconciliation ? record.reconcileByMs : record.maintenanceEndsAtMs) &&
+        // biome-ignore lint/style/noCommaOperator: records the failing stage while the fence check short-circuits
         ((stage = 'APPROVAL_DEADLINE'), true)) ||
       typeof record.operatorRef !== 'string' ||
       !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(record.operatorRef)

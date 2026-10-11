@@ -97,7 +97,6 @@ export function scheduledRepeatSummary(repeatType: DialogRepeatType): string {
       return '每月重复';
     case 'custom':
       return '自定义重复';
-    case 'daily':
     default:
       return '每天重复';
   }

@@ -18,7 +18,9 @@ function Harness() {
     <>
       {project.renderPicker()}
       {project.notice}
-      <button onClick={() => void project.associate('existing_task')}>关联已创建任务</button>
+      <button type="button" onClick={() => void project.associate('existing_task')}>
+        关联已创建任务
+      </button>
     </>
   );
 }

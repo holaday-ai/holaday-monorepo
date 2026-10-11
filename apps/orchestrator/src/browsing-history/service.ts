@@ -88,6 +88,7 @@ export type HostEntry = z.infer<typeof hostEntrySchema>;
 export function normaliseDomain(input: string): string | null {
   const raw = input.trim().toLowerCase();
   if (raw.length === 0) return null;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: rejects URLs containing control characters by design
   if (/[\s\x00-\x1f]/.test(raw)) return null;
   if (
     raw.startsWith('chrome://') ||

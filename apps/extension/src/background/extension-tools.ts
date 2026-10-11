@@ -835,7 +835,6 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
     Math.min(NAVIGATE_LOAD_TIMEOUT_MS, operationBudgetMs - waitMs - 250),
   );
 
-  let trackedPromise: Promise<ExtensionToolResultPayload>;
   const promise = computeExtensionToolResult(
     taskId,
     kind,
@@ -848,7 +847,7 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
       inFlightToolCallResults.delete(dedupeKey);
     }
   });
-  trackedPromise = promise;
+  const trackedPromise = promise;
   inFlightToolCallResults.set(dedupeKey, { generation: controlGeneration, ownerToken, promise });
   const payload = await promise;
   if (isControlledTaskResultStale(taskId, controlGeneration)) {
