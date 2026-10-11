@@ -1,10 +1,10 @@
 // Shared QA-only read-only proof of the fixed copied runtime on either role.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { readFirstCutoverRecoveryRuntime } from '../browser-first-cutover-recovery-runtime.mjs';
 export async function verifyFirstCutoverQaRuntimeMaterials({
   containerId,

@@ -726,10 +726,7 @@ async function sendCdpOnce(
 ): Promise<unknown> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const cap = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`CDP ${method} timeout ${timeoutMs}ms`)),
-      timeoutMs,
-    );
+    timer = setTimeout(() => reject(new Error(`CDP ${method} timeout ${timeoutMs}ms`)), timeoutMs);
   });
   try {
     return await Promise.race([
@@ -1047,9 +1044,7 @@ function pickBestActiveTabCandidate(
   candidates: Array<{ tab: chrome.tabs.Tab; queryIndex: number; tabIndex: number }>,
   predicate: (tab: chrome.tabs.Tab) => boolean,
 ): chrome.tabs.Tab | null {
-  const [best] = candidates
-    .filter(({ tab }) => predicate(tab))
-    .sort(compareActiveTabCandidates);
+  const [best] = candidates.filter(({ tab }) => predicate(tab)).sort(compareActiveTabCandidates);
   return best?.tab ?? null;
 }
 

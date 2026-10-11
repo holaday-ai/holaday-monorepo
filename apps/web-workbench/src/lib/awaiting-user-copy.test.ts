@@ -33,26 +33,25 @@ describe('awaiting user copy', () => {
     });
     expect(awaitingUserCopy('browser_action')).toMatchObject({
       title: '等待你确认',
-      streamBody: '请打开浏览器检查当前页面。确认无误后在下方回复继续；涉及提交、支付、发送、分享、改权限、删除或退订时，HOLA DAY 不会替你点最终确认。',
+      streamBody:
+        '请打开浏览器检查当前页面。确认无误后在下方回复继续；涉及提交、支付、发送、分享、改权限、删除或退订时，HOLA DAY 不会替你点最终确认。',
       panelTitle: '等待你确认',
-      panelBody: '交互模式已开启。请检查当前页面并回复继续；涉及提交、支付、发送、分享、改权限、删除或退订时，最终确认由你手动完成。',
+      panelBody:
+        '交互模式已开启。请检查当前页面并回复继续；涉及提交、支付、发送、分享、改权限、删除或退订时，最终确认由你手动完成。',
       toolbarLabel: '需要确认',
       composerPlaceholder: '确认无误后回复继续，或说明要调整的地方...',
     });
   });
 
   it('shows concrete prompts for clarification and browser confirmation parks', () => {
-    expect(
-      awaitingUserStreamMessage('clarification', '你想订哪一天的机票？'),
-    ).toEqual({
+    expect(awaitingUserStreamMessage('clarification', '你想订哪一天的机票？')).toEqual({
       body: '你想订哪一天的机票？',
       followUp: '在下方输入框回答，任务会继续，不用重新提交。',
     });
-    expect(
-      awaitingUserStreamMessage('browser_action', '请确认是否提交这份申请。'),
-    ).toEqual({
+    expect(awaitingUserStreamMessage('browser_action', '请确认是否提交这份申请。')).toEqual({
       body: '请确认是否提交这份申请。',
-      followUp: '确认无误后在下方回复继续；最终提交、支付、发送、分享、改权限、删除或退订由你手动完成。',
+      followUp:
+        '确认无误后在下方回复继续；最终提交、支付、发送、分享、改权限、删除或退订由你手动完成。',
     });
   });
 
@@ -86,7 +85,11 @@ describe('waiting for the HOLA DAY Chrome extension (FIX-D11)', () => {
     expect(awaitingUserCopy('permission').title).toBe('需要权限');
   });
   it('offers the public cloud only for non-identity requests', () => {
-    const identity = awaitingUserStreamMessage('permission', '需要连接 HOLA DAY Chrome 插件：…', connection);
+    const identity = awaitingUserStreamMessage(
+      'permission',
+      '需要连接 HOLA DAY Chrome 插件：…',
+      connection,
+    );
     expect(identity.followUp).toContain('不会改用无登录态的云端');
     const open = awaitingUserStreamMessage('permission', '需要连接 HOLA DAY Chrome 插件：…', {
       ...connection,

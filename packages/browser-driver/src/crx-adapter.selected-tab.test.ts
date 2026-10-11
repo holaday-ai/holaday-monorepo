@@ -382,7 +382,10 @@ describe('PlaywrightCrxAdapter selected-tab bridge', () => {
 
     const result = await adapter.observeCurrentPage();
 
-    expect(result).toMatchObject({ status: 'error', error: { code: DRIVER_ERRORS.EXTRACT_FAILED } });
+    expect(result).toMatchObject({
+      status: 'error',
+      error: { code: DRIVER_ERRORS.EXTRACT_FAILED },
+    });
     expect(JSON.stringify(result)).not.toContain('hunter2-secret');
   });
 

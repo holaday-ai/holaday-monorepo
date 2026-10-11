@@ -1,6 +1,6 @@
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 // @vitest-environment happy-dom
 import * as React from 'react';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CreativeReferenceLibrary } from './CreativeReferenceLibrary';
 const { query } = vi.hoisted(() => ({ query: vi.fn() }));
@@ -83,16 +83,26 @@ it('ignores a slow response after closing and reopening the picker', async () =>
 });
 
 it('allows document references for stock research while preserving their file identity', async () => {
-  query.mockResolvedValue({ items: [{ ...file, fileId: 'file_report', filename: '财报.pdf', mimetype: 'application/pdf' }], nextCursor: null });
+  query.mockResolvedValue({
+    items: [{ ...file, fileId: 'file_report', filename: '财报.pdf', mimetype: 'application/pdf' }],
+    nextCursor: null,
+  });
   const p = props();
   render(<CreativeReferenceLibrary {...p} fileType="all" theme="light" />);
   expect(screen.getByRole('textbox', { name: '搜索参考文件' })).toBeTruthy();
-  await act(async () => { await vi.advanceTimersByTimeAsync(201); });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(201);
+  });
   expect(query).toHaveBeenCalledWith({ type: 'all', q: undefined, limit: 50 });
   fireEvent.click(screen.getByRole('button', { name: /财报.pdf/ }));
-  expect(p.onPick).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'file_report', mimetype: 'application/pdf', status: 'ready' }));
+  expect(p.onPick).toHaveBeenCalledWith(
+    expect.objectContaining({
+      fileId: 'file_report',
+      mimetype: 'application/pdf',
+      status: 'ready',
+    }),
+  );
 });
-
 
 it('caps search requests at 100 characters for initial and subsequent pages', async () => {
   query.mockResolvedValue({ items: [file], nextCursor: 50 });
@@ -100,9 +110,18 @@ it('caps search requests at 100 characters for initial and subsequent pages', as
   const input = screen.getByRole('textbox', { name: '搜索参考图片' });
   // A synthetic change bypasses the browser limit, exercising request-side protection.
   fireEvent.change(input, { target: { value: '  ' + '测'.repeat(120) + '  ' } });
-  await act(async () => { await vi.advanceTimersByTimeAsync(201); });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(201);
+  });
   expect(query).toHaveBeenLastCalledWith({ type: 'images', q: '测'.repeat(100), limit: 50 });
   expect(input.getAttribute('maxlength')).toBe('100');
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '加载更多' })); });
-  expect(query).toHaveBeenLastCalledWith({ type: 'images', q: '测'.repeat(100), limit: 50, cursor: 50 });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '加载更多' }));
+  });
+  expect(query).toHaveBeenLastCalledWith({
+    type: 'images',
+    q: '测'.repeat(100),
+    limit: 50,
+    cursor: 50,
+  });
 });

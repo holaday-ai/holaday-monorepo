@@ -1,6 +1,6 @@
-import * as React from 'react';
-import { RefreshCw } from 'lucide-react';
 import { lazyLoadErrorCopy } from '@/lib/lazy-load-error';
+import { RefreshCw } from 'lucide-react';
+import * as React from 'react';
 
 interface LazyLoadBoundaryProps {
   readonly children: React.ReactNode;
@@ -30,10 +30,7 @@ export class LazyLoadBoundary extends React.Component<
   }
 
   componentDidUpdate(prevProps: LazyLoadBoundaryProps): void {
-    if (
-      this.state.error !== null &&
-      prevProps.resetKey !== this.props.resetKey
-    ) {
+    if (this.state.error !== null && prevProps.resetKey !== this.props.resetKey) {
       this.setState({ error: null });
     }
   }
@@ -130,8 +127,12 @@ function LazyLoadFallback({
         <div className="mx-auto mb-3 flex h-9 w-9 items-center justify-center rounded-[8px] bg-[#FF0061]/10 text-[#FF0061]">
           <RefreshCw className="h-4 w-4" aria-hidden />
         </div>
-        <div className="text-sm font-semibold text-[#595757] dark:text-foreground">{copy.title}</div>
-        <p className="mt-2 text-sm leading-6 text-[#595757]/75 dark:text-muted-foreground">{copy.body}</p>
+        <div className="text-sm font-semibold text-[#595757] dark:text-foreground">
+          {copy.title}
+        </div>
+        <p className="mt-2 text-sm leading-6 text-[#595757]/75 dark:text-muted-foreground">
+          {copy.body}
+        </p>
         <button
           type="button"
           onClick={() => window.location.reload()}

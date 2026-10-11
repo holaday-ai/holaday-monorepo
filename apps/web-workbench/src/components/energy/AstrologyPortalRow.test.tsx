@@ -16,9 +16,7 @@ describe('AstrologyPortalRow', () => {
       onOpenEnergyCard: vi.fn(),
       onOpenLightTest: vi.fn(),
     };
-    const { container } = render(
-      <AstrologyPortalRow rankingLoading={false} {...callbacks} />,
-    );
+    const { container } = render(<AstrologyPortalRow rankingLoading={false} {...callbacks} />);
     expect(container.querySelectorAll('img[data-portal-art]')).toHaveLength(4);
     expect(
       new Set(

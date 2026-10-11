@@ -138,7 +138,9 @@ function parseJsonLoose(text: string): unknown {
 }
 
 function normType(v: unknown): string {
-  const s = String(v ?? '').toLowerCase().trim();
+  const s = String(v ?? '')
+    .toLowerCase()
+    .trim();
   if (/口播|出镜|voiceover|talking/.test(s)) return 'voiceover';
   if (/b-?roll|broll|空镜|配图|cutaway/.test(s)) return 'broll';
   return s; // let zod reject unknowns
@@ -155,7 +157,11 @@ function normalizeRawScript(raw: unknown): unknown {
       type: normType(seg.type ?? seg.类型),
       visual: seg.visual ?? seg.画面 ?? undefined,
       durationHintSec:
-        seg.durationHintSec ?? seg.duration_hint ?? seg.durationHint ?? seg.duration_hint_sec ?? undefined,
+        seg.durationHintSec ??
+        seg.duration_hint ??
+        seg.durationHint ??
+        seg.duration_hint_sec ??
+        undefined,
     };
   });
   return {
@@ -175,7 +181,11 @@ export async function generateVideoScript(
   try {
     text = await deps.llm({ system: buildScriptSystemPrompt(maxSegments), user: input.userPrompt });
   } catch (err) {
-    throw new VideoScriptError('script LLM call failed', 'llm', err instanceof Error ? err.message : String(err));
+    throw new VideoScriptError(
+      'script LLM call failed',
+      'llm',
+      err instanceof Error ? err.message : String(err),
+    );
   }
   if (!text || !text.trim()) throw new VideoScriptError('script LLM returned empty', 'empty');
 
@@ -191,7 +201,11 @@ export async function generateVideoScript(
   }
   const parsed = ScriptSchema.safeParse(normalizeRawScript(raw));
   if (!parsed.success) {
-    throw new VideoScriptError('script did not match schema', 'parse', JSON.stringify(parsed.error.issues).slice(0, 400));
+    throw new VideoScriptError(
+      'script did not match schema',
+      'parse',
+      JSON.stringify(parsed.error.issues).slice(0, 400),
+    );
   }
   return parsed.data as VideoScript;
 }
@@ -315,20 +329,35 @@ export async function optimizeUserScript(
   const maxSegments = input.maxSegments ?? 6;
   let text: string;
   try {
-    text = await deps.llm({ system: buildOptimizeSystemPrompt(maxSegments, input.style), user: input.userText });
+    text = await deps.llm({
+      system: buildOptimizeSystemPrompt(maxSegments, input.style),
+      user: input.userText,
+    });
   } catch (err) {
-    throw new VideoScriptError('optimize LLM call failed', 'llm', err instanceof Error ? err.message : String(err));
+    throw new VideoScriptError(
+      'optimize LLM call failed',
+      'llm',
+      err instanceof Error ? err.message : String(err),
+    );
   }
   if (!text || !text.trim()) throw new VideoScriptError('optimize LLM returned empty', 'empty');
   let raw: unknown;
   try {
     raw = parseJsonLoose(text);
   } catch (err) {
-    throw new VideoScriptError('optimize reply not parseable JSON', 'parse', `${(err as Error).message} :: ${text.slice(0, 200)}`);
+    throw new VideoScriptError(
+      'optimize reply not parseable JSON',
+      'parse',
+      `${(err as Error).message} :: ${text.slice(0, 200)}`,
+    );
   }
   const parsed = ScriptSchema.safeParse(normalizeOptimized(raw));
   if (!parsed.success) {
-    throw new VideoScriptError('optimized script did not match schema', 'parse', JSON.stringify(parsed.error.issues).slice(0, 400));
+    throw new VideoScriptError(
+      'optimized script did not match schema',
+      'parse',
+      JSON.stringify(parsed.error.issues).slice(0, 400),
+    );
   }
   const script = parsed.data as VideoScript;
   // Hard cap — never exceed maxSegments even if the model over-produces, so a

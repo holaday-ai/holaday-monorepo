@@ -1,9 +1,9 @@
 import { pino } from 'pino';
 import { afterEach, expect, it, vi } from 'vitest';
-import { env } from '../../config/env.js';
 import { browserReplayStore } from '../../agent/browser-tools/browser-replay-service.js';
-import { browserReplayRouter } from './browser-replay.js';
+import { env } from '../../config/env.js';
 import type { Context } from '../context.js';
+import { browserReplayRouter } from './browser-replay.js';
 const original = env.BROWSER_REPLAY_V1;
 afterEach(() => {
   env.BROWSER_REPLAY_V1 = original;

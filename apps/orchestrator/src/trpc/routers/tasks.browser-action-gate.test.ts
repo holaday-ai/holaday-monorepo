@@ -1,6 +1,7 @@
 import { type Browser, type Page, chromium } from 'playwright';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import * as classifier from '../../agent/intent-classifier.js';
+import { supercarReply } from '../../agent/supercar/qwen-only-agent-loop.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { env } from '../../config/env.js';
 import { llmCalls } from '../../db/schema/llm-calls.js';
@@ -11,7 +12,6 @@ import * as messages from '../../llm/messages-adapter.js';
 import { QuotaService } from '../../quota/quota-service.js';
 import * as extensionWs from '../../ws/server.js';
 import type { Context } from '../context.js';
-import { supercarReply } from '../../agent/supercar/qwen-only-agent-loop.js';
 import { tasksRouter } from './tasks.js';
 
 /**
@@ -112,7 +112,8 @@ it('parks an irreversible click for confirmation through tasks.create', async ()
             : [
                 toolUse('f1', 'finish', {
                   status: 'completed',
-                  summary: '用户已明确确认执行，页面上的评论按钮已点击，状态区显示“评论已公开”；这次合成任务的页面操作已经完成。',
+                  summary:
+                    '用户已明确确认执行，页面上的评论按钮已点击，状态区显示“评论已公开”；这次合成任务的页面操作已经完成。',
                   evidence: '评论已公开',
                 }),
               ];
@@ -225,7 +226,10 @@ it('parks an irreversible click for confirmation through tasks.create', async ()
 
     expect(supercarReply(result.taskId, '确认执行')).toBe(true);
     await vi.waitFor(() => expect(terminal).toHaveBeenCalled(), { timeout: 20_000 });
-    expect(terminal.mock.calls.at(-1)?.[1], JSON.stringify(terminal.mock.calls.at(-1)?.[1])).toMatchObject({ status: 'completed' });
+    expect(
+      terminal.mock.calls.at(-1)?.[1],
+      JSON.stringify(terminal.mock.calls.at(-1)?.[1]),
+    ).toMatchObject({ status: 'completed' });
     expect(await page.textContent('#status')).toBe('评论已公开');
   } finally {
     await page.close();

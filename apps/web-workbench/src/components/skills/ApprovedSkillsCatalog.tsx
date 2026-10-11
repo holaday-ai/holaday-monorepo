@@ -1,10 +1,10 @@
-import { useRef, useState, type ComponentProps } from 'react';
+import { AttachmentChip } from '@/components/AttachmentChip';
+import { SkillLogo } from '@/components/SkillLogo';
+import { groupSkillsByCategory } from '@/lib/skills-page-state';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Paperclip, Pin, Plus, Search, X } from 'lucide-react';
-import { SkillLogo } from '@/components/SkillLogo';
-import { AttachmentChip } from '@/components/AttachmentChip';
+import { type ComponentProps, useRef, useState } from 'react';
 import { CapabilityCenterContent } from './CapabilityCenterContent';
-import { groupSkillsByCategory } from '@/lib/skills-page-state';
 
 /** Approved directory and detail drawer, backed by the existing skill handlers. */
 export function ApprovedSkillsCatalog(props: ComponentProps<typeof CapabilityCenterContent>) {

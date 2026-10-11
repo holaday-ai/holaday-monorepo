@@ -1,4 +1,4 @@
-import { isTerminalStatus, type UiTask } from '@/types/task';
+import { type UiTask, isTerminalStatus } from '@/types/task';
 
 /**
  * Group tasks into the sidebar's time buckets: 今天 / 本周 / 更早.
@@ -22,7 +22,8 @@ export function bucketByTime(tasks: UiTask[], now: Date = new Date()): TaskBucke
   const thisWeek: UiTask[] = [];
   const earlier: UiTask[] = [];
   for (const t of tasks) {
-    const ms = t.createdAt instanceof Date ? t.createdAt.getTime() : new Date(t.createdAt).getTime();
+    const ms =
+      t.createdAt instanceof Date ? t.createdAt.getTime() : new Date(t.createdAt).getTime();
     if (Number.isFinite(ms) && ms >= startOfToday) today.push(t);
     else if (Number.isFinite(ms) && ms >= startOfWeek) thisWeek.push(t);
     else earlier.push(t);
@@ -70,7 +71,8 @@ export function applyHistoryRetention(
       visible.push(t);
       continue;
     }
-    const ms = t.createdAt instanceof Date ? t.createdAt.getTime() : new Date(t.createdAt).getTime();
+    const ms =
+      t.createdAt instanceof Date ? t.createdAt.getTime() : new Date(t.createdAt).getTime();
     // Tasks with unparseable createdAt stay visible — better to show
     // garbage than silently hide a real task on a clock skew.
     if (!Number.isFinite(ms) || ms >= cutoff) {

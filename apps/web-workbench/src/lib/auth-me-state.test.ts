@@ -123,6 +123,8 @@ describe('auth.me state helpers', () => {
 });
 
 it('preserves a supplied avatar without changing malformed profile defaults', () => {
- expect(normalizeAuthMeProfile({avatarUrl:' https://example.test/avatar.png '}).avatarUrl).toBe('https://example.test/avatar.png');
- expect(normalizeAuthMeProfile({avatarUrl:{bad:true}}).avatarUrl).toBeUndefined();
+  expect(normalizeAuthMeProfile({ avatarUrl: ' https://example.test/avatar.png ' }).avatarUrl).toBe(
+    'https://example.test/avatar.png',
+  );
+  expect(normalizeAuthMeProfile({ avatarUrl: { bad: true } }).avatarUrl).toBeUndefined();
 });

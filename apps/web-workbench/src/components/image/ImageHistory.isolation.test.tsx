@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 
+import type { UiTask } from '@/types/task';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { UiTask } from '@/types/task';
 import { ImageHistory } from './ImageHistory';
 
 const mocks = vi.hoisted(() => ({ list: vi.fn() }));

@@ -25,8 +25,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { videoParameterIssue } from '@holaday/shared-types';
 import type {
-  ImageGenerateFn,
   ImageGenerateResult as GenerateImagesResult,
+  ImageGenerateFn,
 } from '../image/image-provider-types.js';
 import { ImageProviderError, imageErrorInfo } from '../image/image-provider-types.js';
 import {
@@ -149,10 +149,7 @@ function shouldUseRequiredHandCompositionAnchor(userText: string): boolean {
   );
 }
 
-function requiredHandCompositionAnchorPrompt(
-  userText: string,
-  aspectLabel: string,
-): string {
+function requiredHandCompositionAnchorPrompt(userText: string, aspectLabel: string): string {
   return (
     `生成一张用于视频动作开始前的稳定静帧。参考需求中的场景、操作主体、颜色、材质和环境：${userText}。` +
     '此时动作尚未发生，人物、手和手臂均不入画，不要表现拿起、悬停或放回。' +
@@ -328,14 +325,8 @@ export function resolveAspect(ar: AspectRatio): {
   }
 }
 
-function resolveWanVideoSize(
-  ar: AspectRatio,
-  resolution: '720p' | '1080p',
-): string {
-  const sizes: Record<
-    '720p' | '1080p',
-    Record<AspectRatio, string>
-  > = {
+function resolveWanVideoSize(ar: AspectRatio, resolution: '720p' | '1080p'): string {
+  const sizes: Record<'720p' | '1080p', Record<AspectRatio, string>> = {
     '720p': {
       '16:9': '1280*720',
       '9:16': '720*1280',
@@ -538,7 +529,13 @@ const dormantGeminiSpeech: typeof synthesizeGeminiSpeech = async () => {
   throw new SimpleVideoError('legacy Gemini TTS client is not wired', 'config', false);
 };
 const dormantGeminiVeo = async (): Promise<VeoResult> => {
-  throw new VeoError('legacy Gemini Veo client is not wired', 'no_api_key', undefined, undefined, false);
+  throw new VeoError(
+    'legacy Gemini Veo client is not wired',
+    'no_api_key',
+    undefined,
+    undefined,
+    false,
+  );
 };
 
 async function generateRequiredHandCompositionAnchor(
@@ -774,13 +771,8 @@ export function createSimplePipelineDeps(
       const durationSeconds = opts.veoDurationSeconds ?? 8;
       const resolution = opts.veoResolution ?? '1080p';
       const completionInstruction = motionCompletionInstruction(durationSeconds);
-      let compositionAnchor:
-        | { data: string; mimeType: 'image/png' | 'image/jpeg' }
-        | undefined;
-      if (
-        isVeoSource(videoSource) &&
-        shouldUseRequiredHandCompositionAnchor(userText)
-      ) {
+      let compositionAnchor: { data: string; mimeType: 'image/png' | 'image/jpeg' } | undefined;
+      if (isVeoSource(videoSource) && shouldUseRequiredHandCompositionAnchor(userText)) {
         compositionAnchor = await generateRequiredHandCompositionAnchor(
           {
             prompt: requiredHandCompositionAnchorPrompt(userText, aspectLabel),
@@ -1060,16 +1052,16 @@ export async function runSimpleVideoCreation(
   }
   const aspect = resolveAspect(opts.aspectRatio ?? '9:16');
   if (visualMode === 'image' && !stillImageReady(cfg)) {
-    throw new SimpleVideoError('Still-image source selected but no image provider is configured', 'config');
+    throw new SimpleVideoError(
+      'Still-image source selected but no image provider is configured',
+      'config',
+    );
   }
   if (visualMode === 'video' && isVeoSource(videoSource) && !veoReady(cfg)) {
     throw new SimpleVideoError('Veo selected but its provider key is not configured', 'config');
   }
   if (visualMode === 'video' && videoSource === 'wanxiang' && !cfg.dashscopeApiKey) {
-    throw new SimpleVideoError(
-      'Wanxiang selected but DASHSCOPE_API_KEY not configured',
-      'config',
-    );
+    throw new SimpleVideoError('Wanxiang selected but DASHSCOPE_API_KEY not configured', 'config');
   }
   const fns = { ...realFns(cfg), ...(svc.overrides ?? {}) };
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
@@ -1226,7 +1218,6 @@ export async function runSimpleVideoCreation(
     totalDurationMs: finalDurationMs,
     segments: result.segments.length,
     visualMode,
-    audioEngine:
-      audioEngines.size > 1 ? 'mixed' : (audioEngines.values().next().value ?? 'qwen'),
+    audioEngine: audioEngines.size > 1 ? 'mixed' : (audioEngines.values().next().value ?? 'qwen'),
   };
 }

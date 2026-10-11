@@ -14,13 +14,13 @@
  * routes so dots in subdomains survive React Router.
  */
 
-import { ArrowLeft, Brain, ChevronDown, ChevronRight, Globe, Loader2 } from 'lucide-react';
-import * as React from 'react';
-import { Link, useParams } from 'react-router-dom';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { verificationCheckLabel } from '@/lib/verification-banner-copy';
+import { ArrowLeft, Brain, ChevronDown, ChevronRight, Globe, Loader2 } from 'lucide-react';
+import * as React from 'react';
+import { Link, useParams } from 'react-router-dom';
 import {
   ADMIN_DIVIDER,
   ADMIN_MAGENTA,
@@ -32,8 +32,8 @@ import {
   formatDurationMs,
   formatInteger,
   indexedFallback,
-  nullableFiniteNumber,
   nonNegativeNumber,
+  nullableFiniteNumber,
   optionalText,
   safeArray,
   safeText,
@@ -87,9 +87,7 @@ export function AdminLearningDomainPage(): JSX.Element {
   }, [domain, mountedRef]);
 
   if (!domain) {
-    return (
-      <div className="px-6 py-8 text-muted-foreground">缺少域名信息</div>
-    );
+    return <div className="px-6 py-8 text-muted-foreground">缺少域名信息</div>;
   }
 
   if (error) {
@@ -130,9 +128,7 @@ export function AdminLearningDomainPage(): JSX.Element {
           <DomainIcon />
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-semibold">
-            {view.domain}
-          </h1>
+          <h1 className="truncate text-xl font-semibold">{view.domain}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-3 text-[12px] text-muted-foreground">
             <span>
               总任务{' '}
@@ -153,12 +149,10 @@ export function AdminLearningDomainPage(): JSX.Element {
               </span>
             </span>
             <span>
-              首次{' '}
-              <span className="text-foreground">{formatDate(view.stats.firstTaskAt)}</span>
+              首次 <span className="text-foreground">{formatDate(view.stats.firstTaskAt)}</span>
             </span>
             <span>
-              最近{' '}
-              <span className="text-foreground">{formatDate(view.stats.lastTaskAt)}</span>
+              最近 <span className="text-foreground">{formatDate(view.stats.lastTaskAt)}</span>
             </span>
           </div>
         </div>
@@ -189,9 +183,7 @@ export function AdminLearningDomainPage(): JSX.Element {
           <div className="space-y-2.5">
             {view.failureBreakdown.map((b) => (
               <div key={b.category} className="flex items-center gap-3">
-                <div className="w-28 shrink-0 text-[12px] text-foreground">
-                  {b.label}
-                </div>
+                <div className="w-28 shrink-0 text-[12px] text-foreground">{b.label}</div>
                 <div className="relative h-7 flex-1 rounded-[8px] bg-[#EFEFEF]">
                   <div
                     className="h-full rounded-[8px] transition-all"
@@ -217,11 +209,7 @@ export function AdminLearningDomainPage(): JSX.Element {
       </Section>
 
       {/* Recent tasks */}
-      <Section
-        title="最近任务"
-        hint={`显示 ${view.recentTasks.length} 条`}
-        className="mt-6"
-      >
+      <Section title="最近任务" hint={`显示 ${view.recentTasks.length} 条`} className="mt-6">
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
@@ -244,8 +232,7 @@ export function AdminLearningDomainPage(): JSX.Element {
                 view.recentTasks.map((t) => {
                   const tk = statusToken(t.status);
                   const isExpanded = expandedTaskId === t.taskId;
-                  const failedChecks =
-                    Array.isArray(t.failedChecks) ? t.failedChecks : [];
+                  const failedChecks = Array.isArray(t.failedChecks) ? t.failedChecks : [];
                   const hasDiagnostics =
                     (t.status === 'failed' || t.status === 'partial_success') &&
                     (Boolean(t.errorMessage) || failedChecks.length > 0);
@@ -276,9 +263,7 @@ export function AdminLearningDomainPage(): JSX.Element {
                           {hasDiagnostics && (
                             <button
                               type="button"
-                              onClick={() =>
-                                setExpandedTaskId(isExpanded ? null : t.taskId)
-                              }
+                              onClick={() => setExpandedTaskId(isExpanded ? null : t.taskId)}
                               className="inline-flex items-center gap-0.5 rounded-[8px] px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#FF0061]"
                             >
                               {isExpanded ? (
@@ -339,11 +324,7 @@ export function AdminLearningDomainPage(): JSX.Element {
       {/* AI memories */}
       <Section
         title="AI 记忆"
-        hint={
-          view.memories.length > 0
-            ? `${view.memories.length} 条 site_state`
-            : '尚未记录'
-        }
+        hint={view.memories.length > 0 ? `${view.memories.length} 条 site_state` : '尚未记录'}
         className="mt-6"
       >
         {view.memories.length === 0 ? (
@@ -466,15 +447,14 @@ function Section({
 }): JSX.Element {
   return (
     <section
-      className={cn('rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]', className)}
+      className={cn(
+        'rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]',
+        className,
+      )}
     >
       <header className="mb-4 flex items-baseline justify-between">
         <h2 className="text-base font-semibold">{title}</h2>
-        {hint ? (
-          <span className="text-[11px] uppercase text-muted-foreground">
-            {hint}
-          </span>
-        ) : null}
+        {hint ? <span className="text-[11px] uppercase text-muted-foreground">{hint}</span> : null}
       </header>
       {children}
     </section>

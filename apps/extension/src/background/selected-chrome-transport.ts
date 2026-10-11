@@ -1,8 +1,8 @@
 import type { DriverAction } from '@holaday/browser-driver';
 import type {
-  UserBrowserProtocol,
-  UserBrowserBinding,
   SelectedChromeSessionCommand,
+  UserBrowserBinding,
+  UserBrowserProtocol,
 } from '@holaday/shared-types';
 import type {
   BrowserExecutionOwnership,

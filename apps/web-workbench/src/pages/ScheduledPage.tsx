@@ -1,12 +1,12 @@
-import { Clock, Loader2, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
-import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { useToast } from '@/components/ui/toast';
-import { trpc } from '@/lib/trpc';
-import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
+import { useToast } from '@/components/ui/toast';
 import { humaniseTaskError, taskActionError } from '@/lib/error-copy';
 import { pageErrorMessage } from '@/lib/page-error-copy';
+import { trpc } from '@/lib/trpc';
+import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
+import { Clock, Loader2, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import * as React from 'react';
 
 /**
  * Phase 5a — scheduled tasks list page. Replaces the Phase 16b
@@ -53,17 +53,11 @@ export function ScheduledPage(): JSX.Element {
   // platform prompt. The product-internal Radix-backed ConfirmDialog
   // keeps users inside HOLA DAY's UI and lets us name the task being
   // deleted + show its next run time so the action is unambiguous.
-  const [confirmDelete, setConfirmDelete] = React.useState<UiScheduled | null>(
-    null,
-  );
+  const [confirmDelete, setConfirmDelete] = React.useState<UiScheduled | null>(null);
   // 重新创建 on a failed row pre-fills the dialog with the original
   // intent so the user can edit then save without retyping it.
-  const [recreateIntent, setRecreateIntent] = React.useState<string | null>(
-    null,
-  );
-  const [togglingIds, setTogglingIds] = React.useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
+  const [recreateIntent, setRecreateIntent] = React.useState<string | null>(null);
+  const [togglingIds, setTogglingIds] = React.useState<ReadonlySet<string>>(() => new Set());
   const reloadRequestRef = React.useRef(0);
 
   const reload = React.useCallback(async (): Promise<void> => {
@@ -145,9 +139,7 @@ export function ScheduledPage(): JSX.Element {
               <Clock className="h-5 w-5" />
             </div>
             <div className="space-y-1">
-              <div className="text-sm font-medium text-foreground/85">
-                把重复的工作交给定时器
-              </div>
+              <div className="text-sm font-medium text-foreground/85">把重复的工作交给定时器</div>
               <div className="max-w-md text-xs text-muted-foreground">
                 例如「每天早上 9 点跑昨天的电商日报」「每周一发送项目周报」。
               </div>
@@ -159,16 +151,17 @@ export function ScheduledPage(): JSX.Element {
             {rows.map((r) => (
               <li key={r.scheduledTaskId} className="flex items-start gap-3 py-3">
                 <div className="min-w-0 flex-1">
-                  <div className="line-clamp-2 text-sm font-medium text-foreground" title={r.intent}>
+                  <div
+                    className="line-clamp-2 text-sm font-medium text-foreground"
+                    title={r.intent}
+                  >
                     {r.intent}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                     <span className="rounded border border-border bg-card px-1.5 py-0.5">
                       {REPEAT_LABEL[r.repeatType] ?? r.repeatType}
                     </span>
-                    <span
-                      className={scheduledStatusClassName(r.status)}
-                    >
+                    <span className={scheduledStatusClassName(r.status)}>
                       {scheduledStatusLabel(r.status)}
                     </span>
                     {/* Codex P1 — for recurring rows that just had a

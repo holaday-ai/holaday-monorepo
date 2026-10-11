@@ -1020,10 +1020,23 @@ async function main(): Promise<void> {
       indexes: indexRows,
       foreignKeys: foreignKeyRows,
     });
-    const nullableUsageColumns = ['prompt_tokens', 'completion_tokens', 'cache_read_tokens', 'cache_write_tokens', 'cost_usd'];
-    const accountingViolations = nullableUsageColumns.filter((column) => !columnRows.some((row) =>
-      row.table_name === 'llm_calls' && row.column_name === column && row.is_nullable === 'YES' && row.column_default === null,
-    ));
+    const nullableUsageColumns = [
+      'prompt_tokens',
+      'completion_tokens',
+      'cache_read_tokens',
+      'cache_write_tokens',
+      'cost_usd',
+    ];
+    const accountingViolations = nullableUsageColumns.filter(
+      (column) =>
+        !columnRows.some(
+          (row) =>
+            row.table_name === 'llm_calls' &&
+            row.column_name === column &&
+            row.is_nullable === 'YES' &&
+            row.column_default === null,
+        ),
+    );
 
     if (
       missingTables.length > 0 ||
@@ -1046,7 +1059,9 @@ async function main(): Promise<void> {
         console.error(`Invalid lifecycle schema: ${lifecycleViolations.join('; ')}`);
       }
       if (accountingViolations.length > 0) {
-        console.error(`LLM accounting columns must allow NULL without zero defaults: ${accountingViolations.join(', ')}`);
+        console.error(
+          `LLM accounting columns must allow NULL without zero defaults: ${accountingViolations.join(', ')}`,
+        );
       }
       console.error('Run the numbered migrations or drizzle push before starting orchestrator.');
       process.exitCode = 1;

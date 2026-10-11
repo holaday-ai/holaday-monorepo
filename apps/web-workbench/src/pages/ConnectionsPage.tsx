@@ -1,3 +1,20 @@
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
+import {
+  type ConnectionProviderView,
+  connectionAccessMailBody,
+  connectionLoadErrorCopy,
+  connectionPageSummary,
+  connectionProviderActionLabel,
+  connectionProviderStatus,
+  groupConnectionProviders,
+  normalizeConnectionProviders,
+} from '@/lib/connection-page-state';
+import { pageErrorMessage } from '@/lib/page-error-copy';
+import { supportMailtoHref } from '@/lib/support-links';
+import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
+import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 import {
   AlertCircle,
   BookOpen,
@@ -15,23 +32,6 @@ import {
   Twitter,
 } from 'lucide-react';
 import * as React from 'react';
-import { useToast } from '@/components/ui/toast';
-import { Button } from '@/components/ui/button';
-import {
-  connectionAccessMailBody,
-  connectionLoadErrorCopy,
-  connectionPageSummary,
-  connectionProviderActionLabel,
-  connectionProviderStatus,
-  groupConnectionProviders,
-  normalizeConnectionProviders,
-  type ConnectionProviderView,
-} from '@/lib/connection-page-state';
-import { pageErrorMessage } from '@/lib/page-error-copy';
-import { supportMailtoHref } from '@/lib/support-links';
-import { trpc } from '@/lib/trpc';
-import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
-import { cn } from '@/lib/utils';
 
 const ICONS: Record<string, LucideIcon> = {
   Calendar,
@@ -93,10 +93,7 @@ export function ConnectionsPage(): JSX.Element {
     };
   }, [refresh]);
 
-  const providerGroups = React.useMemo(
-    () => groupConnectionProviders(providers),
-    [providers],
-  );
+  const providerGroups = React.useMemo(() => groupConnectionProviders(providers), [providers]);
   const summary = connectionPageSummary({
     count: providers.length,
     categoryCount: providerGroups.length,
@@ -199,11 +196,7 @@ export function ConnectionsPage(): JSX.Element {
 function ConnectionProviderCard({ provider }: { provider: ConnectionProviderView }): JSX.Element {
   const Icon = ICONS[provider.icon] ?? Plug;
   const status = connectionProviderStatus(provider);
-  const tone = provider.oauthSupported
-    ? provider.comingSoon
-      ? 'preparing'
-      : 'ready'
-    : 'request';
+  const tone = provider.oauthSupported ? (provider.comingSoon ? 'preparing' : 'ready') : 'request';
 
   return (
     <article

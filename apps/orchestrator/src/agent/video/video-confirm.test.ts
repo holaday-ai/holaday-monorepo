@@ -22,7 +22,17 @@ describe('parseVideoConfirm — structured action wins', () => {
 
 describe('parseVideoConfirm — free-text negation guard FIRST (anti-burn)', () => {
   it('any negation → cancel, even alongside a confirm-ish word', () => {
-    for (const t of ['先不要了', '不做了', '取消', '别了', '算了', '先不', '再想想', '暂时不用', '我不要做']) {
+    for (const t of [
+      '先不要了',
+      '不做了',
+      '取消',
+      '别了',
+      '算了',
+      '先不',
+      '再想想',
+      '暂时不用',
+      '我不要做',
+    ]) {
       expect(parseVideoConfirm({ text: t })).toBe('cancel');
     }
   });
@@ -288,13 +298,7 @@ describe('quoteIpVideo — IP 真人换口型 B 架构 (Phase 3)', () => {
     const q = quoteIpVideo('大家好这是一段不太长的口播文案。');
     const estimatedSeconds = Math.max(1, Math.ceil(q.chars / 5));
     expect(q.videoCny).toBe(
-      Math.max(
-        1,
-        Math.ceil(
-          (estimatedSeconds * (8 / 60) + (q.chars / 10000) * 0.115) *
-            7.3,
-        ),
-      ),
+      Math.max(1, Math.ceil((estimatedSeconds * (8 / 60) + (q.chars / 10000) * 0.115) * 7.3)),
     );
     expect(q.videoCny).toBeGreaterThanOrEqual(1);
     expect(q.maybeTooLong).toBe(false);
@@ -307,19 +311,10 @@ describe('quoteIpVideo — IP 真人换口型 B 架构 (Phase 3)', () => {
   });
 
   it('keeps the quote aligned when an environment explicitly selects v2', () => {
-    const q = quoteIpVideo(
-      '字'.repeat(100_000),
-      'fal-ai/sync-lipsync/v2',
-    );
+    const q = quoteIpVideo('字'.repeat(100_000), 'fal-ai/sync-lipsync/v2');
     const estimatedSeconds = Math.max(1, Math.ceil(q.chars / 5));
     expect(q.videoCny).toBe(
-      Math.max(
-        1,
-        Math.ceil(
-          (estimatedSeconds * (3 / 60) + (q.chars / 10000) * 0.115) *
-            7.3,
-        ),
-      ),
+      Math.max(1, Math.ceil((estimatedSeconds * (3 / 60) + (q.chars / 10000) * 0.115) * 7.3)),
     );
     expect(q.message).toContain('Sync Lipsync 2.0');
   });
@@ -329,9 +324,7 @@ describe('quoteIpVideo — IP 真人换口型 B 架构 (Phase 3)', () => {
     const estimatedSeconds = Math.ceil(q.chars / 5);
 
     expect(q.videoCny).toBe(
-      Math.ceil(
-        (estimatedSeconds * (8 / 60) + (q.chars / 10_000) * 0.115) * 7.3,
-      ),
+      Math.ceil((estimatedSeconds * (8 / 60) + (q.chars / 10_000) * 0.115) * 7.3),
     );
   });
 

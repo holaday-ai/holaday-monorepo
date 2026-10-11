@@ -1,15 +1,9 @@
-import { describe, it, expect } from 'vitest';
 import ExcelJS from 'exceljs';
-import {
-  extractPlaceholders,
-  fill,
-  XlsxTemplateError,
-} from './xlsx-template-engine.js';
+import { describe, expect, it } from 'vitest';
+import { XlsxTemplateError, extractPlaceholders, fill } from './xlsx-template-engine.js';
 
 /** Build an .xlsx from a per-cell setup callback. */
-async function buildXlsx(
-  setup: (ws: ExcelJS.Worksheet) => void,
-): Promise<Buffer> {
+async function buildXlsx(setup: (ws: ExcelJS.Worksheet) => void): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Sheet1');
   setup(ws);
@@ -164,7 +158,11 @@ describe('fill (xlsx)', () => {
     expect(ws.getCell('A5').value).toBe('下周计划：灰度发布');
     // no {tag} leaks anywhere
     let leak = false;
-    ws.eachRow((row) => row.eachCell((c) => { if (String(c.value ?? '').includes('{')) leak = true; }));
+    ws.eachRow((row) =>
+      row.eachCell((c) => {
+        if (String(c.value ?? '').includes('{')) leak = true;
+      }),
+    );
     expect(leak).toBe(false);
   });
 

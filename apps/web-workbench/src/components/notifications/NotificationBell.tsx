@@ -19,6 +19,24 @@ import { useExclusiveOverlay } from '@/lib/top-level-overlay';
  *   - Smooth scale+opacity entrance (matches calendar popovers)
  */
 
+import { Button } from '@/components/ui/button';
+import {
+  type NormalizedNotificationRow,
+  type NotificationListCursor,
+  groupNotifications,
+  mergeNotificationRows,
+  normalizeNotificationPage,
+  notificationBadgeText,
+  notificationButtonTitle,
+  notificationErrorMessage,
+  notificationListStatusCopy,
+  notificationListSummary,
+  safeNotificationCount,
+  shouldRenderCompactNotificationDot,
+} from '@/lib/notification-bell-state';
+import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
+import { sanitizeForRender } from '@/utils/render-sanitizer';
 import {
   AlertCircle,
   Bell,
@@ -35,24 +53,6 @@ import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
-import { cn } from '@/lib/utils';
-import { trpc } from '@/lib/trpc';
-import { sanitizeForRender } from '@/utils/render-sanitizer';
-import { Button } from '@/components/ui/button';
-import {
-  groupNotifications,
-  notificationBadgeText,
-  notificationButtonTitle,
-  notificationErrorMessage,
-  notificationListStatusCopy,
-  notificationListSummary,
-  mergeNotificationRows,
-  normalizeNotificationPage,
-  safeNotificationCount,
-  shouldRenderCompactNotificationDot,
-  type NormalizedNotificationRow,
-  type NotificationListCursor,
-} from '@/lib/notification-bell-state';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -143,17 +143,13 @@ export function NotificationBell({
           ? {
               id: cursor.id,
               createdAt:
-                cursor.createdAt instanceof Date
-                  ? cursor.createdAt
-                  : new Date(cursor.createdAt),
+                cursor.createdAt instanceof Date ? cursor.createdAt : new Date(cursor.createdAt),
             }
           : undefined,
       });
       if (!mountedRef.current || listRequestRef.current !== requestId) return;
       const page = normalizeNotificationPage(res);
-      setItems((current) =>
-        append ? mergeNotificationRows(current, page.items) : page.items,
-      );
+      setItems((current) => (append ? mergeNotificationRows(current, page.items) : page.items));
       setNextCursor(page.nextCursor);
       setListError(null);
     } catch (err) {
@@ -188,9 +184,7 @@ export function NotificationBell({
       // mark-read request never makes a notification feel dead.
       if (!row.isRead) {
         setItems((prev) =>
-          prev.map((r) =>
-            r.notificationId === row.notificationId ? { ...r, isRead: true } : r,
-          ),
+          prev.map((r) => (r.notificationId === row.notificationId ? { ...r, isRead: true } : r)),
         );
         setUnreadCount((c) => Math.max(0, safeNotificationCount(c) - 1));
         try {
@@ -253,7 +247,8 @@ export function NotificationBell({
           placement === 'topbar'
             ? 'rounded-full bg-transparent hover:bg-[#EFEFEF]/55 dark:hover:bg-white/10'
             : 'rounded-[10px] border border-[#DCDDDD]/60 bg-white/55 shadow-[0_4px_12px_rgba(17,24,39,0.035)] hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10',
-          open && 'border-[#FF0061]/25 bg-[#FF0061]/5 text-[#FF0061] shadow-[0_10px_26px_rgba(255,0,97,0.08)] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10',
+          open &&
+            'border-[#FF0061]/25 bg-[#FF0061]/5 text-[#FF0061] shadow-[0_10px_26px_rgba(255,0,97,0.08)] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10',
         )}
       >
         <Bell className="h-4 w-4" />
@@ -281,7 +276,7 @@ export function NotificationBell({
               ? 'right-0 top-full mt-1 w-[min(calc(100vw-24px),360px)] origin-top-right'
               : placement === 'topbar'
                 ? 'right-0 top-full mt-3 w-[320px] origin-top-right rounded-[16px]'
-              : 'bottom-full right-0 mb-2 w-[244px] origin-bottom-right',
+                : 'bottom-full right-0 mb-2 w-[244px] origin-bottom-right',
           )}
         >
           <div className="flex items-center justify-between gap-3 border-b border-[#DCDDDD]/80 px-3 py-2.5 dark:border-white/10">
@@ -324,10 +319,7 @@ export function NotificationBell({
               <NotificationSkeleton />
             ) : items.length === 0 ? (
               listError ? (
-                <NotificationHardError
-                  message={listError}
-                  onRetry={() => void fetchList(null)}
-                />
+                <NotificationHardError message={listError} onRetry={() => void fetchList(null)} />
               ) : (
                 <div className="px-3 py-8 text-center text-xs text-muted-foreground">
                   还没有通知
@@ -335,18 +327,41 @@ export function NotificationBell({
               )
             ) : (
               <>
-                {groupNotifications(items).map(({key, dateLabel, members}) => members.length === 1 ? (
-                  <NotificationItem key={key} row={members[0]!} onClick={() => void handleItemClick(members[0]!)} />
-                ) : (
-                  <details key={key} className="border-b border-border/60 px-3 py-2.5 last:border-0">
-                    <summary className="cursor-pointer text-sm text-foreground" title="展开相同通知，逐条查看">
-                      {dateLabel} · {sanitizeForRender(members[0]!.title)} · {members.length} 条相同通知
-                      <span className="ml-2 text-xs text-muted-foreground">{members.filter(row => !row.isRead).length} 条未读</span>
-                    </summary>
-                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{sanitizeForRender(members[0]!.message)}</p>
-                    {members.map(row => <NotificationItem key={row.notificationId} row={row} onClick={() => void handleItemClick(row)} />)}
-                  </details>
-                ))}
+                {groupNotifications(items).map(({ key, dateLabel, members }) =>
+                  members.length === 1 ? (
+                    <NotificationItem
+                      key={key}
+                      row={members[0]!}
+                      onClick={() => void handleItemClick(members[0]!)}
+                    />
+                  ) : (
+                    <details
+                      key={key}
+                      className="border-b border-border/60 px-3 py-2.5 last:border-0"
+                    >
+                      <summary
+                        className="cursor-pointer text-sm text-foreground"
+                        title="展开相同通知，逐条查看"
+                      >
+                        {dateLabel} · {sanitizeForRender(members[0]!.title)} · {members.length}{' '}
+                        条相同通知
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {members.filter((row) => !row.isRead).length} 条未读
+                        </span>
+                      </summary>
+                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                        {sanitizeForRender(members[0]!.message)}
+                      </p>
+                      {members.map((row) => (
+                        <NotificationItem
+                          key={row.notificationId}
+                          row={row}
+                          onClick={() => void handleItemClick(row)}
+                        />
+                      ))}
+                    </details>
+                  ),
+                )}
                 {nextCursor && (
                   <div className="flex justify-center border-t border-[#DCDDDD]/70 px-3 py-2.5 dark:border-white/10">
                     <Button
@@ -508,9 +523,7 @@ function NotificationItem({
             {formatRelative(row.createdAt)}
           </span>
         </div>
-        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-          {row.message}
-        </p>
+        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{row.message}</p>
       </div>
       {!row.isRead && (
         <span
@@ -649,9 +662,7 @@ export function notificationColor(type: string): string {
   return '#ADADAD';
 }
 
-export function scheduledNotificationHref(
-  scheduledTaskInternalId: number | null,
-): string | null {
+export function scheduledNotificationHref(scheduledTaskInternalId: number | null): string | null {
   if (scheduledTaskInternalId === null) return null;
   if (!Number.isSafeInteger(scheduledTaskInternalId) || scheduledTaskInternalId <= 0) {
     return null;

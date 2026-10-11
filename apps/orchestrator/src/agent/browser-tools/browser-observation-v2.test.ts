@@ -1,11 +1,11 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { chromium, type Browser, type Page } from 'playwright';
+import { type Browser, type Page, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
-import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 
 // Real Chromium and local HTTP; the only scripted component is the model.
 describe('cloud observation v2', () => {

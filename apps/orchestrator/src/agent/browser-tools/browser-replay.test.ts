@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { expect, it } from 'vitest';
-import { BrowserReplayStore, BrowserReplayRecorder } from './browser-replay.js';
+import { BrowserReplayRecorder, BrowserReplayStore } from './browser-replay.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 
 it('records without invalidating the current actionable refs', async () => {

@@ -176,7 +176,11 @@ export function calendarEventFromOccurrence(occurrence: PlannedCalendarOccurrenc
       ? '#57479C'
       : occurrence.status === 'paused'
         ? '#ADADAD'
-        : occurrence.status === 'completed' ? '#ADADAD' : occurrence.status === 'running' ? '#FF0061' : '#42C0EF';
+        : occurrence.status === 'completed'
+          ? '#ADADAD'
+          : occurrence.status === 'running'
+            ? '#FF0061'
+            : '#42C0EF';
   return {
     id: occurrence.occurrenceId,
     title: occurrence.title,

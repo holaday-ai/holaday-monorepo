@@ -45,7 +45,9 @@ export function VideoCreationStoryboard({
               <span className="mt-2 block text-[12px] font-medium leading-5 text-[var(--creative-ink,#4B424E)]">
                 {beat.title}
               </span>
-              <span className="mt-0.5 block text-[11px] text-[var(--creative-muted,#8B818D)]">{beat.duration}</span>
+              <span className="mt-0.5 block text-[11px] text-[var(--creative-muted,#8B818D)]">
+                {beat.duration}
+              </span>
             </figcaption>
           </figure>
         ))}

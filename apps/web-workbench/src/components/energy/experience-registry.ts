@@ -159,9 +159,7 @@ export const ENERGY_EXPERIENCES: EnergyExperienceRegistration[] = [
         default: (props: EnergyExperienceProps) =>
           createElement(module.GameExperience, {
             initialGameId:
-              props.launchTarget?.type === 'game'
-                ? props.launchTarget.gameId
-                : 'catch-energy',
+              props.launchTarget?.type === 'game' ? props.launchTarget.gameId : 'catch-energy',
             phase: props.phase,
             onPhaseChange: props.onPhaseChange,
             onComplete: () => props.onExperienceComplete('game'),

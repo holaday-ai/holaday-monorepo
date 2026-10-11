@@ -118,7 +118,10 @@ export function parseOtaAllowlist(envValue: string | null | undefined): Set<stri
 }
 
 /** host ∈ allowlist (exact or subdomain of a listed base), case-insensitive. Empty list ⇒ false. */
-export function isHostAllowed(host: string | null | undefined, allowed: ReadonlySet<string>): boolean {
+export function isHostAllowed(
+  host: string | null | undefined,
+  allowed: ReadonlySet<string>,
+): boolean {
   if (!host) return false;
   const h = host.trim().toLowerCase().replace(/^\./, '');
   if (!h || /[^a-z0-9.-]/.test(h)) return false;
@@ -203,8 +206,10 @@ export function resolveOtaCanaryLane(inputs: OtaCanaryInputs): OtaCanaryDecision
   const domainAllowed = isHostAllowed(matchedDomain, inputs.allowedDomains);
   const base = { matchedDomain, userAllowed, domainAllowed, intentSubtype } as const;
   if (!inputs.masterEnabled) return { lane: 'server-browser', ...base, reason: 'master flag off' };
-  if (!userAllowed) return { lane: 'server-browser', ...base, reason: 'user not in canary allowlist' };
-  if (!domainAllowed) return { lane: 'server-browser', ...base, reason: 'domain not in canary allowlist' };
+  if (!userAllowed)
+    return { lane: 'server-browser', ...base, reason: 'user not in canary allowlist' };
+  if (!domainAllowed)
+    return { lane: 'server-browser', ...base, reason: 'domain not in canary allowlist' };
   // Subtype gate — ONLY hotels use the read-only user browser. Flights
   // have a proven server-Brave adapter (the extension's read-only body
   // text can't surface the flight list); trains/maps/unknown also stay
@@ -219,8 +224,13 @@ export function resolveOtaCanaryLane(inputs: OtaCanaryInputs): OtaCanaryDecision
           : `${intentSubtype}-prefers-server-browser`,
     };
   }
-  if (!inputs.extensionOnline) return { lane: 'server-browser', ...base, reason: 'extension offline' };
-  return { lane: 'user-browser', ...base, reason: 'canary: hotel + user+domain allowlisted, extension online' };
+  if (!inputs.extensionOnline)
+    return { lane: 'server-browser', ...base, reason: 'extension offline' };
+  return {
+    lane: 'user-browser',
+    ...base,
+    reason: 'canary: hotel + user+domain allowlisted, extension online',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -267,10 +277,16 @@ export function classifyOtaAction(action: OtaAction): OtaActionVerdict {
     case 'navigate': {
       const url = action.url ?? '';
       if (!isOtaDomain(url)) {
-        return { allowed: false, reason: `navigate blocked: off-whitelist url (${url.slice(0, 80)})` };
+        return {
+          allowed: false,
+          reason: `navigate blocked: off-whitelist url (${url.slice(0, 80)})`,
+        };
       }
       if (BLOCKED_URL_RE.test(url)) {
-        return { allowed: false, reason: `navigate blocked: payment/order url (${url.slice(0, 80)})` };
+        return {
+          allowed: false,
+          reason: `navigate blocked: payment/order url (${url.slice(0, 80)})`,
+        };
       }
       return { allowed: true, reason: 'navigate: whitelisted OTA query url, allowed' };
     }
@@ -279,12 +295,21 @@ export function classifyOtaAction(action: OtaAction): OtaActionVerdict {
     case 'submit': {
       const label = (action.label ?? '').trim();
       if (action.kind === 'submit') {
-        return { allowed: false, reason: `submit blocked: form submission is never allowed (label="${label.slice(0, 40)}")` };
+        return {
+          allowed: false,
+          reason: `submit blocked: form submission is never allowed (label="${label.slice(0, 40)}")`,
+        };
       }
       if (BLOCKED_LABEL_RE.test(label)) {
-        return { allowed: false, reason: `${action.kind} blocked: forbidden action label ("${label.slice(0, 40)}")` };
+        return {
+          allowed: false,
+          reason: `${action.kind} blocked: forbidden action label ("${label.slice(0, 40)}")`,
+        };
       }
-      return { allowed: true, reason: `${action.kind}: benign control ("${label.slice(0, 40)}"), allowed` };
+      return {
+        allowed: true,
+        reason: `${action.kind}: benign control ("${label.slice(0, 40)}"), allowed`,
+      };
     }
     default:
       return { allowed: false, reason: `unknown action kind blocked` };

@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 test('default facts compose real writer records and refuse preserved or unattributed database owners', async () => {

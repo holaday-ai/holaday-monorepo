@@ -12,7 +12,6 @@
  */
 
 import type { UserBrowserBinding } from '@holaday/shared-types';
-import { SelectedTargetResolver } from './selected-target.js';
 import { type CrxApplication, type Locator, type Page, crx } from 'playwright-crx';
 import {
   DRIVER_ERRORS,
@@ -23,6 +22,7 @@ import {
 } from './driver.js';
 import { collectSensitiveFieldValues, redactSensitiveValues } from './observation-redaction.js';
 import { isOriginAllowed } from './origin-guard.js';
+import { SelectedTargetResolver } from './selected-target.js';
 import { type LocatorSpec, buildSelectorPlan, renderLocatorSpec } from './selector-plan.js';
 
 /**

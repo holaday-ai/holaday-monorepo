@@ -25,8 +25,10 @@
 
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
+import type { BrowserActionDecision, BrowserActionRequest } from '@holaday/shared-types';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
+import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import {
   type AuthenticatedSession,
   authenticateStreamOrAccessSession,
@@ -34,16 +36,14 @@ import {
 } from '../auth/middleware.js';
 import { startWebSocketSessionRevalidation } from '../auth/websocket-session-revalidation.js';
 import type { BrowserPool } from '../browser-pool/index.js';
-import { db } from '../db/client.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
-import { CdpInputHandler } from './cdp-input.js';
-import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
-import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
-import { CdpStreamer } from './cdp-streamer.js';
-import { BrowserFrameGuard, BrowserActionConfirmations } from './browser-viewport-v2.js';
-import type { InputEnvelope } from './screencast-input-bridge.js';
-import type { BrowserActionRequest, BrowserActionDecision } from '@holaday/shared-types';
+import { db } from '../db/client.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
+import { BrowserActionConfirmations, BrowserFrameGuard } from './browser-viewport-v2.js';
+import { CdpInputHandler } from './cdp-input.js';
+import { CdpStreamer } from './cdp-streamer.js';
+import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
+import type { InputEnvelope } from './screencast-input-bridge.js';
 
 /**
  * Phase 24 fix #2 — `/screencast-ws/{arg}` route dispatcher.
@@ -95,7 +95,11 @@ export interface ScreencastProxyOptions {
   pool: BrowserPool;
   /** Server-only adapter: must derive the exact target/digest from the live page,
    * then invoke #248's onBeforeAction. No adapter means V2 writes are read-only. */
-  beforeViewportAction?: (instance: BrowserInstance, envelope: InputEnvelope, signal?: AbortSignal) => Promise<{request: BrowserActionRequest; decision: BrowserActionDecision}>;
+  beforeViewportAction?: (
+    instance: BrowserInstance,
+    envelope: InputEnvelope,
+    signal?: AbortSignal,
+  ) => Promise<{ request: BrowserActionRequest; decision: BrowserActionDecision }>;
   logger: Logger;
   executionDrain?: ExecutionAdmission;
   /** Override route. Default: `/screencast-ws/:userId`. */
@@ -131,7 +135,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     const m = pathPattern.exec(url);
     if (!m) return; // not our path; leave for next handler
     const v2Requested = new URL(url, 'http://localhost').searchParams.get('viewportV2') === '1';
-    if (v2Requested && process.env.BROWSER_VIEWPORT_V2 !== 'true') return reject(socket,409,'browser viewport v2 disabled');
+    if (v2Requested && process.env.BROWSER_VIEWPORT_V2 !== 'true')
+      return reject(socket, 409, 'browser viewport v2 disabled');
     if (!admissionOpen()) return reject(socket, 503, 'maintenance');
 
     const urlArg = decodeURIComponent(m[1] ?? '');
@@ -142,9 +147,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       {
         urlArg,
         argKind: urlArg.startsWith('tsk_') ? 'taskId' : 'userId',
-        hasToken:
-          Boolean(extractBearerFromSubprotocol(req)) ||
-          Boolean(extractTokenFromQuery(url)),
+        hasToken: Boolean(extractBearerFromSubprotocol(req)) || Boolean(extractTokenFromQuery(url)),
         ip: req.socket.remoteAddress,
       },
       'screencast: upgrade attempt',
@@ -161,69 +164,83 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         }
       : (candidate: string) => authenticateStreamOrAccessSession(db, candidate);
 
-    const connect = () => authenticateConnection(token).then(
-      async (session) => {
-        if (!admissionOpen()) return reject(socket, 503, 'maintenance');
-        if (!session) {
-          log.warn({}, 'jwt verify returned null');
-          return reject(socket, 401, 'invalid token');
-        }
-        const callerUserId = session.userId;
+    const connect = () =>
+      authenticateConnection(token).then(
+        async (session) => {
+          if (!admissionOpen()) return reject(socket, 503, 'maintenance');
+          if (!session) {
+            log.warn({}, 'jwt verify returned null');
+            return reject(socket, 401, 'invalid token');
+          }
+          const callerUserId = session.userId;
 
-        // Phase 24 fix #2 — dispatch by ID prefix. tsk_… targets a
-        // specific in-flight task; everything else falls through to
-        // the legacy peekActiveForUser path so existing SPA builds
-        // and curl probes keep working.
-        const picked = pickInstanceForRoute({
-          urlArg,
-          callerUserId,
-          peek: (taskId) => opts.pool.peek(taskId),
-          peekActiveForUser: (userId) => opts.pool.peekActiveForUser(userId),
-        });
-        if (picked.kind === 'forbidden') {
-          log.warn(
-            { callerUserId, urlArg, reason: picked.reason },
-            'screencast: refusing upgrade — forbidden',
-          );
-          return reject(socket, 403, 'forbidden');
-        }
-        if (picked.kind === 'no-active') {
-          log.info(
-            { callerUserId, urlArg, reason: picked.reason },
-            'screencast: no active task instance — closing',
-          );
-          return reject(socket, 409, 'no active task');
-        }
-
-        const instance = picked.instance;
-        await new Promise<void>((resolve, rejectSetup) => wss.handleUpgrade(req, socket, head, (ws) => {
-          startWebSocketSessionRevalidation({
-            socket: ws,
-            expectedUserId: callerUserId,
-            revalidateSession: () => {
-              if (opts.revalidateSession) return opts.revalidateSession(session);
-              if (customAuthenticateToken) {
-                return customAuthenticateToken(token).then((userId) => userId === session.userId);
-              }
-              return revalidateAuthenticatedSession(db, session);
-            },
-            logger: log,
-            intervalMs: opts.sessionRevalidationIntervalMs,
+          // Phase 24 fix #2 — dispatch by ID prefix. tsk_… targets a
+          // specific in-flight task; everything else falls through to
+          // the legacy peekActiveForUser path so existing SPA builds
+          // and curl probes keep working.
+          const picked = pickInstanceForRoute({
+            urlArg,
+            callerUserId,
+            peek: (taskId) => opts.pool.peek(taskId),
+            peekActiveForUser: (userId) => opts.pool.peekActiveForUser(userId),
           });
-          // The server flag enforces V2 guards even for a legacy URL; dropping
-          // the negotiation parameter must never restore unguarded writes.
-          void wireUpClient({ ws, callerUserId, instance, viewportV2: process.env.BROWSER_VIEWPORT_V2 === 'true' }).then(resolve, rejectSetup);
-        }));
-      },
-      (err: unknown) => {
-        log.warn({ err: (err as Error).message }, 'jwt verify threw');
-        return reject(socket, 401, 'invalid token');
-      },
-    );
+          if (picked.kind === 'forbidden') {
+            log.warn(
+              { callerUserId, urlArg, reason: picked.reason },
+              'screencast: refusing upgrade — forbidden',
+            );
+            return reject(socket, 403, 'forbidden');
+          }
+          if (picked.kind === 'no-active') {
+            log.info(
+              { callerUserId, urlArg, reason: picked.reason },
+              'screencast: no active task instance — closing',
+            );
+            return reject(socket, 409, 'no active task');
+          }
+
+          const instance = picked.instance;
+          await new Promise<void>((resolve, rejectSetup) =>
+            wss.handleUpgrade(req, socket, head, (ws) => {
+              startWebSocketSessionRevalidation({
+                socket: ws,
+                expectedUserId: callerUserId,
+                revalidateSession: () => {
+                  if (opts.revalidateSession) return opts.revalidateSession(session);
+                  if (customAuthenticateToken) {
+                    return customAuthenticateToken(token).then(
+                      (userId) => userId === session.userId,
+                    );
+                  }
+                  return revalidateAuthenticatedSession(db, session);
+                },
+                logger: log,
+                intervalMs: opts.sessionRevalidationIntervalMs,
+              });
+              // The server flag enforces V2 guards even for a legacy URL; dropping
+              // the negotiation parameter must never restore unguarded writes.
+              void wireUpClient({
+                ws,
+                callerUserId,
+                instance,
+                viewportV2: process.env.BROWSER_VIEWPORT_V2 === 'true',
+              }).then(resolve, rejectSetup);
+            }),
+          );
+        },
+        (err: unknown) => {
+          log.warn({ err: (err as Error).message }, 'jwt verify threw');
+          return reject(socket, 401, 'invalid token');
+        },
+      );
     try {
       const work = opts.executionDrain ? opts.executionDrain.runRoot(connect).result : connect();
-      void work.catch(() => { if (!socket.destroyed) reject(socket, 503, 'maintenance'); });
-    } catch { reject(socket, 503, 'maintenance'); }
+      void work.catch(() => {
+        if (!socket.destroyed) reject(socket, 503, 'maintenance');
+      });
+    } catch {
+      reject(socket, 503, 'maintenance');
+    }
   }
 
   async function wireUpClient(args: {
@@ -240,36 +257,88 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     const frameGuard = new BrowserFrameGuard();
     const confirmations = new BrowserActionConfirmations();
     const invalidate = () => {
-      frameGuard.invalidate(); confirmations.invalidate();
-      if (args.viewportV2 && args.ws.readyState === WebSocket.OPEN) args.ws.send(JSON.stringify({type:'observation-invalidated'}));
+      frameGuard.invalidate();
+      confirmations.invalidate();
+      if (args.viewportV2 && args.ws.readyState === WebSocket.OPEN)
+        args.ws.send(JSON.stringify({ type: 'observation-invalidated' }));
     };
-    if (args.viewportV2) args.ws.send(JSON.stringify({type:'viewport-v2-ready',controlReady:Boolean(opts.beforeViewportAction)}));
+    if (args.viewportV2)
+      args.ws.send(
+        JSON.stringify({
+          type: 'viewport-v2-ready',
+          controlReady: Boolean(opts.beforeViewportAction),
+        }),
+      );
     const inputBridge = createOwnedScreencastInputBridge({
       instance: args.instance,
       maxViewportHeight: args.viewportV2 ? 2400 : 1600,
-      onViewportRequested: args.viewportV2 ? () => {viewportPending=true;invalidate();streamer?.invalidateObservation();} : undefined,
-      beforeDispatch: args.viewportV2 ? async (envelope, signal) => {
-        if (!streamer?.matchesPage(await args.instance.executor.getPage())) { invalidate(); throw new Error('browser_tab_changed'); }
-        const message = envelope.payload;
-        if (!message) throw new Error('browser_input_missing');
-        if (message.type === 'viewport') { viewportPending = true; invalidate(); streamer?.invalidateObservation(); return; }
-        if (('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y))) || viewportPending || !frameGuard.validate(envelope.observation)) {
-          streamer?.requestFrameRefresh(); throw new Error('browser_observation_expired');
-        }
-        if (message.type === 'scroll' || message.type === 'mouseMove') return;
-        if (!opts.beforeViewportAction) throw new Error('browser_action_gate_unavailable');
-        const result = await opts.beforeViewportAction(args.instance, envelope, signal);
-        // Recheck after the asynchronous policy: resize/navigation may have happened.
-        if (!streamer.matchesPage(await args.instance.executor.getPage()) || !frameGuard.validate(envelope.observation)) throw new Error('browser_observation_expired');
-        if(result.request.taskId!==args.instance.taskId || result.request.actor!=='human' || result.request.lane!=='cdp' || result.request.tabId!==envelope.observation?.tabId || result.request.observationRevision!==envelope.observation?.viewportRevision || result.request.lease!==envelope.controlLease) throw new Error('browser_action_binding_invalid');
-        if (result.decision.kind !== 'allow') throw new Error('browser_action_confirmation_required');
-        if (result.decision.sensitive && !confirmations.consume(envelope.confirmationNonce,result.request)) throw new Error('browser_confirmation_invalid');
-      } : undefined,
+      onViewportRequested: args.viewportV2
+        ? () => {
+            viewportPending = true;
+            invalidate();
+            streamer?.invalidateObservation();
+          }
+        : undefined,
+      beforeDispatch: args.viewportV2
+        ? async (envelope, signal) => {
+            if (!streamer?.matchesPage(await args.instance.executor.getPage())) {
+              invalidate();
+              throw new Error('browser_tab_changed');
+            }
+            const message = envelope.payload;
+            if (!message) throw new Error('browser_input_missing');
+            if (message.type === 'viewport') {
+              viewportPending = true;
+              invalidate();
+              streamer?.invalidateObservation();
+              return;
+            }
+            if (
+              ('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y))) ||
+              viewportPending ||
+              !frameGuard.validate(envelope.observation)
+            ) {
+              streamer?.requestFrameRefresh();
+              throw new Error('browser_observation_expired');
+            }
+            if (message.type === 'scroll' || message.type === 'mouseMove') return;
+            if (!opts.beforeViewportAction) throw new Error('browser_action_gate_unavailable');
+            const result = await opts.beforeViewportAction(args.instance, envelope, signal);
+            // Recheck after the asynchronous policy: resize/navigation may have happened.
+            if (
+              !streamer.matchesPage(await args.instance.executor.getPage()) ||
+              !frameGuard.validate(envelope.observation)
+            )
+              throw new Error('browser_observation_expired');
+            if (
+              result.request.taskId !== args.instance.taskId ||
+              result.request.actor !== 'human' ||
+              result.request.lane !== 'cdp' ||
+              result.request.tabId !== envelope.observation?.tabId ||
+              result.request.observationRevision !== envelope.observation?.viewportRevision ||
+              result.request.lease !== envelope.controlLease
+            )
+              throw new Error('browser_action_binding_invalid');
+            if (result.decision.kind !== 'allow')
+              throw new Error('browser_action_confirmation_required');
+            if (
+              result.decision.sensitive &&
+              !confirmations.consume(envelope.confirmationNonce, result.request)
+            )
+              throw new Error('browser_confirmation_invalid');
+          }
+        : undefined,
       executionDrain: opts.executionDrain,
       peek: (taskId) => opts.pool.peek(taskId),
-      releasePressed: async (signal) => { await inputHandler?.releasePressed(signal); },
+      releasePressed: async (signal) => {
+        await inputHandler?.releasePressed(signal);
+      },
       onViewportApplied: (viewport) => {
-        if (args.viewportV2) { viewportPending=false; streamer?.invalidateObservation(); streamer?.requestFrameRefresh(); }
+        if (args.viewportV2) {
+          viewportPending = false;
+          streamer?.invalidateObservation();
+          streamer?.requestFrameRefresh();
+        }
         if (args.ws.readyState !== WebSocket.OPEN) return;
         try {
           args.ws.send(JSON.stringify({ type: 'viewport-applied', ...viewport }));
@@ -312,7 +381,10 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     // and deliberately drops stale pointer/keyboard input.
     args.ws.on('message', (raw) => {
       if (args.ws.readyState !== WebSocket.OPEN) return;
-      if (args.viewportV2 && raw.toString() === '{"type":"observe"}') { streamer?.requestFrameRefresh(); return; }
+      if (args.viewportV2 && raw.toString() === '{"type":"observe"}') {
+        streamer?.requestFrameRefresh();
+        return;
+      }
       void inputBridge.receive(raw.toString()).catch((err: unknown) => {
         userLog.debug({ err: errMsg(err) }, 'screencast: input dispatch failed');
       });
@@ -344,7 +416,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         ws: args.ws,
         logger: userLog,
         viewportV2: args.viewportV2,
-        onFrame: (frame) => { if (!viewportPending) frameGuard.observe(frame); },
+        onFrame: (frame) => {
+          if (!viewportPending) frameGuard.observe(frame);
+        },
         onObservationInvalidated: invalidate,
         onViewportMayReset: () => inputBridge.reapplyViewport(),
       });
@@ -365,9 +439,13 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         userLog,
         () => streamerRef.requestFrameRefresh(),
         () => {
-          void browserControlSessions.quarantine(args.instance,
-            () => opts.pool.release(args.instance.taskId, 'browser-input-unknown'))
-            .catch((err: unknown) => userLog.warn({ err: errMsg(err) }, 'screencast: browser stop unconfirmed'));
+          void browserControlSessions
+            .quarantine(args.instance, () =>
+              opts.pool.release(args.instance.taskId, 'browser-input-unknown'),
+            )
+            .catch((err: unknown) =>
+              userLog.warn({ err: errMsg(err) }, 'screencast: browser stop unconfirmed'),
+            );
           void teardown('input-outcome-unknown');
         },
         args.viewportV2,

@@ -1,24 +1,21 @@
-import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
-import { AlertTriangle, Check, CircleDot, CircleSlash, Loader2, X } from 'lucide-react';
-import * as React from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
+import { externalLinkConfirmDescription, safeExternalHttpHref } from '@/lib/external-link-copy';
 import {
-  externalLinkConfirmDescription,
-  safeExternalHttpHref,
-} from '@/lib/external-link-copy';
-import {
-  stepDurationLabel,
   stepDisplaySummary,
   stepDisplayTitle,
   stepDoneIsCompletion,
+  stepDurationLabel,
   stepFailureMessage,
   stepRecordStatusLabel,
   stepRecordStatusText,
 } from '@/lib/step-card-state';
 import { cn } from '@/lib/utils';
 import type { UiStep } from '@/types/task';
+import { AlertTriangle, Check, CircleDot, CircleSlash, Loader2, X } from 'lucide-react';
+import * as React from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Props {
   step: UiStep;
@@ -48,16 +45,11 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
   const recordStatus = stepRecordStatusText(step);
   const summary = stepDisplaySummary(step);
   const durationLabel =
-    step.status === 'running' && step.durationMs == null
-      ? '…'
-      : stepDurationLabel(step.durationMs);
+    step.status === 'running' && step.durationMs == null ? '…' : stepDurationLabel(step.durationMs);
   const failureMessage = stepFailureMessage(step);
   const antiBotHigh = step.antiBot?.confidence === 'high';
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
-  const markdownComponents = React.useMemo(
-    () => makeStepMarkdownComponents(setPendingHref),
-    [],
-  );
+  const markdownComponents = React.useMemo(() => makeStepMarkdownComponents(setPendingHref), []);
   return (
     <div className="relative flex animate-fade-in items-start gap-3">
       {/* Timeline rail — a 2px line centered behind the badge. */}
@@ -117,10 +109,7 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
           // paragraphs flush with the box and the lists / code spans
           // tight. Links are confirmed before leaving the workbench.
           <div className="prose prose-sm prose-neutral mt-2 max-w-none rounded-[8px] border border-[#DCDDDD]/70 bg-[#EFEFEF]/45 px-3 py-2 leading-relaxed text-foreground/80 prose-p:my-0 prose-p:text-xs prose-a:text-[#FF0061] prose-a:decoration-[#FF0061]/35 prose-strong:font-semibold prose-strong:text-foreground prose-code:rounded prose-code:bg-white/80 prose-code:px-1 prose-code:text-[11px] dark:prose-invert dark:border-white/10 dark:bg-white/5 dark:prose-code:bg-white/10">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={markdownComponents}
-            >
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
               {summary}
             </ReactMarkdown>
             {step.status === 'running' && <Cursor />}
@@ -133,9 +122,7 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
         <ConfirmDialog
           open={pendingHref !== null}
           title="即将打开外部链接"
-          description={
-            pendingHref ? externalLinkConfirmDescription(pendingHref) : undefined
-          }
+          description={pendingHref ? externalLinkConfirmDescription(pendingHref) : undefined}
           confirmLabel="打开"
           cancelLabel="取消"
           onClose={() => setPendingHref(null)}
@@ -202,8 +189,7 @@ function AntiBotNotice({ step }: { step: UiStep }): JSX.Element {
 
 function StatusBadge({ step }: { step: UiStep }): JSX.Element {
   const label = stepRecordStatusLabel(step);
-  const neutralDone =
-    step.status === 'done' && !stepDoneIsCompletion(step.actionKind);
+  const neutralDone = step.status === 'done' && !stepDoneIsCompletion(step.actionKind);
 
   return (
     <div
@@ -211,8 +197,7 @@ function StatusBadge({ step }: { step: UiStep }): JSX.Element {
         'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(17,24,39,0.08)]',
         step.status === 'running' && 'animate-pulse-dot bg-[#FF0061]',
         step.status === 'done' && !neutralDone && 'bg-[#42C0EF]',
-        neutralDone &&
-          'bg-[#EFEFEF] text-[#595757] dark:bg-white/5 dark:text-foreground',
+        neutralDone && 'bg-[#EFEFEF] text-[#595757] dark:bg-white/5 dark:text-foreground',
         step.status === 'failed' && 'bg-[#FF0061]',
         step.status === 'cancelled' && 'border border-[#DCDDDD] bg-[#EFEFEF] text-[#595757]',
       )}

@@ -1,17 +1,17 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import { once } from 'node:events';
+import { WS_SUBPROTOCOL } from '@holaday/shared-types';
 import { afterEach, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
-import { WS_SUBPROTOCOL } from '@holaday/shared-types';
-import { createOrdinaryMaintenanceStore } from './ordinary-maintenance-store.js';
 // Release client itself is exercised over a real Unix socket.
 // @ts-expect-error JS deployment CLI has no declaration file.
 import { requestMaintenance } from '../../../../scripts/browser-maintenance-client.mjs';
+import { createOrdinaryMaintenanceStore } from './ordinary-maintenance-store.js';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {

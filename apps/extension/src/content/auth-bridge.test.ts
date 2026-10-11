@@ -200,7 +200,10 @@ describe('auth bridge content script', () => {
 
   it('caps repeated retry cadence at the longest configured delay', async () => {
     vi.useFakeTimers();
-    vi.stubGlobal('setInterval', vi.fn(() => 0 as unknown as ReturnType<typeof setInterval>));
+    vi.stubGlobal(
+      'setInterval',
+      vi.fn(() => 0 as unknown as ReturnType<typeof setInterval>),
+    );
     const token = 'hd_live_' + 'a'.repeat(24);
     const getItem = vi.fn((key: string) => (key === TOKEN_KEY ? token : null));
     const sendMessage = vi.fn((_message: unknown, callback: () => void) => {

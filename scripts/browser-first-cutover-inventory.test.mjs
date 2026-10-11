@@ -1,4 +1,3 @@
-import * as recoveryRuntime from './browser-first-cutover-runtime.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -6,6 +5,7 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import * as recoveryRuntime from './browser-first-cutover-runtime.mjs';
 
 // SYNTHETIC protected material: no production disk or package proof.
 function syntheticCloudSources(scope) {
@@ -3151,9 +3151,7 @@ test('native display whole tree drift during final pre-dispatch source gate pres
 });
 
 test('cloud stop scope binds the originally reviewed detached handlers and refuses substituted identities', async () => {
-  const { firstCutoverCloudStopScope } = await import(
-    './browser-first-cutover-inventory.mjs'
-  );
+  const { firstCutoverCloudStopScope } = await import('./browser-first-cutover-inventory.mjs');
   assert.equal(typeof firstCutoverCloudStopScope, 'function');
   const snapshot = {
     hostname: 'qa',

@@ -10,7 +10,10 @@ afterEach(() => {
 describe('fetchWithDeadline', () => {
   it('returns the fetch response before the deadline', async () => {
     const response = new Response('{}', { status: 200 });
-    vi.stubGlobal('fetch', vi.fn(async () => response));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    );
 
     await expect(
       fetchWithDeadline('https://holaday.ai/ping', undefined, 1_000, 'fetch_timeout'),
@@ -28,12 +31,7 @@ describe('fetchWithDeadline', () => {
       }),
     );
 
-    const pending = fetchWithDeadline(
-      'https://holaday.ai/ping',
-      undefined,
-      1_000,
-      'fetch_timeout',
-    );
+    const pending = fetchWithDeadline('https://holaday.ai/ping', undefined, 1_000, 'fetch_timeout');
     const assertion = expect(pending).rejects.toThrow('fetch_timeout');
     await vi.advanceTimersByTimeAsync(1_000);
 
@@ -88,11 +86,7 @@ describe('responseJsonWithDeadline', () => {
       json: vi.fn(() => new Promise(() => undefined)),
     } as unknown as Response;
 
-    const pending = responseJsonWithDeadline(
-      response,
-      Number.NaN,
-      'json_timeout',
-    );
+    const pending = responseJsonWithDeadline(response, Number.NaN, 'json_timeout');
     const assertion = expect(pending).rejects.toThrow('json_timeout');
     await vi.advanceTimersByTimeAsync(29_999);
     await vi.advanceTimersByTimeAsync(1);

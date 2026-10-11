@@ -40,7 +40,13 @@ export function EnergyGrowthPanel({ progress }: EnergyGrowthPanelProps): JSX.Ele
           const collected = progress.collectedKinds.includes(node.kind);
           return (
             <span key={node.kind} data-collected={collected ? 'true' : 'false'}>
-              <span className="energy-approved-bottle" style={{ backgroundPosition: `${25 - [148, 278, 405, 536, 665][index] / 2}px -91px` }} aria-hidden="true" />
+              <span
+                className="energy-approved-bottle"
+                style={{
+                  backgroundPosition: `${25 - [148, 278, 405, 536, 665][index] / 2}px -91px`,
+                }}
+                aria-hidden="true"
+              />
               {node.label}
             </span>
           );

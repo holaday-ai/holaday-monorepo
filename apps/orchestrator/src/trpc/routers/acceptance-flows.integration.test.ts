@@ -221,15 +221,24 @@ describe('acceptance generation, cancel and refund flows', () => {
       const { TaskRepository } = await import('../../agent/task-repository.js');
       const quota = new QuotaService(db);
       const chargedBalance = (await quota.snapshot(actor.id, 'pro')).tasksRemaining;
-      const [charge] = await db.select().from(quotaRefunds).where(eq(quotaRefunds.taskExternalId, confirmed.taskId));
+      const [charge] = await db
+        .select()
+        .from(quotaRefunds)
+        .where(eq(quotaRefunds.taskExternalId, confirmed.taskId));
       expect(charge).toMatchObject({ userId: actor.id, refundedAt: null });
       await new TaskRepository(db).persistVisionOutcome(confirmed.taskId, {
-        status: 'failed', errorCode: 'MEDIA_VIDEO_QUALITY_REJECTED', reason: 'quality fixture', tickCount: 1,
+        status: 'failed',
+        errorCode: 'MEDIA_VIDEO_QUALITY_REJECTED',
+        reason: 'quality fixture',
+        tickCount: 1,
       });
-      expect(await refundTaskOnce(db, quota, confirmed.taskId, 'MEDIA_VIDEO_QUALITY_REJECTED')).toBe(true);
-      expect(await refundTaskOnce(db, quota, confirmed.taskId, 'MEDIA_VIDEO_QUALITY_REJECTED')).toBe(false);
+      expect(
+        await refundTaskOnce(db, quota, confirmed.taskId, 'MEDIA_VIDEO_QUALITY_REJECTED'),
+      ).toBe(true);
+      expect(
+        await refundTaskOnce(db, quota, confirmed.taskId, 'MEDIA_VIDEO_QUALITY_REJECTED'),
+      ).toBe(false);
       expect((await quota.snapshot(actor.id, 'pro')).tasksRemaining).toBe(chargedBalance + 1);
-
     } finally {
       await files.deleteForUser(file.externalId, actor.id);
       Object.assign(env, oldEnv);

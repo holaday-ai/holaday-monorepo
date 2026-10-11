@@ -1,8 +1,4 @@
-export type VerificationFailureLevel =
-  | 'fixable'
-  | 'needs_clarification'
-  | 'hard_fail'
-  | null;
+export type VerificationFailureLevel = 'fixable' | 'needs_clarification' | 'hard_fail' | null;
 
 export interface VerificationCheck {
   type: string;
@@ -53,7 +49,8 @@ export function shouldShowVerificationBanner(task: {
 
 export function verificationCheckLabel(check: VerificationCheck): string {
   const detail = check.detail.trim();
-  if ((check.type === 'ecommerce_rows' || check.type === 'list_item_sources') && detail) return detail;
+  if ((check.type === 'ecommerce_rows' || check.type === 'list_item_sources') && detail)
+    return detail;
   if (
     (check.type === 'url_count' || check.type === 'source_count') &&
     /only\s+0\s+URL|链接数减少|0\s*→|缺少来源链接/i.test(detail)
@@ -69,7 +66,11 @@ export function verificationCheckLabel(check: VerificationCheck): string {
   // Content-length / empty-result checks emit raw notation like
   // "length 81 outside [100, ∞]" — surface a readable Chinese label
   // instead of leaking the assertion string into the banner.
-  if (/length\s+\d+\s+outside|too\s+short|min(?:imum)?\s+length|内容过短|内容过少|字数不足/i.test(detail)) {
+  if (
+    /length\s+\d+\s+outside|too\s+short|min(?:imum)?\s+length|内容过短|内容过少|字数不足/i.test(
+      detail,
+    )
+  ) {
     return '回复内容过短，可能不完整';
   }
   const mapped = CHECK_TYPE_LABELS[check.type];
@@ -78,9 +79,7 @@ export function verificationCheckLabel(check: VerificationCheck): string {
   // verbatim (e.g. "length 81 outside [100, ∞]", "assertion failed").
   // Only a detail that reads as Chinese user copy is safe to surface;
   // otherwise fall back to a generic label.
-  return detail && !looksLikeRawCheckDetail(detail)
-    ? detail
-    : '自动审核发现一项问题';
+  return detail && !looksLikeRawCheckDetail(detail) ? detail : '自动审核发现一项问题';
 }
 
 /**
@@ -109,13 +108,10 @@ export function verificationBannerCopy({
 }): VerificationBannerCopy {
   const isHard = level === 'hard_fail' || status === 'failed';
   const isClarification = level === 'needs_clarification';
-  const labels = dedupe(
-    (failedChecks ?? []).map(verificationCheckLabel).filter(Boolean),
-  );
+  const labels = dedupe((failedChecks ?? []).map(verificationCheckLabel).filter(Boolean));
   const checks = labels.slice(0, 4);
   const hiddenCount = Math.max(0, labels.length - checks.length);
-  const timeoutOnly =
-    labels.length > 0 && labels.every((label) => label.includes('自动审核超时'));
+  const timeoutOnly = labels.length > 0 && labels.every((label) => label.includes('自动审核超时'));
 
   if (isHard) {
     return {
@@ -136,10 +132,9 @@ export function verificationBannerCopy({
       tone: 'warning',
       eyebrow: '自动审核需要复核',
       title: '结果需要你确认后再使用',
-      body:
-        timeoutOnly
-          ? '答案已经生成，但自动审核等待过久。HOLA DAY 没有因此阻塞任务，请按关键数据和来源自行核对。'
-          : labels.length > 0
+      body: timeoutOnly
+        ? '答案已经生成，但自动审核等待过久。HOLA DAY 没有因此阻塞任务，请按关键数据和来源自行核对。'
+        : labels.length > 0
           ? '答案已经生成，但审核认为仍有不确定点。请先核对下面的问题，再决定是否继续追问。'
           : '答案已经生成，但审核无法给出明确通过结论。请核对关键数据或补充更具体的约束。',
       checks,
@@ -151,14 +146,13 @@ export function verificationBannerCopy({
     tone: 'warning',
     eyebrow: '自动审核发现可修正问题',
     title: '结果需复核',
-    body:
-      timeoutOnly
-        ? '答案已经生成，但自动审核等待过久。HOLA DAY 没有因此阻塞任务，请按关键数据和来源自行核对。'
-        : labels.includes('缺少可验证来源链接')
+    body: timeoutOnly
+      ? '答案已经生成，但自动审核等待过久。HOLA DAY 没有因此阻塞任务，请按关键数据和来源自行核对。'
+      : labels.includes('缺少可验证来源链接')
         ? '答案可先参考，但原始来源链接不足或已被移除，避免把未验证链接当作事实来源。建议带已完成信息重试，或指定可信来源。'
         : labels.length > 0
-        ? '答案可先参考，但下面的结构性要求没有完全满足。建议核对来源后再行动。'
-        : '答案可先参考，但旧任务没有保存具体检查项。建议核对来源、数量和排序后再行动。',
+          ? '答案可先参考，但下面的结构性要求没有完全满足。建议核对来源后再行动。'
+          : '答案可先参考，但旧任务没有保存具体检查项。建议核对来源、数量和排序后再行动。',
     checks,
     hiddenCount,
   };

@@ -46,9 +46,7 @@ export function decideTaskOutcomeNotification(
     case 'cancelled':
       return { notify: false };
     case 'success':
-      return prefs.notifyOnSuccess === true
-        ? { notify: true, delivery: 'all' }
-        : { notify: false };
+      return prefs.notifyOnSuccess === true ? { notify: true, delivery: 'all' } : { notify: false };
     case 'failed': {
       const threshold = normaliseFailureThreshold(prefs.failureNotifyThreshold);
       const streak = Math.max(0, Math.trunc(prefs.consecutiveFailures));

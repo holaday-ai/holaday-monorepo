@@ -66,10 +66,7 @@ const PRO_HINTS: readonly RegExp[] = [
   /\b(high[-\s]?(res|resolution|fidelity|quality)|hi[-\s]?res|4k|2k|print[-\s]?ready|ultra[-\s]?hd)\b/i,
 ];
 
-export function pickImageModel(
-  intent: string,
-  opts?: ImageModelOptions,
-): ImageModelDecision {
+export function pickImageModel(intent: string, opts?: ImageModelOptions): ImageModelDecision {
   const flashModel = opts?.flashModel ?? DEFAULT_FLASH_MODEL;
   const proModel = opts?.proModel ?? DEFAULT_PRO_MODEL;
   const text = intent ?? '';

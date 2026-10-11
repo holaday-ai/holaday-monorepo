@@ -130,10 +130,7 @@ function extractOne(
  * fields both pulled from "GMV: 100000"). They're independent —
  * each runs against the full text.
  */
-export function parseInputs(
-  text: string,
-  workflow: ExpertWorkflowContract,
-): ParseInputsResult {
+export function parseInputs(text: string, workflow: ExpertWorkflowContract): ParseInputsResult {
   const extracted: Record<string, string | number> = {};
   const missingRequired: WorkflowInput[] = [];
   const missingOptional: WorkflowInput[] = [];
@@ -184,10 +181,7 @@ export function buildClarificationQuestion(
       lines.push(`- **${input.label}**：你填的是「${rawCapture}」，期望 ${describeType(input)}`);
     }
   }
-  lines.push(
-    '',
-    '可以一次回复全部，或一行一项。',
-  );
+  lines.push('', '可以一次回复全部，或一行一项。');
   return lines.join('\n');
 }
 

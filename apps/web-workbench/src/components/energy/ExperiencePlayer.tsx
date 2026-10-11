@@ -46,7 +46,10 @@ export function ExperiencePlayer({
 }: ExperiencePlayerProps): JSX.Element | null {
   const startRef = React.useRef<HTMLButtonElement>(null);
 
-  const retained = React.useRef<{ experience: EnergyExperienceDefinition; children: React.ReactNode } | null>(null);
+  const retained = React.useRef<{
+    experience: EnergyExperienceDefinition;
+    children: React.ReactNode;
+  } | null>(null);
   React.useLayoutEffect(() => {
     if (open && experience) retained.current = { experience, children };
   }, [open, experience, children]);
@@ -77,7 +80,9 @@ export function ExperiencePlayer({
             // Explicit "return to content" may already have placed focus outside the retiring dialog.
             const active = document.activeElement;
             if (!active || active === document.body || active.closest('.energy-approved-player')) {
-              document.querySelector<HTMLButtonElement>('[data-energy-focus-fallback="true"]')?.focus();
+              document
+                .querySelector<HTMLButtonElement>('[data-energy-focus-fallback="true"]')
+                ?.focus();
             }
           }}
           onEscapeKeyDown={(event) => {
@@ -91,7 +96,8 @@ export function ExperiencePlayer({
                 {visibleExperience.title}
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-sm leading-6 text-[#736a76]">
-                {durationLabel(visibleExperience.estimatedSeconds)} · {visibleExperience.description}
+                {durationLabel(visibleExperience.estimatedSeconds)} ·{' '}
+                {visibleExperience.description}
               </Dialog.Description>
             </div>
           </div>
@@ -126,7 +132,9 @@ export function ExperiencePlayer({
               </div>
             ) : null}
 
-            {phase === 'active' || phase === 'result' || (phase === 'intro' && directEntry) ? visibleChildren : null}
+            {phase === 'active' || phase === 'result' || (phase === 'intro' && directEntry)
+              ? visibleChildren
+              : null}
 
             {phase === 'error' ? (
               <div className="flex min-h-56 flex-col items-center justify-center text-center">

@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  type WebhookChannel,
+  type WebhookContext,
   buildPayload,
   formatPresetMessage,
   maskWebhookUrl,
   sendWebhook,
   substituteTemplate,
   validateWebhookTarget,
-  type WebhookChannel,
-  type WebhookContext,
 } from './webhook-sender.js';
 
 const CTX: WebhookContext = {
@@ -17,9 +17,7 @@ const CTX: WebhookContext = {
   taskName: '每日新闻',
 };
 
-const PUBLIC_RESOLVER = vi.fn(async () => [
-  { address: '93.184.216.34', family: 4 as const },
-]);
+const PUBLIC_RESOLVER = vi.fn(async () => [{ address: '93.184.216.34', family: 4 as const }]);
 
 describe('formatPresetMessage', () => {
   it('composes lines from non-empty fields', () => {
@@ -85,10 +83,7 @@ describe('substituteTemplate', () => {
     );
     expect(out).toEqual({
       msgtype: 'markdown',
-      content: [
-        '# 定时任务完成',
-        { line: '已成功执行：抓取今日新闻', tag: 'success' },
-      ],
+      content: ['# 定时任务完成', { line: '已成功执行：抓取今日新闻', tag: 'success' }],
     });
   });
 
@@ -155,9 +150,9 @@ describe('buildPayload — preset wire shapes', () => {
   });
 
   it('custom: throws when template is missing', () => {
-    expect(() =>
-      buildPayload({ platform: 'custom', webhookUrl: url }, CTX),
-    ).toThrow(/customTemplate/);
+    expect(() => buildPayload({ platform: 'custom', webhookUrl: url }, CTX)).toThrow(
+      /customTemplate/,
+    );
   });
 });
 
@@ -288,8 +283,16 @@ describe('sendWebhook — HTTP behaviour', () => {
 
 describe('validateWebhookTarget — SSRF boundary', () => {
   it.each([
-    ['third-party domain', 'wecom', 'https://hooks.example.com/cgi-bin/webhook/send?key=abcdefgh-1234'],
-    ['spoofed domain', 'wecom', 'https://qyapi.weixin.qq.com.evil.com/cgi-bin/webhook/send?key=abcdefgh-1234'],
+    [
+      'third-party domain',
+      'wecom',
+      'https://hooks.example.com/cgi-bin/webhook/send?key=abcdefgh-1234',
+    ],
+    [
+      'spoofed domain',
+      'wecom',
+      'https://qyapi.weixin.qq.com.evil.com/cgi-bin/webhook/send?key=abcdefgh-1234',
+    ],
     ['http', 'wecom', 'http://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdefgh-1234'],
     ['non-443 port', 'feishu', 'https://open.feishu.cn:8443/open-apis/bot/v2/hook/abcdefgh-1234'],
     ['private IP', 'wecom', 'https://192.168.1.1/cgi-bin/webhook/send?key=abcdefgh-1234'],
@@ -429,11 +432,9 @@ describe('sendWebhook — SSRF-safe delivery', () => {
 
 describe('maskWebhookUrl', () => {
   it('masks a valid URL keeping host + last 6 chars', () => {
-    expect(
-      maskWebhookUrl(
-        'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=ABCD-EFGH',
-      ),
-    ).toBe('qyapi.weixin.qq.com/...D-EFGH');
+    expect(maskWebhookUrl('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=ABCD-EFGH')).toBe(
+      'qyapi.weixin.qq.com/...D-EFGH',
+    );
   });
 
   it('handles a malformed URL by trimming to first/last 6', () => {

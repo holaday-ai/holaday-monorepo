@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest';
 import type { UiStep } from '@/types/task';
+import { describe, expect, it } from 'vitest';
 import {
   EMPTY_STEPS,
-  currentMediaTaskTitle,
   currentMediaTaskText,
+  currentMediaTaskTitle,
   hydrateMissingMediaTask,
   isVideoTaskRunning,
   resolveVideoAwaitingKind,
@@ -75,9 +75,8 @@ describe('hydrateMissingMediaTask — one-time deep-link detail recovery', () =>
     const hydrated: string[] = [];
 
     expect(
-      hydrateMissingMediaTask(
-        { taskId: 'tsk_older', hasTask: false, already: false },
-        (taskId) => hydrated.push(taskId),
+      hydrateMissingMediaTask({ taskId: 'tsk_older', hasTask: false, already: false }, (taskId) =>
+        hydrated.push(taskId),
       ),
     ).toBe(true);
     expect(hydrated).toEqual(['tsk_older']);
@@ -90,23 +89,14 @@ describe('hydrateMissingMediaTask — one-time deep-link detail recovery', () =>
     };
 
     expect(
-      hydrateMissingMediaTask(
-        { taskId: 'tsk_existing', hasTask: true, already: false },
-        hydrate,
-      ),
+      hydrateMissingMediaTask({ taskId: 'tsk_existing', hasTask: true, already: false }, hydrate),
     ).toBe(false);
     expect(
-      hydrateMissingMediaTask(
-        { taskId: 'tsk_attempted', hasTask: false, already: true },
-        hydrate,
-      ),
+      hydrateMissingMediaTask({ taskId: 'tsk_attempted', hasTask: false, already: true }, hydrate),
     ).toBe(false);
-    expect(
-      hydrateMissingMediaTask(
-        { taskId: null, hasTask: false, already: false },
-        hydrate,
-      ),
-    ).toBe(false);
+    expect(hydrateMissingMediaTask({ taskId: null, hasTask: false, already: false }, hydrate)).toBe(
+      false,
+    );
     expect(hydrated).toEqual([]);
   });
 });

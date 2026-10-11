@@ -266,8 +266,17 @@ export function firstCutoverCloudStopScope({ snapshot, name, association, displa
         members: o.members,
         display: Object.fromEntries(
           [
-            'purpose', 'hostname', 'bootId', 'sourcesDigest', 'contextDigest',
-            'roots', 'display', 'members', 'treeDigests', 'clients', 'socketDigest',
+            'purpose',
+            'hostname',
+            'bootId',
+            'sourcesDigest',
+            'contextDigest',
+            'roots',
+            'display',
+            'members',
+            'treeDigests',
+            'clients',
+            'socketDigest',
           ].map((key) => [key, display[key]]),
         ),
       });

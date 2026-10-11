@@ -112,7 +112,8 @@ export const DEFAULT_BROWSE_HARD_MS = 420_000;
 export const LOGIN_BROWSE_HARD_MS = 720_000;
 export function resolveBrowseHardMs(raw: string | undefined, loginMode = false): number {
   const n = Number(raw);
-  if (!Number.isInteger(n) || n <= 0) return loginMode ? LOGIN_BROWSE_HARD_MS : DEFAULT_BROWSE_HARD_MS;
+  if (!Number.isInteger(n) || n <= 0)
+    return loginMode ? LOGIN_BROWSE_HARD_MS : DEFAULT_BROWSE_HARD_MS;
   return n;
 }
 
@@ -151,7 +152,10 @@ export function buildBreakpointSummary(args: {
   else stop = `失败（${r.slice(0, 80) || status}）`;
   const stepLine = steps.length
     ? steps
-        .map((s, i) => `${i + 1}.${s.stepType}${s.visibleText ? `(${s.visibleText.slice(0, 30)})` : ''}`)
+        .map(
+          (s, i) =>
+            `${i + 1}.${s.stepType}${s.visibleText ? `(${s.visibleText.slice(0, 30)})` : ''}`,
+        )
         .join(' → ')
     : '(无捕获动作)';
   return `停止原因：${stop}。已走 ${steps.length} 步：${stepLine}`;
@@ -212,9 +216,13 @@ export function makeRunBrowseTask(deps: RunBrowseTaskDeps): (args: {
         const connectOpts = deps.storageState
           ? ({ cleanContext: true, storageState: deps.storageState } as const)
           : ({ cleanContext: true } as const);
-        const c = await withHardDeadline(ex.connect(deps.cdpEndpoint, connectOpts), connectMs, () => {
-          void ex.disposeCleanContext().catch(() => {}); // unblock a hung connect
-        });
+        const c = await withHardDeadline(
+          ex.connect(deps.cdpEndpoint, connectOpts),
+          connectMs,
+          () => {
+            void ex.disposeCleanContext().catch(() => {}); // unblock a hung connect
+          },
+        );
         if (!c.ok) throw new Error(`connect failed: ${c.error ?? '?'}`);
         // 🔒 fail-closed zero-credential guarantee — throws if ANY cookie present. SKIPPED in
         // login mode (deps.storageState set): a test-account browse is deliberately authenticated,
@@ -231,11 +239,16 @@ export function makeRunBrowseTask(deps: RunBrowseTaskDeps): (args: {
         const reason = e instanceof Error ? e.message : String(e);
         deps.logger?.warn({ domain, attempt, reason }, 'browse runner: connect/assert failed');
         if (attempt === 2) {
-          return { status: 'failed', costUsd: 0, reason: `connect/assert failed (${attempt} attempts): ${reason}` };
+          return {
+            status: 'failed',
+            costUsd: 0,
+            reason: `connect/assert failed (${attempt} attempts): ${reason}`,
+          };
         }
       }
     }
-    if (!executor) return { status: 'failed', costUsd: 0, reason: 'connect: no executor (unexpected)' };
+    if (!executor)
+      return { status: 'failed', costUsd: 0, reason: 'connect: no executor (unexpected)' };
     try {
       const outcome = await deps.runSupercar({ taskId, intent, executor, onBeforeAction });
       return {

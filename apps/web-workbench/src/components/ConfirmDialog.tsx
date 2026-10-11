@@ -1,7 +1,7 @@
-import * as React from 'react';
 import { Button } from '@/components/ui/button';
-import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
+import * as React from 'react';
+import { createPortal } from 'react-dom';
 
 interface Props {
   open: boolean;

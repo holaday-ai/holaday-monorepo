@@ -1,14 +1,14 @@
-import { formatSourceTitle } from '@/lib/source-attribution';
-import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
-import { ChevronDown, ChevronUp, ExternalLink, Globe2 } from 'lucide-react';
-import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
 import { externalLinkConfirmDescription } from '@/lib/external-link-copy';
 import {
+  type SearchSourceLink,
   buildSearchSourceLink,
   sourcePublisherName,
-  type SearchSourceLink,
 } from '@/lib/search-source-link';
+import { formatSourceTitle } from '@/lib/source-attribution';
+import { ChevronDown, ChevronUp, ExternalLink, Globe2 } from 'lucide-react';
+import * as React from 'react';
 
 export interface SearchSource {
   /** Page title from the search engine. Trimmed; never empty. */
@@ -45,8 +45,7 @@ export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.El
       sources
         .map((source) => ({ source, link: buildSearchSourceLink(source.url) }))
         .filter(
-          (row): row is { source: SearchSource; link: SearchSourceLink } =>
-            row.link !== null,
+          (row): row is { source: SearchSource; link: SearchSourceLink } => row.link !== null,
         ),
     [sources],
   );
@@ -59,9 +58,7 @@ export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.El
         <div className="flex items-center justify-between gap-3 border-b border-[#EFEFEF] bg-[#EFEFEF]/35 px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
           <div className="flex min-w-0 items-center gap-2">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#42C0EF]" />
-            <span className="truncate text-[11px] font-medium text-foreground/80">
-              搜索来源
-            </span>
+            <span className="truncate text-[11px] font-medium text-foreground/80">搜索来源</span>
           </div>
           <span className="shrink-0 text-[11px] text-muted-foreground">
             {safeSources.length} 条
@@ -98,9 +95,7 @@ export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.El
       <ConfirmDialog
         open={pendingHref !== null}
         title="即将打开外部链接"
-        description={
-          pendingHref ? externalLinkConfirmDescription(pendingHref) : undefined
-        }
+        description={pendingHref ? externalLinkConfirmDescription(pendingHref) : undefined}
         confirmLabel="打开"
         cancelLabel="取消"
         onClose={() => setPendingHref(null)}
@@ -145,8 +140,12 @@ function SourceRow({
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-          <span className="truncate" title={link.domain}>{sourcePublisherName(link.domain)}</span>
-          <span aria-hidden className="shrink-0 text-muted-foreground/45">/</span>
+          <span className="truncate" title={link.domain}>
+            {sourcePublisherName(link.domain)}
+          </span>
+          <span aria-hidden className="shrink-0 text-muted-foreground/45">
+            /
+          </span>
           <span className="truncate text-muted-foreground/80">{link.pathLabel}</span>
         </div>
         <div className="mt-0.5 flex min-w-0 items-start gap-2">

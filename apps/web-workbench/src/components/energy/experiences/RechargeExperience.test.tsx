@@ -1,9 +1,9 @@
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 // @vitest-environment happy-dom
 import * as React from 'react';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { RechargeExperience } from './RechargeExperience';
 import type { ExperiencePhase } from '../energy-types';
+import { RechargeExperience } from './RechargeExperience';
 afterEach(() => {
   cleanup();
   vi.useRealTimers();

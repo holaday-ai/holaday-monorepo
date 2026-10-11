@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  browserViewportForHost,
-  shouldSendBrowserViewport,
-} from './browser-workspace-viewport';
+import { browserViewportForHost, shouldSendBrowserViewport } from './browser-workspace-viewport';
 
 describe('browser workspace viewport', () => {
   it('uses the actual browser canvas instead of a fixed desktop screenshot size', () => {
@@ -26,16 +23,10 @@ describe('browser workspace viewport', () => {
   it('ignores invalid measurements and sub-pixel resize noise', () => {
     expect(browserViewportForHost({ hostWidth: 0, hostHeight: 800 })).toBeNull();
     expect(
-      shouldSendBrowserViewport(
-        { width: 612, height: 844 },
-        { width: 616, height: 849 },
-      ),
+      shouldSendBrowserViewport({ width: 612, height: 844 }, { width: 616, height: 849 }),
     ).toBe(false);
     expect(
-      shouldSendBrowserViewport(
-        { width: 612, height: 844 },
-        { width: 680, height: 844 },
-      ),
+      shouldSendBrowserViewport({ width: 612, height: 844 }, { width: 680, height: 844 }),
     ).toBe(true);
   });
 });

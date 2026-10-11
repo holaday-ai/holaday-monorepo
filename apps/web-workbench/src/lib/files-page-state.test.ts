@@ -3,8 +3,8 @@ import {
   canApplyFilesResponse,
   fileReferenceText,
   formatFileRelativeDate,
-  normalizeFilesListPage,
   normalizeFileRows,
+  normalizeFilesListPage,
 } from './files-page-state';
 
 describe('canApplyFilesResponse', () => {
@@ -132,12 +132,8 @@ describe('formatFileRelativeDate', () => {
   });
 
   it('accepts Date and timestamp values', () => {
-    expect(formatFileRelativeDate(new Date('2026-05-17T11:00:00Z'), now)).toBe(
-      '今天',
-    );
-    expect(formatFileRelativeDate(Date.parse('2026-05-16T12:00:00Z'), now)).toBe(
-      '昨天',
-    );
+    expect(formatFileRelativeDate(new Date('2026-05-17T11:00:00Z'), now)).toBe('今天');
+    expect(formatFileRelativeDate(Date.parse('2026-05-16T12:00:00Z'), now)).toBe('昨天');
   });
 });
 
@@ -181,6 +177,9 @@ describe('server file availability', () => {
       { fileId: 'file_gone', filename: 'old.png', availability: 'unavailable' },
       { fileId: 'file_pending', filename: 'new.png', availability: 'unknown' },
     ]);
-    expect(rows.map(row => (row as unknown as { availability: string }).availability)).toEqual(['unavailable', 'unknown']);
+    expect(rows.map((row) => (row as unknown as { availability: string }).availability)).toEqual([
+      'unavailable',
+      'unknown',
+    ]);
   });
 });

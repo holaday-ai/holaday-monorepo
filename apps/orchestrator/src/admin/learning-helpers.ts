@@ -104,7 +104,11 @@ export function classifyTaskError(
   if (!haystack.trim()) return 'unknown';
 
   // DNS / network — both Node-style ENOTFOUND and Chromium net:: codes.
-  if (/dns|enotfound|getaddrinfo|net::err_name|net::err_address|网络错误|网络异常|无法访问/.test(haystack)) {
+  if (
+    /dns|enotfound|getaddrinfo|net::err_name|net::err_address|网络错误|网络异常|无法访问/.test(
+      haystack,
+    )
+  ) {
     return 'dns_error';
   }
   // Timeout — match English + Chinese variants.
@@ -116,20 +120,30 @@ export function classifyTaskError(
     return 'auth_required';
   }
   // Captcha / bot check.
-  if (/captcha|recaptcha|hcaptcha|验证码|人机|滑块|cloudflare|are you a (human|robot)/.test(haystack)) {
+  if (
+    /captcha|recaptcha|hcaptcha|验证码|人机|滑块|cloudflare|are you a (human|robot)/.test(haystack)
+  ) {
     return 'captcha';
   }
   // Element-not-found / selector failure / layout change. Checked
   // BEFORE the broader `not_found` bucket because phrases like
   // "element not found" contain "not found" and would otherwise
   // misclassify as a 404.
-  if (/element[\s_]not[\s_]found|selector[\s_]not[\s_]found|找不到元素|找不到按钮|missing.*element|页面结构|布局变化|定位失败/.test(haystack)) {
+  if (
+    /element[\s_]not[\s_]found|selector[\s_]not[\s_]found|找不到元素|找不到按钮|missing.*element|页面结构|布局变化|定位失败/.test(
+      haystack,
+    )
+  ) {
     return 'page_structure';
   }
   // Verifier / result-quality failures. These often surface through
   // partial_success, where the browser technically ran but the output
   // missed links, sources, row completeness, or other acceptance checks.
-  if (/quality|verification|validator|failed.?check|partial_success|质量|校验|验证未通过|缺少来源|缺少链接|结果不完整|信息不完整/.test(haystack)) {
+  if (
+    /quality|verification|validator|failed.?check|partial_success|质量|校验|验证未通过|缺少来源|缺少链接|结果不完整|信息不完整/.test(
+      haystack,
+    )
+  ) {
     return 'quality';
   }
   // 404 / page gone.

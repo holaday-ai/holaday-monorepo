@@ -7,7 +7,7 @@
  * against the real ffmpeg 4.4.2 installed on Vultr (libx264 + aac verified).
  */
 
-import { spawn as nodeSpawn, type SpawnOptions } from 'node:child_process';
+import { type SpawnOptions, spawn as nodeSpawn } from 'node:child_process';
 
 export interface ProcLike {
   stdout: { on(ev: 'data', cb: (chunk: Buffer | string) => void): void } | null;
@@ -80,7 +80,10 @@ async function runProcess(
 }
 
 /** Probe a media file's duration → milliseconds. Throws on a missing/invalid duration. */
-export async function ffprobeDurationMs(filePath: string, opts: FfmpegExecOpts = {}): Promise<number> {
+export async function ffprobeDurationMs(
+  filePath: string,
+  opts: FfmpegExecOpts = {},
+): Promise<number> {
   const args = [
     '-v',
     'error',
@@ -125,9 +128,9 @@ function frozenDurationSeconds(stderr: string, durationSeconds: number): number 
   const starts = [...stderr.matchAll(/lavfi\.freezedetect\.freeze_start:\s*([\d.]+)/g)].map(
     (match) => Number(match[1]),
   );
-  const durations = [
-    ...stderr.matchAll(/lavfi\.freezedetect\.freeze_duration:\s*([\d.]+)/g),
-  ].map((match) => Number(match[1]));
+  const durations = [...stderr.matchAll(/lavfi\.freezedetect\.freeze_duration:\s*([\d.]+)/g)].map(
+    (match) => Number(match[1]),
+  );
   let total = durations.reduce(
     (sum, duration) => sum + (Number.isFinite(duration) && duration > 0 ? duration : 0),
     0,
@@ -151,15 +154,7 @@ export async function inspectMediaIntegrity(
 ): Promise<MediaIntegrityReport> {
   const { stdout } = await runProcess(
     opts.ffprobeBin ?? 'ffprobe',
-    [
-      '-v',
-      'error',
-      '-show_entries',
-      'stream=codec_type:format=duration',
-      '-of',
-      'json',
-      filePath,
-    ],
+    ['-v', 'error', '-show_entries', 'stream=codec_type:format=duration', '-of', 'json', filePath],
     opts,
   );
   let payload: {

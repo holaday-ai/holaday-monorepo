@@ -1,10 +1,10 @@
-import { RefreshCw, X } from 'lucide-react';
-import * as React from 'react';
 import {
   fetchDeployedBundleHash,
   getLoadedBundleHash,
   isNewVersionAvailable,
 } from '@/lib/version-check';
+import { RefreshCw, X } from 'lucide-react';
+import * as React from 'react';
 
 // 5 min — cheap; the focus/visibility check covers the common "came back to a
 // tab left open across a deploy" case, the interval is just a backstop.

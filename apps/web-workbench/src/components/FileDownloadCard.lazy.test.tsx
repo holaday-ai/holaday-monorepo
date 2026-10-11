@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 
+import { resetUnavailableFilesForTests } from '@/lib/unavailable-file-registry';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileDownloadCard } from './FileDownloadCard';
 import { LazyPosterImg } from './LazyPosterImg';
-import { resetUnavailableFilesForTests } from '@/lib/unavailable-file-registry';
 
 const mocks = vi.hoisted(() => ({
   fetchFileBlobAuthed: vi.fn(),
@@ -127,25 +127,29 @@ describe('LazyPosterImg', () => {
     expect(mocks.fetchFileBlobAuthed).not.toHaveBeenCalled();
     act(() => scrollIntoView());
     await waitFor(() =>
-      expect(mocks.fetchFileBlobAuthed).toHaveBeenCalledWith({ url: '/api/files/fil_cover/download' }),
+      expect(mocks.fetchFileBlobAuthed).toHaveBeenCalledWith({
+        url: '/api/files/fil_cover/download',
+      }),
     );
     await waitFor(() => expect(screen.getByRole('img', { name: '视频封面' })).toBeTruthy());
   });
 });
 
-
-it.each([404,410])('treats missing attachment bytes as an unavailable state rather than a retry error (%s)', async status=>{
- mocks.downloadFileAuthed.mockResolvedValue({ok:false,status});
- render(<FileDownloadCard payload={payload('missing.pdf')} showPreview={false}/>);
- fireEvent.click(screen.getByRole('button',{name:/下载文档文件/}));
- await waitFor(()=>expect(screen.queryByRole('button',{name:/下载/})).toBeNull());
- expect(screen.getByText(/文件已不可用/)).toBeTruthy();
- expect(mocks.toast).not.toHaveBeenCalled();
-});
-it('keeps retryable server failures distinct from missing attachment bytes', async()=>{
- mocks.downloadFileAuthed.mockResolvedValue({ok:false,status:503});
- render(<FileDownloadCard payload={payload('retry.pdf')} showPreview={false}/>);
- fireEvent.click(screen.getByRole('button',{name:/下载文档文件/}));
- await screen.findByText('下载失败，点击重试');
- expect(mocks.toast).toHaveBeenCalledWith(expect.any(String),'error');
+it.each([404, 410])(
+  'treats missing attachment bytes as an unavailable state rather than a retry error (%s)',
+  async (status) => {
+    mocks.downloadFileAuthed.mockResolvedValue({ ok: false, status });
+    render(<FileDownloadCard payload={payload('missing.pdf')} showPreview={false} />);
+    fireEvent.click(screen.getByRole('button', { name: /下载文档文件/ }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /下载/ })).toBeNull());
+    expect(screen.getByText(/文件已不可用/)).toBeTruthy();
+    expect(mocks.toast).not.toHaveBeenCalled();
+  },
+);
+it('keeps retryable server failures distinct from missing attachment bytes', async () => {
+  mocks.downloadFileAuthed.mockResolvedValue({ ok: false, status: 503 });
+  render(<FileDownloadCard payload={payload('retry.pdf')} showPreview={false} />);
+  fireEvent.click(screen.getByRole('button', { name: /下载文档文件/ }));
+  await screen.findByText('下载失败，点击重试');
+  expect(mocks.toast).toHaveBeenCalledWith(expect.any(String), 'error');
 });

@@ -21,13 +21,6 @@
  */
 
 import { and, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
-// rrule ships CJS-first (package.json main: dist/es5/rrule.js). Node 22's
-// ESM interop doesn't expose `rrulestr` as a named import on CJS modules
-// reliably — `import { rrulestr } from 'rrule'` crashes with
-// "does not provide an export named 'rrulestr'" at module load. Default
-// import + destructure works because the default IS the CJS module
-// object, and the property lookup happens at call time (not import time).
-import { nextZonedRruleOccurrence } from '../schedule/rrule-zoned.js';
 import { accountClosureAllowsExecution } from '../account-closure/repository.js';
 import { logger } from '../config/logger.js';
 import { scheduledTasks } from '../db/schema/scheduled-tasks.js';
@@ -35,6 +28,13 @@ import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import type { OperationLifetime } from '../execution/owned-operation.js';
+// rrule ships CJS-first (package.json main: dist/es5/rrule.js). Node 22's
+// ESM interop doesn't expose `rrulestr` as a named import on CJS modules
+// reliably — `import { rrulestr } from 'rrule'` crashes with
+// "does not provide an export named 'rrulestr'" at module load. Default
+// import + destructure works because the default IS the CJS module
+// object, and the property lookup happens at call time (not import time).
+import { nextZonedRruleOccurrence } from '../schedule/rrule-zoned.js';
 import {
   callScheduledHook,
   retainScheduledUncertainty,
@@ -96,10 +96,7 @@ export interface ScheduledRunnerDeps {
    * When omitted, the runner skips notifications entirely (back-
    * compat with existing tests that don't care).
    */
-  notify?: (
-    input: ScheduledOutcomeNotifyInput,
-    lifetime?: OperationLifetime,
-  ) => Promise<void>;
+  notify?: (input: ScheduledOutcomeNotifyInput, lifetime?: OperationLifetime) => Promise<void>;
   /**
    * Phase 26B follow-up — reminder hook. Fires when a row's
    * `next_run_at - reminder_minutes` window opens AND we haven't
@@ -216,10 +213,16 @@ export function computeNextRunFromInputs(opts: {
   // Legacy enum cadence: step from the anchor (keeps 09:00 at 09:00) until
   // strictly after `from`; capped so a corrupt anchor can't spin.
   let candidate: Date | null = anchor;
-  for (let guard = 0; guard < 5_000 && candidate && candidate.getTime() <= from.getTime(); guard += 1) {
+  for (
+    let guard = 0;
+    guard < 5_000 && candidate && candidate.getTime() <= from.getTime();
+    guard += 1
+  ) {
     candidate = computeNextRun(candidate, repeatType);
   }
-  return candidate && candidate.getTime() > from.getTime() ? candidate : computeNextRun(from, repeatType);
+  return candidate && candidate.getTime() > from.getTime()
+    ? candidate
+    : computeNextRun(from, repeatType);
 }
 
 let runnerInterval: NodeJS.Timeout | null = null;

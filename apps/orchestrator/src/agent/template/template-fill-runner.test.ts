@@ -1,23 +1,28 @@
-import { describe, it, expect, vi } from 'vitest';
-import type { Logger } from 'pino';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
-import ExcelJS from 'exceljs';
-import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
-import {
-  runTemplateFillTask,
-  parseFillJson,
-  buildUserPrompt,
-  type SaveTemplateFn,
-  type TemplateFillModelFn,
-  type TemplateAttachment,
-} from './template-fill-runner.js';
+import ExcelJS from 'exceljs';
+import type { Logger } from 'pino';
+import PizZip from 'pizzip';
+import { describe, expect, it, vi } from 'vitest';
 import type { PlaceholderSchema } from './placeholder-schema.js';
+import {
+  type SaveTemplateFn,
+  type TemplateAttachment,
+  type TemplateFillModelFn,
+  buildUserPrompt,
+  parseFillJson,
+  runTemplateFillTask,
+} from './template-fill-runner.js';
 
 function fakeLogger(): Logger {
   const noop = vi.fn();
   return {
-    info: noop, warn: noop, debug: noop, error: noop, fatal: noop, trace: noop,
+    info: noop,
+    warn: noop,
+    debug: noop,
+    error: noop,
+    fatal: noop,
+    trace: noop,
     child: () => fakeLogger(),
   } as unknown as Logger;
 }
@@ -34,7 +39,10 @@ function fullText(buf: Buffer): string {
 }
 
 /** A `save` that records the filled buffer so tests can inspect the output. */
-function capturingSave(): { save: SaveTemplateFn; captured: { buffer?: Buffer; filename?: string } } {
+function capturingSave(): {
+  save: SaveTemplateFn;
+  captured: { buffer?: Buffer; filename?: string };
+} {
   const captured: { buffer?: Buffer; filename?: string } = {};
   const save: SaveTemplateFn = async (out) => {
     captured.buffer = out.buffer;
@@ -66,10 +74,16 @@ describe('runTemplateFillTask — happy path', () => {
     const { save, captured } = capturingSave();
     const out = await runTemplateFillTask({
       intent: '客户是张三，编号 INV-1',
-      template: { buffer: template, filename: '发票模板.docx', mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+      template: {
+        buffer: template,
+        filename: '发票模板.docx',
+        mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      },
       allowedFormats: PRO_FORMATS,
       save,
-      model: modelReturning('{"fields":{"client_name":"张三","invoice_no":"INV-1"},"loops":{},"missing":[]}'),
+      model: modelReturning(
+        '{"fields":{"client_name":"张三","invoice_no":"INV-1"},"loops":{},"missing":[]}',
+      ),
       logger: fakeLogger(),
     });
 
@@ -225,7 +239,9 @@ describe('runTemplateFillTask — partial / honest paths', () => {
       template: { buffer: template, filename: 't.docx', mimetype: 'x' },
       allowedFormats: PRO_FORMATS,
       save,
-      model: modelReturning('{"fields":{"client_name":"张三"},"loops":{},"missing":["invoice_no","date"]}'),
+      model: modelReturning(
+        '{"fields":{"client_name":"张三"},"loops":{},"missing":["invoice_no","date"]}',
+      ),
       logger: fakeLogger(),
     });
     expect(out.status).toBe('partial_success');

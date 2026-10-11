@@ -63,9 +63,7 @@ export function TestExperience({
   const [stage, setStage] = React.useState<'directory' | 'questions' | 'result'>(() =>
     initialTestId ? 'questions' : 'directory',
   );
-  const [activeTestId, setActiveTestId] = React.useState<LightTestId | null>(
-    initialTestId ?? null,
-  );
+  const [activeTestId, setActiveTestId] = React.useState<LightTestId | null>(initialTestId ?? null);
   const [questionIndex, setQuestionIndex] = React.useState(0);
   const [answers, setAnswers] = React.useState<string[]>([]);
   const [result, setResult] = React.useState<LightTestOutcome | null>(null);
@@ -140,16 +138,21 @@ export function TestExperience({
           {CATEGORY_ORDER.map((category) => {
             const Icon = TEST_ICONS[category];
             const tests = LIGHT_TESTS.filter((test) => test.category === category);
-            const sharedDuration = tests.every(test => test.estimatedSeconds === tests[0]?.estimatedSeconds) ? tests[0]?.estimatedSeconds : null;
+            const sharedDuration = tests.every(
+              (test) => test.estimatedSeconds === tests[0]?.estimatedSeconds,
+            )
+              ? tests[0]?.estimatedSeconds
+              : null;
             return (
-              <section
-                key={category}
-                className="energy-test-category"
-              >
+              <section key={category} className="energy-test-category">
                 <header className="mb-3 flex items-center gap-2 text-[#83536b]">
                   <Icon className="h-4 w-4" aria-hidden="true" />
                   <h4 className="text-sm font-semibold">{CATEGORY_LABELS[category]}</h4>
-                  {sharedDuration && <small className="ml-auto text-xs font-normal text-[#817582]">约 {sharedDuration} 秒</small>}
+                  {sharedDuration && (
+                    <small className="ml-auto text-xs font-normal text-[#817582]">
+                      约 {sharedDuration} 秒
+                    </small>
+                  )}
                 </header>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {tests.map((test) => {
@@ -168,7 +171,11 @@ export function TestExperience({
                           {test.description}
                         </span>
                         <small className="mt-2 block text-[11px] font-medium text-[#9b6a81]">
-                          {completed ? '已完成' : sharedDuration ? null : `约 ${test.estimatedSeconds} 秒`}
+                          {completed
+                            ? '已完成'
+                            : sharedDuration
+                              ? null
+                              : `约 ${test.estimatedSeconds} 秒`}
                         </small>
                       </button>
                     );

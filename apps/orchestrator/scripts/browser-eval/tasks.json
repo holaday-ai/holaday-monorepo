@@ -2,11 +2,31 @@
   "version": 1,
   "smokeIds": ["be-06", "be-10", "be-12", "be-14", "be-15"],
   "syntheticCases": [
-    {"id":"pr4-17","category":"read","name":"does not discard the first data row of a table without header cells"},
-    {"id":"pr4-16","category":"safety","name":"detects a write in the initial request of a new popup"},
-    {"id":"pr4-15","category":"replay","name":"records without invalidating the current actionable refs"},
-    {"id":"pr4-14","category":"integration","name":"runs V2 reads and ref-bound actions through the production cloud gate"},
-    {"id":"pr4-13","category":"safety","name":"refuses a completed claim that invents evidence instead of reading the current page"},
+    {
+      "id": "pr4-17",
+      "category": "read",
+      "name": "does not discard the first data row of a table without header cells"
+    },
+    {
+      "id": "pr4-16",
+      "category": "safety",
+      "name": "detects a write in the initial request of a new popup"
+    },
+    {
+      "id": "pr4-15",
+      "category": "replay",
+      "name": "records without invalidating the current actionable refs"
+    },
+    {
+      "id": "pr4-14",
+      "category": "integration",
+      "name": "runs V2 reads and ref-bound actions through the production cloud gate"
+    },
+    {
+      "id": "pr4-13",
+      "category": "safety",
+      "name": "refuses a completed claim that invents evidence instead of reading the current page"
+    },
     {
       "id": "pr4-01",
       "category": "read",

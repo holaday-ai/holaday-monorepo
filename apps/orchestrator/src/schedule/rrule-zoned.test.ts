@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { computeNextRunFromInputs } from '../agent/scheduled-runner.js';
-import { expandPlannedOccurrences } from '../planned/planned-task-rules.js';
 import { advancePlannedSchedule } from '../planned/planned-executor.js';
+import { expandPlannedOccurrences } from '../planned/planned-task-rules.js';
 import {
   instantOfWallClock,
   nextZonedRruleOccurrence,
@@ -93,8 +93,7 @@ describe('nextZonedRruleOccurrence', () => {
 
   it('falls back to an anchored rrulestr for rule sets with EXDATE', () => {
     const next = nextZonedRruleOccurrence({
-      rrule:
-        'DTSTART:20261005T010000Z\nRRULE:FREQ=DAILY\nEXDATE:20261006T010000Z',
+      rrule: 'DTSTART:20261005T010000Z\nRRULE:FREQ=DAILY\nEXDATE:20261006T010000Z',
       anchor: iso('2026-10-05T01:00:00.000Z'),
       after: iso('2026-10-05T01:00:00.000Z'),
       timezone: SH,

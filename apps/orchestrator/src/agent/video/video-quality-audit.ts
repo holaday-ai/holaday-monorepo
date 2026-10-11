@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { chmod, mkdir, mkdtemp, open, readdir, rm, lstat, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, open, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { VideoQualityResult } from './video-quality-verifier.js';

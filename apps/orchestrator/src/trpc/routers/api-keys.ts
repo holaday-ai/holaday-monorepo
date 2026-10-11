@@ -25,9 +25,10 @@ import { protectedProcedure, router } from '../trpc.js';
 
 const MAX_KEYS_PER_USER = 10;
 
-async function requireUserId(
-  ctx: { db: typeof import('../../db/client.js').db; userId: string },
-): Promise<number> {
+async function requireUserId(ctx: {
+  db: typeof import('../../db/client.js').db;
+  userId: string;
+}): Promise<number> {
   const [row] = await ctx.db
     .select({ id: users.id })
     .from(users)
@@ -137,9 +138,7 @@ export const apiKeysRouter = router({
       const [row] = await ctx.db
         .select({ id: apiKeys.id, revokedAt: apiKeys.revokedAt })
         .from(apiKeys)
-        .where(
-          and(eq(apiKeys.externalId, input.apiKeyId), eq(apiKeys.userId, userId)),
-        )
+        .where(and(eq(apiKeys.externalId, input.apiKeyId), eq(apiKeys.userId, userId)))
         .limit(1);
       if (!row) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'API key not found' });
@@ -147,10 +146,7 @@ export const apiKeysRouter = router({
       if (row.revokedAt) {
         return { ok: true as const, alreadyRevoked: true };
       }
-      await ctx.db
-        .update(apiKeys)
-        .set({ revokedAt: new Date() })
-        .where(eq(apiKeys.id, row.id));
+      await ctx.db.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, row.id));
       return { ok: true as const, alreadyRevoked: false };
     }),
 });

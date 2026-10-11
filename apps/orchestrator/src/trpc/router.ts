@@ -1,10 +1,10 @@
-import { browserReplayRouter } from './routers/browser-replay.js';
 import { accountClosureRouter } from './routers/account-closure.js';
 import { adminRouter } from './routers/admin.js';
 import { apiKeysRouter } from './routers/api-keys.js';
 import { astrologyRouter } from './routers/astrology.js';
 import { authRouter } from './routers/auth.js';
 import { batchTasksRouter } from './routers/batch-tasks.js';
+import { browserReplayRouter } from './routers/browser-replay.js';
 import { connectionsRouter } from './routers/connections.js';
 import { energyRouter } from './routers/energy.js';
 import { feedbackRouter } from './routers/feedback.js';

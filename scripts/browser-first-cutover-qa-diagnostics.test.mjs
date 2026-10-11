@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 const requireHash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { tmpdir } from 'node:os';
 test('QA diagnostics persist only bounded private whitelisted metadata across chunks', () => {
   const source = fs.readFileSync(
     new URL('./fixtures/browser-recovery-target-qa.mjs', import.meta.url),

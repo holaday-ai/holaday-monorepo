@@ -1,10 +1,10 @@
+import type { DriverAction, DriverResult } from '@holaday/browser-driver';
 import {
   USER_BROWSER_PROTOCOL,
-  type UserBrowserProtocol,
   type UserBrowserBinding,
+  type UserBrowserProtocol,
   type UserBrowserTargetDescription,
 } from '@holaday/shared-types';
-import type { DriverAction, DriverResult } from '@holaday/browser-driver';
 
 export interface SelectedChromeDriver {
   attachExistingTab(): Promise<DriverResult>;

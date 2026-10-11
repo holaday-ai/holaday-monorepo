@@ -214,9 +214,7 @@ describe('ws-client send', () => {
     vi.advanceTimersByTime(12_000);
 
     expect(socket.closeCalls).toEqual([{ code: 4000, reason: 'open timeout' }]);
-    expect(warn).toHaveBeenCalledWith(
-      '[holaday] ws open timed out after 12000ms; reconnecting',
-    );
+    expect(warn).toHaveBeenCalledWith('[holaday] ws open timed out after 12000ms; reconnecting');
     const status = await getWsConnectionStatus();
     expect(status.connected).toBe(false);
     expect(status.readyState).toBeNull();
@@ -350,10 +348,7 @@ describe('ws-client send', () => {
       lastCloseReason: 'open failed: constructor boom',
       nextRetryAt: expect.any(Number),
     });
-    expect(warn).toHaveBeenCalledWith(
-      '[holaday] ws open failed',
-      'constructor boom',
-    );
+    expect(warn).toHaveBeenCalledWith('[holaday] ws open failed', 'constructor boom');
 
     vi.advanceTimersByTime(1_000);
 
@@ -602,7 +597,10 @@ describe('ws-client send', () => {
 
   it('disconnects a websocket health preflight without leaving a connecting status', async () => {
     configMock.wsHealthUrl = 'https://primary.test/api/healthz';
-    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => undefined)),
+    );
     const { connect, disconnect, getWsConnectionStatus } = await import('./ws-client.js');
 
     connect('token');
@@ -650,7 +648,10 @@ describe('ws-client send', () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);
     configMock.wsHealthUrl = 'https://primary.test/api/healthz';
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false }) as Response));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false }) as Response),
+    );
     const { connect, getWsConnectionStatus } = await import('./ws-client.js');
 
     connect('token');
@@ -741,16 +742,17 @@ describe('ws-client send', () => {
     await import('./ws-client.js');
 
     await vi.waitFor(() => {
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith(
-        'holaday.ws.preferredEndpoint',
-      );
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith('holaday.ws.preferredEndpoint');
     });
   });
 
   it('ignores late preferred endpoint hydration after a connection starts opening', async () => {
     vi.useFakeTimers();
     configMock.deriveHealthUrl = true;
-    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => undefined)),
+    );
     let resolvePreferred!: (value: Record<string, unknown>) => void;
     const preferredRead = new Promise<Record<string, unknown>>((resolve) => {
       resolvePreferred = resolve;
@@ -786,9 +788,7 @@ describe('ws-client send', () => {
   it('treats a stuck reconnect-cap storage read as not capped', async () => {
     vi.useFakeTimers();
     const get = chrome.storage.local.get as unknown as ReturnType<typeof vi.fn>;
-    get.mockReturnValue(
-      new Promise(() => undefined) as Promise<Record<string, unknown>>,
-    );
+    get.mockReturnValue(new Promise(() => undefined) as Promise<Record<string, unknown>>);
     const { isReconnectCapped } = await import('./ws-client.js');
 
     const pending = isReconnectCapped();
@@ -820,9 +820,7 @@ describe('ws-client send', () => {
   });
 
   it('ignores stale reconnect hydration after a socket opens', async () => {
-    let resolveReconnectRead:
-      | ((value: Record<string, unknown>) => void)
-      | undefined;
+    let resolveReconnectRead: ((value: Record<string, unknown>) => void) | undefined;
     const get = chrome.storage.local.get as unknown as ReturnType<typeof vi.fn>;
     get.mockImplementation((key: string) => {
       if (key === 'holaday.ws.reconnectAttempts') {
@@ -841,9 +839,7 @@ describe('ws-client send', () => {
 
     resolveReconnectRead?.({ 'holaday.ws.reconnectAttempts': 3 });
     await vi.waitFor(() => {
-      expect(chrome.storage.local.remove).toHaveBeenCalledWith(
-        'holaday.ws.reconnectAttempts',
-      );
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith('holaday.ws.reconnectAttempts');
     });
 
     await expect(getWsConnectionStatus()).resolves.toMatchObject({
@@ -1093,9 +1089,9 @@ describe('ws-client capped slow retry', () => {
     store.set('holaday.ws.reconnectAttempts', 4);
     store.set('holaday.ws.cappedAt', 1_000_000);
 
-    await expect(
-      armCappedSlowRetry(1_000_000 + WS_CAPPED_RETRY_INTERVAL_MS - 1),
-    ).resolves.toBe(false);
+    await expect(armCappedSlowRetry(1_000_000 + WS_CAPPED_RETRY_INTERVAL_MS - 1)).resolves.toBe(
+      false,
+    );
     expect(store.get('holaday.ws.reconnectAttempts')).toBe(4);
 
     await expect(armCappedSlowRetry(1_000_000 + WS_CAPPED_RETRY_INTERVAL_MS)).resolves.toBe(true);

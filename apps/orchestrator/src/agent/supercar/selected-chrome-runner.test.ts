@@ -1442,9 +1442,21 @@ describe('runSelectedChromeTask', () => {
 
   it('shows a safe permissions reason for a permanent provider failure', async () => {
     const h = createHarness([]);
-    h.modelCreate.mockRejectedValue(new MessagesAdapterError('PROVIDER_ERROR', 'private provider body', 403));
-    const result = await runSelectedChromeTask({ taskId: 'permissions', intent: 'Inspect', messagesAdapter: h.messagesAdapter, client: h.client, control: h.control, target });
-    expect(result).toMatchObject({ status: 'failed', reason: '模型服务拒绝访问，请联系管理员检查工作空间和模型权限。' });
+    h.modelCreate.mockRejectedValue(
+      new MessagesAdapterError('PROVIDER_ERROR', 'private provider body', 403),
+    );
+    const result = await runSelectedChromeTask({
+      taskId: 'permissions',
+      intent: 'Inspect',
+      messagesAdapter: h.messagesAdapter,
+      client: h.client,
+      control: h.control,
+      target,
+    });
+    expect(result).toMatchObject({
+      status: 'failed',
+      reason: '模型服务拒绝访问，请联系管理员检查工作空间和模型权限。',
+    });
     expect(h.modelCreate).toHaveBeenCalledTimes(1);
   });
 

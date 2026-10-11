@@ -23,9 +23,7 @@ const MD = { filename: 'productivity-tips.md', mimetype: 'text/markdown' };
 
 describe('fencedFileIds', () => {
   it('extracts fileIds from well-formed fences', () => {
-    expect([...fencedFileIds(`文件已生成：\n${fence('file_abc', 'a.md')}`)]).toEqual([
-      'file_abc',
-    ]);
+    expect([...fencedFileIds(`文件已生成：\n${fence('file_abc', 'a.md')}`)]).toEqual(['file_abc']);
   });
 
   it('ignores a corrupted fence (dropped closing brace)', () => {
@@ -182,9 +180,9 @@ describe('answerClaimsDownloadableFile — filename + generation phrasing', () =
   });
 
   it('does NOT match a bare source link ending in .pdf', () => {
-    expect(
-      answerClaimsDownloadableFile('来源：https://example.com/spec.pdf（仅供参考）'),
-    ).toBe(false);
+    expect(answerClaimsDownloadableFile('来源：https://example.com/spec.pdf（仅供参考）')).toBe(
+      false,
+    );
     expect(answerClaimsDownloadableFile('参考文档 spec.pdf，可供参考')).toBe(false);
   });
 });
@@ -246,9 +244,7 @@ describe('answerClaimsDownloadableFile — reverse word order (verb before filen
   });
 
   it('does NOT match a source/reference link with no generation verb', () => {
-    expect(
-      answerClaimsDownloadableFile('这是参考链接 https://example.com/spec.pdf'),
-    ).toBe(false);
+    expect(answerClaimsDownloadableFile('这是参考链接 https://example.com/spec.pdf')).toBe(false);
     expect(answerClaimsDownloadableFile('任务已完成。详见 https://x.com/report.pdf')).toBe(false);
     expect(answerClaimsDownloadableFile('参考文档 spec.pdf，可供参考')).toBe(false);
   });
@@ -262,9 +258,9 @@ describe('answerClaimsDownloadableFile — Task C boundary phrasings', () => {
   });
 
   it('does NOT trip on a reference link or a "详见 file" pointer', () => {
-    expect(
-      answerClaimsDownloadableFile('参考链接：https://example.com/qa-summary.pdf'),
-    ).toBe(false);
+    expect(answerClaimsDownloadableFile('参考链接：https://example.com/qa-summary.pdf')).toBe(
+      false,
+    );
     expect(answerClaimsDownloadableFile('任务已完成，详见 report.pdf')).toBe(false);
   });
 

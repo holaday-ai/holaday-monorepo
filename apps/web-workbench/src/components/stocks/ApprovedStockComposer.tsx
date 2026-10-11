@@ -1,4 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import type { DraftAttachment } from '@/components/AttachmentChip';
+import { CreativeReferenceLibrary } from '@/components/CreativeReferenceLibrary';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import {
   ArrowUp,
   ChevronDown,
@@ -12,18 +23,7 @@ import {
   Plus,
   X,
 } from 'lucide-react';
-import { CreativeReferenceLibrary } from '@/components/CreativeReferenceLibrary';
-import type { DraftAttachment } from '@/components/AttachmentChip';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { uploadFile, uploadFailureMessage } from '@/lib/upload-file';
+import { useEffect, useRef, useState } from 'react';
 
 export interface StockResearchDraft {
   scope: string;

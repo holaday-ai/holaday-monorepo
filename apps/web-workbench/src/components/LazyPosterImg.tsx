@@ -1,16 +1,9 @@
+import { useNearViewport } from '@/hooks/useNearViewport';
+import { blobToDataUrl, fetchFileBlobAuthed, isUnavailableFileStatus } from '@/lib/download-file';
+import { markFileUnavailableFromStatus, useFileUnavailable } from '@/lib/unavailable-file-registry';
+import { cn } from '@/lib/utils';
 import { Film } from 'lucide-react';
 import * as React from 'react';
-import { useNearViewport } from '@/hooks/useNearViewport';
-import {
-  blobToDataUrl,
-  fetchFileBlobAuthed,
-  isUnavailableFileStatus,
-} from '@/lib/download-file';
-import {
-  markFileUnavailableFromStatus,
-  useFileUnavailable,
-} from '@/lib/unavailable-file-registry';
-import { cn } from '@/lib/utils';
 
 /**
  * Lazy poster thumbnail for a 成片.
@@ -57,13 +50,15 @@ export function LazyPosterImg({
     void fetchFileBlobAuthed({ url: posterUrl }).then((res) => {
       if (cancelled) return;
       if (res.ok && res.blob) {
-        void blobToDataUrl(res.blob).then((dataUrl) => {
-          if (cancelled) return;
-          setUrl(dataUrl);
-          setState('ready');
-        }).catch(() => {
-          if (!cancelled) setState('failed');
-        });
+        void blobToDataUrl(res.blob)
+          .then((dataUrl) => {
+            if (cancelled) return;
+            setUrl(dataUrl);
+            setState('ready');
+          })
+          .catch(() => {
+            if (!cancelled) setState('failed');
+          });
       } else {
         if (isUnavailableFileStatus(res.status)) {
           markFileUnavailableFromStatus(posterUrl, res.status);
@@ -88,7 +83,9 @@ export function LazyPosterImg({
       {state === 'ready' && url ? (
         <img src={url} alt={alt} className="h-full w-full object-cover" />
       ) : (
-        <Film className={cn('h-5 w-5 text-muted-foreground/50', state === 'loading' && 'animate-pulse')} />
+        <Film
+          className={cn('h-5 w-5 text-muted-foreground/50', state === 'loading' && 'animate-pulse')}
+        />
       )}
     </div>
   );

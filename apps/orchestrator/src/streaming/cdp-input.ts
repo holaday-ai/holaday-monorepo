@@ -211,11 +211,25 @@ export class CdpInputHandler {
           const width = Math.round(msg.width);
           const height = Math.round(msg.height);
           const pixelRatio = this.preserveDeviceScaleFactor
-            ? (await send('Runtime.evaluate', {expression:'window.devicePixelRatio',returnByValue:true})).result.value : 1;
+            ? (
+                await send('Runtime.evaluate', {
+                  expression: 'window.devicePixelRatio',
+                  returnByValue: true,
+                })
+              ).result.value
+            : 1;
           const page = this.preserveDeviceScaleFactor ? await this.getPage?.() : undefined;
-          const observedRatio = typeof pixelRatio === 'number' && Number.isFinite(pixelRatio) && pixelRatio>0 && pixelRatio<=4 ? pixelRatio : 1;
-          const deviceScaleFactor = page ? (pagePixelRatios.get(page) ?? observedRatio) : observedRatio;
-          if (page) pagePixelRatios.set(page,deviceScaleFactor);
+          const observedRatio =
+            typeof pixelRatio === 'number' &&
+            Number.isFinite(pixelRatio) &&
+            pixelRatio > 0 &&
+            pixelRatio <= 4
+              ? pixelRatio
+              : 1;
+          const deviceScaleFactor = page
+            ? (pagePixelRatios.get(page) ?? observedRatio)
+            : observedRatio;
+          if (page) pagePixelRatios.set(page, deviceScaleFactor);
           await send('Emulation.setDeviceMetricsOverride', {
             width,
             height,

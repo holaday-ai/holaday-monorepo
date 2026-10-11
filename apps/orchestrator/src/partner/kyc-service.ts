@@ -1,7 +1,7 @@
-import { newExternalId, type PartnerKycStatus } from '@holaday/shared-types';
+import { type PartnerKycStatus, newExternalId } from '@holaday/shared-types';
 import { eq } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
-import { partnerKycProfiles, type PartnerKycProfile } from '../db/schema/partner.js';
+import { type PartnerKycProfile, partnerKycProfiles } from '../db/schema/partner.js';
 
 const KNOWN_KYC_STATUSES: readonly PartnerKycStatus[] = [
   'not_started',
@@ -47,7 +47,9 @@ function metadataRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function normalizeUpsertKycStatus(status: PartnerKycStatus): Exclude<PartnerKycStatus, 'not_started'> {
+function normalizeUpsertKycStatus(
+  status: PartnerKycStatus,
+): Exclude<PartnerKycStatus, 'not_started'> {
   const normalized = normalizeKycStatus(status);
   if (normalized === 'not_started') {
     throw new RangeError('status cannot be not_started for an explicit KYC profile');
@@ -68,7 +70,8 @@ function reviewMetadata(input: {
     source: input.provider,
   };
   if (input.providerRef) metadata.providerRef = input.providerRef;
-  if (input.bankCardHashUpdatedAt) metadata.bankCardHashUpdatedAt = input.bankCardHashUpdatedAt.toISOString();
+  if (input.bankCardHashUpdatedAt)
+    metadata.bankCardHashUpdatedAt = input.bankCardHashUpdatedAt.toISOString();
   if (input.reviewerUserId != null) {
     metadata.reviewerUserId = normalizePositiveSafeInteger(input.reviewerUserId, 'reviewerUserId');
   }

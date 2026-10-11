@@ -351,7 +351,10 @@ describe('release database table and column contract', () => {
     for (const column of ['execution_id', 'execution_revision', 'core_record_version']) {
       assert.ok(tasksColumns.includes(`'${column}'`), `missing core rollout guard: ${column}`);
     }
-    const migration = readFileSync(new URL('../drizzle/0059_core_execution_identity.sql', import.meta.url), 'utf8');
+    const migration = readFileSync(
+      new URL('../drizzle/0059_core_execution_identity.sql', import.meta.url),
+      'utf8',
+    );
     const statements = splitMigrationStatements(migration);
     assert.equal(statements.length, 3);
     assert.deepEqual(findNonAdditiveMigrationStatements(statements), []);

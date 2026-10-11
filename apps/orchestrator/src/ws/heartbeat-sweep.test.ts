@@ -12,7 +12,11 @@ describe('sweepHeartbeats', () => {
     const silent = client();
     const lastPongAt = 0;
     // Before the fix the sweep timed its own pings, so this never terminated.
-    for (let now = HEARTBEAT_INTERVAL_MS; now <= HEARTBEAT_TIMEOUT_MS; now += HEARTBEAT_INTERVAL_MS) {
+    for (
+      let now = HEARTBEAT_INTERVAL_MS;
+      now <= HEARTBEAT_TIMEOUT_MS;
+      now += HEARTBEAT_INTERVAL_MS
+    ) {
       sweepHeartbeats([silent], () => lastPongAt, now);
     }
     expect(silent.terminate).not.toHaveBeenCalled();

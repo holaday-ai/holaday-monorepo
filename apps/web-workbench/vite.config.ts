@@ -1,7 +1,7 @@
 import path from 'node:path';
 import react from '@vitejs/plugin-react';
-import { defineConfig, type UserConfig } from 'vite';
-import { configDefaults, type UserConfig as VitestUserConfig } from 'vitest/config';
+import { type UserConfig, defineConfig } from 'vite';
+import { type UserConfig as VitestUserConfig, configDefaults } from 'vitest/config';
 import { resolveBrowserStreamProxyTarget } from './vite-browser-proxy';
 
 const devServerPort = Number(process.env.HOLADAY_WEB_PORT ?? 5173);
@@ -61,7 +61,14 @@ const config: UserConfig & Pick<VitestUserConfig, 'test'> = {
       output: {
         manualChunks(id: string): string | undefined {
           if (!id.includes('node_modules')) return undefined;
-          if (id.includes('react-markdown') || id.includes('remark-') || id.includes('rehype-') || id.includes('mdast-') || id.includes('hast-') || id.includes('unist-')) {
+          if (
+            id.includes('react-markdown') ||
+            id.includes('remark-') ||
+            id.includes('rehype-') ||
+            id.includes('mdast-') ||
+            id.includes('hast-') ||
+            id.includes('unist-')
+          ) {
             return 'markdown';
           }
           if (id.includes('@fullcalendar')) return 'calendar';

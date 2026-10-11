@@ -1,9 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  filterSidebarFeatureNavItems,
-  preloadSidebarFeatureNavItem,
-} from './sidebar-feature-nav';
+import { filterSidebarFeatureNavItems, preloadSidebarFeatureNavItem } from './sidebar-feature-nav';
 
 const FEATURES = [
   { label: '专家技能', href: '/skills' },
@@ -14,11 +11,9 @@ const FEATURES = [
 
 describe('filterSidebarFeatureNavItems', () => {
   it('hides partner navigation by default for dark launch', () => {
-    expect(filterSidebarFeatureNavItems(FEATURES, { cosmicEnabled: true }).map((item) => item.href)).toEqual([
-      '/skills',
-      '/cosmic',
-      '/files',
-    ]);
+    expect(
+      filterSidebarFeatureNavItems(FEATURES, { cosmicEnabled: true }).map((item) => item.href),
+    ).toEqual(['/skills', '/cosmic', '/files']);
   });
 
   it('shows partner navigation only when explicitly enabled', () => {
@@ -49,7 +44,10 @@ describe('filterSidebarFeatureNavItems', () => {
   });
 
   it('wires stock module preload to pointer and keyboard intent without replacing navigation', () => {
-    const sidebarSource = readFileSync(new URL('../components/Sidebar.tsx', import.meta.url), 'utf8');
+    const sidebarSource = readFileSync(
+      new URL('../components/Sidebar.tsx', import.meta.url),
+      'utf8',
+    );
 
     expect(sidebarSource).toContain('void preloadStockTasksPageRoute()');
     expect(sidebarSource).toContain('onPointerEnter={() => preloadSidebarFeatureNavItem(item)}');

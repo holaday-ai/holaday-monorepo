@@ -120,7 +120,10 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
       awaitingQuestion: '报价：确认制作 / 图片版 / 取消。',
       plan: null,
       origin: 'user',
-      result: { summary: '报价：确认制作 / 图片版 / 取消。', metadata: { lane: 'video_creation_confirm' } },
+      result: {
+        summary: '报价：确认制作 / 图片版 / 取消。',
+        metadata: { lane: 'video_creation_confirm' },
+      },
       ...(status === 'completed' || status === 'cancelled' || status === 'failed'
         ? { completedAt: new Date() }
         : {}),
@@ -508,9 +511,7 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
       userExternalId,
     );
     expect(status).toBe(200);
-    expect((json as { result: { data: { status: string } } }).result.data.status).toBe(
-      'cancelled',
-    );
+    expect((json as { result: { data: { status: string } } }).result.data.status).toBe('cancelled');
 
     const { db } = await import('../../db/client.js');
     const { and, eq } = await import('drizzle-orm');

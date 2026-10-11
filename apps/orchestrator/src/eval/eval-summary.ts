@@ -105,8 +105,7 @@ function laneFromRow(row: DbTaskRow, evalLane?: string | null): string {
   if (result) {
     const md = (result.metadata as Record<string, unknown> | undefined) ?? result;
     const mode =
-      (md.executionMode as string | undefined) ??
-      (md.finalExecutionMode as string | undefined);
+      (md.executionMode as string | undefined) ?? (md.finalExecutionMode as string | undefined);
     if (mode) return mode;
   }
   return 'unknown';
@@ -120,10 +119,7 @@ function formatPct(numerator: number, denominator: number): string {
 function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
-  const idx = Math.min(
-    sorted.length - 1,
-    Math.floor((p / 100) * sorted.length),
-  );
+  const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
   return sorted[idx] ?? 0;
 }
 
@@ -150,9 +146,7 @@ export async function writeEvalSummary(opts: {
 }): Promise<string | undefined> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
-    console.warn(
-      '[eval-summary] DATABASE_URL not set — skipping markdown summary',
-    );
+    console.warn('[eval-summary] DATABASE_URL not set — skipping markdown summary');
     return undefined;
   }
   const taskIds = opts.report.cases
@@ -193,10 +187,7 @@ export async function writeEvalSummary(opts: {
   }
 }
 
-function buildMarkdown(
-  report: EvalReport,
-  byId: Map<string, DbTaskRow>,
-): string {
+function buildMarkdown(report: EvalReport, byId: Map<string, DbTaskRow>): string {
   const lanes = new Map<string, LaneStats>();
   const failureReasons: Record<string, number> = {};
   const falseNegatives: string[] = [];
@@ -204,7 +195,7 @@ function buildMarkdown(
 
   for (const c of report.cases) {
     const row = c.taskId ? byId.get(c.taskId) : undefined;
-    const lane = row ? laneFromRow(row, c.executionMode) : c.executionMode ?? 'unknown';
+    const lane = row ? laneFromRow(row, c.executionMode) : (c.executionMode ?? 'unknown');
     let stats = lanes.get(lane);
     if (!stats) {
       stats = newLaneStats();
@@ -224,10 +215,9 @@ function buildMarkdown(
     stats.failureLevel[fl] = (stats.failureLevel[fl] ?? 0) + 1;
 
     if (verification && Array.isArray(verification.checks)) {
-      const autoFixCount = (verification.checks as Array<{ criterionId?: string }>)
-        .filter((ck) =>
-          typeof ck.criterionId === 'string' && ck.criterionId.startsWith('autoFix.'),
-        ).length;
+      const autoFixCount = (verification.checks as Array<{ criterionId?: string }>).filter(
+        (ck) => typeof ck.criterionId === 'string' && ck.criterionId.startsWith('autoFix.'),
+      ).length;
       if (autoFixCount > 0) {
         stats.autoFixTriggered++;
         if (vp === 1) stats.autoFixSucceeded++;
@@ -247,8 +237,7 @@ function buildMarkdown(
 
     const contract = row ? parseJson(row.contract_json) : null;
     if (contract?.tier && typeof contract.tier === 'string') {
-      stats.contractTiers[contract.tier] =
-        (stats.contractTiers[contract.tier] ?? 0) + 1;
+      stats.contractTiers[contract.tier] = (stats.contractTiers[contract.tier] ?? 0) + 1;
     }
 
     stats.latenciesMs.push(c.durationMs);
@@ -296,16 +285,12 @@ function buildMarkdown(
     const avgEntries =
       s.ledgerEntryCounts.length > 0
         ? Math.round(
-            (s.ledgerEntryCounts.reduce((a, c) => a + c, 0) /
-              s.ledgerEntryCounts.length) *
-              10,
+            (s.ledgerEntryCounts.reduce((a, c) => a + c, 0) / s.ledgerEntryCounts.length) * 10,
           ) / 10
         : 0;
     const avgLatency =
       s.latenciesMs.length > 0
-        ? Math.round(
-            s.latenciesMs.reduce((a, c) => a + c, 0) / s.latenciesMs.length,
-          )
+        ? Math.round(s.latenciesMs.reduce((a, c) => a + c, 0) / s.latenciesMs.length)
         : 0;
     lines.push(
       `| ${name} | ${s.total} | ${s.completed} (${formatPct(s.completed, s.total)}) | ${s.verificationTrue} | ${s.verificationFalse} | ${s.verificationNull} | ${s.emptyLedger} (${formatPct(s.emptyLedger, s.total)}) | ${avgEntries} | ${avgLatency}ms |`,
@@ -358,9 +343,7 @@ function buildMarkdown(
   lines.push('|------|-----:|------:|----------:|--------:|');
   for (const [name, s] of [...lanes.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     const total =
-      (s.contractTiers.full ?? 0) +
-      (s.contractTiers.light ?? 0) +
-      (s.contractTiers.checklist ?? 0);
+      (s.contractTiers.full ?? 0) + (s.contractTiers.light ?? 0) + (s.contractTiers.checklist ?? 0);
     lines.push(
       `| ${name} | ${s.contractTiers.full ?? 0} | ${s.contractTiers.light ?? 0} | ${s.contractTiers.checklist ?? 0} | ${s.total - total} |`,
     );
@@ -428,21 +411,13 @@ function buildMarkdown(
 
   lines.push('## Per-Case Results');
   lines.push('');
-  lines.push(
-    '| ID | Lane | Status | Verifier | Failure Level | Duration | TaskId |',
-  );
-  lines.push(
-    '|----|------|--------|---------:|--------------:|---------:|--------|',
-  );
+  lines.push('| ID | Lane | Status | Verifier | Failure Level | Duration | TaskId |');
+  lines.push('|----|------|--------|---------:|--------------:|---------:|--------|');
   for (const c of report.cases) {
     const row = c.taskId ? byId.get(c.taskId) : undefined;
-    const lane = row ? laneFromRow(row, c.executionMode) : c.executionMode ?? '—';
+    const lane = row ? laneFromRow(row, c.executionMode) : (c.executionMode ?? '—');
     const verifier =
-      row?.verification_passed === 1
-        ? '✓'
-        : row?.verification_passed === 0
-          ? '✗'
-          : '—';
+      row?.verification_passed === 1 ? '✓' : row?.verification_passed === 0 ? '✗' : '—';
     const failureLevel = row?.failure_level ?? '—';
     const status = row?.status ?? c.terminalStatus ?? '—';
     const taskId = c.taskId ? `\`${c.taskId}\`` : '—';

@@ -82,8 +82,8 @@ export async function humanMouseMove(
   // Perpendicular direction: rotate (dx, dy) 90° and normalise.
   const perpLen = Math.hypot(-dy, dx) || 1;
   const perpSign = Math.random() < 0.5 ? -1 : 1;
-  const ctrlX = start.x + dx / 2 + ((-dy / perpLen) * perpMag * perpSign);
-  const ctrlY = start.y + dy / 2 + ((dx / perpLen) * perpMag * perpSign);
+  const ctrlX = start.x + dx / 2 + (-dy / perpLen) * perpMag * perpSign;
+  const ctrlY = start.y + dy / 2 + (dx / perpLen) * perpMag * perpSign;
 
   for (let i = 1; i <= steps; i++) {
     const tBase = i / (steps + 1);

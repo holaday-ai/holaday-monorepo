@@ -20,18 +20,18 @@
  */
 
 import type { Logger } from 'pino';
-import {
-  validateFillJson,
-  countPlaceholders,
-  type PlaceholderSchema,
-  type PlaceholderField,
-  type FillJson,
-  type FillData,
-  type TemplateFormat,
-} from './placeholder-schema.js';
-import { inspectTemplate, checkPlaceholderBudget } from './template-safety.js';
 import { decodeUploadFilename, looksLikeMojibake } from '../../files/file-service.js';
 import * as docxEngine from './docx-template-engine.js';
+import {
+  type FillData,
+  type FillJson,
+  type PlaceholderField,
+  type PlaceholderSchema,
+  type TemplateFormat,
+  countPlaceholders,
+  validateFillJson,
+} from './placeholder-schema.js';
+import { checkPlaceholderBudget, inspectTemplate } from './template-safety.js';
 import * as xlsxEngine from './xlsx-template-engine.js';
 
 /** Matches the SPA's metadata.attachments entry shape (task-store.ts). */
@@ -46,11 +46,7 @@ export interface TemplateAttachment {
   kind: 'output';
 }
 
-export type TemplateFillStatus =
-  | 'completed'
-  | 'partial_success'
-  | 'failed'
-  | 'awaiting_user';
+export type TemplateFillStatus = 'completed' | 'partial_success' | 'failed' | 'awaiting_user';
 
 export interface RunTemplateFillResult {
   status: TemplateFillStatus;
@@ -307,9 +303,7 @@ export async function runTemplateFillTask(
 
   // 14. Final text + terminal status.
   const status: TemplateFillStatus =
-    validated.missing.length > 0 ||
-    validated.flagged.length > 0 ||
-    skippedLoops.length > 0
+    validated.missing.length > 0 || validated.flagged.length > 0 || skippedLoops.length > 0
       ? 'partial_success'
       : 'completed';
   return {
@@ -512,9 +506,7 @@ function buildPreviewMarkdown(
   format: TemplateFormat,
 ): string {
   const lines: string[] = [];
-  lines.push(
-    `你的账号暂不支持生成 .${format} 文件，以下是模板「${filename}」的字段填充预览：`,
-  );
+  lines.push(`你的账号暂不支持生成 .${format} 文件，以下是模板「${filename}」的字段填充预览：`);
   lines.push('');
   lines.push(...renderFilledTable(schema, data));
   lines.push('');

@@ -28,7 +28,9 @@ export function parseTeamProjectsAllowlist(raw: string): ParsedTeamProjectsAllow
  * Allowlist of user externalIds for the team project workspace rollout.
  * Empty = all users when the global flag is enabled.
  */
-const parsedTeamProjectsAllowlist = parseTeamProjectsAllowlist(appEnv.TEAM_PROJECTS_ALLOWLIST ?? '');
+const parsedTeamProjectsAllowlist = parseTeamProjectsAllowlist(
+  appEnv.TEAM_PROJECTS_ALLOWLIST ?? '',
+);
 export const TEAM_PROJECTS_ALLOWLIST = parsedTeamProjectsAllowlist.allowlist;
 
 /**

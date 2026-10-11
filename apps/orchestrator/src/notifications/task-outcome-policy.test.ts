@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  decideTaskOutcomeNotification,
-  normaliseFailureThreshold,
-} from './task-outcome-policy.js';
+import { decideTaskOutcomeNotification, normaliseFailureThreshold } from './task-outcome-policy.js';
 
 const prefs = (consecutiveFailures: number, threshold?: number, notifyOnSuccess?: boolean) => ({
   consecutiveFailures,

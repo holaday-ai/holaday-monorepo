@@ -1,7 +1,7 @@
+import { cn } from '@/lib/utils';
 import { Sparkles, X } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { cn } from '@/lib/utils';
 
 interface Props {
   plan: string;
@@ -74,9 +74,7 @@ export function RoleNudgeBanner({ plan, selectedRoles }: Props): JSX.Element | n
             <Sparkles className="h-3 w-3" />
           </span>
           <div className="min-w-0 leading-snug">
-            <span className="font-medium text-foreground">
-              你还没有选择专业角色
-            </span>
+            <span className="font-medium text-foreground">你还没有选择专业角色</span>
             <span className="ml-1.5 text-[#595757] dark:text-foreground/70">
               选择后任务执行质量会更好
             </span>

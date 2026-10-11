@@ -29,8 +29,8 @@
  * the helper means redundant fires only cost a string compare.
  */
 
-import { decideObservedTokenAction, TOKEN_KEY } from './auth-bridge-core.js';
-import { isLocalQaWorkbenchUrl, LOCAL_CHROME_QA } from '../shared/config.js';
+import { LOCAL_CHROME_QA, isLocalQaWorkbenchUrl } from '../shared/config.js';
+import { TOKEN_KEY, decideObservedTokenAction } from './auth-bridge-core.js';
 
 /**
  * Poll cadence. Chosen so:

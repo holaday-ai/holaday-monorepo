@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  WORKBENCH_DESKTOP_BREAKPOINT_PX,
+  WORKBENCH_MOBILE_BREAKPOINT_PX,
+  WORKBENCH_WIDE_BREAKPOINT_PX,
   isWorkbenchDesktopWidth,
   isWorkbenchMobileWidth,
   isWorkbenchWideWidth,
   workbenchInlineColumnMinimums,
-  WORKBENCH_DESKTOP_BREAKPOINT_PX,
-  WORKBENCH_MOBILE_BREAKPOINT_PX,
-  WORKBENCH_WIDE_BREAKPOINT_PX,
 } from './workbench-breakpoints';
 
 describe('workbench breakpoints', () => {

@@ -1,8 +1,8 @@
-import { PersonalProjectDetail } from '@/components/projects/PersonalProjectDetail';
 import { useAppShellContext } from '@/components/AppShell';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { OrganizationInviteDialog } from '@/components/projects/OrganizationInviteDialog';
 import { OrganizationMembersPanel } from '@/components/projects/OrganizationMembersPanel';
+import { PersonalProjectDetail } from '@/components/projects/PersonalProjectDetail';
 import { WorkspaceSwitcher } from '@/components/projects/WorkspaceSwitcher';
 import { classifyHiddenWorkspaceError } from '@/components/projects/team-workspace-error';
 import { Button } from '@/components/ui/button';
@@ -31,6 +31,7 @@ import {
   projectNameState,
 } from '@/lib/project-page-state';
 import { type AppRouter, trpc } from '@/lib/trpc';
+import { useUrlState } from '@/lib/use-url-state';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 import type { UiProject } from '@/types/task';
@@ -48,7 +49,6 @@ import {
   X,
 } from 'lucide-react';
 import * as React from 'react';
-import { useUrlState } from '@/lib/use-url-state';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 interface ScopedCollectionState<T> {
@@ -472,31 +472,34 @@ export function ProjectsPage(): JSX.Element {
     };
   }, [refreshOrganizationWorkspace, selectedOrganizationId, teamSurfaceEnabled]);
 
-  const selectWorkspace = React.useCallback((organizationId: string | null) => {
-    if (
-      organizationId !== null &&
-      organizationAuthorityStateRef.current.get(organizationId)?.status === 'tombstoned'
-    ) {
-      return;
-    }
-    const previousOrganizationId = selectedOrganizationIdRef.current;
-    if (previousOrganizationId) {
-      bumpWorkspaceGeneration(workspaceRequestGenerationRef.current, previousOrganizationId);
-    }
-    selectedOrganizationIdRef.current = organizationId;
-    setSelectedWorkspaceValue(organizationId);
-    setCreatingPersonal(false);
-    setPersonalName('');
-    setPersonalNameTouched(false);
-    setCreateTeamProjectOpen(false);
-    setInviteOpen(false);
-    setPendingDelete(null);
-    setPendingMemberRemoval(null);
-    if (!organizationId) {
-      setTeamProjects(emptyScopedCollection());
-      setMembers(emptyScopedCollection());
-    }
-  }, [setSelectedWorkspaceValue]);
+  const selectWorkspace = React.useCallback(
+    (organizationId: string | null) => {
+      if (
+        organizationId !== null &&
+        organizationAuthorityStateRef.current.get(organizationId)?.status === 'tombstoned'
+      ) {
+        return;
+      }
+      const previousOrganizationId = selectedOrganizationIdRef.current;
+      if (previousOrganizationId) {
+        bumpWorkspaceGeneration(workspaceRequestGenerationRef.current, previousOrganizationId);
+      }
+      selectedOrganizationIdRef.current = organizationId;
+      setSelectedWorkspaceValue(organizationId);
+      setCreatingPersonal(false);
+      setPersonalName('');
+      setPersonalNameTouched(false);
+      setCreateTeamProjectOpen(false);
+      setInviteOpen(false);
+      setPendingDelete(null);
+      setPendingMemberRemoval(null);
+      if (!organizationId) {
+        setTeamProjects(emptyScopedCollection());
+        setMembers(emptyScopedCollection());
+      }
+    },
+    [setSelectedWorkspaceValue],
+  );
 
   const reconcileMembershipMutation = async (
     organizationId: string,
@@ -740,17 +743,18 @@ export function ProjectsPage(): JSX.Element {
     error: selectedTeamProjects.error,
   });
 
-  const personalDetail = personalProjects.find(project => project.projectId === searchParams.get('project'));
-  if (personalDetail) return <PersonalProjectDetail key={personalDetail.projectId} project={personalDetail} />;
+  const personalDetail = personalProjects.find(
+    (project) => project.projectId === searchParams.get('project'),
+  );
+  if (personalDetail)
+    return <PersonalProjectDetail key={personalDetail.projectId} project={personalDetail} />;
 
   return (
     <PageContainer width="workspace" className="hd-projects-page">
       <span className="hd-page-eyebrow">ROOM FOR YOUR IDEAS</span>
       <PageHeader
         title="项目"
-        description={
-          '让相关的任务与资料，有一个共同的归处。'
-        }
+        description={'让相关的任务与资料，有一个共同的归处。'}
         action={
           selectedOrganization && organizationActions ? (
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -800,19 +804,28 @@ export function ProjectsPage(): JSX.Element {
       />
 
       <div className="hd-project-controlbar">
-      {teamSurfaceEnabled ? (
-        <WorkspaceSwitcher
-          organizations={organizations}
-          selectedOrganizationId={selectedOrganizationId}
-          loading={organizationsLoading}
-          error={organizationsError}
-          onSelectOrganization={selectWorkspace}
-          onCreateOrganization={() => setCreateOrganizationOpen(true)}
-          onRefresh={() => void refreshOrganizations()}
-        />
-      ) : null}
+        {teamSurfaceEnabled ? (
+          <WorkspaceSwitcher
+            organizations={organizations}
+            selectedOrganizationId={selectedOrganizationId}
+            loading={organizationsLoading}
+            error={organizationsError}
+            onSelectOrganization={selectWorkspace}
+            onCreateOrganization={() => setCreateOrganizationOpen(true)}
+            onRefresh={() => void refreshOrganizations()}
+          />
+        ) : null}
 
-      <label className="hd-project-search hd-library-search"><Search /><input aria-label="搜索项目" title="搜索项目" placeholder="搜索项目" value={projectQuery} onChange={event => setProjectQuery(event.target.value)} /></label>
+        <label className="hd-project-search hd-library-search">
+          <Search />
+          <input
+            aria-label="搜索项目"
+            title="搜索项目"
+            placeholder="搜索项目"
+            value={projectQuery}
+            onChange={(event) => setProjectQuery(event.target.value)}
+          />
+        </label>
       </div>
       {selectedOrganization && organizationActions ? (
         <div>
@@ -825,7 +838,9 @@ export function ProjectsPage(): JSX.Element {
             <ProjectCollection
               title="团队项目"
               description="团队项目是当前工作区的主要内容。"
-              projects={selectedTeamProjects.rows.filter(project => project.name.includes(projectQuery))}
+              projects={selectedTeamProjects.rows.filter((project) =>
+                project.name.includes(projectQuery),
+              )}
               loading={selectedTeamProjects.loading}
               error={selectedTeamProjects.error}
               loadingLabel="团队项目加载中"
@@ -867,7 +882,10 @@ export function ProjectsPage(): JSX.Element {
         </div>
       ) : (
         <div>
-          <header className="hd-project-section-title"><h2>最近使用</h2><small>按最近更新</small></header>
+          <header className="hd-project-section-title">
+            <h2>最近使用</h2>
+            <small>按最近更新</small>
+          </header>
           {creatingPersonal ? (
             <PersonalCreateForm
               value={personalName}
@@ -886,7 +904,7 @@ export function ProjectsPage(): JSX.Element {
             />
           ) : null}
           <ProjectCollection
-            projects={personalProjects.filter(project => project.name.includes(projectQuery))}
+            projects={personalProjects.filter((project) => project.name.includes(projectQuery))}
             loading={personalLoading}
             error={personalError}
             loadingLabel={teamSurfaceEnabled ? '个人项目加载中' : '项目加载中'}
@@ -903,7 +921,9 @@ export function ProjectsPage(): JSX.Element {
               setCreatingPersonal(true);
               setPersonalNameTouched(false);
             }}
-            onOpen={(project) => navigate(`/projects?project=${encodeURIComponent(project.projectId)}`)}
+            onOpen={(project) =>
+              navigate(`/projects?project=${encodeURIComponent(project.projectId)}`)
+            }
             onDelete={setPendingDelete}
           />
         </div>
@@ -940,7 +960,7 @@ export function ProjectsPage(): JSX.Element {
         />
       ) : null}
       <ConfirmDialog
-          overlayClassName="hd-approved-confirm"
+        overlayClassName="hd-approved-confirm"
         open={pendingDelete !== null && (pendingDelete.scope === 'personal' || teamSurfaceEnabled)}
         title="删除这个项目？"
         description={
@@ -959,7 +979,7 @@ export function ProjectsPage(): JSX.Element {
         }}
       />
       <ConfirmDialog
-          overlayClassName="hd-approved-confirm"
+        overlayClassName="hd-approved-confirm"
         open={teamSurfaceEnabled && selectedOrganization !== null && pendingMemberRemoval !== null}
         title="移除这位团队成员？"
         description={
@@ -1022,7 +1042,9 @@ function ProjectCollection({
       {title ? (
         <header className="mb-3 flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-foreground">{title === '个人项目' ? '最近使用' : title}</h2>
+            <h2 className="text-base font-semibold text-foreground">
+              {title === '个人项目' ? '最近使用' : title}
+            </h2>
             {description && isTeamCollection ? (
               <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
             ) : null}
@@ -1085,82 +1107,115 @@ function ProjectCollection({
         </div>
       ) : (
         <div className="hd-project-collection-grid grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {[...projects].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).map((project, index) => (<React.Fragment key={project.projectId}>
-            {!isTeamCollection && index === 2 && <h2 className="hd-other-projects">其他项目</h2>}
-            <article
-              data-compact={!isTeamCollection && index >= 2 || undefined}
-              className="hd-project-card group flex flex-col gap-2 rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[transform,border-color,box-shadow] hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]"
-            >
-              <button type="button" className="hd-project-cover" aria-label={`打开项目 ${project.name}`} title={`打开项目 ${project.name}`} onClick={() => onOpen(project)}><small>BUILD SOMETHING GOOD</small><div className="hd-project-paper" aria-hidden="true"><strong>HOLA DAY</strong><span>项目记录</span><i /><i /><i /></div><div className="hd-project-paper" aria-hidden="true"><strong>想法，逐渐成形</strong><span>DESIGN NOTES</span><div className="hd-mini-ui"><b /><b /><b /></div></div></button>
-              <div className="flex items-start gap-2">
-                <button
-                  type="button"
-                  onClick={() => onOpen(project)}
-                  className="flex min-w-0 flex-1 items-start gap-2 text-left"
+          {[...projects]
+            .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+            .map((project, index) => (
+              <React.Fragment key={project.projectId}>
+                {!isTeamCollection && index === 2 && (
+                  <h2 className="hd-other-projects">其他项目</h2>
+                )}
+                <article
+                  data-compact={(!isTeamCollection && index >= 2) || undefined}
+                  className="hd-project-card group flex flex-col gap-2 rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[transform,border-color,box-shadow] hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]"
                 >
-                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors group-hover:border-[#ADADAD]">
-                    {project.scope === 'organization' ? (
-                      <Building2 className="h-4 w-4" aria-hidden />
-                    ) : (
-                      <FolderOpen className="h-4 w-4" aria-hidden />
-                    )}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-foreground hover:text-[#FF0061]">
-                      {project.name}
+                  <button
+                    type="button"
+                    className="hd-project-cover"
+                    aria-label={`打开项目 ${project.name}`}
+                    title={`打开项目 ${project.name}`}
+                    onClick={() => onOpen(project)}
+                  >
+                    <small>BUILD SOMETHING GOOD</small>
+                    <div className="hd-project-paper" aria-hidden="true">
+                      <strong>HOLA DAY</strong>
+                      <span>项目记录</span>
+                      <i />
+                      <i />
+                      <i />
                     </div>
-                    {project.description ? (
-                      <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                        {project.description}
+                    <div className="hd-project-paper" aria-hidden="true">
+                      <strong>想法，逐渐成形</strong>
+                      <span>DESIGN NOTES</span>
+                      <div className="hd-mini-ui">
+                        <b />
+                        <b />
+                        <b />
                       </div>
-                    ) : null}
-                  </div>
-                </button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
+                    </div>
+                  </button>
+                  <div className="flex items-start gap-2">
                     <button
                       type="button"
-                      aria-label={`项目 ${project.name} 操作`}
-                      title="更多"
-                      className={cn(
-                        'inline-flex shrink-0 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground',
-                        project.scope === 'organization' ? 'h-11 w-11' : 'h-8 w-8',
-                      )}
+                      onClick={() => onOpen(project)}
+                      className="flex min-w-0 flex-1 items-start gap-2 text-left"
                     >
-                      <MoreHorizontal className="h-4 w-4" />
+                      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors group-hover:border-[#ADADAD]">
+                        {project.scope === 'organization' ? (
+                          <Building2 className="h-4 w-4" aria-hidden />
+                        ) : (
+                          <FolderOpen className="h-4 w-4" aria-hidden />
+                        )}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium text-foreground hover:text-[#FF0061]">
+                          {project.name}
+                        </div>
+                        {project.description ? (
+                          <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                            {project.description}
+                          </div>
+                        ) : null}
+                      </div>
                     </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-40">
-                    <DropdownMenuItem onSelect={() => onOpen(project)}>
-                      <FolderOpen className="text-muted-foreground" />
-                      <span>{project.scope === 'organization' ? '查看项目' : '打开项目'}</span>
-                    </DropdownMenuItem>
-                    {onDelete && canDeleteProject(project, organizationRole) ? (
-                      <DropdownMenuItem
-                        onSelect={() => onDelete(project)}
-                        className="text-[#FF0061] focus:bg-[#FF0061]/[0.06] focus:text-[#FF0061]"
-                      >
-                        <Trash2 />
-                        <span>删除项目</span>
-                      </DropdownMenuItem>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={`项目 ${project.name} 操作`}
+                          title="更多"
+                          className={cn(
+                            'inline-flex shrink-0 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground',
+                            project.scope === 'organization' ? 'h-11 w-11' : 'h-8 w-8',
+                          )}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-40">
+                        <DropdownMenuItem onSelect={() => onOpen(project)}>
+                          <FolderOpen className="text-muted-foreground" />
+                          <span>{project.scope === 'organization' ? '查看项目' : '打开项目'}</span>
+                        </DropdownMenuItem>
+                        {onDelete && canDeleteProject(project, organizationRole) ? (
+                          <DropdownMenuItem
+                            onSelect={() => onDelete(project)}
+                            className="text-[#FF0061] focus:bg-[#FF0061]/[0.06] focus:text-[#FF0061]"
+                          >
+                            <Trash2 />
+                            <span>删除项目</span>
+                          </DropdownMenuItem>
+                        ) : null}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span>{project.taskCount} 个任务</span>
+                    <time dateTime={new Date(project.updatedAt).toISOString()}>
+                      {new Date(project.updatedAt).toLocaleDateString('zh-CN')}
+                    </time>
+                    {project.memberRole ? (
+                      <span className="rounded-full bg-[#EFEFEF]/80 px-1.5 py-0.5">
+                        {project.memberRole === 'lead'
+                          ? '项目负责人'
+                          : project.memberRole === 'viewer'
+                            ? '观察者'
+                            : '项目成员'}
+                      </span>
                     ) : null}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-              <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                <span>{project.taskCount} 个任务</span><time dateTime={new Date(project.updatedAt).toISOString()}>{new Date(project.updatedAt).toLocaleDateString('zh-CN')}</time>
-                {project.memberRole ? (
-                  <span className="rounded-full bg-[#EFEFEF]/80 px-1.5 py-0.5">
-                    {project.memberRole === 'lead'
-                      ? '项目负责人'
-                      : project.memberRole === 'viewer'
-                        ? '观察者'
-                        : '项目成员'}
-                  </span>
-                ) : null}
-              </div>
-            </article></React.Fragment>
-          ))}
+                  </div>
+                </article>
+              </React.Fragment>
+            ))}
         </div>
       )}
     </section>

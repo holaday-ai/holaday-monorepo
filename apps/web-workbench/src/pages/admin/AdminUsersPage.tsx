@@ -8,12 +8,12 @@
  * Clicking a row routes to /admin/users/:id (the detail page).
  */
 
-import { ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react';
-import * as React from 'react';
-import { Link } from 'react-router-dom';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
+import { ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react';
+import * as React from 'react';
+import { Link } from 'react-router-dom';
 import {
   adminLoadErrorCopy,
   asRecord,
@@ -193,9 +193,7 @@ export function AdminUsersPage(): JSX.Element {
                       <div className="flex items-center gap-2.5">
                         <Avatar url={u.avatarUrl} fallback={u.displayName ?? u.email ?? '?'} />
                         <div className="min-w-0">
-                          <div className="truncate text-foreground">
-                            {u.displayName ?? '—'}
-                          </div>
+                          <div className="truncate text-foreground">{u.displayName ?? '—'}</div>
                           {u.role === 'admin' && (
                             <span className="mt-0.5 inline-block rounded-full bg-[rgba(255,0,97,0.10)] px-1.5 py-0.5 text-[10px] font-medium uppercase text-[#FF0061]">
                               admin
@@ -208,9 +206,7 @@ export function AdminUsersPage(): JSX.Element {
                       {truncate(u.email ?? '—', 32)}
                     </td>
                     <td className="px-3 py-3 text-muted-foreground">{u.plan}</td>
-                    <td className="px-3 py-3 text-muted-foreground">
-                      {formatDate(u.createdAt)}
-                    </td>
+                    <td className="px-3 py-3 text-muted-foreground">{formatDate(u.createdAt)}</td>
                     <td className="px-3 py-3 text-muted-foreground">
                       {u.lastActiveAt ? formatDateTime(u.lastActiveAt) : '—'}
                     </td>
@@ -336,12 +332,7 @@ function Avatar({
 }): JSX.Element {
   if (url) {
     return (
-      <img
-        src={url}
-        alt=""
-        className="h-7 w-7 shrink-0 rounded-full object-cover"
-        loading="lazy"
-      />
+      <img src={url} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" loading="lazy" />
     );
   }
   const letter = (fallback || '?').charAt(0).toUpperCase();

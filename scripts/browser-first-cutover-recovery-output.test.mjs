@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import * as fs from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { serveFirstCutoverRecoverySession } from './browser-first-cutover-recovery-session.mjs';
+import test from 'node:test';
 import { observeCutoverChild } from './browser-first-cutover-bridge-output.mjs';
+import { serveFirstCutoverRecoverySession } from './browser-first-cutover-recovery-session.mjs';
 const module = new URL('./browser-first-cutover-recovery-session.mjs', import.meta.url).pathname;
 const siteBytes = await fs.readFile(
   new URL('./browser-first-cutover-site.mjs', import.meta.url),

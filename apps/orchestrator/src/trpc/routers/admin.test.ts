@@ -64,8 +64,7 @@ describe('mapIpComplianceRow — IP 合规追溯 row assembly', () => {
   });
 });
 
-const { beijingDayStartUtc, beijingDayString, buildDashboardDayStats } =
-  __adminInternals;
+const { beijingDayStartUtc, beijingDayString, buildDashboardDayStats } = __adminInternals;
 
 const fakeLogger = {
   info: vi.fn(),
@@ -135,11 +134,9 @@ describe('adminProcedure (via adminRouter.dashboard gate)', () => {
   });
 
   it('rejects an inactive admin account with FORBIDDEN', async () => {
-    const ctx = makeCtx(
-      { usr_suspended_admin: 'admin' },
-      'usr_suspended_admin',
-      { usr_suspended_admin: 'suspended' },
-    );
+    const ctx = makeCtx({ usr_suspended_admin: 'admin' }, 'usr_suspended_admin', {
+      usr_suspended_admin: 'suspended',
+    });
     const caller = adminRouter.createCaller(ctx as never);
 
     await expect(caller.dashboard()).rejects.toMatchObject({

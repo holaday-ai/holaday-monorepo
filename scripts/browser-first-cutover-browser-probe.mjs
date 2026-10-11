@@ -1,5 +1,5 @@
-import * as fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import * as fs from 'node:fs/promises';
 
 /** Fixed foundational browser probe. Creates one about:blank target, executes a
  * literal expression only on that target, and closes only that returned target.

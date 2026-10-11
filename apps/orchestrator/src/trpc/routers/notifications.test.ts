@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // No real DNS in unit tests: allowlisted bot hosts resolve to a public IP.
-const lookupMock = vi.hoisted(() =>
-  vi.fn(async () => [{ address: '93.184.216.34', family: 4 }]),
-);
+const lookupMock = vi.hoisted(() => vi.fn(async () => [{ address: '93.184.216.34', family: 4 }]));
 vi.mock('node:dns/promises', () => ({ lookup: lookupMock, default: { lookup: lookupMock } }));
 import { _resetAllBucketsForTesting } from '../../quota/rate-limiter.js';
 import { notificationChannelsRouter, notificationsRouter } from './notifications.js';
@@ -17,20 +15,18 @@ const fakeLogger = {
 };
 
 function tableName(table: unknown): string {
-  return (
-    (table as Record<symbol, string> | undefined)?.[
-      Symbol.for('drizzle:Name')
-    ] ?? ''
-  );
+  return (table as Record<symbol, string> | undefined)?.[Symbol.for('drizzle:Name')] ?? '';
 }
 
-function makeContext(options: {
-  channels?: Array<{
-    platform: string;
-    webhookUrl: string;
-    customTemplate: unknown;
-  }>;
-} = {}) {
+function makeContext(
+  options: {
+    channels?: Array<{
+      platform: string;
+      webhookUrl: string;
+      customTemplate: unknown;
+    }>;
+  } = {},
+) {
   const inserted: unknown[] = [];
   const updated: unknown[] = [];
   const channels = options.channels ?? [
@@ -116,7 +112,10 @@ describe('notificationChannelsRouter — webhook target safety', () => {
 
   it.each([
     ['third-party domain', 'https://hooks.example.com/cgi-bin/webhook/send?key=abcdefgh-1234'],
-    ['spoofed domain', 'https://qyapi.weixin.qq.com.evil.com/cgi-bin/webhook/send?key=abcdefgh-1234'],
+    [
+      'spoofed domain',
+      'https://qyapi.weixin.qq.com.evil.com/cgi-bin/webhook/send?key=abcdefgh-1234',
+    ],
     ['http', 'http://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdefgh-1234'],
     ['non-443 port', 'https://qyapi.weixin.qq.com:8443/cgi-bin/webhook/send?key=abcdefgh-1234'],
     ['internal IP', 'https://10.0.0.7/cgi-bin/webhook/send?key=abcdefgh-1234'],
@@ -303,17 +302,19 @@ describe('notificationChannelsRouter — webhook target safety', () => {
 
 describe('notificationsRouter — keyset pagination', () => {
   it('returns the public planned task id for a stock-risk notification', async () => {
-    const notificationRows = [{
-      id: 103,
-      externalId: 'nfn_103',
-      type: 'task_complete',
-      title: '风险发生变化',
-      message: '数据日期 2026-08-19：升级 1 条',
-      isRead: false,
-      createdAt: new Date('2026-08-19T09:00:00Z'),
-      scheduledTaskId: null,
-      plannedTaskId: 77,
-    }];
+    const notificationRows = [
+      {
+        id: 103,
+        externalId: 'nfn_103',
+        type: 'task_complete',
+        title: '风险发生变化',
+        message: '数据日期 2026-08-19：升级 1 条',
+        isRead: false,
+        createdAt: new Date('2026-08-19T09:00:00Z'),
+        scheduledTaskId: null,
+        plannedTaskId: 77,
+      },
+    ];
     const db = {
       select() {
         return {
@@ -322,7 +323,8 @@ describe('notificationsRouter — keyset pagination', () => {
             return {
               where() {
                 if (name === 'users') return { limit: async () => [{ id: 42 }] };
-                if (name === 'planned_tasks') return Promise.resolve([{ id: 77, externalId: 'pln_public' }]);
+                if (name === 'planned_tasks')
+                  return Promise.resolve([{ id: 77, externalId: 'pln_public' }]);
                 return { orderBy: () => ({ limit: async () => notificationRows }) };
               },
             };
@@ -449,8 +451,6 @@ describe('notificationsRouter — keyset pagination', () => {
         cursor: { id: 102, createdAt: '2026-08-05T02:00:00.000Z' },
       } as never);
 
-    expect(page.items).toEqual([
-      expect.objectContaining({ notificationId: 'not_101' }),
-    ]);
+    expect(page.items).toEqual([expect.objectContaining({ notificationId: 'not_101' })]);
   });
 });

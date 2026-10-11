@@ -945,10 +945,7 @@ export async function verifyFinalVideoQuality(
           reason: lastResult.reason,
         });
       } catch (error) {
-        reportAnalysisIssue(
-          deps,
-          serviceErrorIssue(phase, attempt, maxAnalysisAttempts, error),
-        );
+        reportAnalysisIssue(deps, serviceErrorIssue(phase, attempt, maxAnalysisAttempts, error));
         // The production Anthropic analyzer owns transport retries and
         // Retry-After backoff. Repeating it again here would multiply a
         // provider outage into up to six identical requests.
@@ -1012,12 +1009,7 @@ export async function verifyFinalVideoQuality(
     } catch (error) {
       reportAnalysisIssue(
         deps,
-        serviceErrorIssue(
-          'required_action_evidence',
-          attempt,
-          maxAnalysisAttempts,
-          error,
-        ),
+        serviceErrorIssue('required_action_evidence', attempt, maxAnalysisAttempts, error),
       );
       return unknownResult('动作证据质检服务暂时不可用');
     }

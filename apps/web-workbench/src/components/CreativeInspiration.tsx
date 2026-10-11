@@ -1,9 +1,15 @@
-import { useRef, useState } from 'react';
+import type { ImageStyleKey } from '@/types/image';
+import type { VideoAspect } from '@/types/video';
 import * as Dialog from '@radix-ui/react-dialog';
 import { ChevronRight, X } from 'lucide-react';
-import type { VideoAspect } from '@/types/video';
-import type { ImageStyleKey } from '@/types/image';
-type Idea = { name: string; image: string; prompt: string; aspectRatio: VideoAspect; style?: ImageStyleKey };
+import { useRef, useState } from 'react';
+type Idea = {
+  name: string;
+  image: string;
+  prompt: string;
+  aspectRatio: VideoAspect;
+  style?: ImageStyleKey;
+};
 
 export const IMAGE_IDEAS: Idea[] = [
   {
@@ -82,16 +88,20 @@ export function CreativeInspiration({
     <section className="hd-inspiration">
       <div className="hd-inspiration-heading">
         <h2>从一个灵感开始</h2>
-        {kind === 'image' ? <span>选一个方向，自由改写</span> : <button
-          type="button"
-          onClick={(event) => {
-            triggerRef.current = event.currentTarget;
-            setGallery(true);
-          }}
-        >
-          看全部
-          <ChevronRight />
-        </button>}
+        {kind === 'image' ? (
+          <span>选一个方向，自由改写</span>
+        ) : (
+          <button
+            type="button"
+            onClick={(event) => {
+              triggerRef.current = event.currentTarget;
+              setGallery(true);
+            }}
+          >
+            看全部
+            <ChevronRight />
+          </button>
+        )}
       </div>
       <div className="hd-template-grid">
         {(kind === 'image' ? IMAGE_IDEAS : VIDEO_IDEAS).map((idea) => (

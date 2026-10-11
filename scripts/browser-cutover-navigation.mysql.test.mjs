@@ -1,13 +1,13 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import test from 'node:test';
 import {
-  readCutoverWorkScope,
-  validateLegacyWorkBoundary,
   cutoverLegacyInterruptionRisk,
   cutoverWorkScopeReady,
+  readCutoverWorkScope,
+  validateLegacyWorkBoundary,
 } from './browser-cutover-evidence.mjs';
 const h = (x) => createHash('sha256').update(x).digest('hex');
 const policy = {

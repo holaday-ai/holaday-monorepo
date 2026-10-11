@@ -5,12 +5,7 @@ import type { VideoAspect } from './video';
  * locked subject → Wan 2.7 Image, otherwise the default). 'nano_banana_pro'
  * is legacy (old tasks only); it is no longer offered.
  */
-export type ImageModel =
-  | 'auto'
-  | 'qwen_image'
-  | 'wan_image'
-  | 'nano_banana_2'
-  | 'nano_banana_pro';
+export type ImageModel = 'auto' | 'qwen_image' | 'wan_image' | 'nano_banana_2' | 'nano_banana_pro';
 
 export const IMAGE_MODEL_VALUES: readonly ImageModel[] = [
   'auto',
@@ -55,12 +50,7 @@ export type ImageStyleKey =
 
 export type ImageCreationGoal = 'inspiration' | 'lock_subject' | 'commercial';
 
-export type ImageChangeTarget =
-  | 'background'
-  | 'style'
-  | 'lighting'
-  | 'action'
-  | 'composition';
+export type ImageChangeTarget = 'background' | 'style' | 'lighting' | 'action' | 'composition';
 
 export type CommercialImageUse = 'product' | 'poster' | 'social_cover';
 

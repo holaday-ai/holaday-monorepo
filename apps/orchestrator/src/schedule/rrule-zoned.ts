@@ -30,7 +30,9 @@ interface RRuleInstance {
   between(after: Date, before: Date, inclusive?: boolean): Date[];
 }
 const { RRule, rrulestr } = rruleModule as unknown as {
-  RRule: (new (options: RRuleOptions) => RRuleInstance) & {
+  RRule: (new (
+    options: RRuleOptions,
+  ) => RRuleInstance) & {
     parseString(value: string): RRuleOptions;
   };
   rrulestr: (value: string, options?: { dtstart?: Date }) => RRuleInstance;
@@ -132,11 +134,7 @@ function parseZonedRule(raw: string, timezone: string): ParsedZonedRule | null {
   return { options, dtstartWall };
 }
 
-function buildWallRule(
-  rule: string,
-  anchor: Date,
-  timezone: string,
-): RRuleInstance | null {
+function buildWallRule(rule: string, anchor: Date, timezone: string): RRuleInstance | null {
   const parsed = parseZonedRule(rule, timezone);
   if (!parsed) return null;
   const anchorWall = wallClockOf(anchor, timezone);

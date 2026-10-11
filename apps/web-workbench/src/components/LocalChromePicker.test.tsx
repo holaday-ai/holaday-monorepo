@@ -3,8 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({ tabs: vi.fn() }));
 vi.mock('@/lib/trpc', () => ({ trpc: { tasks: { localChromeTabs: { query: api.tabs } } } }));
-import { LocalChromePicker } from './LocalChromePicker';
 import { useTaskStore } from '@/stores/task-store';
+import { LocalChromePicker } from './LocalChromePicker';
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();

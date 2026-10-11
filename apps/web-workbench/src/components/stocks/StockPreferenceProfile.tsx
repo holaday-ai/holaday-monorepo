@@ -117,13 +117,16 @@ export function StockPreferenceProfile({
     };
   }, [load, refreshKey]);
 
-  const openEditor = React.useCallback((trigger: HTMLButtonElement) => {
-    if (!profile) return;
-    editorOpenedByRef.current = trigger;
-    setDraft(copyManualPreferences(profile.manualPreferences));
-    setConfirmClear(false);
-    setSheetOpen(true);
-  }, [profile]);
+  const openEditor = React.useCallback(
+    (trigger: HTMLButtonElement) => {
+      if (!profile) return;
+      editorOpenedByRef.current = trigger;
+      setDraft(copyManualPreferences(profile.manualPreferences));
+      setConfirmClear(false);
+      setSheetOpen(true);
+    },
+    [profile],
+  );
 
   const update = React.useCallback(
     async (enabled: boolean, manualPreferences: ManualPreferences, closeEditor = false) => {
@@ -178,9 +181,7 @@ export function StockPreferenceProfile({
             <h2 className="text-[16px] font-semibold tracking-[-0.01em] text-[#121826]">
               你的选股偏好
             </h2>
-            {profile && profile.state !== 'disabled' ? (
-              <ConfidenceBadge profile={profile} />
-            ) : null}
+            {profile && profile.state !== 'disabled' ? <ConfidenceBadge profile={profile} /> : null}
           </div>
           <p className="mt-2 max-w-[680px] text-[12px] leading-5 text-[#667085]">
             汇总你主动设置、成功筛选和清空后新增关注的可核验迹象，只描述研究习惯，不推断投资者类型或风险承受能力。
@@ -231,9 +232,7 @@ export function StockPreferenceProfile({
           onEnable={() => void update(true, profile.manualPreferences)}
         />
       ) : null}
-      {profile?.state === 'empty' ? (
-        <EmptyState onEdit={openEditor} />
-      ) : null}
+      {profile?.state === 'empty' ? <EmptyState onEdit={openEditor} /> : null}
       {profile?.state === 'ready' ? (
         presentation === 'compact' ? (
           <CompactReadyProfile

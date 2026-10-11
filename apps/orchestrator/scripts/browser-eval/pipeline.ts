@@ -1,3 +1,4 @@
+import type { WebSearchHit } from '../../src/agent/browser-tools/unified-browser-loop.js';
 /**
  * FIX-BATCH-A — production result pipeline for browser eval runs.
  *
@@ -9,7 +10,6 @@
  * text and terminal status, not the raw model summary.
  */
 import { runUnifiedSupercarTask } from '../../src/agent/browser-tools/unified-supercar-runner.js';
-import type { WebSearchHit } from '../../src/agent/browser-tools/unified-browser-loop.js';
 import type { PlaywrightExecutor } from '../../src/agent/vision-loop/playwright-executor.js';
 import {
   type FinalTerminalStatus,

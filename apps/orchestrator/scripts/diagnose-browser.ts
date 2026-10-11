@@ -16,7 +16,7 @@
  *   CDP_ENDPOINT=http://127.0.0.1:9222 \
  *     tsx apps/orchestrator/scripts/diagnose-browser.ts https://example.com
  */
-import { chromium, type Browser } from 'playwright';
+import { type Browser, chromium } from 'playwright';
 
 const CDP_ENDPOINT = process.env.CDP_ENDPOINT ?? 'http://127.0.0.1:9222';
 const TARGET_URL = process.argv[2] ?? 'https://example.com';

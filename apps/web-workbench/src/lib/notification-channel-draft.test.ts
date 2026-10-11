@@ -39,7 +39,10 @@ describe('buildNotificationChannelDraft', () => {
 
   it('rejects non-HTTPS webhook URLs before save or test', () => {
     expect(
-      buildNotificationChannelDraft({ platform: 'wecom', webhookUrl: WECOM.replace('https', 'http') }),
+      buildNotificationChannelDraft({
+        platform: 'wecom',
+        webhookUrl: WECOM.replace('https', 'http'),
+      }),
     ).toEqual({ error: '通知地址必须使用 https://，以免通知内容或凭据被窃取' });
     expect(
       buildNotificationChannelDraft({ platform: 'wecom', webhookUrl: 'javascript:alert(1)' }),
@@ -52,7 +55,11 @@ describe('buildNotificationChannelDraft', () => {
     ['non-443 port', 'feishu', FEISHU.replace('feishu.cn', 'feishu.cn:8443')],
     ['internal IP', 'dingtalk', DINGTALK.replace('oapi.dingtalk.com', '10.0.0.1')],
     ['other platform host', 'wecom', FEISHU],
-    ['wrong path', 'dingtalk', 'https://oapi.dingtalk.com/robot/other?access_token=0123456789abcdef'],
+    [
+      'wrong path',
+      'dingtalk',
+      'https://oapi.dingtalk.com/robot/other?access_token=0123456789abcdef',
+    ],
   ])('rejects %s', (_label, platform, webhookUrl) => {
     const result = buildNotificationChannelDraft({
       platform: platform as 'wecom' | 'feishu' | 'dingtalk',

@@ -1,9 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
-import type {
-  SubjectConsistencyVerdict,
-  VerifySubjectFn,
-} from './image-runner.js';
+import type { SubjectConsistencyVerdict, VerifySubjectFn } from './image-runner.js';
 
 const VERIFY_MODEL = 'claude-sonnet-4-6';
 const PASS_CONFIDENCE = 0.8;
@@ -39,9 +36,7 @@ function unknown(reason: string): SubjectConsistencyVerdict {
   return { status: 'unknown', confidence: null, reason };
 }
 
-export function createAnthropicSubjectConsistencyVerifier(
-  client: Anthropic,
-): VerifySubjectFn {
+export function createAnthropicSubjectConsistencyVerifier(client: Anthropic): VerifySubjectFn {
   return async ({ subject, candidate, intent }) => {
     try {
       const response = await client.messages.create(

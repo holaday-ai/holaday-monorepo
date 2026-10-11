@@ -199,7 +199,9 @@ export function buildComposeCommand(
   if (bgmIdx >= 0) {
     const bv = input.bgmVolume ?? DEFAULT_BGM_VOLUME;
     fc.push(`[${bgmIdx}:a]volume=${bv},aloop=loop=-1:size=2000000000[bgmraw]`);
-    fc.push(`[bgmraw][${acur}]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[bgmduck]`);
+    fc.push(
+      `[bgmraw][${acur}]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[bgmduck]`,
+    );
     fc.push(`[${acur}][bgmduck]amix=inputs=2:duration=first:dropout_transition=0[mixa]`);
     acur = 'mixa';
   }

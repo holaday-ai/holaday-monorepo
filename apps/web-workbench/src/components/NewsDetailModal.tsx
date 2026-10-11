@@ -1,8 +1,8 @@
-import { Check, ChevronLeft, ChevronRight, Copy, FileText, Loader2, X } from 'lucide-react';
-import * as React from 'react';
-import { newsDisplayType, newsTimeLabel, type StockNewsRow } from '@/lib/stock-news';
+import { type StockNewsRow, newsDisplayType, newsTimeLabel } from '@/lib/stock-news';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
+import { Check, ChevronLeft, ChevronRight, Copy, FileText, Loader2, X } from 'lucide-react';
+import * as React from 'react';
 
 type SourceDetail = Awaited<ReturnType<typeof trpc.stocks.newsDetail.query>>;
 
@@ -18,7 +18,7 @@ export function NewsDetailModal({
   onChangeIndex: (index: number | null) => void;
 }): JSX.Element | null {
   const closeRef = React.useRef<HTMLButtonElement>(null);
-  const item = activeIndex === null ? null : news[activeIndex] ?? null;
+  const item = activeIndex === null ? null : (news[activeIndex] ?? null);
   const [detail, setDetail] = React.useState<SourceDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = React.useState(false);
   const [detailUnavailable, setDetailUnavailable] = React.useState(false);
@@ -40,18 +40,22 @@ export function NewsDetailModal({
     setDetailUnavailable(false);
     setShowSourceUrl(false);
     setSourceUrlCopied(false);
-    void trpc.stocks.newsDetail.query({
-      url: item.url,
-      sourceName: item.source ?? '公开来源',
-      publishedAt: item.publishedAt ?? item.time,
-      summary: item.summary,
-    }).then((result) => {
-      if (alive) setDetail(result);
-    }).catch(() => {
-      if (alive) setDetailUnavailable(true);
-    }).finally(() => {
-      if (alive) setLoadingDetail(false);
-    });
+    void trpc.stocks.newsDetail
+      .query({
+        url: item.url,
+        sourceName: item.source ?? '公开来源',
+        publishedAt: item.publishedAt ?? item.time,
+        summary: item.summary,
+      })
+      .then((result) => {
+        if (alive) setDetail(result);
+      })
+      .catch(() => {
+        if (alive) setDetailUnavailable(true);
+      })
+      .finally(() => {
+        if (alive) setLoadingDetail(false);
+      });
     return () => {
       alive = false;
     };
@@ -81,14 +85,15 @@ export function NewsDetailModal({
   if (!item || activeIndex === null) return null;
 
   const type = newsDisplayType(item);
-  const body = detail?.contentStatus === 'source-body' ? detail.body ?? [] : [];
+  const body = detail?.contentStatus === 'source-body' ? (detail.body ?? []) : [];
   const hasSourceSummary = Boolean(detail?.summary ?? item.summary?.trim());
   const summary = detail?.summary ?? item.summary?.trim();
-  const contentLabel = detail?.contentStatus === 'source-body'
-    ? '已提取公开来源正文'
-    : hasSourceSummary
-      ? '来源摘要'
-      : '仅保留来源记录';
+  const contentLabel =
+    detail?.contentStatus === 'source-body'
+      ? '已提取公开来源正文'
+      : hasSourceSummary
+        ? '来源摘要'
+        : '仅保留来源记录';
   const sourceMedia = item.imageKind === 'source-cover';
   const readerItemKey = item.url ?? `${item.publishedAt ?? item.time}:${item.title}`;
   const copySourceUrl = async (): Promise<void> => {
@@ -114,10 +119,14 @@ export function NewsDetailModal({
       <article className="flex h-[min(92vh,860px)] w-[min(94vw,980px)] flex-col overflow-hidden rounded-[12px] border border-[#DCDDDD] bg-[#FBFAF8] shadow-[0_24px_80px_rgba(17,24,39,0.24)]">
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[#E4E1DC] bg-[#FBFAF8] px-5 py-3">
           <div className="flex min-w-0 items-center gap-2">
-            <span className={cn(
-              'rounded-full px-2.5 py-1 text-[12px] font-semibold',
-              type === '公告' ? 'bg-white text-[#344054] ring-1 ring-[#E1E3E8]' : 'bg-[#FF0061] text-white',
-            )}>
+            <span
+              className={cn(
+                'rounded-full px-2.5 py-1 text-[12px] font-semibold',
+                type === '公告'
+                  ? 'bg-white text-[#344054] ring-1 ring-[#E1E3E8]'
+                  : 'bg-[#FF0061] text-white',
+              )}
+            >
               {type}
             </span>
             <span className="truncate text-[12px] text-[#667085]">
@@ -161,7 +170,9 @@ export function NewsDetailModal({
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-8 lg:px-10">
           <div className="mx-auto max-w-[760px]">
             <div className="mb-4 flex flex-wrap items-center gap-2 text-[12px] text-[#667085]">
-              <span>{activeIndex + 1} / {news.length}</span>
+              <span>
+                {activeIndex + 1} / {news.length}
+              </span>
               {item.symbols.length > 0 ? (
                 <>
                   <span className="h-1 w-1 rounded-full bg-[#CBD0DA]" />
@@ -169,13 +180,24 @@ export function NewsDetailModal({
                 </>
               ) : null}
             </div>
-            <h2 id="stock-news-dialog-title" className="text-[28px] font-semibold leading-tight tracking-normal text-[#242424] sm:text-[34px]">
+            <h2
+              id="stock-news-dialog-title"
+              className="text-[28px] font-semibold leading-tight tracking-normal text-[#242424] sm:text-[34px]"
+            >
               {item.title}
             </h2>
 
             {item.imageUrl ? (
-              <figure key={readerItemKey} className="mt-6 overflow-hidden rounded-[10px] border border-[#E4E8EF] bg-[#F1F3F6]">
-                <img key={`${readerItemKey}:${item.imageUrl}`} src={item.imageUrl} alt="" className="max-h-[340px] w-full object-cover" />
+              <figure
+                key={readerItemKey}
+                className="mt-6 overflow-hidden rounded-[10px] border border-[#E4E8EF] bg-[#F1F3F6]"
+              >
+                <img
+                  key={`${readerItemKey}:${item.imageUrl}`}
+                  src={item.imageUrl}
+                  alt=""
+                  className="max-h-[340px] w-full object-cover"
+                />
                 <figcaption className="border-t border-[#E4E8EF] bg-white px-3 py-2 text-[11px] text-[#667085]">
                   {sourceMedia ? '来源配图' : '与当前内容关联的主题配图'}
                 </figcaption>
@@ -189,7 +211,8 @@ export function NewsDetailModal({
               <div className="min-w-0">
                 <p className="text-[13px] font-semibold text-[#344054]">来源与阅读边界</p>
                 <p className="mt-1 text-[13px] leading-6 text-[#667085]">
-                  {item.source ?? '公开来源'} · {newsTimeLabel(item)} · {contentLabel}。正文在当前弹窗内阅读；站内只展示来源返回字段或从已验证来源提取的文本。
+                  {item.source ?? '公开来源'} · {newsTimeLabel(item)} · {contentLabel}
+                  。正文在当前弹窗内阅读；站内只展示来源返回字段或从已验证来源提取的文本。
                 </p>
               </div>
             </section>
@@ -205,7 +228,9 @@ export function NewsDetailModal({
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                       正在核对公开来源正文…
                     </p>
-                  ) : body.length > 0 ? body.map((paragraph) => <p key={paragraph}>{paragraph}</p>) : summary ? (
+                  ) : body.length > 0 ? (
+                    body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)
+                  ) : summary ? (
                     <p>{summary}</p>
                   ) : (
                     <p>当前未收到可展示的来源摘要或正文。来源链接仍可在本页展开核对。</p>
@@ -233,13 +258,19 @@ export function NewsDetailModal({
                   </button>
                   {showSourceUrl ? (
                     <div className="mt-3 flex flex-col gap-2 border-t border-[#EEF0F3] pt-3 sm:flex-row sm:items-center">
-                      <code className="min-w-0 flex-1 break-all text-[12px] leading-5 text-[#667085]">{item.url}</code>
+                      <code className="min-w-0 flex-1 break-all text-[12px] leading-5 text-[#667085]">
+                        {item.url}
+                      </code>
                       <button
                         type="button"
                         onClick={() => void copySourceUrl()}
                         className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[7px] border border-[#E1E3E8] bg-white px-2.5 text-[12px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/25 hover:text-[#FF0061]"
                       >
-                        {sourceUrlCopied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
+                        {sourceUrlCopied ? (
+                          <Check className="h-3.5 w-3.5" aria-hidden />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" aria-hidden />
+                        )}
                         {sourceUrlCopied ? '已复制' : '复制链接'}
                       </button>
                     </div>
@@ -251,7 +282,10 @@ export function NewsDetailModal({
                 <div className="grid gap-3 text-[13px] text-[#4F5868] sm:grid-cols-3">
                   <NewsDetailMetric label="类型" value={type} />
                   <NewsDetailMetric label="来源" value={item.source ?? '公开来源'} />
-                  <NewsDetailMetric label="关联标的" value={item.symbols.length > 0 ? item.symbols.join('、') : '暂无'} />
+                  <NewsDetailMetric
+                    label="关联标的"
+                    value={item.symbols.length > 0 ? item.symbols.join('、') : '暂无'}
+                  />
                 </div>
               </section>
             </div>
@@ -259,7 +293,9 @@ export function NewsDetailModal({
         </div>
 
         <footer className="flex shrink-0 flex-col gap-3 border-t border-[#E4E1DC] bg-[#FBFAF8] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-[12px] leading-relaxed text-[#667085]">站内阅读保留来源边界；发布时间与完整语境以公开来源为准。</div>
+          <div className="text-[12px] leading-relaxed text-[#667085]">
+            站内阅读保留来源边界；发布时间与完整语境以公开来源为准。
+          </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
@@ -279,7 +315,9 @@ function NewsDetailMetric({ label, value }: { label: string; value: string }): J
   return (
     <div className="min-w-0">
       <div className="text-[11px] text-[#8B92A1]">{label}</div>
-      <div className="mt-1 truncate font-medium text-[#121826]" title={value}>{value}</div>
+      <div className="mt-1 truncate font-medium text-[#121826]" title={value}>
+        {value}
+      </div>
     </div>
   );
 }

@@ -22,9 +22,9 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import {
+  CLAIM_PLACEHOLDER_TASK_ID,
   canonicalize,
   cleanup,
-  CLAIM_PLACEHOLDER_TASK_ID,
   finalizeClaim,
   hashBody,
   lookup,
@@ -142,9 +142,7 @@ function makeFakeDb(initialRows: FakeRow[] = []) {
           // throwing DUP if a row already exists for the same
           // (user, key).
           const dup = rows.find(
-            (r) =>
-              r.userId === values.userId &&
-              r.idempotencyKey === values.idempotencyKey,
+            (r) => r.userId === values.userId && r.idempotencyKey === values.idempotencyKey,
           );
           if (dup) {
             const err = new Error('duplicate') as Error & { code: string };
@@ -422,13 +420,10 @@ describe('recordClaim (atomic-claim flow, Codex P1)', () => {
     const a = await recordClaim({ db, logger: fakeLogger }, 42, 'key-a', { prompt: 'x' });
     expect(a.kind).toBe('claimed');
     // First caller finalizes (mimics dispatch + finalizeClaim).
-    await finalizeClaim(
-      { db, logger: fakeLogger },
-      42,
-      'key-a',
-      'tsk_a',
-      { taskId: 'tsk_a', status: 'pending' },
-    );
+    await finalizeClaim({ db, logger: fakeLogger }, 42, 'key-a', 'tsk_a', {
+      taskId: 'tsk_a',
+      status: 'pending',
+    });
     // Second caller collides — sees the populated row → replay.
     const b = await recordClaim({ db, logger: fakeLogger }, 42, 'key-a', { prompt: 'x' });
     expect(b.kind).toBe('replay');
@@ -460,13 +455,10 @@ describe('finalizeClaim', () => {
         createdAt: new Date(),
       },
     ]);
-    const ok = await finalizeClaim(
-      { db, logger: fakeLogger },
-      42,
-      'key-a',
-      'tsk_real',
-      { taskId: 'tsk_real', status: 'pending' },
-    );
+    const ok = await finalizeClaim({ db, logger: fakeLogger }, 42, 'key-a', 'tsk_real', {
+      taskId: 'tsk_real',
+      status: 'pending',
+    });
     expect(ok).toBe(true);
     expect(rows[0]?.taskId).toBe('tsk_real');
     expect(rows[0]?.responseJson).toEqual({ taskId: 'tsk_real', status: 'pending' });

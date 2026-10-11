@@ -7,13 +7,7 @@ const { rrulestr } = rruleModule as {
   rrulestr: (value: string) => { after(date: Date, inclusive?: boolean): Date | null };
 };
 
-export const PLANNED_REPEAT_TYPES = [
-  'once',
-  'daily',
-  'weekly',
-  'monthly',
-  'custom',
-] as const;
+export const PLANNED_REPEAT_TYPES = ['once', 'daily', 'weekly', 'monthly', 'custom'] as const;
 
 export function validatePlannedRepeatRule(
   repeatType: PlannedRepeatType,
@@ -26,9 +20,7 @@ export function validatePlannedRepeatRule(
   try {
     rrulestr(rrule.trim());
   } catch (error) {
-    throw new Error(
-      `重复规则格式错误：${error instanceof Error ? error.message : String(error)}`,
-    );
+    throw new Error(`重复规则格式错误：${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -68,7 +60,13 @@ export const plannedTaskCreateInputSchema = z
     rrule: rruleSchema,
     timezone: z.string().trim().min(1).max(64).default('Asia/Shanghai'),
     endsOn: plannedEndsOnInputSchema,
-    reminderMinutes: z.number().int().min(0).max(60 * 24 * 7).nullable().optional(),
+    reminderMinutes: z
+      .number()
+      .int()
+      .min(0)
+      .max(60 * 24 * 7)
+      .nullable()
+      .optional(),
     // Batch 10.3 — outcome notification preferences.
     notifyOnSuccess: z.boolean().optional(),
     failureNotifyThreshold: z.number().int().min(1).max(10).optional(),

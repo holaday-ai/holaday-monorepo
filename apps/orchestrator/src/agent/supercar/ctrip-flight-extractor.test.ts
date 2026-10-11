@@ -9,10 +9,14 @@ import {
 describe('isCtripFlightResultsUrl', () => {
   it('matches one-way and round-trip flight list URLs', () => {
     expect(
-      isCtripFlightResultsUrl('https://flights.ctrip.com/online/list/oneway-bjs-sha?depdate=2026-08-01'),
+      isCtripFlightResultsUrl(
+        'https://flights.ctrip.com/online/list/oneway-bjs-sha?depdate=2026-08-01',
+      ),
     ).toBe(true);
     expect(
-      isCtripFlightResultsUrl('https://flights.ctrip.com/online/list/round-bjs-sha?depdate=2026-08-01&rdate=2026-08-05'),
+      isCtripFlightResultsUrl(
+        'https://flights.ctrip.com/online/list/round-bjs-sha?depdate=2026-08-01&rdate=2026-08-05',
+      ),
     ).toBe(true);
   });
 
@@ -69,7 +73,10 @@ describe('extractCtripFlights', () => {
 describe('formatCtripFlightsTable', () => {
   it('sorts by price asc, caps at topN, marks no-booking + source', () => {
     const flights = extractCtripFlights(PAGE_TEXT);
-    const md = formatCtripFlightsTable(flights, { url: 'https://flights.ctrip.com/online/list/oneway-bjs-sha', topN: 3 });
+    const md = formatCtripFlightsTable(flights, {
+      url: 'https://flights.ctrip.com/online/list/oneway-bjs-sha',
+      topN: 3,
+    });
     expect(md).toContain('| 航空公司 | 出发-到达 | 是否直飞 | 价格(¥) |');
     expect(md).toContain('春秋航空'); // cheapest in
     expect(md).not.toContain('南方航空'); // 4th by price, dropped at topN=3

@@ -23,19 +23,16 @@ import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import {
-  notificationChannels,
-  notifications,
-} from '../../db/schema/notifications.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
-import { users } from '../../db/schema/users.js';
+import { notificationChannels, notifications } from '../../db/schema/notifications.js';
 import { plannedTasks } from '../../db/schema/planned-tasks.js';
+import { users } from '../../db/schema/users.js';
 import {
+  type NotificationPlatform,
+  type WebhookContext,
   buildPayload,
   sendWebhook,
   validateWebhookTarget,
-  type NotificationPlatform,
-  type WebhookContext,
 } from '../../notifications/webhook-sender.js';
 import { tryAcquire as rateLimitTryAcquire } from '../../quota/rate-limiter.js';
 import { protectedProcedure, router } from '../trpc.js';
@@ -55,9 +52,10 @@ const NOTIFICATION_CHANNEL_TEST_RATE = {
   max: 10,
 } as const;
 
-async function requireUserId(
-  ctx: { db: typeof import('../../db/client.js').db; userId: string },
-): Promise<number> {
+async function requireUserId(ctx: {
+  db: typeof import('../../db/client.js').db;
+  userId: string;
+}): Promise<number> {
   const [row] = await ctx.db
     .select({ id: users.id })
     .from(users)
@@ -74,10 +72,7 @@ async function requireUserId(
  * object. Other platforms must NOT carry a template (we hard-code
  * their preset shape). Returns the cleaned template (or undefined).
  */
-function normaliseTemplate(
-  platform: NotificationPlatform,
-  template: unknown,
-): unknown {
+function normaliseTemplate(platform: NotificationPlatform, template: unknown): unknown {
   if (platform === 'custom') {
     if (template === undefined || template === null) {
       throw new TRPCError({
@@ -122,19 +117,13 @@ function requireNotificationRateLimit(
   });
 }
 
-async function requireSafeWebhookTarget(
-  webhookUrl: string,
-  platform: string,
-): Promise<void> {
+async function requireSafeWebhookTarget(webhookUrl: string, platform: string): Promise<void> {
   try {
     await validateWebhookTarget(webhookUrl, { platform });
   } catch (err) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
-      message:
-        err instanceof Error
-          ? err.message
-          : 'Webhook 地址未通过公网安全校验。',
+      message: err instanceof Error ? err.message : 'Webhook 地址未通过公网安全校验。',
     });
   }
 }
@@ -191,20 +180,24 @@ export const notificationsRouter = router({
         .limit(limit + 1);
       const hasMore = rows.length > limit;
       const page = rows.slice(0, limit);
-      const plannedTaskInternalIds = [...new Set(page.flatMap((row) =>
-        typeof row.plannedTaskId === 'number' ? [row.plannedTaskId] : []))];
-      const plannedTaskRows = plannedTaskInternalIds.length > 0
-        ? await ctx.db
-            .select({ id: plannedTasks.id, externalId: plannedTasks.externalId })
-            .from(plannedTasks)
-            .where(and(
-              eq(plannedTasks.userId, userId),
-              inArray(plannedTasks.id, plannedTaskInternalIds),
-            ))
-        : [];
-      const publicPlannedTaskIds = new Map(
-        plannedTaskRows.map((row) => [row.id, row.externalId]),
-      );
+      const plannedTaskInternalIds = [
+        ...new Set(
+          page.flatMap((row) => (typeof row.plannedTaskId === 'number' ? [row.plannedTaskId] : [])),
+        ),
+      ];
+      const plannedTaskRows =
+        plannedTaskInternalIds.length > 0
+          ? await ctx.db
+              .select({ id: plannedTasks.id, externalId: plannedTasks.externalId })
+              .from(plannedTasks)
+              .where(
+                and(
+                  eq(plannedTasks.userId, userId),
+                  inArray(plannedTasks.id, plannedTaskInternalIds),
+                ),
+              )
+          : [];
+      const publicPlannedTaskIds = new Map(plannedTaskRows.map((row) => [row.id, row.externalId]));
       const items = page.map((r) => ({
         notificationId: r.externalId,
         type: r.type,
@@ -213,9 +206,8 @@ export const notificationsRouter = router({
         isRead: r.isRead,
         createdAt: r.createdAt,
         scheduledTaskInternalId: r.scheduledTaskId,
-        plannedTaskId: r.plannedTaskId === null
-          ? null
-          : publicPlannedTaskIds.get(r.plannedTaskId) ?? null,
+        plannedTaskId:
+          r.plannedTaskId === null ? null : (publicPlannedTaskIds.get(r.plannedTaskId) ?? null),
       }));
       const last = page[page.length - 1];
       return {
@@ -243,10 +235,7 @@ export const notificationsRouter = router({
         .update(notifications)
         .set({ isRead: true })
         .where(
-          and(
-            eq(notifications.externalId, input.notificationId),
-            eq(notifications.userId, userId),
-          ),
+          and(eq(notifications.externalId, input.notificationId), eq(notifications.userId, userId)),
         );
       return { ok: true as const };
     }),
@@ -256,9 +245,7 @@ export const notificationsRouter = router({
     await ctx.db
       .update(notifications)
       .set({ isRead: true })
-      .where(
-        and(eq(notifications.userId, userId), eq(notifications.isRead, false)),
-      );
+      .where(and(eq(notifications.userId, userId), eq(notifications.isRead, false)));
     return { ok: true as const };
   }),
 });
@@ -500,10 +487,7 @@ export const notificationChannelsRouter = router({
           attempt: 0,
         };
       }
-      const result = await sendWebhook(
-        { platform, webhookUrl, customTemplate },
-        ctxBody,
-      );
+      const result = await sendWebhook({ platform, webhookUrl, customTemplate }, ctxBody);
       return result;
     }),
 });

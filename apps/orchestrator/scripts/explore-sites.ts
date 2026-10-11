@@ -189,7 +189,10 @@ if (browse) {
   // still bound each site. Registered ONLY on the browse path (doc-first default stays untouched).
   process.on('unhandledRejection', (reason) => {
     logger.warn(
-      { reason: reason instanceof Error ? `${reason.message}\n${reason.stack ?? ''}` : String(reason) },
+      {
+        reason:
+          reason instanceof Error ? `${reason.message}\n${reason.stack ?? ''}` : String(reason),
+      },
       'explorer CLI: unhandledRejection swallowed — batch kept alive (does not abort remaining sites)',
     );
   });
@@ -226,13 +229,20 @@ if (browse) {
           .where(eq(users.externalId, explorerUser))
           .limit(1);
         if (u) {
-          const ins = await db
-            .insert(tasks)
-            .values({ externalId: taskId, userId: u.id, intent, origin: 'explorer', status: 'running' });
+          const ins = await db.insert(tasks).values({
+            externalId: taskId,
+            userId: u.id,
+            intent,
+            origin: 'explorer',
+            status: 'running',
+          });
           taskDbId = readInsertId(ins);
           captureRepo = new TaskActionCaptureRepository(db);
         } else {
-          logger.warn({}, 'explorer: explorer user row not found → capture disabled this run (browse continues)');
+          logger.warn(
+            {},
+            'explorer: explorer user row not found → capture disabled this run (browse continues)',
+          );
         }
       } catch (e) {
         logger.warn(
@@ -305,7 +315,10 @@ if (browse) {
           }),
           hardMs,
           () => {
-            logger.warn({ hardMs }, 'explorer: per-browse HARD wall exceeded — force-aborting (dispose clean context)');
+            logger.warn(
+              { hardMs },
+              'explorer: per-browse HARD wall exceeded — force-aborting (dispose clean context)',
+            );
             void executor.disposeCleanContext().catch(() => {}); // unblock any in-flight hung op
           },
         );
@@ -405,7 +418,10 @@ if (browse) {
         .join('');
     };
     layerCVeto = makeLayerCVeto({ callModel, maxCalls, logger }).veto;
-    logger.warn({ maxCalls, model: LAYER_C_MODEL }, 'explorer: LAYER C model-fallback veto ON (login-mode)');
+    logger.warn(
+      { maxCalls, model: LAYER_C_MODEL },
+      'explorer: LAYER C model-fallback veto ON (login-mode)',
+    );
   }
   // A3 — login mode thickens the live-veto (EXTRA_RE). Off → 免登录 veto unchanged.
   const browseExplore = makeBrowseExploreSite({

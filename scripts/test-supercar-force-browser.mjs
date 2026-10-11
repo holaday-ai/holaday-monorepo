@@ -36,13 +36,19 @@ const GAP_MS = 5_000;
 // can correlate.
 const TASKS = [
   { id: 'T02', intent: '查看今天 A 股半导体板块涨跌情况，列出涨幅前5和跌幅前5的个股' },
-  { id: 'T06', intent: "帮我看看抖音上最近关于'AI 办公'话题的热门视频，列出前10个的标题、作者、点赞数" },
+  {
+    id: 'T06',
+    intent: "帮我看看抖音上最近关于'AI 办公'话题的热门视频，列出前10个的标题、作者、点赞数",
+  },
   { id: 'T08', intent: "帮我找到抖音上最近一条关于'半导体'的热门视频，把它的文案内容完整抓下来" },
   { id: 'T09', intent: '帮我比较京东和淘宝上 AirPods Pro 2 的价格，哪个更便宜，有没有优惠券' },
   { id: 'T10', intent: "在小红书上搜索'三亚旅游攻略'，帮我整理点赞最多的前5篇帖子的核心内容" },
   { id: 'T13', intent: '在 Boss 直聘上搜索上海的 AI 产品经理岗位，月薪 30k-50k，列出前10个' },
   { id: 'T14', intent: '帮我搜索一下猎聘上深圳的前端开发岗位，3年以上经验，看看薪资范围' },
-  { id: 'T17', intent: '帮我在携程上搜索下周末上海的五星级酒店，价格在800-1500之间，按评分排序列出前5' },
+  {
+    id: 'T17',
+    intent: '帮我在携程上搜索下周末上海的五星级酒店，价格在800-1500之间，按评分排序列出前5',
+  },
 ];
 
 const FORCE_BROWSER_SUFFIX =
@@ -146,11 +152,7 @@ async function runOne(token, task, index, total) {
     }
   }
   const duration = Date.now() - started;
-  const summary =
-    detail?.result?.summary ??
-    detail?.result?.reason ??
-    detail?.errorMessage ??
-    '';
+  const summary = detail?.result?.summary ?? detail?.result?.reason ?? detail?.errorMessage ?? '';
   const toolsSet = new Set();
   const steps = detail?.steps ?? [];
   for (const s of steps) {
@@ -163,7 +165,10 @@ async function runOne(token, task, index, total) {
   const usedWebSearch = toolsSet.has('web_search');
   const usedComputer = toolsSet.has('computer');
   let pathLabel;
-  if (!detail || (detail.status !== 'completed' && detail.status !== 'failed' && detail.status !== 'cancelled')) {
+  if (
+    !detail ||
+    (detail.status !== 'completed' && detail.status !== 'failed' && detail.status !== 'cancelled')
+  ) {
     pathLabel = 'timeout';
   } else if (detail.status === 'failed' || detail.status === 'cancelled') {
     pathLabel = detail.status;
@@ -191,7 +196,9 @@ async function runOne(token, task, index, total) {
     errorCode: detail?.errorCode ?? null,
   };
   fs.appendFileSync(JSONL_PATH, JSON.stringify(row) + '\n');
-  log(`       done status=${row.status} path=${row.path} iter=${row.iterations} ${Math.round(duration / 1000)}s`);
+  log(
+    `       done status=${row.status} path=${row.path} iter=${row.iterations} ${Math.round(duration / 1000)}s`,
+  );
   return row;
 }
 
@@ -217,11 +224,19 @@ function renderReport(rows) {
   }
   lines.push('');
 
-  const browserOnly = rows.filter((r) => r.status === 'completed' && r.usedComputer && !r.usedWebSearch).length;
-  const mixed = rows.filter((r) => r.status === 'completed' && r.usedComputer && r.usedWebSearch).length;
-  const cheated = rows.filter((r) => r.status === 'completed' && !r.usedComputer && r.usedWebSearch).length;
+  const browserOnly = rows.filter(
+    (r) => r.status === 'completed' && r.usedComputer && !r.usedWebSearch,
+  ).length;
+  const mixed = rows.filter(
+    (r) => r.status === 'completed' && r.usedComputer && r.usedWebSearch,
+  ).length;
+  const cheated = rows.filter(
+    (r) => r.status === 'completed' && !r.usedComputer && r.usedWebSearch,
+  ).length;
   const failed = rows.filter((r) => r.status === 'failed' || r.status === 'cancelled').length;
-  const timedOut = rows.filter((r) => !['completed', 'failed', 'cancelled'].includes(r.status)).length;
+  const timedOut = rows.filter(
+    (r) => !['completed', 'failed', 'cancelled'].includes(r.status),
+  ).length;
 
   lines.push('## Stats');
   lines.push('');

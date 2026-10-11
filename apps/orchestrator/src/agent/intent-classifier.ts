@@ -107,7 +107,10 @@ const TRAVEL_STOP_BEFORE_COMMIT_PATTERN =
   /(?:机票|航班|酒店|民宿|房间|车票|火车票|路线|行程|导航).{0,40}(?:不要|别|勿|先别|暂时不|不需要).{0,8}(?:下单|预订|预定|购买|付款|支付|订购|导航|出发)/i;
 
 const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
-  [/(?:打开|访问|进入|前往|跳转到).{0,32}(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24}|网站|网页|页面|链接|后台|app|平台|京东|淘宝|天猫|拼多多|小红书|微博|知乎|抖音|b站|bilibili|github|linkedin|amazon|gmail)/i, '中文打开页面'],
+  [
+    /(?:打开|访问|进入|前往|跳转到).{0,32}(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24}|网站|网页|页面|链接|后台|app|平台|京东|淘宝|天猫|拼多多|小红书|微博|知乎|抖音|b站|bilibili|github|linkedin|amazon|gmail)/i,
+    '中文打开页面',
+  ],
   // Navigation verb (incl. 去) + a site-like token or an online calculator/
   // tool → drive a live page. Catches bare tool names whose suffix is NOT a
   // valid TLD (e.g. "web2.0calc" — ".0calc" starts with a digit, so the
@@ -116,7 +119,10 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   // / example.com), so bare decimals ("128.0") and dot-less words can't match.
   // Routed BEFORE scrape/generate so "打开 web2.0calc 算… 给证据" reaches the
   // browser lane instead of stalling in generate. (T6 P1, 2026-06-10.)
-  [/(?:打开|访问|进入|前往|跳转到|去)\s*(?:https?:\/\/|www\.|[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+|(?:网页|在线)?计算器|在线工具)/i, '中文打开站点或在线工具'],
+  [
+    /(?:打开|访问|进入|前往|跳转到|去)\s*(?:https?:\/\/|www\.|[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+|(?:网页|在线)?计算器|在线工具)/i,
+    '中文打开站点或在线工具',
+  ],
   // Named-site EXECUTION (Web-Agent roadmap Step 1, 2026-06-11): a nav/use
   // verb + a concrete interactive site (maps / ecommerce / ratings) + an
   // execution verb or object (查/搜/路线/价格/评分/…) → drive the live site.
@@ -125,46 +131,154 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   // (百度地图路线 via kan3721.com). The leading negative lookahead keeps
   // topic/analysis phrasing (是什么/商业模式/分析/策略/介绍/…) OUT of the
   // browser lane — those stay generate via the non-execution topic guard.
-  [/^(?!.*(?:是什么|什么是|介绍|历史|商业模式|营销|策略|分析|报告|教程|案例|框架|趋势|运营|优缺点))(?=.*(?:用|使用|打开|访问|进入|前往|去|上)\s*(?:百度地图|高德地图|高德|腾讯地图|京东|淘宝|天猫|拼多多|豆瓣|大众点评))(?=.*(?:查|搜索|搜|找|看看|看一下|比较|对比|路线|导航|价格|多少钱|评分|评价|排名|提取)).+/i, '指名站点执行'],
-  [/(?:点击|点开|按下|选择).{0,24}(?:按钮|链接|菜单|选项|标签|tab|继续|下一步|提交|登录|确认|购买|支付|下载|这个|这|该|它)/i, '中文点击控件'],
-  [/(?:提交|填写|填表|填入|输入).{0,24}(?:表单|申请|订单|资料|信息|姓名|邮箱|地址|验证码|问卷|报名|简历|这个|这|该)/i, '中文表单操作'],
-  [/(?:下载(?![量率])|保存).{0,24}(?:文件|图片|截图|报告|附件|pdf|csv|xlsx|表格|资料|这个|这|该)/i, '中文下载文件'],
+  [
+    /^(?!.*(?:是什么|什么是|介绍|历史|商业模式|营销|策略|分析|报告|教程|案例|框架|趋势|运营|优缺点))(?=.*(?:用|使用|打开|访问|进入|前往|去|上)\s*(?:百度地图|高德地图|高德|腾讯地图|京东|淘宝|天猫|拼多多|豆瓣|大众点评))(?=.*(?:查|搜索|搜|找|看看|看一下|比较|对比|路线|导航|价格|多少钱|评分|评价|排名|提取)).+/i,
+    '指名站点执行',
+  ],
+  [
+    /(?:点击|点开|按下|选择).{0,24}(?:按钮|链接|菜单|选项|标签|tab|继续|下一步|提交|登录|确认|购买|支付|下载|这个|这|该|它)/i,
+    '中文点击控件',
+  ],
+  [
+    /(?:提交|填写|填表|填入|输入).{0,24}(?:表单|申请|订单|资料|信息|姓名|邮箱|地址|验证码|问卷|报名|简历|这个|这|该)/i,
+    '中文表单操作',
+  ],
+  [
+    /(?:下载(?![量率])|保存).{0,24}(?:文件|图片|截图|报告|附件|pdf|csv|xlsx|表格|资料|这个|这|该)/i,
+    '中文下载文件',
+  ],
   [/(?:操作).{0,24}(?:网页|页面|网站|后台|这个|这|该)/i, '中文页面操作'],
-  [/(?:登录|登陆|登入)(?!页|率|流程|体验|文案|策略).{0,24}(?:账号|账户|后台|网站|平台|app|系统|淘宝|天猫|京东|拼多多|小红书|微博|知乎|抖音|b站|bilibili|github|linkedin|amazon|gmail|我的|这个|该)/i, '中文登录账号'],
-  [/(?:帮我|给我|替我|为我)?下单(?!率).{0,24}(?:订单|商品|外卖|咖啡|奶茶|餐|票|这个|这|该|它|杯|份|个|件)/i, '中文下单'],
+  [
+    /(?:登录|登陆|登入)(?!页|率|流程|体验|文案|策略).{0,24}(?:账号|账户|后台|网站|平台|app|系统|淘宝|天猫|京东|拼多多|小红书|微博|知乎|抖音|b站|bilibili|github|linkedin|amazon|gmail|我的|这个|该)/i,
+    '中文登录账号',
+  ],
+  [
+    /(?:帮我|给我|替我|为我)?下单(?!率).{0,24}(?:订单|商品|外卖|咖啡|奶茶|餐|票|这个|这|该|它|杯|份|个|件)/i,
+    '中文下单',
+  ],
   [/(?:抓取(?!率).{0,24}(?:页面|网页|网站|数据|表格|列表|这个|这|该|链接|内容))/i, '中文抓取页面'],
-  [/(?:(?:截图|截屏)(?!率).{0,24}(?:页面|网页|网站|屏幕|结果|证据|这个|这|该)|(?:给|帮我给|帮我|为).{0,16}(?:页面|网页|网站|这个|这|该).{0,12}(?:截图|截屏))/i, '中文截图页面'],
-  [/(?:取消订阅(?!率).{0,24}(?:服务|邮件|会员|这个|这|该|它|账号|账户)|(?:点击|点).{0,12}取消订阅(?:按钮|链接)?)/i, '中文取消订阅'],
-  [/(?:帮我|给我|替我|为我)?比价(?!率|策略|框架|方案|分析|报告|系统).{0,32}(?:商品|价格|平台|京东|淘宝|天猫|拼多多|amazon|航班|酒店|机票|bose|iphone|手机|耳机|电脑|相机|型号|这个|这|该|[a-z0-9][a-z0-9 -]{1,})/i, '中文比价执行'],
-  [/\b(?:log\s+in|sign\s+in)(?!\s+(?:page|rate|flow|experience|copy|strategy))\s+(?:to|into|on)?\s*(?:my\s+|the\s+)?(?:account|dashboard|website|site|app|gmail|amazon|github|linkedin|reddit|youtube|instagram|tiktok|twitter|x\.com)\b/i, 'login to site'],
-  [/\b(?:log|sign)\s+into\s+(?:my\s+|the\s+)?(?:account|dashboard|website|site|app|gmail|amazon|github|linkedin|reddit|youtube|instagram|tiktok|twitter|x\.com)\b/i, 'login to site'],
-  [/\bsign\s+up\s+for\s+(?:this\s+)?(?:event|webinar|class|course|workshop|conference|account|trial|newsletter)\b/i, 'sign up for service'],
-  [/\bsend\s+(?:an?\s+|this\s+)?(?:email|message|dm|direct message)(?!\s+(?:open rate|click rate|conversion|copy|strategy|analysis|report))\b/i, 'send message'],
-  [/\b(?:open|visit|go to)\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24}|(?:the\s+)?(?:website|webpage|page|link|dashboard|app|site)|(?:amazon|github|linkedin|gmail|reddit|youtube|instagram|tiktok|twitter|x\.com))\b/i, 'open page'],
-  [/\b(?:open|visit|go to)\s+(?:the\s+)?(?:amazon|github|linkedin|gmail|reddit|youtube|instagram|tiktok|twitter|x\.com)(?:\s+(?:product|profile|page|site|listing|dashboard|app))*\b/i, 'open platform page'],
-  [/\bnavigate\s+to\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24}|(?:the\s+)?(?:website|webpage|page|link|dashboard|app|site)|(?:amazon|github|linkedin|gmail|reddit|youtube|instagram|tiktok|twitter|x\.com))\b/i, 'navigate to page'],
-  [/\bclick\s+(?:the\s+|this\s+|that\s+)?(?:button|link|menu|tab|option|submit|continue|next|login|sign in|confirm|buy|pay|download)\b/i, 'click control'],
-  [/\bsubmit\s+(?:the\s+|this\s+|that\s+)?(?:form|application|order|request|signup|registration|survey|resume|cv)\b/i, 'submit form'],
-  [/\bfill\s+(?:in|out)\s+(?:the\s+|this\s+|that\s+)?(?:form|application|survey|signup|registration|questionnaire|field|input|profile|address|email|name|resume|cv)\b/i, 'fill form'],
-  [/\b(?:use|open|visit|go\s+to)\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24})\s+(?:to|and)\s+(?:calculate|compute|solve|evaluate)\b/i, 'use website calculator'],
-  [/\b(?:use|open|visit|go\s+to)\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24})\s+(?:to|and)\s+(?:create|edit|update|save|add|upload|generate|make|publish|schedule|fill\s+out)\b/i, 'use website app'],
-  [/\b(?:in|on)\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24})\s*,?\s+(?:create|edit|update|save|add|upload|generate|make|publish|schedule|fill\s+out)\b/i, 'domain-first app workflow'],
-  [/\b(?:create|edit|update|save|add|upload|generate|make|publish|schedule|fill\s+out)\s+.{0,80}\b(?:draft|row|design|post|blog\s+post|image|page|profile|logo|poster|form|campaign|automation|document|record|task|issue|ticket|note|landing\s+page)\b.{0,40}\s+(?:in|on|to)\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24})\b/i, 'action-first domain app workflow'],
-  [/\bdownload\s+(?:the\s+|this\s+|that\s+)?(?:file|image|screenshot|report|attachment|pdf|csv|xlsx|spreadsheet|document)\b/i, 'download file'],
-  [/(?!.*(?:订票(?:转化率|率|策略|框架|方案|分析|报告|系统)|订机票(?:转化率|率|策略|框架|方案|分析|报告|系统)|订酒店(?:转化率|率|策略|框架|方案|分析|报告|系统)|订餐(?:率|策略|框架|方案|分析|报告|系统)|预订(?:率|策略|框架|方案|分析|报告|系统)|预定(?:率|策略|框架|方案|分析|报告|系统)))(?<!制)(?:帮我|给我|替我|为我|在|到|去|用|通过)?(?:携程|去哪儿|飞猪|美团|大众点评|booking|airbnb)?(?:预订|预定|订票|订机票|订酒店|订餐|订|定)(?!率|策略|框架|方案|分析|报告|系统|页面).{0,24}(?:机票|航班|酒店|房间|民宿|餐厅|座位|车票|火车票|门票|票|会议室|今晚|明晚|今天|明天|后天|周[一二三四五六日天]|下周)/i, '中文预订服务'],
-  [/(?<!制)(?:帮我|给我|替我|为我|在|到|去|用|通过)?(?:医院|平台|app|系统)?(?:预约|挂号)(?!率|流程|体验|文案|策略|分析|报告|系统).{0,24}(?:医生|牙医|门诊|科|服务|面试|会议|咨询|体检|维修|上门|时间|今天|明天|后天|周[一二三四五六日天]|下周)/i, '中文预约服务'],
-  [/(?:帮我|给我|替我|为我)?报名.{0,24}(?:活动|课程|会议|讲座|班|workshop|webinar|conference)/i, '中文报名活动'],
+  [
+    /(?:(?:截图|截屏)(?!率).{0,24}(?:页面|网页|网站|屏幕|结果|证据|这个|这|该)|(?:给|帮我给|帮我|为).{0,16}(?:页面|网页|网站|这个|这|该).{0,12}(?:截图|截屏))/i,
+    '中文截图页面',
+  ],
+  [
+    /(?:取消订阅(?!率).{0,24}(?:服务|邮件|会员|这个|这|该|它|账号|账户)|(?:点击|点).{0,12}取消订阅(?:按钮|链接)?)/i,
+    '中文取消订阅',
+  ],
+  [
+    /(?:帮我|给我|替我|为我)?比价(?!率|策略|框架|方案|分析|报告|系统).{0,32}(?:商品|价格|平台|京东|淘宝|天猫|拼多多|amazon|航班|酒店|机票|bose|iphone|手机|耳机|电脑|相机|型号|这个|这|该|[a-z0-9][a-z0-9 -]{1,})/i,
+    '中文比价执行',
+  ],
+  [
+    /\b(?:log\s+in|sign\s+in)(?!\s+(?:page|rate|flow|experience|copy|strategy))\s+(?:to|into|on)?\s*(?:my\s+|the\s+)?(?:account|dashboard|website|site|app|gmail|amazon|github|linkedin|reddit|youtube|instagram|tiktok|twitter|x\.com)\b/i,
+    'login to site',
+  ],
+  [
+    /\b(?:log|sign)\s+into\s+(?:my\s+|the\s+)?(?:account|dashboard|website|site|app|gmail|amazon|github|linkedin|reddit|youtube|instagram|tiktok|twitter|x\.com)\b/i,
+    'login to site',
+  ],
+  [
+    /\bsign\s+up\s+for\s+(?:this\s+)?(?:event|webinar|class|course|workshop|conference|account|trial|newsletter)\b/i,
+    'sign up for service',
+  ],
+  [
+    /\bsend\s+(?:an?\s+|this\s+)?(?:email|message|dm|direct message)(?!\s+(?:open rate|click rate|conversion|copy|strategy|analysis|report))\b/i,
+    'send message',
+  ],
+  [
+    /\b(?:open|visit|go to)\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24}|(?:the\s+)?(?:website|webpage|page|link|dashboard|app|site)|(?:amazon|github|linkedin|gmail|reddit|youtube|instagram|tiktok|twitter|x\.com))\b/i,
+    'open page',
+  ],
+  [
+    /\b(?:open|visit|go to)\s+(?:the\s+)?(?:amazon|github|linkedin|gmail|reddit|youtube|instagram|tiktok|twitter|x\.com)(?:\s+(?:product|profile|page|site|listing|dashboard|app))*\b/i,
+    'open platform page',
+  ],
+  [
+    /\bnavigate\s+to\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24}|(?:the\s+)?(?:website|webpage|page|link|dashboard|app|site)|(?:amazon|github|linkedin|gmail|reddit|youtube|instagram|tiktok|twitter|x\.com))\b/i,
+    'navigate to page',
+  ],
+  [
+    /\bclick\s+(?:the\s+|this\s+|that\s+)?(?:button|link|menu|tab|option|submit|continue|next|login|sign in|confirm|buy|pay|download)\b/i,
+    'click control',
+  ],
+  [
+    /\bsubmit\s+(?:the\s+|this\s+|that\s+)?(?:form|application|order|request|signup|registration|survey|resume|cv)\b/i,
+    'submit form',
+  ],
+  [
+    /\bfill\s+(?:in|out)\s+(?:the\s+|this\s+|that\s+)?(?:form|application|survey|signup|registration|questionnaire|field|input|profile|address|email|name|resume|cv)\b/i,
+    'fill form',
+  ],
+  [
+    /\b(?:use|open|visit|go\s+to)\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24})\s+(?:to|and)\s+(?:calculate|compute|solve|evaluate)\b/i,
+    'use website calculator',
+  ],
+  [
+    /\b(?:use|open|visit|go\s+to)\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24})\s+(?:to|and)\s+(?:create|edit|update|save|add|upload|generate|make|publish|schedule|fill\s+out)\b/i,
+    'use website app',
+  ],
+  [
+    /\b(?:in|on)\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24})\s*,?\s+(?:create|edit|update|save|add|upload|generate|make|publish|schedule|fill\s+out)\b/i,
+    'domain-first app workflow',
+  ],
+  [
+    /\b(?:create|edit|update|save|add|upload|generate|make|publish|schedule|fill\s+out)\s+.{0,80}\b(?:draft|row|design|post|blog\s+post|image|page|profile|logo|poster|form|campaign|automation|document|record|task|issue|ticket|note|landing\s+page)\b.{0,40}\s+(?:in|on|to)\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24})\b/i,
+    'action-first domain app workflow',
+  ],
+  [
+    /\bdownload\s+(?:the\s+|this\s+|that\s+)?(?:file|image|screenshot|report|attachment|pdf|csv|xlsx|spreadsheet|document)\b/i,
+    'download file',
+  ],
+  [
+    /(?!.*(?:订票(?:转化率|率|策略|框架|方案|分析|报告|系统)|订机票(?:转化率|率|策略|框架|方案|分析|报告|系统)|订酒店(?:转化率|率|策略|框架|方案|分析|报告|系统)|订餐(?:率|策略|框架|方案|分析|报告|系统)|预订(?:率|策略|框架|方案|分析|报告|系统)|预定(?:率|策略|框架|方案|分析|报告|系统)))(?<!制)(?:帮我|给我|替我|为我|在|到|去|用|通过)?(?:携程|去哪儿|飞猪|美团|大众点评|booking|airbnb)?(?:预订|预定|订票|订机票|订酒店|订餐|订|定)(?!率|策略|框架|方案|分析|报告|系统|页面).{0,24}(?:机票|航班|酒店|房间|民宿|餐厅|座位|车票|火车票|门票|票|会议室|今晚|明晚|今天|明天|后天|周[一二三四五六日天]|下周)/i,
+    '中文预订服务',
+  ],
+  [
+    /(?<!制)(?:帮我|给我|替我|为我|在|到|去|用|通过)?(?:医院|平台|app|系统)?(?:预约|挂号)(?!率|流程|体验|文案|策略|分析|报告|系统).{0,24}(?:医生|牙医|门诊|科|服务|面试|会议|咨询|体检|维修|上门|时间|今天|明天|后天|周[一二三四五六日天]|下周)/i,
+    '中文预约服务',
+  ],
+  [
+    /(?:帮我|给我|替我|为我)?报名.{0,24}(?:活动|课程|会议|讲座|班|workshop|webinar|conference)/i,
+    '中文报名活动',
+  ],
   [/(?:帮我|给我|替我|为我)?投递.{0,24}(?:简历|岗位|职位|工作|job|role|position)/i, '中文投递职位'],
-  [/(?:在|用|通过|打开|访问|进入|前往).{0,40}(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24}).{0,48}(?:计算|算一下|求值)(?!率|策略|分析|报告|模板)/i, '中文网站计算操作'],
-  [/(?:在|用|通过|打开|访问|进入|前往).{0,40}(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24}).{0,64}(?:创建|新建|编辑|更新|保存|添加|上传|生成|制作|发布|安排|预约|填写).{0,48}(?:草稿|海报|自动化|邮件|campaign|页面|landing page|表单|文档|项目|任务|帖子|图片|设计|邀请|日程|备注|工单|联系人|记录)/i, '中文域名应用操作'],
-  [/(?:帮我|给我|替我|为我)?(?:发|发送|回复).{0,24}(?:邮件|消息|私信|短信|微信|email|gmail)(?!打开率|点击率|转化|文案|策略|分析|报告)/i, '中文发送消息'],
-  [/(?:帮我|给我|替我|为我)?(?:把|将)?.{0,24}(?:加购|放进|加入|添加)(?!率|策略|分析|报告|方案).{0,24}(?:购物车|cart|这个|这|该|它|商品)/i, '中文加入购物车'],
-  [/(?:帮我|给我|替我|为我)?(?:去)?(?:结账|结算)(?!页|率|流程|体验|策略|分析|报告|方案).{0,24}(?:订单|商品|购物车|这个|它)/i, '中文结算'],
-  [/(?:帮我|给我|替我|为我|去)(?:付款|支付)|(?:付款|支付).{0,16}(?:订单|商品|费用|尾款|这个|它)/i, '中文支付'],
-  [/(?:在|到|去)(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit|instagram|facebook|threads).{0,24}(?:发帖|评论|点赞|关注|发布)/i, '中文社交平台操作'],
-  [/(?:发帖|评论|点赞|关注).{0,18}(?:这|该|那个|账号|帖子|笔记|视频|微博|动态|文章|post|tweet)/i, '中文社交对象操作'],
+  [
+    /(?:在|用|通过|打开|访问|进入|前往).{0,40}(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24}).{0,48}(?:计算|算一下|求值)(?!率|策略|分析|报告|模板)/i,
+    '中文网站计算操作',
+  ],
+  [
+    /(?:在|用|通过|打开|访问|进入|前往).{0,40}(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24}).{0,64}(?:创建|新建|编辑|更新|保存|添加|上传|生成|制作|发布|安排|预约|填写).{0,48}(?:草稿|海报|自动化|邮件|campaign|页面|landing page|表单|文档|项目|任务|帖子|图片|设计|邀请|日程|备注|工单|联系人|记录)/i,
+    '中文域名应用操作',
+  ],
+  [
+    /(?:帮我|给我|替我|为我)?(?:发|发送|回复).{0,24}(?:邮件|消息|私信|短信|微信|email|gmail)(?!打开率|点击率|转化|文案|策略|分析|报告)/i,
+    '中文发送消息',
+  ],
+  [
+    /(?:帮我|给我|替我|为我)?(?:把|将)?.{0,24}(?:加购|放进|加入|添加)(?!率|策略|分析|报告|方案).{0,24}(?:购物车|cart|这个|这|该|它|商品)/i,
+    '中文加入购物车',
+  ],
+  [
+    /(?:帮我|给我|替我|为我)?(?:去)?(?:结账|结算)(?!页|率|流程|体验|策略|分析|报告|方案).{0,24}(?:订单|商品|购物车|这个|它)/i,
+    '中文结算',
+  ],
+  [
+    /(?:帮我|给我|替我|为我|去)(?:付款|支付)|(?:付款|支付).{0,16}(?:订单|商品|费用|尾款|这个|它)/i,
+    '中文支付',
+  ],
+  [
+    /(?:在|到|去)(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit|instagram|facebook|threads).{0,24}(?:发帖|评论|点赞|关注|发布)/i,
+    '中文社交平台操作',
+  ],
+  [
+    /(?:发帖|评论|点赞|关注).{0,18}(?:这|该|那个|账号|帖子|笔记|视频|微博|动态|文章|post|tweet)/i,
+    '中文社交对象操作',
+  ],
   [/(?:给|帮我给|替我给|为).{0,24}(?:评论|点赞|关注)/i, '中文社交互动'],
-  [/(?:在|到|去|用|通过).{0,24}(?:携程|去哪儿|飞猪|google flights|airbnb|booking|linkedin).{0,72}(?:筛选|排序|选择|勾选|切换|设置|保存筛选|保存条件|收藏|付款前|支付前|确认前|提交前|停在)/i, '中文站内筛选保存'],
+  [
+    /(?:在|到|去|用|通过).{0,24}(?:携程|去哪儿|飞猪|google flights|airbnb|booking|linkedin).{0,72}(?:筛选|排序|选择|勾选|切换|设置|保存筛选|保存条件|收藏|付款前|支付前|确认前|提交前|停在)/i,
+    '中文站内筛选保存',
+  ],
   // Google Flights / Hotels / Maps and equivalent live travel apps are
   // interactive itinerary tools, NOT scrape-able article pages — the
   // value of an execution agent here is to actually drive the page.
@@ -172,8 +286,14 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   // 导航/查/搜/筛选/...) routes to browser. A travel OBJECT is required,
   // so pure topic phrasing ("Google Maps 营销策略", "什么是 Google
   // Flights") carries no object and falls through to generate.
-  [/google\s*(?:flights?|hotels?|maps|travel)\b.{0,48}(?:航班|机票|酒店|民宿|住宿|房间|路线|导航|出发|到达|往返|单程|入住|直飞|查|搜|筛选|排序|预订|预定|查询|查找|查看|比价|flight|hotel|route|directions|search|find|filter|sort|book|nonstop)/i, 'google travel app'],
-  [/(?:航班|机票|酒店|民宿|路线|导航|直飞).{0,48}google\s*(?:flights?|hotels?|maps|travel)\b/i, 'travel object then google app'],
+  [
+    /google\s*(?:flights?|hotels?|maps|travel)\b.{0,48}(?:航班|机票|酒店|民宿|住宿|房间|路线|导航|出发|到达|往返|单程|入住|直飞|查|搜|筛选|排序|预订|预定|查询|查找|查看|比价|flight|hotel|route|directions|search|find|filter|sort|book|nonstop)/i,
+    'google travel app',
+  ],
+  [
+    /(?:航班|机票|酒店|民宿|路线|导航|直飞).{0,48}google\s*(?:flights?|hotels?|maps|travel)\b/i,
+    'travel object then google app',
+  ],
   // Travel search/booking that explicitly asks to STOP before the
   // commit ("查…航班…不要下单", "筛选酒店…不要预订", "查路线…不开始
   // 导航"). A stop-before-commit instruction is unambiguous live
@@ -187,44 +307,131 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   // browser. A leading negative lookahead drops topic/strategy phrasing
   // (策略/分析/报告/营销/转化率/商业模式/产品体验/…), which the
   // NON_EXECUTION topic guard then sends to generate.
-  [/^(?!.*(?:策略|分析|报告|模板|方案|转化率|商业模式|体验报告|产品体验|营销|规范|优化方案|教程|案例|框架|趋势|运营|拆解|复盘))(?=.*(?:携程|飞猪|去哪儿|去哪网|同程|美团))(?=.*(?:机票|航班|酒店|民宿|住宿|火车票|车票|门票|路线|直飞|筛选|排序|星级|入住|出发|往返|单程|预订前|不要下单|不要预订|价格|查机票|查航班|查酒店|查询|查一下|查看|搜)).+/i, '中文OTA出行执行'],
-  [/(?:在|用|通过).{0,24}(?:gmail|slack|linkedin|notion|飞书|github|google docs|google forms|google sheets|google slides|google calendar|google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?).{0,64}(?:写|撰写|起草|创建|新建|编辑|更新|查找|搜索|下载|上传|导出|分享|移动|重命名|复制链接|安排|预约|添加|保存|回复).{0,48}(?:草稿|邮件|消息|页面|文档|会议纪要|计划|报名表|表单|帖子|表格|演示文稿|幻灯片|会议|日程|邀请|联系人|客户|备注|付款|收据|文件|附件|pdf|csv|xlsx|链接|权限|文件夹|看板|任务|bug|issue|pull request|pr|折扣码|工单|回复|用户|项目|订单|商品|库存)/i, '中文应用草稿操作'],
-  [/(?:打开|进入|访问|前往).{0,24}(?:google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?).{0,64}(?:写|撰写|起草|创建|新建|编辑|更新|查找|搜索|下载|上传|导出|分享|移动|重命名|复制链接|安排|预约|添加|保存|回复).{0,48}(?:草稿|联系人|客户|备注|付款|收据|文件|附件|pdf|csv|xlsx|链接|权限|文件夹|看板|任务|bug|issue|折扣码|工单|回复|用户|项目|订单|商品|库存)/i, '中文打开应用后操作'],
-  [/(?:上传|下载|导出|分享|移动|重命名|复制链接|改权限|授权).{0,48}(?:文件|附件|pdf|csv|xlsx|表格|资料|文档|图片|链接|权限|这个|这|该).{0,48}(?:google drive|dropbox|onedrive|icloud drive)/i, '中文云盘对象操作'],
-  [/(?:把|将).{0,24}(?:文件|附件|文档|pdf|这个|这|该).{0,32}(?:上传|下载|导出|分享|移动|重命名|复制链接|改成|设为|设置为|共享为).{0,48}(?:google drive|dropbox|onedrive|icloud drive|任何有链接|可查看|可编辑|权限)/i, '中文文件权限操作'],
-  [/(?:上传|下载|导出|分享|移动|重命名|复制链接|改权限|授权).{0,32}(?:文件|附件|pdf|csv|xlsx|表格|资料|文档|图片|链接|权限|这个|这|该)(?!.*(?:策略|模板|方案|分析|报告))/i, '中文文件执行操作'],
+  [
+    /^(?!.*(?:策略|分析|报告|模板|方案|转化率|商业模式|体验报告|产品体验|营销|规范|优化方案|教程|案例|框架|趋势|运营|拆解|复盘))(?=.*(?:携程|飞猪|去哪儿|去哪网|同程|美团))(?=.*(?:机票|航班|酒店|民宿|住宿|火车票|车票|门票|路线|直飞|筛选|排序|星级|入住|出发|往返|单程|预订前|不要下单|不要预订|价格|查机票|查航班|查酒店|查询|查一下|查看|搜)).+/i,
+    '中文OTA出行执行',
+  ],
+  [
+    /(?:在|用|通过).{0,24}(?:gmail|slack|linkedin|notion|飞书|github|google docs|google forms|google sheets|google slides|google calendar|google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?).{0,64}(?:写|撰写|起草|创建|新建|编辑|更新|查找|搜索|下载|上传|导出|分享|移动|重命名|复制链接|安排|预约|添加|保存|回复).{0,48}(?:草稿|邮件|消息|页面|文档|会议纪要|计划|报名表|表单|帖子|表格|演示文稿|幻灯片|会议|日程|邀请|联系人|客户|备注|付款|收据|文件|附件|pdf|csv|xlsx|链接|权限|文件夹|看板|任务|bug|issue|pull request|pr|折扣码|工单|回复|用户|项目|订单|商品|库存)/i,
+    '中文应用草稿操作',
+  ],
+  [
+    /(?:打开|进入|访问|前往).{0,24}(?:google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?).{0,64}(?:写|撰写|起草|创建|新建|编辑|更新|查找|搜索|下载|上传|导出|分享|移动|重命名|复制链接|安排|预约|添加|保存|回复).{0,48}(?:草稿|联系人|客户|备注|付款|收据|文件|附件|pdf|csv|xlsx|链接|权限|文件夹|看板|任务|bug|issue|折扣码|工单|回复|用户|项目|订单|商品|库存)/i,
+    '中文打开应用后操作',
+  ],
+  [
+    /(?:上传|下载|导出|分享|移动|重命名|复制链接|改权限|授权).{0,48}(?:文件|附件|pdf|csv|xlsx|表格|资料|文档|图片|链接|权限|这个|这|该).{0,48}(?:google drive|dropbox|onedrive|icloud drive)/i,
+    '中文云盘对象操作',
+  ],
+  [
+    /(?:把|将).{0,24}(?:文件|附件|文档|pdf|这个|这|该).{0,32}(?:上传|下载|导出|分享|移动|重命名|复制链接|改成|设为|设置为|共享为).{0,48}(?:google drive|dropbox|onedrive|icloud drive|任何有链接|可查看|可编辑|权限)/i,
+    '中文文件权限操作',
+  ],
+  [
+    /(?:上传|下载|导出|分享|移动|重命名|复制链接|改权限|授权).{0,32}(?:文件|附件|pdf|csv|xlsx|表格|资料|文档|图片|链接|权限|这个|这|该)(?!.*(?:策略|模板|方案|分析|报告))/i,
+    '中文文件执行操作',
+  ],
   // Match upload destinations only after quoted and instructional upload
   // topics have been neutralized; compound delivery requests stay actionable.
   [/上传(?:到|至)\s*\S|把.{0,24}传(?:到|至)\s*\S/, '中文上传到目标'],
-  [/(?:创建|新建|添加|更新|编辑|回复|下载|上传|导出|查找|退款|安排|预约).{0,48}(?:github\s*issue|asana\s*任务|trello\s*卡片|zendesk\s*工单|hubspot\s*联系人|salesforce\s*客户|stripe\s*(?:付款|收据|发票)|google\s*doc|google\s*文档|notion\s*页面|airtable\s*(?:行|记录)|figma\s*设计|cloudinary\s*图片|buffer\s*帖子|mailchimp\s*campaign|shopify\s*折扣码|日历|日程|会议邀请|日程邀请)/i, '中文对象式 SaaS 操作'],
-  [/(?:在|到).{0,8}(?:日历|calendar).{0,32}(?:添加|安排|创建|新建).{0,32}(?:会议|日程|邀请|event|meeting)/i, '中文日历对象操作'],
-  [/(?:回复|处理|更新).{0,24}(?:工单|ticket)(?!.*(?:模板|策略|方案|分析|报告))/i, '中文工单执行操作'],
-  [/\bbook\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:flight|ticket|hotel|room|table|restaurant|appointment|ride|car|train|bus)\b/i, 'book service'],
-  [/\breserve\s+(?:a\s+|an\s+|the\s+)?(?:table|room|seat|ticket|hotel|restaurant|car)\b/i, 'reserve service'],
-  [/\bmake\s+a\s+reservation\s+(?:for|at|with)\s+(?:a\s+|an\s+|the\s+|this\s+)?(?:restaurant|table|hotel|room|flight|ticket|car|service|dinner|lunch|brunch)\b/i, 'make reservation'],
-  [/\bschedule\s+(?:a\s+|an\s+|the\s+)?(?:appointment|meeting|call|visit|consultation|interview)\b/i, 'schedule appointment'],
-  [/\bschedule\s+.{1,60}\s+(?:appointment|meeting|call|visit|consultation|interview)\b/i, 'schedule appointment'],
-  [/\b(?:make|set\s+up)\s+(?:a\s+|an\s+)?(?:appointment|reservation|meeting|call)(?!\s+(?:strategy|analysis|report|framework|copy|conversion|rate))\b/i, 'make appointment'],
-  [/\bregister\s+for\s+(?:this\s+)?(?:event|webinar|class|course|workshop|conference)\b/i, 'register for event'],
+  [
+    /(?:创建|新建|添加|更新|编辑|回复|下载|上传|导出|查找|退款|安排|预约).{0,48}(?:github\s*issue|asana\s*任务|trello\s*卡片|zendesk\s*工单|hubspot\s*联系人|salesforce\s*客户|stripe\s*(?:付款|收据|发票)|google\s*doc|google\s*文档|notion\s*页面|airtable\s*(?:行|记录)|figma\s*设计|cloudinary\s*图片|buffer\s*帖子|mailchimp\s*campaign|shopify\s*折扣码|日历|日程|会议邀请|日程邀请)/i,
+    '中文对象式 SaaS 操作',
+  ],
+  [
+    /(?:在|到).{0,8}(?:日历|calendar).{0,32}(?:添加|安排|创建|新建).{0,32}(?:会议|日程|邀请|event|meeting)/i,
+    '中文日历对象操作',
+  ],
+  [
+    /(?:回复|处理|更新).{0,24}(?:工单|ticket)(?!.*(?:模板|策略|方案|分析|报告))/i,
+    '中文工单执行操作',
+  ],
+  [
+    /\bbook\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:flight|ticket|hotel|room|table|restaurant|appointment|ride|car|train|bus)\b/i,
+    'book service',
+  ],
+  [
+    /\breserve\s+(?:a\s+|an\s+|the\s+)?(?:table|room|seat|ticket|hotel|restaurant|car)\b/i,
+    'reserve service',
+  ],
+  [
+    /\bmake\s+a\s+reservation\s+(?:for|at|with)\s+(?:a\s+|an\s+|the\s+|this\s+)?(?:restaurant|table|hotel|room|flight|ticket|car|service|dinner|lunch|brunch)\b/i,
+    'make reservation',
+  ],
+  [
+    /\bschedule\s+(?:a\s+|an\s+|the\s+)?(?:appointment|meeting|call|visit|consultation|interview)\b/i,
+    'schedule appointment',
+  ],
+  [
+    /\bschedule\s+.{1,60}\s+(?:appointment|meeting|call|visit|consultation|interview)\b/i,
+    'schedule appointment',
+  ],
+  [
+    /\b(?:make|set\s+up)\s+(?:a\s+|an\s+)?(?:appointment|reservation|meeting|call)(?!\s+(?:strategy|analysis|report|framework|copy|conversion|rate))\b/i,
+    'make appointment',
+  ],
+  [
+    /\bregister\s+for\s+(?:this\s+)?(?:event|webinar|class|course|workshop|conference)\b/i,
+    'register for event',
+  ],
   [/\bapply\s+(?:for|to)\s+(?:this\s+)?(?:job|role|position|opening|listing)\b/i, 'apply for job'],
   [/\bapply\s+(?:on|in)\s+(?:linkedin|indeed|greenhouse|lever)\b/i, 'apply on job site'],
-  [/\b(?:send|reply\s+to)\s+(?:a\s+|an\s+|this\s+)?(?:email|message|dm|direct message)(?!\s+(?:open rate|click rate|conversion|copy|strategy|analysis|report))\b/i, 'send message'],
-  [/\bmessage\s+(?:on|in)\s+(?:linkedin|slack|gmail|whatsapp|telegram|discord|instagram|facebook)\b/i, 'message on platform'],
+  [
+    /\b(?:send|reply\s+to)\s+(?:a\s+|an\s+|this\s+)?(?:email|message|dm|direct message)(?!\s+(?:open rate|click rate|conversion|copy|strategy|analysis|report))\b/i,
+    'send message',
+  ],
+  [
+    /\bmessage\s+(?:on|in)\s+(?:linkedin|slack|gmail|whatsapp|telegram|discord|instagram|facebook)\b/i,
+    'message on platform',
+  ],
   [/\badd\s+.{1,80}\s+to\s+(?:the\s+)?cart\b/i, 'add item to cart'],
   [/\b(?:add|put)\s+.{1,80}\s+(?:in|into)\s+(?:the\s+)?cart\b/i, 'add item to cart'],
   [/\b(?:place|submit)\s+(?:an?\s+|the\s+)?order\b/i, 'place order'],
-  [/\bbuy\s+(?:this|that|the|a|an)\s+.{1,80}\s+(?:on|from)\s+(?:amazon|jd|taobao|tmall|pinduoduo|shopify|etsy|ebay)\b/i, 'buy item on platform'],
+  [
+    /\bbuy\s+(?:this|that|the|a|an)\s+.{1,80}\s+(?:on|from)\s+(?:amazon|jd|taobao|tmall|pinduoduo|shopify|etsy|ebay)\b/i,
+    'buy item on platform',
+  ],
   [/\bcheck\s*out\s+(?:this\s+)?(?:cart|order|item|product)\b/i, 'checkout item'],
-  [/\bpost\s+(?:on|to)\s+(?:twitter|x\.com|linkedin|reddit|instagram|tiktok|facebook|threads)\b/i, 'post on site'],
-  [/\b(?:publish|share)\s+(?:this\s+)?(?:post|update|article|comment)\s+(?:on|to)\b/i, 'publish to site'],
-  [/\b(?:filter|sort|save|favorite|bookmark)\s+.{1,80}\s+(?:on|in)\s+(?:google flights|airbnb|booking|linkedin|indeed|gmail|slack|notion)\b/i, 'filter or save on site'],
-  [/(?!.*\b(?:strategy|analysis|report|template|pricing)\b)\b(?:draft|compose|create|edit|update|schedule|save|add|reply\s+to|upload|download|export|share|move|rename|attach|import)\s+.{1,80}\s+(?:in|on|to)\s+(?:gmail|slack|notion|github|google docs|google forms|google sheets|google slides|google calendar|google drive|dropbox|onedrive|icloud drive|linkedin|hubspot|salesforce|stripe|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?|airtable|figma|cloudinary|buffer|mailchimp)\b/i, 'draft in app'],
-  [/\b(?:draft|compose|create|edit|update|schedule|save|add|reply\s+to|send|upload|download|export|share|move|rename|attach|import|find|refund)\s+.{0,80}\b(?:github\s+(?:issue|pull request|pr)|jira\s+(?:bug|issue|ticket)|linear\s+(?:bug|issue|task)|asana\s+tasks?|trello\s+(?:card|board)|zendesk\s+(?:ticket|reply)|intercom\s+(?:note|message)|hubspot\s+contact|salesforce\s+(?:customer|note|record)|stripe\s+(?:receipt|invoice|payment|refund)|google\s+(?:doc|docs|document|calendar\s+(?:meeting|event|invite))|calendar\s+invite|slack\s+message|linkedin\s+message|notion\s+page|airtable\s+(?:row|record|lead)|row\s+to\s+airtable|figma\s+design|cloudinary\s+image|image\s+to\s+cloudinary|buffer\s+post|post\s+in\s+buffer|mailchimp\s+campaign|shopify\s+discount\s+code|invoice\s+from\s+stripe|google\s+drive\s+(?:file|folder)|dropbox\s+(?:file|folder|link)|onedrive\s+(?:file|folder|link))\b/i, 'object-first SaaS workflow'],
-  [/\b(?:find|search|download|upload|export|share|move|rename|attach|import|refund)\s+.{1,80}\s+(?:in|on|to|from)\s+(?:google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?|airtable|figma|cloudinary|buffer|mailchimp)\b/i, 'find or download in SaaS app'],
-  [/\b(?:find|search|download|upload|export|share|move|rename|attach|import)\s+(?:google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?)(?:\s+(?:for|to|and|then)\b|\s+.{1,80}\b)/i, 'verb-app workflow'],
-  [/\b(?:in|on)\s+(?:google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?),?\s+(?:draft|compose|create|edit|update|schedule|save|add|reply\s+to|find|search|download|upload|export|share|move|rename|attach|import)\b/i, 'app-first workflow'],
-  [/\b(?:use|open|visit|go\s+to|launch)\s+(?:google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify(?:\s+admin)?|zendesk|intercom|linear|monday(?:\.com)?)(?:\s+(?:admin|dashboard))?\s+(?:to|and)\s+(?:draft|compose|create|edit|update|schedule|save|add|reply\s+to|find|search|download|upload|export|share|move|rename|attach|import)\b/i, 'open app then act'],
-  [/发布(?:到|在)(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit)/i, '发布到平台'],
+  [
+    /\bpost\s+(?:on|to)\s+(?:twitter|x\.com|linkedin|reddit|instagram|tiktok|facebook|threads)\b/i,
+    'post on site',
+  ],
+  [
+    /\b(?:publish|share)\s+(?:this\s+)?(?:post|update|article|comment)\s+(?:on|to)\b/i,
+    'publish to site',
+  ],
+  [
+    /\b(?:filter|sort|save|favorite|bookmark)\s+.{1,80}\s+(?:on|in)\s+(?:google flights|airbnb|booking|linkedin|indeed|gmail|slack|notion)\b/i,
+    'filter or save on site',
+  ],
+  [
+    /(?!.*\b(?:strategy|analysis|report|template|pricing)\b)\b(?:draft|compose|create|edit|update|schedule|save|add|reply\s+to|upload|download|export|share|move|rename|attach|import)\s+.{1,80}\s+(?:in|on|to)\s+(?:gmail|slack|notion|github|google docs|google forms|google sheets|google slides|google calendar|google drive|dropbox|onedrive|icloud drive|linkedin|hubspot|salesforce|stripe|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?|airtable|figma|cloudinary|buffer|mailchimp)\b/i,
+    'draft in app',
+  ],
+  [
+    /\b(?:draft|compose|create|edit|update|schedule|save|add|reply\s+to|send|upload|download|export|share|move|rename|attach|import|find|refund)\s+.{0,80}\b(?:github\s+(?:issue|pull request|pr)|jira\s+(?:bug|issue|ticket)|linear\s+(?:bug|issue|task)|asana\s+tasks?|trello\s+(?:card|board)|zendesk\s+(?:ticket|reply)|intercom\s+(?:note|message)|hubspot\s+contact|salesforce\s+(?:customer|note|record)|stripe\s+(?:receipt|invoice|payment|refund)|google\s+(?:doc|docs|document|calendar\s+(?:meeting|event|invite))|calendar\s+invite|slack\s+message|linkedin\s+message|notion\s+page|airtable\s+(?:row|record|lead)|row\s+to\s+airtable|figma\s+design|cloudinary\s+image|image\s+to\s+cloudinary|buffer\s+post|post\s+in\s+buffer|mailchimp\s+campaign|shopify\s+discount\s+code|invoice\s+from\s+stripe|google\s+drive\s+(?:file|folder)|dropbox\s+(?:file|folder|link)|onedrive\s+(?:file|folder|link))\b/i,
+    'object-first SaaS workflow',
+  ],
+  [
+    /\b(?:find|search|download|upload|export|share|move|rename|attach|import|refund)\s+.{1,80}\s+(?:in|on|to|from)\s+(?:google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?|airtable|figma|cloudinary|buffer|mailchimp)\b/i,
+    'find or download in SaaS app',
+  ],
+  [
+    /\b(?:find|search|download|upload|export|share|move|rename|attach|import)\s+(?:google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?)(?:\s+(?:for|to|and|then)\b|\s+.{1,80}\b)/i,
+    'verb-app workflow',
+  ],
+  [
+    /\b(?:in|on)\s+(?:google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?),?\s+(?:draft|compose|create|edit|update|schedule|save|add|reply\s+to|find|search|download|upload|export|share|move|rename|attach|import)\b/i,
+    'app-first workflow',
+  ],
+  [
+    /\b(?:use|open|visit|go\s+to|launch)\s+(?:google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify(?:\s+admin)?|zendesk|intercom|linear|monday(?:\.com)?)(?:\s+(?:admin|dashboard))?\s+(?:to|and)\s+(?:draft|compose|create|edit|update|schedule|save|add|reply\s+to|find|search|download|upload|export|share|move|rename|attach|import)\b/i,
+    'open app then act',
+  ],
+  [
+    /发布(?:到|在)(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit)/i,
+    '发布到平台',
+  ],
 ];
 
 /**
@@ -244,8 +451,7 @@ const IMAGE_NOUN =
 const IMAGE_NEGATIVE =
   /流程图|思维导图|架构图|结构图|柱状图|折线图|饼图|统计图|示意图|图表|甘特图|拓扑图|地图/;
 
-const IMAGE_STRONG_WORDS =
-  /海报|插画|插图|头像|壁纸|表情包|漫画|配图|文生图|图生图|招贴|封面/;
+const IMAGE_STRONG_WORDS = /海报|插画|插图|头像|壁纸|表情包|漫画|配图|文生图|图生图|招贴|封面/;
 
 // Inherently-image phrasings (jargon, 画-verb, edit verbs, English) —
 // high precision, no proximity needed.
@@ -256,10 +462,19 @@ const IMAGE_PATTERNS: readonly [RegExp, string][] = [
   [/(?<![动漫壁油版国年简笔])画\s*(?:一|1|个|张|幅|只|副|点|出|套)/, '中文画图'],
   [/(?:帮|给|替|为|来)\s*我?\s*画(?![室家廊展])/, '中文帮我画'],
   // Image-to-image edit phrasings.
-  [/(?:把|将|给)?\s*(?:这|那|此)?\s*(?:张|幅|个)?\s*图[片像]?.{0,8}(?:背景|风格|换成|改成|变成|[pP]成|加上|去掉|抠掉|换)/, '中文图片编辑'],
-  [/(?:换|改|改变|替换)\s*(?:一下|个)?\s*(?:图[片像]?的?)?(?:背景|风格|滤镜|色调|配色)/, '中文换背景'],
+  [
+    /(?:把|将|给)?\s*(?:这|那|此)?\s*(?:张|幅|个)?\s*图[片像]?.{0,8}(?:背景|风格|换成|改成|变成|[pP]成|加上|去掉|抠掉|换)/,
+    '中文图片编辑',
+  ],
+  [
+    /(?:换|改|改变|替换)\s*(?:一下|个)?\s*(?:图[片像]?的?)?(?:背景|风格|滤镜|色调|配色)/,
+    '中文换背景',
+  ],
   // English text-to-image.
-  [/\b(?:draw|generate|create|make|design|render|paint)\s+(?:me\s+)?(?:an?\s+|some\s+|a\s+couple\s+of\s+)?(?:image|picture|photo|illustration|poster|avatar|logo|icon|wallpaper|drawing|artwork|art|graphic|banner|sticker|emoji)s?\b/i, 'english image gen'],
+  [
+    /\b(?:draw|generate|create|make|design|render|paint)\s+(?:me\s+)?(?:an?\s+|some\s+|a\s+couple\s+of\s+)?(?:image|picture|photo|illustration|poster|avatar|logo|icon|wallpaper|drawing|artwork|art|graphic|banner|sticker|emoji)s?\b/i,
+    'english image gen',
+  ],
   [/\b(?:image|picture|illustration|artwork)\s+of\b/i, 'english image of'],
   [/\bgenerate\b.{0,24}\b(?:image|picture|art|visual)s?\b/i, 'english generate image'],
   // draw / paint / sketch + article + concrete subject → image, even
@@ -267,9 +482,15 @@ const IMAGE_PATTERNS: readonly [RegExp, string][] = [
   // an article (a/an/some/the) so "draw up a contract" / "draw on X"
   // don't match, and excludes the common figurative objects
   // ("draw a conclusion / comparison / the line / a map / a diagram").
-  [/\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:a|an|some|the)\s+(?!conclusion|comparison|distinction|parallel|analog|attention|line\b|breath|blood|card\b|plan\b|map\b|diagram|chart|graph|flowchart|town\b)[a-z]/i, 'english draw subject'],
+  [
+    /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:a|an|some|the)\s+(?!conclusion|comparison|distinction|parallel|analog|attention|line\b|breath|blood|card\b|plan\b|map\b|diagram|chart|graph|flowchart|town\b)[a-z]/i,
+    'english draw subject',
+  ],
   // English image-to-image edit.
-  [/\b(?:edit|modify|change|replace|remove|swap|inpaint)\s+(?:the\s+|this\s+|that\s+)?(?:image|picture|photo|background|object)\b/i, 'english image edit'],
+  [
+    /\b(?:edit|modify|change|replace|remove|swap|inpaint)\s+(?:the\s+|this\s+|that\s+)?(?:image|picture|photo|background|object)\b/i,
+    'english image edit',
+  ],
 ];
 
 // Looser verb + image-noun proximity for "生成一张<描述>海报" where
@@ -308,7 +529,8 @@ const VIDEO_MAKE_RE =
 const VIDEO_TOPIC_GUARD_RE = /策略|分析|方案|报告|大纲|拆解|复盘|运营|商业模式|脚本|分镜|配音稿/;
 // 产物护栏:「视频文案/视频标题/视频封面/缩略图」= 文本/图产物。但「用这段文案做视频」
 // 的文案是【输入】,故只在产物词【紧跟视频名词】时才挡,避免误挡最典型的「用文案做视频」。
-const VIDEO_PRODUCT_GUARD_RE = /(?:视频|短视频|口播|种草视频|带货视频)(?:的)?\s*(?:文案|标题|封面|缩略图)/;
+const VIDEO_PRODUCT_GUARD_RE =
+  /(?:视频|短视频|口播|种草视频|带货视频)(?:的)?\s*(?:文案|标题|封面|缩略图)/;
 
 /**
  * Tight 'video_creation' signal. Returns the matched span or null.
@@ -366,9 +588,15 @@ const TEMPLATE_FILL_PATTERNS: readonly [RegExp, string][] = [
   // Unambiguous jargon.
   [/填充模板|套模板|套用模板|填模板|模板填充|填充(?:这个|该|此)?模板/, '模板填充术语'],
   // 按/用/根据 <template> 生成/填 …
-  [/(?:按|用|根据|依照|参照|基于)\s*(?:这个|那个|这份|那份|附件|我的|上传的)?\s*模板\s*(?:来)?(?:生成|填|填充|填写|做|制作|输出|完成)/, '按模板填充'],
+  [
+    /(?:按|用|根据|依照|参照|基于)\s*(?:这个|那个|这份|那份|附件|我的|上传的)?\s*模板\s*(?:来)?(?:生成|填|填充|填写|做|制作|输出|完成)/,
+    '按模板填充',
+  ],
   // 把（这些）数据填进 模板/表格/文档
-  [/把\s*[^，。；！？!?\n]{0,10}?填(?:进|入|到|好)\s*(?:模板|表格|文档|表里|文件)/, '把数据填进模板'],
+  [
+    /把\s*[^，。；！？!?\n]{0,10}?填(?:进|入|到|好)\s*(?:模板|表格|文档|表里|文件)/,
+    '把数据填进模板',
+  ],
   // 用我的/这个模板 …
   [/用\s*(?:我的|这个|这份|附件|上传的)\s*模板/, '用我的模板'],
   // 模板里的字段/占位符
@@ -377,7 +605,10 @@ const TEMPLATE_FILL_PATTERNS: readonly [RegExp, string][] = [
   [/(?:填写|填充|填入|录入)\s*(?:这个|该|此|模板的)?\s*(?:模板|占位符)/, '填写模板'],
   // English.
   [/\bfill\s+(?:in|out)?\s*(?:the|this|my|that)?\s*template\b/i, 'english fill template'],
-  [/\bfill\s+(?:in\s+)?(?:the\s+)?(?:placeholders?|fields?)\b[^.]*\btemplate\b/i, 'english fill template fields'],
+  [
+    /\bfill\s+(?:in\s+)?(?:the\s+)?(?:placeholders?|fields?)\b[^.]*\btemplate\b/i,
+    'english fill template fields',
+  ],
 ];
 
 function matchTemplateFillPattern(intent: string): string | null {
@@ -403,8 +634,7 @@ function matchTemplateFillPattern(intent: string): string | null {
 // 填/录入/补全, never 总结/翻译/分析) nor — for the doc cases — a template
 // noun, so they are never upgraded. A bare template noun is not enough.
 const TEMPLATE_FILL_SOFT_FILL_VERB = /填|录入|补(?:全|齐|上)/;
-const TEMPLATE_FILL_SOFT_TARGET =
-  /模板|表格|表里|空格|空位|留空|空白|占位符?|字段|待填|套表/;
+const TEMPLATE_FILL_SOFT_TARGET = /模板|表格|表里|空格|空位|留空|空白|占位符?|字段|待填|套表/;
 
 function matchTemplateFillSoft(intent: string): string | null {
   // Reuse the strict veto: 做/设计/写一个模板 + 模板怎么写/范例 are never fills.
@@ -436,15 +666,22 @@ const NON_EXECUTION_PLATFORM_TOPIC_PATTERNS: readonly RegExp[] = [
  * 'browser' (which is for interaction). Cheap path: a few seconds
  * + a single LLM synthesis call.
  */
-const SEARCH_VERBS: readonly string[] = [
-  '搜索', '查找', '查询',
-];
+const SEARCH_VERBS: readonly string[] = ['搜索', '查找', '查询'];
 
 const SEARCH_PATTERNS: readonly [RegExp, string][] = [
   [/\b(?:search|find|look\s+up)\b/i, 'English search verb'],
-  [/(?:帮我|给我|替我|为我)?查(?:一下|找|询)?(?:今天|最新|当前|现在|实时|近期|本周|今年).{0,48}(?:股价|价格|天气|汇率|新闻|财报|来源|链接|市场|排名|航班|酒店|票价|openai|特斯拉|苹果|微软|aapl|tsla|nvda)/i, '中文查实时信息'],
-  [/(?:研究|调研|对比).{0,64}(?:今天|最新|当前|现在|实时|近期|今年|新闻|股价|价格|汇率|天气|财报|官网|来源|链接|市场|格局|竞品|公司|平台|小红书|京东|淘宝|拼多多|amazon|openai|特斯拉|苹果|微软|aapl|tsla|iphone)/i, '中文联网研究'],
-  [/\b(?:research|compare)\b.{0,72}\b(?:latest|current|today|recent|news|price|stock|weather|source|links?|market|competitors?|company|platform|openai|tesla|aapl|tsla|amazon|microsoft|apple|iphone)\b/i, 'English web research'],
+  [
+    /(?:帮我|给我|替我|为我)?查(?:一下|找|询)?(?:今天|最新|当前|现在|实时|近期|本周|今年).{0,48}(?:股价|价格|天气|汇率|新闻|财报|来源|链接|市场|排名|航班|酒店|票价|openai|特斯拉|苹果|微软|aapl|tsla|nvda)/i,
+    '中文查实时信息',
+  ],
+  [
+    /(?:研究|调研|对比).{0,64}(?:今天|最新|当前|现在|实时|近期|今年|新闻|股价|价格|汇率|天气|财报|官网|来源|链接|市场|格局|竞品|公司|平台|小红书|京东|淘宝|拼多多|amazon|openai|特斯拉|苹果|微软|aapl|tsla|iphone)/i,
+    '中文联网研究',
+  ],
+  [
+    /\b(?:research|compare)\b.{0,72}\b(?:latest|current|today|recent|news|price|stock|weather|source|links?|market|competitors?|company|platform|openai|tesla|aapl|tsla|amazon|microsoft|apple|iphone)\b/i,
+    'English web research',
+  ],
 ];
 
 /**
@@ -455,9 +692,19 @@ const SEARCH_PATTERNS: readonly [RegExp, string][] = [
  * generate-only without the URL).
  */
 const INFO_VERBS: readonly string[] = [
-  '查看', '分析', '提取', '抓取', '总结', '看一下', '看看',
+  '查看',
+  '分析',
+  '提取',
+  '抓取',
+  '总结',
+  '看一下',
+  '看看',
   // English
-  'summarize ', 'summarise ', 'analyze ', 'analyse ', 'extract ',
+  'summarize ',
+  'summarise ',
+  'analyze ',
+  'analyse ',
+  'extract ',
 ];
 
 /**
@@ -466,22 +713,75 @@ const INFO_VERBS: readonly string[] = [
  * unless an INTERACTION verb is also present.
  */
 const SITE_NAMES: readonly string[] = [
-  '小红书', '淘宝', '天猫', '京东', '拼多多', '抖音', 'bilibili', 'b站',
-  '携程', '飞猪', '美团', '大众点评', '高德', '百度地图',
-  '微博', '知乎', '豆瓣', '虎扑', 'boss直聘', '拉勾',
-  'github', 'linkedin', 'amazon', 'shopify', 'twitter', 'reddit',
-  'youtube', 'instagram', 'tiktok', 'gmail', 'producthunt',
+  '小红书',
+  '淘宝',
+  '天猫',
+  '京东',
+  '拼多多',
+  '抖音',
+  'bilibili',
+  'b站',
+  '携程',
+  '飞猪',
+  '美团',
+  '大众点评',
+  '高德',
+  '百度地图',
+  '微博',
+  '知乎',
+  '豆瓣',
+  '虎扑',
+  'boss直聘',
+  '拉勾',
+  'github',
+  'linkedin',
+  'amazon',
+  'shopify',
+  'twitter',
+  'reddit',
+  'youtube',
+  'instagram',
+  'tiktok',
+  'gmail',
+  'producthunt',
 ];
 
 const ECOMMERCE_SITE_HINTS: readonly string[] = [
-  '电商站', '电商平台', '购物平台', '商品', '商品页', '商品链接',
-  '京东', '淘宝', '天猫', '拼多多', '抖音商城', '小红书商城',
-  'jd', 'taobao', 'tmall', 'pdd', 'amazon',
+  '电商站',
+  '电商平台',
+  '购物平台',
+  '商品',
+  '商品页',
+  '商品链接',
+  '京东',
+  '淘宝',
+  '天猫',
+  '拼多多',
+  '抖音商城',
+  '小红书商城',
+  'jd',
+  'taobao',
+  'tmall',
+  'pdd',
+  'amazon',
 ];
 
 const ECOMMERCE_LIST_HINTS: readonly string[] = [
-  '前', 'top', '结果', '列表', '名称', '价格', '链接', '按价格', '排序',
-  '从低到高', '从高到低', 'price', 'link', 'url', 'sort',
+  '前',
+  'top',
+  '结果',
+  '列表',
+  '名称',
+  '价格',
+  '链接',
+  '按价格',
+  '排序',
+  '从低到高',
+  '从高到低',
+  'price',
+  'link',
+  'url',
+  'sort',
 ];
 
 const SKILL_HINTS: ReadonlyMap<string, ExecutionMode> = new Map([
@@ -554,18 +854,20 @@ const NEGATED_ROUTING_CLAUSE_EN =
   /\b(?:do\s+not|don't|never|without)\b[^,.!?;\n]*(?:[,.!?;\n]|$)/gi;
 
 function stripNegatedRoutingClauses(intent: string): string {
-  return intent
-    .replace(DOUBLE_NEGATED_ROUTING_ACTION_CN, '')
-    // Preserve the established scope of explicit negatives before handling
-    // newly supported bare “不 + action” clauses and their continuations.
-    .replace(NEGATED_ROUTING_CLAUSE_CN, ' ')
-    .replace(NEGATED_ROUTING_CLAUSE_EN, ' ')
-    .replace(BARE_NEGATED_ROUTING_CLAUSE_CN, (clause) =>
-      clause
-        .replace(ROUTING_CONTRAST_CN, '，$&')
-        .replace(new RegExp(BARE_NEGATED_ROUTING_CLAUSE_CN.source, 'gi'), ' '),
-    )
-    .trim();
+  return (
+    intent
+      .replace(DOUBLE_NEGATED_ROUTING_ACTION_CN, '')
+      // Preserve the established scope of explicit negatives before handling
+      // newly supported bare “不 + action” clauses and their continuations.
+      .replace(NEGATED_ROUTING_CLAUSE_CN, ' ')
+      .replace(NEGATED_ROUTING_CLAUSE_EN, ' ')
+      .replace(BARE_NEGATED_ROUTING_CLAUSE_CN, (clause) =>
+        clause
+          .replace(ROUTING_CONTRAST_CN, '，$&')
+          .replace(new RegExp(BARE_NEGATED_ROUTING_CLAUSE_CN.source, 'gi'), ' '),
+      )
+      .trim()
+  );
 }
 
 function matchInteractionPattern(intent: string): string | null {
@@ -584,7 +886,10 @@ function matchSearchPattern(intent: string): string | null {
 
 function matchSearchVerb(intent: string): string | null {
   for (const verb of SEARCH_VERBS) {
-    const pattern = new RegExp(`(?:^|[\\s，。；、,;:：]|帮我|给我|替我|为我)${verb}(?:一下|一下子|下)?`, 'i');
+    const pattern = new RegExp(
+      `(?:^|[\\s，。；、,;:：]|帮我|给我|替我|为我)${verb}(?:一下|一下子|下)?`,
+      'i',
+    );
     if (pattern.test(intent)) return verb;
   }
   return null;
@@ -598,22 +903,42 @@ function matchDomainInfoIntent(intent: string): string | null {
   const domainMatch = DOMAIN_REGEX.exec(intent);
   if (!domainMatch) return null;
   const domain = domainMatch[0].slice(0, 64);
-  if (/\b(?:report|strategy|framework|template|playbook|guide)\b.{0,80}\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(intent)) {
+  if (
+    /\b(?:report|strategy|framework|template|playbook|guide)\b.{0,80}\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(
+      intent,
+    )
+  ) {
     return null;
   }
   if (/(?:报告|策略|框架|模板|指南|方案).{0,80}\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(intent)) {
     return null;
   }
-  if (/(?:查看|分析|提取|抓取|总结|看一下|看看).{0,80}\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(intent)) {
+  if (
+    /(?:查看|分析|提取|抓取|总结|看一下|看看).{0,80}\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(
+      intent,
+    )
+  ) {
     return domain;
   }
-  if (/\b(?:summari[sz]e|analy[sz]e|extract|review)\b.{0,80}\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(intent)) {
+  if (
+    /\b(?:summari[sz]e|analy[sz]e|extract|review)\b.{0,80}\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(
+      intent,
+    )
+  ) {
     return domain;
   }
-  if (/\b(?:pricing|price|homepage|home\s+page|landing\s+page|docs?|documentation)\b.{0,40}\b(?:from|on|of|for)\s+[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(intent)) {
+  if (
+    /\b(?:pricing|price|homepage|home\s+page|landing\s+page|docs?|documentation)\b.{0,40}\b(?:from|on|of|for)\s+[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(
+      intent,
+    )
+  ) {
     return domain;
   }
-  if (/\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}(?:\/[^\s，。；、,;]*)?.{0,40}(?:定价|价格|首页|主页|页面|文档|内容|\bpricing\b|\bprice\b|\bhomepage\b|\bdocs?\b|\bdocumentation\b)/i.test(intent)) {
+  if (
+    /\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}(?:\/[^\s，。；、,;]*)?.{0,40}(?:定价|价格|首页|主页|页面|文档|内容|\bpricing\b|\bprice\b|\bhomepage\b|\bdocs?\b|\bdocumentation\b)/i.test(
+      intent,
+    )
+  ) {
     return domain;
   }
   return null;
@@ -717,10 +1042,7 @@ function neutralizeDownloadableOutput(intent: string): string {
   return intent.replace(DOWNLOADABLE_OUTPUT_RE, ' ');
 }
 
-function decide(
-  intent: string,
-  ctx: { hasFileAttachment: boolean },
-): RouteDecision {
+function decide(intent: string, ctx: { hasFileAttachment: boolean }): RouteDecision {
   // Route only on affirmative instructions. Without this normalization,
   // "不要打开网页" still contains the positive trigger "打开网页" and
   // unnecessarily allocates a browser. Clause boundaries preserve a later
@@ -770,10 +1092,19 @@ function decide(
   if (ctx.hasFileAttachment && ATTACHMENT_WRITING_RE.test(routingIntent)) {
     const actions = routingIntent
       .replace(/(?:不调用|不使用|禁止调用|不要调用)[^，。；,;！？!?\n]*/g, ' ')
-      .replace(/(?:我(?:本次)?上传的|已上传的|上传的)\s*[\w.-]+\.(?:png|jpe?g|webp|pdf|docx?|txt)\b/gi, '现有配图')
-      .replace(/(?:我(?:本次)?|已|当前|刚刚)?上传的(?:图片|照片|图像|文件|附件|素材|文档|视频)/g, '附件')
+      .replace(
+        /(?:我(?:本次)?上传的|已上传的|上传的)\s*[\w.-]+\.(?:png|jpe?g|webp|pdf|docx?|txt)\b/gi,
+        '现有配图',
+      )
+      .replace(
+        /(?:我(?:本次)?|已|当前|刚刚)?上传的(?:图片|照片|图像|文件|附件|素材|文档|视频)/g,
+        '附件',
+      )
       .replace(/\b[\w.-]+\.(?:png|jpe?g|webp|pdf|docx?|txt)\b/gi, '附件')
-      .replace(/(?:提供|生成|导出|呈现).{0,12}(?:可下载|下载的).{0,24}(?:文件|文档|文章|报告)/g, '');
+      .replace(
+        /(?:提供|生成|导出|呈现).{0,12}(?:可下载|下载的).{0,24}(?:文件|文档|文章|报告)/g,
+        '',
+      );
     if (!matchInteractionPattern(actions)) {
       // Uploaded filenames were removed above; an actual domain or freshness
       // instruction must use live information even when writing a local file.
@@ -866,10 +1197,7 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
   const intent = opts.intent.trim();
   const hasFileAttachment = opts.hasFileAttachment ?? false;
   if (!intent) {
-    opts.logger.info(
-      { mode: 'generate', source: 'empty-intent' },
-      'intent-classifier: decided',
-    );
+    opts.logger.info({ mode: 'generate', source: 'empty-intent' }, 'intent-classifier: decided');
     return 'generate';
   }
 

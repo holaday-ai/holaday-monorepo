@@ -4,8 +4,8 @@ import {
   describeScheduledEventRepeat,
   scheduledEventActionHint,
   scheduledEventCanRunNow,
-  scheduledEventFailureDetail,
   scheduledEventCanToggle,
+  scheduledEventFailureDetail,
   scheduledEventToggleLabel,
   scheduledEventToggleSuccessMessage,
 } from './event-detail-state.js';
@@ -54,9 +54,7 @@ describe('event detail state helpers', () => {
     expect(scheduledEventFailureDetail('missing ANTHROPIC_API_KEY')).toBe(
       'AI 服务暂未配置，请联系 support@holaday.ai。',
     );
-    expect(scheduledEventFailureDetail(null)).toBe(
-      '上次执行失败，请检查任务配置后重试。',
-    );
+    expect(scheduledEventFailureDetail(null)).toBe('上次执行失败，请检查任务配置后重试。');
   });
 
   it('explains scheduled event recovery actions before users click them', () => {
@@ -102,9 +100,7 @@ describe('event detail state helpers', () => {
   });
 
   it('describes preset and custom repeat rules', () => {
-    expect(describeScheduledEventRepeat({ repeatType: 'weekly', rrule: null })).toBe(
-      '每周',
-    );
+    expect(describeScheduledEventRepeat({ repeatType: 'weekly', rrule: null })).toBe('每周');
     expect(
       describeScheduledEventRepeat({
         repeatType: 'once',

@@ -1,8 +1,8 @@
 import { CreativePopover } from '@/components/CreativePopover';
+import { cn } from '@/lib/utils';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Check, SlidersHorizontal, X } from 'lucide-react';
 import type * as React from 'react';
-import { cn } from '@/lib/utils';
 import {
   IMAGE_ASPECT_OPTIONS,
   IMAGE_MODEL_OPTIONS,
@@ -32,115 +32,136 @@ export function ImageGenerationSettings({
   onSettingChange,
 }: ImageGenerationSettingsProps): JSX.Element {
   const settingsContent = (
-          <div className="mt-7 space-y-7">
-            {mode !== 'specs' && <SettingGroup label="模型">
-              <div className="grid gap-3 sm:grid-cols-2">
-                {modelOptions.map((option) => {
-                  const selected = draft.model === option.value;
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => onSettingChange('model', option.value)}
-                      className={cn(
-                        'min-h-[112px] rounded-[18px] border bg-[var(--creative-surface,#fff)] p-4 text-left transition-colors motion-reduce:transition-none',
-                        selected
-                          ? 'border-[#4B8EEA] ring-2 ring-[#4B8EEA]/10'
-                          : 'border-[var(--creative-line,#E5DDE6)] hover:border-[#BFB1C3]',
-                      )}
-                    >
-                      <span className="flex items-center justify-between gap-3">
-                        <span className="font-semibold">
-                          {[option.name, option.version].filter(Boolean).join(' ')}
-                        </span>
-                        {selected ? <Check className="h-4 w-4 text-[var(--creative-muted,#347AD6)]" aria-hidden /> : null}
+    <div className="mt-7 space-y-7">
+      {mode !== 'specs' && (
+        <SettingGroup label="模型">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {modelOptions.map((option) => {
+              const selected = draft.model === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => onSettingChange('model', option.value)}
+                  className={cn(
+                    'min-h-[112px] rounded-[18px] border bg-[var(--creative-surface,#fff)] p-4 text-left transition-colors motion-reduce:transition-none',
+                    selected
+                      ? 'border-[#4B8EEA] ring-2 ring-[#4B8EEA]/10'
+                      : 'border-[var(--creative-line,#E5DDE6)] hover:border-[#BFB1C3]',
+                  )}
+                >
+                  <span className="flex items-center justify-between gap-3">
+                    <span className="font-semibold">
+                      {[option.name, option.version].filter(Boolean).join(' ')}
+                    </span>
+                    {selected ? (
+                      <Check className="h-4 w-4 text-[var(--creative-muted,#347AD6)]" aria-hidden />
+                    ) : null}
+                  </span>
+                  <span className="mt-2 block text-xs leading-5 text-[var(--creative-muted,#776D7A)]">
+                    {option.description}
+                  </span>
+                  <span className="mt-2 flex flex-wrap gap-1.5">
+                    {option.badges.map((badge) => (
+                      <span
+                        key={badge}
+                        className="rounded-full bg-[var(--creative-surface,#EEF5FF)] px-2 py-1 text-[10px] font-semibold text-[var(--creative-muted,#3E6EAA)]"
+                      >
+                        {badge}
                       </span>
-                      <span className="mt-2 block text-xs leading-5 text-[var(--creative-muted,#776D7A)]">
-                        {option.description}
-                      </span>
-                      <span className="mt-2 flex flex-wrap gap-1.5">
-                        {option.badges.map((badge) => (
-                          <span
-                            key={badge}
-                            className="rounded-full bg-[var(--creative-surface,#EEF5FF)] px-2 py-1 text-[10px] font-semibold text-[var(--creative-muted,#3E6EAA)]"
-                          >
-                            {badge}
-                          </span>
-                        ))}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </SettingGroup>}
-
-            {mode !== 'models' && <SettingGroup label="风格">
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:grid-cols-8">
-                {IMAGE_STYLE_OPTIONS.map((option) => {
-                  const selected = draft.style === option.key;
-                  return (
-                    <button
-                      key={option.key}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => onSettingChange('style', option.key)}
-                      className={cn(
-                        'relative overflow-hidden rounded-[16px] border bg-[var(--creative-surface,#fff)] text-left transition-colors motion-reduce:transition-none',
-                        selected
-                          ? 'border-[#8C6DB4] ring-2 ring-[#8C6DB4]/15'
-                          : 'border-[var(--creative-line,#E5DDE6)] hover:border-[#BDAFC1]',
-                      )}
-                    >
-                      <img
-                        src={`/image-style-previews/${option.key}.png`}
-                        alt=""
-                        aria-hidden
-                        className="aspect-[4/3] w-full bg-[var(--creative-surface,#F7F3F5)] object-contain p-1"
-                      />
-                      <span className="flex min-h-11 items-center justify-between gap-1 px-2 py-1.5 text-[11px] font-semibold text-[var(--creative-ink,#504755)]">
-                        {option.label}
-                        {selected ? (
-                          <Check className="h-3.5 w-3.5 shrink-0 text-[var(--creative-muted,#7953A5)]" aria-hidden />
-                        ) : null}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </SettingGroup>}
-
-            {mode !== 'models' && <div className="grid gap-6 md:grid-cols-2">
-              <SettingGroup label="比例">
-                <div className="flex flex-wrap gap-2">
-                  {IMAGE_ASPECT_OPTIONS.map((option) => (
-                    <ChoiceButton
-                      key={option.value}
-                      selected={draft.aspectRatio === option.value}
-                      onClick={() => onSettingChange('aspectRatio', option.value)}
-                    >
-                      {option.label}
-                    </ChoiceButton>
-                  ))}
-                </div>
-              </SettingGroup>
-              <SettingGroup label="生成数量">
-                <div className="flex flex-wrap gap-2">
-                  {([1, 2, 3, 4] as const).map((count) => (
-                    <ChoiceButton
-                      key={count}
-                      selected={draft.imageCount === count}
-                      onClick={() => onSettingChange('imageCount', count)}
-                    >
-                      {count} 张
-                    </ChoiceButton>
-                  ))}
-                </div>
-              </SettingGroup>
-            </div>}
+                    ))}
+                  </span>
+                </button>
+              );
+            })}
           </div>
+        </SettingGroup>
+      )}
+
+      {mode !== 'models' && (
+        <SettingGroup label="风格">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:grid-cols-8">
+            {IMAGE_STYLE_OPTIONS.map((option) => {
+              const selected = draft.style === option.key;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => onSettingChange('style', option.key)}
+                  className={cn(
+                    'relative overflow-hidden rounded-[16px] border bg-[var(--creative-surface,#fff)] text-left transition-colors motion-reduce:transition-none',
+                    selected
+                      ? 'border-[#8C6DB4] ring-2 ring-[#8C6DB4]/15'
+                      : 'border-[var(--creative-line,#E5DDE6)] hover:border-[#BDAFC1]',
+                  )}
+                >
+                  <img
+                    src={`/image-style-previews/${option.key}.png`}
+                    alt=""
+                    aria-hidden
+                    className="aspect-[4/3] w-full bg-[var(--creative-surface,#F7F3F5)] object-contain p-1"
+                  />
+                  <span className="flex min-h-11 items-center justify-between gap-1 px-2 py-1.5 text-[11px] font-semibold text-[var(--creative-ink,#504755)]">
+                    {option.label}
+                    {selected ? (
+                      <Check
+                        className="h-3.5 w-3.5 shrink-0 text-[var(--creative-muted,#7953A5)]"
+                        aria-hidden
+                      />
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </SettingGroup>
+      )}
+
+      {mode !== 'models' && (
+        <div className="grid gap-6 md:grid-cols-2">
+          <SettingGroup label="比例">
+            <div className="flex flex-wrap gap-2">
+              {IMAGE_ASPECT_OPTIONS.map((option) => (
+                <ChoiceButton
+                  key={option.value}
+                  selected={draft.aspectRatio === option.value}
+                  onClick={() => onSettingChange('aspectRatio', option.value)}
+                >
+                  {option.label}
+                </ChoiceButton>
+              ))}
+            </div>
+          </SettingGroup>
+          <SettingGroup label="生成数量">
+            <div className="flex flex-wrap gap-2">
+              {([1, 2, 3, 4] as const).map((count) => (
+                <ChoiceButton
+                  key={count}
+                  selected={draft.imageCount === count}
+                  onClick={() => onSettingChange('imageCount', count)}
+                >
+                  {count} 张
+                </ChoiceButton>
+              ))}
+            </div>
+          </SettingGroup>
+        </div>
+      )}
+    </div>
   );
-  if (mode) return <CreativePopover open={open} onOpenChange={onOpenChange} anchorRef={returnFocusRef} title={mode === 'models' ? '选择图片模型' : '生成设置'}><div className="hd-image-compact-settings">{settingsContent}</div></CreativePopover>;
+  if (mode)
+    return (
+      <CreativePopover
+        open={open}
+        onOpenChange={onOpenChange}
+        anchorRef={returnFocusRef}
+        title={mode === 'models' ? '选择图片模型' : '生成设置'}
+      >
+        <div className="hd-image-compact-settings">{settingsContent}</div>
+      </CreativePopover>
+    );
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -155,7 +176,10 @@ export function ImageGenerationSettings({
           <div className="flex items-start justify-between gap-4 pr-12">
             <div>
               <Dialog.Title className="flex items-center gap-2 text-xl font-semibold tracking-[-0.02em]">
-                <SlidersHorizontal className="h-5 w-5 text-[var(--creative-muted,#D62958)]" aria-hidden />
+                <SlidersHorizontal
+                  className="h-5 w-5 text-[var(--creative-muted,#D62958)]"
+                  aria-hidden
+                />
                 生成设置
               </Dialog.Title>
               <Dialog.Description className="mt-1.5 text-sm leading-6 text-[var(--creative-muted,#766C79)]">
@@ -187,7 +211,9 @@ function SettingGroup({
 }: { label: string; children: React.ReactNode }): JSX.Element {
   return (
     <fieldset aria-label={label} className="min-w-0">
-      <legend className="mb-3 text-sm font-semibold text-[var(--creative-ink,#423A46)]">{label}</legend>
+      <legend className="mb-3 text-sm font-semibold text-[var(--creative-ink,#423A46)]">
+        {label}
+      </legend>
       {children}
     </fieldset>
   );

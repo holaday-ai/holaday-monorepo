@@ -39,10 +39,7 @@ export const SERVER_FIXED_CNY_CENTS_MONTHLY = Math.round(
 );
 
 /** Convert a payments row to CNY cents. Unknown currencies must not be mislabeled as CNY. */
-export function paymentRowCnyCents(
-  amountCents: number,
-  currency: string,
-): number {
+export function paymentRowCnyCents(amountCents: number, currency: string): number {
   const c = currency.toUpperCase();
   if (c === 'CNY') return amountCents;
   if (c === 'USD') return Math.round(amountCents * USD_TO_CNY);
@@ -68,21 +65,14 @@ function beijingMonthStartUtc(at: Date, monthsAgo = 0): Date {
 }
 
 function completedPaymentPeriodCondition(start: Date) {
-  return and(
-    gte(payments.completedAt, start),
-    eq(payments.status, 'completed'),
-  );
+  return and(gte(payments.completedAt, start), eq(payments.status, 'completed'));
 }
 
 /** Beijing-day start (UTC instant), daysAgo back. */
 function beijingDayStartUtc(at: Date, daysAgo = 0): Date {
   const shifted = new Date(at.getTime() + 8 * 3600_000);
   const utcDayStart = new Date(
-    Date.UTC(
-      shifted.getUTCFullYear(),
-      shifted.getUTCMonth(),
-      shifted.getUTCDate() - daysAgo,
-    ),
+    Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate() - daysAgo),
   );
   return new Date(utcDayStart.getTime() - 8 * 3600_000);
 }
@@ -90,11 +80,7 @@ function beijingDayStartUtc(at: Date, daysAgo = 0): Date {
 function beijingDayString(at: Date, daysAgo = 0): string {
   const shifted = new Date(at.getTime() + 8 * 3600_000);
   const d = new Date(
-    Date.UTC(
-      shifted.getUTCFullYear(),
-      shifted.getUTCMonth(),
-      shifted.getUTCDate() - daysAgo,
-    ),
+    Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate() - daysAgo),
   );
   return d.toISOString().slice(0, 10);
 }
@@ -103,25 +89,18 @@ function buildRevenueProductRows(input: {
   userCounts: Array<{ plan: string; count: number }>;
   revenue: Array<{ kind: string; plan: string; revenueCnyCents: number }>;
 }) {
-  const userCountByPlan = new Map(
-    input.userCounts.map((row) => [row.plan, Number(row.count)]),
-  );
+  const userCountByPlan = new Map(input.userCounts.map((row) => [row.plan, Number(row.count)]));
   const revenueByProduct = new Map<string, number>();
   for (const row of input.revenue) {
     const key = `${row.kind}:${row.plan}`;
-    revenueByProduct.set(
-      key,
-      (revenueByProduct.get(key) ?? 0) + row.revenueCnyCents,
-    );
+    revenueByProduct.set(key, (revenueByProduct.get(key) ?? 0) + row.revenueCnyCents);
   }
 
   const baselinePlans = ['free', 'basic', 'pro'];
   const subscriptionPlans = new Set([
     ...baselinePlans,
     ...userCountByPlan.keys(),
-    ...input.revenue
-      .filter((row) => row.kind === 'subscription')
-      .map((row) => row.plan),
+    ...input.revenue.filter((row) => row.kind === 'subscription').map((row) => row.plan),
   ]);
   const orderedSubscriptionPlans = [
     ...baselinePlans,
@@ -176,10 +155,7 @@ export const adminFinanceRouter = router({
       .groupBy(payments.currency);
     let monthRevenueCnyCents = 0;
     for (const row of paymentRows) {
-      monthRevenueCnyCents += paymentRowCnyCents(
-        Number(row.sumCents) || 0,
-        row.currency,
-      );
+      monthRevenueCnyCents += paymentRowCnyCents(Number(row.sumCents) || 0, row.currency);
     }
 
     // LLM cost — sum cost_usd this month → CNY cents.
@@ -233,11 +209,14 @@ export const adminFinanceRouter = router({
       .where(completedPaymentPeriodCondition(monthStart))
       .groupBy(payments.kind, payments.plan, payments.currency);
 
-    const revenueByProduct = new Map<string, {
-      kind: string;
-      plan: string;
-      revenueCnyCents: number;
-    }>();
+    const revenueByProduct = new Map<
+      string,
+      {
+        kind: string;
+        plan: string;
+        revenueCnyCents: number;
+      }
+    >();
     for (const r of paymentRows) {
       const cny = paymentRowCnyCents(Number(r.sumCents) || 0, r.currency);
       const key = `${r.kind}:${r.plan}`;
@@ -315,12 +294,7 @@ export const adminFinanceRouter = router({
         count: sql<number>`COUNT(DISTINCT ${payments.userExternalId})`,
       })
       .from(payments)
-      .where(
-        and(
-          eq(payments.status, 'completed'),
-          eq(payments.kind, 'subscription'),
-        ),
-      );
+      .where(and(eq(payments.status, 'completed'), eq(payments.kind, 'subscription')));
     const paidUsers = Number(paidRow?.count ?? 0);
 
     // "Renewed" = a user with ≥ 2 completed subscription payments.
@@ -330,12 +304,7 @@ export const adminFinanceRouter = router({
         count: sql<number>`COUNT(*)`,
       })
       .from(payments)
-      .where(
-        and(
-          eq(payments.status, 'completed'),
-          eq(payments.kind, 'subscription'),
-        ),
-      )
+      .where(and(eq(payments.status, 'completed'), eq(payments.kind, 'subscription')))
       .groupBy(payments.userExternalId);
     const renewedUsers = renewedRows.filter((r) => Number(r.count) >= 2).length;
 
@@ -346,19 +315,11 @@ export const adminFinanceRouter = router({
         sumCents: sql<number>`COALESCE(SUM(${payments.amountCents}), 0)`,
       })
       .from(payments)
-      .where(
-        and(
-          eq(payments.status, 'completed'),
-          eq(payments.kind, 'subscription'),
-        ),
-      )
+      .where(and(eq(payments.status, 'completed'), eq(payments.kind, 'subscription')))
       .groupBy(payments.currency);
     let totalSubRevenueCnyCents = 0;
     for (const r of ltvRows) {
-      totalSubRevenueCnyCents += paymentRowCnyCents(
-        Number(r.sumCents) || 0,
-        r.currency,
-      );
+      totalSubRevenueCnyCents += paymentRowCnyCents(Number(r.sumCents) || 0, r.currency);
     }
     const ltvCnyCents = paidUsers > 0 ? Math.round(totalSubRevenueCnyCents / paidUsers) : 0;
 
@@ -402,11 +363,13 @@ export const adminFinanceRouter = router({
           provider: r.provider,
           callCount: Number(r.callCount),
           incompleteUsageCalls: Number(r.incompleteUsageCalls ?? 0),
-          totalTokens: Number(r.incompleteUsageCalls ?? 0) > 0 ? null :
-            Number(r.promptTokens) +
-            Number(r.completionTokens) +
-            Number(r.cacheReadTokens) +
-            Number(r.cacheWriteTokens),
+          totalTokens:
+            Number(r.incompleteUsageCalls ?? 0) > 0
+              ? null
+              : Number(r.promptTokens) +
+                Number(r.completionTokens) +
+                Number(r.cacheReadTokens) +
+                Number(r.cacheWriteTokens),
           promptTokens: Number(r.promptTokens),
           completionTokens: Number(r.completionTokens),
           costUsd,
@@ -439,13 +402,19 @@ export const adminFinanceRouter = router({
         .where(gte(llmCalls.createdAt, startUtc))
         .groupBy(dayExpr);
 
-      type DayCost = { callCount: number; costCnyCents: number | null; knownCostCnyCents: number; unknownCostCalls: number };
+      type DayCost = {
+        callCount: number;
+        costCnyCents: number | null;
+        knownCostCnyCents: number;
+        unknownCostCalls: number;
+      };
       const byDay = new Map<string, DayCost>();
       for (const r of rows) {
         const coverage = summarizeCost(r.costUsd, r.unknownCostCalls);
         byDay.set(String(r.day), {
           callCount: Number(r.callCount),
-          costCnyCents: coverage.totalCostUsd === null ? null : usdToCnyCents(coverage.totalCostUsd),
+          costCnyCents:
+            coverage.totalCostUsd === null ? null : usdToCnyCents(coverage.totalCostUsd),
           knownCostCnyCents: usdToCnyCents(coverage.knownCostUsd),
           unknownCostCalls: coverage.unknownCostCalls,
         });
@@ -453,24 +422,50 @@ export const adminFinanceRouter = router({
       const series: Array<{ date: string } & DayCost> = [];
       for (let i = days - 1; i >= 0; i--) {
         const date = beijingDayString(now, i);
-        const v = byDay.get(date) ?? { callCount: 0, costCnyCents: 0, knownCostCnyCents: 0, unknownCostCalls: 0 };
+        const v = byDay.get(date) ?? {
+          callCount: 0,
+          costCnyCents: 0,
+          knownCostCnyCents: 0,
+          unknownCostCalls: 0,
+        };
         series.push({ date, ...v });
       }
       return { series };
     }),
 
   /** Any task, including older/low-cost tasks outside the monthly top ten. */
-  taskCost: adminProcedure.input(z.object({ taskId: z.string().regex(/^tsk_[A-Za-z0-9_-]{1,100}$/) })).query(async ({ ctx, input }) => {
-    const [task] = await ctx.db.select({ id: tasks.id }).from(tasks).where(eq(tasks.externalId, input.taskId)).limit(1);
-    if (!task) throw new TRPCError({ code: 'NOT_FOUND', message: '任务不存在' });
-    const [row] = await ctx.db.select({ callCount: sql<number>`COUNT(*)`, costUsd: sql<string>`COALESCE(SUM(${llmCalls.costUsd}), 0)`, ...costCoverageSelection() }).from(llmCalls).where(eq(llmCalls.taskId, task.id));
-    const coverage = summarizeCost(row?.costUsd, row?.unknownCostCalls);
-    const callCount = Number(row?.callCount ?? 0);
-    return { taskId: input.taskId, callCount, ...coverage, totalCostUsd: callCount === 0 ? null : coverage.totalCostUsd,
-      costCnyCents: callCount === 0 || coverage.totalCostUsd === null ? null : usdToCnyCents(coverage.totalCostUsd),
-      knownCostCnyCents: usdToCnyCents(coverage.knownCostUsd),
-      accounting: 'official_list_estimate' as const };
-  }),
+  taskCost: adminProcedure
+    .input(z.object({ taskId: z.string().regex(/^tsk_[A-Za-z0-9_-]{1,100}$/) }))
+    .query(async ({ ctx, input }) => {
+      const [task] = await ctx.db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(eq(tasks.externalId, input.taskId))
+        .limit(1);
+      if (!task) throw new TRPCError({ code: 'NOT_FOUND', message: '任务不存在' });
+      const [row] = await ctx.db
+        .select({
+          callCount: sql<number>`COUNT(*)`,
+          costUsd: sql<string>`COALESCE(SUM(${llmCalls.costUsd}), 0)`,
+          ...costCoverageSelection(),
+        })
+        .from(llmCalls)
+        .where(eq(llmCalls.taskId, task.id));
+      const coverage = summarizeCost(row?.costUsd, row?.unknownCostCalls);
+      const callCount = Number(row?.callCount ?? 0);
+      return {
+        taskId: input.taskId,
+        callCount,
+        ...coverage,
+        totalCostUsd: callCount === 0 ? null : coverage.totalCostUsd,
+        costCnyCents:
+          callCount === 0 || coverage.totalCostUsd === null
+            ? null
+            : usdToCnyCents(coverage.totalCostUsd),
+        knownCostCnyCents: usdToCnyCents(coverage.knownCostUsd),
+        accounting: 'official_list_estimate' as const,
+      };
+    }),
 
   // ──────────────────────────────────────────────── topCostlyTasks ──
   topCostlyTasks: adminProcedure
@@ -490,12 +485,7 @@ export const adminFinanceRouter = router({
           ...costCoverageSelection(),
         })
         .from(llmCalls)
-        .where(
-          and(
-            gte(llmCalls.createdAt, monthStart),
-            sql`${llmCalls.taskId} IS NOT NULL`,
-          ),
-        )
+        .where(and(gte(llmCalls.createdAt, monthStart), sql`${llmCalls.taskId} IS NOT NULL`))
         .groupBy(llmCalls.taskId)
         .orderBy(desc(sql`COALESCE(SUM(${llmCalls.costUsd}), 0)`))
         .limit(limit);
@@ -530,9 +520,7 @@ export const adminFinanceRouter = router({
           calls: sql<number>`COUNT(*)`,
         })
         .from(llmCalls)
-        .where(
-          and(inArray(llmCalls.taskId, taskIds), gte(llmCalls.createdAt, monthStart)),
-        )
+        .where(and(inArray(llmCalls.taskId, taskIds), gte(llmCalls.createdAt, monthStart)))
         .groupBy(llmCalls.taskId, llmCalls.model);
       const modelByTask = new Map<number, string>();
       const callsByTask = new Map<number, Map<string, number>>();
@@ -553,7 +541,7 @@ export const adminFinanceRouter = router({
       return {
         tasks: aggregateRows.map((agg) => {
           const id = agg.taskId == null ? null : Number(agg.taskId);
-          const task = id == null ? null : taskById.get(id) ?? null;
+          const task = id == null ? null : (taskById.get(id) ?? null);
           const coverage = summarizeCost(agg.costUsd, agg.unknownCostCalls);
           const costUsd = coverage.totalCostUsd;
           return {
@@ -561,7 +549,7 @@ export const adminFinanceRouter = router({
             intent: task?.intent ?? null,
             title: task?.title ?? null,
             status: task?.status ?? null,
-            model: id == null ? null : modelByTask.get(id) ?? null,
+            model: id == null ? null : (modelByTask.get(id) ?? null),
             callCount: Number(agg.callCount),
             totalTokens: Number(agg.incompleteUsageCalls ?? 0) > 0 ? null : Number(agg.totalTokens),
             incompleteUsageCalls: Number(agg.incompleteUsageCalls ?? 0),

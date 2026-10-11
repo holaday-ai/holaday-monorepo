@@ -25,12 +25,8 @@ describe('safeDownloadFilename', () => {
   });
 
   it('removes path separators and unsafe characters', () => {
-    expect(safeDownloadFilename('../secret/report:final?.csv')).toBe(
-      'secret-report-final-.csv',
-    );
-    expect(safeDownloadFilename('folder\\report<>.pdf')).toBe(
-      'folder-report-.pdf',
-    );
+    expect(safeDownloadFilename('../secret/report:final?.csv')).toBe('secret-report-final-.csv');
+    expect(safeDownloadFilename('folder\\report<>.pdf')).toBe('folder-report-.pdf');
   });
 
   it('falls back when no safe filename remains', () => {

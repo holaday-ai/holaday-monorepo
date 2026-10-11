@@ -1,5 +1,3 @@
-import { CircleSlash, Clock3, Download, File, FileSpreadsheet, FileText, Film, Image as ImageIcon, Loader2, Presentation, RotateCcw } from 'lucide-react';
-import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
 import { useNearViewport } from '@/hooks/useNearViewport';
 import {
@@ -10,11 +8,11 @@ import {
   isUnavailableFileStatus,
 } from '@/lib/download-file';
 import {
+  type DownloadFileKind,
   classifyDownloadFileKind,
   downloadFileAvailability,
   downloadFileKindLabel,
   downloadFileMetaLabel,
-  type DownloadFileKind,
 } from '@/lib/file-download-card-copy';
 import { formatFileSize } from '@/lib/file-size';
 import {
@@ -23,6 +21,20 @@ import {
   useFileUnavailable,
 } from '@/lib/unavailable-file-registry';
 import { cn } from '@/lib/utils';
+import {
+  CircleSlash,
+  Clock3,
+  Download,
+  File,
+  FileSpreadsheet,
+  FileText,
+  Film,
+  Image as ImageIcon,
+  Loader2,
+  Presentation,
+  RotateCcw,
+} from 'lucide-react';
+import * as React from 'react';
 
 export interface FileDownloadPayload {
   fileId: string;
@@ -66,9 +78,9 @@ export function FileDownloadCard({
   const mountedRef = React.useRef(false);
   const [state, setState] = React.useState<'idle' | 'loading' | 'failed'>('idle');
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
-  const [previewState, setPreviewState] = React.useState<
-    'idle' | 'loading' | 'ready' | 'failed'
-  >('idle');
+  const [previewState, setPreviewState] = React.useState<'idle' | 'loading' | 'ready' | 'failed'>(
+    'idle',
+  );
   const [previewRetryKey, setPreviewRetryKey] = React.useState(0);
   const knownUnavailable = payload.unavailable === true;
   const fileReference = React.useMemo(
@@ -123,11 +135,7 @@ export function FileDownloadCard({
     // This state is an explicit request token: changing it reruns the
     // authenticated preview fetch without mutating the file URL.
     void previewRetryKey;
-    if (
-      !showPreview ||
-      knownAvailability === 'expired' ||
-      unavailable
-    ) {
+    if (!showPreview || knownAvailability === 'expired' || unavailable) {
       setPreviewUrl(null);
       setPreviewState('idle');
       return;
@@ -212,7 +220,8 @@ export function FileDownloadCard({
     } else {
       markFileUnavailableFromStatus(fileReference, result.status);
       setState(isUnavailableFileStatus(result.status) ? 'idle' : 'failed');
-      if (!isUnavailableFileStatus(result.status)) toast.show(downloadFailureMessage(result.status), 'error');
+      if (!isUnavailableFileStatus(result.status))
+        toast.show(downloadFailureMessage(result.status), 'error');
     }
   };
   const actionLabel = inactive
@@ -228,10 +237,10 @@ export function FileDownloadCard({
         inactive
           ? 'border-[#DCDDDD] bg-[#EFEFEF]/35'
           : state === 'failed'
-          ? 'border-[#FF0061]/40 bg-[#FF0061]/5'
-          : state === 'loading'
-            ? 'border-[#57479C]/40 bg-[#57479C]/5 opacity-90'
-            : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
+            ? 'border-[#FF0061]/40 bg-[#FF0061]/5'
+            : state === 'loading'
+              ? 'border-[#57479C]/40 bg-[#57479C]/5 opacity-90'
+              : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
       )}
     >
       {showPreview && inactive && (kind === 'image' || kind === 'video') ? (
@@ -273,7 +282,11 @@ export function FileDownloadCard({
           aria-label={kind === 'video' ? '视频预览待加载' : '图片预览待加载'}
           className="flex h-40 w-full items-center justify-center rounded-[6px] border border-[#DCDDDD] bg-[#EFEFEF]/50 text-muted-foreground/50 dark:border-white/10 dark:bg-white/5"
         >
-          {kind === 'video' ? <Film className="h-5 w-5" aria-hidden /> : <ImageIcon className="h-5 w-5" aria-hidden />}
+          {kind === 'video' ? (
+            <Film className="h-5 w-5" aria-hidden />
+          ) : (
+            <ImageIcon className="h-5 w-5" aria-hidden />
+          )}
         </span>
       ) : showPreview && previewState === 'failed' ? (
         <div className="flex h-40 w-full flex-col items-center justify-center gap-3 rounded-[6px] border border-dashed border-[#DCDDDD] bg-[#EFEFEF]/35 px-4 text-center text-[11px] leading-5 text-muted-foreground dark:border-white/10 dark:bg-white/5">
@@ -307,10 +320,10 @@ export function FileDownloadCard({
             inactive
               ? 'border-[#DCDDDD] bg-[#EFEFEF]/70 text-[#ADADAD]'
               : state === 'failed'
-              ? 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]'
-              : state === 'loading'
-                ? 'border-[#57479C]/30 bg-[#57479C]/10 text-[#57479C]'
-                : 'border-[#DCDDDD] bg-[#EFEFEF]/55 text-[#595757] group-hover:border-[#42C0EF]/45 group-hover:bg-[#42C0EF]/10 group-hover:text-[#42C0EF] dark:border-white/10 dark:bg-white/10 dark:text-foreground',
+                ? 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]'
+                : state === 'loading'
+                  ? 'border-[#57479C]/30 bg-[#57479C]/10 text-[#57479C]'
+                  : 'border-[#DCDDDD] bg-[#EFEFEF]/55 text-[#595757] group-hover:border-[#42C0EF]/45 group-hover:bg-[#42C0EF]/10 group-hover:text-[#42C0EF] dark:border-white/10 dark:bg-white/10 dark:text-foreground',
           )}
         >
           <FileTypeIcon kind={kind} />
@@ -322,18 +335,16 @@ export function FileDownloadCard({
           <div
             className={cn(
               'text-[11px]',
-              state === 'failed' && !inactive
-                ? 'text-[#FF0061]'
-                : 'text-muted-foreground',
+              state === 'failed' && !inactive ? 'text-[#FF0061]' : 'text-muted-foreground',
             )}
           >
             {inactive
               ? metaLabel
               : state === 'loading'
-              ? '正在下载…'
-              : state === 'failed'
-                ? '下载失败，点击重试'
-                : metaLabel}
+                ? '正在下载…'
+                : state === 'failed'
+                  ? '下载失败，点击重试'
+                  : metaLabel}
           </div>
         </div>
         {inactive ? (

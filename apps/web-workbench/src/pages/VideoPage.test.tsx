@@ -141,25 +141,42 @@ describe('VideoPage scenario-first production wiring', () => {
     await user.type(copy, '今天来介绍我们的新产品');
     await user.click(screen.getByRole('tab', { name: '自由创作' }));
     await user.click(screen.getByRole('tab', { name: '人物口播' }));
-    expect((screen.getByRole('textbox', { name: '口播文案' }) as HTMLTextAreaElement).value).toBe('今天来介绍我们的新产品');
-    expect((screen.getByRole('button', { name: '准备生成' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('textbox', { name: '口播文案' }) as HTMLTextAreaElement).value).toBe(
+      '今天来介绍我们的新产品',
+    );
+    expect((screen.getByRole('button', { name: '准备生成' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
     expect(mocks.createTask).not.toHaveBeenCalled();
   });
 
   it('still requires per-generation consent when presenter assets are ready', async () => {
-    mocks.onboardingStatusQuery.mockResolvedValue({hasVoice:true,hasBaseVideo:true,authorized:true,baseVideoIssue:null});
+    mocks.onboardingStatusQuery.mockResolvedValue({
+      hasVoice: true,
+      hasBaseVideo: true,
+      authorized: true,
+      baseVideoIssue: null,
+    });
     const user = userEvent.setup();
     renderPage();
     await user.click(screen.getByRole('tab', { name: '人物口播' }));
-    await user.type(await screen.findByRole('textbox', { name: '口播文案' }), '今天来介绍我们的新产品');
-    expect((screen.getByRole('button', { name: '准备生成' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.type(
+      await screen.findByRole('textbox', { name: '口播文案' }),
+      '今天来介绍我们的新产品',
+    );
+    expect((screen.getByRole('button', { name: '准备生成' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
     await user.click(screen.getByRole('checkbox', { name: /我确认：口播所用/ }));
     await user.click(screen.getByRole('button', { name: '准备生成' }));
-    await waitFor(()=>expect(mocks.createTask).toHaveBeenCalledTimes(1));
-    expect(mocks.createTask.mock.calls[0]?.[6]).toEqual({tab:'ip_person',aspectRatio:'9:16'});
-    await waitFor(()=>expect((screen.getByRole('checkbox', { name: /我确认：口播所用/ }) as HTMLInputElement).checked).toBe(false));
+    await waitFor(() => expect(mocks.createTask).toHaveBeenCalledTimes(1));
+    expect(mocks.createTask.mock.calls[0]?.[6]).toEqual({ tab: 'ip_person', aspectRatio: '9:16' });
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('checkbox', { name: /我确认：口播所用/ }) as HTMLInputElement).checked,
+      ).toBe(false),
+    );
   });
-
 });
 
 it('closes the reference-video dialog with Escape and restores its trigger without submitting', async () => {
@@ -176,18 +193,20 @@ it('closes the reference-video dialog with Escape and restores its trigger witho
 
 it('offers pet image-to-video separately from human action remake', async () => {
   renderPage();
-  await userEvent.click(await screen.findByRole('tab', {name:'宠物动起来'}));
+  await userEvent.click(await screen.findByRole('tab', { name: '宠物动起来' }));
   expect(screen.getByLabelText('宠物照片')).toBeTruthy();
-  expect(screen.getByRole('button', {name:'获取宠物视频报价'})).toBeTruthy();
-  expect(screen.queryByRole('button', {name:/参考视频 2–30秒/})).toBeNull();
+  expect(screen.getByRole('button', { name: '获取宠物视频报价' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /参考视频 2–30秒/ })).toBeNull();
   expect(mocks.createTask).not.toHaveBeenCalled();
 });
 
-
-it.each(['自由创作', '动作复刻', '宠物动起来', '人物口播'])('shows refund and retry limits before submitting in %s mode', async (mode) => {
-  const user = userEvent.setup();
-  renderPage();
-  await user.click(await screen.findByRole('tab', { name: mode }));
-  expect(screen.getByText('质量不合格会自动退款，最多可重试 3 次')).toBeTruthy();
-  expect(mocks.createTask).not.toHaveBeenCalled();
-});
+it.each(['自由创作', '动作复刻', '宠物动起来', '人物口播'])(
+  'shows refund and retry limits before submitting in %s mode',
+  async (mode) => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('tab', { name: mode }));
+    expect(screen.getByText('质量不合格会自动退款，最多可重试 3 次')).toBeTruthy();
+    expect(mocks.createTask).not.toHaveBeenCalled();
+  },
+);

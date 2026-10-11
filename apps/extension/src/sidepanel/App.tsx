@@ -19,7 +19,11 @@ import { useEffect, useRef, useState } from 'react';
 import { ORCHESTRATOR_HTTP } from '../shared/config.js';
 import { humanizeExtensionError } from '../shared/error-copy.js';
 import { fetchWithDeadline, responseJsonWithDeadline } from '../shared/http.js';
-import { composeContextTail, getActivePageContext, type PageContext } from '../shared/page-context.js';
+import {
+  type PageContext,
+  composeContextTail,
+  getActivePageContext,
+} from '../shared/page-context.js';
 import { sendRuntimeMessageWithRetry } from '../shared/runtime-message.js';
 import {
   type StoredUser,
@@ -33,19 +37,19 @@ import {
   setStoredUser,
 } from '../shared/storage.js';
 import {
-  normalizeTaskSnapshot,
+  type CreateTaskResponse,
+  didTokenSwitchDuringTaskCreate,
+  extractCreatedTaskId,
+  shouldClearAuthAfterCreateUnauthorized,
+  shouldClearAuthAfterUnauthorized,
+} from './create-task-response.js';
+import { MAX_SIDE_PANEL_INTENT_CHARS, normalizeSidePanelIntent } from './task-intent.js';
+import {
   type TaskStatus,
   type TaskView,
   type VisionProgressView,
+  normalizeTaskSnapshot,
 } from './task-snapshot.js';
-import {
-  didTokenSwitchDuringTaskCreate,
-  extractCreatedTaskId,
-  shouldClearAuthAfterUnauthorized,
-  shouldClearAuthAfterCreateUnauthorized,
-  type CreateTaskResponse,
-} from './create-task-response.js';
-import { MAX_SIDE_PANEL_INTENT_CHARS, normalizeSidePanelIntent } from './task-intent.js';
 
 type Status = 'idle' | 'loading' | 'connected' | 'error';
 
@@ -118,7 +122,9 @@ export function App() {
     try {
       do {
         tasksRefreshQueued.current = false;
-        const resp = await sendRuntimeMessageWithRetry<{ tasks?: unknown }>({ type: 'holaday.tasks' });
+        const resp = await sendRuntimeMessageWithRetry<{ tasks?: unknown }>({
+          type: 'holaday.tasks',
+        });
         if (mountedRef.current && resp && 'tasks' in resp) {
           setTasks(normalizeTaskSnapshot(resp.tasks));
         }
@@ -263,10 +269,7 @@ export function App() {
     const tabsListener = () => {
       void refresh();
     };
-    const updatedListener = (
-      _tabId: number,
-      info: chrome.tabs.TabChangeInfo,
-    ) => {
+    const updatedListener = (_tabId: number, info: chrome.tabs.TabChangeInfo) => {
       // Re-read on URL changes and completed loads. Many SPA
       // transitions update title/content without a new tab URL.
       if (info.url || info.status === 'complete') void refresh();
@@ -356,9 +359,7 @@ export function App() {
       const liftedToken = normalizeAccessToken(resp?.token);
       if (!liftedToken) {
         setStatus('error');
-        setError(
-          '没找到已登录的 holaday.ai 标签页。请到 holaday.ai 登录后再点重试。',
-        );
+        setError('没找到已登录的 holaday.ai 标签页。请到 holaday.ai 登录后再点重试。');
         return;
       }
       const result = await fetchMe(liftedToken);
@@ -371,7 +372,8 @@ export function App() {
         if (shouldClearAuthAfterUnauthorized(current, liftedToken)) {
           await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
         } else if (current) {
-          if (mountedRef.current && seq === authSyncSeq.current) setStatus(user ? 'connected' : 'idle');
+          if (mountedRef.current && seq === authSyncSeq.current)
+            setStatus(user ? 'connected' : 'idle');
           return;
         }
         if (!mountedRef.current || seq !== authSyncSeq.current) return;
@@ -511,10 +513,7 @@ export function App() {
   const activeTask =
     (activeTaskId && tasks.find((t) => t.taskId === activeTaskId)) ||
     tasks.find(
-      (t) =>
-        t.status === 'planning' ||
-        t.status === 'executing' ||
-        t.status === 'awaiting_user',
+      (t) => t.status === 'planning' || t.status === 'executing' || t.status === 'awaiting_user',
     ) ||
     null;
 

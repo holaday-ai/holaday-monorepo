@@ -1,5 +1,5 @@
 import { PARTNER_MEMBERSHIP_PRICE_CNY_CENTS } from '@holaday/shared-types';
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { users } from '../../db/schema/users.js';
 
 const {
@@ -103,10 +103,12 @@ class FakeUserLookupDb {
   readonly users: Array<{ id: number; externalId: string }>;
   readonly selectTables: string[] = [];
 
-  constructor(usersInput: Array<{ id: number; externalId: string }> = [
-    { id: 123, externalId: 'usr_partner' },
-    { id: 456, externalId: 'usr_inviter' },
-  ]) {
+  constructor(
+    usersInput: Array<{ id: number; externalId: string }> = [
+      { id: 123, externalId: 'usr_partner' },
+      { id: 456, externalId: 'usr_inviter' },
+    ],
+  ) {
     this.users = usersInput;
   }
 
@@ -567,7 +569,9 @@ describe('partnerRouter mutations', () => {
   it('blocks daily activity before membership is active', async () => {
     getActiveMembershipMock.mockResolvedValueOnce(null);
 
-    await expect(partnerRouter.createCaller(makeContext()).claimDailyActivity()).rejects.toMatchObject({
+    await expect(
+      partnerRouter.createCaller(makeContext()).claimDailyActivity(),
+    ).rejects.toMatchObject({
       code: 'PRECONDITION_FAILED',
       message: 'partner membership required',
     });
@@ -711,9 +715,7 @@ describe('partnerRouter mutations', () => {
 
   it('blocks KYC submission before membership and does not regress passed KYC', async () => {
     getActiveMembershipMock.mockResolvedValueOnce(null);
-    await expect(
-      partnerRouter.createCaller(makeContext()).submitKyc({}),
-    ).rejects.toMatchObject({
+    await expect(partnerRouter.createCaller(makeContext()).submitKyc({})).rejects.toMatchObject({
       code: 'PRECONDITION_FAILED',
       message: 'partner membership required',
     });
@@ -726,9 +728,7 @@ describe('partnerRouter mutations', () => {
       expiresAt: new Date('2027-07-03T00:00:00.000Z'),
     });
     getKycStatusMock.mockResolvedValueOnce('passed');
-    await expect(
-      partnerRouter.createCaller(makeContext()).submitKyc({}),
-    ).rejects.toMatchObject({
+    await expect(partnerRouter.createCaller(makeContext()).submitKyc({})).rejects.toMatchObject({
       code: 'CONFLICT',
       message: 'partner KYC already passed',
     });
@@ -737,9 +737,11 @@ describe('partnerRouter mutations', () => {
 
   it('maps missing inviter and referral conflicts for invite recording', async () => {
     await expect(
-      partnerRouter.createCaller(makeContext(new FakeUserLookupDb([{ id: 123, externalId: 'usr_partner' }]))).recordInvite({
-        inviterExternalId: 'usr_missing',
-      }),
+      partnerRouter
+        .createCaller(makeContext(new FakeUserLookupDb([{ id: 123, externalId: 'usr_partner' }])))
+        .recordInvite({
+          inviterExternalId: 'usr_missing',
+        }),
     ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
       message: 'inviter user was not found',

@@ -1,9 +1,3 @@
-import { modelProviderFailureMessage } from '../../llm/provider-error-diagnostics.js';
-import {
-  createDescriptionActionGate,
-  describeUserBrowserAction,
-} from '../browser-tools/unified-action-gate.js';
-import { createExternalBrowserPark } from './agent-loop.js';
 import {
   type SelectedChromeSessionCommand,
   selectedChromeSessionCommandSchema,
@@ -19,11 +13,17 @@ import {
   type NeutralToolResultBlock,
   type NeutralToolUseBlock,
 } from '../../llm/messages-adapter.js';
+import { modelProviderFailureMessage } from '../../llm/provider-error-diagnostics.js';
 import type {
   BrowserActionCaptureRecorder,
   CapturedToolCall,
 } from '../../playbook/evolution/capture-recorder.js';
+import {
+  createDescriptionActionGate,
+  describeUserBrowserAction,
+} from '../browser-tools/unified-action-gate.js';
 import type { LlmCallRecorder } from '../llm-call-recorder.js';
+import { createExternalBrowserPark } from './agent-loop.js';
 import type { RunSupercarOptions, SupercarOutcome, SupercarTickEvent } from './agent-loop.js';
 import type { BrowserControl } from './browser-control.js';
 import { recordedBrowserAdapter } from './recorded-browser-adapter.js';

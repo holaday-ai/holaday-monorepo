@@ -487,7 +487,7 @@ describe('runSupercarTask credential takeover', () => {
     let currentUrl = 'https://example.com/login';
     const page = {
       url: () => currentUrl,
-      title: vi.fn(async () => currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard'),
+      title: vi.fn(async () => (currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard')),
       evaluate: vi.fn(async () => ''),
       mouse: {
         move: vi.fn(async () => undefined),
@@ -590,9 +590,7 @@ describe('runSupercarTask credential takeover', () => {
           'tool_use',
         ),
       )
-      .mockResolvedValueOnce(
-        response([{ type: 'text', text: '已进入工作台。' }], 'end_turn'),
-      );
+      .mockResolvedValueOnce(response([{ type: 'text', text: '已进入工作台。' }], 'end_turn'));
 
     let currentUrl = 'about:blank';
     const page = {
@@ -600,7 +598,7 @@ describe('runSupercarTask credential takeover', () => {
       goto: vi.fn(async (url: string) => {
         currentUrl = url;
       }),
-      title: vi.fn(async () => currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard'),
+      title: vi.fn(async () => (currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard')),
       evaluate: vi.fn(async (fn: unknown) => {
         if (String(fn).includes('textLength')) {
           return { textLength: 20, images: 0, iframes: 0, inputs: 1, buttons: 1 };
@@ -767,7 +765,7 @@ describe('runSupercarTask credential takeover', () => {
     let currentUrl = 'https://example.com/login';
     const page = {
       url: () => currentUrl,
-      title: vi.fn(async () => currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard'),
+      title: vi.fn(async () => (currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard')),
       evaluate: vi.fn(async () => ''),
       mouse: {
         move: vi.fn(async () => undefined),
@@ -826,20 +824,15 @@ describe('runSupercarTask credential takeover', () => {
   it('accepts an immediate reply when a text-only turn requests browser takeover', async () => {
     createMessage
       .mockResolvedValueOnce(
-        response(
-          [{ type: 'text', text: '请接管浏览器完成登录，然后回来继续。' }],
-          'end_turn',
-        ),
+        response([{ type: 'text', text: '请接管浏览器完成登录，然后回来继续。' }], 'end_turn'),
       )
-      .mockResolvedValueOnce(
-        response([{ type: 'text', text: '已进入工作台。' }], 'end_turn'),
-      );
+      .mockResolvedValueOnce(response([{ type: 'text', text: '已进入工作台。' }], 'end_turn'));
 
     let currentUrl = 'https://example.com/login';
     const page = {
       url: () => currentUrl,
-      title: vi.fn(async () => currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard'),
-      evaluate: vi.fn(async () => currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard'),
+      title: vi.fn(async () => (currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard')),
+      evaluate: vi.fn(async () => (currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard')),
     };
     const executor = {
       resetPageForTask: vi.fn(async () => undefined),
@@ -884,9 +877,7 @@ describe('runSupercarTask credential takeover', () => {
           'tool_use',
         ),
       )
-      .mockResolvedValueOnce(
-        response([{ type: 'text', text: '操作已完成。' }], 'end_turn'),
-      );
+      .mockResolvedValueOnce(response([{ type: 'text', text: '操作已完成。' }], 'end_turn'));
 
     const page = {
       url: () => 'https://example.com/editor',

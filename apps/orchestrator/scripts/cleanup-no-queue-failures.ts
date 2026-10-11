@@ -66,9 +66,7 @@ async function main(): Promise<void> {
       ),
     );
 
-  console.log(
-    `[cleanup] window: last ${WINDOW_HOURS}h (since ${cutoff.toISOString()})`,
-  );
+  console.log(`[cleanup] window: last ${WINDOW_HOURS}h (since ${cutoff.toISOString()})`);
   console.log(`[cleanup] candidates matched: ${candidates.length}`);
   for (const r of candidates) {
     const msgPreview = (r.errorMessage ?? '').slice(0, 100).replace(/\s+/g, ' ');

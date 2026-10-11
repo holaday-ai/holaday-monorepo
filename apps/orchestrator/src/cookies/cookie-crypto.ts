@@ -90,10 +90,7 @@ export function encryptCookieJson(plaintext: string): EncryptedCookieBlob {
   const dataKey = randomBytes(KEY_LEN);
   const ivBlob = randomBytes(IV_LEN);
   const blobCipher = createCipheriv(ALGO, dataKey, ivBlob);
-  const encryptedBlob = Buffer.concat([
-    blobCipher.update(plaintext, 'utf8'),
-    blobCipher.final(),
-  ]);
+  const encryptedBlob = Buffer.concat([blobCipher.update(plaintext, 'utf8'), blobCipher.final()]);
   const encryptionTag = blobCipher.getAuthTag();
 
   const ivKey = randomBytes(IV_LEN);
@@ -129,10 +126,7 @@ export function decryptCookieJson(blob: EncryptedCookieBlob): string {
   const wrappedDataKey = blob.encryptedKey.subarray(IV_LEN + TAG_LEN);
   const keyDecipher = createDecipheriv(ALGO, masterKey, ivKey);
   keyDecipher.setAuthTag(tagKey);
-  const dataKey = Buffer.concat([
-    keyDecipher.update(wrappedDataKey),
-    keyDecipher.final(),
-  ]);
+  const dataKey = Buffer.concat([keyDecipher.update(wrappedDataKey), keyDecipher.final()]);
 
   const blobDecipher = createDecipheriv(ALGO, dataKey, blob.encryptionIv);
   blobDecipher.setAuthTag(blob.encryptionTag);

@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
-import { Folder, Check } from 'lucide-react';
-import { CreativePopover } from './CreativePopover';
-import { trpc } from '@/lib/trpc';
 import { normalizeProjectRows } from '@/lib/project-page-state';
+import { trpc } from '@/lib/trpc';
 import type { UiProject } from '@/types/task';
+import { Check, Folder } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { CreativePopover } from './CreativePopover';
 
 /** Selection uses existing personal projects; association failure never recreates a task. */
 export function useCreativeProject() {

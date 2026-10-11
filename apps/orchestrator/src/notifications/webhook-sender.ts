@@ -30,7 +30,7 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import type { Logger } from 'pino';
-import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
+import { Agent, type Dispatcher, fetch as undiciFetch } from 'undici';
 import { isPublicInternetAddress } from '../agent/browser-network-policy.js';
 import { checkNotificationWebhookUrl, describeWebhookForLog } from './webhook-url-policy.js';
 
@@ -88,9 +88,7 @@ export interface WebhookResolvedAddress {
   family: 4 | 6;
 }
 
-export type WebhookHostResolver = (
-  hostname: string,
-) => Promise<readonly WebhookResolvedAddress[]>;
+export type WebhookHostResolver = (hostname: string) => Promise<readonly WebhookResolvedAddress[]>;
 
 export interface ValidatedWebhookTarget {
   url: string;
@@ -105,7 +103,10 @@ const PRIVATE_TARGET_MESSAGE =
 const DNS_TARGET_MESSAGE = 'Webhook 目标暂时无法安全解析，请检查地址后重试。';
 
 function normaliseHostname(hostname: string): string {
-  return hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  return hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.$/, '');
 }
 
 function isBlockedHostname(hostname: string): boolean {
@@ -169,8 +170,7 @@ export async function validateWebhookTarget(
   }
   if (
     resolved.some(
-      ({ address, family }) =>
-        isIP(address) !== family || !isPublicInternetAddress(address),
+      ({ address, family }) => isIP(address) !== family || !isPublicInternetAddress(address),
     )
   ) {
     throw new Error(PRIVATE_TARGET_MESSAGE);
@@ -225,17 +225,14 @@ async function fetchWebhookHop(
 ): Promise<Response> {
   const dispatcher = createPinnedDispatcher(target);
   try {
-    const response = await fetchImpl(
-      target.url,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-        signal,
-        redirect: 'manual',
-        dispatcher,
-      } as unknown as RequestInit,
-    );
+    const response = await fetchImpl(target.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      signal,
+      redirect: 'manual',
+      dispatcher,
+    } as unknown as RequestInit);
     const snapshot = new Response(null, {
       status: response.status,
       statusText: response.statusText,
@@ -297,10 +294,7 @@ export function formatPresetMessage(ctx: WebhookContext): string {
  *
  * Pure: doesn't mutate the input.
  */
-export function substituteTemplate(
-  template: unknown,
-  ctx: WebhookContext,
-): unknown {
+export function substituteTemplate(template: unknown, ctx: WebhookContext): unknown {
   if (typeof template === 'string') {
     return template
       .replace(/\{\{\s*title\s*\}\}/g, ctx.title)
@@ -329,10 +323,7 @@ export function substituteTemplate(
  * Throws on platform='custom' with no template (caller validation
  * problem; we don't want to silently POST an empty body).
  */
-export function buildPayload(
-  channel: WebhookChannel,
-  ctx: WebhookContext,
-): unknown {
+export function buildPayload(channel: WebhookChannel, ctx: WebhookContext): unknown {
   const text = formatPresetMessage(ctx);
   if (channel.platform === 'wecom') {
     return { msgtype: 'text', text: { content: text } };
@@ -371,8 +362,7 @@ export async function sendWebhook(
   ctx: WebhookContext,
   deps: WebhookSenderDeps = {},
 ): Promise<SendResult> {
-  const fetchImpl =
-    deps.fetch ?? (undiciFetch as unknown as typeof globalThis.fetch);
+  const fetchImpl = deps.fetch ?? (undiciFetch as unknown as typeof globalThis.fetch);
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxAttempts = deps.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
 
@@ -422,10 +412,7 @@ export async function sendWebhook(
           res.status < 400
             ? `HTTP ${res.status} (redirect refused)`
             : `HTTP ${res.status} (permanent)`;
-        deps.logger?.warn(
-          { ...where, status: res.status, attempt },
-          'webhook permanent failure',
-        );
+        deps.logger?.warn({ ...where, status: res.status, attempt }, 'webhook permanent failure');
         return { ok: false, status: res.status, attempt, error: lastError };
       }
       lastError = `HTTP ${res.status}`;

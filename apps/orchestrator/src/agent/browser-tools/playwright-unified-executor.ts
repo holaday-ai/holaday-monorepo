@@ -1,6 +1,6 @@
-import { CloudObservation } from './cloud-observation.js';
 import type { Page } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
+import { CloudObservation } from './cloud-observation.js';
 import { PageRedactionError, REDACTION_FAILED_COPY, redactPageText } from './page-redaction.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
@@ -8,7 +8,13 @@ import type { UnifiedBrowserAction } from './unified-tools.js';
 export interface UnifiedToolResult {
   ok: boolean;
   interruption?: { reason: string; message: string };
-  effect?: { urlChanged: boolean; formChanged: boolean; domChanged: boolean; networkCategories: string[]; unexpected: boolean };
+  effect?: {
+    urlChanged: boolean;
+    formChanged: boolean;
+    domChanged: boolean;
+    networkCategories: string[];
+    unexpected: boolean;
+  };
   text: string;
   image?: { mediaType: 'image/jpeg'; data: string };
   /** Present on `download`: where the file was saved by the host. */
@@ -198,7 +204,8 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   const maxExtract = options.maxExtractChars ?? DEFAULT_MAX_EXTRACT_CHARS;
   const maxUrlChars = options.maxUrlChars ?? DEFAULT_MAX_URL_CHARS;
   let activeFrame = page.mainFrame();
-  const byRef = (ref: string) => observation?.locator(activeFrame,ref) ?? activeFrame.locator(`aria-ref=${ref}`);
+  const byRef = (ref: string) =>
+    observation?.locator(activeFrame, ref) ?? activeFrame.locator(`aria-ref=${ref}`);
 
   const snapshotWithLinks = async (): Promise<{ text: string; links: string[] }> => {
     // Redact before truncating: a secret straddling the cut must not survive.
@@ -245,18 +252,29 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   async function execute(action: UnifiedBrowserAction): Promise<UnifiedToolResult> {
     try {
       switch (action.tool) {
-        case 'read_page': case 'get_page_text': case 'links': case 'tables': case 'scroll_until': case 'list_tabs': case 'switch_tab': return fail('capability_missing');
+        case 'read_page':
+        case 'get_page_text':
+        case 'links':
+        case 'tables':
+        case 'scroll_until':
+        case 'list_tabs':
+        case 'switch_tab':
+          return fail('capability_missing');
         case 'snapshot': {
           const snapshot = await snapshotWithLinks();
           return { ok: true, text: snapshot.text, links: snapshot.links, url: page.url() };
         }
         case 'click':
-          if (observation) { await byRef(action.ref).click({timeout}); return done(`已点击 ${action.ref}`); }
+          if (observation) {
+            await byRef(action.ref).click({ timeout });
+            return done(`已点击 ${action.ref}`);
+          }
           return { ...(await clickFollowingNewTab(action.ref)), url: page.url() };
         case 'type': {
           const target = byRef(action.ref);
           await target.fill(action.text, { timeout });
-          if (observation && await target.inputValue() !== action.text) return fail('输入值核验失败');
+          if (observation && (await target.inputValue()) !== action.text)
+            return fail('输入值核验失败');
           if (action.submit) await target.press('Enter', { timeout });
           return done(`已在 ${action.ref} 输入${action.submit ? '并提交' : ''}`);
         }
@@ -361,13 +379,17 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   const wrappedExecute = async (action: UnifiedBrowserAction): Promise<UnifiedToolResult> => {
     if (!observation) return execute(action);
     try {
-      const interruption=observation.interruption();
-      if(interruption)return {ok:false,text:interruption.message,interruption};
+      const interruption = observation.interruption();
+      if (interruption) return { ok: false, text: interruption.message, interruption };
       const context = observation.resolve(action);
-      page = context.page; activeFrame = context.frame;
-      if(action.tool==='scroll_until') return await observation.act(action,async()=> (await observation.read(action))!);
-      if(action.tool==='screenshot' && await observation.sensitive(context.page)) return {ok:true,text:'敏感页面截图已遮挡'};
-      if(action.tool==='extract') return (await observation.read({...action,tool:'get_page_text',maxChars:16000}))!;
+      page = context.page;
+      activeFrame = context.frame;
+      if (action.tool === 'scroll_until')
+        return await observation.act(action, async () => (await observation.read(action))!);
+      if (action.tool === 'screenshot' && (await observation.sensitive(context.page)))
+        return { ok: true, text: '敏感页面截图已遮挡' };
+      if (action.tool === 'extract')
+        return (await observation.read({ ...action, tool: 'get_page_text', maxChars: 16000 }))!;
       const read = await observation.read(action);
       if (read) return read;
       return await observation.act(action, () => execute(action));
@@ -375,7 +397,12 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
       return fail('页面或 cursor/ref 已失效，请重新 read_page / snapshot 后操作');
     }
   };
-  return { execute: wrappedExecute, snapshot: snapshotText, observation, dispose: () => observation?.dispose() };
+  return {
+    execute: wrappedExecute,
+    snapshot: snapshotText,
+    observation,
+    dispose: () => observation?.dispose(),
+  };
 }
 
 function done(text: string): UnifiedToolResult {

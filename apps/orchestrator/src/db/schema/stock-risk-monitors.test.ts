@@ -26,11 +26,13 @@ describe('stock risk monitor schema', () => {
     ]);
 
     const indexes = getTableConfig(stockRiskMonitors).indexes.map((index) => index.config.name);
-    expect(indexes).toEqual(expect.arrayContaining([
-      'uk_stock_risk_monitors_external_id',
-      'uk_stock_risk_monitors_user_symbol',
-      'uk_stock_risk_monitors_plan',
-    ]));
+    expect(indexes).toEqual(
+      expect.arrayContaining([
+        'uk_stock_risk_monitors_external_id',
+        'uk_stock_risk_monitors_user_symbol',
+        'uk_stock_risk_monitors_plan',
+      ]),
+    );
     expect(Object.keys(getTableColumns(stockRiskMonitors))).not.toEqual(
       expect.arrayContaining(['prompt', 'income', 'assets', 'riskTolerance', 'freeText']),
     );

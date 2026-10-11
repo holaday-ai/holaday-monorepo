@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type ScheduledTaskRow,
   calendarRruleString,
   normalizeScheduledTaskRows,
   pickStatusColor,
   rowToEventInput,
-  type ScheduledTaskRow,
 } from './event-mapping.js';
 
 function localStamp(date: Date): string {
@@ -182,10 +182,7 @@ describe('rowToEventInput', () => {
   });
 
   it('rrule row → emits rrule field + duration object', () => {
-    const events = rowToEventInput(
-      makeRow({ rrule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR' }),
-      { now },
-    );
+    const events = rowToEventInput(makeRow({ rrule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR' }), { now });
     expect(events).toHaveLength(1);
     const ev = events[0]!;
     // Anchored at nextRunAt as a floating (local wall-clock) DTSTART.
@@ -257,25 +254,19 @@ describe('rowToEventInput', () => {
   });
 
   it('invalid nextRunAt → empty array (defensive)', () => {
-    const events = rowToEventInput(
-      makeRow({ nextRunAt: 'not-a-date' }),
-      { now },
-    );
+    const events = rowToEventInput(makeRow({ nextRunAt: 'not-a-date' }), { now });
     expect(events).toEqual([]);
   });
 
   it('custom durationMinutes flows into end-time calc', () => {
     const events = rowToEventInput(makeRow({ durationMinutes: 90 }), { now });
-    expect(
-      (events[0]?.end as Date).getTime() - (events[0]?.start as Date).getTime(),
-    ).toBe(90 * 60_000);
+    expect((events[0]?.end as Date).getTime() - (events[0]?.start as Date).getTime()).toBe(
+      90 * 60_000,
+    );
   });
 
   it('clamps recurring event duration before passing it to FullCalendar', () => {
-    const events = rowToEventInput(
-      makeRow({ durationMinutes: 0, rrule: 'FREQ=DAILY' }),
-      { now },
-    );
+    const events = rowToEventInput(makeRow({ durationMinutes: 0, rrule: 'FREQ=DAILY' }), { now });
     expect(events[0]?.duration).toEqual({ minutes: 1 });
     expect((events[0]?.extendedProps as Record<string, unknown>).durationMinutes).toBe(1);
   });

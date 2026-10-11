@@ -118,7 +118,14 @@ export function resolveCtripHotelUrl(opts: {
   const checkin = fmtDate(addDays(now, 1));
   const checkout = fmtDate(addDays(now, 3));
   if (!city) {
-    return { city: null, knownSchema: false, url: null, cityId: null, checkin: null, checkout: null };
+    return {
+      city: null,
+      knownSchema: false,
+      url: null,
+      cityId: null,
+      checkin: null,
+      checkout: null,
+    };
   }
   const cityId = CTRIP_CITY_IDS[city];
   if (cityId == null) {
@@ -194,7 +201,8 @@ const LOCATION_RE =
 const HOTEL_SIGNAL_RE =
   /[1-5]\.\d\s*分?|[五四三二]钻|豪华型|高档型|舒适型|经济型|\d+\s*条(?:点评|评价)|星级|含早|早餐|大床|双床|入住/;
 // Ad / ranking / coupon cards — never extract these as hotels.
-const AD_CARD_RE = /广告|榜单|必住榜|口碑榜|金榜|银榜|领券|立减|满减|超值券|限时(?:抢|秒)|会员日|大促|专享券/;
+const AD_CARD_RE =
+  /广告|榜单|必住榜|口碑榜|金榜|银榜|领券|立减|满减|超值券|限时(?:抢|秒)|会员日|大促|专享券/;
 // First metadata token that ends the hotel-name prefix in a card chunk.
 const NAME_END_RE =
   /[1-5]\.\d|[五四三二]钻|豪华型|高档型|舒适型|经济型|星级|\d+\s*条(?:点评|评价)|[¥￥]|预订|[一-龥]{2,10}(?:商圈|cbd|CBD|新区|开发区|度假区|广场|火车站|高铁站|机场|地铁站|大学|景区|步行街|古镇|老街)|\d{2,}(?:人|条)/;
@@ -207,11 +215,19 @@ const NAME_NOISE_RE =
  *  it's the leading run before the first metadata token, page-noise
  *  stripped. Returns '' when nothing name-like remains. */
 function extractName(card: string): string {
-  const chunk = card.split(/[\n\r]+/).map((s) => s.trim()).filter(Boolean).pop() ?? card.trim();
+  const chunk =
+    card
+      .split(/[\n\r]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .pop() ?? card.trim();
   const end = chunk.search(NAME_END_RE);
   let name = (end > 0 ? chunk.slice(0, end) : chunk).trim();
   name = name.replace(NAME_NOISE_RE, '').trim();
-  name = name.replace(/^[\s|·,，、.。:：\-]+/, '').replace(/[\s|·,，、.。:：\-]+$/, '').trim();
+  name = name
+    .replace(/^[\s|·,，、.。:：\-]+/, '')
+    .replace(/[\s|·,，、.。:：\-]+$/, '')
+    .trim();
   if (name.length < 2 || name.length > 34) return '';
   if (!/[一-龥A-Za-z]/.test(name)) return '';
   return name;

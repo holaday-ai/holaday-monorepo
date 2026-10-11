@@ -28,7 +28,12 @@ async function workspaceOption(name: RegExp | string) {
 }
 
 async function switchPendingWorkspace(name: RegExp | string) {
-  fireEvent.pointerDown(screen.getByTitle('切换工作区'), { button: 0, ctrlKey: false, pointerId: 1, pointerType: 'mouse' });
+  fireEvent.pointerDown(screen.getByTitle('切换工作区'), {
+    button: 0,
+    ctrlKey: false,
+    pointerId: 1,
+    pointerType: 'mouse',
+  });
   fireEvent.click(await screen.findByRole('menuitem', { name }));
 }
 
@@ -2212,11 +2217,13 @@ describe('ProjectsPage workspace mutation reconciliation', () => {
 });
 
 it('hydrates project search from the URL and preserves other query parameters while typing', async () => {
- const user=userEvent.setup();renderPage('/projects?q=研究&keep=1');
- const input=screen.getByRole('textbox',{name:'搜索项目'});
- expect((input as HTMLInputElement).value).toBe('研究');
- await user.clear(input);await user.type(input,'保留');
- const url=new URL(screen.getByTestId('location-probe').textContent!, 'https://example.test');
- expect(url.searchParams.get('q')).toBe('保留');
- expect(url.searchParams.get('keep')).toBe('1');
+  const user = userEvent.setup();
+  renderPage('/projects?q=研究&keep=1');
+  const input = screen.getByRole('textbox', { name: '搜索项目' });
+  expect((input as HTMLInputElement).value).toBe('研究');
+  await user.clear(input);
+  await user.type(input, '保留');
+  const url = new URL(screen.getByTestId('location-probe').textContent!, 'https://example.test');
+  expect(url.searchParams.get('q')).toBe('保留');
+  expect(url.searchParams.get('keep')).toBe('1');
 });

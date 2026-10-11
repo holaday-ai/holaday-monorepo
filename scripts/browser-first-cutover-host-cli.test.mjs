@@ -3,8 +3,8 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const sourceDirectory = fileURLToPath(new URL('.', import.meta.url));
 

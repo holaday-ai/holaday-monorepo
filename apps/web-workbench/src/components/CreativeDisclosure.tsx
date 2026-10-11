@@ -1,5 +1,5 @@
-import { useId, useState, type ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
+import { type ReactNode, useId, useState } from 'react';
 
 /** Keep occupied space animated in both directions; collapsed contents cannot receive focus. */
 export function CreativeDisclosure({ label, children }: { label: string; children: ReactNode }) {

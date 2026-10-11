@@ -1,6 +1,6 @@
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { test } from 'node:test';
 import vm from 'node:vm';
 
 test('read-only probe discovers the flat durable store record and queries the live socket CLI', () => {

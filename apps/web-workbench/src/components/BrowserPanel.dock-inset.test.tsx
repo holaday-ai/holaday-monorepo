@@ -3,18 +3,39 @@ import { act, cleanup, render, renderHook } from '@testing-library/react';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const api = vi.hoisted(() => ({ query: vi.fn(), mutate: vi.fn(), nav: vi.fn(), refresh: vi.fn(), abort: vi.fn() }));
-vi.mock('@/lib/trpc', () => ({ trpc: { tasks: {
-  browserControlState: { query: api.query }, browserControl: { mutate: api.mutate }, browserNav: { mutate: api.nav },
-  abort: { mutate: api.abort },
-} } }));
-vi.mock('@/lib/use-stream-token', () => ({ useStreamToken: () => ({ token: 'test', refresh: api.refresh }) }));
+const api = vi.hoisted(() => ({
+  query: vi.fn(),
+  mutate: vi.fn(),
+  nav: vi.fn(),
+  refresh: vi.fn(),
+  abort: vi.fn(),
+}));
+vi.mock('@/lib/trpc', () => ({
+  trpc: {
+    tasks: {
+      browserControlState: { query: api.query },
+      browserControl: { mutate: api.mutate },
+      browserNav: { mutate: api.nav },
+      abort: { mutate: api.abort },
+    },
+  },
+}));
+vi.mock('@/lib/use-stream-token', () => ({
+  useStreamToken: () => ({ token: 'test', refresh: api.refresh }),
+}));
 vi.mock('@/lib/ws', () => ({ send: vi.fn() }));
 vi.mock('@/lib/hd-debug', () => ({ hdDebug: vi.fn() }));
-vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn(), info: vi.fn(), show: vi.fn() }) }));
-vi.mock('@/components/CdpScreencastViewport', () => ({ CdpScreencastViewport: () => <div data-testid="viewport" /> }));
+vi.mock('@/components/ui/toast', () => ({
+  useToast: () => ({ error: vi.fn(), success: vi.fn(), info: vi.fn(), show: vi.fn() }),
+}));
+vi.mock('@/components/CdpScreencastViewport', () => ({
+  CdpScreencastViewport: () => <div data-testid="viewport" />,
+}));
 
-import { BROWSER_PANEL_DOCK_INSET_PROPERTY, useBrowserPanelDockInset } from '@/hooks/useBrowserPanelDockInset';
+import {
+  BROWSER_PANEL_DOCK_INSET_PROPERTY,
+  useBrowserPanelDockInset,
+} from '@/hooks/useBrowserPanelDockInset';
 import { useTaskStore } from '@/stores/task-store';
 import { BrowserPanel } from './BrowserPanel';
 
@@ -46,18 +67,41 @@ function emit(record: Observed, width: number): void {
   );
 }
 
-const inset = () => document.documentElement.style.getPropertyValue(BROWSER_PANEL_DOCK_INSET_PROPERTY);
-const base = { activeTaskId: 'tsk_one', taskStatus: 'executing' as const, poolUserId: 'usr_one', onToggleFullscreen: vi.fn() };
+const inset = () =>
+  document.documentElement.style.getPropertyValue(BROWSER_PANEL_DOCK_INSET_PROPERTY);
+const base = {
+  activeTaskId: 'tsk_one',
+  taskStatus: 'executing' as const,
+  poolUserId: 'usr_one',
+  onToggleFullscreen: vi.fn(),
+};
 
 beforeEach(() => {
   observers.length = 0;
   nextWidth = 420;
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
   document.documentElement.style.removeProperty(BROWSER_PANEL_DOCK_INSET_PROPERTY);
-  api.query.mockResolvedValue({ taskId: 'tsk_one', phase: 'agent', lease: null, supported: true, error: null, mode: 'running' });
+  api.query.mockResolvedValue({
+    taskId: 'tsk_one',
+    phase: 'agent',
+    lease: null,
+    supported: true,
+    error: null,
+    mode: 'running',
+  });
   useTaskStore.setState({
     browserInteractive: false,
-    tasks: [{ taskId: 'tsk_one', intent: '浏览测试网页', title: null, tickCount: 0, status: 'executing', executionMode: 'browser', createdAt: new Date() }],
+    tasks: [
+      {
+        taskId: 'tsk_one',
+        intent: '浏览测试网页',
+        title: null,
+        tickCount: 0,
+        status: 'executing',
+        executionMode: 'browser',
+        createdAt: new Date(),
+      },
+    ],
   });
 });
 

@@ -22,9 +22,9 @@ import { and, between, desc, eq, gte, lte, or } from 'drizzle-orm';
 import rrule from 'rrule';
 import { z } from 'zod';
 import { computeNextRunFromInputs } from '../../agent/scheduled-runner.js';
-import { MAX_FAILURE_NOTIFY_THRESHOLD } from '../../notifications/task-outcome-policy.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
 import { scheduledTasks } from '../../db/schema/scheduled-tasks.js';
+import { MAX_FAILURE_NOTIFY_THRESHOLD } from '../../notifications/task-outcome-policy.js';
 
 const { rrulestr } = rrule as { rrulestr: (s: string) => unknown };
 import { users } from '../../db/schema/users.js';
@@ -33,9 +33,10 @@ import { protectedProcedure, router } from '../trpc.js';
 const REPEAT_TYPES = ['once', 'daily', 'weekly', 'monthly'] as const;
 type ScheduleRepeatType = 'once' | 'daily' | 'weekly' | 'monthly' | 'custom';
 
-async function requireUserId(
-  ctx: { db: typeof import('../../db/client.js').db; userId: string },
-): Promise<number> {
+async function requireUserId(ctx: {
+  db: typeof import('../../db/client.js').db;
+  userId: string;
+}): Promise<number> {
   const [row] = await ctx.db
     .select({ id: users.id })
     .from(users)
@@ -143,12 +144,7 @@ function validateRrule(input: string | null | undefined): string | null {
  */
 const OUTCOME_NOTIFY_INPUT = {
   notifyOnSuccess: z.boolean().optional(),
-  failureNotifyThreshold: z
-    .number()
-    .int()
-    .min(1)
-    .max(MAX_FAILURE_NOTIFY_THRESHOLD)
-    .optional(),
+  failureNotifyThreshold: z.number().int().min(1).max(MAX_FAILURE_NOTIFY_THRESHOLD).optional(),
 };
 
 export const scheduledTasksRouter = router({
@@ -190,10 +186,9 @@ export const scheduledTasksRouter = router({
         focusScheduledTaskInternalId !== null
           ? eq(scheduledTasks.id, focusScheduledTaskInternalId)
           : null;
-      const whereClause =
-        rangeFilter
-          ? and(baseFilter, focusFilter ? or(rangeFilter, focusFilter) : rangeFilter)
-          : baseFilter;
+      const whereClause = rangeFilter
+        ? and(baseFilter, focusFilter ? or(rangeFilter, focusFilter) : rangeFilter)
+        : baseFilter;
       const rows = await ctx.db
         .select({
           id: scheduledTasks.id,
@@ -257,7 +252,12 @@ export const scheduledTasksRouter = router({
         // block height on calendar grids; timezone is reserved for
         // future DST-aware rrule expansion.
         rrule: z.string().max(255).optional().nullable(),
-        durationMinutes: z.number().int().positive().max(60 * 24).optional(),
+        durationMinutes: z
+          .number()
+          .int()
+          .positive()
+          .max(60 * 24)
+          .optional(),
         timezone: z.string().max(64).optional(),
         // Phase 26B polish — optional human-readable annotation
         // shown in the event-detail popover. Never reaches the agent.
@@ -266,7 +266,13 @@ export const scheduledTasksRouter = router({
         // null = no reminder; 0 = at fire time; positive = lead-time.
         // Cap at 7 days so a user can't accidentally arm an absurdly
         // early reminder that fires on a different week.
-        reminderMinutes: z.number().int().min(0).max(60 * 24 * 7).optional().nullable(),
+        reminderMinutes: z
+          .number()
+          .int()
+          .min(0)
+          .max(60 * 24 * 7)
+          .optional()
+          .nullable(),
         ...OUTCOME_NOTIFY_INPUT,
       }),
     )
@@ -323,16 +329,12 @@ export const scheduledTasksRouter = router({
         nextRunAt: effectiveRun,
         status: 'active',
         ...(rrule ? { rrule } : {}),
-        ...(input.durationMinutes !== undefined
-          ? { durationMinutes: input.durationMinutes }
-          : {}),
+        ...(input.durationMinutes !== undefined ? { durationMinutes: input.durationMinutes } : {}),
         ...(input.timezone ? { timezone: input.timezone } : {}),
         ...(input.description !== undefined && input.description !== null
           ? { description: input.description }
           : {}),
-        ...(input.reminderMinutes !== undefined
-          ? { reminderMinutes: input.reminderMinutes }
-          : {}),
+        ...(input.reminderMinutes !== undefined ? { reminderMinutes: input.reminderMinutes } : {}),
         ...(input.notifyOnSuccess !== undefined ? { notifyOnSuccess: input.notifyOnSuccess } : {}),
         ...(input.failureNotifyThreshold !== undefined
           ? { failureNotifyThreshold: input.failureNotifyThreshold }
@@ -371,12 +373,23 @@ export const scheduledTasksRouter = router({
         repeatType: z.enum(REPEAT_TYPES).optional(),
         scheduledAt: z.string().datetime().optional(),
         rrule: z.string().max(255).optional().nullable(),
-        durationMinutes: z.number().int().positive().max(60 * 24).optional(),
+        durationMinutes: z
+          .number()
+          .int()
+          .positive()
+          .max(60 * 24)
+          .optional(),
         timezone: z.string().max(64).optional(),
         // Phase 26B polish — explicit `null` clears the field.
         description: z.string().max(2000).optional().nullable(),
         // Phase 26B follow-up — explicit `null` clears the reminder.
-        reminderMinutes: z.number().int().min(0).max(60 * 24 * 7).optional().nullable(),
+        reminderMinutes: z
+          .number()
+          .int()
+          .min(0)
+          .max(60 * 24 * 7)
+          .optional()
+          .nullable(),
         ...OUTCOME_NOTIFY_INPUT,
       }),
     )
@@ -413,8 +426,7 @@ export const scheduledTasksRouter = router({
       let requestedRunAt: Date | null = null;
       let effectiveRunAt: Date | null = null;
       const nextRepeatType = (input.repeatType ?? row.repeatType) as ScheduleRepeatType;
-      const nextRrule =
-        input.rrule !== undefined ? validateRrule(input.rrule) : row.rrule;
+      const nextRrule = input.rrule !== undefined ? validateRrule(input.rrule) : row.rrule;
       if (input.intent !== undefined) updates.intent = input.intent;
       if (input.repeatType !== undefined) {
         updates.repeatType = input.repeatType;

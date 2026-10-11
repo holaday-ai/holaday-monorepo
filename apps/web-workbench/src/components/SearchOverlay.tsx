@@ -1,7 +1,6 @@
-import { AlertCircle, Loader2, RotateCw, Search, X } from 'lucide-react';
-import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import {
+  type SearchOverlayRow,
   nextSearchActiveIndex,
   normalizeSearchOverlayRows,
   searchOverlayCanRetry,
@@ -9,17 +8,15 @@ import {
   searchOverlayNeedsAttention,
   searchOverlayRowCopy,
   searchOverlayRowTone,
-  searchOverlayStatusTone,
   searchOverlayStatusCopy,
-  type SearchOverlayRow,
+  searchOverlayStatusTone,
 } from '@/lib/search-overlay-state';
-import {
-  taskSearchEmptyCopy,
-  taskStatusLabel,
-} from '@/lib/task-status-copy';
+import { taskSearchEmptyCopy, taskStatusLabel } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import type { UiTask } from '@/types/task';
+import { AlertCircle, Loader2, RotateCw, Search, X } from 'lucide-react';
+import * as React from 'react';
 
 interface Props {
   open: boolean;
@@ -208,9 +205,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
             placeholder="搜索任务…"
             className="h-8 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
-          {searching && (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-[#FF0061]" />
-          )}
+          {searching && <Loader2 className="h-3.5 w-3.5 animate-spin text-[#FF0061]" />}
           <button
             type="button"
             onClick={onClose}
@@ -259,9 +254,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
               <div className="mt-3 text-sm font-medium text-foreground/80">
                 {searching ? '正在搜索…' : emptyCopy.title}
               </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {emptyCopy.body}
-              </div>
+              <div className="mt-1 text-xs text-muted-foreground">{emptyCopy.body}</div>
               {statusCopy?.retry && (
                 <Button
                   type="button"
@@ -281,8 +274,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
           {filtered.map((t, i) => {
             const copy = searchOverlayRowCopy(t);
             const needsAttention = searchOverlayNeedsAttention(t);
-            const restingTone =
-              !needsAttention && i !== active ? searchOverlayRowTone(t) : '';
+            const restingTone = !needsAttention && i !== active ? searchOverlayRowTone(t) : '';
             return (
               <li key={t.taskId}>
                 <button
@@ -302,9 +294,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                       : needsAttention
                         ? 'hover:bg-[#FFC910]/[0.12]'
                         : 'hover:bg-[#EFEFEF]/60',
-                    i === active &&
-                      needsAttention &&
-                      'border-[#FFC910]/60 bg-[#FFC910]/[0.13]',
+                    i === active && needsAttention && 'border-[#FFC910]/60 bg-[#FFC910]/[0.13]',
                   )}
                 >
                   <div
@@ -316,9 +306,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                     <Search className="h-3.5 w-3.5" aria-hidden />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <span className="block truncate text-sm text-foreground">
-                      {copy.title}
-                    </span>
+                    <span className="block truncate text-sm text-foreground">{copy.title}</span>
                     {copy.secondary && (
                       <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
                         {copy.secondary}
@@ -366,8 +354,6 @@ function SearchStatusBadge({
 
 function KeyHint({ children }: { children: React.ReactNode }): JSX.Element {
   return (
-    <span className="rounded-[6px] border border-[#DCDDDD] bg-white px-1.5 py-0.5">
-      {children}
-    </span>
+    <span className="rounded-[6px] border border-[#DCDDDD] bg-white px-1.5 py-0.5">{children}</span>
   );
 }

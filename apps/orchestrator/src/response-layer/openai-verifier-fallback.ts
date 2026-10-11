@@ -48,10 +48,7 @@
 
 import OpenAI from 'openai';
 import type { Logger } from 'pino';
-import type {
-  CheckResult,
-  VerificationResult,
-} from '../execution/answer-verifier.js';
+import type { CheckResult, VerificationResult } from '../execution/answer-verifier.js';
 
 export const DEFAULT_VERIFIER_FALLBACK_MODEL = 'gpt-4o-mini';
 export const DEFAULT_VERIFIER_FALLBACK_TIMEOUT_MS = 8_000;
@@ -87,9 +84,7 @@ async function getVerifierDispatcher(): Promise<unknown> {
  *  this is a tiebreaker so we only need a quick read. */
 export const ANSWER_TRUNCATE_CHARS = 1_500;
 
-export type FallbackTriggerReason =
-  | 'deterministic_uncertain'
-  | 'llm_passed_with_issues';
+export type FallbackTriggerReason = 'deterministic_uncertain' | 'llm_passed_with_issues';
 
 export interface VerifierFallbackRequest {
   /** The verifier result we're second-opinion-ing. */
@@ -149,9 +144,7 @@ export function isVerifierFallbackEnabled(env: NodeJS.ProcessEnv = process.env):
  * the trigger reason for metadata; null when the fallback should
  * silently pass through.
  */
-export function shouldTrigger(
-  verification: VerificationResult,
-): FallbackTriggerReason | null {
+export function shouldTrigger(verification: VerificationResult): FallbackTriggerReason | null {
   // Deterministic trigger — soft-fail with at least one fixable
   // check. autoFix would normally run; we want OpenAI to weigh in
   // BEFORE that costly path.
@@ -228,8 +221,7 @@ export async function verifyFallback(
   try {
     raw = await callOpenAI(client, model, req, trigger);
   } catch (err) {
-    const isTimeout =
-      err instanceof Error && /timeout|aborted|ETIMEDOUT/i.test(err.message);
+    const isTimeout = err instanceof Error && /timeout|aborted|ETIMEDOUT/i.test(err.message);
     deps.logger.warn(
       {
         err: err instanceof Error ? err.message : String(err),
@@ -436,8 +428,7 @@ function parseJsonVerdict(raw: string): ParsedVerdict | null {
     // flipping pass→fail with no explanation.
     return null;
   }
-  const suggestedFix =
-    typeof o.suggestedFix === 'string' ? o.suggestedFix : undefined;
+  const suggestedFix = typeof o.suggestedFix === 'string' ? o.suggestedFix : undefined;
   return {
     verdict: o.verdict,
     ...(reasons ? { reasons } : {}),

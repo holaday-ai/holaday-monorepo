@@ -1,3 +1,30 @@
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+import {
+  PARTNER_PAYMENT_PROVIDERS,
+  type PartnerEnabledState,
+  type PartnerIdempotencyDraft,
+  type PartnerPageState,
+  type PartnerPaymentProvider,
+  clampRechargeAmountCnyCents,
+  formatApiUnits,
+  formatHolaCreditCents,
+  formatPartnerCnyCents,
+  kycStatusLabel,
+  normalizePartnerDashboard,
+  normalizePartnerPaymentProvider,
+  partnerActionErrorMessage,
+  partnerDraftKeyAfterSuccess,
+  partnerDraftKeyFor,
+  partnerPaymentIntentDisplay,
+  partnerPaymentProviderHint,
+  partnerPaymentProviderLabel,
+  partnerRechargeGate,
+  partnerWithdrawalGate,
+} from '@/lib/partner-page-state';
+import { trpc } from '@/lib/trpc';
+import { PageContainer, PageHeader, PageLoadingPanel, Row, Section } from '@/pages/PageShell';
 import {
   AlertCircle,
   ArrowUpRight,
@@ -11,33 +38,6 @@ import {
   Wallet,
 } from 'lucide-react';
 import * as React from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { useToast } from '@/components/ui/toast';
-import {
-  clampRechargeAmountCnyCents,
-  formatApiUnits,
-  formatHolaCreditCents,
-  formatPartnerCnyCents,
-  kycStatusLabel,
-  normalizePartnerDashboard,
-  partnerActionErrorMessage,
-  partnerDraftKeyAfterSuccess,
-  partnerDraftKeyFor,
-  partnerRechargeGate,
-  partnerWithdrawalGate,
-  type PartnerIdempotencyDraft,
-  type PartnerEnabledState,
-  type PartnerPageState,
-  PARTNER_PAYMENT_PROVIDERS,
-  normalizePartnerPaymentProvider,
-  partnerPaymentProviderHint,
-  partnerPaymentProviderLabel,
-  partnerPaymentIntentDisplay,
-  type PartnerPaymentProvider,
-} from '@/lib/partner-page-state';
-import { trpc } from '@/lib/trpc';
-import { PageContainer, PageHeader, PageLoadingPanel, Row, Section } from '@/pages/PageShell';
 
 interface PartnerOrderSummary {
   readonly orderExternalId: string;
@@ -111,7 +111,9 @@ export function PartnerPage(): JSX.Element {
   const [rechargeOrder, setRechargeOrder] = React.useState<PartnerOrderSummary | null>(null);
   const [withdrawal, setWithdrawal] = React.useState<PartnerWithdrawalSummary | null>(null);
   const [referral, setReferral] = React.useState<PartnerReferralSummary | null>(null);
-  const [kycSubmission, setKycSubmission] = React.useState<PartnerKycSubmissionSummary | null>(null);
+  const [kycSubmission, setKycSubmission] = React.useState<PartnerKycSubmissionSummary | null>(
+    null,
+  );
   const [rechargeAmountInput, setRechargeAmountInput] = React.useState('10000');
   const [withdrawalAmountInput, setWithdrawalAmountInput] = React.useState('');
   const [bankFingerprint, setBankFingerprint] = React.useState('');
@@ -119,7 +121,8 @@ export function PartnerPage(): JSX.Element {
   const [assistedInvite, setAssistedInvite] = React.useState(false);
   const [kycProviderRef, setKycProviderRef] = React.useState('');
   const [kycBankFingerprint, setKycBankFingerprint] = React.useState('');
-  const [membershipProvider, setMembershipProvider] = React.useState<PartnerPaymentProvider>('wechat');
+  const [membershipProvider, setMembershipProvider] =
+    React.useState<PartnerPaymentProvider>('wechat');
   const [rechargeProvider, setRechargeProvider] = React.useState<PartnerPaymentProvider>('wechat');
   const [membershipIdempotencyKey, setMembershipIdempotencyKey] = React.useState(() =>
     idempotencyKey('partner-membership-wechat'),
@@ -301,7 +304,11 @@ export function PartnerPage(): JSX.Element {
         orderExternalId: order.orderExternalId,
       });
       setOrder(latest);
-      toast.show(latest.status === order.status ? '订单状态已刷新' : '订单状态已更新', 'info', 1800);
+      toast.show(
+        latest.status === order.status ? '订单状态已刷新' : '订单状态已更新',
+        'info',
+        1800,
+      );
       if (latest.status !== 'pending') {
         await refresh();
       }
@@ -396,7 +403,11 @@ export function PartnerPage(): JSX.Element {
       setKycSubmission(result);
       setKycProviderRef('');
       setKycBankFingerprint('');
-      toast.show(result.status === 'passed' ? '实名认证已通过' : '实名材料已提交复核', 'info', 2200);
+      toast.show(
+        result.status === 'passed' ? '实名认证已通过' : '实名材料已提交复核',
+        'info',
+        2200,
+      );
       await refresh();
     } catch (err) {
       handleActionError(err, '实名提交失败');
@@ -489,7 +500,12 @@ export function PartnerPage(): JSX.Element {
           title="刷新失败，正在显示上次账本"
           body={loadError}
           action={
-            <Button type="button" size="sm" onClick={() => void refresh()} disabled={loading || isMutating}>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void refresh()}
+              disabled={loading || isMutating}
+            >
               重试
             </Button>
           }
@@ -508,7 +524,12 @@ export function PartnerPage(): JSX.Element {
           title="合伙人账本暂时无法加载"
           body={loadError ?? '请稍后重试。'}
           action={
-            <Button type="button" size="sm" onClick={() => void refresh()} disabled={loading || isMutating}>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void refresh()}
+              disabled={loading || isMutating}
+            >
               重试
             </Button>
           }
@@ -654,24 +675,24 @@ function PartnerWorkbench({
   isMutating: boolean;
 }): JSX.Element {
   const membershipActive = state.membership.status === 'active';
-  const kycSubmitBlocked = !membershipActive || state.kycStatus === 'passed' || state.kycStatus === 'pending';
+  const kycSubmitBlocked =
+    !membershipActive || state.kycStatus === 'passed' || state.kycStatus === 'pending';
   const rechargeGate = partnerRechargeGate(state);
   const withdrawalGate = partnerWithdrawalGate(state, {
     amountCreditCents: amountInputToCreditCents(withdrawalAmountInput),
     bankAccountFingerprint: bankFingerprint,
   });
-  const kycHint =
-    !membershipActive
-      ? '完成年度会员后可进行实名银行卡认证。'
-      : state.kycStatus === 'passed'
-        ? '银行卡实名认证已通过。'
-        : state.kycStatus === 'pending'
-          ? '银行卡认证已提交，等待认证结果。'
-          : state.kycStatus === 'review_required'
-            ? '认证证据不足，需补充流水或等待人工复核。'
-            : state.kycStatus === 'rejected'
-              ? '实名未通过，可重新提交。'
-              : '可提交实名银行卡认证。';
+  const kycHint = !membershipActive
+    ? '完成年度会员后可进行实名银行卡认证。'
+    : state.kycStatus === 'passed'
+      ? '银行卡实名认证已通过。'
+      : state.kycStatus === 'pending'
+        ? '银行卡认证已提交，等待认证结果。'
+        : state.kycStatus === 'review_required'
+          ? '认证证据不足，需补充流水或等待人工复核。'
+          : state.kycStatus === 'rejected'
+            ? '实名未通过，可重新提交。'
+            : '可提交实名银行卡认证。';
 
   return (
     <div className="space-y-6">
@@ -682,31 +703,48 @@ function PartnerWorkbench({
       >
         <div className="grid gap-x-8 lg:grid-cols-2">
           <Row label="会员状态" description="年费会员是充值和提现的前置条件">
-            <StatusValue icon={<CreditCard className="h-3.5 w-3.5" />} value={state.membership.label} />
+            <StatusValue
+              icon={<CreditCard className="h-3.5 w-3.5" />}
+              value={state.membership.label}
+            />
           </Row>
           <Row label="会员到期" description="到期后需要重新开通年费会员">
-            <span className="text-sm tabular-nums text-foreground/80">{state.membership.expiresAtLabel}</span>
+            <span className="text-sm tabular-nums text-foreground/80">
+              {state.membership.expiresAtLabel}
+            </span>
           </Row>
           <Row label="KYC 状态" description="通过后才能创建充值订单和提现申请">
             <StatusValue icon={<Shield className="h-3.5 w-3.5" />} value={state.kycLabel} />
           </Row>
           <Row label="可用 HOLA Credit" description="可用于后续合伙人账本操作">
-            <span className="text-sm font-medium tabular-nums">{formatHolaCreditCents(state.ledger.availableCreditCents)}</span>
+            <span className="text-sm font-medium tabular-nums">
+              {formatHolaCreditCents(state.ledger.availableCreditCents)}
+            </span>
           </Row>
           <Row label="批次待释放 HOLA Credit" description="本金与锁定增量中尚未释放的部分">
-            <span className="text-sm tabular-nums">{formatHolaCreditCents(state.ledger.scheduledCreditCents)}</span>
+            <span className="text-sm tabular-nums">
+              {formatHolaCreditCents(state.ledger.scheduledCreditCents)}
+            </span>
           </Row>
           <Row label="其他锁定 HOLA Credit" description="邀请奖励等非批次锁定额度">
-            <span className="text-sm tabular-nums">{formatHolaCreditCents(state.ledger.lockedCreditCents)}</span>
+            <span className="text-sm tabular-nums">
+              {formatHolaCreditCents(state.ledger.lockedCreditCents)}
+            </span>
           </Row>
           <Row label="可提现 HOLA Credit" description="可提交提现申请的余额">
-            <span className="text-sm font-medium tabular-nums">{formatHolaCreditCents(state.ledger.withdrawableCreditCents)}</span>
+            <span className="text-sm font-medium tabular-nums">
+              {formatHolaCreditCents(state.ledger.withdrawableCreditCents)}
+            </span>
           </Row>
           <Row label="待出款 HOLA Credit" description="已提交但尚未完成审批或出款">
-            <span className="text-sm tabular-nums">{formatHolaCreditCents(state.ledger.pendingWithdrawalCreditCents)}</span>
+            <span className="text-sm tabular-nums">
+              {formatHolaCreditCents(state.ledger.pendingWithdrawalCreditCents)}
+            </span>
           </Row>
           <Row label="冻结 HOLA Credit" description="风险复核或异常状态下冻结">
-            <span className="text-sm tabular-nums">{formatHolaCreditCents(state.ledger.frozenCreditCents)}</span>
+            <span className="text-sm tabular-nums">
+              {formatHolaCreditCents(state.ledger.frozenCreditCents)}
+            </span>
           </Row>
         </div>
       </Section>
@@ -719,10 +757,15 @@ function PartnerWorkbench({
         <div className="grid gap-x-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div className="grid gap-x-8 lg:grid-cols-3">
             <Row label="今日状态" description={state.activity.activityDate || '—'}>
-              <StatusValue icon={<CalendarCheck className="h-3.5 w-3.5" />} value={state.activity.checkedInLabel} />
+              <StatusValue
+                icon={<CalendarCheck className="h-3.5 w-3.5" />}
+                value={state.activity.checkedInLabel}
+              />
             </Row>
             <Row label="近 7 日签到" description="用于计算每日活跃系数">
-              <span className="text-sm font-medium tabular-nums text-foreground/85">{state.activity.loginDays} 天</span>
+              <span className="text-sm font-medium tabular-nums text-foreground/85">
+                {state.activity.loginDays} 天
+              </span>
             </Row>
             <Row label="活跃系数" description="参与每日锁定增量分配权重">
               <span className="text-sm font-medium tabular-nums text-foreground/85">
@@ -892,20 +935,36 @@ function PartnerWorkbench({
         {state.lots.length === 0 ? (
           <div className="border-y border-dashed border-[#DCDDDD] py-8 text-center">
             <div className="text-sm font-medium text-foreground/80">暂无批次</div>
-            <div className="mt-1 text-xs text-muted-foreground">完成充值确认后，批次会显示在这里。</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              完成充值确认后，批次会显示在这里。
+            </div>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-[760px] w-full text-left text-xs">
               <thead className="border-b border-[#EFEFEF] text-[11px] text-muted-foreground">
                 <tr>
-                  <th scope="col" className="pb-2 pr-4 font-medium">批次</th>
-                  <th scope="col" className="pb-2 pr-4 font-medium">状态</th>
-                  <th scope="col" className="pb-2 pr-4 font-medium">本金</th>
-                  <th scope="col" className="pb-2 pr-4 font-medium">锁定增量</th>
-                  <th scope="col" className="pb-2 pr-4 font-medium">已释放</th>
-                  <th scope="col" className="pb-2 pr-4 font-medium">释放窗口</th>
-                  <th scope="col" className="pb-2 font-medium">风险</th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">
+                    批次
+                  </th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">
+                    状态
+                  </th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">
+                    本金
+                  </th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">
+                    锁定增量
+                  </th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">
+                    已释放
+                  </th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">
+                    释放窗口
+                  </th>
+                  <th scope="col" className="pb-2 font-medium">
+                    风险
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#EFEFEF]">
@@ -913,10 +972,16 @@ function PartnerWorkbench({
                   <tr key={lot.key}>
                     <td className="py-3 pr-4 font-medium text-foreground/80">{lot.externalId}</td>
                     <td className="py-3 pr-4">{lot.statusLabel}</td>
-                    <td className="py-3 pr-4 tabular-nums">{formatHolaCreditCents(lot.principalCreditCents)}</td>
-                    <td className="py-3 pr-4 tabular-nums">{formatHolaCreditCents(lot.lockedBonusCreditCents)}</td>
                     <td className="py-3 pr-4 tabular-nums">
-                      {formatHolaCreditCents(lot.releasedPrincipalCreditCents + lot.releasedBonusCreditCents)}
+                      {formatHolaCreditCents(lot.principalCreditCents)}
+                    </td>
+                    <td className="py-3 pr-4 tabular-nums">
+                      {formatHolaCreditCents(lot.lockedBonusCreditCents)}
+                    </td>
+                    <td className="py-3 pr-4 tabular-nums">
+                      {formatHolaCreditCents(
+                        lot.releasedPrincipalCreditCents + lot.releasedBonusCreditCents,
+                      )}
                     </td>
                     <td className="py-3 pr-4 tabular-nums">
                       {lot.releaseStartsAtLabel} 至 {lot.releaseEndsAtLabel}
@@ -1078,7 +1143,9 @@ function PartnerWorkbench({
           </div>
           <div className="flex flex-col gap-2 lg:items-end">
             <div className="max-w-[260px] text-xs leading-5 text-muted-foreground lg:text-right">
-              {rechargeGate.blocked ? rechargeGate.reason : partnerPaymentProviderHint(rechargeProvider)}
+              {rechargeGate.blocked
+                ? rechargeGate.reason
+                : partnerPaymentProviderHint(rechargeProvider)}
             </div>
             <div className="flex flex-wrap gap-2 lg:justify-end">
               <Button
@@ -1089,7 +1156,9 @@ function PartnerWorkbench({
                 onClick={onPreviewRecharge}
                 disabled={isMutating || rechargeGate.blocked}
               >
-                {pendingAction === 'preview' && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+                {pendingAction === 'preview' && (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                )}
                 预览
               </Button>
               <Button
@@ -1231,7 +1300,12 @@ function OrderSummary({
         <SummaryItem label="渠道" value={partnerPaymentProviderLabel(order.provider)} />
         <SummaryItem label="状态" value={orderStatusLabel(order.status)} />
         <SummaryItem label="金额" value={formatPartnerCnyCents(order.amountCnyCents)} />
-        {paymentIntent && <SummaryItem label="支付意图" value={`${paymentIntent.label} · ${paymentIntent.detail}`} />}
+        {paymentIntent && (
+          <SummaryItem
+            label="支付意图"
+            value={`${paymentIntent.label} · ${paymentIntent.detail}`}
+          />
+        )}
       </dl>
     </div>
   );
@@ -1242,7 +1316,10 @@ function RechargePreviewSummary({ preview }: { preview: PartnerRechargePreview }
   return (
     <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
       <SummaryItem label="当前金额" value={formatPartnerCnyCents(preview.amountCnyCents)} />
-      <SummaryItem label="30 天滚动金额" value={formatPartnerCnyCents(preview.rollingThirtyDayCnyCents)} />
+      <SummaryItem
+        label="30 天滚动金额"
+        value={formatPartnerCnyCents(preview.rollingThirtyDayCnyCents)}
+      />
       <SummaryItem label="阶梯倍率" value={multiplier} />
       <SummaryItem label="API Units" value={formatApiUnits(preview.apiUnits)} />
     </dl>
@@ -1271,20 +1348,38 @@ function RecentOrdersTable({ rows }: { rows: PartnerEnabledState['orders'] }): J
       <table className="min-w-[680px] w-full text-left text-xs">
         <thead className="border-b border-[#EFEFEF] text-[11px] text-muted-foreground">
           <tr>
-            <th scope="col" className="pb-2 pr-4 font-medium">订单</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">类型</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">金额</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">状态</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">说明</th>
-            <th scope="col" className="pb-2 font-medium">创建</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              订单
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              类型
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              金额
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              状态
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              说明
+            </th>
+            <th scope="col" className="pb-2 font-medium">
+              创建
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-[#EFEFEF]">
           {rows.map((row) => (
             <tr key={row.key}>
-              <td className="py-3 pr-4 font-mono text-[11px] text-foreground/75">{row.orderExternalId}</td>
-              <td className="py-3 pr-4 text-muted-foreground">{row.orderKind === 'membership' ? '年费会员' : '充值'}</td>
-              <td className="py-3 pr-4 tabular-nums">{formatPartnerCnyCents(row.amountCnyCents)}</td>
+              <td className="py-3 pr-4 font-mono text-[11px] text-foreground/75">
+                {row.orderExternalId}
+              </td>
+              <td className="py-3 pr-4 text-muted-foreground">
+                {row.orderKind === 'membership' ? '年费会员' : '充值'}
+              </td>
+              <td className="py-3 pr-4 tabular-nums">
+                {formatPartnerCnyCents(row.amountCnyCents)}
+              </td>
               <td className="py-3 pr-4">{row.statusLabel}</td>
               <td className="max-w-[240px] py-3 pr-4 text-muted-foreground">{row.statusHelp}</td>
               <td className="py-3 text-muted-foreground">{row.createdAtLabel}</td>
@@ -1296,7 +1391,9 @@ function RecentOrdersTable({ rows }: { rows: PartnerEnabledState['orders'] }): J
   );
 }
 
-function RecentWithdrawalsTable({ rows }: { rows: PartnerEnabledState['withdrawals'] }): JSX.Element {
+function RecentWithdrawalsTable({
+  rows,
+}: { rows: PartnerEnabledState['withdrawals'] }): JSX.Element {
   if (rows.length === 0) {
     return <EmptyInlineState title="暂无提现" body="提现申请提交后会显示在这里。" />;
   }
@@ -1305,20 +1402,38 @@ function RecentWithdrawalsTable({ rows }: { rows: PartnerEnabledState['withdrawa
       <table className="min-w-[760px] w-full text-left text-xs">
         <thead className="border-b border-[#EFEFEF] text-[11px] text-muted-foreground">
           <tr>
-            <th scope="col" className="pb-2 pr-4 font-medium">申请</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">金额</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">状态</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">说明</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">银行指纹</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">时间</th>
-            <th scope="col" className="pb-2 font-medium">风险</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              申请
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              金额
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              状态
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              说明
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              银行指纹
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              时间
+            </th>
+            <th scope="col" className="pb-2 font-medium">
+              风险
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-[#EFEFEF]">
           {rows.map((row) => (
             <tr key={row.key}>
-              <td className="py-3 pr-4 font-mono text-[11px] text-foreground/75">{row.withdrawalExternalId}</td>
-              <td className="py-3 pr-4 tabular-nums">{formatHolaCreditCents(row.amountCreditCents)}</td>
+              <td className="py-3 pr-4 font-mono text-[11px] text-foreground/75">
+                {row.withdrawalExternalId}
+              </td>
+              <td className="py-3 pr-4 tabular-nums">
+                {formatHolaCreditCents(row.amountCreditCents)}
+              </td>
               <td className="py-3 pr-4">{row.statusLabel}</td>
               <td className="max-w-[240px] py-3 pr-4 text-muted-foreground">{row.statusHelp}</td>
               <td className="py-3 pr-4 text-muted-foreground">
@@ -1345,23 +1460,43 @@ function RecentReferralsTable({ rows }: { rows: PartnerEnabledState['referrals']
       <table className="min-w-[760px] w-full text-left text-xs">
         <thead className="border-b border-[#EFEFEF] text-[11px] text-muted-foreground">
           <tr>
-            <th scope="col" className="pb-2 pr-4 font-medium">邀请</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">类型</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">状态</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">奖励</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">比例</th>
-            <th scope="col" className="pb-2 pr-4 font-medium">说明</th>
-            <th scope="col" className="pb-2 font-medium">时间</th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              邀请
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              类型
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              状态
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              奖励
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              比例
+            </th>
+            <th scope="col" className="pb-2 pr-4 font-medium">
+              说明
+            </th>
+            <th scope="col" className="pb-2 font-medium">
+              时间
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-[#EFEFEF]">
           {rows.map((row) => (
             <tr key={row.key}>
-              <td className="py-3 pr-4 font-mono text-[11px] text-foreground/75">{row.referralExternalId}</td>
+              <td className="py-3 pr-4 font-mono text-[11px] text-foreground/75">
+                {row.referralExternalId}
+              </td>
               <td className="py-3 pr-4 text-muted-foreground">{row.assistedLabel}</td>
               <td className="py-3 pr-4">{row.statusLabel}</td>
-              <td className="py-3 pr-4 tabular-nums">{formatHolaCreditCents(row.rewardCreditCents)}</td>
-              <td className="py-3 pr-4 tabular-nums text-muted-foreground">{row.rewardRateLabel}</td>
+              <td className="py-3 pr-4 tabular-nums">
+                {formatHolaCreditCents(row.rewardCreditCents)}
+              </td>
+              <td className="py-3 pr-4 tabular-nums text-muted-foreground">
+                {row.rewardRateLabel}
+              </td>
               <td className="max-w-[240px] py-3 pr-4 text-muted-foreground">{row.statusHelp}</td>
               <td className="py-3 text-muted-foreground">{referralTimelineLabel(row)}</td>
             </tr>
@@ -1403,7 +1538,9 @@ function referralTimelineLabel(row: PartnerEnabledState['referrals'][number]): s
   return row.createdAtLabel;
 }
 
-function KycSubmissionSummary({ submission }: { submission: PartnerKycSubmissionSummary }): JSX.Element {
+function KycSubmissionSummary({
+  submission,
+}: { submission: PartnerKycSubmissionSummary }): JSX.Element {
   return (
     <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2 lg:grid-cols-5">
       <SummaryItem label="实名编号" value={submission.kycExternalId} />
@@ -1415,7 +1552,9 @@ function KycSubmissionSummary({ submission }: { submission: PartnerKycSubmission
   );
 }
 
-function KycProfileSummary({ profile }: { profile: NonNullable<PartnerEnabledState['kycProfile']> }): JSX.Element {
+function KycProfileSummary({
+  profile,
+}: { profile: NonNullable<PartnerEnabledState['kycProfile']> }): JSX.Element {
   return (
     <dl className="mt-4 grid gap-3 border-t border-[#EFEFEF] pt-4 text-xs sm:grid-cols-2 lg:grid-cols-5">
       <SummaryItem label="实名编号" value={profile.kycExternalId} />

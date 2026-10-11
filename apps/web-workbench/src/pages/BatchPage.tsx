@@ -1,3 +1,38 @@
+import { BatchTaskDialog } from '@/components/BatchTaskDialog';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
+import { batchUnsuccessfulCopy } from '@/lib/batch-copy';
+import {
+  type BatchListCursor,
+  type NormalizedBatchDetail,
+  type NormalizedBatchRow,
+  batchDetailRemainingCount,
+  batchDetailSummary,
+  batchErrorMessage,
+  batchFinishedCount,
+  batchListSummary,
+  batchProgressPercent,
+  batchPromptImportStateReset,
+  batchRemainingCount,
+  batchShouldPoll,
+  batchStatusCopy,
+  batchStatusLabel,
+  mergeBatchRows,
+  normalizeBatchDetail,
+  normalizeBatchPage,
+  safeBatchCount,
+} from '@/lib/batch-page-state';
+import {
+  type BatchProgressFrame,
+  applyBatchProgressToDetail,
+  applyBatchProgressToRows,
+} from '@/lib/batch-progress';
+import { humaniseTaskError, taskActionError } from '@/lib/error-copy';
+import { supportMailtoHref } from '@/lib/support-links';
+import { trpc } from '@/lib/trpc';
+import { onServerMessage } from '@/lib/ws';
+import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import {
   AlertCircle,
   CheckCircle2,
@@ -10,41 +45,6 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { Button } from '@/components/ui/button';
-import { useToast } from '@/components/ui/toast';
-import { trpc } from '@/lib/trpc';
-import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
-import { BatchTaskDialog } from '@/components/BatchTaskDialog';
-import { batchUnsuccessfulCopy } from '@/lib/batch-copy';
-import {
-  batchDetailRemainingCount,
-  batchDetailSummary,
-  batchErrorMessage,
-  batchListSummary,
-  mergeBatchRows,
-  normalizeBatchPage,
-  batchPromptImportStateReset,
-  normalizeBatchDetail,
-  type NormalizedBatchDetail,
-  type NormalizedBatchRow,
-  type BatchListCursor,
-  batchFinishedCount,
-  batchProgressPercent,
-  batchRemainingCount,
-  batchShouldPoll,
-  batchStatusCopy,
-  batchStatusLabel,
-  safeBatchCount,
-} from '@/lib/batch-page-state';
-import {
-  applyBatchProgressToDetail,
-  applyBatchProgressToRows,
-  type BatchProgressFrame,
-} from '@/lib/batch-progress';
-import { humaniseTaskError, taskActionError } from '@/lib/error-copy';
-import { supportMailtoHref } from '@/lib/support-links';
-import { onServerMessage } from '@/lib/ws';
 
 /**
  * Phase 5b — batch tasks list + detail (one page, two modes).
@@ -87,8 +87,7 @@ function BatchList(): JSX.Element {
   // (multi-line composer detect), auto-open the create dialog with
   // those lines pre-filled. One-shot: we clear the state after using
   // it so a refresh doesn't re-open the dialog.
-  const incomingPrompts = (location.state as { initialPrompts?: string[] } | null)
-    ?.initialPrompts;
+  const incomingPrompts = (location.state as { initialPrompts?: string[] } | null)?.initialPrompts;
   const [dialogOpen, setDialogOpen] = React.useState(
     Array.isArray(incomingPrompts) && incomingPrompts.length > 1,
   );
@@ -112,44 +111,43 @@ function BatchList(): JSX.Element {
     }
   }, [hash, incomingPrompts, navigate, pathname, search]);
 
-  const loadPage = React.useCallback(async (cursor: BatchListCursor | null = null) => {
-    const requestId = reloadRequestRef.current + 1;
-    reloadRequestRef.current = requestId;
-    const append = cursor !== null;
-    if (append) setLoadingMore(true);
-    else setLoading(true);
-    try {
-      const list = await trpc.batchTasks.list.query({
-        limit: 50,
-        cursor: cursor
-          ? {
-              id: cursor.id,
-              createdAt:
-                cursor.createdAt instanceof Date
-                  ? cursor.createdAt
-                  : new Date(cursor.createdAt),
-            }
-          : undefined,
-      });
-      if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
-      const page = normalizeBatchPage(list);
-      setRows((current) =>
-        append ? mergeBatchRows(current ?? [], page.items) : page.items,
-      );
-      setNextCursor(page.nextCursor);
-      setLoadError(null);
-    } catch (err) {
-      if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
-      const message = batchErrorMessage(err);
-      toast.show(taskActionError('批量任务暂时无法加载', message), 'error');
-      setLoadError(message);
-    } finally {
-      if (mountedRef.current && reloadRequestRef.current === requestId) {
-        if (append) setLoadingMore(false);
-        else setLoading(false);
+  const loadPage = React.useCallback(
+    async (cursor: BatchListCursor | null = null) => {
+      const requestId = reloadRequestRef.current + 1;
+      reloadRequestRef.current = requestId;
+      const append = cursor !== null;
+      if (append) setLoadingMore(true);
+      else setLoading(true);
+      try {
+        const list = await trpc.batchTasks.list.query({
+          limit: 50,
+          cursor: cursor
+            ? {
+                id: cursor.id,
+                createdAt:
+                  cursor.createdAt instanceof Date ? cursor.createdAt : new Date(cursor.createdAt),
+              }
+            : undefined,
+        });
+        if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
+        const page = normalizeBatchPage(list);
+        setRows((current) => (append ? mergeBatchRows(current ?? [], page.items) : page.items));
+        setNextCursor(page.nextCursor);
+        setLoadError(null);
+      } catch (err) {
+        if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
+        const message = batchErrorMessage(err);
+        toast.show(taskActionError('批量任务暂时无法加载', message), 'error');
+        setLoadError(message);
+      } finally {
+        if (mountedRef.current && reloadRequestRef.current === requestId) {
+          if (append) setLoadingMore(false);
+          else setLoading(false);
+        }
       }
-    }
-  }, [toast]);
+    },
+    [toast],
+  );
 
   const reload = React.useCallback(() => loadPage(null), [loadPage]);
 
@@ -164,9 +162,7 @@ function BatchList(): JSX.Element {
     return onServerMessage((msg) => {
       if (!mountedRef.current) return;
       if (!isBatchProgressFrame(msg)) return;
-      setRows((current) =>
-        current ? applyBatchProgressToRows(current, msg) : current,
-      );
+      setRows((current) => (current ? applyBatchProgressToRows(current, msg) : current));
     });
   }, []);
 
@@ -225,7 +221,10 @@ function BatchList(): JSX.Element {
         {loading && rows == null && (
           <div className="space-y-3">
             {[0, 1, 2].map((idx) => (
-              <div key={idx} className="flex items-start gap-3 rounded-[8px] border border-[#DCDDDD] p-3">
+              <div
+                key={idx}
+                className="flex items-start gap-3 rounded-[8px] border border-[#DCDDDD] p-3"
+              >
                 <div className="h-7 w-7 rounded-md bg-[#EFEFEF]" />
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="h-3 w-40 rounded bg-[#EFEFEF]" />
@@ -250,9 +249,7 @@ function BatchList(): JSX.Element {
               <Layers className="h-5 w-5" />
             </div>
             <div className="space-y-1">
-              <div className="text-sm font-medium text-foreground/85">
-                一次提交多个任务
-              </div>
+              <div className="text-sm font-medium text-foreground/85">一次提交多个任务</div>
               <div className="max-w-md text-xs text-muted-foreground">
                 例如「逐个查询这 10 个竞品的最新动态」。按套餐并发：Basic 同时 3 个，Pro 同时 5 个。
               </div>
@@ -280,9 +277,7 @@ function BatchList(): JSX.Element {
                   onClick={() => void loadPage(nextCursor)}
                   className="h-8 rounded-[6px] border-[#DCDDDD] bg-white px-3 text-xs text-[#595757] hover:border-[#FF0061]/25 hover:bg-[#FF0061]/5 hover:text-[#FF0061]"
                 >
-                  {loadingMore && (
-                    <Loader2 className="mr-1.5 h-3 w-3 animate-spin" aria-hidden />
-                  )}
+                  {loadingMore && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" aria-hidden />}
                   {loadingMore ? '加载中…' : '加载更多批量任务'}
                 </Button>
               </div>
@@ -337,9 +332,7 @@ function BatchListRow({
                 {row.name ?? `批量任务 · ${total} 项`}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                <span className={statusTone}>
-                  {batchStatusLabel(row.status)}
-                </span>
+                <span className={statusTone}>{batchStatusLabel(row.status)}</span>
                 <span>并发 {safeBatchCount(row.concurrency)}</span>
                 <span>{fmtDate(row.createdAt)}</span>
               </div>
@@ -432,9 +425,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
     return onServerMessage((msg) => {
       if (!mountedRef.current) return;
       if (!isBatchProgressFrame(msg)) return;
-      setDetail((current) =>
-        current ? applyBatchProgressToDetail(current, msg) : current,
-      );
+      setDetail((current) => (current ? applyBatchProgressToDetail(current, msg) : current));
     });
   }, []);
 
@@ -509,7 +500,10 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
               <div className="h-3 w-32 rounded bg-[#EFEFEF]" />
               <div className="h-2 w-full rounded-full bg-[#EFEFEF]" />
               {[0, 1, 2].map((idx) => (
-                <div key={idx} className="flex items-start gap-3 border-t border-[#EFEFEF] py-3 first:border-t-0">
+                <div
+                  key={idx}
+                  className="flex items-start gap-3 border-t border-[#EFEFEF] py-3 first:border-t-0"
+                >
                   <div className="h-4 w-4 rounded-full bg-[#EFEFEF]" />
                   <div className="min-w-0 flex-1 space-y-2">
                     <div className="h-3 w-20 rounded bg-[#EFEFEF]" />
@@ -629,10 +623,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
                   <span className="font-mono">#{item.seq + 1}</span>
                   <span>{ITEM_STATUS_LABEL[item.status] ?? item.status}</span>
                 </div>
-                <div
-                  className="mt-0.5 line-clamp-2 text-sm text-foreground"
-                  title={item.prompt}
-                >
+                <div className="mt-0.5 line-clamp-2 text-sm text-foreground" title={item.prompt}>
                   {item.prompt}
                 </div>
                 {item.errorMessage && (

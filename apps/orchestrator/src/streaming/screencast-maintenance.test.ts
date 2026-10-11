@@ -1,14 +1,14 @@
-import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
+import { pino } from 'pino';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
-import { pino } from 'pino';
-import { OrdinaryMaintenance, type MaintenanceRecord } from '../execution/ordinary-maintenance.js';
-import { createScreencastProxy } from './screencast-proxy.js';
-import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
-import type { BrowserInstance } from '../browser-pool/types.js';
 import type { BrowserPool } from '../browser-pool/index.js';
+import type { BrowserInstance } from '../browser-pool/types.js';
+import { type MaintenanceRecord, OrdinaryMaintenance } from '../execution/ordinary-maintenance.js';
+import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
+import { createScreencastProxy } from './screencast-proxy.js';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {

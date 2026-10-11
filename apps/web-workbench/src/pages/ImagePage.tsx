@@ -1,6 +1,6 @@
+import { CreativeInspiration } from '@/components/CreativeInspiration';
 import { useCreativeProject } from '@/components/CreativeProjectPicker';
 import { CreativeReferenceLibrary } from '@/components/CreativeReferenceLibrary';
-import { CreativeInspiration } from '@/components/CreativeInspiration';
 import { ImageBriefComposer } from '@/components/image/ImageBriefComposer';
 import { ImageGenerationSettings } from '@/components/image/ImageGenerationSettings';
 import { ImageGoalPicker } from '@/components/image/ImageGoalPicker';
@@ -32,7 +32,7 @@ import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { useTaskStore } from '@/stores/task-store';
 import { type CommercialImageUse, type ImageChangeTarget, imageModelLabel } from '@/types/image';
-import { Loader2, Settings2, Sparkles, Files, ChevronDown } from 'lucide-react';
+import { ChevronDown, Files, Loader2, Settings2, Sparkles } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -412,7 +412,11 @@ export function ImagePage(): JSX.Element {
   return (
     <main className="hd-creative-page hd-image-page min-h-full bg-[var(--creative-surface,#FBFAF7)] px-4 py-5 text-[var(--creative-ink,#342E39)] sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-[1220px]">
-        <header className="hd-creative-heading"><span>HOLADAY IMAGE</span><h1>让想象，有了模样。</h1><p>从一段灵感出发，或让熟悉的主角走进新画面。</p></header>
+        <header className="hd-creative-heading">
+          <span>HOLADAY IMAGE</span>
+          <h1>让想象，有了模样。</h1>
+          <p>从一段灵感出发，或让熟悉的主角走进新画面。</p>
+        </header>
 
         <div className="hd-image-workspace rounded-[26px] border border-[var(--creative-line,#E8E1E7)] bg-[var(--creative-surface,#fff)] p-4 shadow-[0_14px_38px_rgba(62,48,69,0.05)] sm:p-5 lg:p-7">
           <ImageGoalPicker
@@ -423,9 +427,29 @@ export function ImagePage(): JSX.Element {
             onCommercialUseChange={switchCommercialUse}
           />
 
-          {draft.goal === 'inspiration' && <CreativeInspiration kind="image" disabled={draftLocked} onPick={idea => { if (draftIsLocked()) return; invalidatePendingContinuation(); setDraft(current => ({ ...current, prompt: idea.prompt, aspectRatio: idea.aspectRatio, style: idea.style ?? current.style })); }} />}
+          {draft.goal === 'inspiration' && (
+            <CreativeInspiration
+              kind="image"
+              disabled={draftLocked}
+              onPick={(idea) => {
+                if (draftIsLocked()) return;
+                invalidatePendingContinuation();
+                setDraft((current) => ({
+                  ...current,
+                  prompt: idea.prompt,
+                  aspectRatio: idea.aspectRatio,
+                  style: idea.style ?? current.style,
+                }));
+              }}
+            />
+          )}
 
-          <div ref={composerRef} id="image-creative-stage" className="hd-image-stage" role="tabpanel">
+          <div
+            ref={composerRef}
+            id="image-creative-stage"
+            className="hd-image-stage"
+            role="tabpanel"
+          >
             <input
               ref={fileInputRef}
               type="file"
@@ -437,7 +461,60 @@ export function ImagePage(): JSX.Element {
               onChange={(event) => void handleFilesSelected(event)}
             />
             {project.notice}
-            <ImageBriefComposer settings={<div className="hd-composer-meta"><button ref={settingsTriggerRef} type="button" className="hd-glass-pill" title="选择图片模型" aria-label="选择图片模型" disabled={draftLocked} onClick={event => { settingsTriggerRef.current = event.currentTarget; setSettingsMode('models'); setSettingsOpen(open => settingsMode === 'models' ? !open : true); }}><Settings2 className="h-4 w-4" />{imageModelLabel(usableImageModel(draft.model, mediaModels?.image))}<ChevronDown className="h-3 w-3" /></button><button type="button" className="hd-glass-pill" title="生成设置" aria-label="生成设置" onClick={event => { settingsTriggerRef.current = event.currentTarget; setSettingsMode('specs'); setSettingsOpen(open => settingsMode === 'specs' ? !open : true); }} disabled={draftLocked}>{settingSummary({ ...draft, model: usableImageModel(draft.model, mediaModels?.image) })}</button></div>} referenceAction={<><button ref={libraryAnchor} type="button" title="添加参考资料" disabled={draftLocked} onClick={() => setLibraryOpen(open => !open)}><Files className="h-4 w-4" />参考资料</button>{project.renderPicker(draftLocked)}</>}
+            <ImageBriefComposer
+              settings={
+                <div className="hd-composer-meta">
+                  <button
+                    ref={settingsTriggerRef}
+                    type="button"
+                    className="hd-glass-pill"
+                    title="选择图片模型"
+                    aria-label="选择图片模型"
+                    disabled={draftLocked}
+                    onClick={(event) => {
+                      settingsTriggerRef.current = event.currentTarget;
+                      setSettingsMode('models');
+                      setSettingsOpen((open) => (settingsMode === 'models' ? !open : true));
+                    }}
+                  >
+                    <Settings2 className="h-4 w-4" />
+                    {imageModelLabel(usableImageModel(draft.model, mediaModels?.image))}
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    className="hd-glass-pill"
+                    title="生成设置"
+                    aria-label="生成设置"
+                    onClick={(event) => {
+                      settingsTriggerRef.current = event.currentTarget;
+                      setSettingsMode('specs');
+                      setSettingsOpen((open) => (settingsMode === 'specs' ? !open : true));
+                    }}
+                    disabled={draftLocked}
+                  >
+                    {settingSummary({
+                      ...draft,
+                      model: usableImageModel(draft.model, mediaModels?.image),
+                    })}
+                  </button>
+                </div>
+              }
+              referenceAction={
+                <>
+                  <button
+                    ref={libraryAnchor}
+                    type="button"
+                    title="添加参考资料"
+                    disabled={draftLocked}
+                    onClick={() => setLibraryOpen((open) => !open)}
+                  >
+                    <Files className="h-4 w-4" />
+                    参考资料
+                  </button>
+                  {project.renderPicker(draftLocked)}
+                </>
+              }
               draft={draft}
               uploading={uploading}
               disabled={draftLocked}
@@ -445,7 +522,6 @@ export function ImagePage(): JSX.Element {
               actions={
                 <>
                   <div className="hd-creative-generation-actions">
-
                     <Button
                       type="button"
                       onClick={() => void handleSubmit()}
@@ -463,7 +539,10 @@ export function ImagePage(): JSX.Element {
                       {submitting ? '提交中…' : '准备生成'}
                     </Button>
                   </div>
-                  <p className="mt-2 min-h-5 text-right text-xs text-[var(--creative-muted,#7D737F)]" aria-live="polite">
+                  <p
+                    className="mt-2 min-h-5 text-right text-xs text-[var(--creative-muted,#7D737F)]"
+                    aria-live="polite"
+                  >
                     {validationMessage ?? '设置已就绪，可以开始生成'}
                   </p>
                 </>
@@ -483,8 +562,6 @@ export function ImagePage(): JSX.Element {
               }}
             />
           </div>
-
-
         </div>
 
         {currentTask ? (
@@ -505,7 +582,23 @@ export function ImagePage(): JSX.Element {
         />
       </div>
 
-      <CreativeReferenceLibrary open={libraryOpen} onOpenChange={setLibraryOpen} anchorRef={libraryAnchor} disabled={draftLocked || draft.attachments.length >= 5} selectedFileIds={draft.attachments.map(file => file.fileId)} onChooseLocal={() => fileInputRef.current?.click()} onPick={file => { if (draftIsLocked()) return; setDraft(current => current.attachments.some(item => item.fileId === file.fileId) || current.attachments.length >= 5 ? current : { ...current, attachments: [...current.attachments, file] }); }} />
+      <CreativeReferenceLibrary
+        open={libraryOpen}
+        onOpenChange={setLibraryOpen}
+        anchorRef={libraryAnchor}
+        disabled={draftLocked || draft.attachments.length >= 5}
+        selectedFileIds={draft.attachments.map((file) => file.fileId)}
+        onChooseLocal={() => fileInputRef.current?.click()}
+        onPick={(file) => {
+          if (draftIsLocked()) return;
+          setDraft((current) =>
+            current.attachments.some((item) => item.fileId === file.fileId) ||
+            current.attachments.length >= 5
+              ? current
+              : { ...current, attachments: [...current.attachments, file] },
+          );
+        }}
+      />
       <ImageGenerationSettings
         open={settingsOpen}
         mode={settingsMode}

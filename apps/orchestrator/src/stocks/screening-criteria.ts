@@ -143,11 +143,12 @@ export function canonicalStockScreenCriterion(
   const meta = FIELD_META[criterion.field];
   let label: string;
   if (criterion.status === 'needs_input' || criterion.value === null) {
-    const suffix = criterion.operator === 'lte' || criterion.operator === 'lt'
-      ? '上限'
-      : criterion.operator === 'gte' || criterion.operator === 'gt'
-        ? '下限'
-        : '阈值';
+    const suffix =
+      criterion.operator === 'lte' || criterion.operator === 'lt'
+        ? '上限'
+        : criterion.operator === 'gte' || criterion.operator === 'gt'
+          ? '下限'
+          : '阈值';
     label = `${meta.label}${suffix}`;
   } else if (criterion.field === 'exclude_st') {
     label = criterion.value === true ? '排除 ST' : '不排除 ST';
@@ -171,41 +172,47 @@ export function canonicalStockScreenCriterion(
 function parseClause(clause: string): CriterionDraft[] {
   if (/^(?:请)?(?:排除|不要)\s*\*?ST(?:股|股票)?$/i.test(clause)) {
     const meta = FIELD_META.exclude_st;
-    return [{
-      field: 'exclude_st',
-      operator: 'eq',
-      value: true,
-      unit: meta.unit,
-      label: meta.label,
-      sourceField: meta.sourceField,
-      status: 'ready',
-    }];
+    return [
+      {
+        field: 'exclude_st',
+        operator: 'eq',
+        value: true,
+        unit: meta.unit,
+        label: meta.label,
+        sourceField: meta.sourceField,
+        status: 'ready',
+      },
+    ];
   }
 
   if (/近?三年.*(?:持续盈利|净利润.*(?:为正|大于零))|连续三年.*盈利/.test(clause)) {
     const meta = FIELD_META.net_profit_3y_positive;
-    return [{
-      field: 'net_profit_3y_positive',
-      operator: 'eq',
-      value: true,
-      unit: meta.unit,
-      label: meta.label,
-      sourceField: meta.sourceField,
-      status: 'ready',
-    }];
+    return [
+      {
+        field: 'net_profit_3y_positive',
+        operator: 'eq',
+        value: true,
+        unit: meta.unit,
+        label: meta.label,
+        sourceField: meta.sourceField,
+        status: 'ready',
+      },
+    ];
   }
 
   if (/(?:近期|最近).*(?:无|没有|排除).*减持|排除.*(?:近期|最近).*减持/.test(clause)) {
     const meta = FIELD_META.insider_reduction_recent;
-    return [{
-      field: 'insider_reduction_recent',
-      operator: 'eq',
-      value: false,
-      unit: meta.unit,
-      label: '近期无内部人减持',
-      sourceField: meta.sourceField,
-      status: 'ready',
-    }];
+    return [
+      {
+        field: 'insider_reduction_recent',
+        operator: 'eq',
+        value: false,
+        unit: meta.unit,
+        label: '近期无内部人减持',
+        sourceField: meta.sourceField,
+        status: 'ready',
+      },
+    ];
   }
 
   const field = (() => {
@@ -264,10 +271,12 @@ export function parseStockScreenPrompt(prompt: string): {
   }
 
   return {
-    criteria: drafts.map((criterion, index) => canonicalStockScreenCriterion({
-      ...criterion,
-      id: `${criterion.field}-${index + 1}`,
-    })),
+    criteria: drafts.map((criterion, index) =>
+      canonicalStockScreenCriterion({
+        ...criterion,
+        id: `${criterion.field}-${index + 1}`,
+      }),
+    ),
     unparsedClauses,
   };
 }

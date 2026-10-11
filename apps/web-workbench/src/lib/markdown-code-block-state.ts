@@ -36,7 +36,10 @@ export function markdownCodeBlockMeta(
   className: string | undefined,
   text: string,
 ): MarkdownCodeBlockMeta {
-  const raw = className?.replace(/^language-/, '').trim().toLowerCase();
+  const raw = className
+    ?.replace(/^language-/, '')
+    .trim()
+    .toLowerCase();
   if (raw && DIAGRAM_LANGUAGE_LABELS[raw]) {
     return {
       label: DIAGRAM_LANGUAGE_LABELS[raw],

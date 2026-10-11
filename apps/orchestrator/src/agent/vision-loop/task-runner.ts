@@ -18,12 +18,12 @@
  * or in higher-level orchestration that wraps this function.
  */
 
+import { logger } from '../../config/logger.js';
 import {
   dispatchVisionActionToSW,
   hasConnectedSwClient,
   requestVisionObservationFromSW,
 } from '../../ws/server.js';
-import { logger } from '../../config/logger.js';
 import { defaultBrowserNetworkPolicy } from '../browser-network-policy.js';
 import type { UnifiedBrowserLoopInput } from '../browser-tools/unified-browser-loop.js';
 import {
@@ -578,10 +578,7 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   return runner.run(opts.intent);
 }
 
-function formatAntiBotPauseMessage(
-  signal: AntiBotSignal,
-  hint: string | null,
-): string {
+function formatAntiBotPauseMessage(signal: AntiBotSignal, hint: string | null): string {
   const base = describeSignal(signal);
   return hint ? `${base}：${hint}` : base;
 }
@@ -634,9 +631,7 @@ async function captureDisplayFrame(
  * discriminated union; unknown kinds fall through to the bare kind.
  */
 function describeAction(
-  action:
-    | import('./actions.js').VisionAction
-    | import('./actions-a11y.js').A11yAction,
+  action: import('./actions.js').VisionAction | import('./actions-a11y.js').A11yAction,
 ): string {
   switch (action.kind) {
     case 'click':

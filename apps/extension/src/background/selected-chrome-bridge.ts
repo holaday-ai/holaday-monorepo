@@ -1,5 +1,5 @@
 import { PlaywrightCrxAdapter } from '@holaday/browser-driver/crx';
-import type { UserBrowserProtocol, ServerMessage } from '@holaday/shared-types';
+import type { ServerMessage, UserBrowserProtocol } from '@holaday/shared-types';
 import { SelectedChromeSession } from './selected-chrome-session.js';
 import { readSelectedTab } from './selected-tab-read.js';
 import { getCurrentWsToken } from './ws-client.js';

@@ -1,5 +1,5 @@
 import { computeNextRunFromInputs } from '../agent/scheduled-runner.js';
-import { normalizePlannedItems, type PlannedRepeatType } from './planned-task-rules.js';
+import { type PlannedRepeatType, normalizePlannedItems } from './planned-task-rules.js';
 
 const OCCURRENCE_CONTENT_PREFIX = 'planned-content:v1:';
 
@@ -105,9 +105,8 @@ export function advancePlannedSchedule(input: {
   };
 }
 
-export function derivePlannedRunOutcome(input:
-  | { kind: 'task'; status: string }
-  | { kind: 'batch'; status: string },
+export function derivePlannedRunOutcome(
+  input: { kind: 'task'; status: string } | { kind: 'batch'; status: string },
 ):
   | { terminal: false; status: 'running' }
   | {

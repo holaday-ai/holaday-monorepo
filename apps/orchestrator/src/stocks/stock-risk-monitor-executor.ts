@@ -421,10 +421,12 @@ export async function loadLatestStockRiskSnapshot(
   const rows = await db
     .select({ snapshotJson: stockDashboardSnapshots.snapshotJson })
     .from(stockDashboardSnapshots)
-    .where(and(
-      eq(stockDashboardSnapshots.userId, userId),
-      sql`JSON_EXTRACT(${stockDashboardSnapshots.snapshotJson}, '$.kind') IS NULL`,
-    ))
+    .where(
+      and(
+        eq(stockDashboardSnapshots.userId, userId),
+        sql`JSON_EXTRACT(${stockDashboardSnapshots.snapshotJson}, '$.kind') IS NULL`,
+      ),
+    )
     .orderBy(desc(stockDashboardSnapshots.updatedAt))
     .limit(20);
   for (const row of rows) {

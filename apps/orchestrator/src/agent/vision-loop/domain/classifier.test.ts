@@ -64,9 +64,7 @@ describe('DomainClassifier.classify', () => {
   });
 
   it('confidence stays below 0.95 even with many matches', () => {
-    const r = classify(
-      '股票 基金 财报 K线 涨跌 市盈率 ROE 净利润 ETF 雪球 东方财富',
-    );
+    const r = classify('股票 基金 财报 K线 涨跌 市盈率 ROE 净利润 ETF 雪球 东方财富');
     expect(r.confidence).toBeLessThanOrEqual(0.95);
     expect(r.confidence).toBeGreaterThan(0.7);
   });

@@ -72,7 +72,9 @@ describe('Batch 10.3 — outcome kinds and copy', () => {
     expect(scheduledOutcomeKind({ ok: true, phase: 'dispatch' })).toBe('started');
     expect(scheduledOutcomeKind({ ok: false, phase: 'dispatch' })).toBe('failed');
     expect(scheduledOutcomeKind({ ok: false, skipped: true })).toBe('skipped');
-    expect(scheduledOutcomeKind({ ok: true, phase: 'dispatch', outcome: 'success' })).toBe('success');
+    expect(scheduledOutcomeKind({ ok: true, phase: 'dispatch', outcome: 'success' })).toBe(
+      'success',
+    );
     expect(scheduledOutcomeKind({ ok: false, phase: 'task_terminal', outcome: 'cancelled' })).toBe(
       'cancelled',
     );

@@ -55,12 +55,15 @@ describe('verificationCheckLabel', () => {
   it('never surfaces a raw English check detail verbatim', () => {
     // Unmapped check type + ASCII assertion string → generic label, not raw leak.
     expect(
-      verificationCheckLabel({ type: 'unknown_check', detail: 'assertion failed: got 3, expected >= 5' }),
+      verificationCheckLabel({
+        type: 'unknown_check',
+        detail: 'assertion failed: got 3, expected >= 5',
+      }),
     ).toBe('自动审核发现一项问题');
     // Chinese details are still surfaced as-is.
-    expect(
-      verificationCheckLabel({ type: 'unknown_check', detail: '第 2 行缺少价格' }),
-    ).toBe('第 2 行缺少价格');
+    expect(verificationCheckLabel({ type: 'unknown_check', detail: '第 2 行缺少价格' })).toBe(
+      '第 2 行缺少价格',
+    );
   });
 
   it('clarifies when required source links were removed or absent', () => {
@@ -85,15 +88,15 @@ describe('verificationCheckLabel', () => {
 describe('shouldShowVerificationBanner', () => {
   it('always shows for partial_success regardless of checks', () => {
     expect(shouldShowVerificationBanner({ status: 'partial_success' })).toBe(true);
-    expect(
-      shouldShowVerificationBanner({ status: 'partial_success', failedChecks: [] }),
-    ).toBe(true);
+    expect(shouldShowVerificationBanner({ status: 'partial_success', failedChecks: [] })).toBe(
+      true,
+    );
   });
 
   it('shows when verification explicitly failed or checks were flagged', () => {
-    expect(
-      shouldShowVerificationBanner({ status: 'completed', verificationPassed: false }),
-    ).toBe(true);
+    expect(shouldShowVerificationBanner({ status: 'completed', verificationPassed: false })).toBe(
+      true,
+    );
     expect(
       shouldShowVerificationBanner({
         status: 'failed',

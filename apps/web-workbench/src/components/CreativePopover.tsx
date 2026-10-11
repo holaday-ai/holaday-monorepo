@@ -1,7 +1,7 @@
 import { OverlayNestingContext, useExclusiveOverlay } from '@/lib/top-level-overlay';
 import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
-import { useLayoutEffect, useState, type ReactNode, type RefObject } from 'react';
+import { type ReactNode, type RefObject, useLayoutEffect, useState } from 'react';
 
 /** The approved media menus float beside their trigger and keep keyboard focus. */
 export function CreativePopover({
@@ -40,29 +40,33 @@ export function CreativePopover({
     };
   }, [open, anchorRef]);
   return (
-    <OverlayNestingContext.Provider value={true}><Dialog.Root open={open} onOpenChange={changeOpen} modal={false}>
-      <Dialog.Portal>
-        <Dialog.Content
-          className={`hd-creative-popover${theme === 'light' ? ' hd-light-popover' : ''}`}
-          style={position}
-          aria-describedby={undefined}
-          onInteractOutside={event => { if (anchorRef.current?.contains(event.target as Node)) event.preventDefault(); }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            anchorRef.current?.focus();
-          }}
-        >
-          <Dialog.Title>{title}</Dialog.Title>
-          <Dialog.Close
-            className="hd-dialog-close"
-            title={`关闭${title}`}
-            aria-label={`关闭${title}`}
+    <OverlayNestingContext.Provider value={true}>
+      <Dialog.Root open={open} onOpenChange={changeOpen} modal={false}>
+        <Dialog.Portal>
+          <Dialog.Content
+            className={`hd-creative-popover${theme === 'light' ? ' hd-light-popover' : ''}`}
+            style={position}
+            aria-describedby={undefined}
+            onInteractOutside={(event) => {
+              if (anchorRef.current?.contains(event.target as Node)) event.preventDefault();
+            }}
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              anchorRef.current?.focus();
+            }}
           >
-            <X />
-          </Dialog.Close>
-          <div className="hd-creative-popover-body">{children}</div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root></OverlayNestingContext.Provider>
+            <Dialog.Title>{title}</Dialog.Title>
+            <Dialog.Close
+              className="hd-dialog-close"
+              title={`关闭${title}`}
+              aria-label={`关闭${title}`}
+            >
+              <X />
+            </Dialog.Close>
+            <div className="hd-creative-popover-body">{children}</div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </OverlayNestingContext.Provider>
   );
 }

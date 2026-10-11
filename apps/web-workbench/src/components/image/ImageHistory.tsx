@@ -155,8 +155,12 @@ export function ImageHistory({
     <section className="hd-media-history mt-8 rounded-[28px] border border-[var(--creative-line,#E8E0E8)] bg-white/80 p-5 shadow-[0_16px_42px_rgba(62,48,69,0.045)] sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold tracking-[0.08em] text-[var(--creative-muted,#8A659F)]">你的图片作品</p>
-          <h2 className="mt-1 text-xl font-semibold text-[var(--creative-ink,#3D3441)]">继续上次的创作</h2>
+          <p className="text-xs font-semibold tracking-[0.08em] text-[var(--creative-muted,#8A659F)]">
+            你的图片作品
+          </p>
+          <h2 className="mt-1 text-xl font-semibold text-[var(--creative-ink,#3D3441)]">
+            继续上次的创作
+          </h2>
         </div>
         <fieldset className="flex rounded-xl bg-[var(--creative-surface,#F4EFF6)] p-1">
           <legend className="sr-only">筛选图片历史</legend>

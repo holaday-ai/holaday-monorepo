@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  WORKBENCH_TAB_MATCH_PATTERNS,
   isWorkbenchTabUrl,
   normalizeWorkbenchOpenUrl,
   openOrFocusWorkbench,
   pickBestTab,
-  WORKBENCH_TAB_MATCH_PATTERNS,
 } from './open-workbench.js';
 
 /**
@@ -68,9 +68,7 @@ describe('normalizeWorkbenchOpenUrl', () => {
 
   it('uses http for local development hosts', () => {
     expect(normalizeWorkbenchOpenUrl('localhost:5173/app')).toBe('http://localhost:5173/app');
-    expect(normalizeWorkbenchOpenUrl('127.0.0.1:4173/app')).toBe(
-      'http://127.0.0.1:4173/app',
-    );
+    expect(normalizeWorkbenchOpenUrl('127.0.0.1:4173/app')).toBe('http://127.0.0.1:4173/app');
   });
 
   it('rejects unsupported or malformed values', () => {

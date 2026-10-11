@@ -67,8 +67,12 @@ export function ImageResultPanel({
             )}
           </span>
           <div>
-            <h2 className="text-sm font-semibold text-[var(--creative-ink,#403743)]">{state.title}</h2>
-            <p className="mt-1 text-xs leading-5 text-[var(--creative-muted,#7B717F)]">{state.detail}</p>
+            <h2 className="text-sm font-semibold text-[var(--creative-ink,#403743)]">
+              {state.title}
+            </h2>
+            <p className="mt-1 text-xs leading-5 text-[var(--creative-muted,#7B717F)]">
+              {state.detail}
+            </p>
           </div>
         </div>
       </section>

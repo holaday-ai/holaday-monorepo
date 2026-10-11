@@ -176,9 +176,7 @@ describe('detectLoginPage — composite', () => {
 
 describe('Real-site fixtures (BOSS spec)', () => {
   it('jinritemai login redirect → matched', () => {
-    const r = detectLoginUrl(
-      'https://compass.jinritemai.com/login?redirect=/dashboard',
-    );
+    const r = detectLoginUrl('https://compass.jinritemai.com/login?redirect=/dashboard');
     expect(r.matched).toBe(true);
   });
 
@@ -247,19 +245,27 @@ describe('detectCaptchaPage — Phase 3 R1', () => {
 
   it("matches English needles (CAPTCHA / I'm not a robot / Cloudflare)", () => {
     expect(detectCaptchaPage({ url: 'https://x.com/', title: 'CAPTCHA' }).matched).toBe(true);
-    expect(detectCaptchaPage({ url: 'https://x.com/', title: "I'm not a robot" }).matched).toBe(true);
-    expect(detectCaptchaPage({ url: 'https://x.com/', title: 'Cloudflare security check' }).matched).toBe(true);
+    expect(detectCaptchaPage({ url: 'https://x.com/', title: "I'm not a robot" }).matched).toBe(
+      true,
+    );
+    expect(
+      detectCaptchaPage({ url: 'https://x.com/', title: 'Cloudflare security check' }).matched,
+    ).toBe(true);
   });
 
   it('does not match a non-captcha page', () => {
     expect(detectCaptchaPage({ url: 'https://example.com/articles/42' }).matched).toBe(false);
-    expect(detectCaptchaPage({ url: 'https://example.com/', title: 'Welcome' }).matched).toBe(false);
+    expect(detectCaptchaPage({ url: 'https://example.com/', title: 'Welcome' }).matched).toBe(
+      false,
+    );
   });
 });
 
 describe('detectPermissionWall — Phase 3 R1', () => {
   it('HTTP 403 status fires regardless of URL', () => {
-    expect(detectPermissionWall({ url: 'https://example.com/articles', httpStatus: 403 }).matched).toBe(true);
+    expect(
+      detectPermissionWall({ url: 'https://example.com/articles', httpStatus: 403 }).matched,
+    ).toBe(true);
   });
 
   it('matches /forbidden / /access-denied / /paywall URL paths', () => {
@@ -270,18 +276,26 @@ describe('detectPermissionWall — Phase 3 R1', () => {
 
   it('matches Chinese permission text (需要授权 / 付费会员 / VIP)', () => {
     expect(detectPermissionWall({ url: 'https://x.com/', title: '需要授权' }).matched).toBe(true);
-    expect(detectPermissionWall({ url: 'https://x.com/', title: '付费会员专享' }).matched).toBe(true);
+    expect(detectPermissionWall({ url: 'https://x.com/', title: '付费会员专享' }).matched).toBe(
+      true,
+    );
     expect(detectPermissionWall({ url: 'https://x.com/', title: 'VIP 内容' }).matched).toBe(true);
   });
 
   it('matches English paywall (subscription required / members only)', () => {
-    expect(detectPermissionWall({ url: 'https://x.com/', title: 'Subscription required' }).matched).toBe(true);
-    expect(detectPermissionWall({ url: 'https://x.com/', title: 'Members only' }).matched).toBe(true);
+    expect(
+      detectPermissionWall({ url: 'https://x.com/', title: 'Subscription required' }).matched,
+    ).toBe(true);
+    expect(detectPermissionWall({ url: 'https://x.com/', title: 'Members only' }).matched).toBe(
+      true,
+    );
   });
 
   it('does not fire on plain login pages or normal articles', () => {
     expect(detectPermissionWall({ url: 'https://x.com/login' }).matched).toBe(false);
-    expect(detectPermissionWall({ url: 'https://x.com/articles/42', title: 'Article title' }).matched).toBe(false);
+    expect(
+      detectPermissionWall({ url: 'https://x.com/articles/42', title: 'Article title' }).matched,
+    ).toBe(false);
   });
 });
 

@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
-import { CreativePopover } from '@/components/CreativePopover';
 import type { DraftAttachment } from '@/components/AttachmentChip';
+import { CreativePopover } from '@/components/CreativePopover';
 import { FileTypeBadge } from '@/components/FileTypeBadge';
-import { normalizeFilesListPage, type NormalizedFileRow } from '@/lib/files-page-state';
 import { formatFileSize } from '@/lib/file-size';
+import { type NormalizedFileRow, normalizeFilesListPage } from '@/lib/files-page-state';
 import { trpc } from '@/lib/trpc';
+import { type RefObject, useEffect, useRef, useState } from 'react';
 
 /** Existing authenticated library files, never demo files or public download URLs. */
 export function CreativeReferenceLibrary({

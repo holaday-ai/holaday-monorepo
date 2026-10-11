@@ -1,3 +1,4 @@
+import { and, eq, inArray } from 'drizzle-orm';
 /**
  * Phase 1 Day 5 — execution-pipeline glue layer.
  *
@@ -35,43 +36,47 @@
  * the spec language to the actual symbol names.
  */
 import type { Logger } from 'pino';
-import { and, eq, inArray } from 'drizzle-orm';
-import { tasks as tasksTable } from '../db/schema/tasks.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
+import { tasks as tasksTable } from '../db/schema/tasks.js';
 import type { MessagesAdapter, MessagesProviderMetadata } from '../llm/messages-adapter.js';
 
 import type { CheckResult, ParsedItem, VerificationResult } from './answer-verifier.js';
 import { extractStructuredItems, verifyDeterministic } from './answer-verifier.js';
-import type { OutputFileDescriptor } from './file-artifact-consistency.js';
 import { autoFix } from './auto-fix.js';
-import type {
-  ContractInputs,
-  ExecutionContract,
-} from './execution-contract.js';
+import {
+  type CoreExecutionHandle,
+  type CoreExecutionRegistry,
+  type CoreExecutionState,
+  coreExecutionRegistry,
+} from './core-execution-registry.js';
+import { verifyCoreIntermediate } from './core-intermediate-verification.js';
+import {
+  type EvidenceEntry,
+  EvidenceLedger,
+  disposeLedger,
+  getLedger,
+  getOrCreateLedger,
+} from './evidence-ledger.js';
+import type { ContractInputs, ExecutionContract } from './execution-contract.js';
 import {
   buildContract,
   classifyIntentForOutputRequirement,
   isResearchOrRetrievalIntent,
 } from './execution-contract.js';
-import {
-  disposeLedger,
-  EvidenceLedger,
-  getLedger,
-  getOrCreateLedger,
-  type EvidenceEntry,
-} from './evidence-ledger.js';
+import { getExpertWorkflowById } from './expert-workflow-registry.js';
 import { getFeatureFlags } from './feature-flags.js';
+import type { OutputFileDescriptor } from './file-artifact-consistency.js';
 import {
   mergeDeterministicAndSemantic,
   prepareLlmVerificationInput,
   shouldRunLlmVerifier,
   verifyWithLlm,
 } from './llm-verifier.js';
-import { getExpertWorkflowById } from './expert-workflow-registry.js';
-import { type TaskVerificationContext, createTaskVerificationContext } from './task-verification-context.js';
-import { type CoreExecutionHandle, type CoreExecutionRegistry, type CoreExecutionState, coreExecutionRegistry } from './core-execution-registry.js';
-import { verifyCoreIntermediate } from './core-intermediate-verification.js';
+import {
+  type TaskVerificationContext,
+  createTaskVerificationContext,
+} from './task-verification-context.js';
 
 const EXECUTION_PERSIST_SOURCE_STATUSES = [
   'completed',
@@ -239,8 +244,8 @@ export function assessResearchSourceTrust(input: {
   resultText?: string;
   currentUrl?: string | null;
 }): ResearchSourceTrustReview {
-  const hasClickableSource = [input.resultText ?? '', input.currentUrl ?? ''].some(
-    (value) => /https?:\/\/[^\s,;'")\]>]+/i.test(value),
+  const hasClickableSource = [input.resultText ?? '', input.currentUrl ?? ''].some((value) =>
+    /https?:\/\/[^\s,;'")\]>]+/i.test(value),
   );
   if (
     !input.resultText?.trim() ||
@@ -333,10 +338,7 @@ export function assessResultTrust(input: {
       (row) => Boolean(row.name) && row.price != null && Boolean(row.url),
     );
     const uniqueUrls = new Set(completeRows.map((row) => row.url));
-    if (
-      completeRows.length < requirement.minItems ||
-      uniqueUrls.size < requirement.minItems
-    ) {
+    if (completeRows.length < requirement.minItems || uniqueUrls.size < requirement.minItems) {
       failedChecks.push({
         type: 'ecommerce_rows',
         detail: `可核验商品只有 ${completeRows.length} 条、独立链接 ${uniqueUrls.size} 个，要求至少 ${requirement.minItems} 条名称/价格/商品链接完整的结果`,
@@ -503,9 +505,7 @@ export function extractFailedChecks(
  * verifier's check list. Picks the first failing check with a
  * `severity` hint, falling back to the suggested-fix string.
  */
-export function summariseVerificationFailure(
-  verification: VerificationResult,
-): string {
+export function summariseVerificationFailure(verification: VerificationResult): string {
   const failed = verification.checks.find((c) => !c.passed && c.severity);
   if (failed) return `质量校验未通过：${failed.detail}`;
   const generic = verification.checks.find((c) => !c.passed);
@@ -533,28 +533,37 @@ export async function verifyCoreAndFinalize(inputs: CoreVerifyInputs): Promise<V
   // Observed search URLs without fetched bodies are an informational marker
   // ("来源已列出"), not a verification failure: semantic review decides.
   const verificationContext = state.context;
-  let output = inputs.runnerStatus === 'awaiting_user' || inputs.runnerStatus === 'failed'
-    ? await verifyCoreIntermediate({ state, verificationContext,
-        runnerStatus: inputs.runnerStatus, answerText: inputs.answerText,
-        semanticAdapter: inputs.semanticAdapter })
-    : await verifyResolvedExecution(
-    { ...inputs, taskId: state.handle.taskId, verificationContext },
-    state,
-  );
+  let output =
+    inputs.runnerStatus === 'awaiting_user' || inputs.runnerStatus === 'failed'
+      ? await verifyCoreIntermediate({
+          state,
+          verificationContext,
+          runnerStatus: inputs.runnerStatus,
+          answerText: inputs.answerText,
+          semanticAdapter: inputs.semanticAdapter,
+        })
+      : await verifyResolvedExecution(
+          { ...inputs, taskId: state.handle.taskId, verificationContext },
+          state,
+        );
   if (registry.read(inputs.handle) !== state || !coreVerificationEnabled())
     return unavailableCoreOutput(inputs.handle);
   if (output.verification && !output.verification.inputCoverage) {
     // Deterministic early exits still need atomic, same-round metadata. Build
     // coverage without making a semantic call or reclassifying the failure.
     const { inputCoverage } = prepareLlmVerificationInput({
-      contract: state.contract, ledger: state.ledger, verificationContext,
-      answerText: output.finalText, adapter: inputs.semanticAdapter ?? null,
+      contract: state.contract,
+      ledger: state.ledger,
+      verificationContext,
+      answerText: output.finalText,
+      adapter: inputs.semanticAdapter ?? null,
     });
     output = {
       ...output,
       verification: mergeDeterministicAndSemantic(output.verification, {
         status: output.verification.semanticStatus ?? 'unavailable',
-        issues: [], inputCoverage,
+        issues: [],
+        inputCoverage,
       }),
     };
   }
@@ -841,7 +850,12 @@ function finalizeResolvedExecution(
     if (priorVerification?.inputCoverage?.codes.includes('VERIFICATION_MATERIALS_INCOMPLETE')) {
       inputCoverage = {
         complete: false,
-        codes: [...new Set([...(inputCoverage?.codes ?? []), 'VERIFICATION_MATERIALS_INCOMPLETE' as const])],
+        codes: [
+          ...new Set([
+            ...(inputCoverage?.codes ?? []),
+            'VERIFICATION_MATERIALS_INCOMPLETE' as const,
+          ]),
+        ],
       };
     }
     if (inputCoverage?.complete === false) {
@@ -935,7 +949,10 @@ function runFixLoop(
   ledger: EvidenceLedger,
   initialVerification: VerificationResult,
   inputs: VerifyInputs,
-  workflowContract: Pick<import('./expert-workflow-contract.js').ExpertWorkflowContract, 'workflowId' | 'reportSections'> | null,
+  workflowContract: Pick<
+    import('./expert-workflow-contract.js').ExpertWorkflowContract,
+    'workflowId' | 'reportSections'
+  > | null,
 ): VerifyOutput {
   if (initialVerification.failureLevel !== 'fixable') {
     return {
@@ -1075,16 +1092,10 @@ export interface PersistInputs {
  * Reads contract+ledger from the module registries, so callers
  * only need taskId + verification.
  */
-export async function persistExecution(
-  inputs: PersistInputs,
-): Promise<boolean> {
+export async function persistExecution(inputs: PersistInputs): Promise<boolean> {
   const flags = getFeatureFlags();
   // If none of the flags ever fired, there's nothing to persist.
-  if (
-    !flags.EXECUTION_CONTRACT &&
-    !flags.EVIDENCE_LEDGER &&
-    !flags.EXECUTION_VERIFIER
-  ) {
+  if (!flags.EXECUTION_CONTRACT && !flags.EVIDENCE_LEDGER && !flags.EXECUTION_VERIFIER) {
     return false;
   }
   const contract = getContract(inputs.taskId);
@@ -1097,9 +1108,7 @@ export async function persistExecution(
       .update(tasksTable)
       .set({
         contractJson: contract ? (contract as unknown as Record<string, unknown>) : null,
-        evidenceJson: ledger
-          ? (ledger.toJSON() as unknown as Record<string, unknown>)
-          : null,
+        evidenceJson: ledger ? (ledger.toJSON() as unknown as Record<string, unknown>) : null,
         verificationJson: inputs.verification
           ? (inputs.verification as unknown as Record<string, unknown>)
           : null,

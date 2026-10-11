@@ -1,4 +1,3 @@
-import { ingressDiagnosticStage } from './browser-first-cutover-ingress-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
@@ -6,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
+import { ingressDiagnosticStage } from './browser-first-cutover-ingress-diagnostics.mjs';
 
 const session = await import('./browser-first-cutover-recovery-session.mjs').catch(() => ({}));
 const hash = (value) => createHash('sha256').update(value).digest('hex');

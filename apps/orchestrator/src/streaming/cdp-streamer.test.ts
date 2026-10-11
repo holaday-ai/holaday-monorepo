@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events';
-import type { CDPSession, Page } from 'playwright';
 import type { Logger } from 'pino';
-import type { WebSocket } from 'ws';
+import type { CDPSession, Page } from 'playwright';
 import { describe, expect, it, vi } from 'vitest';
+import type { WebSocket } from 'ws';
 import { CdpStreamer } from './cdp-streamer.js';
 
 describe('CdpStreamer', () => {
@@ -300,9 +300,11 @@ describe('CdpStreamer', () => {
       resolveCapture({ data: 'stale-capture' });
       await vi.runAllTicks();
 
-      const sentFrames = vi.mocked(ws.send).mock.calls.map(([payload]) =>
-        JSON.parse(String(payload)) as { type: string; data?: string },
-      );
+      const sentFrames = vi
+        .mocked(ws.send)
+        .mock.calls.map(
+          ([payload]) => JSON.parse(String(payload)) as { type: string; data?: string },
+        );
       expect(sentFrames).toContainEqual({
         type: 'frame',
         data: 'newer-natural-frame',
@@ -363,12 +365,12 @@ describe('CdpStreamer', () => {
       resolveCapture({ data: 'previous-page-capture' });
       await vi.runAllTicks();
 
-      const sentFrames = vi.mocked(ws.send).mock.calls.map(([payload]) =>
-        JSON.parse(String(payload)) as { type: string; data?: string },
-      );
-      expect(
-        sentFrames.some((frame) => frame.data === 'previous-page-capture'),
-      ).toBe(false);
+      const sentFrames = vi
+        .mocked(ws.send)
+        .mock.calls.map(
+          ([payload]) => JSON.parse(String(payload)) as { type: string; data?: string },
+        );
+      expect(sentFrames.some((frame) => frame.data === 'previous-page-capture')).toBe(false);
       await streamer.stop();
     } finally {
       vi.useRealTimers();
@@ -386,9 +388,7 @@ describe('CdpStreamer', () => {
       const send = vi.fn().mockImplementation((method: string) => {
         if (method === 'Page.captureScreenshot') {
           captureCalls += 1;
-          return captureCalls === 1
-            ? firstCapture
-            : Promise.resolve({ data: 'latest-capture' });
+          return captureCalls === 1 ? firstCapture : Promise.resolve({ data: 'latest-capture' });
         }
         return Promise.resolve(undefined);
       });
@@ -436,9 +436,11 @@ describe('CdpStreamer', () => {
           send.mock.calls.filter(([method]) => method === 'Page.captureScreenshot'),
         ).toHaveLength(2);
       });
-      const sentFrames = vi.mocked(ws.send).mock.calls.map(([payload]) =>
-        JSON.parse(String(payload)) as { type: string; data?: string },
-      );
+      const sentFrames = vi
+        .mocked(ws.send)
+        .mock.calls.map(
+          ([payload]) => JSON.parse(String(payload)) as { type: string; data?: string },
+        );
       expect(sentFrames.some((frame) => frame.data === 'first-capture')).toBe(false);
       expect(sentFrames.some((frame) => frame.data === 'latest-capture')).toBe(true);
       await streamer.stop();
@@ -598,9 +600,7 @@ describe('CdpStreamer', () => {
       });
       await vi.advanceTimersByTimeAsync(6_200);
 
-      expect(
-        send.mock.calls.filter(([method]) => method === 'Runtime.evaluate'),
-      ).toHaveLength(1);
+      expect(send.mock.calls.filter(([method]) => method === 'Runtime.evaluate')).toHaveLength(1);
       resolveHealthCheck({ result: { value: 'https://example.com/' } });
       await vi.runAllTicks();
       await streamer.stop();

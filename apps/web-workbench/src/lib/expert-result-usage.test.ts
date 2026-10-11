@@ -15,9 +15,7 @@ describe('expertResultUsageCopy', () => {
   });
 
   it('surfaces forced expert mode even when no workflow matched', () => {
-    expect(expertResultUsageCopy({ expertMode: 'expert' })).toBe(
-      '本次按专家模式处理',
-    );
+    expect(expertResultUsageCopy({ expertMode: 'expert' })).toBe('本次按专家模式处理');
   });
 
   it('does not show expert usage for normal or automatic tasks without a workflow', () => {

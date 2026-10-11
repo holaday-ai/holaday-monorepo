@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import test from 'node:test';
 import * as evidence from './browser-cutover-evidence.mjs';
 const original = Buffer.from(
   'aW1wb3J0IHsgdHlwZSBMb2dnZXJPcHRpb25zLCBwaW5vIH0gZnJvbSAncGlubyc7CmltcG9ydCB7IGVudiB9IGZyb20gJy4vZW52LmpzJzsKCmV4cG9ydCBjb25zdCBsb2dnZXJPcHRpb25zID0gewogIGxldmVsOiBlbnYuTE9HX0xFVkVMLAogIGJhc2U6IHsgc2VydmljZTogJ29yY2hlc3RyYXRvcicgfSwKICB0aW1lc3RhbXA6IHBpbm8uc3RkVGltZUZ1bmN0aW9ucy5pc29UaW1lLAogIHJlZGFjdDogewogICAgcGF0aHM6IFsKICAgICAgJ3JlcS5oZWFkZXJzLmF1dGhvcml6YXRpb24nLAogICAgICAncmVxLmhlYWRlcnMuY29va2llJywKICAgICAgJ3JlcS5oZWFkZXJzWyJwcm94eS1hdXRob3JpemF0aW9uIl0nLAogICAgICAncmVxLmhlYWRlcnNbIngtYXBpLWtleSJdJywKICAgICAgJ3JlcS5oZWFkZXJzWyJhcGkta2V5Il0nLAogICAgICAncmVzLmhlYWRlcnNbInNldC1jb29raWUiXScsCiAgICAgICdyZXMuaGVhZGVycy5sb2NhdGlvbicsCiAgICBdLAogICAgY2Vuc29yOiAnW1JlZGFjdGVkXScsCiAgfSwKfSBzYXRpc2ZpZXMgTG9nZ2VyT3B0aW9uczsKCmV4cG9ydCBjb25zdCBsb2dnZXIgPSBwaW5vKGxvZ2dlck9wdGlvbnMpOwoKZXhwb3J0IHR5cGUgTG9nZ2VyID0gdHlwZW9mIGxvZ2dlcjsK',

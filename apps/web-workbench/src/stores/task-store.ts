@@ -29,7 +29,11 @@ import {
   browserConnectionWaitSchema,
 } from '@holaday/shared-types';
 import { create } from 'zustand';
-import { type ExecutionIdentity, TaskExecutionOrder, readExecutionIdentity } from './task-execution-order';
+import {
+  type ExecutionIdentity,
+  TaskExecutionOrder,
+  readExecutionIdentity,
+} from './task-execution-order';
 
 /**
  * The surface where a task began. This is routing context, not user-authored
@@ -70,7 +74,13 @@ export interface StockTaskContextInput {
  */
 export interface TaskStore {
   browserPreference: 'cloud-public' | null;
-  localChromeSelection: { extensionClientId: string; tabId: number; expectedUrl: string; selectionId: string; title: string } | null;
+  localChromeSelection: {
+    extensionClientId: string;
+    tabId: number;
+    expectedUrl: string;
+    selectionId: string;
+    title: string;
+  } | null;
   tasks: UiTask[];
   selectedTaskId: string | null;
   /**
@@ -275,10 +285,10 @@ export interface TaskStore {
     intent: string,
     fileIds?: string[],
     /**
-   * Phase 14 audit follow-up — when set, server treats this as
-   * a 追问 of the parent task: skips quota and prepends the
-   * parent's intent + summary so the agent has full context.
-   * The parent must be in a terminal state.
+     * Phase 14 audit follow-up — when set, server treats this as
+     * a 追问 of the parent task: skips quota and prepends the
+     * parent's intent + summary so the agent has full context.
+     * The parent must be in a terminal state.
      */
     replyToTaskId?: string,
     /** O4 — 'plan' makes agent emit + wait-for-approval before executing. */
@@ -379,8 +389,8 @@ function clearCoreRoundRuntime(prev: TaskStore, ids: ReadonlySet<string>): Parti
     stepsByTask: omitRuntimeKeys(prev.stepsByTask, ids),
     webSearchByTask: omitRuntimeKeys(prev.webSearchByTask, ids),
     screencastByTask: omitRuntimeKeys(prev.screencastByTask, ids),
-    terminalTaskIds: new Set([...prev.terminalTaskIds].filter(id => !ids.has(id))),
-    animatedTaskIds: new Set([...prev.animatedTaskIds].filter(id => !ids.has(id))),
+    terminalTaskIds: new Set([...prev.terminalTaskIds].filter((id) => !ids.has(id))),
+    animatedTaskIds: new Set([...prev.animatedTaskIds].filter((id) => !ids.has(id))),
   };
 }
 
@@ -388,7 +398,14 @@ function clearCoreRoundRuntime(prev: TaskStore, ids: ReadonlySet<string>): Parti
 // operation. A missing response or INTERNAL_SERVER_ERROR is not proof of failure.
 function isDefiniteWriteRejection(error: unknown): boolean {
   if (!isTaskListRecord(error) || !isTaskListRecord(error.data)) return false;
-  return ['BAD_REQUEST', 'UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'PRECONDITION_FAILED', 'TOO_MANY_REQUESTS'].includes(String(error.data.code));
+  return [
+    'BAD_REQUEST',
+    'UNAUTHORIZED',
+    'FORBIDDEN',
+    'NOT_FOUND',
+    'PRECONDITION_FAILED',
+    'TOO_MANY_REQUESTS',
+  ].includes(String(error.data.code));
 }
 
 export function pruneRuntimeStateForTerminalTasks(
@@ -415,18 +432,12 @@ export function pruneRuntimeStateForTerminalTasks(
   }
   if (terminalChanged) patch.terminalTaskIds = nextTerminalTaskIds;
 
-  const nextCaptchaWaitByTask = omitRuntimeKeys(
-    prev.captchaWaitByTask,
-    terminalIds,
-  );
+  const nextCaptchaWaitByTask = omitRuntimeKeys(prev.captchaWaitByTask, terminalIds);
   if (nextCaptchaWaitByTask !== prev.captchaWaitByTask) {
     patch.captchaWaitByTask = nextCaptchaWaitByTask;
   }
 
-  const nextExecutorFallbackByTask = omitRuntimeKeys(
-    prev.executorFallbackByTask,
-    terminalIds,
-  );
+  const nextExecutorFallbackByTask = omitRuntimeKeys(prev.executorFallbackByTask, terminalIds);
   if (nextExecutorFallbackByTask !== prev.executorFallbackByTask) {
     patch.executorFallbackByTask = nextExecutorFallbackByTask;
   }
@@ -436,10 +447,7 @@ export function pruneRuntimeStateForTerminalTasks(
     patch.degradeByTask = nextDegradeByTask;
   }
 
-  const nextAwaitingUserByTask = omitRuntimeKeys(
-    prev.awaitingUserByTask,
-    terminalIds,
-  );
+  const nextAwaitingUserByTask = omitRuntimeKeys(prev.awaitingUserByTask, terminalIds);
   if (nextAwaitingUserByTask !== prev.awaitingUserByTask) {
     patch.awaitingUserByTask = nextAwaitingUserByTask;
   }
@@ -457,18 +465,12 @@ export function pruneRuntimeStateForTerminalTasks(
   // Keep streaming/progress as a bridge until canonical resultText is
   // present. Once the API refresh confirms a terminal result, those
   // live buffers are stale and can no longer improve the handoff.
-  const nextStreamingByTask = omitRuntimeKeys(
-    prev.streamingByTask,
-    terminalIdsWithResult,
-  );
+  const nextStreamingByTask = omitRuntimeKeys(prev.streamingByTask, terminalIdsWithResult);
   if (nextStreamingByTask !== prev.streamingByTask) {
     patch.streamingByTask = nextStreamingByTask;
   }
 
-  const nextProgressByTask = omitRuntimeKeys(
-    prev.progressByTask,
-    terminalIdsWithResult,
-  );
+  const nextProgressByTask = omitRuntimeKeys(prev.progressByTask, terminalIdsWithResult);
   if (nextProgressByTask !== prev.progressByTask) {
     patch.progressByTask = nextProgressByTask;
   }
@@ -481,25 +483,17 @@ function pruneRuntimeStateForAwaitingUserTasks(
   tasks: readonly UiTask[],
 ): Partial<AwaitingRuntimeStatePatch> {
   const awaitingIds = new Set(
-    tasks
-      .filter((task) => task.status === 'awaiting_user')
-      .map((task) => task.taskId),
+    tasks.filter((task) => task.status === 'awaiting_user').map((task) => task.taskId),
   );
   if (awaitingIds.size === 0) return {};
 
   const patch: Partial<AwaitingRuntimeStatePatch> = {};
-  const nextCaptchaWaitByTask = omitRuntimeKeys(
-    prev.captchaWaitByTask,
-    awaitingIds,
-  );
+  const nextCaptchaWaitByTask = omitRuntimeKeys(prev.captchaWaitByTask, awaitingIds);
   if (nextCaptchaWaitByTask !== prev.captchaWaitByTask) {
     patch.captchaWaitByTask = nextCaptchaWaitByTask;
   }
 
-  const nextExecutorFallbackByTask = omitRuntimeKeys(
-    prev.executorFallbackByTask,
-    awaitingIds,
-  );
+  const nextExecutorFallbackByTask = omitRuntimeKeys(prev.executorFallbackByTask, awaitingIds);
   if (nextExecutorFallbackByTask !== prev.executorFallbackByTask) {
     patch.executorFallbackByTask = nextExecutorFallbackByTask;
   }
@@ -584,10 +578,7 @@ export function mergeTaskPagesReplacingDuplicates(
   return merged;
 }
 
-function preserveFinalTaskRows(
-  current: readonly UiTask[],
-  incoming: readonly UiTask[],
-): UiTask[] {
+function preserveFinalTaskRows(current: readonly UiTask[], incoming: readonly UiTask[]): UiTask[] {
   const currentByTaskId = new Map(current.map((task) => [task.taskId, task]));
   return incoming.map((task) => {
     const existing = currentByTaskId.get(task.taskId);
@@ -600,15 +591,20 @@ function preserveFinalTaskRows(
 
 function preserveClientTaskContext(current: UiTask, incoming: UiTask): UiTask {
   // List rows from an older server/snapshot cannot erase a known core round.
-  if (current.executionRevision && (!incoming.executionRevision ||
-    incoming.executionRevision < current.executionRevision ||
-    (incoming.executionRevision === current.executionRevision && incoming.executionId !== current.executionId))) return current;
+  if (
+    current.executionRevision &&
+    (!incoming.executionRevision ||
+      incoming.executionRevision < current.executionRevision ||
+      (incoming.executionRevision === current.executionRevision &&
+        incoming.executionId !== current.executionId))
+  )
+    return current;
   const replyToTaskId = incoming.replyToTaskId ?? current.replyToTaskId;
   const executionMode = incoming.executionMode ?? current.executionMode;
   const awaitingKind =
     incoming.status === 'awaiting_user'
-      ? incoming.awaitingKind ??
-        (current.status === 'awaiting_user' ? current.awaitingKind : undefined)
+      ? (incoming.awaitingKind ??
+        (current.status === 'awaiting_user' ? current.awaitingKind : undefined))
       : undefined;
   if (
     replyToTaskId === incoming.replyToTaskId &&
@@ -627,7 +623,8 @@ function preserveClientTaskContext(current: UiTask, incoming: UiTask): UiTask {
 }
 
 function shouldPreserveFinalTaskRow(current: UiTask, incoming: UiTask): boolean {
-  if (incoming.executionRevision && incoming.executionRevision > (current.executionRevision ?? 0)) return false;
+  if (incoming.executionRevision && incoming.executionRevision > (current.executionRevision ?? 0))
+    return false;
   return isTerminalStatus(current.status) && !isTerminalStatus(incoming.status);
 }
 
@@ -635,9 +632,7 @@ export function mergeFirstPageWithPreservedSelection(
   firstPage: readonly UiTask[],
   preservedSelected: UiTask | null,
 ): UiTask[] {
-  const merged = preservedSelected
-    ? [preservedSelected, ...firstPage]
-    : [...firstPage];
+  const merged = preservedSelected ? [preservedSelected, ...firstPage] : [...firstPage];
   const seen = new Set<string>();
   const tasks: UiTask[] = [];
   for (const task of merged) {
@@ -658,9 +653,7 @@ export function mergeFirstPageWithPreservedSelection(
 // `source='url'` selectTask calls (originating from the inbound effect)
 // SKIP this writer to break the cycle even tighter.
 let storeNavigate: ((taskId: string | null) => void) | null = null;
-export function setStoreNavigate(
-  fn: ((taskId: string | null) => void) | null,
-): void {
+export function setStoreNavigate(fn: ((taskId: string | null) => void) | null): void {
   storeNavigate = fn;
 }
 
@@ -743,7 +736,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       },
     );
     if ('error' in created)
-      return { error: `原任务已取消，但公开云端任务没有创建成功：${created.error}。可以再次点击重试，不会重复创建。` };
+      return {
+        error: `原任务已取消，但公开云端任务没有创建成功：${created.error}。可以再次点击重试，不会重复创建。`,
+      };
     set((prev) => ({
       publicCloudContinuationByTask: {
         ...prev.publicCloudContinuationByTask,
@@ -754,12 +749,20 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   }
   const uncertainWriteMessage = '任务接收或创建状态未确认，请保留输入并刷新核对，不要重复提交。';
   function seedExecutionOrder(taskId: string): void {
-    const task = get().tasks.find(t => t.taskId === taskId);
+    const task = get().tasks.find((t) => t.taskId === taskId);
     if (task) executionOrder.seed(taskId, task, isTerminalStatus(task.status));
   }
-  function coversPending(observed: ExecutionIdentity | undefined, pending: ExecutionIdentity | 'invalid'): boolean {
-    return !!observed && pending !== 'invalid' && (observed.executionRevision > pending.executionRevision ||
-      (observed.executionRevision === pending.executionRevision && observed.executionId === pending.executionId));
+  function coversPending(
+    observed: ExecutionIdentity | undefined,
+    pending: ExecutionIdentity | 'invalid',
+  ): boolean {
+    return (
+      !!observed &&
+      pending !== 'invalid' &&
+      (observed.executionRevision > pending.executionRevision ||
+        (observed.executionRevision === pending.executionRevision &&
+          observed.executionId === pending.executionId))
+    );
   }
   function confirmObservedExecution(taskId: string, identity: ExecutionIdentity): void {
     observedExecutions.set(taskId, identity);
@@ -768,27 +771,36 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     for (const [key, id] of uncertainCreations) if (id === taskId) uncertainCreations.delete(key);
   }
   function captureListVersions(): Map<string, number> {
-    return new Map(get().tasks.map(task => {
-      seedExecutionOrder(task.taskId);
-      return [task.taskId, executionOrder.version(task.taskId)];
-    }));
+    return new Map(
+      get().tasks.map((task) => {
+        seedExecutionOrder(task.taskId);
+        return [task.taskId, executionOrder.version(task.taskId)];
+      }),
+    );
   }
   function preserveObservedListRows(rows: UiTask[], versions: Map<string, number>): UiTask[] {
-    const current = new Map(get().tasks.map(task => [task.taskId, task]));
-    return rows.map(row => {
+    const current = new Map(get().tasks.map((task) => [task.taskId, task]));
+    return rows.map((row) => {
       const live = current.get(row.taskId);
-      return live?.executionId && row.executionId === live.executionId &&
-        row.executionRevision === live.executionRevision && executionOrder.version(row.taskId) !== (versions.get(row.taskId) ?? 0)
-        ? live : row;
+      return live?.executionId &&
+        row.executionId === live.executionId &&
+        row.executionRevision === live.executionRevision &&
+        executionOrder.version(row.taskId) !== (versions.get(row.taskId) ?? 0)
+        ? live
+        : row;
     });
   }
   function adoptListRounds(prev: TaskStore, rows: UiTask[]): Partial<TaskStore> {
-    const previous = new Map(prev.tasks.map(task => [task.taskId, task]));
+    const previous = new Map(prev.tasks.map((task) => [task.taskId, task]));
     const changed = new Set<string>();
     for (const row of rows) {
       const identity = readExecutionIdentity(row);
       const old = previous.get(row.taskId);
-      if (identity && identity !== 'invalid' && (!old?.executionId || identity.executionRevision > (old.executionRevision ?? 0))) {
+      if (
+        identity &&
+        identity !== 'invalid' &&
+        (!old?.executionId || identity.executionRevision > (old.executionRevision ?? 0))
+      ) {
         changed.add(row.taskId);
         executionOrder.seed(row.taskId, identity, isTerminalStatus(row.status));
       }
@@ -818,60 +830,93 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     try {
       const rawDetail = await trpc.tasks.detail.query({ taskId });
       if (myToken !== hydrateToken || !isCurrentSession(generation)) return;
-      const detail: Record<string, unknown> = isTaskListRecord(rawDetail)
-        ? rawDetail
-        : {};
+      const detail: Record<string, unknown> = isTaskListRecord(rawDetail) ? rawDetail : {};
       const detailIdentity = readExecutionIdentity(detail);
-      const detailOrder = executionOrder.accept(taskId, detail, { source: 'detail', since: versionAtRequestStart,
-        terminal: isTerminalStatus(normaliseStatus(safeTaskListText(detail.status))) });
+      const detailOrder = executionOrder.accept(taskId, detail, {
+        source: 'detail',
+        since: versionAtRequestStart,
+        terminal: isTerminalStatus(normaliseStatus(safeTaskListText(detail.status))),
+      });
       if (detailOrder === 'ignore' || detailOrder === 'reconcile') return;
       const steps = normalizeTaskDetailSteps(detail.steps);
       set((prev) => {
-        const roundPatch = detailOrder === 'new' ? clearCoreRoundRuntime(prev, new Set([taskId])) : {};
+        const roundPatch =
+          detailOrder === 'new' ? clearCoreRoundRuntime(prev, new Set([taskId])) : {};
         prev = { ...prev, ...roundPatch };
         const existingTask = prev.tasks.find((t) => t.taskId === taskId);
         const rawDetailStatus = safeTaskListText(detail.status);
         const detailStatus = rawDetailStatus
           ? normaliseStatus(rawDetailStatus)
-          : existingTask?.status ?? 'unknown';
-        if (detailOrder !== 'new' && hasFinalTaskRow(prev, taskId) && !isTerminalStatus(detailStatus)) {
+          : (existingTask?.status ?? 'unknown');
+        if (
+          detailOrder !== 'new' &&
+          hasFinalTaskRow(prev, taskId) &&
+          !isTerminalStatus(detailStatus)
+        ) {
           return prev;
         }
-        if (detailIdentity && detailIdentity !== 'invalid' && (detailStatus === 'awaiting_user' || isTerminalStatus(detailStatus))) confirmObservedExecution(taskId, detailIdentity);
+        if (
+          detailIdentity &&
+          detailIdentity !== 'invalid' &&
+          (detailStatus === 'awaiting_user' || isTerminalStatus(detailStatus))
+        )
+          confirmObservedExecution(taskId, detailIdentity);
         const rawResultText = extractSummary(detail.result);
         const rawErrorText = safeTaskListText(detail.errorMessage);
         const resultText =
-          displayResultTextForStatus(detailStatus, rawResultText, rawErrorText) ??
-          undefined;
+          displayResultTextForStatus(detailStatus, rawResultText, rawErrorText) ?? undefined;
         const planStatus = normalizeTaskPlanStatus(detail.planStatus);
         const resultObj = isTaskListRecord(detail.result) ? detail.result : {};
         const savedSuggestions = Array.isArray(resultObj.followUpSuggestions)
-          ? [...new Set(resultObj.followUpSuggestions.filter((value): value is string =>
-              typeof value === 'string' && value.trim().length >= 4 && value.length <= 40,
-            ).map(value => value.trim()))].slice(0, 3)
+          ? [
+              ...new Set(
+                resultObj.followUpSuggestions
+                  .filter(
+                    (value): value is string =>
+                      typeof value === 'string' && value.trim().length >= 4 && value.length <= 40,
+                  )
+                  .map((value) => value.trim()),
+              ),
+            ].slice(0, 3)
           : [];
         const metadata = isTaskListRecord(resultObj.metadata) ? resultObj.metadata : {};
-        const planText = safeTaskListText(resultObj.planText)
-          || safeTaskListText(metadata.approvedPlanText)
-          || safeTaskListText(detail.planText) || undefined;
+        const planText =
+          safeTaskListText(resultObj.planText) ||
+          safeTaskListText(metadata.approvedPlanText) ||
+          safeTaskListText(detail.planText) ||
+          undefined;
         // Executing rows can still carry the previous plan's JSON. Restore
         // history only once the next draft/final result has been persisted.
-        const coreHistory = isTaskListRecord(resultObj.coreRequirements) ? resultObj.coreRequirements.userTurns : undefined;
-        const rawPlanReplies = coreHistory ?? (detailStatus === 'executing'
-          ? undefined : resultObj.planReplyHistory ?? metadata.planReplyHistory);
-        const savedPlanReplies = Array.isArray(rawPlanReplies)
-          && (coreHistory !== undefined
+        const coreHistory = isTaskListRecord(resultObj.coreRequirements)
+          ? resultObj.coreRequirements.userTurns
+          : undefined;
+        const rawPlanReplies =
+          coreHistory ??
+          (detailStatus === 'executing'
+            ? undefined
+            : (resultObj.planReplyHistory ?? metadata.planReplyHistory));
+        const savedPlanReplies =
+          Array.isArray(rawPlanReplies) &&
+          (coreHistory !== undefined
             ? new TextEncoder().encode(JSON.stringify(rawPlanReplies)).byteLength <= 64 * 1024
-            : rawPlanReplies.length <= 32)
-          && rawPlanReplies.every((value): value is string => typeof value === 'string' && (coreHistory !== undefined || value.length <= 4_000))
-            ? rawPlanReplies : null;
+            : rawPlanReplies.length <= 32) &&
+          rawPlanReplies.every(
+            (value): value is string =>
+              typeof value === 'string' && (coreHistory !== undefined || value.length <= 4_000),
+          )
+            ? rawPlanReplies
+            : null;
         const localReplies = prev.userRepliesByTask[taskId] ?? [];
         // Preserve a just-submitted local suffix until persistence catches up.
-        const localHasSavedPrefix = savedPlanReplies !== null
-          && localReplies.length >= savedPlanReplies.length
-          && savedPlanReplies.every((text, index) => localReplies[index]?.text === text);
+        const localHasSavedPrefix =
+          savedPlanReplies !== null &&
+          localReplies.length >= savedPlanReplies.length &&
+          savedPlanReplies.every((text, index) => localReplies[index]?.text === text);
         const replyBaseTime = new Date(safeTaskListDate(detail.createdAt) ?? 0).getTime();
-        const restoredReplies = (savedPlanReplies ?? []).map((text, index) => ({ at: replyBaseTime + index + 1, text }));
+        const restoredReplies = (savedPlanReplies ?? []).map((text, index) => ({
+          at: replyBaseTime + index + 1,
+          text,
+        }));
         const failedEntries = new Set(failedLocalReplies.get(taskId) ?? []);
         // Anchor failed attempts to their original local neighbours, not to the
         // end of the fetched history. Otherwise a failed edit can move after a
@@ -884,16 +929,16 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             restoredReplies.splice(savedIndex + 1, 0, reply);
           } else {
             let matchIndex = savedIndex;
-            while (matchIndex >= 0 && savedPlanReplies?.[matchIndex] !== reply.text) matchIndex -= 1;
+            while (matchIndex >= 0 && savedPlanReplies?.[matchIndex] !== reply.text)
+              matchIndex -= 1;
             if (matchIndex >= 0) {
               restoredReplies[matchIndex] = reply;
               savedIndex = matchIndex - 1;
             }
           }
         }
-        const hydratedReplies = savedPlanReplies === null || localHasSavedPrefix
-          ? localReplies
-          : restoredReplies;
+        const hydratedReplies =
+          savedPlanReplies === null || localHasSavedPrefix ? localReplies : restoredReplies;
         const imageTaskMeta = parseImageTaskMeta(metadata);
         const finalScreenshot =
           safeTaskListText(resultObj.finalScreenshot).length > 0
@@ -944,9 +989,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             iteration: typeof s.seq === 'number' && Number.isFinite(s.seq) ? s.seq : idx,
             query,
             at: Date.now(),
-            ...(sources.length > 0
-              ? { sources }
-              : {}),
+            ...(sources.length > 0 ? { sources } : {}),
           };
         }
         const awaitingQuestion =
@@ -985,8 +1028,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               },
             }
           : (() => {
-              if (!prev.awaitingUserByTask[taskId])
-                return prev.awaitingUserByTask;
+              if (!prev.awaitingUserByTask[taskId]) return prev.awaitingUserByTask;
               const next = { ...prev.awaitingUserByTask };
               delete next[taskId];
               return next;
@@ -998,7 +1040,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               t.taskId === taskId
                 ? {
                     ...t,
-                    ...(detailOrder === 'new' ? { resultText: undefined, planText: undefined, planStatus: undefined, awaitingKind: undefined } : {}),
+                    ...(detailOrder === 'new'
+                      ? {
+                          resultText: undefined,
+                          planText: undefined,
+                          planStatus: undefined,
+                          awaitingKind: undefined,
+                        }
+                      : {}),
                     ...(detailIdentity && detailIdentity !== 'invalid' ? detailIdentity : {}),
                     status: detailStatus,
                     tickCount: Math.max(t.tickCount, steps.length),
@@ -1010,7 +1059,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                     ...(finalViewport ? { finalViewport } : {}),
                     ...(awaitingKind ? { awaitingKind } : {}),
                     ...(executionMode ? { executionMode } : {}),
-                    ...(detail.browserSource === 'local-chrome' || metadata.browserSource === 'local-chrome' ? { browserSource: 'local-chrome' as const } : {}),
+                    ...(detail.browserSource === 'local-chrome' ||
+                    metadata.browserSource === 'local-chrome'
+                      ? { browserSource: 'local-chrome' as const }
+                      : {}),
                     ...(attachments ? { attachments } : {}),
                     ...(expertWorkflowId ? { expertWorkflowId } : {}),
                     ...(expertMode ? { expertMode } : {}),
@@ -1045,7 +1097,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ...(finalViewport ? { finalViewport } : {}),
             ...(awaitingKind ? { awaitingKind } : {}),
             ...(executionMode ? { executionMode } : {}),
-            ...(detail.browserSource === 'local-chrome' || metadata.browserSource === 'local-chrome' ? { browserSource: 'local-chrome' as const } : {}),
+            ...(detail.browserSource === 'local-chrome' || metadata.browserSource === 'local-chrome'
+              ? { browserSource: 'local-chrome' as const }
+              : {}),
             ...(attachments ? { attachments } : {}),
             ...(expertWorkflowId ? { expertWorkflowId } : {}),
             ...(expertMode ? { expertMode } : {}),
@@ -1061,19 +1115,23 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         return {
           ...roundPatch,
           stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
-          ...(savedPlanReplies !== null ? {
-            userRepliesByTask: { ...prev.userRepliesByTask, [taskId]: hydratedReplies },
-          } : {}),
-          suggestionsByTask: detailStatus === 'completed'
+          ...(savedPlanReplies !== null
             ? {
-                ...prev.suggestionsByTask,
-                // Only a frame received during this request is newer than
-                // its snapshot. Preexisting detail caches must be refreshed.
-                [taskId]: prev.suggestionsByTask[taskId] !== suggestionsAtRequestStart
-                  ? prev.suggestionsByTask[taskId] ?? savedSuggestions
-                  : savedSuggestions,
+                userRepliesByTask: { ...prev.userRepliesByTask, [taskId]: hydratedReplies },
               }
-            : omitRuntimeKey(prev.suggestionsByTask, taskId),
+            : {}),
+          suggestionsByTask:
+            detailStatus === 'completed'
+              ? {
+                  ...prev.suggestionsByTask,
+                  // Only a frame received during this request is newer than
+                  // its snapshot. Preexisting detail caches must be refreshed.
+                  [taskId]:
+                    prev.suggestionsByTask[taskId] !== suggestionsAtRequestStart
+                      ? (prev.suggestionsByTask[taskId] ?? savedSuggestions)
+                      : savedSuggestions,
+                }
+              : omitRuntimeKey(prev.suggestionsByTask, taskId),
           ...(hydratedWebSearch
             ? {
                 webSearchByTask: {
@@ -1085,10 +1143,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           awaitingUserByTask: nextAwaitingUserByTask,
           tasks: nextTasks,
           ...(detailOrder === 'new' && !isTerminalStatus(detailStatus)
-            ? { terminalTaskIds: omitTaskIdFromSet(prev.terminalTaskIds, taskId) } : {}),
-          ...(hydratedTask
-            ? pruneRuntimeStateForAwaitingUserTasks(prev, [hydratedTask])
+            ? { terminalTaskIds: omitTaskIdFromSet(prev.terminalTaskIds, taskId) }
             : {}),
+          ...(hydratedTask ? pruneRuntimeStateForAwaitingUserTasks(prev, [hydratedTask]) : {}),
           ...(hydratedTask
             ? pruneRuntimeStateForTerminalTasks(
                 { ...prev, awaitingUserByTask: nextAwaitingUserByTask },
@@ -1104,1666 +1161,1789 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   }
 
   return {
-  tasks: [],
-  selectedTaskId: null,
-  browserPreference: null,
-  localChromeSelection: null,
-  composerMode: 'new',
-  loading: false,
-  error: null,
-  // Phase 24 RC follow-up — pagination state.
-  tasksCursor: null,
-  tasksHasMore: false,
-  tasksVisiblePageLimitReached: false,
-  loadingMore: false,
-  stepsByTask: {},
-  screencastByTask: {},
-  captchaWaitByTask: {},
-  executorFallbackByTask: {},
-  degradeByTask: {},
-  awaitingUserByTask: {},
-  publicCloudContinuationByTask: {},
-  userRepliesByTask: {},
-  webSearchByTask: {},
-  thinkingByTask: {},
-  suggestionsByTask: {},
-  streamingByTask: {},
-  progressByTask: {},
-  subStatusByTask: {},
-  terminalTaskIds: new Set<string>(),
-  animatedTaskIds: new Set<string>(),
-  // Default OFF: the product story is "watch the agent" — the user
-  // observes by default and only takes over when they explicitly
-  // click the takeover button or the agent enters awaiting_user /
-  // captcha. Defaulting ON contradicted the framing and surfaced
-  // confusing "你正在直接操作浏览器" copy on completed tasks.
-  browserInteractive: false,
-  setBrowserInteractive(v) {
-    set({ browserInteractive: v });
-  },
-  defaultViewportProfile: null,
-  setDefaultViewportProfile(profile) {
-    set({ defaultViewportProfile: profile });
-  },
+    tasks: [],
+    selectedTaskId: null,
+    browserPreference: null,
+    localChromeSelection: null,
+    composerMode: 'new',
+    loading: false,
+    error: null,
+    // Phase 24 RC follow-up — pagination state.
+    tasksCursor: null,
+    tasksHasMore: false,
+    tasksVisiblePageLimitReached: false,
+    loadingMore: false,
+    stepsByTask: {},
+    screencastByTask: {},
+    captchaWaitByTask: {},
+    executorFallbackByTask: {},
+    degradeByTask: {},
+    awaitingUserByTask: {},
+    publicCloudContinuationByTask: {},
+    userRepliesByTask: {},
+    webSearchByTask: {},
+    thinkingByTask: {},
+    suggestionsByTask: {},
+    streamingByTask: {},
+    progressByTask: {},
+    subStatusByTask: {},
+    terminalTaskIds: new Set<string>(),
+    animatedTaskIds: new Set<string>(),
+    // Default OFF: the product story is "watch the agent" — the user
+    // observes by default and only takes over when they explicitly
+    // click the takeover button or the agent enters awaiting_user /
+    // captcha. Defaulting ON contradicted the framing and surfaced
+    // confusing "你正在直接操作浏览器" copy on completed tasks.
+    browserInteractive: false,
+    setBrowserInteractive(v) {
+      set({ browserInteractive: v });
+    },
+    defaultViewportProfile: null,
+    setDefaultViewportProfile(profile) {
+      set({ defaultViewportProfile: profile });
+    },
 
-
-  selectTask(taskId, source = 'ui') {
-    if (!taskId) return;
-    if (isLocalPendingTaskId(taskId)) return;
-    if (get().selectedTaskId === taskId) {
-      // Idempotent: already selected. Still re-hydrate detail —
-      // a re-click on the same task is the user asking for fresh
-      // data (post-completion summary, refreshed plan status, etc).
-      void hydrateDetail(taskId);
-      return;
-    }
-    // F2 — switching tasks is UNCONDITIONAL. No guard on the previous
-    // task's status, no in-flight check. The user clicked a row —
-    // they want that view, the executing/awaiting_user task in the
-    // background keeps running on its own. Aborting the old hydrate
-    // prevents its tail (the post-fetch `set()` that stamps tasks[]
-    // entries) from running against the now-different selectedTaskId
-    // and re-pulling the previous task's payload into the new view.
-    // composerMode flips back to 'task' on any selection.
-    // Selecting a task also drops takeover mode so the browser
-    // context starts view-only for the newly selected task.
-    abortInFlightHydrate();
-    set({
-      selectedTaskId: taskId,
-      composerMode: 'task',
-      browserInteractive: false,
-    });
-    void hydrateDetail(taskId);
-    // URL write — only when the call ORIGINATES from a UI action
-    // (sidebar click, suggestion chip, etc.). When source==='url'
-    // the inbound effect already saw the URL change and called us —
-    // re-navigating would re-emit the same URL change and the
-    // inbound effect would re-fire selectTask(... 'url') in a loop.
-    // The asymmetry is what closes the loop: store→URL writes only
-    // happen when the store update originated outside RR, and
-    // URL→store reads never trigger a re-write.
-    if (source !== 'url') {
-      storeNavigate?.(taskId);
-    }
-  },
-
-  enterNewTaskMode() {
-    // composerMode='new' is the lock. refreshTaskList's auto-pick
-    // checks it and bails — without that lock, a refresh that
-    // fires shortly after enterNewTaskMode would silently re-
-    // select the newest task and pull the user back into a 追问
-    // of a stale task.
-    set({
-      selectedTaskId: null,
-      composerMode: 'new',
-      browserInteractive: false,
-    });
-    // Cancel any in-flight hydrate so its post-set callback doesn't
-    // re-stamp the just-cleared selection's tasks[] entry.
-    abortInFlightHydrate();
-    // Drop ?task= via the same direct-navigate path as selectTask;
-    // the deleted outbound effect used to do this. Inbound effect
-    // bails on composerMode==='new' so no loop.
-    storeNavigate?.(null);
-  },
-
-  // Legacy alias retained for code that hasn't migrated yet.
-  selectAndHydrateTask(taskId) {
-    if (taskId) {
-      get().selectTask(taskId, 'ui');
-    } else {
-      get().enterNewTaskMode();
-    }
-  },
-
-  async refreshTaskList() {
-    const generation = captureSessionGeneration();
-    const versions = captureListVersions();
-    set({ loading: true, error: null });
-    try {
-      const res = await trpc.tasks.list.query({ limit: 50 });
-      if (!isCurrentSession(generation)) return;
-      const freshList = preserveFinalTaskRows(
-        get().tasks,
-        preserveObservedListRows(normalizeTaskListRows(res?.tasks), versions),
-      );
-      // P1-C: preserve the active selection's UiTask object across
-      // a list refresh. Deep-linked oldies (not in the first 50) get
-      // upserted by the hydrate path, and that synth must survive a
-      // subsequent refreshTaskList() that overwrites tasks[].
-      const prevSelected = get().selectedTaskId;
-      const freshIds = new Set(freshList.map((t) => t.taskId));
-      const preservedSelected: UiTask | null =
-        prevSelected && !freshIds.has(prevSelected)
-          ? get().tasks.find((t) => t.taskId === prevSelected) ?? null
-          : null;
-      const tasks = mergeFirstPageWithPreservedSelection(
-        freshList,
-        preservedSelected,
-      );
-      // refreshTaskList NEVER decides selectedTaskId. Cold start of
-      // `/` lands in new-task mode (composerMode='new' default)
-      // with the sidebar populated but nothing selected. Selection
-      // happens only through explicit signals: URL deep link via
-      // bootstrap, a sidebar / search / history click, or a
-      // successful createTask. This call just delivers fresh task
-      // data and re-hydrates the active selection if there is one.
-      set((prev) => {
-        const roundPatch = adoptListRounds(prev, tasks);
-        const current = { ...prev, ...roundPatch };
-        return {
-          ...roundPatch,
-          tasks,
-          loading: false,
-          tasksCursor: normalizeTaskListCursor(res?.nextCursor),
-          tasksHasMore: normalizeTaskListCursor(res?.nextCursor) != null,
-          tasksVisiblePageLimitReached: false,
-          ...pruneRuntimeStateForAwaitingUserTasks(current, tasks),
-          ...pruneRuntimeStateForTerminalTasks(current, tasks),
-        };
-      });
-      if (prevSelected) {
-        // Selection unchanged but the underlying detail might have
-        // moved on (task completed, awaiting_user prompt added,
-        // etc.). Re-hydrate so the panel reflects the fresh state.
-        // hydrateDetail's token guard collapses bursts so this is
-        // cheap when refreshTaskList fires alongside a deep-link.
-        void hydrateDetail(prevSelected);
+    selectTask(taskId, source = 'ui') {
+      if (!taskId) return;
+      if (isLocalPendingTaskId(taskId)) return;
+      if (get().selectedTaskId === taskId) {
+        // Idempotent: already selected. Still re-hydrate detail —
+        // a re-click on the same task is the user asking for fresh
+        // data (post-completion summary, refreshed plan status, etc).
+        void hydrateDetail(taskId);
+        return;
       }
-    } catch (err) {
-      if (!isCurrentSession(generation)) return;
-      set({ loading: false, error: taskStoreError(err) });
-    }
-  },
+      // F2 — switching tasks is UNCONDITIONAL. No guard on the previous
+      // task's status, no in-flight check. The user clicked a row —
+      // they want that view, the executing/awaiting_user task in the
+      // background keeps running on its own. Aborting the old hydrate
+      // prevents its tail (the post-fetch `set()` that stamps tasks[]
+      // entries) from running against the now-different selectedTaskId
+      // and re-pulling the previous task's payload into the new view.
+      // composerMode flips back to 'task' on any selection.
+      // Selecting a task also drops takeover mode so the browser
+      // context starts view-only for the newly selected task.
+      abortInFlightHydrate();
+      set({
+        selectedTaskId: taskId,
+        composerMode: 'task',
+        browserInteractive: false,
+      });
+      void hydrateDetail(taskId);
+      // URL write — only when the call ORIGINATES from a UI action
+      // (sidebar click, suggestion chip, etc.). When source==='url'
+      // the inbound effect already saw the URL change and called us —
+      // re-navigating would re-emit the same URL change and the
+      // inbound effect would re-fire selectTask(... 'url') in a loop.
+      // The asymmetry is what closes the loop: store→URL writes only
+      // happen when the store update originated outside RR, and
+      // URL→store reads never trigger a re-write.
+      if (source !== 'url') {
+        storeNavigate?.(taskId);
+      }
+    },
 
-  // Legacy alias retained for code paths that haven't migrated.
-  async refreshTasks() {
-    await get().refreshTaskList();
-  },
+    enterNewTaskMode() {
+      // composerMode='new' is the lock. refreshTaskList's auto-pick
+      // checks it and bails — without that lock, a refresh that
+      // fires shortly after enterNewTaskMode would silently re-
+      // select the newest task and pull the user back into a 追问
+      // of a stale task.
+      set({
+        selectedTaskId: null,
+        composerMode: 'new',
+        browserInteractive: false,
+      });
+      // Cancel any in-flight hydrate so its post-set callback doesn't
+      // re-stamp the just-cleared selection's tasks[] entry.
+      abortInFlightHydrate();
+      // Drop ?task= via the same direct-navigate path as selectTask;
+      // the deleted outbound effect used to do this. Inbound effect
+      // bails on composerMode==='new' so no loop.
+      storeNavigate?.(null);
+    },
 
-  async loadMoreTasks(visibleIds) {
-    const generation = captureSessionGeneration();
-    const versions = captureListVersions();
-    const { tasksCursor, tasksHasMore, tasksVisiblePageLimitReached, loadingMore } = get();
-    if (loadingMore || !tasksHasMore || tasksVisiblePageLimitReached || tasksCursor == null) return;
-    const before = visibleIds?.(get().tasks);
-    const seenCursors = new Set<number>();
-    let cursor: number | null = tasksCursor;
-    set({ loadingMore: true, error: null });
-    try {
-      for (let pages = 0; cursor !== null && pages < 5; pages += 1) {
-        seenCursors.add(cursor);
-        const res = await trpc.tasks.list.query({ limit: 50, cursor });
+    // Legacy alias retained for code that hasn't migrated yet.
+    selectAndHydrateTask(taskId) {
+      if (taskId) {
+        get().selectTask(taskId, 'ui');
+      } else {
+        get().enterNewTaskMode();
+      }
+    },
+
+    async refreshTaskList() {
+      const generation = captureSessionGeneration();
+      const versions = captureListVersions();
+      set({ loading: true, error: null });
+      try {
+        const res = await trpc.tasks.list.query({ limit: 50 });
         if (!isCurrentSession(generation)) return;
-        const moreTasks = preserveObservedListRows(normalizeTaskListRows(res?.tasks), versions);
-        const nextCursor = normalizeTaskListCursor(res?.nextCursor);
-        if (nextCursor !== null && seenCursors.has(nextCursor)) throw new Error('任务分页游标未推进，请稍后重试');
+        const freshList = preserveFinalTaskRows(
+          get().tasks,
+          preserveObservedListRows(normalizeTaskListRows(res?.tasks), versions),
+        );
+        // P1-C: preserve the active selection's UiTask object across
+        // a list refresh. Deep-linked oldies (not in the first 50) get
+        // upserted by the hydrate path, and that synth must survive a
+        // subsequent refreshTaskList() that overwrites tasks[].
+        const prevSelected = get().selectedTaskId;
+        const freshIds = new Set(freshList.map((t) => t.taskId));
+        const preservedSelected: UiTask | null =
+          prevSelected && !freshIds.has(prevSelected)
+            ? (get().tasks.find((t) => t.taskId === prevSelected) ?? null)
+            : null;
+        const tasks = mergeFirstPageWithPreservedSelection(freshList, preservedSelected);
+        // refreshTaskList NEVER decides selectedTaskId. Cold start of
+        // `/` lands in new-task mode (composerMode='new' default)
+        // with the sidebar populated but nothing selected. Selection
+        // happens only through explicit signals: URL deep link via
+        // bootstrap, a sidebar / search / history click, or a
+        // successful createTask. This call just delivers fresh task
+        // data and re-hydrates the active selection if there is one.
         set((prev) => {
-          const merged = mergeTaskPagesReplacingDuplicates(prev.tasks, moreTasks);
-          const roundPatch = adoptListRounds(prev, merged);
+          const roundPatch = adoptListRounds(prev, tasks);
           const current = { ...prev, ...roundPatch };
           return {
-            ...roundPatch, tasks: merged,
-            tasksCursor: nextCursor, tasksHasMore: nextCursor !== null,
-            ...pruneRuntimeStateForAwaitingUserTasks(current, merged),
-            ...pruneRuntimeStateForTerminalTasks(current, merged),
+            ...roundPatch,
+            tasks,
+            loading: false,
+            tasksCursor: normalizeTaskListCursor(res?.nextCursor),
+            tasksHasMore: normalizeTaskListCursor(res?.nextCursor) != null,
+            tasksVisiblePageLimitReached: false,
+            ...pruneRuntimeStateForAwaitingUserTasks(current, tasks),
+            ...pruneRuntimeStateForTerminalTasks(current, tasks),
           };
         });
-        if (!before || !visibleIds || [...visibleIds(get().tasks)].some(id => !before.has(id))) break;
-        // Preserve the server cursor/hasMore truth, but stop scanning hidden pages.
-        if (pages === 4 && nextCursor !== null) set({ tasksVisiblePageLimitReached: true });
-        cursor = nextCursor;
+        if (prevSelected) {
+          // Selection unchanged but the underlying detail might have
+          // moved on (task completed, awaiting_user prompt added,
+          // etc.). Re-hydrate so the panel reflects the fresh state.
+          // hydrateDetail's token guard collapses bursts so this is
+          // cheap when refreshTaskList fires alongside a deep-link.
+          void hydrateDetail(prevSelected);
+        }
+      } catch (err) {
+        if (!isCurrentSession(generation)) return;
+        set({ loading: false, error: taskStoreError(err) });
       }
-    } catch (err) {
-      if (isCurrentSession(generation)) set({ error: taskStoreError(err) });
-    } finally {
-      if (isCurrentSession(generation)) set({ loadingMore: false });
-    }
-  },
+    },
 
-  async togglePin(taskId, desiredPinned) {
-    const generation = captureSessionGeneration();
-    // Pin is server-persisted. The optimistic local flip only applies
-    // when the task is in the store's `tasks` array — /starred can
-    // call this for older pins that aren't in the recent-50 slice, in
-    // which case there's no local row to flip but the RPC must still
-    // fire. Caller can pass `desiredPinned` to force the target state
-    // (the toggle-off path on /starred can't infer it from a local
-    // row that doesn't exist).
-    const before = get().tasks.find((t) => t.taskId === taskId);
-    const next = desiredPinned ?? !(before?.starred ?? false);
-    if (before) {
-      set((prev) => ({
-        tasks: prev.tasks.map((t) =>
-          t.taskId === taskId
-            ? { ...t, starred: next, starredAt: next ? new Date() : null }
-            : t,
-        ),
-      }));
-    }
-    try {
-      await trpc.tasks.star.mutate({ taskId, starred: next });
-    } catch (err) {
-      if (!isCurrentSession(generation)) return;
+    // Legacy alias retained for code paths that haven't migrated.
+    async refreshTasks() {
+      await get().refreshTaskList();
+    },
+
+    async loadMoreTasks(visibleIds) {
+      const generation = captureSessionGeneration();
+      const versions = captureListVersions();
+      const { tasksCursor, tasksHasMore, tasksVisiblePageLimitReached, loadingMore } = get();
+      if (loadingMore || !tasksHasMore || tasksVisiblePageLimitReached || tasksCursor == null)
+        return;
+      const before = visibleIds?.(get().tasks);
+      const seenCursors = new Set<number>();
+      let cursor: number | null = tasksCursor;
+      set({ loadingMore: true, error: null });
+      try {
+        for (let pages = 0; cursor !== null && pages < 5; pages += 1) {
+          seenCursors.add(cursor);
+          const res = await trpc.tasks.list.query({ limit: 50, cursor });
+          if (!isCurrentSession(generation)) return;
+          const moreTasks = preserveObservedListRows(normalizeTaskListRows(res?.tasks), versions);
+          const nextCursor = normalizeTaskListCursor(res?.nextCursor);
+          if (nextCursor !== null && seenCursors.has(nextCursor))
+            throw new Error('任务分页游标未推进，请稍后重试');
+          set((prev) => {
+            const merged = mergeTaskPagesReplacingDuplicates(prev.tasks, moreTasks);
+            const roundPatch = adoptListRounds(prev, merged);
+            const current = { ...prev, ...roundPatch };
+            return {
+              ...roundPatch,
+              tasks: merged,
+              tasksCursor: nextCursor,
+              tasksHasMore: nextCursor !== null,
+              ...pruneRuntimeStateForAwaitingUserTasks(current, merged),
+              ...pruneRuntimeStateForTerminalTasks(current, merged),
+            };
+          });
+          if (!before || !visibleIds || [...visibleIds(get().tasks)].some((id) => !before.has(id)))
+            break;
+          // Preserve the server cursor/hasMore truth, but stop scanning hidden pages.
+          if (pages === 4 && nextCursor !== null) set({ tasksVisiblePageLimitReached: true });
+          cursor = nextCursor;
+        }
+      } catch (err) {
+        if (isCurrentSession(generation)) set({ error: taskStoreError(err) });
+      } finally {
+        if (isCurrentSession(generation)) set({ loadingMore: false });
+      }
+    },
+
+    async togglePin(taskId, desiredPinned) {
+      const generation = captureSessionGeneration();
+      // Pin is server-persisted. The optimistic local flip only applies
+      // when the task is in the store's `tasks` array — /starred can
+      // call this for older pins that aren't in the recent-50 slice, in
+      // which case there's no local row to flip but the RPC must still
+      // fire. Caller can pass `desiredPinned` to force the target state
+      // (the toggle-off path on /starred can't infer it from a local
+      // row that doesn't exist).
+      const before = get().tasks.find((t) => t.taskId === taskId);
+      const next = desiredPinned ?? !(before?.starred ?? false);
       if (before) {
-        // Local row existed and the RPC failed — revert the optimistic
-        // flip so the UI matches the server.
         set((prev) => ({
           tasks: prev.tasks.map((t) =>
-            t.taskId === taskId
-              ? {
-                  ...t,
-                  starred: before.starred ?? false,
-                  starredAt: before.starredAt ?? null,
-                }
-              : t,
+            t.taskId === taskId ? { ...t, starred: next, starredAt: next ? new Date() : null } : t,
           ),
         }));
       }
-      // Nothing to revert when the task wasn't in the local slice;
-      // the caller (StarredPage) handles its own optimistic remove.
-      throw err;
-    }
-  },
-
-  async moveTaskToProject(taskId, projectId) {
-    const generation = captureSessionGeneration();
-    const before = get().tasks.find((t) => t.taskId === taskId);
-    if (!before) return { ok: true };
-    set((prev) => ({
-      tasks: prev.tasks.map((t) => (t.taskId === taskId ? { ...t, projectId } : t)),
-    }));
-    try {
-      await trpc.tasks.moveToProject.mutate({ taskId, projectId });
-      return { ok: true };
-    } catch (err) {
-      const msg = taskStoreError(err);
-      if (!isCurrentSession(generation)) return { error: msg };
-      set((prev) => ({
-        tasks: prev.tasks.map((t) =>
-          t.taskId === taskId ? { ...t, projectId: before.projectId ?? null } : t,
-        ),
-        error: msg,
-      }));
-      return { error: msg };
-    }
-  },
-
-  async deleteTask(taskId) {
-    const generation = captureSessionGeneration();
-    try {
-      await trpc.tasks.delete.mutate({ taskId });
-      if (!isCurrentSession(generation)) return { ok: true as const };
-      const deletedActiveTask = get().selectedTaskId === taskId;
-      if (deletedActiveTask) {
-        abortInFlightHydrate();
-        storeNavigate?.(null);
-      }
-      set((prev) => {
-        const nextTasks = prev.tasks.filter((t) => t.taskId !== taskId);
-        // If the user is deleting the currently selected task, drop
-        // them into new-task mode rather than auto-jumping to the
-        // next sibling. The previous "promote tasks[0]" behaviour
-        // pulled the user into a stale task they'd just chosen NOT
-        // to be looking at — surprising, especially for batch deletes
-        // that include the active selection. composerMode flips to
-        // 'new' so the inbound URL effect bails and outbound clears
-        // ?task=. Other selections are untouched.
-        const wasActive = prev.selectedTaskId === taskId;
-        const nextSelected = wasActive ? null : prev.selectedTaskId;
-        const nextComposerMode = wasActive ? ('new' as const) : prev.composerMode;
-        return {
-          tasks: nextTasks,
-          selectedTaskId: nextSelected,
-          composerMode: nextComposerMode,
-          browserInteractive: wasActive ? false : prev.browserInteractive,
-          stepsByTask: omitRuntimeKey(prev.stepsByTask, taskId),
-          screencastByTask: omitRuntimeKey(prev.screencastByTask, taskId),
-          captchaWaitByTask: omitRuntimeKey(prev.captchaWaitByTask, taskId),
-          executorFallbackByTask: omitRuntimeKey(prev.executorFallbackByTask, taskId),
-          degradeByTask: omitRuntimeKey(prev.degradeByTask, taskId),
-          awaitingUserByTask: omitRuntimeKey(prev.awaitingUserByTask, taskId),
-          userRepliesByTask: omitRuntimeKey(prev.userRepliesByTask, taskId),
-          webSearchByTask: omitRuntimeKey(prev.webSearchByTask, taskId),
-          thinkingByTask: omitRuntimeKey(prev.thinkingByTask, taskId),
-          suggestionsByTask: omitRuntimeKey(prev.suggestionsByTask, taskId),
-          streamingByTask: omitRuntimeKey(prev.streamingByTask, taskId),
-          progressByTask: omitRuntimeKey(prev.progressByTask, taskId),
-          subStatusByTask: omitRuntimeKey(prev.subStatusByTask, taskId),
-          terminalTaskIds: omitTaskIdFromSet(prev.terminalTaskIds, taskId),
-          animatedTaskIds: omitTaskIdFromSet(prev.animatedTaskIds, taskId),
-        };
-      });
-      return { ok: true as const };
-    } catch (err) {
-      const msg = taskStoreError(err);
-      if (!isCurrentSession(generation)) return { error: msg };
-      set({ error: msg });
-      return { error: msg };
-    }
-  },
-
-  async renameTask(taskId, title) {
-    const generation = captureSessionGeneration();
-    const trimmed = title.trim();
-    const nextTitle = trimmed.length === 0 ? null : trimmed;
-    // Optimistic update — snap the new title immediately so the inline
-    // edit UI doesn't lag a round-trip behind user input.
-    set((prev) => ({
-      tasks: prev.tasks.map((t) =>
-        t.taskId === taskId ? { ...t, title: nextTitle } : t,
-      ),
-    }));
-    try {
-      await trpc.tasks.rename.mutate({ taskId, title: trimmed });
-      return { ok: true as const };
-    } catch (err) {
-      const msg = taskStoreError(err);
-      if (!isCurrentSession(generation)) return { error: msg };
-      set({ error: msg });
-      // Roll back optimistic change by pulling the server's truth.
-      void get().refreshTasks();
-      return { error: msg };
-    }
-  },
-
-  async replyToTask(taskId, message, fileIds) {
-    if (uncertainReplies.has(taskId)) return { error: uncertainWriteMessage };
-    seedExecutionOrder(taskId);
-    const generation = captureSessionGeneration();
-    const versionAtSubmit = executionOrder.version(taskId);
-    // A read started before this write cannot tell whether its snapshot includes
-    // the new reply (texts may legitimately repeat). Discard it and read again
-    // after all writes settle instead of merging by text or guessing an overlap.
-    if (get().selectedTaskId === taskId) abortInFlightHydrate();
-    pendingReplies.set(taskId, (pendingReplies.get(taskId) ?? 0) + 1);
-    let replySucceeded = false;
-    // Pin the user's text into the conversation stream before the
-    // round-trip returns — the old behaviour wiped the composer and
-    // left no trace of what the user said, which read like the reply
-    // had vanished. If the mutation fails the message stays visible
-    // (the toast explains) so the user can retry without retyping.
-    const entry = { at: Date.now(), text: message };
-    set((prev) => ({
-      userRepliesByTask: {
-        ...prev.userRepliesByTask,
-        [taskId]: [...(prev.userRepliesByTask[taskId] ?? []), entry],
-      },
-    }));
-    try {
-      const res = await trpc.tasks.reply.mutate({
-        taskId,
-        message,
-        ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
-      });
-      if (!isCurrentSession(generation)) return { ok: res.ok };
-      if (res.state === 'acceptedUnconfirmed') {
-        const pendingIdentity = readExecutionIdentity(res) ?? 'invalid';
-        if (coversPending(observedExecutions.get(taskId), pendingIdentity)) {
-          replySucceeded = true;
-          return { ok: true as const };
+      try {
+        await trpc.tasks.star.mutate({ taskId, starred: next });
+      } catch (err) {
+        if (!isCurrentSession(generation)) return;
+        if (before) {
+          // Local row existed and the RPC failed — revert the optimistic
+          // flip so the UI matches the server.
+          set((prev) => ({
+            tasks: prev.tasks.map((t) =>
+              t.taskId === taskId
+                ? {
+                    ...t,
+                    starred: before.starred ?? false,
+                    starredAt: before.starredAt ?? null,
+                  }
+                : t,
+            ),
+          }));
         }
-        uncertainReplies.set(taskId, pendingIdentity);
-        set(prev => ({ error: uncertainWriteMessage, progressByTask: { ...prev.progressByTask, [taskId]: uncertainWriteMessage } }));
-        return { error: uncertainWriteMessage };
+        // Nothing to revert when the task wasn't in the local slice;
+        // the caller (StarredPage) handles its own optimistic remove.
+        throw err;
       }
-      replySucceeded = res.ok;
-      // Fix 2 — backend tags reply outcome as `state: 'resumed' | 'stillAwaiting'`.
-      // Only `resumed` means the supercar accepted the message and
-      // started executing again; `stillAwaiting` is the user saying
-      // "等一下 / wait" and we should preserve the takeover UI so the
-      // BrowserPanel banner stays up. Older orchestrator builds omit
-      // `state` — treat that as the legacy "always clear" behaviour.
-      const state =
-        (res as { state?: 'resumed' | 'stillAwaiting' }).state ??
-        (res.ok ? 'resumed' : null);
-      if (state === 'resumed') {
-        seedExecutionOrder(taskId);
-        const order = executionOrder.accept(taskId, res, { source: 'ack', since: versionAtSubmit });
-        if (order === 'reconcile') void hydrateDetail(taskId);
-        if (order === 'ignore' || order === 'reconcile') return { ok: res.ok };
-        const identity = readExecutionIdentity(res);
-        // Optimistically clear the awaiting-user state so the composer
-        // flips back to the default mode. Also clear the mirrored
-        // task-row awaitingKind/status immediately; otherwise the
-        // selected-task derivations can keep showing browser handoff
-        // UI until the next WS frame lands.
+    },
+
+    async moveTaskToProject(taskId, projectId) {
+      const generation = captureSessionGeneration();
+      const before = get().tasks.find((t) => t.taskId === taskId);
+      if (!before) return { ok: true };
+      set((prev) => ({
+        tasks: prev.tasks.map((t) => (t.taskId === taskId ? { ...t, projectId } : t)),
+      }));
+      try {
+        await trpc.tasks.moveToProject.mutate({ taskId, projectId });
+        return { ok: true };
+      } catch (err) {
+        const msg = taskStoreError(err);
+        if (!isCurrentSession(generation)) return { error: msg };
+        set((prev) => ({
+          tasks: prev.tasks.map((t) =>
+            t.taskId === taskId ? { ...t, projectId: before.projectId ?? null } : t,
+          ),
+          error: msg,
+        }));
+        return { error: msg };
+      }
+    },
+
+    async deleteTask(taskId) {
+      const generation = captureSessionGeneration();
+      try {
+        await trpc.tasks.delete.mutate({ taskId });
+        if (!isCurrentSession(generation)) return { ok: true as const };
+        const deletedActiveTask = get().selectedTaskId === taskId;
+        if (deletedActiveTask) {
+          abortInFlightHydrate();
+          storeNavigate?.(null);
+        }
         set((prev) => {
-          const nextAwaiting = { ...prev.awaitingUserByTask };
-          delete nextAwaiting[taskId];
-          const nextTerminalIds = new Set(prev.terminalTaskIds);
-          nextTerminalIds.delete(taskId);
-          const nextThinking = omitRuntimeKey(prev.thinkingByTask, taskId);
-          const nextProgress = omitRuntimeKey(prev.progressByTask, taskId);
-          const nextStreaming = omitRuntimeKey(prev.streamingByTask, taskId);
-          const nextSubStatus = omitRuntimeKey(prev.subStatusByTask, taskId);
-          const nextCaptcha = omitRuntimeKey(prev.captchaWaitByTask, taskId);
-          const nextExecutorFallback = omitRuntimeKey(
-            prev.executorFallbackByTask,
-            taskId,
-          );
-          const nextDegrade = omitRuntimeKey(prev.degradeByTask, taskId);
+          const nextTasks = prev.tasks.filter((t) => t.taskId !== taskId);
+          // If the user is deleting the currently selected task, drop
+          // them into new-task mode rather than auto-jumping to the
+          // next sibling. The previous "promote tasks[0]" behaviour
+          // pulled the user into a stale task they'd just chosen NOT
+          // to be looking at — surprising, especially for batch deletes
+          // that include the active selection. composerMode flips to
+          // 'new' so the inbound URL effect bails and outbound clears
+          // ?task=. Other selections are untouched.
+          const wasActive = prev.selectedTaskId === taskId;
+          const nextSelected = wasActive ? null : prev.selectedTaskId;
+          const nextComposerMode = wasActive ? ('new' as const) : prev.composerMode;
           return {
-            awaitingUserByTask: nextAwaiting,
-            thinkingByTask: nextThinking,
-            progressByTask: nextProgress,
-            streamingByTask: nextStreaming,
-            subStatusByTask: nextSubStatus,
-            captchaWaitByTask: nextCaptcha,
-            executorFallbackByTask: nextExecutorFallback,
-            degradeByTask: nextDegrade,
-            terminalTaskIds: nextTerminalIds,
-            tasks: prev.tasks.map((t) => {
-              if (t.taskId !== taskId) return t;
-              const { awaitingKind: _awaitingKind, resultText: _resultText, ...rest } = t;
-              return {
-                ...rest,
-                ...(identity && identity !== 'invalid' ? identity : {}),
-                status: t.status === 'awaiting_user' ? 'executing' : t.status,
-              };
-            }),
+            tasks: nextTasks,
+            selectedTaskId: nextSelected,
+            composerMode: nextComposerMode,
+            browserInteractive: wasActive ? false : prev.browserInteractive,
+            stepsByTask: omitRuntimeKey(prev.stepsByTask, taskId),
+            screencastByTask: omitRuntimeKey(prev.screencastByTask, taskId),
+            captchaWaitByTask: omitRuntimeKey(prev.captchaWaitByTask, taskId),
+            executorFallbackByTask: omitRuntimeKey(prev.executorFallbackByTask, taskId),
+            degradeByTask: omitRuntimeKey(prev.degradeByTask, taskId),
+            awaitingUserByTask: omitRuntimeKey(prev.awaitingUserByTask, taskId),
+            userRepliesByTask: omitRuntimeKey(prev.userRepliesByTask, taskId),
+            webSearchByTask: omitRuntimeKey(prev.webSearchByTask, taskId),
+            thinkingByTask: omitRuntimeKey(prev.thinkingByTask, taskId),
+            suggestionsByTask: omitRuntimeKey(prev.suggestionsByTask, taskId),
+            streamingByTask: omitRuntimeKey(prev.streamingByTask, taskId),
+            progressByTask: omitRuntimeKey(prev.progressByTask, taskId),
+            subStatusByTask: omitRuntimeKey(prev.subStatusByTask, taskId),
+            terminalTaskIds: omitTaskIdFromSet(prev.terminalTaskIds, taskId),
+            animatedTaskIds: omitTaskIdFromSet(prev.animatedTaskIds, taskId),
+          };
+        });
+        return { ok: true as const };
+      } catch (err) {
+        const msg = taskStoreError(err);
+        if (!isCurrentSession(generation)) return { error: msg };
+        set({ error: msg });
+        return { error: msg };
+      }
+    },
+
+    async renameTask(taskId, title) {
+      const generation = captureSessionGeneration();
+      const trimmed = title.trim();
+      const nextTitle = trimmed.length === 0 ? null : trimmed;
+      // Optimistic update — snap the new title immediately so the inline
+      // edit UI doesn't lag a round-trip behind user input.
+      set((prev) => ({
+        tasks: prev.tasks.map((t) => (t.taskId === taskId ? { ...t, title: nextTitle } : t)),
+      }));
+      try {
+        await trpc.tasks.rename.mutate({ taskId, title: trimmed });
+        return { ok: true as const };
+      } catch (err) {
+        const msg = taskStoreError(err);
+        if (!isCurrentSession(generation)) return { error: msg };
+        set({ error: msg });
+        // Roll back optimistic change by pulling the server's truth.
+        void get().refreshTasks();
+        return { error: msg };
+      }
+    },
+
+    async replyToTask(taskId, message, fileIds) {
+      if (uncertainReplies.has(taskId)) return { error: uncertainWriteMessage };
+      seedExecutionOrder(taskId);
+      const generation = captureSessionGeneration();
+      const versionAtSubmit = executionOrder.version(taskId);
+      // A read started before this write cannot tell whether its snapshot includes
+      // the new reply (texts may legitimately repeat). Discard it and read again
+      // after all writes settle instead of merging by text or guessing an overlap.
+      if (get().selectedTaskId === taskId) abortInFlightHydrate();
+      pendingReplies.set(taskId, (pendingReplies.get(taskId) ?? 0) + 1);
+      let replySucceeded = false;
+      // Pin the user's text into the conversation stream before the
+      // round-trip returns — the old behaviour wiped the composer and
+      // left no trace of what the user said, which read like the reply
+      // had vanished. If the mutation fails the message stays visible
+      // (the toast explains) so the user can retry without retyping.
+      const entry = { at: Date.now(), text: message };
+      set((prev) => ({
+        userRepliesByTask: {
+          ...prev.userRepliesByTask,
+          [taskId]: [...(prev.userRepliesByTask[taskId] ?? []), entry],
+        },
+      }));
+      try {
+        const res = await trpc.tasks.reply.mutate({
+          taskId,
+          message,
+          ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
+        });
+        if (!isCurrentSession(generation)) return { ok: res.ok };
+        if (res.state === 'acceptedUnconfirmed') {
+          const pendingIdentity = readExecutionIdentity(res) ?? 'invalid';
+          if (coversPending(observedExecutions.get(taskId), pendingIdentity)) {
+            replySucceeded = true;
+            return { ok: true as const };
+          }
+          uncertainReplies.set(taskId, pendingIdentity);
+          set((prev) => ({
+            error: uncertainWriteMessage,
+            progressByTask: { ...prev.progressByTask, [taskId]: uncertainWriteMessage },
+          }));
+          return { error: uncertainWriteMessage };
+        }
+        replySucceeded = res.ok;
+        // Fix 2 — backend tags reply outcome as `state: 'resumed' | 'stillAwaiting'`.
+        // Only `resumed` means the supercar accepted the message and
+        // started executing again; `stillAwaiting` is the user saying
+        // "等一下 / wait" and we should preserve the takeover UI so the
+        // BrowserPanel banner stays up. Older orchestrator builds omit
+        // `state` — treat that as the legacy "always clear" behaviour.
+        const state =
+          (res as { state?: 'resumed' | 'stillAwaiting' }).state ?? (res.ok ? 'resumed' : null);
+        if (state === 'resumed') {
+          seedExecutionOrder(taskId);
+          const order = executionOrder.accept(taskId, res, {
+            source: 'ack',
+            since: versionAtSubmit,
+          });
+          if (order === 'reconcile') void hydrateDetail(taskId);
+          if (order === 'ignore' || order === 'reconcile') return { ok: res.ok };
+          const identity = readExecutionIdentity(res);
+          // Optimistically clear the awaiting-user state so the composer
+          // flips back to the default mode. Also clear the mirrored
+          // task-row awaitingKind/status immediately; otherwise the
+          // selected-task derivations can keep showing browser handoff
+          // UI until the next WS frame lands.
+          set((prev) => {
+            const nextAwaiting = { ...prev.awaitingUserByTask };
+            delete nextAwaiting[taskId];
+            const nextTerminalIds = new Set(prev.terminalTaskIds);
+            nextTerminalIds.delete(taskId);
+            const nextThinking = omitRuntimeKey(prev.thinkingByTask, taskId);
+            const nextProgress = omitRuntimeKey(prev.progressByTask, taskId);
+            const nextStreaming = omitRuntimeKey(prev.streamingByTask, taskId);
+            const nextSubStatus = omitRuntimeKey(prev.subStatusByTask, taskId);
+            const nextCaptcha = omitRuntimeKey(prev.captchaWaitByTask, taskId);
+            const nextExecutorFallback = omitRuntimeKey(prev.executorFallbackByTask, taskId);
+            const nextDegrade = omitRuntimeKey(prev.degradeByTask, taskId);
+            return {
+              awaitingUserByTask: nextAwaiting,
+              thinkingByTask: nextThinking,
+              progressByTask: nextProgress,
+              streamingByTask: nextStreaming,
+              subStatusByTask: nextSubStatus,
+              captchaWaitByTask: nextCaptcha,
+              executorFallbackByTask: nextExecutorFallback,
+              degradeByTask: nextDegrade,
+              terminalTaskIds: nextTerminalIds,
+              tasks: prev.tasks.map((t) => {
+                if (t.taskId !== taskId) return t;
+                const { awaitingKind: _awaitingKind, resultText: _resultText, ...rest } = t;
+                return {
+                  ...rest,
+                  ...(identity && identity !== 'invalid' ? identity : {}),
+                  status: t.status === 'awaiting_user' ? 'executing' : t.status,
+                };
+              }),
+            };
+          });
+        }
+        return { ok: res.ok };
+      } catch (err) {
+        const unknownWrite = !isDefiniteWriteRejection(err);
+        const msg = unknownWrite ? uncertainWriteMessage : taskStoreError(err);
+        if (!isCurrentSession(generation)) return { error: msg };
+        // No returned identity means a later row cannot prove which request it
+        // belongs to. Keep this session locked; never infer acceptance from text.
+        if (unknownWrite) uncertainReplies.set(taskId, 'invalid');
+        set({ error: msg });
+        return { error: msg };
+      } finally {
+        if (isCurrentSession(generation)) {
+          if (!replySucceeded) {
+            failedLocalReplies.set(taskId, [...(failedLocalReplies.get(taskId) ?? []), entry]);
+          }
+          const remaining = (pendingReplies.get(taskId) ?? 1) - 1;
+          if (remaining > 0) pendingReplies.set(taskId, remaining);
+          else {
+            pendingReplies.delete(taskId);
+            if (get().selectedTaskId === taskId) void hydrateDetail(taskId);
+          }
+        }
+      }
+    },
+
+    continueInPublicCloud(taskId) {
+      // Double clicks, a second button or a re-render share the attempt in flight.
+      const inFlight = publicCloudFlights.get(taskId);
+      if (inFlight) return inFlight;
+      const attempt = continueOnce(taskId).finally(() => publicCloudFlights.delete(taskId));
+      publicCloudFlights.set(taskId, attempt);
+      return attempt;
+    },
+    async abortTask(taskId) {
+      const generation = captureSessionGeneration();
+      try {
+        const res = await trpc.tasks.abort.mutate({ taskId });
+        if (!isCurrentSession(generation)) return { ok: res.ok, state: res.state };
+        // Optimistic status flip so the UI doesn't keep showing the
+        // task as executing until the terminal frame arrives. The
+        // server's own terminal broadcast (status='cancelled') will
+        // overwrite this in applyServerMessage on the same tick.
+        if (res.ok) {
+          set((prev) => {
+            const nextTerminalIds = new Set(prev.terminalTaskIds);
+            nextTerminalIds.add(taskId);
+            const nextAwaiting = { ...prev.awaitingUserByTask };
+            delete nextAwaiting[taskId];
+            const nextSubStatus = { ...prev.subStatusByTask };
+            delete nextSubStatus[taskId];
+            const nextThinking = omitRuntimeKey(prev.thinkingByTask, taskId);
+            const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, taskId);
+            const nextExecutorFallback = omitRuntimeKey(prev.executorFallbackByTask, taskId);
+            const nextDegrade = omitRuntimeKey(prev.degradeByTask, taskId);
+            return {
+              tasks: prev.tasks.map((t) =>
+                t.taskId === taskId ? { ...t, status: 'cancelled' as const } : t,
+              ),
+              terminalTaskIds: nextTerminalIds,
+              awaitingUserByTask: nextAwaiting,
+              thinkingByTask: nextThinking,
+              subStatusByTask: nextSubStatus,
+              captchaWaitByTask: nextCaptchaWait,
+              executorFallbackByTask: nextExecutorFallback,
+              degradeByTask: nextDegrade,
+            };
+          });
+        }
+        return { ok: res.ok, state: res.state };
+      } catch (err) {
+        const msg = taskStoreError(err);
+        if (!isCurrentSession(generation)) return { error: msg };
+        set({ error: msg });
+        return { error: msg };
+      }
+    },
+
+    async rerunTask(taskId, rebuiltIntent, options) {
+      const task = get().tasks.find((item) => item.taskId === taskId);
+      if (!task) return { error: '无法确认原任务的执行方式，请重新打开任务后再试。' };
+      // Selections are short-lived and cleared on creation. Reusing another
+      // composer selection or omitting the target would silently change browsers.
+      if (task.browserSource === 'local-chrome') {
+        return {
+          error: '请点击“新任务”，填入原描述并重新选择 Chrome 页面后发送；不会自动改用云端执行。',
+        };
+      }
+      if (get().localChromeSelection) {
+        return { error: '输入框已选择 Chrome 页面，请先移除该选择，再重新执行原任务。' };
+      }
+      let retryOptions = options;
+      // All retry entry points recover the original inputs before creating a task.
+      if (!retryOptions) {
+        const generation = captureSessionGeneration();
+        try {
+          const context = await trpc.taskRecovery.failureContext.query({ taskId });
+          if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
+          if (context.unavailableInputCount) return { error: '附件已失效，请重新上传' };
+          retryOptions = {
+            fileIds: context.inputFiles.map((file) => file.fileId),
+            ...(context.executionMode === 'generate' &&
+            (task.status === 'failed' || task.status === 'cancelled')
+              ? { retryOfTaskId: taskId }
+              : {}),
+          };
+        } catch {
+          return { error: '无法恢复原任务输入，请稍后重试。' };
+        }
+      }
+      const fileIds = [...new Set(retryOptions?.fileIds ?? [])].slice(0, 5);
+      // Image tasks route on imageOptions, not intent text: without them a
+      // retry would silently fall into the generic lane.
+      const imageOptions =
+        task.executionMode === 'image' && task.imageOptions ? task.imageOptions : undefined;
+      return get().createTask(
+        rebuiltIntent ?? task.intent,
+        fileIds,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        imageOptions,
+        undefined,
+        undefined,
+        retryOptions?.retryOfTaskId,
+      );
+    },
+
+    async createTask(
+      intent,
+      fileIds,
+      replyToTaskId,
+      mode,
+      expertMode,
+      viewportProfile,
+      videoOptions,
+      skillSelection,
+      imageOptions,
+      taskSource,
+      stockContext,
+      retryOfTaskId,
+      overrides,
+    ) {
+      // Reject intents that are obviously control commands typed into
+      // the wrong box (e.g. user typing "停止" into the composer
+      // because they didn't see the Stop button). Fails client-side
+      // with a clear error — no server round-trip, no orphan row.
+      const trimmed = intent.trim();
+      if (CONTROL_WORDS.has(trimmed.toLowerCase())) {
+        const msg = `"${trimmed}" 是控制词，不是任务指令。要停止任务请用 Panel 右上角的"停止"按钮。`;
+        return { error: msg };
+      }
+      const generation = captureSessionGeneration();
+      const chromeSelection = get().localChromeSelection;
+      if (
+        replyToTaskId &&
+        get().tasks.find((task) => task.taskId === replyToTaskId)?.browserSource === 'local-chrome'
+      ) {
+        return { error: '本地 Chrome 会话已结束，请新建任务并重新选择 Chrome 页面后发送。' };
+      }
+      if (
+        chromeSelection &&
+        (mode === 'plan' ||
+          fileIds?.length ||
+          replyToTaskId ||
+          videoOptions ||
+          imageOptions ||
+          taskSource ||
+          stockContext)
+      )
+        return { error: '本地 Chrome 当前支持新建网页操作任务，请移除附件并使用自动执行模式。' };
+      const creationKey = JSON.stringify([
+        intent,
+        fileIds ?? [],
+        replyToTaskId,
+        mode,
+        expertMode,
+        videoOptions,
+        skillSelection,
+        imageOptions,
+        taskSource,
+        stockContext,
+        chromeSelection,
+        overrides,
+      ]);
+      // A caller-supplied server idempotency key makes a resend safe: the server
+      // replays the first task instead of creating another.
+      const idempotentResend = Boolean(overrides?.clientRequestId);
+      if (!idempotentResend && uncertainCreations.has(creationKey))
+        return { error: uncertainWriteMessage };
+      const pickedViewportProfile =
+        viewportProfile ?? get().defaultViewportProfile ?? pickDefaultBrowserViewportProfile();
+      const localTaskId = overrides?.clientRequestId
+        ? `${LOCAL_PENDING_TASK_PREFIX}${overrides.clientRequestId.replace(/[^A-Za-z0-9_]/g, '_')}`
+        : `${LOCAL_PENDING_TASK_PREFIX}${Date.now().toString(36)}_${Math.random()
+            .toString(36)
+            .slice(2, 8)}`;
+      const createdAt = new Date();
+      const videoTaskMeta: Partial<UiTask> = videoOptions?.tab
+        ? {
+            videoType: videoOptions.tab,
+            ...(videoOptions.tab === 'pet' &&
+            videoOptions.petModel &&
+            !videoOptions.referenceVideoFileId
+              ? { videoCreationMode: 'pet_i2v' as const }
+              : {}),
+          }
+        : {};
+      const pendingTask: UiTask = {
+        taskId: localTaskId,
+        intent,
+        title: '正在创建任务',
+        status: 'executing',
+        tickCount: 0,
+        createdAt,
+        executionMode: inferExecutionModeFromIntent(intent),
+        ...videoTaskMeta,
+        ...(replyToTaskId ? { replyToTaskId } : {}),
+      };
+      set((prev) => ({
+        tasks: [pendingTask, ...prev.tasks.filter((t) => t.taskId !== localTaskId)],
+        browserInteractive: false,
+        error: null,
+      }));
+      try {
+        const res = await trpc.tasks.create.mutate({
+          ...(chromeSelection
+            ? {
+                localChrome: {
+                  extensionClientId: chromeSelection.extensionClientId,
+                  tabId: chromeSelection.tabId,
+                  expectedUrl: chromeSelection.expectedUrl,
+                  selectionId: chromeSelection.selectionId,
+                },
+              }
+            : {}),
+          intent,
+          ...((overrides?.browserPreference ?? get().browserPreference)
+            ? {
+                browserPreference:
+                  overrides?.browserPreference ?? get().browserPreference ?? undefined,
+              }
+            : {}),
+          clientRequestId: overrides?.clientRequestId ?? localTaskId,
+          ...(overrides?.publicCloudContinuationOf
+            ? { publicCloudContinuationOf: overrides.publicCloudContinuationOf }
+            : {}),
+          ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
+          ...(replyToTaskId ? { replyToTaskId } : {}),
+          ...(retryOfTaskId ? { retryOfTaskId } : {}),
+          ...(mode === 'plan' ? { mode } : {}),
+          ...(expertMode && expertMode !== 'auto' ? { expertMode } : {}),
+          ...(getSelectedBrainId() ? { brainId: getSelectedBrainId() ?? undefined } : {}),
+          ...(skillSelection?.skillId
+            ? {
+                skillId: skillSelection.skillId,
+                skillSource: skillSelection.skillSource,
+              }
+            : {}),
+          ...(videoOptions ? { videoOptions } : {}),
+          ...(imageOptions ? { imageOptions } : {}),
+          ...(taskSource ? { taskSource } : {}),
+          ...(stockContext ? { stockContext } : {}),
+          viewportProfile: pickedViewportProfile,
+        });
+        if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
+        const createState = (res as { admissionState?: string }).admissionState;
+        const createIdentity = readExecutionIdentity(
+          res as { executionId?: unknown; executionRevision?: unknown },
+        );
+        const observedCreation = observedExecutions.get(res.taskId);
+        const creationObserved =
+          createIdentity === null
+            ? Boolean(observedCreation)
+            : coversPending(observedCreation, createIdentity);
+        const creationUnconfirmed =
+          (createState === 'creationUnconfirmed' || createState === 'acceptedUnconfirmed') &&
+          !creationObserved;
+        const createOrder = creationUnconfirmed
+          ? 'ignore'
+          : executionOrder.accept(
+              res.taskId,
+              res as { executionId?: unknown; executionRevision?: unknown },
+              { source: 'ack', since: 0 },
+            );
+        if (creationUnconfirmed) uncertainCreations.set(creationKey, res.taskId);
+        // Optimistic insert at the top so the UI feels instant; the next
+        // refreshTasks() will pick up the canonical server row.
+        //
+        // F3 — `executionMode` source-of-truth order:
+        //   1. `res.executionMode` (server-authoritative, available on
+        //      builds that include the F3 patch)
+        //   2. `inferExecutionModeFromIntent(intent)` — front-end coarse
+        //      inference, kept as a fallback for older orchestrator
+        //      builds that don't yet ship the field
+        // The server value is always correct because it was decided by
+        // `classifyExecutionMode` + `matchExpertWorkflow` BEFORE the
+        // task row was inserted. Falling back to inference covers the
+        // version-skew window after a deploy.
+        const serverExecutionMode = (res as { executionMode?: UiTask['executionMode'] })
+          .executionMode;
+        const optimistic: UiTask = {
+          ...((res as { browserSource?: string }).browserSource === 'local-chrome'
+            ? { browserSource: 'local-chrome' as const }
+            : {}),
+          taskId: res.taskId,
+          intent,
+          title: null,
+          status: creationUnconfirmed ? 'unknown' : ((res.status as UiTaskStatus) ?? 'executing'),
+          ...(creationUnconfirmed ? { resultText: uncertainWriteMessage } : {}),
+          ...(createIdentity && createIdentity !== 'invalid' ? createIdentity : {}),
+          tickCount: 0,
+          createdAt,
+          executionMode: serverExecutionMode ?? inferExecutionModeFromIntent(intent),
+          ...videoTaskMeta,
+          ...(replyToTaskId ? { replyToTaskId } : {}),
+        };
+        // composerMode flips back to 'task' here. Without this, a user
+        // who clicked 发新任务 (composerMode='new') and submitted ends
+        // up with selectedTaskId=res.taskId but composerMode still
+        // pinned to 'new' — leaving the store in an inconsistent state
+        // that any subsequent enterNewTaskMode() would clear.
+        // browserInteractive clears so the new task starts view-only
+        // unless it explicitly needs user action.
+        set((prev) => ({
+          tasks: [
+            createOrder === 'ignore' &&
+            !creationUnconfirmed &&
+            prev.tasks.some((t) => t.taskId === res.taskId)
+              ? {
+                  ...prev.tasks.find((t) => t.taskId === res.taskId)!,
+                  intent,
+                  title: null,
+                  createdAt,
+                }
+              : optimistic,
+            ...prev.tasks.filter((t) => t.taskId !== res.taskId && t.taskId !== localTaskId),
+          ],
+          ...((res as { question?: string }).question
+            ? {
+                awaitingUserByTask: {
+                  ...prev.awaitingUserByTask,
+                  [res.taskId]: {
+                    question: (res as { question: string }).question,
+                    at: Date.now(),
+                    awaitingKind: 'permission' as const,
+                    ...((res as { browserConnection?: UiAwaitingUser['browserConnection'] })
+                      .browserConnection
+                      ? {
+                          browserConnection: (
+                            res as { browserConnection: UiAwaitingUser['browserConnection'] }
+                          ).browserConnection,
+                        }
+                      : {}),
+                  },
+                },
+              }
+            : {}),
+          selectedTaskId: res.taskId,
+          ...(prev.localChromeSelection === chromeSelection ? { localChromeSelection: null } : {}),
+          composerMode: 'task' as const,
+          browserInteractive: false,
+          ...(creationUnconfirmed ? { error: uncertainWriteMessage } : {}),
+        }));
+        // Pin URL to the new task — same direct-navigate path as
+        // selectTask. The deleted outbound effect used to do this off
+        // the selectedTaskId dep change.
+        storeNavigate?.(res.taskId);
+        // Fire-and-forget refresh so the row's server-authored fields
+        // (createdAt, status) replace the optimistic stub once available.
+        if (creationUnconfirmed) return { error: uncertainWriteMessage };
+        if (createOrder === 'reconcile') void hydrateDetail(res.taskId);
+        void get().refreshTasks();
+        return { taskId: res.taskId };
+      } catch (err) {
+        if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
+        const unknownWrite = !isDefiniteWriteRejection(err);
+        const msg = unknownWrite ? uncertainWriteMessage : taskStoreError(err);
+        if (unknownWrite && !idempotentResend) uncertainCreations.set(creationKey, localTaskId);
+        set((prev) => ({
+          ...(unknownWrite ? { error: msg } : {}),
+          tasks: unknownWrite
+            ? prev.tasks.map((t) =>
+                t.taskId === localTaskId
+                  ? { ...t, status: 'unknown' as const, resultText: msg }
+                  : t,
+              )
+            : prev.tasks.filter((t) => t.taskId !== localTaskId),
+        }));
+        return { error: msg };
+      }
+    },
+
+    async createStockTask(intent, context, fileIds) {
+      return get().createTask(
+        intent,
+        fileIds,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'stock_dashboard',
+        context,
+      );
+    },
+
+    applyServerMessage(msg) {
+      if (
+        'taskId' in msg &&
+        [
+          'server.task.stream',
+          'server.task.progress',
+          'server.task.terminal',
+          'server.supercar.awaiting_user',
+          'server.task.plan',
+          'server.supercar.suggestions',
+        ].includes(msg.type)
+      ) {
+        seedExecutionOrder(msg.taskId);
+        const identity = readExecutionIdentity(
+          msg as { executionId?: unknown; executionRevision?: unknown },
+        );
+        const order = executionOrder.accept(
+          msg.taskId,
+          msg as { executionId?: unknown; executionRevision?: unknown },
+          {
+            source: 'event',
+            terminal: msg.type === 'server.task.terminal',
+            afterTerminal: msg.type === 'server.supercar.suggestions',
+          },
+        );
+        if (order === 'reconcile') void hydrateDetail(msg.taskId);
+        if (order === 'ignore' || order === 'reconcile') return;
+        if (
+          identity &&
+          identity !== 'invalid' &&
+          (msg.type === 'server.task.stream' ||
+            msg.type === 'server.task.terminal' ||
+            msg.type === 'server.supercar.awaiting_user')
+        )
+          confirmObservedExecution(msg.taskId, identity);
+        if (order === 'new' && identity && identity !== 'invalid') {
+          set((prev) => ({
+            ...clearCoreRoundRuntime(prev, new Set([msg.taskId])),
+            tasks: (prev.tasks.some((t) => t.taskId === msg.taskId)
+              ? prev.tasks
+              : [
+                  {
+                    taskId: msg.taskId,
+                    intent: '任务',
+                    title: null,
+                    status: 'executing' as const,
+                    tickCount: 0,
+                    createdAt: new Date(),
+                  },
+                  ...prev.tasks,
+                ]
+            ).map((t) =>
+              t.taskId === msg.taskId
+                ? {
+                    ...t,
+                    ...identity,
+                    status: 'executing',
+                    resultText: undefined,
+                    awaitingKind: undefined,
+                    planText: undefined,
+                    planStatus: undefined,
+                    verificationPassed: null,
+                    failedChecks: undefined,
+                  }
+                : t,
+            ),
+          }));
+        }
+      }
+      if (
+        'taskId' in msg &&
+        [
+          'server.vision.tick.start',
+          'server.vision.tick.end',
+          'server.vision.screencast',
+          'server.supercar.thinking',
+          'server.supercar.web_search',
+        ].includes(msg.type)
+      ) {
+        set((prev) => {
+          if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+          return {
+            tasks: prev.tasks.map((task) =>
+              task.taskId === msg.taskId ? { ...task, executionMode: 'browser' as const } : task,
+            ),
+            subStatusByTask: {
+              ...prev.subStatusByTask,
+              [msg.taskId]:
+                prev.subStatusByTask[msg.taskId]?.subStatus === 'browsing'
+                  ? prev.subStatusByTask[msg.taskId]!
+                  : { subStatus: 'browsing' as const, since: Date.now() },
+            },
           };
         });
       }
-      return { ok: res.ok };
-    } catch (err) {
-      const unknownWrite = !isDefiniteWriteRejection(err);
-      const msg = unknownWrite ? uncertainWriteMessage : taskStoreError(err);
-      if (!isCurrentSession(generation)) return { error: msg };
-      // No returned identity means a later row cannot prove which request it
-      // belongs to. Keep this session locked; never infer acceptance from text.
-      if (unknownWrite) uncertainReplies.set(taskId, 'invalid');
-      set({ error: msg });
-      return { error: msg };
-    } finally {
-      if (isCurrentSession(generation)) {
-        if (!replySucceeded) {
-          failedLocalReplies.set(taskId, [...(failedLocalReplies.get(taskId) ?? []), entry]);
-        }
-        const remaining = (pendingReplies.get(taskId) ?? 1) - 1;
-        if (remaining > 0) pendingReplies.set(taskId, remaining);
-        else {
-          pendingReplies.delete(taskId);
-          if (get().selectedTaskId === taskId) void hydrateDetail(taskId);
-        }
+      if (msg.type === 'server.error') {
+        set({
+          error: msg.message.trim() || `服务器连接错误：${msg.code}`,
+        });
+        return;
       }
-    }
-  },
-
-  continueInPublicCloud(taskId) {
-    // Double clicks, a second button or a re-render share the attempt in flight.
-    const inFlight = publicCloudFlights.get(taskId);
-    if (inFlight) return inFlight;
-    const attempt = continueOnce(taskId).finally(() => publicCloudFlights.delete(taskId));
-    publicCloudFlights.set(taskId, attempt);
-    return attempt;
-  },
-  async abortTask(taskId) {
-    const generation = captureSessionGeneration();
-    try {
-      const res = await trpc.tasks.abort.mutate({ taskId });
-      if (!isCurrentSession(generation)) return { ok: res.ok, state: res.state };
-      // Optimistic status flip so the UI doesn't keep showing the
-      // task as executing until the terminal frame arrives. The
-      // server's own terminal broadcast (status='cancelled') will
-      // overwrite this in applyServerMessage on the same tick.
-      if (res.ok) {
+      if (msg.type === 'server.welcome') {
+        set({ error: null });
+        return;
+      }
+      if (msg.type === 'server.task.dispatch') {
         set((prev) => {
-          const nextTerminalIds = new Set(prev.terminalTaskIds);
-          nextTerminalIds.add(taskId);
+          const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
+          const canRecoverPausedTask = existingTask?.status === 'paused';
+          if (isTaskRuntimeTerminal(prev, msg.taskId) && !canRecoverPausedTask) return prev;
           const nextAwaiting = { ...prev.awaitingUserByTask };
-          delete nextAwaiting[taskId];
+          delete nextAwaiting[msg.taskId];
+          const nextTerminalIds = new Set(prev.terminalTaskIds);
+          nextTerminalIds.delete(msg.taskId);
+          return {
+            awaitingUserByTask: nextAwaiting,
+            terminalTaskIds: nextTerminalIds,
+            tasks: prev.tasks.map((t) => {
+              if (t.taskId !== msg.taskId) return t;
+              if (t.status === 'paused') {
+                const { queuePosition: _queuePosition, resultText: _resultText, ...rest } = t;
+                void _queuePosition;
+                void _resultText;
+                return {
+                  ...rest,
+                  status: 'executing' as const,
+                };
+              }
+              return markTaskRunningFromLiveSignal(t);
+            }),
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.task.control') {
+        set((prev) => {
+          const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
+          const isPausedRecoverableControl =
+            existingTask?.status === 'paused' &&
+            (msg.command === 'pause' || msg.command === 'resume' || msg.command === 'cancel');
+          if (isTaskRuntimeTerminal(prev, msg.taskId) && !isPausedRecoverableControl) return prev;
+          const pauseMessage =
+            msg.command === 'pause' && typeof msg.detail?.message === 'string'
+              ? msg.detail.message
+              : undefined;
           const nextSubStatus = { ...prev.subStatusByTask };
-          delete nextSubStatus[taskId];
-          const nextThinking = omitRuntimeKey(prev.thinkingByTask, taskId);
-          const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, taskId);
-          const nextExecutorFallback = omitRuntimeKey(
-            prev.executorFallbackByTask,
-            taskId,
-          );
-          const nextDegrade = omitRuntimeKey(prev.degradeByTask, taskId);
+          delete nextSubStatus[msg.taskId];
+          const nextAwaiting = { ...prev.awaitingUserByTask };
+          delete nextAwaiting[msg.taskId];
+          const nextThinking = omitRuntimeKey(prev.thinkingByTask, msg.taskId);
+          const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
+          const nextExecutorFallback = omitRuntimeKey(prev.executorFallbackByTask, msg.taskId);
+          const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
+          const nextProgress =
+            msg.command === 'resume'
+              ? omitRuntimeKey(prev.progressByTask, msg.taskId)
+              : prev.progressByTask;
+          const nextStreaming =
+            msg.command === 'resume'
+              ? omitRuntimeKey(prev.streamingByTask, msg.taskId)
+              : prev.streamingByTask;
+          const nextTerminalIds = new Set(prev.terminalTaskIds);
+          if (msg.command === 'cancel' || msg.command === 'pause') nextTerminalIds.add(msg.taskId);
+          else nextTerminalIds.delete(msg.taskId);
+          const status =
+            msg.command === 'pause'
+              ? 'paused'
+              : msg.command === 'cancel'
+                ? 'cancelled'
+                : 'executing';
           return {
             tasks: prev.tasks.map((t) =>
-              t.taskId === taskId ? { ...t, status: 'cancelled' as const } : t,
+              t.taskId === msg.taskId
+                ? {
+                    ...t,
+                    status,
+                    ...(msg.command === 'resume'
+                      ? { awaitingKind: undefined, resultText: undefined }
+                      : {}),
+                    ...(pauseMessage ? { resultText: pauseMessage } : {}),
+                  }
+                : t,
+            ),
+            awaitingUserByTask: nextAwaiting,
+            thinkingByTask: nextThinking,
+            subStatusByTask: nextSubStatus,
+            progressByTask: nextProgress,
+            streamingByTask: nextStreaming,
+            captchaWaitByTask: nextCaptchaWait,
+            executorFallbackByTask: nextExecutorFallback,
+            degradeByTask: nextDegrade,
+            terminalTaskIds: nextTerminalIds,
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.user.confirm') {
+        set((prev) => {
+          const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
+          const canRecoverPausedTask = existingTask?.status === 'paused';
+          if (isTaskRuntimeTerminal(prev, msg.taskId) && !canRecoverPausedTask) return prev;
+          const singleConfirm: NonNullable<UiAwaitingUser['singleConfirm']> = {
+            stepId: msg.stepId,
+            prompt: msg.prompt,
+            risk: msg.risk,
+          };
+          const nextSubStatus = { ...prev.subStatusByTask };
+          delete nextSubStatus[msg.taskId];
+          const nextThinking = omitRuntimeKey(prev.thinkingByTask, msg.taskId);
+          const nextProgress = omitRuntimeKey(prev.progressByTask, msg.taskId);
+          const nextStreaming = omitRuntimeKey(prev.streamingByTask, msg.taskId);
+          const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
+          const nextExecutorFallback = omitRuntimeKey(prev.executorFallbackByTask, msg.taskId);
+          const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
+          const nextTerminalIds = new Set(prev.terminalTaskIds);
+          nextTerminalIds.delete(msg.taskId);
+          return {
+            awaitingUserByTask: {
+              ...prev.awaitingUserByTask,
+              [msg.taskId]: {
+                question: singleConfirmQuestion(singleConfirm),
+                at: Date.now(),
+                awaitingKind: 'browser_action',
+                singleConfirm,
+              },
+            },
+            subStatusByTask: nextSubStatus,
+            thinkingByTask: nextThinking,
+            progressByTask: nextProgress,
+            streamingByTask: nextStreaming,
+            captchaWaitByTask: nextCaptchaWait,
+            executorFallbackByTask: nextExecutorFallback,
+            degradeByTask: nextDegrade,
+            terminalTaskIds: nextTerminalIds,
+            tasks: prev.tasks.map((t) =>
+              t.taskId === msg.taskId
+                ? (() => {
+                    const { resultText: _resultText, ...rest } = t;
+                    return {
+                      ...rest,
+                      status: 'awaiting_user' as const,
+                      awaitingKind: 'browser_action' as const,
+                    };
+                  })()
+                : t,
+            ),
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.batch_confirm_required') {
+        set((prev) => {
+          const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
+          const canRecoverPausedTask = existingTask?.status === 'paused';
+          if (isTaskRuntimeTerminal(prev, msg.taskId) && !canRecoverPausedTask) return prev;
+          const batchConfirm: NonNullable<UiAwaitingUser['batchConfirm']> = {
+            stepId: msg.stepId,
+            batchIndex: msg.batchIndex,
+            batchTotal: msg.batchTotal,
+            risk: msg.risk,
+            ...(msg.summary ? { summary: msg.summary } : {}),
+            items: msg.items,
+          };
+          const nextSubStatus = { ...prev.subStatusByTask };
+          delete nextSubStatus[msg.taskId];
+          const nextThinking = omitRuntimeKey(prev.thinkingByTask, msg.taskId);
+          const nextProgress = omitRuntimeKey(prev.progressByTask, msg.taskId);
+          const nextStreaming = omitRuntimeKey(prev.streamingByTask, msg.taskId);
+          const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
+          const nextExecutorFallback = omitRuntimeKey(prev.executorFallbackByTask, msg.taskId);
+          const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
+          const nextTerminalIds = new Set(prev.terminalTaskIds);
+          nextTerminalIds.delete(msg.taskId);
+          return {
+            awaitingUserByTask: {
+              ...prev.awaitingUserByTask,
+              [msg.taskId]: {
+                question: batchConfirmQuestion(batchConfirm),
+                at: Date.now(),
+                awaitingKind: 'browser_action',
+                batchConfirm,
+              },
+            },
+            subStatusByTask: nextSubStatus,
+            thinkingByTask: nextThinking,
+            progressByTask: nextProgress,
+            streamingByTask: nextStreaming,
+            captchaWaitByTask: nextCaptchaWait,
+            executorFallbackByTask: nextExecutorFallback,
+            degradeByTask: nextDegrade,
+            terminalTaskIds: nextTerminalIds,
+            tasks: prev.tasks.map((t) =>
+              t.taskId === msg.taskId
+                ? (() => {
+                    const { resultText: _resultText, ...rest } = t;
+                    return {
+                      ...rest,
+                      status: 'awaiting_user' as const,
+                      awaitingKind: 'browser_action' as const,
+                    };
+                  })()
+                : t,
+            ),
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.task.terminal') {
+        set((prev) => {
+          const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
+          if (
+            existingTask &&
+            isTerminalStatus(existingTask.status) &&
+            existingTask.status !== msg.status
+          ) {
+            return prev;
+          }
+          // Phase 24 RC follow-up (Bug 1 fix): DO NOT clear streaming
+          // + progress buffers here. There's a ~200ms window between
+          // terminal arrival and tasks.detail merging the canonical
+          // summary; clearing buffers in that window leaves the
+          // streaming view rendering NOTHING, perceived as
+          // "content disappeared then reappeared". The render gate in
+          // TaskStream prefers `task.resultText` over the buffer when
+          // both are present, so retaining the buffer is harmless and
+          // bridges the gap.
+          //
+          // Bug 2 fix: also add to terminalTaskIds so stale-delta
+          // guards in stream/progress handlers can check Set
+          // membership directly (instead of looking at the tasks
+          // array's status, which races with tasks.list).
+          hdDebug('terminal', {
+            taskId: msg.taskId,
+            status: msg.status,
+            prevBufferLen: (prev.streamingByTask[msg.taskId] ?? '').length,
+            hadProgress: Boolean(prev.progressByTask[msg.taskId]),
+            hasSummary: Boolean((msg as { summary?: string }).summary),
+          });
+          const nextTerminalIds = new Set(prev.terminalTaskIds);
+          nextTerminalIds.add(msg.taskId);
+          // Mark this taskId as freshly-completed so TerminalSummary's
+          // typewriter reveal plays once. Tasks loaded from history
+          // (`tasks.list` / `tasks.detail`) never enter this set, so
+          // navigating to a historical task renders the summary in full
+          // immediately — no replay on every sidebar click.
+          const nextAnimatedIds = new Set(prev.animatedTaskIds);
+          if (isTerminalStatus(msg.status)) {
+            nextAnimatedIds.add(msg.taskId);
+          } else {
+            nextAnimatedIds.delete(msg.taskId);
+          }
+          // Codex Pack B1 — clear sub-status on terminal so the chip
+          // disappears the moment a task finishes. Unlike
+          // streamingByTask / progressByTask (which we keep around to
+          // bridge the terminal → TerminalSummary handoff), the chip is
+          // a pure live-state surface — keeping it would leave "正在
+          // 操作浏览器…" hanging next to a completed result.
+          const nextSubStatus = { ...prev.subStatusByTask };
+          delete nextSubStatus[msg.taskId];
+          const nextAwaiting = { ...prev.awaitingUserByTask };
+          delete nextAwaiting[msg.taskId];
+          const nextThinking = { ...prev.thinkingByTask };
+          delete nextThinking[msg.taskId];
+          const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
+          const nextExecutorFallback = omitRuntimeKey(prev.executorFallbackByTask, msg.taskId);
+          const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
+          // Codex Round 2 P1-6 — terminal frame may carry the verifier
+          // verdict's failed-check list so the SPA banner can render
+          // specific bullets. Stamp onto the task; null clears prior
+          // values if a re-broadcast comes back clean.
+          const incomingFailedChecks =
+            (msg as { failedChecks?: Array<{ type: string; detail: string }> }).failedChecks ??
+            null;
+          // P1 timing fix — the image lane now ships attachments[] ON the
+          // terminal frame (see orchestrator tasks.ts + ws.ts). Stamp them
+          // onto the task immediately so the image card renders WITH the
+          // "已生成1张图片" summary, instead of arriving one tasks.detail
+          // round-trip later (the gap the user reported as 文字先出图后到).
+          const incomingAttachments = parseUiAttachments(
+            (msg as { attachments?: unknown }).attachments,
+          );
+          const incomingVerificationPassed =
+            typeof msg.verificationPassed === 'boolean' ? msg.verificationPassed : null;
+          return {
+            tasks: prev.tasks.map((t) =>
+              t.taskId === msg.taskId
+                ? {
+                    ...t,
+                    status: msg.status,
+                    ...(msg.summary ? { resultText: msg.summary } : {}),
+                    ...(msg.reason ? { resultText: humaniseTaskError(msg.reason) } : {}),
+                    ...(incomingFailedChecks !== null
+                      ? { failedChecks: incomingFailedChecks }
+                      : {}),
+                    ...(incomingAttachments ? { attachments: incomingAttachments } : {}),
+                    ...(incomingVerificationPassed !== null
+                      ? { verificationPassed: incomingVerificationPassed }
+                      : {}),
+                  }
+                : t,
             ),
             terminalTaskIds: nextTerminalIds,
+            animatedTaskIds: nextAnimatedIds,
             awaitingUserByTask: nextAwaiting,
             thinkingByTask: nextThinking,
             subStatusByTask: nextSubStatus,
             captchaWaitByTask: nextCaptchaWait,
             executorFallbackByTask: nextExecutorFallback,
             degradeByTask: nextDegrade,
+            // streamingByTask + progressByTask unchanged; buffers
+            // persist until resultText is rendered in their place.
           };
         });
-      }
-      return { ok: res.ok, state: res.state };
-    } catch (err) {
-      const msg = taskStoreError(err);
-      if (!isCurrentSession(generation)) return { error: msg };
-      set({ error: msg });
-      return { error: msg };
-    }
-  },
-
-  async rerunTask(taskId, rebuiltIntent, options) {
-    const task = get().tasks.find((item) => item.taskId === taskId);
-    if (!task) return { error: '无法确认原任务的执行方式，请重新打开任务后再试。' };
-    // Selections are short-lived and cleared on creation. Reusing another
-    // composer selection or omitting the target would silently change browsers.
-    if (task.browserSource === 'local-chrome') {
-      return { error: '请点击“新任务”，填入原描述并重新选择 Chrome 页面后发送；不会自动改用云端执行。' };
-    }
-    if (get().localChromeSelection) {
-      return { error: '输入框已选择 Chrome 页面，请先移除该选择，再重新执行原任务。' };
-    }
-    let retryOptions = options;
-    // All retry entry points recover the original inputs before creating a task.
-    if (!retryOptions) {
-      const generation = captureSessionGeneration();
-      try {
-        const context = await trpc.taskRecovery.failureContext.query({ taskId });
-        if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
-        if (context.unavailableInputCount) return { error: '附件已失效，请重新上传' };
-        retryOptions = { fileIds: context.inputFiles.map(file => file.fileId),
-          ...(context.executionMode === 'generate' && (task.status === 'failed' || task.status === 'cancelled') ? { retryOfTaskId: taskId } : {}) };
-      } catch { return { error: '无法恢复原任务输入，请稍后重试。' }; }
-    }
-    const fileIds = [...new Set(retryOptions?.fileIds ?? [])].slice(0, 5);
-    // Image tasks route on imageOptions, not intent text: without them a
-    // retry would silently fall into the generic lane.
-    const imageOptions =
-      task.executionMode === 'image' && task.imageOptions ? task.imageOptions : undefined;
-    return get().createTask(
-      rebuiltIntent ?? task.intent,
-      fileIds,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      imageOptions,
-      undefined,
-      undefined,
-      retryOptions?.retryOfTaskId,
-    );
-  },
-
-  async createTask(
-    intent,
-    fileIds,
-    replyToTaskId,
-    mode,
-    expertMode,
-    viewportProfile,
-    videoOptions,
-    skillSelection,
-    imageOptions,
-    taskSource,
-    stockContext,
-    retryOfTaskId,
-    overrides,
-  ) {
-    // Reject intents that are obviously control commands typed into
-    // the wrong box (e.g. user typing "停止" into the composer
-    // because they didn't see the Stop button). Fails client-side
-    // with a clear error — no server round-trip, no orphan row.
-    const trimmed = intent.trim();
-    if (CONTROL_WORDS.has(trimmed.toLowerCase())) {
-      const msg = `"${trimmed}" 是控制词，不是任务指令。要停止任务请用 Panel 右上角的"停止"按钮。`;
-      return { error: msg };
-    }
-    const generation = captureSessionGeneration();
-    const chromeSelection = get().localChromeSelection;
-    if (replyToTaskId && get().tasks.find((task) => task.taskId === replyToTaskId)?.browserSource === 'local-chrome') {
-      return { error: '本地 Chrome 会话已结束，请新建任务并重新选择 Chrome 页面后发送。' };
-    }
-    if (chromeSelection && (mode === 'plan' || fileIds?.length || replyToTaskId || videoOptions || imageOptions || taskSource || stockContext)) return { error: '本地 Chrome 当前支持新建网页操作任务，请移除附件并使用自动执行模式。' };
-    const creationKey = JSON.stringify([intent, fileIds ?? [], replyToTaskId, mode, expertMode, videoOptions, skillSelection, imageOptions, taskSource, stockContext, chromeSelection, overrides]);
-    // A caller-supplied server idempotency key makes a resend safe: the server
-    // replays the first task instead of creating another.
-    const idempotentResend = Boolean(overrides?.clientRequestId);
-    if (!idempotentResend && uncertainCreations.has(creationKey)) return { error: uncertainWriteMessage };
-    const pickedViewportProfile =
-      viewportProfile ??
-      get().defaultViewportProfile ??
-      pickDefaultBrowserViewportProfile();
-    const localTaskId = overrides?.clientRequestId
-      ? `${LOCAL_PENDING_TASK_PREFIX}${overrides.clientRequestId.replace(/[^A-Za-z0-9_]/g, '_')}`
-      : `${LOCAL_PENDING_TASK_PREFIX}${Date.now().toString(36)}_${Math.random()
-          .toString(36)
-          .slice(2, 8)}`;
-    const createdAt = new Date();
-    const videoTaskMeta: Partial<UiTask> = videoOptions?.tab ? { videoType: videoOptions.tab, ...(videoOptions.tab === 'pet' && videoOptions.petModel && !videoOptions.referenceVideoFileId ? { videoCreationMode: 'pet_i2v' as const } : {}) } : {};
-    const pendingTask: UiTask = {
-      taskId: localTaskId,
-      intent,
-      title: '正在创建任务',
-      status: 'executing',
-      tickCount: 0,
-      createdAt,
-      executionMode: inferExecutionModeFromIntent(intent),
-      ...videoTaskMeta,
-      ...(replyToTaskId ? { replyToTaskId } : {}),
-    };
-    set((prev) => ({
-      tasks: [pendingTask, ...prev.tasks.filter((t) => t.taskId !== localTaskId)],
-      browserInteractive: false,
-      error: null,
-    }));
-    try {
-      const res = await trpc.tasks.create.mutate({
-        ...(chromeSelection ? { localChrome: { extensionClientId: chromeSelection.extensionClientId, tabId: chromeSelection.tabId, expectedUrl: chromeSelection.expectedUrl, selectionId: chromeSelection.selectionId } } : {}),
-        intent,
-        ...((overrides?.browserPreference ?? get().browserPreference)
-          ? { browserPreference: overrides?.browserPreference ?? get().browserPreference ?? undefined }
-          : {}),
-        clientRequestId: overrides?.clientRequestId ?? localTaskId,
-        ...(overrides?.publicCloudContinuationOf
-          ? { publicCloudContinuationOf: overrides.publicCloudContinuationOf }
-          : {}),
-        ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
-        ...(replyToTaskId ? { replyToTaskId } : {}),
-        ...(retryOfTaskId ? { retryOfTaskId } : {}),
-        ...(mode === 'plan' ? { mode } : {}),
-        ...(expertMode && expertMode !== 'auto' ? { expertMode } : {}),
-        ...(getSelectedBrainId() ? { brainId: getSelectedBrainId() ?? undefined } : {}),
-        ...(skillSelection?.skillId
-          ? {
-              skillId: skillSelection.skillId,
-              skillSource: skillSelection.skillSource,
+        // F4 — backend-orchestrated handoff. When the reply handler on
+        // the orchestrator spawns a follow-up task (intake clarification
+        // revealed a need for the browser lane), it ships the new task's
+        // id on the terminal frame. The SPA's only job: navigate the
+        // selection to that task — the new row + its supercar dispatch
+        // are already running server-side. Earlier flow had the SPA
+        // fire createTask off the terminal which double-created on WS
+        // replay; this version is idempotent because the backend uses
+        // `result.handoffTaskId` as its dedup key.
+        const handoffTaskId = (msg as { handoffTaskId?: string }).handoffTaskId;
+        if (typeof handoffTaskId === 'string' && handoffTaskId.length > 0) {
+          setTimeout(() => {
+            try {
+              get().selectTask(handoffTaskId, 'ui');
+            } catch (err) {
+              hdDebug('handoff selectTask failed', {
+                err: err instanceof Error ? err.message : String(err),
+              });
             }
-          : {}),
-        ...(videoOptions ? { videoOptions } : {}),
-        ...(imageOptions ? { imageOptions } : {}),
-        ...(taskSource ? { taskSource } : {}),
-        ...(stockContext ? { stockContext } : {}),
-        viewportProfile: pickedViewportProfile,
-      });
-      if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
-      const createState = (res as { admissionState?: string }).admissionState;
-      const createIdentity = readExecutionIdentity(res as { executionId?: unknown; executionRevision?: unknown });
-      const observedCreation = observedExecutions.get(res.taskId);
-      const creationObserved = createIdentity === null ? Boolean(observedCreation)
-        : coversPending(observedCreation, createIdentity);
-      const creationUnconfirmed = (createState === 'creationUnconfirmed' || createState === 'acceptedUnconfirmed') && !creationObserved;
-      const createOrder = creationUnconfirmed ? 'ignore' : executionOrder.accept(res.taskId, res as { executionId?: unknown; executionRevision?: unknown }, { source: 'ack', since: 0 });
-      if (creationUnconfirmed) uncertainCreations.set(creationKey, res.taskId);
-      // Optimistic insert at the top so the UI feels instant; the next
-      // refreshTasks() will pick up the canonical server row.
-      //
-      // F3 — `executionMode` source-of-truth order:
-      //   1. `res.executionMode` (server-authoritative, available on
-      //      builds that include the F3 patch)
-      //   2. `inferExecutionModeFromIntent(intent)` — front-end coarse
-      //      inference, kept as a fallback for older orchestrator
-      //      builds that don't yet ship the field
-      // The server value is always correct because it was decided by
-      // `classifyExecutionMode` + `matchExpertWorkflow` BEFORE the
-      // task row was inserted. Falling back to inference covers the
-      // version-skew window after a deploy.
-      const serverExecutionMode = (res as { executionMode?: UiTask['executionMode'] })
-        .executionMode;
-      const optimistic: UiTask = {
-        ...((res as { browserSource?: string }).browserSource === 'local-chrome' ? { browserSource: 'local-chrome' as const } : {}),
-        taskId: res.taskId,
-        intent,
-        title: null,
-        status: creationUnconfirmed ? 'unknown' : (res.status as UiTaskStatus) ?? 'executing',
-        ...(creationUnconfirmed ? { resultText: uncertainWriteMessage } : {}),
-        ...(createIdentity && createIdentity !== 'invalid' ? createIdentity : {}),
-        tickCount: 0,
-        createdAt,
-        executionMode: serverExecutionMode ?? inferExecutionModeFromIntent(intent),
-        ...videoTaskMeta,
-        ...(replyToTaskId ? { replyToTaskId } : {}),
-      };
-      // composerMode flips back to 'task' here. Without this, a user
-      // who clicked 发新任务 (composerMode='new') and submitted ends
-      // up with selectedTaskId=res.taskId but composerMode still
-      // pinned to 'new' — leaving the store in an inconsistent state
-      // that any subsequent enterNewTaskMode() would clear.
-      // browserInteractive clears so the new task starts view-only
-      // unless it explicitly needs user action.
-      set((prev) => ({
-        tasks: [
-          createOrder === 'ignore' && !creationUnconfirmed && prev.tasks.some(t => t.taskId === res.taskId)
-            ? { ...prev.tasks.find(t => t.taskId === res.taskId)!, intent, title: null, createdAt }
-            : optimistic,
-          ...prev.tasks.filter(
-            (t) => t.taskId !== res.taskId && t.taskId !== localTaskId,
-          ),
-        ],
-        ...((res as { question?: string }).question ? {
-          awaitingUserByTask: {
-            ...prev.awaitingUserByTask,
-            [res.taskId]: {
-              question: (res as { question: string }).question,
-              at: Date.now(),
-              awaitingKind: 'permission' as const,
-              ...((res as { browserConnection?: UiAwaitingUser['browserConnection'] })
-                .browserConnection
-                ? {
-                    browserConnection: (
-                      res as { browserConnection: UiAwaitingUser['browserConnection'] }
-                    ).browserConnection,
-                  }
-                : {}),
-            },
-          },
-        } : {}),
-        selectedTaskId: res.taskId,
-        ...(prev.localChromeSelection === chromeSelection ? { localChromeSelection: null } : {}),
-        composerMode: 'task' as const,
-        browserInteractive: false,
-        ...(creationUnconfirmed ? { error: uncertainWriteMessage } : {}),
-      }));
-      // Pin URL to the new task — same direct-navigate path as
-      // selectTask. The deleted outbound effect used to do this off
-      // the selectedTaskId dep change.
-      storeNavigate?.(res.taskId);
-      // Fire-and-forget refresh so the row's server-authored fields
-      // (createdAt, status) replace the optimistic stub once available.
-      if (creationUnconfirmed) return { error: uncertainWriteMessage };
-      if (createOrder === 'reconcile') void hydrateDetail(res.taskId);
-      void get().refreshTasks();
-      return { taskId: res.taskId };
-    } catch (err) {
-      if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
-      const unknownWrite = !isDefiniteWriteRejection(err);
-      const msg = unknownWrite ? uncertainWriteMessage : taskStoreError(err);
-      if (unknownWrite && !idempotentResend) uncertainCreations.set(creationKey, localTaskId);
-      set((prev) => ({
-        ...(unknownWrite ? { error: msg } : {}),
-        tasks: unknownWrite
-          ? prev.tasks.map(t => t.taskId === localTaskId ? { ...t, status: 'unknown' as const, resultText: msg } : t)
-          : prev.tasks.filter((t) => t.taskId !== localTaskId),
-      }));
-      return { error: msg };
-    }
-  },
-
-  async createStockTask(intent, context, fileIds) {
-    return get().createTask(
-      intent,
-      fileIds,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      'stock_dashboard',
-      context,
-    );
-  },
-
-  applyServerMessage(msg) {
-    if ('taskId' in msg && [
-      'server.task.stream', 'server.task.progress', 'server.task.terminal',
-      'server.supercar.awaiting_user', 'server.task.plan', 'server.supercar.suggestions',
-    ].includes(msg.type)) {
-      seedExecutionOrder(msg.taskId);
-      const identity = readExecutionIdentity(msg as { executionId?: unknown; executionRevision?: unknown });
-      const order = executionOrder.accept(msg.taskId, msg as { executionId?: unknown; executionRevision?: unknown }, {
-        source: 'event', terminal: msg.type === 'server.task.terminal',
-        afterTerminal: msg.type === 'server.supercar.suggestions',
-      });
-      if (order === 'reconcile') void hydrateDetail(msg.taskId);
-      if (order === 'ignore' || order === 'reconcile') return;
-      if (identity && identity !== 'invalid' && (msg.type === 'server.task.stream' || msg.type === 'server.task.terminal' || msg.type === 'server.supercar.awaiting_user')) confirmObservedExecution(msg.taskId, identity);
-      if (order === 'new' && identity && identity !== 'invalid') {
-        set(prev => ({
-          ...clearCoreRoundRuntime(prev, new Set([msg.taskId])),
-          tasks: (prev.tasks.some(t => t.taskId === msg.taskId) ? prev.tasks : [{ taskId: msg.taskId, intent: '任务', title: null, status: 'executing' as const, tickCount: 0, createdAt: new Date() }, ...prev.tasks]).map(t => t.taskId === msg.taskId ? {
-            ...t, ...identity, status: 'executing', resultText: undefined, awaitingKind: undefined,
-            planText: undefined, planStatus: undefined, verificationPassed: null, failedChecks: undefined,
-          } : t),
-        }));
+          }, 0);
+        }
+        return;
       }
-    }
-    if ('taskId' in msg && [
-      'server.vision.tick.start', 'server.vision.tick.end', 'server.vision.screencast',
-      'server.supercar.thinking', 'server.supercar.web_search',
-    ].includes(msg.type)) {
-      set(prev => {
-        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
-        return {
-          tasks: prev.tasks.map(task => task.taskId === msg.taskId
-            ? { ...task, executionMode: 'browser' as const } : task),
-          subStatusByTask: { ...prev.subStatusByTask, [msg.taskId]:
-            prev.subStatusByTask[msg.taskId]?.subStatus === 'browsing'
-              ? prev.subStatusByTask[msg.taskId]!
-              : { subStatus: 'browsing' as const, since: Date.now() } },
-        };
-      });
-    }
-    if (msg.type === 'server.error') {
-      set({
-        error: msg.message.trim() || `服务器连接错误：${msg.code}`,
-      });
-      return;
-    }
-    if (msg.type === 'server.welcome') {
-      set({ error: null });
-      return;
-    }
-    if (msg.type === 'server.task.dispatch') {
-      set((prev) => {
-        const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
-        const canRecoverPausedTask = existingTask?.status === 'paused';
-        if (isTaskRuntimeTerminal(prev, msg.taskId) && !canRecoverPausedTask) return prev;
-        const nextAwaiting = { ...prev.awaitingUserByTask };
-        delete nextAwaiting[msg.taskId];
-        const nextTerminalIds = new Set(prev.terminalTaskIds);
-        nextTerminalIds.delete(msg.taskId);
-        return {
-          awaitingUserByTask: nextAwaiting,
-          terminalTaskIds: nextTerminalIds,
-          tasks: prev.tasks.map((t) => {
-            if (t.taskId !== msg.taskId) return t;
-            if (t.status === 'paused') {
-              const { queuePosition: _queuePosition, resultText: _resultText, ...rest } = t;
+      if (msg.type === 'server.task.stream') {
+        // Phase 24 RC follow-up — append the delta to this task's
+        // streaming buffer. The render gate prefers task.resultText
+        // when set, otherwise renders the buffer.
+        //
+        // Bug 2 fix: stale-delta guard reads `terminalTaskIds`
+        // (Set membership) instead of `prev.tasks.find().status`.
+        // The previous version saw status='unknown' whenever the
+        // delta arrived before tasks.list had loaded the task into
+        // the array — guard never fired, stale post-terminal
+        // deltas resurrected cleared buffers.
+        set((prev) => {
+          const isTerminal = prev.terminalTaskIds.has(msg.taskId);
+          const bufferLen = (prev.streamingByTask[msg.taskId] ?? '').length;
+          hdDebug('stream delta', {
+            taskId: msg.taskId,
+            isTerminal,
+            bufferLen,
+            delta: msg.delta.slice(0, 20),
+            gated: isTerminal,
+          });
+          if (isTerminal) return prev;
+          return {
+            streamingByTask: {
+              ...prev.streamingByTask,
+              [msg.taskId]: (prev.streamingByTask[msg.taskId] ?? '') + msg.delta,
+            },
+            subStatusByTask: {
+              ...prev.subStatusByTask,
+              [msg.taskId]: {
+                subStatus: 'generating',
+                since:
+                  prev.subStatusByTask[msg.taskId]?.subStatus === 'generating'
+                    ? prev.subStatusByTask[msg.taskId]!.since
+                    : Date.now(),
+              },
+            },
+            // Stream deltas only come from the generate / scrape runners
+            // (browser path uses screencast, not text streaming). Stamp
+            // executionMode='generate' on first delta so the BrowserPanel
+            // closes its chrome before tasks.detail's persisted result
+            // catches up. Idempotent: only writes when the field is
+            // currently undefined / 'browser', so a real browser→generate
+            // fallback that already persisted 'generate' isn't overridden.
+            tasks: prev.tasks.map((t) =>
+              t.taskId === msg.taskId
+                ? {
+                    ...markTaskRunningFromLiveSignal(t),
+                    executionMode: 'generate' as const,
+                  }
+                : t,
+            ),
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.task.progress') {
+        // Phase 24 RC follow-up — coarse progress note (latest wins).
+        // Same stale-message guard as server.task.stream — Set
+        // membership, not tasks-array status.
+        // Codex Pack B1 — optional `subStatus` field drives the
+        // live-phase chip in TaskStream. Recorded with a client-side
+        // timestamp so the 30s+ elapsed timer can run without needing
+        // server clock alignment.
+        const subStatus = (msg as { subStatus?: string }).subStatus;
+        const typedSubStatus =
+          subStatus === 'planning' ||
+          subStatus === 'browsing' ||
+          subStatus === 'extracting' ||
+          subStatus === 'verifying' ||
+          subStatus === 'generating' ||
+          subStatus === 'generating_image'
+            ? subStatus
+            : null;
+        set((prev) => {
+          const isTerminal = prev.terminalTaskIds.has(msg.taskId);
+          hdDebug('progress', {
+            taskId: msg.taskId,
+            isTerminal,
+            message: msg.message,
+            subStatus: typedSubStatus,
+            gated: isTerminal,
+          });
+          if (isTerminal) return prev;
+          // Explicit type annotation: the two branches of the inner
+          // ternary produce slightly different object literal types,
+          // and without this hint TS widens `nextSubStatus` to a union
+          // that no longer matches `TaskStore['subStatusByTask']` —
+          // causing the zustand `set` callback to reject the return
+          // shape (C2 TS regression repro on Pack B1 land).
+          const previousSubStatus = prev.subStatusByTask[msg.taskId];
+          const nextSubStatus: TaskStore['subStatusByTask'] = typedSubStatus
+            ? {
+                ...prev.subStatusByTask,
+                [msg.taskId]:
+                  // Reuse `since` if the chip was already up — gives a
+                  // continuous timer across phase transitions instead of
+                  // resetting to 0 every time the runner advances.
+                  previousSubStatus
+                    ? { subStatus: typedSubStatus, since: previousSubStatus.since }
+                    : { subStatus: typedSubStatus, since: Date.now() },
+              }
+            : prev.subStatusByTask;
+          return {
+            progressByTask: {
+              ...prev.progressByTask,
+              [msg.taskId]: msg.message,
+            },
+            subStatusByTask: nextSubStatus,
+            // Progress phases are shared by browser and generate lanes:
+            // browser runs emit planning → browsing → verifying. Never
+            // overwrite an execution mode that was already decided by
+            // tasks.create or task hydration. For legacy rows with no mode,
+            // only the lane-specific phases are strong enough to infer one.
+            tasks: prev.tasks.map((t) => {
+              if (t.taskId !== msg.taskId) return t;
+              const liveTask = markTaskRunningFromLiveSignal(t);
+              if (liveTask.executionMode) return liveTask;
+              if (typedSubStatus === 'browsing') {
+                return { ...liveTask, executionMode: 'browser' as const };
+              }
+              if (typedSubStatus === 'generating_image') {
+                return { ...liveTask, executionMode: 'image' as const };
+              }
+              if (typedSubStatus === 'generating') {
+                return { ...liveTask, executionMode: 'generate' as const };
+              }
+              return liveTask;
+            }),
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.task.queued') {
+        set((prev) => ({
+          tasks: prev.tasks.map((t) =>
+            t.taskId === msg.taskId && !isTaskRuntimeTerminal(prev, msg.taskId)
+              ? { ...t, status: 'queued' as const, queuePosition: msg.position }
+              : t,
+          ),
+        }));
+        return;
+      }
+      if (msg.type === 'server.task.plan') {
+        // Phase 13 Dim 1 — first-frame plan arrival. Stash on the
+        // matching task; the TaskStream renders <PlanCard> when this
+        // is set. Idempotent: a reconnected WS replay just overwrites
+        // with the same body.
+        set((prev) => {
+          if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+          return {
+            tasks: prev.tasks.map((t) =>
+              t.taskId === msg.taskId
+                ? { ...t, planText: msg.planText, planStatus: msg.planStatus }
+                : t,
+            ),
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.task.plan_step') {
+        // Phase 13 Dim 1 follow-up — incremental status update.
+        // Replace the planStatus array wholesale; the orchestrator
+        // sends the whole snapshot so the SPA doesn't merge diffs.
+        set((prev) => {
+          if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+          return {
+            tasks: prev.tasks.map((t) =>
+              t.taskId === msg.taskId ? { ...t, planStatus: msg.planStatus } : t,
+            ),
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.vision.tick.start') {
+        set((prev) => {
+          if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+          const existing = prev.stepsByTask[msg.taskId] ?? [];
+          // Idempotent: a reconnected WS may replay a recent tick. If
+          // we already have the step, leave it alone.
+          if (existing.some((s) => s.tickIndex === msg.tickIndex)) return prev;
+          const next: UiStep = {
+            tickIndex: msg.tickIndex,
+            status: 'running',
+            startedAt: Date.now(),
+          };
+          return {
+            stepsByTask: { ...prev.stepsByTask, [msg.taskId]: [...existing, next] },
+            tasks: prev.tasks.map((t) => {
+              if (t.taskId !== msg.taskId) return t;
+              const { queuePosition: _queuePosition, ...rest } = t;
               void _queuePosition;
-              void _resultText;
               return {
                 ...rest,
                 status: 'executing' as const,
+                tickCount: Math.max(t.tickCount, msg.tickIndex + 1),
               };
-            }
-            return markTaskRunningFromLiveSignal(t);
-          }),
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.task.control') {
-      set((prev) => {
-        const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
-        const isPausedRecoverableControl =
-          existingTask?.status === 'paused' &&
-          (msg.command === 'pause' || msg.command === 'resume' || msg.command === 'cancel');
-        if (isTaskRuntimeTerminal(prev, msg.taskId) && !isPausedRecoverableControl) return prev;
-        const pauseMessage =
-          msg.command === 'pause' && typeof msg.detail?.message === 'string'
-            ? msg.detail.message
-            : undefined;
-        const nextSubStatus = { ...prev.subStatusByTask };
-        delete nextSubStatus[msg.taskId];
-        const nextAwaiting = { ...prev.awaitingUserByTask };
-        delete nextAwaiting[msg.taskId];
-        const nextThinking = omitRuntimeKey(prev.thinkingByTask, msg.taskId);
-        const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
-        const nextExecutorFallback = omitRuntimeKey(
-          prev.executorFallbackByTask,
-          msg.taskId,
-        );
-        const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
-        const nextProgress =
-          msg.command === 'resume'
-            ? omitRuntimeKey(prev.progressByTask, msg.taskId)
-            : prev.progressByTask;
-        const nextStreaming =
-          msg.command === 'resume'
-            ? omitRuntimeKey(prev.streamingByTask, msg.taskId)
-            : prev.streamingByTask;
-        const nextTerminalIds = new Set(prev.terminalTaskIds);
-        if (msg.command === 'cancel' || msg.command === 'pause') nextTerminalIds.add(msg.taskId);
-        else nextTerminalIds.delete(msg.taskId);
-        const status =
-          msg.command === 'pause'
-            ? 'paused'
-            : msg.command === 'cancel'
-              ? 'cancelled'
-              : 'executing';
-        return {
-          tasks: prev.tasks.map((t) =>
-            t.taskId === msg.taskId
-              ? {
-                  ...t,
-                  status,
-                  ...(msg.command === 'resume'
-                    ? { awaitingKind: undefined, resultText: undefined }
-                    : {}),
-                  ...(pauseMessage ? { resultText: pauseMessage } : {}),
-                }
-              : t,
-          ),
-          awaitingUserByTask: nextAwaiting,
-          thinkingByTask: nextThinking,
-          subStatusByTask: nextSubStatus,
-          progressByTask: nextProgress,
-          streamingByTask: nextStreaming,
-          captchaWaitByTask: nextCaptchaWait,
-          executorFallbackByTask: nextExecutorFallback,
-          degradeByTask: nextDegrade,
-          terminalTaskIds: nextTerminalIds,
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.user.confirm') {
-      set((prev) => {
-        const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
-        const canRecoverPausedTask = existingTask?.status === 'paused';
-        if (isTaskRuntimeTerminal(prev, msg.taskId) && !canRecoverPausedTask) return prev;
-        const singleConfirm: NonNullable<UiAwaitingUser['singleConfirm']> = {
-          stepId: msg.stepId,
-          prompt: msg.prompt,
-          risk: msg.risk,
-        };
-        const nextSubStatus = { ...prev.subStatusByTask };
-        delete nextSubStatus[msg.taskId];
-        const nextThinking = omitRuntimeKey(prev.thinkingByTask, msg.taskId);
-        const nextProgress = omitRuntimeKey(prev.progressByTask, msg.taskId);
-        const nextStreaming = omitRuntimeKey(prev.streamingByTask, msg.taskId);
-        const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
-        const nextExecutorFallback = omitRuntimeKey(
-          prev.executorFallbackByTask,
-          msg.taskId,
-        );
-        const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
-        const nextTerminalIds = new Set(prev.terminalTaskIds);
-        nextTerminalIds.delete(msg.taskId);
-        return {
-          awaitingUserByTask: {
-            ...prev.awaitingUserByTask,
-            [msg.taskId]: {
-              question: singleConfirmQuestion(singleConfirm),
-              at: Date.now(),
-              awaitingKind: 'browser_action',
-              singleConfirm,
-            },
-          },
-          subStatusByTask: nextSubStatus,
-          thinkingByTask: nextThinking,
-          progressByTask: nextProgress,
-          streamingByTask: nextStreaming,
-          captchaWaitByTask: nextCaptchaWait,
-          executorFallbackByTask: nextExecutorFallback,
-          degradeByTask: nextDegrade,
-          terminalTaskIds: nextTerminalIds,
-          tasks: prev.tasks.map((t) =>
-            t.taskId === msg.taskId
-              ? (() => {
-                  const { resultText: _resultText, ...rest } = t;
-                  return {
-                    ...rest,
-                    status: 'awaiting_user' as const,
-                    awaitingKind: 'browser_action' as const,
-                  };
-                })()
-              : t,
-          ),
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.batch_confirm_required') {
-      set((prev) => {
-        const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
-        const canRecoverPausedTask = existingTask?.status === 'paused';
-        if (isTaskRuntimeTerminal(prev, msg.taskId) && !canRecoverPausedTask) return prev;
-        const batchConfirm: NonNullable<UiAwaitingUser['batchConfirm']> = {
-          stepId: msg.stepId,
-          batchIndex: msg.batchIndex,
-          batchTotal: msg.batchTotal,
-          risk: msg.risk,
-          ...(msg.summary ? { summary: msg.summary } : {}),
-          items: msg.items,
-        };
-        const nextSubStatus = { ...prev.subStatusByTask };
-        delete nextSubStatus[msg.taskId];
-        const nextThinking = omitRuntimeKey(prev.thinkingByTask, msg.taskId);
-        const nextProgress = omitRuntimeKey(prev.progressByTask, msg.taskId);
-        const nextStreaming = omitRuntimeKey(prev.streamingByTask, msg.taskId);
-        const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
-        const nextExecutorFallback = omitRuntimeKey(
-          prev.executorFallbackByTask,
-          msg.taskId,
-        );
-        const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
-        const nextTerminalIds = new Set(prev.terminalTaskIds);
-        nextTerminalIds.delete(msg.taskId);
-        return {
-          awaitingUserByTask: {
-            ...prev.awaitingUserByTask,
-            [msg.taskId]: {
-              question: batchConfirmQuestion(batchConfirm),
-              at: Date.now(),
-              awaitingKind: 'browser_action',
-              batchConfirm,
-            },
-          },
-          subStatusByTask: nextSubStatus,
-          thinkingByTask: nextThinking,
-          progressByTask: nextProgress,
-          streamingByTask: nextStreaming,
-          captchaWaitByTask: nextCaptchaWait,
-          executorFallbackByTask: nextExecutorFallback,
-          degradeByTask: nextDegrade,
-          terminalTaskIds: nextTerminalIds,
-          tasks: prev.tasks.map((t) =>
-            t.taskId === msg.taskId
-              ? (() => {
-                  const { resultText: _resultText, ...rest } = t;
-                  return {
-                    ...rest,
-                    status: 'awaiting_user' as const,
-                    awaitingKind: 'browser_action' as const,
-                  };
-                })()
-              : t,
-          ),
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.task.terminal') {
-      set((prev) => {
-        const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
-        if (
-          existingTask &&
-          isTerminalStatus(existingTask.status) &&
-          existingTask.status !== msg.status
-        ) {
-          return prev;
-        }
-        // Phase 24 RC follow-up (Bug 1 fix): DO NOT clear streaming
-        // + progress buffers here. There's a ~200ms window between
-        // terminal arrival and tasks.detail merging the canonical
-        // summary; clearing buffers in that window leaves the
-        // streaming view rendering NOTHING, perceived as
-        // "content disappeared then reappeared". The render gate in
-        // TaskStream prefers `task.resultText` over the buffer when
-        // both are present, so retaining the buffer is harmless and
-        // bridges the gap.
-        //
-        // Bug 2 fix: also add to terminalTaskIds so stale-delta
-        // guards in stream/progress handlers can check Set
-        // membership directly (instead of looking at the tasks
-        // array's status, which races with tasks.list).
-        hdDebug('terminal', {
-          taskId: msg.taskId,
-          status: msg.status,
-          prevBufferLen: (prev.streamingByTask[msg.taskId] ?? '').length,
-          hadProgress: Boolean(prev.progressByTask[msg.taskId]),
-          hasSummary: Boolean((msg as { summary?: string }).summary),
-        });
-        const nextTerminalIds = new Set(prev.terminalTaskIds);
-        nextTerminalIds.add(msg.taskId);
-        // Mark this taskId as freshly-completed so TerminalSummary's
-        // typewriter reveal plays once. Tasks loaded from history
-        // (`tasks.list` / `tasks.detail`) never enter this set, so
-        // navigating to a historical task renders the summary in full
-        // immediately — no replay on every sidebar click.
-        const nextAnimatedIds = new Set(prev.animatedTaskIds);
-        if (isTerminalStatus(msg.status)) {
-          nextAnimatedIds.add(msg.taskId);
-        } else {
-          nextAnimatedIds.delete(msg.taskId);
-        }
-        // Codex Pack B1 — clear sub-status on terminal so the chip
-        // disappears the moment a task finishes. Unlike
-        // streamingByTask / progressByTask (which we keep around to
-        // bridge the terminal → TerminalSummary handoff), the chip is
-        // a pure live-state surface — keeping it would leave "正在
-        // 操作浏览器…" hanging next to a completed result.
-        const nextSubStatus = { ...prev.subStatusByTask };
-        delete nextSubStatus[msg.taskId];
-        const nextAwaiting = { ...prev.awaitingUserByTask };
-        delete nextAwaiting[msg.taskId];
-        const nextThinking = { ...prev.thinkingByTask };
-        delete nextThinking[msg.taskId];
-        const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
-        const nextExecutorFallback = omitRuntimeKey(
-          prev.executorFallbackByTask,
-          msg.taskId,
-        );
-        const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
-        // Codex Round 2 P1-6 — terminal frame may carry the verifier
-        // verdict's failed-check list so the SPA banner can render
-        // specific bullets. Stamp onto the task; null clears prior
-        // values if a re-broadcast comes back clean.
-        const incomingFailedChecks =
-          (msg as { failedChecks?: Array<{ type: string; detail: string }> })
-            .failedChecks ?? null;
-        // P1 timing fix — the image lane now ships attachments[] ON the
-        // terminal frame (see orchestrator tasks.ts + ws.ts). Stamp them
-        // onto the task immediately so the image card renders WITH the
-        // "已生成1张图片" summary, instead of arriving one tasks.detail
-        // round-trip later (the gap the user reported as 文字先出图后到).
-        const incomingAttachments = parseUiAttachments(
-          (msg as { attachments?: unknown }).attachments,
-        );
-        const incomingVerificationPassed =
-          typeof msg.verificationPassed === 'boolean' ? msg.verificationPassed : null;
-        return {
-          tasks: prev.tasks.map((t) =>
-            t.taskId === msg.taskId
-              ? {
-                  ...t,
-                  status: msg.status,
-                  ...(msg.summary ? { resultText: msg.summary } : {}),
-                  ...(msg.reason ? { resultText: humaniseTaskError(msg.reason) } : {}),
-                  ...(incomingFailedChecks !== null
-                    ? { failedChecks: incomingFailedChecks }
-                    : {}),
-                  ...(incomingAttachments ? { attachments: incomingAttachments } : {}),
-                  ...(incomingVerificationPassed !== null
-                    ? { verificationPassed: incomingVerificationPassed }
-                    : {}),
-                }
-              : t,
-          ),
-          terminalTaskIds: nextTerminalIds,
-          animatedTaskIds: nextAnimatedIds,
-          awaitingUserByTask: nextAwaiting,
-          thinkingByTask: nextThinking,
-          subStatusByTask: nextSubStatus,
-          captchaWaitByTask: nextCaptchaWait,
-          executorFallbackByTask: nextExecutorFallback,
-          degradeByTask: nextDegrade,
-          // streamingByTask + progressByTask unchanged; buffers
-          // persist until resultText is rendered in their place.
-        };
-      });
-      // F4 — backend-orchestrated handoff. When the reply handler on
-      // the orchestrator spawns a follow-up task (intake clarification
-      // revealed a need for the browser lane), it ships the new task's
-      // id on the terminal frame. The SPA's only job: navigate the
-      // selection to that task — the new row + its supercar dispatch
-      // are already running server-side. Earlier flow had the SPA
-      // fire createTask off the terminal which double-created on WS
-      // replay; this version is idempotent because the backend uses
-      // `result.handoffTaskId` as its dedup key.
-      const handoffTaskId = (msg as { handoffTaskId?: string }).handoffTaskId;
-      if (typeof handoffTaskId === 'string' && handoffTaskId.length > 0) {
-        setTimeout(() => {
-          try {
-            get().selectTask(handoffTaskId, 'ui');
-          } catch (err) {
-            hdDebug('handoff selectTask failed', {
-              err: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }, 0);
-      }
-      return;
-    }
-    if (msg.type === 'server.task.stream') {
-      // Phase 24 RC follow-up — append the delta to this task's
-      // streaming buffer. The render gate prefers task.resultText
-      // when set, otherwise renders the buffer.
-      //
-      // Bug 2 fix: stale-delta guard reads `terminalTaskIds`
-      // (Set membership) instead of `prev.tasks.find().status`.
-      // The previous version saw status='unknown' whenever the
-      // delta arrived before tasks.list had loaded the task into
-      // the array — guard never fired, stale post-terminal
-      // deltas resurrected cleared buffers.
-      set((prev) => {
-        const isTerminal = prev.terminalTaskIds.has(msg.taskId);
-        const bufferLen = (prev.streamingByTask[msg.taskId] ?? '').length;
-        hdDebug('stream delta', {
-          taskId: msg.taskId,
-          isTerminal,
-          bufferLen,
-          delta: msg.delta.slice(0, 20),
-          gated: isTerminal,
-        });
-        if (isTerminal) return prev;
-        return {
-          streamingByTask: {
-            ...prev.streamingByTask,
-            [msg.taskId]: (prev.streamingByTask[msg.taskId] ?? '') + msg.delta,
-          },
-          subStatusByTask: { ...prev.subStatusByTask, [msg.taskId]: {
-            subStatus: 'generating',
-            since: prev.subStatusByTask[msg.taskId]?.subStatus === 'generating'
-              ? prev.subStatusByTask[msg.taskId]!.since : Date.now(),
-          } },
-          // Stream deltas only come from the generate / scrape runners
-          // (browser path uses screencast, not text streaming). Stamp
-          // executionMode='generate' on first delta so the BrowserPanel
-          // closes its chrome before tasks.detail's persisted result
-          // catches up. Idempotent: only writes when the field is
-          // currently undefined / 'browser', so a real browser→generate
-          // fallback that already persisted 'generate' isn't overridden.
-          tasks: prev.tasks.map((t) =>
-            t.taskId === msg.taskId
-              ? {
-                  ...markTaskRunningFromLiveSignal(t),
-                  executionMode: 'generate' as const,
-                }
-              : t,
-          ),
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.task.progress') {
-      // Phase 24 RC follow-up — coarse progress note (latest wins).
-      // Same stale-message guard as server.task.stream — Set
-      // membership, not tasks-array status.
-      // Codex Pack B1 — optional `subStatus` field drives the
-      // live-phase chip in TaskStream. Recorded with a client-side
-      // timestamp so the 30s+ elapsed timer can run without needing
-      // server clock alignment.
-      const subStatus = (msg as { subStatus?: string }).subStatus;
-      const typedSubStatus =
-        subStatus === 'planning' ||
-        subStatus === 'browsing' ||
-        subStatus === 'extracting' ||
-        subStatus === 'verifying' ||
-        subStatus === 'generating' ||
-        subStatus === 'generating_image'
-          ? subStatus
-          : null;
-      set((prev) => {
-        const isTerminal = prev.terminalTaskIds.has(msg.taskId);
-        hdDebug('progress', {
-          taskId: msg.taskId,
-          isTerminal,
-          message: msg.message,
-          subStatus: typedSubStatus,
-          gated: isTerminal,
-        });
-        if (isTerminal) return prev;
-        // Explicit type annotation: the two branches of the inner
-        // ternary produce slightly different object literal types,
-        // and without this hint TS widens `nextSubStatus` to a union
-        // that no longer matches `TaskStore['subStatusByTask']` —
-        // causing the zustand `set` callback to reject the return
-        // shape (C2 TS regression repro on Pack B1 land).
-        const previousSubStatus = prev.subStatusByTask[msg.taskId];
-        const nextSubStatus: TaskStore['subStatusByTask'] = typedSubStatus
-          ? {
-              ...prev.subStatusByTask,
-              [msg.taskId]:
-                // Reuse `since` if the chip was already up — gives a
-                // continuous timer across phase transitions instead of
-                // resetting to 0 every time the runner advances.
-                previousSubStatus
-                  ? { subStatus: typedSubStatus, since: previousSubStatus.since }
-                  : { subStatus: typedSubStatus, since: Date.now() },
-            }
-          : prev.subStatusByTask;
-        return {
-          progressByTask: {
-            ...prev.progressByTask,
-            [msg.taskId]: msg.message,
-          },
-          subStatusByTask: nextSubStatus,
-          // Progress phases are shared by browser and generate lanes:
-          // browser runs emit planning → browsing → verifying. Never
-          // overwrite an execution mode that was already decided by
-          // tasks.create or task hydration. For legacy rows with no mode,
-          // only the lane-specific phases are strong enough to infer one.
-          tasks: prev.tasks.map((t) => {
-            if (t.taskId !== msg.taskId) return t;
-            const liveTask = markTaskRunningFromLiveSignal(t);
-            if (liveTask.executionMode) return liveTask;
-            if (typedSubStatus === 'browsing') {
-              return { ...liveTask, executionMode: 'browser' as const };
-            }
-            if (typedSubStatus === 'generating_image') {
-              return { ...liveTask, executionMode: 'image' as const };
-            }
-            if (typedSubStatus === 'generating') {
-              return { ...liveTask, executionMode: 'generate' as const };
-            }
-            return liveTask;
-          }),
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.task.queued') {
-      set((prev) => ({
-        tasks: prev.tasks.map((t) =>
-          t.taskId === msg.taskId && !isTaskRuntimeTerminal(prev, msg.taskId)
-            ? { ...t, status: 'queued' as const, queuePosition: msg.position }
-            : t,
-        ),
-      }));
-      return;
-    }
-    if (msg.type === 'server.task.plan') {
-      // Phase 13 Dim 1 — first-frame plan arrival. Stash on the
-      // matching task; the TaskStream renders <PlanCard> when this
-      // is set. Idempotent: a reconnected WS replay just overwrites
-      // with the same body.
-      set((prev) => {
-        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
-        return {
-          tasks: prev.tasks.map((t) =>
-            t.taskId === msg.taskId
-              ? { ...t, planText: msg.planText, planStatus: msg.planStatus }
-              : t,
-          ),
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.task.plan_step') {
-      // Phase 13 Dim 1 follow-up — incremental status update.
-      // Replace the planStatus array wholesale; the orchestrator
-      // sends the whole snapshot so the SPA doesn't merge diffs.
-      set((prev) => {
-        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
-        return {
-          tasks: prev.tasks.map((t) =>
-            t.taskId === msg.taskId ? { ...t, planStatus: msg.planStatus } : t,
-          ),
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.vision.tick.start') {
-      set((prev) => {
-        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
-        const existing = prev.stepsByTask[msg.taskId] ?? [];
-        // Idempotent: a reconnected WS may replay a recent tick. If
-        // we already have the step, leave it alone.
-        if (existing.some((s) => s.tickIndex === msg.tickIndex)) return prev;
-        const next: UiStep = {
-          tickIndex: msg.tickIndex,
-          status: 'running',
-          startedAt: Date.now(),
-        };
-        return {
-          stepsByTask: { ...prev.stepsByTask, [msg.taskId]: [...existing, next] },
-          tasks: prev.tasks.map((t) => {
-            if (t.taskId !== msg.taskId) return t;
-            const { queuePosition: _queuePosition, ...rest } = t;
-            void _queuePosition;
-            return {
-              ...rest,
-              status: 'executing' as const,
-              tickCount: Math.max(t.tickCount, msg.tickIndex + 1),
-            };
-          }),
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.vision.tick.end') {
-      // Layer 3: forward the anti-bot tag into the UI step. When the
-      // orchestrator flagged this tick as captcha / verify / block /
-      // cloudflare, StepCard renders an orange warning badge instead
-      // of plain success/failure colors.
-      const antiBotTag = msg.antiBot
-        ? {
-            type: msg.antiBot.type,
-            confidence: msg.antiBot.confidence,
-            message: msg.antiBot.message,
-          }
-        : undefined;
-      set((prev) => {
-        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
-        const existing = prev.stepsByTask[msg.taskId] ?? [];
-        let matched = false;
-        const updated = existing.map((s) => {
-          if (s.tickIndex !== msg.tickIndex) return s;
-          matched = true;
-          return {
-            ...s,
-            status: msg.ok ? ('done' as const) : ('failed' as const),
-            actionKind: msg.actionKind,
-            actionSummary: msg.actionSummary,
-            durationMs: msg.durationMs,
-            ...(msg.message ? { message: msg.message } : {}),
-            ...(antiBotTag ? { antiBot: antiBotTag } : {}),
+            }),
           };
         });
-        // Missed tick.start (e.g. reconnected mid-task): synthesise
-        // the step from the end frame so nothing's dropped.
-        const finalList = matched
-          ? updated
-          : [
-              ...existing,
-              {
+        return;
+      }
+      if (msg.type === 'server.vision.tick.end') {
+        // Layer 3: forward the anti-bot tag into the UI step. When the
+        // orchestrator flagged this tick as captcha / verify / block /
+        // cloudflare, StepCard renders an orange warning badge instead
+        // of plain success/failure colors.
+        const antiBotTag = msg.antiBot
+          ? {
+              type: msg.antiBot.type,
+              confidence: msg.antiBot.confidence,
+              message: msg.antiBot.message,
+            }
+          : undefined;
+        set((prev) => {
+          if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+          const existing = prev.stepsByTask[msg.taskId] ?? [];
+          let matched = false;
+          const updated = existing.map((s) => {
+            if (s.tickIndex !== msg.tickIndex) return s;
+            matched = true;
+            return {
+              ...s,
+              status: msg.ok ? ('done' as const) : ('failed' as const),
+              actionKind: msg.actionKind,
+              actionSummary: msg.actionSummary,
+              durationMs: msg.durationMs,
+              ...(msg.message ? { message: msg.message } : {}),
+              ...(antiBotTag ? { antiBot: antiBotTag } : {}),
+            };
+          });
+          // Missed tick.start (e.g. reconnected mid-task): synthesise
+          // the step from the end frame so nothing's dropped.
+          const finalList = matched
+            ? updated
+            : [
+                ...existing,
+                {
+                  tickIndex: msg.tickIndex,
+                  status: msg.ok ? ('done' as const) : ('failed' as const),
+                  actionKind: msg.actionKind,
+                  actionSummary: msg.actionSummary,
+                  durationMs: msg.durationMs,
+                  ...(msg.message ? { message: msg.message } : {}),
+                  ...(antiBotTag ? { antiBot: antiBotTag } : {}),
+                  startedAt: Date.now() - msg.durationMs,
+                } satisfies UiStep,
+              ];
+          finalList.sort((a, b) => a.tickIndex - b.tickIndex);
+          return {
+            stepsByTask: { ...prev.stepsByTask, [msg.taskId]: finalList },
+            tasks: prev.tasks.map((t) =>
+              t.taskId === msg.taskId
+                ? { ...t, tickCount: Math.max(t.tickCount, msg.tickIndex + 1) }
+                : t,
+            ),
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.vision.captcha_detected') {
+        const startedAt = Date.now();
+        set((prev) => {
+          if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+          return {
+            captchaWaitByTask: {
+              ...prev.captchaWaitByTask,
+              [msg.taskId]: {
+                antiBotType: msg.antiBotType,
+                message: msg.message,
+                startedAt,
+                deadlineMs: startedAt + msg.waitTimeoutMs,
+              },
+            },
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.vision.captcha_resolved') {
+        set((prev) => {
+          const next = { ...prev.captchaWaitByTask };
+          delete next[msg.taskId];
+          return { captchaWaitByTask: next };
+        });
+        return;
+      }
+      if (msg.type === 'server.vision.degrade') {
+        set((prev) => {
+          if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+          return {
+            degradeByTask: {
+              ...prev.degradeByTask,
+              [msg.taskId]: {
+                level: msg.level,
+                strategy: msg.strategy,
+                ok: msg.ok,
+                message: msg.message,
+                ...(msg.handoffToExtension ? { handoffToExtension: true } : {}),
+                ...(msg.nextUrl ? { nextUrl: msg.nextUrl } : {}),
+                at: Date.now(),
+              },
+            },
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.vision.executor_fallback') {
+        set((prev) => {
+          if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+          return {
+            executorFallbackByTask: {
+              ...prev.executorFallbackByTask,
+              [msg.taskId]: { available: msg.available, at: Date.now() },
+            },
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.vision.screencast') {
+        set((prev) => {
+          if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+          return {
+            screencastByTask: {
+              ...prev.screencastByTask,
+              [msg.taskId]: {
                 tickIndex: msg.tickIndex,
-                status: msg.ok ? ('done' as const) : ('failed' as const),
-                actionKind: msg.actionKind,
-                actionSummary: msg.actionSummary,
-                durationMs: msg.durationMs,
-                ...(msg.message ? { message: msg.message } : {}),
-                ...(antiBotTag ? { antiBot: antiBotTag } : {}),
-                startedAt: Date.now() - msg.durationMs,
-              } satisfies UiStep,
-            ];
-        finalList.sort((a, b) => a.tickIndex - b.tickIndex);
-        return {
-          stepsByTask: { ...prev.stepsByTask, [msg.taskId]: finalList },
-          tasks: prev.tasks.map((t) =>
-            t.taskId === msg.taskId ? { ...t, tickCount: Math.max(t.tickCount, msg.tickIndex + 1) } : t,
-          ),
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.vision.captcha_detected') {
-      const startedAt = Date.now();
-      set((prev) => {
-        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
-        return {
-          captchaWaitByTask: {
-            ...prev.captchaWaitByTask,
-            [msg.taskId]: {
-              antiBotType: msg.antiBotType,
-              message: msg.message,
-              startedAt,
-              deadlineMs: startedAt + msg.waitTimeoutMs,
+                imageBase64: msg.imageBase64,
+                url: msg.url,
+                viewport: msg.viewport,
+                timestamp: msg.timestamp,
+              },
             },
-          },
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.vision.captcha_resolved') {
-      set((prev) => {
-        const next = { ...prev.captchaWaitByTask };
-        delete next[msg.taskId];
-        return { captchaWaitByTask: next };
-      });
-      return;
-    }
-    if (msg.type === 'server.vision.degrade') {
-      set((prev) => {
-        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
-        return {
-          degradeByTask: {
-            ...prev.degradeByTask,
-            [msg.taskId]: {
-              level: msg.level,
-              strategy: msg.strategy,
-              ok: msg.ok,
-              message: msg.message,
-              ...(msg.handoffToExtension ? { handoffToExtension: true } : {}),
-              ...(msg.nextUrl ? { nextUrl: msg.nextUrl } : {}),
-              at: Date.now(),
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.supercar.awaiting_user') {
+        const awaitingKind = msg.awaitingKind;
+        set((prev) => {
+          const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
+          const canRecoverPausedTask = existingTask?.status === 'paused';
+          if (isTaskRuntimeTerminal(prev, msg.taskId) && !canRecoverPausedTask) return prev;
+          const nextSubStatus = { ...prev.subStatusByTask };
+          delete nextSubStatus[msg.taskId];
+          const nextThinking = omitRuntimeKey(prev.thinkingByTask, msg.taskId);
+          const nextProgress = omitRuntimeKey(prev.progressByTask, msg.taskId);
+          const nextStreaming = omitRuntimeKey(prev.streamingByTask, msg.taskId);
+          const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
+          const nextExecutorFallback = omitRuntimeKey(prev.executorFallbackByTask, msg.taskId);
+          const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
+          const nextTerminalIds = new Set(prev.terminalTaskIds);
+          nextTerminalIds.delete(msg.taskId);
+          return {
+            awaitingUserByTask: {
+              ...prev.awaitingUserByTask,
+              [msg.taskId]: {
+                question: msg.question,
+                at: Date.now(),
+                ...(awaitingKind ? { awaitingKind } : {}),
+                ...(msg.browserConnection ? { browserConnection: msg.browserConnection } : {}),
+              },
             },
-          },
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.vision.executor_fallback') {
-      set((prev) => {
-        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
-        return {
-          executorFallbackByTask: {
-            ...prev.executorFallbackByTask,
-            [msg.taskId]: { available: msg.available, at: Date.now() },
-          },
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.vision.screencast') {
-      set((prev) => {
-        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
-        return {
-          screencastByTask: {
-            ...prev.screencastByTask,
-            [msg.taskId]: {
-              tickIndex: msg.tickIndex,
-              imageBase64: msg.imageBase64,
-              url: msg.url,
-              viewport: msg.viewport,
-              timestamp: msg.timestamp,
+            subStatusByTask: nextSubStatus,
+            thinkingByTask: nextThinking,
+            progressByTask: nextProgress,
+            streamingByTask: nextStreaming,
+            captchaWaitByTask: nextCaptchaWait,
+            executorFallbackByTask: nextExecutorFallback,
+            degradeByTask: nextDegrade,
+            terminalTaskIds: nextTerminalIds,
+            // P2-A — also mirror onto the task row so a refresh that
+            // re-loads via tasks.detail still has the right kind even if
+            // the WS event arrived first and tasks.detail's hydrate has
+            // not yet fired. Also flip the row status immediately: the
+            // awaiting card is now the authoritative lifecycle surface and
+            // must suppress stale "executing / browsing" UI until the next
+            // list refresh catches up.
+            tasks: prev.tasks.map((t) =>
+              t.taskId === msg.taskId
+                ? (() => {
+                    const { resultText: _resultText, ...rest } = t;
+                    return {
+                      ...rest,
+                      status: 'awaiting_user' as const,
+                      ...(awaitingKind ? { awaitingKind } : {}),
+                    };
+                  })()
+                : t,
+            ),
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.supercar.web_search') {
+        set((prev) => {
+          if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+          return {
+            webSearchByTask: {
+              ...prev.webSearchByTask,
+              [msg.taskId]: {
+                iteration: msg.iteration,
+                query: msg.query,
+                at: Date.now(),
+                ...(msg.sources && msg.sources.length > 0 ? { sources: msg.sources } : {}),
+              },
             },
-          },
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.supercar.awaiting_user') {
-      const awaitingKind = msg.awaitingKind;
-      set((prev) => {
-        const existingTask = prev.tasks.find((task) => task.taskId === msg.taskId);
-        const canRecoverPausedTask = existingTask?.status === 'paused';
-        if (isTaskRuntimeTerminal(prev, msg.taskId) && !canRecoverPausedTask) return prev;
-        const nextSubStatus = { ...prev.subStatusByTask };
-        delete nextSubStatus[msg.taskId];
-        const nextThinking = omitRuntimeKey(prev.thinkingByTask, msg.taskId);
-        const nextProgress = omitRuntimeKey(prev.progressByTask, msg.taskId);
-        const nextStreaming = omitRuntimeKey(prev.streamingByTask, msg.taskId);
-        const nextCaptchaWait = omitRuntimeKey(prev.captchaWaitByTask, msg.taskId);
-        const nextExecutorFallback = omitRuntimeKey(
-          prev.executorFallbackByTask,
-          msg.taskId,
-        );
-        const nextDegrade = omitRuntimeKey(prev.degradeByTask, msg.taskId);
-        const nextTerminalIds = new Set(prev.terminalTaskIds);
-        nextTerminalIds.delete(msg.taskId);
-        return {
-          awaitingUserByTask: {
-            ...prev.awaitingUserByTask,
-            [msg.taskId]: {
-              question: msg.question,
-              at: Date.now(),
-              ...(awaitingKind ? { awaitingKind } : {}),
-              ...(msg.browserConnection ? { browserConnection: msg.browserConnection } : {}),
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.supercar.thinking') {
+        set((prev) => {
+          if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
+          return {
+            thinkingByTask: {
+              ...prev.thinkingByTask,
+              [msg.taskId]: { summary: msg.summary, at: Date.now() },
             },
+          };
+        });
+        return;
+      }
+      if (msg.type === 'server.supercar.suggestions') {
+        set((prev) => ({
+          suggestionsByTask: {
+            ...prev.suggestionsByTask,
+            [msg.taskId]: msg.suggestions,
           },
-          subStatusByTask: nextSubStatus,
-          thinkingByTask: nextThinking,
-          progressByTask: nextProgress,
-          streamingByTask: nextStreaming,
-          captchaWaitByTask: nextCaptchaWait,
-          executorFallbackByTask: nextExecutorFallback,
-          degradeByTask: nextDegrade,
-          terminalTaskIds: nextTerminalIds,
-          // P2-A — also mirror onto the task row so a refresh that
-          // re-loads via tasks.detail still has the right kind even if
-          // the WS event arrived first and tasks.detail's hydrate has
-          // not yet fired. Also flip the row status immediately: the
-          // awaiting card is now the authoritative lifecycle surface and
-          // must suppress stale "executing / browsing" UI until the next
-          // list refresh catches up.
-          tasks: prev.tasks.map((t) =>
-            t.taskId === msg.taskId
-              ? (() => {
-                  const { resultText: _resultText, ...rest } = t;
-                  return {
-                    ...rest,
-                    status: 'awaiting_user' as const,
-                    ...(awaitingKind ? { awaitingKind } : {}),
-                  };
-                })()
-              : t,
-          ),
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.supercar.web_search') {
-      set((prev) => {
-        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
-        return {
-          webSearchByTask: {
-            ...prev.webSearchByTask,
-            [msg.taskId]: {
-              iteration: msg.iteration,
-              query: msg.query,
-              at: Date.now(),
-              ...(msg.sources && msg.sources.length > 0 ? { sources: msg.sources } : {}),
-            },
-          },
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.supercar.thinking') {
-      set((prev) => {
-        if (isTaskRuntimeTerminal(prev, msg.taskId)) return prev;
-        return {
-          thinkingByTask: {
-            ...prev.thinkingByTask,
-            [msg.taskId]: { summary: msg.summary, at: Date.now() },
-          },
-        };
-      });
-      return;
-    }
-    if (msg.type === 'server.supercar.suggestions') {
-      set((prev) => ({
-        suggestionsByTask: {
-          ...prev.suggestionsByTask,
-          [msg.taskId]: msg.suggestions,
-        },
-      }));
-      return;
-    }
-    // Other frames (vision.observe / vision.act / ...)
-    // aren't UI-relevant yet; silently ignore.
-  },
+        }));
+        return;
+      }
+      // Other frames (vision.observe / vision.act / ...)
+      // aren't UI-relevant yet; silently ignore.
+    },
 
-  reset() {
-    sessionGeneration += 1;
-    executionOrder.clear();
-    uncertainReplies.clear();
-    observedExecutions.clear();
-    uncertainCreations.clear();
-    publicCloudEligible.clear();
-    publicCloudFlights.clear();
-    pendingReplies.clear();
-    failedLocalReplies.clear();
-    abortInFlightHydrate();
-    set({
-      localChromeSelection: null,
-      browserPreference: null,
-      tasks: [],
-      selectedTaskId: null,
-      loading: false,
-      error: null,
-      tasksCursor: null,
-      tasksHasMore: false,
-      tasksVisiblePageLimitReached: false,
-      loadingMore: false,
-      stepsByTask: {},
-      screencastByTask: {},
-      captchaWaitByTask: {},
-      executorFallbackByTask: {},
-      degradeByTask: {},
-      awaitingUserByTask: {},
-      publicCloudContinuationByTask: {},
-      userRepliesByTask: {},
-      webSearchByTask: {},
-      thinkingByTask: {},
-      suggestionsByTask: {},
-      streamingByTask: {},
-      progressByTask: {},
-      subStatusByTask: {},
-      terminalTaskIds: new Set<string>(),
-      animatedTaskIds: new Set<string>(),
-      defaultViewportProfile: null,
-    });
-  },
+    reset() {
+      sessionGeneration += 1;
+      executionOrder.clear();
+      uncertainReplies.clear();
+      observedExecutions.clear();
+      uncertainCreations.clear();
+      publicCloudEligible.clear();
+      publicCloudFlights.clear();
+      pendingReplies.clear();
+      failedLocalReplies.clear();
+      abortInFlightHydrate();
+      set({
+        localChromeSelection: null,
+        browserPreference: null,
+        tasks: [],
+        selectedTaskId: null,
+        loading: false,
+        error: null,
+        tasksCursor: null,
+        tasksHasMore: false,
+        tasksVisiblePageLimitReached: false,
+        loadingMore: false,
+        stepsByTask: {},
+        screencastByTask: {},
+        captchaWaitByTask: {},
+        executorFallbackByTask: {},
+        degradeByTask: {},
+        awaitingUserByTask: {},
+        publicCloudContinuationByTask: {},
+        userRepliesByTask: {},
+        webSearchByTask: {},
+        thinkingByTask: {},
+        suggestionsByTask: {},
+        streamingByTask: {},
+        progressByTask: {},
+        subStatusByTask: {},
+        terminalTaskIds: new Set<string>(),
+        animatedTaskIds: new Set<string>(),
+        defaultViewportProfile: null,
+      });
+    },
   };
 });
 
@@ -2874,9 +3054,7 @@ function stripInternalResultMetadata(input: string): string {
   return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-function extractFailedChecks(
-  result: unknown,
-): Array<{ type: string; detail: string }> | null {
+function extractFailedChecks(result: unknown): Array<{ type: string; detail: string }> | null {
   if (!result || typeof result !== 'object') return null;
   const raw = (result as Record<string, unknown>).failedChecks;
   if (!Array.isArray(raw)) return null;
@@ -2902,9 +3080,7 @@ function displayResultTextForStatus(
 ): string | null {
   const raw = resultText || fallbackErrorText;
   if (!raw) return null;
-  return status === 'failed' || status === 'cancelled'
-    ? humaniseTaskError(raw)
-    : raw;
+  return status === 'failed' || status === 'cancelled' ? humaniseTaskError(raw) : raw;
 }
 
 /**
@@ -2951,9 +3127,7 @@ const BROWSER_ACTION_RE =
   /打开|登录|登陆|扫码|扫一扫|进入(?:后台|页面|网站)|读取(?:页面|后台)|提交(?:表单|申请)|帮我点|帮我操作|\bopen\s+(?:the\s+)?(?:browser|page|site|url|tab)|\b(?:log|sign)\s*in\b|\bnavigate\s+to\b|\bgo\s+to\s+https?:/iu;
 const BROWSER_SITE_RE =
   /抖店|罗盘|公众号|小红书|淘宝|京东|拼多多|抖音|微信|支付宝|美团|大众点评|jinritemai|taobao|jd\.com|tmall|pinduoduo|xiaohongshu|douyin|weixin|alipay|meituan/iu;
-function inferExecutionModeFromIntent(
-  intent: string,
-): UiTask['executionMode'] {
+function inferExecutionModeFromIntent(intent: string): UiTask['executionMode'] {
   const t = intent.toLowerCase();
   if (/生成一张图片|生成.*图片|图片生成|图生图|图片编辑/u.test(intent)) {
     return 'image';
@@ -2974,14 +3148,13 @@ function extractBrowserConnection(result: unknown): UiAwaitingUser['browserConne
   return parsed.success ? parsed.data : null;
 }
 
-function extractExecutionMode(
-  result: unknown,
-): UiTask['executionMode'] | undefined {
+function extractExecutionMode(result: unknown): UiTask['executionMode'] | undefined {
   if (!result || typeof result !== 'object') return undefined;
   const r = result as Record<string, unknown>;
   // Core requirements only belong to the non-browser generation state machine.
   // Keep the actual lane after a refresh even when settlement has no legacy metadata.
-  if (isTaskListRecord(r.coreRequirements) && r.coreRequirements.schemaVersion === 1) return 'generate';
+  if (isTaskListRecord(r.coreRequirements) && r.coreRequirements.schemaVersion === 1)
+    return 'generate';
   const direct = r.executionMode;
   if (direct === 'browser' || direct === 'generate' || direct === 'scrape' || direct === 'image') {
     return direct;
@@ -3007,9 +3180,7 @@ export function normalizeTaskListRows(value: unknown): UiTask[] {
 }
 
 export function normalizeTaskListCursor(value: unknown): number | null {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
-    ? value
-    : null;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 export function normalizeTaskDetailSteps(value: unknown, now = Date.now()): UiStep[] {
@@ -3021,8 +3192,7 @@ export function normalizeTaskDetailSteps(value: unknown, now = Date.now()): UiSt
     const kind = safeTaskListText(entry.kind) || 'step';
     const summary = safeTaskListText(input.summary) || kind;
     const startedAtValue = safeTaskListDate(entry.startedAt);
-    const startedAt =
-      startedAtValue == null ? now : new Date(startedAtValue).getTime();
+    const startedAt = startedAtValue == null ? now : new Date(startedAtValue).getTime();
     const durationMs =
       typeof output.durationMs === 'number' && Number.isFinite(output.durationMs)
         ? Math.max(0, output.durationMs)
@@ -3032,9 +3202,7 @@ export function normalizeTaskDetailSteps(value: unknown, now = Date.now()): UiSt
     return [
       {
         tickIndex:
-          typeof entry.seq === 'number' && Number.isSafeInteger(entry.seq)
-            ? entry.seq
-            : idx,
+          typeof entry.seq === 'number' && Number.isSafeInteger(entry.seq) ? entry.seq : idx,
         status: normaliseDetailStepStatus(safeTaskListText(entry.status)),
         actionKind: kind,
         actionSummary: summary,
@@ -3052,9 +3220,7 @@ function normalizeTaskPlanStatus(value: unknown): UiTask['planStatus'] | undefin
   type PlanStatusEntry = NonNullable<UiTask['planStatus']>[number];
   const cleaned: PlanStatusEntry[] = value.flatMap((entry) => {
     if (!isTaskListRecord(entry)) return [];
-    const idx = typeof entry.idx === 'number' && Number.isSafeInteger(entry.idx)
-      ? entry.idx
-      : null;
+    const idx = typeof entry.idx === 'number' && Number.isSafeInteger(entry.idx) ? entry.idx : null;
     const status: PlanStatusEntry['status'] | null =
       entry.status === 'pending' ||
       entry.status === 'running' ||
@@ -3110,20 +3276,18 @@ function normalizeStepAntiBot(value: unknown): UiStep['antiBot'] | undefined {
       ? value.type
       : null;
   const confidence =
-    value.confidence === 'high' || value.confidence === 'medium'
-      ? value.confidence
-      : null;
+    value.confidence === 'high' || value.confidence === 'medium' ? value.confidence : null;
   const message = safeTaskListText(value.message);
-  return type && confidence && message
-    ? { type, confidence, message }
-    : undefined;
+  return type && confidence && message ? { type, confidence, message } : undefined;
 }
 
 export function toUiTask(row: ListRow): UiTask {
   const identity = readExecutionIdentity(row);
   const opusUsed = (row as { opusUsed?: unknown }).opusUsed === true;
   const r = row as { starred?: unknown; starredAt?: unknown; projectId?: unknown };
-  const status = normaliseStatus(safeTaskListText((row as { status?: unknown }).status) || 'unknown');
+  const status = normaliseStatus(
+    safeTaskListText((row as { status?: unknown }).status) || 'unknown',
+  );
   // Root-cause fix for the "result text disappears on refresh" / brief
   // post-terminal flash: tasks.list already ships `result` for every
   // row, but toUiTask used to drop it and only map errorMessage. The
@@ -3143,15 +3307,17 @@ export function toUiTask(row: ListRow): UiTask {
   // Generation (success) tasks carry metadata.videoType; the quote task
   // (awaiting video_quote) carries metadata.videoOptions.tab instead — fall
   // back to it so the quote card can hide 图片版 for ip_person (B2).
-  const videoMeta = metadata as { videoType?: unknown; petModel?: unknown; videoOptions?: { tab?: unknown; petModel?: unknown; referenceVideoFileId?: unknown } };
+  const videoMeta = metadata as {
+    videoType?: unknown;
+    petModel?: unknown;
+    videoOptions?: { tab?: unknown; petModel?: unknown; referenceVideoFileId?: unknown };
+  };
   const videoTypeRaw = videoMeta.videoType ?? videoMeta.videoOptions?.tab;
   const videoType =
     videoTypeRaw === 'normal' || videoTypeRaw === 'pet' || videoTypeRaw === 'ip_person'
       ? videoTypeRaw
       : undefined;
-  const attachments: UiTask['attachments'] | undefined = parseUiAttachments(
-    metadata.attachments,
-  );
+  const attachments: UiTask['attachments'] | undefined = parseUiAttachments(metadata.attachments);
   const expertWorkflowId =
     safeTaskListText(metadata.expertWorkflowId).length > 0
       ? safeTaskListText(metadata.expertWorkflowId)
@@ -3170,24 +3336,15 @@ export function toUiTask(row: ListRow): UiTask {
     safeTaskListText(resultObj.finalUrl).length > 0
       ? safeTaskListText(resultObj.finalUrl)
       : undefined;
-  const finalViewport = normalizeFinalViewport(
-    resultObj.finalViewport ?? metadata.finalViewport,
-  );
+  const finalViewport = normalizeFinalViewport(resultObj.finalViewport ?? metadata.finalViewport);
   const stockContext = normalizeStockTaskContext(
     (row as { stockContext?: unknown }).stockContext ?? metadata.stockContext,
   );
   const errorText =
-    typeof row.errorMessage === 'string'
-      ? humaniseTaskError(row.errorMessage)
-      : null;
-  const resultText = displayResultTextForStatus(
-    status,
-    summaryFromResult,
-    errorText,
-  ) ?? null;
+    typeof row.errorMessage === 'string' ? humaniseTaskError(row.errorMessage) : null;
+  const resultText = displayResultTextForStatus(status, summaryFromResult, errorText) ?? null;
   // Codex Pack A4 — verifier verdict columns (null on legacy rows).
-  const verificationPassedRaw = (row as { verificationPassed?: unknown })
-    .verificationPassed;
+  const verificationPassedRaw = (row as { verificationPassed?: unknown }).verificationPassed;
   const failureLevelRaw = (row as { failureLevel?: unknown }).failureLevel;
   const failureLevel =
     failureLevelRaw === 'fixable' ||
@@ -3210,9 +3367,18 @@ export function toUiTask(row: ListRow): UiTask {
     tickCount: 0,
     ...(resultText ? { resultText } : {}),
     ...(executionMode ? { executionMode } : {}),
-    ...((row as { browserSource?: string }).browserSource === 'local-chrome' || (isTaskListRecord(rowResult) && isTaskListRecord(rowResult.metadata) && rowResult.metadata.browserSource === 'local-chrome') ? { browserSource: 'local-chrome' as const } : {}),
+    ...((row as { browserSource?: string }).browserSource === 'local-chrome' ||
+    (isTaskListRecord(rowResult) &&
+      isTaskListRecord(rowResult.metadata) &&
+      rowResult.metadata.browserSource === 'local-chrome')
+      ? { browserSource: 'local-chrome' as const }
+      : {}),
     ...(videoType ? { videoType } : {}),
-    ...(videoType === 'pet' && !videoMeta.videoOptions?.referenceVideoFileId && (videoMeta.petModel || videoMeta.videoOptions?.petModel) ? { videoCreationMode: 'pet_i2v' as const } : {}),
+    ...(videoType === 'pet' &&
+    !videoMeta.videoOptions?.referenceVideoFileId &&
+    (videoMeta.petModel || videoMeta.videoOptions?.petModel)
+      ? { videoCreationMode: 'pet_i2v' as const }
+      : {}),
     ...(attachments ? { attachments } : {}),
     ...(expertWorkflowId ? { expertWorkflowId } : {}),
     ...(expertMode ? { expertMode } : {}),
@@ -3228,8 +3394,7 @@ export function toUiTask(row: ListRow): UiTask {
     starred: r.starred === true,
     starredAt: safeNullableTaskListDate(r.starredAt),
     projectId: safeNullableTaskListText(r.projectId),
-    verificationPassed:
-      typeof verificationPassedRaw === 'boolean' ? verificationPassedRaw : null,
+    verificationPassed: typeof verificationPassedRaw === 'boolean' ? verificationPassedRaw : null,
     failureLevel,
     failedChecks,
   };
@@ -3277,9 +3442,7 @@ function safeTaskListText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function normalizeFinalViewport(
-  value: unknown,
-): UiTask['finalViewport'] | undefined {
+function normalizeFinalViewport(value: unknown): UiTask['finalViewport'] | undefined {
   if (!isTaskListRecord(value)) return undefined;
   const width = value.width;
   const height = value.height;
@@ -3328,9 +3491,7 @@ function parseUiAttachments(arr: unknown): UiTask['attachments'] | undefined {
       const downloadUrl = normaliseAttachmentDownloadUrl(e.downloadUrl);
       if (!downloadUrl) return null;
       const posterUrl =
-        typeof e.posterUrl === 'string'
-          ? normaliseAttachmentDownloadUrl(e.posterUrl)
-          : null;
+        typeof e.posterUrl === 'string' ? normaliseAttachmentDownloadUrl(e.posterUrl) : null;
       return {
         fileId: e.fileId,
         downloadUrl,
@@ -3339,9 +3500,7 @@ function parseUiAttachments(arr: unknown): UiTask['attachments'] | undefined {
         sizeBytes: e.sizeBytes,
         expiresAt: e.expiresAt,
         kind: e.kind,
-        ...(e.availability === 'unavailable'
-          ? { availability: 'unavailable' as const }
-          : {}),
+        ...(e.availability === 'unavailable' ? { availability: 'unavailable' as const } : {}),
         ...(posterUrl ? { posterUrl } : {}),
         ...(posterUrl && e.posterAvailability === 'unavailable'
           ? { posterAvailability: 'unavailable' as const }
@@ -3407,10 +3566,7 @@ function markTaskRunningFromLiveSignal(task: UiTask): UiTask {
   };
 }
 
-function hasFinalTaskRow(
-  state: Pick<TaskStore, 'tasks'>,
-  taskId: string,
-): boolean {
+function hasFinalTaskRow(state: Pick<TaskStore, 'tasks'>, taskId: string): boolean {
   const task = state.tasks.find((candidate) => candidate.taskId === taskId);
   return Boolean(task && isTerminalStatus(task.status));
 }

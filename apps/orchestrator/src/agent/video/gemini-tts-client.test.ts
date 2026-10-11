@@ -21,9 +21,9 @@ describe('synthesizeGeminiSpeech', () => {
       expect(body.contents[0]?.parts[0]?.text).toContain('今天阳光很好。');
       expect(body).not.toHaveProperty('model');
       expect(body.generationConfig.responseModalities).toEqual(['AUDIO']);
-      expect(
-        body.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName,
-      ).toBe('Kore');
+      expect(body.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe(
+        'Kore',
+      );
 
       return new Response(
         JSON.stringify({
@@ -102,8 +102,9 @@ describe('synthesizeGeminiSpeech', () => {
   });
 
   it('marks permission failures non-retryable and keeps provider detail internal', async () => {
-    const fetchImpl = vi.fn(async () =>
-      new Response(JSON.stringify({ error: { message: 'permission denied' } }), { status: 403 }),
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: { message: 'permission denied' } }), { status: 403 }),
     );
 
     await expect(

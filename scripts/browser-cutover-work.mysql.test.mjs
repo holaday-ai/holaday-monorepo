@@ -1,6 +1,6 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import test from 'node:test';
 import { readCutoverWorkScope } from './browser-cutover-evidence.mjs';
 
 // Explicit isolated QA database only; temporary tables disappear with this

@@ -10,11 +10,11 @@ const { once } = require('node:events');
   assert.throws(() => native.createListener('arbitrary-path'), /POOL_EGRESS_NATIVE_INVALID/);
   let original = native.createListener();
   const mode = process.argv[4];
-  const finalized = async expected => {
+  const finalized = async (expected) => {
     const deadline = performance.now() + 2000;
     while (!fs.existsSync(`${path}.finalized`) && performance.now() < deadline) {
       global.gc();
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
     }
     assert.equal(fs.readFileSync(`${path}.finalized`, 'utf8'), expected);
   };
@@ -34,7 +34,7 @@ const { once } = require('node:events');
   const fd = original.take();
   assert.throws(() => original.take(), /POOL_EGRESS_NATIVE_INVALID/);
   original.close(); // Must leave transferred FD live.
-  const server = net.createServer(socket => socket.end('synthetic'));
+  const server = net.createServer((socket) => socket.end('synthetic'));
   const listening = once(server, 'listening');
   server.listen({ fd, exclusive: true });
   await listening;
@@ -46,16 +46,23 @@ const { once } = require('node:events');
   const client = net.connect(path);
   let text = '';
   client.setEncoding('utf8');
-  client.on('data', data => { text += data; });
+  client.on('data', (data) => {
+    text += data;
+  });
   await once(client, 'close');
   assert.equal(text, 'synthetic');
   fs.renameSync(path, `${path}.original`);
   fs.writeFileSync(path, 'replacement', { flag: 'wx' });
-  await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  await new Promise((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
   assert.equal(fs.readFileSync(path, 'utf8'), 'replacement');
   assert(fs.lstatSync(`${path}.original`).isSocket());
   const reused = fs.openSync('/dev/null', 'r');
   original?.close();
   assert(fs.fstatSync(reused).isCharacterDevice());
   fs.closeSync(reused);
-})().catch(error => { console.error(error); process.exitCode = 1; });
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

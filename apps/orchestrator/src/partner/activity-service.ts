@@ -1,7 +1,7 @@
 import { newExternalId } from '@holaday/shared-types';
 import { and, eq, gte, lte, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
-import { partnerActivityEvents, type PartnerActivityEvent } from '../db/schema/partner.js';
+import { type PartnerActivityEvent, partnerActivityEvents } from '../db/schema/partner.js';
 
 const ACTIVITY_BASE_FACTOR_BPS = 10_000;
 const ACTIVITY_MAX_FACTOR_BPS = 11_000;
@@ -63,7 +63,10 @@ export function calculateActivityFactorBps(input: {
   const loginBoost = Math.min(300, loginDays * 100);
   const taskBoost = Math.min(400, completedTasks * 100);
   const inviteBoost = Math.min(300, validInvites * 300);
-  return Math.min(ACTIVITY_MAX_FACTOR_BPS, ACTIVITY_BASE_FACTOR_BPS + loginBoost + taskBoost + inviteBoost);
+  return Math.min(
+    ACTIVITY_MAX_FACTOR_BPS,
+    ACTIVITY_BASE_FACTOR_BPS + loginBoost + taskBoost + inviteBoost,
+  );
 }
 
 export interface PartnerActivitySummary {
@@ -78,7 +81,10 @@ export interface PartnerActivitySummary {
 export class PartnerActivityService {
   constructor(private readonly db?: DB) {}
 
-  private async readDailyCheckIn(userId: number, activityDate: string): Promise<PartnerActivityEvent | undefined> {
+  private async readDailyCheckIn(
+    userId: number,
+    activityDate: string,
+  ): Promise<PartnerActivityEvent | undefined> {
     if (!this.db) return undefined;
 
     const rows = await this.db

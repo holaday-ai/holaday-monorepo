@@ -34,12 +34,18 @@ function singleParam(url: URL, name: string, pattern: RegExp): boolean {
 
 function matchesBotPath(platform: Exclude<NotificationPlatform, 'custom'>, url: URL): boolean {
   if (platform === 'wecom') {
-    return url.pathname === '/cgi-bin/webhook/send' && singleParam(url, 'key', /^[A-Za-z0-9-]{8,128}$/);
+    return (
+      url.pathname === '/cgi-bin/webhook/send' && singleParam(url, 'key', /^[A-Za-z0-9-]{8,128}$/)
+    );
   }
   if (platform === 'feishu') {
-    return /^\/open-apis\/bot\/v2\/hook\/[A-Za-z0-9-]{8,128}$/.test(url.pathname) && url.search === '';
+    return (
+      /^\/open-apis\/bot\/v2\/hook\/[A-Za-z0-9-]{8,128}$/.test(url.pathname) && url.search === ''
+    );
   }
-  return url.pathname === '/robot/send' && singleParam(url, 'access_token', /^[A-Za-z0-9]{16,128}$/);
+  return (
+    url.pathname === '/robot/send' && singleParam(url, 'access_token', /^[A-Za-z0-9]{16,128}$/)
+  );
 }
 
 export function buildNotificationChannelDraft({

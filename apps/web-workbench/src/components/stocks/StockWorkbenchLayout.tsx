@@ -63,13 +63,16 @@ export function StockTaskWorkspaceLayout({
     setRiskWarmed(true);
   }, []);
 
-  const activateTask = React.useCallback((task: StockWorkspaceTask, focusTab = false) => {
-    setActiveTask(task);
-    onTaskChange?.(task);
-    if (focusTab) {
-      queueMicrotask(() => tabRefs.current[task]?.focus());
-    }
-  }, [onTaskChange]);
+  const activateTask = React.useCallback(
+    (task: StockWorkspaceTask, focusTab = false) => {
+      setActiveTask(task);
+      onTaskChange?.(task);
+      if (focusTab) {
+        queueMicrotask(() => tabRefs.current[task]?.focus());
+      }
+    },
+    [onTaskChange],
+  );
 
   const handleTabKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -97,7 +100,11 @@ export function StockTaskWorkspaceLayout({
       aria-label="核心股市任务"
       className="hd-stock-workspace min-w-0 overflow-hidden rounded-[22px] border border-[#E9E0EC] bg-[#FFFCFA] shadow-[0_18px_48px_rgba(103,75,121,0.07)]"
     >
-      <header className="hd-stock-section-heading"><span>RESEARCH</span><h2>关注研究</h2><p>从表现到原因</p></header>
+      <header className="hd-stock-section-heading">
+        <span>RESEARCH</span>
+        <h2>关注研究</h2>
+        <p>从表现到原因</p>
+      </header>
       <nav
         aria-label="股市任务视图"
         role="tablist"
@@ -348,8 +355,30 @@ export function StockMarketContextLayout({
   marketTable: React.ReactNode;
   starStocks: React.ReactNode;
 }): JSX.Element {
-  return <div className="hd-stock-context">
-    <section id="stock-news" aria-label="新闻与公告"><header className="hd-stock-section-heading"><span>NEWSROOM</span><h2>新闻与公告</h2><p>先看与你关注的股票相关的变化</p></header>{discovery}</section>
-    <section id="stock-panorama" aria-label="市场全景"><header className="hd-stock-section-heading"><span>MARKET</span><h2>市场全景</h2><p>把个股放回市场背景里看</p></header><div className="hd-market-panorama-grid"><div>{temperature}</div><div>{sectors}</div><div>{leaderboard}</div><div>{marketTable}</div></div><div>{starStocks}</div></section>
-  </div>;
+  return (
+    <div className="hd-stock-context">
+      <section id="stock-news" aria-label="新闻与公告">
+        <header className="hd-stock-section-heading">
+          <span>NEWSROOM</span>
+          <h2>新闻与公告</h2>
+          <p>先看与你关注的股票相关的变化</p>
+        </header>
+        {discovery}
+      </section>
+      <section id="stock-panorama" aria-label="市场全景">
+        <header className="hd-stock-section-heading">
+          <span>MARKET</span>
+          <h2>市场全景</h2>
+          <p>把个股放回市场背景里看</p>
+        </header>
+        <div className="hd-market-panorama-grid">
+          <div>{temperature}</div>
+          <div>{sectors}</div>
+          <div>{leaderboard}</div>
+          <div>{marketTable}</div>
+        </div>
+        <div>{starStocks}</div>
+      </section>
+    </div>
+  );
 }
