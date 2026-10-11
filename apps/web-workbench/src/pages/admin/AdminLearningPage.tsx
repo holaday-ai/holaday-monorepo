@@ -12,14 +12,15 @@
  * page is where the charts live.
  */
 
-import { pageErrorMessage } from '@/lib/page-error-copy';
-import { trpc } from '@/lib/trpc';
-import { cn } from '@/lib/utils';
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { Loader2, Search } from 'lucide-react';
 import * as React from 'react';
 import { Link } from 'react-router-dom';
-import { AdminLearningEvolution } from './AdminLearningEvolution';
+import { pageErrorMessage } from '@/lib/page-error-copy';
+import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
 import { learningEmptyCopy } from './admin-learning-copy';
+import { AdminLearningEvolution } from './AdminLearningEvolution';
 import {
   adminLoadErrorCopy,
   asRecord,
@@ -146,10 +147,16 @@ export function AdminLearningPage(): JSX.Element {
         <FilterPill active={filter === 'all'} onClick={() => setFilter('all')}>
           全部
         </FilterPill>
-        <FilterPill active={filter === 'highRisk'} onClick={() => setFilter('highRisk')}>
+        <FilterPill
+          active={filter === 'highRisk'}
+          onClick={() => setFilter('highRisk')}
+        >
           仅高风险
         </FilterPill>
-        <FilterPill active={filter === 'recentFail'} onClick={() => setFilter('recentFail')}>
+        <FilterPill
+          active={filter === 'recentFail'}
+          onClick={() => setFilter('recentFail')}
+        >
           本周有未成功
         </FilterPill>
       </div>
@@ -312,18 +319,9 @@ function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
 
 function SuccessRateBar({ successRate }: { successRate: number }): JSX.Element {
   // Interpolate brand magenta (0%) → yellow (50%) → cyan (100%).
-  const r =
-    successRate < 50
-      ? Math.round(234 + (successRate / 50) * (255 - 234))
-      : Math.round(255 - ((successRate - 50) / 50) * (255 - 66));
-  const g =
-    successRate < 50
-      ? Math.round(31 + (successRate / 50) * (201 - 31))
-      : Math.round(201 - ((successRate - 50) / 50) * (201 - 192));
-  const b =
-    successRate < 50
-      ? Math.round(89 - (successRate / 50) * (89 - 16))
-      : Math.round(16 + ((successRate - 50) / 50) * (239 - 16));
+  const r = successRate < 50 ? Math.round(234 + (successRate / 50) * (255 - 234)) : Math.round(255 - ((successRate - 50) / 50) * (255 - 66));
+  const g = successRate < 50 ? Math.round(31 + (successRate / 50) * (201 - 31)) : Math.round(201 - ((successRate - 50) / 50) * (201 - 192));
+  const b = successRate < 50 ? Math.round(89 - (successRate / 50) * (89 - 16)) : Math.round(16 + ((successRate - 50) / 50) * (239 - 16));
   const color = `rgb(${r}, ${g}, ${b})`;
   return (
     <div className="flex items-center gap-2">
@@ -382,7 +380,8 @@ function FilterPill({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <button
+    <ChoiceButton
+      selected={active}
       type="button"
       onClick={onClick}
       className={cn(
@@ -393,6 +392,6 @@ function FilterPill({
       )}
     >
       {children}
-    </button>
+    </ChoiceButton>
   );
 }

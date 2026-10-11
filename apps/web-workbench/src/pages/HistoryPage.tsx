@@ -1,16 +1,16 @@
+import { ChoiceButton } from '@/components/ui/choice-button';
+import { AlertCircle, CheckCircle2, CircleSlash, Loader2, RotateCcw, Search, XCircle } from 'lucide-react';
+import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { supportMailtoHref } from '@/lib/support-links';
 import {
-  type HistoryRangeFilter,
-  type HistoryServerTaskStatus,
-  type HistoryStatusFilter,
-  type NormalizedTaskHubRow,
   formatTaskHubTime,
   hasHistoryFilters,
   historyFilterRequestKey,
   historyPageSummary,
-  historyStatusFilterOptions,
   historyStatusFilterToServerStatuses,
+  historyStatusFilterOptions,
   mergeTaskHubRowsById,
   normalizeTaskHubCursor,
   normalizeTaskHubRows,
@@ -22,22 +22,20 @@ import {
   taskHubRowTitle,
   taskHubRowTone,
   taskHubStatusIconKind,
+  type HistoryRangeFilter,
+  type HistoryServerTaskStatus,
+  type HistoryStatusFilter,
+  type NormalizedTaskHubRow,
 } from '@/lib/task-hub-state';
 import { historyEmptyCopy, taskStatusLabel } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { PageContainer, PageHeader, PageLoadingPanel, Section } from '@/pages/PageShell';
 import {
-  AlertCircle,
-  CheckCircle2,
-  CircleSlash,
-  Loader2,
-  RotateCcw,
-  Search,
-  XCircle,
-} from 'lucide-react';
-import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
+  PageContainer,
+  PageHeader,
+  PageLoadingPanel,
+  Section,
+} from '@/pages/PageShell';
 
 // Filter values use the same vocabulary as the orchestrator's
 // `tasks.status` column ('completed' / 'failed' / 'executing' / …)
@@ -359,8 +357,12 @@ export function HistoryPage(): JSX.Element {
             </div>
           ) : tasks.length === 0 ? (
             <div className="flex h-48 flex-col items-center justify-center text-center">
-              <div className="text-sm font-medium text-foreground/80">{emptyCopy.title}</div>
-              <div className="mt-1 text-[11px] text-muted-foreground">{emptyCopy.body}</div>
+              <div className="text-sm font-medium text-foreground/80">
+                {emptyCopy.title}
+              </div>
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                {emptyCopy.body}
+              </div>
               {filtered && (
                 <Button
                   size="sm"
@@ -470,7 +472,8 @@ function FilterGroup<T extends string>({
   return (
     <div className="inline-flex gap-0.5 rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5 text-xs">
       {options.map((o) => (
-        <button
+        <ChoiceButton
+          selected={value === o.id}
           key={o.id}
           type="button"
           onClick={() => onChange(o.id)}
@@ -482,7 +485,7 @@ function FilterGroup<T extends string>({
           )}
         >
           {o.label}
-        </button>
+        </ChoiceButton>
       ))}
     </div>
   );
@@ -500,7 +503,9 @@ function StatusIcon({ task }: { task: Pick<HistoryTask, 'awaitingKind' | 'status
     return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0061]" />;
   }
   if (iconKind === 'inactive') {
-    return <CircleSlash className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />;
+    return (
+      <CircleSlash className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+    );
   }
   return <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#FF0061]" />;
 }

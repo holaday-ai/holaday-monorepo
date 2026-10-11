@@ -10,8 +10,9 @@ import {
   pixelDifference,
   taskStateFindings,
 } from './lib/checks.mjs';
+import { p2Checks } from './lib/p2-checks.mjs';
 import { round3Checks, browserInputOverlayChecks, scheduledChoiceChecks } from './lib/round3-checks.mjs';
-import { inspectControls } from './lib/interaction.mjs';
+import { inspectControls, reusableControls, waitForSeedContent } from './lib/interaction.mjs';
 import { canonicalUrl, inventory, scenarioSlug, writeInventory } from './lib/inventory.mjs';
 import {
   isPopupNavigation,
@@ -324,6 +325,15 @@ try {
         for (const request of state.requests)
           if (!report.seedContracts.includes(request.name)) report.seedContracts.push(request.name);
       };
+      const expectedSeed = {
+          '/account/closure-recovery': 'ACR-LOCAL-UI',
+          '/files': '测试资料.txt',
+          '/settings/roles': '内容创作',
+          '/skills': '数据报告解读',
+          '/projects': '测试项目',
+          '/projects/:projectId': '测试项目',
+          '/planned': '每日测试计划',
+        }[scenario.pattern];
       let loaded = false;
       const reset = async () => {
         if (loaded) await captureContracts();
@@ -350,6 +360,7 @@ try {
             { timeout: 4000 },
           );
         }
+        await waitForSeedContent(page, expectedSeed);
         loaded = true;
       };
       try {
@@ -366,19 +377,14 @@ try {
           entry.regressions = await scheduledChoiceChecks(page, width, artifacts);
           await reset();
         }
+        if (!screenOnly) {
+          const checks = await p2Checks(page, scenario.pattern, width, artifacts);
+          entry.regressions = [...(entry.regressions ?? []), ...checks];
+        }
         const measured = await measurePage(page);
         await page.screenshot({ path: path.join(out, screenshot), animations: 'disabled' });
         entry.canonicalPath = canonicalUrl(page.url());
         entry.runtimeControls = measured.elements;
-        const expectedSeed = {
-          '/account/closure-recovery': 'ACR-LOCAL-UI',
-          '/files': '测试资料.txt',
-          '/settings/roles': '内容创作',
-          '/skills': '数据报告解读',
-          '/projects': '测试项目',
-          '/projects/:projectId': '测试项目',
-          '/planned': '每日测试计划',
-        }[scenario.pattern];
         if (expectedSeed && !measured.text.includes(expectedSeed))
           report.coverageGaps.push(
             `${scenario.pattern}@${width}: expected seeded content missing: ${expectedSeed}`,
@@ -411,12 +417,12 @@ try {
           entry.issues.push({ rule: 'known-5-raw-provider-label', severity: 'P2' });
         if (!measured.text.trim()) entry.issues.push({ rule: 'page-not-rendered', severity: 'P1' });
         if (!screenOnly) {
-          if (canonical.has(entry.canonicalPath))
+          if (reusableControls(canonical.get(entry.canonicalPath)))
             entry.controls = canonical.get(entry.canonicalPath).map((c) => ({
               ...c,
               status: 'shared-reference',
               reference: entry.canonicalPath,
-              referencedStatus: c.status,
+              referencedStatus: c.status === 'shared-reference' ? c.referencedStatus : c.status,
             }));
           else {
             entry.controls = await inspectControls(page, {
@@ -428,7 +434,7 @@ try {
                 return p;
               },
             });
-            canonical.set(entry.canonicalPath, entry.controls);
+            if (reusableControls(entry.controls)) canonical.set(entry.canonicalPath, entry.controls);
           }
         }
         for (const c of entry.controls) {

@@ -1,12 +1,16 @@
-import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
-import { externalLinkConfirmDescription, safeExternalHttpHref } from '@/lib/external-link-copy';
-import { type PlanStepState, planProgressSummary } from '@/lib/plan-card-state';
-import { cn } from '@/lib/utils';
 import { Check, ChevronDown, ChevronRight, ListChecks, Loader2, X } from 'lucide-react';
 import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import {
+  externalLinkConfirmDescription,
+  safeExternalHttpHref,
+} from '@/lib/external-link-copy';
+import { planProgressSummary, type PlanStepState } from '@/lib/plan-card-state';
+import { cn } from '@/lib/utils';
+import { isTerminalStatus, type UiTaskStatus } from '@/types/task';
 
 export interface PlanStepStatus {
   idx: number;
@@ -19,6 +23,7 @@ interface Props {
   planText: string;
   /** Per-step status array, parallel to the bullet list count. */
   planStatus?: PlanStepStatus[];
+  taskStatus?: UiTaskStatus;
   /**
    * Default expansion state. When the task is still in flight the
    * plan is the live "what's coming next" view and should stay open;
@@ -45,7 +50,12 @@ interface Props {
  * reads as "context, not active work" — the live ticker below
  * keeps its own colour cues for in-flight steps.
  */
-export function PlanCard({ planText, planStatus, defaultExpanded = true }: Props): JSX.Element {
+export function PlanCard({
+  planText,
+  planStatus,
+  taskStatus,
+  defaultExpanded = true,
+}: Props): JSX.Element | null {
   const [expanded, setExpanded] = React.useState(defaultExpanded);
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
   const requestExternalLink = (href: string) => {
@@ -74,8 +84,15 @@ export function PlanCard({ planText, planStatus, defaultExpanded = true }: Props
     return map;
   }, [planStatus]);
 
-  const progress = React.useMemo(() => planProgressSummary(planStatus ?? null), [planStatus]);
+  const progress = React.useMemo(
+    () => planProgressSummary(planStatus ?? null),
+    [planStatus],
+  );
   const advisory = (planStatus?.length ?? 0) === 0;
+
+  // A terminal result is authoritative; a stale planner counter is not evidence
+  // that every proposed step ran. Keep the actual step log in TaskStream.
+  if (taskStatus && isTerminalStatus(taskStatus)) return null;
 
   return (
     <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-5 py-4 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
@@ -90,16 +107,18 @@ export function PlanCard({ planText, planStatus, defaultExpanded = true }: Props
             <ListChecks className="h-3.5 w-3.5" />
           </span>
           <span className="min-w-0">
-            <span className="block text-sm font-medium text-foreground">
-              {advisory ? '处理思路' : '执行计划'}
-            </span>
+            <span className="block text-sm font-medium text-foreground">{advisory ? '处理思路' : '执行计划'}</span>
             <span className="mt-0.5 block text-[11px] text-muted-foreground">
               {advisory ? '拟采用的处理方式，不代表已完成' : progress.label}
             </span>
           </span>
         </span>
         <span className="mt-1 inline-flex shrink-0 items-center gap-1 rounded-full border border-[#DCDDDD] bg-white px-2.5 py-1 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#ADADAD]">
-          {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          {expanded ? (
+            <ChevronDown className="h-3 w-3" />
+          ) : (
+            <ChevronRight className="h-3 w-3" />
+          )}
         </span>
       </button>
       {progress.total > 0 && (
@@ -150,7 +169,9 @@ export function PlanCard({ planText, planStatus, defaultExpanded = true }: Props
       <ConfirmDialog
         open={pendingHref !== null}
         title="即将打开外部链接"
-        description={pendingHref ? externalLinkConfirmDescription(pendingHref) : undefined}
+        description={
+          pendingHref ? externalLinkConfirmDescription(pendingHref) : undefined
+        }
         confirmLabel="打开"
         cancelLabel="取消"
         onClose={() => setPendingHref(null)}
@@ -186,7 +207,9 @@ function PlanList({
         return (
           <li key={itemIndex} className="flex items-start gap-2 py-0.5">
             <StatusPill state={status?.status ?? 'pending'} />
-            <div className="min-w-0 flex-1">{(child as React.ReactElement).props.children}</div>
+            <div className="min-w-0 flex-1">
+              {(child as React.ReactElement).props.children}
+            </div>
           </li>
         );
       })}
@@ -223,10 +246,7 @@ function StatusPill({
     );
   }
   return (
-    <span
-      className={cn(cls, 'border border-[#DCDDDD] bg-[#EFEFEF]/50 text-muted-foreground')}
-      aria-label="pending"
-    />
+    <span className={cn(cls, 'border border-[#DCDDDD] bg-[#EFEFEF]/50 text-muted-foreground')} aria-label="pending" />
   );
 }
 

@@ -1,3 +1,4 @@
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { FullBrandLogo } from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
 import {
@@ -657,7 +658,8 @@ function TabButton({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <button
+    <ChoiceButton
+      selected={active}
       type="button"
       onClick={onClick}
       className={cn(
@@ -668,7 +670,7 @@ function TabButton({
       )}
     >
       {children}
-    </button>
+    </ChoiceButton>
   );
 }
 

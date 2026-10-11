@@ -3065,6 +3065,7 @@ function UrlBar({
         type="text"
         spellCheck={false}
         autoComplete="off"
+        data-browser-address="true"
         value={draft}
         placeholder={
           onLaunchTask

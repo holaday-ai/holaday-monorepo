@@ -28,6 +28,10 @@ export function createSeed() {
         executionRevision: 1,
         recordVersion: 1,
         executionMode: mode,
+        ...(mode === 'browser' && status === 'completed' ? {
+          planText: '1. 打开公开 GitHub 页面\n2. 整理讨论内容',
+          planStatus: [{idx:0,status:'pending'},{idx:1,status:'pending'}],
+        } : {}),
         awaitingKind: mode === 'browser' ? 'login' : 'clarification',
         result: {
           summary:

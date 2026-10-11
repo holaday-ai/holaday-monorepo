@@ -32,7 +32,7 @@ export function classifyGeometry(elements, width, _height) {
         control: e.id,
         box: { x: e.x, y: e.y, width: e.width, height: e.height },
       });
-    if (e.truncated && !e.hasHint)
+    if (e.truncated && !e.hasHint && !e.normalUrlOverflow)
       findings.push({
         rule: 'unexplained-truncation',
         severity: 'P2',
@@ -90,8 +90,13 @@ export async function measurePage(page) {
       }
       return false;
     };
+    const screenReaderOnly = (e) => {
+      const style = getComputedStyle(e), rect = e.getBoundingClientRect();
+      return style.position === 'absolute' && rect.width <= 1 && rect.height <= 1 &&
+        (style.clip === 'rect(0px, 0px, 0px, 0px)' || style.clipPath === 'inset(50%)');
+    };
     const selectors =
-      'button,a,input,textarea,select,summary,[role="button"],[role="tab"],[role="combobox"],[role="menuitem"],[role="switch"],[role="checkbox"],[role="radio"],.fc-daygrid-day[data-date]';
+      'button,a,input,textarea,select,summary,[role="button"],[role="tab"],[role="combobox"],[role="menuitem"],[role="menuitemradio"],[role="switch"],[role="checkbox"],[role="radio"],.fc-daygrid-day[data-date]';
     const seen = new Set(
       [...document.querySelectorAll('[data-ui-audit-id]')].map((e) =>
         e.getAttribute('data-ui-audit-id'),
@@ -247,7 +252,7 @@ export async function measurePage(page) {
             );
           })(),
           selectedWithoutSemantics: (() => {
-            if (calendarDay && e.classList.contains('hd-selected-day')) return true;
+            if (calendarDay && e.classList.contains('hd-selected-day')) return e.getAttribute('aria-selected') !== 'true';
             if (
               e.tagName !== 'BUTTON' ||
               e.hasAttribute('aria-selected') ||
@@ -319,7 +324,11 @@ export async function measurePage(page) {
           type: e.getAttribute('type'),
           href: e.getAttribute('href'),
           disabled: e.disabled || e.getAttribute('aria-disabled') === 'true',
-          hasHint: Boolean(e.getAttribute('title') || e.getAttribute('aria-describedby')),
+          hasHint: e.getAttribute('data-icon-only') === 'true'
+            ? Boolean(e.getAttribute('aria-label')?.trim() && e.getAttribute('title')?.trim() && e.querySelector('svg,img'))
+            : Boolean(e.getAttribute('title') || e.getAttribute('aria-describedby')),
+          normalUrlOverflow: e.tagName === 'INPUT' && e.getAttribute('data-browser-address') === 'true' &&
+            Boolean(e.getAttribute('aria-label')?.trim()) && /^https?:\/\//i.test(e.value),
           x: r.x,
           y: r.y,
           width: r.width,
@@ -394,6 +403,7 @@ export async function measurePage(page) {
       .filter(
         (e) =>
           !hiddenInClosedDetails(e) &&
+          !screenReaderOnly(e) &&
           e.childElementCount === 0 &&
           e.textContent.trim() &&
           getComputedStyle(e).overflow !== 'visible' &&

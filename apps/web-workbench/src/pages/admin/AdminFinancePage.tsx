@@ -16,6 +16,7 @@
  * accents matching the calendar palette.
  */
 
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
@@ -238,7 +239,8 @@ function TabButton({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <button
+    <ChoiceButton
+      selected={active}
       type="button"
       onClick={onClick}
       className={cn(
@@ -249,7 +251,7 @@ function TabButton({
       )}
     >
       {children}
-    </button>
+    </ChoiceButton>
   );
 }
 

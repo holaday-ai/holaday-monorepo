@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module';
+const { expect } = createRequire(new URL('../../apps/web-workbench/package.json', import.meta.url))('playwright/test');
 import { classifyGeometry, measurePage } from './checks.mjs';
 const fingerprint = (p) =>
   p.evaluate(() =>
@@ -10,12 +12,13 @@ const fingerprint = (p) =>
       text: document.body.innerText,
       states: [
         ...document.querySelectorAll(
-          '[aria-expanded],[aria-selected],[aria-pressed],[data-state],input,textarea,select,button,details',
+          '[aria-expanded],[aria-selected],[aria-pressed],[aria-checked],[data-state],input,textarea,select,button,details',
         ),
       ].map((e) => [
         e.getAttribute('aria-expanded'),
         e.getAttribute('aria-selected'),
         e.getAttribute('aria-pressed'),
+        e.getAttribute('aria-checked'),
         e.getAttribute('data-state'),
         e.type,
         e.value,
@@ -56,6 +59,17 @@ export async function observeControl(page, control, { checkDismissal = true } = 
     (control.type === 'radio' && control.checked)
   )
     return { ...control, status: 'idempotent', reason: 'already selected option' };
+  // Selecting the current grid cell again is a no-op; disclosures still need action.
+  if (control.role === 'gridcell' &&
+      (await locator.getAttribute('aria-selected')) === 'true' &&
+      (await locator.getAttribute('aria-expanded')) === null &&
+      (await locator.getAttribute('aria-haspopup')) === null)
+    return { ...control, status: 'idempotent', reason: 'already selected grid cell' };
+  if (control.role === 'menuitemradio' &&
+      (await locator.getAttribute('aria-checked')) === 'true' &&
+      (await locator.getAttribute('aria-expanded')) === null &&
+      (await locator.getAttribute('aria-haspopup')) === null)
+    return { ...control, status: 'idempotent', reason: 'already checked menu radio choice' };
   if (control.selectedWithoutSemantics)
     return {
       ...control,
@@ -315,10 +329,14 @@ export async function observeControl(page, control, { checkDismissal = true } = 
           requests,
           afterUrl,
         };
-      // Leave the region open so that its nested controls are inspected.
-      if ((await locator.count()) && (await locator.getAttribute('aria-expanded')) !== 'true')
-        await locator.click({ timeout: 1800 });
-      await page.waitForTimeout(60);
+      // Escape may close both a nested popup and its parent. Rebuild the full
+      // path after dismissal instead of clicking a node in an exit animation.
+      if (popup) replayAfterDismissal = true;
+      else {
+        if ((await locator.count()) && (await locator.getAttribute('aria-expanded')) !== 'true')
+          await locator.click({ timeout: 1800 });
+        await page.waitForTimeout(60);
+      }
     }
     if (
       checkDismissal &&
@@ -408,9 +426,34 @@ function matchingControl(elements, wanted) {
   );
   return equivalent.length === 1 ? equivalent[0] : undefined;
 }
+// Seeded business content must be present before measuring the initial scene.
+export async function waitForSeedContent(page, text, timeout = 4000) {
+  if (text) await page.getByText(text, { exact: false }).filter({ visible: true }).first().waitFor({ state: 'visible', timeout });
+}
+
+// Poll the same semantic identity used for traversal; asynchronous list hydration
+// must finish before replay. A timeout still leaves an explicit coverage gap.
+async function readyControl(page, wanted, timeout) {
+  let control;
+  try {
+    await expect.poll(async () => {
+      control = matchingControl((await measurePage(page)).elements, wanted);
+      return Boolean(control);
+    }, { timeout }).toBe(true);
+  } catch { return undefined; }
+  return control;
+}
+export function reusableControlResult(result) {
+  const status = result.status === 'shared-reference' ? result.referencedStatus : result.status;
+  return ['passed', 'disabled', 'idempotent', 'protocol-link'].includes(status) &&
+    !result.layout?.some(f => f.severity === 'P1');
+}
+export function reusableControls(results) {
+  return Array.isArray(results) && results.length > 0 && results.every(reusableControlResult);
+}
 export async function inspectControls(
   page,
-  { reset, shared = new Map(), maxDepth = 20, onEvidence = async () => {}, maxControls = 400 } = {},
+  { reset, shared = new Map(), maxDepth = 20, onEvidence = async () => {}, maxControls = 400, readinessTimeout = 4000 } = {},
 ) {
   const initial = await measurePage(page);
   const results = [];
@@ -432,7 +475,8 @@ export async function inspectControls(
     }
     const { control, path } = queue.shift();
     const key = JSON.stringify([control.scope, control.repeatFamilyKey ?? control.id]);
-    if (seen.has(key) && !(outcomes.get(key) === 'disabled' && path.length)) {
+    if (seen.has(key) && !(outcomes.get(key) === 'disabled' && path.length) &&
+      (!control.repeatFamilyKey || reusableControlResult({status: outcomes.get(key)}))) {
       if (control.repeatFamilyKey && !reportedRepeatIds.has(control.id)) {
         results.push({
           ...control,
@@ -451,7 +495,7 @@ export async function inspectControls(
       reportedRepeatIds.add(control.id);
     }
     const isShared = control.shared || path[0]?.shared;
-    if (isShared && shared.has(key)) {
+    if (isShared && shared.has(key) && reusableControlResult({status: 'shared-reference', ...shared.get(key)})) {
       results.push({ ...control, status: 'shared-reference', ...shared.get(key) });
       continue;
     }
@@ -471,8 +515,7 @@ export async function inspectControls(
       await reset();
       for (let i = 0; i < path.length; i++) {
         const step = path[i];
-        const m = await measurePage(page);
-        const next = matchingControl(m.elements, step);
+        const next = await readyControl(page, step, readinessTimeout);
         const result = next
           ? await observeControl(page, next, { checkDismissal: false })
           : { status: 'uncovered', reason: 'ancestor control absent' };
@@ -497,8 +540,8 @@ export async function inspectControls(
       });
       continue;
     }
+    const candidate = await readyControl(page, control, readinessTimeout);
     const current = await measurePage(page);
-    const candidate = matchingControl(current.elements, control);
     if (!candidate) {
       results.push({
         ...control,
@@ -526,7 +569,7 @@ export async function inspectControls(
       } else {
         await reset();
         for (const step of [...path, control]) {
-          const next = matchingControl((await measurePage(page)).elements, step);
+          const next = await readyControl(page, step, readinessTimeout);
           const restored = next
             ? await observeControl(page, next, { checkDismissal: false })
             : { status: 'uncovered', reason: 'control absent' };
@@ -548,7 +591,7 @@ export async function inspectControls(
       result.screenshot = await onEvidence(results.length);
     results.push(result);
     outcomes.set(key, result.status);
-    if (isShared) shared.set(key, { reference: page.url(), referencedStatus: result.status });
+    if (isShared && reusableControlResult(result)) shared.set(key, { reference: page.url(), referencedStatus: result.status });
     if (
       result.status === 'passed' &&
       current.url === result.afterUrl &&

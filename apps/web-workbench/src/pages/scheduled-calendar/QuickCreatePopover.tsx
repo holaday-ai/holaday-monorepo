@@ -14,19 +14,20 @@
  * Dismissal: Esc, click outside, or pressing Cancel.
  */
 
+import { ChoiceButton } from '@/components/ui/choice-button';
+import { Bell, ChevronDown, ChevronUp, Clock, Loader2, Plus, Repeat2 } from 'lucide-react';
+import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Bell, ChevronDown, ChevronUp, Clock, Loader2, Plus, Repeat2 } from 'lucide-react';
-import * as React from 'react';
 import {
-  type QuickCreateRepeatType,
   quickCreateCanSubmit,
   quickCreateHasDraftChanges,
   quickCreateReminderLabel,
   quickCreateRepeatLabel,
   quickCreateSubmitLabel,
   quickCreateValidationMessage,
+  type QuickCreateRepeatType,
 } from './quick-create-state';
 
 const REPEAT_PRESETS: ReadonlyArray<{
@@ -162,7 +163,8 @@ export function QuickCreatePopover({
     setSubmitting(true);
     try {
       const scheduledAt = combineDateAndTime(date, timeStr);
-      const finalRepeatType = repeatType === 'custom' ? 'once' : repeatType;
+      const finalRepeatType =
+        repeatType === 'custom' ? 'once' : repeatType;
       const trimmedDescription = description.trim();
       await onCreate({
         intent: intent.trim(),
@@ -212,199 +214,207 @@ export function QuickCreatePopover({
           padding: 16,
         }}
       >
-        <form onSubmit={(e) => void handleSubmit(e)}>
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <div className="text-[11px] font-medium text-[#595757]">{formatLocalDate(date)}</div>
-              <div className="mt-1 text-sm font-semibold text-[#1f1f1f]">快速创建定时任务</div>
+      <form onSubmit={(e) => void handleSubmit(e)}>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-medium text-[#595757]">
+              {formatLocalDate(date)}
             </div>
-            <div className="rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] px-2.5 py-1 text-[11px] font-medium text-[#595757]">
-              {quickCreateRepeatLabel(repeatType)}
+            <div className="mt-1 text-sm font-semibold text-[#1f1f1f]">
+              快速创建定时任务
             </div>
           </div>
-          <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2.5 focus-within:border-[#FF0061]/50 focus-within:ring-2 focus-within:ring-[#FF0061]/10">
-            <label className="text-[11px] font-medium text-[#595757]">任务内容</label>
+          <div className="rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] px-2.5 py-1 text-[11px] font-medium text-[#595757]">
+            {quickCreateRepeatLabel(repeatType)}
+          </div>
+        </div>
+        <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2.5 focus-within:border-[#FF0061]/50 focus-within:ring-2 focus-within:ring-[#FF0061]/10">
+          <label className="text-[11px] font-medium text-[#595757]">
+            任务内容
+          </label>
+          <input
+            ref={intentRef}
+            type="text"
+            value={intent}
+            onChange={(e) => {
+              setIntent(e.target.value);
+              setSubmitError(null);
+            }}
+            placeholder="描述要做的事情…"
+            className="hd-quick-create__input mt-1 w-full bg-transparent text-sm font-medium text-[#1f1f1f] outline-none placeholder:text-[#ADADAD]"
+            maxLength={2000}
+            disabled={submitting}
+          />
+        </div>
+        {!showDescription ? (
+          <button
+            type="button"
+            onClick={() => {
+              setShowDescription(true);
+              setSubmitError(null);
+            }}
+            disabled={submitting}
+            className="mt-2 inline-flex items-center gap-1 rounded-[8px] px-1 py-1 text-xs text-[#595757] hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-55"
+          >
+            <Plus className="h-3 w-3" />
+            添加备注
+          </button>
+        ) : (
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="补充说明…"
+            rows={2}
+            className="hd-quick-create__input mt-2 w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none placeholder:text-[#ADADAD] focus:border-[#FF0061]/50 focus:ring-2 focus:ring-[#FF0061]/10"
+            maxLength={2000}
+            disabled={submitting}
+          />
+        )}
+        <div className="mt-4 rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#595757]">
+              <Clock className="h-3.5 w-3.5 text-[#57479C]" />
+              执行时间
+            </label>
             <input
-              ref={intentRef}
-              type="text"
-              value={intent}
+              type="time"
+              value={timeStr}
               onChange={(e) => {
-                setIntent(e.target.value);
+                setTimeStr(e.target.value);
                 setSubmitError(null);
               }}
-              placeholder="描述要做的事情…"
-              className="hd-quick-create__input mt-1 w-full bg-transparent text-sm font-medium text-[#1f1f1f] outline-none placeholder:text-[#ADADAD]"
-              maxLength={2000}
+              className="hd-quick-create__time rounded-[8px] border border-[#DCDDDD] bg-white px-2.5 py-1.5 text-sm font-medium text-[#1f1f1f] outline-none focus:border-[#FF0061]/50 focus:ring-2 focus:ring-[#FF0061]/10"
               disabled={submitting}
             />
           </div>
-          {!showDescription ? (
-            <button
+          <div className="mt-2 text-[11px] text-[#595757]">
+            {timeStr} 执行，{quickCreateReminderLabel(reminderMinutes)}
+          </div>
+        </div>
+        <div className="mt-4 flex items-center gap-1.5 text-xs font-medium text-[#595757]">
+          <Repeat2 className="h-3.5 w-3.5 text-[#42C0EF]" />
+          重复方式
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-5">
+          {REPEAT_PRESETS.map((p) => (
+            <ChoiceButton
+              selected={repeatType === p.value}
               type="button"
-              onClick={() => {
-                setShowDescription(true);
-                setSubmitError(null);
-              }}
+              key={p.value}
+              onClick={() => handleRepeatSelect(p.value)}
               disabled={submitting}
-              className="mt-2 inline-flex items-center gap-1 rounded-[8px] px-1 py-1 text-xs text-[#595757] hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-55"
+              className={cn(
+                'rounded-[8px] border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                repeatType === p.value
+                  ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
+                  : 'border-[#EFEFEF] bg-white text-[#595757] hover:border-[#DCDDDD] hover:bg-[#EFEFEF]',
+              )}
             >
-              <Plus className="h-3 w-3" />
-              添加备注
-            </button>
-          ) : (
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="补充说明…"
-              rows={2}
-              className="hd-quick-create__input mt-2 w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none placeholder:text-[#ADADAD] focus:border-[#FF0061]/50 focus:ring-2 focus:ring-[#FF0061]/10"
-              maxLength={2000}
-              disabled={submitting}
-            />
-          )}
-          <div className="mt-4 rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] p-3">
-            <div className="flex items-center justify-between gap-3">
-              <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#595757]">
-                <Clock className="h-3.5 w-3.5 text-[#57479C]" />
-                执行时间
-              </label>
-              <input
-                type="time"
-                value={timeStr}
-                onChange={(e) => {
-                  setTimeStr(e.target.value);
-                  setSubmitError(null);
-                }}
-                className="hd-quick-create__time rounded-[8px] border border-[#DCDDDD] bg-white px-2.5 py-1.5 text-sm font-medium text-[#1f1f1f] outline-none focus:border-[#FF0061]/50 focus:ring-2 focus:ring-[#FF0061]/10"
-                disabled={submitting}
-              />
-            </div>
-            <div className="mt-2 text-[11px] text-[#595757]">
-              {timeStr} 执行，{quickCreateReminderLabel(reminderMinutes)}
-            </div>
+              {p.label}
+            </ChoiceButton>
+          ))}
+        </div>
+        <div className="mt-3">
+          <div className="mb-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-[#595757]">
+            <Bell className="h-3.5 w-3.5 text-[#FFC910]" />
+            提醒
           </div>
-          <div className="mt-4 flex items-center gap-1.5 text-xs font-medium text-[#595757]">
-            <Repeat2 className="h-3.5 w-3.5 text-[#42C0EF]" />
-            重复方式
-          </div>
-          <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-5">
-            {REPEAT_PRESETS.map((p) => (
-              <button
+          <div className="grid grid-cols-3 gap-1.5">
+            {REMINDER_PRESETS.map((p) => (
+              <ChoiceButton
+                selected={reminderMinutes === p.value}
                 type="button"
-                key={p.value}
-                onClick={() => handleRepeatSelect(p.value)}
+                key={p.value === null ? 'off' : String(p.value)}
+                onClick={() => setReminderMinutes(p.value)}
                 disabled={submitting}
                 className={cn(
-                  'rounded-[8px] border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-                  repeatType === p.value
+                  'rounded-[8px] border px-2 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                  reminderMinutes === p.value
                     ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
                     : 'border-[#EFEFEF] bg-white text-[#595757] hover:border-[#DCDDDD] hover:bg-[#EFEFEF]',
                 )}
               >
                 {p.label}
-              </button>
+              </ChoiceButton>
             ))}
           </div>
+        </div>
+        {repeatType === 'custom' && (
           <div className="mt-3">
-            <div className="mb-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-[#595757]">
-              <Bell className="h-3.5 w-3.5 text-[#FFC910]" />
-              提醒
-            </div>
-            <div className="grid grid-cols-3 gap-1.5">
-              {REMINDER_PRESETS.map((p) => (
-                <button
-                  type="button"
-                  key={p.value === null ? 'off' : String(p.value)}
-                  onClick={() => setReminderMinutes(p.value)}
-                  disabled={submitting}
-                  className={cn(
-                    'rounded-[8px] border px-2 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-                    reminderMinutes === p.value
-                      ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
-                      : 'border-[#EFEFEF] bg-white text-[#595757] hover:border-[#DCDDDD] hover:bg-[#EFEFEF]',
-                  )}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {repeatType === 'custom' && (
-            <div className="mt-3">
-              <button
-                type="button"
-                onClick={() => setShowAdvanced((v) => !v)}
-                disabled={submitting}
-                aria-label={showAdvanced ? '收起 RRULE' : '展开 RRULE'}
-                title={showAdvanced ? '收起 RRULE' : '展开 RRULE'}
-                className="inline-flex h-8 items-center gap-1 rounded-[8px] px-2.5 text-xs font-medium text-[#595757] hover:bg-[#EFEFEF] hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                {showAdvanced ? (
-                  <>
-                    <ChevronUp className="h-3.5 w-3.5" aria-hidden />
-                    <span>RRULE</span>
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-                    <span>RRULE</span>
-                  </>
-                )}
-              </button>
-              {showAdvanced && (
-                <div className="mt-2">
-                  <textarea
-                    value={rrule}
-                    onChange={(e) => {
-                      setRrule(e.target.value);
-                      setSubmitError(null);
-                    }}
-                    placeholder={'FREQ=WEEKLY;BYDAY=MO,WE,FR'}
-                    rows={2}
-                    className="w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 font-mono text-xs outline-none placeholder:text-[#ADADAD] focus:border-[#FF0061]/50 focus:ring-2 focus:ring-[#FF0061]/10"
-                    disabled={submitting}
-                  />
-                  {customRuleMissing && (
-                    <div className="mt-1 text-[11px] text-[#FF0061]">
-                      填写 RRULE 后才能创建，或切回预设频率。
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          {submitError && (
-            <div className="mt-3 rounded-md border border-[#FF0061]/20 bg-[#FF0061]/[0.06] px-3 py-2 text-xs text-[#FF0061]">
-              {submitError}
-            </div>
-          )}
-          <div className="mt-5 flex flex-wrap justify-end gap-2">
-            <Button
+            <button
               type="button"
-              variant="ghost"
-              onClick={requestClose}
+              onClick={() => setShowAdvanced((v) => !v)}
               disabled={submitting}
-              className="text-[#595757] hover:bg-[#EFEFEF] hover:text-[#FF0061]"
-              style={{ borderRadius: 8 }}
+              aria-label={showAdvanced ? '收起 RRULE' : '展开 RRULE'}
+              title={showAdvanced ? '收起 RRULE' : '展开 RRULE'}
+              className="inline-flex h-8 items-center gap-1 rounded-[8px] px-2.5 text-xs font-medium text-[#595757] hover:bg-[#EFEFEF] hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-55"
             >
-              取消
-            </Button>
-            <Button
-              type="submit"
-              data-can-create={canCreate ? 'true' : 'false'}
-              disabled={!canCreate}
-              style={{
-                backgroundColor: '#FF0061',
-                borderColor: '#FF0061',
-                borderRadius: 8,
-              }}
-              className="text-white hover:opacity-90"
-            >
-              {submitting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              {quickCreateSubmitLabel(submitting)}
-            </Button>
+              {showAdvanced ? (
+                <>
+                  <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+                  <span>RRULE</span>
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                  <span>RRULE</span>
+                </>
+              )}
+            </button>
+            {showAdvanced && (
+              <div className="mt-2">
+                <textarea
+                  value={rrule}
+                  onChange={(e) => {
+                    setRrule(e.target.value);
+                    setSubmitError(null);
+                  }}
+                  placeholder={'FREQ=WEEKLY;BYDAY=MO,WE,FR'}
+                  rows={2}
+                  className="w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 font-mono text-xs outline-none placeholder:text-[#ADADAD] focus:border-[#FF0061]/50 focus:ring-2 focus:ring-[#FF0061]/10"
+                  disabled={submitting}
+                />
+                {customRuleMissing && (
+                  <div className="mt-1 text-[11px] text-[#FF0061]">
+                    填写 RRULE 后才能创建，或切回预设频率。
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        </form>
+        )}
+        {submitError && (
+          <div className="mt-3 rounded-md border border-[#FF0061]/20 bg-[#FF0061]/[0.06] px-3 py-2 text-xs text-[#FF0061]">
+            {submitError}
+          </div>
+        )}
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={requestClose}
+            disabled={submitting}
+            className="text-[#595757] hover:bg-[#EFEFEF] hover:text-[#FF0061]"
+            style={{ borderRadius: 8 }}
+          >
+            取消
+          </Button>
+          <Button
+            type="submit"
+            data-can-create={canCreate ? 'true' : 'false'}
+            disabled={!canCreate}
+            style={{
+              backgroundColor: '#FF0061',
+              borderColor: '#FF0061',
+              borderRadius: 8,
+            }}
+            className="text-white hover:opacity-90"
+          >
+            {submitting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            {quickCreateSubmitLabel(submitting)}
+          </Button>
+        </div>
+      </form>
       </div>
       <ConfirmDialog
         open={confirmDiscardOpen}
@@ -424,7 +434,10 @@ export function QuickCreatePopover({
   );
 }
 
-function computePosition(anchor: { x: number; y: number }, mobile: boolean): React.CSSProperties {
+function computePosition(
+  anchor: { x: number; y: number },
+  mobile: boolean,
+): React.CSSProperties {
   if (mobile) return {};
   const margin = 16;
   const vw = window.innerWidth;
@@ -456,7 +469,7 @@ function formatLocalDate(d: Date): string {
 }
 
 function combineDateAndTime(date: Date, timeStr: string): Date {
-  const [hh, mm] = timeStr.split(':').map((s) => Number.parseInt(s, 10));
+  const [hh, mm] = timeStr.split(':').map((s) => parseInt(s, 10));
   const out = new Date(date);
   out.setHours(Number.isFinite(hh) ? hh! : 9, Number.isFinite(mm) ? mm! : 0, 0, 0);
   return out;
