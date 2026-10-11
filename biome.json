@@ -15,7 +15,12 @@
       "**/node_modules/**",
       "**/coverage/**",
       "**/*.min.js",
-      "**/drizzle/**"
+      "**/drizzle/**",
+      "ui-suite/**",
+      "frontend-audit-*/**",
+      "docs/**/*.json",
+      "apps/orchestrator/scripts/browser-eval/results/**",
+      "scripts/pool-broker/application_env_keys.json"
     ]
   },
   "organizeImports": {
@@ -59,5 +64,16 @@
         "noUnusedImports": "error"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "include": ["**/tsconfig*.json"],
+      "json": {
+        "parser": {
+          "allowComments": true,
+          "allowTrailingCommas": true
+        }
+      }
+    }
+  ]
 }
