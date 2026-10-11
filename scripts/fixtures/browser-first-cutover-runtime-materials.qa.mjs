@@ -53,7 +53,7 @@ export async function verifyFirstCutoverQaRuntimeMaterials({
         return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join('/'));
       }),
     ]),
-  ].map((name) => `/opt/holaday-recovery${name ? '/' + name : ''}`);
+  ].map((name) => `/opt/holaday-recovery${name ? `/${name}` : ''}`);
   const directoryStats = (
     await docker(['exec', containerId, '/usr/bin/stat', '-c', '%u %a %F', ...directories])
   ).stdout

@@ -283,8 +283,8 @@ it('accepts taller V2 viewports through the applied ACK path without relaxing le
     type: 'input',
     payload: { type: 'viewport', width: 1024, height: 2300 },
   });
-  const handle = vi.fn(async () => {}),
-    applied = vi.fn();
+  const handle = vi.fn(async () => {});
+  const applied = vi.fn();
   const legacy = new DeferredScreencastInputBridge();
   await legacy.attach({ handle });
   await legacy.receive(tall);

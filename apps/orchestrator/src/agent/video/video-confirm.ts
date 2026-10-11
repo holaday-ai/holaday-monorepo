@@ -190,10 +190,7 @@ export function quotePetI2v(
 ): PetVideoQuote {
   const perSec = I2V_CNY_PER_SEC[model]?.[resolution] ?? 0;
   const videoCny = Math.max(1, Math.ceil(durationSeconds * perSec));
-  const message =
-    `将把这张照片生成一条约 ${durationSeconds} 秒的宠物动态视频，预计费用约 ¥${videoCny}` +
-    `（${I2V_LABEL[model]} · ${resolution} · 按 ${durationSeconds} 秒计费）。\n` +
-    `点「确认制作」开始；不需要可「取消」。`;
+  const message = `将把这张照片生成一条约 ${durationSeconds} 秒的宠物动态视频，预计费用约 ¥${videoCny}（${I2V_LABEL[model]} · ${resolution} · 按 ${durationSeconds} 秒计费）。\n点「确认制作」开始；不需要可「取消」。`;
   return { durationSeconds, videoCny, message };
 }
 
@@ -233,10 +230,7 @@ export function quoteCloneVideo(
   const audioNote = options.hasAudibleAudio
     ? `检测到可听声音，报价已包含 ${options.lipSyncModel.endsWith('/v3') ? 'Sync Lipsync 3.0' : 'Sync Lipsync 2.0'} 口型同步。`
     : '未检测到可听声音，不追加口型同步成本。';
-  const message =
-    `将用 Wan Animate 2.2 ${label} 把主角照片替换进参考视频，按参考视频约 ${safeDuration.toFixed(1)} 秒估算费用约 ¥${videoCny}。\n` +
-    `${audioNote}\n` +
-    `最终按成功输出的实际输出时长计费；失败不计费。点「确认制作」开始；不需要可「取消」。`;
+  const message = `将用 Wan Animate 2.2 ${label} 把主角照片替换进参考视频，按参考视频约 ${safeDuration.toFixed(1)} 秒估算费用约 ¥${videoCny}。\n${audioNote}\n最终按成功输出的实际输出时长计费；失败不计费。点「确认制作」开始；不需要可「取消」。`;
   return { durationSeconds: safeDuration, videoCny, message };
 }
 
@@ -278,11 +272,7 @@ export function quoteIpVideo(
   const videoCny = Math.max(1, Math.ceil(usd * USD_TO_CNY));
   const maybeTooLong = chars > IP_CHAR_WARN;
   const modelLabel = model.endsWith('/v3') ? 'Sync Lipsync 3.0' : 'Sync Lipsync 2.0';
-  const message =
-    `将使用已授权的声音 + 出镜底版，通过 ${modelLabel} 生成 IP人物视频，` +
-    `按约 ${estimatedSeconds} 秒口播预估费用 ¥${videoCny}（单条 ≤40 秒）。\n` +
-    (maybeTooLong ? `⚠️ 文案约 ${chars} 字,可能超过 40 秒上限;过长会被拒,请适当截短。\n` : '') +
-    `点「确认制作」开始；不需要可「取消」。`;
+  const message = `将使用已授权的声音 + 出镜底版，通过 ${modelLabel} 生成 IP人物视频，按约 ${estimatedSeconds} 秒口播预估费用 ¥${videoCny}（单条 ≤40 秒）。\n${maybeTooLong ? `⚠️ 文案约 ${chars} 字,可能超过 40 秒上限;过长会被拒,请适当截短。\n` : ''}点「确认制作」开始；不需要可「取消」。`;
   return { chars, videoCny, maybeTooLong, message };
 }
 

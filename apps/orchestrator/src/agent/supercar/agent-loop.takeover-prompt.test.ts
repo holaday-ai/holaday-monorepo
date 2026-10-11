@@ -138,10 +138,7 @@ describe('looksLikeBrowserTakeoverPrompt', () => {
 
     it('long completed report that mentions both login and select incidentally', () => {
       // Length cap dodges the co-occurrence guard for genuine reports.
-      const longReport =
-        '已完成抖音直播复盘任务。' +
-        '我登录了抖音电商罗盘后台，选择了昨晚 20:00-23:00 的直播场次，' +
-        '提取出 GMV、UV、转化率等核心指标。'.repeat(30);
+      const longReport = `已完成抖音直播复盘任务。我登录了抖音电商罗盘后台，选择了昨晚 20:00-23:00 的直播场次，${'提取出 GMV、UV、转化率等核心指标。'.repeat(30)}`;
       expect(looksLikeBrowserTakeoverPrompt(longReport)).toBe(false);
     });
   });

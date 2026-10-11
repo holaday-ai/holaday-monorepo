@@ -15,8 +15,8 @@ export function AmbientGrid() {
       { x: number; y: number; born: number; power: number; hue: number }
     >();
     let frame = 0;
-    let width = 0,
-      height = 0;
+    let width = 0;
+    let height = 0;
     let last: { x: number; y: number } | null = null;
     const clear = () => {
       cancelAnimationFrame(frame);
@@ -51,8 +51,8 @@ export function AmbientGrid() {
       if (cells.size) frame = requestAnimationFrame(draw);
     };
     const stamp = (x: number, y: number, now: number) => {
-      const cx = Math.floor(x / 28),
-        cy = Math.floor(y / 28);
+      const cx = Math.floor(x / 28);
+      const cy = Math.floor(y / 28);
       for (let dx = -1; dx <= 1; dx++)
         for (let dy = -1; dy <= 1; dy++) {
           if (cx + dx < 0 || cy + dy < 0 || (cx + dx) * 28 > width || (cy + dy) * 28 > height)

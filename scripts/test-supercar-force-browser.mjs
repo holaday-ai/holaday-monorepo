@@ -130,7 +130,7 @@ async function runOne(token, task, index, total) {
       summaryPreview: '',
       error: String(err?.message ?? err),
     };
-    fs.appendFileSync(JSONL_PATH, JSON.stringify(row) + '\n');
+    fs.appendFileSync(JSONL_PATH, `${JSON.stringify(row)}\n`);
     return row;
   }
   log(`       -> ${taskId}, polling`);
@@ -195,7 +195,7 @@ async function runOne(token, task, index, total) {
     summaryPreview: summary.slice(0, 300),
     errorCode: detail?.errorCode ?? null,
   };
-  fs.appendFileSync(JSONL_PATH, JSON.stringify(row) + '\n');
+  fs.appendFileSync(JSONL_PATH, `${JSON.stringify(row)}\n`);
   log(
     `       done status=${row.status} path=${row.path} iter=${row.iterations} ${Math.round(duration / 1000)}s`,
   );
@@ -204,7 +204,7 @@ async function runOne(token, task, index, total) {
 
 function truncForTable(s, n) {
   const clean = (s ?? '').replace(/\s+/g, ' ').trim();
-  return clean.length > n ? clean.slice(0, n - 1) + '…' : clean;
+  return clean.length > n ? `${clean.slice(0, n - 1)}…` : clean;
 }
 
 function renderReport(rows) {
@@ -212,7 +212,7 @@ function renderReport(rows) {
   lines.push(`# Supercar force-browser smoke — ${runId}`);
   lines.push('');
   lines.push(`Base: ${BASE}`);
-  lines.push(`Injected suffix forbids \`web_search\`.`);
+  lines.push('Injected suffix forbids `web_search`.');
   lines.push(`Ran ${rows.length} tasks (the 8 that timed out in the pre-Phase-6 baseline).`);
   lines.push('');
   lines.push('| # | 任务 | 状态 | 路径 | 用到的工具 | 迭代 | 耗时 | 摘要 |');
@@ -246,7 +246,7 @@ function renderReport(rows) {
   lines.push(`- ❌ Failed / cancelled: ${failed}/${rows.length}`);
   lines.push(`- ⏱ Timed out: ${timedOut}/${rows.length}`);
   lines.push('');
-  lines.push(`**Target: browser-only ≥ 5/8**`);
+  lines.push('**Target: browser-only ≥ 5/8**');
   return lines.join('\n');
 }
 
@@ -254,7 +254,7 @@ function renderReport(rows) {
   log(`Run ID ${runId}`);
   log(`Results: ${JSONL_PATH}`);
   const token = await login();
-  log(`Token acquired`);
+  log('Token acquired');
   const rows = [];
   for (let i = 0; i < TASKS.length; i += 1) {
     const t = TASKS[i];
@@ -264,7 +264,7 @@ function renderReport(rows) {
   }
   const md = renderReport(rows);
   fs.writeFileSync(MD_PATH, md);
-  console.log('\n' + md);
+  console.log(`\n${md}`);
   log(`Report saved to ${MD_PATH}`);
 })().catch((err) => {
   console.error('FATAL', err);

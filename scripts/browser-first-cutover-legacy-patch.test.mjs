@@ -32,7 +32,7 @@ function fixture(change = {}) {
   return {
     exec: async (_, args) =>
       args.includes('rev-parse')
-        ? (change.head ?? '107857fe70503e30691073f267d87275596edb20') + '\n'
+        ? `${change.head ?? '107857fe70503e30691073f267d87275596edb20'}\n`
         : args.includes('status')
           ? (change.status ?? ' M apps/orchestrator/src/config/logger.ts\n')
           : args.includes('show')

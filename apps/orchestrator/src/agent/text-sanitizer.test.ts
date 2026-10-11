@@ -52,7 +52,8 @@ describe('sanitizeFinalText — paired tool tags', () => {
   });
 
   it('strips paired <tool_response>...</tool_response> across newlines', () => {
-    const input = `Result text\n<tool_response>\nlots of\nmulti-line\nstuff\n</tool_response>\nMore result`;
+    const input =
+      'Result text\n<tool_response>\nlots of\nmulti-line\nstuff\n</tool_response>\nMore result';
     expect(sanitizeFinalText(input)).toBe('Result text\n\nMore result');
   });
 

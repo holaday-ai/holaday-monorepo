@@ -648,7 +648,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
       <ConfirmDialog
         open={confirmCancel}
         title="取消这个批量任务？"
-        description={`未开始的项目会被取消。已在执行中的项目会继续完成，不会被中断。`}
+        description={'未开始的项目会被取消。已在执行中的项目会继续完成，不会被中断。'}
         confirmLabel="取消批量"
         destructive
         onClose={() => setConfirmCancel(false)}

@@ -131,7 +131,7 @@ console.log(
     migrations: kind === 'current-61' ? 61 : 0,
     objects: after.objects.length,
     snapshotFrameBytes: Buffer.byteLength(
-      JSON.stringify({ protocol: 1, type: 'result', seq: 99, value: after }) + '\n',
+      `${JSON.stringify({ protocol: 1, type: 'result', seq: 99, value: after })}\n`,
     ),
     verifyToolRequestBytes: Buffer.byteLength(
       JSON.stringify({

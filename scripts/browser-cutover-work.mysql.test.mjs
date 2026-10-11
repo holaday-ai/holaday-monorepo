@@ -13,7 +13,7 @@ test(
     assert.equal(url.protocol, 'mysql:');
     assert(['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname));
     assert.match(url.pathname, /^\/holaday_cutover_done_qa_[a-f0-9]{8,32}$/);
-    const require = createRequire(process.env.CUTOVER_DONE_QA_REQUIRE_ROOT + '/package.json');
+    const require = createRequire(`${process.env.CUTOVER_DONE_QA_REQUIRE_ROOT}/package.json`);
     const db = await require('mysql2/promise').createConnection({
       uri: url.toString(),
       dateStrings: true,

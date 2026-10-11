@@ -9,13 +9,11 @@ import {
 } from './file-artifact-consistency.js';
 
 const fence = (fileId: string, filename: string): string =>
-  '```holaday-file\n' +
-  JSON.stringify(
+  `\`\`\`holaday-file\n${JSON.stringify(
     { fileId, filename, size: 100, downloadUrl: `/api/files/${fileId}/download` },
     null,
     2,
-  ) +
-  '\n```';
+  )}\n\`\`\``;
 
 const SCREENSHOT = { filename: 'screenshot-tsk_x.jpg', mimetype: 'image/jpeg' };
 const PDF = { filename: 'qa-summary.pdf', mimetype: 'application/pdf' };

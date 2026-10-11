@@ -244,7 +244,7 @@ function fixture(fault) {
       }
       if (command === 'bash' && args[0] === '-c') return '';
       if (command === 'curl')
-        return JSON.stringify({ status: 'ok', adapter_ready: true }) + '\n200';
+        return `${JSON.stringify({ status: 'ok', adapter_ready: true })}\n200`;
       if (command === 'pm2') {
         assert.equal(settings.env.PM2_HOME, '/root/.pm2');
         if (args[0] === 'start') {

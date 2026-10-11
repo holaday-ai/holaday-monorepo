@@ -121,7 +121,7 @@ describe('decideAuthTokenAction', () => {
 
 describe('looksLikeAuthToken', () => {
   it('accepts long opaque auth tokens and rejects obvious garbage', () => {
-    expect(looksLikeAuthToken('hd_live_' + 'a'.repeat(24))).toBe(true);
+    expect(looksLikeAuthToken(`hd_live_${'a'.repeat(24)}`)).toBe(true);
     expect(looksLikeAuthToken('abc')).toBe(false);
     expect(looksLikeAuthToken('undefined')).toBe(false);
     expect(looksLikeAuthToken('NULL')).toBe(false);

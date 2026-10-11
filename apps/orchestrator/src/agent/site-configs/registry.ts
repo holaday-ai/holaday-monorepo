@@ -51,7 +51,7 @@ export function matchSiteConfig(url: string | null | undefined): SiteConfig | nu
   for (const cfg of ALL_SITE_CONFIGS) {
     for (const d of cfg.domains) {
       const dLower = d.toLowerCase();
-      if (host === dLower || host.endsWith('.' + dLower)) return cfg;
+      if (host === dLower || host.endsWith(`.${dLower}`)) return cfg;
     }
   }
   return null;

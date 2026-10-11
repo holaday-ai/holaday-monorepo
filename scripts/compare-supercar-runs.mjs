@@ -121,7 +121,7 @@ function main() {
   let stable = 0;
 
   const lines = [];
-  lines.push(`# Supercar Benchmark Comparison`);
+  lines.push('# Supercar Benchmark Comparison');
   lines.push('');
   lines.push(`New run: \`${jsonlPath}\``);
   lines.push('');

@@ -1095,9 +1095,7 @@ function checkDuplicateCandidateUrls(
       criterionType: 'duplicate_candidate_urls',
       passed: false,
       checker: 'deterministic',
-      detail:
-        `多候选结果中 ${group.length} 行复用了同一个链接 ${url}；` +
-        '若未取得每项独立链接，应只保留一次总来源，不要把同一个链接放到多行',
+      detail: `多候选结果中 ${group.length} 行复用了同一个链接 ${url}；若未取得每项独立链接，应只保留一次总来源，不要把同一个链接放到多行`,
       severity: 'fixable',
     };
   }

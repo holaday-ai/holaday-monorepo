@@ -124,7 +124,7 @@ describe('detectLoginBody', () => {
     // "登录" appear in every site's nav, false-positive on baidu /
     // bing / google homepages. Phase 3 R1 tightened the needle list
     // to phrases that ONLY appear on login walls.
-    const long = 'A '.repeat(200) + 'login best practices include MFA';
+    const long = `${'A '.repeat(200)}login best practices include MFA`;
     expect(detectLoginBody(long).matched).toBe(false);
   });
 

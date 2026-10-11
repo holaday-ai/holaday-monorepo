@@ -613,8 +613,8 @@ for (const stage of ['LOCAL_OWNER', 'STORE_CLOCK', 'APPROVAL_DEADLINE']) {
   });
 }
 test('payment port guard retains original successful read order and command exactly once', async () => {
-  const io = portFixture(),
-    calls = [];
+  const io = portFixture();
+  const calls = [];
   for (const key of ['now', 'assertJournalOwnership', 'readFenceReceipt', 'execNft']) {
     const original = io[key];
     io[key] = (...args) => {
@@ -697,7 +697,7 @@ for (const [fault, expectedStage] of [
       'execFile',
       'ingressDiagnosticError',
       'readFile',
-      block + ';return system;',
+      `${block};return system;`,
     )(execFile, ingressDiagnosticError, () => {});
     const io = portFixture();
     io.execNft = system.execNft;
@@ -720,8 +720,8 @@ for (const [fault, expectedStage] of [
 }
 
 test('payment installation keeps one atomic attempt and rejects uncertain acknowledgement without replay', async () => {
-  const io = portFixture(),
-    calls = [];
+  const io = portFixture();
+  const calls = [];
   io.readFenceReceipt = async () => ({ ...portBinding, stage: 'orders', phase: 'installing' });
   io.readPolicy = async () =>
     readFileSync(

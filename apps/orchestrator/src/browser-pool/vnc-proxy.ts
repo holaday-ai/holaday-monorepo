@@ -293,10 +293,7 @@ function extractTokenFromQuery(url: string): string | null {
  */
 function reject(socket: Duplex, status: number, reason: string): void {
   socket.write(
-    `HTTP/1.1 ${status} ${reason}\r\n` +
-      'Connection: close\r\n' +
-      `Content-Length: ${Buffer.byteLength(reason)}\r\n\r\n` +
-      reason,
+    `HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: ${Buffer.byteLength(reason)}\r\n\r\n${reason}`,
   );
   socket.destroy();
 }

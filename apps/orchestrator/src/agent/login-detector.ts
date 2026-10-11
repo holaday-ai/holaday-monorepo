@@ -153,7 +153,7 @@ export function detectLoginUrl(url: string | null | undefined): LoginSignal {
     if (
       host.startsWith(needle) ||
       host.includes(`.${needle}`) ||
-      host.startsWith(needle.slice(0, -1) + '.')
+      host.startsWith(`${needle.slice(0, -1)}.`)
     ) {
       return { matched: true, source: 'url-host', match: needle };
     }

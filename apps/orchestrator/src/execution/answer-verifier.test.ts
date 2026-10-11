@@ -215,7 +215,7 @@ describe('verifyDeterministic — URL fabrication (acceptance #3)', () => {
     const result = verifyDeterministic({
       contract,
       ledger,
-      answerText: 'No URLs mentioned. Just plain text. ' + 'x'.repeat(60),
+      answerText: `No URLs mentioned. Just plain text. ${'x'.repeat(60)}`,
     });
     const groundCheck = result.checks.find((c) => c.criterionId === 'generic.url_grounding');
     expect(groundCheck).toBeUndefined();
@@ -266,7 +266,7 @@ describe('verifyDeterministic — number cross-validation (acceptance #4)', () =
     const result = verifyDeterministic({
       contract,
       ledger,
-      answerText: '直播复盘报告：本场 GMV ¥200000，订单 500 单，客单价 ¥50。' + 'x'.repeat(60),
+      answerText: `直播复盘报告：本场 GMV ¥200000，订单 500 单，客单价 ¥50。${'x'.repeat(60)}`,
     });
     expect(result.passed).toBe(false);
     const numCheck = result.checks.find((c) => c.criterionId === 'generic.number_cross_check');
@@ -302,7 +302,7 @@ describe('verifyDeterministic — number cross-validation (acceptance #4)', () =
     const result = verifyDeterministic({
       contract,
       ledger,
-      answerText: '直播复盘 ' + 'x'.repeat(80),
+      answerText: `直播复盘 ${'x'.repeat(80)}`,
     });
     const numCheck = result.checks.find((c) => c.criterionId === 'generic.number_cross_check');
     expect(numCheck).toBeDefined();
@@ -321,7 +321,7 @@ describe('verifyDeterministic — number cross-validation (acceptance #4)', () =
     const result = verifyDeterministic({
       contract,
       ledger,
-      answerText: '直播复盘 ' + 'x'.repeat(80),
+      answerText: `直播复盘 ${'x'.repeat(80)}`,
     });
     const numCheck = result.checks.find(
       (check) => check.criterionId === 'generic.number_cross_check',
@@ -343,7 +343,7 @@ describe('verifyDeterministic — number cross-validation (acceptance #4)', () =
     const result = verifyDeterministic({
       contract,
       ledger,
-      answerText: 'Just GMV reported. ' + 'x'.repeat(60),
+      answerText: `Just GMV reported. ${'x'.repeat(60)}`,
     });
     const numCheck = result.checks.find((c) => c.criterionId === 'generic.number_cross_check');
     expect(numCheck).toBeUndefined();
@@ -696,7 +696,7 @@ describe('verifyDeterministic — criterion: covers_required_inputs (full tier)'
       contract,
       ledger,
       // GMV present, 客单价 absent → fixable
-      answerText: '直播复盘：本场 GMV ¥100000 表现良好。' + 'x'.repeat(200),
+      answerText: `直播复盘：本场 GMV ¥100000 表现良好。${'x'.repeat(200)}`,
     });
     const cri = result.checks.find((c) => c.detail.includes('provided inputs missing'));
     expect(cri).toBeDefined();
@@ -838,7 +838,7 @@ describe('verifyDeterministic — workflow section_presence + source_annotation 
     const result = verifyDeterministic({
       contract,
       ledger: new EvidenceLedger('tsk_no_wf'),
-      answerText: 'Hello world. ' + 'x'.repeat(60),
+      answerText: `Hello world. ${'x'.repeat(60)}`,
       // workflowContract intentionally omitted
     });
     const sectionCheck = result.checks.find((c) => c.criterionId === 'workflow.section_presence');
@@ -1040,9 +1040,7 @@ describe('verifyDeterministic — generic expert claim provenance', () => {
     const result = verifyDeterministic({
       contract: genericExpertContract(taskId),
       ledger,
-      answerText:
-        '建议按认知、考虑、转化三个阶段优化。行业平均注册转化率为 8%，首屏改版通常能提升 20%。' +
-        '每项建议都应设置负责人、验证指标和复盘周期。'.repeat(8),
+      answerText: `建议按认知、考虑、转化三个阶段优化。行业平均注册转化率为 8%，首屏改版通常能提升 20%。${'每项建议都应设置负责人、验证指标和复盘周期。'.repeat(8)}`,
     });
 
     expect(result.passed).toBe(false);
@@ -1067,9 +1065,7 @@ describe('verifyDeterministic — generic expert claim provenance', () => {
     const result = verifyDeterministic({
       contract: genericExpertContract(taskId),
       ledger,
-      answerText:
-        '建议按认知、考虑、转化三个阶段优化。注册转化率 8% 仅作为首轮实验目标 [模型假设]，需要用真实流量校准。' +
-        '每项建议都包含漏斗阶段、具体动作、负责人、验证指标和复盘周期。'.repeat(8),
+      answerText: `建议按认知、考虑、转化三个阶段优化。注册转化率 8% 仅作为首轮实验目标 [模型假设]，需要用真实流量校准。${'每项建议都包含漏斗阶段、具体动作、负责人、验证指标和复盘周期。'.repeat(8)}`,
     });
 
     expect(result.checks).toContainEqual(
@@ -1535,9 +1531,7 @@ describe('duplicate candidate links', () => {
       sourceDetail: 'goto',
       confidence: 'observed',
     });
-    const answer =
-      `Example Domain 是 IANA 保留用于文档示例的域名，[Wikipedia](${url}) 说明它不面向真实服务。` +
-      '它适合出现在教程、测试说明和不会真实访问第三方系统的示例里。';
+    const answer = `Example Domain 是 IANA 保留用于文档示例的域名，[Wikipedia](${url}) 说明它不面向真实服务。它适合出现在教程、测试说明和不会真实访问第三方系统的示例里。`;
 
     const result = verifyDeterministic({ contract, ledger, answerText: answer });
 
@@ -1588,16 +1582,12 @@ describe('verifyDeterministic — file-artifact consistency', () => {
 
   it('does NOT flag when a holaday-file fence backs the claim', () => {
     const contract = happyChecklistContract('tsk_fa3');
-    const fenced =
-      claimAnswer +
-      '\n\n```holaday-file\n' +
-      JSON.stringify({
-        fileId: 'file_ok',
-        filename: 'productivity-tips.md',
-        size: 200,
-        downloadUrl: '/api/files/file_ok/download',
-      }) +
-      '\n```';
+    const fenced = `${claimAnswer}\n\n\`\`\`holaday-file\n${JSON.stringify({
+      fileId: 'file_ok',
+      filename: 'productivity-tips.md',
+      size: 200,
+      downloadUrl: '/api/files/file_ok/download',
+    })}\n\`\`\``;
     const result = verifyDeterministic({
       contract,
       ledger: new EvidenceLedger('tsk_fa3'),

@@ -42,9 +42,9 @@ async function maintenance() {
   return m;
 }
 it('tracks pending upgrade auth and rechecks maintenance before choosing a browser', async () => {
-  const m = await maintenance(),
-    held = deferred(),
-    entered = deferred();
+  const m = await maintenance();
+  const held = deferred();
+  const entered = deferred();
   const peek = vi.fn(() => null);
   const proxy = createScreencastProxy({
     pool: { peek } as unknown as BrowserPool,
@@ -63,7 +63,7 @@ it('tracks pending upgrade auth and rechecks maintenance before choosing a brows
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('test address');
   const socket = new WebSocket(
-    'ws://127.0.0.1:' + address.port + '/screencast-ws/tsk_test?token=synthetic',
+    `ws://127.0.0.1:${address.port}/screencast-ws/tsk_test?token=synthetic`,
   );
   socket.on('error', () => {});
   const refused = new Promise<number>((resolve) =>
@@ -89,9 +89,9 @@ it('tracks pending upgrade auth and rechecks maintenance before choosing a brows
   await m.waitForIdle(1000);
 });
 it('keeps an already-dispatched input owned but refuses later input and queued viewport', async () => {
-  const m = await maintenance(),
-    held = deferred(),
-    entered = deferred();
+  const m = await maintenance();
+  const held = deferred();
+  const entered = deferred();
   const instance = {
     taskId: 'tsk_maintenance',
     userId: 'usr_synthetic',

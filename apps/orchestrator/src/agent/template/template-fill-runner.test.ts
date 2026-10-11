@@ -210,13 +210,13 @@ describe('runTemplateFillTask — output filename defense (P0 / E10 mojibake)', 
   // (周报模板 → å¨æ¥…), so the output name inherited the garble. Defend at
   // output generation: repair the name (latin1→utf8) → clean Chinese.
   it('REPAIRS a recoverable mojibake template name → clean Chinese output', async () => {
-    const garble = Buffer.from('周报模板', 'utf8').toString('latin1') + '.xlsx';
+    const garble = `${Buffer.from('周报模板', 'utf8').toString('latin1')}.xlsx`;
     const name = await fill(garble);
     expect(name).toBe('周报模板-已填充.xlsx');
   });
 
   it('falls back to a clean default for an UNRECOVERABLE mojibake name', async () => {
-    const garble = String.fromCharCode(0x80, 0x81, 0x82) + '.xlsx';
+    const garble = `${String.fromCharCode(0x80, 0x81, 0x82)}.xlsx`;
     const name = await fill(garble);
     expect(name).toMatch(/^填充结果-\d{8}-\d{6}\.xlsx$/);
   });

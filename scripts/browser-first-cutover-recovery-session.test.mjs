@@ -336,11 +336,11 @@ for (const fault of ['initial', 'challenge', 'final']) {
       if (frame.type === 'operation') {
         operations++;
         input.write(
-          JSON.stringify({ protocol: 1, type: 'scope', seq: 1, scopeSeq: 1, binding }) + '\n',
+          `${JSON.stringify({ protocol: 1, type: 'scope', seq: 1, scopeSeq: 1, binding })}\n`,
         );
       } else
         input.write(
-          JSON.stringify({ protocol: 1, type: 'result', seq: 1, value: approved }) + '\n',
+          `${JSON.stringify({ protocol: 1, type: 'result', seq: 1, value: approved })}\n`,
         );
     });
     const at = { initial: 1, challenge: 2, final: 3 }[fault];
@@ -385,13 +385,13 @@ for (const fault of ['scope-read', 'scope-recheck', 'attach-value']) {
       isolatedTarget: f.scope.target.identity,
     };
     input.write(
-      JSON.stringify({
+      `${JSON.stringify({
         protocol: 1,
         type: 'operation',
         seq: 1,
         name: 'attach',
         value: fault === 'attach-value' ? {} : approved,
-      }) + '\n',
+      })}\n`,
     );
     let reads = 0;
     const stages = {

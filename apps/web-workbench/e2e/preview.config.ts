@@ -32,12 +32,12 @@ export default mergeConfig(
               const route = (request.url ?? '').split('?')[0];
               fs.appendFileSync(
                 file,
-                JSON.stringify({
+                `${JSON.stringify({
                   path: route,
                   phase,
                   elapsed: Date.now() - (started.get(request) ?? Date.now()),
                   ...extra,
-                }) + '\n',
+                })}\n`,
                 { mode: 0o600 },
               );
             };

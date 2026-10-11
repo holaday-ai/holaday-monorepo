@@ -146,9 +146,7 @@ export function buildFileFormatGuidance(allowed: readonly string[]): string {
       .filter((s): s is string => s != null)
       .join('、');
     lines.push(
-      `若用户要的格式（${unavailable.join('/')}）不在可用列表：**绝不要声称已生成该格式、绝不要假装用 reportlab 等库直接生成**；` +
-        `你必须实际调用 create_file 以最接近的可用格式生成真实文件（${exMap}），` +
-        '然后在最终回答中说明「已改用 X 文件交付；PDF/Office 等格式需升级 Pro 套餐」。未调用 create_file 就不得声称已生成任何文件。',
+      `若用户要的格式（${unavailable.join('/')}）不在可用列表：**绝不要声称已生成该格式、绝不要假装用 reportlab 等库直接生成**；你必须实际调用 create_file 以最接近的可用格式生成真实文件（${exMap}），然后在最终回答中说明「已改用 X 文件交付；PDF/Office 等格式需升级 Pro 套餐」。未调用 create_file 就不得声称已生成任何文件。`,
     );
   }
   return lines.join('\n');
@@ -196,10 +194,7 @@ export function buildUnavailableFormatDirective(
   if (!requested) return '';
   if (allowed.includes(requested)) return '';
   if (allowed.length === 0) {
-    return (
-      `【重要·文件格式】本账号当前套餐无法生成可下载文件，更无法生成 ${requested}。` +
-      '请诚实告知用户当前套餐不支持生成可下载文件，直接在正文给出内容，**切勿声称已生成任何文件或下载链接**。'
-    );
+    return `【重要·文件格式】本账号当前套餐无法生成可下载文件，更无法生成 ${requested}。请诚实告知用户当前套餐不支持生成可下载文件，直接在正文给出内容，**切勿声称已生成任何文件或下载链接**。`;
   }
   const fb = preferredFallbackFormat(requested, allowed) ?? 'md';
   return (
@@ -221,9 +216,7 @@ export function buildCreateFileToolDescription(allowed: readonly string[]): stri
   const unavailable = ALL_FORMATS.filter((f) => !allowed.includes(f));
   let note = ` 本账号可用格式：${allowed.join('/')}。`;
   if (unavailable.length > 0) {
-    note +=
-      `若用户要 ${unavailable.join('/')} 等不可用格式，请改用可用格式生成真实文件` +
-      '（pdf/docx/pptx→md，xlsx→csv），并在回答中说明已降级交付、该格式需升级 Pro，**不要声称已生成不可用格式**。';
+    note += `若用户要 ${unavailable.join('/')} 等不可用格式，请改用可用格式生成真实文件（pdf/docx/pptx→md，xlsx→csv），并在回答中说明已降级交付、该格式需升级 Pro，**不要声称已生成不可用格式**。`;
   }
   return base + note;
 }

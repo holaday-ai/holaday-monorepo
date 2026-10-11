@@ -58,7 +58,7 @@ describe('risk-monitor latest display snapshot, real MySQL query', () => {
     for (let i = 0; i < 20; i++) {
       await insert(
         7,
-        'served-' + i,
+        `served-${i}`,
         { kind: 'served-stock-context-v1', expiresAt: '2026-10-07T02:10:00Z', snapshot: display },
         '2026-10-07 02:00:00',
       );

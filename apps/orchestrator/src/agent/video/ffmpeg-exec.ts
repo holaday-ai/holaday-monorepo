@@ -379,9 +379,7 @@ export async function renderImageKenBurns(
     // Upscale 2× before zoompan so the per-frame zoom downsamples to sub-pixel
     // smoothness (fixes jitter, P1-1); GENTLE zoom 1.0→1.08 at a constant fps.
     '-vf',
-    `scale=${W * 2}:${H * 2}:force_original_aspect_ratio=increase,crop=${W * 2}:${H * 2},` +
-      `zoompan=z='min(1+0.00035*on,1.08)':d=1:fps=${FPS}:s=${W}x${H}:` +
-      `x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',setsar=1`,
+    `scale=${W * 2}:${H * 2}:force_original_aspect_ratio=increase,crop=${W * 2}:${H * 2},zoompan=z='min(1+0.00035*on,1.08)':d=1:fps=${FPS}:s=${W}x${H}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',setsar=1`,
     '-c:v',
     'libx264',
     '-pix_fmt',

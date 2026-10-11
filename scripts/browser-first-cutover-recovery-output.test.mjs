@@ -19,7 +19,7 @@ const connection = siteBytes.slice(
 const writer = connection.match(/output: ([\s\S]*?),\n {6}assertScope:/)?.[1];
 assert.ok(writer, 'actual site recovery output expression');
 for (const fault of ['normal', 'early-attach', 'nonzero-exit', 'early-eof'])
-  test('real recovery pipe transport ' + fault, async (t) => {
+  test(`real recovery pipe transport ${fault}`, async (t) => {
     const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-bridge-pipe-')));
     t.after(() => fs.rm(directory, { recursive: true, force: true }));
     const binding = {
@@ -42,17 +42,17 @@ for (const fault of ['normal', 'early-attach', 'nonzero-exit', 'early-eof'])
       sourceOptions: { facility, directory: '/approved/source', attempt: binding.attempt },
       sourceIdentity: { serverUuid: '11111111-1111-4111-8111-111111111111', database: 'source' },
       destination: { facility, directory, attempt: binding.attempt },
-      identityFile: directory + '/identity',
+      identityFile: `${directory}/identity`,
       target: {
         containerId: '3'.repeat(64),
-        imageId: 'sha256:' + '4'.repeat(64),
-        volume: 'holaday-cutover-restore-' + binding.attempt,
+        imageId: `sha256:${'4'.repeat(64)}`,
+        volume: `holaday-cutover-restore-${binding.attempt}`,
         attempt: binding.attempt,
         identity: { serverUuid: '22222222-2222-4222-8222-222222222222', database: 'restore' },
       },
     };
     const bytes = JSON.stringify(scope);
-    await fs.writeFile(join(directory, 'first-cutover-' + binding.attempt + '.json'), bytes, {
+    await fs.writeFile(join(directory, `first-cutover-${binding.attempt}.json`), bytes, {
       mode: 0o600,
     });
     const request = {

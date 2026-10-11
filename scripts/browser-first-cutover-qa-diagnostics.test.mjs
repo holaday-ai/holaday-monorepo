@@ -20,8 +20,7 @@ test('QA diagnostics persist only bounded private whitelisted metadata across ch
     'openSync',
     'writeSync',
     'fsyncSync',
-    source.slice(start, end) +
-      '\nreturn {safeLine,persistSafeDiagnostics,fd:safeDiagnosticFd,path:safeDiagnosticPath,state:()=>({bytes:safeDiagnosticBytes,failed:safeDiagnosticFailed})};',
+    `${source.slice(start, end)}\nreturn {safeLine,persistSafeDiagnostics,fd:safeDiagnosticFd,path:safeDiagnosticPath,state:()=>({bytes:safeDiagnosticBytes,failed:safeDiagnosticFailed})};`,
   )(directory, join, fs.openSync, fs.writeSync, fs.fsyncSync);
   assert.equal(fs.statSync(api.path).mode & 0o777, 0o600);
   const good = 'QA_BACKUP_STAGE source-snapshot start';
@@ -123,27 +122,27 @@ test('QA diagnostics persist only bounded private whitelisted metadata across ch
   );
   for (const stage of newStages) {
     for (const component of ['client', 'server']) {
-      assert.ok(api.safeLine('QA_RECOVERY_REJECTION ' + JSON.stringify({ component, stage })));
+      assert.ok(api.safeLine(`QA_RECOVERY_REJECTION ${JSON.stringify({ component, stage })}`));
       assert.equal(
-        api.safeLine('QA_RECOVERY_REJECTION ' + JSON.stringify({ component, stage: [stage] })),
+        api.safeLine(`QA_RECOVERY_REJECTION ${JSON.stringify({ component, stage: [stage] })}`),
         false,
       );
       assert.equal(
         api.safeLine(
-          'QA_RECOVERY_REJECTION ' + JSON.stringify({ component, stage, raw: 'PRIVATE' }),
+          `QA_RECOVERY_REJECTION ${JSON.stringify({ component, stage, raw: 'PRIVATE' })}`,
         ),
         false,
       );
     }
     for (const component of ['pair', 'receiver']) {
-      const line = 'QA_INGRESS_REJECTION ' + JSON.stringify({ component, stage });
+      const line = `QA_INGRESS_REJECTION ${JSON.stringify({ component, stage })}`;
       assert.ok(api.safeLine(line));
       assert.equal(
-        api.safeLine('QA_INGRESS_REJECTION ' + JSON.stringify({ component, stage: [stage] })),
+        api.safeLine(`QA_INGRESS_REJECTION ${JSON.stringify({ component, stage: [stage] })}`),
         false,
       );
       assert.equal(
-        api.safeLine('QA_INGRESS_REJECTION ' + JSON.stringify({ component, stage, raw: 'SECRET' })),
+        api.safeLine(`QA_INGRESS_REJECTION ${JSON.stringify({ component, stage, raw: 'SECRET' })}`),
         false,
       );
     }
@@ -161,10 +160,10 @@ test('QA diagnostics persist only bounded private whitelisted metadata across ch
     'QA_INGRESS_CHILD_EXIT {"code":256,"signal":null}',
   ])
     assert.equal(api.safeLine(bad), false);
-  api.persistSafeDiagnostics(Buffer.from('raw SECRET\n' + good.slice(0, 10)));
-  api.persistSafeDiagnostics(Buffer.from(good.slice(10) + '\n'));
-  assert.equal(fs.readFileSync(api.path, 'utf8'), good + '\n');
-  api.persistSafeDiagnostics(Buffer.from((good + '\n').repeat(3000)));
+  api.persistSafeDiagnostics(Buffer.from(`raw SECRET\n${good.slice(0, 10)}`));
+  api.persistSafeDiagnostics(Buffer.from(`${good.slice(10)}\n`));
+  assert.equal(fs.readFileSync(api.path, 'utf8'), `${good}\n`);
+  api.persistSafeDiagnostics(Buffer.from(`${good}\n`.repeat(3000)));
   assert.equal(api.state().failed, true);
   assert.ok(api.state().bytes <= 65536);
   const saved = fs.readFileSync(api.path, 'utf8');
@@ -192,8 +191,8 @@ test('late failure QA checks both mapped approved startup files and isolates Ali
   assert.ok(start > 0 && end > start);
   const directory = fs.mkdtempSync(join(tmpdir(), 'holaday-mapped-startup-contract-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  const vultrStartupRoot = join(directory, 'vultr'),
-    vultrArchive = join(directory, 'archive');
+  const vultrStartupRoot = join(directory, 'vultr');
+  const vultrArchive = join(directory, 'archive');
   fs.mkdirSync(vultrStartupRoot);
   const mapping = source.slice(
     source.indexOf('  const startupMappings ='),
@@ -202,26 +201,26 @@ test('late failure QA checks both mapped approved startup files and isolates Ali
   const mapStartup = new Function(
     'vultrStartupRoot',
     'vultrArchive',
-    mapping + ';return mapStartup;',
+    `${mapping};return mapStartup;`,
   )(vultrStartupRoot, vultrArchive);
-  const root = '/opt/holaday-releases/' + 'a'.repeat(40);
+  const root = `/opt/holaday-releases/${'a'.repeat(40)}`;
   const entries = [
     { name: 'qa-unrelated' },
     {
       name: 'holaday-orchestrator',
-      pm_cwd: root + '/apps/orchestrator',
+      pm_cwd: `${root}/apps/orchestrator`,
       autorestart: false,
       uid: 998,
     },
     {
       name: 'holaday-account-closure-worker',
-      pm_cwd: root + '/apps/orchestrator',
+      pm_cwd: `${root}/apps/orchestrator`,
       autorestart: false,
       uid: 998,
     },
   ];
   const sha = (bytes) => requireHash(bytes);
-  const files = ['dump.pm2', 'dump.pm2.bak'].map((name) => ({ path: '/root/.pm2/' + name }));
+  const files = ['dump.pm2', 'dump.pm2.bak'].map((name) => ({ path: `/root/.pm2/${name}` }));
   const effects = {
     candidateStartupEvents: [
       {},
@@ -244,7 +243,7 @@ test('late failure QA checks both mapped approved startup files and isolates Ali
     'siteContext',
     'enabledWorker',
     'assert',
-    'return (async()=>{' + source.slice(start, end) + '})();',
+    `return (async()=>{${source.slice(start, end)}})();`,
   );
   await run(files, effects, io, mapStartup, sha, { root }, true, assert);
   for (const f of files) {
@@ -294,8 +293,8 @@ test('late known QA persists only fixed discovery and inner refusal markers', (t
     new URL('./fixtures/browser-recovery-target-qa.mjs', import.meta.url),
     'utf8',
   );
-  const start = source.indexOf('const safeDiagnosticPath ='),
-    end = source.indexOf('const child =', start);
+  const start = source.indexOf('const safeDiagnosticPath =');
+  const end = source.indexOf('const child =', start);
   const directory = fs.mkdtempSync(join(tmpdir(), 'holaday-late-known-filter-'));
   const api = new Function(
     'directory',
@@ -303,7 +302,7 @@ test('late known QA persists only fixed discovery and inner refusal markers', (t
     'openSync',
     'writeSync',
     'fsyncSync',
-    source.slice(start, end) + ';return {safeLine,fd:safeDiagnosticFd};',
+    `${source.slice(start, end)};return {safeLine,fd:safeDiagnosticFd};`,
   )(directory, join, fs.openSync, fs.writeSync, fs.fsyncSync);
   t.after(() => {
     fs.closeSync(api.fd);
@@ -314,7 +313,7 @@ test('late known QA persists only fixed discovery and inner refusal markers', (t
     'QA_LATE_KNOWN_REJECTED CUTOVER_KNOWN_EXTERNAL_WORK_UNPROVEN',
   ]) {
     assert.ok(api.safeLine(marker));
-    assert.equal(api.safeLine(marker + ' SECRET'), false);
+    assert.equal(api.safeLine(`${marker} SECRET`), false);
   }
   assert.equal(api.safeLine('QA_LATE_KNOWN_REJECTED CUTOVER_SITE_UNPROVEN'), false);
 });
@@ -324,14 +323,14 @@ test('actual late-known QA checkOwned emits refusal only after original bound se
     new URL('./fixtures/browser-registration-removal-linux.mjs', import.meta.url),
     'utf8',
   );
-  const start = source.indexOf('                  const checkOwned = async () => {'),
-    end = source.indexOf('                  const before = await checkOwned();', start);
+  const start = source.indexOf('                  const checkOwned = async () => {');
+  const end = source.indexOf('                  const before = await checkOwned();', start);
   assert.ok(start > 0 && end > start);
   const directory = fs.mkdtempSync(join(tmpdir(), 'holaday-late-known-refusal-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const path = join(directory, 'journal.json');
-  const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) },
-    binding = { attempt: 'c'.repeat(32) };
+  const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
+  const binding = { attempt: 'c'.repeat(32) };
   fs.writeFileSync(path, JSON.stringify({ phase: 'reconciled', identity }));
   const journal = { path, assertOwnership: async () => binding };
   const ctx = { journal, binding, approval: { reconcileByMs: Date.now() + 60000 } };
@@ -354,9 +353,7 @@ test('actual late-known QA checkOwned emits refusal only after original bound se
     'effectCount',
     'assert',
     'console',
-    'let lateKnownRejections=0;' +
-      source.slice(start, end) +
-      ';return {checkOwned,count:()=>lateKnownRejections};',
+    `let lateKnownRejections=0;${source.slice(start, end)};return {checkOwned,count:()=>lateKnownRejections};`,
   );
   const good = make(ctx, journal, identity, fs.promises, hostAdapter, false, true, 1, assert, {
     error: (x) => events.push(x),

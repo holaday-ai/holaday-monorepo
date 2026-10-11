@@ -310,7 +310,7 @@ describe('Step 9 — parseHotelJson + validateHotelJson', () => {
 
 describe('bodyMatchesCity v2 — dominant city among recommendations', () => {
   it('Shanghai page with a few Beijing recommendations still matches 上海', () => {
-    const mixed = SH_V2_BODY + '\n猜你喜欢 北京王府井希尔顿酒店 ¥1,200 北京三里屯洲际 ¥1,400';
+    const mixed = `${SH_V2_BODY}\n猜你喜欢 北京王府井希尔顿酒店 ¥1,200 北京三里屯洲际 ¥1,400`;
     expect(bodyMatchesCity(mixed, '上海')).toBe(true); // 上海 dominates
     expect(bodyMatchesCity(mixed, '北京')).toBe(false); // not the result city
   });

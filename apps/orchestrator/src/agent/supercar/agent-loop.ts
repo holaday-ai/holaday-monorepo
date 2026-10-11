@@ -170,7 +170,7 @@ export function formatScrapeWebsiteResult(items: readonly unknown[], requestedUr
   const title = first.title ?? '(untitled)';
   const body = absolutizeMarkdownLinks(first.markdown ?? first.text ?? '', finalUrl);
   const head = `# scrape_website 结果\n来源: ${finalUrl}\n标题: ${title}\n\n---\n\n`;
-  return head + truncateText(body, 30_000) + '\n\n---\n**记得回到浏览器继续完成任务**';
+  return `${head + truncateText(body, 30_000)}\n\n---\n**记得回到浏览器继续完成任务**`;
 }
 
 export function absolutizeMarkdownLinks(markdown: string, baseUrl: string): string {
@@ -214,11 +214,9 @@ export function formatSearchEcommerceResult(
   });
   const head = `# search_ecommerce 结果 (${platform}, query="${query}", ${items.length} items)\n\n`;
   const json = JSON.stringify(normalised, null, 2);
-  return (
-    head +
-    truncateText(json, 28_000) +
-    '\n\n---\n**记得回到浏览器中打开商品页或做对比表，让用户看到执行过程**'
-  );
+  return `${
+    head + truncateText(json, 28_000)
+  }\n\n---\n**记得回到浏览器中打开商品页或做对比表，让用户看到执行过程**`;
 }
 
 export function formatFirecrawlSearchEcommerceResult(
@@ -240,15 +238,11 @@ export function formatFirecrawlSearchEcommerceResult(
     product_links: extractEcommerceProductLinks([res], platform).slice(0, 8),
     snippet: res.markdown.replace(/\s+/g, ' ').slice(0, 500),
   }));
-  const sourceBlock =
-    '## 可引用来源清单（最终答案必须优先引用这里的 URL；不要输出空 url；每行商品尽量使用不同的商品详情链接）\n\n' +
-    '```json\n' +
-    JSON.stringify(
-      { product_link_candidates: productLinkCandidates, source_candidates: sourceCandidates },
-      null,
-      2,
-    ) +
-    '\n```\n\n';
+  const sourceBlock = `## 可引用来源清单（最终答案必须优先引用这里的 URL；不要输出空 url；每行商品尽量使用不同的商品详情链接）\n\n\`\`\`json\n${JSON.stringify(
+    { product_link_candidates: productLinkCandidates, source_candidates: sourceCandidates },
+    null,
+    2,
+  )}\n\`\`\`\n\n`;
   const blocks = limited
     .map((res) => {
       const md =
@@ -424,16 +418,7 @@ export function buildAuthWallScraperRescueText(input: {
 }): string {
   const wallLabel = input.kind === 'permission' ? '权限页' : '登录页';
   const urlLine = input.url ? `当前浏览器停在${wallLabel}：${input.url}\n` : '';
-  return (
-    `${urlLine}这是一个公开商品列表/比价查询，不要要求用户登录，也不要停在 awaiting_user。\n\n` +
-    `请立刻改用 \`search_ecommerce\` 获取数据，不要继续用 \`web_search\` 拼结果：\n` +
-    `- 如果用户提到京东或通用中文电商，优先 platform="jd"\n` +
-    `- 如果京东无结果，再试 platform="taobao"\n` +
-    `- query 保留核心商品词，例如 "iPhone 16 128GB"\n` +
-    `- 最终答案必须给出前 5 个结果的名称、价格、可点击链接，并按价格从低到高排序\n` +
-    `- 如果某个平台只返回搜索页，也要引用对应搜索结果页 URL，不要输出空链接\n\n` +
-    `用户原始需求：${input.intent}`
-  );
+  return `${urlLine}这是一个公开商品列表/比价查询，不要要求用户登录，也不要停在 awaiting_user。\n\n请立刻改用 \`search_ecommerce\` 获取数据，不要继续用 \`web_search\` 拼结果：\n- 如果用户提到京东或通用中文电商，优先 platform="jd"\n- 如果京东无结果，再试 platform="taobao"\n- query 保留核心商品词，例如 "iPhone 16 128GB"\n- 最终答案必须给出前 5 个结果的名称、价格、可点击链接，并按价格从低到高排序\n- 如果某个平台只返回搜索页，也要引用对应搜索结果页 URL，不要输出空链接\n\n用户原始需求：${input.intent}`;
 }
 
 export function buildEcommerceAuthWallFallbackSummary(input: {
@@ -444,14 +429,7 @@ export function buildEcommerceAuthWallFallbackSummary(input: {
   const urlLine = input.authWallUrl
     ? `浏览器商品页被登录/权限页拦截：${input.authWallUrl}\n\n`
     : '';
-  return (
-    `我没有继续要求登录，也没有在登录墙里反复重试。\n\n` +
-    urlLine +
-    `下面是后台商品抓取返回的候选结果。只保留能关联到商品详情页或明确来源页的内容；如果可验证商品详情链接不足 5 个，应明确说明不足，不要用搜索页/品类页硬凑。\n\n` +
-    `用户原始需求：${input.intent}\n\n` +
-    `---\n\n` +
-    truncateText(input.searchResultText, 18_000)
-  );
+  return `我没有继续要求登录，也没有在登录墙里反复重试。\n\n${urlLine}下面是后台商品抓取返回的候选结果。只保留能关联到商品详情页或明确来源页的内容；如果可验证商品详情链接不足 5 个，应明确说明不足，不要用搜索页/品类页硬凑。\n\n用户原始需求：${input.intent}\n\n---\n\n${truncateText(input.searchResultText, 18_000)}`;
 }
 
 export function buildStuckNudge(input: StuckNudgeInput): StuckNudgeResult | null {
@@ -468,16 +446,7 @@ export function buildStuckNudge(input: StuckNudgeInput): StuckNudgeResult | null
 }
 
 function buildWarnNudgeText(stuckCount: number): string {
-  return (
-    `提示：页面截图已连续 ${stuckCount} 次未变化，当前操作可能未生效。\n\n` +
-    `先尝试以下浏览器内的方案，不要直接放弃 computer 工具：\n` +
-    `1. **等一下**：wait 3-5 秒后再点击，某些站点首次加载慢\n` +
-    `2. **让用户帮忙**：如果看起来像验证码/滑块，输出"检测到验证码，请在右侧 panel 手动完成"并停住\n` +
-    `3. **换路径**：同站点的 /explore /hot /discover 分类页通常不需要登录\n` +
-    `4. **换备选站点**：携程→飞猪/去哪儿、京东→拼多多、Boss直聘→拉勾\n` +
-    `5. **重置页面**：先 navigate 到 about:blank，再重新访问目标\n` +
-    `6. **最后选项**：切移动版 m.xxx.com（m.jd.com / m.ctrip.com / m.zhipin.com）`
-  );
+  return `提示：页面截图已连续 ${stuckCount} 次未变化，当前操作可能未生效。\n\n先尝试以下浏览器内的方案，不要直接放弃 computer 工具：\n1. **等一下**：wait 3-5 秒后再点击，某些站点首次加载慢\n2. **让用户帮忙**：如果看起来像验证码/滑块，输出"检测到验证码，请在右侧 panel 手动完成"并停住\n3. **换路径**：同站点的 /explore /hot /discover 分类页通常不需要登录\n4. **换备选站点**：携程→飞猪/去哪儿、京东→拼多多、Boss直聘→拉勾\n5. **重置页面**：先 navigate 到 about:blank，再重新访问目标\n6. **最后选项**：切移动版 m.xxx.com（m.jd.com / m.ctrip.com / m.zhipin.com）`;
 }
 
 function buildExitNudgeText(stuckCount: number, hasApifyTools: boolean): string {
@@ -488,24 +457,10 @@ function buildExitNudgeText(stuckCount: number, hasApifyTools: boolean): string 
     // because the model didn't connect "browser is stuck" to "I have
     // a backend scraper for this." Spell it out explicitly, including
     // the URL the page is currently parked on.
-    return (
-      head +
-      `请按以下顺序处理（不要直接 task_done / 总结放弃）：\n` +
-      `1. **优先调用 \`scrape_website\`**：参数 url 用你刚才尝试访问的目标 URL（即页面停留的当前网址）。后台抓取通常能拿到内容。\n` +
-      `2. **电商类查询**：如果用户问的是商品/比价（amazon / 京东 / 淘宝），改用 \`search_ecommerce\`，platform + query 直接传。\n` +
-      `3. **拿到数据后必须回到浏览器**：打开能展示数据的页面（Google Sheets / 文档），或对照原站做整理。不要把抓到的纯文字当最终回复。\n` +
-      `4. **Apify 也失败时再用 \`web_search\`**：搜索引擎兜底信息，并在最终输出中说明"目标站点暂时无法访问，已通过其他途径获取"。\n\n` +
-      `当前状态：你仍然有 computer + scrape_website + search_ecommerce 三套工具。换一套继续推进，不要放弃任务。`
-    );
+    return `${head}请按以下顺序处理（不要直接 task_done / 总结放弃）：\n1. **优先调用 \`scrape_website\`**：参数 url 用你刚才尝试访问的目标 URL（即页面停留的当前网址）。后台抓取通常能拿到内容。\n2. **电商类查询**：如果用户问的是商品/比价（amazon / 京东 / 淘宝），改用 \`search_ecommerce\`，platform + query 直接传。\n3. **拿到数据后必须回到浏览器**：打开能展示数据的页面（Google Sheets / 文档），或对照原站做整理。不要把抓到的纯文字当最终回复。\n4. **Apify 也失败时再用 \`web_search\`**：搜索引擎兜底信息，并在最终输出中说明"目标站点暂时无法访问，已通过其他途径获取"。\n\n当前状态：你仍然有 computer + scrape_website + search_ecommerce 三套工具。换一套继续推进，不要放弃任务。`;
   }
   // Apify not configured — degrade to the legacy web_search guidance.
-  return (
-    head +
-    `请按以下顺序处理：\n` +
-    `1. 如果你已经获取到足够信息，直接汇总输出（markdown 格式）\n` +
-    `2. 如果信息不足，改用 \`web_search\` 工具搜索同一问题\n` +
-    `3. 在最终输出中明确告知用户：目标网站暂时无法访问，已通过其他途径获取信息`
-  );
+  return `${head}请按以下顺序处理：\n1. 如果你已经获取到足够信息，直接汇总输出（markdown 格式）\n2. 如果信息不足，改用 \`web_search\` 工具搜索同一问题\n3. 在最终输出中明确告知用户：目标网站暂时无法访问，已通过其他途径获取信息`;
 }
 
 /**
@@ -1365,7 +1320,7 @@ async function runSupercarTaskInternal(
         { taskId: opts.taskId, lane: 'zapier', runId: r.runId ?? null },
         'supercar: triggered Zap via webhook',
       );
-      const lines = [`# 已触发 Zap 工作流`, '', `任务已通过 Zapier 触发，后台异步执行。`];
+      const lines = ['# 已触发 Zap 工作流', '', '任务已通过 Zapier 触发，后台异步执行。'];
       if (r.runId) lines.push(`- Run ID: \`${r.runId}\``);
       if (r.statusUrl) lines.push(`- 查看进度：${r.statusUrl}`);
       // P1 — Zapier short-circuit completes the task without ever
@@ -3469,21 +3424,16 @@ async function runSupercarTaskInternal(
               content: [
                 {
                   type: 'text',
-                  text:
-                    `已生成文件 ${result.filename}（${formatBytesAgent(result.size)}）。\n` +
-                    '在最终回复里附上一行（保留代码块）让用户能下载：\n' +
-                    '```holaday-file\n' +
-                    JSON.stringify(
-                      {
-                        fileId: result.fileId,
-                        filename: result.filename,
-                        size: result.size,
-                        downloadUrl: result.downloadUrl,
-                      },
-                      null,
-                      2,
-                    ) +
-                    '\n```',
+                  text: `已生成文件 ${result.filename}（${formatBytesAgent(result.size)}）。\n在最终回复里附上一行（保留代码块）让用户能下载：\n\`\`\`holaday-file\n${JSON.stringify(
+                    {
+                      fileId: result.fileId,
+                      filename: result.filename,
+                      size: result.size,
+                      downloadUrl: result.downloadUrl,
+                    },
+                    null,
+                    2,
+                  )}\n\`\`\``,
                 },
               ],
             });
@@ -4183,13 +4133,7 @@ async function runSupercarTaskInternal(
               waitTimeoutMs: 60_000,
             });
           }
-          antiBotHintText =
-            `检测到 **${describeSignal(signal)}**（匹配关键词："${signal.rawMatch.slice(0, 40)}"）。\n\n` +
-            `这不是普通的页面未响应——是网站的反爬 / 人机验证机制。处理方式：\n` +
-            `- 如果是**滑动验证 / 拖动滑块**：用户可以在右侧 panel 交互模式下手动完成，然后告诉你继续\n` +
-            `- 如果是 **Cloudflare 质询页**：等 5 秒让它自动放行，或切 m.xxx.com 移动版绕开\n` +
-            `- 如果是**明确的 403 / 访问被拒**：换站点（见移动版备选表）\n` +
-            `- 不要继续点击同一元素——先换路径`;
+          antiBotHintText = `检测到 **${describeSignal(signal)}**（匹配关键词："${signal.rawMatch.slice(0, 40)}"）。\n\n这不是普通的页面未响应——是网站的反爬 / 人机验证机制。处理方式：\n- 如果是**滑动验证 / 拖动滑块**：用户可以在右侧 panel 交互模式下手动完成，然后告诉你继续\n- 如果是 **Cloudflare 质询页**：等 5 秒让它自动放行，或切 m.xxx.com 移动版绕开\n- 如果是**明确的 403 / 访问被拒**：换站点（见移动版备选表）\n- 不要继续点击同一元素——先换路径`;
 
           // Lane 2 escalation: swap the active executor to the headed
           // browser. Real GPU + real fingerprint defeats most of the
@@ -4199,8 +4143,8 @@ async function runSupercarTaskInternal(
           const swapped = await swapToHeadedIfAvailable(`antibot:${signal.type}`);
           if (swapped) {
             antiBotHintText +=
-              `\n\n系统已自动切换到 **headed 浏览器**（Lane 2，真实渲染指纹）。` +
-              `下一个 computer action 会在新浏览器里执行，之前的页面状态已重放到当前 URL。`;
+              '\n\n系统已自动切换到 **headed 浏览器**（Lane 2，真实渲染指纹）。' +
+              '下一个 computer action 会在新浏览器里执行，之前的页面状态已重放到当前 URL。';
           }
         } else if (activeAntiBotSignal && !signal) {
           // Banner cleared on this turn — notify UI.
@@ -4353,11 +4297,7 @@ async function runSupercarTaskInternal(
         plannerReminder = [
           {
             type: 'text',
-            text:
-              `[plan tracker] 当前执行计划进度：\n${stateLines}\n` +
-              `回复时在 thinking 或正文里插入 \`[STEP N status]\` 标记，N 是 1-based 步骤号，status 是 ` +
-              `\`done\` / \`running\` / \`failed\`。比如刚开始执行第二步就写 \`[STEP 2 running]\`。` +
-              `不需要每步都重复，只在状态变化时打一次。`,
+            text: `[plan tracker] 当前执行计划进度：\n${stateLines}\n回复时在 thinking 或正文里插入 \`[STEP N status]\` 标记，N 是 1-based 步骤号，status 是 \`done\` / \`running\` / \`failed\`。比如刚开始执行第二步就写 \`[STEP 2 running]\`。不需要每步都重复，只在状态变化时打一次。`,
           },
         ];
       }
@@ -4562,7 +4502,7 @@ function validateCoordinate(
     return { ok: false, reason: `non-number entries (got ${typeof x},${typeof y})` };
   }
   if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    return { ok: false, reason: `non-finite (NaN/Infinity)` };
+    return { ok: false, reason: 'non-finite (NaN/Infinity)' };
   }
   if (x < 0 || y < 0 || x > 50_000 || y > 50_000) {
     return { ok: false, reason: `out of range (${x},${y})` };

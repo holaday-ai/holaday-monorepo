@@ -23,7 +23,8 @@ function processIdentity(text) {
   return { pid: p.pid, restarts: p.pm2_env.restart_time };
 }
 export async function verifyAkshareProduction({ readProcessList, readHealth }) {
-  let before, after;
+  let before;
+  let after;
   try {
     before = processIdentity(await readProcessList());
   } catch {

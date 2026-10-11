@@ -352,7 +352,7 @@ export class R2StorageProvider implements StorageProvider {
     let key = storagePath;
     if (legacy) {
       const roots = this.config.legacyLocalRoots ?? ['/tmp/holaday-files', '/opt/holaday-files'];
-      const root = roots.find((candidate) => storagePath.startsWith(path.resolve(candidate) + '/'));
+      const root = roots.find((candidate) => storagePath.startsWith(`${path.resolve(candidate)}/`));
       if (!root) throw new Error('Invalid legacy storage path');
       key = storagePath.slice(path.resolve(root).length + 1);
       if (!/^usr_[\w-]+\/(input|output)\/file_[\w-]+\/[^/]+$/.test(key))

@@ -9,8 +9,8 @@ test('read-only probe discovers the flat durable store record and queries the li
     .split("--input-type=module -e '\n")[1]
     .replace(/'\s*$/, '')
     .replace(/^import .*;\n/gm, '');
-  const calls = [],
-    outputs = [];
+  const calls = [];
+  const outputs = [];
   vm.runInNewContext(body, {
     readFileSync: (path) => {
       assert.equal(path, '/var/lib/holaday/ordinary-maintenance/state.json');
@@ -36,7 +36,7 @@ test('read-only probe discovers the flat durable store record and queries the li
   assert.equal(calls.length, 1);
   assert.equal(
     calls[0][1][2],
-    '/opt/holaday-releases/' + 'a'.repeat(40) + '/scripts/browser-maintenance-control.mjs',
+    `/opt/holaday-releases/${'a'.repeat(40)}/scripts/browser-maintenance-control.mjs`,
   );
   assert.deepEqual(outputs, ['live-proof']);
 });

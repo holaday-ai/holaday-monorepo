@@ -102,7 +102,7 @@ describe('autoFix — URL fabrication', () => {
   }
 
   it('substitutes a fabricated URL with a similar grounded one', () => {
-    const answer = 'Per https://example.com/help/wrong-page we should refresh. ' + 'x'.repeat(60);
+    const answer = `Per https://example.com/help/wrong-page we should refresh. ${'x'.repeat(60)}`;
     const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     expect(out.fixed).toContain('https://example.com/help/index');
@@ -112,7 +112,7 @@ describe('autoFix — URL fabrication', () => {
   });
 
   it('drops a fabricated URL when no grounded candidate is similar (no placeholder)', () => {
-    const answer = 'See https://made-up-citation.example/article for context. ' + 'x'.repeat(60);
+    const answer = `See https://made-up-citation.example/article for context. ${'x'.repeat(60)}`;
     const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     // Phase 1 follow-up: the URL is removed without leaving a
@@ -152,10 +152,7 @@ describe('autoFix — URL fabrication', () => {
     // BOSS Phase 1 follow-up — the SPA's markdown renderer turns
     // an empty `href=""` into a self-link. autoFix must drop the
     // whole `[text](url)` pair instead of leaving `[text]()`.
-    const answer =
-      '推荐资源：[LearnPython.org](https://learnpython.org) 是一个不错的入门站点。' +
-      ' '.repeat(40) +
-      'x'.repeat(40);
+    const answer = `推荐资源：[LearnPython.org](https://learnpython.org) 是一个不错的入门站点。${' '.repeat(40)}${'x'.repeat(40)}`;
     const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     expect(out.fixed).toContain('LearnPython.org');
@@ -168,7 +165,7 @@ describe('autoFix — URL fabrication', () => {
   });
 
   it('markdown link with grounded URL stays intact', () => {
-    const answer = '查阅 [help index](https://example.com/help/index) 了解详情。' + 'x'.repeat(60);
+    const answer = `查阅 [help index](https://example.com/help/index) 了解详情。${'x'.repeat(60)}`;
     const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     expect(out.fixed).toContain('[help index](https://example.com/help/index)');
@@ -176,7 +173,7 @@ describe('autoFix — URL fabrication', () => {
   });
 
   it('markdown link with similar grounded URL gets substituted', () => {
-    const answer = '查阅 [help](https://example.com/help/wrong) 了解详情。' + 'x'.repeat(60);
+    const answer = `查阅 [help](https://example.com/help/wrong) 了解详情。${'x'.repeat(60)}`;
     const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     expect(out.fixed).toContain('[help](https://example.com/help/index)');
@@ -185,7 +182,7 @@ describe('autoFix — URL fabrication', () => {
   });
 
   it('preserves trailing punctuation when substituting', () => {
-    const answer = 'See (https://example.com/help/wrong). It explains. ' + 'x'.repeat(60);
+    const answer = `See (https://example.com/help/wrong). It explains. ${'x'.repeat(60)}`;
     const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     // Closing paren must still be there.
@@ -193,8 +190,7 @@ describe('autoFix — URL fabrication', () => {
   });
 
   it('leaves grounded URLs untouched even when other URLs are fabricated', () => {
-    const answer =
-      'Real: https://example.com/help/index. Fake: https://fake.example.org/x. ' + 'x'.repeat(60);
+    const answer = `Real: https://example.com/help/index. Fake: https://fake.example.org/x. ${'x'.repeat(60)}`;
     const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     expect(out.fixed).toContain('https://example.com/help/index');
@@ -210,7 +206,7 @@ describe('autoFix — passes verification through unchanged', () => {
       executionMode: 'generate',
     });
     const ledger = new EvidenceLedger('tsk_pass');
-    const answer = 'Plain answer with no URLs at all but long enough.' + 'x'.repeat(60);
+    const answer = `Plain answer with no URLs at all but long enough.${'x'.repeat(60)}`;
     const verification = verifyDeterministic({
       contract,
       ledger,
@@ -244,7 +240,7 @@ describe('autoFix — passes verification through unchanged', () => {
       sourceDetail: 'submit',
       confidence: 'observed',
     });
-    const answer = 'Did the search.' + 'x'.repeat(60);
+    const answer = `Did the search.${'x'.repeat(60)}`;
     const verification = verifyDeterministic({
       contract,
       ledger,
@@ -441,7 +437,7 @@ describe('autoFix — missing fields note', () => {
       sourceDetail: 'msg',
       confidence: 'observed',
     });
-    const answer = '本场 GMV ¥100000，分析下转化和复购。' + 'x'.repeat(220);
+    const answer = `本场 GMV ¥100000，分析下转化和复购。${'x'.repeat(220)}`;
     const verification = verifyDeterministic({
       contract,
       ledger,
@@ -544,8 +540,7 @@ describe('autoFix — re-verify after fix', () => {
       sourceDetail: 'goto',
       confidence: 'observed',
     });
-    const answer =
-      'Source: https://example.com/help/missing-page is the canonical doc. ' + 'x'.repeat(60);
+    const answer = `Source: https://example.com/help/missing-page is the canonical doc. ${'x'.repeat(60)}`;
     const v1 = verifyDeterministic({ contract, ledger, answerText: answer });
     expect(v1.passed).toBe(false);
     const out = autoFix({ contract, ledger, verification: v1, answerText: answer });

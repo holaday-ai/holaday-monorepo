@@ -11,7 +11,7 @@ function service(pathOwner: string, owner: string | null = 'usr_alice') {
     userId: 7,
     status: 'active',
     expiresAt: null,
-    storagePath: '/tmp/holaday-files/' + pathOwner + '/input/file_old/example.png',
+    storagePath: `/tmp/holaday-files/${pathOwner}/input/file_old/example.png`,
   };
   const db = {
     select: () => ({

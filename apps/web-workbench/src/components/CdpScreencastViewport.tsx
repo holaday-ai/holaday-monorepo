@@ -916,12 +916,12 @@ export function CdpScreencastViewport({
           }}
           onTouchMove={(e) => {
             if (!viewportV2 || viewOnly) return;
-            const t = e.touches[0],
-              previous = touchRef.current;
+            const t = e.touches[0];
+            const previous = touchRef.current;
             if (!t || !previous) return;
             e.preventDefault();
-            const canvas = canvasRef.current,
-              frame = geometryRef.current;
+            const canvas = canvasRef.current;
+            const frame = geometryRef.current;
             const point =
               canvas && frame
                 ? mapClientPointToBrowserFrame({
@@ -951,9 +951,9 @@ export function CdpScreencastViewport({
             const touch = touchRef.current;
             touchRef.current = null;
             if (!viewportV2 || viewOnly || !touch || touch.moved) return;
-            const t = e.changedTouches[0],
-              canvas = canvasRef.current,
-              frame = geometryRef.current;
+            const t = e.changedTouches[0];
+            const canvas = canvasRef.current;
+            const frame = geometryRef.current;
             const p =
               t && canvas && frame
                 ? mapClientPointToBrowserFrame({

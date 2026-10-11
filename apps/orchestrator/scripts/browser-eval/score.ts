@@ -6,9 +6,9 @@ export function scoreSyntheticSuite(
   cases: ReadonlyArray<{ id: string; category: string }>,
   results: ReadonlyArray<{ id: string; status: 'passed' | 'failed' | 'unsupported' }>,
 ) {
-  let passed = 0,
-    failed = 0,
-    unsupported = 0;
+  let passed = 0;
+  let failed = 0;
+  let unsupported = 0;
   const failureComposition: Record<string, number> = {};
   for (const test of cases) {
     const result = results.find((r) => r.id === test.id);

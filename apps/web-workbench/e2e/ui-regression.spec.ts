@@ -90,19 +90,19 @@ function regression(name: string, action: (page: Page) => Promise<void>): void {
       ).toEqual([]);
       receipt.passed = true;
     } finally {
-      const prefix = path.join(output, info.project.name + '-' + name.replace(/[^a-z0-9-]/gi, '-'));
+      const prefix = path.join(output, `${info.project.name}-${name.replace(/[^a-z0-9-]/gi, '-')}`);
       await page
-        .screenshot({ path: prefix + '.png', animations: 'disabled', timeout: 10_000 })
-        .then(() => fs.chmodSync(prefix + '.png', 0o600))
+        .screenshot({ path: `${prefix}.png`, animations: 'disabled', timeout: 10_000 })
+        .then(() => fs.chmodSync(`${prefix}.png`, 0o600))
         .catch(() => undefined);
-      save(prefix + '.json', receipt);
+      save(`${prefix}.json`, receipt);
       await context.close();
     }
   });
 }
 
 for (const route of ['/image', '/video'])
-  regression('media-model-toggle-' + route.slice(1), async (page) => {
+  regression(`media-model-toggle-${route.slice(1)}`, async (page) => {
     await page.goto(route, { waitUntil: 'domcontentloaded' });
     await ready(page);
     const modes = route === '/video' ? ['自由创作', '动作复刻', '人物口播'] : ['图片'];
@@ -258,8 +258,7 @@ regression('sidebar-retention-pagination', async (page) => {
       path.join(
         output,
         'diagnostics',
-        ((await page.evaluate(() => navigator.maxTouchPoints > 0)) ? 'iphone-14' : 'desktop') +
-          '-pagination-metadata.json',
+        `${(await page.evaluate(() => navigator.maxTouchPoints > 0)) ? 'iphone-14' : 'desktop'}-pagination-metadata.json`,
       ),
       { counts, reads },
     );
@@ -292,7 +291,7 @@ for (const [route, label] of [
   ['/projects', '搜索项目'],
   ['/files', '搜索文件名'],
 ])
-  regression('url-state-' + route.slice(1), async (page) => {
+  regression(`url-state-${route.slice(1)}`, async (page) => {
     await page.goto(route, { waitUntil: 'domcontentloaded' });
     await ready(page);
     const input = page.getByRole('textbox', { name: label, exact: true });

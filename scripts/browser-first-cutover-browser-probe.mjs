@@ -87,10 +87,10 @@ export async function probeFirstCutoverRecoveredBrowser(native, deadline, overri
     }
     return Buffer.concat(parts).toString('utf8');
   };
-  let target,
-    socket,
-    completed = false,
-    closeAttempted = false;
+  let target;
+  let socket;
+  let completed = false;
+  let closeAttempted = false;
   try {
     await ownership();
     const created = JSON.parse(await request('/json/new?about%3Ablank', 'PUT'));

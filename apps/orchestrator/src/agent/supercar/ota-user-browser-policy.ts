@@ -312,7 +312,7 @@ export function classifyOtaAction(action: OtaAction): OtaActionVerdict {
       };
     }
     default:
-      return { allowed: false, reason: `unknown action kind blocked` };
+      return { allowed: false, reason: 'unknown action kind blocked' };
   }
 }
 

@@ -11,22 +11,19 @@ const files = git('diff', '--name-only', '85329cb3')
   .filter((f) => /src\/.*\.tsx?$/.test(f) && !f.includes('.test.'));
 function calls(text) {
   const source = ts.createSourceFile(
-      'source.tsx',
-      text,
-      ts.ScriptTarget.Latest,
-      true,
-      ts.ScriptKind.TSX,
-    ),
-    result = [];
+    'source.tsx',
+    text,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const result = [];
   const walk = (node) => {
     if (ts.isCallExpression(node)) {
       const callee = node.expression.getText(source).replace(/\s+/g, '');
       if (/^trpc\.[\w.]+\.(query|mutate)$/.test(callee))
         result.push(
-          callee +
-            '(' +
-            node.arguments.map((a) => a.getText(source).replace(/\s+/g, '')).join(',') +
-            ')',
+          `${callee}(${node.arguments.map((a) => a.getText(source).replace(/\s+/g, '')).join(',')})`,
         );
     }
     ts.forEachChild(node, walk);
@@ -37,7 +34,7 @@ function calls(text) {
 const baseFiles = new Set(git('ls-tree', '-r', '--name-only', '85329cb3').trim().split('\n'));
 const changed = [];
 for (const file of files) {
-  const before = calls(baseFiles.has(file) ? git('show', '85329cb3:' + file) : '');
+  const before = calls(baseFiles.has(file) ? git('show', `85329cb3:${file}`) : '');
   const after = calls(fs.readFileSync(path.join(root, file), 'utf8'));
   if (JSON.stringify(before) !== JSON.stringify(after)) changed.push(file);
 }
@@ -70,8 +67,8 @@ function updateBrand(text) {
     );
 }
 const protectedResult = protectedFiles.map((file) => {
-  const full = 'apps/web-workbench/' + file;
-  const before = git('show', '85329cb3:' + full);
+  const full = `apps/web-workbench/${file}`;
+  const before = git('show', `85329cb3:${full}`);
   const current = fs.readFileSync(path.join(root, full), 'utf8');
   return {
     file,

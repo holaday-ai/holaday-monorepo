@@ -56,12 +56,12 @@ function CreativeProjectPicker({
   onSelect,
   disabled,
 }: { selected: UiProject | null; onSelect(project: UiProject | null): void; disabled: boolean }) {
-  const [open, setOpen] = useState(false),
-    [rows, setRows] = useState<UiProject[]>([]),
-    [loading, setLoading] = useState(false),
-    [error, setError] = useState(false);
-  const anchor = useRef<HTMLButtonElement>(null),
-    version = useRef(0);
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<UiProject[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  const version = useRef(0);
   useEffect(
     () => () => {
       version.current++;

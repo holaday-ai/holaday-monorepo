@@ -109,7 +109,7 @@ it('caps search requests at 100 characters for initial and subsequent pages', as
   render(<CreativeReferenceLibrary {...props()} />);
   const input = screen.getByRole('textbox', { name: '搜索参考图片' });
   // A synthetic change bypasses the browser limit, exercising request-side protection.
-  fireEvent.change(input, { target: { value: '  ' + '测'.repeat(120) + '  ' } });
+  fireEvent.change(input, { target: { value: `  ${'测'.repeat(120)}  ` } });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(201);
   });

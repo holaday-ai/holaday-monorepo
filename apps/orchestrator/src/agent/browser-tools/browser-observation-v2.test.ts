@@ -109,7 +109,7 @@ describe('cloud observation v2', () => {
         columns: ['Name', 'Price'],
         rows: [['Box', '29']],
         range: [0, 1],
-        sourceURL: base + '/',
+        sourceURL: `${base}/`,
       });
     } finally {
       tools.dispose();
@@ -146,7 +146,7 @@ describe('cloud observation v2', () => {
         observationRevision: state.observationRevision,
       });
       expect(result.ok, result.text).toBe(true);
-      expect(page.url()).toBe(base + '/');
+      expect(page.url()).toBe(`${base}/`);
       expect(page.context().pages()).toHaveLength(2);
       expect(result.text).toContain('popup');
       expect(result.text).toContain('Catalog');

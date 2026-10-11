@@ -567,11 +567,11 @@ export class CloudObservation {
     if (action.tool === 'scroll_until') {
       const budget = Math.min(action.maxChars ?? 8000, Math.floor((action.maxTokens ?? 8000) / 4));
       const started = Date.now();
-      let prior = '',
-        stalls = 0,
-        steps = 0,
-        itemCount = 0,
-        reason = 'step_limit';
+      let prior = '';
+      let stalls = 0;
+      let steps = 0;
+      let itemCount = 0;
+      let reason = 'step_limit';
       for (; steps < (action.maxSteps ?? 10); steps++) {
         if (Date.now() - started >= (action.maxMs ?? 5000)) {
           reason = 'time_limit';
@@ -663,8 +663,8 @@ export class CloudObservation {
     if (action.tool === 'get_page_text') {
       const fingerprint = await this.fingerprint(frame);
       const meta = await this.metadata(frame);
-      let text: string,
-        offset = 0;
+      let text: string;
+      let offset = 0;
       if (action.cursor) {
         const cursor = this.cursors.get(action.cursor);
         this.cursors.delete(action.cursor);
@@ -717,8 +717,8 @@ export class CloudObservation {
             url: (n as HTMLAnchorElement).href,
           })),
       );
-      const start = action.start ?? 0,
-        limit = action.limit ?? 50;
+      const start = action.start ?? 0;
+      const limit = action.limit ?? 50;
       const accessibleItems = raw
         .filter((item) => /^https?:/.test(item.url))
         .slice(start, start + limit)
@@ -747,8 +747,8 @@ export class CloudObservation {
     if (action.tool === 'tables') {
       const before = await this.fingerprint(frame);
       const tableCount = await frame.locator('table').count();
-      const start = action.start ?? 0,
-        limit = action.limit ?? 50;
+      const start = action.start ?? 0;
+      const limit = action.limit ?? 50;
       const items = await frame.locator('table').evaluateAll(
         (nodes, { start, limit }) =>
           nodes.slice(0, 20).map((node, index) => {

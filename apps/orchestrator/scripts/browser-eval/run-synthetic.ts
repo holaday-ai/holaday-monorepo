@@ -15,8 +15,8 @@ export async function runLocalSynthetic() {
   const suite = JSON.parse(await readFile(new URL('./tasks.json', import.meta.url), 'utf8')) as {
     syntheticCases: Array<{ id: string; category: string; name: string }>;
   };
-  const raw = output + '.vitest.json';
-  const log = output + '.log';
+  const raw = `${output}.vitest.json`;
+  const log = `${output}.log`;
   // No inherited provider credentials, dotenv files, or parallel browser workers.
   const runtimeEnv: NodeJS.ProcessEnv = {
     PATH: process.env.PATH,

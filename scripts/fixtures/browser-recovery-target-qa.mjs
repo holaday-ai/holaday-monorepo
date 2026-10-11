@@ -853,8 +853,7 @@ try {
   servingError = error;
   const cause = ingressDiagnosticStage(error);
   if (cause) {
-    const line =
-      'QA_RECOVERY_REJECTION ' + JSON.stringify({ component: 'server', stage: cause }) + '\n';
+    const line = `QA_RECOVERY_REJECTION ${JSON.stringify({ component: 'server', stage: cause })}\n`;
     persistSafeDiagnostics(Buffer.from(line));
     console.error(line.trimEnd());
   }

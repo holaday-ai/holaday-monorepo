@@ -96,7 +96,7 @@ export async function cleanupRejectedVideoFrames(
       if (
         manifest.status !== 'fail' ||
         !/^tsk_[a-zA-Z0-9_-]{1,100}$/.test(manifest.taskId) ||
-        !entry.name.startsWith(manifest.taskId + '-') ||
+        !entry.name.startsWith(`${manifest.taskId}-`) ||
         !Array.isArray(manifest.frames) ||
         !manifest.frames.length ||
         manifest.frames.length > 9 ||

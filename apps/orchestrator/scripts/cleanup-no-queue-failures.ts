@@ -100,7 +100,7 @@ async function main(): Promise<void> {
     })
     .where(inArray(tasksTable.id, ids));
 
-  console.log(`\n[cleanup] applied. drizzle result:`, result);
+  console.log('\n[cleanup] applied. drizzle result:', result);
 
   // Quick verify — re-read the same rows and print the new state.
   const after = await db
@@ -112,7 +112,7 @@ async function main(): Promise<void> {
     .from(tasksTable)
     .where(inArray(tasksTable.id, ids));
 
-  console.log(`[cleanup] post-update state:`);
+  console.log('[cleanup] post-update state:');
   for (const r of after) {
     console.log(
       `  - ${r.externalId}  status=${r.status}  msg="${(r.errorMessage ?? '').slice(0, 80)}"`,

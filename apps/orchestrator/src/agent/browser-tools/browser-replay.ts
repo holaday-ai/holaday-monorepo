@@ -138,21 +138,21 @@ export class BrowserReplayStore {
         manifest.frames.push({ ...frame, gap: true });
     } else {
       if (image) {
-        await writeFile(join(dir, frame.id + '.jpg'), image, { mode: 0o600 });
+        await writeFile(join(dir, `${frame.id}.jpg`), image, { mode: 0o600 });
         manifest.bytes += image.length;
       }
-      manifest.frames.push({ ...frame, ...(image ? { image: frame.id + '.jpg' } : {}) });
+      manifest.frames.push({ ...frame, ...(image ? { image: `${frame.id}.jpg` } : {}) });
     }
     if (await this.ownerDeleted(owner)) {
-      if (image) await rm(join(dir, frame.id + '.jpg'), { force: true });
+      if (image) await rm(join(dir, `${frame.id}.jpg`), { force: true });
       return;
     }
     try {
       await readFile(join(dir, '.deleted'));
-      if (image) await rm(join(dir, frame.id + '.jpg'), { force: true });
+      if (image) await rm(join(dir, `${frame.id}.jpg`), { force: true });
       return;
     } catch {}
-    const temp = join(dir, 'manifest-' + randomUUID() + '.tmp');
+    const temp = join(dir, `manifest-${randomUUID()}.tmp`);
     await writeFile(temp, JSON.stringify(manifest), { mode: 0o600 });
     const { rename } = await import('node:fs/promises');
     await rename(temp, join(dir, 'manifest.json'));

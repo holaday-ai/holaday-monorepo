@@ -7,8 +7,8 @@ function run({ missing = false, uid = 998, failStart = false } = {}) {
   assert.ok(fs.existsSync(path), 'production env startup script must exist');
   const source = fs.readFileSync(path, 'utf8').split("<<'NODE'\n")[1]?.split('\nNODE')[0];
   assert.ok(source);
-  const calls = [],
-    lines = [];
+  const calls = [];
+  const lines = [];
   const env = {
     DATABASE_URL: 'test-db-secret',
     REDIS_URL: 'test-redis-secret',
@@ -21,10 +21,7 @@ function run({ missing = false, uid = 998, failStart = false } = {}) {
     pm2_env: {
       uid,
       gid: 998,
-      pm_exec_path:
-        '/var/lib/holaday-deploy/start-' +
-        (i ? 'account-closure-worker' : 'orchestrator') +
-        '-production.sh',
+      pm_exec_path: `/var/lib/holaday-deploy/start-${i ? 'account-closure-worker' : 'orchestrator'}-production.sh`,
       HOME: '/var/lib/holaday',
       BROWSER_POOL_DIR: '/var/lib/holaday-browsers',
       QWEN_CORE_ROLLOUT_MODE: 'off',

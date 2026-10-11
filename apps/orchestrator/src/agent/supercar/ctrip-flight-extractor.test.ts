@@ -116,9 +116,7 @@ describe('buildCtripFlightHint', () => {
   it('still builds a directive (raw-text path) when the parser finds nothing', () => {
     // Real flight page text the parser doesn't recognize (no ¥ + times pairing),
     // but long enough to be a real page — model should still get the text.
-    const oddText =
-      '携程旅行 机票搜索结果 北京到上海 共找到 42 个航班 '.repeat(8) +
-      ' 航班信息以图形卡片展示，价格区间 700-1600 元，含直飞与经停选项。';
+    const oddText = `${'携程旅行 机票搜索结果 北京到上海 共找到 42 个航班 '.repeat(8)} 航班信息以图形卡片展示，价格区间 700-1600 元，含直飞与经停选项。`;
     const hint = buildCtripFlightHint({ pageText: oddText, url })!;
     expect(hint).toBeTruthy();
     expect(hint).not.toContain('初步解析'); // no parsed rows

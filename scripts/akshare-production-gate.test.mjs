@@ -69,7 +69,7 @@ test('host gate rejects redirects and non-200 even with an ok body', async () =>
       checkHostAkshare(async (command) =>
         command === 'pm2'
           ? JSON.stringify([good])
-          : JSON.stringify({ status: 'ok', adapter_ready: true }) + '\n' + status,
+          : `${JSON.stringify({ status: 'ok', adapter_ready: true })}\n${status}`,
       ),
       /AKSHARE_HEALTH_UNAVAILABLE/,
     );
@@ -91,7 +91,7 @@ test('absent PM2 daemon refuses before jlist can create another daemon', async (
 // Exercise the actual Bash probe; only the root-owned PID file path is redirected
 // to a temporary fixture. No PM2 process is started or signalled.
 for (const [label, content, passes] of [
-  ['newline', String(process.pid) + '\n', true],
+  ['newline', `${String(process.pid)}\n`, true],
   ['no trailing newline', String(process.pid), true],
   ['empty', '', false],
   ['malformed', 'not-a-pid', false],
@@ -113,7 +113,7 @@ for (const [label, content, passes] of [
               command,
               [
                 args[0],
-                args[1].replace('/root/.pm2/pm2.pid', "'" + file.replaceAll("'", "'\\''") + "'"),
+                args[1].replace('/root/.pm2/pm2.pid', `'${file.replaceAll("'", "'\\''")}'`),
               ],
               { ...options, encoding: 'utf8' },
             )
@@ -123,7 +123,7 @@ for (const [label, content, passes] of [
           return JSON.stringify([good]);
         }
         if (command === 'curl')
-          return JSON.stringify({ status: 'ok', adapter_ready: true }) + '\n200';
+          return `${JSON.stringify({ status: 'ok', adapter_ready: true })}\n200`;
         throw Error('unexpected command');
       });
       if (passes) {

@@ -39,7 +39,7 @@ describe('generateVideoScript', () => {
   });
 
   it('strips markdown fences + surrounding prose', async () => {
-    const fenced = '好的，这是脚本：\n```json\n' + VALID + '\n```\n希望满意';
+    const fenced = `好的，这是脚本：\n\`\`\`json\n${VALID}\n\`\`\`\n希望满意`;
     const out = await generateVideoScript({ userPrompt: 'x' }, { llm: llmReturning(fenced) });
     expect(out.segments).toHaveLength(2);
   });

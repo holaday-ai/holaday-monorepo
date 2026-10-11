@@ -5,34 +5,34 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const repo =
   process.env.PR1_REPO ?? fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
 const out = process.env.PR1_OUT ?? '/private/tmp/holaday-tasks/browser-pr1';
-const o = createRequire(repo + '/apps/orchestrator/package.json'),
-  w = createRequire(repo + '/apps/web-workbench/package.json');
-const { chromium } = o('playwright'),
-  { WebSocketServer } = o('ws'),
-  sharp = o('sharp');
+const o = createRequire(`${repo}/apps/orchestrator/package.json`);
+const w = createRequire(`${repo}/apps/web-workbench/package.json`);
+const { chromium } = o('playwright');
+const { WebSocketServer } = o('ws');
+const sharp = o('sharp');
 const { default: pino } = await import(pathToFileURL(o.resolve('pino')));
 const { createServer } = await import(pathToFileURL(w.resolve('vite')));
 const { default: react } = await import(pathToFileURL(w.resolve('@vitejs/plugin-react')));
-const { CdpStreamer } = await import(repo + '/apps/orchestrator/src/streaming/cdp-streamer.ts');
-const { CdpInputHandler } = await import(repo + '/apps/orchestrator/src/streaming/cdp-input.ts');
+const { CdpStreamer } = await import(`${repo}/apps/orchestrator/src/streaming/cdp-streamer.ts`);
+const { CdpInputHandler } = await import(`${repo}/apps/orchestrator/src/streaming/cdp-input.ts`);
 const { DeferredScreencastInputBridge } = await import(
-  repo + '/apps/orchestrator/src/streaming/screencast-input-bridge.ts'
+  `${repo}/apps/orchestrator/src/streaming/screencast-input-bridge.ts`
 );
 const { BrowserFrameGuard } = await import(
-  repo + '/apps/orchestrator/src/streaming/browser-viewport-v2.ts'
+  `${repo}/apps/orchestrator/src/streaming/browser-viewport-v2.ts`
 );
-await mkdir(out + '/harness', { recursive: true });
-await mkdir(out + '/screens', { recursive: true });
+await mkdir(`${out}/harness`, { recursive: true });
+await mkdir(`${out}/screens`, { recursive: true });
 try {
-  await symlink(repo + '/apps/web-workbench/node_modules', out + '/harness/node_modules', 'dir');
+  await symlink(`${repo}/apps/web-workbench/node_modules`, `${out}/harness/node_modules`, 'dir');
 } catch {}
-await writeFile(out + '/harness/package.json', '{"type":"module"}');
+await writeFile(`${out}/harness/package.json`, '{"type":"module"}');
 await writeFile(
-  out + '/harness/index.html',
+  `${out}/harness/index.html`,
   '<!DOCTYPE html><html><body style="margin:0"><div id="root"></div><script type="module" src="/main.jsx"></script></body></html>',
 );
 await writeFile(
-  out + '/harness/main.jsx',
+  `${out}/harness/main.jsx`,
   `import React from 'react';import {createRoot} from 'react-dom/client';
 import {CdpScreencastViewport} from '/@fs/${repo}/apps/web-workbench/src/components/CdpScreencastViewport.tsx';
 import {VncViewport} from '/@fs/${repo}/apps/web-workbench/src/components/VncViewport.tsx';
@@ -51,17 +51,17 @@ createRoot(document.getElementById('root')).render(q.get('parent')==='1'?<ToastP
 const wsserver = new WebSocketServer({ host: '127.0.0.1', port: 0 });
 await new Promise((r) => wsserver.on('listening', r));
 const wsport = wsserver.address().port;
-process.chdir(repo + '/apps/web-workbench');
+process.chdir(`${repo}/apps/web-workbench`);
 const vite = await createServer({
   configFile: false,
-  root: out + '/harness',
+  root: `${out}/harness`,
   plugins: [react()],
   define: { 'import.meta.env.VITE_BROWSER_VIEWPORT_V2': '"true"' },
-  resolve: { alias: { '@': repo + '/apps/web-workbench/src' } },
+  resolve: { alias: { '@': `${repo}/apps/web-workbench/src` } },
   css: {
     postcss: {
       plugins: [
-        w('tailwindcss')({ config: repo + '/apps/web-workbench/tailwind.config.ts' }),
+        w('tailwindcss')({ config: `${repo}/apps/web-workbench/tailwind.config.ts` }),
         w('autoprefixer')(),
       ],
     },
@@ -69,7 +69,7 @@ const vite = await createServer({
   server: {
     host: '127.0.0.1',
     port: 0,
-    proxy: { '/screencast-ws': { target: 'ws://127.0.0.1:' + wsport, ws: true } },
+    proxy: { '/screencast-ws': { target: `ws://127.0.0.1:${wsport}`, ws: true } },
     fs: { allow: [repo, out] },
   },
 });
@@ -80,16 +80,16 @@ const browser = await chromium.launch({
   args: ['--disable-dev-shm-usage', '--renderer-process-limit=2'],
 });
 
-let source,
-  streamer,
-  handler,
-  serverWs,
-  latest,
-  received = [],
-  rejected = 0;
+let source;
+let streamer;
+let handler;
+let serverWs;
+let latest;
+let received = [];
+let rejected = 0;
 const records = [];
-let framebufferSize = { width: 1280, height: 900 },
-  vncPointers = [];
+let framebufferSize = { width: 1280, height: 900 };
+let vncPointers = [];
 async function rfbFixture(ws) {
   const { width, height } = framebufferSize;
   const rgb = await sharp({ create: { width, height, channels: 4, background: '#eef2ff' } })
@@ -108,9 +108,9 @@ async function rfbFixture(ws) {
     bgra[i] = bgra[i + 2];
     bgra[i + 2] = red;
   }
-  let stage = 0,
-    buffer = Buffer.alloc(0),
-    sent = false;
+  let stage = 0;
+  let buffer = Buffer.alloc(0);
+  let sent = false;
   ws.send(Buffer.from('RFB 003.008\n'));
   ws.on('message', (raw) => {
     buffer = Buffer.concat([buffer, Buffer.from(raw)]);
@@ -279,13 +279,13 @@ try {
             received = [];
             await viewer.setViewportSize({ width: panel, height: 800 });
             await viewer.goto(
-              `http://127.0.0.1:${port}/?width=${panel}&source=${srcWidth}&ws=${encodeURIComponent('ws://127.0.0.1:' + wsport + '/cdp')}`,
+              `http://127.0.0.1:${port}/?width=${panel}&source=${srcWidth}&ws=${encodeURIComponent(`ws://127.0.0.1:${wsport}/cdp`)}`,
             );
             await waitFrame(viewer);
             const dims = await viewer.evaluate(() => {
-              const s = document.querySelector('#shell'),
-                c = document.querySelector('canvas'),
-                r = c.getBoundingClientRect();
+              const s = document.querySelector('#shell');
+              const c = document.querySelector('canvas');
+              const r = c.getBoundingClientRect();
               return {
                 host: s.clientWidth,
                 scroll: s.scrollWidth,
@@ -305,7 +305,7 @@ try {
             await viewer.waitForTimeout(90);
             const down = received.filter((x) => x.type === 'mouseDown').at(-1);
             if (!down) {
-              await viewer.screenshot({ path: out + '/screens/failure.png' });
+              await viewer.screenshot({ path: `${out}/screens/failure.png` });
               console.log(JSON.stringify({ dims, latest, received, rejected }));
             }
             assert(down, `missing click ${panel}/${srcWidth}/${pageZoom}/${dpr}`);
@@ -324,7 +324,7 @@ try {
               );
             assert.equal(actualDpr, dpr);
             const name = `cdp-panel${panel}-source${srcWidth}-dpr${dpr}-page-content-zoom${pageZoom * 100}.png`;
-            await viewer.screenshot({ path: out + '/screens/' + name });
+            await viewer.screenshot({ path: `${out}/screens/${name}` });
             records.push({
               transport: 'CDP',
               panel,
@@ -350,7 +350,7 @@ try {
     const viewer = await ctx.newPage();
     await viewer.setViewportSize({ width: 430, height: 800 });
     await viewer.goto(
-      `http://127.0.0.1:${port}/?width=430&source=1600&ws=${encodeURIComponent('ws://127.0.0.1:' + wsport + '/cdp')}`,
+      `http://127.0.0.1:${port}/?width=430&source=1600&ws=${encodeURIComponent(`ws://127.0.0.1:${wsport}/cdp`)}`,
     );
     await waitFrame(viewer);
     for (const scale of [1.25, 2]) {
@@ -362,8 +362,8 @@ try {
       assert.equal(latest.pageScaleFactor, scale);
       const r = await viewer.locator('canvas').boundingBox();
       const box = await source.locator('#target').boundingBox();
-      const x = box.x + box.width / 2,
-        y = box.y + box.height / 2;
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
       received = [];
       await viewer.mouse.click(
         r.x + (r.width * x * scale) / 1600,
@@ -419,7 +419,7 @@ try {
     await viewer.getByRole('button', { name: '放大', exact: true }).click();
     await viewer.getByRole('button', { name: '平移画面', exact: true }).click();
     await viewer.getByRole('menuitem', { name: '平移画面右', exact: true }).click();
-    await viewer.screenshot({ path: out + '/screens/cdp-local-zoom-pan.png' });
+    await viewer.screenshot({ path: `${out}/screens/cdp-local-zoom-pan.png` });
     assert(!received.some((m) => m.type === 'viewport' && m.width !== 1600));
     await viewer.getByRole('button', { name: '适应', exact: true }).click();
     await viewer.getByRole('button', { name: '网页显示模式' }).click();
@@ -443,7 +443,7 @@ try {
           vncPointers = [];
           await v.setViewportSize({ width: panel, height: 800 });
           await v.goto(
-            `http://127.0.0.1:${port}/?width=${panel}&vnc=1&v2=0&ws=${encodeURIComponent('ws://127.0.0.1:' + wsport + '/rfb')}`,
+            `http://127.0.0.1:${port}/?width=${panel}&vnc=1&v2=0&ws=${encodeURIComponent(`ws://127.0.0.1:${wsport}/rfb`)}`,
           );
           await v.waitForFunction(() => window.__ready, null, { timeout: 15000 });
           await v.waitForTimeout(200);
@@ -457,7 +457,7 @@ try {
           if (error > 2) console.log(JSON.stringify({ panel, width, dpr, error, point, r }));
           assert(error <= 2);
           records.push({ transport: 'VNC', panel, framebufferWidth: width, dpr, error });
-          await v.screenshot({ path: out + `/screens/vnc-panel${panel}-fb${width}-dpr${dpr}.png` });
+          await v.screenshot({ path: `${out}/screens/vnc-panel${panel}-fb${width}-dpr${dpr}.png` });
         }
       await v.close();
       await context.close();
@@ -502,15 +502,15 @@ try {
     await parentViewer.goto(`http://127.0.0.1:${port}/?parent=1`);
     await parentViewer.waitForSelector('canvas[data-frame-id]', { timeout: 15000 });
     const bounds = await parentViewer.evaluate(() => {
-      const c = document.querySelector('canvas'),
-        rect = c.getBoundingClientRect(),
-        host = c.closest('.cdp-screencast-host'),
-        toolbar = document.querySelector('[role="toolbar"][aria-label="画面工具栏"]'),
-        tr = toolbar.getBoundingClientRect();
-      const br = toolbar.querySelector('button').getBoundingClientRect(),
-        surface = toolbar.parentElement;
-      const section = c.closest('section'),
-        sr = section.getBoundingClientRect();
+      const c = document.querySelector('canvas');
+      const rect = c.getBoundingClientRect();
+      const host = c.closest('.cdp-screencast-host');
+      const toolbar = document.querySelector('[role="toolbar"][aria-label="画面工具栏"]');
+      const tr = toolbar.getBoundingClientRect();
+      const br = toolbar.querySelector('button').getBoundingClientRect();
+      const surface = toolbar.parentElement;
+      const section = c.closest('section');
+      const sr = section.getBoundingClientRect();
       return {
         bodyWidth: document.documentElement.clientWidth,
         bodyScrollWidth: document.documentElement.scrollWidth,
@@ -555,11 +555,11 @@ try {
       await active.evaluate((e) => getComputedStyle(e).backgroundColor),
       'rgb(255, 0, 97)',
     );
-    await parentViewer.screenshot({ path: out + `/screens/portrait-fix-${panel}.png` });
+    await parentViewer.screenshot({ path: `${out}/screens/portrait-fix-${panel}.png` });
     if (panel === 390)
       await parentViewer
         .getByRole('toolbar', { name: '画面工具栏' })
-        .screenshot({ path: out + '/screens/toolbar-fix-closeup.png' });
+        .screenshot({ path: `${out}/screens/toolbar-fix-closeup.png` });
     assert.equal(await source.evaluate(() => window.devicePixelRatio), portraitDpr);
     records.push({
       portraitFix: true,

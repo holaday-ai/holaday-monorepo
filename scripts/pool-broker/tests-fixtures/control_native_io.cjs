@@ -4,7 +4,8 @@ const { setTimeout: wait } = require('node:timers/promises');
 
 (async () => {
   const [module, leaf] = process.argv.slice(2);
-  let accepted, didAccept;
+  let accepted;
+  let didAccept;
   const peer = new Promise((resolve) => {
     didAccept = resolve;
   });

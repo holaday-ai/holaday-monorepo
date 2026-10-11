@@ -187,8 +187,8 @@ for (const fault of [
       inventoryDigest: 'c'.repeat(64),
     };
     const identity = { candidate: binding.candidate, bootId: 'd'.repeat(32) };
-    let now = 1000,
-      calls = 0;
+    let now = 1000;
+    let calls = 0;
     const record = { phase: 'reconciled', identity };
     const ctx = {
       binding,
@@ -381,9 +381,9 @@ for (const observedAtMs of [400, 1000])
       { id: 3, created_at: new Date(700) },
     ].map((r) => ({
       ...r,
-      external_id: 'QA_' + r.id,
+      external_id: `QA_${r.id}`,
       provider: 'wechat',
-      provider_order_id: 'ORDER_' + r.id,
+      provider_order_id: `ORDER_${r.id}`,
       provider_capture_id: null,
       amount_cents: 100,
       currency: 'CNY',

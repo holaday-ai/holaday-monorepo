@@ -156,7 +156,7 @@ async function runOne(token, task, index, total) {
       summaryPreview: '',
       error: String(err?.message ?? err),
     };
-    fs.appendFileSync(JSONL_PATH, JSON.stringify(row) + '\n');
+    fs.appendFileSync(JSONL_PATH, `${JSON.stringify(row)}\n`);
     return row;
   }
   log(`       -> ${taskId}, polling`);
@@ -170,7 +170,7 @@ async function runOne(token, task, index, total) {
     } catch (err) {
       pollErrors += 1;
       if (pollErrors > 10) {
-        log(`       !! too many poll errors, abandoning poll`);
+        log('       !! too many poll errors, abandoning poll');
         break;
       }
       continue;
@@ -199,19 +199,19 @@ async function runOne(token, task, index, total) {
     summaryPreview: summary.slice(0, 200),
     errorCode: detail?.errorCode ?? null,
   };
-  fs.appendFileSync(JSONL_PATH, JSON.stringify(row) + '\n');
+  fs.appendFileSync(JSONL_PATH, `${JSON.stringify(row)}\n`);
   log(`       done status=${row.status} iter=${row.iterations} ${Math.round(duration / 1000)}s`);
   return row;
 }
 
 function summaryPreview50(s) {
   const clean = (s ?? '').replace(/\s+/g, ' ').trim();
-  return clean.length > 50 ? clean.slice(0, 50) + '…' : clean;
+  return clean.length > 50 ? `${clean.slice(0, 50)}…` : clean;
 }
 
 function truncForTable(s, n) {
   const clean = (s ?? '').replace(/\s+/g, ' ').trim();
-  return clean.length > n ? clean.slice(0, n - 1) + '…' : clean;
+  return clean.length > n ? `${clean.slice(0, n - 1)}…` : clean;
 }
 
 function renderReport(rows) {
@@ -281,7 +281,7 @@ function renderReport(rows) {
   }
   const md = renderReport(rows);
   fs.writeFileSync(MD_PATH, md);
-  console.log('\n' + md);
+  console.log(`\n${md}`);
   log(`Report saved to ${MD_PATH}`);
 })().catch((err) => {
   console.error('FATAL', err);

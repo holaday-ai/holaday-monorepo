@@ -1478,8 +1478,7 @@ export async function requestVisionObservationFromSW(
   void timeoutMs;
   void pendingObservations;
   throw new Error(
-    `extension-WS task execution disabled — task ${taskId} tick ${tickIndex} ` +
-      'must run on per-task pool Brave only (P0 safety guard).',
+    `extension-WS task execution disabled — task ${taskId} tick ${tickIndex} must run on per-task pool Brave only (P0 safety guard).`,
   );
 }
 
@@ -1506,8 +1505,7 @@ export async function dispatchVisionActionToSW(
   void timeoutMs;
   void pendingActed;
   throw new Error(
-    `extension-WS task execution disabled — task ${taskId} tick ${tickIndex} ` +
-      'must run on per-task pool Brave only (P0 safety guard).',
+    `extension-WS task execution disabled — task ${taskId} tick ${tickIndex} must run on per-task pool Brave only (P0 safety guard).`,
   );
 }
 // firstConnectedClient was the per-user "pick a client to drive"

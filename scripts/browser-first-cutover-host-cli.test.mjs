@@ -39,11 +39,9 @@ async function cliFixture(t) {
   assert.equal(source.split(site).length, 2);
   source = source.replace(
     site,
-    "        process.stdout.write('CLI_IMPORT_READY\\n');\n        process.exit(0);\n" + site,
+    `        process.stdout.write('CLI_IMPORT_READY\\n');\n        process.exit(0);\n${site}`,
   );
-  source =
-    "async function fixtureIdentity() { return { readExecutionIdentity: async () => ({ binding: { candidate: 'a'.repeat(40) }, toolDigest: 'b'.repeat(64) }), close() {} }; }\n" +
-    source;
+  source = `async function fixtureIdentity() { return { readExecutionIdentity: async () => ({ binding: { candidate: 'a'.repeat(40) }, toolDigest: 'b'.repeat(64) }), close() {} }; }\n${source}`;
   await fs.writeFile(path, source);
   return (mode) =>
     spawnSync(process.execPath, [path, mode, '81f4c9e3-ec69-4c43-82cb-b19ff3e59d8a'], {
