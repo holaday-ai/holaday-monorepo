@@ -58,6 +58,12 @@ export async function observeControl(page, control, { checkDismissal = true } = 
     (control.type === 'radio' && control.checked)
   )
     return { ...control, status: 'idempotent', reason: 'already selected option' };
+  // Selecting the current grid cell again is a no-op; disclosures still need action.
+  if (control.role === 'gridcell' &&
+      (await locator.getAttribute('aria-selected')) === 'true' &&
+      (await locator.getAttribute('aria-expanded')) === null &&
+      (await locator.getAttribute('aria-haspopup')) === null)
+    return { ...control, status: 'idempotent', reason: 'already selected grid cell' };
   if (control.selectedWithoutSemantics)
     return {
       ...control,
