@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+/** Source-text checks must survive formatter line wrapping. */
+const compact = (text: string) => text.replace(/\s+/g, '');
+
 describe('stock discovery layout', () => {
   it('does not present unloaded discovery feeds as zero-result categories', () => {
     const source = readFileSync(new URL('./StockDiscoveryPage.tsx', import.meta.url), 'utf8');
@@ -39,7 +42,7 @@ describe('stock discovery layout', () => {
     expect(source).toContain(
       'lg:min-h-[280px] lg:grid-cols-[minmax(0,1.12fr)_minmax(320px,0.88fr)]',
     );
-    expect(source).toContain("isLead ? 'aspect-[3/2] w-full lg:order-2 lg:h-full lg:aspect-auto'");
-    expect(source).toContain("isCompact ? 'h-[104px]' : 'aspect-[3/2] w-full'");
+    expect(compact(source)).toContain(compact("isLead ? 'aspect-[3/2] w-full lg:order-2 lg:h-full lg:aspect-auto'"));
+    expect(compact(source)).toContain(compact("isCompact ? 'h-[104px]' : 'aspect-[3/2] w-full'"));
   });
 });

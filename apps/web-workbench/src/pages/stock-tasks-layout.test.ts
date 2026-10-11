@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+/** Source-text checks must survive formatter line wrapping. */
+const compact = (text: string) => text.replace(/\s+/g, '');
+
 describe('stock tasks layout', () => {
   it('keeps page actions clear of the fixed desktop account dock', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
@@ -168,7 +171,7 @@ describe('stock tasks layout', () => {
 
     expect(source).toContain('onPointerEnter={handlePointerEnter}');
     expect(source).toContain('onMouseEnter={handleMouseEnter}');
-    expect(source).toContain('StockRailMetric label={temporalCopy.updateLabel}');
+    expect(compact(source)).toContain(compact('StockRailMetric label={temporalCopy.updateLabel}'));
     expect(source).toContain('分时截至');
     expect(source).not.toContain('interpolatedChartPoint');
   });
@@ -198,7 +201,7 @@ describe('stock tasks layout', () => {
     expect(source).toContain('{dashboardTrust.statusLabel}');
     expect(source).toContain('temporalCopy={temporalCopy}');
     expect(source).toContain('briefingLabel={temporalCopy.briefingTabLabel}');
-    expect(source).toContain('{stock.name}{temporalCopy.storyTitleSuffix}');
+    expect(compact(source)).toContain(compact('{stock.name}{temporalCopy.storyTitleSuffix}'));
     expect(source).toContain('{temporalCopy.storyStatusLabel}');
     expect(source).toContain('temporalCopy.researchTimestampLabel ?? formatUpdateTime(updatedAt)');
     expect(source).toContain('title={temporalCopy.briefingTitle}');

@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { filterSidebarFeatureNavItems, preloadSidebarFeatureNavItem } from './sidebar-feature-nav';
 
+/** Source-text checks must survive formatter line wrapping. */
+const compact = (text: string) => text.replace(/\s+/g, '');
+
 const FEATURES = [
   { label: '专家技能', href: '/skills' },
   { label: '合伙人计划', href: '/partner' },
@@ -53,6 +56,6 @@ describe('filterSidebarFeatureNavItems', () => {
     expect(sidebarSource).toContain('onPointerEnter={() => preloadSidebarFeatureNavItem(item)}');
     expect(sidebarSource).toContain('onFocus={() => preloadSidebarFeatureNavItem(item)}');
     expect(sidebarSource).toContain('else visit(href)');
-    expect(sidebarSource).toContain('navigate(href); onNavigate?.()');
+    expect(compact(sidebarSource)).toContain(compact('navigate(href); onNavigate?.()'));
   });
 });
