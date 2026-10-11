@@ -48,9 +48,11 @@ remote "mkdir -p '$BACKUP_DIR' && cd '$DEPLOY_DIR/apps/orchestrator' && set -a &
       mysqldump --single-transaction --routines --no-tablespaces -h \"\$h\" -P \"\$p\" -u \"\$user\" \"\$db\" | gzip > '$BACKUP_DIR/holaday-$STAMP.sql.gz'; } && \
   test -s '$BACKUP_DIR/holaday-$STAMP.sql.gz'"
 
-# 2. Deploy code (fetch + build). The previous build stays until restart.
+# 2. Deploy code (fetch + lint + build). The previous build stays until restart;
+#    a lint error (root `biome check .`) stops the release like a build error.
 remote "cd '$DEPLOY_DIR' && git fetch --prune origin && git checkout --detach '$RELEASE_REF' && \
-  pnpm install --frozen-lockfile && pnpm --filter @holaday/orchestrator build && pnpm --filter @holaday/web-workbench build"
+  pnpm install --frozen-lockfile && pnpm lint && \
+  pnpm --filter @holaday/orchestrator build && pnpm --filter @holaday/web-workbench build"
 
 # 3. Migrations BEFORE restart (schema first, then code). All are additive.
 remote "cd '$DEPLOY_DIR/apps/orchestrator' && pnpm db:migrate:numbered && pnpm db:verify"

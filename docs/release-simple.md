@@ -2,6 +2,9 @@
 
 脚本：`scripts/release-simple.sh`。默认只打印计划（dry-run），加 `--execute` 才会真正动服务器。**本分支只写了脚本，未执行。**
 
+## 发布前检查（本地，合并/发布前必过）
+`pnpm release:check`：根目录 `pnpm lint`（Biome，0 error）→ 四包 typecheck → orchestrator / web-workbench build。再加 web 与后端全量测试（后端除已知 broker-pool 本机基线外 0 失败）。服务器端第 3 步构建前也会再跑一次 `pnpm lint`，lint 不过即停止发布。
+
 ## 步骤
 1. **前置检查**：服务器工作树必须没有未提交改动，并记下当前 HEAD 作为回滚点（`.release-previous-ref`）。
 2. **数据库备份**：在服务器上用 `mysqldump --single-transaction` 导出到 `BACKUP_DIR/holaday-<时间>.sql.gz`。数据库凭据只从服务器自己的 `.env` 读取，不回显。
