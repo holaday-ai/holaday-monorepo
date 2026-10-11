@@ -242,9 +242,11 @@ describe('clarification resume semantic verification', () => {
       expect(f.calls[0]?.body.model).toBe(env.QWEN_VERIFY_STRICT_MODEL);
       expect(f.saved[0]).toMatchObject({ status: 'completed', summary });
       // Settlement is durable before its detached terminal notification.
-      await vi.waitFor(() => expect(f.frames).toContainEqual(
-        expect.objectContaining({ type: 'server.task.terminal', status: 'completed' }),
-      ));
+      await vi.waitFor(() =>
+        expect(f.frames).toContainEqual(
+          expect.objectContaining({ type: 'server.task.terminal', status: 'completed' }),
+        ),
+      );
     },
   );
 

@@ -20,13 +20,12 @@
  * on the client side so the handshake stays symmetrical.
  */
 
-import { VncReadOnlyFilter } from '../streaming/vnc-readonly.js';
 import type { IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { Logger } from 'pino';
-import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { WebSocket, WebSocketServer } from 'ws';
+import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import {
   type AuthenticatedSession,
   authenticateStreamOrAccessSession,
@@ -34,6 +33,7 @@ import {
 } from '../auth/middleware.js';
 import { startWebSocketSessionRevalidation } from '../auth/websocket-session-revalidation.js';
 import { db } from '../db/client.js';
+import { VncReadOnlyFilter } from '../streaming/vnc-readonly.js';
 import type { BrowserPool } from './browser-pool.js';
 
 export interface VncProxyOptions {
@@ -145,7 +145,8 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
     // a stale query.
     const token = extractBearerFromSubprotocol(req) ?? extractTokenFromQuery(url);
     if (!token) {
-      return reject(socket, 401, 'missing bearer token');
+      reject(socket, 401, 'missing bearer token');
+      return;
     }
 
     // authenticateStreamOrAccessToken accepts either a short-lived stream
@@ -293,10 +294,7 @@ function extractTokenFromQuery(url: string): string | null {
  */
 function reject(socket: Duplex, status: number, reason: string): void {
   socket.write(
-    `HTTP/1.1 ${status} ${reason}\r\n` +
-      'Connection: close\r\n' +
-      `Content-Length: ${Buffer.byteLength(reason)}\r\n\r\n` +
-      reason,
+    `HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: ${Buffer.byteLength(reason)}\r\n\r\n${reason}`,
   );
   socket.destroy();
 }
@@ -327,7 +325,8 @@ function pipe(
   // Don't relay frames until upstream has finished its handshake.
   // Buffer a small window in case the client races the
   // initial-RFB-VERSION bytes.
-  const readOnlyFilter = process.env.BROWSER_VIEWPORT_V2 === 'true' ? new VncReadOnlyFilter() : null;
+  const readOnlyFilter =
+    process.env.BROWSER_VIEWPORT_V2 === 'true' ? new VncReadOnlyFilter() : null;
   const clientBacklog: Array<[data: Buffer, isBinary: boolean]> = [];
   let upstreamReady = false;
   let lastTouchAt = Date.now();
@@ -339,7 +338,10 @@ function pipe(
   }
 
   upstream.on('open', () => {
-    if (client.readyState !== WebSocket.OPEN) { upstream.close(); return; }
+    if (client.readyState !== WebSocket.OPEN) {
+      upstream.close();
+      return;
+    }
     upstreamReady = true;
     for (const [data, isBinary] of clientBacklog) {
       upstream.send(data, { binary: isBinary });
@@ -368,7 +370,13 @@ function pipe(
     if (client.readyState !== WebSocket.OPEN) return;
     let buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
     if (readOnlyFilter) {
-      try { buf = readOnlyFilter.receive(buf); } catch { client.close(1008, 'browser_vnc_read_only'); upstream.close(); return; }
+      try {
+        buf = readOnlyFilter.receive(buf);
+      } catch {
+        client.close(1008, 'browser_vnc_read_only');
+        upstream.close();
+        return;
+      }
       if (!buf.length) return;
     }
     if (!upstreamReady) {

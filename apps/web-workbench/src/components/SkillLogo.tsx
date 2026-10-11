@@ -1,5 +1,5 @@
-import * as React from 'react';
 import { cn } from '@/lib/utils';
+import type * as React from 'react';
 
 type SkillLogoSize = 'sm' | 'md' | 'lg';
 
@@ -32,18 +32,25 @@ const KNOWN_LOGOS = new Set([
   'performance-review-design',
 ]);
 
-export function SkillLogo({
-  logoId,
-  label,
-  size = 'md',
-  className,
-}: SkillLogoProps): JSX.Element {
+export function SkillLogo({ logoId, label, size = 'md', className }: SkillLogoProps): JSX.Element {
   const known = KNOWN_LOGOS.has(logoId);
-  if (known) return (
-    <span role="img" aria-label={label} data-logo-id={logoId} data-logo-known="true" className={cn('inline-flex shrink-0 overflow-hidden', SIZE_CLASS[size], className)}>
-      <img src={`${import.meta.env.BASE_URL}holaday-ui/skill-logos/${logoId}.svg`} alt="" aria-hidden className="h-full w-full" />
-    </span>
-  );
+  if (known)
+    return (
+      <span
+        role="img"
+        aria-label={label}
+        data-logo-id={logoId}
+        data-logo-known="true"
+        className={cn('inline-flex shrink-0 overflow-hidden', SIZE_CLASS[size], className)}
+      >
+        <img
+          src={`${import.meta.env.BASE_URL}holaday-ui/skill-logos/${logoId}.svg`}
+          alt=""
+          aria-hidden
+          className="h-full w-full"
+        />
+      </span>
+    );
   const theme = logoTheme('fallback');
 
   return (
@@ -92,7 +99,8 @@ function logoTheme(logoId: string): {
     case 'xiaohongshu-seeding-ops':
       return {
         background: '#FF7EA1',
-        overlay: 'radial-gradient(circle at 28% 22%, rgba(255,255,255,0.94), rgba(255,255,255,0) 42%)',
+        overlay:
+          'radial-gradient(circle at 28% 22%, rgba(255,255,255,0.94), rgba(255,255,255,0) 42%)',
         foreground: '#FFFFFF',
         accent: '#FFE6EF',
       };
@@ -106,7 +114,8 @@ function logoTheme(logoId: string): {
     case 'social-media-strategy':
       return {
         background: '#B5A6FF',
-        overlay: 'radial-gradient(circle at 72% 22%, rgba(255,221,95,0.95), rgba(255,221,95,0) 42%)',
+        overlay:
+          'radial-gradient(circle at 72% 22%, rgba(255,221,95,0.95), rgba(255,221,95,0) 42%)',
         foreground: '#FFFFFF',
         accent: '#FFE27A',
       };
@@ -134,7 +143,8 @@ function logoTheme(logoId: string): {
     case 'market-competitor-insight':
       return {
         background: '#62D7C7',
-        overlay: 'radial-gradient(circle at 24% 22%, rgba(255,225,117,0.92), rgba(255,225,117,0) 40%)',
+        overlay:
+          'radial-gradient(circle at 24% 22%, rgba(255,225,117,0.92), rgba(255,225,117,0) 40%)',
         foreground: '#FFFFFF',
         accent: '#FFE175',
       };
@@ -148,7 +158,8 @@ function logoTheme(logoId: string): {
     case 'product-plan-drafting':
       return {
         background: '#AFA8FF',
-        overlay: 'radial-gradient(circle at 76% 24%, rgba(190,232,255,0.96), rgba(190,232,255,0) 40%)',
+        overlay:
+          'radial-gradient(circle at 76% 24%, rgba(190,232,255,0.96), rgba(190,232,255,0) 40%)',
         foreground: '#FFFFFF',
         accent: '#E8E5FF',
       };
@@ -169,7 +180,8 @@ function logoTheme(logoId: string): {
     case 'performance-review-design':
       return {
         background: '#FF8BC4',
-        overlay: 'radial-gradient(circle at 70% 22%, rgba(255,255,255,0.42), rgba(255,255,255,0) 42%)',
+        overlay:
+          'radial-gradient(circle at 70% 22%, rgba(255,255,255,0.42), rgba(255,255,255,0) 42%)',
         foreground: '#FFFFFF',
         accent: '#FFE2F0',
       };
@@ -189,22 +201,42 @@ function logoMark(logoId: string, accent: string): React.ReactNode {
       return (
         <>
           <path d="M18 13v22l17-11L18 13Z" fill="currentColor" />
-          <path d="M33 14c3 3 4.5 6.5 4.5 10s-1.5 7-4.5 10" fill="none" stroke={accent} strokeLinecap="round" strokeWidth="4" />
-          <path d="M11 18c-2 4-2 8 0 12" fill="none" stroke="#FF0061" strokeLinecap="round" strokeWidth="4" />
+          <path
+            d="M33 14c3 3 4.5 6.5 4.5 10s-1.5 7-4.5 10"
+            fill="none"
+            stroke={accent}
+            strokeLinecap="round"
+            strokeWidth="4"
+          />
+          <path
+            d="M11 18c-2 4-2 8 0 12"
+            fill="none"
+            stroke="#FF0061"
+            strokeLinecap="round"
+            strokeWidth="4"
+          />
         </>
       );
     case 'xiaohongshu-seeding-ops':
       return (
         <>
           <rect x="12" y="10" width="24" height="29" rx="5" fill="currentColor" />
-          <path d="M18 17h12M18 23h9M18 29h7" stroke="#F72B4E" strokeLinecap="round" strokeWidth="3" />
+          <path
+            d="M18 17h12M18 23h9M18 29h7"
+            stroke="#F72B4E"
+            strokeLinecap="round"
+            strokeWidth="3"
+          />
           <path d="M31 29c4-1 6-4 6-8-4 1-7 4-6 8Z" fill={accent} />
         </>
       );
     case 'wechat-article-ops':
       return (
         <>
-          <path d="M11 17c0-5 5-9 12-9s12 4 12 9-5 9-12 9h-3l-6 5 1.5-6C12.7 23.3 11 20.4 11 17Z" fill="currentColor" />
+          <path
+            d="M11 17c0-5 5-9 12-9s12 4 12 9-5 9-12 9h-3l-6 5 1.5-6C12.7 23.3 11 20.4 11 17Z"
+            fill="currentColor"
+          />
           <path d="M19 17h10M19 22h7" stroke="#21B26B" strokeLinecap="round" strokeWidth="3" />
           <circle cx="33" cy="31" r="6" fill={accent} />
         </>
@@ -212,7 +244,13 @@ function logoMark(logoId: string, accent: string): React.ReactNode {
     case 'social-media-strategy':
       return (
         <>
-          <path d="M15 17l10 7 8-9M15 31l10-7 9 7" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="4" />
+          <path
+            d="M15 17l10 7 8-9M15 31l10-7 9 7"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="4"
+          />
           <circle cx="13" cy="17" r="5" fill="currentColor" />
           <circle cx="25" cy="24" r="5" fill={accent} />
           <circle cx="35" cy="15" r="5" fill="currentColor" />
@@ -222,16 +260,45 @@ function logoMark(logoId: string, accent: string): React.ReactNode {
     case 'image-prompt-reverse':
       return (
         <>
-          <rect x="10" y="12" width="28" height="24" rx="5" fill="none" stroke="currentColor" strokeWidth="4" />
-          <path d="M15 30l7-7 5 5 4-4 5 6" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="3" />
-          <path d="M34 11v8h-8" fill="none" stroke={accent} strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />
+          <rect
+            x="10"
+            y="12"
+            width="28"
+            height="24"
+            rx="5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="4"
+          />
+          <path
+            d="M15 30l7-7 5 5 4-4 5 6"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="3"
+          />
+          <path
+            d="M34 11v8h-8"
+            fill="none"
+            stroke={accent}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="4"
+          />
         </>
       );
     case 'a-share-market-briefing':
       return (
         <>
           <path d="M9 32h30" stroke="currentColor" strokeLinecap="round" strokeWidth="4" />
-          <path d="M12 29l7-9 7 5 10-13" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />
+          <path
+            d="M12 29l7-9 7 5 10-13"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="4"
+          />
           <rect x="16" y="12" width="4" height="14" rx="2" fill={accent} />
           <rect x="29" y="16" width="4" height="16" rx="2" fill={accent} />
         </>
@@ -256,7 +323,12 @@ function logoMark(logoId: string, accent: string): React.ReactNode {
       return (
         <>
           <rect x="10" y="10" width="28" height="28" rx="5" fill="currentColor" opacity="0.96" />
-          <path d="M18 31V20M24 31V16M30 31v-7" stroke="#2563EB" strokeLinecap="round" strokeWidth="4" />
+          <path
+            d="M18 31V20M24 31V16M30 31v-7"
+            stroke="#2563EB"
+            strokeLinecap="round"
+            strokeWidth="4"
+          />
           <circle cx="31" cy="17" r="4" fill={accent} />
         </>
       );
@@ -271,7 +343,13 @@ function logoMark(logoId: string, accent: string): React.ReactNode {
     case 'project-delivery-management':
       return (
         <>
-          <path d="M12 31c8-14 18-14 24-4" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="4" />
+          <path
+            d="M12 31c8-14 18-14 24-4"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="4"
+          />
           <circle cx="13" cy="31" r="5" fill="currentColor" />
           <circle cx="24" cy="22" r="5" fill={accent} />
           <circle cx="36" cy="27" r="5" fill="currentColor" />
@@ -282,7 +360,13 @@ function logoMark(logoId: string, accent: string): React.ReactNode {
         <>
           <rect x="11" y="9" width="23" height="30" rx="5" fill="currentColor" />
           <circle cx="22" cy="20" r="5" fill="#0891B2" />
-          <path d="M16 31c2-4 10-4 12 0" fill="none" stroke="#0891B2" strokeLinecap="round" strokeWidth="3" />
+          <path
+            d="M16 31c2-4 10-4 12 0"
+            fill="none"
+            stroke="#0891B2"
+            strokeLinecap="round"
+            strokeWidth="3"
+          />
           <path d="M32 30l6 6" stroke={accent} strokeLinecap="round" strokeWidth="4" />
           <circle cx="30" cy="28" r="5" fill="none" stroke={accent} strokeWidth="3" />
         </>
@@ -293,7 +377,12 @@ function logoMark(logoId: string, accent: string): React.ReactNode {
           <circle cx="24" cy="24" r="14" fill="none" stroke="currentColor" strokeWidth="4" />
           <circle cx="24" cy="24" r="7" fill="none" stroke={accent} strokeWidth="4" />
           <circle cx="24" cy="24" r="3" fill="currentColor" />
-          <path d="M24 8v6M24 34v6M8 24h6M34 24h6" stroke={accent} strokeLinecap="round" strokeWidth="3" />
+          <path
+            d="M24 8v6M24 34v6M8 24h6M34 24h6"
+            stroke={accent}
+            strokeLinecap="round"
+            strokeWidth="3"
+          />
         </>
       );
     default:

@@ -32,9 +32,7 @@ export function normalizeAuthMeProfile(value: unknown): NormalizedAuthMeProfile 
     teamProjectsEnabled: raw.teamProjectsEnabled === true,
     teamTaskLifecycleEnabled: raw.teamTaskLifecycleEnabled === true,
     modelDataRegion:
-      raw.modelDataRegion === 'cn' || raw.modelDataRegion === 'intl'
-        ? raw.modelDataRegion
-        : null,
+      raw.modelDataRegion === 'cn' || raw.modelDataRegion === 'intl' ? raw.modelDataRegion : null,
   };
 }
 

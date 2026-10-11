@@ -39,7 +39,7 @@ describe('DiscoveryNewsCard', () => {
 });
 
 it('does not advertise unsupported bookmark or more actions', () => {
- render(<DiscoveryNewsCard item={NEWS_ITEM} onOpen={() => undefined} />);
- expect(screen.queryByRole('button',{name:'收藏动态'})).toBeNull();
- expect(screen.queryByRole('button',{name:'更多动态操作'})).toBeNull();
+  render(<DiscoveryNewsCard item={NEWS_ITEM} onOpen={() => undefined} />);
+  expect(screen.queryByRole('button', { name: '收藏动态' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '更多动态操作' })).toBeNull();
 });

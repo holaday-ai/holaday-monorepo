@@ -16,44 +16,43 @@
 
 const PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
   // Anthropic API
-  [/tool_result.*missing|tool_result.*not provided/i,
-    '任务执行中遇到了一个临时问题，正在自动重试。'],
-  [/400.*invalid_request|invalid_request_error/i,
-    '服务暂时繁忙，正在重新尝试。'],
-  [/credit.*balance.*low|insufficient.*credit|quota.*exceeded/i,
-    '系统资源暂时不足，请稍后再试。'],
-  [/rate.?limit|too many requests/i,
-    '请求过于频繁，正在稍候重试。'],
-  [/anthropic api error.*5\d\d/i,
-    '服务暂时不可用，正在重试。'],
+  [
+    /tool_result.*missing|tool_result.*not provided/i,
+    '任务执行中遇到了一个临时问题，正在自动重试。',
+  ],
+  [/400.*invalid_request|invalid_request_error/i, '服务暂时繁忙，正在重新尝试。'],
+  [/credit.*balance.*low|insufficient.*credit|quota.*exceeded/i, '系统资源暂时不足，请稍后再试。'],
+  [/rate.?limit|too many requests/i, '请求过于频繁，正在稍候重试。'],
+  [/anthropic api error.*5\d\d/i, '服务暂时不可用，正在重试。'],
 
   // Network / timeout
-  [/timeout|ETIMEDOUT|timed out/i,
-    '网络连接超时，正在重新加载页面。'],
-  [/ECONNREFUSED|ECONNRESET|connection refused/i,
-    '目标服务暂时无法连接，正在重试。'],
-  [/ERR_NAME_NOT_RESOLVED/i,
-    '网站地址无法解析，请检查 URL 是否正确。'],
-  [/net::ERR_CONNECTION_REFUSED/i,
-    '目标网站拒绝连接，可能暂时不可用。'],
-  [/net::ERR_INTERNET_DISCONNECTED/i,
-    '网络连接已断开，请稍后重试。'],
+  [/timeout|ETIMEDOUT|timed out/i, '网络连接超时，正在重新加载页面。'],
+  [/ECONNREFUSED|ECONNRESET|connection refused/i, '目标服务暂时无法连接，正在重试。'],
+  [/ERR_NAME_NOT_RESOLVED/i, '网站地址无法解析，请检查 URL 是否正确。'],
+  [/net::ERR_CONNECTION_REFUSED/i, '目标网站拒绝连接，可能暂时不可用。'],
+  [/net::ERR_INTERNET_DISCONNECTED/i, '网络连接已断开，请稍后重试。'],
 
   // Browser / Playwright
-  [/navigation.*failed|page\.goto.*failed/i,
-    '无法打开目标页面，正在尝试其他方式访问。'],
-  [/element.*not.*found|selector.*not.*found|locator.*not.*found/i,
-    '页面结构发生了变化，正在重新定位元素。'],
-  [/no executor.*available|browser unavailable/i,
-    '浏览器暂时不可用，正在尝试搜索方式获取信息。'],
+  [/navigation.*failed|page\.goto.*failed/i, '无法打开目标页面，正在尝试其他方式访问。'],
+  [
+    /element.*not.*found|selector.*not.*found|locator.*not.*found/i,
+    '页面结构发生了变化，正在重新定位元素。',
+  ],
+  [/no executor.*available|browser unavailable/i, '浏览器暂时不可用，正在尝试搜索方式获取信息。'],
 
   // Anti-bot
-  [/captcha|recaptcha|hcaptcha|turnstile/i,
-    '页面需要人机验证，请在浏览器面板中手动完成验证后，任务将自动继续。'],
-  [/cloudflare|just a moment|access denied|attention required/i,
-    '网站安全检测触发，已切换至带浏览器指纹的通道重试。'],
-  [/login.*required|authentication.*required|please log in/i,
-    '该网站需要登录后才能继续，请在浏览器面板中登录。'],
+  [
+    /captcha|recaptcha|hcaptcha|turnstile/i,
+    '页面需要人机验证，请在浏览器面板中手动完成验证后，任务将自动继续。',
+  ],
+  [
+    /cloudflare|just a moment|access denied|attention required/i,
+    '网站安全检测触发，已切换至带浏览器指纹的通道重试。',
+  ],
+  [
+    /login.*required|authentication.*required|please log in/i,
+    '该网站需要登录后才能继续，请在浏览器面板中登录。',
+  ],
 ];
 
 const FALLBACK_MESSAGE =

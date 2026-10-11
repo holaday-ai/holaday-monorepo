@@ -121,7 +121,7 @@ describe('decideAuthTokenAction', () => {
 
 describe('looksLikeAuthToken', () => {
   it('accepts long opaque auth tokens and rejects obvious garbage', () => {
-    expect(looksLikeAuthToken('hd_live_' + 'a'.repeat(24))).toBe(true);
+    expect(looksLikeAuthToken(`hd_live_${'a'.repeat(24)}`)).toBe(true);
     expect(looksLikeAuthToken('abc')).toBe(false);
     expect(looksLikeAuthToken('undefined')).toBe(false);
     expect(looksLikeAuthToken('NULL')).toBe(false);
@@ -141,9 +141,7 @@ describe('decideStoredAuthTokenAction', () => {
       kind: 'use',
       token: 'eyJstored.token.value',
     });
-    expect(
-      decideStoredAuthTokenAction('eyJstored.token.value', 'eyJother.token.value'),
-    ).toEqual({
+    expect(decideStoredAuthTokenAction('eyJstored.token.value', 'eyJother.token.value')).toEqual({
       kind: 'use',
       token: 'eyJstored.token.value',
     });
@@ -151,10 +149,7 @@ describe('decideStoredAuthTokenAction', () => {
 
   it('refuses a stored token that still matches the known-bad marker', () => {
     expect(
-      decideStoredAuthTokenAction(
-        'eyJrejected.token.value',
-        'eyJrejected.token.value',
-      ),
+      decideStoredAuthTokenAction('eyJrejected.token.value', 'eyJrejected.token.value'),
     ).toEqual({
       kind: 'refuse',
       reason: 'known_bad_token',

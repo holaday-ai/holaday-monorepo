@@ -17,9 +17,7 @@ export interface ProjectFilterChipState {
   readonly tone: 'normal' | 'loading' | 'error';
 }
 
-export function emptyProjectTaskFilterState(
-  projectId: string,
-): ProjectTaskFilterState {
+export function emptyProjectTaskFilterState(projectId: string): ProjectTaskFilterState {
   return {
     projectId,
     tasks: [],
@@ -126,7 +124,8 @@ export function projectFilterChipState(options: {
 }): ProjectFilterChipState | null {
   if (!options.projectId) return null;
   const stateMatches = options.state?.projectId === options.projectId;
-  const name = safeProjectFilterText(options.projectName) ?? shortProjectFilterId(options.projectId);
+  const name =
+    safeProjectFilterText(options.projectName) ?? shortProjectFilterId(options.projectId);
 
   if (!stateMatches) {
     return {
@@ -150,10 +149,7 @@ export function projectFilterChipState(options: {
     return {
       projectId: options.projectId,
       name,
-      detail:
-        options.state.tasks.length > 0
-          ? '任务刷新失败，显示上次结果'
-          : '任务暂时无法加载',
+      detail: options.state.tasks.length > 0 ? '任务刷新失败，显示上次结果' : '任务暂时无法加载',
       tone: 'error',
     };
   }

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   clearComposerOnSubmitSuccess,
-  composerSubmittingStatus,
   composerSubmitErrorMessage,
+  composerSubmittingStatus,
   keepComposerOnSubmitFailure,
   shouldClearComposerAfterSubmit,
 } from './composer-submit.js';
@@ -38,14 +38,10 @@ describe('shouldClearComposerAfterSubmit', () => {
   });
 
   it('names the in-flight submit state by composer context', () => {
-    expect(composerSubmittingStatus({})).toBe(
-      '已收到任务，正在打开执行页…',
-    );
+    expect(composerSubmittingStatus({})).toBe('已收到任务，正在打开执行页…');
     expect(composerSubmittingStatus({ hasFollowUpTarget: true })).toBe(
       '已收到追问，正在打开跟进任务…',
     );
-    expect(composerSubmittingStatus({ replyMode: true })).toBe(
-      '已收到回复，正在继续当前任务…',
-    );
+    expect(composerSubmittingStatus({ replyMode: true })).toBe('已收到回复，正在继续当前任务…');
   });
 });

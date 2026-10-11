@@ -41,7 +41,7 @@ export class DeferredScreencastInputBridge {
   private sink: ScreencastInputSink | null = null;
   private readonly maxViewportHeight: number;
   private readonly onViewportRequested?: () => void;
-  private readonly beforeDispatch?: DeferredScreencastInputBridgeOptions["beforeDispatch"];
+  private readonly beforeDispatch?: DeferredScreencastInputBridgeOptions['beforeDispatch'];
   private sinkGeneration = 0;
   private latestViewport: Extract<InputMessage, { type: 'viewport' }> | null = null;
   private readonly onViewportApplied?: (viewport: AppliedBrowserViewport) => void;
@@ -108,13 +108,17 @@ export class DeferredScreencastInputBridge {
     this.latestViewport = null;
   }
 
-  private async dispatch(message: InputMessage, lease?: string, envelope?: InputEnvelope): Promise<void> {
+  private async dispatch(
+    message: InputMessage,
+    lease?: string,
+    envelope?: InputEnvelope,
+  ): Promise<void> {
     const sink = this.sink;
     if (!sink) return;
     const generation = this.sinkGeneration;
     const action = async (signal?: AbortSignal): Promise<void> => {
       if (this.sink !== sink || this.sinkGeneration !== generation) return;
-      await this.beforeDispatch?.(envelope ?? {type:"input",payload:message}, signal);
+      await this.beforeDispatch?.(envelope ?? { type: 'input', payload: message }, signal);
       await sink.handle(message, signal);
       if (message.type === 'viewport' && this.sink === sink && this.sinkGeneration === generation) {
         this.onViewportApplied?.({

@@ -1,8 +1,4 @@
-export type ResultSourceMarker =
-  | '[用户提供]'
-  | '[系统计算]'
-  | '[模型假设]'
-  | '[外部来源]';
+export type ResultSourceMarker = '[用户提供]' | '[系统计算]' | '[模型假设]' | '[外部来源]';
 
 export interface ResultSourceBadgeMeta {
   readonly label: string;

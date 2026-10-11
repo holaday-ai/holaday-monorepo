@@ -25,7 +25,6 @@ import FullCalendar from '@fullcalendar/react';
 import * as Dialog from '@radix-ui/react-dialog';
 import {
   CalendarClock,
-  Search,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -37,27 +36,28 @@ import {
   Play,
   Plus,
   RotateCcw,
+  Search,
   Trash2,
   X,
 } from 'lucide-react';
 import * as React from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { PlannedScopeDialog } from './PlannedScopeDialog';
 import {
+  type PlannedEditorErrorKey,
+  type PlannedEditorErrors,
   firstPlannedEditorError,
   plannedEditorFingerprint,
   plannedSaveFeedback,
-  type PlannedEditorErrorKey,
-  type PlannedEditorErrors,
   validatePlannedEditor,
 } from './planned-editor-state';
-import { PlannedScopeDialog } from './PlannedScopeDialog';
 import {
   type PlannedCalendarOccurrence,
   type PlannedCalendarRange,
   type PlannedCalendarView,
   type PlannedRepeatType,
-  buildPlannedLoadMetric,
   buildCustomWeeklyRRule,
+  buildPlannedLoadMetric,
   calendarEventFromOccurrence,
   defaultPlannedCalendarView,
   legacyScheduledEvent,
@@ -65,8 +65,8 @@ import {
   ownedPlannedTaskQueryTarget,
   plannedCalendarEmptyState,
   plannedEndsOnPayload,
-  plannedRepeatLabel,
   plannedRefreshTargets,
+  plannedRepeatLabel,
   plannedStatusGroup,
   stablePlannedCalendarRange,
   stockRiskRunSummary,
@@ -224,7 +224,9 @@ export function PlannedTasksPage(): JSX.Element {
   const [editor, setEditor] = React.useState<EditorState | null>(null);
   // Keep the last form visible while Radix Presence completes the approved exit motion.
   const lastEditor = React.useRef<EditorState | null>(null);
-  React.useLayoutEffect(() => { if (editor) lastEditor.current = editor; }, [editor]);
+  React.useLayoutEffect(() => {
+    if (editor) lastEditor.current = editor;
+  }, [editor]);
   const displayEditor = editor ?? lastEditor.current;
   const [editorBaseline, setEditorBaseline] = React.useState<string | null>(null);
   const [editorErrors, setEditorErrors] = React.useState<PlannedEditorErrors>({});
@@ -315,10 +317,7 @@ export function PlannedTasksPage(): JSX.Element {
   }, []);
 
   const runRefresh = React.useCallback(
-    async (
-      reason: 'mount' | 'range' | 'mutation',
-      targetRange: PlannedCalendarRange | null,
-    ) => {
+    async (reason: 'mount' | 'range' | 'mutation', targetRange: PlannedCalendarRange | null) => {
       const targets = plannedRefreshTargets(reason);
       const requests: Promise<void>[] = [];
       if (targets.plans) requests.push(refreshPlans());
@@ -388,11 +387,7 @@ export function PlannedTasksPage(): JSX.Element {
   }, [editor?.plannedTaskId]);
 
   React.useEffect(() => {
-    if (
-      firstPlansMs === null ||
-      firstCalendarMs === null ||
-      telemetryReportedRef.current
-    ) {
+    if (firstPlansMs === null || firstCalendarMs === null || telemetryReportedRef.current) {
       return;
     }
     telemetryReportedRef.current = true;
@@ -412,10 +407,15 @@ export function PlannedTasksPage(): JSX.Element {
   }, [firstCalendarMs, firstPlansMs, legacyEvents.length, plans.length, view]);
 
   const events = React.useMemo(
-    () => [
-      ...occurrences.map((occurrence) => calendarEventFromOccurrence(occurrence)),
-      ...legacyEvents,
-    ].filter(event => !calendarQuery.trim() || event.title?.toLocaleLowerCase().includes(calendarQuery.trim().toLocaleLowerCase())),
+    () =>
+      [
+        ...occurrences.map((occurrence) => calendarEventFromOccurrence(occurrence)),
+        ...legacyEvents,
+      ].filter(
+        (event) =>
+          !calendarQuery.trim() ||
+          event.title?.toLocaleLowerCase().includes(calendarQuery.trim().toLocaleLowerCase()),
+      ),
     [legacyEvents, occurrences, calendarQuery],
   );
   const attentionCount = plans.filter(
@@ -499,10 +499,7 @@ export function PlannedTasksPage(): JSX.Element {
     });
   }
 
-  function openPlan(
-    plannedTaskId: string,
-    occurrence: PlannedCalendarOccurrence | null,
-  ): void {
+  function openPlan(plannedTaskId: string, occurrence: PlannedCalendarOccurrence | null): void {
     requestEditorTransition(() => {
       rememberEditorReturnFocus();
       void loadPlan(plannedTaskId, occurrence);
@@ -733,7 +730,8 @@ export function PlannedTasksPage(): JSX.Element {
 
   const calendarDay = calendarRef.current?.getApi().getDate();
   const today = new Date();
-  const alreadyOnToday = selectedDay.toDateString() === today.toDateString() &&
+  const alreadyOnToday =
+    selectedDay.toDateString() === today.toDateString() &&
     calendarDay?.getFullYear() === today.getFullYear() &&
     calendarDay?.getMonth() === today.getMonth();
 
@@ -748,58 +746,69 @@ export function PlannedTasksPage(): JSX.Element {
         title="把时间，留给重要的事。"
         description="安排一次，Holaday 在合适的时候开始。"
         action={
-          <>
-            <Button onClick={() => openCreate(selectedDay)}>
-              <Plus aria-hidden />
-              新建规划
-            </Button>
-          </>
+          <Button onClick={() => openCreate(selectedDay)}>
+            <Plus aria-hidden />
+            新建规划
+          </Button>
         }
       />
 
-      <div className="hd-planned-page-tabs">            <div className="planned-toolbar__views" aria-label="视图切换">
-              <button
-                type="button"
-                className={view === 'dayGridMonth' ? 'is-active' : ''}
-                aria-pressed={view === 'dayGridMonth'}
-                onClick={() => changeView('dayGridMonth')}
+      <div className="hd-planned-page-tabs">
+        {' '}
+        <div className="planned-toolbar__views" aria-label="视图切换">
+          <button
+            type="button"
+            className={view === 'dayGridMonth' ? 'is-active' : ''}
+            aria-pressed={view === 'dayGridMonth'}
+            onClick={() => changeView('dayGridMonth')}
+          >
+            月历
+          </button>
+          <button
+            type="button"
+            className={view === 'listMonth' ? 'is-active' : ''}
+            aria-pressed={view === 'listMonth'}
+            onClick={() => changeView('listMonth')}
+          >
+            日程
+          </button>
+        </div>
+        <div className="hd-planned-tools">
+          <label className="hd-planned-search">
+            <Search />
+            <input
+              aria-label="查找规划"
+              placeholder="查找规划"
+              value={calendarQuery}
+              onChange={(event) => setCalendarQuery(event.target.value)}
+            />
+          </label>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                className="hd-legacy-plans"
+                title="旧任务记录"
+                aria-label="旧任务记录"
               >
-                月历
-              </button>
-              <button
-                type="button"
-                className={view === 'listMonth' ? 'is-active' : ''}
-                aria-pressed={view === 'listMonth'}
-                onClick={() => changeView('listMonth')}
-              >
-                日程
-              </button>
-            </div>
-<div className="hd-planned-tools"><label className="hd-planned-search"><Search /><input aria-label="查找规划" placeholder="查找规划" value={calendarQuery} onChange={event => setCalendarQuery(event.target.value)} /></label>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="hd-legacy-plans" title="旧任务记录" aria-label="旧任务记录">
-                  <History aria-hidden />
-                  <span className="sr-only">旧任务记录</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => navigate('/planned/legacy-scheduled')}>
-                  <CalendarClock aria-hidden />
-                  原定时任务
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => navigate('/planned/legacy-batch')}>
-                  <ListChecks aria-hidden />
-                  原批量任务
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-</div></div>
-      <div
-        className="planned-summary"
-        aria-label="规划任务概览"
-        aria-busy={plansLoading}
-      >
+                <History aria-hidden />
+                <span className="sr-only">旧任务记录</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => navigate('/planned/legacy-scheduled')}>
+                <CalendarClock aria-hidden />
+                原定时任务
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => navigate('/planned/legacy-batch')}>
+                <ListChecks aria-hidden />
+                原批量任务
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+      <div className="planned-summary" aria-label="规划任务概览" aria-busy={plansLoading}>
         <span>
           <CalendarClock aria-hidden />
           {activeCount} 个已启用
@@ -835,7 +844,14 @@ export function PlannedTasksPage(): JSX.Element {
               >
                 <ChevronLeft aria-hidden />
               </Button>
-              <Button variant="outline" disabled={alreadyOnToday} onClick={() => { calendarRef.current?.getApi().today(); setSelectedDay(new Date()); }}>
+              <Button
+                variant="outline"
+                disabled={alreadyOnToday}
+                onClick={() => {
+                  calendarRef.current?.getApi().today();
+                  setSelectedDay(new Date());
+                }}
+              >
                 今天
               </Button>
               <Button
@@ -866,7 +882,7 @@ export function PlannedTasksPage(): JSX.Element {
             dayMaxEvents={2}
             fixedWeekCount={false}
             eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
-            dayHeaderContent={arg => arg.text.replace('周', '')}
+            dayHeaderContent={(arg) => arg.text.replace('周', '')}
             moreLinkText={(count) => `还有 ${count} 项`}
             events={events}
             editable
@@ -880,8 +896,10 @@ export function PlannedTasksPage(): JSX.Element {
               );
               setView(arg.view.type as PlannedCalendarView);
             }}
-            dayCellContent={arg => String(arg.date.getDate())}
-            dayCellClassNames={arg => arg.date.toDateString() === selectedDay.toDateString() ? ['hd-selected-day'] : []}
+            dayCellContent={(arg) => String(arg.date.getDate())}
+            dayCellClassNames={(arg) =>
+              arg.date.toDateString() === selectedDay.toDateString() ? ['hd-selected-day'] : []
+            }
             dateClick={handleDateClick}
             eventClick={handleEventClick}
             eventDrop={handleEventDrop}
@@ -912,21 +930,109 @@ export function PlannedTasksPage(): JSX.Element {
           )}
         </section>
 
-        {<aside key={selectedDay.toDateString()} className="hd-day-agenda" aria-label="当天安排">
-          <header><div><span>{selectedDay.toDateString() === new Date().toDateString() ? 'TODAY' : 'SCHEDULE'}</span><h2>{selectedDay.toLocaleDateString('zh-CN', { month:'long', day:'numeric' })}</h2><small>{events.filter(event => event.start && new Date(event.start as string).toDateString() === selectedDay.toDateString()).length} 项安排 · 按各规划当地时间</small></div><button type="button" title="添加当天安排" aria-label="添加当天安排" onClick={() => openCreate(selectedDay)}><Plus /></button></header>
-          <div className="hd-agenda-events">
-            {events.filter(event => event.start && new Date(event.start as string).toDateString() === selectedDay.toDateString()).sort((a,b) => new Date(a.start as string).getTime() - new Date(b.start as string).getTime()).map(event => {
-              const props = event.extendedProps ?? {};
-              const occurrence = occurrences.find(row => row.occurrenceId === event.id);
-              return <button key={event.id} type="button" className="hd-agenda-item" data-status={props.status} onClick={() => {
-                if (props.legacy) { navigate('/planned/legacy-scheduled'); return; }
-                if (occurrence) void openPlan(occurrence.plannedTaskId, occurrence);
-              }}><i style={{ background: String(props.accent ?? '#ADADAD') }} /><time>{new Date(event.start as string).toLocaleTimeString('zh-CN', { hour:'2-digit',minute:'2-digit',hour12:false })}</time><strong>{event.title}</strong><small>{props.legacy ? '旧任务' : `${plannedRepeatLabel(String(props.repeatType))} · ${props.itemCount ?? 1} 个任务项`}</small></button>;
-            })}
-            {!events.some(event => event.start && new Date(event.start as string).toDateString() === selectedDay.toDateString()) && <p className="hd-agenda-empty">{calendarLoading ? '正在读取当天安排…' : '这一天还没有安排，留一点时间给新的想法。'}</p>}
-          </div>
-          <button className="hd-agenda-create" type="button" onClick={() => openCreate(selectedDay)}><Plus />安排一件事</button><p className="hd-agenda-note">定时开始，完成后通知你。<br />重复的小事，也可以从日常里腾出来。</p>
-        </aside>}
+        {
+          <aside key={selectedDay.toDateString()} className="hd-day-agenda" aria-label="当天安排">
+            <header>
+              <div>
+                <span>
+                  {selectedDay.toDateString() === new Date().toDateString() ? 'TODAY' : 'SCHEDULE'}
+                </span>
+                <h2>
+                  {selectedDay.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}
+                </h2>
+                <small>
+                  {
+                    events.filter(
+                      (event) =>
+                        event.start &&
+                        new Date(event.start as string).toDateString() ===
+                          selectedDay.toDateString(),
+                    ).length
+                  }{' '}
+                  项安排 · 按各规划当地时间
+                </small>
+              </div>
+              <button
+                type="button"
+                title="添加当天安排"
+                aria-label="添加当天安排"
+                onClick={() => openCreate(selectedDay)}
+              >
+                <Plus />
+              </button>
+            </header>
+            <div className="hd-agenda-events">
+              {events
+                .filter(
+                  (event) =>
+                    event.start &&
+                    new Date(event.start as string).toDateString() === selectedDay.toDateString(),
+                )
+                .sort(
+                  (a, b) =>
+                    new Date(a.start as string).getTime() - new Date(b.start as string).getTime(),
+                )
+                .map((event) => {
+                  const props = event.extendedProps ?? {};
+                  const occurrence = occurrences.find((row) => row.occurrenceId === event.id);
+                  return (
+                    <button
+                      key={event.id}
+                      type="button"
+                      className="hd-agenda-item"
+                      data-status={props.status}
+                      onClick={() => {
+                        if (props.legacy) {
+                          navigate('/planned/legacy-scheduled');
+                          return;
+                        }
+                        if (occurrence) void openPlan(occurrence.plannedTaskId, occurrence);
+                      }}
+                    >
+                      <i style={{ background: String(props.accent ?? '#ADADAD') }} />
+                      <time>
+                        {new Date(event.start as string).toLocaleTimeString('zh-CN', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: false,
+                        })}
+                      </time>
+                      <strong>{event.title}</strong>
+                      <small>
+                        {props.legacy
+                          ? '旧任务'
+                          : `${plannedRepeatLabel(String(props.repeatType))} · ${props.itemCount ?? 1} 个任务项`}
+                      </small>
+                    </button>
+                  );
+                })}
+              {!events.some(
+                (event) =>
+                  event.start &&
+                  new Date(event.start as string).toDateString() === selectedDay.toDateString(),
+              ) && (
+                <p className="hd-agenda-empty">
+                  {calendarLoading
+                    ? '正在读取当天安排…'
+                    : '这一天还没有安排，留一点时间给新的想法。'}
+                </p>
+              )}
+            </div>
+            <button
+              className="hd-agenda-create"
+              type="button"
+              onClick={() => openCreate(selectedDay)}
+            >
+              <Plus />
+              安排一件事
+            </button>
+            <p className="hd-agenda-note">
+              定时开始，完成后通知你。
+              <br />
+              重复的小事，也可以从日常里腾出来。
+            </p>
+          </aside>
+        }
 
         {displayEditor && (
           <PlannedInspectorSurface
@@ -941,7 +1047,9 @@ export function PlannedTasksPage(): JSX.Element {
               <div>
                 <span>{displayEditor.plannedTaskId ? '规划详情' : '新建规划'}</span>
                 <strong>
-                  {displayEditor.plannedTaskId ? displayEditor.title || '未命名规划' : '安排未来任务'}
+                  {displayEditor.plannedTaskId
+                    ? displayEditor.title || '未命名规划'
+                    : '安排未来任务'}
                 </strong>
               </div>
               <Button
@@ -992,7 +1100,9 @@ export function PlannedTasksPage(): JSX.Element {
               </div>
 
               {displayEditor.multiple ? (
-                <Field label={`任务清单 · ${displayEditor.items.filter((item) => item.trim()).length}/50`}>
+                <Field
+                  label={`任务清单 · ${displayEditor.items.filter((item) => item.trim()).length}/50`}
+                >
                   <div className="planned-items">
                     {displayEditor.items.map((item, index) => (
                       <div className="planned-item" key={`${index}-${displayEditor.items.length}`}>
@@ -1022,7 +1132,9 @@ export function PlannedTasksPage(): JSX.Element {
                           onClick={() =>
                             setEditor({
                               ...displayEditor,
-                              items: displayEditor.items.filter((_, itemIndex) => itemIndex !== index),
+                              items: displayEditor.items.filter(
+                                (_, itemIndex) => itemIndex !== index,
+                              ),
                             })
                           }
                         >
@@ -1034,7 +1146,9 @@ export function PlannedTasksPage(): JSX.Element {
                       variant="outline"
                       size="sm"
                       disabled={displayEditor.items.length >= 50}
-                      onClick={() => setEditor({ ...displayEditor, items: [...displayEditor.items, ''] })}
+                      onClick={() =>
+                        setEditor({ ...displayEditor, items: [...displayEditor.items, ''] })
+                      }
                     >
                       <Plus aria-hidden />
                       添加任务
@@ -1064,11 +1178,7 @@ export function PlannedTasksPage(): JSX.Element {
                     }}
                   />
                   {editorErrors.instruction && (
-                    <p
-                      id="planned-error-instruction"
-                      className="planned-field-error"
-                      role="alert"
-                    >
+                    <p id="planned-error-instruction" className="planned-field-error" role="alert">
                       {editorErrors.instruction}
                     </p>
                   )}
@@ -1082,7 +1192,9 @@ export function PlannedTasksPage(): JSX.Element {
                     value={displayEditor.instruction}
                     rows={3}
                     placeholder="例如：每项都给出来源链接"
-                    onChange={(event) => setEditor({ ...displayEditor, instruction: event.target.value })}
+                    onChange={(event) =>
+                      setEditor({ ...displayEditor, instruction: event.target.value })
+                    }
                   />
                 </Field>
               )}
@@ -1185,11 +1297,7 @@ export function PlannedTasksPage(): JSX.Element {
                     ))}
                   </div>
                   {editorErrors.customDays && (
-                    <p
-                      id="planned-error-custom-days"
-                      className="planned-field-error"
-                      role="alert"
-                    >
+                    <p id="planned-error-custom-days" className="planned-field-error" role="alert">
                       {editorErrors.customDays}
                     </p>
                   )}
@@ -1211,7 +1319,12 @@ export function PlannedTasksPage(): JSX.Element {
                       type="button"
                       className={displayEditor.endsOn !== null ? 'is-active' : ''}
                       aria-pressed={displayEditor.endsOn !== null}
-                      onClick={() => setEditor({ ...displayEditor, endsOn: displayEditor.endsOn ?? displayEditor.date })}
+                      onClick={() =>
+                        setEditor({
+                          ...displayEditor,
+                          endsOn: displayEditor.endsOn ?? displayEditor.date,
+                        })
+                      }
                     >
                       结束日期
                     </button>
@@ -1222,7 +1335,9 @@ export function PlannedTasksPage(): JSX.Element {
                       className="planned-end-date"
                       type="date"
                       value={displayEditor.endsOn}
-                      onChange={(event) => setEditor({ ...displayEditor, endsOn: event.target.value })}
+                      onChange={(event) =>
+                        setEditor({ ...displayEditor, endsOn: event.target.value })
+                      }
                     />
                   )}
                 </Field>
@@ -1233,7 +1348,9 @@ export function PlannedTasksPage(): JSX.Element {
                   <select
                     aria-label="时区"
                     value={displayEditor.timezone}
-                    onChange={(event) => setEditor({ ...displayEditor, timezone: event.target.value })}
+                    onChange={(event) =>
+                      setEditor({ ...displayEditor, timezone: event.target.value })
+                    }
                   >
                     <option value="Asia/Shanghai">中国标准时间</option>
                     <option value="Asia/Tokyo">日本标准时间</option>
@@ -1264,7 +1381,9 @@ export function PlannedTasksPage(): JSX.Element {
               <p className="planned-workload">
                 <Clock3 aria-hidden />
                 {workloadHint(
-                  displayEditor.multiple ? displayEditor.items.filter((item) => item.trim()).length : 1,
+                  displayEditor.multiple
+                    ? displayEditor.items.filter((item) => item.trim()).length
+                    : 1,
                 )}
               </p>
 
@@ -1287,7 +1406,10 @@ export function PlannedTasksPage(): JSX.Element {
                     size="sm"
                     className="text-destructive"
                     onClick={() => {
-                      if (displayEditor.occurrence && displayEditor.occurrence.repeatType !== 'once') {
+                      if (
+                        displayEditor.occurrence &&
+                        displayEditor.occurrence.repeatType !== 'once'
+                      ) {
                         openScopeDialog({ kind: 'remove', occurrence: displayEditor.occurrence });
                       } else if (displayEditor.occurrence) {
                         void removeOccurrence(displayEditor.occurrence, 'series');
@@ -1349,10 +1471,7 @@ export function PlannedTasksPage(): JSX.Element {
             </div>
 
             <div className="planned-inspector__footer">
-              <Button
-                variant="outline"
-                onClick={closeEditor}
-              >
+              <Button variant="outline" onClick={closeEditor}>
                 取消
               </Button>
               <Button onClick={() => void saveEditor()} disabled={saving}>
@@ -1530,7 +1649,20 @@ function renderEventContent(arg: EventContentArg): JSX.Element {
       style={{ '--planned-event-accent': arg.event.extendedProps.accent } as React.CSSProperties}
     >
       <span>{arg.event.title}</span>
-      <div className="hd-planned-event-meta"><time>{arg.timeText}</time><small>{legacy ? '旧任务' : arg.event.extendedProps.status === 'paused' ? '已暂停' : itemCount > 1 ? `${itemCount}项` : arg.event.extendedProps.repeatType === 'once' ? '单次' : '重复'}</small></div>
+      <div className="hd-planned-event-meta">
+        <time>{arg.timeText}</time>
+        <small>
+          {legacy
+            ? '旧任务'
+            : arg.event.extendedProps.status === 'paused'
+              ? '已暂停'
+              : itemCount > 1
+                ? `${itemCount}项`
+                : arg.event.extendedProps.repeatType === 'once'
+                  ? '单次'
+                  : '重复'}
+        </small>
+      </div>
     </div>
   );
 }
@@ -1590,8 +1722,7 @@ function matchMobile(): boolean {
 
 function matchMobileInspector(): boolean {
   return (
-    typeof window !== 'undefined' &&
-    Boolean(window.matchMedia?.(MOBILE_INSPECTOR_QUERY).matches)
+    typeof window !== 'undefined' && Boolean(window.matchMedia?.(MOBILE_INSPECTOR_QUERY).matches)
   );
 }
 

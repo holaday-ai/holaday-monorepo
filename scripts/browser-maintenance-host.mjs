@@ -1,4 +1,3 @@
-import { checkHostAkshare } from './akshare-production-gate.mjs';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants, realpathSync } from 'node:fs';
@@ -6,6 +5,7 @@ import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { checkHostAkshare } from './akshare-production-gate.mjs';
 import { collectCutoverEvidence, publishCutoverEvidence } from './browser-cutover-evidence.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 import {

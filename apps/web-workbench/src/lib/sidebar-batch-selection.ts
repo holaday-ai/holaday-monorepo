@@ -3,9 +3,7 @@ import { isTaskDeletable } from '@/utils/time-buckets';
 
 type BatchTask = Pick<UiTask, 'taskId' | 'status'>;
 
-export function deletableTaskIdsForBatchSelection(
-  tasks: readonly BatchTask[],
-): string[] {
+export function deletableTaskIdsForBatchSelection(tasks: readonly BatchTask[]): string[] {
   const seen = new Set<string>();
   const ids: string[] = [];
   for (const task of tasks) {

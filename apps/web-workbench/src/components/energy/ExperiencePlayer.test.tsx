@@ -111,7 +111,6 @@ describe('ExperiencePlayer', () => {
     await user.click(screen.getByRole('button', { name: '打开抽卡' }));
     expect(screen.getByText('结果内容')).toBeTruthy();
 
-
     expect(screen.getByText('结果内容')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '开始体验' })).toBeNull();
   });

@@ -1,13 +1,10 @@
-import { Check, MoreHorizontal } from 'lucide-react';
-import * as React from 'react';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
-import {
-  taskDisplaySource,
-  taskDisplayTitle,
-} from '@/lib/task-display-copy';
+import { taskDisplaySource, taskDisplayTitle } from '@/lib/task-display-copy';
 import { deriveTaskProductState } from '@/lib/task-product-state';
 import { cn } from '@/lib/utils';
 import { type UiTask, isActive } from '@/types/task';
+import { Check, MoreHorizontal } from 'lucide-react';
+import * as React from 'react';
 
 export { taskDisplaySource, taskDisplayTitle } from '@/lib/task-display-copy';
 
@@ -49,9 +46,7 @@ type TaskLiveSubStatus =
   | 'verifying'
   | 'generating'
   | 'generating_image';
-type TaskLiveSubStatusEntry =
-  | TaskLiveSubStatus
-  | { subStatus: TaskLiveSubStatus; since: number };
+type TaskLiveSubStatusEntry = TaskLiveSubStatus | { subStatus: TaskLiveSubStatus; since: number };
 
 const LIVE_SUB_STATUS_LABELS: Record<TaskLiveSubStatus, string> = {
   planning: '正在规划任务',
@@ -95,12 +90,8 @@ export function TaskListItem({
 }: Props): JSX.Element {
   const active = isActive(task.status);
   const elapsedNow = useTaskListElapsedNow(active && Boolean(liveSubStatus));
-  const elapsedLabel = active
-    ? taskListElapsedLabel(liveSubStatus, elapsedNow)
-    : null;
-  const handleRowClick = (
-    e: React.MouseEvent | React.KeyboardEvent,
-  ): void => {
+  const elapsedLabel = active ? taskListElapsedLabel(liveSubStatus, elapsedNow) : null;
+  const handleRowClick = (e: React.MouseEvent | React.KeyboardEvent): void => {
     if (renaming) return;
     if (batchMode) {
       if (batchDisabled) return;
@@ -119,9 +110,7 @@ export function TaskListItem({
     <div
       data-task-status={task.status}
       data-selected={selected && !batchMode}
-      onContextMenu={
-        onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined
-      }
+      onContextMenu={onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined}
       /* BOSS bug fix — in batch mode the entire row is the click
          target (was: only the inner title button, leaving the
          leading checkbox `<span>` dead because it sits OUTSIDE
@@ -133,17 +122,16 @@ export function TaskListItem({
       className={cn(
         'holaday-task-row group relative flex w-full items-center gap-2 rounded-[8px] border border-transparent px-2.5 py-0.5 text-left transition-colors',
         'hover:border-[#FF0061]/14 hover:bg-[#FF0061]/[0.035] dark:hover:border-[#FF0061]/30 dark:hover:bg-[#FF0061]/10',
-        selected && !batchMode && 'border-[#FF0061]/22 bg-white/70 shadow-[0_8px_22px_rgba(255,0,97,0.06)] dark:bg-white/[0.05]',
+        selected &&
+          !batchMode &&
+          'border-[#FF0061]/22 bg-white/70 shadow-[0_8px_22px_rgba(255,0,97,0.06)] dark:bg-white/[0.05]',
         batchMode && batchChecked && 'border-[#57479C]/22 bg-[#57479C]/10 dark:bg-[#57479C]/20',
         batchMode && batchDisabled && 'opacity-50',
         batchMode && !batchDisabled && 'cursor-pointer',
       )}
     >
       {selected && !batchMode && (
-        <span
-          aria-hidden
-          className="absolute inset-y-1.5 left-0 w-[2px] rounded-r bg-[#FF0061]"
-        />
+        <span aria-hidden className="absolute inset-y-1.5 left-0 w-[2px] rounded-r bg-[#FF0061]" />
       )}
       {batchMode && (
         <span
@@ -198,22 +186,24 @@ export function TaskListItem({
               {elapsedLabel}
             </span>
           )}
-        <button
-          type="button"
-          aria-label="任务菜单"
-          title="更多"
-          onClick={(e) => {
-          e.stopPropagation();
-          onContextMenu(task.taskId, e);
-        }}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[#ADADAD] opacity-100 transition-opacity hover:bg-white hover:text-[#FF0061] focus-visible:opacity-100 dark:hover:bg-white/10 lg:opacity-0 lg:group-hover:opacity-100"
-        >
-          <MoreHorizontal className="h-3.5 w-3.5" />
-        </button>
+          <button
+            type="button"
+            aria-label="任务菜单"
+            title="更多"
+            onClick={(e) => {
+              e.stopPropagation();
+              onContextMenu(task.taskId, e);
+            }}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[#ADADAD] opacity-100 transition-opacity hover:bg-white hover:text-[#FF0061] focus-visible:opacity-100 dark:hover:bg-white/10 lg:opacity-0 lg:group-hover:opacity-100"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
         </>
       )}
       {active && !renaming && (
-        <span className="sr-only">进行中 · {taskListItemSubtitle(task, liveSubStatus, elapsedNow)}</span>
+        <span className="sr-only">
+          进行中 · {taskListItemSubtitle(task, liveSubStatus, elapsedNow)}
+        </span>
       )}
     </div>
   );
@@ -317,16 +307,18 @@ export function taskListItemSubtitle(
           ? `${LIVE_SUB_STATUS_LABELS[subStatus]} · 已运行 ${elapsed}`
           : LIVE_SUB_STATUS_LABELS[subStatus];
       }
-      return task.tickCount === 0 ? '正在启动…' : task.browserSource === 'local-chrome'
-        ? `执行中 · ${recordCount}` : `执行中 · 第 ${task.tickCount} 步`;
+      return task.tickCount === 0
+        ? '正在启动…'
+        : task.browserSource === 'local-chrome'
+          ? `执行中 · ${recordCount}`
+          : `执行中 · 第 ${task.tickCount} 步`;
     case 'waiting_user':
       // F3 — explicit awaiting-user copy. Previously this fell through
       // to the default branch and rendered `undefined` in the row's
       // tooltip / aria-label, both visually wrong and a screen-reader
       // hole.
       return awaitingUserCopy(
-        productState.blocker === 'max_steps' ||
-          productState.blocker === 'retries_exhausted'
+        productState.blocker === 'max_steps' || productState.blocker === 'retries_exhausted'
           ? undefined
           : productState.blocker,
       ).toolbarLabel;
@@ -337,9 +329,7 @@ export function taskListItemSubtitle(
         case 'completed':
           return task.tickCount === 0 ? '已完成' : `已完成 · ${recordCount}`;
         case 'partial_success':
-          return task.tickCount === 0
-            ? '需复核'
-            : `需复核 · ${recordCount}`;
+          return task.tickCount === 0 ? '需复核' : `需复核 · ${recordCount}`;
         case 'failed':
           return task.tickCount === 0 ? '失败' : `失败 · ${recordCount}`;
         case 'cancelled':

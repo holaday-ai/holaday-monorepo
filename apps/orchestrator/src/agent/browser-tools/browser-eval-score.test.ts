@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { reviewListAnswer } from '../../execution/answer-verifier.js';
-import { buildContract } from '../../execution/execution-contract.js';
 import {
   type BrowserEvalTask,
   classifyFailure,
   scoreBrowserEval,
   scoreListWithSources,
 } from '../../../scripts/browser-eval/score.js';
+import { reviewListAnswer } from '../../execution/answer-verifier.js';
+import { buildContract } from '../../execution/execution-contract.js';
 
 const suite = JSON.parse(
   readFileSync(new URL('../../../scripts/browser-eval/tasks.json', import.meta.url), 'utf8'),

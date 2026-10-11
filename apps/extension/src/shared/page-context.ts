@@ -159,7 +159,9 @@ function isPageContextTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.
   if (typeof tab.id !== 'number') return false;
   const url = getTabContextUrl(tab)?.toLowerCase();
   if (!url) return false;
-  return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('chrome-error://');
+  return (
+    url.startsWith('http://') || url.startsWith('https://') || url.startsWith('chrome-error://')
+  );
 }
 
 function getTabContextUrl(tab: chrome.tabs.Tab): string {
@@ -181,7 +183,9 @@ export async function getActivePageContext(): Promise<PageContext | null> {
   // already gives us.
   const rawTabUrl = tab.url || tab.pendingUrl || '';
   const tabUrl = getTabContextUrl(tab);
-  const restrictedScheme = /^(chrome|chrome-extension|chrome-error|edge|about|file):/i.test(rawTabUrl);
+  const restrictedScheme = /^(chrome|chrome-extension|chrome-error|edge|about|file):/i.test(
+    rawTabUrl,
+  );
   if (restrictedScheme || !tabUrl) {
     const snippet = sanitizePageContextSnippet({
       title: tab.title ?? '',
@@ -223,12 +227,16 @@ export async function getActivePageContext(): Promise<PageContext | null> {
   }
 }
 
-async function readPageContextSnippet(tabId: number): Promise<chrome.scripting.InjectionResult<PageContextSnippet>[]> {
+async function readPageContextSnippet(
+  tabId: number,
+): Promise<chrome.scripting.InjectionResult<PageContextSnippet>[]> {
   try {
     return await readPageContextSnippetOnce(tabId);
   } catch (err) {
     if (!isTransientPageContextReadError(err)) throw err;
-    await new Promise<void>((resolve) => setTimeout(resolve, PAGE_CONTEXT_TRANSIENT_RETRY_DELAY_MS));
+    await new Promise<void>((resolve) =>
+      setTimeout(resolve, PAGE_CONTEXT_TRANSIENT_RETRY_DELAY_MS),
+    );
     return readPageContextSnippetOnce(tabId);
   }
 }

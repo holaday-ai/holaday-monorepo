@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { resolve, dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scoreSyntheticSuite } from './score.js';
 
@@ -15,8 +15,8 @@ export async function runLocalSynthetic() {
   const suite = JSON.parse(await readFile(new URL('./tasks.json', import.meta.url), 'utf8')) as {
     syntheticCases: Array<{ id: string; category: string; name: string }>;
   };
-  const raw = output + '.vitest.json';
-  const log = output + '.log';
+  const raw = `${output}.vitest.json`;
+  const log = `${output}.log`;
   // No inherited provider credentials, dotenv files, or parallel browser workers.
   const runtimeEnv: NodeJS.ProcessEnv = {
     PATH: process.env.PATH,

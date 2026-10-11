@@ -71,9 +71,7 @@ export class EvidenceLedger {
       return '';
     }
     const fact =
-      entry.fact.length > MAX_FACT_CHARS
-        ? entry.fact.slice(0, MAX_FACT_CHARS)
-        : entry.fact;
+      entry.fact.length > MAX_FACT_CHARS ? entry.fact.slice(0, MAX_FACT_CHARS) : entry.fact;
     const id = randomUUID();
     this._entries.push({
       id,

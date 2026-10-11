@@ -171,11 +171,7 @@ function httpError(prefix: string, status: number, body: string): FalLipSyncErro
   return new FalLipSyncError(`${prefix} returned ${status}`, 'http', status, body.slice(0, 400));
 }
 
-async function falFetch(
-  url: string,
-  init: RequestInit,
-  p: FalBaseParams,
-): Promise<Response> {
+async function falFetch(url: string, init: RequestInit, p: FalBaseParams): Promise<Response> {
   try {
     return await fetchWithTimeout(url, init, {
       timeoutMs: p.timeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -188,9 +184,7 @@ async function falFetch(
   }
 }
 
-export async function submitLipSync(
-  p: SubmitLipSyncParams,
-): Promise<{
+export async function submitLipSync(p: SubmitLipSyncParams): Promise<{
   requestId: string;
   status: FalStatus;
   statusUrl?: string;
@@ -208,10 +202,18 @@ export async function submitLipSync(
   try {
     json = (await res.json()) as FalSubmitResponse;
   } catch (err) {
-    throw new FalLipSyncError(`fal submit response not JSON: ${(err as Error).message}`, 'bad_response');
+    throw new FalLipSyncError(
+      `fal submit response not JSON: ${(err as Error).message}`,
+      'bad_response',
+    );
   }
   if (!json.request_id) {
-    throw new FalLipSyncError('fal submit returned no request_id', 'bad_response', undefined, json.detail);
+    throw new FalLipSyncError(
+      'fal submit returned no request_id',
+      'bad_response',
+      undefined,
+      json.detail,
+    );
   }
   const statusUrl = trustedQueueUrl(json.status_url, p);
   const responseUrl = trustedQueueUrl(json.response_url, p);
@@ -228,8 +230,7 @@ export async function getLipSyncStatus(
 ): Promise<{ status: FalStatus }> {
   assertKey(p.apiKey);
   const res = await falFetch(
-    p.statusUrl ??
-      `${base(p)}/${modelPath(p)}/requests/${encodeURIComponent(p.requestId)}/status`,
+    p.statusUrl ?? `${base(p)}/${modelPath(p)}/requests/${encodeURIComponent(p.requestId)}/status`,
     { method: 'GET', headers: authHeaders(p.apiKey) },
     p,
   );
@@ -238,7 +239,10 @@ export async function getLipSyncStatus(
   try {
     json = (await res.json()) as FalStatusResponse;
   } catch (err) {
-    throw new FalLipSyncError(`fal status response not JSON: ${(err as Error).message}`, 'bad_response');
+    throw new FalLipSyncError(
+      `fal status response not JSON: ${(err as Error).message}`,
+      'bad_response',
+    );
   }
   return { status: (json.status as FalStatus) ?? 'UNKNOWN' };
 }
@@ -248,8 +252,7 @@ export async function getLipSyncResult(
 ): Promise<LipSyncResult> {
   assertKey(p.apiKey);
   const res = await falFetch(
-    p.responseUrl ??
-      `${base(p)}/${modelPath(p)}/requests/${encodeURIComponent(p.requestId)}`,
+    p.responseUrl ?? `${base(p)}/${modelPath(p)}/requests/${encodeURIComponent(p.requestId)}`,
     { method: 'GET', headers: authHeaders(p.apiKey) },
     p,
   );
@@ -258,7 +261,10 @@ export async function getLipSyncResult(
   try {
     json = (await res.json()) as FalResultResponse;
   } catch (err) {
-    throw new FalLipSyncError(`fal result response not JSON: ${(err as Error).message}`, 'bad_response');
+    throw new FalLipSyncError(
+      `fal result response not JSON: ${(err as Error).message}`,
+      'bad_response',
+    );
   }
   const url = json.video?.url;
   if (!url) {
@@ -318,14 +324,28 @@ async function runLipSyncImpl(
       return { ...result, requestId, elapsedMs: Date.now() - startedAt };
     }
     if (Date.now() - startedAt > maxWaitMs) {
-      throw new FalLipSyncError(`fal lip-sync timed out after ${maxWaitMs}ms`, 'timeout', undefined, requestId);
+      throw new FalLipSyncError(
+        `fal lip-sync timed out after ${maxWaitMs}ms`,
+        'timeout',
+        undefined,
+        requestId,
+      );
     }
     await sleep(pollIntervalMs);
   }
 }
 
-export async function runLipSync(p: RunLipSyncParams): Promise<LipSyncResult & { requestId: string; elapsedMs: number }> {
-  return observeMediaCall({ provider: 'fal', model: p.model ?? DEFAULT_MODEL, purpose: 'media.video' }, () => runLipSyncImpl(p), result => ({ providerRequestId: result.requestId,
-    ...(p.billableDurationSeconds !== undefined ? { mediaUsage: { unit: 'second', quantity: p.billableDurationSeconds, basis: 'measured' } } : {}),
-  }));
+export async function runLipSync(
+  p: RunLipSyncParams,
+): Promise<LipSyncResult & { requestId: string; elapsedMs: number }> {
+  return observeMediaCall(
+    { provider: 'fal', model: p.model ?? DEFAULT_MODEL, purpose: 'media.video' },
+    () => runLipSyncImpl(p),
+    (result) => ({
+      providerRequestId: result.requestId,
+      ...(p.billableDurationSeconds !== undefined
+        ? { mediaUsage: { unit: 'second', quantity: p.billableDurationSeconds, basis: 'measured' } }
+        : {}),
+    }),
+  );
 }

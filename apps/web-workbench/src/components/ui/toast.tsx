@@ -1,11 +1,7 @@
+import { type ToastItem, type ToastKind, enqueueToastItem } from '@/lib/toast-state';
+import { cn } from '@/lib/utils';
 import { AlertCircle, CheckCircle2, X } from 'lucide-react';
 import * as React from 'react';
-import {
-  enqueueToastItem,
-  type ToastItem,
-  type ToastKind,
-} from '@/lib/toast-state';
-import { cn } from '@/lib/utils';
 
 interface ToastCtx {
   /**
@@ -29,16 +25,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
   const [items, setItems] = React.useState<ToastItem[]>([]);
   const idRef = React.useRef(0);
 
-  const show = React.useCallback<ToastCtx['show']>(
-    (text, kind = 'info', durationMs = 4000) => {
-      const id = ++idRef.current;
-      setItems((prev) => enqueueToastItem(prev, { id, text, kind }));
-      setTimeout(() => {
-        setItems((prev) => prev.filter((t) => t.id !== id));
-      }, durationMs);
-    },
-    [],
-  );
+  const show = React.useCallback<ToastCtx['show']>((text, kind = 'info', durationMs = 4000) => {
+    const id = ++idRef.current;
+    setItems((prev) => enqueueToastItem(prev, { id, text, kind }));
+    setTimeout(() => {
+      setItems((prev) => prev.filter((t) => t.id !== id));
+    }, durationMs);
+  }, []);
 
   const dismiss = React.useCallback((id: number) => {
     setItems((prev) => prev.filter((t) => t.id !== id));
@@ -89,9 +82,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
                 <CheckCircle2 className="h-3.5 w-3.5" />
               )}
             </span>
-            <span className="min-w-0 flex-1 break-words pr-1 leading-5">
-              {t.text}
-            </span>
+            <span className="min-w-0 flex-1 break-words pr-1 leading-5">{t.text}</span>
             <X className="mt-1 h-3.5 w-3.5 shrink-0 text-[#ADADAD] transition-colors group-hover:text-[#595757]" />
           </button>
         ))}

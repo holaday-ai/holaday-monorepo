@@ -24,8 +24,8 @@ it('runs V2 reads and ref-bound actions through the production cloud gate', asyn
     const adapter = {
       create: async (request: NeutralMessagesRequest) => {
         turn++;
-        let name = 'read_page',
-          input: Record<string, unknown> = {};
+        let name = 'read_page';
+        let input: Record<string, unknown> = {};
         if (turn === 2 || turn === 4) {
           const state = latest(request);
           const ref = state.tree

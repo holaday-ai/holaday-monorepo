@@ -283,9 +283,29 @@ describe('StockResearchTable', () => {
 
 describe('StockMarketContextLayout', () => {
   it('keeps news and all market references in the approved editorial hierarchy', () => {
-    render(<StockMarketContextLayout discovery={node('discovery')} temperature={node('temperature')} sectors={node('sectors')} leaderboard={node('leaderboard')} marketTable={node('market-table')} starStocks={node('star-stocks')} />);
+    render(
+      <StockMarketContextLayout
+        discovery={node('discovery')}
+        temperature={node('temperature')}
+        sectors={node('sectors')}
+        leaderboard={node('leaderboard')}
+        marketTable={node('market-table')}
+        starStocks={node('star-stocks')}
+      />,
+    );
     expect(screen.getByRole('heading', { name: '新闻与公告' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '市场全景' })).toBeTruthy();
-    expect([...document.querySelectorAll('[data-testid]')].map(element => element.getAttribute('data-testid'))).toEqual(['discovery','temperature','sectors','leaderboard','market-table','star-stocks']);
+    expect(
+      [...document.querySelectorAll('[data-testid]')].map((element) =>
+        element.getAttribute('data-testid'),
+      ),
+    ).toEqual([
+      'discovery',
+      'temperature',
+      'sectors',
+      'leaderboard',
+      'market-table',
+      'star-stocks',
+    ]);
   });
 });

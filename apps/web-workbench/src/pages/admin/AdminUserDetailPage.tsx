@@ -11,26 +11,26 @@
  * Single `admin.userDetail` query backs everything.
  */
 
+import { pageErrorMessage } from '@/lib/page-error-copy';
+import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import * as React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Cell, Pie, PieChart, Tooltip } from 'recharts';
-import { pageErrorMessage } from '@/lib/page-error-copy';
-import { trpc } from '@/lib/trpc';
-import { cn } from '@/lib/utils';
 import {
   ADMIN_BORDER,
   ADMIN_DIVIDER,
   ADMIN_MAGENTA,
   adminLoadErrorCopy,
   asRecord,
-  formatInteger,
   formatDate,
   formatDateTime,
   formatDurationMs,
+  formatInteger,
   indexedFallback,
-  nullableFiniteNumber,
   nonNegativeNumber,
+  nullableFiniteNumber,
   optionalText,
   safeArray,
   safeText,
@@ -41,14 +41,7 @@ import {
 
 type DetailData = Awaited<ReturnType<typeof trpc.admin.userDetail.query>>;
 
-const PIE_COLORS = [
-  '#FF0061',
-  '#FFC910',
-  '#42C0EF',
-  '#57479C',
-  '#ADADAD',
-  '#595757',
-];
+const PIE_COLORS = ['#FF0061', '#FFC910', '#42C0EF', '#57479C', '#ADADAD', '#595757'];
 
 export function AdminUserDetailPage(): JSX.Element {
   const mountedRef = useMountedRef();
@@ -124,37 +117,27 @@ export function AdminUserDetailPage(): JSX.Element {
       <header className="mt-4 flex items-start gap-4">
         <Avatar url={user.avatarUrl} fallback={user.displayName ?? user.email ?? '?'} />
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-semibold">
-            {user.displayName ?? '—'}
-          </h1>
+          <h1 className="truncate text-xl font-semibold">{user.displayName ?? '—'}</h1>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
             {user.email ?? '无邮箱'} {user.phone ? `· ${user.phone}` : ''}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px]">
             <Badge>套餐 · {user.plan}</Badge>
             <Badge>状态 · {user.status}</Badge>
-            {user.role === 'admin' && (
-              <Badge highlight>管理员</Badge>
-            )}
+            {user.role === 'admin' && <Badge highlight>管理员</Badge>}
             <Badge>注册 · {formatDate(user.createdAt)}</Badge>
-            {user.planExpiresAt && (
-              <Badge>套餐到期 · {formatDate(user.planExpiresAt)}</Badge>
-            )}
+            {user.planExpiresAt && <Badge>套餐到期 · {formatDate(user.planExpiresAt)}</Badge>}
           </div>
         </div>
       </header>
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-          <h2 className="text-[11px] font-medium uppercase text-muted-foreground">
-            本月任务数
-          </h2>
+          <h2 className="text-[11px] font-medium uppercase text-muted-foreground">本月任务数</h2>
           <div className="mt-2 text-3xl font-semibold text-foreground">
             {formatInteger(usage.monthTasks)}
           </div>
-          <div className="mt-1 text-[12px] text-muted-foreground">
-            自然月窗口 · 按 UTC 时间统计
-          </div>
+          <div className="mt-1 text-[12px] text-muted-foreground">自然月窗口 · 按 UTC 时间统计</div>
         </section>
         <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] lg:col-span-2">
           <h2 className="mb-2 text-[11px] font-medium uppercase text-muted-foreground">
@@ -192,9 +175,7 @@ export function AdminUserDetailPage(): JSX.Element {
                       const v = typeof value === 'number' ? value : Number(value ?? 0);
                       const payload = (ctx as { payload?: { model?: string } } | undefined)
                         ?.payload;
-                      const pct = totalCalls
-                        ? ((v / totalCalls) * 100).toFixed(1)
-                        : '0';
+                      const pct = totalCalls ? ((v / totalCalls) * 100).toFixed(1) : '0';
                       return [`${v} (${pct}%)`, payload?.model ?? '模型'];
                     }}
                   />
@@ -209,9 +190,7 @@ export function AdminUserDetailPage(): JSX.Element {
                         className="h-2.5 w-2.5 shrink-0 rounded-sm"
                         style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
                       />
-                      <span className="min-w-0 flex-1 truncate text-foreground">
-                        {m.model}
-                      </span>
+                      <span className="min-w-0 flex-1 truncate text-foreground">{m.model}</span>
                       <span className="tabular-nums text-muted-foreground">
                         {formatInteger(m.calls)} · {pct.toFixed(1)}%
                       </span>

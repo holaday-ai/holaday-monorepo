@@ -81,21 +81,34 @@ describe('core follow-up suggestions boundary', () => {
     const f = fixture();
     const events: string[] = [];
     const saved: string[][] = [];
-    await publishCoreTaskSuggestions({ ...f.input,
-      persist: async (items: string[]) => { saved.push(items); events.push('persist'); return true; },
-      publish: () => { events.push('publish'); },
+    await publishCoreTaskSuggestions({
+      ...f.input,
+      persist: async (items: string[]) => {
+        saved.push(items);
+        events.push('persist');
+        return true;
+      },
+      publish: () => {
+        events.push('publish');
+      },
     });
     expect(saved).toEqual([['整理后续执行清单', '比较两种材料结构']]);
     expect(events).toEqual(['persist', 'publish']);
   });
-  it.each(['stale', 'failed'])('does not broadcast after a %s persistence result', async (state) => {
-    const f = fixture();
-    await publishCoreTaskSuggestions({ ...f.input, persist: async () => {
-      if (state === 'failed') throw new Error('PRIVATE_DB_DETAIL');
-      return false;
-    }});
-    expect(f.frames).toEqual([]);
-  });
+  it.each(['stale', 'failed'])(
+    'does not broadcast after a %s persistence result',
+    async (state) => {
+      const f = fixture();
+      await publishCoreTaskSuggestions({
+        ...f.input,
+        persist: async () => {
+          if (state === 'failed') throw new Error('PRIVATE_DB_DETAIL');
+          return false;
+        },
+      });
+      expect(f.frames).toEqual([]);
+    },
+  );
   it.each(['cn', 'intl'])(
     'uses only the selected %s region and a bounded optional request',
     async (modelDataRegion) => {
@@ -144,7 +157,8 @@ describe('core follow-up suggestions boundary', () => {
     await publishCoreTaskSuggestions({
       ...f.input,
       rawIntent: '确认方案，输出最终清单',
-      intent: '为8人的读书交流会拟定组织方案，不采购、不发送消息。\n预算上限改为600元，仍为45分钟，其余限制不变。\n确认方案，输出最终清单',
+      intent:
+        '为8人的读书交流会拟定组织方案，不采购、不发送消息。\n预算上限改为600元，仍为45分钟，其余限制不变。\n确认方案，输出最终清单',
     });
     expect(f.input.persist).toHaveBeenCalledTimes(1);
     expect(f.input.persist).toHaveBeenCalledWith(['整理活动执行清单']);

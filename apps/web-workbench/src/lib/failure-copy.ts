@@ -9,8 +9,11 @@ export interface FriendlyFailure {
 
 function unsupportedOutputFormats(errorText: string): string | undefined {
   // Recognize the server's explicit format failure, not an input filename or plan restriction.
-  const match = /^FILE_FORMAT_UNSUPPORTED:([a-z0-9]+(?:,[a-z0-9]+)*)$/i.exec(errorText.trim())
-    ?? /^任务未完成：当前文件生成工具不支持 ([a-z0-9]+(?:、[a-z0-9]+)*) 格式，升级套餐无法解决。/i.exec(errorText.trim());
+  const match =
+    /^FILE_FORMAT_UNSUPPORTED:([a-z0-9]+(?:,[a-z0-9]+)*)$/i.exec(errorText.trim()) ??
+    /^任务未完成：当前文件生成工具不支持 ([a-z0-9]+(?:、[a-z0-9]+)*) 格式，升级套餐无法解决。/i.exec(
+      errorText.trim(),
+    );
   return match?.[1]?.toUpperCase().replaceAll(',', '、');
 }
 
@@ -25,7 +28,10 @@ export interface FailureContext {
   errorCode?: string;
 }
 
-export function classifyFriendlyFailure(errorText: string, context: FailureContext = {}): FriendlyFailure {
+export function classifyFriendlyFailure(
+  errorText: string,
+  context: FailureContext = {},
+): FriendlyFailure {
   const unsupportedFormats = unsupportedOutputFormats(errorText ?? '');
   if (unsupportedFormats) {
     return {
@@ -35,24 +41,70 @@ export function classifyFriendlyFailure(errorText: string, context: FailureConte
     };
   }
   if (context.executionMode && context.executionMode !== 'browser') {
-    const label = context.executionMode === 'scrape' ? '网页采集' : context.executionMode === 'image' ? '图片生成' : context.executionMode === 'video_creation' ? '视频生成' : '生成';
-    const qualityTitle = context.executionMode === 'video_creation' ? '成片未通过质量检查' : '生成内容未通过质量检查';
-    if (/未要求的文字或品牌/i.test(errorText) || /unauthorized_text_or_brand/i.test(context.errorCode ?? '')) {
-      return { title: qualityTitle, subtitle: '画面出现了未要求的文字或品牌，问题成片没有交付。', nextStep: '调整描述后重新生成。' };
+    const label =
+      context.executionMode === 'scrape'
+        ? '网页采集'
+        : context.executionMode === 'image'
+          ? '图片生成'
+          : context.executionMode === 'video_creation'
+            ? '视频生成'
+            : '生成';
+    const qualityTitle =
+      context.executionMode === 'video_creation' ? '成片未通过质量检查' : '生成内容未通过质量检查';
+    if (
+      /未要求的文字或品牌/i.test(errorText) ||
+      /unauthorized_text_or_brand/i.test(context.errorCode ?? '')
+    ) {
+      return {
+        title: qualityTitle,
+        subtitle: '画面出现了未要求的文字或品牌，问题成片没有交付。',
+        nextStep: '调整描述后重新生成。',
+      };
     }
-    if (/QUALITY|质量|unauthorized_text_or_brand/i.test(`${context.errorCode ?? ''} ${errorText}`)) {
-      return { title: qualityTitle, subtitle: '生成内容未满足要求，问题内容没有交付。额度处理状态见下方。', nextStep: '调整描述后重新生成。' };
+    if (
+      /QUALITY|质量|unauthorized_text_or_brand/i.test(`${context.errorCode ?? ''} ${errorText}`)
+    ) {
+      return {
+        title: qualityTitle,
+        subtitle: '生成内容未满足要求，问题内容没有交付。额度处理状态见下方。',
+        nextStep: '调整描述后重新生成。',
+      };
     }
-    if (/attachment|附件|文件.*不可用|未检测到.*\.(?:png|jpg|pdf)/i.test(`${context.errorCode ?? ''} ${errorText}`)) {
-      return { title: '无法读取任务附件', subtitle: '生成流程未能读取所需的文件。', nextStep: '确认附件可用，必要时重新上传后再执行。' };
+    if (
+      /attachment|附件|文件.*不可用|未检测到.*\.(?:png|jpg|pdf)/i.test(
+        `${context.errorCode ?? ''} ${errorText}`,
+      )
+    ) {
+      return {
+        title: '无法读取任务附件',
+        subtitle: '生成流程未能读取所需的文件。',
+        nextStep: '确认附件可用，必要时重新上传后再执行。',
+      };
     }
     if (/429|rate.limit|限速|繁忙/i.test(errorText)) {
-      return { title: `${label}服务繁忙`, subtitle: '服务暂时限速，请稍后再试。', nextStep: '稍后重新生成。' };
+      return {
+        title: `${label}服务繁忙`,
+        subtitle: '服务暂时限速，请稍后再试。',
+        nextStep: '稍后重新生成。',
+      };
     }
     if (/timeout|超时|timed.out/i.test(errorText)) {
-      return { title: `${label}处理超时`, subtitle: '生成服务没有及时完成此次请求。', nextStep: '稍后重试，或缩小生成内容的范围。' };
+      return {
+        title: `${label}处理超时`,
+        subtitle: '生成服务没有及时完成此次请求。',
+        nextStep: '稍后重试，或缩小生成内容的范围。',
+      };
     }
-    return { title: `${label}任务未能完成`, subtitle: `这次${label}没有完成，请检查输入与要求后重试。`, nextStep: context.executionMode === 'video_creation' || context.executionMode === 'image' ? '调整描述后重新生成。' : context.executionMode === 'scrape' ? '确认采集来源与范围后重新执行。' : '确认要求和附件后重新执行。' };
+    return {
+      title: `${label}任务未能完成`,
+      subtitle: `这次${label}没有完成，请检查输入与要求后重试。`,
+      nextStep:
+        context.executionMode === 'video_creation' || context.executionMode === 'image'
+          ? '调整描述后重新生成。'
+          : context.executionMode === 'scrape'
+            ? '确认采集来源与范围后重新执行。'
+            : '确认要求和附件后重新执行。',
+    };
   }
   const haystack = (errorText ?? '').toLowerCase();
   // FIX-D11 — the executor gave up because the task needed something the
@@ -65,12 +117,18 @@ export function classifyFriendlyFailure(errorText: string, context: FailureConte
   ) {
     return {
       title: '任务未能完成',
-      subtitle: '执行时缺少完成这个任务所需的条件（例如当前环境不支持上传附件），不是网站本身的问题。',
-      nextStep: '确认任务是否真的需要浏览器操作；写文章或根据附件生成内容时，直接说明要求后重新执行。',
+      subtitle:
+        '执行时缺少完成这个任务所需的条件（例如当前环境不支持上传附件），不是网站本身的问题。',
+      nextStep:
+        '确认任务是否真的需要浏览器操作；写文章或根据附件生成内容时，直接说明要求后重新执行。',
     };
   }
   const browserKind = classifyBrowserErrorKind(errorText);
-  if (/ORCHESTRATOR_RESTART|orchestrator_restart|服务重启导致任务中断|orchestrator restarted/i.test(errorText)) {
+  if (
+    /ORCHESTRATOR_RESTART|orchestrator_restart|服务重启导致任务中断|orchestrator restarted/i.test(
+      errorText,
+    )
+  ) {
     return {
       title: '服务重启中断了任务',
       subtitle: '这个任务没能继续执行；旧记录会保留，重新执行会新开一次尝试。',
@@ -217,9 +275,7 @@ export function classifyFriendlyFailure(errorText: string, context: FailureConte
     };
   }
   if (
-    /captcha|recaptcha|hcaptcha|验证码|人机|滑块|cloudflare|are you a (human|robot)/.test(
-      haystack,
-    )
+    /captcha|recaptcha|hcaptcha|验证码|人机|滑块|cloudflare|are you a (human|robot)/.test(haystack)
   ) {
     return {
       title: '网站要求验证身份',
@@ -234,11 +290,7 @@ export function classifyFriendlyFailure(errorText: string, context: FailureConte
       nextStep: '重新执行后在浏览器里完成登录。',
     };
   }
-  if (
-    /browser|chromium|brave|cdp|websocket|浏览器|frame[^\w]not|screencast/.test(
-      haystack,
-    )
-  ) {
+  if (/browser|chromium|brave|cdp|websocket|浏览器|frame[^\w]not|screencast/.test(haystack)) {
     return {
       title: '浏览器遇到问题',
       subtitle: '请重新执行任务；如果反复出现，可以换一个更稳定的网址。',

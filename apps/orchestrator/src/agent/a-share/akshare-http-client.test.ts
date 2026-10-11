@@ -51,18 +51,20 @@ describe('HttpAkshareClient', () => {
 
   it('GET /screening-universe → 保留全市场初筛字段并使用 market 熔断组', async () => {
     const screeningEnv = {
-      data: [{
-        代码: '600519',
-        名称: '贵州茅台',
-        最新价: 1488.5,
-        涨跌幅: 1.2,
-        成交额: 987654321,
-        换手率: 0.75,
-        市盈率TTM: 21.5,
-        市净率: 7.8,
-        总市值原值: 1880000000000,
-        行情时间: '10:05:00',
-      }],
+      data: [
+        {
+          代码: '600519',
+          名称: '贵州茅台',
+          最新价: 1488.5,
+          涨跌幅: 1.2,
+          成交额: 987654321,
+          换手率: 0.75,
+          市盈率TTM: 21.5,
+          市净率: 7.8,
+          总市值原值: 1880000000000,
+          行情时间: '10:05:00',
+        },
+      ],
       count: 1,
       source: 'sina:Market_Center.getHQNodeData(full-market-screening)',
       fetched_at: '2026-08-17T02:05:00Z',

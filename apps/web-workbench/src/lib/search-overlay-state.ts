@@ -1,5 +1,5 @@
-import { pageErrorMessage } from './page-error-copy';
 import type { AwaitingKind } from './awaiting-user-copy';
+import { pageErrorMessage } from './page-error-copy';
 import { taskDisplayIntent, taskDisplaySource } from './task-display-copy';
 import { deriveTaskProductState } from './task-product-state';
 
@@ -104,9 +104,7 @@ function toSearchOverlayProductState(input: SearchOverlayProductStateInput) {
       });
 }
 
-export function searchOverlayNeedsAttention(
-  input: SearchOverlayProductStateInput,
-): boolean {
+export function searchOverlayNeedsAttention(input: SearchOverlayProductStateInput): boolean {
   return toSearchOverlayProductState(input).lifecycle === 'waiting_user';
 }
 

@@ -1,3 +1,4 @@
+import type { EvidenceLedger } from './evidence-ledger.js';
 /**
  * Phase 1 — Answer verifier (deterministic tier).
  *
@@ -24,22 +25,18 @@
  *     facts — best-effort but catches the obvious cases (form
  *     submit / payment) without inventing a structured DSL.
  */
-import type {
-  ExecutionContract,
-  SuccessCriterion,
-} from './execution-contract.js';
-import type { EvidenceLedger } from './evidence-ledger.js';
+import type { ExecutionContract, SuccessCriterion } from './execution-contract.js';
 import type { ExpertWorkflowContract } from './expert-workflow-contract.js';
-import {
-  evaluateFileArtifact,
-  type OutputFileDescriptor,
-} from './file-artifact-consistency.js';
-import { evaluateSourceDomain } from './source-domain-consistency.js';
-import { isNonDetailUrl, urlResourceIdentity } from './url-identity.js';
-import { evaluateTemplateFill } from './template-fill-consistency.js';
+import { type OutputFileDescriptor, evaluateFileArtifact } from './file-artifact-consistency.js';
 import { classifyLightweightTask } from './lightweight-task.js';
+import { evaluateSourceDomain } from './source-domain-consistency.js';
+import {
+  type TaskVerificationContext,
+  createTaskVerificationContext,
+} from './task-verification-context.js';
+import { evaluateTemplateFill } from './template-fill-consistency.js';
+import { isNonDetailUrl, urlResourceIdentity } from './url-identity.js';
 import type { VerificationInputCoverage } from './verification-input-budget.js';
-import { type TaskVerificationContext, createTaskVerificationContext } from './task-verification-context.js';
 
 export type FailureLevel = 'fixable' | 'needs_clarification' | 'hard_fail';
 
@@ -144,10 +141,8 @@ const CONSTRAINT_CHECKERS: Record<string, (fact: string) => boolean> = {
     // co-occurrence is good enough for ledger fact text.
     return /submit/i.test(fact) && /form/i.test(fact);
   },
-  no_payment: (fact) =>
-    /payment|checkout|paypal|pay\s+now|支付|付款|结账|下单/i.test(fact),
-  no_credentials: (fact) =>
-    /password|credential|api[_ ]?key|secret|token|密码|凭证/i.test(fact),
+  no_payment: (fact) => /payment|checkout|paypal|pay\s+now|支付|付款|结账|下单/i.test(fact),
+  no_credentials: (fact) => /password|credential|api[_ ]?key|secret|token|密码|凭证/i.test(fact),
 };
 
 const CHINESE_CONSTRAINT_ALIASES: Record<string, string> = {
@@ -188,7 +183,9 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   // This check compares INPUT values, not assertions in the candidate. A plan
   // or clarification may legitimately ask the user to resolve that conflict.
   // Candidate claims still pass provenance/URL/artifact and semantic checks.
-  const numberCheck = deliveryStage ? null : checkNumberCrossValidation(ledger, inputs.verificationContext);
+  const numberCheck = deliveryStage
+    ? null
+    : checkNumberCrossValidation(ledger, inputs.verificationContext);
   if (numberCheck) checks.push(numberCheck);
 
   // 3. Workflow-specific checks (only when an expert workflow drove
@@ -223,10 +220,7 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   //    metadata.attachments. QA found ~1/3 of file tasks claiming a
   //    file with neither. Flag as fixable so the row reads
   //    partial_success instead of presenting a dead download link.
-  const fileArtifactCheck = checkFileArtifactConsistency(
-    answerText,
-    inputs.outputFiles ?? [],
-  );
+  const fileArtifactCheck = checkFileArtifactConsistency(answerText, inputs.outputFiles ?? []);
   if (fileArtifactCheck) checks.push(fileArtifactCheck);
 
   // 6. Source-domain consistency (Web-Agent roadmap Step 2). When the
@@ -238,11 +232,9 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   //    the user explicitly allowed other sources.
   // contract.goal is the one-line summarised intent (≤120 chars) — site
   // names sit at the head of these prompts, so it's a faithful proxy.
-  const sourceDomainCheck = deliveryStage ? null : checkSourceDomainConsistency(
-    contract.goal,
-    answerText,
-    finalUrl,
-  );
+  const sourceDomainCheck = deliveryStage
+    ? null
+    : checkSourceDomainConsistency(contract.goal, answerText, finalUrl);
   if (sourceDomainCheck) checks.push(sourceDomainCheck);
 
   // 7. Template-fill consistency (Phase 1 #1, §6) — backstop for the
@@ -250,10 +242,7 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   //    (保留了模板原有格式) must be backed by a real filled document. The
   //    runner grades this directly; this catches a runner miss and the
   //    generate-fallback path. No-op for every non-template answer.
-  const templateFillCheck = checkTemplateFillConsistency(
-    answerText,
-    inputs.outputFiles ?? [],
-  );
+  const templateFillCheck = checkTemplateFillConsistency(answerText, inputs.outputFiles ?? []);
   if (templateFillCheck) checks.push(templateFillCheck);
 
   const passed = checks.every((c) => c.passed);
@@ -321,10 +310,7 @@ function checkCriterion(
   }
 }
 
-function checkUrlMatch(
-  criterion: SuccessCriterion,
-  finalUrl: string | undefined,
-): CheckResult {
+function checkUrlMatch(criterion: SuccessCriterion, finalUrl: string | undefined): CheckResult {
   const domain = (criterion.data?.domain as string | undefined) ?? '';
   if (!domain) {
     return {
@@ -356,10 +342,7 @@ function checkUrlMatch(
   };
 }
 
-function checkDataPresent(
-  criterion: SuccessCriterion,
-  ledger: EvidenceLedger,
-): CheckResult {
+function checkDataPresent(criterion: SuccessCriterion, ledger: EvidenceLedger): CheckResult {
   const productive = ledger.entries.filter(
     (e) => e.confidence === 'observed' || e.confidence === 'extracted',
   );
@@ -398,10 +381,7 @@ function checkFileExists(criterion: SuccessCriterion): CheckResult {
   };
 }
 
-function checkFieldCount(
-  criterion: SuccessCriterion,
-  answerText: string,
-): CheckResult {
+function checkFieldCount(criterion: SuccessCriterion, answerText: string): CheckResult {
   const fields = (criterion.data?.fields as string[] | undefined) ?? [];
   if (fields.length === 0) {
     return {
@@ -424,12 +404,9 @@ function checkFieldCount(
   };
 }
 
-function checkWordCount(
-  criterion: SuccessCriterion,
-  answerText: string,
-): CheckResult {
+function checkWordCount(criterion: SuccessCriterion, answerText: string): CheckResult {
   const min = (criterion.data?.min as number | undefined) ?? 0;
-  const max = (criterion.data?.max as number | undefined) ?? Infinity;
+  const max = (criterion.data?.max as number | undefined) ?? Number.POSITIVE_INFINITY;
   const length = answerText.length;
   const passed = length >= min && length <= max;
   return {
@@ -437,8 +414,8 @@ function checkWordCount(
     passed,
     checker: 'deterministic',
     detail: passed
-      ? `length ${length} in [${min}, ${max === Infinity ? '∞' : max}]`
-      : `length ${length} outside [${min}, ${max === Infinity ? '∞' : max}]`,
+      ? `length ${length} in [${min}, ${max === Number.POSITIVE_INFINITY ? '∞' : max}]`
+      : `length ${length} outside [${min}, ${max === Number.POSITIVE_INFINITY ? '∞' : max}]`,
     // Too short = answer is a stub / error state — fixable by re-running.
     // Too long is unlikely but treated the same.
     severity: passed ? undefined : 'fixable',
@@ -506,15 +483,13 @@ function tryExtractJsonItems(answerText: string): ParsedItem[] {
             name: pickString(obj.name),
             price: pickNumber(obj.price),
             url:
-              typeof obj.url === 'string' && /^https?:\/\//i.test(obj.url)
-                ? obj.url.trim()
-                : null,
+              typeof obj.url === 'string' && /^https?:\/\//i.test(obj.url) ? obj.url.trim() : null,
             raw: JSON.stringify(obj),
             source: 'json',
           };
         });
     } catch {
-      continue;
+      // Not JSON: try the next candidate.
     }
   }
   return [];
@@ -600,9 +575,7 @@ function tryExtractJsonLikeItems(answerText: string): ParsedItem[] {
     items.push({
       name: match[1]?.trim() || null,
       price: pickJsonLikePrice(priceText),
-      url: urlMatch?.[1] && /^https?:\/\//i.test(urlMatch[1])
-        ? urlMatch[1].trim()
-        : null,
+      url: urlMatch?.[1] && /^https?:\/\//i.test(urlMatch[1]) ? urlMatch[1].trim() : null,
       raw: segment.trim(),
       source: 'json',
     });
@@ -781,7 +754,7 @@ function parsePriceText(s: string): number | null {
 
 function extractUrlFromCell(c: string): string | null {
   const md = c.match(/\[[^\]]+\]\((https?:\/\/[^)]+)\)/);
-  if (md && md[1]) return md[1];
+  if (md?.[1]) return md[1];
   const direct = c.match(/https?:\/\/\S+/);
   if (direct) return direct[0].replace(/[)\].,;:]+$/, '');
   return null;
@@ -799,10 +772,7 @@ function extractUrlFromCell(c: string): string | null {
  * Soft (fixable) failure: lets the verifier downgrade the verdict
  * to partial_success rather than blocking.
  */
-function checkUrlCount(
-  criterion: SuccessCriterion,
-  answerText: string,
-): CheckResult {
+function checkUrlCount(criterion: SuccessCriterion, answerText: string): CheckResult {
   const min = Number(criterion.data?.min ?? 1);
   const items = extractStructuredItems(answerText);
   const itemUrls = items.map((it) => it.url).filter((u): u is string => Boolean(u));
@@ -838,10 +808,7 @@ function checkUrlCount(
  * folds the prior numbered/bullet/table heuristics into a single
  * extractor; this checker just reads its output.
  */
-function checkResultCount(
-  criterion: SuccessCriterion,
-  answerText: string,
-): CheckResult {
+function checkResultCount(criterion: SuccessCriterion, answerText: string): CheckResult {
   const min = Number(criterion.data?.min ?? 1);
   const items = extractStructuredItems(answerText);
   const count = items.length;
@@ -867,15 +834,10 @@ function checkResultCount(
  * < 2 prices = vacuous pass (result_count handles "not enough rows").
  * Non-strict monotonic — ties allowed for identical prices.
  */
-function checkPriceSort(
-  criterion: SuccessCriterion,
-  answerText: string,
-): CheckResult {
+function checkPriceSort(criterion: SuccessCriterion, answerText: string): CheckResult {
   const direction = (criterion.data?.direction as 'asc' | 'desc' | undefined) ?? 'asc';
   const items = extractStructuredItems(answerText);
-  const prices = items
-    .map((it) => it.price)
-    .filter((p): p is number => p != null && p > 0);
+  const prices = items.map((it) => it.price).filter((p): p is number => p != null && p > 0);
   if (prices.length < 2) {
     return {
       criterionId: criterion.id,
@@ -927,10 +889,7 @@ function checkPriceSort(
  * Bullet rows are audited like every other row: complete triples pass;
  * incomplete rows fail with the same missing-field detail.
  */
-function checkEcommerceRows(
-  criterion: SuccessCriterion,
-  answerText: string,
-): CheckResult {
+function checkEcommerceRows(criterion: SuccessCriterion, answerText: string): CheckResult {
   const minItems = Number(criterion.data?.minItems ?? 0);
   const minUniqueUrls = Number(criterion.data?.minUniqueUrls ?? 0);
   const rows = extractStructuredItems(answerText);
@@ -940,7 +899,8 @@ function checkEcommerceRows(
       criterionType: 'ecommerce_rows',
       passed: false,
       checker: 'deterministic',
-      detail: '未能从回复中解析出结构化的商品列表（应当是 JSON 块、markdown 表格或 1. 2. 3. 编号列表）',
+      detail:
+        '未能从回复中解析出结构化的商品列表（应当是 JSON 块、markdown 表格或 1. 2. 3. 编号列表）',
       severity: 'fixable',
     };
   }
@@ -967,10 +927,7 @@ function checkEcommerceRows(
   const tooFewUniqueUrls =
     minUniqueUrls > 0 && rows.length >= minItems && uniqueUrls.size < minUniqueUrls;
   const passed =
-    incomplete.length === 0 &&
-    aggregateLinkRows.length === 0 &&
-    !tooFew &&
-    !tooFewUniqueUrls;
+    incomplete.length === 0 && aggregateLinkRows.length === 0 && !tooFew && !tooFewUniqueUrls;
   const detailParts: string[] = [];
   if (tooFew) detailParts.push(`只解析到 ${rows.length} 行，要求至少 ${minItems} 条`);
   if (tooFewUniqueUrls) {
@@ -1122,9 +1079,7 @@ function checkDuplicateCandidateUrls(
   for (const [url, group] of byUrl) {
     if (group.length < 2) continue;
     const distinctNames = new Set(
-      group
-        .map((row) => normalizeCandidateName(row.name ?? ''))
-        .filter(Boolean),
+      group.map((row) => normalizeCandidateName(row.name ?? '')).filter(Boolean),
     );
     if (distinctNames.size < 2) continue;
     const allLinkedRowsUseSameUrl = group.length === rows.length;
@@ -1140,9 +1095,7 @@ function checkDuplicateCandidateUrls(
       criterionType: 'duplicate_candidate_urls',
       passed: false,
       checker: 'deterministic',
-      detail:
-        `多候选结果中 ${group.length} 行复用了同一个链接 ${url}；` +
-        '若未取得每项独立链接，应只保留一次总来源，不要把同一个链接放到多行',
+      detail: `多候选结果中 ${group.length} 行复用了同一个链接 ${url}；若未取得每项独立链接，应只保留一次总来源，不要把同一个链接放到多行`,
       severity: 'fixable',
     };
   }
@@ -1268,7 +1221,9 @@ function checkExpertClaimProvenance(
   if (isGroundedInputQuestion(answerText, contextInput)) {
     return {
       criterionId: 'generic.expert_claim_provenance',
-      criterionType: 'expert_claim_provenance', passed: true, checker: 'deterministic',
+      criterionType: 'expert_claim_provenance',
+      passed: true,
+      checker: 'deterministic',
       detail: '本轮仅询问用户已提供的同一指标与数值，不认证该数值正确。',
     };
   }
@@ -1309,15 +1264,19 @@ function isGroundedInputQuestion(
   input?: Pick<VerifyInputs, 'verificationContext' | 'deliveryStage'>,
 ): boolean {
   if (input?.deliveryStage !== 'clarification' || !input.verificationContext) return false;
-  const claim = text.trim().match(/^请确认(?:您|你)?提供的([^。！？?;；\n]{1,160})(?:是否准确|是否正确|对吗)[？?]$/u)?.[1];
+  const claim = text
+    .trim()
+    .match(/^请确认(?:您|你)?提供的([^。！？?;；\n]{1,160})(?:是否准确|是否正确|对吗)[？?]$/u)?.[1];
   if (!claim) return false;
   try {
     const context = createTaskVerificationContext(input.verificationContext);
     const normalize = (value: string) => value.replace(/[\s=：:]/g, '').replace(/％/g, '%');
     const expected = normalize(claim);
-    return [context.initialRequest, ...context.userTurns,
-      ...context.materials.flatMap(material => material.kind === 'text' ? [material.text] : [])]
-      .some(source => normalize(source).includes(expected));
+    return [
+      context.initialRequest,
+      ...context.userTurns,
+      ...context.materials.flatMap((material) => (material.kind === 'text' ? [material.text] : [])),
+    ].some((source) => normalize(source).includes(expected));
   } catch {
     return false;
   }
@@ -1380,8 +1339,7 @@ function checkEmptyResult(
   // never sees a near-empty result card; a one-line "搜索完成" stub
   // also flags now so 自动 retry / 追问 can intervene before we
   // call the task completed.
-  const hasContentChars =
-    /[A-Za-z0-9一-鿿぀-ゟ゠-ヿ]/.test(meaningful);
+  const hasContentChars = /[A-Za-z0-9一-鿿぀-ゟ゠-ヿ]/.test(meaningful);
   if (deliveryStage === 'clarification' && meaningful.length >= 1 && hasContentChars) return null;
   // Plain Q&A — arithmetic / greeting / short knowledge — has a
   // legitimately tiny answer ("2" / "你好！"). Pass on any non-empty
@@ -1391,11 +1349,7 @@ function checkEmptyResult(
   if (classifyLightweightTask(contract.goal) && meaningful.length >= 1 && hasContentChars) {
     return null;
   }
-  if (
-    allowsConciseFactAnswer(contract) &&
-    meaningful.length >= 3 &&
-    hasContentChars
-  ) {
+  if (allowsConciseFactAnswer(contract) && meaningful.length >= 3 && hasContentChars) {
     return null;
   }
   if (meaningful.length >= 20 && hasContentChars) return null;
@@ -1507,17 +1461,10 @@ function allowsConciseFactAnswer(contract: ExecutionContract): boolean {
   return (asksForConciseAnswer || asksForSingleFact || asksForBrowserAction) && !asksForLongForm;
 }
 
-function checkUrlGrounding(
-  answerText: string,
-  ledger: EvidenceLedger,
-): CheckResult | null {
-  const answerUrls = (answerText.match(URL_RE) ?? []).map((u) =>
-    u.replace(/[)\].,;:]+$/, ''),
-  );
+function checkUrlGrounding(answerText: string, ledger: EvidenceLedger): CheckResult | null {
+  const answerUrls = (answerText.match(URL_RE) ?? []).map((u) => u.replace(/[)\].,;:]+$/, ''));
   if (answerUrls.length === 0) return null;
-  const grounded = ledger.getGroundedUrls().map((u) =>
-    u.replace(/[)\].,;:]+$/, ''),
-  );
+  const grounded = ledger.getGroundedUrls().map((u) => u.replace(/[)\].,;:]+$/, ''));
   const groundedSet = new Set(grounded);
   const fabricated = answerUrls.filter((u) => !groundedSet.has(u));
   const passed = fabricated.length === 0;
@@ -1540,10 +1487,7 @@ function checkUrlGrounding(
  * integration step should write structured violation entries
  * instead of relying on substring matches when feasible.
  */
-function checkConstraints(
-  constraints: string[],
-  ledger: EvidenceLedger,
-): CheckResult | null {
+function checkConstraints(constraints: string[], ledger: EvidenceLedger): CheckResult | null {
   if (constraints.length === 0) return null;
   const canonicalised = new Set<string>();
   for (const c of constraints) {
@@ -1569,7 +1513,7 @@ function checkConstraints(
     }
     for (const key of canonicalised) {
       const checker = CONSTRAINT_CHECKERS[key];
-      if (checker && checker(e.fact)) {
+      if (checker?.(e.fact)) {
         violations.push(`${key}: "${e.fact.slice(0, 80)}"`);
       }
     }
@@ -1592,7 +1536,10 @@ function checkConstraints(
  * verify GMV ≈ 订单数 × 客单价 within tolerance. Same for
  * GMV ≈ UV × 转化率 × 客单价.
  */
-function checkNumberCrossValidation(ledger: EvidenceLedger, context?: TaskVerificationContext): CheckResult | null {
+function checkNumberCrossValidation(
+  ledger: EvidenceLedger,
+  context?: TaskVerificationContext,
+): CheckResult | null {
   const numericFacts = collectNumericFacts(ledger, context);
   if (numericFacts.size === 0) return null;
   const checks: { ok: boolean; note: string }[] = [];
@@ -1608,9 +1555,7 @@ function checkNumberCrossValidation(ledger: EvidenceLedger, context?: TaskVerifi
     const ok = withinTolerance(gmv, expected);
     checks.push({
       ok,
-      note: `GMV=${gmv} vs 订单数×客单价=${expected.toFixed(0)}${
-        ok ? ' ≈' : ' ≠'
-      }`,
+      note: `GMV=${gmv} vs 订单数×客单价=${expected.toFixed(0)}${ok ? ' ≈' : ' ≠'}`,
     });
   }
   if (gmv != null && uv != null && conv != null && aov != null) {
@@ -1620,9 +1565,7 @@ function checkNumberCrossValidation(ledger: EvidenceLedger, context?: TaskVerifi
     const ok = withinTolerance(gmv, expected);
     checks.push({
       ok,
-      note: `GMV=${gmv} vs UV×转化率×客单价=${expected.toFixed(0)}${
-        ok ? ' ≈' : ' ≠'
-      }`,
+      note: `GMV=${gmv} vs UV×转化率×客单价=${expected.toFixed(0)}${ok ? ' ≈' : ' ≠'}`,
     });
   }
 
@@ -1639,7 +1582,10 @@ function checkNumberCrossValidation(ledger: EvidenceLedger, context?: TaskVerifi
   };
 }
 
-function collectNumericFacts(ledger: EvidenceLedger, context?: TaskVerificationContext): Map<string, number> {
+function collectNumericFacts(
+  ledger: EvidenceLedger,
+  context?: TaskVerificationContext,
+): Map<string, number> {
   const out = new Map<string, number>();
   let facts: readonly string[];
   if (context !== undefined) {
@@ -1648,15 +1594,20 @@ function collectNumericFacts(ledger: EvidenceLedger, context?: TaskVerificationC
       // Explicit later user assignments supersede earlier ones. Materials
       // supply only fields not specified by the user; none go into the ledger.
       facts = [
-        ...[...snapshot.userTurns].reverse(), snapshot.initialRequest,
-        ...snapshot.materials.flatMap(material => material.kind === 'text' ? [material.text] : []),
+        ...[...snapshot.userTurns].reverse(),
+        snapshot.initialRequest,
+        ...snapshot.materials.flatMap((material) =>
+          material.kind === 'text' ? [material.text] : [],
+        ),
       ];
     } catch {
       // The separate coverage gate rejects invalid contexts, never legacy-fallback.
       return out;
     }
   } else {
-    facts = ledger.entries.filter(entry => entry.sourceType === 'user_input' || entry.sourceType === 'file_parse').map(entry => entry.fact);
+    facts = ledger.entries
+      .filter((entry) => entry.sourceType === 'user_input' || entry.sourceType === 'file_parse')
+      .map((entry) => entry.fact);
   }
   for (const fact of facts) {
     for (const key of KNOWN_NUMERIC_KEYS) {
@@ -1684,7 +1635,12 @@ function collectNumericFacts(ledger: EvidenceLedger, context?: TaskVerificationC
       const canonicalKey = context !== undefined && key === '订单' ? '订单数' : key;
       // Core uses newest explicit assignments even when a correction is smaller.
       // Legacy keeps its historical first/interesting-value behaviour.
-      if (!out.has(canonicalKey) || (context === undefined && n >= MIN_CROSSCHECK_VALUE && (out.get(canonicalKey) ?? 0) < MIN_CROSSCHECK_VALUE)) {
+      if (
+        !out.has(canonicalKey) ||
+        (context === undefined &&
+          n >= MIN_CROSSCHECK_VALUE &&
+          (out.get(canonicalKey) ?? 0) < MIN_CROSSCHECK_VALUE)
+      ) {
         out.set(canonicalKey, n);
       }
     }
@@ -1712,12 +1668,7 @@ function escapeRegex(s: string): string {
  * inside a section that demanded annotation. Stricter counting
  * belongs in the LLM tier because it is too noisy for deterministic.
  */
-const SOURCE_ANNOTATION_MARKERS = [
-  '[用户提供]',
-  '[系统计算]',
-  '[模型假设]',
-  '[外部来源]',
-] as const;
+const SOURCE_ANNOTATION_MARKERS = ['[用户提供]', '[系统计算]', '[模型假设]', '[外部来源]'] as const;
 const LEGACY_SOURCE_ANNOTATION_MARKERS = [
   '\u{1F7E2}',
   '\u{1F535}',
@@ -1873,8 +1824,8 @@ function checkWorkflowSourceAnnotation(
       // matters when the section exists.
       continue;
     }
-    const hasAny = [...SOURCE_ANNOTATION_MARKERS, ...LEGACY_SOURCE_ANNOTATION_MARKERS].some((marker) =>
-      body.includes(marker),
+    const hasAny = [...SOURCE_ANNOTATION_MARKERS, ...LEGACY_SOURCE_ANNOTATION_MARKERS].some(
+      (marker) => body.includes(marker),
     );
     if (!hasAny) unannotated.push(section.title);
   }
@@ -1902,10 +1853,7 @@ function checkWorkflowSourceAnnotation(
  * becomes needs_clarification regardless (the agent shouldn't
  * be answering yet). Empty answer hard-fails.
  */
-function classifyFailureLevel(
-  checks: CheckResult[],
-  contract: ExecutionContract,
-): FailureLevel {
+function classifyFailureLevel(checks: CheckResult[], contract: ExecutionContract): FailureLevel {
   const unprovidedRequired = contract.requiredInputs.some((r) => !r.provided);
   if (unprovidedRequired) return 'needs_clarification';
   const failed = checks.filter((c) => !c.passed);
@@ -1916,10 +1864,7 @@ function classifyFailureLevel(
   return 'fixable';
 }
 
-function buildSuggestion(
-  checks: CheckResult[],
-  ledger: EvidenceLedger,
-): string | undefined {
+function buildSuggestion(checks: CheckResult[], ledger: EvidenceLedger): string | undefined {
   const fixable = checks.filter((c) => !c.passed && c.severity === 'fixable');
   if (fixable.length === 0) return undefined;
   const lines = fixable.map((c) => `- ${c.detail}`);

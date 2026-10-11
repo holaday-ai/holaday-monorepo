@@ -1,8 +1,8 @@
-import { afterEach, expect, it, vi } from 'vitest';
 import { pino } from 'pino';
+import { afterEach, expect, it, vi } from 'vitest';
 import {
-  OrdinaryMaintenance,
   type MaintenanceRecord,
+  OrdinaryMaintenance,
 } from '../../execution/ordinary-maintenance.js';
 import { currentOperationLifetime } from '../../execution/owned-operation.js';
 import type { Context } from '../context.js';

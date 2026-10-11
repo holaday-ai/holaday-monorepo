@@ -30,10 +30,18 @@ type StockRiskMonitorCreateInput = Parameters<typeof trpc.stocks.createRiskMonit
 export interface StockRiskRadarApi {
   load(input: RiskRadarQueryInput): Promise<StockRiskRadarResult>;
   loadMonitors?(input: StockRiskMonitorListInput): Promise<StockRiskMonitorView[]>;
-  createMonitor?(input: StockRiskMonitorCreateInput): ReturnType<typeof trpc.stocks.createRiskMonitor.mutate>;
-  toggleMonitor?(input: { plannedTaskId: string }): ReturnType<typeof trpc.plannedTasks.toggle.mutate>;
-  runMonitorNow?(input: { plannedTaskId: string }): ReturnType<typeof trpc.plannedTasks.runNow.mutate>;
-  archiveMonitor?(input: { plannedTaskId: string }): ReturnType<typeof trpc.plannedTasks.archive.mutate>;
+  createMonitor?(
+    input: StockRiskMonitorCreateInput,
+  ): ReturnType<typeof trpc.stocks.createRiskMonitor.mutate>;
+  toggleMonitor?(input: { plannedTaskId: string }): ReturnType<
+    typeof trpc.plannedTasks.toggle.mutate
+  >;
+  runMonitorNow?(input: { plannedTaskId: string }): ReturnType<
+    typeof trpc.plannedTasks.runNow.mutate
+  >;
+  archiveMonitor?(input: { plannedTaskId: string }): ReturnType<
+    typeof trpc.plannedTasks.archive.mutate
+  >;
 }
 
 const LIVE_API: StockRiskRadarApi = {
@@ -114,10 +122,7 @@ interface StockRiskDisplayGroup {
 
 function groupStockRiskCoverage(result: StockRiskRadarResult): StockRiskDisplayGroup[] {
   const groups = new Map<string, StockRiskDisplayGroup>(
-    groupStockRiskSignals(result.signals).map((group) => [
-      group.symbol,
-      { ...group, checks: [] },
-    ]),
+    groupStockRiskSignals(result.signals).map((group) => [group.symbol, { ...group, checks: [] }]),
   );
 
   for (const check of result.checks) {
@@ -177,63 +182,69 @@ export function StockRiskRadar({
   const isMobile = useIsMobile();
   const loadable = canLoadRiskRadar({ snapshotId, dataAsOf, trustMode });
 
-  const load = React.useCallback(async (resetExpansion = false) => {
-    const requestTrust = { snapshotId, dataAsOf, trustMode };
-    const request = requestSequence.current + 1;
-    requestSequence.current = request;
-    if (resetExpansion) {
-      setExpandedGroupSymbol(null);
-      setExpandedSignalId(null);
-    }
-    setMonitorCapability(false);
-    setMonitors(new Map());
-    setError(null);
-    setResult((current) =>
-      canLoadRiskRadar(requestTrust) &&
-      current?.snapshotId === requestTrust.snapshotId &&
-      current.dataAsOf === requestTrust.dataAsOf
-        ? current
-        : null,
-    );
-    if (!canLoadRiskRadar(requestTrust)) {
-      setExpandedGroupSymbol(null);
-      setExpandedSignalId(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const next = await api.load(requestTrust);
-      if (
-        requestSequence.current === request &&
-        next.snapshotId === snapshotId &&
-        next.dataAsOf === dataAsOf
-      ) {
-        setResult(next);
-        setExpandedGroupSymbol((current) =>
-          current && next.signals.some((signal) => signal.symbol === current) ? current : null,
-        );
-        setExpandedSignalId((current) =>
-          current && next.signals.some((signal) => signal.signalId === current) ? current : null,
-        );
-        if (api.loadMonitors) {
-          void api.loadMonitors(requestTrust).then((rows) => {
-            if (requestSequence.current !== request) return;
-            setMonitors(new Map(rows.map((row) => [row.symbol, row])));
-            setMonitorCapability(true);
-          }).catch(() => {
-            if (requestSequence.current !== request) return;
-            setMonitors(new Map());
-            setMonitorCapability(false);
-          });
-        }
+  const load = React.useCallback(
+    async (resetExpansion = false) => {
+      const requestTrust = { snapshotId, dataAsOf, trustMode };
+      const request = requestSequence.current + 1;
+      requestSequence.current = request;
+      if (resetExpansion) {
+        setExpandedGroupSymbol(null);
+        setExpandedSignalId(null);
       }
-    } catch (caught) {
-      if (requestSequence.current === request) setError(pageErrorMessage(caught));
-    } finally {
-      if (requestSequence.current === request) setLoading(false);
-    }
-  }, [api, dataAsOf, snapshotId, trustMode]);
+      setMonitorCapability(false);
+      setMonitors(new Map());
+      setError(null);
+      setResult((current) =>
+        canLoadRiskRadar(requestTrust) &&
+        current?.snapshotId === requestTrust.snapshotId &&
+        current.dataAsOf === requestTrust.dataAsOf
+          ? current
+          : null,
+      );
+      if (!canLoadRiskRadar(requestTrust)) {
+        setExpandedGroupSymbol(null);
+        setExpandedSignalId(null);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      try {
+        const next = await api.load(requestTrust);
+        if (
+          requestSequence.current === request &&
+          next.snapshotId === snapshotId &&
+          next.dataAsOf === dataAsOf
+        ) {
+          setResult(next);
+          setExpandedGroupSymbol((current) =>
+            current && next.signals.some((signal) => signal.symbol === current) ? current : null,
+          );
+          setExpandedSignalId((current) =>
+            current && next.signals.some((signal) => signal.signalId === current) ? current : null,
+          );
+          if (api.loadMonitors) {
+            void api
+              .loadMonitors(requestTrust)
+              .then((rows) => {
+                if (requestSequence.current !== request) return;
+                setMonitors(new Map(rows.map((row) => [row.symbol, row])));
+                setMonitorCapability(true);
+              })
+              .catch(() => {
+                if (requestSequence.current !== request) return;
+                setMonitors(new Map());
+                setMonitorCapability(false);
+              });
+          }
+        }
+      } catch (caught) {
+        if (requestSequence.current === request) setError(pageErrorMessage(caught));
+      } finally {
+        if (requestSequence.current === request) setLoading(false);
+      }
+    },
+    [api, dataAsOf, snapshotId, trustMode],
+  );
 
   React.useEffect(() => {
     void load(false);
@@ -254,12 +265,13 @@ export function StockRiskRadar({
 
   const createMonitor = React.useCallback(async () => {
     if (
-      !selectedMonitorStock
-      || !api.createMonitor
-      || !snapshotId
-      || !dataAsOf
-      || trustMode !== 'current'
-    ) return;
+      !selectedMonitorStock ||
+      !api.createMonitor ||
+      !snapshotId ||
+      !dataAsOf ||
+      trustMode !== 'current'
+    )
+      return;
     setMonitorPendingSymbol(selectedMonitorStock.symbol);
     setMonitorError(null);
     try {
@@ -278,26 +290,32 @@ export function StockRiskRadar({
     }
   }, [api, dataAsOf, replaceMonitor, selectedMonitorStock, snapshotId, trustMode]);
 
-  const toggleMonitor = React.useCallback(async (monitor: StockRiskMonitorView) => {
-    if (!api.toggleMonitor) return;
-    setMonitorPendingSymbol(monitor.symbol);
-    try {
-      const response = await api.toggleMonitor({ plannedTaskId: monitor.plannedTaskId });
-      replaceMonitor({ ...monitor, status: response.status === 'paused' ? 'paused' : 'active' });
-    } finally {
-      setMonitorPendingSymbol(null);
-    }
-  }, [api, replaceMonitor]);
+  const toggleMonitor = React.useCallback(
+    async (monitor: StockRiskMonitorView) => {
+      if (!api.toggleMonitor) return;
+      setMonitorPendingSymbol(monitor.symbol);
+      try {
+        const response = await api.toggleMonitor({ plannedTaskId: monitor.plannedTaskId });
+        replaceMonitor({ ...monitor, status: response.status === 'paused' ? 'paused' : 'active' });
+      } finally {
+        setMonitorPendingSymbol(null);
+      }
+    },
+    [api, replaceMonitor],
+  );
 
-  const runMonitorNow = React.useCallback(async (monitor: StockRiskMonitorView) => {
-    if (!api.runMonitorNow) return;
-    setMonitorPendingSymbol(monitor.symbol);
-    try {
-      await api.runMonitorNow({ plannedTaskId: monitor.plannedTaskId });
-    } finally {
-      setMonitorPendingSymbol(null);
-    }
-  }, [api]);
+  const runMonitorNow = React.useCallback(
+    async (monitor: StockRiskMonitorView) => {
+      if (!api.runMonitorNow) return;
+      setMonitorPendingSymbol(monitor.symbol);
+      try {
+        await api.runMonitorNow({ plannedTaskId: monitor.plannedTaskId });
+      } finally {
+        setMonitorPendingSymbol(null);
+      }
+    },
+    [api],
+  );
 
   return (
     <section className="overflow-hidden rounded-[8px] border border-[#E1E3E8] bg-white shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
@@ -426,8 +444,9 @@ export function StockRiskRadar({
                 <div className="mt-4 grid gap-3 lg:grid-cols-2">
                   {groupStockRiskCoverage(result).map((group) => {
                     const groupExpanded = expandedGroupSymbol === group.symbol;
-                    const hasCheckedSource = group.signals.length > 0
-                      || group.checks.some((check) => check.status === 'checked');
+                    const hasCheckedSource =
+                      group.signals.length > 0 ||
+                      group.checks.some((check) => check.status === 'checked');
                     const collapsedSignalLimit = isMobile ? 1 : 2;
                     const visibleSignals = groupExpanded
                       ? group.signals
@@ -688,19 +707,33 @@ function MonitorControl({
     );
   }
   const recordHref = `/planned?plan=${encodeURIComponent(monitor.plannedTaskId)}`;
-  const label = monitor.status === 'paused' ? '已暂停' : monitor.status === 'failed' ? '需要处理' : '监控中';
-  const Icon = monitor.status === 'paused' ? PauseCircle : monitor.status === 'failed' ? CircleAlert : BellRing;
+  const label =
+    monitor.status === 'paused' ? '已暂停' : monitor.status === 'failed' ? '需要处理' : '监控中';
+  const Icon =
+    monitor.status === 'paused'
+      ? PauseCircle
+      : monitor.status === 'failed'
+        ? CircleAlert
+        : BellRing;
   return (
     <div className="flex max-w-[240px] flex-col items-end gap-1 text-right max-[390px]:max-w-none max-[390px]:items-start max-[390px]:text-left">
       <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#4F5868]">
-        <Icon className={cn('h-3.5 w-3.5', monitor.status === 'failed' ? 'text-[#C72654]' : 'text-[#6B4AA0]')} aria-hidden />
+        <Icon
+          className={cn(
+            'h-3.5 w-3.5',
+            monitor.status === 'failed' ? 'text-[#C72654]' : 'text-[#6B4AA0]',
+          )}
+          aria-hidden
+        />
         {label}
       </span>
       {monitor.nextRunAt && monitor.status === 'active' ? (
         <span className="text-[10px] text-[#8B92A1]">下次 {formatDateTime(monitor.nextRunAt)}</span>
       ) : null}
       {monitor.lastSummary ? (
-        <span className="line-clamp-1 max-w-full text-[10px] text-[#8B92A1]">{monitor.lastSummary}</span>
+        <span className="line-clamp-1 max-w-full text-[10px] text-[#8B92A1]">
+          {monitor.lastSummary}
+        </span>
       ) : null}
       <div className="flex flex-wrap justify-end gap-x-2 gap-y-1 max-[390px]:justify-start">
         {monitor.status === 'paused' ? (
@@ -712,7 +745,8 @@ function MonitorControl({
             onClick={onToggle}
             className="inline-flex min-h-8 items-center gap-1 text-[10px] font-semibold text-[#6B4AA0] disabled:opacity-50 max-[390px]:min-h-11"
           >
-            <Play className="h-3 w-3" aria-hidden />恢复
+            <Play className="h-3 w-3" aria-hidden />
+            恢复
           </button>
         ) : null}
         {monitor.status === 'failed' ? (
@@ -724,7 +758,11 @@ function MonitorControl({
             onClick={onRunNow}
             className="inline-flex min-h-8 items-center gap-1 text-[10px] font-semibold text-[#C72654] disabled:opacity-50 max-[390px]:min-h-11"
           >
-            <RefreshCw className={cn('h-3 w-3', pending && 'animate-spin motion-reduce:animate-none')} aria-hidden />重试
+            <RefreshCw
+              className={cn('h-3 w-3', pending && 'animate-spin motion-reduce:animate-none')}
+              aria-hidden
+            />
+            重试
           </button>
         ) : null}
         <a

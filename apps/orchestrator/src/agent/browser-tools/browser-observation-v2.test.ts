@@ -1,11 +1,11 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { chromium, type Browser, type Page } from 'playwright';
+import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
-import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 
 // Real Chromium and local HTTP; the only scripted component is the model.
 describe('cloud observation v2', () => {
@@ -109,7 +109,7 @@ describe('cloud observation v2', () => {
         columns: ['Name', 'Price'],
         rows: [['Box', '29']],
         range: [0, 1],
-        sourceURL: base + '/',
+        sourceURL: `${base}/`,
       });
     } finally {
       tools.dispose();
@@ -146,7 +146,7 @@ describe('cloud observation v2', () => {
         observationRevision: state.observationRevision,
       });
       expect(result.ok, result.text).toBe(true);
-      expect(page.url()).toBe(base + '/');
+      expect(page.url()).toBe(`${base}/`);
       expect(page.context().pages()).toHaveLength(2);
       expect(result.text).toContain('popup');
       expect(result.text).toContain('Catalog');

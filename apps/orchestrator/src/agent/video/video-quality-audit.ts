@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { chmod, mkdir, mkdtemp, open, readdir, rm, lstat, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, open, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { VideoQualityResult } from './video-quality-verifier.js';
@@ -96,7 +96,7 @@ export async function cleanupRejectedVideoFrames(
       if (
         manifest.status !== 'fail' ||
         !/^tsk_[a-zA-Z0-9_-]{1,100}$/.test(manifest.taskId) ||
-        !entry.name.startsWith(manifest.taskId + '-') ||
+        !entry.name.startsWith(`${manifest.taskId}-`) ||
         !Array.isArray(manifest.frames) ||
         !manifest.frames.length ||
         manifest.frames.length > 9 ||

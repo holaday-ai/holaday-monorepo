@@ -1,20 +1,20 @@
-import { FileText, Image, Menu, PencilLine } from 'lucide-react';
-import * as React from 'react';
-import { BrandWordmark } from '@/components/BrandLogo';
 import { AmbientGrid } from '@/components/AmbientGrid';
+import { BrandWordmark } from '@/components/BrandLogo';
 import { InputArea } from '@/components/InputArea';
 import { LazyLoadBoundary } from '@/components/LazyLoadBoundary';
 import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
 import { TaskToolbar, isBrowserLikely } from '@/components/TaskToolbar';
-import { Button } from '@/components/ui/button';
-import type { ComposerSubmitResult } from '@/components/composer-submit';
 import { shouldResetComposerOnSelectionChange } from '@/components/composer-reset';
+import type { ComposerSubmitResult } from '@/components/composer-submit';
+import { Button } from '@/components/ui/button';
+import type { AwaitingKind } from '@/lib/awaiting-user-copy';
 import { taskDisplayIntent, taskDisplaySource } from '@/lib/task-display-copy';
 import { taskStatusLabel } from '@/lib/task-status-copy';
 import { useTaskStore } from '@/stores/task-store';
-import type { AwaitingKind } from '@/lib/awaiting-user-copy';
 import type { SidePanelMode } from '@/types/side-panel';
 import type { UiSkillSelection, UiTask } from '@/types/task';
+import { FileText, Image, Menu, PencilLine } from 'lucide-react';
+import * as React from 'react';
 
 const TaskStream = React.lazy(() =>
   import('@/components/TaskStream').then((module) => ({
@@ -78,8 +78,8 @@ interface Props {
  * Centre column — a scrollable TaskStream area on top, InputArea
  * pinned to the bottom, and a mobile-only top bar that hosts the
  * hamburger toggle. Empty state (no task selected) shows a welcome
-   * line plus clickable suggestion chips; clicking a chip prefills the
-   * input so the user can edit before sending.
+ * line plus clickable suggestion chips; clicking a chip prefills the
+ * input so the user can edit before sending.
  */
 export function MainPanel({
   task,
@@ -186,11 +186,7 @@ export function MainPanel({
           <Menu className="h-4 w-4" />
         </Button>
         <div className="ml-2 min-w-0 flex-1 truncate pr-12 text-sm font-medium text-[#595757] dark:text-foreground/85">
-          {task ? (
-            taskDisplayIntent(task.intent)
-          ) : (
-            <BrandWordmark className="h-3.5" />
-          )}
+          {task ? taskDisplayIntent(task.intent) : <BrandWordmark className="h-3.5" />}
         </div>
       </div>
       {showEmptyHome ? (
@@ -222,9 +218,11 @@ export function MainPanel({
             />
             <SuggestionChips onPick={handlePickFromEmptyState} />
             <p className="hd-starter-note">也可以直接拖入文件</p>
-            {userPlan ? <div className="hd-start-account-note">
-              <RoleNudgeBanner plan={userPlan} selectedRoles={userSelectedRoles ?? null} />
-            </div> : null}
+            {userPlan ? (
+              <div className="hd-start-account-note">
+                <RoleNudgeBanner plan={userPlan} selectedRoles={userSelectedRoles ?? null} />
+              </div>
+            ) : null}
           </div>
         </div>
       ) : (
@@ -252,18 +250,12 @@ export function MainPanel({
               staleVersionFallback={<StaticTaskDetailFallback task={task} />}
             >
               <React.Suspense fallback={<TaskStreamFallback />}>
-                <TaskStream
-                  task={task}
-                  onPickSuggestion={handlePickFromTaskSummary}
-                />
+                <TaskStream task={task} onPickSuggestion={handlePickFromTaskSummary} />
               </React.Suspense>
             </LazyLoadBoundary>
           </div>
           {userPlan ? (
-            <RoleNudgeBanner
-              plan={userPlan}
-              selectedRoles={userSelectedRoles ?? null}
-            />
+            <RoleNudgeBanner plan={userPlan} selectedRoles={userSelectedRoles ?? null} />
           ) : null}
           <InputArea
             key={composerKey}
@@ -343,9 +335,7 @@ function StaticTaskDetailFallback({ task }: { task: UiTask }): JSX.Element {
         </span>
       </div>
       <div className="mt-4 rounded-[7px] border border-[#DCDDDD]/70 bg-[#F7FBFC]/80 px-3 py-2.5 dark:border-white/10 dark:bg-white/5">
-        <div className="text-[11px] font-medium text-muted-foreground">
-          已加载结果
-        </div>
+        <div className="text-[11px] font-medium text-muted-foreground">已加载结果</div>
         {hasResult ? (
           <p className="mt-1 max-h-[360px] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
             {task.resultText}
@@ -387,9 +377,20 @@ function SuggestionChips({ onPick }: { onPick(intent: string): void }): JSX.Elem
     { label: '写点内容', icon: PencilLine, intent: '帮我写一段内容：' },
     { label: '做张图片', icon: Image, intent: '帮我做一张图片：' },
   ];
-  return <div className="hd-starter-row">{items.map(({ label, icon: Icon, intent }) => (
-    <button key={label} type="button" className="hd-starter" onClick={() => onPick(intent)} aria-label={`用示例填入：${label}`}>
-      <Icon aria-hidden="true" />{label}
-    </button>
-  ))}</div>;
+  return (
+    <div className="hd-starter-row">
+      {items.map(({ label, icon: Icon, intent }) => (
+        <button
+          key={label}
+          type="button"
+          className="hd-starter"
+          onClick={() => onPick(intent)}
+          aria-label={`用示例填入：${label}`}
+        >
+          <Icon aria-hidden="true" />
+          {label}
+        </button>
+      ))}
+    </div>
+  );
 }

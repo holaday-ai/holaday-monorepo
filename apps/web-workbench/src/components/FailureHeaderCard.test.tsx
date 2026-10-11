@@ -29,7 +29,9 @@ function context(overrides: Partial<TaskFailureContext> = {}): TaskFailureContex
   return {
     taskId: 'tsk_failed',
     refund: { state: 'refunded', refundedAt: '2026-10-04T08:00:00.000Z' },
-    inputFiles: [{ fileId: 'fil_a', filename: '报价单.xlsx', mimetype: 'application/vnd.ms-excel' }],
+    inputFiles: [
+      { fileId: 'fil_a', filename: '报价单.xlsx', mimetype: 'application/vnd.ms-excel' },
+    ],
     unavailableInputCount: 0,
     ...overrides,
   };
@@ -51,13 +53,21 @@ describe('FailureHeaderCard', () => {
     const refund = screen.getByTestId('failure-refund-status');
     expect(refund.textContent).toContain('额度已退还');
     expect(refund.dataset.tone).toBe('positive');
-    expect(screen.getByTestId('failure-retry-attachments').textContent).toContain('原来的 1 个附件');
+    expect(screen.getByTestId('failure-retry-attachments').textContent).toContain(
+      '原来的 1 个附件',
+    );
     await userEvent.click(screen.getByRole('button', { name: '重新执行任务' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
   it('omits the refund line when the task was never charged', () => {
-    render(<FailureHeaderCard status="failed" errorText="boom" refund={refundStatusCopy('not_charged')} />);
+    render(
+      <FailureHeaderCard
+        status="failed"
+        errorText="boom"
+        refund={refundStatusCopy('not_charged')}
+      />,
+    );
     expect(screen.queryByTestId('failure-refund-status')).toBeNull();
   });
 
@@ -75,7 +85,9 @@ describe('FailureHeaderCard', () => {
 
   it('disables the retry button while a retry is in flight', () => {
     render(<FailureHeaderCard status="failed" errorText="boom" onRetry={() => {}} retrying />);
-    expect((screen.getByRole('button', { name: '正在重新执行任务' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: '正在重新执行任务' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 });
 
@@ -91,7 +103,9 @@ describe('task failure recovery copy', () => {
     expect(retryAttachmentNote(context({ unavailableInputCount: 2 }))).toBe(
       '重新执行会带上 1 个附件；另有 2 个已失效，需要重新上传。',
     );
-    expect(retryAttachmentNote(context({ inputFiles: [], unavailableInputCount: 1 }))).toContain('需要重新上传');
+    expect(retryAttachmentNote(context({ inputFiles: [], unavailableInputCount: 1 }))).toContain(
+      '需要重新上传',
+    );
     expect(retryAttachmentNote(context({ inputFiles: [] }))).toBeNull();
   });
 
@@ -139,7 +153,15 @@ describe('useTaskFailureContext', () => {
 describe('media quality failure recovery', () => {
   it('shows the verified refund state and an accessible regenerate action without browser advice', async () => {
     const retry = vi.fn();
-    render(<FailureHeaderCard status="failed" errorText="画面出现了未要求的文字或品牌，视频未交付。请调整描述后重新生成。" executionMode="video_creation" refund={refundStatusCopy('refunded')} onRetry={retry} />);
+    render(
+      <FailureHeaderCard
+        status="failed"
+        errorText="画面出现了未要求的文字或品牌，视频未交付。请调整描述后重新生成。"
+        executionMode="video_creation"
+        refund={refundStatusCopy('refunded')}
+        onRetry={retry}
+      />,
+    );
     expect(screen.getByTestId('failure-refund-status').textContent).toContain('额度已退还');
     expect(screen.queryByText(/换个网址/)).toBeNull();
     await userEvent.setup().click(screen.getByRole('button', { name: '重新生成' }));

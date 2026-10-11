@@ -91,7 +91,9 @@ describe('STEALTH_INIT_SCRIPT', () => {
   it('patches WebGLRenderingContext.getParameter to hide SwiftShader', () => {
     const ctx = makeFakeWindow();
     vm.runInNewContext(STEALTH_INIT_SCRIPT, ctx);
-    const WebGLCtor = ctx.WebGLRenderingContext as new () => { getParameter: (p: number) => string };
+    const WebGLCtor = ctx.WebGLRenderingContext as new () => {
+      getParameter: (p: number) => string;
+    };
     const instance = new WebGLCtor();
     expect(instance.getParameter(37445)).toBe('Intel Inc.');
     expect(instance.getParameter(37446)).toBe('Intel Iris OpenGL Engine');

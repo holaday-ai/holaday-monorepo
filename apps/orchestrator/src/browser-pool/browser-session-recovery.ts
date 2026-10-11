@@ -21,10 +21,7 @@ export interface RestorableBrowserTarget {
  * tests and multi-runtime deployments cannot accidentally share a flight.
  */
 export class BrowserSessionRestoreFlights {
-  private readonly byPool = new WeakMap<
-    object,
-    Map<string, Promise<unknown>>
-  >();
+  private readonly byPool = new WeakMap<object, Map<string, Promise<unknown>>>();
 
   run<T>(pool: object, taskId: string, restore: () => Promise<T>): Promise<T> {
     let taskFlights = this.byPool.get(pool);
@@ -56,9 +53,7 @@ function isHttpUrl(raw: string): boolean {
   }
 }
 
-export function restorableBrowserTarget(
-  task: BrowserTaskSnapshot,
-): RestorableBrowserTarget | null {
+export function restorableBrowserTarget(task: BrowserTaskSnapshot): RestorableBrowserTarget | null {
   if (task.origin !== 'user' || !RESTORABLE_BROWSER_STATUSES.has(task.status)) {
     return null;
   }
@@ -69,12 +64,10 @@ export function restorableBrowserTarget(
     executionMode?: unknown;
     metadata?: { executionMode?: unknown } | null;
   };
-  const executionMode =
-    result.metadata?.executionMode ?? result.executionMode ?? null;
+  const executionMode = result.metadata?.executionMode ?? result.executionMode ?? null;
   if (executionMode !== 'browser') return null;
 
-  const finalUrl =
-    typeof result.finalUrl === 'string' ? result.finalUrl.trim() : '';
+  const finalUrl = typeof result.finalUrl === 'string' ? result.finalUrl.trim() : '';
   if (!finalUrl || !isHttpUrl(finalUrl)) return null;
   return { url: finalUrl.slice(0, 2048) };
 }

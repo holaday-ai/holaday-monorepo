@@ -85,7 +85,10 @@ export function roleLoadErrorCopy(message: string | null | undefined): RoleLoadE
   };
 }
 
-export function roleRemainingChanges(changesThisMonth: number, changesLimit = ROLE_CHANGES_PER_MONTH): number {
+export function roleRemainingChanges(
+  changesThisMonth: number,
+  changesLimit = ROLE_CHANGES_PER_MONTH,
+): number {
   return Math.max(0, changesLimit - changesThisMonth);
 }
 
@@ -98,16 +101,11 @@ export function normalizeRoleListResponse(value: unknown): RoleListSnapshot {
   const catalogue = normalizeRoleCatalogue(root.catalogue);
   const rawSelected = safeRoleStringArray(root.selected);
   const catalogueIds = new Set(catalogue.map((role) => role.id));
-  const selected = dedupeRoleIds(
-    rawSelected.filter((id) => catalogueIds.has(id)),
-  );
+  const selected = dedupeRoleIds(rawSelected.filter((id) => catalogueIds.has(id)));
   const plan = safeRoleText(root.plan) || 'free';
   const pickLimit = safePositiveRoleCount(root.pickLimit, BASIC_ROLE_PICK_LIMIT);
   const changesThisMonth = safeRoleCount(root.changesThisMonth);
-  const changesLimit = safePositiveRoleCount(
-    root.changesLimit,
-    ROLE_CHANGES_PER_MONTH,
-  );
+  const changesLimit = safePositiveRoleCount(root.changesLimit, ROLE_CHANGES_PER_MONTH);
 
   return {
     plan,
@@ -116,12 +114,9 @@ export function normalizeRoleListResponse(value: unknown): RoleListSnapshot {
     pickLimit,
     changesThisMonth,
     changesLimit,
-    overLimit:
-      root.overLimit === true ||
-      (plan === 'basic' && selected.length > pickLimit),
+    overLimit: root.overLimit === true || (plan === 'basic' && selected.length > pickLimit),
     needsRoleRepair:
-      root.needsRoleRepair === true ||
-      (plan === 'basic' && selected.length !== rawSelected.length),
+      root.needsRoleRepair === true || (plan === 'basic' && selected.length !== rawSelected.length),
   };
 }
 

@@ -781,13 +781,7 @@ export async function syncPlannedRuns(db: DB): Promise<number> {
         }),
       );
       settled += 1;
-      await notifyPlannedOutcome(
-        db,
-        run.planId,
-        streakOutcome,
-        'task_terminal',
-        task.errorMessage,
-      );
+      await notifyPlannedOutcome(db, run.planId, streakOutcome, 'task_terminal', task.errorMessage);
       continue;
     }
     if (batchTaskId === null) continue;

@@ -22,7 +22,8 @@ export function useBrowserPanelDockInset<T extends Element>(
     if (!el || typeof ResizeObserver === 'undefined') return;
     const root = document.documentElement;
     const apply = (width: number): void => {
-      if (width > 0) root.style.setProperty(BROWSER_PANEL_DOCK_INSET_PROPERTY, `${Math.ceil(width) + 16}px`);
+      if (width > 0)
+        root.style.setProperty(BROWSER_PANEL_DOCK_INSET_PROPERTY, `${Math.ceil(width) + 16}px`);
       else root.style.removeProperty(BROWSER_PANEL_DOCK_INSET_PROPERTY);
     };
     const ro = new ResizeObserver((entries) => {

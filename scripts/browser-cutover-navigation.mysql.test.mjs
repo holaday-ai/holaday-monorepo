@@ -1,13 +1,13 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import test from 'node:test';
 import {
-  readCutoverWorkScope,
-  validateLegacyWorkBoundary,
   cutoverLegacyInterruptionRisk,
   cutoverWorkScopeReady,
+  readCutoverWorkScope,
+  validateLegacyWorkBoundary,
 } from './browser-cutover-evidence.mjs';
 const h = (x) => createHash('sha256').update(x).digest('hex');
 const policy = {
@@ -28,7 +28,7 @@ test(
     assert.equal(h(bytes), policy.sourceResultSha256);
     const rows = JSON.parse(bytes).evidence.executing;
     assert.equal(rows.length, 10);
-    const require = createRequire(process.env.CUTOVER_DONE_QA_REQUIRE_ROOT + '/package.json');
+    const require = createRequire(`${process.env.CUTOVER_DONE_QA_REQUIRE_ROOT}/package.json`);
     const db = await require('mysql2/promise').createConnection({
       uri: url.toString(),
       dateStrings: true,
@@ -115,7 +115,7 @@ test(
       ];
       for (const r of rows)
         await db.query(
-          'INSERT INTO task_steps VALUES (' + keys.map(() => '?').join(',') + ')',
+          `INSERT INTO task_steps VALUES (${keys.map(() => '?').join(',')})`,
           keys.map((k) => r[k]),
         );
       const read = () =>
@@ -183,7 +183,7 @@ test(
       await db.query('DELETE FROM task_steps WHERE id=?', [first.id]);
       await assert.rejects(read);
       await db.query(
-        'INSERT INTO task_steps VALUES (' + keys.map(() => '?').join(',') + ')',
+        `INSERT INTO task_steps VALUES (${keys.map(() => '?').join(',')})`,
         keys.map((k) => first[k]),
       );
       await db.query(

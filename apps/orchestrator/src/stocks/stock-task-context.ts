@@ -231,12 +231,20 @@ export async function validateStockTaskContext(args: {
 }): Promise<ValidatedStockTaskContext> {
   assertContextInput(args.input);
   const served = await findServedStockSnapshot(args);
-  const rows = served.state === 'valid' ? [{ snapshotJson: served.snapshot }] : await args.db
-    .select({ snapshotJson: stockDashboardSnapshots.snapshotJson })
-    .from(stockDashboardSnapshots)
-    .where(and(eq(stockDashboardSnapshots.userId, args.userId), sql`JSON_EXTRACT(${stockDashboardSnapshots.snapshotJson}, '$.kind') IS NULL`))
-    .orderBy(desc(stockDashboardSnapshots.updatedAt))
-    .limit(20);
+  const rows =
+    served.state === 'valid'
+      ? [{ snapshotJson: served.snapshot }]
+      : await args.db
+          .select({ snapshotJson: stockDashboardSnapshots.snapshotJson })
+          .from(stockDashboardSnapshots)
+          .where(
+            and(
+              eq(stockDashboardSnapshots.userId, args.userId),
+              sql`JSON_EXTRACT(${stockDashboardSnapshots.snapshotJson}, '$.kind') IS NULL`,
+            ),
+          )
+          .orderBy(desc(stockDashboardSnapshots.updatedAt))
+          .limit(20);
   const row = rows.find((candidate) => {
     const snapshot = dashboardSnapshotRecord(candidate.snapshotJson);
     return snapshot?.trust?.snapshotId === args.input.snapshotId;
@@ -252,7 +260,10 @@ export async function validateStockTaskContext(args: {
     );
     throw new TRPCError({
       code: 'BAD_REQUEST',
-      message: served.state === 'expired' ? '股票快照已过期，请刷新页面后重试。' : '找不到属于你的股票快照，请刷新页面后重试。',
+      message:
+        served.state === 'expired'
+          ? '股票快照已过期，请刷新页面后重试。'
+          : '找不到属于你的股票快照，请刷新页面后重试。',
     });
   }
   try {

@@ -117,8 +117,13 @@
  * one place.
  */
 @keyframes hola-skel {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 0.8; }
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.8;
+  }
 }
 .hola-skel {
   animation: hola-skel 1.4s ease-in-out infinite;
@@ -132,9 +137,19 @@
  * to produce the wave. Keep identical in both themes.
  */
 @keyframes hola-typing {
-  0% { opacity: 0.25; transform: translateY(0); }
-  30% { opacity: 1; transform: translateY(-2px); }
-  60%, 100% { opacity: 0.25; transform: translateY(0); }
+  0% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
 }
 .hola-typing-dot {
   display: inline-block;
@@ -145,8 +160,12 @@
   border-radius: 9999px;
   animation: hola-typing 1.2s infinite;
 }
-.hola-typing-dot:nth-child(2) { animation-delay: 0.15s; }
-.hola-typing-dot:nth-child(3) { animation-delay: 0.3s; }
+.hola-typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.hola-typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
 
 /*
  * noVNC RFB inserts its own screen / canvas DOM inside the container
@@ -174,7 +193,7 @@
 /* noVNC ships its canvas wrapped in a div that sometimes gets fixed
  * px sizes from scaleViewport. Relax them so they conform to our
  * flex layout instead of overflowing. */
-.vnc-viewport-host:not([data-fit-mode='readable']) > div {
+.vnc-viewport-host:not([data-fit-mode="readable"]) > div {
   max-width: 100%;
   max-height: 100%;
 }
@@ -190,10 +209,16 @@
  * back out so the user's eye finds the Panel after the scroll.
  */
 @keyframes vnc-flash {
-  0%   { box-shadow: 0 0 0 0px rgba(59, 130, 246, 0.0); }
-  25%  { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.4); }
-  100% { box-shadow: 0 0 0 0px rgba(59, 130, 246, 0.0); }
+  0% {
+    box-shadow: 0 0 0 0px rgba(59, 130, 246, 0.0);
+  }
+  25% {
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.4);
+  }
+  100% {
+    box-shadow: 0 0 0 0px rgba(59, 130, 246, 0.0);
+  }
 }
-.vnc-viewport-host[data-flash='1'] {
+.vnc-viewport-host[data-flash="1"] {
   animation: vnc-flash 1.5s ease-out 1;
 }

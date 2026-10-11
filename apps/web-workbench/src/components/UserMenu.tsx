@@ -1,4 +1,7 @@
+import { CharacterAvatar } from '@/components/CharacterAvatar';
 import { useExclusiveOverlay } from '@/lib/top-level-overlay';
+import { cn } from '@/lib/utils';
+import { type ThemeMode, useTheme } from '@/stores/theme-store';
 import {
   ChevronDown,
   ChevronRight,
@@ -16,9 +19,6 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CharacterAvatar } from '@/components/CharacterAvatar';
-import { cn } from '@/lib/utils';
-import { type ThemeMode, useTheme } from '@/stores/theme-store';
 
 interface Props {
   displayName: string;
@@ -110,13 +110,15 @@ export function UserMenu({
             'border-[#FF0061]/25 bg-[#FF0061]/5 shadow-[0_10px_26px_rgba(255,0,97,0.08)] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10',
         )}
       >
-        <CharacterAvatar name={displayName || email || '用户'} seed={email || displayName} src={avatarUrl} className={topbar ? 'h-[30px] w-[30px]' : 'h-7 w-7'} />
+        <CharacterAvatar
+          name={displayName || email || '用户'}
+          seed={email || displayName}
+          src={avatarUrl}
+          className={topbar ? 'h-[30px] w-[30px]' : 'h-7 w-7'}
+        />
         {topbar ? (
           <ChevronDown
-            className={cn(
-              'h-4 w-4 text-[#FF0061] transition-transform',
-              open && 'rotate-180',
-            )}
+            className={cn('h-4 w-4 text-[#FF0061] transition-transform', open && 'rotate-180')}
           />
         ) : !compact ? (
           <div className="min-w-0 flex-1">
@@ -142,7 +144,12 @@ export function UserMenu({
         >
           {topbar ? (
             <div className="mb-3 flex items-center gap-3 px-1 pb-2">
-              <CharacterAvatar name={displayName || email || '用户'} seed={email || displayName} src={avatarUrl} className="h-11 w-11" />
+              <CharacterAvatar
+                name={displayName || email || '用户'}
+                seed={email || displayName}
+                src={avatarUrl}
+                className="h-11 w-11"
+              />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold text-[#111827]">
                   {displayName || email || '未命名'}
@@ -158,8 +165,17 @@ export function UserMenu({
               {email}
             </div>
           ) : null}
-          <div className={cn('border-b border-[#DCDDDD]/80 py-1 dark:border-white/10', topbar && 'space-y-1 pb-2')}>
-            <MenuItem topbar={topbar} icon={<UserIcon className="h-3.5 w-3.5" />} onClick={() => go('/profile')}>
+          <div
+            className={cn(
+              'border-b border-[#DCDDDD]/80 py-1 dark:border-white/10',
+              topbar && 'space-y-1 pb-2',
+            )}
+          >
+            <MenuItem
+              topbar={topbar}
+              icon={<UserIcon className="h-3.5 w-3.5" />}
+              onClick={() => go('/profile')}
+            >
               个人资料
             </MenuItem>
             <MenuItem
@@ -184,11 +200,22 @@ export function UserMenu({
               任务历史
             </MenuItem>
           </div>
-          <div className={cn('px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground', topbar && 'pt-3 text-[12px] normal-case tracking-normal')}>
+          <div
+            className={cn(
+              'px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground',
+              topbar && 'pt-3 text-[12px] normal-case tracking-normal',
+            )}
+          >
             外观
           </div>
           <ThemeSwitcher mode={mode} onChange={setMode} topbar={topbar} />
-          <div className={cn('mt-1 border-t border-[#DCDDDD]/80 pt-1 dark:border-white/10', topbar && 'mt-3 rounded-[14px] border bg-white p-1.5 shadow-[0_1px_3px_rgba(15,23,42,0.03)] dark:bg-transparent')}>
+          <div
+            className={cn(
+              'mt-1 border-t border-[#DCDDDD]/80 pt-1 dark:border-white/10',
+              topbar &&
+                'mt-3 rounded-[14px] border bg-white p-1.5 shadow-[0_1px_3px_rgba(15,23,42,0.03)] dark:bg-transparent',
+            )}
+          >
             {onClearUnsuccessfulTasks && unsuccessfulTaskCount > 0 && (
               <MenuItem
                 topbar={topbar}
@@ -241,14 +268,34 @@ function ThemeSwitcher({
   topbar?: boolean;
 }): JSX.Element {
   return (
-    <div className={cn('grid grid-cols-3 gap-1 bg-[#EFEFEF]/60 p-0.5 dark:bg-white/10', topbar ? 'rounded-full' : 'rounded-[8px]')}>
-      <ThemeOption topbar={topbar} active={mode === 'light'} onClick={() => onChange('light')} label="浅色">
+    <div
+      className={cn(
+        'grid grid-cols-3 gap-1 bg-[#EFEFEF]/60 p-0.5 dark:bg-white/10',
+        topbar ? 'rounded-full' : 'rounded-[8px]',
+      )}
+    >
+      <ThemeOption
+        topbar={topbar}
+        active={mode === 'light'}
+        onClick={() => onChange('light')}
+        label="浅色"
+      >
         <Sun className="h-3.5 w-3.5" />
       </ThemeOption>
-      <ThemeOption topbar={topbar} active={mode === 'dark'} onClick={() => onChange('dark')} label="深色">
+      <ThemeOption
+        topbar={topbar}
+        active={mode === 'dark'}
+        onClick={() => onChange('dark')}
+        label="深色"
+      >
         <Moon className="h-3.5 w-3.5" />
       </ThemeOption>
-      <ThemeOption topbar={topbar} active={mode === 'system'} onClick={() => onChange('system')} label="跟随系统">
+      <ThemeOption
+        topbar={topbar}
+        active={mode === 'system'}
+        onClick={() => onChange('system')}
+        label="跟随系统"
+      >
         <Monitor className="h-3.5 w-3.5" />
       </ThemeOption>
     </div>
@@ -308,7 +355,9 @@ function MenuItem({
       onClick={onClick}
       className={cn(
         'flex w-full items-center gap-2 text-left transition-colors',
-        topbar ? 'h-9 rounded-[10px] px-2.5 text-[12px] font-medium' : 'rounded-[6px] px-2.5 py-1.5 text-sm',
+        topbar
+          ? 'h-9 rounded-[10px] px-2.5 text-[12px] font-medium'
+          : 'rounded-[6px] px-2.5 py-1.5 text-sm',
         destructive
           ? 'text-[#FF0061] hover:bg-[#FF0061]/10'
           : 'text-[#595757] hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground',
@@ -317,7 +366,8 @@ function MenuItem({
       <span
         className={cn(
           'opacity-80',
-          topbar && 'flex h-6 w-6 items-center justify-center rounded-[8px] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]',
+          topbar &&
+            'flex h-6 w-6 items-center justify-center rounded-[8px] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]',
         )}
       >
         {icon}

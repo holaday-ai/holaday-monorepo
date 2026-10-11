@@ -28,7 +28,11 @@ import { type TaskFile, taskFiles } from '../db/schema/task-files.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
 import type { StorageProvider, StorageReadOptions } from './storage-provider.js';
-import { R2StorageProvider, deleteStorageObjectForClosure, getSharedStorageProvider } from './storage-provider.js';
+import {
+  R2StorageProvider,
+  deleteStorageObjectForClosure,
+  getSharedStorageProvider,
+} from './storage-provider.js';
 
 export type FileKind = 'input' | 'output';
 
@@ -1115,7 +1119,10 @@ export class FileService {
   ): Promise<string | null> {
     const row = await this.readableRowForUser(fileExternalId, userIdInternal);
     if (!row) return null;
-    return this.storage.getSignedUrl(row.storagePath, { ...(await this.legacyReadOwnerArgs(row))[0], expiresInSeconds });
+    return this.storage.getSignedUrl(row.storagePath, {
+      ...(await this.legacyReadOwnerArgs(row))[0],
+      expiresInSeconds,
+    });
   }
 
   /**
@@ -1215,7 +1222,10 @@ export class FileService {
     if (row.userId !== userIdInternal) return null;
     if (row.status !== 'active') return null;
     if (row.expiresAt && row.expiresAt < new Date()) return null;
-    const buffer = await this.storage.get(row.storagePath, ...(await this.legacyReadOwnerArgs(row)));
+    const buffer = await this.storage.get(
+      row.storagePath,
+      ...(await this.legacyReadOwnerArgs(row)),
+    );
     if (!buffer) return null;
     return { row, buffer };
   }
@@ -1242,7 +1252,10 @@ export class FileService {
       if (row.userId !== userIdInternal) continue;
       if (row.status !== 'active') continue;
       if (row.expiresAt && row.expiresAt < new Date()) continue;
-      const buffer = await this.storage.get(row.storagePath, ...(await this.legacyReadOwnerArgs(row)));
+      const buffer = await this.storage.get(
+        row.storagePath,
+        ...(await this.legacyReadOwnerArgs(row)),
+      );
       if (buffer) {
         out.push({ row, buffer });
       } else {

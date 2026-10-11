@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { ImageStudioDraft } from './image-studio-state';
 import {
   IMAGE_ASPECT_OPTIONS,
   IMAGE_MODEL_OPTIONS,
@@ -10,6 +9,7 @@ import {
   buildImageIntentForSubmit,
   usableImageModel,
 } from './image-studio-options';
+import type { ImageStudioDraft } from './image-studio-state';
 
 function draft(overrides: Partial<ImageStudioDraft> = {}): ImageStudioDraft {
   return {
@@ -84,9 +84,7 @@ describe('image studio options', () => {
       subjectFileId: 'file_subject',
       goal: 'lock_subject',
     });
-    expect(buildImageIntentForSubmit(lockDraft)).toContain(
-      '请以用户上传的第一张图片作为锁定主角',
-    );
+    expect(buildImageIntentForSubmit(lockDraft)).toContain('请以用户上传的第一张图片作为锁定主角');
     expect(buildImageIntentForSubmit(lockDraft)).not.toContain('background');
   });
 

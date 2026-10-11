@@ -1,7 +1,7 @@
+import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
 // @vitest-environment happy-dom
 import * as React from 'react';
 import { createPortal } from 'react-dom';
-import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bootstrapTheme, useCreativePageTheme, useTheme } from './theme-store';
 
@@ -9,8 +9,12 @@ beforeEach(() => {
   const values = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => { values.set(key, value); },
-    removeItem: (key: string) => { values.delete(key); },
+    setItem: (key: string, value: string) => {
+      values.set(key, value);
+    },
+    removeItem: (key: string) => {
+      values.delete(key);
+    },
   });
   localStorage.setItem('holaday.theme', 'light');
   bootstrapTheme();
@@ -41,10 +45,13 @@ describe('creative route theme', () => {
   });
 
   it('keeps portals dark during preference changes and restores the latest preference on exit', () => {
-    const theme = renderHook(({ path }) => {
-      useCreativePageTheme(path);
-      return useTheme();
-    }, { initialProps: { path: '/image' } });
+    const theme = renderHook(
+      ({ path }) => {
+        useCreativePageTheme(path);
+        return useTheme();
+      },
+      { initialProps: { path: '/image' } },
+    );
     act(() => theme.result.current.setMode('dark'));
     act(() => theme.result.current.setMode('light'));
     expect(document.documentElement.classList.contains('dark')).toBe(true);

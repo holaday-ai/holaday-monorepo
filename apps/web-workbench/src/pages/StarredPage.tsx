@@ -1,11 +1,8 @@
-import { AlertCircle, CheckCircle2, CircleSlash, Loader2, Pin, PinOff, XCircle } from 'lucide-react';
-import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useTaskStore } from '@/stores/task-store';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { supportMailtoHref } from '@/lib/support-links';
 import {
+  type NormalizedTaskHubRow,
   formatTaskHubTime,
   mergeTaskHubRowsById,
   normalizeTaskHubCursor,
@@ -18,12 +15,23 @@ import {
   taskHubRowTitle,
   taskHubRowTone,
   taskHubStatusIconKind,
-  type NormalizedTaskHubRow,
 } from '@/lib/task-hub-state';
 import { taskStatusLabel } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
+import { useTaskStore } from '@/stores/task-store';
+import {
+  AlertCircle,
+  CheckCircle2,
+  CircleSlash,
+  Loader2,
+  Pin,
+  PinOff,
+  XCircle,
+} from 'lucide-react';
+import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 /**
  * 置顶任务 — pinned-task hub. Pin state is server-persisted (the
@@ -174,7 +182,12 @@ export function StarredPage(): JSX.Element {
             {pageErrorCopy.body}
           </div>
           <div className="mt-1 flex flex-wrap justify-center gap-2">
-            <Button type="button" size="sm" onClick={() => void fetchPage(null, false)} disabled={loading}>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void fetchPage(null, false)}
+              disabled={loading}
+            >
               {loading ? '重试中…' : '重试'}
             </Button>
             <Button
@@ -197,9 +210,7 @@ export function StarredPage(): JSX.Element {
       ) : items.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <Pin className="h-8 w-8 text-muted-foreground/40" />
-          <div className="text-sm font-medium text-foreground/80">
-            还没有置顶任务
-          </div>
+          <div className="text-sm font-medium text-foreground/80">还没有置顶任务</div>
           <div className="text-xs text-muted-foreground">
             在任务列表里右键任意任务，选择「置顶」即可。
           </div>
@@ -295,7 +306,9 @@ export function StarredPage(): JSX.Element {
   );
 }
 
-function PinnedStatusIcon({ task }: { task: Pick<PinnedRow, 'awaitingKind' | 'status'> }): JSX.Element {
+function PinnedStatusIcon({
+  task,
+}: { task: Pick<PinnedRow, 'awaitingKind' | 'status'> }): JSX.Element {
   // Surface the exceptional terminal states (awaiting / failed /
   // partial / cancelled) with the same icon vocabulary as the history
   // page so a pinned task's state is spottable at a glance — previously

@@ -41,10 +41,7 @@ describe('runIntake — missing required inputs', () => {
 
 describe('runIntake — contradictions surface as a different kind', () => {
   it('BOSS-spec scenario — GMV 200000 / 500 orders / ¥50 price → contradiction', () => {
-    const r = runIntake(
-      W,
-      '复盘直播 GMV 200000 UV 5000 订单 500 客单价 50 转化率 10%',
-    );
+    const r = runIntake(W, '复盘直播 GMV 200000 UV 5000 订单 500 客单价 50 转化率 10%');
     expect(r.kind).toBe('contradiction');
     if (r.kind !== 'contradiction') return;
     // The validator that fired:
@@ -57,26 +54,19 @@ describe('runIntake — contradictions surface as a different kind', () => {
   });
 
   it('conversion rate > 100 → contradiction', () => {
-    const r = runIntake(
-      W,
-      '复盘 GMV 1000 UV 100 订单 50 客单价 20 转化率 150%',
-    );
+    const r = runIntake(W, '复盘 GMV 1000 UV 100 订单 50 客单价 20 转化率 150%');
     expect(r.kind).toBe('contradiction');
     if (r.kind !== 'contradiction') return;
-    expect(
-      r.validatorResults.find((v) => v.validatorId === 'conversion_sanity')
-        ?.passed,
-    ).toBe(false);
+    expect(r.validatorResults.find((v) => v.validatorId === 'conversion_sanity')?.passed).toBe(
+      false,
+    );
     expect(r.question).toContain('150');
   });
 });
 
 describe('runIntake — ready', () => {
   it('clean data passes → ready with extracted + validator results', () => {
-    const r = runIntake(
-      W,
-      '复盘抖音直播 GMV 100000 UV 20000 订单 1250 客单价 80 转化率 6.25%',
-    );
+    const r = runIntake(W, '复盘抖音直播 GMV 100000 UV 20000 订单 1250 客单价 80 转化率 6.25%');
     expect(r.kind).toBe('ready');
     if (r.kind !== 'ready') return;
     expect(r.parseResult.extracted.gmv).toBe(100000);

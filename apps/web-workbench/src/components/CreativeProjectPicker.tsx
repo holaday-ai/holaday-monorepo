@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
-import { Folder, Check } from 'lucide-react';
-import { CreativePopover } from './CreativePopover';
-import { trpc } from '@/lib/trpc';
 import { normalizeProjectRows } from '@/lib/project-page-state';
+import { trpc } from '@/lib/trpc';
 import type { UiProject } from '@/types/task';
+import { Check, Folder } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { CreativePopover } from './CreativePopover';
 
 /** Selection uses existing personal projects; association failure never recreates a task. */
 export function useCreativeProject() {
@@ -56,12 +56,12 @@ function CreativeProjectPicker({
   onSelect,
   disabled,
 }: { selected: UiProject | null; onSelect(project: UiProject | null): void; disabled: boolean }) {
-  const [open, setOpen] = useState(false),
-    [rows, setRows] = useState<UiProject[]>([]),
-    [loading, setLoading] = useState(false),
-    [error, setError] = useState(false);
-  const anchor = useRef<HTMLButtonElement>(null),
-    version = useRef(0);
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<UiProject[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  const version = useRef(0);
   useEffect(
     () => () => {
       version.current++;

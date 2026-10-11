@@ -1,9 +1,6 @@
-import * as React from 'react';
-import {
-  normalizeQuotaSnapshot,
-  type QuotaSnapshot,
-} from '@/lib/quota-indicator-state';
+import { type QuotaSnapshot, normalizeQuotaSnapshot } from '@/lib/quota-indicator-state';
 import { trpc } from '@/lib/trpc';
+import * as React from 'react';
 
 interface State {
   snap: QuotaSnapshot | null;

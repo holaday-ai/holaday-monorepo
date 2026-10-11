@@ -150,7 +150,11 @@ export function detectLoginUrl(url: string | null | undefined): LoginSignal {
     return { matched: false, source: 'none' };
   }
   for (const needle of LOGIN_URL_HOST_NEEDLES) {
-    if (host.startsWith(needle) || host.includes(`.${needle}`) || host.startsWith(needle.slice(0, -1) + '.')) {
+    if (
+      host.startsWith(needle) ||
+      host.includes(`.${needle}`) ||
+      host.startsWith(`${needle.slice(0, -1)}.`)
+    ) {
       return { matched: true, source: 'url-host', match: needle };
     }
   }
@@ -271,7 +275,7 @@ const CAPTCHA_TITLE_NEEDLES = [
   'CAPTCHA',
   'captcha',
   "i'm not a robot",
-  "i am not a robot",
+  'i am not a robot',
   'verify you are human',
   'cloudflare',
   'security check',
@@ -381,9 +385,7 @@ export interface PermissionCheckInputs extends LoginCheckInputs {
  * (always fires); URL / title / body match for sites that return
  * 200 with a "subscribe to read" page.
  */
-export function detectPermissionWall(
-  inputs: PermissionCheckInputs,
-): LoginSignal {
+export function detectPermissionWall(inputs: PermissionCheckInputs): LoginSignal {
   if (inputs.httpStatus === 403) {
     return { matched: true, source: 'url-host', match: 'http-403' };
   }
@@ -440,9 +442,7 @@ export function buildCaptchaParkQuestion(url: string | null | undefined): string
  * paid subscription. Different action: they need to switch context
  * or upgrade, not "log in".
  */
-export function buildPermissionParkQuestion(
-  url: string | null | undefined,
-): string {
+export function buildPermissionParkQuestion(url: string | null | undefined): string {
   const host = friendlyHost(url);
   if (host) {
     return `当前页面（${host}）需要账号权限或会员权限才能访问。请用有权限的账号在浏览器中打开后，回复「继续」我接着干。`;

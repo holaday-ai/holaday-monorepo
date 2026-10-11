@@ -1,9 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import {
-  evaluateTemplateFill,
-  answerClaimsTemplateFill,
-} from './template-fill-consistency.js';
+import { describe, expect, it } from 'vitest';
 import type { OutputFileDescriptor } from './file-artifact-consistency.js';
+import { answerClaimsTemplateFill, evaluateTemplateFill } from './template-fill-consistency.js';
 
 const docxOut: OutputFileDescriptor = {
   filename: '发票模板-已填充.docx',
@@ -14,8 +11,10 @@ const screenshotOut: OutputFileDescriptor = {
   mimetype: 'image/png',
 };
 
-const SUCCESS = '已根据你的数据填充模板「发票.docx」，并保留了模板原有格式。\n\n下载链接见下方，24 小时内有效。';
-const PREVIEW = '你的账号暂不支持生成 .docx 文件，以下是模板「发票.docx」的字段填充预览：\n\n升级到 Pro 套餐即可下载。';
+const SUCCESS =
+  '已根据你的数据填充模板「发票.docx」，并保留了模板原有格式。\n\n下载链接见下方，24 小时内有效。';
+const PREVIEW =
+  '你的账号暂不支持生成 .docx 文件，以下是模板「发票.docx」的字段填充预览：\n\n升级到 Pro 套餐即可下载。';
 
 describe('answerClaimsTemplateFill', () => {
   it('recognises the runner success skeleton', () => {

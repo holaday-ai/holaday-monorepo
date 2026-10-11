@@ -1,27 +1,54 @@
+import { OverlayNestingContext, useExclusiveOverlay } from '@/lib/top-level-overlay';
+import { cn } from '@/lib/utils';
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
 import { Check, ChevronRight, Circle } from 'lucide-react';
 import * as React from 'react';
-import { OverlayNestingContext, useExclusiveOverlay } from '@/lib/top-level-overlay';
-import { cn } from '@/lib/utils';
 
-function DropdownMenu({ open: controlled, defaultOpen = false, onOpenChange, children, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>): JSX.Element {
+function DropdownMenu({
+  open: controlled,
+  defaultOpen = false,
+  onOpenChange,
+  children,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Root>): JSX.Element {
   const [internal, setInternal] = React.useState(defaultOpen);
   const open = controlled ?? internal;
-  const change = useExclusiveOverlay(open, next => {
+  const change = useExclusiveOverlay(open, (next) => {
     if (controlled === undefined) setInternal(next);
     onOpenChange?.(next);
   });
-  return <OverlayNestingContext.Provider value={true}><DropdownMenuPrimitive.Root {...props} open={open} onOpenChange={change}>{children}</DropdownMenuPrimitive.Root></OverlayNestingContext.Provider>;
+  return (
+    <OverlayNestingContext.Provider value={true}>
+      <DropdownMenuPrimitive.Root {...props} open={open} onOpenChange={change}>
+        {children}
+      </DropdownMenuPrimitive.Root>
+    </OverlayNestingContext.Provider>
+  );
 }
 const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 const DropdownMenuGroup = DropdownMenuPrimitive.Group;
 const DropdownMenuPortal = DropdownMenuPrimitive.Portal;
 const SubToggleContext = React.createContext<(() => void) | null>(null);
-function DropdownMenuSub({ open: controlled, defaultOpen = false, onOpenChange, children, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Sub>): JSX.Element {
+function DropdownMenuSub({
+  open: controlled,
+  defaultOpen = false,
+  onOpenChange,
+  children,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Sub>): JSX.Element {
   const [internal, setInternal] = React.useState(defaultOpen);
   const open = controlled ?? internal;
-  const change = (next: boolean) => { if (controlled === undefined) setInternal(next); onOpenChange?.(next); };
-  return <SubToggleContext.Provider value={() => change(!open)}><DropdownMenuPrimitive.Sub {...props} open={open} onOpenChange={change}>{children}</DropdownMenuPrimitive.Sub></SubToggleContext.Provider>;
+  const change = (next: boolean) => {
+    if (controlled === undefined) setInternal(next);
+    onOpenChange?.(next);
+  };
+  return (
+    <SubToggleContext.Provider value={() => change(!open)}>
+      <DropdownMenuPrimitive.Sub {...props} open={open} onOpenChange={change}>
+        {children}
+      </DropdownMenuPrimitive.Sub>
+    </SubToggleContext.Provider>
+  );
 }
 const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 
@@ -32,12 +59,27 @@ const DropdownMenuSubTrigger = React.forwardRef<
   }
 >(({ className, inset, children, onClick, ...props }, ref) => {
   const toggle = React.useContext(SubToggleContext);
-  return <DropdownMenuPrimitive.SubTrigger
-    ref={ref}
-    className={cn('flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0', inset && 'pl-8', className)}
-    {...props}
-    onClick={event => { onClick?.(event); if (!event.defaultPrevented && toggle && !props.disabled) { event.preventDefault(); toggle(); } }}
-  >{children}<ChevronRight className="ml-auto" /></DropdownMenuPrimitive.SubTrigger>;
+  return (
+    <DropdownMenuPrimitive.SubTrigger
+      ref={ref}
+      className={cn(
+        'flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+        inset && 'pl-8',
+        className,
+      )}
+      {...props}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!event.defaultPrevented && toggle && !props.disabled) {
+          event.preventDefault();
+          toggle();
+        }
+      }}
+    >
+      {children}
+      <ChevronRight className="ml-auto" />
+    </DropdownMenuPrimitive.SubTrigger>
+  );
 });
 DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
 
@@ -45,17 +87,22 @@ const DropdownMenuSubContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
 >(({ className, ...props }, ref) => (
-  <DropdownMenuPrimitive.Portal><DropdownMenuPrimitive.SubContent
-    avoidCollisions
-    collisionPadding={8}
-    ref={ref}
-    className={cn(
-      'z-[var(--z-dropdown)] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto min-w-[8rem] overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2',
-      className,
-    )}
-    {...props}
-    style={{ ...props.style, maxWidth: 'min(calc(100vw - 16px), var(--radix-dropdown-menu-content-available-width))' }}
-  /></DropdownMenuPrimitive.Portal>
+  <DropdownMenuPrimitive.Portal>
+    <DropdownMenuPrimitive.SubContent
+      avoidCollisions
+      collisionPadding={8}
+      ref={ref}
+      className={cn(
+        'z-[var(--z-dropdown)] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto min-w-[8rem] overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2',
+        className,
+      )}
+      {...props}
+      style={{
+        ...props.style,
+        maxWidth: 'min(calc(100vw - 16px), var(--radix-dropdown-menu-content-available-width))',
+      }}
+    />
+  </DropdownMenuPrimitive.Portal>
 ));
 DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName;
 
@@ -86,7 +133,7 @@ const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
+      'relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0',
       inset && 'pl-8',
       className,
     )}
@@ -148,11 +195,7 @@ const DropdownMenuLabel = React.forwardRef<
 >(({ className, inset, ...props }, ref) => (
   <DropdownMenuPrimitive.Label
     ref={ref}
-    className={cn(
-      'px-2 py-1.5 text-sm font-semibold',
-      inset && 'pl-8',
-      className,
-    )}
+    className={cn('px-2 py-1.5 text-sm font-semibold', inset && 'pl-8', className)}
     {...props}
   />
 ));
@@ -174,10 +217,7 @@ const DropdownMenuShortcut = ({
   className,
   ...props
 }: React.HTMLAttributes<HTMLSpanElement>): JSX.Element => (
-  <span
-    className={cn('ml-auto text-xs tracking-widest opacity-60', className)}
-    {...props}
-  />
+  <span className={cn('ml-auto text-xs tracking-widest opacity-60', className)} {...props} />
 );
 DropdownMenuShortcut.displayName = 'DropdownMenuShortcut';
 

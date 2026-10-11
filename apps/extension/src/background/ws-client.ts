@@ -368,12 +368,11 @@ async function fetchPreconnectProbe(
 ): Promise<Response | null> {
   for (let attempt = 1; attempt <= WS_PRECONNECT_PROBE_ATTEMPTS; attempt += 1) {
     try {
-      const response = await withDeadline(
-        fetch(url, init),
-        timeoutMs,
-        timeoutMessage,
-      );
-      if (!isRetryablePreconnectProbeStatus(response.status) || attempt === WS_PRECONNECT_PROBE_ATTEMPTS) {
+      const response = await withDeadline(fetch(url, init), timeoutMs, timeoutMessage);
+      if (
+        !isRetryablePreconnectProbeStatus(response.status) ||
+        attempt === WS_PRECONNECT_PROBE_ATTEMPTS
+      ) {
         return response;
       }
     } catch {
@@ -515,7 +514,15 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
     void persistReconnectAttempts(0);
     void persistCappedAt(null);
     // Header path may have been stripped by some proxies; fallback hello.
-    send({ type: 'client.hello', token, extensionVersion: chrome.runtime.getManifest().version,userBrowserProtocol:{...USER_BROWSER_PROTOCOL,capabilities:[...USER_BROWSER_PROTOCOL.capabilities]} });
+    send({
+      type: 'client.hello',
+      token,
+      extensionVersion: chrome.runtime.getManifest().version,
+      userBrowserProtocol: {
+        ...USER_BROWSER_PROTOCOL,
+        capabilities: [...USER_BROWSER_PROTOCOL.capabilities],
+      },
+    });
 
     state.pingTimer = setInterval(() => {
       send({ type: 'client.pong', at: Date.now() });
@@ -532,10 +539,7 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
     // 4401-equivalent: orchestrator may emit server.error code=UNAUTHORIZED
     // before closing the socket. Surface it as an "unauthorized" event so
     // the SW clears the stale token instead of looping with bad creds.
-    if (
-      result.data.type === 'server.error' &&
-      result.data.code === 'UNAUTHORIZED'
-    ) {
+    if (result.data.type === 'server.error' && result.data.code === 'UNAUTHORIZED') {
       fireUnauthorized();
     }
     for (const fn of state.listeners) {

@@ -25,7 +25,9 @@ function makeDispatchDb(rows: Array<Record<string, unknown>>) {
     select: vi.fn((selection?: Record<string, unknown>) => ({
       from: vi.fn(() => ({
         where: vi.fn(() =>
-          fakeSelectRows(selection && Object.hasOwn(selection, 'status') ? [{ status: 'active' }] : rows),
+          fakeSelectRows(
+            selection && Object.hasOwn(selection, 'status') ? [{ status: 'active' }] : rows,
+          ),
         ),
       })),
     })),
@@ -136,7 +138,14 @@ describe('scheduled runner — failure streak on dispatch', () => {
 
   it('an inline completion resets the streak and never stamps a fake task id', async () => {
     const { db, updates } = makeDispatchDb([
-      { id: 23, userId: 42, intent: 'briefing', repeatType: 'daily', rrule: null, consecutiveFailures: 5 },
+      {
+        id: 23,
+        userId: 42,
+        intent: 'briefing',
+        repeatType: 'daily',
+        rrule: null,
+        consecutiveFailures: 5,
+      },
     ]);
     const notify = vi.fn(async () => undefined);
     startScheduledRunner({
@@ -176,7 +185,9 @@ describe('settleScheduledTaskOutcomes', () => {
   };
 
   it('a failed task extends the streak, records the error and notifies task_terminal', async () => {
-    const { db, updates } = makeSettleDb([{ ...base, taskStatus: 'failed', taskError: '页面超时' }]);
+    const { db, updates } = makeSettleDb([
+      { ...base, taskStatus: 'failed', taskError: '页面超时' },
+    ]);
     const notify = vi.fn(async () => undefined);
     const settled = await settleScheduledTaskOutcomes({
       db,
@@ -186,7 +197,12 @@ describe('settleScheduledTaskOutcomes', () => {
     });
     expect(settled).toBe(1);
     expect(updates).toEqual([
-      { pendingTaskId: null, consecutiveFailures: 2, lastRunStatus: 'failed', lastError: '页面超时' },
+      {
+        pendingTaskId: null,
+        consecutiveFailures: 2,
+        lastRunStatus: 'failed',
+        lastError: '页面超时',
+      },
     ]);
     expect(notify).toHaveBeenCalledWith({
       userInternalId: 42,

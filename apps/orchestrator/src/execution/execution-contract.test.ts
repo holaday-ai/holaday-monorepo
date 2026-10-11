@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildContract, buildPromptSchemaSuffix, classifyIntentForOutputRequirement } from './execution-contract.js';
+import {
+  buildContract,
+  buildPromptSchemaSuffix,
+  classifyIntentForOutputRequirement,
+} from './execution-contract.js';
 
 describe('buildPromptSchemaSuffix — readable research answers', () => {
   it.each([
@@ -23,9 +27,15 @@ describe('buildPromptSchemaSuffix — readable research answers', () => {
   });
 
   it('still requires a source URL for ordinary research without requiring JSON rows', () => {
-    const contract = buildContract({ taskId: 'synthetic_readable_sources', intent: '总结这份公开资料并附来源链接', executionMode: 'scrape' });
-    expect(contract.successCriteria.some(c => c.type === 'url_count' && c.data?.min === 1)).toBe(true);
-    expect(contract.successCriteria.some(c => c.type === 'result_count')).toBe(false);
+    const contract = buildContract({
+      taskId: 'synthetic_readable_sources',
+      intent: '总结这份公开资料并附来源链接',
+      executionMode: 'scrape',
+    });
+    expect(contract.successCriteria.some((c) => c.type === 'url_count' && c.data?.min === 1)).toBe(
+      true,
+    );
+    expect(contract.successCriteria.some((c) => c.type === 'result_count')).toBe(false);
   });
 });
 
@@ -53,9 +63,9 @@ describe('buildContract — tier selection', () => {
 
     expect(c.tier).toBe('full');
     expect(c.expertMode).toBe('expert');
-    expect(c.successCriteria.some((criterion) => criterion.rule === 'expert_claim_provenance')).toBe(
-      true,
-    );
+    expect(
+      c.successCriteria.some((criterion) => criterion.rule === 'expert_claim_provenance'),
+    ).toBe(true);
   });
 
   it('browser without expert workflow → light tier', () => {
@@ -202,7 +212,10 @@ describe('buildContract — dynamic word_count threshold (Phase 1 follow-up)', (
   it('long generate prompt (>= 100 chars) → min=50', () => {
     const c = buildContract({
       taskId: 'tsk_long',
-      intent: '请帮我写一份详细的产品经理岗位的 OKR 周报，包括本周进展、下周计划、风险与依赖、需要协调的事项与资源。'.repeat(2),
+      intent:
+        '请帮我写一份详细的产品经理岗位的 OKR 周报，包括本周进展、下周计划、风险与依赖、需要协调的事项与资源。'.repeat(
+          2,
+        ),
       executionMode: 'generate',
     });
     expect(wordCountMin(c)).toBe(50);
@@ -323,9 +336,7 @@ describe('buildContract — full tier (expert workflow)', () => {
     expect(types).toContain('word_count');
     expect(types).toContain('data_present');
     // Two custom rules: covers_required_inputs + no_ungrounded_urls.
-    const customRules = c.successCriteria
-      .filter((s) => s.type === 'custom')
-      .map((s) => s.rule);
+    const customRules = c.successCriteria.filter((s) => s.type === 'custom').map((s) => s.rule);
     expect(customRules).toContain('covers_required_inputs');
     expect(customRules).toContain('no_ungrounded_urls');
   });
@@ -342,23 +353,25 @@ describe('buildContract — full tier (expert workflow)', () => {
       intent: 'x',
       executionMode: 'generate',
     });
-    const fullMin = (fullContract.successCriteria.find((s) => s.type === 'word_count')!.data as { min: number }).min;
-    const checklistMin = (checklistContract.successCriteria.find((s) => s.type === 'word_count')!.data as { min: number }).min;
+    const fullMin = (
+      fullContract.successCriteria.find((s) => s.type === 'word_count')!.data as { min: number }
+    ).min;
+    const checklistMin = (
+      checklistContract.successCriteria.find((s) => s.type === 'word_count')!.data as {
+        min: number;
+      }
+    ).min;
     expect(fullMin).toBeGreaterThan(checklistMin);
   });
 });
 
 describe('classifyIntentForOutputRequirement — real QA prompts', () => {
   it('requires a clickable source for explicit research and retrieval intents', () => {
-    expect(
-      classifyIntentForOutputRequirement('研究 2026 年 AI 行业趋势'),
-    ).toEqual({
+    expect(classifyIntentForOutputRequirement('研究 2026 年 AI 行业趋势')).toEqual({
       kind: 'general_with_links',
       requirement: { kind: 'general_with_links', minUrls: 1 },
     });
-    expect(
-      classifyIntentForOutputRequirement('检索最新的数据隐私法规'),
-    ).toEqual({
+    expect(classifyIntentForOutputRequirement('检索最新的数据隐私法规')).toEqual({
       kind: 'general_with_links',
       requirement: { kind: 'general_with_links', minUrls: 1 },
     });
@@ -413,9 +426,7 @@ describe('classifyIntentForOutputRequirement — real QA prompts', () => {
   });
 
   it('tightens comparison URL requirements when the user asks for links', () => {
-    const out = classifyIntentForOutputRequirement(
-      '对比 Notion 和 Coda 的优缺点，并给出来源链接',
-    );
+    const out = classifyIntentForOutputRequirement('对比 Notion 和 Coda 的优缺点，并给出来源链接');
     expect(out.kind).toBe('comparison');
     expect(out.requirement).toEqual({
       kind: 'comparison',
@@ -466,7 +477,9 @@ describe('list answers need per-item sources (FIX-BATCH-A)', () => {
 
   it('keeps ecommerce listings on the product-row contract (acceptance A1)', () => {
     expect(
-      classifyIntentForOutputRequirement('去京东搜索降噪耳机，告诉我前三个商品的名称和价格，并附商品链接。'),
+      classifyIntentForOutputRequirement(
+        '去京东搜索降噪耳机，告诉我前三个商品的名称和价格，并附商品链接。',
+      ),
     ).toMatchObject({ kind: 'ecommerce_listing', requirement: { minItems: 3 } });
   });
 
@@ -485,7 +498,9 @@ describe('list answers need per-item sources (FIX-BATCH-A)', () => {
       ]),
     );
     // The one-URL guard no longer stands in for per-item sources.
-    expect(contract.successCriteria.some((criterion) => criterion.type === 'url_count')).toBe(false);
+    expect(contract.successCriteria.some((criterion) => criterion.type === 'url_count')).toBe(
+      false,
+    );
     const suffix = buildPromptSchemaSuffix(contract.goal);
     expect(suffix).toContain('该条自己的详情页链接');
     expect(suffix).toContain('不能用网站首页、搜索结果页或列表页代替');

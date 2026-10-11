@@ -1,25 +1,15 @@
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { cn } from '@/lib/utils';
 import { Slot } from '@radix-ui/react-slot';
 import { type VariantProps, cva } from 'class-variance-authority';
 import { PanelLeft } from 'lucide-react';
 import * as React from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Separator } from '@/components/ui/separator';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-} from '@/components/ui/sheet';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import { useIsMobile } from '@/hooks/use-mobile';
-import { cn } from '@/lib/utils';
 
 const SIDEBAR_COOKIE_NAME = 'sidebar:state';
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
@@ -85,17 +75,12 @@ const SidebarProvider = React.forwardRef<
       [setOpenProp, open],
     );
     const toggleSidebar = React.useCallback(() => {
-      return isMobile
-        ? setOpenMobile((current) => !current)
-        : setOpen((current) => !current);
+      return isMobile ? setOpenMobile((current) => !current) : setOpen((current) => !current);
     }, [isMobile, setOpen, setOpenMobile]);
 
     React.useEffect(() => {
       const handleKeyDown = (event: KeyboardEvent): void => {
-        if (
-          event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
-          (event.metaKey || event.ctrlKey)
-        ) {
+        if (event.key === SIDEBAR_KEYBOARD_SHORTCUT && (event.metaKey || event.ctrlKey)) {
           event.preventDefault();
           toggleSidebar();
         }
@@ -191,7 +176,10 @@ const Sidebar = React.forwardRef<
           <SheetContent
             data-sidebar="sidebar"
             data-mobile="true"
-            className={cn("w-[--sidebar-width] bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden", className)}
+            className={cn(
+              'w-[--sidebar-width] bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden',
+              className,
+            )}
             style={
               {
                 '--sidebar-width': SIDEBAR_WIDTH_MOBILE,
@@ -200,9 +188,7 @@ const Sidebar = React.forwardRef<
             side={side}
           >
             <SheetTitle className="sr-only">任务列表</SheetTitle>
-            <SheetDescription className="sr-only">
-              移动端任务列表导航
-            </SheetDescription>
+            <SheetDescription className="sr-only">移动端任务列表导航</SheetDescription>
             <div className="flex h-full w-full flex-col">{children}</div>
           </SheetContent>
         </Sheet>
@@ -534,8 +520,7 @@ const SidebarMenuButton = React.forwardRef<
       />
     );
     if (!tooltip) return button;
-    const tooltipProps =
-      typeof tooltip === 'string' ? { children: tooltip } : tooltip;
+    const tooltipProps = typeof tooltip === 'string' ? { children: tooltip } : tooltip;
     return (
       <Tooltip>
         <TooltipTrigger asChild>{button}</TooltipTrigger>

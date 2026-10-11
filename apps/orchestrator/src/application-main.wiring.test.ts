@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { OrdinaryMaintenance, type MaintenanceRecord } from './execution/ordinary-maintenance.js';
 import type { OrdinaryApplicationHooks } from './execution/ordinary-application.js';
+import { type MaintenanceRecord, OrdinaryMaintenance } from './execution/ordinary-maintenance.js';
 
 // Factory wiring only: service behavior has separate real drain/IO tests. No
 // database, browser, HTTP server, queue or production authority is supplied here.

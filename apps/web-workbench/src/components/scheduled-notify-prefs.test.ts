@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { normalizeScheduledTaskRows } from '../pages/scheduled-calendar/event-mapping.js';
 import {
   buildScheduledCreatePayload,
   scheduledDialogHasDraftChanges,
   scheduledNotifySummary,
 } from './scheduled-dialog-state.js';
-import { normalizeScheduledTaskRows } from '../pages/scheduled-calendar/event-mapping.js';
 
 const base = {
   intent: '抓取竞品价格',
@@ -72,7 +72,11 @@ describe('Batch 10.3 — scheduled notification preferences', () => {
         consecutiveFailures: 1.5,
       },
     ]);
-    expect(row).toMatchObject({ notifyOnSuccess: true, failureNotifyThreshold: 3, consecutiveFailures: 2 });
+    expect(row).toMatchObject({
+      notifyOnSuccess: true,
+      failureNotifyThreshold: 3,
+      consecutiveFailures: 2,
+    });
     expect(malformed).not.toHaveProperty('notifyOnSuccess');
     expect(malformed).not.toHaveProperty('failureNotifyThreshold');
     expect(malformed).not.toHaveProperty('consecutiveFailures');

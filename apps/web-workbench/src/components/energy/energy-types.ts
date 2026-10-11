@@ -1,6 +1,6 @@
 import type { AstroProfile } from '@/lib/astrology';
-import type { EnergyAstrologyState } from './useEnergyAstrology';
 import type { EnergyExperienceLaunchTarget } from './energy-content-target';
+import type { EnergyAstrologyState } from './useEnergyAstrology';
 
 export type EnergyMood = 'good' | 'tired' | 'stressed' | 'unwind';
 export type EnergyNeed = 'focus' | 'relax' | 'confidence' | 'uplift';

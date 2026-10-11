@@ -11,14 +11,26 @@
  * round once the popover is in real use.
  */
 
-import { Bell, BellOff, Calendar, CheckCircle2, CircleSlash, Clock, Loader2, Pause, Play, Trash2, XCircle } from 'lucide-react';
-import * as React from 'react';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import {
   FAILURE_NOTIFY_OPTIONS,
   scheduledNotifySummary,
 } from '@/components/scheduled-dialog-state';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import {
+  Bell,
+  BellOff,
+  Calendar,
+  CheckCircle2,
+  CircleSlash,
+  Clock,
+  Loader2,
+  Pause,
+  Play,
+  Trash2,
+  XCircle,
+} from 'lucide-react';
+import * as React from 'react';
 import {
   describeScheduledEventReminder,
   describeScheduledEventRepeat,
@@ -28,10 +40,7 @@ import {
   scheduledEventFailureDetail,
   scheduledEventToggleLabel,
 } from './event-detail-state';
-import {
-  scheduledTaskDisplayTitle,
-  type ScheduledTaskRow,
-} from './event-mapping';
+import { type ScheduledTaskRow, scheduledTaskDisplayTitle } from './event-mapping';
 
 interface Props {
   suspended?: boolean;
@@ -160,9 +169,15 @@ export function EventDetailPopover({
       )}
 
       <div className="mt-3 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1"><Clock className="h-3 w-3" />下次</span>
+        <span className="flex items-center gap-1">
+          <Clock className="h-3 w-3" />
+          下次
+        </span>
         <span className="text-foreground">{formatDateTime(row.nextRunAt)}</span>
-        <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />重复</span>
+        <span className="flex items-center gap-1">
+          <Calendar className="h-3 w-3" />
+          重复
+        </span>
         <span className="text-foreground">{describeScheduledEventRepeat(row)}</span>
         <span className="flex items-center gap-1">
           {row.reminderMinutes == null ? (
@@ -208,9 +223,7 @@ export function EventDetailPopover({
                   <span>已跳过</span>
                 </span>
               ) : null}
-              <span className="text-muted-foreground">
-                · {formatDateTime(row.lastRunAt)}
-              </span>
+              <span className="text-muted-foreground">· {formatDateTime(row.lastRunAt)}</span>
             </span>
           </>
         )}
@@ -303,7 +316,11 @@ export function EventDetailPopover({
               })
             }
           >
-            {busy === 'toggle' ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <ToggleIcon className="mr-1 h-3 w-3" />}
+            {busy === 'toggle' ? (
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            ) : (
+              <ToggleIcon className="mr-1 h-3 w-3" />
+            )}
             {toggleLabel}
           </Button>
         )}
@@ -320,7 +337,11 @@ export function EventDetailPopover({
               })
             }
           >
-            {busy === 'run' ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Play className="mr-1 h-3 w-3" />}
+            {busy === 'run' ? (
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            ) : (
+              <Play className="mr-1 h-3 w-3" />
+            )}
             立即执行一次
           </Button>
         )}
@@ -345,10 +366,7 @@ export function EventDetailPopover({
   );
 }
 
-function computePosition(
-  anchor: { x: number; y: number },
-  mobile: boolean,
-): React.CSSProperties {
+function computePosition(anchor: { x: number; y: number }, mobile: boolean): React.CSSProperties {
   if (mobile) return {};
   const margin = 16;
   const vw = window.innerWidth;

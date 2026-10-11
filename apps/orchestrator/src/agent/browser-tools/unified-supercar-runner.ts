@@ -1,6 +1,4 @@
 import { env } from '../../config/env.js';
-import { browserReplayStore } from './browser-replay-service.js';
-import { BrowserReplayRecorder } from './browser-replay.js';
 import { reviewListAnswer } from '../../execution/answer-verifier.js';
 import { browserOutputGuidance } from '../../execution/execution-contract.js';
 import { getContract } from '../../execution/execution-pipeline.js';
@@ -12,8 +10,10 @@ import type {
 } from '../supercar/agent-loop.js';
 import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
 import { classifyRuntimeAction } from '../supercar/runtime-action-policy.js';
-import { createUnifiedActionGate } from './unified-action-gate.js';
+import { browserReplayStore } from './browser-replay-service.js';
+import { BrowserReplayRecorder } from './browser-replay.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
+import { createUnifiedActionGate } from './unified-action-gate.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 

@@ -342,15 +342,21 @@ export class R2StorageProvider implements StorageProvider {
     storagePath: StoragePath,
     options?: { ownerExternalId?: string; requireLegacyOwner?: boolean },
   ): string {
-    if (storagePath.includes('\\') || storagePath.includes('\0') || storagePath.split('/').some(part => part === '.' || part === '..')) throw new Error('Invalid storage path');
+    if (
+      storagePath.includes('\\') ||
+      storagePath.includes('\0') ||
+      storagePath.split('/').some((part) => part === '.' || part === '..')
+    )
+      throw new Error('Invalid storage path');
     const legacy = path.isAbsolute(storagePath);
     let key = storagePath;
     if (legacy) {
       const roots = this.config.legacyLocalRoots ?? ['/tmp/holaday-files', '/opt/holaday-files'];
-      const root = roots.find(candidate => storagePath.startsWith(path.resolve(candidate) + '/'));
+      const root = roots.find((candidate) => storagePath.startsWith(`${path.resolve(candidate)}/`));
       if (!root) throw new Error('Invalid legacy storage path');
       key = storagePath.slice(path.resolve(root).length + 1);
-      if (!/^usr_[\w-]+\/(input|output)\/file_[\w-]+\/[^/]+$/.test(key)) throw new Error('Invalid legacy storage path');
+      if (!/^usr_[\w-]+\/(input|output)\/file_[\w-]+\/[^/]+$/.test(key))
+        throw new Error('Invalid legacy storage path');
     }
     if ((legacy && options?.requireLegacyOwner) || options?.ownerExternalId !== undefined) {
       const owner = options?.ownerExternalId;
@@ -402,7 +408,10 @@ export class R2StorageProvider implements StorageProvider {
       const res = await this.client.send(
         new GetObjectCommand({
           Bucket: this.config.bucket,
-          Key: this.objectKey(storagePath, { ownerExternalId: options?.ownerExternalId, requireLegacyOwner: true }),
+          Key: this.objectKey(storagePath, {
+            ownerExternalId: options?.ownerExternalId,
+            requireLegacyOwner: true,
+          }),
         }),
       );
       const body = res.Body as NodeJS.ReadableStream | undefined;
@@ -443,7 +452,10 @@ export class R2StorageProvider implements StorageProvider {
     try {
       const cmd = new GetObjectCommand({
         Bucket: this.config.bucket,
-        Key: this.objectKey(storagePath, { ownerExternalId: opts?.ownerExternalId, requireLegacyOwner: true }),
+        Key: this.objectKey(storagePath, {
+          ownerExternalId: opts?.ownerExternalId,
+          requireLegacyOwner: true,
+        }),
         ...(opts?.downloadFilename
           ? {
               ResponseContentDisposition: `attachment; filename="${opts.downloadFilename.replace(/"/g, '')}"`,
@@ -484,7 +496,10 @@ export class R2StorageProvider implements StorageProvider {
       const res = await this.client.send(
         new HeadObjectCommand({
           Bucket: this.config.bucket,
-          Key: this.objectKey(storagePath, { ownerExternalId: options?.ownerExternalId, requireLegacyOwner: true }),
+          Key: this.objectKey(storagePath, {
+            ownerExternalId: options?.ownerExternalId,
+            requireLegacyOwner: true,
+          }),
         }),
         options?.signal ? { abortSignal: options.signal } : undefined,
       );
@@ -574,7 +589,13 @@ export function createStorageProvider(opts: CreateStorageProviderOpts): StorageP
         accessKeyId,
         secretAccessKey,
         bucket,
-        legacyLocalRoots: [...new Set([opts.localRoot ?? process.env.HOLADAY_FILES_ROOT ?? '/tmp/holaday-files', '/tmp/holaday-files', '/opt/holaday-files'])],
+        legacyLocalRoots: [
+          ...new Set([
+            opts.localRoot ?? process.env.HOLADAY_FILES_ROOT ?? '/tmp/holaday-files',
+            '/tmp/holaday-files',
+            '/opt/holaday-files',
+          ]),
+        ],
         ...(process.env.R2_REGION ? { region: process.env.R2_REGION } : {}),
       },
       opts.logger,

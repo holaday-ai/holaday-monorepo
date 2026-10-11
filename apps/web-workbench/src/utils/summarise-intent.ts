@@ -15,10 +15,26 @@ export function summariseIntent(intent: string, maxLen = 20): string {
   // Drop polite opening phrases. Longest-match-first so "能不能" wins
   // before "能".
   const OPENINGS = [
-    '麻烦你帮我', '麻烦帮我', '劳驾帮我', '请帮我', '能不能帮我',
-    '能否帮我', '可以帮我吗', '可以帮我', '你能帮我',
-    '你能', '你可以', '可以', '能否', '能不能',
-    '帮我', '帮忙', '请', '麻烦', '劳驾', '拜托',
+    '麻烦你帮我',
+    '麻烦帮我',
+    '劳驾帮我',
+    '请帮我',
+    '能不能帮我',
+    '能否帮我',
+    '可以帮我吗',
+    '可以帮我',
+    '你能帮我',
+    '你能',
+    '你可以',
+    '可以',
+    '能否',
+    '能不能',
+    '帮我',
+    '帮忙',
+    '请',
+    '麻烦',
+    '劳驾',
+    '拜托',
   ];
   for (const o of OPENINGS) {
     if (t.startsWith(o)) {

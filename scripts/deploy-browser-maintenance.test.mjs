@@ -127,8 +127,10 @@ test('uncertain release is never retried or replaced by legacy rollback', async 
   assert.match(result.stderr, /MAINTENANCE_RELEASE_INCOMPLETE_INSPECT_PHASE/);
 });
 
-test('stock gate failure refuses before capability probe or release',async(t)=>{
- const f=await fixture(t);const result=f.run('akshare-failed');
- assert.equal(result.status,1);assert.match(result.stderr,/AKSHARE_GATE_FAILED/);
- assert.deepEqual(await f.events(),['akshare']);
+test('stock gate failure refuses before capability probe or release', async (t) => {
+  const f = await fixture(t);
+  const result = f.run('akshare-failed');
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /AKSHARE_GATE_FAILED/);
+  assert.deepEqual(await f.events(), ['akshare']);
 });

@@ -442,10 +442,10 @@ export function summarizeLegacySourceUnknowns(rows) {
   ];
   return rows.slice(0, 256).flatMap((row) => {
     const own = (key) => Object.getOwnPropertyDescriptor(row ?? {}, key)?.value;
-    const host = own('host'),
-      kind = own('kind'),
-      id = own('id'),
-      keySha256 = own('keySha256');
+    const host = own('host');
+    const kind = own('kind');
+    const id = own('id');
+    const keySha256 = own('keySha256');
     if (!['aliyun', 'vultr'].includes(host) || !kinds.includes(kind)) return [];
     if (Number.isSafeInteger(id) && id >= 0) return [{ host, kind, id }];
     if (typeof keySha256 === 'string' && /^[a-f0-9]{64}$/.test(keySha256))
@@ -2497,8 +2497,8 @@ export async function createFirstCutoverRetirementObserver(input, overrides = {}
           step = 'cloud-recovery-current-native';
           const sources = await compareSources(raw, pair);
           for (const index of [1, 0]) {
-            const declaration = originalCloudScope[index],
-              retained = cloudRecoveries[declaration.name];
+            const declaration = originalCloudScope[index];
+            const retained = cloudRecoveries[declaration.name];
             if (!retained) continue;
             const observed = await io.reobserveCloudRecovery(
               {
@@ -4097,9 +4097,12 @@ async function readProtectedFirstCutoverApproval(options, io, reconciliation) {
       !Number.isSafeInteger(record.maintenanceEndsAtMs) ||
       !Number.isSafeInteger(record.reconcileByMs) ||
       record.reconcileByMs < record.maintenanceEndsAtMs ||
+      // biome-ignore lint/style/noCommaOperator: records the failing stage while the fence check short-circuits
       (!Number.isSafeInteger(now) && ((stage = 'APPROVAL_CLOCK'), true)) ||
+      // biome-ignore lint/style/noCommaOperator: records the failing stage while the fence check short-circuits
       (now < began && ((stage = 'APPROVAL_CLOCK'), true)) ||
       (now >= (reconciliation ? record.reconcileByMs : record.maintenanceEndsAtMs) &&
+        // biome-ignore lint/style/noCommaOperator: records the failing stage while the fence check short-circuits
         ((stage = 'APPROVAL_DEADLINE'), true)) ||
       typeof record.operatorRef !== 'string' ||
       !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(record.operatorRef)

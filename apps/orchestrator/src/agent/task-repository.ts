@@ -69,13 +69,20 @@ function legacyReplyGuard(taskId: string, userId: number | undefined, origin: Ta
 function canonicalVideoRequest(metadata: Record<string, unknown>): unknown {
   const canonical = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(canonical);
-    if (value && typeof value === 'object') return Object.fromEntries(
-      Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)]),
-    );
+    if (value && typeof value === 'object')
+      return Object.fromEntries(
+        Object.entries(value)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, item]) => [key, canonical(item)]),
+      );
     return value;
   };
-  return canonical({ videoType: metadata.videoType, visualMode: metadata.visualMode,
-    videoOptions: metadata.videoOptions, petModel: metadata.petModel });
+  return canonical({
+    videoType: metadata.videoType,
+    visualMode: metadata.visualMode,
+    videoOptions: metadata.videoOptions,
+    petModel: metadata.petModel,
+  });
 }
 
 export interface InsertTaskContext {
@@ -100,6 +107,20 @@ export interface InsertTaskContext {
   executionMode?: 'browser';
   /** Immutable, server-validated context from a dedicated product surface. */
   sourceContext?: Record<string, unknown> | null;
+  /**
+   * This task is the public-cloud continuation of `originalTaskId`, which the
+   * caller already claimed with `claimToken`. The link is written in the same
+   * transaction as the insert: if the claim is gone, the insert rolls back.
+   */
+  publicCloudContinuation?: { originalTaskId: string; claimToken: string };
+}
+
+/** The original's continuation claim was lost before the replacement was linked. */
+export class PublicCloudContinuationLinkError extends Error {
+  constructor() {
+    super('public-cloud continuation claim lost before the replacement was linked');
+    this.name = 'PublicCloudContinuationLinkError';
+  }
 }
 
 type TaskRepositoryTransaction = Parameters<Parameters<DB['transaction']>[0]>[0];
@@ -213,7 +234,72 @@ export class TaskRepository {
         actor: 'system',
         payload: { intent: ctx.intent, planSize: state.plan.length },
       });
+
+      const continuation = ctx.publicCloudContinuation;
+      if (continuation) {
+        const linked = await tx
+          .update(tasks)
+          .set({ publicCloudContinuationTaskId: state.taskId })
+          .where(
+            and(
+              eq(tasks.externalId, continuation.originalTaskId),
+              eq(tasks.userId, ctx.userId),
+              eq(tasks.origin, this.taskOrigin),
+              eq(tasks.publicCloudContinuationTaskId, continuation.claimToken),
+            ),
+          );
+        if (extractMysqlAffectedRows(linked) !== 1) throw new PublicCloudContinuationLinkError();
+      }
     });
+  }
+
+  /**
+   * Reserve a cancelled original for exactly one public-cloud continuation.
+   * Atomic conditional update: of any number of concurrent callers at most one
+   * sees `true`, and an original that was ever linked can never be claimed again.
+   */
+  async claimPublicCloudContinuation(input: {
+    originalTaskId: string;
+    userId: number;
+    claimToken: string;
+  }): Promise<boolean> {
+    const claimed = await this.db
+      .update(tasks)
+      .set({ publicCloudContinuationTaskId: input.claimToken })
+      .where(
+        and(
+          eq(tasks.externalId, input.originalTaskId),
+          eq(tasks.userId, input.userId),
+          eq(tasks.origin, this.taskOrigin),
+          eq(tasks.status, 'cancelled'),
+          isNull(tasks.publicCloudContinuationTaskId),
+        ),
+      );
+    return extractMysqlAffectedRows(claimed) === 1;
+  }
+
+  /**
+   * Give the claim back when no replacement row was inserted. Only a pending
+   * `claim:` value can be cleared; a linked replacement id never is.
+   */
+  async releasePublicCloudContinuationClaim(input: {
+    originalTaskId: string;
+    userId: number;
+    claimToken: string;
+  }): Promise<void> {
+    if (!input.claimToken.startsWith('claim:')) return;
+    await this.db
+      .update(tasks)
+      .set({ publicCloudContinuationTaskId: null })
+      .where(
+        and(
+          eq(tasks.externalId, input.originalTaskId),
+          eq(tasks.userId, input.userId),
+          eq(tasks.origin, this.taskOrigin),
+          eq(tasks.publicCloudContinuationTaskId, input.claimToken),
+          sql`${tasks.publicCloudContinuationTaskId} LIKE 'claim:%'`,
+        ),
+      );
   }
 
   async applyStepResult(
@@ -425,7 +511,10 @@ export class TaskRepository {
     return { persisted: true };
   }
 
-  async markAwaitingReplyResumed(taskExternalId: string, legacyUserId?: number): Promise<{ persisted: boolean }> {
+  async markAwaitingReplyResumed(
+    taskExternalId: string,
+    legacyUserId?: number,
+  ): Promise<{ persisted: boolean }> {
     const guard = legacyReplyGuard(taskExternalId, legacyUserId, this.taskOrigin);
     const [taskRow] = await this.db
       .select({ id: tasks.id })
@@ -449,7 +538,9 @@ export class TaskRepository {
           errorCode: null,
           errorMessage: null,
         })
-        .where(guard ?? and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
+        .where(
+          guard ?? and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')),
+        );
       if (extractMysqlAffectedRows(result) === 0) {
         persisted = false;
         return;
@@ -495,7 +586,9 @@ export class TaskRepository {
           result: resultPayload,
           completedAt: new Date(),
         })
-        .where(guard ?? and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
+        .where(
+          guard ?? and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')),
+        );
       if (extractMysqlAffectedRows(result) === 0) {
         persisted = false;
         return;
@@ -669,15 +762,23 @@ export class TaskRepository {
     return { persisted: extractMysqlAffectedRows(result) > 0 };
   }
 
-  async persistActiveCorePlan(taskExternalId: string, planText: string): Promise<{ persisted: boolean }> {
-    const result = await this.db.update(tasks).set({ planText, planStatus: [] })
+  async persistActiveCorePlan(
+    taskExternalId: string,
+    planText: string,
+  ): Promise<{ persisted: boolean }> {
+    const result = await this.db
+      .update(tasks)
+      .set({ planText, planStatus: [] })
       .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'executing')));
     return { persisted: extractMysqlAffectedRows(result) > 0 };
   }
 
   async isTaskExecuting(taskExternalId: string): Promise<boolean> {
-    const [row] = await this.db.select({ status: tasks.status }).from(tasks)
-      .where(eq(tasks.externalId, taskExternalId)).limit(1);
+    const [row] = await this.db
+      .select({ status: tasks.status })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
     return row?.status === 'executing';
   }
 
@@ -687,20 +788,25 @@ export class TaskRepository {
     suggestions: string[],
   ): Promise<boolean> {
     if (
-      !suggestions.length || suggestions.length > 3 ||
-      suggestions.some((item) =>
-        typeof item !== 'string' || item.trim().length < 4 || item.length > 40)
-    ) return false;
+      !suggestions.length ||
+      suggestions.length > 3 ||
+      suggestions.some(
+        (item) => typeof item !== 'string' || item.trim().length < 4 || item.length > 40,
+      )
+    )
+      return false;
     const result = await this.db
       .update(tasks)
       .set({
         result: sql`JSON_SET(${tasks.result}, '$.followUpSuggestions', CAST(${JSON.stringify(suggestions)} AS JSON))`,
       })
-      .where(and(
-        eq(tasks.externalId, taskExternalId),
-        eq(tasks.status, 'completed'),
-        sql`JSON_UNQUOTE(JSON_EXTRACT(${tasks.result}, '$.summary')) = ${summary}`,
-      ));
+      .where(
+        and(
+          eq(tasks.externalId, taskExternalId),
+          eq(tasks.status, 'completed'),
+          sql`JSON_UNQUOTE(JSON_EXTRACT(${tasks.result}, '$.summary')) = ${summary}`,
+        ),
+      );
     return extractMysqlAffectedRows(result) > 0;
   }
 
@@ -711,8 +817,13 @@ export class TaskRepository {
       .where(eq(tasks.externalId, taskExternalId))
       .limit(1);
     const result = normalizeJson(row?.result);
-    return row?.status === 'completed' && result !== null && typeof result === 'object' &&
-      'summary' in result && result.summary === summary;
+    return (
+      row?.status === 'completed' &&
+      result !== null &&
+      typeof result === 'object' &&
+      'summary' in result &&
+      result.summary === summary
+    );
   }
 
   async markQueuedTaskExecuting(taskExternalId: string): Promise<{ persisted: boolean }> {
@@ -1399,15 +1510,19 @@ export class TaskRepository {
           plan: [],
           roleId: 'video-creator',
           opusUsed: false,
-          result: { metadata: { ...input.executionMetadata, videoRetryKey: retryKey, videoRetryVersion: 2 } },
+          result: {
+            metadata: { ...input.executionMetadata, videoRetryKey: retryKey, videoRetryVersion: 2 },
+          },
         });
         const taskInternalId = readInsertId(insert);
         if (!input.isBypass) {
           // The same transaction owns debit, quote claim, child and refundable
           // charge. Failure here rolls back the entire confirmation.
           await recordQuotaCharge(tx as unknown as DB, {
-            taskExternalId: input.generationTaskExternalId, userId: input.userId,
-            plan: input.planId, isOpus: false,
+            taskExternalId: input.generationTaskExternalId,
+            userId: input.userId,
+            plan: input.planId,
+            isOpus: false,
           });
         }
         await tx.insert(taskEvents).values([

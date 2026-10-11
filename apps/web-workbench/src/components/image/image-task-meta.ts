@@ -50,8 +50,7 @@ function asImageChangeTargets(value: unknown): ImageChangeTarget[] | null {
   if (!Array.isArray(value) || value.length > 5) return null;
   if (
     value.some(
-      (target) =>
-        typeof target !== 'string' || !CHANGE_TARGETS.has(target as ImageChangeTarget),
+      (target) => typeof target !== 'string' || !CHANGE_TARGETS.has(target as ImageChangeTarget),
     )
   ) {
     return null;
@@ -129,18 +128,14 @@ function parseImageOptions(value: unknown): ImageCreationOptions | undefined {
   };
 }
 
-function parseSubjectConsistency(
-  value: unknown,
-): ImageTaskMeta['subjectConsistency'] | undefined {
+function parseSubjectConsistency(value: unknown): ImageTaskMeta['subjectConsistency'] | undefined {
   if (!isRecord(value)) return undefined;
   const checked = value.checked;
   const passed = value.passed;
   const failed = value.failed;
   const counts = [checked, passed, failed];
   if (
-    !counts.every(
-      (count) => Number.isInteger(count) && Number(count) >= 0 && Number(count) <= 8,
-    ) ||
+    !counts.every((count) => Number.isInteger(count) && Number(count) >= 0 && Number(count) <= 8) ||
     Number(passed) + Number(failed) !== Number(checked)
   ) {
     return undefined;

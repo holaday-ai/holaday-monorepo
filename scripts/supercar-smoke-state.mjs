@@ -1,9 +1,4 @@
-const TERMINAL_STATUSES = new Set([
-  'completed',
-  'partial_success',
-  'failed',
-  'cancelled',
-]);
+const TERMINAL_STATUSES = new Set(['completed', 'partial_success', 'failed', 'cancelled']);
 
 const ACTION_REQUIRED_STATUSES = new Set(['awaiting_user', 'paused']);
 

@@ -1,9 +1,6 @@
 import type { Logger } from 'pino';
 import type { CoreModelRuntimeInput } from '../../llm/core-model-runtime.js';
-import {
-  MessagesAdapterError,
-  createQwenMessagesAdapter,
-} from '../../llm/messages-adapter.js';
+import { MessagesAdapterError, createQwenMessagesAdapter } from '../../llm/messages-adapter.js';
 import { type PlanProviderEnvironment, resolvePlanProviderRoute } from './plan-provider.js';
 import { type PlanGenerateResult, generatePlan } from './plan-service.js';
 
@@ -28,7 +25,7 @@ export async function generatePlanForUser(
   },
   factories: PlanAdapterFactories = DEFAULT_FACTORIES,
 ): Promise<PlanGenerateResult> {
-  let route;
+  let route: ReturnType<typeof resolvePlanProviderRoute>;
   try {
     route = resolvePlanProviderRoute({
       environment: input.environment,
@@ -40,8 +37,7 @@ export async function generatePlanForUser(
     input.logger.warn(
       {
         taskId: input.taskId,
-        reason:
-          error instanceof MessagesAdapterError ? error.code : 'PROVIDER_CONFIGURATION_ERROR',
+        reason: error instanceof MessagesAdapterError ? error.code : 'PROVIDER_CONFIGURATION_ERROR',
       },
       'plan-service: provider unavailable',
     );

@@ -1,9 +1,9 @@
 import {
+  type SelectedChromeSessionCommand,
   USER_BROWSER_PROTOCOL,
+  type UserBrowserTargetDescription,
   userBrowserProtocolSchema,
   userBrowserTargetDescriptionSchema,
-  type UserBrowserTargetDescription,
-  type SelectedChromeSessionCommand,
 } from '@holaday/shared-types';
 import { z } from 'zod';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';

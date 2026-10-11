@@ -38,14 +38,7 @@ export interface ScheduledTaskRow {
   timezone: string;
   nextRunAt: string | Date;
   lastRunAt: string | Date | null;
-  status:
-    | 'active'
-    | 'paused'
-    | 'running'
-    | 'completed'
-    | 'failed'
-    | 'unknown'
-    | (string & {});
+  status: 'active' | 'paused' | 'running' | 'completed' | 'failed' | 'unknown' | (string & {});
   lastRunStatus: 'success' | 'failed' | 'skipped' | null;
   lastError: string | null;
   createdAt: string | Date;
@@ -239,10 +232,7 @@ export function calendarRruleString(rrule: string, anchor: Date): string {
  * Returns an empty array for rows whose nextRunAt is missing (defensive;
  * shouldn't happen given the DB NOT NULL constraint).
  */
-export function rowToEventInput(
-  row: ScheduledTaskRow,
-  opts: { now: Date },
-): EventInput[] {
+export function rowToEventInput(row: ScheduledTaskRow, opts: { now: Date }): EventInput[] {
   const nextRunAt = row.nextRunAt instanceof Date ? row.nextRunAt : new Date(row.nextRunAt);
   if (Number.isNaN(nextRunAt.getTime())) return [];
   const color = pickStatusColor(row, nextRunAt, opts.now);
@@ -352,10 +342,7 @@ function normalizeScheduledTaskRow(value: unknown): ScheduledTaskRow | null {
 }
 
 function normalizeRepeatType(value: unknown): ScheduledTaskRow['repeatType'] {
-  return value === 'daily' ||
-    value === 'weekly' ||
-    value === 'monthly' ||
-    value === 'once'
+  return value === 'daily' || value === 'weekly' || value === 'monthly' || value === 'once'
     ? value
     : 'once';
 }
@@ -379,15 +366,11 @@ function safeText(value: unknown): string {
 }
 
 function safePositiveInteger(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
-    ? value
-    : undefined;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
 function safeNonNegativeInteger(value: unknown): number | null {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
-    ? value
-    : null;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 function safeDateValue(value: unknown): string | Date | null {

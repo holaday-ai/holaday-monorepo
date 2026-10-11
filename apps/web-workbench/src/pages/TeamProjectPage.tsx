@@ -554,7 +554,10 @@ export function TeamProjectPage(): JSX.Element {
 
   return (
     <PageContainer width="workspace" className="hd-project-detail hd-personal-project-detail">
-      <Link to="/projects" className="hd-project-back"><ChevronLeft />全部项目</Link>
+      <Link to="/projects" className="hd-project-back">
+        <ChevronLeft />
+        全部项目
+      </Link>
       <PageHeader
         title={detail.project.name}
         description={detail.project.description || '这个团队项目还没有添加说明。'}

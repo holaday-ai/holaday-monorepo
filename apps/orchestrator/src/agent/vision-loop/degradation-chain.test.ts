@@ -288,9 +288,7 @@ describe('DegradationChain end-to-end escalation', () => {
 
     const fakeExecutor = {
       browser: {
-        contexts: () => [
-          { clearCookies: async () => {}, addInitScript: async () => {} },
-        ],
+        contexts: () => [{ clearCookies: async () => {}, addInitScript: async () => {} }],
       },
       getPage: async () => ({ url: () => 'https://www.google.com/search?q=x' }),
     } as never;

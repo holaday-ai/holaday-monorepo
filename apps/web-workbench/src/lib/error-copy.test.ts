@@ -19,11 +19,15 @@ describe('error-copy', () => {
     expect(humaniseTaskError('Anthropic API error: 429 rate_limit_error')).toBe(
       'AI 服务暂时无法处理请求，可能是请求信息不完整或额度受限。请稍后重试。',
     );
-    expect(humaniseTaskError('Anthropic API error: overloaded_error')).toBe('AI 服务暂时出错，请稍后重试。');
+    expect(humaniseTaskError('Anthropic API error: overloaded_error')).toBe(
+      'AI 服务暂时出错，请稍后重试。',
+    );
   });
 
   it('hides PayPal SDK wording in payment component failures', () => {
-    expect(humaniseTaskError('PayPal SDK failed to load')).toBe('PayPal 暂时无法加载，请刷新页面后重试。');
+    expect(humaniseTaskError('PayPal SDK failed to load')).toBe(
+      'PayPal 暂时无法加载，请刷新页面后重试。',
+    );
   });
 
   it('explains system-stopped tasks without generic failure copy', () => {
@@ -48,9 +52,7 @@ describe('error-copy', () => {
     expect(humaniseTaskError('task ended with status=failed')).toBe(
       '子任务未完成，请打开任务详情查看失败原因。',
     );
-    expect(humaniseTaskError('task ended with status=cancelled')).toBe(
-      '子任务已取消。',
-    );
+    expect(humaniseTaskError('task ended with status=cancelled')).toBe('子任务已取消。');
   });
 
   it('hides model secret names in missing configuration errors', () => {
@@ -60,9 +62,9 @@ describe('error-copy', () => {
   });
 
   it('maps extension timeouts to user-facing browser copy', () => {
-    expect(humaniseTaskError('扩展工具调用超时（已等待 30 秒，请确认浏览器标签页仍在加载或重试）')).toBe(
-      '浏览器响应超时，页面可能仍在加载。请稍后重试。',
-    );
+    expect(
+      humaniseTaskError('扩展工具调用超时（已等待 30 秒，请确认浏览器标签页仍在加载或重试）'),
+    ).toBe('浏览器响应超时，页面可能仍在加载。请稍后重试。');
   });
 
   it('maps browser transport closures before the generic English fallback', () => {
@@ -92,9 +94,11 @@ describe('error-copy', () => {
     expect(humaniseTaskError('socket_closed: 浏览器扩展连接已断开')).toBe(
       '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。',
     );
-    expect(humaniseTaskError('Unchecked runtime.lastError: The message port closed before a response was received.')).toBe(
-      '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。',
-    );
+    expect(
+      humaniseTaskError(
+        'Unchecked runtime.lastError: The message port closed before a response was received.',
+      ),
+    ).toBe('浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。');
   });
 
   it('maps extension host permission failures to permission guidance', () => {

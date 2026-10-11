@@ -22,9 +22,7 @@ describe('CONTENT_TOPIC_WORKFLOW — shape', () => {
   it('2 required + 6 optional inputs', () => {
     expect(W.requiredInputs).toHaveLength(2);
     expect(W.optionalInputs).toHaveLength(6);
-    expect(W.requiredInputs.map((i) => i.name).sort()).toEqual(
-      ['category', 'platform'].sort(),
-    );
+    expect(W.requiredInputs.map((i) => i.name).sort()).toEqual(['category', 'platform'].sort());
   });
 
   it('platform is regex-gated text — pattern matches the 7 known platforms', () => {
@@ -132,26 +130,17 @@ describe('CONTENT_TOPIC_WORKFLOW — parseInputs', () => {
   });
 
   it('content_format enum extraction', () => {
-    const r = parseInputs(
-      '品类 美妆 平台抖音 内容形式 短视频',
-      W,
-    );
+    const r = parseInputs('品类 美妆 平台抖音 内容形式 短视频', W);
     expect(r.extracted.content_format).toBe('短视频');
   });
 
   it('topic_count override via "生成 8 个"', () => {
-    const r = parseInputs(
-      '品类 母婴 平台小红书 生成 8 个选题',
-      W,
-    );
+    const r = parseInputs('品类 母婴 平台小红书 生成 8 个选题', W);
     expect(r.extracted.topic_count).toBe(8);
   });
 
   it('competitor_reference field captures multi-account list', () => {
-    const r = parseInputs(
-      '品类 美妆 平台小红书 竞品账号 完美日记 / 花西子 / 橘朵',
-      W,
-    );
+    const r = parseInputs('品类 美妆 平台小红书 竞品账号 完美日记 / 花西子 / 橘朵', W);
     expect(r.extracted.competitors).toContain('完美日记');
     expect(r.extracted.competitors).toContain('花西子');
   });

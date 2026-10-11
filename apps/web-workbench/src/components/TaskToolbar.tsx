@@ -1,9 +1,9 @@
-import { Globe } from 'lucide-react';
-import type { SidePanelMode } from '@/types/side-panel';
-import type { UiTask } from '@/types/task';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
 import { cn } from '@/lib/utils';
 import { hasBrowserRecordForWorkbench } from '@/lib/workbench-state';
+import type { SidePanelMode } from '@/types/side-panel';
+import type { UiTask } from '@/types/task';
+import { Globe } from 'lucide-react';
 
 /**
  * Codex IA close-out: per-task toolbar pinned to the top-right of the
@@ -84,10 +84,10 @@ export function TaskToolbar({
           attentionNeeded
             ? 'border-[#FF0061]/40 bg-[#FF0061]/10 text-[#FF0061] shadow-[0_1px_3px_rgba(255,0,97,0.10)] hover:bg-[#FF0061]/15'
             : live
-            ? 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061] hover:bg-[#FF0061]/15'
-            : open
-              ? 'border-[#DCDDDD] bg-white text-foreground shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90'
-              : 'border-[#DCDDDD] bg-white text-muted-foreground hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 hover:text-foreground dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10',
+              ? 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061] hover:bg-[#FF0061]/15'
+              : open
+                ? 'border-[#DCDDDD] bg-white text-foreground shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90'
+                : 'border-[#DCDDDD] bg-white text-muted-foreground hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 hover:text-foreground dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10',
         )}
       >
         <Globe className="h-3.5 w-3.5" />

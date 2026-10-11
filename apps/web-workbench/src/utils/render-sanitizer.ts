@@ -146,15 +146,10 @@ const NARRATIVE_LINE_STARTERS = [
  */
 const NARRATIVE_LINE_RE = (() => {
   // Escape regex specials in the phrases (just in case).
-  const escaped = NARRATIVE_LINE_STARTERS.map((s) =>
-    s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-  );
+  const escaped = NARRATIVE_LINE_STARTERS.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   // Match: line start, optional bullet/quote/space, one of the
   // phrases, anything else to end of line.
-  return new RegExp(
-    `^[ \\t]*(?:[-*>][ \\t]+)?(?:${escaped.join('|')})[^\\n]*$`,
-    'gim',
-  );
+  return new RegExp(`^[ \\t]*(?:[-*>][ \\t]+)?(?:${escaped.join('|')})[^\\n]*$`, 'gim');
 })();
 
 /**
@@ -178,7 +173,8 @@ const IMAGE_MARKER_BASE64_RE =
 /**
  * Stop-reason markers leak occasionally on legacy rows.
  */
-const STOP_REASON_RE = /\[(?:STOP[_ ]REASON:[^\]]*|END[_ ]TURN|MAX[_ ]TOKENS|AWAITING[_ ]USER[_ ]INPUT)\]/gi;
+const STOP_REASON_RE =
+  /\[(?:STOP[_ ]REASON:[^\]]*|END[_ ]TURN|MAX[_ ]TOKENS|AWAITING[_ ]USER[_ ]INPUT)\]/gi;
 
 /**
  * Triple+ blank lines collapse — visual hygiene after strips.

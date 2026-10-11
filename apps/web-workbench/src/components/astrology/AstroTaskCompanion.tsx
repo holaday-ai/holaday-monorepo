@@ -1,5 +1,3 @@
-import { CheckCircle2, MoonStar, RefreshCcw, Sparkles, X } from 'lucide-react';
-import * as React from 'react';
 import {
   buildAstroTaskInsight,
   defaultAstroProfile,
@@ -8,6 +6,8 @@ import {
 } from '@/lib/astrology';
 import { cn } from '@/lib/utils';
 import type { UiTaskStatus } from '@/types/task';
+import { CheckCircle2, MoonStar, RefreshCcw, Sparkles, X } from 'lucide-react';
+import * as React from 'react';
 
 const ACCENT_CLASS = {
   rose: {

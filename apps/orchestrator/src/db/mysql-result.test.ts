@@ -10,7 +10,7 @@
  * test bans the inline top-level cast from creeping back in.
  */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readAffectedRows, readInsertId } from './mysql-result.js';

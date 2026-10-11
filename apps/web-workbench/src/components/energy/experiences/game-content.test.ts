@@ -9,7 +9,9 @@ describe('game content', () => {
     for (const game of ENERGY_GAMES) {
       expect(game.estimatedSeconds).toBeGreaterThanOrEqual(30);
       expect(game.estimatedSeconds).toBeLessThanOrEqual(120);
-      expect(`${game.title}${game.description}${game.completionBody}`).not.toMatch(/排名|连胜|失败|惩罚/);
+      expect(`${game.title}${game.description}${game.completionBody}`).not.toMatch(
+        /排名|连胜|失败|惩罚/,
+      );
     }
   });
 });

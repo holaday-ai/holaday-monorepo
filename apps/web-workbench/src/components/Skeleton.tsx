@@ -8,9 +8,7 @@
 export function AppSkeleton(): JSX.Element {
   return (
     <div className="relative flex h-full min-h-0 w-full overflow-hidden">
-      <aside
-        className="hidden h-full w-[260px] shrink-0 flex-col border-r border-[#DCDDDD]/70 bg-white/70 px-3 py-4 md:flex"
-      >
+      <aside className="hidden h-full w-[260px] shrink-0 flex-col border-r border-[#DCDDDD]/70 bg-white/70 px-3 py-4 md:flex">
         <div className="flex items-center gap-2 px-1">
           <div className="h-5 w-8 rounded-[6px] bg-[#FF0061]/90" />
           <div className="hola-skel h-3.5 w-20 bg-[#DCDDDD]/80" />

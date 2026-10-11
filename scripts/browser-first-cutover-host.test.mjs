@@ -2671,7 +2671,7 @@ test('source diagnostics distinguish approval clock, deadline and real file meta
           h.readFile = async () => {
             if (mode === 'read') throw Error('PRIVATE_PAYLOAD');
             const bytes = await read();
-            await fs.rename(f.file, f.file + '.old');
+            await fs.rename(f.file, `${f.file}.old`);
             await fs.writeFile(f.file, bytes, { mode: 0o600 });
             return bytes;
           };
@@ -2775,7 +2775,7 @@ test('source diagnostics compose both schema approval files with the actual prot
           files,
         },
         producerStartupFiles: ['dump.pm2', 'dump.pm2.bak'].map((name) => ({
-          path: '/root/.pm2/' + name,
+          path: `/root/.pm2/${name}`,
           digest: '1'.repeat(64),
           remove: [{ name: 'holaday-orchestrator', entryDigest: '2'.repeat(64) }],
         })),
@@ -2817,9 +2817,9 @@ test('source diagnostics compose both schema approval files with the actual prot
 
 test('read-only preparation diagnostic reaches only the hard journal barrier', async (t) => {
   const f = await lifecycleFixture(t);
-  let acquired = 0,
-    staged = 0,
-    serviceEffects = 0;
+  let acquired = 0;
+  let staged = 0;
+  let serviceEffects = 0;
   f.io.journal = async () => {
     acquired++;
     throw Error('unexpected acquisition');
@@ -2881,9 +2881,9 @@ for (const fault of ['approval', 'deadline', 'source', 'config', 'parse', 'uid',
       f.io.targetAbsent = async () => {
         throw Error('MAINTENANCE_TARGET_EXISTS');
       };
-    let acquired = 0,
-      staged = 0,
-      serviceEffects = 0;
+    let acquired = 0;
+    let staged = 0;
+    let serviceEffects = 0;
     f.io.journal = async () => {
       acquired++;
       throw Error('unexpected acquisition');
@@ -2965,8 +2965,8 @@ test('legacy source diagnostics retain the exact failed reader step and original
     'SOURCE',
     'CLASSIFY',
   ]) {
-    let identities = 0,
-      pairs = 0;
+    let identities = 0;
+    let pairs = 0;
     const request = fault === 'REVIEW' ? {} : input;
     const io = {
       now: () => 1000,
@@ -3049,9 +3049,9 @@ test('read-only preparation diagnostic defaults to the real wall clock without a
     legacyDigest: approved.legacyDigest,
     observedAtMs: Date.now(),
   });
-  let acquisitions = 0,
-    staged = 0,
-    serviceEffects = 0;
+  let acquisitions = 0;
+  let staged = 0;
+  let serviceEffects = 0;
   f.io.journal = async () => {
     acquisitions++;
     throw new Error('UNEXPECTED_JOURNAL');

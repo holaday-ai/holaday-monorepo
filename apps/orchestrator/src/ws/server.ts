@@ -163,7 +163,14 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
 
   wss.on('connection', (socket, req) => {
     const pending = work.run(() =>
-      handleConnection(socket, req, authenticateToken, clientStates, work, opts.sessionRevalidationIntervalMs),
+      handleConnection(
+        socket,
+        req,
+        authenticateToken,
+        clientStates,
+        work,
+        opts.sessionRevalidationIntervalMs,
+      ),
     );
     if (!pending) socket.close(1013, 'service unavailable');
     else void pending.catch(() => socket.close(1011, 'request failed'));
@@ -174,7 +181,6 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
     HEARTBEAT_INTERVAL_MS,
   );
   heartbeat.unref();
-
 
   let closing: Promise<void> | undefined;
   return {
@@ -954,11 +960,17 @@ async function handleConnection(
     const userId = state.userId;
     if (!token || !userId) return;
     stopSessionLease = startWebSocketSessionRevalidation({
-      socket, expectedUserId: userId, logger, intervalMs: sessionRevalidationIntervalMs,
+      socket,
+      expectedUserId: userId,
+      logger,
+      intervalMs: sessionRevalidationIntervalMs,
       revalidateSession: async () => {
         let valid = false;
         const pending = work.run(async () => {
-          valid = (await authenticateToken(token)) === userId && state.authToken === token && state.userId === userId;
+          valid =
+            (await authenticateToken(token)) === userId &&
+            state.authToken === token &&
+            state.userId === userId;
         });
         if (!pending) return false;
         await pending;
@@ -1466,8 +1478,7 @@ export async function requestVisionObservationFromSW(
   void timeoutMs;
   void pendingObservations;
   throw new Error(
-    `extension-WS task execution disabled — task ${taskId} tick ${tickIndex} ` +
-      'must run on per-task pool Brave only (P0 safety guard).',
+    `extension-WS task execution disabled — task ${taskId} tick ${tickIndex} must run on per-task pool Brave only (P0 safety guard).`,
   );
 }
 
@@ -1494,8 +1505,7 @@ export async function dispatchVisionActionToSW(
   void timeoutMs;
   void pendingActed;
   throw new Error(
-    `extension-WS task execution disabled — task ${taskId} tick ${tickIndex} ` +
-      'must run on per-task pool Brave only (P0 safety guard).',
+    `extension-WS task execution disabled — task ${taskId} tick ${tickIndex} must run on per-task pool Brave only (P0 safety guard).`,
   );
 }
 // firstConnectedClient was the per-user "pick a client to drive"

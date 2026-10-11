@@ -30,9 +30,7 @@ export function notificationChannelsLoadErrorMessage(
   return pageErrorMessage(err, fallback);
 }
 
-export function notificationChannelsLoadErrorCopy(
-  err: unknown,
-): NotificationChannelLoadErrorCopy {
+export function notificationChannelsLoadErrorCopy(err: unknown): NotificationChannelLoadErrorCopy {
   return {
     title: '通知渠道暂时无法加载',
     body: notificationChannelsLoadErrorMessage(err),
@@ -76,10 +74,7 @@ function normalizeNotificationChannel(value: unknown): NotificationChannelRow | 
 }
 
 function normalizePlatform(value: unknown): NotificationPlatform {
-  return value === 'wecom' ||
-    value === 'feishu' ||
-    value === 'dingtalk' ||
-    value === 'custom'
+  return value === 'wecom' || value === 'feishu' || value === 'dingtalk' || value === 'custom'
     ? value
     : 'custom';
 }
@@ -94,9 +89,7 @@ function safeText(value: unknown): string {
 }
 
 function safeStatus(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? value
-    : null;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

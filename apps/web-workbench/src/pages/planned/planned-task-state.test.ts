@@ -7,11 +7,11 @@ import {
   friendlyLegacyTaskTitle,
   legacyScheduledEvent,
   nextPlannedEndState,
+  ownedPlannedTaskQueryTarget,
   plannedCalendarEmptyState,
   plannedEndsOnPayload,
-  ownedPlannedTaskQueryTarget,
-  plannedRepeatLabel,
   plannedRefreshTargets,
+  plannedRepeatLabel,
   plannedStatusGroup,
   stablePlannedCalendarRange,
   stockRiskRunSummary,
@@ -83,21 +83,13 @@ describe('planned task presentation state', () => {
 
   it('replaces legacy system markers with user-facing titles', () => {
     expect(
-      friendlyLegacyTaskTitle(
-        '__ashare_premarket_briefing__',
-        '__ashare_premarket_briefing__',
-      ),
+      friendlyLegacyTaskTitle('__ashare_premarket_briefing__', '__ashare_premarket_briefing__'),
     ).toBe('A股盘前简报');
     expect(
-      friendlyLegacyTaskTitle(
-        '__ashare_postmarket_briefing__',
-        '__ashare_postmarket_briefing__',
-      ),
+      friendlyLegacyTaskTitle('__ashare_postmarket_briefing__', '__ashare_postmarket_briefing__'),
     ).toBe('A股盘后复盘');
     expect(friendlyLegacyTaskTitle('__internal_job__', 'sch_1')).toBe('旧定时任务');
-    expect(friendlyLegacyTaskTitle('生成每日销售摘要', 'sch_2')).toBe(
-      '生成每日销售摘要',
-    );
+    expect(friendlyLegacyTaskTitle('生成每日销售摘要', 'sch_2')).toBe('生成每日销售摘要');
   });
 
   it('uses friendly titles when mapping legacy calendar events', () => {

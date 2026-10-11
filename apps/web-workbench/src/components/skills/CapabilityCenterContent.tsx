@@ -52,11 +52,7 @@ const CATEGORY_LABELS: Readonly<Record<UiSkill['category'], string>> = {
   管理协作: '工作自动化',
 };
 
-const CATEGORY_DISPLAY_ORDER: readonly UiSkill['category'][] = [
-  '分析决策',
-  '内容运营',
-  '管理协作',
-];
+const CATEGORY_DISPLAY_ORDER: readonly UiSkill['category'][] = ['分析决策', '内容运营', '管理协作'];
 
 export function CapabilityCenterContent({
   skills,
@@ -114,8 +110,7 @@ export function CapabilityCenterContent({
     () =>
       [...groupSkillsByCategory(filteredSkills)].sort(
         (a, b) =>
-          CATEGORY_DISPLAY_ORDER.indexOf(a.category) -
-          CATEGORY_DISPLAY_ORDER.indexOf(b.category),
+          CATEGORY_DISPLAY_ORDER.indexOf(a.category) - CATEGORY_DISPLAY_ORDER.indexOf(b.category),
       ),
     [filteredSkills],
   );
@@ -156,10 +151,9 @@ export function CapabilityCenterContent({
     .filter((skill): skill is UiSkill => skill !== undefined);
   const taskShowcase = Array.from(
     new Map(
-      [activeSkill, ...categoryAnchors, ...secondaryShowcase, ...showcase, ...skills].map((skill) => [
-        skill.id,
-        skill,
-      ]),
+      [activeSkill, ...categoryAnchors, ...secondaryShowcase, ...showcase, ...skills].map(
+        (skill) => [skill.id, skill],
+      ),
     ).values(),
   ).slice(0, 4);
   const suggestedTaskItems = taskShowcase.map((skill) => ({
@@ -298,29 +292,25 @@ export function CapabilityCenterContent({
                   : `正在保存常用技能，请稍候：${taskLabel}`
                 : attachmentUploading
                   ? `文件上传中，请稍候：${taskLabel}`
-                : taskLabel
-                  ? `开始任务：${taskLabel}`
-                  : '开始任务：请先描述任务'
+                  : taskLabel
+                    ? `开始任务：${taskLabel}`
+                    : '开始任务：请先描述任务'
             }
             aria-busy={suggestionUnavailable || attachmentUploading}
             title={
               suggestionUnavailable || attachmentUploading
-                  ? startButtonTitle
-                  : taskLabel
-                    ? manuallySelectedSkill
-                      ? '用已选技能开始任务'
-                      : matchedSkill
-                        ? '用匹配的技能开始任务'
-                        : '进入任务后继续确认所需技能'
-                    : '先描述你想完成的任务'
+                ? startButtonTitle
+                : taskLabel
+                  ? manuallySelectedSkill
+                    ? '用已选技能开始任务'
+                    : matchedSkill
+                      ? '用匹配的技能开始任务'
+                      : '进入任务后继续确认所需技能'
+                  : '先描述你想完成的任务'
             }
             disabled={!taskPrompt || primaryActionUnavailable}
             onClick={() =>
-              onStart(
-                activeSkill,
-                taskPrompt,
-                manuallySelectedSkill ? 'manual' : 'suggested',
-              )
+              onStart(activeSkill, taskPrompt, manuallySelectedSkill ? 'manual' : 'suggested')
             }
             className="inline-flex h-11 shrink-0 items-center justify-center gap-2 self-end rounded-[11px] bg-[#FF0061] px-4 text-[12px] font-semibold text-white shadow-[0_8px_18px_rgba(255,0,97,0.18)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#D91A52] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/30 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-[#D8D3D5] disabled:shadow-none disabled:hover:translate-y-0 motion-reduce:transform-none"
           >
@@ -372,9 +362,7 @@ export function CapabilityCenterContent({
                 ) : (
                   <ListFilter className="h-3.5 w-3.5" aria-hidden />
                 )}
-                <span className="truncate">
-                  {manuallySelectedSkill?.name ?? '选择技能'}
-                </span>
+                <span className="truncate">{manuallySelectedSkill?.name ?? '选择技能'}</span>
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
@@ -486,7 +474,10 @@ export function CapabilityCenterContent({
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-[#FF0061] shadow-[0_0_0_5px_rgba(255,0,97,0.08)]" aria-hidden />
+                <span
+                  className="h-2 w-2 rounded-full bg-[#FF0061] shadow-[0_0_0_5px_rgba(255,0,97,0.08)]"
+                  aria-hidden
+                />
                 <h2
                   id="intent-understanding-title"
                   className="text-[14px] font-semibold text-[#2F2B2E]"
@@ -709,11 +700,7 @@ export function CapabilityCenterContent({
                           role="switch"
                           aria-label={`${skill.enabled ? '取消常用：' : '设为常用：'}${skill.name}`}
                           title={
-                            pending
-                              ? '正在保存'
-                              : skill.enabled
-                                  ? '从常用技能移除'
-                                  : '设为常用技能'
+                            pending ? '正在保存' : skill.enabled ? '从常用技能移除' : '设为常用技能'
                           }
                           aria-checked={skill.enabled}
                           aria-busy={pending}

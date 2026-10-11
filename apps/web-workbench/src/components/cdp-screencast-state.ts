@@ -6,10 +6,7 @@ export const INITIAL_CDP_RECONNECT_STATE: CdpReconnectState = {
   consecutiveFailures: 0,
 };
 
-export type CdpReconnectEvent =
-  | 'socket-opened'
-  | 'frame-ready'
-  | 'socket-closed';
+export type CdpReconnectEvent = 'socket-opened' | 'frame-ready' | 'socket-closed';
 
 export function cdpReconnectTransition(
   state: CdpReconnectState,
@@ -25,10 +22,7 @@ export function cdpReconnectTransition(
   const consecutiveFailures = state.consecutiveFailures + 1;
   return {
     state: { consecutiveFailures },
-    delayMs: Math.min(
-      5_000,
-      500 * 2 ** Math.min(consecutiveFailures - 1, 4),
-    ),
+    delayMs: Math.min(5_000, 500 * 2 ** Math.min(consecutiveFailures - 1, 4)),
   };
 }
 
@@ -85,12 +79,7 @@ export function cdpKeyTransition(
   state: CdpInputBridgeState,
   input: CdpKeyInput,
 ): { state: CdpInputBridgeState; payload: CdpKeyPayload | null } {
-  if (
-    state.composing ||
-    input.isComposing ||
-    input.keyCode === 229 ||
-    input.key === 'Process'
-  ) {
+  if (state.composing || input.isComposing || input.keyCode === 229 || input.key === 'Process') {
     return { state, payload: null };
   }
 
@@ -119,9 +108,7 @@ export function cdpKeyTransition(
   };
 }
 
-export function cdpCompositionStartTransition(
-  _state: CdpInputBridgeState,
-): CdpInputBridgeState {
+export function cdpCompositionStartTransition(_state: CdpInputBridgeState): CdpInputBridgeState {
   return { composing: true, mirroredText: null };
 }
 

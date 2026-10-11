@@ -672,9 +672,7 @@ describe('startVisionLoopTask — Layer 5 executor fallback', () => {
         const { viewportWidth, viewportHeight } = ctx.observation;
         const isFinal = tickCount >= 5;
         return {
-          action: isFinal
-            ? { kind: 'done', summary: 'ending' }
-            : { kind: 'click', x: 1, y: 1 },
+          action: isFinal ? { kind: 'done', summary: 'ending' } : { kind: 'click', x: 1, y: 1 },
           image: {
             base64: 'AA==',
             originalWidth: viewportWidth || 1,

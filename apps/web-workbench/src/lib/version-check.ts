@@ -26,10 +26,7 @@ export function extractBundleHash(html: string): string | null {
  * must be known — a null on either side (couldn't read / network blip) means
  * "don't nag", never a false positive.
  */
-export function isNewVersionAvailable(
-  loaded: string | null,
-  deployed: string | null,
-): boolean {
+export function isNewVersionAvailable(loaded: string | null, deployed: string | null): boolean {
   return !!loaded && !!deployed && loaded !== deployed;
 }
 

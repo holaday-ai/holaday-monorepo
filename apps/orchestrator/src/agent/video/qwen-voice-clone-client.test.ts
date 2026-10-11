@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  QwenVoiceCloneError,
   deleteVoice,
   enrollVoice,
-  QwenVoiceCloneError,
   synthesizeSpeech,
 } from './qwen-voice-clone-client.js';
 
@@ -59,7 +59,11 @@ describe('enrollVoice', () => {
   it('sends X-DashScope-WorkSpace header when workspaceId is set', async () => {
     const { fetchImpl, calls } = jsonQueue([{ body: { output: { voice: 'v1' } } }]);
     await enrollVoice({ apiKey: KEY, audioBase64: 'QUJD', workspaceId: 'ws_9', fetchImpl });
-    expect((calls[0]?.init as RequestInit & { headers: Record<string, string> }).headers['x-dashscope-workspace']).toBe('ws_9');
+    expect(
+      (calls[0]?.init as RequestInit & { headers: Record<string, string> }).headers[
+        'x-dashscope-workspace'
+      ],
+    ).toBe('ws_9');
   });
 
   it('throws no_api_key when key empty', async () => {
@@ -143,7 +147,11 @@ describe('deleteVoice — 清云端声纹 (Phase 3 隐私)', () => {
 
   it('throws no_voice when voiceId is empty; no_api_key when key empty', async () => {
     const { fetchImpl } = jsonQueue([{ body: { output: {} } }]);
-    await expect(deleteVoice({ apiKey: KEY, voiceId: '', fetchImpl })).rejects.toMatchObject({ kind: 'no_voice' });
-    await expect(deleteVoice({ apiKey: '', voiceId: 'v' })).rejects.toMatchObject({ kind: 'no_api_key' });
+    await expect(deleteVoice({ apiKey: KEY, voiceId: '', fetchImpl })).rejects.toMatchObject({
+      kind: 'no_voice',
+    });
+    await expect(deleteVoice({ apiKey: '', voiceId: 'v' })).rejects.toMatchObject({
+      kind: 'no_api_key',
+    });
   });
 });

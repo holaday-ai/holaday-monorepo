@@ -81,10 +81,7 @@ export async function persistAndBroadcastVisionLoopThrow(args: {
     });
     persisted = out.persisted;
   } catch (err) {
-    args.logger.error(
-      { err, taskId: args.taskId },
-      'vision loop: catch-block persist also failed',
-    );
+    args.logger.error({ err, taskId: args.taskId }, 'vision loop: catch-block persist also failed');
     return false;
   }
 
@@ -146,10 +143,7 @@ export async function persistAndBroadcastBrowserDispatchFailure(args: {
       reason: failedReason.slice(0, 200),
     });
   } catch (err) {
-    args.logger.warn(
-      { err, taskId: args.taskId },
-      'browser dispatch: terminal broadcast failed',
-    );
+    args.logger.warn({ err, taskId: args.taskId }, 'browser dispatch: terminal broadcast failed');
   }
 
   return true;
@@ -158,10 +152,7 @@ export async function persistAndBroadcastBrowserDispatchFailure(args: {
 export async function captureBrowserFinalState<TPage>(args: {
   executor: {
     getPage(): Promise<TPage>;
-    screenshot(
-      page: TPage,
-      options: { timeoutMs: number },
-    ): Promise<BrowserScreenshotResult>;
+    screenshot(page: TPage, options: { timeoutMs: number }): Promise<BrowserScreenshotResult>;
   };
   logger: BrowserFinalStateLogger;
   taskId: string;

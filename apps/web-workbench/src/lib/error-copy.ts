@@ -34,7 +34,8 @@ const SYSTEM_TASK_RULES: Rule[] = [
     to: '子任务已取消。',
   },
   {
-    match: /ORCHESTRATOR_RESTART|orchestrator restarted while task was in-flight|服务重启导致任务中断/i,
+    match:
+      /ORCHESTRATOR_RESTART|orchestrator restarted while task was in-flight|服务重启导致任务中断/i,
     to: '服务刚重启过，这个任务没能继续。重新执行会保留旧记录并新开一次。',
   },
   {
@@ -80,27 +81,33 @@ RULES.push(
     to: '浏览器服务暂时不可用，请稍后重试。',
   },
   {
-    match: /扩展.*未连接|no_extension|extension.*not connected|receiving end does not exist|could not establish connection/i,
+    match:
+      /扩展.*未连接|no_extension|extension.*not connected|receiving end does not exist|could not establish connection/i,
     to: '浏览器扩展未连接，请打开 HOLA DAY 扩展后重试。',
   },
   {
-    match: /cannot access contents of (the )?url|extension manifest must request permission|missing host permission|host permission|扩展.*权限|浏览器.*权限不足/i,
+    match:
+      /cannot access contents of (the )?url|extension manifest must request permission|missing host permission|host permission|扩展.*权限|浏览器.*权限不足/i,
     to: '浏览器扩展缺少当前网站权限，请在扩展里允许访问该网站后重试。',
   },
   {
-    match: /bad_args|bad_url|invalid url|expected http\(s\) url|只支持.*http|不支持.*网址|网址.*无效|导航地址无效/i,
+    match:
+      /bad_args|bad_url|invalid url|expected http\(s\) url|只支持.*http|不支持.*网址|网址.*无效|导航地址无效/i,
     to: '网址格式不支持，请使用 http(s) 开头的网页链接后重试。',
   },
   {
-    match: /浏览器扩展连接已断开|扩展.*断开|extension.*disconnect|extension.*closed|socket_closed|message port closed before a response/i,
+    match:
+      /浏览器扩展连接已断开|扩展.*断开|extension.*disconnect|extension.*closed|socket_closed|message port closed before a response/i,
     to: '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。',
   },
   {
-    match: /扩展工具调用超时|浏览器扩展响应超时|extension tool.*timeout|browser tool.*timeout|navigation.*timeout|navigate.*timeout/i,
+    match:
+      /扩展工具调用超时|浏览器扩展响应超时|extension tool.*timeout|browser tool.*timeout|navigation.*timeout|navigate.*timeout/i,
     to: '浏览器响应超时，页面可能仍在加载。请稍后重试。',
   },
   {
-    match: /protocol error|target closed|session closed|socket_closed|websocket.*closed|browser.*disconnected|cdp.*closed/i,
+    match:
+      /protocol error|target closed|session closed|socket_closed|websocket.*closed|browser.*disconnected|cdp.*closed/i,
     to: '浏览器连接中断，请重新执行任务。',
   },
   {

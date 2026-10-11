@@ -17,7 +17,8 @@ export type VideoChoice = 'video' | 'image' | 'cancel' | 'unclear';
 // 否定护栏:任一命中 → 一律取消,优先于确认词(把「不要做」先抓成 cancel)。
 const NEG = /不|别|勿|不要|不用|算了|取消|再想|先不|等等|暂时|拒绝|放弃|先别/;
 // 锚定确认词:必须句首,避免「不要做」里的「做」被当确认;且不含单独的「要/好」。
-const CONFIRM = /^(?:确认|确定|开始制作|开始吧?|开始|做吧|开做|可以开始|生成吧?|就这样|好的?[，,]?(?:开始|确认|制作|做))/;
+const CONFIRM =
+  /^(?:确认|确定|开始制作|开始吧?|开始|做吧|开做|可以开始|生成吧?|就这样|好的?[，,]?(?:开始|确认|制作|做))/;
 const IMAGE = /图片版|静态图|省钱版|用图片|要图片/;
 
 /**
@@ -189,10 +190,7 @@ export function quotePetI2v(
 ): PetVideoQuote {
   const perSec = I2V_CNY_PER_SEC[model]?.[resolution] ?? 0;
   const videoCny = Math.max(1, Math.ceil(durationSeconds * perSec));
-  const message =
-    `将把这张照片生成一条约 ${durationSeconds} 秒的宠物动态视频，预计费用约 ¥${videoCny}` +
-    `（${I2V_LABEL[model]} · ${resolution} · 按 ${durationSeconds} 秒计费）。\n` +
-    `点「确认制作」开始；不需要可「取消」。`;
+  const message = `将把这张照片生成一条约 ${durationSeconds} 秒的宠物动态视频，预计费用约 ¥${videoCny}（${I2V_LABEL[model]} · ${resolution} · 按 ${durationSeconds} 秒计费）。\n点「确认制作」开始；不需要可「取消」。`;
   return { durationSeconds, videoCny, message };
 }
 
@@ -226,18 +224,13 @@ export function quoteCloneVideo(
     : 0;
   const videoCny = Math.max(
     1,
-    Math.ceil(
-      safeDuration * (CLONE_USD_PER_SEC[mode] + lipSyncUsdPerSecond) * USD_TO_CNY,
-    ),
+    Math.ceil(safeDuration * (CLONE_USD_PER_SEC[mode] + lipSyncUsdPerSecond) * USD_TO_CNY),
   );
   const label = mode === 'wan-pro' ? 'Pro' : 'Standard';
   const audioNote = options.hasAudibleAudio
     ? `检测到可听声音，报价已包含 ${options.lipSyncModel.endsWith('/v3') ? 'Sync Lipsync 3.0' : 'Sync Lipsync 2.0'} 口型同步。`
     : '未检测到可听声音，不追加口型同步成本。';
-  const message =
-    `将用 Wan Animate 2.2 ${label} 把主角照片替换进参考视频，按参考视频约 ${safeDuration.toFixed(1)} 秒估算费用约 ¥${videoCny}。\n` +
-    `${audioNote}\n` +
-    `最终按成功输出的实际输出时长计费；失败不计费。点「确认制作」开始；不需要可「取消」。`;
+  const message = `将用 Wan Animate 2.2 ${label} 把主角照片替换进参考视频，按参考视频约 ${safeDuration.toFixed(1)} 秒估算费用约 ¥${videoCny}。\n${audioNote}\n最终按成功输出的实际输出时长计费；失败不计费。点「确认制作」开始；不需要可「取消」。`;
   return { durationSeconds: safeDuration, videoCny, message };
 }
 
@@ -250,9 +243,7 @@ export function quoteCloneVideo(
 //   https://fal.ai/models/fal-ai/sync-lipsync/v2
 //   https://fal.ai/models/fal-ai/sync-lipsync/v3
 //   阿里 Model Studio qwen-tts 计费(按字符)。
-export type IpLipSyncModel =
-  | 'fal-ai/sync-lipsync/v2'
-  | 'fal-ai/sync-lipsync/v3';
+export type IpLipSyncModel = 'fal-ai/sync-lipsync/v2' | 'fal-ai/sync-lipsync/v3';
 const FAL_USD_PER_SECOND: Record<IpLipSyncModel, number> = {
   'fal-ai/sync-lipsync/v2': 3 / 60,
   'fal-ai/sync-lipsync/v3': 8 / 60,
@@ -277,25 +268,20 @@ export function quoteIpVideo(
   const chars = copyText.trim().length;
   const estimatedSeconds = Math.max(1, Math.ceil(chars / IP_ESTIMATED_CHARS_PER_SECOND));
   const usd =
-    estimatedSeconds * FAL_USD_PER_SECOND[model] +
-    (chars / 10_000) * QWEN_USD_PER_10K_CHARS;
+    estimatedSeconds * FAL_USD_PER_SECOND[model] + (chars / 10_000) * QWEN_USD_PER_10K_CHARS;
   const videoCny = Math.max(1, Math.ceil(usd * USD_TO_CNY));
   const maybeTooLong = chars > IP_CHAR_WARN;
-  const modelLabel = model.endsWith('/v3')
-    ? 'Sync Lipsync 3.0'
-    : 'Sync Lipsync 2.0';
-  const message =
-    `将使用已授权的声音 + 出镜底版，通过 ${modelLabel} 生成 IP人物视频，` +
-    `按约 ${estimatedSeconds} 秒口播预估费用 ¥${videoCny}（单条 ≤40 秒）。\n` +
-    (maybeTooLong
-      ? `⚠️ 文案约 ${chars} 字,可能超过 40 秒上限;过长会被拒,请适当截短。\n`
-      : '') +
-    `点「确认制作」开始；不需要可「取消」。`;
+  const modelLabel = model.endsWith('/v3') ? 'Sync Lipsync 3.0' : 'Sync Lipsync 2.0';
+  const message = `将使用已授权的声音 + 出镜底版，通过 ${modelLabel} 生成 IP人物视频，按约 ${estimatedSeconds} 秒口播预估费用 ¥${videoCny}（单条 ≤40 秒）。\n${maybeTooLong ? `⚠️ 文案约 ${chars} 字,可能超过 40 秒上限;过长会被拒,请适当截短。\n` : ''}点「确认制作」开始；不需要可「取消」。`;
   return { chars, videoCny, maybeTooLong, message };
 }
 
 /** Dynamic price quote — videoCny = 真实段数 × 每段秒数 × 选定档/画质单价 × 汇率. */
-export function quoteVideo(segments: number, tier: VideoSource, opts: VideoQuoteOpts = {}): VideoQuote {
+export function quoteVideo(
+  segments: number,
+  tier: VideoSource,
+  opts: VideoQuoteOpts = {},
+): VideoQuote {
   const resolution: Resolution = opts.resolution ?? '1080p';
   const billSec = opts.durationSeconds ?? DEFAULT_BILL_SEC;
   const perSec = VEO_USD_PER_SEC[tier]?.[resolution] ?? 0;

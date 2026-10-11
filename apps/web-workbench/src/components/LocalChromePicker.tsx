@@ -1,5 +1,3 @@
-import { Globe, Loader2, X } from 'lucide-react';
-import * as React from 'react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,6 +6,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { trpc } from '@/lib/trpc';
 import { useTaskStore } from '@/stores/task-store';
+import { Globe, Loader2, X } from 'lucide-react';
+import * as React from 'react';
 
 type Discovery = Awaited<ReturnType<typeof trpc.tasks.localChromeTabs.query>>;
 export function LocalChromePicker({

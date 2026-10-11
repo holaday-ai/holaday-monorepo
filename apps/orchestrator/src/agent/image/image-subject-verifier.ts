@@ -1,9 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
-import type {
-  SubjectConsistencyVerdict,
-  VerifySubjectFn,
-} from './image-runner.js';
+import type { SubjectConsistencyVerdict, VerifySubjectFn } from './image-runner.js';
 
 const VERIFY_MODEL = 'claude-sonnet-4-6';
 const PASS_CONFIDENCE = 0.8;
@@ -39,9 +36,7 @@ function unknown(reason: string): SubjectConsistencyVerdict {
   return { status: 'unknown', confidence: null, reason };
 }
 
-export function createAnthropicSubjectConsistencyVerifier(
-  client: Anthropic,
-): VerifySubjectFn {
+export function createAnthropicSubjectConsistencyVerifier(client: Anthropic): VerifySubjectFn {
   return async ({ subject, candidate, intent }) => {
     try {
       const response = await client.messages.create(
@@ -74,12 +69,7 @@ export function createAnthropicSubjectConsistencyVerifier(
                 },
                 {
                   type: 'text',
-                  text:
-                    `用户要求：${intent}\n\n` +
-                    '严格判断图 B 是否仍是图 A 的同一主体。主体可能是人物、宠物、商品或 IP。' +
-                    '允许背景、光线、姿态、动作、镜头与绘画风格变化；不得因风格变化而放宽身份判断。' +
-                    '重点比较脸型五官、毛色花纹、体态比例、商品结构、Logo/包装关键特征或 IP 核心造型。' +
-                    '若关键身份特征被替换、重塑、混入其他参考图主体，same_subject 必须为 false。',
+                  text: `用户要求：${intent}\n\n严格判断图 B 是否仍是图 A 的同一主体。主体可能是人物、宠物、商品或 IP。允许背景、光线、姿态、动作、镜头与绘画风格变化；不得因风格变化而放宽身份判断。重点比较脸型五官、毛色花纹、体态比例、商品结构、Logo/包装关键特征或 IP 核心造型。若关键身份特征被替换、重塑、混入其他参考图主体，same_subject 必须为 false。`,
                 },
               ],
             },

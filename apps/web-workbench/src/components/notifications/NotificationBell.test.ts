@@ -69,9 +69,7 @@ describe('notificationColor', () => {
 
 describe('scheduledNotificationHref', () => {
   it('deep-links scheduled notifications to their calendar row', () => {
-    expect(scheduledNotificationHref(42)).toBe(
-      '/scheduled?focusScheduledTaskInternalId=42',
-    );
+    expect(scheduledNotificationHref(42)).toBe('/scheduled?focusScheduledTaskInternalId=42');
   });
 
   it('does not navigate when the notification has no scheduled task link', () => {

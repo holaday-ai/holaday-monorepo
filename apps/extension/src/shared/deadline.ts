@@ -28,8 +28,5 @@ function normalizeDeadlineMs(timeoutMs: number): number {
   if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs)) {
     return DEFAULT_DEADLINE_MS;
   }
-  return Math.min(
-    MAX_DEADLINE_MS,
-    Math.max(MIN_DEADLINE_MS, Math.floor(timeoutMs)),
-  );
+  return Math.min(MAX_DEADLINE_MS, Math.max(MIN_DEADLINE_MS, Math.floor(timeoutMs)));
 }

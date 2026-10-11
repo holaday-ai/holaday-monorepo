@@ -23,8 +23,8 @@ const props = () => ({
   commandTitle: () => undefined,
 });
 it('carries user selected period, scope, format and citation preference into research requirements', async () => {
-  const p = props(),
-    user = userEvent.setup();
+  const p = props();
+  const user = userEvent.setup();
   render(
     <ApprovedStockComposer {...p} researchStocks={[{ symbol: '603528', name: '多伦科技' }]} />,
   );
@@ -48,8 +48,8 @@ it('carries user selected period, scope, format and citation preference into res
   expect(stockResearchIntent(p.value, { ...draft, changed: false })).toBe(p.value);
 });
 it('keeps the unavailable data gate and makes collapsed contents inert', async () => {
-  const p = props(),
-    user = userEvent.setup();
+  const p = props();
+  const user = userEvent.setup();
   const { container } = render(<ApprovedStockComposer {...p} submitDisabled />);
   await user.click(screen.getByRole('button', { name: '提交股市任务' }));
   expect(p.onSubmit).not.toHaveBeenCalled();

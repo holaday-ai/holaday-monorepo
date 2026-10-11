@@ -25,8 +25,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { videoParameterIssue } from '@holaday/shared-types';
 import type {
-  ImageGenerateFn,
   ImageGenerateResult as GenerateImagesResult,
+  ImageGenerateFn,
 } from '../image/image-provider-types.js';
 import { ImageProviderError, imageErrorInfo } from '../image/image-provider-types.js';
 import {
@@ -99,9 +99,7 @@ const BASE_NEGATIVE = [
   'garbled text, fake text, gibberish text, misspelled text, unreadable text, incorrect logo, malformed logo,' +
     ' fused hands, fused fingers, missing fingers, extra arm, extra hand, third arm, deformed hands, extra fingers, floating limb, anatomical error',
 ].join(', ');
-const REQUIRED_HAND_OBJECT_NEGATIVE =
-  `${BASE_NEGATIVE}, 物体变形, 主体身份漂移, 物体类别变化, 把手凭空出现或消失, ` +
-  'object morphing, subject identity drift, changing object shape, object category change, handle appearing or disappearing';
+const REQUIRED_HAND_OBJECT_NEGATIVE = `${BASE_NEGATIVE}, 物体变形, 主体身份漂移, 物体类别变化, 把手凭空出现或消失, object morphing, subject identity drift, changing object shape, object category change, handle appearing or disappearing`;
 const OBJECT_ONLY_NEGATIVE = `${BASE_NEGATIVE}, person, people, human, face, hand, hands, arm, arms, body parts, holding object, touching object, picking up object`;
 
 type HumanPresencePolicy = 'explicit-human' | 'object-only' | 'conditional';
@@ -128,12 +126,12 @@ function requiredHandSafeFramingSuffix(userText: string): string {
     : '操作主体初始占画面高度不超过 20%';
   const safeStaging = preserveRequestedMotion
     ? ''
-    : `；动作安全排布：采用固定全桌面宽景，${subjectSize}，主体上下左右始终保留至少 25% 安全留白；` +
-      '让操作主体初始位于画面中央偏下，主体中心在整个动作中始终停留在画面下半部中央区域，不得进入画面上半部；' +
-      (CUP_OBJECT_RE.test(userText)
-        ? '拿起杯子时仅垂直抬升到足以离开桌面的高度，杯底只离开桌面约 3-5 厘米，抬升距离不超过半个杯身高度，桌面始终在杯子下方留有可见空间；' +
-          '若用户要求悬停或停留，必须清楚停留至少 1 秒，再放回原来的桌面落点，保持把手方向与画面大小和开场一致'
-        : '只做完成动作所需的最短稳定轨迹，并在用户要求的位置完成收尾');
+    : `；动作安全排布：采用固定全桌面宽景，${subjectSize}，主体上下左右始终保留至少 25% 安全留白；让操作主体初始位于画面中央偏下，主体中心在整个动作中始终停留在画面下半部中央区域，不得进入画面上半部；${
+        CUP_OBJECT_RE.test(userText)
+          ? '拿起杯子时仅垂直抬升到足以离开桌面的高度，杯底只离开桌面约 3-5 厘米，抬升距离不超过半个杯身高度，桌面始终在杯子下方留有可见空间；' +
+            '若用户要求悬停或停留，必须清楚停留至少 1 秒，再放回原来的桌面落点，保持把手方向与画面大小和开场一致'
+          : '只做完成动作所需的最短稳定轨迹，并在用户要求的位置完成收尾'
+      }`;
   return framing + camera + motion + safeStaging;
 }
 
@@ -149,18 +147,8 @@ function shouldUseRequiredHandCompositionAnchor(userText: string): boolean {
   );
 }
 
-function requiredHandCompositionAnchorPrompt(
-  userText: string,
-  aspectLabel: string,
-): string {
-  return (
-    `生成一张用于视频动作开始前的稳定静帧。参考需求中的场景、操作主体、颜色、材质和环境：${userText}。` +
-    '此时动作尚未发生，人物、手和手臂均不入画，不要表现拿起、悬停或放回。' +
-    `采用${aspectLabel}全桌面宽景，操作主体完整放在画面下半部中央区域，占画面高度不超过 15%，` +
-    '主体上下左右保留至少 30% 安全留白，顶部、底部、左右边界和全部结构件清楚可见；' +
-    '固定机位、真实产品摄影、桌面与主体比例自然。' +
-    COMMON_SCENE_SUFFIX
-  );
+function requiredHandCompositionAnchorPrompt(userText: string, aspectLabel: string): string {
+  return `生成一张用于视频动作开始前的稳定静帧。参考需求中的场景、操作主体、颜色、材质和环境：${userText}。此时动作尚未发生，人物、手和手臂均不入画，不要表现拿起、悬停或放回。采用${aspectLabel}全桌面宽景，操作主体完整放在画面下半部中央区域，占画面高度不超过 15%，主体上下左右保留至少 30% 安全留白，顶部、底部、左右边界和全部结构件清楚可见；固定机位、真实产品摄影、桌面与主体比例自然。${COMMON_SCENE_SUFFIX}`;
 }
 
 function requiredHandFramingRepairInstruction(userText: string): string {
@@ -252,11 +240,7 @@ function requiredHandChoreography(userText: string): string {
     CUP_OBJECT_RE.test(userText) && !EXPLICIT_HANDLE_GRIP_RE.test(userText)
       ? '；用户未指定抓握杯柄时，优先从杯身侧面用单手稳定抓握，保持手指与杯身接触边界清楚，不把手指穿入狭窄杯柄'
       : '；在不改变用户动作意图的前提下，选择接触边界清楚、遮挡较少的自然抓握方式';
-  return (
-    lowRiskGrip +
-    '；采用单一连续镜头并划分清楚时间段：前 20% 建立初始状态，20%-65% 完成核心动作，' +
-    '65%-85% 完成用户要求的放回或收尾，最后 15% 保持稳定终态；不得瞬移、跳切或让主体位置突然跳变'
-  );
+  return `${lowRiskGrip}；采用单一连续镜头并划分清楚时间段：前 20% 建立初始状态，20%-65% 完成核心动作，65%-85% 完成用户要求的放回或收尾，最后 15% 保持稳定终态；不得瞬移、跳切或让主体位置突然跳变`;
 }
 
 function qualityRepairInstruction(
@@ -328,14 +312,8 @@ export function resolveAspect(ar: AspectRatio): {
   }
 }
 
-function resolveWanVideoSize(
-  ar: AspectRatio,
-  resolution: '720p' | '1080p',
-): string {
-  const sizes: Record<
-    '720p' | '1080p',
-    Record<AspectRatio, string>
-  > = {
+function resolveWanVideoSize(ar: AspectRatio, resolution: '720p' | '1080p'): string {
+  const sizes: Record<'720p' | '1080p', Record<AspectRatio, string>> = {
     '720p': {
       '16:9': '1280*720',
       '9:16': '720*1280',
@@ -538,7 +516,13 @@ const dormantGeminiSpeech: typeof synthesizeGeminiSpeech = async () => {
   throw new SimpleVideoError('legacy Gemini TTS client is not wired', 'config', false);
 };
 const dormantGeminiVeo = async (): Promise<VeoResult> => {
-  throw new VeoError('legacy Gemini Veo client is not wired', 'no_api_key', undefined, undefined, false);
+  throw new VeoError(
+    'legacy Gemini Veo client is not wired',
+    'no_api_key',
+    undefined,
+    undefined,
+    false,
+  );
 };
 
 async function generateRequiredHandCompositionAnchor(
@@ -774,13 +758,8 @@ export function createSimplePipelineDeps(
       const durationSeconds = opts.veoDurationSeconds ?? 8;
       const resolution = opts.veoResolution ?? '1080p';
       const completionInstruction = motionCompletionInstruction(durationSeconds);
-      let compositionAnchor:
-        | { data: string; mimeType: 'image/png' | 'image/jpeg' }
-        | undefined;
-      if (
-        isVeoSource(videoSource) &&
-        shouldUseRequiredHandCompositionAnchor(userText)
-      ) {
+      let compositionAnchor: { data: string; mimeType: 'image/png' | 'image/jpeg' } | undefined;
+      if (isVeoSource(videoSource) && shouldUseRequiredHandCompositionAnchor(userText)) {
         compositionAnchor = await generateRequiredHandCompositionAnchor(
           {
             prompt: requiredHandCompositionAnchorPrompt(userText, aspectLabel),
@@ -1060,16 +1039,16 @@ export async function runSimpleVideoCreation(
   }
   const aspect = resolveAspect(opts.aspectRatio ?? '9:16');
   if (visualMode === 'image' && !stillImageReady(cfg)) {
-    throw new SimpleVideoError('Still-image source selected but no image provider is configured', 'config');
+    throw new SimpleVideoError(
+      'Still-image source selected but no image provider is configured',
+      'config',
+    );
   }
   if (visualMode === 'video' && isVeoSource(videoSource) && !veoReady(cfg)) {
     throw new SimpleVideoError('Veo selected but its provider key is not configured', 'config');
   }
   if (visualMode === 'video' && videoSource === 'wanxiang' && !cfg.dashscopeApiKey) {
-    throw new SimpleVideoError(
-      'Wanxiang selected but DASHSCOPE_API_KEY not configured',
-      'config',
-    );
+    throw new SimpleVideoError('Wanxiang selected but DASHSCOPE_API_KEY not configured', 'config');
   }
   const fns = { ...realFns(cfg), ...(svc.overrides ?? {}) };
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
@@ -1226,7 +1205,6 @@ export async function runSimpleVideoCreation(
     totalDurationMs: finalDurationMs,
     segments: result.segments.length,
     visualMode,
-    audioEngine:
-      audioEngines.size > 1 ? 'mixed' : (audioEngines.values().next().value ?? 'qwen'),
+    audioEngine: audioEngines.size > 1 ? 'mixed' : (audioEngines.values().next().value ?? 'qwen'),
   };
 }

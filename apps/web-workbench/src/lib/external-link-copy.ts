@@ -45,10 +45,22 @@ export function needsExternalLinkConfirmation(href: string): boolean {
   const safe = safeExternalHttpHref(href);
   if (!safe) return true;
   const url = new URL(safe);
-  const publishers = ['eastmoney.com', 'cninfo.com.cn', 'sse.com.cn', 'szse.cn', 'gov.cn', 'holaday.ai'];
-  return url.protocol !== 'https:' || Boolean(url.username || url.password) ||
-    [...url.searchParams.keys()].some(key => /redirect|url|target|return|next|continue/i.test(key)) ||
-    !publishers.some(host => url.hostname === host || url.hostname.endsWith(`.${host}`));
+  const publishers = [
+    'eastmoney.com',
+    'cninfo.com.cn',
+    'sse.com.cn',
+    'szse.cn',
+    'gov.cn',
+    'holaday.ai',
+  ];
+  return (
+    url.protocol !== 'https:' ||
+    Boolean(url.username || url.password) ||
+    [...url.searchParams.keys()].some((key) =>
+      /redirect|url|target|return|next|continue/i.test(key),
+    ) ||
+    !publishers.some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`))
+  );
 }
 
 export function openExternalLink(

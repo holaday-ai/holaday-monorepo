@@ -91,7 +91,10 @@ export function makeLayerCVeto(deps: LayerCDeps): LayerCVeto {
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
       deps.logger?.warn({ reason }, 'Layer C: model call failed/timeout → fail-closed BLOCK');
-      return { block: true, reason: `Layer C 调用失败/超时 → fail-closed 拦 (${reason.slice(0, 40)})` };
+      return {
+        block: true,
+        reason: `Layer C 调用失败/超时 → fail-closed 拦 (${reason.slice(0, 40)})`,
+      };
     }
     return parseLayerCVerdict(raw);
   };

@@ -1,5 +1,5 @@
-import { getFeatureFlags } from '../../execution/feature-flags.js';
 import type { SelectedChromeSessionCommand } from '@holaday/shared-types';
+import { getFeatureFlags } from '../../execution/feature-flags.js';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
 import { BrowserControl } from './browser-control.js';
 import { SelectedChromeClient } from './selected-chrome-client.js';

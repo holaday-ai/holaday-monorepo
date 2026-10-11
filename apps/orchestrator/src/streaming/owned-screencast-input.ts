@@ -3,8 +3,8 @@ import type { BrowserInstance } from '../browser-pool/types.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import {
   type AppliedBrowserViewport,
-  type InputEnvelope,
   DeferredScreencastInputBridge,
+  type InputEnvelope,
 } from './screencast-input-bridge.js';
 
 export function createOwnedScreencastInputBridge(options: {

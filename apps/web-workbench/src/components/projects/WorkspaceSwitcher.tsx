@@ -1,5 +1,10 @@
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import type { UiOrganization } from '@/lib/organization-page-state';
 import { cn } from '@/lib/utils';
 import { Building2, ChevronDown, Plus, RefreshCw, UserRound } from 'lucide-react';
@@ -34,15 +39,37 @@ export function WorkspaceSwitcher({
   const stale = Boolean(error && hasOrganizations);
 
   return (
-    <section
-      aria-label="工作区切换"
-      className="hd-workspace-switcher"
-    >
+    <section aria-label="工作区切换" className="hd-workspace-switcher">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <DropdownMenu><DropdownMenuTrigger asChild><button className="hd-workspace-trigger h-11" type="button" title="切换工作区"><Building2 /><span>{organizations.find(item => item.organizationId === selectedOrganizationId)?.name ?? '个人空间'}</span><ChevronDown /></button></DropdownMenuTrigger><DropdownMenuContent align="start">
-          <DropdownMenuItem className="h-11" onSelect={() => onSelectOrganization(null)}><UserRound />个人空间</DropdownMenuItem>
-          {organizations.map(organization => <DropdownMenuItem className="h-11" key={organization.organizationId} onSelect={() => onSelectOrganization(organization.organizationId)}><Building2 />{organization.name}<small>{ORGANIZATION_ROLE_LABEL[organization.role]}</small></DropdownMenuItem>)}
-        </DropdownMenuContent></DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="hd-workspace-trigger h-11" type="button" title="切换工作区">
+              <Building2 />
+              <span>
+                {organizations.find((item) => item.organizationId === selectedOrganizationId)
+                  ?.name ?? '个人空间'}
+              </span>
+              <ChevronDown />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem className="h-11" onSelect={() => onSelectOrganization(null)}>
+              <UserRound />
+              个人空间
+            </DropdownMenuItem>
+            {organizations.map((organization) => (
+              <DropdownMenuItem
+                className="h-11"
+                key={organization.organizationId}
+                onSelect={() => onSelectOrganization(organization.organizationId)}
+              >
+                <Building2 />
+                {organization.name}
+                <small>{ORGANIZATION_ROLE_LABEL[organization.role]}</small>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <div className="flex items-center gap-1.5">
           <Button
             type="button"

@@ -1,5 +1,3 @@
-import { installVncPointerPrecisionBridge } from '@/lib/vnc-pointer-precision';
-import * as React from 'react';
 import { BrowserViewportToolbar } from '@/components/BrowserViewportToolbar';
 import {
   placeScreencastReadableTop,
@@ -7,6 +5,8 @@ import {
   readableScreencastStartScrollLeft,
 } from '@/lib/screencast-fit';
 import { cn } from '@/lib/utils';
+import { installVncPointerPrecisionBridge } from '@/lib/vnc-pointer-precision';
+import * as React from 'react';
 
 // @novnc/novnc's lib/util/browser.js uses top-level await (for
 // WebCodecs capability detection), which Rollup's CJS resolver
@@ -37,8 +37,14 @@ interface RFBInstance {
   resizeSession: boolean;
   viewOnly: boolean;
   background: string;
-  addEventListener: (name: 'connect' | 'disconnect' | 'credentialsrequired' | 'securityfailure', handler: (ev: Event) => void) => void;
-  removeEventListener: (name: 'connect' | 'disconnect' | 'credentialsrequired' | 'securityfailure', handler: (ev: Event) => void) => void;
+  addEventListener: (
+    name: 'connect' | 'disconnect' | 'credentialsrequired' | 'securityfailure',
+    handler: (ev: Event) => void,
+  ) => void;
+  removeEventListener: (
+    name: 'connect' | 'disconnect' | 'credentialsrequired' | 'securityfailure',
+    handler: (ev: Event) => void,
+  ) => void;
   disconnect: () => void;
   sendCredentials: (creds: { username?: string; password?: string }) => void;
 }
@@ -94,10 +100,10 @@ export function VncViewport({
   viewportV2 = false,
   className,
 }: Props): JSX.Element {
-  const [localMode,setLocalMode]=React.useState<'contain'|'original'>('contain');
-  const [zoom,setZoom]=React.useState(1);
-  const [displayScale,setDisplayScale]=React.useState(1);
-  const [pan,setPan]=React.useState({x:0,y:0});
+  const [localMode, setLocalMode] = React.useState<'contain' | 'original'>('contain');
+  const [zoom, setZoom] = React.useState(1);
+  const [displayScale, setDisplayScale] = React.useState(1);
+  const [pan, setPan] = React.useState({ x: 0, y: 0 });
   const viewportRef = React.useRef<HTMLDivElement | null>(null);
   const targetRef = React.useRef<HTMLDivElement | null>(null);
   const rfbRef = React.useRef<RFBInstance | null>(null);
@@ -237,22 +243,33 @@ export function VncViewport({
     const target = targetRef.current;
     if (!viewport || !target) return;
 
-    if (viewportV2 && localMode==='original') {
-      const canvas=target.querySelector('canvas');
-      if(canvas?.width && canvas?.height) {
-        target.style.width=`${canvas.width*zoom}px`; target.style.height=`${canvas.height*zoom}px`;
-        target.style.position='absolute';target.style.left=`${pan.x}px`;target.style.top=`${pan.y}px`;
-        target.style.maxWidth='none';target.style.maxHeight='none';
+    if (viewportV2 && localMode === 'original') {
+      const canvas = target.querySelector('canvas');
+      if (canvas?.width && canvas?.height) {
+        target.style.width = `${canvas.width * zoom}px`;
+        target.style.height = `${canvas.height * zoom}px`;
+        target.style.position = 'absolute';
+        target.style.left = `${pan.x}px`;
+        target.style.top = `${pan.y}px`;
+        target.style.maxWidth = 'none';
+        target.style.maxHeight = 'none';
         setDisplayScale(zoom);
       }
       return;
     }
-    target.style.position='';target.style.left='';target.style.top='';target.style.maxWidth='';target.style.maxHeight='';
+    target.style.position = '';
+    target.style.left = '';
+    target.style.top = '';
+    target.style.maxWidth = '';
+    target.style.maxHeight = '';
     if (viewportV2 || fitMode !== 'readable') {
       target.style.width = '100%';
       target.style.height = '100%';
-      const canvas=target.querySelector('canvas');
-      if(canvas?.width && canvas?.height) setDisplayScale(Math.min(viewport.clientWidth/canvas.width,viewport.clientHeight/canvas.height));
+      const canvas = target.querySelector('canvas');
+      if (canvas?.width && canvas?.height)
+        setDisplayScale(
+          Math.min(viewport.clientWidth / canvas.width, viewport.clientHeight / canvas.height),
+        );
       target.style.marginLeft = '';
       target.style.marginRight = '';
       readableAutoScrollKeyRef.current = null;
@@ -277,10 +294,8 @@ export function VncViewport({
 
     target.style.width = `${placement.width}px`;
     target.style.height = `${placement.height}px`;
-    target.style.marginLeft =
-      placement.width < rect.width ? `${placement.offsetX}px` : '0px';
-    target.style.marginRight =
-      placement.width < rect.width ? `${placement.offsetX}px` : '0px';
+    target.style.marginLeft = placement.width < rect.width ? `${placement.offsetX}px` : '0px';
+    target.style.marginRight = placement.width < rect.width ? `${placement.offsetX}px` : '0px';
 
     const key = readableScreencastAutoScrollKey({
       frameKey: `${wsUrl ?? 'none'}:${sourceWidth}x${sourceHeight}`,
@@ -328,9 +343,13 @@ export function VncViewport({
     let precisionCanvas: HTMLCanvasElement | null = null;
     let disposePrecision: (() => void) | null = null;
     const forceScale = () => {
-      if(viewportV2) {
-        const canvas=target.querySelector('canvas');
-        if(canvas && canvas!==precisionCanvas) {disposePrecision?.();precisionCanvas=canvas;disposePrecision=installVncPointerPrecisionBridge(canvas);}
+      if (viewportV2) {
+        const canvas = target.querySelector('canvas');
+        if (canvas && canvas !== precisionCanvas) {
+          disposePrecision?.();
+          precisionCanvas = canvas;
+          disposePrecision = installVncPointerPrecisionBridge(canvas);
+        }
       }
       recomputeReadableFrame();
       const rfb = rfbRef.current;
@@ -365,25 +384,47 @@ export function VncViewport({
   }, [recomputeReadableFrame, viewportV2]);
 
   return (
-    <div className={cn('relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden', className)}>
-      {viewportV2 && <BrowserViewportToolbar
-        mode={localMode} zoom={zoom} displayScale={displayScale}
-        onFit={() => { setLocalMode('contain'); setPan({x:0,y:0}); }}
-        onOriginal={() => { setLocalMode('original'); setZoom(1); setPan({x:0,y:0}); }}
-        onZoom={() => { setLocalMode('original'); setZoom(localMode === 'contain' ? 1.25 : Math.min(4,zoom+.25)); }}
-        onZoomOut={() => setZoom(z=>Math.max(.25,z-.25))}
-        onPan={(x,y)=>setPan(p=>({x:p.x+x,y:p.y+y}))}
-        readOnly
-      />}
-      <div ref={viewportRef}
-        data-fit-mode={viewportV2 && localMode==='original' ? 'readable' : fitMode}
-        className={cn('vnc-viewport-host relative w-full min-h-0 min-w-0 flex-1',
-          !viewportV2 && fitMode === 'readable' ? 'overflow-auto' : 'overflow-hidden',
-        )}>
+    <div
+      className={cn(
+        'relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden',
+        className,
+      )}
+    >
+      {viewportV2 && (
+        <BrowserViewportToolbar
+          mode={localMode}
+          zoom={zoom}
+          displayScale={displayScale}
+          onFit={() => {
+            setLocalMode('contain');
+            setPan({ x: 0, y: 0 });
+          }}
+          onOriginal={() => {
+            setLocalMode('original');
+            setZoom(1);
+            setPan({ x: 0, y: 0 });
+          }}
+          onZoom={() => {
+            setLocalMode('original');
+            setZoom(localMode === 'contain' ? 1.25 : Math.min(4, zoom + 0.25));
+          }}
+          onZoomOut={() => setZoom((z) => Math.max(0.25, z - 0.25))}
+          onPan={(x, y) => setPan((p) => ({ x: p.x + x, y: p.y + y }))}
+          readOnly
+        />
+      )}
       <div
-        ref={targetRef}
-        className="vnc-viewport-target relative h-full w-full min-h-0 min-w-0"
-      />
+        ref={viewportRef}
+        data-fit-mode={viewportV2 && localMode === 'original' ? 'readable' : fitMode}
+        className={cn(
+          'vnc-viewport-host relative w-full min-h-0 min-w-0 flex-1',
+          !viewportV2 && fitMode === 'readable' ? 'overflow-auto' : 'overflow-hidden',
+        )}
+      >
+        <div
+          ref={targetRef}
+          className="vnc-viewport-target relative h-full w-full min-h-0 min-w-0"
+        />
       </div>
     </div>
   );

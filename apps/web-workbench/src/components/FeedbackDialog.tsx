@@ -1,5 +1,3 @@
-import { Loader2, X } from 'lucide-react';
-import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import {
   FEEDBACK_AUTOCLOSE_MS,
@@ -9,6 +7,8 @@ import {
   feedbackSubmitError,
 } from '@/lib/feedback-dialog-state';
 import { cn } from '@/lib/utils';
+import { Loader2, X } from 'lucide-react';
+import * as React from 'react';
 
 interface Props {
   open: boolean;
@@ -118,10 +118,16 @@ export function FeedbackDialog({ open, onClose, onSubmit }: Props): JSX.Element 
         >
           <X className="h-4 w-4" />
         </button>
-        <h2 id="feedback-dialog-title" className="text-base font-semibold text-[#2F2F2F] dark:text-foreground">
+        <h2
+          id="feedback-dialog-title"
+          className="text-base font-semibold text-[#2F2F2F] dark:text-foreground"
+        >
           给 HOLA DAY 留言
         </h2>
-        <p id="feedback-dialog-hint" className="mt-1 text-xs text-[#595757] dark:text-muted-foreground">
+        <p
+          id="feedback-dialog-hint"
+          className="mt-1 text-xs text-[#595757] dark:text-muted-foreground"
+        >
           Bug、建议、吐槽都欢迎。我们会跟你邮箱回复。
         </p>
         <form

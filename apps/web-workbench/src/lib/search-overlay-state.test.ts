@@ -3,12 +3,12 @@ import {
   nextSearchActiveIndex,
   normalizeSearchOverlayRows,
   searchOverlayCanRetry,
+  searchOverlayErrorMessage,
   searchOverlayNeedsAttention,
   searchOverlayRowCopy,
   searchOverlayRowTone,
-  searchOverlayStatusTone,
-  searchOverlayErrorMessage,
   searchOverlayStatusCopy,
+  searchOverlayStatusTone,
 } from './search-overlay-state';
 
 describe('searchOverlayRowTone — P2-B resting tone', () => {
@@ -130,9 +130,7 @@ describe('search overlay state helpers', () => {
   it('keeps action-needed status visible in mobile search rows', () => {
     expect(searchOverlayNeedsAttention('awaiting_user')).toBe(true);
     expect(searchOverlayNeedsAttention('executing')).toBe(false);
-    expect(searchOverlayNeedsAttention({ status: 'executing', awaitingKind: 'login' })).toBe(
-      true,
-    );
+    expect(searchOverlayNeedsAttention({ status: 'executing', awaitingKind: 'login' })).toBe(true);
 
     expect(
       searchOverlayRowCopy({

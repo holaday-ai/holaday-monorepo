@@ -14,11 +14,7 @@ export function normalizeHistorySummary(value: unknown): HistorySyncSummary | nu
     topDomains?: unknown;
     at?: unknown;
   };
-  if (
-    typeof raw.ingested !== 'number' ||
-    !Number.isFinite(raw.ingested) ||
-    raw.ingested < 0
-  ) {
+  if (typeof raw.ingested !== 'number' || !Number.isFinite(raw.ingested) || raw.ingested < 0) {
     return null;
   }
   const topDomains = Array.isArray(raw.topDomains)
@@ -30,9 +26,7 @@ export function normalizeHistorySummary(value: unknown): HistorySyncSummary | nu
       ).slice(0, MAX_HISTORY_SUMMARY_TOP_DOMAINS)
     : [];
   const at =
-    typeof raw.at === 'number' && Number.isFinite(raw.at) && raw.at > 0
-      ? raw.at
-      : Date.now();
+    typeof raw.at === 'number' && Number.isFinite(raw.at) && raw.at > 0 ? raw.at : Date.now();
   return {
     ingested: Math.floor(raw.ingested),
     topDomains,

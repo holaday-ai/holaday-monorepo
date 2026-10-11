@@ -84,11 +84,7 @@ export function shouldUseTerminalEvidence(inputs: {
   hasFinalEvidence: boolean;
   liveSessionUnavailable: boolean;
 }): boolean {
-  return (
-    inputs.taskIsTerminal &&
-    inputs.hasFinalEvidence &&
-    inputs.liveSessionUnavailable
-  );
+  return inputs.taskIsTerminal && inputs.hasFinalEvidence && inputs.liveSessionUnavailable;
 }
 
 /**
@@ -156,12 +152,7 @@ export function shouldSuspectTerminalBrowserSession(inputs: {
   return inputs.failedAttempts >= 2 || inputs.connectTimedOut;
 }
 
-export type TerminalBrowserRecoveryState =
-  | 'idle'
-  | 'restoring'
-  | 'ready'
-  | 'connected'
-  | 'failed';
+export type TerminalBrowserRecoveryState = 'idle' | 'restoring' | 'ready' | 'connected' | 'failed';
 
 /**
  * A recoverable terminal browser keeps its live viewport mounted while the
@@ -176,11 +167,7 @@ export function terminalBrowserSessionUnavailable(inputs: {
   recoveryState: TerminalBrowserRecoveryState;
   recoveryAttempt: number;
 }): boolean {
-  return (
-    inputs.sessionSuspected &&
-    !inputs.canRestore &&
-    !inputs.hasPresentedFrame
-  );
+  return inputs.sessionSuspected && !inputs.canRestore && !inputs.hasPresentedFrame;
 }
 
 export function isBrowserInteractionActive(inputs: {
@@ -254,9 +241,7 @@ export function terminalEvidenceLayout(inputs: {
   return inputs.sourceAspect > 1.12 ? 'compact-preview' : 'canvas';
 }
 
-export function terminalEvidenceStatusLabel(
-  status: UiTaskStatus | null | undefined,
-): string {
+export function terminalEvidenceStatusLabel(status: UiTaskStatus | null | undefined): string {
   switch (status) {
     case 'completed':
       return '任务已完成';
@@ -296,7 +281,8 @@ export function browserWorkspaceTaskIntent(rawValue: string): string | null {
   if (explicitScheme && !/^https?:\/\//i.test(value)) return null;
   if (/^https?:\/\//i.test(value)) return `打开 ${value}`;
 
-  const domainLike = /^(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63})(?::\d{1,5})?(?:[/?#]\S*)?$/i;
+  const domainLike =
+    /^(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63})(?::\d{1,5})?(?:[/?#]\S*)?$/i;
   if (domainLike.test(value)) return `打开 https://${value}`;
 
   return `打开浏览器并搜索：${value}`;
@@ -336,9 +322,7 @@ export function terminalEvidenceContinuation(
  * workspace. This is only a requested destination, not evidence that the page
  * was reached, so callers must keep it visually marked as a pending target.
  */
-export function browserStartupTargetUrl(
-  intent: string | null | undefined,
-): string | null {
+export function browserStartupTargetUrl(intent: string | null | undefined): string | null {
   if (!intent) return null;
   const match = intent.trim().match(/^打开\s+(https?:\/\/\S+)$/i);
   return match?.[1] ?? null;
@@ -360,9 +344,7 @@ export function taskOwnedBrowserFrame(inputs: {
   return inputs.liveFrame ?? inputs.finalEvidenceFrame;
 }
 
-export type TerminalEvidenceScreenshotSource =
-  | 'saved-screenshot'
-  | 'last-frame';
+export type TerminalEvidenceScreenshotSource = 'saved-screenshot' | 'last-frame';
 
 export interface TerminalEvidenceFrame {
   frame: UiScreencast;
@@ -376,10 +358,7 @@ export interface TerminalEvidenceFrame {
  */
 export function terminalEvidenceFrameForTask(inputs: {
   taskIsTerminal: boolean;
-  task: Pick<
-    UiTask,
-    'finalScreenshot' | 'finalUrl' | 'finalViewport' | 'createdAt'
-  > | null;
+  task: Pick<UiTask, 'finalScreenshot' | 'finalUrl' | 'finalViewport' | 'createdAt'> | null;
   liveFrame: UiScreencast | null;
 }): TerminalEvidenceFrame | null {
   if (!inputs.taskIsTerminal) return null;
@@ -449,7 +428,6 @@ export function browserLiveStatusLabel(status: BrowserLiveStatus): string {
       return '浏览器画面已断开';
     case 'error':
       return '浏览器画面连接失败';
-    case 'idle':
     default:
       return '等待浏览器画面';
   }
@@ -461,7 +439,6 @@ export function browserPanelDotLabel(status: 'idle' | 'live' | 'error'): string 
       return browserLiveStatusLabel('connected');
     case 'error':
       return '需要处理';
-    case 'idle':
     default:
       return browserLiveStatusLabel('idle');
   }
@@ -486,8 +463,7 @@ export function browserPanelHeaderStatus(inputs: {
       showLabel: true,
     };
   }
-  const interactiveOwned =
-    inputs.interactiveOwned ?? inputs.interactiveActive;
+  const interactiveOwned = inputs.interactiveOwned ?? inputs.interactiveActive;
   if (interactiveOwned && !inputs.interactiveActive) {
     return {
       label: '接管保留',
@@ -654,9 +630,7 @@ export function browserViewportFooterLabel(inputs: {
   usingCdp: boolean;
   viewport: { width: number; height: number } | null | undefined;
 }): string {
-  return inputs.usingCdp
-    ? '自适应视口'
-    : browserViewportFrameLabel(inputs.viewport);
+  return inputs.usingCdp ? '自适应视口' : browserViewportFrameLabel(inputs.viewport);
 }
 
 export function browserFrameCanPanInPortraitSheet(inputs: {
@@ -758,9 +732,10 @@ export function browserReleasedCardCopy(): {
   };
 }
 
-export function browserWakeFeedback(
-  status: string | null | undefined,
-): { message: string; tone: 'info' | 'error' } {
+export function browserWakeFeedback(status: string | null | undefined): {
+  message: string;
+  tone: 'info' | 'error';
+} {
   switch (status) {
     case 'ready':
       return { message: '已有任务浏览器可连接，正在刷新画面', tone: 'info' };

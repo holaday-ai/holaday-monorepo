@@ -1,8 +1,8 @@
-import { userBrowserProtocolSchema } from '@holaday/shared-types';
-import { getFeatureFlags } from '../../execution/feature-flags.js';
 import { randomUUID } from 'node:crypto';
+import { userBrowserProtocolSchema } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { getFeatureFlags } from '../../execution/feature-flags.js';
 import { getConnectedExtensionClientIds, sendExtensionToolCall } from '../../ws/server.js';
 import { protectedProcedure } from '../trpc.js';
 

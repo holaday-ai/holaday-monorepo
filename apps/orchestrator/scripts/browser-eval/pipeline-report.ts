@@ -77,7 +77,9 @@ const cell = (row: Row | undefined) =>
     ? `${row.success ? '✅' : row.falsePass ? '❌ 假通过' : '❌'} ${row.status}${row.problems.length > 0 ? `（${row.problems.slice(0, 2).join('；')}）` : ''}`
     : '—';
 const tokens = (row: Row | undefined) =>
-  row ? `${(row.inputTokens / 1000).toFixed(1)}k / ${row.outputTokens} / ${row.modelCalls} 次` : '—';
+  row
+    ? `${(row.inputTokens / 1000).toFixed(1)}k / ${row.outputTokens} / ${row.modelCalls} 次`
+    : '—';
 const lines = [
   '| 任务 | 修复前 | 修复后 | 输入 token / 输出 token / 调用（前 → 后） | 链接 HTTP（后） |',
   '|---|---|---|---|---|',

@@ -22,12 +22,11 @@
 
 export type WebhookPresetPlatform = 'wecom' | 'feishu' | 'dingtalk';
 
-export const WEBHOOK_PLATFORM_HOSTS: Readonly<Record<WebhookPresetPlatform, readonly string[]>> =
-  {
-    wecom: ['qyapi.weixin.qq.com'],
-    feishu: ['open.feishu.cn', 'open.larksuite.com'],
-    dingtalk: ['oapi.dingtalk.com'],
-  };
+export const WEBHOOK_PLATFORM_HOSTS: Readonly<Record<WebhookPresetPlatform, readonly string[]>> = {
+  wecom: ['qyapi.weixin.qq.com'],
+  feishu: ['open.feishu.cn', 'open.larksuite.com'],
+  dingtalk: ['oapi.dingtalk.com'],
+};
 
 const TOKEN = /^[A-Za-z0-9-]{8,128}$/;
 const DINGTALK_TOKEN = /^[A-Za-z0-9]{16,128}$/;

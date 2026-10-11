@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it } from 'vitest';
 
 import {
   AwaitingMarkdown,
@@ -15,9 +15,9 @@ import {
 
 describe('TaskStream markdown sanitizer', () => {
   it('removes a broken bold marker before bare urls', () => {
-    expect(
-      sanitizeMarkdownBrokenBoldUrls('页面链接：**https://en.wikipedia.org/wiki/OpenAI'),
-    ).toBe('页面链接：https://en.wikipedia.org/wiki/OpenAI');
+    expect(sanitizeMarkdownBrokenBoldUrls('页面链接：**https://en.wikipedia.org/wiki/OpenAI')).toBe(
+      '页面链接：https://en.wikipedia.org/wiki/OpenAI',
+    );
   });
 
   it('keeps normal bold text and markdown links intact', () => {
@@ -93,14 +93,14 @@ describe('TaskStream live phase copy', () => {
   });
 
   it('changes live activity key when streaming, progress, or thinking changes', () => {
-    expect(
-      taskStreamLiveActivityKey({ streamingText: 'abc' }),
-    ).not.toBe(taskStreamLiveActivityKey({ streamingText: 'abcd' }));
-    expect(
-      taskStreamLiveActivityKey({ progressMessage: '正在读取页面' }),
-    ).not.toBe(taskStreamLiveActivityKey({ progressMessage: '正在整理结果' }));
-    expect(
-      taskStreamLiveActivityKey({ thinking: '先搜索' }),
-    ).not.toBe(taskStreamLiveActivityKey({ thinking: '再验证' }));
+    expect(taskStreamLiveActivityKey({ streamingText: 'abc' })).not.toBe(
+      taskStreamLiveActivityKey({ streamingText: 'abcd' }),
+    );
+    expect(taskStreamLiveActivityKey({ progressMessage: '正在读取页面' })).not.toBe(
+      taskStreamLiveActivityKey({ progressMessage: '正在整理结果' }),
+    );
+    expect(taskStreamLiveActivityKey({ thinking: '先搜索' })).not.toBe(
+      taskStreamLiveActivityKey({ thinking: '再验证' }),
+    );
   });
 });

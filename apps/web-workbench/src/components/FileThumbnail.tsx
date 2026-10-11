@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
 import { FileTypeBadge, fileTypePresentation } from '@/components/FileTypeBadge';
 import { fetchFileBlobAuthed } from '@/lib/download-file';
+import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 
 let activeLoads = 0;
 const waiting: Array<() => void> = [];

@@ -311,9 +311,7 @@ describe('tRPC tasks.list + tasks.detail', () => {
           data: { tasks: { taskId: string; status: string }[] };
         };
       };
-      expect(body.result.data.tasks.map((t) => t.taskId).sort()).toEqual(
-        [failed, partial].sort(),
-      );
+      expect(body.result.data.tasks.map((t) => t.taskId).sort()).toEqual([failed, partial].sort());
       expect(new Set(body.result.data.tasks.map((t) => t.status))).toEqual(
         new Set(['failed', 'partial_success']),
       );

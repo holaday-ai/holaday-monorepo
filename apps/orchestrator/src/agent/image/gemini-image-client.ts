@@ -163,9 +163,7 @@ function extractInline(part: ResponsePart): { data: string; mimeType: string } |
  * image buffers; rejects with a `GeminiImageError` carrying a typed
  * `kind` for every failure mode.
  */
-export async function generateImages(
-  params: GenerateImagesParams,
-): Promise<GenerateImagesResult> {
+export async function generateImages(params: GenerateImagesParams): Promise<GenerateImagesResult> {
   if (!params.apiKey || params.apiKey.trim() === '') {
     throw new GeminiImageError('GEMINI_API_KEY not configured', 'no_api_key');
   }
@@ -333,8 +331,7 @@ export async function generateImages(
   const text = textChunks.length > 0 ? textChunks.join('\n') : undefined;
 
   if (images.length === 0) {
-    const blockReason =
-      json.promptFeedback?.blockReason ?? json.promptFeedback?.blockReasonMessage;
+    const blockReason = json.promptFeedback?.blockReason ?? json.promptFeedback?.blockReasonMessage;
     if (blockReason || isSafetyFinish(finishReason)) {
       throw new GeminiImageError(
         `Gemini blocked the image request (${blockReason ?? finishReason})`,

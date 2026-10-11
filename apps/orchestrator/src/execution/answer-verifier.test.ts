@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractStructuredItems, reviewListAnswer, verifyDeterministic } from './answer-verifier.js';
-import { CONTENT_TOPIC_WORKFLOW } from './expert-workflow-content-topic.js';
-import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
+import {
+  extractStructuredItems,
+  reviewListAnswer,
+  verifyDeterministic,
+} from './answer-verifier.js';
+import { EvidenceLedger } from './evidence-ledger.js';
 import type { ExecutionContract } from './execution-contract.js';
 import { buildContract } from './execution-contract.js';
-import { EvidenceLedger } from './evidence-ledger.js';
+import { CONTENT_TOPIC_WORKFLOW } from './expert-workflow-content-topic.js';
+import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
 import {
   appendSearchSourceReferences,
   collectSearchSourceReferences,
@@ -88,9 +92,7 @@ describe('verifyDeterministic — empty-result guard (product polish #2)', () =>
     });
     expect(result.passed).toBe(false);
     expect(result.failureLevel).toBe('fixable');
-    const emptyCheck = result.checks.find(
-      (c) => c.criterionId === 'generic.empty_result',
-    );
+    const emptyCheck = result.checks.find((c) => c.criterionId === 'generic.empty_result');
     expect(emptyCheck).toBeDefined();
     expect(emptyCheck?.passed).toBe(false);
     expect(emptyCheck?.severity).toBe('fixable');
@@ -102,13 +104,10 @@ describe('verifyDeterministic — empty-result guard (product polish #2)', () =>
     const result = verifyDeterministic({
       contract,
       ledger,
-      answerText:
-        '## 报告\n\n1. 网站访问量增长了 30%\n2. 用户留存稳定在 80%',
+      answerText: '## 报告\n\n1. 网站访问量增长了 30%\n2. 用户留存稳定在 80%',
     });
     expect(result.passed).toBe(true);
-    const emptyCheck = result.checks.find(
-      (c) => c.criterionId === 'generic.empty_result',
-    );
+    const emptyCheck = result.checks.find((c) => c.criterionId === 'generic.empty_result');
     // No check appended when meaningful >= 20 (the guard returns null).
     expect(emptyCheck).toBeUndefined();
   });
@@ -116,8 +115,7 @@ describe('verifyDeterministic — empty-result guard (product polish #2)', () =>
   it('allows concise single-fact browser answers such as page titles', () => {
     const contract = buildContract({
       taskId: 'tsk_title',
-      intent:
-        '请打开 https://example.com，读取页面标题，并只回复标题是什么。',
+      intent: '请打开 https://example.com，读取页面标题，并只回复标题是什么。',
       executionMode: 'browser',
       targetDomain: 'example.com',
     });
@@ -143,9 +141,7 @@ describe('verifyDeterministic — empty-result guard (product polish #2)', () =>
       finalUrl: 'https://example.com/',
     });
     expect(result.passed).toBe(true);
-    const emptyCheck = result.checks.find(
-      (c) => c.criterionId === 'generic.empty_result',
-    );
+    const emptyCheck = result.checks.find((c) => c.criterionId === 'generic.empty_result');
     expect(emptyCheck).toBeUndefined();
   });
 
@@ -169,9 +165,7 @@ describe('verifyDeterministic — empty-result guard (product polish #2)', () =>
       finalUrl: 'https://example.com/',
     });
     expect(result.passed).toBe(false);
-    const emptyCheck = result.checks.find(
-      (c) => c.criterionId === 'generic.empty_result',
-    );
+    const emptyCheck = result.checks.find((c) => c.criterionId === 'generic.empty_result');
     expect(emptyCheck?.passed).toBe(false);
   });
 
@@ -186,9 +180,7 @@ describe('verifyDeterministic — empty-result guard (product polish #2)', () =>
       answerText: '|   |   |\n|---|---|\n|   |   |\n',
     });
     expect(result.passed).toBe(false);
-    const emptyCheck = result.checks.find(
-      (c) => c.criterionId === 'generic.empty_result',
-    );
+    const emptyCheck = result.checks.find((c) => c.criterionId === 'generic.empty_result');
     expect(emptyCheck?.passed).toBe(false);
   });
 });
@@ -210,9 +202,7 @@ describe('verifyDeterministic — URL fabrication (acceptance #3)', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.failureLevel).toBe('fixable');
-    const groundCheck = result.checks.find(
-      (c) => c.criterionId === 'generic.url_grounding',
-    );
+    const groundCheck = result.checks.find((c) => c.criterionId === 'generic.url_grounding');
     expect(groundCheck).toBeDefined();
     expect(groundCheck!.passed).toBe(false);
     expect(groundCheck!.detail).toContain('made-up-citation');
@@ -225,11 +215,9 @@ describe('verifyDeterministic — URL fabrication (acceptance #3)', () => {
     const result = verifyDeterministic({
       contract,
       ledger,
-      answerText: 'No URLs mentioned. Just plain text. ' + 'x'.repeat(60),
+      answerText: `No URLs mentioned. Just plain text. ${'x'.repeat(60)}`,
     });
-    const groundCheck = result.checks.find(
-      (c) => c.criterionId === 'generic.url_grounding',
-    );
+    const groundCheck = result.checks.find((c) => c.criterionId === 'generic.url_grounding');
     expect(groundCheck).toBeUndefined();
     expect(result.passed).toBe(true);
   });
@@ -245,8 +233,7 @@ describe('verifyDeterministic — URL fabrication (acceptance #3)', () => {
     const result = verifyDeterministic({
       contract,
       ledger,
-      answerText:
-        'See the docs (https://example.com/help). It explains everything you need.',
+      answerText: 'See the docs (https://example.com/help). It explains everything you need.',
     });
     expect(result.passed).toBe(true);
   });
@@ -279,13 +266,10 @@ describe('verifyDeterministic — number cross-validation (acceptance #4)', () =
     const result = verifyDeterministic({
       contract,
       ledger,
-      answerText:
-        '直播复盘报告：本场 GMV ¥200000，订单 500 单，客单价 ¥50。' + 'x'.repeat(60),
+      answerText: `直播复盘报告：本场 GMV ¥200000，订单 500 单，客单价 ¥50。${'x'.repeat(60)}`,
     });
     expect(result.passed).toBe(false);
-    const numCheck = result.checks.find(
-      (c) => c.criterionId === 'generic.number_cross_check',
-    );
+    const numCheck = result.checks.find((c) => c.criterionId === 'generic.number_cross_check');
     expect(numCheck).toBeDefined();
     expect(numCheck!.passed).toBe(false);
     expect(numCheck!.detail).toContain('订单数×客单价');
@@ -318,11 +302,9 @@ describe('verifyDeterministic — number cross-validation (acceptance #4)', () =
     const result = verifyDeterministic({
       contract,
       ledger,
-      answerText: '直播复盘 ' + 'x'.repeat(80),
+      answerText: `直播复盘 ${'x'.repeat(80)}`,
     });
-    const numCheck = result.checks.find(
-      (c) => c.criterionId === 'generic.number_cross_check',
-    );
+    const numCheck = result.checks.find((c) => c.criterionId === 'generic.number_cross_check');
     expect(numCheck).toBeDefined();
     expect(numCheck!.passed).toBe(true);
   });
@@ -339,7 +321,7 @@ describe('verifyDeterministic — number cross-validation (acceptance #4)', () =
     const result = verifyDeterministic({
       contract,
       ledger,
-      answerText: '直播复盘 ' + 'x'.repeat(80),
+      answerText: `直播复盘 ${'x'.repeat(80)}`,
     });
     const numCheck = result.checks.find(
       (check) => check.criterionId === 'generic.number_cross_check',
@@ -361,11 +343,9 @@ describe('verifyDeterministic — number cross-validation (acceptance #4)', () =
     const result = verifyDeterministic({
       contract,
       ledger,
-      answerText: 'Just GMV reported. ' + 'x'.repeat(60),
+      answerText: `Just GMV reported. ${'x'.repeat(60)}`,
     });
-    const numCheck = result.checks.find(
-      (c) => c.criterionId === 'generic.number_cross_check',
-    );
+    const numCheck = result.checks.find((c) => c.criterionId === 'generic.number_cross_check');
     expect(numCheck).toBeUndefined();
     expect(result.passed).toBe(true);
   });
@@ -402,9 +382,7 @@ describe('verifyDeterministic — constraint violations (acceptance #5)', () => 
     });
     expect(result.passed).toBe(false);
     expect(result.failureLevel).toBe('hard_fail');
-    const constraintCheck = result.checks.find(
-      (c) => c.criterionId === 'generic.constraints',
-    );
+    const constraintCheck = result.checks.find((c) => c.criterionId === 'generic.constraints');
     expect(constraintCheck!.passed).toBe(false);
     expect(constraintCheck!.detail).toContain('no_form_submit');
   });
@@ -489,9 +467,7 @@ describe('verifyDeterministic — criterion: word_count', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.failureLevel).toBe('fixable');
-    const wc = result.checks.find((c) =>
-      c.detail.includes('outside'),
-    );
+    const wc = result.checks.find((c) => c.detail.includes('outside'));
     expect(wc).toBeDefined();
   });
 });
@@ -572,9 +548,7 @@ describe('verifyDeterministic — criterion: url_count', () => {
     const result = verifyDeterministic({ contract, ledger, answerText });
 
     expect(result.passed).toBe(true);
-    expect(result.checks.find((check) => check.criterionType === 'url_count')?.passed).toBe(
-      true,
-    );
+    expect(result.checks.find((check) => check.criterionType === 'url_count')?.passed).toBe(true);
     expect(
       result.checks.find((check) => check.criterionId === 'generic.url_grounding')?.passed,
     ).toBe(true);
@@ -641,9 +615,7 @@ describe('verifyDeterministic — criterion: url_count', () => {
     });
 
     expect(result.passed).toBe(false);
-    const grounding = result.checks.find(
-      (c) => c.criterionId === 'generic.url_grounding',
-    );
+    const grounding = result.checks.find((c) => c.criterionId === 'generic.url_grounding');
     expect(grounding?.passed).toBe(false);
   });
 });
@@ -696,12 +668,9 @@ describe('verifyDeterministic — criterion: covers_required_inputs (full tier)'
     const result = verifyDeterministic({
       contract,
       ledger,
-      answerText:
-        '直播复盘：本场 GMV ¥100000，客单价 ¥80。从 ROI 看转化合理，建议下次提升 UV。',
+      answerText: '直播复盘：本场 GMV ¥100000，客单价 ¥80。从 ROI 看转化合理，建议下次提升 UV。',
     });
-    const cri = result.checks.find((c) =>
-      c.detail.includes('provided inputs'),
-    );
+    const cri = result.checks.find((c) => c.detail.includes('provided inputs'));
     expect(cri).toBeDefined();
     expect(cri!.passed).toBe(true);
   });
@@ -727,11 +696,9 @@ describe('verifyDeterministic — criterion: covers_required_inputs (full tier)'
       contract,
       ledger,
       // GMV present, 客单价 absent → fixable
-      answerText: '直播复盘：本场 GMV ¥100000 表现良好。' + 'x'.repeat(200),
+      answerText: `直播复盘：本场 GMV ¥100000 表现良好。${'x'.repeat(200)}`,
     });
-    const cri = result.checks.find((c) =>
-      c.detail.includes('provided inputs missing'),
-    );
+    const cri = result.checks.find((c) => c.detail.includes('provided inputs missing'));
     expect(cri).toBeDefined();
     expect(cri!.passed).toBe(false);
     expect(result.failureLevel).toBe('fixable');
@@ -745,9 +712,7 @@ describe('verifyDeterministic — failure-level priority', () => {
       intent: '复盘',
       executionMode: 'generate',
       expertWorkflowId: 'douyin',
-      requiredInputs: [
-        { name: 'GMV', description: 't', provided: false },
-      ],
+      requiredInputs: [{ name: 'GMV', description: 't', provided: false }],
     });
     const ledger = new EvidenceLedger('tsk_fl');
     const result = verifyDeterministic({
@@ -826,9 +791,7 @@ const fullTierContract = (taskId: string): ExecutionContract =>
     intent: '复盘抖音直播',
     executionMode: 'generate',
     expertWorkflowId: 'douyin-review',
-    requiredInputs: [
-      { name: 'gmv', description: 'GMV', provided: true },
-    ],
+    requiredInputs: [{ name: 'gmv', description: 'GMV', provided: true }],
   });
 
 // Compact but realistic — every required section title and at
@@ -875,12 +838,10 @@ describe('verifyDeterministic — workflow section_presence + source_annotation 
     const result = verifyDeterministic({
       contract,
       ledger: new EvidenceLedger('tsk_no_wf'),
-      answerText: 'Hello world. ' + 'x'.repeat(60),
+      answerText: `Hello world. ${'x'.repeat(60)}`,
       // workflowContract intentionally omitted
     });
-    const sectionCheck = result.checks.find(
-      (c) => c.criterionId === 'workflow.section_presence',
-    );
+    const sectionCheck = result.checks.find((c) => c.criterionId === 'workflow.section_presence');
     const annotationCheck = result.checks.find(
       (c) => c.criterionId === 'workflow.source_annotation',
     );
@@ -904,9 +865,7 @@ describe('verifyDeterministic — workflow section_presence + source_annotation 
       answerText: COMPLETE_REPORT,
       workflowContract: DOUYIN_REVIEW_WORKFLOW,
     });
-    const sectionCheck = result.checks.find(
-      (c) => c.criterionId === 'workflow.section_presence',
-    );
+    const sectionCheck = result.checks.find((c) => c.criterionId === 'workflow.section_presence');
     const annotationCheck = result.checks.find(
       (c) => c.criterionId === 'workflow.source_annotation',
     );
@@ -939,21 +898,16 @@ describe('verifyDeterministic — workflow section_presence + source_annotation 
     });
 
     expect(
-      result.checks.find((check) => check.criterionId === 'workflow.section_presence')
-        ?.passed,
+      result.checks.find((check) => check.criterionId === 'workflow.section_presence')?.passed,
     ).toBe(true);
     expect(
-      result.checks.find((check) => check.criterionId === 'workflow.source_annotation')
-        ?.passed,
+      result.checks.find((check) => check.criterionId === 'workflow.source_annotation')?.passed,
     ).toBe(true);
   });
 
   it('missing required section: section_presence fails as fixable', () => {
     // Drop the "优化动作" section entirely.
-    const truncated = COMPLETE_REPORT.replace(
-      /## 优化动作[\s\S]*?(?=## 下场直播 Checklist)/,
-      '',
-    );
+    const truncated = COMPLETE_REPORT.replace(/## 优化动作[\s\S]*?(?=## 下场直播 Checklist)/, '');
     const contract = fullTierContract('tsk_wf_missing');
     const ledger = new EvidenceLedger('tsk_wf_missing');
     ledger.add({
@@ -968,9 +922,7 @@ describe('verifyDeterministic — workflow section_presence + source_annotation 
       answerText: truncated,
       workflowContract: DOUYIN_REVIEW_WORKFLOW,
     });
-    const sectionCheck = result.checks.find(
-      (c) => c.criterionId === 'workflow.section_presence',
-    );
+    const sectionCheck = result.checks.find((c) => c.criterionId === 'workflow.section_presence');
     expect(sectionCheck).toBeDefined();
     expect(sectionCheck!.passed).toBe(false);
     expect(sectionCheck!.detail).toContain('优化动作');
@@ -1088,9 +1040,7 @@ describe('verifyDeterministic — generic expert claim provenance', () => {
     const result = verifyDeterministic({
       contract: genericExpertContract(taskId),
       ledger,
-      answerText:
-        '建议按认知、考虑、转化三个阶段优化。行业平均注册转化率为 8%，首屏改版通常能提升 20%。' +
-        '每项建议都应设置负责人、验证指标和复盘周期。'.repeat(8),
+      answerText: `建议按认知、考虑、转化三个阶段优化。行业平均注册转化率为 8%，首屏改版通常能提升 20%。${'每项建议都应设置负责人、验证指标和复盘周期。'.repeat(8)}`,
     });
 
     expect(result.passed).toBe(false);
@@ -1115,9 +1065,7 @@ describe('verifyDeterministic — generic expert claim provenance', () => {
     const result = verifyDeterministic({
       contract: genericExpertContract(taskId),
       ledger,
-      answerText:
-        '建议按认知、考虑、转化三个阶段优化。注册转化率 8% 仅作为首轮实验目标 [模型假设]，需要用真实流量校准。' +
-        '每项建议都包含漏斗阶段、具体动作、负责人、验证指标和复盘周期。'.repeat(8),
+      answerText: `建议按认知、考虑、转化三个阶段优化。注册转化率 8% 仅作为首轮实验目标 [模型假设]，需要用真实流量校准。${'每项建议都包含漏斗阶段、具体动作、负责人、验证指标和复盘周期。'.repeat(8)}`,
     });
 
     expect(result.checks).toContainEqual(
@@ -1269,7 +1217,8 @@ describe('extractStructuredItems — JSON code block path', () => {
   });
 
   it('parses ¥-prefixed string price via parsePriceText', () => {
-    const answer = '```json\n{"items":[{"name":"X","price":"¥1,299.99","url":"https://x.com/x"}]}\n```';
+    const answer =
+      '```json\n{"items":[{"name":"X","price":"¥1,299.99","url":"https://x.com/x"}]}\n```';
     const items = extractStructuredItems(answer);
     expect(items[0]!.price).toBeCloseTo(1299.99);
   });
@@ -1582,9 +1531,7 @@ describe('duplicate candidate links', () => {
       sourceDetail: 'goto',
       confidence: 'observed',
     });
-    const answer =
-      `Example Domain 是 IANA 保留用于文档示例的域名，[Wikipedia](${url}) 说明它不面向真实服务。` +
-      '它适合出现在教程、测试说明和不会真实访问第三方系统的示例里。';
+    const answer = `Example Domain 是 IANA 保留用于文档示例的域名，[Wikipedia](${url}) 说明它不面向真实服务。它适合出现在教程、测试说明和不会真实访问第三方系统的示例里。`;
 
     const result = verifyDeterministic({ contract, ledger, answerText: answer });
 
@@ -1613,9 +1560,7 @@ describe('verifyDeterministic — file-artifact consistency', () => {
       answerText: claimAnswer,
       outputFiles: [{ filename: 'screenshot-tsk.jpg', mimetype: 'image/jpeg' }],
     });
-    const check = result.checks.find(
-      (c) => c.criterionId === 'generic.file_artifact_consistency',
-    );
+    const check = result.checks.find((c) => c.criterionId === 'generic.file_artifact_consistency');
     expect(check?.passed).toBe(false);
     expect(check?.severity).toBe('fixable');
     expect(result.passed).toBe(false);
@@ -1637,16 +1582,12 @@ describe('verifyDeterministic — file-artifact consistency', () => {
 
   it('does NOT flag when a holaday-file fence backs the claim', () => {
     const contract = happyChecklistContract('tsk_fa3');
-    const fenced =
-      claimAnswer +
-      '\n\n```holaday-file\n' +
-      JSON.stringify({
-        fileId: 'file_ok',
-        filename: 'productivity-tips.md',
-        size: 200,
-        downloadUrl: '/api/files/file_ok/download',
-      }) +
-      '\n```';
+    const fenced = `${claimAnswer}\n\n\`\`\`holaday-file\n${JSON.stringify({
+      fileId: 'file_ok',
+      filename: 'productivity-tips.md',
+      size: 200,
+      downloadUrl: '/api/files/file_ok/download',
+    })}\n\`\`\``;
     const result = verifyDeterministic({
       contract,
       ledger: new EvidenceLedger('tsk_fa3'),
@@ -1678,8 +1619,7 @@ describe('verifyDeterministic — lightweight Q&A passes with a concise answer',
   it('an explicit concise generate reply is not treated as empty', () => {
     const contract = buildContract({
       taskId: 'tsk_concise_generate',
-      intent:
-        '只回复：HOLA DAY 否定路由烟测通过。不要打开网页，不要访问任何网站，不要使用工具。',
+      intent: '只回复：HOLA DAY 否定路由烟测通过。不要打开网页，不要访问任何网站，不要使用工具。',
       executionMode: 'generate',
     });
     const result = verifyDeterministic({
@@ -1688,9 +1628,7 @@ describe('verifyDeterministic — lightweight Q&A passes with a concise answer',
       answerText: 'HOLA DAY 否定路由烟测通过。',
     });
     expect(result.passed).toBe(true);
-    expect(
-      result.checks.find((c) => c.criterionId === 'generic.empty_result'),
-    ).toBeUndefined();
+    expect(result.checks.find((c) => c.criterionId === 'generic.empty_result')).toBeUndefined();
   });
 
   it('"1 加 1 等于几？" + answer "2" => passed (no empty_result / word_count fail)', () => {
@@ -1705,9 +1643,7 @@ describe('verifyDeterministic — lightweight Q&A passes with a concise answer',
       answerText: '2',
     });
     expect(result.passed).toBe(true);
-    expect(
-      result.checks.find((c) => c.criterionId === 'generic.empty_result'),
-    ).toBeUndefined();
+    expect(result.checks.find((c) => c.criterionId === 'generic.empty_result')).toBeUndefined();
   });
 
   it('greeting "你好" + short reply => passed', () => {
@@ -1750,9 +1686,7 @@ describe('verifyDeterministic — lightweight Q&A passes with a concise answer',
       answerText: 'AI 指人工智能，让机器模拟人类的学习与推理能力。',
     });
     expect(result.passed).toBe(true);
-    expect(
-      result.checks.find((c) => c.criterionId === 'generic.empty_result'),
-    ).toBeUndefined();
+    expect(result.checks.find((c) => c.criterionId === 'generic.empty_result')).toBeUndefined();
   });
 
   it('"100 * 23 等于几？" + answer "2300" => passed', () => {
@@ -1803,36 +1737,58 @@ describe('list_item_sources + multi-line list rows (FIX-BATCH-A)', () => {
   const verify = (contract: ExecutionContract, answerText: string, urls: string[]) => {
     const ledger = new EvidenceLedger(contract.taskId);
     for (const url of urls)
-      ledger.add({ fact: `page_link=${url}`, sourceType: 'browser_state', sourceDetail: 'snapshot', confidence: 'observed' });
+      ledger.add({
+        fact: `page_link=${url}`,
+        sourceType: 'browser_state',
+        sourceDetail: 'snapshot',
+        confidence: 'observed',
+      });
     return verifyDeterministic({ contract, ledger, answerText });
   };
   const listCheck = (result: ReturnType<typeof verifyDeterministic>) =>
     result.checks.find((check) => check.criterionType === 'list_item_sources');
 
   it('fails the acceptance A2 answer: three items, one homepage link', () => {
-    const result = verify(newsContract, news(() => 'https://36kr.com/'), ['https://36kr.com/']);
+    const result = verify(
+      newsContract,
+      news(() => 'https://36kr.com/'),
+      ['https://36kr.com/'],
+    );
     expect(result.passed).toBe(false);
     expect(listCheck(result)?.detail).toBe(
-      ['第 1 条', '第 2 条', '第 3 条'].map((n) => `${n}缺少独立来源链接（不能用首页或搜索页）`).join('；'),
+      ['第 1 条', '第 2 条', '第 3 条']
+        .map((n) => `${n}缺少独立来源链接（不能用首页或搜索页）`)
+        .join('；'),
     );
   });
 
   it('passes distinct article links grounded by the snapshot, with dates', () => {
     const links = [1, 2, 3].map((i) => `https://36kr.com/p/40166389634213${i}`);
-    const result = verify(newsContract, news((i) => links[i - 1] ?? ''), links);
+    const result = verify(
+      newsContract,
+      news((i) => links[i - 1] ?? ''),
+      links,
+    );
     expect(listCheck(result)).toMatchObject({ passed: true });
     expect(result.passed).toBe(true);
   });
 
   it('names a reused link and a missing date', () => {
-    const result = verify(newsContract, news(() => 'https://36kr.com/p/1', false), ['https://36kr.com/p/1']);
+    const result = verify(
+      newsContract,
+      news(() => 'https://36kr.com/p/1', false),
+      ['https://36kr.com/p/1'],
+    );
     expect(listCheck(result)?.detail).toContain('第 2 条缺少独立来源链接（与第 1 条相同）');
     expect(listCheck(result)?.detail).toContain('第 1 条缺少发布日期/时间');
   });
 
   it('reads price and link from the lines under a numbered product (acceptance A1)', () => {
     const answer = [1, 2, 3]
-      .map((i) => `${i}. **ESSONIO 耳机 ${i} 6.0蓝牙**  \n   价格：¥${i}498.00  \n   链接：https://item.jd.com/10${i}.html`)
+      .map(
+        (i) =>
+          `${i}. **ESSONIO 耳机 ${i} 6.0蓝牙**  \n   价格：¥${i}498.00  \n   链接：https://item.jd.com/10${i}.html`,
+      )
       .join('\n\n');
     expect(extractStructuredItems(answer)).toEqual(
       [1, 2, 3].map((i) =>
@@ -1851,11 +1807,14 @@ describe('list_item_sources + multi-line list rows (FIX-BATCH-A)', () => {
     const urls = [1, 2, 3].map((i) => `https://item.jd.com/10${i}.html`);
     expect(verify(contract, answer, urls).passed).toBe(true);
     // The acceptance answer cited the re.jd.com landing page for every row.
-    const landing = answer.replace(/https:\/\/item\.jd\.com\/10\d\.html/g, 'https://re.jd.com/search?keyword=x');
-    const failed = verify(contract, landing, ['https://re.jd.com/search?keyword=x']);
-    expect(failed.checks.find((check) => check.criterionType === 'ecommerce_rows')?.detail).toContain(
-      '第 1、2、3 行使用了搜索页/品类页链接',
+    const landing = answer.replace(
+      /https:\/\/item\.jd\.com\/10\d\.html/g,
+      'https://re.jd.com/search?keyword=x',
     );
+    const failed = verify(contract, landing, ['https://re.jd.com/search?keyword=x']);
+    expect(
+      failed.checks.find((check) => check.criterionType === 'ecommerce_rows')?.detail,
+    ).toContain('第 1、2、3 行使用了搜索页/品类页链接');
   });
 });
 
@@ -1863,7 +1822,12 @@ describe('concise browser action confirmations (FIX-BATCH-A)', () => {
   const verifyShort = (intent: string, answerText: string) => {
     const contract = buildContract({ taskId: `t-${intent}`, intent, executionMode: 'browser' });
     const ledger = new EvidenceLedger(contract.taskId);
-    ledger.add({ fact: '已保存', sourceType: 'browser_state', sourceDetail: 'page', confidence: 'observed' });
+    ledger.add({
+      fact: '已保存',
+      sourceType: 'browser_state',
+      sourceDetail: 'page',
+      confidence: 'observed',
+    });
     return verifyDeterministic({ contract, ledger, answerText }).checks.find(
       (check) => check.criterionId === 'generic.empty_result',
     );
@@ -1887,7 +1851,9 @@ describe('distinct sources are distinct resources, not strings (PR #247 review P
   });
   const answer = (links: string[]) =>
     links
-      .map((link, i) => `${i + 1}. 标题${i + 1}\n   发布日期：2026-10-08 1${i}:00\n   链接：${link}`)
+      .map(
+        (link, i) => `${i + 1}. 标题${i + 1}\n   发布日期：2026-10-08 1${i}:00\n   链接：${link}`,
+      )
       .join('\n\n');
   const review = (links: string[]) => reviewListAnswer(contract, answer(links));
 
@@ -1898,9 +1864,7 @@ describe('distinct sources are distinct resources, not strings (PR #247 review P
         'https://news.example.test/article/42#section2',
         'https://news.example.test/article/42#section3',
       ]),
-    ).toBe(
-      '第 2 条缺少独立来源链接（与第 1 条相同）；第 3 条缺少独立来源链接（与第 1 条相同）',
-    );
+    ).toBe('第 2 条缺少独立来源链接（与第 1 条相同）；第 3 条缺少独立来源链接（与第 1 条相同）');
   });
 
   it('counts tracking-parameter variants of one page as one source', () => {
@@ -1928,7 +1892,10 @@ describe('distinct sources are distinct resources, not strings (PR #247 review P
       executionMode: 'browser',
     });
     const rows = ['a', 'b', 'c']
-      .map((anchor, i) => `${i + 1}. 耳机${i}\n   价格：¥${i}99\n   链接：https://item.jd.com/100.html#${anchor}`)
+      .map(
+        (anchor, i) =>
+          `${i + 1}. 耳机${i}\n   价格：¥${i}99\n   链接：https://item.jd.com/100.html#${anchor}`,
+      )
       .join('\n');
     expect(reviewListAnswer(jd, rows)).toContain('只解析到 1 个唯一商品链接');
   });

@@ -177,7 +177,8 @@ describe('explorer-guards', () => {
     expect(classifyExplorerAction({ kind: 'type', inputType: 'PASSWORD' }).allowed).toBe(false);
     // even with a totally benign accessible name, password type wins.
     expect(
-      classifyExplorerAction({ kind: 'type', inputType: 'password', placeholder: '请输入' }).allowed,
+      classifyExplorerAction({ kind: 'type', inputType: 'password', placeholder: '请输入' })
+        .allowed,
     ).toBe(false);
   });
   it('does NOT over-block: benign signals + ordinary text/search input stay allowed', () => {
@@ -188,11 +189,16 @@ describe('explorer-guards', () => {
     ).toBe(true);
     // typing into a normal search/text field is allowed (explorer browses + searches).
     expect(
-      classifyExplorerAction({ kind: 'type', inputType: 'search', placeholder: '搜索商品', name: 'q' })
-        .allowed,
+      classifyExplorerAction({
+        kind: 'type',
+        inputType: 'search',
+        placeholder: '搜索商品',
+        name: 'q',
+      }).allowed,
     ).toBe(true);
     expect(
-      classifyExplorerAction({ kind: 'type', inputType: 'text', placeholder: '输入关键词' }).allowed,
+      classifyExplorerAction({ kind: 'type', inputType: 'text', placeholder: '输入关键词' })
+        .allowed,
     ).toBe(true);
   });
   it('A3 login-mode EXTRA_RE: blocks 转账/分享/删除/提现 ONLY when loginMode (免登录 unchanged)', () => {
@@ -212,28 +218,39 @@ describe('explorer-guards', () => {
       // 免登录 lane (default): EXTRA_RE controls are NOT in the base list → allowed.
       expect(classifyExplorerAction({ kind: 'click', label }).allowed).toBe(true);
       // login mode: EXTRA_RE thickens → blocked.
-      expect(classifyExplorerAction({ kind: 'click', label }, { loginMode: true }).allowed).toBe(false);
+      expect(classifyExplorerAction({ kind: 'click', label }, { loginMode: true }).allowed).toBe(
+        false,
+      );
     }
     // multi-signal: an icon-only 转账 (sensitive aria) is blocked in login mode.
     expect(
-      classifyExplorerAction({ kind: 'click', label: '🔁', ariaLabel: '转账' }, { loginMode: true }).allowed,
+      classifyExplorerAction({ kind: 'click', label: '🔁', ariaLabel: '转账' }, { loginMode: true })
+        .allowed,
     ).toBe(false);
   });
   it('A3 login-mode does NOT loosen: base-sensitive + submit + password stay blocked in BOTH modes', () => {
     // base sensitive label blocked regardless of mode.
     for (const opts of [{}, { loginMode: true }]) {
-      expect(classifyExplorerAction({ kind: 'click', label: '立即支付' }, opts).allowed).toBe(false);
+      expect(classifyExplorerAction({ kind: 'click', label: '立即支付' }, opts).allowed).toBe(
+        false,
+      );
       expect(classifyExplorerAction({ kind: 'submit', label: 'x' }, opts).allowed).toBe(false);
-      expect(classifyExplorerAction({ kind: 'type', inputType: 'password' }, opts).allowed).toBe(false);
+      expect(classifyExplorerAction({ kind: 'type', inputType: 'password' }, opts).allowed).toBe(
+        false,
+      );
       // a benign control stays allowed even in login mode (no over-block).
-      expect(classifyExplorerAction({ kind: 'click', label: 'Read the docs' }, opts).allowed).toBe(true);
+      expect(classifyExplorerAction({ kind: 'click', label: 'Read the docs' }, opts).allowed).toBe(
+        true,
+      );
     }
   });
   it('A3 EXTRA_RE precision: benign onboarding text NOT over-blocked, real combos still vetoed', () => {
     // todoist login run FALSE POSITIVE: bare 清空/永久/公开 matched onboarding text ("清空您的大脑")
     // → premature halt. Tightened to combos. These benign labels must NOT veto in login mode:
     for (const label of ['清空您的大脑', '清空大脑', '永久免费', '公开课', '公开页面']) {
-      expect(classifyExplorerAction({ kind: 'click', label }, { loginMode: true }).allowed).toBe(true);
+      expect(classifyExplorerAction({ kind: 'click', label }, { loginMode: true }).allowed).toBe(
+        true,
+      );
     }
     // the REAL destructive / share combos still vetoed in login mode (incl. 清空收件箱 = bulk-delete,
     // the BOSS-flagged gap — a destructive 清空 combo, distinct from the benign onboarding "清空您的大脑"):
@@ -250,7 +267,9 @@ describe('explorer-guards', () => {
       '删除项目',
       '转账',
     ]) {
-      expect(classifyExplorerAction({ kind: 'click', label }, { loginMode: true }).allowed).toBe(false);
+      expect(classifyExplorerAction({ kind: 'click', label }, { loginMode: true }).allowed).toBe(
+        false,
+      );
     }
   });
 
@@ -260,9 +279,21 @@ describe('explorer-guards', () => {
     // EXTRA-only (NOT in base; 立即预订/确认预订/下单/去支付… are already in base → blocked both modes,
     // so they belong to ⑤ not here):
     for (const label of [
-      '继续预订', '占座', '选座', '锁定座位', '担保',
-      'book now', 'reserve', 'hold seat', '添加出行人', '添加乘客', '新增联系人', '填写证件', '保存出行人',
-      'add traveler', 'add passenger',
+      '继续预订',
+      '占座',
+      '选座',
+      '锁定座位',
+      '担保',
+      'book now',
+      'reserve',
+      'hold seat',
+      '添加出行人',
+      '添加乘客',
+      '新增联系人',
+      '填写证件',
+      '保存出行人',
+      'add traveler',
+      'add passenger',
     ]) {
       expect(classifyExplorerAction({ kind: 'click', label }, LOGIN).allowed).toBe(false); // login 拦
       expect(classifyExplorerAction({ kind: 'click', label }).allowed).toBe(true); // 免登录放行
@@ -274,16 +305,29 @@ describe('explorer-guards', () => {
     }
   });
   it('🏨③ 层B 结构：提交型控件 + 中性"继续/下一步" → 拦；非提交型 → 不拦', () => {
-    expect(classifyExplorerAction({ kind: 'click', label: '继续', tagName: 'button' }, LOGIN).allowed).toBe(false);
-    expect(classifyExplorerAction({ kind: 'click', label: '下一步', tagName: 'button' }, LOGIN).allowed).toBe(false);
     expect(
-      classifyExplorerAction({ kind: 'click', label: 'Continue', tagName: 'input', inputType: 'submit' }, LOGIN).allowed,
+      classifyExplorerAction({ kind: 'click', label: '继续', tagName: 'button' }, LOGIN).allowed,
+    ).toBe(false);
+    expect(
+      classifyExplorerAction({ kind: 'click', label: '下一步', tagName: 'button' }, LOGIN).allowed,
+    ).toBe(false);
+    expect(
+      classifyExplorerAction(
+        { kind: 'click', label: 'Continue', tagName: 'input', inputType: 'submit' },
+        LOGIN,
+      ).allowed,
     ).toBe(false);
     // NON-submit control with the SAME neutral label → layer-B does NOT fire (no over-block of links/spans)
-    expect(classifyExplorerAction({ kind: 'click', label: '继续', tagName: 'span' }, LOGIN).allowed).toBe(true);
-    expect(classifyExplorerAction({ kind: 'click', label: '继续阅读', tagName: 'a' }, LOGIN).allowed).toBe(true);
+    expect(
+      classifyExplorerAction({ kind: 'click', label: '继续', tagName: 'span' }, LOGIN).allowed,
+    ).toBe(true);
+    expect(
+      classifyExplorerAction({ kind: 'click', label: '继续阅读', tagName: 'a' }, LOGIN).allowed,
+    ).toBe(true);
     // 免登录: layer B never fires (submit button + 继续 allowed)
-    expect(classifyExplorerAction({ kind: 'click', label: '继续', tagName: 'button' }).allowed).toBe(true);
+    expect(
+      classifyExplorerAction({ kind: 'click', label: '继续', tagName: 'button' }).allowed,
+    ).toBe(true);
   });
   it('🏨②⑥ 交易页反转：login + 交易阶段 pageUrl → 非白名单 click 默认拦；白名单放行；spy 内层 never 调（halt 前拦）', () => {
     const tx = (label: string, extra: Record<string, unknown> = {}) =>
@@ -304,23 +348,40 @@ describe('explorer-guards', () => {
     expect(tx('取消').allowed).toBe(true);
     // 反转只在交易页：同样中性 click 在非交易页 → 放行
     expect(
-      classifyExplorerAction({ kind: 'click', label: '点这里', pageUrl: 'https://www.trip.com/flights/search' }, LOGIN)
-        .allowed,
+      classifyExplorerAction(
+        { kind: 'click', label: '点这里', pageUrl: 'https://www.trip.com/flights/search' },
+        LOGIN,
+      ).allowed,
     ).toBe(true);
     // 免登录: 反转不触发 (交易页 + 中性 click 放行)
     expect(
-      classifyExplorerAction({ kind: 'click', label: '点这里', pageUrl: 'https://www.trip.com/booking/confirm' }).allowed,
+      classifyExplorerAction({
+        kind: 'click',
+        label: '点这里',
+        pageUrl: 'https://www.trip.com/booking/confirm',
+      }).allowed,
     ).toBe(true);
   });
   it('🏨④ benign 不误拦 (login-mode, 非交易页)：搜索/查看/筛选/改日期/返回 放行', () => {
     for (const label of ['搜索航班', '查看详情', '筛选', '改日期', '返回', '排序', '展开更多']) {
       expect(
-        classifyExplorerAction({ kind: 'click', label, pageUrl: 'https://www.trip.com/flights' }, LOGIN).allowed,
+        classifyExplorerAction(
+          { kind: 'click', label, pageUrl: 'https://www.trip.com/flights' },
+          LOGIN,
+        ).allowed,
       ).toBe(true);
     }
   });
   it('🏨⑤ 既有红线不回归 (login-mode 仍拦)：转账/删除/分享/Copy link/清空收件箱/支付/登录', () => {
-    for (const label of ['转账', '删除任务', '分享', 'Copy link', '清空收件箱', '立即支付', '登录']) {
+    for (const label of [
+      '转账',
+      '删除任务',
+      '分享',
+      'Copy link',
+      '清空收件箱',
+      '立即支付',
+      '登录',
+    ]) {
       expect(classifyExplorerAction({ kind: 'click', label }, LOGIN).allowed).toBe(false);
     }
   });
@@ -357,20 +418,28 @@ describe('explorer-guards', () => {
 
   // ════ pageTxSignal 收窄 (extractTxFieldSignal — 只认真表单字段, 不认页脚 prose) ════
   it('🔎① 页脚/正文 prose (Payment methods/支付方式, 无真字段) → 空 → 不触发 (trip 首页误触修)', () => {
-    expect(extractTxFieldSignal('Payment methods | Secure payment 24/7 | 支付方式 | 帮助中心')).toBe('');
+    expect(
+      extractTxFieldSignal('Payment methods | Secure payment 24/7 | 支付方式 | 帮助中心'),
+    ).toBe('');
     expect(extractTxFieldSignal('')).toBe('');
   });
   it('🔎② 真 passenger/payment input 字段 → 出信号 (仍触发)', () => {
-    const s = extractTxFieldSignal('passengerName 出行人姓名 idCardNo 证件号码 cardNumber cvv expiryDate 持卡人');
+    const s = extractTxFieldSignal(
+      'passengerName 出行人姓名 idCardNo 证件号码 cardNumber cvv expiryDate 持卡人',
+    );
     expect(s.length).toBeGreaterThan(0);
     expect(s).toMatch(/passenger|出行人/);
     expect(s).toMatch(/cardnumber|cvv|持卡人/);
   });
   it('🔎④ benign 查机票字段 (fromCity/date/cabin) → 空 → 不触发', () => {
-    expect(extractTxFieldSignal('fromCity toCity departDate returnDate cabin adults children promoCode')).toBe('');
+    expect(
+      extractTxFieldSignal('fromCity toCity departDate returnDate cabin adults children promoCode'),
+    ).toBe('');
   });
   it('🔎 去重 + ≤8 + 去空格', () => {
-    expect(extractTxFieldSignal('passenger passenger 出行人 出行人').split(',').length).toBeLessThanOrEqual(8);
+    expect(
+      extractTxFieldSignal('passenger passenger 出行人 出行人').split(',').length,
+    ).toBeLessThanOrEqual(8);
     expect(extractTxFieldSignal('card number')).toBe('cardnumber'); // \\s 去掉
   });
   it('blocks navigation to pay / login / auth urls (incl. review leaks); allows a doc url', () => {

@@ -16,9 +16,6 @@
  *      bridge regardless of provider)
  */
 
-import { AlertCircle, CheckCircle2, ExternalLink, Loader2, X } from 'lucide-react';
-import * as React from 'react';
-import * as QRCode from 'qrcode';
 import {
   cnPaymentProviderLabel,
   cnPaymentProviderMark,
@@ -28,6 +25,9 @@ import {
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import type { AddonPackId, BillingCycle, PaidPlanId } from '@holaday/shared-types';
+import { AlertCircle, CheckCircle2, ExternalLink, Loader2, X } from 'lucide-react';
+import * as QRCode from 'qrcode';
+import * as React from 'react';
 
 export type CnProvider = 'wechat' | 'alipay';
 
@@ -208,17 +208,13 @@ export function CnPaymentDialog({
               {providerMark}
             </div>
             <div className="min-w-0">
-              <div className="text-[11px] font-medium text-[#595757]">
-                安全支付
-              </div>
+              <div className="text-[11px] font-medium text-[#595757]">安全支付</div>
               <h3 className="mt-0.5 text-base font-semibold">{providerName}</h3>
               {description && (
                 <p className="mt-0.5 text-xs leading-5 text-[#595757]">{description}</p>
               )}
               {formattedAmount && (
-                <div className="mt-2 text-2xl font-semibold tracking-tight">
-                  {formattedAmount}
-                </div>
+                <div className="mt-2 text-2xl font-semibold tracking-tight">{formattedAmount}</div>
               )}
             </div>
           </div>

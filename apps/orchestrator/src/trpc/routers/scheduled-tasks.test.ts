@@ -65,8 +65,7 @@ function makeCtx(rows: ScheduledRow[], userExternalId = 'usr_test') {
                   if (tName === 'scheduled_tasks') {
                     const hit = rows.find(
                       (r) =>
-                        s.includes(`value: '${r.externalId}'`) &&
-                        s.includes(`value: ${r.userId}`),
+                        s.includes(`value: '${r.externalId}'`) && s.includes(`value: ${r.userId}`),
                     );
                     return hit
                       ? [
@@ -74,8 +73,7 @@ function makeCtx(rows: ScheduledRow[], userExternalId = 'usr_test') {
                             status: hit.status,
                             repeatType: hit.repeatType ?? 'once',
                             rrule: hit.rrule ?? null,
-                            nextRunAt:
-                              hit.nextRunAt ?? new Date(Date.now() + 60 * 60_000),
+                            nextRunAt: hit.nextRunAt ?? new Date(Date.now() + 60 * 60_000),
                           },
                         ]
                       : [];
@@ -248,9 +246,7 @@ describe('scheduledTasksRouter — pause / resume are gone (Codex follow-up)', (
 
 describe('scheduledTasksRouter.update — reminder claim reset', () => {
   it('resets lastReminderRun when the schedule time changes', async () => {
-    const { ctx, updates } = makeCtx([
-      { externalId: 'sch_move', status: 'active', userId: 42 },
-    ]);
+    const { ctx, updates } = makeCtx([{ externalId: 'sch_move', status: 'active', userId: 42 }]);
     const caller = scheduledTasksRouter.createCaller(ctx);
     const next = new Date(Date.now() + 2 * 24 * 60 * 60_000).toISOString();
     await expect(
@@ -367,9 +363,7 @@ describe('scheduledTasksRouter.update — reminder claim reset', () => {
   });
 
   it('resets lastReminderRun when recurrence or reminder settings change', async () => {
-    const { ctx, updates } = makeCtx([
-      { externalId: 'sch_recur', status: 'active', userId: 42 },
-    ]);
+    const { ctx, updates } = makeCtx([{ externalId: 'sch_recur', status: 'active', userId: 42 }]);
     const caller = scheduledTasksRouter.createCaller(ctx);
     await expect(
       caller.update({
@@ -390,9 +384,7 @@ describe('scheduledTasksRouter.update — reminder claim reset', () => {
   });
 
   it('does not reset lastReminderRun for presentation-only edits', async () => {
-    const { ctx, updates } = makeCtx([
-      { externalId: 'sch_note', status: 'active', userId: 42 },
-    ]);
+    const { ctx, updates } = makeCtx([{ externalId: 'sch_note', status: 'active', userId: 42 }]);
     const caller = scheduledTasksRouter.createCaller(ctx);
     await expect(
       caller.update({

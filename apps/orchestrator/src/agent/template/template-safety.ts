@@ -180,10 +180,7 @@ export function detectFormat(entries: readonly ZipEntry[]): TemplateFormat | nul
  * (ends `.main`, no `+xml`) in every plain .xlsx — matching that would
  * reject every normal spreadsheet.
  */
-export function hasMacro(
-  entries: readonly ZipEntry[],
-  contentTypesXml: string | null,
-): boolean {
+export function hasMacro(entries: readonly ZipEntry[], contentTypesXml: string | null): boolean {
   if (entries.some((e) => /(^|\/)vbaProject\.bin$/i.test(e.name))) return true;
   if (contentTypesXml && /macroEnabled\.main\+xml/i.test(contentTypesXml)) {
     return true;
@@ -207,8 +204,7 @@ export function findExternalRelThreat(relsXml: string): string | null {
     const target = (tag.match(/\bTarget="([^"]*)"/i)?.[1] ?? '').trim();
     const mode = (tag.match(/\bTargetMode="([^"]*)"/i)?.[1] ?? '').trim();
     const typeLeaf = type.split('/').pop() ?? type;
-    const isExternal =
-      mode.toLowerCase() === 'external' || /^(https?:|file:|\\\\)/i.test(target);
+    const isExternal = mode.toLowerCase() === 'external' || /^(https?:|file:|\\\\)/i.test(target);
     if (isExternal && DANGEROUS_REL_TYPE.test(typeLeaf)) {
       return `${typeLeaf} → ${target.slice(0, 80)}`;
     }

@@ -2,7 +2,9 @@ import type { AccountClosureRequestStatus } from './types.js';
 
 export const ACCOUNT_CLOSURE_GRACE_MS = 7 * 24 * 60 * 60 * 1_000;
 
-const REQUEST_TRANSITIONS: Readonly<Record<AccountClosureRequestStatus, readonly AccountClosureRequestStatus[]>> = {
+const REQUEST_TRANSITIONS: Readonly<
+  Record<AccountClosureRequestStatus, readonly AccountClosureRequestStatus[]>
+> = {
   pending_grace: ['cancelled', 'processing'],
   cancelled: [],
   processing: ['needs_attention', 'completed'],

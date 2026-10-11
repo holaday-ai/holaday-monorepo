@@ -1,4 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import type { DraftAttachment } from '@/components/AttachmentChip';
+import { CreativeReferenceLibrary } from '@/components/CreativeReferenceLibrary';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import {
   ArrowUp,
   ChevronDown,
@@ -12,18 +23,7 @@ import {
   Plus,
   X,
 } from 'lucide-react';
-import { CreativeReferenceLibrary } from '@/components/CreativeReferenceLibrary';
-import type { DraftAttachment } from '@/components/AttachmentChip';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { uploadFile, uploadFailureMessage } from '@/lib/upload-file';
+import { useEffect, useRef, useState } from 'react';
 
 export interface StockResearchDraft {
   scope: string;
@@ -70,20 +70,20 @@ export function ApprovedStockComposer({
   isCommandDisabled: (command: string) => boolean;
   commandTitle: (command: string) => string | undefined;
 }) {
-  const [collapsed, setCollapsed] = useState(false),
-    [expanded, setExpanded] = useState(false);
-  const [scope, setScope] = useState('我的关注'),
-    [period, setPeriod] = useState('最近交易日'),
-    [output, setOutput] = useState('要点摘要');
-  const [citeSources, setCiteSources] = useState(true),
-    [changed, setChanged] = useState(false);
-  const [attachments, setAttachments] = useState<DraftAttachment[]>([]),
-    [uploading, setUploading] = useState(false),
-    [uploadError, setUploadError] = useState('');
+  const [collapsed, setCollapsed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [scope, setScope] = useState('我的关注');
+  const [period, setPeriod] = useState('最近交易日');
+  const [output, setOutput] = useState('要点摘要');
+  const [citeSources, setCiteSources] = useState(true);
+  const [changed, setChanged] = useState(false);
+  const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const libraryAnchor = useRef<HTMLButtonElement>(null),
-    fileInput = useRef<HTMLInputElement>(null),
-    alive = useRef(true);
+  const libraryAnchor = useRef<HTMLButtonElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
     return () => {

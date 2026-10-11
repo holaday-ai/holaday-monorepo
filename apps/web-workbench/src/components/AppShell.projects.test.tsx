@@ -71,7 +71,9 @@ vi.mock('@/components/Skeleton', () => ({ AppSkeleton: () => <div>启动中</div
 vi.mock('@/components/UpdateBanner', () => ({ UpdateBanner: () => null }));
 vi.mock('@/components/UserMenu', () => ({
   UserMenu: ({ onLogout }: { onLogout: () => void }) => (
-    <button type="button" onClick={onLogout}>测试退出登录</button>
+    <button type="button" onClick={onLogout}>
+      测试退出登录
+    </button>
   ),
 }));
 

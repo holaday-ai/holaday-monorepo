@@ -50,8 +50,12 @@ export function VideoCreationScenarioPicker({
               ) : null}
               <span className="block px-4 py-3.5">
                 <span className="mb-2 flex flex-wrap gap-1.5 text-[10px] font-semibold text-[var(--creative-muted,#7C7380)]">
-                  <span className="rounded-full bg-[var(--creative-surface,#F6F2F6)] px-2 py-1">{scenario.aspect}</span>
-                  <span className="rounded-full bg-[var(--creative-surface,#F6F2F6)] px-2 py-1">{scenario.duration}</span>
+                  <span className="rounded-full bg-[var(--creative-surface,#F6F2F6)] px-2 py-1">
+                    {scenario.aspect}
+                  </span>
+                  <span className="rounded-full bg-[var(--creative-surface,#F6F2F6)] px-2 py-1">
+                    {scenario.duration}
+                  </span>
                 </span>
                 <span className="block text-[16px] font-semibold text-[var(--creative-ink,#302936)]">
                   {scenario.title}

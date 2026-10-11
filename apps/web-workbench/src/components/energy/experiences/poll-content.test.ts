@@ -12,7 +12,9 @@ describe('poll content', () => {
       for (const option of poll.options) {
         expect(option.interpretation.length).toBeGreaterThan(0);
         expect(option.suggestion.length).toBeGreaterThan(0);
-        expect(`${option.label}${option.interpretation}${option.suggestion}`).not.toMatch(/%|全网|用户选择/);
+        expect(`${option.label}${option.interpretation}${option.suggestion}`).not.toMatch(
+          /%|全网|用户选择/,
+        );
       }
     }
   });

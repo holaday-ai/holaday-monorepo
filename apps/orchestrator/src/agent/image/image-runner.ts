@@ -245,7 +245,12 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
       const next = candidates[index + 1];
       if (next && shouldTryFallback(err)) {
         opts.logger.warn(
-          { kind: info?.kind ?? 'unknown', status: info?.status, from: choice.model, to: next.model },
+          {
+            kind: info?.kind ?? 'unknown',
+            status: info?.status,
+            from: choice.model,
+            to: next.model,
+          },
           routed
             ? 'image: model unavailable — falling back to next routed model'
             : 'image: Pro overloaded — degrading to NB2',

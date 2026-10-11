@@ -5,8 +5,8 @@ import { browserReplayStore } from '../../agent/browser-tools/browser-replay-ser
 import { env } from '../../config/env.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
-import { protectedProcedure, router } from '../trpc.js';
 import type { Context } from '../context.js';
+import { protectedProcedure, router } from '../trpc.js';
 
 async function requireOwner(ctx: Context, taskId: string) {
   const [task] = await ctx.db

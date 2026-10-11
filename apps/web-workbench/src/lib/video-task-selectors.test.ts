@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest';
 import type { UiStep } from '@/types/task';
+import { describe, expect, it } from 'vitest';
 import {
   EMPTY_STEPS,
-  currentMediaTaskTitle,
   currentMediaTaskText,
+  currentMediaTaskTitle,
   hydrateMissingMediaTask,
   isVideoTaskRunning,
   resolveVideoAwaitingKind,
@@ -36,7 +36,7 @@ function snapshotStabilises(getSnapshot: () => unknown, maxChecks = 100): boolea
 describe('selectStepsFor — #185 regression (referentially-stable snapshot)', () => {
   it('documents the BUG: an inline `?? []` selector is NOT stable (this is what looped)', () => {
     const state: StepsState = { stepsByTask: {} };
-    const buggy = (s: StepsState): readonly UiStep[] => s.stepsByTask['tsk_x'] ?? [];
+    const buggy = (s: StepsState): readonly UiStep[] => s.stepsByTask.tsk_x ?? [];
     // Two calls, identical state → two DIFFERENT array refs. This is the
     // useSyncExternalStore contract violation that crashed VideoPage.
     expect(buggy(state)).not.toBe(buggy(state));
@@ -75,9 +75,8 @@ describe('hydrateMissingMediaTask — one-time deep-link detail recovery', () =>
     const hydrated: string[] = [];
 
     expect(
-      hydrateMissingMediaTask(
-        { taskId: 'tsk_older', hasTask: false, already: false },
-        (taskId) => hydrated.push(taskId),
+      hydrateMissingMediaTask({ taskId: 'tsk_older', hasTask: false, already: false }, (taskId) =>
+        hydrated.push(taskId),
       ),
     ).toBe(true);
     expect(hydrated).toEqual(['tsk_older']);
@@ -90,23 +89,14 @@ describe('hydrateMissingMediaTask — one-time deep-link detail recovery', () =>
     };
 
     expect(
-      hydrateMissingMediaTask(
-        { taskId: 'tsk_existing', hasTask: true, already: false },
-        hydrate,
-      ),
+      hydrateMissingMediaTask({ taskId: 'tsk_existing', hasTask: true, already: false }, hydrate),
     ).toBe(false);
     expect(
-      hydrateMissingMediaTask(
-        { taskId: 'tsk_attempted', hasTask: false, already: true },
-        hydrate,
-      ),
+      hydrateMissingMediaTask({ taskId: 'tsk_attempted', hasTask: false, already: true }, hydrate),
     ).toBe(false);
-    expect(
-      hydrateMissingMediaTask(
-        { taskId: null, hasTask: false, already: false },
-        hydrate,
-      ),
-    ).toBe(false);
+    expect(hydrateMissingMediaTask({ taskId: null, hasTask: false, already: false }, hydrate)).toBe(
+      false,
+    );
     expect(hydrated).toEqual([]);
   });
 });

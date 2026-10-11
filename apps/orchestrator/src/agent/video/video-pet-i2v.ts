@@ -213,7 +213,9 @@ export async function runPetVideoCreation(
     throw new SimpleVideoError(
       'pet video failed automated quality verification',
       verification.status === 'unknown' ? 'quality_unavailable' : 'quality',
-      false, verification.failedChecks, verification.reason,
+      false,
+      verification.failedChecks,
+      verification.reason,
     );
   }
 

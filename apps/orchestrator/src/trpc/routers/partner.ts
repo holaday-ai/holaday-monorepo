@@ -1,17 +1,14 @@
-import {
-  HOLA_CREDIT_CNY_CENTS,
-  PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
-} from '@holaday/shared-types';
+import { HOLA_CREDIT_CNY_CENTS, PARTNER_MEMBERSHIP_PRICE_CNY_CENTS } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { users } from '../../db/schema/users.js';
 import {
   partnerLots,
   partnerRechargeOrders,
   partnerReferrals,
   partnerWithdrawalRequests,
 } from '../../db/schema/partner.js';
+import { users } from '../../db/schema/users.js';
 import { PartnerActivityService } from '../../partner/activity-service.js';
 import { CreditLedgerService } from '../../partner/credit-ledger-service.js';
 import {
@@ -21,14 +18,14 @@ import {
   resolveCnBankCardKycSubmission,
 } from '../../partner/kyc-service.js';
 import { PartnerMembershipService } from '../../partner/membership-service.js';
+import { partnerConfig } from '../../partner/partner-config.js';
+import { calculateApiUnits, selectRechargeTier } from '../../partner/partner-rules.js';
 import {
+  type PartnerPaymentIntent,
   buildPartnerPaymentGatewayCreatePayload,
   buildPartnerPaymentIntent,
   buildPartnerPaymentIntentFromGatewayResponse,
-  type PartnerPaymentIntent,
 } from '../../partner/payment-intent-service.js';
-import { partnerConfig } from '../../partner/partner-config.js';
-import { calculateApiUnits, selectRechargeTier } from '../../partner/partner-rules.js';
 import {
   RechargeGateError,
   RechargeOrderIdempotencyConflictError,
@@ -45,8 +42,8 @@ import {
   WithdrawalService,
   WithdrawalValidationError,
 } from '../../partner/withdrawal-service.js';
-import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 import type { Context } from '../context.js';
+import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 
 const paymentProviderInput = z.enum(['wechat', 'alipay', 'manual']);
 const moneyCentsInput = z.number().int().safe();
@@ -141,15 +138,18 @@ function metadataText(metadata: Record<string, unknown>, key: string): string | 
   return normalized.length > 0 ? normalized : undefined;
 }
 
-function summarizePartnerOrder(order: {
-  externalId: string;
-  provider: string;
-  orderKind: string;
-  amountCnyCents: number;
-  status: string;
-  createdAt?: Date;
-  metadata?: unknown;
-}, options: { includePaymentIntent?: boolean; paymentIntent?: PartnerPaymentIntent } = {}) {
+function summarizePartnerOrder(
+  order: {
+    externalId: string;
+    provider: string;
+    orderKind: string;
+    amountCnyCents: number;
+    status: string;
+    createdAt?: Date;
+    metadata?: unknown;
+  },
+  options: { includePaymentIntent?: boolean; paymentIntent?: PartnerPaymentIntent } = {},
+) {
   const metadata = metadataRecord(order.metadata);
   const reviewReason = metadataText(metadata, 'reviewReason');
   const reviewErrorMessage = metadataText(metadata, 'errorMessage');
@@ -289,9 +289,10 @@ function summarizePartnerWithdrawal(withdrawal: {
   metadata?: unknown;
 }) {
   const metadata = metadataRecord(withdrawal.metadata);
-  const rejectionReason = typeof withdrawal.rejectionReason === 'string' && withdrawal.rejectionReason.trim()
-    ? withdrawal.rejectionReason.trim()
-    : undefined;
+  const rejectionReason =
+    typeof withdrawal.rejectionReason === 'string' && withdrawal.rejectionReason.trim()
+      ? withdrawal.rejectionReason.trim()
+      : undefined;
   const providerPayoutId = metadataText(metadata, 'providerPayoutId');
   const paidAt = metadataText(metadata, 'paidAt');
   const rejectedAt = metadataText(metadata, 'rejectedAt');
@@ -370,7 +371,8 @@ function summarizePartnerKyc(profile: {
     country: profile.country,
     provider: profile.provider ?? 'manual',
     providerRef: profile.providerRef,
-    bankCardVerified: typeof profile.bankCardHash === 'string' && profile.bankCardHash.trim().length > 0,
+    bankCardVerified:
+      typeof profile.bankCardHash === 'string' && profile.bankCardHash.trim().length > 0,
     reviewedAt: profile.reviewedAt,
   };
 }
@@ -539,73 +541,74 @@ export const partnerRouter = router({
     const ledgerService = new CreditLedgerService(ctx.db);
     const activityService = new PartnerActivityService(ctx.db);
 
-    const [membership, kycProfile, ledger, activity, lots, orders, withdrawals, referrals] = await Promise.all([
-      membershipService.getActiveMembership(userId),
-      kycService.getProfile(userId),
-      ledgerService.summarizeUser(userId),
-      activityService.getActivitySummary(userId),
-      ctx.db
-        .select({
-          id: partnerLots.id,
-          externalId: partnerLots.externalId,
-          status: partnerLots.status,
-          riskStatus: partnerLots.riskStatus,
-          principalCreditCents: partnerLots.principalCreditCents,
-          lockedBonusCreditCents: partnerLots.lockedBonusCreditCents,
-          releasedPrincipalCreditCents: partnerLots.releasedPrincipalCreditCents,
-          releasedBonusCreditCents: partnerLots.releasedBonusCreditCents,
-          carryForwardCreditCents: partnerLots.carryForwardCreditCents,
-          releaseStartsAt: partnerLots.releaseStartsAt,
-          releaseEndsAt: partnerLots.releaseEndsAt,
-        })
-        .from(partnerLots)
-        .where(eq(partnerLots.userId, userId))
-        .orderBy(desc(partnerLots.createdAt))
-        .limit(20),
-      ctx.db
-        .select({
-          externalId: partnerRechargeOrders.externalId,
-          provider: partnerRechargeOrders.provider,
-          orderKind: partnerRechargeOrders.orderKind,
-          amountCnyCents: partnerRechargeOrders.amountCnyCents,
-          status: partnerRechargeOrders.status,
-          metadata: partnerRechargeOrders.metadata,
-          createdAt: partnerRechargeOrders.createdAt,
-        })
-        .from(partnerRechargeOrders)
-        .where(eq(partnerRechargeOrders.userId, userId))
-        .orderBy(desc(partnerRechargeOrders.createdAt))
-        .limit(DASHBOARD_ACTIVITY_LIMIT),
-      ctx.db
-        .select({
-          externalId: partnerWithdrawalRequests.externalId,
-          amountCreditCents: partnerWithdrawalRequests.amountCreditCents,
-          status: partnerWithdrawalRequests.status,
-          reviewDueAt: partnerWithdrawalRequests.reviewDueAt,
-          bankAccountFingerprint: partnerWithdrawalRequests.bankAccountFingerprint,
-          riskScore: partnerWithdrawalRequests.riskScore,
-          rejectionReason: partnerWithdrawalRequests.rejectionReason,
-          metadata: partnerWithdrawalRequests.metadata,
-        })
-        .from(partnerWithdrawalRequests)
-        .where(eq(partnerWithdrawalRequests.userId, userId))
-        .orderBy(desc(partnerWithdrawalRequests.createdAt))
-        .limit(DASHBOARD_ACTIVITY_LIMIT),
-      ctx.db
-        .select({
-          externalId: partnerReferrals.externalId,
-          status: partnerReferrals.status,
-          rewardCreditCents: partnerReferrals.rewardCreditCents,
-          rewardRateBps: partnerReferrals.rewardRateBps,
-          assisted: partnerReferrals.assisted,
-          metadata: partnerReferrals.metadata,
-          createdAt: partnerReferrals.createdAt,
-        })
-        .from(partnerReferrals)
-        .where(eq(partnerReferrals.inviterUserId, userId))
-        .orderBy(desc(partnerReferrals.createdAt))
-        .limit(DASHBOARD_ACTIVITY_LIMIT),
-    ]);
+    const [membership, kycProfile, ledger, activity, lots, orders, withdrawals, referrals] =
+      await Promise.all([
+        membershipService.getActiveMembership(userId),
+        kycService.getProfile(userId),
+        ledgerService.summarizeUser(userId),
+        activityService.getActivitySummary(userId),
+        ctx.db
+          .select({
+            id: partnerLots.id,
+            externalId: partnerLots.externalId,
+            status: partnerLots.status,
+            riskStatus: partnerLots.riskStatus,
+            principalCreditCents: partnerLots.principalCreditCents,
+            lockedBonusCreditCents: partnerLots.lockedBonusCreditCents,
+            releasedPrincipalCreditCents: partnerLots.releasedPrincipalCreditCents,
+            releasedBonusCreditCents: partnerLots.releasedBonusCreditCents,
+            carryForwardCreditCents: partnerLots.carryForwardCreditCents,
+            releaseStartsAt: partnerLots.releaseStartsAt,
+            releaseEndsAt: partnerLots.releaseEndsAt,
+          })
+          .from(partnerLots)
+          .where(eq(partnerLots.userId, userId))
+          .orderBy(desc(partnerLots.createdAt))
+          .limit(20),
+        ctx.db
+          .select({
+            externalId: partnerRechargeOrders.externalId,
+            provider: partnerRechargeOrders.provider,
+            orderKind: partnerRechargeOrders.orderKind,
+            amountCnyCents: partnerRechargeOrders.amountCnyCents,
+            status: partnerRechargeOrders.status,
+            metadata: partnerRechargeOrders.metadata,
+            createdAt: partnerRechargeOrders.createdAt,
+          })
+          .from(partnerRechargeOrders)
+          .where(eq(partnerRechargeOrders.userId, userId))
+          .orderBy(desc(partnerRechargeOrders.createdAt))
+          .limit(DASHBOARD_ACTIVITY_LIMIT),
+        ctx.db
+          .select({
+            externalId: partnerWithdrawalRequests.externalId,
+            amountCreditCents: partnerWithdrawalRequests.amountCreditCents,
+            status: partnerWithdrawalRequests.status,
+            reviewDueAt: partnerWithdrawalRequests.reviewDueAt,
+            bankAccountFingerprint: partnerWithdrawalRequests.bankAccountFingerprint,
+            riskScore: partnerWithdrawalRequests.riskScore,
+            rejectionReason: partnerWithdrawalRequests.rejectionReason,
+            metadata: partnerWithdrawalRequests.metadata,
+          })
+          .from(partnerWithdrawalRequests)
+          .where(eq(partnerWithdrawalRequests.userId, userId))
+          .orderBy(desc(partnerWithdrawalRequests.createdAt))
+          .limit(DASHBOARD_ACTIVITY_LIMIT),
+        ctx.db
+          .select({
+            externalId: partnerReferrals.externalId,
+            status: partnerReferrals.status,
+            rewardCreditCents: partnerReferrals.rewardCreditCents,
+            rewardRateBps: partnerReferrals.rewardRateBps,
+            assisted: partnerReferrals.assisted,
+            metadata: partnerReferrals.metadata,
+            createdAt: partnerReferrals.createdAt,
+          })
+          .from(partnerReferrals)
+          .where(eq(partnerReferrals.inviterUserId, userId))
+          .orderBy(desc(partnerReferrals.createdAt))
+          .limit(DASHBOARD_ACTIVITY_LIMIT),
+      ]);
 
     const dashboardLedger = summarizeDashboardLedger(ledger);
     const kycStatus = kycProfile ? normalizeKycStatus(kycProfile.status) : 'not_started';
@@ -667,43 +670,47 @@ export const partnerRouter = router({
     }
   }),
 
-  createMembershipOrder: protectedProcedure.input(createMembershipOrderInput).mutation(async ({ ctx, input }) => {
-    requirePartnerLedgerEnabled();
+  createMembershipOrder: protectedProcedure
+    .input(createMembershipOrderInput)
+    .mutation(async ({ ctx, input }) => {
+      requirePartnerLedgerEnabled();
 
-    const userId = await requireInternalUserId(ctx);
-    try {
-      const order = await new RechargeService(ctx.db).createPendingOrder({
-        userId,
-        provider: input.provider ?? 'manual',
-        orderKind: 'membership',
-        amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
-        idempotencyKey: input.idempotencyKey,
-      });
-      const paymentIntent = await resolvePartnerPaymentIntent(ctx, order);
-      return summarizePartnerOrder(order, { includePaymentIntent: true, paymentIntent });
-    } catch (error) {
-      mapRechargeOrderError(error);
-    }
-  }),
+      const userId = await requireInternalUserId(ctx);
+      try {
+        const order = await new RechargeService(ctx.db).createPendingOrder({
+          userId,
+          provider: input.provider ?? 'manual',
+          orderKind: 'membership',
+          amountCnyCents: PARTNER_MEMBERSHIP_PRICE_CNY_CENTS,
+          idempotencyKey: input.idempotencyKey,
+        });
+        const paymentIntent = await resolvePartnerPaymentIntent(ctx, order);
+        return summarizePartnerOrder(order, { includePaymentIntent: true, paymentIntent });
+      } catch (error) {
+        mapRechargeOrderError(error);
+      }
+    }),
 
-  createRechargeOrder: protectedProcedure.input(createRechargeOrderInput).mutation(async ({ ctx, input }) => {
-    requirePartnerLedgerEnabled();
+  createRechargeOrder: protectedProcedure
+    .input(createRechargeOrderInput)
+    .mutation(async ({ ctx, input }) => {
+      requirePartnerLedgerEnabled();
 
-    const userId = await requireInternalUserId(ctx);
-    try {
-      const order = await new RechargeService(ctx.db).createPendingOrder({
-        userId,
-        provider: input.provider ?? 'manual',
-        orderKind: 'recharge',
-        amountCnyCents: input.amountCnyCents,
-        idempotencyKey: input.idempotencyKey,
-      });
-      const paymentIntent = await resolvePartnerPaymentIntent(ctx, order);
-      return summarizePartnerOrder(order, { includePaymentIntent: true, paymentIntent });
-    } catch (error) {
-      mapRechargeOrderError(error);
-    }
-  }),
+      const userId = await requireInternalUserId(ctx);
+      try {
+        const order = await new RechargeService(ctx.db).createPendingOrder({
+          userId,
+          provider: input.provider ?? 'manual',
+          orderKind: 'recharge',
+          amountCnyCents: input.amountCnyCents,
+          idempotencyKey: input.idempotencyKey,
+        });
+        const paymentIntent = await resolvePartnerPaymentIntent(ctx, order);
+        return summarizePartnerOrder(order, { includePaymentIntent: true, paymentIntent });
+      } catch (error) {
+        mapRechargeOrderError(error);
+      }
+    }),
 
   orderStatus: protectedProcedure.input(orderStatusInput).query(async ({ ctx, input }) => {
     requirePartnerLedgerEnabled();
@@ -799,36 +806,38 @@ export const partnerRouter = router({
     }
   }),
 
-  requestWithdrawal: protectedProcedure.input(requestWithdrawalInput).mutation(async ({ ctx, input }) => {
-    requirePartnerLedgerEnabled();
+  requestWithdrawal: protectedProcedure
+    .input(requestWithdrawalInput)
+    .mutation(async ({ ctx, input }) => {
+      requirePartnerLedgerEnabled();
 
-    const userId = await requireInternalUserId(ctx);
-    try {
-      const kycProfile = await new KycService(ctx.db).getProfile(userId);
-      const kycStatus = kycProfile ? normalizeKycStatus(kycProfile.status) : 'not_started';
-      const sameNameBank =
-        typeof kycProfile?.bankCardHash === 'string' &&
-        kycProfile.bankCardHash.trim() === input.bankAccountFingerprint;
-      const risk = evaluatePartnerRisk({
-        kycPassed: kycStatus === 'passed',
-        sameNameBank,
-        amountCreditCents: input.amountCreditCents,
-        referralConcentration: false,
-        accountFrozen: false,
-      });
-      const withdrawal = await new WithdrawalService(ctx.db).requestWithdrawal({
-        userId,
-        amountCreditCents: input.amountCreditCents,
-        bankAccountFingerprint: input.bankAccountFingerprint,
-        highRisk: risk.status !== 'normal',
-        riskScore: risk.score,
-        idempotencyKey: input.idempotencyKey,
-      });
-      return summarizePartnerWithdrawal(withdrawal);
-    } catch (error) {
-      mapWithdrawalError(error);
-    }
-  }),
+      const userId = await requireInternalUserId(ctx);
+      try {
+        const kycProfile = await new KycService(ctx.db).getProfile(userId);
+        const kycStatus = kycProfile ? normalizeKycStatus(kycProfile.status) : 'not_started';
+        const sameNameBank =
+          typeof kycProfile?.bankCardHash === 'string' &&
+          kycProfile.bankCardHash.trim() === input.bankAccountFingerprint;
+        const risk = evaluatePartnerRisk({
+          kycPassed: kycStatus === 'passed',
+          sameNameBank,
+          amountCreditCents: input.amountCreditCents,
+          referralConcentration: false,
+          accountFrozen: false,
+        });
+        const withdrawal = await new WithdrawalService(ctx.db).requestWithdrawal({
+          userId,
+          amountCreditCents: input.amountCreditCents,
+          bankAccountFingerprint: input.bankAccountFingerprint,
+          highRisk: risk.status !== 'normal',
+          riskScore: risk.score,
+          idempotencyKey: input.idempotencyKey,
+        });
+        return summarizePartnerWithdrawal(withdrawal);
+      } catch (error) {
+        mapWithdrawalError(error);
+      }
+    }),
 
   rechargePreview: protectedProcedure.input(rechargePreviewInput).query(async ({ ctx, input }) => {
     requirePartnerLedgerEnabled();

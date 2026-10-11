@@ -1,5 +1,4 @@
-import { ChevronDown, Copy, Layers, Loader2, Plus, Trash2, X } from 'lucide-react';
-import * as React from 'react';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import {
   batchActiveIndexAfterRemove,
   batchCreateButtonLabel,
@@ -8,25 +7,26 @@ import {
   batchPromptCountCopy,
   normalizeBatchCreateResult,
 } from '@/components/batch-dialog-state';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
+import { parseBatchPromptItems } from '@/lib/batch-prompts';
 import {
-  batchTaskDraftHasReusableDetail,
+  type BatchTaskDraft,
+  EMPTY_BATCH_TASK_DRAFT,
   batchTaskDialogHasDraftContent,
+  batchTaskDraftFromPrompt,
+  batchTaskDraftHasReusableDetail,
   batchTaskDraftIsEmpty,
   batchTaskDraftMissingGoal,
-  batchTaskDraftFromPrompt,
   batchTaskDraftProgress,
   composeBatchTaskPrompt,
   duplicateBatchTaskDraftIndices,
-  EMPTY_BATCH_TASK_DRAFT,
   firstBatchTaskDraftMissingGoal,
-  type BatchTaskDraft,
 } from '@/lib/batch-task-draft';
-import { parseBatchPromptItems } from '@/lib/batch-prompts';
 import { pageActionError } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
+import { ChevronDown, Copy, Layers, Loader2, Plus, Trash2, X } from 'lucide-react';
+import * as React from 'react';
 
 /**
  * Phase 5b — create-batch modal.
@@ -58,9 +58,7 @@ export function BatchTaskDialog({
 }: Props): JSX.Element | null {
   const toast = useToast();
   const [name, setName] = React.useState('');
-  const [items, setItems] = React.useState<BatchTaskDraft[]>([
-    { ...EMPTY_BATCH_TASK_DRAFT },
-  ]);
+  const [items, setItems] = React.useState<BatchTaskDraft[]>([{ ...EMPTY_BATCH_TASK_DRAFT }]);
   const [activeIndex, setActiveIndex] = React.useState(0);
   const [submitting, setSubmitting] = React.useState(false);
   const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
@@ -129,11 +127,7 @@ export function BatchTaskDialog({
     overLimit: parsedPrompts.overLimit,
   });
 
-  const updateItem = (
-    index: number,
-    field: keyof BatchTaskDraft,
-    value: string,
-  ): void => {
+  const updateItem = (index: number, field: keyof BatchTaskDraft, value: string): void => {
     setItems((prev) =>
       prev.map((item, idx) => (idx === index ? { ...item, [field]: value } : item)),
     );
@@ -201,10 +195,12 @@ export function BatchTaskDialog({
     setSubmitting(true);
     try {
       const trimmedName = name.trim();
-      const result = normalizeBatchCreateResult(await trpc.batchTasks.create.mutate({
-        ...(trimmedName ? { name: trimmedName } : {}),
-        prompts,
-      }));
+      const result = normalizeBatchCreateResult(
+        await trpc.batchTasks.create.mutate({
+          ...(trimmedName ? { name: trimmedName } : {}),
+          prompts,
+        }),
+      );
       if (!mountedRef.current) return;
       toast.show(`已创建批量任务（${result.itemsTotal} 项 · 并发 ${result.concurrency}）`);
       onCreated(result.batchId);
@@ -248,235 +244,219 @@ export function BatchTaskDialog({
             </button>
           </header>
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-5">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-foreground/80">
-              批量名称 <span className="text-muted-foreground">(可选)</span>
-            </label>
-            <input
-              type="text"
-              value={name}
-              maxLength={200}
-              disabled={submitting}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="例如：10 个竞品最新动态"
-              className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:border-white/10 dark:bg-card"
-            />
-          </div>
-          <div>
-            <div className="mb-2 flex items-start justify-between gap-3">
-              <div>
-                <label className="block text-xs font-medium text-foreground/80">
-                  任务列表
-                </label>
-                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                  一个卡片就是一个独立任务。每张卡里写清目标、执行步骤和输出要求。
-                </p>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-foreground/80">
+                批量名称 <span className="text-muted-foreground">(可选)</span>
+              </label>
+              <input
+                type="text"
+                value={name}
+                maxLength={200}
+                disabled={submitting}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="例如：10 个竞品最新动态"
+                className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:border-white/10 dark:bg-card"
+              />
+            </div>
+            <div>
+              <div className="mb-2 flex items-start justify-between gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-foreground/80">任务列表</label>
+                  <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                    一个卡片就是一个独立任务。每张卡里写清目标、执行步骤和输出要求。
+                  </p>
+                </div>
+                <span
+                  className={cn(
+                    'shrink-0 rounded-md border px-2 py-1 text-[11px]',
+                    parsedPrompts.overLimit
+                      ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
+                      : 'border-[#DCDDDD] bg-white text-muted-foreground dark:border-white/10 dark:bg-card',
+                  )}
+                >
+                  {batchPromptCountCopy({
+                    promptCount: prompts.length,
+                    maxItems: MAX_ITEMS,
+                    duplicateCount: parsedPrompts.duplicateCount,
+                    overLimit: parsedPrompts.overLimit,
+                  })}
+                </span>
               </div>
-              <span
-                className={cn(
-                  'shrink-0 rounded-md border px-2 py-1 text-[11px]',
-                  parsedPrompts.overLimit
-                    ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
-                    : 'border-[#DCDDDD] bg-white text-muted-foreground dark:border-white/10 dark:bg-card',
-                )}
-              >
-                {batchPromptCountCopy({
-                  promptCount: prompts.length,
-                  maxItems: MAX_ITEMS,
-                  duplicateCount: parsedPrompts.duplicateCount,
-                  overLimit: parsedPrompts.overLimit,
-                })}
-              </span>
-            </div>
-            <div className="space-y-3">
-              {items.map((item, index) => {
-                const isActive = activeIndex === index;
-                const missingGoal = batchTaskDraftMissingGoal(item);
-                const emptyDraft = batchTaskDraftIsEmpty(item);
-                const showEmptyHint = emptyDraft && (items.length > 1 || prompts.length > 0);
-                const canReuseDetail = batchTaskDraftHasReusableDetail(item);
-                const duplicateDraft = duplicateDraftIndices.has(index);
-                return (
-                  <div
-                    key={index}
-                    className={cn(
-                      'rounded-[8px] border bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-colors dark:bg-card/85',
-                      missingGoal
-                        ? 'border-[#FF0061]/40'
-                        : duplicateDraft
-                          ? 'border-[#FFC910]/60'
-                          : isActive
-                            ? 'border-[#FF0061]/25'
-                            : 'border-[#DCDDDD] dark:border-white/10',
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setActiveIndex(current => current === index ? -1 : index)}
-                        disabled={submitting}
-                        aria-expanded={isActive}
-                        className="min-h-8 min-w-0 flex-1 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/15 disabled:pointer-events-none"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#FF0061] text-[11px] font-semibold text-white">
-                            {index + 1}
-                          </span>
-                          <span className="truncate text-xs font-medium text-[#2F2F2F] dark:text-foreground">
-                            任务 {index + 1}
-                          </span>
-                          <TaskDraftProgressPill
-                            draft={item}
-                            duplicate={duplicateDraft}
-                          />
-                          <ChevronDown
-                            className={cn(
-                              'ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
-                              isActive ? 'rotate-180' : 'rotate-0',
-                            )}
-                          />
+              <div className="space-y-3">
+                {items.map((item, index) => {
+                  const isActive = activeIndex === index;
+                  const missingGoal = batchTaskDraftMissingGoal(item);
+                  const emptyDraft = batchTaskDraftIsEmpty(item);
+                  const showEmptyHint = emptyDraft && (items.length > 1 || prompts.length > 0);
+                  const canReuseDetail = batchTaskDraftHasReusableDetail(item);
+                  const duplicateDraft = duplicateDraftIndices.has(index);
+                  return (
+                    <div
+                      key={index}
+                      className={cn(
+                        'rounded-[8px] border bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-colors dark:bg-card/85',
+                        missingGoal
+                          ? 'border-[#FF0061]/40'
+                          : duplicateDraft
+                            ? 'border-[#FFC910]/60'
+                            : isActive
+                              ? 'border-[#FF0061]/25'
+                              : 'border-[#DCDDDD] dark:border-white/10',
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveIndex((current) => (current === index ? -1 : index))
+                          }
+                          disabled={submitting}
+                          aria-expanded={isActive}
+                          className="min-h-8 min-w-0 flex-1 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/15 disabled:pointer-events-none"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#FF0061] text-[11px] font-semibold text-white">
+                              {index + 1}
+                            </span>
+                            <span className="truncate text-xs font-medium text-[#2F2F2F] dark:text-foreground">
+                              任务 {index + 1}
+                            </span>
+                            <TaskDraftProgressPill draft={item} duplicate={duplicateDraft} />
+                            <ChevronDown
+                              className={cn(
+                                'ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
+                                isActive ? 'rotate-180' : 'rotate-0',
+                              )}
+                            />
+                          </div>
+                          {!isActive && (
+                            <TaskDraftSummary draft={item} duplicate={duplicateDraft} />
+                          )}
+                        </button>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => reuseItemDetail(index)}
+                            disabled={submitting || items.length >= MAX_ITEMS || !canReuseDetail}
+                            title={
+                              canReuseDetail
+                                ? `复用任务 ${index + 1} 的步骤和输出`
+                                : '先写步骤或输出后再复用'
+                            }
+                            aria-label={`复用任务 ${index + 1} 的步骤和输出`}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#57479C]/10 hover:text-[#57479C] disabled:pointer-events-none disabled:opacity-35"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeItem(index)}
+                            disabled={submitting || items.length === 1}
+                            aria-label={`删除任务 ${index + 1}`}
+                            title={`删除任务 ${index + 1}`}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#FF0061]/10 hover:text-[#FF0061] disabled:pointer-events-none disabled:opacity-40"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
                         </div>
-                        {!isActive && (
-                          <TaskDraftSummary
-                            draft={item}
-                            duplicate={duplicateDraft}
-                          />
-                        )}
-                      </button>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => reuseItemDetail(index)}
-                          disabled={
-                            submitting || items.length >= MAX_ITEMS || !canReuseDetail
-                          }
-                          title={
-                            canReuseDetail
-                              ? `复用任务 ${index + 1} 的步骤和输出`
-                              : '先写步骤或输出后再复用'
-                          }
-                          aria-label={`复用任务 ${index + 1} 的步骤和输出`}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#57479C]/10 hover:text-[#57479C] disabled:pointer-events-none disabled:opacity-35"
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeItem(index)}
-                          disabled={submitting || items.length === 1}
-                          aria-label={`删除任务 ${index + 1}`}
-                          title={`删除任务 ${index + 1}`}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#FF0061]/10 hover:text-[#FF0061] disabled:pointer-events-none disabled:opacity-40"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
                       </div>
-                    </div>
-                    {isActive && (
-                      <div className="mt-3 grid gap-2">
-                        <label className="grid gap-1">
-                          <span className="text-[11px] font-medium text-[#595757]">
-                            目标
-                          </span>
-                          <input
-                            ref={(node) => {
-                              goalRefs.current[index] = node;
-                            }}
-                            value={item.goal}
-                            disabled={submitting}
-                            onChange={(e) => updateItem(index, 'goal', e.target.value)}
-                            placeholder="例如：查 OpenAI 最新动态"
-                            className={cn(
-                              'w-full rounded-md border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:bg-card',
-                              missingGoal
-                                ? 'border-[#FF0061]/45'
-                                : 'border-[#DCDDDD] dark:border-white/10',
+                      {isActive && (
+                        <div className="mt-3 grid gap-2">
+                          <label className="grid gap-1">
+                            <span className="text-[11px] font-medium text-[#595757]">目标</span>
+                            <input
+                              ref={(node) => {
+                                goalRefs.current[index] = node;
+                              }}
+                              value={item.goal}
+                              disabled={submitting}
+                              onChange={(e) => updateItem(index, 'goal', e.target.value)}
+                              placeholder="例如：查 OpenAI 最新动态"
+                              className={cn(
+                                'w-full rounded-md border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:bg-card',
+                                missingGoal
+                                  ? 'border-[#FF0061]/45'
+                                  : 'border-[#DCDDDD] dark:border-white/10',
+                              )}
+                            />
+                            {missingGoal && (
+                              <span className="text-[11px] leading-4 text-[#FF0061]">
+                                这张任务卡已经填写了步骤或输出，请补充目标。
+                              </span>
                             )}
-                          />
-                          {missingGoal && (
-                            <span className="text-[11px] leading-4 text-[#FF0061]">
-                              这张任务卡已经填写了步骤或输出，请补充目标。
-                            </span>
-                          )}
-                          {showEmptyHint && (
-                            <span className="text-[11px] leading-4 text-muted-foreground">
-                              空白任务不会提交；填写目标后才计入批量。
-                            </span>
-                          )}
-                          {duplicateDraft && (
-                            <span className="text-[11px] leading-4 text-[#8A6A00]">
-                              与前面的任务重复，提交时只保留第一张。
-                            </span>
-                          )}
-                        </label>
-                        <label className="grid gap-1">
-                          <span className="text-[11px] font-medium text-[#595757]">
-                            步骤
-                          </span>
-                          <textarea
-                            value={item.steps}
-                            disabled={submitting}
-                            onChange={(e) => updateItem(index, 'steps', e.target.value)}
-                            rows={3}
-                            placeholder={[
-                              '1. 搜近期新闻',
-                              '2. 找官方来源',
-                              '3. 总结成三条',
-                            ].join('\n')}
-                            className="w-full resize-y rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm leading-6 placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:border-white/10 dark:bg-card"
-                          />
-                        </label>
-                        <label className="grid gap-1">
-                          <span className="text-[11px] font-medium text-[#595757]">
-                            输出要求
-                          </span>
-                          <input
-                            value={item.output}
-                            disabled={submitting}
-                            onChange={(e) => updateItem(index, 'output', e.target.value)}
-                            placeholder="例如：给出链接、三条摘要和判断"
-                            className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:border-white/10 dark:bg-card"
-                          />
-                        </label>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                            {showEmptyHint && (
+                              <span className="text-[11px] leading-4 text-muted-foreground">
+                                空白任务不会提交；填写目标后才计入批量。
+                              </span>
+                            )}
+                            {duplicateDraft && (
+                              <span className="text-[11px] leading-4 text-[#8A6A00]">
+                                与前面的任务重复，提交时只保留第一张。
+                              </span>
+                            )}
+                          </label>
+                          <label className="grid gap-1">
+                            <span className="text-[11px] font-medium text-[#595757]">步骤</span>
+                            <textarea
+                              value={item.steps}
+                              disabled={submitting}
+                              onChange={(e) => updateItem(index, 'steps', e.target.value)}
+                              rows={3}
+                              placeholder={['1. 搜近期新闻', '2. 找官方来源', '3. 总结成三条'].join(
+                                '\n',
+                              )}
+                              className="w-full resize-y rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm leading-6 placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:border-white/10 dark:bg-card"
+                            />
+                          </label>
+                          <label className="grid gap-1">
+                            <span className="text-[11px] font-medium text-[#595757]">输出要求</span>
+                            <input
+                              value={item.output}
+                              disabled={submitting}
+                              onChange={(e) => updateItem(index, 'output', e.target.value)}
+                              placeholder="例如：给出链接、三条摘要和判断"
+                              className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#FF0061]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/10 dark:border-white/10 dark:bg-card"
+                            />
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={addItem}
+                disabled={submitting || items.length >= MAX_ITEMS}
+                className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-3 text-xs font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 disabled:pointer-events-none disabled:opacity-50 dark:border-white/10 dark:bg-card dark:text-foreground dark:hover:bg-white/10"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                添加一个任务
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={addItem}
-              disabled={submitting || items.length >= MAX_ITEMS}
-              className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-3 text-xs font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 disabled:pointer-events-none disabled:opacity-50 dark:border-white/10 dark:bg-card dark:text-foreground dark:hover:bg-white/10"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              添加一个任务
-            </button>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            批量任务会按你的套餐并发执行：免费 1 个、基础 3 个、专业 5 个。
-            {batchIndependenceCopy()}
-          </p>
+            <p className="text-[11px] text-muted-foreground">
+              批量任务会按你的套餐并发执行：免费 1 个、基础 3 个、专业 5 个。
+              {batchIndependenceCopy()}
+            </p>
           </div>
           <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-[#DCDDDD]/80 bg-white px-5 py-3 dark:border-white/10 dark:bg-card">
-          <button
-            type="button"
-            onClick={requestClose}
-            disabled={submitting}
-            className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={() => void submit()}
-            disabled={submitDisabled}
-            className="inline-flex items-center gap-1.5 rounded-md bg-[#FF0061] px-3 py-1.5 text-sm font-medium text-white shadow-[0_4px_12px_rgba(255,0,97,0.16)] transition hover:bg-[#FF0061]/90 disabled:opacity-60"
-          >
-            {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            {batchCreateButtonLabel(submitting)}
-          </button>
+            <button
+              type="button"
+              onClick={requestClose}
+              disabled={submitting}
+              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={() => void submit()}
+              disabled={submitDisabled}
+              className="inline-flex items-center gap-1.5 rounded-md bg-[#FF0061] px-3 py-1.5 text-sm font-medium text-white shadow-[0_4px_12px_rgba(255,0,97,0.16)] transition hover:bg-[#FF0061]/90 disabled:opacity-60"
+            >
+              {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {batchCreateButtonLabel(submitting)}
+            </button>
           </footer>
         </div>
       </div>
@@ -517,22 +497,22 @@ function TaskDraftProgressPill({
           ? 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]'
           : duplicate
             ? 'border-[#FFC910]/55 bg-[#FFC910]/12 text-[#8A6A00]'
-          : ready
-            ? 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#1688AA]'
-            : emptyDraft
-              ? 'border-[#DCDDDD] bg-[#EFEFEF]/55 text-[#595757]'
-              : 'border-[#FFC910]/55 bg-[#FFC910]/12 text-[#8A6A00]',
+            : ready
+              ? 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#1688AA]'
+              : emptyDraft
+                ? 'border-[#DCDDDD] bg-[#EFEFEF]/55 text-[#595757]'
+                : 'border-[#FFC910]/55 bg-[#FFC910]/12 text-[#8A6A00]',
       )}
     >
       {missingGoal
         ? '缺目标'
         : duplicate
           ? '重复'
-        : ready
-          ? '已完整'
-          : emptyDraft
-            ? '空白'
-            : `${progress.count}/3`}
+          : ready
+            ? '已完整'
+            : emptyDraft
+              ? '空白'
+              : `${progress.count}/3`}
     </span>
   );
 }
@@ -556,9 +536,7 @@ function TaskDraftSummary({
       <p
         className={cn(
           'truncate text-xs',
-          draft.goal.trim()
-            ? 'text-[#2F2F2F] dark:text-foreground'
-            : 'text-muted-foreground',
+          draft.goal.trim() ? 'text-[#2F2F2F] dark:text-foreground' : 'text-muted-foreground',
         )}
       >
         {title}
@@ -567,10 +545,10 @@ function TaskDraftSummary({
         {duplicate
           ? '重复任务；提交时只保留第一张。'
           : emptyDraft
-          ? '不会提交；填写目标后才计入批量。'
-          : details.length > 0
-            ? details.join(' · ')
-            : '点击展开后填写目标、步骤和输出。'}
+            ? '不会提交；填写目标后才计入批量。'
+            : details.length > 0
+              ? details.join(' · ')
+              : '点击展开后填写目标、步骤和输出。'}
       </p>
     </div>
   );

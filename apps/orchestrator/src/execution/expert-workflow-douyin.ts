@@ -42,14 +42,16 @@ const REQUIRED_INPUTS: readonly WorkflowInput[] = [
     // of whitespace, ASCII/CJK colons, and the common Chinese
     // copulas (是/为/等于/有/一共/总共) between key and value so
     // both "GMV: 100000" and "GMV 是 200000" extract.
-    extractPattern: /(?:GMV|总成交额?|成交额|销售额)[\s:：]*(?:是|为|等于|有|一共|共计|总共)?\s*[¥￥]?\s*([\d.,]+(?:\s*[万亿千百])?)/i,
+    extractPattern:
+      /(?:GMV|总成交额?|成交额|销售额)[\s:：]*(?:是|为|等于|有|一共|共计|总共)?\s*[¥￥]?\s*([\d.,]+(?:\s*[万亿千百])?)/i,
   },
   {
     name: 'uv',
     label: '场观/UV',
     type: 'number',
     unit: '次',
-    extractPattern: /(?:UV|场观|观看人?数?|观众|曝光观看)[\s:：]*(?:是|为|有|达到)?\s*([\d.,]+(?:\s*[万亿千百])?)/i,
+    extractPattern:
+      /(?:UV|场观|观看人?数?|观众|曝光观看)[\s:：]*(?:是|为|有|达到)?\s*([\d.,]+(?:\s*[万亿千百])?)/i,
   },
   {
     name: 'orders',
@@ -64,7 +66,8 @@ const REQUIRED_INPUTS: readonly WorkflowInput[] = [
     //   alt 2: "一共 500 单" / "共 500 单" — trailing-unit form,
     //          capture digits BEFORE 单. Excludes "客单价" via
     //          a non-trivial preamble (一共|共) before digits.
-    extractPattern: /(?:(?:订单数?|成交单数?|总订单|订单量)[\s:：]*(?:是|为|有|共|约)?\s*[¥￥]?\s*([\d.,]+(?:\s*[万亿千百])?))|(?:(?:一共|共|总共)\s*([\d.,]+)\s*单(?!价))/i,
+    extractPattern:
+      /(?:(?:订单数?|成交单数?|总订单|订单量)[\s:：]*(?:是|为|有|共|约)?\s*[¥￥]?\s*([\d.,]+(?:\s*[万亿千百])?))|(?:(?:一共|共|总共)\s*([\d.,]+)\s*单(?!价))/i,
   },
   {
     name: 'avg_price',
@@ -88,7 +91,8 @@ const OPTIONAL_INPUTS: readonly WorkflowInput[] = [
     label: '千川消耗',
     type: 'number',
     unit: '元',
-    extractPattern: /(?:千川消耗|投放消耗|广告消耗|消耗)\s*[：:]?\s*[¥￥]?\s*([\d.,]+(?:\s*[万亿千百])?)/i,
+    extractPattern:
+      /(?:千川消耗|投放消耗|广告消耗|消耗)\s*[：:]?\s*[¥￥]?\s*([\d.,]+(?:\s*[万亿千百])?)/i,
   },
   {
     name: 'roi',
@@ -109,7 +113,8 @@ const OPTIONAL_INPUTS: readonly WorkflowInput[] = [
     label: '峰值在线',
     type: 'number',
     unit: '人',
-    extractPattern: /(?:峰值(?:在线|观看)|最高在线|最高观看)\s*[：:]?\s*([\d.,]+(?:\s*[万亿千百])?)/i,
+    extractPattern:
+      /(?:峰值(?:在线|观看)|最高在线|最高观看)\s*[：:]?\s*([\d.,]+(?:\s*[万亿千百])?)/i,
   },
   {
     name: 'avg_stay',
@@ -226,14 +231,14 @@ const DATA_VALIDATORS: readonly DataValidator[] = [
       const colonMatch = roiRaw.match(/([\d.]+)\s*[:：]\s*([\d.]+)/);
       let declaredRoi: number;
       if (colonMatch) {
-        const left = parseFloat(colonMatch[1]!);
-        const right = parseFloat(colonMatch[2]!);
+        const left = Number.parseFloat(colonMatch[1]!);
+        const right = Number.parseFloat(colonMatch[2]!);
         if (!Number.isFinite(left) || !Number.isFinite(right) || left === 0) {
           return { passed: true }; // unparseable, skip
         }
         declaredRoi = right / left;
       } else {
-        const single = parseFloat(roiRaw);
+        const single = Number.parseFloat(roiRaw);
         if (!Number.isFinite(single)) return { passed: true };
         declaredRoi = single;
       }
@@ -258,8 +263,7 @@ const REPORT_SECTIONS: readonly ReportSection[] = [
     title: '数据校验',
     required: true,
     sourceAnnotation: false,
-    guidance:
-      '列出每个 validator 的结果。通过的写"已通过"。失败的写"注意："+具体差异+建议确认项。',
+    guidance: '列出每个 validator 的结果。通过的写"已通过"。失败的写"注意："+具体差异+建议确认项。',
   },
   {
     id: 'core_metrics',
@@ -306,7 +310,8 @@ const REPORT_SECTIONS: readonly ReportSection[] = [
 const FOLLOW_UP_ACTIONS: readonly FollowUpAction[] = [
   {
     label: '生成下场直播 SOP',
-    prompt: '基于这次复盘的诊断和优化建议，帮我生成一份详细的下场直播 SOP，包含开播前准备、节奏节点、话术框架。',
+    prompt:
+      '基于这次复盘的诊断和优化建议，帮我生成一份详细的下场直播 SOP，包含开播前准备、节奏节点、话术框架。',
   },
   {
     label: '分析单品表现',
@@ -357,18 +362,12 @@ export const DOUYIN_REVIEW_WORKFLOW: ExpertWorkflowContract = {
 // Helpers (used by validators)
 // ---------------------------------------------------------------------------
 
-function numFrom(
-  extracted: Readonly<Record<string, unknown>>,
-  key: string,
-): number | null {
+function numFrom(extracted: Readonly<Record<string, unknown>>, key: string): number | null {
   const v = extracted[key];
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
-function textFrom(
-  extracted: Readonly<Record<string, unknown>>,
-  key: string,
-): string | null {
+function textFrom(extracted: Readonly<Record<string, unknown>>, key: string): string | null {
   const v = extracted[key];
   return typeof v === 'string' && v.length > 0 ? v : null;
 }

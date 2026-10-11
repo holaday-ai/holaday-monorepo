@@ -44,23 +44,22 @@ export function getConnectionStatusCopy(
       (!status.ws.lastOpenAt || status.lastWelcomeAt >= status.ws.lastOpenAt);
     return {
       title: currentSocketConfirmed ? '浏览器代理已连接' : '浏览器代理正在确认连接',
-      detail: currentSocketConfirmed && status.lastWelcomeAt
-        ? `最近确认：${formatRelativeTime(status.lastWelcomeAt)}`
-        : '连接已建立，正在等待服务确认',
+      detail:
+        currentSocketConfirmed && status.lastWelcomeAt
+          ? `最近确认：${formatRelativeTime(status.lastWelcomeAt)}`
+          : '连接已建立，正在等待服务确认',
     };
   }
 
   const reason =
-    formatWsCloseReason(status.ws.lastCloseReason) ??
-    formatWsCloseCode(status.ws.lastCloseCode);
+    formatWsCloseReason(status.ws.lastCloseReason) ?? formatWsCloseCode(status.ws.lastCloseCode);
   if (status.ws.readyState === WS_CONNECTING) {
-    const retryCopy = status.ws.nextRetryAt ? `下次尝试：${formatRelativeTime(status.ws.nextRetryAt)}` : null;
+    const retryCopy = status.ws.nextRetryAt
+      ? `下次尝试：${formatRelativeTime(status.ws.nextRetryAt)}`
+      : null;
     return {
       title: '浏览器代理正在连接',
-      detail: [
-        reason ? `最近错误：${reason}` : '正在检查服务并建立安全连接',
-        retryCopy,
-      ]
+      detail: [reason ? `最近错误：${reason}` : '正在检查服务并建立安全连接', retryCopy]
         .filter(Boolean)
         .join('；'),
     };
@@ -78,7 +77,9 @@ export function getConnectionStatusCopy(
       title: `浏览器代理正在重连（${status.ws.reconnectAttempt}/${MAX_NETWORK_RECONNECTS}）`,
       detail: [
         reason ? `最近错误：${reason}` : null,
-        status.ws.nextRetryAt ? `下次尝试：${formatRelativeTime(status.ws.nextRetryAt)}` : '等待下一次重连',
+        status.ws.nextRetryAt
+          ? `下次尝试：${formatRelativeTime(status.ws.nextRetryAt)}`
+          : '等待下一次重连',
       ]
         .filter(Boolean)
         .join('；'),
@@ -96,7 +97,11 @@ export function getConnectionStatusCopy(
 export function formatWsCloseReason(reason: string | null | undefined): string | null {
   if (!reason) return null;
   const lower = reason.toLowerCase();
-  if (lower.includes('502') || lower.includes('bad gateway') || lower.includes('unexpected response code')) {
+  if (
+    lower.includes('502') ||
+    lower.includes('bad gateway') ||
+    lower.includes('unexpected response code')
+  ) {
     return '代理服务暂时不可用';
   }
   if (lower.includes('err_connection_closed') || lower.includes('connection_closed')) {

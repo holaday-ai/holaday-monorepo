@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   consumeStockPageInitialRequests,
   loadStockTasksPageRoute,
-  prepareStockPageInitialRequests,
   preloadStockTasksPageRoute,
+  prepareStockPageInitialRequests,
 } from './stock-page-preload';
 
 const api = vi.hoisted(() => ({

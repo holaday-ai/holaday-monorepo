@@ -18,9 +18,9 @@
 
 import 'dotenv/config';
 import { isNull, sql } from 'drizzle-orm';
+import { encryptCookieJson } from '../src/cookies/cookie-crypto.js';
 import { db } from '../src/db/client.js';
 import { pendingCookies } from '../src/db/schema/pending-cookies.js';
-import { encryptCookieJson } from '../src/cookies/cookie-crypto.js';
 
 async function main(): Promise<void> {
   if (!process.env.COOKIE_MASTER_KEY) {

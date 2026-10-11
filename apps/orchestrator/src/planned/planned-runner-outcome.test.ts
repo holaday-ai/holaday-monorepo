@@ -18,7 +18,8 @@ function makeDb(opts: {
   const sets: Array<{ table: string; values: Record<string, unknown> }> = [];
   const rowsFor = (name: string): unknown[] => {
     if (name === 'planned_task_runs') return [{ id: 1, planId: 7, taskId: 99, batchTaskId: null }];
-    if (name === 'tasks') return [{ status: opts.taskStatus, errorMessage: opts.taskError ?? null }];
+    if (name === 'tasks')
+      return [{ status: opts.taskStatus, errorMessage: opts.taskError ?? null }];
     if (name === 'planned_tasks') {
       return [
         {
@@ -109,9 +110,11 @@ describe('syncPlannedRuns — Batch 10.3 outcome notifications', () => {
   });
 
   it('a throwing notifier never breaks settlement', async () => {
-    configurePlannedOutcomeNotifier(vi.fn(async () => {
-      throw new Error('webhook down');
-    }));
+    configurePlannedOutcomeNotifier(
+      vi.fn(async () => {
+        throw new Error('webhook down');
+      }),
+    );
     const { db } = makeDb({ taskStatus: 'failed' });
     await expect(syncPlannedRuns(db)).resolves.toBe(1);
   });

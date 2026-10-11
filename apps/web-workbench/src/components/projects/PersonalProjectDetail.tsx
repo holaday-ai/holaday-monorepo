@@ -1,11 +1,11 @@
+import { pageErrorMessage } from '@/lib/page-error-copy';
+import { taskStatusLabel } from '@/lib/task-status-copy';
+import { trpc } from '@/lib/trpc';
+import { PageContainer, PageHeader } from '@/pages/PageShell';
+import type { UiProject } from '@/types/task';
+import { ChevronLeft, Plus, Search } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Plus, Search } from 'lucide-react';
-import { trpc } from '@/lib/trpc';
-import type { UiProject } from '@/types/task';
-import { taskStatusLabel } from '@/lib/task-status-copy';
-import { PageContainer, PageHeader } from '@/pages/PageShell';
-import { pageErrorMessage } from '@/lib/page-error-copy';
 
 type Rows = Awaited<ReturnType<typeof trpc.tasks.list.query>>['tasks'];
 export function PersonalProjectDetail({ project }: { project: UiProject }) {
@@ -166,7 +166,11 @@ export function PersonalProjectDetail({ project }: { project: UiProject }) {
         <aside className="hd-project-info">
           <h2>项目说明</h2>
           <p>{project.description || '还没有添加项目说明。'}</p>
-          <h2>参考资料</h2><div className="hd-project-coming-soon"><span>即将上线</span><p>将文件集中到项目，随时供任务参考。</p></div>
+          <h2>参考资料</h2>
+          <div className="hd-project-coming-soon">
+            <span>即将上线</span>
+            <p>将文件集中到项目，随时供任务参考。</p>
+          </div>
           <h2>项目进展</h2>
           <p>{project.taskCount} 个任务</p>
           <small>更新于 {new Date(project.updatedAt).toLocaleDateString('zh-CN')}</small>

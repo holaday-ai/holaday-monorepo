@@ -96,7 +96,8 @@ export async function handleCoreTaskReply(args: {
   ) {
     throw new TRPCError({
       code: 'PRECONDITION_FAILED',
-      message: '此旧方案尚不支持恢复浏览器执行。可新建浏览器任务，或改用附件、粘贴数据继续分析；当前方案和要求未改变。',
+      message:
+        '此旧方案尚不支持恢复浏览器执行。可新建浏览器任务，或改用附件、粘贴数据继续分析；当前方案和要求未改变。',
     });
   }
   if (legacy) {
@@ -139,32 +140,34 @@ export async function handleCoreTaskReply(args: {
   const generation = resolve('generate');
   const semantic = resolve('verifier');
   const repo = new CoreTaskRepository(ctx.db);
-  const execution = await withTaskCostContext(ctx, input.taskId, () => startCoreTaskExecution({
-    lifetime: ctx.executionLifetime,
-    scope: { taskId: input.taskId, userId: args.userId },
-    before: head,
-    ...(legacy ? { legacySnapshot: legacy.legacySnapshot } : {}),
-    requirements,
-    blocks,
-    intakeIntent: prepared.intakeIntent,
-    actorExternalId: ctx.userId,
-    logger: ctx.logger,
-    repo,
-    responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
-    firecrawl: ctx.firecrawl ?? null,
-    semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
-    publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
-    afterSettlement: (op) =>
-      publishCoreSettledSuggestions({
-        op,
-        requirements,
-        repo,
-        wiring: args.wiring,
-        actorExternalId: ctx.userId,
-        modelDataRegion: args.modelDataRegion,
-        rawIntent: input.message,
-      }),
-  }));
+  const execution = await withTaskCostContext(ctx, input.taskId, () =>
+    startCoreTaskExecution({
+      lifetime: ctx.executionLifetime,
+      scope: { taskId: input.taskId, userId: args.userId },
+      before: head,
+      ...(legacy ? { legacySnapshot: legacy.legacySnapshot } : {}),
+      requirements,
+      blocks,
+      intakeIntent: prepared.intakeIntent,
+      actorExternalId: ctx.userId,
+      logger: ctx.logger,
+      repo,
+      responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
+      firecrawl: ctx.firecrawl ?? null,
+      semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
+      publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
+      afterSettlement: (op) =>
+        publishCoreSettledSuggestions({
+          op,
+          requirements,
+          repo,
+          wiring: args.wiring,
+          actorExternalId: ctx.userId,
+          modelDataRegion: args.modelDataRegion,
+          rawIntent: input.message,
+        }),
+    }),
+  );
   void execution.completion.catch(() => {});
   return {
     ok: execution.ack.state === 'resumed',

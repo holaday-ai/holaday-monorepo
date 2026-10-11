@@ -1,8 +1,8 @@
-import type { UiScreencast, UiTask } from '@/types/task';
+import { taskDisplayTitle } from '@/lib/task-display-copy';
+import { deriveTaskProductState } from '@/lib/task-product-state';
 import type { ConnStatus } from '@/lib/ws';
 import type { SidePanelMode, SidePanelOverride } from '@/types/side-panel';
-import { deriveTaskProductState } from '@/lib/task-product-state';
-import { taskDisplayTitle } from '@/lib/task-display-copy';
+import type { UiScreencast, UiTask } from '@/types/task';
 
 export interface WorkbenchToastCopy {
   message: string;
@@ -81,20 +81,18 @@ export function taskFrameForWorkbench(
 }
 
 export function isLiveBrowserTaskForWorkbench(task: UiTask | null): boolean {
-  return Boolean(
-    task &&
-      hasBrowserRecordForWorkbench(task) &&
-      !isWorkbenchTerminalTask(task),
-  );
+  return Boolean(task && hasBrowserRecordForWorkbench(task) && !isWorkbenchTerminalTask(task));
 }
 
 export function isWorkbenchTerminalTask(task: UiTask): boolean {
-  return deriveTaskProductState({
-    status: task.status,
-    queuePosition: task.queuePosition,
-    tickCount: task.tickCount,
-    awaitingKind: task.awaitingKind ?? null,
-  }).lifecycle === 'terminal';
+  return (
+    deriveTaskProductState({
+      status: task.status,
+      queuePosition: task.queuePosition,
+      tickCount: task.tickCount,
+      awaitingKind: task.awaitingKind ?? null,
+    }).lifecycle === 'terminal'
+  );
 }
 
 export function terminalTaskHasFollowUpContext(task: UiTask): boolean {

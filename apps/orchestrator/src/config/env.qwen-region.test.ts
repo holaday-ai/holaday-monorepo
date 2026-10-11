@@ -14,8 +14,7 @@ describe('Qwen dual-region environment contract', () => {
     expect(parsed).toMatchObject({
       DASHSCOPE_INTL_API_KEY: '',
       DASHSCOPE_INTL_ANTHROPIC_BASE_URL: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
-      DASHSCOPE_INTL_RESPONSES_BASE_URL:
-        'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+      DASHSCOPE_INTL_RESPONSES_BASE_URL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
       DASHSCOPE_INTL_WORKSPACE_ID: '',
       DASHSCOPE_CN_API_KEY: '',
       DASHSCOPE_CN_ANTHROPIC_BASE_URL: 'https://dashscope.aliyuncs.com/apps/anthropic',
@@ -114,14 +113,8 @@ describe('Qwen dual-region environment contract', () => {
   it.each([
     ['DASHSCOPE_INTL_ANTHROPIC_BASE_URL', 'https://dashscope.aliyuncs.com/apps/anthropic'],
     ['DASHSCOPE_CN_ANTHROPIC_BASE_URL', 'https://dashscope-intl.aliyuncs.com/apps/anthropic'],
-    [
-      'DASHSCOPE_INTL_RESPONSES_BASE_URL',
-      'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    ],
-    [
-      'DASHSCOPE_CN_RESPONSES_BASE_URL',
-      'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-    ],
+    ['DASHSCOPE_INTL_RESPONSES_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1'],
+    ['DASHSCOPE_CN_RESPONSES_BASE_URL', 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'],
   ])('rejects a wrong-region URL in %s', (field, value) => {
     expect(() => envSchema.parse({ ...BASE_ENV, [field]: value })).toThrow(field);
   });
@@ -150,4 +143,3 @@ describe('Qwen dual-region environment contract', () => {
     expect(explicit.DASHSCOPE_API_KEY).toBe('synthetic-legacy');
   });
 });
-

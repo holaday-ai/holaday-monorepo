@@ -1,8 +1,5 @@
 import { getAccessToken } from '@/lib/auth';
-import {
-  isFileUnavailable,
-  markFileUnavailableFromStatus,
-} from '@/lib/unavailable-file-registry';
+import { isFileUnavailable, markFileUnavailableFromStatus } from '@/lib/unavailable-file-registry';
 
 /**
  * Shared authed file download / fetch helpers. Centralised so the
@@ -27,6 +24,7 @@ export interface DownloadResult {
 export function safeDownloadFilename(filename: string): string {
   const trimmed = filename.trim();
   const cleaned = trimmed
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips control characters from download file names by design
     .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-')
     .replace(/\s+/g, ' ')
     .replace(/^[.-]+|-+$/g, '')
@@ -46,9 +44,7 @@ interface BaseInput {
  * `ok: true` on success or a status/message tuple on failure so the
  * caller can craft a context-specific toast.
  */
-export async function downloadFileAuthed(
-  input: BaseInput,
-): Promise<DownloadResult> {
+export async function downloadFileAuthed(input: BaseInput): Promise<DownloadResult> {
   if (isFileUnavailable(input.url)) {
     return { ok: false, status: 410, message: 'known unavailable file' };
   }
@@ -96,9 +92,7 @@ export interface FetchBlobResult {
   message: string;
 }
 
-export function isUnavailableFileStatus(
-  status: number | null,
-): status is 404 | 410 {
+export function isUnavailableFileStatus(status: number | null): status is 404 | 410 {
   return status === 404 || status === 410;
 }
 

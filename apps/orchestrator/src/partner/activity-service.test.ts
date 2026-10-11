@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
-import { partnerActivityEvents, type PartnerActivityEvent } from '../db/schema/partner.js';
-import { calculateActivityFactorBps, PartnerActivityService } from './activity-service.js';
+import { type PartnerActivityEvent, partnerActivityEvents } from '../db/schema/partner.js';
+import { PartnerActivityService, calculateActivityFactorBps } from './activity-service.js';
 
 type FakeActivityInsert = Omit<PartnerActivityEvent, 'id' | 'createdAt'>;
 
@@ -77,19 +77,27 @@ function fakeActivity(overrides: Partial<PartnerActivityEvent> = {}): PartnerAct
 
 describe('partner activity service rules', () => {
   it('keeps inactive users at 1.00x', () => {
-    expect(calculateActivityFactorBps({ loginDays: 0, completedTasks: 0, validInvites: 0 })).toBe(10_000);
+    expect(calculateActivityFactorBps({ loginDays: 0, completedTasks: 0, validInvites: 0 })).toBe(
+      10_000,
+    );
   });
 
   it('caps activity boost at 1.10x', () => {
-    expect(calculateActivityFactorBps({ loginDays: 7, completedTasks: 20, validInvites: 5 })).toBe(11_000);
+    expect(calculateActivityFactorBps({ loginDays: 7, completedTasks: 20, validInvites: 5 })).toBe(
+      11_000,
+    );
   });
 
   it('uses activity as weight only, not direct credit issuance', () => {
-    expect(calculateActivityFactorBps({ loginDays: 1, completedTasks: 1, validInvites: 0 })).toBe(10_200);
+    expect(calculateActivityFactorBps({ loginDays: 1, completedTasks: 1, validInvites: 0 })).toBe(
+      10_200,
+    );
   });
 
   it('normalizes malformed activity inputs conservatively', () => {
-    expect(calculateActivityFactorBps({ loginDays: -1, completedTasks: 1.5, validInvites: Number.NaN })).toBe(10_000);
+    expect(
+      calculateActivityFactorBps({ loginDays: -1, completedTasks: 1.5, validInvites: Number.NaN }),
+    ).toBe(10_000);
   });
 });
 
@@ -129,11 +137,18 @@ describe('PartnerActivityService daily check-in', () => {
       fakeActivity({ id: 2, activityDate: '2026-07-01', idempotencyKey: 'd1' }),
       fakeActivity({ id: 3, activityDate: '2026-07-02', idempotencyKey: 'd2' }),
       fakeActivity({ id: 4, activityDate: '2026-07-03', idempotencyKey: 'd3' }),
-      fakeActivity({ id: 5, userId: 456, activityDate: '2026-07-03', idempotencyKey: 'other-user' }),
+      fakeActivity({
+        id: 5,
+        userId: 456,
+        activityDate: '2026-07-03',
+        idempotencyKey: 'other-user',
+      }),
     ]);
     const service = new PartnerActivityService(db.asDB());
 
-    await expect(service.getActivitySummary(123, new Date('2026-07-03T04:00:00.000Z'))).resolves.toMatchObject({
+    await expect(
+      service.getActivitySummary(123, new Date('2026-07-03T04:00:00.000Z')),
+    ).resolves.toMatchObject({
       activityDate: '2026-07-03',
       checkedInToday: true,
       loginDays: 3,
@@ -141,6 +156,8 @@ describe('PartnerActivityService daily check-in', () => {
       validInvites: 0,
       activityFactorBps: 10_300,
     });
-    await expect(service.getActivityFactorBps(123, new Date('2026-07-03T04:00:00.000Z'))).resolves.toBe(10_300);
+    await expect(
+      service.getActivityFactorBps(123, new Date('2026-07-03T04:00:00.000Z')),
+    ).resolves.toBe(10_300);
   });
 });

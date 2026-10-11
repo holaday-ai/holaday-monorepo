@@ -553,17 +553,26 @@ export async function checkAkshare(deps: SelfCheckDeps): Promise<SelfCheckItem> 
   let available = false;
   try {
     const response = await deps.fetchImpl('http://127.0.0.1:8848/health', {
-      redirect: 'error', signal: AbortSignal.timeout(deps.timeoutMs ?? 5_000),
+      redirect: 'error',
+      signal: AbortSignal.timeout(deps.timeoutMs ?? 5_000),
     });
     if (response.status === 200) {
-      const body = await response.json() as { status?: unknown; adapter_ready?: unknown };
+      const body = (await response.json()) as { status?: unknown; adapter_ready?: unknown };
       available = body?.status === 'ok' && body?.adapter_ready === true;
     }
-  } catch { /* Never expose adapter errors or environment values. */ }
-  return item({ id: 'infra.akshare', group: 'infra', label: '股票数据服务（AkShare）' },
-    available ? { status: 'ok', reason: 'loopback 8848 健康，适配器就绪' }
-      : { status: 'fail', reason: 'loopback 8848 不可用或适配器未就绪',
-          advice: '由运维核对 akshare-mcp-http 原配置与状态；不要自动重启其他服务' });
+  } catch {
+    /* Never expose adapter errors or environment values. */
+  }
+  return item(
+    { id: 'infra.akshare', group: 'infra', label: '股票数据服务（AkShare）' },
+    available
+      ? { status: 'ok', reason: 'loopback 8848 健康，适配器就绪' }
+      : {
+          status: 'fail',
+          reason: 'loopback 8848 不可用或适配器未就绪',
+          advice: '由运维核对 akshare-mcp-http 原配置与状态；不要自动重启其他服务',
+        },
+  );
 }
 
 export async function checkInfrastructure(deps: SelfCheckDeps): Promise<SelfCheckItem[]> {

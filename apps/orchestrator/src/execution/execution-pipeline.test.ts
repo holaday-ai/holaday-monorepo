@@ -998,7 +998,7 @@ describe('all flags on — URL fabrication autoFix loop', () => {
     });
     const out = await verifyAndFinalize({
       taskId: 'tsk_f2',
-      answerText: 'Citation: https://totally-unrelated.example.org/x. ' + 'x'.repeat(60),
+      answerText: `Citation: https://totally-unrelated.example.org/x. ${'x'.repeat(60)}`,
     });
     // Phase 1 follow-up: url_drop now removes the fabricated URL
     // entirely (no placeholder text). The recheck passes because
@@ -1101,7 +1101,7 @@ describe('full tier triggers Qwen semantic verifier', () => {
       '## 核心数据',
       'GMV ¥100000 [用户提供]，客单价 ¥80 [用户提供]。',
       '## 问题诊断',
-      '当前数据口径一致 [用户提供]。' + '分析内容'.repeat(80),
+      `当前数据口径一致 [用户提供]。${'分析内容'.repeat(80)}`,
       '## 优化动作',
       '1. 固定主推品节奏并记录转化。',
       '## 下场直播 Checklist',
@@ -1137,7 +1137,7 @@ describe('full tier triggers Qwen semantic verifier', () => {
       confidence: 'observed',
     });
     const semanticAdapter = makeStubClient('{"status":"pass","issues":[]}');
-    const answerText = '本场 GMV ¥100000，客单价 ¥80。' + 'x'.repeat(220);
+    const answerText = `本场 GMV ¥100000，客单价 ¥80。${'x'.repeat(220)}`;
     const out = await verifyAndFinalize({
       taskId: 'tsk_full1',
       answerText,
@@ -1167,7 +1167,7 @@ describe('full tier triggers Qwen semantic verifier', () => {
     );
     const out = await verifyAndFinalize({
       taskId: 'tsk_full2',
-      answerText: '本场 GMV ¥100000 表现不错。' + 'x'.repeat(220),
+      answerText: `本场 GMV ¥100000 表现不错。${'x'.repeat(220)}`,
       semanticAdapter,
     });
     expect(out.verification!.tier).toBe('llm');
@@ -1445,7 +1445,7 @@ describe('disposeExecution + resilience', () => {
     };
     const out = await verifyAndFinalize({
       taskId: 'tsk_thr',
-      answerText: '本场 GMV ¥100000 ' + 'x'.repeat(220),
+      answerText: `本场 GMV ¥100000 ${'x'.repeat(220)}`,
       semanticAdapter,
     });
     expect(out.verification!.passed).toBe(true);

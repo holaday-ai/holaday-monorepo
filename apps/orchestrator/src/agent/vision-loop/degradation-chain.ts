@@ -76,7 +76,12 @@ export class ProfileRotationStrategy implements DegradationStrategy {
       return { ok: false, strategy: this.id, level: this.level, message: 'no executor' };
     }
     const browser = (executor as unknown as { browser?: unknown }).browser as
-      | { contexts?: () => Array<{ clearCookies?: () => Promise<void>; addInitScript?: (opts: { content: string }) => Promise<void> }> }
+      | {
+          contexts?: () => Array<{
+            clearCookies?: () => Promise<void>;
+            addInitScript?: (opts: { content: string }) => Promise<void>;
+          }>;
+        }
       | null
       | undefined;
     const ctxList = browser?.contexts?.() ?? [];
@@ -129,7 +134,10 @@ export class ProxySwapStrategy implements DegradationStrategy {
   }
 
   async execute(): Promise<DegradationResult> {
-    const proxies = (process.env.PROXY_LIST ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    const proxies = (process.env.PROXY_LIST ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     const chosen = proxies[Math.floor(Math.random() * proxies.length)] ?? null;
     logger.warn(
       { action: 'degrade', level: this.level, strategy: this.id, chosen },
@@ -266,9 +274,7 @@ export class DegradationChain {
   constructor(strategies?: DegradationStrategy[]) {
     // Sort ascending so `tryNext` can iterate linearly. Copy first so
     // we don't mutate the caller's array.
-    this.strategies = (strategies ?? defaultStrategies())
-      .slice()
-      .sort((a, b) => a.level - b.level);
+    this.strategies = (strategies ?? defaultStrategies()).slice().sort((a, b) => a.level - b.level);
   }
 
   /** Ordered list of strategies (post-sort). Exposed for tests. */

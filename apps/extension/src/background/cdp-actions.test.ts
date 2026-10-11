@@ -24,17 +24,11 @@ afterEach(() => {
 
 describe('normalizeCdpNavigateUrl', () => {
   it('accepts http and https urls after trimming', () => {
-    expect(normalizeCdpNavigateUrl(' https://example.com/path ')).toBe(
-      'https://example.com/path',
-    );
+    expect(normalizeCdpNavigateUrl(' https://example.com/path ')).toBe('https://example.com/path');
     expect(normalizeCdpNavigateUrl('http://example.com/')).toBe('http://example.com/');
-    expect(normalizeCdpNavigateUrl('example.com/path?q=1')).toBe(
-      'https://example.com/path?q=1',
-    );
+    expect(normalizeCdpNavigateUrl('example.com/path?q=1')).toBe('https://example.com/path?q=1');
     expect(normalizeCdpNavigateUrl('localhost:3000/app')).toBe('http://localhost:3000/app');
-    expect(normalizeCdpNavigateUrl('127.0.0.1:4173/app')).toBe(
-      'http://127.0.0.1:4173/app',
-    );
+    expect(normalizeCdpNavigateUrl('127.0.0.1:4173/app')).toBe('http://127.0.0.1:4173/app');
   });
 
   it('rejects empty, malformed, internal, and oversized urls', () => {
@@ -169,11 +163,7 @@ describe('executeCdpAction', () => {
       message: '点击坐标超出可视区域 (420,20) / 360x640，请重新定位',
     });
     expect(sendCommand).toHaveBeenCalledTimes(1);
-    expect(sendCommand).toHaveBeenCalledWith(
-      { tabId: 7 },
-      'Runtime.evaluate',
-      expect.any(Object),
-    );
+    expect(sendCommand).toHaveBeenCalledWith({ tabId: 7 }, 'Runtime.evaluate', expect.any(Object));
   });
 
   it('reattaches before clicking when viewport probing resets the debugger session', async () => {
@@ -740,9 +730,7 @@ describe('executeCdpAction', () => {
       ok: false,
       message: '按键指令无效，请重新生成按键操作',
     });
-    await expect(
-      executeCdpAction(11, { kind: 'key', key: 'x'.repeat(65) }),
-    ).resolves.toEqual({
+    await expect(executeCdpAction(11, { kind: 'key', key: 'x'.repeat(65) })).resolves.toEqual({
       ok: false,
       message: '按键指令过长，请拆成更短步骤后重试',
     });
@@ -798,9 +786,7 @@ describe('executeCdpAction', () => {
       ok: false,
       message: '输入文本无效，请重新生成输入内容',
     });
-    await expect(
-      executeCdpAction(12, { kind: 'type', text: 'x'.repeat(4001) }),
-    ).resolves.toEqual({
+    await expect(executeCdpAction(12, { kind: 'type', text: 'x'.repeat(4001) })).resolves.toEqual({
       ok: false,
       message: '输入文本过长，请拆成更短步骤后重试',
     });
@@ -890,17 +876,15 @@ describe('executeCdpAction', () => {
     vi.useFakeTimers();
     const attach = vi.fn(async () => undefined);
     const detach = vi.fn(async () => undefined);
-    const sendCommand = vi
-      .fn()
-      .mockImplementation((_target, method: string) => {
-        if (method === 'Runtime.evaluate') {
-          return Promise.resolve({ result: { value: JSON.stringify({ w: 360, h: 640 }) } });
-        }
-        if (method === 'Input.dispatchMouseEvent') {
-          return new Promise(() => undefined);
-        }
-        return Promise.resolve({});
-      });
+    const sendCommand = vi.fn().mockImplementation((_target, method: string) => {
+      if (method === 'Runtime.evaluate') {
+        return Promise.resolve({ result: { value: JSON.stringify({ w: 360, h: 640 }) } });
+      }
+      if (method === 'Input.dispatchMouseEvent') {
+        return new Promise(() => undefined);
+      }
+      return Promise.resolve({});
+    });
     globalThis.chrome = {
       debugger: {
         attach,
@@ -1106,13 +1090,9 @@ describe('executeCdpAction', () => {
       ok: true,
       message: 'navigated to https://example.com/callback?state=keep',
     });
-    expect(sendCommand).toHaveBeenCalledWith(
-      { tabId: 15 },
-      'Page.navigate',
-      {
-        url: 'https://example.com/callback?accessToken=secret&state=keep#token=hash',
-      },
-    );
+    expect(sendCommand).toHaveBeenCalledWith({ tabId: 15 }, 'Page.navigate', {
+      url: 'https://example.com/callback?accessToken=secret&state=keep#token=hash',
+    });
   });
 
   it('clips action result messages to the vision acted schema limit', async () => {
@@ -1142,12 +1122,14 @@ describe('cdpActionErrorMessage', () => {
     expect(cdpActionErrorMessage(new Error('No tab with id: 1.'))).toBe(
       '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
     );
-    expect(cdpActionErrorMessage(new Error('Could not establish connection. Receiving end does not exist.'))).toBe(
-      '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
-    );
-    expect(cdpActionErrorMessage(new Error('The message port closed before a response was received.'))).toBe(
-      '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
-    );
+    expect(
+      cdpActionErrorMessage(
+        new Error('Could not establish connection. Receiving end does not exist.'),
+      ),
+    ).toBe('浏览器标签页已关闭或连接中断，请重新打开页面后重试');
+    expect(
+      cdpActionErrorMessage(new Error('The message port closed before a response was received.')),
+    ).toBe('浏览器标签页已关闭或连接中断，请重新打开页面后重试');
     expect(cdpActionErrorMessage(new Error('Another debugger is already attached'))).toBe(
       '浏览器调试通道被占用，请关闭该标签页 DevTools 后重试',
     );
@@ -1160,9 +1142,11 @@ describe('cdpActionErrorMessage', () => {
     expect(cdpActionErrorMessage(new Error('Requires activeTab permission'))).toBe(
       '扩展没有这个页面的访问权限，请检查扩展权限后重试',
     );
-    expect(cdpActionErrorMessage(new Error("Either the '<all_urls>' or 'activeTab' permission is required."))).toBe(
-      '扩展没有这个页面的访问权限，请检查扩展权限后重试',
-    );
+    expect(
+      cdpActionErrorMessage(
+        new Error("Either the '<all_urls>' or 'activeTab' permission is required."),
+      ),
+    ).toBe('扩展没有这个页面的访问权限，请检查扩展权限后重试');
     expect(cdpActionErrorMessage(new Error('Cannot access a file:// URL'))).toBe(
       '扩展没有这个页面的访问权限，请检查扩展权限后重试',
     );
@@ -1189,7 +1173,9 @@ describe('cdpActionErrorMessage', () => {
     );
     expect(
       cdpActionErrorMessage(
-        new Error('Cannot access contents of the page. Extension manifest must request permission.'),
+        new Error(
+          'Cannot access contents of the page. Extension manifest must request permission.',
+        ),
       ),
     ).toBe('扩展没有这个页面的访问权限，请检查扩展权限后重试');
     expect(cdpActionErrorMessage(new Error('CDP Input.dispatchMouseEvent timeout 5000ms'))).toBe(
@@ -1330,26 +1316,16 @@ describe('captureVisionObservation', () => {
       url: 'https://holaday.ai/app',
       title: 'HOLA DAY',
     });
-    expect(sendCommand).toHaveBeenNthCalledWith(
-      2,
-      { tabId: 1 },
-      'Page.captureScreenshot',
-      {
-        format: 'jpeg',
-        quality: 80,
-        captureBeyondViewport: false,
-      },
-    );
-    expect(sendCommand).toHaveBeenNthCalledWith(
-      3,
-      { tabId: 1 },
-      'Page.captureScreenshot',
-      {
-        format: 'jpeg',
-        quality: 60,
-        captureBeyondViewport: false,
-      },
-    );
+    expect(sendCommand).toHaveBeenNthCalledWith(2, { tabId: 1 }, 'Page.captureScreenshot', {
+      format: 'jpeg',
+      quality: 80,
+      captureBeyondViewport: false,
+    });
+    expect(sendCommand).toHaveBeenNthCalledWith(3, { tabId: 1 }, 'Page.captureScreenshot', {
+      format: 'jpeg',
+      quality: 60,
+      captureBeyondViewport: false,
+    });
   });
 
   it('falls back to chrome tab metadata when page evaluation is unavailable', async () => {
@@ -1537,7 +1513,9 @@ describe('getActiveTabId', () => {
     const query = vi
       .fn()
       .mockResolvedValueOnce([{ id: 10, url: 'chrome://extensions/', lastAccessed: 7000 }])
-      .mockResolvedValueOnce([{ id: 11, url: 'chrome-extension://abc/src/popup/index.html', lastAccessed: 8000 }])
+      .mockResolvedValueOnce([
+        { id: 11, url: 'chrome-extension://abc/src/popup/index.html', lastAccessed: 8000 },
+      ])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         { id: 12, url: 'https://older.example/', active: false, lastAccessed: 1000 },

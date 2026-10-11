@@ -1,10 +1,10 @@
+import { useTaskStore } from '@/stores/task-store';
+import type { UiTask } from '@/types/task';
 // @vitest-environment happy-dom
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useTaskStore } from '@/stores/task-store';
-import type { UiTask } from '@/types/task';
 import { InputArea } from './InputArea';
 import { ToastProvider } from './ui/toast';
 
@@ -31,7 +31,7 @@ vi.mock('@/lib/trpc', () => ({
 }));
 afterEach(() => {
   cleanup();
-  useTaskStore.setState({tasks:[], selectedTaskId:null});
+  useTaskStore.setState({ tasks: [], selectedTaskId: null });
   vi.restoreAllMocks();
 });
 function mount(attachmentsAllowed: boolean) {
@@ -83,14 +83,23 @@ describe('composer task choices independent of attachment entitlement', () => {
 });
 
 describe('existing task composer and Chrome entry', () => {
-  it.each(['generate', 'image', 'scrape'] as const)('uses follow-up copy and hides Chrome for %s tasks', (executionMode) => {
-    useTaskStore.setState({selectedTaskId:'task-existing', tasks:[{taskId:'task-existing',status:'failed',executionMode} as UiTask]});
-    mount(false);
-    expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('补充问题或下一步指令...');
-    expect(screen.queryByText('连接 Chrome')).toBeNull();
-  });
+  it.each(['generate', 'image', 'scrape'] as const)(
+    'uses follow-up copy and hides Chrome for %s tasks',
+    (executionMode) => {
+      useTaskStore.setState({
+        selectedTaskId: 'task-existing',
+        tasks: [{ taskId: 'task-existing', status: 'failed', executionMode } as UiTask],
+      });
+      mount(false);
+      expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe(
+        '补充问题或下一步指令...',
+      );
+      expect(screen.queryByText('连接 Chrome')).toBeNull();
+    },
+  );
   it('does not offer Chrome in an untyped new task', () => {
-    useTaskStore.setState({selectedTaskId:null,tasks:[]}); mount(false);
+    useTaskStore.setState({ selectedTaskId: null, tasks: [] });
+    mount(false);
     expect(screen.queryByText('连接 Chrome')).toBeNull();
   });
 });

@@ -9,7 +9,7 @@ describe('planned task responsive layout', () => {
     const mobilePagePadding: string[] = [];
 
     root.walkAtRules('media', (media) => {
-      const maxWidth = Number(media.params.match(/max-width:\s*(\d+)px/)?.[1] ?? NaN);
+      const maxWidth = Number(media.params.match(/max-width:\s*(\d+)px/)?.[1] ?? Number.NaN);
       if (!Number.isFinite(maxWidth) || maxWidth > 768) return;
       media.walkRules('.planned-page', (rule) => {
         rule.walkDecls('padding', (declaration) => {
@@ -27,7 +27,7 @@ describe('planned task responsive layout', () => {
     const declarations = new Map<string, Map<string, string>>();
 
     root.walkAtRules('media', (media) => {
-      const maxWidth = Number(media.params.match(/max-width:\s*(\d+)px/)?.[1] ?? NaN);
+      const maxWidth = Number(media.params.match(/max-width:\s*(\d+)px/)?.[1] ?? Number.NaN);
       if (!Number.isFinite(maxWidth) || maxWidth > 820) return;
       media.walkRules((rule) => {
         const values = declarations.get(rule.selector) ?? new Map<string, string>();

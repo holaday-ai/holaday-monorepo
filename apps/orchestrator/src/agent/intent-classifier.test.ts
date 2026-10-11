@@ -122,18 +122,20 @@ describe('classifyExecutionMode — default is generate', () => {
   });
 
   it('keeps two negated actions on either side of a contrast marker offline', async () => {
-    expect(await classifyExecutionMode({
-      intent: '写一份通知，不操作后台但也不访问 https://example.com。',
-      logger: fakeLogger(),
-    })).toBe('generate');
+    expect(
+      await classifyExecutionMode({
+        intent: '写一份通知，不操作后台但也不访问 https://example.com。',
+        logger: fakeLogger(),
+      }),
+    ).toBe('generate');
   });
 
-  it.each([
-    '请生成一张只在店内展示的品牌海报。',
-    '生成一张只用于活动宣传的海报。',
-  ])('leaves affirmative image descriptions unchanged: %s', async (intent) => {
-    expect(await classifyExecutionMode({ intent, logger: fakeLogger() })).toBe('image');
-  });
+  it.each(['请生成一张只在店内展示的品牌海报。', '生成一张只用于活动宣传的海报。'])(
+    'leaves affirmative image descriptions unchanged: %s',
+    async (intent) => {
+      expect(await classifyExecutionMode({ intent, logger: fakeLogger() })).toBe('image');
+    },
+  );
 });
 
 describe('classifyExecutionMode — pre-Firecrawl regression suite (site/URL without interaction now scrape)', () => {
@@ -859,10 +861,7 @@ describe('Task A — Google Flights/Hotels/Maps + travel execution → browser',
   });
 
   it('travel search/booking that stops before commit → browser (even without a Google app)', async () => {
-    for (const intent of [
-      '查上海到东京航班，不要下单',
-      '筛选酒店但先别预订',
-    ]) {
+    for (const intent of ['查上海到东京航班，不要下单', '筛选酒店但先别预订']) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
       expect(out, intent).toBe('browser');
     }
@@ -944,10 +943,18 @@ describe('China OTA execution — 携程/飞猪/去哪儿/同程/美团 → brow
   });
 
   it('current-data and lightweight stay unaffected by the OTA path', async () => {
-    expect(await classifyExecutionMode({ intent: '查今天特斯拉股价', logger: fakeLogger() })).toBe('scrape');
-    expect(await classifyExecutionMode({ intent: '搜索最新 AI 新闻', logger: fakeLogger() })).toBe('scrape');
-    expect(await classifyExecutionMode({ intent: '1 加 1 等于几？', logger: fakeLogger() })).toBe('generate');
-    expect(await classifyExecutionMode({ intent: '什么是 AI？', logger: fakeLogger() })).toBe('generate');
+    expect(await classifyExecutionMode({ intent: '查今天特斯拉股价', logger: fakeLogger() })).toBe(
+      'scrape',
+    );
+    expect(await classifyExecutionMode({ intent: '搜索最新 AI 新闻', logger: fakeLogger() })).toBe(
+      'scrape',
+    );
+    expect(await classifyExecutionMode({ intent: '1 加 1 等于几？', logger: fakeLogger() })).toBe(
+      'generate',
+    );
+    expect(await classifyExecutionMode({ intent: '什么是 AI？', logger: fakeLogger() })).toBe(
+      'generate',
+    );
   });
 });
 
@@ -1101,7 +1108,10 @@ describe('Named-site execution → browser (Web-Agent roadmap Step 1, 2026-06-11
       await classifyExecutionMode({ intent: '搜索小红书上露营笔记', logger: fakeLogger() }),
     ).toBe('scrape');
     expect(
-      await classifyExecutionMode({ intent: '总结 https://example.com 的内容', logger: fakeLogger() }),
+      await classifyExecutionMode({
+        intent: '总结 https://example.com 的内容',
+        logger: fakeLogger(),
+      }),
     ).toBe('scrape');
   });
 });
@@ -1263,13 +1273,17 @@ describe('attachment writing deliverables', () => {
     '写一篇约350字的短文，配图只能使用我上传的cat.png，不调用图片生成、浏览器或搜索，提供可下载的文章文件',
     'Use the attached image to write a story and provide a downloadable document',
   ])('uses the generate lane for attached writing: %s', async (intent) => {
-    expect(await classifyExecutionMode({intent, hasFileAttachment: true, logger: fakeLogger()})).toBe('generate');
+    expect(
+      await classifyExecutionMode({ intent, hasFileAttachment: true, logger: fakeLogger() }),
+    ).toBe('generate');
   });
   it.each([
     '用这张图写短文，并打开 https://example.com 上传文件',
     'Use the attached image to write a story and upload it to github.com',
   ])('preserves explicit website actions: %s', async (intent) => {
-    expect(await classifyExecutionMode({intent, hasFileAttachment: true, logger: fakeLogger()})).toBe('browser');
+    expect(
+      await classifyExecutionMode({ intent, hasFileAttachment: true, logger: fakeLogger() }),
+    ).toBe('browser');
   });
 });
 
@@ -1282,17 +1296,32 @@ describe('attachment writing with live sources', () => {
     '根据附件整理实时价格报告',
     'Use the attached image to write a report about latest prices',
   ])('keeps live-source writing online: %s', async (intent) => {
-    expect(await classifyExecutionMode({intent, hasFileAttachment:true, logger:fakeLogger()})).toBe('scrape');
+    expect(
+      await classifyExecutionMode({ intent, hasFileAttachment: true, logger: fakeLogger() }),
+    ).toBe('scrape');
   });
 });
 
 describe('live-source attachment writing precedence', () => {
- it('fresh data overrides a local-writing skill',async()=>{
-  expect(await classifyExecutionMode({intent:'根据附件写最新新闻报告并列明数据来源',hasFileAttachment:true,skillId:'wechat-article-ops',logger:fakeLogger()})).toBe('scrape');
- });
- it('price rows and links keep the browser shopping lane',async()=>{
-  expect(await classifyExecutionMode({intent:'根据附件和 jd.com 写前5个商品价格和链接报告',hasFileAttachment:true,logger:fakeLogger()})).toBe('browser');
- });
+  it('fresh data overrides a local-writing skill', async () => {
+    expect(
+      await classifyExecutionMode({
+        intent: '根据附件写最新新闻报告并列明数据来源',
+        hasFileAttachment: true,
+        skillId: 'wechat-article-ops',
+        logger: fakeLogger(),
+      }),
+    ).toBe('scrape');
+  });
+  it('price rows and links keep the browser shopping lane', async () => {
+    expect(
+      await classifyExecutionMode({
+        intent: '根据附件和 jd.com 写前5个商品价格和链接报告',
+        hasFileAttachment: true,
+        logger: fakeLogger(),
+      }),
+    ).toBe('browser');
+  });
 });
 
 describe('attachment references vs real uploads (SMALL-FIXES-1)', () => {
@@ -1315,7 +1344,6 @@ describe('attachment references vs real uploads (SMALL-FIXES-1)', () => {
     },
   );
 });
-
 
 describe('FIX-PR251 upload topic boundaries', () => {
   it.each([
@@ -1387,10 +1415,12 @@ describe('downloads: output format vs website action (FIX-D11-ROUTING)', () => {
     ['打开证监会网站下载这份年报的原文', false],
     ['把附件上传到 github.com 的仓库', true],
     ['把上传的文件上传到 Google Drive', true],
-  ])('real website download/upload stays on the browser lane: %s', async (intent, hasFileAttachment) => {
-    expect(await classifyExecutionMode({ intent, hasFileAttachment, logger: fakeLogger() })).toBe(
-      'browser',
-    );
-  });
+  ])(
+    'real website download/upload stays on the browser lane: %s',
+    async (intent, hasFileAttachment) => {
+      expect(await classifyExecutionMode({ intent, hasFileAttachment, logger: fakeLogger() })).toBe(
+        'browser',
+      );
+    },
+  );
 });
-

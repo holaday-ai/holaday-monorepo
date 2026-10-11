@@ -4,8 +4,8 @@ import {
   hasHistoryFilters,
   historyFilterRequestKey,
   historyPageSummary,
-  historyStatusFilterToServerStatuses,
   historyStatusFilterOptions,
+  historyStatusFilterToServerStatuses,
   mergeTaskHubRowsById,
   normalizeTaskHubCursor,
   normalizeTaskHubRows,
@@ -16,8 +16,8 @@ import {
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
   taskHubRowTitle,
-  taskHubStatusIconKind,
   taskHubRowTone,
+  taskHubStatusIconKind,
   taskHubStatusTone,
 } from './task-hub-state';
 
@@ -54,9 +54,7 @@ describe('task hub state helpers', () => {
   });
 
   it('keeps failed and review-needed history filters separate', () => {
-    expect(historyStatusFilterOptions.find((option) => option.id === 'failed')?.label).toBe(
-      '失败',
-    );
+    expect(historyStatusFilterOptions.find((option) => option.id === 'failed')?.label).toBe('失败');
     expect(historyStatusFilterOptions.find((option) => option.id === 'review')?.label).toBe(
       '需复核',
     );
@@ -88,9 +86,7 @@ describe('task hub state helpers', () => {
         status: 'review',
         range: '30d',
       }),
-    ).toBe(
-      'review\n30d\n',
-    );
+    ).toBe('review\n30d\n');
   });
 
   it('summarizes history page states', () => {
