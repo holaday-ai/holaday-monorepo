@@ -1,3 +1,4 @@
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
 import { CreativeDisclosure } from '@/components/CreativeDisclosure';
 import { CreativeInspiration } from '@/components/CreativeInspiration';
@@ -1354,7 +1355,8 @@ function CreativeStyleDialog({
           {(Object.keys(STYLE_GROUPS) as CreativeStyleGroup[]).map((group) => {
             const active = group === activeGroup;
             return (
-              <button
+              <ChoiceButton
+                selected={active}
                 key={group}
                 type="button"
                 onClick={() => onActiveGroupChange(group)}
@@ -1368,7 +1370,7 @@ function CreativeStyleDialog({
                 <span className="ml-1 text-[12px] font-medium text-white/42">
                   {STYLE_GROUPS[group].subtitle}
                 </span>
-              </button>
+              </ChoiceButton>
             );
           })}
         </div>

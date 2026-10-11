@@ -1,3 +1,4 @@
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { AddonPackButton } from '@/components/AddonPackButton';
 import { useAppShellContext } from '@/components/AppShell';
 import { CnPaymentDialog, type CnProvider, type CnPurchase } from '@/components/CnPaymentDialog';
@@ -187,7 +188,8 @@ export function PlanPage(): JSX.Element {
       {/* Cycle toggle */}
       <div className="mx-auto mb-7 flex flex-col items-center gap-2">
         <div className="inline-flex rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-          <button
+          <ChoiceButton
+            selected={cycle === 'monthly'}
             type="button"
             onClick={() => setCycle('monthly')}
             className={cn(
@@ -198,8 +200,9 @@ export function PlanPage(): JSX.Element {
             )}
           >
             {zh ? '按月' : 'Monthly'}
-          </button>
-          <button
+          </ChoiceButton>
+          <ChoiceButton
+            selected={cycle === 'yearly'}
             type="button"
             onClick={() => setCycle('yearly')}
             className={cn(
@@ -220,7 +223,7 @@ export function PlanPage(): JSX.Element {
             >
               {zh ? '省 17%' : '-17%'}
             </span>
-          </button>
+          </ChoiceButton>
         </div>
         <p className="text-center text-[12px] leading-5 text-muted-foreground">
           {zh ? MANUAL_RENEWAL_DISCLOSURE_ZH : MANUAL_RENEWAL_DISCLOSURE_EN}

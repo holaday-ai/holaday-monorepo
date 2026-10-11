@@ -1,3 +1,4 @@
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { AlertCircle, CheckCircle2, CircleSlash, Loader2, RotateCcw, Search, XCircle } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -471,7 +472,8 @@ function FilterGroup<T extends string>({
   return (
     <div className="inline-flex gap-0.5 rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5 text-xs">
       {options.map((o) => (
-        <button
+        <ChoiceButton
+          selected={value === o.id}
           key={o.id}
           type="button"
           onClick={() => onChange(o.id)}
@@ -483,7 +485,7 @@ function FilterGroup<T extends string>({
           )}
         >
           {o.label}
-        </button>
+        </ChoiceButton>
       ))}
     </div>
   );

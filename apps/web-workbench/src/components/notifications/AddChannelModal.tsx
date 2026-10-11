@@ -11,6 +11,7 @@
  * open so closing + reopening doesn't keep a stale form.
  */
 
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { CheckCircle2, Loader2, X, XCircle } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
@@ -219,7 +220,8 @@ export function AddChannelModal({
             </label>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {PLATFORM_CARDS.map((p) => (
-                <button
+                <ChoiceButton
+                  selected={platform === p.value}
                   type="button"
                   key={p.value}
                   disabled={saving || testing}
@@ -244,7 +246,7 @@ export function AddChannelModal({
                   <div className="mt-0.5 text-[10px] text-muted-foreground">
                     {p.hint}
                   </div>
-                </button>
+                </ChoiceButton>
               ))}
             </div>
           </div>

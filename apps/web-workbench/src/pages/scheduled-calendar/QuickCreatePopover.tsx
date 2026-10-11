@@ -14,6 +14,7 @@
  * Dismissal: Esc, click outside, or pressing Cancel.
  */
 
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { Bell, ChevronDown, ChevronUp, Clock, Loader2, Plus, Repeat2 } from 'lucide-react';
 import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -296,7 +297,8 @@ export function QuickCreatePopover({
         </div>
         <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-5">
           {REPEAT_PRESETS.map((p) => (
-            <button
+            <ChoiceButton
+              selected={repeatType === p.value}
               type="button"
               key={p.value}
               onClick={() => handleRepeatSelect(p.value)}
@@ -309,7 +311,7 @@ export function QuickCreatePopover({
               )}
             >
               {p.label}
-            </button>
+            </ChoiceButton>
           ))}
         </div>
         <div className="mt-3">
@@ -319,7 +321,8 @@ export function QuickCreatePopover({
           </div>
           <div className="grid grid-cols-3 gap-1.5">
             {REMINDER_PRESETS.map((p) => (
-              <button
+              <ChoiceButton
+                selected={reminderMinutes === p.value}
                 type="button"
                 key={p.value === null ? 'off' : String(p.value)}
                 onClick={() => setReminderMinutes(p.value)}
@@ -332,7 +335,7 @@ export function QuickCreatePopover({
                 )}
               >
                 {p.label}
-              </button>
+              </ChoiceButton>
             ))}
           </div>
         </div>

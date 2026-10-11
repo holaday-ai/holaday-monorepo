@@ -12,6 +12,7 @@
  * page is where the charts live.
  */
 
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { Loader2, Search } from 'lucide-react';
 import * as React from 'react';
 import { Link } from 'react-router-dom';
@@ -379,7 +380,8 @@ function FilterPill({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <button
+    <ChoiceButton
+      selected={active}
       type="button"
       onClick={onClick}
       className={cn(
@@ -390,6 +392,6 @@ function FilterPill({
       )}
     >
       {children}
-    </button>
+    </ChoiceButton>
   );
 }

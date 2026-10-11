@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module';
+const { expect } = createRequire(new URL('../../apps/web-workbench/package.json', import.meta.url))('playwright/test');
 import { classifyGeometry, measurePage } from './checks.mjs';
 const fingerprint = (p) =>
   p.evaluate(() =>
@@ -408,9 +410,29 @@ function matchingControl(elements, wanted) {
   );
   return equivalent.length === 1 ? equivalent[0] : undefined;
 }
+// Poll the same semantic identity used for traversal; asynchronous list hydration
+// must finish before replay. A timeout still leaves an explicit coverage gap.
+async function readyControl(page, wanted, timeout) {
+  let control;
+  try {
+    await expect.poll(async () => {
+      control = matchingControl((await measurePage(page)).elements, wanted);
+      return Boolean(control);
+    }, { timeout }).toBe(true);
+  } catch { return undefined; }
+  return control;
+}
+export function reusableControlResult(result) {
+  const status = result.status === 'shared-reference' ? result.referencedStatus : result.status;
+  return ['passed', 'disabled', 'idempotent', 'protocol-link'].includes(status) &&
+    !result.layout?.some(f => f.severity === 'P1');
+}
+export function reusableControls(results) {
+  return Array.isArray(results) && results.length > 0 && results.every(reusableControlResult);
+}
 export async function inspectControls(
   page,
-  { reset, shared = new Map(), maxDepth = 20, onEvidence = async () => {}, maxControls = 400 } = {},
+  { reset, shared = new Map(), maxDepth = 20, onEvidence = async () => {}, maxControls = 400, readinessTimeout = 4000 } = {},
 ) {
   const initial = await measurePage(page);
   const results = [];
@@ -432,7 +454,8 @@ export async function inspectControls(
     }
     const { control, path } = queue.shift();
     const key = JSON.stringify([control.scope, control.repeatFamilyKey ?? control.id]);
-    if (seen.has(key) && !(outcomes.get(key) === 'disabled' && path.length)) {
+    if (seen.has(key) && !(outcomes.get(key) === 'disabled' && path.length) &&
+      (!control.repeatFamilyKey || reusableControlResult({status: outcomes.get(key)}))) {
       if (control.repeatFamilyKey && !reportedRepeatIds.has(control.id)) {
         results.push({
           ...control,
@@ -451,7 +474,7 @@ export async function inspectControls(
       reportedRepeatIds.add(control.id);
     }
     const isShared = control.shared || path[0]?.shared;
-    if (isShared && shared.has(key)) {
+    if (isShared && shared.has(key) && reusableControlResult({status: 'shared-reference', ...shared.get(key)})) {
       results.push({ ...control, status: 'shared-reference', ...shared.get(key) });
       continue;
     }
@@ -471,8 +494,7 @@ export async function inspectControls(
       await reset();
       for (let i = 0; i < path.length; i++) {
         const step = path[i];
-        const m = await measurePage(page);
-        const next = matchingControl(m.elements, step);
+        const next = await readyControl(page, step, readinessTimeout);
         const result = next
           ? await observeControl(page, next, { checkDismissal: false })
           : { status: 'uncovered', reason: 'ancestor control absent' };
@@ -497,8 +519,8 @@ export async function inspectControls(
       });
       continue;
     }
+    const candidate = await readyControl(page, control, readinessTimeout);
     const current = await measurePage(page);
-    const candidate = matchingControl(current.elements, control);
     if (!candidate) {
       results.push({
         ...control,
@@ -526,7 +548,7 @@ export async function inspectControls(
       } else {
         await reset();
         for (const step of [...path, control]) {
-          const next = matchingControl((await measurePage(page)).elements, step);
+          const next = await readyControl(page, step, readinessTimeout);
           const restored = next
             ? await observeControl(page, next, { checkDismissal: false })
             : { status: 'uncovered', reason: 'control absent' };
@@ -548,7 +570,7 @@ export async function inspectControls(
       result.screenshot = await onEvidence(results.length);
     results.push(result);
     outcomes.set(key, result.status);
-    if (isShared) shared.set(key, { reference: page.url(), referencedStatus: result.status });
+    if (isShared && reusableControlResult(result)) shared.set(key, { reference: page.url(), referencedStatus: result.status });
     if (
       result.status === 'passed' &&
       current.url === result.afterUrl &&

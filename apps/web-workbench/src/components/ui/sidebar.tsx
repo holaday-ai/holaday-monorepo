@@ -146,6 +146,9 @@ const SidebarProvider = React.forwardRef<
 );
 SidebarProvider.displayName = 'SidebarProvider';
 
+// The rendered state can differ from the user's preference in browser workspaces.
+const SidebarVisualStateContext = React.createContext<'expanded' | 'collapsed' | null>(null);
+
 const Sidebar = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<'div'> & {
@@ -247,7 +250,9 @@ const Sidebar = React.forwardRef<
             data-sidebar="sidebar"
             className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow"
           >
-            {children}
+            <SidebarVisualStateContext.Provider value={effectiveState}>
+              {children}
+            </SidebarVisualStateContext.Provider>
           </div>
         </div>
       </div>
@@ -523,9 +528,16 @@ const SidebarMenuButton = React.forwardRef<
   ) => {
     const Comp = asChild ? Slot : 'button';
     const { isMobile, state } = useSidebar();
+    const visualState = React.useContext(SidebarVisualStateContext) ?? state;
+    const iconOnly = visualState === 'collapsed' && !isMobile;
+    const tooltipLabel = typeof tooltip === 'string' ? tooltip :
+      typeof tooltip?.children === 'string' ? tooltip.children : undefined;
     const button = (
       <Comp
         ref={ref}
+        data-icon-only={iconOnly || undefined}
+        aria-label={props['aria-label'] ?? (iconOnly ? tooltipLabel?.replace(/\s*[（(][^）)]*[）)]$/, '') : undefined)}
+        title={iconOnly ? tooltipLabel : undefined}
         data-sidebar="menu-button"
         data-size={size}
         data-active={isActive}
@@ -542,7 +554,7 @@ const SidebarMenuButton = React.forwardRef<
         <TooltipContent
           side="right"
           align="center"
-          hidden={state !== 'collapsed' || isMobile}
+          hidden={!iconOnly}
           {...tooltipProps}
         />
       </Tooltip>

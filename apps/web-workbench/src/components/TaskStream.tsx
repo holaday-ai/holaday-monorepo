@@ -441,6 +441,7 @@ function AgentBlock({
         {task.planText && (
           <PlanCard
             planText={task.planText}
+            taskStatus={task.status}
             {...(task.planStatus ? { planStatus: task.planStatus } : {})}
             // Fold the plan card by default once the task has landed in
             // a terminal state — at that point the result above and

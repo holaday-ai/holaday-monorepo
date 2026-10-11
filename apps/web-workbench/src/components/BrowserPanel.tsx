@@ -3031,6 +3031,7 @@ function UrlBar({
         type="text"
         spellCheck={false}
         autoComplete="off"
+        data-browser-address="true"
         value={draft}
         placeholder={onLaunchTask ? '输入网址或搜索内容' : !visibleAddress ? '尚未打开网页' : '输入网址回车跳转'}
         readOnly={readOnly || (!onLaunchTask && !controlLease)}

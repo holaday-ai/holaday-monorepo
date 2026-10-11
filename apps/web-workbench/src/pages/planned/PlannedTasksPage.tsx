@@ -187,6 +187,7 @@ export function PlannedTasksPage(): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const calendarPanelRef = React.useRef<HTMLElement | null>(null);
   const calendarRef = React.useRef<FullCalendar | null>(null);
   const mountedRef = React.useRef(true);
   const instructionRef = React.useRef<HTMLTextAreaElement | null>(null);
@@ -211,6 +212,12 @@ export function PlannedTasksPage(): JSX.Element {
   const [title, setTitle] = React.useState('');
   const [calendarQuery, setCalendarQuery] = React.useState('');
   const [selectedDay, setSelectedDay] = React.useState(() => new Date());
+  React.useEffect(() => {
+    calendarPanelRef.current?.querySelectorAll<HTMLElement>('.fc-daygrid-day[data-date]').forEach(cell => {
+      cell.setAttribute('aria-selected', String(new Date(`${cell.dataset.date}T12:00:00`).toDateString() === selectedDay.toDateString()));
+    });
+  }, [selectedDay]);
+
   const [range, setRange] = React.useState<{ start: Date; end: Date } | null>(null);
   const [occurrences, setOccurrences] = React.useState<PlannedCalendarOccurrence[]>([]);
   const [legacyEvents, setLegacyEvents] = React.useState<EventInput[]>([]);
@@ -823,7 +830,7 @@ export function PlannedTasksPage(): JSX.Element {
       </div>
 
       <div className="planned-workbench hd-planned-workbench">
-        <section className="planned-calendar-panel" aria-label="规划日历">
+        <section ref={calendarPanelRef} className="planned-calendar-panel" aria-label="规划日历">
           <div className="planned-toolbar">
             <div className="planned-toolbar__nav">
               <Button
@@ -881,6 +888,7 @@ export function PlannedTasksPage(): JSX.Element {
               setView(arg.view.type as PlannedCalendarView);
             }}
             dayCellContent={arg => String(arg.date.getDate())}
+            dayCellDidMount={({ el, date }) => el.setAttribute('aria-selected', String(date.toDateString() === selectedDay.toDateString()))}
             dayCellClassNames={arg => arg.date.toDateString() === selectedDay.toDateString() ? ['hd-selected-day'] : []}
             dateClick={handleDateClick}
             eventClick={handleEventClick}
