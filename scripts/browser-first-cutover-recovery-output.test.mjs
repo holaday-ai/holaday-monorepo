@@ -16,7 +16,7 @@ const siteBytes = await fs.readFile(
 const connection = siteBytes.slice(
   siteBytes.indexOf('recovery = await io.connectRecovery(approved,'),
 );
-const writer = connection.match(/output: ([\s\S]*?),\n      assertScope:/)?.[1];
+const writer = connection.match(/output: ([\s\S]*?),\n {6}assertScope:/)?.[1];
 assert.ok(writer, 'actual site recovery output expression');
 for (const fault of ['normal', 'early-attach', 'nonzero-exit', 'early-eof'])
   test('real recovery pipe transport ' + fault, async (t) => {

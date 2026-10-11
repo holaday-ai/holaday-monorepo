@@ -456,7 +456,7 @@ function formatLocalDate(d: Date): string {
 }
 
 function combineDateAndTime(date: Date, timeStr: string): Date {
-  const [hh, mm] = timeStr.split(':').map((s) => parseInt(s, 10));
+  const [hh, mm] = timeStr.split(':').map((s) => Number.parseInt(s, 10));
   const out = new Date(date);
   out.setHours(Number.isFinite(hh) ? hh! : 9, Number.isFinite(mm) ? mm! : 0, 0, 0);
   return out;

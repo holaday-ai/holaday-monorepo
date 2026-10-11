@@ -29,7 +29,7 @@
  * Read-only dry run by default. Pass `--apply` to write changes.
  */
 
-import { and, eq, gte, inArray, like, or, sql } from 'drizzle-orm';
+import { and, gte, inArray, like, or, sql } from 'drizzle-orm';
 import { db, pool } from '../src/db/client.js';
 import { tasks as tasksTable } from '../src/db/schema/index.js';
 

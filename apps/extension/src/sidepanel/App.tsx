@@ -33,7 +33,6 @@ import {
   getStoredUser,
   normalizeAccessToken,
   normalizeStoredUser,
-  setAccessToken,
   setStoredUser,
 } from '../shared/storage.js';
 import {

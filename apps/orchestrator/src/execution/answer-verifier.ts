@@ -406,7 +406,7 @@ function checkFieldCount(criterion: SuccessCriterion, answerText: string): Check
 
 function checkWordCount(criterion: SuccessCriterion, answerText: string): CheckResult {
   const min = (criterion.data?.min as number | undefined) ?? 0;
-  const max = (criterion.data?.max as number | undefined) ?? Infinity;
+  const max = (criterion.data?.max as number | undefined) ?? Number.POSITIVE_INFINITY;
   const length = answerText.length;
   const passed = length >= min && length <= max;
   return {
@@ -414,8 +414,8 @@ function checkWordCount(criterion: SuccessCriterion, answerText: string): CheckR
     passed,
     checker: 'deterministic',
     detail: passed
-      ? `length ${length} in [${min}, ${max === Infinity ? '∞' : max}]`
-      : `length ${length} outside [${min}, ${max === Infinity ? '∞' : max}]`,
+      ? `length ${length} in [${min}, ${max === Number.POSITIVE_INFINITY ? '∞' : max}]`
+      : `length ${length} outside [${min}, ${max === Number.POSITIVE_INFINITY ? '∞' : max}]`,
     // Too short = answer is a stub / error state — fixable by re-running.
     // Too long is unlikely but treated the same.
     severity: passed ? undefined : 'fixable',

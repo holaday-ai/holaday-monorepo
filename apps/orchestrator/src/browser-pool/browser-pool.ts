@@ -1136,7 +1136,7 @@ export class BrowserPool {
     let oldest: BrowserInstance | null = null;
     for (const inst of this.instances.values()) {
       if (inst.status !== 'ready' || inst.retainedUntil == null) continue;
-      if (!oldest || inst.retainedUntil < (oldest.retainedUntil ?? Infinity)) {
+      if (!oldest || inst.retainedUntil < (oldest.retainedUntil ?? Number.POSITIVE_INFINITY)) {
         oldest = inst;
       }
     }

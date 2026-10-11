@@ -473,7 +473,7 @@ for (const [name, mutate, stage] of [
   [
     'clock',
     (io) => {
-      io.now = () => NaN;
+      io.now = () => Number.NaN;
     },
     'PORT_CLOCK',
   ],

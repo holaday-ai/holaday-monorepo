@@ -53,7 +53,7 @@ function parseArgs(argv: string[]): CliArgs {
   for (const arg of argv.slice(2)) {
     if (arg === '--dry-run') out.dryRun = true;
     else if (arg.startsWith('--batch=')) {
-      const n = parseInt(arg.slice('--batch='.length), 10);
+      const n = Number.parseInt(arg.slice('--batch='.length), 10);
       if (!Number.isFinite(n) || n <= 0) {
         throw new Error(`invalid --batch value: ${arg}`);
       }

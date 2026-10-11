@@ -218,7 +218,7 @@ describe('validateFillJson — type errors', () => {
 
   it('rejects NaN / Infinity as non-writable', () => {
     const out = validateFillJson(invoiceSchema, {
-      fields: { client_name: NaN, invoice_no: Infinity },
+      fields: { client_name: Number.NaN, invoice_no: Number.POSITIVE_INFINITY },
     });
     expect(out.missing).toContain('client_name');
     expect(out.missing).toContain('invoice_no');

@@ -22,7 +22,6 @@
  * dependencies via the runtime DB client).
  */
 import { promises as fs } from 'node:fs';
-import { resolve } from 'node:path';
 
 import mysql from 'mysql2/promise';
 

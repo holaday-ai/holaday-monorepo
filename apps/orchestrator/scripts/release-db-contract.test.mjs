@@ -347,7 +347,7 @@ describe('team work item lifecycle schema contract', () => {
 describe('release database table and column contract', () => {
   it('blocks application rollout when any durable core identity column is missing', () => {
     const verifier = readFileSync(new URL('./verify-db-schema.ts', import.meta.url), 'utf8');
-    const tasksColumns = verifier.match(/\n  tasks: \[([^\]]+)\]/)?.[1] ?? '';
+    const tasksColumns = verifier.match(/\n {2}tasks: \[([^\]]+)\]/)?.[1] ?? '';
     for (const column of ['execution_id', 'execution_revision', 'core_record_version']) {
       assert.ok(tasksColumns.includes(`'${column}'`), `missing core rollout guard: ${column}`);
     }

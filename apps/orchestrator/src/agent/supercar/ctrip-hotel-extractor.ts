@@ -97,7 +97,7 @@ export function parseHotelPriceLimit(intent: string | null | undefined): number 
     /(?:预算|低于|不超过|不高于|不高过|最多)\s*(\d{2,5})|(\d{2,5})\s*元?\s*(?:以内|以下|之内)|(\d{2,5})\s*元/,
   );
   if (!m) return null;
-  const n = parseInt(m[1] ?? m[2] ?? m[3] ?? '', 10);
+  const n = Number.parseInt(m[1] ?? m[2] ?? m[3] ?? '', 10);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -249,7 +249,7 @@ export function extractCtripHotels(bodyText: string | null | undefined): CtripHo
   let prevEnd = 0;
   let m: RegExpExecArray | null;
   while ((m = priceRe.exec(text)) !== null) {
-    const price = parseInt((m[1] ?? '').replace(/,/g, ''), 10);
+    const price = Number.parseInt((m[1] ?? '').replace(/,/g, ''), 10);
     const cardStart = Math.max(prevEnd, m.index - 120);
     const card = text.slice(cardStart, m.index);
     prevEnd = m.index + m[0].length;
@@ -301,7 +301,7 @@ function coercePrice(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return Math.round(v);
   if (typeof v === 'string') {
     const m = v.replace(/,/g, '').match(/\d{2,6}/);
-    if (m) return parseInt(m[0], 10);
+    if (m) return Number.parseInt(m[0], 10);
   }
   return null;
 }
@@ -349,7 +349,7 @@ export function validateHotelJson(opts: {
   priceLimit?: number;
   topN?: number;
 }): CtripHotel[] {
-  const cap = opts.priceLimit ?? Infinity;
+  const cap = opts.priceLimit ?? Number.POSITIVE_INFINITY;
   const topN = opts.topN ?? 5;
   const seen = new Set<string>();
   const out: CtripHotel[] = [];
@@ -407,7 +407,7 @@ export function filterAndFormatHotels(opts: {
   topN?: number;
 }): HotelFilterResult {
   const topN = opts.topN ?? 5;
-  const cap = opts.maxPriceCNY ?? Infinity;
+  const cap = opts.maxPriceCNY ?? Number.POSITIVE_INFINITY;
   const within = opts.hotels.filter((h) => h.priceCNY <= cap);
   if (within.length === 0) {
     const lowest = opts.hotels.length > 0 ? Math.min(...opts.hotels.map((h) => h.priceCNY)) : null;

@@ -381,7 +381,7 @@ try {
       });
     }
     // Chinese insertion, fixed overlay and iframe through the same real handler.
-    let c = await source.context().newCDPSession(source);
+    const c = await source.context().newCDPSession(source);
     await c.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await c.detach();
     streamer.requestFrameRefresh();

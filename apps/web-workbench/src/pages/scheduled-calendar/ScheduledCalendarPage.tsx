@@ -336,7 +336,7 @@ export function ScheduledCalendarPage(): JSX.Element {
       const bandRaw =
         shell?.style.getPropertyValue('--hd-band-h') ||
         getComputedStyle(shell ?? document.documentElement).getPropertyValue('--hd-band-h');
-      const bandH = parseInt(bandRaw, 10) || 120;
+      const bandH = Number.parseInt(bandRaw, 10) || 120;
       const targetY = rect.top + window.scrollY - bandH - 8;
       window.scrollTo({ top: targetY, behavior: 'auto' });
     }, 800);

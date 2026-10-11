@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildAuthParkQuestion,
-  buildCaptchaParkQuestion,
   buildLoginParkQuestion,
-  buildPermissionParkQuestion,
   detectCaptchaPage,
   detectLoginBody,
   detectLoginPage,

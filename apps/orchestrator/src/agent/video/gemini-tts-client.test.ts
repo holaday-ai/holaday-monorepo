@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GeminiTtsError, synthesizeGeminiSpeech } from './gemini-tts-client.js';
+import { type GeminiTtsError, synthesizeGeminiSpeech } from './gemini-tts-client.js';
 
 describe('synthesizeGeminiSpeech', () => {
   it('requests Mandarin speech and wraps returned PCM in a WAV container', async () => {

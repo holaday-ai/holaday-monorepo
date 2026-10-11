@@ -1,5 +1,5 @@
 import { classifyFriendlyFailure, friendlyFailureDetail } from '@/lib/failure-copy';
-import { type RefundStatusCopy } from '@/lib/task-failure-recovery';
+import type { RefundStatusCopy } from '@/lib/task-failure-recovery';
 import { cn } from '@/lib/utils';
 import type { UiTask } from '@/types/task';
 import { ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';

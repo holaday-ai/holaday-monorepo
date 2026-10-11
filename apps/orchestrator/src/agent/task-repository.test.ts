@@ -1,4 +1,4 @@
-import { type SQL } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import { MySqlDialect } from 'drizzle-orm/mysql-core';
 /**
  * Phase 3 R1 — unit tests for the awaiting_user state-machine guard

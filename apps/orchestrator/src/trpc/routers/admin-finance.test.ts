@@ -40,7 +40,7 @@ describe('usdToCnyCents', () => {
   });
 
   it('returns 0 for non-finite or NaN', () => {
-    expect(usdToCnyCents(NaN)).toBe(0);
+    expect(usdToCnyCents(Number.NaN)).toBe(0);
     expect(usdToCnyCents('not-a-number')).toBe(0);
   });
 

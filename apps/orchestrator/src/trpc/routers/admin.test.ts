@@ -12,7 +12,7 @@
  * after deploy + the type checker.
  */
 
-import { TRPCError } from '@trpc/server';
+import type { TRPCError } from '@trpc/server';
 import { drizzle } from 'drizzle-orm/mysql2';
 import { describe, expect, it, vi } from 'vitest';
 import * as schema from '../../db/schema/index.js';

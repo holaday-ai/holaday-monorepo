@@ -92,7 +92,8 @@ export async function findServedStockSnapshot(args: {
   if (!row || row.userId !== args.userId) return { state: 'missing' };
   const envelope = record(row.snapshotJson);
   if (envelope?.kind !== FORMAT) return { state: 'missing' };
-  const expiry = typeof envelope.expiresAt === 'string' ? Date.parse(envelope.expiresAt) : NaN;
+  const expiry =
+    typeof envelope.expiresAt === 'string' ? Date.parse(envelope.expiresAt) : Number.NaN;
   if (!Number.isFinite(expiry) || expiry <= Date.now()) return { state: 'expired' };
   return { state: 'valid', snapshot: envelope.snapshot };
 }

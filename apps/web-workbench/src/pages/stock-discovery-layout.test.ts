@@ -42,7 +42,9 @@ describe('stock discovery layout', () => {
     expect(source).toContain(
       'lg:min-h-[280px] lg:grid-cols-[minmax(0,1.12fr)_minmax(320px,0.88fr)]',
     );
-    expect(compact(source)).toContain(compact("isLead ? 'aspect-[3/2] w-full lg:order-2 lg:h-full lg:aspect-auto'"));
+    expect(compact(source)).toContain(
+      compact("isLead ? 'aspect-[3/2] w-full lg:order-2 lg:h-full lg:aspect-auto'"),
+    );
     expect(compact(source)).toContain(compact("isCompact ? 'h-[104px]' : 'aspect-[3/2] w-full'"));
   });
 });

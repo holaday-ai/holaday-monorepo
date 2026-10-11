@@ -52,7 +52,7 @@ export function extractDomain(intent: string | null | undefined): string | null 
   if (!match) return null;
   // Trim trailing sentence punctuation the regex couldn't catch
   // (e.g. trailing period or comma at end of a sentence: "去 taobao.com.")
-  let raw = match[0].replace(/[.,;:!?]+$/, '');
+  const raw = match[0].replace(/[.,;:!?]+$/, '');
   try {
     const parsed = new URL(raw);
     let host = parsed.hostname.toLowerCase();

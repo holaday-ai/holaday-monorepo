@@ -231,14 +231,14 @@ const DATA_VALIDATORS: readonly DataValidator[] = [
       const colonMatch = roiRaw.match(/([\d.]+)\s*[:：]\s*([\d.]+)/);
       let declaredRoi: number;
       if (colonMatch) {
-        const left = parseFloat(colonMatch[1]!);
-        const right = parseFloat(colonMatch[2]!);
+        const left = Number.parseFloat(colonMatch[1]!);
+        const right = Number.parseFloat(colonMatch[2]!);
         if (!Number.isFinite(left) || !Number.isFinite(right) || left === 0) {
           return { passed: true }; // unparseable, skip
         }
         declaredRoi = right / left;
       } else {
-        const single = parseFloat(roiRaw);
+        const single = Number.parseFloat(roiRaw);
         if (!Number.isFinite(single)) return { passed: true };
         declaredRoi = single;
       }

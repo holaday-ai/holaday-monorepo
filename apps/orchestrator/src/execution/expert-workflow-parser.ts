@@ -46,7 +46,7 @@ function coerceNumber(raw: string): number {
     .trim()
     .replace(/[¥￥$,，％%]/g, '')
     .replace(/\s+/g, '');
-  if (!cleaned) return NaN;
+  if (!cleaned) return Number.NaN;
   let multiplier = 1;
   // Order matters: check 亿 before 万 (亿 isn't a suffix of 万).
   if (cleaned.endsWith('亿')) {
@@ -62,9 +62,9 @@ function coerceNumber(raw: string): number {
     multiplier = 100;
     cleaned = cleaned.slice(0, -1);
   }
-  if (!cleaned) return NaN;
+  if (!cleaned) return Number.NaN;
   const n = Number(cleaned);
-  return Number.isFinite(n) ? n * multiplier : NaN;
+  return Number.isFinite(n) ? n * multiplier : Number.NaN;
 }
 
 /**

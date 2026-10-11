@@ -121,7 +121,7 @@ export function extractCtripFlights(pageText: string | null | undefined): CtripF
     priceRe.lastIndex = 0;
     const pm = priceRe.exec(text.slice(arr.i, arr.i + 90));
     if (!pm) continue;
-    const price = parseInt((pm[1] ?? '').replace(/,/g, ''), 10);
+    const price = Number.parseInt((pm[1] ?? '').replace(/,/g, ''), 10);
     if (!Number.isFinite(price) || price < 100 || price > 100000) continue;
     // Detect 直飞/经停 only in the forward span (dep → arr+90), never
     // before dep — reaching back would catch the PREVIOUS card's marker.

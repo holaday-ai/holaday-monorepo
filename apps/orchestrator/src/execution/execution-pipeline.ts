@@ -53,7 +53,7 @@ import {
 import { verifyCoreIntermediate } from './core-intermediate-verification.js';
 import {
   type EvidenceEntry,
-  EvidenceLedger,
+  type EvidenceLedger,
   disposeLedger,
   getLedger,
   getOrCreateLedger,

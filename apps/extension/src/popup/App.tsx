@@ -52,7 +52,6 @@ import { shouldClearRejectedPopupToken } from './auth-sync.js';
 import {
   type ExtensionStatusResponse,
   SITE_LOGIN_NOTICE,
-  type WsConnectionStatus,
   getConnectionStatusCopy,
   mergeConnectionStatusPoll,
 } from './connection-copy.js';

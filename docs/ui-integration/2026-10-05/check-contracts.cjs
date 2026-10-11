@@ -60,7 +60,7 @@ const legacyBrand = git('show', '85329cb3:apps/web-workbench/src/index.css').mat
 const legacyRgb = legacyBrand
   .slice(1)
   .match(/../g)
-  .map((part) => parseInt(part, 16));
+  .map((part) => Number.parseInt(part, 16));
 function updateBrand(text) {
   return text
     .replace(new RegExp(legacyBrand, 'ig'), '#FF0061')

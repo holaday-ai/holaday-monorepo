@@ -138,7 +138,7 @@ const HOTEL_JSON_SYSTEM =
 function parseHotelFilters(intent: string): { maxPriceCNY?: number; topN: number } {
   const maxPriceCNY = parseHotelPriceLimit(intent);
   const top = intent.match(/(?:给|取|前|top|列)\s*(\d{1,2})/i);
-  const topN = top ? Math.min(10, Math.max(1, parseInt(top[1] ?? '5', 10))) : 5;
+  const topN = top ? Math.min(10, Math.max(1, Number.parseInt(top[1] ?? '5', 10))) : 5;
   return { ...(maxPriceCNY != null ? { maxPriceCNY } : {}), topN };
 }
 

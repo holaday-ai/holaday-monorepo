@@ -1,6 +1,6 @@
 import { getAccessToken } from '@/lib/auth';
 import { authRedirectTarget } from '@/lib/auth-redirect';
-import * as React from 'react';
+import type * as React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 
 /**

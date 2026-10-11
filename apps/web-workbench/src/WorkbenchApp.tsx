@@ -54,7 +54,7 @@ import {
   sidePanelModeForToolbar,
 } from '@/types/side-panel';
 import type { UiSkillSelection, UiTask } from '@/types/task';
-import { type PlanId } from '@holaday/shared-types';
+import type { PlanId } from '@holaday/shared-types';
 import * as React from 'react';
 
 type UiTaskAwaitingKind = NonNullable<UiTask['awaitingKind']> | undefined;
@@ -233,7 +233,7 @@ export function WorkbenchApp(): JSX.Element {
   const [panelPx, setPanelPx] = React.useState<number | null>(() => {
     if (typeof window === 'undefined') return null;
     const raw = window.localStorage.getItem('holaday.panelPx');
-    const n = raw ? Number.parseInt(raw, 10) : NaN;
+    const n = raw ? Number.parseInt(raw, 10) : Number.NaN;
     if (!Number.isFinite(n) || n <= 0) return null;
     const maxSensible = window.innerWidth * 0.85;
     if (n < PANEL_MIN_PX || n > maxSensible) return null;
