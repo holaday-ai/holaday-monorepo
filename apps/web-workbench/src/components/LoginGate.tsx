@@ -1,6 +1,6 @@
-import { ChoiceButton } from '@/components/ui/choice-button';
 import { FullBrandLogo } from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
+import { ChoiceButton } from '@/components/ui/choice-button';
 import {
   clearMfaChallenge,
   getClosureRecovery,

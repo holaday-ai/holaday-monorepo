@@ -516,13 +516,20 @@ const SidebarMenuButton = React.forwardRef<
     const { isMobile, state } = useSidebar();
     const visualState = React.useContext(SidebarVisualStateContext) ?? state;
     const iconOnly = visualState === 'collapsed' && !isMobile;
-    const tooltipLabel = typeof tooltip === 'string' ? tooltip :
-      typeof tooltip?.children === 'string' ? tooltip.children : undefined;
+    const tooltipLabel =
+      typeof tooltip === 'string'
+        ? tooltip
+        : typeof tooltip?.children === 'string'
+          ? tooltip.children
+          : undefined;
     const button = (
       <Comp
         ref={ref}
         data-icon-only={iconOnly || undefined}
-        aria-label={props['aria-label'] ?? (iconOnly ? tooltipLabel?.replace(/\s*[（(][^）)]*[）)]$/, '') : undefined)}
+        aria-label={
+          props['aria-label'] ??
+          (iconOnly ? tooltipLabel?.replace(/\s*[（(][^）)]*[）)]$/, '') : undefined)
+        }
         title={iconOnly ? tooltipLabel : undefined}
         data-sidebar="menu-button"
         data-size={size}
@@ -536,12 +543,7 @@ const SidebarMenuButton = React.forwardRef<
     return (
       <Tooltip>
         <TooltipTrigger asChild>{button}</TooltipTrigger>
-        <TooltipContent
-          side="right"
-          align="center"
-          hidden={!iconOnly}
-          {...tooltipProps}
-        />
+        <TooltipContent side="right" align="center" hidden={!iconOnly} {...tooltipProps} />
       </Tooltip>
     );
   },

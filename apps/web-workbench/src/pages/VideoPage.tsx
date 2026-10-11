@@ -1,4 +1,3 @@
-import { ChoiceButton } from '@/components/ui/choice-button';
 import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
 import { CreativeDisclosure } from '@/components/CreativeDisclosure';
 import { CreativeInspiration } from '@/components/CreativeInspiration';
@@ -9,6 +8,7 @@ import { FailureHeaderCard } from '@/components/FailureHeaderCard';
 import { FileDownloadCard, type FileDownloadPayload } from '@/components/FileDownloadCard';
 import { LazyPosterImg } from '@/components/LazyPosterImg';
 import { Button } from '@/components/ui/button';
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { PetMotionForm } from '@/components/video/PetMotionForm';
@@ -627,7 +627,10 @@ export function VideoPage(): JSX.Element {
 
   React.useEffect(() => {
     if (!taskId) return;
-    const taskTab = currentTask?.videoCreationMode === 'pet_i2v' ? 'pet_i2v' : videoTabForTaskType(currentTask?.videoType);
+    const taskTab =
+      currentTask?.videoCreationMode === 'pet_i2v'
+        ? 'pet_i2v'
+        : videoTabForTaskType(currentTask?.videoType);
     if (taskTab) setVideoTab(taskTab);
   }, [currentTask?.videoType, currentTask?.videoCreationMode, taskId]);
 
@@ -957,157 +960,430 @@ function CreativeStudioPage({
   }
 
   const project = useCreativeProject();
-  async function handleCreated(taskId: string) { await project.associate(taskId); onTaskCreated(taskId); }
-  const modelControl = (<div className="hd-composer-meta"><button className="hd-glass-pill" type="button" aria-expanded={settingsOpen} title="模型与生成设置" onClick={event => { settingsAnchor.current = event.currentTarget; const kind = isIpVideo ? 'specs' : 'model'; setSettingsKind(kind); setSettingsOpen(open => settingsKind === kind ? !open : true); }}><Clapperboard className="h-4 w-4" />{isCloneVideo ? modelOptionDisplayName(modelOptionFor(model, CLONE_MODEL_OPTIONS)) : isIpVideo ? '人物口播' : creativeModelDisplayName(model as NormalVideoModel)}<ChevronDown className="h-3 w-3" /></button>{videoTab === 'normal' && templateLabel && <button type="button" className="hd-glass-pill" title="移除模板" onClick={() => setTemplateLabel(null)}>{templateLabel}<X className="h-3 w-3" /></button>}</div>);
+  async function handleCreated(taskId: string) {
+    await project.associate(taskId);
+    onTaskCreated(taskId);
+  }
+  const modelControl = (
+    <div className="hd-composer-meta">
+      <button
+        className="hd-glass-pill"
+        type="button"
+        aria-expanded={settingsOpen}
+        title="模型与生成设置"
+        onClick={(event) => {
+          settingsAnchor.current = event.currentTarget;
+          const kind = isIpVideo ? 'specs' : 'model';
+          setSettingsKind(kind);
+          setSettingsOpen((open) => (settingsKind === kind ? !open : true));
+        }}
+      >
+        <Clapperboard className="h-4 w-4" />
+        {isCloneVideo
+          ? modelOptionDisplayName(modelOptionFor(model, CLONE_MODEL_OPTIONS))
+          : isIpVideo
+            ? '人物口播'
+            : creativeModelDisplayName(model as NormalVideoModel)}
+        <ChevronDown className="h-3 w-3" />
+      </button>
+      {videoTab === 'normal' && templateLabel && (
+        <button
+          type="button"
+          className="hd-glass-pill"
+          title="移除模板"
+          onClick={() => setTemplateLabel(null)}
+        >
+          {templateLabel}
+          <X className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <main className="hd-creative-page hd-video-page min-h-full bg-[var(--creative-surface,#FBFAF7)] text-[var(--creative-ink,#342E39)]">
-      <PageContainer width="wide" className="hd-creative-container max-w-[1220px] pb-14 pt-7 md:px-10 md:pt-9">
+      <PageContainer
+        width="wide"
+        className="hd-creative-container max-w-[1220px] pb-14 pt-7 md:px-10 md:pt-9"
+      >
         <div className="relative overflow-hidden rounded-none">
-          <header className="hd-creative-heading"><span>HOLADAY VIDEO</span><h1>把想法，拍成画面。</h1><p>从一句描述、一张参考图开始。</p></header>
+          <header className="hd-creative-heading">
+            <span>HOLADAY VIDEO</span>
+            <h1>把想法，拍成画面。</h1>
+            <p>从一句描述、一张参考图开始。</p>
+          </header>
           <p className="hd-mode-help">质量不合格会自动退款，最多可重试 3 次</p>
-          {onVideoTabChange && <div className="hd-creative-tabs hd-video-types" role="tablist" aria-label="视频创作模式" style={{ '--active-tab': videoTab === 'normal' ? 0 : videoTab === 'pet' ? 1 : videoTab === 'pet_i2v' ? 2 : 3 } as React.CSSProperties}>
-            {([{id:'normal', label:'自由创作', scenario:'product_highlight'},{id:'pet',label:'动作复刻',scenario:'action_remake'},{id:'pet_i2v',label:'宠物动起来',scenario:'pet_motion'},{id:'ip',label:'人物口播',scenario:'ip_presenter'}] as const).map(tab => <button key={tab.id} type="button" role="tab" aria-selected={videoTab === tab.id} disabled={submitting} onClick={() => handleScenarioChange(tab.scenario)}>{tab.label}</button>)}
-          </div>}
-          {videoTab === 'normal' && <CreativeInspiration kind="video" disabled={submitting} onPick={idea => { setPrompt(idea.prompt); setAspectRatio(idea.image === 'vlog' ? '9:16' : '16:9'); }} />}
+          {onVideoTabChange && (
+            <div
+              className="hd-creative-tabs hd-video-types"
+              role="tablist"
+              aria-label="视频创作模式"
+              style={
+                {
+                  '--active-tab':
+                    videoTab === 'normal'
+                      ? 0
+                      : videoTab === 'pet'
+                        ? 1
+                        : videoTab === 'pet_i2v'
+                          ? 2
+                          : 3,
+                } as React.CSSProperties
+              }
+            >
+              {(
+                [
+                  { id: 'normal', label: '自由创作', scenario: 'product_highlight' },
+                  { id: 'pet', label: '动作复刻', scenario: 'action_remake' },
+                  { id: 'pet_i2v', label: '宠物动起来', scenario: 'pet_motion' },
+                  { id: 'ip', label: '人物口播', scenario: 'ip_presenter' },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={videoTab === tab.id}
+                  disabled={submitting}
+                  onClick={() => handleScenarioChange(tab.scenario)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {videoTab === 'normal' && (
+            <CreativeInspiration
+              kind="video"
+              disabled={submitting}
+              onPick={(idea) => {
+                setPrompt(idea.prompt);
+                setAspectRatio(idea.image === 'vlog' ? '9:16' : '16:9');
+              }}
+            />
+          )}
           {videoTab === 'normal' && modelControl}
 
           {project.notice}
-          <CreativeReferenceLibrary open={libraryOpen} onOpenChange={setLibraryOpen} anchorRef={libraryAnchor} disabled={submitting || attachments.length >= CREATIVE_MAX_ATTACHMENTS} selectedFileIds={attachments.map(file => file.fileId)} onChooseLocal={() => imageInputRef.current?.click()} onPick={file => { if (submitting) return; setAttachments(current => current.some(item => item.fileId === file.fileId) || current.length >= CREATIVE_MAX_ATTACHMENTS ? current : [...current, file]); }} />
-          <CreativePopover open={settingsOpen} onOpenChange={setSettingsOpen} anchorRef={settingsAnchor} title={settingsKind === 'model' ? '选择视频模型' : '视频规格'}>
-            {isIpVideo ? <p className="hd-mode-help">9:16 · 随文案时长 · 跟随已上传出镜底版。使用已准备的声音与人物素材。</p> : settingsKind === 'model' ? <div className="hd-model-options">{(isCloneVideo ? CLONE_MODEL_OPTIONS : normalModelOptions).map(option => <button key={option.value} type="button" aria-pressed={model === option.value} onClick={() => { if (isCloneVideo) setModel(option.value as VideoModel); else applyNormalVideoModel(option.value as NormalVideoModel); setSettingsOpen(false); }}><span><strong>{modelOptionDisplayName(option)}</strong><small>{option.description}</small></span>{model === option.value && <Check />}</button>)}</div> : <div className="hd-spec-options">
-              <CreativeSegment label="比例" value={aspectRatio} options={CREATIVE_ASPECT_OPTIONS} onChange={value => setAspectRatio(value as VideoAspect)} accent={accent} compact />
-              <CreativeSegment label="时长" value={durationSeconds} options={[{ value: 6, label: '6s' }, { value: 8, label: '8s' }]} onChange={value => applyNormalVideoDuration(value as VideoDuration)} accent={accent} compact />
-              <CreativeSelect label="画质" value={resolution === '1080p' ? '1080p 高清' : '720p 标清'} options={['1080p 高清', '720p 标清']} onPick={value => applyNormalVideoResolution(value.includes('720') ? '720p' : '1080p')} />
-              <CreativeStyleSummaryPicker vibe={vibeStyle} lighting={lightingStyle} color={colorStyle} previewSubject="default" openGroup={stylePickerOpen} onOpenGroupChange={setStylePickerOpen} onVibeChange={setVibeStyle} onLightingChange={setLightingStyle} onColorChange={setColorStyle} accent={accent} />
-            </div>}
+          <CreativeReferenceLibrary
+            open={libraryOpen}
+            onOpenChange={setLibraryOpen}
+            anchorRef={libraryAnchor}
+            disabled={submitting || attachments.length >= CREATIVE_MAX_ATTACHMENTS}
+            selectedFileIds={attachments.map((file) => file.fileId)}
+            onChooseLocal={() => imageInputRef.current?.click()}
+            onPick={(file) => {
+              if (submitting) return;
+              setAttachments((current) =>
+                current.some((item) => item.fileId === file.fileId) ||
+                current.length >= CREATIVE_MAX_ATTACHMENTS
+                  ? current
+                  : [...current, file],
+              );
+            }}
+          />
+          <CreativePopover
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            anchorRef={settingsAnchor}
+            title={settingsKind === 'model' ? '选择视频模型' : '视频规格'}
+          >
+            {isIpVideo ? (
+              <p className="hd-mode-help">
+                9:16 · 随文案时长 · 跟随已上传出镜底版。使用已准备的声音与人物素材。
+              </p>
+            ) : settingsKind === 'model' ? (
+              <div className="hd-model-options">
+                {(isCloneVideo ? CLONE_MODEL_OPTIONS : normalModelOptions).map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={model === option.value}
+                    onClick={() => {
+                      if (isCloneVideo) setModel(option.value as VideoModel);
+                      else applyNormalVideoModel(option.value as NormalVideoModel);
+                      setSettingsOpen(false);
+                    }}
+                  >
+                    <span>
+                      <strong>{modelOptionDisplayName(option)}</strong>
+                      <small>{option.description}</small>
+                    </span>
+                    {model === option.value && <Check />}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="hd-spec-options">
+                <CreativeSegment
+                  label="比例"
+                  value={aspectRatio}
+                  options={CREATIVE_ASPECT_OPTIONS}
+                  onChange={(value) => setAspectRatio(value as VideoAspect)}
+                  accent={accent}
+                  compact
+                />
+                <CreativeSegment
+                  label="时长"
+                  value={durationSeconds}
+                  options={[
+                    { value: 6, label: '6s' },
+                    { value: 8, label: '8s' },
+                  ]}
+                  onChange={(value) => applyNormalVideoDuration(value as VideoDuration)}
+                  accent={accent}
+                  compact
+                />
+                <CreativeSelect
+                  label="画质"
+                  value={resolution === '1080p' ? '1080p 高清' : '720p 标清'}
+                  options={['1080p 高清', '720p 标清']}
+                  onPick={(value) =>
+                    applyNormalVideoResolution(value.includes('720') ? '720p' : '1080p')
+                  }
+                />
+                <CreativeStyleSummaryPicker
+                  vibe={vibeStyle}
+                  lighting={lightingStyle}
+                  color={colorStyle}
+                  previewSubject="default"
+                  openGroup={stylePickerOpen}
+                  onOpenGroupChange={setStylePickerOpen}
+                  onVibeChange={setVibeStyle}
+                  onLightingChange={setLightingStyle}
+                  onColorChange={setColorStyle}
+                  accent={accent}
+                />
+              </div>
+            )}
           </CreativePopover>
 
           <div className="hd-media-mode" hidden={videoTab === 'normal'}>
-              <div className="hd-special-video relative z-10 mt-5 rounded-[26px] border border-[var(--creative-line,#EFEFEF)] bg-[var(--creative-surface,#fff)] p-5 shadow-[0_16px_42px_rgba(17,24,39,0.05)]">
-                <div className="hd-media-mode" hidden={videoTab !== 'pet'}><PetVideoForm onTaskCreated={handleCreated} model={model} modelControl={modelControl} projectAction={project.renderPicker(submitting)} /></div>
-                <div className="hd-media-mode" hidden={videoTab !== 'pet_i2v'}><PetMotionForm onTaskCreated={handleCreated} /></div>
-                <div className="hd-media-mode" hidden={videoTab !== 'ip'}><IpOnboardingWizard onTaskCreated={handleCreated} modelControl={modelControl} projectAction={project.renderPicker(submitting)} /></div>
-                {currentTaskPanel && videoTab !== 'normal' ? <div className="mt-6">{currentTaskPanel}</div> : null}
+            <div className="hd-special-video relative z-10 mt-5 rounded-[26px] border border-[var(--creative-line,#EFEFEF)] bg-[var(--creative-surface,#fff)] p-5 shadow-[0_16px_42px_rgba(17,24,39,0.05)]">
+              <div className="hd-media-mode" hidden={videoTab !== 'pet'}>
+                <PetVideoForm
+                  onTaskCreated={handleCreated}
+                  model={model}
+                  modelControl={modelControl}
+                  projectAction={project.renderPicker(submitting)}
+                />
               </div>
-              {videoTab !== 'normal' && <VideoHistory
+              <div className="hd-media-mode" hidden={videoTab !== 'pet_i2v'}>
+                <PetMotionForm onTaskCreated={handleCreated} />
+              </div>
+              <div className="hd-media-mode" hidden={videoTab !== 'ip'}>
+                <IpOnboardingWizard
+                  onTaskCreated={handleCreated}
+                  modelControl={modelControl}
+                  projectAction={project.renderPicker(submitting)}
+                />
+              </div>
+              {currentTaskPanel && videoTab !== 'normal' ? (
+                <div className="mt-6">{currentTaskPanel}</div>
+              ) : null}
+            </div>
+            {videoTab !== 'normal' && (
+              <VideoHistory
                 accent={accent}
                 softBg={softBg}
                 videoType={videoTab === 'pet' || videoTab === 'pet_i2v' ? 'pet' : 'ip_person'}
                 refreshKey={historyRefreshKey}
-              />}
+              />
+            )}
           </div>
           <div className="hd-media-mode" hidden={videoTab !== 'normal'}>
-              <section aria-label="视频创作工作台" data-creative-composer className="hd-video-brief">
-                <div className="hd-composer-source"><button type="button" title="添加参考素材" ref={libraryAnchor} onClick={() => setLibraryOpen(open => !open)}><Files className="h-4 w-4" />参考资料</button>{project.renderPicker(submitting)}</div>
-                <h2 id="video-brief-heading" className="sr-only">告诉 HOLA DAY 你的重点</h2>
-                  {attachments.length > 0 ? (
-                    <div className="hd-brief-chips mt-5 flex flex-wrap gap-2 border-t border-[var(--creative-line,#EFEFEF)] pt-4">
-                      {attachments.map((attachment, index) => (
-                        <AttachmentChip
-                          key={attachment.clientId ?? `${attachment.filename}-${index}`}
-                          attachment={attachment}
-                          onRemove={() => removeCreativeAttachment(attachment.clientId, index)}
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-
-                <Textarea value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="描述你想拍出的画面，也可以添加产品或主角图片…" aria-label="告诉 HOLA DAY 你的重点" className="hd-media-prompt" />
-                <div className="hd-media-bottom"><div className="hd-media-tools"><button type="button" className="hd-media-add" title="添加本地资料" aria-label="添加本地资料" onClick={() => imageInputRef.current?.click()}><Plus className="h-4 w-4" /></button>
-                  <button className="hd-glass-pill" type="button" title="添加参考图" aria-label="添加参考图" onClick={() => imageInputRef.current?.click()}><ImagePlus className="h-4 w-4" />参考图</button>
-                  <button className="hd-glass-pill" type="button" title="添加参考视频" aria-label="添加参考视频" ref={referenceVideoTrigger} onClick={() => setReferenceVideoDialogOpen(true)}><VideoIcon className="h-4 w-4" />参考视频</button>
-                  <button className="hd-glass-pill" type="button" aria-expanded={settingsOpen} title="调整视频规格" onClick={event => { settingsAnchor.current = event.currentTarget; setSettingsKind('specs'); setSettingsOpen(open => settingsKind === 'specs' ? !open : true); }}>{aspectRatio} · {durationSeconds}秒 · {resolution}<ChevronDown className="h-3 w-3" /></button>
-                </div><div className="hd-creative-generation-actions"><button type="button" className="hd-generate" onClick={() => void handleSubmit()} disabled={submitting}>{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}<span>{submitting ? '提交中…' : '准备生成'}</span></button><small className="hd-quote-hint">生成前确认积分</small></div></div>
-                      <input
-                        ref={imageInputRef}
-                        type="file"
-                        accept={CREATIVE_ACCEPT_IMAGES}
-                        multiple
-                        className="hidden"
-                        onChange={(event) => {
-                          if (event.target.files)
-                            void ingestCreativeFiles(event.target.files, true);
-                          event.target.value = '';
-                        }}
-                      />
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept={CREATIVE_ACCEPT_REFERENCE_VIDEO}
-                        className="hidden"
-                        onChange={(event) => {
-                          if (event.target.files) {
-                            void ingestCreativeFiles(event.target.files).finally(() =>
-                              setReferenceVideoDialogOpen(false),
-                            );
-                          }
-                          event.target.value = '';
-                        }}
-                      />
-                <ReferenceVideoUploadDialog open={referenceVideoDialogOpen} returnFocusRef={referenceVideoTrigger} onClose={() => setReferenceVideoDialogOpen(false)} onChoose={() => fileInputRef.current?.click()} />
-              </section>
-              <CreativeDisclosure label="示例分镜"><VideoCreationStoryboard scenario={activeScenario} /></CreativeDisclosure>
-
-              {videoEditingEnabled ? (
-                <div className="relative z-10 mt-3 flex flex-col gap-3 rounded-[18px] border border-[var(--creative-line,#E9E1EA)] bg-[linear-gradient(120deg,#FFF9FB,#F7F8FF)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-[13px] font-semibold text-[var(--creative-ink,#332E37)]">
-                      已有视频也能继续创作
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-[var(--creative-muted,#847B87)]">
-                      原视频会保留，每次修改都生成新版本。
-                    </div>
-                  </div>
-                  <input
-                    ref={editingUploadRef}
-                    type="file"
-                    accept="video/*,.mp4,.mov,.webm"
-                    className="hidden"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) void uploadForEditing(file);
-                      event.target.value = '';
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={uploadingForEditing}
-                    onClick={() => editingUploadRef.current?.click()}
-                    className="h-10 shrink-0 gap-2 rounded-[10px] border-[var(--creative-line,#DFCADA)] bg-[var(--creative-surface,#fff)] px-4 text-[var(--creative-muted,#7C4560)] hover:bg-[var(--creative-surface,#FFF5F8)] hover:text-[var(--creative-muted,#B72D5C)]"
-                  >
-                    {uploadingForEditing ? (
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                    ) : (
-                      <Scissors className="h-4 w-4" aria-hidden />
-                    )}
-                    {uploadingForEditing ? '正在导入…' : '上传视频，继续剪辑'}
-                  </Button>
+            <section aria-label="视频创作工作台" data-creative-composer className="hd-video-brief">
+              <div className="hd-composer-source">
+                <button
+                  type="button"
+                  title="添加参考素材"
+                  ref={libraryAnchor}
+                  onClick={() => setLibraryOpen((open) => !open)}
+                >
+                  <Files className="h-4 w-4" />
+                  参考资料
+                </button>
+                {project.renderPicker(submitting)}
+              </div>
+              <h2 id="video-brief-heading" className="sr-only">
+                告诉 HOLA DAY 你的重点
+              </h2>
+              {attachments.length > 0 ? (
+                <div className="hd-brief-chips mt-5 flex flex-wrap gap-2 border-t border-[var(--creative-line,#EFEFEF)] pt-4">
+                  {attachments.map((attachment, index) => (
+                    <AttachmentChip
+                      key={attachment.clientId ?? `${attachment.filename}-${index}`}
+                      attachment={attachment}
+                      onRemove={() => removeCreativeAttachment(attachment.clientId, index)}
+                    />
+                  ))}
                 </div>
-              ) : (
-                <div className="relative z-10 mt-3 flex items-center gap-3 rounded-[18px] border border-[var(--creative-line,#E8E1E7)] bg-[var(--creative-surface,#fff)] px-4 py-3 text-[var(--creative-muted,#6F6472)]">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-[var(--creative-surface,#F4EDF3)] text-[var(--creative-muted,#A95170)]">
-                    <Scissors className="h-4 w-4" aria-hidden />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 text-[12px] font-semibold text-[var(--creative-ink,#443A47)]">
-                      继续剪辑
-                      <span className="rounded-full bg-[var(--creative-surface,#F5EFF4)] px-2 py-0.5 text-[10px] font-semibold text-[var(--creative-muted,#8A7080)]">
-                        即将开放
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-[10px] leading-4 text-[var(--creative-muted,#877D89)]">
-                      许可与稳定性验证完成后开放，当前生成结果和原视频都不会被覆盖。
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {currentTaskPanel && videoTab === 'normal' ? (
-                <div className="relative z-10 mt-6">{currentTaskPanel}</div>
               ) : null}
-              {videoTab === 'normal' && <VideoHistory accent={accent} softBg={softBg} refreshKey={historyRefreshKey} />}
+
+              <Textarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="描述你想拍出的画面，也可以添加产品或主角图片…"
+                aria-label="告诉 HOLA DAY 你的重点"
+                className="hd-media-prompt"
+              />
+              <div className="hd-media-bottom">
+                <div className="hd-media-tools">
+                  <button
+                    type="button"
+                    className="hd-media-add"
+                    title="添加本地资料"
+                    aria-label="添加本地资料"
+                    onClick={() => imageInputRef.current?.click()}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                  <button
+                    className="hd-glass-pill"
+                    type="button"
+                    title="添加参考图"
+                    aria-label="添加参考图"
+                    onClick={() => imageInputRef.current?.click()}
+                  >
+                    <ImagePlus className="h-4 w-4" />
+                    参考图
+                  </button>
+                  <button
+                    className="hd-glass-pill"
+                    type="button"
+                    title="添加参考视频"
+                    aria-label="添加参考视频"
+                    ref={referenceVideoTrigger}
+                    onClick={() => setReferenceVideoDialogOpen(true)}
+                  >
+                    <VideoIcon className="h-4 w-4" />
+                    参考视频
+                  </button>
+                  <button
+                    className="hd-glass-pill"
+                    type="button"
+                    aria-expanded={settingsOpen}
+                    title="调整视频规格"
+                    onClick={(event) => {
+                      settingsAnchor.current = event.currentTarget;
+                      setSettingsKind('specs');
+                      setSettingsOpen((open) => (settingsKind === 'specs' ? !open : true));
+                    }}
+                  >
+                    {aspectRatio} · {durationSeconds}秒 · {resolution}
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                </div>
+                <div className="hd-creative-generation-actions">
+                  <button
+                    type="button"
+                    className="hd-generate"
+                    onClick={() => void handleSubmit()}
+                    disabled={submitting}
+                  >
+                    {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    <span>{submitting ? '提交中…' : '准备生成'}</span>
+                  </button>
+                  <small className="hd-quote-hint">生成前确认积分</small>
+                </div>
+              </div>
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept={CREATIVE_ACCEPT_IMAGES}
+                multiple
+                className="hidden"
+                onChange={(event) => {
+                  if (event.target.files) void ingestCreativeFiles(event.target.files, true);
+                  event.target.value = '';
+                }}
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={CREATIVE_ACCEPT_REFERENCE_VIDEO}
+                className="hidden"
+                onChange={(event) => {
+                  if (event.target.files) {
+                    void ingestCreativeFiles(event.target.files).finally(() =>
+                      setReferenceVideoDialogOpen(false),
+                    );
+                  }
+                  event.target.value = '';
+                }}
+              />
+              <ReferenceVideoUploadDialog
+                open={referenceVideoDialogOpen}
+                returnFocusRef={referenceVideoTrigger}
+                onClose={() => setReferenceVideoDialogOpen(false)}
+                onChoose={() => fileInputRef.current?.click()}
+              />
+            </section>
+            <CreativeDisclosure label="示例分镜">
+              <VideoCreationStoryboard scenario={activeScenario} />
+            </CreativeDisclosure>
+
+            {videoEditingEnabled ? (
+              <div className="relative z-10 mt-3 flex flex-col gap-3 rounded-[18px] border border-[var(--creative-line,#E9E1EA)] bg-[linear-gradient(120deg,#FFF9FB,#F7F8FF)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-[13px] font-semibold text-[var(--creative-ink,#332E37)]">
+                    已有视频也能继续创作
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-[var(--creative-muted,#847B87)]">
+                    原视频会保留，每次修改都生成新版本。
+                  </div>
+                </div>
+                <input
+                  ref={editingUploadRef}
+                  type="file"
+                  accept="video/*,.mp4,.mov,.webm"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void uploadForEditing(file);
+                    event.target.value = '';
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={uploadingForEditing}
+                  onClick={() => editingUploadRef.current?.click()}
+                  className="h-10 shrink-0 gap-2 rounded-[10px] border-[var(--creative-line,#DFCADA)] bg-[var(--creative-surface,#fff)] px-4 text-[var(--creative-muted,#7C4560)] hover:bg-[var(--creative-surface,#FFF5F8)] hover:text-[var(--creative-muted,#B72D5C)]"
+                >
+                  {uploadingForEditing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Scissors className="h-4 w-4" aria-hidden />
+                  )}
+                  {uploadingForEditing ? '正在导入…' : '上传视频，继续剪辑'}
+                </Button>
+              </div>
+            ) : (
+              <div className="relative z-10 mt-3 flex items-center gap-3 rounded-[18px] border border-[var(--creative-line,#E8E1E7)] bg-[var(--creative-surface,#fff)] px-4 py-3 text-[var(--creative-muted,#6F6472)]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-[var(--creative-surface,#F4EDF3)] text-[var(--creative-muted,#A95170)]">
+                  <Scissors className="h-4 w-4" aria-hidden />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 text-[12px] font-semibold text-[var(--creative-ink,#443A47)]">
+                    继续剪辑
+                    <span className="rounded-full bg-[var(--creative-surface,#F5EFF4)] px-2 py-0.5 text-[10px] font-semibold text-[var(--creative-muted,#8A7080)]">
+                      即将开放
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[10px] leading-4 text-[var(--creative-muted,#877D89)]">
+                    许可与稳定性验证完成后开放，当前生成结果和原视频都不会被覆盖。
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {currentTaskPanel && videoTab === 'normal' ? (
+              <div className="relative z-10 mt-6">{currentTaskPanel}</div>
+            ) : null}
+            {videoTab === 'normal' && (
+              <VideoHistory accent={accent} softBg={softBg} refreshKey={historyRefreshKey} />
+            )}
           </div>
         </div>
       </PageContainer>
@@ -1252,7 +1528,9 @@ function CreativeStyleSummaryPicker({
   const summary = selected.length === 0 ? '随机' : selected.join(' / ');
   return (
     <div className="sm:col-span-2 xl:col-span-1">
-      <div className="mb-2 text-[13px] font-semibold text-[var(--creative-muted,#ADADAD)]">风格样式</div>
+      <div className="mb-2 text-[13px] font-semibold text-[var(--creative-muted,#ADADAD)]">
+        风格样式
+      </div>
       <button
         type="button"
         ref={styleTrigger}
@@ -1326,124 +1604,162 @@ function CreativeStyleDialog({
 }): JSX.Element {
   const title = STYLE_GROUPS[activeGroup].title;
   return (
-    <Dialog.Root open onOpenChange={next => { if (!next) onClose(); }}>
+    <Dialog.Root
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[99] bg-black/35" />
         <Dialog.Content
           aria-label={`选择${title}`}
-          onCloseAutoFocus={event => { event.preventDefault(); returnFocusRef.current?.focus(); }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            returnFocusRef.current?.focus();
+          }}
           className="fixed left-1/2 top-1/2 z-[100] flex max-h-[min(760px,calc(100dvh-32px))] w-[calc(100vw-32px)] max-w-[560px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[24px] border border-white/20 bg-[#151515] text-white shadow-[0_28px_80px_rgba(0,0,0,0.34)]"
         >
-        <div className="flex shrink-0 items-start justify-between gap-4 px-5 pb-3 pt-4">
-          <div>
-            <Dialog.Title className="text-[18px] font-semibold text-white">{title}</Dialog.Title>
-            <Dialog.Description className="mt-1 text-[12px] text-white/55">
-              选择会写进视频提示词；随机则交给模型自行判断。
-            </Dialog.Description>
+          <div className="flex shrink-0 items-start justify-between gap-4 px-5 pb-3 pt-4">
+            <div>
+              <Dialog.Title className="text-[18px] font-semibold text-white">{title}</Dialog.Title>
+              <Dialog.Description className="mt-1 text-[12px] text-white/55">
+                选择会写进视频提示词；随机则交给模型自行判断。
+              </Dialog.Description>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-[8px] bg-white/10 p-2 text-white/70 hover:bg-white/15 hover:text-white"
+              aria-label="关闭风格选择"
+              title="关闭风格选择"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-[8px] bg-white/10 p-2 text-white/70 hover:bg-white/15 hover:text-white"
-            aria-label="关闭风格选择"
-            title="关闭风格选择"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="grid shrink-0 grid-cols-3 px-5 pt-2">
-          {(Object.keys(STYLE_GROUPS) as CreativeStyleGroup[]).map((group) => {
-            const active = group === activeGroup;
-            return (
-              <ChoiceButton
-                selected={active}
-                key={group}
-                type="button"
-                onClick={() => onActiveGroupChange(group)}
-                className={cn(
-                  'border-b-2 px-3 pb-3 text-[14px] font-semibold transition-colors focus:outline-none focus-visible:outline-none focus-visible:ring-0',
-                  active ? 'text-white' : 'border-transparent text-white/55 hover:text-white/78',
-                )}
-                style={active ? { borderColor: accent } : undefined}
-              >
-                {STYLE_GROUPS[group].title}
-                <span className="ml-1 text-[12px] font-medium text-white/42">
-                  {STYLE_GROUPS[group].subtitle}
-                </span>
-              </ChoiceButton>
-            );
-          })}
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {STYLE_OPTIONS_BY_GROUP[activeGroup].map((option) => {
-              const active = option.key === values[activeGroup];
+          <div className="grid shrink-0 grid-cols-3 px-5 pt-2">
+            {(Object.keys(STYLE_GROUPS) as CreativeStyleGroup[]).map((group) => {
+              const active = group === activeGroup;
               return (
-                <button
-                  key={option.key}
+                <ChoiceButton
+                  selected={active}
+                  key={group}
                   type="button"
-                  aria-pressed={active}
-                  onClick={() => onChange(activeGroup, option.key)}
-                  aria-label={`${option.label}：${option.description}`}
-                  title={option.description}
+                  onClick={() => onActiveGroupChange(group)}
                   className={cn(
-                    'group overflow-hidden rounded-[10px] border bg-[#222222] text-left transition-colors',
-                    active
-                      ? 'shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_12px_28px_rgba(0,0,0,0.24)]'
-                      : 'border-white/10 hover:border-white/28',
+                    'border-b-2 px-3 pb-3 text-[14px] font-semibold transition-colors focus:outline-none focus-visible:outline-none focus-visible:ring-0',
+                    active ? 'text-white' : 'border-transparent text-white/55 hover:text-white/78',
                   )}
                   style={active ? { borderColor: accent } : undefined}
                 >
-                  <span className="relative flex aspect-square items-end overflow-hidden bg-[#111827]">
-                    <img
-                      src={stylePreviewSrc(activeGroup, option.key, previewSubject)}
-                      alt=""
-                      className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
-                      aria-hidden
-                    />
-                    <span className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/62 to-transparent" />
-                    {active ? (
-                      <span
-                        className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full text-white"
-                        style={{ backgroundColor: accent }}
-                      >
-                        <Check className="h-4 w-4" />
-                      </span>
-                    ) : null}
-                    <span className="relative z-10 w-full px-3 pb-2 text-[13px] font-semibold text-white">
-                      {option.label}
-                    </span>
+                  {STYLE_GROUPS[group].title}
+                  <span className="ml-1 text-[12px] font-medium text-white/42">
+                    {STYLE_GROUPS[group].subtitle}
                   </span>
-                </button>
+                </ChoiceButton>
               );
             })}
           </div>
-        </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-5">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {STYLE_OPTIONS_BY_GROUP[activeGroup].map((option) => {
+                const active = option.key === values[activeGroup];
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => onChange(activeGroup, option.key)}
+                    aria-label={`${option.label}：${option.description}`}
+                    title={option.description}
+                    className={cn(
+                      'group overflow-hidden rounded-[10px] border bg-[#222222] text-left transition-colors',
+                      active
+                        ? 'shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_12px_28px_rgba(0,0,0,0.24)]'
+                        : 'border-white/10 hover:border-white/28',
+                    )}
+                    style={active ? { borderColor: accent } : undefined}
+                  >
+                    <span className="relative flex aspect-square items-end overflow-hidden bg-[#111827]">
+                      <img
+                        src={stylePreviewSrc(activeGroup, option.key, previewSubject)}
+                        alt=""
+                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                        aria-hidden
+                      />
+                      <span className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/62 to-transparent" />
+                      {active ? (
+                        <span
+                          className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full text-white"
+                          style={{ backgroundColor: accent }}
+                        >
+                          <Check className="h-4 w-4" />
+                        </span>
+                      ) : null}
+                      <span className="relative z-10 w-full px-3 pb-2 text-[13px] font-semibold text-white">
+                        {option.label}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
   );
 }
 
-function ReferenceVideoUploadDialog({ open, onClose, onChoose, returnFocusRef }: {
+function ReferenceVideoUploadDialog({
+  open,
+  onClose,
+  onChoose,
+  returnFocusRef,
+}: {
   open: boolean;
   onClose(): void;
   onChoose(): void;
   returnFocusRef: React.RefObject<HTMLButtonElement>;
 }): JSX.Element {
-  return <Dialog.Root open={open} onOpenChange={next => !next && onClose()}>
-    <Dialog.Portal>
-      <Dialog.Overlay className="hd-creative-overlay" />
-      <Dialog.Content className="hd-inspiration-dialog hd-reference-video-dialog"
-        onCloseAutoFocus={event => { event.preventDefault(); returnFocusRef.current?.focus(); }}>
-        <Dialog.Title>添加参考视频</Dialog.Title>
-        <Dialog.Description>用于参考动作、节奏、镜头或构图。</Dialog.Description>
-        <Dialog.Close className="hd-dialog-close" title="关闭添加参考视频" aria-label="关闭添加参考视频"><X /></Dialog.Close>
-        <div className="hd-reference-video-hint"><Clapperboard aria-hidden /><div><strong>参考视频文件</strong><p>支持 MP4 / MOV。建议上传清晰、较短的视频片段。</p><small>文件添加后，可继续调整创作要求。</small></div></div>
-        <footer><Dialog.Close className="hd-glass-pill">取消</Dialog.Close><button type="button" className="hd-glass-pill" onClick={onChoose}>选择视频</button></footer>
-      </Dialog.Content>
-    </Dialog.Portal>
-  </Dialog.Root>;
+  return (
+    <Dialog.Root open={open} onOpenChange={(next) => !next && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="hd-creative-overlay" />
+        <Dialog.Content
+          className="hd-inspiration-dialog hd-reference-video-dialog"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            returnFocusRef.current?.focus();
+          }}
+        >
+          <Dialog.Title>添加参考视频</Dialog.Title>
+          <Dialog.Description>用于参考动作、节奏、镜头或构图。</Dialog.Description>
+          <Dialog.Close
+            className="hd-dialog-close"
+            title="关闭添加参考视频"
+            aria-label="关闭添加参考视频"
+          >
+            <X />
+          </Dialog.Close>
+          <div className="hd-reference-video-hint">
+            <Clapperboard aria-hidden />
+            <div>
+              <strong>参考视频文件</strong>
+              <p>支持 MP4 / MOV。建议上传清晰、较短的视频片段。</p>
+              <small>文件添加后，可继续调整创作要求。</small>
+            </div>
+          </div>
+          <footer>
+            <Dialog.Close className="hd-glass-pill">取消</Dialog.Close>
+            <button type="button" className="hd-glass-pill" onClick={onChoose}>
+              选择视频
+            </button>
+          </footer>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
 }
 
 function CreativeSelect({
@@ -1466,20 +1782,27 @@ function CreativeSelect({
         if (!next || !event.currentTarget.contains(next as Node)) setOpen(false);
       }}
     >
-      <div className="mb-2 text-[13px] font-semibold text-[var(--creative-muted,#ADADAD)]">{label}</div>
+      <div className="mb-2 text-[13px] font-semibold text-[var(--creative-muted,#ADADAD)]">
+        {label}
+      </div>
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
         className={cn(
           'flex h-11 w-full items-center justify-between rounded-[10px] border bg-[var(--creative-surface,#fff)] px-4 text-left text-[14px] font-semibold text-[var(--creative-ink,#111827)] outline-none transition-colors',
-          open ? 'border-[#FF0061]' : 'border-[var(--creative-line,#DCDDDD)] hover:border-[#ADADAD]',
+          open
+            ? 'border-[#FF0061]'
+            : 'border-[var(--creative-line,#DCDDDD)] hover:border-[#ADADAD]',
         )}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
         <span className="truncate">{value === 'auto' ? 'Auto' : value}</span>
         <ChevronDown
-          className={cn('h-4 w-4 text-[var(--creative-ink,#595757)] transition-transform', open && 'rotate-180')}
+          className={cn(
+            'h-4 w-4 text-[var(--creative-ink,#595757)] transition-transform',
+            open && 'rotate-180',
+          )}
         />
       </button>
       {open ? (
@@ -1501,7 +1824,9 @@ function CreativeSelect({
                 }}
                 className={cn(
                   'flex h-9 w-full items-center justify-between rounded-[9px] px-3 text-left text-[13px] font-semibold transition-colors',
-                  active ? 'bg-[#FF0061]/10 text-[var(--creative-muted,#FF0061)]' : 'text-[var(--creative-ink,#111827)] hover:bg-[var(--creative-surface,#F7F7F7)]',
+                  active
+                    ? 'bg-[#FF0061]/10 text-[var(--creative-muted,#FF0061)]'
+                    : 'text-[var(--creative-ink,#111827)] hover:bg-[var(--creative-surface,#F7F7F7)]',
                 )}
               >
                 <span>{option}</span>
@@ -1534,7 +1859,9 @@ function CreativeSegment<T extends string | number>({
 }): JSX.Element {
   return (
     <div className={className}>
-      <div className="mb-2 text-[13px] font-semibold text-[var(--creative-muted,#ADADAD)]">{label}</div>
+      <div className="mb-2 text-[13px] font-semibold text-[var(--creative-muted,#ADADAD)]">
+        {label}
+      </div>
       <div className="flex h-11 w-full items-center gap-1 overflow-hidden rounded-[10px] bg-[var(--creative-surface,#EFEFEF)]/70 p-1">
         {options.map((option) => {
           const active = option.value === value;
@@ -1849,7 +2176,10 @@ function VideoHistory({
           role="status"
         >
           <span className="inline-flex items-center gap-2">
-            <AlertCircle className="h-4 w-4 shrink-0 text-[var(--creative-muted,#FF0061)]" aria-hidden />
+            <AlertCircle
+              className="h-4 w-4 shrink-0 text-[var(--creative-muted,#FF0061)]"
+              aria-hidden
+            />
             未能同步最新作品，当前展示上次已加载的内容。
           </span>
           <Button
@@ -2106,7 +2436,10 @@ function VideoHistory({
       (visibleCount < visible.length || nextCursor !== null || loadMoreError) ? (
         <div className="mt-6 flex flex-col items-center gap-3 border-t border-[var(--creative-line,#EFEFEF)] pt-5">
           {loadMoreError ? (
-            <div className="inline-flex items-center gap-2 text-[13px] text-[var(--creative-muted,#8B93A6)]" role="alert">
+            <div
+              className="inline-flex items-center gap-2 text-[13px] text-[var(--creative-muted,#8B93A6)]"
+              role="alert"
+            >
               <AlertCircle className="h-4 w-4 text-[var(--creative-muted,#FF0061)]" aria-hidden />
               更早作品暂时无法加载，当前内容已保留。
             </div>
@@ -2319,7 +2652,9 @@ function CurrentVideoTaskPanel({
 
           {task.status === 'awaiting_user' && awaitingKind === 'video_quote' && (
             <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-[#FFC910]/55 bg-[var(--creative-surface,#fff)] px-3 py-3 text-[12px]">
-              <span className="mr-auto text-muted-foreground">确认后才会开始制作并消耗额度。质量不合格会自动退款，最多可重试 3 次。</span>
+              <span className="mr-auto text-muted-foreground">
+                确认后才会开始制作并消耗额度。质量不合格会自动退款，最多可重试 3 次。
+              </span>
               <Button
                 type="button"
                 size="sm"
@@ -2587,7 +2922,9 @@ export function NormalVideoForm({
       <Section title="价格预览" className={CREATIVE_PRICE_SECTION_CLASS}>
         <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
           <div>
-            <span className="text-2xl font-semibold text-[var(--creative-muted,#FF0061)]">约 ¥{estVideoCny}</span>
+            <span className="text-2xl font-semibold text-[var(--creative-muted,#FF0061)]">
+              约 ¥{estVideoCny}
+            </span>
             <span className="ml-2 text-[13px] text-muted-foreground">
               视频版 · 每段约 ¥{perSegCny} × {SEG_ESTIMATE} 段(估算)
             </span>
@@ -2598,7 +2935,10 @@ export function NormalVideoForm({
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
           按 {SEG_ESTIMATE} 段估算,实际段数由 AI 拆分文案决定;
-          <span className="font-medium text-[var(--creative-ink,#595757)]"> 提交后会先给精确报价,确认后才扣费。</span>
+          <span className="font-medium text-[var(--creative-ink,#595757)]">
+            {' '}
+            提交后会先给精确报价,确认后才扣费。
+          </span>
         </p>
       </Section>
 
@@ -2808,33 +3148,151 @@ export function PetVideoForm({
 
   return (
     <div className="hd-special-mode">
-      <header className="hd-mode-intro"><h2>让主角，走进这段画面。</h2><p>动作、镜头、节奏与音频跟随参考视频。</p></header>
-      <input ref={photoRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e => void handlePickPhoto(e)} />
-      <input ref={videoRef} type="file" accept={CREATIVE_ACCEPT_REFERENCE_VIDEO} className="hidden" onChange={e => void handlePickReferenceVideo(e)} />
+      <header className="hd-mode-intro">
+        <h2>让主角，走进这段画面。</h2>
+        <p>动作、镜头、节奏与音频跟随参考视频。</p>
+      </header>
+      <input
+        ref={photoRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={(e) => void handlePickPhoto(e)}
+      />
+      <input
+        ref={videoRef}
+        type="file"
+        accept={CREATIVE_ACCEPT_REFERENCE_VIDEO}
+        className="hidden"
+        onChange={(e) => void handlePickReferenceVideo(e)}
+      />
       <div className="hd-required-assets">
         <div className="hd-asset-container">
-          <button type="button" className="hd-asset-slot" onClick={()=>photoRef.current?.click()} disabled={uploadingPhoto || submitting} title="上传一位真人或写实虚构人物的清晰照片；当前模型仅支持单人换单人，取景和身体比例相近；暂不支持宠物、物体或多人替换。">
+          <button
+            type="button"
+            className="hd-asset-slot"
+            onClick={() => photoRef.current?.click()}
+            disabled={uploadingPhoto || submitting}
+            title="上传一位真人或写实虚构人物的清晰照片；当前模型仅支持单人换单人，取景和身体比例相近；暂不支持宠物、物体或多人替换。"
+          >
             {photo ? <img src={photo.previewUrl} alt="主角照片预览" /> : <ImagePlus />}
-            <span><strong>{uploadingPhoto ? '上传中…' : photo ? '主角照片 · 已添加' : '主角照片'}</strong><small>{photo?.name ?? '单人清晰照片 · JPG / PNG / WebP'}</small></span>
+            <span>
+              <strong>
+                {uploadingPhoto ? '上传中…' : photo ? '主角照片 · 已添加' : '主角照片'}
+              </strong>
+              <small>{photo?.name ?? '单人清晰照片 · JPG / PNG / WebP'}</small>
+            </span>
           </button>
-          {photo && <button type="button" className="hd-asset-remove" onClick={removePhoto} disabled={submitting} title="移除主角照片" aria-label="移除主角照片"><X /></button>}
+          {photo && (
+            <button
+              type="button"
+              className="hd-asset-remove"
+              onClick={removePhoto}
+              disabled={submitting}
+              title="移除主角照片"
+              aria-label="移除主角照片"
+            >
+              <X />
+            </button>
+          )}
         </div>
         <div className="hd-asset-container">
-          <button type="button" className="hd-asset-slot" onClick={()=>videoRef.current?.click()} disabled={uploadingVideo || submitting}>
-            <VideoIcon /><span><strong>{uploadingVideo ? '上传中…' : referenceVideo ? '参考视频 · 已添加' : '参考视频'}</strong><small>{referenceVideo?.name ?? '2–30秒 · MP4 / MOV · 不超过200MB'}</small></span>
+          <button
+            type="button"
+            className="hd-asset-slot"
+            onClick={() => videoRef.current?.click()}
+            disabled={uploadingVideo || submitting}
+          >
+            <VideoIcon />
+            <span>
+              <strong>
+                {uploadingVideo ? '上传中…' : referenceVideo ? '参考视频 · 已添加' : '参考视频'}
+              </strong>
+              <small>{referenceVideo?.name ?? '2–30秒 · MP4 / MOV · 不超过200MB'}</small>
+            </span>
           </button>
-          {referenceVideo && <><button type="button" className="hd-asset-remove" onClick={removeReferenceVideo} disabled={submitting} title="移除参考视频" aria-label="移除参考视频"><X /></button><video className="hd-reference-video-preview" src={referenceVideo.previewUrl} controls playsInline onLoadedMetadata={event => {const duration=event.currentTarget.duration;setReferenceVideo(current=>current&&Number.isFinite(duration)?{...current,durationSeconds:duration}:current);}} /></>}
+          {referenceVideo && (
+            <>
+              <button
+                type="button"
+                className="hd-asset-remove"
+                onClick={removeReferenceVideo}
+                disabled={submitting}
+                title="移除参考视频"
+                aria-label="移除参考视频"
+              >
+                <X />
+              </button>
+              <video
+                className="hd-reference-video-preview"
+                src={referenceVideo.previewUrl}
+                controls
+                playsInline
+                onLoadedMetadata={(event) => {
+                  const duration = event.currentTarget.duration;
+                  setReferenceVideo((current) =>
+                    current && Number.isFinite(duration)
+                      ? { ...current, durationSeconds: duration }
+                      : current,
+                  );
+                }}
+              />
+            </>
+          )}
         </div>
       </div>
       {modelControl}
       <section className="hd-video-brief" aria-label="动作复刻创作要求" data-creative-composer>
-        <div className="hd-composer-source">{projectAction}<span>动作与节奏跟随参考</span></div>
-        <Textarea value={prompt} onChange={e=>setPrompt(e.target.value)} aria-label="动作复刻备注" placeholder="可以补充用途或备注，不会改变参考视频的动作与节奏…" className="hd-media-prompt" />
-        <div className="hd-media-bottom"><div className="hd-media-tools">
-          <button type="button" className="hd-glass-pill" onClick={()=>photoRef.current?.click()} disabled={uploadingPhoto || submitting}><ImagePlus />主角照片</button>
-          <button type="button" className="hd-glass-pill" onClick={()=>videoRef.current?.click()} disabled={uploadingVideo || submitting}><VideoIcon />参考视频</button>
-          <span className="hd-glass-pill">跟随参考 · 原始规格</span>
-        </div><div className="hd-creative-generation-actions"><button type="button" className="hd-generate" disabled={submitting || uploadingPhoto || uploadingVideo} onClick={()=>void handleSubmit()}><span>{submitting ? '提交中…' : '准备生成'}</span></button><small className="hd-quote-hint" title={`${selectedCloneModel.name} ${selectedCloneModel.version} 基础估价；服务端检查声音后确认最终报价，确认后才开始生成。`}>{estCny === null ? '添加素材后估价' : `约 ¥${estCny} 起 · 确认后生成`}</small></div></div>
+        <div className="hd-composer-source">
+          {projectAction}
+          <span>动作与节奏跟随参考</span>
+        </div>
+        <Textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          aria-label="动作复刻备注"
+          placeholder="可以补充用途或备注，不会改变参考视频的动作与节奏…"
+          className="hd-media-prompt"
+        />
+        <div className="hd-media-bottom">
+          <div className="hd-media-tools">
+            <button
+              type="button"
+              className="hd-glass-pill"
+              onClick={() => photoRef.current?.click()}
+              disabled={uploadingPhoto || submitting}
+            >
+              <ImagePlus />
+              主角照片
+            </button>
+            <button
+              type="button"
+              className="hd-glass-pill"
+              onClick={() => videoRef.current?.click()}
+              disabled={uploadingVideo || submitting}
+            >
+              <VideoIcon />
+              参考视频
+            </button>
+            <span className="hd-glass-pill">跟随参考 · 原始规格</span>
+          </div>
+          <div className="hd-creative-generation-actions">
+            <button
+              type="button"
+              className="hd-generate"
+              disabled={submitting || uploadingPhoto || uploadingVideo}
+              onClick={() => void handleSubmit()}
+            >
+              <span>{submitting ? '提交中…' : '准备生成'}</span>
+            </button>
+            <small
+              className="hd-quote-hint"
+              title={`${selectedCloneModel.name} ${selectedCloneModel.version} 基础估价；服务端检查声音后确认最终报价，确认后才开始生成。`}
+            >
+              {estCny === null ? '添加素材后估价' : `约 ¥${estCny} 起 · 确认后生成`}
+            </small>
+          </div>
+        </div>
       </section>
     </div>
   );
@@ -2854,7 +3312,9 @@ function SegGroup<T extends string | number>({
 }): JSX.Element {
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-      <div className="w-12 shrink-0 text-[13px] font-semibold text-[var(--creative-muted,#8B93A6)]">{label}</div>
+      <div className="w-12 shrink-0 text-[13px] font-semibold text-[var(--creative-muted,#8B93A6)]">
+        {label}
+      </div>
       <div className="flex flex-wrap gap-1 rounded-[10px] bg-[var(--creative-surface,#EFEFEF)]/70 p-1">
         {options.map((o) => {
           const active = o.value === value;
@@ -2916,27 +3376,47 @@ function VideoStatusIcon({ status }: { status: string }): JSX.Element {
   }
   if (iconKind === 'failed') {
     return (
-      <span className={cn(base, 'border-[#FF0061]/45 bg-[#FF0061]/10 text-[var(--creative-muted,#FF0061)]')}>
+      <span
+        className={cn(
+          base,
+          'border-[#FF0061]/45 bg-[#FF0061]/10 text-[var(--creative-muted,#FF0061)]',
+        )}
+      >
         <XCircle className="h-3.5 w-3.5" />
       </span>
     );
   }
   if (iconKind === 'inactive') {
     return (
-      <span className={cn(base, 'border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#EFEFEF)]/45 text-muted-foreground')}>
+      <span
+        className={cn(
+          base,
+          'border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#EFEFEF)]/45 text-muted-foreground',
+        )}
+      >
         <CircleSlash className="h-3.5 w-3.5" />
       </span>
     );
   }
   if (iconKind === 'success') {
     return (
-      <span className={cn(base, 'border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] text-[var(--creative-muted,#FF0061)]')}>
+      <span
+        className={cn(
+          base,
+          'border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] text-[var(--creative-muted,#FF0061)]',
+        )}
+      >
         <CheckCircle2 className="h-3.5 w-3.5" />
       </span>
     );
   }
   return (
-    <span className={cn(base, 'border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] text-[var(--creative-ink,#595757)]')}>
+    <span
+      className={cn(
+        base,
+        'border-[var(--creative-line,#DCDDDD)] bg-[var(--creative-surface,#fff)] text-[var(--creative-ink,#595757)]',
+      )}
+    >
       <Clock className="h-3.5 w-3.5" />
     </span>
   );
@@ -3105,23 +3585,102 @@ export function IpOnboardingWizard({
 
   return (
     <div className="hd-special-mode">
-      <header className="hd-mode-intro"><h2>让你的角色，开口表达。</h2><p>准备声音与出镜底版，再写下口播文案。</p></header>
-      <input ref={voiceRef} type="file" accept=".wav,.mp3,.m4a,audio/wav,audio/mpeg,audio/mp4" className="hidden" onChange={e=>void handleVoice(e)} />
-      <input ref={videoRef} type="file" accept=".mp4,.mov,video/mp4,video/quicktime" className="hidden" onChange={e=>void handleVideo(e)} />
-      {loadError && <div role="status" className="hd-mode-help">素材状态同步失败，请重试后再生成。<button type="button" className="hd-glass-pill" onClick={()=>void load()}>重试同步</button></div>}
+      <header className="hd-mode-intro">
+        <h2>让你的角色，开口表达。</h2>
+        <p>准备声音与出镜底版，再写下口播文案。</p>
+      </header>
+      <input
+        ref={voiceRef}
+        type="file"
+        accept=".wav,.mp3,.m4a,audio/wav,audio/mpeg,audio/mp4"
+        className="hidden"
+        onChange={(e) => void handleVoice(e)}
+      />
+      <input
+        ref={videoRef}
+        type="file"
+        accept=".mp4,.mov,video/mp4,video/quicktime"
+        className="hidden"
+        onChange={(e) => void handleVideo(e)}
+      />
+      {loadError && (
+        <div role="status" className="hd-mode-help">
+          素材状态同步失败，请重试后再生成。
+          <button type="button" className="hd-glass-pill" onClick={() => void load()}>
+            重试同步
+          </button>
+        </div>
+      )}
       <div className="hd-required-assets">
-        <button type="button" className="hd-asset-slot" onClick={()=>voiceRef.current?.click()} disabled={uploadingVoice || clearing} title="上传声音样本；用完即弃，只保留声纹。已有声音时点击重新上传。"><Mic /><span><strong>{uploadingVoice ? '上传并克隆…' : status.hasVoice ? '声音素材 · 已就绪' : '声音素材'}</strong><small>10–20秒清晰人声 · WAV / MP3 / M4A</small></span>{status.hasVoice && <Check className="hd-asset-ready" />}</button>
-        <button type="button" className="hd-asset-slot" onClick={()=>videoRef.current?.click()} disabled={uploadingVideo || clearing} title="上传出镜视频；正脸、单人、光线均匀、嘴部无遮挡。已有底版时点击重新上传。"><VideoIcon /><span><strong>{uploadingVideo ? '上传中…' : status.hasBaseVideo ? '出镜底版 · 已就绪' : '出镜底版'}</strong><small>{status.baseVideoIssue === 'unavailable' ? '原出镜底版不可用，请重新上传' : '10–60秒竖屏口播 · MP4 / MOV'}</small></span>{status.hasBaseVideo && <Check className="hd-asset-ready" />}</button>
+        <button
+          type="button"
+          className="hd-asset-slot"
+          onClick={() => voiceRef.current?.click()}
+          disabled={uploadingVoice || clearing}
+          title="上传声音样本；用完即弃，只保留声纹。已有声音时点击重新上传。"
+        >
+          <Mic />
+          <span>
+            <strong>
+              {uploadingVoice ? '上传并克隆…' : status.hasVoice ? '声音素材 · 已就绪' : '声音素材'}
+            </strong>
+            <small>10–20秒清晰人声 · WAV / MP3 / M4A</small>
+          </span>
+          {status.hasVoice && <Check className="hd-asset-ready" />}
+        </button>
+        <button
+          type="button"
+          className="hd-asset-slot"
+          onClick={() => videoRef.current?.click()}
+          disabled={uploadingVideo || clearing}
+          title="上传出镜视频；正脸、单人、光线均匀、嘴部无遮挡。已有底版时点击重新上传。"
+        >
+          <VideoIcon />
+          <span>
+            <strong>
+              {uploadingVideo ? '上传中…' : status.hasBaseVideo ? '出镜底版 · 已就绪' : '出镜底版'}
+            </strong>
+            <small>
+              {status.baseVideoIssue === 'unavailable'
+                ? '原出镜底版不可用，请重新上传'
+                : '10–60秒竖屏口播 · MP4 / MOV'}
+            </small>
+          </span>
+          {status.hasBaseVideo && <Check className="hd-asset-ready" />}
+        </button>
       </div>
       {modelControl}
-      <IpGenerateForm onTaskCreated={onTaskCreated} projectAction={projectAction} ready={ready && !loadError && !uploadingVoice && !uploadingVideo && !clearing} onPickVoice={()=>voiceRef.current?.click()} onPickVideo={()=>videoRef.current?.click()} />
-      <details className="hd-asset-management"><summary>隐私与素材管理</summary><p>声音样本在克隆出声纹后即刻删除；出镜底版加密存储，仅用于已确认授权的视频。清除会删除云端声纹、底版和授权记录。</p><Button variant="outline" size="sm" onClick={()=>void handleClear()} disabled={!anyAsset || clearing || uploadingVoice || uploadingVideo}>{clearing ? '清除中…' : '清除全部 IP 素材'}</Button></details>
+      <IpGenerateForm
+        onTaskCreated={onTaskCreated}
+        projectAction={projectAction}
+        ready={ready && !loadError && !uploadingVoice && !uploadingVideo && !clearing}
+        onPickVoice={() => voiceRef.current?.click()}
+        onPickVideo={() => videoRef.current?.click()}
+      />
+      <details className="hd-asset-management">
+        <summary>隐私与素材管理</summary>
+        <p>
+          声音样本在克隆出声纹后即刻删除；出镜底版加密存储，仅用于已确认授权的视频。清除会删除云端声纹、底版和授权记录。
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void handleClear()}
+          disabled={!anyAsset || clearing || uploadingVoice || uploadingVideo}
+        >
+          {clearing ? '清除中…' : '清除全部 IP 素材'}
+        </Button>
+      </details>
     </div>
   );
 }
 
 function IpGenerateForm({
-  onTaskCreated, ready, onPickVoice, onPickVideo, projectAction,
+  onTaskCreated,
+  ready,
+  onPickVoice,
+  onPickVideo,
+  projectAction,
 }: {
   onTaskCreated: (taskId: string) => void;
   ready: boolean;
@@ -3187,12 +3746,63 @@ function IpGenerateForm({
   return (
     <div className="hd-ip-generation">
       <section className="hd-video-brief" aria-label="人物口播创作要求" data-creative-composer>
-        <div className="hd-composer-source">{projectAction}<span>{ready ? '声音与出镜底版已就绪' : '先准备声音素材与出镜底版'}</span></div>
-        <Textarea value={copy} onChange={e=>setCopy(e.target.value)} aria-label="口播文案" placeholder="写下希望角色说出的文案，语气、停顿也可以一起说明…" className="hd-media-prompt" />
-        <div className="hd-media-bottom"><div className="hd-media-tools"><button type="button" className="hd-glass-pill" onClick={onPickVoice}><Mic />声音素材</button><button type="button" className="hd-glass-pill" onClick={onPickVideo}><VideoIcon />出镜底版</button><span className="hd-glass-pill">9:16 · 随文案 · 底版规格</span></div><div className="hd-creative-generation-actions"><button type="button" className="hd-generate" onClick={()=>void handleSubmit()} disabled={submitting || !consent || !ready}><span>{submitting ? '提交中…' : '准备生成'}</span></button><small className="hd-quote-hint">{copy.trim() ? `约 ¥${est.videoCny} · 确认后生成` : '添加文案后估价'}</small></div></div>
-        {est.maybeTooLong && <p className="hd-mode-help" role="status">文案偏长，可能超过40秒上限；请适当截短。</p>}
+        <div className="hd-composer-source">
+          {projectAction}
+          <span>{ready ? '声音与出镜底版已就绪' : '先准备声音素材与出镜底版'}</span>
+        </div>
+        <Textarea
+          value={copy}
+          onChange={(e) => setCopy(e.target.value)}
+          aria-label="口播文案"
+          placeholder="写下希望角色说出的文案，语气、停顿也可以一起说明…"
+          className="hd-media-prompt"
+        />
+        <div className="hd-media-bottom">
+          <div className="hd-media-tools">
+            <button type="button" className="hd-glass-pill" onClick={onPickVoice}>
+              <Mic />
+              声音素材
+            </button>
+            <button type="button" className="hd-glass-pill" onClick={onPickVideo}>
+              <VideoIcon />
+              出镜底版
+            </button>
+            <span className="hd-glass-pill">9:16 · 随文案 · 底版规格</span>
+          </div>
+          <div className="hd-creative-generation-actions">
+            <button
+              type="button"
+              className="hd-generate"
+              onClick={() => void handleSubmit()}
+              disabled={submitting || !consent || !ready}
+            >
+              <span>{submitting ? '提交中…' : '准备生成'}</span>
+            </button>
+            <small className="hd-quote-hint">
+              {copy.trim() ? `约 ¥${est.videoCny} · 确认后生成` : '添加文案后估价'}
+            </small>
+          </div>
+        </div>
+        {est.maybeTooLong && (
+          <p className="hd-mode-help" role="status">
+            文案偏长，可能超过40秒上限；请适当截短。
+          </p>
+        )}
       </section>
-      <label className="hd-presenter-consent"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} /><span>{IP_ASSET_AUTHORIZATION_COPY}<Link to="/terms" target="_blank">《服务条款》</Link>与<Link to="/privacy" target="_blank">《隐私政策》</Link>。</span></label>
+      <label className="hd-presenter-consent">
+        <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+        <span>
+          {IP_ASSET_AUTHORIZATION_COPY}
+          <Link to="/terms" target="_blank">
+            《服务条款》
+          </Link>
+          与
+          <Link to="/privacy" target="_blank">
+            《隐私政策》
+          </Link>
+          。
+        </span>
+      </label>
     </div>
   );
 }

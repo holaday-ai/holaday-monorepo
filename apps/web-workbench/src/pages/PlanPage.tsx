@@ -1,10 +1,10 @@
-import { ChoiceButton } from '@/components/ui/choice-button';
 import { AddonPackButton } from '@/components/AddonPackButton';
 import { useAppShellContext } from '@/components/AppShell';
 import { CnPaymentDialog, type CnProvider, type CnPurchase } from '@/components/CnPaymentDialog';
 import { PayPalButton } from '@/components/PayPalButton';
 import { TrustNavigation } from '@/components/TrustNavigation';
 import { Button } from '@/components/ui/button';
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { useToast } from '@/components/ui/toast';
 import { normalizeAuthMeProfile } from '@/lib/auth-me-state';
 import {

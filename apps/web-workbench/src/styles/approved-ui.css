@@ -5360,9 +5360,25 @@
 
 /* Desktop P2: single-line settings tabs and an opaque sticky clearance strip. */
 @media (min-width: 769px) {
-  .hd-settings-nav { background: hsl(var(--background)); }
-  .hd-settings-nav::before { content: ''; position: absolute; inset: -9px -1px auto; height: 9px; background: hsl(var(--background)); }
-  .hd-settings-nav > div { display: flex; overflow-x: auto; }
-  .hd-settings-nav a { flex: 1 0 auto; white-space: nowrap; }
-  .holaday-shell .hd-energy-page .energy-page { padding-top: 0; }
+  .hd-settings-nav {
+    background: hsl(var(--background));
+  }
+  .hd-settings-nav::before {
+    content: "";
+    position: absolute;
+    inset: -9px -1px auto;
+    height: 9px;
+    background: hsl(var(--background));
+  }
+  .hd-settings-nav > div {
+    display: flex;
+    overflow-x: auto;
+  }
+  .hd-settings-nav a {
+    flex: 1 0 auto;
+    white-space: nowrap;
+  }
+  .holaday-shell .hd-energy-page .energy-page {
+    padding-top: 0;
+  }
 }

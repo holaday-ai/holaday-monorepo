@@ -11,10 +11,8 @@
  * open so closing + reopening doesn't keep a stale form.
  */
 
-import { ChoiceButton } from '@/components/ui/choice-button';
-import { CheckCircle2, Loader2, X, XCircle } from 'lucide-react';
-import * as React from 'react';
 import { Button } from '@/components/ui/button';
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { useToast } from '@/components/ui/toast';
 import {
   NOTIFICATION_PLATFORM_LABEL,
@@ -23,8 +21,10 @@ import {
 import { buildNotificationChannelDraft } from '@/lib/notification-channel-draft';
 import { notificationChannelTestErrorMessage } from '@/lib/notification-channel-state';
 import { pageActionError } from '@/lib/page-error-copy';
-import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
+import { CheckCircle2, Loader2, X, XCircle } from 'lucide-react';
+import * as React from 'react';
 
 export interface ChannelDraft {
   platform: NotificationPlatform;
@@ -68,12 +68,7 @@ const PLATFORM_CARDS: ReadonlyArray<{
   },
 ];
 
-export function AddChannelModal({
-  open,
-  initial,
-  onClose,
-  onSave,
-}: Props): JSX.Element | null {
+export function AddChannelModal({ open, initial, onClose, onSave }: Props): JSX.Element | null {
   const toast = useToast();
   const mountedRef = React.useRef(false);
   const [platform, setPlatform] = React.useState<ChannelDraft['platform']>(
@@ -81,9 +76,7 @@ export function AddChannelModal({
   );
   const [webhookUrl, setWebhookUrl] = React.useState(initial?.webhookUrl ?? '');
   const [testing, setTesting] = React.useState(false);
-  const [testResult, setTestResult] = React.useState<
-    { ok: boolean; message: string } | null
-  >(null);
+  const [testResult, setTestResult] = React.useState<{ ok: boolean; message: string } | null>(null);
   const [saving, setSaving] = React.useState(false);
 
   const updateDraft = React.useCallback((fn: () => void) => {
@@ -215,9 +208,7 @@ export function AddChannelModal({
           className="flex-1 space-y-4 overflow-y-auto px-4 py-4"
         >
           <div>
-            <label className="mb-2 block text-xs font-medium text-muted-foreground">
-              平台
-            </label>
+            <label className="mb-2 block text-xs font-medium text-muted-foreground">平台</label>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {PLATFORM_CARDS.map((p) => (
                 <ChoiceButton
@@ -243,9 +234,7 @@ export function AddChannelModal({
                   >
                     {p.label}
                   </div>
-                  <div className="mt-0.5 text-[10px] text-muted-foreground">
-                    {p.hint}
-                  </div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">{p.hint}</div>
                 </ChoiceButton>
               ))}
             </div>
@@ -287,9 +276,7 @@ export function AddChannelModal({
               onClick={() => void handleTest()}
               disabled={testing || saving}
             >
-              {testing ? (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              ) : null}
+              {testing ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
               发送测试消息
             </Button>
             {testResult && (
@@ -327,9 +314,7 @@ export function AddChannelModal({
               disabled={saving || testing}
               className="bg-[#FF0061] text-white shadow-[0_4px_12px_rgba(255,0,97,0.16)] hover:bg-[#FF0061]/90"
             >
-              {saving ? (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              ) : null}
+              {saving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
               {initial ? '保存' : '添加'}
             </Button>
           </div>
