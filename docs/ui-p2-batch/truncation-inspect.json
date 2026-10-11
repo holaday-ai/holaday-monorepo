@@ -1,0 +1,188 @@
+[
+  {
+    "route": "/video",
+    "items": [
+      {
+        "tag": "SPAN",
+        "label": "切换侧边栏",
+        "scroll": 70,
+        "client": 1,
+        "html": "<span class=\"sr-only\">切换侧边栏</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 正在启动…",
+        "scroll": 121,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 正在启动…</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 需要你回复",
+        "scroll": 124,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 需要你回复</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 正在启动…",
+        "scroll": 121,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 正在启动…</span>"
+      }
+    ]
+  },
+  {
+    "route": "/image",
+    "items": [
+      {
+        "tag": "SPAN",
+        "label": "切换侧边栏",
+        "scroll": 70,
+        "client": 1,
+        "html": "<span class=\"sr-only\">切换侧边栏</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 正在启动…",
+        "scroll": 121,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 正在启动…</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 需要你回复",
+        "scroll": 124,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 需要你回复</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 正在启动…",
+        "scroll": 121,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 正在启动…</span>"
+      },
+      {
+        "tag": "INPUT",
+        "label": "添加图片",
+        "scroll": 195,
+        "client": 1,
+        "html": "<input type=\"file\" multiple=\"\" accept=\"image/png,image/jpeg,image/webp\" aria-label=\"添加图片\" class=\"sr-only\">"
+      }
+    ]
+  },
+  {
+    "route": "/cosmic",
+    "items": [
+      {
+        "tag": "SPAN",
+        "label": "切换侧边栏",
+        "scroll": 70,
+        "client": 1,
+        "html": "<span class=\"sr-only\">切换侧边栏</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 正在启动…",
+        "scroll": 121,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 正在启动…</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 需要你回复",
+        "scroll": 124,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 需要你回复</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 正在启动…",
+        "scroll": 121,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 正在启动…</span>"
+      }
+    ]
+  },
+  {
+    "route": "/files",
+    "items": [
+      {
+        "tag": "SPAN",
+        "label": "切换侧边栏",
+        "scroll": 70,
+        "client": 1,
+        "html": "<span class=\"sr-only\">切换侧边栏</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 正在启动…",
+        "scroll": 121,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 正在启动…</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 需要你回复",
+        "scroll": 124,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 需要你回复</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 正在启动…",
+        "scroll": 121,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 正在启动…</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "已加载 2 个文件",
+        "scroll": 114,
+        "client": 1,
+        "html": "<span class=\"sr-only\" role=\"status\">已加载 2 个文件</span>"
+      }
+    ]
+  },
+  {
+    "route": "/settings#memory",
+    "items": [
+      {
+        "tag": "SPAN",
+        "label": "切换侧边栏",
+        "scroll": 70,
+        "client": 1,
+        "html": "<span class=\"sr-only\">切换侧边栏</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 正在启动…",
+        "scroll": 121,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 正在启动…</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 需要你回复",
+        "scroll": 124,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 需要你回复</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "进行中 · 正在启动…",
+        "scroll": 121,
+        "client": 1,
+        "html": "<span class=\"sr-only\">进行中 · 正在启动…</span>"
+      },
+      {
+        "tag": "SPAN",
+        "label": "搜索 AI 记忆",
+        "scroll": 87,
+        "client": 1,
+        "html": "<span class=\"sr-only\">搜索 AI 记忆</span>"
+      }
+    ]
+  }
+]

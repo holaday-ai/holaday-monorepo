@@ -32,7 +32,7 @@ Debugging case filter: `UI_AUDIT_CASES='["task:generate:completed", "/projects/:
 
 Debugging filters: `UI_AUDIT_ROUTES='["/stocks"]' UI_AUDIT_WIDTHS='[1440]' pnpm ui:audit --screens-only`. Filters/screens-only **always leave a coverage gap** and cannot satisfy the release gate. `--skip-build` requires an exact candidate + source stamp from a previous build.
 
-This copy imports PR #261 at `4b324572` without changing its branch or refreshing its visual baselines. Round 3 adds product-specific P1 assertions in `lib/round3-checks.mjs`; the inherited traversal and thresholds remain intact. A documented geometry correction now compares painted bounds after scroll clipping; `tests/visible-overlap.test.mjs` proves both the prior false positive and a real obstruction. Current delivery evidence is in [validation ledger](validation.md).
+This copy is based on the merged recovery mainline at `69febb6f`. The P2 batch refreshes reviewed desktop visual baselines in the standalone commit `bb174b40`; all 21 diffs above 0.05 have individual provenance in the [visual review](../docs/ui-p2-batch/visual-review.md). Round 3 product-specific P1 assertions remain in `lib/round3-checks.mjs`; `lib/p2-checks.mjs` adds terminal-plan, settings navigation and energy-spacing checks. Strict icon/URL truncation contracts, selected-control semantics and bounded business-ready replay are calibrated with positive and negative tests. Numeric geometry and visual thresholds are unchanged. The unfiltered candidate `1e20af78` completes 240/240 with P1=0, P2=17, coverage gaps=0 and exit=0; see the [P2 report](../docs/ui-p2-batch/report.md) and historical [validation ledger](validation.md).
 
 ## What the evidence means
 

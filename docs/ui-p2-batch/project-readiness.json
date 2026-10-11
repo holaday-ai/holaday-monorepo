@@ -1,0 +1,28 @@
+[
+  {
+    "route": "/projects",
+    "detail": [
+      {
+        "visible": false,
+        "html": "<span>测试项目</span>"
+      },
+      {
+        "visible": true,
+        "html": "<div class=\"truncate text-sm font-medium text-foreground hover:text-[#FF0061]\">测试项目</div>"
+      }
+    ]
+  },
+  {
+    "route": "/projects/:projectId",
+    "detail": [
+      {
+        "visible": false,
+        "html": "<span>测试项目</span>"
+      },
+      {
+        "visible": true,
+        "html": "<h1 class=\"text-xl font-semibold leading-tight text-foreground\">测试项目</h1>"
+      }
+    ]
+  }
+]
