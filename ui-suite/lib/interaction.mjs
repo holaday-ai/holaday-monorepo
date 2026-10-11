@@ -410,6 +410,11 @@ function matchingControl(elements, wanted) {
   );
   return equivalent.length === 1 ? equivalent[0] : undefined;
 }
+// Seeded business content must be present before measuring the initial scene.
+export async function waitForSeedContent(page, text, timeout = 4000) {
+  if (text) await page.getByText(text, { exact: false }).first().waitFor({ state: 'visible', timeout });
+}
+
 // Poll the same semantic identity used for traversal; asynchronous list hydration
 // must finish before replay. A timeout still leaves an explicit coverage gap.
 async function readyControl(page, wanted, timeout) {

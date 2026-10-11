@@ -12,7 +12,7 @@ import {
 } from './lib/checks.mjs';
 import { p2Checks } from './lib/p2-checks.mjs';
 import { round3Checks, browserInputOverlayChecks, scheduledChoiceChecks } from './lib/round3-checks.mjs';
-import { inspectControls, reusableControls } from './lib/interaction.mjs';
+import { inspectControls, reusableControls, waitForSeedContent } from './lib/interaction.mjs';
 import { canonicalUrl, inventory, scenarioSlug, writeInventory } from './lib/inventory.mjs';
 import {
   isPopupNavigation,
@@ -325,6 +325,15 @@ try {
         for (const request of state.requests)
           if (!report.seedContracts.includes(request.name)) report.seedContracts.push(request.name);
       };
+      const expectedSeed = {
+          '/account/closure-recovery': 'ACR-LOCAL-UI',
+          '/files': '测试资料.txt',
+          '/settings/roles': '内容创作',
+          '/skills': '数据报告解读',
+          '/projects': '测试项目',
+          '/projects/:projectId': '测试项目',
+          '/planned': '每日测试计划',
+        }[scenario.pattern];
       let loaded = false;
       const reset = async () => {
         if (loaded) await captureContracts();
@@ -351,6 +360,7 @@ try {
             { timeout: 4000 },
           );
         }
+        await waitForSeedContent(page, expectedSeed);
         loaded = true;
       };
       try {
@@ -375,15 +385,6 @@ try {
         await page.screenshot({ path: path.join(out, screenshot), animations: 'disabled' });
         entry.canonicalPath = canonicalUrl(page.url());
         entry.runtimeControls = measured.elements;
-        const expectedSeed = {
-          '/account/closure-recovery': 'ACR-LOCAL-UI',
-          '/files': '测试资料.txt',
-          '/settings/roles': '内容创作',
-          '/skills': '数据报告解读',
-          '/projects': '测试项目',
-          '/projects/:projectId': '测试项目',
-          '/planned': '每日测试计划',
-        }[scenario.pattern];
         if (expectedSeed && !measured.text.includes(expectedSeed))
           report.coverageGaps.push(
             `${scenario.pattern}@${width}: expected seeded content missing: ${expectedSeed}`,

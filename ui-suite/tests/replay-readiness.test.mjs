@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
-import {inspectControls,reusableControls} from '../lib/interaction.mjs';
+import {inspectControls,reusableControls,waitForSeedContent} from '../lib/interaction.mjs';
 import {measurePage} from '../lib/checks.mjs';
 const {chromium}=createRequire(path.resolve('apps/web-workbench/package.json'))('playwright');
 test('ancestor replay waits for asynchronously loaded pagination control and fails if it never returns',async()=>{
@@ -36,4 +36,15 @@ test('canonical aliases cannot reuse failed, uncovered or P1-obscured coverage',
  }
  assert.equal(reusableControls([{status:'passed',layout:[{severity:'P1'}]}]),false);
  assert.equal(reusableControls([]),false);
+});
+
+test('initial scene waits for delayed seed content and rejects permanently absent data',async()=>{
+ const browser=await chromium.launch();try{
+  const page=await browser.newPage();await page.setContent('<main>加载中</main>');
+  await page.evaluate(()=>{setTimeout(()=>{document.querySelector('main').textContent='每日测试计划'},120)});
+  await waitForSeedContent(page,'每日测试计划',800);
+  assert.equal(await page.getByText('每日测试计划').isVisible(),true);
+  await page.setContent('<main>加载中</main>');
+  await assert.rejects(()=>waitForSeedContent(page,'每日测试计划',150));
+ }finally{await browser.close()}
 });
