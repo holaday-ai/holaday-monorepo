@@ -25,6 +25,7 @@ import {
 } from '../../ws/server.js';
 import { logger } from '../../config/logger.js';
 import { defaultBrowserNetworkPolicy } from '../browser-network-policy.js';
+import type { UnifiedBrowserLoopInput } from '../browser-tools/unified-browser-loop.js';
 import {
   type AntiBotSignal,
   describeSignal,
@@ -78,7 +79,7 @@ export interface StartVisionLoopTaskOptions {
    * (snapshot/click/type…) on that page instead of the commander loop.
    */
   messagesAdapter?: import('../../llm/messages-adapter.js').MessagesAdapter;
-  webSearch?: import('../browser-tools/unified-browser-loop.js').UnifiedBrowserLoopInput['webSearch'];
+  webSearch?: UnifiedBrowserLoopInput['webSearch'];
   /** Batch 06 self-evolution hooks (each flag-gated, all no-ops when off). */
   evolution?: {
     db: import('../../db/client.js').DB;
@@ -605,7 +606,7 @@ async function captureDisplayFrame(
   hookCast: NonNullable<StartVisionLoopTaskOptions['onScreencast']>,
 ): Promise<void> {
   try {
-    const page = (await executor.getPage()) as unknown as import('./playwright-executor.js').PageLike;
+    const page = (await executor.getPage()) as unknown as PageLike;
     const shot = await executor.screenshot(page);
     if (shot.error || !shot.base64) return;
     let url = '';
