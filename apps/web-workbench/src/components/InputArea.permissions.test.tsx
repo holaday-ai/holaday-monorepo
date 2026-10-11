@@ -46,10 +46,24 @@ function mount(attachmentsAllowed: boolean) {
   return { user: userEvent.setup(), onSubmit };
 }
 describe('composer task choices independent of attachment entitlement', () => {
+  it('exposes exclusive execution mode selection without closing the menu', async () => {
+    const { user } = mount(true);
+    await user.click(screen.getByRole('button', { name: '附件与任务选项' }));
+    const auto = screen.getByRole('menuitemradio', { name: '自动执行' });
+    const plan = screen.getByRole('menuitemradio', { name: '先出方案' });
+    expect(auto.getAttribute('aria-checked')).toBe('true');
+    expect(plan.getAttribute('aria-checked')).toBe('false');
+    await user.click(plan);
+    expect(auto.getAttribute('aria-checked')).toBe('false');
+    expect(plan.getAttribute('aria-checked')).toBe('true');
+    await user.click(auto);
+    expect(auto.getAttribute('aria-checked')).toBe('true');
+    expect(plan.getAttribute('aria-checked')).toBe('false');
+  });
   it('lets a user without attachments select plan mode and submit it', async () => {
     const { user, onSubmit } = mount(false);
     await user.click(screen.getByRole('button', { name: '附件与任务选项' }));
-    await user.click(screen.getByRole('menuitem', { name: '先出方案' }));
+    await user.click(screen.getByRole('menuitemradio', { name: '先出方案' }));
     await user.keyboard('{Escape}');
     await user.type(screen.getByRole('textbox'), '只制定三步计划');
     await user.click(screen.getByRole('button', { name: '发送' }));

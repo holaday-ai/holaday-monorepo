@@ -873,32 +873,32 @@ export function InputArea({
                   <span className="font-medium text-foreground">添加照片和文件{!attachmentsAllowed && ' · 需升级'}</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="my-1 bg-[#DCDDDD]/80 dark:bg-white/10" />
-                <DropdownMenuItem
+                <DropdownMenuRadioGroup value={taskMode} onValueChange={mode => setTaskMode(mode as 'auto' | 'plan')}>
+                <DropdownMenuRadioItem
                   className={ATTACHMENT_MENU_ITEM_CLASS}
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    setTaskMode('plan');
-                  }}
+                  value="plan"
+                  showIndicator={false}
+                  onSelect={event => event.preventDefault()}
                 >
                   <ListChecks className="h-4 w-4 text-[#595757]" />
                   <span className="min-w-0 flex-1 font-medium text-foreground">
                     先出方案
                   </span>
                   <MiniSwitch checked={taskMode === 'plan'} />
-                </DropdownMenuItem>
-                <DropdownMenuItem
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem
                   className={ATTACHMENT_MENU_ITEM_CLASS}
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    setTaskMode('auto');
-                  }}
+                  value="auto"
+                  showIndicator={false}
+                  onSelect={event => event.preventDefault()}
                 >
                   <Target className="h-4 w-4 text-[#595757]" />
                   <span className="min-w-0 flex-1 font-medium text-foreground">
                     自动执行
                   </span>
                   <MiniSwitch checked={taskMode === 'auto'} />
-                </DropdownMenuItem>
+                </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
                 <DropdownMenuSeparator className="my-1 bg-[#DCDDDD]/80 dark:bg-white/10" />
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger className="gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 data-[state=open]:bg-[#EFEFEF]/70 dark:focus:bg-white/10 dark:data-[state=open]:bg-white/10">

@@ -96,7 +96,7 @@ export async function measurePage(page) {
         (style.clip === 'rect(0px, 0px, 0px, 0px)' || style.clipPath === 'inset(50%)');
     };
     const selectors =
-      'button,a,input,textarea,select,summary,[role="button"],[role="tab"],[role="combobox"],[role="menuitem"],[role="switch"],[role="checkbox"],[role="radio"],.fc-daygrid-day[data-date]';
+      'button,a,input,textarea,select,summary,[role="button"],[role="tab"],[role="combobox"],[role="menuitem"],[role="menuitemradio"],[role="switch"],[role="checkbox"],[role="radio"],.fc-daygrid-day[data-date]';
     const seen = new Set(
       [...document.querySelectorAll('[data-ui-audit-id]')].map((e) =>
         e.getAttribute('data-ui-audit-id'),

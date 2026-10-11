@@ -12,12 +12,13 @@ const fingerprint = (p) =>
       text: document.body.innerText,
       states: [
         ...document.querySelectorAll(
-          '[aria-expanded],[aria-selected],[aria-pressed],[data-state],input,textarea,select,button,details',
+          '[aria-expanded],[aria-selected],[aria-pressed],[aria-checked],[data-state],input,textarea,select,button,details',
         ),
       ].map((e) => [
         e.getAttribute('aria-expanded'),
         e.getAttribute('aria-selected'),
         e.getAttribute('aria-pressed'),
+        e.getAttribute('aria-checked'),
         e.getAttribute('data-state'),
         e.type,
         e.value,
@@ -64,6 +65,11 @@ export async function observeControl(page, control, { checkDismissal = true } = 
       (await locator.getAttribute('aria-expanded')) === null &&
       (await locator.getAttribute('aria-haspopup')) === null)
     return { ...control, status: 'idempotent', reason: 'already selected grid cell' };
+  if (control.role === 'menuitemradio' &&
+      (await locator.getAttribute('aria-checked')) === 'true' &&
+      (await locator.getAttribute('aria-expanded')) === null &&
+      (await locator.getAttribute('aria-haspopup')) === null)
+    return { ...control, status: 'idempotent', reason: 'already checked menu radio choice' };
   if (control.selectedWithoutSemantics)
     return {
       ...control,
@@ -323,10 +329,14 @@ export async function observeControl(page, control, { checkDismissal = true } = 
           requests,
           afterUrl,
         };
-      // Leave the region open so that its nested controls are inspected.
-      if ((await locator.count()) && (await locator.getAttribute('aria-expanded')) !== 'true')
-        await locator.click({ timeout: 1800 });
-      await page.waitForTimeout(60);
+      // Escape may close both a nested popup and its parent. Rebuild the full
+      // path after dismissal instead of clicking a node in an exit animation.
+      if (popup) replayAfterDismissal = true;
+      else {
+        if ((await locator.count()) && (await locator.getAttribute('aria-expanded')) !== 'true')
+          await locator.click({ timeout: 1800 });
+        await page.waitForTimeout(60);
+      }
     }
     if (
       checkDismissal &&
