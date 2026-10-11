@@ -107,6 +107,20 @@ export interface InsertTaskContext {
   executionMode?: 'browser';
   /** Immutable, server-validated context from a dedicated product surface. */
   sourceContext?: Record<string, unknown> | null;
+  /**
+   * This task is the public-cloud continuation of `originalTaskId`, which the
+   * caller already claimed with `claimToken`. The link is written in the same
+   * transaction as the insert: if the claim is gone, the insert rolls back.
+   */
+  publicCloudContinuation?: { originalTaskId: string; claimToken: string };
+}
+
+/** The original's continuation claim was lost before the replacement was linked. */
+export class PublicCloudContinuationLinkError extends Error {
+  constructor() {
+    super('public-cloud continuation claim lost before the replacement was linked');
+    this.name = 'PublicCloudContinuationLinkError';
+  }
 }
 
 type TaskRepositoryTransaction = Parameters<Parameters<DB['transaction']>[0]>[0];
@@ -220,7 +234,72 @@ export class TaskRepository {
         actor: 'system',
         payload: { intent: ctx.intent, planSize: state.plan.length },
       });
+
+      const continuation = ctx.publicCloudContinuation;
+      if (continuation) {
+        const linked = await tx
+          .update(tasks)
+          .set({ publicCloudContinuationTaskId: state.taskId })
+          .where(
+            and(
+              eq(tasks.externalId, continuation.originalTaskId),
+              eq(tasks.userId, ctx.userId),
+              eq(tasks.origin, this.taskOrigin),
+              eq(tasks.publicCloudContinuationTaskId, continuation.claimToken),
+            ),
+          );
+        if (extractMysqlAffectedRows(linked) !== 1) throw new PublicCloudContinuationLinkError();
+      }
     });
+  }
+
+  /**
+   * Reserve a cancelled original for exactly one public-cloud continuation.
+   * Atomic conditional update: of any number of concurrent callers at most one
+   * sees `true`, and an original that was ever linked can never be claimed again.
+   */
+  async claimPublicCloudContinuation(input: {
+    originalTaskId: string;
+    userId: number;
+    claimToken: string;
+  }): Promise<boolean> {
+    const claimed = await this.db
+      .update(tasks)
+      .set({ publicCloudContinuationTaskId: input.claimToken })
+      .where(
+        and(
+          eq(tasks.externalId, input.originalTaskId),
+          eq(tasks.userId, input.userId),
+          eq(tasks.origin, this.taskOrigin),
+          eq(tasks.status, 'cancelled'),
+          isNull(tasks.publicCloudContinuationTaskId),
+        ),
+      );
+    return extractMysqlAffectedRows(claimed) === 1;
+  }
+
+  /**
+   * Give the claim back when no replacement row was inserted. Only a pending
+   * `claim:` value can be cleared; a linked replacement id never is.
+   */
+  async releasePublicCloudContinuationClaim(input: {
+    originalTaskId: string;
+    userId: number;
+    claimToken: string;
+  }): Promise<void> {
+    if (!input.claimToken.startsWith('claim:')) return;
+    await this.db
+      .update(tasks)
+      .set({ publicCloudContinuationTaskId: null })
+      .where(
+        and(
+          eq(tasks.externalId, input.originalTaskId),
+          eq(tasks.userId, input.userId),
+          eq(tasks.origin, this.taskOrigin),
+          eq(tasks.publicCloudContinuationTaskId, input.claimToken),
+          sql`${tasks.publicCloudContinuationTaskId} LIKE 'claim:%'`,
+        ),
+      );
   }
 
   async applyStepResult(

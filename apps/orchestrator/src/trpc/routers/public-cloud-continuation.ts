@@ -1,15 +1,19 @@
 import { TRPCError } from '@trpc/server';
 
 /**
- * FIX-PR259-2 — "用公开云端（无登录态）继续" re-submits a non-identity extension
- * wait as a logged-out cloud task. The SPA cancels the original first; the
- * server then allows exactly one replacement per original task:
+ * "用公开云端（无登录态）继续" re-submits a non-identity extension wait as a
+ * logged-out cloud task. The SPA cancels the original first; the server then
+ * allows at most one replacement per original, at any time:
  *
  * - the idempotency key is derived from the original task, so a double click,
- *   a network retry or a re-opened tab replays the same replacement instead of
- *   creating (and charging) another task within the claim TTL;
- * - the replacement id is also written onto the original row, so a retry after
- *   the TTL is refused rather than creating a second task;
+ *   a network retry or a re-opened tab replays the same replacement within the
+ *   claim TTL;
+ * - independent of that TTL, the original row is claimed with a conditional
+ *   update (`tasks.public_cloud_continuation_task_id IS NULL`) before anything
+ *   is created, and the claim is swapped for the replacement id inside the
+ *   replacement's own insert transaction. Concurrent or late requests lose the
+ *   claim and create nothing; a failed link rolls the insert back and the
+ *   consumed quota is refunded;
  * - identity-required waits are refused here too, not only in the UI.
  */
 export const PUBLIC_CLOUD_CONTINUATION_PREFIX = 'cloud-continue:';
@@ -38,7 +42,11 @@ export interface ContinuationOriginal {
   status: string;
   intent: string;
   result: unknown;
+  /** `tasks.public_cloud_continuation_task_id`: a claim token or the replacement id. */
+  publicCloudContinuationTaskId?: string | null;
 }
+
+export const PUBLIC_CLOUD_CONTINUATION_CLAIM_PREFIX = 'claim:';
 
 function metadataOf(result: unknown): Record<string, unknown> {
   if (typeof result !== 'object' || result === null) return {};
@@ -48,6 +56,7 @@ function metadataOf(result: unknown): Record<string, unknown> {
     : {};
 }
 
+/** Legacy link written into result.metadata before the column existed. */
 export function publicCloudContinuationTaskIdOf(result: unknown): string | null {
   const id = metadataOf(result).publicCloudContinuationTaskId;
   return typeof id === 'string' && id.length > 0 ? id : null;
@@ -67,7 +76,13 @@ export function assertPublicCloudContinuationAllowed(
       code: 'FORBIDDEN',
       message: '这个任务需要你的登录状态，不能改用无登录态的公开云端。',
     });
-  const existing = publicCloudContinuationTaskIdOf(original.result);
+  const column = original.publicCloudContinuationTaskId ?? null;
+  if (column?.startsWith(PUBLIC_CLOUD_CONTINUATION_CLAIM_PREFIX))
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: '原任务的公开云端续作正在创建，不会重复创建。',
+    });
+  const existing = column ?? publicCloudContinuationTaskIdOf(original.result);
   if (existing)
     throw new TRPCError({
       code: 'CONFLICT',
@@ -82,39 +97,85 @@ export function assertPublicCloudContinuationAllowed(
     throw new TRPCError({ code: 'BAD_REQUEST', message: '公开云端续作必须使用原任务的描述。' });
 }
 
-/** The original row's result with the replacement recorded on it. */
-export function withPublicCloudContinuation(
-  result: unknown,
-  replacementTaskId: string,
-): Record<string, unknown> {
-  const base =
-    typeof result === 'object' && result !== null ? (result as Record<string, unknown>) : {};
-  return {
-    ...base,
-    metadata: { ...metadataOf(result), publicCloudContinuationTaskId: replacementTaskId },
-  };
+export interface ContinuationLink {
+  originalTaskId: string;
+  claimToken: string;
+  /** Called once the replacement row and its link committed together. */
+  onLinked: (replacementTaskId: string) => void;
 }
 
 /**
- * Runs `create` only after the original passes the preconditions, then records
- * the replacement on the original. The caller runs this inside the task-create
- * idempotency claim, so concurrent duplicates never reach `create`.
+ * Claims the original, runs `create` (which must pass the link to the first
+ * task insert), and gives the claim back when no replacement row was inserted.
+ * Once a replacement is linked the claim is never released, so a later failure
+ * of the same request cannot open the door to a second replacement.
  */
 export async function runPublicCloudContinuation<T extends { taskId: string }>(deps: {
+  originalTaskId: string;
   intent: string;
   loadOriginal: () => Promise<ContinuationOriginal | undefined>;
-  recordReplacement: (result: Record<string, unknown>) => Promise<void>;
-  create: () => Promise<T>;
-  onRecordFailure?: (err: unknown) => void;
+  claim: (claimToken: string) => Promise<boolean>;
+  release: (claimToken: string) => Promise<void>;
+  create: (link: ContinuationLink) => Promise<T>;
+  newClaimToken: () => string;
+  onReleaseFailure?: (err: unknown) => void;
 }): Promise<T> {
-  const original = await deps.loadOriginal();
-  assertPublicCloudContinuationAllowed(original, deps.intent);
-  const response = await deps.create();
-  try {
-    await deps.recordReplacement(withPublicCloudContinuation(original.result, response.taskId));
-  } catch (err) {
-    // The idempotency claim still replays this response for its TTL.
-    deps.onRecordFailure?.(err);
+  assertPublicCloudContinuationAllowed(await deps.loadOriginal(), deps.intent);
+  const claimToken = `${PUBLIC_CLOUD_CONTINUATION_CLAIM_PREFIX}${deps.newClaimToken()}`;
+  if (!(await deps.claim(claimToken))) {
+    // Lost to another request, or the original changed: report the precise reason.
+    assertPublicCloudContinuationAllowed(await deps.loadOriginal(), deps.intent);
+    throw new TRPCError({ code: 'CONFLICT', message: '原任务的公开云端续作已由另一次请求处理。' });
   }
-  return response;
+  let linked = false;
+  const release = async () => {
+    if (linked) return;
+    try {
+      await deps.release(claimToken);
+    } catch (err) {
+      // The claim stays: the original cannot be continued again, but no
+      // second replacement can appear either.
+      deps.onReleaseFailure?.(err);
+    }
+  };
+  try {
+    const response = await deps.create({
+      originalTaskId: deps.originalTaskId,
+      claimToken,
+      onLinked: () => {
+        linked = true;
+      },
+    });
+    await release();
+    return response;
+  } catch (err) {
+    await release();
+    throw err;
+  }
+}
+
+/**
+ * Wraps the first task insert of a continuation request: the link rides in the
+ * insert transaction, and a failed insert/link refunds the quota this request
+ * already consumed so a rolled-back continuation is never charged.
+ */
+export async function insertWithContinuationLink(deps: {
+  link: ContinuationLink;
+  replacementTaskId: string;
+  insert: (publicCloudContinuation: {
+    originalTaskId: string;
+    claimToken: string;
+  }) => Promise<void>;
+  refundPendingCharge: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await deps.insert({
+      originalTaskId: deps.link.originalTaskId,
+      claimToken: deps.link.claimToken,
+    });
+  } catch (err) {
+    await deps.refundPendingCharge();
+    throw err;
+  }
+  deps.link.onLinked(deps.replacementTaskId);
 }

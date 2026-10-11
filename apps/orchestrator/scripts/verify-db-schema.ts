@@ -557,6 +557,7 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'verification_json',
     'verification_passed',
     'failure_level',
+    'public_cloud_continuation_task_id',
   ],
   task_steps: [
     'external_id',

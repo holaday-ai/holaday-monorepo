@@ -462,6 +462,14 @@ describe('release database index contract', () => {
 
   const validRows = [
     {
+      table_name: 'tasks',
+      index_name: 'uk_tasks_public_cloud_continuation',
+      non_unique: 0,
+      seq_in_index: 1,
+      column_name: 'public_cloud_continuation_task_id',
+      sub_part: null,
+    },
+    {
       table_name: 'feedback_cases',
       index_name: 'uk_feedback_cases_external_id',
       non_unique: 0,
@@ -845,6 +853,17 @@ describe('release database index contract', () => {
         ),
       ),
       ['payments.uk_payments_provider_order UNIQUE(provider, provider_order_id)'],
+    );
+  });
+
+  it('rejects a non-unique public-cloud continuation index', () => {
+    assert.deepEqual(
+      findMissingRequiredIndexes(
+        validRows.map((row) =>
+          row.index_name === 'uk_tasks_public_cloud_continuation' ? { ...row, non_unique: 1 } : row,
+        ),
+      ),
+      ['tasks.uk_tasks_public_cloud_continuation UNIQUE(public_cloud_continuation_task_id)'],
     );
   });
 

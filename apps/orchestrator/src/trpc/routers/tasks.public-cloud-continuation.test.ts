@@ -15,6 +15,8 @@ vi.mock('../../api-keys/webhook-idempotency-service.js', async (importOriginal) 
 const INTENT = '在京东查一下 iPhone 价格';
 let original: Record<string, unknown> | undefined;
 const originalReads = vi.fn();
+const updates: Record<string, unknown>[] = [];
+let claimWins = true;
 
 function readOriginal(): unknown[] {
   originalReads();
@@ -45,7 +47,14 @@ function caller() {
       };
       return { from: () => query };
     },
-    update: () => ({ set: () => ({ where: async () => [] }) }),
+    update: () => ({
+      set: (values: Record<string, unknown>) => ({
+        where: async () => {
+          updates.push(values);
+          return [{ affectedRows: claimWins ? 1 : 0 }];
+        },
+      }),
+    }),
     insert: () => ({ values: async () => [] }),
   };
   const ctx = {
@@ -84,6 +93,8 @@ beforeEach(() => {
     },
   };
   originalReads.mockClear();
+  updates.length = 0;
+  claimWins = true;
   vi.mocked(idempotency.recordClaim).mockReset().mockResolvedValue({ kind: 'claimed' });
   vi.mocked(idempotency.releaseClaim).mockClear();
   consume = vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
@@ -155,4 +166,16 @@ it('a concurrent duplicate is refused while the first continuation is creating',
   await expect(caller().create(request())).rejects.toMatchObject({ code: 'CONFLICT' });
   expect(originalReads).not.toHaveBeenCalled();
   expect(consume).not.toHaveBeenCalled();
+});
+
+it('a request that loses the database claim creates and charges nothing', async () => {
+  claimWins = false;
+  await expect(caller().create(request())).rejects.toMatchObject({ code: 'CONFLICT' });
+  expect(updates).toEqual([
+    { publicCloudContinuationTaskId: expect.stringMatching(/^claim:[0-9a-f-]{36}$/) },
+  ]);
+  expect(originalReads).toHaveBeenCalledTimes(2);
+  expect(idempotency.releaseClaim).toHaveBeenCalledTimes(1);
+  expect(consume).not.toHaveBeenCalled();
+  expect(insert).not.toHaveBeenCalled();
 });

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type Anthropic from '@anthropic-ai/sdk';
 import {
   BASIC_ROLE_PICK_LIMIT,
@@ -313,7 +313,9 @@ import {
 import { deferredTaskCosts } from './media-task-background.js';
 import { runMediaTaskBackground } from './media-task-background.js';
 import {
+  type ContinuationLink,
   assertPublicCloudContinuationRequest,
+  insertWithContinuationLink,
   runPublicCloudContinuation,
 } from './public-cloud-continuation.js';
 import { runTaskBackground } from './task-background.js';
@@ -1182,11 +1184,15 @@ export const tasksRouter = router({
       const taskCreateIdempotencyKey = input.clientRequestId
         ? `spa_task:${input.clientRequestId}`
         : null;
-      // Inside the idempotency claim: a continuation checks (and links) its
-      // original task around the ordinary create path.
+      // Inside the idempotency claim: a continuation claims its original row,
+      // and the first task insert of this request links the replacement in the
+      // same transaction (see insertWithContinuationLink below).
+      let continuationLink: ContinuationLink | null = null;
+      const continuationRepo = new TaskRepository(ctx.db, ctx.taskOrigin);
       const withContinuation = <T extends { taskId: string }>(create: () => Promise<T>) =>
         continuationOf
           ? runPublicCloudContinuation({
+              originalTaskId: continuationOf,
               intent: input.intent,
               loadOriginal: async () => {
                 const [row] = await ctx.db
@@ -1194,6 +1200,7 @@ export const tasksRouter = router({
                     status: tasksTable.status,
                     intent: tasksTable.intent,
                     result: tasksTable.result,
+                    publicCloudContinuationTaskId: tasksTable.publicCloudContinuationTaskId,
                   })
                   .from(tasksTable)
                   .where(
@@ -1206,23 +1213,27 @@ export const tasksRouter = router({
                   .limit(1);
                 return row;
               },
-              recordReplacement: async (result) => {
-                await ctx.db
-                  .update(tasksTable)
-                  .set({ result })
-                  .where(
-                    and(
-                      eq(tasksTable.externalId, continuationOf),
-                      eq(tasksTable.userId, userRow.id),
-                      eq(tasksTable.origin, ctx.taskOrigin),
-                    ),
-                  );
+              claim: (claimToken) =>
+                continuationRepo.claimPublicCloudContinuation({
+                  originalTaskId: continuationOf,
+                  userId: userRow.id,
+                  claimToken,
+                }),
+              release: (claimToken) =>
+                continuationRepo.releasePublicCloudContinuationClaim({
+                  originalTaskId: continuationOf,
+                  userId: userRow.id,
+                  claimToken,
+                }),
+              create: (link) => {
+                continuationLink = link;
+                return create();
               },
-              create,
-              onRecordFailure: (err) =>
+              newClaimToken: () => randomUUID(),
+              onReleaseFailure: (err) =>
                 ctx.logger.warn(
                   { err, taskId: continuationOf },
-                  'tasks.create: public-cloud continuation link not recorded',
+                  'tasks.create: public-cloud continuation claim not released',
                 ),
             })
           : create();
@@ -1272,7 +1283,27 @@ export const tasksRouter = router({
               // Best-effort: a failed audit row never blocks task creation.
               const insertTask = repo.insertTask.bind(repo);
               repo.insertTask = (async (...args: Parameters<typeof insertTask>) => {
-                const result = await insertTask(...args);
+                const link = continuationLink;
+                let result: Awaited<ReturnType<typeof insertTask>> = undefined;
+                if (link) {
+                  // The first insert of a continuation carries the link; a failed
+                  // insert/link rolls back and refunds what this request consumed.
+                  continuationLink = null;
+                  await insertWithContinuationLink({
+                    link,
+                    replacementTaskId: args[0].taskId,
+                    insert: (publicCloudContinuation) =>
+                      insertTask(args[0], { ...args[1], publicCloudContinuation }),
+                    refundPendingCharge: async () => {
+                      const charge = pendingQuotaCharge;
+                      if (!charge) return;
+                      pendingQuotaCharge = null;
+                      await new QuotaService(ctx.db).refund(userRow.id, charge.plan, charge.isOpus);
+                    },
+                  });
+                } else {
+                  result = await insertTask(...args);
+                }
                 const charge = pendingQuotaCharge;
                 if (charge) {
                   pendingQuotaCharge = null;
