@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { MessagesAdapter } from './messages-adapter.js';
+import { withBrowserBrain } from './browser-brain.js';
+import type { MessagesAdapter, QwenMessagesEnvironment } from './messages-adapter.js';
 import { BUILTIN_MODEL_CATALOG, type BrainEntry, runWithBrain } from './model-catalog.js';
 import {
   MODEL_TASK_FAILURE_COPY,
@@ -103,6 +104,8 @@ describe('createProductionModelRuntimeWiring', () => {
       QWEN_CORE_ENABLED_LANES: '',
       ANTHROPIC_API_KEY: 'synthetic-anthropic-key',
       OPENAI_API_KEY: 'synthetic-openai-key',
+      BROWSER_BRAIN_CLAUDE_ENABLED: true,
+      BROWSER_BRAIN_OPENAI_ENABLED: true,
     };
     const ownership = { scope: 'personal' as const, userRegion: 'intl' };
 
@@ -266,5 +269,66 @@ describe('createProductionModelRuntimeWiring', () => {
         .stream({ input: [{ role: 'user', content: 'x' }], tools: [{ type: 'web_search' }] });
       expect(stream.mock.calls[0]?.[0]).toMatchObject({ tools: [{ type: 'web_search' }] });
     });
+  });
+});
+
+describe('browser role production routing', () => {
+  const env = {
+    ...ENVIRONMENT,
+    QWEN_CORE_ROLLOUT_MODE: 'all' as const,
+    QWEN_CORE_ENABLED_LANES: '',
+  };
+  const ownership = { scope: 'personal' as const, userRegion: 'cn' };
+  const fake = ({
+    environment,
+    region,
+    purpose,
+  }: {
+    environment: QwenMessagesEnvironment;
+    region: 'cn' | 'intl';
+    purpose: string;
+  }): MessagesAdapter => ({
+    metadata: {
+      provider: 'alibaba-model-studio',
+      model: purpose === 'vision' ? environment.QWEN_VISION_MODEL : environment.QWEN_STANDARD_MODEL,
+      region,
+      deploymentScope: region === 'cn' ? 'china_mainland' : 'international',
+      endpointKind: 'public',
+      protocol: 'messages',
+    },
+    create: vi.fn(),
+  });
+  it('uses independent role models while preserving the user region and other lanes', () => {
+    const wiring = createProductionModelRuntimeWiring(env, { createMessages: fake });
+    const runtime = withBrowserBrain(
+      {
+        planning: { provider: 'alibaba-model-studio', model: 'qwen3.8-max' },
+        execution: { provider: 'alibaba-model-studio', model: 'qwen3.8-flash' },
+        verification: { provider: 'alibaba-model-studio', model: 'qwen3.7-plus' },
+      },
+      () => wiring.resolveCore({ actorExternalId: 'usr_a', lane: 'browser', ownership }),
+    );
+    if (runtime.kind !== 'ready') throw new Error('not ready');
+    const adapter = runtime.messages('vision');
+    expect(adapter.metadata).toMatchObject({ model: 'qwen3.8-flash', region: 'cn' });
+    expect(adapter.browserBrain?.planning.metadata.model).toBe('qwen3.8-max');
+    expect(adapter.browserBrain?.verification.metadata.model).toBe('qwen3.7-plus');
+    const plain = wiring.resolveCore({ actorExternalId: 'usr_b', lane: 'browser', ownership });
+    if (plain.kind !== 'ready') throw new Error('not ready');
+    expect(plain.messages('vision').browserBrain).toBeUndefined();
+  });
+  it('prevents a catalog-selected external browser model even with a configured key', () => {
+    const wiring = createProductionModelRuntimeWiring({
+      ...env,
+      ANTHROPIC_API_KEY: 'synthetic-only',
+    });
+    expect(() =>
+      wiring.resolveCore({
+        actorExternalId: 'usr_a',
+        lane: 'browser',
+        ownership,
+        brain: BUILTIN_MODEL_CATALOG[1],
+      }),
+    ).toThrow(/关闭/);
   });
 });

@@ -79,6 +79,7 @@ export interface StartVisionLoopTaskOptions {
    * (snapshot/click/type…) on that page instead of the commander loop.
    */
   messagesAdapter?: import('../../llm/messages-adapter.js').MessagesAdapter;
+  recorder?: import('../llm-call-recorder.js').LlmCallRecorder;
   webSearch?: UnifiedBrowserLoopInput['webSearch'];
   /** Batch 06 self-evolution hooks (each flag-gated, all no-ops when off). */
   evolution?: {

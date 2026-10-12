@@ -124,6 +124,18 @@ const baseEnvSchema = z.object({
     )
     .default(''),
 
+  BROWSER_BRAIN_CANARY: z.string().default(''),
+  BROWSER_BRAIN_PLANNING: z.string().default(''),
+  BROWSER_BRAIN_EXECUTION: z.string().default(''),
+  BROWSER_BRAIN_VERIFICATION: z.string().default(''),
+  BROWSER_BRAIN_CLAUDE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  BROWSER_BRAIN_OPENAI_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
   ANTHROPIC_API_KEY: z.string().optional().default(''),
   /** Catalog-gated GPT brain (admin "模型管理"). Key and base URL only. */
   OPENAI_API_KEY: z.string().optional().default(''),

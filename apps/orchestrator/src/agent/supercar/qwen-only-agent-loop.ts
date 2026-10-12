@@ -67,6 +67,14 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       iterations: 0,
       toolsUsed: [],
     };
-  if (browserExecutorMode() === 'unified' && opts.executor) return runUnifiedSupercarTask(opts);
+  if ((browserExecutorMode() === 'unified' || opts.messagesAdapter.browserBrain) && opts.executor)
+    return runUnifiedSupercarTask(opts);
+  if (opts.messagesAdapter.browserBrain)
+    return {
+      status: 'failed',
+      reason: '角色模型需要统一浏览器执行器。',
+      iterations: 0,
+      toolsUsed: [],
+    };
   return runBrowserTask(opts);
 }

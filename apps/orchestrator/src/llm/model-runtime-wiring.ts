@@ -1,4 +1,11 @@
 import {
+  type BrowserBrainEnvironment,
+  type BrowserBrainModel,
+  assertBrowserProviderEnabled,
+  currentBrowserBrain,
+  resolveBrowserBrainSelection,
+} from './browser-brain.js';
+import {
   type CoreModelRuntimeEnvironment,
   type CoreModelRuntimeInput,
   type CoreModelRuntimeResolution,
@@ -44,7 +51,9 @@ export interface ExternalProviderEnvironment {
   OPENAI_BASE_URL?: string;
 }
 
-export type ModelRuntimeEnvironment = CoreModelRuntimeEnvironment & ExternalProviderEnvironment;
+export type ModelRuntimeEnvironment = CoreModelRuntimeEnvironment &
+  ExternalProviderEnvironment &
+  BrowserBrainEnvironment;
 
 export interface ReadyModelRuntime {
   kind: 'ready';
@@ -113,46 +122,90 @@ export function createProductionModelRuntimeWiring(
   const catalog = options.catalog ?? (() => BUILTIN_MODEL_CATALOG);
   const { createExternalMessages, createExternalResponses, ...qwenFactories } = factories;
 
-  return {
+  const wiring: ProductionModelRuntimeWiring = {
     policy: 'model_catalog',
     resolveCore(input) {
       const brain = input.brain ?? currentBrain()?.brain ?? selectDefaultBrain(catalog());
-      if (brain.provider !== 'alibaba-model-studio') {
-        return resolveExternalRuntime({
-          brain,
-          provider: brain.provider,
-          lane: input.lane,
-          environment,
-          createMessages: createExternalMessages ?? defaultExternalMessages,
-          createResponses: createExternalResponses ?? defaultExternalResponses,
-        });
+      if (input.lane === 'browser') {
+        const selected =
+          currentBrowserBrain() ?? resolveBrowserBrainSelection(environment, input.actorExternalId);
+        const baseModel =
+          brainLaneModel(brain, 'vision') ??
+          brainLaneModel(brain, 'browser') ??
+          environment.QWEN_VISION_MODEL;
+        assertBrowserProviderEnabled(environment, { provider: brain.provider, model: baseModel });
+        if (Object.keys(selected).length) {
+          const roleRuntime = (model: BrowserBrainModel | undefined) => {
+            const choice = model ?? { provider: brain.provider, model: baseModel };
+            assertBrowserProviderEnabled(environment, choice);
+            const roleBrain: BrainEntry = {
+              ...brain,
+              provider: choice.provider,
+              laneModels: { browser: choice.model, vision: choice.model },
+            };
+            return resolveBase({ ...input, brain: roleBrain });
+          };
+          const execution = roleRuntime(selected.execution);
+          const planning = roleRuntime(selected.planning);
+          const verification = roleRuntime(selected.verification);
+          if (execution.kind === 'unavailable') return execution;
+          if (planning.kind === 'unavailable') return planning;
+          if (verification.kind === 'unavailable') return verification;
+          return {
+            ...execution,
+            messages: (purpose) => ({
+              ...execution.messages(purpose),
+              browserBrain: {
+                planning: planning.messages('vision'),
+                verification: verification.messages('vision'),
+              },
+            }),
+          };
+        }
       }
-      const resolution = resolveCoreModelRuntime({
-        environment: withBrainQwenModels(environment, brain, input.lane),
-        actorExternalId: input.actorExternalId,
-        lane: input.lane,
-        ownership: input.ownership,
-        ...qwenFactories,
-      });
-      if (resolution.kind === 'ready') {
-        const withMcp = MCP_LANES.has(input.lane) && options.mcpTools;
-        return {
-          kind: 'ready',
-          brainId: brain.id,
-          provider: 'alibaba-model-studio',
-          region: resolution.region,
-          messages: resolution.messages,
-          responses: withMcp
-            ? (purpose) => withMcpTools(resolution.responses(purpose), options.mcpTools)
-            : resolution.responses,
-        };
-      }
-      return { kind: 'unavailable', reasonCode: mapCoreUnavailableReason(resolution.reason) };
+      return resolveBase(input);
     },
     resolveUnmigrated(_lane) {
       return { kind: 'unavailable', reasonCode: 'MODEL_MIGRATION_IN_PROGRESS' };
     },
   };
+  function resolveBase(
+    input: Parameters<ProductionModelRuntimeWiring['resolveCore']>[0],
+  ): ProductionModelRuntimeResolution {
+    const brain = input.brain ?? currentBrain()?.brain ?? selectDefaultBrain(catalog());
+    if (brain.provider !== 'alibaba-model-studio') {
+      return resolveExternalRuntime({
+        brain,
+        provider: brain.provider,
+        lane: input.lane,
+        environment,
+        createMessages: createExternalMessages ?? defaultExternalMessages,
+        createResponses: createExternalResponses ?? defaultExternalResponses,
+      });
+    }
+    const resolution = resolveCoreModelRuntime({
+      environment: withBrainQwenModels(environment, brain, input.lane),
+      actorExternalId: input.actorExternalId,
+      lane: input.lane,
+      ownership: input.ownership,
+      ...qwenFactories,
+    });
+    if (resolution.kind === 'ready') {
+      const withMcp = MCP_LANES.has(input.lane) && options.mcpTools;
+      return {
+        kind: 'ready',
+        brainId: brain.id,
+        provider: 'alibaba-model-studio',
+        region: resolution.region,
+        messages: resolution.messages,
+        responses: withMcp
+          ? (purpose) => withMcpTools(resolution.responses(purpose), options.mcpTools)
+          : resolution.responses,
+      };
+    }
+    return { kind: 'unavailable', reasonCode: mapCoreUnavailableReason(resolution.reason) };
+  }
+  return wiring;
 }
 
 /**
