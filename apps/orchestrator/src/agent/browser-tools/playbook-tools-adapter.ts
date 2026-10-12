@@ -93,7 +93,6 @@ export function playbookToolsFromUnifiedExecutor(
       const result = await run({ tool: 'download', ref });
       return {
         fileName: result.download?.filename ?? '',
-        ...(result.download?.path ? { path: result.download.path } : {}),
       };
     },
     // Replay hands host-resolved file paths, not task attachment ids: set them

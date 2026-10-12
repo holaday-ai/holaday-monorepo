@@ -3,8 +3,8 @@ export interface BrowserViewportSize {
   height: number;
 }
 
-const MIN_WIDTH = 320;
-const MIN_HEIGHT = 360;
+const MIN_WIDTH = 1280;
+const MIN_HEIGHT = 800;
 const MAX_WIDTH = 1440;
 const MAX_HEIGHT = 1200;
 const RESIZE_NOISE_PX = 6;

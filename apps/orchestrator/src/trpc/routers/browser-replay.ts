@@ -2,7 +2,7 @@ import { TRPCError } from '@trpc/server';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { browserReplayStore } from '../../agent/browser-tools/browser-replay-service.js';
-import { env } from '../../config/env.js';
+import { browserCapabilities } from '../../config/browser-capabilities.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
 import type { Context } from '../context.js';
@@ -19,10 +19,11 @@ async function requireOwner(ctx: Context, taskId: string) {
 }
 const input = z.object({ taskId: z.string().min(1).max(100) });
 export const browserReplayRouter = router({
+  capabilities: protectedProcedure.query(({ ctx }) => browserCapabilities(ctx.userId)),
   read: protectedProcedure
     .input(input.extend({ offset: z.number().int().min(0).max(2000).default(0) }))
     .query(async ({ ctx, input }) => {
-      if (!env.BROWSER_REPLAY_V1) return null;
+      if (!browserCapabilities(ctx.userId).replayV1) return null;
       await requireOwner(ctx, input.taskId);
       return browserReplayStore.read(ctx.userId, input.taskId, input.offset);
     }),

@@ -113,7 +113,9 @@ describe('unified browser loop', () => {
     await page.close();
     expect(outcome).toMatchObject({ status: 'completed', evidence: '结果：收纳盒 ￥29' });
     expect(adapter.requests[0]?.tools?.map((tool) => tool.name)).toEqual(
-      UNIFIED_LOOP_TOOLS.map((t) => t.name),
+      UNIFIED_LOOP_TOOLS.filter((t) => !['download', 'upload', 'web_search'].includes(t.name)).map(
+        (t) => t.name,
+      ),
     );
     expect(String(adapter.requests[0]?.system)).toContain('先调用 snapshot');
   }, 60_000);

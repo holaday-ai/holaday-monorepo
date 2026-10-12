@@ -715,6 +715,9 @@ export interface SupercarEvidenceEvent {
 }
 
 export interface RunSupercarOptions {
+  onBrowserDownload?: (input: { filename: string; buffer: Buffer; sha256: string }) => Promise<
+    import('../browser-tools/playwright-unified-executor.js').BrowserDownloadReceipt
+  >;
   /** BROWSER_EXECUTOR=unified only: web search (Qwen built-in, Firecrawl fallback). */
   unifiedWebSearch?: (query: string) => Promise<Array<{ title: string; url: string }>>;
   /** BROWSER_EXECUTOR=unified only: read-only page text (Firecrawl scrape). */

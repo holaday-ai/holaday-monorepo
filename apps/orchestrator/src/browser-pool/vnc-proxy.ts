@@ -1,3 +1,4 @@
+import { browserCapabilities } from '../config/browser-capabilities.js';
 /**
  * Per-user VNC WebSocket proxy.
  *
@@ -239,7 +240,7 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
           });
           const upstreamUrl = `ws://127.0.0.1:${instance.wsPort}/`;
           const upstream = new WebSocket(upstreamUrl, ['binary']);
-          pipe(client, upstream, instance.taskId, log, opts.pool);
+          pipe(client, upstream, instance.taskId, log, opts.pool, callerUserId);
           opts.pool.touch(instance.taskId);
         });
       },
@@ -321,12 +322,12 @@ function pipe(
   taskId: string,
   log: Logger,
   pool: BrowserPool,
+  userId: string,
 ): void {
   // Don't relay frames until upstream has finished its handshake.
   // Buffer a small window in case the client races the
   // initial-RFB-VERSION bytes.
-  const readOnlyFilter =
-    process.env.BROWSER_VIEWPORT_V2 === 'true' ? new VncReadOnlyFilter() : null;
+  const readOnlyFilter = browserCapabilities(userId).viewportV2 ? new VncReadOnlyFilter() : null;
   const clientBacklog: Array<[data: Buffer, isBinary: boolean]> = [];
   let upstreamReady = false;
   let lastTouchAt = Date.now();

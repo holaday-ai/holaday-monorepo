@@ -4,6 +4,7 @@ import * as React from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({
   query: vi.fn(),
+  capabilities: vi.fn(),
   mutate: vi.fn(),
   nav: vi.fn(),
   refresh: vi.fn(),
@@ -11,6 +12,9 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/trpc', () => ({
   trpc: {
+    browserReplay: {
+      capabilities: { query: api.capabilities },
+    },
     tasks: {
       browserControlState: { query: api.query },
       browserControl: { mutate: api.mutate },
@@ -63,6 +67,12 @@ const base = {
   onToggleFullscreen: vi.fn(),
 };
 beforeEach(() => {
+  api.capabilities.mockResolvedValue({
+    viewportV2: false,
+    observationV2: false,
+    replayV1: false,
+    routingV2: false,
+  });
   useTaskStore.setState({
     browserInteractive: false,
     tasks: [
@@ -193,16 +203,17 @@ it('does not automatically retake control while the login banner awaits its stat
 });
 
 it('V2 portrait sheet owns only the visible width and defaults to contain', async () => {
-  vi.stubEnv('VITE_BROWSER_VIEWPORT_V2', 'true');
-  try {
-    render(<BrowserPanel {...base} layout="sheet" />);
-    const viewport = await screen.findByTestId('viewport');
-    expect(viewport.parentElement?.style.width).toBe('');
-    expect(viewport.parentElement?.className).toContain('w-full');
-    expect(viewport.parentElement?.className).not.toContain('shrink-0');
-  } finally {
-    vi.unstubAllEnvs();
-  }
+  api.capabilities.mockResolvedValue({
+    viewportV2: true,
+    observationV2: false,
+    replayV1: false,
+    routingV2: false,
+  });
+  render(<BrowserPanel {...base} layout="sheet" />);
+  const viewport = await screen.findByTestId('viewport');
+  await waitFor(() => expect(viewport.parentElement?.className).toContain('w-full'));
+  expect(viewport.parentElement?.style.width).toBe('');
+  expect(viewport.parentElement?.className).not.toContain('shrink-0');
 });
 
 it('does not retain processing text in terminal browser activity', () => {

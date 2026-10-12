@@ -283,7 +283,12 @@ const CAPTCHA_TITLE_NEEDLES = [
   '安全验证',
 ];
 
-const CAPTCHA_BODY_NEEDLES = CAPTCHA_TITLE_NEEDLES;
+const CAPTCHA_BODY_NEEDLES = [
+  ...CAPTCHA_TITLE_NEEDLES,
+  'unusual traffic',
+  'sign in to confirm you’re not a bot',
+  "sign in to confirm you're not a bot",
+];
 
 /**
  * URL / page signals for "you don't have permission" walls — distinct

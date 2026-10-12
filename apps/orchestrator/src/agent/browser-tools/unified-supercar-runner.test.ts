@@ -97,7 +97,10 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
   it('runs the unified tools with the shared tick, capture and evidence hooks', async () => {
     Object.assign(env, { BROWSER_EXECUTOR: 'unified' });
     const page = await browser.newPage();
-    await page.setContent(PAGE);
+    await page.route('https://fixture.browser.test/', (route) =>
+      route.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }),
+    );
+    await page.goto('https://fixture.browser.test/');
     const onTick = vi.fn();
     const onAction = vi.fn();
     const onEvidence = vi.fn();
@@ -137,7 +140,10 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
   it('parks on a human handoff and resumes through supercarReply', async () => {
     Object.assign(env, { BROWSER_EXECUTOR: 'unified' });
     const page = await browser.newPage();
-    await page.setContent(PAGE);
+    await page.route('https://fixture.browser.test/', (route) =>
+      route.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }),
+    );
+    await page.goto('https://fixture.browser.test/');
     const onAwaitingUser = vi.fn();
     const running = runSupercarTask({
       taskId: 't_handoff',
@@ -190,7 +196,10 @@ describe('unified runtime safety gate (legacy LIVE-VETO parity)', () => {
     onBeforeAction: NonNullable<Parameters<typeof runSupercarTask>[0]['onBeforeAction']>,
   ) {
     const page = await browser.newPage();
-    await page.setContent(ORDER);
+    await page.route('https://fixture.browser.test/', (route) =>
+      route.fulfill({ contentType: 'text/html; charset=utf-8', body: ORDER }),
+    );
+    await page.goto('https://fixture.browser.test/');
     const onAwaitingUser = vi.fn();
     const running = runSupercarTask({
       taskId,
@@ -331,7 +340,10 @@ describe('unified runtime safety gate (legacy LIVE-VETO parity)', () => {
 
   it('applies the runtime policy even when the caller passes no onBeforeAction', async () => {
     const page = await browser.newPage();
-    await page.setContent(ORDER);
+    await page.route('https://fixture.browser.test/', (route) =>
+      route.fulfill({ contentType: 'text/html; charset=utf-8', body: ORDER }),
+    );
+    await page.goto('https://fixture.browser.test/');
     const onAwaitingUser = vi.fn();
     const running = runSupercarTask({
       taskId: 't_gate_default',

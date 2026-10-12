@@ -1,3 +1,4 @@
+import { browserCapabilities } from '../config/browser-capabilities.js';
 /**
  * BrowserPool — per-task Xvfb + Brave + x11vnc + websockify quartets.
  *
@@ -457,6 +458,7 @@ export class BrowserPool {
     let lastActivity = Date.now();
     return record.group.vncSession({
       ...request,
+      viewportV2: browserCapabilities(callerUserId).viewportV2,
       veto: () => {
         originalVeto();
         this.#vetoBroker(record);

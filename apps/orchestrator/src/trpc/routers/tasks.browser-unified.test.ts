@@ -135,7 +135,10 @@ it.each(['ready', 'timeout'] as const)(
     }));
 
     const page: Page = await browser.newPage();
-    await page.setContent(PAGE);
+    await page.route('https://fixture.browser.test/', (route) =>
+      route.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }),
+    );
+    await page.goto('https://fixture.browser.test/');
     const executor = {
       getPage: async () => page,
       resetPageForTask: async () => {},

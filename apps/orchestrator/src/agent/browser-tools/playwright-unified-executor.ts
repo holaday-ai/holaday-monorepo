@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import type { Page } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
+import { detectBrowserBlocker } from './browser-completion.js';
 import { CloudObservation } from './cloud-observation.js';
 import { PageRedactionError, REDACTION_FAILED_COPY, redactPageText } from './page-redaction.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
@@ -18,7 +20,9 @@ export interface UnifiedToolResult {
   text: string;
   image?: { mediaType: 'image/jpeg'; data: string };
   /** Present on `download`: where the file was saved by the host. */
-  download?: { filename: string; path: string };
+  download?: BrowserDownloadReceipt;
+  tabId?: string;
+  scroll?: { beforeHeight: number; afterHeight: number; addedChars: number; grew: boolean };
   /**
    * Present on `snapshot`: absolute link targets on the page (full, before the
    * model-facing shortening) and the shortened forms the model saw. Host-only
@@ -29,12 +33,20 @@ export interface UnifiedToolResult {
   url?: string;
 }
 
+export interface BrowserDownloadReceipt {
+  fileId: string;
+  filename: string;
+  sizeBytes: number;
+  sha256: string;
+  downloadUrl: string;
+}
+
 export interface UnifiedExecutorOptions {
   observationV2?: boolean;
   /** Resolves task attachment ids to local file paths for `upload`. */
   resolveUploads?: (fileIds: readonly string[]) => Promise<string[]>;
   /** Persists a finished download; returns the host path. */
-  saveDownload?: (download: import('playwright').Download) => Promise<string>;
+  saveDownload?: (download: import('playwright').Download) => Promise<BrowserDownloadReceipt>;
   actionTimeoutMs?: number;
   maxSnapshotChars?: number;
   maxExtractChars?: number;
@@ -204,6 +216,15 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   const maxExtract = options.maxExtractChars ?? DEFAULT_MAX_EXTRACT_CHARS;
   const maxUrlChars = options.maxUrlChars ?? DEFAULT_MAX_URL_CHARS;
   let activeFrame = page.mainFrame();
+  const tabs = new Map<string, Page>([[`tab_${randomUUID()}`, page]]);
+  const registerTab = (target: Page) => {
+    let id = [...tabs].find(([, p]) => p === target)?.[0];
+    if (!id) {
+      id = `tab_${randomUUID()}`;
+      tabs.set(id, target);
+    }
+    return id;
+  };
   const byRef = (ref: string) =>
     observation?.locator(activeFrame, ref) ?? activeFrame.locator(`aria-ref=${ref}`);
 
@@ -227,12 +248,10 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   const snapshotText = async (): Promise<string> => (await snapshotWithLinks()).text;
 
   /**
-   * A link with target=_blank opens a tab the model never sees, so the page
-   * looked unchanged after clicking a product (acceptance A1). Load the new
-   * tab's URL in the controlled page and close the tab.
+   * Follow a target=_blank popup as a real owned tab so later tab operations
+   * can return to the original page without replacing its navigation state.
    */
   const clickFollowingNewTab = async (ref: string): Promise<UnifiedToolResult> => {
-    const before = page.url();
     const popup = page.waitForEvent('popup', { timeout: POPUP_WAIT_MS }).catch(() => null);
     const navigated = page
       .waitForEvent('framenavigated', { timeout: POPUP_WAIT_MS })
@@ -242,11 +261,14 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     const opened = await Promise.race([popup, navigated]);
     if (!opened) return done(`已点击 ${ref}`);
     await opened.waitForLoadState('domcontentloaded', { timeout }).catch(() => {});
-    const target = opened.url();
-    await opened.close().catch(() => {});
-    if (!/^https?:/i.test(target) || target === before) return done(`已点击 ${ref}`);
-    await page.goto(target, { timeout: Math.max(timeout, 30_000), waitUntil: 'domcontentloaded' });
-    return done(`已点击 ${ref}，新标签页内容已在当前页打开：${page.url()}`);
+    registerTab(opened);
+    page = opened;
+    activeFrame = page.mainFrame();
+    return {
+      ...done(`已点击 ${ref}，打开新标签：${page.url()}`),
+      tabId: registerTab(page),
+      url: page.url(),
+    };
   };
 
   async function execute(action: UnifiedBrowserAction): Promise<UnifiedToolResult> {
@@ -257,12 +279,69 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
         case 'links':
         case 'tables':
         case 'scroll_until':
-        case 'list_tabs':
-        case 'switch_tab':
           return fail('capability_missing');
+        case 'list_tabs':
+          return {
+            ...done(
+              JSON.stringify({
+                tabs: await Promise.all(
+                  [...tabs]
+                    .filter(([, p]) => !p.isClosed())
+                    .map(async ([tabId, p]) => ({ tabId, url: p.url(), title: await p.title() })),
+                ),
+              }),
+            ),
+            tabId: registerTab(page),
+          };
+        case 'new_tab': {
+          if ([...tabs.values()].filter((p) => !p.isClosed()).length >= 20)
+            return fail('任务标签数达到上限');
+          const opened = await page.context().newPage();
+          registerTab(opened);
+          page = opened;
+          activeFrame = page.mainFrame();
+          return {
+            ...done(JSON.stringify({ status: 'created', tabId: registerTab(page) })),
+            tabId: registerTab(page),
+            url: page.url(),
+          };
+        }
+        case 'switch_tab':
+        case 'close_tab': {
+          const target = tabs.get(action.targetTabId);
+          if (!target || target.isClosed()) return fail('标签不属于本任务或已关闭');
+          if (action.tool === 'close_tab') {
+            if ([...tabs.values()].filter((p) => !p.isClosed()).length <= 1)
+              return fail('不能关闭最后一个任务标签');
+            await target.close();
+            tabs.delete(action.targetTabId);
+            if (target === page) page = [...tabs.values()].find((p) => !p.isClosed())!;
+          } else {
+            page = target;
+            await page.bringToFront();
+          }
+          activeFrame = page.mainFrame();
+          return {
+            ...done(
+              JSON.stringify({
+                status: action.tool,
+                tabId: registerTab(page),
+                targetTabId: action.targetTabId,
+              }),
+            ),
+            tabId: registerTab(page),
+            url: page.url(),
+          };
+        }
         case 'snapshot': {
           const snapshot = await snapshotWithLinks();
-          return { ok: true, text: snapshot.text, links: snapshot.links, url: page.url() };
+          return {
+            ok: true,
+            text: snapshot.text,
+            links: snapshot.links,
+            url: page.url(),
+            tabId: registerTab(page),
+          };
         }
         case 'click':
           if (observation) {
@@ -287,14 +366,71 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           }
           return done(`已在 ${action.ref} 选择「${action.value}」`);
         }
-        case 'scroll':
+        case 'scroll': {
+          const measure = () =>
+            page.evaluate(() => {
+              const loading =
+                '[role="progressbar"], [aria-busy="true"], .jscroll-loading, .loading, .loader, .spinner';
+              const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+              let chars = 0;
+              while (walker.nextNode()) {
+                const parent = walker.currentNode.parentElement;
+                if (
+                  !parent ||
+                  parent.closest(`${loading},script,style`) ||
+                  !parent.getClientRects().length
+                )
+                  continue;
+                chars += (walker.currentNode.textContent ?? '')
+                  .replace(/(?:loading\s*\.{0,3}|加载中\s*[…。.]*)/gi, '')
+                  .trim().length;
+              }
+              const media = Array.from(document.images).filter(
+                (img) => img.complete && img.naturalWidth > 0 && !img.closest(loading),
+              ).length;
+              return { height: document.documentElement.scrollHeight, chars, media };
+            });
+          const before = await measure();
           if (action.ref) await byRef(action.ref).scrollIntoViewIfNeeded({ timeout });
           else
             await page.mouse.wheel(
               0,
               (action.direction === 'up' ? -1 : 1) * 600 * (action.amount ?? 1),
             );
-          return done('已滚动');
+          const deadline = Date.now() + Math.min(timeout, 3500);
+          let after = await measure();
+          let stableSince = Date.now();
+          if (action.direction !== 'up')
+            while (Date.now() < deadline) {
+              const next = await measure();
+              if (next.chars !== after.chars || next.media !== after.media)
+                stableSince = Date.now();
+              after = next;
+              if (
+                (after.chars > before.chars || after.media > before.media) &&
+                Date.now() - stableSince >= 250
+              )
+                break;
+              await new Promise((resolve) => setTimeout(resolve, 75));
+            }
+          const scroll = {
+            beforeHeight: before.height,
+            afterHeight: after.height,
+            addedChars: Math.max(0, after.chars - before.chars),
+            grew: after.chars > before.chars || after.media > before.media,
+          };
+          return {
+            ...done(
+              JSON.stringify({
+                ...scroll,
+                status: scroll.grew ? 'content_grew' : 'no_growth',
+                instruction: '仅记录真实滚动增长，不能点击 next page 代替滚动',
+              }),
+            ),
+            scroll,
+            url: page.url(),
+          };
+        }
         case 'navigate':
           await page.goto(action.url, {
             timeout: Math.max(timeout, 30_000),
@@ -349,11 +485,11 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
             page.waitForEvent('download', { timeout }),
             byRef(action.ref).click({ timeout }),
           ]);
-          const path = await options.saveDownload(download);
+          const receipt = await options.saveDownload(download);
           return {
             ok: true,
-            text: `已下载 ${download.suggestedFilename()}`,
-            download: { filename: download.suggestedFilename(), path },
+            text: JSON.stringify({ status: 'saved', ...receipt }),
+            download: receipt,
           };
         }
         case 'upload': {
@@ -377,10 +513,20 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   }
 
   const wrappedExecute = async (action: UnifiedBrowserAction): Promise<UnifiedToolResult> => {
-    if (!observation) return execute(action);
+    if (!observation) {
+      if (action.tabId) {
+        const target = tabs.get(action.tabId);
+        if (!target || target.isClosed()) return fail('标签不属于本任务或已关闭');
+        page = target;
+        activeFrame = page.mainFrame();
+      }
+      return execute(action);
+    }
     try {
       const interruption = observation.interruption();
       if (interruption) return { ok: false, text: interruption.message, interruption };
+      if (action.tool === 'new_tab' || action.tool === 'close_tab')
+        return await observation.manageTab(action);
       const context = observation.resolve(action);
       page = context.page;
       activeFrame = context.frame;
@@ -399,6 +545,34 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   };
   return {
     execute: wrappedExecute,
+    ownsPage(candidate: Page) {
+      return observation ? observation.ownsPage(candidate) : [...tabs.values()].includes(candidate);
+    },
+    get page() {
+      return observation?.page ?? page;
+    },
+    supportedTools: {
+      download: Boolean(options.saveDownload),
+      upload: Boolean(options.resolveUploads),
+      tabs: true,
+    },
+    async blocker() {
+      const current = observation?.page ?? page;
+      try {
+        // Probe every frame; bot walls may be embedded in a video player.
+        for (const frame of current.frames()) {
+          const signal = detectBrowserBlocker({
+            url: frame.url(),
+            title: await frame.title(),
+            text: (await frame.locator('body').innerText({ timeout: 3000 })).slice(0, 50000),
+          });
+          if (signal) return signal;
+        }
+        return null;
+      } catch {
+        return { reason: 'page_unreadable', message: '无法确认当前页面状态，请重新读取后继续。' };
+      }
+    },
     snapshot: snapshotText,
     observation,
     dispose: () => observation?.dispose(),

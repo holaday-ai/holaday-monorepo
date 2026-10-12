@@ -350,9 +350,37 @@ export class CloudObservation {
   get page() {
     return this.active;
   }
+  ownsPage(page: Page) {
+    return [...this.tabs.values()].includes(page);
+  }
   register(page: Page) {
     if ([...this.tabs.values()].includes(page)) return;
     this.tabs.set(`tab_${randomUUID()}`, page);
+  }
+  async manageTab(action: UnifiedBrowserAction): Promise<UnifiedToolResult> {
+    if (action.tool === 'new_tab') {
+      if ([...this.tabs.values()].filter((p) => !p.isClosed()).length >= 20)
+        return { ok: false, text: '任务标签数达到上限' };
+      const page = await this.active.context().newPage();
+      this.register(page);
+      this.active = page;
+    } else if (action.tool === 'close_tab') {
+      const target = this.tabs.get(action.targetTabId);
+      const live = [...this.tabs.values()].filter((p) => !p.isClosed());
+      if (!target || target.isClosed() || live.length <= 1)
+        return { ok: false, text: '标签无效或为最后一个任务标签' };
+      await target.close();
+      this.tabs.delete(action.targetTabId);
+      if (this.active === target) this.active = live.find((p) => p !== target)!;
+    }
+    this.observations.clear();
+    this.cursors.clear();
+    return {
+      ok: true,
+      text: JSON.stringify({ tabId: this.tabId(this.active), status: action.tool }),
+      tabId: this.tabId(this.active),
+      url: this.active.url(),
+    };
   }
   private recordRequest(r: Request, window = this.actionWindow ?? this.pendingAction) {
     let url: URL;
@@ -545,6 +573,7 @@ export class CloudObservation {
       const target = this.tabs.get(action.targetTabId);
       if (!target || target.isClosed()) throw new Error('stale_context');
       this.active = target;
+      await target.bringToFront();
       this.observations.clear();
       this.cursors.clear();
       return this.read({ tool: 'read_page' });

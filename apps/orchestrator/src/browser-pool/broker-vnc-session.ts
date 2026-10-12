@@ -15,6 +15,7 @@ const MAX_BYTES = 8 * 1024 * 1024;
 /** Server-only original request, supplied after initial authentication by the
  * pool's private instance binding. Neither an identity DTO nor a public grant. */
 export interface BrokerVncSessionRequest {
+  viewportV2?: boolean;
   request: IncomingMessage;
   socket: Socket;
   head: Buffer;
@@ -343,9 +344,7 @@ export class BrokerVncSession {
     const relay: Relay = { source, target, queue: [], bytes: 0, since: 0, sending: false };
     this.#relays.push(relay);
     const readOnlyFilter =
-      source === this.#client && process.env.BROWSER_VIEWPORT_V2 === 'true'
-        ? new VncReadOnlyFilter()
-        : null;
+      source === this.#client && this.#options.viewportV2 ? new VncReadOnlyFilter() : null;
     source.on('message', (bytes, binary) => {
       if (readOnlyFilter) {
         try {

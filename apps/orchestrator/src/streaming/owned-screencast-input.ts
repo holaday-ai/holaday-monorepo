@@ -1,5 +1,6 @@
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
+import { browserCapabilities } from '../config/browser-capabilities.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import {
   type AppliedBrowserViewport,
@@ -34,7 +35,16 @@ export function createOwnedScreencastInputBridge(options: {
   return new DeferredScreencastInputBridge({
     maxViewportHeight: options.maxViewportHeight,
     onViewportApplied: options.onViewportApplied,
-    beforeDispatch: options.beforeDispatch,
+    beforeDispatch: async (envelope, signal) => {
+      if (
+        envelope.payload?.type === 'viewport' &&
+        !browserCapabilities(instance.userId).viewportV2
+      ) {
+        envelope.payload.width = Math.max(1280, envelope.payload.width);
+        envelope.payload.height = Math.max(800, envelope.payload.height);
+      }
+      await options.beforeDispatch?.(envelope, signal);
+    },
     onViewportRequested: options.onViewportRequested,
     runOwnedInput: async (lease, action) => {
       if (!allowed()) throw new Error('MAINTENANCE_INPUT_CLOSED');

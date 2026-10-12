@@ -182,6 +182,7 @@ import {
   restorableBrowserTarget,
 } from '../../browser-pool/browser-session-recovery.js';
 import { getVaultRuntime } from '../../browser-session-vault/runtime.js';
+import { browserCapabilities } from '../../config/browser-capabilities.js';
 import { env as appEnv } from '../../config/env.js';
 import type { DB } from '../../db/client.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
@@ -1838,7 +1839,7 @@ export const tasksRouter = router({
             const browserRoute =
               executionMode === 'browser'
                 ? decideUserBrowserRoute({
-                    enabled: getExecutionFeatureFlags().USER_BROWSER_ROUTING_V2,
+                    enabled: browserCapabilities(ctx.userId).routingV2,
                     intent: input.intent,
                     extensionOnline: hasConnectedExtension(ctx.userId),
                     selectionOrigin: input.localChrome
@@ -5694,7 +5695,8 @@ export const tasksRouter = router({
                   mimetype: string;
                   sizeBytes: number;
                   expiresAt: string;
-                  kind: 'pdf';
+                  kind: 'pdf' | 'file';
+                  sha256?: string;
                 }> = [];
                 // Phase 1 Playbook B2 — per-action capture. Wire onAction ONLY when
                 // ACTION_CAPTURE is on; the agent-loop skips the whole capture (incl.
@@ -6028,6 +6030,32 @@ export const tasksRouter = router({
                         },
                       }
                     : {}),
+                  async onBrowserDownload({ filename, buffer, sha256 }) {
+                    const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+                    if (taskInternalId == null) throw new Error('task row not found');
+                    const stored = await fileService.storeOutput({
+                      userIdInternal: userRow.id,
+                      userExternalId: ctx.userId,
+                      taskIdInternal: taskInternalId,
+                      filename,
+                      mimetype: 'application/octet-stream',
+                      buffer,
+                    });
+                    const receipt = {
+                      fileId: stored.externalId,
+                      filename: stored.filename,
+                      sizeBytes: stored.sizeBytes,
+                      sha256,
+                      downloadUrl: `/api/files/${stored.externalId}/download`,
+                    };
+                    pdfAttachments.push({
+                      ...receipt,
+                      mimetype: 'application/octet-stream',
+                      expiresAt: stored.expiresAt!.toISOString(),
+                      kind: 'file',
+                    });
+                    return receipt;
+                  },
                   async onCreateFile({ filename, format, content }) {
                     if (!isCreateFileFormat(format)) {
                       return { error: `unsupported format: ${format}` };
@@ -6476,8 +6504,7 @@ export const tasksRouter = router({
                   allowedDomains: otaAllowedDomains,
                 });
                 const useOtaUserBrowser =
-                  !getExecutionFeatureFlags().USER_BROWSER_ROUTING_V2 &&
-                  otaCanary.lane === 'user-browser';
+                  !browserCapabilities(ctx.userId).routingV2 && otaCanary.lane === 'user-browser';
                 if (otaCanary.lane !== null) {
                   // Rollout audit — every OTA-prefer task records its gate outcome.
                   ctx.logger.info(
@@ -6555,7 +6582,7 @@ export const tasksRouter = router({
                       })
                     : null;
                   const runChrome =
-                    getExecutionFeatureFlags().USER_BROWSER_ROUTING_V2 &&
+                    browserCapabilities(ctx.userId).routingV2 &&
                     /携程|ctrip\.com/i.test(input.intent)
                       ? runOtaUserBrowserTask
                       : runSelectedChromeTask;
@@ -9830,7 +9857,7 @@ export const tasksRouter = router({
         if (
           // A routing wait (also created with the routing flag off for login-required
           // tasks, since the cookie sync is retired) never becomes a cloud/text run.
-          (getExecutionFeatureFlags().USER_BROWSER_ROUTING_V2 ||
+          (browserCapabilities(ctx.userId).routingV2 ||
             Boolean(localChromeWait.data?.metadata.browserRoutingAwaiting)) &&
           taskRow.status === 'awaiting_user' &&
           localChromeWait.success &&
