@@ -10,6 +10,8 @@ import {
   pixelDifference,
   taskStateFindings,
 } from './lib/checks.mjs';
+import { measureLayout, layoutFindings } from './lib/layout-checks.mjs';
+import { auditViewports } from './lib/viewports.mjs';
 import { p2Checks } from './lib/p2-checks.mjs';
 import { round3Checks, browserInputOverlayChecks, scheduledChoiceChecks } from './lib/round3-checks.mjs';
 import { inspectControls, reusableControls, waitForSeedContent } from './lib/interaction.mjs';
@@ -31,7 +33,8 @@ const artifacts = path.join(out, 'artifacts');
 fs.mkdirSync(artifacts, { recursive: true });
 const args = new Set(process.argv.slice(2));
 const bootstrap = args.has('--update-baseline');
-const screenOnly = args.has('--screens-only');
+const layoutOnly = args.has('--layout-only');
+const screenOnly = args.has('--screens-only') || layoutOnly;
 const require = createRequire(path.join(appDir, 'package.json'));
 const { chromium } = require('playwright');
 const coreRoot = path.dirname(
@@ -85,6 +88,7 @@ const report = {
   startedAt: new Date().toISOString(),
   mode: bootstrap ? 'baseline-create' : 'verify',
   screenOnly,
+  layoutOnly,
   findings: [],
   coverageGaps: [],
   pages: [],
@@ -158,13 +162,11 @@ try {
   const routes = data.routes.filter((r) => !selected || selected.includes(r.pattern));
   if (selected?.some((r) => !data.routes.some((x) => x.pattern === r)))
     throw Error('UNKNOWN_ROUTE_FILTER');
-  const widths = process.env.UI_AUDIT_WIDTHS
-    ? JSON.parse(process.env.UI_AUDIT_WIDTHS)
-    : [1440, 1280, 1024];
-  if (widths.some((w) => ![1440, 1280, 1024].includes(w))) throw Error('UNSUPPORTED_WIDTH');
-  if (selected || widths.length !== 3)
+  const viewports = auditViewports(process.env);
+  if (selected || process.env.UI_AUDIT_WIDTHS || process.env.UI_AUDIT_VIEWPORTS)
     report.coverageGaps.push('Filtered run: not full release acceptance');
   if (screenOnly) report.coverageGaps.push('Screens-only exploration: controls not exercised');
+  if (layoutOnly) report.coverageGaps.push('Layout-only: interaction and visual baseline comparison not exercised');
   const taskScenarios = ['generate', 'browser', 'scrape', 'image'].flatMap((mode) =>
     ['executing', 'completed', 'failed', 'awaiting_user', 'cancelled'].map((status) => ({
       pattern: `task:${mode}:${status}`,
@@ -180,25 +182,27 @@ try {
     throw Error('UNKNOWN_CASE_FILTER');
   if (cases) report.coverageGaps.push('Case-filtered run: not full release acceptance');
   report.selectedCases = cases;
-  report.selectedWidths = widths;
+  report.selectedWidths = [...new Set(viewports.map(v => v.width))];
+  report.selectedViewports = viewports;
   const scenarios = cases ? allScenarios.filter((s) => cases.includes(s.pattern)) : allScenarios;
-  report.expectedPages = scenarios.length * widths.length;
-  for (const width of widths) {
+  report.expectedPages = scenarios.length * viewports.length;
+  for (const {width, height} of viewports) {
     const shared = new Map();
     const canonical = new Map();
     for (const scenario of scenarios) {
-      const id = `${width}-${scenarioSlug(scenario.pattern)}`;
+      const id = `${width}${height === 960 ? '' : `x${height}`}-${scenarioSlug(scenario.pattern)}`;
       const screenshot = path.join('artifacts', `${id}.png`);
       const entry = {
         route: scenario.pattern,
         path: scenario.path,
         width,
+        height,
         controls: [],
         screenshot,
         issues: [],
       };
       const context = await browser.newContext({
-        viewport: { width, height: 960 },
+        viewport: { width, height },
         locale: 'zh-CN',
         timezoneId: 'Asia/Shanghai',
         colorScheme: 'light',
@@ -347,6 +351,10 @@ try {
         await page.goto(server.origin + scenario.path, { waitUntil: 'load' });
         await page.evaluate(() => document.fonts.ready);
         await page.waitForTimeout(300);
+        // Geometry is meaningful only after the route's lazy component has mounted.
+        await page.locator('[aria-label="页面加载中"]').first().waitFor({state: 'hidden', timeout: 8000});
+        if (layoutOnly && !publicRoute && scenario.pattern !== '*')
+          await page.locator('.holaday-main').waitFor({state: 'visible', timeout: 8000});
         if (
           scenario.taskMode === 'browser' &&
           ['executing', 'awaiting_user'].includes(scenario.status)
@@ -382,6 +390,8 @@ try {
           entry.regressions = [...(entry.regressions ?? []), ...checks];
         }
         const measured = await measurePage(page);
+        entry.layout = await measureLayout(page);
+        entry.issues.push(...layoutFindings(entry.layout));
         await page.screenshot({ path: path.join(out, screenshot), animations: 'disabled' });
         entry.canonicalPath = canonicalUrl(page.url());
         entry.runtimeControls = measured.elements;
@@ -389,7 +399,7 @@ try {
           report.coverageGaps.push(
             `${scenario.pattern}@${width}: expected seeded content missing: ${expectedSeed}`,
           );
-        entry.issues.push(...classifyGeometry(measured.elements, width, 960));
+        entry.issues.push(...classifyGeometry(measured.elements, width, height));
         for (const t of measured.truncatedText)
           if (!t.hasHint)
             entry.issues.push({
@@ -397,12 +407,6 @@ try {
               severity: 'P2',
               detail: t.text,
             });
-        if (measured.scrollWidth > width + 2)
-          entry.issues.push({
-            rule: 'horizontal-overflow',
-            severity: 'P1',
-            detail: `${measured.scrollWidth}>${width}`,
-          });
         if (scenario.status)
           entry.issues.push(
             ...taskStateFindings(measured.text, {
@@ -465,7 +469,9 @@ try {
         const baseline = path.join(root, 'baselines', SEED_VERSION, `${id}.png`);
         const baseMeta = `${baseline}.json`;
         fs.mkdirSync(path.dirname(baseline), { recursive: true });
-        if (bootstrap) {
+        if (layoutOnly) {
+          entry.visual = {status: 'not-compared-layout-only'};
+        } else if (bootstrap) {
           fs.copyFileSync(path.join(out, screenshot), baseline);
           fs.writeFileSync(
             baseMeta,
@@ -473,6 +479,7 @@ try {
               candidate,
               seed: SEED_VERSION,
               width,
+              height,
               buildHash: report.buildHash,
               browserVersion: report.browserVersion,
               platform: report.platform,
@@ -486,6 +493,7 @@ try {
           if (
             meta.seed !== SEED_VERSION ||
             meta.width !== width ||
+            (meta.height ?? 960) !== height ||
             meta.browserVersion !== report.browserVersion ||
             meta.platform !== report.platform
           )
@@ -536,6 +544,7 @@ try {
             ...f,
             route: scenario.pattern,
             width,
+            height,
             screenshot: f.screenshot ?? screenshot,
           });
         report.pages.push(entry);
@@ -545,6 +554,7 @@ try {
           JSON.stringify({
             route: scenario.pattern,
             width,
+            height,
             controls: entry.controls.length,
             findings: entry.issues.length,
           }),

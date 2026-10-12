@@ -676,10 +676,15 @@ export function WorkbenchApp(): JSX.Element {
   }, [closeBrowserWorkspace, openBrowserWorkbench, selectedTaskId, showBrowserPanel]);
 
   return (
-    <div className="relative flex h-full min-h-0 w-full overflow-hidden" ref={contentRowRef}>
+    <div
+      className="relative flex min-h-0 min-w-0 w-full flex-1 overflow-hidden"
+      data-layout-container="workbench"
+      ref={contentRowRef}
+    >
       {!panelFullscreen && (
         <MainPanel
           task={selectedTask}
+          minWidth={showBrowserPanel && isDesktop ? inlineColumnMinimums.main : 0}
           greetingName={preferredDisplayName(me) || undefined}
           inputRef={inputRef}
           replyMode={isReplyMode}

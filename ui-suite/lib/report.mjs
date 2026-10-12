@@ -21,12 +21,12 @@ export function saveReport(report, out) {
     '',
     '## Findings',
     '',
-    '| Severity | Route / width | Rule | Detail | Screenshot |',
+    '| Severity | Route / viewport | Rule | Detail | Screenshot |',
     '| --- | --- | --- | --- | --- |',
   ];
   for (const f of report.findings)
     lines.push(
-      `| ${f.severity} | ${esc(f.route)} / ${f.width ?? ''} | ${f.rule} | ${esc([f.control, f.detail].filter(Boolean).join(': '))} | [image](${f.screenshot ?? ''}) |`,
+      `| ${f.severity} | ${esc(f.route)} / ${f.width ?? ''}${f.height ? `×${f.height}` : ''} | ${f.rule} | ${esc([f.control, f.detail].filter(Boolean).join(': '))} | [image](${f.screenshot ?? ''}) |`,
     );
   lines.push(
     '',
@@ -36,12 +36,12 @@ export function saveReport(report, out) {
     '',
     '## Page and control coverage',
     '',
-    '| Route | Width | Total | Passed / shared / disabled / protocol / uncovered / failed | Screenshot |',
+    '| Route | Viewport | Total | Passed / shared / disabled / protocol / uncovered / failed | Screenshot |',
     '| --- | --- | --- | --- | --- | --- |',
   );
   for (const p of report.pages)
     lines.push(
-      `| ${esc(p.route)} | ${p.width} | ${p.controls.length} | ${['passed', 'shared-reference', 'disabled', 'protocol-link', 'uncovered', 'failed'].map((s) => p.controls.filter((c) => c.status === s || (s === 'passed' && c.status === 'idempotent')).length).join(' / ')} | [image](${p.screenshot}) |`,
+      `| ${esc(p.route)} | ${p.width}${p.height ? `×${p.height}` : ''} | ${p.controls.length} | ${['passed', 'shared-reference', 'disabled', 'protocol-link', 'uncovered', 'failed'].map((s) => p.controls.filter((c) => c.status === s || (s === 'passed' && c.status === 'idempotent')).length).join(' / ')} | [image](${p.screenshot}) |`,
     );
   lines.push(
     '',

@@ -30,8 +30,8 @@ describe('collapsed sidebar accessibility', () => {
 it('names automatically collapsed browser-workspace buttons even when manual state stays expanded', () => {
   const renderSidebar = (forceCollapsed: boolean) =>
     renderToStaticMarkup(
-      <SidebarProvider defaultOpen>
-        <Sidebar collapsible="icon" forceCollapsed={forceCollapsed}>
+      <SidebarProvider defaultOpen forceCollapsed={forceCollapsed}>
+        <Sidebar collapsible="icon">
           <SidebarMenuButton tooltip="文件库">
             <svg />
             <span>文件库</span>

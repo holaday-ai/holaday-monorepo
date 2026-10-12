@@ -137,7 +137,6 @@ interface Props {
   mobileOpen?: boolean;
   onMobileClose?: () => void;
   /** Temporarily use the icon rail while a compact inline browser is open. */
-  adaptiveCollapsed?: boolean;
   /**
    * Phase 10 polish — number of tasks the SPA hid because they're
    * older than the user's plan retention window. Drives the
@@ -202,12 +201,11 @@ export function Sidebar({
   userRole = 'user',
   mobileOpen,
   onMobileClose,
-  adaptiveCollapsed = false,
   hiddenTaskCount = 0,
   historyDays,
   pagerOverride,
 }: Props): JSX.Element {
-  const { setOpenMobile, state: sidebarState } = useSidebar();
+  const { setOpenMobile, state: sidebarState, forceCollapsed } = useSidebar();
   const togglePin = useTaskStore((s) => s.togglePin);
   const liveSubStatusByTask = useTaskStore((s) => s.subStatusByTask);
   // Belt-and-braces: collapse any duplicate taskId rows the store may
@@ -321,7 +319,7 @@ export function Sidebar({
   // We just bind mobile open via setOpenMobile so the legacy
   // `mobileOpen` prop continues to drive the Sheet from
   // WorkbenchApp's hamburger button.
-  const sidebarIsCompact = adaptiveCollapsed || sidebarState === 'collapsed';
+  const sidebarIsCompact = sidebarState === 'collapsed';
   const { pathname: sidebarPath } = useLocation();
   React.useEffect(() => {
     setOpenMobile(!!mobileOpen);
@@ -354,7 +352,6 @@ export function Sidebar({
         className={cn('holaday-sidebar', /^\/(video|image)\/?$/.test(sidebarPath) && 'dark')}
         variant="floating"
         collapsible="icon"
-        forceCollapsed={adaptiveCollapsed}
       >
         {/* Codex info-architecture rework: the Sidebar reads as four
             stable segments. Header / SidebarNav / SidebarFooter are
@@ -695,7 +692,7 @@ export function Sidebar({
             users can click to toggle expand/collapse. Lets the icon
             mode feel composable instead of "stuck" without users
             having to discover Cmd+B. */}
-        {!adaptiveCollapsed && <SidebarRail />}
+        {!forceCollapsed && <SidebarRail />}
       </SidebarShell>
 
       <TaskContextMenu

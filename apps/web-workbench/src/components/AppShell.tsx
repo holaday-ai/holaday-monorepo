@@ -714,6 +714,7 @@ export function AppShell(): JSX.Element {
   return (
     <SidebarProvider
       defaultOpen={true}
+      forceCollapsed={browserAdaptiveSidebarCollapsed}
       className={`holaday-shell${creativeTheme ? ' dark holaday-creative-shell' : ''}`}
       style={
         {
@@ -792,7 +793,6 @@ export function AppShell(): JSX.Element {
         userRole={me?.role ?? 'user'}
         userPlan={me?.plan ?? 'free'}
         videoEnabled={me?.videoEnabled ?? false}
-        adaptiveCollapsed={browserAdaptiveSidebarCollapsed}
         onOpenSearch={() => setSearchOpen(true)}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
@@ -811,7 +811,8 @@ export function AppShell(): JSX.Element {
           flex-1 + overflow-y-auto blocks (WorkbenchApp, scheduled
           calendar). */}
       <SidebarInset className="holaday-main h-svh overflow-y-auto bg-background">
-        <div className="hd-shell-topbar" aria-hidden="true" />
+        {/* Workbench owns its toolbar; a painted shell strip would cover the browser controls. */}
+        {location.pathname !== '/' && <div className="hd-shell-topbar" aria-hidden="true" />}
         {!selectedTaskId && <WorkbenchBreadcrumb />}
         <Outlet context={ctx} />
       </SidebarInset>

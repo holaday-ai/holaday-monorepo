@@ -72,6 +72,8 @@ interface Props {
   onToggleSidePanel?: () => void;
   /** True when the desktop browser is sharing the row with this panel. */
   browserPanelOpen?: boolean;
+  /** Use the same minimum as the sibling browser column allocation. */
+  minWidth?: number;
 }
 
 /**
@@ -98,6 +100,7 @@ export function MainPanel({
   sidePanelMode = 'closed',
   browserAttentionNeeded = false,
   onToggleSidePanel,
+  minWidth = 0,
 }: Props): JSX.Element {
   // Suggestion-chip clicks (empty-state EmptyState picks + the
   // "继续探索" chips inside TaskStream) prefill the composer instead
@@ -169,7 +172,8 @@ export function MainPanel({
   return (
     <main
       data-testid="workbench-main-panel"
-      className="flex h-full min-w-0 flex-[2] flex-col bg-background lg:min-w-[560px]"
+      className="flex h-full min-h-0 min-w-0 flex-[2] flex-col bg-background"
+      style={{ minWidth }}
     >
       <div
         data-testid="mobile-task-header"

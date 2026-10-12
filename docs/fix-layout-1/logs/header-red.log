@@ -1,0 +1,50 @@
+TAP version 13
+# Subtest: layout checks find clipped columns even when the document itself has no scrollbar
+ok 1 - layout checks find clipped columns even when the document itself has no scrollbar
+  ---
+  duration_ms: 203.085459
+  type: 'test'
+  ...
+# Subtest: layout checks detect both root overflow and a short shell, accepting full-height scroll content
+ok 2 - layout checks detect both root overflow and a short shell, accepting full-height scroll content
+  ---
+  duration_ms: 172.940917
+  type: 'test'
+  ...
+# Subtest: default audit includes laptop aspect ratios, retaining legacy 960px baselines
+ok 3 - default audit includes laptop aspect ratios, retaining legacy 960px baselines
+  ---
+  duration_ms: 0.489875
+  type: 'test'
+  ...
+# Subtest: an opaque shell strip cannot paint over the browser toolbar even with pointer-events disabled
+not ok 4 - an opaque shell strip cannot paint over the browser toolbar even with pointer-events disabled
+  ---
+  duration_ms: 172.350166
+  type: 'test'
+  location: '/Users/yaleiqi/.codex/worktrees/fix-sidebar-toggle/holaday-monorepo/ui-suite/tests/layout.test.mjs:46:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The expression evaluated to a falsy value:
+    
+      assert.ok(layoutFindings(await measureLayout(page)).some(f=>f.rule==='browser-header-occluded'))
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file:///Users/yaleiqi/.codex/worktrees/fix-sidebar-toggle/holaday-monorepo/ui-suite/tests/layout.test.mjs:51:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 3
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 754.835417
