@@ -104,3 +104,32 @@ it('does not capture unapproved origins and represents gaps and limits explicitl
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it('reports a sanitized storage failure instead of silently losing every frame', async () => {
+  const { writeFile } = await import('node:fs/promises');
+  const root = await mkdtemp(join(tmpdir(), 'replay-failure-'));
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const path = join(root, 'not-a-directory');
+    await writeFile(path, 'occupied');
+    const errors: string[] = [];
+    const recorder = new BrowserReplayRecorder(
+      new BrowserReplayStore(path),
+      'owner',
+      'task',
+      new Set(),
+      {},
+      (code) => {
+        errors.push(code);
+      },
+    );
+    const page = await browser.newPage();
+    await recorder.capture(page, 'one', 'before');
+    await recorder.capture(page, 'two', 'after');
+    expect(errors).toEqual(['replay_storage_enotdir']);
+    await recorder.dispose();
+  } finally {
+    await browser.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Page } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
-import { detectBrowserBlocker } from './browser-completion.js';
+import { probeBrowserBlocker } from './browser-blocker-probe.js';
 import { browserToolError } from './browser-tool-error.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { CloudObservation } from './cloud-observation.js';
@@ -558,21 +558,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
       tabs: true,
     },
     async blocker() {
-      const current = observation?.page ?? page;
-      try {
-        // Probe every frame; bot walls may be embedded in a video player.
-        for (const frame of current.frames()) {
-          const signal = detectBrowserBlocker({
-            url: frame.url(),
-            title: await frame.title(),
-            text: (await frame.locator('body').innerText({ timeout: 3000 })).slice(0, 50000),
-          });
-          if (signal) return signal;
-        }
-        return null;
-      } catch {
-        return { reason: 'page_unreadable', message: '无法确认当前页面状态，请重新读取后继续。' };
-      }
+      return probeBrowserBlocker(observation?.page ?? page);
     },
     snapshot: snapshotText,
     observation,

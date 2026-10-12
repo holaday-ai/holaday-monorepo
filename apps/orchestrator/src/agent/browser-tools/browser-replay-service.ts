@@ -1,7 +1,9 @@
 import { resolve } from 'node:path';
+import { env } from '../../config/env.js';
 import { BrowserReplayStore } from './browser-replay.js';
 
-export const browserReplayStore = new BrowserReplayStore(resolve('var/browser-replay'));
+// Runtime state belongs beside browser profiles, not in a read-only release directory.
+export const browserReplayStore = new BrowserReplayStore(resolve(env.BROWSER_POOL_DIR, '.replay'));
 let sweeping = false;
 const sweep = async () => {
   if (sweeping) return;

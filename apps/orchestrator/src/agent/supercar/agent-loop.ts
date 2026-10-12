@@ -598,6 +598,7 @@ export interface SupercarTickEvent {
     message?: string;
     errorCode?: string;
     errorMessage?: string;
+    blockerEvidence?: import('../browser-tools/browser-completion.js').BrowserBlockerEvidence;
   };
   iteration: number;
   /**
