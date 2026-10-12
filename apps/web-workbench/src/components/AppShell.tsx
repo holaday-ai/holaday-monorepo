@@ -714,6 +714,7 @@ export function AppShell(): JSX.Element {
   return (
     <SidebarProvider
       defaultOpen={true}
+      forceCollapsed={browserAdaptiveSidebarCollapsed}
       className={`holaday-shell${creativeTheme ? ' dark holaday-creative-shell' : ''}`}
       style={
         {
@@ -792,7 +793,6 @@ export function AppShell(): JSX.Element {
         userRole={me?.role ?? 'user'}
         userPlan={me?.plan ?? 'free'}
         videoEnabled={me?.videoEnabled ?? false}
-        adaptiveCollapsed={browserAdaptiveSidebarCollapsed}
         onOpenSearch={() => setSearchOpen(true)}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}

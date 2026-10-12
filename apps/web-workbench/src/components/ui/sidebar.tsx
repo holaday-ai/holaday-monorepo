@@ -25,6 +25,9 @@ type SidebarContext = {
   openMobile: boolean;
   setOpenMobile: (open: boolean) => void;
   isMobile: boolean;
+  forceCollapsed: boolean;
+  openOverlay: boolean;
+  setOpenOverlay: (open: boolean) => void;
   toggleSidebar: () => void;
 };
 
@@ -42,6 +45,7 @@ const SidebarProvider = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<'div'> & {
     defaultOpen?: boolean;
+    forceCollapsed?: boolean;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
   }
@@ -49,6 +53,7 @@ const SidebarProvider = React.forwardRef<
   (
     {
       defaultOpen = true,
+      forceCollapsed = false,
       open: openProp,
       onOpenChange: setOpenProp,
       className,
@@ -60,6 +65,8 @@ const SidebarProvider = React.forwardRef<
   ) => {
     const isMobile = useIsMobile();
     const [openMobile, setOpenMobile] = React.useState(false);
+    const [temporaryOpen, setOpenOverlay] = React.useState(false);
+    const openOverlay = forceCollapsed && !isMobile && temporaryOpen;
     const [_open, _setOpen] = React.useState(defaultOpen);
     const open = openProp ?? _open;
     const setOpen = React.useCallback(
@@ -75,8 +82,14 @@ const SidebarProvider = React.forwardRef<
       [setOpenProp, open],
     );
     const toggleSidebar = React.useCallback(() => {
-      return isMobile ? setOpenMobile((current) => !current) : setOpen((current) => !current);
-    }, [isMobile, setOpen, setOpenMobile]);
+      if (isMobile) setOpenMobile((current) => !current);
+      else if (forceCollapsed) setOpenOverlay((current) => !current);
+      else setOpen((current) => !current);
+    }, [isMobile, forceCollapsed, setOpen]);
+
+    React.useEffect(() => {
+      if (!forceCollapsed || isMobile) setOpenOverlay(false);
+    }, [forceCollapsed, isMobile]);
 
     React.useEffect(() => {
       const handleKeyDown = (event: KeyboardEvent): void => {
@@ -89,7 +102,7 @@ const SidebarProvider = React.forwardRef<
       return () => window.removeEventListener('keydown', handleKeyDown);
     }, [toggleSidebar]);
 
-    const state = open ? 'expanded' : 'collapsed';
+    const state = (forceCollapsed && !isMobile ? openOverlay : open) ? 'expanded' : 'collapsed';
 
     const contextValue = React.useMemo<SidebarContext>(
       () => ({
@@ -99,9 +112,12 @@ const SidebarProvider = React.forwardRef<
         isMobile,
         openMobile,
         setOpenMobile,
+        forceCollapsed,
+        openOverlay,
+        setOpenOverlay,
         toggleSidebar,
       }),
-      [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar],
+      [state, open, setOpen, isMobile, openMobile, forceCollapsed, openOverlay, toggleSidebar],
     );
 
     return (
@@ -140,7 +156,6 @@ const Sidebar = React.forwardRef<
     side?: 'left' | 'right';
     variant?: 'sidebar' | 'floating' | 'inset';
     collapsible?: 'offcanvas' | 'icon' | 'none';
-    forceCollapsed?: boolean;
   }
 >(
   (
@@ -148,15 +163,47 @@ const Sidebar = React.forwardRef<
       side = 'left',
       variant = 'sidebar',
       collapsible = 'offcanvas',
-      forceCollapsed = false,
       className,
       children,
       ...props
     },
     ref,
   ) => {
-    const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
-    const effectiveState = forceCollapsed ? 'collapsed' : state;
+    const {
+      isMobile,
+      state,
+      openMobile,
+      setOpenMobile,
+      forceCollapsed,
+      openOverlay,
+      setOpenOverlay,
+    } = useSidebar();
+    const panelRef = React.useRef<HTMLDivElement>(null);
+    React.useEffect(() => {
+      if (!openOverlay) return;
+      const dismissOutside = (event: PointerEvent) => {
+        const target = event.target;
+        if (!(target instanceof Element) || panelRef.current?.contains(target)) return;
+        // Menus and confirmation dialogs can be portalled outside the sidebar DOM.
+        if (
+          target.closest('[data-radix-popper-content-wrapper], [role=dialog], [role=alertdialog]')
+        )
+          return;
+        setOpenOverlay(false);
+      };
+      const dismissEscape = (event: KeyboardEvent) => {
+        if (event.key !== 'Escape' || event.defaultPrevented) return;
+        event.preventDefault();
+        setOpenOverlay(false);
+        panelRef.current?.querySelector<HTMLButtonElement>('[data-sidebar=trigger]')?.focus();
+      };
+      document.addEventListener('pointerdown', dismissOutside);
+      window.addEventListener('keydown', dismissEscape);
+      return () => {
+        document.removeEventListener('pointerdown', dismissOutside);
+        window.removeEventListener('keydown', dismissEscape);
+      };
+    }, [openOverlay, setOpenOverlay]);
 
     if (collapsible === 'none') {
       return (
@@ -202,13 +249,25 @@ const Sidebar = React.forwardRef<
       <div
         ref={ref}
         className="group peer hidden md:block text-sidebar-foreground"
-        data-state={effectiveState}
-        data-collapsible={effectiveState === 'collapsed' ? collapsible : ''}
+        data-state={state}
+        data-collapsible={state === 'collapsed' ? collapsible : ''}
         data-variant={variant}
         data-side={side}
       >
         {/* This is what handles the sidebar gap on desktop */}
         <div
+          style={
+            forceCollapsed
+              ? {
+                  width:
+                    collapsible === 'offcanvas'
+                      ? 0
+                      : variant === 'sidebar'
+                        ? 'var(--sidebar-width-icon)'
+                        : 'calc(var(--sidebar-width-icon) + 1rem)',
+                }
+              : undefined
+          }
           className={cn(
             'hd-sidebar-spacer duration-[620ms] relative h-svh w-[--sidebar-width] bg-transparent transition-[width] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none',
             'group-data-[collapsible=offcanvas]:w-0',
@@ -219,6 +278,11 @@ const Sidebar = React.forwardRef<
           )}
         />
         <div
+          ref={panelRef}
+          role={openOverlay ? 'dialog' : undefined}
+          aria-label={openOverlay ? '侧边栏导航' : undefined}
+          aria-modal={openOverlay ? false : undefined}
+          data-sidebar-overlay={openOverlay ? 'true' : undefined}
           className={cn(
             'duration-[620ms] fixed inset-y-0 z-10 hidden h-svh w-[--sidebar-width] transition-[left,right,width] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none md:flex',
             side === 'left'
@@ -228,6 +292,7 @@ const Sidebar = React.forwardRef<
             variant === 'floating' || variant === 'inset'
               ? 'p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]'
               : 'group-data-[collapsible=icon]:w-[--sidebar-width-icon] group-data-[side=left]:border-r group-data-[side=right]:border-l',
+            openOverlay && 'z-40 drop-shadow-xl',
             className,
           )}
           {...props}
@@ -236,7 +301,7 @@ const Sidebar = React.forwardRef<
             data-sidebar="sidebar"
             className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow"
           >
-            <SidebarVisualStateContext.Provider value={effectiveState}>
+            <SidebarVisualStateContext.Provider value={state}>
               {children}
             </SidebarVisualStateContext.Provider>
           </div>
@@ -251,7 +316,8 @@ const SidebarTrigger = React.forwardRef<
   React.ElementRef<typeof Button>,
   React.ComponentProps<typeof Button>
 >(({ className, onClick, ...props }, ref) => {
-  const { toggleSidebar } = useSidebar();
+  const { toggleSidebar, state, isMobile, openMobile } = useSidebar();
+  const expanded = isMobile ? openMobile : state === 'expanded';
   return (
     <Button
       ref={ref}
@@ -259,7 +325,8 @@ const SidebarTrigger = React.forwardRef<
       variant="ghost"
       size="icon"
       aria-label="切换侧边栏"
-      title="切换侧边栏"
+      title={expanded ? '收起侧边栏' : '展开侧边栏'}
+      aria-expanded={expanded}
       className={cn('h-7 w-7', className)}
       onClick={(event) => {
         onClick?.(event);
@@ -276,7 +343,8 @@ SidebarTrigger.displayName = 'SidebarTrigger';
 
 const SidebarRail = React.forwardRef<HTMLButtonElement, React.ComponentProps<'button'>>(
   ({ className, ...props }, ref) => {
-    const { toggleSidebar } = useSidebar();
+    const { toggleSidebar, state, isMobile, openMobile } = useSidebar();
+    const expanded = isMobile ? openMobile : state === 'expanded';
     return (
       <button
         ref={ref}
@@ -284,7 +352,8 @@ const SidebarRail = React.forwardRef<HTMLButtonElement, React.ComponentProps<'bu
         aria-label="切换侧边栏"
         tabIndex={-1}
         onClick={toggleSidebar}
-        title="切换侧边栏"
+        title={expanded ? '收起侧边栏' : '展开侧边栏'}
+        aria-expanded={expanded}
         className={cn(
           'absolute inset-y-0 z-20 hidden w-7 -translate-x-1/2 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=left]:-right-4 group-data-[side=right]:left-0 sm:flex lg:w-4',
           '[[data-side=left]_&]:cursor-w-resize [[data-side=right]_&]:cursor-e-resize',
