@@ -1,3 +1,4 @@
+import { browserCapabilities } from '../config/browser-capabilities.js';
 /**
  * Phase 19 — `/screencast-ws/:userId` upgrade handler.
  *
@@ -135,10 +136,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     const m = pathPattern.exec(url);
     if (!m) return; // not our path; leave for next handler
     const v2Requested = new URL(url, 'http://localhost').searchParams.get('viewportV2') === '1';
-    if (v2Requested && process.env.BROWSER_VIEWPORT_V2 !== 'true') {
-      reject(socket, 409, 'browser viewport v2 disabled');
-      return;
-    }
+
     if (!admissionOpen()) {
       reject(socket, 503, 'maintenance');
       return;
@@ -179,6 +177,10 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             return reject(socket, 401, 'invalid token');
           }
           const callerUserId = session.userId;
+          if (v2Requested && !browserCapabilities(callerUserId).viewportV2) {
+            reject(socket, 409, 'browser viewport v2 disabled');
+            return;
+          }
 
           // Phase 24 fix #2 — dispatch by ID prefix. tsk_… targets a
           // specific in-flight task; everything else falls through to
@@ -229,7 +231,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
                 ws,
                 callerUserId,
                 instance,
-                viewportV2: process.env.BROWSER_VIEWPORT_V2 === 'true',
+                viewportV2: browserCapabilities(callerUserId).viewportV2,
               }).then(resolve, rejectSetup);
             }),
           );

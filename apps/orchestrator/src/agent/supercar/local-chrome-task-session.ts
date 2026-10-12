@@ -1,5 +1,5 @@
 import type { SelectedChromeSessionCommand } from '@holaday/shared-types';
-import { getFeatureFlags } from '../../execution/feature-flags.js';
+import { browserCapabilities } from '../../config/browser-capabilities.js';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
 import { BrowserControl } from './browser-control.js';
 import { SelectedChromeClient } from './selected-chrome-client.js';
@@ -68,7 +68,7 @@ export class LocalChromeTaskSessions {
       taskId,
       extensionClientId: selection.extensionClientId,
       control,
-      routingV2: getFeatureFlags().USER_BROWSER_ROUTING_V2,
+      routingV2: browserCapabilities(userId).routingV2,
       send,
     });
     const session = {

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { userBrowserProtocolSchema } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { getFeatureFlags } from '../../execution/feature-flags.js';
+import { browserCapabilities } from '../../config/browser-capabilities.js';
 import { getConnectedExtensionClientIds, sendExtensionToolCall } from '../../ws/server.js';
 import { protectedProcedure } from '../trpc.js';
 
@@ -46,7 +46,7 @@ export const localChromeTabsProcedure = protectedProcedure.query(async ({ ctx })
       });
       const parsed = tabsSchema.safeParse(reply.result);
       if (
-        getFeatureFlags().USER_BROWSER_ROUTING_V2 &&
+        browserCapabilities(ctx.userId).routingV2 &&
         reply.ok &&
         !userBrowserProtocolSchema.safeParse(
           (reply.result as Record<string, unknown>)?.userBrowserProtocol,
@@ -77,7 +77,7 @@ export const localChromeTabsProcedure = protectedProcedure.query(async ({ ctx })
     connected: connections.length > 0,
     unavailable: results.some((result) => result.unavailable),
     needsUpdate: results.some((result) => result.needsUpdate),
-    routingV2: getFeatureFlags().USER_BROWSER_ROUTING_V2,
+    routingV2: browserCapabilities(ctx.userId).routingV2,
   };
 });
 
@@ -86,7 +86,7 @@ export async function assertLocalChromeSelection(
   selection: z.infer<typeof localChromeSelectionSchema>,
 ) {
   const { extensionClientId, ...target } = selection;
-  if (getFeatureFlags().USER_BROWSER_ROUTING_V2) {
+  if (browserCapabilities(userId).routingV2) {
     // Capability handshake contains tab metadata only, before reading page content.
     const handshake = await sendExtensionToolCall(userId, {
       taskId: `capabilities-${randomUUID()}`,

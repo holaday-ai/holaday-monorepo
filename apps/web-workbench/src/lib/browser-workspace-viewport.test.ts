@@ -2,17 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { browserViewportForHost, shouldSendBrowserViewport } from './browser-workspace-viewport';
 
 describe('browser workspace viewport', () => {
-  it('uses the actual browser canvas instead of a fixed desktop screenshot size', () => {
+  it('keeps a desktop execution viewport when the panel is narrow', () => {
     expect(browserViewportForHost({ hostWidth: 612.4, hostHeight: 844.8 })).toEqual({
-      width: 612,
+      width: 1280,
       height: 845,
     });
   });
 
   it('clamps tiny and oversized canvases to supported remote browser limits', () => {
     expect(browserViewportForHost({ hostWidth: 120, hostHeight: 180 })).toEqual({
-      width: 320,
-      height: 360,
+      width: 1280,
+      height: 800,
     });
     expect(browserViewportForHost({ hostWidth: 2400, hostHeight: 1800 })).toEqual({
       width: 1440,

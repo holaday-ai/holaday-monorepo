@@ -1,4 +1,4 @@
-import { env } from '../../config/env.js';
+import { browserCapabilities } from '../../config/browser-capabilities.js';
 import { reviewListAnswer } from '../../execution/answer-verifier.js';
 import { browserOutputGuidance } from '../../execution/execution-contract.js';
 import { getContract } from '../../execution/execution-pipeline.js';
@@ -10,8 +10,10 @@ import type {
 } from '../supercar/agent-loop.js';
 import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
 import { classifyRuntimeAction } from '../supercar/runtime-action-policy.js';
+import { persistBrowserDownload } from './browser-download.js';
 import { browserReplayStore } from './browser-replay-service.js';
 import { BrowserReplayRecorder } from './browser-replay.js';
+import { installDomainEgress } from './domain-egress.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import { createUnifiedActionGate } from './unified-action-gate.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
@@ -140,11 +142,43 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       toolsUsed: [],
     };
   }
+  const controller = new AbortController();
+  const capabilities = browserCapabilities(opts.userExternalId);
+  if (!capabilities.viewportV2) {
+    const size = page.viewportSize();
+    if (!size || size.width < 1280 || size.height < 800)
+      await page.setViewportSize({
+        width: Math.max(1280, size?.width ?? 1280),
+        height: Math.max(800, size?.height ?? 800),
+      });
+  }
   const tools = createPlaywrightUnifiedExecutor(page, {
-    observationV2: env.BROWSER_OBSERVATION_V2,
+    ...(opts.onBrowserDownload
+      ? { saveDownload: (download) => persistBrowserDownload(download, opts.onBrowserDownload!) }
+      : {}),
+    observationV2: capabilities.observationV2,
   });
+  let egress: Awaited<ReturnType<typeof installDomainEgress>>;
+  try {
+    egress = await installDomainEgress(
+      page,
+      undefined,
+      undefined,
+      tools.ownsPage,
+      controller.signal,
+      `${opts.userExternalId ?? 'unknown'}:${opts.taskId}`,
+    );
+  } catch {
+    tools.dispose();
+    return {
+      status: 'failed',
+      reason: '域名代理配置或浏览器上下文不支持安全代理，请检查配置后重试。',
+      iterations: 0,
+      toolsUsed: [],
+    };
+  }
   const replay =
-    env.BROWSER_REPLAY_V1 && opts.userExternalId
+    capabilities.replayV1 && opts.userExternalId
       ? new BrowserReplayRecorder(browserReplayStore, opts.userExternalId, opts.taskId, new Set())
       : null;
   let replayActionId = 0;
@@ -174,7 +208,6 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       }).create(request, options);
     },
   };
-  const controller = new AbortController();
   running.set(opts.taskId, controller);
   const timeout = opts.timeoutMs ? setTimeout(() => controller.abort(), opts.timeoutMs) : undefined;
   const cancelPoll = setInterval(() => {
@@ -296,7 +329,11 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         return { kind: 'skip' as const, message: '页面或 ref 已失效，请重新 read_page。' };
       }
     }
-    const targetPage = tools.observation?.resolve(action).page ?? page;
+    const changedTab = ['new_tab', 'switch_tab', 'close_tab'].includes(action.tool);
+    const targetPage =
+      phase === 'after' && changedTab
+        ? tools.page
+        : (tools.observation?.resolve(action).page ?? tools.page);
     const result = await baseGateAction(targetPage)(action, phase);
     if (result.kind === 'proceed' && replay) {
       try {
@@ -310,8 +347,12 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   };
   try {
     const outcome = await runUnifiedBrowserLoop({
-      observationV2: env.BROWSER_OBSERVATION_V2,
-      checkInterruption: () => tools.observation?.interruption(),
+      observationV2: capabilities.observationV2,
+      requireBrowserEvidence: true,
+      supportedTools: tools.supportedTools,
+      probeBlocker: tools.blocker,
+      checkInterruption: () =>
+        tools.observation?.interruption() ?? egress.interruption() ?? undefined,
       intent: guidance ? `${opts.intent}\n\n【结果要求】\n${guidance}` : opts.intent,
       ...(contract && guidance
         ? { reviewFinish: (summary: string) => reviewListAnswer(contract, summary) }
@@ -323,10 +364,11 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       signal: controller.signal,
       async execute(action) {
         const id = `action-${++replayActionId}`;
-        const targetPage = tools.observation?.page ?? page;
+        const targetPage = tools.page;
         await replay?.capture(targetPage, id, 'before');
         const result = await tools.execute(action);
-        page = tools.observation?.page ?? page;
+        page = tools.page;
+        if (result.ok) opts.executor?.selectTaskPage?.(page);
         await replay?.capture(
           page,
           id,
@@ -336,6 +378,20 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         iteration += 1;
         toolsUsed.add(action.tool);
         if (action.tool === 'snapshot' && result.ok) lastSnapshot = result.text;
+        if (result.ok && (result.download || result.tabId || result.scroll))
+          await safe(() =>
+            opts.onEvidence?.({
+              fact: JSON.stringify({
+                tool: action.tool,
+                ...(result.download ? { download: result.download } : {}),
+                ...(result.tabId ? { tabId: result.tabId } : {}),
+                ...(result.scroll ? { scroll: result.scroll } : {}),
+              }),
+              sourceType: 'browser_state',
+              sourceDetail: 'browser_tool_receipt',
+              confidence: 'observed',
+            }),
+          );
         if (result.ok && result.url) await recordLinks([result.url], 'unified page url');
         if (result.ok && result.links?.length)
           await recordLinks(result.links, `unified snapshot of ${result.url ?? page.url()}`);
@@ -454,6 +510,16 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         };
     }
   } finally {
+    await egress.dispose();
+    if (egress.metrics.proxyRequests || egress.metrics.blockedMedia)
+      await safe(() =>
+        opts.onEvidence?.({
+          fact: JSON.stringify(egress.metrics),
+          sourceType: 'browser_state',
+          sourceDetail: 'domain_proxy_traffic',
+          confidence: 'observed',
+        }),
+      );
     if (replayTimer) clearInterval(replayTimer);
     await replay?.dispose();
     tools.dispose();

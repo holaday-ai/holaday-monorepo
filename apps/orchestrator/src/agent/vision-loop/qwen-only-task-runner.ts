@@ -5,6 +5,7 @@ import {
   tryPlaybookReuse,
 } from '../../playbook/evolution/executor-hooks.js';
 import type { BrowserSnapshot } from '../../playbook/replay/browser-tools.js';
+import { type BrowserTrace, completionGap } from '../browser-tools/browser-completion.js';
 import {
   parseUnifiedSnapshot,
   playbookToolsFromUnifiedExecutor,
@@ -43,73 +44,87 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
     return { status: 'failed', reason: '浏览器暂时不可用，请稍后重试。', history: [] };
   }
   const tools = createPlaywrightUnifiedExecutor(page);
-  const evolution = opts.evolution;
-
-  if (evolution) {
-    const reuse = await tryPlaybookReuse({
-      db: evolution.db,
-      tools: playbookToolsFromUnifiedExecutor(page, tools.execute),
-      intent: opts.intent,
-      siteDomain: siteDomainOf(page.url()),
-      taskId: evolution.taskDbId,
-      adapter: evolution.generateAdapter,
-      logger: evolution.logger,
-    });
-    if (reuse?.handled) {
-      const extracted = await tools.execute({ tool: 'extract', instruction: opts.intent });
-      const content = extracted.ok ? (JSON.parse(extracted.text).content as string) : '';
-      return {
-        status: 'completed',
-        summary: `已按验证过的操作路径完成。\n\n${content.slice(0, 4_000)}`,
-        history: [],
-      };
-    }
-  }
-
-  const recorder = evolution
-    ? createTaskCaptureRecorder({
-        db: evolution.db,
-        taskId: evolution.taskDbId,
-        executorSource: 'cloud',
-        logger: evolution.logger,
-      })
-    : null;
-  let lastSnapshot: BrowserSnapshot | undefined;
-  const execute = async (action: UnifiedBrowserAction) => {
+  const trace: BrowserTrace[] = [];
+  const perform = async (action: UnifiedBrowserAction) => {
     const result = await tools.execute(action);
-    if (!recorder || !result.ok) return result;
-    if (action.tool === 'snapshot') {
-      lastSnapshot = await parseUnifiedSnapshot(page, result.text).catch(() => undefined);
-    } else if (CAPTURED_OPS.has(action.tool as CapturedToolCall['op'])) {
-      await recorder.recordToolCall({
-        op: action.tool as CapturedToolCall['op'],
-        ...('ref' in action && action.ref ? { ref: action.ref } : {}),
-        ...(lastSnapshot ? { snapshot: lastSnapshot } : {}),
-        ...(action.tool === 'navigate' ? { url: action.url } : {}),
-        ...(action.tool === 'type' ? { text: action.text, submit: action.submit === true } : {}),
-        ...(action.tool === 'select' ? { value: action.value } : {}),
-        pageUrl: page.url(),
-      });
-    }
+    trace.push({ tool: action.tool, ...result });
+    page = tools.page;
+    if (result.ok) opts.playwrightExecutor?.selectTaskPage?.(page);
     return result;
   };
+  const evolution = opts.evolution;
+  try {
+    if (evolution) {
+      const reuse = await tryPlaybookReuse({
+        db: evolution.db,
+        tools: playbookToolsFromUnifiedExecutor(page, perform),
+        intent: opts.intent,
+        siteDomain: siteDomainOf(page.url()),
+        taskId: evolution.taskDbId,
+        adapter: evolution.generateAdapter,
+        logger: evolution.logger,
+      });
+      if (reuse?.handled) {
+        const extracted = await perform({ tool: 'extract', instruction: opts.intent });
+        const content = extracted.ok ? (JSON.parse(extracted.text).content as string) : '';
+        const blocker = await tools.blocker();
+        if (blocker) return { status: 'paused', reason: blocker.message, history: [] };
+        const summary = `已按验证过的操作路径完成。\n\n${content.slice(0, 4_000)}`;
+        if (extracted.ok && !completionGap(opts.intent, summary, trace, true))
+          return { status: 'completed', summary, history: [] };
+      }
+    }
 
-  const outcome = await runUnifiedBrowserLoop({
-    intent: opts.intent,
-    adapter: opts.messagesAdapter,
-    execute,
-    ...(opts.webSearch ? { webSearch: opts.webSearch } : {}),
-    maxSteps: opts.maxSteps ?? 40,
-  });
-  switch (outcome.status) {
-    case 'completed':
-      await recorder?.recordOutcome({ finalUrl: page.url(), evidenceTexts: [outcome.evidence] });
-      return { status: 'completed', summary: outcome.summary, history: [] };
-    case 'awaiting_user':
-      return { status: 'paused', reason: outcome.message, history: [] };
-    case 'cancelled':
-      return { status: 'cancelled', history: [] };
-    default:
-      return { status: 'failed', reason: outcome.reason, history: [] };
+    const recorder = evolution
+      ? createTaskCaptureRecorder({
+          db: evolution.db,
+          taskId: evolution.taskDbId,
+          executorSource: 'cloud',
+          logger: evolution.logger,
+        })
+      : null;
+    let lastSnapshot: BrowserSnapshot | undefined;
+    const execute = async (action: UnifiedBrowserAction) => {
+      const result = await perform(action);
+      if (!recorder || !result.ok) return result;
+      if (action.tool === 'snapshot') {
+        lastSnapshot = await parseUnifiedSnapshot(page, result.text).catch(() => undefined);
+      } else if (CAPTURED_OPS.has(action.tool as CapturedToolCall['op'])) {
+        await recorder.recordToolCall({
+          op: action.tool as CapturedToolCall['op'],
+          ...('ref' in action && action.ref ? { ref: action.ref } : {}),
+          ...(lastSnapshot ? { snapshot: lastSnapshot } : {}),
+          ...(action.tool === 'navigate' ? { url: action.url } : {}),
+          ...(action.tool === 'type' ? { text: action.text, submit: action.submit === true } : {}),
+          ...(action.tool === 'select' ? { value: action.value } : {}),
+          pageUrl: page.url(),
+        });
+      }
+      return result;
+    };
+
+    const outcome = await runUnifiedBrowserLoop({
+      intent: opts.intent,
+      requireBrowserEvidence: true,
+      supportedTools: tools.supportedTools,
+      probeBlocker: tools.blocker,
+      adapter: opts.messagesAdapter,
+      execute,
+      ...(opts.webSearch ? { webSearch: opts.webSearch } : {}),
+      maxSteps: opts.maxSteps ?? 40,
+    });
+    switch (outcome.status) {
+      case 'completed':
+        await recorder?.recordOutcome({ finalUrl: page.url(), evidenceTexts: [outcome.evidence] });
+        return { status: 'completed', summary: outcome.summary, history: [] };
+      case 'awaiting_user':
+        return { status: 'paused', reason: outcome.message, history: [] };
+      case 'cancelled':
+        return { status: 'cancelled', history: [] };
+      default:
+        return { status: 'failed', reason: outcome.reason, history: [] };
+    }
+  } finally {
+    tools.dispose();
   }
 }

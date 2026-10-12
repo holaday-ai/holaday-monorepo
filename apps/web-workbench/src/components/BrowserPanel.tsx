@@ -514,7 +514,20 @@ function CloudBrowserPanel({
   // a live socket on every render.
   const streamTransport = React.useMemo(() => readStreamTransport(), []);
   const usingCdp = streamTransport === 'cdp';
-  const viewportV2 = import.meta.env.VITE_BROWSER_VIEWPORT_V2 === 'true';
+  const [viewportV2, setViewportV2] = React.useState(false);
+  React.useEffect(() => {
+    let live = true;
+    setViewportV2(false);
+    void trpc.browserReplay.capabilities
+      .query()
+      .then((capabilities) => {
+        if (live) setViewportV2(capabilities.viewportV2);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [poolUserId]);
   // Phase 24 diagnostic — log the current task scope so DevTools can
   // confirm the panel is actually receiving the expected taskId from
   // its parent. Re-fires whenever the user picks a different task.

@@ -28,7 +28,9 @@ const FIXTURE = `<!doctype html><html><head><title>合成商城</title></head><b
 
 describe('unified browser tool definitions', () => {
   it('exposes one definition per tool name', () => {
-    expect(UNIFIED_BROWSER_TOOLS.map((tool) => tool.name)).toEqual([...UNIFIED_BROWSER_TOOL_NAMES]);
+    expect(UNIFIED_BROWSER_TOOLS.map((tool) => tool.name).sort()).toEqual(
+      [...UNIFIED_BROWSER_TOOL_NAMES].sort(),
+    );
   });
 
   it('parses valid calls and rejects stale or unsafe input with model-readable errors', () => {
@@ -201,9 +203,11 @@ describe('unified executor on list pages (FIX-BATCH-A, real Chromium)', () => {
     expect(ref).toBeTruthy();
     const clicked = await tools.execute({ tool: 'click', ref: ref as string });
     expect(clicked).toMatchObject({ ok: true, url: `${base}/item/1` });
-    expect(clicked.text).toContain('新标签页内容已在当前页打开');
-    expect(page.context().pages()).toHaveLength(1);
-    expect(await page.title()).toBe('商品 1');
+    expect(clicked.tabId).toBeTruthy();
+    expect(page.context().pages()).toHaveLength(2);
+    expect(await tools.page.title()).toBe('商品 1');
+    expect(page.url()).toBe(`${base}/`);
+    await tools.page.close();
     await page.close();
   }, 60_000);
 

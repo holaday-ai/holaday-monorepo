@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
   query: vi.fn(),
+  capabilities: vi.fn(),
   mutate: vi.fn(),
   nav: vi.fn(),
   refresh: vi.fn(),
@@ -12,6 +13,9 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/trpc', () => ({
   trpc: {
+    browserReplay: {
+      capabilities: { query: api.capabilities },
+    },
     tasks: {
       browserControlState: { query: api.query },
       browserControl: { mutate: api.mutate },
@@ -77,6 +81,12 @@ const base = {
 };
 
 beforeEach(() => {
+  api.capabilities.mockResolvedValue({
+    viewportV2: false,
+    observationV2: false,
+    replayV1: false,
+    routingV2: false,
+  });
   observers.length = 0;
   nextWidth = 420;
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);

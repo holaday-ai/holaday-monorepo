@@ -4,6 +4,16 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({ query: vi.fn(), mutate: vi.fn(), abort: vi.fn() }));
 vi.mock('@/lib/trpc', () => ({
   trpc: {
+    browserReplay: {
+      capabilities: {
+        query: vi.fn().mockResolvedValue({
+          viewportV2: false,
+          observationV2: false,
+          replayV1: false,
+          routingV2: false,
+        }),
+      },
+    },
     tasks: {
       browserControlState: { query: api.query },
       browserControl: { mutate: api.mutate },

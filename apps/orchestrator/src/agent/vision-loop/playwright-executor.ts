@@ -663,6 +663,13 @@ export class PlaywrightExecutor {
     return browser.contexts()[0];
   }
 
+  /** The unified task may select only a live page inside its current owned context. */
+  selectTaskPage(page: Page): void {
+    if (!this.browser || page.isClosed() || page.context() !== this.browseContext(this.browser))
+      throw new Error('browser_page_not_owned');
+    this.activePage = page;
+  }
+
   setViewportSize(size: { width: number; height: number } | null): void {
     if (
       size &&

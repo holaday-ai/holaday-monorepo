@@ -24,6 +24,10 @@ export const UNIFIED_BROWSER_TOOL_NAMES = [
   'download',
   'upload',
   'click_at',
+  'list_tabs',
+  'new_tab',
+  'switch_tab',
+  'close_tab',
 ] as const;
 export type UnifiedBrowserToolName = (typeof UNIFIED_BROWSER_TOOL_NAMES)[number];
 
@@ -39,6 +43,17 @@ const expectation = {
 } as const;
 
 export const UNIFIED_BROWSER_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
+  ...(['list_tabs', 'new_tab', 'switch_tab', 'close_tab'] as const).map((name) => ({
+    name,
+    description: '管理本任务拥有的真实标签；tabId 来自成功回执，不能用 navigate 冒充切换。',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties:
+        name === 'switch_tab' || name === 'close_tab' ? { targetTabId: { type: 'string' } } : {},
+      ...(name === 'switch_tab' || name === 'close_tab' ? { required: ['targetTabId'] } : {}),
+    },
+  })),
   {
     name: 'snapshot',
     description:
@@ -199,6 +214,8 @@ export type ObservationAction =
 
 export type UnifiedBrowserAction = (
   | ObservationAction
+  | { tool: 'new_tab' }
+  | { tool: 'close_tab'; targetTabId: string }
   | { tool: 'snapshot' }
   | { tool: 'click'; ref: string }
   | { tool: 'type'; ref: string; text: string; submit?: boolean }
@@ -260,8 +277,10 @@ function parseAction(name: string, input: unknown): UnifiedBrowserAction {
   switch (name) {
     case 'read_page':
     case 'list_tabs':
+    case 'new_tab':
       return { tool: name };
     case 'switch_tab':
+    case 'close_tab':
       return { tool: name, targetTabId: str('targetTabId')! };
     case 'get_page_text':
       return { tool: name, cursor: str('cursor', false), maxChars: bounded('maxChars', 16000) };
@@ -432,24 +451,25 @@ export function cloudObservationTools(): ReadonlyArray<NeutralToolDefinition> {
         properties: { ...(t.inputSchema.properties as object), ...context },
       },
     })),
-    ...OBSERVATION_TOOL_NAMES.map((name) => ({
-      name,
-      description: {
-        read_page:
-          '读取当前 frame 的可访问性树、refs、版本和 frame 列表。页面变化、导航、切换标签后 refs 失效。',
-        get_page_text: '分段读取脱敏正文；cursor 绑定页版本，end=true 才是末尾。',
-        links: '分页读取真实资源链接；保留查询身份，移除追踪参数。',
-        tables: '读取表格列名、行范围及分页来源。',
-        scroll_until: '有界滚动读取；返回停滞或数量/时间/token 上限和截断原因。',
-        list_tabs: '只列出本任务拥有的标签。',
-        switch_tab: '切换到本任务已观察的标签，旧 refs 失效。',
-      }[name],
-      inputSchema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: { ...context, ...extras[name] },
-        ...(name === 'switch_tab' ? { required: ['targetTabId'] } : {}),
-      },
-    })),
+    ...OBSERVATION_TOOL_NAMES.filter((name) => name !== 'list_tabs' && name !== 'switch_tab').map(
+      (name) => ({
+        name,
+        description: {
+          read_page:
+            '读取当前 frame 的可访问性树、refs、版本和 frame 列表。页面变化、导航、切换标签后 refs 失效。',
+          get_page_text: '分段读取脱敏正文；cursor 绑定页版本，end=true 才是末尾。',
+          links: '分页读取真实资源链接；保留查询身份，移除追踪参数。',
+          tables: '读取表格列名、行范围及分页来源。',
+          scroll_until: '有界滚动读取；返回停滞或数量/时间/token 上限和截断原因。',
+          list_tabs: '只列出本任务拥有的标签。',
+          switch_tab: '切换到本任务已观察的标签，旧 refs 失效。',
+        }[name],
+        inputSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { ...context, ...extras[name] },
+        },
+      }),
+    ),
   ];
 }
