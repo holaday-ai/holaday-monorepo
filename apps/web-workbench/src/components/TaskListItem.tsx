@@ -1,3 +1,4 @@
+import { useToast } from '@/components/ui/toast';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
 import { taskDisplaySource, taskDisplayTitle } from '@/lib/task-display-copy';
 import { deriveTaskProductState } from '@/lib/task-product-state';
@@ -33,7 +34,7 @@ interface Props {
   /**
    * Active / executing tasks can't be batch-deleted — backend will
    * reject. With this flag set, the row dims its checkbox and
-   * swallows clicks so users can't accumulate undeletable rows in
+   * explains blocked clicks so users can't accumulate undeletable rows in
    * the selection set and then hit a wall on confirm.
    */
   batchDisabled?: boolean;
@@ -88,13 +89,19 @@ export function TaskListItem({
   onBatchToggle,
   batchDisabled,
 }: Props): JSX.Element {
+  const toast = useToast();
+  const batchUnavailable = Boolean(batchMode && batchDisabled);
+  const batchDisabledReason = '进行中的任务不能批量操作';
   const active = isActive(task.status);
   const elapsedNow = useTaskListElapsedNow(active && Boolean(liveSubStatus));
   const elapsedLabel = active ? taskListElapsedLabel(liveSubStatus, elapsedNow) : null;
   const handleRowClick = (e: React.MouseEvent | React.KeyboardEvent): void => {
     if (renaming) return;
     if (batchMode) {
-      if (batchDisabled) return;
+      if (batchDisabled) {
+        toast.show(batchDisabledReason, 'info');
+        return;
+      }
       onBatchToggle?.(task.taskId);
       return;
     }
@@ -104,7 +111,7 @@ export function TaskListItem({
   const rowTitle = renaming
     ? undefined
     : batchMode && batchDisabled
-      ? '进行中的任务无法批量删除'
+      ? batchDisabledReason
       : `${taskDisplaySource(task)}\n${taskListItemSubtitle(task, liveSubStatus, elapsedNow)}`;
   return (
     <div
@@ -118,6 +125,7 @@ export function TaskListItem({
          stopPropagation so the toggle doesn't fire twice. */
       onClick={batchMode ? handleRowClick : undefined}
       role={batchMode ? 'button' : undefined}
+      aria-disabled={batchUnavailable || undefined}
       title={rowTitle}
       className={cn(
         'holaday-task-row group relative flex w-full items-center gap-2 rounded-[8px] border border-transparent px-2.5 py-0.5 text-left transition-colors',
@@ -126,7 +134,7 @@ export function TaskListItem({
           !batchMode &&
           'border-[#FF0061]/22 bg-white/70 shadow-[0_8px_22px_rgba(255,0,97,0.06)] dark:bg-white/[0.05]',
         batchMode && batchChecked && 'border-[#57479C]/22 bg-[#57479C]/10 dark:bg-[#57479C]/20',
-        batchMode && batchDisabled && 'opacity-50',
+        batchUnavailable && 'cursor-not-allowed opacity-50',
         batchMode && !batchDisabled && 'cursor-pointer',
       )}
     >
@@ -167,8 +175,11 @@ export function TaskListItem({
             if (batchMode) e.stopPropagation();
           }}
           aria-pressed={selected && !batchMode ? true : undefined}
+          aria-disabled={batchUnavailable || undefined}
+          title={batchUnavailable ? batchDisabledReason : undefined}
           className={cn(
             'flex h-8 min-w-0 flex-1 items-center truncate bg-transparent text-left text-[13px] leading-5 outline-none focus-visible:ring-1 focus-visible:ring-[#FF0061]/45',
+            batchUnavailable && 'cursor-not-allowed',
             task.status === 'failed' ? 'text-[#ADADAD]' : 'text-[#595757] dark:text-foreground/85',
             selected && 'font-medium text-[#FF0061] dark:text-[#FF0061]',
           )}
