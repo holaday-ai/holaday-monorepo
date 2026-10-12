@@ -224,6 +224,7 @@ export class BrowserReplayStore {
 }
 
 export class BrowserReplayRecorder {
+  private reportedErrors = new Set<string>();
   private paused = false;
   get isPaused() {
     return this.paused;
@@ -245,6 +246,7 @@ export class BrowserReplayRecorder {
     private task: string,
     private origins: Set<string>,
     limits: Partial<{ maxFrames: number; maxBytes: number; maxMs: number }> = {},
+    private onError?: (code: string) => void | Promise<void>,
   ) {
     this.limits = { maxFrames: 1200, maxBytes: 100 * 1024 * 1024, maxMs: 10 * 60000, ...limits };
   }
@@ -320,8 +322,20 @@ export class BrowserReplayRecorder {
           this.limits,
         );
       })
-      .catch(() => {
-        /* Archive failure must never leak page data or release an action gate. */
+      .catch(async (error: unknown) => {
+        // Persist only an allowlisted category; filesystem paths/page data stay private.
+        const code = (error as { code?: unknown })?.code;
+        const diagnostic =
+          typeof code === 'string' && ['EACCES', 'EROFS', 'ENOSPC', 'ENOTDIR'].includes(code)
+            ? `replay_storage_${code.toLowerCase()}`
+            : 'replay_capture_failed';
+        if (this.reportedErrors.has(diagnostic)) return;
+        this.reportedErrors.add(diagnostic);
+        try {
+          await this.onError?.(diagnostic);
+        } catch {
+          /* Diagnostics cannot release a gate. */
+        }
       })
       .finally(() => {
         this.queued--;

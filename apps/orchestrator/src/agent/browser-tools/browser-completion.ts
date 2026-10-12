@@ -1,18 +1,59 @@
 import { detectCaptchaPage, detectLoginPage } from '../login-detector.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 
-export function detectBrowserBlocker(page: { url: string; title: string; text: string }) {
+export interface BrowserBlockerEvidence {
+  frameHost: string;
+  framePath: string;
+  rule: string;
+  visible: boolean;
+  scope: 'document' | 'dialog' | 'player' | 'frame';
+}
+export function detectBrowserBlocker(page: {
+  url: string;
+  title: string;
+  text: string;
+  visible?: boolean;
+  blocking?: boolean;
+  readableContent?: boolean;
+  scope?: BrowserBlockerEvidence['scope'];
+}) {
+  if (
+    page.visible === false ||
+    page.blocking === false ||
+    (page.readableContent && page.scope === 'document')
+  )
+    return null;
   const input = { url: page.url, title: page.title, prominentText: page.text };
-  const captcha =
-    detectCaptchaPage(input).matched || /sign in to confirm you[’']?re not a bot/i.test(page.text);
-  if (captcha)
-    return {
-      reason: 'captcha',
-      message: '页面遇到机器人验证或验证码，需要你接管完成验证；当前任务尚未完成。',
-    };
-  if (detectLoginPage(input).matched)
-    return { reason: 'login', message: '页面遇到登录墙，需要你接管登录；当前任务尚未完成。' };
-  return null;
+  const captcha = detectCaptchaPage(input);
+  const login = detectLoginPage(input);
+  const hit = captcha.matched ? captcha : login;
+  if (!hit.matched) return null;
+  let frameHost = '';
+  let framePath = '/';
+  try {
+    const url = new URL(page.url);
+    frameHost = url.hostname;
+    framePath = url.pathname
+      .split('/')
+      .map((part) => (part.length > 40 || /@|%40/i.test(part) ? '[redacted]' : part))
+      .join('/')
+      .slice(0, 300);
+  } catch {}
+  const reason = captcha.matched ? 'captcha' : 'login';
+  return {
+    reason,
+    message:
+      reason === 'captcha'
+        ? '页面遇到机器人验证或验证码，需要你接管完成验证；当前任务尚未完成。'
+        : '页面遇到登录墙，需要你接管登录；当前任务尚未完成。',
+    evidence: {
+      frameHost,
+      framePath,
+      rule: `${reason}:${hit.source}:${hit.match}`,
+      visible: true,
+      scope: page.scope ?? 'document',
+    } satisfies BrowserBlockerEvidence,
+  };
 }
 
 export type BrowserTrace = Pick<

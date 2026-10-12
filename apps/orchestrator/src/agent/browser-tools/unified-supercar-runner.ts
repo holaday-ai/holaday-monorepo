@@ -174,7 +174,15 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   }
   const replay =
     capabilities.replayV1 && opts.userExternalId
-      ? new BrowserReplayRecorder(browserReplayStore, opts.userExternalId, opts.taskId, new Set())
+      ? new BrowserReplayRecorder(
+          browserReplayStore,
+          opts.userExternalId,
+          opts.taskId,
+          new Set(),
+          {},
+          async (code) =>
+            recordDiagnostic('browser_replay', code, '回放录制失败，执行结果仍以步骤证据为准。'),
+        )
       : null;
   let replayActionId = 0;
   let sampling = false;
@@ -256,6 +264,31 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       /* Hooks are best-effort, as in the legacy loop. */
     }
   };
+
+  async function recordDiagnostic(
+    actionKind: string,
+    errorCode: string,
+    message: string,
+    blockerEvidence?: import('./browser-completion.js').BrowserBlockerEvidence,
+  ) {
+    iteration += 1;
+    await safe(() =>
+      opts.onTick?.({
+        iteration,
+        execution: {
+          actionKind,
+          actionSummary: message,
+          ok: false,
+          message,
+          errorCode,
+          ...(blockerEvidence ? { blockerEvidence } : {}),
+        },
+        toolsInTurn: [],
+        textPreamble: '',
+        apiLatencyMs: 0,
+      }),
+    );
+  }
 
   /** Parks until the user replies (supercarReply); null on timeout or abort. */
   const parkForReply = async (
@@ -374,7 +407,26 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       observationV2: capabilities.observationV2,
       requireBrowserEvidence: true,
       supportedTools: tools.supportedTools,
-      probeBlocker: tools.blocker,
+      probeBlocker: async () => {
+        const blocker = await tools.blocker();
+        if (blocker && 'evidence' in blocker) {
+          await recordDiagnostic(
+            'browser_blocker',
+            `browser_${blocker.reason}_wall`,
+            blocker.message,
+            blocker.evidence,
+          );
+          await safe(() =>
+            opts.onEvidence?.({
+              fact: JSON.stringify(blocker.evidence),
+              sourceType: 'browser_state',
+              sourceDetail: 'browser_blocker',
+              confidence: 'observed',
+            }),
+          );
+        }
+        return blocker;
+      },
       currentPageUrl: () => tools.page.url(),
       checkInterruption: () =>
         tools.observation?.interruption() ?? egress.interruption() ?? undefined,
