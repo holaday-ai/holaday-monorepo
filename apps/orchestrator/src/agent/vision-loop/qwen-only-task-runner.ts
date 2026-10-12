@@ -13,6 +13,7 @@ import {
 import { createPlaywrightUnifiedExecutor } from '../browser-tools/playwright-unified-executor.js';
 import { runUnifiedBrowserLoop } from '../browser-tools/unified-browser-loop.js';
 import type { UnifiedBrowserAction } from '../browser-tools/unified-tools.js';
+import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
 import type { RunOutcome } from './runner.js';
 import {
   type StartVisionLoopTaskOptions,
@@ -36,7 +37,11 @@ const CAPTURED_OPS = new Set<CapturedToolCall['op']>([
  * (batch 06, flag-gated); otherwise it falls back to the commander loop.
  */
 export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Promise<RunOutcome> {
-  if (!opts.playwrightExecutor || !opts.messagesAdapter) return startCommanderLoopTask(opts);
+  if (!opts.playwrightExecutor || !opts.messagesAdapter) {
+    if (opts.messagesAdapter?.browserBrain)
+      return { status: 'failed', reason: '角色模型需要统一浏览器执行器。', history: [] };
+    return startCommanderLoopTask(opts);
+  }
   let page: Awaited<ReturnType<NonNullable<typeof opts.playwrightExecutor>['getPage']>>;
   try {
     page = await opts.playwrightExecutor.getPage();
@@ -54,7 +59,8 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   };
   const evolution = opts.evolution;
   try {
-    if (evolution) {
+    // A configured verifier must see every completion, including reusable paths.
+    if (evolution && !opts.messagesAdapter.browserBrain) {
       const reuse = await tryPlaybookReuse({
         db: evolution.db,
         tools: playbookToolsFromUnifiedExecutor(page, perform),
@@ -108,7 +114,13 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
       requireBrowserEvidence: true,
       supportedTools: tools.supportedTools,
       probeBlocker: tools.blocker,
-      adapter: opts.messagesAdapter,
+      adapter: recordedBrowserAdapter(opts.messagesAdapter, {
+        recorder: opts.recorder,
+        userExternalId: opts.userId,
+        taskId: opts.taskId,
+        iteration: 0,
+        onRecordError: () => {},
+      }),
       execute,
       ...(opts.webSearch ? { webSearch: opts.webSearch } : {}),
       maxSteps: opts.maxSteps ?? 40,

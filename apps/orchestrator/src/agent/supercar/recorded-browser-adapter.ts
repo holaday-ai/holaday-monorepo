@@ -14,6 +14,7 @@ export function recordedBrowserAdapter(
     userExternalId?: string;
     taskId: string;
     iteration: number;
+    role?: import('../../llm/browser-brain.js').BrowserBrainRole;
     onRecordError: () => void;
   },
 ): MessagesAdapter {
@@ -28,6 +29,20 @@ export function recordedBrowserAdapter(
   };
   return {
     metadata: adapter.metadata,
+    ...(adapter.browserBrain
+      ? {
+          browserBrain: {
+            planning: recordedBrowserAdapter(adapter.browserBrain.planning, {
+              ...context,
+              role: 'planning',
+            }),
+            verification: recordedBrowserAdapter(adapter.browserBrain.verification, {
+              ...context,
+              role: 'verification',
+            }),
+          },
+        }
+      : {}),
     async create(request, options) {
       const start = Date.now();
       const base = {
@@ -36,8 +51,18 @@ export function recordedBrowserAdapter(
         provider: adapter.metadata.provider,
         model: adapter.metadata.model,
         region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
-        purpose: 'supercar.turn' as const,
-        requestMeta: { iteration: context.iteration, protocol: 'messages', lane: 'browser' },
+        purpose:
+          context.role === 'planning'
+            ? ('browser.planning' as const)
+            : context.role === 'verification'
+              ? ('browser.verification' as const)
+              : ('supercar.turn' as const),
+        requestMeta: {
+          iteration: context.iteration,
+          protocol: 'messages',
+          lane: 'browser',
+          role: context.role ?? 'execution',
+        },
       };
       let result: NeutralMessagesResponse;
       try {

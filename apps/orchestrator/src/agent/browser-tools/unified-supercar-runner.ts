@@ -192,6 +192,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   let modelTurn = 0;
   const adapter: MessagesAdapter = {
     metadata: baseAdapter.metadata,
+    browserBrain: recordedBrowserAdapter(baseAdapter, {
+      recorder: opts.recorder,
+      userExternalId: opts.userExternalId,
+      taskId: opts.taskId,
+      iteration: 0,
+      onRecordError: () => {},
+    }).browserBrain,
     create(request, options) {
       modelTurn += 1;
       return recordedBrowserAdapter(baseAdapter, {

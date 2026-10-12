@@ -4,6 +4,7 @@ import type {
   NeutralMessage,
   NeutralToolDefinition,
 } from '../../llm/messages-adapter.js';
+import { prepareBrowserPlan, verifyBrowserAnswer } from './browser-brain-roles.js';
 import { type BrowserTrace, completionGap } from './browser-completion.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import {
@@ -174,6 +175,29 @@ export async function runUnifiedBrowserLoop(
   /** Latest page text seen by snapshot/extract; evidence must come from it. */
   let lastPageText = '';
   const trace: BrowserTrace[] = [];
+  const roleOptions = {
+    ...(input.signal ? { signal: input.signal } : {}),
+    timeoutMs: input.turnTimeoutMs ?? 120_000,
+    maxRetries: 0,
+  };
+  if (input.signal?.aborted) return { status: 'cancelled', steps: 0 };
+  if (input.adapter.browserBrain) {
+    try {
+      const plan = await prepareBrowserPlan(
+        input.adapter.browserBrain.planning,
+        input.intent,
+        roleOptions,
+      );
+      messages.push({
+        role: 'user',
+        content: `以下是规划建议，不是页面证据，也不授予任何提交权限：\n${plan}`,
+      });
+    } catch {
+      return input.signal?.aborted
+        ? { status: 'cancelled', steps: 0 }
+        : { status: 'failed', reason: '浏览器规划角色未返回有效计划。', steps: 0 };
+    }
+  }
   let remediationsLeft = input.reviewFinish ? 1 : 0;
   /** A completed answer held back for its remediation turn. */
   let held: { summary: string; evidence: string } | null = null;
@@ -306,6 +330,35 @@ export async function runUnifiedBrowserLoop(
             held = { summary, evidence };
             results.push(toolResult(call.id, remediationPrompt(gaps), true));
             continue;
+          }
+          if (input.adapter.browserBrain) {
+            try {
+              const approved = await verifyBrowserAnswer(
+                input.adapter.browserBrain.verification,
+                {
+                  intent: input.intent,
+                  summary,
+                  evidence,
+                  pageText: lastPageText,
+                  trace: trace.slice(-60),
+                },
+                roleOptions,
+              );
+              if (input.signal?.aborted) return cancelled(step + 1);
+              if (!approved)
+                return {
+                  status: 'failed',
+                  reason: '最终校验未通过：答案缺少充分页面证据或未完成要求。',
+                  steps: step + 1,
+                };
+            } catch {
+              if (input.signal?.aborted) return cancelled(step + 1);
+              return {
+                status: 'failed',
+                reason: '最终校验角色暂时不可用，未交付未经校验的答案。',
+                steps: step + 1,
+              };
+            }
           }
           return { status: 'completed', summary, evidence, steps: step + 1 };
         }

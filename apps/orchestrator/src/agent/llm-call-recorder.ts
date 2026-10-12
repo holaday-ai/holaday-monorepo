@@ -54,6 +54,8 @@ export interface LlmCallRecord {
     | 'skill.body'
     | 'safety.filter'
     | 'supercar.turn'
+    | 'browser.planning'
+    | 'browser.verification'
     | 'media.image'
     | 'media.video'
     | 'media.tts';

@@ -144,3 +144,46 @@ it('recovers a zero-step answer through real navigation and then completes the v
     await page.close();
   }
 });
+
+it('does not reuse a playbook or fall back to commander when browser roles are configured', async () => {
+  const readonly: MessagesAdapter = {
+    metadata: {
+      provider: 'alibaba-model-studio',
+      model: 'test-role',
+      region: 'cn',
+      deploymentScope: 'china_mainland',
+      endpointKind: 'public',
+      protocol: 'messages',
+    },
+    async create() {
+      throw new Error('planned test failure');
+    },
+  };
+  const adapter = { ...readonly, browserBrain: { planning: readonly, verification: readonly } };
+  const common = {
+    taskId: 'role-task',
+    userId: 'test-user',
+    intent: 'Read Alpha',
+    commander: {} as never,
+    messagesAdapter: adapter,
+  };
+  expect((await startVisionLoopTask(common)).status).toBe('failed');
+  const page = await browser.newPage();
+  try {
+    reuse.mockResolvedValue({ handled: true } as never);
+    const result = await startVisionLoopTask({
+      ...common,
+      playwrightExecutor: { getPage: async () => page } as never,
+      evolution: {
+        db: {} as never,
+        taskDbId: 1,
+        generateAdapter: {} as never,
+        logger: {} as never,
+      },
+    });
+    expect(result.status).toBe('failed');
+    expect(reuse).not.toHaveBeenCalled();
+  } finally {
+    await page.close();
+  }
+});

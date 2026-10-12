@@ -137,6 +137,7 @@ export interface NeutralMessagesResponse {
 }
 
 export interface MessagesAdapter {
+  readonly browserBrain?: import('./browser-brain.js').BrowserBrainRoles;
   readonly metadata: MessagesProviderMetadata;
   create(
     request: NeutralMessagesRequest,

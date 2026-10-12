@@ -241,6 +241,11 @@ import {
 } from '../../files/parsers.js';
 import { getSharedStorageProvider } from '../../files/storage-provider.js';
 import { allowedFormatsForPlan, isCreateFileFormat, renderFile } from '../../files/writers.js';
+import {
+  browserBrainRequestSchema,
+  resolveBrowserBrainSelection,
+  withBrowserBrain,
+} from '../../llm/browser-brain.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import {
   catalogSettingsService,
@@ -688,6 +693,7 @@ const createInput = z.object({
    * by `resolveBrain`; an unknown, hidden or unconfigured brain falls back to
    * the catalog default and the fallback reason is recorded with the task.
    */
+  browserBrain: browserBrainRequestSchema.optional(),
   brainId: z
     .string()
     .min(1)
@@ -1117,7 +1123,16 @@ export const tasksRouter = router({
       // starts, so every lane resolved downstream (generate, verifier, plan,
       // browser…) uses it.
       const brain = await resolveBrainForUser(ctx.db, ctx.userId, input.brainId);
-      return runWithBrain(brain, () => next());
+      let roles: ReturnType<typeof resolveBrowserBrainSelection>;
+      try {
+        roles = resolveBrowserBrainSelection(appEnv, ctx.userId, input.browserBrain);
+      } catch (error) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: error instanceof Error ? error.message : '浏览器大脑配置无效。',
+        });
+      }
+      return withBrowserBrain(roles, () => runWithBrain(brain, () => next()));
     })
     .mutation(async ({ ctx, input }) => {
       if (
@@ -7888,6 +7903,7 @@ export const tasksRouter = router({
                 visionRuntime.kind === 'ready'
                   ? {
                       messagesAdapter: visionRuntime.messages('vision'),
+                      recorder: new DrizzleLlmCallRecorder(ctx.db),
                       webSearch: createFallbackWebSearch({
                         primary: createResponsesWebSearch(visionRuntime.responses('fast')),
                         firecrawl: ctx.firecrawl ?? null,

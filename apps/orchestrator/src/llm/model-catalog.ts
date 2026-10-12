@@ -7,6 +7,7 @@ import {
   taskModelSelections,
 } from '../db/schema/model-catalog.js';
 import { users } from '../db/schema/users.js';
+import { currentBrowserBrain } from './browser-brain.js';
 import { CORE_MODEL_LANES, type CoreModelLane } from './model-runtime-policy.js';
 
 export const BRAIN_PROVIDERS = ['alibaba-model-studio', 'anthropic', 'openai'] as const;
@@ -471,7 +472,7 @@ export async function recordTaskModelSelection(
       provider: resolved.brain.provider,
       requestedBrainId: resolved.requestedBrainId,
       fallbackReason: resolved.fallbackReason,
-      laneModels: resolved.brain.laneModels,
+      laneModels: { ...resolved.brain.laneModels, browserRoles: currentBrowserBrain() ?? {} },
     })
     .onDuplicateKeyUpdate({ set: { taskExternalId } });
 }
