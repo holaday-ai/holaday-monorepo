@@ -24,7 +24,7 @@ pnpm ui:audit
 pnpm test:ui-suite
 ```
 
-Screenshot comparison flags >1% pixels with an RGB channel difference >30. Time, locale, timezone, viewport height (960), color scheme and reduced motion are fixed. Browser/OS/seed/width mismatch blocks comparison; candidate SHA and source/build hashes are recorded. Review image differences before updating a baseline. Fonts and browser versions affect pixels.
+Screenshot comparison flags >1% pixels with an RGB channel difference >30. Time, locale, timezone, viewport size (1440×960, 1280×960, 1024×960, 1200×1000 and 1366×768), color scheme and reduced motion are fixed. Browser/OS/seed/viewport mismatch blocks comparison; candidate SHA and source/build hashes are recorded. Review image differences before updating a baseline. Fonts and browser versions affect pixels.
 
 To audit the other frontend branch without modifying it, keep this harness and dependencies here and set `UI_AUDIT_APP_DIR=/absolute/path/to/other-checkout/apps/web-workbench` and `UI_AUDIT_OUTPUT=/private/tmp/other-ui-audit`. The runner builds that candidate, validates its source hash, and compares against these baselines. The target's existing `dist` is replaced by a local build. Use its isolated worktree; do not point at a deployment directory. This has not been claimed as a green run of an unavailable future fix.
 
@@ -54,3 +54,15 @@ The seed server is intentionally a finite UI contract fixture, not the real back
 External mailto/tel links are recorded as protocol-link URI checks; this suite does not launch host applications or send messages. They are separate from clicked web URLs.
 
 Security UI fixtures use visibly synthetic credential placeholders only; they are never provisioned, usable, or read from host secrets.
+
+## Laptop layout audit
+
+`UI_AUDIT_VIEWPORTS` accepts explicit `{width,height}` pairs (and cannot be combined with `UI_AUDIT_WIDTHS`). Legacy width filters keep a 960px height. New screenshot IDs include the height except for the existing 960px baselines.
+
+```bash
+UI_AUDIT_CASES='["/","task:browser:executing","/stocks","/settings"]' \
+UI_AUDIT_VIEWPORTS='[{"width":1200,"height":1000},{"width":1366,"height":768}]' \
+pnpm ui:audit --layout-only
+```
+
+This bounded mode retains seeded readiness, runtime/network errors, geometry, task-state assertions and screenshots. It also measures document and bounded-container horizontal overflow, full-height shell/main/sidebar coverage, and a shell header painting over the browser toolbar. It skips control traversal and visual baseline comparison, explicitly records those gaps, and **never passes the full release gate**. A completed zero-P1 layout matrix is layout evidence only. Use the normal unfiltered command for the full interaction release gate; creating new viewport baselines requires separate visual review.

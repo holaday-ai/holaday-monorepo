@@ -10,6 +10,7 @@
   align-items: center;
   justify-content: center;
   min-height: 530px;
+  min-width: 0;
   padding: 100px 48px 14vh;
   overflow: auto;
   isolation: isolate;
@@ -17,6 +18,7 @@
 .hd-new-task-home {
   width: 100%;
   max-width: 688px;
+  min-width: 0;
   position: relative;
   z-index: 1;
   animation: hd-empty-enter 620ms var(--hd-motion);

@@ -4668,3 +4668,31 @@
     flex: none;
   }
 }
+
+/* The sidebar reduces the content width independently of the window breakpoint. */
+#energy-recharge {
+  container: energy / inline-size;
+}
+
+@container energy (max-width: 900px) {
+  .energy-hero:not(.energy-hero--compact) {
+    grid-template-areas:
+      "copy art"
+      "needs art"
+      "action art";
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 0.86fr);
+    grid-template-rows: auto 1fr auto;
+  }
+
+  .energy-hero:not(.energy-hero--compact) .energy-need-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container energy (max-width: 620px) {
+  .energy-hero:not(.energy-hero--compact) {
+    grid-template-areas: "copy" "art" "needs" "action";
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+  }
+}

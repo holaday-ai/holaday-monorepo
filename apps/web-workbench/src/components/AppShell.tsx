@@ -811,7 +811,8 @@ export function AppShell(): JSX.Element {
           flex-1 + overflow-y-auto blocks (WorkbenchApp, scheduled
           calendar). */}
       <SidebarInset className="holaday-main h-svh overflow-y-auto bg-background">
-        <div className="hd-shell-topbar" aria-hidden="true" />
+        {/* Workbench owns its toolbar; a painted shell strip would cover the browser controls. */}
+        {location.pathname !== '/' && <div className="hd-shell-topbar" aria-hidden="true" />}
         {!selectedTaskId && <WorkbenchBreadcrumb />}
         <Outlet context={ctx} />
       </SidebarInset>
