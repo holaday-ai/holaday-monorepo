@@ -46,12 +46,42 @@ const IDENTITY = new RegExp(
  */
 const NEGATED_LOGIN =
   /(?:不|不要|无需|不需要|不用|别|勿|无须|不必|免)\s*(?:要|用|必)?\s*(?:登录|登陆|登入|注册|sign\s*in|log\s*in)|\b(?:without|no need to|don'?t|do not|never)\s+(?:logging|signing|log|sign)(?:\s*(?:in|into))?\b|\bno\s+(?:login|sign[ -]?in)\b/gi;
+/**
+ * A stop condition — "若有验证码、登录墙就立即停止", "遇到账号门槛立即暂停",
+ * "if you hit a login wall, stop" — describes an obstacle to report, not a
+ * request to use the user's login. Removed only when the clause names no
+ * personal data (see PERSONAL_DATA), so "遇到登录页就用我的账号登录" still counts.
+ */
+const CONDITIONAL_OBSTACLE =
+  /(?:若|如果|如若|假如|假若|倘若|要是|一旦|万一|如遇|若遇|遇到|碰到|遇上|出现)[^。；;！!？?\n]{0,40}?(?:登录|登陆|登入|验证|账号|账户|人机)[^。；;！!？?\n]{0,30}?(?:停止|停下|暂停|中止|终止|停|报告|交给我|交还|交接|告诉我|通知我|退出|放弃|不要继续|不再继续)|\b(?:if|when|should)\b[^.;!?\n]{0,60}?\b(?:log-?\s?in|sign-?\s?in|captcha|verification)\b[^.;!?\n]{0,40}?\b(?:stop|pause|halt|hand|report|abort)\b|\b(?:stop|pause|halt|abort)\b[^.;!?\n]{0,30}?\b(?:if|when)\b[^.;!?\n]{0,40}?\b(?:log-?\s?in|sign-?\s?in|captcha|verification)\b/gi;
+/**
+ * A forbidden action — "不加购物车", "不要下单", "不提交任何表单", "don't add to
+ * cart" — limits what the task may do; it is not a request for account data.
+ */
+const NEGATED_OPERATION =
+  /(?:不|不要|别|勿|切勿|禁止|不得|不能|不可|无需|不用|不必|无须)\s*(?:要|用|必)?\s*(?:把[^，。；、,;\n]{0,10}?)?(?:加入|加到|加|放入|放进|添加到|添加)?\s*(?:购物车|加购|下单|购买|付款|支付|结算|提交(?:任何)?(?:表单|订单|申请)?|收藏|关注|点赞|评论|转发|发帖|发布|发消息|发送消息)|\b(?:don'?t|do not|never|without)\s+(?:add(?:ing)?\s+(?:\w+\s+)?to\s+(?:the\s+|a\s+)?cart|buy(?:ing)?|purchas(?:e|ing)|check(?:ing)?\s*out|order(?:ing)?|plac(?:e|ing)\s+(?:an?\s+)?order|pay(?:ing)?|submit(?:ting)?|post(?:ing)?)\b/gi;
+/** Personal-data wording that keeps a clause from being treated as a mere condition. */
+const PERSONAL_DATA = /我的|本人|用我|自己的|私有|私密|\bmy\b|\bprivate\b/i;
 /** Whether the request explicitly needs the user's own login / private data. */
 export function requiresUserIdentity(intent: string): boolean {
   return IDENTITY.test(
-    intent.replace(/https?:\/\/[^\s<>"'，。；）]+/gi, ' ').replace(NEGATED_LOGIN, ' '),
+    intent
+      .replace(/https?:\/\/[^\s<>"'，。；）]+/gi, ' ')
+      .replace(NEGATED_LOGIN, ' ')
+      .replace(CONDITIONAL_OBSTACLE, (clause) => (PERSONAL_DATA.test(clause) ? clause : ' '))
+      .replace(NEGATED_OPERATION, ' '),
   );
 }
+/**
+ * Public sites that are usually unreachable from mainland-China networks: the
+ * user's own Chrome may not open them, so they stay in the cloud browser even
+ * with routing v2 (unless the request needs the user's own login, or the user
+ * explicitly picked a Chrome page).
+ */
+const CN_UNREACHABLE_HOST =
+  /(?:^|\.)(?:google\.[a-z.]{2,}|googleusercontent\.com|youtube\.com|youtu\.be|wikipedia\.org|wikimedia\.org|twitter\.com|x\.com|facebook\.com|instagram\.com|reddit\.com)$/i;
+const CN_UNREACHABLE_NAME =
+  /\bgoogle\b|谷歌|youtube|油管|wikipedia|维基百科|\btwitter\b|推特|\bfacebook\b|脸书|\binstagram\b|\breddit\b/i;
 /**
  * Services that are normally behind a login. Not certain enough to refuse an
  * explicit public-cloud choice, but without one the task waits for the user's
@@ -133,6 +163,16 @@ export function decideUserBrowserRoute(input: {
   const likely = !identity && IDENTITY_LIKELY.test(input.intent);
   // Unsure whether a login is needed → wait for the user's Chrome (or an explicit public choice).
   const preferred = Boolean(cohort) || identity || likely;
+  const cnUnreachable = url
+    ? CN_UNREACHABLE_HOST.test(host ?? '')
+    : !cohort && CN_UNREACHABLE_NAME.test(input.intent);
+  if (cnUnreachable && !identity && !input.selectionOrigin)
+    return {
+      lane: 'cloud',
+      reason: 'public_site',
+      limitation:
+        '该站点在中国大陆网络常无法直接访问，已使用云端浏览器公开查询（无登录态），无法读取个人信息。',
+    };
   if (input.publicCloudRequested && !identity && !input.selectionOrigin)
     return {
       lane: 'cloud',
