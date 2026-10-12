@@ -5109,6 +5109,8 @@
 }
 .holaday-sidebar .hd-task-history-scroll {
   overscroll-behavior: contain;
+  /* Keep one button of clearance above the footer when focus scrolls a task into view. */
+  scroll-padding-bottom: 2rem;
 }
 .dark .holaday-shell:has(.hd-stocks-page) .hd-workbench-breadcrumb,
 .dark .holaday-shell:has(.hd-stocks-page) .hd-workbench-breadcrumb * {
