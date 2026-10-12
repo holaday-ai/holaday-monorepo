@@ -596,6 +596,8 @@ export interface SupercarTickEvent {
     actionSummary: string;
     ok: boolean;
     message?: string;
+    errorCode?: string;
+    errorMessage?: string;
   };
   iteration: number;
   /**
@@ -860,6 +862,8 @@ export interface RunSupercarOptions {
    * NULL, so recording is skipped when this is absent even if `recorder` is set.
    */
   userExternalId?: string;
+  /** Owner-resolved rollout snapshot passed through task dispatch. */
+  browserCapabilities?: import('../../config/browser-capabilities.js').BrowserCapabilities;
 
   // --- Phase 6-2: 5-lane router inputs ---
   /**

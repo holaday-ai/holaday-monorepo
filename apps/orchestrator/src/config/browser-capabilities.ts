@@ -1,6 +1,23 @@
 import { getFeatureFlags } from '../execution/feature-flags.js';
 import { env } from './env.js';
 
+export interface BrowserCapabilities {
+  readonly viewportV2: boolean;
+  readonly observationV2: boolean;
+  readonly replayV1: boolean;
+  readonly routingV2: boolean;
+}
+
+/** Existing test/legacy instances get a single owner-based snapshot on first use. */
+export function instanceBrowserCapabilities(instance: {
+  userId: string;
+  capabilities?: BrowserCapabilities;
+}): BrowserCapabilities {
+  if (!instance.capabilities)
+    instance.capabilities = Object.freeze(browserCapabilities(instance.userId));
+  return instance.capabilities;
+}
+
 export function resolveBrowserCapabilities(
   userId: string | undefined,
   config: {

@@ -21,7 +21,7 @@ import {
 import { pino } from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BrowserPool, PoolCapacityError } from './browser-pool.js';
-import type { BrowserInstance, PoolConfig } from './types.js';
+import type { BrowserInstance, BrowserSessionTarget, PoolConfig } from './types.js';
 
 function makePool(maxInstances = 10): {
   pool: BrowserPool;
@@ -46,7 +46,12 @@ function makePool(maxInstances = 10): {
   // on spawn, release on tearDown) matches production behaviour;
   // tests for canAllocate / capacity / port reuse depend on this.
   const spawnSpy = vi.fn(
-    async (taskId: string, userId: string, viewportProfile?: BrowserViewportProfile) => {
+    async (
+      taskId: string,
+      userId: string,
+      viewportProfile?: BrowserViewportProfile,
+      session?: BrowserSessionTarget,
+    ) => {
       const allocator = (
         pool as unknown as { allocator: { claim: () => unknown; isFull: () => boolean } }
       ).allocator;
@@ -64,6 +69,7 @@ function makePool(maxInstances = 10): {
         ...slot,
         taskId,
         userId,
+        capabilities: session?.capabilities,
         userDataDir: `/tmp/test-task-${taskId}`,
         executor: {
           disconnect: vi.fn().mockResolvedValue(undefined),
@@ -133,16 +139,42 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
       const inst = await pool.allocate('tsk_panel', 'usr_panel', 'sidepanel');
 
       expect(inst.viewportProfile).toBe('sidepanel');
-      expect(spawnSpy).toHaveBeenCalledWith('tsk_panel', 'usr_panel', 'sidepanel', undefined);
+      expect(spawnSpy).toHaveBeenCalledWith(
+        'tsk_panel',
+        'usr_panel',
+        'sidepanel',
+        expect.objectContaining({ capabilities: expect.objectContaining({ viewportV2: false }) }),
+      );
+    });
+
+    it('passes a frozen owner decision and desktop floor to the spawned canary task', async () => {
+      const capabilities = {
+        viewportV2: true,
+        observationV2: true,
+        replayV1: true,
+        routingV2: true,
+      };
+      await pool.allocate('tsk_canary', 'usr_canary', 'sidepanel', { capabilities });
+      const session = spawnSpy.mock.calls[0]?.[3];
+      expect(spawnSpy.mock.calls[0]?.[2]).toBe('desktop');
+      expect(session?.capabilities).toEqual(capabilities);
+      expect(Object.isFrozen(session?.capabilities)).toBe(true);
+      capabilities.replayV1 = false;
+      expect(session?.capabilities?.replayV1).toBe(true);
     });
 
     it('passes the task target site to session preparation (FIX-PR252)', async () => {
       await pool.allocate('tsk_target', 'usr_panel', undefined, {
         targetUrl: 'https://www.jd.com',
       });
-      expect(spawnSpy).toHaveBeenCalledWith('tsk_target', 'usr_panel', undefined, {
-        targetUrl: 'https://www.jd.com',
-      });
+      expect(spawnSpy).toHaveBeenCalledWith(
+        'tsk_target',
+        'usr_panel',
+        undefined,
+        expect.objectContaining({
+          targetUrl: 'https://www.jd.com',
+        }),
+      );
     });
 
     it('deduplicates concurrent allocation attempts for the same task', async () => {

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Frame, Page, Request } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { TRANSACTION_PAGE_RE } from '../supercar/runtime-action-policy.js';
+import { ensureExecutionViewport } from './browser-viewport.js';
 import { redactPageText } from './page-redaction.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import { type UnifiedBrowserAction, isMutatingBrowserAction } from './unified-tools.js';
@@ -150,155 +151,159 @@ const TRANSACTION_RECEIPT_RE =
   /(?:下单|付款|支付|提交|删除|发送)(?:成功|完成)|订单号|(?:order|payment|purchase|booking)\s+(?:created|placed|confirmed|completed|number)|(?:deleted|sent)\s+successfully/i;
 
 /** No raw form values or network payloads leave this host-side verifier. */
-export async function observationState(frame: Frame) {
-  const state = await frame.evaluate(() => {
-    const root = globalThis as typeof globalThis & {
-      __holadayObservation?: { id: string; version: number; interceptedEnter: number };
-    };
-    if (!root.__holadayObservation) {
-      const current = { id: `${Date.now()}-${Math.random()}`, version: 0, interceptedEnter: 0 };
-      root.__holadayObservation = current;
-      new MutationObserver(() => current.version++).observe(document, {
-        subtree: true,
-        childList: true,
-        attributes: true,
-        characterData: true,
-      });
-      document.addEventListener(
-        'keydown',
-        (event) => {
-          if (event.key === 'Enter')
-            setTimeout(() => {
-              if (event.defaultPrevented) current.interceptedEnter++;
-            }, 0);
-        },
-        true,
-      );
-      document.addEventListener('input', () => current.version++, true);
-      document.addEventListener('change', () => current.version++, true);
+function collectObservationState() {
+  const root = globalThis as typeof globalThis & {
+    __holadayObservation?: { id: string; version: number; interceptedEnter: number };
+  };
+  if (!root.__holadayObservation) {
+    const current = { id: `${Date.now()}-${Math.random()}`, version: 0, interceptedEnter: 0 };
+    root.__holadayObservation = current;
+    new MutationObserver(() => current.version++).observe(document, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    });
+    document.addEventListener(
+      'keydown',
+      (event) => {
+        if (event.key === 'Enter')
+          setTimeout(() => {
+            if (event.defaultPrevented) current.interceptedEnter++;
+          }, 0);
+      },
+      true,
+    );
+    document.addEventListener('input', () => current.version++, true);
+    document.addEventListener('change', () => current.version++, true);
+  }
+  const form = Array.from(document.querySelectorAll('input,textarea,select'))
+    .slice(0, 200)
+    .map((el) => {
+      const input = el as HTMLInputElement;
+      return [input.type, input.name, input.value, input.checked];
+    });
+  const text = (document.body?.innerText || '').slice(0, 100_000);
+  const roots: ParentNode[] = [document];
+  const fields: Element[] = [];
+  for (let i = 0; i < roots.length && i < 100; i++) {
+    const currentRoot = roots[i];
+    if (!currentRoot) break;
+    fields.push(...Array.from(currentRoot.querySelectorAll('input,textarea')));
+    for (const element of Array.from(currentRoot.querySelectorAll('*')).slice(0, 10000))
+      if (element.shadowRoot) roots.push(element.shadowRoot);
+  }
+  const visible = (element: Element) => {
+    const style = getComputedStyle(element);
+    return (
+      element.getClientRects().length > 0 &&
+      style.visibility !== 'hidden' &&
+      style.display !== 'none'
+    );
+  };
+  const keypads = new Map<Element, Set<string>>();
+  for (const currentRoot of roots.slice(0, 100)) {
+    for (const key of Array.from(
+      currentRoot.querySelectorAll('button,[role="button"],[role="gridcell"],td'),
+    ).slice(0, 2000)) {
+      const digit = key.textContent?.trim() ?? '';
+      if (!/^[0-9]$/.test(digit) || !visible(key)) continue;
+      const container = key.closest('.keypad,[role="grid"],[role="group"]') ?? key.parentElement;
+      if (!container) continue;
+      const digits = keypads.get(container) ?? new Set<string>();
+      digits.add(digit);
+      keypads.set(container, digits);
     }
-    const form = Array.from(document.querySelectorAll('input,textarea,select'))
-      .slice(0, 200)
-      .map((el) => {
-        const input = el as HTMLInputElement;
-        return [input.type, input.name, input.value, input.checked];
-      });
-    const text = (document.body?.innerText || '').slice(0, 100_000);
-    const roots: ParentNode[] = [document];
-    const fields: Element[] = [];
-    for (let i = 0; i < roots.length && i < 100; i++) {
-      const currentRoot = roots[i];
-      if (!currentRoot) break;
-      fields.push(...Array.from(currentRoot.querySelectorAll('input,textarea')));
-      for (const element of Array.from(currentRoot.querySelectorAll('*')).slice(0, 10000))
-        if (element.shadowRoot) roots.push(element.shadowRoot);
-    }
-    const visible = (element: Element) => {
-      const style = getComputedStyle(element);
-      return (
-        element.getClientRects().length > 0 &&
-        style.visibility !== 'hidden' &&
-        style.display !== 'none'
-      );
-    };
-    const keypads = new Map<Element, Set<string>>();
-    for (const currentRoot of roots.slice(0, 100)) {
-      for (const key of Array.from(
-        currentRoot.querySelectorAll('button,[role="button"],[role="gridcell"],td'),
-      ).slice(0, 2000)) {
-        const digit = key.textContent?.trim() ?? '';
-        if (!/^[0-9]$/.test(digit) || !visible(key)) continue;
-        const container = key.closest('.keypad,[role="grid"],[role="group"]') ?? key.parentElement;
-        if (!container) continue;
-        const digits = keypads.get(container) ?? new Set<string>();
-        digits.add(digit);
-        keypads.set(container, digits);
-      }
-    }
-    const sensitiveKeypad =
-      [...keypads].some(
-        ([container, digits]) =>
-          digits.size === 10 &&
-          /密码|支付|付款|验证|password|payment|verification/i.test(
-            (((container.parentElement ?? container) as HTMLElement).innerText || '').slice(
-              0,
-              2000,
-            ),
-          ),
-      ) ||
-      roots
-        .slice(0, 100)
-        .some((currentRoot) =>
-          Array.from(currentRoot.querySelectorAll('.keypad,[role="grid"],[role="group"]')).some(
-            (container) =>
-              visible(container) &&
-              /(?:[●•*]\s*){4,}/.test(container.textContent ?? '') &&
-              /支付密码|付款密码|payment password/i.test(
-                (((container.parentElement ?? container) as HTMLElement).innerText || '').slice(
-                  0,
-                  2000,
-                ),
+  }
+  const sensitiveKeypad =
+    [...keypads].some(
+      ([container, digits]) =>
+        digits.size === 10 &&
+        /密码|支付|付款|验证|password|payment|verification/i.test(
+          (((container.parentElement ?? container) as HTMLElement).innerText || '').slice(0, 2000),
+        ),
+    ) ||
+    roots
+      .slice(0, 100)
+      .some((currentRoot) =>
+        Array.from(currentRoot.querySelectorAll('.keypad,[role="grid"],[role="group"]')).some(
+          (container) =>
+            visible(container) &&
+            /(?:[●•*]\s*){4,}/.test(container.textContent ?? '') &&
+            /支付密码|付款密码|payment password/i.test(
+              (((container.parentElement ?? container) as HTMLElement).innerText || '').slice(
+                0,
+                2000,
               ),
-          ),
-        );
-    const sensitive =
-      sensitiveKeypad ||
-      fields.some((element) => {
-        const input = element as HTMLInputElement;
-        const style = getComputedStyle(input);
-        if (
-          input.disabled ||
-          input.readOnly ||
-          input.type === 'hidden' ||
-          !input.getClientRects().length ||
-          style.visibility === 'hidden' ||
-          style.display === 'none'
-        )
-          return false;
-        const identity = [
-          input.name,
-          input.id,
-          input.getAttribute('aria-label'),
-          input.labels?.[0]?.innerText,
-          input.placeholder,
-        ]
-          .filter(Boolean)
-          .join(' ');
-        return (
-          input.type === 'password' ||
-          /^(?:one-time-code|cc-)/i.test(input.autocomplete) ||
-          /(?:otp|cvv|cvc|card[-_ ]?(?:number|no)|credit[-_ ]?card|pay(?:ment)?[-_ ]?(?:password|pin)|验证码|两步验证|银行卡|卡号|支付密码)/i.test(
-            identity,
-          )
-        );
-      }) ||
-      /(?:^|\/)(?:login|signin|sign-in|log-in|checkout|payment|cashier|pay|2fa|verify-identity)(?:\/|$)/i.test(
-        location.pathname,
+            ),
+        ),
       );
-    return {
-      documentId: root.__holadayObservation.id,
-      version: root.__holadayObservation.version,
-      interceptedEnter: root.__holadayObservation.interceptedEnter,
-      forms: JSON.stringify(form),
-      text,
-      receiptRegions: Array.from(
-        document.querySelectorAll(
-          '[role="status"],[role="alert"],dialog,p,h1,h2,main,article,[data-result],[data-status]',
-        ),
+  const sensitive =
+    sensitiveKeypad ||
+    fields.some((element) => {
+      const input = element as HTMLInputElement;
+      const style = getComputedStyle(input);
+      if (
+        input.disabled ||
+        input.readOnly ||
+        input.type === 'hidden' ||
+        !input.getClientRects().length ||
+        style.visibility === 'hidden' ||
+        style.display === 'none'
       )
-        .filter((n) => !n.closest('nav,header,footer') && n.getClientRects().length)
-        .slice(0, 200)
-        .flatMap((n) =>
-          ((n as HTMLElement).innerText || '')
-            .slice(0, 8000)
-            .split('\n')
-            .map((line) => line.trim())
-            .filter(Boolean),
-        ),
-      sensitive,
-      geometry: [scrollX, scrollY, innerWidth, innerHeight],
-    };
-  });
+        return false;
+      const identity = [
+        input.name,
+        input.id,
+        input.getAttribute('aria-label'),
+        input.labels?.[0]?.innerText,
+        input.placeholder,
+      ]
+        .filter(Boolean)
+        .join(' ');
+      return (
+        input.type === 'password' ||
+        /^(?:one-time-code|cc-)/i.test(input.autocomplete) ||
+        /(?:otp|cvv|cvc|card[-_ ]?(?:number|no)|credit[-_ ]?card|pay(?:ment)?[-_ ]?(?:password|pin)|验证码|两步验证|银行卡|卡号|支付密码)/i.test(
+          identity,
+        )
+      );
+    }) ||
+    /(?:^|\/)(?:login|signin|sign-in|log-in|checkout|payment|cashier|pay|2fa|verify-identity)(?:\/|$)/i.test(
+      location.pathname,
+    );
+  return {
+    documentId: root.__holadayObservation.id,
+    version: root.__holadayObservation.version,
+    interceptedEnter: root.__holadayObservation.interceptedEnter,
+    forms: JSON.stringify(form),
+    text,
+    receiptRegions: Array.from(
+      document.querySelectorAll(
+        '[role="status"],[role="alert"],dialog,p,h1,h2,main,article,[data-result],[data-status]',
+      ),
+    )
+      .filter((n) => !n.closest('nav,header,footer') && n.getClientRects().length)
+      .slice(0, 200)
+      .flatMap((n) =>
+        ((n as HTMLElement).innerText || '')
+          .slice(0, 8000)
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean),
+      ),
+    sensitive,
+    geometry: [scrollX, scrollY, innerWidth, innerHeight],
+  };
+}
+
+// tsx/esbuild keepNames adds __name to named local functions. Playwright serialises
+// callbacks without their module scope, so supply the helper inside the page.
+export const OBSERVATION_STATE_EXPRESSION = `(() => { const __name = (target) => target; return (${collectObservationState.toString()})(); })()`;
+export async function observationState(frame: Frame) {
+  const state = await frame.evaluate<ReturnType<typeof collectObservationState>>(
+    OBSERVATION_STATE_EXPRESSION,
+  );
   return { ...state, forms: hash(state.forms), dom: hash(state.text), url: frame.url() };
 }
 
@@ -362,6 +367,7 @@ export class CloudObservation {
       if ([...this.tabs.values()].filter((p) => !p.isClosed()).length >= 20)
         return { ok: false, text: '任务标签数达到上限' };
       const page = await this.active.context().newPage();
+      await ensureExecutionViewport(page);
       this.register(page);
       this.active = page;
     } else if (action.tool === 'close_tab') {
@@ -905,6 +911,7 @@ export class CloudObservation {
     if (opened.length) {
       const observations = [];
       for (const p of opened) {
+        await ensureExecutionViewport(p);
         await p.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
         observations.push(
           JSON.parse((await this.read({ tool: 'read_page', tabId: this.tabId(p) }))!.text),

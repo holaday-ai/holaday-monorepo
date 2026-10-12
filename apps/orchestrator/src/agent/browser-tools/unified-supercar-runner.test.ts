@@ -380,3 +380,54 @@ describe('unified runtime safety gate (legacy LIVE-VETO parity)', () => {
     await page.close();
   }, 60_000);
 });
+
+describe('canary task evidence and failure diagnostics', () => {
+  it('uses the supplied snapshot, records original errors, and never calls a blank page a login wall', async () => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage({ viewport: { width: 500, height: 679 } });
+    const goto = vi
+      .spyOn(page, 'goto')
+      .mockRejectedValue(
+        new Error(
+          'page.goto: net::ERR_CONNECTION_RESET https://u:private@example.com/?token=hidden',
+        ),
+      );
+    const onTick = vi.fn();
+    try {
+      const outcome = await runSupercarTask({
+        taskId: 'tsk_blank_failure',
+        intent: '打开公网页面',
+        userExternalId: 'owner',
+        executor: { getPage: async () => page } as never,
+        browserCapabilities: {
+          viewportV2: true,
+          observationV2: true,
+          replayV1: false,
+          routingV2: false,
+        },
+        messagesAdapter: scripted([
+          () => [call('navigate', { url: 'https://example.com' })],
+          () => [call('finish', { status: 'failed', summary: '该网站需要登录才能继续' })],
+        ]),
+        onTick,
+      });
+      expect(page.viewportSize()).toEqual({ width: 1280, height: 800 });
+      expect(outcome.status).toBe('failed');
+      expect(outcome.reason).toContain('about:blank');
+      expect(outcome.reason).not.toContain('该网站需要登录');
+      expect(onTick).toHaveBeenCalledWith(
+        expect.objectContaining({
+          execution: expect.objectContaining({
+            ok: false,
+            errorCode: 'browser_network_failed',
+            errorMessage: expect.stringContaining('ERR_CONNECTION_RESET'),
+          }),
+        }),
+      );
+      expect(JSON.stringify(onTick.mock.calls)).not.toMatch(/private|token=hidden/);
+    } finally {
+      goto.mockRestore();
+      await browser.close();
+    }
+  });
+});

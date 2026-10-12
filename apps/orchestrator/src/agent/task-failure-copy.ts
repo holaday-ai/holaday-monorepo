@@ -10,6 +10,8 @@ export function modelTaskFailureReason(reason: ModelTaskUnavailableReason): stri
 
 export function friendlyTaskFailureReason(status: string, raw: string | null | undefined): string {
   const r = (raw ?? '').toLowerCase();
+  if (r.includes('about:blank'))
+    return '浏览器尚未打开目标页面，无法判断站点登录状态。请重试；若持续失败请联系支持。';
   const unsupportedFile = /^FILE_FORMAT_UNSUPPORTED:([a-z0-9]+(?:,[a-z0-9]+)*)$/i.exec(raw ?? '');
   if (unsupportedFile?.[1]) {
     const formats = unsupportedFile[1].toUpperCase().split(',').join('、');

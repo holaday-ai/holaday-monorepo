@@ -13,6 +13,8 @@ import { classifyRuntimeAction } from '../supercar/runtime-action-policy.js';
 import { persistBrowserDownload } from './browser-download.js';
 import { browserReplayStore } from './browser-replay-service.js';
 import { BrowserReplayRecorder } from './browser-replay.js';
+import { browserToolError } from './browser-tool-error.js';
+import { ensureExecutionViewport } from './browser-viewport.js';
 import { installDomainEgress } from './domain-egress.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import { createUnifiedActionGate } from './unified-action-gate.js';
@@ -143,15 +145,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     };
   }
   const controller = new AbortController();
-  const capabilities = browserCapabilities(opts.userExternalId);
-  if (!capabilities.viewportV2) {
-    const size = page.viewportSize();
-    if (!size || size.width < 1280 || size.height < 800)
-      await page.setViewportSize({
-        width: Math.max(1280, size?.width ?? 1280),
-        height: Math.max(800, size?.height ?? 800),
-      });
-  }
+  const capabilities = opts.browserCapabilities ?? browserCapabilities(opts.userExternalId);
+  await ensureExecutionViewport(page);
   const tools = createPlaywrightUnifiedExecutor(page, {
     ...(opts.onBrowserDownload
       ? { saveDownload: (download) => persistBrowserDownload(download, opts.onBrowserDownload!) }
@@ -325,8 +320,30 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     if (phase === 'before' && tools.observation) {
       try {
         await tools.observation.validate(action);
-      } catch {
-        return { kind: 'skip' as const, message: '页面或 ref 已失效，请重新 read_page。' };
+      } catch (error) {
+        const failure = browserToolError(error);
+        iteration += 1;
+        toolsUsed.add(action.tool);
+        await safe(() =>
+          opts.onTick?.({
+            iteration,
+            execution: {
+              actionKind: action.tool,
+              actionSummary: describe(action, null),
+              ok: false,
+              message: failure.text,
+              errorCode: failure.errorCode,
+              errorMessage: failure.errorMessage,
+            },
+            toolsInTurn: [action.tool],
+            textPreamble: '',
+            apiLatencyMs: 0,
+          }),
+        );
+        return {
+          kind: 'skip' as const,
+          message: `${failure.text} (${failure.errorCode}: ${failure.errorMessage})`,
+        };
       }
     }
     const changedTab = ['new_tab', 'switch_tab', 'close_tab'].includes(action.tool);
@@ -351,6 +368,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       requireBrowserEvidence: true,
       supportedTools: tools.supportedTools,
       probeBlocker: tools.blocker,
+      currentPageUrl: () => tools.page.url(),
       checkInterruption: () =>
         tools.observation?.interruption() ?? egress.interruption() ?? undefined,
       intent: guidance ? `${opts.intent}\n\n【结果要求】\n${guidance}` : opts.intent,
@@ -403,7 +421,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
               actionKind: action.tool,
               actionSummary: describe(action, label),
               ok: result.ok,
-              ...(result.ok ? {} : { message: result.text }),
+              ...(result.ok
+                ? {}
+                : {
+                    message: result.text,
+                    errorCode: result.errorCode,
+                    errorMessage: result.errorMessage,
+                  }),
             },
             toolsInTurn: [action.tool],
             textPreamble: '',
@@ -504,7 +528,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       default:
         return {
           status: 'failed',
-          reason: outcome.reason,
+          reason:
+            page.url() === 'about:blank'
+              ? '浏览器尚未打开目标页面（about:blank），无法判断站点登录状态。请重试；若持续失败请联系支持。'
+              : outcome.reason,
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
         };

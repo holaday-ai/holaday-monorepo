@@ -75,7 +75,12 @@ describe('cloud executor redaction (unified executor, real Chromium)', () => {
         },
       });
       const result = await createPlaywrightUnifiedExecutor(broken).execute({ tool: 'snapshot' });
-      expect(result).toEqual({ ok: false, text: REDACTION_FAILED_COPY });
+      expect(result).toMatchObject({
+        ok: false,
+        text: REDACTION_FAILED_COPY,
+        errorCode: 'redaction_failed',
+        errorMessage: 'page redaction unavailable',
+      });
     } finally {
       await page.close();
     }
