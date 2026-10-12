@@ -1,4 +1,4 @@
-import { browserCapabilities } from '../config/browser-capabilities.js';
+import { instanceBrowserCapabilities } from '../config/browser-capabilities.js';
 /**
  * Phase 19 — `/screencast-ws/:userId` upgrade handler.
  *
@@ -177,10 +177,6 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             return reject(socket, 401, 'invalid token');
           }
           const callerUserId = session.userId;
-          if (v2Requested && !browserCapabilities(callerUserId).viewportV2) {
-            reject(socket, 409, 'browser viewport v2 disabled');
-            return;
-          }
 
           // Phase 24 fix #2 — dispatch by ID prefix. tsk_… targets a
           // specific in-flight task; everything else falls through to
@@ -208,6 +204,11 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
           }
 
           const instance = picked.instance;
+          const capabilities = instanceBrowserCapabilities(instance);
+          if (v2Requested && !capabilities.viewportV2) {
+            reject(socket, 409, 'browser viewport v2 disabled');
+            return;
+          }
           await new Promise<void>((resolve, rejectSetup) =>
             wss.handleUpgrade(req, socket, head, (ws) => {
               startWebSocketSessionRevalidation({
@@ -231,7 +232,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
                 ws,
                 callerUserId,
                 instance,
-                viewportV2: browserCapabilities(callerUserId).viewportV2,
+                viewportV2: capabilities.viewportV2,
               }).then(resolve, rejectSetup);
             }),
           );

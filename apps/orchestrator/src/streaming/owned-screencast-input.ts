@@ -1,6 +1,5 @@
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
-import { browserCapabilities } from '../config/browser-capabilities.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import {
   type AppliedBrowserViewport,
@@ -36,10 +35,7 @@ export function createOwnedScreencastInputBridge(options: {
     maxViewportHeight: options.maxViewportHeight,
     onViewportApplied: options.onViewportApplied,
     beforeDispatch: async (envelope, signal) => {
-      if (
-        envelope.payload?.type === 'viewport' &&
-        !browserCapabilities(instance.userId).viewportV2
-      ) {
+      if (envelope.payload?.type === 'viewport') {
         envelope.payload.width = Math.max(1280, envelope.payload.width);
         envelope.payload.height = Math.max(800, envelope.payload.height);
       }

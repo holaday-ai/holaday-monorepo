@@ -519,7 +519,7 @@ function CloudBrowserPanel({
     let live = true;
     setViewportV2(false);
     void trpc.browserReplay.capabilities
-      .query()
+      .query(activeTaskId ? { taskId: activeTaskId } : undefined)
       .then((capabilities) => {
         if (live) setViewportV2(capabilities.viewportV2);
       })
@@ -527,7 +527,7 @@ function CloudBrowserPanel({
     return () => {
       live = false;
     };
-  }, [poolUserId]);
+  }, [poolUserId, activeTaskId]);
   // Phase 24 diagnostic — log the current task scope so DevTools can
   // confirm the panel is actually receiving the expected taskId from
   // its parent. Re-fires whenever the user picks a different task.

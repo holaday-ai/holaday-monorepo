@@ -1,4 +1,7 @@
-import { browserCapabilities } from '../config/browser-capabilities.js';
+import {
+  browserCapabilities,
+  instanceBrowserCapabilities,
+} from '../config/browser-capabilities.js';
 /**
  * BrowserPool — per-task Xvfb + Brave + x11vnc + websockify quartets.
  *
@@ -350,6 +353,7 @@ export class BrowserPool {
         taskId,
         userId,
         executor: record.executor,
+        capabilities: session?.capabilities,
         status: 'ready',
         createdAt: now,
         lastActiveAt: now,
@@ -458,7 +462,7 @@ export class BrowserPool {
     let lastActivity = Date.now();
     return record.group.vncSession({
       ...request,
-      viewportV2: browserCapabilities(callerUserId).viewportV2,
+      viewportV2: instanceBrowserCapabilities(instance).viewportV2,
       veto: () => {
         originalVeto();
         this.#vetoBroker(record);
@@ -547,6 +551,17 @@ export class BrowserPool {
     ) {
       throw new Error('POOL_PROCESS_CLEANUP_PENDING');
     }
+
+    session = {
+      ...session,
+      capabilities: Object.freeze({ ...(session?.capabilities ?? browserCapabilities(userId)) }),
+    };
+    if (
+      session.capabilities?.viewportV2 &&
+      (dimensionsForProfile(viewportProfile).width < 1280 ||
+        dimensionsForProfile(viewportProfile).height < 800)
+    )
+      viewportProfile = 'desktop';
 
     let resolve!: (instance: BrowserInstance) => void;
     let reject!: (error: unknown) => void;
@@ -1305,6 +1320,7 @@ export class BrowserPool {
         userId,
         userDataDir,
         executor,
+        capabilities: session?.capabilities,
         xvfbPid: xvfb?.pid ?? 0,
         bravePid: browserProcess.pid,
         x11vncPid: x11vnc?.pid ?? 0,

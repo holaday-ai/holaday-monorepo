@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
 import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
@@ -72,5 +72,33 @@ describe('owned screencast input assembly', () => {
     });
     expect(effects).toEqual(['resize', 'ack', 'observe']);
     binding.finish();
+  });
+  it('floors a canary panel resize to the real execution viewport', async () => {
+    const instance = {
+      taskId: 'tsk_small_canary',
+      userId: 'usr_canary',
+      status: 'ready',
+      capabilities: { viewportV2: true, observationV2: true, replayV1: true, routingV2: true },
+    } as BrowserInstance;
+    vi.stubEnv('BROWSER_V2_CANARY_USER_IDS', 'usr_canary');
+    const binding = browserControlSessions.start(instance);
+    const sizes: unknown[] = [];
+    const bridge = createOwnedScreencastInputBridge({ instance, peek: () => instance });
+    await bridge.attach({
+      handle: async (envelope) => {
+        sizes.push(envelope);
+      },
+    });
+    try {
+      await bridge.receive(
+        JSON.stringify({ type: 'input', payload: { type: 'viewport', width: 500, height: 679 } }),
+      );
+      await binding.control.checkpoint(async () => undefined);
+      expect(JSON.stringify(sizes)).toContain('1280');
+      expect(JSON.stringify(sizes)).toContain('800');
+    } finally {
+      binding.finish();
+      vi.unstubAllEnvs();
+    }
   });
 });

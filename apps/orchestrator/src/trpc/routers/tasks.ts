@@ -1827,6 +1827,7 @@ export const tasksRouter = router({
                         : null,
                   });
 
+            let taskBrowserCapabilities = Object.freeze(browserCapabilities(ctx.userId));
             const browserTargetUrl =
               executionMode === 'browser' ? browserTaskTargetUrl(input.intent) : null;
             // A connected site grant (vault, default off) gives the cloud browser that site's session.
@@ -1839,7 +1840,7 @@ export const tasksRouter = router({
             const browserRoute =
               executionMode === 'browser'
                 ? decideUserBrowserRoute({
-                    enabled: browserCapabilities(ctx.userId).routingV2,
+                    enabled: taskBrowserCapabilities.routingV2,
                     intent: input.intent,
                     extensionOnline: hasConnectedExtension(ctx.userId),
                     selectionOrigin: input.localChrome
@@ -5059,6 +5060,7 @@ export const tasksRouter = router({
                       adopted ??
                       (await ctx.browserPool.allocate(taskId, ctx.userId, input.viewportProfile, {
                         targetUrl: browserTargetUrl,
+                        capabilities: taskBrowserCapabilities,
                       }));
                     executor = instance.executor;
                     allocatedPool = true;
@@ -5437,6 +5439,7 @@ export const tasksRouter = router({
                       ? adopted
                       : await ctx.browserPool.allocate(taskId, ctx.userId, input.viewportProfile, {
                           targetUrl: browserTargetUrl,
+                          capabilities: taskBrowserCapabilities,
                         });
                     allocatedForContinuation = adopted == null;
                     const continuation = resolveBrowserFollowUpContinuation({
@@ -5494,6 +5497,7 @@ export const tasksRouter = router({
                         throw err;
                       }
                     }
+                    taskBrowserCapabilities = instance.capabilities ?? taskBrowserCapabilities;
                     perUserExec = instance.executor;
                     adoptedBrowserSession =
                       continuation === 'adopted' || continuation === 'restore';
@@ -5747,6 +5751,7 @@ export const tasksRouter = router({
                 });
                 const unifiedReadPage = createFirecrawlReadPage(ctx.firecrawl);
                 const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
+                  browserCapabilities: taskBrowserCapabilities,
                   ...(unifiedWebSearch ? { unifiedWebSearch } : {}),
                   ...(unifiedReadPage ? { unifiedReadPage } : {}),
                   messagesAdapter: browserMessagesAdapter,
@@ -6140,6 +6145,8 @@ export const tasksRouter = router({
                               seq: ev.iteration,
                               kind: actionKind,
                               status: receipt.status,
+                              errorCode: ev.execution?.errorCode ?? null,
+                              errorMessage: ev.execution?.errorMessage ?? null,
                               riskLevel: 'low',
                               input: { summary: actionSummary },
                               output: {
@@ -6504,7 +6511,7 @@ export const tasksRouter = router({
                   allowedDomains: otaAllowedDomains,
                 });
                 const useOtaUserBrowser =
-                  !browserCapabilities(ctx.userId).routingV2 && otaCanary.lane === 'user-browser';
+                  !taskBrowserCapabilities.routingV2 && otaCanary.lane === 'user-browser';
                 if (otaCanary.lane !== null) {
                   // Rollout audit — every OTA-prefer task records its gate outcome.
                   ctx.logger.info(
@@ -6582,8 +6589,7 @@ export const tasksRouter = router({
                       })
                     : null;
                   const runChrome =
-                    browserCapabilities(ctx.userId).routingV2 &&
-                    /携程|ctrip\.com/i.test(input.intent)
+                    taskBrowserCapabilities.routingV2 && /携程|ctrip\.com/i.test(input.intent)
                       ? runOtaUserBrowserTask
                       : runSelectedChromeTask;
                   return runChrome({
@@ -7749,6 +7755,7 @@ export const tasksRouter = router({
                   input.localChrome,
                   sendExtensionToolCall,
                   ctx.localChromeReservation,
+                  taskBrowserCapabilities,
                 );
                 try {
                   await dispatchToBrave(executionContext);

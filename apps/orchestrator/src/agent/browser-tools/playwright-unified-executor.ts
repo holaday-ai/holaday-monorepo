@@ -2,13 +2,17 @@ import { randomUUID } from 'node:crypto';
 import type { Page } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { detectBrowserBlocker } from './browser-completion.js';
+import { browserToolError } from './browser-tool-error.js';
+import { ensureExecutionViewport } from './browser-viewport.js';
 import { CloudObservation } from './cloud-observation.js';
-import { PageRedactionError, REDACTION_FAILED_COPY, redactPageText } from './page-redaction.js';
+import { redactPageText } from './page-redaction.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
 /** One tool result for the model: text always, an image only for `screenshot`. */
 export interface UnifiedToolResult {
   ok: boolean;
+  errorCode?: string;
+  errorMessage?: string;
   interruption?: { reason: string; message: string };
   effect?: {
     urlChanged: boolean;
@@ -261,6 +265,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     const opened = await Promise.race([popup, navigated]);
     if (!opened) return done(`已点击 ${ref}`);
     await opened.waitForLoadState('domcontentloaded', { timeout }).catch(() => {});
+    await ensureExecutionViewport(opened);
     registerTab(opened);
     page = opened;
     activeFrame = page.mainFrame();
@@ -297,6 +302,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           if ([...tabs.values()].filter((p) => !p.isClosed()).length >= 20)
             return fail('任务标签数达到上限');
           const opened = await page.context().newPage();
+          await ensureExecutionViewport(opened);
           registerTab(opened);
           page = opened;
           activeFrame = page.mainFrame();
@@ -503,12 +509,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           return done(`已点击坐标 (${action.x}, ${action.y})`);
       }
     } catch (error) {
-      if (error instanceof PageRedactionError) return fail(REDACTION_FAILED_COPY);
-      const message = error instanceof Error ? error.message : String(error);
-      if (/aria-ref|not found|No node found/i.test(message))
-        return fail('该 ref 已失效，请重新 snapshot 后再操作');
-      if (/Timeout/i.test(message)) return fail('操作超时，请重新 snapshot 确认页面状态');
-      return fail('操作失败，请重新 snapshot 后换一种方式');
+      return browserToolError(error);
     }
   }
 
@@ -539,8 +540,8 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
       const read = await observation.read(action);
       if (read) return read;
       return await observation.act(action, () => execute(action));
-    } catch {
-      return fail('页面或 cursor/ref 已失效，请重新 read_page / snapshot 后操作');
+    } catch (error) {
+      return browserToolError(error);
     }
   };
   return {

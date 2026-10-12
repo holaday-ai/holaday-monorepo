@@ -12,6 +12,7 @@
 
 import type { BrowserViewportProfile } from '@holaday/shared-types';
 import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
+import type { BrowserCapabilities } from '../config/browser-capabilities.js';
 
 /**
  * Lifecycle status of one instance. Callers never see `allocating`
@@ -44,6 +45,7 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
    */
   taskId: string;
   userId: string;
+  capabilities?: BrowserCapabilities;
   userDataDir?: string;
   executor: PlaywrightExecutor;
   xvfbPid?: number;
@@ -80,6 +82,8 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
 
 /** What the task will browse; only a matching site grant applies to it. */
 export interface BrowserSessionTarget {
+  /** Trusted server snapshot resolved from the task owner at admission. */
+  capabilities?: BrowserCapabilities;
   targetUrl?: string | null;
 }
 

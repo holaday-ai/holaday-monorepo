@@ -92,6 +92,7 @@ export interface UnifiedBrowserLoopInput {
   requireBrowserEvidence?: boolean;
   supportedTools?: { download: boolean; upload: boolean; tabs: boolean };
   probeBlocker?: () => Promise<{ reason: string; message: string } | null>;
+  currentPageUrl?: () => string;
   checkInterruption?: () => { reason: string; message: string } | undefined;
   intent: string;
   adapter: MessagesAdapter;
@@ -308,11 +309,27 @@ export async function runUnifiedBrowserLoop(
           }
           return { status: 'completed', summary, evidence, steps: step + 1 };
         }
-        // The model's own failure explains why the gaps could not be filled.
-        return { status: 'failed', reason: summary || '任务未完成。', steps: step + 1 };
+        // A failed navigation cannot establish a login wall, even if the model guesses one.
+        return {
+          status: 'failed',
+          reason:
+            input.currentPageUrl?.() === 'about:blank'
+              ? '浏览器尚未打开目标页面（about:blank），无法判断站点登录状态。'
+              : summary || '任务未完成。',
+          steps: step + 1,
+        };
       }
       if (call.name === 'request_human') {
         const reason = typeof args.reason === 'string' ? args.reason : 'other';
+        if (
+          ['login', 'captcha', 'payment'].includes(reason) &&
+          input.currentPageUrl?.() === 'about:blank'
+        )
+          return {
+            status: 'failed',
+            reason: '浏览器尚未打开目标页面（about:blank），无法判断站点登录状态。',
+            steps: step + 1,
+          };
         const message = typeof args.message === 'string' ? args.message : '需要你接管浏览器。';
         if (!input.requestHuman)
           return { status: 'awaiting_user', reason, message, steps: step + 1 };
@@ -407,7 +424,15 @@ export async function runUnifiedBrowserLoop(
         )
       )
         lastPageText = outcome.text;
-      results.push(toolResult(call.id, outcome.text, !outcome.ok));
+      results.push(
+        toolResult(
+          call.id,
+          outcome.errorCode
+            ? `${outcome.text} (${outcome.errorCode}: ${outcome.errorMessage ?? ''})`
+            : outcome.text,
+          !outcome.ok,
+        ),
+      );
       if (outcome.image)
         images.push({
           type: 'image',

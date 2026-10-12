@@ -2,7 +2,10 @@ import { TRPCError } from '@trpc/server';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { browserReplayStore } from '../../agent/browser-tools/browser-replay-service.js';
-import { browserCapabilities } from '../../config/browser-capabilities.js';
+import {
+  browserCapabilities,
+  instanceBrowserCapabilities,
+} from '../../config/browser-capabilities.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
 import type { Context } from '../context.js';
@@ -19,11 +22,23 @@ async function requireOwner(ctx: Context, taskId: string) {
 }
 const input = z.object({ taskId: z.string().min(1).max(100) });
 export const browserReplayRouter = router({
-  capabilities: protectedProcedure.query(({ ctx }) => browserCapabilities(ctx.userId)),
+  capabilities: protectedProcedure.input(input.optional()).query(async ({ ctx, input }) => {
+    if (!input) return browserCapabilities(ctx.userId);
+    await requireOwner(ctx, input.taskId);
+    const instance = ctx.browserPool?.peek(input.taskId);
+    return instance?.userId === ctx.userId
+      ? instanceBrowserCapabilities(instance)
+      : browserCapabilities(ctx.userId);
+  }),
   read: protectedProcedure
     .input(input.extend({ offset: z.number().int().min(0).max(2000).default(0) }))
     .query(async ({ ctx, input }) => {
-      if (!browserCapabilities(ctx.userId).replayV1) return null;
+      const instance = ctx.browserPool?.peek(input.taskId);
+      const capabilities =
+        instance?.userId === ctx.userId
+          ? instanceBrowserCapabilities(instance)
+          : browserCapabilities(ctx.userId);
+      if (!capabilities.replayV1) return null;
       await requireOwner(ctx, input.taskId);
       return browserReplayStore.read(ctx.userId, input.taskId, input.offset);
     }),
