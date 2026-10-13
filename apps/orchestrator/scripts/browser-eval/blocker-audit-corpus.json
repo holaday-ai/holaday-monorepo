@@ -1,0 +1,178 @@
+[
+  {
+    "id": "player-public-metadata",
+    "html": "player",
+    "url": "https://www.youtube.com/watch?v=public",
+    "intent": "请使用云端浏览器，YouTube 公开视频页读标题/频道/播放量/发布日期（不播放）",
+    "expected": "continue",
+    "reason": "目标元信息在播放器外可读"
+  },
+  {
+    "id": "player-play",
+    "html": "player",
+    "url": "https://www.youtube.com/watch?v=public",
+    "intent": "播放视频并总结视频内容",
+    "expected": "pause",
+    "reason": "任务需要被墙挡住的播放器"
+  },
+  {
+    "id": "player-subtitles",
+    "html": "player",
+    "url": "https://www.youtube.com/watch?v=public",
+    "intent": "不要播放，只读取视频字幕",
+    "expected": "pause",
+    "reason": "字幕仍需受保护内容"
+  },
+  {
+    "id": "google-sorry",
+    "html": "google-sorry",
+    "url": "https://www.google.com/sorry/index",
+    "intent": "读取前5条搜索结果标题和链接",
+    "expected": "pause",
+    "reason": "Google整页验证"
+  },
+  {
+    "id": "cloudflare",
+    "html": "cloudflare",
+    "url": "https://news.test/",
+    "intent": "读取文章标题",
+    "expected": "pause",
+    "reason": "Cloudflare整页验证"
+  },
+  {
+    "id": "whole-login",
+    "html": "login",
+    "url": "https://accounts.example.test/signin",
+    "intent": "读取文章标题",
+    "expected": "pause",
+    "reason": "整页登录"
+  },
+  {
+    "id": "cookie",
+    "html": "cookie",
+    "url": "https://news.test/article",
+    "intent": "读取文章正文",
+    "expected": "clear",
+    "reason": "Cookie提示不算验证墙"
+  },
+  {
+    "id": "article",
+    "html": "article",
+    "url": "https://news.test/article",
+    "intent": "读取文章正文",
+    "expected": "clear",
+    "reason": "普通公开文章"
+  },
+  {
+    "id": "comments-public-article",
+    "html": "comments",
+    "url": "https://news.test/article",
+    "intent": "总结文章正文",
+    "expected": "continue",
+    "reason": "评论墙不阻断公开正文"
+  },
+  {
+    "id": "comments-protected",
+    "html": "comments",
+    "url": "https://news.test/article",
+    "intent": "读取评论区内容",
+    "expected": "pause",
+    "reason": "目标是受保护评论"
+  },
+  {
+    "id": "player-missing-fields",
+    "html": "no-metadata",
+    "url": "https://www.youtube.com/watch?v=public",
+    "intent": "读取标题、频道、播放量、发布日期，不播放",
+    "expected": "pause",
+    "reason": "墙外没有足够目标字段证据"
+  },
+  {
+    "id": "embedded-public-article",
+    "html": "embedded",
+    "url": "https://news.test/article",
+    "intent": "读取文章正文",
+    "expected": "continue",
+    "reason": "嵌入组件局部墙不阻断正文"
+  },
+  {
+    "id": "fullscreen-player",
+    "html": "full-player",
+    "url": "https://www.youtube.com/watch?v=public",
+    "intent": "读取标题和频道，不播放",
+    "expected": "pause",
+    "reason": "全屏遮挡不能当作局部墙"
+  },
+  {
+    "id": "cloudflare-decoy",
+    "html": "cloudflare-decoy",
+    "url": "https://news.test/",
+    "intent": "读取文章正文",
+    "expected": "pause",
+    "reason": "整页挑战不能因有正文结构被豁免"
+  },
+  {
+    "id": "d18-core-01",
+    "html": "google-sorry",
+    "url": "https://www.google.com/sorry/index",
+    "intent": "请使用云端浏览器，Google 搜索并返回前5条标题和链接",
+    "expected": "pause",
+    "reason": "保留D18 core-01证据中的Google /sorry site_blocked"
+  },
+  {
+    "id": "d18-core-02",
+    "html": "google-sorry",
+    "url": "https://www.google.com/sorry/index",
+    "intent": "请使用云端浏览器，Google 搜索并返回前5条标题和链接",
+    "expected": "pause",
+    "reason": "保留D18 core-02证据中的Google /sorry site_blocked"
+  },
+  {
+    "id": "youtube-elements",
+    "html": "youtube-elements",
+    "url": "https://www.youtube.com/watch?v=public",
+    "intent": "读取标题、频道、播放量、发布日期，不播放",
+    "expected": "continue",
+    "reason": "YouTube自定义元素和1y ago时间可读"
+  },
+  {
+    "id": "sidebar-only-fields",
+    "html": "sidebar-only-fields",
+    "url": "https://www.youtube.com/watch?v=public",
+    "intent": "读取标题、频道、播放量、发布日期，不播放",
+    "expected": "pause",
+    "reason": "推荐栏数据不能补当前视频缺失字段"
+  },
+  {
+    "id": "original-minimal-repro",
+    "html": "minimal-original",
+    "url": "https://www.youtube.com/watch?v=public",
+    "intent": "读取标题、频道、播放量、发布日期，不播放",
+    "expected": "continue",
+    "reason": "D18原始最小复现，仅补任务意图参数"
+  },
+  {
+    "id": "cloudflare-article",
+    "html": "cloudflare-article",
+    "url": "https://news.test/article",
+    "intent": "读取文章正文",
+    "expected": "clear",
+    "reason": "安全检查相关文章标题不应当作实际挑战"
+  },
+  {
+    "id": "public-author-path",
+    "html": "article",
+    "url": "https://news.test/author/alice",
+    "intent": "读取文章正文",
+    "expected": "clear",
+    "reason": "/author不能因/auth子串被当成登录端点"
+  },
+  {
+    "id": "public-captcha-guide",
+    "html": "article",
+    "url": "https://news.test/docs/captcha",
+    "intent": "读取文章正文",
+    "expected": "clear",
+    "reason": "教程路径含captcha并非整页验证"
+  }
+]

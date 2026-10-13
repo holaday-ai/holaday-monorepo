@@ -47,7 +47,8 @@
     "partner:monthly": "tsx scripts/partner-run-monthly.ts",
     "account-closure:worker": "node dist/account-closure/worker-entry.js",
     "db:studio": "drizzle-kit studio",
-    "clean": "rimraf dist .turbo"
+    "clean": "rimraf dist .turbo",
+    "blocker:audit": "tsx scripts/blocker-audit.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.90.0",

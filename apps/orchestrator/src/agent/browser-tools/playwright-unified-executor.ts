@@ -47,6 +47,7 @@ export interface BrowserDownloadReceipt {
 
 export interface UnifiedExecutorOptions {
   observationV2?: boolean;
+  taskIntent?: string;
   /** Resolves task attachment ids to local file paths for `upload`. */
   resolveUploads?: (fileIds: readonly string[]) => Promise<string[]>;
   /** Persists a finished download; returns the host path. */
@@ -278,6 +279,38 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
 
   async function execute(action: UnifiedBrowserAction): Promise<UnifiedToolResult> {
     try {
+      // A local-wall exception authorizes reading public data, never clicking through that wall.
+      if (
+        options.taskIntent &&
+        ['click', 'type', 'select', 'download', 'upload', 'click_at'].includes(action.tool)
+      ) {
+        const blocker = await probeBrowserBlocker(page, options.taskIntent);
+        if (blocker && 'disposition' in blocker && blocker.disposition === 'continue') {
+          const restricted =
+            '#movie_player,#player,ytd-player,#comments,ytd-comments,[aria-label="Comments" i],[role="region"],video,audio';
+          const inWall =
+            activeFrame !== page.mainFrame() ||
+            (action.tool === 'click_at'
+              ? await page.evaluate(
+                  ({ x, y, selector }) =>
+                    !document.elementFromPoint(x, y) ||
+                    !!document.elementFromPoint(x, y)?.closest(selector),
+                  { x: action.x, y: action.y, selector: restricted },
+                )
+              : 'ref' in action && action.ref
+                ? await byRef(action.ref).evaluate(
+                    (el, selector) => !!el.closest(selector),
+                    restricted,
+                  )
+                : true);
+          if (inWall)
+            return {
+              ok: false,
+              errorCode: 'local_wall_protected',
+              text: '该区域需用户验证；仅继续读取墙外公开信息，不点击登录、播放或验证控件。',
+            };
+        }
+      }
       switch (action.tool) {
         case 'read_page':
         case 'get_page_text':
@@ -558,7 +591,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
       tabs: true,
     },
     async blocker() {
-      return probeBrowserBlocker(observation?.page ?? page);
+      return probeBrowserBlocker(observation?.page ?? page, options.taskIntent);
     },
     snapshot: snapshotText,
     observation,

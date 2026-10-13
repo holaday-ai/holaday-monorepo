@@ -152,6 +152,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       ? { saveDownload: (download) => persistBrowserDownload(download, opts.onBrowserDownload!) }
       : {}),
     observationV2: capabilities.observationV2,
+    taskIntent: opts.intent,
   });
   let egress: Awaited<ReturnType<typeof installDomainEgress>>;
   try {
@@ -267,7 +268,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
 
   async function recordDiagnostic(
     actionKind: string,
-    errorCode: string,
+    errorCode: string | undefined,
     message: string,
     blockerEvidence?: import('./browser-completion.js').BrowserBlockerEvidence,
   ) {
@@ -278,9 +279,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         execution: {
           actionKind,
           actionSummary: message,
-          ok: false,
+          ok: actionKind === 'browser_local_wall',
           message,
-          errorCode,
+          ...(errorCode ? { errorCode } : {}),
           ...(blockerEvidence ? { blockerEvidence } : {}),
         },
         toolsInTurn: [],
@@ -410,9 +411,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       probeBlocker: async () => {
         const blocker = await tools.blocker();
         if (blocker && 'evidence' in blocker) {
+          const continued = 'disposition' in blocker && blocker.disposition === 'continue';
           await recordDiagnostic(
-            'browser_blocker',
-            `browser_${blocker.reason}_wall`,
+            continued ? 'browser_local_wall' : 'browser_blocker',
+            continued ? undefined : `browser_${blocker.reason}_wall`,
             blocker.message,
             blocker.evidence,
           );

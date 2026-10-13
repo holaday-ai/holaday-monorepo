@@ -6,7 +6,7 @@ export interface BrowserBlockerEvidence {
   framePath: string;
   rule: string;
   visible: boolean;
-  scope: 'document' | 'dialog' | 'player' | 'frame';
+  scope: 'document' | 'dialog' | 'player' | 'frame' | 'comments' | 'component';
 }
 export function detectBrowserBlocker(page: {
   url: string;
