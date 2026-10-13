@@ -46,6 +46,8 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
   taskId: string;
   userId: string;
   capabilities?: BrowserCapabilities;
+  /** Fixed at allocation; adoption never mixes anonymous and identity contexts. */
+  sessionPolicy?: BrowserSessionPolicy;
   userDataDir?: string;
   executor: PlaywrightExecutor;
   xvfbPid?: number;
@@ -81,10 +83,26 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
 }
 
 /** What the task will browse; only a matching site grant applies to it. */
+/**
+ * Which sessions a task's browser may carry, derived by the server from the
+ * routing decision at task creation (never from model or client input):
+ * - `anonymous`: no vault grant, cookie, storage or profile is loaded and no
+ *   identity-bearing context is reused — the "公开云端（看不到你的个人信息）" promise;
+ * - `vault_allowed`: a connected site grant for the target may be loaded.
+ * A missing policy is treated as `anonymous` (fail closed).
+ */
+export type BrowserSessionPolicy = 'anonymous' | 'vault_allowed';
+
 export interface BrowserSessionTarget {
   /** Trusted server snapshot resolved from the task owner at admission. */
   capabilities?: BrowserCapabilities;
   targetUrl?: string | null;
+  sessionPolicy?: BrowserSessionPolicy;
+}
+
+/** Only an explicit `vault_allowed` lets a session be loaded. */
+export function sessionPolicyOf(session?: BrowserSessionTarget): BrowserSessionPolicy {
+  return session?.sessionPolicy === 'vault_allowed' ? 'vault_allowed' : 'anonymous';
 }
 
 export interface PoolConfig {

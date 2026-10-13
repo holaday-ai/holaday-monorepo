@@ -543,7 +543,7 @@ it.each([
       expect.anything(),
       expect.objectContaining({
         executionMode: 'browser',
-        sourceContext: { browserSource: 'local-chrome' },
+        sourceContext: { browserSource: 'local-chrome', browserSessionPolicy: 'vault_allowed' },
       }),
     );
     releaseModel();

@@ -381,7 +381,7 @@ it.each(['adopt', 'touch'] as const)(
     const before = instance.retainedUntil;
     await vi.advanceTimersByTimeAsync(1);
     if (mode === 'adopt')
-      expect(f.pool.adoptRetained('retained', 'followup', 'synthetic')).toBeNull();
+      expect(f.pool.adoptRetained('retained', 'followup', 'synthetic', 'anonymous')).toBeNull();
     else {
       f.pool.touch('retained');
       expect(instance.retainedUntil).toBe(before);
@@ -510,7 +510,7 @@ it('refuses adoption into a key with a failed release receipt', async () => {
   expect(release.state.error).toBeInstanceOf(Error);
   expect(f.pool.peek('old')).toBeNull();
   expect(f.pool.retain('retained', 60_000)).toBe(true);
-  expect(f.pool.adoptRetained('retained', 'old', 'synthetic')).toBeNull();
+  expect(f.pool.adoptRetained('retained', 'old', 'synthetic', 'anonymous')).toBeNull();
   expect(f.pool.peek('retained')).toBe(retained);
   const stop = observe(f.pool.shutdown());
   await flush();
@@ -533,7 +533,7 @@ it('refuses adoption into a key whose allocation is still pending', async () => 
   const allocation = observe(f.pool.allocate('allocating', 'synthetic'));
   await flush();
   expect(allocation.state.done).toBe(false);
-  expect(f.pool.adoptRetained('retained', 'allocating', 'synthetic')).toBeNull();
+  expect(f.pool.adoptRetained('retained', 'allocating', 'synthetic', 'anonymous')).toBeNull();
   expect(f.pool.peek('retained')).toBe(retained);
   gate.resolve();
   await allocation.finished;
@@ -578,7 +578,9 @@ it('does not publish a ready browser until the vault is prepared; closes profile
   const finished = deferred();
   const finish = vi.fn(async () => finished.promise);
   const f = fixture({ prepareSession: async () => prepared.promise, finishSession: finish });
-  const allocation = observe(f.pool.allocate('vault-task', 'owner'));
+  const allocation = observe(
+    f.pool.allocate('vault-task', 'owner', undefined, { sessionPolicy: 'vault_allowed' }),
+  );
   await flush();
   expect(allocation.state.done).toBe(false);
   expect(f.pool.peek('vault-task')).toBeNull();
@@ -597,4 +599,59 @@ it('does not publish a ready browser until the vault is prepared; closes profile
   await release.finished;
   expect(release.state.error).toBeUndefined();
   expect(f.pool.peek('vault-task')).toBeNull();
+});
+
+/**
+ * D17-P1-01: the session policy fixed at task creation governs every pool path.
+ * An anonymous ("公开云端") task never reaches the session hook (no vault match,
+ * no worker.open, no cookie/profile load), and a retained browser is never
+ * handed between anonymous and identity tasks.
+ */
+it('an anonymous allocation never reaches the session hook; vault_allowed does', async () => {
+  const prepareSession = vi.fn(async () => {});
+  const f = fixture({ prepareSession });
+  const targetUrl = 'https://shop.example.test/orders';
+  for (const session of [{ targetUrl, sessionPolicy: 'anonymous' as const }, { targetUrl }]) {
+    const allocation = observe(f.pool.allocate('public-task', 'owner', undefined, session));
+    await flush();
+    await allocation.finished;
+    expect(allocation.state.error).toBeUndefined();
+    expect(f.pool.peek('public-task')?.sessionPolicy).toBe('anonymous');
+    const release = observe(f.pool.release('public-task'));
+    await flush();
+    await vi.advanceTimersByTimeAsync(5000);
+    await release.finished;
+  }
+  expect(prepareSession).not.toHaveBeenCalled();
+  const identity = observe(
+    f.pool.allocate('identity-task', 'owner', undefined, {
+      targetUrl,
+      sessionPolicy: 'vault_allowed',
+    }),
+  );
+  await flush();
+  await identity.finished;
+  expect(prepareSession).toHaveBeenCalledTimes(1);
+  expect(prepareSession).toHaveBeenCalledWith(
+    'owner',
+    expect.anything(),
+    expect.objectContaining({ sessionPolicy: 'vault_allowed', targetUrl }),
+  );
+  expect(f.pool.peek('identity-task')?.sessionPolicy).toBe('vault_allowed');
+});
+
+it.each([
+  ['vault_allowed', 'anonymous'],
+  ['anonymous', 'vault_allowed'],
+] as const)('a retained %s browser is never adopted by a %s follow-up', async (parent, child) => {
+  const f = fixture();
+  const allocation = observe(
+    f.pool.allocate('parent', 'owner', undefined, { sessionPolicy: parent }),
+  );
+  await flush();
+  await allocation.finished;
+  expect(f.pool.retain('parent', 10_000)).toBe(true);
+  expect(f.pool.adoptRetained('parent', 'follow-up', 'owner', child)).toBeNull();
+  expect(f.pool.peek('parent')).not.toBeNull();
+  expect(f.pool.adoptRetained('parent', 'follow-up', 'owner', parent)).not.toBeNull();
 });

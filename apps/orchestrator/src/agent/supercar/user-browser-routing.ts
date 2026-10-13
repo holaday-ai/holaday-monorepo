@@ -149,6 +149,11 @@ export interface UserBrowserRoute {
   identityRequired?: boolean;
   /** Readable identity decision (which personal-data object matched, if any). */
   identityReason?: string;
+  /**
+   * Set when the route promises a logged-out run ("无登录态" / "看不到你的个人
+   *信息"): the browser for this task must not load any user session.
+   */
+  sessionPolicy?: 'anonymous';
   question?: string;
   origin?: string;
   limitation?: string;
@@ -211,6 +216,7 @@ export function decideUserBrowserRoute(input: {
       ? {
           lane: 'cloud',
           reason: 'public_site',
+          sessionPolicy: 'anonymous',
           limitation:
             '该站点在中国大陆网络常无法直接访问，已使用云端浏览器公开查询（无登录态），无法读取个人信息。',
         }
@@ -218,6 +224,7 @@ export function decideUserBrowserRoute(input: {
         ? {
             lane: 'cloud',
             reason: 'explicit_public_cloud',
+            sessionPolicy: 'anonymous',
             limitation:
               '已显式选择云端公开查询（无登录态）；可能遇到登录或反爬限制，无法读取个人信息。',
           }
@@ -229,6 +236,7 @@ export function decideUserBrowserRoute(input: {
       reason: 'explicit_public_cloud',
       identityRequired: true,
       identityReason: decision.reason,
+      sessionPolicy: 'anonymous',
       limitation:
         '已按你的选择用公开云端继续（无登录态），看不到你的个人信息；需要个人数据的部分无法完成。',
     };
