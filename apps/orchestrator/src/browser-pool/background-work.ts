@@ -55,7 +55,7 @@ export function startPoolBackgroundWork(
             const hook = config.onInstanceReady;
             // Owner-scoped initialisation (e.g. legacy cookie injection) never
             // runs for an anonymous ("公开云端") browser.
-            if (canDispatch() && hook && instance.sessionPolicy !== 'anonymous')
+            if (canDispatch() && hook && instance.sessionPolicy === 'vault_allowed')
               await hook.call(config, instance.userId, instance.executor);
           } else {
             const dismiss = instance.executor.dismissChromeBanners;
