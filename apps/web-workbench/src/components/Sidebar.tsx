@@ -320,6 +320,33 @@ export function Sidebar({
   // `mobileOpen` prop continues to drive the Sheet from
   // WorkbenchApp's hamburger button.
   const sidebarIsCompact = sidebarState === 'collapsed';
+  const batchBarRef = React.useRef<HTMLDivElement>(null);
+  const [batchActionSpace, setBatchActionSpace] = React.useState(0);
+  const showBatchBar = batchMode && !sidebarIsCompact;
+  React.useLayoutEffect(() => {
+    const bar = batchBarRef.current;
+    if (!showBatchBar || !bar) {
+      setBatchActionSpace(0);
+      return;
+    }
+    const measure = (): void => {
+      const style = getComputedStyle(bar);
+      const gap = bar.parentElement ? getComputedStyle(bar.parentElement).rowGap : '0';
+      setBatchActionSpace(
+        Math.ceil(
+          bar.getBoundingClientRect().height +
+            (Number.parseFloat(style.marginTop) || 0) +
+            (Number.parseFloat(style.marginBottom) || 0) +
+            (Number.parseFloat(gap) || 0),
+        ),
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [showBatchBar]);
   const { pathname: sidebarPath } = useLocation();
   React.useEffect(() => {
     setOpenMobile(!!mobileOpen);
@@ -349,7 +376,11 @@ export function Sidebar({
   return (
     <>
       <SidebarShell
-        className={cn('holaday-sidebar', /^\/(video|image)\/?$/.test(sidebarPath) && 'dark')}
+        className={cn(
+          'holaday-sidebar',
+          showBatchBar && 'hd-sidebar-batch',
+          /^\/(video|image)\/?$/.test(sidebarPath) && 'dark',
+        )}
         variant="floating"
         collapsible="icon"
       >
@@ -419,7 +450,10 @@ export function Sidebar({
             onMobileClose?.();
           }}
         />
-        <SidebarContent className="hd-task-history-scroll px-0 bg-white/45 dark:bg-transparent">
+        <SidebarContent
+          className="hd-task-history-scroll px-0 bg-white/45 dark:bg-transparent"
+          style={{ '--hd-batch-action-space': `${batchActionSpace}px` } as React.CSSProperties}
+        >
           {projectFilter && (
             <div
               className={cn(
@@ -611,8 +645,11 @@ export function Sidebar({
                   is on, render the count + 全选 / 删除选中 / 取消
                   controls; otherwise show a small "批量管理" entry
                   button alongside the quota indicator. */}
-          {batchMode && !sidebarIsCompact ? (
-            <div className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-[8px] border border-[#57479C]/18 bg-white/75 px-2 py-1.5 text-[11px] text-[#595757] shadow-[0_8px_22px_rgba(87,71,156,0.08)] dark:border-[#57479C]/35 dark:bg-white/[0.04] dark:text-[#DCDDDD]">
+          {showBatchBar ? (
+            <div
+              ref={batchBarRef}
+              className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-[8px] border border-[#57479C]/18 bg-white/75 px-2 py-1.5 text-[11px] text-[#595757] shadow-[0_8px_22px_rgba(87,71,156,0.08)] dark:border-[#57479C]/35 dark:bg-white/[0.04] dark:text-[#DCDDDD]"
+            >
               <span className="inline-flex items-center gap-1.5 font-medium">
                 <span className="flex h-4 min-w-4 items-center justify-center rounded-[5px] bg-[#57479C]/10 px-1 text-[10px] text-[#57479C] dark:bg-[#57479C]/25 dark:text-[#DCDDDD]">
                   {selectedBatchDeleteIds.length}

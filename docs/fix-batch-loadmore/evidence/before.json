@@ -1,0 +1,118 @@
+[
+  {
+    "width": 1440,
+    "height": 960,
+    "scenario": "batch",
+    "actions": [
+      {
+        "id": "BUTTON||批量管理任务||0",
+        "status": "passed"
+      },
+      {
+        "id": "DIV|button|UI generate cancelled 已取消||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 51,
+      "issues": [
+        {
+          "rule": "control-occluded",
+          "severity": "P1",
+          "control": "BUTTON||加载更多任务||0",
+          "box": {
+            "x": 33,
+            "y": 766,
+            "width": 252,
+            "height": 32
+          }
+        }
+      ]
+    },
+    "errors": [],
+    "screenshot": "before-1440x960-batch.png",
+    "pagerAtSelection": {
+      "y": 766,
+      "height": 32,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": false,
+      "hit": false
+    },
+    "lastRow": {
+      "y": 680,
+      "height": 38,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "pagerAtBottom": {
+      "y": 726,
+      "height": 32,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "footer": {
+      "bottom": 943,
+      "inViewport": true
+    },
+    "beforeLoadCount": 8,
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1366,
+    "height": 768,
+    "scenario": "batch",
+    "actions": [
+      {
+        "id": "BUTTON||批量管理任务||0",
+        "status": "passed"
+      },
+      {
+        "id": "DIV|button|UI generate cancelled 已取消||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 51,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "before-1366x768-batch.png",
+    "pagerAtSelection": {
+      "y": 678,
+      "height": 32,
+      "top": 573,
+      "bottom": 590,
+      "fullyVisible": false,
+      "hit": false
+    },
+    "lastRow": {
+      "y": 554,
+      "height": 38,
+      "top": 573,
+      "bottom": 590,
+      "fullyVisible": false,
+      "hit": true
+    },
+    "pagerAtBottom": {
+      "y": 534,
+      "height": 32,
+      "top": 573,
+      "bottom": 590,
+      "fullyVisible": false,
+      "hit": false
+    },
+    "footer": {
+      "bottom": 751,
+      "inViewport": true
+    },
+    "beforeLoadCount": 8,
+    "countBefore": 8,
+    "countAfter": 8
+  }
+]
