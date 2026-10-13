@@ -3,7 +3,7 @@
 脚本：`scripts/release-simple.sh`。默认只打印计划（dry-run），加 `--execute` 才会真正动服务器。**本分支只写了脚本，未执行。**
 
 ## 发布前检查（本地，合并/发布前必过）
-`pnpm release:check`：根目录 `pnpm lint`（Biome，0 error）→ 四包 typecheck → orchestrator / web-workbench build。再加 web 与后端全量测试（后端除已知 broker-pool 本机基线外 0 失败）。`release-simple.sh --execute` 在任何 SSH 前，确认本地干净 HEAD 与 `RELEASE_REF` 一致并执行根 lint；通过后将发布引用固定为该提交 SHA。warnings 保留，errors 阻断。服务器跳过根 lint，避免依赖生产安装可能省略的 Biome dev 依赖；web build 原有 ESLint 门禁保留。
+`pnpm release:check`：先跑 `pnpm route:audit`（路由离线体检：production-suite 52 项 + BROWSER-BENCH-1 12 句加「请使用云端浏览器，」前缀，必须 100% 判为 browser、身份不需要、会话策略 anonymous；10 句纯信息对照必须仍为 scrape；无网络、无密钥，任一不符即退出 1）→ 根目录 `pnpm lint`（Biome，0 error）→ 四包 typecheck → orchestrator / web-workbench build。再加 web 与后端全量测试（后端除已知 broker-pool 本机基线外 0 失败）。`release-simple.sh --execute` 在任何 SSH 前，确认本地干净 HEAD 与 `RELEASE_REF` 一致并执行 `pnpm route:audit` 与根 lint；通过后将发布引用固定为该提交 SHA。warnings 保留，errors 阻断。服务器跳过根 lint，避免依赖生产安装可能省略的 Biome dev 依赖；web build 原有 ESLint 门禁保留。
 
 ## 步骤
 1. **前置检查**：服务器工作树必须没有未提交改动，并记下当前 HEAD 作为回滚点（`.release-previous-ref`）。

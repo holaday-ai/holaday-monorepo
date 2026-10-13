@@ -41,7 +41,7 @@ import {
   type RunImageTaskResult,
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
-import { classifyExecutionMode } from '../../agent/intent-classifier.js';
+import { explainExecutionMode } from '../../agent/intent-classifier.js';
 import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
 import { withMediaCallContext } from '../../agent/media-call-recorder.js';
 // Phase 24 RC follow-up — nav-failure safety net. Catches the
@@ -53,6 +53,10 @@ import { detectNavFailure } from '../../agent/nav-failure-detector.js';
 import { isExplicitPlanApproval, isPurePlanHold } from '../../agent/plan-mode.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
+import {
+  searchResultRequirement,
+  searchResultsSatisfy,
+} from '../../agent/search-result-requirement.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
 import { resolveSuggestionsProviderRoute } from '../../agent/suggestions-provider.js';
@@ -101,6 +105,7 @@ import {
   browserTaskTargetUrl,
   classifyIdentityNeed,
   decideUserBrowserRoute,
+  deriveTaskSessionPolicy,
 } from '../../agent/supercar/user-browser-routing.js';
 import type { PlannedStep, TaskState } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
@@ -1098,6 +1103,32 @@ function isTaskCreateReplay(value: unknown): value is TaskCreateReplay {
   );
 }
 
+/**
+ * FIX-INTENT-ROUTE-BROWSER — the same request, re-entered for the one-time
+ * scrape → browser retry. Fields that would make it a different or duplicate
+ * task (idempotency key, retry/continuation links, local Chrome, attachments)
+ * are dropped; the original task row is adopted instead of inserting one.
+ */
+export function scrapeBrowserRetryInput<
+  T extends {
+    clientRequestId?: unknown;
+    retryOfTaskId?: unknown;
+    publicCloudContinuationOf?: unknown;
+    localChrome?: unknown;
+    fileIds?: unknown;
+  },
+>(input: T) {
+  const {
+    clientRequestId: _clientRequestId,
+    retryOfTaskId: _retryOfTaskId,
+    publicCloudContinuationOf: _publicCloudContinuationOf,
+    localChrome: _localChrome,
+    fileIds: _fileIds,
+    ...rest
+  } = input;
+  return rest;
+}
+
 export const tasksRouter = router({
   create: protectedProcedure
     .input(pureTaskInput(createInput))
@@ -1773,9 +1804,10 @@ export const tasksRouter = router({
             // browser/generate budgets). Adds ~500ms latency on cache miss;
             // skill-hint + keyword fast paths inside the classifier short-
             // circuit most cases for free.
-            const classifiedExecutionMode = retryCore
-              ? ('generate' as const)
-              : await classifyExecutionMode({
+            // The decision keeps its reason (rule source + match) for task metadata.
+            const executionModeDecision = retryCore
+              ? null
+              : await explainExecutionMode({
                   intent: input.intent,
                   skillId: taskSkillId,
                   // §5 fileIds-aware soft template-fill: an attachment + a fill clue
@@ -1783,6 +1815,7 @@ export const tasksRouter = router({
                   hasFileAttachment: Boolean(input.fileIds && input.fileIds.length > 0),
                   logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
                 });
+            const classifiedExecutionMode = executionModeDecision?.mode ?? ('generate' as const);
             // Phase 2b — typed expert workflow lane override. When the new
             // typed matcher (content-topic / ecom-daily / douyin-review)
             // fires AND the EXPERT_WORKFLOW flag is on, force generate-mode
@@ -1829,21 +1862,25 @@ export const tasksRouter = router({
               routingWorkflowId: typedRoutingWorkflow?.workflowId,
               legacyWorkflowId: expertWorkflow?.id,
             });
-            const executionMode = retryCore
-              ? ('generate' as const)
-              : input.localChrome
-                ? ('browser' as const)
-                : resolveFollowUpExecutionMode({
-                    parentHasBrowserContext,
-                    typedWorkflowOverride,
-                    expertRouteOverride: expertWorkflow?.routeOverride,
-                    classifiedExecutionMode,
-                    explicitMediaMode: input.imageOptions
-                      ? 'image'
-                      : input.videoOptions
-                        ? 'video_creation'
-                        : null,
-                  });
+            // FIX-INTENT-ROUTE-BROWSER — internal one-time retry of a scrape task.
+            const scrapeBrowserRetry = ctx.scrapeBrowserRetry ?? null;
+            const executionMode = scrapeBrowserRetry
+              ? ('browser' as const)
+              : retryCore
+                ? ('generate' as const)
+                : input.localChrome
+                  ? ('browser' as const)
+                  : resolveFollowUpExecutionMode({
+                      parentHasBrowserContext,
+                      typedWorkflowOverride,
+                      expertRouteOverride: expertWorkflow?.routeOverride,
+                      classifiedExecutionMode,
+                      explicitMediaMode: input.imageOptions
+                        ? 'image'
+                        : input.videoOptions
+                          ? 'video_creation'
+                          : null,
+                    });
 
             let taskBrowserCapabilities = Object.freeze(browserCapabilities(ctx.userId));
             const browserTargetUrl =
@@ -1873,14 +1910,19 @@ export const tasksRouter = router({
                   })
                 : { lane: 'legacy' as const, reason: 'flag_off' as const };
             // D17-P1-01 — which sessions this task's browser may load, fixed here by the
-            // server and stored on the task. A logged-out promise (explicit public cloud,
-            // or a route that says 无登录态) is `anonymous`: no vault grant, cookie, storage
-            // or profile, and no reuse of an identity context. Nothing later can widen it.
-            const taskSessionPolicy: BrowserSessionPolicy =
-              input.browserPreference === 'cloud-public' ||
-              ('sessionPolicy' in browserRoute && browserRoute.sessionPolicy === 'anonymous')
-                ? 'anonymous'
-                : 'vault_allowed';
+            // server and stored on the task. Only a task that needs the user's own data
+            // may load a vault session (and not after a public choice or on a logged-out
+            // route); everything else is `anonymous`. Nothing later can widen it.
+            const taskSessionPolicy: BrowserSessionPolicy = deriveTaskSessionPolicy({
+              identityRequired: identityDecision?.required === true,
+              publicCloudRequested: input.browserPreference === 'cloud-public',
+              route: browserRoute,
+            });
+            if (scrapeBrowserRetry && browserRoute.lane === 'awaiting_user')
+              throw new TRPCError({
+                code: 'PRECONDITION_FAILED',
+                message: 'BROWSER_RETRY_NEEDS_USER_BROWSER',
+              });
             // Resolve identity/grant requirements before model preflight, quota or any cloud allocation.
             if (browserRoute.lane === 'awaiting_user') {
               const taskId = newExternalId('task');
@@ -2217,7 +2259,7 @@ export const tasksRouter = router({
               });
             }
             const directOpenUrl =
-              !input.localChrome && executionMode === 'browser'
+              !scrapeBrowserRetry && !input.localChrome && executionMode === 'browser'
                 ? extractRunnableDirectOpenUrl(input.intent, input.mode)
                 : null;
             const directOpenSafetyError = directOpenUrl
@@ -2295,7 +2337,8 @@ export const tasksRouter = router({
               .from(tasksTable)
               .where(inArray(tasksTable.status, [...TASK_QUEUE_DEPTH_STATUSES]));
             const queueDepth = Number(activeRow?.count ?? 0);
-            if (queueDepth >= GLOBAL_QUEUE_DEPTH_LIMIT) {
+            // The browser retry replaces its own already-admitted scrape task.
+            if (!scrapeBrowserRetry && queueDepth >= GLOBAL_QUEUE_DEPTH_LIMIT) {
               ctx.logger.warn(
                 { userId: ctx.userId, queueDepth, limit: GLOBAL_QUEUE_DEPTH_LIMIT },
                 'tasks.create: rejected — global queue depth exceeded',
@@ -2314,7 +2357,7 @@ export const tasksRouter = router({
             // for testing). Non-bypass users get their plan limit (1/3/5).
             const concurrencyLimit = isBypass ? BYPASS_CONCURRENCY : getConcurrencyLimit(planId);
             const concurrentCount = await quotaService.getActiveTaskCount(userRow.id);
-            if (concurrentCount >= concurrencyLimit) {
+            if (!scrapeBrowserRetry && concurrentCount >= concurrencyLimit) {
               throw new TRPCError({
                 code: 'TOO_MANY_REQUESTS',
                 message: isBypass
@@ -2329,7 +2372,7 @@ export const tasksRouter = router({
             // non-bypass users are governed by
             // their plan's monthly/daily counter (see tryConsume below) which
             // is already a different shape of throttle.
-            if (isBypass) {
+            if (isBypass && !scrapeBrowserRetry) {
               const rl = rateLimitTryAcquire(ctx.userId, BYPASS_RATE);
               if (!rl.ok) {
                 ctx.logger.warn(
@@ -2351,11 +2394,15 @@ export const tasksRouter = router({
             // plan for testing purposes. Concurrency + rate-limit + global
             // queue-depth (above) provide all the throttling we need.
             let opusActuallyConsumed = false;
-            const consumeTaskQuotaOnCreate = shouldConsumeTaskQuotaOnCreate({
-              isBypass,
-              isFollowUp,
-              willCreateVideoQuote,
-            });
+            // The scrape task already consumed this request's quota; its browser
+            // retry is the same task and is never charged again.
+            const consumeTaskQuotaOnCreate =
+              !scrapeBrowserRetry &&
+              shouldConsumeTaskQuotaOnCreate({
+                isBypass,
+                isFollowUp,
+                willCreateVideoQuote,
+              });
             if (isBypass) {
               opusActuallyConsumed = willConsumeOpus;
               ctx.logger.info(
@@ -4798,6 +4845,41 @@ export const tasksRouter = router({
                         : (scrapeResearchSourceTrust.failedChecks[0]?.detail ?? null)
                       : null;
 
+                  // FIX-INTENT-ROUTE-BROWSER — a search-engine task that asked for result
+                  // links / a count must get them. When the scrape answer falls short,
+                  // hand the SAME task to the browser lane once (no second charge),
+                  // recording why; only if that handoff cannot start does it fail here.
+                  let browserRetryFailure: string | null = null;
+                  const searchRequirement = searchResultRequirement(input.intent);
+                  if (searchRequirement) {
+                    const check =
+                      outcome.status === 'completed'
+                        ? searchResultsSatisfy(searchRequirement, outcome.summary)
+                        : ({ ok: false, reason: '抓取没有得到结果' } as const);
+                    if (!check.ok) {
+                      const reason = `抓取结果不满足要求（${check.reason}），已自动改用云端浏览器重试一次`;
+                      try {
+                        disposeExecution(taskId);
+                        broadcastToUser(ctx.userId, {
+                          type: 'server.task.progress',
+                          taskId,
+                          message: reason,
+                        });
+                        await tasksRouter
+                          .createCaller({ ...ctx, scrapeBrowserRetry: { taskId, reason } })
+                          .create(scrapeBrowserRetryInput(input));
+                        ctx.logger.info({ taskId, reason }, 'scrape: handed over to browser retry');
+                        return;
+                      } catch (err) {
+                        browserRetryFailure = `${reason}，但浏览器重试未能启动`;
+                        ctx.logger.warn(
+                          { taskId, err: err instanceof Error ? err.message : String(err) },
+                          'scrape: browser retry could not start',
+                        );
+                      }
+                    }
+                  }
+
                   // B3 — structured task:completed log. Single record per task
                   // termination with all fields the eval pipeline needs.
                   const elapsedMs = Date.now() - scrapeStartedAt;
@@ -4808,6 +4890,10 @@ export const tasksRouter = router({
                   const metadata = {
                     executionMode: 'scrape' as const,
                     finalExecutionMode,
+                    ...(executionModeDecision
+                      ? { executionModeReason: executionModeDecision }
+                      : {}),
+                    ...(browserRetryFailure ? { browserRetryFailure } : {}),
                     expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
                     expertMode: expertModeOverride,
                     selectedRole: dispatchRoleId,
@@ -5287,8 +5373,13 @@ export const tasksRouter = router({
 
             // Production browser execution uses the admitted regional Qwen adapter.
             // AGENT_MODE and Anthropic credentials cannot redirect this lane.
+            if (scrapeBrowserRetry && !browserMessagesAdapter)
+              throw new TRPCError({
+                code: 'PRECONDITION_FAILED',
+                message: 'BROWSER_RETRY_RUNTIME_UNAVAILABLE',
+              });
             if (browserMessagesAdapter) {
-              const taskId = newExternalId('task');
+              const taskId = scrapeBrowserRetry?.taskId ?? newExternalId('task');
 
               // Phase 13 Dim 1 — first-frame plan. Skipped for simple-search and
               // trivial intents. The Qwen route requires the shared adapter flag, a
@@ -5344,26 +5435,40 @@ export const tasksRouter = router({
                   executionMode === 'browser' &&
                   shouldUseBrowserPool(ctx.userId),
               );
-              await repo.insertTask(
-                {
-                  taskId,
-                  status: willQueueDispatch ? 'queued' : 'executing',
-                  plan: [],
-                  cursor: 0,
-                  pendingConfirm: null,
-                },
-                {
+              const browserSourceContext = {
+                ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
+                browserSessionPolicy: taskSessionPolicy,
+              };
+              if (scrapeBrowserRetry) {
+                // Same task, same charge: take over the scrape task's row.
+                const adopted = await repo.adoptTaskForBrowserRetry({
+                  taskExternalId: taskId,
                   userId: userRow.id,
-                  intent: input.intent,
-                  roleId: dispatchRoleId,
-                  opusUsed: opusActuallyConsumed,
-                  executionMode: 'browser',
-                  sourceContext: {
-                    ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
-                    browserSessionPolicy: taskSessionPolicy,
+                  status: willQueueDispatch ? 'queued' : 'executing',
+                  sourceContext: browserSourceContext,
+                  reason: scrapeBrowserRetry.reason,
+                });
+                if (!adopted.persisted)
+                  throw new TRPCError({ code: 'CONFLICT', message: 'BROWSER_RETRY_TASK_CHANGED' });
+              } else {
+                await repo.insertTask(
+                  {
+                    taskId,
+                    status: willQueueDispatch ? 'queued' : 'executing',
+                    plan: [],
+                    cursor: 0,
+                    pendingConfirm: null,
                   },
-                },
-              );
+                  {
+                    userId: userRow.id,
+                    intent: input.intent,
+                    roleId: dispatchRoleId,
+                    opusUsed: opusActuallyConsumed,
+                    executionMode: 'browser',
+                    sourceContext: browserSourceContext,
+                  },
+                );
+              }
               // Phase 13 Dim 1 — persist plan onto the task row and broadcast
               // it to the SPA so the user sees upcoming steps before any
               // tool fires. Best-effort: write failures log + continue.
@@ -6964,7 +7069,13 @@ export const tasksRouter = router({
                         expertMode: expertModeOverride,
                         selectedRole: dispatchRoleId,
                         ...browserMessagesAdapter.metadata,
-                        fallbackChain: ['browser'],
+                        fallbackChain: scrapeBrowserRetry ? ['scrape', 'browser'] : ['browser'],
+                        ...(scrapeBrowserRetry
+                          ? { browserRetryReason: scrapeBrowserRetry.reason }
+                          : {}),
+                        ...(executionModeDecision
+                          ? { executionModeReason: executionModeDecision }
+                          : {}),
                         elapsedMs,
                         iterations: outcome.iterations,
                         toolsUsed: outcome.toolsUsed,

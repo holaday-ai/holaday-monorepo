@@ -1265,7 +1265,9 @@ describe('D10 original input retry', () => {
     const first = await f.createDirect(undefined, ['fil_original']);
     await vi.waitFor(() => expect(f.settlements).toHaveLength(1));
     f.row.status = 'failed';
-    const classify = vi.spyOn(classifier, 'classifyExecutionMode').mockResolvedValue('browser');
+    const classify = vi
+      .spyOn(classifier, 'explainExecutionMode')
+      .mockResolvedValue({ mode: 'browser', source: 'test' });
     const retry = await f.createDirect(f.row.intent, [], undefined, first.taskId);
     expect(retry).toMatchObject({ executionMode: 'generate' });
     expect(classify).not.toHaveBeenCalled();
@@ -1300,7 +1302,7 @@ it('admits reading an existing PR through the real task scope guard', async () =
   const f = fixture();
   // Stop at the classifier after the real scope guard, without starting a browser.
   const nextStage = vi
-    .spyOn(classifier, 'classifyExecutionMode')
+    .spyOn(classifier, 'explainExecutionMode')
     .mockRejectedValueOnce(new Error('scope guard passed'));
   await expect(
     f.createDirect('Open the PR #123 on GitHub and read its discussion'),

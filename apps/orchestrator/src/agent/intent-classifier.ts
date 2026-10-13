@@ -870,6 +870,46 @@ function stripNegatedRoutingClauses(intent: string): string {
   );
 }
 
+/**
+ * FIX-INTENT-ROUTE-BROWSER — the user explicitly asked for a browser (or for
+ * something only a browser can do: click, screenshot, act after logging in,
+ * start from a given page). These outrank every search / scrape keyword: a
+ * task that says "请使用云端浏览器，Google 搜索…" must not be answered by a
+ * Firecrawl search. Matched on the negation-stripped intent, so "不要用浏览器"
+ * does not count.
+ */
+const EXPLICIT_BROWSER_PATTERNS: readonly [RegExp, string][] = [
+  [
+    /(?:用|使用|通过|借助|开启|开|启动|调用)\s*(?:一个)?\s*(?:云端|真实|实际|在线|自动化|无头|远程|本地)?\s*(?:的)?\s*浏览器/i,
+    '指定使用浏览器',
+  ],
+  [/在\s*(?:云端|真实)?\s*浏览器\s*(?:里|中|上|内)/i, '在浏览器里操作'],
+  [/(?:起始页面|起始页|起始网址|开始页面)\s*[：:]/i, '指定起始页面'],
+  [
+    /(?:去|到|上)\s*[^，。；,;\s]{1,20}?(?:网站|官网|网页)\s*(?:上)?\s*(?:看|查|找|搜|读|点|浏览)/i,
+    '去网站查看',
+  ],
+  [/点击(?!率|量|数|次数|转化)/i, '点击'],
+  [
+    /(?<!这张|那张|该|上传的|附件|附件的|图片|这个)(?:截图|截屏|截个图)(?!率|工具|中|里|上的|内容)/i,
+    '截图',
+  ],
+  [/(?:登录|登陆|登入)后(?!台)/i, '登录后操作'],
+  [
+    /\b(?:use|using|in|with|via|open|launch)\s+(?:a\s+|the\s+)?(?:cloud\s+|real\s+|headless\s+)?browser\b/i,
+    'use a browser',
+  ],
+  [/\b(?:take|capture)\s+(?:a\s+)?screenshots?\b/i, 'take a screenshot'],
+  [/\bclick(?:s|ing)?\s+(?:on\s+)?(?:the\s+|a\s+)?(?!-?through|rate)\w/i, 'click'],
+];
+
+function matchExplicitBrowserIntent(intent: string): string | null {
+  for (const [pattern, label] of EXPLICIT_BROWSER_PATTERNS) {
+    if (pattern.test(intent)) return label;
+  }
+  return null;
+}
+
 function matchInteractionPattern(intent: string): string | null {
   for (const [pattern, label] of INTERACTION_PATTERNS) {
     if (pattern.test(intent)) return label;
@@ -1079,7 +1119,13 @@ function decide(intent: string, ctx: { hasFileAttachment: boolean }): RouteDecis
     }
   }
 
-  // 0. Product-listing / comparison shopping tasks need the supercar
+  // 0. Explicit browser request — highest priority after template fill.
+  const explicitBrowser = matchExplicitBrowserIntent(routingIntent);
+  if (explicitBrowser) {
+    return { mode: 'browser', source: 'kw:explicit-browser', match: explicitBrowser };
+  }
+
+  // 0'. Product-listing / comparison shopping tasks need the supercar
   // loop so it can use search_ecommerce and preserve source URLs.
   // Firecrawl/generate lanes repeatedly produced price rows with
   // empty URLs for "前5结果（名称/价格/链接）" style prompts.
@@ -1193,12 +1239,23 @@ function decide(intent: string, ctx: { hasFileAttachment: boolean }): RouteDecis
   return { mode: 'generate', source: 'default' };
 }
 
+/** The routing decision with its reason (rule source + matched text), for task metadata and audits. */
+export interface ExecutionModeDecision {
+  mode: ExecutionMode;
+  source: string;
+  match?: string;
+}
+
 export async function classifyExecutionMode(opts: ClassifyOpts): Promise<ExecutionMode> {
+  return (await explainExecutionMode(opts)).mode;
+}
+
+export async function explainExecutionMode(opts: ClassifyOpts): Promise<ExecutionModeDecision> {
   const intent = opts.intent.trim();
   const hasFileAttachment = opts.hasFileAttachment ?? false;
   if (!intent) {
     opts.logger.info({ mode: 'generate', source: 'empty-intent' }, 'intent-classifier: decided');
-    return 'generate';
+    return { mode: 'generate', source: 'empty-intent' };
   }
 
   const key = cacheKey(intent, hasFileAttachment);
@@ -1208,7 +1265,7 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
       { mode: cached.mode, source: cached.source, cache: 'hit' },
       'intent-classifier: decided',
     );
-    return cached.mode;
+    return { mode: cached.mode, source: cached.source };
   }
 
   // Phase 1 follow-up — strong keyword signals override skill-hint
@@ -1230,6 +1287,7 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
   // ambiguous prompts while preventing the search-verb foot-gun.
   const d = decide(intent, { hasFileAttachment });
   const STRONG_SIGNAL_SOURCES = new Set([
+    'kw:explicit-browser',
     'kw:template_fill',
     'kw:template_fill_file',
     'kw:attachment-writing',
@@ -1252,7 +1310,7 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
       },
       'intent-classifier: decided',
     );
-    return d.mode;
+    return d;
   }
 
   if (opts.skillId) {
@@ -1263,7 +1321,7 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
         { mode: hinted, source: 'skill-hint', skillId: opts.skillId },
         'intent-classifier: decided',
       );
-      return hinted;
+      return { mode: hinted, source: `skill:${opts.skillId}` };
     }
   }
 
@@ -1276,5 +1334,5 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
     },
     'intent-classifier: decided',
   );
-  return d.mode;
+  return d;
 }

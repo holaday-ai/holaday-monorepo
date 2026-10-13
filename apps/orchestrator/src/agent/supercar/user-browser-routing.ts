@@ -291,3 +291,21 @@ export function decideUserBrowserRoute(input: {
     };
   return { lane: 'user-chrome', reason: 'selected', origin: input.selectionOrigin };
 }
+
+/**
+ * The browser session policy a new task is created with (D17-P1-01, tightened
+ * in FIX-INTENT-ROUTE-BROWSER): only a task that reads or acts on the user's
+ * own data may load a vault session, and never after an explicit public-cloud
+ * choice or on a route that promised a logged-out run. Public and uncertain
+ * tasks (search, public pages, forms on test sites…) are always `anonymous`.
+ */
+export function deriveTaskSessionPolicy(input: {
+  identityRequired: boolean;
+  publicCloudRequested: boolean;
+  route: { sessionPolicy?: 'anonymous' } | { lane: string; reason: string };
+}): 'anonymous' | 'vault_allowed' {
+  if (!input.identityRequired || input.publicCloudRequested) return 'anonymous';
+  if ('sessionPolicy' in input.route && input.route.sessionPolicy === 'anonymous')
+    return 'anonymous';
+  return 'vault_allowed';
+}

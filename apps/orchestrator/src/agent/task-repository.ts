@@ -826,6 +826,54 @@ export class TaskRepository {
     );
   }
 
+  /**
+   * FIX-INTENT-ROUTE-BROWSER — the scrape lane hands its still-executing task to
+   * the browser lane for one retry. Only an `executing` row of this user/origin
+   * is taken over; it keeps its id, intent and charge.
+   */
+  async adoptTaskForBrowserRetry(params: {
+    taskExternalId: string;
+    userId: number;
+    status: 'executing' | 'queued';
+    sourceContext: Record<string, unknown>;
+    reason: string;
+  }): Promise<{ persisted: boolean }> {
+    let persisted = false;
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.externalId, params.taskExternalId),
+            eq(tasks.userId, params.userId),
+            eq(tasks.origin, this.taskOrigin),
+            eq(tasks.status, 'executing'),
+          ),
+        )
+        .limit(1);
+      if (!row) return;
+      const updated = await tx
+        .update(tasks)
+        .set({
+          status: params.status,
+          result: { executionMode: 'browser' },
+          sourceContext: params.sourceContext,
+        })
+        .where(and(eq(tasks.id, row.id), eq(tasks.status, 'executing')));
+      if (extractMysqlAffectedRows(updated) !== 1) return;
+      await tx.insert(taskEvents).values({
+        externalId: newExternalId('taskEvent'),
+        taskId: row.id,
+        type: 'task.rerouted',
+        actor: 'system',
+        payload: { from: 'scrape', to: 'browser', reason: params.reason },
+      });
+      persisted = true;
+    });
+    return { persisted };
+  }
+
   async markQueuedTaskExecuting(taskExternalId: string): Promise<{ persisted: boolean }> {
     const [taskRow] = await runQueueDatabase(() =>
       this.db
