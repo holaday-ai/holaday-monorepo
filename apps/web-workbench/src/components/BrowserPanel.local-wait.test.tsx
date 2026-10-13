@@ -56,7 +56,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 it.each([
-  [true, '用公开云端（无登录态）继续'],
+  [true, '用公开云端继续（看不到你的个人信息）'],
   [false, '不会改用无登录态的云端浏览器'],
 ])(
   'the local Chrome panel shows the connect-the-extension wait (publicCloudAllowed=%s)',

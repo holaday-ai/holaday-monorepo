@@ -827,6 +827,9 @@ export const browserConnectionWaitSchema = z
   .object({
     reason: z.enum(['extension_offline', 'selection_required', 'origin_grant_required']),
     publicCloudAllowed: z.boolean(),
+    /** The task reads the user's own data; `identityReason` names the object matched. */
+    identityRequired: z.boolean().optional(),
+    identityReason: z.string().max(300).optional(),
   })
   .strict();
 export type BrowserConnectionWait = z.infer<typeof browserConnectionWaitSchema>;

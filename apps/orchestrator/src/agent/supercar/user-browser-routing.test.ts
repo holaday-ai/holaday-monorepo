@@ -8,9 +8,16 @@ describe('identity-aware user Chrome route', () => {
     '搜索小红书笔记',
     '在微博查公开帖子',
     '在携程查上海酒店',
-  ])('defaults %s to Chrome awaiting exact-origin selection', (intent) => {
-    expect(decideUserBrowserRoute({ ...base, intent }).lane).toBe('awaiting_user');
-  });
+  ])(
+    'a public query on a first-cohort site runs in the cloud, no pre-departure wait: %s',
+    (intent) => {
+      // FIX-ROUTING-IDENTITY-2: uncertain → public cloud; a real login wall pauses during execution.
+      expect(decideUserBrowserRoute({ ...base, intent })).toMatchObject({
+        lane: 'cloud',
+        reason: 'public_site',
+      });
+    },
+  );
   it('does not silently fall back when offline', () => {
     const r = decideUserBrowserRoute({
       ...base,
@@ -28,7 +35,7 @@ describe('identity-aware user Chrome route', () => {
       'legacy',
     );
   });
-  it('public cloud choice is explicit and limited; identity requests cannot use it', () => {
+  it('public cloud choice is explicit and limited; for identity requests it says personal data is not visible', () => {
     const r = decideUserBrowserRoute({
       ...base,
       intent: '查询京东公开商品价格',
@@ -37,9 +44,16 @@ describe('identity-aware user Chrome route', () => {
     expect(r.lane).toBe('cloud');
     expect(r.limitation).toMatch(/无登录态/);
     expect(
-      decideUserBrowserRoute({ ...base, intent: '查看我的京东订单', publicCloudRequested: true })
-        .lane,
-    ).toBe('awaiting_user');
+      decideUserBrowserRoute({ ...base, intent: '查看我的京东订单', publicCloudRequested: true }),
+    ).toMatchObject({
+      lane: 'cloud',
+      reason: 'explicit_public_cloud',
+      identityRequired: true,
+      limitation: expect.stringContaining('看不到你的个人信息'),
+    });
+    expect(decideUserBrowserRoute({ ...base, intent: '查看我的京东订单' }).lane).toBe(
+      'awaiting_user',
+    );
   });
   it('requires exact origin selection for target URL; no suffix or subdomain grants', () => {
     expect(
@@ -79,17 +93,26 @@ describe('ordinary login / private-data wording needs the user Chrome (FIX-PR250
     'check my inbox',
     'list my private repositories on github.com',
     'log in to github.com and open notifications',
-  ])('%s: waits for Chrome, and a public-cloud choice cannot override it', (intent) => {
-    for (const publicCloudRequested of [false, true]) {
-      const route = decideUserBrowserRoute({ ...offline, intent, publicCloudRequested });
-      expect(route.lane).toBe('awaiting_user');
-      expect(route.reason).toBe('extension_offline');
-    }
+  ])('%s: waits for Chrome unless the user explicitly continues publicly', (intent) => {
+    const route = decideUserBrowserRoute({ ...offline, intent });
+    expect(route).toMatchObject({
+      lane: 'awaiting_user',
+      reason: 'extension_offline',
+      identityRequired: true,
+      identityReason: expect.stringMatching(/「.+」/),
+    });
+    expect(route.question).toContain('用公开云端继续（看不到你的个人信息）');
+    expect(
+      decideUserBrowserRoute({ ...offline, intent, publicCloudRequested: true }),
+    ).toMatchObject({ lane: 'cloud', reason: 'explicit_public_cloud', identityRequired: true });
     expect(decideUserBrowserRoute({ ...base, intent }).lane).toBe('awaiting_user');
   });
-  it('a usually-logged-in service without explicit wording waits; an explicit public choice is honoured', () => {
+  it('a usually-logged-in service without personal wording is uncertain: it runs in the cloud', () => {
     for (const intent of ['打开 Notion 看看这周的计划', '在飞书文档里找到上线清单']) {
-      expect(decideUserBrowserRoute({ ...offline, intent }).lane).toBe('awaiting_user');
+      expect(decideUserBrowserRoute({ ...offline, intent })).toMatchObject({
+        lane: 'cloud',
+        reason: 'public_site',
+      });
       expect(
         decideUserBrowserRoute({ ...offline, intent, publicCloudRequested: true }),
       ).toMatchObject({ lane: 'cloud', reason: 'explicit_public_cloud' });

@@ -1,8 +1,8 @@
 import { TRPCError } from '@trpc/server';
 
 /**
- * "用公开云端（无登录态）继续" re-submits a non-identity extension wait as a
- * logged-out cloud task. The SPA cancels the original first; the server then
+ * "用公开云端继续（看不到你的个人信息）" re-submits an extension wait as a
+ * logged-out cloud task (an identity task then runs without personal data). The SPA cancels the original first; the server then
  * allows at most one replacement per original, at any time:
  *
  * - the idempotency key is derived from the original task, so a double click,
@@ -14,7 +14,8 @@ import { TRPCError } from '@trpc/server';
  *   replacement's own insert transaction. Concurrent or late requests lose the
  *   claim and create nothing; a failed link rolls the insert back and the
  *   consumed quota is refunded;
- * - identity-required waits are refused here too, not only in the UI.
+ * - only a wait whose stored `browserConnection.publicCloudAllowed` is true can
+ *   continue (identity waits now allow it: the user explicitly gives up personal data).
  */
 export const PUBLIC_CLOUD_CONTINUATION_PREFIX = 'cloud-continue:';
 

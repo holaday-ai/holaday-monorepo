@@ -99,6 +99,7 @@ import {
 } from '../../agent/supercar/task-state-machine.js';
 import {
   browserTaskTargetUrl,
+  classifyIdentityNeed,
   decideUserBrowserRoute,
 } from '../../agent/supercar/user-browser-routing.js';
 import type { PlannedStep, TaskState } from '../../agent/task-controller.js';
@@ -1852,6 +1853,9 @@ export const tasksRouter = router({
                 browserTargetUrl &&
                 (await vaultRuntime.vault.match(ctx.userId, browserTargetUrl).catch(() => null)),
             );
+            // Readable identity decision, kept on the task for later diagnosis.
+            const identityDecision =
+              executionMode === 'browser' ? classifyIdentityNeed(input.intent) : null;
             const browserRoute =
               executionMode === 'browser'
                 ? decideUserBrowserRoute({
@@ -1881,14 +1885,19 @@ export const tasksRouter = router({
               );
               const question =
                 browserRoute.question ?? '需要连接 HOLA DAY Chrome 插件，请连接后重新选择页面。';
-              // Only a request that does not need the user's own login may continue in
-              // the public cloud (logged out); the UI offers that button from this flag.
+              // FIX-ROUTING-IDENTITY-2: every extension wait may continue in the public
+              // cloud by the user's explicit choice; for an identity task the UI states
+              // that personal data is not visible there (identityReason says which).
               const browserConnection = {
                 reason: browserRoute.reason as
                   | 'extension_offline'
                   | 'selection_required'
                   | 'origin_grant_required',
-                publicCloudAllowed: browserRoute.identityRequired === false,
+                publicCloudAllowed: true,
+                identityRequired: browserRoute.identityRequired === true,
+                ...(browserRoute.identityReason
+                  ? { identityReason: browserRoute.identityReason }
+                  : {}),
               };
               const persisted = await repo.persistAwaitingUser({
                 taskExternalId: taskId,
@@ -1900,6 +1909,7 @@ export const tasksRouter = router({
                     browserSource: 'local-chrome',
                     browserRoutingAwaiting: browserRoute.reason,
                     browserConnection,
+                    ...(identityDecision ? { identityDecision } : {}),
                   },
                 },
               });
@@ -6920,6 +6930,7 @@ export const tasksRouter = router({
                         ...(browserRoute.limitation
                           ? { browserLimitation: browserRoute.limitation }
                           : {}),
+                        ...(identityDecision ? { identityDecision } : {}),
                         ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
                         executionMode: executionMode === 'browser' ? 'browser' : executionMode,
                         finalExecutionMode: executionMode === 'browser' ? 'browser' : executionMode,

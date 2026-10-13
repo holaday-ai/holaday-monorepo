@@ -95,6 +95,15 @@ describe('waiting for the HOLA DAY Chrome extension (FIX-D11)', () => {
       ...connection,
       publicCloudAllowed: true,
     });
-    expect(open.followUp).toContain('用公开云端（无登录态）继续');
+    expect(open.followUp).toContain('用公开云端继续（看不到你的个人信息）');
+    // FIX-ROUTING-IDENTITY-2: an identity wait may also continue publicly, saying what it cannot see.
+    const own = awaitingUserStreamMessage('permission', '需要连接 HOLA DAY Chrome 插件：…', {
+      ...connection,
+      publicCloudAllowed: true,
+      identityRequired: true,
+      identityReason: '要读取或操作属于你本人的数据：「我的京东订单」',
+    });
+    expect(own.followUp).toContain('「我的京东订单」');
+    expect(own.followUp).toContain('用公开云端继续（看不到你的个人信息）');
   });
 });
