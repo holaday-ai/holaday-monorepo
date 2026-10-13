@@ -367,7 +367,7 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
       const source = await pool.allocate('tsk_parent', 'usr_owner', 'desktop');
       pool.retain('tsk_parent', 60_000, 'terminal-review');
 
-      const adopted = pool.adoptRetained('tsk_parent', 'tsk_follow_up', 'usr_owner');
+      const adopted = pool.adoptRetained('tsk_parent', 'tsk_follow_up', 'usr_owner', 'anonymous');
 
       expect(adopted).toBe(source);
       expect(adopted?.taskId).toBe('tsk_follow_up');
@@ -381,7 +381,7 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
     it('releases the adopted task key when its browser dies later', async () => {
       const source = await pool.allocate('tsk_parent', 'usr_owner');
       pool.retain('tsk_parent', 60_000, 'terminal-review');
-      const adopted = pool.adoptRetained('tsk_parent', 'tsk_follow_up', 'usr_owner');
+      const adopted = pool.adoptRetained('tsk_parent', 'tsk_follow_up', 'usr_owner', 'anonymous');
 
       expect(adopted).toBe(source);
       (
@@ -399,10 +399,10 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
 
     it('refuses handoff when the source is not retained or has another owner', async () => {
       await pool.allocate('tsk_active', 'usr_owner');
-      expect(pool.adoptRetained('tsk_active', 'tsk_next', 'usr_owner')).toBeNull();
+      expect(pool.adoptRetained('tsk_active', 'tsk_next', 'usr_owner', 'anonymous')).toBeNull();
 
       pool.retain('tsk_active', 60_000, 'terminal-review');
-      expect(pool.adoptRetained('tsk_active', 'tsk_next', 'usr_other')).toBeNull();
+      expect(pool.adoptRetained('tsk_active', 'tsk_next', 'usr_other', 'anonymous')).toBeNull();
       expect(pool.peek('tsk_active')).not.toBeNull();
       expect(pool.peek('tsk_next')).toBeNull();
     });
@@ -412,7 +412,7 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
       pool.retain('tsk_parent', 60_000, 'terminal-review');
       const destination = await pool.allocate('tsk_next', 'usr_owner');
 
-      expect(pool.adoptRetained('tsk_parent', 'tsk_next', 'usr_owner')).toBeNull();
+      expect(pool.adoptRetained('tsk_parent', 'tsk_next', 'usr_owner', 'anonymous')).toBeNull();
       expect(pool.peek('tsk_next')).toBe(destination);
       expect(pool.peek('tsk_parent')).not.toBeNull();
     });

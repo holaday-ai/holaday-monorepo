@@ -16,7 +16,7 @@ export interface VaultRuntime {
   prepare(
     userId: string,
     executor: PlaywrightExecutor,
-    session?: { targetUrl?: string | null },
+    session?: { targetUrl?: string | null; sessionPolicy?: 'anonymous' | 'vault_allowed' },
   ): Promise<void>;
   sweep(): Promise<void>;
   finish(executor: PlaywrightExecutor): Promise<void>;
@@ -88,7 +88,10 @@ export function createVaultRuntime(options: {
       }
     },
     async prepare(userId, executor, session) {
-      const targetUrl = session?.targetUrl;
+      // Fail closed: only a task the server derived as `vault_allowed` may load a
+      // grant. An anonymous ("公开云端") task never matches or opens one.
+      if (session?.sessionPolicy !== 'vault_allowed') return;
+      const targetUrl = session.targetUrl;
       if (!targetUrl) return;
       const grant = await vault.match(userId, targetUrl);
       if (!grant) return;

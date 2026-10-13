@@ -332,16 +332,106 @@ describe('vault browser worker (real Chromium)', () => {
     const executor = () => ({ createSessionVaultContext: vi.fn((o) => browser.newContext(o)) });
     for (const target of [undefined, null, 'https://www.ctrip.com/hotels', 'http://localhost/']) {
       const e = executor();
-      await runtime.prepare('alice', e as never, { targetUrl: target });
+      await runtime.prepare('alice', e as never, {
+        targetUrl: target,
+        sessionPolicy: 'vault_allowed',
+      });
       expect(e.createSessionVaultContext).not.toHaveBeenCalled();
     }
     const e1 = executor();
     const e2 = executor();
-    await runtime.prepare('alice', e1 as never, { targetUrl: `${origin}/orders` });
-    await runtime.prepare('alice', e2 as never, { targetUrl: `${origin}/cart` });
+    await runtime.prepare('alice', e1 as never, {
+      targetUrl: `${origin}/orders`,
+      sessionPolicy: 'vault_allowed',
+    });
+    await runtime.prepare('alice', e2 as never, {
+      targetUrl: `${origin}/cart`,
+      sessionPolicy: 'vault_allowed',
+    });
     expect(e1.createSessionVaultContext).toHaveBeenCalledTimes(1);
     expect(e2.createSessionVaultContext).toHaveBeenCalledTimes(1);
     await runtime.finish(e1 as never);
     await runtime.finish(e2 as never);
+  });
+
+  describe('D17-P1-01: an anonymous (公开云端) task never loads a granted session (real Chromium)', () => {
+    async function grantedRuntime() {
+      const { store } = countingStore();
+      const runtime = createVaultRuntime({
+        importEnabled: true,
+        profileEnabled: true,
+        keys: new TestKeyProvider(),
+        store,
+        context: (o) => browser.newContext(o),
+        probes: new Map([[origin, { path: '/account-check', selector: '[data-ok]' }]]),
+      });
+      if (!runtime) throw new Error('runtime missing');
+      const grant = await runtime.vault.grant('alice', {
+        origin,
+        purposes: ['read', 'session-import'],
+        storageKeys: [],
+      });
+      await runtime.vault.import(
+        'alice',
+        grant.id,
+        { cookies: [cookie('127.0.0.1')], storage: [] },
+        async () => 'connected',
+      );
+      const match = vi.spyOn(runtime.vault, 'match');
+      const open = vi.spyOn(runtime.worker, 'open');
+      return { runtime, match, open };
+    }
+    const accountStatus = async (context: import('playwright').BrowserContext) =>
+      (await context.request.get(`${origin}/account-check`)).status();
+
+    it.each([
+      ['anonymous', { sessionPolicy: 'anonymous' as const }],
+      ['no policy (fail closed)', {}],
+    ])(
+      '%s: 0 vault matches, 0 worker.open, the task context has no site cookie',
+      async (_label, policy) => {
+        const { runtime, match, open } = await grantedRuntime();
+        const executor = { createSessionVaultContext: vi.fn((o) => browser.newContext(o)) };
+        await runtime.prepare('alice', executor as never, {
+          targetUrl: `${origin}/orders`,
+          ...policy,
+        });
+        expect(match).not.toHaveBeenCalled();
+        expect(open).not.toHaveBeenCalled();
+        expect(executor.createSessionVaultContext).not.toHaveBeenCalled();
+        // What the anonymous task browses in: a context with nothing loaded.
+        const clean = await browser.newContext();
+        try {
+          expect(await clean.cookies(origin)).toEqual([]);
+          expect(await accountStatus(clean)).toBe(401);
+        } finally {
+          await clean.close();
+        }
+        await runtime.finish(executor as never);
+      },
+    );
+
+    it('vault_allowed (identity task with a connected grant) still gets the logged-in context', async () => {
+      const { runtime, match, open } = await grantedRuntime();
+      const contexts: import('playwright').BrowserContext[] = [];
+      const executor = {
+        createSessionVaultContext: vi.fn(async (o) => {
+          const context = await browser.newContext(o);
+          contexts.push(context);
+          return context;
+        }),
+      };
+      await runtime.prepare('alice', executor as never, {
+        targetUrl: `${origin}/orders`,
+        sessionPolicy: 'vault_allowed',
+      });
+      expect(match).toHaveBeenCalledTimes(1);
+      expect(open).toHaveBeenCalledTimes(1);
+      const [context] = contexts;
+      if (!context) throw new Error('vault context missing');
+      expect((await context.cookies(origin)).map((c) => c.name)).toContain('sid');
+      expect(await accountStatus(context)).toBe(200);
+      await runtime.finish(executor as never);
+    });
   });
 });

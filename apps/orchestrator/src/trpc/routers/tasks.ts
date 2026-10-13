@@ -181,7 +181,9 @@ import {
 import {
   BrowserSessionRestoreFlights,
   restorableBrowserTarget,
+  storedBrowserSessionPolicy,
 } from '../../browser-pool/browser-session-recovery.js';
+import type { BrowserSessionPolicy } from '../../browser-pool/types.js';
 import { getVaultRuntime } from '../../browser-session-vault/runtime.js';
 import { browserCapabilities } from '../../config/browser-capabilities.js';
 import { env as appEnv } from '../../config/env.js';
@@ -1870,6 +1872,15 @@ export const tasksRouter = router({
                     cloudSessionAvailable,
                   })
                 : { lane: 'legacy' as const, reason: 'flag_off' as const };
+            // D17-P1-01 — which sessions this task's browser may load, fixed here by the
+            // server and stored on the task. A logged-out promise (explicit public cloud,
+            // or a route that says 无登录态) is `anonymous`: no vault grant, cookie, storage
+            // or profile, and no reuse of an identity context. Nothing later can widen it.
+            const taskSessionPolicy: BrowserSessionPolicy =
+              input.browserPreference === 'cloud-public' ||
+              ('sessionPolicy' in browserRoute && browserRoute.sessionPolicy === 'anonymous')
+                ? 'anonymous'
+                : 'vault_allowed';
             // Resolve identity/grant requirements before model preflight, quota or any cloud allocation.
             if (browserRoute.lane === 'awaiting_user') {
               const taskId = newExternalId('task');
@@ -5069,6 +5080,7 @@ export const tasksRouter = router({
                   roleId: dispatchRoleId,
                   opusUsed: opusActuallyConsumed,
                   executionMode: 'browser',
+                  sourceContext: { browserSessionPolicy: taskSessionPolicy },
                 },
               );
 
@@ -5079,13 +5091,19 @@ export const tasksRouter = router({
                 try {
                   if (directOpenUsesBrowserPool && ctx.browserPool) {
                     const adopted = input.replyToTaskId
-                      ? ctx.browserPool.adoptRetained(input.replyToTaskId, taskId, ctx.userId)
+                      ? ctx.browserPool.adoptRetained(
+                          input.replyToTaskId,
+                          taskId,
+                          ctx.userId,
+                          taskSessionPolicy,
+                        )
                       : null;
                     const instance =
                       adopted ??
                       (await ctx.browserPool.allocate(taskId, ctx.userId, input.viewportProfile, {
                         targetUrl: browserTargetUrl,
                         capabilities: taskBrowserCapabilities,
+                        sessionPolicy: taskSessionPolicy,
                       }));
                     executor = instance.executor;
                     allocatedPool = true;
@@ -5340,9 +5358,10 @@ export const tasksRouter = router({
                   roleId: dispatchRoleId,
                   opusUsed: opusActuallyConsumed,
                   executionMode: 'browser',
-                  ...(input.localChrome
-                    ? { sourceContext: { browserSource: 'local-chrome' } }
-                    : {}),
+                  sourceContext: {
+                    ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
+                    browserSessionPolicy: taskSessionPolicy,
+                  },
                 },
               );
               // Phase 13 Dim 1 — persist plan onto the task row and broadcast
@@ -5457,7 +5476,12 @@ export const tasksRouter = router({
                     // immediately on completion. Per-user concurrency is gated
                     // upstream via getActiveTaskCount + plan limits.
                     const adopted = input.replyToTaskId
-                      ? ctx.browserPool.adoptRetained(input.replyToTaskId, taskId, ctx.userId)
+                      ? ctx.browserPool.adoptRetained(
+                          input.replyToTaskId,
+                          taskId,
+                          ctx.userId,
+                          taskSessionPolicy,
+                        )
                       : null;
                     let allocatedForContinuation = false;
                     const instance = adopted
@@ -5465,6 +5489,7 @@ export const tasksRouter = router({
                       : await ctx.browserPool.allocate(taskId, ctx.userId, input.viewportProfile, {
                           targetUrl: browserTargetUrl,
                           capabilities: taskBrowserCapabilities,
+                          sessionPolicy: taskSessionPolicy,
                         });
                     allocatedForContinuation = adopted == null;
                     const continuation = resolveBrowserFollowUpContinuation({
@@ -6931,6 +6956,7 @@ export const tasksRouter = router({
                           ? { browserLimitation: browserRoute.limitation }
                           : {}),
                         ...(identityDecision ? { identityDecision } : {}),
+                        browserSessionPolicy: taskSessionPolicy,
                         ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
                         executionMode: executionMode === 'browser' ? 'browser' : executionMode,
                         finalExecutionMode: executionMode === 'browser' ? 'browser' : executionMode,
@@ -10951,6 +10977,7 @@ export const tasksRouter = router({
           status: tasksTable.status,
           origin: tasksTable.origin,
           result: tasksTable.result,
+          sourceContext: tasksTable.sourceContext,
         })
         .from(tasksTable)
         .where(
@@ -11018,6 +11045,8 @@ export const tasksRouter = router({
         try {
           const instance = await browserPool.allocate(input.taskId, ctx.userId, undefined, {
             targetUrl: target.url,
+            // The task's stored policy; rows from before the policy existed keep vault access.
+            sessionPolicy: storedBrowserSessionPolicy(taskRow.sourceContext),
           });
           allocated = true;
           await instance.executor.resetPageForTask();

@@ -71,3 +71,15 @@ export function restorableBrowserTarget(task: BrowserTaskSnapshot): RestorableBr
   if (!finalUrl || !isHttpUrl(finalUrl)) return null;
   return { url: finalUrl.slice(0, 2048) };
 }
+
+/**
+ * The session policy stored on a task at creation (D17-P1-01). An explicit
+ * `anonymous` — or anything unrecognised — stays anonymous; only rows created
+ * before the policy existed (no value at all) keep vault access as before.
+ */
+export function storedBrowserSessionPolicy(sourceContext: unknown): 'anonymous' | 'vault_allowed' {
+  if (!sourceContext || typeof sourceContext !== 'object') return 'vault_allowed';
+  const value = (sourceContext as { browserSessionPolicy?: unknown }).browserSessionPolicy;
+  if (value === undefined) return 'vault_allowed';
+  return value === 'vault_allowed' ? 'vault_allowed' : 'anonymous';
+}

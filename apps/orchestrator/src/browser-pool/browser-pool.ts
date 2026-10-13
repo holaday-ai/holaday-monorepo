@@ -82,12 +82,14 @@ import {
   spawnXvfb,
   waitForCdpReady,
 } from './spawn.js';
-import type {
-  BrowserInstance,
-  BrowserSessionTarget,
-  BrowserSlot,
-  PoolConfig,
-  PoolStats,
+import {
+  type BrowserInstance,
+  type BrowserSessionPolicy,
+  type BrowserSessionTarget,
+  type BrowserSlot,
+  type PoolConfig,
+  type PoolStats,
+  sessionPolicyOf,
 } from './types.js';
 
 /** Thrown by allocate() when capacity is reached. Callers should
@@ -344,7 +346,9 @@ export class BrowserPool {
       const connected = await record.executor.connect(cdp.endpoint, { cdpHeaders: cdp.headers });
       this.#checkBroker(record);
       if (!connected.ok) throw brokerInvalid();
-      await this.config.prepareSession?.(userId, record.executor, session);
+      // Anonymous tasks never reach the session hook (no vault/cookie/profile load).
+      if (sessionPolicyOf(session) === 'vault_allowed')
+        await this.config.prepareSession?.(userId, record.executor, session);
       this.#checkBroker(record);
       const now = Date.now();
       const instance: BrowserInstance = {
@@ -354,6 +358,7 @@ export class BrowserPool {
         userId,
         executor: record.executor,
         capabilities: session?.capabilities,
+        sessionPolicy: sessionPolicyOf(session),
         status: 'ready',
         createdAt: now,
         lastActiveAt: now,
@@ -679,6 +684,8 @@ export class BrowserPool {
     sourceTaskId: string,
     destinationTaskId: string,
     userId: string,
+    /** The follow-up's own policy: an anonymous task never adopts an identity context (and vice versa). */
+    sessionPolicy: BrowserSessionPolicy,
   ): BrowserInstance | null {
     if (this.shuttingDown) return null;
     const source = this.instances.get(sourceTaskId);
@@ -708,6 +715,7 @@ export class BrowserPool {
     if (!inst || inst.status !== 'ready' || inst.userId !== userId || inst.retainedUntil == null) {
       return null;
     }
+    if ((inst.sessionPolicy ?? 'anonymous') !== sessionPolicy) return null;
 
     const retentionTimer = this.retentionTimers.get(sourceTaskId);
     if (retentionTimer) clearTimeout(retentionTimer);
@@ -1311,7 +1319,9 @@ export class BrowserPool {
       if (!connectResult.ok) {
         throw new Error(`PlaywrightExecutor.connect failed: ${connectResult.error}`);
       }
-      await this.config.prepareSession?.(userId, executor, session);
+      // Anonymous tasks never reach the session hook (no vault/cookie/profile load).
+      if (sessionPolicyOf(session) === 'vault_allowed')
+        await this.config.prepareSession?.(userId, executor, session);
       assertActive();
       const now = Date.now();
       instance = {
@@ -1321,6 +1331,7 @@ export class BrowserPool {
         userDataDir,
         executor,
         capabilities: session?.capabilities,
+        sessionPolicy: sessionPolicyOf(session),
         xvfbPid: xvfb?.pid ?? 0,
         bravePid: browserProcess.pid,
         x11vncPid: x11vnc?.pid ?? 0,

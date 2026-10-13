@@ -168,3 +168,43 @@ describe('retired automatic cookie sync and vault sessions (FIX-PR252)', () => {
     expect(browserTaskTargetUrl('搜索今天的新闻')).toBeNull();
   });
 });
+
+describe('D17-P1-01: a logged-out promise always comes with the anonymous session policy', () => {
+  const promisesNoLogin = (text?: string) =>
+    /无登录态|看不到你的个人信息|无法读取个人信息/.test(text ?? '');
+  it.each([
+    {
+      intent: '查看我的订单 https://shop.example.test/orders',
+      publicCloudRequested: true,
+      cloudSessionAvailable: true,
+    },
+    { intent: '查看我的京东订单', publicCloudRequested: true },
+    { intent: '查询京东公开商品价格', publicCloudRequested: true },
+    { intent: 'https://www.google.com/search?q=HOLA+DAY' },
+    { intent: '在谷歌搜索支付宝最新新闻' },
+  ])('%o', (input) => {
+    for (const enabled of [false, true]) {
+      const route = decideUserBrowserRoute({
+        enabled,
+        extensionOnline: false,
+        legacyCookieSyncRetired: true,
+        ...input,
+      });
+      if (promisesNoLogin(route.limitation)) expect(route.sessionPolicy).toBe('anonymous');
+    }
+    const route = decideUserBrowserRoute({ enabled: true, extensionOnline: false, ...input });
+    expect(promisesNoLogin(route.limitation)).toBe(true);
+    expect(route.sessionPolicy).toBe('anonymous');
+  });
+  it('the vault route for an identity task without a public choice is not anonymous', () => {
+    const route = decideUserBrowserRoute({
+      enabled: true,
+      intent: '查看我的订单 https://shop.example.test/orders',
+      extensionOnline: false,
+      cloudSessionAvailable: true,
+    });
+    expect(route).toMatchObject({ lane: 'cloud', reason: 'vault_session' });
+    expect(route.sessionPolicy).toBeUndefined();
+    expect(promisesNoLogin(route.limitation)).toBe(false);
+  });
+});

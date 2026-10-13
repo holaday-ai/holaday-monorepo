@@ -470,6 +470,7 @@ it.each(['dispatchDirectOpen', 'dispatchToBrave'])(
         }),
         input: {},
         taskId: 'synthetic-task',
+        taskSessionPolicy: 'vault_allowed',
         executionMode: 'browser',
         shouldUseBrowserPool: () => true,
         willQueueDirectOpen: false,
@@ -480,5 +481,70 @@ it.each(['dispatchDirectOpen', 'dispatchToBrave'])(
       },
     );
     expect(allocated).toEqual(['fresh']);
+  },
+);
+/**
+ * D17-P1-01: the real dispatch bodies carry the server-derived session policy to
+ * every pool path — a fresh allocation and the retained-browser handoff.
+ */
+it.each(['dispatchDirectOpen', 'dispatchToBrave'])(
+  'actual %s passes the task session policy to allocate and adoptRetained',
+  async (name) => {
+    const declaration = findNode(
+      (node) =>
+        ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name,
+    ) as ts.VariableDeclaration;
+    if (!declaration.initializer) throw new Error('missing dispatch function');
+    for (const policy of ['anonymous', 'vault_allowed'] as const) {
+      const sessions: unknown[] = [];
+      const adoptions: unknown[][] = [];
+      const ctx = {
+        logger: quiet,
+        userId: 'usr_synthetic',
+        browserPool: {
+          adoptRetained: (...args: unknown[]) => {
+            adoptions.push(args);
+            return null;
+          },
+          allocate: async (...args: unknown[]) => {
+            sessions.push(args[3]);
+            throw new Error('synthetic allocation refusal');
+          },
+        },
+      };
+      await compile(
+        `const ${name} = ${declaration.initializer.getText(source)}; await ${name}(bound);`,
+        {
+          ctx,
+          bound: ctx,
+          directOpenFallbackExecutor: null,
+          directOpenUsesBrowserPool: true,
+          browserTargetUrl: 'https://shop.example.test/orders',
+          taskBrowserCapabilities: Object.freeze({
+            viewportV2: false,
+            observationV2: false,
+            replayV1: false,
+            routingV2: false,
+          }),
+          input: { replyToTaskId: 'tsk_parent' },
+          taskId: 'synthetic-task',
+          taskSessionPolicy: policy,
+          executionMode: 'browser',
+          shouldUseBrowserPool: () => true,
+          willQueueDirectOpen: false,
+          willQueueDispatch: false,
+          repo: { persistVisionOutcome: async () => ({ persisted: false }) },
+          persistAndBroadcastBrowserDispatchFailure: async () => {},
+          broadcastToUser: () => {},
+        },
+      ).catch(() => {});
+      expect(adoptions).toEqual([['tsk_parent', 'synthetic-task', 'usr_synthetic', policy]]);
+      expect(sessions).toEqual([
+        expect.objectContaining({
+          targetUrl: 'https://shop.example.test/orders',
+          sessionPolicy: policy,
+        }),
+      ]);
+    }
   },
 );
