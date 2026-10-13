@@ -402,8 +402,12 @@ it.each([
         }
       : {}),
   });
-  if (scenario === 'executor') {
+  if (scenario === 'executor' || scenario === 'v2-inbox-public-cloud') {
+    // v2-inbox-public-cloud (FIX-ROUTING-IDENTITY-2): the explicit public-cloud choice
+    // now runs the identity task logged out instead of waiting; with no cloud
+    // executor in this fixture it reaches the executor precondition, never a wait.
     await expect(pending).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect(awaiting).not.toHaveBeenCalled();
     expect(consume).not.toHaveBeenCalled();
     expect(requests).toEqual([]);
     return;
@@ -413,11 +417,14 @@ it.each([
     expect(result.status).toBe('awaiting_user');
     expect(consume).not.toHaveBeenCalled();
     expect(requests).toEqual([]);
-    // FIX-D11: every identity wait carries the connection marker; no public-cloud fallback.
+    // Every identity wait carries the connection marker with the readable reason;
+    // the public cloud stays available by explicit choice (FIX-ROUTING-IDENTITY-2).
     if (scenario !== 'v2-grant') {
       const connection = {
-        reason: scenario === 'v2-inbox-public-cloud' ? 'selection_required' : 'extension_offline',
-        publicCloudAllowed: false,
+        reason: 'extension_offline',
+        publicCloudAllowed: true,
+        identityRequired: true,
+        identityReason: expect.stringMatching(/「.+」/),
       };
       expect((result as { browserConnection?: unknown }).browserConnection).toEqual(connection);
       expect(broadcast).toHaveBeenCalledWith(
@@ -430,7 +437,10 @@ it.each([
       expect(awaiting).toHaveBeenCalledWith(
         expect.objectContaining({
           result: expect.objectContaining({
-            metadata: expect.objectContaining({ browserConnection: connection }),
+            metadata: expect.objectContaining({
+              browserConnection: connection,
+              identityDecision: { required: true, reason: expect.stringMatching(/「.+」/) },
+            }),
           }),
         }),
       );

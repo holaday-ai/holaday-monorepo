@@ -1045,7 +1045,7 @@ function AwaitingUserBanner({
       const res = await useTaskStore.getState().continueInPublicCloud(taskId);
       if (!mountedRef.current) return;
       if ('error' in res) toast.show(res.error, 'error');
-      else toast.show('已改用公开云端（无登录态）继续', 'info', 2000);
+      else toast.show('已改用公开云端继续（看不到你的个人信息）', 'info', 2000);
     } finally {
       if (mountedRef.current) setContinuingPublic(false);
     }
@@ -1249,7 +1249,7 @@ function AwaitingUserBanner({
                   disabled={continuingPublic || cancelling}
                   className="inline-flex h-7 items-center gap-1 rounded-md border border-[#57479C] bg-[#57479C] px-3 font-medium text-white transition-colors hover:bg-[#473a82] disabled:opacity-60"
                 >
-                  {continuingPublic ? '提交中…' : '用公开云端（无登录态）继续'}
+                  {continuingPublic ? '提交中…' : '用公开云端继续（看不到你的个人信息）'}
                 </button>
               )}
               <button
@@ -1294,7 +1294,7 @@ function PublicCloudRetryNotice({ taskId }: { taskId: string }): JSX.Element {
     try {
       const res = await useTaskStore.getState().continueInPublicCloud(taskId);
       if ('error' in res) toast.show(res.error, 'error');
-      else toast.show('已改用公开云端（无登录态）继续', 'info', 2000);
+      else toast.show('已改用公开云端继续（看不到你的个人信息）', 'info', 2000);
     } finally {
       setSubmitting(false);
     }
@@ -1309,7 +1309,7 @@ function PublicCloudRetryNotice({ taskId }: { taskId: string }): JSX.Element {
           disabled={submitting}
           className="inline-flex h-7 items-center gap-1 rounded-md border border-[#57479C] bg-[#57479C] px-3 text-xs font-medium text-white transition-colors hover:bg-[#473a82] disabled:opacity-60"
         >
-          {submitting ? '提交中…' : '重试用公开云端（无登录态）继续'}
+          {submitting ? '提交中…' : '重试用公开云端继续（看不到你的个人信息）'}
         </button>
         <span className="text-[11px] text-muted-foreground">重试不会重复创建任务。</span>
       </div>

@@ -119,9 +119,11 @@ export function awaitingUserStreamMessage(
   if (normalized === 'permission' && browserConnection) {
     return {
       body: trimmedQuestion || copy.streamBody,
-      followUp: browserConnection.publicCloudAllowed
-        ? '只需要公开信息时，可以点“用公开云端（无登录态）继续”，无法读取你的个人信息。'
-        : '这个任务需要你的登录状态，不会改用无登录态的云端浏览器。',
+      followUp: !browserConnection.publicCloudAllowed
+        ? '这个任务需要你的登录状态，不会改用无登录态的云端浏览器。'
+        : browserConnection.identityRequired
+          ? `这个任务${browserConnection.identityReason ?? '需要读取你本人的数据'}。可以连接插件后重新提交；也可以点“用公开云端继续（看不到你的个人信息）”，需要个人数据的部分将无法完成。`
+          : '只需要公开信息时，可以点“用公开云端继续（看不到你的个人信息）”。',
     };
   }
   if (normalized === 'clarification' && trimmedQuestion) {

@@ -53,7 +53,7 @@ it('one cancel click removes the waiting banner and updates the rendered termina
   expect(screen.getAllByText(/已取消/).length).toBeGreaterThan(0);
 });
 
-it('shows "用公开云端（无登录态）继续" only for a non-identity Chrome-extension wait (FIX-D11)', async () => {
+it('shows "用公开云端继续（看不到你的个人信息）" only for a non-identity Chrome-extension wait (FIX-D11)', async () => {
   const continueSpy = vi.fn().mockResolvedValue({ taskId: 'tsk_public' });
   for (const publicCloudAllowed of [false, true]) {
     useTaskStore.setState({
@@ -84,7 +84,7 @@ it('shows "用公开云端（无登录态）继续" only for a non-identity Chro
     render(<Harness />);
     expect(screen.getAllByText('需要连接 HOLA DAY Chrome 插件').length).toBeGreaterThan(0);
     expect(screen.queryByText(/拒绝访问/)).toBeNull();
-    const button = screen.queryByRole('button', { name: '用公开云端（无登录态）继续' });
+    const button = screen.queryByRole('button', { name: '用公开云端继续（看不到你的个人信息）' });
     if (!publicCloudAllowed) expect(button).toBeNull();
     else {
       expect(button).not.toBeNull();
@@ -123,12 +123,14 @@ it('offers one retry when the original is cancelled but the public-cloud task wa
     return task ? <TaskStream task={task} /> : null;
   }
   render(<Harness />);
-  const retry = screen.getByRole('button', { name: '重试用公开云端（无登录态）继续' });
+  const retry = screen.getByRole('button', { name: '重试用公开云端继续（看不到你的个人信息）' });
   await userEvent.click(retry);
   await userEvent.click(screen.getByRole('button', { name: '提交中…' }));
   expect(continueSpy).toHaveBeenCalledTimes(1);
   release({ taskId: 'tsk_public' });
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: '重试用公开云端（无登录态）继续' })).toBeTruthy(),
+    expect(
+      screen.getByRole('button', { name: '重试用公开云端继续（看不到你的个人信息）' }),
+    ).toBeTruthy(),
   );
 });

@@ -357,12 +357,14 @@ export interface UiAwaitingUser {
   at: number;
   /**
    * FIX-D11 — the task waits for the HOLA DAY Chrome extension / page
-   * selection. `publicCloudAllowed` is false when it needs the user's own
-   * login (no "用公开云端（无登录态）继续" then).
+   * selection. `publicCloudAllowed` gates "用公开云端继续（看不到你的个人信息）";
+   * `identityRequired` / `identityReason` say which personal data the task needs.
    */
   browserConnection?: {
     reason: 'extension_offline' | 'selection_required' | 'origin_grant_required';
     publicCloudAllowed: boolean;
+    identityRequired?: boolean;
+    identityReason?: string;
   };
   /**
    * P2-A — kind of input we're waiting on. The store mirrors this
