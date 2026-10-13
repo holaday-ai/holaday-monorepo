@@ -5112,6 +5112,23 @@
   /* Keep one button of clearance above the footer when focus scrolls a task into view. */
   scroll-padding-bottom: 2rem;
 }
+/* The footer remains in flex flow. Reserve real scrollable content clearance,
+   measured from the batch bar, so focus and end-of-list scrolling agree. */
+.holaday-sidebar.hd-sidebar-batch .hd-task-history-scroll {
+  min-height: calc(var(--hd-batch-action-space) + 4rem);
+  scroll-padding-bottom: max(2rem, var(--hd-batch-action-space));
+}
+.holaday-sidebar.hd-sidebar-batch .hd-history-section {
+  padding-bottom: calc(1rem + var(--hd-batch-action-space));
+}
+/* At short heights the fixed shortcuts must yield enough space for a complete
+   task/pager control. They remain reachable in their own scroll region. */
+.holaday-sidebar.hd-sidebar-batch .holaday-feature-nav {
+  flex-shrink: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .dark .holaday-shell:has(.hd-stocks-page) .hd-workbench-breadcrumb,
 .dark .holaday-shell:has(.hd-stocks-page) .hd-workbench-breadcrumb * {
   color: #595757;
