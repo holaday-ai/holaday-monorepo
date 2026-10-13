@@ -11045,8 +11045,9 @@ export const tasksRouter = router({
         try {
           const instance = await browserPool.allocate(input.taskId, ctx.userId, undefined, {
             targetUrl: target.url,
-            // The task's stored policy; rows from before the policy existed keep vault access.
-            sessionPolicy: storedBrowserSessionPolicy(taskRow.sourceContext),
+            // Fail closed: only a task stored as vault_allowed may reload a session;
+            // legacy rows and logged-out promises restore anonymously (D17-P1-02).
+            sessionPolicy: storedBrowserSessionPolicy(taskRow),
           });
           allocated = true;
           await instance.executor.resetPageForTask();

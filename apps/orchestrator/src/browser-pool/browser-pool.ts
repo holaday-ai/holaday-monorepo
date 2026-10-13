@@ -715,6 +715,7 @@ export class BrowserPool {
     if (!inst || inst.status !== 'ready' || inst.userId !== userId || inst.retainedUntil == null) {
       return null;
     }
+    // A browser without a recorded policy counts as anonymous (fail closed).
     if ((inst.sessionPolicy ?? 'anonymous') !== sessionPolicy) return null;
 
     const retentionTimer = this.retentionTimers.get(sourceTaskId);
