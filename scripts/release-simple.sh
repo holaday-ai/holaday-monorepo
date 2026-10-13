@@ -46,12 +46,12 @@ if [[ $EXECUTE -eq 1 ]]; then
   REQUESTED_REF="$(git -C "$REPO_ROOT" rev-parse "${RELEASE_REF}^{commit}")"
   [[ "$LOCAL_REF" == "$REQUESTED_REF" ]] || { echo '!! local HEAD must match RELEASE_REF'; exit 1; }
   test -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
-  (cd "$REPO_ROOT" && pnpm lint)
+  (cd "$REPO_ROOT" && pnpm route:audit && pnpm lint)
   [[ "$(git -C "$REPO_ROOT" rev-parse HEAD)" == "$LOCAL_REF" ]]
   test -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
   RELEASE_REF="$LOCAL_REF"
 else
-  echo '[dry-run] verify clean local candidate and run pnpm lint before SSH'
+  echo '[dry-run] verify clean local candidate and run pnpm route:audit + pnpm lint before SSH'
 fi
 
 # 0. Refuse to deploy over uncommitted server-side changes; remember the rollback point.

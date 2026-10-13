@@ -74,7 +74,10 @@ it.each([
     DASHSCOPE_CN_API_KEY: scenario === 'credentials' ? '' : 'synthetic-cn',
     DASHSCOPE_API_KEY: '',
   });
-  vi.spyOn(classifier, 'classifyExecutionMode').mockResolvedValue(isLocal ? 'generate' : 'browser');
+  vi.spyOn(classifier, 'explainExecutionMode').mockResolvedValue({
+    mode: isLocal ? 'generate' : 'browser',
+    source: 'test',
+  });
   const consume = vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
   vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);
   vi.spyOn(TaskRepository.prototype, 'insertTask').mockResolvedValue();
@@ -543,7 +546,8 @@ it.each([
       expect.anything(),
       expect.objectContaining({
         executionMode: 'browser',
-        sourceContext: { browserSource: 'local-chrome', browserSessionPolicy: 'vault_allowed' },
+        // FIX-INTENT-ROUTE-BROWSER: a public task (no identity needed) is anonymous.
+        sourceContext: { browserSource: 'local-chrome', browserSessionPolicy: 'anonymous' },
       }),
     );
     releaseModel();

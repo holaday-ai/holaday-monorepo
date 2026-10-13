@@ -18,6 +18,7 @@
     "test": "node --test scripts/qa-db-safety.test.mjs scripts/qa-report-metadata.test.mjs scripts/release-db-contract.test.mjs scripts/qwen-synthetic-benchmark.test.mjs scripts/qwen-runtime-benchmark.test.mjs && vitest run",
     "test:qwen-only-contract": "node --test scripts/qwen-only-release-contract.test.mjs scripts/qwen-synthetic-benchmark.test.mjs scripts/qwen-runtime-benchmark.test.mjs && node scripts/qwen-only-release-contract.mjs --run",
     "test:watch": "vitest",
+    "route:audit": "tsx scripts/route-audit.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "qa:web": "node scripts/web-ui-qa.mjs",
     "qa:browser-release": "pnpm qa:web && pnpm smoke:browser-egress",

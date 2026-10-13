@@ -57,7 +57,9 @@ function saveRef(request: messages.NeutralMessagesRequest): string {
   return ref;
 }
 
-it.each(['ready', 'timeout'] as const)(
+// scrape-retry (FIX-INTENT-ROUTE-BROWSER): the scrape lane's one-time handoff re-enters
+// create with an internal ctx flag; it adopts the scrape task's row and is not charged again.
+it.each(['ready', 'timeout', 'scrape-retry'] as const)(
   'unified executor through tasks.create: %s',
   async (scenario) => {
     expect(original.BROWSER_EXECUTOR).toBe('unified');
@@ -71,10 +73,16 @@ it.each(['ready', 'timeout'] as const)(
       DASHSCOPE_CN_API_KEY: 'synthetic-cn',
       DASHSCOPE_API_KEY: '',
     });
-    vi.spyOn(classifier, 'classifyExecutionMode').mockResolvedValue('browser');
+    vi.spyOn(classifier, 'explainExecutionMode').mockResolvedValue({
+      mode: 'browser',
+      source: 'test',
+    });
     const consume = vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
     vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);
-    vi.spyOn(TaskRepository.prototype, 'insertTask').mockResolvedValue();
+    const insert = vi.spyOn(TaskRepository.prototype, 'insertTask').mockResolvedValue();
+    const adopt = vi
+      .spyOn(TaskRepository.prototype, 'adoptTaskForBrowserRetry')
+      .mockResolvedValue({ persisted: true });
     vi.spyOn(TaskRepository.prototype, 'isTaskCancelled').mockResolvedValue(false);
     const terminal = vi
       .spyOn(TaskRepository.prototype, 'persistVisionOutcome')
@@ -204,6 +212,14 @@ it.each(['ready', 'timeout'] as const)(
       executionRouter: null,
       browserPool: null,
       taskQueue: null,
+      ...(scenario === 'scrape-retry'
+        ? {
+            scrapeBrowserRetry: {
+              taskId: 'task_scrape_retry1',
+              reason: '抓取结果不满足要求（测试）',
+            },
+          }
+        : {}),
     } as unknown as Context;
 
     try {
@@ -222,6 +238,32 @@ it.each(['ready', 'timeout'] as const)(
         requests: requests.length,
       });
 
+      if (scenario === 'scrape-retry') {
+        // Same task, same charge: the scrape row is adopted, nothing new is inserted.
+        expect(result.taskId).toBe('task_scrape_retry1');
+        expect(consume, diagnostics).not.toHaveBeenCalled();
+        expect(insert).not.toHaveBeenCalled();
+        expect(adopt).toHaveBeenCalledWith(
+          expect.objectContaining({
+            taskExternalId: 'task_scrape_retry1',
+            userId: 41,
+            status: 'executing',
+            sourceContext: { browserSessionPolicy: 'anonymous' },
+            reason: '抓取结果不满足要求（测试）',
+          }),
+        );
+        expect(outcome, diagnostics).toMatchObject({
+          status: 'completed',
+          metadata: {
+            executionMode: 'browser',
+            fallbackChain: ['scrape', 'browser'],
+            browserRetryReason: '抓取结果不满足要求（测试）',
+          },
+        });
+        expect(await page.textContent('#status')).toBe('已保存');
+        return;
+      }
+      expect(adopt).not.toHaveBeenCalled();
       expect(consume, diagnostics).toHaveBeenCalledWith(41, 'pro', false);
       if (scenario === 'ready') {
         expect(outcome, diagnostics).toMatchObject({

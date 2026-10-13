@@ -94,7 +94,10 @@ it.each(['article_links', 'remediated', 'still_homepage'] as const)(
       DASHSCOPE_CN_API_KEY: 'synthetic-cn',
       DASHSCOPE_API_KEY: '',
     });
-    vi.spyOn(classifier, 'classifyExecutionMode').mockResolvedValue('browser');
+    vi.spyOn(classifier, 'explainExecutionMode').mockResolvedValue({
+      mode: 'browser',
+      source: 'test',
+    });
     vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
     vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);
     vi.spyOn(TaskRepository.prototype, 'insertTask').mockResolvedValue();
