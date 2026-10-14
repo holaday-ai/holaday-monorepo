@@ -1,6 +1,6 @@
 # Search engine wall fallback
 
-Based on PR #277 (`102e627c`, `claude/browser-autopilot-1`), incorporating PR #276. This change is confined to task dispatch, a new
+Based on PR #277 (`0eac6c87`, `claude/browser-autopilot-1`), incorporating PR #276. This change is confined to task dispatch, a new
 search fallback module, and verification. It does not modify the shared browser
 loop, completion fields, answer verifier, auto-fix, browser completion, or cloud
 observation modules being changed by AUTOPILOT.
