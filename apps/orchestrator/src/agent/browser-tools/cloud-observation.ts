@@ -332,6 +332,16 @@ type ActionWindow = {
   action: string;
 };
 
+/**
+ * The document's readable root: <body>, or the root element for frameset
+ * documents (e.g. the-internet /nested_frames), whose AI snapshot inlines the
+ * child frames.
+ */
+export async function pageRoot(frame: Frame) {
+  const body = frame.locator('body');
+  return (await body.count().catch(() => 0)) > 0 ? body : frame.locator(':root');
+}
+
 export class CloudObservation {
   private tabs = new Map<string, Page>();
   private frames = new Map<string, Frame>();
@@ -827,7 +837,7 @@ export class CloudObservation {
     if (action.tool === 'snapshot' || action.tool === 'read_page') {
       let tree = await redactPageText(
         frame,
-        await frame.locator('body').ariaSnapshot({ mode: 'ai', timeout: 5000 }),
+        await (await pageRoot(frame)).ariaSnapshot({ mode: 'ai', timeout: 5000 }),
       );
       // AI snapshots inline child frames, including cross-origin documents.
       // Expose child refs only through the separately scoped frame records below.
@@ -959,7 +969,7 @@ export class CloudObservation {
         text = await redactPageText(
           frame,
           section === undefined
-            ? await frame.locator('body').innerText({ timeout: 5000 })
+            ? await (await pageRoot(frame)).innerText({ timeout: 5000 })
             : await frame.evaluate((section) => {
                 const headings = Array.from(document.querySelectorAll('h2')).filter(
                   (node) => node.getClientRects().length > 0,

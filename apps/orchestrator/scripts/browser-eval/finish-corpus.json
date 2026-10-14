@@ -400,6 +400,92 @@
         }
       ],
       "expect": "deliver"
+    },
+    {
+      "id": "auto-r3-core-07-a-rejected1",
+      "source": "BROWSER-AUTOPILOT-1 round 3 round3-core-07-a (real finish rejected by the switch-back check (switch_tab receipt had no tab id in cloud observation))",
+      "intent": "请使用云端浏览器，从一个页面打开3个链接到新标签，分别读标题后回到第一个",
+      "summary": "已从 Wikipedia 首页（tab_51796d31-0779-40a4-956a-d06284d6f3a2）通过页面链接在新标签中打开3个站点并读取标题：\n1. Commons → 标题「Commons」（tab_f5ac17a3-77c4-4a1c-a654-274ffe48fe2f）\n2. Wikivoyage → 标题「Wikivoyage」（tab_117eafa6-3467-4f79-8f19-23f6c5920502）\n3. Wiktionary → 标题「Wiktionary」（tab_8d4a452b-88d2-46e4-ab81-903122665be7）\n\n完成后已切回第一个原始标签页，当前焦点位于 https://www.wikipedia.org/，页面状态未发生变化。浏览器现共有4个标签页，符合成功条件。",
+      "pages": [
+        {
+          "text": "Wikimedia Commons\nCommons",
+          "tabId": "tab_f5ac17a3-77c4-4a1c-a654-274ffe48fe2f"
+        },
+        {
+          "text": "Wikivoyage",
+          "tabId": "tab_117eafa6-3467-4f79-8f19-23f6c5920502"
+        },
+        {
+          "text": "Wiktionary",
+          "tabId": "tab_8d4a452b-88d2-46e4-ab81-903122665be7"
+        },
+        {
+          "text": "link \"Commons\"\nlink \"Wikivoyage\"\nlink \"Wiktionary\"",
+          "tabId": "tab_51796d31-0779-40a4-956a-d06284d6f3a2",
+          "sourceURL": "https://www.wikipedia.org/"
+        }
+      ],
+      "expect": "deliver"
+    },
+    {
+      "id": "auto-r3-core-07-a-rejected2",
+      "source": "BROWSER-AUTOPILOT-1 round 3 round3-core-07-a (real finish rejected by the switch-back check (switch_tab receipt had no tab id in cloud observation))",
+      "intent": "请使用云端浏览器，从一个页面打开3个链接到新标签，分别读标题后回到第一个",
+      "summary": "已从 Wikipedia 首页（tab_51796d31-0779-40a4-956a-d06284d6f3a2）通过页面链接在新标签中打开3个站点并读取标题：\n1. Commons → 标题「Wikimedia Commons」（tab_f5ac17a3-77c4-4a1c-a654-274ffe48fe2f）\n2. Wikivoyage → 标题「Wikivoyage」（tab_117eafa6-3467-4f79-8f19-23f6c5920502）\n3. Wiktionary → 标题「Wiktionary」（tab_8d4a452b-88d2-46e4-ab81-903122665be7）\n\n通过 list_tabs 确认浏览器现有4个标签，且最终 switch_tab 回执证实焦点已回到第一个原始标签 tab_51796d31-0779-40a4-956a-d06284d6f3a2（https://www.wikipedia.org/），页面状态未发生变化。所有成功条件均已满足。",
+      "pages": [
+        {
+          "text": "Wikimedia Commons\nCommons",
+          "tabId": "tab_f5ac17a3-77c4-4a1c-a654-274ffe48fe2f"
+        },
+        {
+          "text": "Wikivoyage",
+          "tabId": "tab_117eafa6-3467-4f79-8f19-23f6c5920502"
+        },
+        {
+          "text": "Wiktionary",
+          "tabId": "tab_8d4a452b-88d2-46e4-ab81-903122665be7"
+        },
+        {
+          "text": "link \"Commons\"\nlink \"Wikivoyage\"\nlink \"Wiktionary\"",
+          "tabId": "tab_51796d31-0779-40a4-956a-d06284d6f3a2",
+          "sourceURL": "https://www.wikipedia.org/"
+        }
+      ],
+      "expect": "deliver"
+    },
+    {
+      "id": "auto-r3-core-10-a-rejected1",
+      "source": "BROWSER-AUTOPILOT-1 round 3 round3-core-10-a (real finish rejected as \"no page read\" after a frameset page wiped earlier reads of the same tab)",
+      "intent": "请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts",
+      "summary": "已在云端浏览器完成 the-internet.herokuapp.com 的 JavaScript Alerts 与 Iframe 验证：\n\n1. **JavaScript Alerts**（https://the-internet.herokuapp.com/javascript_alerts）\n   - 点击 \"Click for JS Alert\" → 弹窗触发成功，页面 Result 显示 \"You successfully clicked an alert\"。\n   - 点击 \"Click for JS Confirm\" → confirm 弹窗触发并自动取消，Result 显示 \"You clicked: Cancel\"。\n   - 点击 \"Click for JS Prompt\" → prompt 弹窗触发并自动取消输入，Result 显示 \"You entered: null\"。\n   - 三种原生弹窗均正常弹出，页面无报错崩溃。\n\n2. **Iframe**\n   - iFrame 页面（https://the-internet.herokuapp.com/iframe）DOM 中存在 `<iframe>` 元素（ref=e80），其子 frame（frame_67eb6884-a8b2-40a0-afc5-32a1f1592786）成功加载并渲染文本 \"Your content goes here.\"，未出现空白或跨域错误。（注：TinyMCE 编辑器因免费额度耗尽处于只读模式，但不影响 iframe 本身加载。）\n   - Nested Frames 页面（https://the-internet.herokuapp.com/nested_frames）使用 frameset 结构，无可访问性树 body 节点导致 snapshot/read_page 失败，但截图确认页面正常渲染出 LEFT、RIGHT、TOP、BOTTOM、MIDDLE 等框架内容，无加载失败错误。\n\n所有成功条件均已满足。",
+      "pages": [
+        {
+          "text": "Result: You successfully clicked an alert\nYou clicked: Cancel\nYou entered: null",
+          "sourceURL": "https://the-internet.herokuapp.com/javascript_alerts"
+        },
+        {
+          "text": "An iFrame containing the TinyMCE WYSIWYG Editor\nYour content goes here.",
+          "sourceURL": "https://the-internet.herokuapp.com/iframe"
+        }
+      ],
+      "expect": "deliver"
+    },
+    {
+      "id": "auto-r3-core-10-a-rejected2",
+      "source": "BROWSER-AUTOPILOT-1 round 3 round3-core-10-a (real finish rejected as \"no page read\" after a frameset page wiped earlier reads of the same tab)",
+      "intent": "请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts",
+      "summary": "已完成 the-internet.herokuapp.com 的 JavaScript Alerts 与 Iframe 验证，其中 Nested Frames 因技术限制无法通过云端可访问性工具读取 DOM：\n\n**1. JavaScript Alerts（完全成功）**\n- 页面 URL：https://the-internet.herokuapp.com/javascript_alerts\n- 点击 \"Click for JS Alert\" → Result: \"You successfully clicked an alert\"\n- 点击 \"Click for JS Confirm\" → Result: \"You clicked: Cancel\"\n- 点击 \"Click for JS Prompt\" → Result: \"You entered: null\"\n- 三种原生弹窗均正常触发，页面无报错。\n\n**2. Iframe（完全成功）**\n- 页面 URL：https://the-internet.herokuapp.com/iframe\n- DOM 中存在 `<iframe>` 元素（ref=e80）\n- 子 frame（frame_67eb6884-a8b2-40a0-afc5-32a1f1592786）成功加载，内容为 \"Your content goes here.\"\n- 无跨域或空白错误（TinyMCE 只读提示不影响 iframe 加载）\n\n**3. Nested Frames（部分受限）**\n- 页面 URL：https://the-internet.herokuapp.com/nested_frames\n- 该页面使用 HTML `<frameset>` 结构，不含 `<body>` 元素，导致云端浏览器的 snapshot/read_page 工具报错 \"Selector 'body' does not match any element\"，无法获取可访问性树证据。\n- 截图显示页面渲染正常（LEFT/RIGHT/TOP/BOTTOM/MIDDLE 文本可见），但截图不构成结构化 DOM 证据。\n- 此为该站点 frameset 页面的固有限制，非操作失败。\n\n综上，JavaScript Alerts 和 iFrame 两项核心验证目标均已成功完成并提供页面原样证据；Nested Frames 因 frameset 无 body 的技术限制无法通过可访问性 API 读取，已在 fields 中如实标注。",
+      "pages": [
+        {
+          "text": "Result: You successfully clicked an alert\nYou clicked: Cancel\nYou entered: null",
+          "sourceURL": "https://the-internet.herokuapp.com/javascript_alerts"
+        },
+        {
+          "text": "An iFrame containing the TinyMCE WYSIWYG Editor\nYour content goes here.",
+          "sourceURL": "https://the-internet.herokuapp.com/iframe"
+        }
+      ],
+      "expect": "deliver"
     }
   ]
 }

@@ -601,11 +601,6 @@ export async function runUnifiedBrowserLoop(
       ) {
         lastPageText = '';
       }
-      if (action.tool === 'navigate') {
-        const tab = action.tabId ?? activeTabId;
-        for (let i = pageEvidence.length - 1; i >= 0; i--)
-          if (pageEvidence[i]!.tabId === tab) pageEvidence.splice(i, 1);
-      }
       const openingTabId = activeTabId;
       const outcome = await input.execute(action);
       if (outcome.tabId) activeTabId = outcome.tabId;
@@ -628,6 +623,11 @@ export async function runUnifiedBrowserLoop(
       trace.push({
         tool: action.tool,
         ...receipt,
+        // In cloud observation a switch_tab result is a page read whose tab id
+        // lives in the text: record the tab the host actually switched to.
+        ...(action.tool === 'switch_tab' && outcome.ok && !receipt.tabId
+          ? { tabId: action.targetTabId }
+          : {}),
         screenshot: !!capturedImage,
         ...((action.tool === 'new_tab' || (action.tool === 'click' && action.newTab)) &&
         openingTabId

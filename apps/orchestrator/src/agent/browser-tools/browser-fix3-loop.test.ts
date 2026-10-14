@@ -146,7 +146,9 @@ describe('BROWSER-FIX-3 grounded completion', () => {
     expect(requests).toHaveLength(2);
   });
 
-  it('never reuses evidence after a navigation to a different document', async () => {
+  // BROWSER-AUTOPILOT-1: content read before a navigation came from a page that did
+  // load; it stays admissible (core-10 lost every read to a later frameset page).
+  it('keeps content read before a navigation to a different document', async () => {
     const { adapter } = brain([
       { name: 'read_page', input: {} },
       { name: 'navigate', input: { url: 'https://example.com/new' } },
@@ -162,6 +164,6 @@ describe('BROWSER-FIX-3 grounded completion', () => {
           ? { ok: true, url: 'https://example.com/old', text: 'Old private text' }
           : { ok: true, url: 'https://example.com/new', text: 'navigated' },
     });
-    expect(result.status).toBe('failed');
+    expect(result.status).toBe('completed');
   });
 });
