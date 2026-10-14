@@ -448,6 +448,8 @@ export class CloudObservation {
         /^(?:\/youtubei\/v1\/(?:guide|log_event|notification_registration\/set_registration)|\/api\/jnn\/v1\/GenerateIT)$/.test(
           url.pathname,
         )) ||
+      (url.hostname === 'cdn.tiny.cloud' &&
+        /^\/1\/[^/]+\/tinymce\/[A-Za-z0-9.-]+\/cdn-init$/.test(url.pathname)) ||
       (url.hostname === 'en.wikipedia.org' &&
         r.resourceType() === 'ping' &&
         /^\/ins-[a-z0-9]+\/v2\/events$/.test(url.pathname));

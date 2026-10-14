@@ -433,3 +433,27 @@ it.each([
     completionGap(intent, '已读取页面', [{ tool: 'navigate', ok: true, url: base }], true),
   ).toBeNull();
 });
+it.each([
+  ['/1/public-site/tinymce/5.10.9-138/cdn-init', false],
+  ['/1/public-site/tinymce/5.10.9-138/save', true],
+] as const)('classifies TinyMCE initialization narrowly: %s', async (path, unexpected) => {
+  const page = await browser.newPage();
+  await page.route('https://cdn.tiny.cloud/**', (route) =>
+    route.fulfill({
+      contentType: route.request().isNavigationRequest() ? 'text/html' : 'application/json',
+      body: route.request().isNavigationRequest()
+        ? `<main>Editor</main><script>fetch('${path}',{method:'POST'})</script>`
+        : '{}',
+    }),
+  );
+  const tools = createPlaywrightUnifiedExecutor(page, { observationV2: true });
+  try {
+    expect(
+      (await tools.execute({ tool: 'navigate', url: 'https://cdn.tiny.cloud/test' })).effect
+        ?.unexpected,
+    ).toBe(unexpected);
+  } finally {
+    tools.dispose();
+    await page.close();
+  }
+});
