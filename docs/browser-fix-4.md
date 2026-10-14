@@ -11,6 +11,8 @@ Continuation of PR #276 on `codex/browser-fix-3`. The source report is
   quote. Rejections name the failing field and show a nearby source passage.
   Navigation still invalidates freshness; a failed navigation and a tab listing
   cannot certify the target page's title. File receipts only certify file facts.
+  A known date precision note is separate from the observed relative timestamp;
+  invented dates and factual parentheticals still fail grounding.
 - A readable document surface in a same-origin/example or known editor frame can
   be hit-tested. Unknown, opaque and unreadable targets still require confirmation;
   payment/submission classification and post-action effect checks remain active.

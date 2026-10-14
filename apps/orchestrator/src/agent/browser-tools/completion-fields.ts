@@ -59,7 +59,18 @@ function explicitFields(input: unknown): CompletionField[] {
 function answerFields(summary: string): CompletionField[] {
   const result: CompletionField[] = [];
   const add = (name: string, value: string) => {
-    const v = clean(value);
+    let v = clean(value);
+    // A precision disclaimer is not a page fact. Strip only this known note from
+    // a date field whose remaining value is itself a relative timestamp.
+    if (/日期|发布时间|published/i.test(name)) {
+      const date = v.replace(/\s*[（(]相对时间\s*[,，、]\s*非精确日期[）)]$/u, '');
+      if (
+        /^(?:\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s+ago|\d+\s*(?:秒|分钟|小时|天|周|个月|月|年)前)$/iu.test(
+          date,
+        )
+      )
+        v = date;
+    }
     if (v) result.push({ name, value: v });
   };
   for (const url of summary.match(TEXT_URL_RE) ?? []) add('链接', url);
