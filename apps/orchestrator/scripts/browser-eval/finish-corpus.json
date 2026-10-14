@@ -486,6 +486,23 @@
         }
       ],
       "expect": "deliver"
+    },
+    {
+      "id": "auto-r4-core-10-a-delivered",
+      "source": "BROWSER-AUTOPILOT-1 round 4 core-10 (real finish delivered; facts match the site behaviour)",
+      "intent": "请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts",
+      "summary": "已成功完成 the-internet.herokuapp.com 的 iframe 与 JavaScript alerts 测试任务。\n\n1. **iframe 测试**：成功导航至 /iframe 页面，定位到内部 iframe（frameId: frame_7b3c987d-29eb-47b8-b074-6f20d6b8c1a0），并准确读取到预期文本内容 \"Your content goes here.\"。已对主页面及 iframe 区域进行截图留证。\n\n2. **JavaScript Alerts 测试**：成功导航至 /javascript_alerts 页面，依次触发并处理了三种弹窗：\n   - JS Alert：点击按钮后弹窗被自动接受，页面显示结果 \"You successfully clicked an alert\"。\n   - JS Confirm：点击按钮后弹窗被自动处理（默认取消），页面显示结果 \"You clicked: Cancel\"。\n   - JS Prompt：点击按钮后弹窗被自动处理（未输入文本），页面显示结果 \"You entered: null\"。\n   所有弹窗交互均未阻塞脚本执行，且已截图记录最终结果状态。\n\n注：由于浏览器自动化环境限制，JS Confirm 和 JS Prompt 弹窗由系统自动处理（Confirm 默认取消，Prompt 默认返回 null），无法模拟手动输入特定文本或选择确认选项，但已成功验证弹窗触发与关闭机制正常工作。\n\n- iframe_page_url：https://the-internet.herokuapp.com/iframe",
+      "pages": [
+        {
+          "text": "Your content goes here.",
+          "sourceURL": "https://the-internet.herokuapp.com/iframe"
+        },
+        {
+          "text": "You successfully clicked an alert\nYou clicked: Cancel\nYou entered: null",
+          "sourceURL": "https://the-internet.herokuapp.com/javascript_alerts"
+        }
+      ],
+      "expect": "deliver"
     }
   ]
 }
