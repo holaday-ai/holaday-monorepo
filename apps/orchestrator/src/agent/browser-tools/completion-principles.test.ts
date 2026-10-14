@@ -90,8 +90,8 @@ describe('fact assessment', () => {
       assessCompletionFacts({
         summary: '1) https://unread.test/ → 标题 "Unread page"',
         pages: [{ text: page, sourceURL: 'https://read.test/' }],
-      }).contradictions,
-    ).toHaveLength(1);
+      }).contradictions.join(' '),
+    ).toContain('未成功读取');
   });
 });
 

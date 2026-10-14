@@ -15,6 +15,7 @@ interface CorpusEntry {
   evidence?: string;
   fields?: Array<{ name: string; value: string; tabId?: string; sourceURL?: string }>;
   pages: ObservedEvidence[];
+  toolTexts?: string;
   expect: 'deliver' | 'contradiction';
 }
 const corpus = JSON.parse(
@@ -34,6 +35,7 @@ describe('real model finish corpus', () => {
       fields: entry.fields,
       pages: entry.pages,
       intent: entry.intent,
+      ...(entry.toolTexts ? { toolTexts: entry.toolTexts } : {}),
     });
     if (entry.expect === 'deliver') expect(result.contradictions).toEqual([]);
     else expect(result.contradictions.length).toBeGreaterThan(0);

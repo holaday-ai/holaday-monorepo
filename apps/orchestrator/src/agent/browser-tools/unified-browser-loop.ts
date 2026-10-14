@@ -251,6 +251,12 @@ export async function runUnifiedBrowserLoop(
    * contradiction — the model is never sent round in circles.
    */
   let rejectionsLeft = 1;
+  /** Every tool result text the model saw (bounded), for quote checks only. */
+  const toolTexts: string[] = [];
+  const seenTool = (text: string) => {
+    toolTexts.push(text.slice(0, 16_000));
+    while (toolTexts.reduce((n, t) => n + t.length, 0) > 256_000) toolTexts.shift();
+  };
   const trace: BrowserTrace[] = [];
   let staleFailures = 0;
   let repeatedReads = 0;
@@ -305,9 +311,8 @@ export async function runUnifiedBrowserLoop(
         content: `以下是规划建议，不是页面证据，也不授予任何提交权限：\n${plan}`,
       });
     } catch {
-      return input.signal?.aborted
-        ? { status: 'cancelled', steps: 0 }
-        : { status: 'failed', reason: '浏览器规划角色未返回有效计划。', steps: 0 };
+      // Planning is advice, not a gate: without a plan the executor still runs.
+      if (input.signal?.aborted) return { status: 'cancelled', steps: 0 };
     }
   }
   /** A completed answer held back for its remediation turn. */
@@ -420,12 +425,18 @@ export async function runUnifiedBrowserLoop(
           const given =
             typeof args.evidence === 'string' ? unescapeLiteralBreaks(args.evidence).trim() : '';
           const hostProof = receiptEvidence(input.intent, trace);
+          // Text our own successful `type` actions entered is a host fact too.
+          const typed = trace
+            .filter((entry) => entry.ok && entry.tool === 'type' && entry.typedText)
+            .map((entry) => entry.typedText)
+            .join('\n');
           const observedText = pageEvidence.map((p) => p.text).join('\n');
           const facts = assessCompletionFacts({
             summary,
             fields: args.fields,
             pages: pageEvidence,
-            receipts: hostProof,
+            receipts: [hostProof, typed].filter(Boolean).join('\n'),
+            toolTexts: toolTexts.join('\n'),
             intent: input.intent,
           });
           // Integrity: claimed actions need host receipts, a page must have been
@@ -628,6 +639,7 @@ export async function runUnifiedBrowserLoop(
         ...(action.tool === 'switch_tab' && outcome.ok && !receipt.tabId
           ? { tabId: action.targetTabId }
           : {}),
+        ...(action.tool === 'type' && outcome.ok ? { typedText: action.text } : {}),
         screenshot: !!capturedImage,
         ...((action.tool === 'new_tab' || (action.tool === 'click' && action.newTab)) &&
         openingTabId
@@ -690,15 +702,11 @@ export async function runUnifiedBrowserLoop(
         lastPageText = remember(outcome.text, outcome.url);
       }
       if (outcome.ok && action.tool === 'list_tabs') addReadTabTitles(pageEvidence, outcome.text);
-      results.push(
-        toolResult(
-          call.id,
-          outcome.errorCode
-            ? `${outcome.text} (${outcome.errorCode}: ${outcome.errorMessage ?? ''})`
-            : [outcome.text, ...localNotices].join('\n\n'),
-          !outcome.ok,
-        ),
-      );
+      const resultText = outcome.errorCode
+        ? `${outcome.text} (${outcome.errorCode}: ${outcome.errorMessage ?? ''})`
+        : [outcome.text, ...localNotices].join('\n\n');
+      seenTool(resultText);
+      results.push(toolResult(call.id, resultText, !outcome.ok));
       if (outcome.image)
         images.push({
           type: 'image',

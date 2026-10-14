@@ -110,7 +110,9 @@ describe('browser role loop', () => {
       expect(out.status).toBe('completed');
     },
   );
-  it('does not let planner tools run and records provider failure without invented usage', async () => {
+  // BROWSER-AUTOPILOT-1: planning is advice. A planner that tries to act is
+  // ignored (its tool call never runs) and the executor carries on.
+  it('never runs planner tools, ignores the bad plan, and records provider failure without invented usage', async () => {
     const calls: LlmCallRecord[] = [];
     const raw = {
       ...model('exec', [[snapshot], [finish]]),
@@ -130,15 +132,19 @@ describe('browser role loop', () => {
       iteration: 1,
       onRecordError() {},
     });
+    const executed: string[] = [];
     const out = await runUnifiedBrowserLoop({
       intent: 'Read',
       adapter,
-      execute: async () => {
-        throw new Error('must not execute');
+      execute: async (action) => {
+        executed.push(action.tool);
+        return { ok: true, text: 'Alpha' };
       },
     });
-    expect(out.status).toBe('failed');
-    expect(calls).toHaveLength(1);
+    // Only the executor's own snapshot ran; the planner's tool call never did.
+    expect(executed).toEqual(['snapshot']);
+    expect(out.status).toBe('completed');
+    expect(calls[0]?.requestMeta?.role).toBe('planning');
     const failing = recordedBrowserAdapter(model('down', []), {
       recorder: {
         async record(r) {

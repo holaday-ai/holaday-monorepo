@@ -155,10 +155,20 @@ const TRANSACTION_RECEIPT_RE =
 /** No raw form values or network payloads leave this host-side verifier. */
 function collectObservationState() {
   const root = globalThis as typeof globalThis & {
-    __holadayObservation?: { id: string; version: number; interceptedEnter: number };
+    __holadayObservation?: {
+      id: string;
+      version: number;
+      interceptedEnter: number;
+      interceptedSearchEnter: number;
+    };
   };
   if (!root.__holadayObservation) {
-    const current = { id: `${Date.now()}-${Math.random()}`, version: 0, interceptedEnter: 0 };
+    const current = {
+      id: `${Date.now()}-${Math.random()}`,
+      version: 0,
+      interceptedEnter: 0,
+      interceptedSearchEnter: 0,
+    };
     root.__holadayObservation = current;
     new MutationObserver(() => current.version++).observe(document, {
       subtree: true,
@@ -169,10 +179,32 @@ function collectObservationState() {
     document.addEventListener(
       'keydown',
       (event) => {
-        if (event.key === 'Enter')
-          setTimeout(() => {
-            if (event.defaultPrevented) current.interceptedEnter++;
-          }, 0);
+        if (event.key !== 'Enter') return;
+        // Enter in a search box normally runs a search (a read): counted apart so a
+        // search that visibly lands is not mistaken for a submission.
+        const field = event.target as HTMLInputElement | null;
+        const label = [
+          field?.getAttribute?.('name'),
+          field?.getAttribute?.('placeholder'),
+          field?.getAttribute?.('aria-label'),
+          field?.id,
+        ]
+          .filter(Boolean)
+          .join(' ');
+        const search =
+          !!field &&
+          (field.type === 'search' ||
+            ['searchbox', 'combobox'].includes(field.getAttribute?.('role') ?? '') ||
+            /^(?:q|query|search|search_query|keyword|keywords|wd|k|s)$/i.test(
+              field.getAttribute?.('name') ?? '',
+            ) ||
+            /搜索|search|查找/i.test(label) ||
+            !!field.closest?.('form[role="search"], [role="search"]'));
+        setTimeout(() => {
+          if (!event.defaultPrevented) return;
+          if (search) current.interceptedSearchEnter++;
+          else current.interceptedEnter++;
+        }, 0);
       },
       true,
     );
@@ -278,6 +310,7 @@ function collectObservationState() {
     documentId: root.__holadayObservation.id,
     version: root.__holadayObservation.version,
     interceptedEnter: root.__holadayObservation.interceptedEnter,
+    interceptedSearchEnter: root.__holadayObservation.interceptedSearchEnter ?? 0,
     forms: JSON.stringify(form),
     text,
     receiptRegions: Array.from(
@@ -347,7 +380,7 @@ export class CloudObservation {
   private frames = new Map<string, Frame>();
   private observations = new Map<
     Frame,
-    { fingerprint: string; revision: string; refs: Set<string> }
+    { fingerprint: string; revision: string; refs: Set<string>; document: string }
   >();
   private virtualRefs = new Map<Frame, Map<string, number>>();
   private cursors = new Map<
@@ -658,6 +691,10 @@ export class CloudObservation {
     if (!frame || frame.isDetached() || frame.page() !== page) throw new Error('stale_context');
     return { page, frame };
   }
+  /** The document itself (not its changing text): same load, same URL. */
+  private async documentKey(frame: Frame) {
+    return `${(await observationState(frame)).documentId}|${frame.url()}`;
+  }
   private async fingerprint(frame: Frame) {
     const state = await observationState(frame);
     return hash(
@@ -680,7 +717,15 @@ export class CloudObservation {
         !current ||
         !current.refs.has(action.ref) ||
         action.observationRevision !== current.revision ||
-        (await this.fingerprint(frame)) !== current.fingerprint
+        // BROWSER-AUTOPILOT-1: an aria ref stays bound to the element the model
+        // saw; unrelated text changes (carousels, clocks) on a live page must not
+        // invalidate it. A different document or URL still does.
+        (await this.documentKey(frame)) !== current.document ||
+        // …and the element itself must still be on the page (a removed or
+        // replaced node, even with the same label, is not what the model saw).
+        (await this.locator(frame, action.ref)
+          .count()
+          .catch(() => 0)) !== 1
       )
         throw new Error('stale_observation');
     }
@@ -689,7 +734,12 @@ export class CloudObservation {
     const fingerprint = await this.fingerprint(frame);
     let current = this.observations.get(frame);
     if (!current || current.fingerprint !== fingerprint) {
-      current = { fingerprint, revision: randomUUID(), refs: new Set() };
+      current = {
+        fingerprint,
+        revision: randomUUID(),
+        refs: new Set(),
+        document: await this.documentKey(frame),
+      };
       this.observations.set(frame, current);
     }
     return {
@@ -1224,11 +1274,16 @@ export class CloudObservation {
           (text) => TRANSACTION_RECEIPT_RE.test(text) && !before.receiptRegions.includes(text),
         )) ??
       false;
+    // A script-handled Enter is a possible submission — except in a search box
+    // whose search visibly landed (new URL or new content).
+    const enterIntercepted =
+      (after?.interceptedEnter ?? 0) > before.interceptedEnter ||
+      ((after?.interceptedSearchEnter ?? 0) > (before.interceptedSearchEnter ?? 0) &&
+        after?.url === before.url &&
+        after?.dom === before.dom);
     const unexpected =
       writes.length > 0 ||
-      (action.tool === 'type' &&
-        action.submit &&
-        (after?.interceptedEnter ?? 0) > before.interceptedEnter) ||
+      (action.tool === 'type' && action.submit && enterIntercepted) ||
       (window.interactive && opened.some((p) => TRANSACTION_PAGE_RE.test(p.url()))) ||
       (window.interactive &&
         !!after &&
@@ -1242,11 +1297,7 @@ export class CloudObservation {
         url: safeObservationUrl(after?.url ?? before.url),
         action: action.tool,
       });
-    if (
-      action.tool === 'type' &&
-      action.submit &&
-      (after?.interceptedEnter ?? 0) > before.interceptedEnter
-    )
+    if (action.tool === 'type' && action.submit && enterIntercepted)
       triggers.push({
         branch: 'intercepted_submit',
         method: '',

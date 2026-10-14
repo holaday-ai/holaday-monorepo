@@ -88,6 +88,8 @@ interface Fact {
   sourceURL?: string;
   /** One item of a list (e.g. search results): no single-heading comparison. */
   listItem?: boolean;
+  /** A quoted literal: not finding it verbatim means the page never said it. */
+  quote?: boolean;
 }
 
 const PROSE_FIELD =
@@ -130,8 +132,9 @@ function beforeOuterComma(value: string): string {
   return value;
 }
 
-function answerFacts(summary: string): Fact[] {
+function answerFacts(summary: string, intent = ''): Fact[] {
   const text = unescapeLiteralBreaks(summary);
+  const asked = normalizeFact(intent);
   const facts: Fact[] = [];
   const add = (fact: Fact) => {
     if (fact.value && fact.value.length <= 300) facts.push(fact);
@@ -153,6 +156,19 @@ function answerFacts(summary: string): Fact[] {
     const before = text.slice(Math.max(0, match.index! - 4), match.index!);
     const qualified = /[节章段条项部篇栏]\s*$|列表\s*$|\d\s*$/.test(before);
     add({ name: match[1]!, value: clean(value), ...(qualified ? { listItem: true } : {}) });
+  }
+  // A quoted string with Latin letters or digits claims literal page text
+  // ("You clicked: Ok"); a negated mention ("而非 …") is not a claim.
+  for (const match of text.matchAll(/[“"「]([^”"」\n]{3,200})[”"」]/gu)) {
+    const quote = match[1]!.trim();
+    const before = text.slice(Math.max(0, match.index! - 12), match.index!);
+    if (
+      /[A-Za-z]{3,}|\d/.test(quote) &&
+      // The user's own words ("搜索「Playwright tutorial」") are not a page claim.
+      !asked.includes(normalizeFact(quote)) &&
+      !/而非|不是|并非|并不是|没有|未出现|instead of|rather than|not\s*$/i.test(before)
+    )
+      add({ name: '原文引用', value: quote, quote: true });
   }
   let headers: string[] | undefined;
   for (const line of text.split('\n')) {
@@ -230,6 +246,8 @@ export function assessCompletionFacts(input: {
   pages: ObservedEvidence[];
   /** Host receipts (download, scroll, form) that may also ground facts. */
   receipts?: string;
+  /** Everything the host returned to the model (errors included): grounds quotes only. */
+  toolTexts?: string;
   intent?: string;
 }): FactAssessment {
   const intent = input.intent ?? '';
@@ -245,7 +263,7 @@ export function assessCompletionFacts(input: {
   const contradictions: string[] = [];
   const unverified: string[] = [];
   const seen = new Set<string>();
-  const facts = [...explicitFacts(input.fields), ...answerFacts(input.summary)].flatMap(
+  const facts = [...explicitFacts(input.fields), ...answerFacts(input.summary, intent)].flatMap(
     (fact): Fact[] => {
       // A parenthetical that carries numbers is its own fact, checked separately.
       // Titles and list items often carry parentheses as part of the name.
@@ -289,7 +307,8 @@ export function assessCompletionFacts(input: {
             (page.sourceURL && normalizeFact(page.sourceURL) === v) ||
             page.links?.some((link) => normalizeFact(link.url) === v),
         ) ||
-        (!fact.tabId && !fact.sourceURL && receipts.includes(v)) ||
+        // Host receipts (download, typed text, scroll) are facts whatever the binding.
+        receipts.includes(v) ||
         // A result list ("title — URL") is proven by the listing page's own link.
         (!opensLinks &&
           !fact.tabId &&
@@ -303,6 +322,8 @@ export function assessCompletionFacts(input: {
           )),
     );
     if (grounded) continue;
+    if (fact.quote && candidates.some((v) => normalizeFact(input.toolTexts ?? '').includes(v)))
+      continue;
     if (!pages.length) {
       contradictions.push(`${label} 没有成功读取的页面可以支持（页面未加载或未读取）`);
       continue;
@@ -333,6 +354,10 @@ export function assessCompletionFacts(input: {
       }
     }
     // A single page title that differs from the page's own main heading.
+    if (fact.quote) {
+      contradictions.push(`${label} 不是已读页面中的原文`);
+      continue;
+    }
     if (TITLE_FIELD.test(fact.name) && !fact.listItem) {
       const headings = new Set(
         eligible
@@ -340,7 +365,14 @@ export function assessCompletionFacts(input: {
           .filter((heading): heading is string => Boolean(heading)),
       );
       const heading = headings.size === 1 ? [...headings][0] : undefined;
-      if (heading && !candidates.some((v) => normalizeFact(heading).includes(v))) {
+      // "人工智能 编辑" (h1 with its edit link) vs "人工智能 - 维基百科" (document title)
+      // are the same title: compare cores, either way round.
+      const main = heading
+        ? normalizeFact(heading)
+            .replace(/\s*(?:\[?编辑\]?|\[?edit\]?)$/i, '')
+            .trim()
+        : '';
+      if (heading && !candidates.some((v) => v.includes(main) || main.includes(v))) {
         contradictions.push(`${label} 与页面一级标题「${heading.slice(0, 120)}」不符`);
         continue;
       }

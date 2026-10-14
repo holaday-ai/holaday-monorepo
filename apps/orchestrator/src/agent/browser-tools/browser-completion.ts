@@ -64,6 +64,8 @@ export type BrowserTrace = Pick<
   screenshot?: boolean;
   /** The tab that was active when this action opened a new tab. */
   fromTabId?: string;
+  /** Text a successful `type` entered (a host fact for answer checks). */
+  typedText?: string;
 };
 /** A prohibition or an admission of non-completion is not a claim of execution. */
 function positiveActionText(text: string): string {
