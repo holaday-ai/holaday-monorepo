@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { browserCompletionVerdict } from '../../execution/execution-pipeline.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { detectBrowserBlocker } from './browser-completion.js';
 import { assessCompletionFacts } from './completion-fields.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
@@ -179,5 +180,34 @@ describe('4. 未核实 noise', () => {
         receipts: 'small-file.txt | 1024 bytes/字节',
       }).unverified,
     ).toEqual([]);
+  });
+});
+describe('5. a headline mentioning cloudflare is not a captcha wall', () => {
+  const page = (title: string, text: string) =>
+    detectBrowserBlocker({
+      title,
+      text,
+      visible: true,
+      blocking: true,
+      scope: 'document',
+      readableContent: false,
+    });
+  it('keeps a Hacker News front page readable', () => {
+    const text = Array.from(
+      { length: 30 },
+      (_, i) => `${i + 1}. Story ${i + 1} (example${i}.com) 120 points`,
+    )
+      .concat('17. Yandex outage: malicious bots moved (cloudflare.com)')
+      .join('\n');
+    expect(page('Hacker News', text)).toBeNull();
+  });
+  it('still pauses on a real Cloudflare challenge', () => {
+    expect(
+      page(
+        'news.example.com',
+        'Checking your browser before accessing. Performance & security by Cloudflare',
+      )?.reason,
+    ).toBeTruthy();
+    expect(page('Attention Required! | Cloudflare', 'Ray ID: 1234')?.reason).toBeTruthy();
   });
 });
