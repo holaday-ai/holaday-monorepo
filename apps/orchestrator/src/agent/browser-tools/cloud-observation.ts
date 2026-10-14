@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Frame, Page, Request } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { TRANSACTION_PAGE_RE } from '../supercar/runtime-action-policy.js';
+import { ActionCausality } from './action-causality.js';
+import { scrollWithEvidence } from './browser-scroll.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { redactPageText } from './page-redaction.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
@@ -308,6 +310,19 @@ export async function observationState(frame: Frame) {
 }
 
 type ActionWindow = {
+  token: string;
+  interactive: boolean;
+  causes: Map<string, number>;
+  records: Array<{
+    category: string;
+    write: boolean;
+    candidate: boolean;
+    key: string;
+    branch: string;
+    method: string;
+    url: string;
+    at: number;
+  }>;
   frame: Frame;
   origin: string;
   pages: Set<Page>;
@@ -327,15 +342,28 @@ export class CloudObservation {
   private virtualRefs = new Map<Frame, Map<string, number>>();
   private cursors = new Map<
     string,
-    { frame: Frame; documentId: string; text: string; offset: number; snapshotId: string }
+    {
+      frame: Frame;
+      documentId: string;
+      text: string;
+      offset: number;
+      snapshotId: string;
+      section?: number;
+    }
   >();
   private requests: Array<{
     category: string;
     write: boolean;
+    candidate: boolean;
+    key: string;
     branch: string;
     method: string;
     url: string;
   }> = [];
+  private readonly causality: ActionCausality;
+  private readonly windows = new Map<string, ActionWindow>();
+  private readonly recentRequests: Array<{ record: ActionWindow['records'][number]; page?: Page }> =
+    [];
 
   private active: Page;
   private backgroundRequests = new Map<string, number>();
@@ -368,10 +396,60 @@ export class CloudObservation {
   }
   constructor(page: Page) {
     this.active = page;
+    this.causality = new ActionCausality(page.context(), (frame, event) => {
+      const window = this.windows.get(event.token);
+      if (!window?.interactive || !window.pages.has(frame.page())) return;
+      let key: string;
+      try {
+        const url = new URL(event.url);
+        key = `${event.method}:${url.origin}${url.pathname}`;
+      } catch {
+        return;
+      }
+      window.causes.set(key, Date.now());
+      const observed = [...this.recentRequests]
+        .reverse()
+        .find(
+          ({ record, page }) =>
+            record.key === key &&
+            record.candidate &&
+            !record.write &&
+            record.at > Date.now() - 500 &&
+            (!page || window.pages.has(page)),
+        );
+      if (observed) {
+        observed.record.write = true;
+        window.causes.delete(key);
+        this.noteWrite(window, observed.record);
+      }
+    });
     this.register(page);
     page.context().on('request', this.onRequest);
     page.context().on('requestfinished', this.onRequestSettled);
     page.context().on('requestfailed', this.onRequestSettled);
+  }
+  private noteWrite(
+    window: ActionWindow,
+    request: { branch: string; method: string; url: string },
+  ) {
+    this.pendingWrite = true;
+    this.pendingTriggers.push({
+      branch: request.branch,
+      method: request.method,
+      url: request.url,
+      action: window.action,
+    });
+    this.pendingTriggers = this.pendingTriggers.slice(-20);
+  }
+  private backgroundEvidence() {
+    return this.requests
+      .filter((r) => !r.write && (r.candidate || /^(POST|PUT|PATCH|DELETE)$/.test(r.method)))
+      .map((r) => ({
+        branch: r.branch,
+        method: r.method,
+        url: r.url,
+        action: this.pendingAction?.action ?? 'background',
+      }));
   }
   get page() {
     return this.active;
@@ -427,35 +505,13 @@ export class CloudObservation {
         : null;
     const transactional =
       transactionRequest(url) || graphql === 'mutation' || graphql === 'unknown';
+    let requestPage: Page | undefined;
     try {
-      if (!window.pages.has(r.frame().page())) return;
+      requestPage = r.frame().page();
+      if (!this.ownsPage(requestPage)) return;
     } catch {
       /* A task popup's initial navigation may not have a frame yet. */
     }
-    const telemetryPath = /(?:^|\/)(?:collect|track|log|logs|beacon|heartbeat|ping)(?:\/|$)/i.test(
-      url.pathname,
-    );
-    const telemetryHost =
-      /(?:^|\.)(?:google-analytics\.com|googletagmanager\.com|sentry\.io|mixpanel\.com|segment\.(?:com|io)|sensorsdata\.cn)$/i.test(
-        url.hostname,
-      );
-    const ignored =
-      (telemetryPath && (url.origin === window.origin || telemetryHost)) ||
-      (!navigation && window.priorRequests.has(signature));
-    if (ignored && !transactional) return;
-    const knownSiteInitialization =
-      ((url.hostname === 'www.youtube.com' || url.hostname === 'youtube.com') &&
-        /^(?:\/youtubei\/v1\/(?:guide|log_event|notification_registration\/set_registration)|\/api\/jnn\/v1\/GenerateIT)$/.test(
-          url.pathname,
-        )) ||
-      (url.hostname === 'cdn.tiny.cloud' &&
-        /^\/1\/[^/]+\/tinymce\/[A-Za-z0-9.-]+\/cdn-init$/.test(url.pathname)) ||
-      (url.hostname === 'en.wikipedia.org' &&
-        r.resourceType() === 'ping' &&
-        /^\/ins-[a-z0-9]+\/v2\/events$/.test(url.pathname));
-    const readApi =
-      (url.hostname === 'www.youtube.com' || url.hostname === 'youtube.com') &&
-      /\/youtubei\/v\d+\/(?:search|browse|next|player|get_transcript)(?:\/|$)/i.test(url.pathname);
     const formPost =
       r.method() === 'POST' &&
       (navigation ||
@@ -466,44 +522,57 @@ export class CloudObservation {
       r.method() === 'POST' &&
       /\/(?:orders?|payments?|messages?|comments?|bookings?)(?:\/|$)/i.test(url.pathname);
     const methodWrite = ['PUT', 'PATCH', 'DELETE'].includes(r.method());
-    // Unknown POSTs remain fail-closed; only a known read API or parsed GraphQL query is exempt.
-    const unknownPost =
-      r.method() === 'POST' && !readApi && !knownSiteInitialization && graphql !== 'query';
-    const write = transactional || resourceWrite || methodWrite || unknownPost;
+    // A beacon with telemetry semantics is not a form/API mutation. Transaction
+    // paths and action parameters still take precedence, even on /collect.
+    const passiveBeacon =
+      r.resourceType() === 'ping' &&
+      !transactional &&
+      /(?:^|\/)(?:collect|track|logs?|beacon|heartbeat|ping)(?:\/|$)/i.test(url.pathname);
+    const unknownPost = r.method() === 'POST' && graphql !== 'query' && !passiveBeacon;
+    const candidate = transactional || resourceWrite || methodWrite || unknownPost;
+    const key = `${r.method()}:${url.origin}${url.pathname}`;
+    // Timing alone does not establish causation. Only an instrumented trusted
+    // interaction (or its async continuation) can attribute a write to us.
+    const cause = [...this.windows.values()]
+      .reverse()
+      .find(
+        (w) =>
+          w.interactive &&
+          (w.causes.get(key) ?? 0) > Date.now() - 500 &&
+          (!requestPage || w.pages.has(requestPage)),
+      );
+    const write = candidate && !!cause;
     const branch =
       transactional || resourceWrite
         ? 'transaction_request'
-        : formPost && !readApi
+        : formPost
           ? 'form_submit'
-          : knownSiteInitialization && !transactional
-            ? 'site_initialization'
-            : methodWrite
-              ? 'mutation_method'
-              : unknownPost
-                ? 'unknown_post'
-                : readApi
-                  ? 'read_api'
-                  : 'read_request';
+          : methodWrite
+            ? 'mutation_method'
+            : unknownPost
+              ? 'unknown_post'
+              : 'read_request';
     window.lastActivity = Date.now();
     window.inFlight.add(r);
     this.requestWindows.set(r, window);
-    if (write) {
-      this.pendingWrite = true;
-      this.pendingTriggers.push({
-        branch,
-        method: r.method(),
-        url: safeObservationUrl(url.origin + url.pathname),
-        action: window.action,
-      });
-      this.pendingTriggers = this.pendingTriggers.slice(-20);
-    }
-    this.requests.push({
+    const record = {
       category: `${r.method()}:${r.resourceType()}`,
       write,
+      candidate,
+      key,
       branch,
       method: r.method(),
       url: safeObservationUrl(url.origin + url.pathname),
-    });
+      at: Date.now(),
+    };
+    if (write && cause) {
+      cause.causes.delete(key);
+      this.noteWrite(cause, record);
+    }
+    this.requests.push(record);
+    window.records.push(record);
+    this.recentRequests.push({ record, page: requestPage });
+    if (this.recentRequests.length > 400) this.recentRequests.shift();
     if (this.requests.length > 400) this.requests.shift();
   }
   private onRequest = (request: Request) => {
@@ -546,10 +615,13 @@ export class CloudObservation {
     }
   }
   dispose() {
+    this.causality.dispose();
     this.active.context().off('request', this.onRequest);
     this.active.context().off('requestfinished', this.onRequestSettled);
     this.active.context().off('requestfailed', this.onRequestSettled);
     this.requestWindows.clear();
+    this.windows.clear();
+    this.recentRequests.length = 0;
     this.pendingAction = this.actionWindow = null;
     this.cursors.clear();
   }
@@ -636,6 +708,19 @@ export class CloudObservation {
       ok: true,
       text: JSON.stringify(value),
       url: safeObservationUrl(frame.url()),
+      ...(this.backgroundEvidence().length
+        ? {
+            effect: {
+              urlChanged: false,
+              formChanged: false,
+              domChanged: false,
+              unexpected: false,
+              observationAvailable: false,
+              networkCategories: [],
+              backgroundRequests: this.backgroundEvidence(),
+            },
+          }
+        : {}),
     });
     if (action.tool === 'list_tabs')
       return json({
@@ -676,7 +761,6 @@ export class CloudObservation {
     if (action.tool === 'scroll_until') {
       const budget = Math.min(action.maxChars ?? 8000, Math.floor((action.maxTokens ?? 8000) / 4));
       const started = Date.now();
-      let prior = '';
       let stalls = 0;
       let steps = 0;
       let itemCount = 0;
@@ -692,33 +776,23 @@ export class CloudObservation {
           reason = 'time_limit';
           break;
         }
-        const state = await observationState(frame);
         itemCount = await frame.locator('li,[role=listitem],tbody tr').count();
         if (itemCount >= (action.maxItems ?? 1000)) {
           reason = 'item_limit';
           break;
         }
-        // maxChars bounds the returned text, not the number of actual scrolls.
-        const progress = await frame.evaluate(() =>
-          JSON.stringify([document.body?.scrollHeight, scrollY, document.body?.innerText.length]),
+        const receipt = await scrollWithEvidence(
+          frame,
+          'down',
+          1,
+          Math.max(1, Math.min(3500, (action.maxMs ?? 5000) - (Date.now() - started))),
         );
-        stalls = progress === prior ? stalls + 1 : 0;
-        prior = progress;
+        receipts.push(receipt);
+        stalls = !receipt.grew && receipt.afterTop === receipt.beforeTop ? stalls + 1 : 0;
         if (stalls >= 2) {
           reason = 'stalled';
           break;
         }
-        const beforeHeight = await frame.evaluate(() => document.documentElement.scrollHeight);
-        await frame.evaluate(() => window.scrollBy(0, Math.max(200, innerHeight - 100)));
-        await page.waitForTimeout(350);
-        const afterState = await observationState(frame);
-        const afterHeight = await frame.evaluate(() => document.documentElement.scrollHeight);
-        receipts.push({
-          beforeHeight,
-          afterHeight,
-          addedChars: Math.max(0, afterState.text.length - state.text.length),
-          grew: afterState.text.length > state.text.length || afterHeight > beforeHeight,
-        });
       }
       return {
         ...json({
@@ -748,6 +822,18 @@ export class CloudObservation {
         frame,
         await frame.locator('body').ariaSnapshot({ mode: 'ai', timeout: 5000 }),
       );
+      // AI snapshots inline child frames, including cross-origin documents.
+      // Expose child refs only through the separately scoped frame records below.
+      let frameIndent = -1;
+      tree = tree
+        .split('\n')
+        .filter((line) => {
+          const indent = line.length - line.trimStart().length;
+          if (frameIndent >= 0 && indent > frameIndent) return false;
+          frameIndent = /^\s*- iframe\b/.test(line) ? indent : -1;
+          return true;
+        })
+        .join('\n');
       const dates = await frame.locator('input').evaluateAll((nodes) =>
         nodes
           .map((n, index) => ({
@@ -778,17 +864,67 @@ export class CloudObservation {
       current.revision = randomUUID();
       meta.observationRevision = current.revision;
       current.refs = new Set(
-        [...safeTree.slice(0, 24000).matchAll(/\[ref=(e\d+)\]/g)].map((m) => m[1]!),
+        [...safeTree.slice(0, 24000).matchAll(/\[ref=((?:f\d+)?e\d+)\]/g)].map((m) => m[1]!),
       );
+      const rawHeadings = await frame.locator('h1,h2,h3').evaluateAll((nodes) => {
+        let section = 0;
+        return nodes
+          .filter((node) => node.getClientRects().length > 0)
+          .slice(0, 120)
+          .map((node) => ({
+            level: Number(node.tagName.slice(1)),
+            text: (node.textContent ?? '').trim().slice(0, 200),
+            section: node.tagName === 'H2' ? ++section : undefined,
+          }));
+      });
+      const headings = JSON.parse(await redactPageText(frame, JSON.stringify(rawHeadings)));
+      const frames: Array<Record<string, unknown>> = [];
+      if (frame === page.mainFrame()) {
+        let remaining = 16_000;
+        const origin = (child: Frame): string => {
+          if (['about:blank', 'about:srcdoc', ''].includes(child.url()) && child.parentFrame())
+            return origin(child.parentFrame()!);
+          try {
+            return new URL(child.url()).origin;
+          } catch {
+            return '';
+          }
+        };
+        for (const child of page
+          .frames()
+          .filter((f) => f !== frame)
+          .slice(0, 30)) {
+          const info = { frameId: this.frameId(child), sourceURL: safeObservationUrl(child.url()) };
+          if (!origin(frame) || origin(child) !== origin(frame)) {
+            frames.push({ ...info, limitation: '跨源 iframe：父页面快照不暴露其内部引用。' });
+          } else if (remaining > 0) {
+            try {
+              const value = JSON.parse(
+                (await this.read({ tool: 'read_page', tabId: meta.tabId, frameId: info.frameId }))!
+                  .text,
+              );
+              const tree = String(value.tree ?? '').slice(0, Math.min(4000, remaining));
+              remaining -= tree.length;
+              frames.push({
+                ...value,
+                ...info,
+                tree,
+                frames: undefined,
+                instruction: '使用此 iframe 的 frameId 和 observationRevision 操作其中的 ref。',
+              });
+            } catch {
+              frames.push({ ...info, limitation: 'iframe 尚未就绪，请重新读取。' });
+            }
+          } else frames.push({ ...info, limitation: 'iframe 内容超过本次快照预算。' });
+        }
+      }
       return json({
         ...meta,
         tree: safeTree.slice(0, 24000),
+        headings,
         truncated: safeTree.length > 24000,
         refExpiresOn: ['DOM mutation', 'form change', 'navigation', 'tab switch'],
-        frames: page
-          .frames()
-          .slice(0, 30)
-          .map((f) => ({ frameId: this.frameId(f), sourceURL: safeObservationUrl(f.url()) })),
+        frames,
       });
     }
     if (action.tool === 'get_page_text') {
@@ -797,18 +933,56 @@ export class CloudObservation {
       let snapshotId: string = randomUUID();
       let text: string;
       let offset = 0;
+      let section = action.section;
       if (action.cursor) {
         const cursor = this.cursors.get(action.cursor);
         this.cursors.delete(action.cursor);
-        if (!cursor || cursor.frame !== frame || cursor.documentId !== documentId)
+        if (
+          !cursor ||
+          cursor.frame !== frame ||
+          cursor.documentId !== documentId ||
+          (section !== undefined && section !== cursor.section)
+        )
           throw new Error('stale_cursor');
         text = cursor.text;
         offset = cursor.offset;
         snapshotId = cursor.snapshotId;
+        section = cursor.section;
       } else
         text = await redactPageText(
           frame,
-          await frame.locator('body').innerText({ timeout: 5000 }),
+          section === undefined
+            ? await frame.locator('body').innerText({ timeout: 5000 })
+            : await frame.evaluate((section) => {
+                const headings = Array.from(document.querySelectorAll('h2')).filter(
+                  (node) => node.getClientRects().length > 0,
+                );
+                const heading = headings[section - 1];
+                if (!heading) throw new Error('Requested section is not present in this document');
+                const anchor = heading.parentElement?.classList.contains('mw-heading')
+                  ? heading.parentElement
+                  : heading;
+                const next = headings[section];
+                const end = next?.parentElement?.classList.contains('mw-heading')
+                  ? next.parentElement
+                  : next;
+                const range = document.createRange();
+                range.setStartBefore(anchor);
+                if (end) range.setEndBefore(end);
+                else range.setEnd(document.body, document.body.childNodes.length);
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                const parts: string[] = [];
+                while (walker.nextNode()) {
+                  const parent = walker.currentNode.parentElement;
+                  if (
+                    parent?.getClientRects().length &&
+                    !parent.closest('script,style,[hidden],[aria-hidden=true]') &&
+                    range.intersectsNode(walker.currentNode)
+                  )
+                    parts.push(walker.currentNode.textContent ?? '');
+                }
+                return parts.join(' ').replace(/\s+/g, ' ').trim();
+              }, section),
         );
       if (documentId !== (await observationState(frame)).documentId)
         throw new Error('stale_cursor');
@@ -823,6 +997,7 @@ export class CloudObservation {
           text,
           offset: endOffset,
           snapshotId,
+          section,
         });
       }
       return json({
@@ -830,6 +1005,7 @@ export class CloudObservation {
         text: text.slice(offset, endOffset),
         range: [offset, endOffset],
         snapshotId,
+        section,
         snapshotMode: 'immutable-document-text',
         position: {
           paragraph: text.slice(0, offset).split(/\n+/).length - 1,
@@ -841,7 +1017,8 @@ export class CloudObservation {
       });
     }
     if (action.tool === 'links') {
-      const before = await this.fingerprint(frame);
+      const before = (await observationState(frame)).documentId;
+      const beforeUrl = frame.url();
       const anchorCount = await frame.locator('a[href]').count();
       const raw = await frame.locator('a[href]').evaluateAll((nodes) =>
         nodes
@@ -865,7 +1042,8 @@ export class CloudObservation {
       }));
       const clean = JSON.parse(await redactPageText(frame, JSON.stringify(items)));
       const meta = await this.metadata(frame);
-      if (before !== (await this.fingerprint(frame))) throw new Error('stale_observation');
+      if (before !== (await observationState(frame)).documentId || beforeUrl !== frame.url())
+        throw new Error('stale_observation');
       return {
         ...json({
           ...meta,
@@ -880,7 +1058,8 @@ export class CloudObservation {
       };
     }
     if (action.tool === 'tables') {
-      const before = await this.fingerprint(frame);
+      const before = (await observationState(frame)).documentId;
+      const beforeUrl = frame.url();
       const tableCount = await frame.locator('table').count();
       const start = action.start ?? 0;
       const limit = action.limit ?? 50;
@@ -929,7 +1108,8 @@ export class CloudObservation {
       }
       const clean = JSON.parse(await redactPageText(frame, JSON.stringify(items)));
       const meta = await this.metadata(frame);
-      if (before !== (await this.fingerprint(frame))) throw new Error('stale_observation');
+      if (before !== (await observationState(frame)).documentId || beforeUrl !== frame.url())
+        throw new Error('stale_observation');
       return json({
         ...meta,
         items: clean,
@@ -942,6 +1122,7 @@ export class CloudObservation {
     action: UnifiedBrowserAction,
     execute: () => Promise<UnifiedToolResult>,
   ): Promise<UnifiedToolResult> {
+    await this.causality.prepare();
     await this.validate(action);
     const { page, frame } = this.resolve(action);
     const before = await observationState(frame);
@@ -951,8 +1132,18 @@ export class CloudObservation {
       origin = new URL(action.tool === 'navigate' ? action.url : before.url, before.url).origin;
     } catch {}
     const pending = this.interruption();
-    if (pending) return { ok: false, text: pending.message, interruption: pending };
+    if (pending)
+      return {
+        ok: false,
+        text: pending.message,
+        interruption: pending,
+        effect: this.pendingEffect(),
+      };
     const window: ActionWindow = {
+      token: randomUUID(),
+      interactive: ['click', 'click_at', 'type', 'select'].includes(action.tool),
+      causes: new Map(),
+      records: [],
       frame,
       origin,
       pages: new Set([page]),
@@ -965,6 +1156,14 @@ export class CloudObservation {
     };
     this.actionWindow = window;
     this.pendingAction = window;
+    this.windows.set(window.token, window);
+    if (this.windows.size > 64) this.windows.delete(this.windows.keys().next().value!);
+    if (window.interactive)
+      await this.causality.arm(
+        frame,
+        window.token,
+        'ref' in action && action.ref ? this.locator(frame, action.ref) : undefined,
+      );
     const opened: Page[] = [];
     const popup = (p: Page) => {
       this.register(p);
@@ -975,8 +1174,10 @@ export class CloudObservation {
     let result: UnifiedToolResult;
     try {
       result = await execute();
+      if (window.interactive) await this.causality.disarm(frame, window.token);
       await this.waitForNetworkQuiet(window);
     } finally {
+      if (window.interactive) await this.causality.disarm(frame, window.token);
       page.off('popup', popup);
       this.actionWindow = null;
     }
@@ -989,7 +1190,7 @@ export class CloudObservation {
       action: action.tool,
     }));
     const newReceipt =
-      (['click', 'click_at', 'type', 'select'].includes(action.tool) &&
+      (window.interactive &&
         after?.receiptRegions.some(
           (text) => TRANSACTION_RECEIPT_RE.test(text) && !before.receiptRegions.includes(text),
         )) ??
@@ -999,8 +1200,8 @@ export class CloudObservation {
       (action.tool === 'type' &&
         action.submit &&
         (after?.interceptedEnter ?? 0) > before.interceptedEnter) ||
-      opened.some((p) => TRANSACTION_PAGE_RE.test(p.url())) ||
-      (action.tool !== 'navigate' &&
+      (window.interactive && opened.some((p) => TRANSACTION_PAGE_RE.test(p.url()))) ||
+      (window.interactive &&
         !!after &&
         TRANSACTION_PAGE_RE.test(after.url) &&
         after.url !== before.url) ||
@@ -1023,7 +1224,7 @@ export class CloudObservation {
         url: safeObservationUrl(before.url),
         action: action.tool,
       });
-    if (opened.some((p) => TRANSACTION_PAGE_RE.test(p.url())))
+    if (window.interactive && opened.some((p) => TRANSACTION_PAGE_RE.test(p.url())))
       triggers.push({
         branch: 'transaction_popup',
         method: '',
@@ -1031,7 +1232,7 @@ export class CloudObservation {
         action: action.tool,
       });
     if (
-      action.tool !== 'navigate' &&
+      window.interactive &&
       after &&
       TRANSACTION_PAGE_RE.test(after.url) &&
       after.url !== before.url
@@ -1048,6 +1249,7 @@ export class CloudObservation {
       domChanged: before.dom !== after?.dom,
       networkCategories: [...new Set(this.requests.map((r) => r.category))],
       triggers,
+      backgroundRequests: this.backgroundEvidence(),
       observationAvailable: !!after,
       unexpected,
     };

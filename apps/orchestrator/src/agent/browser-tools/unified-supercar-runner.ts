@@ -16,7 +16,10 @@ import { BrowserReplayRecorder } from './browser-replay.js';
 import { browserToolError } from './browser-tool-error.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { installDomainEgress } from './domain-egress.js';
-import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
+import {
+  type UnifiedToolResult,
+  createPlaywrightUnifiedExecutor,
+} from './playwright-unified-executor.js';
 import { createUnifiedActionGate } from './unified-action-gate.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
@@ -271,6 +274,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     errorCode: string | undefined,
     message: string,
     blockerEvidence?: import('./browser-completion.js').BrowserBlockerEvidence,
+    effect?: UnifiedToolResult['effect'],
   ) {
     iteration += 1;
     await safe(() =>
@@ -283,6 +287,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           message,
           ...(errorCode ? { errorCode } : {}),
           ...(blockerEvidence ? { blockerEvidence } : {}),
+          ...(effect ? { effect } : {}),
         },
         toolsInTurn: [],
         textPreamble: '',
@@ -429,8 +434,19 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         return blocker;
       },
       currentPageUrl: () => tools.page.url(),
-      checkInterruption: () =>
-        tools.observation?.interruption() ?? egress.interruption() ?? undefined,
+      checkInterruption: async () => {
+        const interruption =
+          tools.observation?.interruption() ?? egress.interruption() ?? undefined;
+        if (interruption)
+          await recordDiagnostic(
+            'browser_effect',
+            interruption.reason,
+            interruption.message,
+            undefined,
+            tools.observation?.pendingEffect(),
+          );
+        return interruption;
+      },
       intent: guidance ? `${opts.intent}\n\n【结果要求】\n${guidance}` : opts.intent,
       ...(contract && guidance
         ? { reviewFinish: (summary: string) => reviewListAnswer(contract, summary) }

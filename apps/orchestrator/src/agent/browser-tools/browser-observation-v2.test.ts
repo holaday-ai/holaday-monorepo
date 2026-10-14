@@ -172,7 +172,7 @@ describe('cloud observation v2', () => {
         maxChars: 256,
       });
       expect(result.truncated).toBe(true);
-      expect(['stalled', 'step_limit', 'text_limit']).toContain(result.reason);
+      expect(['stalled', 'step_limit', 'text_limit', 'time_limit']).toContain(result.reason);
     } finally {
       tools.dispose();
       await page.close();

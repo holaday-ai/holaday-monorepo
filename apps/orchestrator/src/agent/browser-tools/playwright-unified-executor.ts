@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Page } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { probeBrowserBlocker } from './browser-blocker-probe.js';
+import { scrollWithEvidence } from './browser-scroll.js';
 import { browserToolError } from './browser-tool-error.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { CloudObservation } from './cloud-observation.js';
@@ -21,6 +22,7 @@ export interface UnifiedToolResult {
     networkCategories: string[];
     unexpected: boolean;
     triggers?: Array<{ branch: string; method: string; url: string; action: string }>;
+    backgroundRequests?: Array<{ branch: string; method: string; url: string; action: string }>;
     observationAvailable?: boolean;
   };
   form?: { ref: string; filled: boolean; submitted: boolean };
@@ -421,58 +423,13 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           };
         }
         case 'scroll': {
-          const measure = () =>
-            page.evaluate(() => {
-              const loading =
-                '[role="progressbar"], [aria-busy="true"], .jscroll-loading, .loading, .loader, .spinner';
-              const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-              let chars = 0;
-              while (walker.nextNode()) {
-                const parent = walker.currentNode.parentElement;
-                if (
-                  !parent ||
-                  parent.closest(`${loading},script,style`) ||
-                  !parent.getClientRects().length
-                )
-                  continue;
-                chars += (walker.currentNode.textContent ?? '')
-                  .replace(/(?:loading\s*\.{0,3}|加载中\s*[…。.]*)/gi, '')
-                  .trim().length;
-              }
-              const media = Array.from(document.images).filter(
-                (img) => img.complete && img.naturalWidth > 0 && !img.closest(loading),
-              ).length;
-              return { height: document.documentElement.scrollHeight, chars, media };
-            });
-          const before = await measure();
-          if (action.ref) await byRef(action.ref).scrollIntoViewIfNeeded({ timeout });
-          else
-            await page.mouse.wheel(
-              0,
-              (action.direction === 'up' ? -1 : 1) * 600 * (action.amount ?? 1),
-            );
-          const deadline = Date.now() + Math.min(timeout, 3500);
-          let after = await measure();
-          let stableSince = Date.now();
-          if (action.direction !== 'up')
-            while (Date.now() < deadline) {
-              const next = await measure();
-              if (next.chars !== after.chars || next.media !== after.media)
-                stableSince = Date.now();
-              after = next;
-              if (
-                (after.chars > before.chars || after.media > before.media) &&
-                Date.now() - stableSince >= 250
-              )
-                break;
-              await new Promise((resolve) => setTimeout(resolve, 75));
-            }
-          const scroll = {
-            beforeHeight: before.height,
-            afterHeight: after.height,
-            addedChars: Math.max(0, after.chars - before.chars),
-            grew: after.chars > before.chars || after.media > before.media,
-          };
+          const scroll = await scrollWithEvidence(
+            activeFrame,
+            action.direction,
+            action.amount,
+            Math.min(timeout, 3500),
+            action.ref ? () => byRef(action.ref!).scrollIntoViewIfNeeded({ timeout }) : undefined,
+          );
           return {
             ...done(
               JSON.stringify({

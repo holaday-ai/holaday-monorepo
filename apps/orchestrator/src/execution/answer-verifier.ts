@@ -135,6 +135,14 @@ const KNOWN_NUMERIC_KEYS = [
 // decides whether to actually block or just warn.
 const CONSTRAINT_CHECKERS: Record<string, (fact: string) => boolean> = {
   no_form_submit: (fact) => {
+    try {
+      const receipt = JSON.parse(fact);
+      if (receipt && typeof receipt === 'object' && typeof receipt.form?.submitted === 'boolean') {
+        return receipt.form.submitted || /^(?:submit|form_submit)$/.test(receipt.tool ?? '');
+      }
+    } catch {
+      // Legacy prose evidence still uses the conservative text detector below.
+    }
     if (/提交表单|表单提交/i.test(fact)) return true;
     // Avoid `\b` here — `_` counts as a word char in JS regex, so
     // `\bsubmit\b` wouldn't match "form_submit". Plain substring

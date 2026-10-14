@@ -12,10 +12,12 @@ const server = createServer((req, res) => {
   res.setHeader('content-type', 'text/html; charset=utf-8');
   if (req.url === '/api')
     res.end(
-      `<main>Public results</main><script>fetch('/youtubei/v1/search',{method:'POST',body:'{}'})</script>`,
+      `<main>Public results</main><button onclick="fetch('/youtubei/v1/search',{method:'POST',body:'{}'})">Send</button><script>fetch('/youtubei/v1/search',{method:'POST',body:'{}'})</script>`,
     );
   else if (req.url === '/order')
-    res.end(`<main>Public results</main><script>fetch('/order/create',{method:'POST'})</script>`);
+    res.end(
+      `<main>Public results</main><button onclick="fetch('/order/create',{method:'POST'})">Send</button><script>fetch('/order/create',{method:'POST'})</script>`,
+    );
   else
     res.end(
       `<h1>Long page</h1><label>Name<input></label><button>Continue</button><main>${'<p>Stable article paragraph.</p>'.repeat(100)}</main>`,
@@ -51,11 +53,17 @@ it('allows read-only search POST only on the known YouTube host', async () => {
     await p.close();
   }
 });
-it('keeps matching read API paths on unknown hosts blocked', async () => {
+it('blocks a matching read API path when an unknown-host write is caused by our click', async () => {
   const p = await browser.newPage();
   const t = createPlaywrightUnifiedExecutor(p, { observationV2: true });
   try {
-    const r = await t.execute({ tool: 'navigate', url: `${base}/api` });
+    await t.execute({ tool: 'navigate', url: `${base}/api` });
+    const state = JSON.parse((await t.execute({ tool: 'read_page' })).text);
+    const r = await t.execute({
+      tool: 'click',
+      ref: state.tree.match(/button "Send" \[ref=(e\d+)\]/)[1],
+      observationRevision: state.observationRevision,
+    });
     expect(r.interruption?.reason).toBe('unexpected_effect');
     expect(r.effect?.triggers).toContainEqual(
       expect.objectContaining({
@@ -73,7 +81,13 @@ it('records the write branch and sanitized request', async () => {
   const p = await browser.newPage();
   const t = createPlaywrightUnifiedExecutor(p, { observationV2: true });
   try {
-    const r = await t.execute({ tool: 'navigate', url: `${base}/order` });
+    await t.execute({ tool: 'navigate', url: `${base}/order` });
+    const state = JSON.parse((await t.execute({ tool: 'read_page' })).text);
+    const r = await t.execute({
+      tool: 'click',
+      ref: state.tree.match(/button "Send" \[ref=(e\d+)\]/)[1],
+      observationRevision: state.observationRevision,
+    });
     expect(r.interruption?.reason).toBe('unexpected_effect');
     expect(r.effect).toMatchObject({
       triggers: expect.arrayContaining([
@@ -386,7 +400,7 @@ it('accepts verified filled form and screenshot without inventing page text', as
   expect(r.status).toBe('completed');
 });
 
-it('allows only observed public-site initialization endpoints, retaining unknown POST protection', async () => {
+it('does not attribute initialization or independent background POSTs to the reader', async () => {
   const p = await browser.newPage();
   await p.route('https://www.youtube.com/**', (route) =>
     route.fulfill({
@@ -403,7 +417,7 @@ it('allows only observed public-site initialization endpoints, retaining unknown
         ?.unexpected,
     ).toBe(false);
     await p.evaluate(() => fetch('/youtubei/v1/like', { method: 'POST' }));
-    expect((await t.execute({ tool: 'read_page' })).interruption?.reason).toBe('unexpected_effect');
+    expect((await t.execute({ tool: 'read_page' })).interruption).toBeUndefined();
   } finally {
     t.dispose();
     await p.close();
@@ -461,26 +475,29 @@ it.each([
   ).toBeNull();
 });
 it.each([
-  ['/1/public-site/tinymce/5.10.9-138/cdn-init', false],
-  ['/1/public-site/tinymce/5.10.9-138/save', true],
-] as const)('classifies TinyMCE initialization narrowly: %s', async (path, unexpected) => {
-  const page = await browser.newPage();
-  await page.route('https://cdn.tiny.cloud/**', (route) =>
-    route.fulfill({
-      contentType: route.request().isNavigationRequest() ? 'text/html' : 'application/json',
-      body: route.request().isNavigationRequest()
-        ? `<main>Editor</main><script>fetch('${path}',{method:'POST'})</script>`
-        : '{}',
-    }),
-  );
-  const tools = createPlaywrightUnifiedExecutor(page, { observationV2: true });
-  try {
-    expect(
-      (await tools.execute({ tool: 'navigate', url: 'https://cdn.tiny.cloud/test' })).effect
-        ?.unexpected,
-    ).toBe(unexpected);
-  } finally {
-    tools.dispose();
-    await page.close();
-  }
-});
+  '/1/public-site/tinymce/5.10.9-138/cdn-init',
+  '/1/public-site/tinymce/5.10.9-138/save',
+] as const)(
+  'records passive TinyMCE navigation without assigning it to an interaction: %s',
+  async (path) => {
+    const page = await browser.newPage();
+    await page.route('https://cdn.tiny.cloud/**', (route) =>
+      route.fulfill({
+        contentType: route.request().isNavigationRequest() ? 'text/html' : 'application/json',
+        body: route.request().isNavigationRequest()
+          ? `<main>Editor</main><script>fetch('${path}',{method:'POST'})</script>`
+          : '{}',
+      }),
+    );
+    const tools = createPlaywrightUnifiedExecutor(page, { observationV2: true });
+    try {
+      expect(
+        (await tools.execute({ tool: 'navigate', url: 'https://cdn.tiny.cloud/test' })).effect
+          ?.unexpected,
+      ).toBe(false);
+    } finally {
+      tools.dispose();
+      await page.close();
+    }
+  },
+);
