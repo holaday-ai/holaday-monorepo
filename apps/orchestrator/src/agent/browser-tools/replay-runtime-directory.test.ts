@@ -33,8 +33,12 @@ it('records through the actual runner and API from a read-only release directory
         },
       },
     );
-    expect(stdout).toContain('"pass":true');
-    expect(stdout).toContain('"images":1');
+    const summary = JSON.parse(stdout.trim().split('\n').at(-1) ?? '{}');
+    expect(summary.pass).toBe(true);
+    // The navigate step's image, plus the final frame recorded as the task ends
+    // (FIX-REPLAY-GAPS).
+    expect(summary.images).toBe(2);
+    expect(summary.phases.at(-1)).toBe('final');
   } finally {
     await chmod(release, 0o755);
     await rm(root, { recursive: true, force: true });

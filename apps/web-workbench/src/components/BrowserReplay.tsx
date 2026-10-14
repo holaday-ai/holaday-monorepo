@@ -1,6 +1,14 @@
 import { trpc } from '@/lib/trpc';
 import { useRef, useState } from 'react';
 
+// FIX-REPLAY-GAPS — 'final' is the frame recorded when the task parks or ends.
+const REPLAY_PHASE_LABEL: Record<string, string> = {
+  before: '操作前',
+  after: '操作后',
+  failure: '失败',
+  sample: '操作后',
+  final: '最终',
+};
 type Replay = NonNullable<Awaited<ReturnType<typeof trpc.browserReplay.read.query>>>;
 export function BrowserReplay({ taskId }: { taskId: string }) {
   const [replay, setReplay] = useState<Replay | null>(null);
@@ -89,7 +97,7 @@ export function BrowserReplay({ taskId }: { taskId: string }) {
                 <img
                   className="max-h-64 w-full object-contain"
                   src={frame.image}
-                  alt={`步骤 ${frame.actionId} 的${frame.phase === 'before' ? '操作前' : frame.phase === 'failure' ? '失败' : '操作后'}画面`}
+                  alt={`步骤 ${frame.actionId} 的${REPLAY_PHASE_LABEL[frame.phase] ?? '操作后'}画面`}
                 />
               ) : (
                 <div className="rounded bg-muted p-6 text-center">

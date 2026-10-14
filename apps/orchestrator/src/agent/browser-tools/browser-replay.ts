@@ -5,11 +5,17 @@ import type { Page } from 'playwright';
 import { CloudObservation, safeObservationUrl } from './cloud-observation.js';
 
 const RETENTION = 7 * 86400000;
+/** The final frame may exceed the archive budget by at most one maximum-size image. */
+const FINAL_IMAGE_RESERVE = 2 * 1024 * 1024;
+const FINAL_ATTEMPTS = 6;
+const FINAL_RETRY_MS = 300;
+/** Bounds how long a task's end can wait for a settled final frame. */
+const FINAL_BUDGET_MS = 3000;
 const digest = (s: string) => createHash('sha256').update(s).digest('hex');
 export interface ReplayFrame {
   id: string;
   actionId: string;
-  phase: 'before' | 'after' | 'failure' | 'sample';
+  phase: 'before' | 'after' | 'failure' | 'sample' | 'final';
   capturedAt: number;
   tabId: string;
   frameId: string;
@@ -127,14 +133,21 @@ export class BrowserReplayStore {
       frames: [],
       bytes: 0,
     };
-    if (
-      manifest.frames.length >= limits.maxFrames ||
-      manifest.bytes + (image?.length ?? 0) > limits.maxBytes ||
-      this.now() - manifest.createdAt > limits.maxMs
-    ) {
+    // The final frame (task parked or ended) is kept past the frame/time budget;
+    // only the byte budget, plus one image of reserve, still bounds it.
+    const overBudget =
+      frame.phase === 'final'
+        ? manifest.bytes + (image?.length ?? 0) > limits.maxBytes + FINAL_IMAGE_RESERVE
+        : manifest.frames.length >= limits.maxFrames ||
+          manifest.bytes + (image?.length ?? 0) > limits.maxBytes ||
+          this.now() - manifest.createdAt > limits.maxMs;
+    if (overBudget) {
       manifest.truncated = true;
-      // Preserve failure metadata even when the archive budget is exhausted.
-      if (frame.phase === 'failure' && manifest.frames.length < limits.maxFrames + 10)
+      // Preserve failure / final metadata even when the archive budget is exhausted.
+      if (
+        (frame.phase === 'failure' || frame.phase === 'final') &&
+        manifest.frames.length < limits.maxFrames + 10
+      )
         manifest.frames.push({ ...frame, gap: true });
     } else {
       if (image) {
@@ -230,7 +243,9 @@ export class BrowserReplayRecorder {
     return this.paused;
   }
   async pause() {
+    const final = this.finalize();
     this.paused = true;
+    await final;
     await this.serial;
   }
   resume() {
@@ -239,6 +254,7 @@ export class BrowserReplayRecorder {
   private serial: Promise<void> = Promise.resolve();
   private queued = 0;
   private observer: CloudObservation | null = null;
+  private lastPage: Page | null = null;
   private limits: { maxFrames: number; maxBytes: number; maxMs: number };
   constructor(
     private store: BrowserReplayStore,
@@ -253,6 +269,90 @@ export class BrowserReplayRecorder {
   authorize(origin: string) {
     if (/^https?:\/\//.test(origin)) this.origins.add(origin);
   }
+  /** One screenshot under the existing origin / sensitive-page / observation rules. */
+  private async shoot(page: Page) {
+    this.observer ??= new CloudObservation(page);
+    this.observer.register(page);
+    let allowed = false;
+    try {
+      allowed = this.origins.has(new URL(page.url()).origin);
+    } catch {}
+    let redacted = allowed ? await this.observer.sensitive(page) : false;
+    const before = await this.observer.metadata(page.mainFrame()).catch(() => null);
+    let image: Buffer | undefined;
+    let gap = !allowed || page.isClosed();
+    if (allowed && !redacted && !gap) {
+      try {
+        // Playwright's mask overlays mutate the DOM and invalidate action refs.
+        // Whole sensitive pages are suppressed; caret preservation makes capture read-only.
+        image = await page.screenshot({
+          type: 'jpeg',
+          quality: 45,
+          timeout: 2000,
+          caret: 'initial',
+        });
+        if (image.length > 2 * 1024 * 1024) {
+          image = undefined;
+          gap = true;
+        }
+      } catch {
+        gap = true;
+      }
+    }
+    if (image && (await this.observer.sensitive(page))) {
+      image = undefined;
+      redacted = true;
+    }
+    const metadata = await this.observer.metadata(page.mainFrame()).catch(() => null);
+    if (image && (!before || before.observationRevision !== metadata?.observationRevision)) {
+      image = undefined;
+      gap = true;
+    }
+    return { allowed, image, gap, redacted, metadata };
+  }
+  private record(
+    page: Page,
+    actionId: string,
+    phase: ReplayFrame['phase'],
+    shot: Awaited<ReturnType<BrowserReplayRecorder['shoot']>>,
+    result?: string,
+  ) {
+    const { metadata } = shot;
+    return this.store.append(
+      this.owner,
+      this.task,
+      {
+        id: randomUUID(),
+        actionId,
+        phase,
+        capturedAt: this.store.now(),
+        tabId: metadata?.tabId ?? 'unavailable',
+        frameId: metadata?.frameId ?? 'unavailable',
+        observationRevision: metadata?.observationRevision ?? 'unavailable',
+        sourceURL: safeObservationUrl(page.url()),
+        redacted: shot.redacted,
+        gap: shot.gap,
+        result,
+      },
+      shot.image,
+      this.limits,
+    );
+  }
+  private async reportError(error: unknown) {
+    // Persist only an allowlisted category; filesystem paths/page data stay private.
+    const code = (error as { code?: unknown })?.code;
+    const diagnostic =
+      typeof code === 'string' && ['EACCES', 'EROFS', 'ENOSPC', 'ENOTDIR'].includes(code)
+        ? `replay_storage_${code.toLowerCase()}`
+        : 'replay_capture_failed';
+    if (this.reportedErrors.has(diagnostic)) return;
+    this.reportedErrors.add(diagnostic);
+    try {
+      await this.onError?.(diagnostic);
+    } catch {
+      /* Diagnostics cannot release a gate. */
+    }
+  }
   capture(
     page: Page,
     actionId: string,
@@ -260,90 +360,60 @@ export class BrowserReplayRecorder {
     result?: string,
   ): Promise<void> {
     if (this.paused || this.queued >= 2) return this.serial;
+    this.lastPage = page;
     this.queued++;
     this.serial = this.serial
       .then(async () => {
         if (this.paused) return;
-        this.observer ??= new CloudObservation(page);
-        this.observer.register(page);
-        let allowed = false;
-        try {
-          allowed = this.origins.has(new URL(page.url()).origin);
-        } catch {}
-        let redacted = allowed ? await this.observer.sensitive(page) : false;
-        const before = await this.observer.metadata(page.mainFrame()).catch(() => null);
-        let image: Buffer | undefined;
-        let gap = !allowed || page.isClosed();
-        if (allowed && !redacted && !gap) {
-          try {
-            // Playwright's mask overlays mutate the DOM and invalidate action refs.
-            // Whole sensitive pages are suppressed; caret preservation makes capture read-only.
-            image = await page.screenshot({
-              type: 'jpeg',
-              quality: 45,
-              timeout: 2000,
-              caret: 'initial',
-            });
-            if (image.length > 2 * 1024 * 1024) {
-              image = undefined;
-              gap = true;
-            }
-          } catch {
-            gap = true;
-          }
-        }
-        if (image && (await this.observer.sensitive(page))) {
-          image = undefined;
-          redacted = true;
-        }
-        const metadata = await this.observer.metadata(page.mainFrame()).catch(() => null);
-        if (image && (!before || before.observationRevision !== metadata?.observationRevision)) {
-          image = undefined;
-          gap = true;
-        }
+        const shot = await this.shoot(page);
         if (this.paused) return;
-        await this.store.append(
-          this.owner,
-          this.task,
-          {
-            id: randomUUID(),
-            actionId,
-            phase,
-            capturedAt: this.store.now(),
-            tabId: metadata?.tabId ?? 'unavailable',
-            frameId: metadata?.frameId ?? 'unavailable',
-            observationRevision: metadata?.observationRevision ?? 'unavailable',
-            sourceURL: safeObservationUrl(page.url()),
-            redacted,
-            gap,
-            result,
-          },
-          image,
-          this.limits,
-        );
+        await this.record(page, actionId, phase, shot, result);
       })
-      .catch(async (error: unknown) => {
-        // Persist only an allowlisted category; filesystem paths/page data stay private.
-        const code = (error as { code?: unknown })?.code;
-        const diagnostic =
-          typeof code === 'string' && ['EACCES', 'EROFS', 'ENOSPC', 'ENOTDIR'].includes(code)
-            ? `replay_storage_${code.toLowerCase()}`
-            : 'replay_capture_failed';
-        if (this.reportedErrors.has(diagnostic)) return;
-        this.reportedErrors.add(diagnostic);
-        try {
-          await this.onError?.(diagnostic);
-        } catch {
-          /* Diagnostics cannot release a gate. */
-        }
-      })
+      .catch((error: unknown) => this.reportError(error))
       .finally(() => {
         this.queued--;
       });
     return this.serial;
   }
+  /**
+   * FIX-REPLAY-GAPS — before the task parks for the user (awaiting_user) or the
+   * recorder is released (completed / failed / cancelled / timeout), record one
+   * final frame of the last page. A page still settling after the last action
+   * would otherwise leave the replay ending on a gap; the final frame retries
+   * briefly (at most ~3 s) until the screenshot matches a stable observation,
+   * otherwise it is recorded honestly as a gap. Unapproved
+   * origins stay unrecorded and sensitive pages stay masked (existing rules);
+   * never while paused (the user's takeover is not recorded).
+   */
+  private finalize(): Promise<void> {
+    const page = this.lastPage;
+    if (this.paused || !page) return this.serial;
+    this.serial = this.serial
+      .then(async () => {
+        const deadline = Date.now() + FINAL_BUDGET_MS;
+        let shot = await this.shoot(page);
+        for (
+          let attempt = 1;
+          attempt < FINAL_ATTEMPTS &&
+          Date.now() + FINAL_RETRY_MS < deadline &&
+          !shot.image &&
+          !shot.redacted &&
+          shot.allowed &&
+          !page.isClosed();
+          attempt++
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, FINAL_RETRY_MS));
+          shot = await this.shoot(page);
+        }
+        await this.record(page, 'final', 'final', shot);
+      })
+      .catch((error: unknown) => this.reportError(error));
+    return this.serial;
+  }
   async dispose() {
+    const final = this.finalize();
     this.paused = true;
+    await final;
     await this.serial;
     this.observer?.dispose();
   }
