@@ -6798,10 +6798,14 @@ export const tasksRouter = router({
                 const searchFallbackChain: string[] = [];
                 const recordSearchFallback = async (event: SearchFallbackEvent) => {
                   if (event.phase === 'started') {
-                    searchFallbackChain.push(
-                      `search:${event.from.toLowerCase()}`,
-                      `search:${event.to.toLowerCase()}`,
-                    );
+                    if (event.endpoint === 'lite') {
+                      searchFallbackChain.push('search:duckduckgo-lite');
+                    } else {
+                      searchFallbackChain.push(
+                        `search:${event.from.toLowerCase()}`,
+                        `search:${event.to.toLowerCase()}`,
+                      );
+                    }
                   }
                   if (!taskDbId) return;
                   await ctx.db.insert(taskEvents).values({

@@ -212,9 +212,14 @@ it('does not replay unstructured write tools or a cancelled search', async () =>
     expect(calls).toBe(1);
   }
 });
-it.each([false, true])(
-  'a weather-card fallback requires weather facts, not just generic links (%s)',
-  async (hasWeather) => {
+it.each([
+  ['新加坡当前天气 30°C，多云，来源 https://weather.example.com/singapore', true],
+  ['新加坡天气：多云，未读取到温度。', true],
+  ['[Singapore Weather Forecast](https://weather.example.com/singapore)，未读取到温度。', true],
+  ['新加坡百科链接 https://example.com/singapore', false],
+])(
+  'delivers available weather information without requiring a temperature: %s',
+  async (summary, hasWeather) => {
     let calls = 0;
     const result = await runSearchWithFallback(
       { ...args, intent: 'Google 搜索「新加坡 天气」读出天气卡片' },
@@ -229,9 +234,7 @@ it.each([false, true])(
           }
           return {
             ...completed,
-            summary: hasWeather
-              ? '新加坡当前天气 30°C，多云，来源 https://weather.example.com/singapore'
-              : '新加坡百科链接 https://example.com/singapore',
+            summary: String(summary),
           };
         },
       },
@@ -270,7 +273,109 @@ it('pauses on an unavailable alternate engine rather than failing or switching f
       },
     },
   );
-  expect(calls).toBe(2);
+  expect(calls).toBe(3);
   expect(result.status).toBe('awaiting_user');
   expect(result.question).toContain('未切换第三个引擎');
 });
+
+it('tries DDG lite once after an HTML error, retaining task, time budget, events and step order', async () => {
+  const calls: RunSupercarOptions[] = [];
+  const events: unknown[] = [];
+  const observedSteps: number[] = [];
+  const page = {
+    url: () =>
+      calls.length < 3
+        ? 'https://html.duckduckgo.com/html/?q=test'
+        : 'https://lite.duckduckgo.com/lite/?q=test',
+    locator: () => ({
+      innerText: async () => (calls.length < 3 ? 'Unexpected error. Please try again.' : 'Results'),
+    }),
+  };
+  const result = await runSearchWithFallback(
+    {
+      ...args,
+      intent: 'Bing 搜索「test」',
+      timeoutMs: 20000,
+      executor: { getPage: async () => page } as never,
+      onTick: async (e) => {
+        observedSteps.push(e.iteration);
+      },
+    },
+    {
+      stop: () => true,
+      onFallback: async (e) => {
+        events.push(e);
+      },
+      run: async (a) => {
+        calls.push(a);
+        if (calls.length === 1) {
+          await a.onTick?.(tick);
+          await a.onAwaitingUser?.(captchaEvent('https://www.bing.com/search?q=test'));
+          return blocked;
+        }
+        await a.onTick?.({
+          ...tick,
+          iteration: 1,
+          execution: undefined,
+          toolsInTurn: ['read_page'],
+        });
+        return calls.length === 2
+          ? { ...blocked, status: 'failed', reason: 'No results' }
+          : completed;
+      },
+    },
+  );
+  expect(calls).toHaveLength(3);
+  expect(calls[2]!.intent).toContain('从 https://lite.duckduckgo.com/lite/?q=test 开始');
+  expect(calls.every((a) => a.taskId === args.taskId)).toBe(true);
+  expect(calls[2]!.timeoutMs).toBeLessThanOrEqual(20000);
+  expect(observedSteps).toEqual([2, 3, 5]);
+  expect(result.status).toBe('completed');
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      reason: 'search_endpoint_unavailable',
+      endpoint: 'lite',
+      phase: 'started',
+    }),
+  );
+});
+it.each(['captcha', 'write', 'cancelled'])(
+  'never retries the DDG endpoint after %s',
+  async (reason) => {
+    let calls = 0;
+    const result = await runSearchWithFallback(
+      {
+        ...args,
+        intent: 'Bing 搜索「test」',
+        isTaskCancelled: async () => reason === 'cancelled' && calls >= 2,
+        executor: {
+          getPage: async () => ({
+            url: () => 'https://html.duckduckgo.com/html/?q=test',
+            locator: () => ({ innerText: async () => 'Unexpected error. Please try again.' }),
+          }),
+        } as never,
+      },
+      {
+        stop: () => true,
+        run: async (a) => {
+          calls++;
+          if (calls === 1) {
+            await a.onTick?.(tick);
+            await a.onAwaitingUser?.(captchaEvent('https://www.bing.com/search?q=test'));
+            return blocked;
+          }
+          if (reason === 'captcha') {
+            await a.onTick?.(tick);
+            await a.onAwaitingUser?.(captchaEvent('https://html.duckduckgo.com/anomaly.js'));
+            return blocked;
+          }
+          if (reason === 'write')
+            await a.onTick?.({ ...tick, execution: undefined, toolsInTurn: ['type'] });
+          return { ...blocked, status: 'failed', reason: 'No results' };
+        },
+      },
+    );
+    expect(calls).toBe(2);
+    expect(result.status).not.toBe('completed');
+  },
+);

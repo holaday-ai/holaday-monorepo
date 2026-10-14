@@ -19,7 +19,8 @@ export interface SearchFallbackPlan {
 export interface SearchFallbackEvent {
   from: Engine;
   to: Engine;
-  reason: 'search_verification_wall';
+  reason: 'search_verification_wall' | 'search_endpoint_unavailable';
+  endpoint?: 'lite';
   phase: 'started' | 'completed' | 'blocked' | 'failed';
   attempt: 1;
 }
@@ -33,7 +34,7 @@ function engineAt(url: URL): Engine | null {
   )
     return 'Google';
   if (/^(?:www\.)?bing\.com$/.test(host)) return 'Bing';
-  if (/^(?:(?:www|html)\.)?duckduckgo\.com$/.test(host)) return 'DuckDuckGo';
+  if (/^(?:(?:www|html|lite)\.)?duckduckgo\.com$/.test(host)) return 'DuckDuckGo';
   if (/^(?:www|wappass)\.baidu\.com$/.test(host)) return '百度';
   return null;
 }
@@ -61,7 +62,7 @@ export function planSearchFallback(intent: string, wall: SearchWall): SearchFall
   if (
     !url ||
     !from ||
-    !/^\/(?:$|search|sorry|turing|captcha|challenge|s(?:\/|$)|html|anomaly|static\/captcha)/i.test(
+    !/^\/(?:$|search|sorry|turing|captcha|challenge|s(?:\/|$)|html|lite|anomaly|static\/captcha)/i.test(
       url.pathname,
     )
   )
@@ -102,8 +103,39 @@ export function planSearchFallback(intent: string, wall: SearchWall): SearchFall
     url: next.href,
     notice,
     requiresWeather,
-    intent: `${intent}\n\n【搜索引擎回退】${from} 已出现真实验证墙，不尝试解验证码。原查询为「${query}」。本次获准使用 ${to} 交付同类公开搜索结果；从 ${next.href} 开始，保持原有数量与字段要求。只读，不登录、不提交业务表单；不得把替代来源冒充 ${from}，不能编造未读取的内容。${requiresWeather ? '若备用引擎没有天气卡片，可在同一引擎使用等价关键词并打开其真实天气来源，读取温度、状况与时间；仅有百科或普通链接不算完成天气卡片请求。' : ''}`,
+    intent: `${intent}\n\n【搜索引擎回退】${from} 已出现真实验证墙，不尝试解验证码。原查询为「${query}」。本次获准使用 ${to} 交付同类公开搜索结果；从 ${next.href} 开始，保持原有数量与字段要求。只读，不登录、不提交业务表单；不得把替代来源冒充 ${from}，不能编造未读取的内容。${requiresWeather ? '若备用引擎没有天气卡片，可在同一引擎使用等价关键词并打开其真实天气来源，交付实际读到的天气概况、温度或天气网站链接；读不到温度时明确说明，仍可交付其他天气信息，不得编造温度。完全没有天气信息才算未完成。' : ''}`,
   };
+}
+
+/** Partial weather information is useful; missing temperature alone is not failure. */
+function hasWeatherInformation(summary: string): boolean {
+  if (/\d+(?:\.\d+)?\s*(?:°\s*[CF]?|摄氏度|华氏度|degrees)/i.test(summary)) return true;
+  if (
+    /(?:天气|weather|forecast)[^\n]{0,100}(?:多云|晴|雨|雪|cloudy|sunny|rain|snow|overcast)/i.test(
+      summary,
+    )
+  )
+    return true;
+  // Require an actual weather-labelled link, not an unrelated city/encyclopedia URL.
+  return /\[[^\]\n]*(?:天气|气象|预报|weather|forecast|meteorological)[^\]\n]*\]\(https?:\/\/[^)]+\)/i.test(
+    summary,
+  );
+}
+async function isUnavailableSearchPage(args: RunSupercarOptions, engine: Engine): Promise<boolean> {
+  try {
+    const page = await args.executor?.getPage();
+    const current = page && parsed(page.url());
+    if (!page || !current || engineAt(current) !== engine) return false;
+    const text = (await page.locator('body').innerText({ timeout: 1500 })).trim();
+    return (
+      text.length < 1500 &&
+      /unexpected error[\s\S]{0,160}(?:try again|if this persists)|our support email address includes an anonymized error code|^(?:access denied|forbidden|service unavailable)$/i.test(
+        text,
+      )
+    );
+  } catch {
+    return false;
+  }
 }
 
 export interface SearchFallbackDeps {
@@ -142,14 +174,17 @@ export async function runSearchWithFallback(
   let maxStep = 0;
   let retry = false;
   let blockedRetry = false;
+  let retryWallObserved = false;
+  let endpointRetry = false;
   let offset = 0;
   const startedAt = Date.now();
   const emit = async (phase: SearchFallbackEvent['phase']) => {
     if (plan)
       await deps.onFallback?.({
-        from: plan.from,
+        from: endpointRetry ? plan.to : plan.from,
         to: plan.to,
-        reason: 'search_verification_wall',
+        reason: endpointRetry ? 'search_endpoint_unavailable' : 'search_verification_wall',
+        ...(endpointRetry ? { endpoint: 'lite' as const } : {}),
         phase,
         attempt: 1,
       });
@@ -166,10 +201,12 @@ export async function runSearchWithFallback(
           execution.blockerEvidence?.visible
         )
           wallObserved = true;
-        if (execution && !READ_ONLY.has(execution.actionKind)) unsafe = true;
-        if (ev.toolsInTurn.some((tool) => !READ_ONLY.has(tool) && tool !== 'finish')) unsafe = true;
-        if (execution?.effect?.unexpected || execution?.effect?.triggers?.length) unsafe = true;
+      } else if (execution?.errorCode === 'browser_captcha_wall') {
+        retryWallObserved = true;
       }
+      if (execution && !READ_ONLY.has(execution.actionKind)) unsafe = true;
+      if (ev.toolsInTurn.some((tool) => !READ_ONLY.has(tool) && tool !== 'finish')) unsafe = true;
+      if (execution?.effect?.unexpected || execution?.effect?.triggers?.length) unsafe = true;
       const iteration = ev.iteration + offset;
       maxStep = Math.max(maxStep, iteration);
       await args.onTick?.({ ...ev, iteration });
@@ -235,48 +272,66 @@ export async function runSearchWithFallback(
   await emit('started');
   const next = tracked(selected.intent);
   if (remaining !== undefined) next.timeoutMs = remaining;
-  const second = await deps.run(next);
-  if (second.status === 'failed' || second.status === 'timeout') {
-    let unavailable = false;
-    try {
-      const page = await args.executor?.getPage();
-      const current = page && parsed(page.url());
-      if (page && current && engineAt(current) === selected.to) {
-        const text = (await page.locator('body').innerText({ timeout: 1500 })).trim();
-        unavailable =
-          text.length < 1500 &&
-          /unexpected error[\s\S]{0,160}(?:try again|if this persists)|our support email address includes an anonymized error code|^(?:access denied|forbidden|service unavailable)$/i.test(
-            text,
-          );
-      }
-    } catch {
-      /* Do not infer a site block from a missing/closed page. */
-    }
-    if (unavailable) {
-      if (!blockedRetry) await emit('blocked');
-      return {
-        ...second,
-        status: 'awaiting_user',
-        reason: undefined,
-        question: `${selected.notice}\n\n${selected.to} 当前也无法返回搜索结果，已暂停，未切换第三个引擎。请稍后重试或指定其他可访问来源。`,
-        iterations: offset + second.iterations,
-        toolsUsed: [...new Set([...first.toolsUsed, ...second.toolsUsed])],
-      };
-    }
+  let second = await deps.run(next);
+  const allTools = new Set([...first.toolsUsed, ...second.toolsUsed]);
+  let unavailable = !retryWallObserved && (await isUnavailableSearchPage(args, selected.to));
+  const endpointBudget = args.timeoutMs ? args.timeoutMs - (Date.now() - startedAt) : undefined;
+  if (
+    unavailable &&
+    selected.to === 'DuckDuckGo' &&
+    !unsafe &&
+    !blockedRetry &&
+    second.status !== 'cancelled' &&
+    !(await args.isTaskCancelled?.()) &&
+    (endpointBudget === undefined || endpointBudget > 0)
+  ) {
+    await emit('failed');
+    endpointRetry = true;
+    const lite = new URL('https://lite.duckduckgo.com/lite/');
+    lite.searchParams.set('q', selected.query);
+    offset = Math.max(maxStep, offset + second.iterations);
+    selected.notice += ' DuckDuckGo HTML 入口返回站点错误，已尝试一次 Lite 入口。';
+    await emit('started');
+    // Replace the entry URL rather than leaving competing start instructions.
+    const liteArgs = tracked(selected.intent.replace(selected.url, lite.href));
+    if (endpointBudget !== undefined) liteArgs.timeoutMs = endpointBudget;
+    second = await deps.run(liteArgs);
+    for (const tool of second.toolsUsed) allTools.add(tool);
+    unavailable = !retryWallObserved && (await isUnavailableSearchPage(args, selected.to));
+  }
+  if (second.status === 'cancelled' || (await args.isTaskCancelled?.())) {
+    return {
+      ...second,
+      status: 'cancelled',
+      iterations: offset + second.iterations,
+      toolsUsed: [...allTools],
+    };
+  }
+  if (unavailable) {
+    if (!blockedRetry) await emit('blocked');
+    return {
+      ...second,
+      status: 'awaiting_user',
+      reason: undefined,
+      summary: undefined,
+      question: `${selected.notice}\n\n${selected.to} 当前也无法返回搜索结果，已暂停，未切换第三个引擎。请稍后重试或指定其他可访问来源。`,
+      iterations: offset + second.iterations,
+      toolsUsed: [...allTools],
+    };
   }
   if (
     selected.requiresWeather &&
     second.status === 'completed' &&
-    !/\d+(?:\.\d+)?\s*(?:°\s*[CF]?|摄氏度|华氏度|degrees|度)/i.test(second.summary ?? '')
+    !hasWeatherInformation(second.summary ?? '')
   ) {
     await emit('failed');
     return {
       ...second,
       status: 'awaiting_user',
       summary: undefined,
-      question: `${selected.notice}\n\n备用来源尚未提供可核验的天气温度，未完成天气卡片请求。请指定可访问的天气来源，不能把普通链接当作天气结果。`,
+      question: `${selected.notice}\n\n备用来源尚未提供任何天气信息，未完成天气查询。请指定可访问的天气来源。`,
       iterations: offset + second.iterations,
-      toolsUsed: [...new Set([...first.toolsUsed, ...second.toolsUsed])],
+      toolsUsed: [...allTools],
     };
   }
   if (!blockedRetry)
@@ -290,7 +345,7 @@ export async function runSearchWithFallback(
   return {
     ...second,
     iterations: offset + second.iterations,
-    toolsUsed: [...new Set([...first.toolsUsed, ...second.toolsUsed])],
+    toolsUsed: [...allTools],
     ...(second.summary ? { summary: `${selected.notice}\n\n${second.summary}` } : {}),
     ...(second.question ? { question: `${selected.notice}\n\n${second.question}` } : {}),
   };

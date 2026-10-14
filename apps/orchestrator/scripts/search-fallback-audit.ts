@@ -13,6 +13,7 @@ const arg = (name: string) => {
 };
 const output = resolve(arg('--out') ?? join(tmpdir(), 'search-fallback-audit'));
 const live = process.argv.includes('--live');
+const ddgErrorFixture = !live && process.argv.includes('--ddg-error');
 const selected = arg('--case')?.split(',');
 const isolated = await mkdtemp(join(tmpdir(), 'search-fallback-runtime-'));
 process.chdir(isolated);
@@ -133,12 +134,21 @@ try {
       );
       if (!live)
         await page.route(
-          target === 'Bing' ? 'https://www.bing.com/search**' : 'https://html.duckduckgo.com/**',
+          target === 'Bing'
+            ? 'https://www.bing.com/search**'
+            : /^https:\/\/(?:html|lite)\.duckduckgo\.com\//,
           (route) =>
             route.fulfill({
               contentType: 'text/html; charset=utf-8',
               body: `<h1>Search results</h1><p>Singapore weather 30°C Cloudy</p>${[1, 2, 3, 4, 5].map((n) => `<a href="https://example.com/${n}">${item.query} result ${n}</a>`).join('<br>')}`,
             }),
+        );
+      if (ddgErrorFixture && target === 'DuckDuckGo')
+        await page.route('https://html.duckduckgo.com/**', (route) =>
+          route.fulfill({
+            contentType: 'text/html; charset=utf-8',
+            body: '<h1>Unexpected error. Please try again.</h1>',
+          }),
         );
       const ticks: unknown[] = [];
       const events: unknown[] = [];
@@ -147,6 +157,7 @@ try {
       let links: Link[] = [];
       let weather = '';
       let weatherSource = '';
+      let weatherKind: 'temperature' | 'link' = 'temperature';
       let scriptError = '';
       const reads: Array<{ url: string; text: string }> = [];
       const started = Date.now();
@@ -198,6 +209,8 @@ try {
                   const pageRead = yield { name: 'read_page', input: {} };
                   text = String(pageRead.tree ?? pageRead.text ?? '');
                   reads.push({ url: page.url(), text: text.slice(0, 16000) });
+                  if (/unexpected error|anonymized error code/i.test(text))
+                    throw Error('Search endpoint returned a site error');
                   const linkRead = yield { name: 'links', input: { limit: 100 } };
                   seenLinks = linkRead.items ?? [];
                   links = resultLinks(seenLinks);
@@ -206,9 +219,27 @@ try {
                 const temperature = (value: string) =>
                   value.match(/[^\n]{0,50}\d{1,2}\s*°[CF]?[^\n]{0,70}/)?.[0] ?? '';
                 if (item.id === 'core-02') {
-                  weather = temperature(text);
+                  const selectWeather = () => {
+                    weather = temperature(text);
+                    if (weather) {
+                      weatherSource = page.url();
+                      weatherKind = 'temperature';
+                      return;
+                    }
+                    const candidate = resultLinks(seenLinks).find((x) =>
+                      /weather|forecast|meteorological|天气|气象|预报/i.test(
+                        `${x.text} ${resultDestination(x.url)?.href ?? ''}`,
+                      ),
+                    );
+                    if (candidate) {
+                      weather = candidate.text.trim();
+                      weatherSource = candidate.url;
+                      weatherKind = 'link';
+                    }
+                  };
+                  selectWeather();
                   if (!weather) {
-                    // This benchmark's Chinese query may need an equivalent local-language search.
+                    // Equivalent query on the same engine, preserving the weather request.
                     const refined = new URL(fallback);
                     refined.searchParams.set('q', 'Singapore weather');
                     yield { name: 'navigate', input: { url: refined.href } };
@@ -216,45 +247,24 @@ try {
                       await new Promise((r) => setTimeout(r, 1000));
                       const read = yield { name: 'read_page', input: {} };
                       text = String(read.tree ?? read.text ?? '');
+                      reads.push({ url: page.url(), text: text.slice(0, 16000) });
                       const found = yield { name: 'links', input: { limit: 100 } };
                       seenLinks = found.items ?? [];
-                      const candidates = resultLinks(seenLinks);
-                      if (candidates.length === 5) links = candidates;
-                      weather = temperature(text);
+                      links = resultLinks(seenLinks);
+                      selectWeather();
                       if (weather) break;
                     }
                   }
-                  if (!weather) {
-                    const weatherLinks = resultLinks(seenLinks);
-                    const candidate =
-                      weatherLinks.find((x) =>
-                        /weather\.gov\.sg|meteorological/i.test(
-                          (resultDestination(x.url)?.href ?? '') + x.text,
-                        ),
-                      ) ??
-                      weatherLinks.find(
-                        (x) => /weather|forecast|天气|气象/i.test(x.text) && /^https?:/.test(x.url),
-                      );
-                    if (candidate) {
-                      yield { name: 'navigate', input: { url: candidate.url } };
-                      const body = yield { name: 'get_page_text', input: { maxChars: 16000 } };
-                      weather = temperature(String(body.text ?? ''));
-                      if (!weather) {
-                        const read = yield { name: 'read_page', input: {} };
-                        weather = temperature(String(read.tree ?? read.text ?? ''));
-                      }
-                    }
-                  }
-                  weatherSource = page.url();
                   if (!weather)
                     throw Error(
-                      'No observed temperature from the alternate engine or its weather source',
+                      'No observed weather information or weather link on the alternate engine',
                     );
                 }
-                if (links.length < 5) throw Error(`Only ${links.length}/5 observed result links`);
+                if (item.id !== 'core-02' && links.length < 5)
+                  throw Error(`Only ${links.length}/5 observed result links`);
                 const description =
                   item.id === 'core-02'
-                    ? `备用来源的天气信息（非 Google 天气卡片）。页面天气文字：${weather}\n天气来源：${weatherSource}\n\n`
+                    ? `备用来源的天气信息（非 Google 天气卡片）。${weatherKind === 'link' ? `未读取到温度，提供页面实际可见的天气网站链接：[${weather}](${weatherSource})` : `页面天气文字：${weather}\n天气来源：${weatherSource}`}\n\n`
                     : '';
                 if (item.id === 'D16') yield { name: 'screenshot', input: {} };
                 yield {
@@ -264,7 +274,7 @@ try {
                     summary:
                       description +
                       links.map((x, n) => `${n + 1}. [${x.text.trim()}](${x.url})`).join('\n'),
-                    evidence: links[0].text.trim(),
+                    evidence: links[0]?.text.trim() ?? weather,
                     fields: [
                       ...(weather ? [{ name: '天气摘录', value: weather }] : []),
                       ...links.flatMap((x) => [
@@ -318,8 +328,8 @@ try {
         const pass =
           finalStatus === 'completed' &&
           verified.verification?.passed === true &&
-          attempts === 2 &&
-          links.length === 5 &&
+          attempts === (ddgErrorFixture && target === 'DuckDuckGo' ? 3 : 2) &&
+          (item.id === 'core-02' || links.length === 5) &&
           answer.includes(`改用 ${target}`) &&
           (item.id !== 'core-02' || Boolean(weather));
         rows.push({
@@ -335,6 +345,7 @@ try {
           links,
           weather,
           weatherSource,
+          weatherKind,
           scriptError,
           events,
           verification: verified.verification,
