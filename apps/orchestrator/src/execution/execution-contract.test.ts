@@ -298,18 +298,19 @@ describe('buildContract — light tier (browser)', () => {
     expect(c.successCriteria.find((s) => s.type === 'data_present')).toBeDefined();
   });
 
-  it('always includes the safety constraints (no_form_submit, no_payment)', () => {
+  // BROWSER-AUTOPILOT-1: irreversible actions are confirmed by the runtime action
+  // gate; no default post-hoc keyword constraints (a search is not a violation).
+  it('adds no default keyword constraints to a browser search', () => {
     const c = buildContract({
       taskId: 'tsk_b3',
       intent: '搜索',
       executionMode: 'browser',
       targetDomain: 'duckduckgo.com',
     });
-    expect(c.constraints).toContain('no_form_submit');
-    expect(c.constraints).toContain('no_payment');
+    expect(c.constraints).toEqual([]);
   });
 
-  it('appends user constraints AFTER the default safety set', () => {
+  it('keeps the constraints the user stated', () => {
     const c = buildContract({
       taskId: 'tsk_b4',
       intent: '比价',
@@ -317,9 +318,7 @@ describe('buildContract — light tier (browser)', () => {
       targetDomain: 'taobao.com',
       constraints: ['不点击购买按钮'],
     });
-    // Caller-supplied constraint comes first, then defaults.
-    expect(c.constraints[0]).toBe('不点击购买按钮');
-    expect(c.constraints).toContain('no_form_submit');
+    expect(c.constraints).toEqual(['不点击购买按钮']);
   });
 });
 

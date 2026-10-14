@@ -5,7 +5,7 @@ import { probeBrowserBlocker } from './browser-blocker-probe.js';
 import { scrollWithEvidence } from './browser-scroll.js';
 import { browserToolError } from './browser-tool-error.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
-import { CloudObservation } from './cloud-observation.js';
+import { CloudObservation, pageRoot } from './cloud-observation.js';
 import { redactPageText } from './page-redaction.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
@@ -249,7 +249,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     // Redact before truncating: a secret straddling the cut must not survive.
     const redacted = await redactPageText(
       page as never,
-      await page.locator('body').ariaSnapshot({ mode: 'ai', timeout }),
+      await (await pageRoot(page.mainFrame())).ariaSnapshot({ mode: 'ai', timeout }),
     );
     // Links resolve against document.baseURI (honours <base href>), not page.url().
     const baseUrl = await page.evaluate(() => document.baseURI).catch(() => page.url());
@@ -477,7 +477,10 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           return { ...done(`已打开 ${page.url()}`), url: page.url() };
         case 'extract': {
           const content = (
-            await redactPageText(page as never, await page.locator('body').innerText({ timeout }))
+            await redactPageText(
+              page as never,
+              await (await pageRoot(page.mainFrame())).innerText({ timeout }),
+            )
           ).slice(0, maxExtract);
           // innerText drops hrefs; list answers need each item's own link.
           const anchors = await pageLinks(page, timeout);

@@ -59,7 +59,14 @@ export function detectBrowserBlocker(page: {
 export type BrowserTrace = Pick<
   UnifiedToolResult,
   'ok' | 'url' | 'download' | 'tabId' | 'scroll' | 'form' | 'openedTab'
-> & { tool: string; screenshot?: boolean };
+> & {
+  tool: string;
+  screenshot?: boolean;
+  /** The tab that was active when this action opened a new tab. */
+  fromTabId?: string;
+  /** Text a successful `type` entered (a host fact for answer checks). */
+  typedText?: string;
+};
 /** A prohibition or an admission of non-completion is not a claim of execution. */
 function positiveActionText(text: string): string {
   return text
@@ -127,8 +134,13 @@ export function completionGap(
       numericCount(count[1]!)
   )
     return '新标签数量没有足够的 new_tab 回执。';
-  if (/(?:切回|返回).{0,10}(?:原|最初|第一个).{0,5}标签/.test(claimed)) {
-    const first = successful.find((entry) => entry.tabId)?.tabId;
+  if (/(?:切回|返回|回到).{0,10}(?:原|最初|第一个|源|来源|起始|初始).{0,5}标签/.test(claimed)) {
+    // The original tab is the one active when the first new tab was opened —
+    // never the new tab a click(newTab) receipt names.
+    const first =
+      trace.find((entry) => entry.fromTabId)?.fromTabId ??
+      successful.find((entry) => entry.tabId && !entry.openedTab && entry.tool !== 'new_tab')
+        ?.tabId;
     const lastSwitch = successful.filter((entry) => entry.tool === 'switch_tab').at(-1);
     if (!first || lastSwitch?.tabId !== first) return 'switch_tab 回执未证明切回原标签。';
   }

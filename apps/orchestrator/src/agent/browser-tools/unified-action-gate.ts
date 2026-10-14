@@ -69,14 +69,28 @@ interface SubmitContext {
  */
 const READ_ACTIONABLE = (
   node: Node,
-  allowDocumentSurface = false,
 ): (ElementSignals & { iframe?: false }) | { iframe: true } | null => {
   const el = (node.nodeType === 1 ? node : node.parentElement) as Element | null;
   if (!el) return null;
   const doc = el.ownerDocument;
   const tag = String(el.tagName || '').toLowerCase();
   if (tag === 'iframe' || tag === 'frame') return { iframe: true };
-  if ((el === doc.body || el === doc.documentElement) && !allowDocumentSurface) return null;
+  // BROWSER-AUTOPILOT-1: a blank document surface (no control, link or form) is an
+  // ordinary click with no label — never the whole page's text, never "unknown".
+  if (el === doc.body || el === doc.documentElement)
+    return {
+      visibleText: null,
+      ariaLabel: null,
+      title: null,
+      placeholder: null,
+      name: null,
+      type: null,
+      tagName: tag || null,
+      url: doc.location ? doc.location.href : null,
+      href: null,
+      formAction: null,
+      formMethod: null,
+    };
   const selector =
     'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [onclick]';
   let actionable: Element | null = null;
@@ -361,20 +375,7 @@ async function fallbackTargetAt(page: Page, x: number, y: number): Promise<ReadT
     )) as ElementHandle<Element> | null;
     const element = handle?.asElement() ?? null;
     if (!element) return null;
-    let read = await withTimeout(element.evaluate(READ_ACTIONABLE, false));
-    if (!read && frame !== page.mainFrame()) {
-      // We can inspect this exact node. Only a known document surface gets a
-      // second read; unreadable frames and opaque hosts remain unverified.
-      let known = /^(?:about:blank|about:srcdoc)$/.test(frame.url());
-      try {
-        known ||=
-          new URL(frame.url()).origin === new URL(page.url()).origin ||
-          new URL(frame.url()).hostname === 'cdn.tiny.cloud';
-      } catch {
-        /* no known origin */
-      }
-      if (known) read = await withTimeout(element.evaluate(READ_ACTIONABLE, true));
-    }
+    const read = await withTimeout(element.evaluate(READ_ACTIONABLE));
     if (!read) return null;
     if (!read.iframe) return { signals: read, binding: { kind: 'handle', handle: element } };
     const child = await withTimeout(element.contentFrame());

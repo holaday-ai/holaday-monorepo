@@ -781,9 +781,12 @@ function buildLightTier(inputs: ContractInputs): ExecutionContract {
   return {
     ...commonHeader(inputs, 'light', 'data'),
     successCriteria,
-    // Default safety guardrails for unattended browser execution.
-    // Caller can override / extend via inputs.constraints.
-    constraints: [...(inputs.constraints ?? []), 'no_form_submit', 'no_payment'],
+    // BROWSER-AUTOPILOT-1: no default keyword constraints. Irreversible actions
+    // (submit, pay, order, delete, send) are confirmed by the runtime action
+    // gate before they run; a post-hoc keyword match over the ledger failed
+    // correct runs (a YouTube search "submitted a form"). Constraints the user
+    // states ("不提交表单", "禁止支付") are still checked.
+    constraints: [...(inputs.constraints ?? [])],
   };
 }
 

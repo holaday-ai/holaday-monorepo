@@ -15,6 +15,8 @@ it.each([
     intent: '只填表不提交',
     executionMode: 'browser',
     targetDomain: 'example.com',
+    // User-stated (no longer a default since BROWSER-AUTOPILOT-1).
+    constraints: ['no_form_submit'],
   });
   const ledger = new EvidenceLedger('constraint');
   ledger.add({

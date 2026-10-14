@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagesAdapter, NeutralMessagesRequest } from '../../llm/messages-adapter.js';
 import { completionGap } from './browser-completion.js';
-import { completionFieldGaps } from './completion-fields.js';
+import { assessCompletionFacts } from './completion-fields.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
 function brain(turns: Array<{ name: string; input: unknown }>) {
@@ -35,20 +35,18 @@ const finish = (summary: string, evidence: string, fields?: unknown[]) => ({
 });
 const read = { name: 'read_page', input: {} };
 const actual =
-  'heading "Rick Astley - Never Gonna Give You Up"\nrecommendations\nlink "Rick Astley"\nmore text\ngeneric "18亿次观看"\ngeneric "16年前"';
+  'heading "Rick Astley - Never Gonna Give You Up" [level=1]\nrecommendations\nlink "Rick Astley"\nmore text\ngeneric "18亿次观看"\ngeneric "16年前"';
 
 describe('BROWSER-FIX-4 field evidence', () => {
   it('matches a read tab source URL containing balanced path parentheses', () => {
     const url = 'https://en.wikipedia.org/wiki/Science_(journal)';
     expect(
-      completionFieldGaps(
-        `1. Science (journal) — ${url}`,
-        'Science (journal)',
-        undefined,
-        [{ text: 'heading "Science (journal)"', sourceURL: url }],
-        '从页面打开链接到新标签并读标题',
-      ),
-    ).toBeNull();
+      assessCompletionFacts({
+        summary: `1. Science (journal) — ${url}`,
+        pages: [{ text: 'heading "Science (journal)"', sourceURL: url }],
+        intent: '从页面打开链接到新标签并读标题',
+      }),
+    ).toEqual({ contradictions: [], unverified: [] });
   });
   it('does not certify a title after a new link tab fails to load', async () => {
     const { adapter } = brain([
@@ -83,11 +81,9 @@ describe('BROWSER-FIX-4 field evidence', () => {
   });
   it('accepts the requested channel on a video metadata page', () => {
     expect(
-      completionFieldGaps(
-        '频道：Rick Astley',
-        'Rick Astley',
-        undefined,
-        [
+      assessCompletionFacts({
+        summary: '频道：Rick Astley',
+        pages: [
           {
             text: actual,
             sourceURL: 'https://youtube.com/watch?v=test',
@@ -96,9 +92,9 @@ describe('BROWSER-FIX-4 field evidence', () => {
             ],
           },
         ],
-        'YouTube 公开视频页读标题/频道/播放量/发布日期',
-      ),
-    ).toBeNull();
+        intent: 'YouTube 公开视频页读标题/频道/播放量/发布日期',
+      }),
+    ).toEqual({ contradictions: [], unverified: [] });
   });
   it('does not confuse an individual full-course video title with a playlist', () => {
     expect(
@@ -112,20 +108,18 @@ describe('BROWSER-FIX-4 field evidence', () => {
   });
   it('does not use source-link text as proof of an unread child tab title', () => {
     expect(
-      completionFieldGaps(
-        '1. Target title — https://target.test/',
-        'Target title',
-        undefined,
-        [
+      assessCompletionFacts({
+        summary: '1. Target title — https://target.test/',
+        pages: [
           {
             text: 'Target title https://target.test/',
             sourceURL: 'https://source.test/',
             links: [{ text: 'Target title', url: 'https://target.test/', kind: 'link' }],
           },
         ],
-        '从页面打开链接到新标签，分别读取标题',
-      ),
-    ).toBeTruthy();
+        intent: '从页面打开链接到新标签，分别读取标题',
+      }).contradictions,
+    ).toHaveLength(1);
   });
   it('allows retrying the initial source navigation when it never loaded', async () => {
     const { adapter } = brain([
@@ -170,10 +164,27 @@ describe('BROWSER-FIX-4 field evidence', () => {
     });
     expect(result.status).toBe('failed');
   });
-  it.each([
-    '| 标题 | 频道 |\n|---|---|\n| Rick Astley - Never Gonna Give You Up | Invented channel |',
-    '播放量为999亿次观看',
-  ])('rejects an unobserved factual field in a table or natural label: %s', async (summary) => {
+  it('delivers an unobserved, uncontradicted table value with a 未核实 note', async () => {
+    const { adapter } = brain([
+      read,
+      finish(
+        '| 标题 | 频道 |\n|---|---|\n| Rick Astley - Never Gonna Give You Up | Invented channel |',
+        'Rick Astley',
+      ),
+    ]);
+    const result = await runUnifiedBrowserLoop({
+      adapter,
+      intent: '读取标题频道播放量',
+      observationV2: true,
+      maxSteps: 2,
+      execute: async () => ({ ok: true, text: actual }),
+    });
+    expect(result).toMatchObject({ status: 'completed' });
+    expect(result.status === 'completed' && result.summary).toContain('未核实');
+    expect(result.status === 'completed' && result.summary).toContain('Invented channel');
+  });
+  it('fails a number that contradicts the page after its single rejection', async () => {
+    const summary = '播放量为999亿次观看';
     const { adapter } = brain([read, finish(summary, 'Rick Astley')]);
     const result = await runUnifiedBrowserLoop({
       adapter,
@@ -213,7 +224,7 @@ describe('BROWSER-FIX-4 field evidence', () => {
     const rejected: unknown[] = [];
     const { adapter } = brain([
       read,
-      finish('标题：Wrong title; token=secret-marker user@example.com', 'Wrong title'),
+      finish('播放量：999亿次观看; token=secret-marker user@example.com', '999亿次观看'),
     ]);
     await runUnifiedBrowserLoop({
       adapter,
@@ -226,7 +237,7 @@ describe('BROWSER-FIX-4 field evidence', () => {
       execute: async () => ({ ok: true, text: actual }),
     });
     expect(rejected).toHaveLength(1);
-    expect(JSON.stringify(rejected)).toContain('Wrong title');
+    expect(JSON.stringify(rejected)).toContain('999亿次观看');
     expect(JSON.stringify(rejected)).not.toContain('secret-marker');
     expect(JSON.stringify(rejected)).not.toContain('user@example.com');
   });
@@ -254,16 +265,18 @@ describe('BROWSER-FIX-4 field evidence', () => {
     });
     expect(result.status).toBe('completed');
   });
-  it('rejects an invented answer field even when its short evidence is real', async () => {
-    const { adapter } = brain([read, finish('标题：Invented video title', 'Rick Astley')]);
+  it('rejects a title that contradicts the page heading, then fails if it is repeated', async () => {
+    const wrong = finish('标题：Invented video title', 'Rick Astley');
+    const { adapter } = brain([read, wrong, wrong]);
     const result = await runUnifiedBrowserLoop({
       adapter,
       intent: '读取视频标题',
       observationV2: true,
-      maxSteps: 2,
+      maxSteps: 3,
       execute: async () => ({ ok: true, text: JSON.stringify({ tree: actual }) }),
     });
-    expect(result.status).toBe('failed');
+    expect(result).toMatchObject({ status: 'failed' });
+    expect(result.status === 'failed' && result.reason).toContain('一级标题');
   });
   it('returns the rejected field and a nearby relevant original snippet instead of the tail', async () => {
     const { adapter, requests } = brain([

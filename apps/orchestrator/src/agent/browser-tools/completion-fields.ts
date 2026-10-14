@@ -6,14 +6,47 @@ export interface ObservedEvidence {
   sourceURL?: string;
   links?: Array<{ text: string; url: string; kind?: string }>;
 }
-export interface CompletionField {
-  name: string;
-  value: string;
-  tabId?: string;
-  sourceURL?: string;
+/**
+ * BROWSER-AUTOPILOT-1 — completion integrity, deliberately small.
+ *
+ * Only hard facts in the answer (titles, names, numbers, dates, prices, links,
+ * file names/sizes) are compared with what the browser actually read. Prose —
+ * summaries, explanations, notes, the model's `evidence` text — is never
+ * checked. A fact found in the read text passes; a fact that contradicts the
+ * read pages (or claims content of a page that never loaded) blocks; anything
+ * else is delivered and labelled 未核实 instead of being rejected.
+ */
+const RELATIVE_UNITS: Array<[RegExp, string]> = [
+  [/(\d+)\s*years?\s+ago/g, '$1年前'],
+  [/(\d+)\s*months?\s+ago/g, '$1个月前'],
+  [/(\d+)\s*weeks?\s+ago/g, '$1周前'],
+  [/(\d+)\s*days?\s+ago/g, '$1天前'],
+  [/(\d+)\s*hours?\s+ago/g, '$1小时前'],
+  [/(\d+)\s*minutes?\s+ago/g, '$1分钟前'],
+  [/(\d+)\s*月前/g, '$1个月前'],
+];
+
+/** Literal `\n` / `\t` that a model double-escaped inside tool arguments. */
+export function unescapeLiteralBreaks(value: string): string {
+  return value.replace(/\\r\\n|\\n/g, '\n').replace(/\\t/g, ' ');
 }
-const normalized = (value: string) => value.replace(/\s+/g, ' ').trim();
-const clean = (value: string) => value.replace(/^[\s*`#>]+|[\s*`。]+$/g, '').trim();
+
+/** Canonical form for comparison: width, case, quotes, spacing, digits, relative time. */
+export function normalizeFact(value: string): string {
+  let v = unescapeLiteralBreaks(value).normalize('NFKC').toLocaleLowerCase();
+  v = v
+    .replace(/[“”«»„]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[‐-―−]/g, '-');
+  v = v.replace(/(\d),(?=\d{3}\b)/g, '$1');
+  for (const [pattern, replacement] of RELATIVE_UNITS) v = v.replace(pattern, replacement);
+  return v.replace(/\s+/g, ' ').trim();
+}
+
+const clean = (value: string) =>
+  unescapeLiteralBreaks(value)
+    .replace(/^[\s*`#>"'“”「」]+|[\s*`。，,;；"'“”「」]+$/g, '')
+    .trim();
 
 /** Only successful content reads enter this store; listings and navigation receipts do not. */
 export function observedEvidence(text: string, decoded: string, url?: string): ObservedEvidence {
@@ -41,46 +74,104 @@ export function observedEvidence(text: string, decoded: string, url?: string): O
   };
 }
 
-function explicitFields(input: unknown): CompletionField[] {
+export interface FactAssessment {
+  /** Contradicts a read page, or reports a page that never loaded: blocks completion. */
+  contradictions: string[];
+  /** Not found verbatim, not contradicted: delivered with a 未核实 note. */
+  unverified: string[];
+}
+
+interface Fact {
+  name: string;
+  value: string;
+  tabId?: string;
+  sourceURL?: string;
+  /** One item of a list (e.g. search results): no single-heading comparison. */
+  listItem?: boolean;
+  /** A quoted literal: not finding it verbatim means the page never said it. */
+  quote?: boolean;
+}
+
+const PROSE_FIELD =
+  /summary|总结|概述|摘要|说明|备注|注释|^注$|解释|描述|内容|结论|note|remark|explanation|description|overview|reason|原因/i;
+/** The page's own title — not a section, chapter or list-item title. */
+const TITLE_FIELD = /^(?:视频|页面|网页|文章|商品)?标题$|^(?:page |video )?title$/i;
+const NUMERIC_LABEL = /播放量|观看次数|价格|售价|大小|日期|发布时间|views|price|size|published/i;
+const FACT_LABELS =
+  '标题|频道|作者|播放量|观看次数|发布日期(?:或页面相对日期)?|发布时间|日期|价格|售价|文件名|文件大小|大小|title|channel|author|views|published|price|filename|size|tab\\s*\\d+\\s*title';
+
+function explicitFacts(input: unknown): Fact[] {
   if (!Array.isArray(input)) return [];
-  return input.slice(0, 60).map((field): CompletionField => {
-    if (!field || typeof field !== 'object') return { name: '无效字段', value: '' };
+  return input.slice(0, 60).flatMap((field): Fact[] => {
+    if (!field || typeof field !== 'object') return [];
     const f = field as Record<string, unknown>;
-    return {
-      name: typeof f.name === 'string' ? f.name.slice(0, 80) : '字段',
-      value: typeof f.value === 'string' ? f.value.slice(0, 2000) : '',
-      ...(typeof f.tabId === 'string' ? { tabId: f.tabId } : {}),
-      ...(typeof f.sourceURL === 'string' ? { sourceURL: f.sourceURL } : {}),
-    };
+    const name = typeof f.name === 'string' ? f.name.slice(0, 80) : '字段';
+    const value = typeof f.value === 'string' ? clean(f.value) : '';
+    // Summaries and explanations are the model's own words, not page facts.
+    if (!value || PROSE_FIELD.test(name) || value.length > 300) return [];
+    return [
+      {
+        name,
+        value,
+        ...(typeof f.tabId === 'string' ? { tabId: f.tabId } : {}),
+        ...(typeof f.sourceURL === 'string' ? { sourceURL: f.sourceURL } : {}),
+      },
+    ];
   });
 }
 
-/** Extract factual cells, quoted values, labels and URLs, not procedural summary prose. */
-function answerFields(summary: string): CompletionField[] {
-  const result: CompletionField[] = [];
-  const add = (name: string, value: string) => {
-    let v = clean(value);
-    // A precision disclaimer is not a page fact. Strip only this known note from
-    // a date field whose remaining value is itself a relative timestamp.
-    if (/日期|发布时间|published/i.test(name)) {
-      const date = v.replace(/\s*[（(]相对时间\s*[,，、]\s*非精确日期[）)]$/u, '');
-      if (
-        /^(?:\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s+ago|\d+\s*(?:秒|分钟|小时|天|周|个月|月|年)前)$/iu.test(
-          date,
-        )
-      )
-        v = date;
-    }
-    if (v) result.push({ name, value: v });
+/** Text up to the first full-width comma that is not inside brackets. */
+function beforeOuterComma(value: string): string {
+  let depth = 0;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i]!;
+    if ('（(【['.includes(ch)) depth++;
+    else if ('）)】]'.includes(ch)) depth = Math.max(0, depth - 1);
+    else if (ch === '，' && depth === 0) return value.slice(0, i);
+  }
+  return value;
+}
+
+function answerFacts(summary: string, intent = ''): Fact[] {
+  const text = unescapeLiteralBreaks(summary);
+  const asked = normalizeFact(intent);
+  const facts: Fact[] = [];
+  const add = (fact: Fact) => {
+    if (fact.value && fact.value.length <= 300) facts.push(fact);
   };
-  for (const url of summary.match(TEXT_URL_RE) ?? []) add('链接', url);
-  for (const match of summary.matchAll(
-    /(?:标题|频道|播放量|观看次数|发布日期(?:或页面相对日期)?|发布时间|日期|title|channel|views|published|tab\s*\d+\s*title)\s*[*`]*\s*(?:[:：]|为|是)\s*([^\n；;|。]+)/giu,
-  ))
-    add(match[0].split(/[:：]/)[0]!, match[1]!);
-  for (const match of summary.matchAll(/[“「"]([^”」"\n]{2,300})[”」"]/gu)) add('引用', match[1]!);
+  for (const url of text.match(TEXT_URL_RE) ?? []) add({ name: '链接', value: url });
+  // A labelled run that lists URLs ("标题：1) https://… → X") is handled per item below;
+  // a numeric label whose value has no number is prose ("播放量为页面原样字符串").
+  for (const match of text.matchAll(
+    new RegExp(`(${FACT_LABELS})\\s*[*\`]*\\s*(?:[:：]|为|是)\\s*([^\\n；;|。]+)`, 'giu'),
+  )) {
+    if (/https?:\/\//i.test(match[2]!)) continue;
+    if (NUMERIC_LABEL.test(match[1]!) && !/\d/.test(match[2]!)) continue;
+    // A quoted value is exactly what is inside the quotes; otherwise prose after a
+    // full-width comma is not part of the value.
+    const raw = match[2]!.trim();
+    const quoted = raw.match(/^[“"「『]([^”"」』]+)[”"」』]/u)?.[1];
+    const value = quoted ?? beforeOuterComma(raw);
+    // "第3节标题" / "列表标题" — a section or item title, not the page's own title.
+    const before = text.slice(Math.max(0, match.index! - 4), match.index!);
+    const qualified = /[节章段条项部篇栏]\s*$|列表\s*$|\d\s*$/.test(before);
+    add({ name: match[1]!, value: clean(value), ...(qualified ? { listItem: true } : {}) });
+  }
+  // A quoted string with Latin letters or digits claims literal page text
+  // ("You clicked: Ok"); a negated mention ("而非 …") is not a claim.
+  for (const match of text.matchAll(/[“"「]([^”"」\n]{3,200})[”"」]/gu)) {
+    const quote = match[1]!.trim();
+    const before = text.slice(Math.max(0, match.index! - 12), match.index!);
+    if (
+      /[A-Za-z]{3,}|\d/.test(quote) &&
+      // The user's own words ("搜索「Playwright tutorial」") are not a page claim.
+      !asked.includes(normalizeFact(quote)) &&
+      !/而非|不是|并非|并不是|没有|未出现|instead of|rather than|not\s*$/i.test(before)
+    )
+      add({ name: '原文引用', value: quote, quote: true });
+  }
   let headers: string[] | undefined;
-  for (const line of summary.split('\n')) {
+  for (const line of text.split('\n')) {
     if (line.trim().startsWith('|')) {
       const cells = line
         .trim()
@@ -88,106 +179,212 @@ function answerFields(summary: string): CompletionField[] {
         .split('|')
         .map(clean);
       if (cells.every((cell) => /^:?-+:?$/.test(cell))) continue;
-      if (
-        !headers &&
-        cells.some((cell) => /标题|频道|播放量|日期|链接|title|channel|views|url/i.test(cell))
-      ) {
+      if (!headers && cells.some((cell) => new RegExp(FACT_LABELS, 'i').test(cell))) {
         headers = cells;
         continue;
       }
       if (headers)
-        for (let i = 0; i < cells.length; i++) {
-          if (/标题|频道|播放量|日期|链接|title|channel|views|url/i.test(headers[i] ?? ''))
-            add(headers[i]!, cells[i]!.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1'));
-        }
+        cells.forEach((cell, i) => {
+          if (new RegExp(FACT_LABELS, 'i').test(headers![i] ?? ''))
+            add({
+              name: headers![i]!,
+              value: cell.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1'),
+              listItem: true,
+            });
+        });
     }
-
-    // A numbered title/link list associates the title with that particular source.
+    // A numbered "title — URL" item binds the title to that page.
     const item = line.match(/^\s*\d+[.)、]\s+(.+?)\s+[—–-]\s+(https?:\/\/\S+)/u);
-    if (item) {
-      const url = item[2]!.match(TEXT_URL_RE)?.[0];
-      if (url) result.push({ name: '条目标题', value: clean(item[1]!), sourceURL: url });
+    const url = item?.[2]?.match(TEXT_URL_RE)?.[0];
+    if (item && url) {
+      add({ name: '条目标题', value: clean(item[1]!), sourceURL: url, listItem: true });
+      continue;
     }
+    // "URL → 标题 X": the title is claimed for that page.
+    const arrow = line.match(
+      /(https?:\/\/\S+?)\s*(?:→|->|=>)\s*(?:标题\s*[:：]?\s*)?["“「]?([^"”」\n；;]+?)["”」]?\s*(?:[；;。]|$)/u,
+    );
+    const arrowUrl = arrow?.[1]?.match(TEXT_URL_RE)?.[0];
+    if (arrow && arrowUrl) {
+      add({ name: '标签标题', value: clean(arrow[2]!), sourceURL: arrowUrl, listItem: true });
+      continue;
+    }
+    // A short numbered list line without prose (e.g. search-result titles).
+    const listed = line.match(/^\s*\d+[.)、]\s+(.+)$/u)?.[1];
+    if (
+      listed &&
+      !/[：*]/.test(listed) &&
+      clean(listed).length <= 150 &&
+      !/https?:\/\//i.test(listed)
+    )
+      add({ name: '条目', value: clean(listed), listItem: true });
   }
-  return result;
+  return facts;
 }
 
-function evidenceFields(evidence: string): CompletionField[] {
-  return evidence
-    .split(/\n|；|;/u)
-    .map((part) => clean(part))
-    .filter(Boolean)
-    .map((part) => {
-      const quote = part.match(/^(?:[-*]\s*)?(?:heading|link|generic|text|paragraph)\s+"([^"]+)"/);
-      const label = part.match(
-        /^(?:标题|频道|播放量|发布日期|title|channel|views)\s*[:：]\s*(.+)$/i,
-      );
-      return { name: '证据', value: quote?.[1] ?? label?.[1] ?? part };
-    });
+/** A value with an explanatory parenthetical: the bare value is the fact. */
+function splitNote(value: string): { bare: string; note: string } | null {
+  const match = value.match(/^(.+?)\s*[（(]([^（()）]*)[)）]\s*$/u);
+  if (!match || !match[1]!.trim()) return null;
+  return { bare: match[1]!.trim(), note: match[2]!.trim() };
+}
+/** The bare value; a parenthetical without numbers is only an explanation. */
+function withoutNote(value: string): string | null {
+  return splitNote(value)?.bare ?? null;
 }
 
-function nearest(field: CompletionField, pages: ObservedEvidence[]): string {
-  const tokens =
-    normalized(field.value)
-      .toLocaleLowerCase()
-      .match(/[\p{L}\p{N}]+/gu) ?? [];
-  let best = '';
-  let score = 0;
-  for (const page of pages)
-    for (const line of page.text.split('\n')) {
-      const lower = line.toLocaleLowerCase();
-      const n = tokens.reduce((sum, token) => sum + (lower.includes(token) ? token.length : 0), 0);
-      if (n > score) {
-        score = n;
-        best = line;
-      }
-    }
-  return best.slice(0, 300) || '没有对应的已读字段';
+const skeleton = (value: string) => value.replace(/\d+(?:\.\d+)?/g, '#');
+
+function sourceLabel(fact: Fact) {
+  return fact.tabId ? `标签 ${fact.tabId}` : (fact.sourceURL ?? '该页面');
 }
 
-/** All identified answer fields and evidence fragments must be grounded independently. */
-export function completionFieldGaps(
-  summary: string,
-  evidence: string,
-  fields: unknown,
-  pages: ObservedEvidence[],
-  intent = '',
-): string | null {
+export function assessCompletionFacts(input: {
+  summary: string;
+  fields?: unknown;
+  /** Successful page reads (never navigation receipts or tab listings). */
+  pages: ObservedEvidence[];
+  /** Host receipts (download, scroll, form) that may also ground facts. */
+  receipts?: string;
+  /** Everything the host returned to the model (errors included): grounds quotes only. */
+  toolTexts?: string;
+  intent?: string;
+}): FactAssessment {
+  const intent = input.intent ?? '';
   const videoSearch =
     /youtube/i.test(intent) && /视频|videos?/i.test(intent) && /搜索|search/i.test(intent);
-  const claims = [...explicitFields(fields), ...answerFields(summary), ...evidenceFields(evidence)];
-  const misses: string[] = [];
-  for (const field of claims) {
-    const value = normalized(field.value);
-    const eligible = pages.filter(
-      (p) =>
-        (!field.tabId || p.tabId === field.tabId) &&
-        (!field.sourceURL ||
-          p.sourceURL === field.sourceURL ||
-          (videoSearch &&
-            p.links?.some(
-              (link) => link.url === field.sourceURL && normalized(link.text).includes(value),
-            ))),
-    );
-    const wrongVideoKind =
+  /** The task asks to open the links themselves: a listing is not proof of their pages. */
+  const opensLinks = /打开.{0,12}链接|新标签|new tabs?|open .{0,20}links?/i.test(intent);
+  const pages = input.pages.map((page) => {
+    const lines = unescapeLiteralBreaks(page.text).split('\n').map(normalizeFact);
+    return { ...page, lines, norm: lines.join(' ') };
+  });
+  const receipts = normalizeFact(input.receipts ?? '');
+  const contradictions: string[] = [];
+  const unverified: string[] = [];
+  const seen = new Set<string>();
+  const facts = [...explicitFacts(input.fields), ...answerFacts(input.summary, intent)].flatMap(
+    (fact): Fact[] => {
+      // A parenthetical that carries numbers is its own fact, checked separately.
+      // Titles and list items often carry parentheses as part of the name.
+      const split = fact.listItem || TITLE_FIELD.test(fact.name) ? null : splitNote(fact.value);
+      return split && /\d/.test(split.note)
+        ? [fact, { ...fact, name: `${fact.name}（括注）`, value: split.note, listItem: true }]
+        : [fact];
+    },
+  );
+  for (const fact of facts) {
+    const key = `${fact.name}|${fact.value}|${fact.tabId ?? ''}|${fact.sourceURL ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const quoted = fact.value.match(/[“"「]([^”"」]{1,200})[”"」]/u)?.[1];
+    const candidates = [fact.value, withoutNote(fact.value), quoted]
+      .filter((v): v is string => Boolean(v))
+      .map(normalizeFact);
+    const bound = (page: (typeof pages)[number]) =>
+      (!fact.tabId || page.tabId === fact.tabId) &&
+      (!fact.sourceURL || page.sourceURL === fact.sourceURL);
+    const eligible = pages.filter(bound);
+    const label = `${fact.name}「${fact.value.slice(0, 120)}」`;
+    const isVideoKindMismatch =
       videoSearch &&
-      eligible.some((p) =>
-        p.links?.some(
+      pages.some((page) =>
+        page.links?.some(
           (link) =>
             ['playlist', 'channel'].includes(link.kind ?? '') &&
-            (link.url === field.value || normalized(link.text) === value),
+            candidates.includes(normalizeFact(link.text)),
         ),
       );
-    if (
-      value &&
-      !wrongVideoKind &&
-      eligible.some((p) => normalized(p.text).includes(value) || p.sourceURL === value)
-    )
+    if (isVideoKindMismatch) {
+      contradictions.push(`${label} 在页面上是播放列表/频道，不是视频`);
       continue;
-    misses.push(
-      `${field.name}「${field.value.slice(0, 180)}」未通过核验；最相近原文：${nearest(field, eligible)}`,
+    }
+    const grounded = candidates.some(
+      (v) =>
+        eligible.some(
+          (page) =>
+            page.norm.includes(v) ||
+            (page.sourceURL && normalizeFact(page.sourceURL) === v) ||
+            page.links?.some((link) => normalizeFact(link.url) === v),
+        ) ||
+        // Host receipts (download, typed text, scroll) are facts whatever the binding.
+        receipts.includes(v) ||
+        // A result list ("title — URL") is proven by the listing page's own link.
+        (!opensLinks &&
+          !fact.tabId &&
+          !!fact.sourceURL &&
+          pages.some((page) =>
+            page.links?.some(
+              (link) =>
+                normalizeFact(link.url) === normalizeFact(fact.sourceURL!) &&
+                normalizeFact(link.text).includes(v),
+            ),
+          )),
     );
-    if (misses.length === 8) break;
+    if (grounded) continue;
+    if (fact.quote && candidates.some((v) => normalizeFact(input.toolTexts ?? '').includes(v)))
+      continue;
+    if (!pages.length) {
+      contradictions.push(`${label} 没有成功读取的页面可以支持（页面未加载或未读取）`);
+      continue;
+    }
+    if ((fact.tabId || fact.sourceURL) && !eligible.length) {
+      contradictions.push(`${label} 所属页面（${sourceLabel(fact)}）未成功读取`);
+      continue;
+    }
+    if (
+      (fact.tabId || fact.sourceURL) &&
+      candidates.some((v) => pages.some((page) => !bound(page) && page.norm.includes(v)))
+    ) {
+      contradictions.push(`${label} 来自其他页面，不是 ${sourceLabel(fact)} 的内容`);
+      continue;
+    }
+    // Same context on the page with a different number (views, dates, prices,
+    // sizes) — single labelled values only; list pages repeat such shapes.
+    // Compare the bare value (an explanatory note stripped) with the page.
+    const value = normalizeFact(withoutNote(fact.value) ?? fact.value);
+    const shape = skeleton(value);
+    if (!fact.listItem && /\d/.test(value) && shape.replace(/[#\s]/g, '').length >= 2) {
+      const conflict = eligible
+        .flatMap((page) => page.lines)
+        .find((line) => /\d/.test(line) && skeleton(line).includes(shape));
+      if (conflict) {
+        contradictions.push(`${label} 与页面不符；页面为「${conflict.trim().slice(0, 120)}」`);
+        continue;
+      }
+    }
+    // A single page title that differs from the page's own main heading.
+    if (fact.quote) {
+      contradictions.push(`${label} 不是已读页面中的原文`);
+      continue;
+    }
+    if (TITLE_FIELD.test(fact.name) && !fact.listItem) {
+      const headings = new Set(
+        eligible
+          .map((page) => page.text.match(/heading "([^"]+)" \[level=1\]/)?.[1])
+          .filter((heading): heading is string => Boolean(heading)),
+      );
+      const heading = headings.size === 1 ? [...headings][0] : undefined;
+      // "人工智能 编辑" (h1 with its edit link) vs "人工智能 - 维基百科" (document title)
+      // are the same title: compare cores, either way round.
+      const main = heading
+        ? normalizeFact(heading)
+            .replace(/\s*(?:\[?编辑\]?|\[?edit\]?)$/i, '')
+            .trim()
+        : '';
+      if (heading && !candidates.some((v) => v.includes(main) || main.includes(v))) {
+        contradictions.push(`${label} 与页面一级标题「${heading.slice(0, 120)}」不符`);
+        continue;
+      }
+    }
+    unverified.push(label);
   }
-  return misses.length ? `完成字段证据不足：\n${[...new Set(misses)].join('\n')}` : null;
+  return { contradictions: contradictions.slice(0, 8), unverified: unverified.slice(0, 8) };
+}
+
+/** User-visible note for facts that could not be matched word for word. */
+export function unverifiedNote(unverified: readonly string[]): string {
+  return unverified.length
+    ? `未核实：以下内容未能在已读页面中逐字找到，请自行确认——${unverified.join('；')}`
+    : '';
 }
