@@ -31,6 +31,7 @@ export interface UnifiedToolResult {
   /** Present on `download`: where the file was saved by the host. */
   download?: BrowserDownloadReceipt;
   tabId?: string;
+  openedTab?: boolean;
   scroll?: {
     beforeHeight: number;
     afterHeight: number;
@@ -394,6 +395,32 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           };
         }
         case 'click':
+          if (action.newTab) {
+            const target = byRef(action.ref);
+            const href = await target.getAttribute('href');
+            if (!href || !/^https?:/i.test(new URL(href, activeFrame.url()).href))
+              return fail('newTab 只允许已观察到的普通网页链接');
+            if (page.context().pages().length >= 20) return fail('任务标签数达到上限');
+            const [opened] = await Promise.all([
+              page.context().waitForEvent('page', { timeout }),
+              target.click({ button: 'middle', timeout }),
+            ]);
+            await ensureExecutionViewport(opened);
+            page = opened;
+            activeFrame = opened.mainFrame();
+            const tabId = observation?.activate(opened) ?? registerTab(opened);
+            try {
+              await opened.waitForLoadState('domcontentloaded', { timeout });
+            } catch (error) {
+              return { ...browserToolError(error), tabId, openedTab: true, url: opened.url() };
+            }
+            return {
+              ...done(`已点击链接并打开新标签 ${tabId}`),
+              tabId,
+              openedTab: true,
+              url: opened.url(),
+            };
+          }
           if (observation) {
             await byRef(action.ref).click({ timeout });
             return done(`已点击 ${action.ref}`);
@@ -482,7 +509,12 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
         }
         case 'wait_for': {
           const wait = action.timeoutMs ?? timeout;
-          if (action.text) await page.getByText(action.text).first().waitFor({ timeout: wait });
+          if (action.text)
+            await page
+              .getByText(action.text)
+              .filter({ visible: true })
+              .first()
+              .waitFor({ timeout: wait });
           if (action.ref) await byRef(action.ref).waitFor({ timeout: wait });
           if (action.networkIdle) await page.waitForLoadState('networkidle', { timeout: wait });
           return done('等待条件已满足');

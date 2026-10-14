@@ -35,6 +35,7 @@ import {
   createTaskVerificationContext,
 } from './task-verification-context.js';
 import { evaluateTemplateFill } from './template-fill-consistency.js';
+import { TEXT_URL_RE as URL_RE, trimTextUrl } from './text-urls.js';
 import { isNonDetailUrl, urlResourceIdentity } from './url-identity.js';
 import type { VerificationInputCoverage } from './verification-input-budget.js';
 
@@ -105,7 +106,6 @@ export interface VerifyInputs {
   outputFiles?: ReadonlyArray<OutputFileDescriptor>;
 }
 
-const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
 // Permissible drift in cross-validation arithmetic (5%) — covers
 // rounding in the user's input ("GMV ¥100,000" vs computed 99,852.50).
 const CROSS_VALIDATION_TOLERANCE = 0.05;
@@ -761,10 +761,10 @@ function parsePriceText(s: string): number | null {
 }
 
 function extractUrlFromCell(c: string): string | null {
-  const md = c.match(/\[[^\]]+\]\((https?:\/\/[^)]+)\)/);
+  const md = c.match(new RegExp(String.raw`\[[^\]]+\]\((${URL_RE.source})\)`, 'u'));
   if (md?.[1]) return md[1];
-  const direct = c.match(/https?:\/\/\S+/);
-  if (direct) return direct[0].replace(/[)\].,;:]+$/, '');
+  const direct = c.match(URL_RE);
+  if (direct) return trimTextUrl(direct[0]!);
   return null;
 }
 
@@ -1121,7 +1121,7 @@ function normalizeCandidateName(value: string): string {
 }
 
 function stripTrailingPunct(url: string): string {
-  return url.replace(/[)\].,;:，。]+$/, '');
+  return trimTextUrl(url);
 }
 
 function isMultiCandidateIntent(intent: string): boolean {
@@ -1470,9 +1470,9 @@ function allowsConciseFactAnswer(contract: ExecutionContract): boolean {
 }
 
 function checkUrlGrounding(answerText: string, ledger: EvidenceLedger): CheckResult | null {
-  const answerUrls = (answerText.match(URL_RE) ?? []).map((u) => u.replace(/[)\].,;:]+$/, ''));
+  const answerUrls = (answerText.match(URL_RE) ?? []).map(trimTextUrl);
   if (answerUrls.length === 0) return null;
-  const grounded = ledger.getGroundedUrls().map((u) => u.replace(/[)\].,;:]+$/, ''));
+  const grounded = ledger.getGroundedUrls().map(trimTextUrl);
   const groundedSet = new Set(grounded);
   const fabricated = answerUrls.filter((u) => !groundedSet.has(u));
   const passed = fabricated.length === 0;

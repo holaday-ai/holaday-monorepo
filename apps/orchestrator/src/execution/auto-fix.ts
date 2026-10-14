@@ -24,8 +24,7 @@ import type { EvidenceLedger } from './evidence-ledger.js';
  */
 import type { ExecutionContract } from './execution-contract.js';
 import type { ExpertWorkflowContract } from './expert-workflow-contract.js';
-
-const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
+import { TEXT_URL_RE as URL_RE, trimTextUrl } from './text-urls.js';
 
 /**
  * Markdown link `[text](https://...)`. Captured separately from the
@@ -36,7 +35,7 @@ const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
  * an ungrounded URL inside a markdown link, drop the whole link
  * shape and keep just the bare text.
  */
-const MARKDOWN_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
+const MARKDOWN_LINK_RE = new RegExp(String.raw`\[([^\]\n]+)\]\((${URL_RE.source})\)`, 'gu');
 const URL_DROP_EMPTY_FALLBACK =
   '这些网址缺少可验证来源，已从结果中移除。请允许联网检索后再获取可靠链接。';
 const WORKFLOW_SOURCE_NOTE =
@@ -352,7 +351,7 @@ function isStrictParentPath(candidate: string, target: string): boolean {
 }
 
 function stripTrailingPunct(url: string): string {
-  return url.replace(/[)\].,;:，。]+$/, '');
+  return trimTextUrl(url);
 }
 
 function fillEmptyJsonUrls(

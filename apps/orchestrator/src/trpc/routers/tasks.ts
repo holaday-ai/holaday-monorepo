@@ -42,7 +42,7 @@ import {
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
 import { explainExecutionMode } from '../../agent/intent-classifier.js';
-import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
+import { DrizzleLlmCallRecorder, type LlmCallRecord } from '../../agent/llm-call-recorder.js';
 import { withMediaCallContext } from '../../agent/media-call-recorder.js';
 // Phase 24 RC follow-up — nav-failure safety net. Catches the
 // "false success" case where the agent calls task_done with a body
@@ -5390,10 +5390,18 @@ export const tasksRouter = router({
               const skipPlan =
                 Boolean(input.localChrome) || isSimpleSearchIntent || shouldSkipPlan(input.intent);
               const memoryService = new MemoryService(ctx.db, ctx.logger);
+              const pendingPlanCalls: LlmCallRecord[] = [];
               const [planResult, relevantMemories] = await Promise.all([
                 skipPlan
                   ? Promise.resolve({ planText: null, planStatus: null })
                   : generatePlanForUser({
+                      browserPlanning: true,
+                      planningAdapter: browserMessagesAdapter.browserBrain?.planning,
+                      recorder: {
+                        record: async (call) => {
+                          pendingPlanCalls.push(call);
+                        },
+                      },
                       environment: appEnv,
                       userExternalId: ctx.userId,
                       userModelDataRegion: userRow.modelDataRegion,
@@ -5469,6 +5477,12 @@ export const tasksRouter = router({
                   },
                 );
               }
+              // The model call precedes row creation. Flush only now, so its cost
+              // belongs to this task rather than an unassociated account call.
+              const planRecorder = new DrizzleLlmCallRecorder(ctx.db, {
+                onError: () => ctx.logger.warn({ taskId }, 'browser planning accounting failed'),
+              });
+              for (const call of pendingPlanCalls) await planRecorder.record(call);
               // Phase 13 Dim 1 — persist plan onto the task row and broadcast
               // it to the SPA so the user sees upcoming steps before any
               // tool fires. Best-effort: write failures log + continue.
@@ -6291,9 +6305,18 @@ export const tasksRouter = router({
                     const webSearches = pendingWebSearches;
                     pendingWebSearches = [];
                     if (taskDbId) {
-                      void runTaskBackground(ctx, async (ctx) =>
+                      const persistTick = runTaskBackground(ctx, async (ctx) =>
                         (async () => {
                           try {
+                            if (actionKind === 'browser_finish_rejected') {
+                              await ctx.db.insert(taskEvents).values({
+                                externalId: newExternalId('taskEvent'),
+                                taskId: taskDbId,
+                                type: 'browser.finish_rejected',
+                                actor: 'agent',
+                                payload: { diagnostic: ev.execution?.message ?? actionSummary },
+                              });
+                            }
                             await ctx.db.insert(taskSteps).values({
                               externalId: newExternalId('taskStep'),
                               taskId: taskDbId,
@@ -6321,6 +6344,7 @@ export const tasksRouter = router({
                           }
                         })(),
                       );
+                      if (actionKind === 'browser_finish_rejected') return persistTick;
                     }
                   },
                   onScreencast(ev) {

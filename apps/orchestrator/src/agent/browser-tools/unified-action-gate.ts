@@ -69,13 +69,14 @@ interface SubmitContext {
  */
 const READ_ACTIONABLE = (
   node: Node,
+  allowDocumentSurface = false,
 ): (ElementSignals & { iframe?: false }) | { iframe: true } | null => {
   const el = (node.nodeType === 1 ? node : node.parentElement) as Element | null;
   if (!el) return null;
   const doc = el.ownerDocument;
   const tag = String(el.tagName || '').toLowerCase();
   if (tag === 'iframe' || tag === 'frame') return { iframe: true };
-  if (el === doc.body || el === doc.documentElement) return null;
+  if ((el === doc.body || el === doc.documentElement) && !allowDocumentSurface) return null;
   const selector =
     'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [onclick]';
   let actionable: Element | null = null;
@@ -360,7 +361,20 @@ async function fallbackTargetAt(page: Page, x: number, y: number): Promise<ReadT
     )) as ElementHandle<Element> | null;
     const element = handle?.asElement() ?? null;
     if (!element) return null;
-    const read = await withTimeout(element.evaluate(READ_ACTIONABLE));
+    let read = await withTimeout(element.evaluate(READ_ACTIONABLE, false));
+    if (!read && frame !== page.mainFrame()) {
+      // We can inspect this exact node. Only a known document surface gets a
+      // second read; unreadable frames and opaque hosts remain unverified.
+      let known = /^(?:about:blank|about:srcdoc)$/.test(frame.url());
+      try {
+        known ||=
+          new URL(frame.url()).origin === new URL(page.url()).origin ||
+          new URL(frame.url()).hostname === 'cdn.tiny.cloud';
+      } catch {
+        /* no known origin */
+      }
+      if (known) read = await withTimeout(element.evaluate(READ_ACTIONABLE, true));
+    }
     if (!read) return null;
     if (!read.iframe) return { signals: read, binding: { kind: 'handle', handle: element } };
     const child = await withTimeout(element.contentFrame());
@@ -389,7 +403,7 @@ async function targetAtPoint(
   y: number,
 ): Promise<ReadTarget | null> {
   const viaCdp = await cdpTargetAt(probe, x, y);
-  return viaCdp === undefined ? fallbackTargetAt(page, x, y) : viaCdp;
+  return viaCdp == null ? fallbackTargetAt(page, x, y) : viaCdp;
 }
 
 /** A ref'd element is clicked at its centre after scrolling: read what is hit there. */

@@ -155,12 +155,16 @@ const prompts: Record<string, string> = {
   'core-10': '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts',
   'core-11': '请使用云端浏览器，the-internet.herokuapp.com/infinite_scroll 滚动5次后读内容',
 };
-function response(request: NeutralMessagesRequest): Reply {
+function response(request: NeutralMessagesRequest, retryStale = false): Reply {
   const last = request.messages.at(-1)?.content;
   if (!Array.isArray(last)) return {};
   const result = last.find((x) => x.type === 'tool_result');
   if (!result || result.type !== 'tool_result') return {};
-  if (result.isError) throw Error(String(result.content).slice(0, 300));
+  if (result.isError) {
+    if (retryStale && /stale_|已失效/.test(String(result.content)))
+      return { text: String(result.content), stale: true };
+    throw Error(String(result.content).slice(0, 300));
+  }
   try {
     return JSON.parse(String(result.content));
   } catch {
@@ -176,13 +180,15 @@ async function* scenario(id: string, base: string, facts: Reply): Script {
     yield command('navigate', {
       url: live ? 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' : `${base}/video`,
     });
+    if (live) yield command('wait_for', { text: 'views', timeoutMs: 15000 });
+    yield command('get_page_text', { maxChars: 16000 });
+    const links = yield command('links', { limit: 100 });
+    // Use a fresh snapshot after hydration, not the initial loading shell.
     state = yield command('read_page');
     facts.metadataLines = String(state.tree)
       .split('\n')
       .filter((line) => /views|ago|Published/.test(line))
       .slice(0, 24);
-    yield command('get_page_text', { maxChars: 16000 });
-    const links = yield command('links', { limit: 100 });
     const title = state.tree?.match(/heading "([^"]+)" \[level=1\]/)?.[1];
     const channel = links.items?.find((x: Reply) => /\/@|\/channel\//.test(x.url))?.text?.trim();
     // Accessibility labels describe the displayed number; raw innerText can
@@ -277,6 +283,14 @@ async function* scenario(id: string, base: string, facts: Reply): Script {
     const urls = [
       ...new Set<string>(
         (state.items ?? [])
+          .filter((item: Reply) => {
+            try {
+              ref(first.tree, new RegExp(item.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+              return true;
+            } catch {
+              return false;
+            }
+          })
           .map((x: Reply) => x.url)
           .filter((u: string) =>
             live
@@ -287,21 +301,45 @@ async function* scenario(id: string, base: string, facts: Reply): Script {
     ].slice(0, 3);
     if (urls.length !== 3) throw Error('Three actual links unavailable');
     const readTitles = [];
+    const resolvedUrls: string[] = [];
     for (const u of urls) {
-      yield command('new_tab');
-      yield command('navigate', { url: u });
+      let clicked = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const source = yield command('switch_tab', { targetTabId: first.tabId });
+        const sourceLink = (state.items ?? []).find((item: Reply) => item.url === u);
+        if (!sourceLink) throw Error('Source link is not observed');
+        const click = yield command('click', {
+          ref: ref(source.tree, new RegExp(sourceLink.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))),
+          newTab: true,
+          ...context(source),
+        });
+        if (/未执行|失效|stale_/i.test(String(click.text))) continue;
+        if (!String(click.text).includes('已点击链接并打开新标签'))
+          throw Error('Missing actual new-tab click receipt');
+        clicked = true;
+        break;
+      }
+      if (!clicked) throw Error('Source link remained stale after three fresh observations');
       const s = yield command('read_page');
       const title = s.tree?.match(/heading "([^"]+)" \[level=1\]/)?.[1];
-      if (!title) throw Error('Detail heading missing');
+      if (!title || s.tabId === first.tabId || !/^https?:/.test(s.sourceURL))
+        throw Error('Loaded child title missing');
       readTitles.push(title);
+      resolvedUrls.push(s.sourceURL);
     }
+    if (new Set(resolvedUrls).size !== 3) throw Error('Three distinct child links were not read');
     yield command('switch_tab', { targetTabId: first.tabId });
     const returned = yield command('read_page');
     if (returned.tabId !== first.tabId || returned.sourceURL !== first.sourceURL)
       throw Error('Did not return to the original tab and page');
-    Object.assign(facts, { urls, titles: readTitles, returned: true });
+    Object.assign(facts, {
+      sourceLinks: urls,
+      urls: resolvedUrls,
+      titles: readTitles,
+      returned: true,
+    });
     yield finish(
-      `已打开3个新标签并返回第一个页面。\n${readTitles.map((t, i) => `${i + 1}. ${t} — ${urls[i]}`).join('\n')}`,
+      `已打开3个新标签并返回第一个页面。\n${readTitles.map((t, i) => `${i + 1}. ${t} — ${resolvedUrls[i]}`).join('\n')}`,
       readTitles[0],
     );
     return;
@@ -412,7 +450,7 @@ try {
       async create(request) {
         let next: Awaited<ReturnType<Script['next']>>;
         try {
-          next = await actualScenario.next(response(request));
+          next = await actualScenario.next(response(request, id === 'core-07'));
         } catch (error) {
           facts.scriptError = String(error).slice(0, 800);
           throw error;

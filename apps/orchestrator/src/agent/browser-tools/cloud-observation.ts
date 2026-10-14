@@ -461,6 +461,13 @@ export class CloudObservation {
     if ([...this.tabs.values()].includes(page)) return;
     this.tabs.set(`tab_${randomUUID()}`, page);
   }
+  activate(page: Page): string {
+    this.register(page);
+    this.active = page;
+    this.observations.clear();
+    this.cursors.clear();
+    return [...this.tabs].find(([, target]) => target === page)![0];
+  }
   async manageTab(action: UnifiedBrowserAction): Promise<UnifiedToolResult> {
     if (action.tool === 'new_tab') {
       if ([...this.tabs.values()].filter((p) => !p.isClosed()).length >= 20)
@@ -1027,6 +1034,16 @@ export class CloudObservation {
           .map((n) => ({
             text: (n.textContent || '').slice(0, 500),
             url: (n as HTMLAnchorElement).href,
+            kind:
+              n.closest('ytd-playlist-renderer, ytd-radio-renderer') ||
+              /[?&]list=|\/playlist(?:\?|$)/.test((n as HTMLAnchorElement).href)
+                ? 'playlist'
+                : n.closest('ytd-channel-renderer') ||
+                    /youtube\.com\/(?:@|channel\/|c\/)/.test((n as HTMLAnchorElement).href)
+                  ? 'channel'
+                  : /youtube\.com\/(?:watch\?v=|shorts\/)/.test((n as HTMLAnchorElement).href)
+                    ? 'video'
+                    : 'link',
           })),
       );
       const start = action.start ?? 0;
@@ -1171,6 +1188,7 @@ export class CloudObservation {
       opened.push(p);
     };
     page.on('popup', popup);
+    page.context().on('page', popup);
     let result: UnifiedToolResult;
     try {
       result = await execute();
@@ -1179,6 +1197,7 @@ export class CloudObservation {
     } finally {
       if (window.interactive) await this.causality.disarm(frame, window.token);
       page.off('popup', popup);
+      page.context().off('page', popup);
       this.actionWindow = null;
     }
     const after = await observationState(frame).catch(() => null);

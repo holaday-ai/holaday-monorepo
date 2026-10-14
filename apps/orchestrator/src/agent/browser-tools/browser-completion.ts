@@ -58,7 +58,7 @@ export function detectBrowserBlocker(page: {
 
 export type BrowserTrace = Pick<
   UnifiedToolResult,
-  'ok' | 'url' | 'download' | 'tabId' | 'scroll' | 'form'
+  'ok' | 'url' | 'download' | 'tabId' | 'scroll' | 'form' | 'openedTab'
 > & { tool: string; screenshot?: boolean };
 /** A prohibition or an admission of non-completion is not a claim of execution. */
 function positiveActionText(text: string): string {
@@ -84,6 +84,21 @@ export function completionGap(
   const requested = positiveActionText(intent);
   if (requireBrowser && !successful.some((entry) => entry.url && /^https?:\/\//i.test(entry.url)))
     return '尚无真实浏览器页面证据，请先 navigate 到任务网址，再 snapshot 核验；不能直接生成答案。';
+  if (
+    /youtube/i.test(intent) &&
+    /视频|videos?/i.test(intent) &&
+    /搜索|前\s*\d|search/i.test(intent)
+  ) {
+    const results = summary.split('\n').filter((line) => /^\s*\d+[.)、]|^[|]/.test(line));
+    if (
+      results.some((line) =>
+        /[（(【\[]\s*(?:播放列表|playlist|课程合集)\s*[）)】\]]|\/playlist[?]|[?&]list=/i.test(
+          line,
+        ),
+      )
+    )
+      return '用户要求视频，结果中仍有播放列表或课程合集；请只保留实际视频条目。';
+  }
   const claims: Array<[RegExp, string]> = [
     [/(?:切回|切换|返回).{0,10}(?:标签|tab)|switched? (?:back )?to.{0,20}tab/i, 'switch_tab'],
     [/(?:新建|打开|创建).{0,8}(?:新标签|\d+个标签)|opened? .{0,12}new tabs?/i, 'new_tab'],
@@ -91,7 +106,10 @@ export function completionGap(
     [/(?:已|成功).{0,6}(?:上传)|uploaded/i, 'upload'],
   ];
   for (const [pattern, tool] of claims)
-    if (pattern.test(claimed) && !successful.some((entry) => entry.tool === tool))
+    if (
+      pattern.test(claimed) &&
+      !successful.some((entry) => entry.tool === tool || (tool === 'new_tab' && entry.openedTab))
+    )
       return `动作 ${tool} 没有成功工具回执，请实际执行或如实说明未完成。`;
   const numericCount = (value: string) =>
     (
@@ -105,7 +123,8 @@ export function completionGap(
   );
   if (
     count &&
-    successful.filter((entry) => entry.tool === 'new_tab').length < numericCount(count[1]!)
+    successful.filter((entry) => entry.tool === 'new_tab' || entry.openedTab).length <
+      numericCount(count[1]!)
   )
     return '新标签数量没有足够的 new_tab 回执。';
   if (/(?:切回|返回).{0,10}(?:原|最初|第一个).{0,5}标签/.test(claimed)) {

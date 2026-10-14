@@ -40,6 +40,7 @@ import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { tasks as tasksTable } from '../db/schema/tasks.js';
 import type { MessagesAdapter, MessagesProviderMetadata } from '../llm/messages-adapter.js';
+import { TEXT_URL_RE } from './text-urls.js';
 
 import type { CheckResult, ParsedItem, VerificationResult } from './answer-verifier.js';
 import { extractStructuredItems, verifyDeterministic } from './answer-verifier.js';
@@ -457,7 +458,7 @@ function countUrls(text: string, items: ParsedItem[]): number {
   if (items.length > 0) {
     return items.filter((it) => Boolean(it.url)).length;
   }
-  return (text.match(/https?:\/\/[^\s,;'")\]>]+/g) ?? []).length;
+  return (text.match(TEXT_URL_RE) ?? []).length;
 }
 
 /**

@@ -62,11 +62,11 @@ export const UNIFIED_BROWSER_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
   },
   {
     name: 'click',
-    description: '点击最新 snapshot 中的元素。',
+    description: '点击最新 snapshot 中的元素；打开已观察到的链接到新标签时用 newTab=true。',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
-      properties: { ref, expect: expectation },
+      properties: { ref, expect: expectation, newTab: { type: 'boolean' } },
       required: ['ref'],
     },
   },
@@ -217,7 +217,7 @@ export type UnifiedBrowserAction = (
   | { tool: 'new_tab' }
   | { tool: 'close_tab'; targetTabId: string }
   | { tool: 'snapshot' }
-  | { tool: 'click'; ref: string }
+  | { tool: 'click'; ref: string; newTab?: boolean }
   | { tool: 'type'; ref: string; text: string; submit?: boolean }
   | { tool: 'select'; ref: string; value: string }
   | { tool: 'scroll'; direction?: 'down' | 'up'; ref?: string; amount?: number }
@@ -317,6 +317,9 @@ function parseAction(name: string, input: unknown): UnifiedBrowserAction {
     case 'back':
       return { tool: name };
     case 'click':
+      if (args.newTab !== undefined && typeof args.newTab !== 'boolean')
+        throw new UnifiedToolInputError('Invalid newTab');
+      return { tool: name, ref: refArg() as string, ...(args.newTab ? { newTab: true } : {}) };
     case 'download':
       return { tool: name, ref: refArg() as string };
     case 'type':
