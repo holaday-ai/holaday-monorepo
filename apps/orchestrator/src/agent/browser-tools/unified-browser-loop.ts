@@ -471,9 +471,12 @@ export async function runUnifiedBrowserLoop(
             continue;
           }
           const note = unverifiedNote(facts.unverified);
+          // Fields are part of the answer: show the ones the summary leaves out.
+          const listed = fieldLines(args.fields, summary);
+          const answer = [summary, listed, note].filter(Boolean).join('\n\n');
           return {
             status: 'completed',
-            summary: withLimitations(note ? `${summary}\n\n${note}` : summary),
+            summary: withLimitations(answer),
             evidence,
             steps: step + 1,
           };
@@ -603,6 +606,7 @@ export async function runUnifiedBrowserLoop(
         for (let i = pageEvidence.length - 1; i >= 0; i--)
           if (pageEvidence[i]!.tabId === tab) pageEvidence.splice(i, 1);
       }
+      const openingTabId = activeTabId;
       const outcome = await input.execute(action);
       if (outcome.tabId) activeTabId = outcome.tabId;
       if (action.tool === 'navigate' || (action.tool === 'click' && action.newTab)) {
@@ -621,7 +625,15 @@ export async function runUnifiedBrowserLoop(
         }
       }
       const { image: capturedImage, ...receipt } = outcome;
-      trace.push({ tool: action.tool, ...receipt, screenshot: !!capturedImage });
+      trace.push({
+        tool: action.tool,
+        ...receipt,
+        screenshot: !!capturedImage,
+        ...((action.tool === 'new_tab' || (action.tool === 'click' && action.newTab)) &&
+        openingTabId
+          ? { fromTabId: openingTabId }
+          : {}),
+      });
       if (['stale_ref', 'stale_context'].includes(outcome.errorCode ?? '')) {
         staleTurn = true;
         if (++staleFailures >= 3)
@@ -677,6 +689,7 @@ export async function runUnifiedBrowserLoop(
       ) {
         lastPageText = remember(outcome.text, outcome.url);
       }
+      if (outcome.ok && action.tool === 'list_tabs') addReadTabTitles(pageEvidence, outcome.text);
       results.push(
         toolResult(
           call.id,
@@ -768,6 +781,43 @@ export function normalizeToolInput(
  * Evidence fallback: a line of the model's summary (or a table cell run) that
  * literally appears in the latest page text. Never invents text.
  */
+/**
+ * The browser-reported document title of a tab that was already read
+ * successfully is part of that page. A tab never read (or that failed to load)
+ * gets nothing from the listing.
+ */
+export function addReadTabTitles(pages: ObservedEvidence[], listing: string): void {
+  let tabs: unknown;
+  try {
+    tabs = (JSON.parse(listing) as { tabs?: unknown }).tabs;
+  } catch {
+    return;
+  }
+  if (!Array.isArray(tabs)) return;
+  for (const tab of tabs) {
+    if (!tab || typeof tab.tabId !== 'string' || typeof tab.title !== 'string' || !tab.title)
+      continue;
+    const read = pages.find((page) => page.tabId === tab.tabId);
+    if (read && !read.text.includes(tab.title)) read.text = `${read.text}\n${tab.title}`;
+  }
+}
+
+/** Structured `fields` values the summary does not already state, as answer lines. */
+export function fieldLines(fields: unknown, summary: string): string {
+  if (!Array.isArray(fields)) return '';
+  const lines: string[] = [];
+  for (const field of fields.slice(0, 60)) {
+    if (!field || typeof field !== 'object') continue;
+    const { name, value } = field as { name?: unknown; value?: unknown };
+    if (typeof name !== 'string' || typeof value !== 'string') continue;
+    const text = unescapeLiteralBreaks(value).trim();
+    if (!text || summary.includes(text) || /summary|总结|概述|摘要|说明|备注|note/i.test(name))
+      continue;
+    lines.push(`- ${name}：${text}`);
+  }
+  return lines.join('\n');
+}
+
 export function deriveEvidence(summary: string, pageText: string): string {
   if (!pageText) return '';
   const normalizedPage = pageText.replace(/\s+/g, ' ');
