@@ -120,6 +120,23 @@ function explicitFacts(input: unknown): Fact[] {
   });
 }
 
+const unclosed = (value: string) =>
+  (value.match(/[（(]/g)?.length ?? 0) > (value.match(/[）)]/g)?.length ?? 0);
+
+/** Drop an explanatory parenthetical left unclosed by the field cut ("16年前（说明…"). */
+function closeBrackets(value: string): string {
+  let depth = 0;
+  let open = -1;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i]!;
+    if ('（(【['.includes(ch)) {
+      if (depth === 0) open = i;
+      depth++;
+    } else if ('）)】]'.includes(ch)) depth = Math.max(0, depth - 1);
+  }
+  return depth > 0 && open > 0 ? value.slice(0, open).trim() : value;
+}
+
 /** Text up to the first full-width comma that is not inside brackets. */
 function beforeOuterComma(value: string): string {
   let depth = 0;
@@ -151,7 +168,13 @@ function answerFacts(summary: string, intent = ''): Fact[] {
     // full-width comma is not part of the value.
     const raw = match[2]!.trim();
     const quoted = raw.match(/^[“"「『]([^”"」』]+)[”"」』]/u)?.[1];
-    const value = quoted ?? beforeOuterComma(raw);
+    // "大小：文件名为 …" — an enumeration header, not this label's value.
+    if (!quoted && new RegExp(`^(?:${FACT_LABELS})\\s*(?:为|是|[:：])`, 'iu').test(raw)) continue;
+    // A field cut inside a bracket ("16年前（说明；…）") is completed to its
+    // closing bracket, so facts inside the note are still checked.
+    const end = match.index! + match[0].length;
+    const tail = text.slice(end).match(/^[^（）()\n]*[）)]/u)?.[0] ?? '';
+    const value = closeBrackets(quoted ?? beforeOuterComma(raw + (unclosed(raw) ? tail : '')));
     // "第3节标题" / "列表标题" — a section or item title, not the page's own title.
     const before = text.slice(Math.max(0, match.index! - 4), match.index!);
     const qualified = /[节章段条项部篇栏]\s*$|列表\s*$|\d\s*$/.test(before);
@@ -164,6 +187,8 @@ function answerFacts(summary: string, intent = ''): Fact[] {
     const before = text.slice(Math.max(0, match.index! - 12), match.index!);
     if (
       /[A-Za-z]{3,}|\d/.test(quote) &&
+      // Short symbol/number snippets ("0/1") are not page-text claims.
+      (/[A-Za-z]/.test(quote) || quote.length >= 4) &&
       // The user's own words ("搜索「Playwright tutorial」") are not a page claim.
       !asked.includes(normalizeFact(quote)) &&
       !/而非|不是|并非|并不是|没有|未出现|instead of|rather than|not\s*$/i.test(before)
@@ -268,9 +293,21 @@ export function assessCompletionFacts(input: {
       // A parenthetical that carries numbers is its own fact, checked separately.
       // Titles and list items often carry parentheses as part of the name.
       const split = fact.listItem || TITLE_FIELD.test(fact.name) ? null : splitNote(fact.value);
-      return split && /\d/.test(split.note)
-        ? [fact, { ...fact, name: `${fact.name}（括注）`, value: split.note, listItem: true }]
-        : [fact];
+      if (!split || !/\d/.test(split.note)) return [fact];
+      // Only the pieces of the note that carry numbers are facts of their own.
+      const pieces = split.note
+        .split(/[，,；;、]/)
+        .map((piece) => piece.trim())
+        .filter((piece) => /\d/.test(piece));
+      return [
+        fact,
+        ...pieces.map((piece) => ({
+          ...fact,
+          name: `${fact.name}（括注）`,
+          value: piece,
+          listItem: true,
+        })),
+      ];
     },
   );
   for (const fact of facts) {
