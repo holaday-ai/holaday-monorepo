@@ -599,6 +599,7 @@ export interface SupercarTickEvent {
     errorCode?: string;
     errorMessage?: string;
     blockerEvidence?: import('../browser-tools/browser-completion.js').BrowserBlockerEvidence;
+    effect?: import('../browser-tools/playwright-unified-executor.js').UnifiedToolResult['effect'];
   };
   iteration: number;
   /**

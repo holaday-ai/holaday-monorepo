@@ -314,6 +314,7 @@ type ActionWindow = {
   priorRequests: Set<string>;
   inFlight: Set<Request>;
   lastActivity: number;
+  action: string;
 };
 
 export class CloudObservation {
@@ -326,15 +327,35 @@ export class CloudObservation {
   private virtualRefs = new Map<Frame, Map<string, number>>();
   private cursors = new Map<
     string,
-    { frame: Frame; fingerprint: string; text: string; offset: number; revision: string }
+    { frame: Frame; documentId: string; text: string; offset: number; snapshotId: string }
   >();
-  private requests: Array<{ category: string; write: boolean }> = [];
+  private requests: Array<{
+    category: string;
+    write: boolean;
+    branch: string;
+    method: string;
+    url: string;
+  }> = [];
 
   private active: Page;
   private backgroundRequests = new Map<string, number>();
   private actionWindow: ActionWindow | null = null;
   private pendingAction: ActionWindow | null = null;
   private pendingWrite = false;
+  private pendingTriggers: Array<{ branch: string; method: string; url: string; action: string }> =
+    [];
+  pendingEffect() {
+    return this.pendingWrite
+      ? {
+          urlChanged: false,
+          formChanged: false,
+          domChanged: false,
+          networkCategories: [],
+          unexpected: true,
+          triggers: [...this.pendingTriggers],
+        }
+      : undefined;
+  }
   private requestWindows = new Map<Request, ActionWindow>();
   interruption(): { reason: string; message: string } | undefined {
     return this.pendingWrite
@@ -381,12 +402,8 @@ export class CloudObservation {
     }
     this.observations.clear();
     this.cursors.clear();
-    return {
-      ok: true,
-      text: JSON.stringify({ tabId: this.tabId(this.active), status: action.tool }),
-      tabId: this.tabId(this.active),
-      url: this.active.url(),
-    };
+    const observation = await this.read({ tool: 'read_page' });
+    return { ...observation!, tabId: this.tabId(this.active), url: this.active.url() };
   }
   private recordRequest(r: Request, window = this.actionWindow ?? this.pendingAction) {
     let url: URL;
@@ -426,13 +443,67 @@ export class CloudObservation {
       (telemetryPath && (url.origin === window.origin || telemetryHost)) ||
       (!navigation && window.priorRequests.has(signature));
     if (ignored && !transactional) return;
-    const write =
-      transactional || (graphql !== 'query' && !['GET', 'HEAD', 'OPTIONS'].includes(r.method()));
+    const knownSiteInitialization =
+      ((url.hostname === 'www.youtube.com' || url.hostname === 'youtube.com') &&
+        /^(?:\/youtubei\/v1\/(?:guide|log_event|notification_registration\/set_registration)|\/api\/jnn\/v1\/GenerateIT)$/.test(
+          url.pathname,
+        )) ||
+      (url.hostname === 'cdn.tiny.cloud' &&
+        /^\/1\/[^/]+\/tinymce\/[A-Za-z0-9.-]+\/cdn-init$/.test(url.pathname)) ||
+      (url.hostname === 'en.wikipedia.org' &&
+        r.resourceType() === 'ping' &&
+        /^\/ins-[a-z0-9]+\/v2\/events$/.test(url.pathname));
+    const readApi = /\/youtubei\/v\d+\/(?:search|browse|next|player|get_transcript)(?:\/|$)/i.test(
+      url.pathname,
+    );
+    const formPost =
+      r.method() === 'POST' &&
+      (navigation ||
+        /application\/x-www-form-urlencoded|multipart\/form-data/i.test(
+          r.headers()['content-type'] ?? '',
+        ));
+    const resourceWrite =
+      r.method() === 'POST' &&
+      /\/(?:orders?|payments?|messages?|comments?|bookings?)(?:\/|$)/i.test(url.pathname);
+    const methodWrite = ['PUT', 'PATCH', 'DELETE'].includes(r.method());
+    // Unknown POSTs remain fail-closed; only a known read API or parsed GraphQL query is exempt.
+    const unknownPost =
+      r.method() === 'POST' && !readApi && !knownSiteInitialization && graphql !== 'query';
+    const write = transactional || resourceWrite || methodWrite || unknownPost;
+    const branch =
+      transactional || resourceWrite
+        ? 'transaction_request'
+        : formPost && !readApi
+          ? 'form_submit'
+          : knownSiteInitialization && !transactional
+            ? 'site_initialization'
+            : methodWrite
+              ? 'mutation_method'
+              : unknownPost
+                ? 'unknown_post'
+                : readApi
+                  ? 'read_api'
+                  : 'read_request';
     window.lastActivity = Date.now();
     window.inFlight.add(r);
     this.requestWindows.set(r, window);
-    if (write) this.pendingWrite = true;
-    this.requests.push({ category: `${r.method()}:${r.resourceType()}`, write });
+    if (write) {
+      this.pendingWrite = true;
+      this.pendingTriggers.push({
+        branch,
+        method: r.method(),
+        url: safeObservationUrl(url.origin + url.pathname),
+        action: window.action,
+      });
+      this.pendingTriggers = this.pendingTriggers.slice(-20);
+    }
+    this.requests.push({
+      category: `${r.method()}:${r.resourceType()}`,
+      write,
+      branch,
+      method: r.method(),
+      url: safeObservationUrl(url.origin + url.pathname),
+    });
     if (this.requests.length > 400) this.requests.shift();
   }
   private onRequest = (request: Request) => {
@@ -512,6 +583,7 @@ export class CloudObservation {
     );
   }
   async validate(action: UnifiedBrowserAction) {
+    if (['new_tab', 'switch_tab', 'close_tab', 'list_tabs'].includes(action.tool)) return;
     const { frame } = this.resolve(action);
     if ('ref' in action && action.ref) {
       const current = this.observations.get(frame);
@@ -557,7 +629,9 @@ export class CloudObservation {
     return false;
   }
   async read(action: UnifiedBrowserAction): Promise<UnifiedToolResult | null> {
-    const { page, frame } = this.resolve(action);
+    const { page, frame } = ['switch_tab', 'list_tabs'].includes(action.tool)
+      ? { page: this.active, frame: this.active.mainFrame() }
+      : this.resolve(action);
     const json = (value: unknown): UnifiedToolResult => ({
       ok: true,
       text: JSON.stringify(value),
@@ -607,6 +681,12 @@ export class CloudObservation {
       let steps = 0;
       let itemCount = 0;
       let reason = 'step_limit';
+      const receipts: Array<{
+        beforeHeight: number;
+        afterHeight: number;
+        addedChars: number;
+        grew: boolean;
+      }> = [];
       for (; steps < (action.maxSteps ?? 10); steps++) {
         if (Date.now() - started >= (action.maxMs ?? 5000)) {
           reason = 'time_limit';
@@ -618,10 +698,7 @@ export class CloudObservation {
           reason = 'item_limit';
           break;
         }
-        if (state.text.length >= budget) {
-          reason = 'text_limit';
-          break;
-        }
+        // maxChars bounds the returned text, not the number of actual scrolls.
         const progress = await frame.evaluate(() =>
           JSON.stringify([document.body?.scrollHeight, scrollY, document.body?.innerText.length]),
         );
@@ -631,22 +708,42 @@ export class CloudObservation {
           reason = 'stalled';
           break;
         }
+        const beforeHeight = await frame.evaluate(() => document.documentElement.scrollHeight);
         await frame.evaluate(() => window.scrollBy(0, Math.max(200, innerHeight - 100)));
-        await page.waitForTimeout(100);
+        await page.waitForTimeout(350);
+        const afterState = await observationState(frame);
+        const afterHeight = await frame.evaluate(() => document.documentElement.scrollHeight);
+        receipts.push({
+          beforeHeight,
+          afterHeight,
+          addedChars: Math.max(0, afterState.text.length - state.text.length),
+          grew: afterState.text.length > state.text.length || afterHeight > beforeHeight,
+        });
       }
-      return json({
-        ...(await this.metadata(frame)),
-        steps,
-        itemCount,
-        reason,
-        tokenBudget: action.maxTokens ?? 8000,
-        truncated: true,
-        end: false,
-        text: (await redactPageText(frame, (await observationState(frame)).text)).slice(0, budget),
-      });
+      return {
+        ...json({
+          ...(await this.metadata(frame)),
+          steps: receipts.length,
+          itemCount,
+          reason,
+          tokenBudget: action.maxTokens ?? 8000,
+          truncated: true,
+          end: false,
+          text: (await redactPageText(frame, (await observationState(frame)).text)).slice(
+            0,
+            budget,
+          ),
+        }),
+        scroll: {
+          beforeHeight: receipts[0]?.beforeHeight ?? 0,
+          afterHeight: receipts.at(-1)?.afterHeight ?? 0,
+          addedChars: receipts.reduce((n, r) => n + r.addedChars, 0),
+          grew: receipts.some((r) => r.grew),
+          steps: receipts,
+        },
+      };
     }
     if (action.tool === 'snapshot' || action.tool === 'read_page') {
-      const before = await this.fingerprint(frame);
       let tree = await redactPageText(
         frame,
         await frame.locator('body').ariaSnapshot({ mode: 'ai', timeout: 5000 }),
@@ -670,7 +767,7 @@ export class CloudObservation {
         tree += `\n- textbox "${item.label}" [ref=${ref}] [type=${item.type}]`;
       }
       this.virtualRefs.set(frame, virtual);
-      if (before !== (await this.fingerprint(frame))) throw new Error('stale_observation');
+      // Snapshot reads may overlap harmless page updates; mutation actions still validate the resulting revision.
       // Rewrite only URL scalar lines; never shorten real resource identities.
       const safeTree = tree.replace(
         /^(\s*- \/url: )(.*)$/gm,
@@ -678,7 +775,6 @@ export class CloudObservation {
       );
       const meta = await this.metadata(frame);
       const current = this.observations.get(frame)!;
-      if (current.fingerprint !== before) throw new Error('stale_observation');
       current.revision = randomUUID();
       meta.observationRevision = current.revision;
       current.refs = new Set(
@@ -696,28 +792,26 @@ export class CloudObservation {
       });
     }
     if (action.tool === 'get_page_text') {
-      const fingerprint = await this.fingerprint(frame);
+      const documentId = (await observationState(frame)).documentId;
       const meta = await this.metadata(frame);
+      let snapshotId: string = randomUUID();
       let text: string;
       let offset = 0;
       if (action.cursor) {
         const cursor = this.cursors.get(action.cursor);
         this.cursors.delete(action.cursor);
-        if (
-          !cursor ||
-          cursor.frame !== frame ||
-          cursor.fingerprint !== fingerprint ||
-          cursor.revision !== meta.observationRevision
-        )
+        if (!cursor || cursor.frame !== frame || cursor.documentId !== documentId)
           throw new Error('stale_cursor');
         text = cursor.text;
         offset = cursor.offset;
+        snapshotId = cursor.snapshotId;
       } else
         text = await redactPageText(
           frame,
           await frame.locator('body').innerText({ timeout: 5000 }),
         );
-      if (fingerprint !== (await this.fingerprint(frame))) throw new Error('stale_cursor');
+      if (documentId !== (await observationState(frame)).documentId)
+        throw new Error('stale_cursor');
       const endOffset = Math.min(text.length, offset + (action.maxChars ?? 8000));
       const end = endOffset >= text.length;
       const cursor = end ? null : randomUUID();
@@ -725,16 +819,22 @@ export class CloudObservation {
         if (this.cursors.size >= 32) this.cursors.delete(this.cursors.keys().next().value!);
         this.cursors.set(cursor, {
           frame,
-          fingerprint,
+          documentId,
           text,
           offset: endOffset,
-          revision: meta.observationRevision,
+          snapshotId,
         });
       }
       return json({
         ...meta,
         text: text.slice(offset, endOffset),
         range: [offset, endOffset],
+        snapshotId,
+        snapshotMode: 'immutable-document-text',
+        position: {
+          paragraph: text.slice(0, offset).split(/\n+/).length - 1,
+          characterOffset: offset,
+        },
         cursor,
         end,
         truncated: !end,
@@ -848,7 +948,7 @@ export class CloudObservation {
     this.requests = [];
     let origin = '';
     try {
-      origin = new URL(before.url).origin;
+      origin = new URL(action.tool === 'navigate' ? action.url : before.url, before.url).origin;
     } catch {}
     const pending = this.interruption();
     if (pending) return { ok: false, text: pending.message, interruption: pending };
@@ -861,6 +961,7 @@ export class CloudObservation {
       ),
       inFlight: new Set(),
       lastActivity: Date.now(),
+      action: action.tool,
     };
     this.actionWindow = window;
     this.pendingAction = window;
@@ -880,25 +981,74 @@ export class CloudObservation {
       this.actionWindow = null;
     }
     const after = await observationState(frame).catch(() => null);
-    const writes = this.requests.filter((r) => r.write).map((r) => r.category);
+    const writes = this.requests.filter((r) => r.write);
+    const triggers = writes.map((r) => ({
+      branch: r.branch,
+      method: r.method,
+      url: r.url,
+      action: action.tool,
+    }));
     const newReceipt =
-      after?.receiptRegions.some(
-        (text) => TRANSACTION_RECEIPT_RE.test(text) && !before.receiptRegions.includes(text),
-      ) ?? false;
+      (['click', 'click_at', 'type', 'select'].includes(action.tool) &&
+        after?.receiptRegions.some(
+          (text) => TRANSACTION_RECEIPT_RE.test(text) && !before.receiptRegions.includes(text),
+        )) ??
+      false;
     const unexpected =
       writes.length > 0 ||
-      !after ||
       (action.tool === 'type' &&
         action.submit &&
-        after.interceptedEnter > before.interceptedEnter) ||
+        (after?.interceptedEnter ?? 0) > before.interceptedEnter) ||
       opened.some((p) => TRANSACTION_PAGE_RE.test(p.url())) ||
-      (TRANSACTION_PAGE_RE.test(after.url) && after.url !== before.url) ||
-      (after.dom !== before.dom && newReceipt);
+      (action.tool !== 'navigate' &&
+        !!after &&
+        TRANSACTION_PAGE_RE.test(after.url) &&
+        after.url !== before.url) ||
+      (after?.dom !== before.dom && newReceipt);
+    if (newReceipt)
+      triggers.push({
+        branch: 'new_transaction_receipt',
+        method: '',
+        url: safeObservationUrl(after?.url ?? before.url),
+        action: action.tool,
+      });
+    if (
+      action.tool === 'type' &&
+      action.submit &&
+      (after?.interceptedEnter ?? 0) > before.interceptedEnter
+    )
+      triggers.push({
+        branch: 'intercepted_submit',
+        method: '',
+        url: safeObservationUrl(before.url),
+        action: action.tool,
+      });
+    if (opened.some((p) => TRANSACTION_PAGE_RE.test(p.url())))
+      triggers.push({
+        branch: 'transaction_popup',
+        method: '',
+        url: '[task popup]',
+        action: action.tool,
+      });
+    if (
+      action.tool !== 'navigate' &&
+      after &&
+      TRANSACTION_PAGE_RE.test(after.url) &&
+      after.url !== before.url
+    )
+      triggers.push({
+        branch: 'transaction_navigation',
+        method: '',
+        url: safeObservationUrl(after.url),
+        action: action.tool,
+      });
     const effect = {
       urlChanged: before.url !== after?.url,
       formChanged: before.forms !== after?.forms,
       domChanged: before.dom !== after?.dom,
       networkCategories: [...new Set(this.requests.map((r) => r.category))],
+      triggers,
+      observationAvailable: !!after,
       unexpected,
     };
     result.effect = effect;

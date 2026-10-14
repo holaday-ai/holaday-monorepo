@@ -174,5 +174,21 @@
     "intent": "读取文章正文",
     "expected": "clear",
     "reason": "教程路径含captcha并非整页验证"
+  },
+  {
+    "id": "real-youtube-dialog-public",
+    "html": "youtube-real-interstitial",
+    "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+    "intent": "YouTube 公开视频页读标题/频道/播放量/发布日期（不播放）",
+    "expected": "continue",
+    "reason": "真实播放器错误层dialog，墙外元信息可读"
+  },
+  {
+    "id": "real-youtube-dialog-play",
+    "html": "youtube-real-interstitial",
+    "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+    "intent": "播放视频并读取字幕",
+    "expected": "pause",
+    "reason": "真实播放器错误层挡住受保护目标"
   }
 ]

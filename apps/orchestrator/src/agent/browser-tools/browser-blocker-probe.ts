@@ -72,11 +72,16 @@ function collectSurface() {
       const auth = hasAuthInput(el);
       const cookie = /cookie|consent|隐私|同意.*条款/i.test(value) && !auth;
       const player = el.matches('#movie_player,#player,ytd-player');
+      const playerSurface =
+        player ||
+        !!el.closest(
+          'yt-playability-error-supported-renderers#error-screen,yt-player-interstitial-renderer',
+        );
       const comments = el.matches('#comments,ytd-comments,[aria-label="Comments" i]');
       const component = el.matches('[role="region"]');
       const modal = el.getAttribute('aria-modal') === 'true' || el.matches('dialog[open]');
       const obstructs =
-        player ||
+        playerSurface ||
         comments ||
         component ||
         modal ||
@@ -90,8 +95,9 @@ function collectSurface() {
             : component
               ? ('component' as const)
               : ('dialog' as const),
+        playerSurface,
         local:
-          (player || comments || component) &&
+          (playerSurface || comments || component) &&
           r.width * r.height < innerWidth * innerHeight * 0.8 &&
           !modal &&
           !el.closest('[aria-modal="true"],dialog[open]'),
@@ -273,12 +279,11 @@ export async function probeBrowserBlocker(page: Page, intent?: string) {
             localNotice = {
               ...hit,
               disposition: 'continue',
-              message:
-                region.scope === 'player'
-                  ? '播放器需登录验证，未播放，以下为页面公开信息。'
-                  : region.scope === 'comments'
-                    ? '评论区需登录验证，未读取受限评论，以下为页面公开信息。'
-                    : '局部组件需登录验证，未操作受限组件，以下为页面公开信息。',
+              message: region.playerSurface
+                ? '播放器需登录验证，未播放，以下为页面公开信息。'
+                : region.scope === 'comments'
+                  ? '评论区需登录验证，未读取受限评论，以下为页面公开信息。'
+                  : '局部组件需登录验证，未操作受限组件，以下为页面公开信息。',
             };
             continue;
           }

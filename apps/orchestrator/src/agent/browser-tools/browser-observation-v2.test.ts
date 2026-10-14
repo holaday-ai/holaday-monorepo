@@ -55,7 +55,7 @@ describe('cloud observation v2', () => {
       .find((l) => l.includes(label) && /ref=e\d+/.test(l))!
       .match(/ref=(e\d+)/)![1]!;
 
-  it('rejects cursors after DOM mutation and never mixes page versions', async () => {
+  it('keeps an immutable text snapshot across DOM mutation without mixing page versions', async () => {
     const { page, tools } = await fixture();
     try {
       const first = await read(tools, { tool: 'get_page_text', maxChars: 256 });
@@ -69,9 +69,16 @@ describe('cloud observation v2', () => {
       expect(second.observationRevision).toBe(first.observationRevision);
       expect(second.range).toEqual([256, 512]);
       await page.locator('h1').evaluate((n) => (n.textContent = 'Changed'));
-      expect((await tools.execute({ tool: 'get_page_text', cursor: second.cursor })).ok).toBe(
-        false,
-      );
+      const third = await read(tools, {
+        tool: 'get_page_text',
+        cursor: second.cursor,
+        maxChars: 256,
+      });
+      expect(third.snapshotId).toBe(first.snapshotId);
+      expect(third.range).toEqual([512, 768]);
+      expect(third.text).not.toContain('Changed');
+      await page.reload();
+      expect((await tools.execute({ tool: 'get_page_text', cursor: third.cursor })).ok).toBe(false);
     } finally {
       tools.dispose();
       await page.close();

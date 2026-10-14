@@ -383,15 +383,14 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         );
         return {
           kind: 'skip' as const,
-          message: `${failure.text} (${failure.errorCode}: ${failure.errorMessage})`,
+          message: `${failure.text} (${failure.errorCode}: ${failure.errorMessage})\nfresh_observation (未执行原动作):\n${(await tools.recoverObservation().catch(() => null))?.text ?? '无法重新观察当前页'}`,
         };
       }
     }
     const changedTab = ['new_tab', 'switch_tab', 'close_tab'].includes(action.tool);
-    const targetPage =
-      phase === 'after' && changedTab
-        ? tools.page
-        : (tools.observation?.resolve(action).page ?? tools.page);
+    const targetPage = changedTab
+      ? tools.page
+      : (tools.observation?.resolve(action).page ?? tools.page);
     const result = await baseGateAction(targetPage)(action, phase);
     if (result.kind === 'proceed' && replay) {
       try {
@@ -457,7 +456,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         iteration += 1;
         toolsUsed.add(action.tool);
         if (action.tool === 'snapshot' && result.ok) lastSnapshot = result.text;
-        if (result.ok && (result.download || result.tabId || result.scroll))
+        if (
+          result.ok &&
+          (result.download || result.tabId || result.scroll || result.form || result.image)
+        )
           await safe(() =>
             opts.onEvidence?.({
               fact: JSON.stringify({
@@ -465,6 +467,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                 ...(result.download ? { download: result.download } : {}),
                 ...(result.tabId ? { tabId: result.tabId } : {}),
                 ...(result.scroll ? { scroll: result.scroll } : {}),
+                ...(result.form ? { form: result.form } : {}),
+                ...(result.image ? { screenshot: true } : {}),
               }),
               sourceType: 'browser_state',
               sourceDetail: 'browser_tool_receipt',
@@ -482,6 +486,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
               actionKind: action.tool,
               actionSummary: describe(action, label),
               ok: result.ok,
+              ...(result.effect ? { effect: result.effect } : {}),
               ...(result.ok
                 ? {}
                 : {

@@ -5,7 +5,7 @@ import type {
   NeutralToolDefinition,
 } from '../../llm/messages-adapter.js';
 import { prepareBrowserPlan, verifyBrowserAnswer } from './browser-brain-roles.js';
-import { type BrowserTrace, completionGap } from './browser-completion.js';
+import { type BrowserTrace, completionGap, receiptEvidence } from './browser-completion.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import {
   UNIFIED_BROWSER_TOOLS,
@@ -179,6 +179,30 @@ export async function runUnifiedBrowserLoop(
   /** Latest page text seen by snapshot/extract; evidence must come from it. */
   let lastPageText = '';
   const trace: BrowserTrace[] = [];
+  let staleFailures = 0;
+  let repeatedReads = 0;
+  const seenReads = new Set<string>();
+  let concludeNow = false;
+  const readSignature = (text: string) => {
+    try {
+      const value = JSON.parse(text);
+      return JSON.stringify(value, (key, item) =>
+        [
+          'observationRevision',
+          'capturedAt',
+          'refExpiresOn',
+          'snapshotId',
+          'cursor',
+          'tabId',
+          'frameId',
+        ].includes(key)
+          ? undefined
+          : item,
+      ).replace(/\[ref=e\d+\]/g, '');
+    } catch {
+      return text;
+    }
+  };
   const localNotices = new Set<string>();
   const checkBlocker = async () => {
     const hit = await input.probeBlocker?.();
@@ -236,21 +260,24 @@ export async function runUnifiedBrowserLoop(
               ? '\n当前启用云端读取：每次交互带上 read_page 返回的 observationRevision/tabId/frameId；动作后重新读取，只有实际页面证据才能完成。cursor/ref 过期须重读。'
               : ''),
           messages: trimImages(compactToolResults(messages, input.fullPageResults)),
-          tools: [
-            ...(input.observationV2
-              ? [...cloudObservationTools(), ...CONTROL_TOOLS]
-              : UNIFIED_LOOP_TOOLS
-            ).filter((tool) => {
-              if (tool.name === 'web_search') return Boolean(input.webSearch);
-              if (!input.supportedTools) return tool.name !== 'download' && tool.name !== 'upload';
-              if (tool.name === 'download' || tool.name === 'upload')
-                return input.supportedTools[tool.name];
-              if (['new_tab', 'switch_tab', 'close_tab', 'list_tabs'].includes(tool.name))
-                return input.supportedTools.tabs;
-              return true;
-            }),
-            ...(input.readPage ? [READ_URL_TOOL] : []),
-          ],
+          tools: concludeNow
+            ? CONTROL_TOOLS.filter((t) => t.name === 'finish')
+            : [
+                ...(input.observationV2
+                  ? [...cloudObservationTools(), ...CONTROL_TOOLS]
+                  : UNIFIED_LOOP_TOOLS
+                ).filter((tool) => {
+                  if (tool.name === 'web_search') return Boolean(input.webSearch);
+                  if (!input.supportedTools)
+                    return tool.name !== 'download' && tool.name !== 'upload';
+                  if (tool.name === 'download' || tool.name === 'upload')
+                    return input.supportedTools[tool.name];
+                  if (['new_tab', 'switch_tab', 'close_tab', 'list_tabs'].includes(tool.name))
+                    return input.supportedTools.tabs;
+                  return true;
+                }),
+                ...(input.readPage ? [READ_URL_TOOL] : []),
+              ],
           toolChoice: { type: 'any' },
         },
         {
@@ -268,6 +295,12 @@ export async function runUnifiedBrowserLoop(
     }
     const calls = response.content.filter((block) => block.type === 'tool_use');
     if (calls.length === 0) {
+      if (concludeNow)
+        return {
+          status: 'failed',
+          reason: '连续读取后未给出有效完成结果，已停止空转。',
+          steps: step + 1,
+        };
       messages.push({ role: 'assistant', content: response.content });
       messages.push({
         role: 'user',
@@ -292,12 +325,20 @@ export async function runUnifiedBrowserLoop(
       }
       const normalized = normalizeToolInput(call.input);
       if (normalized === INVALID_ARGUMENTS) {
+        if (concludeNow)
+          return { status: 'failed', reason: '完成结果参数无效，已停止空转。', steps: step + 1 };
         results.push(
           toolResult(call.id, `${call.name} 的参数不是合法 JSON，请缩短内容后重新调用。`, true),
         );
         continue;
       }
       const args = normalized;
+      if (concludeNow && call.name !== 'finish')
+        return {
+          status: 'failed',
+          reason: '连续读取没有新信息；无法证明已完成目标，已停止空转。',
+          steps: step + 1,
+        };
       if (call.name === 'finish') {
         const summary = typeof args.summary === 'string' ? args.summary : '';
         if (args.status === 'completed') {
@@ -310,16 +351,25 @@ export async function runUnifiedBrowserLoop(
             input.requireBrowserEvidence ?? false,
           );
           if (gap) {
+            if (concludeNow) return { status: 'failed', reason: gap, steps: step + 1 };
             results.push(toolResult(call.id, gap, true));
             continue;
           }
           const given = typeof args.evidence === 'string' ? args.evidence.trim() : '';
-          const evidence = given || deriveEvidence(summary, lastPageText);
+          const hostProof = receiptEvidence(input.intent, trace);
+          const evidence = hostProof || given || deriveEvidence(summary, lastPageText);
           if (
             input.observationV2 &&
+            !hostProof &&
             (!lastPageText ||
               (given && !lastPageText.replace(/\s+/g, ' ').includes(given.replace(/\s+/g, ' '))))
           ) {
+            if (concludeNow)
+              return {
+                status: 'failed',
+                reason: '没有足够的最新页面证据，已停止重复读取。',
+                steps: step + 1,
+              };
             results.push(
               toolResult(
                 call.id,
@@ -330,6 +380,12 @@ export async function runUnifiedBrowserLoop(
             continue;
           }
           if (!evidence) {
+            if (concludeNow)
+              return {
+                status: 'failed',
+                reason: '没有完成证据，已停止重复读取。',
+                steps: step + 1,
+              };
             results.push(
               toolResult(
                 call.id,
@@ -341,6 +397,7 @@ export async function runUnifiedBrowserLoop(
           }
           const gaps = remediationsLeft > 0 ? (input.reviewFinish?.(summary) ?? null) : null;
           if (gaps) {
+            if (concludeNow) return { status: 'failed', reason: gaps, steps: step + 1 };
             remediationsLeft -= 1;
             held = { summary: withLimitations(summary), evidence };
             results.push(toolResult(call.id, remediationPrompt(gaps), true));
@@ -462,12 +519,45 @@ export async function runUnifiedBrowserLoop(
       // wins over the action: nothing runs after it.
       if (input.signal?.aborted) return cancelled(step + 1);
       if (gate?.kind === 'skip') {
+        if (/stale_/.test(gate.message) && ++staleFailures >= 3)
+          return {
+            status: 'failed',
+            reason: '同一阶段引用连续失效3次；已停止并保留观察证据，请换用稳定定位或重新导航。',
+            steps: step + 1,
+          };
         results.push(toolResult(call.id, gate.message));
         staleTurn = true;
         continue;
       }
       const outcome = await input.execute(action);
-      trace.push({ tool: action.tool, ...outcome });
+      const { image: capturedImage, ...receipt } = outcome;
+      trace.push({ tool: action.tool, ...receipt, screenshot: !!capturedImage });
+      if (['stale_ref', 'stale_context'].includes(outcome.errorCode ?? '')) {
+        staleTurn = true;
+        if (++staleFailures >= 3)
+          return {
+            status: 'failed',
+            reason: '引用连续失效3次，已停止旧引用重试；需要稳定定位或重新导航。',
+            steps: step + 1,
+          };
+      } else if (outcome.ok && isMutatingBrowserAction(action)) staleFailures = 0;
+      if (
+        outcome.ok &&
+        ['read_page', 'snapshot', 'get_page_text', 'links', 'tables'].includes(action.tool)
+      ) {
+        const signature = readSignature(outcome.text);
+        repeatedReads = seenReads.has(signature) ? repeatedReads + 1 : 1;
+        seenReads.add(signature);
+        if (seenReads.size > 64) seenReads.delete(seenReads.values().next().value!);
+        if (repeatedReads >= 5) {
+          concludeNow = true;
+          outcome.text +=
+            '\n连续5轮读取没有新信息。下一轮必须基于现有证据 finish，或者如实报告未完成；禁止继续空转读取。';
+        }
+      } else if (outcome.ok) {
+        repeatedReads = 0;
+        seenReads.clear();
+      }
       if (outcome.ok && input.probeBlocker) {
         const blocker = await checkBlocker();
         if (blocker) return { status: 'awaiting_user', ...blocker, steps: step + 1 };
