@@ -1217,7 +1217,8 @@ describe('constraint violation hard_fail', () => {
       intent: '搜索',
       executionMode: 'browser',
       targetDomain: 'example.com',
-      // Light tier auto-includes no_form_submit.
+      // User-stated (no longer a default since BROWSER-AUTOPILOT-1).
+      constraints: ['no_form_submit'],
     });
     recordEvidence('tsk_hf', {
       fact: 'navigated to https://example.com/',
@@ -1297,6 +1298,7 @@ describe('persistExecution writes the 5 columns', () => {
       intent: 'x',
       executionMode: 'browser',
       targetDomain: 'example.com',
+      constraints: ['no_form_submit'],
     });
     recordEvidence('tsk_p2', {
       fact: 'navigated to https://example.com/',

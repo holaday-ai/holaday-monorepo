@@ -616,6 +616,32 @@
         }
       ],
       "expect": "deliver"
+    },
+    {
+      "id": "auto-r6-core-08-gate-delivered",
+      "source": "BROWSER-AUTOPILOT-1 round 6 gate round6-core-08-gate (real finish; delivered by the loop)",
+      "intent": "请使用云端浏览器，httpbin.org/forms/post 或 the-internet.herokuapp.com 填表单与日期控件，只填不提交并截图",
+      "summary": "已在 httpbin.org/forms/post 页面完成表单填写（仅填写未提交）并截图。填写内容包括：Customer name 填入 Test User，Telephone 填入 1234567890，E-mail 填入 test@example.com，Pizza Size 选中 Medium，Pizza Toppings 勾选 Bacon，Preferred delivery time 时间控件填入 18:30，Delivery instructions 填入 Please ring the doorbell。所有字段均已成功输入，Submit order 按钮未被点击，表单保持未提交状态。页面截图已获取，展示了填写后的表单状态。该页面不包含独立的日期(date)控件，仅有 time 类型的时间控件，已按要求填写。\n\n- page_url：https://httpbin.org/forms/post",
+      "pages": [
+        {
+          "text": "(page text not recorded)"
+        }
+      ],
+      "expect": "deliver",
+      "note": "Facts below were checked by the loop against the live read text at the time."
+    },
+    {
+      "id": "auto-r6-core-10-gate-delivered",
+      "source": "BROWSER-AUTOPILOT-1 round 6 gate round6-core-10-gate (real finish; delivered by the loop)",
+      "intent": "请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts",
+      "summary": "在 the-internet.herokuapp.com 上完成了 JavaScript Alerts 和 Nested Frames 的测试。\n\n**JavaScript Alerts 测试结果（以页面实际返回文本为准）：**\n1.  **JS Alert**: 点击按钮后，页面 Result 区域显示 `You successfully clicked an alert`。✅ 达成（注：实际页面文案与规划建议中的示例不同，已按页面原样记录）。\n2.  **JS Confirm**: 进行了两次点击尝试。受云端浏览器对原生对话框交互的限制，无法主动选择 \"OK\" 或输入文本，系统默认行为均触发了 Cancel 路径。\n    *   两次尝试结果均为：`You clicked: Cancel`。\n    *   ⚠️ 部分达成：成功验证了 Cancel 路径及页面响应机制，但无法模拟 \"OK\" 选择。\n3.  **JS Prompt**: 点击按钮后，页面 Result 区域显示 `You entered: null`。⚠️ 受限于对话框交互能力，未能展示自定义文本输入效果，但成功捕获了未输入时的默认响应。\n\n**Nested Frames 测试结果：**\n*   导航至 `https://the-internet.herokuapp.com/nested_frames`（注：规划中的 `/frames/nested` 返回 404，已修正为正确地址）。\n*   成功识别并读取了所有嵌套 iframe 的内容：\n    *   Bottom Frame: `BOTTOM`\n    *   Left Frame: `LEFT`\n    *   Middle Frame: `MIDDLE`\n    *   Right Frame: `RIGHT`\n*   ✅ 完全达成：能够跨层级定位并提取最内层 iframe 中的特定文本元素。\n\n**总结**：页面导航、DOM 交互及嵌套 Frame 内容读取功能正常；原生 JS 对话框的复杂交互（确认OK、输入文本）受云端浏览器安全策略限制，仅能捕获默认的取消/空值响应。所有字段值均已核实为页面原样文本。",
+      "pages": [
+        {
+          "text": "(page text not recorded)"
+        }
+      ],
+      "expect": "deliver",
+      "note": "Facts below were checked by the loop against the live read text at the time."
     }
   ]
 }
