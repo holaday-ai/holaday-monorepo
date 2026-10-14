@@ -210,8 +210,6 @@ export async function runUnifiedBrowserLoop(
 ): Promise<UnifiedBrowserOutcome> {
   const maxSteps = input.maxSteps ?? 40;
   const messages: NeutralMessage[] = [{ role: 'user', content: input.intent }];
-  /** Latest page text seen by snapshot/extract; evidence must come from it. */
-  let lastPageText = '';
   const pageEvidence: ObservedEvidence[] = [];
   let activeTabId: string | undefined;
   let navigated = false;
@@ -527,10 +525,7 @@ export async function runUnifiedBrowserLoop(
         const url = typeof args.url === 'string' ? args.url : '';
         try {
           const page = await input.readPage(url);
-          lastPageText = remember(
-            JSON.stringify({ text: page.markdown, sourceURL: page.url }),
-            page.url,
-          );
+          remember(JSON.stringify({ text: page.markdown, sourceURL: page.url }), page.url);
           trace.push({ tool: 'read_url', ok: true });
           results.push(
             toolResult(call.id, `URL: ${page.url}\n标题: ${page.title}\n${page.markdown}`),
@@ -597,21 +592,6 @@ export async function runUnifiedBrowserLoop(
       }
       // A navigation or interaction can replace the document or its values. Scrolls
       // and chunked reads retain earlier observed passages on the same page.
-      if (
-        [
-          'navigate',
-          'click',
-          'click_at',
-          'type',
-          'select',
-          'upload',
-          'new_tab',
-          'switch_tab',
-          'close_tab',
-        ].includes(action.tool)
-      ) {
-        lastPageText = '';
-      }
       const openingTabId = activeTabId;
       const outcome = await input.execute(action);
       if (outcome.tabId) activeTabId = outcome.tabId;
@@ -699,7 +679,7 @@ export async function runUnifiedBrowserLoop(
           action.tool,
         )
       ) {
-        lastPageText = remember(outcome.text, outcome.url);
+        remember(outcome.text, outcome.url);
       }
       if (outcome.ok && action.tool === 'list_tabs') addReadTabTitles(pageEvidence, outcome.text);
       const resultText = outcome.errorCode
