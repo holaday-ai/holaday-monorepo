@@ -94,6 +94,7 @@ const PROSE_FIELD =
   /summary|总结|概述|摘要|说明|备注|注释|^注$|解释|描述|内容|结论|note|remark|explanation|description|overview|reason|原因/i;
 /** The page's own title — not a section, chapter or list-item title. */
 const TITLE_FIELD = /^(?:视频|页面|网页|文章|商品)?标题$|^(?:page |video )?title$/i;
+const NUMERIC_LABEL = /播放量|观看次数|价格|售价|大小|日期|发布时间|views|price|size|published/i;
 const FACT_LABELS =
   '标题|频道|作者|播放量|观看次数|发布日期(?:或页面相对日期)?|发布时间|日期|价格|售价|文件名|文件大小|大小|title|channel|author|views|published|price|filename|size|tab\\s*\\d+\\s*title';
 
@@ -117,6 +118,18 @@ function explicitFacts(input: unknown): Fact[] {
   });
 }
 
+/** Text up to the first full-width comma that is not inside brackets. */
+function beforeOuterComma(value: string): string {
+  let depth = 0;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i]!;
+    if ('（(【['.includes(ch)) depth++;
+    else if ('）)】]'.includes(ch)) depth = Math.max(0, depth - 1);
+    else if (ch === '，' && depth === 0) return value.slice(0, i);
+  }
+  return value;
+}
+
 function answerFacts(summary: string): Fact[] {
   const text = unescapeLiteralBreaks(summary);
   const facts: Fact[] = [];
@@ -124,11 +137,23 @@ function answerFacts(summary: string): Fact[] {
     if (fact.value && fact.value.length <= 300) facts.push(fact);
   };
   for (const url of text.match(TEXT_URL_RE) ?? []) add({ name: '链接', value: url });
-  // A labelled run that lists URLs ("标题：1) https://… → X") is handled per item below.
+  // A labelled run that lists URLs ("标题：1) https://… → X") is handled per item below;
+  // a numeric label whose value has no number is prose ("播放量为页面原样字符串").
   for (const match of text.matchAll(
     new RegExp(`(${FACT_LABELS})\\s*[*\`]*\\s*(?:[:：]|为|是)\\s*([^\\n；;|。]+)`, 'giu'),
-  ))
-    if (!/https?:\/\//i.test(match[2]!)) add({ name: match[1]!, value: clean(match[2]!) });
+  )) {
+    if (/https?:\/\//i.test(match[2]!)) continue;
+    if (NUMERIC_LABEL.test(match[1]!) && !/\d/.test(match[2]!)) continue;
+    // A quoted value is exactly what is inside the quotes; otherwise prose after a
+    // full-width comma is not part of the value.
+    const raw = match[2]!.trim();
+    const quoted = raw.match(/^[“"「『]([^”"」』]+)[”"」』]/u)?.[1];
+    const value = quoted ?? beforeOuterComma(raw);
+    // "第3节标题" / "列表标题" — a section or item title, not the page's own title.
+    const before = text.slice(Math.max(0, match.index! - 4), match.index!);
+    const qualified = /[节章段条项部篇栏]\s*$|列表\s*$|\d\s*$/.test(before);
+    add({ name: match[1]!, value: clean(value), ...(qualified ? { listItem: true } : {}) });
+  }
   let headers: string[] | undefined;
   for (const line of text.split('\n')) {
     if (line.trim().startsWith('|')) {

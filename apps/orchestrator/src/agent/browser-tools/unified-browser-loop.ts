@@ -432,7 +432,7 @@ export async function runUnifiedBrowserLoop(
           // read, and hard facts must not contradict what was read.
           const blocking =
             completionGap(input.intent, summary, trace, input.requireBrowserEvidence ?? false) ??
-            (!hostProof && (!observedText || (input.observationV2 && !lastPageText))
+            (!hostProof && !observedText
               ? '没有成功读取的页面内容；导航回执、标签列表或加载失败的页面都不能作为结果。请先 read_page/get_page_text 读取目标页面。'
               : null) ??
             (facts.contradictions.length
@@ -612,7 +612,10 @@ export async function runUnifiedBrowserLoop(
           if (action.tool === 'navigate') navigated = true;
           if (url) failedNavigationUrls.delete(url);
           if (tab) failedNavigationTabs.delete(tab);
-        } else {
+        } else if (outcome.errorCode !== 'browser_timeout') {
+          // A load-event timeout usually leaves a readable DOM (slow assets);
+          // only real load failures make the page's content inadmissible.
+          // Error pages are still excluded by their own URL scheme below.
           if (url) failedNavigationUrls.add(url);
           if (tab) failedNavigationTabs.add(tab);
         }

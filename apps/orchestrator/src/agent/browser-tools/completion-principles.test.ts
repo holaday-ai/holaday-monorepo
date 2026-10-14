@@ -137,3 +137,87 @@ describe('one rejection per run', () => {
     expect(result).toMatchObject({ status: 'completed', summary: '播放量：4.4亿次观看' });
   });
 });
+
+describe('page-read integrity without over-blocking (round 1 live findings)', () => {
+  it('accepts content read after a load-event timeout (slow assets, DOM present)', async () => {
+    const { adapter } = brain([
+      { name: 'navigate', input: { url: 'https://slow.test/alerts' } },
+      read,
+      finish('Result 显示：You successfully clicked an alert'),
+    ]);
+    const result = await runUnifiedBrowserLoop({
+      adapter,
+      intent: '打开页面读取结果',
+      observationV2: true,
+      maxSteps: 3,
+      execute: async (action) =>
+        action.tool === 'navigate'
+          ? {
+              ok: false,
+              errorCode: 'browser_timeout',
+              text: 'page.goto: Timeout 30000ms exceeded.',
+              url: action.url,
+            }
+          : {
+              ok: true,
+              text: JSON.stringify({
+                tabId: 't1',
+                sourceURL: 'https://slow.test/alerts',
+                tree: 'Result: You successfully clicked an alert',
+              }),
+            },
+    });
+    expect(result).toMatchObject({ status: 'completed' });
+  });
+  it('accepts titles read in tabs even when the last action switched back to the first tab', async () => {
+    const tabs: Record<string, string> = { a: 'Alpha', b: 'Beta' };
+    let current = 'a';
+    const { adapter } = brain([
+      read,
+      { name: 'switch_tab', input: { targetTabId: 'b' } },
+      read,
+      { name: 'switch_tab', input: { targetTabId: 'a' } },
+      finish('已读两个标签：Alpha；Beta', {
+        fields: [
+          { name: '标签标题', value: 'Alpha', tabId: 'a' },
+          { name: '标签标题', value: 'Beta', tabId: 'b' },
+        ],
+      }),
+    ]);
+    const result = await runUnifiedBrowserLoop({
+      adapter,
+      intent: '读两个标签的标题后回到第一个',
+      observationV2: true,
+      maxSteps: 5,
+      supportedTools: { download: false, upload: false, tabs: true },
+      execute: async (action) => {
+        if (action.tool === 'switch_tab') {
+          current = action.targetTabId;
+          return { ok: true, text: 'switched', tabId: current };
+        }
+        return {
+          ok: true,
+          text: JSON.stringify({ tabId: current, tree: `heading "${tabs[current]}" [level=1]` }),
+        };
+      },
+    });
+    expect(result).toMatchObject({ status: 'completed' });
+  });
+});
+
+describe('labelled values (round 1 live findings)', () => {
+  const pages = [{ text: 'heading "人工智能 编辑" [level=1]\nlink "发展史"\n发展史' }];
+  it('reads a quoted value exactly and does not treat a section title as the page title', () => {
+    expect(
+      assessCompletionFacts({
+        summary: '维基百科《人工智能》第3节标题为“发展史”，系统梳理了人工智能的演进脉络。',
+        pages,
+      }),
+    ).toEqual({ contradictions: [], unverified: [] });
+  });
+  it('ignores prose after a numeric label that carries no number', () => {
+    expect(
+      assessCompletionFacts({ summary: '播放量为页面原样字符串，未做数值换算。', pages }),
+    ).toEqual({ contradictions: [], unverified: [] });
+  });
+});

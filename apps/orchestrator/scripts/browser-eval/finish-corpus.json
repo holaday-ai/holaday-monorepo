@@ -250,6 +250,106 @@
       ],
       "expect": "contradiction",
       "why": "Iosevka title reported for a page that never loaded"
+    },
+    {
+      "id": "auto-r1-core-03-a-delivered",
+      "source": "BROWSER-AUTOPILOT-1 round 1 core-03 (real finish, delivered; facts checked against screenshot)",
+      "intent": "请使用云端浏览器，YouTube 公开视频页读标题/频道/播放量/发布日期（不播放）",
+      "summary": "已在 YouTube 公开视频页（watch?v=jNQXAC9IVRw）成功读取公开元数据：标题为「Me at the zoo」，频道为「jawed」，播放量显示为「4.4亿次观看」，发布日期以相对时间显示为「21年前」。页面出现“请登录，以便我们确认你不是聊天机器人”对话框，但未进行任何登录或播放操作，所有字段均来自未受保护的公开 DOM 文本。注：YouTube 当前未在该页暴露绝对发布日期（ISO 8601），仅显示相对时间；播放量为页面原样字符串，未做数值换算。",
+      "pages": [
+        {
+          "text": "heading \"Me at the zoo\" [level=1]\nlink \"jawed\"\ntext: 4.4亿次观看 21年前",
+          "sourceURL": "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+        }
+      ],
+      "expect": "deliver"
+    },
+    {
+      "id": "auto-r1-core-04-a-delivered",
+      "source": "BROWSER-AUTOPILOT-1 round 1 core-04 (real finish, delivered with no 未核实 note = all titles were verbatim in the read text)",
+      "intent": "请使用云端浏览器，YouTube 搜索「Playwright tutorial」返回前5个视频标题",
+      "summary": "已在云端浏览器中打开 YouTube 并搜索「Playwright tutorial」。从实时渲染的搜索结果页中，按页面显示顺序提取前5个独立视频标题（已排除课程/播放列表卡片）如下：\n1. Playwright with TypeScript : Learn Playwright Automation Tutorial from Scratch [6 Hours]\n2. What is Playwright? (🎭 Playwright introduction tutorial, features & demo)\n3. Playwright Automation Full Course for Beginners | Build Production Level Framework from Scratch\n4. Playwright Automation Tutorial for Beginners from Scratch\n5. Playwright Beginner Tutorial 1 | What is Playwright\n\n注：搜索结果顶部存在多个课程/播放列表卡片（如“Playwright with TypeScript”26节课、“Playwright Beginner Tutorials”16节课等），按要求已跳过，仅返回独立视频条目的标题。页面未触发验证码或登录墙，数据来自实时 DOM。",
+      "pages": [
+        {
+          "text": "heading \"Playwright with TypeScript : Learn Playwright Automation Tutorial from Scratch [6 Hours]\" [level=3]\nheading \"What is Playwright? (🎭 Playwright introduction tutorial, features & demo)\" [level=3]\nheading \"Playwright Automation Full Course for Beginners | Build Production Level Framework from Scratch\" [level=3]\nheading \"Playwright Automation Tutorial for Beginners from Scratch\" [level=3]\nheading \"Playwright Beginner Tutorial 1 | What is Playwright\" [level=3]",
+          "sourceURL": "https://www.youtube.com/results?search_query=Playwright+tutorial"
+        }
+      ],
+      "expect": "deliver"
+    },
+    {
+      "id": "auto-r1-core-06-a-rejected1",
+      "source": "BROWSER-AUTOPILOT-1 round 1 core-06 (real finish wrongly rejected: \"第3节标题为“发展史”，…\" parsed as page title)",
+      "intent": "请使用云端浏览器，维基百科长页面，分段读取并总结第3节",
+      "summary": "维基百科《人工智能》页面第3节标题为“发展史”，系统梳理了人工智能从古代哲学与逻辑学萌芽到2026年的演进脉络，核心要点如下：\n\n1. **起源与奠基（古代–1950s）**：对形式推理的研究可追溯至古代哲学家与数学家；图灵的计算理论、麦卡洛克-皮茨人工神经元模型及图灵测试为AI奠定理论基础。1956年达特茅斯会议标志AI作为独立学科正式成立，早期程序在国际跳棋、代数题、定理证明等方面取得令人瞩目的成果。\n\n2. **乐观预期与第一次寒冬（1960s–1970s）**：研究者曾预言机器将在一代人内实现通用智能，但因问题复杂度被低估、莱特希尔批评及政府削减资助，加之《感知器》一书被误读否定神经网络，AI进入首个资金枯竭的“寒冬”。\n\n3. **专家系统复兴与第二次低谷（1980s）**：专家系统的商业成功使AI市场在1985年超10亿美元，日本第五代计算机项目也推动英美恢复资助；但Lisp机器市场衰退后AI再度受挫。同期，布鲁克斯、珀尔、泽德等人转向次符号、概率推理和机器人工程，辛顿团队在联结主义与神经网络上取得突破，杨立昆1990年证明卷积神经网络可识别手写数字。\n\n4. **规范化与跨学科融合（1990s–2000s）**：AI采用形式化数学方法聚焦特定问题，与统计学、经济学等交叉合作，解决方案广泛应用但常不再冠以“AI”之名；通用人工智能（AGI）于2000年代成为独立子领域。\n\n5. **深度学习主导与公众热潮（2012–2019）**：硬件进步、大数据集（如ImageNet）推动深度学习成为行业标准，替代方法被边缘化；机器学习论文数量五年增长50%，公平性、滥用与对齐问题逐渐成为研究重点。\n\n6. **大模型爆发与产业扩张（2020–2024）**：AlphaGo、GPT-3/4/4o等产品引发新一轮AI热潮，企业投资激增，美国AI相关岗位空缺达80万；全球AI市场规模约1640亿美元，年复合增长率36.6%。中国与美国占全球AI专利四分之三以上。\n\n7. **高效小模型与智能体时代（2025–2026）**：DeepSeek-R1、QwQ-32B等中小型开源推理模型以低算力实现高性能；Grok 4、GPT-5/5.1/5.4/6、Gemini 3/3.1、Claude Opus系列密集发布，“智能体”成为2026年行业主攻方向；欧盟《人工智能法案》第二阶段义务生效，开放权重与全球协同治理同步提速。\n\n整体而言，该节呈现了AI学科在理论、技术范式、资金周期与社会影响四个维度上的螺旋式发展轨迹，并强调2020年代以来大模型与智能体正重塑研究议程和产业格局。",
+      "pages": [
+        {
+          "text": "heading \"人工智能 编辑\" [level=1]\nlink \"发展史\"\n发展史",
+          "sourceURL": "https://zh.wikipedia.org/wiki/%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD"
+        }
+      ],
+      "expect": "deliver"
+    },
+    {
+      "id": "auto-r1-core-06-a-delivered",
+      "source": "BROWSER-AUTOPILOT-1 round 1 core-06 (real finish, delivered)",
+      "intent": "请使用云端浏览器，维基百科长页面，分段读取并总结第3节",
+      "summary": "维基百科《人工智能》页面（页面一级标题为“人工智能 编辑”）第3节标题为“发展史”，系统梳理了人工智能从古代哲学与逻辑学萌芽到2026年的演进脉络，核心要点如下：\n\n1. **起源与奠基（古代–1950s）**：对形式推理的研究可追溯至古代哲学家与数学家；图灵的计算理论、麦卡洛克-皮茨人工神经元模型及图灵测试为AI奠定理论基础。1956年达特茅斯会议标志AI作为独立学科正式成立，早期程序在国际跳棋、代数题、定理证明等方面取得令人瞩目的成果。\n\n2. **乐观预期与第一次寒冬（1960s–1970s）**：研究者曾预言机器将在一代人内实现通用智能，但因问题复杂度被低估、莱特希尔批评及政府削减资助，加之《感知器》一书被误读否定神经网络，AI进入首个资金枯竭的“寒冬”。\n\n3. **专家系统复兴与第二次低谷（1980s）**：专家系统的商业成功使AI市场在1985年超10亿美元，日本第五代计算机项目也推动英美恢复资助；但Lisp机器市场衰退后AI再度受挫。同期，布鲁克斯、珀尔、泽德等人转向次符号、概率推理和机器人工程，辛顿团队在联结主义与神经网络上取得突破，杨立昆1990年证明卷积神经网络可识别手写数字。\n\n4. **规范化与跨学科融合（1990s–2000s）**：AI采用形式化数学方法聚焦特定问题，与统计学、经济学等交叉合作，解决方案广泛应用但常不再冠以“AI”之名；通用人工智能（AGI）于2000年代成为独立子领域。\n\n5. **深度学习主导与公众热潮（2012–2019）**：硬件进步、大数据集（如ImageNet）推动深度学习成为行业标准，替代方法被边缘化；机器学习论文数量五年增长50%，公平性、滥用与对齐问题逐渐成为研究重点。\n\n6. **大模型爆发与产业扩张（2020–2024）**：AlphaGo、GPT-3/4/4o等产品引发新一轮AI热潮，企业投资激增，美国AI相关岗位空缺达80万；全球AI市场规模约1640亿美元，年复合增长率36.6%。中国与美国占全球AI专利四分之三以上。\n\n7. **高效小模型与智能体时代（2025–2026）**：DeepSeek-R1、QwQ-32B等中小型开源推理模型以低算力实现高性能；Grok 4、GPT-5/5.1/5.4/6、Gemini 3/3.1、系列密集发布，“智能体”成为2026年行业主攻方向；欧盟《人工智能法案》第二阶段义务生效，开放权重与全球协同治理同步提速。\n\n整体而言，该节呈现了AI学科在理论、技术范式、资金周期与社会影响四个维度上的螺旋式发展轨迹，并强调2020年代以来大模型与智能体正重塑研究议程和产业格局。",
+      "pages": [
+        {
+          "text": "heading \"人工智能 编辑\" [level=1]\nlink \"发展史\"\n发展史",
+          "sourceURL": "https://zh.wikipedia.org/wiki/%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD"
+        }
+      ],
+      "expect": "deliver"
+    },
+    {
+      "id": "auto-r1-core-07-a-rejected1",
+      "source": "BROWSER-AUTOPILOT-1 round 1 round1-core-07-a (real finish rejected by the over-strict page-read rule; facts not contradicted)",
+      "intent": "请使用云端浏览器，从一个页面打开3个链接到新标签，分别读标题后回到第一个",
+      "summary": "已从 wikipedia.org 首页成功打开3个新标签页并读取标题：1) 中文维基百科「维基百科，自由的百科全书」(tab_93bf839e-2ebe-493e-958d-ee9f1720be2b)；2) 英文维基百科「Wikipedia, the free encyclopedia」(tab_c4f63651-f6aa-4c51-9f56-1ed24db9732b)；3) 日文维基百科「ウィキペディア フリー百科事典」(tab_48c5d89b-3af6-4873-b8bf-c8e8584c1099)。当前激活标签页为第一个打开的中文维基百科页面，符合任务要求。浏览器现共有4个标签页（原始页+3个新页）。",
+      "pages": [
+        {
+          "text": "(page text not recorded; facts below come from reads the gate wrongly discarded)"
+        }
+      ],
+      "expect": "deliver"
+    },
+    {
+      "id": "auto-r1-core-07-a-rejected2",
+      "source": "BROWSER-AUTOPILOT-1 round 1 round1-core-07-a (real finish rejected by the over-strict page-read rule; facts not contradicted)",
+      "intent": "请使用云端浏览器，从一个页面打开3个链接到新标签，分别读标题后回到第一个",
+      "summary": "已从 wikipedia.org 首页成功打开3个新标签页并通过 read_page 读取标题：1) 中文维基百科「维基百科，自由的百科全书」(tab_93bf839e-2ebe-493e-958d-ee9f1720be2b)；2) 英文维基百科「Wikipedia, the free encyclopedia」(tab_c4f63651-f6aa-4c51-9f56-1ed24db9732b)；3) 日文维基百科「ウィキペディア フリー百科事典」(tab_48c5d89b-3af6-4873-b8bf-c8e8584c1099)。当前激活标签页为第一个打开的中文维基百科页面，符合任务要求。浏览器现共有4个标签页（原始页+3个新页）。",
+      "pages": [
+        {
+          "text": "(page text not recorded; facts below come from reads the gate wrongly discarded)"
+        }
+      ],
+      "expect": "deliver"
+    },
+    {
+      "id": "auto-r1-core-10-a-rejected1",
+      "source": "BROWSER-AUTOPILOT-1 round 1 round1-core-10-a (real finish rejected by the over-strict page-read rule; facts not contradicted)",
+      "intent": "请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts",
+      "summary": "已在云端浏览器中打开 https://the-internet.herokuapp.com/javascript_alerts 并依次触发三个 JavaScript 对话框。该页面本身不包含 iframe，所有按钮均位于主文档中。由于当前环境无法直接向原生 alert/confirm/prompt 弹窗输入文本或选择确认，三次点击后浏览器自动以默认行为关闭弹窗，页面 Result 区域分别显示：\n1. Click for JS Alert → \"You successfully clicked an alert\"\n2. Click for JS Confirm → \"You clicked: Cancel\"（默认取消）\n3. Click for JS Prompt → \"You entered: null\"（未输入文本）\n\n以上结果均为页面原样文本，已作为字段返回。若需自定义 Confirm 选择或 Prompt 输入内容，需在支持原生对话框交互的自动化环境中操作。",
+      "pages": [
+        {
+          "text": "(page text not recorded; facts below come from reads the gate wrongly discarded)"
+        }
+      ],
+      "expect": "deliver"
+    },
+    {
+      "id": "auto-r1-core-10-a-rejected2",
+      "source": "BROWSER-AUTOPILOT-1 round 1 round1-core-10-a (real finish rejected by the over-strict page-read rule; facts not contradicted)",
+      "intent": "请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts",
+      "summary": "已在云端浏览器中成功读取 https://the-internet.herokuapp.com/javascript_alerts 页面（read_page observationRevision=e96924ea-6901-4e26-9866-d4a30f6a2ed8）。该页面不包含 iframe，三个按钮均位于主文档。依次点击后，由于当前环境无法向原生对话框输入或选择确认，浏览器以默认行为关闭弹窗，Result 区域先后显示：\n1. Click for JS Alert → \"You successfully clicked an alert\"\n2. Click for JS Confirm → \"You clicked: Cancel\"\n3. Click for JS Prompt → \"You entered: null\"\n以上均为页面原样文本并已绑定 tabId/sourceURL。如需自定义 Confirm/Prompt 交互，需在支持原生对话框控制的环境中操作。",
+      "pages": [
+        {
+          "text": "(page text not recorded; facts below come from reads the gate wrongly discarded)"
+        }
+      ],
+      "expect": "deliver"
     }
   ]
 }
