@@ -29,8 +29,13 @@ Object.assign(process.env, {
 const load = (path: string) => import(pathToFileURL(join(here, '../src', path)).href);
 const { runSearchWithFallback } = await load('agent/search-fallback/search-engine-fallback.ts');
 const { runSupercarTask, supercarAbort } = await load('agent/supercar/index.ts');
-const { initExecution, recordEvidence, verifyAndFinalize, deriveFinalStatus, disposeExecution } =
-  await load('execution/execution-pipeline.ts');
+const {
+  initExecution,
+  recordEvidence,
+  verifyAndFinalize,
+  browserCompletionVerdict,
+  disposeExecution,
+} = await load('execution/execution-pipeline.ts');
 const { setFeatureFlagsForTest } = await load('execution/feature-flags.ts');
 setFeatureFlagsForTest({
   EVIDENCE_LEDGER: true,
@@ -324,13 +329,19 @@ try {
           finalUrl: page.url(),
           semanticAdapter: null,
         });
-        const finalStatus = deriveFinalStatus(outcome.status, verified.verification);
+        const verdict = browserCompletionVerdict({
+          runnerStatus: outcome.status,
+          verification: verified.verification,
+          verifiedText: verified.finalText,
+          originalText: answer,
+        });
+        const finalStatus = verdict.status;
         const pass =
           finalStatus === 'completed' &&
-          verified.verification?.passed === true &&
+          outcome.status === 'completed' &&
           attempts === (ddgErrorFixture && target === 'DuckDuckGo' ? 3 : 2) &&
           (item.id === 'core-02' || links.length === 5) &&
-          answer.includes(`改用 ${target}`) &&
+          verdict.text.includes(`改用 ${target}`) &&
           (item.id !== 'core-02' || Boolean(weather));
         rows.push({
           id,
@@ -341,7 +352,7 @@ try {
           attempts,
           runnerStatus: outcome.status,
           finalStatus,
-          answer: verified.finalText,
+          answer: verdict.text,
           links,
           weather,
           weatherSource,

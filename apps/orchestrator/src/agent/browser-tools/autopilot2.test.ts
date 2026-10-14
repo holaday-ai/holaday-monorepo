@@ -185,6 +185,7 @@ describe('4. 未核实 noise', () => {
 describe('5. a headline mentioning cloudflare is not a captcha wall', () => {
   const page = (title: string, text: string) =>
     detectBrowserBlocker({
+      url: 'https://example.com/',
       title,
       text,
       visible: true,
