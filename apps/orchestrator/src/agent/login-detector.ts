@@ -284,7 +284,12 @@ const CAPTCHA_TITLE_NEEDLES = [
 ];
 
 const CAPTCHA_BODY_NEEDLES = [
-  ...CAPTCHA_TITLE_NEEDLES,
+  // BROWSER-AUTOPILOT-2: a bare "cloudflare" in body text is an ordinary word
+  // (a Hacker News headline about cloudflare.com paused core-07); only the
+  // challenge page's own phrases count in the body. Titles keep the bare word.
+  ...CAPTCHA_TITLE_NEEDLES.filter((needle) => needle !== 'cloudflare'),
+  'performance & security by cloudflare',
+  'checking your browser',
   'unusual traffic',
   'sign in to confirm you’re not a bot',
   "sign in to confirm you're not a bot",

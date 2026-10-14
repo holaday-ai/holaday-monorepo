@@ -268,6 +268,48 @@ export function assessResearchSourceTrust(input: {
 }
 
 /**
+ * BROWSER-AUTOPILOT-2 — browser-lane terminal verdict. A completed browser run
+ * is only failed after the fact when a constraint the user stated was
+ * violated. Post-hoc success criteria (url_count, data_present, URL grounding,
+ * result counts, source trust) become visible notes on the delivered answer:
+ * safety is enforced before actions and integrity at finish, in the loop.
+ */
+export function browserCompletionVerdict(input: {
+  runnerStatus: string;
+  verification: VerificationResult | null;
+  sourceTrust?: ResearchSourceTrustReview;
+  /** The answer after verification / auto-fix (may be the safe boundary text). */
+  verifiedText: string;
+  /** The answer as delivered by the browser loop, before verification. */
+  originalText: string;
+}): { status: FinalTerminalStatus; text: string; notes: string[] } {
+  if (input.runnerStatus !== 'completed')
+    return {
+      status: deriveFinalStatus(input.runnerStatus, input.verification, input.sourceTrust),
+      text: input.verifiedText,
+      notes: [],
+    };
+  const failed = input.verification?.checks.filter((check) => !check.passed) ?? [];
+  if (failed.some((check) => check.criterionId === 'generic.constraints'))
+    return { status: 'failed', text: input.verifiedText, notes: [] };
+  const notes = [
+    ...failed.map((check) => check.detail).filter((detail): detail is string => !!detail),
+    ...(input.sourceTrust?.requiresReview
+      ? input.sourceTrust.failedChecks.map((check) => check.detail)
+      : []),
+  ];
+  const kept = input.verifiedText.startsWith(SAFE_BOUNDARY_HEADER)
+    ? input.originalText
+    : input.verifiedText;
+  const unique = [...new Set(notes)].slice(0, 6);
+  return {
+    status: 'completed',
+    text: unique.length ? `${kept}\n\n核验提示：${unique.join('；')}` : kept,
+    notes: unique,
+  };
+}
+
+/**
  * Always-on minimum trust gate for result types where an unverified
  * answer is worse than no answer. This deliberately does not depend on
  * the staged execution-verifier flags: stock quotes and ecommerce

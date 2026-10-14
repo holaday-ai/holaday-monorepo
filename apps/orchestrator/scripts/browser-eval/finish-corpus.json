@@ -709,8 +709,8 @@
         }
       ],
       "expect": "deliver",
-      "open": true,
-      "openReason": "quote rule treats a short numeric quote (\"0/1\") as a page-text claim; fix after BROWSER-AUTOPILOT-1"
+      "openReason": "quote rule treats a short numeric quote (\"0/1\") as a page-text claim; fix after BROWSER-AUTOPILOT-1",
+      "resolved": "BROWSER-AUTOPILOT-2: short numeric/symbol quotes are no longer page-text claims"
     },
     {
       "id": "auto-r6-core-03-fb-delivered",

@@ -217,6 +217,7 @@ import {
   type FinalTerminalStatus,
   type VerifyOutput,
   assessResultTrust,
+  browserCompletionVerdict,
   deriveFinalStatus,
   disposeExecution,
   extractFailedChecks,
@@ -7390,6 +7391,7 @@ export const tasksRouter = router({
                       // a fabricated URL with a grounded one BEFORE
                       // persistSupercarOutcome writes the row, so the user
                       // sees the corrected text on first render.
+                      let browserOriginalAnswer: string | null = null;
                       if (outcome.status === 'completed' && outcome.summary) {
                         const terminalSearchSources =
                           collectSearchSourceReferences(observedWebSearchSources);
@@ -7408,6 +7410,7 @@ export const tasksRouter = router({
                           outcome.summary,
                           terminalSearchSources,
                         );
+                        browserOriginalAnswer = answerSummary;
                         outcome = {
                           ...outcome,
                           summary: answerSummary,
@@ -7512,11 +7515,18 @@ export const tasksRouter = router({
 
                       // Codex Pack A3 — the verdict now describes the exact text that
                       // flows through persistence and the terminal WebSocket message.
-                      const supercarTerminalStatus: FinalTerminalStatus = deriveFinalStatus(
-                        outcome.status,
-                        executionVerification,
-                        supercarResearchSourceTrust,
-                      );
+                      // BROWSER-AUTOPILOT-2: post-hoc success criteria annotate a completed
+                      // browser answer; only a user-stated constraint can still fail it.
+                      const browserVerdict = browserCompletionVerdict({
+                        runnerStatus: outcome.status,
+                        verification: executionVerification,
+                        sourceTrust: supercarResearchSourceTrust,
+                        verifiedText: outcome.summary ?? '',
+                        originalText: browserOriginalAnswer ?? outcome.summary ?? '',
+                      });
+                      if (outcome.status === 'completed' && outcome.summary)
+                        outcome = { ...outcome, summary: browserVerdict.text };
+                      const supercarTerminalStatus: FinalTerminalStatus = browserVerdict.status;
                       const supercarFailureSummary =
                         supercarTerminalStatus === 'failed'
                           ? executionVerification
@@ -7577,7 +7587,9 @@ export const tasksRouter = router({
                           metadata,
                           supercarTerminalStatus,
                           supercarFailureSummary,
-                          supercarFailedChecks.length > 0 ? supercarFailedChecks : undefined,
+                          supercarTerminalStatus !== 'completed' && supercarFailedChecks.length > 0
+                            ? supercarFailedChecks
+                            : undefined,
                         );
                         terminalPersisted = terminalResult.persisted;
                       }
