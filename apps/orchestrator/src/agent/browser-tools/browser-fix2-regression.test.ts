@@ -423,3 +423,13 @@ it('does not keep asking after the forced final turn omits a tool', async () => 
   expect(n).toBe(6);
   expect(r.status).toBe('failed');
 });
+it.each([
+  '读取页面，不要截图',
+  '只读页面，不要填写表单',
+  '不要滚动5次，只读取标题',
+  'Read page; do not screenshot',
+])('does not require prohibited actions: %s', (intent) => {
+  expect(
+    completionGap(intent, '已读取页面', [{ tool: 'navigate', ok: true, url: base }], true),
+  ).toBeNull();
+});

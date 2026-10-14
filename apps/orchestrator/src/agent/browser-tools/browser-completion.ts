@@ -64,11 +64,11 @@ export type BrowserTrace = Pick<
 function positiveActionText(text: string): string {
   return text
     .replace(
-      /(?:不要|不用|无需|不必|禁止|没有|并未|尚未|未曾|未|不)(?:成功|实际)?\s*(?:下载|上传|切换|切回|返回|新建|创建|打开|滚动|读取)[^，,。；;.!?\n]*/g,
+      /(?:不要|不用|不需要|无需|不必|禁止|没有|并未|尚未|未曾|未|不)(?:成功|实际)?\s*(?:下载|上传|切换|切回|返回|新建|创建|打开|滚动|读取|截图|截屏|填写|填表|填入)[^，,。；;.!?\n]*/g,
       ' ',
     )
     .replace(
-      /\b(?:do not|don['’]t|did not|didn['’]t|have not|haven['’]t|has not|hasn['’]t|never|without|not)\s+(?:(?:successfully|actually)\s+)?(?:download(?:ed|ing)?|upload(?:ed|ing)?|switch(?:ed|ing)?|open(?:ed|ing)?|creat(?:e|ed|ing)|scroll(?:ed|ing)?|read(?:ing)?)[^,.;!?\n]*/gi,
+      /\b(?:do not|don['’]t|did not|didn['’]t|have not|haven['’]t|has not|hasn['’]t|never|without|not|no)\s+(?:(?:successfully|actually)\s+)?(?:download(?:ed|ing)?|upload(?:ed|ing)?|switch(?:ed|ing)?|open(?:ed|ing)?|creat(?:e|ed|ing)|scroll(?:ed|ing)?|read(?:ing)?|screenshot|fill(?:ing)?)[^,.;!?\n]*/gi,
       ' ',
     );
 }
@@ -81,6 +81,7 @@ export function completionGap(
 ): string | null {
   const successful = trace.filter((entry) => entry.ok);
   const claimed = positiveActionText(summary);
+  const requested = positiveActionText(intent);
   if (requireBrowser && !successful.some((entry) => entry.url && /^https?:\/\//i.test(entry.url)))
     return '尚无真实浏览器页面证据，请先 navigate 到任务网址，再 snapshot 核验；不能直接生成答案。';
   const claims: Array<[RegExp, string]> = [
@@ -112,7 +113,7 @@ export function completionGap(
     const lastSwitch = successful.filter((entry) => entry.tool === 'switch_tab').at(-1);
     if (!first || lastSwitch?.tabId !== first) return 'switch_tab 回执未证明切回原标签。';
   }
-  const scrollText = `${intent} ${claimed}`;
+  const scrollText = `${requested} ${claimed}`;
   const scrollCount =
     scrollText.match(
       /(?:滚动|scroll(?:ed)?)(?:了)?\s*(\d+|[一二两三四五六七八九十])\s*(?:次|times?)/i,
@@ -123,14 +124,14 @@ export function completionGap(
   if (scrollCount && scrollReceipts.length < numericCount(scrollCount[1]!))
     return '滚动次数/增长没有足够的实际滚动回执。';
   const forms = successful.flatMap((t) => (t.form ? [t.form] : []));
-  if (/(?:填表|填写|填入|fill.*form)/i.test(intent) && !forms.some((f) => f.filled))
+  if (/(?:填表|填写|填入|fill.*form)/i.test(requested) && !forms.some((f) => f.filled))
     return '没有实际填表回执，不能宣告已填表。';
   if (
     /(?:不提交|不要提交|do not submit|without submitting)/i.test(intent) &&
     forms.some((f) => f.submitted)
   )
     return '表单已提交，违反只填不提交的要求。';
-  if (/(?:截图|screenshot)/i.test(intent) && !successful.some((t) => t.screenshot))
+  if (/(?:截图|screenshot)/i.test(requested) && !successful.some((t) => t.screenshot))
     return '缺少实际截图回执。';
   const receipts = successful.flatMap((entry) => (entry.download ? [entry.download] : []));
   if (/(下载|download)/i.test(positiveActionText(intent) + claimed) && !receipts.length)
