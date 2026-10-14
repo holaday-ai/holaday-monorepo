@@ -253,7 +253,8 @@ describe('cloud observation v2', () => {
       await page.close();
     }
   });
-  it('refuses a completed claim that invents evidence instead of reading the current page', async () => {
+  // BROWSER-AUTOPILOT-1: the model's own evidence text is not a gate; the page read is.
+  it('does not reject a completion over the model evidence text once the page was read', async () => {
     const { page, tools } = await fixture();
     try {
       let turn = 0;
@@ -283,7 +284,7 @@ describe('cloud observation v2', () => {
         observationV2: true,
         maxSteps: 2,
       });
-      expect(result.status).toBe('failed');
+      expect(result.status).toBe('completed');
     } finally {
       tools.dispose();
       await page.close();

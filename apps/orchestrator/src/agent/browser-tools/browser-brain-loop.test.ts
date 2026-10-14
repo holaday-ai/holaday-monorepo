@@ -49,7 +49,9 @@ function model(
   };
 }
 describe('browser role loop', () => {
-  it('runs a read-only planner, executor, and evidence-only verifier and records all roles', async () => {
+  // BROWSER-AUTOPILOT-1: the verification role no longer judges answers (integrity is
+  // checked deterministically in the loop); it is never called.
+  it('runs a read-only planner and the executor, never the verification role', async () => {
     const plans: NeutralMessagesRequest[] = [];
     const reviews: NeutralMessagesRequest[] = [];
     const actions: string[] = [];
@@ -86,22 +88,12 @@ describe('browser role loop', () => {
     expect(result.status).toBe('completed');
     expect(actions).toEqual(['snapshot']);
     expect(plans[0]?.tools ?? []).toEqual([]);
-    expect(reviews[0]?.tools ?? []).toEqual([]);
-    expect(reviews[0]?.messages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ role: 'user', content: expect.stringContaining('Alpha') }),
-      ]),
-    );
-    expect(calls.map((c) => c.requestMeta?.role)).toEqual([
-      'planning',
-      'execution',
-      'execution',
-      'verification',
-    ]);
+    expect(reviews).toHaveLength(0);
+    expect(calls.map((c) => c.requestMeta?.role)).toEqual(['planning', 'execution', 'execution']);
     expect(calls.every((c) => c.taskExternalId === 'task_a')).toBe(true);
   });
   it.each(['{"approved":false,"reason":"missing data"}', 'not json'])(
-    'never completes when verifier rejects or returns malformed verdict: %s',
+    'a verification verdict no longer decides completion: %s',
     async (verdict) => {
       const adapter = {
         ...model('exec', [[snapshot], [finish]]),
@@ -115,7 +107,7 @@ describe('browser role loop', () => {
         adapter,
         execute: async () => ({ ok: true, text: 'Alpha' }),
       });
-      expect(out.status).toBe('failed');
+      expect(out.status).toBe('completed');
     },
   );
   it('does not let planner tools run and records provider failure without invented usage', async () => {
@@ -178,31 +170,4 @@ describe('browser role loop', () => {
     expect(out.status).toBe('completed');
     expect(requests).toHaveLength(2);
   });
-});
-
-it('preserves cancellation even if a verifier returns approval after abort', async () => {
-  const controller = new AbortController();
-  const base = model('exec', [[snapshot], [finish]]);
-  const verifier = model('verify', [[text('{"approved":true,"reason":"observed"}')]]);
-  const adapter = {
-    ...base,
-    browserBrain: {
-      planning: model('plan', [[text('read')]]),
-      verification: {
-        ...verifier,
-        async create(request: NeutralMessagesRequest) {
-          const answer = await verifier.create(request);
-          controller.abort();
-          return answer;
-        },
-      },
-    },
-  };
-  const result = await runUnifiedBrowserLoop({
-    intent: 'Read Alpha',
-    adapter,
-    signal: controller.signal,
-    execute: async () => ({ ok: true, text: 'Alpha' }),
-  });
-  expect(result.status).toBe('cancelled');
 });

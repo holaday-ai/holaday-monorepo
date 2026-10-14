@@ -123,7 +123,9 @@ describe('BROWSER-FIX-3 grounded completion', () => {
     expect(result.status).toBe('completed');
   });
 
-  it('rejects invented evidence and gives a correction without requesting more repeated reads', async () => {
+  // BROWSER-AUTOPILOT-1: prose (and the model's evidence text) is not checked; a
+  // read page plus no contradicted hard fact delivers on the first finish.
+  it('delivers a prose answer after a real read without a rejection loop', async () => {
     const { adapter, requests } = brain([
       { name: 'read_page', input: {} },
       finish('Invented content'),
@@ -136,10 +138,12 @@ describe('BROWSER-FIX-3 grounded completion', () => {
       maxSteps: 3,
       execute: async () => ({ ok: true, url: 'https://example.com', text: 'Verified title' }),
     });
-    expect(result.status).toBe('completed');
-    expect(JSON.stringify(requests[2]?.messages)).toContain('Verified title');
-    expect(JSON.stringify(requests[2]?.messages)).toContain('证据');
-    expect(JSON.stringify(requests[2]?.messages)).not.toContain('请重新读取');
+    // The model's evidence text ('Invented content') is not a gate after a real read.
+    expect(result).toMatchObject({
+      status: 'completed',
+      summary: 'Observed public video metadata.',
+    });
+    expect(requests).toHaveLength(2);
   });
 
   it('never reuses evidence after a navigation to a different document', async () => {
