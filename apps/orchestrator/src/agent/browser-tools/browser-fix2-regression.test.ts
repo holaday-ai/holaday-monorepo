@@ -30,13 +30,40 @@ afterAll(async () => {
   await browser.close();
   await new Promise<void>((r) => server.close(() => r()));
 });
-it('allows read-only search POST on navigation', async () => {
+it('allows read-only search POST only on the known YouTube host', async () => {
+  const p = await browser.newPage();
+  await p.route('https://www.youtube.com/**', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body:
+        new URL(route.request().url()).pathname === '/landing'
+          ? `<main>Public results</main><script>fetch('/youtubei/v1/search',{method:'POST',body:'{}'})</script>`
+          : 'ok',
+    }),
+  );
+  const t = createPlaywrightUnifiedExecutor(p, { observationV2: true });
+  try {
+    const r = await t.execute({ tool: 'navigate', url: 'https://www.youtube.com/landing' });
+    expect(r.interruption).toBeUndefined();
+    expect(r.effect?.unexpected).toBe(false);
+  } finally {
+    t.dispose();
+    await p.close();
+  }
+});
+it('keeps matching read API paths on unknown hosts blocked', async () => {
   const p = await browser.newPage();
   const t = createPlaywrightUnifiedExecutor(p, { observationV2: true });
   try {
     const r = await t.execute({ tool: 'navigate', url: `${base}/api` });
-    expect(r.interruption).toBeUndefined();
-    expect(r.effect?.unexpected).toBe(false);
+    expect(r.interruption?.reason).toBe('unexpected_effect');
+    expect(r.effect?.triggers).toContainEqual(
+      expect.objectContaining({
+        branch: 'unknown_post',
+        method: 'POST',
+        url: `${base}/youtubei/v1/search`,
+      }),
+    );
   } finally {
     t.dispose();
     await p.close();

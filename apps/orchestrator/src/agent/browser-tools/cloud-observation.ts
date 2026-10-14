@@ -453,9 +453,9 @@ export class CloudObservation {
       (url.hostname === 'en.wikipedia.org' &&
         r.resourceType() === 'ping' &&
         /^\/ins-[a-z0-9]+\/v2\/events$/.test(url.pathname));
-    const readApi = /\/youtubei\/v\d+\/(?:search|browse|next|player|get_transcript)(?:\/|$)/i.test(
-      url.pathname,
-    );
+    const readApi =
+      (url.hostname === 'www.youtube.com' || url.hostname === 'youtube.com') &&
+      /\/youtubei\/v\d+\/(?:search|browse|next|player|get_transcript)(?:\/|$)/i.test(url.pathname);
     const formPost =
       r.method() === 'POST' &&
       (navigation ||
