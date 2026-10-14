@@ -77,6 +77,9 @@ try {
     'public page replay has no image',
   );
   assert(replay.frames.some((f) => f.phase === 'after' && f.sourceURL === 'https://replay.test/'));
+  // FIX-REPLAY-GAPS: the task's end records a final frame of the page.
+  const last = replay.frames.at(-1);
+  assert(last?.phase === 'final' && last.image, 'replay does not end on a final page frame');
   assert.equal(await browserReplayStore.read('different-owner', taskId), null);
   console.log(
     JSON.stringify({
