@@ -58,8 +58,8 @@ export function detectBrowserBlocker(page: {
 
 export type BrowserTrace = Pick<
   UnifiedToolResult,
-  'ok' | 'url' | 'download' | 'tabId' | 'scroll'
-> & { tool: string };
+  'ok' | 'url' | 'download' | 'tabId' | 'scroll' | 'form'
+> & { tool: string; screenshot?: boolean };
 /** A prohibition or an admission of non-completion is not a claim of execution. */
 function positiveActionText(text: string): string {
   return text
@@ -112,19 +112,61 @@ export function completionGap(
     const lastSwitch = successful.filter((entry) => entry.tool === 'switch_tab').at(-1);
     if (!first || lastSwitch?.tabId !== first) return 'switch_tab 回执未证明切回原标签。';
   }
-  const scrollCount = claimed.match(
-    /(?:滚动|scroll(?:ed)?)(?:了)?\s*(\d+|[一二两三四五六七八九十])\s*(?:次|times?)/i,
+  const scrollText = `${intent} ${claimed}`;
+  const scrollCount =
+    scrollText.match(
+      /(?:滚动|scroll(?:ed)?)(?:了)?\s*(\d+|[一二两三四五六七八九十])\s*(?:次|times?)/i,
+    ) ?? scrollText.match(/(\d+|[一二两三四五六七八九十])\s*次\s*(?:向下|向上)?滚动/i);
+  const scrollReceipts = successful.flatMap(
+    (entry) => entry.scroll?.steps ?? (entry.scroll ? [entry.scroll] : []),
   );
+  if (scrollCount && scrollReceipts.length < numericCount(scrollCount[1]!))
+    return '滚动次数/增长没有足够的实际滚动回执。';
+  const forms = successful.flatMap((t) => (t.form ? [t.form] : []));
+  if (/(?:填表|填写|填入|fill.*form)/i.test(intent) && !forms.some((f) => f.filled))
+    return '没有实际填表回执，不能宣告已填表。';
   if (
-    scrollCount &&
-    successful.filter((entry) => entry.scroll?.grew).length < numericCount(scrollCount[1]!)
+    /(?:不提交|不要提交|do not submit|without submitting)/i.test(intent) &&
+    forms.some((f) => f.submitted)
   )
-    return '滚动新增内容次数没有足够的增长回执。';
+    return '表单已提交，违反只填不提交的要求。';
+  if (/(?:截图|screenshot)/i.test(intent) && !successful.some((t) => t.screenshot))
+    return '缺少实际截图回执。';
   const receipts = successful.flatMap((entry) => (entry.download ? [entry.download] : []));
   if (/(下载|download)/i.test(positiveActionText(intent) + claimed) && !receipts.length)
     return '下载没有成功保存回执，不能宣告完成。请使用 download 保存文件。';
-  for (const match of claimed.matchAll(/(\d[\d,]*)\s*(?:字节|bytes?)/gi))
+  for (const name of claimed.matchAll(
+    /[\p{L}\d_][\p{L}\d_.-]*\.(?:txt|csv|tsv|json|pdf|zip|xlsx|docx|png|jpg)\b/giu,
+  ))
+    if (receipts.length && !receipts.some((r) => r.filename === name[0]))
+      return '文件名与实际下载回执不符。';
+  for (const match of claimed.matchAll(/(\d[\d,]*)\s*(?:字节|bytes?|B\b)/gi))
     if (!receipts.some((receipt) => receipt.sizeBytes === Number(match[1]?.replaceAll(',', ''))))
       return '声称的字节数与真实文件回执不符。';
   return null;
+}
+
+/** Canonical evidence from successful host actions, never from the model. */
+export function receiptEvidence(intent: string, trace: readonly BrowserTrace[]): string {
+  const ok = trace.filter((t) => t.ok);
+  if (/下载|download/i.test(positiveActionText(intent))) {
+    const files = ok.flatMap((t) => (t.download ? [t.download] : []));
+    return files
+      .map(
+        (f) => `${f.filename} | ${f.sizeBytes} bytes/字节 | ${f.downloadUrl} | sha256=${f.sha256}`,
+      )
+      .join('\n');
+  }
+  if (/滚动|scroll/i.test(positiveActionText(intent))) {
+    const scrolls = ok.flatMap((t) => t.scroll?.steps ?? (t.scroll ? [t.scroll] : []));
+    if (scrolls.length) return JSON.stringify({ scrollCount: scrolls.length, steps: scrolls });
+  }
+  if (
+    /填|填写|fill|form/i.test(intent) &&
+    ok.some((t) => t.form?.filled) &&
+    !ok.some((t) => t.form?.submitted) &&
+    ok.some((t) => t.screenshot)
+  )
+    return '表单字段已填写，未提交；已截取当前页面截图。';
+  return '';
 }

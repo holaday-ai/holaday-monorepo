@@ -20,13 +20,22 @@ export interface UnifiedToolResult {
     domChanged: boolean;
     networkCategories: string[];
     unexpected: boolean;
+    triggers?: Array<{ branch: string; method: string; url: string; action: string }>;
+    observationAvailable?: boolean;
   };
+  form?: { ref: string; filled: boolean; submitted: boolean };
   text: string;
   image?: { mediaType: 'image/jpeg'; data: string };
   /** Present on `download`: where the file was saved by the host. */
   download?: BrowserDownloadReceipt;
   tabId?: string;
-  scroll?: { beforeHeight: number; afterHeight: number; addedChars: number; grew: boolean };
+  scroll?: {
+    beforeHeight: number;
+    afterHeight: number;
+    addedChars: number;
+    grew: boolean;
+    steps?: Array<{ beforeHeight: number; afterHeight: number; addedChars: number; grew: boolean }>;
+  };
   /**
    * Present on `snapshot`: absolute link targets on the page (full, before the
    * model-facing shortening) and the shortened forms the model saw. Host-only
@@ -394,7 +403,10 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           if (observation && (await target.inputValue()) !== action.text)
             return fail('输入值核验失败');
           if (action.submit) await target.press('Enter', { timeout });
-          return done(`已在 ${action.ref} 输入${action.submit ? '并提交' : ''}`);
+          return {
+            ...done(`已在 ${action.ref} 输入${action.submit ? '并提交' : ''}`),
+            form: { ref: action.ref, filled: true, submitted: !!action.submit },
+          };
         }
         case 'select': {
           const target = byRef(action.ref);
@@ -403,7 +415,10 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           } catch {
             await target.selectOption(action.value, { timeout });
           }
-          return done(`已在 ${action.ref} 选择「${action.value}」`);
+          return {
+            ...done(`已在 ${action.ref} 选择「${action.value}」`),
+            form: { ref: action.ref, filled: true, submitted: false },
+          };
         }
         case 'scroll': {
           const measure = () =>
@@ -558,9 +573,17 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     }
     try {
       const interruption = observation.interruption();
-      if (interruption) return { ok: false, text: interruption.message, interruption };
+      if (interruption)
+        return {
+          ok: false,
+          text: interruption.message,
+          interruption,
+          effect: observation.pendingEffect(),
+        };
       if (action.tool === 'new_tab' || action.tool === 'close_tab')
         return await observation.manageTab(action);
+      if (action.tool === 'switch_tab' || action.tool === 'list_tabs')
+        return (await observation.read(action))!;
       const context = observation.resolve(action);
       page = context.page;
       activeFrame = context.frame;
@@ -574,11 +597,18 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
       if (read) return read;
       return await observation.act(action, () => execute(action));
     } catch (error) {
-      return browserToolError(error);
+      const failure = browserToolError(error);
+      if (['stale_ref', 'stale_context'].includes(failure.errorCode)) {
+        const fresh = await observation.read({ tool: 'read_page' }).catch(() => null);
+        if (fresh?.ok)
+          failure.text += `\nfresh_observation (original action was NOT executed):\n${fresh.text}`;
+      }
+      return failure;
     }
   };
   return {
     execute: wrappedExecute,
+    recoverObservation: async () => (observation ? observation.read({ tool: 'read_page' }) : null),
     ownsPage(candidate: Page) {
       return observation ? observation.ownsPage(candidate) : [...tabs.values()].includes(candidate);
     },
