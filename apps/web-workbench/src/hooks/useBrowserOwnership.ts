@@ -63,6 +63,16 @@ export function useBrowserOwnership(taskId: string | null, connected: boolean) {
 
   const valid =
     state?.value.taskId === taskId && state.generation === generation ? state.value : null;
+  // The control session registers a few seconds after the task starts (the
+  // pool is still launching the browser). Until it has been seen once, the
+  // "no session yet" answers mean starting, not observe-only.
+  const confirmed = React.useRef<string | null>(null);
+  if (valid?.supported) confirmed.current = taskId;
+  const starting =
+    !!taskId &&
+    confirmed.current !== taskId &&
+    !valid?.supported &&
+    (!error || error === 'session_unavailable' || error === 'runner_unavailable');
   const lease =
     connected && !pending && (!error || error === 'observation_failed') && valid?.phase === 'human'
       ? valid.lease
@@ -110,6 +120,7 @@ export function useBrowserOwnership(taskId: string | null, connected: boolean) {
     lease,
     state: valid,
     supported: valid?.supported ?? false,
+    starting,
     pending,
     error,
     request,

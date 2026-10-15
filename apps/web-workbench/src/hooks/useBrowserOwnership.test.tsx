@@ -20,6 +20,21 @@ const state = (taskId: string, phase = 'agent', lease: string | null = null) => 
 });
 
 describe('browser ownership UI', () => {
+  it('reads a session not yet registered as starting, never after it was confirmed', async () => {
+    const unavailable = { ...state('one'), supported: false, error: 'session_unavailable' };
+    query.mockResolvedValue(unavailable);
+    const { result } = renderHook(() => useBrowserOwnership('one', true));
+    expect(result.current.starting).toBe(true);
+    await waitFor(() => expect(result.current.error).toBe('session_unavailable'));
+    expect(result.current.starting).toBe(true);
+    query.mockResolvedValue(state('one'));
+    await waitFor(() => expect(result.current.supported).toBe(true), { timeout: 3000 });
+    expect(result.current.starting).toBe(false);
+    query.mockResolvedValue(unavailable);
+    await waitFor(() => expect(result.current.supported).toBe(false), { timeout: 3000 });
+    expect(result.current.starting).toBe(false);
+  });
+
   it('never exposes an offline lease for even one render when reconnecting', async () => {
     query.mockResolvedValue(state('one', 'human', 'offline'));
     const rendered: Array<string | null> = [];

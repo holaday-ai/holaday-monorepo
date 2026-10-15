@@ -587,6 +587,11 @@ export interface SupercarOutcome {
    * that made users distrust the answer.
    */
   reconciledStepUpdate?: { tickIndex: number; actionSummary: string };
+  /**
+   * BROWSER-AUTOPILOT-3: a completed browser answer with fewer items than the
+   * user asked for. Persisted as partial_success (部分完成), never completed.
+   */
+  partial?: { found: number; wanted: number };
 }
 
 export interface SupercarTickEvent {

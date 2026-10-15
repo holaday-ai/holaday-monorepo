@@ -58,7 +58,7 @@ export function detectBrowserBlocker(page: {
 
 export type BrowserTrace = Pick<
   UnifiedToolResult,
-  'ok' | 'url' | 'download' | 'tabId' | 'scroll' | 'form' | 'openedTab'
+  'ok' | 'url' | 'download' | 'tabId' | 'scroll' | 'form' | 'openedTab' | 'dialogs'
 > & {
   tool: string;
   screenshot?: boolean;
@@ -106,6 +106,13 @@ export function completionGap(
     )
       return '用户要求视频，结果中仍有播放列表或课程合集；请只保留实际视频条目。';
   }
+  // AP3 core-10: "JavaScript alerts" asks for native dialogs; an in-page
+  // notice closed by a button is not one.
+  if (
+    /javascript\s*alerts?|\bjs\s*(?:alert|confirm|prompt)s?\b/i.test(intent) &&
+    !successful.some((entry) => entry.dialogs?.length)
+  )
+    return '用户要求 JavaScript alerts，但本次没有触发过任何原生对话框（alert/confirm/prompt）；页面内的提示框不算。请打开带触发按钮的页面点击按钮，再读取页面显示的结果；做不到就如实说明。';
   const claims: Array<[RegExp, string]> = [
     [/(?:切回|切换|返回).{0,10}(?:标签|tab)|switched? (?:back )?to.{0,20}tab/i, 'switch_tab'],
     [/(?:新建|打开|创建).{0,8}(?:新标签|\d+个标签)|opened? .{0,12}new tabs?/i, 'new_tab'],

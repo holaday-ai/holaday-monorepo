@@ -199,6 +199,7 @@ export type BrowserObservationContext = {
 
 export type ObservationAction =
   | { tool: 'read_page' }
+  | { tool: 'sections' }
   | { tool: 'get_page_text'; cursor?: string; maxChars?: number; section?: number }
   | { tool: 'links' | 'tables'; start?: number; limit?: number }
   | {
@@ -280,6 +281,7 @@ function parseAction(name: string, input: unknown): UnifiedBrowserAction {
   };
   switch (name) {
     case 'read_page':
+    case 'sections':
     case 'list_tabs':
     case 'new_tab':
       return { tool: name };
@@ -407,6 +409,7 @@ export function isMutatingBrowserAction(action: UnifiedBrowserAction): boolean {
     'extract',
     'wait_for',
     'read_page',
+    'sections',
     'get_page_text',
     'links',
     'tables',
@@ -417,6 +420,7 @@ export function isMutatingBrowserAction(action: UnifiedBrowserAction): boolean {
 /** Only offered to the cloud lane when BROWSER_OBSERVATION_V2 is enabled. */
 export const OBSERVATION_TOOL_NAMES = [
   'read_page',
+  'sections',
   'get_page_text',
   'links',
   'tables',
@@ -441,7 +445,7 @@ export function cloudObservationTools(): ReadonlyArray<NeutralToolDefinition> {
         type: 'integer',
         minimum: 1,
         maximum: 120,
-        description: '可选：read_page.headings 中 H2 的 section 编号，按真实章节边界读取。',
+        description: '可选：sections 返回的正文章节序号（index），按真实章节边界读取。',
       },
     },
     links: {
@@ -475,8 +479,10 @@ export function cloudObservationTools(): ReadonlyArray<NeutralToolDefinition> {
         description: {
           read_page:
             '读取当前 frame 的可访问性树、refs、版本和 frame 列表。页面变化、导航、切换标签后 refs 失效。',
+          sections:
+            '列出文章正文的章节（只取正文区域的 H2/H3，目录、导航、侧栏、参考文献不算），带序号 index 与锚点。涉及「第N节/第N章/第N部分」时必须先调用它，按 index 定位。',
           get_page_text:
-            '分段读取脱敏正文或指定 H2 section；cursor 绑定文档与章节，end=true 才是末尾。',
+            '分段读取脱敏正文或指定 section（sections 的 index）；cursor 绑定文档与章节，end=true 才是末尾。',
           links: '分页读取真实资源链接；保留查询身份，移除追踪参数。',
           tables: '读取表格列名、行范围及分页来源。',
           scroll_until: '有界滚动读取；返回停滞或数量/时间/token 上限和截断原因。',
