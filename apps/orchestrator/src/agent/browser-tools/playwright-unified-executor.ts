@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Page } from 'playwright';
+import type { Dialog, Page } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { probeBrowserBlocker } from './browser-blocker-probe.js';
 import { scrollWithEvidence } from './browser-scroll.js';
@@ -30,6 +30,8 @@ export interface UnifiedToolResult {
   image?: { mediaType: 'image/jpeg'; data: string };
   /** Present on `download`: where the file was saved by the host. */
   download?: BrowserDownloadReceipt;
+  /** Native JavaScript dialogs (alert/confirm/prompt) this action opened. */
+  dialogs?: Array<{ type: string; message: string }>;
   tabId?: string;
   openedTab?: boolean;
   scroll?: {
@@ -244,6 +246,18 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   };
   const byRef = (ref: string) =>
     observation?.locator(activeFrame, ref) ?? activeFrame.locator(`aria-ref=${ref}`);
+  // AP3 core-10: native dialogs are host receipts. Handling them keeps
+  // Playwright's default outcome (dismissed: alert closed, confirm cancelled,
+  // prompt empty) and records that one opened.
+  const dialogs: Array<{ type: string; message: string }> = [];
+  const onDialog = (dialog: Dialog) => {
+    dialogs.push({ type: dialog.type(), message: dialog.message().slice(0, 200) });
+    // A page-level handler (a harness, a test) owns the dialog; only record it.
+    const owner = dialog.page() as unknown as { listenerCount(event: string): number } | null;
+    if ((owner?.listenerCount('dialog') ?? 0) > 0) return;
+    dialog.dismiss().catch(() => {});
+  };
+  page.context().on('dialog', onDialog);
 
   const snapshotWithLinks = async (): Promise<{ text: string; links: string[] }> => {
     // Redact before truncating: a secret straddling the cut must not survive.
@@ -565,6 +579,19 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     }
   }
 
+  const withDialogs = async (action: UnifiedBrowserAction): Promise<UnifiedToolResult> => {
+    const start = dialogs.length;
+    const result = await wrappedExecute(action);
+    if (dialogs.length === start) return result;
+    const opened = dialogs.slice(start);
+    return {
+      ...result,
+      dialogs: opened,
+      text: `${result.text}\n浏览器弹出原生对话框：${opened
+        .map((d) => `${d.type}「${d.message}」`)
+        .join('；')}（已自动关闭：alert 确认、confirm 取消、prompt 不输入）。`,
+    };
+  };
   const wrappedExecute = async (action: UnifiedBrowserAction): Promise<UnifiedToolResult> => {
     if (!observation) {
       if (action.tabId) {
@@ -611,7 +638,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     }
   };
   return {
-    execute: wrappedExecute,
+    execute: withDialogs,
     recoverObservation: async () => (observation ? observation.read({ tool: 'read_page' }) : null),
     ownsPage(candidate: Page) {
       return observation ? observation.ownsPage(candidate) : [...tabs.values()].includes(candidate);
@@ -629,7 +656,10 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     },
     snapshot: snapshotText,
     observation,
-    dispose: () => observation?.dispose(),
+    dispose: () => {
+      page.context().off('dialog', onDialog);
+      observation?.dispose();
+    },
   };
 }
 

@@ -4,6 +4,7 @@ import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { browserCompletionVerdict } from '../../execution/execution-pipeline.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { completionGap } from './browser-completion.js';
 import {
   answerCount,
   checkSectionClaim,
@@ -170,6 +171,24 @@ describe('a wrong “第N节” is corrected once with the real list, then fails
   });
 });
 
+describe('“JavaScript alerts” needs a native dialog receipt (core-10 f2-a)', () => {
+  const intent = `${P}the-internet.herokuapp.com 的 iframe 与 JavaScript alerts`;
+  const summary = '已完成 iframe 与 JavaScript alerts：关闭了页面内 alert 组件。';
+  const read = { tool: 'read_page', ok: true, url: 'https://the-internet.herokuapp.com/iframe' };
+  it('rejects an answer when no dialog was ever opened', () => {
+    expect(completionGap(intent, summary, [read], false)).toContain('没有触发过任何原生对话框');
+  });
+  it('accepts it once a click opened one', () => {
+    const click = {
+      ...read,
+      tool: 'click',
+      dialogs: [{ type: 'alert', message: 'I am a JS Alert' }],
+    };
+    expect(completionGap(intent, summary, [read, click], false)).toBeNull();
+    expect(completionGap(`${P}YouTube 搜索`, summary, [read], false)).toBeNull();
+  });
+});
+
 describe('a partial browser answer is persisted as partial_success', () => {
   it('maps partial to partial_success and keeps the answer', () => {
     expect(
@@ -211,6 +230,12 @@ ${BODY.map(
     server = createServer((req, res) => {
       res.setHeader('content-type', 'text/html; charset=utf-8');
       if (req.url === '/forbidden') res.statusCode = 403;
+      if (req.url === '/alerts') {
+        res.end(
+          `<button onclick="alert('I am a JS Alert');r.textContent='You successfully clicked an alert'">Click for JS Alert</button><button onclick="r.textContent='You clicked: '+(confirm('I am a JS Confirm')?'Ok':'Cancel')">Click for JS Confirm</button><p id="r"></p>`,
+        );
+        return;
+      }
       res.end(
         req.url === '/blog' ? blog : req.url === '/forbidden' ? '<h1>403 Forbidden</h1>' : wiki,
       );
@@ -263,6 +288,36 @@ ${BODY.map(
     expect((await tools.execute({ tool: 'navigate', url: `${base}/blog` })).text).not.toContain(
       'HTTP',
     );
+    tools.dispose();
+    await page.close();
+  });
+  it('records native dialogs as receipts and keeps their default outcome (core-10 f2-a)', async () => {
+    const page = await browser.newPage();
+    await page.goto(`${base}/alerts`);
+    const tools = createPlaywrightUnifiedExecutor(page, { observationV2: true });
+    const read = JSON.parse((await tools.execute({ tool: 'read_page' })).text);
+    const ref = (name: string) =>
+      String(read.tree).match(new RegExp(`button "${name}" \\[ref=(e\\d+)\\]`))![1]!;
+    const revision = read.observationRevision;
+    const alert = await tools.execute({
+      tool: 'click',
+      ref: ref('Click for JS Alert'),
+      observationRevision: revision,
+    });
+    expect(alert.dialogs).toEqual([{ type: 'alert', message: 'I am a JS Alert' }]);
+    expect(alert.text).toContain('alert「I am a JS Alert」');
+    expect(await page.locator('#r').textContent()).toBe('You successfully clicked an alert');
+    const fresh = JSON.parse((await tools.execute({ tool: 'read_page' })).text);
+    const confirmRef = String(fresh.tree).match(
+      /button "Click for JS Confirm" \[ref=(e\d+)\]/,
+    )![1]!;
+    const confirm = await tools.execute({
+      tool: 'click',
+      ref: confirmRef,
+      observationRevision: fresh.observationRevision,
+    });
+    expect(confirm.dialogs?.[0]?.type).toBe('confirm');
+    expect(await page.locator('#r').textContent()).toBe('You clicked: Cancel');
     tools.dispose();
     await page.close();
   });
