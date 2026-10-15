@@ -491,7 +491,9 @@ export function listSourcesGuidance(requirement: OutputRequirementListSources): 
   const fields = requirement.keyFields.map((field) => KEY_FIELD_LABELS[field]);
   return [
     `按编号逐条列出 ${requirement.minItems} 条，每条单独写出：标题或名称${fields.length > 0 ? `、${fields.join('、')}` : ''}、该条自己的详情页链接。`,
-    '链接必须是该条目本身的页面（文章页、商品详情页、帖子页），用页面上的真实链接；不能用网站首页、搜索结果页或列表页代替，也不能多条共用一个链接。',
+    // AP4 core-01: a search result that points at a site's home page is that
+    // result's own link; rejecting it made real Bing results "invalid".
+    '链接必须是该条目自己指向的页面，用页面上的真实链接：文章、商品、帖子给出它自己的页面；搜索结果给出该结果指向的网址（即使它是某个网站的首页）。不能用搜索结果页本身或列表页代替，也不能多条共用一个链接。',
     '某条拿不到链接或字段时，写明“未获取到”，不要编造。',
   ].join('\n');
 }

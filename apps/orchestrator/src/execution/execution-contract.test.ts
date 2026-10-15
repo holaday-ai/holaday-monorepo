@@ -502,6 +502,8 @@ describe('list answers need per-item sources (FIX-BATCH-A)', () => {
     );
     const suffix = buildPromptSchemaSuffix(contract.goal);
     expect(suffix).toContain('该条自己的详情页链接');
-    expect(suffix).toContain('不能用网站首页、搜索结果页或列表页代替');
+    expect(suffix).toContain('不能用搜索结果页本身或列表页代替');
+    // A search result pointing at a home page is that result's own link (AP4 core-01).
+    expect(suffix).toContain('即使它是某个网站的首页');
   });
 });
