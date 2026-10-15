@@ -11,8 +11,10 @@ export function CloudBrowserProfileControl() {
   const [state, setState] = useState<'idle' | 'busy' | 'cleared' | 'failed'>('idle');
   useEffect(() => {
     let live = true;
-    trpc.tasks.browserProfileStatus
-      .query()
+    // Any failure, even a synchronous one, means "not shown": this optional row
+    // must never take the settings page down with it.
+    Promise.resolve()
+      .then(() => trpc.tasks.browserProfileStatus.query())
       .then((result) => {
         if (live) setConfigured(result.configured);
       })
@@ -33,8 +35,8 @@ export function CloudBrowserProfileControl() {
         disabled={state === 'busy'}
         onClick={() => {
           setState('busy');
-          trpc.tasks.browserProfileClear
-            .mutate()
+          Promise.resolve()
+            .then(() => trpc.tasks.browserProfileClear.mutate())
             .then(() => setState('cleared'))
             .catch(() => setState('failed'));
         }}
