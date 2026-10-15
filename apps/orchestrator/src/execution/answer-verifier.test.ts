@@ -556,6 +556,29 @@ describe('verifyDeterministic — criterion: url_count', () => {
     ).toBe(true);
   });
 
+  it('does not count the in-browser search results page (.invalid) as a source', () => {
+    const taskId = 'tsk_url_count_invalid_host';
+    const contract = buildContract({
+      taskId,
+      intent: '打开 Wikipedia，搜索 OpenAI，进入对应条目，提取 founded date，并给出页面链接。',
+      executionMode: 'browser',
+      targetDomain: 'wikipedia.org',
+    });
+    const ledger = ledgerWith(taskId, {
+      fact: 'navigated to https://search-results.holaday.invalid/search?q=OpenAI',
+      sourceType: 'browser_state',
+      sourceDetail: 'page.goto',
+      confidence: 'observed',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText:
+        'Founded: December 8, 2015。来源：https://search-results.holaday.invalid/search?q=OpenAI',
+    });
+    expect(result.checks.find((check) => check.criterionType === 'url_count')?.passed).toBe(false);
+  });
+
   it('accepts answer-level grounded URLs when parsed table items have no URL column', () => {
     const contract = buildContract({
       taskId: 'tsk_url_count_prose_link',

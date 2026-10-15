@@ -249,6 +249,20 @@ export async function runSearchWithFallback(
   args: RunSupercarOptions,
   deps: SearchFallbackDeps,
 ): Promise<SupercarOutcome> {
+  // A served results page is a context route; it must not outlive the search.
+  const cleanup: Array<() => Promise<void>> = [];
+  try {
+    return await searchWithFallback(args, deps, cleanup);
+  } finally {
+    await Promise.allSettled(cleanup.map((dispose) => dispose()));
+  }
+}
+
+async function searchWithFallback(
+  args: RunSupercarOptions,
+  deps: SearchFallbackDeps,
+  cleanup: Array<() => Promise<void>>,
+): Promise<SupercarOutcome> {
   let plan: SearchFallbackPlan | null = null;
   let firstQuestion = '';
   let wallObserved = false;
@@ -365,6 +379,7 @@ export async function runSearchWithFallback(
       // Not a fallback attempt: a wall met on this run is handled as usual.
       retry = true;
       await emit('started');
+      cleanup.push(api.dispose);
       const outcome = await deps.run(tracked(api.plan.intent));
       await emit(
         outcome.status === 'completed'
@@ -415,6 +430,7 @@ export async function runSearchWithFallback(
       deps.originalIntent ?? args.intent,
     );
     if (api) {
+      cleanup.push(api.dispose);
       selected = api.plan;
       plan = api.plan;
       apiUsed = true;
