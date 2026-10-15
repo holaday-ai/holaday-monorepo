@@ -133,3 +133,42 @@ describe('proxy pool on real Chromium (local stub proxies)', () => {
     expect(total()).toBe(before);
   });
 });
+
+describe('service worker guard (PROXY-TRIAL-1 finding)', () => {
+  let browser: Browser;
+  beforeAll(async () => {
+    browser = await chromium.launch({ headless: true });
+  });
+  afterAll(async () => {
+    await browser?.close();
+  });
+  const withWorkers = async (urls: string[]) => {
+    const page = await browser.newPage();
+    const context = page.context();
+    (context as unknown as { serviceWorkers: () => unknown[] }).serviceWorkers = () =>
+      urls.map((url) => ({ url: () => url }));
+    try {
+      const egress = await installDomainEgress(
+        page,
+        { enabled: true, domains: ['example.test'], proxyUrl: 'http://127.0.0.1:9' },
+        { check: async (url) => ({ allowed: true as const, url, addresses: ['127.0.0.1'] }) },
+      );
+      await egress.dispose();
+      return 'installed';
+    } catch (error) {
+      return (error as Error).message;
+    } finally {
+      await page.close();
+    }
+  };
+  it("ignores the browser's own extension workers (Chrome starts one)", async () => {
+    expect(
+      await withWorkers(['chrome-extension://nkeimhogjdpnpccoofpliimaahmaaome/thunk.js']),
+    ).toBe('installed');
+  });
+  it('still refuses a web origin service worker that could bypass the route', async () => {
+    expect(await withWorkers(['https://site.test/sw.js'])).toBe(
+      'domain_proxy_service_worker_active',
+    );
+  });
+});

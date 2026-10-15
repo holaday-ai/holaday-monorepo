@@ -126,7 +126,11 @@ export async function installDomainEgress(
     throw new Error('domain_proxy_invalid_config');
   const domains = [...config.domains];
   const context = page.context();
-  if (context.serviceWorkers().length) {
+  // Only a web origin's service worker can answer page requests and bypass the
+  // route. The browser's own component extensions (Chrome ships one at start,
+  // chrome-extension://…) are not page traffic and must not block the proxy.
+  const webWorker = (worker: { url(): string }) => /^https?:/i.test(worker.url());
+  if (context.serviceWorkers().some(webWorker)) {
     signal?.removeEventListener('abort', stop);
     throw new Error('domain_proxy_service_worker_active');
   }
@@ -141,7 +145,8 @@ export async function installDomainEgress(
   };
   await context.addInitScript(blockRegistration);
   await page.evaluate(blockRegistration);
-  const workerStarted = () => {
+  const workerStarted = (worker: { url(): string }) => {
+    if (!webWorker(worker)) return;
     metrics.failed++;
     stop();
   };
