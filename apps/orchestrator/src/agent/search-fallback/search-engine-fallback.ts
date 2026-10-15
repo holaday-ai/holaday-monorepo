@@ -22,7 +22,7 @@ export interface SearchFallbackPlan {
 export interface SearchFallbackEvent {
   from: Engine | string;
   to: Engine | string;
-  reason: 'search_verification_wall' | 'search_endpoint_unavailable';
+  reason: 'search_verification_wall' | 'search_endpoint_unavailable' | 'search_api_first';
   endpoint?: 'lite' | 'api';
   phase: 'started' | 'completed' | 'blocked' | 'failed';
   attempt: 1;
@@ -114,9 +114,16 @@ function withAlternate(
   },
   to: string,
   url: string,
+  /** CAPTCHA-REDUCE-1: the search API was used first, before any wall. */
+  preferred = false,
 ): SearchFallbackPlan {
   const { from, query, requiresWeather, specific, original } = base;
-  const notice = `${from} 要求人机验证，已改用 ${to} 搜索。${specific ? `以下是 ${to} 的同类结果，不是 ${from} 专属卡片或原站结果。` : ''}`;
+  const notice = preferred
+    ? `本次搜索使用 ${to}（不是 ${from} 结果页）。`
+    : `${from} 要求人机验证，已改用 ${to} 搜索。${specific ? `以下是 ${to} 的同类结果，不是 ${from} 专属卡片或原站结果。` : ''}`;
+  const header = preferred
+    ? `【搜索接口】本次按配置直接使用 ${to} 获取搜索结果，不打开 ${from} 结果页。`
+    : `【搜索引擎回退】${from} 已出现真实验证墙，不尝试解验证码。`;
   return {
     from,
     to,
@@ -124,7 +131,7 @@ function withAlternate(
     url,
     notice,
     requiresWeather,
-    intent: `${original}\n\n【搜索引擎回退】${from} 已出现真实验证墙，不尝试解验证码。原查询为「${query}」。本次获准使用 ${to} 交付同类公开搜索结果；从 ${url} 开始，保持原有数量与字段要求。只读，不登录、不提交业务表单；不得把替代来源冒充 ${from}，不能编造未读取的内容。${requiresWeather ? '若备用引擎没有天气卡片，可在同一引擎使用等价关键词并打开其真实天气来源，交付实际读到的天气概况、温度或天气网站链接；读不到温度时明确说明，仍可交付其他天气信息，不得编造温度。完全没有天气信息才算未完成。' : ''}`,
+    intent: `${original}\n\n${header}原查询为「${query}」。本次获准使用 ${to} 交付同类公开搜索结果；从 ${url} 开始，保持原有数量与字段要求。只读，不登录、不提交业务表单；不得把替代来源冒充 ${from}，不能编造未读取的内容。${requiresWeather ? '若备用引擎没有天气卡片，可在同一引擎使用等价关键词并打开其真实天气来源，交付实际读到的天气概况、温度或天气网站链接；读不到温度时明确说明，仍可交付其他天气信息，不得编造温度。完全没有天气信息才算未完成。' : ''}`,
   };
 }
 
@@ -138,6 +145,7 @@ async function viaSearchApi(
   provider: SearchProvider,
   args: RunSupercarOptions,
   original: string,
+  preferred = false,
 ): Promise<{ plan: SearchFallbackPlan; dispose: () => Promise<void> } | null> {
   try {
     const results = await provider.search(plan.query, {
@@ -162,6 +170,7 @@ async function viaSearchApi(
         },
         provider.label,
         served.url,
+        preferred,
       ),
       dispose: served.dispose,
     };
@@ -207,6 +216,11 @@ async function isUnavailableSearchPage(
 export interface SearchFallbackDeps {
   /** CAPTCHA-REDUCE-1: tried before the alternate engine when configured. */
   searchProvider?: SearchProvider | null;
+  /**
+   * CAPTCHA-REDUCE-1: with a provider, a Google search task skips google.com
+   * altogether (a datacenter browser is walled there almost every time).
+   */
+  searchApiFirst?: boolean;
   run: (args: RunSupercarOptions) => Promise<SupercarOutcome>;
   stop: (taskId: string) => boolean;
   onFallback?: (event: SearchFallbackEvent) => Promise<void>;
@@ -245,6 +259,7 @@ export async function runSearchWithFallback(
   let retryWallObserved = false;
   let endpointRetry = false;
   let apiUsed = false;
+  let apiFirst = false;
   let offset = 0;
   const startedAt = Date.now();
   const emit = async (phase: SearchFallbackEvent['phase']) => {
@@ -252,7 +267,11 @@ export async function runSearchWithFallback(
       await deps.onFallback?.({
         from: endpointRetry ? plan.to : plan.from,
         to: apiUsed && deps.searchProvider ? deps.searchProvider.id : plan.to,
-        reason: endpointRetry ? 'search_endpoint_unavailable' : 'search_verification_wall',
+        reason: endpointRetry
+          ? 'search_endpoint_unavailable'
+          : apiFirst
+            ? 'search_api_first'
+            : 'search_verification_wall',
         ...(endpointRetry
           ? { endpoint: 'lite' as const }
           : apiUsed
@@ -325,6 +344,41 @@ export async function runSearchWithFallback(
       });
     },
   });
+  const original = deps.originalIntent ?? args.intent;
+  if (
+    deps.searchProvider &&
+    deps.searchApiFirst &&
+    /google|谷歌/i.test(original) &&
+    !(await args.isTaskCancelled?.())
+  ) {
+    const preferred = planSearchFallback(original, {
+      url: 'https://www.google.com/search',
+      captcha: true,
+      visible: true,
+    });
+    const api =
+      preferred && (await viaSearchApi(preferred, deps.searchProvider, args, original, true));
+    if (api) {
+      plan = api.plan;
+      apiUsed = true;
+      apiFirst = true;
+      // Not a fallback attempt: a wall met on this run is handled as usual.
+      retry = true;
+      await emit('started');
+      const outcome = await deps.run(tracked(api.plan.intent));
+      await emit(
+        outcome.status === 'completed'
+          ? 'completed'
+          : outcome.status === 'awaiting_user'
+            ? 'blocked'
+            : 'failed',
+      );
+      return {
+        ...outcome,
+        ...(outcome.summary ? { summary: `${api.plan.notice}\n\n${outcome.summary}` } : {}),
+      };
+    }
+  }
   const first = await deps.run(tracked(args.intent));
   // The unified runner returns detected walls directly; legacy/human gates may
   // instead invoke onAwaitingUser. Both require the same host-observed signal.

@@ -228,6 +228,41 @@ describe('a Google wall on a search task goes to the search API, not the user', 
     expect(result.summary).toContain('已改用 本地测试搜索接口');
     expect(events[0]).toMatchObject({ to: 'search-api:stub', endpoint: 'api', phase: 'started' });
   });
+  it('with search-API-first, a Google search never opens google.com', async () => {
+    const page = await browser.newPage();
+    const calls: RunSupercarOptions[] = [];
+    const events: Array<Record<string, unknown>> = [];
+    const result = await runSearchWithFallback(
+      {
+        taskId: 'task',
+        intent,
+        executor: { getPage: async () => page },
+      } as unknown as RunSupercarOptions,
+      {
+        originalIntent: intent,
+        searchProvider: new StubSearchProvider(),
+        searchApiFirst: true,
+        stop: vi.fn(() => true),
+        onFallback: async (e) => {
+          events.push(e as never);
+        },
+        run: async (a) => {
+          calls.push(a);
+          return completed;
+        },
+      },
+    );
+    await page.close();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.intent).toContain('【搜索接口】');
+    expect(calls[0]!.intent).toContain(SEARCH_RESULTS_ORIGIN);
+    expect(calls[0]!.intent).not.toContain('验证墙');
+    expect(result.summary).toContain('本次搜索使用 本地测试搜索接口（不是 Google 结果页）');
+    expect(events.map((e) => [e.reason, e.phase])).toEqual([
+      ['search_api_first', 'started'],
+      ['search_api_first', 'completed'],
+    ]);
+  });
   it('uses the alternate engine when the API has nothing', async () => {
     const { calls } = await run(new StubSearchProvider(() => []));
     expect(calls[1]!.intent).toContain('https://www.bing.com/search?q=HOLA+DAY+AI');

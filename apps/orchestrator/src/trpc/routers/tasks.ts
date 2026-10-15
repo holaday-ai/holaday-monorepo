@@ -6916,6 +6916,7 @@ export const tasksRouter = router({
                           originalIntent: input.intent,
                           // CAPTCHA-REDUCE-1: BROWSER_SEARCH_API_PROVIDER (default none).
                           searchProvider: searchProviderFromEnv(),
+                          searchApiFirst: process.env.BROWSER_SEARCH_API_FIRST !== 'false',
                           run: (args) =>
                             runSupercarWithRetry(args, { userId, taskId, logger: ctx.logger }),
                           stop: supercarAbort,
