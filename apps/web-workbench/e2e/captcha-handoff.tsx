@@ -37,7 +37,6 @@ function App() {
   return (
     <ToastProvider>
       <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}>
-        <output data-testid="fixture-state">{JSON.stringify(state)}</output>
         <div style={{ flex: 1, minHeight: 0 }}>
           <BrowserPanel
             activeTaskId={taskId}

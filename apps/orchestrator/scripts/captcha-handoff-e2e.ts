@@ -19,6 +19,7 @@ import {
   browserCaptchaProcedure,
   browserControlProcedure,
   browserControlStateProcedure,
+  browserNavProcedure,
 } from '../src/trpc/routers/browser-control.js';
 import { publicProcedure, router } from '../src/trpc/trpc.js';
 const out = process.env.CAPTCHA_E2E_OUTPUT;
@@ -67,6 +68,7 @@ const appRouter = router({
   tasks: router({
     browserControlState: browserControlStateProcedure,
     browserControl: browserControlProcedure,
+    browserNav: browserNavProcedure,
     browserCaptcha: browserCaptchaProcedure,
     checkpointBrowserSession: publicProcedure.input(z.any()).mutation(() => ({ ok: true })),
   }),
@@ -268,7 +270,6 @@ try {
     await ui.setViewportSize({ width: 390, height: 844 });
     await ui.getByRole('button', { name: '全屏浏览器模式', exact: true }).click();
     await ui.getByRole('button', { name: '退出全屏', exact: true }).first().waitFor();
-    await ui.getByTitle('放大画面').click();
     assert.equal(
       await ui.getByRole('button', { name: '我已完成，继续', exact: true }).isVisible(),
       true,

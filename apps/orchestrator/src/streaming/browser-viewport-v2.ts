@@ -6,20 +6,43 @@ import type {
 } from '@holaday/shared-types';
 
 export const BROWSER_FRAME_MAX_AGE_MS = 5_000;
+// A just-painted frame can be superseded while its human input is in flight.
+// Keep only a 250ms bounded transport grace within the SAME target/revision.
+const INPUT_FRAME_TRANSIT_MS = 250;
 export class BrowserFrameGuard {
   private frame: BrowserFrameGeometry | null = null;
+  private recent = new Map<string, { frame: BrowserFrameGeometry; supersededAt: number }>();
   observe(frame: BrowserFrameGeometry): void {
+    const previous = this.frame;
+    if (
+      previous &&
+      previous.tabId === frame.tabId &&
+      previous.viewportRevision === frame.viewportRevision &&
+      previous.cssWidth === frame.cssWidth &&
+      previous.cssHeight === frame.cssHeight
+    ) {
+      this.recent.set(previous.frameId, { frame: previous, supersededAt: frame.capturedAt });
+      for (const [id, entry] of this.recent)
+        if (frame.capturedAt - entry.supersededAt > INPUT_FRAME_TRANSIT_MS) this.recent.delete(id);
+      while (this.recent.size > 32) this.recent.delete(this.recent.keys().next().value!);
+    } else this.recent.clear();
     this.frame = frame;
   }
   invalidate(): void {
     this.frame = null;
+    this.recent.clear();
   }
   validate(ref: BrowserFrameReference | undefined, now = Date.now()): boolean {
-    const f = this.frame;
+    if (!ref || !this.frame) return false;
+    const prior = this.recent.get(ref.frameId);
+    const f =
+      ref.frameId === this.frame.frameId
+        ? this.frame
+        : prior && now - prior.supersededAt <= INPUT_FRAME_TRANSIT_MS
+          ? prior.frame
+          : null;
     return !!(
       f &&
-      ref &&
-      ref.frameId === f.frameId &&
       ref.tabId === f.tabId &&
       ref.viewportRevision === f.viewportRevision &&
       now >= f.capturedAt &&

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { BrowserActionDecision, BrowserActionRequest } from '@holaday/shared-types';
+import type { CDPSession } from 'playwright';
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { captchaHandoffs } from '../agent/supercar/captcha-handoff.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
@@ -10,6 +11,7 @@ export async function authorizeCaptchaViewportInput(
   instance: BrowserInstance,
   envelope: InputEnvelope,
   signal?: AbortSignal,
+  session?: CDPSession | null,
 ): Promise<{ request: BrowserActionRequest; decision: BrowserActionDecision }> {
   const requireOwner = () => {
     signal?.throwIfAborted();
@@ -29,7 +31,7 @@ export async function authorizeCaptchaViewportInput(
   };
   requireOwner();
   const page = await instance.executor.getPage();
-  const cdp = await page.context().newCDPSession(page);
+  const cdp = session ?? (await page.context().newCDPSession(page));
   let focusedObject: string | undefined;
   try {
     const payload = envelope.payload!;
@@ -75,6 +77,6 @@ export async function authorizeCaptchaViewportInput(
   } finally {
     if (focusedObject)
       await cdp.send('Runtime.releaseObject', { objectId: focusedObject }).catch(() => {});
-    await cdp.detach().catch(() => {});
+    if (!session) await cdp.detach().catch(() => {});
   }
 }

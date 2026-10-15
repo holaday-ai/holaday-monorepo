@@ -708,3 +708,119 @@ describe('CdpStreamer', () => {
     await streamer.stop();
   });
 });
+
+it('V2 publishes the already-open URL and refreshes static pixels before input expires', async () => {
+  vi.useFakeTimers();
+  const send = vi.fn(async (method: string) =>
+    method === 'Page.captureScreenshot' ? { data: 'fixture' } : undefined,
+  );
+  const session = Object.assign(new EventEmitter(), {
+    send,
+    detach: vi.fn(),
+  }) as unknown as CDPSession;
+  const ws = { send: vi.fn() } as unknown as WebSocket;
+  const streamer = new CdpStreamer({
+    viewportV2: true,
+    ws,
+    logger: { info: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
+    getPage: async () =>
+      ({
+        url: () => 'https://example.com/already-open',
+        context: () => ({ newCDPSession: async () => session }),
+      }) as unknown as Page,
+  });
+  try {
+    await streamer.start();
+    expect(ws.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: 'url-changed', url: 'https://example.com/already-open' }),
+    );
+    expect(send).toHaveBeenCalledWith('Page.startScreencast', {
+      format: 'jpeg',
+      quality: 90,
+      everyNthFrame: 1,
+    });
+    (session as unknown as EventEmitter).emit('Page.screencastFrame', {
+      data: 'fixture',
+      metadata: {},
+      sessionId: 1,
+    });
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(send).toHaveBeenCalledWith('Page.captureScreenshot', expect.any(Object));
+  } finally {
+    await streamer.stop();
+    vi.useRealTimers();
+  }
+});
+
+it('uses CSS layout units when Retina screencast metadata contains physical pixels', async () => {
+  const sharp = (await import('sharp')).default;
+  const data = (
+    await sharp({ create: { width: 800, height: 600, channels: 3, background: 'white' } })
+      .jpeg()
+      .toBuffer()
+  ).toString('base64');
+  const send = vi.fn(async (method: string) =>
+    method === 'Page.getLayoutMetrics'
+      ? { cssLayoutViewport: { clientWidth: 400, clientHeight: 300 } }
+      : method === 'Page.captureScreenshot'
+        ? { data }
+        : undefined,
+  );
+  const session = Object.assign(new EventEmitter(), {
+    send,
+    detach: vi.fn(),
+  }) as unknown as CDPSession;
+  const onFrame = vi.fn();
+  const streamer = new CdpStreamer({
+    viewportV2: true,
+    onFrame,
+    ws: { send: vi.fn() } as unknown as WebSocket,
+    logger: { info: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
+    getPage: async () =>
+      ({
+        url: () => 'https://example.com',
+        context: () => ({ newCDPSession: async () => session }),
+      }) as unknown as Page,
+  });
+  try {
+    await streamer.start();
+    streamer.setCaptureScale(2);
+    (session as unknown as EventEmitter).emit('Page.screencastFrame', {
+      data,
+      metadata: { deviceWidth: 800, deviceHeight: 600, pageScaleFactor: 1 },
+      sessionId: 1,
+    });
+    await vi.waitFor(() => expect(onFrame).toHaveBeenCalled());
+    expect(onFrame).toHaveBeenCalledWith(
+      expect.objectContaining({ cssWidth: 400, cssHeight: 300, imageWidth: 800, imageHeight: 600 }),
+    );
+  } finally {
+    await streamer.stop();
+  }
+});
+
+it('serializes input behind a capture so emulation is stable', async () => {
+  const streamer = new CdpStreamer({
+    getPage: async () => ({}) as Page,
+    ws: {} as WebSocket,
+    logger: {} as Logger,
+  });
+  const events: string[] = [];
+  let release!: () => void;
+  const capture = streamer.runWithStableViewport(async () => {
+    events.push('capture');
+    await new Promise<void>((r) => {
+      release = r;
+    });
+    events.push('restored');
+  });
+  const input = streamer.runWithStableViewport(async () => {
+    events.push('input');
+  });
+  await Promise.resolve();
+  expect(events).toEqual(['capture']);
+  release();
+  await capture;
+  await input;
+  expect(events).toEqual(['capture', 'restored', 'input']);
+});

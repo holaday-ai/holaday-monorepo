@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { browserViewportForHost, shouldSendBrowserViewport } from './browser-workspace-viewport';
+import {
+  browserViewportForHost,
+  browserViewportV2ForHost,
+  shouldSendBrowserViewport,
+} from './browser-workspace-viewport';
 
 describe('browser workspace viewport', () => {
   it('keeps a desktop execution viewport when the panel is narrow', () => {
@@ -29,4 +33,15 @@ describe('browser workspace viewport', () => {
       shouldSendBrowserViewport({ width: 612, height: 844 }, { width: 680, height: 844 }),
     ).toBe(true);
   });
+});
+
+it('V2 default follows the panel CSS size without shrinking a desktop', () => {
+  for (const [width, height] of [
+    [390, 640],
+    [800, 700],
+    [1440, 900],
+  ])
+    expect(
+      browserViewportV2ForHost({ hostWidth: width, hostHeight: height, renderMode: 'auto' }),
+    ).toEqual({ width, height });
 });

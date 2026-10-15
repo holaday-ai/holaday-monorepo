@@ -73,7 +73,7 @@ describe('owned screencast input assembly', () => {
     expect(effects).toEqual(['resize', 'ack', 'observe']);
     binding.finish();
   });
-  it('floors a canary panel resize to the real execution viewport', async () => {
+  it('preserves a negotiated V2 panel viewport', async () => {
     const instance = {
       taskId: 'tsk_small_canary',
       userId: 'usr_canary',
@@ -83,7 +83,11 @@ describe('owned screencast input assembly', () => {
     vi.stubEnv('BROWSER_V2_CANARY_USER_IDS', 'usr_canary');
     const binding = browserControlSessions.start(instance);
     const sizes: unknown[] = [];
-    const bridge = createOwnedScreencastInputBridge({ instance, peek: () => instance });
+    const bridge = createOwnedScreencastInputBridge({
+      instance,
+      peek: () => instance,
+      viewportV2: true,
+    });
     await bridge.attach({
       handle: async (envelope) => {
         sizes.push(envelope);
@@ -94,8 +98,8 @@ describe('owned screencast input assembly', () => {
         JSON.stringify({ type: 'input', payload: { type: 'viewport', width: 500, height: 679 } }),
       );
       await binding.control.checkpoint(async () => undefined);
-      expect(JSON.stringify(sizes)).toContain('1280');
-      expect(JSON.stringify(sizes)).toContain('800');
+      expect(JSON.stringify(sizes)).toContain('500');
+      expect(JSON.stringify(sizes)).toContain('679');
     } finally {
       binding.finish();
       vi.unstubAllEnvs();

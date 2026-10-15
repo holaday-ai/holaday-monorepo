@@ -6,11 +6,13 @@ export interface ScreencastInputSink {
 }
 
 export interface AppliedBrowserViewport {
+  deviceScaleFactor?: number;
   width: number;
   height: number;
 }
 
 interface DeferredScreencastInputBridgeOptions {
+  runWithStableViewport?: (action: () => Promise<void>) => Promise<void>;
   maxViewportHeight?: number;
   onViewportApplied?: (viewport: AppliedBrowserViewport) => void;
   onViewportRequested?: () => void;
@@ -39,6 +41,7 @@ export interface InputEnvelope {
  */
 export class DeferredScreencastInputBridge {
   private sink: ScreencastInputSink | null = null;
+  private readonly runWithStableViewport?: DeferredScreencastInputBridgeOptions['runWithStableViewport'];
   private readonly maxViewportHeight: number;
   private readonly onViewportRequested?: () => void;
   private readonly beforeDispatch?: DeferredScreencastInputBridgeOptions['beforeDispatch'];
@@ -49,6 +52,7 @@ export class DeferredScreencastInputBridge {
   private readonly queueViewport?: DeferredScreencastInputBridgeOptions['queueViewport'];
 
   constructor(options: DeferredScreencastInputBridgeOptions = {}) {
+    this.runWithStableViewport = options.runWithStableViewport;
     this.maxViewportHeight = options.maxViewportHeight ?? 1600;
     this.onViewportApplied = options.onViewportApplied;
     this.beforeDispatch = options.beforeDispatch;
@@ -67,8 +71,12 @@ export class DeferredScreencastInputBridge {
     if (envelope?.type !== 'input' || !envelope.payload) return;
 
     if (envelope.payload.type === 'viewport') {
-      const { width, height } = envelope.payload;
+      const { width, height, deviceScaleFactor } = envelope.payload;
       if (
+        (deviceScaleFactor !== undefined &&
+          (!Number.isFinite(deviceScaleFactor) ||
+            deviceScaleFactor < 1 ||
+            deviceScaleFactor > 2)) ||
         !Number.isFinite(width) ||
         !Number.isFinite(height) ||
         width < 240 ||
@@ -116,7 +124,7 @@ export class DeferredScreencastInputBridge {
     const sink = this.sink;
     if (!sink) return;
     const generation = this.sinkGeneration;
-    const action = async (signal?: AbortSignal): Promise<void> => {
+    const stableAction = async (signal?: AbortSignal): Promise<void> => {
       if (this.sink !== sink || this.sinkGeneration !== generation) return;
       await this.beforeDispatch?.(envelope ?? { type: 'input', payload: message }, signal);
       await sink.handle(message, signal);
@@ -124,9 +132,16 @@ export class DeferredScreencastInputBridge {
         this.onViewportApplied?.({
           width: Math.round(message.width),
           height: Math.round(message.height),
+          ...(message.deviceScaleFactor !== undefined
+            ? { deviceScaleFactor: message.deviceScaleFactor }
+            : {}),
         });
       }
     };
+    const action = (signal?: AbortSignal) =>
+      this.runWithStableViewport
+        ? this.runWithStableViewport(() => stableAction(signal))
+        : stableAction(signal);
     if (message.type === 'viewport' && this.queueViewport) {
       this.queueViewport(action);
     } else if (this.runOwnedInput) {
