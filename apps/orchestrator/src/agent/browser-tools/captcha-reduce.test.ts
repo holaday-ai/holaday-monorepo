@@ -104,6 +104,27 @@ describe('after two failed rounds the user can continue another way', () => {
   });
 });
 
+describe('换个方式继续 with the wall still up', () => {
+  it('hands the wall over once; the agent then gets its turn instead of a new handoff', async () => {
+    const handoff = vi.fn(async () => 'alternate' as const);
+    const { adapter, seen } = scripted([
+      { name: 'snapshot', input: {} },
+      { name: 'finish', input: { status: 'failed', summary: '该页面有验证码，已如实说明' } },
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '打开 https://shop.test/item 读价格',
+      adapter,
+      maxSteps: 4,
+      execute: async () => ({ ok: true, text: 'heading "Item"', url: 'https://shop.test/item' }),
+      probeBlocker: async () => wall as never,
+      captchaHandoff: handoff,
+    });
+    expect(handoff).toHaveBeenCalledTimes(1);
+    expect(seen.join('\n')).toContain('换个方式继续');
+    expect(outcome).toMatchObject({ status: 'failed' });
+  });
+});
+
 describe('challenge hints', () => {
   it('give one actionable sentence per challenge kind', () => {
     expect(CHALLENGE_HINTS.recaptcha_image).toContain('新图里还有也要点');

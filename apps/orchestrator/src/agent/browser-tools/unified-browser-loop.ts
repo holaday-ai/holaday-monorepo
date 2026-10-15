@@ -377,18 +377,25 @@ export async function runUnifiedBrowserLoop(
     held && !input.requireBrowserEvidence ? { status: 'completed', ...held, steps } : outcome;
   const ALTERNATE =
     '用户选择「换个方式继续」：这个页面的验证码没有通过。不要再打开或重试被验证墙挡住的页面，改用其他公开来源完成任务；确实做不到就如实说明缺什么。';
+  /**
+   * After 换个方式继续 the wall is still up by design: the agent gets its turn
+   * to leave it, and no wall in this task is handed to the user again.
+   */
+  let captchaDeclined = false;
   /** Undefined: not handed over (the caller pauses as before, e.g. for a search fallback). */
   const handCaptcha = async (
     message: string,
   ): Promise<'resumed' | 'alternate' | 'ended' | undefined> => {
     if (!input.captchaHandoff) return undefined;
+    if (captchaDeclined) return 'alternate';
     if (input.captchaHandoffWanted && !(await input.captchaHandoffWanted())) return undefined;
     const result = await input.captchaHandoff(message);
+    if (result === 'alternate') captchaDeclined = true;
     return result === 'alternate' ? 'alternate' : result ? 'resumed' : 'ended';
   };
   for (let step = 0; step < maxSteps; step += 1) {
     if (input.signal?.aborted) return cancelled(step);
-    if (input.captchaHandoff) {
+    if (input.captchaHandoff && !captchaDeclined) {
       const wall = await checkBlocker();
       if (wall?.reason === 'captcha') {
         const handed = await handCaptcha(wall.message);

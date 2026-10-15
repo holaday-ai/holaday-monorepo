@@ -254,6 +254,12 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   let binding: { control: BrowserControl; finish: () => void } | undefined;
   let control = opts.browserControl;
   let handoffFailure: string | undefined;
+  /** The user chose 换个方式继续: the answer does not come from the walled page. */
+  let captchaAlternate = false;
+  const withAlternateNotice = (summary: string) =>
+    captchaAlternate
+      ? `页面验证码未通过，已按你的选择改用其他方式继续；以下结果不是来自被验证拦住的页面。\n\n${summary}`
+      : summary;
   const cancelPoll = setInterval(() => {
     void Promise.resolve(opts.isTaskCancelled?.())
       .then((cancelled) => {
@@ -499,6 +505,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                 await opts.onCaptchaHandoffEnd?.(false);
               }
               lastSnapshot = '';
+              if (result === 'alternate') captchaAlternate = true;
               if (result === 'resumed' || result === 'alternate') replay?.resume();
               resumeTimeout();
               return result === 'alternate' ? 'alternate' : result === 'resumed';
@@ -663,7 +670,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         );
         return {
           status: 'completed',
-          summary: outcome.summary,
+          summary: withAlternateNotice(outcome.summary),
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
           ...(outcome.partial ? { partial: outcome.partial } : {}),
@@ -691,7 +698,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           );
           return {
             status: 'completed',
-            summary: outcome.heldAnswer.summary,
+            summary: withAlternateNotice(outcome.heldAnswer.summary),
             iterations: outcome.steps,
             toolsUsed: [...toolsUsed],
           };

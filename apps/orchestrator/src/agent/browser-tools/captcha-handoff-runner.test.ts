@@ -33,13 +33,20 @@ let browser: Browser | undefined;
 afterEach(async () => {
   await browser?.close();
 });
-async function scenario(timeout = 3000) {
+type Call = { name: string; input: Record<string, unknown> };
+async function scenario(timeout = 3000, script?: Call[]) {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   await page.route('https://www.google.com/**', (route) =>
     route.fulfill({
       contentType: 'text/html; charset=utf-8',
       body: `<h1>Verify you are human</h1><div class="g-recaptcha"></div><input aria-label="Private input"><button onclick="history.replaceState({},'', '/search?q=fixture');document.body.innerHTML='<h1>Public result</h1><p>Verified fixture content</p>'">Complete fixture</button>`,
+    }),
+  );
+  await page.route('https://alt.example/**', (route) =>
+    route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: '<h1>Alternate source</h1><p>Alternate public fact</p>',
     }),
   );
   const control = new BrowserControl();
@@ -72,7 +79,10 @@ async function scenario(timeout = 3000) {
     messagesAdapter: {
       metadata: { provider: 'anthropic', model: 'fixture' },
       async create() {
-        const name = calls.length === 0 ? 'navigate' : calls.length === 1 ? 'read_page' : 'finish';
+        const scripted = script?.[Math.min(calls.length, script.length - 1)];
+        const name =
+          scripted?.name ??
+          (calls.length === 0 ? 'navigate' : calls.length === 1 ? 'read_page' : 'finish');
         calls.push(name);
         return {
           id: String(calls.length),
@@ -83,8 +93,9 @@ async function scenario(timeout = 3000) {
               type: 'tool_use',
               id: String(calls.length),
               name,
-              input:
-                name === 'navigate'
+              input: scripted
+                ? scripted.input
+                : name === 'navigate'
                   ? { url: 'https://www.google.com/sorry/index' }
                   : name === 'finish'
                     ? {
@@ -147,4 +158,36 @@ it('timeout exits truthfully and releases control instead of running more model 
   expect(replay.paused).toBe(true);
   expect(replay.resumes).toBe(0);
   expect(captchaHandoffs.active('captcha-fixture', 'fixture-user')).toBe(false);
+}, 10000);
+it('an answer after 换个方式继续 says it does not come from the walled page', async () => {
+  const f = await scenario(3000, [
+    { name: 'navigate', input: { url: 'https://www.google.com/sorry/index' } },
+    { name: 'navigate', input: { url: 'https://alt.example/fact' } },
+    { name: 'read_page', input: {} },
+    {
+      name: 'finish',
+      input: {
+        status: 'completed',
+        summary: 'Alternate public fact',
+        evidence: 'Alternate public fact',
+      },
+    },
+  ]);
+  try {
+    await f.waiting;
+    await expect.poll(() => f.control.snapshot().phase, { timeout: 1000 }).toBe('human');
+    for (let round = 0; round < 2; round++)
+      expect(await captchaHandoffs.proceed('captcha-fixture', 'fixture-user', f.control)).toBe(
+        false,
+      );
+    expect(captchaHandoffs.alternate('captcha-fixture', 'fixture-user', f.control)).toBe(true);
+    const outcome = await f.run;
+    expect(outcome.status).toBe('completed');
+    expect(outcome.status === 'completed' && outcome.summary).toMatch(
+      /^页面验证码未通过，已按你的选择改用其他方式继续/,
+    );
+  } finally {
+    f.control.close();
+    await f.run;
+  }
 }, 10000);
