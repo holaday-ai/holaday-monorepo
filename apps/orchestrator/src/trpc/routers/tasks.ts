@@ -65,6 +65,7 @@ import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
 import { resolveSuggestionsProviderRoute } from '../../agent/suggestions-provider.js';
 import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
+import { CAPTCHA_HANDOFF_MS, captchaHandoffs } from '../../agent/supercar/captcha-handoff.js';
 import { matchExpertWorkflow } from '../../agent/supercar/expert-workflows.js';
 import {
   type SupercarActionCaptureEvent,
@@ -320,6 +321,7 @@ import {
 import { taskDrainMiddleware } from '../task-drain.js';
 import { protectedProcedure, pureTaskInput, router } from '../trpc.js';
 import {
+  browserCaptchaProcedure,
   browserControlProcedure,
   browserControlStateProcedure,
   browserNavProcedure,
@@ -5924,6 +5926,9 @@ export const tasksRouter = router({
                   firecrawl: ctx.firecrawl ?? null,
                 });
                 const unifiedReadPage = createFirecrawlReadPage(ctx.firecrawl);
+                let captchaPrivacy = false;
+                let pauseCaptchaWatchdog = () => {};
+                let resumeCaptchaWatchdog = () => {};
                 const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
                   browserCapabilities: taskBrowserCapabilities,
                   ...(unifiedWebSearch ? { unifiedWebSearch } : {}),
@@ -6397,7 +6402,23 @@ export const tasksRouter = router({
                       ctx.logger.warn({ err, taskId }, 'supercar: broadcast web_search failed');
                     }
                   },
+                  async onCaptchaHandoffEnd(resumed) {
+                    if (!resumed) resumeCaptchaWatchdog();
+                    const persisted = await repo.markAwaitingReplyResumed(taskId, userRow.id);
+                    if (!persisted.persisted) return false;
+                    if (resumed) resumeCaptchaWatchdog();
+                    broadcastToUser(userId, {
+                      type: 'server.vision.captcha_resolved',
+                      taskId,
+                      reason: resumed ? 'auto' : 'timeout',
+                    });
+                    return true;
+                  },
                   async onAwaitingUser(ev) {
+                    if (ev.captchaHandoff) {
+                      captchaPrivacy = true;
+                      pauseCaptchaWatchdog();
+                    }
                     let awaitingPersisted = false;
                     try {
                       const persisted = await repo.persistAwaitingUser({
@@ -6412,7 +6433,10 @@ export const tasksRouter = router({
                         'supercar: persist awaiting_user state failed',
                       );
                     }
-                    if (!awaitingPersisted) return;
+                    if (!awaitingPersisted) {
+                      if (ev.captchaHandoff) throw new Error('captcha_wait_not_persisted');
+                      return;
+                    }
                     try {
                       broadcastToUser(userId, {
                         type: 'server.supercar.awaiting_user',
@@ -6440,6 +6464,7 @@ export const tasksRouter = router({
                     // classification reads result.metadata.executionMode OR
                     // result.executionMode; without this, login parks fall
                     // through to lane='unknown'.
+                    // Never persist a screenshot while the user can enter credentials.
                     const parkUrl = ev.currentUrl;
                     void runTaskBackground(ctx, async (ctx) =>
                       (async () => {
@@ -6448,22 +6473,23 @@ export const tasksRouter = router({
                           // shares the captureFinalState helper used at terminal
                           // — best-effort, returns {} on any failure (no
                           // executor / page closed / capture timeout).
-                          const captured = perUserExec
-                            ? await captureFinalState({
-                                executor: {
-                                  getPage: () => perUserExec.getPage(),
-                                  screenshot: (page, options) =>
-                                    perUserExec.screenshot(
-                                      page as unknown as Parameters<
-                                        PlaywrightExecutor['screenshot']
-                                      >[0],
-                                      options,
-                                    ),
-                                },
-                                logger: ctx.logger,
-                                taskId,
-                              })
-                            : {};
+                          const captured =
+                            perUserExec && !ev.captchaHandoff
+                              ? await captureFinalState({
+                                  executor: {
+                                    getPage: () => perUserExec.getPage(),
+                                    screenshot: (page, options) =>
+                                      perUserExec.screenshot(
+                                        page as unknown as Parameters<
+                                          PlaywrightExecutor['screenshot']
+                                        >[0],
+                                        options,
+                                      ),
+                                  },
+                                  logger: ctx.logger,
+                                  taskId,
+                                })
+                              : {};
                           const [row] = await ctx.db
                             .select({ result: tasksTable.result })
                             .from(tasksTable)
@@ -6595,7 +6621,7 @@ export const tasksRouter = router({
                 );
                 const WATCHDOG_GRACE_MS = 30_000;
                 let watchdogFinalized = false;
-                const watchdogTimer = setTimeout(() => {
+                const watchdogFire = () => {
                   ctx.logger.warn(
                     {
                       taskId,
@@ -6661,7 +6687,31 @@ export const tasksRouter = router({
                       }),
                     );
                   }
-                }, SUPERCAR_TIMEOUT_MS + WATCHDOG_GRACE_MS);
+                };
+                let watchdogRemaining = SUPERCAR_TIMEOUT_MS + WATCHDOG_GRACE_MS;
+                let watchdogActiveSince = Date.now();
+                let watchdogPaused = false;
+                let watchdogTimer = setTimeout(watchdogFire, watchdogRemaining);
+                pauseCaptchaWatchdog = () => {
+                  if (watchdogPaused) return;
+                  watchdogPaused = true;
+                  watchdogRemaining = Math.max(
+                    1,
+                    watchdogRemaining - (Date.now() - watchdogActiveSince),
+                  );
+                  clearTimeout(watchdogTimer);
+                  // Independent hard cap if the parked runner itself wedges.
+                  watchdogTimer = setTimeout(watchdogFire, CAPTCHA_HANDOFF_MS + WATCHDOG_GRACE_MS);
+                  watchdogTimer.unref?.();
+                };
+                resumeCaptchaWatchdog = () => {
+                  if (!watchdogPaused) return;
+                  watchdogPaused = false;
+                  clearTimeout(watchdogTimer);
+                  watchdogActiveSince = Date.now();
+                  watchdogTimer = setTimeout(watchdogFire, watchdogRemaining);
+                  watchdogTimer.unref?.();
+                };
                 // Mark the timer as unref'd so it doesn't keep the Node process
                 // alive on shutdown — the pool's own draining handles cleanup.
                 watchdogTimer.unref?.();
@@ -7113,22 +7163,23 @@ export const tasksRouter = router({
                       // Skip for non-browser-mode tasks (perUserExec is null
                       // when executionMode='generate' / 'scrape' — there's no
                       // browser to screenshot).
-                      const finalState = perUserExec
-                        ? await captureFinalState({
-                            executor: {
-                              getPage: () => perUserExec.getPage(),
-                              screenshot: (page, options) =>
-                                perUserExec.screenshot(
-                                  page as unknown as Parameters<
-                                    PlaywrightExecutor['screenshot']
-                                  >[0],
-                                  options,
-                                ),
-                            },
-                            logger: ctx.logger,
-                            taskId,
-                          })
-                        : {};
+                      const finalState =
+                        perUserExec && !captchaPrivacy
+                          ? await captureFinalState({
+                              executor: {
+                                getPage: () => perUserExec.getPage(),
+                                screenshot: (page, options) =>
+                                  perUserExec.screenshot(
+                                    page as unknown as Parameters<
+                                      PlaywrightExecutor['screenshot']
+                                    >[0],
+                                    options,
+                                  ),
+                              },
+                              logger: ctx.logger,
+                              taskId,
+                            })
+                          : {};
                       // B3 — structured eval log fields. Persisted under
                       // result.metadata so tasks.detail consumers (Codex eval
                       // pipeline) get them without a schema migration. Same
@@ -10110,6 +10161,20 @@ export const tasksRouter = router({
         if (!taskRow) {
           throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
         }
+        const captchaInstance = ctx.browserPool?.peek(input.taskId);
+        const captchaSession =
+          captchaInstance && browserControlSessions.get(captchaInstance, ctx.userId, input.taskId);
+        if (
+          captchaSession &&
+          captchaHandoffs.active(input.taskId, ctx.userId, captchaSession.control)
+        ) {
+          const ok = await captchaHandoffs.proceed(
+            input.taskId,
+            ctx.userId,
+            captchaSession.control,
+          );
+          return { ok: true, state: ok ? 'resumed' : 'stillAwaiting' };
+        }
         const localChromeWait = z
           .object({
             metadata: z.object({
@@ -11399,6 +11464,7 @@ export const tasksRouter = router({
    * `{ok:false, reason}` so the UI can show a subtle toast rather
    * than a TRPC error banner for something as cheap as "no page yet".
    */
+  browserCaptcha: browserCaptchaProcedure,
   browserControlState: browserControlStateProcedure,
   localChromeTabs: localChromeTabsProcedure,
   browserControl: browserControlProcedure,

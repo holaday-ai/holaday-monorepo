@@ -215,6 +215,10 @@ export async function runSearchWithFallback(
       await args.onWebSearch?.({ ...ev, iteration: ev.iteration + offset });
     },
     onAwaitingUser: async (ev) => {
+      if (ev.captchaHandoff) {
+        await args.onAwaitingUser?.(ev);
+        return;
+      }
       const captcha = ev.awaitingKind === 'captcha';
       if (!retry && !unsafe && !(await args.isTaskCancelled?.()) && captcha && ev.currentUrl) {
         const candidate = planSearchFallback(deps.originalIntent ?? args.intent, {

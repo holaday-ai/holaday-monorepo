@@ -627,6 +627,8 @@ export type SupercarAwaitingKind =
   | 'browser_action';
 
 export interface SupercarAwaitingUserEvent {
+  /** An in-process captcha handoff owns this browser; do not restart/fallback. */
+  captchaHandoff?: boolean;
   question: string;
   /** When this question was asked. */
   at: Date;
@@ -735,6 +737,9 @@ export interface RunSupercarOptions {
   messagesAdapter?: MessagesAdapter;
   /** Opt-in until navigation and input channels share the same owner receipt. */
   browserControl?: BrowserControl;
+  captchaWaitMs?: number;
+  captchaPollMs?: number;
+  onCaptchaHandoffEnd?: (resumed: boolean) => Promise<boolean>;
   browserControlFactory?: () => { control: BrowserControl; finish: () => void };
   /** External task id (task_…). Correlates hooks and WS frames. */
   taskId: string;

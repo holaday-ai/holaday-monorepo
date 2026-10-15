@@ -29,10 +29,10 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
   },
   captcha: {
     title: '需要验证',
-    streamBody: '请打开浏览器完成验证码或滑块，完成后任务会继续，不用重新提交。',
+    streamBody: '网站要求人机验证，请在下方浏览器中完成验证。',
     streamHint: '打开浏览器通过验证',
     panelTitle: '需要验证',
-    panelBody: '交互模式已开启。完成验证码或滑块后，HOLA DAY 会继续执行，不用重新提交任务。',
+    panelBody: '请在此浏览器中由你本人完成验证，完成后会自动接着原任务执行。',
     toolbarLabel: '需要验证',
     composerPlaceholder: '验证完成后可在这里补充说明...',
   },

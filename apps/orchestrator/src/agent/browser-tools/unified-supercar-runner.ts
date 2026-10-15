@@ -8,6 +8,8 @@ import type {
   SupercarAwaitingKind,
   SupercarOutcome,
 } from '../supercar/agent-loop.js';
+import type { BrowserControl } from '../supercar/browser-control.js';
+import { captchaHandoffs } from '../supercar/captcha-handoff.js';
 import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
 import { classifyRuntimeAction } from '../supercar/runtime-action-policy.js';
 import { persistBrowserDownload } from './browser-download.js';
@@ -223,7 +225,22 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     },
   };
   running.set(opts.taskId, controller);
-  const timeout = opts.timeoutMs ? setTimeout(() => controller.abort(), opts.timeoutMs) : undefined;
+  let activeRemaining = opts.timeoutMs;
+  let activeSince = Date.now();
+  let timeout = activeRemaining ? setTimeout(() => controller.abort(), activeRemaining) : undefined;
+  const suspendTimeout = () => {
+    if (timeout) clearTimeout(timeout);
+    if (activeRemaining !== undefined)
+      activeRemaining = Math.max(1, activeRemaining - (Date.now() - activeSince));
+  };
+  const resumeTimeout = () => {
+    activeSince = Date.now();
+    if (activeRemaining !== undefined)
+      timeout = setTimeout(() => controller.abort(), activeRemaining);
+  };
+  let binding: { control: BrowserControl; finish: () => void } | undefined;
+  let control = opts.browserControl;
+  let handoffFailure: string | undefined;
   const cancelPoll = setInterval(() => {
     void Promise.resolve(opts.isTaskCancelled?.())
       .then((cancelled) => {
@@ -363,6 +380,20 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         },
       };
 
+    if (phase === 'before' && control && !control.canAgentAct()) {
+      await replay?.pause();
+      const boundary = await control.checkpoint(async () => {
+        lastSnapshot = '';
+      });
+      if (boundary.resumed) replay?.resume();
+      if (boundary.resumed)
+        return {
+          kind: 'skip',
+          message: '用户已交还控制权；从当前页面重新 snapshot，不重放旧动作。',
+        };
+      if (!control.canAgentAct())
+        return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
+    }
     if (phase === 'before' && tools.observation) {
       try {
         await tools.observation.validate(action);
@@ -410,7 +441,54 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     return result;
   };
   try {
+    binding = opts.browserControlFactory?.();
+    control = binding?.control ?? control;
     const outcome = await runUnifiedBrowserLoop({
+      ...(control
+        ? {
+            captchaHandoff: async (_message: string) => {
+              suspendTimeout();
+              await replay?.pause();
+              const result = await captchaHandoffs.wait({
+                taskId: opts.taskId,
+                userId: opts.userExternalId ?? '',
+                control: control!,
+                hasWall: async () => {
+                  const hit = await tools.blocker();
+                  return (
+                    hit?.reason === 'captcha' &&
+                    !('disposition' in hit && hit.disposition === 'continue')
+                  );
+                },
+                onWaiting: async () => {
+                  await opts.onAwaitingUser?.({
+                    question:
+                      '网站要求人机验证，请在下方浏览器中完成验证。AI 已暂停，最多等待 10 分钟。',
+                    at: new Date(),
+                    currentUrl: page.url(),
+                    awaitingKind: 'captcha',
+                    captchaHandoff: true,
+                  });
+                },
+                onResumed: async () => (await opts.onCaptchaHandoffEnd?.(true)) ?? true,
+                signal: controller.signal,
+                timeoutMs: opts.captchaWaitMs,
+                pollMs: opts.captchaPollMs,
+              });
+              if (result !== 'resumed') {
+                handoffFailure =
+                  result === 'timeout'
+                    ? '等待用户完成验证码已超时，任务未完成。'
+                    : '用户已放弃验证，任务未完成。';
+                await opts.onCaptchaHandoffEnd?.(false);
+              }
+              lastSnapshot = '';
+              if (result === 'resumed') replay?.resume();
+              resumeTimeout();
+              return result === 'resumed';
+            },
+          }
+        : {}),
       observationV2: capabilities.observationV2,
       requireBrowserEvidence: true,
       supportedTools: tools.supportedTools,
@@ -622,12 +700,15 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           reason:
             page.url() === 'about:blank'
               ? '浏览器尚未打开目标页面（about:blank），无法判断站点登录状态。请重试；若持续失败请联系支持。'
-              : outcome.reason,
+              : (handoffFailure ?? outcome.reason),
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
         };
     }
   } finally {
+    control?.close();
+    await control?.settled();
+    binding?.finish();
     await egress.dispose();
     if (egress.metrics.proxyRequests || egress.metrics.blockedMedia)
       await safe(() =>

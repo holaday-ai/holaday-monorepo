@@ -2750,7 +2750,20 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         set((prev) => {
           const next = { ...prev.captchaWaitByTask };
           delete next[msg.taskId];
-          return { captchaWaitByTask: next };
+          const wait = prev.awaitingUserByTask[msg.taskId];
+          if (wait?.awaitingKind !== 'captcha' || msg.reason !== 'auto')
+            return { captchaWaitByTask: next };
+          return {
+            captchaWaitByTask: next,
+            awaitingUserByTask: omitRuntimeKey(prev.awaitingUserByTask, msg.taskId),
+            browserInteractive:
+              prev.selectedTaskId === msg.taskId ? false : prev.browserInteractive,
+            tasks: prev.tasks.map((t) =>
+              t.taskId === msg.taskId && t.status === 'awaiting_user'
+                ? { ...t, status: 'executing' as const, awaitingKind: undefined }
+                : t,
+            ),
+          };
         });
         return;
       }

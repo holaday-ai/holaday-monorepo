@@ -124,6 +124,7 @@ export interface WebSearchHit {
 
 export interface UnifiedBrowserLoopInput {
   observationV2?: boolean;
+  captchaHandoff?: (message: string) => Promise<boolean>;
   requireBrowserEvidence?: boolean;
   supportedTools?: { download: boolean; upload: boolean; tabs: boolean };
   probeBlocker?: () => Promise<{
@@ -370,6 +371,17 @@ export async function runUnifiedBrowserLoop(
     held && !input.requireBrowserEvidence ? { status: 'completed', ...held, steps } : outcome;
   for (let step = 0; step < maxSteps; step += 1) {
     if (input.signal?.aborted) return cancelled(step);
+    if (input.captchaHandoff) {
+      const wall = await checkBlocker();
+      if (wall?.reason === 'captcha') {
+        if (!(await input.captchaHandoff(wall.message)))
+          return { status: 'failed', reason: '验证码等待已结束，任务未完成。', steps: step };
+        messages.push({
+          role: 'user',
+          content: '用户已完成验证；从当前页面重新 snapshot 后继续原任务，不要重启或重放旧动作。',
+        });
+      }
+    }
     let response: Awaited<ReturnType<MessagesAdapter['create']>>;
     try {
       response = await input.adapter.create(
@@ -409,6 +421,17 @@ export async function runUnifiedBrowserLoop(
       );
     } catch {
       if (input.signal?.aborted) return cancelled(step);
+      if (input.captchaHandoff) {
+        const wall = await checkBlocker();
+        if (wall?.reason === 'captcha') {
+          if (!(await input.captchaHandoff(wall.message)))
+            return { status: 'failed', reason: '验证码等待已结束，任务未完成。', steps: step };
+          messages.push({
+            role: 'user',
+            content: '用户已完成验证；从当前页面重新 snapshot 后继续原任务，不要重启或重放旧动作。',
+          });
+        }
+      }
       return heldOr(
         { status: 'failed', reason: '模型服务暂时不可用，请稍后重试。', steps: step },
         step,
@@ -465,7 +488,21 @@ export async function runUnifiedBrowserLoop(
         if (args.status === 'completed') {
           // Safety: a wall in front of the target pauses for the user.
           const blocker = await checkBlocker();
-          if (blocker) return { status: 'awaiting_user', ...blocker, steps: step + 1 };
+          if (blocker) {
+            if (blocker.reason !== 'captcha' || !input.captchaHandoff)
+              return { status: 'awaiting_user', ...blocker, steps: step + 1 };
+            if (!(await input.captchaHandoff(blocker.message)))
+              return {
+                status: 'failed',
+                reason: '验证码等待已结束，任务未完成。',
+                steps: step + 1,
+              };
+            results.push(
+              toolResult(call.id, '用户已完成验证，请先重新 snapshot 再决定，不重放旧动作。', true),
+            );
+            staleTurn = true;
+            continue;
+          }
           const given =
             typeof args.evidence === 'string' ? unescapeLiteralBreaks(args.evidence).trim() : '';
           const hostProof = receiptEvidence(input.intent, trace);
@@ -619,8 +656,14 @@ export async function runUnifiedBrowserLoop(
         const message = typeof args.message === 'string' ? args.message : '需要你接管浏览器。';
         if (!input.requestHuman)
           return { status: 'awaiting_user', reason, message, steps: step + 1 };
-        const resumed = await input.requestHuman({ reason, message }).catch(() => false);
-        if (!resumed) return { status: 'awaiting_user', reason, message, steps: step + 1 };
+        const resumed =
+          reason === 'captcha' && input.captchaHandoff
+            ? await input.captchaHandoff(message)
+            : await input.requestHuman({ reason, message }).catch(() => false);
+        if (!resumed)
+          return reason === 'captcha' && input.captchaHandoff
+            ? { status: 'failed', reason: '验证码接管已结束，任务未完成。', steps: step + 1 }
+            : { status: 'awaiting_user', reason, message, steps: step + 1 };
         results.push(
           toolResult(call.id, '用户已完成接管，请重新 snapshot 后继续；用户的操作不算你的操作。'),
         );
@@ -759,7 +802,17 @@ export async function runUnifiedBrowserLoop(
       }
       if (outcome.ok && input.probeBlocker) {
         const blocker = await checkBlocker();
-        if (blocker) return { status: 'awaiting_user', ...blocker, steps: step + 1 };
+        if (blocker) {
+          if (blocker.reason !== 'captcha' || !input.captchaHandoff)
+            return { status: 'awaiting_user', ...blocker, steps: step + 1 };
+          if (!(await input.captchaHandoff(blocker.message)))
+            return { status: 'failed', reason: '验证码等待已结束，任务未完成。', steps: step + 1 };
+          results.push(
+            toolResult(call.id, '用户已完成验证；当前页面已变化，请重新 snapshot 后继续。'),
+          );
+          staleTurn = true;
+          continue;
+        }
       }
       if (outcome.interruption)
         return {

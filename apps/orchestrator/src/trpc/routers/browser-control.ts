@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
 import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
 import { BrowserInputOutcomeUnknownError } from '../../agent/supercar/browser-control.js';
+import { captchaHandoffs } from '../../agent/supercar/captcha-handoff.js';
 import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
 import {
   hasParkedSupercarHandle,
@@ -103,7 +104,11 @@ export const browserControlProcedure = protectedProcedure
     if (!session)
       throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'browser_runner_unavailable' });
     if (input.action === 'takeover') session.control.requestHuman();
-    else {
+    else if (captchaHandoffs.active(input.taskId, ctx.userId, session.control)) {
+      if (!input.controlLease || session.control.snapshot().lease !== input.controlLease)
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'browser_control_not_owned' });
+      await captchaHandoffs.proceed(input.taskId, ctx.userId, session.control);
+    } else {
       const state = session.control.snapshot();
       if (!input.controlLease || state.lease !== input.controlLease)
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'browser_control_not_owned' });
@@ -189,4 +194,20 @@ export const browserNavProcedure = protectedProcedure
     } catch (error) {
       return { ok: false as const, reason: error instanceof Error ? error.message : 'nav_failed' };
     }
+  });
+
+export const browserCaptchaProcedure = protectedProcedure
+  .input(taskInput.extend({ action: z.enum(['continue', 'cancel']) }))
+  .mutation(async ({ ctx, input }) => {
+    const owned = await ownedBrowser(ctx, input.taskId);
+    const session =
+      owned.instance && browserControlSessions.get(owned.instance, ctx.userId, input.taskId);
+    if (!session || !captchaHandoffs.active(input.taskId, ctx.userId, session.control))
+      return { ok: false, state: 'inactive' as const };
+    if (input.action === 'cancel') {
+      captchaHandoffs.cancel(input.taskId, ctx.userId, session.control);
+      return { ok: true, state: 'cancelled' as const };
+    }
+    const ok = await captchaHandoffs.proceed(input.taskId, ctx.userId, session.control);
+    return { ok, state: ok ? ('resuming' as const) : ('waiting' as const) };
   });
