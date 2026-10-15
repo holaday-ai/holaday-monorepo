@@ -3,6 +3,12 @@ import type { Frame, Page, Request } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { TRANSACTION_PAGE_RE } from '../supercar/runtime-action-policy.js';
 import { ActionCausality } from './action-causality.js';
+import {
+  ARTICLE_OUTLINE_EXPRESSION,
+  type ArticleOutline,
+  type OutlineSectionText,
+  articleSectionExpression,
+} from './article-outline.js';
 import { scrollWithEvidence } from './browser-scroll.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { redactPageText } from './page-redaction.js';
@@ -392,6 +398,7 @@ export class CloudObservation {
       offset: number;
       snapshotId: string;
       section?: number;
+      sectionTitle?: string;
     }
   >();
   private requests: Array<{
@@ -821,9 +828,15 @@ export class CloudObservation {
       }
     }
     if (
-      !['snapshot', 'read_page', 'get_page_text', 'links', 'tables', 'scroll_until'].includes(
-        action.tool,
-      )
+      ![
+        'snapshot',
+        'read_page',
+        'sections',
+        'get_page_text',
+        'links',
+        'tables',
+        'scroll_until',
+      ].includes(action.tool)
     )
       return null;
     if (await this.sensitive(page))
@@ -943,17 +956,24 @@ export class CloudObservation {
       current.refs = new Set(
         [...safeTree.slice(0, 24000).matchAll(/\[ref=((?:f\d+)?e\d+)\]/g)].map((m) => m[1]!),
       );
-      const rawHeadings = await frame.locator('h1,h2,h3').evaluateAll((nodes) => {
-        let section = 0;
-        return nodes
-          .filter((node) => node.getClientRects().length > 0)
-          .slice(0, 120)
-          .map((node) => ({
-            level: Number(node.tagName.slice(1)),
-            text: (node.textContent ?? '').trim().slice(0, 200),
-            section: node.tagName === 'H2' ? ++section : undefined,
-          }));
-      });
+      // Section numbers come from the article body outline (目录/导航不计), the
+      // same numbering get_page_text(section) and sections use.
+      const title = await frame
+        .locator('h1')
+        .first()
+        .textContent({ timeout: 1000 })
+        .catch(() => null);
+      const outline = (await frame
+        .evaluate(ARTICLE_OUTLINE_EXPRESSION)
+        .catch(() => null)) as ArticleOutline | null;
+      const rawHeadings = [
+        ...(title?.trim() ? [{ level: 1, text: title.trim().slice(0, 200) }] : []),
+        ...(outline?.sections ?? []).slice(0, 120).map((entry) => ({
+          level: entry.level,
+          text: entry.title,
+          ...(entry.index.includes('.') ? {} : { section: Number(entry.index) }),
+        })),
+      ];
       const headings = JSON.parse(await redactPageText(frame, JSON.stringify(rawHeadings)));
       const frames: Array<Record<string, unknown>> = [];
       if (frame === page.mainFrame()) {
@@ -1004,6 +1024,20 @@ export class CloudObservation {
         frames,
       });
     }
+    if (action.tool === 'sections') {
+      const outline = (await frame.evaluate(ARTICLE_OUTLINE_EXPRESSION)) as ArticleOutline;
+      const sections = JSON.parse(
+        await redactPageText(frame, JSON.stringify(outline.sections)),
+      ) as ArticleOutline['sections'];
+      return json({
+        ...(await this.metadata(frame)),
+        scope: outline.scope,
+        sections,
+        excluded: outline.excluded,
+        instruction:
+          '「第N节」= index 为 N 的正文章节（目录、导航、参考文献不计）；用 get_page_text(section=N) 读取，N.k 是第N节的小节。',
+      });
+    }
     if (action.tool === 'get_page_text') {
       const documentId = (await observationState(frame)).documentId;
       const meta = await this.metadata(frame);
@@ -1011,6 +1045,7 @@ export class CloudObservation {
       let text: string;
       let offset = 0;
       let section = action.section;
+      let sectionTitle: string | undefined;
       if (action.cursor) {
         const cursor = this.cursors.get(action.cursor);
         this.cursors.delete(action.cursor);
@@ -1025,42 +1060,20 @@ export class CloudObservation {
         offset = cursor.offset;
         snapshotId = cursor.snapshotId;
         section = cursor.section;
-      } else
+        sectionTitle = cursor.sectionTitle;
+      } else if (section === undefined)
         text = await redactPageText(
           frame,
-          section === undefined
-            ? await (await pageRoot(frame)).innerText({ timeout: 5000 })
-            : await frame.evaluate((section) => {
-                const headings = Array.from(document.querySelectorAll('h2')).filter(
-                  (node) => node.getClientRects().length > 0,
-                );
-                const heading = headings[section - 1];
-                if (!heading) throw new Error('Requested section is not present in this document');
-                const anchor = heading.parentElement?.classList.contains('mw-heading')
-                  ? heading.parentElement
-                  : heading;
-                const next = headings[section];
-                const end = next?.parentElement?.classList.contains('mw-heading')
-                  ? next.parentElement
-                  : next;
-                const range = document.createRange();
-                range.setStartBefore(anchor);
-                if (end) range.setEndBefore(end);
-                else range.setEnd(document.body, document.body.childNodes.length);
-                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-                const parts: string[] = [];
-                while (walker.nextNode()) {
-                  const parent = walker.currentNode.parentElement;
-                  if (
-                    parent?.getClientRects().length &&
-                    !parent.closest('script,style,[hidden],[aria-hidden=true]') &&
-                    range.intersectsNode(walker.currentNode)
-                  )
-                    parts.push(walker.currentNode.textContent ?? '');
-                }
-                return parts.join(' ').replace(/\s+/g, ' ').trim();
-              }, section),
+          await (await pageRoot(frame)).innerText({ timeout: 5000 }),
         );
+      else {
+        // `section` is the article body outline index (see sections).
+        const read = (await frame.evaluate(
+          articleSectionExpression(section),
+        )) as OutlineSectionText;
+        text = await redactPageText(frame, read.text);
+        sectionTitle = await redactPageText(frame, read.title);
+      }
       if (documentId !== (await observationState(frame)).documentId)
         throw new Error('stale_cursor');
       const endOffset = Math.min(text.length, offset + (action.maxChars ?? 8000));
@@ -1075,6 +1088,7 @@ export class CloudObservation {
           offset: endOffset,
           snapshotId,
           section,
+          sectionTitle,
         });
       }
       return json({
@@ -1083,6 +1097,7 @@ export class CloudObservation {
         range: [offset, endOffset],
         snapshotId,
         section,
+        ...(sectionTitle ? { sectionTitle } : {}),
         snapshotMode: 'immutable-document-text',
         position: {
           paragraph: text.slice(0, offset).split(/\n+/).length - 1,

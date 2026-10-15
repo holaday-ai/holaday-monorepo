@@ -282,6 +282,8 @@ export function browserCompletionVerdict(input: {
   verifiedText: string;
   /** The answer as delivered by the browser loop, before verification. */
   originalText: string;
+  /** Fewer items than asked for (BROWSER-AUTOPILOT-3): 部分完成, not completed. */
+  partial?: { found: number; wanted: number };
 }): { status: FinalTerminalStatus; text: string; notes: string[] } {
   if (input.runnerStatus !== 'completed')
     return {
@@ -303,7 +305,7 @@ export function browserCompletionVerdict(input: {
     : input.verifiedText;
   const unique = [...new Set(notes)].slice(0, 6);
   return {
-    status: 'completed',
+    status: input.partial ? 'partial_success' : 'completed',
     text: unique.length ? `${kept}\n\n核验提示：${unique.join('；')}` : kept,
     notes: unique,
   };

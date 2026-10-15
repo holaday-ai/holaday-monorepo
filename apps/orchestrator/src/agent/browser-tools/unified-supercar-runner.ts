@@ -572,6 +572,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           summary: outcome.summary,
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
+          ...(outcome.partial ? { partial: outcome.partial } : {}),
         };
       case 'awaiting_user':
         return {

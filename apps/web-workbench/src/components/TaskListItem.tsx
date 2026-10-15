@@ -293,7 +293,10 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
 }
 
 export function taskListItemSubtitle(
-  task: Pick<UiTask, 'awaitingKind' | 'queuePosition' | 'status' | 'tickCount' | 'browserSource'>,
+  task: Pick<
+    UiTask,
+    'awaitingKind' | 'queuePosition' | 'status' | 'tickCount' | 'browserSource' | 'resultText'
+  >,
   liveSubStatus?: TaskLiveSubStatusEntry | null,
   now = Date.now(),
 ): string {
@@ -339,8 +342,11 @@ export function taskListItemSubtitle(
       switch (productState.outcome) {
         case 'completed':
           return task.tickCount === 0 ? '已完成' : `已完成 · ${recordCount}`;
-        case 'partial_success':
-          return task.tickCount === 0 ? '需复核' : `需复核 · ${recordCount}`;
+        case 'partial_success': {
+          // BROWSER-AUTOPILOT-3: fewer items than asked for reads 部分完成.
+          const label = task.resultText?.startsWith('部分完成') ? '部分完成' : '需复核';
+          return task.tickCount === 0 ? label : `${label} · ${recordCount}`;
+        }
         case 'failed':
           return task.tickCount === 0 ? '失败' : `失败 · ${recordCount}`;
         case 'cancelled':

@@ -7466,6 +7466,7 @@ export const tasksRouter = router({
                         sourceTrust: supercarResearchSourceTrust,
                         verifiedText: outcome.summary ?? '',
                         originalText: browserOriginalAnswer ?? outcome.summary ?? '',
+                        ...(outcome.partial ? { partial: outcome.partial } : {}),
                       });
                       if (outcome.status === 'completed' && outcome.summary)
                         outcome = { ...outcome, summary: browserVerdict.text };

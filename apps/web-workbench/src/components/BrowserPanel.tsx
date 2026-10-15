@@ -1121,13 +1121,18 @@ function CloudBrowserPanel({
                       : interactive
                         ? '你在操作'
                         : !ownership.supported
-                          ? '仅观察'
+                          ? ownership.starting && !taskIsTerminal
+                            ? '正在连接'
+                            : '仅观察'
                           : taskIsTerminal
                             ? '浏览器就绪'
                             : 'AI 正在操作',
-          tooltip: ownership.error
-            ? '暂未恢复 AI 操作，请检查连接或重试交还。'
-            : headerStatus.tooltip,
+          tooltip:
+            ownership.starting && !taskIsTerminal
+              ? '浏览器正在启动，AI 即将开始操作。'
+              : ownership.error
+                ? '暂未恢复 AI 操作，请检查连接或重试交还。'
+                : headerStatus.tooltip,
           showLabel: true,
         }
       : headerStatus;

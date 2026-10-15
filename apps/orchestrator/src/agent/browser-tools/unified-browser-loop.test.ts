@@ -269,7 +269,7 @@ describe('pre-delivery review (FIX-BATCH-A)', () => {
       },
     ]);
     const outcome = await runUnifiedBrowserLoop({
-      intent: '36kr 前三条新闻',
+      intent: '36kr 今日新闻',
       adapter,
       execute: async () => ({ ok: true, text: '开源的火 https://36kr.com/ https://36kr.com/p/1' }),
       reviewFinish,
@@ -290,7 +290,7 @@ describe('pre-delivery review (FIX-BATCH-A)', () => {
       () => [finish('1. 开源的火 https://36kr.com/（未获取到独立链接）', 'f2')],
     ]);
     const outcome = await runUnifiedBrowserLoop({
-      intent: '36kr 前三条新闻',
+      intent: '36kr 今日新闻',
       adapter,
       execute: async () => ({ ok: true, text: '开源的火 https://36kr.com/ https://36kr.com/p/1' }),
       reviewFinish,
@@ -312,7 +312,7 @@ describe('remediation never ends worse than the held answer (FIX-BATCH-A)', () =
   it('returns the held answer when the remediation runs out of steps', async () => {
     const adapter = scriptedAdapter([read, firstFinish, () => [call('snapshot', {}, 's1')]]);
     const outcome = await runUnifiedBrowserLoop({
-      intent: '京东前三个商品价格和链接',
+      intent: '京东耳机的价格和链接',
       adapter,
       execute: async () => ({ ok: true, text: '耳机A ¥99' }),
       reviewFinish: () => '第 1 行缺少链接',
@@ -332,7 +332,7 @@ describe('remediation never ends worse than the held answer (FIX-BATCH-A)', () =
       },
     ]);
     const outcome = await runUnifiedBrowserLoop({
-      intent: '京东前三个商品价格和链接',
+      intent: '京东耳机的价格和链接',
       adapter,
       execute: async () => ({ ok: true, text: '耳机A ¥99' }),
       reviewFinish: () => '第 1 行缺少链接',
@@ -348,7 +348,7 @@ describe('remediation never ends worse than the held answer (FIX-BATCH-A)', () =
       () => [call('finish', { status: 'failed', summary: '商品卡片没有公开链接' }, 'f2')],
     ]);
     const outcome = await runUnifiedBrowserLoop({
-      intent: '京东前三个商品价格和链接',
+      intent: '京东耳机的价格和链接',
       adapter,
       execute: async () => ({ ok: true, text: '耳机A ¥99' }),
       reviewFinish: () => '第 1 行缺少链接',

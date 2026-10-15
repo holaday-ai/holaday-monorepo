@@ -178,4 +178,13 @@ describe('taskListItemSubtitle', () => {
     expect(taskListItemSubtitle({ status: 'partial_success', tickCount: 0 })).toBe('需复核');
     expect(taskListItemSubtitle({ status: 'partial_success', tickCount: 4 })).toBe('需复核 · 4 步');
   });
+  it('labels a short count delivered by the browser lane 部分完成', () => {
+    expect(
+      taskListItemSubtitle({
+        status: 'partial_success',
+        tickCount: 2,
+        resultText: '部分完成：只找到 4/5 条。\n\n1. …',
+      }),
+    ).toBe('部分完成 · 2 步');
+  });
 });

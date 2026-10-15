@@ -325,6 +325,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
       }
       switch (action.tool) {
         case 'read_page':
+        case 'sections':
         case 'get_page_text':
         case 'links':
         case 'tables':
