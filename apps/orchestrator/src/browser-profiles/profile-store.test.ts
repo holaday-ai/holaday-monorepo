@@ -134,7 +134,7 @@ describe('a passed verification carries over to the next task (real Chromium)', 
     server = createServer((req, res) => {
       res.setHeader('content-type', 'text/html');
       if (req.url === '/pass') {
-        res.setHeader('set-cookie', `cf_clearance=passed; Max-Age=86400; Path=/; HttpOnly`);
+        res.setHeader('set-cookie', 'cf_clearance=passed; Max-Age=86400; Path=/; HttpOnly');
         res.end('<h1>passed</h1>');
         return;
       }
