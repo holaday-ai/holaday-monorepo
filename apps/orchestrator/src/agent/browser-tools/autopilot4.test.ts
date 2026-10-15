@@ -4,6 +4,7 @@ import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { planSearchFallback } from '../search-fallback/search-engine-fallback.js';
+import { prepareBrowserPlan } from './browser-brain-roles.js';
 import { completionGap } from './browser-completion.js';
 import { assessCompletionFacts } from './completion-fields.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
@@ -244,5 +245,37 @@ describe('5. field kinds on real Chromium', () => {
     expect(kinds['Date picker']).toMatchObject({ date: true });
     tools.dispose();
     await page.close();
+  });
+});
+
+describe('6. the planner restates the user, it does not add requirements (core-01 r1)', () => {
+  it('tells the planning role not to invent conditions or page values', async () => {
+    let system = '';
+    const adapter = {
+      metadata: { provider: 'anthropic', model: 'fixture' },
+      async create(request: { system?: string }) {
+        system = String(request.system);
+        return {
+          id: '1',
+          metadata: { provider: 'anthropic', model: 'fixture' },
+          content: [{ type: 'text', text: '1. 打开搜索页' }],
+          stopReason: 'end_turn',
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    } as unknown as MessagesAdapter;
+    await prepareBrowserPlan(
+      adapter,
+      `${P}Google 搜索「HOLA DAY AI」返回前5条标题和链接`,
+      {} as never,
+    );
+    expect(system).toContain('不得新增用户没说的要求');
+    expect(system).toContain('不得写出页面上的预期文字');
   });
 });
