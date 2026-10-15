@@ -211,6 +211,10 @@ export async function runUnifiedBrowserLoop(
   const maxSteps = input.maxSteps ?? 40;
   const messages: NeutralMessage[] = [{ role: 'user', content: input.intent }];
   const pageEvidence: ObservedEvidence[] = [];
+  // Tabs read successfully and their latest listed titles. Kept apart from
+  // pageEvidence, which evicts old reads of long pages.
+  const readTabs = new Set<string>();
+  const tabTitles = new Map<string, string>();
   let activeTabId: string | undefined;
   let navigated = false;
   const failedNavigationUrls = new Set<string>();
@@ -229,6 +233,7 @@ export async function runUnifiedBrowserLoop(
     )
       return '';
     pageEvidence.push(item);
+    if (item.tabId) readTabs.add(item.tabId);
     while (
       pageEvidence.length > 16 ||
       pageEvidence.reduce((n, p) => n + p.text.length, 0) > 256_000
@@ -432,7 +437,7 @@ export async function runUnifiedBrowserLoop(
           const facts = assessCompletionFacts({
             summary,
             fields: args.fields,
-            pages: pageEvidence,
+            pages: [...pageEvidence, ...readTabTitles(tabTitles, readTabs)],
             receipts: [hostProof, typed].filter(Boolean).join('\n'),
             toolTexts: toolTexts.join('\n'),
             intent: input.intent,
@@ -683,7 +688,9 @@ export async function runUnifiedBrowserLoop(
       ) {
         remember(outcome.text, outcome.url);
       }
-      if (outcome.ok && action.tool === 'list_tabs') addReadTabTitles(pageEvidence, outcome.text);
+      if (outcome.ok && action.tool === 'list_tabs') {
+        for (const [tabId, title] of listedTabTitles(outcome.text)) tabTitles.set(tabId, title);
+      }
       const resultText = outcome.errorCode
         ? `${outcome.text} (${outcome.errorCode}: ${outcome.errorMessage ?? ''})`
         : [outcome.text, ...localNotices].join('\n\n');
@@ -771,25 +778,35 @@ export function normalizeToolInput(
  * Evidence fallback: a line of the model's summary (or a table cell run) that
  * literally appears in the latest page text. Never invents text.
  */
-/**
- * The browser-reported document title of a tab that was already read
- * successfully is part of that page. A tab never read (or that failed to load)
- * gets nothing from the listing.
- */
-export function addReadTabTitles(pages: ObservedEvidence[], listing: string): void {
+/** Tab id → document title from a `list_tabs` result. */
+export function listedTabTitles(listing: string): Map<string, string> {
+  const titles = new Map<string, string>();
   let tabs: unknown;
   try {
     tabs = (JSON.parse(listing) as { tabs?: unknown }).tabs;
   } catch {
-    return;
+    return titles;
   }
-  if (!Array.isArray(tabs)) return;
+  if (!Array.isArray(tabs)) return titles;
   for (const tab of tabs) {
-    if (!tab || typeof tab.tabId !== 'string' || typeof tab.title !== 'string' || !tab.title)
-      continue;
-    const read = pages.find((page) => page.tabId === tab.tabId);
-    if (read && !read.text.includes(tab.title)) read.text = `${read.text}\n${tab.title}`;
+    if (tab && typeof tab.tabId === 'string' && typeof tab.title === 'string' && tab.title)
+      titles.set(tab.tabId, tab.title);
   }
+  return titles;
+}
+
+/**
+ * The browser-reported document title of a tab that was read successfully at
+ * some point is part of that page, whenever it was listed. A tab never read (or
+ * that failed to load) gets nothing from the listing.
+ */
+export function readTabTitles(
+  titles: Map<string, string>,
+  readTabs: Set<string>,
+): ObservedEvidence[] {
+  return [...titles]
+    .filter(([tabId]) => readTabs.has(tabId))
+    .map(([tabId, title]) => ({ text: title, tabId }));
 }
 
 /** Structured `fields` values the summary does not already state, as answer lines. */

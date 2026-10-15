@@ -183,7 +183,8 @@ function answerFacts(summary: string, intent = ''): Fact[] {
   // A quoted string with Latin letters or digits claims literal page text
   // ("You clicked: Ok"); a negated mention ("而非 …") is not a claim.
   for (const match of text.matchAll(/[“"「]([^”"」\n]{3,200})[”"」]/gu)) {
-    const quote = match[1]!.trim();
+    // "Impedit iure omnis..." quotes the opening of a passage: compare the excerpt.
+    const quote = match[1]!.trim().replace(/^(?:\.{3,}|…+)\s*|\s*(?:\.{3,}|…+)$/gu, '');
     const before = text.slice(Math.max(0, match.index! - 12), match.index!);
     if (
       /[A-Za-z]{3,}|\d/.test(quote) &&
@@ -191,7 +192,11 @@ function answerFacts(summary: string, intent = ''): Fact[] {
       (/[A-Za-z]/.test(quote) || quote.length >= 4) &&
       // The user's own words ("搜索「Playwright tutorial」") are not a page claim.
       !asked.includes(normalizeFact(quote)) &&
-      !/而非|不是|并非|并不是|没有|未出现|instead of|rather than|not\s*$/i.test(before)
+      !/而非|不是|并非|并不是|没有|未出现|误引|instead of|rather than|not\s*$/i.test(before) &&
+      // A retracted quote ("此前误引的 “…” 并非页面内容") is not a claim either.
+      !/^[^。；\n]{0,6}(?:并非|不是|并不是|有误|是误引)/u.test(
+        text.slice(match.index! + match[0].length),
+      )
     )
       add({ name: '原文引用', value: quote, quote: true });
   }

@@ -185,7 +185,10 @@ describe('BROWSER-FIX-1 fixed-call real Chromium acceptance', () => {
         await tools.execute({ tool: 'navigate', url: `${base}/?tab=${i}` });
       }
       expect(JSON.parse((await tools.execute({ tool: 'list_tabs' })).text).tabs).toHaveLength(4);
-      expect((await tools.execute({ tool: 'switch_tab', targetTabId: first })).ok).toBe(true);
+      const switched = await tools.execute({ tool: 'switch_tab', targetTabId: first });
+      expect(switched.ok).toBe(true);
+      // AP2 core-07: in cloud observation the read after a switch names the title.
+      if (observationV2) expect(JSON.parse(switched.text).title).toBe('fixture');
       expect(tools.page).toBe(page);
       expect((await tools.execute({ tool: 'close_tab', targetTabId: 'foreign' })).ok).toBe(false);
       expect(foreign.isClosed()).toBe(false);

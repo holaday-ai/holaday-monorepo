@@ -140,12 +140,100 @@ describe('2. a cloud-observation switch_tab result counts as a read (core-07-fb)
   });
 });
 
+describe('2b. listed titles stay grounded after long reads evict the page (core-07 r2-b)', () => {
+  it('does not mark a read tab title 未核实 when it was listed before the read', async () => {
+    const titles: Record<string, string> = {
+      a: '朝鲜试射两种潜射战略巡航导弹_新浪新闻',
+      b: '一张脸标价500块？_新浪新闻',
+    };
+    let turn = 0;
+    const script = [
+      { name: 'list_tabs', input: {} },
+      { name: 'switch_tab', input: { targetTabId: 'a' } },
+      { name: 'switch_tab', input: { targetTabId: 'b' } },
+      ...Array.from({ length: 5 }, () => ({ name: 'read_page', input: {} })),
+      {
+        name: 'finish',
+        input: { status: 'completed', summary: `1) ${titles.a}\n2) ${titles.b}` },
+      },
+    ];
+    const adapter: MessagesAdapter = {
+      metadata: { provider: 'anthropic', model: 'fixture' },
+      async create() {
+        const call = script[turn++]!;
+        return {
+          id: String(turn),
+          metadata: { provider: 'anthropic', model: 'fixture' },
+          content: [{ type: 'tool_use', id: String(turn), ...call }],
+          stopReason: 'tool_use',
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    const result = await runUnifiedBrowserLoop({
+      intent: '分别读两个标签的标题',
+      adapter,
+      observationV2: true,
+      maxSteps: 10,
+      supportedTools: { download: false, upload: false, tabs: true },
+      execute: async (action) =>
+        action.tool === 'list_tabs'
+          ? {
+              ok: true,
+              text: JSON.stringify({
+                tabs: Object.entries(titles).map(([tabId, title]) => ({ tabId, title })),
+              }),
+            }
+          : {
+              ok: true,
+              text: JSON.stringify({
+                tabId: action.tool === 'switch_tab' ? action.targetTabId : 'b',
+                tree: `paragraph "${'正文'.repeat(40_000)}"`,
+              }),
+            },
+    });
+    expect(result).toMatchObject({ status: 'completed' });
+    expect(JSON.stringify(result)).not.toContain('未核实');
+  });
+});
+
 describe('3. short numeric quotes are not page-text claims (core-06-fa)', () => {
   it('does not reject “0/1”, still checks a quoted English phrase', () => {
     const pages = [{ text: '图灵：符号0和1' }];
     expect(assessCompletionFacts({ summary: '用“0/1”两个符号', pages }).contradictions).toEqual([]);
     expect(
       assessCompletionFacts({ summary: '页面显示 "You clicked: Ok"', pages }).contradictions,
+    ).toHaveLength(1);
+  });
+  it('does not hold a retracted quote against the answer (core-10 f2-a)', () => {
+    const pages = [{ text: 'paragraph "Your content goes here."' }];
+    expect(
+      assessCompletionFacts({
+        summary:
+          'iframe 内可见文本 "Your content goes here."。此前误引的 "Welcome to the Internet" 并非该 iframe 页面实际内容，已更正。',
+        pages,
+      }).contradictions,
+    ).toEqual([]);
+  });
+  it('compares an ellipsis excerpt by its text (core-11 f2-a)', () => {
+    const pages = [
+      { text: 'paragraph "Impedit iure omnis quas est expedita enim architecto voluptate"' },
+    ];
+    expect(
+      assessCompletionFacts({
+        summary: '第1段以“Impedit iure omnis quas est expedita...”开头',
+        pages,
+      }).contradictions,
+    ).toEqual([]);
+    expect(
+      assessCompletionFacts({ summary: '第2段以“Qui natus aliquid numquam vel…”开头', pages })
+        .contradictions,
     ).toHaveLength(1);
   });
 });
@@ -185,7 +273,7 @@ describe('4. 未核实 noise', () => {
 describe('5. a headline mentioning cloudflare is not a captcha wall', () => {
   const page = (title: string, text: string) =>
     detectBrowserBlocker({
-      url: 'https://example.com/',
+      url: 'https://news.ycombinator.com/',
       title,
       text,
       visible: true,

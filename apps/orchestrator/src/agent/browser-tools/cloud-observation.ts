@@ -808,7 +808,17 @@ export class CloudObservation {
       await target.bringToFront();
       this.observations.clear();
       this.cursors.clear();
-      return this.read({ tool: 'read_page' });
+      // "分别读标题": the read of the tab switched to also carries its document title.
+      const read = await this.read({ tool: 'read_page' });
+      if (!read) return read;
+      try {
+        const value = JSON.parse(read.text) as Record<string, unknown>;
+        if (value.redacted) return read;
+        const title = await redactPageText(target, await target.title());
+        return title ? { ...read, text: JSON.stringify({ title, ...value }) } : read;
+      } catch {
+        return read;
+      }
     }
     if (
       !['snapshot', 'read_page', 'get_page_text', 'links', 'tables', 'scroll_until'].includes(
