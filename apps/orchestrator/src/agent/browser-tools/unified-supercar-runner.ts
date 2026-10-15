@@ -168,6 +168,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       tools.ownsPage,
       controller.signal,
       `${opts.userExternalId ?? 'unknown'}:${opts.taskId}`,
+      // One user keeps one pool IP across tasks (CAPTCHA-REDUCE-1).
+      opts.userExternalId ?? `${opts.userExternalId ?? 'unknown'}:${opts.taskId}`,
     );
   } catch {
     tools.dispose();

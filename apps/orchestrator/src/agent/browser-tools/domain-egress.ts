@@ -13,17 +13,67 @@ export interface DomainEgressConfig {
   enabled: boolean;
   domains: string[];
   proxyUrl: string;
+  /**
+   * CAPTCHA-REDUCE-1: fixed-IP proxies (one endpoint per static ISP IP). A user
+   * is mapped to one of them for good, never rotated; overrides `proxyUrl`.
+   */
+  pool?: string[];
   maxBytes?: number;
 }
-export function domainEgressConfig(): DomainEgressConfig {
+/**
+ * Google search and its verification pages. reCAPTCHA must be solved from the
+ * IP that triggered it, so its assets go the same way; sign-in hosts never do.
+ */
+export const DEFAULT_PROXY_DOMAINS = [
+  'www.google.com',
+  'google.com',
+  'consent.google.com',
+  'www.gstatic.com',
+  'www.recaptcha.net',
+  'recaptcha.net',
+];
+/** Account and sign-in hosts never use the shared proxy, whatever the domain list. */
+const SIGN_IN_HOST = /^(?:accounts|myaccount|login|signin|sso|auth|passport|id)\./i;
+const list = (value: string | undefined) =>
+  (value ?? '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+/** Variable names only: configuration is read from the environment, never logged. */
+export const DOMAIN_PROXY_ENV = {
+  enabled: 'BROWSER_DOMAIN_PROXY_ENABLED',
+  domains: 'BROWSER_DOMAIN_PROXY_DOMAINS',
+  url: 'BROWSER_DOMAIN_PROXY_URL',
+  pool: 'BROWSER_DOMAIN_PROXY_POOL',
+  username: 'BROWSER_DOMAIN_PROXY_USERNAME',
+  password: 'BROWSER_DOMAIN_PROXY_PASSWORD',
+} as const;
+/** `host:port` or a full proxy URL; shared credentials fill in missing ones. */
+export function proxyPoolFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
+  const user = env[DOMAIN_PROXY_ENV.username] ?? '';
+  const pass = env[DOMAIN_PROXY_ENV.password] ?? '';
+  return list(env[DOMAIN_PROXY_ENV.pool]).map((entry) => {
+    const url = new URL(/^[a-z]+:\/\//i.test(entry) ? entry : `http://${entry}`);
+    if (!url.username && user) {
+      url.username = encodeURIComponent(user);
+      url.password = encodeURIComponent(pass);
+    }
+    return url.href;
+  });
+}
+export function domainEgressConfig(env: NodeJS.ProcessEnv = process.env): DomainEgressConfig {
+  const pool = proxyPoolFromEnv(env);
+  const domains = list(env[DOMAIN_PROXY_ENV.domains]).map((d) => d.toLowerCase());
   return {
-    enabled: process.env.BROWSER_DOMAIN_PROXY_ENABLED === 'true',
-    domains: (process.env.BROWSER_DOMAIN_PROXY_DOMAINS ?? '')
-      .split(',')
-      .map((d) => d.trim().toLowerCase())
-      .filter(Boolean),
-    proxyUrl: process.env.BROWSER_DOMAIN_PROXY_URL ?? '',
+    enabled: env[DOMAIN_PROXY_ENV.enabled] === 'true',
+    domains: domains.length || !pool.length ? domains : [...DEFAULT_PROXY_DOMAINS],
+    proxyUrl: env[DOMAIN_PROXY_ENV.url] ?? '',
+    ...(pool.length ? { pool } : {}),
   };
+}
+/** The pool slot a user always gets (stable across tasks and restarts). */
+export function proxyPoolSlot(affinityKey: string, size: number): number {
+  return createHash('sha256').update(affinityKey).digest().readUInt32BE(0) % size;
 }
 /** One immutable endpoint per task/session. No credentials, URLs or bodies enter telemetry. */
 export async function installDomainEgress(
@@ -33,6 +83,8 @@ export async function installDomainEgress(
   ownsPage?: (candidate: Page) => boolean,
   signal?: AbortSignal,
   sessionKey: string = randomUUID(),
+  /** The user: picks the same pool IP for every task of this user. */
+  affinityKey: string = sessionKey,
 ) {
   const metrics = {
     proxyRequestBytes: 0,
@@ -58,7 +110,11 @@ export async function installDomainEgress(
   };
   signal?.addEventListener('abort', stop, { once: true });
   const template = config.proxyUrl;
+  const pinned = config.pool?.length
+    ? new URL(config.pool[proxyPoolSlot(affinityKey, config.pool.length)]!)
+    : null;
   const proxyFor = (domain: string) => {
+    if (pinned) return pinned;
     const identity = createHash('sha256')
       .update(JSON.stringify([sessionKey, domain]))
       .digest('hex')
@@ -105,9 +161,9 @@ export async function installDomainEgress(
     }
     if (!(await belongs(owner))) return route.fallback();
     const url = new URL(request.url());
-    const domain = domains.find(
-      (entry) => url.hostname === entry || url.hostname.endsWith(`.${entry}`),
-    );
+    const domain = SIGN_IN_HOST.test(url.hostname)
+      ? undefined
+      : domains.find((entry) => url.hostname === entry || url.hostname.endsWith(`.${entry}`));
     if (!domain) return route.fallback();
     const proxy = proxyFor(domain);
     try {
