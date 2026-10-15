@@ -42,15 +42,36 @@ export const BROWSER_PROFILE_ENV = {
 export const PROFILE_IDLE_MS = 7 * 86_400_000;
 const MAX_BYTES = 2 * 1024 * 1024;
 
-/** Anti-bot clearance and consent cookies: what spares a user the next challenge. */
-const CLEARANCE_COOKIE =
-  /^(?:GOOGLE_ABUSE_EXEMPTION|NID|AEC|SOCS|CONSENT|__Secure-ENID|cf_clearance|__cf_bm|_cfuvid|datadome|_abck|bm_sz|ak_bmsc|MUID|SRCHUID|SRCHD|_EDGE_S|_EDGE_V|aws-waf-token)$/;
+/**
+ * Anti-bot clearance and consent cookies: what spares a user the next challenge.
+ * A name counts only on the domains that issue it (FOLLOWUPS-282), so another
+ * site's cookie that happens to share the name is not kept. Bot-management
+ * vendors set theirs on the protected site itself, so those match any domain.
+ */
+const GOOGLE = /(?:^|\.)(?:google\.[a-z]{2,3}(?:\.[a-z]{2})?|youtube\.com)$/;
+const MICROSOFT = /(?:^|\.)(?:bing\.com|microsoft\.com|msn\.com)$/;
+const ANY = /./;
+const CLEARANCE_COOKIES: Array<{ names: RegExp; domains: RegExp }> = [
+  { names: /^(?:GOOGLE_ABUSE_EXEMPTION|NID|AEC|SOCS|CONSENT|__Secure-ENID)$/, domains: GOOGLE },
+  { names: /^(?:MUID|SRCHUID|SRCHD|_EDGE_S|_EDGE_V)$/, domains: MICROSOFT },
+  // Cloudflare, DataDome, Akamai and AWS WAF clearance on the site they protect.
+  {
+    names: /^(?:cf_clearance|__cf_bm|_cfuvid|datadome|_abck|bm_sz|ak_bmsc|aws-waf-token)$/,
+    domains: ANY,
+  },
+];
+const isClearanceCookie = (cookie: StoredCookie) => {
+  const domain = cookie.domain.toLowerCase().replace(/^\./, '');
+  return CLEARANCE_COOKIES.some(
+    (rule) => rule.names.test(cookie.name) && rule.domains.test(domain),
+  );
+};
 
 export function filterProfile(profile: StoredProfile, now = Date.now()) {
   const live = profile.cookies.filter((c) => c.expires === -1 || c.expires * 1000 > now);
   return {
     // Session-only cookies do not outlive the browser that set them.
-    cookies: live.filter((c) => c.expires !== -1 && CLEARANCE_COOKIE.test(c.name)),
+    cookies: live.filter((c) => c.expires !== -1 && isClearanceCookie(c)),
     origins: [],
   };
 }

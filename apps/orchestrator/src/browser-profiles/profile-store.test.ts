@@ -56,6 +56,30 @@ describe('profile store', () => {
     ]);
     expect(filterProfile(profile).origins).toEqual([]);
   });
+  it('keeps a clearance name only on the domains that issue it', () => {
+    const kept = filterProfile({
+      cookies: [
+        cookie('NID', 'g', '.google.com'),
+        cookie('CONSENT', 'g', '.google.co.uk'),
+        cookie('SOCS', 'y', '.youtube.com'),
+        cookie('MUID', 'b', '.bing.com'),
+        cookie('cf_clearance', 'c', 'shop.example.test'),
+        // Same names on other domains are another site's cookies, not clearance.
+        cookie('NID', 'session', '.example.test'),
+        cookie('CONSENT', 'x', 'google.com.evil.test'),
+        cookie('MUID', 'x', '.notbing.com'),
+        cookie('GOOGLE_ABUSE_EXEMPTION', 'x', '.example.test'),
+      ],
+      origins: [],
+    }).cookies.map((c) => `${c.name}@${c.domain}`);
+    expect(kept).toEqual([
+      'NID@.google.com',
+      'CONSENT@.google.co.uk',
+      'SOCS@.youtube.com',
+      'MUID@.bing.com',
+      'cf_clearance@shop.example.test',
+    ]);
+  });
   it('encrypts at rest and reads back for the same user only', async () => {
     const store = make();
     await store.save('usr_a', profile);
