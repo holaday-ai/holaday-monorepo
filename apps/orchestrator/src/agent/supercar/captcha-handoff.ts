@@ -62,7 +62,8 @@ export class CaptchaHandoffs {
   async wait(o: WaitOptions): Promise<CaptchaHandoffResult> {
     if (this.entries.has(o.taskId)) throw new Error('captcha_handoff_already_active');
     let outcome: CaptchaHandoffResult = 'cancelled';
-    let checking = false;
+    /** The check in progress; a press of 我已完成 waits for it instead of being dropped. */
+    let checking: Promise<boolean> | null = null;
     let failedRounds = 0;
     let alternateChosen = false;
     let challenge: ChallengeInfo | null = null;
@@ -88,21 +89,30 @@ export class CaptchaHandoffs {
         return true;
       },
       proceed: async (manual = false) => {
-        if (checking || o.signal?.aborted || o.control.snapshot().phase !== 'human') return false;
-        checking = true;
-        try {
-          if (await o.hasWall()) {
-            if (manual) failedRounds += 1;
+        while (checking) {
+          if (!manual) return false;
+          await checking;
+        }
+        if (o.signal?.aborted || o.control.snapshot().phase !== 'human') return false;
+        const check = (async () => {
+          try {
+            if (await o.hasWall()) {
+              if (manual) failedRounds += 1;
+              return false;
+            }
+            const lease = o.control.snapshot().lease;
+            if (!lease || o.signal?.aborted) return false;
+            o.control.returnToAgent(lease);
+            return true;
+          } catch {
             return false;
           }
-          const lease = o.control.snapshot().lease;
-          if (!lease || o.signal?.aborted) return false;
-          o.control.returnToAgent(lease);
-          return true;
-        } catch {
-          return false;
+        })();
+        checking = check;
+        try {
+          return await check;
         } finally {
-          checking = false;
+          if (checking === check) checking = null;
         }
       },
     };
