@@ -88,6 +88,24 @@ describe('profile store', () => {
     await store.clear('usr_a');
     expect(await store.load('usr_a')).toBeNull();
   });
+  it('a clear wins over a task that was already running (settings or account closure)', async () => {
+    let now = Date.now();
+    const store = make(() => now);
+    const taskStarted = now;
+    now += 1000;
+    await store.clear('usr_a');
+    now += 1000;
+    await store.save('usr_a', profile, taskStarted);
+    expect(await store.load('usr_a')).toBeNull();
+    // A task that starts after the clear saves normally; expiry is not a clear.
+    await store.save('usr_a', profile, now);
+    expect(await store.load('usr_a')).not.toBeNull();
+    const later = now;
+    now += 8 * 86_400_000;
+    expect(await store.load('usr_a')).toBeNull();
+    await store.save('usr_a', profile, later);
+    expect(await store.load('usr_a')).not.toBeNull();
+  });
   it('is off unless enabled with a 32-byte key', () => {
     expect(browserProfileStore({})).toBeNull();
     expect(

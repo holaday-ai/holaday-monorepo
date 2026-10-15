@@ -61,6 +61,8 @@ const userHash = (userId: string) =>
 const aad = (userId: string) => Buffer.from(`holaday-browser-profile:v1:${userHash(userId)}`);
 
 export class BrowserProfileStore {
+  /** When each user last cleared, so a task that was already running cannot write it back. */
+  private readonly cleared = new Map<string, number>();
   constructor(
     private readonly options: {
       dir: string;
@@ -96,7 +98,8 @@ export class BrowserProfileStore {
         data: string;
       };
       if (record.v !== 1 || this.now() - record.savedAt > PROFILE_IDLE_MS) {
-        await this.clear(userId);
+        // Expiry is not a user clear: the task that found it may save afresh.
+        await rm(this.file(userId), { force: true });
         return null;
       }
       const decipher = createDecipheriv(
@@ -120,7 +123,11 @@ export class BrowserProfileStore {
       return null;
     }
   }
-  async save(userId: string, profile: StoredProfile): Promise<void> {
+  /** `since`: when the saving task began; a clear after that wins over the save. */
+  async save(userId: string, profile: StoredProfile, since?: number): Promise<void> {
+    const clearedAfterStart = () =>
+      since !== undefined && (this.cleared.get(userHash(userId)) ?? -1) >= since;
+    if (clearedAfterStart()) return;
     const kept = filterProfile(profile, this.scope, this.now());
     const plain = Buffer.from(JSON.stringify(kept));
     if (plain.length > MAX_BYTES) return;
@@ -142,10 +149,15 @@ export class BrowserProfileStore {
       }),
       { mode: 0o600 },
     );
+    if (clearedAfterStart()) {
+      await rm(temp, { force: true });
+      return;
+    }
     await rename(temp, file);
   }
   /** One-click clear (settings) and account closure. */
   async clear(userId: string): Promise<void> {
+    this.cleared.set(userHash(userId), this.now());
     await rm(this.file(userId), { force: true });
   }
 }
@@ -203,7 +215,9 @@ export async function saveBrowserProfile(
   context: import('playwright').BrowserContext,
   store: BrowserProfileStore,
   userId: string,
+  /** When the task restored the profile; a clear since then is not undone. */
+  since?: number,
 ): Promise<void> {
   const state = await context.storageState().catch(() => null);
-  if (state) await store.save(userId, state).catch(() => {});
+  if (state) await store.save(userId, state, since).catch(() => {});
 }
