@@ -76,10 +76,13 @@ export function planSearchFallback(intent: string, wall: SearchWall): SearchFall
     /购买|下单|发送|删除|编辑文档|提交表单|\b(?:purchase|buy|delete|send|submit)\b/i.test(positive)
   )
     return null;
-  let query = queryAt(url);
+  // The query comes from the user's own task, never from the wall: Google's
+  // /sorry page carries an opaque `q` token (Deploy-22 D16 / core-02 searched
+  // for it on Bing).
+  let query: string | null = null;
   for (const raw of intent.match(TEXT_URL_RE) ?? []) {
     const candidate = parsed(trimTextUrl(raw));
-    if (!query && candidate && engineAt(candidate) === from) query = queryAt(candidate);
+    if (!query && candidate && engineAt(candidate)) query = queryAt(candidate);
   }
   query ??= intent.match(/[「“"]([^」”"\n]{1,500})[」”"]/)?.[1]?.trim() ?? null;
   query ??=
@@ -103,7 +106,7 @@ export function planSearchFallback(intent: string, wall: SearchWall): SearchFall
     url: next.href,
     notice,
     requiresWeather,
-    intent: `${intent}\n\n【搜索引擎回退】${from} 已出现真实验证墙，不尝试解验证码。原查询为「${query}」。本次获准使用 ${to} 交付同类公开搜索结果；从 ${next.href} 开始，保持原有数量与字段要求。只读，不登录、不提交业务表单；不得把替代来源冒充 ${from}，不能编造未读取的内容。${requiresWeather ? '若备用引擎没有天气卡片，可在同一引擎使用等价关键词并打开其真实天气来源，交付实际读到的天气概况、温度或天气网站链接；读不到温度时明确说明，仍可交付其他天气信息，不得编造温度。完全没有天气信息才算未完成。' : ''}`,
+    intent: `${intent}\n\n【搜索引擎回退】${from} 已出现真实验证墙，不尝试解验证码。原查询为「${query}」。本次获准使用 ${to} 交付同类公开搜索结果；从 ${next.href} 开始，保持原有数量与字段要求。只读：不登录、不下单、不发送（在 ${to} 搜索框里输入并搜索属于查询，可以做）；不得把替代来源冒充 ${from}，不能编造未读取的内容。${requiresWeather ? '若备用引擎没有天气卡片，可在同一引擎使用等价关键词并打开其真实天气来源，交付实际读到的天气概况、温度或天气网站链接；读不到温度时明确说明，仍可交付其他天气信息，不得编造温度。完全没有天气信息才算未完成。' : ''}`,
   };
 }
 

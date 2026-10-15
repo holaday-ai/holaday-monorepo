@@ -269,6 +269,28 @@ function sourceLabel(fact: Fact) {
   return fact.tabId ? `标签 ${fact.tabId}` : (fact.sourceURL ?? '该页面');
 }
 
+/**
+ * AP4 (Deploy-22 core-01): the page a fact is bound to, allowing for a redirect.
+ * Bing appends `rdr`/`rdrig` to the URL the answer cites; the same host and
+ * path with every parameter the answer names is the same page.
+ */
+function sameSource(pageUrl: string | undefined, cited: string): boolean {
+  if (!pageUrl) return false;
+  if (pageUrl === cited) return true;
+  try {
+    const page = new URL(pageUrl);
+    const want = new URL(cited);
+    const host = (url: URL) => url.hostname.replace(/^www\./, '');
+    const path = (url: URL) => url.pathname.replace(/\/+$/, '') || '/';
+    if (host(page) !== host(want) || path(page) !== path(want)) return false;
+    for (const [key, value] of want.searchParams)
+      if (page.searchParams.get(key) !== value) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function assessCompletionFacts(input: {
   summary: string;
   fields?: unknown;
@@ -325,7 +347,7 @@ export function assessCompletionFacts(input: {
       .map(normalizeFact);
     const bound = (page: (typeof pages)[number]) =>
       (!fact.tabId || page.tabId === fact.tabId) &&
-      (!fact.sourceURL || page.sourceURL === fact.sourceURL);
+      (!fact.sourceURL || sameSource(page.sourceURL, fact.sourceURL));
     const eligible = pages.filter(bound);
     const label = `${fact.name}「${fact.value.slice(0, 120)}」`;
     const isVideoKindMismatch =
@@ -346,7 +368,8 @@ export function assessCompletionFacts(input: {
         eligible.some(
           (page) =>
             page.norm.includes(v) ||
-            (page.sourceURL && normalizeFact(page.sourceURL) === v) ||
+            (page.sourceURL &&
+              (normalizeFact(page.sourceURL) === v || sameSource(page.sourceURL, fact.value))) ||
             page.links?.some((link) => normalizeFact(link.url) === v),
         ) ||
         // Host receipts (download, typed text, scroll) are facts whatever the binding.
