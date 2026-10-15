@@ -167,7 +167,8 @@ export function searchProviderFromEnv(
 ): SearchProvider | null {
   switch ((env[SEARCH_API_ENV.provider] ?? 'none').trim().toLowerCase()) {
     case 'stub':
-      return new StubSearchProvider();
+      // Fixture results must never reach a real user as search results.
+      return env.NODE_ENV === 'production' ? null : new StubSearchProvider();
     case 'brave': {
       const key = env[SEARCH_API_ENV.braveKey];
       return key ? new BraveSearchProvider(key, fetchImpl) : null;

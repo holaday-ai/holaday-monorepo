@@ -80,6 +80,9 @@ describe('search providers (local stand-ins only, no real key)', () => {
   it('is configured only by name, and never silently without its key', () => {
     expect(searchProviderFromEnv({})).toBeNull();
     expect(searchProviderFromEnv({ BROWSER_SEARCH_API_PROVIDER: 'brave' })).toBeNull();
+    expect(
+      searchProviderFromEnv({ BROWSER_SEARCH_API_PROVIDER: 'stub', NODE_ENV: 'production' }),
+    ).toBeNull();
     expect(searchProviderFromEnv({ BROWSER_SEARCH_API_PROVIDER: 'stub' })?.id).toBe(
       'search-api:stub',
     );
