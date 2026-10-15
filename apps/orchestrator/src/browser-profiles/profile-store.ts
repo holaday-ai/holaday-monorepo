@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { logger } from '../config/logger.js';
 
 /**
  * CAPTCHA-REDUCE-1 — a per-user browser profile that survives tasks. A site
@@ -10,9 +11,9 @@ import { join } from 'node:path';
  *
  * - Encrypted at rest (AES-256-GCM); the user hash is authenticated data, so a
  *   profile can never be read as another user's.
- * - Default scope is verification clearance and consent state only; sign-in
- *   sessions stay with the browser-session vault and its per-site consent.
- *   `all` keeps every cookie and local-storage origin (operator choice).
+ * - Only verification clearance and consent state is kept; sign-in sessions
+ *   stay with the browser-session vault and its per-site consent. There is no
+ *   wider scope (FOLLOWUPS-282: `BROWSER_PROFILE_STORE_SCOPE=all` was removed).
  * - Idle profiles expire; the user can clear theirs at any time.
  * Off unless BROWSER_PROFILE_STORE_ENABLED=true with a key configured.
  */
@@ -30,7 +31,6 @@ export interface StoredProfile {
   cookies: StoredCookie[];
   origins: Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }>;
 }
-export type ProfileScope = 'clearance' | 'all';
 
 /** Variable names only; values are never logged. */
 export const BROWSER_PROFILE_ENV = {
@@ -46,9 +46,8 @@ const MAX_BYTES = 2 * 1024 * 1024;
 const CLEARANCE_COOKIE =
   /^(?:GOOGLE_ABUSE_EXEMPTION|NID|AEC|SOCS|CONSENT|__Secure-ENID|cf_clearance|__cf_bm|_cfuvid|datadome|_abck|bm_sz|ak_bmsc|MUID|SRCHUID|SRCHD|_EDGE_S|_EDGE_V|aws-waf-token)$/;
 
-export function filterProfile(profile: StoredProfile, scope: ProfileScope, now = Date.now()) {
+export function filterProfile(profile: StoredProfile, now = Date.now()) {
   const live = profile.cookies.filter((c) => c.expires === -1 || c.expires * 1000 > now);
-  if (scope === 'all') return { cookies: live, origins: profile.origins };
   return {
     // Session-only cookies do not outlive the browser that set them.
     cookies: live.filter((c) => c.expires !== -1 && CLEARANCE_COOKIE.test(c.name)),
@@ -67,7 +66,6 @@ export class BrowserProfileStore {
     private readonly options: {
       dir: string;
       key: Buffer;
-      scope?: ProfileScope;
       now?: () => number;
     },
   ) {
@@ -78,9 +76,6 @@ export class BrowserProfileStore {
   }
   private now() {
     return this.options.now?.() ?? Date.now();
-  }
-  get scope(): ProfileScope {
-    return this.options.scope ?? 'clearance';
   }
   async load(userId: string): Promise<StoredProfile | null> {
     let raw: string;
@@ -113,11 +108,7 @@ export class BrowserProfileStore {
         decipher.update(Buffer.from(record.data, 'base64')),
         decipher.final(),
       ]);
-      return filterProfile(
-        JSON.parse(plain.toString('utf8')) as StoredProfile,
-        this.scope,
-        this.now(),
-      );
+      return filterProfile(JSON.parse(plain.toString('utf8')) as StoredProfile, this.now());
     } catch {
       // Unreadable (wrong key, tampered, other user's file): start blank.
       return null;
@@ -128,7 +119,7 @@ export class BrowserProfileStore {
     const clearedAfterStart = () =>
       since !== undefined && (this.cleared.get(userHash(userId)) ?? -1) >= since;
     if (clearedAfterStart()) return;
-    const kept = filterProfile(profile, this.scope, this.now());
+    const kept = filterProfile(profile, this.now());
     const plain = Buffer.from(JSON.stringify(kept));
     if (plain.length > MAX_BYTES) return;
     const nonce = randomBytes(12);
@@ -166,6 +157,7 @@ let cached: { signature: string; store: BrowserProfileStore | null } | null = nu
 /** The configured store, or null when disabled or without a valid key. */
 export function browserProfileStore(
   env: NodeJS.ProcessEnv = process.env,
+  warn: (message: string) => void = (message) => logger.warn(message),
 ): BrowserProfileStore | null {
   const signature = [
     env[BROWSER_PROFILE_ENV.enabled],
@@ -177,13 +169,15 @@ export function browserProfileStore(
   ].join('|');
   if (cached?.signature === signature) return cached.store;
   let store: BrowserProfileStore | null = null;
+  const scope = env[BROWSER_PROFILE_ENV.scope]?.trim();
+  if (scope && scope !== 'clearance')
+    warn(`${BROWSER_PROFILE_ENV.scope} only supports "clearance"; the configured value is ignored`);
   if (env[BROWSER_PROFILE_ENV.enabled] === 'true') {
     const key = Buffer.from(env[BROWSER_PROFILE_ENV.key] ?? '', 'base64');
     if (key.length === 32)
       store = new BrowserProfileStore({
         dir: env[BROWSER_PROFILE_ENV.dir] || join(process.cwd(), 'data', 'browser-profiles'),
         key,
-        scope: env[BROWSER_PROFILE_ENV.scope] === 'all' ? 'all' : 'clearance',
       });
   }
   cached = { signature, store };
@@ -210,7 +204,7 @@ export async function restoreBrowserProfile(
   return saved.cookies.length;
 }
 
-/** Saves what the store's scope keeps from the context at the end of a task. */
+/** Saves the clearance the store keeps from the context at the end of a task. */
 export async function saveBrowserProfile(
   context: import('playwright').BrowserContext,
   store: BrowserProfileStore,

@@ -43,20 +43,18 @@ const profile = {
 };
 
 describe('profile store', () => {
-  const make = (now = () => Date.now(), scope?: 'all' | 'clearance') =>
+  const make = (now = () => Date.now()) =>
     new BrowserProfileStore({
       dir: mkdtempSync(join(tmpdir(), 'profiles-')),
       key: randomBytes(32),
-      ...(scope ? { scope } : {}),
       now,
     });
   it('keeps only verification clearance by default, never sign-in sessions', () => {
-    expect(filterProfile(profile, 'clearance').cookies.map((c) => c.name)).toEqual([
+    expect(filterProfile(profile).cookies.map((c) => c.name)).toEqual([
       'cf_clearance',
       'GOOGLE_ABUSE_EXEMPTION',
     ]);
-    expect(filterProfile(profile, 'clearance').origins).toEqual([]);
-    expect(filterProfile(profile, 'all').cookies).toHaveLength(4);
+    expect(filterProfile(profile).origins).toEqual([]);
   });
   it('encrypts at rest and reads back for the same user only', async () => {
     const store = make();
@@ -114,13 +112,25 @@ describe('profile store', () => {
         BROWSER_PROFILE_STORE_KEY: 'short',
       }),
     ).toBeNull();
-    expect(
-      browserProfileStore({
+  });
+  it('has no wider scope: SCOPE=all is ignored with a warning and still keeps clearance only', async () => {
+    const warnings: string[] = [];
+    const store = browserProfileStore(
+      {
         BROWSER_PROFILE_STORE_ENABLED: 'true',
         BROWSER_PROFILE_STORE_KEY: randomBytes(32).toString('base64'),
         BROWSER_PROFILE_STORE_DIR: mkdtempSync(join(tmpdir(), 'profiles-')),
-      })?.scope,
-    ).toBe('clearance');
+        BROWSER_PROFILE_STORE_SCOPE: 'all',
+      },
+      (message) => warnings.push(message),
+    );
+    expect(warnings).toEqual([
+      'BROWSER_PROFILE_STORE_SCOPE only supports "clearance"; the configured value is ignored',
+    ]);
+    await store!.save('usr_a', profile);
+    const loaded = await store!.load('usr_a');
+    expect(loaded?.cookies.map((c) => c.name)).toEqual(['cf_clearance', 'GOOGLE_ABUSE_EXEMPTION']);
+    expect(loaded?.origins).toEqual([]);
   });
 });
 
