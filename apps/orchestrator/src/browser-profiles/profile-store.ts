@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { logger } from '../config/logger.js';
 
@@ -40,6 +40,11 @@ export const BROWSER_PROFILE_ENV = {
   scope: 'BROWSER_PROFILE_STORE_SCOPE',
 } as const;
 export const PROFILE_IDLE_MS = 7 * 86_400_000;
+/** A save's temp file older than this was left by a crash. */
+export const PROFILE_TEMP_MAX_AGE_MS = 3_600_000;
+/** The only names this store writes: `<user hash>.json` and its save temp. */
+const PROFILE_FILE = /^[0-9a-f]{64}\.json$/;
+const PROFILE_TEMP = /^[0-9a-f]{64}\.json\.[0-9a-f]{24}\.tmp$/;
 const MAX_BYTES = 2 * 1024 * 1024;
 
 /**
@@ -166,6 +171,41 @@ export class BrowserProfileStore {
       return;
     }
     await rename(temp, file);
+  }
+  /**
+   * FOLLOWUPS-282: removes idle profiles nobody reads again and crash-left temp
+   * files. Only regular files in this store's own name format, in its directory.
+   */
+  async sweep(): Promise<{ expired: number; temps: number }> {
+    const removed = { expired: 0, temps: 0 };
+    let names: string[];
+    try {
+      names = await readdir(this.options.dir);
+    } catch {
+      return removed;
+    }
+    for (const name of names) {
+      const temp = PROFILE_TEMP.test(name);
+      if (!temp && !PROFILE_FILE.test(name)) continue;
+      const path = join(this.options.dir, name);
+      const before = await lstat(path).catch(() => null);
+      if (!before?.isFile()) continue;
+      if (temp) {
+        if (this.now() - before.mtimeMs <= PROFILE_TEMP_MAX_AGE_MS) continue;
+      } else {
+        const savedAt = await readFile(path, 'utf8')
+          .then((raw) => JSON.parse(raw) as { v?: unknown; savedAt?: unknown })
+          .then((record) => (record.v === 1 ? record.savedAt : undefined))
+          .catch(() => undefined);
+        if (typeof savedAt !== 'number' || this.now() - savedAt <= PROFILE_IDLE_MS) continue;
+      }
+      // A save may have replaced the file meanwhile; then it is not stale.
+      const after = await lstat(path).catch(() => null);
+      if (!after?.isFile() || after.mtimeMs !== before.mtimeMs) continue;
+      await rm(path, { force: true });
+      removed[temp ? 'temps' : 'expired'] += 1;
+    }
+    return removed;
   }
   /** One-click clear (settings) and account closure. */
   async clear(userId: string): Promise<void> {

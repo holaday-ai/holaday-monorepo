@@ -1,5 +1,13 @@
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, readFileSync, readdirSync, renameSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { type Server, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -127,6 +135,37 @@ describe('profile store', () => {
     expect(await store.load('usr_a')).toBeNull();
     await store.save('usr_a', profile, later);
     expect(await store.load('usr_a')).not.toBeNull();
+  });
+  it('sweeps idle profiles and crash-left temps, and nothing else', async () => {
+    let now = Date.now();
+    const dir = mkdtempSync(join(tmpdir(), 'profiles-'));
+    const store = new BrowserProfileStore({ dir, key: randomBytes(32), now: () => now });
+    await store.save('usr_old', profile);
+    now += 8 * 86_400_000;
+    await store.save('usr_new', profile);
+    const hash = readdirSync(dir)
+      .find((n) => n.endsWith('.json'))!
+      .slice(0, 64);
+    const oldTemp = join(dir, `${hash}.json.${'a'.repeat(24)}.tmp`);
+    const freshTemp = join(dir, `${hash}.json.${'b'.repeat(24)}.tmp`);
+    const foreign = join(dir, 'notes.txt');
+    for (const file of [oldTemp, freshTemp, foreign]) writeFileSync(file, 'x');
+    const twoHoursAgo = new Date(now - 2 * 3_600_000);
+    utimesSync(oldTemp, twoHoursAgo, twoHoursAgo);
+    utimesSync(freshTemp, new Date(now), new Date(now));
+    symlinkSync(join(dir, 'notes.txt'), join(dir, `${'c'.repeat(64)}.json`));
+
+    expect(await store.sweep()).toEqual({ expired: 1, temps: 1 });
+    expect(await store.load('usr_old')).toBeNull();
+    expect(await store.load('usr_new')).not.toBeNull();
+    const left = readdirSync(dir);
+    expect(left).toContain(`${hash}.json.${'b'.repeat(24)}.tmp`);
+    expect(left).not.toContain(`${hash}.json.${'a'.repeat(24)}.tmp`);
+    expect(left).toContain('notes.txt');
+    expect(left).toContain(`${'c'.repeat(64)}.json`);
+    expect(
+      await new BrowserProfileStore({ dir: join(dir, 'missing'), key: randomBytes(32) }).sweep(),
+    ).toEqual({ expired: 0, temps: 0 });
   });
   it('is off unless enabled with a 32-byte key', () => {
     expect(browserProfileStore({})).toBeNull();
