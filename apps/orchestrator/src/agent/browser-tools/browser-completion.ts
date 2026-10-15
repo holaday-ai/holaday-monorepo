@@ -178,7 +178,8 @@ export function completionGap(
   if (/(?:截图|screenshot)/i.test(requested) && !successful.some((t) => t.screenshot))
     return '缺少实际截图回执。';
   const receipts = successful.flatMap((entry) => (entry.download ? [entry.download] : []));
-  if (/(下载|download)/i.test(positiveActionText(intent) + claimed) && !receipts.length)
+  // Source titles may contain Download; only the task's request requires a receipt.
+  if (/(下载|download)/i.test(requested) && !receipts.length)
     return '下载没有成功保存回执，不能宣告完成。请使用 download 保存文件。';
   for (const name of claimed.matchAll(
     /[\p{L}\d_][\p{L}\d_.-]*\.(?:txt|csv|tsv|json|pdf|zip|xlsx|docx|png|jpg)\b/giu,

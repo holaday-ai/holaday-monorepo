@@ -54,6 +54,10 @@ import { isExplicitPlanApproval, isPurePlanHold } from '../../agent/plan-mode.js
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
 import {
+  type SearchFallbackEvent,
+  runSearchWithFallback,
+} from '../../agent/search-fallback/search-engine-fallback.js';
+import {
   searchResultRequirement,
   searchResultsSatisfy,
 } from '../../agent/search-result-requirement.js';
@@ -6792,12 +6796,62 @@ export const tasksRouter = router({
                     onAwaitingUser: supercarArgs.onAwaitingUser,
                   });
                 };
+                const searchFallbackChain: string[] = [];
+                const recordSearchFallback = async (event: SearchFallbackEvent) => {
+                  if (event.phase === 'started') {
+                    if (event.endpoint === 'lite') {
+                      searchFallbackChain.push('search:duckduckgo-lite');
+                    } else {
+                      searchFallbackChain.push(
+                        `search:${event.from.toLowerCase()}`,
+                        `search:${event.to.toLowerCase()}`,
+                      );
+                    }
+                  }
+                  if (!taskDbId) return;
+                  await ctx.db.insert(taskEvents).values({
+                    externalId: newExternalId('taskEvent'),
+                    taskId: taskDbId,
+                    type: 'browser.search_fallback',
+                    actor: 'agent',
+                    payload: event,
+                  });
+                  const [saved] = await ctx.db
+                    .select({ result: tasksTable.result })
+                    .from(tasksTable)
+                    .where(eq(tasksTable.externalId, taskId))
+                    .limit(1);
+                  const previous = (saved?.result ?? {}) as Record<string, unknown>;
+                  const previousMetadata = (previous.metadata ?? {}) as Record<string, unknown>;
+                  await ctx.db
+                    .update(tasksTable)
+                    .set({
+                      result: {
+                        ...previous,
+                        metadata: {
+                          ...previousMetadata,
+                          fallbackChain: [
+                            ...(scrapeBrowserRetry ? ['scrape', 'browser'] : ['browser']),
+                            ...searchFallbackChain,
+                          ],
+                          searchFallback: event,
+                        },
+                      },
+                    })
+                    .where(eq(tasksTable.externalId, taskId));
+                };
                 const runFn = () =>
                   (input.localChrome
                     ? runLocalChrome()
                     : useOtaUserBrowser
                       ? runUserBrowserReadonly()
-                      : runSupercarWithRetry(supercarArgs, { userId, taskId, logger: ctx.logger })
+                      : runSearchWithFallback(supercarArgs, {
+                          originalIntent: input.intent,
+                          run: (args) =>
+                            runSupercarWithRetry(args, { userId, taskId, logger: ctx.logger }),
+                          stop: supercarAbort,
+                          onFallback: recordSearchFallback,
+                        })
                   )
                     .then(async (rawOutcome) => {
                       let outcome = rawOutcome;
@@ -7094,7 +7148,10 @@ export const tasksRouter = router({
                         expertMode: expertModeOverride,
                         selectedRole: dispatchRoleId,
                         ...browserMessagesAdapter.metadata,
-                        fallbackChain: scrapeBrowserRetry ? ['scrape', 'browser'] : ['browser'],
+                        fallbackChain: [
+                          ...(scrapeBrowserRetry ? ['scrape', 'browser'] : ['browser']),
+                          ...searchFallbackChain,
+                        ],
                         ...(scrapeBrowserRetry
                           ? { browserRetryReason: scrapeBrowserRetry.reason }
                           : {}),
