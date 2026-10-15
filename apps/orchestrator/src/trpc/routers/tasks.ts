@@ -193,6 +193,7 @@ import {
   restorableBrowserTarget,
   storedBrowserSessionPolicy,
 } from '../../browser-pool/browser-session-recovery.js';
+import { finishTaskBrowser } from '../../browser-pool/finish-task-browser.js';
 import type { BrowserSessionPolicy } from '../../browser-pool/types.js';
 import { getVaultRuntime } from '../../browser-session-vault/runtime.js';
 import { browserCapabilities } from '../../config/browser-capabilities.js';
@@ -5927,6 +5928,7 @@ export const tasksRouter = router({
                 });
                 const unifiedReadPage = createFirecrawlReadPage(ctx.firecrawl);
                 let captchaPrivacy = false;
+                let captchaNeedsRelease = false;
                 let pauseCaptchaWatchdog = () => {};
                 let resumeCaptchaWatchdog = () => {};
                 const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
@@ -6403,10 +6405,16 @@ export const tasksRouter = router({
                     }
                   },
                   async onCaptchaHandoffEnd(resumed) {
-                    if (!resumed) resumeCaptchaWatchdog();
+                    if (!resumed) {
+                      captchaNeedsRelease = true;
+                      resumeCaptchaWatchdog();
+                    }
                     const persisted = await repo.markAwaitingReplyResumed(taskId, userRow.id);
                     if (!persisted.persisted) return false;
-                    if (resumed) resumeCaptchaWatchdog();
+                    if (resumed) {
+                      captchaNeedsRelease = false;
+                      resumeCaptchaWatchdog();
+                    }
                     broadcastToUser(userId, {
                       type: 'server.vision.captcha_resolved',
                       taskId,
@@ -6417,6 +6425,7 @@ export const tasksRouter = router({
                   async onAwaitingUser(ev) {
                     if (ev.captchaHandoff) {
                       captchaPrivacy = true;
+                      captchaNeedsRelease = true;
                       pauseCaptchaWatchdog();
                     }
                     let awaitingPersisted = false;
@@ -7837,22 +7846,23 @@ export const tasksRouter = router({
                       // terminal-failed and clobber the park state.
                       let catchPersisted = false;
                       try {
-                        const failureFinalState = perUserExec
-                          ? await captureFinalState({
-                              executor: {
-                                getPage: () => perUserExec.getPage(),
-                                screenshot: (page, options) =>
-                                  perUserExec.screenshot(
-                                    page as unknown as Parameters<
-                                      PlaywrightExecutor['screenshot']
-                                    >[0],
-                                    options,
-                                  ),
-                              },
-                              logger: ctx.logger,
-                              taskId,
-                            })
-                          : {};
+                        const failureFinalState =
+                          perUserExec && !captchaPrivacy
+                            ? await captureFinalState({
+                                executor: {
+                                  getPage: () => perUserExec.getPage(),
+                                  screenshot: (page, options) =>
+                                    perUserExec.screenshot(
+                                      page as unknown as Parameters<
+                                        PlaywrightExecutor['screenshot']
+                                      >[0],
+                                      options,
+                                    ),
+                                },
+                                logger: ctx.logger,
+                                taskId,
+                              })
+                            : {};
                         const out = await repo.persistVisionOutcome(taskId, {
                           status: 'failed',
                           reason: `runner threw: ${reason}`.slice(0, 500),
@@ -7892,7 +7902,7 @@ export const tasksRouter = router({
                         }
                       }
                     })
-                    .finally(() => {
+                    .finally(async () => {
                       // Phase 3 R1 — clear the watchdog now that the runner
                       // settled normally. If it already fired, clearTimeout is
                       // a no-op and the watchdog's release call has already
@@ -7902,22 +7912,20 @@ export const tasksRouter = router({
                       // review workspace. The lease is bounded and reclaimable: a new
                       // task at capacity releases the oldest retained browser first.
                       if (didAllocatePool && ctx.browserPool) {
-                        const retained = ctx.browserPool.retain(
-                          taskId,
-                          appEnv.BROWSER_TERMINAL_RETENTION_MS,
-                          'terminal-review',
-                        );
-                        if (!retained) {
-                          const releasingPool = ctx.browserPool;
-                          void runTaskBackground(ctx, async (ctx) =>
-                            releasingPool.release(taskId, `task-${taskId}-done`).catch((relErr) => {
-                              ctx.logger.warn(
-                                { err: relErr, taskId, userId: ctx.userId },
-                                'pool: post-task release failed',
-                              );
-                            }),
+                        const finishingPool = ctx.browserPool;
+                        await runTaskBackground(ctx, async () =>
+                          finishTaskBrowser(
+                            finishingPool,
+                            taskId,
+                            appEnv.BROWSER_TERMINAL_RETENTION_MS,
+                            !captchaNeedsRelease,
+                          ),
+                        ).catch((relErr) => {
+                          ctx.logger.warn(
+                            { err: relErr, taskId, userId: ctx.userId },
+                            'pool: post-task release failed',
                           );
-                        }
+                        });
                       }
                       // Phase 24 RC follow-up — wake the TaskQueue worker so
                       // the next queued task fires immediately instead of

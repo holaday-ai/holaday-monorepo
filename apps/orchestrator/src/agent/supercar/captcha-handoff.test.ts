@@ -92,3 +92,15 @@ it('waits for accepted human input to settle before resuming or releasing', asyn
   await input;
   expect(await f.result).toBe('resumed');
 });
+
+it('cancellation wins a race with resume persistence', async () => {
+  const f = await fixture();
+  f.resumed.mockImplementation(async () => {
+    f.registry.cancel('t', 'u', f.control);
+    return true;
+  });
+  f.clear();
+  await vi.advanceTimersByTimeAsync(50);
+  expect(await f.result).toBe('cancelled');
+  expect(f.control.snapshot().phase).toBe('closed');
+});
