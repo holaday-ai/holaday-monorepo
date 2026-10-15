@@ -430,3 +430,24 @@ describe('unified loop context size (batch 11.0)', () => {
     expect(results[1]?.content).toBe(page);
   });
 });
+
+it('discards same-turn actions queued before a CAPTCHA handoff', async () => {
+  const execute = vi.fn(async () => ({ ok: true, text: 'stale navigation' }));
+  const captchaHandoff = vi.fn(async () => true);
+  const adapter = scriptedAdapter([
+    () => [
+      call('request_human', { reason: 'captcha', message: '请完成验证码' }, 'handoff'),
+      call('navigate', { url: 'https://example.com/stale' }, 'stale'),
+    ],
+    () => [call('finish', { status: 'failed', summary: '测试结束' }, 'end')],
+  ]);
+  await runUnifiedBrowserLoop({
+    intent: '读取当前页面',
+    adapter,
+    execute,
+    requestHuman: async () => true,
+    captchaHandoff,
+  });
+  expect(captchaHandoff).toHaveBeenCalledOnce();
+  expect(execute).not.toHaveBeenCalled();
+});

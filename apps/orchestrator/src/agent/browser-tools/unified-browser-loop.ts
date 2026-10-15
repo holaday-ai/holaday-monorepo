@@ -421,17 +421,6 @@ export async function runUnifiedBrowserLoop(
       );
     } catch {
       if (input.signal?.aborted) return cancelled(step);
-      if (input.captchaHandoff) {
-        const wall = await checkBlocker();
-        if (wall?.reason === 'captcha') {
-          if (!(await input.captchaHandoff(wall.message)))
-            return { status: 'failed', reason: '验证码等待已结束，任务未完成。', steps: step };
-          messages.push({
-            role: 'user',
-            content: '用户已完成验证；从当前页面重新 snapshot 后继续原任务，不要重启或重放旧动作。',
-          });
-        }
-      }
       return heldOr(
         { status: 'failed', reason: '模型服务暂时不可用，请稍后重试。', steps: step },
         step,
@@ -667,6 +656,7 @@ export async function runUnifiedBrowserLoop(
         results.push(
           toolResult(call.id, '用户已完成接管，请重新 snapshot 后继续；用户的操作不算你的操作。'),
         );
+        if (reason === 'captcha') staleTurn = true;
         continue;
       }
       if (call.name === 'read_url' && input.readPage) {
