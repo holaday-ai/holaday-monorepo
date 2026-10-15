@@ -9,6 +9,7 @@ import type {
   SupercarOutcome,
 } from '../supercar/agent-loop.js';
 import type { BrowserControl } from '../supercar/browser-control.js';
+import { inspectChallenge } from '../supercar/captcha-challenge.js';
 import { captchaHandoffs } from '../supercar/captcha-handoff.js';
 import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
 import { classifyRuntimeAction } from '../supercar/runtime-action-policy.js';
@@ -448,6 +449,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     const outcome = await runUnifiedBrowserLoop({
       ...(control
         ? {
+            // A search wall the fallback can answer is not the user's job.
+            captchaHandoffWanted: () => !opts.searchWallReplaceable?.(page.url()),
             captchaHandoff: async (_message: string) => {
               suspendTimeout();
               await replay?.pause();
@@ -473,11 +476,12 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                   });
                 },
                 onResumed: async () => (await opts.onCaptchaHandoffEnd?.(true)) ?? true,
+                challenge: () => inspectChallenge(page),
                 signal: controller.signal,
                 timeoutMs: opts.captchaWaitMs,
                 pollMs: opts.captchaPollMs,
               });
-              if (result !== 'resumed') {
+              if (result !== 'resumed' && result !== 'alternate') {
                 handoffFailure =
                   result === 'timeout'
                     ? '等待用户完成验证码已超时，任务未完成。'
@@ -485,9 +489,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                 await opts.onCaptchaHandoffEnd?.(false);
               }
               lastSnapshot = '';
-              if (result === 'resumed') replay?.resume();
+              if (result === 'resumed' || result === 'alternate') replay?.resume();
               resumeTimeout();
-              return result === 'resumed';
+              return result === 'alternate' ? 'alternate' : result === 'resumed';
             },
           }
         : {}),

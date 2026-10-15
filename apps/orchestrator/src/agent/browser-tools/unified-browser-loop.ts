@@ -124,7 +124,13 @@ export interface WebSearchHit {
 
 export interface UnifiedBrowserLoopInput {
   observationV2?: boolean;
-  captchaHandoff?: (message: string) => Promise<boolean>;
+  /**
+   * Hands a captcha to the user. `alternate` (CAPTCHA-REDUCE-1): after two
+   * failed rounds the user chose to continue another way.
+   */
+  captchaHandoff?: (message: string) => Promise<boolean | 'alternate'>;
+  /** False when this wall need not be handed over (a search fallback replaces it). */
+  captchaHandoffWanted?: () => boolean | Promise<boolean>;
   requireBrowserEvidence?: boolean;
   supportedTools?: { download: boolean; upload: boolean; tabs: boolean };
   probeBlocker?: () => Promise<{
@@ -369,16 +375,32 @@ export async function runUnifiedBrowserLoop(
   /** Remediation must not end worse than the held answer would have. */
   const heldOr = (outcome: UnifiedBrowserOutcome, steps: number): UnifiedBrowserOutcome =>
     held && !input.requireBrowserEvidence ? { status: 'completed', ...held, steps } : outcome;
+  const ALTERNATE =
+    '用户选择「换个方式继续」：这个页面的验证码没有通过。不要再打开或重试被验证墙挡住的页面，改用其他公开来源完成任务；确实做不到就如实说明缺什么。';
+  /** Undefined: not handed over (the caller pauses as before, e.g. for a search fallback). */
+  const handCaptcha = async (
+    message: string,
+  ): Promise<'resumed' | 'alternate' | 'ended' | undefined> => {
+    if (!input.captchaHandoff) return undefined;
+    if (input.captchaHandoffWanted && !(await input.captchaHandoffWanted())) return undefined;
+    const result = await input.captchaHandoff(message);
+    return result === 'alternate' ? 'alternate' : result ? 'resumed' : 'ended';
+  };
   for (let step = 0; step < maxSteps; step += 1) {
     if (input.signal?.aborted) return cancelled(step);
     if (input.captchaHandoff) {
       const wall = await checkBlocker();
       if (wall?.reason === 'captcha') {
-        if (!(await input.captchaHandoff(wall.message)))
+        const handed = await handCaptcha(wall.message);
+        if (handed === undefined) return { status: 'awaiting_user', ...wall, steps: step };
+        if (handed === 'ended')
           return { status: 'failed', reason: '验证码等待已结束，任务未完成。', steps: step };
         messages.push({
           role: 'user',
-          content: '用户已完成验证；从当前页面重新 snapshot 后继续原任务，不要重启或重放旧动作。',
+          content:
+            handed === 'alternate'
+              ? ALTERNATE
+              : '用户已完成验证；从当前页面重新 snapshot 后继续原任务，不要重启或重放旧动作。',
         });
       }
     }
@@ -478,16 +500,24 @@ export async function runUnifiedBrowserLoop(
           // Safety: a wall in front of the target pauses for the user.
           const blocker = await checkBlocker();
           if (blocker) {
-            if (blocker.reason !== 'captcha' || !input.captchaHandoff)
+            const handed =
+              blocker.reason === 'captcha' ? await handCaptcha(blocker.message) : undefined;
+            if (handed === undefined)
               return { status: 'awaiting_user', ...blocker, steps: step + 1 };
-            if (!(await input.captchaHandoff(blocker.message)))
+            if (handed === 'ended')
               return {
                 status: 'failed',
                 reason: '验证码等待已结束，任务未完成。',
                 steps: step + 1,
               };
             results.push(
-              toolResult(call.id, '用户已完成验证，请先重新 snapshot 再决定，不重放旧动作。', true),
+              toolResult(
+                call.id,
+                handed === 'alternate'
+                  ? ALTERNATE
+                  : '用户已完成验证，请先重新 snapshot 再决定，不重放旧动作。',
+                true,
+              ),
             );
             staleTurn = true;
             continue;
@@ -645,18 +675,26 @@ export async function runUnifiedBrowserLoop(
         const message = typeof args.message === 'string' ? args.message : '需要你接管浏览器。';
         if (!input.requestHuman)
           return { status: 'awaiting_user', reason, message, steps: step + 1 };
-        const resumed =
-          reason === 'captcha' && input.captchaHandoff
-            ? await input.captchaHandoff(message)
-            : await input.requestHuman({ reason, message }).catch(() => false);
-        if (!resumed)
-          return reason === 'captcha' && input.captchaHandoff
-            ? { status: 'failed', reason: '验证码接管已结束，任务未完成。', steps: step + 1 }
-            : { status: 'awaiting_user', reason, message, steps: step + 1 };
+        const handed = reason === 'captcha' ? await handCaptcha(message) : undefined;
+        if (handed !== undefined) {
+          if (handed === 'ended')
+            return { status: 'failed', reason: '验证码接管已结束，任务未完成。', steps: step + 1 };
+          results.push(
+            toolResult(
+              call.id,
+              handed === 'alternate'
+                ? ALTERNATE
+                : '用户已完成接管，请重新 snapshot 后继续；用户的操作不算你的操作。',
+            ),
+          );
+          staleTurn = true;
+          continue;
+        }
+        const resumed = await input.requestHuman({ reason, message }).catch(() => false);
+        if (!resumed) return { status: 'awaiting_user', reason, message, steps: step + 1 };
         results.push(
           toolResult(call.id, '用户已完成接管，请重新 snapshot 后继续；用户的操作不算你的操作。'),
         );
-        if (reason === 'captcha') staleTurn = true;
         continue;
       }
       if (call.name === 'read_url' && input.readPage) {
@@ -793,12 +831,18 @@ export async function runUnifiedBrowserLoop(
       if (outcome.ok && input.probeBlocker) {
         const blocker = await checkBlocker();
         if (blocker) {
-          if (blocker.reason !== 'captcha' || !input.captchaHandoff)
-            return { status: 'awaiting_user', ...blocker, steps: step + 1 };
-          if (!(await input.captchaHandoff(blocker.message)))
+          const handed =
+            blocker.reason === 'captcha' ? await handCaptcha(blocker.message) : undefined;
+          if (handed === undefined) return { status: 'awaiting_user', ...blocker, steps: step + 1 };
+          if (handed === 'ended')
             return { status: 'failed', reason: '验证码等待已结束，任务未完成。', steps: step + 1 };
           results.push(
-            toolResult(call.id, '用户已完成验证；当前页面已变化，请重新 snapshot 后继续。'),
+            toolResult(
+              call.id,
+              handed === 'alternate'
+                ? ALTERNATE
+                : '用户已完成验证；当前页面已变化，请重新 snapshot 后继续。',
+            ),
           );
           staleTurn = true;
           continue;

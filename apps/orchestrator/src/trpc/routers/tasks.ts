@@ -57,6 +57,7 @@ import {
   type SearchFallbackEvent,
   runSearchWithFallback,
 } from '../../agent/search-fallback/search-engine-fallback.js';
+import { searchProviderFromEnv } from '../../agent/search-fallback/search-provider.js';
 import {
   searchResultRequirement,
   searchResultsSatisfy,
@@ -6906,6 +6907,8 @@ export const tasksRouter = router({
                       ? runUserBrowserReadonly()
                       : runSearchWithFallback(supercarArgs, {
                           originalIntent: input.intent,
+                          // CAPTCHA-REDUCE-1: BROWSER_SEARCH_API_PROVIDER (default none).
+                          searchProvider: searchProviderFromEnv(),
                           run: (args) =>
                             runSupercarWithRetry(args, { userId, taskId, logger: ctx.logger }),
                           stop: supercarAbort,

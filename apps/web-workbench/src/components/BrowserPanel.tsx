@@ -1680,7 +1680,12 @@ function CloudBrowserPanel({
                     on the live site, then come back and reply to the
                     task. */}
                 {awaitingKind === 'captcha' && activeTaskId && (
-                  <CaptchaHandoffActions taskId={activeTaskId} />
+                  <CaptchaHandoffActions
+                    taskId={activeTaskId}
+                    {...(!fullscreen && onToggleFullscreen
+                      ? { onFullscreen: onToggleFullscreen }
+                      : {})}
+                  />
                 )}
                 {awaitingKind === 'login' && !frame && persistedFinalUrl && (
                   <SafeExternalLinkButton
