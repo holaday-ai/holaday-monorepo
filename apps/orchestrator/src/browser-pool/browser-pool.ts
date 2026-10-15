@@ -58,6 +58,7 @@ import {
 } from '@holaday/shared-types';
 import type { Logger } from 'pino';
 import { defaultBrowserNetworkPolicy } from '../agent/browser-network-policy.js';
+import { browserProxyUpstreams } from '../agent/browser-tools/domain-egress.js';
 import { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import { ExecutionDrain } from '../execution/execution-drain.js';
@@ -175,7 +176,9 @@ export class BrowserPool {
     if (mode !== undefined && mode !== STRICT_POOL) throw brokerInvalid();
     this.#strict = mode === STRICT_POOL;
     this.allocator = new SlotAllocator(config);
-    this.egressProxy = new BrowserEgressProxy({ logger });
+    // PROXY-BROWSER-1: with BROWSER_DOMAIN_PROXY_* in browser mode, each user's
+    // Chrome reaches Google through that user's fixed ISP endpoint.
+    this.egressProxy = new BrowserEgressProxy({ logger, upstreams: browserProxyUpstreams() });
     if (!this.#strict) mkdirSync(config.baseDir, { recursive: true });
   }
 
@@ -1248,7 +1251,7 @@ export class BrowserPool {
         /* mkdirSync race / perm — will fail below with a clearer error */
       }
 
-      const proxyServer = await this.egressProxy.start();
+      const proxyServer = await this.egressProxy.startFor(userId);
       assertActive();
       let xvfb: SpawnedProcess | null = null;
       let x11vnc: SpawnedProcess | null = null;

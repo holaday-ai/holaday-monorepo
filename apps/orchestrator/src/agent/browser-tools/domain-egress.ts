@@ -18,18 +18,23 @@ export interface DomainEgressConfig {
    * is mapped to one of them for good, never rotated; overrides `proxyUrl`.
    */
   pool?: string[];
+  /**
+   * PROXY-BROWSER-1: `browser` (default with a pool) chains the listed domains
+   * at the browser's own loopback proxy, so Chrome does the TLS itself;
+   * `replay` keeps the Playwright route + Node re-request path.
+   */
+  mode?: DomainProxyMode;
   maxBytes?: number;
 }
+export type DomainProxyMode = 'browser' | 'replay';
 /**
  * Google search and its verification pages. reCAPTCHA must be solved from the
  * IP that triggered it, so its assets go the same way; sign-in hosts never do.
  */
 export const DEFAULT_PROXY_DOMAINS = [
-  'www.google.com',
   'google.com',
-  'consent.google.com',
-  'www.gstatic.com',
-  'www.recaptcha.net',
+  'gstatic.com',
+  'googleapis.com',
   'recaptcha.net',
 ];
 /** Account and sign-in hosts never use the shared proxy, whatever the domain list. */
@@ -47,7 +52,18 @@ export const DOMAIN_PROXY_ENV = {
   pool: 'BROWSER_DOMAIN_PROXY_POOL',
   username: 'BROWSER_DOMAIN_PROXY_USERNAME',
   password: 'BROWSER_DOMAIN_PROXY_PASSWORD',
+  mode: 'BROWSER_DOMAIN_PROXY_MODE',
 } as const;
+/**
+ * The proxy rule (what a PAC file would say): listed domains and their
+ * subdomains go through the ISP endpoint, sign-in hosts and everything else
+ * stay on the direct path.
+ */
+export function proxiedDomain(hostname: string, domains: readonly string[]): string | undefined {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  if (SIGN_IN_HOST.test(host)) return undefined;
+  return domains.find((entry) => host === entry || host.endsWith(`.${entry}`));
+}
 /** `host:port` or a full proxy URL; shared credentials fill in missing ones. */
 export function proxyPoolFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
   const user = env[DOMAIN_PROXY_ENV.username] ?? '';
@@ -69,7 +85,16 @@ export function domainEgressConfig(env: NodeJS.ProcessEnv = process.env): Domain
     domains: domains.length || !pool.length ? domains : [...DEFAULT_PROXY_DOMAINS],
     proxyUrl: env[DOMAIN_PROXY_ENV.url] ?? '',
     ...(pool.length ? { pool } : {}),
+    mode: pool.length && env[DOMAIN_PROXY_ENV.mode] !== 'replay' ? 'browser' : 'replay',
   };
+}
+/** Browser-level chaining: one fixed ISP endpoint per pool slot, or null when off. */
+export function browserProxyUpstreams(
+  env: NodeJS.ProcessEnv = process.env,
+): { endpoints: string[]; domains: string[] } | null {
+  const config = domainEgressConfig(env);
+  if (!config.enabled || config.mode !== 'browser' || !config.pool?.length) return null;
+  return { endpoints: config.pool, domains: config.domains };
 }
 /** The pool slot a user always gets (stable across tasks and restarts). */
 export function proxyPoolSlot(affinityKey: string, size: number): number {
@@ -95,7 +120,9 @@ export async function installDomainEgress(
     failed: 0,
     unit: 'http_payload_bytes',
   };
-  if (!config.enabled) return { metrics, interruption: () => null, dispose: async () => {} };
+  // Browser mode proxies at launch (BrowserEgressProxy); nothing to route here.
+  if (!config.enabled || config.mode === 'browser')
+    return { metrics, interruption: () => null, dispose: async () => {} };
   const lifetime = currentOperationLifetime();
   let closed = false;
   const pending = new Set<ClientRequest>();
@@ -166,9 +193,7 @@ export async function installDomainEgress(
     }
     if (!(await belongs(owner))) return route.fallback();
     const url = new URL(request.url());
-    const domain = SIGN_IN_HOST.test(url.hostname)
-      ? undefined
-      : domains.find((entry) => url.hostname === entry || url.hostname.endsWith(`.${entry}`));
+    const domain = proxiedDomain(url.hostname, domains);
     if (!domain) return route.fallback();
     const proxy = proxyFor(domain);
     try {
