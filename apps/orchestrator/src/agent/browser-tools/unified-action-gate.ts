@@ -75,7 +75,22 @@ const READ_ACTIONABLE = (
   const doc = el.ownerDocument;
   const tag = String(el.tagName || '').toLowerCase();
   if (tag === 'iframe' || tag === 'frame') return { iframe: true };
-  if (el === doc.body || el === doc.documentElement) return null;
+  // BROWSER-AUTOPILOT-1: a blank document surface (no control, link or form) is an
+  // ordinary click with no label — never the whole page's text, never "unknown".
+  if (el === doc.body || el === doc.documentElement)
+    return {
+      visibleText: null,
+      ariaLabel: null,
+      title: null,
+      placeholder: null,
+      name: null,
+      type: null,
+      tagName: tag || null,
+      url: doc.location ? doc.location.href : null,
+      href: null,
+      formAction: null,
+      formMethod: null,
+    };
   const selector =
     'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [onclick]';
   let actionable: Element | null = null;
@@ -389,7 +404,7 @@ async function targetAtPoint(
   y: number,
 ): Promise<ReadTarget | null> {
   const viaCdp = await cdpTargetAt(probe, x, y);
-  return viaCdp === undefined ? fallbackTargetAt(page, x, y) : viaCdp;
+  return viaCdp == null ? fallbackTargetAt(page, x, y) : viaCdp;
 }
 
 /** A ref'd element is clicked at its centre after scrolling: read what is hit there. */

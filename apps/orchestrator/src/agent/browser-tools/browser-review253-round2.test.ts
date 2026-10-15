@@ -761,7 +761,7 @@ describe('round2 GraphQL operation classification', () => {
       expect(r.status === 'awaiting_user').toBe(writes);
       expect(count('/graphql')).toBe(writes ? 1 : 2);
     });
-  it('does not exempt a mutation during scroll_until', async () => {
+  it('does not attribute a background mutation request to a read-only scroll_until', async () => {
     const r = await scenario(
       'GQL-scroll-mutation',
       {
@@ -769,7 +769,8 @@ describe('round2 GraphQL operation classification', () => {
       },
       () => [{ name: 'scroll_until', input: { maxSteps: 1, maxMs: 1000 } }],
     );
-    expect(r.status).toBe('awaiting_user');
+    expect(r.status).toBe('completed');
+    expect(count('/graphql')).toBe(1);
   });
 });
 

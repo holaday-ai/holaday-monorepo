@@ -246,12 +246,11 @@ it.each(['article_links', 'remediated', 'still_homepage'] as const)(
           expect(outcome, diagnostics).toMatchObject({ status: 'completed' });
           for (let i = 0; i < 3; i += 1) expect(outcome.summary).toContain(article(i));
         } else {
-          // Never completed + verified with homepage links: an honest failure.
-          expect(outcome, diagnostics).toMatchObject({ status: 'failed' });
-          expect(String(outcome.reason)).toContain('独立来源链接');
-          expect(outcome.failedChecks).toEqual(
-            expect.arrayContaining([expect.objectContaining({ type: 'list_item_sources' })]),
-          );
+          // BROWSER-AUTOPILOT-2: a post-hoc list-source criterion annotates the
+          // delivered answer instead of failing it (the titles are real).
+          expect(outcome, diagnostics).toMatchObject({ status: 'completed' });
+          expect(String(outcome.summary)).toContain('核验提示');
+          expect(String(outcome.summary)).toContain('独立来源链接');
         }
       }
     } finally {

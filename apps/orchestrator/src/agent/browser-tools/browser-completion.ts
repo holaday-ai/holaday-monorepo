@@ -58,8 +58,15 @@ export function detectBrowserBlocker(page: {
 
 export type BrowserTrace = Pick<
   UnifiedToolResult,
-  'ok' | 'url' | 'download' | 'tabId' | 'scroll' | 'form'
-> & { tool: string; screenshot?: boolean };
+  'ok' | 'url' | 'download' | 'tabId' | 'scroll' | 'form' | 'openedTab'
+> & {
+  tool: string;
+  screenshot?: boolean;
+  /** The tab that was active when this action opened a new tab. */
+  fromTabId?: string;
+  /** Text a successful `type` entered (a host fact for answer checks). */
+  typedText?: string;
+};
 /** A prohibition or an admission of non-completion is not a claim of execution. */
 function positiveActionText(text: string): string {
   return text
@@ -84,6 +91,21 @@ export function completionGap(
   const requested = positiveActionText(intent);
   if (requireBrowser && !successful.some((entry) => entry.url && /^https?:\/\//i.test(entry.url)))
     return '尚无真实浏览器页面证据，请先 navigate 到任务网址，再 snapshot 核验；不能直接生成答案。';
+  if (
+    /youtube/i.test(intent) &&
+    /视频|videos?/i.test(intent) &&
+    /搜索|前\s*\d|search/i.test(intent)
+  ) {
+    const results = summary.split('\n').filter((line) => /^\s*\d+[.)、]|^[|]/.test(line));
+    if (
+      results.some((line) =>
+        /[（(【\[]\s*(?:播放列表|playlist|课程合集)\s*[）)】\]]|\/playlist[?]|[?&]list=/i.test(
+          line,
+        ),
+      )
+    )
+      return '用户要求视频，结果中仍有播放列表或课程合集；请只保留实际视频条目。';
+  }
   const claims: Array<[RegExp, string]> = [
     [/(?:切回|切换|返回).{0,10}(?:标签|tab)|switched? (?:back )?to.{0,20}tab/i, 'switch_tab'],
     [/(?:新建|打开|创建).{0,8}(?:新标签|\d+个标签)|opened? .{0,12}new tabs?/i, 'new_tab'],
@@ -91,7 +113,10 @@ export function completionGap(
     [/(?:已|成功).{0,6}(?:上传)|uploaded/i, 'upload'],
   ];
   for (const [pattern, tool] of claims)
-    if (pattern.test(claimed) && !successful.some((entry) => entry.tool === tool))
+    if (
+      pattern.test(claimed) &&
+      !successful.some((entry) => entry.tool === tool || (tool === 'new_tab' && entry.openedTab))
+    )
       return `动作 ${tool} 没有成功工具回执，请实际执行或如实说明未完成。`;
   const numericCount = (value: string) =>
     (
@@ -105,11 +130,17 @@ export function completionGap(
   );
   if (
     count &&
-    successful.filter((entry) => entry.tool === 'new_tab').length < numericCount(count[1]!)
+    successful.filter((entry) => entry.tool === 'new_tab' || entry.openedTab).length <
+      numericCount(count[1]!)
   )
     return '新标签数量没有足够的 new_tab 回执。';
-  if (/(?:切回|返回).{0,10}(?:原|最初|第一个).{0,5}标签/.test(claimed)) {
-    const first = successful.find((entry) => entry.tabId)?.tabId;
+  if (/(?:切回|返回|回到).{0,10}(?:原|最初|第一个|源|来源|起始|初始).{0,5}标签/.test(claimed)) {
+    // The original tab is the one active when the first new tab was opened —
+    // never the new tab a click(newTab) receipt names.
+    const first =
+      trace.find((entry) => entry.fromTabId)?.fromTabId ??
+      successful.find((entry) => entry.tabId && !entry.openedTab && entry.tool !== 'new_tab')
+        ?.tabId;
     const lastSwitch = successful.filter((entry) => entry.tool === 'switch_tab').at(-1);
     if (!first || lastSwitch?.tabId !== first) return 'switch_tab 回执未证明切回原标签。';
   }
@@ -123,6 +154,12 @@ export function completionGap(
   );
   if (scrollCount && scrollReceipts.length < numericCount(scrollCount[1]!))
     return '滚动次数/增长没有足够的实际滚动回执。';
+  if (
+    /无限滚动|infinite[\s_-]*scroll/i.test(intent) &&
+    scrollCount &&
+    !scrollReceipts.some((r) => r.grew)
+  )
+    return '无限滚动没有加载新增内容，任务未完成；请检查滚动目标与站点加载状态。';
   const forms = successful.flatMap((t) => (t.form ? [t.form] : []));
   if (/(?:填表|填写|填入|fill.*form)/i.test(requested) && !forms.some((f) => f.filled))
     return '没有实际填表回执，不能宣告已填表。';
@@ -141,9 +178,10 @@ export function completionGap(
   ))
     if (receipts.length && !receipts.some((r) => r.filename === name[0]))
       return '文件名与实际下载回执不符。';
-  for (const match of claimed.matchAll(/(\d[\d,]*)\s*(?:字节|bytes?|B\b)/gi))
-    if (!receipts.some((receipt) => receipt.sizeBytes === Number(match[1]?.replaceAll(',', ''))))
-      return '声称的字节数与真实文件回执不符。';
+  if (receipts.length)
+    for (const match of claimed.matchAll(/(\d[\d,]*)\s*(?:字节|bytes?|B\b)/gi))
+      if (!receipts.some((receipt) => receipt.sizeBytes === Number(match[1]?.replaceAll(',', ''))))
+        return '声称的字节数与真实文件回执不符。';
   return null;
 }
 

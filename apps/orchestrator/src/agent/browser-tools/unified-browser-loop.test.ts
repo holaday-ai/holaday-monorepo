@@ -162,7 +162,7 @@ describe('unified browser loop', () => {
       (request) => {
         const results = JSON.stringify(request.messages.at(-1));
         expect(results).toContain('ref 无效');
-        expect(results).toContain('evidence');
+        expect(results).toContain('没有成功读取的页面内容');
         return [call('finish', { status: 'failed', summary: '无法确认结果' }, 'f1')];
       },
     ]);
@@ -259,6 +259,7 @@ describe('pre-delivery review (FIX-BATCH-A)', () => {
       summary.includes('/p/') ? null : '第 1 条缺少独立来源链接',
     );
     const adapter = scriptedAdapter([
+      () => [call('snapshot', {}, 's0')],
       () => [finish('1. 开源的火 https://36kr.com/', 'f1')],
       (request) => {
         const text = JSON.stringify(request.messages.at(-1));
@@ -270,7 +271,7 @@ describe('pre-delivery review (FIX-BATCH-A)', () => {
     const outcome = await runUnifiedBrowserLoop({
       intent: '36kr 前三条新闻',
       adapter,
-      execute: async () => ({ ok: true, text: '' }),
+      execute: async () => ({ ok: true, text: '开源的火 https://36kr.com/ https://36kr.com/p/1' }),
       reviewFinish,
     });
     expect(outcome).toMatchObject({
@@ -284,42 +285,46 @@ describe('pre-delivery review (FIX-BATCH-A)', () => {
   it('remediates only once: a second gap-filled answer goes to the verifier as-is', async () => {
     const reviewFinish = vi.fn(() => '第 1 条缺少独立来源链接');
     const adapter = scriptedAdapter([
+      () => [call('snapshot', {}, 's0')],
       () => [finish('1. 开源的火 https://36kr.com/', 'f1')],
       () => [finish('1. 开源的火 https://36kr.com/（未获取到独立链接）', 'f2')],
     ]);
     const outcome = await runUnifiedBrowserLoop({
       intent: '36kr 前三条新闻',
       adapter,
-      execute: async () => ({ ok: true, text: '' }),
+      execute: async () => ({ ok: true, text: '开源的火 https://36kr.com/ https://36kr.com/p/1' }),
       reviewFinish,
     });
     expect(outcome).toMatchObject({ status: 'completed' });
     expect(reviewFinish).toHaveBeenCalledTimes(1);
-    expect(adapter.requests).toHaveLength(2);
+    expect(adapter.requests).toHaveLength(3);
   });
 });
 
 describe('remediation never ends worse than the held answer (FIX-BATCH-A)', () => {
   const held = { summary: '1. 耳机A ¥99（未获取到商品链接）', evidence: '耳机A' };
+  // A real read precedes the answer (no page read, no completion).
+  const read = () => [call('snapshot', {}, 's0')];
   const firstFinish = () => [
     call('finish', { status: 'completed', summary: held.summary, evidence: held.evidence }, 'f1'),
   ];
 
   it('returns the held answer when the remediation runs out of steps', async () => {
-    const adapter = scriptedAdapter([firstFinish, () => [call('snapshot', {}, 's1')]]);
+    const adapter = scriptedAdapter([read, firstFinish, () => [call('snapshot', {}, 's1')]]);
     const outcome = await runUnifiedBrowserLoop({
       intent: '京东前三个商品价格和链接',
       adapter,
-      execute: async () => ({ ok: true, text: '' }),
+      execute: async () => ({ ok: true, text: '耳机A ¥99' }),
       reviewFinish: () => '第 1 行缺少链接',
-      maxSteps: 2,
+      maxSteps: 3,
     });
-    expect(outcome).toEqual({ status: 'completed', ...held, steps: 2 });
+    expect(outcome).toEqual({ status: 'completed', ...held, steps: 3 });
   });
 
   it('hands the held answer to the caller when aborted during remediation', async () => {
     const controller = new AbortController();
     const adapter = scriptedAdapter([
+      read,
       firstFinish,
       () => {
         controller.abort();
@@ -329,22 +334,23 @@ describe('remediation never ends worse than the held answer (FIX-BATCH-A)', () =
     const outcome = await runUnifiedBrowserLoop({
       intent: '京东前三个商品价格和链接',
       adapter,
-      execute: async () => ({ ok: true, text: '' }),
+      execute: async () => ({ ok: true, text: '耳机A ¥99' }),
       reviewFinish: () => '第 1 行缺少链接',
       signal: controller.signal,
     });
-    expect(outcome).toEqual({ status: 'cancelled', steps: 2, heldAnswer: held });
+    expect(outcome).toEqual({ status: 'cancelled', steps: 3, heldAnswer: held });
   });
 
   it("keeps the model's own failure after remediation", async () => {
     const adapter = scriptedAdapter([
+      read,
       firstFinish,
       () => [call('finish', { status: 'failed', summary: '商品卡片没有公开链接' }, 'f2')],
     ]);
     const outcome = await runUnifiedBrowserLoop({
       intent: '京东前三个商品价格和链接',
       adapter,
-      execute: async () => ({ ok: true, text: '' }),
+      execute: async () => ({ ok: true, text: '耳机A ¥99' }),
       reviewFinish: () => '第 1 行缺少链接',
     });
     expect(outcome).toMatchObject({ status: 'failed', reason: '商品卡片没有公开链接' });

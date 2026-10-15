@@ -358,6 +358,8 @@ describe('verifyDeterministic — constraint violations (acceptance #5)', () => 
       intent: '搜索',
       executionMode: 'browser',
       targetDomain: 'example.com',
+      // User-stated (no longer a default since BROWSER-AUTOPILOT-1).
+      constraints: ['no_form_submit'],
     });
     const ledger = ledgerWith(
       'tsk_cv',

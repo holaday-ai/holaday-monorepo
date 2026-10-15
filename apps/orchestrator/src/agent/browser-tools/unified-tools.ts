@@ -33,8 +33,8 @@ export type UnifiedBrowserToolName = (typeof UNIFIED_BROWSER_TOOL_NAMES)[number]
 
 const ref = {
   type: 'string',
-  pattern: '^e[0-9]+$',
-  description: '最新 snapshot 中元素的 ref，例如 e12。',
+  pattern: '^(?:f[0-9]+)?e[0-9]+$',
+  description: '最新 snapshot 中元素的 ref，例如 e12；iframe 中为 f1e2，须同时给 frameId。',
 } as const;
 const expectation = {
   type: 'string',
@@ -62,11 +62,11 @@ export const UNIFIED_BROWSER_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
   },
   {
     name: 'click',
-    description: '点击最新 snapshot 中的元素。',
+    description: '点击最新 snapshot 中的元素；打开已观察到的链接到新标签时用 newTab=true。',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
-      properties: { ref, expect: expectation },
+      properties: { ref, expect: expectation, newTab: { type: 'boolean' } },
       required: ['ref'],
     },
   },
@@ -199,7 +199,7 @@ export type BrowserObservationContext = {
 
 export type ObservationAction =
   | { tool: 'read_page' }
-  | { tool: 'get_page_text'; cursor?: string; maxChars?: number }
+  | { tool: 'get_page_text'; cursor?: string; maxChars?: number; section?: number }
   | { tool: 'links' | 'tables'; start?: number; limit?: number }
   | {
       tool: 'scroll_until';
@@ -217,7 +217,7 @@ export type UnifiedBrowserAction = (
   | { tool: 'new_tab' }
   | { tool: 'close_tab'; targetTabId: string }
   | { tool: 'snapshot' }
-  | { tool: 'click'; ref: string }
+  | { tool: 'click'; ref: string; newTab?: boolean }
   | { tool: 'type'; ref: string; text: string; submit?: boolean }
   | { tool: 'select'; ref: string; value: string }
   | { tool: 'scroll'; direction?: 'down' | 'up'; ref?: string; amount?: number }
@@ -239,7 +239,7 @@ export class UnifiedToolInputError extends Error {
   }
 }
 
-const REF_RE = /^e[0-9]+$/;
+const REF_RE = /^(?:f[0-9]+)?e[0-9]+$/;
 
 /** Validates a model tool call into a typed action; throws a model-readable error. */
 export function parseUnifiedBrowserAction(name: string, input: unknown): UnifiedBrowserAction {
@@ -252,6 +252,8 @@ export function parseUnifiedBrowserAction(name: string, input: unknown): Unified
       action[key] = args[key];
     }
   }
+  if ('ref' in action && /^f\d+e/.test(action.ref ?? '') && !action.frameId)
+    throw new UnifiedToolInputError('iframe ref 必须携带对应的 frameId 和 observationRevision');
   return action;
 }
 function parseAction(name: string, input: unknown): UnifiedBrowserAction {
@@ -265,7 +267,9 @@ function parseAction(name: string, input: unknown): UnifiedBrowserAction {
   const refArg = (required = true): string | undefined => {
     const value = str('ref', required);
     if (value !== undefined && !REF_RE.test(value))
-      throw new UnifiedToolInputError(`${name} 的 ref 无效：请先 snapshot，再使用形如 e12 的 ref`);
+      throw new UnifiedToolInputError(
+        `${name} 的 ref 无效：请先 snapshot，再使用形如 e12 或 f1e2 的 ref`,
+      );
     return value;
   };
   const bounded = (key: string, max: number) => {
@@ -283,7 +287,12 @@ function parseAction(name: string, input: unknown): UnifiedBrowserAction {
     case 'close_tab':
       return { tool: name, targetTabId: str('targetTabId')! };
     case 'get_page_text':
-      return { tool: name, cursor: str('cursor', false), maxChars: bounded('maxChars', 16000) };
+      return {
+        tool: name,
+        cursor: str('cursor', false),
+        maxChars: bounded('maxChars', 16000),
+        section: bounded('section', 120),
+      };
     case 'links':
     case 'tables': {
       if (
@@ -308,6 +317,9 @@ function parseAction(name: string, input: unknown): UnifiedBrowserAction {
     case 'back':
       return { tool: name };
     case 'click':
+      if (args.newTab !== undefined && typeof args.newTab !== 'boolean')
+        throw new UnifiedToolInputError('Invalid newTab');
+      return { tool: name, ref: refArg() as string, ...(args.newTab ? { newTab: true } : {}) };
     case 'download':
       return { tool: name, ref: refArg() as string };
     case 'type':
@@ -425,6 +437,12 @@ export function cloudObservationTools(): ReadonlyArray<NeutralToolDefinition> {
     get_page_text: {
       cursor: { type: 'string' },
       maxChars: { type: 'integer', minimum: 1, maximum: 16000 },
+      section: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 120,
+        description: '可选：read_page.headings 中 H2 的 section 编号，按真实章节边界读取。',
+      },
     },
     links: {
       start: { type: 'integer', minimum: 0 },
@@ -457,7 +475,8 @@ export function cloudObservationTools(): ReadonlyArray<NeutralToolDefinition> {
         description: {
           read_page:
             '读取当前 frame 的可访问性树、refs、版本和 frame 列表。页面变化、导航、切换标签后 refs 失效。',
-          get_page_text: '分段读取脱敏正文；cursor 绑定页版本，end=true 才是末尾。',
+          get_page_text:
+            '分段读取脱敏正文或指定 H2 section；cursor 绑定文档与章节，end=true 才是末尾。',
           links: '分页读取真实资源链接；保留查询身份，移除追踪参数。',
           tables: '读取表格列名、行范围及分页来源。',
           scroll_until: '有界滚动读取；返回停滞或数量/时间/token 上限和截断原因。',

@@ -50,18 +50,28 @@ function collectSurface() {
         (el.type === 'password' ||
           /one-time-code|current-password|new-password/.test(el.autocomplete)),
     );
-  const readable = Array.from(
-    document.querySelectorAll(
-      'article,main,[role="main"],ytd-search,ytd-item-section-renderer,ytd-watch-metadata',
-    ),
-  ).some(
-    (el) =>
-      visible(el) &&
-      !hasAuthInput(el) &&
-      text(el, true).trim().length >= 100 &&
-      (el.matches('article,ytd-search,ytd-item-section-renderer,ytd-watch-metadata') ||
-        el.querySelectorAll('a[href],p').length >= 2),
-  );
+  // A content page without semantic landmarks (table layouts such as Hacker
+  // News) is readable too: plenty of visible text and links, no sign-in field.
+  // Challenge and login walls are short and nearly link-free.
+  const plainReadable =
+    !!document.body &&
+    !hasAuthInput(document.body) &&
+    text(document.body, true).trim().length >= 500 &&
+    Array.from(document.querySelectorAll('a[href]')).filter(visible).length >= 20;
+  const readable =
+    plainReadable ||
+    Array.from(
+      document.querySelectorAll(
+        'article,main,[role="main"],ytd-search,ytd-item-section-renderer,ytd-watch-metadata',
+      ),
+    ).some(
+      (el) =>
+        visible(el) &&
+        !hasAuthInput(el) &&
+        text(el, true).trim().length >= 100 &&
+        (el.matches('article,ytd-search,ytd-item-section-renderer,ytd-watch-metadata') ||
+          el.querySelectorAll('a[href],p').length >= 2),
+    );
   const regions = Array.from(
     document.querySelectorAll(`[role="dialog"],[aria-modal="true"],dialog[open],${localRegions}`),
   )

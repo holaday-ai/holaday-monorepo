@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { Page } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { probeBrowserBlocker } from './browser-blocker-probe.js';
+import { scrollWithEvidence } from './browser-scroll.js';
 import { browserToolError } from './browser-tool-error.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
-import { CloudObservation } from './cloud-observation.js';
+import { CloudObservation, pageRoot } from './cloud-observation.js';
 import { redactPageText } from './page-redaction.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
@@ -21,6 +22,7 @@ export interface UnifiedToolResult {
     networkCategories: string[];
     unexpected: boolean;
     triggers?: Array<{ branch: string; method: string; url: string; action: string }>;
+    backgroundRequests?: Array<{ branch: string; method: string; url: string; action: string }>;
     observationAvailable?: boolean;
   };
   form?: { ref: string; filled: boolean; submitted: boolean };
@@ -29,6 +31,7 @@ export interface UnifiedToolResult {
   /** Present on `download`: where the file was saved by the host. */
   download?: BrowserDownloadReceipt;
   tabId?: string;
+  openedTab?: boolean;
   scroll?: {
     beforeHeight: number;
     afterHeight: number;
@@ -246,7 +249,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     // Redact before truncating: a secret straddling the cut must not survive.
     const redacted = await redactPageText(
       page as never,
-      await page.locator('body').ariaSnapshot({ mode: 'ai', timeout }),
+      await (await pageRoot(page.mainFrame())).ariaSnapshot({ mode: 'ai', timeout }),
     );
     // Links resolve against document.baseURI (honours <base href>), not page.url().
     const baseUrl = await page.evaluate(() => document.baseURI).catch(() => page.url());
@@ -392,6 +395,32 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           };
         }
         case 'click':
+          if (action.newTab) {
+            const target = byRef(action.ref);
+            const href = await target.getAttribute('href');
+            if (!href || !/^https?:/i.test(new URL(href, activeFrame.url()).href))
+              return fail('newTab 只允许已观察到的普通网页链接');
+            if (page.context().pages().length >= 20) return fail('任务标签数达到上限');
+            const [opened] = await Promise.all([
+              page.context().waitForEvent('page', { timeout }),
+              target.click({ button: 'middle', timeout }),
+            ]);
+            await ensureExecutionViewport(opened);
+            page = opened;
+            activeFrame = opened.mainFrame();
+            const tabId = observation?.activate(opened) ?? registerTab(opened);
+            try {
+              await opened.waitForLoadState('domcontentloaded', { timeout });
+            } catch (error) {
+              return { ...browserToolError(error), tabId, openedTab: true, url: opened.url() };
+            }
+            return {
+              ...done(`已点击链接并打开新标签 ${tabId}`),
+              tabId,
+              openedTab: true,
+              url: opened.url(),
+            };
+          }
           if (observation) {
             await byRef(action.ref).click({ timeout });
             return done(`已点击 ${action.ref}`);
@@ -421,58 +450,13 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           };
         }
         case 'scroll': {
-          const measure = () =>
-            page.evaluate(() => {
-              const loading =
-                '[role="progressbar"], [aria-busy="true"], .jscroll-loading, .loading, .loader, .spinner';
-              const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-              let chars = 0;
-              while (walker.nextNode()) {
-                const parent = walker.currentNode.parentElement;
-                if (
-                  !parent ||
-                  parent.closest(`${loading},script,style`) ||
-                  !parent.getClientRects().length
-                )
-                  continue;
-                chars += (walker.currentNode.textContent ?? '')
-                  .replace(/(?:loading\s*\.{0,3}|加载中\s*[…。.]*)/gi, '')
-                  .trim().length;
-              }
-              const media = Array.from(document.images).filter(
-                (img) => img.complete && img.naturalWidth > 0 && !img.closest(loading),
-              ).length;
-              return { height: document.documentElement.scrollHeight, chars, media };
-            });
-          const before = await measure();
-          if (action.ref) await byRef(action.ref).scrollIntoViewIfNeeded({ timeout });
-          else
-            await page.mouse.wheel(
-              0,
-              (action.direction === 'up' ? -1 : 1) * 600 * (action.amount ?? 1),
-            );
-          const deadline = Date.now() + Math.min(timeout, 3500);
-          let after = await measure();
-          let stableSince = Date.now();
-          if (action.direction !== 'up')
-            while (Date.now() < deadline) {
-              const next = await measure();
-              if (next.chars !== after.chars || next.media !== after.media)
-                stableSince = Date.now();
-              after = next;
-              if (
-                (after.chars > before.chars || after.media > before.media) &&
-                Date.now() - stableSince >= 250
-              )
-                break;
-              await new Promise((resolve) => setTimeout(resolve, 75));
-            }
-          const scroll = {
-            beforeHeight: before.height,
-            afterHeight: after.height,
-            addedChars: Math.max(0, after.chars - before.chars),
-            grew: after.chars > before.chars || after.media > before.media,
-          };
+          const scroll = await scrollWithEvidence(
+            activeFrame,
+            action.direction,
+            action.amount,
+            Math.min(timeout, 3500),
+            action.ref ? () => byRef(action.ref!).scrollIntoViewIfNeeded({ timeout }) : undefined,
+          );
           return {
             ...done(
               JSON.stringify({
@@ -493,7 +477,10 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           return { ...done(`已打开 ${page.url()}`), url: page.url() };
         case 'extract': {
           const content = (
-            await redactPageText(page as never, await page.locator('body').innerText({ timeout }))
+            await redactPageText(
+              page as never,
+              await (await pageRoot(page.mainFrame())).innerText({ timeout }),
+            )
           ).slice(0, maxExtract);
           // innerText drops hrefs; list answers need each item's own link.
           const anchors = await pageLinks(page, timeout);
@@ -525,7 +512,12 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
         }
         case 'wait_for': {
           const wait = action.timeoutMs ?? timeout;
-          if (action.text) await page.getByText(action.text).first().waitFor({ timeout: wait });
+          if (action.text)
+            await page
+              .getByText(action.text)
+              .filter({ visible: true })
+              .first()
+              .waitFor({ timeout: wait });
           if (action.ref) await byRef(action.ref).waitFor({ timeout: wait });
           if (action.networkIdle) await page.waitForLoadState('networkidle', { timeout: wait });
           return done('等待条件已满足');
