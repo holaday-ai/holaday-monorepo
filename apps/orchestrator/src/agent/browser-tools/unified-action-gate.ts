@@ -75,9 +75,17 @@ const READ_ACTIONABLE = (
   const doc = el.ownerDocument;
   const tag = String(el.tagName || '').toLowerCase();
   if (tag === 'iframe' || tag === 'frame') return { iframe: true };
+  const selector =
+    'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [onclick]';
   // BROWSER-AUTOPILOT-1: a blank document surface (no control, link or form) is an
   // ordinary click with no label — never the whole page's text, never "unknown".
-  if (el === doc.body || el === doc.documentElement)
+  // A document root can itself be a labelled control; retain its real signals.
+  if (
+    (el === doc.body || el === doc.documentElement) &&
+    !el.matches(selector) &&
+    !el.hasAttribute('aria-label') &&
+    typeof (el as HTMLElement).onclick !== 'function'
+  )
     return {
       visibleText: null,
       ariaLabel: null,
@@ -91,8 +99,6 @@ const READ_ACTIONABLE = (
       formAction: null,
       formMethod: null,
     };
-  const selector =
-    'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [onclick]';
   let actionable: Element | null = null;
   let cur: Element | null = el;
   for (let hops = 0; cur && hops < 200; hops += 1) {

@@ -49,6 +49,22 @@ const IFRAME = (label: string) =>
 
 describe('frames and real click targets', () => {
   it.each(['确认支付', '删除项目'])(
+    'preserves the actionable document surface label "%s" and asks before clicking',
+    async (label) => {
+      const page = await browser.newPage();
+      await page.setContent(
+        `<body role="button" aria-label="${label}" onclick="window.hits=1" style="margin:0;height:100vh">${label}</body>`,
+      );
+      const { gate, park } = gateFor(page);
+      const decision = await gate({ tool: 'click_at', x: 400, y: 300 }, 'before');
+      expect(park).toHaveBeenCalledWith(expect.stringContaining(label), 'browser_action');
+      expect(decision).toMatchObject({ kind: 'stop' });
+      expect(await page.evaluate(() => (window as { hits?: number }).hits ?? 0)).toBe(0);
+      await page.close();
+    },
+  );
+
+  it.each(['确认支付', '删除项目'])(
     'parks a coordinate click on an iframe "%s" button and does not click',
     async (label) => {
       const page = await browser.newPage();
