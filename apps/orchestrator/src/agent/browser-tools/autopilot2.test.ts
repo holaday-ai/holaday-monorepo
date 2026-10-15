@@ -211,6 +211,31 @@ describe('3. short numeric quotes are not page-text claims (core-06-fa)', () => 
       assessCompletionFacts({ summary: '页面显示 "You clicked: Ok"', pages }).contradictions,
     ).toHaveLength(1);
   });
+  it('does not hold a retracted quote against the answer (core-10 f2-a)', () => {
+    const pages = [{ text: 'paragraph "Your content goes here."' }];
+    expect(
+      assessCompletionFacts({
+        summary:
+          'iframe 内可见文本 "Your content goes here."。此前误引的 "Welcome to the Internet" 并非该 iframe 页面实际内容，已更正。',
+        pages,
+      }).contradictions,
+    ).toEqual([]);
+  });
+  it('compares an ellipsis excerpt by its text (core-11 f2-a)', () => {
+    const pages = [
+      { text: 'paragraph "Impedit iure omnis quas est expedita enim architecto voluptate"' },
+    ];
+    expect(
+      assessCompletionFacts({
+        summary: '第1段以“Impedit iure omnis quas est expedita...”开头',
+        pages,
+      }).contradictions,
+    ).toEqual([]);
+    expect(
+      assessCompletionFacts({ summary: '第2段以“Qui natus aliquid numquam vel…”开头', pages })
+        .contradictions,
+    ).toHaveLength(1);
+  });
 });
 
 describe('4. 未核实 noise', () => {
