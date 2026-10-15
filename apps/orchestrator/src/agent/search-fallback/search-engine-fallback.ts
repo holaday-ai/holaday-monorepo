@@ -80,7 +80,8 @@ export function planSearchFallback(intent: string, wall: SearchWall): SearchFall
   )
     return null;
   // The query comes from the user's own task, never from the wall: Google's
-  // /sorry page carries an opaque `q` token (Deploy-22 D16).
+  // /sorry page carries an opaque `q` token (Deploy-22 D16 / core-02 searched
+  // for it on Bing).
   let query: string | null = null;
   for (const raw of intent.match(TEXT_URL_RE) ?? []) {
     const candidate = parsed(trimTextUrl(raw));
@@ -131,7 +132,11 @@ function withAlternate(
     url,
     notice,
     requiresWeather,
-    intent: `${original}\n\n${header}原查询为「${query}」。本次获准使用 ${to} 交付同类公开搜索结果；从 ${url} 开始，保持原有数量与字段要求。只读，不登录、不提交业务表单；不得把替代来源冒充 ${from}，不能编造未读取的内容。${requiresWeather ? '若备用引擎没有天气卡片，可在同一引擎使用等价关键词并打开其真实天气来源，交付实际读到的天气概况、温度或天气网站链接；读不到温度时明确说明，仍可交付其他天气信息，不得编造温度。完全没有天气信息才算未完成。' : ''}`,
+    // INTEGRATE-281: #282's plan shape (search API pages too) with #281's
+    // read-only wording: "不提交…" made the real model refuse to submit the
+    // alternate's own search box (core-02); business writes stay barred by the
+    // task's own wording and the write guard.
+    intent: `${original}\n\n${header}原查询为「${query}」。本次获准使用 ${to} 交付同类公开搜索结果；从 ${url} 开始，保持原有数量与字段要求。只读：不登录、不下单、不发送（在 ${to} 搜索框里输入并搜索属于查询，可以做）；不得把替代来源冒充 ${from}，不能编造未读取的内容。${requiresWeather ? '若备用引擎没有天气卡片，可在同一引擎使用等价关键词并打开其真实天气来源，交付实际读到的天气概况、温度或天气网站链接；读不到温度时明确说明，仍可交付其他天气信息，不得编造温度。完全没有天气信息才算未完成。' : ''}`,
   };
 }
 
