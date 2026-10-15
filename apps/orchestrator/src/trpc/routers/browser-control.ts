@@ -11,6 +11,7 @@ import {
   supercarReply,
 } from '../../agent/supercar/qwen-only-agent-loop.js';
 import { TaskRepository } from '../../agent/task-repository.js';
+import { browserProfileStore } from '../../browser-profiles/profile-store.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
 import type { Context } from '../context.js';
@@ -196,18 +197,39 @@ export const browserNavProcedure = protectedProcedure
     }
   });
 
+/**
+ * CAPTCHA-REDUCE-1: the user's persistent cloud browser profile (verification
+ * clearance). `configured` is false when the store is off; clearing is always
+ * safe and only touches the caller's own profile.
+ */
+export const browserProfileStatusProcedure = protectedProcedure.query(() => ({
+  configured: browserProfileStore() !== null,
+}));
+export const browserProfileClearProcedure = protectedProcedure.mutation(async ({ ctx }) => {
+  const store = browserProfileStore();
+  if (store) await store.clear(ctx.userId);
+  return { ok: true as const, configured: store !== null };
+});
+
 export const browserCaptchaProcedure = protectedProcedure
-  .input(taskInput.extend({ action: z.enum(['continue', 'cancel']) }))
+  .input(taskInput.extend({ action: z.enum(['continue', 'cancel', 'status', 'alternate']) }))
   .mutation(async ({ ctx, input }) => {
     const owned = await ownedBrowser(ctx, input.taskId);
     const session =
       owned.instance && browserControlSessions.get(owned.instance, ctx.userId, input.taskId);
     if (!session || !captchaHandoffs.active(input.taskId, ctx.userId, session.control))
       return { ok: false, state: 'inactive' as const };
+    const status = () => captchaHandoffs.status(input.taskId, ctx.userId, session.control);
     if (input.action === 'cancel') {
       captchaHandoffs.cancel(input.taskId, ctx.userId, session.control);
       return { ok: true, state: 'cancelled' as const };
     }
+    if (input.action === 'status') return { ok: true, state: 'waiting' as const, ...status() };
+    if (input.action === 'alternate') {
+      // CAPTCHA-REDUCE-1: only offered after repeated failed rounds.
+      const ok = captchaHandoffs.alternate(input.taskId, ctx.userId, session.control);
+      return { ok, state: ok ? ('alternate' as const) : ('waiting' as const), ...status() };
+    }
     const ok = await captchaHandoffs.proceed(input.taskId, ctx.userId, session.control);
-    return { ok, state: ok ? ('resuming' as const) : ('waiting' as const) };
+    return { ok, state: ok ? ('resuming' as const) : ('waiting' as const), ...status() };
   });

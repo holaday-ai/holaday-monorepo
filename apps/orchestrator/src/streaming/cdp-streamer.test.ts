@@ -40,6 +40,43 @@ describe('CdpStreamer', () => {
     await streamer.stop();
   });
 
+  it('logs only the origin of the page it streams, never its path or query', async () => {
+    const session = Object.assign(new EventEmitter(), {
+      send: vi.fn().mockResolvedValue(undefined),
+      detach: vi.fn().mockResolvedValue(undefined),
+    }) as unknown as CDPSession;
+    const page = {
+      context: () => ({ newCDPSession: vi.fn().mockResolvedValue(session) }),
+      url: () => 'https://shop.example.com/account/orders?token=secret-token#x',
+    } as unknown as Page;
+    const logger = { info: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger;
+    const streamer = new CdpStreamer({
+      getPage: async () => page,
+      ws: { send: vi.fn() } as unknown as WebSocket,
+      logger,
+    });
+    await streamer.start();
+    (session as unknown as EventEmitter).emit('Page.frameNavigated', {
+      frame: { id: 'main', url: 'https://shop.example.com/account/orders?token=secret-token#x' },
+    });
+    await vi.waitFor(() =>
+      expect(
+        vi
+          .mocked(logger.info)
+          .mock.calls.some((call) => /frame-navigated/.test(JSON.stringify(call))),
+      ).toBe(true),
+    );
+    await streamer.stop();
+    const logged = JSON.stringify([
+      vi.mocked(logger.info).mock.calls,
+      vi.mocked(logger.warn).mock.calls,
+      vi.mocked(logger.debug).mock.calls,
+    ]);
+    expect(logged).toContain('https://shop.example.com/');
+    expect(logged).not.toContain('secret-token');
+    expect(logged).not.toContain('/account/orders');
+  });
+
   it('does not hard-restart a healthy static page just because no pixels changed', async () => {
     vi.useFakeTimers();
     try {

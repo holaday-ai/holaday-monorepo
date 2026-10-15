@@ -780,11 +780,25 @@ function extractUrlFromCell(c: string): string | null {
  * Soft (fixable) failure: lets the verifier downgrade the verdict
  * to partial_success rather than blocking.
  */
+/**
+ * `.invalid` never resolves (RFC 2606): it names pages answered inside the
+ * task's own browser, such as a search API's results page, never a source.
+ */
+function isSourceUrl(url: string): boolean {
+  try {
+    return !/(?:^|\.)invalid\.?$/i.test(new URL(trimTextUrl(url)).hostname);
+  } catch {
+    return true;
+  }
+}
+
 function checkUrlCount(criterion: SuccessCriterion, answerText: string): CheckResult {
   const min = Number(criterion.data?.min ?? 1);
   const items = extractStructuredItems(answerText);
-  const itemUrls = items.map((it) => it.url).filter((u): u is string => Boolean(u));
-  const globalUrlCount = (answerText.match(URL_RE) ?? []).length;
+  const itemUrls = items
+    .map((it) => it.url)
+    .filter((u): u is string => Boolean(u) && isSourceUrl(u!));
+  const globalUrlCount = (answerText.match(URL_RE) ?? []).filter(isSourceUrl).length;
   // Fall back to global URL count when item-level URLs are below the
   // required floor. Browser execution answers often mix a small facts
   // table with a prose "page link" (Wikipedia / Skyscanner), which is

@@ -57,6 +57,7 @@ import {
   type SearchFallbackEvent,
   runSearchWithFallback,
 } from '../../agent/search-fallback/search-engine-fallback.js';
+import { searchProviderFromEnv } from '../../agent/search-fallback/search-provider.js';
 import {
   searchResultRequirement,
   searchResultsSatisfy,
@@ -326,6 +327,8 @@ import {
   browserControlProcedure,
   browserControlStateProcedure,
   browserNavProcedure,
+  browserProfileClearProcedure,
+  browserProfileStatusProcedure,
 } from './browser-control.js';
 import {
   assertLocalChromeSelection,
@@ -5937,6 +5940,11 @@ export const tasksRouter = router({
                   ...(unifiedReadPage ? { unifiedReadPage } : {}),
                   messagesAdapter: browserMessagesAdapter,
                   taskId,
+                  // CAPTCHA-REDUCE-1: anonymous cloud sessions keep this user's
+                  // verification clearance (profile store off unless configured).
+                  ...(taskSessionPolicy === 'anonymous' && !input.localChrome
+                    ? { persistentProfileUser: ctx.userId }
+                    : {}),
                   ...(primaryExecutor && ctx.browserPool?.peek(taskId)?.executor === primaryExecutor
                     ? {
                         browserControlFactory: () => {
@@ -6906,6 +6914,9 @@ export const tasksRouter = router({
                       ? runUserBrowserReadonly()
                       : runSearchWithFallback(supercarArgs, {
                           originalIntent: input.intent,
+                          // CAPTCHA-REDUCE-1: BROWSER_SEARCH_API_PROVIDER (default none).
+                          searchProvider: searchProviderFromEnv(),
+                          searchApiFirst: process.env.BROWSER_SEARCH_API_FIRST !== 'false',
                           run: (args) =>
                             runSupercarWithRetry(args, { userId, taskId, logger: ctx.logger }),
                           stop: supercarAbort,
@@ -11473,6 +11484,8 @@ export const tasksRouter = router({
    * than a TRPC error banner for something as cheap as "no page yet".
    */
   browserCaptcha: browserCaptchaProcedure,
+  browserProfileStatus: browserProfileStatusProcedure,
+  browserProfileClear: browserProfileClearProcedure,
   browserControlState: browserControlStateProcedure,
   localChromeTabs: localChromeTabsProcedure,
   browserControl: browserControlProcedure,

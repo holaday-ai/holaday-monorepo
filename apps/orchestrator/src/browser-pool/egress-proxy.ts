@@ -1,6 +1,7 @@
 import {
   type ClientRequest,
   type IncomingMessage,
+  type Server,
   createServer,
   request as forwardHttpRequest,
 } from 'node:http';
@@ -9,6 +10,7 @@ import type { AddressInfo } from 'node:net';
 import { type Duplex, type Readable, Writable } from 'node:stream';
 import type { BrowserNetworkPolicy } from '../agent/browser-network-policy.js';
 import { defaultBrowserNetworkPolicy } from '../agent/browser-network-policy.js';
+import { proxiedDomain, proxyPoolSlot } from '../agent/browser-tools/domain-egress.js';
 import type { OperationLifetime } from '../execution/owned-operation.js';
 import { browserUrlForLog } from './log-url.js';
 
@@ -19,6 +21,17 @@ interface BrowserEgressProxyOptions {
   logger?: {
     warn(context: Record<string, unknown>, message: string): void;
   };
+  /**
+   * PROXY-BROWSER-1: fixed ISP endpoints (proxy URLs, credentials included) and
+   * the domains chained through them. Chrome keeps doing the TLS: the tunnel to
+   * the endpoint only carries its bytes. Absent means every target is direct.
+   */
+  upstreams?: { endpoints: readonly string[]; domains: readonly string[] } | null;
+}
+
+interface IspUpstream {
+  url: URL;
+  domains: readonly string[];
 }
 
 /**
@@ -31,15 +44,10 @@ interface BrowserEgressProxyOptions {
 export class BrowserEgressProxy {
   private readonly policy: Pick<BrowserNetworkPolicy, 'check'>;
   private readonly logger: BrowserEgressProxyOptions['logger'];
-  private readonly server = createServer((req, res) => {
-    void this.trackPending(
-      this.handleHttp(req, res).catch((error) => {
-        this.logger?.warn({ error: errorMessage(error) }, 'browser egress proxy HTTP failure');
-        if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
-        res.end('browser proxy request failed');
-      }),
-    );
-  });
+  private readonly server = this.createProxyServer();
+  private readonly upstreams: BrowserEgressProxyOptions['upstreams'];
+  /** One loopback listener per ISP endpoint, so a browser's port fixes its exit IP. */
+  private readonly routed = new Map<number, { server: Server; url: Promise<string> }>();
   private readonly clientSockets = new Set<Socket>();
   private readonly upstreamSockets = new Set<Socket>();
   private readonly upstreamRequests = new Set<ClientRequest>();
@@ -54,6 +62,7 @@ export class BrowserEgressProxy {
 
   constructor(options: BrowserEgressProxyOptions = {}) {
     this.policy = options.policy ?? defaultBrowserNetworkPolicy;
+    this.upstreams = options.upstreams?.endpoints.length ? options.upstreams : null;
     this.logger =
       options.lifetime && options.logger
         ? {
@@ -73,9 +82,21 @@ export class BrowserEgressProxy {
         throw new Error('POOL_EGRESS_OWNER_INVALID');
       }
     }
-    this.server.on('connect', (req, client, head) => {
+  }
+
+  private createProxyServer(upstream?: IspUpstream): Server {
+    const server = createServer((req, res) => {
       void this.trackPending(
-        this.handleConnect(req, client, head).catch((error) => {
+        this.handleHttp(req, res).catch((error) => {
+          this.logger?.warn({ error: errorMessage(error) }, 'browser egress proxy HTTP failure');
+          if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+          res.end('browser proxy request failed');
+        }),
+      );
+    });
+    server.on('connect', (req, client, head) => {
+      void this.trackPending(
+        this.handleConnect(req, client, head, upstream).catch((error) => {
           this.logger?.warn(
             { error: errorMessage(error), target: req.url ?? '' },
             'browser egress proxy CONNECT failure',
@@ -84,7 +105,7 @@ export class BrowserEgressProxy {
         }),
       );
     });
-    this.server.on('upgrade', (req, client, head) => {
+    server.on('upgrade', (req, client, head) => {
       void this.trackPending(
         this.handleUpgrade(req, client, head).catch((error) => {
           this.logger?.warn(
@@ -95,13 +116,40 @@ export class BrowserEgressProxy {
         }),
       );
     });
-    this.server.on('connection', (socket) => {
+    server.on('connection', (socket) => {
       this.trackClient(socket);
       if (this.closing) socket.destroy();
     });
-    this.server.requestTimeout = 30_000;
-    this.server.headersTimeout = 15_000;
-    this.server.keepAliveTimeout = 5_000;
+    server.requestTimeout = 30_000;
+    server.headersTimeout = 15_000;
+    server.keepAliveTimeout = 5_000;
+    return server;
+  }
+
+  /**
+   * The proxy URL for one user's browser: with ISP endpoints configured, the
+   * listener of the endpoint this user always maps to; otherwise the shared one.
+   */
+  startFor(affinityKey: string): Promise<string> {
+    if (!this.upstreams) return this.start();
+    if (this.lifetime) return Promise.reject(new Error('POOL_EGRESS_PRIVATE_ONLY'));
+    if (this.closing) return Promise.reject(new Error('browser egress proxy is closing'));
+    const slot = proxyPoolSlot(affinityKey, this.upstreams.endpoints.length);
+    const existing = this.routed.get(slot);
+    if (existing) return existing.url;
+    const url = new URL(this.upstreams.endpoints[slot]!);
+    if (url.protocol !== 'http:' || !url.hostname)
+      return Promise.reject(new Error('domain_proxy_invalid_config'));
+    const server = this.createProxyServer({ url, domains: this.upstreams.domains });
+    const entry = {
+      server,
+      url: listenLoopback(server).catch((error) => {
+        this.routed.delete(slot);
+        throw error;
+      }),
+    };
+    this.routed.set(slot, entry);
+    return entry.url;
   }
 
   start(): Promise<string> {
@@ -140,6 +188,12 @@ export class BrowserEgressProxy {
         for (const socket of this.upstreamSockets) socket.destroy();
         for (const request of this.upstreamRequests) request.destroy();
         for (const transfer of this.transfers) transfer.destroy();
+        for (const { server, url } of this.routed.values()) {
+          await url.catch(() => {});
+          server.closeAllConnections?.();
+          if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+        }
+        this.routed.clear();
         this.server.closeAllConnections?.();
         if (this.server.listening) {
           await new Promise<void>((resolve, reject) => {
@@ -347,7 +401,12 @@ export class BrowserEgressProxy {
     this.guardedPipe(req, upstream, false);
   }
 
-  private async handleConnect(req: IncomingMessage, client: Duplex, head: Buffer): Promise<void> {
+  private async handleConnect(
+    req: IncomingMessage,
+    client: Duplex,
+    head: Buffer,
+    upstream?: IspUpstream,
+  ): Promise<void> {
     this.assertDispatch();
     const authority = req.url ?? '';
     const target = parseConnectAuthority(authority);
@@ -367,28 +426,36 @@ export class BrowserEgressProxy {
       return;
     }
 
-    const upstream = await connectApprovedAddress(
-      decision.addresses,
-      target.port,
-      (socket) => this.trackUpstreamSocket(socket),
-      () => {
-        this.assertDispatch();
-        return client.destroyed;
-      },
-    );
+    const track = (socket: Socket) => this.trackUpstreamSocket(socket);
+    const cancelled = () => {
+      this.assertDispatch();
+      return client.destroyed;
+    };
+    // Only the listed HTTPS hosts take the ISP tunnel; the policy check above
+    // still applies to them, sign-in hosts never match.
+    const viaIsp =
+      upstream && target.port === 443 && proxiedDomain(target.host, upstream.domains) !== undefined;
+    const tunnel = viaIsp
+      ? await connectThroughUpstream(
+          upstream.url,
+          formatAuthority(target.host, target.port),
+          track,
+          cancelled,
+        )
+      : await connectApprovedAddress(decision.addresses, target.port, track, cancelled);
     this.assertDispatch();
     if (client.destroyed) {
-      upstream.destroy();
+      tunnel.destroy();
       return;
     }
     client.write('HTTP/1.1 200 Connection Established\r\nProxy-Agent: Holaday\r\n\r\n');
     if (head.length > 0) {
       this.assertDispatch();
-      upstream.write(head);
+      tunnel.write(head);
     }
-    this.guardedPipe(upstream, client);
-    this.guardedPipe(client, upstream);
-    bindSocketFailures(client, upstream);
+    this.guardedPipe(tunnel, client);
+    this.guardedPipe(client, tunnel);
+    bindSocketFailures(client, tunnel);
   }
 
   private async handleUpgrade(req: IncomingMessage, client: Duplex, head: Buffer): Promise<void> {
@@ -453,6 +520,83 @@ export class BrowserEgressProxy {
     this.trackClosed(socket, () => this.upstreamSockets.delete(socket));
     if (this.closing) socket.destroy();
   }
+}
+
+function listenLoopback(server: Server): Promise<string> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      const address = server.address() as AddressInfo | null;
+      if (address) resolve(`http://127.0.0.1:${address.port}`);
+      else reject(new Error('browser egress proxy did not expose a listening address'));
+    });
+  });
+}
+
+/**
+ * Opens a CONNECT tunnel through the ISP endpoint. Credentials go only into the
+ * Proxy-Authorization header; failures carry the status code, never the URL.
+ */
+async function connectThroughUpstream(
+  proxy: URL,
+  authority: string,
+  onSocket: (socket: Socket) => void,
+  isCancelled: () => boolean,
+): Promise<Socket> {
+  if (isCancelled()) throw new Error('browser egress proxy is closing');
+  const auth = proxy.username
+    ? `Proxy-Authorization: Basic ${Buffer.from(
+        `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`,
+      ).toString('base64')}\r\n`
+    : '';
+  return new Promise<Socket>((resolve, reject) => {
+    const socket = connectTcp({ host: proxy.hostname, port: Number(proxy.port || 80) });
+    const timer = setTimeout(() => socket.destroy(new Error('isp_upstream_timeout')), 15_000);
+    let buffered = Buffer.alloc(0);
+    const cleanup = () => {
+      clearTimeout(timer);
+      socket.off('data', data);
+      socket.off('error', failed);
+      socket.off('close', closed);
+    };
+    const failed = (error: Error) => {
+      cleanup();
+      socket.destroy();
+      reject(error);
+    };
+    const closed = () => failed(new Error('isp_upstream_closed'));
+    const data = (chunk: Buffer) => {
+      buffered = Buffer.concat([buffered, chunk]);
+      const end = buffered.indexOf('\r\n\r\n');
+      if (end < 0) {
+        if (buffered.length > 16 * 1024) failed(new Error('isp_upstream_bad_response'));
+        return;
+      }
+      const status = /^HTTP\/1\.[01] (\d{3})/.exec(buffered.subarray(0, end).toString('latin1'));
+      if (status?.[1] !== '200') {
+        failed(new Error(`isp_upstream_status_${status?.[1] ?? 'invalid'}`));
+        return;
+      }
+      cleanup();
+      socket.pause();
+      const rest = buffered.subarray(end + 4);
+      if (rest.length > 0) socket.unshift(rest);
+      if (isCancelled()) {
+        socket.destroy();
+        reject(new Error('browser egress proxy is closing'));
+        return;
+      }
+      resolve(socket);
+    };
+    socket.on('data', data);
+    socket.once('error', failed);
+    socket.once('close', closed);
+    socket.once('connect', () =>
+      socket.write(`CONNECT ${authority} HTTP/1.1\r\nHost: ${authority}\r\n${auth}\r\n`),
+    );
+    onSocket(socket);
+  });
 }
 
 function absoluteProxyUrl(req: IncomingMessage): URL | null {

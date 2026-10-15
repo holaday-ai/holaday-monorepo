@@ -739,6 +739,16 @@ export interface RunSupercarOptions {
   browserControl?: BrowserControl;
   captchaWaitMs?: number;
   captchaPollMs?: number;
+  /**
+   * CAPTCHA-REDUCE-1: true when a search fallback can replace the walled page
+   * (a search API or another engine); such a wall is not handed to the user.
+   */
+  searchWallReplaceable?: (url: string) => boolean;
+  /**
+   * CAPTCHA-REDUCE-1: restore and save this user's persistent browser profile
+   * (anonymous cloud sessions only; off unless the profile store is configured).
+   */
+  persistentProfileUser?: string;
   onCaptchaHandoffEnd?: (resumed: boolean) => Promise<boolean>;
   browserControlFactory?: () => { control: BrowserControl; finish: () => void };
   /** External task id (task_…). Correlates hooks and WS frames. */

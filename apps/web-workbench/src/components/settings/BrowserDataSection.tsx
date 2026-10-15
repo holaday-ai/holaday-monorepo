@@ -3,6 +3,7 @@ import { trpc } from '@/lib/trpc';
 import { Section } from '@/pages/PageShell';
 import type { BrowserGrantMetadata } from '@holaday/shared-types';
 import { useEffect, useState } from 'react';
+import { CloudBrowserProfileControl } from './CloudBrowserProfileControl';
 type Mode = {
   enabled: boolean;
   importEnabled: boolean;
@@ -258,6 +259,7 @@ export function BrowserDataSection() {
           </button>
         </div>
       )}
+      <CloudBrowserProfileControl />
     </Section>
   );
 }

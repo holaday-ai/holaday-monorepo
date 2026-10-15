@@ -393,6 +393,23 @@ export function dispatch(s, name, input = {}, method = 'GET') {
       session.lease = session.phase === 'human' ? 'local-only-control-lease' : null;
       return dispatch(s, 'tasks.browserControlState', { taskId: input.taskId });
     }
+    // CAPTCHA-REDUCE-1: handoff card status and the persistent profile (off).
+    case 'tasks.browserCaptcha': {
+      const status = {
+        failedRounds: 0,
+        alternateAvailable: false,
+        challenge: {
+          kind: 'recaptcha_image',
+          hint: '把所有符合题目的格子点掉；点过的格子会换新图，新图里还有也要点，直到没有了再点「VERIFY / 验证」。看不清可以点耳机图标改成语音题。',
+        },
+      };
+      if (input.action === 'cancel') return { ok: true, state: 'cancelled' };
+      return { ok: input.action === 'status', state: 'waiting', ...status };
+    }
+    case 'tasks.browserProfileStatus':
+      return { configured: false };
+    case 'tasks.browserProfileClear':
+      return { ok: true, configured: false };
     case 'tasks.browserNav': {
       const session = s.browserSessions[input.taskId];
       if (!session || session.phase !== 'human' || input.controlLease !== session.lease)

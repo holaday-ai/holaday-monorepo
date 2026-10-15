@@ -280,7 +280,7 @@ it('CAPTCHA actions enforce ownership and legacy return leases; continue cannot 
     ).rejects.toThrow('browser_control_not_owned');
     expect(
       await f.caller.browserCaptcha({ taskId: f.instance.taskId, action: 'continue' }),
-    ).toEqual({ ok: false, state: 'waiting' });
+    ).toMatchObject({ ok: false, state: 'waiting', failedRounds: 1, alternateAvailable: false });
     expect(binding.control.canAgentAct()).toBe(false);
     f.row.userExternalId = 'other';
     await expect(
@@ -290,8 +290,44 @@ it('CAPTCHA actions enforce ownership and legacy return leases; continue cannot 
     wall = false;
     expect(
       await f.caller.browserCaptcha({ taskId: f.instance.taskId, action: 'continue' }),
-    ).toEqual({ ok: true, state: 'resuming' });
+    ).toMatchObject({ ok: true, state: 'resuming' });
     expect(await result).toBe('resumed');
+    expect(f.effects).toEqual([]);
+  } finally {
+    binding.control.close();
+    await result;
+    binding.finish();
+  }
+});
+it('after two failed rounds the user may continue another way; not before (CAPTCHA-REDUCE-1)', async () => {
+  const f = fixture();
+  const binding = browserControlSessions.start(f.instance);
+  const result = captchaHandoffs.wait({
+    taskId: f.instance.taskId,
+    userId: 'usr_owner',
+    control: binding.control,
+    hasWall: async () => true,
+    onWaiting: async () => {},
+    onResumed: async () => true,
+    challenge: async () => ({ kind: 'recaptcha_image', hint: '把所有符合题目的格子点掉' }),
+    pollMs: 60000,
+  });
+  const captcha = (action: 'continue' | 'status' | 'alternate') =>
+    f.caller.browserCaptcha({ taskId: f.instance.taskId, action });
+  try {
+    await vi.waitFor(() => expect(binding.control.snapshot().phase).toBe('human'));
+    expect(await captcha('status')).toMatchObject({
+      failedRounds: 0,
+      alternateAvailable: false,
+      challenge: { kind: 'recaptcha_image' },
+    });
+    expect(await captcha('alternate')).toMatchObject({ ok: false, state: 'waiting' });
+    await captcha('continue');
+    await captcha('continue');
+    expect(await captcha('status')).toMatchObject({ failedRounds: 2, alternateAvailable: true });
+    expect(await captcha('alternate')).toMatchObject({ ok: true, state: 'alternate' });
+    expect(await result).toBe('alternate');
+    expect(binding.control.canAgentAct()).toBe(true);
     expect(f.effects).toEqual([]);
   } finally {
     binding.control.close();

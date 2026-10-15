@@ -1,5 +1,7 @@
 import { TEXT_URL_RE, trimTextUrl } from '../../execution/text-urls.js';
 import type { RunSupercarOptions, SupercarOutcome, SupercarTickEvent } from '../supercar/index.js';
+import type { SearchProvider } from './search-provider.js';
+import { serveSearchResults } from './search-results-page.js';
 
 type Engine = 'Google' | 'Bing' | 'DuckDuckGo' | '百度';
 export interface SearchWall {
@@ -9,7 +11,8 @@ export interface SearchWall {
 }
 export interface SearchFallbackPlan {
   from: Engine;
-  to: Engine;
+  /** An alternate engine, or a search API's label (CAPTCHA-REDUCE-1). */
+  to: Engine | string;
   query: string;
   url: string;
   notice: string;
@@ -17,10 +20,10 @@ export interface SearchFallbackPlan {
   intent: string;
 }
 export interface SearchFallbackEvent {
-  from: Engine;
-  to: Engine;
-  reason: 'search_verification_wall' | 'search_endpoint_unavailable';
-  endpoint?: 'lite';
+  from: Engine | string;
+  to: Engine | string;
+  reason: 'search_verification_wall' | 'search_endpoint_unavailable' | 'search_api_first';
+  endpoint?: 'lite' | 'api';
   phase: 'started' | 'completed' | 'blocked' | 'failed';
   attempt: 1;
 }
@@ -76,10 +79,12 @@ export function planSearchFallback(intent: string, wall: SearchWall): SearchFall
     /购买|下单|发送|删除|编辑文档|提交表单|\b(?:purchase|buy|delete|send|submit)\b/i.test(positive)
   )
     return null;
-  let query = queryAt(url);
+  // The query comes from the user's own task, never from the wall: Google's
+  // /sorry page carries an opaque `q` token (Deploy-22 D16).
+  let query: string | null = null;
   for (const raw of intent.match(TEXT_URL_RE) ?? []) {
     const candidate = parsed(trimTextUrl(raw));
-    if (!query && candidate && engineAt(candidate) === from) query = queryAt(candidate);
+    if (!query && candidate && engineAt(candidate)) query = queryAt(candidate);
   }
   query ??= intent.match(/[「“"]([^」”"\n]{1,500})[」”"]/)?.[1]?.trim() ?? null;
   query ??=
@@ -95,16 +100,83 @@ export function planSearchFallback(intent: string, wall: SearchWall): SearchFall
   next.searchParams.set('q', query);
   const specific = /必须|只能|仅用|一定要|天气卡片|weather card|\bmust\b|\bonly\b/i.test(intent);
   const requiresWeather = /天气卡片|weather\s+card/i.test(intent);
-  const notice = `${from} 要求人机验证，已改用 ${to} 搜索。${specific ? `以下是 ${to} 的同类结果，不是 ${from} 专属卡片或原站结果。` : ''}`;
+  return withAlternate({ from, query, requiresWeather, specific, original: intent }, to, next.href);
+}
+
+/** The plan for one alternate source: an engine page, or a search API's results page. */
+function withAlternate(
+  base: {
+    from: Engine;
+    query: string;
+    requiresWeather: boolean;
+    specific: boolean;
+    original: string;
+  },
+  to: string,
+  url: string,
+  /** CAPTCHA-REDUCE-1: the search API was used first, before any wall. */
+  preferred = false,
+): SearchFallbackPlan {
+  const { from, query, requiresWeather, specific, original } = base;
+  const notice = preferred
+    ? `本次搜索使用 ${to}（不是 ${from} 结果页）。`
+    : `${from} 要求人机验证，已改用 ${to} 搜索。${specific ? `以下是 ${to} 的同类结果，不是 ${from} 专属卡片或原站结果。` : ''}`;
+  const header = preferred
+    ? `【搜索接口】本次按配置直接使用 ${to} 获取搜索结果，不打开 ${from} 结果页。`
+    : `【搜索引擎回退】${from} 已出现真实验证墙，不尝试解验证码。`;
   return {
     from,
     to,
     query,
-    url: next.href,
+    url,
     notice,
     requiresWeather,
-    intent: `${intent}\n\n【搜索引擎回退】${from} 已出现真实验证墙，不尝试解验证码。原查询为「${query}」。本次获准使用 ${to} 交付同类公开搜索结果；从 ${next.href} 开始，保持原有数量与字段要求。只读，不登录、不提交业务表单；不得把替代来源冒充 ${from}，不能编造未读取的内容。${requiresWeather ? '若备用引擎没有天气卡片，可在同一引擎使用等价关键词并打开其真实天气来源，交付实际读到的天气概况、温度或天气网站链接；读不到温度时明确说明，仍可交付其他天气信息，不得编造温度。完全没有天气信息才算未完成。' : ''}`,
+    intent: `${original}\n\n${header}原查询为「${query}」。本次获准使用 ${to} 交付同类公开搜索结果；从 ${url} 开始，保持原有数量与字段要求。只读，不登录、不提交业务表单；不得把替代来源冒充 ${from}，不能编造未读取的内容。${requiresWeather ? '若备用引擎没有天气卡片，可在同一引擎使用等价关键词并打开其真实天气来源，交付实际读到的天气概况、温度或天气网站链接；读不到温度时明确说明，仍可交付其他天气信息，不得编造温度。完全没有天气信息才算未完成。' : ''}`,
   };
+}
+
+/**
+ * CAPTCHA-REDUCE-1: the same plan through a search API — its results page is
+ * served inside the task's browser. Null when the API fails or finds nothing,
+ * so the alternate engine is used instead.
+ */
+async function viaSearchApi(
+  plan: SearchFallbackPlan,
+  provider: SearchProvider,
+  args: RunSupercarOptions,
+  original: string,
+  preferred = false,
+): Promise<{ plan: SearchFallbackPlan; dispose: () => Promise<void> } | null> {
+  try {
+    const results = await provider.search(plan.query, {
+      count: 10,
+      signal: AbortSignal.timeout(15_000),
+    });
+    const page = await args.executor?.getPage();
+    if (!results.length || !page) return null;
+    const served = await serveSearchResults(page.context(), {
+      query: plan.query,
+      label: provider.label,
+      results,
+    });
+    return {
+      plan: withAlternate(
+        {
+          from: plan.from as Engine,
+          query: plan.query,
+          requiresWeather: plan.requiresWeather,
+          specific: /必须|只能|仅用|一定要|天气卡片|weather card|\bmust\b|\bonly\b/i.test(original),
+          original,
+        },
+        provider.label,
+        served.url,
+        preferred,
+      ),
+      dispose: served.dispose,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Partial weather information is useful; missing temperature alone is not failure. */
@@ -121,7 +193,10 @@ function hasWeatherInformation(summary: string): boolean {
     summary,
   );
 }
-async function isUnavailableSearchPage(args: RunSupercarOptions, engine: Engine): Promise<boolean> {
+async function isUnavailableSearchPage(
+  args: RunSupercarOptions,
+  engine: Engine | string,
+): Promise<boolean> {
   try {
     const page = await args.executor?.getPage();
     const current = page && parsed(page.url());
@@ -139,6 +214,13 @@ async function isUnavailableSearchPage(args: RunSupercarOptions, engine: Engine)
 }
 
 export interface SearchFallbackDeps {
+  /** CAPTCHA-REDUCE-1: tried before the alternate engine when configured. */
+  searchProvider?: SearchProvider | null;
+  /**
+   * CAPTCHA-REDUCE-1: with a provider, a Google search task skips google.com
+   * altogether (a datacenter browser is walled there almost every time).
+   */
+  searchApiFirst?: boolean;
   run: (args: RunSupercarOptions) => Promise<SupercarOutcome>;
   stop: (taskId: string) => boolean;
   onFallback?: (event: SearchFallbackEvent) => Promise<void>;
@@ -167,6 +249,20 @@ export async function runSearchWithFallback(
   args: RunSupercarOptions,
   deps: SearchFallbackDeps,
 ): Promise<SupercarOutcome> {
+  // A served results page is a context route; it must not outlive the search.
+  const cleanup: Array<() => Promise<void>> = [];
+  try {
+    return await searchWithFallback(args, deps, cleanup);
+  } finally {
+    await Promise.allSettled(cleanup.map((dispose) => dispose()));
+  }
+}
+
+async function searchWithFallback(
+  args: RunSupercarOptions,
+  deps: SearchFallbackDeps,
+  cleanup: Array<() => Promise<void>>,
+): Promise<SupercarOutcome> {
   let plan: SearchFallbackPlan | null = null;
   let firstQuestion = '';
   let wallObserved = false;
@@ -176,15 +272,25 @@ export async function runSearchWithFallback(
   let blockedRetry = false;
   let retryWallObserved = false;
   let endpointRetry = false;
+  let apiUsed = false;
+  let apiFirst = false;
   let offset = 0;
   const startedAt = Date.now();
   const emit = async (phase: SearchFallbackEvent['phase']) => {
     if (plan)
       await deps.onFallback?.({
         from: endpointRetry ? plan.to : plan.from,
-        to: plan.to,
-        reason: endpointRetry ? 'search_endpoint_unavailable' : 'search_verification_wall',
-        ...(endpointRetry ? { endpoint: 'lite' as const } : {}),
+        to: apiUsed && deps.searchProvider ? deps.searchProvider.id : plan.to,
+        reason: endpointRetry
+          ? 'search_endpoint_unavailable'
+          : apiFirst
+            ? 'search_api_first'
+            : 'search_verification_wall',
+        ...(endpointRetry
+          ? { endpoint: 'lite' as const }
+          : apiUsed
+            ? { endpoint: 'api' as const }
+            : {}),
         phase,
         attempt: 1,
       });
@@ -192,6 +298,16 @@ export async function runSearchWithFallback(
   const tracked = (intent: string): RunSupercarOptions => ({
     ...args,
     intent,
+    // CAPTCHA-REDUCE-1: a search wall this fallback can answer is not handed to
+    // the user; only the first attempt, before any write, qualifies.
+    searchWallReplaceable: (url: string) =>
+      !retry &&
+      !unsafe &&
+      !!planSearchFallback(deps.originalIntent ?? args.intent, {
+        url,
+        captcha: true,
+        visible: true,
+      }),
     onTick: async (ev: SupercarTickEvent) => {
       const execution = ev.execution;
       if (!retry) {
@@ -242,6 +358,42 @@ export async function runSearchWithFallback(
       });
     },
   });
+  const original = deps.originalIntent ?? args.intent;
+  if (
+    deps.searchProvider &&
+    deps.searchApiFirst &&
+    /google|谷歌/i.test(original) &&
+    !(await args.isTaskCancelled?.())
+  ) {
+    const preferred = planSearchFallback(original, {
+      url: 'https://www.google.com/search',
+      captcha: true,
+      visible: true,
+    });
+    const api =
+      preferred && (await viaSearchApi(preferred, deps.searchProvider, args, original, true));
+    if (api) {
+      plan = api.plan;
+      apiUsed = true;
+      apiFirst = true;
+      // Not a fallback attempt: a wall met on this run is handled as usual.
+      retry = true;
+      await emit('started');
+      cleanup.push(api.dispose);
+      const outcome = await deps.run(tracked(api.plan.intent));
+      await emit(
+        outcome.status === 'completed'
+          ? 'completed'
+          : outcome.status === 'awaiting_user'
+            ? 'blocked'
+            : 'failed',
+      );
+      return {
+        ...outcome,
+        ...(outcome.summary ? { summary: `${api.plan.notice}\n\n${outcome.summary}` } : {}),
+      };
+    }
+  }
   const first = await deps.run(tracked(args.intent));
   // The unified runner returns detected walls directly; legacy/human gates may
   // instead invoke onAwaitingUser. Both require the same host-observed signal.
@@ -265,8 +417,25 @@ export async function runSearchWithFallback(
       /* An unavailable or revoked browser cannot be retried. */
     }
   }
-  const selected = plan as SearchFallbackPlan | null;
+  let selected = plan as SearchFallbackPlan | null;
   if (!selected || first.status === 'completed') return first;
+  // CAPTCHA-REDUCE-1: a configured search API answers before any other engine
+  // page (no wall, no user). Its results page lives in this task's own browser
+  // context and goes away with it.
+  if (deps.searchProvider && !(await args.isTaskCancelled?.())) {
+    const api = await viaSearchApi(
+      selected,
+      deps.searchProvider,
+      args,
+      deps.originalIntent ?? args.intent,
+    );
+    if (api) {
+      cleanup.push(api.dispose);
+      selected = api.plan;
+      plan = api.plan;
+      apiUsed = true;
+    }
+  }
   if (await args.isTaskCancelled?.()) return { ...first, status: 'cancelled' };
   const remaining = args.timeoutMs ? args.timeoutMs - (Date.now() - startedAt) : undefined;
   if (remaining !== undefined && remaining <= 0)
