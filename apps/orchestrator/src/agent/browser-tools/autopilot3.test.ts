@@ -210,7 +210,10 @@ ${BODY.map(
   beforeAll(async () => {
     server = createServer((req, res) => {
       res.setHeader('content-type', 'text/html; charset=utf-8');
-      res.end(req.url === '/blog' ? blog : wiki);
+      if (req.url === '/forbidden') res.statusCode = 403;
+      res.end(
+        req.url === '/blog' ? blog : req.url === '/forbidden' ? '<h1>403 Forbidden</h1>' : wiki,
+      );
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -248,6 +251,18 @@ ${BODY.map(
         .filter((h: { section?: number }) => h.section)
         .map((h: { text: string; section: number }) => `${h.section} ${h.text}`),
     ).toEqual(['1 史前时期', '2 文明起源', '3 夏朝', '4 商朝', '5 周朝']);
+    tools.dispose();
+    await page.close();
+  });
+  it('tells the model when navigation lands on an HTTP error page (core-07 f1-b)', async () => {
+    const page = await browser.newPage();
+    const tools = createPlaywrightUnifiedExecutor(page, { observationV2: true });
+    const opened = await tools.execute({ tool: 'navigate', url: `${base}/forbidden` });
+    expect(opened.text).toContain('HTTP 403');
+    expect(opened.text).toContain('换一个公开页面');
+    expect((await tools.execute({ tool: 'navigate', url: `${base}/blog` })).text).not.toContain(
+      'HTTP',
+    );
     tools.dispose();
     await page.close();
   });

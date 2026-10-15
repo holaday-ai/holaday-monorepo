@@ -470,12 +470,23 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
             url: page.url(),
           };
         }
-        case 'navigate':
-          await page.goto(action.url, {
+        case 'navigate': {
+          const response = await page.goto(action.url, {
             timeout: Math.max(timeout, 30_000),
             waitUntil: 'domcontentloaded',
           });
+          // AP3 core-07: a 403 page read as "已打开" kept the model on it until
+          // the step limit. Say what the server answered.
+          const httpStatus = response?.status() ?? 0;
+          if (httpStatus >= 400)
+            return {
+              ...done(
+                `已打开 ${page.url()}，但服务器返回 HTTP ${httpStatus}（拒绝访问或不存在），页面没有可用内容。用户没有指定网站时换一个公开页面；指定了网站则如实说明无法访问。`,
+              ),
+              url: page.url(),
+            };
           return { ...done(`已打开 ${page.url()}`), url: page.url() };
+        }
         case 'extract': {
           const content = (
             await redactPageText(
