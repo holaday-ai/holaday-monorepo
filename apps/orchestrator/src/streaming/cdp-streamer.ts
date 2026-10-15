@@ -44,6 +44,7 @@ import type { Logger } from 'pino';
 import type { CDPSession, Page } from 'playwright';
 import sharp from 'sharp';
 import type { WebSocket } from 'ws';
+import { browserUrlForLog } from '../browser-pool/log-url.js';
 
 export interface CdpStreamerOptions {
   /**
@@ -384,10 +385,11 @@ export class CdpStreamer {
         this.lastFrameAt = Date.now();
         this.scheduleInitialFrameFallback();
       }
-      this.opts.logger.info({ reason, url }, 'cdp-streamer: armed screencast');
+      // Origin only: a page URL's path and query can carry tokens (FOLLOWUPS-282).
+      this.opts.logger.info({ reason, origin: logOrigin(url) }, 'cdp-streamer: armed screencast');
     } catch (err) {
       this.opts.logger.warn(
-        { reason, url, err: errMsg(err) },
+        { reason, origin: logOrigin(url), err: errMsg(err) },
         'cdp-streamer: arm screencast failed',
       );
     }
@@ -799,4 +801,8 @@ export class CdpStreamer {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function logOrigin(url: string | null): string | null {
+  return url === null ? null : browserUrlForLog(url);
 }
