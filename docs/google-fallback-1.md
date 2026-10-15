@@ -1,6 +1,6 @@
 # Search engine wall fallback
 
-Based on PR #277 (`0eac6c87`, `claude/browser-autopilot-1`), incorporating PR #276. This change is confined to task dispatch, a new
+Based on PR #277 (`aa5d1446`, `claude/browser-autopilot-1`), incorporating PR #276. This change is confined to task dispatch, a new
 search fallback module, and verification. It does not modify the shared browser
 loop, completion fields, answer verifier, auto-fix, browser completion, or cloud
 observation modules being changed by AUTOPILOT.
@@ -33,15 +33,18 @@ pnpm --filter @holaday/orchestrator exec tsx scripts/search-fallback-audit.ts --
 No production configuration, proxy subscription, SSH, merge or deployment is part
 of this change. Proxy evaluation and evidence live in the task report directory.
 
-## GOOGLE-FALLBACK-2 acceptance
+## GOOGLE-FALLBACK-3 acceptance
 
-The three real Bing cases were rerun on the PR #277 base with a locally
-simulated initial Google wall and a scripted (unpaid) model. The weather case
-delivered observed weather links, explicitly stating that no temperature was
-read and that this is not a Google weather card. The two five-result cases
-remain blocked by the inherited `completionGap` download check: a literal
-result title containing “Download” is treated as a claim that a file was saved.
-That check still exists in `browser-completion.ts` on #277 and is outside this
-PR's allowed file scope. No result titles were hidden or rewritten to get a
-passing audit. The 3/3 real-site target is therefore not met. See
-`google-fallback-1/report-2.md` in the task report directory for current evidence.
+PR #278 incorporates the final #277 base (`aa5d1446`). Download receipt
+requirements now depend on the requested task rather than words in returned
+page titles. Explicit download tasks still require a successful stored
+receipt; filename/byte consistency and other safety and integrity rules remain.
+
+With a locally simulated initial Google wall and a scripted (unpaid) model,
+core-01, core-02 and D16 all completed against real Bing. The five-result
+answers retain the actual title containing “Download”; no titles were removed
+or rewritten to pass. Weather delivers observed weather links and explicitly
+states that no temperature was read and that this is not a Google weather card.
+These results do not establish production, Google-site or real-model acceptance.
+See `google-fallback-1/report-3.md` in the task report directory for final-head
+validation and evidence. Earlier reports are historical.

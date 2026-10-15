@@ -77,5 +77,33 @@ it('does not turn a negative action statement into a required or claimed action'
   ])
     expect(completionGap(intent!, summary!, trace, true)).toBeNull();
   expect(completionGap('下载文件', '未下载文件', trace, true)).toContain('下载');
-  expect(completionGap('不要下载', '已下载13字节', trace, true)).toContain('下载');
+  expect(completionGap('不要下载，只读标题', 'Download guide', trace, true)).toBeNull();
+});
+
+describe('download receipts follow the requested task, not result titles', () => {
+  const trace = [{ tool: 'navigate', ok: true, url: 'https://www.bing.com/search?q=HOLA+DAY+AI' }];
+  it.each([
+    [
+      'Google 搜索「HOLA DAY AI」返回前5条标题和链接',
+      '1. [Hola VPN for Windows & Mac - Download the Hola Desktop App](https://hola.org/products/desktop)',
+    ],
+    ['搜索 Python 返回标题', 'Python 下载与安装指南'],
+    ['Read the first five search results; do not download files.', 'Download the Hola Desktop App'],
+  ])(
+    'allows a literal result title without inventing a download receipt: %s',
+    (intent, summary) => {
+      expect(completionGap(intent, summary, trace, true)).toBeNull();
+    },
+  );
+  it.each(['下载文件', '请下载报告并保存文件', 'Download the report and save it'])(
+    'still requires a successful receipt for a download task: %s',
+    (intent) => {
+      expect(completionGap(intent, '任务完成', trace, true)).toContain('下载');
+    },
+  );
+  it('does not accept a failed download attempt as a receipt', () => {
+    expect(
+      completionGap('下载文件', '任务完成', [...trace, { tool: 'download', ok: false }], true),
+    ).toContain('下载');
+  });
 });
