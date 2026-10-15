@@ -1,0 +1,209 @@
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+/**
+ * CAPTCHA-REDUCE-1 — a per-user browser profile that survives tasks. A site
+ * that let a user through after one verification (Google's exemption cookie,
+ * Cloudflare's cf_clearance, consent choices) sees the same browser next time
+ * instead of a blank, high-risk one.
+ *
+ * - Encrypted at rest (AES-256-GCM); the user hash is authenticated data, so a
+ *   profile can never be read as another user's.
+ * - Default scope is verification clearance and consent state only; sign-in
+ *   sessions stay with the browser-session vault and its per-site consent.
+ *   `all` keeps every cookie and local-storage origin (operator choice).
+ * - Idle profiles expire; the user can clear theirs at any time.
+ * Off unless BROWSER_PROFILE_STORE_ENABLED=true with a key configured.
+ */
+export interface StoredCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  expires: number;
+  httpOnly: boolean;
+  secure: boolean;
+  sameSite: 'Strict' | 'Lax' | 'None';
+}
+export interface StoredProfile {
+  cookies: StoredCookie[];
+  origins: Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }>;
+}
+export type ProfileScope = 'clearance' | 'all';
+
+/** Variable names only; values are never logged. */
+export const BROWSER_PROFILE_ENV = {
+  enabled: 'BROWSER_PROFILE_STORE_ENABLED',
+  dir: 'BROWSER_PROFILE_STORE_DIR',
+  key: 'BROWSER_PROFILE_STORE_KEY',
+  scope: 'BROWSER_PROFILE_STORE_SCOPE',
+} as const;
+export const PROFILE_IDLE_MS = 7 * 86_400_000;
+const MAX_BYTES = 2 * 1024 * 1024;
+
+/** Anti-bot clearance and consent cookies: what spares a user the next challenge. */
+const CLEARANCE_COOKIE =
+  /^(?:GOOGLE_ABUSE_EXEMPTION|NID|AEC|SOCS|CONSENT|__Secure-ENID|cf_clearance|__cf_bm|_cfuvid|datadome|_abck|bm_sz|ak_bmsc|MUID|SRCHUID|SRCHD|_EDGE_S|_EDGE_V|aws-waf-token)$/;
+
+export function filterProfile(profile: StoredProfile, scope: ProfileScope, now = Date.now()) {
+  const live = profile.cookies.filter((c) => c.expires === -1 || c.expires * 1000 > now);
+  if (scope === 'all') return { cookies: live, origins: profile.origins };
+  return {
+    // Session-only cookies do not outlive the browser that set them.
+    cookies: live.filter((c) => c.expires !== -1 && CLEARANCE_COOKIE.test(c.name)),
+    origins: [],
+  };
+}
+
+const userHash = (userId: string) =>
+  createHash('sha256').update(`holaday-browser-profile:${userId}`).digest('hex');
+const aad = (userId: string) => Buffer.from(`holaday-browser-profile:v1:${userHash(userId)}`);
+
+export class BrowserProfileStore {
+  constructor(
+    private readonly options: {
+      dir: string;
+      key: Buffer;
+      scope?: ProfileScope;
+      now?: () => number;
+    },
+  ) {
+    if (options.key.length !== 32) throw new Error('browser_profile_key_invalid');
+  }
+  private file(userId: string) {
+    return join(this.options.dir, `${userHash(userId)}.json`);
+  }
+  private now() {
+    return this.options.now?.() ?? Date.now();
+  }
+  get scope(): ProfileScope {
+    return this.options.scope ?? 'clearance';
+  }
+  async load(userId: string): Promise<StoredProfile | null> {
+    let raw: string;
+    try {
+      raw = await readFile(this.file(userId), 'utf8');
+    } catch {
+      return null;
+    }
+    try {
+      const record = JSON.parse(raw) as {
+        v: 1;
+        savedAt: number;
+        nonce: string;
+        tag: string;
+        data: string;
+      };
+      if (record.v !== 1 || this.now() - record.savedAt > PROFILE_IDLE_MS) {
+        await this.clear(userId);
+        return null;
+      }
+      const decipher = createDecipheriv(
+        'aes-256-gcm',
+        this.options.key,
+        Buffer.from(record.nonce, 'base64'),
+      );
+      decipher.setAAD(aad(userId));
+      decipher.setAuthTag(Buffer.from(record.tag, 'base64'));
+      const plain = Buffer.concat([
+        decipher.update(Buffer.from(record.data, 'base64')),
+        decipher.final(),
+      ]);
+      return filterProfile(
+        JSON.parse(plain.toString('utf8')) as StoredProfile,
+        this.scope,
+        this.now(),
+      );
+    } catch {
+      // Unreadable (wrong key, tampered, other user's file): start blank.
+      return null;
+    }
+  }
+  async save(userId: string, profile: StoredProfile): Promise<void> {
+    const kept = filterProfile(profile, this.scope, this.now());
+    const plain = Buffer.from(JSON.stringify(kept));
+    if (plain.length > MAX_BYTES) return;
+    const nonce = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', this.options.key, nonce);
+    cipher.setAAD(aad(userId));
+    const data = Buffer.concat([cipher.update(plain), cipher.final()]);
+    await mkdir(this.options.dir, { recursive: true, mode: 0o700 });
+    const file = this.file(userId);
+    const temp = `${file}.${nonce.toString('hex')}.tmp`;
+    await writeFile(
+      temp,
+      JSON.stringify({
+        v: 1,
+        savedAt: this.now(),
+        nonce: nonce.toString('base64'),
+        tag: cipher.getAuthTag().toString('base64'),
+        data: data.toString('base64'),
+      }),
+      { mode: 0o600 },
+    );
+    await rename(temp, file);
+  }
+  /** One-click clear (settings) and account closure. */
+  async clear(userId: string): Promise<void> {
+    await rm(this.file(userId), { force: true });
+  }
+}
+
+let cached: { signature: string; store: BrowserProfileStore | null } | null = null;
+/** The configured store, or null when disabled or without a valid key. */
+export function browserProfileStore(
+  env: NodeJS.ProcessEnv = process.env,
+): BrowserProfileStore | null {
+  const signature = [
+    env[BROWSER_PROFILE_ENV.enabled],
+    env[BROWSER_PROFILE_ENV.dir],
+    env[BROWSER_PROFILE_ENV.scope],
+    createHash('sha256')
+      .update(env[BROWSER_PROFILE_ENV.key] ?? '')
+      .digest('hex'),
+  ].join('|');
+  if (cached?.signature === signature) return cached.store;
+  let store: BrowserProfileStore | null = null;
+  if (env[BROWSER_PROFILE_ENV.enabled] === 'true') {
+    const key = Buffer.from(env[BROWSER_PROFILE_ENV.key] ?? '', 'base64');
+    if (key.length === 32)
+      store = new BrowserProfileStore({
+        dir: env[BROWSER_PROFILE_ENV.dir] || join(process.cwd(), 'data', 'browser-profiles'),
+        key,
+        scope: env[BROWSER_PROFILE_ENV.scope] === 'all' ? 'all' : 'clearance',
+      });
+  }
+  cached = { signature, store };
+  return store;
+}
+
+/** Restores a user's saved clearance into a fresh browser context. */
+export async function restoreBrowserProfile(
+  context: import('playwright').BrowserContext,
+  store: BrowserProfileStore,
+  userId: string,
+): Promise<number> {
+  const saved = await store.load(userId).catch(() => null);
+  if (!saved) return 0;
+  if (saved.cookies.length) await context.addCookies(saved.cookies).catch(() => {});
+  if (saved.origins.length)
+    await context
+      .addInitScript((origins) => {
+        const own = origins.find((entry) => entry.origin === location.origin);
+        if (own && localStorage.length === 0)
+          for (const item of own.localStorage) localStorage.setItem(item.name, item.value);
+      }, saved.origins)
+      .catch(() => {});
+  return saved.cookies.length;
+}
+
+/** Saves what the store's scope keeps from the context at the end of a task. */
+export async function saveBrowserProfile(
+  context: import('playwright').BrowserContext,
+  store: BrowserProfileStore,
+  userId: string,
+): Promise<void> {
+  const state = await context.storageState().catch(() => null);
+  if (state) await store.save(userId, state).catch(() => {});
+}

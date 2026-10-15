@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { supercarAbort } from '../agent/supercar/qwen-only-agent-loop.js';
 import { cancelUserTasksForAccountClosure } from '../agent/task-repository.js';
+import { browserProfileStore } from '../browser-profiles/profile-store.js';
 import { getVaultRuntime } from '../browser-session-vault/runtime.js';
 import { env } from '../config/env.js';
 import type { DB } from '../db/client.js';
@@ -192,6 +193,12 @@ export async function applyImmediateClosureEffects(
     ]);
     for (const result of cleanup)
       if (result.status === 'rejected') abortFailures.push('browser-vault');
+  }
+  // CAPTCHA-REDUCE-1: the user's persistent cloud browser profile goes too.
+  try {
+    await browserProfileStore()?.clear(input.userExternalId);
+  } catch {
+    abortFailures.push('browser-profile');
   }
   if (abortFailures.length > 0) {
     throw new ImmediateClosureEffectsRetryableError(abortFailures.length);

@@ -1,3 +1,8 @@
+import {
+  browserProfileStore,
+  restoreBrowserProfile,
+  saveBrowserProfile,
+} from '../../browser-profiles/profile-store.js';
 import { browserCapabilities } from '../../config/browser-capabilities.js';
 import { reviewListAnswer } from '../../execution/answer-verifier.js';
 import { browserOutputGuidance } from '../../execution/execution-contract.js';
@@ -181,6 +186,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       toolsUsed: [],
     };
   }
+  // CAPTCHA-REDUCE-1: the same user's verification clearance carries over.
+  const profileStore = opts.persistentProfileUser ? browserProfileStore() : null;
+  if (profileStore && opts.persistentProfileUser)
+    await restoreBrowserProfile(page.context(), profileStore, opts.persistentProfileUser);
   const replay =
     capabilities.replayV1 && opts.userExternalId
       ? new BrowserReplayRecorder(
@@ -715,6 +724,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     control?.close();
     await control?.settled();
     binding?.finish();
+    if (profileStore && opts.persistentProfileUser)
+      await saveBrowserProfile(page.context(), profileStore, opts.persistentProfileUser);
     await egress.dispose();
     if (egress.metrics.proxyRequests || egress.metrics.blockedMedia)
       await safe(() =>

@@ -327,6 +327,8 @@ import {
   browserControlProcedure,
   browserControlStateProcedure,
   browserNavProcedure,
+  browserProfileClearProcedure,
+  browserProfileStatusProcedure,
 } from './browser-control.js';
 import {
   assertLocalChromeSelection,
@@ -5938,6 +5940,11 @@ export const tasksRouter = router({
                   ...(unifiedReadPage ? { unifiedReadPage } : {}),
                   messagesAdapter: browserMessagesAdapter,
                   taskId,
+                  // CAPTCHA-REDUCE-1: anonymous cloud sessions keep this user's
+                  // verification clearance (profile store off unless configured).
+                  ...(taskSessionPolicy === 'anonymous' && !input.localChrome
+                    ? { persistentProfileUser: ctx.userId }
+                    : {}),
                   ...(primaryExecutor && ctx.browserPool?.peek(taskId)?.executor === primaryExecutor
                     ? {
                         browserControlFactory: () => {
@@ -11476,6 +11483,8 @@ export const tasksRouter = router({
    * than a TRPC error banner for something as cheap as "no page yet".
    */
   browserCaptcha: browserCaptchaProcedure,
+  browserProfileStatus: browserProfileStatusProcedure,
+  browserProfileClear: browserProfileClearProcedure,
   browserControlState: browserControlStateProcedure,
   localChromeTabs: localChromeTabsProcedure,
   browserControl: browserControlProcedure,

@@ -744,6 +744,11 @@ export interface RunSupercarOptions {
    * (a search API or another engine); such a wall is not handed to the user.
    */
   searchWallReplaceable?: (url: string) => boolean;
+  /**
+   * CAPTCHA-REDUCE-1: restore and save this user's persistent browser profile
+   * (anonymous cloud sessions only; off unless the profile store is configured).
+   */
+  persistentProfileUser?: string;
   onCaptchaHandoffEnd?: (resumed: boolean) => Promise<boolean>;
   browserControlFactory?: () => { control: BrowserControl; finish: () => void };
   /** External task id (task_…). Correlates hooks and WS frames. */

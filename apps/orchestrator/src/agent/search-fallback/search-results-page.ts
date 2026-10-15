@@ -9,7 +9,7 @@ import type { WebSearchResult } from './search-provider.js';
  */
 export const SEARCH_RESULTS_ORIGIN = 'https://search-results.holaday.invalid';
 
-const escape = (value: string) =>
+const escapeHtml = (value: string) =>
   value.replace(
     /[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
@@ -23,10 +23,10 @@ export function searchResultsHtml(input: {
   const items = input.results
     .map(
       (r, i) =>
-        `<li><h3><a href="${escape(r.url)}">${escape(r.title)}</a></h3><cite>${escape(r.url)}</cite>${r.snippet ? `<p>${escape(r.snippet)}</p>` : ''}<span hidden>${i + 1}</span></li>`,
+        `<li><h3><a href="${escapeHtml(r.url)}">${escapeHtml(r.title)}</a></h3><cite>${escapeHtml(r.url)}</cite>${r.snippet ? `<p>${escapeHtml(r.snippet)}</p>` : ''}<span hidden>${i + 1}</span></li>`,
     )
     .join('\n');
-  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>「${escape(input.query)}」- ${escape(input.label)}</title></head><body><main><h1>「${escape(input.query)}」的搜索结果</h1><p>来源：${escape(input.label)}（不是 Google 结果页）</p><ol>${items}</ol></main></body></html>`;
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>「${escapeHtml(input.query)}」- ${escapeHtml(input.label)}</title></head><body><main><h1>「${escapeHtml(input.query)}」的搜索结果</h1><p>来源：${escapeHtml(input.label)}（不是 Google 结果页）</p><ol>${items}</ol></main></body></html>`;
 }
 
 /** Serves the results page in `context`; dispose removes the route. */
