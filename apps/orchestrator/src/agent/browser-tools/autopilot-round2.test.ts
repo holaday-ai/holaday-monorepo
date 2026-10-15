@@ -56,10 +56,8 @@ describe('blank document surface (core-10)', () => {
 
 describe('tab titles from the listing (core-07)', () => {
   it('ground the title of a tab that was read, never of one that was not', async () => {
-    const { addReadTabTitles } = await import('./unified-browser-loop.js');
-    const pages = [{ text: 'heading "Main Page"', tabId: 'read' }];
-    addReadTabTitles(
-      pages,
+    const { listedTabTitles, readTabTitles } = await import('./unified-browser-loop.js');
+    const titles = listedTabTitles(
       JSON.stringify({
         tabs: [
           { tabId: 'read', title: 'Wikipedia, the free encyclopedia' },
@@ -67,8 +65,8 @@ describe('tab titles from the listing (core-07)', () => {
         ],
       }),
     );
-    expect(pages).toEqual([
-      { text: 'heading "Main Page"\nWikipedia, the free encyclopedia', tabId: 'read' },
+    expect(readTabTitles(titles, new Set(['read']))).toEqual([
+      { text: 'Wikipedia, the free encyclopedia', tabId: 'read' },
     ]);
   });
 });
