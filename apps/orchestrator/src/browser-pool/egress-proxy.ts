@@ -27,11 +27,22 @@ interface BrowserEgressProxyOptions {
    * the endpoint only carries its bytes. Absent means every target is direct.
    */
   upstreams?: { endpoints: readonly string[]; domains: readonly string[] } | null;
+  /** OPEN-ANY-SITE-1: sites learned to block the datacenter egress (snapshot per launch). */
+  learned?: () => readonly string[];
+}
+
+/** Traffic through one launch's ISP/mobile tunnels (bytes are TLS payload as relayed). */
+export interface IspRouteMetrics {
+  tunnels: number;
+  failures: number;
+  bytesUp: number;
+  bytesDown: number;
 }
 
 interface IspUpstream {
   url: URL;
   domains: readonly string[];
+  metrics: IspRouteMetrics;
 }
 
 /**
@@ -46,8 +57,15 @@ export class BrowserEgressProxy {
   private readonly logger: BrowserEgressProxyOptions['logger'];
   private readonly server = this.createProxyServer();
   private readonly upstreams: BrowserEgressProxyOptions['upstreams'];
-  /** One loopback listener per ISP endpoint, so a browser's port fixes its exit IP. */
-  private readonly routed = new Map<number, { server: Server; url: Promise<string> }>();
+  private readonly learned: BrowserEgressProxyOptions['learned'];
+  /**
+   * Loopback listeners whose port fixes the exit: `slot:<n>` is shared per ISP
+   * endpoint; `route:<key>` belongs to one browser launch and fixes its domain list.
+   */
+  private readonly routed = new Map<
+    string,
+    { server: Server; url: Promise<string>; upstream: IspUpstream }
+  >();
   private readonly clientSockets = new Set<Socket>();
   private readonly upstreamSockets = new Set<Socket>();
   private readonly upstreamRequests = new Set<ClientRequest>();
@@ -63,6 +81,7 @@ export class BrowserEgressProxy {
   constructor(options: BrowserEgressProxyOptions = {}) {
     this.policy = options.policy ?? defaultBrowserNetworkPolicy;
     this.upstreams = options.upstreams?.endpoints.length ? options.upstreams : null;
+    this.learned = options.learned;
     this.logger =
       options.lifetime && options.logger
         ? {
@@ -127,29 +146,56 @@ export class BrowserEgressProxy {
   }
 
   /**
-   * The proxy URL for one user's browser: with ISP endpoints configured, the
-   * listener of the endpoint this user always maps to; otherwise the shared one.
+   * The proxy URL for one user's browser: with ISP endpoints configured, a
+   * listener on the endpoint this user always maps to; otherwise the shared one.
+   * With `routeKey` (one browser launch) the listener is the launch's own: its
+   * domain list (configured + learned) is fixed now, and closeRoute reports its
+   * traffic. Without it, users of one endpoint share a listener on the static list.
    */
-  startFor(affinityKey: string): Promise<string> {
+  startFor(affinityKey: string, routeKey?: string): Promise<string> {
     if (!this.upstreams) return this.start();
     if (this.lifetime) return Promise.reject(new Error('POOL_EGRESS_PRIVATE_ONLY'));
     if (this.closing) return Promise.reject(new Error('browser egress proxy is closing'));
     const slot = proxyPoolSlot(affinityKey, this.upstreams.endpoints.length);
-    const existing = this.routed.get(slot);
+    const key = routeKey === undefined ? `slot:${slot}` : `route:${routeKey}`;
+    const existing = this.routed.get(key);
     if (existing) return existing.url;
     const url = new URL(this.upstreams.endpoints[slot]!);
     if (url.protocol !== 'http:' || !url.hostname)
       return Promise.reject(new Error('domain_proxy_invalid_config'));
-    const server = this.createProxyServer({ url, domains: this.upstreams.domains });
+    const domains =
+      routeKey === undefined
+        ? this.upstreams.domains
+        : [...new Set([...this.upstreams.domains, ...(this.learned?.() ?? [])])];
+    const upstream: IspUpstream = {
+      url,
+      domains,
+      metrics: { tunnels: 0, failures: 0, bytesUp: 0, bytesDown: 0 },
+    };
+    const server = this.createProxyServer(upstream);
     const entry = {
       server,
+      upstream,
       url: listenLoopback(server).catch((error) => {
-        this.routed.delete(slot);
+        this.routed.delete(key);
         throw error;
       }),
     };
-    this.routed.set(slot, entry);
+    this.routed.set(key, entry);
     return entry.url;
+  }
+
+  /** Closes one launch's listener (its browser is gone) and returns its traffic. */
+  async closeRoute(routeKey: string): Promise<IspRouteMetrics | null> {
+    const key = `route:${routeKey}`;
+    const entry = this.routed.get(key);
+    if (!entry) return null;
+    this.routed.delete(key);
+    await entry.url.catch(() => {});
+    entry.server.closeAllConnections?.();
+    if (entry.server.listening)
+      await new Promise<void>((resolve) => entry.server.close(() => resolve()));
+    return { ...entry.upstream.metrics };
   }
 
   start(): Promise<string> {
@@ -441,8 +487,21 @@ export class BrowserEgressProxy {
           formatAuthority(target.host, target.port),
           track,
           cancelled,
-        )
+        ).catch((error) => {
+          upstream.metrics.failures += 1;
+          throw error;
+        })
       : await connectApprovedAddress(decision.addresses, target.port, track, cancelled);
+    if (viaIsp) {
+      const { metrics } = upstream;
+      metrics.tunnels += 1;
+      tunnel.on('data', (chunk: Buffer) => {
+        metrics.bytesDown += chunk.length;
+      });
+      client.on('data', (chunk: Buffer) => {
+        metrics.bytesUp += chunk.length;
+      });
+    }
     this.assertDispatch();
     if (client.destroyed) {
       tunnel.destroy();
