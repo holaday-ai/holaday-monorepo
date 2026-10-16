@@ -1,7 +1,8 @@
+import type { BrowserContext, Route } from 'playwright';
 import { TEXT_URL_RE, trimTextUrl } from '../../execution/text-urls.js';
 import type { RunSupercarOptions, SupercarOutcome, SupercarTickEvent } from '../supercar/index.js';
-import type { SearchProvider } from './search-provider.js';
-import { serveSearchResults } from './search-results-page.js';
+import type { SearchProvider, WebSearchResult } from './search-provider.js';
+import { engineResultsQuery, redirectHtml, serveSearchResults } from './search-results-page.js';
 
 type Engine = 'Google' | 'Bing' | 'DuckDuckGo' | '百度';
 export interface SearchWall {
@@ -159,20 +160,13 @@ async function viaSearchApi(
     });
     const page = await args.executor?.getPage();
     if (!results.length || !page) return null;
-    // ACCEPT-283-R4: the links the API returned are observed sources, as tasks.ts
-    // records for web_search; otherwise answer checks strip them as ungrounded.
-    for (const result of results)
-      await args.onEvidence?.({
-        fact: `web_search_url=${result.url}`,
-        sourceType: 'tool_result',
-        sourceDetail: `search API result (${provider.id})`,
-        confidence: 'observed',
-      });
+    await recordApiResults(results, provider, args);
     const served = await serveSearchResults(page.context(), {
       query: plan.query,
       label: provider.label,
       results,
     });
+    const unguard = await guardEngineSearches(page.context(), provider, args, served);
     return {
       plan: withAlternate(
         {
@@ -186,11 +180,79 @@ async function viaSearchApi(
         served.url,
         preferred,
       ),
-      dispose: served.dispose,
+      dispose: async () => {
+        await unguard().catch(() => {});
+        await served.dispose();
+      },
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * ACCEPT-283-R4: the links the API returned are observed sources, as tasks.ts
+ * records for web_search; otherwise answer checks strip them as ungrounded.
+ */
+async function recordApiResults(
+  results: readonly WebSearchResult[],
+  provider: SearchProvider,
+  args: RunSupercarOptions,
+) {
+  for (const result of results)
+    await args.onEvidence?.({
+      fact: `web_search_url=${result.url}`,
+      sourceType: 'tool_result',
+      sourceDetail: `search API result (${provider.id})`,
+      confidence: 'observed',
+    });
+}
+
+/**
+ * SEARCH-GUARD-1: while the search API answers, the agent's own navigation to
+ * a search engine's results page (Google /search or /sorry, Bing, DuckDuckGo)
+ * is not opened: its query goes to the API and the browser lands on the API
+ * results page, which says so. Engine home pages, Maps, Shopping and other
+ * verticals are untouched; when the API has nothing, the engine opens as before.
+ */
+async function guardEngineSearches(
+  context: BrowserContext,
+  provider: SearchProvider,
+  args: RunSupercarOptions,
+  served: Awaited<ReturnType<typeof serveSearchResults>>,
+): Promise<() => Promise<void>> {
+  const matcher = (url: URL) => engineResultsQuery(url.href) !== null;
+  const handler = async (route: Route) => {
+    const request = route.request();
+    let mainFrame = false;
+    try {
+      mainFrame =
+        request.isNavigationRequest() && request.frame() === request.frame().page().mainFrame();
+    } catch {
+      /* no frame yet: not a page navigation we redirect */
+    }
+    const query = engineResultsQuery(request.url())?.trim();
+    if (!mainFrame || !query || query.length > 500) return route.fallback();
+    const results = await provider
+      .search(query, { count: 10, signal: AbortSignal.timeout(15_000) })
+      .catch(() => [] as WebSearchResult[]);
+    if (!results.length) return route.fallback();
+    await recordApiResults(results, provider, args);
+    const to = served.add({
+      query,
+      label: provider.label,
+      results,
+      note: `已改用搜索接口结果页：本次不打开 ${new URL(request.url()).hostname} 的搜索结果页。`,
+    });
+    return route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      headers: { 'cache-control': 'no-store' },
+      body: redirectHtml(to),
+    });
+  };
+  await context.route(matcher, handler);
+  return () => context.unroute(matcher, handler);
 }
 
 /** Partial weather information is useful; missing temperature alone is not failure. */
