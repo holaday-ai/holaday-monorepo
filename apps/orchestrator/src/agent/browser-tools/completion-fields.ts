@@ -374,16 +374,18 @@ export function assessCompletionFacts(input: {
         ) ||
         // Host receipts (download, typed text, scroll) are facts whatever the binding.
         receipts.includes(v) ||
-        // A result list ("title — URL") is proven by the listing page's own link.
+        // A result list ("title — URL") is proven by the listing page's own link,
+        // also when the fact names the listing's tab (ACCEPT-283-R5 D16).
         (!opensLinks &&
-          !fact.tabId &&
           !!fact.sourceURL &&
-          pages.some((page) =>
-            page.links?.some(
-              (link) =>
-                normalizeFact(link.url) === normalizeFact(fact.sourceURL!) &&
-                normalizeFact(link.text).includes(v),
-            ),
+          pages.some(
+            (page) =>
+              (!fact.tabId || page.tabId === fact.tabId) &&
+              page.links?.some(
+                (link) =>
+                  normalizeFact(link.url) === normalizeFact(fact.sourceURL!) &&
+                  normalizeFact(link.text).includes(v),
+              ),
           )),
     );
     if (grounded) continue;

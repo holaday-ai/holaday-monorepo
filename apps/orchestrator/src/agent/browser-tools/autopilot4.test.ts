@@ -279,3 +279,36 @@ describe('6. the planner restates the user, it does not add requirements (core-0
     expect(system).toContain('不得写出页面上的预期文字');
   });
 });
+
+describe('ACCEPT-283-R5 D16: a result list bound to its listing tab and each item’s own link', () => {
+  const listing = {
+    text: '「HOLA DAY AI」的搜索结果 Hola-Dermat:护肤AI助手 https://www.hubwiz.com/blog/x',
+    tabId: 'tab_list',
+    sourceURL: 'https://search-results.holaday.invalid/search?q=HOLA%20DAY%20AI',
+    links: [{ text: 'Hola-Dermat:护肤AI助手', url: 'https://www.hubwiz.com/blog/x' }],
+  };
+  const fact = (tabId: string, value = 'Hola-Dermat:护肤AI助手') => ({
+    name: '第1条标题',
+    value,
+    sourceURL: 'https://www.hubwiz.com/blog/x',
+    tabId,
+  });
+  it('the listing page in that tab links the title to that URL: grounded', () => {
+    const result = assessCompletionFacts({
+      summary: '1. Hola-Dermat:护肤AI助手 https://www.hubwiz.com/blog/x',
+      fields: [fact('tab_list')],
+      pages: [listing],
+    });
+    expect(result.contradictions).toEqual([]);
+  });
+  it('another tab, or a title the link does not carry, is still unread', () => {
+    for (const f of [fact('tab_other'), fact('tab_list', '另一个标题')]) {
+      const result = assessCompletionFacts({
+        summary: `1. ${f.value}`,
+        fields: [f],
+        pages: [listing],
+      });
+      expect(result.contradictions.length, f.tabId + f.value).toBeGreaterThan(0);
+    }
+  });
+});
