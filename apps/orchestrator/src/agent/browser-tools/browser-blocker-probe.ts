@@ -204,7 +204,19 @@ async function frameVisibility(frame: Frame) {
   return { visible: true, ratio, modal, local };
 }
 
+/**
+ * ACCEPT-283-R6: a navigation in progress (a redirect, a late location change)
+ * destroys the context the probe runs in. That is not a page the user must
+ * look at: read it again once it has loaded, and only then call it unreadable.
+ */
 export async function probeBrowserBlocker(page: Page, intent?: string) {
+  const first = await probeOnce(page, intent);
+  if (first?.reason !== 'page_unreadable') return first;
+  await page.waitForLoadState('domcontentloaded', { timeout: 3_000 }).catch(() => {});
+  return probeOnce(page, intent);
+}
+
+async function probeOnce(page: Page, intent?: string) {
   let readableContent = false;
   let targets: ReturnType<typeof collectSurface>['publicTargets'] | undefined;
   let localNotice:
