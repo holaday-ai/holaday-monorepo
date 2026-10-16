@@ -93,6 +93,97 @@ describe('search providers (local stand-ins only, no real key)', () => {
   });
 });
 
+describe('GOOGLE-WALL-2: legacy Brave name, mainland Qwen and an ordered chain', () => {
+  const braveBody = { web: { results: [{ title: 'Brave hit', url: 'https://brave.example/1' }] } };
+  const qwenBody = {
+    output: {
+      search_info: { search_results: [{ title: 'Qwen hit', url: 'https://qwen.example/1' }] },
+    },
+  };
+  it('reads the early BRAVE_API_KEY, the current name winning', async () => {
+    const keys: string[] = [];
+    const fetchImpl = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      keys.push(String((init?.headers as Record<string, string>)['x-subscription-token']));
+      return json(braveBody);
+    }) as unknown as typeof fetch;
+    await searchProviderFromEnv(
+      { BROWSER_SEARCH_API_PROVIDER: 'brave', BRAVE_API_KEY: 'old' },
+      fetchImpl,
+    )!.search('q', { count: 1 });
+    await searchProviderFromEnv(
+      { BROWSER_SEARCH_API_PROVIDER: 'brave', BRAVE_API_KEY: 'old', BRAVE_SEARCH_API_KEY: 'new' },
+      fetchImpl,
+    )!.search('q', { count: 1 });
+    expect(keys).toEqual(['old', 'new']);
+  });
+  it('qwen-cn uses the mainland key and endpoint and says so', async () => {
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (url: unknown, init?: RequestInit) => {
+      calls.push(`${String(url)} ${(init?.headers as Record<string, string>).authorization}`);
+      return json(qwenBody);
+    }) as unknown as typeof fetch;
+    const provider = searchProviderFromEnv(
+      {
+        BROWSER_SEARCH_API_PROVIDER: 'qwen-cn',
+        DASHSCOPE_CN_API_KEY: 'cn-key',
+        DASHSCOPE_INTL_API_KEY: 'intl-key',
+      },
+      fetchImpl,
+    )!;
+    expect(await provider.search('q', { count: 1 })).toEqual([
+      { title: 'Qwen hit', url: 'https://qwen.example/1' },
+    ]);
+    expect(calls).toEqual([
+      'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation Bearer cn-key',
+    ]);
+    expect(provider.id).toBe('search-api:qwen-cn');
+    expect(provider.label).toContain('大陆');
+    expect(
+      searchProviderFromEnv({
+        BROWSER_SEARCH_API_PROVIDER: 'qwen-cn',
+        DASHSCOPE_INTL_API_KEY: 'k',
+      }),
+    ).toBeNull();
+  });
+  it('tries providers in order and names the one that answered', async () => {
+    const fetchImpl = vi.fn(async (url: unknown) =>
+      String(url).includes('brave') ? json({}, 429) : json(qwenBody),
+    ) as unknown as typeof fetch;
+    const provider = searchProviderFromEnv(
+      {
+        BROWSER_SEARCH_API_PROVIDER: 'brave, qwen-cn, engine-fallback',
+        BRAVE_API_KEY: 'b',
+        DASHSCOPE_CN_API_KEY: 'c',
+      },
+      fetchImpl,
+    )!;
+    expect((await provider.search('q', { count: 1 }))[0]?.title).toBe('Qwen hit');
+    expect(provider.id).toBe('search-api:qwen-cn');
+  });
+  it('skips a provider without its key, and fails only when every provider fails', async () => {
+    expect(
+      searchProviderFromEnv({
+        BROWSER_SEARCH_API_PROVIDER: 'brave,qwen-cn',
+        DASHSCOPE_CN_API_KEY: 'c',
+      })?.id,
+    ).toBe('search-api:qwen-cn');
+    expect(
+      searchProviderFromEnv({ BROWSER_SEARCH_API_PROVIDER: 'brave,qwen-cn,engine-fallback' }),
+    ).toBeNull();
+    const failing = vi.fn(async () => json({}, 500)) as unknown as typeof fetch;
+    await expect(
+      searchProviderFromEnv(
+        {
+          BROWSER_SEARCH_API_PROVIDER: 'brave,qwen-cn',
+          BRAVE_API_KEY: 'b',
+          DASHSCOPE_CN_API_KEY: 'c',
+        },
+        failing,
+      )!.search('q', { count: 1 }),
+    ).rejects.toThrow('search_api_http_500');
+  });
+});
+
 describe('the results page', () => {
   let browser: Browser;
   beforeAll(async () => {

@@ -29,7 +29,11 @@ type Fetch = typeof fetch;
 export const SEARCH_API_ENV = {
   provider: 'BROWSER_SEARCH_API_PROVIDER',
   braveKey: 'BRAVE_SEARCH_API_KEY',
+  /** GOOGLE-WALL-2: the name the early Brave adapter used; the new name wins. */
+  braveKeyLegacy: 'BRAVE_API_KEY',
   qwenKey: 'DASHSCOPE_INTL_API_KEY',
+  /** GOOGLE-WALL-2: Qwen web search on the mainland (Beijing) endpoint. */
+  qwenCnKey: 'DASHSCOPE_CN_API_KEY',
   qwenBaseUrl: 'BROWSER_SEARCH_API_QWEN_BASE_URL',
   qwenModel: 'BROWSER_SEARCH_API_QWEN_MODEL',
 } as const;
@@ -122,14 +126,18 @@ export class BraveSearchProvider implements SearchProvider {
  * result list. The model's own text is not used.
  */
 export class QwenWebSearchProvider implements SearchProvider {
-  readonly id = 'search-api:qwen';
-  readonly label = '通义千问联网搜索接口';
+  readonly id: string;
+  readonly label: string;
   constructor(
     private readonly apiKey: string,
     private readonly fetchImpl: Fetch = fetch,
     private readonly baseUrl = 'https://dashscope-intl.aliyuncs.com',
     private readonly model = 'qwen-flash',
-  ) {}
+    region: 'intl' | 'cn' = 'intl',
+  ) {
+    this.id = region === 'cn' ? 'search-api:qwen-cn' : 'search-api:qwen';
+    this.label = region === 'cn' ? '通义千问联网搜索接口（大陆）' : '通义千问联网搜索接口';
+  }
   async search(query: string, options: { count: number; signal?: AbortSignal }) {
     const response = await this.fetchImpl(
       `${this.baseUrl.replace(/\/+$/, '')}/api/v1/services/aigc/text-generation/generation`,
@@ -158,33 +166,90 @@ export class QwenWebSearchProvider implements SearchProvider {
 }
 
 /**
- * `BROWSER_SEARCH_API_PROVIDER`: none (default) | stub | brave | qwen. A
- * provider without its key is not configured (null), never a silent default.
+ * GOOGLE-WALL-2: providers tried in order; the first with results answers.
+ * `id`/`label` name the provider that answered the last search, so the user
+ * is told where these results came from.
  */
-export function searchProviderFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-  fetchImpl: Fetch = fetch,
+export class ChainSearchProvider implements SearchProvider {
+  private answered: SearchProvider;
+  constructor(private readonly providers: readonly SearchProvider[]) {
+    this.answered = providers[0]!;
+  }
+  get id() {
+    return this.answered.id;
+  }
+  get label() {
+    return this.answered.label;
+  }
+  async search(query: string, options: { count: number; signal?: AbortSignal }) {
+    let failure: unknown;
+    for (const provider of this.providers) {
+      options.signal?.throwIfAborted();
+      try {
+        const results = await provider.search(query, options);
+        if (results.length) {
+          this.answered = provider;
+          return results;
+        }
+      } catch (error) {
+        failure = error;
+      }
+    }
+    if (failure) throw failure;
+    return [];
+  }
+}
+
+function providerNamed(
+  name: string,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: Fetch,
 ): SearchProvider | null {
-  switch ((env[SEARCH_API_ENV.provider] ?? 'none').trim().toLowerCase()) {
+  switch (name) {
     case 'stub':
       // Fixture results must never reach a real user as search results.
       return env.NODE_ENV === 'production' ? null : new StubSearchProvider();
     case 'brave': {
-      const key = env[SEARCH_API_ENV.braveKey];
+      const key = env[SEARCH_API_ENV.braveKey] || env[SEARCH_API_ENV.braveKeyLegacy];
       return key ? new BraveSearchProvider(key, fetchImpl) : null;
     }
-    case 'qwen': {
-      const key = env[SEARCH_API_ENV.qwenKey];
+    case 'qwen':
+    case 'qwen-cn': {
+      const cn = name === 'qwen-cn';
+      const key = env[cn ? SEARCH_API_ENV.qwenCnKey : SEARCH_API_ENV.qwenKey];
       return key
         ? new QwenWebSearchProvider(
             key,
             fetchImpl,
-            env[SEARCH_API_ENV.qwenBaseUrl] || undefined,
+            (cn ? undefined : env[SEARCH_API_ENV.qwenBaseUrl]) ||
+              (cn ? 'https://dashscope.aliyuncs.com' : undefined),
             env[SEARCH_API_ENV.qwenModel] || undefined,
+            cn ? 'cn' : 'intl',
           )
         : null;
     }
     default:
       return null;
   }
+}
+
+/**
+ * `BROWSER_SEARCH_API_PROVIDER`: none (default), or one or more of stub |
+ * brave | qwen | qwen-cn, comma-separated, tried in order (GOOGLE-WALL-2).
+ * A provider without its key is skipped, never a silent default; with none
+ * configured the result is null. `engine-fallback` may end the list: the
+ * alternate engine always follows when no API answers.
+ */
+export function searchProviderFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  fetchImpl: Fetch = fetch,
+): SearchProvider | null {
+  const providers = (env[SEARCH_API_ENV.provider] ?? 'none')
+    .split(',')
+    .map((name) => name.trim().toLowerCase())
+    .filter((name) => name && name !== 'none' && name !== 'engine-fallback')
+    .map((name) => providerNamed(name, env, fetchImpl))
+    .filter((provider): provider is SearchProvider => provider !== null);
+  if (!providers.length) return null;
+  return providers.length === 1 ? providers[0]! : new ChainSearchProvider(providers);
 }
