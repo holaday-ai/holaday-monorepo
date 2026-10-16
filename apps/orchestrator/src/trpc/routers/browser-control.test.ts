@@ -8,6 +8,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
 }));
 import { runSupercarTask, supercarAbort } from '../../agent/supercar/agent-loop.js';
 import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
+import { captchaHandoffs } from '../../agent/supercar/captcha-handoff.js';
 import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import type { PlaywrightExecutor } from '../../agent/vision-loop/playwright-executor.js';
@@ -252,5 +253,111 @@ it('one cancellation durably cancels awaiting_user even while a runtime handle r
     expect(local.cancellation.signal.aborted).toBe(true);
   } finally {
     await localChromeTaskSessions.finish('usr_owner', id);
+  }
+});
+
+it('CAPTCHA actions enforce ownership and legacy return leases; continue cannot bypass a wall', async () => {
+  const f = fixture();
+  const binding = browserControlSessions.start(f.instance);
+  let wall = true;
+  const result = captchaHandoffs.wait({
+    taskId: f.instance.taskId,
+    userId: 'usr_owner',
+    control: binding.control,
+    hasWall: async () => wall,
+    onWaiting: async () => {},
+    onResumed: async () => true,
+    pollMs: 60000,
+  });
+  try {
+    await vi.waitFor(() => expect(binding.control.snapshot().phase).toBe('human'));
+    await expect(
+      f.caller.browserControl({
+        taskId: f.instance.taskId,
+        action: 'return',
+        controlLease: 'stale',
+      }),
+    ).rejects.toThrow('browser_control_not_owned');
+    expect(
+      await f.caller.browserCaptcha({ taskId: f.instance.taskId, action: 'continue' }),
+    ).toMatchObject({ ok: false, state: 'waiting', failedRounds: 1, alternateAvailable: false });
+    expect(binding.control.canAgentAct()).toBe(false);
+    f.row.userExternalId = 'other';
+    await expect(
+      f.caller.browserCaptcha({ taskId: f.instance.taskId, action: 'cancel' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    f.row.userExternalId = 'usr_owner';
+    wall = false;
+    expect(
+      await f.caller.browserCaptcha({ taskId: f.instance.taskId, action: 'continue' }),
+    ).toMatchObject({ ok: true, state: 'resuming' });
+    expect(await result).toBe('resumed');
+    expect(f.effects).toEqual([]);
+  } finally {
+    binding.control.close();
+    await result;
+    binding.finish();
+  }
+});
+it('after two failed rounds the user may continue another way; not before (CAPTCHA-REDUCE-1)', async () => {
+  const f = fixture();
+  const binding = browserControlSessions.start(f.instance);
+  const result = captchaHandoffs.wait({
+    taskId: f.instance.taskId,
+    userId: 'usr_owner',
+    control: binding.control,
+    hasWall: async () => true,
+    onWaiting: async () => {},
+    onResumed: async () => true,
+    challenge: async () => ({ kind: 'recaptcha_image', hint: '把所有符合题目的格子点掉' }),
+    pollMs: 60000,
+  });
+  const captcha = (action: 'continue' | 'status' | 'alternate') =>
+    f.caller.browserCaptcha({ taskId: f.instance.taskId, action });
+  try {
+    await vi.waitFor(() => expect(binding.control.snapshot().phase).toBe('human'));
+    expect(await captcha('status')).toMatchObject({
+      failedRounds: 0,
+      alternateAvailable: false,
+      challenge: { kind: 'recaptcha_image' },
+    });
+    expect(await captcha('alternate')).toMatchObject({ ok: false, state: 'waiting' });
+    await captcha('continue');
+    await captcha('continue');
+    expect(await captcha('status')).toMatchObject({ failedRounds: 2, alternateAvailable: true });
+    expect(await captcha('alternate')).toMatchObject({ ok: true, state: 'alternate' });
+    expect(await result).toBe('alternate');
+    expect(binding.control.canAgentAct()).toBe(true);
+    expect(f.effects).toEqual([]);
+  } finally {
+    binding.control.close();
+    await result;
+    binding.finish();
+  }
+});
+it('the CAPTCHA cancel action closes the original task control without submitting input', async () => {
+  const f = fixture();
+  const binding = browserControlSessions.start(f.instance);
+  const result = captchaHandoffs.wait({
+    taskId: f.instance.taskId,
+    userId: 'usr_owner',
+    control: binding.control,
+    hasWall: async () => true,
+    onWaiting: async () => {},
+    onResumed: async () => true,
+  });
+  try {
+    await vi.waitFor(() => expect(binding.control.snapshot().phase).toBe('human'));
+    expect(await f.caller.browserCaptcha({ taskId: f.instance.taskId, action: 'cancel' })).toEqual({
+      ok: true,
+      state: 'cancelled',
+    });
+    expect(await result).toBe('cancelled');
+    expect(binding.control.snapshot().phase).toBe('closed');
+    expect(f.effects).toEqual([]);
+  } finally {
+    binding.control.close();
+    await result;
+    binding.finish();
   }
 });

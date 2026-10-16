@@ -166,6 +166,46 @@ describe('same-task bounded orchestration', () => {
   });
 });
 
+it('a query typed into the search box is a search, so the wall after it is still replaced', async () => {
+  const typed = (searchForm: boolean, unexpected = false) => ({
+    iteration: 1,
+    execution: {
+      actionKind: 'type',
+      actionSummary: '在搜索框输入',
+      ok: true,
+      ...(searchForm ? { searchForm: true } : {}),
+      ...(unexpected ? { effect: { unexpected: true, triggers: [] } as never } : {}),
+    },
+    toolsInTurn: ['type'],
+    textPreamble: '',
+    apiLatencyMs: 0,
+  });
+  const runs = async (event: ReturnType<typeof typed>) => {
+    let calls = 0;
+    await runSearchWithFallback(
+      {
+        ...args,
+        executor: { getPage: async () => ({ url: () => wall.url, goto: async () => {} }) } as never,
+      },
+      {
+        stop: () => true,
+        run: async (a) => {
+          calls++;
+          if (calls > 1) return completed;
+          await a.onTick?.(event);
+          await a.onTick?.(tick);
+          return blocked;
+        },
+      },
+    );
+    return calls;
+  };
+  // QWEN-CN-1 s282-core-01: Google home → type the query → /sorry.
+  expect(await runs(typed(true))).toBe(2);
+  // Any other typing, or a write the search caused, still keeps the task where it is.
+  expect(await runs(typed(false))).toBe(1);
+  expect(await runs(typed(true, true))).toBe(1);
+});
 it('handles a host-verified settled wall even when the runner returns without a park callback', async () => {
   let calls = 0;
   const result = await runSearchWithFallback(
@@ -184,6 +224,36 @@ it('handles a host-verified settled wall even when the runner returns without a 
   );
   expect(calls).toBe(2);
   expect(result.status).toBe('completed');
+});
+it('opens the alternate before the retry, so the replaced wall is not handed to the user', async () => {
+  let current = wall.url;
+  const gotos: string[] = [];
+  const page = {
+    url: () => current,
+    goto: async (url: string) => {
+      gotos.push(url);
+      current = url;
+    },
+  };
+  const seenAtStart: string[] = [];
+  const result = await runSearchWithFallback(
+    { ...args, executor: { getPage: async () => page } as never },
+    {
+      stop: () => true,
+      run: async (a) => {
+        seenAtStart.push(current);
+        if (seenAtStart.length === 1) {
+          await a.onTick?.(tick);
+          return blocked;
+        }
+        return completed;
+      },
+    },
+  );
+  expect(result.status).toBe('completed');
+  expect(gotos).toEqual(['https://www.bing.com/search?q=HOLA+DAY+AI']);
+  // The retry starts on Bing, not on Google's /sorry page.
+  expect(seenAtStart).toEqual([wall.url, 'https://www.bing.com/search?q=HOLA+DAY+AI']);
 });
 it('extracts an unquoted search query without including output instructions', () => {
   expect(

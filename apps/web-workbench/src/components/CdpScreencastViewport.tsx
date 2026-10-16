@@ -1,4 +1,3 @@
-import { BrowserViewportToolbar } from '@/components/BrowserViewportToolbar';
 import {
   type CdpInputBridgeState,
   INITIAL_CDP_INPUT_BRIDGE_STATE,
@@ -12,7 +11,6 @@ import {
 } from '@/components/cdp-screencast-state';
 import { appendBrowserStreamToken } from '@/lib/browser-stream-url';
 import {
-  type BrowserViewportRenderMode,
   type BrowserViewportSize,
   browserViewportForHost,
   browserViewportV2ForHost,
@@ -96,6 +94,7 @@ interface InputPayload {
     | 'keyUp'
     | 'insertText'
     | 'viewport';
+  deviceScaleFactor?: number;
   x?: number;
   y?: number;
   button?: 'left' | 'middle' | 'right';
@@ -142,16 +141,10 @@ export function CdpScreencastViewport({
   }, [onFrameReady]);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const writeReadyRef = React.useRef(false);
-  const [writeReady, setWriteReady] = React.useState(false);
   const geometryRef = React.useRef<BrowserFrameGeometry | null>(null);
   const observationEpochRef = React.useRef(0);
   const viewportPendingRef = React.useRef(false);
   const requestedViewportRef = React.useRef<BrowserViewportSize | null>(null);
-  const [renderMode, setRenderMode] = React.useState<BrowserViewportRenderMode>('auto');
-  const [localMode, setLocalMode] = React.useState<'contain' | 'original'>('contain');
-  const [zoom, setZoom] = React.useState(1);
-  const [displayScale, setDisplayScale] = React.useState(1);
-  const [pan, setPan] = React.useState({ x: 0, y: 0 });
   const invalidateGeometry = React.useCallback(() => {
     geometryRef.current = null;
     observationEpochRef.current++;
@@ -269,6 +262,7 @@ export function CdpScreencastViewport({
     [viewportV2],
   );
 
+  const lastDprRef = React.useRef(0);
   const lastViewportRef = React.useRef<BrowserViewportSize | null>(null);
   const [connectionEpoch, setConnectionEpoch] = React.useState(0);
   React.useEffect(() => {
@@ -288,14 +282,19 @@ export function CdpScreencastViewport({
         ? browserViewportV2ForHost({
             hostWidth: host.clientWidth,
             hostHeight: host.clientHeight,
-            renderMode,
+            renderMode: 'auto',
             desktopViewport:
               desktopWidth !== undefined && desktopHeight !== undefined
                 ? { width: desktopWidth, height: desktopHeight }
                 : undefined,
           })
         : browserViewportForHost({ hostWidth: rect.width, hostHeight: rect.height });
-      if (!next || !shouldSendBrowserViewport(lastViewportRef.current, next)) {
+      const deviceScaleFactor = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+      if (
+        !next ||
+        (!shouldSendBrowserViewport(lastViewportRef.current, next) &&
+          lastDprRef.current === deviceScaleFactor)
+      ) {
         return;
       }
       if (viewportV2) {
@@ -305,8 +304,16 @@ export function CdpScreencastViewport({
       }
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        if (sendInput({ type: 'viewport', width: next.width, height: next.height })) {
+        if (
+          sendInput({
+            type: 'viewport',
+            width: next.width,
+            height: next.height,
+            ...(viewportV2 ? { deviceScaleFactor } : {}),
+          })
+        ) {
           lastViewportRef.current = next;
+          lastDprRef.current = deviceScaleFactor;
         }
       }, 100);
     };
@@ -325,7 +332,6 @@ export function CdpScreencastViewport({
     status,
     wsUrl,
     viewportV2,
-    renderMode,
     desktopWidth,
     desktopHeight,
     invalidateGeometry,
@@ -363,17 +369,10 @@ export function CdpScreencastViewport({
       // mode may make wide desktop pages horizontally scrollable, so
       // center the first view on the readable region and recompute it
       // when the host changes size.
-      const scale = viewportV2 && localMode === 'original' ? zoom : placement.scale;
-      setDisplayScale(scale);
+      const scale = placement.scale;
       canvas.style.setProperty('--hd-scale', String(scale));
-      canvas.style.setProperty(
-        '--hd-offset-x',
-        `${viewportV2 && localMode === 'original' ? pan.x : placement.offsetX}px`,
-      );
-      canvas.style.setProperty(
-        '--hd-offset-y',
-        `${viewportV2 && localMode === 'original' ? pan.y : placement.offsetY}px`,
-      );
+      canvas.style.setProperty('--hd-offset-x', `${placement.offsetX}px`);
+      canvas.style.setProperty('--hd-offset-y', `${placement.offsetY}px`);
       host.style.setProperty('--hd-content-width', `${placement.width}px`);
       host.style.setProperty('--hd-content-height', `${placement.height}px`);
       const autoScrollKey = readableScreencastAutoScrollKey({
@@ -413,7 +412,7 @@ export function CdpScreencastViewport({
       window.removeEventListener('resize', onWindowResize);
       sourceDimsRecomputeRef.current = null;
     };
-  }, [fitMode, status, wsUrl, viewportV2, localMode, zoom, pan]);
+  }, [fitMode, status, wsUrl, viewportV2]);
 
   const drawFrameRef = React.useRef(drawFrame);
   drawFrameRef.current = drawFrame;
@@ -461,7 +460,6 @@ export function CdpScreencastViewport({
         return;
       }
       writeReadyRef.current = false;
-      setWriteReady(false);
       invalidateGeometry();
       viewportPendingRef.current = viewportV2;
       const connectionSeq = ++connectionSeqRef.current;
@@ -508,7 +506,6 @@ export function CdpScreencastViewport({
         if (!msg) return;
         if (viewportV2 && msg.type === 'viewport-v2-ready') {
           writeReadyRef.current = msg.controlReady === true;
-          setWriteReady(writeReadyRef.current);
           return;
         }
         if (viewportV2 && msg.type === 'observation-invalidated') {
@@ -689,14 +686,26 @@ export function CdpScreencastViewport({
   }
 
   /** Map a DOM mouse event's clientX/Y to canvas-pixel space. */
-  function getCoords(e: React.MouseEvent | React.WheelEvent): { x: number; y: number } {
+  function getCoords(
+    e: React.MouseEvent | React.WheelEvent,
+    clampDrag = false,
+  ): { x: number; y: number } {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     if (viewportV2) {
       const frame = geometryRef.current;
       const point = frame
-        ? mapClientPointToBrowserFrame({ clientX: e.clientX, clientY: e.clientY, rect, frame })
+        ? mapClientPointToBrowserFrame({
+            clientX: clampDrag
+              ? Math.max(rect.left, Math.min(rect.right - 0.01, e.clientX))
+              : e.clientX,
+            clientY: clampDrag
+              ? Math.max(rect.top, Math.min(rect.bottom - 0.01, e.clientY))
+              : e.clientY,
+            rect,
+            frame,
+          })
         : null;
       return point ?? { x: Number.NaN, y: Number.NaN };
     }
@@ -722,7 +731,7 @@ export function CdpScreencastViewport({
   // Mouse handlers
   const onMouseMove = (e: React.MouseEvent) => {
     if (viewOnly) return;
-    const { x, y } = getCoords(e);
+    const { x, y } = getCoords(e, e.buttons !== 0);
     sendInput({ type: 'mouseMove', x, y });
   };
   const onMouseDown = (e: React.MouseEvent) => {
@@ -742,7 +751,7 @@ export function CdpScreencastViewport({
   };
   const onMouseUp = (e: React.MouseEvent) => {
     if (viewOnly) return;
-    const { x, y } = getCoords(e);
+    const { x, y } = getCoords(e, true);
     sendInput({
       type: 'mouseUp',
       x,
@@ -832,35 +841,6 @@ export function CdpScreencastViewport({
         className,
       )}
     >
-      {viewportV2 && (
-        <BrowserViewportToolbar
-          mode={localMode}
-          zoom={zoom}
-          displayScale={displayScale}
-          onFit={() => {
-            setLocalMode('contain');
-            setPan({ x: 0, y: 0 });
-          }}
-          onOriginal={() => {
-            setLocalMode('original');
-            setZoom(1);
-            setPan({ x: 0, y: 0 });
-          }}
-          onZoom={() => {
-            setLocalMode('original');
-            setZoom(localMode === 'contain' ? 1.25 : Math.min(4, zoom + 0.25));
-          }}
-          onZoomOut={() => setZoom((z) => Math.max(0.25, z - 0.25))}
-          onPan={(x, y) => setPan((p) => ({ x: p.x + x, y: p.y + y }))}
-          renderMode={renderMode}
-          onRenderMode={(mode) => {
-            lastViewportRef.current = null;
-            setRenderMode(mode);
-          }}
-          readOnly={viewOnly || !writeReady}
-          readOnlyLabel="点击和输入暂未开放"
-        />
-      )}
       <div
         ref={hostRef}
         className={cn(
@@ -891,17 +871,25 @@ export function CdpScreencastViewport({
           onPointerDown={
             viewportV2
               ? (e) => {
-                  if (e.pointerType !== 'touch') onMouseDown(e);
+                  if (e.pointerType !== 'touch') {
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    onMouseDown(e);
+                  }
                 }
               : undefined
           }
           onPointerUp={
             viewportV2
               ? (e) => {
-                  if (e.pointerType !== 'touch') onMouseUp(e);
+                  if (e.pointerType !== 'touch') {
+                    onMouseUp(e);
+                    if (e.currentTarget.hasPointerCapture(e.pointerId))
+                      e.currentTarget.releasePointerCapture(e.pointerId);
+                  }
                 }
               : undefined
           }
+          onPointerCancel={viewportV2 ? onMouseUp : undefined}
           onWheel={onWheel}
           onTouchStart={(e) => {
             const t = e.touches[0];
@@ -975,7 +963,7 @@ export function CdpScreencastViewport({
            * swap. The host remains the layout authority. */
           className="absolute left-0 top-0 block origin-top-left will-change-transform"
           style={{
-            cursor: viewOnly ? 'default' : 'crosshair',
+            cursor: 'default',
             touchAction: viewportV2 ? 'none' : undefined,
             transform:
               'translate(var(--hd-offset-x, 0px), var(--hd-offset-y, 0px)) scale(var(--hd-scale, 1))',

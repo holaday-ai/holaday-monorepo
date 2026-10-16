@@ -1,3 +1,4 @@
+import type { CDPSession } from 'playwright';
 import { instanceBrowserCapabilities } from '../config/browser-capabilities.js';
 /**
  * Phase 19 — `/screencast-ws/:userId` upgrade handler.
@@ -100,6 +101,7 @@ export interface ScreencastProxyOptions {
     instance: BrowserInstance,
     envelope: InputEnvelope,
     signal?: AbortSignal,
+    session?: CDPSession | null,
   ) => Promise<{ request: BrowserActionRequest; decision: BrowserActionDecision }>;
   logger: Logger;
   executionDrain?: ExecutionAdmission;
@@ -280,6 +282,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       );
     const inputBridge = createOwnedScreencastInputBridge({
       instance: args.instance,
+      runWithStableViewport: (action) =>
+        streamer && args.viewportV2 ? streamer.runWithStableViewport(action) : action(),
+      viewportV2: args.viewportV2,
       maxViewportHeight: args.viewportV2 ? 2400 : 1600,
       onViewportRequested: args.viewportV2
         ? () => {
@@ -312,7 +317,12 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             }
             if (message.type === 'scroll' || message.type === 'mouseMove') return;
             if (!opts.beforeViewportAction) throw new Error('browser_action_gate_unavailable');
-            const result = await opts.beforeViewportAction(args.instance, envelope, signal);
+            const result = await opts.beforeViewportAction(
+              args.instance,
+              envelope,
+              signal,
+              streamer.getSession(),
+            );
             // Recheck after the asynchronous policy: resize/navigation may have happened.
             if (
               !streamer.matchesPage(await args.instance.executor.getPage()) ||
@@ -341,8 +351,10 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       peek: (taskId) => opts.pool.peek(taskId),
       releasePressed: async (signal) => {
         await inputHandler?.releasePressed(signal);
+        streamer?.notePointerInput('release');
       },
       onViewportApplied: (viewport) => {
+        streamer?.setCaptureScale(viewport.deviceScaleFactor ?? 1);
         if (args.viewportV2) {
           viewportPending = false;
           streamer?.invalidateObservation();
@@ -446,7 +458,10 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       inputHandler = new CdpInputHandler(
         () => streamerRef.getSession(),
         userLog,
-        () => streamerRef.requestFrameRefresh(),
+        (message) => {
+          streamerRef.notePointerInput(message.type);
+          streamerRef.requestFrameRefresh();
+        },
         () => {
           void browserControlSessions
             .quarantine(args.instance, () =>

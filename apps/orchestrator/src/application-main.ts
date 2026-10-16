@@ -27,6 +27,7 @@ import { failStaleTasksWithEvents } from './agent/task-maintenance.js';
 import { PlaywrightExecutor } from './agent/vision-loop/playwright-executor.js';
 import { BrowserPool, reapOrphans } from './browser-pool/index.js';
 import { createVncProxy } from './browser-pool/vnc-proxy.js';
+import { browserProfileStore } from './browser-profiles/profile-store.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { pool as databasePool, db } from './db/client.js';
@@ -53,6 +54,7 @@ import {
   stopPlannedRunner,
 } from './planned/planned-runner.js';
 import { type TaskQueue, createTaskQueue } from './queue/task-queue.js';
+import { authorizeCaptchaViewportInput } from './streaming/captcha-viewport-action.js';
 import { createScreencastProxy } from './streaming/screencast-proxy.js';
 import { createWsServer, loadRehydratedTasks } from './ws/server.js';
 
@@ -118,13 +120,19 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
     }
     if (failed) throw new Error('MAINTENANCE_RESOURCES_UNPROVEN');
   };
-  const registerPeriodic = (name: string, intervalMs: number, action: () => Promise<void>) => {
+  const registerPeriodic = (
+    name: string,
+    intervalMs: number,
+    action: () => Promise<void>,
+    runAtStart = false,
+  ) => {
     let timer: ReturnType<typeof setInterval> | undefined;
     let work: ReturnType<typeof createPeriodicWork> | undefined;
     registerProducer(
       name,
       () => {
         work = createPeriodicWork(executionDrain);
+        if (runAtStart) void work.run(action)?.catch(() => {});
         timer = setInterval(() => {
           void work?.run(action)?.catch(() => {});
         }, intervalMs);
@@ -137,6 +145,25 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
     );
   };
   if (browserVault) registerPeriodic('browser-vault-expiry', 60000, () => browserVault.sweep());
+  // FOLLOWUPS-282: idle cloud browser profiles and crash-left temp files, at
+  // start and daily. No-op while the profile store is off.
+  registerPeriodic(
+    'browser-profile-sweep',
+    24 * 60 * 60 * 1000,
+    async () => {
+      try {
+        const removed = await browserProfileStore()?.sweep();
+        if (removed && (removed.expired || removed.temps))
+          logger.info(removed, 'browser profile sweep: removed stale files');
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'browser profile sweep failed (non-fatal)',
+        );
+      }
+    },
+    true,
+  );
   try {
     // Qwen-only production boot must never construct a legacy provider client.
     // Browser execution remains explicitly unavailable until its commander lane
@@ -936,6 +963,7 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
         // See streaming/screencast-proxy.ts for the protocol contract.
         const screencastProxy = createScreencastProxy({
           pool: browserPool,
+          beforeViewportAction: authorizeCaptchaViewportInput,
           logger,
           ...(ordinary ? { executionDrain: ordinary.coordinator } : {}),
         });

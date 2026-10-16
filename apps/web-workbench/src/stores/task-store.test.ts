@@ -4624,3 +4624,52 @@ describe('frontend audit transport lane recovery', () => {
     expect(useTaskStore.getState().tasks[0].executionMode).toBe('generate');
   });
 });
+
+describe('CAPTCHA handoff state', () => {
+  it('resumes the original task and clears only its typed wait on verified handback', () => {
+    useTaskStore.setState({
+      selectedTaskId: 'tsk_captcha',
+      tasks: [
+        {
+          taskId: 'tsk_captcha',
+          title: 'Captcha',
+          intent: 'read',
+          status: 'awaiting_user',
+          tickCount: 2,
+          createdAt: new Date(),
+          awaitingKind: 'captcha',
+        },
+      ],
+      awaitingUserByTask: {
+        tsk_captcha: { question: 'Verify', at: 1, awaitingKind: 'captcha' },
+        tsk_other: { question: 'Other', at: 1 },
+      },
+      browserInteractive: true,
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.vision.captcha_resolved',
+      taskId: 'tsk_captcha',
+      reason: 'auto',
+    });
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      taskId: 'tsk_captcha',
+      status: 'executing',
+      tickCount: 2,
+    });
+    expect(state.awaitingUserByTask.tsk_captcha).toBeUndefined();
+    expect(state.awaitingUserByTask.tsk_other).toBeDefined();
+    expect(state.browserInteractive).toBe(false);
+  });
+  it('does not present a timed-out wait as resumed', () => {
+    useTaskStore.setState({
+      awaitingUserByTask: { tsk_captcha: { question: 'Verify', at: 1, awaitingKind: 'captcha' } },
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.vision.captcha_resolved',
+      taskId: 'tsk_captcha',
+      reason: 'timeout',
+    });
+    expect(useTaskStore.getState().awaitingUserByTask.tsk_captcha).toBeDefined();
+  });
+});

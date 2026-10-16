@@ -90,6 +90,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { BrowserReplay } from './BrowserReplay';
+import { CaptchaHandoffActions } from './CaptchaHandoffActions';
 
 /**
  * Emergency-only VNC bridge URL. CDP screencast is the production
@@ -1633,7 +1634,7 @@ function CloudBrowserPanel({
               </header>
             )}
           {activeTaskId && <BrowserReplay key={activeTaskId} taskId={activeTaskId} />}
-          {browserAwaiting && !fullscreen && (
+          {browserAwaiting && (
             <div
               role="alert"
               className={cn(
@@ -1678,6 +1679,14 @@ function CloudBrowserPanel({
                     a new tab so the user can complete the login flow
                     on the live site, then come back and reply to the
                     task. */}
+                {awaitingKind === 'captcha' && activeTaskId && (
+                  <CaptchaHandoffActions
+                    taskId={activeTaskId}
+                    {...(!fullscreen && onToggleFullscreen
+                      ? { onFullscreen: onToggleFullscreen }
+                      : {})}
+                  />
+                )}
                 {awaitingKind === 'login' && !frame && persistedFinalUrl && (
                   <SafeExternalLinkButton
                     href={persistedFinalUrl}

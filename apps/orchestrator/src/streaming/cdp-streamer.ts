@@ -44,6 +44,7 @@ import type { Logger } from 'pino';
 import type { CDPSession, Page } from 'playwright';
 import sharp from 'sharp';
 import type { WebSocket } from 'ws';
+import { browserUrlForLog } from '../browser-pool/log-url.js';
 
 export interface CdpStreamerOptions {
   /**
@@ -61,7 +62,7 @@ export interface CdpStreamerOptions {
   ws: WebSocket;
   /** Per-instance logger (already child-tagged with userId). */
   logger: Logger;
-  /** JPEG quality 0..100. Default 60. */
+  /** JPEG quality 0..100. V2 defaults to 90, legacy to 60. */
   quality?: number;
   viewportV2?: boolean;
   onFrame?: (frame: BrowserFrameGeometry) => void;
@@ -83,6 +84,8 @@ export interface ScreencastFrameMessage {
   data: string;
   geometry?: BrowserFrameGeometry;
   metadata: {
+    cssWidth?: number;
+    cssHeight?: number;
     offsetTop?: number;
     pageScaleFactor?: number;
     deviceWidth?: number;
@@ -100,9 +103,49 @@ export interface ScreencastUrlMessage {
 
 export class CdpStreamer {
   private cdpSession: CDPSession | null = null;
+  private captureScale = 1;
+  private pointerHeld = false;
+  notePointerInput(type: string): void {
+    if (type === 'mouseDown') this.pointerHeld = true;
+    if (type === 'mouseUp' || type === 'release') {
+      this.pointerHeld = false;
+      this.requestFrameRefresh();
+    }
+  }
+  private displayTail: Promise<void> = Promise.resolve();
+  private uncertainCaptureSession: CDPSession | null = null;
+  /** CDP screenshots temporarily alter emulation: never dispatch input during capture. */
+  runWithStableViewport<T>(action: () => Promise<T>): Promise<T> {
+    const result = this.displayTail.then(() => {
+      if (this.cdpSession && this.uncertainCaptureSession === this.cdpSession)
+        throw new Error('browser_capture_unsettled');
+      return action();
+    });
+    this.displayTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+  private compositorDirty = false;
+  private compositorTimer: NodeJS.Timeout | null = null;
+  setCaptureScale(scale: number): void {
+    this.captureScale = scale;
+  }
+  private requestHighResolutionFrame(): void {
+    this.compositorDirty = true;
+    if (this.compositorTimer || this.captureInFlight) return;
+    this.compositorTimer = setTimeout(() => {
+      this.compositorTimer = null;
+      if (!this.streaming || !this.compositorDirty) return;
+      this.compositorDirty = false;
+      this.queueCurrentFrameCapture('retina-compositor', this.frameSequence);
+    }, 16);
+  }
   private viewportRevision = 0;
   private observationSequence = 0;
   private tabId = '';
+  private mainFrameId: string | undefined;
   private boundPage: Page | null = null;
   matchesPage(page: Page): boolean {
     return this.boundPage === page && !page.isClosed();
@@ -110,6 +153,7 @@ export class CdpStreamer {
   private readonly pageIds = new WeakMap<Page, string>();
 
   invalidateObservation(): void {
+    this.invalidateCaptureRequests();
     this.viewportRevision++;
     this.observationSequence++;
     this.opts.onObservationInvalidated?.();
@@ -148,7 +192,7 @@ export class CdpStreamer {
   /** How often the watchdog inspects the frame gap. */
   private readonly watchdogIntervalMs = 1000;
   private readonly initialFrameFallbackMs = 1200;
-  private readonly inputRefreshDelayMs = 160;
+  private readonly inputRefreshDelayMs = 16;
   private readonly captureScreenshotTimeoutMs = 2500;
   private readonly opts: Required<
     Omit<
@@ -164,7 +208,7 @@ export class CdpStreamer {
 
   constructor(opts: CdpStreamerOptions) {
     this.opts = {
-      quality: 60,
+      quality: opts.viewportV2 ? 90 : 60,
       viewportV2: false,
       maxWidth: 1440,
       maxHeight: 1200,
@@ -190,6 +234,9 @@ export class CdpStreamer {
       this.cdpSession = await page.context().newCDPSession(page);
       this.wireListeners(this.cdpSession);
       await this.cdpSession.send('Page.enable');
+      const tree = await this.cdpSession.send('Page.getFrameTree');
+      this.mainFrameId = tree?.frameTree?.frame?.id;
+      this.opts.ws.send(JSON.stringify({ type: 'url-changed', url: page.url() }));
       await this.armScreencast('initial-start', null);
       // Start the no-frame counter at "now" so an arm that takes a
       // few hundred ms to produce its first frame doesn't trigger
@@ -221,7 +268,12 @@ export class CdpStreamer {
       // The CDP wire format wraps the JPEG as a base64 string
       // already — pass through unchanged so the frontend can
       // render via `data:image/jpeg;base64,${data}`.
-      this.publishFrame(params.data, params.metadata ?? {});
+      // Chromium's screencast often emits CSS-resolution JPEGs even with DPR=2.
+      // Use compositor damage as the trigger for a coalesced, full-resolution
+      // surface capture. Never upscale a 1x JPEG and call it Retina.
+      if (this.opts.viewportV2 && this.captureScale > 1 && !this.pointerHeld)
+        this.requestHighResolutionFrame();
+      else this.publishFrame(params.data, params.metadata ?? {});
       // Acking is mandatory — without it the streamer waits forever
       // for the previous frame to be consumed and frame flow halts.
       cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch((err: Error) => {
@@ -234,6 +286,7 @@ export class CdpStreamer {
       // Only notify on top-level navigation. Subframes fire too
       // but the SPA only cares about the address-bar URL.
       if (params.frame.parentId) return;
+      this.mainFrameId = params.frame.id;
       // A screenshot started on the prior document must never become the first
       // frame of the new page, even when Chromium keeps the same CDP session.
       this.invalidateCaptureRequests();
@@ -267,7 +320,8 @@ export class CdpStreamer {
     // stream stays valid.
     cdp.on('Page.navigatedWithinDocument', (params) => {
       if (!this.streaming || this.cdpSession !== cdp) return;
-      if (params.frameId == null) return;
+      if (params.frameId == null || (this.mainFrameId && params.frameId !== this.mainFrameId))
+        return;
       this.invalidateCaptureRequests();
       // Only notify on the MAIN frame's pushState/replaceState; the
       // streamer keeps the main frame id implicit via the no-parent
@@ -331,10 +385,11 @@ export class CdpStreamer {
         this.lastFrameAt = Date.now();
         this.scheduleInitialFrameFallback();
       }
-      this.opts.logger.info({ reason, url }, 'cdp-streamer: armed screencast');
+      // Origin only: a page URL's path and query can carry tokens (FOLLOWUPS-282).
+      this.opts.logger.info({ reason, origin: logOrigin(url) }, 'cdp-streamer: armed screencast');
     } catch (err) {
       this.opts.logger.warn(
-        { reason, url, err: errMsg(err) },
+        { reason, origin: logOrigin(url), err: errMsg(err) },
         'cdp-streamer: arm screencast failed',
       );
     }
@@ -343,11 +398,16 @@ export class CdpStreamer {
   private startWatchdog(): void {
     if (this.watchdogTimer) return;
     this.watchdogTimer = setInterval(() => {
+      if (this.opts.viewportV2 && this.hasReceivedFrame && Date.now() - this.lastFrameAt >= 2000)
+        this.requestFrameRefresh();
       void this.watchdogTick();
     }, this.watchdogIntervalMs);
   }
 
   private stopWatchdog(): void {
+    if (this.compositorTimer) clearTimeout(this.compositorTimer);
+    this.compositorTimer = null;
+    this.compositorDirty = false;
     if (!this.watchdogTimer) return;
     clearInterval(this.watchdogTimer);
     this.watchdogTimer = null;
@@ -382,12 +442,11 @@ export class CdpStreamer {
     try {
       const dimensions = await sharp(Buffer.from(frame.data, 'base64')).metadata();
       const m = frame.metadata;
-      const metrics =
-        (!m.deviceWidth || !m.deviceHeight) && session
-          ? await session.send('Page.getLayoutMetrics')
-          : null;
-      const cssWidth = m.deviceWidth ?? metrics?.cssLayoutViewport?.clientWidth;
-      const cssHeight = m.deviceHeight ?? metrics?.cssLayoutViewport?.clientHeight;
+      // Screencast deviceWidth/deviceHeight can be physical pixels under DPR
+      // emulation. Only cssLayoutViewport has an unambiguous input coordinate unit.
+      const metrics = !m.cssWidth && session ? await session.send('Page.getLayoutMetrics') : null;
+      const cssWidth = m.cssWidth ?? metrics?.cssLayoutViewport?.clientWidth;
+      const cssHeight = m.cssHeight ?? metrics?.cssLayoutViewport?.clientHeight;
       if (
         !this.streaming ||
         this.cdpSession !== session ||
@@ -477,7 +536,10 @@ export class CdpStreamer {
           }
           const data = (response as { data?: unknown }).data;
           if (typeof data !== 'string' || data.length === 0) continue;
-          this.publishFrame(data, {});
+          this.publishFrame(
+            data,
+            (response as { metadata?: ScreencastFrameMessage['metadata'] }).metadata ?? {},
+          );
           const log =
             request.reason === 'initial-frame-fallback'
               ? this.opts.logger.info.bind(this.opts.logger)
@@ -492,31 +554,57 @@ export class CdpStreamer {
       }
     } finally {
       this.captureInFlight = false;
+      if (this.compositorDirty) this.requestHighResolutionFrame();
       if (this.streaming && this.pendingCapture) {
         void this.drainCaptureQueue();
       }
     }
   }
 
-  private async captureCurrentPage(cdp: CDPSession): Promise<unknown> {
-    let timeout: NodeJS.Timeout | null = null;
-    try {
-      return await Promise.race([
-        cdp.send('Page.captureScreenshot', {
-          format: 'jpeg',
-          quality: this.opts.quality,
-          fromSurface: true,
-          captureBeyondViewport: false,
-        }),
-        new Promise<never>((_resolve, reject) => {
-          timeout = setTimeout(() => {
-            reject(new Error('current-page capture timed out'));
-          }, this.captureScreenshotTimeoutMs);
-        }),
-      ]);
-    } finally {
-      if (timeout) clearTimeout(timeout);
-    }
+  private captureCurrentPage(cdp: CDPSession): Promise<unknown> {
+    const capture = async () => {
+      if (this.cdpSession !== cdp) throw new Error('browser_capture_session_changed');
+      // A high-DPR screenshot resets Chromium's native drag latch. During a
+      // held pointer, keep forwarding compositor frames without emulation.
+      if (this.opts.viewportV2 && this.pointerHeld) return {};
+      // Read CSS metrics BEFORE screenshot temporarily changes the emulation.
+      const metrics = this.opts.viewportV2 ? await cdp.send('Page.getLayoutMetrics') : null;
+      let timeout: NodeJS.Timeout | null = null;
+      try {
+        const response = await Promise.race([
+          cdp.send('Page.captureScreenshot', {
+            format: 'jpeg',
+            quality: this.opts.quality,
+            fromSurface: true,
+            captureBeyondViewport: false,
+          }),
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => {
+              if (this.opts.viewportV2) {
+                this.uncertainCaptureSession = cdp;
+                void this.restartAfterStall();
+              }
+              reject(new Error('current-page capture timed out'));
+            }, this.captureScreenshotTimeoutMs);
+          }),
+        ]);
+        return {
+          ...response,
+          metadata: metrics?.cssLayoutViewport
+            ? {
+                cssWidth: metrics.cssLayoutViewport.clientWidth,
+                cssHeight: metrics.cssLayoutViewport.clientHeight,
+                pageScaleFactor: metrics.cssVisualViewport?.scale ?? 1,
+                scrollOffsetX: metrics.cssLayoutViewport.pageX,
+                scrollOffsetY: metrics.cssLayoutViewport.pageY,
+              }
+            : {},
+        };
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    };
+    return this.opts.viewportV2 ? this.runWithStableViewport(capture) : capture();
   }
 
   /**
@@ -531,6 +619,10 @@ export class CdpStreamer {
     this.inputRefreshTimer = setTimeout(() => {
       this.inputRefreshTimer = null;
       if (!this.streaming || this.frameSequence !== expectedSequence) return;
+      if (this.opts.viewportV2 && this.pointerHeld) {
+        void this.armScreencast('held-pointer-refresh', null);
+        return;
+      }
       this.queueCurrentFrameCapture('post-input-fallback', expectedSequence);
     }, this.inputRefreshDelayMs);
   }
@@ -655,6 +747,9 @@ export class CdpStreamer {
     this.cdpSession = await page.context().newCDPSession(page);
     this.wireListeners(this.cdpSession);
     await this.cdpSession.send('Page.enable');
+    const tree = await this.cdpSession.send('Page.getFrameTree');
+    this.mainFrameId = tree?.frameTree?.frame?.id;
+    this.opts.ws.send(JSON.stringify({ type: 'url-changed', url: page.url() }));
     await this.armScreencast('hard-restart', page.url());
     await this.opts.onViewportMayReset?.();
   }
@@ -706,4 +801,8 @@ export class CdpStreamer {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function logOrigin(url: string | null): string | null {
+  return url === null ? null : browserUrlForLog(url);
 }

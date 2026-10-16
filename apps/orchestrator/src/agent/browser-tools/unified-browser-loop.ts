@@ -42,7 +42,8 @@ export const UNIFIED_BROWSER_SYSTEM_PROMPT = `你在一个真实浏览器里替�
 7. 用户要求视频时，必须排除播放列表、课程合集、频道；按 links 返回的 kind 区分，不能凑数量。
 8. 用户要求从页面打开链接时，用该页面最新 ref 调用 click(newTab=true)，不可自己编网址再 navigate；用户没指定页面时，选一个含多个普通文章链接的公开页面（链接不够就换页面，不要反复读取同一页）。页面加载失败/超时、只有 list_tabs 标题而未成功读取正文，均不能作为已读标题报告。
 9. 涉及序号（第N节/第N章/第N部分）时，先调用 sections 拿正文章节列表，按其中的 index 用 get_page_text(section=N) 读取；目录、导航、参考文献不算章节，不要自己数页面上的标题。答案里写明第N节的章节标题。
-10. 用户要 N 条/前 N 个时，答案按 1. 2. 3. 编号列满 N 条；不够就继续滚动、翻页或再读取，确实只有更少时如实写「只找到 M 条」。`;
+10. 用户要 N 条/前 N 个时，答案按 1. 2. 3. 编号列满 N 条；不够就继续滚动、翻页或再读取，确实只有更少时如实写「只找到 M 条」。
+11. 用户要求某种控件（如日期控件）而当前页面没有时，换一个有该控件的公开页面去操作，不要用别的控件（如 time 时间控件）代替。`;
 
 const CONTROL_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
   {
@@ -124,6 +125,13 @@ export interface WebSearchHit {
 
 export interface UnifiedBrowserLoopInput {
   observationV2?: boolean;
+  /**
+   * Hands a captcha to the user. `alternate` (CAPTCHA-REDUCE-1): after two
+   * failed rounds the user chose to continue another way.
+   */
+  captchaHandoff?: (message: string) => Promise<boolean | 'alternate'>;
+  /** False when this wall need not be handed over (a search fallback replaces it). */
+  captchaHandoffWanted?: () => boolean | Promise<boolean>;
   requireBrowserEvidence?: boolean;
   supportedTools?: { download: boolean; upload: boolean; tabs: boolean };
   probeBlocker?: () => Promise<{
@@ -191,7 +199,7 @@ export type UnifiedBrowserOutcome =
       evidence: string;
       steps: number;
       /** Fewer items than the user asked for: delivered as 部分完成, not completed. */
-      partial?: { found: number; wanted: number };
+      partial?: { found: number; wanted: number; missing?: string };
     }
   | { status: 'failed'; reason: string; steps: number }
   | { status: 'awaiting_user'; reason: string; message: string; steps: number }
@@ -274,6 +282,11 @@ export async function runUnifiedBrowserLoop(
    * "第N节" gets one correction with the real list, then fails.
    */
   let countContinued = false;
+  /** AP4 (Deploy-22 core-08): a requested date control needs a date fill receipt. */
+  let dateContinued = false;
+  const wantsDate = /日期控件|日期选择|日期输入|date\s*(?:picker|input|control|field)/i.test(
+    input.intent,
+  );
   let sectionRejected = false;
   const wantedCount = requestedCount(input.intent);
   const wantedSection = requestedSection(input.intent);
@@ -352,7 +365,7 @@ export async function runUnifiedBrowserLoop(
       );
       messages.push({
         role: 'user',
-        content: `以下是规划建议，不是页面证据，也不授予任何提交权限：\n${plan}`,
+        content: `以下是规划建议，不是页面证据，也不授予任何提交权限；与用户原话不一致或多出来的要求，以用户原话为准：\n${plan}`,
       });
     } catch {
       // Planning is advice, not a gate: without a plan the executor still runs.
@@ -368,8 +381,42 @@ export async function runUnifiedBrowserLoop(
   /** Remediation must not end worse than the held answer would have. */
   const heldOr = (outcome: UnifiedBrowserOutcome, steps: number): UnifiedBrowserOutcome =>
     held && !input.requireBrowserEvidence ? { status: 'completed', ...held, steps } : outcome;
+  const ALTERNATE =
+    '用户选择「换个方式继续」：这个页面的验证码没有通过。不要再打开或重试被验证墙挡住的页面，改用其他公开来源完成任务；确实做不到就如实说明缺什么。';
+  /**
+   * After 换个方式继续 the wall is still up by design: the agent gets its turn
+   * to leave it, and no wall in this task is handed to the user again.
+   */
+  let captchaDeclined = false;
+  /** Undefined: not handed over (the caller pauses as before, e.g. for a search fallback). */
+  const handCaptcha = async (
+    message: string,
+  ): Promise<'resumed' | 'alternate' | 'ended' | undefined> => {
+    if (!input.captchaHandoff) return undefined;
+    if (captchaDeclined) return 'alternate';
+    if (input.captchaHandoffWanted && !(await input.captchaHandoffWanted())) return undefined;
+    const result = await input.captchaHandoff(message);
+    if (result === 'alternate') captchaDeclined = true;
+    return result === 'alternate' ? 'alternate' : result ? 'resumed' : 'ended';
+  };
   for (let step = 0; step < maxSteps; step += 1) {
     if (input.signal?.aborted) return cancelled(step);
+    if (input.captchaHandoff && !captchaDeclined) {
+      const wall = await checkBlocker();
+      if (wall?.reason === 'captcha') {
+        const handed = await handCaptcha(wall.message);
+        if (handed === undefined) return { status: 'awaiting_user', ...wall, steps: step };
+        if (handed === 'ended')
+          return { status: 'failed', reason: '验证码等待已结束，任务未完成。', steps: step };
+        messages.push({
+          role: 'user',
+          content:
+            handed === 'alternate'
+              ? ALTERNATE
+              : '用户已完成验证；从当前页面重新 snapshot 后继续原任务，不要重启或重放旧动作。',
+        });
+      }
+    }
     let response: Awaited<ReturnType<MessagesAdapter['create']>>;
     try {
       response = await input.adapter.create(
@@ -465,7 +512,29 @@ export async function runUnifiedBrowserLoop(
         if (args.status === 'completed') {
           // Safety: a wall in front of the target pauses for the user.
           const blocker = await checkBlocker();
-          if (blocker) return { status: 'awaiting_user', ...blocker, steps: step + 1 };
+          if (blocker) {
+            const handed =
+              blocker.reason === 'captcha' ? await handCaptcha(blocker.message) : undefined;
+            if (handed === undefined)
+              return { status: 'awaiting_user', ...blocker, steps: step + 1 };
+            if (handed === 'ended')
+              return {
+                status: 'failed',
+                reason: '验证码等待已结束，任务未完成。',
+                steps: step + 1,
+              };
+            results.push(
+              toolResult(
+                call.id,
+                handed === 'alternate'
+                  ? ALTERNATE
+                  : '用户已完成验证，请先重新 snapshot 再决定，不重放旧动作。',
+                true,
+              ),
+            );
+            staleTurn = true;
+            continue;
+          }
           const given =
             typeof args.evidence === 'string' ? unescapeLiteralBreaks(args.evidence).trim() : '';
           const hostProof = receiptEvidence(input.intent, trace);
@@ -560,6 +629,19 @@ export async function runUnifiedBrowserLoop(
             );
             continue;
           }
+          const dateMissing = wantsDate && !trace.some((entry) => entry.ok && entry.form?.date);
+          if (dateMissing && !dateContinued && !concludeNow) {
+            dateContinued = true;
+            await rejected(summary, given, '要求的日期控件没有填写回执');
+            results.push(
+              toolResult(
+                call.id,
+                '任务要求操作日期控件，但本次没有在日期控件里填写过（time 时间控件不算）。当前页面没有日期控件时，换一个有日期控件的公开表单页再填写（例如 https://www.w3schools.com/tags/tryhtml5_input_type_date.htm 的日期输入框），仍然只填不提交并截图；确实找不到时如实说明，结果会按「部分完成」交付。',
+                true,
+              ),
+            );
+            continue;
+          }
           const evidence =
             hostProof ||
             given ||
@@ -578,15 +660,17 @@ export async function runUnifiedBrowserLoop(
           // Fields are part of the answer: show the ones the summary leaves out.
           const listed = fieldLines(args.fields, summary);
           const answer = [summary, listed, note].filter(Boolean).join('\n\n');
-          if (short)
+          if (short || dateMissing)
             return {
               status: 'completed',
               summary: withLimitations(
-                `部分完成：只找到 ${found}/${wantedCount} 条。\n\n${answer}`,
+                `${short ? `部分完成：只找到 ${found}/${wantedCount} 条。` : '部分完成：没有找到可填写的日期控件，日期未填写。'}\n\n${answer}`,
               ),
               evidence,
               steps: step + 1,
-              partial: { found: found!, wanted: wantedCount! },
+              partial: short
+                ? { found: found!, wanted: wantedCount! }
+                : { found: 0, wanted: 1, missing: '日期控件' },
             };
           return {
             status: 'completed',
@@ -619,6 +703,21 @@ export async function runUnifiedBrowserLoop(
         const message = typeof args.message === 'string' ? args.message : '需要你接管浏览器。';
         if (!input.requestHuman)
           return { status: 'awaiting_user', reason, message, steps: step + 1 };
+        const handed = reason === 'captcha' ? await handCaptcha(message) : undefined;
+        if (handed !== undefined) {
+          if (handed === 'ended')
+            return { status: 'failed', reason: '验证码接管已结束，任务未完成。', steps: step + 1 };
+          results.push(
+            toolResult(
+              call.id,
+              handed === 'alternate'
+                ? ALTERNATE
+                : '用户已完成接管，请重新 snapshot 后继续；用户的操作不算你的操作。',
+            ),
+          );
+          staleTurn = true;
+          continue;
+        }
         const resumed = await input.requestHuman({ reason, message }).catch(() => false);
         if (!resumed) return { status: 'awaiting_user', reason, message, steps: step + 1 };
         results.push(
@@ -759,7 +858,23 @@ export async function runUnifiedBrowserLoop(
       }
       if (outcome.ok && input.probeBlocker) {
         const blocker = await checkBlocker();
-        if (blocker) return { status: 'awaiting_user', ...blocker, steps: step + 1 };
+        if (blocker) {
+          const handed =
+            blocker.reason === 'captcha' ? await handCaptcha(blocker.message) : undefined;
+          if (handed === undefined) return { status: 'awaiting_user', ...blocker, steps: step + 1 };
+          if (handed === 'ended')
+            return { status: 'failed', reason: '验证码等待已结束，任务未完成。', steps: step + 1 };
+          results.push(
+            toolResult(
+              call.id,
+              handed === 'alternate'
+                ? ALTERNATE
+                : '用户已完成验证；当前页面已变化，请重新 snapshot 后继续。',
+            ),
+          );
+          staleTurn = true;
+          continue;
+        }
       }
       if (outcome.interruption)
         return {

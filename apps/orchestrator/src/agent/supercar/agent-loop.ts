@@ -605,6 +605,8 @@ export interface SupercarTickEvent {
     errorMessage?: string;
     blockerEvidence?: import('../browser-tools/browser-completion.js').BrowserBlockerEvidence;
     effect?: import('../browser-tools/playwright-unified-executor.js').UnifiedToolResult['effect'];
+    /** QWEN-CN-1: a `type` that filled and submitted a search box (a query, not a form). */
+    searchForm?: boolean;
   };
   iteration: number;
   /**
@@ -627,6 +629,8 @@ export type SupercarAwaitingKind =
   | 'browser_action';
 
 export interface SupercarAwaitingUserEvent {
+  /** An in-process captcha handoff owns this browser; do not restart/fallback. */
+  captchaHandoff?: boolean;
   question: string;
   /** When this question was asked. */
   at: Date;
@@ -735,6 +739,24 @@ export interface RunSupercarOptions {
   messagesAdapter?: MessagesAdapter;
   /** Opt-in until navigation and input channels share the same owner receipt. */
   browserControl?: BrowserControl;
+  captchaWaitMs?: number;
+  captchaPollMs?: number;
+  /**
+   * CAPTCHA-REDUCE-1: true when a search fallback can replace the walled page
+   * (a search API or another engine); such a wall is not handed to the user.
+   */
+  searchWallReplaceable?: (url: string) => boolean;
+  /**
+   * CAPTCHA-REDUCE-1: restore and save this user's persistent browser profile
+   * (anonymous cloud sessions only; off unless the profile store is configured).
+   */
+  persistentProfileUser?: string;
+  /**
+   * OPEN-ANY-SITE-1: a cloud pool browser — a site that walls or refuses this
+   * egress is learned for the user's next launch (never retried now).
+   */
+  learnEgressBlocks?: boolean;
+  onCaptchaHandoffEnd?: (resumed: boolean) => Promise<boolean>;
   browserControlFactory?: () => { control: BrowserControl; finish: () => void };
   /** External task id (task_…). Correlates hooks and WS frames. */
   taskId: string;

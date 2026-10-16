@@ -133,6 +133,7 @@ import {
 import * as React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { CaptchaHandoffActions } from './CaptchaHandoffActions';
 
 interface Props {
   task: UiTask;
@@ -1203,6 +1204,8 @@ function AwaitingUserBanner({
                 </button>
               </div>
             </div>
+          ) : kind === 'captcha' ? (
+            <CaptchaHandoffActions taskId={taskId} />
           ) : kind === 'video_quote' ? (
             // 三个结构化按钮(确认制作 / 图片版 / 取消)→ tasks.confirmVideo。
             // 价格显示在上方 body(后端报价文案),按钮只透传选择。

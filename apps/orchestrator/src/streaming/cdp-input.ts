@@ -46,7 +46,7 @@ export type InputMessage =
       shiftKey?: boolean;
     }
   | { type: 'insertText'; text: string }
-  | { type: 'viewport'; width: number; height: number };
+  | { type: 'viewport'; width: number; height: number; deviceScaleFactor?: number };
 
 /** CDP modifier bitmask: alt=1, ctrl=2, meta=4, shift=8. */
 function modifiersBitmask(m: {
@@ -133,7 +133,7 @@ export class CdpInputHandler {
     Extract<InputMessage, { type: 'keyDown' | 'keyUp' }>
   >();
   private readonly pressedButtons = new Map<
-    string,
+    'left' | 'middle' | 'right',
     Extract<InputMessage, { type: 'mouseDown' | 'mouseUp' }>
   >();
 
@@ -210,6 +210,12 @@ export class CdpInputHandler {
           }
           const width = Math.round(msg.width);
           const height = Math.round(msg.height);
+          const requestedRatio = msg.deviceScaleFactor;
+          if (
+            requestedRatio !== undefined &&
+            (!Number.isFinite(requestedRatio) || requestedRatio < 1 || requestedRatio > 2)
+          )
+            return;
           const pixelRatio = this.preserveDeviceScaleFactor
             ? (
                 await send('Runtime.evaluate', {
@@ -226,9 +232,12 @@ export class CdpInputHandler {
             pixelRatio <= 4
               ? pixelRatio
               : 1;
-          const deviceScaleFactor = page
-            ? (pagePixelRatios.get(page) ?? observedRatio)
-            : observedRatio;
+          const deviceScaleFactor =
+            this.preserveDeviceScaleFactor && requestedRatio !== undefined
+              ? requestedRatio
+              : page
+                ? (pagePixelRatios.get(page) ?? observedRatio)
+                : observedRatio;
           if (page) pagePixelRatios.set(page, deviceScaleFactor);
           await send('Emulation.setDeviceMetricsOverride', {
             width,
@@ -243,6 +252,11 @@ export class CdpInputHandler {
         case 'mouseMove':
           await send('Input.dispatchMouseEvent', {
             type: 'mouseMoved',
+            button: this.pressedButtons.keys().next().value ?? 'none',
+            buttons: [...this.pressedButtons.keys()].reduce(
+              (bits, button) => bits | (button === 'left' ? 1 : button === 'right' ? 2 : 4),
+              0,
+            ),
             x: msg.x,
             y: msg.y,
           });

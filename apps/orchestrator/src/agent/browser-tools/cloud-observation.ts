@@ -39,6 +39,39 @@ export function safeObservationUrl(value: string, base?: string): string {
   }
 }
 
+/**
+ * ACCEPT-283-R5: analytics, media statistics and POST-transported reads of the
+ * sites tasks use most, sent by fetch/XHR as well as beacons (seen pausing
+ * read-only tasks on YouTube results and w3schools). Never a user-visible write.
+ */
+const KNOWN_TELEMETRY: ReadonlyArray<readonly [host: RegExp, path: RegExp]> = [
+  [/(?:^|\.)google-analytics\.com$/, /^\/(?:g\/|j\/)?collect$/],
+  [/^analytics\.google\.com$/, /^\/g\/collect$/],
+  [/(?:^|\.)google\.com$/, /^\/(?:measurement\/conversion|gen_204)(?:\/|$)/],
+  [/(?:^|\.)youtube\.com$/, /^\/(?:api\/stats\/[a-z_]+|youtubei\/v1\/log_event|ptracking)$/],
+  // YouTube's InnerTube reads go by POST too: player config, results, pages.
+  [/(?:^|\.)youtube\.com$/, /^\/youtubei\/v1\/(?:player|next|browse|search|guide|get_watch)$/],
+  [/(?:^|\.)googlevideo\.com$/, /^\/videoplayback$/],
+];
+/**
+ * A request that only reports telemetry: a beacon to a telemetry path, or a
+ * known analytics/media-statistics endpoint. A transaction path or action
+ * parameter is never telemetry, whatever the host.
+ */
+export function passiveTelemetryRequest(url: URL, resourceType: string): boolean {
+  if (transactionRequest(url)) return false;
+  if (KNOWN_TELEMETRY.some(([host, path]) => host.test(url.hostname) && path.test(url.pathname)))
+    return true;
+  // QWEN-CN-1: Bing beacons its search logging to /fd/ls/lsp.aspx on submit,
+  // Google to /gen_204.
+  return (
+    resourceType === 'ping' &&
+    /(?:^|\/)(?:collect|track|logs?|beacon|heartbeat|ping|telemetry|metrics|analytics|rum|ls|lsp\.aspx|gen_204|generate_204)(?:\/|$)/i.test(
+      url.pathname,
+    )
+  );
+}
+
 /** Endpoint/operation semantics only; never read a body, header or cookie. */
 function transactionRequest(url: URL) {
   if (
@@ -581,10 +614,7 @@ export class CloudObservation {
     const methodWrite = ['PUT', 'PATCH', 'DELETE'].includes(r.method());
     // A beacon with telemetry semantics is not a form/API mutation. Transaction
     // paths and action parameters still take precedence, even on /collect.
-    const passiveBeacon =
-      r.resourceType() === 'ping' &&
-      !transactional &&
-      /(?:^|\/)(?:collect|track|logs?|beacon|heartbeat|ping)(?:\/|$)/i.test(url.pathname);
+    const passiveBeacon = !transactional && passiveTelemetryRequest(url, r.resourceType());
     const unknownPost = r.method() === 'POST' && graphql !== 'query' && !passiveBeacon;
     const candidate = transactional || resourceWrite || methodWrite || unknownPost;
     const key = `${r.method()}:${url.origin}${url.pathname}`;

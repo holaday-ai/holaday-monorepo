@@ -1,3 +1,9 @@
+import { egressBlockLearner } from '../../browser-pool/egress-learning.js';
+import {
+  browserProfileStore,
+  restoreBrowserProfile,
+  saveBrowserProfile,
+} from '../../browser-profiles/profile-store.js';
 import { browserCapabilities } from '../../config/browser-capabilities.js';
 import { reviewListAnswer } from '../../execution/answer-verifier.js';
 import { browserOutputGuidance } from '../../execution/execution-contract.js';
@@ -8,6 +14,9 @@ import type {
   SupercarAwaitingKind,
   SupercarOutcome,
 } from '../supercar/agent-loop.js';
+import type { BrowserControl } from '../supercar/browser-control.js';
+import { inspectChallenge } from '../supercar/captcha-challenge.js';
+import { captchaHandoffs } from '../supercar/captcha-handoff.js';
 import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
 import { classifyRuntimeAction } from '../supercar/runtime-action-policy.js';
 import { persistBrowserDownload } from './browser-download.js';
@@ -166,6 +175,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       tools.ownsPage,
       controller.signal,
       `${opts.userExternalId ?? 'unknown'}:${opts.taskId}`,
+      // One user keeps one pool IP across tasks (CAPTCHA-REDUCE-1).
+      opts.userExternalId ?? `${opts.userExternalId ?? 'unknown'}:${opts.taskId}`,
     );
   } catch {
     tools.dispose();
@@ -176,6 +187,24 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       toolsUsed: [],
     };
   }
+  // CAPTCHA-REDUCE-1: the same user's verification clearance carries over.
+  // OPEN-ANY-SITE-1: a site refusing this egress (its page 403/429, or a
+  // verification wall) goes through the user's endpoint from the next launch.
+  const learnBlock = opts.learnEgressBlocks ? egressBlockLearner() : null;
+  const onPageResponse = (response: import('playwright').Response) => {
+    const status = response.status();
+    if (
+      (status === 403 || status === 429) &&
+      response.request().isNavigationRequest() &&
+      response.frame() === page.mainFrame()
+    )
+      learnBlock?.(response.url(), `http_${status}`);
+  };
+  if (learnBlock) page.on('response', onPageResponse);
+  const profileStore = opts.persistentProfileUser ? browserProfileStore() : null;
+  const profileSince = Date.now();
+  if (profileStore && opts.persistentProfileUser)
+    await restoreBrowserProfile(page.context(), profileStore, opts.persistentProfileUser);
   const replay =
     capabilities.replayV1 && opts.userExternalId
       ? new BrowserReplayRecorder(
@@ -223,7 +252,28 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     },
   };
   running.set(opts.taskId, controller);
-  const timeout = opts.timeoutMs ? setTimeout(() => controller.abort(), opts.timeoutMs) : undefined;
+  let activeRemaining = opts.timeoutMs;
+  let activeSince = Date.now();
+  let timeout = activeRemaining ? setTimeout(() => controller.abort(), activeRemaining) : undefined;
+  const suspendTimeout = () => {
+    if (timeout) clearTimeout(timeout);
+    if (activeRemaining !== undefined)
+      activeRemaining = Math.max(1, activeRemaining - (Date.now() - activeSince));
+  };
+  const resumeTimeout = () => {
+    activeSince = Date.now();
+    if (activeRemaining !== undefined)
+      timeout = setTimeout(() => controller.abort(), activeRemaining);
+  };
+  let binding: { control: BrowserControl; finish: () => void } | undefined;
+  let control = opts.browserControl;
+  let handoffFailure: string | undefined;
+  /** The user chose 换个方式继续: the answer does not come from the walled page. */
+  let captchaAlternate = false;
+  const withAlternateNotice = (summary: string) =>
+    captchaAlternate
+      ? `页面验证码未通过，已按你的选择改用其他方式继续；以下结果不是来自被验证拦住的页面。\n\n${summary}`
+      : summary;
   const cancelPoll = setInterval(() => {
     void Promise.resolve(opts.isTaskCancelled?.())
       .then((cancelled) => {
@@ -363,6 +413,20 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         },
       };
 
+    if (phase === 'before' && control && !control.canAgentAct()) {
+      await replay?.pause();
+      const boundary = await control.checkpoint(async () => {
+        lastSnapshot = '';
+      });
+      if (boundary.resumed) replay?.resume();
+      if (boundary.resumed)
+        return {
+          kind: 'skip',
+          message: '用户已交还控制权；从当前页面重新 snapshot，不重放旧动作。',
+        };
+      if (!control.canAgentAct())
+        return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
+    }
     if (phase === 'before' && tools.observation) {
       try {
         await tools.observation.validate(action);
@@ -410,7 +474,58 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     return result;
   };
   try {
+    binding = opts.browserControlFactory?.();
+    control = binding?.control ?? control;
     const outcome = await runUnifiedBrowserLoop({
+      ...(control
+        ? {
+            // A search wall the fallback can answer is not the user's job.
+            captchaHandoffWanted: () => !opts.searchWallReplaceable?.(page.url()),
+            captchaHandoff: async (_message: string) => {
+              suspendTimeout();
+              await replay?.pause();
+              const result = await captchaHandoffs.wait({
+                taskId: opts.taskId,
+                userId: opts.userExternalId ?? '',
+                control: control!,
+                hasWall: async () => {
+                  const hit = await tools.blocker();
+                  return (
+                    hit?.reason === 'captcha' &&
+                    !('disposition' in hit && hit.disposition === 'continue')
+                  );
+                },
+                onWaiting: async () => {
+                  await opts.onAwaitingUser?.({
+                    question:
+                      '网站要求人机验证，请在下方浏览器中完成验证。AI 已暂停，最多等待 10 分钟。',
+                    at: new Date(),
+                    currentUrl: page.url(),
+                    awaitingKind: 'captcha',
+                    captchaHandoff: true,
+                  });
+                },
+                onResumed: async () => (await opts.onCaptchaHandoffEnd?.(true)) ?? true,
+                challenge: () => inspectChallenge(page),
+                signal: controller.signal,
+                timeoutMs: opts.captchaWaitMs,
+                pollMs: opts.captchaPollMs,
+              });
+              if (result !== 'resumed' && result !== 'alternate') {
+                handoffFailure =
+                  result === 'timeout'
+                    ? '等待用户完成验证码已超时，任务未完成。'
+                    : '用户已放弃验证，任务未完成。';
+                await opts.onCaptchaHandoffEnd?.(false);
+              }
+              lastSnapshot = '';
+              if (result === 'alternate') captchaAlternate = true;
+              if (result === 'resumed' || result === 'alternate') replay?.resume();
+              resumeTimeout();
+              return result === 'alternate' ? 'alternate' : result === 'resumed';
+            },
+          }
+        : {}),
       observationV2: capabilities.observationV2,
       requireBrowserEvidence: true,
       supportedTools: tools.supportedTools,
@@ -418,6 +533,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         const blocker = await tools.blocker();
         if (blocker && 'evidence' in blocker) {
           const continued = 'disposition' in blocker && blocker.disposition === 'continue';
+          if (!continued && blocker.reason === 'captcha') learnBlock?.(tools.page.url(), 'captcha');
           await recordDiagnostic(
             continued ? 'browser_local_wall' : 'browser_blocker',
             continued ? undefined : `browser_${blocker.reason}_wall`,
@@ -511,6 +627,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
               actionSummary: describe(action, label),
               ok: result.ok,
               ...(result.effect ? { effect: result.effect } : {}),
+              ...(action.tool === 'type' && result.form?.search ? { searchForm: true } : {}),
               ...(result.ok
                 ? {}
                 : {
@@ -569,7 +686,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         );
         return {
           status: 'completed',
-          summary: outcome.summary,
+          summary: withAlternateNotice(outcome.summary),
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
           ...(outcome.partial ? { partial: outcome.partial } : {}),
@@ -597,7 +714,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           );
           return {
             status: 'completed',
-            summary: outcome.heldAnswer.summary,
+            summary: withAlternateNotice(outcome.heldAnswer.summary),
             iterations: outcome.steps,
             toolsUsed: [...toolsUsed],
           };
@@ -622,12 +739,23 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           reason:
             page.url() === 'about:blank'
               ? '浏览器尚未打开目标页面（about:blank），无法判断站点登录状态。请重试；若持续失败请联系支持。'
-              : outcome.reason,
+              : (handoffFailure ?? outcome.reason),
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
         };
     }
   } finally {
+    if (learnBlock) page.off('response', onPageResponse);
+    control?.close();
+    await control?.settled();
+    binding?.finish();
+    if (profileStore && opts.persistentProfileUser)
+      await saveBrowserProfile(
+        page.context(),
+        profileStore,
+        opts.persistentProfileUser,
+        profileSince,
+      );
     await egress.dispose();
     if (egress.metrics.proxyRequests || egress.metrics.blockedMedia)
       await safe(() =>

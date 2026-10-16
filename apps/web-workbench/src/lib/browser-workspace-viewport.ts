@@ -68,10 +68,10 @@ export function browserViewportV2ForHost(input: {
       height: clamp(Math.round(desktopViewport.height), 360, 2400),
     };
   }
-  if (renderMode === 'panel')
+  if (renderMode === 'panel' || renderMode === 'auto')
     return {
-      width: clamp(Math.round(hostWidth), 320, 1920),
-      height: clamp(Math.round(hostHeight), 360, 2400),
+      width: clamp(Math.round(hostWidth), 240, 1920),
+      height: clamp(Math.round(hostHeight), 240, 2400),
     };
   const portrait = hostHeight > hostWidth;
   const width = renderMode === 'desktop' || !portrait ? 1280 : 1024;

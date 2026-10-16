@@ -269,6 +269,28 @@ function sourceLabel(fact: Fact) {
   return fact.tabId ? `标签 ${fact.tabId}` : (fact.sourceURL ?? '该页面');
 }
 
+/**
+ * AP4 (Deploy-22 core-01): the page a fact is bound to, allowing for a redirect.
+ * Bing appends `rdr`/`rdrig` to the URL the answer cites; the same host and
+ * path with every parameter the answer names is the same page.
+ */
+function sameSource(pageUrl: string | undefined, cited: string): boolean {
+  if (!pageUrl) return false;
+  if (pageUrl === cited) return true;
+  try {
+    const page = new URL(pageUrl);
+    const want = new URL(cited);
+    const host = (url: URL) => url.hostname.replace(/^www\./, '');
+    const path = (url: URL) => url.pathname.replace(/\/+$/, '') || '/';
+    if (host(page) !== host(want) || path(page) !== path(want)) return false;
+    for (const [key, value] of want.searchParams)
+      if (page.searchParams.get(key) !== value) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function assessCompletionFacts(input: {
   summary: string;
   fields?: unknown;
@@ -325,7 +347,7 @@ export function assessCompletionFacts(input: {
       .map(normalizeFact);
     const bound = (page: (typeof pages)[number]) =>
       (!fact.tabId || page.tabId === fact.tabId) &&
-      (!fact.sourceURL || page.sourceURL === fact.sourceURL);
+      (!fact.sourceURL || sameSource(page.sourceURL, fact.sourceURL));
     const eligible = pages.filter(bound);
     const label = `${fact.name}「${fact.value.slice(0, 120)}」`;
     const isVideoKindMismatch =
@@ -346,21 +368,26 @@ export function assessCompletionFacts(input: {
         eligible.some(
           (page) =>
             page.norm.includes(v) ||
-            (page.sourceURL && normalizeFact(page.sourceURL) === v) ||
+            (page.sourceURL &&
+              (normalizeFact(page.sourceURL) === v || sameSource(page.sourceURL, fact.value))) ||
             page.links?.some((link) => normalizeFact(link.url) === v),
         ) ||
         // Host receipts (download, typed text, scroll) are facts whatever the binding.
         receipts.includes(v) ||
-        // A result list ("title — URL") is proven by the listing page's own link.
+        // A result list ("title — URL") is proven by the listing page's own link,
+        // also when the fact names the listing's tab (ACCEPT-283-R5 D16).
         (!opensLinks &&
-          !fact.tabId &&
           !!fact.sourceURL &&
-          pages.some((page) =>
-            page.links?.some(
-              (link) =>
-                normalizeFact(link.url) === normalizeFact(fact.sourceURL!) &&
-                normalizeFact(link.text).includes(v),
-            ),
+          pages.some(
+            (page) =>
+              (!fact.tabId || page.tabId === fact.tabId) &&
+              (page.links?.some(
+                (link) =>
+                  normalizeFact(link.url) === normalizeFact(fact.sourceURL!) &&
+                  normalizeFact(link.text).includes(v),
+              ) ||
+                // A snapshot read: the item's link follows its title on the page.
+                listedNear(page.norm, v, normalizeFact(fact.sourceURL!))),
           )),
     );
     if (grounded) continue;
@@ -429,4 +456,12 @@ export function unverifiedNote(unverified: readonly string[]): string {
   return unverified.length
     ? `未核实：以下内容未能在已读页面中逐字找到，请自行确认——${unverified.join('；')}`
     : '';
+}
+
+/** `url` appears on the page right after `title` (the same result entry). */
+function listedNear(norm: string, title: string, url: string): boolean {
+  if (!title || !url) return false;
+  for (let at = norm.indexOf(title); at >= 0; at = norm.indexOf(title, at + 1))
+    if (norm.slice(at, at + title.length + 800).includes(url)) return true;
+  return false;
 }

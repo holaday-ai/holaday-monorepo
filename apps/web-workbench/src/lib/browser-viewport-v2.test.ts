@@ -18,7 +18,9 @@ describe('V2 full frame placement and reversible coordinates', () => {
       }
     }
   });
-  it('fills portrait panels with a desktop-width viewport while landscape keeps 1280×800', () => {
+  // #280 (live view follows the panel): 'auto' is the panel's own CSS size, so
+  // the frame fills it exactly (browser-workspace-viewport.test.ts asserts the size).
+  it('fills portrait and landscape panels with a viewport of the panel size', () => {
     for (const [hostWidth, hostHeight] of [
       [380, 690],
       [420, 810],
@@ -29,7 +31,7 @@ describe('V2 full frame placement and reversible coordinates', () => {
         hostHeight,
         renderMode: 'auto',
       });
-      expect(remote?.width).toBe(1024);
+      expect(remote).toEqual({ width: hostWidth, height: hostHeight });
       if (!remote) throw new Error('expected valid viewport');
       const placement = fit.placeScreencastContainTop({
         hostWidth,
@@ -44,7 +46,7 @@ describe('V2 full frame placement and reversible coordinates', () => {
     }
     expect(
       viewport.browserViewportV2ForHost({ hostWidth: 1440, hostHeight: 800, renderMode: 'auto' }),
-    ).toEqual({ width: 1280, height: 800 });
+    ).toEqual({ width: 1440, height: 800 });
   });
   it('keeps explicit desktop profiles and a manual 1280 width, with bounded portrait height', () => {
     expect(
@@ -60,7 +62,7 @@ describe('V2 full frame placement and reversible coordinates', () => {
     ).toEqual({ width: 1600, height: 900 });
     expect(
       viewport.browserViewportV2ForHost({ hostWidth: 390, hostHeight: 10000, renderMode: 'auto' }),
-    ).toEqual({ width: 1024, height: 2400 });
+    ).toEqual({ width: 390, height: 2400 });
     expect(
       viewport.browserViewportV2ForHost({ hostWidth: 390, hostHeight: 760, renderMode: 'panel' }),
     ).toEqual({ width: 390, height: 760 });

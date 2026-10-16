@@ -537,3 +537,37 @@ it('applies tall V2 device metrics while retaining legacy and maximum bounds', a
   await v2.handle({ type: 'viewport', width: 1024, height: 2401 });
   expect(send).toHaveBeenCalledTimes(before);
 });
+
+it('uses negotiated Retina DPR and retains held buttons through a drag', async () => {
+  const send = vi.fn(async (method: string) =>
+    method === 'Runtime.evaluate' ? { result: { value: 1 } } : {},
+  );
+  const cdp = { send, detach: async () => {} } as unknown as CDPSession;
+  const handler = new CdpInputHandler(
+    () => cdp,
+    pino({ level: 'silent' }),
+    undefined,
+    undefined,
+    true,
+  );
+  await handler.handle({ type: 'viewport', width: 390, height: 600, deviceScaleFactor: 2 });
+  expect(send).toHaveBeenCalledWith(
+    'Emulation.setDeviceMetricsOverride',
+    expect.objectContaining({ width: 390, height: 600, deviceScaleFactor: 2 }),
+  );
+  await handler.handle({ type: 'mouseDown', x: 10, y: 20, button: 'left' });
+  await handler.handle({ type: 'mouseMove', x: 90, y: 20 });
+  expect(send).toHaveBeenCalledWith(
+    'Input.dispatchMouseEvent',
+    expect.objectContaining({ type: 'mouseMoved', button: 'left', buttons: 1, x: 90 }),
+  );
+  await handler.handle({ type: 'mouseUp', x: 90, y: 20, button: 'left' });
+  await handler.handle({ type: 'mouseMove', x: 100, y: 20 });
+  expect(send).toHaveBeenLastCalledWith(
+    'Input.dispatchMouseEvent',
+    expect.objectContaining({ type: 'mouseMoved', buttons: 0 }),
+  );
+  send.mockClear();
+  await handler.handle({ type: 'viewport', width: 390, height: 600, deviceScaleFactor: 100 });
+  expect(send).not.toHaveBeenCalled();
+});

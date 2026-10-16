@@ -64,3 +64,15 @@ describe('server-owned one-use confirmations', () => {
     expect(c.consume(n, action, 1001)).toBe(false);
   });
 });
+
+it('allows only bounded in-flight frames in the same viewport, never after invalidation', () => {
+  const g = new BrowserFrameGuard();
+  g.observe(frame);
+  g.observe({ ...frame, frameId: 'f2', capturedAt: 1100 });
+  expect(g.validate(frame, 1200)).toBe(true);
+  expect(g.validate(frame, 1351)).toBe(false);
+  g.observe({ ...frame, frameId: 'f3', viewportRevision: 2, capturedAt: 1400 });
+  expect(g.validate(frame, 1401)).toBe(false);
+  g.invalidate();
+  expect(g.validate({ ...frame, frameId: 'f3', viewportRevision: 2 }, 1401)).toBe(false);
+});

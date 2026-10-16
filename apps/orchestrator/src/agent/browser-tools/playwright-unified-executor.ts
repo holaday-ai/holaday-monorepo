@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Dialog, Page } from 'playwright';
+import type { Dialog, Locator, Page } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { probeBrowserBlocker } from './browser-blocker-probe.js';
 import { scrollWithEvidence } from './browser-scroll.js';
@@ -25,7 +25,15 @@ export interface UnifiedToolResult {
     backgroundRequests?: Array<{ branch: string; method: string; url: string; action: string }>;
     observationAvailable?: boolean;
   };
-  form?: { ref: string; filled: boolean; submitted: boolean };
+  form?: {
+    ref: string;
+    filled: boolean;
+    submitted: boolean;
+    /** The field belongs to a search box (GET query), not a business form. */
+    search?: boolean;
+    /** The field is a date control (native date input or a date picker). */
+    date?: boolean;
+  };
   text: string;
   image?: { mediaType: 'image/jpeg'; data: string };
   /** Present on `download`: where the file was saved by the host. */
@@ -413,13 +421,29 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           if (action.newTab) {
             const target = byRef(action.ref);
             const href = await target.getAttribute('href');
-            if (!href || !/^https?:/i.test(new URL(href, activeFrame.url()).href))
-              return fail('newTab 只允许已观察到的普通网页链接');
+            const link = href ? new URL(href, activeFrame.url()).href : '';
+            if (!/^https?:/i.test(link)) return fail('newTab 只允许已观察到的普通网页链接');
             if (page.context().pages().length >= 20) return fail('任务标签数达到上限');
-            const [opened] = await Promise.all([
-              page.context().waitForEvent('page', { timeout }),
-              target.click({ button: 'middle', timeout }),
+            const [popup] = await Promise.all([
+              page
+                .context()
+                .waitForEvent('page', { timeout: Math.min(timeout, 5_000) })
+                .catch(() => null),
+              // An overlay or a script can keep the middle click from landing.
+              target
+                .click({ button: 'middle', timeout: Math.min(timeout, 5_000) })
+                .catch(() => {}),
             ]);
+            // ACCEPT-283-R6 (BBC): when the middle click opens nothing (taken over
+            // or blocked), open the observed link itself in the new tab instead.
+            let opened = popup;
+            if (!opened) {
+              opened = await page.context().newPage();
+              await opened.goto(link, { waitUntil: 'commit', timeout }).catch(() => {});
+            } else if (opened.url() === 'about:blank') {
+              // The tab exists before its navigation starts: report the real page.
+              await opened.waitForURL((u) => u.href !== 'about:blank', { timeout }).catch(() => {});
+            }
             await ensureExecutionViewport(opened);
             page = opened;
             activeFrame = opened.mainFrame();
@@ -443,17 +467,19 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           return { ...(await clickFollowingNewTab(action.ref)), url: page.url() };
         case 'type': {
           const target = byRef(action.ref);
+          const field = await fieldKind(target, timeout);
           await target.fill(action.text, { timeout });
           if (observation && (await target.inputValue()) !== action.text)
             return fail('输入值核验失败');
           if (action.submit) await target.press('Enter', { timeout });
           return {
             ...done(`已在 ${action.ref} 输入${action.submit ? '并提交' : ''}`),
-            form: { ref: action.ref, filled: true, submitted: !!action.submit },
+            form: { ref: action.ref, filled: true, submitted: !!action.submit, ...field },
           };
         }
         case 'select': {
           const target = byRef(action.ref);
+          const field = await fieldKind(target, timeout);
           try {
             await target.selectOption({ label: action.value }, { timeout });
           } catch {
@@ -461,7 +487,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           }
           return {
             ...done(`已在 ${action.ref} 选择「${action.value}」`),
-            form: { ref: action.ref, filled: true, submitted: false },
+            form: { ref: action.ref, filled: true, submitted: false, ...field },
           };
         }
         case 'scroll': {
@@ -661,6 +687,52 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
       observation?.dispose();
     },
   };
+}
+
+/**
+ * AP4: what kind of field a fill/select acted on. A search box submits a GET
+ * query, not a business form (Deploy-22 core-02); a date control is what a
+ * "日期控件" request needs (core-08: httpbin's time input is not one).
+ */
+async function fieldKind(
+  target: Locator,
+  timeout: number,
+): Promise<{ search?: boolean; date?: boolean }> {
+  try {
+    return await target.evaluate(
+      (el) => {
+        const input = el as HTMLInputElement;
+        const type = (input.type ?? '').toLowerCase();
+        const words = [
+          input.name,
+          input.id,
+          input.getAttribute('placeholder'),
+          input.getAttribute('aria-label'),
+          input.getAttribute('autocomplete'),
+          el.className,
+        ]
+          .filter(Boolean)
+          .join(' ');
+        const form = input.form;
+        const search =
+          type === 'search' ||
+          el.getAttribute('role') === 'searchbox' ||
+          !!el.closest('[role="search"]') ||
+          (!!form &&
+            (form.method || 'get').toLowerCase() === 'get' &&
+            /search|\/s(?:\?|$)|[?&]q=/i.test(form.getAttribute('action') ?? '') &&
+            /^(?:q|query|search|wd|p|keyword|kw)$/i.test(input.name ?? ''));
+        const date =
+          ['date', 'datetime-local', 'month', 'week'].includes(type) ||
+          (type !== 'time' && /date|datepicker|日期|birth|生日|bday/i.test(words));
+        return { ...(search ? { search: true } : {}), ...(date ? { date: true } : {}) };
+      },
+      undefined,
+      { timeout: Math.min(timeout, 3000) },
+    );
+  } catch {
+    return {};
+  }
 }
 
 function done(text: string): UnifiedToolResult {

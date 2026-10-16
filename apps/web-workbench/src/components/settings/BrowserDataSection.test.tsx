@@ -14,7 +14,14 @@ const { tabs } = vi.hoisted(() => ({
     ],
   })),
 }));
-vi.mock('@/lib/trpc', () => ({ trpc: { tasks: { localChromeTabs: { query: tabs } } } }));
+vi.mock('@/lib/trpc', () => ({
+  trpc: {
+    tasks: {
+      localChromeTabs: { query: tabs },
+      browserProfileStatus: { query: async () => ({ configured: false }) },
+    },
+  },
+}));
 vi.mock('@/lib/auth', () => ({ getAccessToken: () => 'TEST_AUTH' }));
 import { BrowserDataSection } from './BrowserDataSection';
 afterEach(() => {

@@ -113,6 +113,28 @@ export function completionGap(
     !successful.some((entry) => entry.dialogs?.length)
   )
     return '用户要求 JavaScript alerts，但本次没有触发过任何原生对话框（alert/confirm/prompt）；页面内的提示框不算。请打开带触发按钮的页面点击按钮，再读取页面显示的结果；做不到就如实说明。';
+  // AP4 core-02: "opened weather.com" with no visit is a claimed action without
+  // a receipt. A site counts as visited when a successful step landed on it.
+  const visited = new Set(
+    successful.flatMap((entry) => {
+      try {
+        return entry.url ? [new URL(entry.url).hostname.replace(/^www\./, '')] : [];
+      } catch {
+        return [];
+      }
+    }),
+  );
+  for (const match of claimed.matchAll(
+    /(?:打开|访问|进入|跳转到|浏览了|opened|visited|navigated to)[^。；\n]{0,24}?\b((?:[a-z0-9-]+\.)+(?:com|net|org|cn|io|gov|edu|info|co|uk|sg|jp|de)\b)/gi,
+  )) {
+    // "未能打开 / 无法访问 …" admits the opposite.
+    if (/(?:未能|没能|无法|不能|未|没有|并未)\s*$/.test(claimed.slice(0, match.index!))) continue;
+    const host = match[1]!.toLowerCase().replace(/^www\./, '');
+    // Search engines are covered by the fallback's own receipts across attempts.
+    if (/(?:^|\.)(?:google\.[a-z.]+|bing\.com|duckduckgo\.com|baidu\.com)$/.test(host)) continue;
+    if (![...visited].some((seen) => seen === host || seen.endsWith(`.${host}`)))
+      return `答案说打开/访问了 ${host}，但本次没有成功访问该网站的回执；只能报告实际打开并读取过的页面。`;
+  }
   const claims: Array<[RegExp, string]> = [
     [/(?:切回|切换|返回).{0,10}(?:标签|tab)|switched? (?:back )?to.{0,20}tab/i, 'switch_tab'],
     [/(?:新建|打开|创建).{0,8}(?:新标签|\d+个标签)|opened? .{0,12}new tabs?/i, 'new_tab'],
@@ -172,7 +194,8 @@ export function completionGap(
     return '没有实际填表回执，不能宣告已填表。';
   if (
     /(?:不提交|不要提交|do not submit|without submitting)/i.test(intent) &&
-    forms.some((f) => f.submitted)
+    // A search box submits a GET query; only business forms are "submitted".
+    forms.some((f) => f.submitted && !f.search)
   )
     return '表单已提交，违反只填不提交的要求。';
   if (/(?:截图|screenshot)/i.test(requested) && !successful.some((t) => t.screenshot))

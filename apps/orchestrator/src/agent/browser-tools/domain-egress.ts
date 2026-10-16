@@ -13,17 +13,117 @@ export interface DomainEgressConfig {
   enabled: boolean;
   domains: string[];
   proxyUrl: string;
+  /**
+   * CAPTCHA-REDUCE-1: fixed-IP proxies (one endpoint per static ISP IP). A user
+   * is mapped to one of them for good, never rotated; overrides `proxyUrl`.
+   */
+  pool?: string[];
+  /**
+   * PROXY-BROWSER-1: `browser` (default with a pool) chains the listed domains
+   * at the browser's own loopback proxy, so Chrome does the TLS itself;
+   * `replay` keeps the Playwright route + Node re-request path.
+   */
+  mode?: DomainProxyMode;
   maxBytes?: number;
 }
-export function domainEgressConfig(): DomainEgressConfig {
+export type DomainProxyMode = 'browser' | 'replay';
+/**
+ * The sites sent through the user's endpoint by default: those that refuse
+ * datacenter IPs and open through a mobile exit (OPEN-ANY-SITE-1, measured
+ * with the production launch flags, 2026-10-16): Reddit 0/2 direct → 3/4
+ * mobile, Medium 0/2 → 2/4. Sign-in hosts never go through the endpoint.
+ * BROWSER_DOMAIN_PROXY_DOMAINS replaces the list; learned sites are added.
+ */
+export const DEFAULT_PROXY_DOMAINS = [
+  // Reddit
+  'reddit.com',
+  'redditstatic.com',
+  'redditmedia.com',
+  'redd.it',
+  // Medium
+  'medium.com',
+];
+/**
+ * Sites that stay on the direct exit whatever is learned: they open from the
+ * datacenter and wall a proxy exit (Google search 19/20 direct, 0/20 mobile;
+ * YouTube 2/2 direct). BROWSER_DOMAIN_PROXY_DIRECT replaces the list.
+ */
+export const DIRECT_ONLY_DOMAINS = [
+  'google.com',
+  'gstatic.com',
+  'googleapis.com',
+  'recaptcha.net',
+  'youtube.com',
+  'ytimg.com',
+  'googlevideo.com',
+];
+/** Account and sign-in hosts never use the shared proxy, whatever the domain list. */
+const SIGN_IN_HOST = /^(?:accounts|myaccount|login|signin|sso|auth|passport|id)\./i;
+const list = (value: string | undefined) =>
+  (value ?? '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+/** Variable names only: configuration is read from the environment, never logged. */
+export const DOMAIN_PROXY_ENV = {
+  enabled: 'BROWSER_DOMAIN_PROXY_ENABLED',
+  domains: 'BROWSER_DOMAIN_PROXY_DOMAINS',
+  url: 'BROWSER_DOMAIN_PROXY_URL',
+  pool: 'BROWSER_DOMAIN_PROXY_POOL',
+  username: 'BROWSER_DOMAIN_PROXY_USERNAME',
+  password: 'BROWSER_DOMAIN_PROXY_PASSWORD',
+  mode: 'BROWSER_DOMAIN_PROXY_MODE',
+  direct: 'BROWSER_DOMAIN_PROXY_DIRECT',
+} as const;
+/**
+ * The proxy rule (what a PAC file would say): listed domains and their
+ * subdomains go through the ISP endpoint, sign-in hosts and everything else
+ * stay on the direct path.
+ */
+export function proxiedDomain(hostname: string, domains: readonly string[]): string | undefined {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  if (SIGN_IN_HOST.test(host)) return undefined;
+  return domains.find((entry) => host === entry || host.endsWith(`.${entry}`));
+}
+/** `host:port` or a full proxy URL; shared credentials fill in missing ones. */
+export function proxyPoolFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
+  const user = env[DOMAIN_PROXY_ENV.username] ?? '';
+  const pass = env[DOMAIN_PROXY_ENV.password] ?? '';
+  return list(env[DOMAIN_PROXY_ENV.pool]).map((entry) => {
+    const url = new URL(/^[a-z]+:\/\//i.test(entry) ? entry : `http://${entry}`);
+    if (!url.username && user) {
+      url.username = encodeURIComponent(user);
+      url.password = encodeURIComponent(pass);
+    }
+    return url.href;
+  });
+}
+export function domainEgressConfig(env: NodeJS.ProcessEnv = process.env): DomainEgressConfig {
+  const pool = proxyPoolFromEnv(env);
+  const domains = list(env[DOMAIN_PROXY_ENV.domains]).map((d) => d.toLowerCase());
   return {
-    enabled: process.env.BROWSER_DOMAIN_PROXY_ENABLED === 'true',
-    domains: (process.env.BROWSER_DOMAIN_PROXY_DOMAINS ?? '')
-      .split(',')
-      .map((d) => d.trim().toLowerCase())
-      .filter(Boolean),
-    proxyUrl: process.env.BROWSER_DOMAIN_PROXY_URL ?? '',
+    enabled: env[DOMAIN_PROXY_ENV.enabled] === 'true',
+    domains: domains.length || !pool.length ? domains : [...DEFAULT_PROXY_DOMAINS],
+    proxyUrl: env[DOMAIN_PROXY_ENV.url] ?? '',
+    ...(pool.length ? { pool } : {}),
+    mode: pool.length && env[DOMAIN_PROXY_ENV.mode] !== 'replay' ? 'browser' : 'replay',
   };
+}
+/** Browser-level chaining: one fixed ISP endpoint per pool slot, or null when off. */
+export function browserProxyUpstreams(
+  env: NodeJS.ProcessEnv = process.env,
+): { endpoints: string[]; domains: string[]; direct: string[] } | null {
+  const config = domainEgressConfig(env);
+  if (!config.enabled || config.mode !== 'browser' || !config.pool?.length) return null;
+  const configured = list(env[DOMAIN_PROXY_ENV.direct]).map((d) => d.toLowerCase());
+  const direct = configured.length ? configured : [...DIRECT_ONLY_DOMAINS];
+  // Direct wins over the list too: an operator list cannot send these through.
+  const domains = config.domains.filter((d) => !proxiedDomain(d, direct));
+  return { endpoints: config.pool, domains, direct };
+}
+/** The pool slot a user always gets (stable across tasks and restarts). */
+export function proxyPoolSlot(affinityKey: string, size: number): number {
+  return createHash('sha256').update(affinityKey).digest().readUInt32BE(0) % size;
 }
 /** One immutable endpoint per task/session. No credentials, URLs or bodies enter telemetry. */
 export async function installDomainEgress(
@@ -33,6 +133,8 @@ export async function installDomainEgress(
   ownsPage?: (candidate: Page) => boolean,
   signal?: AbortSignal,
   sessionKey: string = randomUUID(),
+  /** The user: picks the same pool IP for every task of this user. */
+  affinityKey: string = sessionKey,
 ) {
   const metrics = {
     proxyRequestBytes: 0,
@@ -43,7 +145,9 @@ export async function installDomainEgress(
     failed: 0,
     unit: 'http_payload_bytes',
   };
-  if (!config.enabled) return { metrics, interruption: () => null, dispose: async () => {} };
+  // Browser mode proxies at launch (BrowserEgressProxy); nothing to route here.
+  if (!config.enabled || config.mode === 'browser')
+    return { metrics, interruption: () => null, dispose: async () => {} };
   const lifetime = currentOperationLifetime();
   let closed = false;
   const pending = new Set<ClientRequest>();
@@ -58,7 +162,11 @@ export async function installDomainEgress(
   };
   signal?.addEventListener('abort', stop, { once: true });
   const template = config.proxyUrl;
+  const pinned = config.pool?.length
+    ? new URL(config.pool[proxyPoolSlot(affinityKey, config.pool.length)]!)
+    : null;
   const proxyFor = (domain: string) => {
+    if (pinned) return pinned;
     const identity = createHash('sha256')
       .update(JSON.stringify([sessionKey, domain]))
       .digest('hex')
@@ -70,7 +178,11 @@ export async function installDomainEgress(
     throw new Error('domain_proxy_invalid_config');
   const domains = [...config.domains];
   const context = page.context();
-  if (context.serviceWorkers().length) {
+  // Only a web origin's service worker can answer page requests and bypass the
+  // route. The browser's own component extensions (Chrome ships one at start,
+  // chrome-extension://…) are not page traffic and must not block the proxy.
+  const webWorker = (worker: { url(): string }) => /^https?:/i.test(worker.url());
+  if (context.serviceWorkers().some(webWorker)) {
     signal?.removeEventListener('abort', stop);
     throw new Error('domain_proxy_service_worker_active');
   }
@@ -85,7 +197,8 @@ export async function installDomainEgress(
   };
   await context.addInitScript(blockRegistration);
   await page.evaluate(blockRegistration);
-  const workerStarted = () => {
+  const workerStarted = (worker: { url(): string }) => {
+    if (!webWorker(worker)) return;
     metrics.failed++;
     stop();
   };
@@ -105,9 +218,7 @@ export async function installDomainEgress(
     }
     if (!(await belongs(owner))) return route.fallback();
     const url = new URL(request.url());
-    const domain = domains.find(
-      (entry) => url.hostname === entry || url.hostname.endsWith(`.${entry}`),
-    );
+    const domain = proxiedDomain(url.hostname, domains);
     if (!domain) return route.fallback();
     const proxy = proxyFor(domain);
     try {
