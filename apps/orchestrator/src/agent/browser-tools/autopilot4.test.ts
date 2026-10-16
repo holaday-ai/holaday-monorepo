@@ -301,6 +301,32 @@ describe('ACCEPT-283-R5 D16: a result list bound to its listing tab and each ite
     });
     expect(result.contradictions).toEqual([]);
   });
+  it('a snapshot read (no links list): the URL right after the title is the same entry', () => {
+    const snapshot = {
+      text: '- listitem: - link "Hola-Dermat:护肤AI助手" [ref=e6] - /url: https://www.hubwiz.com/blog/x - listitem: - link "Hula" [ref=e9]',
+      tabId: 'tab_list',
+      sourceURL: 'https://search-results.holaday.invalid/search?q=HOLA%20DAY%20AI',
+    };
+    expect(
+      assessCompletionFacts({
+        summary: '1. Hola-Dermat:护肤AI助手',
+        fields: [fact('tab_list')],
+        pages: [snapshot],
+      }).contradictions,
+    ).toEqual([]);
+    // The URL of another entry, far from the title, does not ground it.
+    const far = {
+      ...snapshot,
+      text: `- link "Hola-Dermat:护肤AI助手" ${'x '.repeat(600)} /url: https://www.hubwiz.com/blog/x`,
+    };
+    expect(
+      assessCompletionFacts({
+        summary: '1. Hola-Dermat:护肤AI助手',
+        fields: [fact('tab_list')],
+        pages: [far],
+      }).contradictions.length,
+    ).toBeGreaterThan(0);
+  });
   it('another tab, or a title the link does not carry, is still unread', () => {
     for (const f of [fact('tab_other'), fact('tab_list', '另一个标题')]) {
       const result = assessCompletionFacts({

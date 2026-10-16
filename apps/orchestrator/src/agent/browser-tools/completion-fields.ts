@@ -381,11 +381,13 @@ export function assessCompletionFacts(input: {
           pages.some(
             (page) =>
               (!fact.tabId || page.tabId === fact.tabId) &&
-              page.links?.some(
+              (page.links?.some(
                 (link) =>
                   normalizeFact(link.url) === normalizeFact(fact.sourceURL!) &&
                   normalizeFact(link.text).includes(v),
-              ),
+              ) ||
+                // A snapshot read: the item's link follows its title on the page.
+                listedNear(page.norm, v, normalizeFact(fact.sourceURL!))),
           )),
     );
     if (grounded) continue;
@@ -454,4 +456,12 @@ export function unverifiedNote(unverified: readonly string[]): string {
   return unverified.length
     ? `未核实：以下内容未能在已读页面中逐字找到，请自行确认——${unverified.join('；')}`
     : '';
+}
+
+/** `url` appears on the page right after `title` (the same result entry). */
+function listedNear(norm: string, title: string, url: string): boolean {
+  if (!title || !url) return false;
+  for (let at = norm.indexOf(title); at >= 0; at = norm.indexOf(title, at + 1))
+    if (norm.slice(at, at + title.length + 800).includes(url)) return true;
+  return false;
 }
