@@ -316,6 +316,17 @@ describe('1b. confirmation / pause rate on ordinary reads', () => {
       { second: clickLabel('下一页') },
     );
   });
+  it('B2c search submit beacons Google-style logging (/gen_204) (QWEN-CN-1 s282-core-01)', async () => {
+    await scenario(
+      'B2c-get-search-with-google-gen204-beacon',
+      {
+        '/': `<form role="search" action="/search" onsubmit="navigator.sendBeacon('/gen_204?atyp=i','')"><input name="q" aria-label="搜索词"></form>`,
+        '/search': `<p>结果 1</p><a href="/search?page=2">下一页</a>`,
+      },
+      typeSubmit,
+      { second: clickLabel('下一页') },
+    );
+  });
   it('B3 pagination click; result page fires an analytics POST on load', async () => {
     await scenario(
       'B3-next-page-with-load-analytics-post',
