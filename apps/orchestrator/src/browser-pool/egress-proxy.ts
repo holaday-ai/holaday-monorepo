@@ -40,10 +40,14 @@ export interface IspRouteMetrics {
 }
 
 interface IspUpstream {
+  slot: number;
   url: URL;
   domains: readonly string[];
   metrics: IspRouteMetrics;
 }
+
+/** How long an endpoint that failed to open a tunnel is skipped by new launches. */
+export const ENDPOINT_RETRY_MS = 10 * 60_000;
 
 /**
  * Loopback-only forward proxy for browser-pool Chromium processes.
@@ -58,6 +62,8 @@ export class BrowserEgressProxy {
   private readonly server = this.createProxyServer();
   private readonly upstreams: BrowserEgressProxyOptions['upstreams'];
   private readonly learned: BrowserEgressProxyOptions['learned'];
+  /** Endpoints whose tunnels failed (the endpoint, not a site), until when. */
+  private readonly unhealthy = new Map<number, number>();
   /**
    * Loopback listeners whose port fixes the exit: `slot:<n>` is shared per ISP
    * endpoint; `route:<key>` belongs to one browser launch and fixes its domain list.
@@ -156,7 +162,16 @@ export class BrowserEgressProxy {
     if (!this.upstreams) return this.start();
     if (this.lifetime) return Promise.reject(new Error('POOL_EGRESS_PRIVATE_ONLY'));
     if (this.closing) return Promise.reject(new Error('browser egress proxy is closing'));
-    const slot = proxyPoolSlot(affinityKey, this.upstreams.endpoints.length);
+    const size = this.upstreams.endpoints.length;
+    const home = proxyPoolSlot(affinityKey, size);
+    // A new launch skips an endpoint that could not open tunnels; a running
+    // browser keeps its endpoint (a site's wall never moves anyone).
+    const now = Date.now();
+    const healthy = (n: number) => (this.unhealthy.get(n) ?? 0) <= now;
+    const slot =
+      routeKey === undefined
+        ? home
+        : (Array.from({ length: size }, (_, i) => (home + i) % size).find(healthy) ?? home);
     const key = routeKey === undefined ? `slot:${slot}` : `route:${routeKey}`;
     const existing = this.routed.get(key);
     if (existing) return existing.url;
@@ -168,6 +183,7 @@ export class BrowserEgressProxy {
         ? this.upstreams.domains
         : [...new Set([...this.upstreams.domains, ...(this.learned?.() ?? [])])];
     const upstream: IspUpstream = {
+      slot,
       url,
       domains,
       metrics: { tunnels: 0, failures: 0, bytesUp: 0, bytesDown: 0 },
@@ -489,6 +505,9 @@ export class BrowserEgressProxy {
           cancelled,
         ).catch((error) => {
           upstream.metrics.failures += 1;
+          // 5xx, timeouts and refused connections are the endpoint's; a 407 is configuration.
+          if (!/isp_upstream_status_4\d\d/.test(errorMessage(error)))
+            this.unhealthy.set(upstream.slot, Date.now() + ENDPOINT_RETRY_MS);
           throw error;
         })
       : await connectApprovedAddress(decision.addresses, target.port, track, cancelled);

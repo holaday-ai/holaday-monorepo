@@ -304,3 +304,46 @@ describe('per-launch routes (OPEN-ANY-SITE-1)', () => {
     expect(await egress.closeRoute('task-1')).toMatchObject({ tunnels: 0, failures: 1 });
   });
 });
+
+describe('endpoint health (OPEN-ANY-SITE-1)', () => {
+  it('a new launch skips an endpoint that failed to open tunnels; the running one stays', async () => {
+    const echo = await echoServer();
+    const dead = await fakeUpstream(1, 522);
+    const alive = await fakeUpstream(echo);
+    const endpoints = [`http://127.0.0.1:${dead.port}`, `http://127.0.0.1:${alive.port}`];
+    const egress = new BrowserEgressProxy({
+      policy: allowAll,
+      upstreams: { endpoints, domains: ['google.com'] },
+    });
+    closers.push(() => egress.close());
+    const user = Array.from({ length: 50 }, (_, i) => `u${i}`).find(
+      (u) => proxyPoolSlot(u, 2) === 0,
+    )!;
+    const first = await egress.startFor(user, 'task-1');
+    expect((await connectThrough(first, 'www.google.com:443')).status).toContain(' 502 ');
+    // The running browser does not switch endpoints.
+    expect((await connectThrough(first, 'www.google.com:443')).status).toContain(' 502 ');
+    expect(alive.seen).toEqual([]);
+    const next = await egress.startFor(user, 'task-2');
+    expect((await connectThrough(next, 'www.google.com:443')).echoed).toBe('ping');
+    expect(alive.seen).toHaveLength(1);
+  });
+
+  it('an authentication refusal is configuration, not an unhealthy endpoint', async () => {
+    const refused = await fakeUpstream(1, 407);
+    const egress = new BrowserEgressProxy({
+      policy: allowAll,
+      upstreams: {
+        endpoints: [`http://127.0.0.1:${refused.port}`, 'http://127.0.0.1:9'],
+        domains: ['google.com'],
+      },
+    });
+    closers.push(() => egress.close());
+    const user = Array.from({ length: 50 }, (_, i) => `u${i}`).find(
+      (u) => proxyPoolSlot(u, 2) === 0,
+    )!;
+    await connectThrough(await egress.startFor(user, 'task-1'), 'www.google.com:443');
+    await connectThrough(await egress.startFor(user, 'task-2'), 'www.google.com:443');
+    expect(refused.seen).toHaveLength(2);
+  });
+});
