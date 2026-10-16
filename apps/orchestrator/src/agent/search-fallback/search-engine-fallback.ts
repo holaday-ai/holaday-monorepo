@@ -154,10 +154,7 @@ async function viaSearchApi(
   preferred = false,
 ): Promise<{ plan: SearchFallbackPlan; dispose: () => Promise<void> } | null> {
   try {
-    const results = await provider.search(plan.query, {
-      count: 10,
-      signal: AbortSignal.timeout(15_000),
-    });
+    const results = await searchWithRetry(provider, plan.query);
     const page = await args.executor?.getPage();
     if (!results.length || !page) return null;
     await recordApiResults(results, provider, args);
@@ -187,6 +184,20 @@ async function viaSearchApi(
     };
   } catch {
     return null;
+  }
+}
+
+/**
+ * SEARCH-GUARD-1: one retry after a failed call. The first API call after a
+ * start failed once in the real-model run, and without the API page the agent
+ * opened google.com itself; an empty answer is final.
+ */
+async function searchWithRetry(provider: SearchProvider, query: string) {
+  try {
+    return await provider.search(query, { count: 10, signal: AbortSignal.timeout(15_000) });
+  } catch {
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    return provider.search(query, { count: 10, signal: AbortSignal.timeout(15_000) });
   }
 }
 
@@ -471,6 +482,16 @@ async function searchWithFallback(
     });
     const api =
       preferred && (await viaSearchApi(preferred, deps.searchProvider, args, original, true));
+    // Not silent: the task record shows the API was tried and did not answer.
+    if (preferred && !api)
+      await deps.onFallback?.({
+        from: preferred.from,
+        to: deps.searchProvider.id,
+        reason: 'search_api_first',
+        endpoint: 'api',
+        phase: 'failed',
+        attempt: 1,
+      });
     if (api) {
       plan = api.plan;
       apiUsed = true;

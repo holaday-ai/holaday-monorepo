@@ -126,3 +126,85 @@ describe('the search guard while the API answers', () => {
     expect(landed[0]!.url).toBe('https://www.google.com/search?q=nothing');
   }, 30_000);
 });
+
+describe('a failed API call (SEARCH-GUARD-1 s282-D16)', () => {
+  it('is retried once before the engine is used', async () => {
+    let calls = 0;
+    const provider = {
+      id: 'search-api:flaky',
+      label: '测试接口',
+      search: async (query: string) => {
+        calls++;
+        if (calls === 1) throw new Error('search_api_http_503');
+        return [{ title: `${query} hit`, url: 'https://example.com/hit' }];
+      },
+    };
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const events: Array<{ reason: string; phase: string }> = [];
+    let intentSeen = '';
+    await runSearchWithFallback(
+      {
+        taskId: 'flaky',
+        intent,
+        executor: { getPage: async () => page },
+      } as unknown as RunSupercarOptions,
+      {
+        originalIntent: intent,
+        searchProvider: provider,
+        searchApiFirst: true,
+        stop: () => true,
+        onFallback: async (e) => {
+          events.push(e as never);
+        },
+        run: async (a) => {
+          intentSeen = a.intent;
+          return done;
+        },
+      },
+    );
+    await context.close();
+    expect(calls).toBe(2);
+    expect(intentSeen).toContain('【搜索接口】');
+    expect(events.map((e) => e.phase)).toEqual(['started', 'completed']);
+  }, 30_000);
+
+  it('a provider that keeps failing is recorded, and the engine path runs', async () => {
+    const provider = {
+      id: 'search-api:down',
+      label: '测试接口',
+      search: async () => {
+        throw new Error('search_api_http_503');
+      },
+    };
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const events: Array<{ reason: string; phase: string }> = [];
+    let intentSeen = '';
+    await runSearchWithFallback(
+      {
+        taskId: 'down',
+        intent,
+        executor: { getPage: async () => page },
+      } as unknown as RunSupercarOptions,
+      {
+        originalIntent: intent,
+        searchProvider: provider,
+        searchApiFirst: true,
+        stop: () => true,
+        onFallback: async (e) => {
+          events.push(e as never);
+        },
+        run: async (a) => {
+          intentSeen = a.intent;
+          return done;
+        },
+      },
+    );
+    await context.close();
+    expect(events).toEqual([
+      expect.objectContaining({ reason: 'search_api_first', phase: 'failed' }),
+    ]);
+    expect(intentSeen).toBe(intent);
+  }, 30_000);
+});
