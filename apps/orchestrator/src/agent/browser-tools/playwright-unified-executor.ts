@@ -421,13 +421,29 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           if (action.newTab) {
             const target = byRef(action.ref);
             const href = await target.getAttribute('href');
-            if (!href || !/^https?:/i.test(new URL(href, activeFrame.url()).href))
-              return fail('newTab 只允许已观察到的普通网页链接');
+            const link = href ? new URL(href, activeFrame.url()).href : '';
+            if (!/^https?:/i.test(link)) return fail('newTab 只允许已观察到的普通网页链接');
             if (page.context().pages().length >= 20) return fail('任务标签数达到上限');
-            const [opened] = await Promise.all([
-              page.context().waitForEvent('page', { timeout }),
-              target.click({ button: 'middle', timeout }),
+            const [popup] = await Promise.all([
+              page
+                .context()
+                .waitForEvent('page', { timeout: Math.min(timeout, 5_000) })
+                .catch(() => null),
+              // An overlay or a script can keep the middle click from landing.
+              target
+                .click({ button: 'middle', timeout: Math.min(timeout, 5_000) })
+                .catch(() => {}),
             ]);
+            // ACCEPT-283-R6 (BBC): when the middle click opens nothing (taken over
+            // or blocked), open the observed link itself in the new tab instead.
+            let opened = popup;
+            if (!opened) {
+              opened = await page.context().newPage();
+              await opened.goto(link, { waitUntil: 'commit', timeout }).catch(() => {});
+            } else if (opened.url() === 'about:blank') {
+              // The tab exists before its navigation starts: report the real page.
+              await opened.waitForURL((u) => u.href !== 'about:blank', { timeout }).catch(() => {});
+            }
             await ensureExecutionViewport(opened);
             page = opened;
             activeFrame = opened.mainFrame();
