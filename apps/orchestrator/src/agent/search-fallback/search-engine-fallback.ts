@@ -159,6 +159,15 @@ async function viaSearchApi(
     });
     const page = await args.executor?.getPage();
     if (!results.length || !page) return null;
+    // ACCEPT-283-R4: the links the API returned are observed sources, as tasks.ts
+    // records for web_search; otherwise answer checks strip them as ungrounded.
+    for (const result of results)
+      await args.onEvidence?.({
+        fact: `web_search_url=${result.url}`,
+        sourceType: 'tool_result',
+        sourceDetail: `search API result (${provider.id})`,
+        confidence: 'observed',
+      });
     const served = await serveSearchResults(page.context(), {
       query: plan.query,
       label: provider.label,
@@ -257,10 +266,25 @@ export async function runSearchWithFallback(
   // A served results page is a context route; it must not outlive the search.
   const cleanup: Array<() => Promise<void>> = [];
   try {
-    return await searchWithFallback(args, deps, cleanup);
+    return withoutInternalPages(await searchWithFallback(args, deps, cleanup));
   } finally {
     await Promise.allSettled(cleanup.map((dispose) => dispose()));
   }
+}
+
+/**
+ * ACCEPT-283-R4: the in-browser results page (`.invalid`, never resolvable) is
+ * not a link to show the user; the answer names the search API instead.
+ */
+function withoutInternalPages(outcome: SupercarOutcome): SupercarOutcome {
+  // The page's origin (SEARCH_RESULTS_ORIGIN) up to the end of the URL.
+  const internal = /https:\/\/search-results\.holaday\.invalid[^\s，。；、)）\]」]*/g;
+  const clean = (text: string) => text.replace(internal, '搜索接口结果页');
+  return {
+    ...outcome,
+    ...('summary' in outcome && outcome.summary ? { summary: clean(outcome.summary) } : {}),
+    ...('question' in outcome && outcome.question ? { question: clean(outcome.question) } : {}),
+  } as SupercarOutcome;
 }
 
 async function searchWithFallback(

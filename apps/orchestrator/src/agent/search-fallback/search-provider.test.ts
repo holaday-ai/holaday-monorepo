@@ -357,6 +357,39 @@ describe('a Google wall on a search task goes to the search API, not the user', 
       ['search_api_first', 'completed'],
     ]);
   });
+  it('records the API results as observed sources and never shows the internal page', async () => {
+    const page = await browser.newPage();
+    const evidence: Array<{ fact: string; confidence: string }> = [];
+    const result = await runSearchWithFallback(
+      {
+        taskId: 'task',
+        intent,
+        executor: { getPage: async () => page },
+        onEvidence: async (e: { fact: string; confidence: string }) => {
+          evidence.push(e);
+        },
+      } as unknown as RunSupercarOptions,
+      {
+        originalIntent: intent,
+        searchProvider: new StubSearchProvider(),
+        searchApiFirst: true,
+        stop: vi.fn(() => true),
+        run: async () => ({
+          ...completed,
+          summary: `已从替代源 ${SEARCH_RESULTS_ORIGIN}/search?q=HOLA%20DAY%20AI 读取：\n1. A；链接：https://example.com/HOLA%20DAY%20AI/1`,
+        }),
+      },
+    );
+    await page.close();
+    expect(evidence).toHaveLength(10);
+    expect(evidence[0]).toMatchObject({
+      fact: 'web_search_url=https://example.com/HOLA%20DAY%20AI/1',
+      confidence: 'observed',
+    });
+    expect(result.summary).not.toContain('holaday.invalid');
+    expect(result.summary).toContain('已从替代源 搜索接口结果页 读取');
+    expect(result.summary).toContain('https://example.com/HOLA%20DAY%20AI/1');
+  });
   it('uses the alternate engine when the API has nothing', async () => {
     const { calls } = await run(new StubSearchProvider(() => []));
     expect(calls[1]!.intent).toContain('https://www.bing.com/search?q=HOLA+DAY+AI');
