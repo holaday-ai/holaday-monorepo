@@ -612,6 +612,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
               actionSummary: describe(action, label),
               ok: result.ok,
               ...(result.effect ? { effect: result.effect } : {}),
+              ...(action.tool === 'type' && result.form?.search ? { searchForm: true } : {}),
               ...(result.ok
                 ? {}
                 : {

@@ -605,6 +605,8 @@ export interface SupercarTickEvent {
     errorMessage?: string;
     blockerEvidence?: import('../browser-tools/browser-completion.js').BrowserBlockerEvidence;
     effect?: import('../browser-tools/playwright-unified-executor.js').UnifiedToolResult['effect'];
+    /** QWEN-CN-1: a `type` that filled and submitted a search box (a query, not a form). */
+    searchForm?: boolean;
   };
   iteration: number;
   /**

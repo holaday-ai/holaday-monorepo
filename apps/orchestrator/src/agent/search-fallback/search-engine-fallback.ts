@@ -325,8 +325,16 @@ async function searchWithFallback(
       } else if (execution?.errorCode === 'browser_captcha_wall') {
         retryWallObserved = true;
       }
-      if (execution && !READ_ONLY.has(execution.actionKind)) unsafe = true;
-      if (ev.toolsInTurn.some((tool) => !READ_ONLY.has(tool) && tool !== 'finish')) unsafe = true;
+      // Typing a query into a search box is a search, not a write (#281); any
+      // write it caused still shows in effect.unexpected / triggers below.
+      const query = execution?.actionKind === 'type' && execution.searchForm === true;
+      if (execution && !READ_ONLY.has(execution.actionKind) && !query) unsafe = true;
+      if (
+        ev.toolsInTurn.some(
+          (tool) => !READ_ONLY.has(tool) && tool !== 'finish' && !(query && tool === 'type'),
+        )
+      )
+        unsafe = true;
       if (execution?.effect?.unexpected || execution?.effect?.triggers?.length) unsafe = true;
       const iteration = ev.iteration + offset;
       maxStep = Math.max(maxStep, iteration);
