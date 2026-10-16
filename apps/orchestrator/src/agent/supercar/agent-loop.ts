@@ -751,6 +751,11 @@ export interface RunSupercarOptions {
    * (anonymous cloud sessions only; off unless the profile store is configured).
    */
   persistentProfileUser?: string;
+  /**
+   * OPEN-ANY-SITE-1: a cloud pool browser — a site that walls or refuses this
+   * egress is learned for the user's next launch (never retried now).
+   */
+  learnEgressBlocks?: boolean;
   onCaptchaHandoffEnd?: (resumed: boolean) => Promise<boolean>;
   browserControlFactory?: () => { control: BrowserControl; finish: () => void };
   /** External task id (task_…). Correlates hooks and WS frames. */

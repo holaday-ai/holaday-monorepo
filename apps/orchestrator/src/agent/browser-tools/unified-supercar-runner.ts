@@ -1,3 +1,4 @@
+import { egressBlockLearner } from '../../browser-pool/egress-learning.js';
 import {
   browserProfileStore,
   restoreBrowserProfile,
@@ -187,6 +188,19 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     };
   }
   // CAPTCHA-REDUCE-1: the same user's verification clearance carries over.
+  // OPEN-ANY-SITE-1: a site refusing this egress (its page 403/429, or a
+  // verification wall) goes through the user's endpoint from the next launch.
+  const learnBlock = opts.learnEgressBlocks ? egressBlockLearner() : null;
+  const onPageResponse = (response: import('playwright').Response) => {
+    const status = response.status();
+    if (
+      (status === 403 || status === 429) &&
+      response.request().isNavigationRequest() &&
+      response.frame() === page.mainFrame()
+    )
+      learnBlock?.(response.url(), `http_${status}`);
+  };
+  if (learnBlock) page.on('response', onPageResponse);
   const profileStore = opts.persistentProfileUser ? browserProfileStore() : null;
   const profileSince = Date.now();
   if (profileStore && opts.persistentProfileUser)
@@ -519,6 +533,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         const blocker = await tools.blocker();
         if (blocker && 'evidence' in blocker) {
           const continued = 'disposition' in blocker && blocker.disposition === 'continue';
+          if (!continued && blocker.reason === 'captcha') learnBlock?.(tools.page.url(), 'captcha');
           await recordDiagnostic(
             continued ? 'browser_local_wall' : 'browser_blocker',
             continued ? undefined : `browser_${blocker.reason}_wall`,
@@ -730,6 +745,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         };
     }
   } finally {
+    if (learnBlock) page.off('response', onPageResponse);
     control?.close();
     await control?.settled();
     binding?.finish();

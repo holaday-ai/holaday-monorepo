@@ -5945,6 +5945,10 @@ export const tasksRouter = router({
                   ...(taskSessionPolicy === 'anonymous' && !input.localChrome
                     ? { persistentProfileUser: ctx.userId }
                     : {}),
+                  // OPEN-ANY-SITE-1: pool browsers learn sites that refuse their egress.
+                  ...(!input.localChrome && ctx.browserPool?.peek(taskId)
+                    ? { learnEgressBlocks: true }
+                    : {}),
                   ...(primaryExecutor && ctx.browserPool?.peek(taskId)?.executor === primaryExecutor
                     ? {
                         browserControlFactory: () => {

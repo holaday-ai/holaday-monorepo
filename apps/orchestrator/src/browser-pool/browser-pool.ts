@@ -72,6 +72,7 @@ import { BrokerBootSession } from './broker-boot-session.js';
 import { BrokerPoolRuntime, type OriginalBrokerGroup } from './broker-pool-runtime.js';
 import { BrokerVncIngress, type BrokerVncIngressRequest } from './broker-vnc-ingress.js';
 import type { BrokerVncSessionAccess, BrokerVncSessionRequest } from './broker-vnc-session.js';
+import { egressLearning } from './egress-learning.js';
 import { BrowserEgressProxy } from './egress-proxy.js';
 import { SlotAllocator } from './port-allocator.js';
 import {
@@ -178,7 +179,14 @@ export class BrowserPool {
     this.allocator = new SlotAllocator(config);
     // PROXY-BROWSER-1: with BROWSER_DOMAIN_PROXY_* in browser mode, each user's
     // Chrome reaches Google through that user's fixed ISP endpoint.
-    this.egressProxy = new BrowserEgressProxy({ logger, upstreams: browserProxyUpstreams() });
+    // OPEN-ANY-SITE-1: sites seen refusing the datacenter egress join the list
+    // from the next launch (each launch fixes its list when it starts).
+    const upstreams = browserProxyUpstreams();
+    this.egressProxy = new BrowserEgressProxy({
+      logger,
+      upstreams,
+      ...(upstreams ? { learned: () => egressLearning().sites() } : {}),
+    });
     if (!this.#strict) mkdirSync(config.baseDir, { recursive: true });
   }
 
@@ -883,6 +891,8 @@ export class BrowserPool {
           'pool: teardown error (continuing)',
         );
       });
+    // Keyed by the spawning task, which a follow-up's adoption does not change.
+    await this.closeEgressRoute(this.instanceProcesses.get(inst)?.taskId ?? taskId);
     this.allocator.release({
       index: inst.index,
       display: inst.display,
@@ -1251,7 +1261,8 @@ export class BrowserPool {
         /* mkdirSync race / perm — will fail below with a clearer error */
       }
 
-      const proxyServer = await this.egressProxy.startFor(userId);
+      // One listener per launch, keyed by the spawning task (kept across adoption).
+      const proxyServer = await this.egressProxy.startFor(userId, taskId);
       assertActive();
       let xvfb: SpawnedProcess | null = null;
       let x11vnc: SpawnedProcess | null = null;
@@ -1407,10 +1418,18 @@ export class BrowserPool {
             /* legacy best effort */
           }
         }
+      await this.closeEgressRoute(taskId);
       this.allocator.release(slot);
       this.processRecords.delete(record);
       throw err;
     }
+  }
+
+  /** The launch's ISP/mobile listener goes with its browser; its traffic is logged. */
+  private async closeEgressRoute(routeKey: string): Promise<void> {
+    const metrics = await this.egressProxy.closeRoute(routeKey).catch(() => null);
+    if (metrics?.tunnels || metrics?.failures)
+      this.logger.info({ routeKey, ...metrics }, 'pool: ISP egress traffic for this browser');
   }
 
   private async tearDownInstance(inst: BrowserInstance): Promise<void> {

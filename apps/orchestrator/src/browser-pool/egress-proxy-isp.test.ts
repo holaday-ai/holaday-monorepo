@@ -252,3 +252,98 @@ describe('BrowserEgressProxy ISP chaining', () => {
     expect(await egress.startFor('b')).toBe(await egress.start());
   });
 });
+
+describe('per-launch routes (OPEN-ANY-SITE-1)', () => {
+  it('fixes the learned list when the browser launches; a later lesson waits for the next launch', async () => {
+    const echo = await echoServer();
+    const upstream = await fakeUpstream(echo);
+    const learned: string[] = [];
+    const egress = new BrowserEgressProxy({
+      policy: allowAll,
+      upstreams: { endpoints: [`http://127.0.0.1:${upstream.port}`], domains: ['google.com'] },
+      learned: () => learned,
+    });
+    closers.push(() => egress.close());
+    const running = await egress.startFor('alice', 'task-1');
+    learned.push('reddit.com');
+    // The running browser does not switch exits for a site learned after it started.
+    await connectThrough(running, 'www.reddit.com:443');
+    expect(upstream.seen).toEqual([]);
+    const next = await egress.startFor('alice', 'task-2');
+    expect(next).not.toBe(running);
+    expect((await connectThrough(next, 'www.reddit.com:443')).echoed).toBe('ping');
+    expect(upstream.seen.map((s) => s.authority)).toEqual(['www.reddit.com:443']);
+  });
+
+  it('counts each launch’s tunnelled traffic and closes its listener', async () => {
+    const echo = await echoServer();
+    const upstream = await fakeUpstream(echo);
+    const egress = new BrowserEgressProxy({
+      policy: allowAll,
+      upstreams: { endpoints: [`http://127.0.0.1:${upstream.port}`], domains: ['google.com'] },
+    });
+    closers.push(() => egress.close());
+    const url = await egress.startFor('alice', 'task-1');
+    await connectThrough(url, 'www.google.com:443', 'hello');
+    // Direct traffic is not counted.
+    await connectThrough(url, `example.com:${echo}`, 'direct');
+    const metrics = await egress.closeRoute('task-1');
+    expect(metrics).toEqual({ tunnels: 1, failures: 0, bytesUp: 5, bytesDown: 5 });
+    expect(await egress.closeRoute('task-1')).toBeNull();
+    await expect(connectThrough(url, 'www.google.com:443')).rejects.toThrow();
+  });
+
+  it('counts a refused tunnel as a failure', async () => {
+    const upstream = await fakeUpstream(1, 407);
+    const egress = new BrowserEgressProxy({
+      policy: allowAll,
+      upstreams: { endpoints: [`http://127.0.0.1:${upstream.port}`], domains: ['google.com'] },
+    });
+    closers.push(() => egress.close());
+    await connectThrough(await egress.startFor('alice', 'task-1'), 'www.google.com:443');
+    expect(await egress.closeRoute('task-1')).toMatchObject({ tunnels: 0, failures: 1 });
+  });
+});
+
+describe('endpoint health (OPEN-ANY-SITE-1)', () => {
+  it('a new launch skips an endpoint that failed to open tunnels; the running one stays', async () => {
+    const echo = await echoServer();
+    const dead = await fakeUpstream(1, 522);
+    const alive = await fakeUpstream(echo);
+    const endpoints = [`http://127.0.0.1:${dead.port}`, `http://127.0.0.1:${alive.port}`];
+    const egress = new BrowserEgressProxy({
+      policy: allowAll,
+      upstreams: { endpoints, domains: ['google.com'] },
+    });
+    closers.push(() => egress.close());
+    const user = Array.from({ length: 50 }, (_, i) => `u${i}`).find(
+      (u) => proxyPoolSlot(u, 2) === 0,
+    )!;
+    const first = await egress.startFor(user, 'task-1');
+    expect((await connectThrough(first, 'www.google.com:443')).status).toContain(' 502 ');
+    // The running browser does not switch endpoints.
+    expect((await connectThrough(first, 'www.google.com:443')).status).toContain(' 502 ');
+    expect(alive.seen).toEqual([]);
+    const next = await egress.startFor(user, 'task-2');
+    expect((await connectThrough(next, 'www.google.com:443')).echoed).toBe('ping');
+    expect(alive.seen).toHaveLength(1);
+  });
+
+  it('an authentication refusal is configuration, not an unhealthy endpoint', async () => {
+    const refused = await fakeUpstream(1, 407);
+    const egress = new BrowserEgressProxy({
+      policy: allowAll,
+      upstreams: {
+        endpoints: [`http://127.0.0.1:${refused.port}`, 'http://127.0.0.1:9'],
+        domains: ['google.com'],
+      },
+    });
+    closers.push(() => egress.close());
+    const user = Array.from({ length: 50 }, (_, i) => `u${i}`).find(
+      (u) => proxyPoolSlot(u, 2) === 0,
+    )!;
+    await connectThrough(await egress.startFor(user, 'task-1'), 'www.google.com:443');
+    await connectThrough(await egress.startFor(user, 'task-2'), 'www.google.com:443');
+    expect(refused.seen).toHaveLength(2);
+  });
+});

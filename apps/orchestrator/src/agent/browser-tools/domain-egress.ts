@@ -28,14 +28,38 @@ export interface DomainEgressConfig {
 }
 export type DomainProxyMode = 'browser' | 'replay';
 /**
- * Google search and its verification pages. reCAPTCHA must be solved from the
- * IP that triggered it, so its assets go the same way; sign-in hosts never do.
+ * Sites known to wall or refuse datacenter IPs, with the same-site asset hosts
+ * a page needs (OPEN-ANY-SITE-1). A verification must be solved from the IP
+ * that triggered it, so challenge assets go the same way; sign-in hosts never
+ * do. Video streams (googlevideo.com) stay direct: they are the bulk of bytes.
+ * BROWSER_DOMAIN_PROXY_DOMAINS replaces the list; learned sites are added.
  */
 export const DEFAULT_PROXY_DOMAINS = [
+  // Google search, consent and reCAPTCHA
   'google.com',
   'gstatic.com',
   'googleapis.com',
   'recaptcha.net',
+  // YouTube pages and thumbnails
+  'youtube.com',
+  'ytimg.com',
+  // Reddit
+  'reddit.com',
+  'redditstatic.com',
+  'redditmedia.com',
+  'redd.it',
+  // IMDb and Amazon (images on media-amazon.com)
+  'imdb.com',
+  'amazon.com',
+  'media-amazon.com',
+  'ssl-images-amazon.com',
+  // Medium, Etsy
+  'medium.com',
+  'etsy.com',
+  'etsystatic.com',
+  // Challenge providers a walled page loads from its own IP
+  'challenges.cloudflare.com',
+  'hcaptcha.com',
 ];
 /** Account and sign-in hosts never use the shared proxy, whatever the domain list. */
 const SIGN_IN_HOST = /^(?:accounts|myaccount|login|signin|sso|auth|passport|id)\./i;
