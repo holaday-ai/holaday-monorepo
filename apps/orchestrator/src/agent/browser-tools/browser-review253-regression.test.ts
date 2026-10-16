@@ -305,6 +305,17 @@ describe('1b. confirmation / pause rate on ordinary reads', () => {
       { second: clickLabel('下一页') },
     );
   });
+  it('B2b search submit beacons Bing-style logging (/fd/ls/lsp.aspx) (QWEN-CN-1 core-02)', async () => {
+    await scenario(
+      'B2b-get-search-with-bing-log-beacon',
+      {
+        '/': `<form role="search" action="/search" onsubmit="navigator.sendBeacon('/fd/ls/lsp.aspx','{&quot;e&quot;:1}')"><input name="q" aria-label="搜索词"></form>`,
+        '/search': `<p>结果 1</p><a href="/search?page=2">下一页</a>`,
+      },
+      typeSubmit,
+      { second: clickLabel('下一页') },
+    );
+  });
   it('B3 pagination click; result page fires an analytics POST on load', async () => {
     await scenario(
       'B3-next-page-with-load-analytics-post',

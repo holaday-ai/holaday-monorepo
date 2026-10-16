@@ -581,10 +581,13 @@ export class CloudObservation {
     const methodWrite = ['PUT', 'PATCH', 'DELETE'].includes(r.method());
     // A beacon with telemetry semantics is not a form/API mutation. Transaction
     // paths and action parameters still take precedence, even on /collect.
+    // QWEN-CN-1: Bing beacons its search logging to /fd/ls/lsp.aspx on submit.
     const passiveBeacon =
       r.resourceType() === 'ping' &&
       !transactional &&
-      /(?:^|\/)(?:collect|track|logs?|beacon|heartbeat|ping)(?:\/|$)/i.test(url.pathname);
+      /(?:^|\/)(?:collect|track|logs?|beacon|heartbeat|ping|telemetry|metrics|analytics|rum|ls|lsp\.aspx)(?:\/|$)/i.test(
+        url.pathname,
+      );
     const unknownPost = r.method() === 'POST' && graphql !== 'query' && !passiveBeacon;
     const candidate = transactional || resourceWrite || methodWrite || unknownPost;
     const key = `${r.method()}:${url.origin}${url.pathname}`;
