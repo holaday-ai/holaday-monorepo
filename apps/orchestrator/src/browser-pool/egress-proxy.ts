@@ -26,7 +26,12 @@ interface BrowserEgressProxyOptions {
    * the domains chained through them. Chrome keeps doing the TLS: the tunnel to
    * the endpoint only carries its bytes. Absent means every target is direct.
    */
-  upstreams?: { endpoints: readonly string[]; domains: readonly string[] } | null;
+  upstreams?: {
+    endpoints: readonly string[];
+    domains: readonly string[];
+    /** Sites that never go through an endpoint, even when learned. */
+    direct?: readonly string[];
+  } | null;
   /** OPEN-ANY-SITE-1: sites learned to block the datacenter egress (snapshot per launch). */
   learned?: () => readonly string[];
 }
@@ -181,7 +186,14 @@ export class BrowserEgressProxy {
     const domains =
       routeKey === undefined
         ? this.upstreams.domains
-        : [...new Set([...this.upstreams.domains, ...(this.learned?.() ?? [])])];
+        : [
+            ...new Set([
+              ...this.upstreams.domains,
+              ...(this.learned?.() ?? []).filter(
+                (site) => !proxiedDomain(site, this.upstreams?.direct ?? []),
+              ),
+            ]),
+          ];
     const upstream: IspUpstream = {
       slot,
       url,

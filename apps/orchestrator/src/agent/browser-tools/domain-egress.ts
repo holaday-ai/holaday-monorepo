@@ -28,38 +28,34 @@ export interface DomainEgressConfig {
 }
 export type DomainProxyMode = 'browser' | 'replay';
 /**
- * Sites known to wall or refuse datacenter IPs, with the same-site asset hosts
- * a page needs (OPEN-ANY-SITE-1). A verification must be solved from the IP
- * that triggered it, so challenge assets go the same way; sign-in hosts never
- * do. Video streams (googlevideo.com) stay direct: they are the bulk of bytes.
+ * The sites sent through the user's endpoint by default: those that refuse
+ * datacenter IPs and open through a mobile exit (OPEN-ANY-SITE-1, measured
+ * with the production launch flags, 2026-10-16): Reddit 0/2 direct → 3/4
+ * mobile, Medium 0/2 → 2/4. Sign-in hosts never go through the endpoint.
  * BROWSER_DOMAIN_PROXY_DOMAINS replaces the list; learned sites are added.
  */
 export const DEFAULT_PROXY_DOMAINS = [
-  // Google search, consent and reCAPTCHA
-  'google.com',
-  'gstatic.com',
-  'googleapis.com',
-  'recaptcha.net',
-  // YouTube pages and thumbnails
-  'youtube.com',
-  'ytimg.com',
   // Reddit
   'reddit.com',
   'redditstatic.com',
   'redditmedia.com',
   'redd.it',
-  // IMDb and Amazon (images on media-amazon.com)
-  'imdb.com',
-  'amazon.com',
-  'media-amazon.com',
-  'ssl-images-amazon.com',
-  // Medium, Etsy
+  // Medium
   'medium.com',
-  'etsy.com',
-  'etsystatic.com',
-  // Challenge providers a walled page loads from its own IP
-  'challenges.cloudflare.com',
-  'hcaptcha.com',
+];
+/**
+ * Sites that stay on the direct exit whatever is learned: they open from the
+ * datacenter and wall a proxy exit (Google search 19/20 direct, 0/20 mobile;
+ * YouTube 2/2 direct). BROWSER_DOMAIN_PROXY_DIRECT replaces the list.
+ */
+export const DIRECT_ONLY_DOMAINS = [
+  'google.com',
+  'gstatic.com',
+  'googleapis.com',
+  'recaptcha.net',
+  'youtube.com',
+  'ytimg.com',
+  'googlevideo.com',
 ];
 /** Account and sign-in hosts never use the shared proxy, whatever the domain list. */
 const SIGN_IN_HOST = /^(?:accounts|myaccount|login|signin|sso|auth|passport|id)\./i;
@@ -77,6 +73,7 @@ export const DOMAIN_PROXY_ENV = {
   username: 'BROWSER_DOMAIN_PROXY_USERNAME',
   password: 'BROWSER_DOMAIN_PROXY_PASSWORD',
   mode: 'BROWSER_DOMAIN_PROXY_MODE',
+  direct: 'BROWSER_DOMAIN_PROXY_DIRECT',
 } as const;
 /**
  * The proxy rule (what a PAC file would say): listed domains and their
@@ -115,10 +112,14 @@ export function domainEgressConfig(env: NodeJS.ProcessEnv = process.env): Domain
 /** Browser-level chaining: one fixed ISP endpoint per pool slot, or null when off. */
 export function browserProxyUpstreams(
   env: NodeJS.ProcessEnv = process.env,
-): { endpoints: string[]; domains: string[] } | null {
+): { endpoints: string[]; domains: string[]; direct: string[] } | null {
   const config = domainEgressConfig(env);
   if (!config.enabled || config.mode !== 'browser' || !config.pool?.length) return null;
-  return { endpoints: config.pool, domains: config.domains };
+  const configured = list(env[DOMAIN_PROXY_ENV.direct]).map((d) => d.toLowerCase());
+  const direct = configured.length ? configured : [...DIRECT_ONLY_DOMAINS];
+  // Direct wins over the list too: an operator list cannot send these through.
+  const domains = config.domains.filter((d) => !proxiedDomain(d, direct));
+  return { endpoints: config.pool, domains, direct };
 }
 /** The pool slot a user always gets (stable across tasks and restarts). */
 export function proxyPoolSlot(affinityKey: string, size: number): number {

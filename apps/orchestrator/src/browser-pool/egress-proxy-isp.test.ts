@@ -120,7 +120,7 @@ function proxy(
 
 describe('proxy rule (PAC equivalent)', () => {
   it('proxies only the listed domains and their subdomains', () => {
-    const domains = [...DEFAULT_PROXY_DOMAINS];
+    const domains = ['google.com', 'gstatic.com', 'googleapis.com', 'recaptcha.net'];
     expect(proxiedDomain('www.google.com', domains)).toBe('google.com');
     expect(proxiedDomain('WWW.Google.COM.', domains)).toBe('google.com');
     expect(proxiedDomain('consent.google.com', domains)).toBeDefined();
@@ -250,6 +250,45 @@ describe('BrowserEgressProxy ISP chaining', () => {
     closers.push(() => egress.close());
     expect(await egress.startFor('a')).toBe(await egress.start());
     expect(await egress.startFor('b')).toBe(await egress.start());
+  });
+});
+
+describe('per-site exits (OPEN-ANY-SITE-1)', () => {
+  const env = {
+    BROWSER_DOMAIN_PROXY_ENABLED: 'true',
+    BROWSER_DOMAIN_PROXY_POOL: 'mobile.example:10001',
+  };
+  it('sends only the sites a mobile exit opens; Google and YouTube stay direct', () => {
+    const upstreams = browserProxyUpstreams(env)!;
+    expect(upstreams.domains).toEqual(DEFAULT_PROXY_DOMAINS);
+    for (const host of ['www.reddit.com', 'old.reddit.com', 'www.redditstatic.com', 'medium.com'])
+      expect(proxiedDomain(host, upstreams.domains)).toBeDefined();
+    for (const host of ['www.google.com', 'www.youtube.com', 'www.imdb.com', 'www.etsy.com'])
+      expect(proxiedDomain(host, upstreams.domains)).toBeUndefined();
+    expect(upstreams.direct).toContain('google.com');
+  });
+  it('a direct-only site stays direct even when configured or learned', async () => {
+    const configured = browserProxyUpstreams({
+      ...env,
+      BROWSER_DOMAIN_PROXY_DOMAINS: 'google.com,reddit.com',
+    })!;
+    expect(configured.domains).toEqual(['reddit.com']);
+    const echo = await echoServer();
+    const upstream = await fakeUpstream(echo);
+    const egress = new BrowserEgressProxy({
+      policy: allowAll,
+      upstreams: {
+        endpoints: [`http://127.0.0.1:${upstream.port}`],
+        domains: ['reddit.com'],
+        direct: ['google.com'],
+      },
+      learned: () => ['google.com', 'imdb.com'],
+    });
+    closers.push(() => egress.close());
+    const url = await egress.startFor('alice', 'task-1');
+    await connectThrough(url, 'www.google.com:443');
+    await connectThrough(url, 'www.imdb.com:443');
+    expect(upstream.seen.map((s) => s.authority)).toEqual(['www.imdb.com:443']);
   });
 });
 

@@ -63,6 +63,9 @@ describe('egressBlockLearner', () => {
     learn('https://accounts.google.com/signin', 'captcha');
     learn('not a url', 'captcha');
     learn('https://www.zillow.com/homes/', 'http_403');
+    // Google walls a proxy exit: a /sorry page on the direct exit is not a lesson.
+    learn('https://www.google.com/sorry/index', 'captcha');
+    learn('https://www.youtube.com/watch?v=x', 'http_429');
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({
       'zillow.com': expect.objectContaining({ reason: 'http_403', count: 1 }),
     });

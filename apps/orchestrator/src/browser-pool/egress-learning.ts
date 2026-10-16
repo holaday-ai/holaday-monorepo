@@ -129,7 +129,9 @@ export function egressBlockLearner(
       return;
     }
     const site = siteOf(host);
-    if (!site || proxiedDomain(site, [...upstreams.domains, ...store.sites()])) return;
+    // A direct-only site (Google, YouTube) walls a proxy exit: never learn it.
+    if (!site || proxiedDomain(site, upstreams.direct)) return;
+    if (proxiedDomain(site, [...upstreams.domains, ...store.sites()])) return;
     store.record(host, reason);
   };
 }
