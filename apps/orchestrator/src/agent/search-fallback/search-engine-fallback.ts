@@ -448,6 +448,15 @@ async function searchWithFallback(
   retry = true;
   offset = Math.max(maxStep, first.iterations);
   await emit('started');
+  // QWEN-CN-1: open the alternate before the retry starts. Its loop hands any
+  // wall it finds at a step start to the user (#280), and the replaced wall is
+  // still on screen until the agent navigates; the instruction starts there too.
+  try {
+    const page = await args.executor?.getPage();
+    await page?.goto(selected.url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  } catch {
+    /* the agent's own navigation still starts from the URL in its instruction */
+  }
   const next = tracked(selected.intent);
   if (remaining !== undefined) next.timeoutMs = remaining;
   let second = await deps.run(next);

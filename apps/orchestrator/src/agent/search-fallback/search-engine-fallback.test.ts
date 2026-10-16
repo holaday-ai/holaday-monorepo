@@ -185,6 +185,36 @@ it('handles a host-verified settled wall even when the runner returns without a 
   expect(calls).toBe(2);
   expect(result.status).toBe('completed');
 });
+it('opens the alternate before the retry, so the replaced wall is not handed to the user', async () => {
+  let current = wall.url;
+  const gotos: string[] = [];
+  const page = {
+    url: () => current,
+    goto: async (url: string) => {
+      gotos.push(url);
+      current = url;
+    },
+  };
+  const seenAtStart: string[] = [];
+  const result = await runSearchWithFallback(
+    { ...args, executor: { getPage: async () => page } as never },
+    {
+      stop: () => true,
+      run: async (a) => {
+        seenAtStart.push(current);
+        if (seenAtStart.length === 1) {
+          await a.onTick?.(tick);
+          return blocked;
+        }
+        return completed;
+      },
+    },
+  );
+  expect(result.status).toBe('completed');
+  expect(gotos).toEqual(['https://www.bing.com/search?q=HOLA+DAY+AI']);
+  // The retry starts on Bing, not on Google's /sorry page.
+  expect(seenAtStart).toEqual([wall.url, 'https://www.bing.com/search?q=HOLA+DAY+AI']);
+});
 it('extracts an unquoted search query without including output instructions', () => {
   expect(
     planSearchFallback('请用 Google 搜索 Playwright tutorial，返回前5条标题和链接', wall)?.query,
