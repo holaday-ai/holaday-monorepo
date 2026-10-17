@@ -131,6 +131,13 @@ export function completionGap(
   )) {
     // "未能打开 / 无法访问 …" admits the opposite.
     if (/(?:未能|没能|无法|不能|未|没有|并未)\s*$/.test(claimed.slice(0, match.index!))) continue;
+    // "如需更多，可自行访问 weather.gov.sg" suggests a site to the user (FIX-24 core-02).
+    if (
+      /(?:可以?|自行|请|建议|如需[^。；\n]{0,20}|您可以?|也可)\s*$/.test(
+        claimed.slice(0, match.index!),
+      )
+    )
+      continue;
     const host = match[1]!.toLowerCase().replace(/^www\./, '');
     // Search engines are covered by the fallback's own receipts across attempts.
     if (/(?:^|\.)(?:google\.[a-z.]+|bing\.com|duckduckgo\.com|baidu\.com)$/.test(host)) continue;

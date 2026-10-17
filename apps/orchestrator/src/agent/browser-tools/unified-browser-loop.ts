@@ -4,6 +4,7 @@ import type {
   NeutralMessage,
   NeutralToolDefinition,
 } from '../../llm/messages-adapter.js';
+import { SEARCH_RESULTS_ORIGIN } from '../search-fallback/search-results-page.js';
 import { prepareBrowserPlan } from './browser-brain-roles.js';
 import { type BrowserTrace, completionGap, receiptEvidence } from './browser-completion.js';
 import { completionDiagnostic } from './completion-diagnostic.js';
@@ -283,6 +284,7 @@ export async function runUnifiedBrowserLoop(
   /** FIX-24 (Deploy-24 core-02): every weather value comes from the read page. */
   const wantsReadings = /天气|气温|weather|forecast/i.test(input.intent);
   let readingsCorrected = false;
+  let weatherPageAsked = false;
   /**
    * BROWSER-AUTOPILOT-3: a short count gets one automatic continuation; a wrong
    * "第N节" gets one correction with the real list, then fails.
@@ -726,6 +728,22 @@ export async function runUnifiedBrowserLoop(
             rejectionsLeft -= 1;
             held = { summary: withLimitations(summary), evidence };
             results.push(toolResult(call.id, remediationPrompt(gaps), true));
+            continue;
+          }
+          // Values from result snippets are not a weather page's reading.
+          const onlyResults =
+            pageEvidence.length > 0 &&
+            pageEvidence.every((page) => page.sourceURL?.startsWith(SEARCH_RESULTS_ORIGIN));
+          if (wantsReadings && onlyResults && !weatherPageAsked && !concludeNow) {
+            weatherPageAsked = true;
+            await rejected(summary, given, '天气数值只来自搜索结果摘要，没有读取天气页面');
+            results.push(
+              toolResult(
+                call.id,
+                '这些天气数值来自搜索结果页的摘要，不是天气页面本身。请打开结果里的一个天气来源页面（click newTab 或 navigate 到该结果链接），读取后逐项照该页原样写；页面上读不到的项写「未读到」。打不开时如实说明。',
+                true,
+              ),
+            );
             continue;
           }
           if (wantsReadings && facts.unverified.length && !readingsCorrected && !concludeNow) {

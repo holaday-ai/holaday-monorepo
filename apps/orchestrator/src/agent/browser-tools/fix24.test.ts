@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { completionGap } from './browser-completion.js';
 import { assessCompletionFacts, nearestPassage } from './completion-fields.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import { intentHosts, runUnifiedBrowserLoop } from './unified-browser-loop.js';
@@ -327,5 +328,105 @@ describe('core-02: short quotes keep the quote marks paired', () => {
       assessCompletionFacts({ summary: '天气为"阴"，页面写着"Sunny 31/27℃"。', pages })
         .contradictions,
     ).toEqual(['原文引用「Sunny 31/27℃」 不是已读页面中的原文']);
+  });
+});
+
+describe('core-08: a short field value is not traced to another page', () => {
+  const pages = [
+    { text: 'textbox "Customer name"\ntextbox "Preferred delivery time" type=time', tabId: 'h1' },
+    { text: 'Available Examples\nInputs\nnotification messages', tabId: 'i1' },
+  ] as never;
+  it('"no (only type=time present)" is not "from another page"', () => {
+    const facts = assessCompletionFacts({
+      summary: 'x',
+      fields: [
+        { name: 'date_control_available', value: 'no (only type=time present)', tabId: 'h1' },
+      ],
+      pages,
+    });
+    expect(facts.contradictions).toEqual([]);
+  });
+  it('a specific value read on another tab still is', () => {
+    const facts = assessCompletionFacts({
+      summary: 'x',
+      fields: [{ name: '标题', value: 'Available Examples', tabId: 'h1' }],
+      pages,
+    });
+    expect(facts.contradictions[0]).toContain('来自其他页面');
+  });
+});
+
+describe('core-02: a weather answer from result snippets is sent to a weather page once', () => {
+  const WEATHER = `${P}Google 搜索「新加坡 天气」读出天气卡片`;
+  const RESULTS =
+    'https://search-results.holaday.invalid/search?q=%E6%96%B0%E5%8A%A0%E5%9D%A1%20%E5%A4%A9%E6%B0%94';
+  const run = (opens: boolean) => {
+    const { adapter, seen } = scripted([
+      { name: 'navigate', input: { url: RESULTS } },
+      { name: 'snapshot', input: {} },
+      finish('结果第10条摘要显示：当前温度 31°，降雨概率 66%。'),
+      ...(opens
+        ? [
+            { name: 'navigate', input: { url: 'https://www.accuweather.com/sg/singapore' } },
+            { name: 'snapshot', input: {} },
+          ]
+        : []),
+      finish('当前温度 31°，降雨概率 66%。'),
+    ]);
+    let url = 'about:blank';
+    const execute = async (action: { tool: string; url?: string }): Promise<UnifiedToolResult> => {
+      if (action.tool === 'navigate') {
+        url = action.url!;
+        return { ok: true, text: '已打开', url };
+      }
+      return { ok: true, text: '当前温度 31°\n降雨概率 66%', url };
+    };
+    return runUnifiedBrowserLoop({
+      intent: WEATHER,
+      adapter,
+      maxSteps: 8,
+      execute: execute as never,
+    }).then((outcome) => ({ outcome, seen: seen.join('\n') }));
+  };
+  it('asks once for a weather page, then completes from it', async () => {
+    const { outcome, seen } = await run(true);
+    expect(seen).toContain('这些天气数值来自搜索结果页的摘要，不是天气页面本身');
+    expect(outcome).toMatchObject({ status: 'completed' });
+  });
+  it('does not ask when a weather page was read', async () => {
+    const { adapter, seen } = scripted([
+      { name: 'navigate', input: { url: 'https://www.accuweather.com/sg/singapore' } },
+      { name: 'snapshot', input: {} },
+      finish('当前温度 31°，降雨概率 66%。'),
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: WEATHER,
+      adapter,
+      maxSteps: 6,
+      execute: (async (action: { tool: string; url?: string }) =>
+        action.tool === 'navigate'
+          ? { ok: true, text: '已打开', url: action.url }
+          : {
+              ok: true,
+              text: '当前温度 31°\n降雨概率 66%',
+              url: 'https://www.accuweather.com/sg/singapore',
+            }) as never,
+    });
+    expect(seen.join('\n')).not.toContain('不是天气页面本身');
+    expect(outcome).toMatchObject({ status: 'completed' });
+  });
+  it('a site suggested to the user is not a claim of having visited it', () => {
+    const trace = [{ tool: 'navigate', ok: true, url: RESULTS }];
+    expect(
+      completionGap(
+        WEATHER,
+        '如需更详细的小时预报，可自行访问结果列表中的 weather.gov.sg 查看。',
+        trace,
+        false,
+      ),
+    ).toBeNull();
+    expect(completionGap(WEATHER, '已访问 weather.gov.sg 并读取了温度。', trace, false)).toContain(
+      'weather.gov.sg',
+    );
   });
 });

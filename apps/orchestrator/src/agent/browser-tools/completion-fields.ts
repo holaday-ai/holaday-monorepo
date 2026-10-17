@@ -414,7 +414,13 @@ export function assessCompletionFacts(input: {
     }
     if (
       (fact.tabId || fact.sourceURL) &&
-      candidates.some((v) => pages.some((page) => !bound(page) && page.norm.includes(v)))
+      // "no" (from "no (only type=time present)") is inside almost any page's words:
+      // only a value long enough to be specific can be traced to another page.
+      candidates.some(
+        (v) =>
+          (v.length >= 4 || /\p{Script=Han}{2}/u.test(v)) &&
+          pages.some((page) => !bound(page) && page.norm.includes(v)),
+      )
     ) {
       contradictions.push(`${label} 来自其他页面，不是 ${sourceLabel(fact)} 的内容`);
       continue;
