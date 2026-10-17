@@ -30,7 +30,25 @@ describe('switching back to the original tab (core-07)', () => {
         [...opened, { tool: 'switch_tab', ok: true, tabId: 'new1' }],
         false,
       ),
-    ).toBe('switch_tab 回执未证明切回原标签。');
+    ).toBe(
+      'switch_tab 回执未证明切回原标签：起始标签是 source（打开这些链接的页面），不是新打开的标签；请 switch_tab 到 source 后再完成。',
+    );
+  });
+  // FIX-24 (Deploy-24 core-07): the model read 回到第一个 as the first new tab.
+  it('rejects "切回第一个新标签页" and names the starting tab', () => {
+    const gap = completionGap(
+      '从一个页面打开3个链接到新标签，分别读标题后回到第一个',
+      '分别读取标题后切回第一个新标签页',
+      [...opened, { tool: 'switch_tab', ok: true, tabId: 'new1' }],
+      false,
+    );
+    expect(gap).toContain('起始标签是 source');
+  });
+  it('the prompt says 回到第一个 means the starting tab', async () => {
+    const { UNIFIED_BROWSER_SYSTEM_PROMPT } = await import('./unified-browser-loop.js');
+    expect(UNIFIED_BROWSER_SYSTEM_PROMPT).toContain(
+      '指打开这些链接的起始页面所在的标签（不是第一个新标签）',
+    );
   });
 });
 

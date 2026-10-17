@@ -66,6 +66,8 @@ export type BrowserTrace = Pick<
   fromTabId?: string;
   /** Text a successful `type` entered (a host fact for answer checks). */
   typedText?: string;
+  /** The page a form receipt was made on. */
+  pageUrl?: string;
 };
 /** A prohibition or an admission of non-completion is not a claim of execution. */
 function positiveActionText(text: string): string {
@@ -171,7 +173,10 @@ export function completionGap(
       successful.find((entry) => entry.tabId && !entry.openedTab && entry.tool !== 'new_tab')
         ?.tabId;
     const lastSwitch = successful.filter((entry) => entry.tool === 'switch_tab').at(-1);
-    if (!first || lastSwitch?.tabId !== first) return 'switch_tab 回执未证明切回原标签。';
+    if (!first || lastSwitch?.tabId !== first)
+      return first
+        ? `switch_tab 回执未证明切回原标签：起始标签是 ${first}（打开这些链接的页面），不是新打开的标签；请 switch_tab 到 ${first} 后再完成。`
+        : 'switch_tab 回执未证明切回原标签。';
   }
   const scrollText = `${requested} ${claimed}`;
   const scrollCount =
