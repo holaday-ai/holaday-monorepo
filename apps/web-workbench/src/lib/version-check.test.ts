@@ -58,7 +58,8 @@ describe('fetchDeployedBundleHash', () => {
     expect(calls[0]).toEqual({ url: '/index.html', cache: 'no-store' });
   });
   it('returns null on a non-200 response', async () => {
-    const fakeFetch = (async () => ({ ok: false, text: async () => '' }) as Response) as unknown as typeof fetch;
+    const fakeFetch = (async () =>
+      ({ ok: false, text: async () => '' }) as Response) as unknown as typeof fetch;
     expect(await fetchDeployedBundleHash(fakeFetch)).toBeNull();
   });
   it('returns null (no throw) on a network error', async () => {

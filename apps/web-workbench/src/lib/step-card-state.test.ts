@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   shouldShowStepCard,
-  stepDurationLabel,
-  stepDisplaySummary,
-  stepDisplayStepsForTask,
-  stepDisplayTitle,
   stepDetailSummary,
+  stepDisplayStepsForTask,
+  stepDisplaySummary,
+  stepDisplayTitle,
+  stepDurationLabel,
   stepFailureMessage,
   stepStatusLabel,
   stepStatusText,
@@ -70,12 +70,7 @@ describe('step-card-state', () => {
   });
 
   it('treats a cancelled-only terminal list as cancelled, not failed', () => {
-    expect(
-      stepDetailSummary([
-        { status: 'done' },
-        { status: 'cancelled' },
-      ]),
-    ).toMatchObject({
+    expect(stepDetailSummary([{ status: 'done' }, { status: 'cancelled' }])).toMatchObject({
       label: '1/2 步完成 · 1 已取消',
       tone: 'cancelled',
     });
@@ -104,15 +99,18 @@ describe('step-card-state', () => {
       { tickIndex: 1, status: 'done' as const },
     ];
 
-    expect(
-      stepDisplayStepsForTask(source, 'failed').map((step) => step.status),
-    ).toEqual(['failed', 'done']);
-    expect(
-      stepDisplayStepsForTask(source, 'completed').map((step) => step.status),
-    ).toEqual(['done', 'done']);
-    expect(
-      stepDisplayStepsForTask(source, 'partial_success').map((step) => step.status),
-    ).toEqual(['cancelled', 'done']);
+    expect(stepDisplayStepsForTask(source, 'failed').map((step) => step.status)).toEqual([
+      'failed',
+      'done',
+    ]);
+    expect(stepDisplayStepsForTask(source, 'completed').map((step) => step.status)).toEqual([
+      'done',
+      'done',
+    ]);
+    expect(stepDisplayStepsForTask(source, 'partial_success').map((step) => step.status)).toEqual([
+      'cancelled',
+      'done',
+    ]);
   });
 
   it('does not infer selected Chrome receipt completion from the parent task status', () => {
@@ -159,57 +157,45 @@ describe('step-card-state', () => {
   });
 
   it('uses user-facing titles for raw browser step kinds', () => {
-    expect(stepDisplayTitle({ actionKind: 'computer', tickIndex: 0 })).toBe(
-      '浏览器操作',
-    );
-    expect(stepDisplayTitle({ actionKind: 'text', tickIndex: 1 })).toBe(
-      '结果说明',
-    );
-    expect(stepDisplayTitle({ actionKind: 'web_search', tickIndex: 2 })).toBe(
-      '联网搜索',
-    );
-    expect(stepDisplayTitle({ actionKind: 'unknown_tool', tickIndex: 3 })).toBe(
-      '任务步骤',
-    );
+    expect(stepDisplayTitle({ actionKind: 'computer', tickIndex: 0 })).toBe('浏览器操作');
+    expect(stepDisplayTitle({ actionKind: 'text', tickIndex: 1 })).toBe('结果说明');
+    expect(stepDisplayTitle({ actionKind: 'web_search', tickIndex: 2 })).toBe('联网搜索');
+    expect(stepDisplayTitle({ actionKind: 'unknown_tool', tickIndex: 3 })).toBe('任务步骤');
   });
 
   it('names selected Chrome records by evidence type and marks historical ticks unverified', () => {
-    expect(
-      stepDisplayTitle({ actionKind: 'selected_chrome_action', tickIndex: 0 }),
-    ).toBe('浏览器操作结果');
-    expect(
-      stepDisplayTitle({ actionKind: 'selected_chrome_observe', tickIndex: 1 }),
-    ).toBe('页面观察记录');
-    expect(
-      stepDisplayTitle({ actionKind: 'selected_chrome_finish', tickIndex: 2 }),
-    ).toBe('结果验证记录');
+    expect(stepDisplayTitle({ actionKind: 'selected_chrome_action', tickIndex: 0 })).toBe(
+      '浏览器操作结果',
+    );
+    expect(stepDisplayTitle({ actionKind: 'selected_chrome_observe', tickIndex: 1 })).toBe(
+      '页面观察记录',
+    );
+    expect(stepDisplayTitle({ actionKind: 'selected_chrome_finish', tickIndex: 2 })).toBe(
+      '结果验证记录',
+    );
     expect(
       stepDisplayTitle({
         actionKind: 'selected_chrome_plan_discarded',
         tickIndex: 3,
       }),
     ).toBe('未执行计划');
-    expect(
-      stepDisplayTitle({ actionKind: 'selected_chrome_handoff', tickIndex: 4 }),
-    ).toBe('人工交还记录');
+    expect(stepDisplayTitle({ actionKind: 'selected_chrome_handoff', tickIndex: 4 })).toBe(
+      '人工交还记录',
+    );
     expect(stepDisplayTitle({ actionKind: 'browser_act', tickIndex: 5 })).toBe(
       '历史浏览器轮次（未验证）',
     );
-    expect(
-      stepDisplayTitle({ actionKind: 'browser_observe', tickIndex: 6 }),
-    ).toBe('历史页面观察（未验证）');
-    expect(
-      stepDisplayTitle({ actionKind: 'browser_finish', tickIndex: 7 }),
-    ).toBe('历史结束轮次（未验证）');
+    expect(stepDisplayTitle({ actionKind: 'browser_observe', tickIndex: 6 })).toBe(
+      '历史页面观察（未验证）',
+    );
+    expect(stepDisplayTitle({ actionKind: 'browser_finish', tickIndex: 7 })).toBe(
+      '历史结束轮次（未验证）',
+    );
   });
 
   it('hides label-only step summaries but keeps useful descriptions', () => {
-    expect(
-      stepDisplaySummary({ actionKind: 'computer', actionSummary: 'computer' }),
-    ).toBeNull();
-    expect(
-      stepDisplaySummary({ actionKind: 'text', actionSummary: ' text ' }),
-    ).toBeNull();
+    expect(stepDisplaySummary({ actionKind: 'computer', actionSummary: 'computer' })).toBeNull();
+    expect(stepDisplaySummary({ actionKind: 'text', actionSummary: ' text ' })).toBeNull();
     expect(
       stepDisplaySummary({
         actionKind: 'computer',
@@ -219,15 +205,9 @@ describe('step-card-state', () => {
   });
 
   it('drops uninformative generic browser detail cards', () => {
-    expect(
-      shouldShowStepCard({ actionKind: 'computer', actionSummary: 'computer' }),
-    ).toBe(false);
-    expect(shouldShowStepCard({ actionKind: 'text', actionSummary: 'text' })).toBe(
-      false,
-    );
-    expect(shouldShowStepCard({ actionKind: 'navigate', actionSummary: 'navigate' })).toBe(
-      true,
-    );
+    expect(shouldShowStepCard({ actionKind: 'computer', actionSummary: 'computer' })).toBe(false);
+    expect(shouldShowStepCard({ actionKind: 'text', actionSummary: 'text' })).toBe(false);
+    expect(shouldShowStepCard({ actionKind: 'navigate', actionSummary: 'navigate' })).toBe(true);
     expect(
       shouldShowStepCard({
         actionKind: 'computer',
@@ -240,8 +220,7 @@ describe('step-card-state', () => {
     expect(
       stepFailureMessage({
         actionKind: 'navigate',
-        message:
-          '扩展工具调用超时（已等待 30 秒，请确认浏览器标签页仍在加载或重试）',
+        message: '扩展工具调用超时（已等待 30 秒，请确认浏览器标签页仍在加载或重试）',
       }),
     ).toBe('浏览器响应超时，可能是页面仍在加载或扩展连接短暂中断。可以重新执行当前任务。');
   });

@@ -50,14 +50,18 @@ function samePublicationDay(left: StockNewsRow, right: StockNewsRow): boolean {
 
 function bigrams(value: string): Set<string> {
   if (value.length < 2) return new Set([value]);
-  return new Set(Array.from({ length: value.length - 1 }, (_, index) => value.slice(index, index + 2)));
+  return new Set(
+    Array.from({ length: value.length - 1 }, (_, index) => value.slice(index, index + 2)),
+  );
 }
 
 function likelySameMarketStory(left: StockNewsRow, right: StockNewsRow): boolean {
   const leftFeed = newsFeed(left);
   const rightFeed = newsFeed(right);
-  if (leftFeed === '重要公告' || rightFeed === '重要公告' || !samePublicationDay(left, right)) return false;
-  if (leftFeed !== rightFeed && leftFeed !== '自选股新闻' && rightFeed !== '自选股新闻') return false;
+  if (leftFeed === '重要公告' || rightFeed === '重要公告' || !samePublicationDay(left, right))
+    return false;
+  if (leftFeed !== rightFeed && leftFeed !== '自选股新闻' && rightFeed !== '自选股新闻')
+    return false;
   const leftHeadline = normalizedHeadline(left);
   const rightHeadline = normalizedHeadline(right);
   if (!leftHeadline || !rightHeadline) return false;
@@ -65,17 +69,22 @@ function likelySameMarketStory(left: StockNewsRow, right: StockNewsRow): boolean
   const numbers = (value: string) => new Set(value.match(/\d+(?:\.\d+)?%?/g) ?? []);
   const leftNumbers = numbers(leftHeadline);
   const rightNumbers = numbers(rightHeadline);
-  if (leftNumbers.size > 0 && rightNumbers.size > 0 && (
-    leftNumbers.size !== rightNumbers.size || [...leftNumbers].some((token) => !rightNumbers.has(token))
-  )) {
+  if (
+    leftNumbers.size > 0 &&
+    rightNumbers.size > 0 &&
+    (leftNumbers.size !== rightNumbers.size ||
+      [...leftNumbers].some((token) => !rightNumbers.has(token)))
+  ) {
     return false;
   }
   const shorter = leftHeadline.length <= rightHeadline.length ? leftHeadline : rightHeadline;
   const longer = shorter === leftHeadline ? rightHeadline : leftHeadline;
-  if (shorter.length >= 8 && longer.includes(shorter) && shorter.length / longer.length >= 0.65) return true;
-  const anchors = (value: string) => new Set([
-    ...(value.match(/[a-z]+\d*|\d+(?:\.\d+)?%/g) ?? []).filter((token) => token.length >= 2),
-  ]);
+  if (shorter.length >= 8 && longer.includes(shorter) && shorter.length / longer.length >= 0.65)
+    return true;
+  const anchors = (value: string) =>
+    new Set([
+      ...(value.match(/[a-z]+\d*|\d+(?:\.\d+)?%/g) ?? []).filter((token) => token.length >= 2),
+    ]);
   const leftAnchors = anchors(leftHeadline);
   const rightAnchors = anchors(rightHeadline);
   const hasSharedAnchor = [...leftAnchors].some((token) => rightAnchors.has(token));
@@ -83,14 +92,43 @@ function likelySameMarketStory(left: StockNewsRow, right: StockNewsRow): boolean
   const rightBigrams = bigrams(rightHeadline);
   let shared = 0;
   for (const token of leftBigrams) if (rightBigrams.has(token)) shared += 1;
-  const similarity = shared * 2 / (leftBigrams.size + rightBigrams.size);
-  return similarity >= 0.72 || (shared >= 8 && similarity >= 0.5) || (hasSharedAnchor && similarity >= 0.54);
+  const similarity = (shared * 2) / (leftBigrams.size + rightBigrams.size);
+  return (
+    similarity >= 0.72 ||
+    (shared >= 8 && similarity >= 0.5) ||
+    (hasSharedAnchor && similarity >= 0.54)
+  );
 }
 
 const MARKET_TOPIC_TOKENS = [
-  'cpo', 'ipo', 'ai', '半导体', '芯片', '算力', '机器人', '医药', '医疗', '创新药',
-  '新能源', '光伏', '储能', '电力', '汽车', '有色', '黄金', '消费', '物价', '房地产',
-  '银行', '证券', '保险', '港股', '美股', '人民币', '关税', '外贸',
+  'cpo',
+  'ipo',
+  'ai',
+  '半导体',
+  '芯片',
+  '算力',
+  '机器人',
+  '医药',
+  '医疗',
+  '创新药',
+  '新能源',
+  '光伏',
+  '储能',
+  '电力',
+  '汽车',
+  '有色',
+  '黄金',
+  '消费',
+  '物价',
+  '房地产',
+  '银行',
+  '证券',
+  '保险',
+  '港股',
+  '美股',
+  '人民币',
+  '关税',
+  '外贸',
 ] as const;
 
 export function discoveryStoryAliases(items: readonly StockNewsRow[]): ReadonlyMap<string, string> {
@@ -129,24 +167,31 @@ export function discoveryStoryClusterKey(
   return leading ?? newsFeed(item);
 }
 
-export function mergeDiscoveryNews(base: StockNewsRow[], additions: StockNewsRow[]): StockNewsRow[] {
+export function mergeDiscoveryNews(
+  base: StockNewsRow[],
+  additions: StockNewsRow[],
+): StockNewsRow[] {
   const seenKeys = new Set<string>();
   const merged: StockNewsRow[] = [];
   for (const item of [...base, ...additions]) {
     const key = item.url?.trim() || `${newsFeed(item)}:${item.time}:${item.title.trim()}`;
     const duplicateIndex = merged.findIndex((candidate) => {
-      const candidateKey = candidate.url?.trim() || `${newsFeed(candidate)}:${candidate.time}:${candidate.title.trim()}`;
+      const candidateKey =
+        candidate.url?.trim() ||
+        `${newsFeed(candidate)}:${candidate.time}:${candidate.title.trim()}`;
       return candidateKey === key || likelySameMarketStory(candidate, item);
     });
     if (seenKeys.has(key) || duplicateIndex >= 0) {
       if (duplicateIndex >= 0) {
         const candidate = merged[duplicateIndex]!;
-        const richerSummary = (item.summary?.trim().length ?? 0) > (candidate.summary?.trim().length ?? 0)
-          ? item.summary
-          : candidate.summary;
-        const sourceCover = !candidate.imageUrl && item.imageKind === 'source-cover' && item.imageUrl
-          ? { imageUrl: item.imageUrl, imageKind: item.imageKind }
-          : {};
+        const richerSummary =
+          (item.summary?.trim().length ?? 0) > (candidate.summary?.trim().length ?? 0)
+            ? item.summary
+            : candidate.summary;
+        const sourceCover =
+          !candidate.imageUrl && item.imageKind === 'source-cover' && item.imageUrl
+            ? { imageUrl: item.imageUrl, imageKind: item.imageKind }
+            : {};
         merged[duplicateIndex] = {
           ...candidate,
           ...(richerSummary ? { summary: richerSummary } : {}),

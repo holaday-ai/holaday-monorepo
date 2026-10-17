@@ -22,9 +22,9 @@
  */
 
 import {
+  type OutputFileDescriptor,
   fencedFileIds,
   isDocumentOutput,
-  type OutputFileDescriptor,
 } from './file-artifact-consistency.js';
 
 // The runner's success skeleton always states it preserved the
@@ -34,9 +34,7 @@ import {
 const TEMPLATE_FILL_CLAIM_RE =
   /保留了模板(?:原有)?格式|已(?:根据|按)[^。\n]{0,40}填充(?:了)?[^。\n]{0,6}模板/;
 
-export function answerClaimsTemplateFill(
-  answerText: string | null | undefined,
-): boolean {
+export function answerClaimsTemplateFill(answerText: string | null | undefined): boolean {
   if (!answerText) return false;
   return TEMPLATE_FILL_CLAIM_RE.test(answerText);
 }

@@ -136,6 +136,7 @@ export interface UiTask {
    * isolation, the type chip, and the IP-only "生成中较慢" hint.
    */
   videoType?: 'normal' | 'pet' | 'ip_person';
+  videoCreationMode?: 'pet_i2v';
   /** Validated image generation settings persisted with image tasks. */
   imageOptions?: ImageCreationOptions;
   /** Aggregate-only identity verification counts. Internal model reasons are never exposed. */
@@ -354,6 +355,17 @@ export interface UiExecutorFallback {
 export interface UiAwaitingUser {
   question: string;
   at: number;
+  /**
+   * FIX-D11 — the task waits for the HOLA DAY Chrome extension / page
+   * selection. `publicCloudAllowed` gates "用公开云端继续（看不到你的个人信息）";
+   * `identityRequired` / `identityReason` say which personal data the task needs.
+   */
+  browserConnection?: {
+    reason: 'extension_offline' | 'selection_required' | 'origin_grant_required';
+    publicCloudAllowed: boolean;
+    identityRequired?: boolean;
+    identityReason?: string;
+  };
   /**
    * P2-A — kind of input we're waiting on. The store mirrors this
    * onto the task's awaitingKind so refreshing tasks.detail

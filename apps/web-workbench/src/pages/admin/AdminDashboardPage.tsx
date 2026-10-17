@@ -11,25 +11,17 @@
  * so there's no round-trip per region.
  */
 
-import { ArrowDown, ArrowUp, Loader2 } from 'lucide-react';
-import * as React from 'react';
-import { Link } from 'react-router-dom';
-import {
-  Bar,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
+import { ArrowDown, ArrowUp, Loader2 } from 'lucide-react';
+import * as React from 'react';
+import { Link } from 'react-router-dom';
+import { Bar, CartesianGrid, ComposedChart, Line, Tooltip, XAxis, YAxis } from 'recharts';
 import {
+  ADMIN_BORDER,
   ADMIN_MAGENTA,
   ADMIN_MAGENTA_SOFT,
-  ADMIN_BORDER,
   adminLoadErrorCopy,
   asRecord,
   clampNumber,
@@ -100,7 +92,7 @@ export function AdminDashboardPage(): JSX.Element {
     return (
       <div className="mx-auto max-w-5xl px-6 py-10">
         <h1 className="text-xl font-semibold">仪表盘</h1>
-        <div className="mt-4 rounded-[8px] border border-[#EA1F59]/25 border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+        <div className="mt-4 rounded-[8px] border border-[#FF0061]/25 border-l-[#FF0061] bg-white px-4 py-3 text-sm text-[#FF0061] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
           <div className="font-medium">{copy.title}</div>
           <div className="mt-1 text-xs text-[#595757]">{copy.body}</div>
         </div>
@@ -137,9 +129,7 @@ export function AdminDashboardPage(): JSX.Element {
     <div className="mx-auto max-w-6xl px-6 py-8">
       <header className="mb-6">
         <h1 className="text-xl font-semibold">仪表盘</h1>
-        <p className="mt-1 text-[13px] text-muted-foreground">
-          今日运行情况一览 · 按北京时间统计
-        </p>
+        <p className="mt-1 text-[13px] text-muted-foreground">今日运行情况一览 · 按北京时间统计</p>
       </header>
 
       {/* Metric cards */}
@@ -179,9 +169,7 @@ export function AdminDashboardPage(): JSX.Element {
       <section className="mt-8 rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
         <header className="mb-4 flex items-baseline justify-between">
           <h2 className="text-base font-semibold">过去 7 天趋势</h2>
-          <span className="text-[11px] uppercase text-muted-foreground">
-            任务量 · 成功率
-          </span>
+          <span className="text-[11px] uppercase text-muted-foreground">任务量 · 成功率</span>
         </header>
         <div ref={chartFrameRef} className="h-72 w-full min-w-0">
           {chartSize.width > 0 && chartSize.height > 0 ? (
@@ -198,12 +186,7 @@ export function AdminDashboardPage(): JSX.Element {
                 stroke="#999"
                 fontSize={12}
               />
-              <YAxis
-                yAxisId="left"
-                stroke="#999"
-                fontSize={12}
-                allowDecimals={false}
-              />
+              <YAxis yAxisId="left" stroke="#999" fontSize={12} allowDecimals={false} />
               <YAxis
                 yAxisId="right"
                 orientation="right"
@@ -253,9 +236,7 @@ export function AdminDashboardPage(): JSX.Element {
       <section className="mt-8 rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
         <header className="mb-4 flex items-baseline justify-between">
           <h2 className="text-base font-semibold">最近任务</h2>
-          <span className="text-[11px] uppercase text-muted-foreground">
-            最新 20 条
-          </span>
+          <span className="text-[11px] uppercase text-muted-foreground">最新 20 条</span>
         </header>
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
@@ -280,8 +261,7 @@ export function AdminDashboardPage(): JSX.Element {
                 recent.map((row) => {
                   const tk = statusToken(row.status);
                   const userLabel =
-                    row.user.displayName ??
-                    (row.user.email ?? row.user.userId ?? '—');
+                    row.user.displayName ?? row.user.email ?? row.user.userId ?? '—';
                   return (
                     <tr
                       key={row.taskId}
@@ -294,14 +274,12 @@ export function AdminDashboardPage(): JSX.Element {
                         {row.user.userId ? (
                           <Link
                             to={`/admin/users/${row.user.userId}`}
-                            className="text-foreground hover:text-[#EA1F59] hover:underline"
+                            className="text-foreground hover:text-[#FF0061] hover:underline"
                           >
                             {truncate(userLabel, 20)}
                           </Link>
                         ) : (
-                          <span className="text-foreground">
-                            {truncate(userLabel, 20)}
-                          </span>
+                          <span className="text-foreground">{truncate(userLabel, 20)}</span>
                         )}
                       </td>
                       <td className="py-2 pr-3 text-foreground">
@@ -321,9 +299,7 @@ export function AdminDashboardPage(): JSX.Element {
                       <td className="py-2 pr-3 text-muted-foreground">
                         {formatDurationMs(row.durationMs)}
                       </td>
-                      <td className="py-2 pr-3 text-muted-foreground">
-                        {row.model ?? '—'}
-                      </td>
+                      <td className="py-2 pr-3 text-muted-foreground">{row.model ?? '—'}</td>
                     </tr>
                   );
                 })
@@ -341,14 +317,9 @@ interface AdminMetricValue {
   prev: number | null;
 }
 
-function normalizeMetric(
-  metric: unknown,
-  options?: { percentage?: boolean },
-): AdminMetricValue {
+function normalizeMetric(metric: unknown, options?: { percentage?: boolean }): AdminMetricValue {
   const row = asRecord(metric);
-  const value = options?.percentage
-    ? clampNumber(row.value, 0, 100)
-    : finiteNumber(row.value, 0);
+  const value = options?.percentage ? clampNumber(row.value, 0, 100) : finiteNumber(row.value, 0);
   return {
     value,
     prev: nullableFiniteNumber(row.prev),
@@ -413,21 +384,17 @@ function MetricCard({
   return (
     <div
       className="rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
-      style={{ backgroundImage: `linear-gradient(135deg, ${ADMIN_MAGENTA_SOFT} 0%, transparent 60%)` }}
+      style={{
+        backgroundImage: `linear-gradient(135deg, ${ADMIN_MAGENTA_SOFT} 0%, transparent 60%)`,
+      }}
     >
-      <div className="text-[11px] uppercase text-muted-foreground">
-        {label}
-      </div>
-      <div className="mt-2 text-2xl font-semibold text-foreground">
-        {value}
-      </div>
+      <div className="text-[11px] uppercase text-muted-foreground">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-foreground">{value}</div>
       {deltaLabel ? (
         <div
           className={cn(
             'mt-1 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium',
-            positive
-              ? 'bg-[#42C0EF]/10 text-[#1688AA]'
-              : 'bg-[#EA1F59]/10 text-[#EA1F59]',
+            positive ? 'bg-[#42C0EF]/10 text-[#1688AA]' : 'bg-[#FF0061]/10 text-[#FF0061]',
           )}
         >
           {positive ? (

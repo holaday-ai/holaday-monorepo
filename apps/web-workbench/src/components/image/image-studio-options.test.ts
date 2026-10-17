@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import type { ImageStudioDraft } from './image-studio-state';
 import {
   IMAGE_ASPECT_OPTIONS,
   IMAGE_MODEL_OPTIONS,
   IMAGE_STYLE_OPTIONS,
+  availableImageModelOptions,
   buildImageCreationOptions,
   buildImageFileOrder,
   buildImageIntentForSubmit,
+  usableImageModel,
 } from './image-studio-options';
+import type { ImageStudioDraft } from './image-studio-state';
 
 function draft(overrides: Partial<ImageStudioDraft> = {}): ImageStudioDraft {
   return {
@@ -26,10 +28,12 @@ function draft(overrides: Partial<ImageStudioDraft> = {}): ImageStudioDraft {
 }
 
 describe('image studio options', () => {
-  it('exposes only the image capabilities connected to the current provider', () => {
+  it('offers auto routing plus the backend image models (Qwen / Wan 2.7 / NB2)', () => {
     expect(IMAGE_MODEL_OPTIONS.map((option) => option.value)).toEqual([
+      'auto',
+      'qwen_image',
+      'wan_image',
       'nano_banana_2',
-      'nano_banana_pro',
     ]);
     expect(IMAGE_STYLE_OPTIONS).toHaveLength(16);
     expect(IMAGE_ASPECT_OPTIONS.map((option) => option.value)).toEqual([
@@ -80,9 +84,7 @@ describe('image studio options', () => {
       subjectFileId: 'file_subject',
       goal: 'lock_subject',
     });
-    expect(buildImageIntentForSubmit(lockDraft)).toContain(
-      '请以用户上传的第一张图片作为锁定主角',
-    );
+    expect(buildImageIntentForSubmit(lockDraft)).toContain('请以用户上传的第一张图片作为锁定主角');
     expect(buildImageIntentForSubmit(lockDraft)).not.toContain('background');
   });
 
@@ -103,5 +105,23 @@ describe('image studio options', () => {
 
   it('does not attach a subject id to free generation', () => {
     expect(buildImageCreationOptions(draft(), 'file_subject')).not.toHaveProperty('subjectFileId');
+  });
+
+  it('hides models the backend cannot serve, but always keeps auto', () => {
+    expect(availableImageModelOptions(['qwen_image', 'wan_image']).map((o) => o.value)).toEqual([
+      'auto',
+      'qwen_image',
+      'wan_image',
+    ]);
+    expect(availableImageModelOptions([]).map((o) => o.value)).toEqual(['auto']);
+    // Unknown availability (auth.me not loaded) never hides options.
+    expect(availableImageModelOptions(null)).toHaveLength(4);
+  });
+
+  it('coerces unavailable or legacy selections back to auto before submit', () => {
+    expect(usableImageModel('nano_banana_2', ['qwen_image'])).toBe('auto');
+    expect(usableImageModel('nano_banana_pro', null)).toBe('auto');
+    expect(usableImageModel('wan_image', ['wan_image'])).toBe('wan_image');
+    expect(usableImageModel('qwen_image', null)).toBe('qwen_image');
   });
 });

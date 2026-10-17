@@ -1,5 +1,5 @@
-import * as React from 'react';
 import { cn } from '@/lib/utils';
+import * as React from 'react';
 
 const LOGO_BASE_URL = 'https://assets.holaday.ai/logo';
 
@@ -24,7 +24,7 @@ export function BrandIcon({ className }: BrandImageProps): JSX.Element {
         aria-label="HOLA DAY"
         className={cn(
           'inline-flex h-5 w-8 shrink-0 items-center justify-center rounded bg-primary text-[10px] font-semibold text-primary-foreground',
-          className
+          className,
         )}
       >
         HD
@@ -48,7 +48,9 @@ export function BrandWordmark({ className }: BrandImageProps): JSX.Element {
 
   if (failed) {
     return (
-      <span className={cn('text-sm font-semibold tracking-tight text-sidebar-foreground', className)}>
+      <span
+        className={cn('text-sm font-semibold tracking-tight text-sidebar-foreground', className)}
+      >
         HOLA DAY
       </span>
     );

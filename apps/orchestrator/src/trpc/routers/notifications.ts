@@ -23,24 +23,24 @@ import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import {
-  notificationChannels,
-  notifications,
-} from '../../db/schema/notifications.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
-import { users } from '../../db/schema/users.js';
+import { notificationChannels, notifications } from '../../db/schema/notifications.js';
 import { plannedTasks } from '../../db/schema/planned-tasks.js';
+import { users } from '../../db/schema/users.js';
 import {
+  type NotificationPlatform,
+  type WebhookContext,
   buildPayload,
   sendWebhook,
   validateWebhookTarget,
-  type NotificationPlatform,
-  type WebhookContext,
 } from '../../notifications/webhook-sender.js';
 import { tryAcquire as rateLimitTryAcquire } from '../../quota/rate-limiter.js';
 import { protectedProcedure, router } from '../trpc.js';
 
-const PLATFORMS = ['wecom', 'feishu', 'dingtalk', 'custom'] as const;
+// Batch 10.3 — only official IM-bot platforms are accepted. The legacy
+// free-form 'custom' platform cannot satisfy a host allowlist; existing custom
+// rows stay listable/deletable but can't be created, edited, enabled or sent.
+const PLATFORMS = ['wecom', 'feishu', 'dingtalk'] as const;
 const MAX_NOTIFICATION_CHANNELS_PER_USER = 10;
 const MAX_CUSTOM_TEMPLATE_BYTES = 32 * 1024;
 const NOTIFICATION_CHANNEL_CREATE_RATE = {
@@ -52,9 +52,10 @@ const NOTIFICATION_CHANNEL_TEST_RATE = {
   max: 10,
 } as const;
 
-async function requireUserId(
-  ctx: { db: typeof import('../../db/client.js').db; userId: string },
-): Promise<number> {
+async function requireUserId(ctx: {
+  db: typeof import('../../db/client.js').db;
+  userId: string;
+}): Promise<number> {
   const [row] = await ctx.db
     .select({ id: users.id })
     .from(users)
@@ -71,10 +72,7 @@ async function requireUserId(
  * object. Other platforms must NOT carry a template (we hard-code
  * their preset shape). Returns the cleaned template (or undefined).
  */
-function normaliseTemplate(
-  platform: NotificationPlatform,
-  template: unknown,
-): unknown {
+function normaliseTemplate(platform: NotificationPlatform, template: unknown): unknown {
   if (platform === 'custom') {
     if (template === undefined || template === null) {
       throw new TRPCError({
@@ -119,16 +117,13 @@ function requireNotificationRateLimit(
   });
 }
 
-async function requireSafeWebhookTarget(webhookUrl: string): Promise<void> {
+async function requireSafeWebhookTarget(webhookUrl: string, platform: string): Promise<void> {
   try {
-    await validateWebhookTarget(webhookUrl);
+    await validateWebhookTarget(webhookUrl, { platform });
   } catch (err) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
-      message:
-        err instanceof Error
-          ? err.message
-          : 'Webhook 地址未通过公网安全校验。',
+      message: err instanceof Error ? err.message : 'Webhook 地址未通过公网安全校验。',
     });
   }
 }
@@ -185,20 +180,24 @@ export const notificationsRouter = router({
         .limit(limit + 1);
       const hasMore = rows.length > limit;
       const page = rows.slice(0, limit);
-      const plannedTaskInternalIds = [...new Set(page.flatMap((row) =>
-        typeof row.plannedTaskId === 'number' ? [row.plannedTaskId] : []))];
-      const plannedTaskRows = plannedTaskInternalIds.length > 0
-        ? await ctx.db
-            .select({ id: plannedTasks.id, externalId: plannedTasks.externalId })
-            .from(plannedTasks)
-            .where(and(
-              eq(plannedTasks.userId, userId),
-              inArray(plannedTasks.id, plannedTaskInternalIds),
-            ))
-        : [];
-      const publicPlannedTaskIds = new Map(
-        plannedTaskRows.map((row) => [row.id, row.externalId]),
-      );
+      const plannedTaskInternalIds = [
+        ...new Set(
+          page.flatMap((row) => (typeof row.plannedTaskId === 'number' ? [row.plannedTaskId] : [])),
+        ),
+      ];
+      const plannedTaskRows =
+        plannedTaskInternalIds.length > 0
+          ? await ctx.db
+              .select({ id: plannedTasks.id, externalId: plannedTasks.externalId })
+              .from(plannedTasks)
+              .where(
+                and(
+                  eq(plannedTasks.userId, userId),
+                  inArray(plannedTasks.id, plannedTaskInternalIds),
+                ),
+              )
+          : [];
+      const publicPlannedTaskIds = new Map(plannedTaskRows.map((row) => [row.id, row.externalId]));
       const items = page.map((r) => ({
         notificationId: r.externalId,
         type: r.type,
@@ -207,9 +206,8 @@ export const notificationsRouter = router({
         isRead: r.isRead,
         createdAt: r.createdAt,
         scheduledTaskInternalId: r.scheduledTaskId,
-        plannedTaskId: r.plannedTaskId === null
-          ? null
-          : publicPlannedTaskIds.get(r.plannedTaskId) ?? null,
+        plannedTaskId:
+          r.plannedTaskId === null ? null : (publicPlannedTaskIds.get(r.plannedTaskId) ?? null),
       }));
       const last = page[page.length - 1];
       return {
@@ -237,10 +235,7 @@ export const notificationsRouter = router({
         .update(notifications)
         .set({ isRead: true })
         .where(
-          and(
-            eq(notifications.externalId, input.notificationId),
-            eq(notifications.userId, userId),
-          ),
+          and(eq(notifications.externalId, input.notificationId), eq(notifications.userId, userId)),
         );
       return { ok: true as const };
     }),
@@ -250,9 +245,7 @@ export const notificationsRouter = router({
     await ctx.db
       .update(notifications)
       .set({ isRead: true })
-      .where(
-        and(eq(notifications.userId, userId), eq(notifications.isRead, false)),
-      );
+      .where(and(eq(notifications.userId, userId), eq(notifications.isRead, false)));
     return { ok: true as const };
   }),
 });
@@ -298,7 +291,7 @@ export const notificationChannelsRouter = router({
       );
       const userId = await requireUserId(ctx);
       const template = normaliseTemplate(input.platform, input.customTemplate);
-      await requireSafeWebhookTarget(input.webhookUrl);
+      await requireSafeWebhookTarget(input.webhookUrl, input.platform);
       const existingChannels = await ctx.db
         .select({ id: notificationChannels.id })
         .from(notificationChannels)
@@ -339,6 +332,7 @@ export const notificationChannelsRouter = router({
       const [row] = await ctx.db
         .select({
           platform: notificationChannels.platform,
+          webhookUrl: notificationChannels.webhookUrl,
         })
         .from(notificationChannels)
         .where(
@@ -351,19 +345,21 @@ export const notificationChannelsRouter = router({
       if (!row) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '通知渠道不存在' });
       }
-      if (input.webhookUrl !== undefined) {
-        await requireSafeWebhookTarget(input.webhookUrl);
+      // Re-check the (platform, url) pair whenever either side changes, and
+      // before (re-)enabling a row, so a legacy non-allowlisted channel can't
+      // be revived by flipping `enabled` alone.
+      if (
+        input.webhookUrl !== undefined ||
+        input.platform !== undefined ||
+        input.enabled === true
+      ) {
+        await requireSafeWebhookTarget(
+          input.webhookUrl ?? row.webhookUrl,
+          input.platform ?? row.platform,
+        );
       }
       const updates: Partial<typeof notificationChannels.$inferInsert> = {};
       const effectivePlatform = (input.platform ?? row.platform) as NotificationPlatform;
-      if (
-        effectivePlatform === 'custom' &&
-        input.platform === 'custom' &&
-        row.platform !== 'custom' &&
-        input.customTemplate === undefined
-      ) {
-        normaliseTemplate('custom', undefined);
-      }
       if (input.platform !== undefined) updates.platform = input.platform;
       if (input.webhookUrl !== undefined) updates.webhookUrl = input.webhookUrl;
       if (input.customTemplate !== undefined) {
@@ -371,7 +367,7 @@ export const notificationChannelsRouter = router({
           effectivePlatform,
           input.customTemplate,
         ) as Record<string, unknown> | null;
-      } else if (input.platform !== undefined && input.platform !== 'custom') {
+      } else if (input.platform !== undefined) {
         // Switching to a preset platform — clear any leftover
         // template so the wire shape isn't ambiguous.
         updates.customTemplate = null;
@@ -472,7 +468,7 @@ export const notificationChannelsRouter = router({
         // surface the "must include template" error via SendResult.
         customTemplate = input.customTemplate;
       }
-      await requireSafeWebhookTarget(webhookUrl);
+      await requireSafeWebhookTarget(webhookUrl, platform);
       const ctxBody: WebhookContext = {
         title: 'HOLA DAY 测试消息',
         message: '这是一条来自 HOLA DAY 的测试消息，证明你的 webhook 配置可用。',
@@ -491,10 +487,7 @@ export const notificationChannelsRouter = router({
           attempt: 0,
         };
       }
-      const result = await sendWebhook(
-        { platform, webhookUrl, customTemplate },
-        ctxBody,
-      );
+      const result = await sendWebhook({ platform, webhookUrl, customTemplate }, ctxBody);
       return result;
     }),
 });

@@ -88,7 +88,7 @@ export function UsagePage(): JSX.Element {
               type="button"
               variant="outline"
               size="icon"
-              className="h-8 w-8 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              className="h-8 w-8 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
               onClick={() => void refresh()}
               disabled={loading}
               aria-label={loading ? '正在刷新用量' : '刷新用量'}
@@ -105,14 +105,14 @@ export function UsagePage(): JSX.Element {
       />
       <div className="space-y-6">
         {statusCopy && (loading || snap != null) && (
-          <div className="rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+          <div className="rounded-[8px] border border-[#DCDDDD] border-l-[#FF0061] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-start gap-2">
                 {error ? (
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0061]" aria-hidden />
                 ) : (
                   <Loader2
-                    className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#EA1F59]"
+                    className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#FF0061]"
                     aria-hidden
                   />
                 )}
@@ -129,7 +129,7 @@ export function UsagePage(): JSX.Element {
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                     onClick={() => void refresh()}
                     disabled={loading}
                   >
@@ -139,7 +139,7 @@ export function UsagePage(): JSX.Element {
                     asChild
                     variant="outline"
                     size="sm"
-                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                   >
                     <a
                       href={supportMailtoHref({
@@ -170,7 +170,7 @@ export function UsagePage(): JSX.Element {
           </div>
         ) : error && snap == null ? (
           <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-            <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
+            <AlertCircle className="h-8 w-8 text-[#FF0061]" aria-hidden />
             <div className="text-sm font-medium text-foreground/80">
               {statusCopy?.title ?? '用量暂时无法加载'}
             </div>
@@ -185,7 +185,7 @@ export function UsagePage(): JSX.Element {
                 asChild
                 variant="outline"
                 size="sm"
-                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
               >
                 <a
                   href={supportMailtoHref({
@@ -235,7 +235,7 @@ export function UsagePage(): JSX.Element {
                   snap?.quotaMode === 'unmetered_test' ? (
                     <CheckCircle2 className="h-4 w-4 text-[#42C0EF]" />
                   ) : (
-                    <Clock className="h-4 w-4 text-[#EA1F59]" />
+                    <Clock className="h-4 w-4 text-[#FF0061]" />
                   )
                 }
                 label={snap?.quotaMode === 'unmetered_test' ? '额度状态' : '剩余额度'}
@@ -276,7 +276,7 @@ export function UsagePage(): JSX.Element {
                     <div
                       className={cn(
                         'h-full transition-all',
-                        pct >= 90 ? 'bg-[#EA1F59]' : pct >= 75 ? 'bg-[#FFC910]' : 'bg-[#EA1F59]',
+                        pct >= 90 ? 'bg-[#FF0061]' : pct >= 75 ? 'bg-[#FFC910]' : 'bg-[#FF0061]',
                       )}
                       style={{ width: `${pct}%` }}
                     />
@@ -298,7 +298,7 @@ export function UsagePage(): JSX.Element {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                      className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                     >
                       查看套餐
                     </Button>
@@ -326,7 +326,7 @@ export function UsagePage(): JSX.Element {
                         <div
                           className={cn(
                             'w-full rounded-t-md transition-all',
-                            b.count > 0 ? 'bg-[#EA1F59]/80' : 'bg-[#EFEFEF]',
+                            b.count > 0 ? 'bg-[#FF0061]/80' : 'bg-[#EFEFEF]',
                           )}
                           style={{ height: h }}
                         />

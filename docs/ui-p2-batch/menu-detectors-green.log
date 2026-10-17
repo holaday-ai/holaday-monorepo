@@ -1,0 +1,23 @@
+TAP version 13
+# Subtest: menu radio choices are discovered and only checked choices without disclosures are idempotent
+ok 1 - menu radio choices are discovered and only checked choices without disclosures are idempotent
+  ---
+  duration_ms: 3449.264083
+  type: 'test'
+  ...
+# {"phase":"controls","done":0,"queued":0,"url":"blank"}
+# Subtest: nested popup dismissal replays from reset instead of clicking its departing parent
+ok 2 - nested popup dismissal replays from reset instead of clicking its departing parent
+  ---
+  duration_ms: 5338.271458
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9307.980042

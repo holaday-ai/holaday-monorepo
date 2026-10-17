@@ -3,7 +3,7 @@ import type { DB } from '../db/client.js';
 import type { ApiCostPoolEvent } from '../db/schema/partner.js';
 import { AllocationService, type DailyLockedBonusSummary } from './allocation-service.js';
 import { assertPartnerLedgerWriteEnabled, partnerConfig } from './partner-config.js';
-import { ReleaseService, type MonthlyReleaseSummary } from './release-service.js';
+import { type MonthlyReleaseSummary, ReleaseService } from './release-service.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -84,10 +84,15 @@ function defaultPreviousUtcDay(now: Date): string {
 
 function defaultPreviousUtcMonth(now: Date): string {
   const normalizedNow = assertDate(now, 'now');
-  return formatUtcMonth(new Date(Date.UTC(normalizedNow.getUTCFullYear(), normalizedNow.getUTCMonth() - 1, 1)));
+  return formatUtcMonth(
+    new Date(Date.UTC(normalizedNow.getUTCFullYear(), normalizedNow.getUTCMonth() - 1, 1)),
+  );
 }
 
-function parseYearMonthDay(value: string, fieldName: string): { year: number; month: number; day: number } {
+function parseYearMonthDay(
+  value: string,
+  fieldName: string,
+): { year: number; month: number; day: number } {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new RangeError(`${fieldName} must be YYYY-MM-DD`);
   }
@@ -125,7 +130,13 @@ export function normalizePartnerReleaseMonth(value: string): string {
   const [yearText, monthText] = value.split('-');
   const year = Number(yearText);
   const month = Number(monthText);
-  if (!Number.isInteger(year) || year < 1000 || !Number.isInteger(month) || month < 1 || month > 12) {
+  if (
+    !Number.isInteger(year) ||
+    year < 1000 ||
+    !Number.isInteger(month) ||
+    month < 1 ||
+    month > 12
+  ) {
     throw new RangeError('releaseMonth must be a valid calendar month');
   }
 
@@ -203,7 +214,10 @@ function envValue(env: PartnerSchedulerCliEnv, name: string): string | undefined
   return value === '' ? undefined : value;
 }
 
-function parseCliFlags(args: readonly string[], allowedFlags: readonly string[]): Map<string, string> {
+function parseCliFlags(
+  args: readonly string[],
+  allowedFlags: readonly string[],
+): Map<string, string> {
   const allowed = new Set(allowedFlags);
   const values = new Map<string, string>();
 
@@ -250,7 +264,10 @@ export function parsePartnerDailyCliArgs(
 ): Pick<RunPartnerDailyJobsInput, 'day' | 'fxBps' | 'allocationBudgetCreditCents'> {
   const flags = parseCliFlags(args, ['day', 'fx-bps', 'allocation-budget-credit-cents']);
   const day = flags.get('day') ?? envValue(env, 'PARTNER_DAILY_DAY');
-  const fxBps = parseIntegerCliValue(flags.get('fx-bps') ?? envValue(env, 'PARTNER_FX_BPS'), 'fxBps');
+  const fxBps = parseIntegerCliValue(
+    flags.get('fx-bps') ?? envValue(env, 'PARTNER_FX_BPS'),
+    'fxBps',
+  );
   const allocationBudgetCreditCents = parseIntegerCliValue(
     flags.get('allocation-budget-credit-cents') ??
       envValue(env, 'PARTNER_DAILY_ALLOCATION_BUDGET_CREDIT_CENTS'),
@@ -271,7 +288,8 @@ export function parsePartnerMonthlyCliArgs(
   const flags = parseCliFlags(args, ['release-month', 'budget-credit-cents']);
   const releaseMonth = flags.get('release-month') ?? envValue(env, 'PARTNER_RELEASE_MONTH');
   const budgetCreditCents = parseIntegerCliValue(
-    flags.get('budget-credit-cents') ?? envValue(env, 'PARTNER_MONTHLY_RELEASE_BUDGET_CREDIT_CENTS'),
+    flags.get('budget-credit-cents') ??
+      envValue(env, 'PARTNER_MONTHLY_RELEASE_BUDGET_CREDIT_CENTS'),
     'budgetCreditCents',
   );
 
@@ -281,14 +299,19 @@ export function parsePartnerMonthlyCliArgs(
   };
 }
 
-export async function runPartnerDailyJobs(input: RunPartnerDailyJobsInput = {}): Promise<PartnerDailyJobSummary> {
+export async function runPartnerDailyJobs(
+  input: RunPartnerDailyJobsInput = {},
+): Promise<PartnerDailyJobSummary> {
   assertPartnerLedgerWriteEnabled();
   const day = normalizePartnerDailyDay(input.day ?? defaultPreviousUtcDay(input.now ?? new Date()));
   const fxBps = assertPositiveSafeInteger(input.fxBps ?? partnerConfig().fxBps, 'fxBps');
   const explicitAllocationBudgetCreditCents =
     input.allocationBudgetCreditCents === undefined
       ? undefined
-      : assertNonNegativeSafeInteger(input.allocationBudgetCreditCents, 'allocationBudgetCreditCents');
+      : assertNonNegativeSafeInteger(
+          input.allocationBudgetCreditCents,
+          'allocationBudgetCreditCents',
+        );
   const allocationService = allocationServiceFor(input);
 
   const costPool = await allocationService.buildDailyCostPool({ day, fxBps });
@@ -320,7 +343,10 @@ export async function runPartnerMonthlyRelease(
   if (input.budgetCreditCents === undefined) {
     throw new RangeError('budgetCreditCents is required');
   }
-  const budgetCreditCents = assertNonNegativeSafeInteger(input.budgetCreditCents, 'budgetCreditCents');
+  const budgetCreditCents = assertNonNegativeSafeInteger(
+    input.budgetCreditCents,
+    'budgetCreditCents',
+  );
   const releaseService = releaseServiceFor(input);
   const release = await releaseService.releaseEligibleLots({ releaseMonth, budgetCreditCents });
 

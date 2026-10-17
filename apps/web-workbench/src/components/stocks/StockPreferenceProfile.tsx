@@ -117,13 +117,16 @@ export function StockPreferenceProfile({
     };
   }, [load, refreshKey]);
 
-  const openEditor = React.useCallback((trigger: HTMLButtonElement) => {
-    if (!profile) return;
-    editorOpenedByRef.current = trigger;
-    setDraft(copyManualPreferences(profile.manualPreferences));
-    setConfirmClear(false);
-    setSheetOpen(true);
-  }, [profile]);
+  const openEditor = React.useCallback(
+    (trigger: HTMLButtonElement) => {
+      if (!profile) return;
+      editorOpenedByRef.current = trigger;
+      setDraft(copyManualPreferences(profile.manualPreferences));
+      setConfirmClear(false);
+      setSheetOpen(true);
+    },
+    [profile],
+  );
 
   const update = React.useCallback(
     async (enabled: boolean, manualPreferences: ManualPreferences, closeEditor = false) => {
@@ -178,9 +181,7 @@ export function StockPreferenceProfile({
             <h2 className="text-[16px] font-semibold tracking-[-0.01em] text-[#121826]">
               你的选股偏好
             </h2>
-            {profile && profile.state !== 'disabled' ? (
-              <ConfidenceBadge profile={profile} />
-            ) : null}
+            {profile && profile.state !== 'disabled' ? <ConfidenceBadge profile={profile} /> : null}
           </div>
           <p className="mt-2 max-w-[680px] text-[12px] leading-5 text-[#667085]">
             汇总你主动设置、成功筛选和清空后新增关注的可核验迹象，只描述研究习惯，不推断投资者类型或风险承受能力。
@@ -193,7 +194,7 @@ export function StockPreferenceProfile({
             disabled={loading}
             aria-label="刷新选股偏好"
             title="刷新选股偏好"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-[7px] border border-[#DDE0E6] bg-white text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#D91952] disabled:opacity-50 sm:h-9 sm:w-9"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-[7px] border border-[#DDE0E6] bg-white text-[#667085] transition hover:border-[#FF0061]/30 hover:text-[#D91952] disabled:opacity-50 sm:h-9 sm:w-9"
           >
             <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} aria-hidden />
           </button>
@@ -204,7 +205,7 @@ export function StockPreferenceProfile({
               disabled={saving}
               aria-label="暂停画像"
               title="暂停画像"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-[7px] border border-[#DDE0E6] bg-white text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#D91952] disabled:opacity-50 sm:h-9 sm:w-9"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-[7px] border border-[#DDE0E6] bg-white text-[#667085] transition hover:border-[#FF0061]/30 hover:text-[#D91952] disabled:opacity-50 sm:h-9 sm:w-9"
             >
               <Pause className="h-3.5 w-3.5" aria-hidden />
             </button>
@@ -214,7 +215,7 @@ export function StockPreferenceProfile({
               ref={editorTriggerRef}
               type="button"
               onClick={(event) => openEditor(event.currentTarget)}
-              className="inline-flex h-11 items-center justify-center gap-1.5 whitespace-nowrap rounded-[7px] border border-[#DDE0E6] bg-white px-3 text-[12px] font-semibold text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:text-[#D91952] motion-reduce:transition-none sm:h-9"
+              className="inline-flex h-11 items-center justify-center gap-1.5 whitespace-nowrap rounded-[7px] border border-[#DDE0E6] bg-white px-3 text-[12px] font-semibold text-[#4F5868] transition hover:border-[#FF0061]/30 hover:text-[#D91952] motion-reduce:transition-none sm:h-9"
             >
               <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
               调整画像
@@ -231,9 +232,7 @@ export function StockPreferenceProfile({
           onEnable={() => void update(true, profile.manualPreferences)}
         />
       ) : null}
-      {profile?.state === 'empty' ? (
-        <EmptyState onEdit={openEditor} />
-      ) : null}
+      {profile?.state === 'empty' ? <EmptyState onEdit={openEditor} /> : null}
       {profile?.state === 'ready' ? (
         presentation === 'compact' ? (
           <CompactReadyProfile
@@ -332,7 +331,7 @@ function DisabledState({
         type="button"
         onClick={onEnable}
         disabled={saving}
-        className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[#EA1F59] px-3 text-[11px] font-semibold text-[#D91952] disabled:opacity-50"
+        className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[#FF0061] px-3 text-[11px] font-semibold text-[#D91952] disabled:opacity-50"
       >
         {saving ? (
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -360,7 +359,7 @@ function EmptyState({
       <button
         type="button"
         onClick={(event) => onEdit(event.currentTarget)}
-        className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[#EA1F59] px-3 text-[11px] font-semibold text-[#D91952]"
+        className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[#FF0061] px-3 text-[11px] font-semibold text-[#D91952]"
       >
         <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
         主动设置偏好
@@ -487,7 +486,7 @@ function CompactReadyProfile({
           ref={completeProfileTriggerRef}
           type="button"
           onClick={onOpenComplete}
-          className="inline-flex h-8 shrink-0 items-center justify-center rounded-[7px] border border-[#DDE0E6] bg-white px-3 text-[11px] font-semibold text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:text-[#D91952]"
+          className="inline-flex h-8 shrink-0 items-center justify-center rounded-[7px] border border-[#DDE0E6] bg-white px-3 text-[11px] font-semibold text-[#4F5868] transition hover:border-[#FF0061]/30 hover:text-[#D91952]"
         >
           查看完整画像
         </button>
@@ -630,8 +629,8 @@ function PreferenceEditor({
                             className={cn(
                               'inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-[7px] border px-2.5 py-1.5 text-[11px] transition',
                               selected
-                                ? 'border-[#EA1F59]/45 bg-[#FFF0F4] font-semibold text-[#B4234D]'
-                                : 'border-[#DDE0E6] bg-white text-[#667085] hover:border-[#EA1F59]/30',
+                                ? 'border-[#FF0061]/45 bg-[#FFF0F4] font-semibold text-[#B4234D]'
+                                : 'border-[#DDE0E6] bg-white text-[#667085] hover:border-[#FF0061]/30',
                             )}
                           >
                             <input
@@ -705,7 +704,7 @@ function PreferenceEditor({
             type="button"
             onClick={onSave}
             disabled={saving || !draft}
-            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[7px] bg-[#EA1F59] px-4 text-[12px] font-semibold text-white disabled:opacity-50"
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[7px] bg-[#FF0061] px-4 text-[12px] font-semibold text-white disabled:opacity-50"
           >
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
             保存偏好

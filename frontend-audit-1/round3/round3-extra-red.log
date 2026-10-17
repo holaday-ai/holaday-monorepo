@@ -1,0 +1,98 @@
+1440 /video creative shell header must have an opaque base behind account controls
+1440 /image locked-subject input and generation: hit areas must not overlap
+1440 /planned locator.click: Timeout 4000ms exceeded.
+Call log:
+[2m  - waiting for getByRole('button', { name: '旧任务记录', exact: true })[22m
+[2m    - locator resolved to <button title="旧任务记录" type="button" id="radix-:ri:" aria-label="旧任务记录" data-state="closed" aria-haspopup="menu" aria-expanded="false" class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-…>…</button>[22m
+[2m  - attempting click action[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <div class="hd-planned-page-tabs">…</div> intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <div class="hd-planned-page-tabs">…</div> intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m      - waiting 100ms[22m
+[2m    7 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <div class="hd-planned-page-tabs">…</div> intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m      - waiting 500ms[22m
+
+1440 /planned/legacy-batch active batch card must collapse
+
+'true' !== 'false'
+
+1280 /video creative shell header must have an opaque base behind account controls
+1280 /image locked-subject input and generation: hit areas must not overlap
+1280 /planned locator.click: Timeout 4000ms exceeded.
+Call log:
+[2m  - waiting for getByRole('button', { name: '旧任务记录', exact: true })[22m
+[2m    - locator resolved to <button title="旧任务记录" type="button" id="radix-:ri:" aria-label="旧任务记录" data-state="closed" aria-haspopup="menu" aria-expanded="false" class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-…>…</button>[22m
+[2m  - attempting click action[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <div class="hd-planned-page-tabs">…</div> intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <div class="hd-planned-page-tabs">…</div> intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m      - waiting 100ms[22m
+[2m    7 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <div class="hd-planned-page-tabs">…</div> intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m      - waiting 500ms[22m
+
+1280 /planned/legacy-batch active batch card must collapse
+
+'true' !== 'false'
+
+1024 /video creative shell header must have an opaque base behind account controls
+1024 /image locked-subject input and generation: hit areas must not overlap
+1024 /planned locator.click: Timeout 4000ms exceeded.
+Call log:
+[2m  - waiting for getByRole('button', { name: '旧任务记录', exact: true })[22m
+[2m    - locator resolved to <button title="旧任务记录" type="button" id="radix-:ri:" aria-label="旧任务记录" data-state="closed" aria-haspopup="menu" aria-expanded="false" class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-…>…</button>[22m
+[2m  - attempting click action[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <div class="hd-planned-page-tabs">…</div> intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <div class="hd-planned-page-tabs">…</div> intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m      - waiting 100ms[22m
+[2m    7 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <div class="hd-planned-page-tabs">…</div> intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m      - waiting 500ms[22m
+
+1024 /planned/legacy-batch active batch card must collapse
+
+'true' !== 'false'

@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  SETTINGS_SECTIONS,
-  normaliseSettingsHash,
-  settingsSectionHref,
-} from './settings-sections';
+import { SETTINGS_SECTIONS, normaliseSettingsHash, settingsSectionHref } from './settings-sections';
 
 describe('settings sections', () => {
   it('keeps stable ids for settings deep links', () => {
@@ -12,6 +8,7 @@ describe('settings sections', () => {
       'roles',
       'model-region',
       'api-keys',
+      'browser-data',
       'memory',
       'notifications',
       'account',

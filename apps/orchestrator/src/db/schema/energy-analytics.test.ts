@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { getTableColumns } from 'drizzle-orm';
-import { getTableConfig, type MySqlTable } from 'drizzle-orm/mysql-core';
+import { type MySqlTable, getTableConfig } from 'drizzle-orm/mysql-core';
 import { describe, expect, it } from 'vitest';
 import * as schema from './index.js';
 

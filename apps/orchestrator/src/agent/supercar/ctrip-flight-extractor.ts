@@ -49,17 +49,36 @@ const BLOCKED_RE =
   /whaleguard|人机验证|滑块|拖动验证|verify you are human|security check|访问验证|异常流量|请完成验证/i;
 
 const KNOWN_AIRLINES: readonly string[] = [
-  '中国国际航空', '中国国航', '国航',
-  '中国东方航空', '东方航空', '东航',
-  '中国南方航空', '南方航空', '南航',
-  '海南航空', '海航',
-  '厦门航空', '厦航',
-  '吉祥航空', '春秋航空',
-  '深圳航空', '深航',
-  '山东航空', '山航',
-  '四川航空', '川航',
-  '上海航空', '上航',
-  '天津航空', '成都航空', '华夏航空', '西部航空', '首都航空', '青岛航空', '昆明航空',
+  '中国国际航空',
+  '中国国航',
+  '国航',
+  '中国东方航空',
+  '东方航空',
+  '东航',
+  '中国南方航空',
+  '南方航空',
+  '南航',
+  '海南航空',
+  '海航',
+  '厦门航空',
+  '厦航',
+  '吉祥航空',
+  '春秋航空',
+  '深圳航空',
+  '深航',
+  '山东航空',
+  '山航',
+  '四川航空',
+  '川航',
+  '上海航空',
+  '上航',
+  '天津航空',
+  '成都航空',
+  '华夏航空',
+  '西部航空',
+  '首都航空',
+  '青岛航空',
+  '昆明航空',
 ];
 
 function matchAirline(window: string): string | undefined {
@@ -102,7 +121,7 @@ export function extractCtripFlights(pageText: string | null | undefined): CtripF
     priceRe.lastIndex = 0;
     const pm = priceRe.exec(text.slice(arr.i, arr.i + 90));
     if (!pm) continue;
-    const price = parseInt((pm[1] ?? '').replace(/,/g, ''), 10);
+    const price = Number.parseInt((pm[1] ?? '').replace(/,/g, ''), 10);
     if (!Number.isFinite(price) || price < 100 || price > 100000) continue;
     // Detect 直飞/经停 only in the forward span (dep → arr+90), never
     // before dep — reaching back would catch the PREVIOUS card's marker.
@@ -168,8 +187,7 @@ export function buildCtripFlightHint(opts: {
     );
   }
   parts.push(
-    `要求：① 提取「航空公司 / 出发-到达时间 / 是否直飞 / 价格」 ② 按价格升序取最便宜的 ${topN} 个 ③ 用 Markdown 表格输出 ④ 结尾明确「仅查询，未下单/未预订」。\n` +
-      `如果下方文本里确实没有可读的航班信息，请回复「已进入携程结果页，但未能稳定读取航班列表」并简述原因（如页面仍在加载/结构异常），**不要**泛化成「任务执行出错」。`,
+    `要求：① 提取「航空公司 / 出发-到达时间 / 是否直飞 / 价格」 ② 按价格升序取最便宜的 ${topN} 个 ③ 用 Markdown 表格输出 ④ 结尾明确「仅查询，未下单/未预订」。\n如果下方文本里确实没有可读的航班信息，请回复「已进入携程结果页，但未能稳定读取航班列表」并简述原因（如页面仍在加载/结构异常），**不要**泛化成「任务执行出错」。`,
   );
   parts.push(`【携程结果页可见文本】\n${text.slice(0, 12000)}`);
   return parts.join('\n\n');

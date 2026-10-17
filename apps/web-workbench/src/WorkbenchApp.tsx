@@ -1,5 +1,3 @@
-import * as React from 'react';
-import { type PlanId } from '@holaday/shared-types';
 import { useAppShellContext } from '@/components/AppShell';
 import { BrowserPanel } from '@/components/BrowserPanel';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -7,35 +5,36 @@ import { MainPanel } from '@/components/MainPanel';
 import { ModelDataRegionDialog } from '@/components/ModelDataRegionDialog';
 import { ResizeHandle } from '@/components/ResizeHandle';
 import {
+  type ComposerSubmitResult,
   clearComposerOnSubmitSuccess,
   keepComposerOnSubmitFailure,
-  type ComposerSubmitResult,
 } from '@/components/composer-submit';
-import { useToast } from '@/components/ui/toast';
 import { useSidebar } from '@/components/ui/sidebar';
-import { hdDebug } from '@/lib/hd-debug';
-import { taskActionError } from '@/lib/error-copy';
+import { useToast } from '@/components/ui/toast';
 import { useRegionGatedTaskSubmit } from '@/hooks/useRegionGatedTaskSubmit';
-import type { ModelDataRegion } from '@/lib/model-data-region-state';
-import { trpc } from '@/lib/trpc';
-import {
-  clampInlineBrowserPanelWidth,
-  estimateInlineBrowserPanelWidth,
-  pickWorkbenchBrowserViewportProfile,
-} from '@/lib/browser-viewport-profile';
 import {
   enterBrowserFullscreen,
   exitBrowserFullscreen,
   isBrowserFullscreenActive,
 } from '@/lib/browser-fullscreen';
 import {
+  clampInlineBrowserPanelWidth,
+  estimateInlineBrowserPanelWidth,
+  pickWorkbenchBrowserViewportProfile,
+} from '@/lib/browser-viewport-profile';
+import { taskActionError } from '@/lib/error-copy';
+import { hdDebug } from '@/lib/hd-debug';
+import type { ModelDataRegion } from '@/lib/model-data-region-state';
+import { trpc } from '@/lib/trpc';
+import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
+import {
+  WORKBENCH_DESKTOP_BREAKPOINT_PX,
+  WORKBENCH_MOBILE_BREAKPOINT_PX,
+  WORKBENCH_WIDE_BREAKPOINT_PX,
   isWorkbenchDesktopWidth,
   isWorkbenchMobileWidth,
   isWorkbenchWideWidth,
   workbenchInlineColumnMinimums,
-  WORKBENCH_DESKTOP_BREAKPOINT_PX,
-  WORKBENCH_MOBILE_BREAKPOINT_PX,
-  WORKBENCH_WIDE_BREAKPOINT_PX,
 } from '@/lib/workbench-breakpoints';
 import {
   followUpTargetForTask,
@@ -47,15 +46,16 @@ import {
   taskFrameForWorkbench,
 } from '@/lib/workbench-state';
 import { useTaskStore } from '@/stores/task-store';
-import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
 import {
+  type SidePanelMode,
+  type SidePanelOverride,
   computeSidePanelMode,
   needsBrowserViewport,
   sidePanelModeForToolbar,
-  type SidePanelMode,
-  type SidePanelOverride,
 } from '@/types/side-panel';
 import type { UiSkillSelection, UiTask } from '@/types/task';
+import type { PlanId } from '@holaday/shared-types';
+import * as React from 'react';
 
 type UiTaskAwaitingKind = NonNullable<UiTask['awaitingKind']> | undefined;
 
@@ -142,15 +142,9 @@ export function WorkbenchApp(): JSX.Element {
   });
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    const desktopMq = window.matchMedia(
-      `(min-width: ${WORKBENCH_DESKTOP_BREAKPOINT_PX}px)`,
-    );
-    const mobileMq = window.matchMedia(
-      `(min-width: ${WORKBENCH_MOBILE_BREAKPOINT_PX}px)`,
-    );
-    const wideMq = window.matchMedia(
-      `(min-width: ${WORKBENCH_WIDE_BREAKPOINT_PX}px)`,
-    );
+    const desktopMq = window.matchMedia(`(min-width: ${WORKBENCH_DESKTOP_BREAKPOINT_PX}px)`);
+    const mobileMq = window.matchMedia(`(min-width: ${WORKBENCH_MOBILE_BREAKPOINT_PX}px)`);
+    const wideMq = window.matchMedia(`(min-width: ${WORKBENCH_WIDE_BREAKPOINT_PX}px)`);
     const onDesktop = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
     const onMobile = (e: MediaQueryListEvent) => setIsMobile(!e.matches);
     const onWide = (e: MediaQueryListEvent) => setIsWideDesktop(e.matches);
@@ -200,8 +194,7 @@ export function WorkbenchApp(): JSX.Element {
   // doesn't follow into task B. This single flag replaces the
   // previous three (browserCollapsed / userOpenedBrowserPanel /
   // showBrowserPanel) that were fighting each other.
-  const [sidePanelOverride, setSidePanelOverride] =
-    React.useState<SidePanelOverride>(null);
+  const [sidePanelOverride, setSidePanelOverride] = React.useState<SidePanelOverride>(null);
   const [confirmRebuildTask, setConfirmRebuildTask] = React.useState<{
     taskId: string;
     intent: string;
@@ -240,7 +233,7 @@ export function WorkbenchApp(): JSX.Element {
   const [panelPx, setPanelPx] = React.useState<number | null>(() => {
     if (typeof window === 'undefined') return null;
     const raw = window.localStorage.getItem('holaday.panelPx');
-    const n = raw ? Number.parseInt(raw, 10) : NaN;
+    const n = raw ? Number.parseInt(raw, 10) : Number.NaN;
     if (!Number.isFinite(n) || n <= 0) return null;
     const maxSensible = window.innerWidth * 0.85;
     if (n < PANEL_MIN_PX || n > maxSensible) return null;
@@ -256,12 +249,14 @@ export function WorkbenchApp(): JSX.Element {
     const row = contentRowRef.current;
     if (!row) return Math.max(PANEL_MIN_PX, Math.round(window.innerWidth * 0.5));
     const rect = row.getBoundingClientRect();
-    return estimateInlineBrowserPanelWidth({
-      rowWidth: rect.width,
-      explicitPanelWidth: null,
-      panelMinWidth: PANEL_MIN_PX,
-      mainMinWidth: MAIN_PANEL_MIN_PX,
-    }) ?? Math.max(PANEL_MIN_PX, Math.round(window.innerWidth * 0.5));
+    return (
+      estimateInlineBrowserPanelWidth({
+        rowWidth: rect.width,
+        explicitPanelWidth: null,
+        panelMinWidth: PANEL_MIN_PX,
+        mainMinWidth: MAIN_PANEL_MIN_PX,
+      }) ?? Math.max(PANEL_MIN_PX, Math.round(window.innerWidth * 0.5))
+    );
   }, []);
   const onPanelResizeDrag = React.useCallback(
     (dx: number) => {
@@ -289,7 +284,8 @@ export function WorkbenchApp(): JSX.Element {
       isCompactInlineViewport ||
       panelPx == null ||
       typeof ResizeObserver === 'undefined'
-    ) return;
+    )
+      return;
     const row = contentRowRef.current;
     if (!row) return;
 
@@ -327,10 +323,8 @@ export function WorkbenchApp(): JSX.Element {
   const rerunTask = useTaskStore((s) => s.rerunTask);
   const pickCurrentViewportProfile = React.useCallback(() => {
     const rowRect = contentRowRef.current?.getBoundingClientRect();
-    const viewportWidth =
-      typeof window !== 'undefined' ? window.innerWidth : 1280;
-    const viewportHeight =
-      typeof window !== 'undefined' ? window.innerHeight : 800;
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1280;
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
     return pickWorkbenchBrowserViewportProfile({
       viewportWidth,
       viewportHeight,
@@ -429,8 +423,7 @@ export function WorkbenchApp(): JSX.Element {
   const browserInteractive = useTaskStore((s) => s.browserInteractive);
 
   // Quota gate.
-  const planForRetention: PlanId =
-    me?.plan === 'basic' || me?.plan === 'pro' ? me.plan : 'free';
+  const planForRetention: PlanId = me?.plan === 'basic' || me?.plan === 'pro' ? me.plan : 'free';
   const { snap: quotaSnap } = useQuotaStatus(tasks.length);
   const quotaExhausted = isQuotaExhausted(quotaSnap);
 
@@ -439,9 +432,8 @@ export function WorkbenchApp(): JSX.Element {
     selectedTaskId &&
       (awaitingUserByTask[selectedTaskId] ||
         captchaWaitByTask[selectedTaskId] ||
-        (tasks.find((t) => t.taskId === selectedTaskId)?.status as
-          | string
-          | undefined) === 'awaiting_user'),
+        (tasks.find((t) => t.taskId === selectedTaskId)?.status as string | undefined) ===
+          'awaiting_user'),
   );
   const selectedAwaitingKind: UiTaskAwaitingKind = (() => {
     if (!selectedTaskId) return undefined;
@@ -486,11 +478,7 @@ export function WorkbenchApp(): JSX.Element {
       const tag = (e.target as HTMLElement | null)?.tagName;
       const inField = tag === 'INPUT' || tag === 'TEXTAREA';
       const remoteOwnsEsc =
-        browserInteractive &&
-        !!selectedTaskId &&
-        !inField &&
-        !e.metaKey &&
-        !e.shiftKey;
+        browserInteractive && !!selectedTaskId && !inField && !e.metaKey && !e.shiftKey;
       if (remoteOwnsEsc) return;
       if (browserSheetOpen) {
         setBrowserSheetOpen(false);
@@ -689,12 +677,14 @@ export function WorkbenchApp(): JSX.Element {
 
   return (
     <div
-      className="relative flex h-full min-h-0 w-full overflow-hidden"
+      className="relative flex min-h-0 min-w-0 w-full flex-1 overflow-hidden"
+      data-layout-container="workbench"
       ref={contentRowRef}
     >
       {!panelFullscreen && (
         <MainPanel
           task={selectedTask}
+          minWidth={showBrowserPanel && isDesktop ? inlineColumnMinimums.main : 0}
           greetingName={preferredDisplayName(me) || undefined}
           inputRef={inputRef}
           replyMode={isReplyMode}
@@ -731,7 +721,8 @@ export function WorkbenchApp(): JSX.Element {
               if ('error' in res) {
                 toast.show(taskActionError('回复失败', res.error), 'error');
                 return keepComposerOnSubmitFailure;
-              } else if (!res.ok) {
+              }
+              if (!res.ok) {
                 setConfirmRebuildTask({
                   taskId: selectedTaskId,
                   intent: selectedTask?.intent ?? '',
@@ -757,9 +748,7 @@ export function WorkbenchApp(): JSX.Element {
                 return keepComposerOnSubmitFailure;
               }
               toast.show(
-                selectedHasBrowserRecord
-                  ? 'AI 已接手当前页面继续执行'
-                  : '已基于上一个任务追问',
+                selectedHasBrowserRecord ? 'AI 已接手当前页面继续执行' : '已基于上一个任务追问',
               );
               return clearComposerOnSubmitSuccess;
             }
@@ -770,9 +759,7 @@ export function WorkbenchApp(): JSX.Element {
               expertMode,
               skillSelection,
             });
-            return decision.kind === 'submitted'
-              ? decision.result
-              : keepComposerOnSubmitFailure;
+            return decision.kind === 'submitted' ? decision.result : keepComposerOnSubmitFailure;
           }}
           onOpenSidebar={() => setOpenMobile(true)}
           sidePanelMode={toolbarSidePanelMode}
@@ -834,9 +821,7 @@ export function WorkbenchApp(): JSX.Element {
           }
         >
           <BrowserPanel
-            frame={
-              taskFrameForWorkbench(browserPanelTaskId, screencastByTask)
-            }
+            frame={taskFrameForWorkbench(browserPanelTaskId, screencastByTask)}
             taskStatus={browserPanelTask?.status ?? null}
             awaitingUser={
               browserPanelTask
@@ -873,46 +858,44 @@ export function WorkbenchApp(): JSX.Element {
           also prevents a parallel screencast mount. */}
       {!panelFullscreen && isMobile && (
         <div>
-        {browserSheetOpen && (
-          <button
-            type="button"
-            aria-label="收起浏览器"
-            title="收起浏览器"
-            className="fixed inset-0 z-[70] cursor-default bg-black/20 backdrop-blur-[1px]"
-            onClick={closeBrowserWorkspace}
+          {browserSheetOpen && (
+            <button
+              type="button"
+              aria-label="收起浏览器"
+              title="收起浏览器"
+              className="fixed inset-0 z-[70] cursor-default bg-black/20 backdrop-blur-[1px]"
+              onClick={closeBrowserWorkspace}
+            />
+          )}
+          <BrowserPanel
+            layout="sheet"
+            open={browserSheetOpen}
+            onClose={closeBrowserWorkspace}
+            frame={taskFrameForWorkbench(browserPanelTaskId, screencastByTask)}
+            taskStatus={browserPanelTask?.status ?? null}
+            awaitingUser={
+              browserPanelTask
+                ? Boolean(
+                    captchaWaitByTask[browserPanelTask.taskId] ||
+                      awaitingUserByTask[browserPanelTask.taskId],
+                  )
+                : false
+            }
+            awaitingKind={
+              browserPanelTask && captchaWaitByTask[browserPanelTask.taskId]
+                ? 'captcha'
+                : browserPanelTask
+                  ? selectedAwaitingKind
+                  : undefined
+            }
+            activeTaskId={browserPanelTaskId}
+            workspaceIdle={standaloneBrowserWorkspace}
+            onStartWorkspaceTask={startWorkspaceBrowserTask}
+            poolUserId={me?.multiUser ? me.userId : null}
+            onReExecute={browserPanelTask ? () => void handleBrowserReExecute() : undefined}
+            reExecuting={browserReExecuting}
+            onRequestAgentHelp={focusBrowserFollowUp}
           />
-        )}
-        <BrowserPanel
-          layout="sheet"
-          open={browserSheetOpen}
-          onClose={closeBrowserWorkspace}
-          frame={
-            taskFrameForWorkbench(browserPanelTaskId, screencastByTask)
-          }
-          taskStatus={browserPanelTask?.status ?? null}
-          awaitingUser={
-            browserPanelTask
-              ? Boolean(
-                  captchaWaitByTask[browserPanelTask.taskId] ||
-                    awaitingUserByTask[browserPanelTask.taskId],
-                )
-              : false
-          }
-          awaitingKind={
-            browserPanelTask && captchaWaitByTask[browserPanelTask.taskId]
-              ? 'captcha'
-              : browserPanelTask
-                ? selectedAwaitingKind
-                : undefined
-          }
-          activeTaskId={browserPanelTaskId}
-          workspaceIdle={standaloneBrowserWorkspace}
-          onStartWorkspaceTask={startWorkspaceBrowserTask}
-          poolUserId={me?.multiUser ? me.userId : null}
-          onReExecute={browserPanelTask ? () => void handleBrowserReExecute() : undefined}
-          reExecuting={browserReExecuting}
-          onRequestAgentHelp={focusBrowserFollowUp}
-        />
         </div>
       )}
 

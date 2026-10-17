@@ -41,6 +41,10 @@ export type CriterionType =
   // checker parses the answer as JSON-block-first → markdown-table
   // fallback and audits each row for name + price + url presence.
   | 'ecommerce_rows'
+  // FIX-BATCH-A — retrieved lists ("前三条新闻"): every item needs its own
+  // clickable detail source (never the homepage / a search page, never one
+  // URL shared by all rows) plus the key fields the user asked for.
+  | 'list_item_sources'
   | 'custom';
 
 /**
@@ -57,6 +61,7 @@ export type IntentKind =
   | 'stock_quote'
   | 'ecommerce_listing'
   | 'comparison'
+  | 'list_with_sources'
   | 'general_with_links'
   | 'general';
 
@@ -78,6 +83,20 @@ export interface OutputRequirementComparison {
   minUrls: number;
 }
 
+/** Key fields a retrieved list item must state, checked per item. */
+export type ListKeyField = 'date' | 'price';
+
+export interface OutputRequirementListSources {
+  kind: 'list_sources';
+  minItems: number;
+  keyFields: ListKeyField[];
+  /**
+   * FIX-24: the items are search results. A result's own link is wherever it
+   * points, a site's home page included; the search page itself is not.
+   */
+  searchResults?: boolean;
+}
+
 export interface OutputRequirementGeneralLinks {
   kind: 'general_with_links';
   minUrls: number;
@@ -87,6 +106,7 @@ export type OutputRequirement =
   | OutputRequirementStock
   | OutputRequirementEcommerce
   | OutputRequirementComparison
+  | OutputRequirementListSources
   | OutputRequirementGeneralLinks;
 
 export interface SuccessCriterion {
@@ -282,6 +302,11 @@ export function classifyIntentForOutputRequirement(intent: string): {
     };
   }
 
+  // A retrieved list ("前三条新闻", "top 3 posts") is only verifiable item by
+  // item: each item needs its own source, not one homepage link for all.
+  const list = inferListSourcesRequirement(text, explicitLinkRequest || researchOrRetrievalIntent);
+  if (list) return { kind: 'list_with_sources', requirement: list };
+
   // Research and retrieval results need at least one clickable source
   // to remain completed. This is only a zero-source structural guard;
   // it does not claim that a URL verifies every fact in the answer.
@@ -293,6 +318,39 @@ export function classifyIntentForOutputRequirement(intent: string): {
   }
 
   return { kind: 'general', requirement: null };
+}
+
+/**
+ * FIX-BATCH-A — "前三条新闻 / 最新的三条 / top 3 帖子" asks for N retrieved
+ * items. Requires an explicit count bound to an item noun, and a retrieval or
+ * link request, so writing tasks ("写三条标题") never pick this up.
+ */
+function inferListSourcesRequirement(
+  text: string,
+  retrieval: boolean,
+): OutputRequirementListSources | null {
+  if (!retrieval && !/\b(?:links?|urls?|sources?)\b/i.test(text)) return null;
+  const noun =
+    '(?:新闻|资讯|快讯|文章|帖子|话题|热搜|仓库|项目|结果|视频|问题|回答|商品|产品|条目|论文|公告|报道|消息|posts?|stories|articles|repos(?:itories)?|items)';
+  const count = text.match(
+    new RegExp(
+      `(?:前|最新的?|最近的?|排名前|热门的?|今天的?前?|今日前?)\\s*(\\d+|[一二两三四五六七八九十])\\s*(?:(?:条|篇|则|个|名|项|位|款|家)\\s*(?:的\\s*)?${noun}?|(?:的\\s*)?${noun})` +
+        `|(\\d+|[一二两三四五六七八九十])\\s*(?:条|篇|则)[^，。,.;；\\n]{0,12}?${noun}` +
+        `|\\btop\\s*(\\d+)\\s+${noun}`,
+      'i',
+    ),
+  );
+  if (!count) return null;
+  const raw = count[1] ?? count[2] ?? count[3];
+  const minItems = raw ? Number(raw) || parseChineseSmallNumber(raw) : Number.NaN;
+  if (!Number.isFinite(minItems) || minItems < 2 || minItems > 20) return null;
+  const keyFields: ListKeyField[] = [];
+  // Only an explicit per-item date request; "今天/今日" scopes the list, it
+  // does not ask every row for a date (GitHub "今日新增 star" has none).
+  if (/日期|时间|几点|\b(?:date|time|when)\b/i.test(text)) keyFields.push('date');
+  if (/价格|价钱|报价|售价|prices?\b/i.test(text)) keyFields.push('price');
+  const searchResults = /搜索|检索|\bsearch(?:es|ed|ing)?\b/i.test(text);
+  return { kind: 'list_sources', minItems, keyFields, ...(searchResults ? { searchResults } : {}) };
 }
 
 export function isResearchOrRetrievalIntent(intent: string): boolean {
@@ -409,7 +467,8 @@ function parseChineseSmallNumber(raw: string): number {
  * structured output.
  */
 export function buildPromptSchemaSuffix(intent: string): string {
-  const { kind } = classifyIntentForOutputRequirement(intent);
+  const { kind, requirement } = classifyIntentForOutputRequirement(intent);
+  if (requirement?.kind === 'list_sources') return `\n${listSourcesGuidance(requirement)}`;
   if (kind === 'general_with_links') {
     return [
       '',
@@ -429,6 +488,36 @@ export function buildPromptSchemaSuffix(intent: string): string {
     '```',
     '如果无法获取某个字段，标为 null（不要省略字段）。',
   ].join('\n');
+}
+
+const KEY_FIELD_LABELS: Record<ListKeyField, string> = { date: '发布日期或时间', price: '价格' };
+
+/** Output requirement for list answers, shown to the model before it answers. */
+export function listSourcesGuidance(requirement: OutputRequirementListSources): string {
+  const fields = requirement.keyFields.map((field) => KEY_FIELD_LABELS[field]);
+  return [
+    `按编号逐条列出 ${requirement.minItems} 条，每条单独写出：标题或名称${fields.length > 0 ? `、${fields.join('、')}` : ''}、该条自己的详情页链接。`,
+    // AP4 core-01: a search result that points at a site's home page is that
+    // result's own link; rejecting it made real Bing results "invalid".
+    '链接必须是该条目自己指向的页面，用页面上的真实链接：文章、商品、帖子给出它自己的页面；搜索结果给出该结果指向的网址（即使它是某个网站的首页）。不能用搜索结果页本身或列表页代替，也不能多条共用一个链接。',
+    '某条拿不到链接或字段时，写明“未获取到”，不要编造。',
+  ].join('\n');
+}
+
+/**
+ * Output requirement for browser-lane models, derived from the contract the
+ * verifier will enforce. Empty when the contract has no list requirement.
+ */
+export function browserOutputGuidance(contract: ExecutionContract | undefined): string {
+  const requirement = contract?.outputRequirement;
+  if (requirement?.kind === 'list_sources') return listSourcesGuidance(requirement);
+  if (requirement?.kind === 'ecommerce') {
+    return [
+      `逐条列出至少 ${requirement.minItems} 个商品，每条写出名称、价格和该商品自己的详情页链接（例如 item.jd.com/数字.html）。`,
+      '不能用搜索结果页、活动页或列表页链接代替商品链接，也不能多条共用一个链接；拿不到时写明“未获取到”，不要编造。',
+    ].join('\n');
+  }
+  return '';
 }
 
 const INTENT_OUTPUT_SCHEMAS: Partial<Record<IntentKind, string>> = {
@@ -544,6 +633,23 @@ function criteriaForRequirement(req: OutputRequirement): SuccessCriterion[] {
           type: 'url_count',
           description: `对比结论必须附带至少 ${req.minUrls} 个来源 URL`,
           data: { min: req.minUrls },
+        },
+      ];
+    case 'list_sources':
+      return [
+        {
+          id: newCriterionId(),
+          type: 'list_item_sources',
+          description: `前 ${req.minItems} 条每条都要有独立的详情页来源链接${
+            req.keyFields.length > 0
+              ? `，并写明${req.keyFields.map((field) => KEY_FIELD_LABELS[field]).join('、')}`
+              : ''
+          }`,
+          data: {
+            minItems: req.minItems,
+            keyFields: req.keyFields,
+            ...(req.searchResults ? { searchResults: true } : {}),
+          },
         },
       ];
     case 'general_with_links':
@@ -687,9 +793,12 @@ function buildLightTier(inputs: ContractInputs): ExecutionContract {
   return {
     ...commonHeader(inputs, 'light', 'data'),
     successCriteria,
-    // Default safety guardrails for unattended browser execution.
-    // Caller can override / extend via inputs.constraints.
-    constraints: [...(inputs.constraints ?? []), 'no_form_submit', 'no_payment'],
+    // BROWSER-AUTOPILOT-1: no default keyword constraints. Irreversible actions
+    // (submit, pay, order, delete, send) are confirmed by the runtime action
+    // gate before they run; a post-hoc keyword match over the ledger failed
+    // correct runs (a YouTube search "submitted a form"). Constraints the user
+    // states ("不提交表单", "禁止支付") are still checked.
+    constraints: [...(inputs.constraints ?? [])],
   };
 }
 

@@ -1,3 +1,5 @@
+import { CONTENT_TOPIC_WORKFLOW } from './expert-workflow-content-topic.js';
+import type { ExpertWorkflowContract } from './expert-workflow-contract.js';
 /**
  * Phase 2 Day 2 — Expert Workflow registry / matcher.
  *
@@ -23,9 +25,7 @@
  * → ecom-daily. Adjust the array if a future workflow needs priority.
  */
 import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
-import { CONTENT_TOPIC_WORKFLOW } from './expert-workflow-content-topic.js';
 import { ECOM_DAILY_WORKFLOW } from './expert-workflow-ecom-daily.js';
-import type { ExpertWorkflowContract } from './expert-workflow-contract.js';
 
 interface MatchOpts {
   intent: string;
@@ -51,16 +51,8 @@ const FOLLOW_UP_ACTION_PATTERNS: Partial<
     /(?:top\s*\d*\s*)?选题.*脚本/i,
     /竞品.*差异化.*清单|差异化.*竞品/i,
   ],
-  'ecom-daily': [
-    /明日.*(?:运营\s*)?sop/i,
-    /上周同期/i,
-    /roi.*(?:不达预期|原因|排查)/i,
-  ],
-  'douyin-review': [
-    /下场直播.*sop/i,
-    /单品.*表现/i,
-    /对比.*(?:上场|上一场)/i,
-  ],
+  'ecom-daily': [/明日.*(?:运营\s*)?sop/i, /上周同期/i, /roi.*(?:不达预期|原因|排查)/i],
+  'douyin-review': [/下场直播.*sop/i, /单品.*表现/i, /对比.*(?:上场|上一场)/i],
 };
 
 /**
@@ -68,10 +60,7 @@ const FOLLOW_UP_ACTION_PATTERNS: Partial<
  * the contract stays declarative + serialisable. New workflows
  * register a matcher by adding a case here.
  */
-function matchOne(
-  workflow: ExpertWorkflowContract,
-  opts: MatchOpts,
-): boolean {
+function matchOne(workflow: ExpertWorkflowContract, opts: MatchOpts): boolean {
   switch (workflow.workflowId) {
     case 'douyin-review':
       return matchesDouyinReview(opts);
@@ -96,14 +85,7 @@ const REVIEW_TERMS = ['复盘', '诊断', '分析直播', '直播分析', '直�
 // "标题" alone (e.g. "帮我起个标题") doesn't fire because no platform.
 // "做小红书" alone doesn't fire because no task term. The conjunction
 // pattern is what makes content-topic distinct from douyin-review.
-const CONTENT_TASK_TERMS = [
-  '选题',
-  '内容策划',
-  '爆款',
-  '标题',
-  '内容方向',
-  '种草',
-];
+const CONTENT_TASK_TERMS = ['选题', '内容策划', '爆款', '标题', '内容方向', '种草'];
 const CONTENT_PLATFORM_TERMS = [
   '小红书',
   '抖音',
@@ -140,16 +122,7 @@ const TIME_TERMS = [
   'yesterday',
   'today',
 ];
-const ECOM_TERMS = [
-  '电商',
-  '营收',
-  '营业额',
-  '销售额',
-  '店铺',
-  'GMV',
-  '日销售',
-  '日gmv',
-];
+const ECOM_TERMS = ['电商', '营收', '营业额', '销售额', '店铺', 'GMV', '日销售', '日gmv'];
 
 function matchesEcomDaily(opts: MatchOpts): boolean {
   // Precedence: registry order means douyin-review and content-topic
@@ -173,12 +146,8 @@ function matchesContentTopic(opts: MatchOpts): boolean {
   // BOTH are explicitly asked). This function therefore doesn't need
   // an exclusion clause — the order in WORKFLOWS handles it.
   const lower = opts.intent.toLowerCase();
-  const hasTask = CONTENT_TASK_TERMS.some((t) =>
-    lower.includes(t.toLowerCase()),
-  );
-  const hasPlatform = CONTENT_PLATFORM_TERMS.some((t) =>
-    lower.includes(t.toLowerCase()),
-  );
+  const hasTask = CONTENT_TASK_TERMS.some((t) => lower.includes(t.toLowerCase()));
+  const hasPlatform = CONTENT_PLATFORM_TERMS.some((t) => lower.includes(t.toLowerCase()));
   return hasTask && hasPlatform;
 }
 
@@ -212,9 +181,7 @@ function matchesDouyinReview(opts: MatchOpts): boolean {
  * Returns null when no workflow applies; caller falls back to the
  * default generate path.
  */
-export function matchExpertWorkflow(
-  opts: MatchOpts,
-): ExpertWorkflowContract | null {
+export function matchExpertWorkflow(opts: MatchOpts): ExpertWorkflowContract | null {
   for (const w of WORKFLOWS) {
     if (matchOne(w, opts)) return w;
   }
@@ -229,9 +196,7 @@ export function matchExpertWorkflow(
  * mid-pipeline). Returns null when the id isn't registered —
  * caller falls back to non-workflow verification.
  */
-export function getExpertWorkflowById(
-  workflowId: string,
-): ExpertWorkflowContract | null {
+export function getExpertWorkflowById(workflowId: string): ExpertWorkflowContract | null {
   for (const w of WORKFLOWS) {
     if (w.workflowId === workflowId) return w;
   }
@@ -260,13 +225,9 @@ export function resolveExpertWorkflowDispatch(input: {
     input.isFollowUp &&
     input.matchedWorkflow != null &&
     input.parentWorkflow?.workflowId === input.matchedWorkflow.workflowId &&
-    matchesWorkflowFollowUpAction(
-      input.matchedWorkflow.workflowId,
-      input.followUpIntent ?? '',
-    );
+    matchesWorkflowFollowUpAction(input.matchedWorkflow.workflowId, input.followUpIntent ?? '');
   const reportWorkflow = sameWorkflowDerivedAction ? null : input.matchedWorkflow;
-  const routingWorkflow =
-    input.matchedWorkflow ?? (input.isFollowUp ? input.parentWorkflow : null);
+  const routingWorkflow = input.matchedWorkflow ?? (input.isFollowUp ? input.parentWorkflow : null);
   return { reportWorkflow, routingWorkflow };
 }
 
@@ -286,9 +247,7 @@ function matchesWorkflowFollowUpAction(
   workflowId: ExpertWorkflowContract['workflowId'],
   intent: string,
 ): boolean {
-  return (FOLLOW_UP_ACTION_PATTERNS[workflowId] ?? []).some((pattern) =>
-    pattern.test(intent),
-  );
+  return (FOLLOW_UP_ACTION_PATTERNS[workflowId] ?? []).some((pattern) => pattern.test(intent));
 }
 
 /**

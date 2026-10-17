@@ -35,10 +35,7 @@ const TOOL_TAG_NAMES = [
  */
 function buildPairedRegex(): RegExp {
   const tagAlternation = TOOL_TAG_NAMES.join('|');
-  return new RegExp(
-    `<(${tagAlternation})\\b[^>]*>[\\s\\S]*?</\\1\\s*>`,
-    'gi',
-  );
+  return new RegExp(`<(${tagAlternation})\\b[^>]*>[\\s\\S]*?</\\1\\s*>`, 'gi');
 }
 
 const PAIRED_TAG_RE = buildPairedRegex();
@@ -49,10 +46,7 @@ const PAIRED_TAG_RE = buildPairedRegex();
  * try to be clever about content; if we see `<tool_call>` without
  * a closer, drop it. Same for the closer alone.
  */
-const ORPHAN_TAG_RE = new RegExp(
-  `</?(?:${TOOL_TAG_NAMES.join('|')})\\b[^>]*/?>`,
-  'gi',
-);
+const ORPHAN_TAG_RE = new RegExp(`</?(?:${TOOL_TAG_NAMES.join('|')})\\b[^>]*/?>`, 'gi');
 
 /**
  * Massive base64 blobs (e.g. inline screenshots the model occasionally
@@ -78,8 +72,7 @@ const IMAGE_MARKER_BASE64_RE =
  * the base64 string. Stripped wholesale so the surrounding JSON
  * doesn't end up with a half-removed string literal.
  */
-const QUOTED_IMAGE_DATA_RE =
-  /"data"\s*:\s*"(?:\/9j\/|iVBORw0KGgo|R0lGOD|UklGR)[A-Za-z0-9+/=]*"/g;
+const QUOTED_IMAGE_DATA_RE = /"data"\s*:\s*"(?:\/9j\/|iVBORw0KGgo|R0lGOD|UklGR)[A-Za-z0-9+/=]*"/g;
 
 /**
  * Standalone bare base64 — surrounded by whitespace (or string
@@ -160,10 +153,7 @@ function stripToolJsonBlocks(text: string): string {
         return out;
       }
       const block = text.slice(start, j);
-      if (
-        TOOL_RESPONSE_MARKERS_RE.test(block) ||
-        looksLikeInternalResultMetadata(block)
-      ) {
+      if (TOOL_RESPONSE_MARKERS_RE.test(block) || looksLikeInternalResultMetadata(block)) {
         // Drop the block entirely; iterator continues at j.
       } else {
         out += block;
@@ -393,22 +383,19 @@ export function humaniseScrapeFailure(rawReason: string | undefined): string {
     ].join('\n');
   }
   if (/(no\s*results|empty|0\s*results|没有结果)/.test(r)) {
-    return [
-      '搜索没有返回任何结果。',
-      '建议：换更通用或更具体的关键词，或换一个数据源。',
-    ].join('\n');
+    return ['搜索没有返回任何结果。', '建议：换更通用或更具体的关键词，或换一个数据源。'].join(
+      '\n',
+    );
   }
   if (/(rate.?limit|429|throttl)/.test(r)) {
-    return [
-      '抓取被对方站点限流（429），稍后再试或更换 IP。',
-      '建议：休息几分钟后重试。',
-    ].join('\n');
+    return ['抓取被对方站点限流（429），稍后再试或更换 IP。', '建议：休息几分钟后重试。'].join(
+      '\n',
+    );
   }
   if (/(timeout|timed?\s*out|deadline)/.test(r)) {
-    return [
-      '抓取超时，可能是站点响应过慢或防爬严格。',
-      '建议：换一个数据源或简化查询。',
-    ].join('\n');
+    return ['抓取超时，可能是站点响应过慢或防爬严格。', '建议：换一个数据源或简化查询。'].join(
+      '\n',
+    );
   }
   // DNS / connection check runs BEFORE 404 — Node's "ENOTFOUND" error
   // string contains the substring "notfound" and would otherwise be
@@ -420,10 +407,7 @@ export function humaniseScrapeFailure(rawReason: string | undefined): string {
     ].join('\n');
   }
   if (/(not\s*found|404|no\s*such)/.test(r)) {
-    return [
-      '该页面不存在（404）。',
-      '建议：检查 URL 拼写，或换一个有效的链接。',
-    ].join('\n');
+    return ['该页面不存在（404）。', '建议：检查 URL 拼写，或换一个有效的链接。'].join('\n');
   }
   if (/firecrawl/.test(r)) {
     return `数据抓取服务返回错误：${rawReason}\n建议：稍后重试，或换一个数据源。`;

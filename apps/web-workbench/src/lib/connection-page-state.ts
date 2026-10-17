@@ -90,7 +90,9 @@ export function connectionPageSummary(options: {
   return `已规划 ${count} 个连接器 · ${categoryCount} 类工具`;
 }
 
-export function connectionLoadErrorCopy(message: string | null | undefined): ConnectionLoadErrorCopy {
+export function connectionLoadErrorCopy(
+  message: string | null | undefined,
+): ConnectionLoadErrorCopy {
   const body =
     typeof message === 'string' && message.trim()
       ? message.trim()

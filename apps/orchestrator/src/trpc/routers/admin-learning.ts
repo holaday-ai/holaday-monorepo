@@ -23,15 +23,16 @@
 import { TRPCError } from '@trpc/server';
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import {
+  ERROR_LABELS,
+  type ErrorCategory,
+  classifyTaskError,
+  extractDomain,
+} from '../../admin/learning-helpers.js';
 import { executionMemory } from '../../db/schema/execution-memory.js';
 import { tasks } from '../../db/schema/tasks.js';
+import { readEvolutionMetrics } from '../../playbook/evolution/drizzle-evolution-store.js';
 import { adminProcedure, router } from '../trpc.js';
-import {
-  classifyTaskError,
-  ERROR_LABELS,
-  extractDomain,
-  type ErrorCategory,
-} from '../../admin/learning-helpers.js';
 
 /** Maximum rows to scan per request. ~50k is fine in-memory. */
 const SCAN_LIMIT = 50_000;
@@ -67,9 +68,7 @@ function classifyLearningFailure(row: {
   );
 }
 
-function extractPersistedFailedChecks(
-  result: unknown,
-): Array<{ type: string; detail: string }> {
+function extractPersistedFailedChecks(result: unknown): Array<{ type: string; detail: string }> {
   const parsed = typeof result === 'string' ? safeJsonParse(result) : result;
   if (!parsed || typeof parsed !== 'object') return [];
   const raw = (parsed as Record<string, unknown>).failedChecks;
@@ -164,8 +163,7 @@ function aggregateByDomain(scanRows: TaskScanRow[]): Map<string, DomainAggregate
         agg.lastFailedAt = row.createdAt;
       }
       const cat = classifyLearningFailure(row);
-      const perCat =
-        failureCountByDomainCategory.get(domain) ?? new Map<ErrorCategory, number>();
+      const perCat = failureCountByDomainCategory.get(domain) ?? new Map<ErrorCategory, number>();
       perCat.set(cat, (perCat.get(cat) ?? 0) + 1);
       failureCountByDomainCategory.set(domain, perCat);
     }
@@ -183,16 +181,18 @@ function aggregateByDomain(scanRows: TaskScanRow[]): Map<string, DomainAggregate
   return byDomain;
 }
 
-function selectRecentDomainRows<T extends { createdAt: Date }>(
-  rows: T[],
-  limit: number,
-): T[] {
-  return [...rows]
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .slice(0, limit);
+function selectRecentDomainRows<T extends { createdAt: Date }>(rows: T[], limit: number): T[] {
+  return [...rows].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, limit);
 }
 
 export const adminLearningRouter = router({
+  // ───────────────────────────────────────────────────────── evolution ──
+  // Batch 06 — self-evolution loop: template path counts, canary pass rate,
+  // reuse hit rate, and estimated model calls saved by deterministic replay.
+  evolution: adminProcedure
+    .input(z.object({ windowDays: z.number().int().min(1).max(365).default(30) }).optional())
+    .query(async ({ ctx, input }) => readEvolutionMetrics(ctx.db, input?.windowDays ?? 30)),
+
   // ────────────────────────────────────────────────────────── overview ──
   overview: adminProcedure
     .input(
@@ -233,9 +233,7 @@ export const adminLearningRouter = router({
       const aiMemoriesCount = Number(memoryRow?.count ?? 0);
 
       // Build the ranking list. Filter → sort → paginate.
-      let rows = Array.from(byDomain.values()).filter(
-        (d) => d.total >= MIN_TASKS_FOR_RANKING,
-      );
+      let rows = Array.from(byDomain.values()).filter((d) => d.total >= MIN_TASKS_FOR_RANKING);
       if (args.search) {
         const q = args.search.toLowerCase();
         rows = rows.filter((r) => r.domain.includes(q));
@@ -247,9 +245,7 @@ export const adminLearningRouter = router({
         });
       } else if (args.filter === 'recentFail') {
         const sevenDaysAgo = Date.now() - 7 * 86_400_000;
-        rows = rows.filter(
-          (r) => r.lastFailedAt && r.lastFailedAt.getTime() >= sevenDaysAgo,
-        );
+        rows = rows.filter((r) => r.lastFailedAt && r.lastFailedAt.getTime() >= sevenDaysAgo);
       }
       const sortKey =
         args.sort === 'totalTasks'
@@ -431,13 +427,9 @@ export const adminLearningRouter = router({
           failed,
           cancelled,
           successRate:
-            success + failed > 0
-              ? Math.round((success / (success + failed)) * 1000) / 10
-              : 0,
+            success + failed > 0 ? Math.round((success / (success + failed)) * 1000) / 10 : 0,
           failureRate:
-            success + failed > 0
-              ? Math.round((failed / (success + failed)) * 1000) / 10
-              : 0,
+            success + failed > 0 ? Math.round((failed / (success + failed)) * 1000) / 10 : 0,
           firstTaskAt: firstAt,
           lastTaskAt: lastAt,
         },
@@ -451,9 +443,7 @@ export const adminLearningRouter = router({
           failedChecks: extractPersistedFailedChecks(r.result),
           createdAt: r.createdAt,
           durationMs:
-            r.startedAt && r.completedAt
-              ? r.completedAt.getTime() - r.startedAt.getTime()
-              : null,
+            r.startedAt && r.completedAt ? r.completedAt.getTime() - r.startedAt.getTime() : null,
         })),
         memories: memRows.map((m) => ({
           externalId: m.externalId,

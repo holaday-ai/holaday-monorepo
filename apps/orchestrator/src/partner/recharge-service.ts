@@ -7,10 +7,10 @@ import {
 import { and, eq, gte, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import {
-  partnerLots,
-  partnerRechargeOrders,
   type PartnerLot,
   type PartnerRechargeOrder,
+  partnerLots,
+  partnerRechargeOrders,
 } from '../db/schema/partner.js';
 import { KycService, canRechargeWithKycStatus } from './kyc-service.js';
 import { PartnerMembershipService } from './membership-service.js';
@@ -23,7 +23,10 @@ const REVIEW_OVERRIDE_NOTE_MAX_LENGTH = 1000;
 
 export type RechargeAmountValidationResult =
   | { ok: true }
-  | { ok: false; reason: 'invalid_amount' | 'not_whole_cny' | 'below_minimum' | 'above_single_maximum' };
+  | {
+      ok: false;
+      reason: 'invalid_amount' | 'not_whole_cny' | 'below_minimum' | 'above_single_maximum';
+    };
 
 export interface RechargeAmountLimits {
   singleRechargeMinCnyCents: number;
@@ -156,7 +159,9 @@ export async function computeCompletedRechargeTotalCnyCents(
         return false;
       }
       const effectiveAt = row.updatedAt ?? row.createdAt;
-      return effectiveAt.getTime() >= windowStart.getTime() && effectiveAt.getTime() <= now.getTime();
+      return (
+        effectiveAt.getTime() >= windowStart.getTime() && effectiveAt.getTime() <= now.getTime()
+      );
     })
     .reduce((sum, row) => sum + row.amountCnyCents, 0);
 }
@@ -291,9 +296,16 @@ function normalizeReviewOverride(
 ): NormalizedRechargeLotReviewOverride | undefined {
   if (value === undefined) return undefined;
   return {
-    reviewerUserId: normalizePositiveSafeInteger(value.reviewerUserId, 'reviewOverride.reviewerUserId'),
+    reviewerUserId: normalizePositiveSafeInteger(
+      value.reviewerUserId,
+      'reviewOverride.reviewerUserId',
+    ),
     approvedAt: normalizeDate(value.approvedAt, 'reviewOverride.approvedAt'),
-    note: normalizeOptionalBoundedString(value.note, 'reviewOverride.note', REVIEW_OVERRIDE_NOTE_MAX_LENGTH),
+    note: normalizeOptionalBoundedString(
+      value.note,
+      'reviewOverride.note',
+      REVIEW_OVERRIDE_NOTE_MAX_LENGTH,
+    ),
   };
 }
 
@@ -449,7 +461,10 @@ export class RechargeService {
   private readonly membership: Pick<PartnerMembershipService, 'getActiveMembership'>;
   private readonly kyc: Pick<KycService, 'getStatus'>;
 
-  constructor(private readonly db: DB, deps: RechargeServiceDeps = {}) {
+  constructor(
+    private readonly db: DB,
+    deps: RechargeServiceDeps = {},
+  ) {
     this.membership = deps.membership ?? new PartnerMembershipService(db);
     this.kyc = deps.kyc ?? new KycService(db);
   }

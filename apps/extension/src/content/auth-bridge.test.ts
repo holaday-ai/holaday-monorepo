@@ -15,7 +15,7 @@ afterEach(() => {
 describe('auth bridge content script', () => {
   it('retries an observed token when the service worker ack never arrives', async () => {
     vi.useFakeTimers();
-    const token = 'hd_live_' + 'a'.repeat(24);
+    const token = `hd_live_${'a'.repeat(24)}`;
     const getItem = vi.fn((key: string) => (key === TOKEN_KEY ? token : null));
     const sendMessage = vi.fn((_message: unknown, callback: () => void) => {
       if (sendMessage.mock.calls.length > 1) callback();
@@ -90,7 +90,7 @@ describe('auth bridge content script', () => {
 
   it('does not mirror malformed non-empty localStorage values as logout after a valid token', async () => {
     vi.useFakeTimers();
-    let observedToken: string | null = 'hd_live_' + 'a'.repeat(24);
+    let observedToken: string | null = `hd_live_${'a'.repeat(24)}`;
     const storageListeners: Array<(event: StorageEvent) => void> = [];
     const getItem = vi.fn((key: string) => (key === TOKEN_KEY ? observedToken : null));
     const sendMessage = vi.fn((_message: unknown, callback: () => void) => {
@@ -126,7 +126,7 @@ describe('auth bridge content script', () => {
 
   it('retries an observed token when the service worker send fails', async () => {
     vi.useFakeTimers();
-    const token = 'hd_live_' + 'a'.repeat(24);
+    const token = `hd_live_${'a'.repeat(24)}`;
     const getItem = vi.fn((key: string) => (key === TOKEN_KEY ? token : null));
     const sendMessage = vi.fn((_message: unknown, callback: () => void) => {
       if (sendMessage.mock.calls.length === 1) {
@@ -162,7 +162,7 @@ describe('auth bridge content script', () => {
 
   it('retries a failed service worker send before the next poll tick', async () => {
     vi.useFakeTimers();
-    const token = 'hd_live_' + 'a'.repeat(24);
+    const token = `hd_live_${'a'.repeat(24)}`;
     const getItem = vi.fn((key: string) => (key === TOKEN_KEY ? token : null));
     const sendMessage = vi.fn((_message: unknown, callback: () => void) => {
       if (sendMessage.mock.calls.length === 1) {
@@ -200,8 +200,11 @@ describe('auth bridge content script', () => {
 
   it('caps repeated retry cadence at the longest configured delay', async () => {
     vi.useFakeTimers();
-    vi.stubGlobal('setInterval', vi.fn(() => 0 as unknown as ReturnType<typeof setInterval>));
-    const token = 'hd_live_' + 'a'.repeat(24);
+    vi.stubGlobal(
+      'setInterval',
+      vi.fn(() => 0 as unknown as ReturnType<typeof setInterval>),
+    );
+    const token = `hd_live_${'a'.repeat(24)}`;
     const getItem = vi.fn((key: string) => (key === TOKEN_KEY ? token : null));
     const sendMessage = vi.fn((_message: unknown, callback: () => void) => {
       chrome.runtime.lastError = { message: 'service worker restarting' };
@@ -236,7 +239,7 @@ describe('auth bridge content script', () => {
 
   it('retries an observed token when the service worker reports an internal failure', async () => {
     vi.useFakeTimers();
-    const token = 'hd_live_' + 'a'.repeat(24);
+    const token = `hd_live_${'a'.repeat(24)}`;
     const getItem = vi.fn((key: string) => (key === TOKEN_KEY ? token : null));
     const sendMessage = vi.fn((_message: unknown, callback: (response?: unknown) => void) => {
       if (sendMessage.mock.calls.length === 1) {
@@ -270,8 +273,8 @@ describe('auth bridge content script', () => {
 
   it('does not let an old send failure roll back a newer token', async () => {
     vi.useFakeTimers();
-    const oldToken = 'hd_old_' + 'a'.repeat(24);
-    const newToken = 'hd_new_' + 'b'.repeat(24);
+    const oldToken = `hd_old_${'a'.repeat(24)}`;
+    const newToken = `hd_new_${'b'.repeat(24)}`;
     let currentToken = oldToken;
     const storageListeners: Array<(event: StorageEvent) => void> = [];
     const callbacks: Array<() => void> = [];

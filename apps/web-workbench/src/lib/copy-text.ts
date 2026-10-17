@@ -18,10 +18,7 @@ interface CopyTextDeps {
   document?: Document | null;
 }
 
-export async function copyTextToClipboard(
-  text: string,
-  deps: CopyTextDeps = {},
-): Promise<boolean> {
+export async function copyTextToClipboard(text: string, deps: CopyTextDeps = {}): Promise<boolean> {
   const clipboard = deps.clipboard ?? globalThis.navigator?.clipboard ?? null;
   if (clipboard) {
     try {

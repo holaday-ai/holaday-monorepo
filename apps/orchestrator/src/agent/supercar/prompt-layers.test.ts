@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BASE_PROMPT,
+  ROLE_PROMPTS,
+  STYLE_PROMPT,
   buildLayeredSystemPrompt,
   classifyRole,
   getTaskBudget,
   selectModelAndEffort,
-  ROLE_PROMPTS,
-  BASE_PROMPT,
-  STYLE_PROMPT,
 } from './prompt-layers.js';
 
 describe('classifyRole', () => {
@@ -120,8 +120,12 @@ describe('buildLayeredSystemPrompt', () => {
 
   it('requires user confirmation before transactional final submits', () => {
     const out = buildLayeredSystemPrompt('none');
-    expect(out).toContain('预订 / 预约 / 报名 / 投递 / 加购 / 结账 / 取消订阅 / 退订 / 文件分享或权限变更');
-    expect(out).toContain('不要点击最终确认 / 提交预约 / 提交报名 / 提交申请 / 确认预订 / Place order / Share / Change access / Delete / Unsubscribe');
+    expect(out).toContain(
+      '预订 / 预约 / 报名 / 投递 / 加购 / 结账 / 取消订阅 / 退订 / 文件分享或权限变更',
+    );
+    expect(out).toContain(
+      '不要点击最终确认 / 提交预约 / 提交报名 / 提交申请 / 确认预订 / Place order / Share / Change access / Delete / Unsubscribe',
+    );
     expect(out).toContain('分享对象/权限');
     expect(out).toContain('关键条款或将要改变的账户状态');
     expect(out).toContain('停在最终确认页，先说明影响');
@@ -271,15 +275,15 @@ describe('selectModelAndEffort', () => {
     });
   });
 
-  it.each([
-    '今天上海天气',
-    'What is the Tesla stock price today?',
-  ])('pure fact lookup still uses Haiku 4.5 medium: %s', (intent) => {
-    expect(selectModelAndEffort(intent, 'none')).toEqual({
-      model: 'claude-haiku-4-5',
-      effort: 'medium',
-    });
-  });
+  it.each(['今天上海天气', 'What is the Tesla stock price today?'])(
+    'pure fact lookup still uses Haiku 4.5 medium: %s',
+    (intent) => {
+      expect(selectModelAndEffort(intent, 'none')).toEqual({
+        model: 'claude-haiku-4-5',
+        effort: 'medium',
+      });
+    },
+  );
 
   it('xhigh is only paired with Sonnet 4.6 (Opus retired from auto-routing)', () => {
     const cases: Array<[string, string]> = [
@@ -398,8 +402,9 @@ describe('getTaskBudget', () => {
   it('budget always meets API minimum (20K)', () => {
     const intents = ['查天气', '写笔记', '财报', '招聘', ''];
     const roles = ['none', 'content-creator', 'product-manager', 'recruiter'];
-    for (const i of intents) for (const r of roles) {
-      expect(getTaskBudget(i, r)).toBeGreaterThanOrEqual(20_000);
-    }
+    for (const i of intents)
+      for (const r of roles) {
+        expect(getTaskBudget(i, r)).toBeGreaterThanOrEqual(20_000);
+      }
   });
 });

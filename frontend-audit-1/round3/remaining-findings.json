@@ -1,0 +1,4565 @@
+[
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||新任务||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1440-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||搜索任务 ⌘K||0",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1440-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||技能||0",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1440-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||股市任务||0",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1440-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||今日能量||0",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1440-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||视频任务||0",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1440-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||图片任务||0",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1440-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||规划任务||0",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1440-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||文件库||0",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1440-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||项目||0",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1440-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||管理后台||0",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1440-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||UI generate awaiting_us…||0",
+    "box": {
+      "x": 81,
+      "y": 843,
+      "width": 153,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1440-task_generate_executing-control-59.png",
+    "route": "task:generate:executing",
+    "width": 1440
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "手机登录",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "task:generate:executing",
+    "width": 1440,
+    "screenshot": "artifacts/1440-task_generate_executing.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.01343894675925926",
+    "screenshot": "artifacts/1440-task_generate_completed-diff.png",
+    "route": "task:generate:completed",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 1216,
+      "y": 8.5,
+      "width": 83,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1440-task_browser_executing-control-68.png",
+    "route": "task:browser:executing",
+    "width": 1440
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.057164351851851855",
+    "screenshot": "artifacts/1440-task_browser_executing-diff.png",
+    "route": "task:browser:executing",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 1216,
+      "y": 8.5,
+      "width": 77.03125,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1440-task_browser_completed-control-71.png",
+    "route": "task:browser:completed",
+    "width": 1440
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.022033420138888888",
+    "screenshot": "artifacts/1440-task_browser_completed-diff.png",
+    "route": "task:browser:completed",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 1216,
+      "y": 8.5,
+      "width": 77.03125,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1440-task_browser_failed-control-75.png",
+    "route": "task:browser:failed",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 1216,
+      "y": 8.5,
+      "width": 123,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1440-task_browser_awaiting_user-control-67.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1440
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.056950231481481484",
+    "screenshot": "artifacts/1440-task_browser_awaiting_user-diff.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 1216,
+      "y": 8.5,
+      "width": 77.03125,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1440-task_browser_cancelled-control-74.png",
+    "route": "task:browser:cancelled",
+    "width": 1440
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.01759982638888889",
+    "screenshot": "artifacts/1440-task_scrape_completed-diff.png",
+    "route": "task:scrape:completed",
+    "width": 1440
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.01355541087962963",
+    "screenshot": "artifacts/1440-task_image_completed-diff.png",
+    "route": "task:image:completed",
+    "width": 1440
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "手机登录",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/login",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_login.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "密码登录",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/register",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_register.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.18205295138888888",
+    "screenshot": "artifacts/1440-_cosmic-preview-diff.png",
+    "route": "/cosmic-preview",
+    "width": 1440
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "全部",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/tasks",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_tasks.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "近 30 天",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/tasks",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_tasks.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/schedule",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_schedule.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不提醒",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/schedule",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_schedule.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/calendar",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_calendar.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不提醒",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/calendar",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_calendar.png"
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/appearance",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_settings_appearance.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/appearance",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_settings_appearance.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.04060112847222222",
+    "screenshot": "artifacts/1440-_settings_appearance-diff.png",
+    "route": "/settings/appearance",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/api-keys",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_settings_api-keys.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/api-keys",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_settings_api-keys.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.04769892939814815",
+    "screenshot": "artifacts/1440-_settings_api-keys-diff.png",
+    "route": "/settings/api-keys",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/memory",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_settings_memory.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/memory",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_settings_memory.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.056469907407407406",
+    "screenshot": "artifacts/1440-_settings_memory-diff.png",
+    "route": "/settings/memory",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/notifications",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_settings_notifications.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/notifications",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_settings_notifications.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.010939670138888889",
+    "screenshot": "artifacts/1440-_settings_notifications-diff.png",
+    "route": "/settings/notifications",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/account",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_settings_account.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/account",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_settings_account.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.010987413194444445",
+    "screenshot": "artifacts/1440-_settings_account-diff.png",
+    "route": "/settings/account",
+    "width": 1440
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "营收明细",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/admin/finance",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_admin_finance.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "全部",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/admin/learning",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_admin_learning.png"
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_settings.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_settings.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "按月",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/plan",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_plan.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.1694386574074074",
+    "screenshot": "artifacts/1440-_cosmic-diff.png",
+    "route": "/cosmic",
+    "width": 1440
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "全部",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/history",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_history.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "近 30 天",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/history",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_history.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.05676938657407407",
+    "screenshot": "artifacts/1440-_stocks-diff.png",
+    "route": "/stocks",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "已加载 2 个文件",
+    "route": "/files",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_files.png"
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||生活方式||0",
+    "box": {
+      "x": 604,
+      "y": 340.78125,
+      "width": 256,
+      "height": 150
+    },
+    "route": "/video",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_video.png"
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "告诉 HOLA DAY 你的重点",
+    "route": "/video",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_video.png"
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||产品短片||0",
+    "box": {
+      "x": 334,
+      "y": 340.78125,
+      "width": 256,
+      "height": 150
+    },
+    "observedUrl": "http://127.0.0.1:53284/video",
+    "screenshot": "artifacts/1440-_video-control-80.png",
+    "route": "/video",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||光影氛围||0",
+    "box": {
+      "x": 874,
+      "y": 340.78125,
+      "width": 256,
+      "height": 150
+    },
+    "observedUrl": "http://127.0.0.1:53284/video",
+    "screenshot": "artifacts/1440-_video-control-106.png",
+    "route": "/video",
+    "width": 1440
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "氛围风格基调",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/video",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_video.png"
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||自然光影||0",
+    "box": {
+      "x": 1144,
+      "y": 319.1875,
+      "width": 256,
+      "height": 150
+    },
+    "observedUrl": "http://127.0.0.1:53284/image",
+    "screenshot": "artifacts/1440-_image-control-41.png",
+    "route": "/image",
+    "width": 1440
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||商品棚拍||0",
+    "box": {
+      "x": 874,
+      "y": 319.1875,
+      "width": 256,
+      "height": 150
+    },
+    "observedUrl": "http://127.0.0.1:53284/image",
+    "screenshot": "artifacts/1440-_image-control-70.png",
+    "route": "/image",
+    "width": 1440
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.03204861111111111",
+    "screenshot": "artifacts/1440-_image-diff.png",
+    "route": "/image",
+    "width": 1440
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "9 每日测试计划 18:00 重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/planned",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_planned.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/planned/legacy-scheduled",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_planned_legacy-scheduled.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不提醒",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/planned/legacy-scheduled",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_planned_legacy-scheduled.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/scheduled",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_scheduled.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不提醒",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/scheduled",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_scheduled.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "9 每日测试计划 18:00 重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/batch",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_batch.png"
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||新任务||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1280-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||搜索任务 ⌘K||0",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1280-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||技能||0",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1280-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||股市任务||0",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1280-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||今日能量||0",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1280-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||视频任务||0",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1280-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||图片任务||0",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1280-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||规划任务||0",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1280-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||文件库||0",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1280-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||项目||0",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1280-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||管理后台||0",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1280-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||UI generate awaiting_us…||0",
+    "box": {
+      "x": 81,
+      "y": 843,
+      "width": 153,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1280-task_generate_executing-control-58.png",
+    "route": "task:generate:executing",
+    "width": 1280
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "手机登录",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "task:generate:executing",
+    "width": 1280,
+    "screenshot": "artifacts/1280-task_generate_executing.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.015118815104166667",
+    "screenshot": "artifacts/1280-task_generate_completed-diff.png",
+    "route": "task:generate:completed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1280-task_browser_executing-control-88.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||1",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1280-task_browser_executing-control-88.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||2",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1280-task_browser_executing-control-88.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||3",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1280-task_browser_executing-control-88.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||4",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1280-task_browser_executing-control-88.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||5",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1280-task_browser_executing-control-88.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||6",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1280-task_browser_executing-control-88.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||7",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1280-task_browser_executing-control-88.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||8",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1280-task_browser_executing-control-88.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||9",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1280-task_browser_executing-control-88.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||10",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1280-task_browser_executing-control-88.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 1006,
+      "y": 8.5,
+      "width": 133,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1280-task_browser_executing-control-88.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.0661865234375",
+    "screenshot": "artifacts/1280-task_browser_executing-diff.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||新任务||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1280-task_browser_completed-control-71.png",
+    "route": "task:browser:completed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||搜索任务 ⌘K||0",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1280-task_browser_completed-control-71.png",
+    "route": "task:browser:completed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||技能||0",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1280-task_browser_completed-control-71.png",
+    "route": "task:browser:completed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||股市任务||0",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1280-task_browser_completed-control-71.png",
+    "route": "task:browser:completed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||今日能量||0",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1280-task_browser_completed-control-71.png",
+    "route": "task:browser:completed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||视频任务||0",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1280-task_browser_completed-control-71.png",
+    "route": "task:browser:completed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||图片任务||0",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1280-task_browser_completed-control-71.png",
+    "route": "task:browser:completed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||规划任务||0",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1280-task_browser_completed-control-71.png",
+    "route": "task:browser:completed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||文件库||0",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1280-task_browser_completed-control-71.png",
+    "route": "task:browser:completed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||项目||0",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1280-task_browser_completed-control-71.png",
+    "route": "task:browser:completed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||管理后台||0",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1280-task_browser_completed-control-71.png",
+    "route": "task:browser:completed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 1006,
+      "y": 8.5,
+      "width": 127.03125,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1280-task_browser_completed-control-71.png",
+    "route": "task:browser:completed",
+    "width": 1280
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.02478759765625",
+    "screenshot": "artifacts/1280-task_browser_completed-diff.png",
+    "route": "task:browser:completed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||新任务||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1280-task_browser_failed-control-75.png",
+    "route": "task:browser:failed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||搜索任务 ⌘K||0",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1280-task_browser_failed-control-75.png",
+    "route": "task:browser:failed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||技能||0",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1280-task_browser_failed-control-75.png",
+    "route": "task:browser:failed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||股市任务||0",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1280-task_browser_failed-control-75.png",
+    "route": "task:browser:failed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||今日能量||0",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1280-task_browser_failed-control-75.png",
+    "route": "task:browser:failed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||视频任务||0",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1280-task_browser_failed-control-75.png",
+    "route": "task:browser:failed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||图片任务||0",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1280-task_browser_failed-control-75.png",
+    "route": "task:browser:failed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||规划任务||0",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1280-task_browser_failed-control-75.png",
+    "route": "task:browser:failed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||文件库||0",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1280-task_browser_failed-control-75.png",
+    "route": "task:browser:failed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||项目||0",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1280-task_browser_failed-control-75.png",
+    "route": "task:browser:failed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||管理后台||0",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1280-task_browser_failed-control-75.png",
+    "route": "task:browser:failed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 1006,
+      "y": 8.5,
+      "width": 127.03125,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1280-task_browser_failed-control-75.png",
+    "route": "task:browser:failed",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-control-67.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||1",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-control-67.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||2",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-control-67.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||3",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-control-67.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||4",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-control-67.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||5",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-control-67.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||6",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-control-67.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||7",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-control-67.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||8",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-control-67.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||9",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-control-67.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||10",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-control-67.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 1006,
+      "y": 8.5,
+      "width": 173,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-control-67.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.06541666666666666",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-diff.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||新任务||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1280-task_browser_cancelled-control-74.png",
+    "route": "task:browser:cancelled",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||搜索任务 ⌘K||0",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1280-task_browser_cancelled-control-74.png",
+    "route": "task:browser:cancelled",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||技能||0",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1280-task_browser_cancelled-control-74.png",
+    "route": "task:browser:cancelled",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||股市任务||0",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1280-task_browser_cancelled-control-74.png",
+    "route": "task:browser:cancelled",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||今日能量||0",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1280-task_browser_cancelled-control-74.png",
+    "route": "task:browser:cancelled",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||视频任务||0",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1280-task_browser_cancelled-control-74.png",
+    "route": "task:browser:cancelled",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||图片任务||0",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1280-task_browser_cancelled-control-74.png",
+    "route": "task:browser:cancelled",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||规划任务||0",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1280-task_browser_cancelled-control-74.png",
+    "route": "task:browser:cancelled",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||文件库||0",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1280-task_browser_cancelled-control-74.png",
+    "route": "task:browser:cancelled",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||项目||0",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1280-task_browser_cancelled-control-74.png",
+    "route": "task:browser:cancelled",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||管理后台||0",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1280-task_browser_cancelled-control-74.png",
+    "route": "task:browser:cancelled",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 1006,
+      "y": 8.5,
+      "width": 127.03125,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1280-task_browser_cancelled-control-74.png",
+    "route": "task:browser:cancelled",
+    "width": 1280
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.0197998046875",
+    "screenshot": "artifacts/1280-task_scrape_completed-diff.png",
+    "route": "task:scrape:completed",
+    "width": 1280
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.015249837239583333",
+    "screenshot": "artifacts/1280-task_image_completed-diff.png",
+    "route": "task:image:completed",
+    "width": 1280
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "手机登录",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/login",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_login.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "密码登录",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/register",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_register.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.20366048177083335",
+    "screenshot": "artifacts/1280-_cosmic-preview-diff.png",
+    "route": "/cosmic-preview",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||新任务||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/app",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||搜索任务 ⌘K||0",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/app",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||技能||0",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/app",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||股市任务||0",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/app",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||今日能量||0",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/app",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||视频任务||0",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/app",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||图片任务||0",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/app",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||规划任务||0",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/app",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||文件库||0",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/app",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||项目||0",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/app",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||管理后台||0",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/app",
+    "width": 1280
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "全部",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/tasks",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_tasks.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "近 30 天",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/tasks",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_tasks.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/schedule",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_schedule.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不提醒",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/schedule",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_schedule.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/calendar",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_calendar.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不提醒",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/calendar",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_calendar.png"
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/appearance",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_settings_appearance.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/appearance",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_settings_appearance.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.04567626953125",
+    "screenshot": "artifacts/1280-_settings_appearance-diff.png",
+    "route": "/settings/appearance",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/api-keys",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_settings_api-keys.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/api-keys",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_settings_api-keys.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.053619791666666666",
+    "screenshot": "artifacts/1280-_settings_api-keys-diff.png",
+    "route": "/settings/api-keys",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/memory",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_settings_memory.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/memory",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_settings_memory.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.06348714192708334",
+    "screenshot": "artifacts/1280-_settings_memory-diff.png",
+    "route": "/settings/memory",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/notifications",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_settings_notifications.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/notifications",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_settings_notifications.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.012263997395833334",
+    "screenshot": "artifacts/1280-_settings_notifications-diff.png",
+    "route": "/settings/notifications",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/account",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_settings_account.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/account",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_settings_account.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.011953125",
+    "screenshot": "artifacts/1280-_settings_account-diff.png",
+    "route": "/settings/account",
+    "width": 1280
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "营收明细",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/admin/finance",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_admin_finance.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "全部",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/admin/learning",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_admin_learning.png"
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||新任务||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||搜索任务 ⌘K||0",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||技能||0",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||股市任务||0",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||今日能量||0",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||视频任务||0",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||图片任务||0",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||规划任务||0",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||文件库||0",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||项目||0",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||管理后台||0",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1280-_app-control-51.png",
+    "route": "/",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_settings.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_settings.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "按月",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/plan",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_plan.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.17536214192708333",
+    "screenshot": "artifacts/1280-_cosmic-diff.png",
+    "route": "/cosmic",
+    "width": 1280
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "全部",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/history",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_history.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "近 30 天",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/history",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_history.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.060077311197916664",
+    "screenshot": "artifacts/1280-_stocks-diff.png",
+    "route": "/stocks",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "已加载 2 个文件",
+    "route": "/files",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_files.png"
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||生活方式||0",
+    "box": {
+      "x": 564,
+      "y": 340.78125,
+      "width": 216,
+      "height": 150
+    },
+    "route": "/video",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_video.png"
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "告诉 HOLA DAY 你的重点",
+    "route": "/video",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_video.png"
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||产品短片||0",
+    "box": {
+      "x": 334,
+      "y": 340.78125,
+      "width": 216,
+      "height": 150
+    },
+    "observedUrl": "http://127.0.0.1:53284/video",
+    "screenshot": "artifacts/1280-_video-control-80.png",
+    "route": "/video",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||光影氛围||0",
+    "box": {
+      "x": 794,
+      "y": 340.78125,
+      "width": 216,
+      "height": 150
+    },
+    "observedUrl": "http://127.0.0.1:53284/video",
+    "screenshot": "artifacts/1280-_video-control-106.png",
+    "route": "/video",
+    "width": 1280
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "氛围风格基调",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/video",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_video.png"
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||自然光影||0",
+    "box": {
+      "x": 1024,
+      "y": 319.1875,
+      "width": 216,
+      "height": 150
+    },
+    "observedUrl": "http://127.0.0.1:53284/image",
+    "screenshot": "artifacts/1280-_image-control-41.png",
+    "route": "/image",
+    "width": 1280
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||商品棚拍||0",
+    "box": {
+      "x": 794,
+      "y": 319.1875,
+      "width": 216,
+      "height": 150
+    },
+    "observedUrl": "http://127.0.0.1:53284/image",
+    "screenshot": "artifacts/1280-_image-control-70.png",
+    "route": "/image",
+    "width": 1280
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.0325244140625",
+    "screenshot": "artifacts/1280-_image-diff.png",
+    "route": "/image",
+    "width": 1280
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "9 每日测试计划 18:00 重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/planned",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_planned.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/planned/legacy-scheduled",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_planned_legacy-scheduled.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不提醒",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/planned/legacy-scheduled",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_planned_legacy-scheduled.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/scheduled",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_scheduled.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不提醒",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/scheduled",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_scheduled.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "9 每日测试计划 18:00 重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/batch",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_batch.png"
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||新任务||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1024-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||搜索任务 ⌘K||0",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1024-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||技能||0",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1024-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||股市任务||0",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1024-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||今日能量||0",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1024-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||视频任务||0",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1024-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||图片任务||0",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1024-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||规划任务||0",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1024-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||文件库||0",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1024-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||项目||0",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1024-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||管理后台||0",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1024-task_generate_executing-control-33.png",
+    "route": "task:generate:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||UI generate awaiting_us…||0",
+    "box": {
+      "x": 81,
+      "y": 843,
+      "width": 153,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_generate_executing",
+    "screenshot": "artifacts/1024-task_generate_executing-control-58.png",
+    "route": "task:generate:executing",
+    "width": 1024
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "手机登录",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "task:generate:executing",
+    "width": 1024,
+    "screenshot": "artifacts/1024-task_generate_executing.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.018646240234375",
+    "screenshot": "artifacts/1024-task_generate_completed-diff.png",
+    "route": "task:generate:completed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1024-task_browser_executing-control-86.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||1",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1024-task_browser_executing-control-86.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||2",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1024-task_browser_executing-control-86.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||3",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1024-task_browser_executing-control-86.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||4",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1024-task_browser_executing-control-86.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||5",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1024-task_browser_executing-control-86.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||6",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1024-task_browser_executing-control-86.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||7",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1024-task_browser_executing-control-86.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||8",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1024-task_browser_executing-control-86.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||9",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1024-task_browser_executing-control-86.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||10",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1024-task_browser_executing-control-86.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 844,
+      "y": 8.5,
+      "width": 39,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_executing",
+    "screenshot": "artifacts/1024-task_browser_executing-control-86.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.052851359049479164",
+    "screenshot": "artifacts/1024-task_browser_executing-diff.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||新任务||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1024-task_browser_completed-control-69.png",
+    "route": "task:browser:completed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||搜索任务 ⌘K||0",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1024-task_browser_completed-control-69.png",
+    "route": "task:browser:completed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||技能||0",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1024-task_browser_completed-control-69.png",
+    "route": "task:browser:completed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||股市任务||0",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1024-task_browser_completed-control-69.png",
+    "route": "task:browser:completed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||今日能量||0",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1024-task_browser_completed-control-69.png",
+    "route": "task:browser:completed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||视频任务||0",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1024-task_browser_completed-control-69.png",
+    "route": "task:browser:completed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||图片任务||0",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1024-task_browser_completed-control-69.png",
+    "route": "task:browser:completed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||规划任务||0",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1024-task_browser_completed-control-69.png",
+    "route": "task:browser:completed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||文件库||0",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1024-task_browser_completed-control-69.png",
+    "route": "task:browser:completed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||项目||0",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1024-task_browser_completed-control-69.png",
+    "route": "task:browser:completed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||管理后台||0",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1024-task_browser_completed-control-69.png",
+    "route": "task:browser:completed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 844,
+      "y": 8.5,
+      "width": 79,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_completed",
+    "screenshot": "artifacts/1024-task_browser_completed-control-69.png",
+    "route": "task:browser:completed",
+    "width": 1024
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.0302276611328125",
+    "screenshot": "artifacts/1024-task_browser_completed-diff.png",
+    "route": "task:browser:completed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||新任务||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1024-task_browser_failed-control-73.png",
+    "route": "task:browser:failed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||搜索任务 ⌘K||0",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1024-task_browser_failed-control-73.png",
+    "route": "task:browser:failed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||技能||0",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1024-task_browser_failed-control-73.png",
+    "route": "task:browser:failed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||股市任务||0",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1024-task_browser_failed-control-73.png",
+    "route": "task:browser:failed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||今日能量||0",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1024-task_browser_failed-control-73.png",
+    "route": "task:browser:failed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||视频任务||0",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1024-task_browser_failed-control-73.png",
+    "route": "task:browser:failed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||图片任务||0",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1024-task_browser_failed-control-73.png",
+    "route": "task:browser:failed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||规划任务||0",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1024-task_browser_failed-control-73.png",
+    "route": "task:browser:failed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||文件库||0",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1024-task_browser_failed-control-73.png",
+    "route": "task:browser:failed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||项目||0",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1024-task_browser_failed-control-73.png",
+    "route": "task:browser:failed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||管理后台||0",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1024-task_browser_failed-control-73.png",
+    "route": "task:browser:failed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 844,
+      "y": 8.5,
+      "width": 79,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_failed",
+    "screenshot": "artifacts/1024-task_browser_failed-control-73.png",
+    "route": "task:browser:failed",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-control-65.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||1",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-control-65.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||2",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-control-65.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||3",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-control-65.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||4",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-control-65.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||5",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-control-65.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||6",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-control-65.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||7",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-control-65.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||8",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-control-65.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||9",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-control-65.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||BUTTON||10",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-control-65.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 844,
+      "y": 8.5,
+      "width": 79,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_awaiting_user",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-control-65.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.05185546875",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-diff.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||新任务||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1024-task_browser_cancelled-control-72.png",
+    "route": "task:browser:cancelled",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||搜索任务 ⌘K||0",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1024-task_browser_cancelled-control-72.png",
+    "route": "task:browser:cancelled",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||技能||0",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1024-task_browser_cancelled-control-72.png",
+    "route": "task:browser:cancelled",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||股市任务||0",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1024-task_browser_cancelled-control-72.png",
+    "route": "task:browser:cancelled",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||今日能量||0",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1024-task_browser_cancelled-control-72.png",
+    "route": "task:browser:cancelled",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||视频任务||0",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1024-task_browser_cancelled-control-72.png",
+    "route": "task:browser:cancelled",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||图片任务||0",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1024-task_browser_cancelled-control-72.png",
+    "route": "task:browser:cancelled",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||规划任务||0",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1024-task_browser_cancelled-control-72.png",
+    "route": "task:browser:cancelled",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||文件库||0",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1024-task_browser_cancelled-control-72.png",
+    "route": "task:browser:cancelled",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||项目||0",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1024-task_browser_cancelled-control-72.png",
+    "route": "task:browser:cancelled",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||管理后台||0",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1024-task_browser_cancelled-control-72.png",
+    "route": "task:browser:cancelled",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "INPUT||浏览器地址栏 (Enter 跳转, Esc 还原)||0",
+    "box": {
+      "x": 844,
+      "y": 8.5,
+      "width": 79,
+      "height": 30
+    },
+    "observedUrl": "http://127.0.0.1:53284/?task=tsk_ui_browser_cancelled",
+    "screenshot": "artifacts/1024-task_browser_cancelled-control-72.png",
+    "route": "task:browser:cancelled",
+    "width": 1024
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.024312337239583332",
+    "screenshot": "artifacts/1024-task_scrape_completed-diff.png",
+    "route": "task:scrape:completed",
+    "width": 1024
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.018810017903645834",
+    "screenshot": "artifacts/1024-task_image_completed-diff.png",
+    "route": "task:image:completed",
+    "width": 1024
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "手机登录",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/login",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_login.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "密码登录",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/register",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_register.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.23868306477864584",
+    "screenshot": "artifacts/1024-_cosmic-preview-diff.png",
+    "route": "/cosmic-preview",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||新任务||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/app",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||搜索任务 ⌘K||0",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/app",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||技能||0",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/app",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||股市任务||0",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/app",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||今日能量||0",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/app",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||视频任务||0",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/app",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||图片任务||0",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/app",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||规划任务||0",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/app",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||文件库||0",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/app",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||项目||0",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/app",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||管理后台||0",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/app",
+    "width": 1024
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "全部",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/tasks",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_tasks.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "近 30 天",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/tasks",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_tasks.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/schedule",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_schedule.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不提醒",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/schedule",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_schedule.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/calendar",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_calendar.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不提醒",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/calendar",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_calendar.png"
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/appearance",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_settings_appearance.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/appearance",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_settings_appearance.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.0535247802734375",
+    "screenshot": "artifacts/1024-_settings_appearance-diff.png",
+    "route": "/settings/appearance",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/api-keys",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_settings_api-keys.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/api-keys",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_settings_api-keys.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.06251220703125",
+    "screenshot": "artifacts/1024-_settings_api-keys-diff.png",
+    "route": "/settings/api-keys",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/memory",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_settings_memory.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/memory",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_settings_memory.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.07379862467447916",
+    "screenshot": "artifacts/1024-_settings_memory-diff.png",
+    "route": "/settings/memory",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/notifications",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_settings_notifications.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/notifications",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_settings_notifications.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.015803019205729168",
+    "screenshot": "artifacts/1024-_settings_notifications-diff.png",
+    "route": "/settings/notifications",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings/account",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_settings_account.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings/account",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_settings_account.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.015360514322916666",
+    "screenshot": "artifacts/1024-_settings_account-diff.png",
+    "route": "/settings/account",
+    "width": 1024
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "营收明细",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/admin/finance",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_admin_finance.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "全部",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/admin/learning",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_admin_learning.png"
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||新任务||0",
+    "box": {
+      "x": 25,
+      "y": 83,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||搜索任务 ⌘K||0",
+    "box": {
+      "x": 25,
+      "y": 129,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||技能||0",
+    "box": {
+      "x": 25,
+      "y": 179,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||股市任务||0",
+    "box": {
+      "x": 25,
+      "y": 211,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||今日能量||0",
+    "box": {
+      "x": 25,
+      "y": 243,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||视频任务||0",
+    "box": {
+      "x": 25,
+      "y": 275,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||图片任务||0",
+    "box": {
+      "x": 25,
+      "y": 307,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||规划任务||0",
+    "box": {
+      "x": 25,
+      "y": 339,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||文件库||0",
+    "box": {
+      "x": 25,
+      "y": 371,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||项目||0",
+    "box": {
+      "x": 25,
+      "y": 403,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||管理后台||0",
+    "box": {
+      "x": 25,
+      "y": 435,
+      "width": 32,
+      "height": 32
+    },
+    "observedUrl": "http://127.0.0.1:53284/",
+    "screenshot": "artifacts/1024-_app-control-51.png",
+    "route": "/",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "搜索 AI 记忆",
+    "route": "/settings",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_settings.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "企业微信 qyapi.weixin.qq.com",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/settings",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_settings.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "按月",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/plan",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_plan.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.1941497802734375",
+    "screenshot": "artifacts/1024-_cosmic-diff.png",
+    "route": "/cosmic",
+    "width": 1024
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "全部",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/history",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_history.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "近 30 天",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/history",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_history.png"
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.06441650390625",
+    "screenshot": "artifacts/1024-_stocks-diff.png",
+    "route": "/stocks",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "已加载 2 个文件",
+    "route": "/files",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_files.png"
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||生活方式||0",
+    "box": {
+      "x": 500,
+      "y": 332.390625,
+      "width": 152,
+      "height": 135
+    },
+    "route": "/video",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_video.png"
+  },
+  {
+    "rule": "unexplained-text-truncation",
+    "severity": "P2",
+    "detail": "告诉 HOLA DAY 你的重点",
+    "route": "/video",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_video.png"
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||光影氛围||0",
+    "box": {
+      "x": 666,
+      "y": 332.390625,
+      "width": 152,
+      "height": 135
+    },
+    "observedUrl": "http://127.0.0.1:53284/video",
+    "screenshot": "artifacts/1024-_video-control-106.png",
+    "route": "/video",
+    "width": 1024
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||细节特写||0",
+    "box": {
+      "x": 832,
+      "y": 332.390625,
+      "width": 152,
+      "height": 135
+    },
+    "observedUrl": "http://127.0.0.1:53284/video",
+    "screenshot": "artifacts/1024-_video-control-90.png",
+    "route": "/video",
+    "width": 1024
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "氛围风格基调",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/video",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_video.png"
+  },
+  {
+    "rule": "unexplained-truncation",
+    "severity": "P2",
+    "control": "BUTTON||自然光影||0",
+    "box": {
+      "x": 832,
+      "y": 310.796875,
+      "width": 152,
+      "height": 135
+    },
+    "observedUrl": "http://127.0.0.1:53284/image",
+    "screenshot": "artifacts/1024-_image-control-70.png",
+    "route": "/image",
+    "width": 1024
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.034856160481770836",
+    "screenshot": "artifacts/1024-_image-diff.png",
+    "route": "/image",
+    "width": 1024
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "9 每日测试计划 18:00 重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/planned",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_planned.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/planned/legacy-scheduled",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_planned_legacy-scheduled.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不提醒",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/planned/legacy-scheduled",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_planned_legacy-scheduled.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/scheduled",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_scheduled.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "不提醒",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/scheduled",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_scheduled.png"
+  },
+  {
+    "rule": "selected-tab-semantics",
+    "severity": "P2",
+    "control": "9 每日测试计划 18:00 重复",
+    "detail": "Selected choice is styled as active but lacks aria-selected/aria-pressed",
+    "route": "/batch",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_batch.png"
+  }
+]

@@ -132,6 +132,7 @@ describe('stock task context validation', () => {
       select: () => ({
         from: () => ({
           where: () => ({
+            limit: async () => [],
             orderBy: () => ({ limit: async () => [] }),
           }),
         }),
@@ -162,6 +163,7 @@ describe('stock task context validation', () => {
       select: () => ({
         from: () => ({
           where: () => ({
+            limit: async () => [],
             orderBy: () => ({ limit: async () => [{ snapshotJson: SNAPSHOT }] }),
           }),
         }),

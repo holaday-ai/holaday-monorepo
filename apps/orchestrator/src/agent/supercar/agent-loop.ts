@@ -1,3 +1,4 @@
+import { modelProviderFailureMessage } from '../../llm/provider-error-diagnostics.js';
 /**
  * Supercar agent loop.
  *
@@ -30,36 +31,24 @@
  * pause — the PlaywrightExecutor's pinned page stays where it was.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import { createHash } from 'node:crypto';
-import type { BrowserControl } from './browser-control.js';
-import {
-  type AntiBotSignal,
-  describeSignal,
-  detectAntiBot,
-} from '../vision-loop/anti-bot-detector.js';
-import { redactTypedValue } from '../../playbook/action-capture-redaction.js';
-import type {
-  PageLike,
-  PlaywrightExecutor,
-  TargetDescriptor,
-} from '../vision-loop/playwright-executor.js';
+import Anthropic from '@anthropic-ai/sdk';
+import { env as appEnv } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 import {
   buildCreateFileToolDescription,
   buildFileFormatGuidance,
   buildUnavailableFormatDirective,
 } from '../../files/writers.js';
-import type { DomainName } from '../vision-loop/domain/classifier.js';
-import type { LlmCallRecorder } from '../llm-call-recorder.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { MessagesAdapterError } from '../../llm/messages-adapter.js';
-import { createBrowserMessage, type BrowserModelResponse } from './browser-messages.js';
-import { toBrowserPixels } from './browser-coordinates.js';
-import { recordedBrowserAdapter } from './recorded-browser-adapter.js';
-import type { ApifyAdapter } from './adapters/apify.js';
-import type { ZapierAdapter } from './adapters/zapier.js';
+import { redactTypedValue } from '../../playbook/action-capture-redaction.js';
+// Layer C — pure matcher for the gated transaction-FORM-FIELD signal (explorer login-mode only).
+import { extractTxFieldSignal } from '../../playbook/explorer/explorer-guards.js';
+import { detectBlankPage } from '../blank-page-detector.js';
+import { defaultBrowserNetworkPolicy } from '../browser-network-policy.js';
 import { translateError } from '../error-translator.js';
+import type { LlmCallRecorder } from '../llm-call-recorder.js';
 import {
   buildAuthParkQuestion,
   detectCaptchaPage,
@@ -67,27 +56,39 @@ import {
   detectLoginUrl,
   detectPermissionWall,
 } from '../login-detector.js';
-import {
-  applySiteConfigPostNavigation,
-  matchSiteConfig,
-} from '../site-configs/index.js';
-import { detectBlankPage } from '../blank-page-detector.js';
 import { translateNavError } from '../nav-error-translator.js';
+import { applySiteConfigPostNavigation, matchSiteConfig } from '../site-configs/index.js';
 import { classifyTaskType, filterTools } from '../tool-registry.js';
-// Layer C — pure matcher for the gated transaction-FORM-FIELD signal (explorer login-mode only).
-import { extractTxFieldSignal } from '../../playbook/explorer/explorer-guards.js';
 import {
+  type AntiBotSignal,
+  describeSignal,
+  detectAntiBot,
+} from '../vision-loop/anti-bot-detector.js';
+import type { DomainName } from '../vision-loop/domain/classifier.js';
+import type {
+  PageLike,
+  PlaywrightExecutor,
+  TargetDescriptor,
+} from '../vision-loop/playwright-executor.js';
+import type { ApifyAdapter } from './adapters/apify.js';
+import type { ZapierAdapter } from './adapters/zapier.js';
+import type { BrowserControl } from './browser-control.js';
+import { toBrowserPixels } from './browser-coordinates.js';
+import { type BrowserModelResponse, createBrowserMessage } from './browser-messages.js';
+import { buildCtripFlightHint, isCtripFlightResultsUrl } from './ctrip-flight-extractor.js';
+import {
+  type Effort,
+  type ExpertMode,
   classifyRole,
   getTaskBudget,
   selectModelAndEffort,
-  type Effort,
-  type ExpertMode,
 } from './prompt-layers.js';
+import { recordedBrowserAdapter } from './recorded-browser-adapter.js';
+import {
+  classifyError as classifyToolError,
+  extractDomain as extractDomainStat,
+} from './stats-service.js';
 import { buildSupercarSystemPrompt } from './system-prompt.js';
-import { classifyError as classifyToolError, extractDomain as extractDomainStat } from './stats-service.js';
-import { env as appEnv } from '../../config/env.js';
-import { buildCtripFlightHint, isCtripFlightResultsUrl } from './ctrip-flight-extractor.js';
-import { defaultBrowserNetworkPolicy } from '../browser-network-policy.js';
 
 /**
  * Anti-crawl stuck detection thresholds.
@@ -134,9 +135,7 @@ const AWAITING_USER_TIMEOUT_TAKEOVER_MS = 30 * 60 * 1000;
  * to the model.
  */
 export const APIFY_SCRAPE_WEBSITE_ACTOR = 'apify/website-content-crawler';
-export const APIFY_ECOMMERCE_ACTORS: Readonly<
-  Record<'amazon' | 'jd' | 'taobao', string>
-> = {
+export const APIFY_ECOMMERCE_ACTORS: Readonly<Record<'amazon' | 'jd' | 'taobao', string>> = {
   amazon: 'epctex/amazon-search-scraper',
   jd: 'apify/jd-product-scraper',
   taobao: 'dtrungtin/taobao-products-scraper',
@@ -171,24 +170,21 @@ export function formatScrapeWebsiteResult(items: readonly unknown[], requestedUr
   const title = first.title ?? '(untitled)';
   const body = absolutizeMarkdownLinks(first.markdown ?? first.text ?? '', finalUrl);
   const head = `# scrape_website 结果\n来源: ${finalUrl}\n标题: ${title}\n\n---\n\n`;
-  return head + truncateText(body, 30_000) + '\n\n---\n**记得回到浏览器继续完成任务**';
+  return `${head + truncateText(body, 30_000)}\n\n---\n**记得回到浏览器继续完成任务**`;
 }
 
 export function absolutizeMarkdownLinks(markdown: string, baseUrl: string): string {
   if (!markdown || !baseUrl) return markdown;
-  return markdown.replace(
-    /\[([^\]\n]+)\]\(([^)\s]+)\)/g,
-    (raw, label: string, href: string) => {
-      if (/^(?:https?:|mailto:|tel:|#)/i.test(href)) return raw;
-      try {
-        const absolute = new URL(href, baseUrl).toString();
-        if (!/^https?:/i.test(absolute)) return raw;
-        return `[${label}](${absolute})`;
-      } catch {
-        return raw;
-      }
-    },
-  );
+  return markdown.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (raw, label: string, href: string) => {
+    if (/^(?:https?:|mailto:|tel:|#)/i.test(href)) return raw;
+    try {
+      const absolute = new URL(href, baseUrl).toString();
+      if (!/^https?:/i.test(absolute)) return raw;
+      return `[${label}](${absolute})`;
+    } catch {
+      return raw;
+    }
+  });
 }
 
 /**
@@ -212,19 +208,15 @@ export function formatSearchEcommerceResult(
     const price = (r.price ?? r.priceText ?? r.salePrice ?? r.currentPrice ?? '') as
       | string
       | number;
-    const rating = (r.rating ?? r.stars ?? r.averageRating ?? r.score ?? '') as
-      | string
-      | number;
+    const rating = (r.rating ?? r.stars ?? r.averageRating ?? r.score ?? '') as string | number;
     const url = (r.url ?? r.productUrl ?? r.link ?? r.itemUrl ?? '') as string;
     return { name, price, rating, url };
   });
   const head = `# search_ecommerce 结果 (${platform}, query="${query}", ${items.length} items)\n\n`;
   const json = JSON.stringify(normalised, null, 2);
-  return (
-    head +
-    truncateText(json, 28_000) +
-    '\n\n---\n**记得回到浏览器中打开商品页或做对比表，让用户看到执行过程**'
-  );
+  return `${
+    head + truncateText(json, 28_000)
+  }\n\n---\n**记得回到浏览器中打开商品页或做对比表，让用户看到执行过程**`;
 }
 
 export function formatFirecrawlSearchEcommerceResult(
@@ -246,16 +238,17 @@ export function formatFirecrawlSearchEcommerceResult(
     product_links: extractEcommerceProductLinks([res], platform).slice(0, 8),
     snippet: res.markdown.replace(/\s+/g, ' ').slice(0, 500),
   }));
-  const sourceBlock =
-    '## 可引用来源清单（最终答案必须优先引用这里的 URL；不要输出空 url；每行商品尽量使用不同的商品详情链接）\n\n' +
-    '```json\n' +
-    JSON.stringify({ product_link_candidates: productLinkCandidates, source_candidates: sourceCandidates }, null, 2) +
-    '\n```\n\n';
+  const sourceBlock = `## 可引用来源清单（最终答案必须优先引用这里的 URL；不要输出空 url；每行商品尽量使用不同的商品详情链接）\n\n\`\`\`json\n${JSON.stringify(
+    { product_link_candidates: productLinkCandidates, source_candidates: sourceCandidates },
+    null,
+    2,
+  )}\n\`\`\`\n\n`;
   const blocks = limited
     .map((res) => {
-      const md = res.markdown.length > 6_000
-        ? `${res.markdown.slice(0, 5_988)}\n\n…(truncated)`
-        : res.markdown;
+      const md =
+        res.markdown.length > 6_000
+          ? `${res.markdown.slice(0, 5_988)}\n\n…(truncated)`
+          : res.markdown;
       return `## ${res.title ?? res.url}\n来源: ${res.url}\n\n${md}`;
     })
     .join('\n\n---\n\n');
@@ -425,16 +418,7 @@ export function buildAuthWallScraperRescueText(input: {
 }): string {
   const wallLabel = input.kind === 'permission' ? '权限页' : '登录页';
   const urlLine = input.url ? `当前浏览器停在${wallLabel}：${input.url}\n` : '';
-  return (
-    `${urlLine}这是一个公开商品列表/比价查询，不要要求用户登录，也不要停在 awaiting_user。\n\n` +
-    `请立刻改用 \`search_ecommerce\` 获取数据，不要继续用 \`web_search\` 拼结果：\n` +
-    `- 如果用户提到京东或通用中文电商，优先 platform="jd"\n` +
-    `- 如果京东无结果，再试 platform="taobao"\n` +
-    `- query 保留核心商品词，例如 "iPhone 16 128GB"\n` +
-    `- 最终答案必须给出前 5 个结果的名称、价格、可点击链接，并按价格从低到高排序\n` +
-    `- 如果某个平台只返回搜索页，也要引用对应搜索结果页 URL，不要输出空链接\n\n` +
-    `用户原始需求：${input.intent}`
-  );
+  return `${urlLine}这是一个公开商品列表/比价查询，不要要求用户登录，也不要停在 awaiting_user。\n\n请立刻改用 \`search_ecommerce\` 获取数据，不要继续用 \`web_search\` 拼结果：\n- 如果用户提到京东或通用中文电商，优先 platform="jd"\n- 如果京东无结果，再试 platform="taobao"\n- query 保留核心商品词，例如 "iPhone 16 128GB"\n- 最终答案必须给出前 5 个结果的名称、价格、可点击链接，并按价格从低到高排序\n- 如果某个平台只返回搜索页，也要引用对应搜索结果页 URL，不要输出空链接\n\n用户原始需求：${input.intent}`;
 }
 
 export function buildEcommerceAuthWallFallbackSummary(input: {
@@ -445,14 +429,7 @@ export function buildEcommerceAuthWallFallbackSummary(input: {
   const urlLine = input.authWallUrl
     ? `浏览器商品页被登录/权限页拦截：${input.authWallUrl}\n\n`
     : '';
-  return (
-    `我没有继续要求登录，也没有在登录墙里反复重试。\n\n` +
-    urlLine +
-    `下面是后台商品抓取返回的候选结果。只保留能关联到商品详情页或明确来源页的内容；如果可验证商品详情链接不足 5 个，应明确说明不足，不要用搜索页/品类页硬凑。\n\n` +
-    `用户原始需求：${input.intent}\n\n` +
-    `---\n\n` +
-    truncateText(input.searchResultText, 18_000)
-  );
+  return `我没有继续要求登录，也没有在登录墙里反复重试。\n\n${urlLine}下面是后台商品抓取返回的候选结果。只保留能关联到商品详情页或明确来源页的内容；如果可验证商品详情链接不足 5 个，应明确说明不足，不要用搜索页/品类页硬凑。\n\n用户原始需求：${input.intent}\n\n---\n\n${truncateText(input.searchResultText, 18_000)}`;
 }
 
 export function buildStuckNudge(input: StuckNudgeInput): StuckNudgeResult | null {
@@ -469,45 +446,21 @@ export function buildStuckNudge(input: StuckNudgeInput): StuckNudgeResult | null
 }
 
 function buildWarnNudgeText(stuckCount: number): string {
-  return (
-    `提示：页面截图已连续 ${stuckCount} 次未变化，当前操作可能未生效。\n\n` +
-    `先尝试以下浏览器内的方案，不要直接放弃 computer 工具：\n` +
-    `1. **等一下**：wait 3-5 秒后再点击，某些站点首次加载慢\n` +
-    `2. **让用户帮忙**：如果看起来像验证码/滑块，输出"检测到验证码，请在右侧 panel 手动完成"并停住\n` +
-    `3. **换路径**：同站点的 /explore /hot /discover 分类页通常不需要登录\n` +
-    `4. **换备选站点**：携程→飞猪/去哪儿、京东→拼多多、Boss直聘→拉勾\n` +
-    `5. **重置页面**：先 navigate 到 about:blank，再重新访问目标\n` +
-    `6. **最后选项**：切移动版 m.xxx.com（m.jd.com / m.ctrip.com / m.zhipin.com）`
-  );
+  return `提示：页面截图已连续 ${stuckCount} 次未变化，当前操作可能未生效。\n\n先尝试以下浏览器内的方案，不要直接放弃 computer 工具：\n1. **等一下**：wait 3-5 秒后再点击，某些站点首次加载慢\n2. **让用户帮忙**：如果看起来像验证码/滑块，输出"检测到验证码，请在右侧 panel 手动完成"并停住\n3. **换路径**：同站点的 /explore /hot /discover 分类页通常不需要登录\n4. **换备选站点**：携程→飞猪/去哪儿、京东→拼多多、Boss直聘→拉勾\n5. **重置页面**：先 navigate 到 about:blank，再重新访问目标\n6. **最后选项**：切移动版 m.xxx.com（m.jd.com / m.ctrip.com / m.zhipin.com）`;
 }
 
 function buildExitNudgeText(stuckCount: number, hasApifyTools: boolean): string {
-  const head =
-    `系统检测：页面已连续 ${stuckCount} 次无响应（hash 未变），浏览器路径暂时走不通。\n\n`;
+  const head = `系统检测：页面已连续 ${stuckCount} 次无响应（hash 未变），浏览器路径暂时走不通。\n\n`;
   if (hasApifyTools) {
     // Apify-first rescue. The agent already has scrape_website /
     // search_ecommerce in its tool list — most failures here are
     // because the model didn't connect "browser is stuck" to "I have
     // a backend scraper for this." Spell it out explicitly, including
     // the URL the page is currently parked on.
-    return (
-      head +
-      `请按以下顺序处理（不要直接 task_done / 总结放弃）：\n` +
-      `1. **优先调用 \`scrape_website\`**：参数 url 用你刚才尝试访问的目标 URL（即页面停留的当前网址）。后台抓取通常能拿到内容。\n` +
-      `2. **电商类查询**：如果用户问的是商品/比价（amazon / 京东 / 淘宝），改用 \`search_ecommerce\`，platform + query 直接传。\n` +
-      `3. **拿到数据后必须回到浏览器**：打开能展示数据的页面（Google Sheets / 文档），或对照原站做整理。不要把抓到的纯文字当最终回复。\n` +
-      `4. **Apify 也失败时再用 \`web_search\`**：搜索引擎兜底信息，并在最终输出中说明"目标站点暂时无法访问，已通过其他途径获取"。\n\n` +
-      `当前状态：你仍然有 computer + scrape_website + search_ecommerce 三套工具。换一套继续推进，不要放弃任务。`
-    );
+    return `${head}请按以下顺序处理（不要直接 task_done / 总结放弃）：\n1. **优先调用 \`scrape_website\`**：参数 url 用你刚才尝试访问的目标 URL（即页面停留的当前网址）。后台抓取通常能拿到内容。\n2. **电商类查询**：如果用户问的是商品/比价（amazon / 京东 / 淘宝），改用 \`search_ecommerce\`，platform + query 直接传。\n3. **拿到数据后必须回到浏览器**：打开能展示数据的页面（Google Sheets / 文档），或对照原站做整理。不要把抓到的纯文字当最终回复。\n4. **Apify 也失败时再用 \`web_search\`**：搜索引擎兜底信息，并在最终输出中说明"目标站点暂时无法访问，已通过其他途径获取"。\n\n当前状态：你仍然有 computer + scrape_website + search_ecommerce 三套工具。换一套继续推进，不要放弃任务。`;
   }
   // Apify not configured — degrade to the legacy web_search guidance.
-  return (
-    head +
-    `请按以下顺序处理：\n` +
-    `1. 如果你已经获取到足够信息，直接汇总输出（markdown 格式）\n` +
-    `2. 如果信息不足，改用 \`web_search\` 工具搜索同一问题\n` +
-    `3. 在最终输出中明确告知用户：目标网站暂时无法访问，已通过其他途径获取信息`
-  );
+  return `${head}请按以下顺序处理：\n1. 如果你已经获取到足够信息，直接汇总输出（markdown 格式）\n2. 如果信息不足，改用 \`web_search\` 工具搜索同一问题\n3. 在最终输出中明确告知用户：目标网站暂时无法访问，已通过其他途径获取信息`;
 }
 
 /**
@@ -634,6 +587,11 @@ export interface SupercarOutcome {
    * that made users distrust the answer.
    */
   reconciledStepUpdate?: { tickIndex: number; actionSummary: string };
+  /**
+   * BROWSER-AUTOPILOT-3: a completed browser answer with fewer items than the
+   * user asked for. Persisted as partial_success (部分完成), never completed.
+   */
+  partial?: { found: number; wanted: number };
 }
 
 export interface SupercarTickEvent {
@@ -643,6 +601,12 @@ export interface SupercarTickEvent {
     actionSummary: string;
     ok: boolean;
     message?: string;
+    errorCode?: string;
+    errorMessage?: string;
+    blockerEvidence?: import('../browser-tools/browser-completion.js').BrowserBlockerEvidence;
+    effect?: import('../browser-tools/playwright-unified-executor.js').UnifiedToolResult['effect'];
+    /** QWEN-CN-1: a `type` that filled and submitted a search box (a query, not a form). */
+    searchForm?: boolean;
   };
   iteration: number;
   /**
@@ -665,6 +629,8 @@ export type SupercarAwaitingKind =
   | 'browser_action';
 
 export interface SupercarAwaitingUserEvent {
+  /** An in-process captcha handoff owns this browser; do not restart/fallback. */
+  captchaHandoff?: boolean;
   question: string;
   /** When this question was asked. */
   at: Date;
@@ -762,10 +728,35 @@ export interface SupercarEvidenceEvent {
 }
 
 export interface RunSupercarOptions {
+  onBrowserDownload?: (input: { filename: string; buffer: Buffer; sha256: string }) => Promise<
+    import('../browser-tools/playwright-unified-executor.js').BrowserDownloadReceipt
+  >;
+  /** BROWSER_EXECUTOR=unified only: web search (Qwen built-in, Firecrawl fallback). */
+  unifiedWebSearch?: (query: string) => Promise<Array<{ title: string; url: string }>>;
+  /** BROWSER_EXECUTOR=unified only: read-only page text (Firecrawl scrape). */
+  unifiedReadPage?: (url: string) => Promise<{ url: string; title: string; markdown: string }>;
   /** Region-resolved production model. Omission retains the legacy fixture path. */
   messagesAdapter?: MessagesAdapter;
   /** Opt-in until navigation and input channels share the same owner receipt. */
   browserControl?: BrowserControl;
+  captchaWaitMs?: number;
+  captchaPollMs?: number;
+  /**
+   * CAPTCHA-REDUCE-1: true when a search fallback can replace the walled page
+   * (a search API or another engine); such a wall is not handed to the user.
+   */
+  searchWallReplaceable?: (url: string) => boolean;
+  /**
+   * CAPTCHA-REDUCE-1: restore and save this user's persistent browser profile
+   * (anonymous cloud sessions only; off unless the profile store is configured).
+   */
+  persistentProfileUser?: string;
+  /**
+   * OPEN-ANY-SITE-1: a cloud pool browser — a site that walls or refuses this
+   * egress is learned for the user's next launch (never retried now).
+   */
+  learnEgressBlocks?: boolean;
+  onCaptchaHandoffEnd?: (resumed: boolean) => Promise<boolean>;
   browserControlFactory?: () => { control: BrowserControl; finish: () => void };
   /** External task id (task_…). Correlates hooks and WS frames. */
   taskId: string;
@@ -900,6 +891,8 @@ export interface RunSupercarOptions {
    * NULL, so recording is skipped when this is absent even if `recorder` is set.
    */
   userExternalId?: string;
+  /** Owner-resolved rollout snapshot passed through task dispatch. */
+  browserCapabilities?: import('../../config/browser-capabilities.js').BrowserCapabilities;
 
   // --- Phase 6-2: 5-lane router inputs ---
   /**
@@ -983,7 +976,9 @@ export interface RunSupercarOptions {
     filename: string;
     format: string;
     content: string;
-  }) => Promise<{ fileId: string; filename: string; size: number; downloadUrl: string } | { error: string }>;
+  }) => Promise<
+    { fileId: string; filename: string; size: number; downloadUrl: string } | { error: string }
+  >;
 
   /**
    * Phase 3 R3 — `save_page_as_pdf` tool callback. Storage-only:
@@ -998,7 +993,9 @@ export interface RunSupercarOptions {
   onSavePageAsPdf?: (input: {
     filename: string;
     pdfBuffer: Buffer;
-  }) => Promise<{ fileId: string; filename: string; sizeBytes: number; downloadUrl: string } | { error: string }>;
+  }) => Promise<
+    { fileId: string; filename: string; sizeBytes: number; downloadUrl: string } | { error: string }
+  >;
 
   // --- Phase 13 Dim 5/6: cross-task memory + execution stats ---
   /**
@@ -1050,11 +1047,13 @@ export interface RunSupercarOptions {
    * broadcast `server.task.plan_step` so the SPA's PlanCard
    * updates state pills live.
    */
-  onPlanStepUpdate?: (steps: Array<{
-    idx: number;
-    status: 'pending' | 'running' | 'done' | 'failed';
-    note?: string;
-  }>) => void | Promise<void>;
+  onPlanStepUpdate?: (
+    steps: Array<{
+      idx: number;
+      status: 'pending' | 'running' | 'done' | 'failed';
+      note?: string;
+    }>,
+  ) => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1087,6 +1086,58 @@ interface RunHandle {
 }
 
 const handles = new Map<string, RunHandle>();
+
+/** Register a non-cloud browser lane with the existing task reply lifecycle. */
+export function createExternalBrowserPark(options: {
+  taskId: string;
+  intent: string;
+  signal?: AbortSignal;
+  onAwaitingUser?: RunSupercarOptions['onAwaitingUser'];
+  aborted: () => boolean;
+  timeoutMs?: number;
+}) {
+  const handle: RunHandle = {
+    resolveReply: null,
+    abort: () => handle.resolveReply?.('__SUPERCAR_ABORT__'),
+    handoffMessage: null,
+    originalIntent: options.intent,
+    pendingAttachmentBlocks: null,
+  };
+  if (handles.has(options.taskId)) throw new Error('browser_task_already_running');
+  handles.set(options.taskId, handle);
+  const abort = () => handle.abort();
+  options.signal?.addEventListener('abort', abort);
+  return {
+    async park(question: string, awaitingKind: SupercarAwaitingKind): Promise<string | null> {
+      if (options.aborted() || options.signal?.aborted) return null;
+      let resolve!: (text: string) => void;
+      const reply = new Promise<string>((r) => {
+        resolve = r;
+      });
+      handle.resolveReply = resolve;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await options.onAwaitingUser?.({ question, awaitingKind, at: new Date(), currentUrl: '' });
+        if (options.aborted() || options.signal?.aborted) return null;
+        const value = await Promise.race([
+          reply,
+          new Promise<null>((r) => {
+            timer = setTimeout(() => r(null), options.timeoutMs ?? 300_000);
+          }),
+        ]);
+        return value === '__SUPERCAR_ABORT__' ? null : value;
+      } finally {
+        if (timer) clearTimeout(timer);
+        if (handle.resolveReply === resolve) handle.resolveReply = null;
+      }
+    },
+    close() {
+      options.signal?.removeEventListener('abort', abort);
+      handle.abort();
+      if (handles.get(options.taskId) === handle) handles.delete(options.taskId);
+    },
+  };
+}
 
 /**
  * Resume a supercar run that's parked on `onAwaitingUser`. Returns
@@ -1125,7 +1176,7 @@ export function supercarReply(
  */
 export function hasParkedSupercarHandle(taskId: string): boolean {
   const handle = handles.get(taskId);
-  return Boolean(handle && handle.resolveReply);
+  return Boolean(handle?.resolveReply);
 }
 
 /**
@@ -1137,10 +1188,7 @@ export function hasParkedSupercarHandle(taskId: string): boolean {
  * cancelled. Returns true if the handoff was accepted (handle exists +
  * is parked); false if the task isn't currently parked.
  */
-export function supercarHandoffToGenerate(
-  taskId: string,
-  message: string,
-): boolean {
+export function supercarHandoffToGenerate(taskId: string, message: string): boolean {
   const handle = handles.get(taskId);
   if (!handle || !handle.resolveReply) return false;
   handle.handoffMessage = message;
@@ -1308,11 +1356,7 @@ async function runSupercarTaskInternal(
         { taskId: opts.taskId, lane: 'zapier', runId: r.runId ?? null },
         'supercar: triggered Zap via webhook',
       );
-      const lines = [
-        `# 已触发 Zap 工作流`,
-        '',
-        `任务已通过 Zapier 触发，后台异步执行。`,
-      ];
+      const lines = ['# 已触发 Zap 工作流', '', '任务已通过 Zapier 触发，后台异步执行。'];
       if (r.runId) lines.push(`- Run ID: \`${r.runId}\``);
       if (r.statusUrl) lines.push(`- 查看进度：${r.statusUrl}`);
       // P1 — Zapier short-circuit completes the task without ever
@@ -1370,7 +1414,10 @@ async function runSupercarTaskInternal(
   const roleId = opts.roleIdOverride ?? classifyRole(opts.intent);
   const routedRaw = tier1
     ? selectModelAndEffort(opts.intent, roleId)
-    : { model: opts.model ?? process.env.SUPERCAR_MODEL ?? 'claude-sonnet-4-6', effort: 'high' as Effort };
+    : {
+        model: opts.model ?? process.env.SUPERCAR_MODEL ?? 'claude-sonnet-4-6',
+        effort: 'high' as Effort,
+      };
   // Phase 24 RC follow-up — supercar requires Sonnet or Opus.
   // selectModelAndEffort routes simple-search intents to Haiku 4.5 to
   // save cost on the generate path; that's correct for the generate
@@ -1476,8 +1523,10 @@ async function runSupercarTaskInternal(
   const SCREENSHOT_MAX_ATTEMPTS = 3;
   const SCREENSHOT_RETRY_GAP_MS = 2_000;
   let initialShot: Awaited<ReturnType<typeof executor.screenshot>> | null = null;
+  let lastShotError: string | undefined;
   for (let attempt = 1; attempt <= SCREENSHOT_MAX_ATTEMPTS; attempt++) {
     const shot = await executor.screenshot(page);
+    lastShotError = shot.error ?? (shot.base64 ? undefined : 'empty screenshot');
     if (!shot.error && shot.base64) {
       if (attempt > 1) {
         logger.info(
@@ -1509,7 +1558,7 @@ async function runSupercarTaskInternal(
   if (!initialShot || initialShot.error || !initialShot.base64) {
     return {
       status: 'failed',
-      reason: `initial screenshot failed after ${SCREENSHOT_MAX_ATTEMPTS} attempts: ${initialShot?.error ?? 'unknown'}`,
+      reason: `initial screenshot failed after ${SCREENSHOT_MAX_ATTEMPTS} attempts: ${initialShot?.error ?? lastShotError ?? 'unknown'}`,
       iterations: 0,
       toolsUsed: [],
     };
@@ -1594,9 +1643,7 @@ async function runSupercarTaskInternal(
     intentParts.push(opts.playbookContext);
   }
   const intentBlock = intentParts.join('\n\n');
-  const initialContent: ContentBlockParam[] = [
-    { type: 'text', text: intentBlock },
-  ];
+  const initialContent: ContentBlockParam[] = [{ type: 'text', text: intentBlock }];
   if (opts.attachments && opts.attachments.length > 0) {
     initialContent.push(...opts.attachments);
   }
@@ -1660,14 +1707,16 @@ async function runSupercarTaskInternal(
     }
     if (verdict.requiresConfirmation) {
       const question =
-        verdict.question ??
-        '即将执行可能产生外部影响的操作。请明确回复“确认执行”后继续。';
-      const waiting = await waitForUser({
-        question,
-        at: new Date(),
-        currentUrl: action.pageUrl ?? action.url ?? null,
-        awaitingKind: 'browser_action',
-      }, AWAITING_USER_TIMEOUT_TAKEOVER_MS);
+        verdict.question ?? '即将执行可能产生外部影响的操作。请明确回复“确认执行”后继续。';
+      const waiting = await waitForUser(
+        {
+          question,
+          at: new Date(),
+          currentUrl: action.pageUrl ?? action.url ?? null,
+          awaitingKind: 'browser_action',
+        },
+        AWAITING_USER_TIMEOUT_TAKEOVER_MS,
+      );
       const reply = waiting.reply;
       if (reply === '__SUPERCAR_ABORT__' || lifecycle.cancelled) {
         return {
@@ -1685,9 +1734,7 @@ async function runSupercarTaskInternal(
         };
       }
       if (waiting.observation) return { kind: 'skip_pending_action', content: waiting.observation };
-      const { isAffirmativeActionConfirmation } = await import(
-        './runtime-action-policy.js'
-      );
+      const { isAffirmativeActionConfirmation } = await import('./runtime-action-policy.js');
       if (isAffirmativeActionConfirmation(reply)) {
         logger.info(
           { taskId: opts.taskId, iteration, actionKind: action.kind },
@@ -1716,7 +1763,9 @@ async function runSupercarTaskInternal(
   // MD5 of the most recent screenshot we showed Claude. Compared after
   // each computer action's fresh shot — identical bytes means the page
   // didn't react to the action (reset on every real change).
-  let lastScreenshotHash: string | null = createHash('md5').update(initialShot.base64).digest('hex');
+  let lastScreenshotHash: string | null = createHash('md5')
+    .update(initialShot.base64)
+    .digest('hex');
   // Monotonic count of consecutive no-change screenshots. Reset to 0 on
   // any hash change.
   let stuckCount = 0;
@@ -1784,12 +1833,15 @@ async function runSupercarTaskInternal(
     url: string | null,
   ): Promise<SupercarOutcome | AuthWallResume> {
     const question = buildAuthParkQuestion(kind, url);
-    const waiting = await waitForUser({
-      question,
-      at: new Date(),
-      currentUrl: url,
-      awaitingKind: kind,
-    }, AWAITING_USER_TIMEOUT_TAKEOVER_MS);
+    const waiting = await waitForUser(
+      {
+        question,
+        at: new Date(),
+        currentUrl: url,
+        awaitingKind: kind,
+      },
+      AWAITING_USER_TIMEOUT_TAKEOVER_MS,
+    );
     if (lifecycle.cancelled) {
       return {
         status: 'cancelled',
@@ -1851,31 +1903,38 @@ async function runSupercarTaskInternal(
   // browser-operation timeout. The transport must not grant user input until
   // this checkpoint has published a human lease.
   const observeBrowser = async (): Promise<ContentBlockParam[]> => {
-      const currentPage = (await executor.getPage()) as unknown as PageLike;
-      const shot = await executor.screenshot(currentPage);
-      if (shot.error || !shot.base64) throw new Error('browser_control_observation_failed');
-      page = currentPage;
-      displayWidth = shot.viewportWidth ?? displayWidth;
-      displayHeight = shot.viewportHeight ?? displayHeight;
-      lastScreenshotHash = createHash('md5').update(shot.base64).digest('hex');
-      stuckCount = 0;
-      activeAntiBotSignal = null;
-      const observation: ContentBlockParam[] = [
-        { type: 'text', text: `浏览器控制权或窗口尺寸已更新。请根据当前页面重新规划，不要重放更新前的旧动作。当前 URL：${currentPage.url()}` },
-        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: shot.base64 } },
-      ];
-      await safeCall(opts.onScreencast, {
-        iteration, imageBase64: shot.base64, url: currentPage.url(),
-        viewportWidth: shot.viewportWidth ?? displayWidth,
-        viewportHeight: shot.viewportHeight ?? displayHeight,
-      });
-      return observation;
+    const currentPage = (await executor.getPage()) as unknown as PageLike;
+    const shot = await executor.screenshot(currentPage);
+    if (shot.error || !shot.base64) throw new Error('browser_control_observation_failed');
+    page = currentPage;
+    displayWidth = shot.viewportWidth ?? displayWidth;
+    displayHeight = shot.viewportHeight ?? displayHeight;
+    lastScreenshotHash = createHash('md5').update(shot.base64).digest('hex');
+    stuckCount = 0;
+    activeAntiBotSignal = null;
+    const observation: ContentBlockParam[] = [
+      {
+        type: 'text',
+        text: `浏览器控制权或窗口尺寸已更新。请根据当前页面重新规划，不要重放更新前的旧动作。当前 URL：${currentPage.url()}`,
+      },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: shot.base64 } },
+    ];
+    await safeCall(opts.onScreencast, {
+      iteration,
+      imageBase64: shot.base64,
+      url: currentPage.url(),
+      viewportWidth: shot.viewportWidth ?? displayWidth,
+      viewportHeight: shot.viewportHeight ?? displayHeight,
+    });
+    return observation;
   };
   const manualCheckpoint = async (): Promise<ContentBlockParam[] | null> => {
     const control = opts.browserControl;
     if (!control) return null;
     let observation: ContentBlockParam[] | null = null;
-    const receipt = await control.checkpoint(async () => { observation = await observeBrowser(); });
+    const receipt = await control.checkpoint(async () => {
+      observation = await observeBrowser();
+    });
     deadline += receipt.waitedMs;
     return receipt.resumed ? observation : null;
   };
@@ -1885,7 +1944,9 @@ async function runSupercarTaskInternal(
     timeoutMs: number,
   ): Promise<{ reply: string; observation: ContentBlockParam[] | null }> {
     let resolveReply!: (reply: string) => void;
-    const reply = new Promise<string>((resolve) => { resolveReply = resolve; });
+    const reply = new Promise<string>((resolve) => {
+      resolveReply = resolve;
+    });
     handle.resolveReply = resolveReply;
     let timer: NodeJS.Timeout | undefined;
     let observation: ContentBlockParam[] | null = null;
@@ -1893,19 +1954,33 @@ async function runSupercarTaskInternal(
       await safeCall(opts.onAwaitingUser, event);
       if (lifecycle.cancelled) return { reply: '__SUPERCAR_ABORT__', observation };
       if (opts.browserControl) {
-        const receipt = await opts.browserControl.waitForReply(reply, async () => {
-          observation = await observeBrowser();
-        }, timeoutMs);
+        const receipt = await opts.browserControl.waitForReply(
+          reply,
+          async () => {
+            observation = await observeBrowser();
+          },
+          timeoutMs,
+        );
         deadline += receipt.waitedMs;
         return {
-          reply: receipt.reason === 'closed' ? '__SUPERCAR_ABORT__'
-            : receipt.reason === 'timeout' ? '__SUPERCAR_AWAITING_TIMEOUT__' : receipt.value ?? '',
+          reply:
+            receipt.reason === 'closed'
+              ? '__SUPERCAR_ABORT__'
+              : receipt.reason === 'timeout'
+                ? '__SUPERCAR_AWAITING_TIMEOUT__'
+                : (receipt.value ?? ''),
           observation,
         };
       }
-      return { reply: await Promise.race([reply, new Promise<string>((resolve) => {
-        timer = setTimeout(() => resolve('__SUPERCAR_AWAITING_TIMEOUT__'), timeoutMs);
-      })]), observation };
+      return {
+        reply: await Promise.race([
+          reply,
+          new Promise<string>((resolve) => {
+            timer = setTimeout(() => resolve('__SUPERCAR_AWAITING_TIMEOUT__'), timeoutMs);
+          }),
+        ]),
+        observation,
+      };
     } finally {
       if (timer) clearTimeout(timer);
       if (handle.resolveReply === resolveReply) handle.resolveReply = null;
@@ -1941,6 +2016,8 @@ async function runSupercarTaskInternal(
       // SUPERCAR_TIMEOUT_MS deadline only fires between iterations,
       // never during an in-flight await).
       const API_TIMEOUT_MS = 120_000;
+      /** Transport retries per model turn (429/502/503/504) inside the turn deadline. */
+      const BROWSER_MODEL_MAX_RETRIES = 2;
       try {
         // Phase 10 Tier 1 betas: server-side compaction + advisory
         // task budgets. Each is appended only when the master flag is
@@ -1991,166 +2068,171 @@ async function runSupercarTaskInternal(
             },
           ],
           messages,
-          tools: filterTools([
-            {
-              type: 'computer_20251124',
-              name: 'computer',
-              display_width_px: displayWidth,
-              display_height_px: displayHeight,
-              enable_zoom: true,
-            },
-            {
-              type: 'web_search_20260209',
-              name: 'web_search',
-            },
-            // Custom `navigate` tool. The sole way to change the page's
-            // URL in this environment — `page.screenshot()` captures
-            // only the viewport, not the Chrome UI chrome, so Claude
-            // can't see (or click) the address bar. Without this,
-            // every task starts on about:blank and stays there.
-            //
-            // Phase 1-6 "browser" wins were all Claude silently routing
-            // around this missing capability by spawning Python +
-            // Playwright inside the server-side code_execution sandbox.
-            // The computer tool itself never successfully drove a
-            // page.goto. Adding this tool makes the browser path
-            // actually work.
-            {
-              type: 'custom',
-              name: 'navigate',
-              description:
-                '跳转浏览器标签到指定 URL。**本环境不显示地址栏，这是唯一的导航方式** —— 不要尝试用 key "ctrl+l" + type 的组合。返回跳转后的页面截图。',
-              input_schema: {
-                type: 'object',
-                properties: {
-                  url: {
-                    type: 'string',
-                    description: '完整 URL（包含 https://）。示例：https://m.jd.com/search?keyword=airpods',
-                  },
-                },
-                required: ['url'],
+          tools: filterTools(
+            [
+              {
+                type: 'computer_20251124',
+                name: 'computer',
+                display_width_px: displayWidth,
+                display_height_px: displayHeight,
+                enable_zoom: true,
               },
-            },
-            // Phase 10 Tier 3 — create_file. Only injected when the
-            // caller's plan whitelist is non-empty. The format enum is
-            // narrowed per-plan (Basic gets text-shaped formats only;
-            // Pro gets all). Server-side check below also re-validates,
-            // so a model that hallucinates 'xlsx' on Basic still fails
-            // safely instead of producing a paid-tier file.
-            // Phase 3 R3 — save_page_as_pdf. Renders the CURRENT
-            // browser page to PDF via CDP Page.printToPDF (Playwright
-            // exposes this as page.pdf()). 24h downloadable link.
-            // Different from create_file which generates from text;
-            // this captures whatever the user is looking at right
-            // now (post-navigation, post-render).
-            ...(opts.onSavePageAsPdf
-              ? [
-                  {
-                    type: 'custom' as const,
-                    name: 'save_page_as_pdf',
-                    description:
-                      '把当前浏览器页面（你现在看到的这一页）保存为 PDF，返回 24 小时有效的下载链接。**适用场景**：用户明确要求保存当前页为 PDF / 导出报告 / 存档。这工具捕获的是当前 DOM 渲染后的页面，跟 create_file 不一样（那个是从纯文本生成新文档）。',
-                    input_schema: {
-                      type: 'object',
-                      properties: {
-                        filename: {
-                          type: 'string',
-                          description: '可选：自定义文件名（不含路径）。默认 page-<taskId>.pdf。',
-                        },
-                      },
-                      required: [],
+              {
+                type: 'web_search_20260209',
+                name: 'web_search',
+              },
+              // Custom `navigate` tool. The sole way to change the page's
+              // URL in this environment — `page.screenshot()` captures
+              // only the viewport, not the Chrome UI chrome, so Claude
+              // can't see (or click) the address bar. Without this,
+              // every task starts on about:blank and stays there.
+              //
+              // Phase 1-6 "browser" wins were all Claude silently routing
+              // around this missing capability by spawning Python +
+              // Playwright inside the server-side code_execution sandbox.
+              // The computer tool itself never successfully drove a
+              // page.goto. Adding this tool makes the browser path
+              // actually work.
+              {
+                type: 'custom',
+                name: 'navigate',
+                description:
+                  '跳转浏览器标签到指定 URL。**本环境不显示地址栏，这是唯一的导航方式** —— 不要尝试用 key "ctrl+l" + type 的组合。返回跳转后的页面截图。',
+                input_schema: {
+                  type: 'object',
+                  properties: {
+                    url: {
+                      type: 'string',
+                      description:
+                        '完整 URL（包含 https://）。示例：https://m.jd.com/search?keyword=airpods',
                     },
                   },
-                ]
-              : []),
-            ...(opts.createFileFormats && opts.createFileFormats.length > 0
-              ? [
-                  {
-                    type: 'custom' as const,
-                    name: 'create_file',
-                    description: buildCreateFileToolDescription(opts.createFileFormats),
-                    input_schema: {
-                      type: 'object',
-                      properties: {
-                        filename: {
-                          type: 'string',
-                          description: '含扩展名的文件名，例如 sales-report.xlsx',
+                  required: ['url'],
+                },
+              },
+              // Phase 10 Tier 3 — create_file. Only injected when the
+              // caller's plan whitelist is non-empty. The format enum is
+              // narrowed per-plan (Basic gets text-shaped formats only;
+              // Pro gets all). Server-side check below also re-validates,
+              // so a model that hallucinates 'xlsx' on Basic still fails
+              // safely instead of producing a paid-tier file.
+              // Phase 3 R3 — save_page_as_pdf. Renders the CURRENT
+              // browser page to PDF via CDP Page.printToPDF (Playwright
+              // exposes this as page.pdf()). 24h downloadable link.
+              // Different from create_file which generates from text;
+              // this captures whatever the user is looking at right
+              // now (post-navigation, post-render).
+              ...(opts.onSavePageAsPdf
+                ? [
+                    {
+                      type: 'custom' as const,
+                      name: 'save_page_as_pdf',
+                      description:
+                        '把当前浏览器页面（你现在看到的这一页）保存为 PDF，返回 24 小时有效的下载链接。**适用场景**：用户明确要求保存当前页为 PDF / 导出报告 / 存档。这工具捕获的是当前 DOM 渲染后的页面，跟 create_file 不一样（那个是从纯文本生成新文档）。',
+                      input_schema: {
+                        type: 'object',
+                        properties: {
+                          filename: {
+                            type: 'string',
+                            description: '可选：自定义文件名（不含路径）。默认 page-<taskId>.pdf。',
+                          },
                         },
-                        format: {
-                          type: 'string',
-                          enum: [...opts.createFileFormats],
-                          description:
-                            '文件格式。csv/txt/md/json 直接传文本；xlsx 传 JSON（数组的数组、对象数组、或 {sheetName: rows} 字典）；pdf/docx 传纯文本或 Markdown 风格段落；pptx 传 {"slides":[{"title":"...","bullets":["..."]}]}',
-                        },
-                        content: {
-                          type: 'string',
-                          description: '文件内容。结构按 format 描述。',
-                        },
+                        required: [],
                       },
-                      required: ['filename', 'format', 'content'],
                     },
-                  },
-                ]
-              : []),
-            // Phase 23 Step 3 / Phase 24 RC follow-up — escape-hatch
-            // tools backed by Firecrawl (preferred when configured)
-            // OR Apify (fallback). Exposed only when AT LEAST ONE
-            // adapter is wired. The model sees these tools as a
-            // Tier-3 fallback after browser attempts + search
-            // engines fail; the descriptions tell the model to
-            // RETURN to the browser afterwards to present results,
-            // not just emit text.
-            ...(opts.firecrawl || opts.apifyAdapter
-              ? [
-                  {
-                    type: 'custom' as const,
-                    name: 'scrape_website',
-                    description:
-                      '后台抓取网页内容（不经过当前浏览器标签）。**适用场景**：当浏览器无法加载目标网站、被反爬拦截、或加载超时（已经尝试过 navigate + 重试无效）时使用。**关键约束**：拿到数据后，你**必须**回到浏览器继续完成任务的后续步骤——比如打开一个能展示这些数据的页面（Google Sheets 等）、在当前页做对比、或导航到具体链接做进一步操作。**不要**把抓取到的纯文字直接当作最终回复——那会让用户看不到执行过程。返回页面文本（截断到 ~30KB）。',
-                    input_schema: {
-                      type: 'object',
-                      properties: {
-                        url: {
-                          type: 'string',
-                          description: '完整 URL（含 https://）。例：https://www.example.com/article',
+                  ]
+                : []),
+              ...(opts.createFileFormats && opts.createFileFormats.length > 0
+                ? [
+                    {
+                      type: 'custom' as const,
+                      name: 'create_file',
+                      description: buildCreateFileToolDescription(opts.createFileFormats),
+                      input_schema: {
+                        type: 'object',
+                        properties: {
+                          filename: {
+                            type: 'string',
+                            description: '含扩展名的文件名，例如 sales-report.xlsx',
+                          },
+                          format: {
+                            type: 'string',
+                            enum: [...opts.createFileFormats],
+                            description:
+                              '文件格式。csv/txt/md/json 直接传文本；xlsx 传 JSON（数组的数组、对象数组、或 {sheetName: rows} 字典）；pdf/docx 传纯文本或 Markdown 风格段落；pptx 传 {"slides":[{"title":"...","bullets":["..."]}]}',
+                          },
+                          content: {
+                            type: 'string',
+                            description: '文件内容。结构按 format 描述。',
+                          },
                         },
-                        extractionPrompt: {
-                          type: 'string',
-                          description:
-                            '可选：告诉 scraper 重点提取什么（默认抓取主要正文）。例："产品名、价格、评分"',
-                        },
+                        required: ['filename', 'format', 'content'],
                       },
-                      required: ['url'],
                     },
-                  },
-                  {
-                    type: 'custom' as const,
-                    name: 'search_ecommerce',
-                    description:
-                      '搜索主流电商平台的商品（amazon / 京东 / 淘宝），后台调用 platform-specific scraper。**适用场景**：用户要查商品/比价时，浏览器路径被反爬阻止；或者搜索引擎给不出商品级别的结构化数据。**关键约束**：拿到 JSON 列表后，你**必须**回到浏览器中整理和呈现结果——比如打开第一个商品详情页让用户看，或在当前页面做对比表格。返回 { name, price, rating, url } 的 JSON 数组。',
-                    input_schema: {
-                      type: 'object',
-                      properties: {
-                        platform: {
-                          type: 'string',
-                          enum: ['amazon', 'jd', 'taobao'],
-                          description: '电商平台',
+                  ]
+                : []),
+              // Phase 23 Step 3 / Phase 24 RC follow-up — escape-hatch
+              // tools backed by Firecrawl (preferred when configured)
+              // OR Apify (fallback). Exposed only when AT LEAST ONE
+              // adapter is wired. The model sees these tools as a
+              // Tier-3 fallback after browser attempts + search
+              // engines fail; the descriptions tell the model to
+              // RETURN to the browser afterwards to present results,
+              // not just emit text.
+              ...(opts.firecrawl || opts.apifyAdapter
+                ? [
+                    {
+                      type: 'custom' as const,
+                      name: 'scrape_website',
+                      description:
+                        '后台抓取网页内容（不经过当前浏览器标签）。**适用场景**：当浏览器无法加载目标网站、被反爬拦截、或加载超时（已经尝试过 navigate + 重试无效）时使用。**关键约束**：拿到数据后，你**必须**回到浏览器继续完成任务的后续步骤——比如打开一个能展示这些数据的页面（Google Sheets 等）、在当前页做对比、或导航到具体链接做进一步操作。**不要**把抓取到的纯文字直接当作最终回复——那会让用户看不到执行过程。返回页面文本（截断到 ~30KB）。',
+                      input_schema: {
+                        type: 'object',
+                        properties: {
+                          url: {
+                            type: 'string',
+                            description:
+                              '完整 URL（含 https://）。例：https://www.example.com/article',
+                          },
+                          extractionPrompt: {
+                            type: 'string',
+                            description:
+                              '可选：告诉 scraper 重点提取什么（默认抓取主要正文）。例："产品名、价格、评分"',
+                          },
                         },
-                        query: {
-                          type: 'string',
-                          description: '搜索关键词，例如 "mechanical keyboard"',
-                        },
-                        maxResults: {
-                          type: 'number',
-                          description: '最多返回的商品条数。默认 10，上限 30。',
-                        },
+                        required: ['url'],
                       },
-                      required: ['platform', 'query'],
                     },
-                  },
-                ]
-              : []),
-          ], supercarTaskType) as Anthropic.Beta.BetaToolUnion[],
+                    {
+                      type: 'custom' as const,
+                      name: 'search_ecommerce',
+                      description:
+                        '搜索主流电商平台的商品（amazon / 京东 / 淘宝），后台调用 platform-specific scraper。**适用场景**：用户要查商品/比价时，浏览器路径被反爬阻止；或者搜索引擎给不出商品级别的结构化数据。**关键约束**：拿到 JSON 列表后，你**必须**回到浏览器中整理和呈现结果——比如打开第一个商品详情页让用户看，或在当前页面做对比表格。返回 { name, price, rating, url } 的 JSON 数组。',
+                      input_schema: {
+                        type: 'object',
+                        properties: {
+                          platform: {
+                            type: 'string',
+                            enum: ['amazon', 'jd', 'taobao'],
+                            description: '电商平台',
+                          },
+                          query: {
+                            type: 'string',
+                            description: '搜索关键词，例如 "mechanical keyboard"',
+                          },
+                          maxResults: {
+                            type: 'number',
+                            description: '最多返回的商品条数。默认 10，上限 30。',
+                          },
+                        },
+                        required: ['platform', 'query'],
+                      },
+                    },
+                  ]
+                : []),
+            ],
+            supercarTaskType,
+          ) as Anthropic.Beta.BetaToolUnion[],
           betas,
           thinking: { type: 'adaptive' },
           // Phase 10 Tier 1: opt into server-side compaction so long
@@ -2178,26 +2260,40 @@ async function runSupercarTaskInternal(
             userExternalId: opts.userExternalId,
             taskId: opts.taskId,
             iteration,
-            onRecordError: () => logger.error({ taskId: opts.taskId, iteration }, 'supercar: usage persistence failed'),
+            onRecordError: () =>
+              logger.error(
+                { taskId: opts.taskId, iteration },
+                'supercar: usage persistence failed',
+              ),
           });
           response = await createBrowserMessage(recordedAdapter, apiRequest, {
             signal: lifecycle.modelAbort.signal,
             timeoutMs: Math.min(API_TIMEOUT_MS, Math.max(1, deadline - Date.now())),
-            maxRetries: 0,
+            // Model turns have no external side effects (tools run afterwards), so
+            // the shared transport may retry 429/5xx within the same deadline.
+            maxRetries: BROWSER_MODEL_MAX_RETRIES,
           });
         } else {
           if (!client) throw new Error('Legacy browser client unavailable');
           const buildApiCall = () => client.beta.messages.create(apiRequest);
 
           try {
-            response = await callWithTimeout(buildApiCall(), API_TIMEOUT_MS, `iter ${iteration} api`);
+            response = await callWithTimeout(
+              buildApiCall(),
+              API_TIMEOUT_MS,
+              `iter ${iteration} api`,
+            );
           } catch (firstErr) {
             if (!(firstErr instanceof IterationTimeoutError)) throw firstErr;
             logger.warn(
               { taskId: opts.taskId, iteration, apiTimeoutMs: API_TIMEOUT_MS },
               'supercar: api call timed out, retrying once',
             );
-            response = await callWithTimeout(buildApiCall(), API_TIMEOUT_MS, `iter ${iteration} api retry`);
+            response = await callWithTimeout(
+              buildApiCall(),
+              API_TIMEOUT_MS,
+              `iter ${iteration} api retry`,
+            );
           }
         }
       } catch (err) {
@@ -2220,7 +2316,9 @@ async function runSupercarTaskInternal(
           ? '模型响应超时，本次执行已停止；已完成动作不会自动重放。'
           : isTimeout
             ? '请求处理时间过长，正在重试。'
-            : translateError(message, opts.intent);
+            : err instanceof MessagesAdapterError && err.code === 'PROVIDER_ERROR'
+              ? modelProviderFailureMessage(err.status)
+              : translateError(message, opts.intent);
         return {
           status: qwenTimeout ? 'timeout' : 'failed',
           reason: friendly,
@@ -2321,8 +2419,9 @@ async function runSupercarTaskInternal(
       // drops) a synthetic `*_tool_result_error` block right after
       // each orphan — preserving the surrounding order so thinking
       // signatures stay valid.
-      const { patched: assistantContent, orphansFixed } =
-        patchOrphanServerToolUses(response.content);
+      const { patched: assistantContent, orphansFixed } = patchOrphanServerToolUses(
+        response.content,
+      );
       if (orphansFixed.length > 0) {
         logger.warn(
           { taskId: opts.taskId, iteration, orphansFixed },
@@ -2340,9 +2439,7 @@ async function runSupercarTaskInternal(
         let mutated = false;
         for (const block of response.content) {
           if (block.type !== 'text' || !block.text) continue;
-          const matches = block.text.matchAll(
-            /\[STEP\s+(\d+)\s+(done|running|failed|pending)\]/gi,
-          );
+          const matches = block.text.matchAll(/\[STEP\s+(\d+)\s+(done|running|failed|pending)\]/gi);
           for (const m of matches) {
             const oneBased = Number.parseInt(m[1] ?? '0', 10);
             const status = (m[2] ?? '').toLowerCase() as PlanStepLocal['status'];
@@ -2454,9 +2551,7 @@ async function runSupercarTaskInternal(
         try {
           const livePage = (await executor.getPage()) as unknown as {
             title?: () => Promise<string> | string;
-            evaluate?: (
-              fn: () => string,
-            ) => Promise<string> | string;
+            evaluate?: (fn: () => string) => Promise<string> | string;
           };
           const t = livePage?.title?.();
           if (t) preParkTitle = (typeof t === 'string' ? t : await t) ?? null;
@@ -2559,11 +2654,7 @@ async function runSupercarTaskInternal(
           // "登录解锁更多内容", taobao's "亲，请登录"). Only checked when
           // the global login body probe missed AND the site config
           // matched — keeps the false-positive risk low.
-          if (
-            !loginTextHit &&
-            siteConfig?.auth?.loginBodyPhrases &&
-            preParkBodyText
-          ) {
+          if (!loginTextHit && siteConfig?.auth?.loginBodyPhrases && preParkBodyText) {
             const lower = preParkBodyText.toLowerCase();
             for (const phrase of siteConfig.auth.loginBodyPhrases) {
               if (lower.includes(phrase.toLowerCase())) {
@@ -2634,10 +2725,9 @@ async function runSupercarTaskInternal(
           const visibleQuestion = forcedAuthPark
             ? buildAuthParkQuestion(forcedAuthKind!, preParkUrl)
             : stripAwaitingUserMarker(finalText);
-          const parkAwaitingKind: ReturnType<typeof classifyAwaitingKind> =
-            forcedAuthPark
-              ? (forcedAuthKind as ReturnType<typeof classifyAwaitingKind>)
-              : classifyAwaitingKind(visibleQuestion);
+          const parkAwaitingKind: ReturnType<typeof classifyAwaitingKind> = forcedAuthPark
+            ? (forcedAuthKind as ReturnType<typeof classifyAwaitingKind>)
+            : classifyAwaitingKind(visibleQuestion);
           const AWAITING_USER_TIMEOUT_MS =
             parkAwaitingKind === 'clarification'
               ? AWAITING_USER_TIMEOUT_CLARIFICATION_MS
@@ -2650,12 +2740,15 @@ async function runSupercarTaskInternal(
           // <1ms costs nothing but the value can't have changed in
           // between (no I/O between the two checks).
           const currentParkUrl: string | null = preParkUrl;
-          const waiting = await waitForUser({
-            question: visibleQuestion,
-            at: new Date(),
-            currentUrl: currentParkUrl,
-            awaitingKind: parkAwaitingKind,
-          }, AWAITING_USER_TIMEOUT_MS);
+          const waiting = await waitForUser(
+            {
+              question: visibleQuestion,
+              at: new Date(),
+              currentUrl: currentParkUrl,
+              awaitingKind: parkAwaitingKind,
+            },
+            AWAITING_USER_TIMEOUT_MS,
+          );
           const replyOrAbort = waiting.reply;
           if (waiting.observation) messages.push({ role: 'user', content: waiting.observation });
           // F1 — `supercarHandoffToGenerate` set handle.handoffMessage
@@ -2722,11 +2815,7 @@ async function runSupercarTaskInternal(
             );
             convergePlanOnSuccess();
             const preReconcile = stripAwaitingUserMarker(finalText);
-            const reconciled = await reconcileFinalAnswer(
-              preReconcile,
-              executor,
-              opts.taskId,
-            );
+            const reconciled = await reconcileFinalAnswer(preReconcile, executor, opts.taskId);
             const stepUpdate = buildReconciledStepUpdate(
               preReconcile,
               reconciled.summary,
@@ -2753,10 +2842,7 @@ async function runSupercarTaskInternal(
           // uploads inline with the reply text. Clear pending state
           // after consuming so a subsequent text-only reply doesn't
           // accidentally inherit the prior attachments.
-          if (
-            handle.pendingAttachmentBlocks &&
-            handle.pendingAttachmentBlocks.length > 0
-          ) {
+          if (handle.pendingAttachmentBlocks && handle.pendingAttachmentBlocks.length > 0) {
             const blocks = handle.pendingAttachmentBlocks;
             handle.pendingAttachmentBlocks = null;
             messages.push({
@@ -2773,16 +2859,8 @@ async function runSupercarTaskInternal(
         }
         convergePlanOnSuccess();
         const preReconcile = stripAwaitingUserMarker(finalText);
-        const reconciled = await reconcileFinalAnswer(
-          preReconcile,
-          executor,
-          opts.taskId,
-        );
-        const stepUpdate = buildReconciledStepUpdate(
-          preReconcile,
-          reconciled.summary,
-          iteration,
-        );
+        const reconciled = await reconcileFinalAnswer(preReconcile, executor, opts.taskId);
+        const stepUpdate = buildReconciledStepUpdate(preReconcile, reconciled.summary, iteration);
         return {
           status: 'completed',
           summary: reconciled.summary,
@@ -2803,9 +2881,7 @@ async function runSupercarTaskInternal(
       // per action), so Claude doesn't get penalised for emitting
       // multiple parallel tool_uses that all observe the same frame.
       let turnChangedScreenshot = false;
-      const appendTakeoverResumeResult = async (
-        toolUseId: string,
-      ): Promise<void> => {
+      const appendTakeoverResumeResult = async (toolUseId: string): Promise<void> => {
         const resumedPage = (await executor.getPage()) as unknown as PageLike;
         const resumedShot = await executor.screenshot(resumedPage);
         const guidance =
@@ -2859,8 +2935,14 @@ async function runSupercarTaskInternal(
         skipRemainingToolUses = true;
         resumedAfterTakeover = true;
         toolResults.push({
-          type: 'tool_result', tool_use_id: toolUseId,
-          content: [{ type: 'text', text: '用户请求接管，尚未开始的旧动作已取消。请根据交还后的当前页面重新规划。' }],
+          type: 'tool_result',
+          tool_use_id: toolUseId,
+          content: [
+            {
+              type: 'text',
+              text: '用户请求接管，尚未开始的旧动作已取消。请根据交还后的当前页面重新规划。',
+            },
+          ],
         });
       };
       for (const toolUse of toolUseBlocks) {
@@ -2899,7 +2981,9 @@ async function runSupercarTaskInternal(
             toolResults.push({
               type: 'tool_result',
               tool_use_id: toolUse.id,
-              content: [{ type: 'text', text: 'navigate tool_use missing required `url` parameter' }],
+              content: [
+                { type: 'text', text: 'navigate tool_use missing required `url` parameter' },
+              ],
               is_error: true,
             });
             continue;
@@ -3284,10 +3368,7 @@ async function runSupercarTaskInternal(
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            logger.warn(
-              { taskId: opts.taskId, err: msg },
-              'supercar: save_page_as_pdf threw',
-            );
+            logger.warn({ taskId: opts.taskId, err: msg }, 'supercar: save_page_as_pdf threw');
             toolResults.push({
               type: 'tool_result',
               tool_use_id: toolUse.id,
@@ -3301,11 +3382,12 @@ async function runSupercarTaskInternal(
 
         // -------- Custom `create_file` tool (Phase 10 Tier 3) --------
         if (toolUse.name === 'create_file') {
-          const inp = (toolUse.input as {
-            filename?: string;
-            format?: string;
-            content?: string;
-          } | null) ?? {};
+          const inp =
+            (toolUse.input as {
+              filename?: string;
+              format?: string;
+              content?: string;
+            } | null) ?? {};
           const filename = typeof inp.filename === 'string' ? inp.filename.trim() : '';
           const format = typeof inp.format === 'string' ? inp.format.trim() : '';
           const content = typeof inp.content === 'string' ? inp.content : '';
@@ -3343,7 +3425,12 @@ async function runSupercarTaskInternal(
             toolResults.push({
               type: 'tool_result',
               tool_use_id: toolUse.id,
-              content: [{ type: 'text', text: 'create_file: 当前会话未启用文件生成，请把内容直接写在回复里' }],
+              content: [
+                {
+                  type: 'text',
+                  text: 'create_file: 当前会话未启用文件生成，请把内容直接写在回复里',
+                },
+              ],
               is_error: true,
             });
             continue;
@@ -3373,21 +3460,16 @@ async function runSupercarTaskInternal(
               content: [
                 {
                   type: 'text',
-                  text:
-                    `已生成文件 ${result.filename}（${formatBytesAgent(result.size)}）。\n` +
-                    '在最终回复里附上一行（保留代码块）让用户能下载：\n' +
-                    '```holaday-file\n' +
-                    JSON.stringify(
-                      {
-                        fileId: result.fileId,
-                        filename: result.filename,
-                        size: result.size,
-                        downloadUrl: result.downloadUrl,
-                      },
-                      null,
-                      2,
-                    ) +
-                    '\n```',
+                  text: `已生成文件 ${result.filename}（${formatBytesAgent(result.size)}）。\n在最终回复里附上一行（保留代码块）让用户能下载：\n\`\`\`holaday-file\n${JSON.stringify(
+                    {
+                      fileId: result.fileId,
+                      filename: result.filename,
+                      size: result.size,
+                      downloadUrl: result.downloadUrl,
+                    },
+                    null,
+                    2,
+                  )}\n\`\`\``,
                 },
               ],
             });
@@ -3426,10 +3508,11 @@ async function runSupercarTaskInternal(
             });
             continue;
           }
-          const inp = (toolUse.input as {
-            url?: string;
-            extractionPrompt?: string;
-          } | null) ?? {};
+          const inp =
+            (toolUse.input as {
+              url?: string;
+              extractionPrompt?: string;
+            } | null) ?? {};
           const url = typeof inp.url === 'string' ? inp.url.trim() : '';
           if (!url || !/^https?:\/\//i.test(url)) {
             toolResults.push({
@@ -3470,9 +3553,10 @@ async function runSupercarTaskInternal(
               toolsUsed.add('scrape_website');
               const head = `# scrape_website 结果\n来源: ${r.url}${r.title ? ` — ${r.title}` : ''}\n\n---\n\n`;
               const markdown = absolutizeMarkdownLinks(r.markdown, r.url);
-              const body = markdown.length > 30_000
-                ? `${markdown.slice(0, 29_988)}\n\n…(truncated)`
-                : markdown;
+              const body =
+                markdown.length > 30_000
+                  ? `${markdown.slice(0, 29_988)}\n\n…(truncated)`
+                  : markdown;
               const tail = '\n\n---\n**记得回到浏览器中整理 / 呈现这些信息，让用户看到执行过程**';
               toolResults.push({
                 type: 'tool_result',
@@ -3537,11 +3621,12 @@ async function runSupercarTaskInternal(
             });
             continue;
           }
-          const inp = (toolUse.input as {
-            platform?: string;
-            query?: string;
-            maxResults?: number;
-          } | null) ?? {};
+          const inp =
+            (toolUse.input as {
+              platform?: string;
+              query?: string;
+              maxResults?: number;
+            } | null) ?? {};
           const platform = inp.platform as keyof typeof APIFY_ECOMMERCE_ACTORS | undefined;
           const query = typeof inp.query === 'string' ? inp.query.trim() : '';
           const maxResults = Math.min(Math.max(Number(inp.maxResults ?? 10) || 10, 1), 30);
@@ -3589,14 +3674,15 @@ async function runSupercarTaskInternal(
             // model (which is good at reading product cards).
             if (opts.firecrawl) {
               const platformName =
-                platform === 'jd' ? '京东 jd.com' :
-                platform === 'taobao' ? '淘宝 taobao.com' :
-                'amazon.com';
+                platform === 'jd'
+                  ? '京东 jd.com'
+                  : platform === 'taobao'
+                    ? '淘宝 taobao.com'
+                    : 'amazon.com';
               if (await cancellationRequested()) return cancelledOutcome();
-              const r = await opts.firecrawl.search(
-                `${platformName} ${query}`,
-                { limit: maxResults },
-              );
+              const r = await opts.firecrawl.search(`${platformName} ${query}`, {
+                limit: maxResults,
+              });
               if (await cancellationRequested()) return cancelledOutcome();
               if (!r.ok) {
                 toolResults.push({
@@ -3717,9 +3803,7 @@ async function runSupercarTaskInternal(
           toolResults.push({
             type: 'tool_result',
             tool_use_id: toolUse.id,
-            content: [
-              { type: 'text', text: `Unknown tool: ${toolUse.name}` },
-            ],
+            content: [{ type: 'text', text: `Unknown tool: ${toolUse.name}` }],
             is_error: true,
           });
           continue;
@@ -3729,21 +3813,31 @@ async function runSupercarTaskInternal(
         let computerInput = toolUse.input as ComputerActionInput;
         if (opts.messagesAdapter?.metadata.provider === 'alibaba-model-studio') {
           if (
-            (computerInput.coordinate !== undefined || computerInput.start_coordinate !== undefined)
-            && (displayWidth !== modelViewport.width || displayHeight !== modelViewport.height)
+            (computerInput.coordinate !== undefined ||
+              computerInput.start_coordinate !== undefined) &&
+            (displayWidth !== modelViewport.width || displayHeight !== modelViewport.height)
           ) {
             toolResults.push({
-              type: 'tool_result', tool_use_id: toolUse.id,
-              content: [{ type: 'text', text: 'coordinate viewport changed; reobserve before retrying' }],
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [
+                { type: 'text', text: 'coordinate viewport changed; reobserve before retrying' },
+              ],
               is_error: true,
             });
             continue;
           }
-          const converted = toBrowserPixels(computerInput, modelViewport.width, modelViewport.height);
+          const converted = toBrowserPixels(
+            computerInput,
+            modelViewport.width,
+            modelViewport.height,
+          );
           if (!converted.ok) {
             toolResults.push({
-              type: 'tool_result', tool_use_id: toolUse.id,
-              content: [{ type: 'text', text: converted.reason }], is_error: true,
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: converted.reason }],
+              is_error: true,
             });
             continue;
           }
@@ -3893,7 +3987,10 @@ async function runSupercarTaskInternal(
             type: 'tool_result',
             tool_use_id: toolUse.id,
             content: [
-              { type: 'text', text: `screenshot after ${execResult.summary} failed: ${shot.error ?? '?'}` },
+              {
+                type: 'text',
+                text: `screenshot after ${execResult.summary} failed: ${shot.error ?? '?'}`,
+              },
             ],
             is_error: true,
           });
@@ -4003,11 +4100,7 @@ async function runSupercarTaskInternal(
       // per task; on success we fold the dataset into the summary and
       // exit before spending more API turns on a browser that clearly
       // isn't cooperating.
-      if (
-        !apifyAttempted &&
-        stuckCount >= 3 &&
-        opts.apifyAdapter
-      ) {
+      if (!apifyAttempted && stuckCount >= 3 && opts.apifyAdapter) {
         const match = opts.apifyAdapter.findActorForIntent(opts.intent);
         if (match) {
           apifyAttempted = true;
@@ -4022,7 +4115,10 @@ async function runSupercarTaskInternal(
           if ('items' in r && r.items.length > 0) {
             const itemsPreview = r.items
               .slice(0, 10)
-              .map((it, i) => `${i + 1}. \`\`\`json\n${JSON.stringify(it, null, 2).slice(0, 400)}\n\`\`\``)
+              .map(
+                (it, i) =>
+                  `${i + 1}. \`\`\`json\n${JSON.stringify(it, null, 2).slice(0, 400)}\n\`\`\``,
+              )
               .join('\n\n');
             convergePlanOnSuccess();
             return {
@@ -4073,13 +4169,7 @@ async function runSupercarTaskInternal(
               waitTimeoutMs: 60_000,
             });
           }
-          antiBotHintText =
-            `检测到 **${describeSignal(signal)}**（匹配关键词："${signal.rawMatch.slice(0, 40)}"）。\n\n` +
-            `这不是普通的页面未响应——是网站的反爬 / 人机验证机制。处理方式：\n` +
-            `- 如果是**滑动验证 / 拖动滑块**：用户可以在右侧 panel 交互模式下手动完成，然后告诉你继续\n` +
-            `- 如果是 **Cloudflare 质询页**：等 5 秒让它自动放行，或切 m.xxx.com 移动版绕开\n` +
-            `- 如果是**明确的 403 / 访问被拒**：换站点（见移动版备选表）\n` +
-            `- 不要继续点击同一元素——先换路径`;
+          antiBotHintText = `检测到 **${describeSignal(signal)}**（匹配关键词："${signal.rawMatch.slice(0, 40)}"）。\n\n这不是普通的页面未响应——是网站的反爬 / 人机验证机制。处理方式：\n- 如果是**滑动验证 / 拖动滑块**：用户可以在右侧 panel 交互模式下手动完成，然后告诉你继续\n- 如果是 **Cloudflare 质询页**：等 5 秒让它自动放行，或切 m.xxx.com 移动版绕开\n- 如果是**明确的 403 / 访问被拒**：换站点（见移动版备选表）\n- 不要继续点击同一元素——先换路径`;
 
           // Lane 2 escalation: swap the active executor to the headed
           // browser. Real GPU + real fingerprint defeats most of the
@@ -4089,8 +4179,8 @@ async function runSupercarTaskInternal(
           const swapped = await swapToHeadedIfAvailable(`antibot:${signal.type}`);
           if (swapped) {
             antiBotHintText +=
-              `\n\n系统已自动切换到 **headed 浏览器**（Lane 2，真实渲染指纹）。` +
-              `下一个 computer action 会在新浏览器里执行，之前的页面状态已重放到当前 URL。`;
+              '\n\n系统已自动切换到 **headed 浏览器**（Lane 2，真实渲染指纹）。' +
+              '下一个 computer action 会在新浏览器里执行，之前的页面状态已重放到当前 URL。';
           }
         } else if (activeAntiBotSignal && !signal) {
           // Banner cleared on this turn — notify UI.
@@ -4118,7 +4208,11 @@ async function runSupercarTaskInternal(
           const curUrl = typeof cp.url === 'function' ? cp.url() : '';
           if (isCtripFlightResultsUrl(curUrl)) {
             const longText = await readPageText(executor, 16384);
-            ctripFlightHintText = buildCtripFlightHint({ pageText: longText, url: curUrl, topN: 3 });
+            ctripFlightHintText = buildCtripFlightHint({
+              pageText: longText,
+              url: curUrl,
+              topN: 3,
+            });
             if (ctripFlightHintText) {
               ctripFlightHintSent = true;
               logger.info(
@@ -4235,17 +4329,11 @@ async function runSupercarTaskInternal(
       // next turn anyway).
       let plannerReminder: ContentBlockParam[] = [];
       if (planTrackerEnabled && response.stop_reason !== 'end_turn') {
-        const stateLines = currentPlanSteps
-          .map((s) => `${s.idx + 1}. ${s.status}`)
-          .join('\n');
+        const stateLines = currentPlanSteps.map((s) => `${s.idx + 1}. ${s.status}`).join('\n');
         plannerReminder = [
           {
             type: 'text',
-            text:
-              `[plan tracker] 当前执行计划进度：\n${stateLines}\n` +
-              `回复时在 thinking 或正文里插入 \`[STEP N status]\` 标记，N 是 1-based 步骤号，status 是 ` +
-              `\`done\` / \`running\` / \`failed\`。比如刚开始执行第二步就写 \`[STEP 2 running]\`。` +
-              `不需要每步都重复，只在状态变化时打一次。`,
+            text: `[plan tracker] 当前执行计划进度：\n${stateLines}\n回复时在 thinking 或正文里插入 \`[STEP N status]\` 标记，N 是 1-based 步骤号，status 是 \`done\` / \`running\` / \`failed\`。比如刚开始执行第二步就写 \`[STEP 2 running]\`。不需要每步都重复，只在状态变化时打一次。`,
           },
         ];
       }
@@ -4439,7 +4527,9 @@ interface ActionResult {
  * numbers; max 50000 catches absurd values from stale viewport
  * arithmetic without rejecting any plausible 4K screen layout.
  */
-function validateCoordinate(c: unknown): { ok: true; x: number; y: number } | { ok: false; reason: string } {
+function validateCoordinate(
+  c: unknown,
+): { ok: true; x: number; y: number } | { ok: false; reason: string } {
   if (!Array.isArray(c)) return { ok: false, reason: 'not an array' };
   if (c.length !== 2) return { ok: false, reason: `length ${c.length} (expected 2)` };
   const x = c[0];
@@ -4448,7 +4538,7 @@ function validateCoordinate(c: unknown): { ok: true; x: number; y: number } | { 
     return { ok: false, reason: `non-number entries (got ${typeof x},${typeof y})` };
   }
   if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    return { ok: false, reason: `non-finite (NaN/Infinity)` };
+    return { ok: false, reason: 'non-finite (NaN/Infinity)' };
   }
   if (x < 0 || y < 0 || x > 50_000 || y > 50_000) {
     return { ok: false, reason: `out of range (${x},${y})` };
@@ -4491,7 +4581,10 @@ async function executeComputerAction(
         // don't need a new executor method.
         if (input.text) {
           const mod = normaliseModifier(input.text);
-          const anyPage = page as unknown as { keyboard: { down: (k: string) => Promise<void>; up: (k: string) => Promise<void> }; mouse: typeof page.mouse };
+          const anyPage = page as unknown as {
+            keyboard: { down: (k: string) => Promise<void>; up: (k: string) => Promise<void> };
+            mouse: typeof page.mouse;
+          };
           await anyPage.keyboard.down(mod);
           try {
             await anyPage.mouse.click(x, y, { button });
@@ -4563,7 +4656,11 @@ async function executeComputerAction(
       case 'left_mouse_down':
       case 'left_mouse_up': {
         const anyPage = page as unknown as {
-          mouse: { down: () => Promise<void>; up: () => Promise<void>; move: (x: number, y: number) => Promise<void> };
+          mouse: {
+            down: () => Promise<void>;
+            up: () => Promise<void>;
+            move: (x: number, y: number) => Promise<void>;
+          };
         };
         if (input.coordinate !== undefined) {
           const c = validateCoordinate(input.coordinate);
@@ -4578,14 +4675,21 @@ async function executeComputerAction(
       case 'left_click_drag': {
         const start = validateCoordinate(input.start_coordinate);
         if (!start.ok) {
-          return { ok: false, summary: `left_click_drag: invalid start_coordinate (${start.reason})` };
+          return {
+            ok: false,
+            summary: `left_click_drag: invalid start_coordinate (${start.reason})`,
+          };
         }
         const end = validateCoordinate(input.coordinate);
         if (!end.ok) {
           return { ok: false, summary: `left_click_drag: invalid coordinate (${end.reason})` };
         }
         const anyPage = page as unknown as {
-          mouse: { down: () => Promise<void>; up: () => Promise<void>; move: (x: number, y: number) => Promise<void> };
+          mouse: {
+            down: () => Promise<void>;
+            up: () => Promise<void>;
+            move: (x: number, y: number) => Promise<void>;
+          };
         };
         await anyPage.mouse.move(start.x, start.y);
         await anyPage.mouse.down();
@@ -4607,7 +4711,9 @@ async function executeComputerAction(
         if (input.coordinate) await page.mouse.move(input.coordinate[0], input.coordinate[1]);
         // Modifier via `text` (e.g. shift+scroll = horizontal on some sites).
         const mod = input.text ? normaliseModifier(input.text) : null;
-        const anyPage = page as unknown as { keyboard: { down: (k: string) => Promise<void>; up: (k: string) => Promise<void> } };
+        const anyPage = page as unknown as {
+          keyboard: { down: (k: string) => Promise<void>; up: (k: string) => Promise<void> };
+        };
         if (mod) await anyPage.keyboard.down(mod);
         try {
           const r = await executor.scroll(page, dy + dx);
@@ -4690,7 +4796,10 @@ function looksLikePendingQuestion(text: string): boolean {
   // Promoted ABOVE the trailing-? heuristic because takeover prompts
   // rarely end in a question mark.
   if (looksLikeBrowserTakeoverPrompt(trimmed)) return true;
-  const lines = trimmed.split('\n').map((l) => l.trim()).filter(Boolean);
+  const lines = trimmed
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
   const last = lines[lines.length - 1] ?? '';
   if (last.endsWith('？') || last.endsWith('?')) return true;
   if (trimmed.length >= 1500) return false;
@@ -4704,9 +4813,7 @@ function looksLikePendingQuestion(text: string): boolean {
     /\bi\s+(?:need|require|'ll\s+need)\s+(?:the|some|more|additional)\b/i,
   ];
   if (!INTAKE_MARKERS.some((re) => re.test(trimmed))) return false;
-  const listLines = lines.filter(
-    (l) => /^[\-\*•·]\s/.test(l) || /^\d+[\.、)]/u.test(l),
-  ).length;
+  const listLines = lines.filter((l) => /^[\-\*•·]\s/.test(l) || /^\d+[\.、)]/u.test(l)).length;
   if (listLines >= 2) return true;
   // Or: colon-then-list pattern ("请补充：\n1. ...\n2. ...")
   return /[：:]\s*\n\s*(?:[\d\-\*•·]|[一二三四五六七八九十])/u.test(trimmed);
@@ -4759,8 +4866,7 @@ export function looksLikeBrowserTakeoverPrompt(text: string): boolean {
   // Cap at 1500 chars so a long completed report that mentions both
   // by accident isn't tripped.
   if (text.length > 1500) return false;
-  const hasLogin =
-    /登录|登入|扫码|二维码|入口|sign\s*in|log\s*in/i.test(t);
+  const hasLogin = /登录|登入|扫码|二维码|入口|sign\s*in|log\s*in/i.test(t);
   const hasAsk =
     /接管|告诉我|选择|哪个|哪一个|你用|麻烦你|麻烦您|choose|select|take\s+over|please\s+(?:tell|let|specify|provide|share|choose|pick)/i.test(
       t,
@@ -4792,9 +4898,7 @@ function looksLikePastTenseLoginReport(text: string): boolean {
   // "后" / "再" / "之后" / "以后" (future-tense subordinate clause).
   // The lookahead allows incidental whitespace so "登录完成 后告诉我"
   // also gets excluded (defensive against a stray newline).
-  if (
-    /(?:登录|登入|扫码)\s*(?:成功|完成|了)(?!\s*(?:后|再|之后|以后))/u.test(text)
-  ) {
+  if (/(?:登录|登入|扫码)\s*(?:成功|完成|了)(?!\s*(?:后|再|之后|以后))/u.test(text)) {
     return true;
   }
   // "登录过" — past-tense aspectual marker. NOTE: 完 alone is
@@ -4871,12 +4975,7 @@ async function reconcileFinalAnswer(
     );
   }
 
-  const summary = reconcileFinalAnswerText(
-    finalText,
-    observedUrl,
-    observedTitle,
-    taskId,
-  );
+  const summary = reconcileFinalAnswerText(finalText, observedUrl, observedTitle, taskId);
   return { summary, observedUrl, observedTitle };
 }
 
@@ -4952,9 +5051,7 @@ export function reconcileFinalAnswerText(
   }
 
   const safeTitle =
-    observedTitle && observedTitle.trim().length > 0
-      ? observedTitle.trim()
-      : observedUrl;
+    observedTitle && observedTitle.trim().length > 0 ? observedTitle.trim() : observedUrl;
 
   const sameDomainUrls = allUrls.filter((u) => parseDomain(u) === observedDomain);
   const distinctSameDomainUrls = new Set(sameDomainUrls.map((u) => normalize(u)));
@@ -5089,9 +5186,7 @@ function stripPlanTrackerMarkers(s: string): string {
  * heuristic because the same question can mention "登录" inside a
  * generic prompt.
  */
-export function classifyAwaitingKind(
-  question: string,
-): SupercarAwaitingKind {
+export function classifyAwaitingKind(question: string): SupercarAwaitingKind {
   const t = question.toLowerCase();
   if (
     /验证码|滑块|滑动验证|拼图|captcha|recaptcha|hcaptcha|cloudflare|cf[\-\s]?turnstile|人机验证/.test(
@@ -5117,9 +5212,7 @@ export function classifyAwaitingKind(
   return 'clarification';
 }
 
-export function shouldKeepAwaitingOnUserTimeout(
-  kind: SupercarAwaitingKind,
-): boolean {
+export function shouldKeepAwaitingOnUserTimeout(kind: SupercarAwaitingKind): boolean {
   return kind !== 'clarification';
 }
 
@@ -5145,7 +5238,10 @@ class IterationTimeoutError extends Error {
 async function callWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: NodeJS.Timeout | null = null;
   const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new IterationTimeoutError(`${label} timed out after ${ms}ms`)), ms);
+    timer = setTimeout(
+      () => reject(new IterationTimeoutError(`${label} timed out after ${ms}ms`)),
+      ms,
+    );
   });
   try {
     return await Promise.race([p, timeoutPromise]);
@@ -5158,12 +5254,18 @@ async function callWithTimeout<T>(p: Promise<T>, ms: number, label: string): Pro
  * Invoke a user callback without letting its failure kill the loop.
  * Swallows thrown errors after logging them.
  */
-async function safeCall<T>(fn: ((ev: T) => void | Promise<void>) | undefined, ev: T): Promise<void> {
+async function safeCall<T>(
+  fn: ((ev: T) => void | Promise<void>) | undefined,
+  ev: T,
+): Promise<void> {
   if (!fn) return;
   try {
     await fn(ev);
   } catch (err) {
-    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'supercar: callback threw');
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'supercar: callback threw',
+    );
   }
 }
 
@@ -5318,10 +5420,7 @@ function extractWebSearchSources(
   return [];
 }
 
-async function readPageText(
-  executor: PlaywrightExecutor,
-  maxChars = 4096,
-): Promise<string> {
+async function readPageText(executor: PlaywrightExecutor, maxChars = 4096): Promise<string> {
   try {
     const page = (await executor.getPage()) as unknown as {
       evaluate: <T>(fn: () => T) => Promise<T>;

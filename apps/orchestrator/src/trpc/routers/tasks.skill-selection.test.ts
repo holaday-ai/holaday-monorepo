@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import { TRPCError } from '@trpc/server';
+import { describe, expect, it } from 'vitest';
 import { __tasksInternals } from './tasks.js';
 
 const {
@@ -10,12 +10,14 @@ const {
   resolveTaskSkillContext,
 } = __tasksInternals as typeof __tasksInternals & {
   buildPlannerIntent?: (intent: string, taskSkillId: string | undefined) => string;
-  buildPlannerSkillCatalogue?: (rows: Array<{
-    slug: string;
-    description: string | null;
-    occupationTag: string | null;
-    manifest: unknown;
-  }>) => Array<{ slug: string; description: string; allowedOrigins?: readonly string[] }>;
+  buildPlannerSkillCatalogue?: (
+    rows: Array<{
+      slug: string;
+      description: string | null;
+      occupationTag: string | null;
+      manifest: unknown;
+    }>,
+  ) => Array<{ slug: string; description: string; allowedOrigins?: readonly string[] }>;
 };
 
 describe('tasks router task skill selection', () => {
@@ -30,9 +32,9 @@ describe('tasks router task skill selection', () => {
       assertTaskSkillSelectionAvailable({ skillId: 'a-share-analyst', skillSource: 'manual' }),
     ).toBe('a-share-market-briefing');
 
-    expect(
-      assertTaskSkillSelectionAvailable({ skillId: 'douyin', skillSource: 'manual' }),
-    ).toBe('douyin-live-ops');
+    expect(assertTaskSkillSelectionAvailable({ skillId: 'douyin', skillSource: 'manual' })).toBe(
+      'douyin-live-ops',
+    );
   });
 
   it('accepts canonical composer ids when the stored enabled id is legacy', () => {
@@ -75,17 +77,11 @@ describe('tasks router task skill selection', () => {
   });
 
   it('normalizes the skill id used by task creation after manual validation', () => {
+    expect(resolveTaskSkillContext({ skillId: 'douyin', skillSource: 'manual' }, ['douyin'])).toBe(
+      'douyin-live-ops',
+    );
     expect(
-      resolveTaskSkillContext(
-        { skillId: 'douyin', skillSource: 'manual' },
-        ['douyin'],
-      ),
-    ).toBe('douyin-live-ops');
-    expect(
-      resolveTaskSkillContext(
-        { roleId: 'xiaohongshu', skillSource: 'manual' },
-        ['xiaohongshu'],
-      ),
+      resolveTaskSkillContext({ roleId: 'xiaohongshu', skillSource: 'manual' }, ['xiaohongshu']),
     ).toBe('xiaohongshu-seeding-ops');
   });
 
@@ -93,18 +89,14 @@ describe('tasks router task skill selection', () => {
     expect(resolveTaskSkillContext({ roleId: 'a-share-analyst' }, [])).toBe(
       'a-share-market-briefing',
     );
-    expect(resolveTaskSkillContext({ roleId: 'legacy-role-id' }, [])).toBe(
-      'legacy-role-id',
-    );
+    expect(resolveTaskSkillContext({ roleId: 'legacy-role-id' }, [])).toBe('legacy-role-id');
   });
 
   it('lets explicit skill context win over automatic role classification', () => {
     expect(resolveTaskDispatchSkillId('a-share-market-briefing', 'tech-translator')).toBe(
       'a-share-market-briefing',
     );
-    expect(resolveTaskDispatchSkillId(undefined, 'xiaohongshu-expert')).toBe(
-      'xiaohongshu-expert',
-    );
+    expect(resolveTaskDispatchSkillId(undefined, 'xiaohongshu-expert')).toBe('xiaohongshu-expert');
     expect(resolveTaskDispatchSkillId(undefined, 'none')).toBeUndefined();
   });
 
@@ -128,9 +120,9 @@ describe('tasks router task skill selection', () => {
         'resume-search-screening',
       ]),
     );
-    expect(catalogue.find((skill) => skill.slug === 'douyin-comment-manager')?.allowedOrigins).toEqual([
-      '*.douyin.com',
-    ]);
+    expect(
+      catalogue.find((skill) => skill.slug === 'douyin-comment-manager')?.allowedOrigins,
+    ).toEqual(['*.douyin.com']);
     expect(catalogue.find((skill) => skill.slug === 'douyin-live-ops')?.description).toBe(
       '直播复盘、短视频选题、脚本与账号运营',
     );

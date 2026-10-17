@@ -1,8 +1,4 @@
-import type {
-  EnergyExperienceDefinition,
-  EnergyExperienceId,
-  EnergyMood,
-} from './energy-types';
+import type { EnergyExperienceDefinition, EnergyExperienceId, EnergyMood } from './energy-types';
 import { ENERGY_EXPERIENCES } from './experience-registry';
 
 export interface EnergyMoodResponse {

@@ -112,6 +112,24 @@ describe('matchAshareQa', () => {
     ).toBeNull();
   });
 
+  it.each([
+    '用 DCF 算一下宁德时代的合理估值',
+    '/行业 白酒',
+    '帮我测算一下这家公司的目标价和合理价位区间',
+    '用 dcf 模型估一下内在价值，给出详细推导过程',
+  ])('上下文内估值/研究命令词进合规框架（不落通用路径）：%s', async (intent) => {
+    const r = await resolveAshareInContext({ intent, watchlist: WL, now: NOW }, async () => []);
+    expect(r.hasSignal).toBe(true);
+  });
+
+  it('上下文内无 A股信号的普通请求仍放行通用路径', async () => {
+    const r = await resolveAshareInContext(
+      { intent: '帮我写一份本周工作周报', watchlist: WL, now: NOW },
+      async () => [],
+    );
+    expect(r).toEqual({ match: null, hasSignal: false, indexIntent: false });
+  });
+
   it('上下文内遇到非 A 股证券查询 → 放回通用路径，不给 A 股引导兜底', async () => {
     const r = await resolveAshareInContext(
       {

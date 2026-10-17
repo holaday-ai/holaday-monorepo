@@ -4,6 +4,8 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 import { bootstrapTheme } from './stores/theme-store';
 import './index.css';
+import './styles/holaday-ui.css';
+import './styles/approved-ui.css';
 
 // Apply the persisted theme before the first paint so we don't flash
 // white → dark on reload for dark-mode users.

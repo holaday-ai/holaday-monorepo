@@ -8,7 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createFirecrawlLane, type FirecrawlLane } from './firecrawl-lane.js';
+import { type FirecrawlLane, createFirecrawlLane } from './firecrawl-lane.js';
 
 interface FakeResp {
   status: number;
@@ -37,7 +37,10 @@ function makeFetch(...sequence: FakeResp[]): {
   return { fetch: fakeFetch, calls };
 }
 
-function makeLane(fetchFn: typeof fetch, overrides: Partial<{ apiKey: string; timeoutMs: number }> = {}): FirecrawlLane {
+function makeLane(
+  fetchFn: typeof fetch,
+  overrides: Partial<{ apiKey: string; timeoutMs: number }> = {},
+): FirecrawlLane {
   return createFirecrawlLane({
     apiKey: overrides.apiKey ?? 'fc-test-key',
     baseUrl: 'https://api.firecrawl.test',
@@ -188,9 +191,9 @@ describe('createFirecrawlLane — search()', () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.results).toHaveLength(2);
-      expect(out.results[0]!.url).toBe('https://example.com/a');
-      expect(out.results[0]!.markdown).toContain('A body');
-      expect(out.results[0]!.title).toBe('A');
+      expect(out.results[0]?.url).toBe('https://example.com/a');
+      expect(out.results[0]?.markdown).toContain('A body');
+      expect(out.results[0]?.title).toBe('A');
     }
     const call = calls[0]!;
     expect(call.url).toBe('https://api.firecrawl.test/v1/search');
@@ -207,7 +210,7 @@ describe('createFirecrawlLane — search()', () => {
     const lane = makeLane(fetch);
 
     await lane.search('q');
-    const body = JSON.parse(calls[0]!.init?.body as string) as { limit: number };
+    const body = JSON.parse(calls[0]?.init?.body as string) as { limit: number };
     expect(body.limit).toBe(5);
   });
 
@@ -240,4 +243,27 @@ describe('createFirecrawlLane — surface', () => {
     expect(typeof lane.scrape).toBe('function');
     expect(typeof lane.search).toBe('function');
   });
+});
+
+it('caller abort stops Firecrawl retries within the task budget', async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const lane = createFirecrawlLane({
+    apiKey: 'fixture',
+    timeoutMs: 10,
+    fetch: async (_url, init) => {
+      calls++;
+      return new Promise<Response>((_r, reject) =>
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('aborted', 'AbortError')),
+          { once: true },
+        ),
+      );
+    },
+  });
+  const pending = lane.search('公开新闻', { signal: controller.signal });
+  setTimeout(() => controller.abort(), 1);
+  await pending;
+  expect(calls).toBe(1);
 });

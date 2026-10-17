@@ -1,9 +1,114 @@
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { FailureHeaderCard } from '@/components/FailureHeaderCard';
+import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
+import { PlanCard } from '@/components/PlanCard';
+import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
+import { SearchResultCard } from '@/components/SearchResultCard';
+import { StepCard } from '@/components/StepCard';
+import { isBrowserErrorUrl } from '@/components/browser-panel-state';
+import {
+  taskCancelStateChangedMessage,
+  terminalResultContentInsufficient,
+} from '@/components/terminal-result-state';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { useToast } from '@/components/ui/toast';
+import { useTaskFailureContext } from '@/hooks/useTaskFailureContext';
+import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
+import {
+  type BatchConfirmDecision,
+  type SingleConfirmDecision,
+  batchConfirmActionLabel,
+  batchConfirmSummary,
+  singleConfirmActionLabel,
+  singleConfirmSummary,
+} from '@/lib/batch-confirm-copy';
+import { copyTextToClipboard, hasCopyableText } from '@/lib/copy-text';
+import {
+  downloadFailureMessage,
+  downloadFileAuthed,
+  fetchFileBlobAuthed,
+  isUnavailableFileStatus,
+} from '@/lib/download-file';
+import { taskActionError } from '@/lib/error-copy';
+import { EXPERT_RESULT_LABELS, expertResultUsageCopy } from '@/lib/expert-result-usage';
+import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
+import { externalLinkConfirmDescription, safeExternalHttpHref } from '@/lib/external-link-copy';
+import { failureResultCopyText, terminalAllowsRerun } from '@/lib/failure-copy';
+import { downloadFileMetaLabel } from '@/lib/file-download-card-copy';
+import { formatFileSize } from '@/lib/file-size';
+import { hdDebug } from '@/lib/hd-debug';
+import { shouldRenderLiveSubStatus } from '@/lib/live-substatus';
+import { markdownCodeBlockMeta } from '@/lib/markdown-code-block-state';
+import { downloadMarkdownFile } from '@/lib/markdown-download';
+import { pageActionError } from '@/lib/page-error-copy';
+import {
+  RESULT_SOURCE_BADGES,
+  type ResultSourceMarker,
+  matchResultSourceBadgePrefix,
+} from '@/lib/result-source-badges';
+import { screenshotThumbnailPresentation } from '@/lib/screenshot-thumbnail-state';
+import {
+  type StepDetailSummary,
+  shouldShowStepCard,
+  stepDetailSummary,
+  stepDisplayStepsForTask,
+  stepStatusText,
+} from '@/lib/step-card-state';
+import { taskDisplayIntent } from '@/lib/task-display-copy';
+import { refundStatusCopy, retryAttachmentNote } from '@/lib/task-failure-recovery';
+import { pausedTaskNoticeCopy } from '@/lib/task-status-copy';
+import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
+import {
+  terminalEmptyAllowsRerun,
+  terminalEmptyCopy,
+  terminalInsufficientCopy,
+} from '@/lib/terminal-empty-copy';
+import { trpc } from '@/lib/trpc';
+import {
+  type RecoveryAction,
+  type TrustEvidenceStage,
+  type TrustTone,
+  buildRecoveryActions,
+  buildTrustSummary,
+  shouldShowTrustSummary,
+} from '@/lib/trust-summary';
+import { useFileUnavailable } from '@/lib/unavailable-file-registry';
+import { cn } from '@/lib/utils';
+import { shouldShowVerificationBanner } from '@/lib/verification-banner-copy';
+import { showImageOption } from '@/lib/video-history-row';
+import { hasBrowserRecordForWorkbench } from '@/lib/workbench-state';
+import { useTaskStore } from '@/stores/task-store';
+import type {
+  UiAwaitingUser,
+  UiCaptchaWait,
+  UiDegradeEvent,
+  UiExecutorFallback,
+  UiStep,
+  UiTask,
+  UiTerminalAttachment,
+  UiWebSearchEvent,
+} from '@/types/task';
+import { isTerminalStatus } from '@/types/task';
+// Phase 1 follow-up — render-time defence-in-depth sanitiser. Strips
+// markdown image references that point at agent screenshots, agent
+// retry / reroute / login-wall narrative lines, lingering tool XML
+// envelopes, and image-magic-byte base64. Runs on EVERY summary
+// before ReactMarkdown — protects history rows that pre-date the
+// orchestrator-side sanitiser too.
+import { sanitizeForRender } from '@/utils/render-sanitizer';
+import { friendlyHost, humanizeStep, humanizedGlyph, liveStatusLabel } from '@/utils/step-humanize';
 import {
   AlertCircle,
   Check,
   ChevronDown,
   ChevronRight,
   CircleSlash,
+  Clapperboard,
   Clock,
   Copy,
   Download,
@@ -11,7 +116,6 @@ import {
   FileText,
   Globe,
   KeyRound,
-  Clapperboard,
   Link2,
   ListChecks,
   Loader2,
@@ -26,110 +130,10 @@ import {
   ShieldCheck,
   ShieldQuestion,
 } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import * as React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { useToast } from '@/components/ui/toast';
-import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
-import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
-import {
-  batchConfirmActionLabel,
-  batchConfirmSummary,
-  type BatchConfirmDecision,
-  singleConfirmActionLabel,
-  singleConfirmSummary,
-  type SingleConfirmDecision,
-} from '@/lib/batch-confirm-copy';
-import { isBrowserErrorUrl } from '@/components/browser-panel-state';
-import { copyTextToClipboard, hasCopyableText } from '@/lib/copy-text';
-import { shouldRenderLiveSubStatus } from '@/lib/live-substatus';
-import {
-  downloadFailureMessage,
-  downloadFileAuthed,
-  fetchFileBlobAuthed,
-} from '@/lib/download-file';
-import { taskActionError } from '@/lib/error-copy';
-import { EXPERT_RESULT_LABELS, expertResultUsageCopy } from '@/lib/expert-result-usage';
-import { pageActionError } from '@/lib/page-error-copy';
-import {
-  externalLinkConfirmDescription,
-  safeExternalHttpHref,
-} from '@/lib/external-link-copy';
-import { classifyFriendlyFailure, failureResultCopyText, friendlyFailureDetail, terminalAllowsRerun } from '@/lib/failure-copy';
-import { formatFileSize } from '@/lib/file-size';
-import { downloadFileMetaLabel } from '@/lib/file-download-card-copy';
-import { downloadMarkdownFile } from '@/lib/markdown-download';
-import { screenshotThumbnailPresentation } from '@/lib/screenshot-thumbnail-state';
-import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
-import { useFileUnavailable } from '@/lib/unavailable-file-registry';
-import {
-  terminalEmptyAllowsRerun,
-  terminalEmptyCopy,
-  terminalInsufficientCopy,
-} from '@/lib/terminal-empty-copy';
-import {
-  shouldShowStepCard,
-  stepDetailSummary,
-  stepDisplayStepsForTask,
-  stepStatusText,
-  type StepDetailSummary,
-} from '@/lib/step-card-state';
-import {
-  matchResultSourceBadgePrefix,
-  RESULT_SOURCE_BADGES,
-  type ResultSourceMarker,
-} from '@/lib/result-source-badges';
-import { shouldShowVerificationBanner } from '@/lib/verification-banner-copy';
-import {
-  buildRecoveryActions,
-  buildTrustSummary,
-  shouldShowTrustSummary,
-  type RecoveryAction,
-  type TrustEvidenceStage,
-  type TrustTone,
-} from '@/lib/trust-summary';
-import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
-import { PlanCard } from '@/components/PlanCard';
-import { SearchResultCard } from '@/components/SearchResultCard';
-import { StepCard } from '@/components/StepCard';
-import {
-  taskCancelStateChangedMessage,
-  terminalResultContentInsufficient,
-} from '@/components/terminal-result-state';
-import { hdDebug } from '@/lib/hd-debug';
-import { markdownCodeBlockMeta } from '@/lib/markdown-code-block-state';
-import { pausedTaskNoticeCopy } from '@/lib/task-status-copy';
-import { trpc } from '@/lib/trpc';
-import { useTaskStore } from '@/stores/task-store';
-import { showImageOption } from '@/lib/video-history-row';
-import { cn } from '@/lib/utils';
-import { taskDisplayIntent } from '@/lib/task-display-copy';
-import type {
-  UiAwaitingUser,
-  UiCaptchaWait,
-  UiDegradeEvent,
-  UiExecutorFallback,
-  UiStep,
-  UiTask,
-  UiTerminalAttachment,
-  UiWebSearchEvent,
-} from '@/types/task';
-import { isTerminalStatus } from '@/types/task';
-import { friendlyHost, humanizeStep, humanizedGlyph, liveStatusLabel } from '@/utils/step-humanize';
-// Phase 1 follow-up — render-time defence-in-depth sanitiser. Strips
-// markdown image references that point at agent screenshots, agent
-// retry / reroute / login-wall narrative lines, lingering tool XML
-// envelopes, and image-magic-byte base64. Runs on EVERY summary
-// before ReactMarkdown — protects history rows that pre-date the
-// orchestrator-side sanitiser too.
-import { sanitizeForRender } from '@/utils/render-sanitizer';
+import { CaptchaHandoffActions } from './CaptchaHandoffActions';
 
 interface Props {
   task: UiTask;
@@ -181,13 +185,9 @@ function useMountedRef(): React.MutableRefObject<boolean> {
  * 百度…" or "点击了'搜索'"), with a spinner-adorned status row for the
  * still-running tick.
  */
-export function TaskStream({
-  task,
-  onPickSuggestion,
-}: Props): JSX.Element {
+export function TaskStream({ task, onPickSuggestion }: Props): JSX.Element {
   const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
-  const userReplies =
-    useTaskStore((s) => s.userRepliesByTask[task.taskId]) ?? EMPTY_REPLIES;
+  const userReplies = useTaskStore((s) => s.userRepliesByTask[task.taskId]) ?? EMPTY_REPLIES;
   const captchaWait = useTaskStore((s) => s.captchaWaitByTask[task.taskId]);
   const executorFallback = useTaskStore((s) => s.executorFallbackByTask[task.taskId]);
   const degrade = useTaskStore((s) => s.degradeByTask[task.taskId]);
@@ -224,8 +224,7 @@ export function TaskStream({
       parent = parent.parentElement;
     }
     if (!parent) return;
-    const distanceFromBottom =
-      parent.scrollHeight - parent.scrollTop - parent.clientHeight;
+    const distanceFromBottom = parent.scrollHeight - parent.scrollTop - parent.clientHeight;
     if (distanceFromBottom < 200) {
       anchor.scrollIntoView({ block: 'end' });
     }
@@ -337,6 +336,9 @@ function AgentBlock({
   webSearch: UiWebSearchEvent | undefined;
   serverSuggestions?: string[];
 }): JSX.Element {
+  const publicCloudRetryPending = useTaskStore(
+    (s) => s.publicCloudContinuationByTask[task.taskId]?.stage === 'cancelled',
+  );
   const [detailOpen, setDetailOpen] = React.useState(false);
   // Phase 24 RC follow-up — generate / scrape streaming output. The
   // buffer accumulates `server.task.stream` deltas; the progress
@@ -352,9 +354,7 @@ function AgentBlock({
   // Set populated when a `server.task.terminal` arrives live — used
   // to gate the typewriter reveal so historical task clicks render
   // the summary statically (no per-mount replay).
-  const animatedThisSession = useTaskStore((s) =>
-    s.animatedTaskIds.has(task.taskId),
-  );
+  const animatedThisSession = useTaskStore((s) => s.animatedTaskIds.has(task.taskId));
   const animateTerminalReveal =
     animatedThisSession && !PLAYED_TERMINAL_REVEAL_TASK_IDS.has(task.taskId);
   React.useEffect(() => {
@@ -384,10 +384,7 @@ function AgentBlock({
     () => stepDisplayStepsForTask(steps.filter(shouldShowStepCard), task.status),
     [steps, task.status],
   );
-  const detailSummary = React.useMemo(
-    () => stepDetailSummary(detailSteps),
-    [detailSteps],
-  );
+  const detailSummary = React.useMemo(() => stepDetailSummary(detailSteps), [detailSteps]);
 
   const hasAnyActivity = taskStreamHasAnyActivity({
     humanLineCount: humanLines.length,
@@ -403,8 +400,7 @@ function AgentBlock({
   });
   const showInlineProgress = !terminal;
   const hasTerminalArtifacts =
-    Boolean(task.attachments?.length) ||
-    Boolean(task.finalUrl && task.finalUrl !== 'about:blank');
+    Boolean(task.attachments?.length) || Boolean(task.finalUrl && task.finalUrl !== 'about:blank');
   const trustSummaryUrl = task.finalUrl ?? screencastUrl;
   const showTrustSummary = shouldRenderTaskTrustSummary({
     terminal,
@@ -419,12 +415,7 @@ function AgentBlock({
   // structure that an avatar adds noise without information.
   return (
     <div className="flex items-start gap-3">
-      <div
-        className={cn(
-          'min-w-0 flex-1 space-y-3',
-          terminal && 'pb-24 sm:pb-0',
-        )}
-      >
+      <div className={cn('min-w-0 flex-1 space-y-3', terminal && 'pb-24 sm:pb-0')}>
         {/* Phase 13 Dim 1 — plan card lands above thinking + steps so
          *  the user sees the upcoming-step list as soon as the
          *  orchestrator emits server.task.plan (or on tab re-open
@@ -432,6 +423,7 @@ function AgentBlock({
         {task.planText && (
           <PlanCard
             planText={task.planText}
+            taskStatus={task.status}
             {...(task.planStatus ? { planStatus: task.planStatus } : {})}
             // Fold the plan card by default once the task has landed in
             // a terminal state — at that point the result above and
@@ -455,16 +447,11 @@ function AgentBlock({
             terminal,
             hasAwaitingUser: Boolean(awaitingUser),
           }) && (
-            <LiveSubStatusChip
-              subStatus={subStatusEntry.subStatus}
-              since={subStatusEntry.since}
-            />
+            <LiveSubStatusChip subStatus={subStatusEntry.subStatus} since={subStatusEntry.since} />
           )}
         {!hasAnyActivity && !terminal && !subStatusEntry && <BoardingLine />}
 
-        {showInlineProgress && humanLines.length > 0 && (
-          <HumanLineList lines={humanLines} />
-        )}
+        {showInlineProgress && humanLines.length > 0 && <HumanLineList lines={humanLines} />}
 
         {/* Live progress pill — one line, spinner + current tool
          *  label. Shows while task is non-terminal and we have at
@@ -483,9 +470,7 @@ function AgentBlock({
 
         {showInlineProgress && screencastUrl && <CurrentUrlChip url={screencastUrl} />}
 
-        {webSearch && !awaitingUser && (
-          <WebSearchLine event={webSearch} terminal={terminal} />
-        )}
+        {webSearch && !awaitingUser && <WebSearchLine event={webSearch} terminal={terminal} />}
 
         {captchaWait && <CaptchaWaitBanner wait={captchaWait} />}
         {degrade && !executorFallback && <DegradeBanner event={degrade} />}
@@ -497,6 +482,10 @@ function AgentBlock({
             taskId={task.taskId}
             taskTickCount={task.tickCount}
           />
+        )}
+
+        {!awaitingUser && publicCloudRetryPending && (
+          <PublicCloudRetryNotice taskId={task.taskId} />
         )}
 
         {task.status === 'paused' && <PausedTaskNotice reason={task.resultText} />}
@@ -530,25 +519,22 @@ function AgentBlock({
          *  no-op — only the supplementary controls (copy button,
          *  suggestion chips) light up when resultText lands. */}
         {!task.resultText && (progressMessage || streamingText) && (
-            <div className={cn(TRUST_SURFACE, 'px-5 py-4 text-foreground')}>
-              {progressMessage && !streamingText && (
-                <div className="text-xs text-muted-foreground">
-                  <span className="inline-block animate-pulse">●</span>{' '}
-                  {progressMessage}
-                </div>
-              )}
-              {streamingText && (
-                <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {sanitizeMarkdownTrailingPunctuation(
-                      sanitizeForRender(streamingText),
-                    )}
-                  </ReactMarkdown>
-                  <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-foreground/40 align-baseline" />
-                </div>
-              )}
-            </div>
-          )}
+          <div className={cn(TRUST_SURFACE, 'px-5 py-4 text-foreground')}>
+            {progressMessage && !streamingText && (
+              <div className="text-xs text-muted-foreground">
+                <span className="inline-block animate-pulse">●</span> {progressMessage}
+              </div>
+            )}
+            {streamingText && (
+              <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {sanitizeMarkdownTrailingPunctuation(sanitizeForRender(streamingText))}
+                </ReactMarkdown>
+                <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-foreground/40 align-baseline" />
+              </div>
+            )}
+          </div>
+        )}
 
         {terminal && (task.resultText || hasTerminalArtifacts) && (
           <TerminalSummary
@@ -751,21 +737,13 @@ function TrustSummaryCard({
   );
   const Icon = trustToneIcon(summary.tone);
   return (
-    <div
-      className={cn(
-        TRUST_SURFACE,
-        'px-4 py-3 text-sm',
-        trustToneClass(summary.tone),
-      )}
-    >
+    <div className={cn(TRUST_SURFACE, 'px-4 py-3 text-sm', trustToneClass(summary.tone))}>
       <div className="flex items-start gap-2.5">
         <Icon className={cn('mt-0.5 h-4 w-4 shrink-0', trustToneIconClass(summary.tone))} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
-              <div className="text-[11px] font-medium text-muted-foreground">
-                {summary.title}
-              </div>
+              <div className="text-[11px] font-medium text-muted-foreground">{summary.title}</div>
               <div className="mt-0.5 font-medium text-foreground">{summary.verdict}</div>
             </div>
             {task.failureLevel && (
@@ -774,9 +752,7 @@ function TrustSummaryCard({
               </span>
             )}
           </div>
-          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-            {summary.boundary}
-          </p>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{summary.boundary}</p>
           {summary.rows.length > 0 && (
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               {summary.rows.map((row) => (
@@ -855,14 +831,16 @@ function TrustSummaryCard({
                       (action.kind === 'prefill' && !onSuggestionPick)
                     }
                     title={action.detail}
-                    className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white/75 px-3 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#EA1F59]/30 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:bg-white/10"
+                    className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white/75 px-3 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#FF0061]/30 hover:bg-[#FF0061]/5 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:bg-white/10"
                   >
                     {action.kind === 'retry' ? (
                       <RotateCcw className={cn('h-3.5 w-3.5', retrying && 'animate-spin')} />
                     ) : (
                       <ListChecks className="h-3.5 w-3.5" />
                     )}
-                    <span>{action.kind === 'retry' && retrying ? '重新执行中…' : action.label}</span>
+                    <span>
+                      {action.kind === 'retry' && retrying ? '重新执行中…' : action.label}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -919,13 +897,13 @@ function trustToneIcon(tone: TrustTone): React.ComponentType<{ className?: strin
 }
 
 function trustToneClass(tone: TrustTone): string {
-  if (tone === 'danger') return 'border-[#EA1F59]/35';
+  if (tone === 'danger') return 'border-[#FF0061]/35';
   if (tone === 'warning') return 'border-[#FFC910]/55';
   return 'border-[#DCDDDD]';
 }
 
 function trustToneIconClass(tone: TrustTone): string {
-  if (tone === 'danger') return 'text-[#EA1F59]';
+  if (tone === 'danger') return 'text-[#FF0061]';
   if (tone === 'warning') return 'text-[#57479C]';
   return 'text-[#2F9E6D]';
 }
@@ -1024,8 +1002,9 @@ function AwaitingUserBanner({
     | null
   >(null);
   const kind = wait.awaitingKind ?? 'clarification';
-  const copy = awaitingUserCopy(kind);
-  const message = awaitingUserStreamMessage(kind, wait.question);
+  const copy = awaitingUserCopy(kind, wait.browserConnection);
+  const message = awaitingUserStreamMessage(kind, wait.question, wait.browserConnection);
+  const [continuingPublic, setContinuingPublic] = React.useState(false);
   const Icon = AWAITING_KIND_ICON[kind] ?? AWAITING_KIND_ICON.clarification;
   const batchConfirm = wait.batchConfirm;
   const singleConfirm = wait.singleConfirm;
@@ -1038,10 +1017,14 @@ function AwaitingUserBanner({
     if (cancelling) return;
     setCancelling(true);
     try {
-      const res = await trpc.tasks.abort.mutate({ taskId });
+      const res = await useTaskStore.getState().abortTask(taskId);
       if (!mountedRef.current) return;
+      if ('error' in res) {
+        toast.show(res.error, 'error');
+        return;
+      }
       if (!res.ok) {
-        toast.show(taskCancelStateChangedMessage(res.state), 'error');
+        toast.show(taskCancelStateChangedMessage(res.state ?? 'stale'), 'error');
         return;
       }
       toast.show('已取消任务', 'info', 2000);
@@ -1054,6 +1037,20 @@ function AwaitingUserBanner({
       }
     }
   }, [cancelling, mountedRef, taskId, toast]);
+  // FIX-D11 — only a request that does not need the user's own login may be
+  // re-submitted to the public (logged-out) cloud browser.
+  const handleContinuePublicCloud = React.useCallback(async () => {
+    if (continuingPublic) return;
+    setContinuingPublic(true);
+    try {
+      const res = await useTaskStore.getState().continueInPublicCloud(taskId);
+      if (!mountedRef.current) return;
+      if ('error' in res) toast.show(res.error, 'error');
+      else toast.show('已改用公开云端继续（看不到你的个人信息）', 'info', 2000);
+    } finally {
+      if (mountedRef.current) setContinuingPublic(false);
+    }
+  }, [continuingPublic, mountedRef, taskId, toast]);
   // Phase 1 #4 — 视频报价确认:结构化按钮硬绑【这张卡的 taskId】(不绑"最近任务")。
   // 前端不解析确认意图、不算价 — 只把选择透传给后端 confirmVideo(Veo 在后端确认后才烧)。
   const handleConfirmVideo = React.useCallback(
@@ -1127,9 +1124,7 @@ function AwaitingUserBanner({
             <AwaitingMarkdown text={message.body} />
           </div>
           {message.followUp && (
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              {message.followUp}
-            </p>
+            <p className="mt-2 text-[11px] text-muted-foreground">{message.followUp}</p>
           )}
           {batchConfirm ? (
             <div className="mt-3 space-y-3">
@@ -1205,12 +1200,12 @@ function AwaitingUserBanner({
                   disabled={confirming !== null}
                   className="ml-auto inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-transparent px-3 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:opacity-60 dark:border-white/10 dark:text-foreground dark:hover:bg-white/10"
                 >
-                  {confirming === 'single:reject'
-                    ? '取消中…'
-                    : singleConfirmActionLabel('reject')}
+                  {confirming === 'single:reject' ? '取消中…' : singleConfirmActionLabel('reject')}
                 </button>
               </div>
             </div>
+          ) : kind === 'captcha' ? (
+            <CaptchaHandoffActions taskId={taskId} />
           ) : kind === 'video_quote' ? (
             // 三个结构化按钮(确认制作 / 图片版 / 取消)→ tasks.confirmVideo。
             // 价格显示在上方 body(后端报价文案),按钮只透传选择。
@@ -1249,9 +1244,17 @@ function AwaitingUserBanner({
                   已完成 {taskTickCount} 步
                 </span>
               )}
-              <span className="text-muted-foreground">
-                {copy.streamHint}
-              </span>
+              <span className="text-muted-foreground">{copy.streamHint}</span>
+              {wait.browserConnection?.publicCloudAllowed && (
+                <button
+                  type="button"
+                  onClick={() => void handleContinuePublicCloud()}
+                  disabled={continuingPublic || cancelling}
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-[#57479C] bg-[#57479C] px-3 font-medium text-white transition-colors hover:bg-[#473a82] disabled:opacity-60"
+                >
+                  {continuingPublic ? '提交中…' : '用公开云端继续（看不到你的个人信息）'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => void handleCancel()}
@@ -1279,6 +1282,43 @@ const AWAITING_KIND_ICON: Record<
   browser_action: MousePointerClick,
   video_quote: Clapperboard,
 };
+
+/**
+ * FIX-PR259-2 — the original was cancelled for a public-cloud continuation but
+ * the replacement was not confirmed. Retrying reuses the same server key, so it
+ * replays or completes the one replacement instead of creating another.
+ */
+function PublicCloudRetryNotice({ taskId }: { taskId: string }): JSX.Element {
+  const toast = useToast();
+  const [submitting, setSubmitting] = React.useState(false);
+  const retry = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const res = await useTaskStore.getState().continueInPublicCloud(taskId);
+      if ('error' in res) toast.show(res.error, 'error');
+      else toast.show('已改用公开云端继续（看不到你的个人信息）', 'info', 2000);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return (
+    <div className="rounded-lg border border-[#DCDDDD] bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
+      <p className="text-sm text-foreground">原任务已取消，公开云端任务还没有创建成功。</p>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void retry()}
+          disabled={submitting}
+          className="inline-flex h-7 items-center gap-1 rounded-md border border-[#57479C] bg-[#57479C] px-3 text-xs font-medium text-white transition-colors hover:bg-[#473a82] disabled:opacity-60"
+        >
+          {submitting ? '提交中…' : '重试用公开云端继续（看不到你的个人信息）'}
+        </button>
+        <span className="text-[11px] text-muted-foreground">重试不会重复创建任务。</span>
+      </div>
+    </div>
+  );
+}
 
 function PausedTaskNotice({ reason }: { reason?: string }): JSX.Element {
   const copy = pausedTaskNoticeCopy(reason);
@@ -1308,12 +1348,8 @@ function PausedTaskNotice({ reason }: { reason?: string }): JSX.Element {
  * "在新标签页打开 <url>" affordance takes over from there.
  */
 function CurrentUrlChip({ url }: { url: string }): JSX.Element | null {
-  if (
-    !url ||
-    url === 'about:blank' ||
-    url.startsWith('chrome://') ||
-    isBrowserErrorUrl(url)
-  ) return null;
+  if (!url || url === 'about:blank' || url.startsWith('chrome://') || isBrowserErrorUrl(url))
+    return null;
   let host = '';
   try {
     host = new URL(url).hostname;
@@ -1357,8 +1393,7 @@ function WebSearchLine({
       <div className="flex items-start gap-2 text-sm leading-relaxed text-muted-foreground">
         <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#42C0EF]" />
         <span className="min-w-0 flex-1">
-          {webSearchLinePrefix(terminal)}{' '}
-          <span className="text-foreground">"{event.query}"</span>
+          {webSearchLinePrefix(terminal)} <span className="text-foreground">"{event.query}"</span>
         </span>
       </div>
       {event.sources && event.sources.length > 0 && (
@@ -1407,16 +1442,13 @@ function LiveStatus({
     <div
       className={cn(
         'flex items-center gap-2 text-[13px] leading-5',
-        red ? 'text-[#EA1F59]' : 'text-muted-foreground',
+        red ? 'text-[#FF0061]' : 'text-muted-foreground',
       )}
     >
       {red ? (
         <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
       ) : (
-        <Loader2
-          className="h-3.5 w-3.5 shrink-0 animate-spin text-[#EA1F59]"
-          aria-hidden
-        />
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[#FF0061]" aria-hidden />
       )}
       <span>{label}</span>
     </div>
@@ -1498,6 +1530,8 @@ export function liveSubStatusLongRunningHint(
     | 'generating_image',
   elapsedSec: number,
 ): string | null {
+  if (elapsedSec >= 30 && subStatus === 'generating')
+    return '正在生成内容，尚未收到下一阶段更新；你可以继续等待或停止任务。';
   if (elapsedSec < 120) return null;
   if (elapsedSec >= 300) {
     if (subStatus === 'browsing') {
@@ -1506,10 +1540,10 @@ export function liveSubStatusLongRunningHint(
     return '仍在处理当前任务。你可以继续等待，HOLA DAY 会在完成或需要你配合时更新状态。';
   }
   if (subStatus === 'browsing') {
-    return '仍在执行网页操作，不是卡死。遇到登录、风控或慢页面时会多花一点时间。';
+    return '尚未收到下一阶段更新。遇到登录、风控或慢页面时会多花一点时间。';
   }
   if (subStatus === 'extracting' || subStatus === 'verifying') {
-    return '仍在整理和核对结果，不是卡死。';
+    return '尚未收到下一阶段更新，正在等待数据或核验结果。';
   }
   return null;
 }
@@ -1536,7 +1570,7 @@ function HumanLineList({ lines }: { lines: HumanLine[] }): JSX.Element {
           <span
             className={cn(
               'min-w-0 flex-1',
-              line.status === 'failed' ? 'text-[#EA1F59]' : 'text-foreground',
+              line.status === 'failed' ? 'text-[#FF0061]' : 'text-foreground',
               line.status === 'cancelled' && 'text-muted-foreground',
               line.status === 'running' && 'text-foreground',
             )}
@@ -1556,14 +1590,11 @@ function LineBadge({
   status: UiStep['status'];
   glyph: string;
 }): JSX.Element {
-  const label =
-    status === 'done'
-      ? `${stepStatusText(status)} · ${glyph}`
-      : stepStatusText(status);
+  const label = status === 'done' ? `${stepStatusText(status)} · ${glyph}` : stepStatusText(status);
   if (status === 'running') {
     return (
       <span
-        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#EA1F59]"
+        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#FF0061]"
         aria-label={label}
         title={label}
       >
@@ -1574,7 +1605,7 @@ function LineBadge({
   if (status === 'failed') {
     return (
       <span
-        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#EA1F59]"
+        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#FF0061]"
         aria-label={label}
         title={label}
       >
@@ -1642,11 +1673,7 @@ function DetailToggle({
           </span>
         </span>
         <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#DCDDDD] bg-white px-2.5 py-1 text-[11px] font-medium text-[#595757] transition-colors group-hover:border-[#ADADAD] dark:border-white/10 dark:bg-transparent dark:text-foreground">
-          {open ? (
-            <ChevronDown className="h-3 w-3" />
-          ) : (
-            <ChevronRight className="h-3 w-3" />
-          )}
+          {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         </span>
       </button>
       {open && children}
@@ -1655,8 +1682,8 @@ function DetailToggle({
 }
 
 function stepDetailToneClass(tone: StepDetailSummary['tone']): string {
-  if (tone === 'failed') return 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]';
-  if (tone === 'running') return 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]';
+  if (tone === 'failed') return 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]';
+  if (tone === 'running') return 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]';
   if (tone === 'done') return 'border-[#42C0EF]/45 bg-[#42C0EF]/10 text-[#42C0EF]';
   if (tone === 'cancelled') return 'border-[#ADADAD]/55 bg-[#EFEFEF]/70 text-[#595757]';
   return 'border-[#DCDDDD] bg-white text-[#595757]';
@@ -1729,14 +1756,15 @@ function ExecutorFallbackBanner({
     return (
       <div
         role="alert"
-        className="flex animate-fade-in items-start gap-3 rounded-lg border border-[#EA1F59]/35 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#EA1F59]/35 dark:bg-card/85"
+        className="flex animate-fade-in items-start gap-3 rounded-lg border border-[#FF0061]/35 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FF0061]/35 dark:bg-card/85"
       >
-        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-[#EA1F59]" />
+        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-[#FF0061]" />
         <div className="min-w-0 flex-1 text-sm">
-        <div className="font-semibold text-foreground">反爬保护触发，但扩展未连接</div>
-        <div className="mt-1 text-xs text-muted-foreground">
-          HOLA DAY 想切到本机浏览器扩展继续任务，但没有检测到在线的 HOLA DAY 扩展。请安装并打开扩展后重试。
-        </div>
+          <div className="font-semibold text-foreground">反爬保护触发，但扩展未连接</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            HOLA DAY 想切到本机浏览器扩展继续任务，但没有检测到在线的 HOLA DAY
+            扩展。请安装并打开扩展后重试。
+          </div>
         </div>
       </div>
     );
@@ -1747,7 +1775,8 @@ function ExecutorFallbackBanner({
       <div className="min-w-0 flex-1 text-sm">
         <div className="font-semibold text-foreground">已切换到浏览器扩展模式执行</div>
         <div className="mt-1 text-xs text-muted-foreground">
-          连续检测到反爬拦截，HOLA DAY 切到本机浏览器扩展继续任务，后续步骤会通过你已登录的浏览器环境执行。
+          连续检测到反爬拦截，HOLA DAY
+          切到本机浏览器扩展继续任务，后续步骤会通过你已登录的浏览器环境执行。
         </div>
       </div>
     </div>
@@ -1767,19 +1796,14 @@ const DEGRADE_LEVEL_COPY: Readonly<Record<number, string>> = {
 };
 
 function DegradeBanner({ event }: { event: UiDegradeEvent }): JSX.Element {
-  const message =
-    DEGRADE_LEVEL_COPY[event.level] ?? '正在尝试替代方案…';
+  const message = DEGRADE_LEVEL_COPY[event.level] ?? '正在尝试替代方案…';
   return (
-    <div className="flex animate-fade-in items-start gap-3 rounded-lg border border-[#EA1F59]/35 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#EA1F59]/35 dark:bg-card/85">
-      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-[#EA1F59]" />
+    <div className="flex animate-fade-in items-start gap-3 rounded-lg border border-[#FF0061]/35 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FF0061]/35 dark:bg-card/85">
+      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-[#FF0061]" />
       <div className="min-w-0 flex-1 text-sm">
-        <div className="font-medium text-foreground">
-          {message}
-        </div>
+        <div className="font-medium text-foreground">{message}</div>
         {!event.ok && (
-          <div className="mt-1 text-xs text-muted-foreground">
-            上一次尝试未生效，继续切换方式。
-          </div>
+          <div className="mt-1 text-xs text-muted-foreground">上一次尝试未生效，继续切换方式。</div>
         )}
       </div>
     </div>
@@ -1887,9 +1911,9 @@ function EmptyTerminalCard({
           ? 'border-[#DCDDDD] bg-[#EFEFEF]/35 text-muted-foreground dark:border-white/10 dark:bg-white/5'
           : partial
             ? 'border-[#FFC910]/55 bg-white text-[#595757] dark:border-[#FFC910]/35 dark:bg-card/85 dark:text-foreground'
-          : failed
-            ? 'border-[#EA1F59]/35 bg-white text-[#595757] dark:border-[#EA1F59]/35 dark:bg-card/85 dark:text-foreground'
-            : 'border-[#DCDDDD] bg-white text-muted-foreground dark:border-white/10 dark:bg-card/85',
+            : failed
+              ? 'border-[#FF0061]/35 bg-white text-[#595757] dark:border-[#FF0061]/35 dark:bg-card/85 dark:text-foreground'
+              : 'border-[#DCDDDD] bg-white text-muted-foreground dark:border-white/10 dark:bg-card/85',
       )}
     >
       <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/70">
@@ -1907,7 +1931,7 @@ function EmptyTerminalCard({
             'mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border bg-white/70 px-3 text-[11px] font-medium transition-colors hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:bg-transparent dark:hover:bg-white/10',
             partial
               ? 'border-[#FFC910]/60 text-[#57479C] dark:border-[#FFC910]/35 dark:text-foreground'
-              : 'border-[#EA1F59]/40 text-[#EA1F59] dark:border-[#EA1F59]/35',
+              : 'border-[#FF0061]/40 text-[#FF0061] dark:border-[#FF0061]/35',
           )}
         >
           <RotateCcw className={cn('h-3.5 w-3.5', retrying && 'animate-spin')} />
@@ -1930,9 +1954,9 @@ function ExpertReportHeader({ workflowId }: { workflowId: string }): JSX.Element
 
 function BrowserErrorFinalUrlBanner(): JSX.Element {
   return (
-    <div className="mb-3 rounded-md border border-[#EA1F59]/30 bg-[#EA1F59]/5 px-3 py-2 text-sm text-[#595757] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10 dark:text-foreground">
+    <div className="mb-3 rounded-md border border-[#FF0061]/30 bg-[#FF0061]/5 px-3 py-2 text-sm text-[#595757] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10 dark:text-foreground">
       <div className="flex items-start gap-2">
-        <Globe className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
+        <Globe className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0061]" aria-hidden />
         <div className="min-w-0">
           <div className="font-medium">网页没有成功打开</div>
           <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
@@ -1998,10 +2022,10 @@ function FollowUpChips({
             key={`${i}-${a.slice(0, 12)}`}
             type="button"
             onClick={() => onPick(a)}
-            className="group inline-flex min-h-8 max-w-full items-start gap-2 rounded-[6px] border border-[#DCDDDD] bg-white px-2.5 py-1.5 text-left text-xs font-medium text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 sm:max-w-[280px] dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:bg-[#EA1F59]/10 dark:hover:text-foreground"
+            className="group inline-flex min-h-8 max-w-full items-start gap-2 rounded-[6px] border border-[#DCDDDD] bg-white px-2.5 py-1.5 text-left text-xs font-medium text-[#595757] transition-colors hover:border-[#FF0061]/35 hover:bg-[#FF0061]/5 hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 sm:max-w-[280px] dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:bg-[#FF0061]/10 dark:hover:text-foreground"
           >
             <ChevronRight
-              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#ADADAD] transition-transform group-hover:translate-x-0.5 group-hover:text-[#EA1F59]"
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#ADADAD] transition-transform group-hover:translate-x-0.5 group-hover:text-[#FF0061]"
               aria-hidden
             />
             <span className="min-w-0 flex-1 leading-5">{a}</span>
@@ -2057,9 +2081,7 @@ function ScreenshotThumbnailCard({
   });
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const [failed, setFailed] = React.useState(false);
-  const [downloadState, setDownloadState] = React.useState<
-    'idle' | 'loading' | 'failed'
-  >('idle');
+  const [downloadState, setDownloadState] = React.useState<'idle' | 'loading' | 'failed'>('idle');
   React.useEffect(() => {
     let cancelled = false;
     let createdUrl: string | null = null;
@@ -2127,7 +2149,8 @@ function ScreenshotThumbnailCard({
       setDownloadState('idle');
     } else {
       setDownloadState('failed');
-      toast.show(downloadFailureMessage(result.status), 'error');
+      if (!isUnavailableFileStatus(result.status))
+        toast.show(downloadFailureMessage(result.status), 'error');
     }
   };
   const metaLabel = downloadFileMetaLabel({
@@ -2144,7 +2167,7 @@ function ScreenshotThumbnailCard({
       className={cn(
         'group my-2 flex w-full max-w-md flex-col gap-2 overflow-hidden rounded-[8px] border bg-white p-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85',
         downloadState === 'failed'
-          ? 'border-[#EA1F59]/40 bg-[#EA1F59]/5'
+          ? 'border-[#FF0061]/40 bg-[#FF0061]/5'
           : downloadState === 'loading'
             ? 'border-[#57479C]/40 bg-[#57479C]/5 opacity-90'
             : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
@@ -2170,10 +2193,7 @@ function ScreenshotThumbnailCard({
             }}
           />
         ) : (
-          <div
-            aria-hidden
-            className="hola-skel block h-48 w-full bg-[#EFEFEF]/70"
-          />
+          <div aria-hidden className="hola-skel block h-48 w-full bg-[#EFEFEF]/70" />
         )}
       </div>
       <div className="flex items-center gap-2 border-t border-[#DCDDDD]/70 px-1 pb-0.5 pt-2 text-xs dark:border-white/10">
@@ -2184,9 +2204,7 @@ function ScreenshotThumbnailCard({
           <div
             className={cn(
               'mt-0.5 text-[11px]',
-              downloadState === 'failed'
-                ? 'text-[#EA1F59]'
-                : 'text-muted-foreground',
+              downloadState === 'failed' ? 'text-[#FF0061]' : 'text-muted-foreground',
             )}
           >
             {downloadState === 'loading'
@@ -2197,14 +2215,14 @@ function ScreenshotThumbnailCard({
           </div>
         </div>
         {downloadState === 'loading' ? (
-          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" />
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#FF0061]" />
         ) : (
           <Download
             className={cn(
               'h-4 w-4 shrink-0 transition-colors',
               downloadState === 'failed'
-                ? 'text-[#EA1F59]'
-                : 'text-muted-foreground group-hover:text-[#EA1F59]',
+                ? 'text-[#FF0061]'
+                : 'text-muted-foreground group-hover:text-[#FF0061]',
             )}
           />
         )}
@@ -2292,7 +2310,7 @@ function MarkdownCodeBlock({
               meta.variant === 'diagram'
                 ? 'bg-[#42C0EF]'
                 : meta.variant === 'content'
-                  ? 'bg-[#EA1F59]'
+                  ? 'bg-[#FF0061]'
                   : 'bg-[#57479C]',
             )}
           />
@@ -2304,7 +2322,7 @@ function MarkdownCodeBlock({
           type="button"
           onClick={() => void handleCopy()}
           disabled={!text}
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-white hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-white hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
           aria-label={copied ? `${meta.copyLabel}已复制` : `复制${meta.copyLabel}`}
           title={copied ? '已复制' : `复制${meta.copyLabel}`}
         >
@@ -2442,11 +2460,13 @@ function TerminalSummary({
       };
     }
     const list =
-      parsed && typeof parsed === 'object' && Array.isArray((parsed as { suggestions?: unknown }).suggestions)
-        ? ((parsed as { suggestions: unknown[] }).suggestions
+      parsed &&
+      typeof parsed === 'object' &&
+      Array.isArray((parsed as { suggestions?: unknown }).suggestions)
+        ? (parsed as { suggestions: unknown[] }).suggestions
             .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
             .map((s) => s.trim())
-            .slice(0, 3))
+            .slice(0, 3)
         : [];
     return {
       displayText: textWithoutFollowUps.replace(re, '').trim(),
@@ -2457,9 +2477,7 @@ function TerminalSummary({
   // model embedded in its text. Either way, the chip render path
   // below sees a single canonical `suggestions` array.
   const suggestions =
-    serverSuggestions && serverSuggestions.length > 0
-      ? serverSuggestions
-      : parsedSuggestions;
+    serverSuggestions && serverSuggestions.length > 0 ? serverSuggestions : parsedSuggestions;
   // O10 — typewriter reveal of the SUMMARY text only (failed cards
   // skip this so users see the failure reason immediately). Resets
   // when text changes (new task / re-render with fresh content).
@@ -2496,9 +2514,7 @@ function TerminalSummary({
   const hasRealUrl = safeCurrentUrl !== null;
   const endedOnBrowserErrorPage = isBrowserErrorUrl(currentUrl);
   const usableAttachmentCount =
-    attachments?.filter(
-      (attachment) => attachment.availability !== 'unavailable',
-    ).length ?? 0;
+    attachments?.filter((attachment) => attachment.availability !== 'unavailable').length ?? 0;
   const fallbackPlainText = React.useMemo(
     () =>
       terminalArtifactFallbackText({
@@ -2518,9 +2534,19 @@ function TerminalSummary({
   // card itself only ever shows the humanised version). Substitute the
   // same friendly summary the user reads. Other terminal states copy
   // their actual result text unchanged.
+  const failureExecutionMode = useTaskStore((state) => {
+    const task = state.tasks.find((item) => item.taskId === taskId);
+    return task?.videoType
+      ? 'video_creation'
+      : (task?.executionMode ??
+          (hasBrowserRecordForWorkbench(task ?? null) ? 'browser' : 'generate'));
+  });
   const copyBodyText = React.useMemo(
-    () => (status === 'failed' ? failureResultCopyText(displayText) : displayText),
-    [status, displayText],
+    () =>
+      status === 'failed'
+        ? failureResultCopyText(displayText, { executionMode: failureExecutionMode })
+        : displayText,
+    [status, displayText, failureExecutionMode],
   );
   const plainText = React.useMemo(
     () => stripMarkdown(copyBodyText) || fallbackPlainText,
@@ -2552,13 +2578,29 @@ function TerminalSummary({
   // navigate to the new task automatically — no manual route push
   // needed here.
   const rerunTask = useTaskStore((s) => s.rerunTask);
+  // Batch 10.2 — refund ledger status + original input attachments.
+  const failureContext = useTaskFailureContext(taskId, status);
+  const ensureFailureContext = failureContext.ensure;
   const [retryingIntent, setRetryingIntent] = React.useState<string | null>(null);
   const handleRetry = React.useCallback(
     async (retryIntent: string): Promise<void> => {
       if (retryingIntent || !taskId) return;
       setRetryingIntent(retryIntent);
       try {
-        const result = await rerunTask(taskId);
+        const context = await ensureFailureContext();
+        if (!mountedRef.current) return;
+        if (!context) {
+          toast.show('无法恢复原任务输入，请稍后重试。', 'error');
+          return;
+        }
+        if (context.unavailableInputCount) {
+          toast.show('附件已失效，请重新上传', 'error');
+          return;
+        }
+        const result = await rerunTask(taskId, undefined, {
+          fileIds: context?.inputFiles.map((file) => file.fileId) ?? [],
+          retryOfTaskId: context?.executionMode === 'generate' ? taskId : undefined,
+        });
         if (!mountedRef.current) return;
         if ('error' in result) {
           toast.show(taskActionError('重新执行失败', result.error), 'error');
@@ -2571,7 +2613,7 @@ function TerminalSummary({
         }
       }
     },
-    [rerunTask, taskId, mountedRef, retryingIntent, toast],
+    [ensureFailureContext, rerunTask, taskId, mountedRef, retryingIntent, toast],
   );
   // Codex IA close-out — the result card no longer hosts the
   // browser-panel entry. That moved to TaskToolbar at the top of the
@@ -2581,135 +2623,132 @@ function TerminalSummary({
       {isFailedLike && (
         <FailureHeaderCard
           status={status}
-          errorText={status === 'failed' ? displayText ?? '' : ''}
+          executionMode={failureExecutionMode}
+          errorText={status === 'failed' ? (displayText ?? '') : ''}
           onRetry={
             terminalAllowsRerun(status, displayText ?? '') && intent
               ? () => void handleRetry(intent)
               : undefined
           }
           retrying={terminalAllowsRerun(status, displayText ?? '') && retryingIntent != null}
+          refund={refundStatusCopy(failureContext.context?.refund.state)}
+          attachmentNote={retryAttachmentNote(failureContext.context)}
         />
       )}
-      {!isFailedLike && endedOnBrowserErrorPage && (
-        <BrowserErrorFinalUrlBanner />
-      )}
+      {!isFailedLike && endedOnBrowserErrorPage && <BrowserErrorFinalUrlBanner />}
       {/* Phase 4 R1 B.6 — expert-report header (only on success
           panels; failed/cancelled never carry a workflow id). */}
-      {!isFailedLike && expertWorkflowId && (
-        <ExpertReportHeader workflowId={expertWorkflowId} />
-      )}
+      {!isFailedLike && expertWorkflowId && <ExpertReportHeader workflowId={expertWorkflowId} />}
       {/* BOSS feedback — skip the markdown body for failed tasks
           to avoid duplicating the error text already shown in
           FailureHeaderCard's collapsible. Cancelled status keeps
           the body because there's often partial content worth
           preserving. */}
-      {status === 'failed' ? null : (() => {
-        // Empty-result fallback. When the sanitized text is
-        // suspiciously short (< 20 chars after stripping markdown
-        // structure / ordinals / whitespace), surface a hint card
-        // instead of rendering a near-empty prose block. Common
-        // causes: model hit max_tokens before producing real content,
-        // post-check ate everything, tool output was structurally
-        // invalid. Threshold matches the orchestrator's answer-verifier
-        // checkEmptyResult so the SPA never displays a near-empty
-        // success card the backend would have flagged fixable.
-        //
-        // BUG-A2 fix (2026-05-20): bypass the empty-result card when
-        // the original (un-sanitized) answer is substantial (>200
-        // non-whitespace chars). Structured Chinese answers heavy on
-        // headers / tables / bullets sanitize to a small "meaningful"
-        // slice even when the user is reading a rich response — the
-        // sanitizer was stripping `^#{1,6}\s+.*$` (full header lines)
-        // and `[|*_]` table/emphasis markers, which over-eats long
-        // markdown reports. 200 is generous enough that no genuinely
-        // empty answer can hit it, but small enough to still catch
-        // the original failure mode (single-line stub / pure ordinals).
-        const sanitized = sanitizeMarkdownTrailingPunctuation(
-          sanitizeForRender(revealed),
-        );
-        if (terminalResultContentInsufficient({
-          status,
-          displayText,
-          revealedText: sanitized,
-          intent,
-          attachmentCount: usableAttachmentCount,
-        })) {
-          const copy = terminalInsufficientCopy();
-          return (
-            <div className="rounded-md border border-[#FFC910]/55 bg-[#FFC910]/10 px-3 py-2.5 text-sm text-[#595757] dark:border-[#FFC910]/35 dark:text-foreground">
-              <div className="font-medium">{copy.title}</div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {copy.body}
+      {status === 'failed'
+        ? null
+        : (() => {
+            // Empty-result fallback. When the sanitized text is
+            // suspiciously short (< 20 chars after stripping markdown
+            // structure / ordinals / whitespace), surface a hint card
+            // instead of rendering a near-empty prose block. Common
+            // causes: model hit max_tokens before producing real content,
+            // post-check ate everything, tool output was structurally
+            // invalid. Threshold matches the orchestrator's answer-verifier
+            // checkEmptyResult so the SPA never displays a near-empty
+            // success card the backend would have flagged fixable.
+            //
+            // BUG-A2 fix (2026-05-20): bypass the empty-result card when
+            // the original (un-sanitized) answer is substantial (>200
+            // non-whitespace chars). Structured Chinese answers heavy on
+            // headers / tables / bullets sanitize to a small "meaningful"
+            // slice even when the user is reading a rich response — the
+            // sanitizer was stripping `^#{1,6}\s+.*$` (full header lines)
+            // and `[|*_]` table/emphasis markers, which over-eats long
+            // markdown reports. 200 is generous enough that no genuinely
+            // empty answer can hit it, but small enough to still catch
+            // the original failure mode (single-line stub / pure ordinals).
+            const sanitized = sanitizeMarkdownTrailingPunctuation(sanitizeForRender(revealed));
+            if (
+              terminalResultContentInsufficient({
+                status,
+                displayText,
+                revealedText: sanitized,
+                intent,
+                attachmentCount: usableAttachmentCount,
+              })
+            ) {
+              const copy = terminalInsufficientCopy();
+              return (
+                <div className="rounded-md border border-[#FFC910]/55 bg-[#FFC910]/10 px-3 py-2.5 text-sm text-[#595757] dark:border-[#FFC910]/35 dark:text-foreground">
+                  <div className="font-medium">{copy.title}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{copy.body}</div>
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                    {intent && !verificationBannerPresent && (
+                      <button
+                        type="button"
+                        onClick={() => void handleRetry(intent)}
+                        disabled={retryingIntent != null}
+                        aria-label={retryingIntent ? '正在重新执行任务' : '重新执行任务'}
+                        title={retryingIntent ? '正在重新执行' : '重新执行任务'}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#FF0061]/25 bg-[#FF0061]/5 px-3 text-[11px] font-medium text-[#FF0061] transition-colors hover:border-[#FF0061]/45 hover:bg-[#FF0061]/10 disabled:cursor-wait disabled:opacity-60 dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10 dark:text-foreground"
+                      >
+                        <RotateCcw
+                          className={cn('h-3.5 w-3.5', retryingIntent && 'animate-spin')}
+                        />
+                        <span>重新执行</span>
+                      </button>
+                    )}
+                    {intent && onSuggestionPick && (
+                      <button
+                        type="button"
+                        onClick={() => onSuggestionPick(intent)}
+                        aria-label="填入原描述"
+                        title="填入原描述后可编辑再发送"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#FFC910]/60 bg-white/70 px-3 text-[11px] font-medium text-[#57479C] transition-colors hover:bg-white dark:border-[#FFC910]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        填入原描述
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const feedback = displayText.trim() || '(空结果)';
+                        void copyTo(feedback, '反馈内容');
+                      }}
+                      aria-label="复制反馈内容"
+                      title="复制反馈"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white/60 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-white dark:border-white/10 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>
+                  {sanitized}
+                </ReactMarkdown>
               </div>
-              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                {intent && !verificationBannerPresent && (
-                  <button
-                    type="button"
-                    onClick={() => void handleRetry(intent)}
-                    disabled={retryingIntent != null}
-                    aria-label={retryingIntent ? '正在重新执行任务' : '重新执行任务'}
-                    title={retryingIntent ? '正在重新执行' : '重新执行任务'}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-3 text-[11px] font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10 disabled:cursor-wait disabled:opacity-60 dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10 dark:text-foreground"
-                  >
-                    <RotateCcw className={cn('h-3.5 w-3.5', retryingIntent && 'animate-spin')} />
-                    <span>重新执行</span>
-                  </button>
-                )}
-                {intent && onSuggestionPick && (
-                  <button
-                    type="button"
-                    onClick={() => onSuggestionPick(intent)}
-                    aria-label="填入原描述"
-                    title="填入原描述后可编辑再发送"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#FFC910]/60 bg-white/70 px-3 text-[11px] font-medium text-[#57479C] transition-colors hover:bg-white dark:border-[#FFC910]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    填入原描述
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    const feedback = displayText.trim() || '(空结果)';
-                    void copyTo(feedback, '反馈内容');
-                  }}
-                  aria-label="复制反馈内容"
-                  title="复制反馈"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white/60 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-white dark:border-white/10 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          );
-        }
-        return (
-          <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>
-              {sanitized}
-            </ReactMarkdown>
-          </div>
-        );
-      })()}
+            );
+          })()}
       {hasRealUrl && (
-        <div
-          className={cn(
-            'mt-4 border-t pt-3 text-xs',
-            tone.divider,
-          )}
-        >
+        <div className={cn('mt-4 border-t pt-3 text-xs', tone.divider)}>
           <button
             type="button"
-            onClick={() => setPendingLink(safeCurrentUrl)}
+            onClick={() => {
+              if (needsExternalLinkConfirmation(safeCurrentUrl)) setPendingLink(safeCurrentUrl);
+              else openExternalLink(safeCurrentUrl);
+            }}
             className="group flex min-h-12 w-full min-w-0 items-start gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
           >
             <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#EFEFEF]/70 text-[#595757] transition-colors group-hover:bg-white dark:bg-white/10 dark:text-foreground/80">
               <ExternalLink className="h-3.5 w-3.5" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block font-medium text-foreground/85">
-                打开页面链接
-              </span>
+              <span className="block font-medium text-foreground/85">打开页面链接</span>
               <span className="mt-0.5 block truncate leading-5 text-muted-foreground">
                 {safeCurrentUrl}
               </span>
@@ -2794,7 +2833,7 @@ function TerminalSummary({
             onClick={() => void copyTo(plainText, '纯文本')}
             aria-label="复制纯文本结果"
             title="复制"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#DCDDDD] bg-white/75 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.04)] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:border-[#EA1F59]/40 dark:hover:bg-[#EA1F59]/10 dark:hover:text-foreground"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#DCDDDD] bg-white/75 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.04)] transition-colors hover:border-[#FF0061]/35 hover:bg-[#FF0061]/5 hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:border-[#FF0061]/40 dark:hover:bg-[#FF0061]/10 dark:hover:text-foreground"
           >
             <Copy className="h-3.5 w-3.5" />
           </button>
@@ -2817,7 +2856,7 @@ function TerminalSummary({
             >
               <DropdownMenuItem
                 onSelect={() => void copyTo(markdownText, '为 Markdown')}
-                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
               >
                 <FileText className="text-[#ADADAD]" />
                 <span>复制为 Markdown</span>
@@ -2830,7 +2869,7 @@ function TerminalSummary({
                     toast.show('下载失败，请复制内容后手动保存', 'error');
                   }
                 }}
-                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
               >
                 <Download className="text-[#ADADAD]" />
                 <span>下载 .md</span>
@@ -2838,14 +2877,10 @@ function TerminalSummary({
               {taskId && (
                 <DropdownMenuItem
                   onSelect={() => {
-                    const origin =
-                      typeof window !== 'undefined' ? window.location.origin : '';
-                    void copyTo(
-                      `${origin}/?task=${encodeURIComponent(taskId)}`,
-                      '任务链接',
-                    );
+                    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+                    void copyTo(`${origin}/?task=${encodeURIComponent(taskId)}`, '任务链接');
                   }}
-                  className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+                  className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
                 >
                   <Link2 className="text-[#ADADAD]" />
                   <span>分享任务</span>
@@ -2854,7 +2889,7 @@ function TerminalSummary({
               {!isFailedLike && intent && (
                 <DropdownMenuItem
                   onSelect={() => setScheduleDialogOpen(true)}
-                  className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+                  className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
                 >
                   <Clock className="text-[#ADADAD]" />
                   <span>设为定时</span>
@@ -2889,9 +2924,9 @@ function TerminalSummary({
               key={`${i}-${s.slice(0, 10)}`}
               type="button"
               onClick={() => onSuggestionPick(s)}
-              className="group flex min-h-10 w-full items-start gap-2.5 rounded-[6px] px-2.5 py-2.5 text-left text-xs text-[#595757] transition-colors hover:bg-[#EFEFEF]/55 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground"
+              className="group flex min-h-10 w-full items-start gap-2.5 rounded-[6px] px-2.5 py-2.5 text-left text-xs text-[#595757] transition-colors hover:bg-[#EFEFEF]/55 hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground"
             >
-              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#DCDDDD] bg-[#EFEFEF]/55 text-[11px] font-medium text-[#595757] transition-colors group-hover:border-[#EA1F59]/35 group-hover:bg-[#EA1F59]/5 group-hover:text-[#EA1F59] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70">
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#DCDDDD] bg-[#EFEFEF]/55 text-[11px] font-medium text-[#595757] transition-colors group-hover:border-[#FF0061]/35 group-hover:bg-[#FF0061]/5 group-hover:text-[#FF0061] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70">
                 {i + 1}
               </span>
               <span className="min-w-0 flex-1 leading-5">{s}</span>
@@ -2904,7 +2939,7 @@ function TerminalSummary({
         onClose={() => setPendingLink(null)}
         onConfirm={(href) => {
           setPendingLink(null);
-          window.open(href, '_blank', 'noopener,noreferrer');
+          openExternalLink(href);
         }}
       />
       {/* Phase 5a — schedule-this-task dialog. `initialIntent` pre-
@@ -2964,11 +2999,7 @@ function stripMarkdown(input: string): string {
   return out.trim();
 }
 
-function useTypewriterReveal(
-  full: string,
-  speedCharsPerSec: number,
-  animate = true,
-): string {
+function useTypewriterReveal(full: string, speedCharsPerSec: number, animate = true): string {
   const [revealed, setRevealed] = React.useState<string>(full);
   const seenRef = React.useRef<string>('');
   React.useEffect(() => {
@@ -3059,14 +3090,14 @@ function makeMarkdownComponents(opts: {
           target="_blank"
           rel="noopener noreferrer"
           onClick={
-            opts.onExternalClick
+            opts.onExternalClick && needsExternalLinkConfirmation(safeHref)
               ? (e) => {
                   e.preventDefault();
                   opts.onExternalClick?.(safeHref);
                 }
               : undefined
           }
-          className="inline-flex min-h-7 items-center gap-1 rounded-[4px] px-0.5 align-middle text-[#EA1F59] underline decoration-[#EA1F59]/35 underline-offset-2 hover:text-[#EA1F59] dark:text-[#EA1F59] dark:hover:text-[#EA1F59]"
+          className="inline-flex min-h-7 items-center gap-1 rounded-[4px] px-0.5 align-middle text-[#FF0061] underline decoration-[#FF0061]/35 underline-offset-2 hover:text-[#FF0061] dark:text-[#FF0061] dark:hover:text-[#FF0061]"
           {...rest}
         >
           {children}
@@ -3162,7 +3193,11 @@ function makeMarkdownComponents(opts: {
       if (lang === 'language-holaday-file') {
         return <>{children}</>;
       }
-      return <MarkdownCodeBlock languageClassName={lang} rest={rest}>{children}</MarkdownCodeBlock>;
+      return (
+        <MarkdownCodeBlock languageClassName={lang} rest={rest}>
+          {children}
+        </MarkdownCodeBlock>
+      );
     },
     // Phase 4 R1 — paragraph override. Two transforms based on the
     // FIRST text node:
@@ -3232,10 +3267,7 @@ function ResponsiveMarkdownTable({
   return (
     <>
       <div className="relative my-3 -mx-1 hidden overflow-x-auto rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-6 after:bg-gradient-to-l after:from-white after:to-transparent dark:border-white/10 dark:bg-card/85 dark:after:from-card sm:block">
-        <table
-          className="w-auto min-w-full border-collapse text-left text-[13px]"
-          {...rest}
-        >
+        <table className="w-auto min-w-full border-collapse text-left text-[13px]" {...rest}>
           {children}
         </table>
       </div>
@@ -3314,86 +3346,4 @@ function markdownElementTagName(element: React.ReactElement): string | null {
   if (typeof element.type === 'string') return element.type;
   const props = element.props as { node?: { tagName?: unknown } };
   return typeof props.node?.tagName === 'string' ? props.node.tagName : null;
-}
-
-// ───────────────────────── Failure header (user-friendly copy)
-
-function FailureHeaderCard({
-  status,
-  errorText,
-  onRetry,
-  retrying = false,
-}: {
-  status: UiTask['status'];
-  errorText: string;
-  onRetry?: () => void;
-  retrying?: boolean;
-}): JSX.Element {
-  const cancelled = status === 'cancelled';
-  const friendly = cancelled
-    ? {
-        title: '已取消',
-        subtitle: '任务已取消。下方保留了已生成的部分内容。',
-        nextStep: '需要继续时可以重新执行这个任务。',
-      }
-    : classifyFriendlyFailure(errorText);
-  const hasTechnical = !cancelled && errorText.trim().length > 0;
-  const detailText = friendlyFailureDetail(errorText);
-  const [showTechnical, setShowTechnical] = React.useState(false);
-  return (
-    <div
-      className={cn(
-        'mb-3 rounded-md border px-3 py-2 text-sm',
-        cancelled
-          ? 'border-[#DCDDDD] bg-[#EFEFEF]/45 text-muted-foreground dark:border-white/10 dark:bg-white/5'
-          : 'border-[#EA1F59]/35 bg-[#EA1F59]/5 text-[#595757] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10 dark:text-foreground',
-      )}
-      role="alert"
-    >
-      <div className="font-medium">{friendly.title}</div>
-      <div className="mt-0.5 text-xs opacity-80">{friendly.subtitle}</div>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <p className="min-w-[180px] flex-1 text-[11px] leading-5 text-[#595757]/75 dark:text-foreground/70">
-          {friendly.nextStep}
-        </p>
-        {onRetry && (
-          <button
-            type="button"
-            onClick={onRetry}
-            disabled={retrying}
-            aria-label={retrying ? '正在重新执行任务' : '重新执行任务'}
-            title={retrying ? '正在重新执行' : '重新执行任务'}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[#EA1F59]/25 bg-white px-3 text-[11px] font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/5 disabled:cursor-wait disabled:opacity-60 dark:border-[#EA1F59]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-[#EA1F59]/10"
-          >
-            <RotateCcw className={cn('h-3.5 w-3.5', retrying && 'animate-spin')} aria-hidden />
-            <span>{retrying ? '重新执行中…' : '重新执行'}</span>
-          </button>
-        )}
-      </div>
-      {hasTechnical && (
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => setShowTechnical((v) => !v)}
-            aria-expanded={showTechnical}
-            aria-label={showTechnical ? '收起失败详情' : '查看失败详情'}
-            title={showTechnical ? '收起失败详情' : '查看失败详情'}
-            className="inline-flex h-8 items-center gap-1 rounded-[6px] px-2 text-[11px] font-medium text-[#595757] transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
-          >
-            {showTechnical ? (
-              <ChevronDown className="h-3 w-3" aria-hidden />
-            ) : (
-              <ChevronRight className="h-3 w-3" aria-hidden />
-            )}
-            <span>详情</span>
-          </button>
-          {showTechnical && (
-            <pre className="mt-1.5 whitespace-pre-wrap break-words rounded bg-white/70 px-2 py-1.5 text-[11px] font-mono leading-relaxed text-[#595757] dark:bg-white/10 dark:text-foreground">
-              {detailText}
-            </pre>
-          )}
-        </div>
-      )}
-    </div>
-  );
 }

@@ -94,9 +94,7 @@ describe('CapabilityCenterContent', () => {
     render(<CapabilityCenterContent {...baseProps} />);
 
     expect(screen.getByRole('heading', { level: 1, name: '技能中心' })).toBeTruthy();
-    expect(
-      screen.getByText('说出你想完成的事，我会自动匹配并组合需要的技能。'),
-    ).toBeTruthy();
+    expect(screen.getByText('说出你想完成的事，我会自动匹配并组合需要的技能。')).toBeTruthy();
     expect(screen.getByRole('textbox', { name: '描述想完成的任务' })).toBeTruthy();
     const starters = screen.getByRole('region', { name: '不确定从哪开始？' });
     expect(within(starters).getByText('分析这份周报并找出异常')).toBeTruthy();
@@ -144,12 +142,7 @@ describe('CapabilityCenterContent', () => {
 
   it('lets users reveal or hide the execution preview for an understood task', async () => {
     const user = userEvent.setup();
-    render(
-      <CapabilityCenterContent
-        {...baseProps}
-        query="帮我分析销售数据，找出复购率下降原因"
-      />,
-    );
+    render(<CapabilityCenterContent {...baseProps} query="帮我分析销售数据，找出复购率下降原因" />);
 
     const understood = screen.getByTestId('intent-understanding');
     expect(within(understood).getByText('Holaday 已理解')).toBeTruthy();
@@ -172,7 +165,9 @@ describe('CapabilityCenterContent', () => {
   it('presents every starter as a consistent task example instead of mixing preview and start', () => {
     render(<CapabilityCenterContent {...baseProps} activeSkillId="social-media-strategy" />);
 
-    expect(screen.getAllByText('从目标到选题，生成一周内容计划。').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('从目标到选题，生成一周内容计划。').length).toBeGreaterThanOrEqual(
+      2,
+    );
     expect(screen.queryByText('能力可预览，启用后使用')).toBeNull();
     expect(
       screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }),
@@ -215,9 +210,7 @@ describe('CapabilityCenterContent', () => {
     }
     render(<Harness />);
 
-    await user.click(
-      screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }),
-    );
+    await user.click(screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }));
     expect(
       (screen.getByRole('textbox', { name: '描述想完成的任务' }) as HTMLTextAreaElement).value,
     ).toBe('');
@@ -246,20 +239,14 @@ describe('CapabilityCenterContent', () => {
     }
     render(<Harness />);
 
-    await user.click(
-      screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }),
-    );
+    await user.click(screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }));
     const start = screen.getByRole('button', {
       name: '开始任务：为新品规划一周社媒内容',
     });
     expect(start.hasAttribute('disabled')).toBe(false);
     await user.click(start);
 
-    expect(onStart).toHaveBeenCalledWith(
-      skills[1],
-      '为新品规划一周社媒内容',
-      'manual',
-    );
+    expect(onStart).toHaveBeenCalledWith(skills[1], '为新品规划一周社媒内容', 'manual');
   });
 
   it('keeps the selected task while letting the user change which skill will run it', async () => {
@@ -281,19 +268,11 @@ describe('CapabilityCenterContent', () => {
     }
     render(<Harness />);
 
-    await user.click(
-      screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }),
-    );
+    await user.click(screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }));
     await user.click(screen.getByRole('button', { name: '查看合同风险审查' }));
-    await user.click(
-      screen.getByRole('button', { name: '开始任务：为新品规划一周社媒内容' }),
-    );
+    await user.click(screen.getByRole('button', { name: '开始任务：为新品规划一周社媒内容' }));
 
-    expect(onStart).toHaveBeenCalledWith(
-      skills[2],
-      '为新品规划一周社媒内容',
-      'manual',
-    );
+    expect(onStart).toHaveBeenCalledWith(skills[2], '为新品规划一周社媒内容', 'manual');
   });
 
   it('combines selected task and optional extra requirements only when starting', async () => {
@@ -312,16 +291,12 @@ describe('CapabilityCenterContent', () => {
     }
     render(<Harness />);
 
-    await user.click(
-      screen.getByRole('button', { name: '选择任务示例：检查这份合同的主要风险' }),
-    );
+    await user.click(screen.getByRole('button', { name: '选择任务示例：检查这份合同的主要风险' }));
     await user.type(
       screen.getByRole('textbox', { name: '描述想完成的任务' }),
       '重点看自动续费和违约责任',
     );
-    await user.click(
-      screen.getByRole('button', { name: '开始任务：检查这份合同的主要风险' }),
-    );
+    await user.click(screen.getByRole('button', { name: '开始任务：检查这份合同的主要风险' }));
 
     expect(onStart).toHaveBeenCalledWith(
       skills[2],
@@ -334,27 +309,23 @@ describe('CapabilityCenterContent', () => {
     const user = userEvent.setup();
     function Harness(): JSX.Element {
       const [query, setQuery] = React.useState('');
-      return (
-        <CapabilityCenterContent {...baseProps} query={query} onQueryChange={setQuery} />
-      );
+      return <CapabilityCenterContent {...baseProps} query={query} onQueryChange={setQuery} />;
     }
     render(<Harness />);
 
-    await user.click(
-      screen.getByRole('button', { name: '选择任务示例：分析这份周报并找出异常' }),
-    );
+    await user.click(screen.getByRole('button', { name: '选择任务示例：分析这份周报并找出异常' }));
     await user.click(screen.getByRole('button', { name: '移除已选任务' }));
 
     expect(screen.queryByText('已选任务')).toBeNull();
-    expect(screen.getByRole('button', { name: '开始任务：请先描述任务' }).hasAttribute('disabled')).toBe(true);
+    expect(
+      screen.getByRole('button', { name: '开始任务：请先描述任务' }).hasAttribute('disabled'),
+    ).toBe(true);
   });
 
   it('hands chosen files to the real attachment callback before starting', async () => {
     const user = userEvent.setup();
     const onAddAttachments = vi.fn();
-    render(
-      <CapabilityCenterContent {...baseProps} onAddAttachments={onAddAttachments} />,
-    );
+    render(<CapabilityCenterContent {...baseProps} onAddAttachments={onAddAttachments} />);
 
     const input = screen.getByLabelText('选择任务附件') as HTMLInputElement;
     const file = new File(['sales'], '销售数据.csv', { type: 'text/csv' });
@@ -423,12 +394,12 @@ describe('CapabilityCenterContent', () => {
       expect(item.className).not.toContain('focus:text-accent-foreground');
     }
 
-    expect(
-      within(automaticItem).getByText('根据任务和附件选择最合适的技能').className,
-    ).toContain('text-[#746E72]');
-    expect(
-      within(reportItem).getByText('把零散数据变成清晰结论。').className,
-    ).toContain('text-[#746E72]');
+    expect(within(automaticItem).getByText('根据任务和附件选择最合适的技能').className).toContain(
+      'text-[#746E72]',
+    );
+    expect(within(reportItem).getByText('把零散数据变成清晰结论。').className).toContain(
+      'text-[#746E72]',
+    );
   });
 
   it('returns an explicit skill choice to automatic matching', async () => {
@@ -484,22 +455,14 @@ describe('CapabilityCenterContent', () => {
     }
 
     render(<Harness />);
-    await user.click(
-      screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }),
-    );
+    await user.click(screen.getByRole('button', { name: '选择任务示例：为新品规划一周社媒内容' }));
     await user.click(screen.getByRole('button', { name: '选择技能：社交媒体策略' }));
     await user.click(screen.getByRole('menuitem', { name: '自动匹配' }));
 
     expect(screen.getByRole('button', { name: '选择技能：自动匹配' })).toBeTruthy();
-    await user.click(
-      screen.getByRole('button', { name: '开始任务：为新品规划一周社媒内容' }),
-    );
+    await user.click(screen.getByRole('button', { name: '开始任务：为新品规划一周社媒内容' }));
 
-    expect(onStart).toHaveBeenCalledWith(
-      skills[1],
-      '为新品规划一周社媒内容',
-      'suggested',
-    );
+    expect(onStart).toHaveBeenCalledWith(skills[1], '为新品规划一周社媒内容', 'suggested');
   });
 
   it('closes the skill picker with Escape while search is focused', async () => {
@@ -717,9 +680,7 @@ describe('CapabilityCenterContent', () => {
     render(<Harness />);
     expect(screen.getByTestId('intent-understanding')).toBeTruthy();
 
-    await user.click(
-      screen.getByRole('button', { name: '选择任务示例：分析这份周报并找出异常' }),
-    );
+    await user.click(screen.getByRole('button', { name: '选择任务示例：分析这份周报并找出异常' }));
 
     expect(screen.getAllByText('数据报表解读').length).toBeGreaterThan(0);
     expect(screen.getByText('已选任务')).toBeTruthy();
@@ -736,9 +697,7 @@ describe('CapabilityCenterContent', () => {
     await user.click(screen.getByRole('switch', { name: '设为常用：社交媒体策略' }));
     expect(onToggle).toHaveBeenCalledWith(skills[1]);
     expect(
-      screen
-        .getByRole('switch', { name: '取消常用：数据报表解读' })
-        .getAttribute('aria-checked'),
+      screen.getByRole('switch', { name: '取消常用：数据报表解读' }).getAttribute('aria-checked'),
     ).toBe('true');
     const enabledSwitch = screen.getByRole('switch', { name: '取消常用：数据报表解读' });
     expect(within(enabledSwitch).queryByText('常用')).toBeNull();

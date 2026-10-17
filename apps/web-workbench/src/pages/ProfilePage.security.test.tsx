@@ -5,6 +5,7 @@ import {
   clearClosureRecovery,
   getAccessToken,
   getClosureRecovery,
+  setAccessToken,
 } from '@/lib/auth';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -14,6 +15,7 @@ import { ProfilePage } from './ProfilePage';
 
 const trpcMocks = vi.hoisted(() => ({
   me: vi.fn(),
+  logoutAll: vi.fn(),
   sendPasswordChangeCode: vi.fn(),
   changePasswordWithCode: vi.fn(),
   mfaStatus: vi.fn(),
@@ -31,6 +33,7 @@ vi.mock('@/lib/trpc', () => ({
   trpc: {
     auth: {
       me: { query: trpcMocks.me },
+      logoutAll: { mutate: trpcMocks.logoutAll },
       sendPasswordChangeCode: { mutate: trpcMocks.sendPasswordChangeCode },
       changePasswordWithCode: { mutate: trpcMocks.changePasswordWithCode },
       mfaStatus: { query: trpcMocks.mfaStatus },
@@ -232,4 +235,17 @@ describe('ProfilePage password self-service', () => {
     expect(trustNavigation.querySelector('a[href="/terms"]')).toBeTruthy();
     expect(trustNavigation.querySelector('a[href="/privacy"]')).toBeTruthy();
   });
+});
+
+it('keeps the session and reports failure when logout-all cannot be confirmed', async () => {
+  setAccessToken('synthetic-local-session');
+  trpcMocks.logoutAll.mockRejectedValue(new Error('synthetic outage'));
+  render(
+    <MemoryRouter>
+      <ProfilePage />
+    </MemoryRouter>,
+  );
+  await userEvent.click(await screen.findByRole('button', { name: '退出所有设备' }));
+  expect(await screen.findByText('退出未完成，请重试。')).toBeTruthy();
+  expect(getAccessToken()).toBe('synthetic-local-session');
 });

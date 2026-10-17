@@ -5,7 +5,7 @@
  * default styles). The container is provided by ScheduledCalendarPage's
  * outer wrapper.
  *
- * Brand magenta #EA1F59 drives: today-circle, primary CTA, segment-
+ * Brand magenta #FF0061 drives: today-circle, primary CTA, segment-
  * control highlight, now-indicator line, event-block accents.
  * Greys come from the brand neutral ramp for a
  * single-source-of-truth on type hierarchy.
@@ -15,18 +15,17 @@
  * the calendar and the global NotificationBell popover. */
 
 .hd-calendar {
-  --hd-magenta: #EA1F59;
-  --hd-magenta-rgb: 234, 31, 89;
+  --hd-magenta: #ff0061;
+  --hd-magenta-rgb: 255, 0, 97;
   --hd-text-strong: #292727;
   --hd-text-mid: #595757;
-  --hd-text-muted: #ADADAD;
-  --hd-text-fade: #DCDDDD;
-  --hd-grid: #EFEFEF;
-  --hd-grid-strong: #DCDDDD;
-  --hd-hover-bg: rgba(234, 31, 89, 0.03);
+  --hd-text-muted: #adadad;
+  --hd-text-fade: #dcdddd;
+  --hd-grid: #efefef;
+  --hd-grid-strong: #dcdddd;
+  --hd-hover-bg: rgba(255, 0, 97, 0.03);
   padding: 0 8px;
-  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 .dark .hd-calendar {
   --hd-text-strong: #f1f5f9;
@@ -34,8 +33,8 @@
   --hd-text-muted: #64748b;
   --hd-text-fade: #475569;
   --hd-grid: rgba(255, 255, 255, 0.06);
-  --hd-grid-strong: rgba(255, 255, 255, 0.10);
-  --hd-hover-bg: rgba(234, 31, 89, 0.06);
+  --hd-grid-strong: rgba(255, 255, 255, 0.1);
+  --hd-hover-bg: rgba(255, 0, 97, 0.06);
 }
 
 /* ───────────────────────── Sticky header band (title + toolbar) */
@@ -48,7 +47,7 @@
  * — without it the title bumps into the page top. */
 .hd-calendar-sticky-band {
   position: sticky;
-  top: 0;
+  top: var(--shell-header-height, 0px);
   z-index: 10;
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(12px);
@@ -65,7 +64,7 @@
  * the first paint before the observer fires. */
 .hd-calendar .fc-scrollgrid-section-header > * {
   position: sticky;
-  top: var(--hd-band-h, 120px);
+  top: calc(var(--shell-header-height, 0px) + var(--hd-band-h, 120px));
   z-index: 9;
   background: rgba(255, 255, 255, 0.96);
 }
@@ -147,7 +146,7 @@
 }
 .hd-calendar-toolbar__today:hover {
   background: #ffffff;
-  border-color: #ADADAD;
+  border-color: #adadad;
   color: var(--hd-magenta);
 }
 .dark .hd-calendar-toolbar__today {
@@ -166,8 +165,8 @@
 }
 .hd-calendar-toolbar__views {
   display: inline-flex;
-  background: #EFEFEF;
-  border: 1px solid #DCDDDD;
+  background: #efefef;
+  border: 1px solid #dcdddd;
   border-radius: 8px;
   padding: 2px;
   position: relative;
@@ -190,8 +189,7 @@
   /* BOSS bug fix — transition includes background-color (was
      `color` only), so the magenta-on-active flip animates and we
      don't see a stale transparent background flash. */
-  transition: background-color 150ms ease, color 150ms ease,
-    box-shadow 150ms ease;
+  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
 }
 .hd-calendar-toolbar__view-btn[data-active="true"] {
   /* Keep active text readable even during FullCalendar view swaps:
@@ -200,9 +198,7 @@
   background-color: #ffffff !important;
   color: var(--hd-magenta) !important;
   font-weight: 600;
-  box-shadow:
-    inset 0 0 0 1px rgba(234, 31, 89, 0.28),
-    0 1px 2px rgba(15, 23, 42, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 0, 97, 0.28), 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 .hd-calendar-toolbar__view-btn:not([data-active="true"]):hover {
   color: #1f1f1f;
@@ -216,7 +212,7 @@
 
 .hd-calendar .fc {
   --fc-border-color: var(--hd-grid);
-  --fc-today-bg-color: transparent;  /* we draw the today highlight ourselves */
+  --fc-today-bg-color: transparent; /* we draw the today highlight ourselves */
   --fc-page-bg-color: transparent;
   --fc-neutral-bg-color: transparent;
   --fc-list-event-hover-bg-color: var(--hd-hover-bg);
@@ -269,7 +265,7 @@
   cursor: pointer;
 }
 .hd-calendar .fc-daygrid-day:hover {
-  background-color: #EFEFEF;
+  background-color: #efefef;
 }
 .hd-calendar .fc-daygrid-day-frame {
   padding: 6px 8px;
@@ -334,7 +330,7 @@
   padding: 4px 8px 4px 11px;
   font-size: 13px;
   line-height: 1.4;
-  background: var(--hd-event-bg, rgba(234, 31, 89, 0.08));
+  background: var(--hd-event-bg, rgba(255, 0, 97, 0.08));
   color: var(--hd-event-text, var(--hd-text-strong));
   overflow: hidden;
   text-overflow: ellipsis;
@@ -352,7 +348,7 @@
   background: var(--hd-event-accent, var(--hd-magenta));
 }
 .hd-calendar .fc-event:hover .fc-event-main {
-  background: var(--hd-event-bg-hover, rgba(234, 31, 89, 0.15));
+  background: var(--hd-event-bg-hover, rgba(255, 0, 97, 0.15));
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
 }
 .hd-calendar .fc-event-time,
@@ -383,7 +379,7 @@
   border-top-style: dotted;
 }
 .hd-calendar .fc-timegrid-col.fc-day-today {
-  background: rgba(234, 31, 89, 0.025);
+  background: rgba(255, 0, 97, 0.025);
 }
 .hd-calendar .fc-timegrid-axis {
   border-color: var(--hd-grid);
@@ -392,7 +388,7 @@
   cursor: pointer;
 }
 .hd-calendar .fc-timegrid-col-frame:hover {
-  background: #EFEFEF;
+  background: #efefef;
 }
 
 /* All-day row — hide entirely when no events live there */
@@ -423,7 +419,7 @@
   border-color: var(--hd-grid);
 }
 .hd-calendar .fc-list-day-cushion {
-  background: #EFEFEF;
+  background: #efefef;
   font-weight: 600;
   color: var(--hd-text-strong);
 }
@@ -480,7 +476,7 @@
 
 .hd-quick-create__input:focus,
 .hd-quick-create__time:focus {
-  border-bottom-color: var(--hd-magenta, #EA1F59) !important;
+  border-bottom-color: var(--hd-magenta, #ff0061) !important;
 }
 
 /* ───────────────────────── Keyframes — popover entrance + new pulse */
@@ -502,13 +498,13 @@
 
 @keyframes hd-pulse-new {
   0% {
-    box-shadow: 0 0 0 0 rgba(234, 31, 89, 0.7);
+    box-shadow: 0 0 0 0 rgba(255, 0, 97, 0.7);
   }
   70% {
-    box-shadow: 0 0 0 12px rgba(234, 31, 89, 0);
+    box-shadow: 0 0 0 12px rgba(255, 0, 97, 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(234, 31, 89, 0);
+    box-shadow: 0 0 0 0 rgba(255, 0, 97, 0);
   }
 }
 .hd-pulse-new {

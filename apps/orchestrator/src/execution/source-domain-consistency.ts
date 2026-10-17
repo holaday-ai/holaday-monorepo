@@ -66,7 +66,11 @@ const BARE_DOMAIN_RE =
 const FULL_URL_RE = /https?:\/\/([^\s/,;'"()<>\]]+)/gi;
 
 function normalizeHost(raw: string): string | null {
-  const host = raw.trim().toLowerCase().replace(/^www\./, '').replace(/[.,;:!?）)】」]+$/, '');
+  const host = raw
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, '')
+    .replace(/[.,;:!?）)】」]+$/, '');
   if (!host || !host.includes('.')) return null;
   if (/[^a-z0-9.-]/.test(host)) return null;
   if (OWN_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`))) return null;

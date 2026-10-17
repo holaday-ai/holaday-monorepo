@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+/** Source-text checks must survive formatter line wrapping. */
+const compact = (text: string) => text.replace(/\s+/g, '');
+
 describe('stock tasks layout', () => {
   it('keeps page actions clear of the fixed desktop account dock', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
@@ -24,9 +27,11 @@ describe('stock tasks layout', () => {
       new URL('../components/stocks/StockWorkbenchLayout.tsx', import.meta.url),
       'utf8',
     );
-    const responsiveTargets = `${source}\n${layoutSource}`.match(/h-11 min-\[769px\]:h-(?:8|9)/g) ?? [];
+    const responsiveTargets =
+      `${source}\n${layoutSource}`.match(/h-11 min-\[769px\]:h-(?:8|9)/g) ?? [];
 
-    expect(responsiveTargets).toHaveLength(7);
+    // The approved layout displays market sections directly; its collapse button was removed.
+    expect(responsiveTargets).toHaveLength(6);
     expect(source).toContain('h-11 min-[769px]:h-8');
   });
 
@@ -48,13 +53,20 @@ describe('stock tasks layout', () => {
     expect(source).toContain("import('@/components/stocks/StockScreeningWorkbench')");
     expect(source).toContain("import('@/components/stocks/StockPreferenceProfile')");
     expect(source).toContain('<React.Suspense');
-    expect(source).not.toContain("import { StockRiskRadar } from '@/components/stocks/StockRiskRadar';");
-    expect(source).not.toContain("import { StockPreferenceProfile } from '@/components/stocks/StockPreferenceProfile';");
+    expect(source).not.toContain(
+      "import { StockRiskRadar } from '@/components/stocks/StockRiskRadar';",
+    );
+    expect(source).not.toContain(
+      "import { StockPreferenceProfile } from '@/components/stocks/StockPreferenceProfile';",
+    );
   });
 
   it('uses verified source covers when available and never turns discovery cards into source placeholders', () => {
     const pageSource = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
-    const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
+    const cardSource = readFileSync(
+      new URL('../components/DiscoveryNewsCard.tsx', import.meta.url),
+      'utf8',
+    );
 
     expect(pageSource).toContain('<DiscoveryNewsCard');
     expect(pageSource).toContain('title="市场动态"');
@@ -67,10 +79,17 @@ describe('stock tasks layout', () => {
   });
 
   it('notifies the discovery reader when a declared cover cannot load', () => {
-    const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
+    const cardSource = readFileSync(
+      new URL('../components/DiscoveryNewsCard.tsx', import.meta.url),
+      'utf8',
+    );
 
-    expect(cardSource).toContain('const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);');
-    expect(cardSource).toContain('const showImage = Boolean(item.imageUrl && failedImageUrl !== item.imageUrl);');
+    expect(cardSource).toContain(
+      'const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);',
+    );
+    expect(cardSource).toContain(
+      'const showImage = Boolean(item.imageUrl && failedImageUrl !== item.imageUrl);',
+    );
     expect(cardSource).toContain('onImageError?: (imageUrl: string) => void;');
     expect(cardSource).toContain('onImageError(item.imageUrl);');
     expect(cardSource).toContain('{showImage ? (');
@@ -82,14 +101,19 @@ describe('stock tasks layout', () => {
     expect(source).not.toContain('正在后台刷新行情');
     expect(source).not.toContain('refreshingDashboard && dashboard');
     expect(source).toContain("void loadPageData('background')");
-    expect(source).not.toContain("else setRefreshingDashboard(true);");
+    expect(source).not.toContain('else setRefreshingDashboard(true);');
     expect(source).not.toContain('trustMessage={dashboardTrust.message}');
     expect(source).not.toContain('title={dashboardTrust.message ?? undefined}');
-    expect(source).not.toContain("|| refreshingDashboard || dashboardFreshness?.status === 'partial'");
+    expect(source).not.toContain(
+      "|| refreshingDashboard || dashboardFreshness?.status === 'partial'",
+    );
   });
 
   it('remounts the detail cover for each article and keeps source reading inside the modal', () => {
-    const modalSource = readFileSync(new URL('../components/NewsDetailModal.tsx', import.meta.url), 'utf8');
+    const modalSource = readFileSync(
+      new URL('../components/NewsDetailModal.tsx', import.meta.url),
+      'utf8',
+    );
 
     expect(modalSource).toContain('const readerItemKey = item.url');
     expect(modalSource).toContain('key={readerItemKey}');
@@ -101,7 +125,10 @@ describe('stock tasks layout', () => {
 
   it('gives discovery a clear priority story and a chronological source stream', () => {
     const pageSource = readFileSync(new URL('./StockDiscoveryPage.tsx', import.meta.url), 'utf8');
-    const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
+    const cardSource = readFileSync(
+      new URL('../components/DiscoveryNewsCard.tsx', import.meta.url),
+      'utf8',
+    );
 
     expect(pageSource).toContain('优先阅读');
     expect(pageSource).toContain('更多来源');
@@ -115,7 +142,10 @@ describe('stock tasks layout', () => {
 
   it('renders reusable editorial art as normal card media without exposing its provenance', () => {
     const pageSource = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
-    const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
+    const cardSource = readFileSync(
+      new URL('../components/DiscoveryNewsCard.tsx', import.meta.url),
+      'utf8',
+    );
 
     expect(pageSource).toContain("imageKind?: 'source-cover' | 'editorial-art'");
     expect(cardSource).toContain("item.imageKind === 'source-cover'");
@@ -125,9 +155,14 @@ describe('stock tasks layout', () => {
   });
 
   it('does not invent a related-symbol count for a source that has none', () => {
-    const cardSource = readFileSync(new URL('../components/DiscoveryNewsCard.tsx', import.meta.url), 'utf8');
+    const cardSource = readFileSync(
+      new URL('../components/DiscoveryNewsCard.tsx', import.meta.url),
+      'utf8',
+    );
 
-    expect(cardSource).toContain("item.symbols.length > 0 ? ` · ${item.symbols.length} 个关联` : ''");
+    expect(cardSource).toContain(
+      "item.symbols.length > 0 ? ` · ${item.symbols.length} 个关联` : ''",
+    );
     expect(cardSource).not.toContain('Math.max(1, item.symbols.length)');
   });
 
@@ -136,7 +171,7 @@ describe('stock tasks layout', () => {
 
     expect(source).toContain('onPointerEnter={handlePointerEnter}');
     expect(source).toContain('onMouseEnter={handleMouseEnter}');
-    expect(source).toContain('StockRailMetric label={temporalCopy.updateLabel}');
+    expect(compact(source)).toContain(compact('StockRailMetric label={temporalCopy.updateLabel}'));
     expect(source).toContain('分时截至');
     expect(source).not.toContain('interpolatedChartPoint');
   });
@@ -166,7 +201,7 @@ describe('stock tasks layout', () => {
     expect(source).toContain('{dashboardTrust.statusLabel}');
     expect(source).toContain('temporalCopy={temporalCopy}');
     expect(source).toContain('briefingLabel={temporalCopy.briefingTabLabel}');
-    expect(source).toContain('{stock.name}{temporalCopy.storyTitleSuffix}');
+    expect(compact(source)).toContain(compact('{stock.name}{temporalCopy.storyTitleSuffix}'));
     expect(source).toContain('{temporalCopy.storyStatusLabel}');
     expect(source).toContain('temporalCopy.researchTimestampLabel ?? formatUpdateTime(updatedAt)');
     expect(source).toContain('title={temporalCopy.briefingTitle}');
@@ -181,8 +216,12 @@ describe('stock tasks layout', () => {
   it('blocks prompt submission only when no trustworthy snapshot can support a stock-data task', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
 
-    expect(source).toContain("dashboardTrust.tone === 'unavailable' || dashboardTrust.tone === 'unverified'");
-    expect(source).toContain('submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}');
+    expect(source).toContain(
+      "dashboardTrust.tone === 'unavailable' || dashboardTrust.tone === 'unverified'",
+    );
+    expect(source).toContain(
+      'submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}',
+    );
     expect(source).toContain('placeholder={temporalCopy.promptPlaceholder}');
   });
 
@@ -194,13 +233,17 @@ describe('stock tasks layout', () => {
     );
 
     expect(source).toContain("import('@/components/stocks/StockScreeningWorkbench')");
-    expect(source.indexOf('<MarketHighlights')).toBeLessThan(source.indexOf('<StockScreeningWorkbench'));
-    expect(source.indexOf('<StockScreeningWorkbench')).toBeLessThan(source.indexOf('<DailyBriefing'));
+    expect(source.indexOf('<MarketHighlights')).toBeLessThan(
+      source.indexOf('<StockScreeningWorkbench'),
+    );
+    expect(source.indexOf('<StockScreeningWorkbench')).toBeLessThan(
+      source.indexOf('<DailyBriefing'),
+    );
     expect(source).toContain('snapshotId={dashboard?.trust?.snapshotId ?? null}');
     expect(source).toContain('dataAsOf={dashboard?.trust?.dataAsOf ?? null}');
-    expect(source).toContain('trustMode={dashboard?.trust?.mode ?? \'unverified\'}');
+    expect(source).toContain("trustMode={dashboard?.trust?.mode ?? 'unverified'}");
     expect(source).toContain('onAddToWatchlist={addScreeningCandidate}');
-    expect(source).not.toContain('toast.show(message, \'error\');\n      throw err;');
+    expect(source).not.toContain("toast.show(message, 'error');\n      throw err;");
     expect(component).toContain('trpc.stocks.previewScreening.query');
     expect(component).toContain('trpc.stocks.runScreening.mutate');
     expect(component).toContain('条件匹配不等于投资建议');
@@ -213,7 +256,9 @@ describe('stock tasks layout', () => {
 
     expect(source).toContain("import('@/components/stocks/StockRiskRadar')");
     expect(source.indexOf('<MarketHighlights')).toBeLessThan(source.indexOf('<StockRiskRadar'));
-    expect(source.indexOf('<StockRiskRadar')).toBeLessThan(source.indexOf('<StockScreeningWorkbench'));
+    expect(source.indexOf('<StockRiskRadar')).toBeLessThan(
+      source.indexOf('<StockScreeningWorkbench'),
+    );
     expect(source).toContain('snapshotId={dashboard?.trust?.snapshotId ?? null}');
     expect(source).toContain('dataAsOf={dashboard?.trust?.dataAsOf ?? null}');
     expect(source).toContain("trustMode={dashboard?.trust?.mode ?? 'unverified'}");
@@ -223,8 +268,12 @@ describe('stock tasks layout', () => {
     const source = readFileSync(new URL('./StockTasksPage.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain("import('@/components/stocks/StockPreferenceProfile')");
-    expect(source.indexOf('<StockScreeningWorkbench')).toBeLessThan(source.indexOf('<StockPreferenceProfile'));
-    expect(source.indexOf('<StockPreferenceProfile')).toBeLessThan(source.indexOf('<DailyBriefing'));
+    expect(source.indexOf('<StockScreeningWorkbench')).toBeLessThan(
+      source.indexOf('<StockPreferenceProfile'),
+    );
+    expect(source.indexOf('<StockPreferenceProfile')).toBeLessThan(
+      source.indexOf('<DailyBriefing'),
+    );
     expect(source).toContain('refreshKey={preferenceRevision}');
     expect(source).toContain('onScreeningRecorded={refreshPreferenceProfile}');
     expect(source).toContain('setPreferenceRevision((current) => current + 1)');

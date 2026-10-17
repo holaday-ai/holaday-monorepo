@@ -86,7 +86,6 @@ describe('restart recovery: transient queued tasks fail visibly', () => {
     const token = await signAccessToken({ sub: userExternalId, plan: 'free' });
     const client = new WebSocket(`ws://127.0.0.1:${port}`, [WS_SUBPROTOCOL, `jwt.${token}`]);
     try {
-
       const terminalPromise = new Promise<{
         taskId: string;
         status: string;
@@ -110,7 +109,9 @@ describe('restart recovery: transient queued tasks fail visibly', () => {
         client.once('open', () => resolve());
         client.once('error', reject);
       });
-      client.send(JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }));
+      client.send(
+        JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }),
+      );
 
       const terminal = await terminalPromise;
       expect(terminal).toEqual({
@@ -242,7 +243,9 @@ describe('restart recovery: transient queued tasks fail visibly', () => {
         client.once('open', () => resolve());
         client.once('error', reject);
       });
-      client.send(JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }));
+      client.send(
+        JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }),
+      );
 
       await expect(terminalOrIdle).resolves.toBeNull();
 

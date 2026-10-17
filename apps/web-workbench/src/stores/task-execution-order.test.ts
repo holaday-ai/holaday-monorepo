@@ -8,15 +8,23 @@ describe('execution ordering boundary', () => {
     const order = new TaskExecutionOrder();
     order.accept('task', one, { source: 'event', terminal: true });
     const since = order.version('task');
-    expect(order.accept('task', { ...one, executionId: 'truth' }, { source: 'detail', since })).toBe('new');
+    expect(
+      order.accept('task', { ...one, executionId: 'truth' }, { source: 'detail', since }),
+    ).toBe('new');
     expect(order.accept('task', one, { source: 'detail', since })).toBe('reconcile');
-    expect(order.accept('task', { ...one, executionId: 'truth' }, { source: 'event' })).toBe('same');
+    expect(order.accept('task', { ...one, executionId: 'truth' }, { source: 'event' })).toBe(
+      'same',
+    );
   });
   it('requires reconciliation for a conflicting or unversioned unknown identity', () => {
     const order = new TaskExecutionOrder();
     expect(order.accept('task', one, { source: 'event' })).toBe('new');
-    expect(order.accept('task', { ...one, executionId: 'other' }, { source: 'event' })).toBe('reconcile');
-    expect(order.accept('task', { executionId: 'stranger' }, { source: 'event' })).toBe('reconcile');
+    expect(order.accept('task', { ...one, executionId: 'other' }, { source: 'event' })).toBe(
+      'reconcile',
+    );
+    expect(order.accept('task', { executionId: 'stranger' }, { source: 'event' })).toBe(
+      'reconcile',
+    );
     expect(order.version('task')).toBe(1);
   });
   it('allows a higher round after terminal, rejects old and late same-round streams', () => {

@@ -1,69 +1,63 @@
 import { describe, expect, it } from 'vitest';
 import {
-  browserFrameCanPanInPortraitSheet,
-  browserLiveOverlayCopy,
-  browserStartupTargetUrl,
-  browserWorkspaceTaskIntent,
-  browserPanelHeaderStatus,
   browserControlAction,
+  browserFrameCanPanInPortraitSheet,
   browserInputFallbackMode,
+  browserLiveOverlayCopy,
+  browserLiveStatusLabel,
+  browserPanelDotLabel,
   browserPanelEvidenceHeaderStatus,
+  browserPanelHeaderStatus,
+  browserReconnectAffordanceDelay,
   browserReleasedCardCopy,
-  taskOwnedBrowserFrame,
-  taskOwnedBrowserUrl,
-  terminalEvidenceFrameForTask,
-  terminalEvidenceContinuation,
+  browserStartupTargetUrl,
   browserViewportFooterLabel,
   browserViewportFrameLabel,
   browserWakeFeedback,
+  browserWorkspaceTaskIntent,
   isBrowserErrorUrl,
-  browserPanelDotLabel,
-  browserLiveStatusLabel,
-  shouldShowBrowserHeader,
-  shouldShowBrowserLiveOverlay,
+  isBrowserInteractionActive,
   shouldApplyBrowserTaskOperation,
+  shouldConnectBrowserStream,
   shouldPreserveBrowserCanvasOnTaskSwitch,
   shouldRemountBrowserStreamAfterRestore,
-  shouldSuspectTerminalBrowserSession,
   shouldShowBrowserFullscreen,
+  shouldShowBrowserHeader,
+  shouldShowBrowserLiveOverlay,
   shouldShowTerminalEvidenceLedger,
-  shouldConnectBrowserStream,
+  shouldSuspectTerminalBrowserSession,
   shouldUseTerminalEvidence,
-  isBrowserInteractionActive,
-  terminalEvidenceLayout,
+  taskOwnedBrowserFrame,
+  taskOwnedBrowserUrl,
   terminalBrowserMissingFrameCopy,
+  terminalBrowserRecoveryRetryDelay,
+  terminalBrowserRecoveryWindow,
   terminalBrowserSessionUnavailable,
   terminalBrowserTakeoverMessage,
-  terminalBrowserRecoveryRetryDelay,
-  browserReconnectAffordanceDelay,
-  terminalBrowserRecoveryWindow,
+  terminalEvidenceContinuation,
+  terminalEvidenceFrameForTask,
   terminalEvidenceFrameLabel,
+  terminalEvidenceLayout,
   terminalEvidenceStatusLabel,
 } from './browser-panel-state';
 
 describe('BrowserPanel state helpers', () => {
   it('turns a terminal takeover handoff into a focused AI follow-up', () => {
-    expect(
-      browserControlAction({ interactive: true, taskIsTerminal: true }),
-    ).toEqual({
+    expect(browserControlAction({ interactive: true, taskIsTerminal: true })).toEqual({
       nextInteractive: false,
       focusFollowUp: true,
       label: '交给 AI',
       ariaLabel: '交给 AI 继续',
       title: '交给 AI — 输入下一步指令后从当前页面继续',
     });
-    expect(
-      browserControlAction({ interactive: true, taskIsTerminal: false }),
-    ).toEqual({
+    expect(browserControlAction({ interactive: true, taskIsTerminal: false })).toEqual({
       nextInteractive: false,
       focusFollowUp: false,
       label: '交给 AI',
       ariaLabel: '退出浏览器接管',
       title: '退出接管 — AI 继续当前执行',
     });
-    expect(
-      browserControlAction({ interactive: false, taskIsTerminal: true }),
-    ).toEqual({
+    expect(browserControlAction({ interactive: false, taskIsTerminal: true })).toEqual({
       nextInteractive: true,
       focusFollowUp: false,
       label: '接管',
@@ -271,12 +265,8 @@ describe('BrowserPanel state helpers', () => {
   });
 
   it('reconnects CDP in place after backend restore so the painted frame survives', () => {
-    expect(
-      shouldRemountBrowserStreamAfterRestore({ usingCdp: true }),
-    ).toBe(false);
-    expect(
-      shouldRemountBrowserStreamAfterRestore({ usingCdp: false }),
-    ).toBe(true);
+    expect(shouldRemountBrowserStreamAfterRestore({ usingCdp: true })).toBe(false);
+    expect(shouldRemountBrowserStreamAfterRestore({ usingCdp: false })).toBe(true);
   });
 
   it('drops a terminal restore result after the user switches tasks', () => {
@@ -406,15 +396,9 @@ describe('BrowserPanel state helpers', () => {
   });
 
   it('attempts the live stream for browser records, including retained terminal sessions', () => {
-    expect(
-      shouldConnectBrowserStream({ isBrowserTask: true, taskIsTerminal: false }),
-    ).toBe(true);
-    expect(
-      shouldConnectBrowserStream({ isBrowserTask: true, taskIsTerminal: true }),
-    ).toBe(true);
-    expect(
-      shouldConnectBrowserStream({ isBrowserTask: false, taskIsTerminal: false }),
-    ).toBe(false);
+    expect(shouldConnectBrowserStream({ isBrowserTask: true, taskIsTerminal: false })).toBe(true);
+    expect(shouldConnectBrowserStream({ isBrowserTask: true, taskIsTerminal: true })).toBe(true);
+    expect(shouldConnectBrowserStream({ isBrowserTask: false, taskIsTerminal: false })).toBe(false);
   });
 
   it('uses terminal evidence only after the retained browser becomes unavailable', () => {
@@ -522,9 +506,7 @@ describe('BrowserPanel state helpers', () => {
     };
 
     expect(taskOwnedBrowserUrl('tsk_current', cachedUrl)).toBeNull();
-    expect(taskOwnedBrowserUrl('tsk_previous', cachedUrl)).toBe(
-      'https://previous.example',
-    );
+    expect(taskOwnedBrowserUrl('tsk_previous', cachedUrl)).toBe('https://previous.example');
     expect(taskOwnedBrowserUrl(null, cachedUrl)).toBeNull();
   });
 
@@ -629,9 +611,7 @@ describe('BrowserPanel state helpers', () => {
     expect(browserWorkspaceTaskIntent('http://localhost:3000/docs')).toBe(
       '打开 http://localhost:3000/docs',
     );
-    expect(browserWorkspaceTaskIntent('今天的 AI 新闻')).toBe(
-      '打开浏览器并搜索：今天的 AI 新闻',
-    );
+    expect(browserWorkspaceTaskIntent('今天的 AI 新闻')).toBe('打开浏览器并搜索：今天的 AI 新闻');
   });
 
   it('refuses empty input and unsafe URL schemes', () => {
@@ -702,9 +682,9 @@ describe('BrowserPanel state helpers', () => {
     expect(terminalEvidenceStatusLabel('cancelled')).toBe('任务已取消');
     expect(terminalEvidenceStatusLabel('executing')).toBe('任务已结束');
     expect(terminalEvidenceStatusLabel(null)).toBe('任务已结束');
-    expect(
-      terminalEvidenceFrameLabel({ status: 'completed', url: 'https://example.com/' }),
-    ).toBe('任务已完成 · 浏览器页面');
+    expect(terminalEvidenceFrameLabel({ status: 'completed', url: 'https://example.com/' })).toBe(
+      '任务已完成 · 浏览器页面',
+    );
   });
 
   it('labels live browser connection states for icon-only status dots', () => {
@@ -792,9 +772,7 @@ describe('BrowserPanel state helpers', () => {
   });
 
   it('restores terminal evidence into the current task browser session', () => {
-    expect(
-      terminalEvidenceContinuation('https://example.com/final?from=task'),
-    ).toEqual({
+    expect(terminalEvidenceContinuation('https://example.com/final?from=task')).toEqual({
       intent: '打开 https://example.com/final?from=task',
       label: '恢复可操作浏览器',
       pendingLabel: '正在恢复浏览器…',
@@ -816,12 +794,7 @@ describe('BrowserPanel state helpers', () => {
         url: 'chrome-error://chromewebdata/',
       }),
     ).toBe('页面无法打开 · 浏览器页面');
-    expect(
-      browserPanelEvidenceHeaderStatus(
-        'completed',
-        'chrome-error://chromewebdata/',
-      ),
-    ).toEqual({
+    expect(browserPanelEvidenceHeaderStatus('completed', 'chrome-error://chromewebdata/')).toEqual({
       label: '只读记录',
       tooltip: '任务已完成；当前为浏览器错误页截图，不能点击或输入',
       tone: 'attention',
@@ -832,15 +805,9 @@ describe('BrowserPanel state helpers', () => {
 
   it('labels screencast frame geometry so narrow panels are easy to verify', () => {
     expect(browserViewportFrameLabel(null)).toBe('视口未知');
-    expect(browserViewportFrameLabel({ width: 430, height: 760 })).toBe(
-      '430×760 · 竖屏视口',
-    );
-    expect(browserViewportFrameLabel({ width: 560, height: 720 })).toBe(
-      '560×720 · 窄屏视口',
-    );
-    expect(browserViewportFrameLabel({ width: 1280, height: 800 })).toBe(
-      '1280×800 · 桌面帧',
-    );
+    expect(browserViewportFrameLabel({ width: 430, height: 760 })).toBe('430×760 · 竖屏视口');
+    expect(browserViewportFrameLabel({ width: 560, height: 720 })).toBe('560×720 · 窄屏视口');
+    expect(browserViewportFrameLabel({ width: 1280, height: 800 })).toBe('1280×800 · 桌面帧');
   });
 
   it('does not present the saved task viewport as the live adaptive CDP size', () => {
@@ -917,16 +884,12 @@ describe('BrowserPanel state helpers', () => {
   });
 
   it('explains slow browser live-view connections before offering reconnect', () => {
-    expect(
-      browserLiveOverlayCopy({ status: 'connecting', showReconnect: false }),
-    ).toEqual({
+    expect(browserLiveOverlayCopy({ status: 'connecting', showReconnect: false })).toEqual({
       title: '正在连接浏览器',
       detail: '浏览器正在启动或恢复连接，任务会继续执行。',
       reconnectLabel: '重连画面',
     });
-    expect(
-      browserLiveOverlayCopy({ status: 'connecting', showReconnect: true }),
-    ).toEqual({
+    expect(browserLiveOverlayCopy({ status: 'connecting', showReconnect: true })).toEqual({
       title: '浏览器启动时间较久',
       detail: '浏览器可能还在打开网页。可以继续等待，或手动重连画面。',
       reconnectLabel: '重连画面',
@@ -948,16 +911,12 @@ describe('BrowserPanel state helpers', () => {
   });
 
   it('keeps persistent disconnected live views recoverable without implying a rerun', () => {
-    expect(
-      browserLiveOverlayCopy({ status: 'disconnected', showReconnect: false }),
-    ).toEqual({
+    expect(browserLiveOverlayCopy({ status: 'disconnected', showReconnect: false })).toEqual({
       title: '正在恢复浏览器画面',
       detail: 'HOLA DAY 正在自动重连。你可以继续等待，任务不会重新提交。',
       reconnectLabel: '重连画面',
     });
-    expect(
-      browserLiveOverlayCopy({ status: 'disconnected', showReconnect: true }),
-    ).toEqual({
+    expect(browserLiveOverlayCopy({ status: 'disconnected', showReconnect: true })).toEqual({
       title: '画面连接已断开',
       detail: '任务可能仍在后台执行。刷新只会重连画面，不会重新提交任务。',
       reconnectLabel: '重连画面',
@@ -965,9 +924,7 @@ describe('BrowserPanel state helpers', () => {
   });
 
   it('explains persistent live-view errors as view-only recovery', () => {
-    expect(
-      browserLiveOverlayCopy({ status: 'error', showReconnect: true }),
-    ).toEqual({
+    expect(browserLiveOverlayCopy({ status: 'error', showReconnect: true })).toEqual({
       title: '无法连接浏览器画面',
       detail: '画面连接没有建立成功。任务本身可能仍在处理，可以先重连画面。',
       reconnectLabel: '重连画面',
@@ -975,9 +932,7 @@ describe('BrowserPanel state helpers', () => {
   });
 
   it('keeps terminal takeover refusal tied to task state', () => {
-    expect(terminalBrowserTakeoverMessage('failed')).toBe(
-      '任务未完成，正在恢复当前任务的浏览器。',
-    );
+    expect(terminalBrowserTakeoverMessage('failed')).toBe('任务未完成，正在恢复当前任务的浏览器。');
   });
 
   it('frames missing terminal browser frames as a next action, not lost evidence', () => {

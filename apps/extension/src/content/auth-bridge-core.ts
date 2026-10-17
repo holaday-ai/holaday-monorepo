@@ -37,10 +37,7 @@ export const TOKEN_KEY = 'holaday.access_token';
  *     The SW clears chrome.storage and disconnects the WS so the
  *     extension UI flips to logged-out within seconds.
  */
-export type SyncAction =
-  | { kind: 'unchanged' }
-  | { kind: 'set'; token: string }
-  | { kind: 'clear' };
+export type SyncAction = { kind: 'unchanged' } | { kind: 'set'; token: string } | { kind: 'clear' };
 
 /**
  * Decide what to do given an observed localStorage value relative to
@@ -66,10 +63,7 @@ export function decideAction(prev: string | null, curr: string | null): SyncActi
   return { kind: 'set', token: normalised };
 }
 
-export function decideObservedTokenAction(
-  prev: string | null,
-  curr: string | null,
-): SyncAction {
+export function decideObservedTokenAction(prev: string | null, curr: string | null): SyncAction {
   const decision = decideAction(prev, curr);
   if (decision.kind !== 'set') return decision;
   if (looksLikeToken(decision.token)) return decision;

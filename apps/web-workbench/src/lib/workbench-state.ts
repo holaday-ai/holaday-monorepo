@@ -1,8 +1,8 @@
-import type { UiScreencast, UiTask } from '@/types/task';
+import { taskDisplayTitle } from '@/lib/task-display-copy';
+import { deriveTaskProductState } from '@/lib/task-product-state';
 import type { ConnStatus } from '@/lib/ws';
 import type { SidePanelMode, SidePanelOverride } from '@/types/side-panel';
-import { deriveTaskProductState } from '@/lib/task-product-state';
-import { taskDisplayTitle } from '@/lib/task-display-copy';
+import type { UiScreencast, UiTask } from '@/types/task';
 
 export interface WorkbenchToastCopy {
   message: string;
@@ -47,7 +47,7 @@ export function realtimeConnectionTransition(input: {
   return { hadDisconnect: input.hadDisconnect, toast: null };
 }
 
-const BROWSER_TASK_VERBS = ['打开', '登录', '访问', '点击', '下载', '搜索'];
+const BROWSER_TASK_REQUEST = /^(?:请)?(?:帮我)?(?:用浏览器|打开|访问|登录|点击网页|在网页上)/;
 
 /**
  * Legacy task rows may predate executionMode while still owning browser
@@ -60,8 +60,7 @@ export function hasBrowserRecordForWorkbench(task: UiTask | null): boolean {
   if (task.executionMode) return false;
   if (task.finalUrl?.trim() || task.finalScreenshot) return true;
   const intent = task.intent ?? '';
-  if (/https?:\/\//i.test(intent)) return true;
-  return BROWSER_TASK_VERBS.some((verb) => intent.includes(verb));
+  return BROWSER_TASK_REQUEST.test(intent.trim());
 }
 
 export function shouldConnectTaskBrowserForWorkbench(input: {
@@ -71,7 +70,7 @@ export function shouldConnectTaskBrowserForWorkbench(input: {
   if (!input.task) return false;
   if (hasBrowserRecordForWorkbench(input.task)) return true;
   if (input.task.executionMode) return false;
-  return !input.hasRuntimeTextSignal;
+  return false;
 }
 
 export function taskFrameForWorkbench(
@@ -82,20 +81,18 @@ export function taskFrameForWorkbench(
 }
 
 export function isLiveBrowserTaskForWorkbench(task: UiTask | null): boolean {
-  return Boolean(
-    task &&
-      hasBrowserRecordForWorkbench(task) &&
-      !isWorkbenchTerminalTask(task),
-  );
+  return Boolean(task && hasBrowserRecordForWorkbench(task) && !isWorkbenchTerminalTask(task));
 }
 
 export function isWorkbenchTerminalTask(task: UiTask): boolean {
-  return deriveTaskProductState({
-    status: task.status,
-    queuePosition: task.queuePosition,
-    tickCount: task.tickCount,
-    awaitingKind: task.awaitingKind ?? null,
-  }).lifecycle === 'terminal';
+  return (
+    deriveTaskProductState({
+      status: task.status,
+      queuePosition: task.queuePosition,
+      tickCount: task.tickCount,
+      awaitingKind: task.awaitingKind ?? null,
+    }).lifecycle === 'terminal'
+  );
 }
 
 export function terminalTaskHasFollowUpContext(task: UiTask): boolean {

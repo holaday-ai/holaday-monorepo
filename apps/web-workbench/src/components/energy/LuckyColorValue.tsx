@@ -5,10 +5,7 @@ interface LuckyColorValueProps {
   fallback?: string;
 }
 
-export function LuckyColorValue({
-  value,
-  fallback,
-}: LuckyColorValueProps): JSX.Element {
+export function LuckyColorValue({ value, fallback }: LuckyColorValueProps): JSX.Element {
   const color = presentLuckyColor(value, fallback);
 
   return (

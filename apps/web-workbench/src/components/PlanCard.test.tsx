@@ -35,3 +35,26 @@ describe('PlanCard advisory versus tracked execution', () => {
     ).toBeTruthy();
   });
 });
+
+describe('terminal task plan visibility', () => {
+  it.each(['completed', 'partial_success', 'failed', 'cancelled'] as const)(
+    'removes stale tracked progress when an executing task becomes %s',
+    (taskStatus) => {
+      const props = {
+        planText: '1. 打开页面\n2. 整理讨论',
+        planStatus: [
+          { idx: 0, status: 'pending' as const },
+          { idx: 1, status: 'running' as const },
+        ],
+      };
+      const view = render(<PlanCard {...props} taskStatus="executing" />);
+      expect(screen.getByText('0/2 阶段完成')).toBeTruthy();
+      view.rerender(<PlanCard {...props} taskStatus={taskStatus} />);
+      expect(screen.queryByText('执行计划')).toBeNull();
+      expect(screen.queryByLabelText('running')).toBeNull();
+      expect(screen.queryByText('0/2 阶段完成')).toBeNull();
+      view.rerender(<PlanCard {...props} taskStatus="executing" />);
+      expect(screen.getByText('0/2 阶段完成')).toBeTruthy();
+    },
+  );
+});

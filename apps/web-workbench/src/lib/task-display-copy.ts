@@ -5,10 +5,8 @@ export interface TaskDisplayCopyInput {
   readonly title?: string | null;
 }
 
-const CREATIVE_INTERNAL_SECTION =
-  /(?:图片设置|图片风格要求|主体一致性要求)[：:]/u;
-const CREATIVE_LANE_PREFIX =
-  /^(?:生成(?:一张)?图片|基于上传的参考图片进行图生图或图片编辑)[：:]/u;
+const CREATIVE_INTERNAL_SECTION = /(?:图片设置|图片风格要求|主体一致性要求)[：:]/u;
+const CREATIVE_LANE_PREFIX = /^(?:生成(?:一张)?图片|基于上传的参考图片进行图生图或图片编辑)[：:]/u;
 const APPENDED_CREATIVE_INSTRUCTIONS =
   /(?:\n\s*(?:图片风格要求|主体一致性要求)[：:]|^主体一致性要求[：:]\s*请以用户上传)/u;
 
@@ -35,10 +33,7 @@ export function taskDisplaySource(task: TaskDisplayCopyInput): string {
   return taskDisplayIntent(task.intent);
 }
 
-export function taskDisplayTitle(
-  task: TaskDisplayCopyInput,
-  maxLen = 24,
-): string {
+export function taskDisplayTitle(task: TaskDisplayCopyInput, maxLen = 24): string {
   const source = taskDisplaySource(task);
   const rawTitle = task.title?.trim() ?? '';
   if (rawTitle && cleanCreativeTaskCopy(rawTitle)) {
@@ -63,10 +58,7 @@ function cleanCreativeTaskCopy(source: string): string {
 }
 
 function looksLikeGeneratedImageCopy(source: string): boolean {
-  return (
-    CREATIVE_LANE_PREFIX.test(source) ||
-    APPENDED_CREATIVE_INSTRUCTIONS.test(source)
-  );
+  return CREATIVE_LANE_PREFIX.test(source) || APPENDED_CREATIVE_INSTRUCTIONS.test(source);
 }
 
 function truncateTaskDisplayText(source: string, maxLen: number): string {

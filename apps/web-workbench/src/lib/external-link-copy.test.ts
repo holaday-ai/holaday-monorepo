@@ -7,12 +7,8 @@ import {
 
 describe('safeExternalHttpHref', () => {
   it('keeps http and https URLs', () => {
-    expect(safeExternalHttpHref(' https://example.com/report ')).toBe(
-      'https://example.com/report',
-    );
-    expect(safeExternalHttpHref('http://example.com/path')).toBe(
-      'http://example.com/path',
-    );
+    expect(safeExternalHttpHref(' https://example.com/report ')).toBe('https://example.com/report');
+    expect(safeExternalHttpHref('http://example.com/path')).toBe('http://example.com/path');
   });
 
   it('rejects non-web or malformed URLs', () => {
@@ -25,9 +21,7 @@ describe('safeExternalHttpHref', () => {
 
 describe('displayExternalHref', () => {
   it('keeps short URLs intact', () => {
-    expect(displayExternalHref('https://example.com/report')).toBe(
-      'https://example.com/report',
-    );
+    expect(displayExternalHref('https://example.com/report')).toBe('https://example.com/report');
   });
 
   it('truncates long URLs while preserving the origin and tail', () => {

@@ -345,4 +345,51 @@ describe('selected Chrome execution session', () => {
     });
     expect(h.driver.execute).toHaveBeenCalledTimes(1);
   });
+
+  it('reports a closed session tab as tab_closed without touching the driver', async () => {
+    const h = harness();
+    const opened = await h.open();
+    if (!opened.ok) throw new Error('open failed');
+    h.session.markTabClosed(7); // another tab: no effect
+    h.session.markTabClosed(42);
+    const click = {
+      kind: 'click',
+      selector: {
+        description: 'Save',
+        strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
+      },
+    } as unknown as DriverAction;
+    await expect(h.session.execute('task-a', opened.sessionId, click)).resolves.toEqual({
+      ok: false,
+      error: 'tab_closed',
+      actionOutcome: 'not_applied',
+    });
+    expect(h.driver.execute).not.toHaveBeenCalled();
+    await expect(h.session.observe('task-a', opened.sessionId)).resolves.toEqual({
+      ok: false,
+      error: 'tab_closed',
+    });
+  });
+
+  it('maps a selector miss caused by the tab closing mid-action to tab_closed', async () => {
+    const h = harness();
+    const opened = await h.open();
+    if (!opened.ok) throw new Error('open failed');
+    h.driver.execute.mockImplementationOnce(async () => {
+      h.session.markTabClosed(42);
+      return { status: 'error', error: { code: 'SELECTOR_NOT_FOUND', message: 'gone' } };
+    });
+    const click = {
+      kind: 'click',
+      selector: {
+        description: 'Save',
+        strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
+      },
+    } as unknown as DriverAction;
+    await expect(h.session.execute('task-a', opened.sessionId, click)).resolves.toEqual({
+      ok: false,
+      error: 'tab_closed',
+      actionOutcome: 'not_applied',
+    });
+  });
 });

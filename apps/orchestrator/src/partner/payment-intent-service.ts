@@ -125,7 +125,11 @@ export function buildPartnerPaymentGatewayCreatePayload(input: {
 
   return {
     provider,
-    userId: normalizeBoundedString(input.userExternalId, 'userExternalId', USER_EXTERNAL_ID_MAX_LENGTH),
+    userId: normalizeBoundedString(
+      input.userExternalId,
+      'userExternalId',
+      USER_EXTERNAL_ID_MAX_LENGTH,
+    ),
     purchase: {
       kind: orderKind === 'membership' ? 'partner_membership' : 'partner_recharge',
       partnerOrderExternalId: orderExternalId,

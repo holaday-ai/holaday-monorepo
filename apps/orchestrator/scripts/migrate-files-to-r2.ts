@@ -35,12 +35,12 @@
  */
 
 import { promises as fs } from 'node:fs';
+import { eq } from 'drizzle-orm';
 import { logger } from '../src/config/logger.js';
 import { db } from '../src/db/client.js';
-import { eq } from 'drizzle-orm';
 import { taskFiles } from '../src/db/schema/task-files.js';
-import { createStorageProvider, R2StorageProvider } from '../src/files/storage-provider.js';
 import { users } from '../src/db/schema/users.js';
+import { R2StorageProvider, createStorageProvider } from '../src/files/storage-provider.js';
 
 interface CliArgs {
   dryRun: boolean;
@@ -53,7 +53,7 @@ function parseArgs(argv: string[]): CliArgs {
   for (const arg of argv.slice(2)) {
     if (arg === '--dry-run') out.dryRun = true;
     else if (arg.startsWith('--batch=')) {
-      const n = parseInt(arg.slice('--batch='.length), 10);
+      const n = Number.parseInt(arg.slice('--batch='.length), 10);
       if (!Number.isFinite(n) || n <= 0) {
         throw new Error(`invalid --batch value: ${arg}`);
       }
@@ -181,10 +181,7 @@ async function main(): Promise<void> {
           mimetype: row.mimetype,
         });
         // Rewrite the row's storage_path to the R2 key.
-        await db
-          .update(taskFiles)
-          .set({ storagePath: newKey })
-          .where(eq(taskFiles.id, row.id));
+        await db.update(taskFiles).set({ storagePath: newKey }).where(eq(taskFiles.id, row.id));
         migrated++;
       } catch (err) {
         logger.warn(
@@ -199,10 +196,7 @@ async function main(): Promise<void> {
     }
   }
 
-  logger.info(
-    { migrated, skipped, failed, dryRun: args.dryRun },
-    'migrate-files-to-r2: done',
-  );
+  logger.info({ migrated, skipped, failed, dryRun: args.dryRun }, 'migrate-files-to-r2: done');
   process.exit(failed > 0 ? 1 : 0);
 }
 

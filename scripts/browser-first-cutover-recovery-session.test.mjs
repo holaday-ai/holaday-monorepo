@@ -1,4 +1,3 @@
-import { ingressDiagnosticStage } from './browser-first-cutover-ingress-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
@@ -6,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
+import { ingressDiagnosticStage } from './browser-first-cutover-ingress-diagnostics.mjs';
 
 const session = await import('./browser-first-cutover-recovery-session.mjs').catch(() => ({}));
 const hash = (value) => createHash('sha256').update(value).digest('hex');
@@ -336,11 +336,11 @@ for (const fault of ['initial', 'challenge', 'final']) {
       if (frame.type === 'operation') {
         operations++;
         input.write(
-          JSON.stringify({ protocol: 1, type: 'scope', seq: 1, scopeSeq: 1, binding }) + '\n',
+          `${JSON.stringify({ protocol: 1, type: 'scope', seq: 1, scopeSeq: 1, binding })}\n`,
         );
       } else
         input.write(
-          JSON.stringify({ protocol: 1, type: 'result', seq: 1, value: approved }) + '\n',
+          `${JSON.stringify({ protocol: 1, type: 'result', seq: 1, value: approved })}\n`,
         );
     });
     const at = { initial: 1, challenge: 2, final: 3 }[fault];
@@ -385,13 +385,13 @@ for (const fault of ['scope-read', 'scope-recheck', 'attach-value']) {
       isolatedTarget: f.scope.target.identity,
     };
     input.write(
-      JSON.stringify({
+      `${JSON.stringify({
         protocol: 1,
         type: 'operation',
         seq: 1,
         name: 'attach',
         value: fault === 'attach-value' ? {} : approved,
-      }) + '\n',
+      })}\n`,
     );
     let reads = 0;
     const stages = {

@@ -4,14 +4,22 @@
 
 import { describe, expect, it } from 'vitest';
 import type { AkshareClient } from './akshare-client.js';
-import { buildIndexCard } from './ashare-fact-card.js';
+import { replayClient } from './ashare-eval-replay.client.js';
+import { QWEN_SECTION7_PERIOD_MIXUP } from './ashare-eval-replay.fixtures.js';
+import { buildIndexCard, buildPanoramaContext, fetchPanoramaData } from './ashare-fact-card.js';
+import { complianceGate } from './ashare-qa-gate.js';
 import {
   isDeepQuery,
   isIndexQuery,
   resolveAshareInContext,
   resolveAshareQa,
 } from './ashare-qa-matcher.js';
-import { ASHARE_QA_GUIDANCE, runAsharePanorama, runAshareQa } from './ashare-qa-runner.js';
+import {
+  ASHARE_QA_GUIDANCE,
+  SECTION7_SYSTEM,
+  runAsharePanorama,
+  runAshareQa,
+} from './ashare-qa-runner.js';
 import type { AshareQaMatch, ResolvedStock } from './ashare-qa-types.js';
 
 const MATCH: AshareQaMatch = {
@@ -903,4 +911,175 @@ describe('P2 数据补映射 · C1/A3/R4 接线（亏损 fake：A3出、C1兜底
     expect(r.answer).toContain('董监高减持'); // R4 命中
     expect(r.answer).not.toContain('约占总股本'); // EPS<0 → 占比兜底
   });
+});
+
+describe('批次 11.1：⑦ 报告期一致性（勿删）', () => {
+  const MATCH: AshareQaMatch = {
+    kind: 'info',
+    stocks: [{ symbol: '603335', displayName: '迪生力' }],
+    dateIso: '2026-06-14',
+    dateCompact: '20260614',
+    deep: true,
+  };
+
+  it('⑦ 输入数据：每个财务数字前都带报告期 + 累计口径说明', async () => {
+    const data = await fetchPanoramaData(replayClient(), MATCH);
+    const ctx = buildPanoramaContext(data, MATCH);
+    expect(ctx).toContain('2026Q1 营收 1.71亿元');
+    expect(ctx).toContain('2026Q1 归母净利润 -1981.72万元');
+    expect(ctx).toContain('2026Q1 扣非净利润 -1984.52万元');
+    expect(ctx).toContain('2026Q1 ROE-6.76%');
+    expect(ctx).toContain('2025年报 归母净利润 4848.00万元');
+    expect(ctx).toContain('2023年报 归母净利润 -1.49亿元');
+    expect(ctx).toContain('不同报告期不可混用');
+  });
+
+  it('提示词要求引用数字必须带期间、禁止把年报扭亏说成今年', () => {
+    expect(SECTION7_SYSTEM).toContain('财务数字必须带报告期');
+    expect(SECTION7_SYSTEM).toContain('不能写「今年已扭亏');
+  });
+
+  it('千问真实输出在原合规闸门下是放行的（问题只能由期间检查发现）', async () => {
+    const data = await fetchPanoramaData(replayClient(), MATCH);
+    expect(
+      complianceGate(QWEN_SECTION7_PERIOD_MIXUP, buildPanoramaContext(data, MATCH)).passed,
+    ).toBe(true);
+  });
+
+  it('千问真实输出（今年已扭亏为盈）→ 降级为不带 ⑦，打 period_mismatch 日志，判官不调用', async () => {
+    const { logger, warns } = fakeLogger();
+    let judgeCalls = 0;
+    const r = await runAsharePanorama(
+      {
+        client: replayClient(),
+        interpret: async () => QWEN_SECTION7_PERIOD_MIXUP,
+        judge: async () => {
+          judgeCalls += 1;
+          return '{"verdict":"pass","redline":"none","quote":""}';
+        },
+        logger,
+        now: NOW,
+        context: { userId: 'u', taskId: 't' },
+      },
+      MATCH,
+    );
+    expect(r.degraded).toBe(true);
+    expect(r.reason).toBe('ungrounded');
+    expect(r.interpreted).toBe(false);
+    expect(r.answer).not.toContain('## ⑦ 分析师视角');
+    expect(r.answer).not.toContain('今年已扭亏为盈');
+    expect(r.answer).toContain('**④ 基本面**');
+    expect(judgeCalls).toBe(0);
+    const log = warns.find((w) => w.obj?.event === 'ashare_qa_degrade');
+    expect(log?.obj).toMatchObject({
+      reason: 'ungrounded',
+      subReason: 'period_mismatch',
+      lane: 'panorama',
+      layer: 'period-check',
+      taskId: 't',
+      stocks: ['603335'],
+    });
+    expect(log?.obj.hits[0]).toMatchObject({ type: 'state', quote: '今年已扭亏为盈' });
+  });
+
+  it('judge 未注入时同样降级（期间检查不依赖判官）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: replayClient(),
+        interpret: async () => QWEN_SECTION7_PERIOD_MIXUP,
+        logger,
+        now: NOW,
+      },
+      MATCH,
+    );
+    expect(r.degraded).toBe(true);
+  });
+
+  it('正确带期间的 ⑦ → 不误降级', async () => {
+    const { logger, warns } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: replayClient(),
+        interpret: async () =>
+          '迪生力是总市值34.47亿的小盘股。2025年报归母净利润4848万、已扭亏为盈，但2026Q1归母净利润-1981.72万，又亏了；估值偏高，PE-TTM67.2处历史高位。以上为客观信息聚合，未经证实，不构成任何投资建议。',
+        logger,
+        now: NOW,
+      },
+      MATCH,
+    );
+    expect(r.degraded).toBe(false);
+    expect(r.interpreted).toBe(true);
+    expect(warns.some((w) => w.obj?.event === 'ashare_qa_degrade')).toBe(false);
+  });
+
+  it('HARD 红线同时命中 → 仍按原合规路径降级（reason=advice），不被期间检查改写', async () => {
+    const { logger, warns } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: replayClient(),
+        interpret: async () => '今年已扭亏为盈，可以考虑逢低建仓。',
+        logger,
+        now: NOW,
+      },
+      MATCH,
+    );
+    expect(r.reason).toBe('advice');
+    expect(warns.some((w) => w.obj?.subReason === 'period_mismatch')).toBe(false);
+  });
+});
+
+it('uses actual quote and report period in both deterministic seven-dimension report and model input', async () => {
+  const client = fakeClient();
+  client.getStockQuote = async () =>
+    env([{ 代码: '600519', 最新价: 1272.08, 涨跌幅: 1.3, 行情时间: '2026-10-09 11:30:00' }]);
+  client.getStockAnnouncements = async () =>
+    env(
+      [1, 2, 3].map((i) => ({
+        公告标题: `录制契约公告${i}`,
+        公告时间: '2026-10-09',
+        公告链接: `https://www.cninfo.com.cn/new/disclosure/detail?announcementId=fixture${i}`,
+      })),
+    );
+  let input = '';
+  const r = await runAsharePanorama(
+    {
+      client,
+      now: new Date('2026-10-09T03:41:00Z'),
+      riskRadar: true,
+      logger: fakeLogger().logger,
+      interpret: async (x) => {
+        input = x.user;
+        return '';
+      },
+    },
+    { ...MATCH, dateIso: '2026-10-09', dateCompact: '20261009' },
+  );
+  expect(r.answer).toContain('1,272.08');
+  expect(r.answer).toContain('2026-10-09 11:30:00');
+  expect(r.answer).toContain('11:41');
+  expect(r.answer).toContain('2026Q1财报');
+  expect(r.answer.match(/\]\(https:\/\/www.cninfo.com.cn/g)?.length).toBeGreaterThanOrEqual(3);
+  expect(input).toContain('1,272.08');
+  expect(input).toContain('2026Q1');
+});
+
+it('failed risk sources are unavailable rather than negative evidence', async () => {
+  const client = fakeClient();
+  const unavailable = async () => ({
+    ...env([]),
+    error: 'unavailable',
+    error_code: 'UPSTREAM_TIMEOUT',
+  });
+  client.getRiskPledge = unavailable;
+  client.getRiskGoodwill = unavailable;
+  client.getRiskForecast = unavailable;
+  client.getRiskInsider = unavailable;
+  client.getStockAnnouncements = unavailable;
+  const r = await runAsharePanorama(
+    { client, now: NOW, riskRadar: true, logger: fakeLogger().logger, interpret: async () => '' },
+    MATCH,
+  );
+  expect(r.answer).toContain('风险数据暂不可用');
+  expect(r.answer).not.toContain('未检测到上述风险信号');
 });

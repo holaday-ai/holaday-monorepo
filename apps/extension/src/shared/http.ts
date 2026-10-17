@@ -76,8 +76,5 @@ function normalizeHttpDeadlineMs(timeoutMs: number): number {
   if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs)) {
     return DEFAULT_HTTP_DEADLINE_MS;
   }
-  return Math.min(
-    MAX_HTTP_DEADLINE_MS,
-    Math.max(MIN_HTTP_DEADLINE_MS, Math.floor(timeoutMs)),
-  );
+  return Math.min(MAX_HTTP_DEADLINE_MS, Math.max(MIN_HTTP_DEADLINE_MS, Math.floor(timeoutMs)));
 }

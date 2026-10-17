@@ -58,16 +58,24 @@ describe('classifyOtaIntentSubtype', () => {
 
 describe('decideOtaLane', () => {
   it('flag off → null (routing unchanged)', () => {
-    expect(decideOtaLane({ preferUserBrowser: true, extensionOnline: true, flagEnabled: false })).toBeNull();
+    expect(
+      decideOtaLane({ preferUserBrowser: true, extensionOnline: true, flagEnabled: false }),
+    ).toBeNull();
   });
   it('not an OTA-prefer site → null', () => {
-    expect(decideOtaLane({ preferUserBrowser: false, extensionOnline: true, flagEnabled: true })).toBeNull();
+    expect(
+      decideOtaLane({ preferUserBrowser: false, extensionOnline: true, flagEnabled: true }),
+    ).toBeNull();
   });
   it('OTA-prefer + extension online → user-browser', () => {
-    expect(decideOtaLane({ preferUserBrowser: true, extensionOnline: true, flagEnabled: true })).toBe('user-browser');
+    expect(
+      decideOtaLane({ preferUserBrowser: true, extensionOnline: true, flagEnabled: true }),
+    ).toBe('user-browser');
   });
   it('OTA-prefer + extension offline → server-browser (fallback)', () => {
-    expect(decideOtaLane({ preferUserBrowser: true, extensionOnline: false, flagEnabled: true })).toBe('server-browser');
+    expect(
+      decideOtaLane({ preferUserBrowser: true, extensionOnline: false, flagEnabled: true }),
+    ).toBe('server-browser');
   });
 });
 
@@ -75,7 +83,8 @@ describe('resolveOtaLaneForIntent (Task 4 lane cases)', () => {
   it('携程酒店 prompt + extension online → user-browser', () => {
     expect(
       resolveOtaLaneForIntent({
-        intent: '打开携程查上海 2026-08-01 到 2026-08-03 的酒店，不要预订。筛选 4 星以上，价格低于 800 元，给 5 个结果。',
+        intent:
+          '打开携程查上海 2026-08-01 到 2026-08-03 的酒店，不要预订。筛选 4 星以上，价格低于 800 元，给 5 个结果。',
         extensionOnline: true,
         flagEnabled: true,
       }),
@@ -94,25 +103,45 @@ describe('resolveOtaLaneForIntent (Task 4 lane cases)', () => {
 
   it('携程机票 prompt also allowed on user-browser (and server Brave still usable offline)', () => {
     expect(
-      resolveOtaLaneForIntent({ intent: '打开携程查北京到上海的机票，不要下单', extensionOnline: true, flagEnabled: true }),
+      resolveOtaLaneForIntent({
+        intent: '打开携程查北京到上海的机票，不要下单',
+        extensionOnline: true,
+        flagEnabled: true,
+      }),
     ).toBe('user-browser');
     expect(
-      resolveOtaLaneForIntent({ intent: '打开携程查北京到上海的机票，不要下单', extensionOnline: false, flagEnabled: true }),
+      resolveOtaLaneForIntent({
+        intent: '打开携程查北京到上海的机票，不要下单',
+        extensionOnline: false,
+        flagEnabled: true,
+      }),
     ).toBe('server-browser');
   });
 
   it('non-OTA browser task is NOT forced to user-browser', () => {
     expect(
-      resolveOtaLaneForIntent({ intent: '打开 https://example.com 看看页面', extensionOnline: true, flagEnabled: true }),
+      resolveOtaLaneForIntent({
+        intent: '打开 https://example.com 看看页面',
+        extensionOnline: true,
+        flagEnabled: true,
+      }),
     ).toBeNull();
     expect(
-      resolveOtaLaneForIntent({ intent: '登录 LinkedIn 查看我的主页', extensionOnline: true, flagEnabled: true }),
+      resolveOtaLaneForIntent({
+        intent: '登录 LinkedIn 查看我的主页',
+        extensionOnline: true,
+        flagEnabled: true,
+      }),
     ).toBeNull();
   });
 
   it('flag off → never user-browser, even for OTA', () => {
     expect(
-      resolveOtaLaneForIntent({ intent: '打开携程查上海酒店', extensionOnline: true, flagEnabled: false }),
+      resolveOtaLaneForIntent({
+        intent: '打开携程查上海酒店',
+        extensionOnline: true,
+        flagEnabled: false,
+      }),
     ).toBeNull();
   });
 });
@@ -139,25 +168,53 @@ describe('resolveOtaCanaryLane (Step 2.5 gate matrix)', () => {
   const allowedDomains = parseOtaAllowlist('ctrip.com,flights.ctrip.com,hotels.ctrip.com');
 
   it('flag off → server-browser', () => {
-    const d = resolveOtaCanaryLane({ intent: HOTEL, userId: USER, extensionOnline: true, masterEnabled: false, allowedUserIds, allowedDomains });
+    const d = resolveOtaCanaryLane({
+      intent: HOTEL,
+      userId: USER,
+      extensionOnline: true,
+      masterEnabled: false,
+      allowedUserIds,
+      allowedDomains,
+    });
     expect(d.lane).toBe('server-browser');
     expect(d.reason).toMatch(/master flag off/);
   });
   it('flag on but user NOT allowlisted → server-browser', () => {
-    const d = resolveOtaCanaryLane({ intent: HOTEL, userId: 'usr_other', extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
+    const d = resolveOtaCanaryLane({
+      intent: HOTEL,
+      userId: 'usr_other',
+      extensionOnline: true,
+      masterEnabled: true,
+      allowedUserIds,
+      allowedDomains,
+    });
     expect(d.lane).toBe('server-browser');
     expect(d.userAllowed).toBe(false);
     expect(d.reason).toMatch(/user not in canary/);
   });
   it('flag on + user allowlisted but DOMAIN not allowlisted → server-browser', () => {
-    const d = resolveOtaCanaryLane({ intent: '去哪儿查东京到上海机票', userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
+    const d = resolveOtaCanaryLane({
+      intent: '去哪儿查东京到上海机票',
+      userId: USER,
+      extensionOnline: true,
+      masterEnabled: true,
+      allowedUserIds,
+      allowedDomains,
+    });
     expect(d.matchedDomain).toBe('qunar.com');
     expect(d.lane).toBe('server-browser');
     expect(d.domainAllowed).toBe(false);
     expect(d.reason).toMatch(/domain not in canary/);
   });
   it('flag on + user + domain allowlisted + extension online + HOTEL → user-browser', () => {
-    const d = resolveOtaCanaryLane({ intent: HOTEL, userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
+    const d = resolveOtaCanaryLane({
+      intent: HOTEL,
+      userId: USER,
+      extensionOnline: true,
+      masterEnabled: true,
+      allowedUserIds,
+      allowedDomains,
+    });
     expect(d.lane).toBe('user-browser');
     expect(d.userAllowed).toBe(true);
     expect(d.domainAllowed).toBe(true);
@@ -165,8 +222,18 @@ describe('resolveOtaCanaryLane (Step 2.5 gate matrix)', () => {
   });
 
   it('Step 7: a Ctrip FLIGHT with ALL canary gates satisfied is forced to server-browser', () => {
-    for (const intent of ['打开携程查北京到上海的机票，不要下单，筛选直飞', '打开携程查上海到北京机票']) {
-      const d = resolveOtaCanaryLane({ intent, userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
+    for (const intent of [
+      '打开携程查北京到上海的机票，不要下单，筛选直飞',
+      '打开携程查上海到北京机票',
+    ]) {
+      const d = resolveOtaCanaryLane({
+        intent,
+        userId: USER,
+        extensionOnline: true,
+        masterEnabled: true,
+        allowedUserIds,
+        allowedDomains,
+      });
       expect(d.intentSubtype, intent).toBe('flight');
       expect(d.lane, intent).toBe('server-browser');
       expect(d.reason, intent).toBe('flight-prefers-server-brave-adapter');
@@ -174,18 +241,39 @@ describe('resolveOtaCanaryLane (Step 2.5 gate matrix)', () => {
   });
 
   it('Step 7: Ctrip 火车票/高铁 → server-browser', () => {
-    const d = resolveOtaCanaryLane({ intent: '携程查上海到北京的高铁车次', userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
+    const d = resolveOtaCanaryLane({
+      intent: '携程查上海到北京的高铁车次',
+      userId: USER,
+      extensionOnline: true,
+      masterEnabled: true,
+      allowedUserIds,
+      allowedDomains,
+    });
     expect(d.intentSubtype).toBe('train');
     expect(d.lane).toBe('server-browser');
     expect(d.reason).toMatch(/train-prefers-server-browser/);
   });
   it('extension offline → server-browser', () => {
-    const d = resolveOtaCanaryLane({ intent: HOTEL, userId: USER, extensionOnline: false, masterEnabled: true, allowedUserIds, allowedDomains });
+    const d = resolveOtaCanaryLane({
+      intent: HOTEL,
+      userId: USER,
+      extensionOnline: false,
+      masterEnabled: true,
+      allowedUserIds,
+      allowedDomains,
+    });
     expect(d.lane).toBe('server-browser');
     expect(d.reason).toMatch(/extension offline/);
   });
   it('non-OTA intent → null (routing unchanged)', () => {
-    const d = resolveOtaCanaryLane({ intent: '打开 https://example.com 看看', userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
+    const d = resolveOtaCanaryLane({
+      intent: '打开 https://example.com 看看',
+      userId: USER,
+      extensionOnline: true,
+      masterEnabled: true,
+      allowedUserIds,
+      allowedDomains,
+    });
     expect(d.lane).toBeNull();
   });
   it('REGRESSION: mixed-case userId matches a mixed-case allowlist entry (no lowercasing)', () => {
@@ -203,7 +291,14 @@ describe('resolveOtaCanaryLane (Step 2.5 gate matrix)', () => {
   });
 
   it('empty allowlists (prod default) → never user-browser', () => {
-    const d = resolveOtaCanaryLane({ intent: HOTEL, userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds: new Set(), allowedDomains: new Set() });
+    const d = resolveOtaCanaryLane({
+      intent: HOTEL,
+      userId: USER,
+      extensionOnline: true,
+      masterEnabled: true,
+      allowedUserIds: new Set(),
+      allowedDomains: new Set(),
+    });
     expect(d.lane).toBe('server-browser');
   });
 });
@@ -216,7 +311,10 @@ describe('classifyOtaAction — read/navigate allowed, order/pay/account blocked
 
   it('navigate to a whitelisted OTA query url is allowed', () => {
     expect(
-      classifyOtaAction({ kind: 'navigate', url: 'https://hotels.ctrip.com/hotels/list?city=2&star=4,5&price=0,800' }).allowed,
+      classifyOtaAction({
+        kind: 'navigate',
+        url: 'https://hotels.ctrip.com/hotels/list?city=2&star=4,5&price=0,800',
+      }).allowed,
     ).toBe(true);
   });
 
@@ -233,7 +331,9 @@ describe('classifyOtaAction — read/navigate allowed, order/pay/account blocked
   });
 
   it('navigate off-whitelist is blocked', () => {
-    expect(classifyOtaAction({ kind: 'navigate', url: 'https://booking.com/hotels' }).allowed).toBe(false);
+    expect(classifyOtaAction({ kind: 'navigate', url: 'https://booking.com/hotels' }).allowed).toBe(
+      false,
+    );
   });
 
   it('benign clicks (filters / search) are allowed', () => {
@@ -243,7 +343,17 @@ describe('classifyOtaAction — read/navigate allowed, order/pay/account blocked
   });
 
   it('clicking 提交订单 / 去支付 / 立即预订 is BLOCKED with a reason', () => {
-    for (const label of ['提交订单', '去支付', '立即预订', '确认下单', '立即支付', '确认支付', '去结算', 'Pay now', 'Place order']) {
+    for (const label of [
+      '提交订单',
+      '去支付',
+      '立即预订',
+      '确认下单',
+      '立即支付',
+      '确认支付',
+      '去结算',
+      'Pay now',
+      'Place order',
+    ]) {
       const v = classifyOtaAction({ kind: 'click', label });
       expect(v.allowed, label).toBe(false);
       expect(v.reason).toMatch(/forbidden action label/);
@@ -251,7 +361,15 @@ describe('classifyOtaAction — read/navigate allowed, order/pay/account blocked
   });
 
   it('account-edit / message / review clicks are blocked', () => {
-    for (const label of ['修改密码', '账号设置', '绑定银行卡', '保存支付', '发表评论', '发送', '私信']) {
+    for (const label of [
+      '修改密码',
+      '账号设置',
+      '绑定银行卡',
+      '保存支付',
+      '发表评论',
+      '发送',
+      '私信',
+    ]) {
       expect(classifyOtaAction({ kind: 'click', label }).allowed, label).toBe(false);
     }
   });
@@ -265,7 +383,13 @@ describe('buildOtaAuditRecord', () => {
   it('records taskId / domain / actionType / target / decision / reason for a blocked action', () => {
     const action = { kind: 'click' as const, label: '提交订单' };
     const verdict = classifyOtaAction(action);
-    const rec = buildOtaAuditRecord({ taskId: 'tsk_x', domain: 'hotels.ctrip.com', lane: 'user-browser', action, verdict });
+    const rec = buildOtaAuditRecord({
+      taskId: 'tsk_x',
+      domain: 'hotels.ctrip.com',
+      lane: 'user-browser',
+      action,
+      verdict,
+    });
     expect(rec).toMatchObject({
       event: 'ota.user_browser.action',
       taskId: 'tsk_x',
@@ -279,7 +403,10 @@ describe('buildOtaAuditRecord', () => {
   });
 
   it('records an allowed navigate', () => {
-    const action = { kind: 'navigate' as const, url: 'https://hotels.ctrip.com/hotels/list?city=2' };
+    const action = {
+      kind: 'navigate' as const,
+      url: 'https://hotels.ctrip.com/hotels/list?city=2',
+    };
     const rec = buildOtaAuditRecord({
       taskId: 'tsk_y',
       domain: 'hotels.ctrip.com',

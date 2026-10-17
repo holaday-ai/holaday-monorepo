@@ -15,6 +15,18 @@ describe('verificationCheckLabel', () => {
     ).toBe('第 3 行缺少商品链接');
   });
 
+  it('keeps per-item list source details', () => {
+    expect(
+      verificationCheckLabel({
+        type: 'list_item_sources',
+        detail: '第 1 条缺少独立来源链接（不能用首页或搜索页）',
+      }),
+    ).toBe('第 1 条缺少独立来源链接（不能用首页或搜索页）');
+    expect(verificationCheckLabel({ type: 'list_item_sources', detail: '' })).toBe(
+      '列表条目缺少独立来源或关键字段',
+    );
+  });
+
   it('maps unknown second-opinion details without exposing model names', () => {
     const label = verificationCheckLabel({
       type: 'unknown',
@@ -43,12 +55,15 @@ describe('verificationCheckLabel', () => {
   it('never surfaces a raw English check detail verbatim', () => {
     // Unmapped check type + ASCII assertion string → generic label, not raw leak.
     expect(
-      verificationCheckLabel({ type: 'unknown_check', detail: 'assertion failed: got 3, expected >= 5' }),
+      verificationCheckLabel({
+        type: 'unknown_check',
+        detail: 'assertion failed: got 3, expected >= 5',
+      }),
     ).toBe('自动审核发现一项问题');
     // Chinese details are still surfaced as-is.
-    expect(
-      verificationCheckLabel({ type: 'unknown_check', detail: '第 2 行缺少价格' }),
-    ).toBe('第 2 行缺少价格');
+    expect(verificationCheckLabel({ type: 'unknown_check', detail: '第 2 行缺少价格' })).toBe(
+      '第 2 行缺少价格',
+    );
   });
 
   it('clarifies when required source links were removed or absent', () => {
@@ -73,15 +88,15 @@ describe('verificationCheckLabel', () => {
 describe('shouldShowVerificationBanner', () => {
   it('always shows for partial_success regardless of checks', () => {
     expect(shouldShowVerificationBanner({ status: 'partial_success' })).toBe(true);
-    expect(
-      shouldShowVerificationBanner({ status: 'partial_success', failedChecks: [] }),
-    ).toBe(true);
+    expect(shouldShowVerificationBanner({ status: 'partial_success', failedChecks: [] })).toBe(
+      true,
+    );
   });
 
   it('shows when verification explicitly failed or checks were flagged', () => {
-    expect(
-      shouldShowVerificationBanner({ status: 'completed', verificationPassed: false }),
-    ).toBe(true);
+    expect(shouldShowVerificationBanner({ status: 'completed', verificationPassed: false })).toBe(
+      true,
+    );
     expect(
       shouldShowVerificationBanner({
         status: 'failed',

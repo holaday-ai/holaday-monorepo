@@ -47,12 +47,17 @@ export interface FirecrawlError {
 export type FirecrawlScrapeResult = FirecrawlScrapeOk | FirecrawlError;
 export type FirecrawlSearchResultBundle = FirecrawlSearchOk | FirecrawlError;
 
+export interface FirecrawlScrapeOpts {
+  signal?: AbortSignal;
+}
+
 export interface FirecrawlSearchOpts {
+  signal?: AbortSignal;
   limit?: number;
 }
 
 export interface FirecrawlLane {
-  scrape(url: string): Promise<FirecrawlScrapeResult>;
+  scrape(url: string, opts?: FirecrawlScrapeOpts): Promise<FirecrawlScrapeResult>;
   search(query: string, opts?: FirecrawlSearchOpts): Promise<FirecrawlSearchResultBundle>;
 }
 
@@ -86,13 +91,18 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
   async function request(
     path: string,
     body: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<{ ok: true; json: unknown } | { ok: false; error: string }> {
+    if (signal?.aborted) return { ok: false, error: 'firecrawl: request cancelled' };
     if (!apiKey) {
       return { ok: false, error: 'firecrawl: api key not configured (FIRECRAWL_API_KEY empty)' };
     }
-    let lastErr: string = 'unknown';
+    let lastErr = 'unknown';
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const controller = new AbortController();
+      const abortFromCaller = () => controller.abort();
+      signal?.addEventListener('abort', abortFromCaller, { once: true });
+      if (signal?.aborted) controller.abort();
       const startedAt = Date.now();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
@@ -143,10 +153,10 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
         return { ok: true, json };
       } catch (err) {
         clearTimeout(timer);
+        if (signal?.aborted) return { ok: false, error: 'firecrawl: request cancelled' };
         lastErr = err instanceof Error ? err.message : String(err);
         const isAbort =
-          err instanceof Error &&
-          (err.name === 'AbortError' || /aborted|abort/i.test(err.message));
+          err instanceof Error && (err.name === 'AbortError' || /aborted|abort/i.test(err.message));
         logger?.warn(
           {
             path,
@@ -156,24 +166,29 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
             isAbort,
             err: lastErr,
           },
-          isAbort
-            ? 'firecrawl: request aborted (timeout)'
-            : 'firecrawl: transport failure',
+          isAbort ? 'firecrawl: request aborted (timeout)' : 'firecrawl: transport failure',
         );
         // network/timeout — retry once
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abortFromCaller);
       }
     }
     return { ok: false, error: `firecrawl: ${lastErr} (after ${MAX_ATTEMPTS} attempts)` };
   }
 
   return {
-    async scrape(url: string): Promise<FirecrawlScrapeResult> {
+    async scrape(url: string, scrapeOpts?: FirecrawlScrapeOpts): Promise<FirecrawlScrapeResult> {
       const trimmed = url.trim();
       if (!trimmed) return { ok: false, error: 'firecrawl: empty url' };
-      const result = await request('/v1/scrape', {
-        url: trimmed,
-        formats: ['markdown'],
-      });
+      const result = await request(
+        '/v1/scrape',
+        {
+          url: trimmed,
+          formats: ['markdown'],
+        },
+        scrapeOpts?.signal,
+      );
       if (!result.ok) return { ok: false, error: result.error };
       const j = result.json as
         | {
@@ -201,15 +216,22 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
       };
     },
 
-    async search(query: string, searchOpts?: FirecrawlSearchOpts): Promise<FirecrawlSearchResultBundle> {
+    async search(
+      query: string,
+      searchOpts?: FirecrawlSearchOpts,
+    ): Promise<FirecrawlSearchResultBundle> {
       const trimmed = query.trim();
       if (!trimmed) return { ok: false, error: 'firecrawl: empty query' };
       const limit = Math.max(1, Math.min(20, searchOpts?.limit ?? 5));
-      const result = await request('/v1/search', {
-        query: trimmed,
-        limit,
-        scrapeOptions: { formats: ['markdown'] },
-      });
+      const result = await request(
+        '/v1/search',
+        {
+          query: trimmed,
+          limit,
+          scrapeOptions: { formats: ['markdown'] },
+        },
+        searchOpts?.signal,
+      );
       if (!result.ok) return { ok: false, error: result.error };
       const j = result.json as
         | {

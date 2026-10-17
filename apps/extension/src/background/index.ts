@@ -45,6 +45,8 @@ import { PlaywrightCrxAdapter } from '@holaday/browser-driver/crx';
 import { MockDriver } from '@holaday/browser-driver/mock';
 import type { ClientMessage, ServerMessage } from '@holaday/shared-types';
 import { tryAutoLogin } from '../shared/auto-login.js';
+import { withDeadline } from '../shared/deadline.js';
+import { compactLogErrorReason } from '../shared/log-error.js';
 import {
   clearAccessToken,
   clearStoredUser,
@@ -52,40 +54,37 @@ import {
   normalizeAccessToken,
   setAccessToken,
 } from '../shared/storage.js';
+import { isTrustedAuthBridgeSender } from './auth-bridge-trust.js';
+import { decideAuthTokenAction, decideStoredAuthTokenAction } from './auth-token-handler.js';
+import {
+  BrowserExecutionBusyError,
+  browserExecutionOwnership,
+} from './browser-execution-ownership.js';
 import {
   captureVisionObservation,
   detachAll,
   executeCdpAction,
   getActiveTabId,
   prepareSelectedChromeCdp,
+  releaseStaleDebuggerAttachments,
 } from './cdp-actions.js';
 import { buildLoginStatesMessage, readLoginStates } from './cookie-bridge.js';
 import { runCookieSync } from './cookie-sync.js';
-import { runHistorySync } from './history-sync.js';
+import { sendCriticalClientMessage } from './critical-send.js';
 import {
   configureExtensionToolRuntime,
   handleExtensionToolCall,
   setExtensionToolTaskStopped,
 } from './extension-tools.js';
-import {
-  BrowserExecutionBusyError,
-  browserExecutionOwnership,
-} from './browser-execution-ownership.js';
+import { runHistorySync } from './history-sync.js';
 import { createSelectedChromeBridge } from './selected-chrome-bridge.js';
 import { createSelectedChromeTransport } from './selected-chrome-transport.js';
-import { isTrustedAuthBridgeSender } from './auth-bridge-trust.js';
 import {
-  decideAuthTokenAction,
-  decideStoredAuthTokenAction,
-} from './auth-token-handler.js';
-import { sendCriticalClientMessage } from './critical-send.js';
-import { withDeadline } from '../shared/deadline.js';
-import { compactLogErrorReason } from '../shared/log-error.js';
-import {
+  armCappedSlowRetry,
   connect as connectWs,
   disconnect as disconnectWs,
-  getWsConnectionStatus,
   getCurrentWsToken,
+  getWsConnectionStatus,
   isConnected,
   isReconnectCapped,
   onServerMessage,
@@ -168,6 +167,11 @@ async function getDriver(): Promise<HolaDayBrowserDriver> {
   });
   return driverPromise;
 }
+
+// A (re)started worker owns no debugger session; release any the previous
+// worker left attached so selected-tab / vision attaches do not fail with
+// "Another debugger is already attached" after an MV3 recycle.
+void releaseStaleDebuggerAttachments();
 
 /** Runs only while selected ownership is already reserved and before the
  * selected bridge attaches. Any cleanup failure blocks the new attachment. */
@@ -496,9 +500,9 @@ async function onVisionObserve(
   }
   const cached = recentVisionObservations.get(dedupeKey);
   if (
-    cached
-    && cached.generation === controlGeneration
-    && Date.now() - cached.at <= VISION_OBSERVATION_RESULT_TTL_MS
+    cached &&
+    cached.generation === controlGeneration &&
+    Date.now() - cached.at <= VISION_OBSERVATION_RESULT_TTL_MS
   ) {
     if (isControlledTaskResultStale(msg.taskId, controlGeneration)) {
       logDroppedControlledTaskResult('vision observation', msg.taskId);
@@ -517,7 +521,6 @@ async function onVisionObserve(
     await pending.promise;
     return;
   }
-  let trackedPromise: Promise<VisionObservationPayload>;
   const next = computeVisionObservationPayload(msg)
     .catch((err): VisionObservationPayload => {
       console.warn('[holaday] vision observation failed unexpectedly', compactLogErrorReason(err));
@@ -539,7 +542,7 @@ async function onVisionObserve(
         inFlightVisionObservations.delete(dedupeKey);
       }
     });
-  trackedPromise = next;
+  const trackedPromise = next;
   inFlightVisionObservations.set(dedupeKey, {
     generation: controlGeneration,
     ownerToken,
@@ -633,9 +636,9 @@ async function onVisionAct(
   }
   const cached = recentVisionActResults.get(dedupeKey);
   if (
-    cached
-    && cached.generation === controlGeneration
-    && Date.now() - cached.at <= VISION_ACT_RESULT_TTL_MS
+    cached &&
+    cached.generation === controlGeneration &&
+    Date.now() - cached.at <= VISION_ACT_RESULT_TTL_MS
   ) {
     if (isControlledTaskResultStale(msg.taskId, controlGeneration)) {
       logDroppedControlledTaskResult('vision action', msg.taskId);
@@ -654,7 +657,6 @@ async function onVisionAct(
     await pending.promise;
     return;
   }
-  let trackedPromise: Promise<VisionActResultPayload>;
   const next = computeVisionActResult(msg)
     .catch((err): VisionActResultPayload => {
       console.warn('[holaday] vision act failed unexpectedly', compactLogErrorReason(err));
@@ -669,7 +671,7 @@ async function onVisionAct(
         inFlightVisionActResults.delete(dedupeKey);
       }
     });
-  trackedPromise = next;
+  const trackedPromise = next;
   inFlightVisionActResults.set(dedupeKey, {
     generation: controlGeneration,
     ownerToken,
@@ -856,13 +858,15 @@ function finaliseVisionTask(taskId: string, status: 'completed' | 'failed', deta
 }
 
 function releaseVisionDebugger(taskId: string): void {
-  void browserExecutionOwnership.runLegacy(() => detachAll()).catch((err) => {
-    if (err instanceof BrowserExecutionBusyError) return;
-    console.warn('[holaday] vision debugger release failed', {
-      taskId,
-      reason: compactLogErrorReason(err),
+  void browserExecutionOwnership
+    .runLegacy(() => detachAll())
+    .catch((err) => {
+      if (err instanceof BrowserExecutionBusyError) return;
+      console.warn('[holaday] vision debugger release failed', {
+        taskId,
+        reason: compactLogErrorReason(err),
+      });
     });
-  });
 }
 
 /**
@@ -937,9 +941,9 @@ async function runStep(
   }
   const cached = recentStepResults.get(dedupeKey);
   if (
-    cached
-    && cached.generation === controlGeneration
-    && Date.now() - cached.at <= STEP_RESULT_TTL_MS
+    cached &&
+    cached.generation === controlGeneration &&
+    Date.now() - cached.at <= STEP_RESULT_TTL_MS
   ) {
     if (isControlledTaskResultStale(msg.taskId, controlGeneration)) {
       logDroppedControlledTaskResult('step result', msg.taskId);
@@ -958,7 +962,6 @@ async function runStep(
     await pending.promise;
     return;
   }
-  let trackedPromise: Promise<StepResultPayload>;
   const next = computeStepResult(msg)
     .then((payload) => {
       rememberStepResult(dedupeKey, payload, controlGeneration, ownerToken);
@@ -969,7 +972,7 @@ async function runStep(
         inFlightStepResults.delete(dedupeKey);
       }
     });
-  trackedPromise = next;
+  const trackedPromise = next;
   inFlightStepResults.set(dedupeKey, {
     generation: controlGeneration,
     ownerToken,
@@ -1333,10 +1336,7 @@ async function resetAuthFailureState(): Promise<void> {
       'auth_failure_state_remove_timeout',
     );
   } catch (err) {
-    console.warn(
-      '[holaday] auth: failed to reset failure bookkeeping',
-      compactLogErrorReason(err),
-    );
+    console.warn('[holaday] auth: failed to reset failure bookkeeping', compactLogErrorReason(err));
   }
 }
 
@@ -1411,9 +1411,7 @@ async function ensureConnectedInner(): Promise<{ token: string | null; frozen?: 
     const knownBad = await getKnownBadToken();
     const storedAction = decideStoredAuthTokenAction(token, knownBad);
     if (storedAction.kind === 'refuse') {
-      console.warn(
-        `[holaday] ensureConnected: refusing stored ${storedAction.reason} token`,
-      );
+      console.warn(`[holaday] ensureConnected: refusing stored ${storedAction.reason} token`);
       await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
       disconnect();
       state.tasks.clear();
@@ -1427,9 +1425,7 @@ async function ensureConnectedInner(): Promise<{ token: string | null; frozen?: 
     if (lifted) {
       const knownBad = await getKnownBadToken();
       if (knownBad && lifted === knownBad) {
-        console.warn(
-          '[holaday] ensureConnected: lifted token matches last-rejected; not retrying',
-        );
+        console.warn('[holaday] ensureConnected: lifted token matches last-rejected; not retrying');
         return { token: null };
       }
       const currentBeforeImport = normalizeAccessToken(await getAccessToken());
@@ -1465,38 +1461,18 @@ async function ensureConnectedInner(): Promise<{ token: string | null; frozen?: 
 const LOGIN_STATES_PERIOD_MS = 5 * 60 * 1000;
 let lastLoginStatesAt = 0;
 
-/**
- * Phase 17 — cookie-value sync throttle. Welcome + alarm both call
- * this; the timestamp dedupes so a tight reconnect cycle doesn't
- * burn the orchestrator with redundant POSTs.
- *
- * The interval matches the `30 * 60 * 1000` spec target (30 min)
- * for the alarm path; the welcome path is allowed to fire whenever
- * it does so freshly-authed users get an instant sync.
- */
-const COOKIE_SYNC_PERIOD_MS = 30 * 60 * 1000;
+/** Phase 17 cookie-value sync is retired; this only dedupes the one-time notice. */
 let lastCookieSyncAt = 0;
 
 async function maybeRunCookieSync(reason: 'welcome' | 'alarm' | 'manual'): Promise<void> {
-  const now = Date.now();
-  if (reason === 'alarm' && now - lastCookieSyncAt < COOKIE_SYNC_PERIOD_MS) return;
-  lastCookieSyncAt = now;
-  try {
-    const res = await runCookieSync();
-    if (res === null) {
-      // No token — silent skip, sync will retry on next welcome.
-      return;
-    }
-    console.info(
-      `[holaday] cookie-sync (${reason}): synced ${res.synced} cookies across ${res.domains.length} domains${
-        res.deferred ? ' (parked, no live Brave)' : ' (immediate inject)'
-      }`,
-    );
-  } catch (err) {
-    console.warn('[holaday] cookie-sync failed', compactLogErrorReason(err));
-    // Reset throttle so the next attempt isn't gated by the failed run.
-    lastCookieSyncAt = 0;
-  }
+  // Retired: cookies are no longer synced automatically. Say so once instead
+  // of failing silently; the popup shows the same notice to the user.
+  if (lastCookieSyncAt) return;
+  lastCookieSyncAt = Date.now();
+  await runCookieSync();
+  console.info(
+    `[holaday] cookie-sync (${reason}): 已改为按站点授权导入（功能即将开放），不再自动同步 Cookie`,
+  );
 }
 
 /**
@@ -1678,10 +1654,7 @@ onUnauthorized(() => {
         'auth_failures_write_timeout',
       );
     } catch (err) {
-      console.warn(
-        '[holaday] auth: failed to persist failure count',
-        compactLogErrorReason(err),
-      );
+      console.warn('[holaday] auth: failed to persist failure count', compactLogErrorReason(err));
     }
     if (rejected) {
       try {
@@ -1714,8 +1687,7 @@ onUnauthorized(() => {
       );
       return;
     }
-    const delay =
-      RETRY_BACKOFF_MS[Math.min(next - 1, RETRY_BACKOFF_MS.length - 1)] ?? 4_000;
+    const delay = RETRY_BACKOFF_MS[Math.min(next - 1, RETRY_BACKOFF_MS.length - 1)] ?? 4_000;
     console.info(
       `[holaday] auth: rejected (attempt ${next}/${MAX_AUTH_FAILURES}); next retry in ${delay}ms`,
     );
@@ -1737,15 +1709,18 @@ onUnauthorized(() => {
 // kick off a fresh reconnect cycle EVERY tick after the in-memory
 // cap fired — defeating the persistent-cap fix in ws-client. With
 // it, three failed attempts → silence until the user explicitly
-// re-engages via the popup or chrome.runtime.onStartup.
+// re-engages via the popup or chrome.runtime.onStartup, except for one
+// slow probe per WS_CAPPED_RETRY_INTERVAL_MS (armCappedSlowRetry).
 chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: KEEPALIVE_PERIOD_MIN });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === KEEPALIVE_ALARM) {
     void (async () => {
-      if (await isReconnectCapped()) {
+      if ((await isReconnectCapped()) && !(await armCappedSlowRetry())) {
         // Persistent cap is hit — don't burn another connect cycle on
         // a known-unreachable orchestrator. The popup's manual retry
-        // path will clear the cap when the user is ready.
+        // path clears the cap immediately; otherwise one slow probe is
+        // allowed every WS_CAPPED_RETRY_INTERVAL_MS (self-heal after an
+        // orchestrator restart / network outage).
         return;
       }
       await ensureConnected();
@@ -1791,10 +1766,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // login / account swap. Idempotent: identical-to-stored values
     // are short-circuited so we don't churn the WS on poll ticks.
     if (!isTrustedAuthBridgeSender(_sender.url)) {
-      console.warn(
-        '[holaday] auth-bridge: ignoring message from untrusted sender',
-        _sender.url,
-      );
+      console.warn('[holaday] auth-bridge: ignoring message from untrusted sender', _sender.url);
       safeSendResponse(sendResponse, { ok: false, reason: 'untrusted_sender' });
       return true;
     }

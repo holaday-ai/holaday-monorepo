@@ -474,14 +474,27 @@ const COMPLEX_ROLES = new Set([
  * worth it.
  */
 const SIMPLE_KEYWORDS: readonly string[] = [
-  '翻译', '术语表', '一句话', '简单查询', '单一查询',
-  'sop', '标准操作流程',
-  'translate ', 'translate.', 'glossary',
+  '翻译',
+  '术语表',
+  '一句话',
+  '简单查询',
+  '单一查询',
+  'sop',
+  '标准操作流程',
+  'translate ',
+  'translate.',
+  'glossary',
 ];
 
 const COMPLEX_KEYWORDS: readonly string[] = [
-  '多步骤', '跨领域', '综合分析', '深度研究', '深度调研',
-  '全面调研', '系统性分析', '战略研究',
+  '多步骤',
+  '跨领域',
+  '综合分析',
+  '深度研究',
+  '深度调研',
+  '全面调研',
+  '系统性分析',
+  '战略研究',
 ];
 
 function hasAny(intent: string, keywords: readonly string[]): boolean {

@@ -4,26 +4,33 @@ import { alias } from 'drizzle-orm/mysql-core';
 import { z } from 'zod';
 import type { DB } from '../../db/client.js';
 import {
-  partnerKycProfiles,
-  partnerLots,
-  partnerReferrals,
-  partnerRechargeOrders,
-  partnerRiskEvents,
-  partnerWithdrawalRequests,
   type PartnerLot,
   type PartnerRechargeOrder,
   type PartnerWithdrawalRequest,
+  partnerKycProfiles,
+  partnerLots,
+  partnerRechargeOrders,
+  partnerReferrals,
+  partnerRiskEvents,
+  partnerWithdrawalRequests,
 } from '../../db/schema/partner.js';
 import { users } from '../../db/schema/users.js';
 import { KycService } from '../../partner/kyc-service.js';
 import {
   PartnerPaymentConfirmConflictError,
   PartnerPaymentConfirmReviewRequiredError,
-  PartnerPaymentProviderCaptureConflictError,
   PartnerPaymentConfirmService,
+  PartnerPaymentProviderCaptureConflictError,
 } from '../../partner/payment-confirm-service.js';
-import { PartnerRiskLotService, PartnerRiskLotTransitionError } from '../../partner/risk-lot-service.js';
-import { WithdrawalGateError, WithdrawalService, WithdrawalTransitionError } from '../../partner/withdrawal-service.js';
+import {
+  PartnerRiskLotService,
+  PartnerRiskLotTransitionError,
+} from '../../partner/risk-lot-service.js';
+import {
+  WithdrawalGateError,
+  WithdrawalService,
+  WithdrawalTransitionError,
+} from '../../partner/withdrawal-service.js';
 import { adminProcedure, router } from '../trpc.js';
 
 const OVERVIEW_LIMIT_CAP = 500;
@@ -60,7 +67,10 @@ async function resolveUserByExternalId(db: DB, userExternalId: string) {
   return row;
 }
 
-async function readOrderByExternalId(db: DB, orderExternalId: string): Promise<PartnerRechargeOrder> {
+async function readOrderByExternalId(
+  db: DB,
+  orderExternalId: string,
+): Promise<PartnerRechargeOrder> {
   const [row] = await db
     .select()
     .from(partnerRechargeOrders)
@@ -306,10 +316,7 @@ function summarizeRiskEventQueueRow<T extends { metadata?: unknown }>(row: T) {
   };
 }
 
-function summarizeWithdrawalMetrics(
-  rows: Array<{ status: string; reviewDueAt: Date }>,
-  now: Date,
-) {
+function summarizeWithdrawalMetrics(rows: Array<{ status: string; reviewDueAt: Date }>, now: Date) {
   const activeRows = rows.filter((row) => row.status === 'requested' || row.status === 'reviewing');
   return {
     pendingWithdrawalCount: activeRows.length,
@@ -317,7 +324,8 @@ function summarizeWithdrawalMetrics(
     paidWithdrawalCount: rows.filter((row) => row.status === 'paid').length,
     rejectedWithdrawalCount: rows.filter((row) => row.status === 'rejected').length,
     returnedWithdrawalCount: rows.filter((row) => row.status === 'returned').length,
-    overdueWithdrawalCount: activeRows.filter((row) => row.reviewDueAt.getTime() <= now.getTime()).length,
+    overdueWithdrawalCount: activeRows.filter((row) => row.reviewDueAt.getTime() <= now.getTime())
+      .length,
   };
 }
 
@@ -361,37 +369,39 @@ function summarizePartnerReconciliation(input: {
     rewardRateBps: rowNonNegativeInteger(row.rewardRateBps),
   }));
   const providerBreakdown = Array.from(
-    orders.reduce(
-      (byProvider, row) => {
-        const current = byProvider.get(row.provider) ?? {
-          provider: row.provider,
-          orderCount: 0,
-          completedOrderCount: 0,
-          completedAmountCnyCents: 0,
-          reviewRequiredOrderCount: 0,
-        };
-        current.orderCount += 1;
-        if (row.status === 'completed') {
-          current.completedOrderCount += 1;
-          current.completedAmountCnyCents += row.amountCnyCents;
-        }
-        if (row.status === 'review_required') {
-          current.reviewRequiredOrderCount += 1;
-        }
-        byProvider.set(row.provider, current);
-        return byProvider;
-      },
-      new Map<
-        string,
-        {
-          provider: string;
-          orderCount: number;
-          completedOrderCount: number;
-          completedAmountCnyCents: number;
-          reviewRequiredOrderCount: number;
-        }
-      >(),
-    ).values(),
+    orders
+      .reduce(
+        (byProvider, row) => {
+          const current = byProvider.get(row.provider) ?? {
+            provider: row.provider,
+            orderCount: 0,
+            completedOrderCount: 0,
+            completedAmountCnyCents: 0,
+            reviewRequiredOrderCount: 0,
+          };
+          current.orderCount += 1;
+          if (row.status === 'completed') {
+            current.completedOrderCount += 1;
+            current.completedAmountCnyCents += row.amountCnyCents;
+          }
+          if (row.status === 'review_required') {
+            current.reviewRequiredOrderCount += 1;
+          }
+          byProvider.set(row.provider, current);
+          return byProvider;
+        },
+        new Map<
+          string,
+          {
+            provider: string;
+            orderCount: number;
+            completedOrderCount: number;
+            completedAmountCnyCents: number;
+            reviewRequiredOrderCount: number;
+          }
+        >(),
+      )
+      .values(),
   ).sort((a, b) => a.provider.localeCompare(b.provider));
   const completedOrders = orders.filter((row) => row.status === 'completed');
   const rewardedReferrals = referrals.filter((row) => row.status === 'rewarded');
@@ -402,7 +412,10 @@ function summarizePartnerReconciliation(input: {
       completedOrderCount: completedOrders.length,
       pendingOrderCount: orders.filter((row) => row.status === 'pending').length,
       reviewRequiredOrderCount: orders.filter((row) => row.status === 'review_required').length,
-      completedOrderAmountCnyCents: completedOrders.reduce((sum, row) => sum + row.amountCnyCents, 0),
+      completedOrderAmountCnyCents: completedOrders.reduce(
+        (sum, row) => sum + row.amountCnyCents,
+        0,
+      ),
       membershipRevenueCnyCents: completedOrders
         .filter((row) => row.orderKind === 'membership')
         .reduce((sum, row) => sum + row.amountCnyCents, 0),
@@ -430,7 +443,10 @@ function summarizePartnerReconciliation(input: {
       assistedReferralRewardCreditCents: rewardedReferrals
         .filter((row) => row.assisted)
         .reduce((sum, row) => sum + row.rewardCreditCents, 0),
-      totalReferralRewardCreditCents: rewardedReferrals.reduce((sum, row) => sum + row.rewardCreditCents, 0),
+      totalReferralRewardCreditCents: rewardedReferrals.reduce(
+        (sum, row) => sum + row.rewardCreditCents,
+        0,
+      ),
     },
     providerBreakdown,
     orders,
@@ -480,11 +496,7 @@ function normalizeReconciliationWindow(input: { from?: string; to?: string } | u
   };
 }
 
-function requireCompleteReconciliationRows<T>(
-  rows: T[],
-  limit: number,
-  label: string,
-): T[] {
+function requireCompleteReconciliationRows<T>(rows: T[], limit: number, label: string): T[] {
   if (rows.length > limit) {
     throw new TRPCError({
       code: 'PRECONDITION_FAILED',
@@ -504,7 +516,10 @@ function mapPaymentError(error: unknown): never {
   if (error instanceof RangeError) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
   }
-  throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'partner order confirmation failed' });
+  throw new TRPCError({
+    code: 'INTERNAL_SERVER_ERROR',
+    message: 'partner order confirmation failed',
+  });
 }
 
 function mapWithdrawalError(error: unknown): never {
@@ -526,7 +541,10 @@ function mapWithdrawalError(error: unknown): never {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'withdrawal request not found' });
     }
     if (error.reason === 'update_conflict') {
-      throw new TRPCError({ code: 'CONFLICT', message: 'withdrawal request changed while reviewing' });
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'withdrawal request changed while reviewing',
+      });
     }
     throw new TRPCError({ code: 'PRECONDITION_FAILED', message: error.message });
   }
@@ -542,7 +560,10 @@ function mapRiskLotError(error: unknown): never {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'partner risk lot not found' });
     }
     if (error.reason === 'not_frozen') {
-      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'partner risk lot is not frozen' });
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'partner risk lot is not frozen',
+      });
     }
     if (error.reason === 'closed') {
       throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'partner risk lot is closed' });
@@ -702,7 +723,10 @@ export const adminPartnerRouter = router({
           .innerJoin(users, eq(users.id, partnerLots.userId))
           .where(
             and(
-              or(inArray(partnerLots.riskStatus, ['review', 'review_required', 'frozen']), eq(partnerLots.status, 'frozen')),
+              or(
+                inArray(partnerLots.riskStatus, ['review', 'review_required', 'frozen']),
+                eq(partnerLots.status, 'frozen'),
+              ),
               searchPattern ? riskLotSearchCondition(searchPattern) : undefined,
             ),
           )
@@ -764,7 +788,8 @@ export const adminPartnerRouter = router({
         metrics: {
           pendingKycCount: kycRows.length,
           pendingOrderCount: orderRows.filter((row) => row.status === 'pending').length,
-          reviewRequiredOrderCount: orderRows.filter((row) => row.status === 'review_required').length,
+          reviewRequiredOrderCount: orderRows.filter((row) => row.status === 'review_required')
+            .length,
           ...withdrawalMetrics,
           riskLotCount: riskLotRows.length,
           riskEventCount: riskEventRows.length,
@@ -876,8 +901,14 @@ export const adminPartnerRouter = router({
             updatedAt: partnerReferrals.updatedAt,
           })
           .from(partnerReferrals)
-          .innerJoin(referralInviterUsers, eq(referralInviterUsers.id, partnerReferrals.inviterUserId))
-          .innerJoin(referralInviteeUsers, eq(referralInviteeUsers.id, partnerReferrals.inviteeUserId))
+          .innerJoin(
+            referralInviterUsers,
+            eq(referralInviterUsers.id, partnerReferrals.inviterUserId),
+          )
+          .innerJoin(
+            referralInviteeUsers,
+            eq(referralInviteeUsers.id, partnerReferrals.inviteeUserId),
+          )
           .where(
             and(
               gte(partnerReferrals.updatedAt, window.fromDate),
@@ -888,16 +919,8 @@ export const adminPartnerRouter = router({
           .limit(limit + 1),
       ]);
       const orders = requireCompleteReconciliationRows(orderRows, limit, 'orders');
-      const withdrawals = requireCompleteReconciliationRows(
-        withdrawalRows,
-        limit,
-        'withdrawals',
-      );
-      const referrals = requireCompleteReconciliationRows(
-        referralRows,
-        limit,
-        'referrals',
-      );
+      const withdrawals = requireCompleteReconciliationRows(withdrawalRows, limit, 'withdrawals');
+      const referrals = requireCompleteReconciliationRows(referralRows, limit, 'referrals');
 
       return {
         enabled: true as const,
@@ -930,10 +953,7 @@ export const adminPartnerRouter = router({
           note: z.string().trim().min(1).max(1000),
         })
         .superRefine((value, context) => {
-          if (
-            (value.status === 'passed' || value.status === 'rejected') &&
-            !value.providerRef
-          ) {
+          if ((value.status === 'passed' || value.status === 'rejected') && !value.providerRef) {
             context.addIssue({
               code: z.ZodIssueCode.custom,
               path: ['providerRef'],

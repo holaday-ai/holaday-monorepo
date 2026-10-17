@@ -14,6 +14,9 @@ import { z } from 'zod';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { users } from '../../db/schema/users.js';
 import { FileService, decodeUploadFilename } from '../../files/file-service.js';
+import { libraryAvailability } from '../../files/library-availability.js';
+import { getSharedStorageProvider } from '../../files/storage-provider.js';
+import { recordServerTiming, timedPhase } from '../../http-server-timing.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 async function requireUserId(ctx: {
@@ -112,7 +115,7 @@ export const filesRouter = router({
         .default({ type: 'all' }),
     )
     .query(async ({ ctx, input }) => {
-      const userId = await requireUserId(ctx);
+      const userId = await timedPhase(ctx.res, 'auth', () => requireUserId(ctx));
       const now = new Date();
       const conds = [
         eq(taskFiles.userId, userId),
@@ -141,33 +144,44 @@ export const filesRouter = router({
       if (input.cursor) {
         conds.push(lt(taskFiles.id, input.cursor));
       }
-      const rows = await ctx.db
-        .select({
-          id: taskFiles.id,
-          externalId: taskFiles.externalId,
-          filename: taskFiles.filename,
-          mimetype: taskFiles.mimetype,
-          sizeBytes: taskFiles.sizeBytes,
-          createdAt: taskFiles.createdAt,
-          status: taskFiles.status,
-          expiresAt: taskFiles.expiresAt,
-        })
-        .from(taskFiles)
-        .where(and(...conds))
-        .orderBy(desc(taskFiles.id))
-        .limit(input.limit + 1);
+      const rows = await timedPhase(ctx.res, 'db', () =>
+        ctx.db
+          .select({
+            id: taskFiles.id,
+            externalId: taskFiles.externalId,
+            filename: taskFiles.filename,
+            mimetype: taskFiles.mimetype,
+            sizeBytes: taskFiles.sizeBytes,
+            createdAt: taskFiles.createdAt,
+            status: taskFiles.status,
+            expiresAt: taskFiles.expiresAt,
+            storagePath: taskFiles.storagePath,
+          })
+          .from(taskFiles)
+          .where(and(...conds))
+          .orderBy(desc(taskFiles.id))
+          .limit(input.limit + 1),
+      );
       const hasMore = rows.length > input.limit;
       const page = rows.slice(0, input.limit);
-      return {
-        items: page.map((r) => ({
+      const availability = await timedPhase(ctx.res, 'avail', () =>
+        libraryAvailability(getSharedStorageProvider({ logger: ctx.logger }), page, ctx.userId),
+      );
+      const serializeStarted = performance.now();
+      const result = {
+        items: page.map((r, index) => ({
           fileId: r.externalId,
           filename: normalizeLibraryFilename(r.filename),
           mimetype: r.mimetype,
           sizeBytes: Number(r.sizeBytes),
           createdAt: r.createdAt,
+          // biome-ignore lint/style/noNonNullAssertion: Availability retains the page length and order.
+          availability: availability[index]!,
         })),
         nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
       };
+      recordServerTiming(ctx.res, 'ser', performance.now() - serializeStarted);
+      return result;
     }),
 
   /** Delete the owned backing object first, then remove its index row. */
@@ -218,6 +232,7 @@ function libraryFilenameSearchTerms(query: string): string[] {
 
 export const __filesRouterInternals = {
   deleteLibraryFile,
+  libraryAvailability,
   fileAvailabilityItems,
   fileIsAvailableInLibrary,
   fileMatchesLibraryFilter,

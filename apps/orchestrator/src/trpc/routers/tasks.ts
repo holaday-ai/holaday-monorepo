@@ -1,18 +1,11 @@
-import { createHash } from 'node:crypto';
-import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
-import { runSelectedChromeTask } from '../../agent/supercar/selected-chrome-runner.js';
-import { startOwnedOperation } from '../../execution/owned-operation.js';
-import { runTaskBackground } from './task-background.js';
-import { assertLocalChromeSelection, localChromeSelectionSchema, localChromeTabsProcedure } from './local-chrome-selection.js';
-import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
-import { browserControlProcedure, browserControlStateProcedure, browserNavProcedure } from './browser-control.js';
+import { createHash, randomUUID } from 'node:crypto';
 import type Anthropic from '@anthropic-ai/sdk';
-import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import {
   BASIC_ROLE_PICK_LIMIT,
   HOLADAY_SKILLS,
   OPEN_POOL_ROLE_IDS,
   type PlanId,
+  browserConnectionWaitSchema,
   gateRoleForUser,
   newExternalId,
   normalizeSkillIds,
@@ -24,42 +17,56 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } 
 import { z } from 'zod';
 import { ashareQaHandlesMode } from '../../agent/a-share/ashare-qa-lane-gate.js';
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
+import { createResponsesWebSearch } from '../../agent/browser-tools/unified-browser-loop.js';
+import {
+  createFallbackWebSearch,
+  createFirecrawlReadPage,
+} from '../../agent/browser-tools/web-search-fallback.js';
+import { looksLikeCodeIntent } from '../../agent/code-intent.js';
+import { restoreCoreLegacyWorkflow } from '../../agent/core-legacy-workflow.js';
+import { assertCoreTaskInput } from '../../agent/core-task-input.js';
+import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
+import { readCoreTaskRecord } from '../../agent/core-task-record.js';
+import type { CoreAcceptedRequirements } from '../../agent/core-task-requirements.js';
+import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import {
   extractRunnableDirectOpenUrl,
   runDirectOpen,
   verifyDirectOpenUrlSafety,
 } from '../../agent/direct-open.js';
 import { type GenerateOutcome, runGenerateTask } from '../../agent/generate-runner.js';
-import { isExplicitPlanApproval, isPurePlanHold } from '../../agent/plan-mode.js';
+import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
 import {
   type ImageAttachment,
   type RunImageTaskResult,
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
-import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
-import { createAnthropicSubjectConsistencyVerifier } from '../../agent/image/image-subject-verifier.js';
-import { classifyExecutionMode } from '../../agent/intent-classifier.js';
-import { DrizzleLlmCallRecorder } from '../../agent/llm-call-recorder.js';
+import { explainExecutionMode } from '../../agent/intent-classifier.js';
+import { DrizzleLlmCallRecorder, type LlmCallRecord } from '../../agent/llm-call-recorder.js';
+import { withMediaCallContext } from '../../agent/media-call-recorder.js';
 // Phase 24 RC follow-up — nav-failure safety net. Catches the
 // "false success" case where the agent calls task_done with a body
 // that is just a DNS/SSL/timeout/refused error message; the sidebar
 // would otherwise label it "已完成" because the runner respected the
 // agent's terminal decision.
 import { detectNavFailure } from '../../agent/nav-failure-detector.js';
+import { isExplicitPlanApproval, isPurePlanHold } from '../../agent/plan-mode.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
-import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
-import { assertCoreTaskInput } from '../../agent/core-task-input.js';
-import { assertLegacyReplyRecord } from './tasks-reply-record.js';
-import { handleCoreTaskReply } from './tasks-core-reply.js';
-import { taskTickReceipt } from './task-tick-receipt.js';
-import { createCoreGenerateTask } from './tasks-core-create.js';
-import { restoreCoreLegacyWorkflow } from '../../agent/core-legacy-workflow.js';
-import type { CoreAcceptedRequirements } from '../../agent/core-task-requirements.js';
-import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
+import {
+  type SearchFallbackEvent,
+  runSearchWithFallback,
+} from '../../agent/search-fallback/search-engine-fallback.js';
+import { searchProviderFromEnv } from '../../agent/search-fallback/search-provider.js';
+import {
+  searchResultRequirement,
+  searchResultsSatisfy,
+} from '../../agent/search-result-requirement.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
 import { resolveSuggestionsProviderRoute } from '../../agent/suggestions-provider.js';
+import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
+import { CAPTCHA_HANDOFF_MS, captchaHandoffs } from '../../agent/supercar/captcha-handoff.js';
 import { matchExpertWorkflow } from '../../agent/supercar/expert-workflows.js';
 import {
   type SupercarActionCaptureEvent,
@@ -72,20 +79,23 @@ import {
   supercarHandoffToGenerate,
   supercarReply,
 } from '../../agent/supercar/index.js';
-import { MemoryService } from '../../agent/supercar/qwen-only-memory-service.js';
-import { generatePlanForUser } from '../../agent/supercar/plan-runner.js';
+import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
 import {
   parseOtaAllowlist,
   resolveOtaCanaryLane,
 } from '../../agent/supercar/ota-user-browser-policy.js';
+import { runOtaUserBrowserTask } from '../../agent/supercar/ota-user-browser-runner.js';
 import { runOtaUserBrowserReadonly } from '../../agent/supercar/ota-user-browser-runner.js';
+import { generatePlanForUser } from '../../agent/supercar/plan-runner.js';
 import { shouldSkipPlan } from '../../agent/supercar/plan-service.js';
 import {
   formatForPrompt as formatPlaybooksForPrompt,
   matchPlaybooks,
 } from '../../agent/supercar/playbook-service.js';
 import { classifyRole, selectModelAndEffort } from '../../agent/supercar/prompt-layers.js';
+import { MemoryService } from '../../agent/supercar/qwen-only-memory-service.js';
 import { classifyRuntimeAction } from '../../agent/supercar/runtime-action-policy.js';
+import { runSelectedChromeTask } from '../../agent/supercar/selected-chrome-runner.js';
 import {
   StatsService,
   classifyTaskType,
@@ -97,6 +107,12 @@ import {
   shouldPersistSupercarTerminalOutcome,
   shouldRunSupercarTerminalSideEffects,
 } from '../../agent/supercar/task-state-machine.js';
+import {
+  browserTaskTargetUrl,
+  classifyIdentityNeed,
+  decideUserBrowserRoute,
+  deriveTaskSessionPolicy,
+} from '../../agent/supercar/user-browser-routing.js';
 import type { PlannedStep, TaskState } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
 import {
@@ -123,20 +139,25 @@ import {
   resolveIntentUrl,
   toSafeUrlResolutionLog,
 } from '../../agent/url-resolver.js';
+import { mediaCapabilityIssue } from '../../agent/video/media-capability.js';
+import { notifyMediaGenerationFailed } from '../../agent/video/media-failure-refund.js';
+import {
+  resolveMediaModelServices,
+  videoModelServicesReady,
+} from '../../agent/video/media-model-services.js';
 import type { VideoScript } from '../../agent/video/types.js';
 import { VIDEO_CREATION_ALLOWLIST } from '../../agent/video/video-access.js';
 import { probeCloneReferenceQuoteFacts } from '../../agent/video/video-clone-reference.js';
-import { mediaCapabilityIssue } from '../../agent/video/media-capability.js';
 import {
+  type VideoAudioVerificationCoverage,
+  type VideoAudioVisualSyncAudit,
+  type VideoType,
   claimVideoConfirmAfterVerifierPreflight,
   deriveVideoType,
   mapVideoFailureReason,
   videoAudioVerificationCoverage,
   videoQualityFailureOutcome,
   videoQualityVerificationMetadata,
-  type VideoAudioVisualSyncAudit,
-  type VideoAudioVerificationCoverage,
-  type VideoType,
 } from '../../agent/video/video-confirm-meta.js';
 import {
   decideVideoGate,
@@ -145,6 +166,7 @@ import {
   preflightIpVideoAssets,
   quoteCloneVideo,
   quoteIpVideo,
+  quotePetI2v,
   quoteVideo,
 } from '../../agent/video/video-confirm.js';
 import type { IpVideoConfig } from '../../agent/video/video-ip-lipsync.js';
@@ -154,6 +176,7 @@ import type {
   VideoSource,
 } from '../../agent/video/video-lane-simple.js';
 import type { PetI2vModel } from '../../agent/video/video-pet-i2v.js';
+import { videoRejectionReason } from '../../agent/video/video-retry-policy.js';
 import type { VideoStyle } from '../../agent/video/video-script.js';
 import type { WanAnimateMixMode } from '../../agent/video/wan-animate-mix-client.js';
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
@@ -161,9 +184,20 @@ import { classify as classifyDomain } from '../../agent/vision-loop/domain/class
 import type { PageLike, PlaywrightExecutor } from '../../agent/vision-loop/playwright-executor.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/qwen-only-task-runner.js';
 import {
+  type ClaimResult as TaskCreateClaimResult,
+  recordClaim as claimTaskCreate,
+  finalizeClaim as finalizeTaskCreateClaim,
+  releaseClaim as releaseTaskCreateClaim,
+} from '../../api-keys/webhook-idempotency-service.js';
+import {
   BrowserSessionRestoreFlights,
   restorableBrowserTarget,
+  storedBrowserSessionPolicy,
 } from '../../browser-pool/browser-session-recovery.js';
+import { finishTaskBrowser } from '../../browser-pool/finish-task-browser.js';
+import type { BrowserSessionPolicy } from '../../browser-pool/types.js';
+import { getVaultRuntime } from '../../browser-session-vault/runtime.js';
+import { browserCapabilities } from '../../config/browser-capabilities.js';
 import { env as appEnv } from '../../config/env.js';
 import type { DB } from '../../db/client.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
@@ -178,18 +212,6 @@ import { users } from '../../db/schema/users.js';
 import { EvidenceArtifactRepository } from '../../evidence/evidence-artifact-repository.js';
 import { routeTaskEvidenceOnDelete } from '../../evidence/evidence-deletion-service.js';
 import { writeLedgerToDb } from '../../evidence/ledger-write-service.js';
-import { SnapshotAkshareClient } from '../../stocks/snapshot-akshare-client.js';
-import {
-  type ValidatedStockTaskContext,
-  publicStockTaskContext,
-  validateStockTaskContext,
-} from '../../stocks/stock-task-context.js';
-import {
-  finalizeClaim as finalizeTaskCreateClaim,
-  recordClaim as claimTaskCreate,
-  releaseClaim as releaseTaskCreateClaim,
-  type ClaimResult as TaskCreateClaimResult,
-} from '../../api-keys/webhook-idempotency-service.js';
 import type { VerificationResult } from '../../execution/answer-verifier.js';
 // Phase 1 Day 5 — execution-pipeline glue. All four entry points are
 // no-ops when the corresponding feature flag is off (default), so
@@ -198,6 +220,7 @@ import {
   type FinalTerminalStatus,
   type VerifyOutput,
   assessResultTrust,
+  browserCompletionVerdict,
   deriveFinalStatus,
   disposeExecution,
   extractFailedChecks,
@@ -209,9 +232,7 @@ import {
   summariseVerificationFailure,
   verifyAndFinalize,
 } from '../../execution/execution-pipeline.js';
-import { reviewGenerateOutcome } from '../../execution/generate-outcome-review.js';
 import { parseInputs } from '../../execution/expert-workflow-parser.js';
-import { assessGeneralTaskIntake } from '../../execution/general-task-intake.js';
 import {
   getExpertWorkflowById,
   matchExpertWorkflow as matchTypedExpertWorkflow,
@@ -220,20 +241,52 @@ import {
 } from '../../execution/expert-workflow-registry.js';
 import { getFeatureFlags as getExecutionFeatureFlags } from '../../execution/feature-flags.js';
 import { fencedFileIds, isDocumentOutput } from '../../execution/file-artifact-consistency.js';
+import { assessGeneralTaskIntake } from '../../execution/general-task-intake.js';
+import { reviewGenerateOutcome } from '../../execution/generate-outcome-review.js';
+import { startOwnedOperation } from '../../execution/owned-operation.js';
 import {
   appendSearchSourceReferences,
   collectSearchSourceReferences,
 } from '../../execution/search-source-references.js';
 import { MAX_DOWNLOAD_BYTES } from '../../files/download-manager.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
-import { parseFileForPrompt } from '../../files/parsers.js';
+import {
+  CONVERT_REQUIRED_COPY,
+  CoreFileInputError,
+  parseFileForPrompt,
+} from '../../files/parsers.js';
 import { getSharedStorageProvider } from '../../files/storage-provider.js';
 import { allowedFormatsForPlan, isCreateFileFormat, renderFile } from '../../files/writers.js';
+import {
+  browserBrainRequestSchema,
+  resolveBrowserBrainSelection,
+  withBrowserBrain,
+} from '../../llm/browser-brain.js';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import {
+  catalogSettingsService,
+  modelCatalogService,
+  resolveBrainForExistingTask,
+  resolveBrainForUser,
+} from '../../llm/model-catalog-runtime.js';
+import { toMcpTools } from '../../llm/model-catalog-settings.js';
+import {
+  currentBrain,
+  enterBrain,
+  recordTaskModelSelection,
+  runWithBrain,
+} from '../../llm/model-catalog.js';
 import {
   type ModelTaskUnavailableReason,
   createProductionModelRuntimeWiring,
 } from '../../llm/model-runtime-wiring.js';
+import {
+  createTaskCaptureRecorder,
+  extractTaskMemoryAfterSuccess,
+  resolveUserGenerateAdapter,
+} from '../../playbook/evolution/executor-hooks.js';
 import { TaskActionCaptureRepository } from '../../playbook/task-action-capture-repository.js';
+import { recordQuotaCharge } from '../../quota/platform-failure-refunds.js';
 import { isQuotaBypassUser } from '../../quota/quota-mode.js';
 import {
   type ConsumeReason,
@@ -247,6 +300,12 @@ import {
   runResponseLayerForLane,
   stampResponseLayerColumns,
 } from '../../response-layer/lane-integration.js';
+import { selectStockAnalysisInput } from '../../stocks/stock-analysis-input.js';
+import {
+  type ValidatedStockTaskContext,
+  publicStockTaskContext,
+  validateStockTaskContext,
+} from '../../stocks/stock-task-context.js';
 import {
   TASK_ACTIVE_STATUSES,
   TASK_QUEUE_DEPTH_STATUSES,
@@ -261,9 +320,32 @@ import {
   sendExtensionToolCall,
   updateTaskStateForUser,
 } from '../../ws/server.js';
-import { protectedProcedure, pureTaskInput, router } from '../trpc.js';
 import { taskDrainMiddleware } from '../task-drain.js';
+import { protectedProcedure, pureTaskInput, router } from '../trpc.js';
 import {
+  browserCaptchaProcedure,
+  browserControlProcedure,
+  browserControlStateProcedure,
+  browserNavProcedure,
+  browserProfileClearProcedure,
+  browserProfileStatusProcedure,
+} from './browser-control.js';
+import {
+  assertLocalChromeSelection,
+  localChromeSelectionSchema,
+  localChromeTabsProcedure,
+} from './local-chrome-selection.js';
+import { deferredTaskCosts } from './media-task-background.js';
+import { runMediaTaskBackground } from './media-task-background.js';
+import {
+  type ContinuationLink,
+  assertPublicCloudContinuationRequest,
+  insertWithContinuationLink,
+  runPublicCloudContinuation,
+} from './public-cloud-continuation.js';
+import { runTaskBackground } from './task-background.js';
+import {
+  deferredMediaNotice,
   followUpParentHasBrowserContext,
   followUpParentReasonLabel,
   followUpTerminalGuardMessage,
@@ -271,8 +353,8 @@ import {
   resolveFollowUpExecutionMode,
   resolveWorkflowIdentities,
 } from './task-followup-copy.js';
-import { markQueuedTaskExecutingOrThrow } from './task-queue-start.js';
 import { enqueueTaskExecution } from './task-queue-execution.js';
+import { markQueuedTaskExecutingOrThrow } from './task-queue-start.js';
 import { annotateTaskResultAttachmentAvailability } from './task-result-attachment-availability.js';
 import {
   type CapturedBrowserFinalState as CapturedFinalState,
@@ -280,6 +362,10 @@ import {
   persistAndBroadcastBrowserDispatchFailure,
   persistAndBroadcastVisionLoopThrow,
 } from './task-terminal-recovery.js';
+import { taskTickReceipt } from './task-tick-receipt.js';
+import { createCoreGenerateTask } from './tasks-core-create.js';
+import { handleCoreTaskReply } from './tasks-core-reply.js';
+import { assertLegacyReplyRecord } from './tasks-reply-record.js';
 
 const taskController = new TaskController();
 const FAILURE_REVIEW_STATUSES = ['failed', 'partial_success'] as const;
@@ -411,13 +497,16 @@ function assertVideoImageChoiceAllowed(input: {
   choice: 'video' | 'image';
   isClone: boolean;
   isIp: boolean;
+  isPet?: boolean;
 }): void {
-  if (input.choice === 'image' && (input.isClone || input.isIp)) {
+  if (input.choice === 'image' && (input.isClone || input.isIp || input.isPet)) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
       message: input.isClone
         ? '复刻视频不支持切换为图片版，请确认制作视频或取消。'
-        : 'IP 人物不支持切换为图片版，请确认制作视频或取消。',
+        : input.isPet
+          ? '宠物动画不支持切换为图片版，请确认制作视频或取消。'
+          : 'IP 人物不支持切换为图片版，请确认制作视频或取消。',
     });
   }
 }
@@ -454,9 +543,7 @@ const ASHARE_QA_ALLOWLIST: ReadonlySet<string> = new Set(
 // agent/video/video-access.ts (single source shared with auth.me's
 // videoEnabled frontend gate — imported above; can't drift).
 
-// Anthropic model for the video优化/脚本 step.
-// TODO(env): 接进 env.ts (VIDEO_SCRIPT_MODEL) when the video lane env block lands.
-const VIDEO_SCRIPT_MODEL = 'claude-sonnet-4-6';
+// Video 优化/脚本 runs on the Qwen generate lane (agent/video/media-model-services.ts).
 
 /**
  * Build the simplified-video-lane config from env. Model ids / 音色 / 字体 use
@@ -510,7 +597,14 @@ function dormantLegacyModelClient(): Anthropic | null {
 }
 const legacyMediaModelClient = dormantLegacyModelClient();
 
-const modelRuntimeWiring = createProductionModelRuntimeWiring(appEnv);
+const modelRuntimeWiring = createProductionModelRuntimeWiring(
+  appEnv,
+  {},
+  {
+    catalog: () => modelCatalogService.snapshot(),
+    mcpTools: () => toMcpTools(catalogSettingsService.mcpServersSnapshot()),
+  },
+);
 
 function resolveGenerateRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
   return modelRuntimeWiring.resolveCore({
@@ -541,10 +635,10 @@ function generateRuntimeUnavailableReason(reason: ModelTaskUnavailableReason): s
 }
 
 function unmigratedLaneForExecutionMode(
-  executionMode: string,
+  _executionMode: string,
 ): 'image' | 'video_generation' | null {
-  if (executionMode === 'image') return 'image';
-  if (executionMode === 'video_creation') return 'video_generation';
+  // Capability recovery: image runs on Qwen Image / Wan 2.7 Image / fal NB2,
+  // video on Wan 2.7 / fal Veo 3.1 / fal lip-sync (qwen-only-* runtimes).
   return null;
 }
 
@@ -565,7 +659,7 @@ export const stockTaskContextInput = z.object({
 });
 
 export const imageCreationOptionsInput = z.object({
-  model: z.enum(['nano_banana_2', 'nano_banana_pro']).optional(),
+  model: z.enum(['auto', 'qwen_image', 'wan_image', 'nano_banana_2', 'nano_banana_pro']).optional(),
   style: z
     .enum([
       'random',
@@ -601,6 +695,30 @@ export const imageCreationOptionsInput = z.object({
 
 const createInput = z.object({
   localChrome: localChromeSelectionSchema.optional(),
+  browserPreference: z.enum(['cloud-public']).optional(),
+  /**
+   * FIX-PR259-2 — re-submit a cancelled, non-identity extension wait in the
+   * public cloud. Requires `clientRequestId = cloud-continue:<taskId>` so one
+   * original task yields at most one replacement.
+   */
+  publicCloudContinuationOf: z
+    .string()
+    .min(1)
+    .max(48)
+    .regex(/^[A-Za-z0-9._-]+$/)
+    .optional(),
+  /**
+   * Model catalog brain the user picked (e.g. `qwen`). Validated server-side
+   * by `resolveBrain`; an unknown, hidden or unconfigured brain falls back to
+   * the catalog default and the fallback reason is recorded with the task.
+   */
+  browserBrain: browserBrainRequestSchema.optional(),
+  brainId: z
+    .string()
+    .min(1)
+    .max(32)
+    .regex(/^[a-z0-9_-]+$/)
+    .optional(),
   intent: z.string().min(1).max(4_000),
   /**
    * Non-user-authored routing context from a dedicated product surface.
@@ -623,6 +741,7 @@ const createInput = z.object({
    * block, and prepends them to the agent's first user message.
    */
   fileIds: z.array(z.string()).max(5).optional(),
+  retryOfTaskId: z.string().min(1).max(32).optional(),
   /**
    * Phase 14 audit follow-up — multi-turn追问. When the user is
    * looking at a terminal task and types a follow-up
@@ -717,13 +836,11 @@ const createInput = z.object({
 
 const ASHARE_SKILL_IDS = new Set(['a-share-market-briefing', 'a-share-analyst']);
 
-function assertTaskSkillSelectionAvailable(
-  input: {
-    skillId?: string | null;
-    roleId?: string | null;
-    skillSource?: 'manual' | 'suggested' | undefined;
-  },
-): string | null {
+function assertTaskSkillSelectionAvailable(input: {
+  skillId?: string | null;
+  roleId?: string | null;
+  skillSource?: 'manual' | 'suggested' | undefined;
+}): string | null {
   if (input.skillSource !== 'manual' && input.skillSource !== 'suggested') return null;
   const skillId = (input.skillId ?? input.roleId ?? '').trim();
   const skill = skillById(skillId);
@@ -753,9 +870,7 @@ function resolveTaskSkillContext(
   },
   _selectedSkillIds: unknown,
 ): string | undefined {
-  return (
-    assertTaskSkillSelectionAvailable(input) ?? normalizeTaskSkillInputId(input)
-  );
+  return assertTaskSkillSelectionAvailable(input) ?? normalizeTaskSkillInputId(input);
 }
 
 function resolveTaskDispatchSkillId(
@@ -817,180 +932,6 @@ function buildPlannerIntent(intent: string, taskSkillId: string | undefined): st
 }
 
 /**
- * O15 — friendly refusal for coding / app-building intents. HOLA DAY
- * is a browser-task agent, not a code IDE; trying to satisfy a "帮我
- * 写一个 React 组件" prompt burns Anthropic budget on something Claude
- * Code or Cursor does much better. Match BEFORE quota consumption so
- * the user sees a fast no-cost rejection instead of "executing → fail
- * after 8 turns".
- *
- * Pattern: requires a CODE keyword (write/build/develop/debug/deploy
- * + 中文 写代码/编程/开发) AND a SUBJECT keyword (网站/网页/app/组件/
- * 接口/api/sdk/库). A standalone "写" without subject is too vague to
- * reject; "做个网站" alone could be a website-research task. Both
- * dimensions in the same intent → refuse.
- */
-const CODE_VERBS = [
-  '写代码',
-  '写程序',
-  '编程',
-  '编写',
-  '写一个',
-  '写一段',
-  '写个',
-  '做',
-  '做个',
-  '做一个',
-  '开发',
-  '搭建',
-  '搭一个',
-  '搭个',
-  '建',
-  '建个',
-  '建一个',
-  '构建',
-  '调试',
-  '部署',
-  '上线',
-  '修复 bug',
-  '修 bug',
-  'debug',
-  '重构',
-  '实现一个',
-  'write code',
-  'build a',
-  'build me',
-  'develop',
-  'deploy',
-  'compile',
-  'refactor',
-];
-const CODE_SUBJECTS = [
-  '网站',
-  '网页',
-  '后台',
-  '前端',
-  '后端',
-  '应用',
-  '系统',
-  '组件',
-  '函数',
-  '接口',
-  'api',
-  'sdk',
-  '库',
-  '插件',
-  '扩展',
-  '小程序',
-  '页面',
-  '脚本',
-  '程序',
-  '代码',
-  '小工具',
-  '数据库',
-  '服务器',
-  'website',
-  'webapp',
-  'web app',
-  'app',
-  'component',
-  'function',
-  'script',
-  'plugin',
-  'package',
-  'module',
-  'library',
-];
-// Full-phrase fast-path. The verb-AND-subject double-keyword check
-// can miss compact intents like "做个网站" because "做" is too
-// generic to whitelist on its own (BOSS reported false-negative).
-// These exact substrings light up regardless of the strict pair check.
-const CODE_PHRASES = [
-  '做个网站',
-  '做一个网站',
-  '建个网站',
-  '建一个网站',
-  '搭个网站',
-  '搭一个网站',
-  '帮我做网站',
-  '帮我建网站',
-  '帮我搭网站',
-  '帮我建站',
-  '建站',
-  '写个网站',
-  '写个 app',
-  '写个app',
-  '写个应用',
-  '做个 app',
-  '做个app',
-  '做个小程序',
-  '建个小程序',
-  '帮我开发',
-  '帮我编程',
-  '帮我写代码',
-  'build me a website',
-  'build a website',
-  'make me an app',
-  'build a webapp',
-];
-/**
- * Phase 1 follow-up — analysis-intent whitelist. The verb+subject
- * heuristic was too aggressive: prompts like "总结人工智能应用系统的
- * 发展趋势" matched `开发` (verb) + `应用系统` (subject) and triggered
- * the rejection. Real users asking for analysis got told to use
- * Cursor.
- *
- * The whitelist applies ONLY to the verb+subject pair; CODE_PHRASES
- * (full unambiguous phrases like "做个网站") still always trigger.
- * The user's analytical framing is the signal — if any of these
- * words is present, the intent is "explain / analyze / report ON
- * the technology" rather than "build the technology for me".
- */
-const ANALYSIS_INTENT_WORDS = [
-  '分析',
-  '总结',
-  '复盘',
-  '报告',
-  '研究',
-  '调研',
-  '调查',
-  '说明',
-  '解释',
-  '介绍',
-  '描述',
-  '阐述',
-  '讲讲',
-  '讲一下',
-  '方法',
-  '方法论',
-  '方案',
-  '策略',
-  '思路',
-  '趋势',
-  '现状',
-  '特点',
-  '特征',
-  '原理',
-  '架构思路',
-  '本质',
-  '是什么',
-  '什么是',
-  '如何理解',
-  '怎么看',
-  // English
-  'analyze ',
-  'analyse ',
-  'summarize ',
-  'summarise ',
-  'explain ',
-  'describe ',
-  'compare ',
-  'overview',
-  'introduction',
-  'what is',
-  'how does',
-];
-/**
  * Codex Pack B1 — broadcast a transient sub-status marker for the
  * SPA's live-progress chip. Wraps `server.task.progress` so the
  * existing handler in task-store picks it up; the new `subStatus`
@@ -1037,24 +978,6 @@ function broadcastSubStatus(
   } catch {
     /* best-effort */
   }
-}
-
-function hasAnalysisIntent(lower: string): boolean {
-  return ANALYSIS_INTENT_WORDS.some((w) => lower.includes(w));
-}
-function looksLikeCodeIntent(intent: string): boolean {
-  const lower = intent.toLowerCase();
-  // Unambiguous full phrases always trigger — the user explicitly
-  // said "build me a website" / "做个网站". No whitelist for these.
-  if (CODE_PHRASES.some((p) => lower.includes(p))) return true;
-  const hasVerb = CODE_VERBS.some((v) => lower.includes(v));
-  if (!hasVerb) return false;
-  if (!CODE_SUBJECTS.some((s) => lower.includes(s))) return false;
-  // Verb + subject pair matched — but if the prompt also has an
-  // analysis-intent word, the user is asking ABOUT the tech, not
-  // asking us to build it. Skip the rejection.
-  if (hasAnalysisIntent(lower)) return false;
-  return true;
 }
 
 type ModeBPingOutcome = {
@@ -1191,3538 +1114,998 @@ function isTaskCreateReplay(value: unknown): value is TaskCreateReplay {
   );
 }
 
+/**
+ * FIX-INTENT-ROUTE-BROWSER — the same request, re-entered for the one-time
+ * scrape → browser retry. Fields that would make it a different or duplicate
+ * task (idempotency key, retry/continuation links, local Chrome, attachments)
+ * are dropped; the original task row is adopted instead of inserting one.
+ */
+export function scrapeBrowserRetryInput<
+  T extends {
+    clientRequestId?: unknown;
+    retryOfTaskId?: unknown;
+    publicCloudContinuationOf?: unknown;
+    localChrome?: unknown;
+    fileIds?: unknown;
+  },
+>(input: T) {
+  const {
+    clientRequestId: _clientRequestId,
+    retryOfTaskId: _retryOfTaskId,
+    publicCloudContinuationOf: _publicCloudContinuationOf,
+    localChrome: _localChrome,
+    fileIds: _fileIds,
+    ...rest
+  } = input;
+  return rest;
+}
+
 export const tasksRouter = router({
-  create: protectedProcedure.input(pureTaskInput(createInput)).use(async ({ ctx, input, next }) => {
-    let localChromeReservation;
-    try {
-      localChromeReservation = input.localChrome ? localChromeTaskSessions.reserve(ctx.userId, input.localChrome) : undefined;
-    } catch {
-      throw new TRPCError({ code: 'CONFLICT', message: '这个 Chrome 连接正在执行另一项任务，请等待完成后重试。未扣除额度。' });
-    }
-    try { return await next({ ctx: { localChromeReservation } }); }
-    finally { if (localChromeReservation) localChromeTaskSessions.releaseReservation(localChromeReservation); }
-  }).use(taskDrainMiddleware).mutation(async ({ ctx, input }) => {
-    if (input.localChrome && (input.mode === 'plan' || input.fileIds?.length || input.imageOptions || input.videoOptions || input.stockContext || input.taskSource || input.replyToTaskId)) {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: '本地 Chrome 当前支持新建网页操作任务，请移除附件并使用自动执行模式。' });
-    }
-    // O15 — code-task refusal lands BEFORE user lookup so even an
-    // unauthenticated-token-in-fail-path doesn't get scaffolding.
-    //
-    // Phase 21a — whitelist this guard when the user has signaled
-    // they're operating in a specialist context: either explicit
-    // skillId on the task, or the role classifier (keyword-only,
-    // free) matched something. A user asking 技术翻译专家 to "帮我
-    // 写个网站本地化脚本" knows what they want; a guard that says
-    // "用 Cursor" insults them. The guard is meant to catch raw
-    // free-form attempts to build apps in HOLA DAY, not legitimate
-    // expert-mode scripting.
-    const inputSkillId = normalizeTaskSkillInputId(input);
-    const intentImpliesRole = classifyRole(input.intent) !== 'none';
-    const inSpecialistContext = Boolean(inputSkillId) || intentImpliesRole;
-    if (!inSpecialistContext && looksLikeCodeIntent(input.intent)) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message:
-          'HOLA DAY 专注浏览器任务执行（搜索 / 操作 / 比价 / 抓内容）。代码开发请用 Claude Code 或 Cursor 等专业工具。',
-      });
-    }
-    const [userRow] = await ctx.db
-      .select({
-        id: users.id,
-        plan: users.plan,
-        selectedRoles: users.selectedRoles,
-        selectedSkills: users.selectedSkills,
-        modelDataRegion: users.modelDataRegion,
-        // Phase 2 第三期 — IP 人物生成门控(三件齐 + 授权才放行)。
-        qwenVoiceId: users.qwenVoiceId,
-        baseVideoFileId: users.baseVideoFileId,
-        videoSelfUseAuthorizedAt: users.videoSelfUseAuthorizedAt,
-      })
-      .from(users)
-      .where(eq(users.externalId, ctx.userId))
-      .limit(1);
-    if (!userRow) {
-      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
-    }
-    const taskCreateIdempotencyKey = input.clientRequestId
-      ? `spa_task:${input.clientRequestId}`
-      : null;
-    return runTaskCreateIdempotently({
-      clientRequestId: input.clientRequestId,
-      claim: () =>
-        claimTaskCreate(
-          { db: ctx.db, logger: ctx.logger },
-          userRow.id,
-          taskCreateIdempotencyKey!,
-          input,
-        ),
-      finalize: (taskId, response) =>
-        finalizeTaskCreateClaim(
-          { db: ctx.db, logger: ctx.logger },
-          userRow.id,
-          taskCreateIdempotencyKey!,
-          taskId,
-          response,
-        ),
-      release: () =>
-        releaseTaskCreateClaim(
-          { db: ctx.db, logger: ctx.logger },
-          userRow.id,
-          taskCreateIdempotencyKey!,
-        ),
-      onFinalizeFailure: () => {
-        ctx.executionLifetime?.drain.markUnknown(ctx.executionLifetime.owner);
-        ctx.logger.error(
-          { userId: ctx.userId, clientRequestId: input.clientRequestId },
-          'tasks.create: task created but idempotency claim did not finalize',
-        );
-      },
-      run: async () => {
-    type TaskExecutionContext = typeof ctx;
-    // The authenticated request carries a server-signed origin. One repository
-    // instance is shared by every execution lane so no early-return branch can
-    // accidentally fall back to the database's `user` default.
-    const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
-    let validatedStockContext: ValidatedStockTaskContext | null = null;
-    if (input.taskSource === 'stock_dashboard') {
-      if (!input.stockContext) {
+  create: protectedProcedure
+    .input(pureTaskInput(createInput))
+    .use(async ({ ctx, input, next }) => {
+      let localChromeReservation: ReturnType<typeof localChromeTaskSessions.reserve> | undefined;
+      try {
+        localChromeReservation = input.localChrome
+          ? localChromeTaskSessions.reserve(ctx.userId, input.localChrome)
+          : undefined;
+      } catch {
         throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '股票任务缺少可信快照，请刷新股市任务页面后重试。',
+          code: 'CONFLICT',
+          message: '这个 Chrome 连接正在执行另一项任务，请等待完成后重试。未扣除额度。',
         });
       }
-      validatedStockContext = await validateStockTaskContext({
-        db: ctx.db,
-        userId: userRow.id,
-        input: input.stockContext,
-        intent: input.intent,
-        logger: ctx.logger,
-      });
-    }
-    const stockTaskSourceContext = validatedStockContext
-      ? (validatedStockContext as unknown as Record<string, unknown>)
-      : null;
-    const taskSkillId = resolveTaskSkillContext(input, userRow.selectedSkills);
-    const videoAllowed =
-      VIDEO_CREATION_ALLOWLIST.size === 0 || VIDEO_CREATION_ALLOWLIST.has(ctx.userId);
-
-    // Resolve and validate attachments before any quota consumption. Locked
-    // subjects are a hard input contract: a missing, non-image, or unreadable
-    // anchor must return BAD_REQUEST without charging the task.
-    const fileService = new FileService(ctx.db, ctx.logger);
-    const attachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
-    let orderedFileIds: string[];
-    try {
-      orderedFileIds = orderImageAttachmentIds(
-        input.fileIds ?? [],
-        input.imageOptions?.mode,
-        input.imageOptions?.subjectFileId,
-      );
-    } catch (err) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: err instanceof Error ? err.message : '主角图选择无效，请重新选择',
-      });
-    }
-    // Routing only needs file presence. Defer parsing until the lane is fixed
-    // so core text can preserve the full source while other lanes keep their
-    // existing parser behavior. This still precedes every quota operation.
-    const parseCreateAttachments = async (completeText: boolean) => {
-      if (orderedFileIds.length === 0) return;
-      const loaded = await fileService.loadMany(orderedFileIds, userRow.id);
-      const requestedFileIds = [...new Set(orderedFileIds)];
-      const loadedFileIds = new Set(loaded.map((file) => file.row.externalId));
-      if (requestedFileIds.some((fileId) => !loadedFileIds.has(fileId))) {
+      try {
+        return await next({ ctx: { localChromeReservation } });
+      } finally {
+        if (localChromeReservation)
+          localChromeTaskSessions.releaseReservation(localChromeReservation);
+      }
+    })
+    .use(taskDrainMiddleware)
+    .use(async ({ ctx, input, next }) => {
+      // After drain admission: bind the task's brain to everything this task
+      // starts, so every lane resolved downstream (generate, verifier, plan,
+      // browser…) uses it.
+      const brain = await resolveBrainForUser(ctx.db, ctx.userId, input.brainId);
+      let roles: ReturnType<typeof resolveBrowserBrainSelection>;
+      try {
+        roles = resolveBrowserBrainSelection(appEnv, ctx.userId, input.browserBrain);
+      } catch (error) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: '有附件已失效或无法读取，请重新上传后再提交',
+          message: error instanceof Error ? error.message : '浏览器大脑配置无效。',
         });
       }
-      if (input.imageOptions?.mode === 'lock_subject' && input.imageOptions.subjectFileId) {
-        const subject = loaded.find(
-          (file) => file.row.externalId === input.imageOptions?.subjectFileId,
-        );
-        if (!subject || !subject.row.mimetype.startsWith('image/')) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: '主角图不可用或不是图片，请重新上传',
-          });
-        }
+      return withBrowserBrain(roles, () => runWithBrain(brain, () => next()));
+    })
+    .mutation(async ({ ctx, input }) => {
+      if (
+        input.localChrome &&
+        (input.mode === 'plan' ||
+          input.fileIds?.length ||
+          input.imageOptions ||
+          input.videoOptions ||
+          input.stockContext ||
+          input.taskSource ||
+          input.replyToTaskId)
+      ) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '本地 Chrome 当前支持新建网页操作任务，请移除附件并使用自动执行模式。',
+        });
       }
-      for (const f of loaded) {
-        const isLockedSubject =
-          input.imageOptions?.mode === 'lock_subject' &&
-          f.row.externalId === input.imageOptions.subjectFileId;
-        try {
-          const parsed = await parseFileForPrompt(
-            f.buffer, f.row.filename, f.row.mimetype, { completeText },
-          );
-          if (isLockedSubject && !parsed.blocks.some((block) => block.type === 'image')) {
-            throw new Error('主角图未解析为图像');
-          }
-          attachmentBlocks.push(...parsed.blocks);
-        } catch (err) {
-          if (completeText) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: '附件超出完整核验范围或无法读取，请缩小材料或重新上传后再提交。',
-            });
-          }
-          ctx.logger.warn(
-            { err: err instanceof Error ? err.message : String(err), fileId: f.row.externalId },
-            isLockedSubject
-              ? 'tasks.create: locked subject parse failed'
-              : 'tasks.create: file parse failed — skipping',
-          );
-          if (isLockedSubject) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: '主角图读取失败，请重新上传一张清晰图片',
-            });
-          }
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: '附件读取失败，请重新上传后再提交',
-          });
-        }
+      // O15 — code-task refusal lands BEFORE user lookup so even an
+      // unauthenticated-token-in-fail-path doesn't get scaffolding.
+      //
+      // Phase 21a — whitelist this guard when the user has signaled
+      // they're operating in a specialist context: either explicit
+      // skillId on the task, or the role classifier (keyword-only,
+      // free) matched something. A user asking 技术翻译专家 to "帮我
+      // 写个网站本地化脚本" knows what they want; a guard that says
+      // "用 Cursor" insults them. The guard is meant to catch raw
+      // free-form attempts to build apps in HOLA DAY, not legitimate
+      // expert-mode scripting.
+      const inputSkillId = normalizeTaskSkillInputId(input);
+      const intentImpliesRole = classifyRole(input.intent) !== 'none';
+      const inSpecialistContext = Boolean(inputSkillId) || intentImpliesRole;
+      if (!inSpecialistContext && looksLikeCodeIntent(input.intent)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message:
+            'HOLA DAY 专注浏览器任务执行（搜索 / 操作 / 比价 / 抓内容）。代码开发请用 Claude Code 或 Cursor 等专业工具。',
+        });
       }
-    };
-
-    // Phase 14 audit follow-up — multi-turn 追问. When `replyToTaskId`
-    // is set, the new task piggybacks on a previously completed/failed
-    // task: skips quota and prefixes the agent's intent with the parent's
-    // intent + result so the model has full context for "为什么失败" /
-    // "再试一次" style follow-ups.
-    let parentContextBlock = '';
-    let parentUserContext = '';
-    let parentModelReference = '';
-    let isFollowUp = false;
-    /**
-     * Phase 3 R1 (Codex follow-up #2) — recovered parent workflow id.
-     * When this is a follow-up tasks.create (replyToTaskId set), we
-     * read the parent's `result.metadata.expertWorkflowId` so the
-     * follow-up inherits the parent's workflow even if the chip's
-     * prompt doesn't trip the typed matcher (e.g. "生成发布日历"
-     * has no platform keyword). Null if no parent or parent wasn't
-     * a workflow task.
-     */
-    let parentWorkflowId: string | null = null;
-    let parentHasBrowserContext = false;
-    let parentBrowserRestoreUrl: string | null = null;
-    if (input.replyToTaskId) {
-      const [parent] = await ctx.db
+      const [userRow] = await ctx.db
         .select({
-          intent: tasksTable.intent,
-          status: tasksTable.status,
-          result: tasksTable.result,
-          errorMessage: tasksTable.errorMessage,
-          sourceContext: tasksTable.sourceContext,
+          id: users.id,
+          plan: users.plan,
+          selectedRoles: users.selectedRoles,
+          selectedSkills: users.selectedSkills,
+          modelDataRegion: users.modelDataRegion,
+          // Phase 2 第三期 — IP 人物生成门控(三件齐 + 授权才放行)。
+          qwenVoiceId: users.qwenVoiceId,
+          baseVideoFileId: users.baseVideoFileId,
+          videoSelfUseAuthorizedAt: users.videoSelfUseAuthorizedAt,
         })
-        .from(tasksTable)
-        .where(
-          and(
-            eq(tasksTable.externalId, input.replyToTaskId),
-            eq(tasksTable.userId, userRow.id),
-            eq(tasksTable.origin, ctx.taskOrigin),
-          ),
-        )
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
         .limit(1);
-      if (!parent) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: '找不到要追问的任务（可能已删除或不属于你）',
+      if (!userRow) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      const continuationOf = input.publicCloudContinuationOf;
+      if (continuationOf)
+        assertPublicCloudContinuationRequest({
+          publicCloudContinuationOf: continuationOf,
+          clientRequestId: input.clientRequestId,
+          browserPreference: input.browserPreference,
+          hasLocalChrome: Boolean(input.localChrome),
         });
-      }
-      if (!isTaskTerminalStatus(parent.status)) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: followUpTerminalGuardMessage(),
-        });
-      }
-      // A finished local session cannot be adopted by the cloud follow-up path.
-      // Require a new explicit selection before creating or charging a task.
-      if (z.object({ browserSource: z.literal('local-chrome') }).safeParse(parent.sourceContext).success) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '本地 Chrome 会话已结束，请新建任务并重新选择 Chrome 页面后发送。',
-        });
-      }
-      const parentResult = (parent.result ?? null) as {
-            summary?: string;
-            reason?: string;
-            metadata?: {
-              expertWorkflowId?: string | null;
-              executionMode?: string | null;
-              finalUrl?: string | null;
-            };
-            expertWorkflowId?: string | null;
-            executionMode?: string | null;
-            finalUrl?: string | null;
-            finalScreenshot?: unknown;
-      } | null;
-      // Workflow id can be either nested under metadata (newer tasks)
-      // or top-level on result (older / generate-resume rows). Probe
-      // both so old tasks don't lose context on follow-up.
-      const candidateWfId =
-        parentResult?.metadata?.expertWorkflowId ?? parentResult?.expertWorkflowId ?? null;
-      if (typeof candidateWfId === 'string' && candidateWfId.length > 0) {
-        parentWorkflowId = candidateWfId;
-      }
-      parentHasBrowserContext = followUpParentHasBrowserContext({
-            executionMode:
-              parentResult?.metadata?.executionMode ?? parentResult?.executionMode ?? null,
-        finalUrl: parentResult?.finalUrl ?? null,
-        hasFinalScreenshot: Boolean(parentResult?.finalScreenshot),
-        intent: parent.intent,
-      });
-      const parentFinalUrl = parentResult?.finalUrl ?? parentResult?.metadata?.finalUrl ?? null;
-      parentBrowserRestoreUrl =
-        typeof parentFinalUrl === 'string' && isSafeUrl(parentFinalUrl)
-          ? parentFinalUrl.trim().slice(0, 2048)
-          : null;
-      const summary = parentResult?.summary?.trim() ?? '';
-      const reason = parentResult?.reason?.trim() ?? (parent.errorMessage ?? '').trim();
-      const reasonLabel = followUpParentReasonLabel(parent.status);
-      const outcomeLine =
-        (parent.status === 'completed' || parent.status === 'partial_success') && summary
-          ? `结果：${summary}`
-          : reason
-            ? `${reasonLabel}：${reason}`
-            : `状态：${parent.status}（无详细输出）`;
-      parentUserContext = `【前次用户要求】\n${parent.intent}\n\n【本次用户要求】\n`;
-      parentModelReference = outcomeLine;
-      parentContextBlock = [
-        '---',
-        '【追问上下文】',
-        `前一个任务："${parent.intent}"`,
-        outcomeLine,
-        '---',
-        '',
-      ].join('\n');
-      isFollowUp = true;
-    }
-
-    /**
-     * The intent the AGENT sees. For a follow-up, the parent's
-     * intent + outcome are prepended so the model has full context.
-     * The DB still stores `input.intent` verbatim — that's what the
-     * user actually typed and what they expect to see in history.
-     */
-    // O4 plan-mode preamble. Cache-safe: appended to the first user
-    // message (not the system prompt), so cache hit rate stays
-    // intact. The agent obeys this by emitting a plan and stopping
-    // on a question-suffix line, which the supercar awaiting_user
-    // detector parks the loop on; tasks.reply ("执行" / "开始" /
-    // "go" or any free-form approval) unblocks it.
-    const planPreamble =
-      input.mode === 'plan'
-        ? [
-            '【执行模式】先列计划，等用户确认',
-            '请先输出 2-5 步执行计划（用编号列表），不要立刻调任何工具。',
-            '末尾用一句问句问用户是否同意：例如"按这个计划执行吗？"',
-            '用户回复"执行"/"开始"/"go"/"按计划做" → 继续；回复修改意见 → 调整后再问；',
-            '从计划开始到用户回复期间，禁止调 navigate/computer/web_search/create_file。',
-            '',
-          ].join('\n')
-        : '';
-    // Codex Pack C1 — task-level expert mode override. The user's
-    // composer pick wins over the intent matcher:
-    //   'normal' → skip the legacy matcher entirely (force null)
-    //   'expert' → use whatever matcher returns; if null, the typed
-    //              matcher below may still pick one up
-    //   'auto'   → matcher unchanged (the historical behaviour)
-    const expertModeOverride = input.expertMode ?? 'auto';
-    const expertWorkflow =
-      expertModeOverride === 'normal'
-        ? null
-        : matchExpertWorkflow(input.intent, {
-            hasAttachments: Boolean(input.fileIds && input.fileIds.length > 0),
-          });
-    const expertWorkflowPreamble = expertWorkflow?.promptPreamble ?? '';
-    const effectiveIntent =
-      planPreamble +
-      (expertWorkflowPreamble ? `${expertWorkflowPreamble}\n` : '') +
-      (parentContextBlock ? parentContextBlock : '') +
-      input.intent;
-
-    const generalTaskIntakeIssue = assessGeneralTaskIntake(input.intent);
-    if (generalTaskIntakeIssue) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: generalTaskIntakeIssue.question,
-      });
-    }
-
-    // Phase 10 Tier 2 — quota + concurrency gate. Both block task
-    // creation BEFORE the row is inserted, so the user gets a clean
-    // error rather than a half-spawned task. Role classification is
-    // also done here so we can record role_id + opus_used on the
-    // task row at insert time (avoids a follow-up UPDATE).
-    const planId: PlanId =
-      userRow.plan === 'basic' || userRow.plan === 'pro' ? userRow.plan : 'free';
-    const rawSelectedRoles = (userRow.selectedRoles ?? []) as string[];
-    // P1-final — sanitize for Basic. Mirror what roles.list does so
-    // a Basic user whose persisted selected_roles still contains
-    // legacy Pro-only ids (e.g. contract-reviewer left over from the
-    // skill/role split migration) doesn't get gated on a count that
-    // includes ids they can't actually benefit from. The gate runs
-    // against OPEN_POOL-only ids; gateRoleForUser also receives the
-    // sanitized list so the keyword-classifier path stays consistent.
-    const OPEN_POOL_SET = new Set<string>(OPEN_POOL_ROLE_IDS);
-    const selectedRoles =
-      planId === 'basic'
-        ? rawSelectedRoles.filter((id) => OPEN_POOL_SET.has(id))
-        : rawSelectedRoles;
-
-    // P1-A — Basic-plan over-limit gate. The skill/role split
-    // migration left some users with > 5 entries in selected_roles.
-    // gateRoleForUser would happily inject any of the 8 detected
-    // matches, effectively letting Basic users benefit from a 8-pick
-    // allowance they never paid for. Refuse the task until they
-    // trim back to ≤ 5 in /settings/roles. Auto-trim is intentionally
-    // avoided — the user should pick which 5 to keep.
-    if (planId === 'basic' && selectedRoles.length > BASIC_ROLE_PICK_LIMIT) {
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message: `你当前选择 ${selectedRoles.length} 个角色，超出基础版 ${BASIC_ROLE_PICK_LIMIT} 个上限。请到 /settings/roles 调整，或升级到专业版解除限制。`,
-      });
-    }
-
-    // Role gate. classifyRole runs the same keyword classifier the
-    // agent-loop uses; gateRoleForUser then drops it back to 'none'
-    // when the plan / selection forbids it. Free → always 'none'.
-    // Basic → 'none' unless the role is open-pool AND in the user's
-    // pick. Pro → all roles allowed.
-    const detectedRole = classifyRole(input.intent);
-    let gatedRole = gateRoleForUser(detectedRole, planId, selectedRoles);
-    // Pro upgrade: when the classifier picked an open-pool role that
-    // has a Pro-only counterpart, swap up. Today the only such pair
-    // is xiaohongshu-{operator → expert}; the basic role stays for
-    // Basic-plan users to keep the upsell visible. If we add more
-    // tiered roles, encode them here as a flat map.
-    if (planId === 'pro' && gatedRole === 'xiaohongshu-operator') {
-      gatedRole = 'xiaohongshu-expert';
-    }
-    const dispatchSkillId = resolveTaskDispatchSkillId(taskSkillId, gatedRole);
-    const dispatchRoleId = dispatchSkillId ?? null;
-    const routed = selectModelAndEffort(input.intent, dispatchSkillId ?? 'none');
-    const isOpus = routed.model === 'claude-opus-4-7';
-
-    // Free + Basic don't have an Opus quota; selectModelAndEffort
-    // only routes to Opus for COMPLEX_ROLES, all of which are
-    // pro-exclusive. So in practice isOpus is true only for Pro
-    // users — but defend against future config drift by clamping
-    // here rather than relying on prompt-layers' invariants.
-
-    const quotaService = new QuotaService(ctx.db);
-    const isBypass = isQuotaBypassUser(ctx.userId);
-
-    // Phase 21b — classify execution mode FIRST so the concurrency
-    // gate can apply per-mode caps (bypass users have separate
-    // browser/generate budgets). Adds ~500ms latency on cache miss;
-    // skill-hint + keyword fast paths inside the classifier short-
-    // circuit most cases for free.
-    const classifiedExecutionMode = await classifyExecutionMode({
-      intent: input.intent,
-      skillId: taskSkillId,
-      // §5 fileIds-aware soft template-fill: an attachment + a fill clue
-      // ("填入…模板…留空") relaxes the strict-pattern adjacency requirement.
-      hasFileAttachment: Boolean(input.fileIds && input.fileIds.length > 0),
-      logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
-    });
-    // Phase 2b — typed expert workflow lane override. When the new
-    // typed matcher (content-topic / ecom-daily / douyin-review)
-    // fires AND the EXPERT_WORKFLOW flag is on, force generate-mode
-    // — these workflows never want a browser. This sits after the
-    // legacy matcher so routeOverride='browser' from the legacy
-    // douyin-livestream-review (when user has platform-source
-    // keywords) still wins; in practice the two matchers don't
-    // overlap on browser-needing intents.
-    // Codex Pack C1 — same override applies to the typed matcher.
-    // `normal` skips matching so the task drops to general-purpose
-    // generate/scrape lanes even when the intent looks like a
-    // workflow (e.g. user wants a quick 抖音 fact-check instead of
-    // the full report).
-    const typedWorkflowFromMatcher =
-      expertModeOverride === 'normal'
-        ? null
-        : getExecutionFeatureFlags().EXPERT_WORKFLOW
-          ? matchTypedExpertWorkflow({
+      const taskCreateIdempotencyKey = input.clientRequestId
+        ? `spa_task:${input.clientRequestId}`
+        : null;
+      // Inside the idempotency claim: a continuation claims its original row,
+      // and the first task insert of this request links the replacement in the
+      // same transaction (see insertWithContinuationLink below).
+      let continuationLink: ContinuationLink | null = null;
+      const continuationRepo = new TaskRepository(ctx.db, ctx.taskOrigin);
+      const withContinuation = <T extends { taskId: string }>(create: () => Promise<T>) =>
+        continuationOf
+          ? runPublicCloudContinuation({
+              originalTaskId: continuationOf,
               intent: input.intent,
-              roleId: taskSkillId ?? null,
+              loadOriginal: async () => {
+                const [row] = await ctx.db
+                  .select({
+                    status: tasksTable.status,
+                    intent: tasksTable.intent,
+                    result: tasksTable.result,
+                    publicCloudContinuationTaskId: tasksTable.publicCloudContinuationTaskId,
+                  })
+                  .from(tasksTable)
+                  .where(
+                    and(
+                      eq(tasksTable.externalId, continuationOf),
+                      eq(tasksTable.userId, userRow.id),
+                      eq(tasksTable.origin, ctx.taskOrigin),
+                    ),
+                  )
+                  .limit(1);
+                return row;
+              },
+              claim: (claimToken) =>
+                continuationRepo.claimPublicCloudContinuation({
+                  originalTaskId: continuationOf,
+                  userId: userRow.id,
+                  claimToken,
+                }),
+              release: (claimToken) =>
+                continuationRepo.releasePublicCloudContinuationClaim({
+                  originalTaskId: continuationOf,
+                  userId: userRow.id,
+                  claimToken,
+                }),
+              create: (link) => {
+                continuationLink = link;
+                return create();
+              },
+              newClaimToken: () => randomUUID(),
+              onReleaseFailure: (err) =>
+                ctx.logger.warn(
+                  { err, taskId: continuationOf },
+                  'tasks.create: public-cloud continuation claim not released',
+                ),
             })
-          : null;
-    // A follow-up chip usually does not carry the original workflow
-    // keywords. The parent workflow still forces the safe generate lane,
-    // but the new deliverable must not inherit the parent's report schema:
-    // a 30-day calendar is not another content-topic report, and a live SOP
-    // is not another douyin-review report. Only a workflow matched by the
-    // follow-up text itself becomes the new report/verifier contract.
-    const typedWorkflowFromParent =
-      isFollowUp && parentWorkflowId ? getExpertWorkflowById(parentWorkflowId) : null;
-    const {
-      reportWorkflow: typedWorkflow,
-      routingWorkflow: typedRoutingWorkflow,
-    } = resolveExpertWorkflowDispatch({
-      matchedWorkflow: typedWorkflowFromMatcher,
-      parentWorkflow: typedWorkflowFromParent,
-      isFollowUp,
-      followUpIntent: input.intent,
-    });
-    const typedWorkflowOverride =
-      typedRoutingWorkflow != null && expertWorkflow?.routeOverride !== 'browser'
-        ? ('generate' as const)
-        : null;
-    const workflowIdentities = resolveWorkflowIdentities({
-      reportWorkflowId: typedWorkflow?.workflowId,
-      routingWorkflowId: typedRoutingWorkflow?.workflowId,
-      legacyWorkflowId: expertWorkflow?.id,
-    });
-    const executionMode = input.localChrome ? 'browser' as const : resolveFollowUpExecutionMode({
-      parentHasBrowserContext,
-      typedWorkflowOverride,
-      expertRouteOverride: expertWorkflow?.routeOverride,
-      classifiedExecutionMode,
-      explicitMediaMode: input.imageOptions
-        ? 'image'
-        : input.videoOptions
-          ? 'video_creation'
-          : null,
-    });
-
-    await parseCreateAttachments(executionMode === 'generate');
-    // Preserve the existing specialized stock candidate path (including its
-    // generic fallback) until the remaining first-create migration is done.
-    const specializedStockLaneEligible =
-      shouldAllowSpecializedLaneOverride(typedRoutingWorkflow) &&
-      (appEnv.ASHARE_QA_ENABLED || validatedStockContext !== null) &&
-      ashareQaHandlesMode(executionMode) &&
-      (ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId));
-    const coreCreateRequirements: CoreAcceptedRequirements | null =
-      executionMode === 'generate' &&
-      !specializedStockLaneEligible
-        ? {
-            initialRequest: parentUserContext + input.intent,
-            ...(parentModelReference ? { referenceContext: parentModelReference } : {}),
-            userTurns: [],
-            phase: input.mode === 'plan' ? 'draft' : 'direct',
-            workflow: typedWorkflow
-              ? { id: typedWorkflow.workflowId, sections: typedWorkflow.reportSections }
-              : null,
-            referencePlan: null,
-            fileIds: orderedFileIds,
-            ...(expertWorkflow ? { legacyWorkflow: restoreCoreLegacyWorkflow(expertWorkflow.id, {
-              initialRequest: parentUserContext + input.intent,
-              userTurns: [],
-              fileIds: orderedFileIds,
-            }) } : {}),
-            resume: {
-              schemaVersion: 1,
-              expertMode: expertModeOverride,
-              skillId: dispatchSkillId ?? null,
-              legacyWorkflowId: expertWorkflow?.id ?? null,
-              intakeBindings: [],
-            },
-          }
-        : null;
-    if (coreCreateRequirements) {
-      const flags = getExecutionFeatureFlags();
-      if (!flags.EVIDENCE_LEDGER || !flags.EXECUTION_CONTRACT || !flags.EXECUTION_VERIFIER)
-        throw new TRPCError({
-          code: 'PRECONDITION_FAILED',
-          message: '任务方案核验尚未就绪，未创建任务或扣除额度。',
-        });
-    }
-    if (executionMode === 'generate') {
-      assertCoreTaskInput({
-        ...(coreCreateRequirements ?? {
-        initialRequest: parentContextBlock + input.intent,
-        userTurns: [],
-        phase: input.mode === 'plan' ? 'draft' : 'direct',
-        workflow: workflowIdentities.contractWorkflowId
-          ? { id: workflowIdentities.contractWorkflowId, sections: typedWorkflow?.reportSections ?? [] }
-          : null,
-        referencePlan: null,
-        fileIds: orderedFileIds,
-        }),
-        blocks: attachmentBlocks,
-      });
-    }
-
-    const willConsumeOpus = executionMode !== 'browser' && isOpus && planId === 'pro';
-
-    // Qwen-only rollout boundary: media lanes still depend on
-    // legacy model controllers. Persist an honest terminal task before
-    // quota consumption instead of throwing a transient precondition or
-    // leaving an accepted task in `executing` forever.
-    const unmigratedLane = unmigratedLaneForExecutionMode(executionMode);
-    if (unmigratedLane) {
-      const unavailable = modelRuntimeWiring.resolveUnmigrated(unmigratedLane);
-      const reason = modelTaskFailureReason(unavailable.reasonCode);
-      const taskId = newExternalId('task');
-      await repo.insertTask(
-        {
-          taskId,
-          status: 'executing',
-          plan: [],
-          cursor: 0,
-          pendingConfirm: null,
-        },
-        {
-          userId: userRow.id,
-          intent: input.intent,
-          roleId: dispatchRoleId,
-          opusUsed: false,
-        },
-      );
-      const terminal = await repo.persistVisionOutcome(taskId, {
-        status: 'failed',
-        reason,
-        tickCount: 0,
-        errorCode: unavailable.reasonCode,
-        metadata: {
-          executionMode,
-          finalExecutionMode: executionMode,
-          reasonCode: unavailable.reasonCode,
-        },
-      });
-      if (terminal.persisted) {
-        broadcastToUser(ctx.userId, {
-          type: 'server.task.terminal',
-          taskId,
-          status: 'failed',
-          reason,
-        });
-      }
-      return {
-        taskId,
-        status: 'failed' as const,
-        steps: [],
-        executionMode,
-      };
-    }
-
-    // Resolve region, credentials and rollout eligibility before quota
-    // consumption. An unavailable core lane is a deployment/rollout state,
-    // not a billable task attempt.
-    const coreLane = coreLaneForExecutionMode(executionMode);
-    let browserMessagesAdapter: MessagesAdapter | undefined;
-    if (coreLane) {
-      const preflight = modelRuntimeWiring.resolveCore({
-        actorExternalId: ctx.userId,
-        lane: coreLane,
-        ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
-      });
-      if (preflight.kind === 'unavailable') {
-        const reason = modelTaskFailureReason(preflight.reasonCode);
-        const taskId = newExternalId('task');
-        await repo.insertTask(
-          {
+          : create();
+      return runTaskCreateIdempotently({
+        clientRequestId: input.clientRequestId,
+        claim: () =>
+          claimTaskCreate(
+            { db: ctx.db, logger: ctx.logger },
+            userRow.id,
+            taskCreateIdempotencyKey!,
+            input,
+          ),
+        finalize: (taskId, response) =>
+          finalizeTaskCreateClaim(
+            { db: ctx.db, logger: ctx.logger },
+            userRow.id,
+            taskCreateIdempotencyKey!,
             taskId,
-            status: 'executing',
-            plan: [],
-            cursor: 0,
-            pendingConfirm: null,
-          },
-          {
-            userId: userRow.id,
-            intent: input.intent,
-            roleId: dispatchRoleId,
-            opusUsed: false,
-            ...(stockTaskSourceContext ? { sourceContext: stockTaskSourceContext } : {}),
-          },
-        );
-        const terminal = await repo.persistVisionOutcome(taskId, {
-          status: 'failed',
-          reason,
-          tickCount: 0,
-          errorCode: preflight.reasonCode,
-          metadata: {
-            executionMode,
-            finalExecutionMode: executionMode,
-            reasonCode: preflight.reasonCode,
-          },
-        });
-        if (terminal.persisted) {
-          broadcastToUser(ctx.userId, {
-            type: 'server.task.terminal',
-            taskId,
-            status: 'failed',
-            reason,
-          });
-        }
-        return {
-          taskId,
-          status: 'failed' as const,
-          steps: [],
-          executionMode,
-        };
-      }
-      if (coreLane === 'browser') {
-        browserMessagesAdapter = preflight.messages('vision');
-        if (input.localChrome) await assertLocalChromeSelection(ctx.userId, input.localChrome);
-        if (
-          !input.localChrome &&
-          !ctx.playwrightExecutor &&
-          !ctx.executionRouter?.getExecutor('headed') &&
-          !ctx.executionRouter?.getExecutor('headless') &&
-          !(ctx.browserPool && shouldUseBrowserPool(ctx.userId))
-        ) {
-          throw new TRPCError({
-            code: 'PRECONDITION_FAILED',
-            message: '浏览器执行器尚未就绪，未扣除额度。请稍后重试。',
-          });
-        }
-      }
-    }
-    const videoIntent =
-      executionMode === 'video_creation' ||
-      input.roleId === 'video-creator' ||
-      input.videoOptions?.tab !== undefined;
-        const providerReadiness = {
-          hasDashscope: Boolean(appEnv.DASHSCOPE_API_KEY),
-          hasFal: Boolean(appEnv.FAL_KEY),
-          hasGemini: Boolean(appEnv.GEMINI_API_KEY),
-        };
-        const mediaIssue =
-          executionMode === 'image'
-            ? mediaCapabilityIssue({ kind: 'image' }, providerReadiness)
-            : videoIntent
-              ? mediaCapabilityIssue(
-                  {
-                    kind: 'video',
-                    tab: input.videoOptions?.tab ?? 'normal',
-                    model: input.videoOptions?.model ?? 'veo_fast',
-                  },
-                  providerReadiness,
-                )
-              : null;
-        if (mediaIssue) {
-          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: mediaIssue });
-        }
-        if (
-          executionMode === 'image' &&
-          input.imageOptions?.mode === 'lock_subject' &&
-          !legacyMediaModelClient
-        ) {
-          throw new TRPCError({
-            code: 'PRECONDITION_FAILED',
-            message: '主体一致性复核服务尚未就绪，未创建任务或扣除额度。',
-          });
-        }
-    if (videoIntent && (!appEnv.VIDEO_CREATION_ENABLED || !videoAllowed)) {
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message: '视频生成功能尚未向当前账号开放，未创建任务或扣除额度。',
-      });
-    }
-    if (videoIntent && !legacyMediaModelClient) {
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message: '视频生成服务尚未就绪，未创建任务或扣除额度。',
-      });
-    }
-    const willCreateVideoQuote =
-      appEnv.VIDEO_CREATION_ENABLED &&
-      videoAllowed &&
-      Boolean(legacyMediaModelClient) &&
-      videoIntent;
-    if (!input.localChrome && appEnv.NODE_ENV === 'production' && executionMode === 'browser' && !ctx.browserPool) {
-      // Server-side browser tasks must use the per-task pool because that
-      // path is pinned to BrowserEgressProxy. A shared CDP fallback can only
-      // apply app-level URL checks and cannot eliminate DNS rebinding or
-      // subresource access to cloud metadata.
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message: '安全浏览器执行环境尚未就绪，未创建任务。请稍后重试。',
-      });
-    }
-    const directOpenUrl =
-          !input.localChrome && executionMode === 'browser'
-            ? extractRunnableDirectOpenUrl(input.intent, input.mode)
-            : null;
-    const directOpenSafetyError = directOpenUrl
-      ? await verifyDirectOpenUrlSafety(directOpenUrl)
-      : null;
-    if (directOpenSafetyError) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: directOpenSafetyError,
-      });
-    }
-    const directOpenFallbackExecutor = directOpenUrl
-      ? (ctx.playwrightExecutor ??
-        ctx.executionRouter?.getExecutor('headed') ??
-        ctx.executionRouter?.getExecutor('headless') ??
-        null)
-      : null;
-    const directOpenUsesBrowserPool = Boolean(
-      directOpenUrl && ctx.browserPool && shouldUseBrowserPool(ctx.userId),
-    );
-    if (directOpenUrl && !directOpenUsesBrowserPool && !directOpenFallbackExecutor) {
-      // Availability is deployment readiness. Reject before charging the
-      // user when no browser can produce the promised page evidence.
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message: '浏览器执行器尚未就绪，未创建空白任务。请稍后重试。',
-      });
-    }
-    // Codex Round 2 P1-7 — explicit observability log at the dispatch
-    // boundary. Lets BOSS run `pm2 logs | grep task:expert_dispatch`
-    // to compare normal vs expert outcomes (expertModeRequested ==
-    // 'normal' AND expertWorkflowMatched != null = a forced-skip that
-    // would otherwise have fired a workflow — useful for measuring
-    // "did the user opt out of value or junk").
-    ctx.logger.info(
-      {
-        userId: ctx.userId,
-        expertModeRequested: expertModeOverride,
-        expertWorkflowMatched: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
-        executionMode,
-      },
-      'task:expert_dispatch',
-    );
-    if (typedRoutingWorkflow != null && executionMode === 'generate') {
-      ctx.logger.info(
-        {
-          typedWorkflowId: typedRoutingWorkflow.workflowId,
-          reportWorkflowId: typedWorkflow?.workflowId ?? null,
-          classifiedExecutionMode,
-          legacyRouteOverride: expertWorkflow?.routeOverride ?? null,
-        },
-        'typed-workflow: forced generate lane',
-      );
-    }
-    if (expertWorkflow?.routeOverride) {
-      ctx.logger.info(
-        {
-          workflowId: expertWorkflow.id,
-          routeOverride: expertWorkflow.routeOverride,
-          classifiedExecutionMode,
-          missingInputs: expertWorkflow.missingInputs,
-        },
-        'expert-workflow: route override applied',
-      );
-    }
-
-    // Phase 21a P0 — global queue-depth guard. Applies to ALL users,
-    // bypass or not, so a runaway client (or a bug elsewhere) can't
-    // pile tasks faster than the executor pool drains. Counts across
-    // pending/planning/queued/executing. Parked user-wait states do
-    // not consume executor capacity. The query hits an index on `status`, so this is
-    // sub-ms even at high concurrency.
-    const [activeRow] = await ctx.db
-      .select({ count: sql<number>`COUNT(*)` })
-      .from(tasksTable)
-      .where(inArray(tasksTable.status, [...TASK_QUEUE_DEPTH_STATUSES]));
-    const queueDepth = Number(activeRow?.count ?? 0);
-    if (queueDepth >= GLOBAL_QUEUE_DEPTH_LIMIT) {
-      ctx.logger.warn(
-        { userId: ctx.userId, queueDepth, limit: GLOBAL_QUEUE_DEPTH_LIMIT },
-        'tasks.create: rejected — global queue depth exceeded',
-      );
-      throw new TRPCError({
-        code: 'TOO_MANY_REQUESTS',
-        message: `系统繁忙（队列深度 ${queueDepth}/${GLOBAL_QUEUE_DEPTH_LIMIT}），请稍后再试。`,
-      });
-    }
-
-    // Phase 24 — per-user concurrency. With per-task browsers (one
-    // task = one Brave) the in-memory mode tracker is no longer
-    // needed — the DB total count of active tasks is the source of
-    // truth. Bypass users still get a higher ceiling (matches pool
-    // capacity so a single bypass user can saturate the pool, fine
-    // for testing). Non-bypass users get their plan limit (1/3/5).
-    const concurrencyLimit = isBypass ? BYPASS_CONCURRENCY : getConcurrencyLimit(planId);
-    const concurrentCount = await quotaService.getActiveTaskCount(userRow.id);
-    if (concurrentCount >= concurrencyLimit) {
-      throw new TRPCError({
-        code: 'TOO_MANY_REQUESTS',
-        message: isBypass
-          ? `bypass 并发上限 ${concurrencyLimit}（当前 ${concurrentCount}），请稍后再试。`
-          : concurrencyExhaustedMessage(planId),
-      });
-    }
-
-    // Phase 21a P0 — per-bypass-user submission rate limit. In-memory
-    // sliding window (see quota/rate-limiter.ts). Only fires for users
-    // in the centrally configured unmetered test-account set today;
-    // non-bypass users are governed by
-    // their plan's monthly/daily counter (see tryConsume below) which
-    // is already a different shape of throttle.
-    if (isBypass) {
-      const rl = rateLimitTryAcquire(ctx.userId, BYPASS_RATE);
-      if (!rl.ok) {
-        ctx.logger.warn(
-          { userId: ctx.userId, count: rl.count, retryAfterMs: rl.retryAfterMs },
-          'tasks.create: bypass rate limit hit',
-        );
-        throw new TRPCError({
-          code: 'TOO_MANY_REQUESTS',
-          message: `bypass 速率上限 ${BYPASS_RATE.max}/分钟，约 ${Math.ceil(rl.retryAfterMs / 1000)} 秒后重试。`,
-        });
-      }
-    }
-
-    // Follow-ups are free, and video quote creation is not a generated
-    // task yet. The latter consumes one regular task only after the user
-    // confirms a valid quote in confirmVideo.
-    //
-    // Bypass users also skip tryConsume — they're not on a metered
-    // plan for testing purposes. Concurrency + rate-limit + global
-    // queue-depth (above) provide all the throttling we need.
-    let opusActuallyConsumed = false;
-    const consumeTaskQuotaOnCreate = shouldConsumeTaskQuotaOnCreate({
-      isBypass,
-      isFollowUp,
-      willCreateVideoQuote,
-    });
-    if (isBypass) {
-      opusActuallyConsumed = willConsumeOpus;
-      ctx.logger.info(
-        {
-          userId: ctx.userId,
-          queueDepth,
-          concurrentCount,
-          taskIntent: input.intent.slice(0, 60),
-        },
-        'tasks.create: bypass admit (concurrency + rate-limit ok)',
-      );
-    } else if (consumeTaskQuotaOnCreate) {
-      const consume = await quotaService.tryConsume(userRow.id, planId, willConsumeOpus);
-      if (!consume.ok) {
-        // Pro running out of Opus mid-task should downgrade to Sonnet
-        // automatically rather than block the task. Re-attempt with
-        // isOpus=false so the regular pool absorbs it.
-        if (consume.reason === 'opus_limit' && planId === 'pro') {
-          const fallback = await quotaService.tryConsume(userRow.id, planId, false);
-          if (!fallback.ok) {
-            throw quotaErrorFor(fallback.reason);
-          }
-          ctx.logger.info(
-            { userId: ctx.userId, taskIntent: input.intent.slice(0, 60) },
-            'quota: opus exhausted — task will run on Sonnet',
+            response,
+          ),
+        release: () =>
+          releaseTaskCreateClaim(
+            { db: ctx.db, logger: ctx.logger },
+            userRow.id,
+            taskCreateIdempotencyKey!,
+          ),
+        onFinalizeFailure: () => {
+          ctx.executionLifetime?.drain.markUnknown(ctx.executionLifetime.owner);
+          ctx.logger.error(
+            { userId: ctx.userId, clientRequestId: input.clientRequestId },
+            'tasks.create: task created but idempotency claim did not finalize',
           );
-        } else {
-          throw quotaErrorFor(consume.reason);
-        }
-      }
-      opusActuallyConsumed = consume.ok && willConsumeOpus;
-    } else if (isFollowUp) {
-      ctx.logger.info(
-        {
-          userId: ctx.userId,
-          replyToTaskId: input.replyToTaskId,
-          taskIntent: input.intent.slice(0, 60),
         },
-        'tasks.create: follow-up reply mode (quota skipped)',
-      );
-    } else {
-      ctx.logger.info(
-        {
-          userId: ctx.userId,
-          taskIntent: input.intent.slice(0, 60),
-        },
-        'tasks.create: video quote mode (quota deferred until confirmation)',
-      );
-    }
-
-    // Compute these once — used both by the diagnostic log AND by the
-    // gate. Hoisting them up avoids re-classifying the intent twice.
-    const isSimpleSearchIntent = classifyAsSimpleSearch(input.intent);
-    /**
-     * Per-user pool fast lane: when the global headless singleton is
-     * dead but this user has (or can spawn) their own pool slot, we
-     * can still run supercar — the per-user Brave is functionally
-     * equivalent to the singleton from runSupercarTask's view. Sync
-     * `canAllocate` peek; the actual `allocate` happens inside the
-     * branch and may fail under race (Brave crash mid-spawn). When
-     * it does, primaryExecutor stays null and runSupercarTask's null
-     * guard fails the task gracefully — the gate doesn't have to
-     * second-guess. Without this condition, every PRD / 笔记 / 分析
-     * task fell through to vision-loop the moment the singleton
-     * crashed, defeating Phase 8 + Phase 10 entirely.
-     */
-    const browserPoolEligible = Boolean(
-      ctx.browserPool && shouldUseBrowserPool(ctx.userId) && ctx.browserPool.canAllocate(),
-    );
-
-    // ===== image-mode fork (sprint #5 — nano banana) =====
-    // 文生图 / 图生图 tasks: classify NB2 vs Pro, call Gemini, persist
-    // each PNG to R2, surface as FileDownloadCard via
-    // result.metadata.attachments. No agent loop, no pool slot, no
-    // verifier — a single outbound API call that produces a file.
-    //
-        // Provider readiness is checked before quota consumption above. Explicit
-        // image work never falls through to a text-only lane.
-        if (executionMode === 'image') {
-      const taskId = newExternalId('task');
-
-      await repo.insertTask(
-        {
-          taskId,
-          status: 'executing',
-          plan: [],
-          cursor: 0,
-          pendingConfirm: null,
-        },
-        {
-          userId: userRow.id,
-          intent: input.intent,
-          roleId: dispatchRoleId,
-          opusUsed: false,
-        },
-      );
-
-      ctx.logger.info(
-        { taskId, userId: ctx.userId, executorLane: 'image', executionMode },
-        'task: executor lane selected',
-      );
-      broadcastSubStatus(ctx.userId, taskId, 'generating_image');
-
-      // Input images (图生图 / edit) come from the user's uploaded
-      // attachments, already parsed into base64 image content blocks.
-      const inputImages: Array<{ data: string; mimeType: string }> = [];
-      for (const b of attachmentBlocks) {
-        if (b.type === 'image' && b.source.type === 'base64') {
-          inputImages.push({ data: b.source.data, mimeType: b.source.media_type });
-        }
-      }
-
-      const imageStartedAt = Date.now();
-      void runTaskBackground(ctx, async (ctx) => (async () => {
-        const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
-            const imageHeartbeat =
-              taskInternalId == null
-                ? null
-                : startTaskHeartbeat(ctx.db, taskId, {
-                    onError: (error) => {
-                      ctx.logger.warn(
-                        { err: error.message, taskId },
-                        'image: task heartbeat failed',
-                      );
+        run: () =>
+          withContinuation(async () => {
+            type TaskExecutionContext = typeof ctx;
+            // The authenticated request carries a server-signed origin. One repository
+            // instance is shared by every execution lane so no early-return branch can
+            // accidentally fall back to the database's `user` default.
+            const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
+            const resolvedBrain = currentBrain();
+            // Set once this request consumed quota; the next task inserted carries the
+            // charge so a platform failure can be refunded exactly once.
+            let pendingQuotaCharge: { plan: PlanId; isOpus: boolean } | null = null;
+            {
+              // Record which brain each task created by this request runs with.
+              // Best-effort: a failed audit row never blocks task creation.
+              const insertTask = repo.insertTask.bind(repo);
+              repo.insertTask = (async (...args: Parameters<typeof insertTask>) => {
+                const link = continuationLink;
+                let result: Awaited<ReturnType<typeof insertTask>> = undefined;
+                if (link) {
+                  // The first insert of a continuation carries the link; a failed
+                  // insert/link rolls back and refunds what this request consumed.
+                  continuationLink = null;
+                  await insertWithContinuationLink({
+                    link,
+                    replacementTaskId: args[0].taskId,
+                    insert: (publicCloudContinuation) =>
+                      insertTask(args[0], { ...args[1], publicCloudContinuation }),
+                    refundPendingCharge: async () => {
+                      const charge = pendingQuotaCharge;
+                      if (!charge) return;
+                      pendingQuotaCharge = null;
+                      await new QuotaService(ctx.db).refund(userRow.id, charge.plan, charge.isOpus);
                     },
                   });
-            try {
-        let result: RunImageTaskResult;
-        if (taskInternalId == null) {
-          result = {
-            status: 'failed',
-            summary: '',
-            reason: '任务记录丢失，请重试。',
-            attachments: [],
-          };
-        } else {
-          const save = async (
-            img: { buffer: Buffer; mimeType: string },
-            index: number,
-          ): Promise<ImageAttachment> => {
-            if (img.buffer.length > MAX_DOWNLOAD_BYTES) {
-              throw new Error(
-                `generated image too large (${img.buffer.length} bytes > ${MAX_DOWNLOAD_BYTES} cap)`,
-              );
+                } else {
+                  result = await insertTask(...args);
+                }
+                const charge = pendingQuotaCharge;
+                if (charge) {
+                  pendingQuotaCharge = null;
+                  void recordQuotaCharge(ctx.db, {
+                    taskExternalId: args[0].taskId,
+                    userId: userRow.id,
+                    ...charge,
+                  }).catch((err: unknown) => {
+                    ctx.logger.warn(
+                      {
+                        err: err instanceof Error ? err.message : String(err),
+                        taskId: args[0].taskId,
+                      },
+                      'quota: charge record not written (refund unavailable for this task)',
+                    );
+                  });
+                }
+                if (!resolvedBrain) return result;
+                void recordTaskModelSelection(ctx.db, args[0].taskId, resolvedBrain).catch(
+                  (err: unknown) => {
+                    ctx.logger.warn(
+                      {
+                        err: err instanceof Error ? err.message : String(err),
+                        taskId: args[0].taskId,
+                      },
+                      'model catalog: task model selection not recorded',
+                    );
+                  },
+                );
+                return result;
+              }) as typeof repo.insertTask;
             }
-            const ext =
-              img.mimeType === 'image/jpeg'
-                ? 'jpg'
-                : img.mimeType === 'image/webp'
-                  ? 'webp'
-                  : img.mimeType === 'image/gif'
-                    ? 'gif'
-                    : 'png';
-            const filename = `holaday-image-${index + 1}.${ext}`;
-            if (ctx.downloadManager) {
-              const saved = await ctx.downloadManager.save({
-                userIdInternal: userRow.id,
-                userExternalId: ctx.userId,
-                taskIdInternal: taskInternalId,
-                content: img.buffer,
-                filename,
-                mimetype: img.mimeType,
+            let retryCore = false;
+            let retryRequirements: CoreAcceptedRequirements | null = null;
+            if (input.retryOfTaskId) {
+              if (
+                input.replyToTaskId ||
+                input.localChrome ||
+                input.imageOptions ||
+                input.videoOptions ||
+                input.taskSource
+              )
+                throw new TRPCError({ code: 'BAD_REQUEST', message: '不能更改原任务的执行方式。' });
+              const [original] = await ctx.db
+                .select({
+                  status: tasksTable.status,
+                  result: tasksTable.result,
+                  executionId: tasksTable.executionId,
+                  executionRevision: tasksTable.executionRevision,
+                  coreRecordVersion: tasksTable.coreRecordVersion,
+                  intent: tasksTable.intent,
+                })
+                .from(tasksTable)
+                .where(
+                  and(
+                    eq(tasksTable.externalId, input.retryOfTaskId),
+                    eq(tasksTable.userId, userRow.id),
+                    eq(tasksTable.origin, ctx.taskOrigin),
+                  ),
+                )
+                .limit(1);
+              if (!original) throw new TRPCError({ code: 'NOT_FOUND', message: '原任务不存在。' });
+              const record = readCoreTaskRecord({
+                head: {
+                  status: original.status,
+                  executionId: original.executionId,
+                  executionRevision: original.executionRevision,
+                  recordVersion: original.coreRecordVersion,
+                },
+                result: original.result,
+              });
+              if (!['failed', 'cancelled'].includes(original.status) || record.kind !== 'core')
+                throw new TRPCError({
+                  code: 'BAD_REQUEST',
+                  message: '原任务不可重试，请重新创建任务。',
+                });
+              input = {
+                ...input,
+                intent: original.intent,
+                fileIds: [...record.requirements.fileIds],
+                expertMode: record.requirements.resume?.expertMode ?? 'auto',
+                skillId: record.requirements.resume?.skillId ?? undefined,
+              };
+              retryCore = true;
+              retryRequirements = record.requirements;
+            }
+            let validatedStockContext: ValidatedStockTaskContext | null = null;
+            if (input.taskSource === 'stock_dashboard') {
+              if (!input.stockContext) {
+                throw new TRPCError({
+                  code: 'BAD_REQUEST',
+                  message: '股票任务缺少可信快照，请刷新股市任务页面后重试。',
+                });
+              }
+              validatedStockContext = await validateStockTaskContext({
+                db: ctx.db,
+                userId: userRow.id,
+                input: input.stockContext,
+                intent: input.intent,
+                logger: ctx.logger,
+              });
+            }
+            const stockTaskSourceContext = validatedStockContext
+              ? (validatedStockContext as unknown as Record<string, unknown>)
+              : null;
+            const taskSkillId = resolveTaskSkillContext(input, userRow.selectedSkills);
+            const videoAllowed =
+              VIDEO_CREATION_ALLOWLIST.size === 0 || VIDEO_CREATION_ALLOWLIST.has(ctx.userId);
+
+            // Resolve and validate attachments before any quota consumption. Locked
+            // subjects are a hard input contract: a missing, non-image, or unreadable
+            // anchor must return BAD_REQUEST without charging the task.
+            const fileService = new FileService(ctx.db, ctx.logger);
+            const inputFileMetadata: { fileId: string; filename: string; mimetype: string }[] = [];
+            const attachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
+            let orderedFileIds: string[];
+            try {
+              orderedFileIds = orderImageAttachmentIds(
+                input.fileIds ?? [],
+                input.imageOptions?.mode,
+                input.imageOptions?.subjectFileId,
+              );
+            } catch (err) {
+              throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: err instanceof Error ? err.message : '主角图选择无效，请重新选择',
+              });
+            }
+            // Routing only needs file presence. Defer parsing until the lane is fixed
+            // so core text can preserve the full source while other lanes keep their
+            // existing parser behavior. This still precedes every quota operation.
+            const parseCreateAttachments = async (completeText: boolean) => {
+              if (orderedFileIds.length === 0) return;
+              const loaded = await fileService.loadMany(orderedFileIds, userRow.id);
+              const requestedFileIds = [...new Set(orderedFileIds)];
+              inputFileMetadata.push(
+                ...loaded.map(({ row }) => ({
+                  fileId: row.externalId,
+                  filename: row.filename,
+                  mimetype: row.mimetype,
+                })),
+              );
+              const loadedFileIds = new Set(loaded.map((file) => file.row.externalId));
+              if (requestedFileIds.some((fileId) => !loadedFileIds.has(fileId))) {
+                throw new TRPCError({
+                  code: 'BAD_REQUEST',
+                  message: '附件已失效，请重新上传',
+                });
+              }
+              if (input.imageOptions?.mode === 'lock_subject' && input.imageOptions.subjectFileId) {
+                const subject = loaded.find(
+                  (file) => file.row.externalId === input.imageOptions?.subjectFileId,
+                );
+                if (!subject || !subject.row.mimetype.startsWith('image/')) {
+                  throw new TRPCError({
+                    code: 'BAD_REQUEST',
+                    message: '主角图不可用或不是图片，请重新上传',
+                  });
+                }
+              }
+              for (const f of loaded) {
+                const isLockedSubject =
+                  input.imageOptions?.mode === 'lock_subject' &&
+                  f.row.externalId === input.imageOptions.subjectFileId;
+                try {
+                  const parsed = await parseFileForPrompt(
+                    f.buffer,
+                    f.row.filename,
+                    f.row.mimetype,
+                    { completeText },
+                  );
+                  if (isLockedSubject && !parsed.blocks.some((block) => block.type === 'image')) {
+                    throw new Error('主角图未解析为图像');
+                  }
+                  attachmentBlocks.push(...parsed.blocks);
+                } catch (err) {
+                  if (
+                    err instanceof CoreFileInputError &&
+                    err.code === 'CORE_FILE_CONVERT_REQUIRED'
+                  ) {
+                    throw new TRPCError({ code: 'BAD_REQUEST', message: CONVERT_REQUIRED_COPY });
+                  }
+                  if (completeText) {
+                    throw new TRPCError({
+                      code: 'BAD_REQUEST',
+                      message: '附件超出完整核验范围或无法读取，请缩小材料或重新上传后再提交。',
+                    });
+                  }
+                  ctx.logger.warn(
+                    {
+                      err: err instanceof Error ? err.message : String(err),
+                      fileId: f.row.externalId,
+                    },
+                    isLockedSubject
+                      ? 'tasks.create: locked subject parse failed'
+                      : 'tasks.create: file parse failed — skipping',
+                  );
+                  if (isLockedSubject) {
+                    throw new TRPCError({
+                      code: 'BAD_REQUEST',
+                      message: '主角图读取失败，请重新上传一张清晰图片',
+                    });
+                  }
+                  throw new TRPCError({
+                    code: 'BAD_REQUEST',
+                    message: '附件读取失败，请重新上传后再提交',
+                  });
+                }
+              }
+            };
+
+            // Phase 14 audit follow-up — multi-turn 追问. When `replyToTaskId`
+            // is set, the new task piggybacks on a previously completed/failed
+            // task: skips quota and prefixes the agent's intent with the parent's
+            // intent + result so the model has full context for "为什么失败" /
+            // "再试一次" style follow-ups.
+            let parentContextBlock = '';
+            let parentUserContext = '';
+            let parentModelReference = '';
+            let isFollowUp = false;
+            /**
+             * Phase 3 R1 (Codex follow-up #2) — recovered parent workflow id.
+             * When this is a follow-up tasks.create (replyToTaskId set), we
+             * read the parent's `result.metadata.expertWorkflowId` so the
+             * follow-up inherits the parent's workflow even if the chip's
+             * prompt doesn't trip the typed matcher (e.g. "生成发布日历"
+             * has no platform keyword). Null if no parent or parent wasn't
+             * a workflow task.
+             */
+            let parentWorkflowId: string | null = null;
+            let parentHasBrowserContext = false;
+            let parentBrowserRestoreUrl: string | null = null;
+            if (input.replyToTaskId) {
+              const [parent] = await ctx.db
+                .select({
+                  intent: tasksTable.intent,
+                  status: tasksTable.status,
+                  result: tasksTable.result,
+                  errorMessage: tasksTable.errorMessage,
+                  sourceContext: tasksTable.sourceContext,
+                })
+                .from(tasksTable)
+                .where(
+                  and(
+                    eq(tasksTable.externalId, input.replyToTaskId),
+                    eq(tasksTable.userId, userRow.id),
+                    eq(tasksTable.origin, ctx.taskOrigin),
+                  ),
+                )
+                .limit(1);
+              if (!parent) {
+                throw new TRPCError({
+                  code: 'NOT_FOUND',
+                  message: '找不到要追问的任务（可能已删除或不属于你）',
+                });
+              }
+              if (!isTaskTerminalStatus(parent.status)) {
+                throw new TRPCError({
+                  code: 'BAD_REQUEST',
+                  message: followUpTerminalGuardMessage(),
+                });
+              }
+              // A finished local session cannot be adopted by the cloud follow-up path.
+              // Require a new explicit selection before creating or charging a task.
+              if (
+                z
+                  .object({ browserSource: z.literal('local-chrome') })
+                  .safeParse(parent.sourceContext).success
+              ) {
+                throw new TRPCError({
+                  code: 'BAD_REQUEST',
+                  message: '本地 Chrome 会话已结束，请新建任务并重新选择 Chrome 页面后发送。',
+                });
+              }
+              const parentResult = (parent.result ?? null) as {
+                summary?: string;
+                reason?: string;
+                metadata?: {
+                  expertWorkflowId?: string | null;
+                  executionMode?: string | null;
+                  finalUrl?: string | null;
+                };
+                expertWorkflowId?: string | null;
+                executionMode?: string | null;
+                finalUrl?: string | null;
+                finalScreenshot?: unknown;
+              } | null;
+              // Workflow id can be either nested under metadata (newer tasks)
+              // or top-level on result (older / generate-resume rows). Probe
+              // both so old tasks don't lose context on follow-up.
+              const candidateWfId =
+                parentResult?.metadata?.expertWorkflowId ?? parentResult?.expertWorkflowId ?? null;
+              if (typeof candidateWfId === 'string' && candidateWfId.length > 0) {
+                parentWorkflowId = candidateWfId;
+              }
+              parentHasBrowserContext = followUpParentHasBrowserContext({
+                executionMode:
+                  parentResult?.metadata?.executionMode ?? parentResult?.executionMode ?? null,
+                finalUrl: parentResult?.finalUrl ?? null,
+                hasFinalScreenshot: Boolean(parentResult?.finalScreenshot),
+                intent: parent.intent,
+              });
+              const parentFinalUrl =
+                parentResult?.finalUrl ?? parentResult?.metadata?.finalUrl ?? null;
+              parentBrowserRestoreUrl =
+                typeof parentFinalUrl === 'string' && isSafeUrl(parentFinalUrl)
+                  ? parentFinalUrl.trim().slice(0, 2048)
+                  : null;
+              const summary = parentResult?.summary?.trim() ?? '';
+              const reason = parentResult?.reason?.trim() ?? (parent.errorMessage ?? '').trim();
+              const reasonLabel = followUpParentReasonLabel(parent.status);
+              const outcomeLine =
+                (parent.status === 'completed' || parent.status === 'partial_success') && summary
+                  ? `结果：${summary}`
+                  : reason
+                    ? `${reasonLabel}：${reason}`
+                    : `状态：${parent.status}（无详细输出）`;
+              parentUserContext = `【前次用户要求】\n${parent.intent}\n\n【本次用户要求】\n`;
+              parentModelReference = outcomeLine;
+              parentContextBlock = [
+                '---',
+                '【追问上下文】',
+                `前一个任务："${parent.intent}"`,
+                outcomeLine,
+                '---',
+                '',
+              ].join('\n');
+              isFollowUp = true;
+            }
+
+            /**
+             * The intent the AGENT sees. For a follow-up, the parent's
+             * intent + outcome are prepended so the model has full context.
+             * The DB still stores `input.intent` verbatim — that's what the
+             * user actually typed and what they expect to see in history.
+             */
+            // O4 plan-mode preamble. Cache-safe: appended to the first user
+            // message (not the system prompt), so cache hit rate stays
+            // intact. The agent obeys this by emitting a plan and stopping
+            // on a question-suffix line, which the supercar awaiting_user
+            // detector parks the loop on; tasks.reply ("执行" / "开始" /
+            // "go" or any free-form approval) unblocks it.
+            const planPreamble =
+              input.mode === 'plan'
+                ? [
+                    '【执行模式】先列计划，等用户确认',
+                    '请先输出 2-5 步执行计划（用编号列表），不要立刻调任何工具。',
+                    '末尾用一句问句问用户是否同意：例如"按这个计划执行吗？"',
+                    '用户回复"执行"/"开始"/"go"/"按计划做" → 继续；回复修改意见 → 调整后再问；',
+                    '从计划开始到用户回复期间，禁止调 navigate/computer/web_search/create_file。',
+                    '',
+                  ].join('\n')
+                : '';
+            // Codex Pack C1 — task-level expert mode override. The user's
+            // composer pick wins over the intent matcher:
+            //   'normal' → skip the legacy matcher entirely (force null)
+            //   'expert' → use whatever matcher returns; if null, the typed
+            //              matcher below may still pick one up
+            //   'auto'   → matcher unchanged (the historical behaviour)
+            const expertModeOverride = input.expertMode ?? 'auto';
+            const expertWorkflow =
+              expertModeOverride === 'normal'
+                ? null
+                : matchExpertWorkflow(input.intent, {
+                    hasAttachments: Boolean(input.fileIds && input.fileIds.length > 0),
+                  });
+            const expertWorkflowPreamble = expertWorkflow?.promptPreamble ?? '';
+            const effectiveIntent =
+              planPreamble +
+              (expertWorkflowPreamble ? `${expertWorkflowPreamble}\n` : '') +
+              (parentContextBlock ? parentContextBlock : '') +
+              input.intent;
+
+            const generalTaskIntakeIssue = assessGeneralTaskIntake(input.intent);
+            if (generalTaskIntakeIssue) {
+              throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: generalTaskIntakeIssue.question,
+              });
+            }
+
+            // Phase 10 Tier 2 — quota + concurrency gate. Both block task
+            // creation BEFORE the row is inserted, so the user gets a clean
+            // error rather than a half-spawned task. Role classification is
+            // also done here so we can record role_id + opus_used on the
+            // task row at insert time (avoids a follow-up UPDATE).
+            const planId: PlanId =
+              userRow.plan === 'basic' || userRow.plan === 'pro' ? userRow.plan : 'free';
+            const rawSelectedRoles = (userRow.selectedRoles ?? []) as string[];
+            // P1-final — sanitize for Basic. Mirror what roles.list does so
+            // a Basic user whose persisted selected_roles still contains
+            // legacy Pro-only ids (e.g. contract-reviewer left over from the
+            // skill/role split migration) doesn't get gated on a count that
+            // includes ids they can't actually benefit from. The gate runs
+            // against OPEN_POOL-only ids; gateRoleForUser also receives the
+            // sanitized list so the keyword-classifier path stays consistent.
+            const OPEN_POOL_SET = new Set<string>(OPEN_POOL_ROLE_IDS);
+            const selectedRoles =
+              planId === 'basic'
+                ? rawSelectedRoles.filter((id) => OPEN_POOL_SET.has(id))
+                : rawSelectedRoles;
+
+            // P1-A — Basic-plan over-limit gate. The skill/role split
+            // migration left some users with > 5 entries in selected_roles.
+            // gateRoleForUser would happily inject any of the 8 detected
+            // matches, effectively letting Basic users benefit from a 8-pick
+            // allowance they never paid for. Refuse the task until they
+            // trim back to ≤ 5 in /settings/roles. Auto-trim is intentionally
+            // avoided — the user should pick which 5 to keep.
+            if (planId === 'basic' && selectedRoles.length > BASIC_ROLE_PICK_LIMIT) {
+              throw new TRPCError({
+                code: 'PRECONDITION_FAILED',
+                message: `你当前选择 ${selectedRoles.length} 个角色，超出基础版 ${BASIC_ROLE_PICK_LIMIT} 个上限。请到 /settings/roles 调整，或升级到专业版解除限制。`,
+              });
+            }
+
+            // Role gate. classifyRole runs the same keyword classifier the
+            // agent-loop uses; gateRoleForUser then drops it back to 'none'
+            // when the plan / selection forbids it. Free → always 'none'.
+            // Basic → 'none' unless the role is open-pool AND in the user's
+            // pick. Pro → all roles allowed.
+            const detectedRole = classifyRole(input.intent);
+            let gatedRole = gateRoleForUser(detectedRole, planId, selectedRoles);
+            // Pro upgrade: when the classifier picked an open-pool role that
+            // has a Pro-only counterpart, swap up. Today the only such pair
+            // is xiaohongshu-{operator → expert}; the basic role stays for
+            // Basic-plan users to keep the upsell visible. If we add more
+            // tiered roles, encode them here as a flat map.
+            if (planId === 'pro' && gatedRole === 'xiaohongshu-operator') {
+              gatedRole = 'xiaohongshu-expert';
+            }
+            const dispatchSkillId = resolveTaskDispatchSkillId(taskSkillId, gatedRole);
+            const dispatchRoleId = dispatchSkillId ?? null;
+            const routed = selectModelAndEffort(input.intent, dispatchSkillId ?? 'none');
+            const isOpus = routed.model === 'claude-opus-4-7';
+
+            // Free + Basic don't have an Opus quota; selectModelAndEffort
+            // only routes to Opus for COMPLEX_ROLES, all of which are
+            // pro-exclusive. So in practice isOpus is true only for Pro
+            // users — but defend against future config drift by clamping
+            // here rather than relying on prompt-layers' invariants.
+
+            const quotaService = new QuotaService(ctx.db);
+            const isBypass = isQuotaBypassUser(ctx.userId);
+
+            // Phase 21b — classify execution mode FIRST so the concurrency
+            // gate can apply per-mode caps (bypass users have separate
+            // browser/generate budgets). Adds ~500ms latency on cache miss;
+            // skill-hint + keyword fast paths inside the classifier short-
+            // circuit most cases for free.
+            // The decision keeps its reason (rule source + match) for task metadata.
+            const executionModeDecision = retryCore
+              ? null
+              : await explainExecutionMode({
+                  intent: input.intent,
+                  skillId: taskSkillId,
+                  // §5 fileIds-aware soft template-fill: an attachment + a fill clue
+                  // ("填入…模板…留空") relaxes the strict-pattern adjacency requirement.
+                  hasFileAttachment: Boolean(input.fileIds && input.fileIds.length > 0),
+                  logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
+                });
+            const classifiedExecutionMode = executionModeDecision?.mode ?? ('generate' as const);
+            // Phase 2b — typed expert workflow lane override. When the new
+            // typed matcher (content-topic / ecom-daily / douyin-review)
+            // fires AND the EXPERT_WORKFLOW flag is on, force generate-mode
+            // — these workflows never want a browser. This sits after the
+            // legacy matcher so routeOverride='browser' from the legacy
+            // douyin-livestream-review (when user has platform-source
+            // keywords) still wins; in practice the two matchers don't
+            // overlap on browser-needing intents.
+            // Codex Pack C1 — same override applies to the typed matcher.
+            // `normal` skips matching so the task drops to general-purpose
+            // generate/scrape lanes even when the intent looks like a
+            // workflow (e.g. user wants a quick 抖音 fact-check instead of
+            // the full report).
+            const typedWorkflowFromMatcher =
+              expertModeOverride === 'normal'
+                ? null
+                : getExecutionFeatureFlags().EXPERT_WORKFLOW
+                  ? matchTypedExpertWorkflow({
+                      intent: input.intent,
+                      roleId: taskSkillId ?? null,
+                    })
+                  : null;
+            // A follow-up chip usually does not carry the original workflow
+            // keywords. The parent workflow still forces the safe generate lane,
+            // but the new deliverable must not inherit the parent's report schema:
+            // a 30-day calendar is not another content-topic report, and a live SOP
+            // is not another douyin-review report. Only a workflow matched by the
+            // follow-up text itself becomes the new report/verifier contract.
+            const typedWorkflowFromParent =
+              isFollowUp && parentWorkflowId ? getExpertWorkflowById(parentWorkflowId) : null;
+            const { reportWorkflow: typedWorkflow, routingWorkflow: typedRoutingWorkflow } =
+              resolveExpertWorkflowDispatch({
+                matchedWorkflow: typedWorkflowFromMatcher,
+                parentWorkflow: typedWorkflowFromParent,
+                isFollowUp,
+                followUpIntent: input.intent,
+              });
+            const typedWorkflowOverride =
+              typedRoutingWorkflow != null && expertWorkflow?.routeOverride !== 'browser'
+                ? ('generate' as const)
+                : null;
+            const workflowIdentities = resolveWorkflowIdentities({
+              reportWorkflowId: typedWorkflow?.workflowId,
+              routingWorkflowId: typedRoutingWorkflow?.workflowId,
+              legacyWorkflowId: expertWorkflow?.id,
+            });
+            // FIX-INTENT-ROUTE-BROWSER — internal one-time retry of a scrape task.
+            const scrapeBrowserRetry = ctx.scrapeBrowserRetry ?? null;
+            const executionMode = scrapeBrowserRetry
+              ? ('browser' as const)
+              : retryCore
+                ? ('generate' as const)
+                : input.localChrome
+                  ? ('browser' as const)
+                  : resolveFollowUpExecutionMode({
+                      parentHasBrowserContext,
+                      typedWorkflowOverride,
+                      expertRouteOverride: expertWorkflow?.routeOverride,
+                      classifiedExecutionMode,
+                      explicitMediaMode: input.imageOptions
+                        ? 'image'
+                        : input.videoOptions
+                          ? 'video_creation'
+                          : null,
+                    });
+
+            let taskBrowserCapabilities = Object.freeze(browserCapabilities(ctx.userId));
+            const browserTargetUrl =
+              executionMode === 'browser' ? browserTaskTargetUrl(input.intent) : null;
+            // A connected site grant (vault, default off) gives the cloud browser that site's session.
+            const vaultRuntime = getVaultRuntime();
+            const cloudSessionAvailable = Boolean(
+              vaultRuntime &&
+                browserTargetUrl &&
+                (await vaultRuntime.vault.match(ctx.userId, browserTargetUrl).catch(() => null)),
+            );
+            // Readable identity decision, kept on the task for later diagnosis.
+            const identityDecision =
+              executionMode === 'browser' ? classifyIdentityNeed(input.intent) : null;
+            const browserRoute =
+              executionMode === 'browser'
+                ? decideUserBrowserRoute({
+                    enabled: taskBrowserCapabilities.routingV2,
+                    intent: input.intent,
+                    extensionOnline: hasConnectedExtension(ctx.userId),
+                    selectionOrigin: input.localChrome
+                      ? new URL(input.localChrome.expectedUrl).origin
+                      : undefined,
+                    publicCloudRequested: input.browserPreference === 'cloud-public',
+                    legacyCookieSyncRetired: true,
+                    cloudSessionAvailable,
+                  })
+                : { lane: 'legacy' as const, reason: 'flag_off' as const };
+            // D17-P1-01 — which sessions this task's browser may load, fixed here by the
+            // server and stored on the task. Only a task that needs the user's own data
+            // may load a vault session (and not after a public choice or on a logged-out
+            // route); everything else is `anonymous`. Nothing later can widen it.
+            const taskSessionPolicy: BrowserSessionPolicy = deriveTaskSessionPolicy({
+              identityRequired: identityDecision?.required === true,
+              publicCloudRequested: input.browserPreference === 'cloud-public',
+              route: browserRoute,
+            });
+            if (scrapeBrowserRetry && browserRoute.lane === 'awaiting_user')
+              throw new TRPCError({
+                code: 'PRECONDITION_FAILED',
+                message: 'BROWSER_RETRY_NEEDS_USER_BROWSER',
+              });
+            // Resolve identity/grant requirements before model preflight, quota or any cloud allocation.
+            if (browserRoute.lane === 'awaiting_user') {
+              const taskId = newExternalId('task');
+              await repo.insertTask(
+                { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
+                {
+                  userId: userRow.id,
+                  intent: input.intent,
+                  roleId: dispatchRoleId,
+                  opusUsed: false,
+                  sourceContext: { browserSource: 'local-chrome' },
+                },
+              );
+              const question =
+                browserRoute.question ?? '需要连接 HOLA DAY Chrome 插件，请连接后重新选择页面。';
+              // FIX-ROUTING-IDENTITY-2: every extension wait may continue in the public
+              // cloud by the user's explicit choice; for an identity task the UI states
+              // that personal data is not visible there (identityReason says which).
+              const browserConnection = {
+                reason: browserRoute.reason as
+                  | 'extension_offline'
+                  | 'selection_required'
+                  | 'origin_grant_required',
+                publicCloudAllowed: true,
+                identityRequired: browserRoute.identityRequired === true,
+                ...(browserRoute.identityReason
+                  ? { identityReason: browserRoute.identityReason }
+                  : {}),
+              };
+              const persisted = await repo.persistAwaitingUser({
+                taskExternalId: taskId,
+                question,
+                awaitingKind: 'permission',
+                result: {
+                  executionMode: 'browser',
+                  metadata: {
+                    browserSource: 'local-chrome',
+                    browserRoutingAwaiting: browserRoute.reason,
+                    browserConnection,
+                    ...(identityDecision ? { identityDecision } : {}),
+                  },
+                },
+              });
+              if (!persisted.persisted)
+                throw new TRPCError({ code: 'CONFLICT', message: '任务状态已变化，请重新提交。' });
+              broadcastToUser(ctx.userId, {
+                type: 'server.supercar.awaiting_user',
+                taskId,
+                question,
+                awaitingKind: 'permission',
+                browserConnection,
               });
               return {
-                fileId: saved.fileId,
-                downloadUrl: saved.downloadUrl,
-                filename: saved.filename,
-                mimetype: saved.mimetype,
-                sizeBytes: saved.sizeBytes,
-                expiresAt: saved.expiresAt.toISOString(),
-                kind: 'output',
+                taskId,
+                status: 'awaiting_user' as const,
+                question,
+                awaitingKind: 'permission' as const,
+                browserConnection,
+                steps: [],
+                executionMode: 'browser' as const,
+                browserSource: 'local-chrome' as const,
               };
             }
-            const stored = await fileService.storeOutput({
-              userIdInternal: userRow.id,
-              userExternalId: ctx.userId,
-              taskIdInternal: taskInternalId,
-              filename,
-              mimetype: img.mimeType,
-              buffer: img.buffer,
-            });
-            return {
-              fileId: stored.externalId,
-              downloadUrl: `/api/files/${stored.externalId}/download`,
-              filename: stored.filename,
-              mimetype: stored.mimetype,
-              sizeBytes: Number(stored.sizeBytes),
-              expiresAt: stored.expiresAt
-                ? stored.expiresAt.toISOString()
-                : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-              kind: 'output',
-            };
-          };
 
-          result = await runImageTask({
-            intent: input.intent,
-            ...(inputImages.length > 0 ? { inputImages } : {}),
-            ...(input.imageOptions?.aspectRatio
-              ? { aspectRatio: input.imageOptions.aspectRatio }
-              : {}),
-            ...(input.imageOptions?.imageCount
-              ? { imageCount: input.imageOptions.imageCount as 1 | 2 | 3 | 4 }
-              : {}),
-            ...(input.imageOptions?.mode ? { mode: input.imageOptions.mode } : {}),
-            apiKey: appEnv.GEMINI_API_KEY,
-            baseUrl: appEnv.GEMINI_BASE_URL,
-            flashModel: appEnv.GEMINI_IMAGE_MODEL,
-            proModel: appEnv.GEMINI_IMAGE_MODEL_PRO,
-            ...(input.imageOptions?.model
-              ? {
-                  preferredTier:
-                    input.imageOptions.model === 'nano_banana_pro'
-                      ? ('pro' as const)
-                      : ('flash' as const),
-                }
-              : {}),
-            save,
-            logger: ctx.logger,
-                  ...(input.imageOptions?.mode === 'lock_subject' && legacyMediaModelClient
-                    ? {
-                        verifySubject:
-                          createAnthropicSubjectConsistencyVerifier(legacyMediaModelClient),
-                      }
-                    : {}),
-          });
-        }
-
-        const metadata = {
-          executionMode: 'image' as const,
-          finalExecutionMode: 'image' as const,
-          model: result.model ?? null,
-          imageTier: result.tier ?? null,
-          ...(input.imageOptions ? { imageOptions: input.imageOptions } : {}),
-          elapsedMs: Date.now() - imageStartedAt,
-                ...(result.subjectConsistency
-                  ? { subjectConsistency: result.subjectConsistency }
-                  : {}),
-          ...(result.attachments.length > 0 ? { attachments: result.attachments } : {}),
-        };
-
-        ctx.logger.info(
-          {
-            taskId,
-            userId: ctx.userId,
-            runnerStatus: result.status,
-            model: result.model ?? null,
-            imageCount: result.attachments.length,
-          },
-          'task:completed',
-        );
-
-        let imagePersisted = false;
-        try {
-          if (result.status === 'completed' || result.status === 'partial_success') {
-            const persisted = await repo.persistVisionOutcome(taskId, {
-              status: result.status,
-              summary: result.summary,
-              tickCount: 1,
-              metadata,
-            });
-            imagePersisted = persisted.persisted;
-          } else {
-            const persisted = await repo.persistVisionOutcome(taskId, {
-              status: 'failed',
-              reason: result.reason ?? '图片生成失败，请稍后重试。',
-              tickCount: 1,
-              metadata,
-            });
-            imagePersisted = persisted.persisted;
-          }
-        } catch (err) {
-          ctx.logger.error({ err, taskId }, 'image: persist failed');
-        }
-
-        try {
-          if (
-            imagePersisted &&
-            (result.status === 'completed' || result.status === 'partial_success')
-          ) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: result.status,
-              ...(result.summary ? { summary: result.summary } : {}),
-              // P1 timing fix: ship attachments ON the terminal frame so
-              // the SPA renders the image card WITH the summary text
-              // instead of after a separate tasks.detail round-trip
-              // (was: text "已生成1张图片" first, thumbnail seconds later).
-              ...(result.attachments.length > 0 ? { attachments: result.attachments } : {}),
-            });
-          } else if (imagePersisted) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'failed',
-              ...(result.reason ? { reason: result.reason } : {}),
-            });
-          }
-        } catch (err) {
-          ctx.logger.warn({ err, taskId }, 'image: broadcast terminal failed');
-        }
-            } finally {
-              imageHeartbeat?.stop();
+            await parseCreateAttachments(
+              executionMode === 'generate' || executionMode === 'scrape',
+            );
+            // Preserve the existing specialized stock candidate path (including its
+            // generic fallback) until the remaining first-create migration is done.
+            const specializedStockLaneEligible =
+              !retryCore &&
+              shouldAllowSpecializedLaneOverride(typedRoutingWorkflow) &&
+              (appEnv.ASHARE_QA_ENABLED || validatedStockContext !== null) &&
+              ashareQaHandlesMode(executionMode) &&
+              (ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId));
+            const coreCreateRequirements: CoreAcceptedRequirements | null = retryRequirements
+              ? { ...retryRequirements, inputFiles: inputFileMetadata }
+              : executionMode === 'generate' && !specializedStockLaneEligible
+                ? {
+                    initialRequest: parentUserContext + input.intent,
+                    ...(parentModelReference ? { referenceContext: parentModelReference } : {}),
+                    userTurns: [],
+                    phase: input.mode === 'plan' ? 'draft' : 'direct',
+                    workflow: typedWorkflow
+                      ? { id: typedWorkflow.workflowId, sections: typedWorkflow.reportSections }
+                      : null,
+                    referencePlan: null,
+                    fileIds: orderedFileIds,
+                    inputFiles: inputFileMetadata,
+                    ...(expertWorkflow
+                      ? {
+                          legacyWorkflow: restoreCoreLegacyWorkflow(expertWorkflow.id, {
+                            initialRequest: parentUserContext + input.intent,
+                            userTurns: [],
+                            fileIds: orderedFileIds,
+                          }),
+                        }
+                      : {}),
+                    resume: {
+                      schemaVersion: 1,
+                      expertMode: expertModeOverride,
+                      skillId: dispatchSkillId ?? null,
+                      legacyWorkflowId: expertWorkflow?.id ?? null,
+                      intakeBindings: [],
+                    },
+                  }
+                : null;
+            if (coreCreateRequirements) {
+              const flags = getExecutionFeatureFlags();
+              if (!flags.EVIDENCE_LEDGER || !flags.EXECUTION_CONTRACT || !flags.EXECUTION_VERIFIER)
+                throw new TRPCError({
+                  code: 'PRECONDITION_FAILED',
+                  message: '任务方案核验尚未就绪，未创建任务或扣除额度。',
+                });
             }
-      })().catch(async (err) => {
-        const reason = '图片生成异常中断，请重试。';
-        ctx.logger.error({ err, taskId }, 'image: detached runner rejected');
-        try {
-          const persisted = await repo.persistVisionOutcome(taskId, {
-            status: 'failed',
-            reason,
-            tickCount: 1,
-            metadata: {
-              executionMode: 'image',
-              finalExecutionMode: 'image',
-              ...(input.imageOptions ? { imageOptions: input.imageOptions } : {}),
-              elapsedMs: Date.now() - imageStartedAt,
-              failureSource: 'detached_runner',
-            },
-          });
-          if (persisted.persisted) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'failed',
-              reason,
-            });
-          }
-        } catch (persistErr) {
-          ctx.logger.error(
-            { err: persistErr, taskId },
-            'image: detached failure could not be persisted',
-          );
-        }
-      }));
+            if (executionMode === 'generate') {
+              assertCoreTaskInput({
+                ...(coreCreateRequirements ?? {
+                  initialRequest: parentContextBlock + input.intent,
+                  userTurns: [],
+                  phase: input.mode === 'plan' ? 'draft' : 'direct',
+                  workflow: workflowIdentities.contractWorkflowId
+                    ? {
+                        id: workflowIdentities.contractWorkflowId,
+                        sections: typedWorkflow?.reportSections ?? [],
+                      }
+                    : null,
+                  referencePlan: null,
+                  fileIds: orderedFileIds,
+                }),
+                blocks: attachmentBlocks,
+              });
+            }
 
-      return {
-        taskId,
-        status: 'executing' as const,
-        steps: [],
-        executionMode: 'image' as const,
-      };
-    }
-    // ===== end image-mode fork =====
+            const willConsumeOpus = executionMode !== 'browser' && isOpus && planId === 'pro';
 
-    // ===== video-creation fork (Phase 1 #4 原方案, flag + allowlist 灰度) =====
-    // 两段式:Phase1 出 awaiting_user 报价卡(只跑 optimize=LLM,零 Veo);确认走
-    // tasks.confirmVideo(结构化按钮)。Veo 烧钱严格在 confirmVideo 的原子抢占之后。
-    // 默认 VIDEO_CREATION_ENABLED=false：视频意图会在扣额前硬拒绝，
-    // 绝不静默降级到通用 generate。
-    {
-      // 视频意图:分类器命中 video_creation,或选了 video-creator 技能,**或**前端「视频任务」
-      // 界面显式带了 videoOptions.tab(普通/宠物/IP)。后者是关键——宠物动作 prompt / IP 口播文案
-      // 本身不含「视频」关键词,分类器会判 generate;只有 videoOptions.tab 这个显式信号能可靠把
-      // 三类 tab 提交都送进视频 fork(只有视频界面会设它,其它 createTask 路径绝不带)。
-      if (willCreateVideoQuote && legacyMediaModelClient) {
-        const anthropicClient = legacyMediaModelClient;
-            const { buildFallbackVideoScript, optimizeUserScript, segmentCapForText } =
-              await import('../../agent/video/video-script.js');
-        // Phase 2 第一期 — SPA「普通视频」面板把模型档/风格/画幅/画质/时长带上来。
-        const vOpts = input.videoOptions ?? {};
-
-        // ===== 复刻视频 — Wan Animate 2.2 真实角色替换 =====
-        // 主角图片 + 参考视频均以独立 typed fileId 保存；确认后再签短期 URL
-        // 调用 character-swap。没有参考视频时绝不降级为单图 i2v。
-        if (vOpts.tab === 'pet') {
-          if (!vOpts.petImageFileId || !vOpts.referenceVideoFileId) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: '复刻视频需要主角照片和参考视频。',
-            });
-          }
-              const quoteAssetPreflight = await preflightCloneVideoAssets(
+            // Qwen-only rollout boundary: media lanes still depend on
+            // legacy model controllers. Persist an honest terminal task before
+            // quota consumption instead of throwing a transient precondition or
+            // leaving an accepted task in `executing` forever.
+            const unmigratedLane = unmigratedLaneForExecutionMode(executionMode);
+            if (unmigratedLane) {
+              const unavailable = modelRuntimeWiring.resolveUnmigrated(unmigratedLane);
+              const reason = modelTaskFailureReason(unavailable.reasonCode);
+              const taskId = newExternalId('task');
+              await repo.insertTask(
                 {
-                  subjectFileId: vOpts.petImageFileId,
-                  referenceVideoFileId: vOpts.referenceVideoFileId,
+                  taskId,
+                  status: 'executing',
+                  plan: [],
+                  cursor: 0,
+                  pendingConfirm: null,
                 },
-                async (fileId) => {
-                  const retained = await fileService.retainInputForUser(fileId, userRow.id);
-                  return retained ? fileService.signedReadUrl(fileId, userRow.id, 300) : null;
+                {
+                  userId: userRow.id,
+                  intent: input.intent,
+                  roleId: dispatchRoleId,
+                  opusUsed: false,
                 },
               );
-              if (quoteAssetPreflight.issue || !quoteAssetPreflight.referenceVideoUrl) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: '主角照片或参考视频不可用，请重新上传。',
-            });
-          }
-          let quoteFacts: Awaited<ReturnType<typeof probeCloneReferenceQuoteFacts>>;
-          try {
-                quoteFacts = await probeCloneReferenceQuoteFacts(
-                  quoteAssetPreflight.referenceVideoUrl,
-                );
-          } catch {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: '参考视频无法读取，或时长不在 2 到 30 秒之间，请重新上传。',
-            });
-          }
-          const cloneMode: WanAnimateMixMode = vOpts.cloneMode ?? 'wan-std';
-          const cloneQuote = quoteCloneVideo(quoteFacts.durationSeconds, cloneMode, {
-            hasAudibleAudio: quoteFacts.hasAudibleAudio,
-            lipSyncModel: appEnv.FAL_CLONE_LIPSYNC_MODEL,
-          });
-          const taskId = newExternalId('task');
-          await repo.insertTask(
-            { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
-                {
-                  userId: userRow.id,
-                  intent: input.intent,
-                  roleId: 'video-creator',
-                  opusUsed: false,
-                },
-          );
-          const initialized = await repo.persistInitialAwaitingUser({
-            taskExternalId: taskId,
-            question: cloneQuote.message,
-            awaitingKind: 'video_quote',
-            result: {
-              summary: cloneQuote.message,
-              metadata: {
-                lane: 'video_creation_confirm',
-                petImageFileId: vOpts.petImageFileId,
-                referenceVideoFileId: vOpts.referenceVideoFileId,
-                referenceVideoDurationSeconds: quoteFacts.durationSeconds,
-                referenceVideoHasAudibleAudio: quoteFacts.hasAudibleAudio,
-                cloneMode,
-                videoOptions: vOpts,
-              },
-            },
-          });
-          if (!initialized.persisted) {
-            throw new TRPCError({
-              code: 'INTERNAL_SERVER_ERROR',
-              message: '视频报价任务初始化失败，请重试。',
-            });
-          }
-          ctx.logger.info(
-            {
-              taskId,
-              userId: ctx.userId,
-              executorLane: 'video_creation_confirm',
-              cloneMode,
-              videoCny: cloneQuote.videoCny,
-            },
-            'task: executor lane selected (clone video)',
-          );
-          broadcastToUser(ctx.userId, {
-            type: 'server.supercar.awaiting_user',
-            taskId,
-            question: cloneQuote.message,
-            awaitingKind: 'video_quote',
-          });
-          return {
-            taskId,
-            status: 'awaiting_user' as const,
-            steps: [],
-            executionMode: 'generate' as const,
-          };
-        }
-        // ===== end 复刻视频分支 =====
-
-        // ===== IP 人物 换口型分支 (Phase 2 第三期, B 架构单 clip 口播) =====
-        // 门控:三件齐(克隆声音 + 出镜底版 + 本人授权)才放行;缺则引导去 onboarding。
-        // 无 optimize 多段那套:全文案直接 quoteIpVideo → 报价卡 → confirmVideo 跑 B lane。
-        if (vOpts.tab === 'ip_person') {
-          const ipReady =
-            !!userRow.qwenVoiceId &&
-            !!userRow.baseVideoFileId &&
-            !!userRow.videoSelfUseAuthorizedAt;
-          if (!ipReady) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: '请先在「视频任务 → IP 人物」完成素材准备(本人授权 + 声音 + 出镜底版)。',
-            });
-          }
-              const ipQuote = quoteIpVideo(input.intent, appEnv.FAL_LIPSYNC_MODEL);
-          const taskId = newExternalId('task');
-          await repo.insertTask(
-            { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
-                {
-                  userId: userRow.id,
-                  intent: input.intent,
-                  roleId: 'video-creator',
-                  opusUsed: false,
-                },
-          );
-          const initialized = await repo.persistInitialAwaitingUser({
-            taskExternalId: taskId,
-            question: ipQuote.message,
-            awaitingKind: 'video_quote',
-            result: {
-              summary: ipQuote.message,
-              metadata: {
-                lane: 'video_creation_confirm',
-                ipCopyText: input.intent,
-                videoOptions: vOpts,
-              },
-            },
-          });
-          if (!initialized.persisted) {
-            throw new TRPCError({
-              code: 'INTERNAL_SERVER_ERROR',
-              message: '视频报价任务初始化失败，请重试。',
-            });
-          }
-          ctx.logger.info(
-            {
-              taskId,
-              userId: ctx.userId,
-              executorLane: 'video_creation_confirm',
-              ipChars: ipQuote.chars,
-              videoCny: ipQuote.videoCny,
-            },
-            'task: executor lane selected (ip lip-sync)',
-          );
-          broadcastToUser(ctx.userId, {
-            type: 'server.supercar.awaiting_user',
-            taskId,
-            question: ipQuote.message,
-            awaitingKind: 'video_quote',
-          });
-          return {
-            taskId,
-            status: 'awaiting_user' as const,
-            steps: [],
-            executionMode: 'generate' as const,
-          };
-        }
-        // ===== end IP 人物分支 =====
-
-        const style = vOpts.style as VideoStyle | undefined;
-        const tier: VideoSource = vOpts.model ?? 'veo_fast';
-        if (
-          videoParameterIssue({
-            model: tier,
-            resolution: vOpts.resolution ?? '1080p',
-            durationSeconds: vOpts.durationSeconds ?? 8,
-          })
-        ) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Veo 1080p 仅支持 8 秒，请选择 8 秒或改用 720p 标清。',
-          });
-        }
-        let script: VideoScript | null = null;
-        try {
-          // optimize = LLM(~¥0.01),**非 Veo**。出真实段数以便动态报价;风格只调画面语气。
-          // 段数按文案内容量定上限(segmentCapForText):一句话→1~2 段,长文案→6 段。
-          // 避免短文案被硬凑成 6 段 48s、报价虚高(quoteVideo = 段数 × 每段秒数)。
-          const segCap = segmentCapForText(input.intent);
-          script = await optimizeUserScript(
-            { userText: input.intent, maxSegments: segCap, ...(style ? { style } : {}) },
-            {
-              llm: async ({ system, user }) => {
-                const resp = await anthropicClient.messages.create({
-                  model: VIDEO_SCRIPT_MODEL,
-                  max_tokens: 2000,
-                  system,
-                  messages: [{ role: 'user', content: user }],
-                });
-                const b = resp.content[0];
-                return b && b.type === 'text' ? b.text : '';
-              },
-            },
-          );
-        } catch (err) {
-          ctx.logger.warn(
-            { err, userId: ctx.userId },
-            'video_creation: optimize(报价前) failed — using faithful single-segment fallback',
-          );
-          script = buildFallbackVideoScript(input.intent);
-        }
-        if (script) {
-          const quote = quoteVideo(script.segments.length, tier, {
-            ...(vOpts.resolution ? { resolution: vOpts.resolution } : {}),
-            ...(vOpts.durationSeconds ? { durationSeconds: vOpts.durationSeconds } : {}),
-            ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}),
-          });
-          const taskId = newExternalId('task');
-          await repo.insertTask(
-            { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
-                {
-                  userId: userRow.id,
-                  intent: input.intent,
-                  roleId: 'video-creator',
-                  opusUsed: false,
-                },
-          );
-          // Initial awaiting_user quote: stamp awaitingKind/result and
-          // write the matching task.awaiting_user event in one repository call.
-          // result.metadata 存 videoScript(确认后复用,保证段数=报价段数)+ lane(给
-          // consumeVideoConfirm 原子抢占识别)。
-          const initialized = await repo.persistInitialAwaitingUser({
-            taskExternalId: taskId,
-            question: quote.message,
-            awaitingKind: 'video_quote',
-            result: {
-              summary: quote.message,
-              metadata: {
-                lane: 'video_creation_confirm',
-                videoScript: script,
-                videoTier: tier,
-                videoOptions: vOpts,
-              },
-            },
-          });
-          if (!initialized.persisted) {
-            throw new TRPCError({
-              code: 'INTERNAL_SERVER_ERROR',
-              message: '视频报价任务初始化失败，请重试。',
-            });
-          }
-          ctx.logger.info(
-            {
-              taskId,
-              userId: ctx.userId,
-              executorLane: 'video_creation_confirm',
-              segs: script.segments.length,
-              videoCny: quote.videoCny,
-            },
-            'task: executor lane selected',
-          );
-          broadcastToUser(ctx.userId, {
-            type: 'server.supercar.awaiting_user',
-            taskId,
-            question: quote.message,
-            awaitingKind: 'video_quote',
-          });
-          return {
-            taskId,
-            status: 'awaiting_user' as const,
-            steps: [],
-            executionMode: 'generate' as const,
-          };
-        }
-      }
-    }
-    // ===== end video-creation fork =====
-
-    // ===== a-share 即时问答 fork (Phase 1 #2 ④, flag + allowlist 灰度) =====
-    // 命中 a-share 个股问答 → 自取数组装确定性事实卡 → LLM③解读 → 合规闸门
-    // （越线降级纯数据 + 打日志计数）→ 直接完成任务。镜像 template-fill lane：
-    // 无 agent loop、无 pool slot、背景 async 出答案后 persist + 广播 terminal。
-    // 默认 ASHARE_QA_ENABLED=false：关时落通用 generate 路径，零副作用。
-    // BOSS 拍板门控（持久启用式 + signal-based）：**启用** a-share 技能（users.selectedSkills）
-    // 或显式选技能（skillId/roleId/gatedRole）= 上下文内。上下文内**命中任一 A股信号**（个股
-    // 解析成功 / A股术语 / 持仓语境词 / 自选股整体问）→ 进合规框架（lane 或引导兜底）；**完全无
-    // A股信号**（如「帮我写周报」）→ 放行通用路径，不误拦。per-task 选择器(发 skillId)记 backlog。
-    const ashareSkillEnabled = normalizeSkillIds(userRow.selectedSkills).some((id) =>
-      ASHARE_SKILL_IDS.has(id),
-    );
-    const ashareContext =
-      ashareSkillEnabled ||
-      (taskSkillId ? ASHARE_SKILL_IDS.has(taskSkillId) : false) ||
-      ASHARE_SKILL_IDS.has(gatedRole) ||
-      input.taskSource === 'stock_dashboard';
-    // Cross-session guard (#1 session, 2026-06-13, see SESSION_STATUS): only
-    // enter the a-share QA lane for GENERIC info intents — a dedicated lane the
-    // classifier already chose (template_fill / image / browser) must win, or
-    // the matcher hijacks it (bug: "按这个周报模板填充…" → answered as stock 600415).
-    // widen（BOSS 批准，④ 验收关闭）：ASHARE_QA_ALLOWLIST 为空 = 全量用户可用（flag on）；
-    // 非空 = 仅名单内（灰度）。
-    if (specializedStockLaneEligible) {
-      const stockRuntime = resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion);
-      const stockMessagesAdapter =
-        stockRuntime.kind === 'ready' ? stockRuntime.messages('standard') : null;
-      const { resolveAshareQa, resolveAshareInContext } = await import(
-        '../../agent/a-share/ashare-qa-matcher.js'
-      );
-      const { listWatchlistForUser } = await import('../../agent/a-share/briefing-service.js');
-      const watchlist = validatedStockContext
-        ? validatedStockContext.snapshotPayload.watchlistStocks.map((stock) => ({
-            symbol: stock.symbol,
-            displayName: typeof stock.name === 'string' ? stock.name : null,
-          }))
-        : (await listWatchlistForUser(ctx.db, userRow.id)).map((stock) => ({
-            symbol: stock.symbol,
-            displayName: stock.displayName,
-          }));
-      const aksClient = validatedStockContext
-        ? new SnapshotAkshareClient(validatedStockContext.snapshotPayload)
-        : new (await import('../../agent/a-share/akshare-http-client.js')).HttpAkshareClient({
-            baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
-            logger: ctx.logger,
-          });
-      const stockAnalysisNow = validatedStockContext
-        ? new Date(`${validatedStockContext.dataAsOf}T07:00:00.000Z`)
-        : new Date();
-      const publicValidatedStockContext = publicStockTaskContext(validatedStockContext);
-      const stockAnswerPrefix = validatedStockContext
-        ? `分析基于 ${validatedStockContext.dataAsOf} 数据。\n\n`
-        : '';
-      const searchFn = async (q: string) => {
-        const env = await aksClient.searchSymbol(q);
-        return (env.data ?? [])
-          .map((r) => ({
-            symbol: String(r.code ?? ''),
-            displayName: r.name != null ? String(r.name) : null,
-          }))
-          .filter((s) => s.symbol);
-      };
-      let ashareQaMatch: Awaited<ReturnType<typeof resolveAshareQa>> = null;
-      let guidanceNeeded = false;
-      let indexIntent = false;
-      if (ashareContext) {
-        // 上下文内：命中个股 → 个股 lane；指数/大盘问句 → 指数 lane；命中信号但无个股/非
-        // 指数 → 引导兜底；无信号 → 放行通用。
-        const r = await resolveAshareInContext(
-          { intent: input.intent, watchlist, now: stockAnalysisNow },
-          searchFn,
-        );
-        ashareQaMatch = r.match;
-        indexIntent = r.indexIntent;
-        guidanceNeeded = !r.match && !r.indexIntent && r.hasSignal;
-      } else {
-        // 非上下文（未启用/未选技能）：强信号(术语+个股)出 lane，否则放行（无引导兜底）。
-        ashareQaMatch = await resolveAshareQa(
-          {
-            intent: input.intent,
-            roleId: taskSkillId ?? null,
-            watchlist,
-            now: stockAnalysisNow,
-          },
-          searchFn,
-        );
-      }
-      if (ashareQaMatch) {
-        const taskId = newExternalId('task');
-        await repo.insertTask(
-          { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
-          {
-            userId: userRow.id,
-            intent: input.intent,
-            roleId: dispatchRoleId,
-            opusUsed: false,
-            ...(stockTaskSourceContext ? { sourceContext: stockTaskSourceContext } : {}),
-          },
-        );
-        ctx.logger.info(
-          {
-            taskId,
-            userId: ctx.userId,
-            executorLane: ashareQaMatch.deep ? 'ashare_panorama' : 'ashare_qa',
-            kind: ashareQaMatch.kind,
-            stocks: ashareQaMatch.stocks.map((s) => s.symbol),
-          },
-          'task: executor lane selected',
-        );
-        broadcastSubStatus(ctx.userId, taskId, 'generating');
-
-        if (!stockMessagesAdapter) {
-          const reasonCode =
-            stockRuntime.kind === 'unavailable'
-              ? stockRuntime.reasonCode
-              : 'MODEL_MIGRATION_IN_PROGRESS';
-          const reason = modelTaskFailureReason(reasonCode);
-          const terminal = await repo.persistVisionOutcome(taskId, {
-            status: 'failed',
-            reason,
-            tickCount: 0,
-            errorCode: reasonCode,
-            metadata: {
-              executionMode: 'generate',
-              finalExecutionMode: 'generate',
-              lane: 'ashare_qa',
-              reasonCode,
-              ...(publicValidatedStockContext
-                ? { stockContext: publicValidatedStockContext }
-                : {}),
-            },
-          });
-          if (terminal.persisted) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'failed',
-              reason,
-            });
-          }
-          return {
-            taskId,
-            status: 'failed' as const,
-            steps: [],
-            executionMode: 'generate' as const,
-          };
-        }
-
-        void runTaskBackground(ctx, async (ctx) => (async () => {
-          const { runAshareQa, runAsharePanorama } = await import(
-            '../../agent/a-share/ashare-qa-runner.js'
-          );
-          // 技能 markdown（人设/红线）→ DB skills.manifest.body；缺则内置兜底人设
-          // （合规硬约束已在 runner 的 system prompt，故缺 markdown 也安全）。
-          let skillMarkdown: string | null = null;
-          try {
-            const { skills } = await import('../../db/schema/skills.js');
-            const [row] = await ctx.db
-              .select({ manifest: skills.manifest })
-              .from(skills)
-              .where(inArray(skills.slug, Array.from(ASHARE_SKILL_IDS)))
-              .limit(1);
-            const body = (row?.manifest as { body?: unknown } | null)?.body;
-            if (typeof body === 'string' && body.trim()) skillMarkdown = body;
-          } catch (err) {
-            ctx.logger.warn({ err, taskId }, 'ashare-qa: 技能 markdown 读取失败，用兜底人设');
-          }
-          const FALLBACK_PERSONA =
-            '你是严谨的 A股信息分析助手：只聚合公开信息、客观陈述事实，绝不荐股、不预测涨跌、不给买卖或择时建议。';
-          let answer: string;
-          let terminalStatus: 'completed' | 'failed' = 'completed';
-          try {
-            // deep 意图（详细分析/全面看看）→ 七维全景版（含 ④基本面⑤估值 + ⑦分析师视角）；
-            // 否则轻量速览（①②③ + ③解读）。⑦ prompt 自含人设，不依赖 skillMarkdown。
-            const runner = ashareQaMatch.deep ? runAsharePanorama : runAshareQa;
-            const r = await runner(
-              {
-                client: aksClient,
-                skillMarkdown: skillMarkdown ?? FALLBACK_PERSONA,
-                interpret: async ({ system, user }) => {
-                  const resp = await stockMessagesAdapter.create({
-                    maxTokens: 700,
-                    // 低温：③/⑦ 更忠实照抄数字（降低 ungrounded 误降级），措辞仍自然。
-                    temperature: 0.3,
-                    system,
-                    messages: [{ role: 'user', content: user }],
-                    thinking: { type: 'disabled' },
-                  });
-                  return resp.content
-                    .filter((block) => block.type === 'text')
-                    .map((block) => block.text)
-                    .join('\n');
-                },
-                // Phase2 ⑦ 意图判官（第二层，flag 控制）：温度0 求确定性（同股同文同判，治"时好时降级"）。
-                judge: appEnv.ASHARE_INTENT_JUDGE_ENABLED
-                  ? async ({ system, user }) => {
-                      const resp = await stockMessagesAdapter.create({
-                        maxTokens: 160,
-                        temperature: 0,
-                        system,
-                        messages: [{ role: 'user', content: user }],
-                        thinking: { type: 'disabled' },
-                      });
-                      return resp.content
-                        .filter((block) => block.type === 'text')
-                        .map((block) => block.text)
-                        .join('\n');
-                    }
-                  : undefined,
-                // Phase 2「看懂层」P1：腿A 逐指标注解开关（默认 OFF，零新增 LLM）。
-                seethrough: appEnv.ASHARE_SEETHROUGH_ENABLED,
-                // ④ 风险信号雷达 P1：腿A 确定性检测开关（默认 OFF，零新增 LLM）。
-                riskRadar: appEnv.ASHARE_RISK_RADAR_ENABLED,
-                // P3 F 走势组 P1：腿A K线波动总结开关（默认 OFF，零新增 LLM）。
-                perfTrend: appEnv.ASHARE_PERF_TREND_ENABLED,
-                logger: ctx.logger,
-                now: stockAnalysisNow,
-                context: { userId: ctx.userId, taskId },
-              },
-              ashareQaMatch,
-            );
-            answer = `${stockAnswerPrefix}${r.answer}`;
-            ctx.logger.info(
-              { taskId, degraded: r.degraded, reason: r.reason, interpreted: r.interpreted },
-              'ashare-qa: lane done',
-            );
-          } catch (err) {
-            ctx.logger.error({ err, taskId }, 'ashare-qa: lane failed');
-            answer = `${stockAnswerPrefix}抱歉，A股问答处理失败，请稍后重试。`;
-            terminalStatus = 'failed';
-          }
-          try {
-            let asharePersisted = false;
-            const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
-            if (taskInternalId != null) {
-              if (terminalStatus === 'completed') {
-                const persisted = await repo.persistVisionOutcome(taskId, {
-                  status: 'completed',
-                  summary: answer,
-                  tickCount: 1,
-                  metadata: {
-                    executionMode: 'generate',
-                    lane: 'ashare_qa',
-                    ...(publicValidatedStockContext
-                      ? { stockContext: publicValidatedStockContext }
-                      : {}),
-                  },
-                });
-                asharePersisted = persisted.persisted;
-              } else {
-                const persisted = await repo.persistVisionOutcome(taskId, {
-                  status: 'failed',
-                  reason: answer,
-                  tickCount: 1,
-                  metadata: {
-                    executionMode: 'generate',
-                    lane: 'ashare_qa',
-                    ...(publicValidatedStockContext
-                      ? { stockContext: publicValidatedStockContext }
-                      : {}),
-                  },
-                });
-                asharePersisted = persisted.persisted;
-              }
-            }
-            if (asharePersisted && terminalStatus === 'completed') {
-              broadcastToUser(ctx.userId, {
-                type: 'server.task.terminal',
-                taskId,
-                status: 'completed',
-                summary: answer,
-              });
-            } else if (asharePersisted) {
-              broadcastToUser(ctx.userId, {
-                type: 'server.task.terminal',
-                taskId,
+              const terminal = await repo.persistVisionOutcome(taskId, {
                 status: 'failed',
-                reason: answer,
-              });
-            }
-          } catch (err) {
-            ctx.logger.error({ err, taskId }, 'ashare-qa: persist/broadcast failed');
-          }
-        })());
-
-        return {
-          taskId,
-          status: 'executing' as const,
-          steps: [],
-          executionMode: 'generate' as const,
-        };
-      }
-      // 指数 lane（E16）：「查今天A股三大指数收盘 / 大盘怎么样」类指数/大盘问句 → 确定性
-      // 三大指数速览卡（无 LLM、无闸门），不进个股 lane（防普通词 name-search 误命中个股）。
-      if (indexIntent) {
-        const { buildIndexCard } = await import('../../agent/a-share/ashare-fact-card.js');
-        const taskId = newExternalId('task');
-        await repo.insertTask(
-          { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
-          {
-            userId: userRow.id,
-            intent: input.intent,
-            roleId: dispatchRoleId,
-            opusUsed: false,
-            ...(stockTaskSourceContext ? { sourceContext: stockTaskSourceContext } : {}),
-          },
-        );
-        ctx.logger.info(
-          { taskId, userId: ctx.userId, executorLane: 'ashare_index' },
-          'task: executor lane selected',
-        );
-        broadcastSubStatus(ctx.userId, taskId, 'generating');
-        void runTaskBackground(ctx, async (ctx) => (async () => {
-          let answer: string;
-          let terminalStatus: 'completed' | 'failed' = 'completed';
-          try {
-            answer = `${stockAnswerPrefix}${await buildIndexCard({ client: aksClient, now: stockAnalysisNow })}`;
-          } catch (err) {
-            ctx.logger.error({ err, taskId }, 'ashare-index: lane failed');
-            answer = `${stockAnswerPrefix}抱歉，A股大盘指数查询处理失败，请稍后重试。`;
-            terminalStatus = 'failed';
-          }
-          try {
-            let indexPersisted = false;
-            const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
-            if (taskInternalId != null) {
-              if (terminalStatus === 'completed') {
-                const persisted = await repo.persistVisionOutcome(taskId, {
-                  status: 'completed',
-                  summary: answer,
-                  tickCount: 1,
-                  metadata: {
-                    executionMode: 'generate',
-                    lane: 'ashare_index',
-                    ...(publicValidatedStockContext
-                      ? { stockContext: publicValidatedStockContext }
-                      : {}),
-                  },
-                });
-                indexPersisted = persisted.persisted;
-              } else {
-                const persisted = await repo.persistVisionOutcome(taskId, {
-                  status: 'failed',
-                  reason: answer,
-                  tickCount: 1,
-                  metadata: {
-                    executionMode: 'generate',
-                    lane: 'ashare_index',
-                    ...(publicValidatedStockContext
-                      ? { stockContext: publicValidatedStockContext }
-                      : {}),
-                  },
-                });
-                indexPersisted = persisted.persisted;
-              }
-            }
-            if (indexPersisted && terminalStatus === 'completed') {
-              broadcastToUser(ctx.userId, {
-                type: 'server.task.terminal',
-                taskId,
-                status: 'completed',
-                summary: answer,
-              });
-            } else if (indexPersisted) {
-              broadcastToUser(ctx.userId, {
-                type: 'server.task.terminal',
-                taskId,
-                status: 'failed',
-                reason: answer,
-              });
-            }
-          } catch (err) {
-            ctx.logger.error({ err, taskId }, 'ashare-index: persist/broadcast failed');
-          }
-        })());
-        return {
-          taskId,
-          status: 'executing' as const,
-          steps: [],
-          executionMode: 'generate' as const,
-        };
-      }
-      // P0 兜底（BOSS 要求①）：上下文内命中 A股信号（持仓语境词/术语）但没解析出个股 →
-      // 静态引导话术，**绝不落通用 LLM**。无 A股信号的问句 guidanceNeeded=false，正常放行
-      // 通用路径（如「帮我写周报」不误拦）。
-      if (guidanceNeeded) {
-        const { ASHARE_QA_GUIDANCE } = await import('../../agent/a-share/ashare-qa-runner.js');
-        const guidanceAnswer = `${stockAnswerPrefix}${ASHARE_QA_GUIDANCE}`;
-        const taskId = newExternalId('task');
-        await repo.insertTask(
-          { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
-          {
-            userId: userRow.id,
-            intent: input.intent,
-            roleId: dispatchRoleId,
-            opusUsed: false,
-            ...(stockTaskSourceContext ? { sourceContext: stockTaskSourceContext } : {}),
-          },
-        );
-        ctx.logger.info(
-          { taskId, userId: ctx.userId, executorLane: 'ashare_qa_guidance' },
-          'task: executor lane selected',
-        );
-        void runTaskBackground(ctx, async (ctx) => (async () => {
-          try {
-            let guidancePersisted = false;
-            const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
-            if (taskInternalId != null) {
-              const persisted = await repo.persistVisionOutcome(taskId, {
-                status: 'completed',
-                summary: guidanceAnswer,
-                tickCount: 1,
+                reason,
+                tickCount: 0,
+                errorCode: unavailable.reasonCode,
                 metadata: {
-                  executionMode: 'generate',
-                  lane: 'ashare_qa_guidance',
-                  ...(publicValidatedStockContext
-                    ? { stockContext: publicValidatedStockContext }
-                    : {}),
+                  executionMode,
+                  finalExecutionMode: executionMode,
+                  reasonCode: unavailable.reasonCode,
                 },
               });
-              guidancePersisted = persisted.persisted;
-            }
-            if (guidancePersisted) {
-              broadcastToUser(ctx.userId, {
-                type: 'server.task.terminal',
-                taskId,
-                status: 'completed',
-                summary: guidanceAnswer,
-              });
-            }
-          } catch (err) {
-            ctx.logger.error({ err, taskId }, 'ashare-qa-guidance: persist/broadcast failed');
-          }
-        })());
-        return {
-          taskId,
-          status: 'executing' as const,
-          steps: [],
-          executionMode: 'generate' as const,
-        };
-      }
-    }
-    if (validatedStockContext) {
-      throw new TRPCError({
-        code: 'SERVICE_UNAVAILABLE',
-        message: '可信股票任务执行器暂不可用，请稍后重试；任务不会改用实时行情或通用搜索。',
-      });
-    }
-    // ===== end a-share QA fork =====
-
-    // ===== template-fill fork (Phase 1 #1) =====
-    // Fill a user-uploaded Office template (docx/xlsx) deterministically
-    // and return the filled file. Mirrors the image fork: no agent loop,
-    // no pool slot, no verifier — safety check + extract placeholders +
-    // ONE constrained model mapping call + engine fill + storeOutput →
-    // FileDownloadCard via result.metadata.attachments.
-    //
-    // Gated on TEMPLATE_FILL_ENABLED (mirrors GEMINI_API_KEY gating the
-    // image lane): when the flag is off, template_fill intents fall
-    // through to the generate lane below, where the model honestly says
-    // it cannot fill the user's file — so shipping before the feature is
-    // vetted is a no-op for users instead of a broken lane.
-    if (executionMode === 'template_fill' && appEnv.TEMPLATE_FILL_ENABLED) {
-      const taskId = newExternalId('task');
-      const templateRuntime = resolveGenerateRuntimeForUser(
-        ctx.userId,
-        userRow.modelDataRegion,
-      );
-      const templateResponsesAdapter =
-        templateRuntime.kind === 'ready' ? templateRuntime.responses('standard') : null;
-
-      await repo.insertTask(
-        {
-          taskId,
-          status: 'executing',
-          plan: [],
-          cursor: 0,
-          pendingConfirm: null,
-        },
-        {
-          userId: userRow.id,
-          intent: input.intent,
-          roleId: dispatchRoleId,
-          opusUsed: false,
-        },
-      );
-
-      ctx.logger.info(
-        { taskId, userId: ctx.userId, executorLane: 'template_fill', executionMode },
-        'task: executor lane selected',
-      );
-      broadcastSubStatus(ctx.userId, taskId, 'generating');
-
-      const templateStartedAt = Date.now();
-      const fileIds = input.fileIds ?? [];
-
-      if (!templateResponsesAdapter) {
-        const reasonCode =
-          templateRuntime.kind === 'unavailable'
-            ? templateRuntime.reasonCode
-            : 'MODEL_MIGRATION_IN_PROGRESS';
-        const reason = modelTaskFailureReason(reasonCode);
-        const terminal = await repo.persistVisionOutcome(taskId, {
-          status: 'failed',
-          reason,
-          tickCount: 0,
-          errorCode: reasonCode,
-          metadata: {
-            executionMode: 'template_fill',
-            finalExecutionMode: 'template_fill',
-            reasonCode,
-          },
-        });
-        if (terminal.persisted) {
-          broadcastToUser(ctx.userId, {
-            type: 'server.task.terminal',
-            taskId,
-            status: 'failed',
-            reason,
-          });
-        }
-        return {
-          taskId,
-          status: 'failed' as const,
-          steps: [],
-          executionMode: 'template_fill' as const,
-        };
-      }
-
-      void runTaskBackground(ctx, async (ctx) => (async () => {
-        const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
-        let result: RunTemplateFillResult;
-        if (taskInternalId == null) {
-          result = {
-            status: 'failed',
-            summary: '',
-            reason: '任务记录丢失，请重试。',
-            attachments: [],
-          };
-        } else {
-          // Re-load the uploaded files for RAW bytes — the shared
-          // attachmentBlocks above are parsed-for-prompt, not raw. The
-          // template is the first Office file (docx preferred); any other
-          // file (csv/xlsx/json) is parsed to text as the data source.
-          let template: { buffer: Buffer; filename: string; mimetype: string } | undefined;
-          const dataTexts: string[] = [];
-          if (fileIds.length > 0) {
-            const loaded = await fileService.loadMany(fileIds, userRow.id);
-            const isOffice = (name: string, mime: string): boolean =>
-              /\.(?:docx|xlsx)$/i.test(name) ||
-              /wordprocessingml\.document|spreadsheetml\.sheet/i.test(mime);
-            const isDocx = (name: string, mime: string): boolean =>
-              /\.docx$/i.test(name) || /wordprocessingml\.document/i.test(mime);
-            const officeFiles = loaded.filter((f) => isOffice(f.row.filename, f.row.mimetype));
-            const tpl =
-              officeFiles.find((f) => isDocx(f.row.filename, f.row.mimetype)) ?? officeFiles[0];
-            if (tpl) {
-              template = {
-                buffer: tpl.buffer,
-                filename: tpl.row.filename,
-                mimetype: tpl.row.mimetype,
-              };
-            }
-            for (const f of loaded) {
-              if (tpl && f === tpl) continue;
-              try {
-                    const parsed = await parseFileForPrompt(
-                      f.buffer,
-                      f.row.filename,
-                      f.row.mimetype,
-                    );
-                for (const b of parsed.blocks) {
-                  if (b.type === 'text') dataTexts.push(b.text);
-                }
-              } catch (err) {
-                ctx.logger.warn(
-                  { err: err instanceof Error ? err.message : String(err) },
-                  'template-fill: data file parse failed — skipping',
-                );
-              }
-            }
-          }
-
-          const save = async (out: {
-            buffer: Buffer;
-            filename: string;
-            mimetype: string;
-          }): Promise<TemplateAttachment> => {
-            const stored = await fileService.storeOutput({
-              userIdInternal: userRow.id,
-              userExternalId: ctx.userId,
-              taskIdInternal: taskInternalId,
-              filename: out.filename,
-              mimetype: out.mimetype,
-              buffer: out.buffer,
-            });
-            return {
-              fileId: stored.externalId,
-              downloadUrl: `/api/files/${stored.externalId}/download`,
-              filename: stored.filename,
-              mimetype: stored.mimetype,
-              sizeBytes: Number(stored.sizeBytes),
-              expiresAt: stored.expiresAt
-                ? stored.expiresAt.toISOString()
-                : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-              kind: 'output',
-            };
-          };
-
-          const model = async (req: {
-            system: string;
-            user: string;
-          }): Promise<string> => {
-            const response = await templateResponsesAdapter.stream(
-              {
-                instructions: req.system,
-                input: req.user,
-                tools: [],
-                temperature: 0,
-                maxOutputTokens: 8192,
-              },
-              { timeoutMs: 60_000 },
-            );
-            return response.text;
-          };
-
-          result = await runTemplateFillTask({
-            intent: input.intent,
-            ...(template ? { template } : {}),
-            ...(dataTexts.length > 0 ? { dataText: dataTexts.join('\n\n') } : {}),
-            allowedFormats: allowedFormatsForPlan(planId),
-            save,
-            model,
-            logger: ctx.logger,
-          });
-        }
-
-        const metadata = {
-          executionMode: 'template_fill' as const,
-          finalExecutionMode: 'template_fill' as const,
-          templateFormat: result.format ?? null,
-          ...(result.degraded ? { templateDegraded: result.degraded } : {}),
-          elapsedMs: Date.now() - templateStartedAt,
-          ...(result.attachments.length > 0 ? { attachments: result.attachments } : {}),
-        };
-
-        ctx.logger.info(
-          {
-            taskId,
-            userId: ctx.userId,
-            runnerStatus: result.status,
-            templateFormat: result.format ?? null,
-            missingCount: result.missing?.length ?? 0,
-          },
-          'task:completed',
-        );
-
-        let templatePersisted = false;
-        let templateAwaitingPersisted = false;
-        try {
-          if (result.status === 'completed') {
-            const persisted = await repo.persistVisionOutcome(taskId, {
-              status: 'completed',
-              summary: result.summary,
-              tickCount: 1,
-              metadata,
-            });
-            templatePersisted = persisted.persisted;
-          } else if (result.status === 'partial_success') {
-            const persisted = await repo.persistVisionOutcome(taskId, {
-              status: 'partial_success',
-              summary: result.summary,
-              tickCount: 1,
-              metadata,
-            });
-            templatePersisted = persisted.persisted;
-          } else if (result.status === 'awaiting_user') {
-            // Chat-only clarification (please upload a template) — same
-            // shape as the generate-lane intake park.
-            const persisted = await repo.persistAwaitingUser({
-              taskExternalId: taskId,
-              question: result.awaitingQuestion ?? '请补充信息后继续。',
-              awaitingKind: 'clarification',
-              result: { ...metadata, executionMode: 'template_fill' as const },
-            });
-            templateAwaitingPersisted = persisted.persisted;
-          } else {
-            const persisted = await repo.persistVisionOutcome(taskId, {
-              status: 'failed',
-              reason: result.reason ?? '模板填充失败，请稍后重试。',
-              tickCount: 1,
-              metadata,
-            });
-            templatePersisted = persisted.persisted;
-          }
-        } catch (err) {
-          ctx.logger.error({ err, taskId }, 'template-fill: persist failed');
-        }
-
-        try {
-          if (
-            templatePersisted &&
-            (result.status === 'completed' || result.status === 'partial_success')
-          ) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: result.status,
-              ...(result.summary ? { summary: result.summary } : {}),
-            });
-          } else if (result.status === 'awaiting_user' && templateAwaitingPersisted) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.supercar.awaiting_user',
-              taskId,
-              question: result.awaitingQuestion ?? '请补充信息后继续。',
-              awaitingKind: 'clarification',
-            });
-          } else if (templatePersisted) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'failed',
-              ...(result.reason ? { reason: result.reason } : {}),
-            });
-          }
-        } catch (err) {
-          ctx.logger.warn({ err, taskId }, 'template-fill: broadcast terminal failed');
-        }
-      })());
-
-      return {
-        taskId,
-        status: 'executing' as const,
-        steps: [],
-        executionMode: 'template_fill' as const,
-      };
-    }
-    // ===== end template-fill fork =====
-
-    if (coreCreateRequirements) {
-      return createCoreGenerateTask({
-        ctx,
-        userId: userRow.id,
-        modelDataRegion: userRow.modelDataRegion,
-        wiring: modelRuntimeWiring,
-        taskRepo: repo,
-        requirements: coreCreateRequirements,
-        blocks: attachmentBlocks,
-        intent: input.intent,
-        roleId: dispatchRoleId,
-        opusUsed: opusActuallyConsumed,
-      });
-    }
-
-    // ===== Phase 21b — generate-mode fork =====
-    // Pure-generation tasks (write a PRD, translate this, summarize that)
-    // skip the supercar agent loop entirely. One region-bound Qwen
-    // Responses run persists the outcome and broadcasts the terminal frame,
-    // returns immediately. No pool slot, no Playwright, no plan-step
-    // state machine. Falls through to the existing supercar branch
-    // below for executionMode === 'browser'.
-    if (executionMode === 'generate' || executionMode === 'template_fill') {
-      const taskId = newExternalId('task');
-      const generateRuntime = resolveGenerateRuntimeForUser(
-        ctx.userId,
-        userRow.modelDataRegion,
-      );
-      const generateResponsesAdapter =
-        generateRuntime.kind === 'ready' ? generateRuntime.responses('standard') : null;
-      const verifierRuntime = resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion);
-      const semanticVerifierAdapter =
-        verifierRuntime.kind === 'ready' ? verifierRuntime.messages('verify_strict') : null;
-      const generateUnavailableReasonCode =
-        generateRuntime.kind === 'unavailable' ? generateRuntime.reasonCode : null;
-
-      await repo.insertTask(
-        {
-          taskId,
-          status: 'executing',
-          plan: [],
-          cursor: 0,
-          pendingConfirm: null,
-        },
-        {
-          userId: userRow.id,
-          intent: input.intent,
-          roleId: dispatchRoleId,
-          opusUsed: opusActuallyConsumed,
-        },
-      );
-
-      ctx.logger.info(
-        { taskId, userId: ctx.userId, executorLane: 'generate', executionMode },
-        'task: executor lane selected',
-      );
-
-      // Phase 1 Day 5 — initialise execution pipeline. No-op when
-      // every feature flag is off (default). When flags are flipped
-      // on, this seeds the ledger with the user_input fact and
-      // generates the contract for later verification.
-      initExecution({
-        taskId,
-        intent: input.intent,
-        executionMode: 'generate',
-        expertWorkflowId: workflowIdentities.contractWorkflowId,
-        expertMode: expertModeOverride,
-        hasAttachments: attachmentBlocks.length > 0,
-      });
-      // Codex Pack B1 — planning chip: contract + ledger seeded, the
-      // runner hasn't dispatched yet. Fires once per task, immediately
-      // after tasks.create returns to the SPA.
-      broadcastSubStatus(ctx.userId, taskId, 'planning');
-
-      // Fire-and-forget — generate doesn't share Brave instances so
-      // there's no per-user FIFO queue to enqueue into. Concurrent
-      // generate tasks parallelize on the selected regional Qwen endpoint.
-      const generateStartedAt = Date.now();
-      void runTaskBackground(ctx, async (ctx) => (async () => {
-        // A2 deferred — generate→browser fallback would re-enter the
-        // supercar branch which needs pool slots, queueing, and a
-        // distinct outcome shape. Tracked as fallbackChain=['generate']
-        // here for the eval pipeline; if generate fails today, we
-        // surface the failure as-is rather than risk the cross-runner
-        // re-dispatch.
-        const fallbackChain: string[] = ['generate'];
-        let outcome: GenerateOutcome;
-        try {
-          const executionPlan = generateResponsesAdapter
-            ? await prepareCoreTaskPlan({
-                wiring: modelRuntimeWiring, actorExternalId: ctx.userId,
-                modelDataRegion: userRow.modelDataRegion, intent: input.intent, logger: ctx.logger,
-                persist: async planText => (await repo.persistActiveCorePlan(taskId, planText)).persisted,
-                publish: planText => broadcastToUser(ctx.userId, {
-                  type: 'server.task.plan', taskId, planText, planStatus: [],
-                }),
-              })
-            : null;
-          // Planning may finish after cancellation, including when it yields no plan.
-          // Recheck before launching a new paid request or sending progress frames.
-          if (generateResponsesAdapter && !(await repo.isTaskExecuting(taskId))) {
-            disposeExecution(taskId);
-            return;
-          }
-          // Codex Pack B1 — generating chip: about to invoke the LLM
-          // stream. runGenerateTask emits its own progress markers
-          // inside; this prefix marker covers the brief setup gap.
-          broadcastSubStatus(ctx.userId, taskId, 'generating');
-          outcome = generateResponsesAdapter
-            ? await runGenerateTask({
-                taskId,
-                userId: ctx.userId,
-                // Use effectiveIntent (with parent context block when in
-                // a follow-up + workflow preambles) whenever EITHER the
-                // legacy or typed matcher fires. Earlier this only checked
-                // legacy; P2_CT_008 surfaced the gap — typed-only matches
-                // (content-topic / ecom-daily) lost their parent context
-                // on follow-up tasks.create with replyToTaskId.
-                // Phase 3 R1 (Codex #2): use effectiveIntent (parent
-                // context block + workflow preamble prepended) whenever
-                // any of:
-                //   - legacy matcher fires
-                //   - typed matcher fires (or recovered from parent)
-                //   - this is a follow-up (replyToTaskId set) — the
-                //     parent's outcome is load-bearing context for the
-                //     model regardless of whether a workflow matched
-                // Otherwise pass the bare user input.
-                intent:
-                  expertWorkflow || typedWorkflow || isFollowUp ? effectiveIntent : input.intent,
-                planOnly: input.mode === 'plan',
-                // Phase 2b — pass the resolved typed workflow so the
-                // runner skips its inline matcher (which would re-match
-                // against the parent-context-prefixed intent and could
-                // pick a different workflow — P2_ED_008 surfaced this
-                // when the parent ecom-daily report's summary text
-                // happened to contain douyin-review keywords like 诊断).
-                workflowOverride: typedWorkflow,
-                skillId: dispatchSkillId,
-                expertMode: expertModeOverride,
-                responsesAdapter: generateResponsesAdapter,
-                ...(executionPlan ? { executionPlan } : {}),
-                logger: ctx.logger,
-                ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
-                // Phase 24 RC follow-up — stream LLM deltas to the SPA
-                // so users see incremental output instead of a blank
-                // panel for 30-90s. broadcast errors are swallowed by
-                // the runner; we never let WS issues stall the loop.
-                onStreamDelta: (delta) => {
-                  try {
-                    broadcastToUser(ctx.userId, {
-                      type: 'server.task.stream',
-                      taskId,
-                      delta,
-                    });
-                  } catch (err) {
-                    ctx.logger.warn({ err, taskId }, 'generate: broadcast stream delta failed');
-                  }
-                },
-              })
-            : {
-                status: 'failed' as const,
-                summary: '',
-                reason: generateRuntimeUnavailableReason(
-                  generateRuntime.kind === 'unavailable'
-                    ? generateRuntime.reasonCode
-                    : 'MODEL_MIGRATION_IN_PROGRESS',
-                ),
-                inputTokens: 0,
-                outputTokens: 0,
-                durationMs: 0,
-              };
-        } catch {
-          ctx.logger.error({ taskId, code: 'GENERATE_RUNNER_THROWN' }, 'generate: runner threw');
-          outcome = {
-            status: 'failed' as const,
-            summary: '',
-            reason: '生成服务暂时不可用，请稍后重试。',
-            inputTokens: 0,
-            outputTokens: 0,
-            durationMs: 0,
-          };
-        }
-
-        const generateReview = await reviewGenerateOutcome({
-          taskId,
-          intent: input.intent,
-          outcome,
-          semanticAdapter: semanticVerifierAdapter,
-          logger: ctx.logger,
-          onVerifying: () => broadcastSubStatus(ctx.userId, taskId, 'verifying'),
-        });
-        outcome = generateReview.outcome;
-        const executionVerification = generateReview.verification;
-        const terminalStatus = generateReview.terminalStatus;
-        const failureSummary = generateReview.failureSummary;
-
-        // B3 — structured task:completed log.
-        const elapsedMs = Date.now() - generateStartedAt;
-        const metadata = {
-          executionMode: 'generate' as const,
-          finalExecutionMode: 'generate' as const,
-          expertWorkflowId: workflowIdentities.lineageWorkflowId,
-          // Codex Pack C1 — user's composer pick. SPA reads this from
-          // tasks.detail.result.metadata.expertMode to decide whether
-          // to render the "本次使用了技能" footer chip.
-          expertMode: expertModeOverride,
-          selectedRole: dispatchRoleId,
-          ...(generateResponsesAdapter
-            ? {
-                provider: generateResponsesAdapter.metadata.provider,
-                model: generateResponsesAdapter.metadata.model,
-                region: generateResponsesAdapter.metadata.region,
-                deploymentScope: generateResponsesAdapter.metadata.deploymentScope,
-              }
-            : {}),
-          fallbackChain,
-          ...(generateUnavailableReasonCode
-            ? { reasonCode: generateUnavailableReasonCode }
-            : {}),
-          elapsedMs,
-        };
-        ctx.logger.info(
-          {
-            taskId,
-            userId: ctx.userId,
-            runnerStatus: outcome.status,
-            finalStatus: terminalStatus,
-            ...metadata,
-            failureReason: outcome.status === 'failed' ? outcome.reason : failureSummary,
-          },
-          'task:completed',
-        );
-
-        // Compatibility boundary for the retired second-model polisher.
-        // It always returns the primary answer byte-for-byte and never
-        // emits metadata, regardless of legacy environment variables.
-        const generateRl = await runResponseLayerForLane({
-          taskId,
-          status: outcome.status,
-          summary: outcome.status === 'completed' ? outcome.summary : '',
-          expertWorkflowId: workflowIdentities.lineageWorkflowId,
-          logger: ctx.logger,
-        });
-        // Codex Round 2 P1-5 — post-formatter recheck. If the response
-        // layer dropped a citation or merged items, downgrade the
-        // terminal verdict from completed → partial_success so the
-        // SPA's yellow banner fires with a specific "formatter shrunk
-        // the content" hint. Zero-cost when the formatter passed
-        // through (same string reference).
-        let generatePostFormatDowngrade: { downgrade: boolean; reason: string | null } = {
-          downgrade: false,
-          reason: null,
-        };
-        if (outcome.status === 'completed' && generateRl.summary !== outcome.summary) {
-          const preFormatSummary = outcome.summary;
-          generatePostFormatDowngrade = recheckPostFormat(preFormatSummary, generateRl.summary);
-          outcome = {
-            ...outcome,
-                summary: generatePostFormatDowngrade.downgrade
-                  ? preFormatSummary
-                  : generateRl.summary,
-          };
-        }
-        let generateTerminalStatus = terminalStatus;
-        const generateExtraFailedChecks: Array<{ type: string; detail: string }> = [];
-        if (generatePostFormatDowngrade.downgrade && generateTerminalStatus === 'completed') {
-          generateTerminalStatus = 'partial_success';
-          generateExtraFailedChecks.push({
-            type: 'post_format_regression',
-            detail: generatePostFormatDowngrade.reason ?? '格式化层后内容缩水',
-          });
-          ctx.logger.warn(
-            { taskId, reason: generatePostFormatDowngrade.reason },
-            'generate: post-format recheck flagged regression — keeping pre-format summary',
-          );
-        }
-        // Compute before persistence so refresh/history/detail views
-        // carry the same verifier bullets as the live terminal frame.
-        const generateFailedChecks = [
-          ...generateReview.failedChecks,
-          ...generateExtraFailedChecks,
-        ];
-        let generateTerminalPersisted = false;
-        let generateAwaitingPersisted = false;
-
-        try {
-          if (generateTerminalStatus === 'completed' && outcome.status === 'completed') {
-            const persisted = await repo.persistVisionOutcome(taskId, {
-              status: 'completed',
-              summary: outcome.summary,
-              tickCount: 1,
-              metadata,
-            });
-            generateTerminalPersisted = persisted.persisted;
-          } else if (
-            generateTerminalStatus === 'partial_success' &&
-            outcome.status === 'completed'
-          ) {
-            // Codex Pack A3 — verifier flagged soft failure; row keeps
-            // summary, status='partial_success' so the SPA renders a
-            // yellow "结果可能不完整" banner above the answer.
-            const persisted = await repo.persistVisionOutcome(taskId, {
-              status: 'partial_success',
-              summary: outcome.summary,
-              tickCount: 1,
-              metadata,
-              failedChecks: generateFailedChecks,
-            });
-            generateTerminalPersisted = persisted.persisted;
-          } else if (generateTerminalStatus === 'failed') {
-            // Either the runner failed OR the verifier verdict
-            // escalated a completed task to failed (hard_fail). Prefer
-            // the verifier-synthesised summary when the runner thought
-            // it had succeeded; the SPA renders red "质量校验未通过".
-            const reason =
-              outcome.status === 'failed'
-                ? (outcome.reason ?? 'generate: api failed')
-                : (failureSummary ?? '质量校验未通过');
-            const persisted = await repo.persistVisionOutcome(taskId, {
-              status: 'failed',
-              reason,
-              tickCount: 1,
-              ...(generateUnavailableReasonCode
-                ? { errorCode: generateUnavailableReasonCode }
-                : {}),
-              metadata,
-              failedChecks: generateFailedChecks,
-            });
-            generateTerminalPersisted = persisted.persisted;
-          } else if (outcome.status === 'awaiting_user') {
-            // Expert-workflow intake park out of the generate runner.
-            // Persist status='awaiting_user' + the visible question
-            // so a refresh during the pause re-renders correctly,
-            // and stamp `awaiting_kind='clarification'` so the SPA's
-            // BrowserPanel does NOT auto-expand / show the verify
-            // banner — this is a chat-only intake. We also stamp
-            // `result.executionMode='generate'` (rather than going
-            // through persistVisionOutcome) so the reply path can
-            // tell this task is parked from generate, not supercar.
-            const awaitingPersist = await repo.persistAwaitingUser({
-              taskExternalId: taskId,
-              question: outcome.summary,
-              awaitingKind: 'clarification',
-              result: {
-                ...metadata,
-                executionMode: 'generate' as const,
-                ...(input.mode === 'plan'
-                  ? {
-                      planMode: 'awaiting_approval',
-                      planText: outcome.summary,
-                      planInitialIntent: parentContextBlock + input.intent,
-                      planReplyHistory: [],
-                      planFileIds: orderedFileIds,
-                      planWorkflowId: typedWorkflow?.workflowId ?? null,
-                      planLegacyWorkflowId: expertWorkflow?.id ?? null,
-                    }
-                  : {}),
-              },
-            });
-            generateAwaitingPersisted = awaitingPersist.persisted;
-            if (!awaitingPersist.persisted) {
-                  ctx.logger.warn(
-                    { taskId },
-                    'generate: awaiting_user persist refused by state guard',
-                  );
-            }
-          }
-        } catch (err) {
-          ctx.logger.error({ err, taskId }, 'generate: persist failed');
-        }
-
-        // Stamp the response-layer metadata columns now that persist
-        // has landed. Best-effort: a stamp failure logs but doesn't
-        // tear down terminal broadcast. Only fires when the formatter
-        // actually ran (flag on); the awaiting_user branch never
-        // produces a formatter run (non-terminal status filter
-        // inside `runResponseLayerForLane`).
-        if (generateTerminalPersisted) {
-          await stampResponseLayerColumns(
-            ctx.db,
-            taskId,
-            generateRl.responseLayerOriginal,
-            outcome.status === 'completed' ? outcome.summary : '',
-            generateRl.responseLayerMetadata,
-            ctx.logger,
-          );
-        }
-
-        try {
-          if (
-            generateTerminalPersisted &&
-            generateTerminalStatus === 'completed' &&
-            outcome.status === 'completed'
-          ) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'completed',
-              ...(outcome.summary ? { summary: outcome.summary } : {}),
-            });
-          } else if (
-            generateTerminalPersisted &&
-            generateTerminalStatus === 'partial_success' &&
-            outcome.status === 'completed'
-          ) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'partial_success',
-              ...(outcome.summary ? { summary: outcome.summary } : {}),
-                  ...(generateFailedChecks.length > 0
-                    ? { failedChecks: generateFailedChecks }
-                    : {}),
-            });
-          } else if (generateTerminalPersisted && generateTerminalStatus === 'failed') {
-            const reason =
-              outcome.status === 'failed' ? outcome.reason : (failureSummary ?? undefined);
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'failed',
-              ...(reason ? { reason } : {}),
-                  ...(generateFailedChecks.length > 0
-                    ? { failedChecks: generateFailedChecks }
-                    : {}),
-            });
-          } else if (outcome.status === 'awaiting_user' && generateAwaitingPersisted) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.supercar.awaiting_user',
-              taskId,
-              question: outcome.summary,
-              awaitingKind: 'clarification',
-            });
-          }
-        } catch (err) {
-          ctx.logger.warn({ err, taskId }, 'generate: broadcast terminal failed');
-        }
-
-        if (
-          generateTerminalPersisted &&
-          generateTerminalStatus === 'completed' &&
-          outcome.status === 'completed'
-        ) {
-          const summary = outcome.summary;
-          void runTaskBackground(ctx, async (ctx) => publishCoreTaskSuggestions({
-            wiring: modelRuntimeWiring,
-            actorExternalId: ctx.userId,
-            modelDataRegion: userRow.modelDataRegion,
-            rawIntent: input.intent,
-            intent: effectiveIntent,
-            summary,
-            isCurrent: () => repo.isCurrentCompletedOutcome(taskId, summary),
-            persist: (suggestions) => repo.persistCurrentCompletedSuggestions(taskId, summary, suggestions),
-            publish: (suggestions) =>
-              broadcastToUser(ctx.userId, {
-                type: 'server.supercar.suggestions', taskId, suggestions,
-              }),
-          }));
-        }
-
-        // Phase 1 Day 5 — fire-and-forget execution-pipeline persist
-        // + always cleanup the in-memory contract / ledger registries
-        // even when persist is a no-op (flags off) so the maps don't
-        // leak across long-running PM2 lifetimes.
-        void runTaskBackground(ctx, async (ctx) => persistExecution({
-          taskId,
-          verification: executionVerification,
-          db: ctx.db,
-          logger: ctx.logger,
-        })
-          .then((persisted) =>
-            persisted
-              ? writeLedgerToDb({
-                  taskExternalId: taskId,
-                  verification: executionVerification,
-                  db: ctx.db,
-                  logger: ctx.logger,
-                })
-              : null,
-          )
-          .finally(() => disposeExecution(taskId)));
-      })());
-
-      return {
-        taskId,
-        status: 'executing' as const,
-        steps: [],
-        executionMode: 'generate' as const,
-      };
-    }
-    // ===== end generate-mode fork =====
-
-    // ===== scrape-mode fork (Phase 24 RC follow-up) =====
-    // Tasks classified as 'scrape' want page content but NOT live
-    // browser interaction. Firecrawl pulls markdown in 2-3s, then
-    // the regional Qwen Responses runtime synthesises an answer from those bytes.
-    // 5-10× cheaper than the browser path; latency 5-10× faster.
-    //
-    // If FIRECRAWL_API_KEY is missing at boot, ctx.firecrawl is null
-    // and the scrape branch persists a clear failure (rather than
-    // silently degrading to the browser path which is what the
-    // classifier explicitly avoided routing to).
-    if (executionMode === 'scrape') {
-      const taskId = newExternalId('task');
-      const scrapeRuntime = resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion);
-      const scrapeResponsesAdapter =
-        scrapeRuntime.kind === 'ready' ? scrapeRuntime.responses('standard') : null;
-      const fallbackGenerateRuntime = resolveGenerateRuntimeForUser(
-        ctx.userId,
-        userRow.modelDataRegion,
-      );
-      const fallbackGenerateResponsesAdapter =
-        fallbackGenerateRuntime.kind === 'ready'
-          ? fallbackGenerateRuntime.responses('standard')
-          : null;
-      const verifierRuntime = resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion);
-      const semanticVerifierAdapter =
-        verifierRuntime.kind === 'ready' ? verifierRuntime.messages('verify_strict') : null;
-      const scrapeUnavailableReasonCode =
-        scrapeRuntime.kind === 'unavailable' ? scrapeRuntime.reasonCode : null;
-      const fallbackGenerateUnavailableReasonCode =
-        fallbackGenerateRuntime.kind === 'unavailable'
-          ? fallbackGenerateRuntime.reasonCode
-          : null;
-
-      await repo.insertTask(
-        {
-          taskId,
-          status: 'executing',
-          plan: [],
-          cursor: 0,
-          pendingConfirm: null,
-        },
-        {
-          userId: userRow.id,
-          intent: input.intent,
-          roleId: dispatchRoleId,
-          opusUsed: opusActuallyConsumed,
-        },
-      );
-
-      ctx.logger.info(
-        { taskId, userId: ctx.userId, executorLane: 'scrape', executionMode },
-        'task: executor lane selected',
-      );
-
-      // Defensive — if the adapter wasn't configured at boot, fail
-      // loudly with the exact reason. SPA / translateError surfaces
-      // a clear "Firecrawl 未配置" instead of "服务繁忙".
-      if (!ctx.firecrawl) {
-        let missingFirecrawlPersisted = false;
-        try {
-          const persisted = await repo.persistVisionOutcome(taskId, {
-            status: 'failed',
-            reason: 'scrape: Firecrawl 未配置（FIRECRAWL_API_KEY 缺失），任务无法执行',
-            tickCount: 0,
-          });
-          missingFirecrawlPersisted = persisted.persisted;
-        } catch (err) {
-          ctx.logger.warn({ err, taskId }, 'scrape: persist failed-row write threw');
-        }
-        try {
-          if (missingFirecrawlPersisted) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'failed',
-              reason: 'Firecrawl 未配置',
-            });
-          }
-        } catch {
-          /* swallow — best-effort */
-        }
-        return {
-          taskId,
-          status: 'executing' as const,
-          steps: [],
-          executionMode: 'scrape' as const,
-        };
-      }
-
-      // Phase 1 Day 5 — initialise execution pipeline. No-op when
-      // every feature flag is off (default). The firecrawl-null
-      // early return above bails BEFORE this init so the registries
-      // never see a task that won't terminate.
-      initExecution({
-        taskId,
-        intent: input.intent,
-        executionMode: 'scrape',
-        expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
-        expertMode: expertModeOverride,
-        hasAttachments: attachmentBlocks.length > 0,
-      });
-      // Codex Pack B1 — planning chip (scrape lane).
-      broadcastSubStatus(ctx.userId, taskId, 'planning');
-
-      const firecrawl = ctx.firecrawl;
-      const scrapeStartedAt = Date.now();
-      void runTaskBackground(ctx, async (ctx) => (async () => {
-        // Fallback chain (A4) — every lane the dispatcher actually
-        // tried for this task. Logged + persisted under
-        // result.metadata.fallbackChain so the eval pipeline can see
-        // which path produced the final outcome.
-        const fallbackChain: string[] = ['scrape'];
-        let finalExecutionMode: 'scrape' | 'generate' = 'scrape';
-        let scrapeOutcome: ScrapeOutcome;
-        try {
-          const executionPlan = scrapeResponsesAdapter
-            ? await prepareCoreTaskPlan({
-                wiring: modelRuntimeWiring, actorExternalId: ctx.userId,
-                modelDataRegion: userRow.modelDataRegion, intent: input.intent, logger: ctx.logger,
-                persist: async planText => (await repo.persistActiveCorePlan(taskId, planText)).persisted,
-                publish: planText => broadcastToUser(ctx.userId, {
-                  type: 'server.task.plan', taskId, planText, planStatus: [],
-                }),
-              })
-            : null;
-          if (scrapeResponsesAdapter && !(await repo.isTaskExecuting(taskId))) {
-            disposeExecution(taskId);
-            return;
-          }
-          // Codex Pack B1 — extracting chip: firecrawl about to fetch.
-          broadcastSubStatus(ctx.userId, taskId, 'extracting');
-          scrapeOutcome = scrapeResponsesAdapter
-            ? await runScrapeTask({
-                taskId,
-                userId: ctx.userId,
-            // Use effectiveIntent (with parent context block when in
-            // a follow-up + workflow preambles) whenever EITHER the
-            // legacy or typed matcher fires. Earlier this only checked
-            // legacy; P2_CT_008 surfaced the gap — typed-only matches
-            // (content-topic / ecom-daily) lost their parent context
-            // on follow-up tasks.create with replyToTaskId.
-            // Phase 3 R1 (Codex #2): use effectiveIntent (parent
-            // context block + workflow preamble prepended) whenever
-            // any of:
-            //   - legacy matcher fires
-            //   - typed matcher fires (or recovered from parent)
-            //   - this is a follow-up (replyToTaskId set) — the
-            //     parent's outcome is load-bearing context for the
-            //     model regardless of whether a workflow matched
-            // Otherwise pass the bare user input.
-                intent:
-                  expertWorkflow || typedWorkflow || isFollowUp ? effectiveIntent : input.intent,
-                skillId: dispatchSkillId,
-                expertMode: expertModeOverride,
-                responsesAdapter: scrapeResponsesAdapter,
-                ...(executionPlan ? { executionPlan } : {}),
-                firecrawl,
-                logger: ctx.logger,
-            // Phase 24 RC follow-up — stream LLM deltas + push
-            // coarse Firecrawl-phase progress to the SPA. Same
-            // contract as generate-runner; broadcast errors are
-            // swallowed.
-                onStreamDelta: (delta) => {
-                  try {
-                    broadcastToUser(ctx.userId, {
-                      type: 'server.task.stream',
-                      taskId,
-                      delta,
-                    });
-                  } catch (err) {
-                    ctx.logger.warn({ err, taskId }, 'scrape: broadcast stream delta failed');
-                  }
-                },
-                onProgress: (message) => {
-                  try {
-                    broadcastToUser(ctx.userId, {
-                      type: 'server.task.progress',
-                      taskId,
-                      message,
-                    });
-                  } catch (err) {
-                    ctx.logger.warn({ err, taskId }, 'scrape: broadcast progress failed');
-                  }
-                },
-              })
-            : {
-                status: 'failed' as const,
-                summary: '',
-                reason: generateRuntimeUnavailableReason(
-                  scrapeRuntime.kind === 'unavailable'
-                    ? scrapeRuntime.reasonCode
-                    : 'MODEL_MIGRATION_IN_PROGRESS',
-                ),
-                inputTokens: 0,
-                outputTokens: 0,
-                durationMs: 0,
-                source: 'scrape' as const,
-                sources: [],
-              };
-        } catch {
-          ctx.logger.error({ taskId, code: 'SCRAPE_RUNNER_THROWN' }, 'scrape: runner threw');
-          scrapeOutcome = {
-            status: 'failed' as const,
-            summary: '',
-            reason: '内容整理服务暂时不可用，请稍后重试。',
-            inputTokens: 0,
-            outputTokens: 0,
-            durationMs: 0,
-            source: 'scrape' as const,
-            sources: [] as string[],
-          };
-        }
-
-        // A1 — scrape failed → fall back to generate. Generate has
-        // zero infra dependencies (no Brave, no Firecrawl) so it's
-        // always reachable; if the model can't answer the intent
-        // directly, generate itself will return failed and we keep
-        // the chain visible in metadata for triage. The intent +
-        // skill + attachments are identical between the two runners,
-        // so the fallback produces the same surface for the user.
-        let outcome:
-          | {
-              status: 'completed';
-              summary: string;
-              reason?: string;
-            }
-          | {
-              status: 'failed';
-              summary?: string;
-              reason: string;
-            };
-        if (scrapeOutcome.status === 'completed') {
-          outcome = {
-            status: 'completed',
-            summary: scrapeOutcome.summary,
-          };
-        } else {
-          ctx.logger.warn(
-            {
-              taskId,
-              scrapeReason: scrapeOutcome.reason,
-              fallbackTo: 'generate',
-            },
-            'scrape failed, falling back to generate',
-          );
-          fallbackChain.push('generate');
-          finalExecutionMode = 'generate';
-          let generateOutcome: GenerateOutcome;
-          try {
-            generateOutcome = fallbackGenerateResponsesAdapter
-              ? await runGenerateTask({
-                  taskId,
-                  userId: ctx.userId,
-                  // Phase 3 R1 (Codex #2): use effectiveIntent (parent
-                  // context block + workflow preamble prepended) whenever
-                  // any of:
-                  //   - legacy matcher fires
-                  //   - typed matcher fires (or recovered from parent)
-                  //   - this is a follow-up (replyToTaskId set) — the
-                  //     parent's outcome is load-bearing context for the
-                  //     model regardless of whether a workflow matched
-                  // Otherwise pass the bare user input.
-                  intent:
-                    expertWorkflow || typedWorkflow || isFollowUp
-                      ? effectiveIntent
-                      : input.intent,
-                  workflowOverride: typedWorkflow,
-                  skillId: dispatchSkillId,
-                  expertMode: expertModeOverride,
-                  responsesAdapter: fallbackGenerateResponsesAdapter,
-                  logger: ctx.logger,
-                  ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
-                  onStreamDelta: (delta) => {
-                    try {
-                      broadcastToUser(ctx.userId, {
-                        type: 'server.task.stream',
-                        taskId,
-                        delta,
-                      });
-                    } catch (err) {
-                      ctx.logger.warn(
-                        { err, taskId },
-                        'fallback-generate: broadcast stream delta failed',
-                      );
-                    }
-                  },
-                })
-              : {
-                  status: 'failed' as const,
-                  summary: '',
-                  reason: generateRuntimeUnavailableReason(
-                    fallbackGenerateRuntime.kind === 'unavailable'
-                      ? fallbackGenerateRuntime.reasonCode
-                      : 'MODEL_MIGRATION_IN_PROGRESS',
-                  ),
-                  inputTokens: 0,
-                  outputTokens: 0,
-                  durationMs: 0,
-                };
-          } catch {
-            ctx.logger.error(
-              { taskId, code: 'FALLBACK_GENERATE_RUNNER_THROWN' },
-              'fallback-generate: runner threw',
-            );
-            generateOutcome = {
-              status: 'failed' as const,
-              summary: '',
-              reason: '生成服务暂时不可用，请稍后重试。',
-              inputTokens: 0,
-              outputTokens: 0,
-              durationMs: 0,
-            };
-          }
-          if (generateOutcome.status === 'completed') {
-            outcome = {
-              status: 'completed',
-              summary: generateOutcome.summary,
-            };
-          } else {
-            // Phase 1 follow-up — humanise the failure reason so the
-            // user sees actionable Chinese guidance instead of a raw
-            // stack trace / English error code.
-            outcome = {
-              status: 'failed',
-              reason: humaniseScrapeFailure(
-                `scrape failed (${scrapeOutcome.reason}); generate fallback also failed (${generateOutcome.reason ?? 'unknown'})`,
-              ),
-            };
-          }
-        }
-
-        // Phase 1 follow-up — sanitise the completed-path summary
-        // before verification. Same rationale as the generate lane.
-        if (outcome.status === 'completed' && outcome.summary) {
-          const cleaned = sanitizeFinalText(outcome.summary);
-          if (cleaned !== outcome.summary) {
-            outcome = { ...outcome, summary: cleaned };
-          }
-        }
-
-        // Phase 1 Day 5 — pipeline verification on the runner's
-        // final answer. Same pattern as the generate fork: ledger
-        // gets a tool_result for each scraped source + a
-        // response_length entry, then the verifier runs.
-        let executionVerification: VerificationResult | null = null;
-        if (outcome.status === 'completed') {
-          for (const url of scrapeOutcome.sources.slice(0, 10)) {
-            recordEvidence(taskId, {
-              fact: `scraped_url=${url}`,
-              sourceType: 'tool_result',
-              sourceDetail: `firecrawl_${scrapeOutcome.source}`,
-              confidence: 'extracted',
-            });
-          }
-          recordEvidence(taskId, {
-            fact: `response_length=${outcome.summary.length}`,
-            sourceType: 'tool_result',
-            sourceDetail: 'llm_scrape_response',
-            confidence: 'observed',
-          });
-          // Codex Pack B1 — verifying chip (scrape lane).
-          broadcastSubStatus(ctx.userId, taskId, 'verifying');
-          const verified: VerifyOutput = await verifyAndFinalize({
-            taskId,
-            answerText: outcome.summary,
-            semanticAdapter: semanticVerifierAdapter,
-            logger: ctx.logger,
-          });
-          if (verified.finalText !== outcome.summary) {
-            outcome = { ...outcome, summary: verified.finalText };
-          }
-          executionVerification = verified.verification;
-        }
-
-        const scrapeResearchSourceTrust = assessResultTrust({
-          intent: input.intent,
-          resultText: outcome.status === 'completed' ? outcome.summary : '',
-        });
-
-        // Codex Pack A3 — verifier verdict drives the terminal status.
-        const terminalStatus: FinalTerminalStatus = deriveFinalStatus(
-          outcome.status,
-          executionVerification,
-          scrapeResearchSourceTrust,
-        );
-        const failureSummary =
-          terminalStatus === 'failed'
-            ? executionVerification
-              ? summariseVerificationFailure(executionVerification)
-              : (scrapeResearchSourceTrust.failedChecks[0]?.detail ?? null)
-            : null;
-
-        // B3 — structured task:completed log. Single record per task
-        // termination with all fields the eval pipeline needs.
-        const elapsedMs = Date.now() - scrapeStartedAt;
-        const finalResponsesAdapter =
-          finalExecutionMode === 'scrape'
-            ? scrapeResponsesAdapter
-            : fallbackGenerateResponsesAdapter;
-        const metadata = {
-          executionMode: 'scrape' as const,
-          finalExecutionMode,
-          expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
-          expertMode: expertModeOverride,
-          selectedRole: dispatchRoleId,
-          ...(finalResponsesAdapter
-            ? {
-                provider: finalResponsesAdapter.metadata.provider,
-                model: finalResponsesAdapter.metadata.model,
-                region: finalResponsesAdapter.metadata.region,
-                deploymentScope: finalResponsesAdapter.metadata.deploymentScope,
-              }
-            : {}),
-          fallbackChain,
-          ...(!finalResponsesAdapter
-            ? {
-                reasonCode:
-                  fallbackGenerateUnavailableReasonCode ??
-                  scrapeUnavailableReasonCode ??
-                  'MODEL_MIGRATION_IN_PROGRESS',
-              }
-            : {}),
-          elapsedMs,
-        };
-        ctx.logger.info(
-          {
-            taskId,
-            userId: ctx.userId,
-            runnerStatus: outcome.status,
-            finalStatus: terminalStatus,
-            ...metadata,
-            failureReason: outcome.status === 'failed' ? outcome.reason : failureSummary,
-          },
-          'task:completed',
-        );
-
-        // Retired polishing compatibility boundary; always preserves
-        // the primary scrape answer byte-for-byte.
-        const scrapeRl = await runResponseLayerForLane({
-          taskId,
-          status: outcome.status,
-          summary: outcome.status === 'completed' ? outcome.summary : '',
-          expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
-          logger: ctx.logger,
-        });
-        // Codex Round 2 P1-5 — same post-formatter recheck as generate
-        // lane. Scrape's LLM synthesis lands a citation block at the
-        // end; the formatter rarely shrinks it, but the safety net is
-        // free when the text passes through unchanged.
-        let scrapePostFormatDowngrade: { downgrade: boolean; reason: string | null } = {
-          downgrade: false,
-          reason: null,
-        };
-        if (outcome.status === 'completed' && scrapeRl.summary !== outcome.summary) {
-          const preFormatSummary = outcome.summary;
-          scrapePostFormatDowngrade = recheckPostFormat(preFormatSummary, scrapeRl.summary);
-          outcome = {
-            ...outcome,
-            summary: scrapePostFormatDowngrade.downgrade ? preFormatSummary : scrapeRl.summary,
-          };
-        }
-        let scrapeTerminalStatus = terminalStatus;
-        const scrapeExtraFailedChecks: Array<{ type: string; detail: string }> = [];
-        if (scrapePostFormatDowngrade.downgrade && scrapeTerminalStatus === 'completed') {
-          scrapeTerminalStatus = 'partial_success';
-          scrapeExtraFailedChecks.push({
-            type: 'post_format_regression',
-            detail: scrapePostFormatDowngrade.reason ?? '格式化层后内容缩水',
-          });
-          ctx.logger.warn(
-            { taskId, reason: scrapePostFormatDowngrade.reason },
-            'scrape: post-format recheck flagged regression — keeping pre-format summary',
-          );
-        }
-        const scrapeFailedChecks = [
-          ...(executionVerification && !executionVerification.passed
-            ? extractFailedChecks(executionVerification)
-            : []),
-          ...(executionVerification && !executionVerification.passed
-            ? []
-            : scrapeResearchSourceTrust.failedChecks),
-          ...scrapeExtraFailedChecks,
-        ];
-        let scrapeTerminalPersisted = false;
-
-        try {
-          if (scrapeTerminalStatus === 'completed' && outcome.status === 'completed') {
-            const persisted = await repo.persistVisionOutcome(taskId, {
-              status: 'completed',
-              summary: outcome.summary,
-              tickCount: 1,
-              metadata,
-            });
-            scrapeTerminalPersisted = persisted.persisted;
-              } else if (
-                scrapeTerminalStatus === 'partial_success' &&
-                outcome.status === 'completed'
-              ) {
-            const persisted = await repo.persistVisionOutcome(taskId, {
-              status: 'partial_success',
-              summary: outcome.summary,
-              tickCount: 1,
-              metadata,
-              failedChecks: scrapeFailedChecks,
-            });
-            scrapeTerminalPersisted = persisted.persisted;
-          } else {
-            const reason =
-                  outcome.status === 'failed'
-                    ? outcome.reason
-                    : (failureSummary ?? '质量校验未通过');
-            const persisted = await repo.persistVisionOutcome(taskId, {
-              status: 'failed',
-              reason,
-              tickCount: 1,
-              ...(!finalResponsesAdapter
-                ? {
-                    errorCode:
-                      fallbackGenerateUnavailableReasonCode ??
-                      scrapeUnavailableReasonCode ??
-                      'MODEL_MIGRATION_IN_PROGRESS',
-                  }
-                : {}),
-              metadata,
-              failedChecks: scrapeFailedChecks,
-            });
-            scrapeTerminalPersisted = persisted.persisted;
-          }
-        } catch (err) {
-          ctx.logger.error({ err, taskId }, 'scrape: persist failed');
-        }
-
-        if (scrapeTerminalPersisted) {
-          await stampResponseLayerColumns(
-            ctx.db,
-            taskId,
-            scrapeRl.responseLayerOriginal,
-            outcome.status === 'completed' ? outcome.summary : '',
-            scrapeRl.responseLayerMetadata,
-            ctx.logger,
-          );
-        }
-
-        try {
-          if (
-            scrapeTerminalPersisted &&
-            scrapeTerminalStatus === 'completed' &&
-            outcome.status === 'completed'
-          ) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'completed',
-              ...(outcome.summary ? { summary: outcome.summary } : {}),
-            });
-          } else if (
-            scrapeTerminalPersisted &&
-            scrapeTerminalStatus === 'partial_success' &&
-            outcome.status === 'completed'
-          ) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'partial_success',
-              ...(outcome.summary ? { summary: outcome.summary } : {}),
-              ...(scrapeFailedChecks.length > 0 ? { failedChecks: scrapeFailedChecks } : {}),
-            });
-          } else if (scrapeTerminalPersisted) {
-            const reason =
-              outcome.status === 'failed' ? outcome.reason : (failureSummary ?? undefined);
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'failed',
-              ...(reason ? { reason } : {}),
-              ...(scrapeFailedChecks.length > 0 ? { failedChecks: scrapeFailedChecks } : {}),
-            });
-          }
-        } catch (err) {
-          ctx.logger.warn({ err, taskId }, 'scrape: broadcast terminal failed');
-        }
-
-        if (
-          scrapeTerminalPersisted &&
-          scrapeTerminalStatus === 'completed' &&
-          outcome.status === 'completed'
-        ) {
-          const summary = outcome.summary;
-          void runTaskBackground(ctx, async (ctx) => publishCoreTaskSuggestions({
-            wiring: modelRuntimeWiring,
-            actorExternalId: ctx.userId,
-            modelDataRegion: userRow.modelDataRegion,
-            rawIntent: input.intent,
-            intent: effectiveIntent,
-            summary,
-            isCurrent: () => repo.isCurrentCompletedOutcome(taskId, summary),
-            persist: (suggestions) => repo.persistCurrentCompletedSuggestions(taskId, summary, suggestions),
-            publish: (suggestions) =>
-              broadcastToUser(ctx.userId, {
-                type: 'server.supercar.suggestions', taskId, suggestions,
-              }),
-          }));
-        }
-
-        // Phase 1 Day 5 — fire-and-forget execution-pipeline persist
-        // + cleanup. Same pattern as the generate fork.
-        void runTaskBackground(ctx, async (ctx) => persistExecution({
-          taskId,
-          verification: executionVerification,
-          db: ctx.db,
-          logger: ctx.logger,
-        })
-          .then((persisted) =>
-            persisted
-              ? writeLedgerToDb({
-                  taskExternalId: taskId,
-                  verification: executionVerification,
-                  db: ctx.db,
-                  logger: ctx.logger,
-                })
-              : null,
-          )
-          .finally(() => disposeExecution(taskId)));
-      })());
-
-      return {
-        taskId,
-        status: 'executing' as const,
-        steps: [],
-        executionMode: 'scrape' as const,
-      };
-    }
-    // ===== end scrape-mode fork =====
-
-    // Deterministic direct-open lane. An explicit "打开 https://..."
-    // command needs no model judgement: navigate the managed browser,
-    // capture the real page, and finish. This also keeps offline local
-    // QA honest — it never creates StubPlanner's about:blank smoke plan.
-    if (directOpenUrl) {
-      const taskId = newExternalId('task');
-      const willQueueDirectOpen = Boolean(ctx.taskQueue && directOpenUsesBrowserPool);
-      await repo.insertTask(
-        {
-          taskId,
-          status: willQueueDirectOpen ? 'queued' : 'executing',
-          plan: [],
-          cursor: 0,
-          pendingConfirm: null,
-        },
-        {
-          userId: userRow.id,
-          intent: input.intent,
-          roleId: dispatchRoleId,
-          opusUsed: opusActuallyConsumed,
-        },
-      );
-
-      const dispatchDirectOpen = async (ctx: TaskExecutionContext): Promise<void> => {
-        let executor = directOpenFallbackExecutor;
-        let allocatedPool = false;
-        let adoptedBrowserSession = false;
-        try {
-          if (directOpenUsesBrowserPool && ctx.browserPool) {
-            const adopted = input.replyToTaskId
-              ? ctx.browserPool.adoptRetained(input.replyToTaskId, taskId, ctx.userId)
-              : null;
-            const instance =
-              adopted ??
-              (await ctx.browserPool.allocate(taskId, ctx.userId, input.viewportProfile));
-            executor = instance.executor;
-            allocatedPool = true;
-            adoptedBrowserSession = adopted != null;
-          }
-          if (!executor) throw new Error('浏览器执行器尚未就绪');
-          const readyExecutor = executor;
-
-          const directExecutor = {
-            resetPageForTask: () => readyExecutor.resetPageForTask(),
-            getPage: async () => (await readyExecutor.getPage()) as unknown as PageLike,
-            navigate: (page: PageLike, url: string) => readyExecutor.navigate(page, url),
-            screenshot: (page: PageLike) => readyExecutor.screenshot(page),
-          };
-          const evidence = await runDirectOpen(directExecutor, directOpenUrl, {
-            preserveExistingPage: adoptedBrowserSession,
-          });
-          const persisted = await repo.persistVisionOutcome(taskId, {
-            status: 'completed',
-            summary: `已打开 ${evidence.finalUrl}`,
-            tickCount: 1,
-            finalUrl: evidence.finalUrl,
-            finalScreenshot: evidence.finalScreenshot,
-            ...(evidence.finalViewport ? { finalViewport: evidence.finalViewport } : {}),
-            metadata: {
-              executionMode: 'browser',
-              lane: 'direct_open',
-            },
-          });
-          if (!persisted.persisted) return;
-
-          broadcastToUser(ctx.userId, {
-            type: 'server.vision.screencast',
-            taskId,
-            tickIndex: 1,
-            imageBase64: evidence.finalScreenshot,
-            url: evidence.finalUrl,
-            viewport: evidence.finalViewport ?? { width: 1280, height: 800 },
-            timestamp: new Date().toISOString(),
-          });
-          broadcastToUser(ctx.userId, {
-            type: 'server.task.terminal',
-            taskId,
-            status: 'completed',
-            summary: `已打开 ${evidence.finalUrl}`,
-          });
-        } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
-          try {
-            const persisted = await repo.persistVisionOutcome(taskId, {
-              status: 'failed',
-              reason: `浏览器打开失败：${reason}`.slice(0, 500),
-              errorCode: 'DIRECT_OPEN_FAILED',
-              tickCount: 0,
-              metadata: { executionMode: 'browser', lane: 'direct_open' },
-            });
-            if (persisted.persisted) {
-              broadcastToUser(ctx.userId, {
-                type: 'server.task.terminal',
-                taskId,
-                status: 'failed',
-                reason: `浏览器打开失败：${reason}`.slice(0, 200),
-              });
-            }
-          } catch (persistErr) {
-            ctx.logger.error(
-              { err: persistErr, taskId },
-              'direct-open: failed outcome could not be persisted',
-            );
-          }
-        } finally {
-          if (allocatedPool && ctx.browserPool) {
-            const retained = ctx.browserPool.retain(
-              taskId,
-              appEnv.BROWSER_TERMINAL_RETENTION_MS,
-              'direct-open-review',
-            );
-            if (!retained) {
-                  await ctx.browserPool
-                    .release(taskId, `direct-open-${taskId}-done`)
-                    .catch(() => {});
-            }
-          }
-          if (willQueueDirectOpen) ctx.taskQueue?.signalSlotFreed();
-        }
-      };
-
-      if (willQueueDirectOpen && ctx.taskQueue) {
-        const enqueueResult = enqueueTaskExecution(ctx, {
-          taskId,
-          userId: ctx.userId,
-          runFn: dispatchDirectOpen,
-          onStart: async (ctx): Promise<void> => {
-            await markQueuedTaskExecutingOrThrow({ repo, taskId, logger: ctx.logger });
-          },
-          onTimeout: async (ctx): Promise<void> => {
-            const reason = '排队等待时间过长，任务已自动停止。请稍后重新执行。';
-            try {
-                  const failed = await repo.markQueuedTaskFailed(
-                    taskId,
-                    `queue timeout: ${reason}`,
-                    {
-                errorCode: 'QUEUE_TIMEOUT',
-                source: 'direct_open_queue_timeout',
-                    },
-                  );
-              if (failed.persisted) {
+              if (terminal.persisted) {
                 broadcastToUser(ctx.userId, {
                   type: 'server.task.terminal',
                   taskId,
@@ -4730,2543 +2113,6229 @@ export const tasksRouter = router({
                   reason,
                 });
               }
-            } catch (err) {
-              ctx.logger.error(
-                { err, taskId },
-                'direct-open: queue timeout could not be persisted',
-              );
+              return {
+                taskId,
+                status: 'failed' as const,
+                steps: [],
+                executionMode,
+              };
             }
-          },
-        });
 
-        if (enqueueResult.kind === 'rejected') {
-          await repo.markQueuedTaskFailed(taskId, enqueueResult.reason, {
-            errorCode: 'QUEUE_REJECTED',
-            source: 'direct_open_queue_rejected',
-          });
-          throw new TRPCError({
-            code: 'TOO_MANY_REQUESTS',
-            message: enqueueResult.reason,
-          });
-        }
-        if (enqueueResult.kind === 'queued') {
-          broadcastToUser(ctx.userId, {
-            type: 'server.task.queued',
-            taskId,
-            position: enqueueResult.position,
-          });
-        }
-        return {
-          taskId,
-          status:
-            enqueueResult.kind === 'dispatched' ? ('executing' as const) : ('queued' as const),
-          steps: [],
-          executionMode: 'browser' as const,
-        };
-      }
-
-      void runTaskBackground(ctx, async (ctx) => dispatchDirectOpen(ctx).catch((err) => {
-        ctx.logger.error({ err, taskId }, 'direct-open: detached dispatch rejected');
-      }));
-
-      return {
-        taskId,
-        status: 'executing' as const,
-        steps: [],
-        executionMode: 'browser' as const,
-      };
-    }
-
-    // Diagnostic: log the supercar-gate inputs on every tasks.create
-    // so BOSS can tell from pm2 logs exactly why a task fell into the
-    // legacy branch. Happens BEFORE the gate so the log always lands.
-    ctx.logger.info(
-      {
-        gate: 'supercar-vs-legacy',
-        AGENT_MODE: appEnv.AGENT_MODE,
-        playwrightExecutorPresent: Boolean(ctx.playwrightExecutor),
-        browserModel: browserMessagesAdapter?.metadata.model ?? null,
-        isSimpleSearchIntent,
-        browserPoolEligible,
-        willUseSupercar:
-          Boolean(browserMessagesAdapter),
-      },
-      'tasks.create: control-plane decision',
-    );
-
-    // Production browser execution uses the admitted regional Qwen adapter.
-    // AGENT_MODE and Anthropic credentials cannot redirect this lane.
-    if (browserMessagesAdapter) {
-      const taskId = newExternalId('task');
-
-      // Phase 13 Dim 1 — first-frame plan. Skipped for simple-search and
-      // trivial intents. The Qwen route requires the shared adapter flag, a
-      // dedicated plan canary, an exact synthetic allowlist match, and the
-      // user's persisted model-data region. All invalid/configuration/provider
-      // failures become no-plan, so task execution remains available. Run in
-      // parallel with memory retrieval to avoid adding serial create latency.
-      const skipPlan = Boolean(input.localChrome) || isSimpleSearchIntent || shouldSkipPlan(input.intent);
-      const memoryService = new MemoryService(ctx.db, ctx.logger);
-      const [planResult, relevantMemories] = await Promise.all([
-        skipPlan
-          ? Promise.resolve({ planText: null, planStatus: null })
-          : generatePlanForUser({
-              environment: appEnv,
-              userExternalId: ctx.userId,
-              userModelDataRegion: userRow.modelDataRegion,
-              intent: input.intent,
-              logger: ctx.logger,
-              taskId,
-            }),
-        memoryService.pickRelevant(userRow.id, input.intent),
-      ]);
-      const memoryPreamble = memoryService.formatForPrompt(relevantMemories);
-      // Phase 14 — site-playbook injection. Match the user's intent
-      // against the playbook catalogue (中文 name / domain / English
-      // name); render the matched tips into a user-message preamble.
-      // Empty when no site is mentioned — keeps unrelated tasks
-      // unaffected. matchPlaybooks is a small in-memory loop over
-      // ~25 entries (microseconds). The matched array is also reused
-      // below by the router cold-start recommendation when stats has
-      // < 3 samples for the target site.
-      const matchedPlaybooks = matchPlaybooks(input.intent);
-      const playbookContext = formatPlaybooksForPrompt(matchedPlaybooks);
-      if (matchedPlaybooks.length > 0) {
-        ctx.logger.info(
-          { taskId, sites: matchedPlaybooks.map((p) => p.domain) },
-          'playbook: injected site context',
-        );
-      }
-
-      // Phase 24 RC follow-up — TaskQueue gates dispatch when the
-      // per-task BrowserPool is at its 10-slot capacity. We seed the
-      // row with status='queued' so a 30-task burst doesn't show 30
-      // fake-executing rows while 20 of them are actually waiting.
-      // The queue's onStart callback flips the row to 'executing' the
-      // moment a slot frees; if the queue isn't wired (e.g. legacy
-      // boot without MULTI_USER) we fall back to the historical
-      // 'executing' seed.
-      const willQueueDispatch = Boolean(
-        !input.localChrome && ctx.taskQueue && executionMode === 'browser' && shouldUseBrowserPool(ctx.userId),
-      );
-      await repo.insertTask(
-        {
-          taskId,
-          status: willQueueDispatch ? 'queued' : 'executing',
-          plan: [],
-          cursor: 0,
-          pendingConfirm: null,
-        },
-        {
-          userId: userRow.id,
-          intent: input.intent,
-          roleId: dispatchRoleId,
-          opusUsed: opusActuallyConsumed,
-          ...(input.localChrome ? { sourceContext: { browserSource: 'local-chrome' } } : {}),
-        },
-      );
-      // Phase 13 Dim 1 — persist plan onto the task row and broadcast
-      // it to the SPA so the user sees upcoming steps before any
-      // tool fires. Best-effort: write failures log + continue.
-      if (planResult.planText) {
-        await ctx.db
-          .update(tasksTable)
-          .set({
-            planText: planResult.planText,
-            planStatus: planResult.planStatus as unknown,
-          })
-          .where(eq(tasksTable.externalId, taskId))
-          .catch((err) => ctx.logger.warn({ err, taskId }, 'plan persist failed'));
-        try {
-          broadcastToUser(ctx.userId, {
-            type: 'server.task.plan',
-            taskId,
-            planText: planResult.planText,
-            planStatus: planResult.planStatus ?? [],
-          });
-        } catch (err) {
-          ctx.logger.warn({ err, taskId }, 'plan broadcast failed');
-        }
-      }
-      // Phase 10 Tier 3 — back-fill task_files.task_id once the task
-      // row exists. Best-effort so a failed link doesn't kill the run;
-      // worst case the file is orphaned (still readable by id, just
-      // not linkable from /tasks/:id).
-      if (input.fileIds && input.fileIds.length > 0) {
-        const [taskDb] = await ctx.db
-          .select({ id: tasksTable.id })
-          .from(tasksTable)
-          .where(eq(tasksTable.externalId, taskId))
-          .limit(1);
-        if (taskDb) {
-          await fileService
-            .linkToTask(input.fileIds, taskDb.id, userRow.id)
-            .catch((err) => ctx.logger.warn({ err }, 'tasks.create: file link failed'));
-        }
-      }
-
-      const classification = classifyDomain(input.intent);
-      ctx.logger.info(
-        { taskId, domain: classification.domain, confidence: classification.confidence },
-        'supercar: task domain classified',
-      );
-
-      const userId = ctx.userId;
-      const [taskDbRow] = await ctx.db
-        .select({ id: tasksTable.id })
-        .from(tasksTable)
-        .where(eq(tasksTable.externalId, taskId))
-        .limit(1);
-      const taskDbId = taskDbRow?.id;
-
-      // Phase 8.1: HEADED Brave is the primary browser. Phase 6-2
-      // shipped with headless as primary + headed as a stuck/anti-bot
-      // fallback, but that meant the user watched the Panel VNC stream
-      // (wired to the headed Xvfb) while the agent was actually
-      // driving the hidden headless instance — they never matched
-      // up in the UI. Demoting headless to "last-resort fallback"
-      // makes the UI stream and the agent's focus the same browser.
-      //
-      // Empty headed lane (dev boxes without Xvfb + Brave) falls back
-      // to headless → plain injected executor → router-less deploy
-      // ancestor. Each null just hops to the next layer.
-      const headedExec = ctx.executionRouter?.getExecutor('headed') ?? null;
-      const headlessExec =
-        ctx.executionRouter?.getExecutor('headless') ?? ctx.playwrightExecutor ?? null;
-
-      // Phase 21b — executionMode was decided up at the admission
-      // gate (so per-mode concurrency could apply). It's reused here
-      // to gate pool.allocate; for 'generate' we don't need a per-
-      // user pool slot. Note that this branch only fires for the
-      // BROWSER execution mode under 21b — pure-generate tasks fork
-      // off into runGenerateTask before reaching the supercar gate.
-      ctx.logger.info(
-        { taskId, userId: ctx.userId, executionMode },
-        'tasks.create: supercar branch — execution mode',
-      );
-
-      // Phase 8.2: when the caller is in MULTI_USER_USERS allow-list,
-      // replace the shared headed singleton with their own pool slot.
-      // The pool's executor is a freshly-connected PlaywrightExecutor
-      // pointing at a dedicated Brave + Xvfb + VNC quartet — the rest
-      // of the supercar loop sees a plain PlaywrightExecutor and
-      // doesn't know the difference. If allocate throws (capacity
-      // exceeded, spawn timeout) we surface a typed error so the UI
-      // can show "browser-pool busy" rather than an opaque 500.
-      //
-      // 21a — also skip when executionMode='generate' (no per-user
-      // browser slot needed for pure-generation tasks).
-      // Phase 24 RC follow-up — wrap allocate + supercarArgs build +
-      // runFn invocation in dispatchToBrave so the global TaskQueue
-      // can hold it past the 10-slot pool cap. Body unchanged from
-      // the pre-queue flow; only outer scheduling differs (taskQueue
-      // .enqueue vs `void runFn()`).
-      const dispatchToBrave = async (ctx: TaskExecutionContext): Promise<void> => {
-      let perUserExec = null;
-      let adoptedBrowserSession = false;
+            // Resolve region, credentials and rollout eligibility before quota
+            // consumption. An unavailable core lane is a deployment/rollout state,
+            // not a billable task attempt.
+            const coreLane = coreLaneForExecutionMode(executionMode);
+            let browserMessagesAdapter: MessagesAdapter | undefined;
+            if (coreLane) {
+              const preflight = modelRuntimeWiring.resolveCore({
+                actorExternalId: ctx.userId,
+                lane: coreLane,
+                ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
+              });
+              if (preflight.kind === 'unavailable') {
+                const reason = modelTaskFailureReason(preflight.reasonCode);
+                const taskId = newExternalId('task');
+                await repo.insertTask(
+                  {
+                    taskId,
+                    status: 'executing',
+                    plan: [],
+                    cursor: 0,
+                    pendingConfirm: null,
+                  },
+                  {
+                    userId: userRow.id,
+                    intent: input.intent,
+                    roleId: dispatchRoleId,
+                    opusUsed: false,
+                    ...(stockTaskSourceContext ? { sourceContext: stockTaskSourceContext } : {}),
+                  },
+                );
+                const terminal = await repo.persistVisionOutcome(taskId, {
+                  status: 'failed',
+                  reason,
+                  tickCount: 0,
+                  errorCode: preflight.reasonCode,
+                  metadata: {
+                    executionMode,
+                    finalExecutionMode: executionMode,
+                    reasonCode: preflight.reasonCode,
+                  },
+                });
+                if (terminal.persisted) {
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.task.terminal',
+                    taskId,
+                    status: 'failed',
+                    reason,
+                  });
+                }
+                return {
+                  taskId,
+                  status: 'failed' as const,
+                  steps: [],
+                  executionMode,
+                };
+              }
+              if (coreLane === 'browser') {
+                browserMessagesAdapter = preflight.messages('vision');
+                if (input.localChrome)
+                  await assertLocalChromeSelection(ctx.userId, input.localChrome);
+                if (
+                  !input.localChrome &&
+                  !ctx.playwrightExecutor &&
+                  !ctx.executionRouter?.getExecutor('headed') &&
+                  !ctx.executionRouter?.getExecutor('headless') &&
+                  !(ctx.browserPool && shouldUseBrowserPool(ctx.userId))
+                ) {
+                  throw new TRPCError({
+                    code: 'PRECONDITION_FAILED',
+                    message: '浏览器执行器尚未就绪，未扣除额度。请稍后重试。',
+                  });
+                }
+              }
+            }
+            const videoIntent =
+              executionMode === 'video_creation' ||
+              input.roleId === 'video-creator' ||
+              input.videoOptions?.tab !== undefined;
+            const mediaServices = resolveMediaModelServices({
+              generate: resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+              verifier: resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+            });
+            const providerReadiness = {
+              hasDashscope: Boolean(appEnv.DASHSCOPE_API_KEY),
+              hasFal: Boolean(appEnv.FAL_KEY),
+              hasGemini: Boolean(appEnv.GEMINI_API_KEY),
+            };
+            const mediaIssue =
+              executionMode === 'image'
+                ? mediaCapabilityIssue({ kind: 'image' }, providerReadiness)
+                : videoIntent
+                  ? mediaCapabilityIssue(
+                      {
+                        kind: 'video',
+                        tab: input.videoOptions?.tab ?? 'normal',
+                        model: input.videoOptions?.model ?? 'veo_fast',
+                        petI2v: Boolean(
+                          input.videoOptions?.petModel && !input.videoOptions.referenceVideoFileId,
+                        ),
+                      },
+                      providerReadiness,
+                    )
+                  : null;
+            if (mediaIssue) {
+              throw new TRPCError({ code: 'PRECONDITION_FAILED', message: mediaIssue });
+            }
+            if (
+              executionMode === 'image' &&
+              input.imageOptions?.mode === 'lock_subject' &&
+              !mediaServices.verifySubject
+            ) {
+              throw new TRPCError({
+                code: 'PRECONDITION_FAILED',
+                message: '主体一致性复核服务尚未就绪，未创建任务或扣除额度。',
+              });
+            }
+            if (videoIntent && (!appEnv.VIDEO_CREATION_ENABLED || !videoAllowed)) {
+              throw new TRPCError({
+                code: 'PRECONDITION_FAILED',
+                message: '视频生成功能尚未向当前账号开放，未创建任务或扣除额度。',
+              });
+            }
+            if (videoIntent && !videoModelServicesReady(mediaServices)) {
+              throw new TRPCError({
+                code: 'PRECONDITION_FAILED',
+                message: '视频生成服务尚未就绪，未创建任务或扣除额度。',
+              });
+            }
+            const willCreateVideoQuote =
+              appEnv.VIDEO_CREATION_ENABLED &&
+              videoAllowed &&
+              videoModelServicesReady(mediaServices) &&
+              videoIntent;
             if (
               !input.localChrome &&
-              ctx.browserPool &&
-              shouldUseBrowserPool(ctx.userId) &&
-              executionMode === 'browser'
+              appEnv.NODE_ENV === 'production' &&
+              executionMode === 'browser' &&
+              !ctx.browserPool
             ) {
-        try {
-          // Phase 24 — keyed by taskId, not userId. One task = one
-          // Brave (no shared instance, no refcount). The runFn
-          // .finally below calls release(taskId) to tear down
-          // immediately on completion. Per-user concurrency is gated
-          // upstream via getActiveTaskCount + plan limits.
-          const adopted = input.replyToTaskId
-              ? ctx.browserPool.adoptRetained(input.replyToTaskId, taskId, ctx.userId)
-            : null;
-          let allocatedForContinuation = false;
-          const instance = adopted
-            ? adopted
-              : await ctx.browserPool.allocate(taskId, ctx.userId, input.viewportProfile);
-          allocatedForContinuation = adopted == null;
-          const continuation = resolveBrowserFollowUpContinuation({
-            hasParentTask: Boolean(input.replyToTaskId),
-            parentHasBrowserContext,
-            adopted: adopted != null,
-            restoreUrl: parentBrowserRestoreUrl,
-          });
-          if (continuation === 'unavailable') {
-                  await ctx.browserPool
-                    .release(taskId, 'follow-up-page-unavailable')
-                    .catch(() => {});
-              throw new Error('当前浏览器页面已过期，且没有可恢复地址。请重新打开目标页面。');
-          }
-          if (continuation === 'restore') {
-            if (!parentBrowserRestoreUrl) {
-                await ctx.browserPool.release(taskId, 'follow-up-page-unavailable');
-                throw new Error('当前浏览器页面已过期，且没有可恢复地址。请重新打开目标页面。');
+              // Server-side browser tasks must use the per-task pool because that
+              // path is pinned to BrowserEgressProxy. A shared CDP fallback can only
+              // apply app-level URL checks and cannot eliminate DNS rebinding or
+              // subresource access to cloud metadata.
+              throw new TRPCError({
+                code: 'PRECONDITION_FAILED',
+                message: '安全浏览器执行环境尚未就绪，未创建任务。请稍后重试。',
+              });
             }
-              const decision = await defaultBrowserNetworkPolicy.check(parentBrowserRestoreUrl);
-            if (!decision.allowed) {
-              await ctx.browserPool.release(taskId, 'follow-up-url-blocked');
-              throw new Error(decision.message);
-            }
-            try {
-              await instance.executor.resetPageForTask();
-              const page = (await instance.executor.getPage()) as unknown as PageLike;
-                    const navigation = await instance.executor.navigate(
-                      page,
-                      parentBrowserRestoreUrl,
-                    );
-              if (!navigation.ok) {
-                  throw new Error(navigation.message ?? '无法恢复前一个任务的页面');
-              }
-              ctx.logger.info(
-                {
-                  sourceTaskId: input.replyToTaskId,
-                  destinationTaskId: taskId,
-                  userId: ctx.userId,
-                  url: parentBrowserRestoreUrl,
-                },
-                'pool: restored follow-up page after retained browser expired',
-              );
-            } catch (err) {
-              if (allocatedForContinuation) {
-                await ctx.browserPool
-                  .release(taskId, 'follow-up-page-restore-failed')
-                  .catch(() => {});
-              }
-              throw err;
-            }
-          }
-          perUserExec = instance.executor;
-            adoptedBrowserSession = continuation === 'adopted' || continuation === 'restore';
-          ctx.logger.info(
-              {
-                taskId,
-                userId: ctx.userId,
-                cdpPort: instance.cdpPort,
-                displayNum: instance.display,
-              },
-            'pool: allocated browser for task',
-          );
-        } catch (err) {
-          // No singleton fallback. The earlier behaviour ("degrade to
-          // shared Brave") could land a user's clicks on another
-          // user's session and bypassed the per-task hijack guards.
-          // Re-throw so dispatchToBrave aborts; the runFn .finally
-          // marks the task failed and the queue slot releases.
-          // Capacity errors should be rare since the queue gates on
-          // pool depth; treat them as alert-worthy when they hit.
-          ctx.logger.error(
-                  {
-                    err: err instanceof Error ? err.message : String(err),
-                    userId: ctx.userId,
-                    taskId,
-                  },
-            'pool: allocate failed — refusing to fall back to singleton, failing task',
-          );
-          const reason =
-            err instanceof Error ? err.message : `pool allocate failed: ${String(err)}`;
-          try {
-            await persistAndBroadcastBrowserDispatchFailure({
-              repo,
-              taskId,
-              userId: ctx.userId,
-              reason,
-              logger: ctx.logger,
-              broadcastToUser,
-            });
-          } finally {
-            if (willQueueDispatch) ctx.taskQueue?.signalSlotFreed();
-          }
-          return;
-        }
-      }
-
-      // primaryExecutor may be null when:
-      //   - the gate admitted via canShortCircuitBrave (simple-search,
-      //     no browser needed — Brave handles it); or
-      //   - the gate admitted via browserPoolEligible but pool.allocate
-      //     above raced and lost (Brave crashed mid-spawn).
-      // runSupercarTask's null-executor guard handles both: Brave/Zapier
-      // short-circuits fire first, and if neither matches it returns
-      // status='failed' with a clear "browser unavailable" reason.
-      // That marks the task failed in the DB rather than 500ing the
-      // tasks.create call, which would lose the audit trail.
-      const primaryExecutor = perUserExec ?? headedExec ?? headlessExec;
-      // Phase 22a — captured once at admit time so the runFn .finally
-      // below can release the slot without re-checking pool state.
-      const didAllocatePool = perUserExec !== null;
-      // Phase 19c follow-up — log which executor lane this task
-      // landed on. Lets BOSS confirm in pm2 logs that the per-user
-      // pool path is actually winning (and falling back to a
-      // singleton lane is the exception, not the rule). Helps
-      // future "agent operates on a different browser than the
-      // user is watching" reports get diagnosed in one log line.
-      const executorLane = input.localChrome ? 'local-chrome' : perUserExec
-        ? 'per-user-pool'
-        : primaryExecutor === headedExec
-          ? 'singleton-headed-fallback'
-          : primaryExecutor === headlessExec
-            ? 'singleton-headless-fallback'
-            : 'none';
-      ctx.logger.info(
-        { taskId, userId: ctx.userId, executorLane },
-        'task: executor lane selected',
-      );
-      // Phase 13 Dim 6 — single StatsService instance shared across
-      // all stats records the loop emits. Wiring is best-effort
-      // (StatsService.record swallows its own errors), so a stats
-      // backend hiccup never stalls the agent.
-      const statsService = new StatsService(ctx.db, ctx.logger);
-      const taskTypeForStats = classifyTaskType(input.intent);
-      // Phase 13 Dim 6 — optimal-lane hint from prior stats. Best-
-      // effort observability: derives the target site from any URL
-      // mention in the intent (e.g. "在 jd.com 搜..."), then logs
-      // the historically winning lane for (this user, that site).
-      // Routing decisions are unchanged this commit; the log line
-      // exists so we can validate the recommender empirically before
-      // wiring it to the gate. Null target_site → no lookup.
-      const intentSiteMatch = input.intent.match(
-        /\b(?:https?:\/\/)?((?:[a-z0-9-]+\.)+(?:com|cn|net|org|tech|ai|io|co))\b/i,
-      );
-            const intentTargetSite = intentSiteMatch
-              ? extractDomain(intentSiteMatch[1] ?? null)
+            const directOpenUrl =
+              !scrapeBrowserRetry && !input.localChrome && executionMode === 'browser'
+                ? extractRunnableDirectOpenUrl(input.intent, input.mode)
+                : null;
+            const directOpenSafetyError = directOpenUrl
+              ? await verifyDirectOpenUrlSafety(directOpenUrl)
               : null;
-      // Phase 14 — playbook-driven cold-start lane recommendation.
-      // The "router: cold-start lane from playbook" log fires when:
-      //   (a) intent has a URL but stats < 3 samples, OR
-      //   (b) intent has no URL but a playbook matched by name.
-      // The intent-only branch is a best-effort observability hook;
-      // routing decisions still go through the legacy gate this
-      // commit. Stats stay primary once they exceed the sample
-      // threshold (priority order in router-decision.ts).
-      const playbookForRouter = matchedPlaybooks[0] ?? null;
-      const routerTargetSite = intentTargetSite ?? playbookForRouter?.domain ?? null;
-      if (routerTargetSite) {
-        try {
-          const optimalLane = await statsService.getOptimalLane({
-            userIdInternal: userRow.id,
-            targetSite: routerTargetSite,
-          });
-          if (optimalLane) {
+            if (directOpenSafetyError) {
+              throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: directOpenSafetyError,
+              });
+            }
+            const directOpenFallbackExecutor = directOpenUrl
+              ? (ctx.playwrightExecutor ??
+                ctx.executionRouter?.getExecutor('headed') ??
+                ctx.executionRouter?.getExecutor('headless') ??
+                null)
+              : null;
+            const directOpenUsesBrowserPool = Boolean(
+              directOpenUrl && ctx.browserPool && shouldUseBrowserPool(ctx.userId),
+            );
+            if (directOpenUrl && !directOpenUsesBrowserPool && !directOpenFallbackExecutor) {
+              // Availability is deployment readiness. Reject before charging the
+              // user when no browser can produce the promised page evidence.
+              throw new TRPCError({
+                code: 'PRECONDITION_FAILED',
+                message: '浏览器执行器尚未就绪，未创建空白任务。请稍后重试。',
+              });
+            }
+            // Codex Round 2 P1-7 — explicit observability log at the dispatch
+            // boundary. Lets BOSS run `pm2 logs | grep task:expert_dispatch`
+            // to compare normal vs expert outcomes (expertModeRequested ==
+            // 'normal' AND expertWorkflowMatched != null = a forced-skip that
+            // would otherwise have fired a workflow — useful for measuring
+            // "did the user opt out of value or junk").
             ctx.logger.info(
               {
-                taskId,
-                taskType: taskTypeForStats,
-                targetSite: routerTargetSite,
-                optimalLane,
-                source: 'stats',
+                userId: ctx.userId,
+                expertModeRequested: expertModeOverride,
+                expertWorkflowMatched: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+                executionMode,
               },
-              'router: optimal lane from stats',
+              'task:expert_dispatch',
             );
-          } else if (playbookForRouter) {
-            ctx.logger.info(
-              {
-                taskId,
-                taskType: taskTypeForStats,
-                targetSite: routerTargetSite,
-                recommendedLane: playbookForRouter.preferredLane,
-                source: 'playbook',
-              },
-              'router: cold-start lane from playbook',
-            );
-            // Phase 14 (extension follow-up) — when the matched
-            // playbook flags this site as login-required AND the
-            // user has a live extension WS connection AND the
-            // extension reports them as logged in there, log a
-            // hint so we can later wire the chrome-extension
-            // transport as a higher-priority lane than headed.
-            // Read-only observability this commit; no routing
-            // change. Treats the playbook's own domain as
-            // canonical (covers the case where intent has no URL).
-            if (
-              playbookForRouter.loginRequired !== false &&
-              hasConnectedSwClient(ctx.userId) &&
-              getExtensionLoginState(ctx.userId, playbookForRouter.domain) === true
-            ) {
+            if (typedRoutingWorkflow != null && executionMode === 'generate') {
               ctx.logger.info(
                 {
-                  taskId,
-                  targetSite: playbookForRouter.domain,
-                  loginRequired: playbookForRouter.loginRequired,
+                  typedWorkflowId: typedRoutingWorkflow.workflowId,
+                  reportWorkflowId: typedWorkflow?.workflowId ?? null,
+                  classifiedExecutionMode,
+                  legacyRouteOverride: expertWorkflow?.routeOverride ?? null,
                 },
-                'router: extension lane available with verified login state',
+                'typed-workflow: forced generate lane',
               );
             }
-          } else {
-            ctx.logger.info(
-              { taskId, targetSite: routerTargetSite },
-              'router: no usable stats history for site (default route)',
-            );
-          }
-        } catch (err) {
-          ctx.logger.warn(
-            { err: err instanceof Error ? err.message : String(err) },
-            'router: stats lookup failed (non-fatal)',
-          );
-        }
-      }
-      // Per-task buffer of web_search results from the current
-      // iteration. onWebSearch pushes here; onTick (which fires once
-      // at the end of each iteration) flushes them into the persisted
-      // step's output JSON so a refresh-after-completion can rebuild
-      // webSearchByTask without replaying the WS frames. Local to
-      // dispatchToBrave so concurrent tasks don't share a buffer.
-      let pendingWebSearches: Array<{
-        readonly query: string;
-        readonly sources: ReadonlyArray<{ title: string; url: string; snippet?: string }>;
-      }> = [];
-      // Terminal source references are independent from the per-tick buffer:
-      // onTick clears the latter after persistence, while the final answer
-      // still needs the observed search URLs for its evidence boundary.
-      const observedWebSearchSources: Array<{ title: string; url: string }> = [];
-      // Codex P3 follow-up — per-task buffer of save_page_as_pdf
-      // results. Each successful call appends one entry here; the
-      // terminal-state merge below folds the list into
-      // `metadata.attachments` so the eval haystack + SPA AttachmentBar
-      // see every PDF the agent saved during the run (not just the
-      // last one). Local to the .create closure so concurrent tasks
-      // don't share state. Each entry mirrors the L1 screenshot
-      // attachment shape (`kind: 'pdf'`).
-      const pdfAttachments: Array<{
-        fileId: string;
-        downloadUrl: string;
-        filename: string;
-        mimetype: string;
-        sizeBytes: number;
-        expiresAt: string;
-        kind: 'pdf';
-      }> = [];
-      // Phase 1 Playbook B2 — per-action capture. Wire onAction ONLY when
-      // ACTION_CAPTURE is on; the agent-loop skips the whole capture (incl.
-      // the page.evaluate) when opts.onAction is absent → OFF = zero
-      // overhead. Persist is fire-and-forget (mirrors the onTick consumer).
-      const actionCaptureEnabled = getExecutionFeatureFlags().ACTION_CAPTURE;
-      const taskActionCaptureRepo = actionCaptureEnabled
-        ? new TaskActionCaptureRepository(ctx.db)
-        : null;
-      // Phase 1 Playbook B4 — screenshot anchor. Independent flag, AND
-      // ACTION_CAPTURE (rides the same onAction event). Instances built only
-      // when enabled; per-task counter caps R2 spend at MAX_SCREENSHOT_ANCHORS.
-      const screenshotAnchorEnabled =
-        actionCaptureEnabled && getExecutionFeatureFlags().B4_SCREENSHOT_ANCHOR;
-      const evidenceArtifactRepo = screenshotAnchorEnabled
-        ? new EvidenceArtifactRepository(ctx.db)
-        : null;
-      const sharedStorage = screenshotAnchorEnabled
-        ? getSharedStorageProvider({ logger: ctx.logger })
-        : null;
-      const MAX_SCREENSHOT_ANCHORS = 8;
-      let screenshotAnchorCount = 0;
-      // Phase 1 Playbook ④ prerequisite — wire the supercar loop to the
-      // shared LLM cost recorder so each browse turn lands in `llm_calls`
-      // (the loop builds its own Anthropic client and was never recorded →
-      // browse tasks showed $0). Recording is fire-and-forget inside the loop;
-      // a write failure only logs here.
-      const llmCallRecorder = new DrizzleLlmCallRecorder(ctx.db, {
-        onError: (err) =>
-          ctx.logger.warn(
-            { err: err instanceof Error ? err.message : String(err), taskId },
-            'supercar: llm_calls cost record failed (non-blocking)',
-          ),
-      });
-      const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
-          messagesAdapter: browserMessagesAdapter,
-          taskId,
-          ...(primaryExecutor && ctx.browserPool?.peek(taskId)?.executor === primaryExecutor ? { browserControlFactory: () => {
-            const instance = ctx.browserPool?.peek(taskId);
-            if (!instance || instance.userId !== ctx.userId || instance.executor !== primaryExecutor || instance.status !== 'ready') {
-              throw new Error('browser_control_instance_unavailable');
+            if (expertWorkflow?.routeOverride) {
+              ctx.logger.info(
+                {
+                  workflowId: expertWorkflow.id,
+                  routeOverride: expertWorkflow.routeOverride,
+                  classifiedExecutionMode,
+                  missingInputs: expertWorkflow.missingInputs,
+                },
+                'expert-workflow: route override applied',
+              );
             }
-            return browserControlSessions.start(instance);
-          } } : {}),
-          isTaskCancelled: () => repo.isTaskCancelled(taskId),
-          // Phase 1 Playbook ④ prerequisite — cost accounting for the browse
-          // loop (recorder + the external user id llm_calls.user_id needs).
-          recorder: llmCallRecorder,
-          userExternalId: ctx.userId,
-          // Phase 1 Playbook B4 — gate screenshot-anchor attachment in the loop
-          // (OFF → loop never attaches the screenshot = zero overhead).
-          captureScreenshotAnchors: screenshotAnchorEnabled,
-          // Phase 14 audit follow-up — feed the agent the parent-task
-          // context block when this is a 追问. DB still stores
-          // `input.intent` (what the user typed); only the model sees
-          // the prefixed version.
-          intent: effectiveIntent,
-          expertMode: expertModeOverride,
-          ...(memoryPreamble ? { memoryPreamble } : {}),
-          ...(playbookContext ? { playbookContext } : {}),
-          ...(planResult.planText ? { planText: planResult.planText } : {}),
-          ...(planResult.planStatus ? { planSteps: planResult.planStatus } : {}),
-          // Phase 13 Dim 1 follow-up — persist + broadcast every
-          // plan-step state change as the model emits markers. Best-
-          // effort: a DB blip or broadcast failure logs and continues
-          // (the loop already has the up-to-date state in memory).
-          onPlanStepUpdate: (steps) => {
-            void runTaskBackground(ctx, async (ctx) => (async () => {
-              const persisted = await repo.persistActivePlanStatus(taskId, steps);
-              if (!persisted.persisted) {
-                ctx.logger.info({ taskId }, 'plan-step skipped stale update');
-                return;
-              }
-              try {
-                broadcastToUser(ctx.userId, {
-                  type: 'server.task.plan_step',
-                  taskId,
-                  planStatus: steps,
-                });
-              } catch (err) {
-                ctx.logger.warn({ err, taskId }, 'plan-step broadcast failed');
-              }
-            })().catch((err) => ctx.logger.warn({ err, taskId }, 'plan-step persist failed')));
-          },
-          onStatsRecord: ({ laneUsed, targetSite, success, latencyMs, errorType }) => {
-            void runTaskBackground(ctx, async () => statsService.record({
-              userIdInternal: userRow.id,
-              taskExternalId: taskId,
-              taskType: taskTypeForStats,
-              targetSite,
-              laneUsed,
-              success,
-              latencyMs,
-              errorType,
-            }));
-          },
-          onEvidence: (ev) => {
-            try {
-              recordEvidence(taskId, ev);
-            } catch (err) {
+
+            // Phase 21a P0 — global queue-depth guard. Applies to ALL users,
+            // bypass or not, so a runaway client (or a bug elsewhere) can't
+            // pile tasks faster than the executor pool drains. Counts across
+            // pending/planning/queued/executing. Parked user-wait states do
+            // not consume executor capacity. The query hits an index on `status`, so this is
+            // sub-ms even at high concurrency.
+            const [activeRow] = await ctx.db
+              .select({ count: sql<number>`COUNT(*)` })
+              .from(tasksTable)
+              .where(inArray(tasksTable.status, [...TASK_QUEUE_DEPTH_STATUSES]));
+            const queueDepth = Number(activeRow?.count ?? 0);
+            // The browser retry replaces its own already-admitted scrape task.
+            if (!scrapeBrowserRetry && queueDepth >= GLOBAL_QUEUE_DEPTH_LIMIT) {
               ctx.logger.warn(
-                { err: err instanceof Error ? err.message : String(err), taskId },
-                'supercar: record evidence callback failed',
+                { userId: ctx.userId, queueDepth, limit: GLOBAL_QUEUE_DEPTH_LIMIT },
+                'tasks.create: rejected — global queue depth exceeded',
+              );
+              throw new TRPCError({
+                code: 'TOO_MANY_REQUESTS',
+                message: `系统繁忙（队列深度 ${queueDepth}/${GLOBAL_QUEUE_DEPTH_LIMIT}），请稍后再试。`,
+              });
+            }
+
+            // Phase 24 — per-user concurrency. With per-task browsers (one
+            // task = one Brave) the in-memory mode tracker is no longer
+            // needed — the DB total count of active tasks is the source of
+            // truth. Bypass users still get a higher ceiling (matches pool
+            // capacity so a single bypass user can saturate the pool, fine
+            // for testing). Non-bypass users get their plan limit (1/3/5).
+            const concurrencyLimit = isBypass ? BYPASS_CONCURRENCY : getConcurrencyLimit(planId);
+            const concurrentCount = await quotaService.getActiveTaskCount(userRow.id);
+            if (!scrapeBrowserRetry && concurrentCount >= concurrencyLimit) {
+              throw new TRPCError({
+                code: 'TOO_MANY_REQUESTS',
+                message: isBypass
+                  ? `bypass 并发上限 ${concurrencyLimit}（当前 ${concurrentCount}），请稍后再试。`
+                  : concurrencyExhaustedMessage(planId),
+              });
+            }
+
+            // Phase 21a P0 — per-bypass-user submission rate limit. In-memory
+            // sliding window (see quota/rate-limiter.ts). Only fires for users
+            // in the centrally configured unmetered test-account set today;
+            // non-bypass users are governed by
+            // their plan's monthly/daily counter (see tryConsume below) which
+            // is already a different shape of throttle.
+            if (isBypass && !scrapeBrowserRetry) {
+              const rl = rateLimitTryAcquire(ctx.userId, BYPASS_RATE);
+              if (!rl.ok) {
+                ctx.logger.warn(
+                  { userId: ctx.userId, count: rl.count, retryAfterMs: rl.retryAfterMs },
+                  'tasks.create: bypass rate limit hit',
+                );
+                throw new TRPCError({
+                  code: 'TOO_MANY_REQUESTS',
+                  message: `bypass 速率上限 ${BYPASS_RATE.max}/分钟，约 ${Math.ceil(rl.retryAfterMs / 1000)} 秒后重试。`,
+                });
+              }
+            }
+
+            // Follow-ups are free, and video quote creation is not a generated
+            // task yet. The latter consumes one regular task only after the user
+            // confirms a valid quote in confirmVideo.
+            //
+            // Bypass users also skip tryConsume — they're not on a metered
+            // plan for testing purposes. Concurrency + rate-limit + global
+            // queue-depth (above) provide all the throttling we need.
+            let opusActuallyConsumed = false;
+            // The scrape task already consumed this request's quota; its browser
+            // retry is the same task and is never charged again.
+            const consumeTaskQuotaOnCreate =
+              !scrapeBrowserRetry &&
+              shouldConsumeTaskQuotaOnCreate({
+                isBypass,
+                isFollowUp,
+                willCreateVideoQuote,
+              });
+            if (isBypass) {
+              opusActuallyConsumed = willConsumeOpus;
+              ctx.logger.info(
+                {
+                  userId: ctx.userId,
+                  queueDepth,
+                  concurrentCount,
+                  taskIntent: input.intent.slice(0, 60),
+                },
+                'tasks.create: bypass admit (concurrency + rate-limit ok)',
+              );
+            } else if (consumeTaskQuotaOnCreate) {
+              const consume = await quotaService.tryConsume(userRow.id, planId, willConsumeOpus);
+              if (!consume.ok) {
+                // Pro running out of Opus mid-task should downgrade to Sonnet
+                // automatically rather than block the task. Re-attempt with
+                // isOpus=false so the regular pool absorbs it.
+                if (consume.reason === 'opus_limit' && planId === 'pro') {
+                  const fallback = await quotaService.tryConsume(userRow.id, planId, false);
+                  if (!fallback.ok) {
+                    throw quotaErrorFor(fallback.reason);
+                  }
+                  ctx.logger.info(
+                    { userId: ctx.userId, taskIntent: input.intent.slice(0, 60) },
+                    'quota: opus exhausted — task will run on Sonnet',
+                  );
+                } else {
+                  throw quotaErrorFor(consume.reason);
+                }
+              }
+              opusActuallyConsumed = consume.ok && willConsumeOpus;
+              pendingQuotaCharge = { plan: planId, isOpus: opusActuallyConsumed };
+            } else if (isFollowUp) {
+              ctx.logger.info(
+                {
+                  userId: ctx.userId,
+                  replyToTaskId: input.replyToTaskId,
+                  taskIntent: input.intent.slice(0, 60),
+                },
+                'tasks.create: follow-up reply mode (quota skipped)',
+              );
+            } else {
+              ctx.logger.info(
+                {
+                  userId: ctx.userId,
+                  taskIntent: input.intent.slice(0, 60),
+                },
+                'tasks.create: video quote mode (quota deferred until confirmation)',
               );
             }
-          },
-          // Runtime safety boundary for ordinary user tasks. The
-          // supercar loop invokes this immediately before each live
-          // write action. Irreversible clicks park in awaiting_user
-          // and require a fresh confirmation; credentials remain
-          // takeover-only.
-          onBeforeAction: classifyRuntimeAction,
-          ...(taskActionCaptureRepo
-            ? {
-                onAction: (ev: SupercarActionCaptureEvent) => {
-                  if (!taskDbId || !taskActionCaptureRepo) return;
-                  // Fire-and-forget (mirrors the onTick consumer): a DB
-                  // failure only drops this capture row + logs; the browse
-                  // action is never awaited on it.
-                  void runTaskBackground(ctx, async (ctx) => (async () => {
-                    try {
-                      const capture = await taskActionCaptureRepo.create({
-                        taskId: taskDbId,
-                        siteDomain: ev.siteDomain,
-                        actionIndex: ev.actionIndex,
-                        stepType: ev.stepType,
-                        visibleText: ev.visibleText,
-                        targetSelectorJson: ev.targetSelector
-                          ? { selector: ev.targetSelector }
-                          : null,
-                        coordinateJson: ev.coordinate,
-                        framePath: ev.framePath,
-                        entryUrl: ev.entryUrl,
-                        inputValue: ev.inputValue,
-                      });
-                      // Phase 1 Playbook B4 — screenshot anchor (gated + capped).
-                      // Own try so a failure keeps the capture row above + never
-                      // blocks/throws. Counter bumped BEFORE upload = caps R2
-                      // ATTEMPTS (a failed upload still consumes the budget).
-                      if (
-                        ev.screenshotBase64 &&
-                        evidenceArtifactRepo &&
-                        sharedStorage &&
-                        screenshotAnchorCount < MAX_SCREENSHOT_ANCHORS
-                      ) {
-                        screenshotAnchorCount += 1;
-                        try {
-                          const buffer = Buffer.from(ev.screenshotBase64, 'base64');
-                          const sha256 = createHash('sha256').update(buffer).digest('hex');
-                          const { storagePath } = await sharedStorage.put({
-                            userExternalId: taskId,
+
+            // Compute these once — used both by the diagnostic log AND by the
+            // gate. Hoisting them up avoids re-classifying the intent twice.
+            const isSimpleSearchIntent = classifyAsSimpleSearch(input.intent);
+            /**
+             * Per-user pool fast lane: when the global headless singleton is
+             * dead but this user has (or can spawn) their own pool slot, we
+             * can still run supercar — the per-user Brave is functionally
+             * equivalent to the singleton from runSupercarTask's view. Sync
+             * `canAllocate` peek; the actual `allocate` happens inside the
+             * branch and may fail under race (Brave crash mid-spawn). When
+             * it does, primaryExecutor stays null and runSupercarTask's null
+             * guard fails the task gracefully — the gate doesn't have to
+             * second-guess. Without this condition, every PRD / 笔记 / 分析
+             * task fell through to vision-loop the moment the singleton
+             * crashed, defeating Phase 8 + Phase 10 entirely.
+             */
+            const browserPoolEligible = Boolean(
+              ctx.browserPool && shouldUseBrowserPool(ctx.userId) && ctx.browserPool.canAllocate(),
+            );
+
+            // ===== image-mode fork (sprint #5 — nano banana) =====
+            // 文生图 / 图生图 tasks: classify NB2 vs Pro, call Gemini, persist
+            // each PNG to R2, surface as FileDownloadCard via
+            // result.metadata.attachments. No agent loop, no pool slot, no
+            // verifier — a single outbound API call that produces a file.
+            //
+            // Provider readiness is checked before quota consumption above. Explicit
+            // image work never falls through to a text-only lane.
+            if (executionMode === 'image') {
+              const taskId = newExternalId('task');
+
+              await repo.insertTask(
+                {
+                  taskId,
+                  status: 'executing',
+                  plan: [],
+                  cursor: 0,
+                  pendingConfirm: null,
+                },
+                {
+                  userId: userRow.id,
+                  intent: input.intent,
+                  roleId: dispatchRoleId,
+                  opusUsed: false,
+                },
+              );
+
+              ctx.logger.info(
+                { taskId, userId: ctx.userId, executorLane: 'image', executionMode },
+                'task: executor lane selected',
+              );
+              broadcastSubStatus(ctx.userId, taskId, 'generating_image');
+
+              // Input images (图生图 / edit) come from the user's uploaded
+              // attachments, already parsed into base64 image content blocks.
+              const inputImages: Array<{ data: string; mimeType: string }> = [];
+              for (const b of attachmentBlocks) {
+                if (b.type === 'image' && b.source.type === 'base64') {
+                  inputImages.push({ data: b.source.data, mimeType: b.source.media_type });
+                }
+              }
+
+              const imageStartedAt = Date.now();
+              void runMediaTaskBackground(ctx, taskId, async (ctx) =>
+                (async () => {
+                  const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+                  const imageHeartbeat =
+                    taskInternalId == null
+                      ? null
+                      : startTaskHeartbeat(ctx.db, taskId, {
+                          onError: (error) => {
+                            ctx.logger.warn(
+                              { err: error.message, taskId },
+                              'image: task heartbeat failed',
+                            );
+                          },
+                        });
+                  try {
+                    let result: RunImageTaskResult;
+                    if (taskInternalId == null) {
+                      result = {
+                        status: 'failed',
+                        summary: '',
+                        reason: '任务记录丢失，请重试。',
+                        attachments: [],
+                      };
+                    } else {
+                      const save = async (
+                        img: { buffer: Buffer; mimeType: string },
+                        index: number,
+                      ): Promise<ImageAttachment> => {
+                        if (img.buffer.length > MAX_DOWNLOAD_BYTES) {
+                          throw new Error(
+                            `generated image too large (${img.buffer.length} bytes > ${MAX_DOWNLOAD_BYTES} cap)`,
+                          );
+                        }
+                        const ext =
+                          img.mimeType === 'image/jpeg'
+                            ? 'jpg'
+                            : img.mimeType === 'image/webp'
+                              ? 'webp'
+                              : img.mimeType === 'image/gif'
+                                ? 'gif'
+                                : 'png';
+                        const filename = `holaday-image-${index + 1}.${ext}`;
+                        if (ctx.downloadManager) {
+                          const saved = await ctx.downloadManager.save({
+                            userIdInternal: userRow.id,
+                            userExternalId: ctx.userId,
+                            taskIdInternal: taskInternalId,
+                            content: img.buffer,
+                            filename,
+                            mimetype: img.mimeType,
+                          });
+                          return {
+                            fileId: saved.fileId,
+                            downloadUrl: saved.downloadUrl,
+                            filename: saved.filename,
+                            mimetype: saved.mimetype,
+                            sizeBytes: saved.sizeBytes,
+                            expiresAt: saved.expiresAt.toISOString(),
                             kind: 'output',
-                            fileExternalId: newExternalId('file'),
-                            filename: 'anchor.jpg',
-                            buffer,
-                            mimetype: 'image/jpeg',
-                          });
-                          const artifact = await evidenceArtifactRepo.create({
-                            ownerUserId: userRow.id,
-                            taskId: taskDbId,
-                            artifactKind: 'screenshot',
-                            purpose: 'action_anchor',
-                            r2Bucket: process.env.R2_BUCKET ?? 'local',
-                            r2Key: storagePath,
-                            contentType: 'image/jpeg',
-                            sizeBytes: buffer.byteLength,
-                            sha256,
-                            capturedAt: new Date(),
-                            collectorLane: 'screenshot-anchor',
-                            retentionPolicy: 'manual_hold',
-                          });
-                          // Backfill the capture row's anchor FK BY PRIMARY KEY
-                          // (create() above returned the row + its id). PK is
-                          // unique + retry-safe: (task_id, action_index) is
-                          // NON-unique and the auto-retry wrapper re-runs the loop
-                          // with the same taskDbId + resets action_index, so it can
-                          // duplicate rows at the same action_index — keying on the
-                          // row's own id is the only target that hits exactly the
-                          // just-inserted capture row.
-                          await ctx.db
-                            .update(taskActionCaptures)
-                            .set({ screenshotAnchorId: artifact.id })
-                            .where(eq(taskActionCaptures.id, capture.id));
-                        } catch (e2) {
-                          ctx.logger.warn(
-                            { err: e2 instanceof Error ? e2.message : String(e2), taskId },
-                            'supercar: screenshot anchor failed (capture kept, anchor null)',
+                          };
+                        }
+                        const stored = await fileService.storeOutput({
+                          userIdInternal: userRow.id,
+                          userExternalId: ctx.userId,
+                          taskIdInternal: taskInternalId,
+                          filename,
+                          mimetype: img.mimeType,
+                          buffer: img.buffer,
+                        });
+                        return {
+                          fileId: stored.externalId,
+                          downloadUrl: `/api/files/${stored.externalId}/download`,
+                          filename: stored.filename,
+                          mimetype: stored.mimetype,
+                          sizeBytes: Number(stored.sizeBytes),
+                          expiresAt: stored.expiresAt
+                            ? stored.expiresAt.toISOString()
+                            : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+                          kind: 'output',
+                        };
+                      };
+
+                      result = await runImageTask({
+                        intent: input.intent,
+                        ...(inputImages.length > 0 ? { inputImages } : {}),
+                        ...(input.imageOptions?.aspectRatio
+                          ? { aspectRatio: input.imageOptions.aspectRatio }
+                          : {}),
+                        ...(input.imageOptions?.imageCount
+                          ? { imageCount: input.imageOptions.imageCount as 1 | 2 | 3 | 4 }
+                          : {}),
+                        ...(input.imageOptions?.mode ? { mode: input.imageOptions.mode } : {}),
+                        apiKey: appEnv.GEMINI_API_KEY,
+                        baseUrl: appEnv.GEMINI_BASE_URL,
+                        flashModel: appEnv.GEMINI_IMAGE_MODEL,
+                        proModel: appEnv.GEMINI_IMAGE_MODEL_PRO,
+                        ...(input.imageOptions?.model
+                          ? { preferredModel: input.imageOptions.model }
+                          : {}),
+                        save,
+                        logger: ctx.logger,
+                        ...(input.imageOptions?.mode === 'lock_subject' &&
+                        mediaServices.verifySubject
+                          ? { verifySubject: mediaServices.verifySubject }
+                          : {}),
+                      });
+                    }
+
+                    const metadata = {
+                      executionMode: 'image' as const,
+                      finalExecutionMode: 'image' as const,
+                      model: result.model ?? null,
+                      imageTier: result.tier ?? null,
+                      ...(input.imageOptions ? { imageOptions: input.imageOptions } : {}),
+                      elapsedMs: Date.now() - imageStartedAt,
+                      ...(result.subjectConsistency
+                        ? { subjectConsistency: result.subjectConsistency }
+                        : {}),
+                      ...(result.attachments.length > 0 ? { attachments: result.attachments } : {}),
+                    };
+
+                    ctx.logger.info(
+                      {
+                        taskId,
+                        userId: ctx.userId,
+                        runnerStatus: result.status,
+                        model: result.model ?? null,
+                        imageCount: result.attachments.length,
+                      },
+                      'task:completed',
+                    );
+
+                    let imagePersisted = false;
+                    try {
+                      if (result.status === 'completed' || result.status === 'partial_success') {
+                        const persisted = await repo.persistVisionOutcome(taskId, {
+                          status: result.status,
+                          summary: result.summary,
+                          tickCount: 1,
+                          metadata,
+                        });
+                        imagePersisted = persisted.persisted;
+                      } else {
+                        const persisted = await repo.persistVisionOutcome(taskId, {
+                          status: 'failed',
+                          reason: result.reason ?? '图片生成失败，请稍后重试。',
+                          tickCount: 1,
+                          metadata,
+                        });
+                        imagePersisted = persisted.persisted;
+                        if (persisted.persisted) {
+                          await notifyMediaGenerationFailed(
+                            {
+                              taskId,
+                              userIdInternal: userRow.id,
+                              lane: 'image',
+                              reason: result.reason ?? '图片生成失败，请稍后重试。',
+                              nothingDelivered: result.attachments.length === 0,
+                            },
+                            ctx.logger,
                           );
                         }
                       }
                     } catch (err) {
-                      ctx.logger.warn(
-                        { err: err instanceof Error ? err.message : String(err), taskId },
-                        'supercar: persist action capture failed',
+                      ctx.logger.error({ err, taskId }, 'image: persist failed');
+                    }
+
+                    try {
+                      if (
+                        imagePersisted &&
+                        (result.status === 'completed' || result.status === 'partial_success')
+                      ) {
+                        broadcastToUser(ctx.userId, {
+                          type: 'server.task.terminal',
+                          taskId,
+                          status: result.status,
+                          ...(result.summary ? { summary: result.summary } : {}),
+                          // P1 timing fix: ship attachments ON the terminal frame so
+                          // the SPA renders the image card WITH the summary text
+                          // instead of after a separate tasks.detail round-trip
+                          // (was: text "已生成1张图片" first, thumbnail seconds later).
+                          ...(result.attachments.length > 0
+                            ? { attachments: result.attachments }
+                            : {}),
+                        });
+                      } else if (imagePersisted) {
+                        broadcastToUser(ctx.userId, {
+                          type: 'server.task.terminal',
+                          taskId,
+                          status: 'failed',
+                          ...(result.reason ? { reason: result.reason } : {}),
+                        });
+                      }
+                    } catch (err) {
+                      ctx.logger.warn({ err, taskId }, 'image: broadcast terminal failed');
+                    }
+                  } finally {
+                    imageHeartbeat?.stop();
+                  }
+                })().catch(async (err) => {
+                  const reason = '图片生成异常中断，请重试。';
+                  ctx.logger.error({ err, taskId }, 'image: detached runner rejected');
+                  try {
+                    const persisted = await repo.persistVisionOutcome(taskId, {
+                      status: 'failed',
+                      reason,
+                      tickCount: 1,
+                      metadata: {
+                        executionMode: 'image',
+                        finalExecutionMode: 'image',
+                        ...(input.imageOptions ? { imageOptions: input.imageOptions } : {}),
+                        elapsedMs: Date.now() - imageStartedAt,
+                        failureSource: 'detached_runner',
+                      },
+                    });
+                    if (persisted.persisted) {
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.task.terminal',
+                        taskId,
+                        status: 'failed',
+                        reason,
+                      });
+                      await notifyMediaGenerationFailed(
+                        {
+                          taskId,
+                          userIdInternal: userRow.id,
+                          lane: 'image',
+                          reason,
+                          nothingDelivered: true,
+                        },
+                        ctx.logger,
                       );
                     }
-                  })());
-                },
-              }
-            : {}),
-          executor: primaryExecutor,
-          preserveExistingPage: adoptedBrowserSession,
-          domain: classification.domain,
-          // Swap target: the NON-primary browser. When headed was
-          // used as primary, a stuck/anti-bot signal falls back to
-          // headless (in case Brave is what's being fingerprinted).
-          // When headless is primary (Brave unavailable), swap
-          // points at nothing — agent-loop no-ops the swap. Per-user
-          // pool mode has no fallback — the user's own Brave is the
-          // only tab they're watching, swapping to a shared headless
-          // would stream frames of the wrong page.
-          headedExecutor: perUserExec
-              ? null
-              : primaryExecutor === headedExec
-              ? (headlessExec ?? null)
-                : null,
-          zapierAdapter: ctx.executionRouter?.zapier ?? null,
-          apifyAdapter: ctx.executionRouter?.apify ?? null,
-          firecrawl: ctx.firecrawl ?? null,
-          isSimpleSearch: isSimpleSearchIntent,
-          isCrossPlatformAutomation: classifyAsCrossPlatformAutomation(input.intent),
-          zapierWebhookPath: process.env.ZAPIER_WEBHOOK_PATH ?? null,
-          // Pass the resolved dispatch context so prompt-layers cannot
-          // resurrect the raw classifier match. Manual skills win over
-          // automatic role classification; otherwise this is the gated role.
-          roleIdOverride: dispatchSkillId ?? 'none',
-          // Phase 10 Tier 3 — attachments parsed above, prepended to
-          // the agent's first user message before the screenshot.
-          ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
-          // Phase 10 Tier 3 — per-plan create_file format whitelist.
-          // Empty list (free) suppresses the tool entirely; basic gets
-          // text-shaped formats only; pro gets office formats too.
-          createFileFormats: allowedFormatsForPlan(planId),
-          // Closure that lazily resolves the task's DB id (the supercar
-          // queue runs async; the row exists by the time the model
-          // calls a tool). Stores the buffer + index row, then returns
-          // a download URL the model embeds in the final summary.
-          // Phase 3 R3 L2 — save_page_as_pdf storage callback. The
-          // supercar loop renders the page to a PDF Buffer; we just
-          // persist it via DownloadManager (which enforces the 50MB
-          // cap + builds the URL). Only wired when downloadManager
-          // exists on ctx (always true in prod boot path; nullable
-          // in test deps).
-          ...(ctx.downloadManager
-            ? {
-                async onSavePageAsPdf({
-                  filename,
-                  pdfBuffer,
-                }: {
-                  filename: string;
-                  pdfBuffer: Buffer;
-                }) {
-                  try {
-                    const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
-                    if (taskInternalId == null) {
-                      return { error: 'task row not found' };
-                    }
-                    const saved = await ctx.downloadManager!.save({
-                      userIdInternal: userRow.id,
-                      userExternalId: ctx.userId,
-                      taskIdInternal: taskInternalId,
-                      content: pdfBuffer,
-                      filename,
-                      mimetype: 'application/pdf',
-                    });
-                    // Codex P3 follow-up — accumulate per-task so the
-                    // terminal-state merge folds every saved PDF into
-                    // metadata.attachments. Previously the model's tool
-                    // result text was the only record of the PDF, which
-                    // meant the SPA's AttachmentBar + eval haystack saw
-                    // none of the saved PDFs.
-                    pdfAttachments.push({
-                      fileId: saved.fileId,
-                      downloadUrl: saved.downloadUrl,
-                      filename: saved.filename,
-                      mimetype: saved.mimetype,
-                      sizeBytes: saved.sizeBytes,
-                      expiresAt: saved.expiresAt.toISOString(),
-                      kind: 'pdf',
-                    });
-                    return {
-                      fileId: saved.fileId,
-                      filename: saved.filename,
-                      sizeBytes: saved.sizeBytes,
-                      downloadUrl: saved.downloadUrl,
-                    };
-                  } catch (err) {
-                    return {
-                      error: err instanceof Error ? err.message : String(err),
-                    };
+                  } catch (persistErr) {
+                    ctx.logger.error(
+                      { err: persistErr, taskId },
+                      'image: detached failure could not be persisted',
+                    );
                   }
-                },
-              }
-            : {}),
-          async onCreateFile({ filename, format, content }) {
-            if (!isCreateFileFormat(format)) {
-              return { error: `unsupported format: ${format}` };
-            }
-            try {
-              const rendered = await renderFile(format, content);
-              const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
-              if (taskInternalId == null) {
-                return { error: 'task row not found' };
-              }
-              const stored = await fileService.storeOutput({
-                userIdInternal: userRow.id,
-                userExternalId: ctx.userId,
-                taskIdInternal: taskInternalId,
-                filename,
-                mimetype: rendered.mimetype,
-                buffer: rendered.buffer,
-              });
+                }),
+              );
+
               return {
-                fileId: stored.externalId,
-                filename: stored.filename,
-                size: stored.sizeBytes,
-                downloadUrl: `/api/files/${stored.externalId}/download`,
-              };
-            } catch (err) {
-              return {
-                error: err instanceof Error ? err.message : String(err),
+                taskId,
+                status: 'executing' as const,
+                steps: [],
+                executionMode: 'image' as const,
               };
             }
-          },
-          onTick(ev) {
-            // Selected Chrome supplies receipt-backed records; other
-            // runners retain their existing per-iteration projection.
-            //
-            // Also bump the per-user pool's lastActiveAt so an active
-            // task never trips the 30-min idle GC — pool.touch is a
-            // no-op when the user isn't on a pool slot.
-            if (ctx.browserPool && perUserExec) {
-              ctx.browserPool.touch(taskId);
-            }
-            const fallbackSummary = ev.textPreamble
-              ? truncateString(stripPlanTrackerMarkers(ev.textPreamble), 80)
-              : ev.toolsInTurn.join(', ') || 'thinking';
-            const receipt = taskTickReceipt(ev, fallbackSummary);
-            const { actionKind, actionSummary } = receipt;
-            const now = Date.now();
-            try {
-              broadcastToUser(userId, {
-                type: 'server.vision.tick.start',
-                taskId,
-                tickIndex: ev.iteration,
-                mode: 'screenshot',
-              });
-              broadcastToUser(userId, {
-                type: 'server.vision.tick.end',
-                taskId,
-                tickIndex: ev.iteration,
-                mode: 'screenshot',
-                actionKind,
-                actionSummary,
-                durationMs: ev.apiLatencyMs,
-                ok: receipt.ok,
-                ...(receipt.message ? { message: receipt.message } : {}),
-              });
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'supercar: broadcast tick failed');
-            }
-            // Persist the iteration to task_steps so history survives
-            // reloads — same shape the legacy vision-loop uses.
-            // Snapshot + reset pendingWebSearches so the async insert
-            // below sees this iteration's batch even if the next
-            // iteration starts before the insert finishes.
-            const webSearches = pendingWebSearches;
-            pendingWebSearches = [];
-            if (taskDbId) {
-              void runTaskBackground(ctx, async (ctx) => (async () => {
-                try {
-                  await ctx.db.insert(taskSteps).values({
-                    externalId: newExternalId('taskStep'),
-                    taskId: taskDbId,
-                    seq: ev.iteration,
-                    kind: actionKind,
-                    status: receipt.status,
-                    riskLevel: 'low',
-                    input: { summary: actionSummary },
-                    output: {
-                      apiLatencyMs: ev.apiLatencyMs,
-                      tools: ev.toolsInTurn,
-                      ...(ev.execution ? { execution: ev.execution } : {}),
-                      ...(webSearches.length > 0 ? { webSearches } : {}),
+            // ===== end image-mode fork =====
+
+            // ===== video-creation fork (Phase 1 #4 原方案, flag + allowlist 灰度) =====
+            // 两段式:Phase1 出 awaiting_user 报价卡(只跑 optimize=LLM,零 Veo);确认走
+            // tasks.confirmVideo(结构化按钮)。Veo 烧钱严格在 confirmVideo 的原子抢占之后。
+            // 默认 VIDEO_CREATION_ENABLED=false：视频意图会在扣额前硬拒绝，
+            // 绝不静默降级到通用 generate。
+            // biome-ignore lint/complexity/noUselessLoneBlockStatements: scopes the video-creation fork; Biome's fix would drop the section comments above
+            {
+              // 视频意图:分类器命中 video_creation,或选了 video-creator 技能,**或**前端「视频任务」
+              // 界面显式带了 videoOptions.tab(普通/宠物/IP)。后者是关键——宠物动作 prompt / IP 口播文案
+              // 本身不含「视频」关键词,分类器会判 generate;只有 videoOptions.tab 这个显式信号能可靠把
+              // 三类 tab 提交都送进视频 fork(只有视频界面会设它,其它 createTask 路径绝不带)。
+              if (willCreateVideoQuote && mediaServices.scriptLlm) {
+                const scriptLlm = mediaServices.scriptLlm;
+                const { buildFallbackVideoScript, optimizeUserScript, segmentCapForText } =
+                  await import('../../agent/video/video-script.js');
+                // Phase 2 第一期 — SPA「普通视频」面板把模型档/风格/画幅/画质/时长带上来。
+                const vOpts = input.videoOptions ?? {};
+
+                // Explicit pet i2v is separate from human character-swap. Never
+                // interpret a missing reference clip as an implicit clone fallback.
+                if (vOpts.tab === 'pet' && vOpts.petModel && !vOpts.referenceVideoFileId) {
+                  if (
+                    !vOpts.petImageFileId ||
+                    !(await fileService.retainInputForUser(vOpts.petImageFileId, userRow.id))
+                  ) {
+                    throw new TRPCError({
+                      code: 'BAD_REQUEST',
+                      message: '宠物照片不可用，请重新上传。',
+                    });
+                  }
+                  const [petPhoto] = await fileService.loadMany([vOpts.petImageFileId], userRow.id);
+                  if (!petPhoto || !/^image\/(png|jpeg|webp)$/.test(petPhoto.row.mimetype)) {
+                    throw new TRPCError({
+                      code: 'BAD_REQUEST',
+                      message: '请上传 JPG / PNG / WebP 宠物照片。',
+                    });
+                  }
+                  const duration = vOpts.durationSeconds ?? 5;
+                  if (![3, 5].includes(duration))
+                    throw new TRPCError({
+                      code: 'BAD_REQUEST',
+                      message: '宠物视频请选择3秒或5秒。',
+                    });
+                  const quote = quotePetI2v(duration, vOpts.petModel, vOpts.resolution ?? '1080p');
+                  const taskId = newExternalId('task');
+                  await repo.insertTask(
+                    { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
+                    {
+                      userId: userRow.id,
+                      intent: input.intent,
+                      roleId: 'video-creator',
+                      opusUsed: false,
                     },
-                    startedAt: new Date(now - ev.apiLatencyMs),
-                    completedAt: new Date(now),
+                  );
+                  const initialized = await repo.persistInitialAwaitingUser({
+                    taskExternalId: taskId,
+                    question: quote.message,
+                    awaitingKind: 'video_quote',
+                    result: {
+                      summary: quote.message,
+                      metadata: {
+                        lane: 'video_creation_confirm',
+                        petImageFileId: vOpts.petImageFileId,
+                        petModel: vOpts.petModel,
+                        i2vPrompt: input.intent,
+                        videoOptions: { ...vOpts, durationSeconds: duration },
+                      },
+                    },
                   });
+                  if (!initialized.persisted)
+                    throw new TRPCError({
+                      code: 'INTERNAL_SERVER_ERROR',
+                      message: '视频报价初始化失败，请重试。',
+                    });
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.supercar.awaiting_user',
+                    taskId,
+                    question: quote.message,
+                    awaitingKind: 'video_quote',
+                  });
+                  return {
+                    taskId,
+                    status: 'awaiting_user' as const,
+                    steps: [],
+                    executionMode: 'generate' as const,
+                  };
+                }
+
+                // ===== 复刻视频 — Wan Animate 2.2 真实角色替换 =====
+                // 主角图片 + 参考视频均以独立 typed fileId 保存；确认后再签短期 URL
+                // 调用 character-swap。没有参考视频时绝不降级为单图 i2v。
+                if (vOpts.tab === 'pet') {
+                  if (!vOpts.petImageFileId || !vOpts.referenceVideoFileId) {
+                    throw new TRPCError({
+                      code: 'BAD_REQUEST',
+                      message: '复刻视频需要主角照片和参考视频。',
+                    });
+                  }
+                  const quoteAssetPreflight = await preflightCloneVideoAssets(
+                    {
+                      subjectFileId: vOpts.petImageFileId,
+                      referenceVideoFileId: vOpts.referenceVideoFileId,
+                    },
+                    async (fileId) => {
+                      const retained = await fileService.retainInputForUser(fileId, userRow.id);
+                      return retained ? fileService.signedReadUrl(fileId, userRow.id, 300) : null;
+                    },
+                  );
+                  if (quoteAssetPreflight.issue || !quoteAssetPreflight.referenceVideoUrl) {
+                    throw new TRPCError({
+                      code: 'BAD_REQUEST',
+                      message: '主角照片或参考视频不可用，请重新上传。',
+                    });
+                  }
+                  let quoteFacts: Awaited<ReturnType<typeof probeCloneReferenceQuoteFacts>>;
+                  try {
+                    quoteFacts = await probeCloneReferenceQuoteFacts(
+                      quoteAssetPreflight.referenceVideoUrl,
+                    );
+                  } catch {
+                    throw new TRPCError({
+                      code: 'BAD_REQUEST',
+                      message: '参考视频无法读取，或时长不在 2 到 30 秒之间，请重新上传。',
+                    });
+                  }
+                  const cloneMode: WanAnimateMixMode = vOpts.cloneMode ?? 'wan-std';
+                  const cloneQuote = quoteCloneVideo(quoteFacts.durationSeconds, cloneMode, {
+                    hasAudibleAudio: quoteFacts.hasAudibleAudio,
+                    lipSyncModel: appEnv.FAL_CLONE_LIPSYNC_MODEL,
+                  });
+                  const taskId = newExternalId('task');
+                  await repo.insertTask(
+                    { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
+                    {
+                      userId: userRow.id,
+                      intent: input.intent,
+                      roleId: 'video-creator',
+                      opusUsed: false,
+                    },
+                  );
+                  const initialized = await repo.persistInitialAwaitingUser({
+                    taskExternalId: taskId,
+                    question: cloneQuote.message,
+                    awaitingKind: 'video_quote',
+                    result: {
+                      summary: cloneQuote.message,
+                      metadata: {
+                        lane: 'video_creation_confirm',
+                        petImageFileId: vOpts.petImageFileId,
+                        referenceVideoFileId: vOpts.referenceVideoFileId,
+                        referenceVideoDurationSeconds: quoteFacts.durationSeconds,
+                        referenceVideoHasAudibleAudio: quoteFacts.hasAudibleAudio,
+                        cloneMode,
+                        videoOptions: vOpts,
+                      },
+                    },
+                  });
+                  if (!initialized.persisted) {
+                    throw new TRPCError({
+                      code: 'INTERNAL_SERVER_ERROR',
+                      message: '视频报价任务初始化失败，请重试。',
+                    });
+                  }
+                  ctx.logger.info(
+                    {
+                      taskId,
+                      userId: ctx.userId,
+                      executorLane: 'video_creation_confirm',
+                      cloneMode,
+                      videoCny: cloneQuote.videoCny,
+                    },
+                    'task: executor lane selected (clone video)',
+                  );
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.supercar.awaiting_user',
+                    taskId,
+                    question: cloneQuote.message,
+                    awaitingKind: 'video_quote',
+                  });
+                  return {
+                    taskId,
+                    status: 'awaiting_user' as const,
+                    steps: [],
+                    executionMode: 'generate' as const,
+                  };
+                }
+                // ===== end 复刻视频分支 =====
+
+                // ===== IP 人物 换口型分支 (Phase 2 第三期, B 架构单 clip 口播) =====
+                // 门控:三件齐(克隆声音 + 出镜底版 + 本人授权)才放行;缺则引导去 onboarding。
+                // 无 optimize 多段那套:全文案直接 quoteIpVideo → 报价卡 → confirmVideo 跑 B lane。
+                if (vOpts.tab === 'ip_person') {
+                  const ipReady =
+                    !!userRow.qwenVoiceId &&
+                    !!userRow.baseVideoFileId &&
+                    !!userRow.videoSelfUseAuthorizedAt;
+                  if (!ipReady) {
+                    throw new TRPCError({
+                      code: 'BAD_REQUEST',
+                      message:
+                        '请先在「视频任务 → IP 人物」完成素材准备(本人授权 + 声音 + 出镜底版)。',
+                    });
+                  }
+                  const ipQuote = quoteIpVideo(input.intent, appEnv.FAL_LIPSYNC_MODEL);
+                  const taskId = newExternalId('task');
+                  await repo.insertTask(
+                    { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
+                    {
+                      userId: userRow.id,
+                      intent: input.intent,
+                      roleId: 'video-creator',
+                      opusUsed: false,
+                    },
+                  );
+                  const initialized = await repo.persistInitialAwaitingUser({
+                    taskExternalId: taskId,
+                    question: ipQuote.message,
+                    awaitingKind: 'video_quote',
+                    result: {
+                      summary: ipQuote.message,
+                      metadata: {
+                        lane: 'video_creation_confirm',
+                        ipCopyText: input.intent,
+                        videoOptions: vOpts,
+                      },
+                    },
+                  });
+                  if (!initialized.persisted) {
+                    throw new TRPCError({
+                      code: 'INTERNAL_SERVER_ERROR',
+                      message: '视频报价任务初始化失败，请重试。',
+                    });
+                  }
+                  ctx.logger.info(
+                    {
+                      taskId,
+                      userId: ctx.userId,
+                      executorLane: 'video_creation_confirm',
+                      ipChars: ipQuote.chars,
+                      videoCny: ipQuote.videoCny,
+                    },
+                    'task: executor lane selected (ip lip-sync)',
+                  );
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.supercar.awaiting_user',
+                    taskId,
+                    question: ipQuote.message,
+                    awaitingKind: 'video_quote',
+                  });
+                  return {
+                    taskId,
+                    status: 'awaiting_user' as const,
+                    steps: [],
+                    executionMode: 'generate' as const,
+                  };
+                }
+                // ===== end IP 人物分支 =====
+
+                const style = vOpts.style as VideoStyle | undefined;
+                const tier: VideoSource = vOpts.model ?? 'veo_fast';
+                if (
+                  videoParameterIssue({
+                    model: tier,
+                    resolution: vOpts.resolution ?? '1080p',
+                    durationSeconds: vOpts.durationSeconds ?? 8,
+                  })
+                ) {
+                  throw new TRPCError({
+                    code: 'BAD_REQUEST',
+                    message: 'Veo 1080p 仅支持 8 秒，请选择 8 秒或改用 720p 标清。',
+                  });
+                }
+                const quoteTaskId = newExternalId('task');
+                const quoteCosts = deferredTaskCosts(ctx, quoteTaskId);
+                let script: VideoScript | null = null;
+                try {
+                  // optimize = LLM(~¥0.01),**非 Veo**。出真实段数以便动态报价;风格只调画面语气。
+                  // 段数按文案内容量定上限(segmentCapForText):一句话→1~2 段,长文案→6 段。
+                  // 避免短文案被硬凑成 6 段 48s、报价虚高(quoteVideo = 段数 × 每段秒数)。
+                  const segCap = segmentCapForText(input.intent);
+                  script = await quoteCosts.run(() =>
+                    optimizeUserScript(
+                      { userText: input.intent, maxSegments: segCap, ...(style ? { style } : {}) },
+                      { llm: scriptLlm },
+                    ),
+                  );
                 } catch (err) {
                   ctx.logger.warn(
-                    { err, taskId, iteration: ev.iteration },
-                    'supercar: persist step failed',
+                    { err, userId: ctx.userId },
+                    'video_creation: optimize(报价前) failed — using faithful single-segment fallback',
                   );
+                  script = buildFallbackVideoScript(input.intent);
                 }
-              })());
-            }
-          },
-          onScreencast(ev) {
-            try {
-              broadcastToUser(userId, {
-                type: 'server.vision.screencast',
-                taskId,
-                tickIndex: ev.iteration,
-                imageBase64: ev.imageBase64,
-                url: ev.url,
-                viewport: { width: ev.viewportWidth, height: ev.viewportHeight },
-                timestamp: new Date().toISOString(),
-              });
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'supercar: broadcast screencast failed');
-            }
-          },
-          onWebSearch(ev) {
-            // Broadcasts as a synthetic tick so the UI shows a step
-            // card for the search. No screencast — web_search is
-            // server-side and has no DOM to capture. Sources (when
-            // present) are forwarded so the SearchResultCard can
-            // render favicon + title + snippet rows.
-            //
-            // Also buffer for the next onTick so the persisted step
-            // row carries the sources — this is what lets a SPA
-            // refresh-after-completion rebuild webSearchByTask from
-            // tasks.detail instead of needing a WS replay.
-            pendingWebSearches.push({
-              query: ev.query,
-              sources: ev.sources ?? [],
-            });
-            if (ev.sources?.length) {
-              observedWebSearchSources.push(...ev.sources);
-            }
-            try {
-              broadcastToUser(userId, {
-                type: 'server.supercar.web_search',
-                taskId,
-                iteration: ev.iteration,
-                query: ev.query,
-                ...(ev.sources && ev.sources.length > 0 ? { sources: ev.sources } : {}),
-              });
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'supercar: broadcast web_search failed');
-            }
-          },
-          async onAwaitingUser(ev) {
-            let awaitingPersisted = false;
-            try {
-              const persisted = await repo.persistAwaitingUser({
-                taskExternalId: taskId,
-                question: ev.question,
-                awaitingKind: ev.awaitingKind,
-              });
-              awaitingPersisted = persisted.persisted;
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'supercar: persist awaiting_user state failed');
-            }
-            if (!awaitingPersisted) return;
-            try {
-              broadcastToUser(userId, {
-                type: 'server.supercar.awaiting_user',
-                taskId,
-                question: ev.question,
-                // P2-A — propagate kind to the SPA so the BrowserPanel
-                // doesn't have to guess. WS receivers older than this
-                // build will ignore the field (zod passthrough).
-                awaitingKind: ev.awaitingKind,
-              });
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'supercar: broadcast awaiting_user failed');
-            }
-            // Phase 1 follow-up — stamp `executionMode='browser'`,
-            // `finalUrl`, AND `finalScreenshot` into result on park.
-            //
-            // Why screenshot on park (not just on terminal):
-            // when the user refreshes the page during a login park,
-            // the WS screencast disconnects and the BrowserPanel
-            // would otherwise show a blank `about:blank`. With a
-            // persisted `finalScreenshot` the SPA renders the last
-            // visible frame instead of empty space.
-            //
-            // Why executionMode here: analytics / eval pipeline lane
-            // classification reads result.metadata.executionMode OR
-            // result.executionMode; without this, login parks fall
-            // through to lane='unknown'.
-            const parkUrl = ev.currentUrl;
-            void runTaskBackground(ctx, async (ctx) => (async () => {
-              try {
-                // Capture a screenshot off the per-task Brave. This
-                // shares the captureFinalState helper used at terminal
-                // — best-effort, returns {} on any failure (no
-                // executor / page closed / capture timeout).
-                const captured = perUserExec
-                  ? await captureFinalState({
-                      executor: {
-                        getPage: () => perUserExec.getPage(),
-                        screenshot: (page, options) =>
-                          perUserExec.screenshot(
-                            page as unknown as Parameters<PlaywrightExecutor['screenshot']>[0],
-                            options,
-                          ),
+                if (script) {
+                  const quote = quoteVideo(script.segments.length, tier, {
+                    ...(vOpts.resolution ? { resolution: vOpts.resolution } : {}),
+                    ...(vOpts.durationSeconds ? { durationSeconds: vOpts.durationSeconds } : {}),
+                    ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}),
+                  });
+                  const taskId = quoteTaskId;
+                  await repo.insertTask(
+                    { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
+                    {
+                      userId: userRow.id,
+                      intent: input.intent,
+                      roleId: 'video-creator',
+                      opusUsed: false,
+                    },
+                  );
+                  await quoteCosts.flush();
+                  // Initial awaiting_user quote: stamp awaitingKind/result and
+                  // write the matching task.awaiting_user event in one repository call.
+                  // result.metadata 存 videoScript(确认后复用,保证段数=报价段数)+ lane(给
+                  // consumeVideoConfirm 原子抢占识别)。
+                  const initialized = await repo.persistInitialAwaitingUser({
+                    taskExternalId: taskId,
+                    question: quote.message,
+                    awaitingKind: 'video_quote',
+                    result: {
+                      summary: quote.message,
+                      metadata: {
+                        lane: 'video_creation_confirm',
+                        videoScript: script,
+                        videoTier: tier,
+                        videoOptions: vOpts,
                       },
-                      logger: ctx.logger,
-                      taskId,
-                    })
-                  : {};
-                const [row] = await ctx.db
-                  .select({ result: tasksTable.result })
-                  .from(tasksTable)
-                  .where(eq(tasksTable.externalId, taskId))
-                  .limit(1);
-                const prev = (row?.result ?? {}) as Record<string, unknown>;
-                const next: Record<string, unknown> = {
-                  ...prev,
-                  executionMode: 'browser',
-                };
-                // Prefer the URL the agent gave us via the event;
-                // fall back to whatever captureFinalState read off
-                // the page if `ev.currentUrl` was undefined.
-                const finalUrl = parkUrl ?? captured.finalUrl;
-                if (finalUrl) next.finalUrl = finalUrl;
-                if (captured.finalScreenshot) {
-                  next.finalScreenshot = captured.finalScreenshot;
-                }
-                if (captured.finalViewport) {
-                  next.finalViewport = captured.finalViewport;
-                }
-                const persisted = await repo.persistAwaitingUserResult({
-                  taskExternalId: taskId,
-                  awaitingKind: ev.awaitingKind,
-                  result: next,
-                });
-                if (!persisted.persisted) {
+                    },
+                  });
+                  if (!initialized.persisted) {
+                    throw new TRPCError({
+                      code: 'INTERNAL_SERVER_ERROR',
+                      message: '视频报价任务初始化失败，请重试。',
+                    });
+                  }
                   ctx.logger.info(
-                    { taskId, awaitingKind: ev.awaitingKind },
-                    'supercar: skipped stale park metadata write',
+                    {
+                      taskId,
+                      userId: ctx.userId,
+                      executorLane: 'video_creation_confirm',
+                      segs: script.segments.length,
+                      videoCny: quote.videoCny,
+                    },
+                    'task: executor lane selected',
                   );
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.supercar.awaiting_user',
+                    taskId,
+                    question: quote.message,
+                    awaitingKind: 'video_quote',
+                  });
+                  return {
+                    taskId,
+                    status: 'awaiting_user' as const,
+                    steps: [],
+                    executionMode: 'generate' as const,
+                  };
                 }
-              } catch (err) {
-                ctx.logger.warn({ err, taskId }, 'supercar: persist park metadata failed');
               }
-            })());
-          },
-          onThinking(summary) {
-            try {
-              broadcastToUser(userId, {
-                type: 'server.supercar.thinking',
-                taskId,
-                summary: truncateString(summary, 2_000),
-              });
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'supercar: broadcast thinking failed');
             }
-          },
-          onAntiBotSignal(ev) {
-            // Reuse the vision-loop captcha_detected frame shape so the
-            // task-store's existing captcha-wait banner lights up
-            // without any frontend changes. BrowserPanel auto-flips to
-            // interactive mode (Phase 2) when this fires, so the user
-            // can solve a slider captcha in-panel.
-            try {
-              broadcastToUser(userId, {
-                type: 'server.vision.captcha_detected',
-                taskId,
-                antiBotType: ev.signal.type,
-                message: describeSignal(ev.signal),
-                waitTimeoutMs: ev.waitTimeoutMs,
-              });
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'supercar: broadcast captcha_detected failed');
-            }
-          },
-          onAntiBotResolved(ev) {
-            try {
-              broadcastToUser(userId, {
-                type: 'server.vision.captcha_resolved',
-                taskId,
-                reason: ev.reason,
-              });
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'supercar: broadcast captcha_resolved failed');
-            }
-          },
-        };
-      // Phase 1 Day 5 Round 2 — initialise execution pipeline for
-      // the supercar/browser lane. No-op when flags are off. Light
-      // tier per the original Phase 1 spec (browser → light): the
-      // verifier checks data_present + URL grounding + the optional
-      // url_match (only when the resolver supplied a target domain).
-      // Per-step navigation evidence isn't instrumented in agent-loop
-      // yet — the post-runner hook below seeds the ledger with the
-      // terminal browser state + response_length, which is enough
-      // for the light-tier criteria to evaluate meaningfully.
-      initExecution({
-        taskId,
-        intent: input.intent,
-        executionMode: 'browser',
-        expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
-        expertMode: expertModeOverride,
-        hasAttachments: attachmentBlocks.length > 0,
-      });
-      // Codex Pack B1 — planning chip (supercar/browser lane). The
-      // browsing chip fires later, right before the agent loop spins
-      // up Brave; here we just signal that the runner is staged.
-      broadcastSubStatus(ctx.userId, taskId, 'planning');
-      // Captures the verifier's verdict so the .finally() persist
-      // block can serialise it after the run terminates. Stays null
-      // for any path that doesn't reach the verify hook (failures,
-      // handoffs to generate, runner exceptions) — those rows just
-      // get contract + ledger persisted with verification=null.
-      let executionVerification: VerificationResult | null = null;
-      const browserStartedAt = Date.now();
-      // Phase 3 R1 — outer watchdog. The agent-loop has its OWN
-      // deadline (SUPERCAR_TIMEOUT_MS, default 10 min) but if the
-      // loop wedges (an Anthropic fetch never resolves, a Playwright
-      // command hangs, etc.) the .finally() below never fires and
-      // Brave + the per-task pool slot stay allocated until the
-      // process restarts. The watchdog fires `internalDeadline +
-      // 30s` and force-releases Brave + clears the pool slot. Idempotent
-      // with the .finally release (browser-pool.release on a
-      // non-allocated slot no-ops).
-      const SUPERCAR_TIMEOUT_MS = Number.parseInt(
-        process.env.SUPERCAR_TIMEOUT_MS ?? '600000',
-        10,
-      );
-      const WATCHDOG_GRACE_MS = 30_000;
-      let watchdogFinalized = false;
-      const watchdogTimer = setTimeout(() => {
-        ctx.logger.warn(
-          {
-            taskId,
-            userId: ctx.userId,
-            watchdogMs: SUPERCAR_TIMEOUT_MS + WATCHDOG_GRACE_MS,
-          },
-          'supercar: watchdog fired — forcing brave release (agent-loop may be wedged)',
-        );
-        // Step 1: tell agent-loop to abort. If it's in a non-blocking
-        // state (between API calls / tool steps) it'll exit cleanly
-        // and the .finally below still fires the regular release.
-        try {
-          localChromeTaskSessions.abort(ctx.userId, taskId);
-          supercarAbort(taskId);
-        } catch {
-          /* swallow — abort is best-effort */
-        }
-        // Step 2: mark the user-visible task terminal. The old
-        // watchdog only released Brave; if the agent loop stayed
-        // wedged, the DB row remained `executing` until the next
-        // orchestrator restart boot-sweep. That looked like an
-        // endless task to the user and kept quota/concurrency noisy.
-        void runTaskBackground(ctx, async (ctx) => (async (): Promise<void> => {
-          const reason = '任务执行超时，已自动停止。建议：简化任务描述后重试。';
-          try {
-            const persisted = await repo.persistVisionOutcome(taskId, {
-              status: 'failed',
-              reason,
-              tickCount: 0,
-              errorCode: 'SUPERCAR_WATCHDOG_TIMEOUT',
-              metadata: { executionMode: 'browser', watchdog: true },
-            });
-            watchdogFinalized = persisted.persisted;
-            if (persisted.persisted) {
-              broadcastToUser(userId, {
-                type: 'server.task.terminal',
-                taskId,
-                status: 'failed',
-                reason,
-              });
-            }
-          } catch (err) {
-            watchdogFinalized = false;
-            ctx.logger.warn(
-              { err: err instanceof Error ? err.message : String(err), taskId },
-              'supercar: watchdog failed to persist terminal timeout',
+            // ===== end video-creation fork =====
+
+            // ===== a-share 即时问答 fork (Phase 1 #2 ④, flag + allowlist 灰度) =====
+            // 命中 a-share 个股问答 → 自取数组装确定性事实卡 → LLM③解读 → 合规闸门
+            // （越线降级纯数据 + 打日志计数）→ 直接完成任务。镜像 template-fill lane：
+            // 无 agent loop、无 pool slot、背景 async 出答案后 persist + 广播 terminal。
+            // 默认 ASHARE_QA_ENABLED=false：关时落通用 generate 路径，零副作用。
+            // BOSS 拍板门控（持久启用式 + signal-based）：**启用** a-share 技能（users.selectedSkills）
+            // 或显式选技能（skillId/roleId/gatedRole）= 上下文内。上下文内**命中任一 A股信号**（个股
+            // 解析成功 / A股术语 / 持仓语境词 / 自选股整体问）→ 进合规框架（lane 或引导兜底）；**完全无
+            // A股信号**（如「帮我写周报」）→ 放行通用路径，不误拦。per-task 选择器(发 skillId)记 backlog。
+            const ashareSkillEnabled = normalizeSkillIds(userRow.selectedSkills).some((id) =>
+              ASHARE_SKILL_IDS.has(id),
             );
-          }
-        })());
-        // Step 3: force-release the per-task Brave even if abort
-        // didn't take. The pool's release method is idempotent: a
-        // second call when the slot is already torn down no-ops.
-        if (didAllocatePool && ctx.browserPool) {
-            const releasingPool = ctx.browserPool;
-            void runTaskBackground(ctx, async (ctx) => releasingPool.release(taskId, 'watchdog-force-release').catch((relErr) => {
-              ctx.logger.warn(
-                { err: relErr, taskId, userId: ctx.userId },
-                'pool: watchdog force-release failed',
-              );
-            }));
-        }
-      }, SUPERCAR_TIMEOUT_MS + WATCHDOG_GRACE_MS);
-      // Mark the timer as unref'd so it doesn't keep the Node process
-      // alive on shutdown — the pool's own draining handles cleanup.
-      watchdogTimer.unref?.();
-      // Codex Pack B1 — browsing chip fires right before the agent
-      // loop actually runs (Brave allocate, first tool call, etc.).
-      broadcastSubStatus(ctx.userId, taskId, 'browsing');
-      // B-专项 Step 2 — read-only OTA user-browser lane. ONLY when the
-      // OTA_USER_BROWSER flag is on AND the user's extension is online
-      // AND the intent matches an OTA-prefer site. Otherwise this is a
-      // no-op and the task runs the server-Brave supercar exactly as
-      // today. The readonly runner uses the extension's Mode B
-      // navigate/screenshot channel (no chrome.debugger, no click/type,
-      // no order/pay) and returns a SupercarOutcome consumed by the same
-      // terminal handler below.
-      // Step 2.5 — canary-scoped gate. user-browser-readonly fires ONLY
-      // for an allowlisted user + allowlisted OTA domain + online
-      // extension, on top of the master flag. Empty allowlists (prod
-      // default) ⇒ nobody is canaried ⇒ server Brave for everyone.
-      const otaExtensionOnline = hasConnectedExtension(ctx.userId);
-      const otaMasterEnabled =
-        getExecutionFeatureFlags().OTA_USER_BROWSER && Boolean(legacyMediaModelClient);
-            const otaAllowedDomains = parseOtaAllowlist(
-              process.env.OTA_USER_BROWSER_ALLOWED_DOMAINS,
-            );
-      const otaCanary = resolveOtaCanaryLane({
-        intent: input.intent,
-        userId: ctx.userId,
-        extensionOnline: otaExtensionOnline,
-        masterEnabled: otaMasterEnabled,
-        allowedUserIds: parseOtaAllowlist(process.env.OTA_USER_BROWSER_ALLOWED_USER_IDS),
-        allowedDomains: otaAllowedDomains,
-      });
-      const useOtaUserBrowser = otaCanary.lane === 'user-browser';
-      if (otaCanary.lane !== null) {
-        // Rollout audit — every OTA-prefer task records its gate outcome.
-        ctx.logger.info(
-          {
-            event: 'ota.user_browser.rollout',
-            taskId,
-            userId: ctx.userId,
-            domain: otaCanary.matchedDomain,
-            flagEnabled: otaMasterEnabled,
-            userAllowed: otaCanary.userAllowed,
-            domainAllowed: otaCanary.domainAllowed,
-            extensionOnline: otaExtensionOnline,
-            intentSubtype: otaCanary.intentSubtype,
-            subtypeReason: otaCanary.reason,
-            decision: otaCanary.lane,
-            reason: otaCanary.reason,
-          },
-          'ota: user-browser rollout decision',
-        );
-      }
-      const runUserBrowserReadonly = (): Promise<SupercarOutcome> =>
-        runOtaUserBrowserReadonly({
-          taskId,
-          intent: effectiveIntent,
-          deps: {
-            client: legacyMediaModelClient!,
-            dispatchNavigate: async (url: string) => {
-              const r = await sendExtensionToolCall(ctx.userId, {
-                taskId,
-                kind: 'navigate',
-                args: { url },
-              });
-              return r.ok
-                  ? {
-                      ok: true,
-                      result: r.result as { finalUrl: string; title: string; bodyText: string },
-                    }
-                : { ok: false, error: r.error };
-            },
-            dispatchScreenshot: () =>
-              sendExtensionToolCall(ctx.userId, { taskId, kind: 'screenshot' }),
-            audit: (rec) => ctx.logger.info(rec, 'ota: user-browser audit'),
-                  onProgress: (message) =>
-                    broadcastSubStatus(ctx.userId, taskId, 'browsing', message),
-            logger: ctx.logger,
-            allowedDomains: otaAllowedDomains,
-          },
-        });
-      const runLocalChrome = async () => {
-        if (!input.localChrome) throw new Error('chrome_selection_required');
-        const session = localChromeTaskSessions.get(userId, taskId);
-        if (!session) throw new Error('chrome_session_unavailable');
-        const { extensionClientId: _connection, ...target } = input.localChrome;
-        return runSelectedChromeTask({
-            taskId, intent: effectiveIntent, messagesAdapter: browserMessagesAdapter,
-            client: session.client, control: session.control, target,
-            signal: session.cancellation.signal, isTaskCancelled: supercarArgs.isTaskCancelled,
-            recorder: llmCallRecorder, userExternalId: userId,
-            onTick: supercarArgs.onTick, onThinking: supercarArgs.onThinking,
-            createFileFormats: supercarArgs.createFileFormats,
-            onCreateFile: supercarArgs.onCreateFile,
-        });
-      };
-      const runFn = () =>
-        (input.localChrome ? runLocalChrome() : useOtaUserBrowser
-          ? runUserBrowserReadonly()
-          : runSupercarWithRetry(supercarArgs, { userId, taskId, logger: ctx.logger })
-        )
-          .then(async (outcome) => {
-            ctx.logger.info(
-                {
-                  taskId,
-                  status: outcome.status,
-                  iterations: outcome.iterations,
-                  toolsUsed: outcome.toolsUsed,
-                },
-              'supercar: task terminated',
-            );
-            if (watchdogFinalized) {
-              ctx.logger.warn(
-                { taskId, status: outcome.status },
-                'supercar: late runner outcome ignored after watchdog terminal persist',
-              );
-              return;
-            }
-            // F1 — handoff to generate. User replied with manual data
-            // (numeric metrics, "数据如下:", etc.); supercar exited
-            // without continuing the browser loop. Run generate against
-            // the original intent + the user's data and persist THAT
-            // outcome under this task id. No new task row, no quota
-            // re-charge — same task, same id, just a different runner.
-            if (outcome.status === 'handoff_to_generate') {
-              const userManualData = outcome.question ?? '';
-              const combinedIntent = [
-                input.intent,
-                  userManualData ? `\n\n[用户提供的数据]\n${userManualData}` : '',
-                ]
-                  .join('')
-                  .trim();
-              ctx.logger.info(
-                {
-                  taskId,
-                  userId,
-                  manualDataLen: userManualData.length,
-                  combinedIntentLen: combinedIntent.length,
-                },
-                'supercar: handoff to generate runner',
-              );
-              const handoffStartedAt = Date.now();
-              const handoffGenerateRuntime = resolveGenerateRuntimeForUser(
+            const ashareContext =
+              ashareSkillEnabled ||
+              (taskSkillId ? ASHARE_SKILL_IDS.has(taskSkillId) : false) ||
+              ASHARE_SKILL_IDS.has(gatedRole) ||
+              input.taskSource === 'stock_dashboard';
+            // Cross-session guard (#1 session, 2026-06-13, see SESSION_STATUS): only
+            // enter the a-share QA lane for GENERIC info intents — a dedicated lane the
+            // classifier already chose (template_fill / image / browser) must win, or
+            // the matcher hijacks it (bug: "按这个周报模板填充…" → answered as stock 600415).
+            // widen（BOSS 批准，④ 验收关闭）：ASHARE_QA_ALLOWLIST 为空 = 全量用户可用（flag on）；
+            // 非空 = 仅名单内（灰度）。
+            if (specializedStockLaneEligible) {
+              const stockRuntime = resolveGenerateRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
               );
-              const handoffGenerateResponsesAdapter =
-                handoffGenerateRuntime.kind === 'ready'
-                  ? handoffGenerateRuntime.responses('standard')
-                  : null;
-              let generateOutcome: GenerateOutcome;
-              try {
-                generateOutcome = handoffGenerateResponsesAdapter
-                  ? await runGenerateTask({
+              const { ashareMessagesAdapter, createAshareModelCallers } = await import(
+                '../../agent/a-share/ashare-model-callers.js'
+              );
+              const stockMessagesAdapter = ashareMessagesAdapter(stockRuntime);
+              const { resolveAshareQa, resolveAshareInContext } = await import(
+                '../../agent/a-share/ashare-qa-matcher.js'
+              );
+              const { listWatchlistForUser } = await import(
+                '../../agent/a-share/briefing-service.js'
+              );
+              const watchlist = validatedStockContext
+                ? validatedStockContext.snapshotPayload.watchlistStocks.map((stock) => ({
+                    symbol: stock.symbol,
+                    displayName: typeof stock.name === 'string' ? stock.name : null,
+                  }))
+                : (await listWatchlistForUser(ctx.db, userRow.id)).map((stock) => ({
+                    symbol: stock.symbol,
+                    displayName: stock.displayName,
+                  }));
+              const stockAnalysis = selectStockAnalysisInput(
+                validatedStockContext,
+                new (await import('../../agent/a-share/akshare-http-client.js')).HttpAkshareClient({
+                  baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+                  logger: ctx.logger,
+                }),
+                new Date(),
+              );
+              const aksClient = stockAnalysis.client;
+              const stockAnalysisNow = stockAnalysis.submittedAt;
+              const publicValidatedStockContext = publicStockTaskContext(validatedStockContext);
+              const stockAnswerPrefix = validatedStockContext
+                ? `分析基于 ${validatedStockContext.dataAsOf} 数据。\n\n`
+                : '';
+              const searchFn = async (q: string) => {
+                const env = await aksClient.searchSymbol(q);
+                return (env.data ?? [])
+                  .map((r) => ({
+                    symbol: String(r.code ?? ''),
+                    displayName: r.name != null ? String(r.name) : null,
+                  }))
+                  .filter((s) => s.symbol);
+              };
+              let ashareQaMatch: Awaited<ReturnType<typeof resolveAshareQa>> = null;
+              let guidanceNeeded = false;
+              let indexIntent = false;
+              if (ashareContext) {
+                // 上下文内：命中个股 → 个股 lane；指数/大盘问句 → 指数 lane；命中信号但无个股/非
+                // 指数 → 引导兜底；无信号 → 放行通用。
+                const r = await resolveAshareInContext(
+                  { intent: input.intent, watchlist, now: stockAnalysis.matchNow },
+                  searchFn,
+                );
+                ashareQaMatch = r.match;
+                indexIntent = r.indexIntent;
+                guidanceNeeded = !r.match && !r.indexIntent && r.hasSignal;
+              } else {
+                // 非上下文（未启用/未选技能）：强信号(术语+个股)出 lane，否则放行（无引导兜底）。
+                ashareQaMatch = await resolveAshareQa(
+                  {
+                    intent: input.intent,
+                    roleId: taskSkillId ?? null,
+                    watchlist,
+                    now: stockAnalysis.matchNow,
+                  },
+                  searchFn,
+                );
+              }
+              if (ashareQaMatch) {
+                const taskId = newExternalId('task');
+                await repo.insertTask(
+                  { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
+                  {
+                    userId: userRow.id,
+                    intent: input.intent,
+                    roleId: dispatchRoleId,
+                    opusUsed: false,
+                    ...(stockTaskSourceContext ? { sourceContext: stockTaskSourceContext } : {}),
+                  },
+                );
+                ctx.logger.info(
+                  {
+                    taskId,
+                    userId: ctx.userId,
+                    executorLane: ashareQaMatch.deep ? 'ashare_panorama' : 'ashare_qa',
+                    kind: ashareQaMatch.kind,
+                    stocks: ashareQaMatch.stocks.map((s) => s.symbol),
+                  },
+                  'task: executor lane selected',
+                );
+                broadcastSubStatus(ctx.userId, taskId, 'generating');
+
+                if (!stockMessagesAdapter) {
+                  const reasonCode =
+                    stockRuntime.kind === 'unavailable'
+                      ? stockRuntime.reasonCode
+                      : 'MODEL_MIGRATION_IN_PROGRESS';
+                  const reason = modelTaskFailureReason(reasonCode);
+                  const terminal = await repo.persistVisionOutcome(taskId, {
+                    status: 'failed',
+                    reason,
+                    tickCount: 0,
+                    errorCode: reasonCode,
+                    metadata: {
+                      executionMode: 'generate',
+                      finalExecutionMode: 'generate',
+                      lane: 'ashare_qa',
+                      reasonCode,
+                      ...(publicValidatedStockContext
+                        ? { stockContext: publicValidatedStockContext }
+                        : {}),
+                    },
+                  });
+                  if (terminal.persisted) {
+                    broadcastToUser(ctx.userId, {
+                      type: 'server.task.terminal',
                       taskId,
-                      userId: ctx.userId,
-                      intent: combinedIntent,
-                      workflowOverride: typedWorkflow,
-                      skillId: dispatchSkillId,
-                      expertMode: expertModeOverride,
-                      responsesAdapter: handoffGenerateResponsesAdapter,
-                      logger: ctx.logger,
-                      ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
-                      onStreamDelta: (delta) => {
-                        try {
-                          broadcastToUser(userId, {
-                            type: 'server.task.stream',
+                      status: 'failed',
+                      reason,
+                    });
+                  }
+                  return {
+                    taskId,
+                    status: 'failed' as const,
+                    steps: [],
+                    executionMode: 'generate' as const,
+                  };
+                }
+
+                void runTaskBackground(ctx, async (ctx) =>
+                  withMediaCallContext(
+                    {
+                      recorder: new DrizzleLlmCallRecorder(ctx.db, {
+                        onError: () =>
+                          ctx.logger.warn(
+                            { taskId, code: 'LLM_ACCOUNTING_WRITE_FAILED' },
+                            'ashare: accounting unavailable',
+                          ),
+                      }),
+                      userExternalId: ctx.userId,
+                      taskExternalId: taskId,
+                    },
+                    async () => {
+                      const { runAshareQa, runAsharePanorama } = await import(
+                        '../../agent/a-share/ashare-qa-runner.js'
+                      );
+                      // 技能 markdown（人设/红线）→ DB skills.manifest.body；缺则内置兜底人设
+                      // （合规硬约束已在 runner 的 system prompt，故缺 markdown 也安全）。
+                      let skillMarkdown: string | null = null;
+                      try {
+                        const { skills } = await import('../../db/schema/skills.js');
+                        const [row] = await ctx.db
+                          .select({ manifest: skills.manifest })
+                          .from(skills)
+                          .where(inArray(skills.slug, Array.from(ASHARE_SKILL_IDS)))
+                          .limit(1);
+                        const body = (row?.manifest as { body?: unknown } | null)?.body;
+                        if (typeof body === 'string' && body.trim()) skillMarkdown = body;
+                      } catch (err) {
+                        ctx.logger.warn(
+                          { err, taskId },
+                          'ashare-qa: 技能 markdown 读取失败，用兜底人设',
+                        );
+                      }
+                      const FALLBACK_PERSONA =
+                        '你是严谨的 A股信息分析助手：只聚合公开信息、客观陈述事实，绝不荐股、不预测涨跌、不给买卖或择时建议。';
+                      let answer: string;
+                      let terminalStatus: 'completed' | 'failed' = 'completed';
+                      try {
+                        // deep 意图（详细分析/全面看看）→ 七维全景版（含 ④基本面⑤估值 + ⑦分析师视角）；
+                        // 否则轻量速览（①②③ + ③解读）。⑦ prompt 自含人设，不依赖 skillMarkdown。
+                        const runner = ashareQaMatch.deep ? runAsharePanorama : runAshareQa;
+                        const r = await runner(
+                          {
+                            client: aksClient,
+                            skillMarkdown: skillMarkdown ?? FALLBACK_PERSONA,
+                            // 模型目录 generate 通道（standard 档）：③/⑦ 解读温度0.3；⑦ 意图判官（第二层，
+                            // ASHARE_INTENT_JUDGE_ENABLED 控制）温度0。参数见 ashare-model-callers.ts。
+                            ...createAshareModelCallers(stockMessagesAdapter, {
+                              judgeEnabled: appEnv.ASHARE_INTENT_JUDGE_ENABLED,
+                            }),
+                            // Phase 2「看懂层」P1：腿A 逐指标注解开关（默认 OFF，零新增 LLM）。
+                            seethrough: appEnv.ASHARE_SEETHROUGH_ENABLED,
+                            // ④ 风险信号雷达 P1：腿A 确定性检测开关（默认 OFF，零新增 LLM）。
+                            riskRadar: appEnv.ASHARE_RISK_RADAR_ENABLED,
+                            // P3 F 走势组 P1：腿A K线波动总结开关（默认 OFF，零新增 LLM）。
+                            perfTrend: appEnv.ASHARE_PERF_TREND_ENABLED,
+                            logger: ctx.logger,
+                            now: stockAnalysisNow,
+                            context: { userId: ctx.userId, taskId },
+                          },
+                          ashareQaMatch,
+                        );
+                        answer = `${stockAnswerPrefix}${r.answer}`;
+                        ctx.logger.info(
+                          {
                             taskId,
-                            delta,
+                            degraded: r.degraded,
+                            reason: r.reason,
+                            interpreted: r.interpreted,
+                          },
+                          'ashare-qa: lane done',
+                        );
+                      } catch (err) {
+                        ctx.logger.error({ err, taskId }, 'ashare-qa: lane failed');
+                        answer = `${stockAnswerPrefix}抱歉，A股问答处理失败，请稍后重试。`;
+                        terminalStatus = 'failed';
+                      }
+                      try {
+                        let asharePersisted = false;
+                        const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+                        if (taskInternalId != null) {
+                          if (terminalStatus === 'completed') {
+                            const persisted = await repo.persistVisionOutcome(taskId, {
+                              status: 'completed',
+                              summary: answer,
+                              tickCount: 1,
+                              metadata: {
+                                executionMode: 'generate',
+                                lane: 'ashare_qa',
+                                ...(publicValidatedStockContext
+                                  ? { stockContext: publicValidatedStockContext }
+                                  : {}),
+                              },
+                            });
+                            asharePersisted = persisted.persisted;
+                          } else {
+                            const persisted = await repo.persistVisionOutcome(taskId, {
+                              status: 'failed',
+                              reason: answer,
+                              tickCount: 1,
+                              metadata: {
+                                executionMode: 'generate',
+                                lane: 'ashare_qa',
+                                ...(publicValidatedStockContext
+                                  ? { stockContext: publicValidatedStockContext }
+                                  : {}),
+                              },
+                            });
+                            asharePersisted = persisted.persisted;
+                          }
+                        }
+                        if (asharePersisted && terminalStatus === 'completed') {
+                          broadcastToUser(ctx.userId, {
+                            type: 'server.task.terminal',
+                            taskId,
+                            status: 'completed',
+                            summary: answer,
                           });
+                        } else if (asharePersisted) {
+                          broadcastToUser(ctx.userId, {
+                            type: 'server.task.terminal',
+                            taskId,
+                            status: 'failed',
+                            reason: answer,
+                          });
+                        }
+                      } catch (err) {
+                        ctx.logger.error({ err, taskId }, 'ashare-qa: persist/broadcast failed');
+                      }
+                    },
+                  ),
+                );
+
+                return {
+                  taskId,
+                  status: 'executing' as const,
+                  steps: [],
+                  executionMode: 'generate' as const,
+                };
+              }
+              // 指数 lane（E16）：「查今天A股三大指数收盘 / 大盘怎么样」类指数/大盘问句 → 确定性
+              // 三大指数速览卡（无 LLM、无闸门），不进个股 lane（防普通词 name-search 误命中个股）。
+              if (indexIntent) {
+                const { buildIndexCard } = await import('../../agent/a-share/ashare-fact-card.js');
+                const taskId = newExternalId('task');
+                await repo.insertTask(
+                  { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
+                  {
+                    userId: userRow.id,
+                    intent: input.intent,
+                    roleId: dispatchRoleId,
+                    opusUsed: false,
+                    ...(stockTaskSourceContext ? { sourceContext: stockTaskSourceContext } : {}),
+                  },
+                );
+                ctx.logger.info(
+                  { taskId, userId: ctx.userId, executorLane: 'ashare_index' },
+                  'task: executor lane selected',
+                );
+                broadcastSubStatus(ctx.userId, taskId, 'generating');
+                void runTaskBackground(ctx, async (ctx) =>
+                  (async () => {
+                    let answer: string;
+                    let terminalStatus: 'completed' | 'failed' = 'completed';
+                    try {
+                      answer = `${stockAnswerPrefix}${await buildIndexCard({ client: aksClient, now: stockAnalysisNow })}`;
+                    } catch (err) {
+                      ctx.logger.error({ err, taskId }, 'ashare-index: lane failed');
+                      answer = `${stockAnswerPrefix}抱歉，A股大盘指数查询处理失败，请稍后重试。`;
+                      terminalStatus = 'failed';
+                    }
+                    try {
+                      let indexPersisted = false;
+                      const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+                      if (taskInternalId != null) {
+                        if (terminalStatus === 'completed') {
+                          const persisted = await repo.persistVisionOutcome(taskId, {
+                            status: 'completed',
+                            summary: answer,
+                            tickCount: 1,
+                            metadata: {
+                              executionMode: 'generate',
+                              lane: 'ashare_index',
+                              ...(publicValidatedStockContext
+                                ? { stockContext: publicValidatedStockContext }
+                                : {}),
+                            },
+                          });
+                          indexPersisted = persisted.persisted;
+                        } else {
+                          const persisted = await repo.persistVisionOutcome(taskId, {
+                            status: 'failed',
+                            reason: answer,
+                            tickCount: 1,
+                            metadata: {
+                              executionMode: 'generate',
+                              lane: 'ashare_index',
+                              ...(publicValidatedStockContext
+                                ? { stockContext: publicValidatedStockContext }
+                                : {}),
+                            },
+                          });
+                          indexPersisted = persisted.persisted;
+                        }
+                      }
+                      if (indexPersisted && terminalStatus === 'completed') {
+                        broadcastToUser(ctx.userId, {
+                          type: 'server.task.terminal',
+                          taskId,
+                          status: 'completed',
+                          summary: answer,
+                        });
+                      } else if (indexPersisted) {
+                        broadcastToUser(ctx.userId, {
+                          type: 'server.task.terminal',
+                          taskId,
+                          status: 'failed',
+                          reason: answer,
+                        });
+                      }
+                    } catch (err) {
+                      ctx.logger.error({ err, taskId }, 'ashare-index: persist/broadcast failed');
+                    }
+                  })(),
+                );
+                return {
+                  taskId,
+                  status: 'executing' as const,
+                  steps: [],
+                  executionMode: 'generate' as const,
+                };
+              }
+              // P0 兜底（BOSS 要求①）：上下文内命中 A股信号（持仓语境词/术语）但没解析出个股 →
+              // 静态引导话术，**绝不落通用 LLM**。无 A股信号的问句 guidanceNeeded=false，正常放行
+              // 通用路径（如「帮我写周报」不误拦）。
+              if (guidanceNeeded) {
+                const { ASHARE_QA_GUIDANCE } = await import(
+                  '../../agent/a-share/ashare-qa-runner.js'
+                );
+                const guidanceAnswer = `${stockAnswerPrefix}${ASHARE_QA_GUIDANCE}`;
+                const taskId = newExternalId('task');
+                await repo.insertTask(
+                  { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
+                  {
+                    userId: userRow.id,
+                    intent: input.intent,
+                    roleId: dispatchRoleId,
+                    opusUsed: false,
+                    ...(stockTaskSourceContext ? { sourceContext: stockTaskSourceContext } : {}),
+                  },
+                );
+                ctx.logger.info(
+                  { taskId, userId: ctx.userId, executorLane: 'ashare_qa_guidance' },
+                  'task: executor lane selected',
+                );
+                void runTaskBackground(ctx, async (ctx) =>
+                  (async () => {
+                    try {
+                      let guidancePersisted = false;
+                      const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+                      if (taskInternalId != null) {
+                        const persisted = await repo.persistVisionOutcome(taskId, {
+                          status: 'completed',
+                          summary: guidanceAnswer,
+                          tickCount: 1,
+                          metadata: {
+                            executionMode: 'generate',
+                            lane: 'ashare_qa_guidance',
+                            ...(publicValidatedStockContext
+                              ? { stockContext: publicValidatedStockContext }
+                              : {}),
+                          },
+                        });
+                        guidancePersisted = persisted.persisted;
+                      }
+                      if (guidancePersisted) {
+                        broadcastToUser(ctx.userId, {
+                          type: 'server.task.terminal',
+                          taskId,
+                          status: 'completed',
+                          summary: guidanceAnswer,
+                        });
+                      }
+                    } catch (err) {
+                      ctx.logger.error(
+                        { err, taskId },
+                        'ashare-qa-guidance: persist/broadcast failed',
+                      );
+                    }
+                  })(),
+                );
+                return {
+                  taskId,
+                  status: 'executing' as const,
+                  steps: [],
+                  executionMode: 'generate' as const,
+                };
+              }
+            }
+            if (validatedStockContext) {
+              throw new TRPCError({
+                code: 'SERVICE_UNAVAILABLE',
+                message: '可信股票任务执行器暂不可用，请稍后重试；任务不会改用实时行情或通用搜索。',
+              });
+            }
+            // ===== end a-share QA fork =====
+
+            // ===== template-fill fork (Phase 1 #1) =====
+            // Fill a user-uploaded Office template (docx/xlsx) deterministically
+            // and return the filled file. Mirrors the image fork: no agent loop,
+            // no pool slot, no verifier — safety check + extract placeholders +
+            // ONE constrained model mapping call + engine fill + storeOutput →
+            // FileDownloadCard via result.metadata.attachments.
+            //
+            // Gated on TEMPLATE_FILL_ENABLED (mirrors GEMINI_API_KEY gating the
+            // image lane): when the flag is off, template_fill intents fall
+            // through to the generate lane below, where the model honestly says
+            // it cannot fill the user's file — so shipping before the feature is
+            // vetted is a no-op for users instead of a broken lane.
+            if (executionMode === 'template_fill' && appEnv.TEMPLATE_FILL_ENABLED) {
+              const taskId = newExternalId('task');
+              const templateRuntime = resolveGenerateRuntimeForUser(
+                ctx.userId,
+                userRow.modelDataRegion,
+              );
+              const templateResponsesAdapter =
+                templateRuntime.kind === 'ready' ? templateRuntime.responses('standard') : null;
+
+              await repo.insertTask(
+                {
+                  taskId,
+                  status: 'executing',
+                  plan: [],
+                  cursor: 0,
+                  pendingConfirm: null,
+                },
+                {
+                  userId: userRow.id,
+                  intent: input.intent,
+                  roleId: dispatchRoleId,
+                  opusUsed: false,
+                },
+              );
+
+              ctx.logger.info(
+                { taskId, userId: ctx.userId, executorLane: 'template_fill', executionMode },
+                'task: executor lane selected',
+              );
+              broadcastSubStatus(ctx.userId, taskId, 'generating');
+
+              const templateStartedAt = Date.now();
+              const fileIds = input.fileIds ?? [];
+
+              if (!templateResponsesAdapter) {
+                const reasonCode =
+                  templateRuntime.kind === 'unavailable'
+                    ? templateRuntime.reasonCode
+                    : 'MODEL_MIGRATION_IN_PROGRESS';
+                const reason = modelTaskFailureReason(reasonCode);
+                const terminal = await repo.persistVisionOutcome(taskId, {
+                  status: 'failed',
+                  reason,
+                  tickCount: 0,
+                  errorCode: reasonCode,
+                  metadata: {
+                    executionMode: 'template_fill',
+                    finalExecutionMode: 'template_fill',
+                    reasonCode,
+                  },
+                });
+                if (terminal.persisted) {
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.task.terminal',
+                    taskId,
+                    status: 'failed',
+                    reason,
+                  });
+                }
+                return {
+                  taskId,
+                  status: 'failed' as const,
+                  steps: [],
+                  executionMode: 'template_fill' as const,
+                };
+              }
+
+              void runTaskBackground(ctx, async (ctx) =>
+                (async () => {
+                  const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+                  let result: RunTemplateFillResult;
+                  if (taskInternalId == null) {
+                    result = {
+                      status: 'failed',
+                      summary: '',
+                      reason: '任务记录丢失，请重试。',
+                      attachments: [],
+                    };
+                  } else {
+                    // Re-load the uploaded files for RAW bytes — the shared
+                    // attachmentBlocks above are parsed-for-prompt, not raw. The
+                    // template is the first Office file (docx preferred); any other
+                    // file (csv/xlsx/json) is parsed to text as the data source.
+                    let template:
+                      | { buffer: Buffer; filename: string; mimetype: string }
+                      | undefined;
+                    const dataTexts: string[] = [];
+                    if (fileIds.length > 0) {
+                      const loaded = await fileService.loadMany(fileIds, userRow.id);
+                      const isOffice = (name: string, mime: string): boolean =>
+                        /\.(?:docx|xlsx)$/i.test(name) ||
+                        /wordprocessingml\.document|spreadsheetml\.sheet/i.test(mime);
+                      const isDocx = (name: string, mime: string): boolean =>
+                        /\.docx$/i.test(name) || /wordprocessingml\.document/i.test(mime);
+                      const officeFiles = loaded.filter((f) =>
+                        isOffice(f.row.filename, f.row.mimetype),
+                      );
+                      const tpl =
+                        officeFiles.find((f) => isDocx(f.row.filename, f.row.mimetype)) ??
+                        officeFiles[0];
+                      if (tpl) {
+                        template = {
+                          buffer: tpl.buffer,
+                          filename: tpl.row.filename,
+                          mimetype: tpl.row.mimetype,
+                        };
+                      }
+                      for (const f of loaded) {
+                        if (tpl && f === tpl) continue;
+                        try {
+                          const parsed = await parseFileForPrompt(
+                            f.buffer,
+                            f.row.filename,
+                            f.row.mimetype,
+                          );
+                          for (const b of parsed.blocks) {
+                            if (b.type === 'text') dataTexts.push(b.text);
+                          }
                         } catch (err) {
                           ctx.logger.warn(
-                            { err, taskId },
-                            'handoff-generate: broadcast stream delta failed',
+                            { err: err instanceof Error ? err.message : String(err) },
+                            'template-fill: data file parse failed — skipping',
                           );
                         }
-                      },
-                    })
-                  : {
+                      }
+                    }
+
+                    const save = async (out: {
+                      buffer: Buffer;
+                      filename: string;
+                      mimetype: string;
+                    }): Promise<TemplateAttachment> => {
+                      const stored = await fileService.storeOutput({
+                        userIdInternal: userRow.id,
+                        userExternalId: ctx.userId,
+                        taskIdInternal: taskInternalId,
+                        filename: out.filename,
+                        mimetype: out.mimetype,
+                        buffer: out.buffer,
+                      });
+                      return {
+                        fileId: stored.externalId,
+                        downloadUrl: `/api/files/${stored.externalId}/download`,
+                        filename: stored.filename,
+                        mimetype: stored.mimetype,
+                        sizeBytes: Number(stored.sizeBytes),
+                        expiresAt: stored.expiresAt
+                          ? stored.expiresAt.toISOString()
+                          : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+                        kind: 'output',
+                      };
+                    };
+
+                    const model = async (req: {
+                      system: string;
+                      user: string;
+                    }): Promise<string> => {
+                      const response = await templateResponsesAdapter.stream(
+                        {
+                          instructions: req.system,
+                          input: req.user,
+                          tools: [],
+                          temperature: 0,
+                          maxOutputTokens: 8192,
+                        },
+                        { timeoutMs: 60_000 },
+                      );
+                      return response.text;
+                    };
+
+                    result = await runTemplateFillTask({
+                      intent: input.intent,
+                      ...(template ? { template } : {}),
+                      ...(dataTexts.length > 0 ? { dataText: dataTexts.join('\n\n') } : {}),
+                      allowedFormats: allowedFormatsForPlan(planId),
+                      save,
+                      model,
+                      logger: ctx.logger,
+                    });
+                  }
+
+                  const metadata = {
+                    executionMode: 'template_fill' as const,
+                    finalExecutionMode: 'template_fill' as const,
+                    templateFormat: result.format ?? null,
+                    ...(result.degraded ? { templateDegraded: result.degraded } : {}),
+                    elapsedMs: Date.now() - templateStartedAt,
+                    ...(result.attachments.length > 0 ? { attachments: result.attachments } : {}),
+                  };
+
+                  ctx.logger.info(
+                    {
+                      taskId,
+                      userId: ctx.userId,
+                      runnerStatus: result.status,
+                      templateFormat: result.format ?? null,
+                      missingCount: result.missing?.length ?? 0,
+                    },
+                    'task:completed',
+                  );
+
+                  let templatePersisted = false;
+                  let templateAwaitingPersisted = false;
+                  try {
+                    if (result.status === 'completed') {
+                      const persisted = await repo.persistVisionOutcome(taskId, {
+                        status: 'completed',
+                        summary: result.summary,
+                        tickCount: 1,
+                        metadata,
+                      });
+                      templatePersisted = persisted.persisted;
+                    } else if (result.status === 'partial_success') {
+                      const persisted = await repo.persistVisionOutcome(taskId, {
+                        status: 'partial_success',
+                        summary: result.summary,
+                        tickCount: 1,
+                        metadata,
+                      });
+                      templatePersisted = persisted.persisted;
+                    } else if (result.status === 'awaiting_user') {
+                      // Chat-only clarification (please upload a template) — same
+                      // shape as the generate-lane intake park.
+                      const persisted = await repo.persistAwaitingUser({
+                        taskExternalId: taskId,
+                        question: result.awaitingQuestion ?? '请补充信息后继续。',
+                        awaitingKind: 'clarification',
+                        result: { ...metadata, executionMode: 'template_fill' as const },
+                      });
+                      templateAwaitingPersisted = persisted.persisted;
+                    } else {
+                      const persisted = await repo.persistVisionOutcome(taskId, {
+                        status: 'failed',
+                        reason: result.reason ?? '模板填充失败，请稍后重试。',
+                        tickCount: 1,
+                        metadata,
+                      });
+                      templatePersisted = persisted.persisted;
+                    }
+                  } catch (err) {
+                    ctx.logger.error({ err, taskId }, 'template-fill: persist failed');
+                  }
+
+                  try {
+                    if (
+                      templatePersisted &&
+                      (result.status === 'completed' || result.status === 'partial_success')
+                    ) {
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.task.terminal',
+                        taskId,
+                        status: result.status,
+                        ...(result.summary ? { summary: result.summary } : {}),
+                      });
+                    } else if (result.status === 'awaiting_user' && templateAwaitingPersisted) {
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.supercar.awaiting_user',
+                        taskId,
+                        question: result.awaitingQuestion ?? '请补充信息后继续。',
+                        awaitingKind: 'clarification',
+                      });
+                    } else if (templatePersisted) {
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.task.terminal',
+                        taskId,
+                        status: 'failed',
+                        ...(result.reason ? { reason: result.reason } : {}),
+                      });
+                    }
+                  } catch (err) {
+                    ctx.logger.warn({ err, taskId }, 'template-fill: broadcast terminal failed');
+                  }
+                })(),
+              );
+
+              return {
+                taskId,
+                status: 'executing' as const,
+                steps: [],
+                executionMode: 'template_fill' as const,
+              };
+            }
+            // ===== end template-fill fork =====
+
+            if (coreCreateRequirements) {
+              return createCoreGenerateTask({
+                ctx,
+                userId: userRow.id,
+                modelDataRegion: userRow.modelDataRegion,
+                wiring: modelRuntimeWiring,
+                taskRepo: repo,
+                requirements: coreCreateRequirements,
+                blocks: attachmentBlocks,
+                intent: input.intent,
+                roleId: dispatchRoleId,
+                opusUsed: opusActuallyConsumed,
+                resultNotice: deferredMediaNotice({
+                  classifiedExecutionMode,
+                  executionMode,
+                  // Batch 05 wired the image/video lanes back to real executors.
+                  mediaLaneAvailable: true,
+                }),
+              });
+            }
+
+            // ===== Phase 21b — generate-mode fork =====
+            // Pure-generation tasks (write a PRD, translate this, summarize that)
+            // skip the supercar agent loop entirely. One region-bound Qwen
+            // Responses run persists the outcome and broadcasts the terminal frame,
+            // returns immediately. No pool slot, no Playwright, no plan-step
+            // state machine. Falls through to the existing supercar branch
+            // below for executionMode === 'browser'.
+            if (executionMode === 'generate' || executionMode === 'template_fill') {
+              const taskId = newExternalId('task');
+              const generateRuntime = resolveGenerateRuntimeForUser(
+                ctx.userId,
+                userRow.modelDataRegion,
+              );
+              const generateResponsesAdapter =
+                generateRuntime.kind === 'ready' ? generateRuntime.responses('standard') : null;
+              const verifierRuntime = resolveVerifierRuntimeForUser(
+                ctx.userId,
+                userRow.modelDataRegion,
+              );
+              const semanticVerifierAdapter =
+                verifierRuntime.kind === 'ready' ? verifierRuntime.messages('verify_strict') : null;
+              const generateUnavailableReasonCode =
+                generateRuntime.kind === 'unavailable' ? generateRuntime.reasonCode : null;
+
+              await repo.insertTask(
+                {
+                  taskId,
+                  status: 'executing',
+                  plan: [],
+                  cursor: 0,
+                  pendingConfirm: null,
+                },
+                {
+                  userId: userRow.id,
+                  intent: input.intent,
+                  roleId: dispatchRoleId,
+                  opusUsed: opusActuallyConsumed,
+                },
+              );
+
+              ctx.logger.info(
+                { taskId, userId: ctx.userId, executorLane: 'generate', executionMode },
+                'task: executor lane selected',
+              );
+
+              // Phase 1 Day 5 — initialise execution pipeline. No-op when
+              // every feature flag is off (default). When flags are flipped
+              // on, this seeds the ledger with the user_input fact and
+              // generates the contract for later verification.
+              initExecution({
+                taskId,
+                intent: input.intent,
+                executionMode: 'generate',
+                expertWorkflowId: workflowIdentities.contractWorkflowId,
+                expertMode: expertModeOverride,
+                hasAttachments: attachmentBlocks.length > 0,
+              });
+              // Codex Pack B1 — planning chip: contract + ledger seeded, the
+              // runner hasn't dispatched yet. Fires once per task, immediately
+              // after tasks.create returns to the SPA.
+              broadcastSubStatus(ctx.userId, taskId, 'planning');
+
+              // Fire-and-forget — generate doesn't share Brave instances so
+              // there's no per-user FIFO queue to enqueue into. Concurrent
+              // generate tasks parallelize on the selected regional Qwen endpoint.
+              const generateStartedAt = Date.now();
+              void runMediaTaskBackground(ctx, taskId, async (ctx) =>
+                (async () => {
+                  // A2 deferred — generate→browser fallback would re-enter the
+                  // supercar branch which needs pool slots, queueing, and a
+                  // distinct outcome shape. Tracked as fallbackChain=['generate']
+                  // here for the eval pipeline; if generate fails today, we
+                  // surface the failure as-is rather than risk the cross-runner
+                  // re-dispatch.
+                  const fallbackChain: string[] = ['generate'];
+                  let outcome: GenerateOutcome;
+                  try {
+                    const executionPlan = generateResponsesAdapter
+                      ? await prepareCoreTaskPlan({
+                          wiring: modelRuntimeWiring,
+                          actorExternalId: ctx.userId,
+                          modelDataRegion: userRow.modelDataRegion,
+                          intent: input.intent,
+                          logger: ctx.logger,
+                          persist: async (planText) =>
+                            (await repo.persistActiveCorePlan(taskId, planText)).persisted,
+                          publish: (planText) =>
+                            broadcastToUser(ctx.userId, {
+                              type: 'server.task.plan',
+                              taskId,
+                              planText,
+                              planStatus: [],
+                            }),
+                        })
+                      : null;
+                    // Planning may finish after cancellation, including when it yields no plan.
+                    // Recheck before launching a new paid request or sending progress frames.
+                    if (generateResponsesAdapter && !(await repo.isTaskExecuting(taskId))) {
+                      disposeExecution(taskId);
+                      return;
+                    }
+                    // Codex Pack B1 — generating chip: about to invoke the LLM
+                    // stream. runGenerateTask emits its own progress markers
+                    // inside; this prefix marker covers the brief setup gap.
+                    broadcastSubStatus(ctx.userId, taskId, 'generating');
+                    outcome = generateResponsesAdapter
+                      ? await runGenerateTask({
+                          taskId,
+                          userId: ctx.userId,
+                          // Use effectiveIntent (with parent context block when in
+                          // a follow-up + workflow preambles) whenever EITHER the
+                          // legacy or typed matcher fires. Earlier this only checked
+                          // legacy; P2_CT_008 surfaced the gap — typed-only matches
+                          // (content-topic / ecom-daily) lost their parent context
+                          // on follow-up tasks.create with replyToTaskId.
+                          // Phase 3 R1 (Codex #2): use effectiveIntent (parent
+                          // context block + workflow preamble prepended) whenever
+                          // any of:
+                          //   - legacy matcher fires
+                          //   - typed matcher fires (or recovered from parent)
+                          //   - this is a follow-up (replyToTaskId set) — the
+                          //     parent's outcome is load-bearing context for the
+                          //     model regardless of whether a workflow matched
+                          // Otherwise pass the bare user input.
+                          intent:
+                            expertWorkflow || typedWorkflow || isFollowUp
+                              ? effectiveIntent
+                              : input.intent,
+                          planOnly: input.mode === 'plan',
+                          // Phase 2b — pass the resolved typed workflow so the
+                          // runner skips its inline matcher (which would re-match
+                          // against the parent-context-prefixed intent and could
+                          // pick a different workflow — P2_ED_008 surfaced this
+                          // when the parent ecom-daily report's summary text
+                          // happened to contain douyin-review keywords like 诊断).
+                          workflowOverride: typedWorkflow,
+                          skillId: dispatchSkillId,
+                          expertMode: expertModeOverride,
+                          responsesAdapter: generateResponsesAdapter,
+                          firecrawl: ctx.firecrawl ?? null,
+                          ...(executionPlan ? { executionPlan } : {}),
+                          logger: ctx.logger,
+                          ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
+                          // Phase 24 RC follow-up — stream LLM deltas to the SPA
+                          // so users see incremental output instead of a blank
+                          // panel for 30-90s. broadcast errors are swallowed by
+                          // the runner; we never let WS issues stall the loop.
+                          onStreamDelta: (delta) => {
+                            try {
+                              broadcastToUser(ctx.userId, {
+                                type: 'server.task.stream',
+                                taskId,
+                                delta,
+                              });
+                            } catch (err) {
+                              ctx.logger.warn(
+                                { err, taskId },
+                                'generate: broadcast stream delta failed',
+                              );
+                            }
+                          },
+                        })
+                      : {
+                          status: 'failed' as const,
+                          summary: '',
+                          reason: generateRuntimeUnavailableReason(
+                            generateRuntime.kind === 'unavailable'
+                              ? generateRuntime.reasonCode
+                              : 'MODEL_MIGRATION_IN_PROGRESS',
+                          ),
+                          inputTokens: 0,
+                          outputTokens: 0,
+                          durationMs: 0,
+                        };
+                  } catch {
+                    ctx.logger.error(
+                      { taskId, code: 'GENERATE_RUNNER_THROWN' },
+                      'generate: runner threw',
+                    );
+                    outcome = {
                       status: 'failed' as const,
                       summary: '',
-                      reason: generateRuntimeUnavailableReason(
-                        handoffGenerateRuntime.kind === 'unavailable'
-                          ? handoffGenerateRuntime.reasonCode
-                          : 'MODEL_MIGRATION_IN_PROGRESS',
-                      ),
+                      reason: '生成服务暂时不可用，请稍后重试。',
                       inputTokens: 0,
                       outputTokens: 0,
                       durationMs: 0,
                     };
-              } catch {
-                ctx.logger.error(
-                  { taskId, code: 'HANDOFF_GENERATE_RUNNER_THROWN' },
-                  'handoff-generate: runner threw',
-                );
-                generateOutcome = {
-                  status: 'failed' as const,
-                  summary: '',
-                  reason: '生成服务暂时不可用，请稍后重试。',
-                  inputTokens: 0,
-                  outputTokens: 0,
-                  durationMs: 0,
-                };
-              }
-              const elapsedMs = Date.now() - handoffStartedAt;
-              const metadata = {
-                executionMode: 'browser' as const,
-                finalExecutionMode: 'generate' as const,
-                expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
-                expertMode: expertModeOverride,
-                selectedRole: dispatchRoleId,
-                ...(handoffGenerateResponsesAdapter
-                  ? {
-                      provider: handoffGenerateResponsesAdapter.metadata.provider,
-                      model: handoffGenerateResponsesAdapter.metadata.model,
-                      region: handoffGenerateResponsesAdapter.metadata.region,
-                      deploymentScope:
-                        handoffGenerateResponsesAdapter.metadata.deploymentScope,
+                  }
+
+                  const generateReview = await reviewGenerateOutcome({
+                    taskId,
+                    intent: input.intent,
+                    outcome,
+                    semanticAdapter: semanticVerifierAdapter,
+                    logger: ctx.logger,
+                    onVerifying: () => broadcastSubStatus(ctx.userId, taskId, 'verifying'),
+                  });
+                  outcome = generateReview.outcome;
+                  const executionVerification = generateReview.verification;
+                  const terminalStatus = generateReview.terminalStatus;
+                  const failureSummary = generateReview.failureSummary;
+
+                  // B3 — structured task:completed log.
+                  const elapsedMs = Date.now() - generateStartedAt;
+                  const metadata = {
+                    executionMode: 'generate' as const,
+                    finalExecutionMode: 'generate' as const,
+                    expertWorkflowId: workflowIdentities.lineageWorkflowId,
+                    // Codex Pack C1 — user's composer pick. SPA reads this from
+                    // tasks.detail.result.metadata.expertMode to decide whether
+                    // to render the "本次使用了技能" footer chip.
+                    expertMode: expertModeOverride,
+                    selectedRole: dispatchRoleId,
+                    ...(generateResponsesAdapter
+                      ? {
+                          provider: generateResponsesAdapter.metadata.provider,
+                          model: generateResponsesAdapter.metadata.model,
+                          region: generateResponsesAdapter.metadata.region,
+                          deploymentScope: generateResponsesAdapter.metadata.deploymentScope,
+                        }
+                      : {}),
+                    fallbackChain,
+                    ...(generateUnavailableReasonCode
+                      ? { reasonCode: generateUnavailableReasonCode }
+                      : {}),
+                    elapsedMs,
+                  };
+                  ctx.logger.info(
+                    {
+                      taskId,
+                      userId: ctx.userId,
+                      runnerStatus: outcome.status,
+                      finalStatus: terminalStatus,
+                      ...metadata,
+                      failureReason: outcome.status === 'failed' ? outcome.reason : failureSummary,
+                    },
+                    'task:completed',
+                  );
+
+                  // Compatibility boundary for the retired second-model polisher.
+                  // It always returns the primary answer byte-for-byte and never
+                  // emits metadata, regardless of legacy environment variables.
+                  const generateRl = await runResponseLayerForLane({
+                    taskId,
+                    status: outcome.status,
+                    summary: outcome.status === 'completed' ? outcome.summary : '',
+                    expertWorkflowId: workflowIdentities.lineageWorkflowId,
+                    logger: ctx.logger,
+                  });
+                  // Codex Round 2 P1-5 — post-formatter recheck. If the response
+                  // layer dropped a citation or merged items, downgrade the
+                  // terminal verdict from completed → partial_success so the
+                  // SPA's yellow banner fires with a specific "formatter shrunk
+                  // the content" hint. Zero-cost when the formatter passed
+                  // through (same string reference).
+                  let generatePostFormatDowngrade: { downgrade: boolean; reason: string | null } = {
+                    downgrade: false,
+                    reason: null,
+                  };
+                  if (outcome.status === 'completed' && generateRl.summary !== outcome.summary) {
+                    const preFormatSummary = outcome.summary;
+                    generatePostFormatDowngrade = recheckPostFormat(
+                      preFormatSummary,
+                      generateRl.summary,
+                    );
+                    outcome = {
+                      ...outcome,
+                      summary: generatePostFormatDowngrade.downgrade
+                        ? preFormatSummary
+                        : generateRl.summary,
+                    };
+                  }
+                  let generateTerminalStatus = terminalStatus;
+                  const generateExtraFailedChecks: Array<{ type: string; detail: string }> = [];
+                  if (
+                    generatePostFormatDowngrade.downgrade &&
+                    generateTerminalStatus === 'completed'
+                  ) {
+                    generateTerminalStatus = 'partial_success';
+                    generateExtraFailedChecks.push({
+                      type: 'post_format_regression',
+                      detail: generatePostFormatDowngrade.reason ?? '格式化层后内容缩水',
+                    });
+                    ctx.logger.warn(
+                      { taskId, reason: generatePostFormatDowngrade.reason },
+                      'generate: post-format recheck flagged regression — keeping pre-format summary',
+                    );
+                  }
+                  // Compute before persistence so refresh/history/detail views
+                  // carry the same verifier bullets as the live terminal frame.
+                  const generateFailedChecks = [
+                    ...generateReview.failedChecks,
+                    ...generateExtraFailedChecks,
+                  ];
+                  let generateTerminalPersisted = false;
+                  let generateAwaitingPersisted = false;
+
+                  try {
+                    if (generateTerminalStatus === 'completed' && outcome.status === 'completed') {
+                      const persisted = await repo.persistVisionOutcome(taskId, {
+                        status: 'completed',
+                        summary: outcome.summary,
+                        tickCount: 1,
+                        metadata,
+                      });
+                      generateTerminalPersisted = persisted.persisted;
+                    } else if (
+                      generateTerminalStatus === 'partial_success' &&
+                      outcome.status === 'completed'
+                    ) {
+                      // Codex Pack A3 — verifier flagged soft failure; row keeps
+                      // summary, status='partial_success' so the SPA renders a
+                      // yellow "结果可能不完整" banner above the answer.
+                      const persisted = await repo.persistVisionOutcome(taskId, {
+                        status: 'partial_success',
+                        summary: outcome.summary,
+                        tickCount: 1,
+                        metadata,
+                        failedChecks: generateFailedChecks,
+                      });
+                      generateTerminalPersisted = persisted.persisted;
+                    } else if (generateTerminalStatus === 'failed') {
+                      // Either the runner failed OR the verifier verdict
+                      // escalated a completed task to failed (hard_fail). Prefer
+                      // the verifier-synthesised summary when the runner thought
+                      // it had succeeded; the SPA renders red "质量校验未通过".
+                      const reason =
+                        outcome.status === 'failed'
+                          ? (outcome.reason ?? 'generate: api failed')
+                          : (failureSummary ?? '质量校验未通过');
+                      const persisted = await repo.persistVisionOutcome(taskId, {
+                        status: 'failed',
+                        reason,
+                        tickCount: 1,
+                        ...(generateUnavailableReasonCode
+                          ? { errorCode: generateUnavailableReasonCode }
+                          : {}),
+                        metadata,
+                        failedChecks: generateFailedChecks,
+                      });
+                      generateTerminalPersisted = persisted.persisted;
+                    } else if (outcome.status === 'awaiting_user') {
+                      // Expert-workflow intake park out of the generate runner.
+                      // Persist status='awaiting_user' + the visible question
+                      // so a refresh during the pause re-renders correctly,
+                      // and stamp `awaiting_kind='clarification'` so the SPA's
+                      // BrowserPanel does NOT auto-expand / show the verify
+                      // banner — this is a chat-only intake. We also stamp
+                      // `result.executionMode='generate'` (rather than going
+                      // through persistVisionOutcome) so the reply path can
+                      // tell this task is parked from generate, not supercar.
+                      const awaitingPersist = await repo.persistAwaitingUser({
+                        taskExternalId: taskId,
+                        question: outcome.summary,
+                        awaitingKind: 'clarification',
+                        result: {
+                          ...metadata,
+                          executionMode: 'generate' as const,
+                          ...(input.mode === 'plan'
+                            ? {
+                                planMode: 'awaiting_approval',
+                                planText: outcome.summary,
+                                planInitialIntent: parentContextBlock + input.intent,
+                                planReplyHistory: [],
+                                planFileIds: orderedFileIds,
+                                planWorkflowId: typedWorkflow?.workflowId ?? null,
+                                planLegacyWorkflowId: expertWorkflow?.id ?? null,
+                              }
+                            : {}),
+                        },
+                      });
+                      generateAwaitingPersisted = awaitingPersist.persisted;
+                      if (!awaitingPersist.persisted) {
+                        ctx.logger.warn(
+                          { taskId },
+                          'generate: awaiting_user persist refused by state guard',
+                        );
+                      }
                     }
-                  : {}),
-                fallbackChain: ['browser', 'generate'],
-                elapsedMs,
+                  } catch (err) {
+                    ctx.logger.error({ err, taskId }, 'generate: persist failed');
+                  }
+
+                  // Stamp the response-layer metadata columns now that persist
+                  // has landed. Best-effort: a stamp failure logs but doesn't
+                  // tear down terminal broadcast. Only fires when the formatter
+                  // actually ran (flag on); the awaiting_user branch never
+                  // produces a formatter run (non-terminal status filter
+                  // inside `runResponseLayerForLane`).
+                  if (generateTerminalPersisted) {
+                    await stampResponseLayerColumns(
+                      ctx.db,
+                      taskId,
+                      generateRl.responseLayerOriginal,
+                      outcome.status === 'completed' ? outcome.summary : '',
+                      generateRl.responseLayerMetadata,
+                      ctx.logger,
+                    );
+                  }
+
+                  try {
+                    if (
+                      generateTerminalPersisted &&
+                      generateTerminalStatus === 'completed' &&
+                      outcome.status === 'completed'
+                    ) {
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.task.terminal',
+                        taskId,
+                        status: 'completed',
+                        ...(outcome.summary ? { summary: outcome.summary } : {}),
+                      });
+                    } else if (
+                      generateTerminalPersisted &&
+                      generateTerminalStatus === 'partial_success' &&
+                      outcome.status === 'completed'
+                    ) {
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.task.terminal',
+                        taskId,
+                        status: 'partial_success',
+                        ...(outcome.summary ? { summary: outcome.summary } : {}),
+                        ...(generateFailedChecks.length > 0
+                          ? { failedChecks: generateFailedChecks }
+                          : {}),
+                      });
+                    } else if (generateTerminalPersisted && generateTerminalStatus === 'failed') {
+                      const reason =
+                        outcome.status === 'failed'
+                          ? outcome.reason
+                          : (failureSummary ?? undefined);
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.task.terminal',
+                        taskId,
+                        status: 'failed',
+                        ...(reason ? { reason } : {}),
+                        ...(generateFailedChecks.length > 0
+                          ? { failedChecks: generateFailedChecks }
+                          : {}),
+                      });
+                    } else if (outcome.status === 'awaiting_user' && generateAwaitingPersisted) {
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.supercar.awaiting_user',
+                        taskId,
+                        question: outcome.summary,
+                        awaitingKind: 'clarification',
+                      });
+                    }
+                  } catch (err) {
+                    ctx.logger.warn({ err, taskId }, 'generate: broadcast terminal failed');
+                  }
+
+                  if (
+                    generateTerminalPersisted &&
+                    generateTerminalStatus === 'completed' &&
+                    outcome.status === 'completed'
+                  ) {
+                    const summary = outcome.summary;
+                    void runTaskBackground(ctx, async (ctx) =>
+                      publishCoreTaskSuggestions({
+                        wiring: modelRuntimeWiring,
+                        actorExternalId: ctx.userId,
+                        modelDataRegion: userRow.modelDataRegion,
+                        rawIntent: input.intent,
+                        intent: effectiveIntent,
+                        summary,
+                        isCurrent: () => repo.isCurrentCompletedOutcome(taskId, summary),
+                        persist: (suggestions) =>
+                          repo.persistCurrentCompletedSuggestions(taskId, summary, suggestions),
+                        publish: (suggestions) =>
+                          broadcastToUser(ctx.userId, {
+                            type: 'server.supercar.suggestions',
+                            taskId,
+                            suggestions,
+                          }),
+                      }),
+                    );
+                  }
+
+                  // Phase 1 Day 5 — fire-and-forget execution-pipeline persist
+                  // + always cleanup the in-memory contract / ledger registries
+                  // even when persist is a no-op (flags off) so the maps don't
+                  // leak across long-running PM2 lifetimes.
+                  void runTaskBackground(ctx, async (ctx) =>
+                    persistExecution({
+                      taskId,
+                      verification: executionVerification,
+                      db: ctx.db,
+                      logger: ctx.logger,
+                    })
+                      .then((persisted) =>
+                        persisted
+                          ? writeLedgerToDb({
+                              taskExternalId: taskId,
+                              verification: executionVerification,
+                              db: ctx.db,
+                              logger: ctx.logger,
+                            })
+                          : null,
+                      )
+                      .finally(() => disposeExecution(taskId)),
+                  );
+                })(),
+              );
+
+              return {
+                taskId,
+                status: 'executing' as const,
+                steps: [],
+                executionMode: 'generate' as const,
               };
-              ctx.logger.info(
+            }
+            // ===== end generate-mode fork =====
+
+            // ===== scrape-mode fork (Phase 24 RC follow-up) =====
+            // Tasks classified as 'scrape' want page content but NOT live
+            // browser interaction. Firecrawl pulls markdown in 2-3s, then
+            // the regional Qwen Responses runtime synthesises an answer from those bytes.
+            // 5-10× cheaper than the browser path; latency 5-10× faster.
+            //
+            // If FIRECRAWL_API_KEY is missing at boot, ctx.firecrawl is null
+            // and the scrape branch persists a clear failure (rather than
+            // silently degrading to the browser path which is what the
+            // classifier explicitly avoided routing to).
+            if (executionMode === 'scrape') {
+              const taskId = newExternalId('task');
+              const scrapeRuntime = resolveScrapeRuntimeForUser(
+                ctx.userId,
+                userRow.modelDataRegion,
+              );
+              const scrapeResponsesAdapter =
+                scrapeRuntime.kind === 'ready' ? scrapeRuntime.responses('standard') : null;
+              const fallbackGenerateRuntime = resolveGenerateRuntimeForUser(
+                ctx.userId,
+                userRow.modelDataRegion,
+              );
+              const fallbackGenerateResponsesAdapter =
+                fallbackGenerateRuntime.kind === 'ready'
+                  ? fallbackGenerateRuntime.responses('standard')
+                  : null;
+              const verifierRuntime = resolveVerifierRuntimeForUser(
+                ctx.userId,
+                userRow.modelDataRegion,
+              );
+              const semanticVerifierAdapter =
+                verifierRuntime.kind === 'ready' ? verifierRuntime.messages('verify_strict') : null;
+              const scrapeUnavailableReasonCode =
+                scrapeRuntime.kind === 'unavailable' ? scrapeRuntime.reasonCode : null;
+              const fallbackGenerateUnavailableReasonCode =
+                fallbackGenerateRuntime.kind === 'unavailable'
+                  ? fallbackGenerateRuntime.reasonCode
+                  : null;
+
+              await repo.insertTask(
                 {
                   taskId,
-                  userId,
-                  finalStatus: generateOutcome.status,
-                  ...metadata,
-                  failureReason:
-                      generateOutcome.status === 'failed' ? generateOutcome.reason : null,
+                  status: 'executing',
+                  plan: [],
+                  cursor: 0,
+                  pendingConfirm: null,
                 },
-                'task:completed',
+                {
+                  userId: userRow.id,
+                  intent: input.intent,
+                  roleId: dispatchRoleId,
+                  opusUsed: opusActuallyConsumed,
+                },
               );
-              // Retired polishing compatibility boundary; old flags cannot
-              // re-enable a second model call for handoff-generated output.
-              const handoffRl = await runResponseLayerForLane({
-                taskId,
-                status: generateOutcome.status,
-                      summary:
-                        generateOutcome.status === 'completed' ? generateOutcome.summary : '',
-                  expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
-                logger: ctx.logger,
-              });
-              if (
-                generateOutcome.status === 'completed' &&
-                handoffRl.summary !== generateOutcome.summary
-              ) {
-                generateOutcome = {
-                  ...generateOutcome,
-                  summary: handoffRl.summary,
-                };
-              }
-              let handoffTerminalPersisted = false;
-              try {
-                if (generateOutcome.status === 'completed') {
-                  const persisted = await repo.persistVisionOutcome(taskId, {
-                    status: 'completed',
-                    summary: generateOutcome.summary,
-                    tickCount: outcome.iterations,
-                    metadata,
-                  });
-                  handoffTerminalPersisted = persisted.persisted;
-                  // P1 — generate has no plan-step marker discipline
-                  // (no [STEP N done] emission), so any pending /
-                  // running steps left over from the supercar's
-                  // browser phase would freeze at "x/N 完成" forever
-                  // even though the user just got a complete answer.
-                  // Roll them all to done now and broadcast so the
-                  // PlanCard catches up. Best-effort: a DB blip
-                  // can't block terminal broadcast.
-                  if (persisted.persisted) {
-                    void runTaskBackground(ctx, async (ctx) => convergePlanStatusOnSuccess(ctx, taskId, userId));
-                    broadcastToUser(userId, {
-                      type: 'server.task.terminal',
-                      taskId,
-                      status: 'completed',
-                            ...(generateOutcome.summary
-                              ? { summary: generateOutcome.summary }
-                              : {}),
-                    });
-                  }
-                } else {
+
+              ctx.logger.info(
+                { taskId, userId: ctx.userId, executorLane: 'scrape', executionMode },
+                'task: executor lane selected',
+              );
+
+              // Defensive — if the adapter wasn't configured at boot, fail
+              // loudly with the exact reason. SPA / translateError surfaces
+              // a clear "Firecrawl 未配置" instead of "服务繁忙".
+              if (!ctx.firecrawl) {
+                let missingFirecrawlPersisted = false;
+                try {
                   const persisted = await repo.persistVisionOutcome(taskId, {
                     status: 'failed',
-                      reason: generateOutcome.reason ?? 'handoff-generate: api failed',
-                    tickCount: outcome.iterations,
-                    metadata,
+                    reason: 'scrape: Firecrawl 未配置（FIRECRAWL_API_KEY 缺失），任务无法执行',
+                    tickCount: 0,
                   });
-                  handoffTerminalPersisted = persisted.persisted;
-                  if (persisted.persisted) {
-                    broadcastToUser(userId, {
+                  missingFirecrawlPersisted = persisted.persisted;
+                } catch (err) {
+                  ctx.logger.warn({ err, taskId }, 'scrape: persist failed-row write threw');
+                }
+                try {
+                  if (missingFirecrawlPersisted) {
+                    broadcastToUser(ctx.userId, {
                       type: 'server.task.terminal',
                       taskId,
                       status: 'failed',
-                        ...(generateOutcome.reason ? { reason: generateOutcome.reason } : {}),
+                      reason: 'Firecrawl 未配置',
                     });
                   }
+                } catch {
+                  /* swallow — best-effort */
                 }
-              } catch (err) {
-                      ctx.logger.error(
-                        { err, taskId },
-                        'handoff-generate: persist/broadcast failed',
-                      );
-              }
-              // Stamp metadata columns after persist. Safe to call
-              // only when the terminal row actually landed. The
-              // helper itself guards terminal source statuses; this
-              // extra gate prevents a late handoff result from
-              // stamping formatter metadata onto a task that was
-              // already cancelled or otherwise superseded.
-              if (handoffTerminalPersisted) {
-                await stampResponseLayerColumns(
-                  ctx.db,
+                return {
                   taskId,
-                  handoffRl.responseLayerOriginal,
-                    generateOutcome.status === 'completed' ? generateOutcome.summary : '',
-                  handoffRl.responseLayerMetadata,
-                  ctx.logger,
-                );
-              }
-              return;
-            }
-            // R7 — grab the final-state evidence BEFORE persistSupercar
-            // and pool.release. The BrowserPanel renders the static
-            // screenshot for terminal tasks instead of trying to
-            // reconnect the screencast WS to a torn-down Brave.
-            // Skip for non-browser-mode tasks (perUserExec is null
-            // when executionMode='generate' / 'scrape' — there's no
-            // browser to screenshot).
-            const finalState = perUserExec
-              ? await captureFinalState({
-                  executor: {
-                    getPage: () => perUserExec.getPage(),
-                    screenshot: (page, options) =>
-                      perUserExec.screenshot(
-                        page as unknown as Parameters<PlaywrightExecutor['screenshot']>[0],
-                        options,
-                      ),
-                  },
-                  logger: ctx.logger,
-                  taskId,
-                })
-              : {};
-            // B3 — structured eval log fields. Persisted under
-            // result.metadata so tasks.detail consumers (Codex eval
-            // pipeline) get them without a schema migration. Same
-            // shape as the scrape / generate fork logs above so
-            // downstream parsing is uniform.
-            const elapsedMs = Date.now() - browserStartedAt;
-            const metadata: Record<string, unknown> = {
-              ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
-              executionMode: executionMode === 'browser' ? 'browser' : executionMode,
-              finalExecutionMode: executionMode === 'browser' ? 'browser' : executionMode,
-              expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
-              expertMode: expertModeOverride,
-              selectedRole: dispatchRoleId,
-              ...browserMessagesAdapter.metadata,
-              fallbackChain: ['browser'],
-              elapsedMs,
-              iterations: outcome.iterations,
-              toolsUsed: outcome.toolsUsed,
-              // awaitingUserCount isn't exposed on SupercarOutcome
-              // today — Codex pipeline can derive it from
-              // task_events `vision.paused` rows for now. Stub at 0.
-              awaitingUserCount: 0,
-              modelFinalText:
-                  outcome.status === 'completed' ? (outcome.summary ?? '').slice(0, 200) : null,
-              ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
-                    ...(finalState.finalViewport
-                      ? { finalViewport: finalState.finalViewport }
-                      : {}),
-              hasFinalScreenshot: Boolean(finalState.finalScreenshot),
-            };
-            // Phase 3 R3 — L1 auto-save final screenshot as a
-            // downloadable file. Only fires when:
-            //   1. The task is in browser-mode (finalState came from
-            //      captureFinalState which is null for generate/scrape)
-            //   2. We actually captured a screenshot (lone "browser
-            //      crashed before goto" failures leave finalScreenshot
-            //      empty)
-            //   3. There's a task DB id to attach to (taskDbId is set
-            //      after the initial insert; falsy only on a code-path
-            //      bug we'd want to log anyway)
-            // Failures here log + continue — the user's task still
-            // completes; they just lose the downloadable artifact.
-            // The screenshot's base64 form is already inside
-            // metadata.result via persistVisionOutcome, so the SPA's
-            // BrowserPanel still has a frame to render.
-              let screenshotAttachment:
-                | import('../../files/download-manager.js').DownloadResult
-                | null = null;
-            if (
-              finalState.finalScreenshot &&
-              taskDbId &&
-              outcome.status !== 'cancelled' &&
-              ctx.downloadManager
-            ) {
-              try {
-                // captureFinalState pulls a JPEG (quality 80) off the
-                // PlaywrightExecutor (vision-loop/playwright-executor.ts
-                // L610: `page.screenshot({ type: 'jpeg', quality: 80 })`).
-                // Earlier this code labeled it as PNG, so downloads ended
-                // up as foo.png containing JPEG bytes — most viewers fall
-                // back on sniffing, but eval pipelines + strict viewers
-                // (Slack preview, some PDF embedders) refuse to render.
-                screenshotAttachment = await ctx.downloadManager.save({
-                  userIdInternal: userRow.id,
-                  userExternalId: ctx.userId,
-                  taskIdInternal: taskDbId,
-                  content: finalState.finalScreenshot,
-                  filename: `screenshot-${taskId}.jpg`,
-                  mimetype: 'image/jpeg',
-                });
-                ctx.logger.info(
-                  {
-                    taskId,
-                    fileId: screenshotAttachment.fileId,
-                    sizeBytes: screenshotAttachment.sizeBytes,
-                  },
-                  'L1: final screenshot saved as downloadable file',
-                );
-                // Surface to SPA + eval-runner via result.metadata.
-                // The shape mirrors what the L2 save_pdf tool will
-                // produce, so consumers iterate one homogeneous list.
-                const attachments = (metadata.attachments as unknown[]) ?? [];
-                metadata.attachments = [
-                  ...attachments,
-                  {
-                    fileId: screenshotAttachment.fileId,
-                    downloadUrl: screenshotAttachment.downloadUrl,
-                    filename: screenshotAttachment.filename,
-                    mimetype: screenshotAttachment.mimetype,
-                    sizeBytes: screenshotAttachment.sizeBytes,
-                    expiresAt: screenshotAttachment.expiresAt.toISOString(),
-                    kind: 'screenshot',
-                  },
-                ];
-              } catch (err) {
-                ctx.logger.warn(
-                  { err: err instanceof Error ? err.message : String(err), taskId },
-                  'L1: final screenshot save failed (non-fatal)',
-                );
-              }
-            }
-            // Codex P3 follow-up — fold any save_page_as_pdf outputs the
-            // agent accumulated during the run into metadata.attachments
-            // alongside the L1 screenshot. The accumulator is appended
-            // (not replaced) so the screenshot block above (which
-            // already wrote to metadata.attachments) stays intact.
-            if (pdfAttachments.length > 0) {
-              const existing = (metadata.attachments as unknown[]) ?? [];
-              metadata.attachments = [...existing, ...pdfAttachments];
-              ctx.logger.info(
-                {
-                  taskId,
-                  pdfCount: pdfAttachments.length,
-                  fileIds: pdfAttachments.map((a) => a.fileId),
-                },
-                'L2: folded save_page_as_pdf outputs into metadata.attachments',
-              );
-            }
-            ctx.logger.info(
-              {
-                taskId,
-                userId,
-                finalStatus: outcome.status,
-                ...metadata,
-                failureReason:
-                  outcome.status === 'failed' || outcome.status === 'timeout'
-                    ? outcome.reason
-                    : null,
-              },
-              'task:completed',
-            );
-            // Phase 1 follow-up — sanitise the supercar's final
-            // answer before any downstream step (verification,
-            // persistence, broadcast). Tool-XML scaffolding from
-            // computer_20251124 traces leaks here more often than
-            // in the generate / scrape lanes.
-            if (outcome.status === 'completed' && outcome.summary) {
-              const cleaned = sanitizeFinalText(outcome.summary);
-              if (cleaned !== outcome.summary) {
-                outcome = { ...outcome, summary: cleaned };
-              }
-            }
-            // Phase 24 RC follow-up — nav-failure safety net.
-            // Codex caught the "false success" case: bare-URL tasks
-            // like `打开 https://thisdomaindoesnotexist12345.com`
-            // would land with status=completed and a summary that's
-            // just the friendly DNS error message. The agent thinks
-            // it completed (it accurately reported the failure), but
-            // the user's goal (open the page) was never reached, so
-            // labelling the row "已完成" is misleading. detectNavFailure
-            // pattern-matches a short summary against DNS / SSL /
-            // timeout / refused signals; on a hit we flip the row
-            // to failed BEFORE the verifier + persist run. Long
-            // legitimate reports that happen to mention a nav error
-            // as one bullet are not flipped (≤400 char gate).
-            if (outcome.status === 'completed' && outcome.summary) {
-              const navSignal = detectNavFailure(outcome.summary);
-              if (navSignal.detected) {
-                ctx.logger.info(
-                  {
-                    taskId,
-                    matchedPattern: navSignal.matchedPattern,
-                    kind: navSignal.kind,
-                  },
-                  'supercar: nav-failure detector tripped — downgrading completed → failed',
-                );
-                outcome = {
-                  ...outcome,
-                  status: 'failed',
-                  reason: navSignal.reason ?? '导航失败，未完成任务',
+                  status: 'executing' as const,
+                  steps: [],
+                  executionMode: 'scrape' as const,
                 };
               }
+
+              // Phase 1 Day 5 — initialise execution pipeline. No-op when
+              // every feature flag is off (default). The firecrawl-null
+              // early return above bails BEFORE this init so the registries
+              // never see a task that won't terminate.
+              initExecution({
+                taskId,
+                intent: input.intent,
+                executionMode: 'scrape',
+                expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+                expertMode: expertModeOverride,
+                hasAttachments: attachmentBlocks.length > 0,
+              });
+              // Codex Pack B1 — planning chip (scrape lane).
+              broadcastSubStatus(ctx.userId, taskId, 'planning');
+
+              const firecrawl = ctx.firecrawl;
+              const scrapeStartedAt = Date.now();
+              void runMediaTaskBackground(ctx, taskId, async (ctx) =>
+                (async () => {
+                  // Fallback chain (A4) — every lane the dispatcher actually
+                  // tried for this task. Logged + persisted under
+                  // result.metadata.fallbackChain so the eval pipeline can see
+                  // which path produced the final outcome.
+                  const fallbackChain: string[] = ['scrape'];
+                  let finalExecutionMode: 'scrape' | 'generate' = 'scrape';
+                  let scrapeOutcome: ScrapeOutcome;
+                  try {
+                    const executionPlan = scrapeResponsesAdapter
+                      ? await prepareCoreTaskPlan({
+                          wiring: modelRuntimeWiring,
+                          actorExternalId: ctx.userId,
+                          modelDataRegion: userRow.modelDataRegion,
+                          intent: input.intent,
+                          logger: ctx.logger,
+                          persist: async (planText) =>
+                            (await repo.persistActiveCorePlan(taskId, planText)).persisted,
+                          publish: (planText) =>
+                            broadcastToUser(ctx.userId, {
+                              type: 'server.task.plan',
+                              taskId,
+                              planText,
+                              planStatus: [],
+                            }),
+                        })
+                      : null;
+                    if (scrapeResponsesAdapter && !(await repo.isTaskExecuting(taskId))) {
+                      disposeExecution(taskId);
+                      return;
+                    }
+                    // Codex Pack B1 — extracting chip: firecrawl about to fetch.
+                    broadcastSubStatus(ctx.userId, taskId, 'extracting');
+                    scrapeOutcome = scrapeResponsesAdapter
+                      ? await runScrapeTask({
+                          taskId,
+                          userId: ctx.userId,
+                          // Use effectiveIntent (with parent context block when in
+                          // a follow-up + workflow preambles) whenever EITHER the
+                          // legacy or typed matcher fires. Earlier this only checked
+                          // legacy; P2_CT_008 surfaced the gap — typed-only matches
+                          // (content-topic / ecom-daily) lost their parent context
+                          // on follow-up tasks.create with replyToTaskId.
+                          // Phase 3 R1 (Codex #2): use effectiveIntent (parent
+                          // context block + workflow preamble prepended) whenever
+                          // any of:
+                          //   - legacy matcher fires
+                          //   - typed matcher fires (or recovered from parent)
+                          //   - this is a follow-up (replyToTaskId set) — the
+                          //     parent's outcome is load-bearing context for the
+                          //     model regardless of whether a workflow matched
+                          // Otherwise pass the bare user input.
+                          intent:
+                            expertWorkflow || typedWorkflow || isFollowUp
+                              ? effectiveIntent
+                              : input.intent,
+                          skillId: dispatchSkillId,
+                          expertMode: expertModeOverride,
+                          responsesAdapter: scrapeResponsesAdapter,
+                          fileIds: orderedFileIds,
+                          ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
+                          ...(executionPlan ? { executionPlan } : {}),
+                          firecrawl,
+                          logger: ctx.logger,
+                          // Phase 24 RC follow-up — stream LLM deltas + push
+                          // coarse Firecrawl-phase progress to the SPA. Same
+                          // contract as generate-runner; broadcast errors are
+                          // swallowed.
+                          onStreamDelta: (delta) => {
+                            try {
+                              broadcastToUser(ctx.userId, {
+                                type: 'server.task.stream',
+                                taskId,
+                                delta,
+                              });
+                            } catch (err) {
+                              ctx.logger.warn(
+                                { err, taskId },
+                                'scrape: broadcast stream delta failed',
+                              );
+                            }
+                          },
+                          onProgress: (message) => {
+                            try {
+                              broadcastToUser(ctx.userId, {
+                                type: 'server.task.progress',
+                                taskId,
+                                message,
+                              });
+                            } catch (err) {
+                              ctx.logger.warn({ err, taskId }, 'scrape: broadcast progress failed');
+                            }
+                          },
+                        })
+                      : {
+                          status: 'failed' as const,
+                          summary: '',
+                          reason: generateRuntimeUnavailableReason(
+                            scrapeRuntime.kind === 'unavailable'
+                              ? scrapeRuntime.reasonCode
+                              : 'MODEL_MIGRATION_IN_PROGRESS',
+                          ),
+                          inputTokens: 0,
+                          outputTokens: 0,
+                          durationMs: 0,
+                          source: 'scrape' as const,
+                          sources: [],
+                        };
+                  } catch {
+                    ctx.logger.error(
+                      { taskId, code: 'SCRAPE_RUNNER_THROWN' },
+                      'scrape: runner threw',
+                    );
+                    scrapeOutcome = {
+                      status: 'failed' as const,
+                      summary: '',
+                      reason: '内容整理服务暂时不可用，请稍后重试。',
+                      inputTokens: 0,
+                      outputTokens: 0,
+                      durationMs: 0,
+                      source: 'scrape' as const,
+                      sources: [] as string[],
+                    };
+                  }
+
+                  // A1 — scrape failed → fall back to generate. Generate has
+                  // zero infra dependencies (no Brave, no Firecrawl) so it's
+                  // always reachable; if the model can't answer the intent
+                  // directly, generate itself will return failed and we keep
+                  // the chain visible in metadata for triage. The intent +
+                  // skill + attachments are identical between the two runners,
+                  // so the fallback produces the same surface for the user.
+                  let outcome:
+                    | {
+                        status: 'completed';
+                        summary: string;
+                        reason?: string;
+                      }
+                    | {
+                        status: 'failed';
+                        summary?: string;
+                        reason: string;
+                      };
+                  if (scrapeOutcome.status === 'completed') {
+                    outcome = {
+                      status: 'completed',
+                      summary: scrapeOutcome.summary,
+                    };
+                  } else {
+                    ctx.logger.warn(
+                      {
+                        taskId,
+                        scrapeReason: scrapeOutcome.reason,
+                        fallbackTo: 'generate',
+                      },
+                      'scrape failed, falling back to generate',
+                    );
+                    fallbackChain.push('generate');
+                    finalExecutionMode = 'generate';
+                    let generateOutcome: GenerateOutcome;
+                    try {
+                      generateOutcome = fallbackGenerateResponsesAdapter
+                        ? await runGenerateTask({
+                            taskId,
+                            userId: ctx.userId,
+                            // Phase 3 R1 (Codex #2): use effectiveIntent (parent
+                            // context block + workflow preamble prepended) whenever
+                            // any of:
+                            //   - legacy matcher fires
+                            //   - typed matcher fires (or recovered from parent)
+                            //   - this is a follow-up (replyToTaskId set) — the
+                            //     parent's outcome is load-bearing context for the
+                            //     model regardless of whether a workflow matched
+                            // Otherwise pass the bare user input.
+                            intent:
+                              expertWorkflow || typedWorkflow || isFollowUp
+                                ? effectiveIntent
+                                : input.intent,
+                            workflowOverride: typedWorkflow,
+                            skillId: dispatchSkillId,
+                            expertMode: expertModeOverride,
+                            responsesAdapter: fallbackGenerateResponsesAdapter,
+                            firecrawl: ctx.firecrawl ?? null,
+                            logger: ctx.logger,
+                            ...(attachmentBlocks.length > 0
+                              ? { attachments: attachmentBlocks }
+                              : {}),
+                            onStreamDelta: (delta) => {
+                              try {
+                                broadcastToUser(ctx.userId, {
+                                  type: 'server.task.stream',
+                                  taskId,
+                                  delta,
+                                });
+                              } catch (err) {
+                                ctx.logger.warn(
+                                  { err, taskId },
+                                  'fallback-generate: broadcast stream delta failed',
+                                );
+                              }
+                            },
+                          })
+                        : {
+                            status: 'failed' as const,
+                            summary: '',
+                            reason: generateRuntimeUnavailableReason(
+                              fallbackGenerateRuntime.kind === 'unavailable'
+                                ? fallbackGenerateRuntime.reasonCode
+                                : 'MODEL_MIGRATION_IN_PROGRESS',
+                            ),
+                            inputTokens: 0,
+                            outputTokens: 0,
+                            durationMs: 0,
+                          };
+                    } catch {
+                      ctx.logger.error(
+                        { taskId, code: 'FALLBACK_GENERATE_RUNNER_THROWN' },
+                        'fallback-generate: runner threw',
+                      );
+                      generateOutcome = {
+                        status: 'failed' as const,
+                        summary: '',
+                        reason: '生成服务暂时不可用，请稍后重试。',
+                        inputTokens: 0,
+                        outputTokens: 0,
+                        durationMs: 0,
+                      };
+                    }
+                    if (generateOutcome.status === 'completed') {
+                      outcome = {
+                        status: 'completed',
+                        summary: generateOutcome.summary,
+                      };
+                    } else {
+                      // Phase 1 follow-up — humanise the failure reason so the
+                      // user sees actionable Chinese guidance instead of a raw
+                      // stack trace / English error code.
+                      outcome = {
+                        status: 'failed',
+                        reason: humaniseScrapeFailure(
+                          `scrape failed (${scrapeOutcome.reason}); generate fallback also failed (${generateOutcome.reason ?? 'unknown'})`,
+                        ),
+                      };
+                    }
+                  }
+
+                  // Phase 1 follow-up — sanitise the completed-path summary
+                  // before verification. Same rationale as the generate lane.
+                  if (outcome.status === 'completed' && outcome.summary) {
+                    const cleaned = sanitizeFinalText(outcome.summary);
+                    if (cleaned !== outcome.summary) {
+                      outcome = { ...outcome, summary: cleaned };
+                    }
+                  }
+
+                  // Phase 1 Day 5 — pipeline verification on the runner's
+                  // final answer. Same pattern as the generate fork: ledger
+                  // gets a tool_result for each scraped source + a
+                  // response_length entry, then the verifier runs.
+                  let executionVerification: VerificationResult | null = null;
+                  if (outcome.status === 'completed') {
+                    for (const url of scrapeOutcome.sources.slice(0, 10)) {
+                      recordEvidence(taskId, {
+                        fact: `scraped_url=${url}`,
+                        sourceType: 'tool_result',
+                        sourceDetail: `firecrawl_${scrapeOutcome.source}`,
+                        confidence: 'extracted',
+                      });
+                    }
+                    recordEvidence(taskId, {
+                      fact: `response_length=${outcome.summary.length}`,
+                      sourceType: 'tool_result',
+                      sourceDetail: 'llm_scrape_response',
+                      confidence: 'observed',
+                    });
+                    // Codex Pack B1 — verifying chip (scrape lane).
+                    broadcastSubStatus(ctx.userId, taskId, 'verifying');
+                    const verified: VerifyOutput = await verifyAndFinalize({
+                      taskId,
+                      answerText: outcome.summary,
+                      semanticAdapter: semanticVerifierAdapter,
+                      logger: ctx.logger,
+                    });
+                    if (verified.finalText !== outcome.summary) {
+                      outcome = { ...outcome, summary: verified.finalText };
+                    }
+                    executionVerification = verified.verification;
+                  }
+
+                  const scrapeResearchSourceTrust = assessResultTrust({
+                    intent: input.intent,
+                    resultText: outcome.status === 'completed' ? outcome.summary : '',
+                  });
+
+                  // Codex Pack A3 — verifier verdict drives the terminal status.
+                  const terminalStatus: FinalTerminalStatus = deriveFinalStatus(
+                    outcome.status,
+                    executionVerification,
+                    scrapeResearchSourceTrust,
+                  );
+                  const failureSummary =
+                    terminalStatus === 'failed'
+                      ? executionVerification
+                        ? summariseVerificationFailure(executionVerification)
+                        : (scrapeResearchSourceTrust.failedChecks[0]?.detail ?? null)
+                      : null;
+
+                  // FIX-INTENT-ROUTE-BROWSER — a search-engine task that asked for result
+                  // links / a count must get them. When the scrape answer falls short,
+                  // hand the SAME task to the browser lane once (no second charge),
+                  // recording why; only if that handoff cannot start does it fail here.
+                  let browserRetryFailure: string | null = null;
+                  const searchRequirement = searchResultRequirement(input.intent);
+                  if (searchRequirement) {
+                    const check =
+                      outcome.status === 'completed'
+                        ? searchResultsSatisfy(searchRequirement, outcome.summary)
+                        : ({ ok: false, reason: '抓取没有得到结果' } as const);
+                    if (!check.ok) {
+                      const reason = `抓取结果不满足要求（${check.reason}），已自动改用云端浏览器重试一次`;
+                      try {
+                        disposeExecution(taskId);
+                        broadcastToUser(ctx.userId, {
+                          type: 'server.task.progress',
+                          taskId,
+                          message: reason,
+                        });
+                        await tasksRouter
+                          .createCaller({ ...ctx, scrapeBrowserRetry: { taskId, reason } })
+                          .create(scrapeBrowserRetryInput(input));
+                        ctx.logger.info({ taskId, reason }, 'scrape: handed over to browser retry');
+                        return;
+                      } catch (err) {
+                        browserRetryFailure = `${reason}，但浏览器重试未能启动`;
+                        ctx.logger.warn(
+                          { taskId, err: err instanceof Error ? err.message : String(err) },
+                          'scrape: browser retry could not start',
+                        );
+                      }
+                    }
+                  }
+
+                  // B3 — structured task:completed log. Single record per task
+                  // termination with all fields the eval pipeline needs.
+                  const elapsedMs = Date.now() - scrapeStartedAt;
+                  const finalResponsesAdapter =
+                    finalExecutionMode === 'scrape'
+                      ? scrapeResponsesAdapter
+                      : fallbackGenerateResponsesAdapter;
+                  const metadata = {
+                    executionMode: 'scrape' as const,
+                    finalExecutionMode,
+                    ...(executionModeDecision
+                      ? { executionModeReason: executionModeDecision }
+                      : {}),
+                    ...(browserRetryFailure ? { browserRetryFailure } : {}),
+                    expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+                    expertMode: expertModeOverride,
+                    selectedRole: dispatchRoleId,
+                    ...(finalResponsesAdapter
+                      ? {
+                          provider: finalResponsesAdapter.metadata.provider,
+                          model: finalResponsesAdapter.metadata.model,
+                          region: finalResponsesAdapter.metadata.region,
+                          deploymentScope: finalResponsesAdapter.metadata.deploymentScope,
+                        }
+                      : {}),
+                    fallbackChain,
+                    ...(!finalResponsesAdapter
+                      ? {
+                          reasonCode:
+                            fallbackGenerateUnavailableReasonCode ??
+                            scrapeUnavailableReasonCode ??
+                            'MODEL_MIGRATION_IN_PROGRESS',
+                        }
+                      : {}),
+                    elapsedMs,
+                  };
+                  ctx.logger.info(
+                    {
+                      taskId,
+                      userId: ctx.userId,
+                      runnerStatus: outcome.status,
+                      finalStatus: terminalStatus,
+                      ...metadata,
+                      failureReason: outcome.status === 'failed' ? outcome.reason : failureSummary,
+                    },
+                    'task:completed',
+                  );
+
+                  // Retired polishing compatibility boundary; always preserves
+                  // the primary scrape answer byte-for-byte.
+                  const scrapeRl = await runResponseLayerForLane({
+                    taskId,
+                    status: outcome.status,
+                    summary: outcome.status === 'completed' ? outcome.summary : '',
+                    expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+                    logger: ctx.logger,
+                  });
+                  // Codex Round 2 P1-5 — same post-formatter recheck as generate
+                  // lane. Scrape's LLM synthesis lands a citation block at the
+                  // end; the formatter rarely shrinks it, but the safety net is
+                  // free when the text passes through unchanged.
+                  let scrapePostFormatDowngrade: { downgrade: boolean; reason: string | null } = {
+                    downgrade: false,
+                    reason: null,
+                  };
+                  if (outcome.status === 'completed' && scrapeRl.summary !== outcome.summary) {
+                    const preFormatSummary = outcome.summary;
+                    scrapePostFormatDowngrade = recheckPostFormat(
+                      preFormatSummary,
+                      scrapeRl.summary,
+                    );
+                    outcome = {
+                      ...outcome,
+                      summary: scrapePostFormatDowngrade.downgrade
+                        ? preFormatSummary
+                        : scrapeRl.summary,
+                    };
+                  }
+                  let scrapeTerminalStatus = terminalStatus;
+                  const scrapeExtraFailedChecks: Array<{ type: string; detail: string }> = [];
+                  if (scrapePostFormatDowngrade.downgrade && scrapeTerminalStatus === 'completed') {
+                    scrapeTerminalStatus = 'partial_success';
+                    scrapeExtraFailedChecks.push({
+                      type: 'post_format_regression',
+                      detail: scrapePostFormatDowngrade.reason ?? '格式化层后内容缩水',
+                    });
+                    ctx.logger.warn(
+                      { taskId, reason: scrapePostFormatDowngrade.reason },
+                      'scrape: post-format recheck flagged regression — keeping pre-format summary',
+                    );
+                  }
+                  const scrapeFailedChecks = [
+                    ...(executionVerification && !executionVerification.passed
+                      ? extractFailedChecks(executionVerification)
+                      : []),
+                    ...(executionVerification && !executionVerification.passed
+                      ? []
+                      : scrapeResearchSourceTrust.failedChecks),
+                    ...scrapeExtraFailedChecks,
+                  ];
+                  let scrapeTerminalPersisted = false;
+
+                  try {
+                    if (scrapeTerminalStatus === 'completed' && outcome.status === 'completed') {
+                      const persisted = await repo.persistVisionOutcome(taskId, {
+                        status: 'completed',
+                        summary: outcome.summary,
+                        tickCount: 1,
+                        metadata,
+                      });
+                      scrapeTerminalPersisted = persisted.persisted;
+                    } else if (
+                      scrapeTerminalStatus === 'partial_success' &&
+                      outcome.status === 'completed'
+                    ) {
+                      const persisted = await repo.persistVisionOutcome(taskId, {
+                        status: 'partial_success',
+                        summary: outcome.summary,
+                        tickCount: 1,
+                        metadata,
+                        failedChecks: scrapeFailedChecks,
+                      });
+                      scrapeTerminalPersisted = persisted.persisted;
+                    } else {
+                      const reason =
+                        outcome.status === 'failed'
+                          ? outcome.reason
+                          : (failureSummary ?? '质量校验未通过');
+                      const persisted = await repo.persistVisionOutcome(taskId, {
+                        status: 'failed',
+                        reason,
+                        tickCount: 1,
+                        ...(!finalResponsesAdapter
+                          ? {
+                              errorCode:
+                                fallbackGenerateUnavailableReasonCode ??
+                                scrapeUnavailableReasonCode ??
+                                'MODEL_MIGRATION_IN_PROGRESS',
+                            }
+                          : {}),
+                        metadata,
+                        failedChecks: scrapeFailedChecks,
+                      });
+                      scrapeTerminalPersisted = persisted.persisted;
+                    }
+                  } catch (err) {
+                    ctx.logger.error({ err, taskId }, 'scrape: persist failed');
+                  }
+
+                  if (scrapeTerminalPersisted) {
+                    await stampResponseLayerColumns(
+                      ctx.db,
+                      taskId,
+                      scrapeRl.responseLayerOriginal,
+                      outcome.status === 'completed' ? outcome.summary : '',
+                      scrapeRl.responseLayerMetadata,
+                      ctx.logger,
+                    );
+                  }
+
+                  try {
+                    if (
+                      scrapeTerminalPersisted &&
+                      scrapeTerminalStatus === 'completed' &&
+                      outcome.status === 'completed'
+                    ) {
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.task.terminal',
+                        taskId,
+                        status: 'completed',
+                        ...(outcome.summary ? { summary: outcome.summary } : {}),
+                      });
+                    } else if (
+                      scrapeTerminalPersisted &&
+                      scrapeTerminalStatus === 'partial_success' &&
+                      outcome.status === 'completed'
+                    ) {
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.task.terminal',
+                        taskId,
+                        status: 'partial_success',
+                        ...(outcome.summary ? { summary: outcome.summary } : {}),
+                        ...(scrapeFailedChecks.length > 0
+                          ? { failedChecks: scrapeFailedChecks }
+                          : {}),
+                      });
+                    } else if (scrapeTerminalPersisted) {
+                      const reason =
+                        outcome.status === 'failed'
+                          ? outcome.reason
+                          : (failureSummary ?? undefined);
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.task.terminal',
+                        taskId,
+                        status: 'failed',
+                        ...(reason ? { reason } : {}),
+                        ...(scrapeFailedChecks.length > 0
+                          ? { failedChecks: scrapeFailedChecks }
+                          : {}),
+                      });
+                    }
+                  } catch (err) {
+                    ctx.logger.warn({ err, taskId }, 'scrape: broadcast terminal failed');
+                  }
+
+                  if (
+                    scrapeTerminalPersisted &&
+                    scrapeTerminalStatus === 'completed' &&
+                    outcome.status === 'completed'
+                  ) {
+                    const summary = outcome.summary;
+                    void runTaskBackground(ctx, async (ctx) =>
+                      publishCoreTaskSuggestions({
+                        wiring: modelRuntimeWiring,
+                        actorExternalId: ctx.userId,
+                        modelDataRegion: userRow.modelDataRegion,
+                        rawIntent: input.intent,
+                        intent: effectiveIntent,
+                        summary,
+                        isCurrent: () => repo.isCurrentCompletedOutcome(taskId, summary),
+                        persist: (suggestions) =>
+                          repo.persistCurrentCompletedSuggestions(taskId, summary, suggestions),
+                        publish: (suggestions) =>
+                          broadcastToUser(ctx.userId, {
+                            type: 'server.supercar.suggestions',
+                            taskId,
+                            suggestions,
+                          }),
+                      }),
+                    );
+                  }
+
+                  // Phase 1 Day 5 — fire-and-forget execution-pipeline persist
+                  // + cleanup. Same pattern as the generate fork.
+                  void runTaskBackground(ctx, async (ctx) =>
+                    persistExecution({
+                      taskId,
+                      verification: executionVerification,
+                      db: ctx.db,
+                      logger: ctx.logger,
+                    })
+                      .then((persisted) =>
+                        persisted
+                          ? writeLedgerToDb({
+                              taskExternalId: taskId,
+                              verification: executionVerification,
+                              db: ctx.db,
+                              logger: ctx.logger,
+                            })
+                          : null,
+                      )
+                      .finally(() => disposeExecution(taskId)),
+                  );
+                })(),
+              );
+
+              return {
+                taskId,
+                status: 'executing' as const,
+                steps: [],
+                executionMode: 'scrape' as const,
+              };
             }
-            // File-artifact consistency (B). The agent creates
-            // downloadable files via the create_file tool and is told
-            // to surface them with a ```holaday-file fence in the final
-            // answer; QA found ~1/3 of file tasks where the prose claims
-            // a file but the fence is omitted/garbled, so the user is
-            // told to click a download that isn't there. Fold any
-            // created output file NOT already referenced by a fence into
-            // metadata.attachments — the SPA's AttachmentBar then renders
-            // a download card without any SPA change. Deduped against
-            // fences so a correctly-surfaced file isn't doubled.
-            let outputDocDescriptors: Array<{ filename: string; mimetype: string }> = [];
-            if (taskDbId && outcome.status === 'completed') {
-              try {
-                const now = Date.now();
-                // DOCUMENT outputs only — the auto-final-screenshot is
-                // also a kind='output' row (added to attachments by L1
-                // above) and must not be re-folded here nor count as the
-                // claimed PDF/Markdown artifact.
-                const outputDocs = (await fileService.listForTask(taskDbId)).filter(
-                  (f) =>
-                    f.kind === 'output' &&
-                    f.status !== 'expired' &&
-                    (f.expiresAt == null || f.expiresAt.getTime() > now) &&
-                    isDocumentOutput({ filename: f.filename, mimetype: f.mimetype }),
+            // ===== end scrape-mode fork =====
+
+            // Deterministic direct-open lane. An explicit "打开 https://..."
+            // command needs no model judgement: navigate the managed browser,
+            // capture the real page, and finish. This also keeps offline local
+            // QA honest — it never creates StubPlanner's about:blank smoke plan.
+            if (directOpenUrl) {
+              const taskId = newExternalId('task');
+              const willQueueDirectOpen = Boolean(ctx.taskQueue && directOpenUsesBrowserPool);
+              await repo.insertTask(
+                {
+                  taskId,
+                  status: willQueueDirectOpen ? 'queued' : 'executing',
+                  plan: [],
+                  cursor: 0,
+                  pendingConfirm: null,
+                },
+                {
+                  userId: userRow.id,
+                  intent: input.intent,
+                  roleId: dispatchRoleId,
+                  opusUsed: opusActuallyConsumed,
+                  executionMode: 'browser',
+                  sourceContext: { browserSessionPolicy: taskSessionPolicy },
+                },
+              );
+
+              const dispatchDirectOpen = async (ctx: TaskExecutionContext): Promise<void> => {
+                let executor = directOpenFallbackExecutor;
+                let allocatedPool = false;
+                let adoptedBrowserSession = false;
+                try {
+                  if (directOpenUsesBrowserPool && ctx.browserPool) {
+                    const adopted = input.replyToTaskId
+                      ? ctx.browserPool.adoptRetained(
+                          input.replyToTaskId,
+                          taskId,
+                          ctx.userId,
+                          taskSessionPolicy,
+                        )
+                      : null;
+                    const instance =
+                      adopted ??
+                      (await ctx.browserPool.allocate(taskId, ctx.userId, input.viewportProfile, {
+                        targetUrl: browserTargetUrl,
+                        capabilities: taskBrowserCapabilities,
+                        sessionPolicy: taskSessionPolicy,
+                      }));
+                    executor = instance.executor;
+                    allocatedPool = true;
+                    adoptedBrowserSession = adopted != null;
+                  }
+                  if (!executor) throw new Error('浏览器执行器尚未就绪');
+                  const readyExecutor = executor;
+
+                  const directExecutor = {
+                    resetPageForTask: () => readyExecutor.resetPageForTask(),
+                    getPage: async () => (await readyExecutor.getPage()) as unknown as PageLike,
+                    navigate: (page: PageLike, url: string) => readyExecutor.navigate(page, url),
+                    screenshot: (page: PageLike) => readyExecutor.screenshot(page),
+                  };
+                  const evidence = await runDirectOpen(directExecutor, directOpenUrl, {
+                    preserveExistingPage: adoptedBrowserSession,
+                  });
+                  const persisted = await repo.persistVisionOutcome(taskId, {
+                    status: 'completed',
+                    summary: `已打开 ${evidence.finalUrl}`,
+                    tickCount: 1,
+                    finalUrl: evidence.finalUrl,
+                    finalScreenshot: evidence.finalScreenshot,
+                    ...(evidence.finalViewport ? { finalViewport: evidence.finalViewport } : {}),
+                    metadata: {
+                      executionMode: 'browser',
+                      lane: 'direct_open',
+                    },
+                  });
+                  if (!persisted.persisted) return;
+
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.vision.screencast',
+                    taskId,
+                    tickIndex: 1,
+                    imageBase64: evidence.finalScreenshot,
+                    url: evidence.finalUrl,
+                    viewport: evidence.finalViewport ?? { width: 1280, height: 800 },
+                    timestamp: new Date().toISOString(),
+                  });
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.task.terminal',
+                    taskId,
+                    status: 'completed',
+                    summary: `已打开 ${evidence.finalUrl}`,
+                  });
+                } catch (err) {
+                  const reason = err instanceof Error ? err.message : String(err);
+                  try {
+                    const persisted = await repo.persistVisionOutcome(taskId, {
+                      status: 'failed',
+                      reason: `浏览器打开失败：${reason}`.slice(0, 500),
+                      errorCode: 'DIRECT_OPEN_FAILED',
+                      tickCount: 0,
+                      metadata: { executionMode: 'browser', lane: 'direct_open' },
+                    });
+                    if (persisted.persisted) {
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.task.terminal',
+                        taskId,
+                        status: 'failed',
+                        reason: `浏览器打开失败：${reason}`.slice(0, 200),
+                      });
+                    }
+                  } catch (persistErr) {
+                    ctx.logger.error(
+                      { err: persistErr, taskId },
+                      'direct-open: failed outcome could not be persisted',
+                    );
+                  }
+                } finally {
+                  if (allocatedPool && ctx.browserPool) {
+                    const retained = ctx.browserPool.retain(
+                      taskId,
+                      appEnv.BROWSER_TERMINAL_RETENTION_MS,
+                      'direct-open-review',
+                    );
+                    if (!retained) {
+                      await ctx.browserPool
+                        .release(taskId, `direct-open-${taskId}-done`)
+                        .catch(() => {});
+                    }
+                  }
+                  if (willQueueDirectOpen) ctx.taskQueue?.signalSlotFreed();
+                }
+              };
+
+              if (willQueueDirectOpen && ctx.taskQueue) {
+                const enqueueResult = enqueueTaskExecution(ctx, {
+                  taskId,
+                  userId: ctx.userId,
+                  runFn: dispatchDirectOpen,
+                  onStart: async (ctx): Promise<void> => {
+                    await markQueuedTaskExecutingOrThrow({ repo, taskId, logger: ctx.logger });
+                  },
+                  onTimeout: async (ctx): Promise<void> => {
+                    const reason = '排队等待时间过长，任务已自动停止。请稍后重新执行。';
+                    try {
+                      const failed = await repo.markQueuedTaskFailed(
+                        taskId,
+                        `queue timeout: ${reason}`,
+                        {
+                          errorCode: 'QUEUE_TIMEOUT',
+                          source: 'direct_open_queue_timeout',
+                        },
+                      );
+                      if (failed.persisted) {
+                        broadcastToUser(ctx.userId, {
+                          type: 'server.task.terminal',
+                          taskId,
+                          status: 'failed',
+                          reason,
+                        });
+                      }
+                    } catch (err) {
+                      ctx.logger.error(
+                        { err, taskId },
+                        'direct-open: queue timeout could not be persisted',
+                      );
+                    }
+                  },
+                });
+
+                if (enqueueResult.kind === 'rejected') {
+                  await repo.markQueuedTaskFailed(taskId, enqueueResult.reason, {
+                    errorCode: 'QUEUE_REJECTED',
+                    source: 'direct_open_queue_rejected',
+                  });
+                  throw new TRPCError({
+                    code: 'TOO_MANY_REQUESTS',
+                    message: enqueueResult.reason,
+                  });
+                }
+                if (enqueueResult.kind === 'queued') {
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.task.queued',
+                    taskId,
+                    position: enqueueResult.position,
+                  });
+                }
+                return {
+                  taskId,
+                  status:
+                    enqueueResult.kind === 'dispatched'
+                      ? ('executing' as const)
+                      : ('queued' as const),
+                  steps: [],
+                  executionMode: 'browser' as const,
+                };
+              }
+
+              void runTaskBackground(ctx, async (ctx) =>
+                dispatchDirectOpen(ctx).catch((err) => {
+                  ctx.logger.error({ err, taskId }, 'direct-open: detached dispatch rejected');
+                }),
+              );
+
+              return {
+                taskId,
+                status: 'executing' as const,
+                steps: [],
+                executionMode: 'browser' as const,
+              };
+            }
+
+            // Diagnostic: log the supercar-gate inputs on every tasks.create
+            // so BOSS can tell from pm2 logs exactly why a task fell into the
+            // legacy branch. Happens BEFORE the gate so the log always lands.
+            ctx.logger.info(
+              {
+                gate: 'supercar-vs-legacy',
+                AGENT_MODE: appEnv.AGENT_MODE,
+                playwrightExecutorPresent: Boolean(ctx.playwrightExecutor),
+                browserModel: browserMessagesAdapter?.metadata.model ?? null,
+                isSimpleSearchIntent,
+                browserPoolEligible,
+                willUseSupercar: Boolean(browserMessagesAdapter),
+              },
+              'tasks.create: control-plane decision',
+            );
+
+            // Production browser execution uses the admitted regional Qwen adapter.
+            // AGENT_MODE and Anthropic credentials cannot redirect this lane.
+            if (scrapeBrowserRetry && !browserMessagesAdapter)
+              throw new TRPCError({
+                code: 'PRECONDITION_FAILED',
+                message: 'BROWSER_RETRY_RUNTIME_UNAVAILABLE',
+              });
+            if (browserMessagesAdapter) {
+              const taskId = scrapeBrowserRetry?.taskId ?? newExternalId('task');
+
+              // Phase 13 Dim 1 — first-frame plan. Skipped for simple-search and
+              // trivial intents. The Qwen route requires the shared adapter flag, a
+              // dedicated plan canary, an exact synthetic allowlist match, and the
+              // user's persisted model-data region. All invalid/configuration/provider
+              // failures become no-plan, so task execution remains available. Run in
+              // parallel with memory retrieval to avoid adding serial create latency.
+              const skipPlan =
+                Boolean(input.localChrome) || isSimpleSearchIntent || shouldSkipPlan(input.intent);
+              const memoryService = new MemoryService(ctx.db, ctx.logger);
+              const pendingPlanCalls: LlmCallRecord[] = [];
+              const [planResult, relevantMemories] = await Promise.all([
+                skipPlan
+                  ? Promise.resolve({ planText: null, planStatus: null })
+                  : generatePlanForUser({
+                      browserPlanning: true,
+                      planningAdapter: browserMessagesAdapter.browserBrain?.planning,
+                      recorder: {
+                        record: async (call) => {
+                          pendingPlanCalls.push(call);
+                        },
+                      },
+                      environment: appEnv,
+                      userExternalId: ctx.userId,
+                      userModelDataRegion: userRow.modelDataRegion,
+                      intent: input.intent,
+                      logger: ctx.logger,
+                      taskId,
+                    }),
+                memoryService.pickRelevant(userRow.id, input.intent),
+              ]);
+              const memoryPreamble = memoryService.formatForPrompt(relevantMemories);
+              // Phase 14 — site-playbook injection. Match the user's intent
+              // against the playbook catalogue (中文 name / domain / English
+              // name); render the matched tips into a user-message preamble.
+              // Empty when no site is mentioned — keeps unrelated tasks
+              // unaffected. matchPlaybooks is a small in-memory loop over
+              // ~25 entries (microseconds). The matched array is also reused
+              // below by the router cold-start recommendation when stats has
+              // < 3 samples for the target site.
+              const matchedPlaybooks = matchPlaybooks(input.intent);
+              const playbookContext = formatPlaybooksForPrompt(matchedPlaybooks);
+              if (matchedPlaybooks.length > 0) {
+                ctx.logger.info(
+                  { taskId, sites: matchedPlaybooks.map((p) => p.domain) },
+                  'playbook: injected site context',
                 );
-                outputDocDescriptors = outputDocs.map((f) => ({
-                  filename: f.filename,
-                  mimetype: f.mimetype,
-                }));
-                if (outputDocs.length > 0) {
-                  const fenced = fencedFileIds(outcome.summary ?? '');
-                        const existing =
-                          (metadata.attachments as Array<{ fileId?: unknown }>) ?? [];
-                  const alreadyAttached = new Set(
-                    existing.map((a) => (typeof a.fileId === 'string' ? a.fileId : '')),
-                  );
-                  const unfenced = outputDocs.filter(
-                    (f) => !fenced.has(f.externalId) && !alreadyAttached.has(f.externalId),
-                  );
-                  if (unfenced.length > 0) {
-                    metadata.attachments = [
-                      ...existing,
-                      ...unfenced.map((f) => ({
-                        fileId: f.externalId,
-                        downloadUrl: `/api/files/${f.externalId}/download`,
-                        filename: f.filename,
-                        mimetype: f.mimetype,
-                        sizeBytes: f.sizeBytes,
-                        expiresAt: f.expiresAt ? f.expiresAt.toISOString() : null,
-                        kind: 'file',
-                      })),
-                    ];
+              }
+
+              // Phase 24 RC follow-up — TaskQueue gates dispatch when the
+              // per-task BrowserPool is at its 10-slot capacity. We seed the
+              // row with status='queued' so a 30-task burst doesn't show 30
+              // fake-executing rows while 20 of them are actually waiting.
+              // The queue's onStart callback flips the row to 'executing' the
+              // moment a slot frees; if the queue isn't wired (e.g. legacy
+              // boot without MULTI_USER) we fall back to the historical
+              // 'executing' seed.
+              const willQueueDispatch = Boolean(
+                !input.localChrome &&
+                  ctx.taskQueue &&
+                  executionMode === 'browser' &&
+                  shouldUseBrowserPool(ctx.userId),
+              );
+              const browserSourceContext = {
+                ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
+                browserSessionPolicy: taskSessionPolicy,
+              };
+              if (scrapeBrowserRetry) {
+                // Same task, same charge: take over the scrape task's row.
+                const adopted = await repo.adoptTaskForBrowserRetry({
+                  taskExternalId: taskId,
+                  userId: userRow.id,
+                  status: willQueueDispatch ? 'queued' : 'executing',
+                  sourceContext: browserSourceContext,
+                  reason: scrapeBrowserRetry.reason,
+                });
+                if (!adopted.persisted)
+                  throw new TRPCError({ code: 'CONFLICT', message: 'BROWSER_RETRY_TASK_CHANGED' });
+              } else {
+                await repo.insertTask(
+                  {
+                    taskId,
+                    status: willQueueDispatch ? 'queued' : 'executing',
+                    plan: [],
+                    cursor: 0,
+                    pendingConfirm: null,
+                  },
+                  {
+                    userId: userRow.id,
+                    intent: input.intent,
+                    roleId: dispatchRoleId,
+                    opusUsed: opusActuallyConsumed,
+                    executionMode: 'browser',
+                    sourceContext: browserSourceContext,
+                  },
+                );
+              }
+              // The model call precedes row creation. Flush only now, so its cost
+              // belongs to this task rather than an unassociated account call.
+              const planRecorder = new DrizzleLlmCallRecorder(ctx.db, {
+                onError: () => ctx.logger.warn({ taskId }, 'browser planning accounting failed'),
+              });
+              for (const call of pendingPlanCalls) await planRecorder.record(call);
+              // Phase 13 Dim 1 — persist plan onto the task row and broadcast
+              // it to the SPA so the user sees upcoming steps before any
+              // tool fires. Best-effort: write failures log + continue.
+              if (planResult.planText) {
+                await ctx.db
+                  .update(tasksTable)
+                  .set({
+                    planText: planResult.planText,
+                    planStatus: planResult.planStatus as unknown,
+                  })
+                  .where(eq(tasksTable.externalId, taskId))
+                  .catch((err) => ctx.logger.warn({ err, taskId }, 'plan persist failed'));
+                try {
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.task.plan',
+                    taskId,
+                    planText: planResult.planText,
+                    planStatus: planResult.planStatus ?? [],
+                  });
+                } catch (err) {
+                  ctx.logger.warn({ err, taskId }, 'plan broadcast failed');
+                }
+              }
+              // Phase 10 Tier 3 — back-fill task_files.task_id once the task
+              // row exists. Best-effort so a failed link doesn't kill the run;
+              // worst case the file is orphaned (still readable by id, just
+              // not linkable from /tasks/:id).
+              if (input.fileIds && input.fileIds.length > 0) {
+                const [taskDb] = await ctx.db
+                  .select({ id: tasksTable.id })
+                  .from(tasksTable)
+                  .where(eq(tasksTable.externalId, taskId))
+                  .limit(1);
+                if (taskDb) {
+                  await fileService
+                    .linkToTask(input.fileIds, taskDb.id, userRow.id)
+                    .catch((err) => ctx.logger.warn({ err }, 'tasks.create: file link failed'));
+                }
+              }
+
+              const classification = classifyDomain(input.intent);
+              ctx.logger.info(
+                { taskId, domain: classification.domain, confidence: classification.confidence },
+                'supercar: task domain classified',
+              );
+
+              const userId = ctx.userId;
+              const [taskDbRow] = await ctx.db
+                .select({ id: tasksTable.id })
+                .from(tasksTable)
+                .where(eq(tasksTable.externalId, taskId))
+                .limit(1);
+              const taskDbId = taskDbRow?.id;
+
+              // Phase 8.1: HEADED Brave is the primary browser. Phase 6-2
+              // shipped with headless as primary + headed as a stuck/anti-bot
+              // fallback, but that meant the user watched the Panel VNC stream
+              // (wired to the headed Xvfb) while the agent was actually
+              // driving the hidden headless instance — they never matched
+              // up in the UI. Demoting headless to "last-resort fallback"
+              // makes the UI stream and the agent's focus the same browser.
+              //
+              // Empty headed lane (dev boxes without Xvfb + Brave) falls back
+              // to headless → plain injected executor → router-less deploy
+              // ancestor. Each null just hops to the next layer.
+              const headedExec = ctx.executionRouter?.getExecutor('headed') ?? null;
+              const headlessExec =
+                ctx.executionRouter?.getExecutor('headless') ?? ctx.playwrightExecutor ?? null;
+
+              // Phase 21b — executionMode was decided up at the admission
+              // gate (so per-mode concurrency could apply). It's reused here
+              // to gate pool.allocate; for 'generate' we don't need a per-
+              // user pool slot. Note that this branch only fires for the
+              // BROWSER execution mode under 21b — pure-generate tasks fork
+              // off into runGenerateTask before reaching the supercar gate.
+              ctx.logger.info(
+                { taskId, userId: ctx.userId, executionMode },
+                'tasks.create: supercar branch — execution mode',
+              );
+
+              // Phase 8.2: when the caller is in MULTI_USER_USERS allow-list,
+              // replace the shared headed singleton with their own pool slot.
+              // The pool's executor is a freshly-connected PlaywrightExecutor
+              // pointing at a dedicated Brave + Xvfb + VNC quartet — the rest
+              // of the supercar loop sees a plain PlaywrightExecutor and
+              // doesn't know the difference. If allocate throws (capacity
+              // exceeded, spawn timeout) we surface a typed error so the UI
+              // can show "browser-pool busy" rather than an opaque 500.
+              //
+              // 21a — also skip when executionMode='generate' (no per-user
+              // browser slot needed for pure-generation tasks).
+              // Phase 24 RC follow-up — wrap allocate + supercarArgs build +
+              // runFn invocation in dispatchToBrave so the global TaskQueue
+              // can hold it past the 10-slot pool cap. Body unchanged from
+              // the pre-queue flow; only outer scheduling differs (taskQueue
+              // .enqueue vs `void runFn()`).
+              const dispatchToBrave = async (ctx: TaskExecutionContext): Promise<void> => {
+                let perUserExec = null;
+                let adoptedBrowserSession = false;
+                if (
+                  !input.localChrome &&
+                  ctx.browserPool &&
+                  shouldUseBrowserPool(ctx.userId) &&
+                  executionMode === 'browser'
+                ) {
+                  try {
+                    // Phase 24 — keyed by taskId, not userId. One task = one
+                    // Brave (no shared instance, no refcount). The runFn
+                    // .finally below calls release(taskId) to tear down
+                    // immediately on completion. Per-user concurrency is gated
+                    // upstream via getActiveTaskCount + plan limits.
+                    const adopted = input.replyToTaskId
+                      ? ctx.browserPool.adoptRetained(
+                          input.replyToTaskId,
+                          taskId,
+                          ctx.userId,
+                          taskSessionPolicy,
+                        )
+                      : null;
+                    let allocatedForContinuation = false;
+                    const instance = adopted
+                      ? adopted
+                      : await ctx.browserPool.allocate(taskId, ctx.userId, input.viewportProfile, {
+                          targetUrl: browserTargetUrl,
+                          capabilities: taskBrowserCapabilities,
+                          sessionPolicy: taskSessionPolicy,
+                        });
+                    allocatedForContinuation = adopted == null;
+                    const continuation = resolveBrowserFollowUpContinuation({
+                      hasParentTask: Boolean(input.replyToTaskId),
+                      parentHasBrowserContext,
+                      adopted: adopted != null,
+                      restoreUrl: parentBrowserRestoreUrl,
+                    });
+                    if (continuation === 'unavailable') {
+                      await ctx.browserPool
+                        .release(taskId, 'follow-up-page-unavailable')
+                        .catch(() => {});
+                      throw new Error(
+                        '当前浏览器页面已过期，且没有可恢复地址。请重新打开目标页面。',
+                      );
+                    }
+                    if (continuation === 'restore') {
+                      if (!parentBrowserRestoreUrl) {
+                        await ctx.browserPool.release(taskId, 'follow-up-page-unavailable');
+                        throw new Error(
+                          '当前浏览器页面已过期，且没有可恢复地址。请重新打开目标页面。',
+                        );
+                      }
+                      const decision =
+                        await defaultBrowserNetworkPolicy.check(parentBrowserRestoreUrl);
+                      if (!decision.allowed) {
+                        await ctx.browserPool.release(taskId, 'follow-up-url-blocked');
+                        throw new Error(decision.message);
+                      }
+                      try {
+                        await instance.executor.resetPageForTask();
+                        const page = (await instance.executor.getPage()) as unknown as PageLike;
+                        const navigation = await instance.executor.navigate(
+                          page,
+                          parentBrowserRestoreUrl,
+                        );
+                        if (!navigation.ok) {
+                          throw new Error(navigation.message ?? '无法恢复前一个任务的页面');
+                        }
+                        ctx.logger.info(
+                          {
+                            sourceTaskId: input.replyToTaskId,
+                            destinationTaskId: taskId,
+                            userId: ctx.userId,
+                            url: parentBrowserRestoreUrl,
+                          },
+                          'pool: restored follow-up page after retained browser expired',
+                        );
+                      } catch (err) {
+                        if (allocatedForContinuation) {
+                          await ctx.browserPool
+                            .release(taskId, 'follow-up-page-restore-failed')
+                            .catch(() => {});
+                        }
+                        throw err;
+                      }
+                    }
+                    taskBrowserCapabilities = instance.capabilities ?? taskBrowserCapabilities;
+                    perUserExec = instance.executor;
+                    adoptedBrowserSession =
+                      continuation === 'adopted' || continuation === 'restore';
                     ctx.logger.info(
-                      { taskId, recovered: unfenced.map((f) => f.externalId) },
-                      'file-artifact: folded un-fenced document outputs into metadata.attachments',
+                      {
+                        taskId,
+                        userId: ctx.userId,
+                        cdpPort: instance.cdpPort,
+                        displayNum: instance.display,
+                      },
+                      'pool: allocated browser for task',
+                    );
+                  } catch (err) {
+                    // No singleton fallback. The earlier behaviour ("degrade to
+                    // shared Brave") could land a user's clicks on another
+                    // user's session and bypassed the per-task hijack guards.
+                    // Re-throw so dispatchToBrave aborts; the runFn .finally
+                    // marks the task failed and the queue slot releases.
+                    // Capacity errors should be rare since the queue gates on
+                    // pool depth; treat them as alert-worthy when they hit.
+                    ctx.logger.error(
+                      {
+                        err: err instanceof Error ? err.message : String(err),
+                        userId: ctx.userId,
+                        taskId,
+                      },
+                      'pool: allocate failed — refusing to fall back to singleton, failing task',
+                    );
+                    const reason =
+                      err instanceof Error ? err.message : `pool allocate failed: ${String(err)}`;
+                    try {
+                      await persistAndBroadcastBrowserDispatchFailure({
+                        repo,
+                        taskId,
+                        userId: ctx.userId,
+                        reason,
+                        logger: ctx.logger,
+                        broadcastToUser,
+                      });
+                    } finally {
+                      if (willQueueDispatch) ctx.taskQueue?.signalSlotFreed();
+                    }
+                    return;
+                  }
+                }
+
+                // primaryExecutor may be null when:
+                //   - the gate admitted via canShortCircuitBrave (simple-search,
+                //     no browser needed — Brave handles it); or
+                //   - the gate admitted via browserPoolEligible but pool.allocate
+                //     above raced and lost (Brave crashed mid-spawn).
+                // runSupercarTask's null-executor guard handles both: Brave/Zapier
+                // short-circuits fire first, and if neither matches it returns
+                // status='failed' with a clear "browser unavailable" reason.
+                // That marks the task failed in the DB rather than 500ing the
+                // tasks.create call, which would lose the audit trail.
+                const primaryExecutor = perUserExec ?? headedExec ?? headlessExec;
+                // Phase 22a — captured once at admit time so the runFn .finally
+                // below can release the slot without re-checking pool state.
+                const didAllocatePool = perUserExec !== null;
+                // Phase 19c follow-up — log which executor lane this task
+                // landed on. Lets BOSS confirm in pm2 logs that the per-user
+                // pool path is actually winning (and falling back to a
+                // singleton lane is the exception, not the rule). Helps
+                // future "agent operates on a different browser than the
+                // user is watching" reports get diagnosed in one log line.
+                const executorLane = input.localChrome
+                  ? 'local-chrome'
+                  : perUserExec
+                    ? 'per-user-pool'
+                    : primaryExecutor === headedExec
+                      ? 'singleton-headed-fallback'
+                      : primaryExecutor === headlessExec
+                        ? 'singleton-headless-fallback'
+                        : 'none';
+                ctx.logger.info(
+                  { taskId, userId: ctx.userId, executorLane },
+                  'task: executor lane selected',
+                );
+                // Phase 13 Dim 6 — single StatsService instance shared across
+                // all stats records the loop emits. Wiring is best-effort
+                // (StatsService.record swallows its own errors), so a stats
+                // backend hiccup never stalls the agent.
+                const statsService = new StatsService(ctx.db, ctx.logger);
+                const taskTypeForStats = classifyTaskType(input.intent);
+                // Phase 13 Dim 6 — optimal-lane hint from prior stats. Best-
+                // effort observability: derives the target site from any URL
+                // mention in the intent (e.g. "在 jd.com 搜..."), then logs
+                // the historically winning lane for (this user, that site).
+                // Routing decisions are unchanged this commit; the log line
+                // exists so we can validate the recommender empirically before
+                // wiring it to the gate. Null target_site → no lookup.
+                const intentSiteMatch = input.intent.match(
+                  /\b(?:https?:\/\/)?((?:[a-z0-9-]+\.)+(?:com|cn|net|org|tech|ai|io|co))\b/i,
+                );
+                const intentTargetSite = intentSiteMatch
+                  ? extractDomain(intentSiteMatch[1] ?? null)
+                  : null;
+                // Phase 14 — playbook-driven cold-start lane recommendation.
+                // The "router: cold-start lane from playbook" log fires when:
+                //   (a) intent has a URL but stats < 3 samples, OR
+                //   (b) intent has no URL but a playbook matched by name.
+                // The intent-only branch is a best-effort observability hook;
+                // routing decisions still go through the legacy gate this
+                // commit. Stats stay primary once they exceed the sample
+                // threshold (priority order in router-decision.ts).
+                const playbookForRouter = matchedPlaybooks[0] ?? null;
+                const routerTargetSite = intentTargetSite ?? playbookForRouter?.domain ?? null;
+                if (routerTargetSite) {
+                  try {
+                    const optimalLane = await statsService.getOptimalLane({
+                      userIdInternal: userRow.id,
+                      targetSite: routerTargetSite,
+                    });
+                    if (optimalLane) {
+                      ctx.logger.info(
+                        {
+                          taskId,
+                          taskType: taskTypeForStats,
+                          targetSite: routerTargetSite,
+                          optimalLane,
+                          source: 'stats',
+                        },
+                        'router: optimal lane from stats',
+                      );
+                    } else if (playbookForRouter) {
+                      ctx.logger.info(
+                        {
+                          taskId,
+                          taskType: taskTypeForStats,
+                          targetSite: routerTargetSite,
+                          recommendedLane: playbookForRouter.preferredLane,
+                          source: 'playbook',
+                        },
+                        'router: cold-start lane from playbook',
+                      );
+                      // Phase 14 (extension follow-up) — when the matched
+                      // playbook flags this site as login-required AND the
+                      // user has a live extension WS connection AND the
+                      // extension reports them as logged in there, log a
+                      // hint so we can later wire the chrome-extension
+                      // transport as a higher-priority lane than headed.
+                      // Read-only observability this commit; no routing
+                      // change. Treats the playbook's own domain as
+                      // canonical (covers the case where intent has no URL).
+                      if (
+                        playbookForRouter.loginRequired !== false &&
+                        hasConnectedSwClient(ctx.userId) &&
+                        getExtensionLoginState(ctx.userId, playbookForRouter.domain) === true
+                      ) {
+                        ctx.logger.info(
+                          {
+                            taskId,
+                            targetSite: playbookForRouter.domain,
+                            loginRequired: playbookForRouter.loginRequired,
+                          },
+                          'router: extension lane available with verified login state',
+                        );
+                      }
+                    } else {
+                      ctx.logger.info(
+                        { taskId, targetSite: routerTargetSite },
+                        'router: no usable stats history for site (default route)',
+                      );
+                    }
+                  } catch (err) {
+                    ctx.logger.warn(
+                      { err: err instanceof Error ? err.message : String(err) },
+                      'router: stats lookup failed (non-fatal)',
                     );
                   }
                 }
-              } catch (err) {
-                ctx.logger.warn(
-                  { err: err instanceof Error ? err.message : String(err), taskId },
-                  'file-artifact: output-file fold failed (non-fatal)',
-                );
-              }
-            }
-            // Phase 1 Day 5 Round 2 — pipeline verification on the
-            // supercar/browser final answer. Mirrors the generate +
-            // scrape pattern: seed terminal-state evidence into the
-            // ledger, then run the verifier. autoFix can substitute
-            // a fabricated URL with a grounded one BEFORE
-            // persistSupercarOutcome writes the row, so the user
-            // sees the corrected text on first render.
-            if (outcome.status === 'completed' && outcome.summary) {
-              const terminalSearchSources = collectSearchSourceReferences(
-                observedWebSearchSources,
-              );
-              // The final answer cites provider-returned links, so record the
-              // same observed URLs before verification. Otherwise autoFix
-              // correctly treats the links as ungrounded and removes them.
-              for (const source of terminalSearchSources) {
-                recordEvidence(taskId, {
-                  fact: `web_search_url=${source.url}`,
-                  sourceType: 'tool_result',
-                  sourceDetail: 'supercar web_search provider result',
-                  confidence: 'observed',
+                // Per-task buffer of web_search results from the current
+                // iteration. onWebSearch pushes here; onTick (which fires once
+                // at the end of each iteration) flushes them into the persisted
+                // step's output JSON so a refresh-after-completion can rebuild
+                // webSearchByTask without replaying the WS frames. Local to
+                // dispatchToBrave so concurrent tasks don't share a buffer.
+                let pendingWebSearches: Array<{
+                  readonly query: string;
+                  readonly sources: ReadonlyArray<{ title: string; url: string; snippet?: string }>;
+                }> = [];
+                // Terminal source references are independent from the per-tick buffer:
+                // onTick clears the latter after persistence, while the final answer
+                // still needs the observed search URLs for its evidence boundary.
+                const observedWebSearchSources: Array<{ title: string; url: string }> = [];
+                // Codex P3 follow-up — per-task buffer of save_page_as_pdf
+                // results. Each successful call appends one entry here; the
+                // terminal-state merge below folds the list into
+                // `metadata.attachments` so the eval haystack + SPA AttachmentBar
+                // see every PDF the agent saved during the run (not just the
+                // last one). Local to the .create closure so concurrent tasks
+                // don't share state. Each entry mirrors the L1 screenshot
+                // attachment shape (`kind: 'pdf'`).
+                const pdfAttachments: Array<{
+                  fileId: string;
+                  downloadUrl: string;
+                  filename: string;
+                  mimetype: string;
+                  sizeBytes: number;
+                  expiresAt: string;
+                  kind: 'pdf' | 'file';
+                  sha256?: string;
+                }> = [];
+                // Phase 1 Playbook B2 — per-action capture. Wire onAction ONLY when
+                // ACTION_CAPTURE is on; the agent-loop skips the whole capture (incl.
+                // the page.evaluate) when opts.onAction is absent → OFF = zero
+                // overhead. Persist is fire-and-forget (mirrors the onTick consumer).
+                const actionCaptureEnabled = getExecutionFeatureFlags().ACTION_CAPTURE;
+                const taskActionCaptureRepo = actionCaptureEnabled
+                  ? new TaskActionCaptureRepository(ctx.db)
+                  : null;
+                // Phase 1 Playbook B4 — screenshot anchor. Independent flag, AND
+                // ACTION_CAPTURE (rides the same onAction event). Instances built only
+                // when enabled; per-task counter caps R2 spend at MAX_SCREENSHOT_ANCHORS.
+                const screenshotAnchorEnabled =
+                  actionCaptureEnabled && getExecutionFeatureFlags().B4_SCREENSHOT_ANCHOR;
+                const evidenceArtifactRepo = screenshotAnchorEnabled
+                  ? new EvidenceArtifactRepository(ctx.db)
+                  : null;
+                const sharedStorage = screenshotAnchorEnabled
+                  ? getSharedStorageProvider({ logger: ctx.logger })
+                  : null;
+                const MAX_SCREENSHOT_ANCHORS = 8;
+                let screenshotAnchorCount = 0;
+                // Phase 1 Playbook ④ prerequisite — wire the supercar loop to the
+                // shared LLM cost recorder so each browse turn lands in `llm_calls`
+                // (the loop builds its own Anthropic client and was never recorded →
+                // browse tasks showed $0). Recording is fire-and-forget inside the loop;
+                // a write failure only logs here.
+                const llmCallRecorder = new DrizzleLlmCallRecorder(ctx.db, {
+                  onError: (err) =>
+                    ctx.logger.warn(
+                      { err: err instanceof Error ? err.message : String(err), taskId },
+                      'supercar: llm_calls cost record failed (non-blocking)',
+                    ),
                 });
-              }
-              const answerSummary = appendSearchSourceReferences(
-                outcome.summary,
-                terminalSearchSources,
-              );
-              outcome = {
-                ...outcome,
-                summary: answerSummary,
-              };
-              if (finalState.finalUrl) {
-                recordEvidence(taskId, {
-                  fact: `final_url=${finalState.finalUrl}`,
-                  sourceType: 'browser_state',
-                  sourceDetail: 'supercar terminal state',
-                  confidence: 'observed',
+                // Batch 09: unified executor search (Qwen built-in first, Firecrawl
+                // fallback when FIRECRAWL_API_KEY is set) and read-only page reads.
+                const unifiedBrowserRuntime = modelRuntimeWiring.resolveCore({
+                  actorExternalId: ctx.userId,
+                  lane: 'browser',
+                  ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
                 });
-              }
-              recordEvidence(taskId, {
-                fact: `response_length=${answerSummary.length}`,
-                sourceType: 'tool_result',
-                sourceDetail: 'supercar agent response',
-                confidence: 'observed',
-              });
-              // Codex Pack B1 — verifying chip (supercar lane).
-              broadcastSubStatus(ctx.userId, taskId, 'verifying');
-              const verified: VerifyOutput = await verifyAndFinalize({
-                taskId,
-                answerText: answerSummary,
-                ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
-                logger: ctx.logger,
-                // File-artifact guard (C): a download claim with no
-                // fence AND no matching DOCUMENT output → fixable. The
-                // screenshot is excluded from outputDocDescriptors.
-                outputFiles: outputDocDescriptors,
-              });
-              if (verified.finalText !== outcome.summary) {
-                outcome = { ...outcome, summary: verified.finalText };
-              }
-              executionVerification = verified.verification;
-            }
-            const preFormatResearchSourceTrust = assessResultTrust({
-              intent: input.intent,
-              resultText: outcome.status === 'completed' ? outcome.summary : '',
-              currentUrl: finalState.finalUrl,
-            });
-
-            // The formatter needs a provisional terminal shape. The definitive
-            // verdict is recalculated from the exact persisted text below.
-            const preFormatTerminalStatus: FinalTerminalStatus = deriveFinalStatus(
-              outcome.status,
-              executionVerification,
-              preFormatResearchSourceTrust,
-            );
-            // The legacy second-model polishing layer is retired. Route the
-            // supercar lane through the same compatibility boundary as the
-            // other lanes so old environment variables cannot re-enable it.
-            const supercarRl = await runResponseLayerForLane({
-              taskId,
-              status: preFormatTerminalStatus,
-              summary: outcome.summary ?? '',
-              expertWorkflowId:
-                typeof metadata?.expertWorkflowId === 'string'
-                  ? metadata.expertWorkflowId
-                  : undefined,
-              logger: ctx.logger,
-            });
-            const responseLayerOriginal = supercarRl.responseLayerOriginal;
-            const responseLayerMetadata = supercarRl.responseLayerMetadata;
-            if (outcome.summary && supercarRl.summary !== outcome.summary) {
-              outcome = { ...outcome, summary: supercarRl.summary };
-            }
-            // Enforce the observed-source boundary immediately before persistence.
-            if (outcome.status === 'completed' && outcome.summary) {
-              const persistenceSummary = appendSearchSourceReferences(
-                outcome.summary,
-                observedWebSearchSources,
-              );
-              outcome = {
-                ...outcome,
-                summary: persistenceSummary,
-              };
-
-              // Production trust P0 — this is the last mutation boundary.
-              // Re-run the deterministic verifier + auto-fix on the exact
-              // string we will persist. This prevents a formatter (or the
-              // source footer) from re-introducing duplicate candidate links
-              // after the primary verifier already ran.
-              const finalVerified = await finalizeAnswerForPersistence({
-                taskId,
-                answerText: persistenceSummary,
-                priorVerification: executionVerification,
-                ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
-                logger: ctx.logger,
-                outputFiles: outputDocDescriptors,
-              });
-              if (finalVerified.finalText !== outcome.summary) {
-                outcome = { ...outcome, summary: finalVerified.finalText };
-              }
-              executionVerification = finalVerified.verification;
-            }
-
-            const supercarResearchSourceTrust = assessResultTrust({
-              intent: input.intent,
-              resultText: outcome.status === 'completed' ? outcome.summary : '',
-              currentUrl: finalState.finalUrl,
-            });
-
-            // Codex Pack A3 — the verdict now describes the exact text that
-            // flows through persistence and the terminal WebSocket message.
-            const supercarTerminalStatus: FinalTerminalStatus = deriveFinalStatus(
-              outcome.status,
-              executionVerification,
-              supercarResearchSourceTrust,
-            );
-            const supercarFailureSummary =
-              supercarTerminalStatus === 'failed'
-                ? executionVerification
-                  ? summariseVerificationFailure(executionVerification)
-                  : (supercarResearchSourceTrust.failedChecks[0]?.detail ?? null)
-                : null;
-            const supercarFailedChecks = [
-              ...(executionVerification && !executionVerification.passed
-                ? extractFailedChecks(executionVerification)
-                : []),
-              ...(executionVerification && !executionVerification.passed
-                ? []
-                : supercarResearchSourceTrust.failedChecks),
-            ];
-            const supercarStateTransition = classifySupercarTaskStateTransition({
-              status: outcome.status,
-              question: outcome.question,
-              summary: outcome.summary,
-            });
-            let terminalPersisted = false;
-            if (supercarStateTransition.kind === 'waiting_user') {
-              try {
-                const finalFields = finalStatePersistFields(finalState);
-                const waitingPersisted = await repo.persistAwaitingUser({
-                  taskExternalId: taskId,
-                  question: supercarStateTransition.question,
-                  awaitingKind: supercarStateTransition.awaitingKind,
-                  result: {
-                    ...(metadata ?? {}),
-                    executionMode:
-                      typeof metadata?.executionMode === 'string'
-                        ? metadata.executionMode
-                        : 'browser',
-                    ...finalFields,
+                const unifiedWebSearch = createFallbackWebSearch({
+                  primary:
+                    unifiedBrowserRuntime.kind === 'ready'
+                      ? createResponsesWebSearch(unifiedBrowserRuntime.responses('fast'))
+                      : null,
+                  firecrawl: ctx.firecrawl ?? null,
+                });
+                const unifiedReadPage = createFirecrawlReadPage(ctx.firecrawl);
+                let captchaPrivacy = false;
+                let captchaNeedsRelease = false;
+                let pauseCaptchaWatchdog = () => {};
+                let resumeCaptchaWatchdog = () => {};
+                const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
+                  browserCapabilities: taskBrowserCapabilities,
+                  ...(unifiedWebSearch ? { unifiedWebSearch } : {}),
+                  ...(unifiedReadPage ? { unifiedReadPage } : {}),
+                  messagesAdapter: browserMessagesAdapter,
+                  taskId,
+                  // CAPTCHA-REDUCE-1: anonymous cloud sessions keep this user's
+                  // verification clearance (profile store off unless configured).
+                  ...(taskSessionPolicy === 'anonymous' && !input.localChrome
+                    ? { persistentProfileUser: ctx.userId }
+                    : {}),
+                  // OPEN-ANY-SITE-1: pool browsers learn sites that refuse their egress.
+                  ...(!input.localChrome && ctx.browserPool?.peek(taskId)
+                    ? { learnEgressBlocks: true }
+                    : {}),
+                  ...(primaryExecutor && ctx.browserPool?.peek(taskId)?.executor === primaryExecutor
+                    ? {
+                        browserControlFactory: () => {
+                          const instance = ctx.browserPool?.peek(taskId);
+                          if (
+                            !instance ||
+                            instance.userId !== ctx.userId ||
+                            instance.executor !== primaryExecutor ||
+                            instance.status !== 'ready'
+                          ) {
+                            throw new Error('browser_control_instance_unavailable');
+                          }
+                          return browserControlSessions.start(instance);
+                        },
+                      }
+                    : {}),
+                  isTaskCancelled: () => repo.isTaskCancelled(taskId),
+                  // Phase 1 Playbook ④ prerequisite — cost accounting for the browse
+                  // loop (recorder + the external user id llm_calls.user_id needs).
+                  recorder: llmCallRecorder,
+                  userExternalId: ctx.userId,
+                  // Phase 1 Playbook B4 — gate screenshot-anchor attachment in the loop
+                  // (OFF → loop never attaches the screenshot = zero overhead).
+                  captureScreenshotAnchors: screenshotAnchorEnabled,
+                  // Phase 14 audit follow-up — feed the agent the parent-task
+                  // context block when this is a 追问. DB still stores
+                  // `input.intent` (what the user typed); only the model sees
+                  // the prefixed version.
+                  intent: effectiveIntent,
+                  expertMode: expertModeOverride,
+                  ...(memoryPreamble ? { memoryPreamble } : {}),
+                  ...(playbookContext ? { playbookContext } : {}),
+                  ...(planResult.planText ? { planText: planResult.planText } : {}),
+                  ...(planResult.planStatus ? { planSteps: planResult.planStatus } : {}),
+                  // Phase 13 Dim 1 follow-up — persist + broadcast every
+                  // plan-step state change as the model emits markers. Best-
+                  // effort: a DB blip or broadcast failure logs and continues
+                  // (the loop already has the up-to-date state in memory).
+                  onPlanStepUpdate: (steps) => {
+                    void runTaskBackground(ctx, async (ctx) =>
+                      (async () => {
+                        const persisted = await repo.persistActivePlanStatus(taskId, steps);
+                        if (!persisted.persisted) {
+                          ctx.logger.info({ taskId }, 'plan-step skipped stale update');
+                          return;
+                        }
+                        try {
+                          broadcastToUser(ctx.userId, {
+                            type: 'server.task.plan_step',
+                            taskId,
+                            planStatus: steps,
+                          });
+                        } catch (err) {
+                          ctx.logger.warn({ err, taskId }, 'plan-step broadcast failed');
+                        }
+                      })().catch((err) =>
+                        ctx.logger.warn({ err, taskId }, 'plan-step persist failed'),
+                      ),
+                    );
                   },
-                });
-                if (waitingPersisted.persisted) {
-                    broadcastToUser(
-                      userId,
-                      buildSupercarWaitingUserMessage({
-                    taskId,
-                    transition: supercarStateTransition,
+                  onStatsRecord: ({ laneUsed, targetSite, success, latencyMs, errorType }) => {
+                    void runTaskBackground(ctx, async () =>
+                      statsService.record({
+                        userIdInternal: userRow.id,
+                        taskExternalId: taskId,
+                        taskType: taskTypeForStats,
+                        targetSite,
+                        laneUsed,
+                        success,
+                        latencyMs,
+                        errorType,
                       }),
                     );
-                }
-              } catch (err) {
-                ctx.logger.warn(
-                  { err, taskId },
-                  'supercar: persist/broadcast awaiting_user fallback failed',
-                );
-              }
-            } else {
-              const terminalResult = await persistSupercarOutcome(
-                repo,
-                taskId,
-                outcome,
-                finalState,
-                metadata,
-                supercarTerminalStatus,
-                supercarFailureSummary,
-                supercarFailedChecks.length > 0 ? supercarFailedChecks : undefined,
-              );
-              terminalPersisted = terminalResult.persisted;
-            }
-            // Optimization #2 — stamp the formatter columns. Best-
-            // effort UPDATE after the row landed; failure here logs
-            // but doesn't tear down the terminal flow. Only writes
-            // when we actually have something to record (formatter
-            // ran, even if it fell back).
-            if (terminalPersisted && responseLayerMetadata) {
-              try {
-                const stamped = await stampResponseLayerColumns(
-                  ctx.db,
-                  taskId,
-                  responseLayerOriginal,
-                  outcome.summary ?? '',
-                  responseLayerMetadata,
-                  ctx.logger,
-                );
-                if (!stamped) {
-                  ctx.logger.warn(
-                    { taskId },
-                    'openai-response-layer: supercar stamp skipped because task was no longer terminal',
-                  );
-                }
-              } catch (err) {
-                ctx.logger.warn(
-                  { err: err instanceof Error ? err.message : String(err), taskId },
-                  'openai-response-layer: persist metadata failed (non-fatal)',
-                );
-              }
-            }
-            // Reconcile-driven step rewrite. When the agent loop's
-            // reconcileFinalAnswer rewrote the model's text (URL or
-            // title mismatched the live page), the LAST step row's
-            // `input.summary` and the matching `tick.end` actionSummary
-            // are now stale. The "最近操作" overlay reads from steps,
-            // not summary, so without this rewrite the user opens the
-            // overlay and still sees the wrong URL the model invented.
-            // Best-effort: a DB / broadcast blip leaves the row stale
-            // but doesn't impact terminal flow.
-            if (outcome.reconciledStepUpdate && taskDbId) {
-              const upd = outcome.reconciledStepUpdate;
-              try {
-                await ctx.db
-                  .update(taskSteps)
-                  .set({ input: { summary: upd.actionSummary } })
-                        .where(
-                          and(eq(taskSteps.taskId, taskDbId), eq(taskSteps.seq, upd.tickIndex)),
-                        );
-              } catch (err) {
-                ctx.logger.warn(
-                  { err, taskId, tickIndex: upd.tickIndex },
-                  'supercar: persist reconciled step failed',
-                );
-              }
-              try {
-                broadcastToUser(userId, {
-                  type: 'server.vision.tick.end',
-                  taskId,
-                  tickIndex: upd.tickIndex,
-                  mode: 'screenshot',
-                  actionKind: 'text',
-                  actionSummary: upd.actionSummary,
-                  durationMs: 0,
-                  ok: true,
-                });
-              } catch (err) {
-                ctx.logger.warn(
-                  { err, taskId, tickIndex: upd.tickIndex },
-                  'supercar: broadcast reconciled step failed',
-                );
-              }
-            }
-            // Codex P3 follow-up — gate terminal-only side effects on
-            // `terminalPersisted`. When the atomic state-machine guard
-            // refused the UPDATE (row still in awaiting_user — happens
-            // when a takeover-timeout fires AFTER the user already
-            // came back and replied), the WS terminal frame would
-            // clobber the in-progress state in the SPA store, memory
-            // extraction would store a half-finished summary, and a
-            // stale suggestion bubble would surface alongside the
-            // running task. Skip all three when the row didn't move.
-            const runTerminalSideEffects = shouldRunSupercarTerminalSideEffects({
-              transition: supercarStateTransition,
-              persisted: terminalPersisted,
-            });
-            if (!runTerminalSideEffects) {
-              ctx.logger.info(
-                { taskId, transition: supercarStateTransition.kind },
-                'supercar: skipping terminal broadcast / memory / suggestions',
-              );
-            }
-            if (runTerminalSideEffects) {
-              try {
-                // Surface verifier or deterministic source checks to
-                // the SPA banner; empty lists are omitted by helper.
-                broadcastToUser(
-                  userId,
-                  buildTaskTerminalMessage(
-                    taskId,
-                    outcome,
-                    supercarTerminalStatus,
-                    supercarFailureSummary,
-                    supercarFailedChecks,
-                  ),
-                );
-              } catch (err) {
-                ctx.logger.warn({ err, taskId }, 'supercar: broadcast terminal failed');
-              }
-            }
-            // Cross-task memory extraction is paused until it has a dedicated
-            // Qwen implementation. Existing memories stay readable; production
-            // must not fall back to the dormant Anthropic extractor.
-            if (terminalPersisted && outcome.status === 'completed' && outcome.summary) {
-              // Post-task suggestions are Qwen-only. The shared runtime enforces
-              // rollout, lane, persisted region and region-local credentials
-              // before constructing a transport. There is no legacy fallback.
-              let suggestionsRoute: ReturnType<typeof resolveSuggestionsProviderRoute> | null = null;
-              try {
-                suggestionsRoute = resolveSuggestionsProviderRoute({
-                  environment: appEnv,
-                  userExternalId: ctx.userId,
-                  userModelDataRegion: userRow.modelDataRegion,
-                });
-                if (suggestionsRoute.provider === 'unavailable') {
-                  ctx.logger.warn(
-                    { taskId, reason: suggestionsRoute.reason },
-                    'suggestions: provider unavailable',
-                  );
-                }
-              } catch (error) {
-                ctx.logger.warn(
-                  { taskId, reason: 'PROVIDER_CONFIGURATION_ERROR' },
-                  'suggestions: provider unavailable',
-                );
-              }
-
-              if (suggestionsRoute?.provider === 'qwen') {
-                const messagesAdapter = suggestionsRoute.messagesAdapter;
-                ctx.logger.info(
-                  {
-                    taskId,
-                    provider: messagesAdapter.metadata.provider,
-                    model: messagesAdapter.metadata.model,
-                    region: messagesAdapter.metadata.region,
-                    deploymentScope: messagesAdapter.metadata.deploymentScope,
-                    endpointKind: messagesAdapter.metadata.endpointKind,
                   },
-                  'suggestions: Qwen selected',
-                );
-                const completedSummary = outcome.summary;
-                void runTaskBackground(ctx, async (ctx) => generateSuggestions({
-                  messagesAdapter,
-                  intent: input.intent,
-                  summary: completedSummary,
-                })
-                  .then((suggestions) => {
-                    if (suggestions.length === 0) return;
+                  onEvidence: (ev) => {
+                    try {
+                      recordEvidence(taskId, ev);
+                    } catch (err) {
+                      ctx.logger.warn(
+                        { err: err instanceof Error ? err.message : String(err), taskId },
+                        'supercar: record evidence callback failed',
+                      );
+                    }
+                  },
+                  // Runtime safety boundary for ordinary user tasks. The
+                  // supercar loop invokes this immediately before each live
+                  // write action. Irreversible clicks park in awaiting_user
+                  // and require a fresh confirmation; credentials remain
+                  // takeover-only.
+                  onBeforeAction: classifyRuntimeAction,
+                  ...(taskActionCaptureRepo
+                    ? {
+                        onAction: (ev: SupercarActionCaptureEvent) => {
+                          if (!taskDbId || !taskActionCaptureRepo) return;
+                          // Fire-and-forget (mirrors the onTick consumer): a DB
+                          // failure only drops this capture row + logs; the browse
+                          // action is never awaited on it.
+                          void runTaskBackground(ctx, async (ctx) =>
+                            (async () => {
+                              try {
+                                const capture = await taskActionCaptureRepo.create({
+                                  taskId: taskDbId,
+                                  siteDomain: ev.siteDomain,
+                                  actionIndex: ev.actionIndex,
+                                  stepType: ev.stepType,
+                                  visibleText: ev.visibleText,
+                                  targetSelectorJson: ev.targetSelector
+                                    ? { selector: ev.targetSelector }
+                                    : null,
+                                  coordinateJson: ev.coordinate,
+                                  framePath: ev.framePath,
+                                  entryUrl: ev.entryUrl,
+                                  inputValue: ev.inputValue,
+                                });
+                                // Phase 1 Playbook B4 — screenshot anchor (gated + capped).
+                                // Own try so a failure keeps the capture row above + never
+                                // blocks/throws. Counter bumped BEFORE upload = caps R2
+                                // ATTEMPTS (a failed upload still consumes the budget).
+                                if (
+                                  ev.screenshotBase64 &&
+                                  evidenceArtifactRepo &&
+                                  sharedStorage &&
+                                  screenshotAnchorCount < MAX_SCREENSHOT_ANCHORS
+                                ) {
+                                  screenshotAnchorCount += 1;
+                                  try {
+                                    const buffer = Buffer.from(ev.screenshotBase64, 'base64');
+                                    const sha256 = createHash('sha256')
+                                      .update(buffer)
+                                      .digest('hex');
+                                    const { storagePath } = await sharedStorage.put({
+                                      userExternalId: taskId,
+                                      kind: 'output',
+                                      fileExternalId: newExternalId('file'),
+                                      filename: 'anchor.jpg',
+                                      buffer,
+                                      mimetype: 'image/jpeg',
+                                    });
+                                    const artifact = await evidenceArtifactRepo.create({
+                                      ownerUserId: userRow.id,
+                                      taskId: taskDbId,
+                                      artifactKind: 'screenshot',
+                                      purpose: 'action_anchor',
+                                      r2Bucket: process.env.R2_BUCKET ?? 'local',
+                                      r2Key: storagePath,
+                                      contentType: 'image/jpeg',
+                                      sizeBytes: buffer.byteLength,
+                                      sha256,
+                                      capturedAt: new Date(),
+                                      collectorLane: 'screenshot-anchor',
+                                      retentionPolicy: 'manual_hold',
+                                    });
+                                    // Backfill the capture row's anchor FK BY PRIMARY KEY
+                                    // (create() above returned the row + its id). PK is
+                                    // unique + retry-safe: (task_id, action_index) is
+                                    // NON-unique and the auto-retry wrapper re-runs the loop
+                                    // with the same taskDbId + resets action_index, so it can
+                                    // duplicate rows at the same action_index — keying on the
+                                    // row's own id is the only target that hits exactly the
+                                    // just-inserted capture row.
+                                    await ctx.db
+                                      .update(taskActionCaptures)
+                                      .set({ screenshotAnchorId: artifact.id })
+                                      .where(eq(taskActionCaptures.id, capture.id));
+                                  } catch (e2) {
+                                    ctx.logger.warn(
+                                      {
+                                        err: e2 instanceof Error ? e2.message : String(e2),
+                                        taskId,
+                                      },
+                                      'supercar: screenshot anchor failed (capture kept, anchor null)',
+                                    );
+                                  }
+                                }
+                              } catch (err) {
+                                ctx.logger.warn(
+                                  { err: err instanceof Error ? err.message : String(err), taskId },
+                                  'supercar: persist action capture failed',
+                                );
+                              }
+                            })(),
+                          );
+                        },
+                      }
+                    : {}),
+                  executor: primaryExecutor,
+                  preserveExistingPage: adoptedBrowserSession,
+                  domain: classification.domain,
+                  // Swap target: the NON-primary browser. When headed was
+                  // used as primary, a stuck/anti-bot signal falls back to
+                  // headless (in case Brave is what's being fingerprinted).
+                  // When headless is primary (Brave unavailable), swap
+                  // points at nothing — agent-loop no-ops the swap. Per-user
+                  // pool mode has no fallback — the user's own Brave is the
+                  // only tab they're watching, swapping to a shared headless
+                  // would stream frames of the wrong page.
+                  headedExecutor: perUserExec
+                    ? null
+                    : primaryExecutor === headedExec
+                      ? (headlessExec ?? null)
+                      : null,
+                  zapierAdapter: ctx.executionRouter?.zapier ?? null,
+                  apifyAdapter: ctx.executionRouter?.apify ?? null,
+                  firecrawl: ctx.firecrawl ?? null,
+                  isSimpleSearch: isSimpleSearchIntent,
+                  isCrossPlatformAutomation: classifyAsCrossPlatformAutomation(input.intent),
+                  zapierWebhookPath: process.env.ZAPIER_WEBHOOK_PATH ?? null,
+                  // Pass the resolved dispatch context so prompt-layers cannot
+                  // resurrect the raw classifier match. Manual skills win over
+                  // automatic role classification; otherwise this is the gated role.
+                  roleIdOverride: dispatchSkillId ?? 'none',
+                  // Phase 10 Tier 3 — attachments parsed above, prepended to
+                  // the agent's first user message before the screenshot.
+                  ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
+                  // Phase 10 Tier 3 — per-plan create_file format whitelist.
+                  // Empty list (free) suppresses the tool entirely; basic gets
+                  // text-shaped formats only; pro gets office formats too.
+                  createFileFormats: allowedFormatsForPlan(planId),
+                  // Closure that lazily resolves the task's DB id (the supercar
+                  // queue runs async; the row exists by the time the model
+                  // calls a tool). Stores the buffer + index row, then returns
+                  // a download URL the model embeds in the final summary.
+                  // Phase 3 R3 L2 — save_page_as_pdf storage callback. The
+                  // supercar loop renders the page to a PDF Buffer; we just
+                  // persist it via DownloadManager (which enforces the 50MB
+                  // cap + builds the URL). Only wired when downloadManager
+                  // exists on ctx (always true in prod boot path; nullable
+                  // in test deps).
+                  ...(ctx.downloadManager
+                    ? {
+                        async onSavePageAsPdf({
+                          filename,
+                          pdfBuffer,
+                        }: {
+                          filename: string;
+                          pdfBuffer: Buffer;
+                        }) {
+                          try {
+                            const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+                            if (taskInternalId == null) {
+                              return { error: 'task row not found' };
+                            }
+                            const saved = await ctx.downloadManager!.save({
+                              userIdInternal: userRow.id,
+                              userExternalId: ctx.userId,
+                              taskIdInternal: taskInternalId,
+                              content: pdfBuffer,
+                              filename,
+                              mimetype: 'application/pdf',
+                            });
+                            // Codex P3 follow-up — accumulate per-task so the
+                            // terminal-state merge folds every saved PDF into
+                            // metadata.attachments. Previously the model's tool
+                            // result text was the only record of the PDF, which
+                            // meant the SPA's AttachmentBar + eval haystack saw
+                            // none of the saved PDFs.
+                            pdfAttachments.push({
+                              fileId: saved.fileId,
+                              downloadUrl: saved.downloadUrl,
+                              filename: saved.filename,
+                              mimetype: saved.mimetype,
+                              sizeBytes: saved.sizeBytes,
+                              expiresAt: saved.expiresAt.toISOString(),
+                              kind: 'pdf',
+                            });
+                            return {
+                              fileId: saved.fileId,
+                              filename: saved.filename,
+                              sizeBytes: saved.sizeBytes,
+                              downloadUrl: saved.downloadUrl,
+                            };
+                          } catch (err) {
+                            return {
+                              error: err instanceof Error ? err.message : String(err),
+                            };
+                          }
+                        },
+                      }
+                    : {}),
+                  async onBrowserDownload({ filename, buffer, sha256 }) {
+                    const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+                    if (taskInternalId == null) throw new Error('task row not found');
+                    const stored = await fileService.storeOutput({
+                      userIdInternal: userRow.id,
+                      userExternalId: ctx.userId,
+                      taskIdInternal: taskInternalId,
+                      filename,
+                      mimetype: 'application/octet-stream',
+                      buffer,
+                    });
+                    const receipt = {
+                      fileId: stored.externalId,
+                      filename: stored.filename,
+                      sizeBytes: stored.sizeBytes,
+                      sha256,
+                      downloadUrl: `/api/files/${stored.externalId}/download`,
+                    };
+                    pdfAttachments.push({
+                      ...receipt,
+                      mimetype: 'application/octet-stream',
+                      expiresAt: stored.expiresAt!.toISOString(),
+                      kind: 'file',
+                    });
+                    return receipt;
+                  },
+                  async onCreateFile({ filename, format, content }) {
+                    if (!isCreateFileFormat(format)) {
+                      return { error: `unsupported format: ${format}` };
+                    }
+                    try {
+                      const rendered = await renderFile(format, content);
+                      const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+                      if (taskInternalId == null) {
+                        return { error: 'task row not found' };
+                      }
+                      const stored = await fileService.storeOutput({
+                        userIdInternal: userRow.id,
+                        userExternalId: ctx.userId,
+                        taskIdInternal: taskInternalId,
+                        filename,
+                        mimetype: rendered.mimetype,
+                        buffer: rendered.buffer,
+                      });
+                      return {
+                        fileId: stored.externalId,
+                        filename: stored.filename,
+                        size: stored.sizeBytes,
+                        downloadUrl: `/api/files/${stored.externalId}/download`,
+                      };
+                    } catch (err) {
+                      return {
+                        error: err instanceof Error ? err.message : String(err),
+                      };
+                    }
+                  },
+                  onTick(ev) {
+                    // Selected Chrome supplies receipt-backed records; other
+                    // runners retain their existing per-iteration projection.
+                    //
+                    // Also bump the per-user pool's lastActiveAt so an active
+                    // task never trips the 30-min idle GC — pool.touch is a
+                    // no-op when the user isn't on a pool slot.
+                    if (ctx.browserPool && perUserExec) {
+                      ctx.browserPool.touch(taskId);
+                    }
+                    const fallbackSummary = ev.textPreamble
+                      ? truncateString(stripPlanTrackerMarkers(ev.textPreamble), 80)
+                      : ev.toolsInTurn.join(', ') || 'thinking';
+                    const receipt = taskTickReceipt(ev, fallbackSummary);
+                    const { actionKind, actionSummary } = receipt;
+                    const now = Date.now();
                     try {
                       broadcastToUser(userId, {
-                        type: 'server.supercar.suggestions',
+                        type: 'server.vision.tick.start',
                         taskId,
-                        suggestions,
+                        tickIndex: ev.iteration,
+                        mode: 'screenshot',
+                      });
+                      broadcastToUser(userId, {
+                        type: 'server.vision.tick.end',
+                        taskId,
+                        tickIndex: ev.iteration,
+                        mode: 'screenshot',
+                        actionKind,
+                        actionSummary,
+                        durationMs: ev.apiLatencyMs,
+                        ok: receipt.ok,
+                        ...(receipt.message ? { message: receipt.message } : {}),
                       });
                     } catch (err) {
-                      ctx.logger.warn({ err, taskId }, 'suggestions: broadcast failed');
+                      ctx.logger.warn({ err, taskId }, 'supercar: broadcast tick failed');
                     }
-                  })
-                  .catch((err) =>
-                    ctx.logger.warn({ err, taskId }, 'suggestions: generate crashed'),
-                  ));
-              }
-            }
-          })
-          .catch(async (err) => {
-            // Phase 22a — uncaught throws used to leave the task at
-            // status='executing' forever (the .then chain didn't run,
-            // so persistSupercarOutcome was never called). Persist a
-            // failed outcome here BEFORE logging so the task always
-            // reaches a terminal state. Wrapped in its own try so a
-            // DB blip during the recovery persist doesn't bubble up
-            // and tear down the .finally below.
-            const reason = err instanceof Error ? err.message : String(err);
-              ctx.logger.error({ err, taskId }, 'supercar: loop threw — persisting failed');
-            // Codex P3 follow-up — same `persisted` gate as the happy
-            // path. If the runner threw AFTER the row landed in
-            // awaiting_user (rare but possible: runtime stack unwind
-            // after the agent fired onAwaitingUser), don't broadcast
-            // terminal-failed and clobber the park state.
-            let catchPersisted = false;
-            try {
-              const failureFinalState = perUserExec
-                ? await captureFinalState({
-                    executor: {
-                      getPage: () => perUserExec.getPage(),
-                      screenshot: (page, options) =>
-                        perUserExec.screenshot(
-                          page as unknown as Parameters<PlaywrightExecutor['screenshot']>[0],
-                          options,
-                        ),
-                    },
-                    logger: ctx.logger,
-                    taskId,
-                  })
-                : {};
-              const out = await repo.persistVisionOutcome(taskId, {
-                status: 'failed',
-                reason: `runner threw: ${reason}`.slice(0, 500),
-                tickCount: 0,
-                      ...(failureFinalState.finalUrl
-                        ? { finalUrl: failureFinalState.finalUrl }
-                        : {}),
-                ...(failureFinalState.finalScreenshot
-                  ? { finalScreenshot: failureFinalState.finalScreenshot }
-                  : {}),
-                ...(failureFinalState.finalViewport
-                  ? { finalViewport: failureFinalState.finalViewport }
-                  : {}),
-                metadata: {
-                  executionMode,
-                  finalExecutionMode: executionMode,
-                  lane: 'supercar_exception',
-                },
-              });
-              catchPersisted = out.persisted;
-            } catch (persistErr) {
-              ctx.logger.error(
-                { err: persistErr, taskId },
-                'supercar: catch-block persist also failed',
-              );
-            }
-            if (catchPersisted) {
-              try {
-                broadcastToUser(userId, {
-                  type: 'server.task.terminal',
-                  taskId,
-                  status: 'failed',
-                  reason: `runner threw: ${reason}`.slice(0, 200),
-                });
-              } catch {
-                /* swallow — broadcast is best-effort */
-              }
-            }
-          })
-          .finally(() => {
-            // Phase 3 R1 — clear the watchdog now that the runner
-            // settled normally. If it already fired, clearTimeout is
-            // a no-op and the watchdog's release call has already
-            // happened (idempotent with the regular release below).
-            clearTimeout(watchdogTimer);
-            // Keep the completed browser briefly available for the task's
-            // review workspace. The lease is bounded and reclaimable: a new
-            // task at capacity releases the oldest retained browser first.
-            if (didAllocatePool && ctx.browserPool) {
-              const retained = ctx.browserPool.retain(
-                taskId,
-                appEnv.BROWSER_TERMINAL_RETENTION_MS,
-                'terminal-review',
-              );
-              if (!retained) {
-                      const releasingPool = ctx.browserPool;
-                      void runTaskBackground(ctx, async (ctx) => releasingPool
-                        .release(taskId, `task-${taskId}-done`)
-                        .catch((relErr) => {
-                    ctx.logger.warn(
-                      { err: relErr, taskId, userId: ctx.userId },
-                      'pool: post-task release failed',
-                    );
-                  }));
-              }
-            }
-            // Phase 24 RC follow-up — wake the TaskQueue worker so
-            // the next queued task fires immediately instead of
-            // waiting for the next 5s tick. Safe even when no queue
-            // is wired (the optional-chain shorts).
-            ctx.taskQueue?.signalSlotFreed();
-            // Phase 1 Day 5 Round 2 — fire-and-forget pipeline
-            // persist + cleanup. Same pattern as the generate +
-            // scrape lanes. Always runs (then OR catch path), so
-            // even a runner exception still serialises the contract
-            // + ledger that were inited at task start.
-            const finalPersistence = persistExecution({
-              taskId,
-              verification: executionVerification,
-              db: ctx.db,
-              logger: ctx.logger,
-            })
-          .then((persisted) =>
-            persisted
-                    ? writeLedgerToDb({
+                    // Persist the iteration to task_steps so history survives
+                    // reloads — same shape the legacy vision-loop uses.
+                    // Snapshot + reset pendingWebSearches so the async insert
+                    // below sees this iteration's batch even if the next
+                    // iteration starts before the insert finishes.
+                    const webSearches = pendingWebSearches;
+                    pendingWebSearches = [];
+                    if (taskDbId) {
+                      const persistTick = runTaskBackground(ctx, async (ctx) =>
+                        (async () => {
+                          try {
+                            if (actionKind === 'browser_finish_rejected') {
+                              await ctx.db.insert(taskEvents).values({
+                                externalId: newExternalId('taskEvent'),
+                                taskId: taskDbId,
+                                type: 'browser.finish_rejected',
+                                actor: 'agent',
+                                payload: { diagnostic: ev.execution?.message ?? actionSummary },
+                              });
+                            }
+                            await ctx.db.insert(taskSteps).values({
+                              externalId: newExternalId('taskStep'),
+                              taskId: taskDbId,
+                              seq: ev.iteration,
+                              kind: actionKind,
+                              status: receipt.status,
+                              errorCode: ev.execution?.errorCode ?? null,
+                              errorMessage: ev.execution?.errorMessage ?? null,
+                              riskLevel: 'low',
+                              input: { summary: actionSummary },
+                              output: {
+                                apiLatencyMs: ev.apiLatencyMs,
+                                tools: ev.toolsInTurn,
+                                ...(ev.execution ? { execution: ev.execution } : {}),
+                                ...(webSearches.length > 0 ? { webSearches } : {}),
+                              },
+                              startedAt: new Date(now - ev.apiLatencyMs),
+                              completedAt: new Date(now),
+                            });
+                          } catch (err) {
+                            ctx.logger.warn(
+                              { err, taskId, iteration: ev.iteration },
+                              'supercar: persist step failed',
+                            );
+                          }
+                        })(),
+                      );
+                      if (actionKind === 'browser_finish_rejected') return persistTick;
+                    }
+                  },
+                  onScreencast(ev) {
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.vision.screencast',
+                        taskId,
+                        tickIndex: ev.iteration,
+                        imageBase64: ev.imageBase64,
+                        url: ev.url,
+                        viewport: { width: ev.viewportWidth, height: ev.viewportHeight },
+                        timestamp: new Date().toISOString(),
+                      });
+                    } catch (err) {
+                      ctx.logger.warn({ err, taskId }, 'supercar: broadcast screencast failed');
+                    }
+                  },
+                  onWebSearch(ev) {
+                    // Broadcasts as a synthetic tick so the UI shows a step
+                    // card for the search. No screencast — web_search is
+                    // server-side and has no DOM to capture. Sources (when
+                    // present) are forwarded so the SearchResultCard can
+                    // render favicon + title + snippet rows.
+                    //
+                    // Also buffer for the next onTick so the persisted step
+                    // row carries the sources — this is what lets a SPA
+                    // refresh-after-completion rebuild webSearchByTask from
+                    // tasks.detail instead of needing a WS replay.
+                    pendingWebSearches.push({
+                      query: ev.query,
+                      sources: ev.sources ?? [],
+                    });
+                    if (ev.sources?.length) {
+                      observedWebSearchSources.push(...ev.sources);
+                    }
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.supercar.web_search',
+                        taskId,
+                        iteration: ev.iteration,
+                        query: ev.query,
+                        ...(ev.sources && ev.sources.length > 0 ? { sources: ev.sources } : {}),
+                      });
+                    } catch (err) {
+                      ctx.logger.warn({ err, taskId }, 'supercar: broadcast web_search failed');
+                    }
+                  },
+                  async onCaptchaHandoffEnd(resumed) {
+                    if (!resumed) {
+                      captchaNeedsRelease = true;
+                      resumeCaptchaWatchdog();
+                    }
+                    const persisted = await repo.markAwaitingReplyResumed(taskId, userRow.id);
+                    if (!persisted.persisted) return false;
+                    if (resumed) {
+                      captchaNeedsRelease = false;
+                      resumeCaptchaWatchdog();
+                    }
+                    broadcastToUser(userId, {
+                      type: 'server.vision.captcha_resolved',
+                      taskId,
+                      reason: resumed ? 'auto' : 'timeout',
+                    });
+                    return true;
+                  },
+                  async onAwaitingUser(ev) {
+                    if (ev.captchaHandoff) {
+                      captchaPrivacy = true;
+                      captchaNeedsRelease = true;
+                      pauseCaptchaWatchdog();
+                    }
+                    let awaitingPersisted = false;
+                    try {
+                      const persisted = await repo.persistAwaitingUser({
                         taskExternalId: taskId,
+                        question: ev.question,
+                        awaitingKind: ev.awaitingKind,
+                      });
+                      awaitingPersisted = persisted.persisted;
+                    } catch (err) {
+                      ctx.logger.warn(
+                        { err, taskId },
+                        'supercar: persist awaiting_user state failed',
+                      );
+                    }
+                    if (!awaitingPersisted) {
+                      if (ev.captchaHandoff) throw new Error('captcha_wait_not_persisted');
+                      return;
+                    }
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.supercar.awaiting_user',
+                        taskId,
+                        question: ev.question,
+                        // P2-A — propagate kind to the SPA so the BrowserPanel
+                        // doesn't have to guess. WS receivers older than this
+                        // build will ignore the field (zod passthrough).
+                        awaitingKind: ev.awaitingKind,
+                      });
+                    } catch (err) {
+                      ctx.logger.warn({ err, taskId }, 'supercar: broadcast awaiting_user failed');
+                    }
+                    // Phase 1 follow-up — stamp `executionMode='browser'`,
+                    // `finalUrl`, AND `finalScreenshot` into result on park.
+                    //
+                    // Why screenshot on park (not just on terminal):
+                    // when the user refreshes the page during a login park,
+                    // the WS screencast disconnects and the BrowserPanel
+                    // would otherwise show a blank `about:blank`. With a
+                    // persisted `finalScreenshot` the SPA renders the last
+                    // visible frame instead of empty space.
+                    //
+                    // Why executionMode here: analytics / eval pipeline lane
+                    // classification reads result.metadata.executionMode OR
+                    // result.executionMode; without this, login parks fall
+                    // through to lane='unknown'.
+                    // Never persist a screenshot while the user can enter credentials.
+                    const parkUrl = ev.currentUrl;
+                    void runTaskBackground(ctx, async (ctx) =>
+                      (async () => {
+                        try {
+                          // Capture a screenshot off the per-task Brave. This
+                          // shares the captureFinalState helper used at terminal
+                          // — best-effort, returns {} on any failure (no
+                          // executor / page closed / capture timeout).
+                          const captured =
+                            perUserExec && !ev.captchaHandoff
+                              ? await captureFinalState({
+                                  executor: {
+                                    getPage: () => perUserExec.getPage(),
+                                    screenshot: (page, options) =>
+                                      perUserExec.screenshot(
+                                        page as unknown as Parameters<
+                                          PlaywrightExecutor['screenshot']
+                                        >[0],
+                                        options,
+                                      ),
+                                  },
+                                  logger: ctx.logger,
+                                  taskId,
+                                })
+                              : {};
+                          const [row] = await ctx.db
+                            .select({ result: tasksTable.result })
+                            .from(tasksTable)
+                            .where(eq(tasksTable.externalId, taskId))
+                            .limit(1);
+                          const prev = (row?.result ?? {}) as Record<string, unknown>;
+                          const next: Record<string, unknown> = {
+                            ...prev,
+                            executionMode: 'browser',
+                          };
+                          // Prefer the URL the agent gave us via the event;
+                          // fall back to whatever captureFinalState read off
+                          // the page if `ev.currentUrl` was undefined.
+                          const finalUrl = parkUrl ?? captured.finalUrl;
+                          if (finalUrl) next.finalUrl = finalUrl;
+                          if (captured.finalScreenshot) {
+                            next.finalScreenshot = captured.finalScreenshot;
+                          }
+                          if (captured.finalViewport) {
+                            next.finalViewport = captured.finalViewport;
+                          }
+                          const persisted = await repo.persistAwaitingUserResult({
+                            taskExternalId: taskId,
+                            awaitingKind: ev.awaitingKind,
+                            result: next,
+                          });
+                          if (!persisted.persisted) {
+                            ctx.logger.info(
+                              { taskId, awaitingKind: ev.awaitingKind },
+                              'supercar: skipped stale park metadata write',
+                            );
+                          }
+                        } catch (err) {
+                          ctx.logger.warn(
+                            { err, taskId },
+                            'supercar: persist park metadata failed',
+                          );
+                        }
+                      })(),
+                    );
+                  },
+                  onThinking(summary) {
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.supercar.thinking',
+                        taskId,
+                        summary: truncateString(summary, 2_000),
+                      });
+                    } catch (err) {
+                      ctx.logger.warn({ err, taskId }, 'supercar: broadcast thinking failed');
+                    }
+                  },
+                  onAntiBotSignal(ev) {
+                    // Reuse the vision-loop captcha_detected frame shape so the
+                    // task-store's existing captcha-wait banner lights up
+                    // without any frontend changes. BrowserPanel auto-flips to
+                    // interactive mode (Phase 2) when this fires, so the user
+                    // can solve a slider captcha in-panel.
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.vision.captcha_detected',
+                        taskId,
+                        antiBotType: ev.signal.type,
+                        message: describeSignal(ev.signal),
+                        waitTimeoutMs: ev.waitTimeoutMs,
+                      });
+                    } catch (err) {
+                      ctx.logger.warn(
+                        { err, taskId },
+                        'supercar: broadcast captcha_detected failed',
+                      );
+                    }
+                  },
+                  onAntiBotResolved(ev) {
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.vision.captcha_resolved',
+                        taskId,
+                        reason: ev.reason,
+                      });
+                    } catch (err) {
+                      ctx.logger.warn(
+                        { err, taskId },
+                        'supercar: broadcast captcha_resolved failed',
+                      );
+                    }
+                  },
+                };
+                // Phase 1 Day 5 Round 2 — initialise execution pipeline for
+                // the supercar/browser lane. No-op when flags are off. Light
+                // tier per the original Phase 1 spec (browser → light): the
+                // verifier checks data_present + URL grounding + the optional
+                // url_match (only when the resolver supplied a target domain).
+                // Per-step navigation evidence isn't instrumented in agent-loop
+                // yet — the post-runner hook below seeds the ledger with the
+                // terminal browser state + response_length, which is enough
+                // for the light-tier criteria to evaluate meaningfully.
+                initExecution({
+                  taskId,
+                  intent: input.intent,
+                  executionMode: 'browser',
+                  expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+                  expertMode: expertModeOverride,
+                  hasAttachments: attachmentBlocks.length > 0,
+                });
+                // Codex Pack B1 — planning chip (supercar/browser lane). The
+                // browsing chip fires later, right before the agent loop spins
+                // up Brave; here we just signal that the runner is staged.
+                broadcastSubStatus(ctx.userId, taskId, 'planning');
+                // Captures the verifier's verdict so the .finally() persist
+                // block can serialise it after the run terminates. Stays null
+                // for any path that doesn't reach the verify hook (failures,
+                // handoffs to generate, runner exceptions) — those rows just
+                // get contract + ledger persisted with verification=null.
+                let executionVerification: VerificationResult | null = null;
+                const browserStartedAt = Date.now();
+                // Phase 3 R1 — outer watchdog. The agent-loop has its OWN
+                // deadline (SUPERCAR_TIMEOUT_MS, default 10 min) but if the
+                // loop wedges (an Anthropic fetch never resolves, a Playwright
+                // command hangs, etc.) the .finally() below never fires and
+                // Brave + the per-task pool slot stay allocated until the
+                // process restarts. The watchdog fires `internalDeadline +
+                // 30s` and force-releases Brave + clears the pool slot. Idempotent
+                // with the .finally release (browser-pool.release on a
+                // non-allocated slot no-ops).
+                const SUPERCAR_TIMEOUT_MS = Number.parseInt(
+                  process.env.SUPERCAR_TIMEOUT_MS ?? '600000',
+                  10,
+                );
+                const WATCHDOG_GRACE_MS = 30_000;
+                let watchdogFinalized = false;
+                const watchdogFire = () => {
+                  ctx.logger.warn(
+                    {
+                      taskId,
+                      userId: ctx.userId,
+                      watchdogMs: SUPERCAR_TIMEOUT_MS + WATCHDOG_GRACE_MS,
+                    },
+                    'supercar: watchdog fired — forcing brave release (agent-loop may be wedged)',
+                  );
+                  // Step 1: tell agent-loop to abort. If it's in a non-blocking
+                  // state (between API calls / tool steps) it'll exit cleanly
+                  // and the .finally below still fires the regular release.
+                  try {
+                    localChromeTaskSessions.abort(ctx.userId, taskId);
+                    supercarAbort(taskId);
+                  } catch {
+                    /* swallow — abort is best-effort */
+                  }
+                  // Step 2: mark the user-visible task terminal. The old
+                  // watchdog only released Brave; if the agent loop stayed
+                  // wedged, the DB row remained `executing` until the next
+                  // orchestrator restart boot-sweep. That looked like an
+                  // endless task to the user and kept quota/concurrency noisy.
+                  void runTaskBackground(ctx, async (ctx) =>
+                    (async (): Promise<void> => {
+                      const reason = '任务执行超时，已自动停止。建议：简化任务描述后重试。';
+                      try {
+                        const persisted = await repo.persistVisionOutcome(taskId, {
+                          status: 'failed',
+                          reason,
+                          tickCount: 0,
+                          errorCode: 'SUPERCAR_WATCHDOG_TIMEOUT',
+                          metadata: { executionMode: 'browser', watchdog: true },
+                        });
+                        watchdogFinalized = persisted.persisted;
+                        if (persisted.persisted) {
+                          broadcastToUser(userId, {
+                            type: 'server.task.terminal',
+                            taskId,
+                            status: 'failed',
+                            reason,
+                          });
+                        }
+                      } catch (err) {
+                        watchdogFinalized = false;
+                        ctx.logger.warn(
+                          { err: err instanceof Error ? err.message : String(err), taskId },
+                          'supercar: watchdog failed to persist terminal timeout',
+                        );
+                      }
+                    })(),
+                  );
+                  // Step 3: force-release the per-task Brave even if abort
+                  // didn't take. The pool's release method is idempotent: a
+                  // second call when the slot is already torn down no-ops.
+                  if (didAllocatePool && ctx.browserPool) {
+                    const releasingPool = ctx.browserPool;
+                    void runTaskBackground(ctx, async (ctx) =>
+                      releasingPool.release(taskId, 'watchdog-force-release').catch((relErr) => {
+                        ctx.logger.warn(
+                          { err: relErr, taskId, userId: ctx.userId },
+                          'pool: watchdog force-release failed',
+                        );
+                      }),
+                    );
+                  }
+                };
+                let watchdogRemaining = SUPERCAR_TIMEOUT_MS + WATCHDOG_GRACE_MS;
+                let watchdogActiveSince = Date.now();
+                let watchdogPaused = false;
+                let watchdogTimer = setTimeout(watchdogFire, watchdogRemaining);
+                pauseCaptchaWatchdog = () => {
+                  if (watchdogPaused) return;
+                  watchdogPaused = true;
+                  watchdogRemaining = Math.max(
+                    1,
+                    watchdogRemaining - (Date.now() - watchdogActiveSince),
+                  );
+                  clearTimeout(watchdogTimer);
+                  // Independent hard cap if the parked runner itself wedges.
+                  watchdogTimer = setTimeout(watchdogFire, CAPTCHA_HANDOFF_MS + WATCHDOG_GRACE_MS);
+                  watchdogTimer.unref?.();
+                };
+                resumeCaptchaWatchdog = () => {
+                  if (!watchdogPaused) return;
+                  watchdogPaused = false;
+                  clearTimeout(watchdogTimer);
+                  watchdogActiveSince = Date.now();
+                  watchdogTimer = setTimeout(watchdogFire, watchdogRemaining);
+                  watchdogTimer.unref?.();
+                };
+                // Mark the timer as unref'd so it doesn't keep the Node process
+                // alive on shutdown — the pool's own draining handles cleanup.
+                watchdogTimer.unref?.();
+                // Codex Pack B1 — browsing chip fires right before the agent
+                // loop actually runs (Brave allocate, first tool call, etc.).
+                broadcastSubStatus(ctx.userId, taskId, 'browsing');
+                // B-专项 Step 2 — read-only OTA user-browser lane. ONLY when the
+                // OTA_USER_BROWSER flag is on AND the user's extension is online
+                // AND the intent matches an OTA-prefer site. Otherwise this is a
+                // no-op and the task runs the server-Brave supercar exactly as
+                // today. The readonly runner uses the extension's Mode B
+                // navigate/screenshot channel (no chrome.debugger, no click/type,
+                // no order/pay) and returns a SupercarOutcome consumed by the same
+                // terminal handler below.
+                // Step 2.5 — canary-scoped gate. user-browser-readonly fires ONLY
+                // for an allowlisted user + allowlisted OTA domain + online
+                // extension, on top of the master flag. Empty allowlists (prod
+                // default) ⇒ nobody is canaried ⇒ server Brave for everyone.
+                const otaExtensionOnline = hasConnectedExtension(ctx.userId);
+                const otaMasterEnabled =
+                  getExecutionFeatureFlags().OTA_USER_BROWSER && Boolean(legacyMediaModelClient);
+                const otaAllowedDomains = parseOtaAllowlist(
+                  process.env.OTA_USER_BROWSER_ALLOWED_DOMAINS,
+                );
+                const otaCanary = resolveOtaCanaryLane({
+                  intent: input.intent,
+                  userId: ctx.userId,
+                  extensionOnline: otaExtensionOnline,
+                  masterEnabled: otaMasterEnabled,
+                  allowedUserIds: parseOtaAllowlist(process.env.OTA_USER_BROWSER_ALLOWED_USER_IDS),
+                  allowedDomains: otaAllowedDomains,
+                });
+                const useOtaUserBrowser =
+                  !taskBrowserCapabilities.routingV2 && otaCanary.lane === 'user-browser';
+                if (otaCanary.lane !== null) {
+                  // Rollout audit — every OTA-prefer task records its gate outcome.
+                  ctx.logger.info(
+                    {
+                      event: 'ota.user_browser.rollout',
+                      taskId,
+                      userId: ctx.userId,
+                      domain: otaCanary.matchedDomain,
+                      flagEnabled: otaMasterEnabled,
+                      userAllowed: otaCanary.userAllowed,
+                      domainAllowed: otaCanary.domainAllowed,
+                      extensionOnline: otaExtensionOnline,
+                      intentSubtype: otaCanary.intentSubtype,
+                      subtypeReason: otaCanary.reason,
+                      decision: otaCanary.lane,
+                      reason: otaCanary.reason,
+                    },
+                    'ota: user-browser rollout decision',
+                  );
+                }
+                const runUserBrowserReadonly = (): Promise<SupercarOutcome> =>
+                  runOtaUserBrowserReadonly({
+                    taskId,
+                    intent: effectiveIntent,
+                    deps: {
+                      ...(() => {
+                        // Batch 04: the OTA readonly lane uses the model-catalog brain.
+                        const otaRuntime = modelRuntimeWiring.resolveCore({
+                          actorExternalId: ctx.userId,
+                          lane: 'browser',
+                          ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
+                        });
+                        return otaRuntime.kind === 'ready'
+                          ? { messagesAdapter: otaRuntime.messages('standard') }
+                          : { client: legacyMediaModelClient };
+                      })(),
+                      dispatchNavigate: async (url: string) => {
+                        const r = await sendExtensionToolCall(ctx.userId, {
+                          taskId,
+                          kind: 'navigate',
+                          args: { url },
+                        });
+                        return r.ok
+                          ? {
+                              ok: true,
+                              result: r.result as {
+                                finalUrl: string;
+                                title: string;
+                                bodyText: string;
+                              },
+                            }
+                          : { ok: false, error: r.error };
+                      },
+                      dispatchScreenshot: () =>
+                        sendExtensionToolCall(ctx.userId, { taskId, kind: 'screenshot' }),
+                      audit: (rec) => ctx.logger.info(rec, 'ota: user-browser audit'),
+                      onProgress: (message) =>
+                        broadcastSubStatus(ctx.userId, taskId, 'browsing', message),
+                      logger: ctx.logger,
+                      allowedDomains: otaAllowedDomains,
+                    },
+                  });
+                const runLocalChrome = async () => {
+                  if (!input.localChrome) throw new Error('chrome_selection_required');
+                  const session = localChromeTaskSessions.get(userId, taskId);
+                  if (!session) throw new Error('chrome_session_unavailable');
+                  const { extensionClientId: _connection, ...target } = input.localChrome;
+                  // Batch 09 — extension executor capture (ACTION_CAPTURE, default off).
+                  const capture = taskDbId
+                    ? createTaskCaptureRecorder({
+                        db: ctx.db,
+                        taskId: taskDbId,
+                        executorSource: 'extension',
+                        logger: ctx.logger,
+                      })
+                    : null;
+                  const runChrome =
+                    taskBrowserCapabilities.routingV2 && /携程|ctrip\.com/i.test(input.intent)
+                      ? runOtaUserBrowserTask
+                      : runSelectedChromeTask;
+                  return runChrome({
+                    ...(capture ? { capture } : {}),
+                    taskId,
+                    intent: effectiveIntent,
+                    messagesAdapter: browserMessagesAdapter,
+                    client: session.client,
+                    control: session.control,
+                    target,
+                    signal: session.cancellation.signal,
+                    isTaskCancelled: supercarArgs.isTaskCancelled,
+                    recorder: llmCallRecorder,
+                    userExternalId: userId,
+                    onTick: supercarArgs.onTick,
+                    onThinking: supercarArgs.onThinking,
+                    createFileFormats: supercarArgs.createFileFormats,
+                    onCreateFile: supercarArgs.onCreateFile,
+                    onBeforeAction: supercarArgs.onBeforeAction,
+                    onAwaitingUser: supercarArgs.onAwaitingUser,
+                  });
+                };
+                const searchFallbackChain: string[] = [];
+                const recordSearchFallback = async (event: SearchFallbackEvent) => {
+                  if (event.phase === 'started') {
+                    if (event.endpoint === 'lite') {
+                      searchFallbackChain.push('search:duckduckgo-lite');
+                    } else {
+                      searchFallbackChain.push(
+                        `search:${event.from.toLowerCase()}`,
+                        `search:${event.to.toLowerCase()}`,
+                      );
+                    }
+                  }
+                  if (!taskDbId) return;
+                  await ctx.db.insert(taskEvents).values({
+                    externalId: newExternalId('taskEvent'),
+                    taskId: taskDbId,
+                    type: 'browser.search_fallback',
+                    actor: 'agent',
+                    payload: event,
+                  });
+                  const [saved] = await ctx.db
+                    .select({ result: tasksTable.result })
+                    .from(tasksTable)
+                    .where(eq(tasksTable.externalId, taskId))
+                    .limit(1);
+                  const previous = (saved?.result ?? {}) as Record<string, unknown>;
+                  const previousMetadata = (previous.metadata ?? {}) as Record<string, unknown>;
+                  await ctx.db
+                    .update(tasksTable)
+                    .set({
+                      result: {
+                        ...previous,
+                        metadata: {
+                          ...previousMetadata,
+                          fallbackChain: [
+                            ...(scrapeBrowserRetry ? ['scrape', 'browser'] : ['browser']),
+                            ...searchFallbackChain,
+                          ],
+                          searchFallback: event,
+                        },
+                      },
+                    })
+                    .where(eq(tasksTable.externalId, taskId));
+                };
+                const runFn = () =>
+                  (input.localChrome
+                    ? runLocalChrome()
+                    : useOtaUserBrowser
+                      ? runUserBrowserReadonly()
+                      : runSearchWithFallback(supercarArgs, {
+                          originalIntent: input.intent,
+                          // CAPTCHA-REDUCE-1: BROWSER_SEARCH_API_PROVIDER (default none).
+                          searchProvider: searchProviderFromEnv(),
+                          searchApiFirst: process.env.BROWSER_SEARCH_API_FIRST !== 'false',
+                          run: (args) =>
+                            runSupercarWithRetry(args, { userId, taskId, logger: ctx.logger }),
+                          stop: supercarAbort,
+                          onFallback: recordSearchFallback,
+                        })
+                  )
+                    .then(async (rawOutcome) => {
+                      let outcome = rawOutcome;
+                      if (browserRoute.limitation && outcome.status === 'completed') {
+                        outcome = {
+                          ...outcome,
+                          summary: `${browserRoute.limitation}\n\n${outcome.summary}`,
+                        };
+                      }
+                      ctx.logger.info(
+                        {
+                          taskId,
+                          status: outcome.status,
+                          iterations: outcome.iterations,
+                          toolsUsed: outcome.toolsUsed,
+                        },
+                        'supercar: task terminated',
+                      );
+                      if (watchdogFinalized) {
+                        ctx.logger.warn(
+                          { taskId, status: outcome.status },
+                          'supercar: late runner outcome ignored after watchdog terminal persist',
+                        );
+                        return;
+                      }
+                      // Batch 06 — cross-task memory: model-catalog generate lane, only site
+                      // operations + user preferences. MEMORY_EXTRACTION_ENABLED (default off).
+                      if (outcome.status === 'completed' && outcome.summary) {
+                        void extractTaskMemoryAfterSuccess({
+                          db: ctx.db,
+                          logger: ctx.logger,
+                          adapter: resolveUserGenerateAdapter({
+                            wiring: modelRuntimeWiring,
+                            actorExternalId: ctx.userId,
+                            modelDataRegion: userRow.modelDataRegion,
+                          }),
+                          userIdInternal: userRow.id,
+                          intent: input.intent,
+                          summary: outcome.summary,
+                          taskExternalId: taskId,
+                        }).catch(() => {});
+                      }
+                      // F1 — handoff to generate. User replied with manual data
+                      // (numeric metrics, "数据如下:", etc.); supercar exited
+                      // without continuing the browser loop. Run generate against
+                      // the original intent + the user's data and persist THAT
+                      // outcome under this task id. No new task row, no quota
+                      // re-charge — same task, same id, just a different runner.
+                      if (outcome.status === 'handoff_to_generate') {
+                        const userManualData = outcome.question ?? '';
+                        const combinedIntent = [
+                          input.intent,
+                          userManualData ? `\n\n[用户提供的数据]\n${userManualData}` : '',
+                        ]
+                          .join('')
+                          .trim();
+                        ctx.logger.info(
+                          {
+                            taskId,
+                            userId,
+                            manualDataLen: userManualData.length,
+                            combinedIntentLen: combinedIntent.length,
+                          },
+                          'supercar: handoff to generate runner',
+                        );
+                        const handoffStartedAt = Date.now();
+                        const handoffGenerateRuntime = resolveGenerateRuntimeForUser(
+                          ctx.userId,
+                          userRow.modelDataRegion,
+                        );
+                        const handoffGenerateResponsesAdapter =
+                          handoffGenerateRuntime.kind === 'ready'
+                            ? handoffGenerateRuntime.responses('standard')
+                            : null;
+                        let generateOutcome: GenerateOutcome;
+                        try {
+                          generateOutcome = handoffGenerateResponsesAdapter
+                            ? await runGenerateTask({
+                                taskId,
+                                userId: ctx.userId,
+                                intent: combinedIntent,
+                                workflowOverride: typedWorkflow,
+                                skillId: dispatchSkillId,
+                                expertMode: expertModeOverride,
+                                responsesAdapter: handoffGenerateResponsesAdapter,
+                                firecrawl: ctx.firecrawl ?? null,
+                                logger: ctx.logger,
+                                ...(attachmentBlocks.length > 0
+                                  ? { attachments: attachmentBlocks }
+                                  : {}),
+                                onStreamDelta: (delta) => {
+                                  try {
+                                    broadcastToUser(userId, {
+                                      type: 'server.task.stream',
+                                      taskId,
+                                      delta,
+                                    });
+                                  } catch (err) {
+                                    ctx.logger.warn(
+                                      { err, taskId },
+                                      'handoff-generate: broadcast stream delta failed',
+                                    );
+                                  }
+                                },
+                              })
+                            : {
+                                status: 'failed' as const,
+                                summary: '',
+                                reason: generateRuntimeUnavailableReason(
+                                  handoffGenerateRuntime.kind === 'unavailable'
+                                    ? handoffGenerateRuntime.reasonCode
+                                    : 'MODEL_MIGRATION_IN_PROGRESS',
+                                ),
+                                inputTokens: 0,
+                                outputTokens: 0,
+                                durationMs: 0,
+                              };
+                        } catch {
+                          ctx.logger.error(
+                            { taskId, code: 'HANDOFF_GENERATE_RUNNER_THROWN' },
+                            'handoff-generate: runner threw',
+                          );
+                          generateOutcome = {
+                            status: 'failed' as const,
+                            summary: '',
+                            reason: '生成服务暂时不可用，请稍后重试。',
+                            inputTokens: 0,
+                            outputTokens: 0,
+                            durationMs: 0,
+                          };
+                        }
+                        const elapsedMs = Date.now() - handoffStartedAt;
+                        const metadata = {
+                          executionMode: 'browser' as const,
+                          finalExecutionMode: 'generate' as const,
+                          expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+                          expertMode: expertModeOverride,
+                          selectedRole: dispatchRoleId,
+                          ...(handoffGenerateResponsesAdapter
+                            ? {
+                                provider: handoffGenerateResponsesAdapter.metadata.provider,
+                                model: handoffGenerateResponsesAdapter.metadata.model,
+                                region: handoffGenerateResponsesAdapter.metadata.region,
+                                deploymentScope:
+                                  handoffGenerateResponsesAdapter.metadata.deploymentScope,
+                              }
+                            : {}),
+                          fallbackChain: ['browser', 'generate'],
+                          elapsedMs,
+                        };
+                        ctx.logger.info(
+                          {
+                            taskId,
+                            userId,
+                            finalStatus: generateOutcome.status,
+                            ...metadata,
+                            failureReason:
+                              generateOutcome.status === 'failed' ? generateOutcome.reason : null,
+                          },
+                          'task:completed',
+                        );
+                        // Retired polishing compatibility boundary; old flags cannot
+                        // re-enable a second model call for handoff-generated output.
+                        const handoffRl = await runResponseLayerForLane({
+                          taskId,
+                          status: generateOutcome.status,
+                          summary:
+                            generateOutcome.status === 'completed' ? generateOutcome.summary : '',
+                          expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+                          logger: ctx.logger,
+                        });
+                        if (
+                          generateOutcome.status === 'completed' &&
+                          handoffRl.summary !== generateOutcome.summary
+                        ) {
+                          generateOutcome = {
+                            ...generateOutcome,
+                            summary: handoffRl.summary,
+                          };
+                        }
+                        let handoffTerminalPersisted = false;
+                        try {
+                          if (generateOutcome.status === 'completed') {
+                            const persisted = await repo.persistVisionOutcome(taskId, {
+                              status: 'completed',
+                              summary: generateOutcome.summary,
+                              tickCount: outcome.iterations,
+                              metadata,
+                            });
+                            handoffTerminalPersisted = persisted.persisted;
+                            // P1 — generate has no plan-step marker discipline
+                            // (no [STEP N done] emission), so any pending /
+                            // running steps left over from the supercar's
+                            // browser phase would freeze at "x/N 完成" forever
+                            // even though the user just got a complete answer.
+                            // Roll them all to done now and broadcast so the
+                            // PlanCard catches up. Best-effort: a DB blip
+                            // can't block terminal broadcast.
+                            if (persisted.persisted) {
+                              void runTaskBackground(ctx, async (ctx) =>
+                                convergePlanStatusOnSuccess(ctx, taskId, userId),
+                              );
+                              broadcastToUser(userId, {
+                                type: 'server.task.terminal',
+                                taskId,
+                                status: 'completed',
+                                ...(generateOutcome.summary
+                                  ? { summary: generateOutcome.summary }
+                                  : {}),
+                              });
+                            }
+                          } else {
+                            const persisted = await repo.persistVisionOutcome(taskId, {
+                              status: 'failed',
+                              reason: generateOutcome.reason ?? 'handoff-generate: api failed',
+                              tickCount: outcome.iterations,
+                              metadata,
+                            });
+                            handoffTerminalPersisted = persisted.persisted;
+                            if (persisted.persisted) {
+                              broadcastToUser(userId, {
+                                type: 'server.task.terminal',
+                                taskId,
+                                status: 'failed',
+                                ...(generateOutcome.reason
+                                  ? { reason: generateOutcome.reason }
+                                  : {}),
+                              });
+                            }
+                          }
+                        } catch (err) {
+                          ctx.logger.error(
+                            { err, taskId },
+                            'handoff-generate: persist/broadcast failed',
+                          );
+                        }
+                        // Stamp metadata columns after persist. Safe to call
+                        // only when the terminal row actually landed. The
+                        // helper itself guards terminal source statuses; this
+                        // extra gate prevents a late handoff result from
+                        // stamping formatter metadata onto a task that was
+                        // already cancelled or otherwise superseded.
+                        if (handoffTerminalPersisted) {
+                          await stampResponseLayerColumns(
+                            ctx.db,
+                            taskId,
+                            handoffRl.responseLayerOriginal,
+                            generateOutcome.status === 'completed' ? generateOutcome.summary : '',
+                            handoffRl.responseLayerMetadata,
+                            ctx.logger,
+                          );
+                        }
+                        return;
+                      }
+                      // R7 — grab the final-state evidence BEFORE persistSupercar
+                      // and pool.release. The BrowserPanel renders the static
+                      // screenshot for terminal tasks instead of trying to
+                      // reconnect the screencast WS to a torn-down Brave.
+                      // Skip for non-browser-mode tasks (perUserExec is null
+                      // when executionMode='generate' / 'scrape' — there's no
+                      // browser to screenshot).
+                      const finalState =
+                        perUserExec && !captchaPrivacy
+                          ? await captureFinalState({
+                              executor: {
+                                getPage: () => perUserExec.getPage(),
+                                screenshot: (page, options) =>
+                                  perUserExec.screenshot(
+                                    page as unknown as Parameters<
+                                      PlaywrightExecutor['screenshot']
+                                    >[0],
+                                    options,
+                                  ),
+                              },
+                              logger: ctx.logger,
+                              taskId,
+                            })
+                          : {};
+                      // B3 — structured eval log fields. Persisted under
+                      // result.metadata so tasks.detail consumers (Codex eval
+                      // pipeline) get them without a schema migration. Same
+                      // shape as the scrape / generate fork logs above so
+                      // downstream parsing is uniform.
+                      const elapsedMs = Date.now() - browserStartedAt;
+                      const metadata: Record<string, unknown> = {
+                        ...(browserRoute.limitation
+                          ? { browserLimitation: browserRoute.limitation }
+                          : {}),
+                        ...(identityDecision ? { identityDecision } : {}),
+                        browserSessionPolicy: taskSessionPolicy,
+                        ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
+                        executionMode: executionMode === 'browser' ? 'browser' : executionMode,
+                        finalExecutionMode: executionMode === 'browser' ? 'browser' : executionMode,
+                        expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+                        expertMode: expertModeOverride,
+                        selectedRole: dispatchRoleId,
+                        ...browserMessagesAdapter.metadata,
+                        fallbackChain: [
+                          ...(scrapeBrowserRetry ? ['scrape', 'browser'] : ['browser']),
+                          ...searchFallbackChain,
+                        ],
+                        ...(scrapeBrowserRetry
+                          ? { browserRetryReason: scrapeBrowserRetry.reason }
+                          : {}),
+                        ...(executionModeDecision
+                          ? { executionModeReason: executionModeDecision }
+                          : {}),
+                        elapsedMs,
+                        iterations: outcome.iterations,
+                        toolsUsed: outcome.toolsUsed,
+                        // awaitingUserCount isn't exposed on SupercarOutcome
+                        // today — Codex pipeline can derive it from
+                        // task_events `vision.paused` rows for now. Stub at 0.
+                        awaitingUserCount: 0,
+                        modelFinalText:
+                          outcome.status === 'completed'
+                            ? (outcome.summary ?? '').slice(0, 200)
+                            : null,
+                        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+                        ...(finalState.finalViewport
+                          ? { finalViewport: finalState.finalViewport }
+                          : {}),
+                        hasFinalScreenshot: Boolean(finalState.finalScreenshot),
+                      };
+                      // Phase 3 R3 — L1 auto-save final screenshot as a
+                      // downloadable file. Only fires when:
+                      //   1. The task is in browser-mode (finalState came from
+                      //      captureFinalState which is null for generate/scrape)
+                      //   2. We actually captured a screenshot (lone "browser
+                      //      crashed before goto" failures leave finalScreenshot
+                      //      empty)
+                      //   3. There's a task DB id to attach to (taskDbId is set
+                      //      after the initial insert; falsy only on a code-path
+                      //      bug we'd want to log anyway)
+                      // Failures here log + continue — the user's task still
+                      // completes; they just lose the downloadable artifact.
+                      // The screenshot's base64 form is already inside
+                      // metadata.result via persistVisionOutcome, so the SPA's
+                      // BrowserPanel still has a frame to render.
+                      let screenshotAttachment:
+                        | import('../../files/download-manager.js').DownloadResult
+                        | null = null;
+                      if (
+                        finalState.finalScreenshot &&
+                        taskDbId &&
+                        outcome.status !== 'cancelled' &&
+                        ctx.downloadManager
+                      ) {
+                        try {
+                          // captureFinalState pulls a JPEG (quality 80) off the
+                          // PlaywrightExecutor (vision-loop/playwright-executor.ts
+                          // L610: `page.screenshot({ type: 'jpeg', quality: 80 })`).
+                          // Earlier this code labeled it as PNG, so downloads ended
+                          // up as foo.png containing JPEG bytes — most viewers fall
+                          // back on sniffing, but eval pipelines + strict viewers
+                          // (Slack preview, some PDF embedders) refuse to render.
+                          screenshotAttachment = await ctx.downloadManager.save({
+                            userIdInternal: userRow.id,
+                            userExternalId: ctx.userId,
+                            taskIdInternal: taskDbId,
+                            content: finalState.finalScreenshot,
+                            filename: `screenshot-${taskId}.jpg`,
+                            mimetype: 'image/jpeg',
+                          });
+                          ctx.logger.info(
+                            {
+                              taskId,
+                              fileId: screenshotAttachment.fileId,
+                              sizeBytes: screenshotAttachment.sizeBytes,
+                            },
+                            'L1: final screenshot saved as downloadable file',
+                          );
+                          // Surface to SPA + eval-runner via result.metadata.
+                          // The shape mirrors what the L2 save_pdf tool will
+                          // produce, so consumers iterate one homogeneous list.
+                          const attachments = (metadata.attachments as unknown[]) ?? [];
+                          metadata.attachments = [
+                            ...attachments,
+                            {
+                              fileId: screenshotAttachment.fileId,
+                              downloadUrl: screenshotAttachment.downloadUrl,
+                              filename: screenshotAttachment.filename,
+                              mimetype: screenshotAttachment.mimetype,
+                              sizeBytes: screenshotAttachment.sizeBytes,
+                              expiresAt: screenshotAttachment.expiresAt.toISOString(),
+                              kind: 'screenshot',
+                            },
+                          ];
+                        } catch (err) {
+                          ctx.logger.warn(
+                            { err: err instanceof Error ? err.message : String(err), taskId },
+                            'L1: final screenshot save failed (non-fatal)',
+                          );
+                        }
+                      }
+                      // Codex P3 follow-up — fold any save_page_as_pdf outputs the
+                      // agent accumulated during the run into metadata.attachments
+                      // alongside the L1 screenshot. The accumulator is appended
+                      // (not replaced) so the screenshot block above (which
+                      // already wrote to metadata.attachments) stays intact.
+                      if (pdfAttachments.length > 0) {
+                        const existing = (metadata.attachments as unknown[]) ?? [];
+                        metadata.attachments = [...existing, ...pdfAttachments];
+                        ctx.logger.info(
+                          {
+                            taskId,
+                            pdfCount: pdfAttachments.length,
+                            fileIds: pdfAttachments.map((a) => a.fileId),
+                          },
+                          'L2: folded save_page_as_pdf outputs into metadata.attachments',
+                        );
+                      }
+                      ctx.logger.info(
+                        {
+                          taskId,
+                          userId,
+                          finalStatus: outcome.status,
+                          ...metadata,
+                          failureReason:
+                            outcome.status === 'failed' || outcome.status === 'timeout'
+                              ? outcome.reason
+                              : null,
+                        },
+                        'task:completed',
+                      );
+                      // Phase 1 follow-up — sanitise the supercar's final
+                      // answer before any downstream step (verification,
+                      // persistence, broadcast). Tool-XML scaffolding from
+                      // computer_20251124 traces leaks here more often than
+                      // in the generate / scrape lanes.
+                      if (outcome.status === 'completed' && outcome.summary) {
+                        const cleaned = sanitizeFinalText(outcome.summary);
+                        if (cleaned !== outcome.summary) {
+                          outcome = { ...outcome, summary: cleaned };
+                        }
+                      }
+                      // Phase 24 RC follow-up — nav-failure safety net.
+                      // Codex caught the "false success" case: bare-URL tasks
+                      // like `打开 https://thisdomaindoesnotexist12345.com`
+                      // would land with status=completed and a summary that's
+                      // just the friendly DNS error message. The agent thinks
+                      // it completed (it accurately reported the failure), but
+                      // the user's goal (open the page) was never reached, so
+                      // labelling the row "已完成" is misleading. detectNavFailure
+                      // pattern-matches a short summary against DNS / SSL /
+                      // timeout / refused signals; on a hit we flip the row
+                      // to failed BEFORE the verifier + persist run. Long
+                      // legitimate reports that happen to mention a nav error
+                      // as one bullet are not flipped (≤400 char gate).
+                      if (outcome.status === 'completed' && outcome.summary) {
+                        const navSignal = detectNavFailure(outcome.summary);
+                        if (navSignal.detected) {
+                          ctx.logger.info(
+                            {
+                              taskId,
+                              matchedPattern: navSignal.matchedPattern,
+                              kind: navSignal.kind,
+                            },
+                            'supercar: nav-failure detector tripped — downgrading completed → failed',
+                          );
+                          outcome = {
+                            ...outcome,
+                            status: 'failed',
+                            reason: navSignal.reason ?? '导航失败，未完成任务',
+                          };
+                        }
+                      }
+                      // File-artifact consistency (B). The agent creates
+                      // downloadable files via the create_file tool and is told
+                      // to surface them with a ```holaday-file fence in the final
+                      // answer; QA found ~1/3 of file tasks where the prose claims
+                      // a file but the fence is omitted/garbled, so the user is
+                      // told to click a download that isn't there. Fold any
+                      // created output file NOT already referenced by a fence into
+                      // metadata.attachments — the SPA's AttachmentBar then renders
+                      // a download card without any SPA change. Deduped against
+                      // fences so a correctly-surfaced file isn't doubled.
+                      let outputDocDescriptors: Array<{ filename: string; mimetype: string }> = [];
+                      if (taskDbId && outcome.status === 'completed') {
+                        try {
+                          const now = Date.now();
+                          // DOCUMENT outputs only — the auto-final-screenshot is
+                          // also a kind='output' row (added to attachments by L1
+                          // above) and must not be re-folded here nor count as the
+                          // claimed PDF/Markdown artifact.
+                          const outputDocs = (await fileService.listForTask(taskDbId)).filter(
+                            (f) =>
+                              f.kind === 'output' &&
+                              f.status !== 'expired' &&
+                              (f.expiresAt == null || f.expiresAt.getTime() > now) &&
+                              isDocumentOutput({ filename: f.filename, mimetype: f.mimetype }),
+                          );
+                          outputDocDescriptors = outputDocs.map((f) => ({
+                            filename: f.filename,
+                            mimetype: f.mimetype,
+                          }));
+                          if (outputDocs.length > 0) {
+                            const fenced = fencedFileIds(outcome.summary ?? '');
+                            const existing =
+                              (metadata.attachments as Array<{ fileId?: unknown }>) ?? [];
+                            const alreadyAttached = new Set(
+                              existing.map((a) => (typeof a.fileId === 'string' ? a.fileId : '')),
+                            );
+                            const unfenced = outputDocs.filter(
+                              (f) =>
+                                !fenced.has(f.externalId) && !alreadyAttached.has(f.externalId),
+                            );
+                            if (unfenced.length > 0) {
+                              metadata.attachments = [
+                                ...existing,
+                                ...unfenced.map((f) => ({
+                                  fileId: f.externalId,
+                                  downloadUrl: `/api/files/${f.externalId}/download`,
+                                  filename: f.filename,
+                                  mimetype: f.mimetype,
+                                  sizeBytes: f.sizeBytes,
+                                  expiresAt: f.expiresAt ? f.expiresAt.toISOString() : null,
+                                  kind: 'file',
+                                })),
+                              ];
+                              ctx.logger.info(
+                                { taskId, recovered: unfenced.map((f) => f.externalId) },
+                                'file-artifact: folded un-fenced document outputs into metadata.attachments',
+                              );
+                            }
+                          }
+                        } catch (err) {
+                          ctx.logger.warn(
+                            { err: err instanceof Error ? err.message : String(err), taskId },
+                            'file-artifact: output-file fold failed (non-fatal)',
+                          );
+                        }
+                      }
+                      // Phase 1 Day 5 Round 2 — pipeline verification on the
+                      // supercar/browser final answer. Mirrors the generate +
+                      // scrape pattern: seed terminal-state evidence into the
+                      // ledger, then run the verifier. autoFix can substitute
+                      // a fabricated URL with a grounded one BEFORE
+                      // persistSupercarOutcome writes the row, so the user
+                      // sees the corrected text on first render.
+                      let browserOriginalAnswer: string | null = null;
+                      if (outcome.status === 'completed' && outcome.summary) {
+                        const terminalSearchSources =
+                          collectSearchSourceReferences(observedWebSearchSources);
+                        // The final answer cites provider-returned links, so record the
+                        // same observed URLs before verification. Otherwise autoFix
+                        // correctly treats the links as ungrounded and removes them.
+                        for (const source of terminalSearchSources) {
+                          recordEvidence(taskId, {
+                            fact: `web_search_url=${source.url}`,
+                            sourceType: 'tool_result',
+                            sourceDetail: 'supercar web_search provider result',
+                            confidence: 'observed',
+                          });
+                        }
+                        const answerSummary = appendSearchSourceReferences(
+                          outcome.summary,
+                          terminalSearchSources,
+                        );
+                        browserOriginalAnswer = answerSummary;
+                        outcome = {
+                          ...outcome,
+                          summary: answerSummary,
+                        };
+                        if (finalState.finalUrl) {
+                          recordEvidence(taskId, {
+                            fact: `final_url=${finalState.finalUrl}`,
+                            sourceType: 'browser_state',
+                            sourceDetail: 'supercar terminal state',
+                            confidence: 'observed',
+                          });
+                        }
+                        recordEvidence(taskId, {
+                          fact: `response_length=${answerSummary.length}`,
+                          sourceType: 'tool_result',
+                          sourceDetail: 'supercar agent response',
+                          confidence: 'observed',
+                        });
+                        // Codex Pack B1 — verifying chip (supercar lane).
+                        broadcastSubStatus(ctx.userId, taskId, 'verifying');
+                        const verified: VerifyOutput = await verifyAndFinalize({
+                          taskId,
+                          answerText: answerSummary,
+                          ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+                          logger: ctx.logger,
+                          // File-artifact guard (C): a download claim with no
+                          // fence AND no matching DOCUMENT output → fixable. The
+                          // screenshot is excluded from outputDocDescriptors.
+                          outputFiles: outputDocDescriptors,
+                        });
+                        if (verified.finalText !== outcome.summary) {
+                          outcome = { ...outcome, summary: verified.finalText };
+                        }
+                        executionVerification = verified.verification;
+                      }
+                      const preFormatResearchSourceTrust = assessResultTrust({
+                        intent: input.intent,
+                        resultText: outcome.status === 'completed' ? outcome.summary : '',
+                        currentUrl: finalState.finalUrl,
+                      });
+
+                      // The formatter needs a provisional terminal shape. The definitive
+                      // verdict is recalculated from the exact persisted text below.
+                      const preFormatTerminalStatus: FinalTerminalStatus = deriveFinalStatus(
+                        outcome.status,
+                        executionVerification,
+                        preFormatResearchSourceTrust,
+                      );
+                      // The legacy second-model polishing layer is retired. Route the
+                      // supercar lane through the same compatibility boundary as the
+                      // other lanes so old environment variables cannot re-enable it.
+                      const supercarRl = await runResponseLayerForLane({
+                        taskId,
+                        status: preFormatTerminalStatus,
+                        summary: outcome.summary ?? '',
+                        expertWorkflowId:
+                          typeof metadata?.expertWorkflowId === 'string'
+                            ? metadata.expertWorkflowId
+                            : undefined,
+                        logger: ctx.logger,
+                      });
+                      const responseLayerOriginal = supercarRl.responseLayerOriginal;
+                      const responseLayerMetadata = supercarRl.responseLayerMetadata;
+                      if (outcome.summary && supercarRl.summary !== outcome.summary) {
+                        outcome = { ...outcome, summary: supercarRl.summary };
+                      }
+                      // Enforce the observed-source boundary immediately before persistence.
+                      if (outcome.status === 'completed' && outcome.summary) {
+                        const persistenceSummary = appendSearchSourceReferences(
+                          outcome.summary,
+                          observedWebSearchSources,
+                        );
+                        outcome = {
+                          ...outcome,
+                          summary: persistenceSummary,
+                        };
+
+                        // Production trust P0 — this is the last mutation boundary.
+                        // Re-run the deterministic verifier + auto-fix on the exact
+                        // string we will persist. This prevents a formatter (or the
+                        // source footer) from re-introducing duplicate candidate links
+                        // after the primary verifier already ran.
+                        const finalVerified = await finalizeAnswerForPersistence({
+                          taskId,
+                          answerText: persistenceSummary,
+                          priorVerification: executionVerification,
+                          ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+                          logger: ctx.logger,
+                          outputFiles: outputDocDescriptors,
+                        });
+                        if (finalVerified.finalText !== outcome.summary) {
+                          outcome = { ...outcome, summary: finalVerified.finalText };
+                        }
+                        executionVerification = finalVerified.verification;
+                      }
+
+                      const supercarResearchSourceTrust = assessResultTrust({
+                        intent: input.intent,
+                        resultText: outcome.status === 'completed' ? outcome.summary : '',
+                        currentUrl: finalState.finalUrl,
+                      });
+
+                      // Codex Pack A3 — the verdict now describes the exact text that
+                      // flows through persistence and the terminal WebSocket message.
+                      // BROWSER-AUTOPILOT-2: post-hoc success criteria annotate a completed
+                      // browser answer; only a user-stated constraint can still fail it.
+                      const browserVerdict = browserCompletionVerdict({
+                        runnerStatus: outcome.status,
+                        verification: executionVerification,
+                        sourceTrust: supercarResearchSourceTrust,
+                        verifiedText: outcome.summary ?? '',
+                        originalText: browserOriginalAnswer ?? outcome.summary ?? '',
+                        ...(outcome.partial ? { partial: outcome.partial } : {}),
+                      });
+                      if (outcome.status === 'completed' && outcome.summary)
+                        outcome = { ...outcome, summary: browserVerdict.text };
+                      const supercarTerminalStatus: FinalTerminalStatus = browserVerdict.status;
+                      const supercarFailureSummary =
+                        supercarTerminalStatus === 'failed'
+                          ? executionVerification
+                            ? summariseVerificationFailure(executionVerification)
+                            : (supercarResearchSourceTrust.failedChecks[0]?.detail ?? null)
+                          : null;
+                      const supercarFailedChecks = [
+                        ...(executionVerification && !executionVerification.passed
+                          ? extractFailedChecks(executionVerification)
+                          : []),
+                        ...(executionVerification && !executionVerification.passed
+                          ? []
+                          : supercarResearchSourceTrust.failedChecks),
+                      ];
+                      const supercarStateTransition = classifySupercarTaskStateTransition({
+                        status: outcome.status,
+                        question: outcome.question,
+                        summary: outcome.summary,
+                      });
+                      let terminalPersisted = false;
+                      if (supercarStateTransition.kind === 'waiting_user') {
+                        try {
+                          const finalFields = finalStatePersistFields(finalState);
+                          const waitingPersisted = await repo.persistAwaitingUser({
+                            taskExternalId: taskId,
+                            question: supercarStateTransition.question,
+                            awaitingKind: supercarStateTransition.awaitingKind,
+                            result: {
+                              ...(metadata ?? {}),
+                              executionMode:
+                                typeof metadata?.executionMode === 'string'
+                                  ? metadata.executionMode
+                                  : 'browser',
+                              ...finalFields,
+                            },
+                          });
+                          if (waitingPersisted.persisted) {
+                            broadcastToUser(
+                              userId,
+                              buildSupercarWaitingUserMessage({
+                                taskId,
+                                transition: supercarStateTransition,
+                              }),
+                            );
+                          }
+                        } catch (err) {
+                          ctx.logger.warn(
+                            { err, taskId },
+                            'supercar: persist/broadcast awaiting_user fallback failed',
+                          );
+                        }
+                      } else {
+                        const terminalResult = await persistSupercarOutcome(
+                          repo,
+                          taskId,
+                          outcome,
+                          finalState,
+                          metadata,
+                          supercarTerminalStatus,
+                          supercarFailureSummary,
+                          supercarTerminalStatus !== 'completed' && supercarFailedChecks.length > 0
+                            ? supercarFailedChecks
+                            : undefined,
+                        );
+                        terminalPersisted = terminalResult.persisted;
+                      }
+                      // Optimization #2 — stamp the formatter columns. Best-
+                      // effort UPDATE after the row landed; failure here logs
+                      // but doesn't tear down the terminal flow. Only writes
+                      // when we actually have something to record (formatter
+                      // ran, even if it fell back).
+                      if (terminalPersisted && responseLayerMetadata) {
+                        try {
+                          const stamped = await stampResponseLayerColumns(
+                            ctx.db,
+                            taskId,
+                            responseLayerOriginal,
+                            outcome.summary ?? '',
+                            responseLayerMetadata,
+                            ctx.logger,
+                          );
+                          if (!stamped) {
+                            ctx.logger.warn(
+                              { taskId },
+                              'openai-response-layer: supercar stamp skipped because task was no longer terminal',
+                            );
+                          }
+                        } catch (err) {
+                          ctx.logger.warn(
+                            { err: err instanceof Error ? err.message : String(err), taskId },
+                            'openai-response-layer: persist metadata failed (non-fatal)',
+                          );
+                        }
+                      }
+                      // Reconcile-driven step rewrite. When the agent loop's
+                      // reconcileFinalAnswer rewrote the model's text (URL or
+                      // title mismatched the live page), the LAST step row's
+                      // `input.summary` and the matching `tick.end` actionSummary
+                      // are now stale. The "最近操作" overlay reads from steps,
+                      // not summary, so without this rewrite the user opens the
+                      // overlay and still sees the wrong URL the model invented.
+                      // Best-effort: a DB / broadcast blip leaves the row stale
+                      // but doesn't impact terminal flow.
+                      if (outcome.reconciledStepUpdate && taskDbId) {
+                        const upd = outcome.reconciledStepUpdate;
+                        try {
+                          await ctx.db
+                            .update(taskSteps)
+                            .set({ input: { summary: upd.actionSummary } })
+                            .where(
+                              and(eq(taskSteps.taskId, taskDbId), eq(taskSteps.seq, upd.tickIndex)),
+                            );
+                        } catch (err) {
+                          ctx.logger.warn(
+                            { err, taskId, tickIndex: upd.tickIndex },
+                            'supercar: persist reconciled step failed',
+                          );
+                        }
+                        try {
+                          broadcastToUser(userId, {
+                            type: 'server.vision.tick.end',
+                            taskId,
+                            tickIndex: upd.tickIndex,
+                            mode: 'screenshot',
+                            actionKind: 'text',
+                            actionSummary: upd.actionSummary,
+                            durationMs: 0,
+                            ok: true,
+                          });
+                        } catch (err) {
+                          ctx.logger.warn(
+                            { err, taskId, tickIndex: upd.tickIndex },
+                            'supercar: broadcast reconciled step failed',
+                          );
+                        }
+                      }
+                      // Codex P3 follow-up — gate terminal-only side effects on
+                      // `terminalPersisted`. When the atomic state-machine guard
+                      // refused the UPDATE (row still in awaiting_user — happens
+                      // when a takeover-timeout fires AFTER the user already
+                      // came back and replied), the WS terminal frame would
+                      // clobber the in-progress state in the SPA store, memory
+                      // extraction would store a half-finished summary, and a
+                      // stale suggestion bubble would surface alongside the
+                      // running task. Skip all three when the row didn't move.
+                      const runTerminalSideEffects = shouldRunSupercarTerminalSideEffects({
+                        transition: supercarStateTransition,
+                        persisted: terminalPersisted,
+                      });
+                      if (!runTerminalSideEffects) {
+                        ctx.logger.info(
+                          { taskId, transition: supercarStateTransition.kind },
+                          'supercar: skipping terminal broadcast / memory / suggestions',
+                        );
+                      }
+                      if (runTerminalSideEffects) {
+                        try {
+                          // Surface verifier or deterministic source checks to
+                          // the SPA banner; empty lists are omitted by helper.
+                          broadcastToUser(
+                            userId,
+                            buildTaskTerminalMessage(
+                              taskId,
+                              outcome,
+                              supercarTerminalStatus,
+                              supercarFailureSummary,
+                              supercarFailedChecks,
+                            ),
+                          );
+                        } catch (err) {
+                          ctx.logger.warn({ err, taskId }, 'supercar: broadcast terminal failed');
+                        }
+                      }
+                      // Cross-task memory extraction is paused until it has a dedicated
+                      // Qwen implementation. Existing memories stay readable; production
+                      // must not fall back to the dormant Anthropic extractor.
+                      if (terminalPersisted && outcome.status === 'completed' && outcome.summary) {
+                        // Post-task suggestions are Qwen-only. The shared runtime enforces
+                        // rollout, lane, persisted region and region-local credentials
+                        // before constructing a transport. There is no legacy fallback.
+                        let suggestionsRoute: ReturnType<
+                          typeof resolveSuggestionsProviderRoute
+                        > | null = null;
+                        try {
+                          suggestionsRoute = resolveSuggestionsProviderRoute({
+                            environment: appEnv,
+                            userExternalId: ctx.userId,
+                            userModelDataRegion: userRow.modelDataRegion,
+                          });
+                          if (suggestionsRoute.provider === 'unavailable') {
+                            ctx.logger.warn(
+                              { taskId, reason: suggestionsRoute.reason },
+                              'suggestions: provider unavailable',
+                            );
+                          }
+                        } catch (error) {
+                          ctx.logger.warn(
+                            { taskId, reason: 'PROVIDER_CONFIGURATION_ERROR' },
+                            'suggestions: provider unavailable',
+                          );
+                        }
+
+                        if (suggestionsRoute?.provider === 'qwen') {
+                          const messagesAdapter = suggestionsRoute.messagesAdapter;
+                          ctx.logger.info(
+                            {
+                              taskId,
+                              provider: messagesAdapter.metadata.provider,
+                              model: messagesAdapter.metadata.model,
+                              region: messagesAdapter.metadata.region,
+                              deploymentScope: messagesAdapter.metadata.deploymentScope,
+                              endpointKind: messagesAdapter.metadata.endpointKind,
+                            },
+                            'suggestions: Qwen selected',
+                          );
+                          const completedSummary = outcome.summary;
+                          void runTaskBackground(ctx, async (ctx) =>
+                            generateSuggestions({
+                              messagesAdapter,
+                              intent: input.intent,
+                              summary: completedSummary,
+                            })
+                              .then((suggestions) => {
+                                if (suggestions.length === 0) return;
+                                try {
+                                  broadcastToUser(userId, {
+                                    type: 'server.supercar.suggestions',
+                                    taskId,
+                                    suggestions,
+                                  });
+                                } catch (err) {
+                                  ctx.logger.warn({ err, taskId }, 'suggestions: broadcast failed');
+                                }
+                              })
+                              .catch((err) =>
+                                ctx.logger.warn({ err, taskId }, 'suggestions: generate crashed'),
+                              ),
+                          );
+                        }
+                      }
+                    })
+                    .catch(async (err) => {
+                      // Phase 22a — uncaught throws used to leave the task at
+                      // status='executing' forever (the .then chain didn't run,
+                      // so persistSupercarOutcome was never called). Persist a
+                      // failed outcome here BEFORE logging so the task always
+                      // reaches a terminal state. Wrapped in its own try so a
+                      // DB blip during the recovery persist doesn't bubble up
+                      // and tear down the .finally below.
+                      const reason = err instanceof Error ? err.message : String(err);
+                      ctx.logger.error({ err, taskId }, 'supercar: loop threw — persisting failed');
+                      // Codex P3 follow-up — same `persisted` gate as the happy
+                      // path. If the runner threw AFTER the row landed in
+                      // awaiting_user (rare but possible: runtime stack unwind
+                      // after the agent fired onAwaitingUser), don't broadcast
+                      // terminal-failed and clobber the park state.
+                      let catchPersisted = false;
+                      try {
+                        const failureFinalState =
+                          perUserExec && !captchaPrivacy
+                            ? await captureFinalState({
+                                executor: {
+                                  getPage: () => perUserExec.getPage(),
+                                  screenshot: (page, options) =>
+                                    perUserExec.screenshot(
+                                      page as unknown as Parameters<
+                                        PlaywrightExecutor['screenshot']
+                                      >[0],
+                                      options,
+                                    ),
+                                },
+                                logger: ctx.logger,
+                                taskId,
+                              })
+                            : {};
+                        const out = await repo.persistVisionOutcome(taskId, {
+                          status: 'failed',
+                          reason: `runner threw: ${reason}`.slice(0, 500),
+                          tickCount: 0,
+                          ...(failureFinalState.finalUrl
+                            ? { finalUrl: failureFinalState.finalUrl }
+                            : {}),
+                          ...(failureFinalState.finalScreenshot
+                            ? { finalScreenshot: failureFinalState.finalScreenshot }
+                            : {}),
+                          ...(failureFinalState.finalViewport
+                            ? { finalViewport: failureFinalState.finalViewport }
+                            : {}),
+                          metadata: {
+                            executionMode,
+                            finalExecutionMode: executionMode,
+                            lane: 'supercar_exception',
+                          },
+                        });
+                        catchPersisted = out.persisted;
+                      } catch (persistErr) {
+                        ctx.logger.error(
+                          { err: persistErr, taskId },
+                          'supercar: catch-block persist also failed',
+                        );
+                      }
+                      if (catchPersisted) {
+                        try {
+                          broadcastToUser(userId, {
+                            type: 'server.task.terminal',
+                            taskId,
+                            status: 'failed',
+                            reason: `runner threw: ${reason}`.slice(0, 200),
+                          });
+                        } catch {
+                          /* swallow — broadcast is best-effort */
+                        }
+                      }
+                    })
+                    .finally(async () => {
+                      // Phase 3 R1 — clear the watchdog now that the runner
+                      // settled normally. If it already fired, clearTimeout is
+                      // a no-op and the watchdog's release call has already
+                      // happened (idempotent with the regular release below).
+                      clearTimeout(watchdogTimer);
+                      // Keep the completed browser briefly available for the task's
+                      // review workspace. The lease is bounded and reclaimable: a new
+                      // task at capacity releases the oldest retained browser first.
+                      if (didAllocatePool && ctx.browserPool) {
+                        const finishingPool = ctx.browserPool;
+                        await runTaskBackground(ctx, async () =>
+                          finishTaskBrowser(
+                            finishingPool,
+                            taskId,
+                            appEnv.BROWSER_TERMINAL_RETENTION_MS,
+                            !captchaNeedsRelease,
+                          ),
+                        ).catch((relErr) => {
+                          ctx.logger.warn(
+                            { err: relErr, taskId, userId: ctx.userId },
+                            'pool: post-task release failed',
+                          );
+                        });
+                      }
+                      // Phase 24 RC follow-up — wake the TaskQueue worker so
+                      // the next queued task fires immediately instead of
+                      // waiting for the next 5s tick. Safe even when no queue
+                      // is wired (the optional-chain shorts).
+                      ctx.taskQueue?.signalSlotFreed();
+                      // Phase 1 Day 5 Round 2 — fire-and-forget pipeline
+                      // persist + cleanup. Same pattern as the generate +
+                      // scrape lanes. Always runs (then OR catch path), so
+                      // even a runner exception still serialises the contract
+                      // + ledger that were inited at task start.
+                      const finalPersistence = persistExecution({
+                        taskId,
                         verification: executionVerification,
                         db: ctx.db,
                         logger: ctx.logger,
                       })
-              : null,
-          )
-          .finally(() => disposeExecution(taskId));
-            if (input.localChrome || ctx.ordinaryMaintenance) return finalPersistence;
-          });
+                        .then((persisted) =>
+                          persisted
+                            ? writeLedgerToDb({
+                                taskExternalId: taskId,
+                                verification: executionVerification,
+                                db: ctx.db,
+                                logger: ctx.logger,
+                              })
+                            : null,
+                        )
+                        .finally(() => disposeExecution(taskId));
+                      if (input.localChrome || ctx.ordinaryMaintenance) return finalPersistence;
+                    });
 
-      // Phase 24 — fire the runFn directly (pre-queue path). Per-task
-      // isolation removes the need for serialisation — each task gets
-      // its own Brave, can run in parallel up to the user's plan-
-      // derived concurrency limit (already gated at admit time via
-      // getActiveTaskCount).
-      await runFn();
-      };
-      // ↑ end of dispatchToBrave wrap
+                // Phase 24 — fire the runFn directly (pre-queue path). Per-task
+                // isolation removes the need for serialisation — each task gets
+                // its own Brave, can run in parallel up to the user's plan-
+                // derived concurrency limit (already gated at admit time via
+                // getActiveTaskCount).
+                await runFn();
+              };
+              // ↑ end of dispatchToBrave wrap
 
-      // Phase 24 RC follow-up — global pool-capacity-aware queue.
-      // Without this, a 30-task burst overruns the 10-slot pool;
-      // pool.allocate throws PoolCapacityError, the catch falls
-      // through to a shared singleton, and every overflow task races
-      // the same Brave on `initial screenshot failed`. The queue
-      // holds overflow in 'queued' status until pool capacity frees,
-      // then dispatches FIFO.
-      if (willQueueDispatch && ctx.taskQueue) {
-        const enqueueResult = enqueueTaskExecution(ctx, {
-          taskId,
-          userId: ctx.userId,
-          runFn: dispatchToBrave,
-          onStart: async (ctx): Promise<void> => {
-            await markQueuedTaskExecutingOrThrow({ repo, taskId, logger: ctx.logger });
-            // No queued→executing WS frame — supercar's own
-            // `server.task.plan` / step events fire next from the
-            // dispatched runFn, and the SPA's task store reads the
-            // fresh row on its existing tRPC poll. Avoid adding a
-            // new message type for a transition that's already
-            // observable via the next event.
-          },
-          onTimeout: async (ctx): Promise<void> => {
-            ctx.logger.warn(
-              { taskId, userId: ctx.userId },
-              'task-queue: queue timeout — marking failed',
-            );
-            const queueTimeoutReason = '排队等待时间过长，任务已自动停止。请稍后重新执行。';
-            try {
-              const failed = await repo.markQueuedTaskFailed(
-                taskId,
-                `queue timeout: ${queueTimeoutReason}`,
-                { errorCode: 'QUEUE_TIMEOUT', source: 'task_queue_timeout' },
-              );
-              if (failed.persisted) {
-                broadcastToUser(ctx.userId, {
-                  type: 'server.task.terminal',
+              // Phase 24 RC follow-up — global pool-capacity-aware queue.
+              // Without this, a 30-task burst overruns the 10-slot pool;
+              // pool.allocate throws PoolCapacityError, the catch falls
+              // through to a shared singleton, and every overflow task races
+              // the same Brave on `initial screenshot failed`. The queue
+              // holds overflow in 'queued' status until pool capacity frees,
+              // then dispatches FIFO.
+              if (willQueueDispatch && ctx.taskQueue) {
+                const enqueueResult = enqueueTaskExecution(ctx, {
                   taskId,
-                  status: 'failed',
-                  reason: queueTimeoutReason,
+                  userId: ctx.userId,
+                  runFn: dispatchToBrave,
+                  onStart: async (ctx): Promise<void> => {
+                    await markQueuedTaskExecutingOrThrow({ repo, taskId, logger: ctx.logger });
+                    // No queued→executing WS frame — supercar's own
+                    // `server.task.plan` / step events fire next from the
+                    // dispatched runFn, and the SPA's task store reads the
+                    // fresh row on its existing tRPC poll. Avoid adding a
+                    // new message type for a transition that's already
+                    // observable via the next event.
+                  },
+                  onTimeout: async (ctx): Promise<void> => {
+                    ctx.logger.warn(
+                      { taskId, userId: ctx.userId },
+                      'task-queue: queue timeout — marking failed',
+                    );
+                    const queueTimeoutReason = '排队等待时间过长，任务已自动停止。请稍后重新执行。';
+                    try {
+                      const failed = await repo.markQueuedTaskFailed(
+                        taskId,
+                        `queue timeout: ${queueTimeoutReason}`,
+                        { errorCode: 'QUEUE_TIMEOUT', source: 'task_queue_timeout' },
+                      );
+                      if (failed.persisted) {
+                        broadcastToUser(ctx.userId, {
+                          type: 'server.task.terminal',
+                          taskId,
+                          status: 'failed',
+                          reason: queueTimeoutReason,
+                        });
+                      }
+                    } catch (err) {
+                      ctx.logger.warn(
+                        { err: err instanceof Error ? err.message : String(err), taskId },
+                        'task-queue: onTimeout persist failed',
+                      );
+                    }
+                  },
                 });
+                if (enqueueResult.kind === 'rejected') {
+                  ctx.logger.warn(
+                    { taskId, userId: ctx.userId, reason: enqueueResult.reason },
+                    'task-queue: enqueue rejected (queue at depth cap)',
+                  );
+                  try {
+                    await repo.markQueuedTaskFailed(taskId, enqueueResult.reason, {
+                      errorCode: 'QUEUE_REJECTED',
+                      source: 'task_queue_rejected',
+                    });
+                  } catch (err) {
+                    ctx.logger.warn(
+                      { err: err instanceof Error ? err.message : String(err), taskId },
+                      'task-queue: rejection-row update failed',
+                    );
+                  }
+                  throw new TRPCError({
+                    code: 'TOO_MANY_REQUESTS',
+                    message: enqueueResult.reason,
+                  });
+                }
+                ctx.logger.info(
+                  {
+                    taskId,
+                    userId: ctx.userId,
+                    kind: enqueueResult.kind,
+                    position: enqueueResult.position,
+                    queueSize: ctx.taskQueue.size(),
+                  },
+                  'task-queue: task enqueued',
+                );
+                if (enqueueResult.kind === 'queued') {
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.task.queued',
+                    taskId,
+                    position: enqueueResult.position,
+                  });
+                }
+                const statusOut = enqueueResult.kind === 'dispatched' ? 'executing' : 'queued';
+                return {
+                  taskId,
+                  status: statusOut as 'executing' | 'queued',
+                  steps: [],
+                  executionMode: 'browser' as const,
+                };
               }
-            } catch (err) {
-              ctx.logger.warn(
-                { err: err instanceof Error ? err.message : String(err), taskId },
-                'task-queue: onTimeout persist failed',
-              );
-            }
-          },
-        });
-        if (enqueueResult.kind === 'rejected') {
-          ctx.logger.warn(
-            { taskId, userId: ctx.userId, reason: enqueueResult.reason },
-            'task-queue: enqueue rejected (queue at depth cap)',
-          );
-          try {
-            await repo.markQueuedTaskFailed(taskId, enqueueResult.reason, {
-              errorCode: 'QUEUE_REJECTED',
-              source: 'task_queue_rejected',
-            });
-          } catch (err) {
-            ctx.logger.warn(
-              { err: err instanceof Error ? err.message : String(err), taskId },
-              'task-queue: rejection-row update failed',
-            );
-          }
-          throw new TRPCError({
-            code: 'TOO_MANY_REQUESTS',
-            message: enqueueResult.reason,
-          });
-        }
-        ctx.logger.info(
-          {
-            taskId,
-            userId: ctx.userId,
-            kind: enqueueResult.kind,
-            position: enqueueResult.position,
-            queueSize: ctx.taskQueue.size(),
-          },
-          'task-queue: task enqueued',
-        );
-        if (enqueueResult.kind === 'queued') {
-          broadcastToUser(ctx.userId, {
-            type: 'server.task.queued',
-            taskId,
-            position: enqueueResult.position,
-          });
-        }
-        const statusOut = enqueueResult.kind === 'dispatched' ? 'executing' : 'queued';
-        return {
-          taskId,
-          status: statusOut as 'executing' | 'queued',
-          steps: [],
-          executionMode: 'browser' as const,
-        };
-      }
 
-      // Legacy / non-pool path — fire directly without queue gating.
-      const dispatchLocalChrome = async (executionContext: TaskExecutionContext) => {
-        if (!input.localChrome) throw new Error('chrome_selection_required');
-        localChromeTaskSessions.start(ctx.userId, taskId, input.localChrome, sendExtensionToolCall, ctx.localChromeReservation);
-        try { await dispatchToBrave(executionContext); }
-        finally {
-          const receipt = await localChromeTaskSessions.finish(ctx.userId, taskId);
-          if (receipt && !receipt.ok && executionContext.executionLifetime) executionContext.executionLifetime.drain.markUnknown(executionContext.executionLifetime.owner);
-        }
-      };
-      if (ctx.ordinaryMaintenance) {
-        void runTaskBackground(ctx, async (ctx) => input.localChrome ? dispatchLocalChrome(ctx) : dispatchToBrave(ctx))
-          .catch(error => ctx.logger.error({ error, taskId }, 'browser execution failed'));
-      } else if (input.localChrome && ctx.executionLifetime) {
-        const { drain, owner } = ctx.executionLifetime;
-        const operation = startOwnedOperation(drain, 'execution', child => dispatchLocalChrome({ ...ctx, executionLifetime: { drain, owner: child } }), { parent: owner, errorOutcome: 'unknown', dispatch: 'immediate' });
-        void operation.result.catch(error => ctx.logger.error({ error, taskId }, 'local Chrome execution failed'));
-      } else {
-        void runTaskBackground(ctx, async (ctx) => (input.localChrome ? dispatchLocalChrome(ctx) : dispatchToBrave(ctx)));
-      }
-
-      return {
-        taskId,
-        status: 'executing' as const,
-        steps: [],
-        executionMode: 'browser' as const,
-        ...(input.localChrome ? { browserSource: 'local-chrome' as const } : {}),
-      };
-    }
-
-    // Vision-loop path — the new control plane. Claude looks at each
-    // tick's screenshot and picks one action at a time; there is no
-    // pre-generated plan, no ResilientSelector, no Skill matching.
-    // Activates when the env flag is off AND a vision commander is
-    // wired at boot (needs ANTHROPIC_API_KEY). Falls through to the
-    // legacy plan-once path otherwise.
-    if (ctx.visionCommander) {
-      const taskId = newExternalId('task');
-      // Seed task row with status='executing' and empty plan — the
-      // vision loop has no pre-planned steps; task_steps rows get
-      // written as the loop progresses (Phase B: per-tick row; Phase
-      // A: single synthetic row reflecting terminal outcome).
-      await repo.insertTask(
-        {
-          taskId,
-          status: 'executing',
-          plan: [],
-          cursor: 0,
-          pendingConfirm: null,
-        },
-        {
-          userId: userRow.id,
-          intent: input.intent,
-          roleId: dispatchRoleId,
-          opusUsed: opusActuallyConsumed,
-        },
-      );
-      // Start the loop asynchronously. We return to the popup
-      // immediately with the taskId; the loop proceeds in the
-      // background, driven by WS round-trips to the connected SW.
-      // Outcome persistence is best-effort: we log failures instead
-      // of surfacing them to the caller (they already got the taskId
-      // and can poll tasks.detail).
-      // F3: serialise per-user through the vision-loop task queue.
-      // Multiple Run clicks for the same user (popup glitch / user
-      // queueing intentional follow-ups) FIFO onto a single
-      // Playwright Page — no racing clicks. Different users don't
-      // block each other.
-      // URL resolution is deterministic: explicit user URLs are network-
-      // checked, known sites come from the curated playbook registry, and
-      // unknown/ambiguous names receive a search-and-verify instruction. A
-      // model never selects the navigation target.
-      const resolved = await resolveIntentUrl(input.intent);
-      const enrichedIntent = resolved
-        ? injectResolvedUrl(input.intent, resolved)
-        : input.intent;
-      if (resolved) {
-        ctx.logger.info(
-          toSafeUrlResolutionLog(resolved),
-          'urlResolve: resolution classified',
-        );
-      }
-
-      // Per-task domain specialisation. Classifier is keyword-only
-      // (no LLM call), safe to run on every create. If the commander
-      // supports per-task specialisation, clone it with the classified
-      // domain; otherwise fall back to the generic singleton.
-      const classification = classifyDomain(enrichedIntent);
-      const commander = ctx.visionCommander.withDomain
-        ? ctx.visionCommander.withDomain(classification.domain)
-        : ctx.visionCommander;
-      ctx.logger.info(
-        {
-          taskId,
-          domain: classification.domain,
-          confidence: classification.confidence,
-          matched: classification.matched,
-        },
-        'vision-loop domain classification',
-      );
-      const userId = ctx.userId;
-      // Resolve the tasks.id once — every onTickEnd needs it to insert
-      // the task_steps row. Avoids a DB lookup on every tick.
-      const [taskDbRow] = await ctx.db
-        .select({ id: tasksTable.id })
-        .from(tasksTable)
-        .where(eq(tasksTable.externalId, taskId))
-        .limit(1);
-      const taskDbId = taskDbRow?.id;
-      const runTaskFn = () =>
-        startVisionLoopTask({
-          userId: ctx.userId,
-          taskId,
-          // Pass the URL-enriched intent to the vision loop. The
-          // *displayed* intent (saved to the tasks row above + shown
-          // in the UI's user bubble) stays the user's original text.
-          intent: enrichedIntent,
-          commander,
-          // Phase D Step 3: when PlaywrightExecutor is wired at boot,
-          // the runner bypasses the WS/SW path and drives Chrome
-          // directly via CDP. Falls through to the legacy WS transport
-          // automatically when absent.
-          ...(ctx.playwrightExecutor ? { playwrightExecutor: ctx.playwrightExecutor } : {}),
-          // G4: stream per-tick progress to the web workbench. Best-
-          // effort — a broadcast throw is swallowed so loop progress
-          // is never gated on the UI being online.
-          onTickStart(info) {
-            try {
-              broadcastToUser(userId, {
-                type: 'server.vision.tick.start',
-                taskId,
-                tickIndex: info.tickIndex,
-                mode: info.mode,
-              });
-            } catch (err) {
-              ctx.logger.warn(
-                { err, taskId, tickIndex: info.tickIndex },
-                'broadcast tick.start failed',
-              );
-            }
-          },
-          onTickEnd(info) {
-            // Bug 4 — persist every tick as a task_steps row so task
-            // history survives page reloads + clicking back into old
-            // tasks. Fire-and-forget: DB failure logs but must not
-            // stall the loop.
-            if (taskDbId) {
-              void runTaskBackground(ctx, async (ctx) => (async () => {
+              // Legacy / non-pool path — fire directly without queue gating.
+              const dispatchLocalChrome = async (executionContext: TaskExecutionContext) => {
+                if (!input.localChrome) throw new Error('chrome_selection_required');
+                localChromeTaskSessions.start(
+                  ctx.userId,
+                  taskId,
+                  input.localChrome,
+                  sendExtensionToolCall,
+                  ctx.localChromeReservation,
+                  taskBrowserCapabilities,
+                );
                 try {
-                  await ctx.db.insert(taskSteps).values({
-                      externalId: newExternalId('taskStep'),
-                      taskId: taskDbId,
-                      seq: info.tickIndex,
-                      kind: info.actionKind,
-                      status: info.ok ? 'done' : 'failed',
-                      riskLevel: 'low',
-                      input: { summary: info.actionSummary },
-                      output: {
-                        durationMs: info.durationMs,
+                  await dispatchToBrave(executionContext);
+                } finally {
+                  const receipt = await localChromeTaskSessions.finish(ctx.userId, taskId);
+                  if (receipt && !receipt.ok && executionContext.executionLifetime)
+                    executionContext.executionLifetime.drain.markUnknown(
+                      executionContext.executionLifetime.owner,
+                    );
+                }
+              };
+              if (ctx.ordinaryMaintenance) {
+                void runTaskBackground(ctx, async (ctx) =>
+                  input.localChrome ? dispatchLocalChrome(ctx) : dispatchToBrave(ctx),
+                ).catch((error) => ctx.logger.error({ error, taskId }, 'browser execution failed'));
+              } else if (input.localChrome && ctx.executionLifetime) {
+                const { drain, owner } = ctx.executionLifetime;
+                const operation = startOwnedOperation(
+                  drain,
+                  'execution',
+                  (child) =>
+                    dispatchLocalChrome({ ...ctx, executionLifetime: { drain, owner: child } }),
+                  { parent: owner, errorOutcome: 'unknown', dispatch: 'immediate' },
+                );
+                void operation.result.catch((error) =>
+                  ctx.logger.error({ error, taskId }, 'local Chrome execution failed'),
+                );
+              } else {
+                void runTaskBackground(ctx, async (ctx) =>
+                  input.localChrome ? dispatchLocalChrome(ctx) : dispatchToBrave(ctx),
+                );
+              }
+
+              return {
+                taskId,
+                status: 'executing' as const,
+                steps: [],
+                executionMode: 'browser' as const,
+                ...(input.localChrome ? { browserSource: 'local-chrome' as const } : {}),
+              };
+            }
+
+            // Vision-loop path — the new control plane. Claude looks at each
+            // tick's screenshot and picks one action at a time; there is no
+            // pre-generated plan, no ResilientSelector, no Skill matching.
+            // Activates when the env flag is off AND a vision commander is
+            // wired at boot (needs ANTHROPIC_API_KEY). Falls through to the
+            // legacy plan-once path otherwise.
+            if (ctx.visionCommander) {
+              const taskId = newExternalId('task');
+              // Seed task row with status='executing' and empty plan — the
+              // vision loop has no pre-planned steps; task_steps rows get
+              // written as the loop progresses (Phase B: per-tick row; Phase
+              // A: single synthetic row reflecting terminal outcome).
+              await repo.insertTask(
+                {
+                  taskId,
+                  status: 'executing',
+                  plan: [],
+                  cursor: 0,
+                  pendingConfirm: null,
+                },
+                {
+                  userId: userRow.id,
+                  intent: input.intent,
+                  roleId: dispatchRoleId,
+                  opusUsed: opusActuallyConsumed,
+                },
+              );
+              // Start the loop asynchronously. We return to the popup
+              // immediately with the taskId; the loop proceeds in the
+              // background, driven by WS round-trips to the connected SW.
+              // Outcome persistence is best-effort: we log failures instead
+              // of surfacing them to the caller (they already got the taskId
+              // and can poll tasks.detail).
+              // F3: serialise per-user through the vision-loop task queue.
+              // Multiple Run clicks for the same user (popup glitch / user
+              // queueing intentional follow-ups) FIFO onto a single
+              // Playwright Page — no racing clicks. Different users don't
+              // block each other.
+              // URL resolution is deterministic: explicit user URLs are network-
+              // checked, known sites come from the curated playbook registry, and
+              // unknown/ambiguous names receive a search-and-verify instruction. A
+              // model never selects the navigation target.
+              const resolved = await resolveIntentUrl(input.intent);
+              const enrichedIntent = resolved
+                ? injectResolvedUrl(input.intent, resolved)
+                : input.intent;
+              if (resolved) {
+                ctx.logger.info(
+                  toSafeUrlResolutionLog(resolved),
+                  'urlResolve: resolution classified',
+                );
+              }
+
+              // Per-task domain specialisation. Classifier is keyword-only
+              // (no LLM call), safe to run on every create. If the commander
+              // supports per-task specialisation, clone it with the classified
+              // domain; otherwise fall back to the generic singleton.
+              const classification = classifyDomain(enrichedIntent);
+              const commander = ctx.visionCommander.withDomain
+                ? ctx.visionCommander.withDomain(classification.domain)
+                : ctx.visionCommander;
+              ctx.logger.info(
+                {
+                  taskId,
+                  domain: classification.domain,
+                  confidence: classification.confidence,
+                  matched: classification.matched,
+                },
+                'vision-loop domain classification',
+              );
+              const userId = ctx.userId;
+              // Resolve the tasks.id once — every onTickEnd needs it to insert
+              // the task_steps row. Avoids a DB lookup on every tick.
+              const [taskDbRow] = await ctx.db
+                .select({ id: tasksTable.id })
+                .from(tasksTable)
+                .where(eq(tasksTable.externalId, taskId))
+                .limit(1);
+              const taskDbId = taskDbRow?.id;
+              // Batch 04: the browser lane's brain (model catalog) drives the unified
+              // tool set when a Playwright page is available.
+              const visionRuntime = modelRuntimeWiring.resolveCore({
+                actorExternalId: ctx.userId,
+                lane: 'browser',
+                ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
+              });
+              const unifiedBrowser =
+                visionRuntime.kind === 'ready'
+                  ? {
+                      messagesAdapter: visionRuntime.messages('vision'),
+                      recorder: new DrizzleLlmCallRecorder(ctx.db),
+                      webSearch: createFallbackWebSearch({
+                        primary: createResponsesWebSearch(visionRuntime.responses('fast')),
+                        firecrawl: ctx.firecrawl ?? null,
+                      }),
+                    }
+                  : {};
+              const runTaskFn = () =>
+                startVisionLoopTask({
+                  ...unifiedBrowser,
+                  ...(taskDbId
+                    ? {
+                        evolution: {
+                          db: ctx.db,
+                          taskDbId,
+                          generateAdapter: resolveUserGenerateAdapter({
+                            wiring: modelRuntimeWiring,
+                            actorExternalId: ctx.userId,
+                            modelDataRegion: userRow.modelDataRegion,
+                          }),
+                          logger: ctx.logger,
+                        },
+                      }
+                    : {}),
+                  userId: ctx.userId,
+                  taskId,
+                  // Pass the URL-enriched intent to the vision loop. The
+                  // *displayed* intent (saved to the tasks row above + shown
+                  // in the UI's user bubble) stays the user's original text.
+                  intent: enrichedIntent,
+                  commander,
+                  // Phase D Step 3: when PlaywrightExecutor is wired at boot,
+                  // the runner bypasses the WS/SW path and drives Chrome
+                  // directly via CDP. Falls through to the legacy WS transport
+                  // automatically when absent.
+                  ...(ctx.playwrightExecutor ? { playwrightExecutor: ctx.playwrightExecutor } : {}),
+                  // G4: stream per-tick progress to the web workbench. Best-
+                  // effort — a broadcast throw is swallowed so loop progress
+                  // is never gated on the UI being online.
+                  onTickStart(info) {
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.vision.tick.start',
+                        taskId,
+                        tickIndex: info.tickIndex,
                         mode: info.mode,
+                      });
+                    } catch (err) {
+                      ctx.logger.warn(
+                        { err, taskId, tickIndex: info.tickIndex },
+                        'broadcast tick.start failed',
+                      );
+                    }
+                  },
+                  onTickEnd(info) {
+                    // Bug 4 — persist every tick as a task_steps row so task
+                    // history survives page reloads + clicking back into old
+                    // tasks. Fire-and-forget: DB failure logs but must not
+                    // stall the loop.
+                    if (taskDbId) {
+                      void runTaskBackground(ctx, async (ctx) =>
+                        (async () => {
+                          try {
+                            await ctx.db.insert(taskSteps).values({
+                              externalId: newExternalId('taskStep'),
+                              taskId: taskDbId,
+                              seq: info.tickIndex,
+                              kind: info.actionKind,
+                              status: info.ok ? 'done' : 'failed',
+                              riskLevel: 'low',
+                              input: { summary: info.actionSummary },
+                              output: {
+                                durationMs: info.durationMs,
+                                mode: info.mode,
+                                ...(info.message ? { message: info.message } : {}),
+                                ...(info.antiBot
+                                  ? {
+                                      antiBot: {
+                                        type: info.antiBot.type,
+                                        confidence: info.antiBot.confidence,
+                                        message: describeSignal(info.antiBot),
+                                      },
+                                    }
+                                  : {}),
+                              },
+                              ...(info.ok
+                                ? {}
+                                : { errorMessage: (info.message ?? '').slice(0, 2000) }),
+                              startedAt: new Date(Date.now() - info.durationMs),
+                              completedAt: new Date(),
+                            });
+                          } catch (err) {
+                            ctx.logger.warn(
+                              { err, taskId, tickIndex: info.tickIndex },
+                              'persist step row failed',
+                            );
+                          }
+                        })(),
+                      );
+                    }
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.vision.tick.end',
+                        taskId,
+                        tickIndex: info.tickIndex,
+                        mode: info.mode,
+                        actionKind: info.actionKind,
+                        actionSummary: info.actionSummary,
+                        durationMs: info.durationMs,
+                        ok: info.ok,
                         ...(info.message ? { message: info.message } : {}),
                         ...(info.antiBot
                           ? {
+                              // Flatten the server-side signal into the
+                              // WS-facing shape. Keep raw detector snippets out
+                              // of user-visible progress; logs/forensics can use
+                              // the server-side AntiBotSignal before this point.
                               antiBot: {
                                 type: info.antiBot.type,
                                 confidence: info.antiBot.confidence,
@@ -7274,319 +8343,302 @@ export const tasksRouter = router({
                               },
                             }
                           : {}),
-                      },
-                      ...(info.ok ? {} : { errorMessage: (info.message ?? '').slice(0, 2000) }),
-                      startedAt: new Date(Date.now() - info.durationMs),
-                      completedAt: new Date(),
-                    });
-                } catch (err) {
-                  ctx.logger.warn(
-                    { err, taskId, tickIndex: info.tickIndex },
-                    'persist step row failed',
-                  );
-                }
-              })());
-            }
-            try {
-              broadcastToUser(userId, {
-                type: 'server.vision.tick.end',
-                taskId,
-                tickIndex: info.tickIndex,
-                mode: info.mode,
-                actionKind: info.actionKind,
-                actionSummary: info.actionSummary,
-                durationMs: info.durationMs,
-                ok: info.ok,
-                ...(info.message ? { message: info.message } : {}),
-                ...(info.antiBot
-                  ? {
-                      // Flatten the server-side signal into the
-                      // WS-facing shape. Keep raw detector snippets out
-                      // of user-visible progress; logs/forensics can use
-                      // the server-side AntiBotSignal before this point.
-                      antiBot: {
-                        type: info.antiBot.type,
-                        confidence: info.antiBot.confidence,
-                        message: describeSignal(info.antiBot),
-                      },
+                      });
+                    } catch (err) {
+                      ctx.logger.warn(
+                        { err, taskId, tickIndex: info.tickIndex },
+                        'broadcast tick.end failed',
+                      );
                     }
-                  : {}),
-              });
-            } catch (err) {
-              ctx.logger.warn(
-                { err, taskId, tickIndex: info.tickIndex },
-                'broadcast tick.end failed',
-              );
-            }
-          },
-          onScreencast(info) {
-            try {
-              broadcastToUser(userId, {
-                type: 'server.vision.screencast',
-                taskId,
-                tickIndex: info.tickIndex,
-                imageBase64: info.imageBase64,
-                url: info.url,
-                viewport: { width: info.viewportWidth, height: info.viewportHeight },
-                timestamp: new Date().toISOString(),
-              });
-            } catch (err) {
-              ctx.logger.warn(
-                { err, taskId, tickIndex: info.tickIndex },
-                'broadcast screencast failed',
-              );
-            }
-          },
-          onCaptchaDetected(info) {
-            ctx.logger.info(
-              { taskId, antiBotType: info.antiBotType, waitTimeoutMs: info.waitTimeoutMs },
-              'vision loop paused on captcha signal',
-            );
-            try {
-              broadcastToUser(userId, {
-                type: 'server.vision.captcha_detected',
-                taskId,
-                antiBotType: info.antiBotType,
-                message: info.message,
-                waitTimeoutMs: info.waitTimeoutMs,
-              });
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'broadcast captcha_detected failed');
-            }
-          },
-          onCaptchaResolved(info) {
-            ctx.logger.info({ taskId, reason: info.reason }, 'vision loop captcha wait ended');
-            try {
-              broadcastToUser(userId, {
-                type: 'server.vision.captcha_resolved',
-                taskId,
-                reason: info.reason,
-              });
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'broadcast captcha_resolved failed');
-            }
-          },
-          onDegrade(info) {
-            ctx.logger.info(
-              { taskId, level: info.level, strategy: info.strategy, ok: info.ok },
-              'degradation tier attempted',
-            );
-            try {
-              broadcastToUser(userId, {
-                type: 'server.vision.degrade',
-                taskId,
-                level: info.level,
-                strategy: info.strategy,
-                ok: info.ok,
-                message: info.message,
-                ...(info.handoffToExtension ? { handoffToExtension: true } : {}),
-                ...(info.nextUrl ? { nextUrl: info.nextUrl } : {}),
-              });
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'broadcast degrade failed');
-            }
-          },
-          onExecutorFallback(info) {
-            ctx.logger.info(
-              { taskId, reason: info.reason, available: info.available },
-              'vision loop executor fallback triggered',
-            );
-            try {
-              broadcastToUser(userId, {
-                type: 'server.vision.executor_fallback',
-                taskId,
-                reason: info.reason,
-                available: info.available,
-              });
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'broadcast executor_fallback failed');
-            }
-          },
-        })
-          .then(async (outcome) => {
-            ctx.logger.info(
-              {
-                taskId,
-                status: outcome.status,
-                tickCount: outcome.history.length,
-              },
-              'vision loop terminated',
-            );
-            let visionPersisted = false;
-            try {
-              if (outcome.status === 'completed') {
-                const persisted = await repo.persistVisionOutcome(taskId, {
-                  status: 'completed',
-                  summary: outcome.summary,
-                  tickCount: outcome.history.length,
-                });
-                visionPersisted = persisted.persisted;
-              } else if (outcome.status === 'failed') {
-                const persisted = await repo.persistVisionOutcome(taskId, {
-                  status: 'failed',
-                  reason: outcome.reason,
-                  tickCount: outcome.history.length,
-                });
-                visionPersisted = persisted.persisted;
-              } else if (outcome.status === 'paused') {
-                const persisted = await repo.persistVisionOutcome(taskId, {
-                  status: 'paused',
-                  reason: outcome.reason,
-                  tickCount: outcome.history.length,
-                });
-                visionPersisted = persisted.persisted;
-              } else {
-                const persisted = await repo.persistVisionOutcome(taskId, {
-                  status: 'cancelled',
-                  tickCount: outcome.history.length,
-                });
-                visionPersisted = persisted.persisted;
-              }
-            } catch (err) {
-              ctx.logger.error({ err, taskId }, 'persistVisionOutcome failed');
-            }
-            // Push the settled state to any connected client so the
-            // UI can update without polling. Paused is recoverable, so
-            // it uses task.control(pause) rather than task.terminal.
-            try {
-              if (visionPersisted) {
-                if (outcome.status === 'paused') {
-                  broadcastToUser(ctx.userId, {
-                    type: 'server.task.control',
-                    taskId,
-                    command: 'pause',
-                    reason: 'max_steps_reached',
-                    detail: { message: outcome.reason },
+                  },
+                  onScreencast(info) {
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.vision.screencast',
+                        taskId,
+                        tickIndex: info.tickIndex,
+                        imageBase64: info.imageBase64,
+                        url: info.url,
+                        viewport: { width: info.viewportWidth, height: info.viewportHeight },
+                        timestamp: new Date().toISOString(),
+                      });
+                    } catch (err) {
+                      ctx.logger.warn(
+                        { err, taskId, tickIndex: info.tickIndex },
+                        'broadcast screencast failed',
+                      );
+                    }
+                  },
+                  onCaptchaDetected(info) {
+                    ctx.logger.info(
+                      { taskId, antiBotType: info.antiBotType, waitTimeoutMs: info.waitTimeoutMs },
+                      'vision loop paused on captcha signal',
+                    );
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.vision.captcha_detected',
+                        taskId,
+                        antiBotType: info.antiBotType,
+                        message: info.message,
+                        waitTimeoutMs: info.waitTimeoutMs,
+                      });
+                    } catch (err) {
+                      ctx.logger.warn({ err, taskId }, 'broadcast captcha_detected failed');
+                    }
+                  },
+                  onCaptchaResolved(info) {
+                    ctx.logger.info(
+                      { taskId, reason: info.reason },
+                      'vision loop captcha wait ended',
+                    );
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.vision.captcha_resolved',
+                        taskId,
+                        reason: info.reason,
+                      });
+                    } catch (err) {
+                      ctx.logger.warn({ err, taskId }, 'broadcast captcha_resolved failed');
+                    }
+                  },
+                  onDegrade(info) {
+                    ctx.logger.info(
+                      { taskId, level: info.level, strategy: info.strategy, ok: info.ok },
+                      'degradation tier attempted',
+                    );
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.vision.degrade',
+                        taskId,
+                        level: info.level,
+                        strategy: info.strategy,
+                        ok: info.ok,
+                        message: info.message,
+                        ...(info.handoffToExtension ? { handoffToExtension: true } : {}),
+                        ...(info.nextUrl ? { nextUrl: info.nextUrl } : {}),
+                      });
+                    } catch (err) {
+                      ctx.logger.warn({ err, taskId }, 'broadcast degrade failed');
+                    }
+                  },
+                  onExecutorFallback(info) {
+                    ctx.logger.info(
+                      { taskId, reason: info.reason, available: info.available },
+                      'vision loop executor fallback triggered',
+                    );
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.vision.executor_fallback',
+                        taskId,
+                        reason: info.reason,
+                        available: info.available,
+                      });
+                    } catch (err) {
+                      ctx.logger.warn({ err, taskId }, 'broadcast executor_fallback failed');
+                    }
+                  },
+                })
+                  .then(async (outcome) => {
+                    ctx.logger.info(
+                      {
+                        taskId,
+                        status: outcome.status,
+                        tickCount: outcome.history.length,
+                      },
+                      'vision loop terminated',
+                    );
+                    let visionPersisted = false;
+                    try {
+                      if (outcome.status === 'completed') {
+                        const persisted = await repo.persistVisionOutcome(taskId, {
+                          status: 'completed',
+                          summary: outcome.summary,
+                          tickCount: outcome.history.length,
+                        });
+                        visionPersisted = persisted.persisted;
+                        // Batch 09 — same cross-task memory as the supercar branch
+                        // (MEMORY_EXTRACTION_ENABLED, default off; never blocks).
+                        if (persisted.persisted && outcome.summary) {
+                          void extractTaskMemoryAfterSuccess({
+                            db: ctx.db,
+                            logger: ctx.logger,
+                            adapter: resolveUserGenerateAdapter({
+                              wiring: modelRuntimeWiring,
+                              actorExternalId: ctx.userId,
+                              modelDataRegion: userRow.modelDataRegion,
+                            }),
+                            userIdInternal: userRow.id,
+                            intent: input.intent,
+                            summary: outcome.summary,
+                            taskExternalId: taskId,
+                          }).catch(() => {});
+                        }
+                      } else if (outcome.status === 'failed') {
+                        const persisted = await repo.persistVisionOutcome(taskId, {
+                          status: 'failed',
+                          reason: outcome.reason,
+                          tickCount: outcome.history.length,
+                        });
+                        visionPersisted = persisted.persisted;
+                      } else if (outcome.status === 'paused') {
+                        const persisted = await repo.persistVisionOutcome(taskId, {
+                          status: 'paused',
+                          reason: outcome.reason,
+                          tickCount: outcome.history.length,
+                        });
+                        visionPersisted = persisted.persisted;
+                      } else {
+                        const persisted = await repo.persistVisionOutcome(taskId, {
+                          status: 'cancelled',
+                          tickCount: outcome.history.length,
+                        });
+                        visionPersisted = persisted.persisted;
+                      }
+                    } catch (err) {
+                      ctx.logger.error({ err, taskId }, 'persistVisionOutcome failed');
+                    }
+                    // Push the settled state to any connected client so the
+                    // UI can update without polling. Paused is recoverable, so
+                    // it uses task.control(pause) rather than task.terminal.
+                    try {
+                      if (visionPersisted) {
+                        if (outcome.status === 'paused') {
+                          broadcastToUser(ctx.userId, {
+                            type: 'server.task.control',
+                            taskId,
+                            command: 'pause',
+                            reason: 'max_steps_reached',
+                            detail: { message: outcome.reason },
+                          });
+                        } else {
+                          broadcastToUser(ctx.userId, {
+                            type: 'server.task.terminal',
+                            taskId,
+                            status: outcome.status,
+                            ...(outcome.status === 'completed' ? { summary: outcome.summary } : {}),
+                            ...(outcome.status === 'failed' ? { reason: outcome.reason } : {}),
+                          });
+                        }
+                      }
+                    } catch (err) {
+                      ctx.logger.warn({ err, taskId }, 'broadcast task settle failed');
+                    }
+                  })
+                  .catch(async (err) => {
+                    // Phase 22a — same fix as the supercar branch: persist a
+                    // failed terminal state when the runner throws so the task
+                    // doesn't sit at 'executing' forever. Broadcast only after
+                    // the guarded recovery persist actually changes the row.
+                    const reason = err instanceof Error ? err.message : String(err);
+                    ctx.logger.error({ err, taskId }, 'vision loop threw — persisting failed');
+                    await persistAndBroadcastVisionLoopThrow({
+                      repo,
+                      taskId,
+                      userId: ctx.userId,
+                      reason,
+                      logger: ctx.logger,
+                      broadcastToUser,
+                    });
                   });
-                } else {
-                  broadcastToUser(ctx.userId, {
-                    type: 'server.task.terminal',
-                    taskId,
-                    status: outcome.status,
-                    ...(outcome.status === 'completed' ? { summary: outcome.summary } : {}),
-                    ...(outcome.status === 'failed' ? { reason: outcome.reason } : {}),
-                  });
-                }
-              }
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'broadcast task settle failed');
+
+              // Phase 24 — fire directly (no per-user FIFO queue). Per-task
+              // isolation removes the need for serialisation; per-user
+              // concurrency is gated upstream at admit time.
+              void runTaskBackground(ctx, async () => runTaskFn());
+              return {
+                taskId,
+                status: 'executing' as const,
+                steps: [],
+              };
             }
-          })
-          .catch(async (err) => {
-            // Phase 22a — same fix as the supercar branch: persist a
-            // failed terminal state when the runner throws so the task
-            // doesn't sit at 'executing' forever. Broadcast only after
-            // the guarded recovery persist actually changes the row.
-            const reason = err instanceof Error ? err.message : String(err);
-            ctx.logger.error({ err, taskId }, 'vision loop threw — persisting failed');
-            await persistAndBroadcastVisionLoopThrow({
-              repo,
+
+            const catalogue = await loadSkillCatalogue(ctx.db, input.occupation ?? null);
+
+            let plan: Awaited<ReturnType<typeof ctx.planner.plan>>;
+            try {
+              plan = await ctx.planner.plan({
+                intent: buildPlannerIntent(input.intent, taskSkillId),
+                userId: ctx.userId,
+                occupation: input.occupation ?? null,
+                skills: catalogue,
+              });
+            } catch (err) {
+              // Upstream planner failures (Anthropic 4xx/5xx, network) are NOT our
+              // internal bug — surface them as 502 BAD_GATEWAY with the original
+              // message so the popup can show "Anthropic: 403 forbidden" instead
+              // of an opaque 500. Full stack is logged for the operator.
+              ctx.logger.error(
+                { err, userId: ctx.userId, intent: input.intent.slice(0, 200) },
+                'planner upstream error',
+              );
+              const message = err instanceof Error ? err.message : String(err);
+              throw new TRPCError({
+                code: 'BAD_GATEWAY',
+                message: `planner upstream error: ${message}`,
+                cause: err,
+              });
+            }
+            if (plan.length === 0) {
+              throw new TRPCError({
+                code: 'INTERNAL_SERVER_ERROR',
+                message: 'planner returned empty plan',
+              });
+            }
+
+            // Origin allowlist: identify which Skills in the catalogue the
+            // generated plan actually reaches (i.e. any Skill whose
+            // allowedOrigins covers ≥1 goto URL in the plan). Union the
+            // allowedOrigins of just those. When the plan uses NO Skill (free-
+            // form intent the commander answered without adopting a Skill — e.g.
+            // "在 Bing 搜一下 XXX"), `usedSkills` is empty, `allowedOrigins`
+            // comes back `[]`, and the driver treats that as unrestricted.
+            //
+            // Earlier bug: we used to union allowedOrigins across the ENTIRE
+            // active catalogue. That meant a free-form plan emitted bing.com
+            // but the union was { douyin.com, xueqiu.com, ... } and the driver
+            // refused bing.com as ORIGIN_BLOCKED. The catalogue is a menu, not
+            // a restraining order — only Skills the plan actually uses should
+            // constrain what the driver is allowed to visit.
+            const usedSkills = pickSkillsUsedByPlan(plan, catalogue);
+            const allowedOrigins = unionAllowedOrigins(usedSkills);
+
+            const taskId = newExternalId('task');
+            const { state, effects } = taskController.start({
+              state: null,
               taskId,
-              userId: ctx.userId,
-              reason,
-              logger: ctx.logger,
-              broadcastToUser,
+              plan,
+              ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
             });
-          });
 
-      // Phase 24 — fire directly (no per-user FIFO queue). Per-task
-      // isolation removes the need for serialisation; per-user
-      // concurrency is gated upstream at admit time.
-      void runTaskBackground(ctx, async () => runTaskFn());
-      return {
-        taskId,
-        status: 'executing' as const,
-        steps: [],
-      };
-    }
+            await repo.insertTask(state, {
+              userId: userRow.id,
+              intent: input.intent,
+              roleId: dispatchRoleId,
+              opusUsed: opusActuallyConsumed,
+            });
 
-    const catalogue = await loadSkillCatalogue(ctx.db, input.occupation ?? null);
+            // Drive the first dispatch out to any connected WS clients.
+            // Without this the task sits in `executing` in the DB but the
+            // extension never receives `server.task.dispatch` and the Agent
+            // Loop never starts. Symmetric with pause/resume/confirm below.
+            updateTaskStateForUser(ctx.userId, state);
+            for (const eff of effects) {
+              if (eff.kind === 'send') broadcastToUser(ctx.userId, eff.message);
+            }
 
-    let plan: Awaited<ReturnType<typeof ctx.planner.plan>>;
-    try {
-      plan = await ctx.planner.plan({
-        intent: buildPlannerIntent(input.intent, taskSkillId),
-        userId: ctx.userId,
-        occupation: input.occupation ?? null,
-        skills: catalogue,
+            return {
+              taskId: state.taskId,
+              status: state.status,
+              steps: state.plan.map((s) => ({
+                id: s.id,
+                kind: s.kind,
+                risk: s.risk,
+                requiresConfirm: s.requiresConfirm ?? false,
+              })),
+            };
+          }),
       });
-    } catch (err) {
-      // Upstream planner failures (Anthropic 4xx/5xx, network) are NOT our
-      // internal bug — surface them as 502 BAD_GATEWAY with the original
-      // message so the popup can show "Anthropic: 403 forbidden" instead
-      // of an opaque 500. Full stack is logged for the operator.
-      ctx.logger.error(
-        { err, userId: ctx.userId, intent: input.intent.slice(0, 200) },
-        'planner upstream error',
-      );
-      const message = err instanceof Error ? err.message : String(err);
-      throw new TRPCError({
-        code: 'BAD_GATEWAY',
-        message: `planner upstream error: ${message}`,
-        cause: err,
-      });
-    }
-    if (plan.length === 0) {
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'planner returned empty plan',
-      });
-    }
-
-    // Origin allowlist: identify which Skills in the catalogue the
-    // generated plan actually reaches (i.e. any Skill whose
-    // allowedOrigins covers ≥1 goto URL in the plan). Union the
-    // allowedOrigins of just those. When the plan uses NO Skill (free-
-    // form intent the commander answered without adopting a Skill — e.g.
-    // "在 Bing 搜一下 XXX"), `usedSkills` is empty, `allowedOrigins`
-    // comes back `[]`, and the driver treats that as unrestricted.
-    //
-    // Earlier bug: we used to union allowedOrigins across the ENTIRE
-    // active catalogue. That meant a free-form plan emitted bing.com
-    // but the union was { douyin.com, xueqiu.com, ... } and the driver
-    // refused bing.com as ORIGIN_BLOCKED. The catalogue is a menu, not
-    // a restraining order — only Skills the plan actually uses should
-    // constrain what the driver is allowed to visit.
-    const usedSkills = pickSkillsUsedByPlan(plan, catalogue);
-    const allowedOrigins = unionAllowedOrigins(usedSkills);
-
-    const taskId = newExternalId('task');
-    const { state, effects } = taskController.start({
-      state: null,
-      taskId,
-      plan,
-      ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
-    });
-
-    await repo.insertTask(state, {
-      userId: userRow.id,
-      intent: input.intent,
-      roleId: dispatchRoleId,
-      opusUsed: opusActuallyConsumed,
-    });
-
-    // Drive the first dispatch out to any connected WS clients.
-    // Without this the task sits in `executing` in the DB but the
-    // extension never receives `server.task.dispatch` and the Agent
-    // Loop never starts. Symmetric with pause/resume/confirm below.
-    updateTaskStateForUser(ctx.userId, state);
-    for (const eff of effects) {
-      if (eff.kind === 'send') broadcastToUser(ctx.userId, eff.message);
-    }
-
-    return {
-      taskId: state.taskId,
-      status: state.status,
-      steps: state.plan.map((s) => ({
-        id: s.id,
-        kind: s.kind,
-        risk: s.risk,
-        requiresConfirm: s.requiresConfirm ?? false,
-      })),
-    };
-      },
-    });
-  }),
+    }),
 
   /**
    * Diagnostic end-to-end: run a hardcoded Baidu search plan against
@@ -7789,6 +8841,8 @@ export const tasksRouter = router({
         .select({
           id: users.id,
           plan: users.plan,
+          // Qwen model region for the script / frame-QA runtimes.
+          modelDataRegion: users.modelDataRegion,
           // Phase 2 第三期 — IP 人物 lane 需要克隆声音 + 出镜底版 + 本人授权(合规硬闸)。
           qwenVoiceId: users.qwenVoiceId,
           baseVideoFileId: users.baseVideoFileId,
@@ -7858,73 +8912,8 @@ export const tasksRouter = router({
         return { taskId: input.taskId, status: 'awaiting_user' as const };
       }
 
-      // The quote may predate the Qwen-only cutover. A positive answer must
-      // not debit quota or create a generation child while the media lane is
-      // migration-unavailable. Settle the quote itself as an explicit failed
-      // terminal so repeated confirmation cannot spin or charge twice.
-      if (appEnv.MODEL_RUNTIME_POLICY === 'qwen_only') {
-        const unavailable = modelRuntimeWiring.resolveUnmigrated('video_generation');
-        const unavailableReason = modelTaskFailureReason(unavailable.reasonCode);
-        const previousResult =
-          row.result && typeof row.result === 'object'
-            ? (row.result as Record<string, unknown>)
-            : {};
-        const previousMetadata =
-          previousResult.metadata && typeof previousResult.metadata === 'object'
-            ? (previousResult.metadata as Record<string, unknown>)
-            : {};
-        const failed = await ctx.db.transaction(async (tx) => {
-        const updateResult = await tx
-          .update(tasksTable)
-          .set({
-            status: 'failed',
-            awaitingKind: null,
-            awaitingQuestion: null,
-            errorCode: unavailable.reasonCode,
-            errorMessage: unavailableReason,
-            completedAt: new Date(),
-            result: {
-              ...previousResult,
-              reason: unavailableReason,
-              metadata: {
-                ...previousMetadata,
-                reasonCode: unavailable.reasonCode,
-              },
-            },
-          })
-          .where(
-            and(
-              eq(tasksTable.id, row.id),
-              eq(tasksTable.status, 'awaiting_user'),
-              eq(tasksTable.awaitingKind, 'video_quote'),
-            ),
-          );
-        if (readAffectedRows(updateResult) !== 1) return false;
-        await tx.insert(taskEvents).values({
-          externalId: newExternalId('taskEvent'),
-          taskId: row.id,
-          type: 'task.failed',
-          actor: 'system',
-          payload: {
-            source: 'video_quote',
-            from: 'awaiting_user',
-            to: 'failed',
-            errorCode: unavailable.reasonCode,
-          },
-        });
-        return true;
-        });
-        if (!failed) {
-          throw new TRPCError({ code: 'NOT_FOUND', message: '找不到待确认的视频报价' });
-        }
-        broadcastToUser(ctx.userId, {
-          type: 'server.task.terminal',
-          taskId: input.taskId,
-          status: 'failed',
-          reason: unavailableReason,
-        });
-        return { taskId: input.taskId, status: 'failed' as const };
-      }
+      // Capability recovery: confirmed quotes generate on the Qwen-only media
+      // runtime (agent/video/qwen-only-video-runtime.ts); no migration gate.
 
       // Validate the quote payload before the atomic consume. A malformed
       // quote should not be marked completed before we know generation can
@@ -7961,7 +8950,7 @@ export const tasksRouter = router({
       const script = meta.videoScript;
       const tier: VideoSource = meta.videoTier ?? 'veo_fast';
       const vOpts = meta.videoOptions ?? {};
-      assertVideoImageChoiceAllowed({ choice, isClone, isIp });
+      assertVideoImageChoiceAllowed({ choice, isClone, isIp, isPet });
       const providerReadiness = {
         hasDashscope: Boolean(appEnv.DASHSCOPE_API_KEY),
         hasFal: Boolean(appEnv.FAL_KEY),
@@ -7975,6 +8964,7 @@ export const tasksRouter = router({
                 kind: 'video',
                 tab: isClone ? 'pet' : isIp ? 'ip_person' : (vOpts.tab ?? 'normal'),
                 model: tier,
+                petI2v: isPet && !isClone,
               },
               providerReadiness,
             );
@@ -7986,6 +8976,8 @@ export const tasksRouter = router({
       }
       if (
         choice === 'video' &&
+        !isPet &&
+        !isIp &&
         videoParameterIssue({
           model: tier,
           resolution: vOpts.resolution ?? '1080p',
@@ -8038,8 +9030,12 @@ export const tasksRouter = router({
           message: ipPreflight.issue,
         });
       }
+      const confirmMediaServices = resolveMediaModelServices({
+        generate: resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+        verifier: resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+      });
       const preflight = await claimVideoConfirmAfterVerifierPreflight(
-        { choice, hasVerifier: Boolean(legacyMediaModelClient) },
+        { choice, hasVerifier: Boolean(confirmMediaServices.analyzeVideoQuality) },
         async () => true,
       );
       if (preflight.issue) {
@@ -8050,12 +9046,16 @@ export const tasksRouter = router({
       }
 
       const visualMode = choice === 'image' ? ('image' as const) : ('video' as const);
-      const executionMetadata = buildVideoExecutionMetadata({
-        isPet,
-        isIp,
-        tab: vOpts.tab,
-        visualMode,
-      });
+      const executionMetadata = {
+        ...buildVideoExecutionMetadata({
+          isPet,
+          isIp,
+          tab: vOpts.tab,
+          visualMode,
+        }),
+        videoOptions: vOpts,
+        ...(isPet && !isClone ? { petModel: meta.petModel } : {}),
+      };
       const newTaskId = newExternalId('task');
       const atomicCreate = await repo.consumeVideoConfirmAndInsertGeneration({
         quoteTaskExternalId: input.taskId,
@@ -8065,9 +9065,17 @@ export const tasksRouter = router({
         isBypass,
         intent: row.intent,
         executionMetadata,
+        rejectRetryLimit: appEnv.VIDEO_REJECT_RETRY_LIMIT,
       });
       if (atomicCreate.kind === 'quota_denied') {
         throw quotaErrorFor(atomicCreate.reason);
+      }
+
+      if (atomicCreate.kind === 'reject_retry_limit') {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '同一制作要求已连续多次未通过质检。请修改素材或描述；本次未扣费。',
+        });
       }
 
       // video|image — 报价消费、扣额度和生成任务写入同一事务。
@@ -8122,7 +9130,6 @@ export const tasksRouter = router({
       // generate_video | generate_image — 外部供应商调用只在事务提交后启动。
       broadcastSubStatus(ctx.userId, newTaskId, 'generating');
 
-      const anthropicClient = legacyMediaModelClient;
       const userExternalId = ctx.userId;
       const userInternalId = userRow.id;
       const ipVoiceId = userRow.qwenVoiceId; // Phase 2 第三期 IP lane
@@ -8131,344 +9138,166 @@ export const tasksRouter = router({
       const logger = ctx.logger;
       const db = ctx.db;
       const intentText = row.intent;
-      void runTaskBackground(ctx, async () => (async () => {
-        const taskInternalId = await taskInternalIdFor(db, newTaskId);
-        if (taskInternalId == null) return;
-        const taskHeartbeat = startTaskHeartbeat(db, newTaskId, {
-          onError: (error) => {
-            logger.warn(
-              { err: error.message, taskId: newTaskId },
-              'video_creation: task heartbeat failed',
-            );
-          },
-        });
-        try {
-        const { runSimpleVideoCreation } = await import(
-          '../../agent/video/qwen-only-video-runtime.js'
-        );
-        const { runFfmpeg } = await import('../../agent/video/ffmpeg-exec.js');
-        const { createAnthropicVideoQualityAnalyzer, verifyFinalVideoQuality } = await import(
-          '../../agent/video/video-quality-verifier.js'
-        );
-        const { verifyAudioVisualSync } = await import(
-          '../../agent/video/qwen-only-video-runtime.js'
-        );
-        const { verifyCloneVideoCompatibility } = await import(
-          '../../agent/video/video-clone-compatibility.js'
-        );
-        const os = await import('node:os');
-        const path = await import('node:path');
-        const { promises: fsp } = await import('node:fs');
-        const fileService = new FileService(db, logger);
-        const workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'hd-video-'));
-        let finalAtt: ImageAttachment | null = null;
-        // 首帧 poster 的下载 URL（poster 由 lane 在成片后抽帧存盘，再盖到 finalAtt 上）。
-        let posterUrl: string | null = null;
-        const llm = async ({ system, user }: { system: string; user: string }) => {
-          if (!anthropicClient) return '';
-          const resp = await anthropicClient.messages.create({
-            model: VIDEO_SCRIPT_MODEL,
-            max_tokens: 2000,
-            system,
-            messages: [{ role: 'user', content: user }],
-          });
-          const b = resp.content[0];
-          return b && b.type === 'text' ? b.text : '';
-        };
-        const analyzeVideoQuality = anthropicClient
-          ? createAnthropicVideoQualityAnalyzer(anthropicClient)
-          : async () => '';
-        const verifyFinalVideo = (qualityInput: Parameters<typeof verifyFinalVideoQuality>[0]) =>
-          verifyFinalVideoQuality(qualityInput, {
-            runFfmpeg,
-            readFile: (filePath) => fsp.readFile(filePath),
-            analyzeFrames: analyzeVideoQuality,
-            onAnalysisIssue: (issue) => {
+      void runMediaTaskBackground(ctx, newTaskId, async () =>
+        (async () => {
+          const taskInternalId = await taskInternalIdFor(db, newTaskId);
+          if (taskInternalId == null) return;
+          const taskHeartbeat = startTaskHeartbeat(db, newTaskId, {
+            onError: (error) => {
               logger.warn(
-                { taskId: newTaskId, ...issue },
-                'video: automated quality analysis did not return a usable verdict',
+                { err: error.message, taskId: newTaskId },
+                'video_creation: task heartbeat failed',
               );
             },
           });
-        const verifyCloneInputs = (
-          compatibilityInput: Parameters<typeof verifyCloneVideoCompatibility>[0],
-        ) =>
-          verifyCloneVideoCompatibility(compatibilityInput, {
-            runFfmpeg,
-            readFile: (filePath) => fsp.readFile(filePath),
-            analyzeFrames: analyzeVideoQuality,
-          });
-        const reviewAudioVisualSync = (input: {
-          videoPath: string;
-          durationMs: number;
-        }) =>
-          verifyAudioVisualSync(
-            {
-              ...input,
-              workdir,
-              apiKey: appEnv.GEMINI_API_KEY,
-              baseUrl: appEnv.GEMINI_BASE_URL,
-              model: appEnv.GEMINI_VIDEO_REVIEW_MODEL,
-            },
-            {
-              runFfmpeg,
-              readFile: (filePath) => fsp.readFile(filePath),
-            },
-          );
-        // 仅最终 video.mp4 落用户文件;中间段产物只用 workdir 副本(pipeline 用本地路径)。
-        const storeOutput = async (i: { filename: string; mimetype: string; buffer: Buffer }) => {
-          if (i.filename === 'poster.jpg') {
-            const ps = await fileService.storeOutput({
-              userIdInternal: userInternalId,
-              userExternalId,
-              taskIdInternal: taskInternalId,
-              filename: 'holaday-video-poster.jpg',
-              mimetype: 'image/jpeg',
-              buffer: i.buffer,
-            });
-            const url = `/api/files/${ps.externalId}/download`;
-            posterUrl = url;
-            const fa = finalAtt;
-            if (fa) fa.posterUrl = url;
-            return { fileId: ps.externalId, storagePath: ps.externalId };
-          }
-          if (i.filename !== 'video.mp4') {
-            return { fileId: `tmp:${i.filename}`, storagePath: `tmp:${i.filename}` };
-          }
-          const s = await fileService.storeOutput({
-            userIdInternal: userInternalId,
-            userExternalId,
-            taskIdInternal: taskInternalId,
-            filename: 'holaday-video.mp4',
-            mimetype: 'video/mp4',
-            buffer: i.buffer,
-          });
-          finalAtt = {
-            fileId: s.externalId,
-            downloadUrl: `/api/files/${s.externalId}/download`,
-            filename: s.filename,
-            mimetype: s.mimetype,
-            sizeBytes: Number(s.sizeBytes),
-            expiresAt: s.expiresAt
-              ? s.expiresAt.toISOString()
-              : new Date(Date.now() + 864e5).toISOString(),
-            kind: 'output',
-            ...(posterUrl ? { posterUrl } : {}),
-          };
-          return { fileId: s.externalId, storagePath: s.externalId };
-        };
-        const storeOutputFile = async (i: {
-          filename: string;
-          mimetype: string;
-          sourcePath: string;
-        }) => {
-          if (i.filename !== 'video.mp4') {
-            throw new Error(`unexpected streamed video output: ${i.filename}`);
-          }
-          const s = await fileService.storeOutputFile({
-            userIdInternal: userInternalId,
-            userExternalId,
-            taskIdInternal: taskInternalId,
-            filename: 'holaday-video.mp4',
-            mimetype: i.mimetype,
-            sourcePath: i.sourcePath,
-          });
-          finalAtt = {
-            fileId: s.externalId,
-            downloadUrl: `/api/files/${s.externalId}/download`,
-            filename: s.filename,
-            mimetype: s.mimetype,
-            sizeBytes: Number(s.sizeBytes),
-            expiresAt: s.expiresAt
-              ? s.expiresAt.toISOString()
-              : new Date(Date.now() + 864e5).toISOString(),
-            kind: 'output',
-            ...(posterUrl ? { posterUrl } : {}),
-          };
-          return { fileId: s.externalId, storagePath: s.externalId };
-        };
-        try {
-          let summary: string;
-          let audioEngine: 'qwen' | 'gemini' | 'mixed' | undefined;
-            let audioCoverage: VideoAudioVerificationCoverage = videoAudioVerificationCoverage();
-          let audiovisualSyncReview: VideoAudioVisualSyncAudit | undefined;
-          if (isClone) {
-            const { runCloneVideoCreation } = await import(
+          try {
+            const { runSimpleVideoCreation } = await import(
               '../../agent/video/qwen-only-video-runtime.js'
             );
-            const petImageFileId = meta.petImageFileId;
-            const referenceVideoFileId = meta.referenceVideoFileId;
-            if (!petImageFileId || !referenceVideoFileId) {
-              throw new Error('复刻视频缺少主角照片或参考视频');
-            }
-            const [imageUrl, referenceVideoUrl] = await Promise.all([
-              fileService.signedReadUrl(petImageFileId, userInternalId),
-              fileService.signedReadUrl(referenceVideoFileId, userInternalId),
-            ]);
-            if (!imageUrl || !referenceVideoUrl) {
-              throw new Error('主角照片或参考视频不可用（已过期或无法生成访问链接）');
-            }
-            await fileService.linkToTask(
-              [petImageFileId, referenceVideoFileId],
-              taskInternalId,
-              userInternalId,
+            const { runFfmpeg } = await import('../../agent/video/ffmpeg-exec.js');
+            const { verifyFinalVideoQuality } = await import(
+              '../../agent/video/video-quality-verifier.js'
             );
-            const result = await runCloneVideoCreation(
-              {
-                imageUrl,
-                referenceVideoUrl,
-                description: meta.i2vPrompt ?? intentText,
-              },
-              buildVideoCfg(),
-              { mode: meta.cloneMode ?? 'wan-std' },
-              {
-                storeOutput,
-                storeOutputFile,
-                storeTemporaryVideoFile: async (i) => {
-                  const stored = await fileService.storeTemporaryOutputFile({
-                    userIdInternal: userInternalId,
-                    userExternalId,
-                    taskIdInternal: taskInternalId,
-                    filename: i.filename,
-                    mimetype: i.mimetype,
-                    sourcePath: i.sourcePath,
-                  });
-                  return { fileId: stored.externalId };
+            const { verifyAudioVisualSync } = await import(
+              '../../agent/video/qwen-only-video-runtime.js'
+            );
+            const { verifyCloneVideoCompatibility } = await import(
+              '../../agent/video/video-clone-compatibility.js'
+            );
+            const os = await import('node:os');
+            const path = await import('node:path');
+            const { promises: fsp } = await import('node:fs');
+            const fileService = new FileService(db, logger);
+            const workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'hd-video-'));
+            let finalAtt: ImageAttachment | null = null;
+            // 首帧 poster 的下载 URL（poster 由 lane 在成片后抽帧存盘，再盖到 finalAtt 上）。
+            let posterUrl: string | null = null;
+            // Script: Qwen generate lane. Frame QA: Qwen vision (QWEN_VISION_MODEL).
+            const llm = confirmMediaServices.scriptLlm ?? (async () => '');
+            const analyzeVideoQuality =
+              confirmMediaServices.analyzeVideoQuality ?? (async () => '');
+            const verifyFinalVideo = async (
+              qualityInput: Parameters<typeof verifyFinalVideoQuality>[0],
+            ) => {
+              const verdict = await verifyFinalVideoQuality(qualityInput, {
+                runFfmpeg,
+                readFile: (filePath) => fsp.readFile(filePath),
+                analyzeFrames: analyzeVideoQuality,
+                onAnalysisIssue: (issue) => {
+                  logger.warn(
+                    { taskId: newTaskId, ...issue },
+                    'video: automated quality analysis did not return a usable verdict',
+                  );
                 },
-                storeTemporaryAudio: async (i) => {
-                  const stored = await fileService.storeTemporaryOutput({
-                    userIdInternal: userInternalId,
-                    userExternalId,
-                    taskIdInternal: taskInternalId,
-                    filename: i.filename,
-                    mimetype: i.mimetype,
-                    buffer: i.buffer,
+              });
+              if (verdict.status === 'fail') {
+                const { retainRejectedVideoFrames } = await import(
+                  '../../agent/video/video-quality-audit.js'
+                );
+                try {
+                  const auditId = await retainRejectedVideoFrames({
+                    taskId: newTaskId,
+                    workdir: qualityInput.workdir,
+                    verdict,
+                    retentionDays: appEnv.VIDEO_REJECT_FRAME_RETENTION_DAYS,
                   });
-                  return { fileId: stored.externalId };
+                  logger.info(
+                    { taskId: newTaskId, auditId, failedChecks: verdict.failedChecks },
+                    'video: rejected frames retained for internal review',
+                  );
+                } catch (error) {
+                  logger.error(
+                    { taskId: newTaskId, err: error },
+                    'video: rejected frame retention failed',
+                  );
+                }
+              }
+              return verdict;
+            };
+            const verifyCloneInputs = (
+              compatibilityInput: Parameters<typeof verifyCloneVideoCompatibility>[0],
+            ) =>
+              verifyCloneVideoCompatibility(compatibilityInput, {
+                runFfmpeg,
+                readFile: (filePath) => fsp.readFile(filePath),
+                analyzeFrames: analyzeVideoQuality,
+              });
+            const reviewAudioVisualSync = (input: {
+              videoPath: string;
+              durationMs: number;
+            }) =>
+              verifyAudioVisualSync(
+                {
+                  ...input,
+                  workdir,
+                  apiKey: appEnv.GEMINI_API_KEY,
+                  baseUrl: appEnv.GEMINI_BASE_URL,
+                  model: appEnv.GEMINI_VIDEO_REVIEW_MODEL,
                 },
-                presignByFileId: (fileId) =>
-                  fileService.signedReadUrl(fileId, userInternalId, 900),
-                deleteOutput: (fileId) => fileService.deleteForUser(fileId, userInternalId),
-                workdir,
-                logger,
-                verifyCloneInputs,
-                verifyFinalVideo,
-                verifyAudioVisualSync: reviewAudioVisualSync,
-              },
-            );
-            audioCoverage = videoAudioVerificationCoverage({
-              audibleAudioVerified: result.audibleAudioVerified,
-              lipSyncProcessingCompleted: result.lipSyncProcessingCompleted,
-              audiovisualSyncVerified: result.audiovisualSyncVerified,
-            });
-            audiovisualSyncReview = result.audiovisualSyncReview;
-            summary = '复刻视频已生成。';
-          } else if (isPet) {
-            // 宠物 i2v: fileId → presigned GET → i2v 单图 → pad+水印+静默 → store.
-            const { runPetVideoCreation } = await import(
-              '../../agent/video/qwen-only-video-runtime.js'
-            );
-            const petImageFileId = meta.petImageFileId;
-            if (!petImageFileId) {
-              throw new Error('宠物视频缺少宠物照片');
-            }
-            const imageUrl = await fileService.signedReadUrl(petImageFileId, userInternalId);
-            if (!imageUrl) {
-              throw new Error('宠物照片不可用(已过期或无法生成访问链接)');
-            }
-            await runPetVideoCreation(
-              { imageUrl, motionPrompt: meta.i2vPrompt ?? intentText },
-              buildVideoCfg(),
-              {
-                ...(meta.petModel ? { model: meta.petModel } : {}),
-                ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}),
-                ...(vOpts.durationSeconds ? { durationSeconds: vOpts.durationSeconds } : {}),
-              },
-              { storeOutput, storeOutputFile, workdir, logger, verifyFinalVideo },
-            );
-            summary = '宠物视频已生成。';
-          } else if (isIp) {
-            // IP 人物 B 架构: 克隆音(全文案)→ 1 次 fal 换口型(loop_mode 补够)→ 字幕+水印 → store.
-            const { runIpVideoCreation } = await import(
-              '../../agent/video/qwen-only-video-runtime.js'
-            );
-            // 合规硬闸:确认时复核三件齐 + 本人授权(报价后、生成前可能已撤销/清除素材)。
-            if (!ipVoiceId || !ipBaseFileId || !ipAuthorized) {
-              throw new Error('IP 素材或授权缺失(可能已被清除),请重新完成 onboarding');
-            }
-            const baseVideoUrl = ipPreflight.baseVideoUrl;
-            if (!baseVideoUrl) throw new Error('出镜底版不可用(确认前预检未通过)');
-            // IP final outputs stay user-visible. Cloned audio uses a hidden
-            // short-TTL row so an Orchestrator crash cannot leave it behind as
-            // an ordinary deliverable; normal completion still deletes it.
-            const storeOutputIp = async (i: {
+                {
+                  runFfmpeg,
+                  readFile: (filePath) => fsp.readFile(filePath),
+                },
+              );
+            // 仅最终 video.mp4 落用户文件;中间段产物只用 workdir 副本(pipeline 用本地路径)。
+            const storeOutput = async (i: {
               filename: string;
               mimetype: string;
               buffer: Buffer;
             }) => {
+              if (i.filename === 'poster.jpg') {
+                const ps = await fileService.storeOutput({
+                  userIdInternal: userInternalId,
+                  userExternalId,
+                  taskIdInternal: taskInternalId,
+                  filename: 'holaday-video-poster.jpg',
+                  mimetype: 'image/jpeg',
+                  buffer: i.buffer,
+                });
+                const url = `/api/files/${ps.externalId}/download`;
+                posterUrl = url;
+                const fa = finalAtt;
+                if (fa) fa.posterUrl = url;
+                return { fileId: ps.externalId, storagePath: ps.externalId };
+              }
+              if (i.filename !== 'video.mp4') {
+                return { fileId: `tmp:${i.filename}`, storagePath: `tmp:${i.filename}` };
+              }
               const s = await fileService.storeOutput({
                 userIdInternal: userInternalId,
                 userExternalId,
                 taskIdInternal: taskInternalId,
-                filename:
-                  i.filename === 'video.mp4'
-                    ? 'holaday-ip-video.mp4'
-                    : i.filename === 'poster.jpg'
-                      ? 'holaday-ip-video-poster.jpg'
-                      : i.filename,
-                mimetype: i.mimetype,
+                filename: 'holaday-video.mp4',
+                mimetype: 'video/mp4',
                 buffer: i.buffer,
               });
-              if (i.filename === 'video.mp4') {
-                finalAtt = {
-                  fileId: s.externalId,
-                  downloadUrl: `/api/files/${s.externalId}/download`,
-                  filename: s.filename,
-                  mimetype: s.mimetype,
-                  sizeBytes: Number(s.sizeBytes),
-                  expiresAt: s.expiresAt
-                    ? s.expiresAt.toISOString()
-                    : new Date(Date.now() + 864e5).toISOString(),
-                  kind: 'output',
-                  ...(posterUrl ? { posterUrl } : {}),
-                };
-              }
-              if (i.filename === 'poster.jpg') {
-                const url = `/api/files/${s.externalId}/download`;
-                posterUrl = url;
-                const fa = finalAtt;
-                if (fa) fa.posterUrl = url;
-              }
-              return { fileId: s.externalId };
+              finalAtt = {
+                fileId: s.externalId,
+                downloadUrl: `/api/files/${s.externalId}/download`,
+                filename: s.filename,
+                mimetype: s.mimetype,
+                sizeBytes: Number(s.sizeBytes),
+                expiresAt: s.expiresAt
+                  ? s.expiresAt.toISOString()
+                  : new Date(Date.now() + 864e5).toISOString(),
+                kind: 'output',
+                ...(posterUrl ? { posterUrl } : {}),
+              };
+              return { fileId: s.externalId, storagePath: s.externalId };
             };
-            const storeTemporaryAudioIp = async (i: {
-              filename: string;
-              mimetype: string;
-              buffer: Buffer;
-            }) => {
-              const s = await fileService.storeTemporaryOutput({
-                userIdInternal: userInternalId,
-                userExternalId,
-                taskIdInternal: taskInternalId,
-                filename: i.filename,
-                mimetype: i.mimetype,
-                buffer: i.buffer,
-              });
-              return { fileId: s.externalId };
-            };
-            const storeOutputFileIp = async (i: {
+            const storeOutputFile = async (i: {
               filename: string;
               mimetype: string;
               sourcePath: string;
             }) => {
               if (i.filename !== 'video.mp4') {
-                throw new Error(`unexpected streamed IP video output: ${i.filename}`);
+                throw new Error(`unexpected streamed video output: ${i.filename}`);
               }
               const s = await fileService.storeOutputFile({
                 userIdInternal: userInternalId,
                 userExternalId,
                 taskIdInternal: taskInternalId,
-                filename: 'holaday-ip-video.mp4',
+                filename: 'holaday-video.mp4',
                 mimetype: i.mimetype,
                 sourcePath: i.sourcePath,
               });
@@ -8484,129 +9313,347 @@ export const tasksRouter = router({
                 kind: 'output',
                 ...(posterUrl ? { posterUrl } : {}),
               };
-              return { fileId: s.externalId };
+              return { fileId: s.externalId, storagePath: s.externalId };
             };
-            const result = await runIpVideoCreation(
-              { copyText: meta.ipCopyText ?? intentText },
-              buildIpVideoCfg(),
-              { voiceId: ipVoiceId, baseVideoUrl },
-              { ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}) },
-              {
-                storeOutput: storeOutputIp,
-                storeOutputFile: storeOutputFileIp,
-                storeTemporaryAudio: storeTemporaryAudioIp,
-                presignByFileId: (fid: string) =>
-                  fileService.signedReadUrl(fid, userInternalId, 900),
-                deleteOutput: (fid: string) => fileService.deleteForUser(fid, userInternalId),
-                workdir,
-                logger,
-                verifyFinalVideo,
-                verifyAudioVisualSync: reviewAudioVisualSync,
-              },
-            );
-            audioCoverage = videoAudioVerificationCoverage({
-              audibleAudioVerified: true,
-              lipSyncProcessingCompleted: true,
-              audiovisualSyncVerified: result.audiovisualSyncVerified,
-            });
-            audiovisualSyncReview = result.audiovisualSyncReview;
-            summary = `真人换口型视频已生成（约 ${Math.round(result.totalDurationMs / 1000)} 秒）。`;
-          } else {
-            if (!script) {
-              throw new Error('普通视频报价脚本丢失');
+            try {
+              let summary: string;
+              let audioEngine: 'qwen' | 'gemini' | 'mixed' | undefined;
+              let audioCoverage: VideoAudioVerificationCoverage = videoAudioVerificationCoverage();
+              let audiovisualSyncReview: VideoAudioVisualSyncAudit | undefined;
+              if (isClone) {
+                const { runCloneVideoCreation } = await import(
+                  '../../agent/video/qwen-only-video-runtime.js'
+                );
+                const petImageFileId = meta.petImageFileId;
+                const referenceVideoFileId = meta.referenceVideoFileId;
+                if (!petImageFileId || !referenceVideoFileId) {
+                  throw new Error('复刻视频缺少主角照片或参考视频');
+                }
+                const [imageUrl, referenceVideoUrl] = await Promise.all([
+                  fileService.signedReadUrl(petImageFileId, userInternalId),
+                  fileService.signedReadUrl(referenceVideoFileId, userInternalId),
+                ]);
+                if (!imageUrl || !referenceVideoUrl) {
+                  throw new Error('主角照片或参考视频不可用（已过期或无法生成访问链接）');
+                }
+                await fileService.linkToTask(
+                  [petImageFileId, referenceVideoFileId],
+                  taskInternalId,
+                  userInternalId,
+                );
+                const result = await runCloneVideoCreation(
+                  {
+                    imageUrl,
+                    referenceVideoUrl,
+                    description: meta.i2vPrompt ?? intentText,
+                  },
+                  buildVideoCfg(),
+                  { mode: meta.cloneMode ?? 'wan-std' },
+                  {
+                    storeOutput,
+                    storeOutputFile,
+                    storeTemporaryVideoFile: async (i) => {
+                      const stored = await fileService.storeTemporaryOutputFile({
+                        userIdInternal: userInternalId,
+                        userExternalId,
+                        taskIdInternal: taskInternalId,
+                        filename: i.filename,
+                        mimetype: i.mimetype,
+                        sourcePath: i.sourcePath,
+                      });
+                      return { fileId: stored.externalId };
+                    },
+                    storeTemporaryAudio: async (i) => {
+                      const stored = await fileService.storeTemporaryOutput({
+                        userIdInternal: userInternalId,
+                        userExternalId,
+                        taskIdInternal: taskInternalId,
+                        filename: i.filename,
+                        mimetype: i.mimetype,
+                        buffer: i.buffer,
+                      });
+                      return { fileId: stored.externalId };
+                    },
+                    presignByFileId: (fileId) =>
+                      fileService.signedReadUrl(fileId, userInternalId, 900),
+                    deleteOutput: (fileId) => fileService.deleteForUser(fileId, userInternalId),
+                    workdir,
+                    logger,
+                    verifyCloneInputs,
+                    verifyFinalVideo,
+                    verifyAudioVisualSync: reviewAudioVisualSync,
+                  },
+                );
+                audioCoverage = videoAudioVerificationCoverage({
+                  audibleAudioVerified: result.audibleAudioVerified,
+                  lipSyncProcessingCompleted: result.lipSyncProcessingCompleted,
+                  audiovisualSyncVerified: result.audiovisualSyncVerified,
+                });
+                audiovisualSyncReview = result.audiovisualSyncReview;
+                summary = '复刻视频已生成。';
+              } else if (isPet) {
+                // 宠物 i2v: fileId → presigned GET → i2v 单图 → pad+水印+静默 → store.
+                const { runPetVideoCreation } = await import(
+                  '../../agent/video/qwen-only-video-runtime.js'
+                );
+                const petImageFileId = meta.petImageFileId;
+                if (!petImageFileId) {
+                  throw new Error('宠物视频缺少宠物照片');
+                }
+                const imageUrl = await fileService.signedReadUrl(petImageFileId, userInternalId);
+                if (!imageUrl) {
+                  throw new Error('宠物照片不可用(已过期或无法生成访问链接)');
+                }
+                await runPetVideoCreation(
+                  { imageUrl, motionPrompt: meta.i2vPrompt ?? intentText },
+                  buildVideoCfg(),
+                  {
+                    ...(meta.petModel ? { model: meta.petModel } : {}),
+                    ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}),
+                    ...(vOpts.durationSeconds ? { durationSeconds: vOpts.durationSeconds } : {}),
+                  },
+                  { storeOutput, storeOutputFile, workdir, logger, verifyFinalVideo },
+                );
+                summary = '宠物视频已生成。';
+              } else if (isIp) {
+                // IP 人物 B 架构: 克隆音(全文案)→ 1 次 fal 换口型(loop_mode 补够)→ 字幕+水印 → store.
+                const { runIpVideoCreation } = await import(
+                  '../../agent/video/qwen-only-video-runtime.js'
+                );
+                // 合规硬闸:确认时复核三件齐 + 本人授权(报价后、生成前可能已撤销/清除素材)。
+                if (!ipVoiceId || !ipBaseFileId || !ipAuthorized) {
+                  throw new Error('IP 素材或授权缺失(可能已被清除),请重新完成 onboarding');
+                }
+                const baseVideoUrl = ipPreflight.baseVideoUrl;
+                if (!baseVideoUrl) throw new Error('出镜底版不可用(确认前预检未通过)');
+                // IP final outputs stay user-visible. Cloned audio uses a hidden
+                // short-TTL row so an Orchestrator crash cannot leave it behind as
+                // an ordinary deliverable; normal completion still deletes it.
+                const storeOutputIp = async (i: {
+                  filename: string;
+                  mimetype: string;
+                  buffer: Buffer;
+                }) => {
+                  const s = await fileService.storeOutput({
+                    userIdInternal: userInternalId,
+                    userExternalId,
+                    taskIdInternal: taskInternalId,
+                    filename:
+                      i.filename === 'video.mp4'
+                        ? 'holaday-ip-video.mp4'
+                        : i.filename === 'poster.jpg'
+                          ? 'holaday-ip-video-poster.jpg'
+                          : i.filename,
+                    mimetype: i.mimetype,
+                    buffer: i.buffer,
+                  });
+                  if (i.filename === 'video.mp4') {
+                    finalAtt = {
+                      fileId: s.externalId,
+                      downloadUrl: `/api/files/${s.externalId}/download`,
+                      filename: s.filename,
+                      mimetype: s.mimetype,
+                      sizeBytes: Number(s.sizeBytes),
+                      expiresAt: s.expiresAt
+                        ? s.expiresAt.toISOString()
+                        : new Date(Date.now() + 864e5).toISOString(),
+                      kind: 'output',
+                      ...(posterUrl ? { posterUrl } : {}),
+                    };
+                  }
+                  if (i.filename === 'poster.jpg') {
+                    const url = `/api/files/${s.externalId}/download`;
+                    posterUrl = url;
+                    const fa = finalAtt;
+                    if (fa) fa.posterUrl = url;
+                  }
+                  return { fileId: s.externalId };
+                };
+                const storeTemporaryAudioIp = async (i: {
+                  filename: string;
+                  mimetype: string;
+                  buffer: Buffer;
+                }) => {
+                  const s = await fileService.storeTemporaryOutput({
+                    userIdInternal: userInternalId,
+                    userExternalId,
+                    taskIdInternal: taskInternalId,
+                    filename: i.filename,
+                    mimetype: i.mimetype,
+                    buffer: i.buffer,
+                  });
+                  return { fileId: s.externalId };
+                };
+                const storeOutputFileIp = async (i: {
+                  filename: string;
+                  mimetype: string;
+                  sourcePath: string;
+                }) => {
+                  if (i.filename !== 'video.mp4') {
+                    throw new Error(`unexpected streamed IP video output: ${i.filename}`);
+                  }
+                  const s = await fileService.storeOutputFile({
+                    userIdInternal: userInternalId,
+                    userExternalId,
+                    taskIdInternal: taskInternalId,
+                    filename: 'holaday-ip-video.mp4',
+                    mimetype: i.mimetype,
+                    sourcePath: i.sourcePath,
+                  });
+                  finalAtt = {
+                    fileId: s.externalId,
+                    downloadUrl: `/api/files/${s.externalId}/download`,
+                    filename: s.filename,
+                    mimetype: s.mimetype,
+                    sizeBytes: Number(s.sizeBytes),
+                    expiresAt: s.expiresAt
+                      ? s.expiresAt.toISOString()
+                      : new Date(Date.now() + 864e5).toISOString(),
+                    kind: 'output',
+                    ...(posterUrl ? { posterUrl } : {}),
+                  };
+                  return { fileId: s.externalId };
+                };
+                const result = await runIpVideoCreation(
+                  { copyText: meta.ipCopyText ?? intentText },
+                  buildIpVideoCfg(),
+                  { voiceId: ipVoiceId, baseVideoUrl },
+                  { ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}) },
+                  {
+                    storeOutput: storeOutputIp,
+                    storeOutputFile: storeOutputFileIp,
+                    storeTemporaryAudio: storeTemporaryAudioIp,
+                    presignByFileId: (fid: string) =>
+                      fileService.signedReadUrl(fid, userInternalId, 900),
+                    deleteOutput: (fid: string) => fileService.deleteForUser(fid, userInternalId),
+                    workdir,
+                    logger,
+                    verifyFinalVideo,
+                    verifyAudioVisualSync: reviewAudioVisualSync,
+                  },
+                );
+                audioCoverage = videoAudioVerificationCoverage({
+                  audibleAudioVerified: true,
+                  lipSyncProcessingCompleted: true,
+                  audiovisualSyncVerified: result.audiovisualSyncVerified,
+                });
+                audiovisualSyncReview = result.audiovisualSyncReview;
+                summary = `真人换口型视频已生成（约 ${Math.round(result.totalDurationMs / 1000)} 秒）。`;
+              } else {
+                if (!script) {
+                  throw new Error('普通视频报价脚本丢失');
+                }
+                const result = await runSimpleVideoCreation(
+                  {
+                    userText: intentText,
+                    script,
+                    ...(vOpts.style ? { style: vOpts.style } : {}),
+                  },
+                  buildVideoCfg(),
+                  {
+                    visualMode,
+                    videoSource: tier,
+                    ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}),
+                    ...(vOpts.resolution ? { veoResolution: vOpts.resolution } : {}),
+                    ...(vOpts.durationSeconds ? { veoDurationSeconds: vOpts.durationSeconds } : {}),
+                  },
+                  {
+                    storeOutput,
+                    storeOutputFile,
+                    workdir,
+                    logger,
+                    llm,
+                    verifyFinalVideo,
+                  },
+                );
+                audioEngine = result.audioEngine;
+                const audioNote =
+                  result.audioEngine === 'qwen' ? '' : '，主语音服务不可用，已自动切换备用音色';
+                summary = `视频已生成（${result.segments} 段 / ${Math.round(result.totalDurationMs / 1000)} 秒${audioNote}）。`;
+              }
+              const persisted = await repo.persistVisionOutcome(newTaskId, {
+                status: 'completed',
+                summary,
+                tickCount: 1,
+                verificationPassed: true,
+                metadata: {
+                  ...executionMetadata,
+                  ...(audioEngine ? { audioEngine } : {}),
+                  ...videoQualityVerificationMetadata(
+                    new Date(),
+                    audioCoverage,
+                    audiovisualSyncReview,
+                  ),
+                  ...(finalAtt ? { attachments: [finalAtt] } : {}),
+                },
+              });
+              if (persisted.persisted) {
+                broadcastToUser(userExternalId, {
+                  type: 'server.task.terminal',
+                  taskId: newTaskId,
+                  status: 'completed',
+                  summary,
+                  verificationPassed: true,
+                  ...(finalAtt ? { attachments: [finalAtt] } : {}),
+                });
+              }
+            } catch (err) {
+              // Full error to the server log (internal); a SAFE whitelisted reason
+              // to the user — never leak stack / detail / urls / file ids.
+              logger.error({ err, taskId: newTaskId }, 'video_creation: lane failed');
+              const qualityFailure = videoQualityFailureOutcome(err);
+              const mappedReason = mapVideoFailureReason(err);
+              const friendlyReason = qualityFailure.metadata
+                ? videoRejectionReason(
+                    mappedReason,
+                    atomicCreate.kind === 'created' ? atomicCreate.priorQualityRejects : 0,
+                    appEnv.VIDEO_REJECT_RETRY_LIMIT,
+                  )
+                : mappedReason;
+              const persisted = await repo
+                .persistVisionOutcome(newTaskId, {
+                  status: 'failed',
+                  reason: friendlyReason,
+                  ...(qualityFailure.metadata ? { errorCode: 'MEDIA_VIDEO_QUALITY_REJECTED' } : {}),
+                  tickCount: 1,
+                  ...(typeof qualityFailure.verificationPassed === 'boolean'
+                    ? { verificationPassed: qualityFailure.verificationPassed }
+                    : {}),
+                  ...(qualityFailure.failedChecks
+                    ? { failedChecks: qualityFailure.failedChecks }
+                    : {}),
+                  metadata: {
+                    ...executionMetadata,
+                    ...qualityFailure.metadata,
+                  },
+                })
+                .catch(() => ({ persisted: false }));
+              if (persisted.persisted) {
+                broadcastToUser(userExternalId, {
+                  type: 'server.task.terminal',
+                  taskId: newTaskId,
+                  status: 'failed',
+                  reason: friendlyReason,
+                });
+                await notifyMediaGenerationFailed(
+                  {
+                    taskId: newTaskId,
+                    userIdInternal: userInternalId,
+                    lane: 'video_creation',
+                    reason: friendlyReason,
+                    nothingDelivered: true,
+                  },
+                  logger,
+                );
+              }
+            } finally {
+              await fsp.rm(workdir, { recursive: true, force: true }).catch(() => {});
             }
-            const result = await runSimpleVideoCreation(
-              {
-                userText: intentText,
-                script,
-                ...(vOpts.style ? { style: vOpts.style } : {}),
-              },
-              buildVideoCfg(),
-              {
-                visualMode,
-                videoSource: tier,
-                ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}),
-                ...(vOpts.resolution ? { veoResolution: vOpts.resolution } : {}),
-                ...(vOpts.durationSeconds ? { veoDurationSeconds: vOpts.durationSeconds } : {}),
-              },
-              {
-                storeOutput,
-                storeOutputFile,
-                workdir,
-                logger,
-                llm,
-                verifyFinalVideo,
-              },
-            );
-            audioEngine = result.audioEngine;
-            const audioNote =
-                result.audioEngine === 'qwen' ? '' : '，主语音服务不可用，已自动切换备用音色';
-            summary = `视频已生成（${result.segments} 段 / ${Math.round(result.totalDurationMs / 1000)} 秒${audioNote}）。`;
+          } finally {
+            taskHeartbeat.stop();
           }
-          const persisted = await repo.persistVisionOutcome(newTaskId, {
-            status: 'completed',
-            summary,
-            tickCount: 1,
-            verificationPassed: true,
-            metadata: {
-              ...executionMetadata,
-              ...(audioEngine ? { audioEngine } : {}),
-              ...videoQualityVerificationMetadata(
-                new Date(),
-                audioCoverage,
-                audiovisualSyncReview,
-              ),
-              ...(finalAtt ? { attachments: [finalAtt] } : {}),
-            },
-          });
-          if (persisted.persisted) {
-            broadcastToUser(userExternalId, {
-              type: 'server.task.terminal',
-              taskId: newTaskId,
-              status: 'completed',
-              summary,
-              verificationPassed: true,
-              ...(finalAtt ? { attachments: [finalAtt] } : {}),
-            });
-          }
-        } catch (err) {
-          // Full error to the server log (internal); a SAFE whitelisted reason
-          // to the user — never leak stack / detail / urls / file ids.
-          logger.error({ err, taskId: newTaskId }, 'video_creation: lane failed');
-          const friendlyReason = mapVideoFailureReason(err);
-          const qualityFailure = videoQualityFailureOutcome(err);
-          const persisted = await repo
-            .persistVisionOutcome(newTaskId, {
-              status: 'failed',
-              reason: friendlyReason,
-              tickCount: 1,
-              ...(typeof qualityFailure.verificationPassed === 'boolean'
-                ? { verificationPassed: qualityFailure.verificationPassed }
-                : {}),
-              ...(qualityFailure.failedChecks
-                ? { failedChecks: qualityFailure.failedChecks }
-                : {}),
-              metadata: {
-                ...executionMetadata,
-                ...qualityFailure.metadata,
-              },
-            })
-            .catch(() => ({ persisted: false }));
-          if (persisted.persisted) {
-            broadcastToUser(userExternalId, {
-              type: 'server.task.terminal',
-              taskId: newTaskId,
-              status: 'failed',
-              reason: friendlyReason,
-            });
-          }
-        } finally {
-          await fsp.rm(workdir, { recursive: true, force: true }).catch(() => {});
-        }
-        } finally {
-          taskHeartbeat.stop();
-        }
-      })());
+        })(),
+      );
       return { taskId: newTaskId, status: 'executing' as const };
     }),
 
@@ -8703,10 +9750,7 @@ export const tasksRouter = router({
       }
       // Phase 1 #3 — isolation boundary. Product sessions are pinned to `user`;
       // the server-signed eval session can poll only its own `eval` rows.
-      const conds = [
-        eq(tasksTable.userId, userRow.id),
-        eq(tasksTable.origin, ctx.taskOrigin),
-      ];
+      const conds = [eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, ctx.taskOrigin)];
       // Cursor is an opaque numeric token whose interpretation matches
       // the active ORDER BY. In starred mode we order by `starredAt
       // DESC` and treat the cursor as a unix-ms timestamp; otherwise
@@ -8807,25 +9851,25 @@ export const tasksRouter = router({
       // removed in SQL so it never crosses the database boundary for a list.
       const resultRows =
         rows.length > 0
-        ? await ctx.db
-            .select({
-              id: tasksTable.id,
-              result: sql<unknown>`JSON_REMOVE(${tasksTable.result}, '$.finalScreenshot')`.as(
-                'result',
-              ),
-            })
-            .from(tasksTable)
-            .where(
-              and(
-                eq(tasksTable.userId, userRow.id),
-                eq(tasksTable.origin, ctx.taskOrigin),
-                inArray(
-                  tasksTable.id,
-                  rows.map((row) => row.id),
+          ? await ctx.db
+              .select({
+                id: tasksTable.id,
+                result: sql<unknown>`JSON_REMOVE(${tasksTable.result}, '$.finalScreenshot')`.as(
+                  'result',
                 ),
-              ),
-            )
-        : [];
+              })
+              .from(tasksTable)
+              .where(
+                and(
+                  eq(tasksTable.userId, userRow.id),
+                  eq(tasksTable.origin, ctx.taskOrigin),
+                  inArray(
+                    tasksTable.id,
+                    rows.map((row) => row.id),
+                  ),
+                ),
+              )
+          : [];
       const resultByTaskId = new Map(resultRows.map((row) => [row.id, row.result] as const));
       const attachmentNow = new Date();
       const availableAttachmentRows =
@@ -8906,7 +9950,10 @@ export const tasksRouter = router({
           verificationPassed: r.verificationPassed,
           failureLevel: r.failureLevel,
           stockContext: publicStockTaskContext(r.sourceContext),
-          ...(z.object({ browserSource: z.literal('local-chrome') }).safeParse(r.sourceContext).success ? { browserSource: 'local-chrome' as const } : {}),
+          ...(z.object({ browserSource: z.literal('local-chrome') }).safeParse(r.sourceContext)
+            .success
+            ? { browserSource: 'local-chrome' as const }
+            : {}),
         })),
         nextCursor:
           rows.length === input.limit
@@ -9025,7 +10072,10 @@ export const tasksRouter = router({
         starredAt: taskRow.starredAt,
         projectId: projectExternalId,
         stockContext: publicStockTaskContext(taskRow.sourceContext),
-        ...(z.object({ browserSource: z.literal('local-chrome') }).safeParse(taskRow.sourceContext).success ? { browserSource: 'local-chrome' as const } : {}),
+        ...(z.object({ browserSource: z.literal('local-chrome') }).safeParse(taskRow.sourceContext)
+          .success
+          ? { browserSource: 'local-chrome' as const }
+          : {}),
         result: annotateTaskResultAttachmentAvailability(
           normalizeOutput(taskRow.result),
           availableAttachmentIds,
@@ -9072,15 +10122,17 @@ export const tasksRouter = router({
    */
   reply: protectedProcedure
     .input(
-      pureTaskInput(z.object({
-        taskId: z.string().min(1),
-        message: z.string().min(1).max(4_000),
-        // F2 — attachments uploaded with the reply. Same shape as
-        // `tasks.create.fileIds`. Resolved + parsed below into
-        // content blocks, then plumbed through `supercarReply`'s
-        // attachmentBlocks param. Cap mirrors create.
-        fileIds: z.array(z.string()).max(5).optional(),
-      })),
+      pureTaskInput(
+        z.object({
+          taskId: z.string().min(1),
+          message: z.string().min(1).max(4_000),
+          // F2 — attachments uploaded with the reply. Same shape as
+          // `tasks.create.fileIds`. Resolved + parsed below into
+          // content blocks, then plumbed through `supercarReply`'s
+          // attachmentBlocks param. Cap mirrors create.
+          fileIds: z.array(z.string()).max(5).optional(),
+        }),
+      ),
     )
     .use(taskDrainMiddleware)
     // Explicit return-type annotation breaks the circular type
@@ -9100,24 +10152,27 @@ export const tasksRouter = router({
         handoff?: 'browser';
         handoffTaskId?: string;
       }> => {
-      const [userRow] = await ctx.db
-        .select({ id: users.id, modelDataRegion: users.modelDataRegion })
-        .from(users)
-        .where(eq(users.externalId, ctx.userId))
-        .limit(1);
-      if (!userRow) {
-        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
-      }
-      const [taskRow] = await ctx.db
-        .select({
-          id: tasksTable.id, status: tasksTable.status, result: tasksTable.result, intent: tasksTable.intent,
-          executionId: tasksTable.executionId,
-          executionRevision: tasksTable.executionRevision,
-          coreRecordVersion: tasksTable.coreRecordVersion,
-          awaitingQuestion: tasksTable.awaitingQuestion,
-          roleId: tasksTable.roleId,
-        })
-        .from(tasksTable)
+        const [userRow] = await ctx.db
+          .select({ id: users.id, modelDataRegion: users.modelDataRegion })
+          .from(users)
+          .where(eq(users.externalId, ctx.userId))
+          .limit(1);
+        if (!userRow) {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+        }
+        const [taskRow] = await ctx.db
+          .select({
+            id: tasksTable.id,
+            status: tasksTable.status,
+            result: tasksTable.result,
+            intent: tasksTable.intent,
+            executionId: tasksTable.executionId,
+            executionRevision: tasksTable.executionRevision,
+            coreRecordVersion: tasksTable.coreRecordVersion,
+            awaitingQuestion: tasksTable.awaitingQuestion,
+            roleId: tasksTable.roleId,
+          })
+          .from(tasksTable)
           .where(
             and(
               eq(tasksTable.externalId, input.taskId),
@@ -9125,816 +10180,939 @@ export const tasksRouter = router({
               eq(tasksTable.origin, ctx.taskOrigin),
             ),
           )
-        .limit(1);
-      if (!taskRow) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
-      }
-      const replyResult = normalizeOutput(taskRow.result) as Record<string, unknown> | null;
-      const coreReply = await handleCoreTaskReply({ ctx, input, userId: userRow.id,
-        modelDataRegion: userRow.modelDataRegion, wiring: modelRuntimeWiring,
-        row: { ...taskRow, result: replyResult } });
-      if (coreReply) return coreReply;
-      assertLegacyReplyRecord({ ...taskRow, result: replyResult });
-      const coreTextReply = taskRow.status === 'awaiting_user' &&
-        replyResult?.executionMode === 'generate' && !hasParkedSupercarHandle(input.taskId);
-      if (coreTextReply) {
-        if (isPurePlanHold(input.message) && !input.fileIds?.length)
-          return { ok: true, state: 'stillAwaiting' as const };
-        throw new TRPCError({ code: 'BAD_REQUEST', message: '旧任务缺少完整执行历史，请保留原有要求和附件后重新创建任务。' });
-      }
-      // Core replies require every referenced file and complete text before
-      // releasing the wait. Other lanes retain their existing parsing policy.
-        const replyAttachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
-      if (input.fileIds && input.fileIds.length > 0) {
-        const fileService = new FileService(ctx.db, ctx.logger);
-        const loaded = await fileService.loadMany(input.fileIds, userRow.id);
-        if (coreTextReply && input.fileIds.some(id => !loaded.some(file => file.row.externalId === id))) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: '有附件已失效或无法读取，请重新上传后再提交。' });
+          .limit(1);
+        if (!taskRow) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
         }
-        for (const f of loaded) {
-          try {
-              const parsed = await parseFileForPrompt(f.buffer, f.row.filename, f.row.mimetype, { completeText: coreTextReply });
-            replyAttachmentBlocks.push(...parsed.blocks);
-          } catch (err) {
-            if (coreTextReply) {
-              throw new TRPCError({ code: 'BAD_REQUEST', message: '附件超出完整核验范围或无法读取，请缩小材料或重新上传后再提交。' });
-            }
-            ctx.logger.warn(
-              {
-                err: err instanceof Error ? err.message : String(err),
-                fileId: f.row.externalId,
-              },
-              'tasks.reply: file parse failed — skipping',
-            );
-          }
-        }
-      }
-      // F1 — classify the user's reply intent. Four buckets:
-      //   manual_data     — user pasted metrics / "数据如下" / numeric
-      //                     blob; supercar should hand off to generate.
-      //   login_completed — user finished a manual login or captcha
-      //                     ("扫完了" / "登录好了"); continue browser.
-      //   still_awaiting  — user said "等一下 / 稍等 / wait"; keep
-      //                     supercar parked, don't resume the loop.
-      //   default         — auto, anything else; continue browser.
-      // The classifier is intentionally conservative (favors `default`)
-      // — false-handoff aborts a working browser session, so we only
-      // hand off when the message is unambiguously self-sufficient.
-      const replyKind = classifyReplyIntent(input.message);
-      ctx.logger.info(
-        { taskId: input.taskId, replyKind, msgLen: input.message.length },
-        'reply: classified',
-      );
-
-      // Fix 2 — still_awaiting short-circuit. Don't deliver to
-      // supercarReply, don't resume the loop, don't touch DB status.
-      // Task stays in awaiting_user; SPA's replyToTask gates on
-      // `state` and preserves the BrowserPanel takeover UI.
-      if (replyKind === 'still_awaiting') {
-        let reviseHeldPlan = false;
-        // Best-effort re-broadcast so any SPA tab that lost its
-        // awaitingUserByTask entry (e.g. after a long idle) gets it
-        // back without needing tasks.detail re-fetch.
-        try {
-          const [row] = await ctx.db
-            .select({
-              status: tasksTable.status,
-              awaitingQuestion: tasksTable.awaitingQuestion,
-              awaitingKind: tasksTable.awaitingKind,
-              result: tasksTable.result,
-              executionId: tasksTable.executionId,
-              executionRevision: tasksTable.executionRevision,
-              coreRecordVersion: tasksTable.coreRecordVersion,
-            })
-            .from(tasksTable)
-            .where(
-              and(
-                eq(tasksTable.externalId, input.taskId),
-                eq(tasksTable.userId, userRow.id),
-                eq(tasksTable.origin, ctx.taskOrigin),
-              ),
-            )
-            .limit(1);
-          const heldResult = normalizeOutput(row?.result) as Record<string, unknown> | null;
-          if (row) assertLegacyReplyRecord({ ...row, result: heldResult });
-          reviseHeldPlan = row?.status === 'awaiting_user' &&
-            heldResult?.planMode === 'awaiting_approval' &&
-            (!isPurePlanHold(input.message) || (input.fileIds?.length ?? 0) > 0);
-          if (!reviseHeldPlan && row?.status === 'awaiting_user' && row.awaitingQuestion) {
-            broadcastToUser(ctx.userId, {
-              type: 'server.supercar.awaiting_user',
-              taskId: input.taskId,
-              question: row.awaitingQuestion,
-              awaitingKind: normalizeReplyAwaitingKindForBroadcast(row.awaitingKind),
-            });
-          }
-        } catch (err) {
-          if (err instanceof TRPCError) throw err;
-          ctx.logger.warn(
-            { err, taskId: input.taskId },
-            'reply: still_awaiting rebroadcast failed (non-fatal)',
+        const captchaInstance = ctx.browserPool?.peek(input.taskId);
+        const captchaSession =
+          captchaInstance && browserControlSessions.get(captchaInstance, ctx.userId, input.taskId);
+        if (
+          captchaSession &&
+          captchaHandoffs.active(input.taskId, ctx.userId, captchaSession.control)
+        ) {
+          const ok = await captchaHandoffs.proceed(
+            input.taskId,
+            ctx.userId,
+            captchaSession.control,
           );
+          return { ok: true, state: ok ? 'resumed' : 'stillAwaiting' };
         }
-        if (!reviseHeldPlan) return { ok: true, state: 'stillAwaiting' as const };
-      }
-
-      // Phase 3 R1 — state-machine invariant requires the row to be
-      // in `executing` BEFORE the agent-loop is woken from its
-      // awaiting_user park. Otherwise the agent's next iteration
-      // could complete + call persistVisionOutcome while the row
-      // still says `awaiting_user`, and the new state guard in
-      // task-repository would refuse the completed write.
-      //
-      // Sequence:
-      //   1. AWAIT the DB transition awaiting_user → executing.
-      //   2. Then call supercarReply / supercarHandoffToGenerate to
-      //      wake the agent.
-      //   3. Agent's next persistVisionOutcome sees status=executing,
-      //      writes complete normally.
-      // If the DB write fails we DON'T deliver the reply — the row
-      // would be inconsistent and the agent could complete into a
-      // refused write, leaving the user with a parked task that
-      // never moves.
-      const supercarHasHandle = hasParkedSupercarHandle(input.taskId);
-      if (supercarHasHandle) {
-        try {
-          const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
-          const persisted = await repo.markAwaitingReplyResumed(input.taskId, userRow.id);
-          if (!persisted.persisted) {
-            ctx.logger.warn(
-              { taskId: input.taskId },
-              'reply: awaiting_user → executing guard refused; not delivering reply',
-            );
-            return { ok: false, state: 'persistFailed' as const };
-          }
-        } catch (err) {
-          ctx.logger.error(
-            { err, taskId: input.taskId },
-            'reply: failed to flip awaiting_user → executing; refusing to deliver reply',
-          );
-          return { ok: false, state: 'persistFailed' as const };
-        }
-      }
-
-      const delivered =
-        replyKind === 'manual_data'
-          ? supercarHandoffToGenerate(input.taskId, input.message)
-          : supercarReply(
-              input.taskId,
-              input.message,
-              replyAttachmentBlocks.length > 0 ? replyAttachmentBlocks : undefined,
-            );
-      if (delivered) {
-        return { ok: true, state: 'resumed' as const };
-      }
-
-      // No supercar handle — could be a generate-lane intake park
-      // (expert workflow with `missingInputs > 0` routes through
-      // `runGenerateTask`, parks on `[AWAITING_USER_INPUT]`, has no
-      // agent loop to register a handle). In that case we resume by
-      // re-running runGenerateTask under the same taskId with the
-      // combined original-intent + user-reply text.
-      const [parkRow] = await ctx.db
-        .select({
-          intent: tasksTable.intent,
-          status: tasksTable.status,
-          result: tasksTable.result,
-          opusUsed: tasksTable.opusUsed,
-          roleId: tasksTable.roleId,
-          executionId: tasksTable.executionId,
-          executionRevision: tasksTable.executionRevision,
-          coreRecordVersion: tasksTable.coreRecordVersion,
-        })
-        .from(tasksTable)
-        .where(and(
-          eq(tasksTable.externalId, input.taskId),
-          eq(tasksTable.userId, userRow.id),
-          eq(tasksTable.origin, ctx.taskOrigin),
-        ))
-        .limit(1);
-      const prevResult = normalizeOutput(parkRow?.result ?? null) as Record<string, unknown> | null;
-      if (parkRow) assertLegacyReplyRecord({ ...parkRow, result: prevResult });
-      if (parkRow?.status === 'awaiting_user' && prevResult?.executionMode === 'generate')
-        throw new TRPCError({ code: 'BAD_REQUEST', message: '旧任务缺少完整执行历史，请保留原有要求和附件后重新创建任务。' });
-      const parkedExpertMode =
-        prevResult?.expertMode === 'normal' ||
-        prevResult?.expertMode === 'expert' ||
-        prevResult?.expertMode === 'auto'
-          ? prevResult.expertMode
-          : 'auto';
-      const wasGenerateParked =
-        Boolean(parkRow) &&
-        parkRow!.status === 'awaiting_user' &&
-        prevResult?.executionMode === 'generate';
-      if (!parkRow || !wasGenerateParked) {
-        return { ok: false };
-      }
-
-      // Sweep P2 fix: user replies the bare VALUE (e.g. "美妆护肤")
-      // for an intake question, but the typed workflow's
-      // extractPattern requires an anchor like "品类:" before the
-      // value. The re-parse on the unmodified combined intent
-      // re-misses the field and we park with the SAME question
-      // forever.
-      //
-      // Mitigation: peek at the typed workflow that was driving the
-      // original park and, for each required field whose
-      // extractPattern doesn't match the bare reply text, prepend
-      // the field's label as an anchor so the regex can pick it up
-      // on the next parse round. Uses the EXECUTION registry match
-      // (the typed-workflow lane), not the supercar matcher.
-      const userReply = input.message.trim();
-      const awaitingPlanApproval = prevResult?.planMode === 'awaiting_approval';
-      // Only this reply can approve; plan text, attachments and earlier replies
-      // remain untrusted reference material, never a source of authorization.
-      const planOnly = awaitingPlanApproval && !isExplicitPlanApproval(userReply);
-      const hasPlanContext = awaitingPlanApproval || prevResult?.planText !== undefined;
-      const planContext = hasPlanContext
-        ? z.object({
-            planText: z.string().min(1),
-            planInitialIntent: z.string().optional(),
-            planReplyHistory: z.array(z.string().max(4_000)).max(31).default([]),
-            planFileIds: z.array(z.string().min(1)).max(5).default([]),
-            planWorkflowId: z.string().min(1).nullable().optional(),
-            planLegacyWorkflowId: z.string().min(1).nullable().optional(),
-            planIntakeContext: z.array(z.string()).max(128).default([]),
-          }).safeParse(prevResult)
-        : null;
-      if (planContext && !planContext.success) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '方案上下文无法恢复或修改轮次过多，请新建任务并带上需要保留的要求。',
-        });
-      }
-      const savedContext = planContext?.success ? planContext.data : null;
-      // null is an explicit general-purpose choice; absent means an older task.
-      const savedWorkflow = savedContext?.planWorkflowId
-        ? getExpertWorkflowById(savedContext.planWorkflowId)
-        : null;
-      if (savedContext?.planWorkflowId && !savedWorkflow) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '原方案使用的技能暂不可用，任务仍在等待；请新建任务重新选择技能。',
-        });
-      }
-      const parkingTypedWorkflow = savedContext?.planWorkflowId !== undefined
-        ? savedWorkflow
-        : matchTypedExpertWorkflow({
-            intent: parkRow!.intent,
-            roleId: parkRow!.roleId ?? null,
+        const localChromeWait = z
+          .object({
+            metadata: z.object({
+              browserSource: z.literal('local-chrome'),
+              browserRoutingAwaiting: z.string().optional(),
+              browserConnection: browserConnectionWaitSchema.optional(),
+            }),
+          })
+          .safeParse(normalizeOutput(taskRow.result));
+        if (
+          // A routing wait (also created with the routing flag off for login-required
+          // tasks, since the cookie sync is retired) never becomes a cloud/text run.
+          (browserCapabilities(ctx.userId).routingV2 ||
+            Boolean(localChromeWait.data?.metadata.browserRoutingAwaiting)) &&
+          taskRow.status === 'awaiting_user' &&
+          localChromeWait.success &&
+          !hasParkedSupercarHandle(input.taskId)
+        ) {
+          // An expired Chrome seat cannot become a generate or unauthenticated cloud run.
+          const browserConnection = localChromeWait.data?.metadata.browserConnection;
+          broadcastToUser(ctx.userId, {
+            type: 'server.supercar.awaiting_user',
+            taskId: input.taskId,
+            question:
+              taskRow.awaitingQuestion ??
+              '需要连接 HOLA DAY Chrome 插件，请连接后重新选择页面并重新提交原任务。',
+            awaitingKind: 'permission',
+            ...(browserConnection ? { browserConnection } : {}),
           });
-      const savedPlan = savedContext?.planText;
-      const planReplyHistory = savedContext ? [...savedContext.planReplyHistory, userReply] : [];
-      const planIntakeContext = [...(savedContext?.planIntakeContext ?? [])];
-      const planFileIds = savedContext
-        ? [...new Set([...savedContext.planFileIds, ...(input.fileIds ?? [])])]
-        : [];
-      if (planFileIds.length > 5) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '同一方案最多保留5个附件，请合并材料后新建任务。',
+          return { ok: true, state: 'stillAwaiting' as const };
+        }
+        // A follow-up keeps the brain its task started with. Resolved only after
+        // the user and task ownership checks so they stay the first lookups.
+        enterBrain(await resolveBrainForExistingTask(ctx.db, ctx.userId, input.taskId));
+        const replyResult = normalizeOutput(taskRow.result) as Record<string, unknown> | null;
+        const coreReply = await handleCoreTaskReply({
+          ctx,
+          input,
+          userId: userRow.id,
+          modelDataRegion: userRow.modelDataRegion,
+          wiring: modelRuntimeWiring,
+          row: { ...taskRow, result: replyResult },
         });
-      }
-      // Never substitute a model's summary for the underlying files. Reload
-      // with ownership/expiry checks before releasing the awaiting-state CAS.
-      // The earlier owner read can precede a transition into this core wait.
-      // Do not reuse blocks that may have been parsed under another lane's
-      // policy. Re-authorize and parse the complete current file set here.
-      const generateFileIds = savedContext ? planFileIds : [...new Set(input.fileIds ?? [])];
-      const generateAttachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
-      if (generateFileIds.length > 0) {
-        try {
-          const files = await new FileService(ctx.db, ctx.logger).loadMany(generateFileIds, userRow.id);
-          if (generateFileIds.some(id => !files.some(file => file.row.externalId === id))) {
-            throw new Error('MISSING_PLAN_FILE');
-          }
-          for (const file of files) {
-            const parsed = await parseFileForPrompt(
-              file.buffer, file.row.filename, file.row.mimetype, { completeText: true },
-            );
-            if (!parsed.blocks.length) throw new Error('EMPTY_PLAN_FILE');
-            generateAttachmentBlocks.push(...parsed.blocks);
-          }
-        } catch {
+        if (coreReply) return coreReply;
+        assertLegacyReplyRecord({ ...taskRow, result: replyResult });
+        const coreTextReply =
+          taskRow.status === 'awaiting_user' &&
+          replyResult?.executionMode === 'generate' &&
+          !hasParkedSupercarHandle(input.taskId);
+        if (coreTextReply) {
+          if (isPurePlanHold(input.message) && !input.fileIds?.length)
+            return { ok: true, state: 'stillAwaiting' as const };
           throw new TRPCError({
             code: 'BAD_REQUEST',
-            message: '方案附件已失效或无法读取，任务仍在等待；请重新整理附件后新建任务。',
+            message: '旧任务缺少完整执行历史，请保留原有要求和附件后重新创建任务。',
           });
         }
-      }
-      let anchoredReply = userReply;
-      if (!awaitingPlanApproval && parkingTypedWorkflow && userReply.length > 0) {
-        const priorIntakeIntent = savedContext
-          ? [savedContext.planInitialIntent ?? parkRow!.intent,
-              ...savedContext.planReplyHistory, ...planIntakeContext].join('\n')
-          : parkRow!.intent;
-        const priorParse = parseInputs(priorIntakeIntent, parkingTypedWorkflow);
-        const additions: string[] = [];
-        for (const field of priorParse.missingRequired) {
-          if (!field.extractPattern) continue;
-          if (field.extractPattern.test(userReply)) continue;
-          const anchor = (field.label ?? field.name).split(/[\s/]/)[0];
-          additions.push(`${anchor}: ${userReply}`);
+        // Core replies require every referenced file and complete text before
+        // releasing the wait. Other lanes retain their existing parsing policy.
+        const replyAttachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
+        if (input.fileIds && input.fileIds.length > 0) {
+          const fileService = new FileService(ctx.db, ctx.logger);
+          const loaded = await fileService.loadMany(input.fileIds, userRow.id);
+          if (
+            coreTextReply &&
+            input.fileIds.some((id) => !loaded.some((file) => file.row.externalId === id))
+          ) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '有附件已失效或无法读取，请重新上传后再提交。',
+            });
+          }
+          for (const f of loaded) {
+            try {
+              const parsed = await parseFileForPrompt(f.buffer, f.row.filename, f.row.mimetype, {
+                completeText: coreTextReply,
+              });
+              replyAttachmentBlocks.push(...parsed.blocks);
+            } catch (err) {
+              if (coreTextReply) {
+                throw new TRPCError({
+                  code: 'BAD_REQUEST',
+                  message: '附件超出完整核验范围或无法读取，请缩小材料或重新上传后再提交。',
+                });
+              }
+              ctx.logger.warn(
+                {
+                  err: err instanceof Error ? err.message : String(err),
+                  fileId: f.row.externalId,
+                },
+                'tasks.reply: file parse failed — skipping',
+              );
+            }
+          }
         }
-        if (additions.length > 0) {
-          anchoredReply = [...additions, userReply].join('\n');
-          if (savedContext) planIntakeContext.push(...additions);
-        }
-      }
-
-      const combinedIntent = [
-        savedContext?.planInitialIntent ?? parkRow!.intent,
-        ...(savedContext ? planReplyHistory : [anchoredReply])
-          .map(reply => `\n\n[用户补充]\n${reply}`),
-        ...(planIntakeContext.length > 0
-          ? [`\n\n[系统根据待答问题映射的字段，仅辅助解析；非用户原话]\n${planIntakeContext.join('\n')}`]
-          : []),
-      ].join('').trim();
-
-      // Re-evaluate the workflow on the COMBINED intent. Two outcomes
-      // matter here:
-      //   1. missingInputs is now empty + user supplied platform-source
-      //      keywords (罗盘/抖店) → routeOverride='browser'. We can't
-      //      cleanly hand off to supercar from inside this handler
-      //      today (the supercar dispatch is 1500 lines of inline glue
-      //      in tasks.create, not a callable helper). So we surface a
-      //      structured response and let the SPA prompt the user to
-      //      open a new task with `intent=combinedIntent`. Tracked as
-      //      a follow-up to extract `dispatchSupercar` once we have a
-      //      dedicated reviewer for the refactor.
-      //   2. Otherwise (manual data / paste / "我自己给数据" / still
-      //      missing inputs) → re-run runGenerateTask one shot. The
-      //      runner will either complete (report) or park again with
-      //      a new intake question (the model decides).
-      //
-      // Short-circuit: if the user clearly pasted metrics/data
-      // (`replyKind === 'manual_data'`) we skip the workflow re-run
-      // and go straight to generate. The classifier is conservative,
-      // so a `manual_data` verdict means there are unambiguous numeric
-      // figures or "数据如下" markers — no need to ask whether the
-      // user actually wants the browser path. Avoids edge cases where
-      // a paste happens to contain platform keywords ("罗盘 GMV 156k
-      // UV 28k") and would otherwise trip the browser-handoff branch.
-      // A saved legacy choice may refresh its missing inputs, but later text
-      // must not introduce a legacy workflow that was never selected.
-      const newWorkflow = savedContext?.planWorkflowId === undefined || savedContext.planLegacyWorkflowId
-        ? matchExpertWorkflow(combinedIntent, {
-            hasAttachments: generateAttachmentBlocks.length > 0,
-          })
-        : null;
-      if (savedContext?.planLegacyWorkflowId && newWorkflow?.id !== savedContext.planLegacyWorkflowId) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '原方案使用的工作流暂不可用，任务仍在等待；请新建任务重新选择技能。',
-        });
-      }
-      const resumeWorkflowId = savedContext?.planWorkflowId !== undefined
-        ? savedContext.planWorkflowId ?? newWorkflow?.id ?? null
-        : newWorkflow?.id ?? null;
-      const wantsBrowser =
-          !planOnly && replyKind !== 'manual_data' && newWorkflow?.routeOverride === 'browser';
-
-      if (wantsBrowser) {
+        // F1 — classify the user's reply intent. Four buckets:
+        //   manual_data     — user pasted metrics / "数据如下" / numeric
+        //                     blob; supercar should hand off to generate.
+        //   login_completed — user finished a manual login or captcha
+        //                     ("扫完了" / "登录好了"); continue browser.
+        //   still_awaiting  — user said "等一下 / 稍等 / wait"; keep
+        //                     supercar parked, don't resume the loop.
+        //   default         — auto, anything else; continue browser.
+        // The classifier is intentionally conservative (favors `default`)
+        // — false-handoff aborts a working browser session, so we only
+        // hand off when the message is unambiguously self-sufficient.
+        const replyKind = classifyReplyIntent(input.message);
         ctx.logger.info(
-          {
-            taskId: input.taskId,
-            workflowId: newWorkflow!.id,
-            missingInputs: newWorkflow!.missingInputs,
-          },
-          'reply: combined intent now wants browser lane — backend auto-handoff',
+          { taskId: input.taskId, replyKind, msgLen: input.message.length },
+          'reply: classified',
         );
-        // F4 — backend-orchestrated auto-handoff. The earlier round
-        // broadcast `autoHandoff: { intent }` and let the SPA fire
-        // createTask, which had two problems:
-        //   1. SPA reconnect could replay the terminal frame and
-        //      double-create the handoff task.
-        //   2. The SPA's createTask charged user quota — even though
-        //      the handoff is logically a continuation of the parent.
-        // Now the backend invokes `tasksRouter.create` itself via
-        // createCaller with `replyToTaskId` set to the parent. That
-        // path skips the quota gate (existing follow-up semantics),
-        // injects the parent context, and returns the new taskId.
-        // Idempotency guard: if `result.handoffTaskId` is already
-        // populated for this parent, reuse it instead of creating a
-        // duplicate (handles WS replay / double-click).
-          const handoffNotice = '需要登录浏览器去后台读取数据，已为你新建一个浏览器任务接续执行。';
-        let handoffTaskId: string | null =
-            typeof prevResult?.handoffTaskId === 'string' ? prevResult.handoffTaskId : null;
-        // F4 ordering fix — createCaller's `tasks.create` follow-up
-        // gate (replyToTaskId path) rejects parents in awaiting_user
-        // ("只能追问已完成/失败/取消的任务"). We must flip the parent
-        // to `completed` BEFORE invoking createCaller, otherwise the
-        // call throws and handoffTaskId stays null. Persist the
-        // pre-handoff state first, then run createCaller, then patch
-        // the result row again to include handoffTaskId on success.
-        // If createCaller throws AFTER the status flip, the parent
-        // stays completed (with combinedIntent in result) — slightly
-        // worse UX than ideal but never blocks the user, and matches
-        // the prior behaviour for partial failure.
-        const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
-        try {
-          const parentResult = {
-            ...(prevResult ?? {}),
-            executionMode: 'generate',
-            handoffSuggestion: 'browser',
-            combinedIntent,
-            summary: handoffNotice,
-          };
-          const persisted = await repo.markAwaitingReplyCompleted(input.taskId, parentResult, userRow.id);
-          if (!persisted.persisted) {
+
+        // Fix 2 — still_awaiting short-circuit. Don't deliver to
+        // supercarReply, don't resume the loop, don't touch DB status.
+        // Task stays in awaiting_user; SPA's replyToTask gates on
+        // `state` and preserves the BrowserPanel takeover UI.
+        if (replyKind === 'still_awaiting') {
+          let reviseHeldPlan = false;
+          // Best-effort re-broadcast so any SPA tab that lost its
+          // awaitingUserByTask entry (e.g. after a long idle) gets it
+          // back without needing tasks.detail re-fetch.
+          try {
+            const [row] = await ctx.db
+              .select({
+                status: tasksTable.status,
+                awaitingQuestion: tasksTable.awaitingQuestion,
+                awaitingKind: tasksTable.awaitingKind,
+                result: tasksTable.result,
+                executionId: tasksTable.executionId,
+                executionRevision: tasksTable.executionRevision,
+                coreRecordVersion: tasksTable.coreRecordVersion,
+              })
+              .from(tasksTable)
+              .where(
+                and(
+                  eq(tasksTable.externalId, input.taskId),
+                  eq(tasksTable.userId, userRow.id),
+                  eq(tasksTable.origin, ctx.taskOrigin),
+                ),
+              )
+              .limit(1);
+            const heldResult = normalizeOutput(row?.result) as Record<string, unknown> | null;
+            if (row) assertLegacyReplyRecord({ ...row, result: heldResult });
+            reviseHeldPlan =
+              row?.status === 'awaiting_user' &&
+              heldResult?.planMode === 'awaiting_approval' &&
+              (!isPurePlanHold(input.message) || (input.fileIds?.length ?? 0) > 0);
+            if (!reviseHeldPlan && row?.status === 'awaiting_user' && row.awaitingQuestion) {
+              broadcastToUser(ctx.userId, {
+                type: 'server.supercar.awaiting_user',
+                taskId: input.taskId,
+                question: row.awaitingQuestion,
+                awaitingKind: normalizeReplyAwaitingKindForBroadcast(row.awaitingKind),
+              });
+            }
+          } catch (err) {
+            if (err instanceof TRPCError) throw err;
             ctx.logger.warn(
-              { taskId: input.taskId },
-              'reply: handoff parent-flip guard refused; not creating handoff task',
+              { err, taskId: input.taskId },
+              'reply: still_awaiting rebroadcast failed (non-fatal)',
+            );
+          }
+          if (!reviseHeldPlan) return { ok: true, state: 'stillAwaiting' as const };
+        }
+
+        // Phase 3 R1 — state-machine invariant requires the row to be
+        // in `executing` BEFORE the agent-loop is woken from its
+        // awaiting_user park. Otherwise the agent's next iteration
+        // could complete + call persistVisionOutcome while the row
+        // still says `awaiting_user`, and the new state guard in
+        // task-repository would refuse the completed write.
+        //
+        // Sequence:
+        //   1. AWAIT the DB transition awaiting_user → executing.
+        //   2. Then call supercarReply / supercarHandoffToGenerate to
+        //      wake the agent.
+        //   3. Agent's next persistVisionOutcome sees status=executing,
+        //      writes complete normally.
+        // If the DB write fails we DON'T deliver the reply — the row
+        // would be inconsistent and the agent could complete into a
+        // refused write, leaving the user with a parked task that
+        // never moves.
+        const supercarHasHandle = hasParkedSupercarHandle(input.taskId);
+        if (supercarHasHandle) {
+          try {
+            const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
+            const persisted = await repo.markAwaitingReplyResumed(input.taskId, userRow.id);
+            if (!persisted.persisted) {
+              ctx.logger.warn(
+                { taskId: input.taskId },
+                'reply: awaiting_user → executing guard refused; not delivering reply',
+              );
+              return { ok: false, state: 'persistFailed' as const };
+            }
+          } catch (err) {
+            ctx.logger.error(
+              { err, taskId: input.taskId },
+              'reply: failed to flip awaiting_user → executing; refusing to deliver reply',
             );
             return { ok: false, state: 'persistFailed' as const };
           }
-        } catch (err) {
-          ctx.logger.error(
-            { err, taskId: input.taskId },
-            'reply: handoff parent-flip persist failed',
-          );
-          return { ok: false, state: 'persistFailed' as const };
         }
 
-        if (!handoffTaskId) {
-          try {
-              const handoff = await tasksRouter.createCaller(ctx).create({
-                intent: combinedIntent,
-                replyToTaskId: input.taskId,
+        const delivered =
+          replyKind === 'manual_data'
+            ? supercarHandoffToGenerate(input.taskId, input.message)
+            : supercarReply(
+                input.taskId,
+                input.message,
+                replyAttachmentBlocks.length > 0 ? replyAttachmentBlocks : undefined,
+              );
+        if (delivered) {
+          return { ok: true, state: 'resumed' as const };
+        }
+
+        // No supercar handle — could be a generate-lane intake park
+        // (expert workflow with `missingInputs > 0` routes through
+        // `runGenerateTask`, parks on `[AWAITING_USER_INPUT]`, has no
+        // agent loop to register a handle). In that case we resume by
+        // re-running runGenerateTask under the same taskId with the
+        // combined original-intent + user-reply text.
+        const [parkRow] = await ctx.db
+          .select({
+            intent: tasksTable.intent,
+            status: tasksTable.status,
+            result: tasksTable.result,
+            opusUsed: tasksTable.opusUsed,
+            roleId: tasksTable.roleId,
+            executionId: tasksTable.executionId,
+            executionRevision: tasksTable.executionRevision,
+            coreRecordVersion: tasksTable.coreRecordVersion,
+          })
+          .from(tasksTable)
+          .where(
+            and(
+              eq(tasksTable.externalId, input.taskId),
+              eq(tasksTable.userId, userRow.id),
+              eq(tasksTable.origin, ctx.taskOrigin),
+            ),
+          )
+          .limit(1);
+        const prevResult = normalizeOutput(parkRow?.result ?? null) as Record<
+          string,
+          unknown
+        > | null;
+        if (parkRow) assertLegacyReplyRecord({ ...parkRow, result: prevResult });
+        if (parkRow?.status === 'awaiting_user' && prevResult?.executionMode === 'generate')
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '旧任务缺少完整执行历史，请保留原有要求和附件后重新创建任务。',
+          });
+        const parkedExpertMode =
+          prevResult?.expertMode === 'normal' ||
+          prevResult?.expertMode === 'expert' ||
+          prevResult?.expertMode === 'auto'
+            ? prevResult.expertMode
+            : 'auto';
+        const wasGenerateParked =
+          Boolean(parkRow) &&
+          parkRow!.status === 'awaiting_user' &&
+          prevResult?.executionMode === 'generate';
+        if (!parkRow || !wasGenerateParked) {
+          return { ok: false };
+        }
+
+        // Sweep P2 fix: user replies the bare VALUE (e.g. "美妆护肤")
+        // for an intake question, but the typed workflow's
+        // extractPattern requires an anchor like "品类:" before the
+        // value. The re-parse on the unmodified combined intent
+        // re-misses the field and we park with the SAME question
+        // forever.
+        //
+        // Mitigation: peek at the typed workflow that was driving the
+        // original park and, for each required field whose
+        // extractPattern doesn't match the bare reply text, prepend
+        // the field's label as an anchor so the regex can pick it up
+        // on the next parse round. Uses the EXECUTION registry match
+        // (the typed-workflow lane), not the supercar matcher.
+        const userReply = input.message.trim();
+        const awaitingPlanApproval = prevResult?.planMode === 'awaiting_approval';
+        // Only this reply can approve; plan text, attachments and earlier replies
+        // remain untrusted reference material, never a source of authorization.
+        const planOnly = awaitingPlanApproval && !isExplicitPlanApproval(userReply);
+        const hasPlanContext = awaitingPlanApproval || prevResult?.planText !== undefined;
+        const planContext = hasPlanContext
+          ? z
+              .object({
+                planText: z.string().min(1),
+                planInitialIntent: z.string().optional(),
+                planReplyHistory: z.array(z.string().max(4_000)).max(31).default([]),
+                planFileIds: z.array(z.string().min(1)).max(5).default([]),
+                planWorkflowId: z.string().min(1).nullable().optional(),
+                planLegacyWorkflowId: z.string().min(1).nullable().optional(),
+                planIntakeContext: z.array(z.string()).max(128).default([]),
+              })
+              .safeParse(prevResult)
+          : null;
+        if (planContext && !planContext.success) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '方案上下文无法恢复或修改轮次过多，请新建任务并带上需要保留的要求。',
+          });
+        }
+        const savedContext = planContext?.success ? planContext.data : null;
+        // null is an explicit general-purpose choice; absent means an older task.
+        const savedWorkflow = savedContext?.planWorkflowId
+          ? getExpertWorkflowById(savedContext.planWorkflowId)
+          : null;
+        if (savedContext?.planWorkflowId && !savedWorkflow) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '原方案使用的技能暂不可用，任务仍在等待；请新建任务重新选择技能。',
+          });
+        }
+        const parkingTypedWorkflow =
+          savedContext?.planWorkflowId !== undefined
+            ? savedWorkflow
+            : matchTypedExpertWorkflow({
+                intent: parkRow!.intent,
+                roleId: parkRow!.roleId ?? null,
               });
-            handoffTaskId = handoff.taskId;
-            ctx.logger.info(
-              {
-                parentTaskId: input.taskId,
-                handoffTaskId,
-                handoffStatus: handoff.status,
-                handoffExecutionMode: handoff.executionMode,
-              },
-              'reply: spawned handoff task via createCaller',
+        const savedPlan = savedContext?.planText;
+        const planReplyHistory = savedContext ? [...savedContext.planReplyHistory, userReply] : [];
+        const planIntakeContext = [...(savedContext?.planIntakeContext ?? [])];
+        const planFileIds = savedContext
+          ? [...new Set([...savedContext.planFileIds, ...(input.fileIds ?? [])])]
+          : [];
+        if (planFileIds.length > 5) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '同一方案最多保留5个附件，请合并材料后新建任务。',
+          });
+        }
+        // Never substitute a model's summary for the underlying files. Reload
+        // with ownership/expiry checks before releasing the awaiting-state CAS.
+        // The earlier owner read can precede a transition into this core wait.
+        // Do not reuse blocks that may have been parsed under another lane's
+        // policy. Re-authorize and parse the complete current file set here.
+        const generateFileIds = savedContext ? planFileIds : [...new Set(input.fileIds ?? [])];
+        const generateAttachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] =
+          [];
+        if (generateFileIds.length > 0) {
+          try {
+            const files = await new FileService(ctx.db, ctx.logger).loadMany(
+              generateFileIds,
+              userRow.id,
             );
-          } catch (err) {
-            ctx.logger.error(
-              {
-                err: err instanceof Error ? err.message : String(err),
-                parentTaskId: input.taskId,
-              },
-              'reply: handoff createCaller failed',
-            );
-            // Continue — parent already marked completed above; SPA
-            // shows the completion notice without auto-navigation.
+            if (generateFileIds.some((id) => !files.some((file) => file.row.externalId === id))) {
+              throw new Error('MISSING_PLAN_FILE');
+            }
+            for (const file of files) {
+              const parsed = await parseFileForPrompt(
+                file.buffer,
+                file.row.filename,
+                file.row.mimetype,
+                { completeText: true },
+              );
+              if (!parsed.blocks.length) throw new Error('EMPTY_PLAN_FILE');
+              generateAttachmentBlocks.push(...parsed.blocks);
+            }
+          } catch {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '方案附件已失效或无法读取，任务仍在等待；请重新整理附件后新建任务。',
+            });
           }
-        } else {
-          ctx.logger.info(
-            { parentTaskId: input.taskId, handoffTaskId },
-            'reply: handoff already exists — idempotent reuse',
-          );
+        }
+        let anchoredReply = userReply;
+        if (!awaitingPlanApproval && parkingTypedWorkflow && userReply.length > 0) {
+          const priorIntakeIntent = savedContext
+            ? [
+                savedContext.planInitialIntent ?? parkRow!.intent,
+                ...savedContext.planReplyHistory,
+                ...planIntakeContext,
+              ].join('\n')
+            : parkRow!.intent;
+          const priorParse = parseInputs(priorIntakeIntent, parkingTypedWorkflow);
+          const additions: string[] = [];
+          for (const field of priorParse.missingRequired) {
+            if (!field.extractPattern) continue;
+            if (field.extractPattern.test(userReply)) continue;
+            const anchor = (field.label ?? field.name).split(/[\s/]/)[0];
+            additions.push(`${anchor}: ${userReply}`);
+          }
+          if (additions.length > 0) {
+            anchoredReply = [...additions, userReply].join('\n');
+            if (savedContext) planIntakeContext.push(...additions);
+          }
         }
 
-        // Patch result with handoffTaskId now that createCaller has
-        // returned (or failed). Best-effort — terminal broadcast
-        // below already carries the field for live SPA listeners.
-        try {
-          if (handoffTaskId) {
-            const patched = await repo.patchCompletedTaskResult(input.taskId, {
+        const combinedIntent = [
+          savedContext?.planInitialIntent ?? parkRow!.intent,
+          ...(savedContext ? planReplyHistory : [anchoredReply]).map(
+            (reply) => `\n\n[用户补充]\n${reply}`,
+          ),
+          ...(planIntakeContext.length > 0
+            ? [
+                `\n\n[系统根据待答问题映射的字段，仅辅助解析；非用户原话]\n${planIntakeContext.join('\n')}`,
+              ]
+            : []),
+        ]
+          .join('')
+          .trim();
+
+        // Re-evaluate the workflow on the COMBINED intent. Two outcomes
+        // matter here:
+        //   1. missingInputs is now empty + user supplied platform-source
+        //      keywords (罗盘/抖店) → routeOverride='browser'. We can't
+        //      cleanly hand off to supercar from inside this handler
+        //      today (the supercar dispatch is 1500 lines of inline glue
+        //      in tasks.create, not a callable helper). So we surface a
+        //      structured response and let the SPA prompt the user to
+        //      open a new task with `intent=combinedIntent`. Tracked as
+        //      a follow-up to extract `dispatchSupercar` once we have a
+        //      dedicated reviewer for the refactor.
+        //   2. Otherwise (manual data / paste / "我自己给数据" / still
+        //      missing inputs) → re-run runGenerateTask one shot. The
+        //      runner will either complete (report) or park again with
+        //      a new intake question (the model decides).
+        //
+        // Short-circuit: if the user clearly pasted metrics/data
+        // (`replyKind === 'manual_data'`) we skip the workflow re-run
+        // and go straight to generate. The classifier is conservative,
+        // so a `manual_data` verdict means there are unambiguous numeric
+        // figures or "数据如下" markers — no need to ask whether the
+        // user actually wants the browser path. Avoids edge cases where
+        // a paste happens to contain platform keywords ("罗盘 GMV 156k
+        // UV 28k") and would otherwise trip the browser-handoff branch.
+        // A saved legacy choice may refresh its missing inputs, but later text
+        // must not introduce a legacy workflow that was never selected.
+        const newWorkflow =
+          savedContext?.planWorkflowId === undefined || savedContext.planLegacyWorkflowId
+            ? matchExpertWorkflow(combinedIntent, {
+                hasAttachments: generateAttachmentBlocks.length > 0,
+              })
+            : null;
+        if (
+          savedContext?.planLegacyWorkflowId &&
+          newWorkflow?.id !== savedContext.planLegacyWorkflowId
+        ) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '原方案使用的工作流暂不可用，任务仍在等待；请新建任务重新选择技能。',
+          });
+        }
+        const resumeWorkflowId =
+          savedContext?.planWorkflowId !== undefined
+            ? (savedContext.planWorkflowId ?? newWorkflow?.id ?? null)
+            : (newWorkflow?.id ?? null);
+        const wantsBrowser =
+          !planOnly && replyKind !== 'manual_data' && newWorkflow?.routeOverride === 'browser';
+
+        if (wantsBrowser) {
+          ctx.logger.info(
+            {
+              taskId: input.taskId,
+              workflowId: newWorkflow!.id,
+              missingInputs: newWorkflow!.missingInputs,
+            },
+            'reply: combined intent now wants browser lane — backend auto-handoff',
+          );
+          // F4 — backend-orchestrated auto-handoff. The earlier round
+          // broadcast `autoHandoff: { intent }` and let the SPA fire
+          // createTask, which had two problems:
+          //   1. SPA reconnect could replay the terminal frame and
+          //      double-create the handoff task.
+          //   2. The SPA's createTask charged user quota — even though
+          //      the handoff is logically a continuation of the parent.
+          // Now the backend invokes `tasksRouter.create` itself via
+          // createCaller with `replyToTaskId` set to the parent. That
+          // path skips the quota gate (existing follow-up semantics),
+          // injects the parent context, and returns the new taskId.
+          // Idempotency guard: if `result.handoffTaskId` is already
+          // populated for this parent, reuse it instead of creating a
+          // duplicate (handles WS replay / double-click).
+          const handoffNotice = '需要登录浏览器去后台读取数据，已为你新建一个浏览器任务接续执行。';
+          let handoffTaskId: string | null =
+            typeof prevResult?.handoffTaskId === 'string' ? prevResult.handoffTaskId : null;
+          // F4 ordering fix — createCaller's `tasks.create` follow-up
+          // gate (replyToTaskId path) rejects parents in awaiting_user
+          // ("只能追问已完成/失败/取消的任务"). We must flip the parent
+          // to `completed` BEFORE invoking createCaller, otherwise the
+          // call throws and handoffTaskId stays null. Persist the
+          // pre-handoff state first, then run createCaller, then patch
+          // the result row again to include handoffTaskId on success.
+          // If createCaller throws AFTER the status flip, the parent
+          // stays completed (with combinedIntent in result) — slightly
+          // worse UX than ideal but never blocks the user, and matches
+          // the prior behaviour for partial failure.
+          const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
+          try {
+            const parentResult = {
               ...(prevResult ?? {}),
               executionMode: 'generate',
               handoffSuggestion: 'browser',
               combinedIntent,
               summary: handoffNotice,
-              handoffTaskId,
-            });
-            if (!patched.persisted) {
+            };
+            const persisted = await repo.markAwaitingReplyCompleted(
+              input.taskId,
+              parentResult,
+              userRow.id,
+            );
+            if (!persisted.persisted) {
               ctx.logger.warn(
-                { taskId: input.taskId, handoffTaskId },
-                'reply: handoff result patch guard refused; skipping stale terminal broadcast',
+                { taskId: input.taskId },
+                'reply: handoff parent-flip guard refused; not creating handoff task',
               );
-              return {
-                ok: false,
-                state: 'persistFailed' as const,
-                handoff: 'browser' as const,
-                handoffTaskId,
-              };
+              return { ok: false, state: 'persistFailed' as const };
             }
+          } catch (err) {
+            ctx.logger.error(
+              { err, taskId: input.taskId },
+              'reply: handoff parent-flip persist failed',
+            );
+            return { ok: false, state: 'persistFailed' as const };
           }
-          broadcastToUser(ctx.userId, {
-            type: 'server.task.terminal',
-            taskId: input.taskId,
-            status: 'completed',
-            summary: handoffNotice,
-            ...(handoffTaskId ? { handoffTaskId } : {}),
-          });
-        } catch (err) {
-            ctx.logger.error({ err, taskId: input.taskId }, 'reply: handoff persist failed');
-        }
-        return {
-          ok: true,
-          handoff: 'browser' as const,
-          state: 'resumed' as const,
-          ...(handoffTaskId ? { handoffTaskId } : {}),
-        };
-      }
 
-      // Generate-lane resume. Flip to executing, then dispatch the
-      // runner with the combined intent. The preamble carries the
-      // expert-workflow context (now with `missingInputs.length === 0`
-      // → no intake-guard, so the model will produce a real report).
-      const resumeGenerateRuntime = resolveGenerateRuntimeForUser(
-        ctx.userId,
-        userRow.modelDataRegion,
-      );
-      const resumeGenerateResponsesAdapter =
-        resumeGenerateRuntime.kind === 'ready'
-          ? resumeGenerateRuntime.responses('standard')
-          : null;
-      const resumeVerifierRuntime = resolveVerifierRuntimeForUser(
-        ctx.userId,
-        userRow.modelDataRegion,
-      );
-      const resumeSemanticVerifierAdapter =
-        resumeVerifierRuntime.kind === 'ready'
-          ? resumeVerifierRuntime.messages('verify_strict')
-          : null;
-      const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
-      const newWorkflowPreamble = newWorkflow?.promptPreamble ?? '';
-      const effectiveCombined =
-        (newWorkflowPreamble ? `${newWorkflowPreamble}\n` : '') + combinedIntent;
-      assertCoreTaskInput({
-        initialRequest: savedContext?.planInitialIntent ?? parkRow.intent,
-        userTurns: savedContext ? planReplyHistory : [userReply],
-        phase: planOnly ? 'revise' : savedContext ? 'approved_execution' : 'direct',
-        workflow: parkingTypedWorkflow
-          ? { id: parkingTypedWorkflow.workflowId, sections: parkingTypedWorkflow.reportSections }
-          : resumeWorkflowId ? { id: resumeWorkflowId, sections: [] } : null,
-        referencePlan: savedPlan ?? null,
-        fileIds: generateFileIds,
-        blocks: generateAttachmentBlocks,
-      });
-      const resumePersisted = await repo.markAwaitingReplyResumed(input.taskId, userRow.id);
-      if (!resumePersisted.persisted) {
-        ctx.logger.warn(
-          { taskId: input.taskId },
-          'reply: generate resume guard refused; not dispatching runner',
-        );
-        return { ok: false, state: 'persistFailed' as const };
-      }
-      initExecution({
-        taskId: input.taskId,
-        intent: combinedIntent,
-        executionMode: 'generate',
-        expertWorkflowId: resumeWorkflowId,
-        expertMode: parkedExpertMode,
-        hasAttachments: generateAttachmentBlocks.length > 0,
-      });
-      const resumeStartedAt = Date.now();
-      void runTaskBackground(ctx, async (ctx) => (async () => {
-        let executionVerification: VerificationResult | null = null;
-        try {
-          let outcome: GenerateOutcome;
+          if (!handoffTaskId) {
+            try {
+              const handoff = await tasksRouter.createCaller(ctx).create({
+                intent: combinedIntent,
+                replyToTaskId: input.taskId,
+              });
+              handoffTaskId = handoff.taskId;
+              ctx.logger.info(
+                {
+                  parentTaskId: input.taskId,
+                  handoffTaskId,
+                  handoffStatus: handoff.status,
+                  handoffExecutionMode: handoff.executionMode,
+                },
+                'reply: spawned handoff task via createCaller',
+              );
+            } catch (err) {
+              ctx.logger.error(
+                {
+                  err: err instanceof Error ? err.message : String(err),
+                  parentTaskId: input.taskId,
+                },
+                'reply: handoff createCaller failed',
+              );
+              // Continue — parent already marked completed above; SPA
+              // shows the completion notice without auto-navigation.
+            }
+          } else {
+            ctx.logger.info(
+              { parentTaskId: input.taskId, handoffTaskId },
+              'reply: handoff already exists — idempotent reuse',
+            );
+          }
+
+          // Patch result with handoffTaskId now that createCaller has
+          // returned (or failed). Best-effort — terminal broadcast
+          // below already carries the field for live SPA listeners.
           try {
-            outcome = resumeGenerateResponsesAdapter
-              ? await runGenerateTask({
-                  taskId: input.taskId,
-                  userId: ctx.userId,
-                  intent: effectiveCombined,
-                  planOnly,
-                  planExecutionApproved: Boolean(savedContext && !planOnly),
-                  ...(savedContext?.planWorkflowId !== undefined
-                    ? { workflowOverride: savedWorkflow }
-                    : {}),
-                  ...(savedPlan ? { executionPlan: savedPlan } : {}),
-                  // The typed parser takes the first match per field. Give only
-                  // that parser newest explicit user turns first, then derived
-                  // missing-field mappings, then the initial request. The model,
-                  // verifier and suggestions still receive chronological history.
-                  ...(savedContext ? {
-                    intakeIntent: [
-                      ...[...planReplyHistory].reverse(),
-                      ...[...planIntakeContext].reverse(),
-                      savedContext.planInitialIntent ?? parkRow!.intent,
-                    ].join('\n'),
-                  } : {}),
-                  ...(parkRow!.roleId ? { skillId: parkRow!.roleId } : {}),
-                  expertMode: parkedExpertMode,
-                  responsesAdapter: resumeGenerateResponsesAdapter,
-                  logger: ctx.logger,
-                  // F2 — pass user-uploaded attachments through to the
-                  // generate runner so a parked-from-generate task that
-                  // resumes with a file (e.g. Excel of metrics) sees the
-                  // attachment alongside the original intent.
-                  ...(generateAttachmentBlocks.length > 0
-                    ? { attachments: generateAttachmentBlocks }
-                    : {}),
-                  onStreamDelta: (delta) => {
-                    try {
-                      broadcastToUser(ctx.userId, {
-                        type: 'server.task.stream',
-                        taskId: input.taskId,
-                        delta,
-                      });
-                    } catch (err) {
-                      ctx.logger.warn(
-                        { err, taskId: input.taskId },
-                        'reply: broadcast stream delta failed',
-                      );
-                    }
-                  },
-                })
-              : {
+            if (handoffTaskId) {
+              const patched = await repo.patchCompletedTaskResult(input.taskId, {
+                ...(prevResult ?? {}),
+                executionMode: 'generate',
+                handoffSuggestion: 'browser',
+                combinedIntent,
+                summary: handoffNotice,
+                handoffTaskId,
+              });
+              if (!patched.persisted) {
+                ctx.logger.warn(
+                  { taskId: input.taskId, handoffTaskId },
+                  'reply: handoff result patch guard refused; skipping stale terminal broadcast',
+                );
+                return {
+                  ok: false,
+                  state: 'persistFailed' as const,
+                  handoff: 'browser' as const,
+                  handoffTaskId,
+                };
+              }
+            }
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId: input.taskId,
+              status: 'completed',
+              summary: handoffNotice,
+              ...(handoffTaskId ? { handoffTaskId } : {}),
+            });
+          } catch (err) {
+            ctx.logger.error({ err, taskId: input.taskId }, 'reply: handoff persist failed');
+          }
+          return {
+            ok: true,
+            handoff: 'browser' as const,
+            state: 'resumed' as const,
+            ...(handoffTaskId ? { handoffTaskId } : {}),
+          };
+        }
+
+        // Generate-lane resume. Flip to executing, then dispatch the
+        // runner with the combined intent. The preamble carries the
+        // expert-workflow context (now with `missingInputs.length === 0`
+        // → no intake-guard, so the model will produce a real report).
+        const resumeGenerateRuntime = resolveGenerateRuntimeForUser(
+          ctx.userId,
+          userRow.modelDataRegion,
+        );
+        const resumeGenerateResponsesAdapter =
+          resumeGenerateRuntime.kind === 'ready'
+            ? resumeGenerateRuntime.responses('standard')
+            : null;
+        const resumeVerifierRuntime = resolveVerifierRuntimeForUser(
+          ctx.userId,
+          userRow.modelDataRegion,
+        );
+        const resumeSemanticVerifierAdapter =
+          resumeVerifierRuntime.kind === 'ready'
+            ? resumeVerifierRuntime.messages('verify_strict')
+            : null;
+        const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
+        const newWorkflowPreamble = newWorkflow?.promptPreamble ?? '';
+        const effectiveCombined =
+          (newWorkflowPreamble ? `${newWorkflowPreamble}\n` : '') + combinedIntent;
+        assertCoreTaskInput({
+          initialRequest: savedContext?.planInitialIntent ?? parkRow.intent,
+          userTurns: savedContext ? planReplyHistory : [userReply],
+          phase: planOnly ? 'revise' : savedContext ? 'approved_execution' : 'direct',
+          workflow: parkingTypedWorkflow
+            ? { id: parkingTypedWorkflow.workflowId, sections: parkingTypedWorkflow.reportSections }
+            : resumeWorkflowId
+              ? { id: resumeWorkflowId, sections: [] }
+              : null,
+          referencePlan: savedPlan ?? null,
+          fileIds: generateFileIds,
+          blocks: generateAttachmentBlocks,
+        });
+        const resumePersisted = await repo.markAwaitingReplyResumed(input.taskId, userRow.id);
+        if (!resumePersisted.persisted) {
+          ctx.logger.warn(
+            { taskId: input.taskId },
+            'reply: generate resume guard refused; not dispatching runner',
+          );
+          return { ok: false, state: 'persistFailed' as const };
+        }
+        initExecution({
+          taskId: input.taskId,
+          intent: combinedIntent,
+          executionMode: 'generate',
+          expertWorkflowId: resumeWorkflowId,
+          expertMode: parkedExpertMode,
+          hasAttachments: generateAttachmentBlocks.length > 0,
+        });
+        const resumeStartedAt = Date.now();
+        void runTaskBackground(ctx, async (ctx) =>
+          (async () => {
+            let executionVerification: VerificationResult | null = null;
+            try {
+              let outcome: GenerateOutcome;
+              try {
+                outcome = resumeGenerateResponsesAdapter
+                  ? await runGenerateTask({
+                      taskId: input.taskId,
+                      userId: ctx.userId,
+                      intent: effectiveCombined,
+                      planOnly,
+                      planExecutionApproved: Boolean(savedContext && !planOnly),
+                      ...(savedContext?.planWorkflowId !== undefined
+                        ? { workflowOverride: savedWorkflow }
+                        : {}),
+                      ...(savedPlan ? { executionPlan: savedPlan } : {}),
+                      // The typed parser takes the first match per field. Give only
+                      // that parser newest explicit user turns first, then derived
+                      // missing-field mappings, then the initial request. The model,
+                      // verifier and suggestions still receive chronological history.
+                      ...(savedContext
+                        ? {
+                            intakeIntent: [
+                              ...[...planReplyHistory].reverse(),
+                              ...[...planIntakeContext].reverse(),
+                              savedContext.planInitialIntent ?? parkRow!.intent,
+                            ].join('\n'),
+                          }
+                        : {}),
+                      ...(parkRow!.roleId ? { skillId: parkRow!.roleId } : {}),
+                      expertMode: parkedExpertMode,
+                      responsesAdapter: resumeGenerateResponsesAdapter,
+                      firecrawl: ctx.firecrawl ?? null,
+                      logger: ctx.logger,
+                      // F2 — pass user-uploaded attachments through to the
+                      // generate runner so a parked-from-generate task that
+                      // resumes with a file (e.g. Excel of metrics) sees the
+                      // attachment alongside the original intent.
+                      ...(generateAttachmentBlocks.length > 0
+                        ? { attachments: generateAttachmentBlocks }
+                        : {}),
+                      onStreamDelta: (delta) => {
+                        try {
+                          broadcastToUser(ctx.userId, {
+                            type: 'server.task.stream',
+                            taskId: input.taskId,
+                            delta,
+                          });
+                        } catch (err) {
+                          ctx.logger.warn(
+                            { err, taskId: input.taskId },
+                            'reply: broadcast stream delta failed',
+                          );
+                        }
+                      },
+                    })
+                  : {
+                      status: 'failed' as const,
+                      summary: '',
+                      reason: generateRuntimeUnavailableReason(
+                        resumeGenerateRuntime.kind === 'unavailable'
+                          ? resumeGenerateRuntime.reasonCode
+                          : 'MODEL_MIGRATION_IN_PROGRESS',
+                      ),
+                      inputTokens: 0,
+                      outputTokens: 0,
+                      durationMs: 0,
+                    };
+              } catch {
+                ctx.logger.error(
+                  { taskId: input.taskId, code: 'GENERATE_RESUME_RUNNER_THROWN' },
+                  'reply: runner threw',
+                );
+                outcome = {
                   status: 'failed' as const,
                   summary: '',
-                  reason: generateRuntimeUnavailableReason(
-                    resumeGenerateRuntime.kind === 'unavailable'
-                      ? resumeGenerateRuntime.reasonCode
-                      : 'MODEL_MIGRATION_IN_PROGRESS',
-                  ),
+                  reason: '生成服务暂时不可用，请稍后重试。',
                   inputTokens: 0,
                   outputTokens: 0,
                   durationMs: 0,
                 };
-          } catch {
-            ctx.logger.error(
-              { taskId: input.taskId, code: 'GENERATE_RESUME_RUNNER_THROWN' },
-              'reply: runner threw',
-            );
-            outcome = {
-              status: 'failed' as const,
-              summary: '',
-              reason: '生成服务暂时不可用，请稍后重试。',
-              inputTokens: 0,
-              outputTokens: 0,
-              durationMs: 0,
-            };
-          }
+              }
 
-          const reviewed = await reviewGenerateOutcome({
-            taskId: input.taskId,
-            intent: combinedIntent,
-            outcome,
-            semanticAdapter: resumeSemanticVerifierAdapter,
-            logger: ctx.logger,
-            evidenceSourceDetail: 'llm_generate_resume_response',
-            onVerifying: () => broadcastSubStatus(ctx.userId, input.taskId, 'verifying'),
-          });
-          outcome = reviewed.outcome;
-          executionVerification = reviewed.verification;
-          const metadata = {
-            executionMode: 'generate' as const,
-            finalExecutionMode: 'generate' as const,
-            expertWorkflowId: resumeWorkflowId,
-            expertMode: parkedExpertMode,
-            selectedRole: parkRow!.roleId ?? null,
-            ...(resumeGenerateResponsesAdapter
-              ? {
-                  provider: resumeGenerateResponsesAdapter.metadata.provider,
-                  model: resumeGenerateResponsesAdapter.metadata.model,
-                  region: resumeGenerateResponsesAdapter.metadata.region,
-                  deploymentScope: resumeGenerateResponsesAdapter.metadata.deploymentScope,
-                }
-              : {}),
-            fallbackChain: ['generate-resume'],
-            elapsedMs: Date.now() - resumeStartedAt,
-            ...(savedContext ? {
-              approvedPlanText: savedPlan,
-              planReplyHistory,
-            } : {}),
-          };
-
-          if (reviewed.terminalStatus === 'completed' && outcome.status === 'completed') {
-            const persisted = await repo.persistVisionOutcome(input.taskId, {
-              status: 'completed',
-              summary: outcome.summary,
-              tickCount: 1,
-              metadata,
-            });
-            if (persisted.persisted) {
-              broadcastToUser(ctx.userId, {
-                type: 'server.task.terminal',
+              const reviewed = await reviewGenerateOutcome({
                 taskId: input.taskId,
-                status: 'completed',
-                ...(outcome.summary ? { summary: outcome.summary } : {}),
-              });
-              const summary = outcome.summary;
-              void runTaskBackground(ctx, async (ctx) => publishCoreTaskSuggestions({
-                wiring: modelRuntimeWiring,
-                actorExternalId: ctx.userId,
-                modelDataRegion: userRow.modelDataRegion,
-                rawIntent: input.message,
                 intent: combinedIntent,
-                summary,
-                isCurrent: () => repo.isCurrentCompletedOutcome(input.taskId, summary),
-                persist: (suggestions) => repo.persistCurrentCompletedSuggestions(input.taskId, summary, suggestions),
-                publish: (suggestions) => broadcastToUser(ctx.userId, {
-                  type: 'server.supercar.suggestions',
-                  taskId: input.taskId,
-                  suggestions,
-                }),
-              }));
-            }
-          } else if (
-            reviewed.terminalStatus === 'partial_success' &&
-            outcome.status === 'completed'
-          ) {
-            const persisted = await repo.persistVisionOutcome(input.taskId, {
-              status: 'partial_success',
-              summary: outcome.summary,
-              tickCount: 1,
-              metadata,
-              failedChecks: reviewed.failedChecks,
-            });
-            if (persisted.persisted) {
-              broadcastToUser(ctx.userId, {
-                type: 'server.task.terminal',
-                taskId: input.taskId,
-                status: 'partial_success',
-                ...(outcome.summary ? { summary: outcome.summary } : {}),
-                ...(reviewed.failedChecks.length > 0
-                  ? { failedChecks: reviewed.failedChecks }
-                  : {}),
-              });
-            }
-          } else if (outcome.status === 'awaiting_user') {
-            // Park again — model still wants more info.
-            const persisted = await repo.persistAwaitingUser({
-              taskExternalId: input.taskId,
-              question: outcome.summary,
-              awaitingKind: 'clarification',
-              result: {
-                ...metadata,
-                executionMode: 'generate' as const,
-                ...(savedContext ? {
-                  ...(planOnly ? { planMode: 'awaiting_approval' } : {}),
-                  planText: planOnly ? outcome.summary : savedContext.planText,
-                  planInitialIntent: savedContext.planInitialIntent ?? parkRow!.intent,
-                  planReplyHistory,
-                  planFileIds,
-                  ...(savedContext.planWorkflowId !== undefined
-                    ? { planWorkflowId: savedContext.planWorkflowId }
-                    : {}),
-                  ...(savedContext.planLegacyWorkflowId !== undefined
-                    ? { planLegacyWorkflowId: savedContext.planLegacyWorkflowId }
-                    : {}),
-                  planIntakeContext,
-                } : {}),
-              },
-            });
-            if (persisted.persisted) {
-              broadcastToUser(ctx.userId, {
-                type: 'server.supercar.awaiting_user',
-                taskId: input.taskId,
-                question: outcome.summary,
-                awaitingKind: 'clarification',
-              });
-            }
-          } else {
-            const reason =
-              outcome.status === 'failed'
-                ? (outcome.reason ?? 'generate-resume: api failed')
-                : (reviewed.failureSummary ?? '质量校验未通过');
-            const persisted = await repo.persistVisionOutcome(input.taskId, {
-              status: 'failed',
-              reason,
-              tickCount: 1,
-              metadata,
-              failedChecks: reviewed.failedChecks,
-            });
-            if (persisted.persisted) {
-              broadcastToUser(ctx.userId, {
-                type: 'server.task.terminal',
-                taskId: input.taskId,
-                status: 'failed',
-                ...(reason ? { reason } : {}),
-                ...(reviewed.failedChecks.length > 0
-                  ? { failedChecks: reviewed.failedChecks }
-                  : {}),
-              });
-            }
-          }
-        } catch (err) {
-          ctx.logger.error({ err, taskId: input.taskId }, 'reply: persist resume outcome failed');
-        } finally {
-          try {
-            const persisted = await persistExecution({
-              taskId: input.taskId,
-              verification: executionVerification,
-              db: ctx.db,
-              logger: ctx.logger,
-            });
-            if (persisted) {
-              await writeLedgerToDb({
-                taskExternalId: input.taskId,
-                verification: executionVerification,
-                db: ctx.db,
+                outcome,
+                semanticAdapter: resumeSemanticVerifierAdapter,
                 logger: ctx.logger,
+                evidenceSourceDetail: 'llm_generate_resume_response',
+                onVerifying: () => broadcastSubStatus(ctx.userId, input.taskId, 'verifying'),
               });
+              outcome = reviewed.outcome;
+              executionVerification = reviewed.verification;
+              const metadata = {
+                executionMode: 'generate' as const,
+                finalExecutionMode: 'generate' as const,
+                expertWorkflowId: resumeWorkflowId,
+                expertMode: parkedExpertMode,
+                selectedRole: parkRow!.roleId ?? null,
+                ...(resumeGenerateResponsesAdapter
+                  ? {
+                      provider: resumeGenerateResponsesAdapter.metadata.provider,
+                      model: resumeGenerateResponsesAdapter.metadata.model,
+                      region: resumeGenerateResponsesAdapter.metadata.region,
+                      deploymentScope: resumeGenerateResponsesAdapter.metadata.deploymentScope,
+                    }
+                  : {}),
+                fallbackChain: ['generate-resume'],
+                elapsedMs: Date.now() - resumeStartedAt,
+                ...(savedContext
+                  ? {
+                      approvedPlanText: savedPlan,
+                      planReplyHistory,
+                    }
+                  : {}),
+              };
+
+              if (reviewed.terminalStatus === 'completed' && outcome.status === 'completed') {
+                const persisted = await repo.persistVisionOutcome(input.taskId, {
+                  status: 'completed',
+                  summary: outcome.summary,
+                  tickCount: 1,
+                  metadata,
+                });
+                if (persisted.persisted) {
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.task.terminal',
+                    taskId: input.taskId,
+                    status: 'completed',
+                    ...(outcome.summary ? { summary: outcome.summary } : {}),
+                  });
+                  const summary = outcome.summary;
+                  void runTaskBackground(ctx, async (ctx) =>
+                    publishCoreTaskSuggestions({
+                      wiring: modelRuntimeWiring,
+                      actorExternalId: ctx.userId,
+                      modelDataRegion: userRow.modelDataRegion,
+                      rawIntent: input.message,
+                      intent: combinedIntent,
+                      summary,
+                      isCurrent: () => repo.isCurrentCompletedOutcome(input.taskId, summary),
+                      persist: (suggestions) =>
+                        repo.persistCurrentCompletedSuggestions(input.taskId, summary, suggestions),
+                      publish: (suggestions) =>
+                        broadcastToUser(ctx.userId, {
+                          type: 'server.supercar.suggestions',
+                          taskId: input.taskId,
+                          suggestions,
+                        }),
+                    }),
+                  );
+                }
+              } else if (
+                reviewed.terminalStatus === 'partial_success' &&
+                outcome.status === 'completed'
+              ) {
+                const persisted = await repo.persistVisionOutcome(input.taskId, {
+                  status: 'partial_success',
+                  summary: outcome.summary,
+                  tickCount: 1,
+                  metadata,
+                  failedChecks: reviewed.failedChecks,
+                });
+                if (persisted.persisted) {
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.task.terminal',
+                    taskId: input.taskId,
+                    status: 'partial_success',
+                    ...(outcome.summary ? { summary: outcome.summary } : {}),
+                    ...(reviewed.failedChecks.length > 0
+                      ? { failedChecks: reviewed.failedChecks }
+                      : {}),
+                  });
+                }
+              } else if (outcome.status === 'awaiting_user') {
+                // Park again — model still wants more info.
+                const persisted = await repo.persistAwaitingUser({
+                  taskExternalId: input.taskId,
+                  question: outcome.summary,
+                  awaitingKind: 'clarification',
+                  result: {
+                    ...metadata,
+                    executionMode: 'generate' as const,
+                    ...(savedContext
+                      ? {
+                          ...(planOnly ? { planMode: 'awaiting_approval' } : {}),
+                          planText: planOnly ? outcome.summary : savedContext.planText,
+                          planInitialIntent: savedContext.planInitialIntent ?? parkRow!.intent,
+                          planReplyHistory,
+                          planFileIds,
+                          ...(savedContext.planWorkflowId !== undefined
+                            ? { planWorkflowId: savedContext.planWorkflowId }
+                            : {}),
+                          ...(savedContext.planLegacyWorkflowId !== undefined
+                            ? { planLegacyWorkflowId: savedContext.planLegacyWorkflowId }
+                            : {}),
+                          planIntakeContext,
+                        }
+                      : {}),
+                  },
+                });
+                if (persisted.persisted) {
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.supercar.awaiting_user',
+                    taskId: input.taskId,
+                    question: outcome.summary,
+                    awaitingKind: 'clarification',
+                  });
+                }
+              } else {
+                const reason =
+                  outcome.status === 'failed'
+                    ? (outcome.reason ?? 'generate-resume: api failed')
+                    : (reviewed.failureSummary ?? '质量校验未通过');
+                const persisted = await repo.persistVisionOutcome(input.taskId, {
+                  status: 'failed',
+                  reason,
+                  tickCount: 1,
+                  metadata,
+                  failedChecks: reviewed.failedChecks,
+                });
+                if (persisted.persisted) {
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.task.terminal',
+                    taskId: input.taskId,
+                    status: 'failed',
+                    ...(reason ? { reason } : {}),
+                    ...(reviewed.failedChecks.length > 0
+                      ? { failedChecks: reviewed.failedChecks }
+                      : {}),
+                  });
+                }
+              }
+            } catch (err) {
+              ctx.logger.error(
+                { err, taskId: input.taskId },
+                'reply: persist resume outcome failed',
+              );
+            } finally {
+              try {
+                const persisted = await persistExecution({
+                  taskId: input.taskId,
+                  verification: executionVerification,
+                  db: ctx.db,
+                  logger: ctx.logger,
+                });
+                if (persisted) {
+                  await writeLedgerToDb({
+                    taskExternalId: input.taskId,
+                    verification: executionVerification,
+                    db: ctx.db,
+                    logger: ctx.logger,
+                  });
+                }
+              } finally {
+                disposeExecution(input.taskId);
+              }
             }
-          } finally {
-            disposeExecution(input.taskId);
-          }
-        }
-      })());
-      return { ok: true, state: 'resumed' as const };
-    },
-  ),
+          })(),
+        );
+        return { ok: true, state: 'resumed' as const };
+      },
+    ),
 
   /**
    * Supercar-only: abort a running task. Sets the in-memory abort flag;
@@ -9966,8 +11144,9 @@ export const tasksRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
       const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
-      const aborted = localChromeTaskSessions.abort(ctx.userId, input.taskId) || supercarAbort(input.taskId);
-      if (aborted) {
+      const aborted =
+        localChromeTaskSessions.abort(ctx.userId, input.taskId) || supercarAbort(input.taskId);
+      if (aborted && taskRow.status !== 'awaiting_user') {
         try {
           await repo.recordCancelRequested(input.taskId, taskRow.status as TaskState['status']);
         } catch (err) {
@@ -10091,6 +11270,7 @@ export const tasksRouter = router({
           status: tasksTable.status,
           origin: tasksTable.origin,
           result: tasksTable.result,
+          sourceContext: tasksTable.sourceContext,
         })
         .from(tasksTable)
         .where(
@@ -10105,96 +11285,101 @@ export const tasksRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: '找不到浏览器任务' });
       }
       return browserSessionRestoreFlights.run(browserPool, input.taskId, async () => {
-          const existing = browserPool.peek(input.taskId);
-          if (existing?.status === 'ready') {
-            if (existing.userId !== ctx.userId) {
-              throw new TRPCError({
-                code: 'FORBIDDEN',
-                message: '浏览器归属校验失败',
-              });
-            }
-            browserPool.retain(
-              input.taskId,
-              appEnv.BROWSER_TERMINAL_RETENTION_MS,
-              'terminal-workspace',
-            );
-            let currentUrl = 'about:blank';
-            try {
-              currentUrl = (await existing.executor.getPage()).url();
-            } catch {
-              const target = restorableBrowserTarget(taskRow);
-              if (target) currentUrl = target.url;
-            }
-            return {
-              status: 'ready' as const,
-              restored: false,
-              url: currentUrl,
-            };
-          }
-          if (existing) {
+        const existing = browserPool.peek(input.taskId);
+        if (existing?.status === 'ready') {
+          if (existing.userId !== ctx.userId) {
             throw new TRPCError({
-              code: 'CONFLICT',
-              message: '浏览器工作区正在释放，请稍后重试',
+              code: 'FORBIDDEN',
+              message: '浏览器归属校验失败',
             });
           }
-
-          const target = restorableBrowserTarget(taskRow);
-          if (!target) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: '这个任务没有可恢复的真实浏览器页面',
-            });
-          }
-
-          const decision = await defaultBrowserNetworkPolicy.check(target.url);
-          if (!decision.allowed) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: decision.message,
-            });
-          }
-
-          let allocated = false;
+          browserPool.retain(
+            input.taskId,
+            appEnv.BROWSER_TERMINAL_RETENTION_MS,
+            'terminal-workspace',
+          );
+          let currentUrl = 'about:blank';
           try {
-          const instance = await browserPool.allocate(input.taskId, ctx.userId);
-            allocated = true;
-            await instance.executor.resetPageForTask();
-            const page = (await instance.executor.getPage()) as unknown as PageLike;
-            const navigation = await instance.executor.navigate(page, target.url);
-            if (!navigation.ok) {
-              throw new Error(navigation.message ?? '无法恢复最后页面');
-            }
-            const restoredPage = await instance.executor.getPage();
-            const restoredUrl = restoredPage.url();
-            browserPool.retain(
-              input.taskId,
-              appEnv.BROWSER_TERMINAL_RETENTION_MS,
-              'terminal-workspace',
-            );
-            return {
-              status: 'ready' as const,
-              restored: true,
-              url: restoredUrl || target.url,
-            };
-          } catch (err) {
-            if (allocated) {
-              await browserPool
-                .release(input.taskId, 'terminal-workspace-restore-failed')
-                .catch(() => {});
-            }
-            ctx.logger.warn(
-              {
-                taskId: input.taskId,
-                userId: ctx.userId,
-                err: err instanceof Error ? err.message : String(err),
-              },
-              'tasks.ensureBrowserSession: restore failed',
-            );
-            throw new TRPCError({
-              code: 'INTERNAL_SERVER_ERROR',
-              message: '浏览器工作区恢复失败，请稍后重试',
-            });
+            currentUrl = (await existing.executor.getPage()).url();
+          } catch {
+            const target = restorableBrowserTarget(taskRow);
+            if (target) currentUrl = target.url;
           }
+          return {
+            status: 'ready' as const,
+            restored: false,
+            url: currentUrl,
+          };
+        }
+        if (existing) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: '浏览器工作区正在释放，请稍后重试',
+          });
+        }
+
+        const target = restorableBrowserTarget(taskRow);
+        if (!target) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '这个任务没有可恢复的真实浏览器页面',
+          });
+        }
+
+        const decision = await defaultBrowserNetworkPolicy.check(target.url);
+        if (!decision.allowed) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: decision.message,
+          });
+        }
+
+        let allocated = false;
+        try {
+          const instance = await browserPool.allocate(input.taskId, ctx.userId, undefined, {
+            targetUrl: target.url,
+            // Fail closed: only a task stored as vault_allowed may reload a session;
+            // legacy rows and logged-out promises restore anonymously (D17-P1-02).
+            sessionPolicy: storedBrowserSessionPolicy(taskRow),
+          });
+          allocated = true;
+          await instance.executor.resetPageForTask();
+          const page = (await instance.executor.getPage()) as unknown as PageLike;
+          const navigation = await instance.executor.navigate(page, target.url);
+          if (!navigation.ok) {
+            throw new Error(navigation.message ?? '无法恢复最后页面');
+          }
+          const restoredPage = await instance.executor.getPage();
+          const restoredUrl = restoredPage.url();
+          browserPool.retain(
+            input.taskId,
+            appEnv.BROWSER_TERMINAL_RETENTION_MS,
+            'terminal-workspace',
+          );
+          return {
+            status: 'ready' as const,
+            restored: true,
+            url: restoredUrl || target.url,
+          };
+        } catch (err) {
+          if (allocated) {
+            await browserPool
+              .release(input.taskId, 'terminal-workspace-restore-failed')
+              .catch(() => {});
+          }
+          ctx.logger.warn(
+            {
+              taskId: input.taskId,
+              userId: ctx.userId,
+              err: err instanceof Error ? err.message : String(err),
+            },
+            'tasks.ensureBrowserSession: restore failed',
+          );
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: '浏览器工作区恢复失败，请稍后重试',
+          });
+        }
       });
     }),
 
@@ -10302,6 +11487,9 @@ export const tasksRouter = router({
    * `{ok:false, reason}` so the UI can show a subtle toast rather
    * than a TRPC error banner for something as cheap as "no page yet".
    */
+  browserCaptcha: browserCaptchaProcedure,
+  browserProfileStatus: browserProfileStatusProcedure,
+  browserProfileClear: browserProfileClearProcedure,
   browserControlState: browserControlStateProcedure,
   localChromeTabs: localChromeTabsProcedure,
   browserControl: browserControlProcedure,
@@ -10939,7 +12127,8 @@ async function persistSupercarOutcome(
         ...finalFields,
         ...(metadata ? { metadata } : {}),
       });
-    } else if (outcome.status === 'cancelled') {
+    }
+    if (outcome.status === 'cancelled') {
       // Phase 1 follow-up — capture terminal frame on cancel too.
       // Users sometimes cancel mid-task and want to see the last
       // visible state.
@@ -10949,7 +12138,8 @@ async function persistSupercarOutcome(
         ...finalFields,
         ...(metadata ? { metadata } : {}),
       });
-    } else if (outcome.status === 'timeout') {
+    }
+    if (outcome.status === 'timeout') {
       return await repo.persistVisionOutcome(taskId, {
         status: 'failed',
         reason: friendlyTaskFailureReason(
@@ -10960,19 +12150,15 @@ async function persistSupercarOutcome(
         ...finalFields,
         ...(metadata ? { metadata } : {}),
       });
-    } else {
-      // 'failed'
-      return await repo.persistVisionOutcome(taskId, {
-        status: 'failed',
-        reason: friendlyTaskFailureReason(
-          outcome.status,
-          outcome.reason ?? 'supercar: task failed',
-        ),
-        tickCount: outcome.iterations,
-        ...finalFields,
-        ...(metadata ? { metadata } : {}),
-      });
     }
+    // 'failed'
+    return await repo.persistVisionOutcome(taskId, {
+      status: 'failed',
+      reason: friendlyTaskFailureReason(outcome.status, outcome.reason ?? 'supercar: task failed'),
+      tickCount: outcome.iterations,
+      ...finalFields,
+      ...(metadata ? { metadata } : {}),
+    });
   } catch (err) {
     // Best-effort — persistence failure is logged by the caller's .then().
     // Rethrow so the caller's logger catches it.

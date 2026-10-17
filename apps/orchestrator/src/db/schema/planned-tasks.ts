@@ -40,6 +40,12 @@ export const plannedTasks = mysqlTable(
     lastRunAt: datetime('last_run_at', { mode: 'date', fsp: 3 }),
     lastRunStatus: varchar('last_run_status', { length: 24 }),
     lastError: text('last_error'),
+    /** Batch 10.3 (migration 0065) — outcome notification preferences. */
+    notifyOnSuccess: boolean('notify_on_success').notNull().default(false),
+    failureNotifyThreshold: int('failure_notify_threshold', { unsigned: true })
+      .notNull()
+      .default(1),
+    consecutiveFailures: int('consecutive_failures', { unsigned: true }).notNull().default(0),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()
       .default(sql`CURRENT_TIMESTAMP(3)`),
@@ -142,11 +148,7 @@ export const plannedTaskRuns = mysqlTable(
   },
   (t) => [
     uniqueIndex('uk_planned_runs_external_id').on(t.externalId),
-    uniqueIndex('uk_planned_runs_occurrence').on(
-      t.plannedTaskId,
-      t.seriesScheduledFor,
-      t.trigger,
-    ),
+    uniqueIndex('uk_planned_runs_occurrence').on(t.plannedTaskId, t.seriesScheduledFor, t.trigger),
     index('ix_planned_runs_plan_created').on(t.plannedTaskId, t.createdAt),
     index('ix_planned_runs_status').on(t.status),
     index('ix_planned_runs_task').on(t.taskId),
@@ -162,10 +164,10 @@ export const plannedTaskRunItems = mysqlTable(
     plannedTaskRunId: bigint('planned_task_run_id', { mode: 'number', unsigned: true })
       .notNull()
       .references(() => plannedTaskRuns.id, { onDelete: 'cascade' }),
-    plannedTaskItemId: bigint('planned_task_item_id', { mode: 'number', unsigned: true }).references(
-      () => plannedTaskItems.id,
-      { onDelete: 'set null' },
-    ),
+    plannedTaskItemId: bigint('planned_task_item_id', {
+      mode: 'number',
+      unsigned: true,
+    }).references(() => plannedTaskItems.id, { onDelete: 'set null' }),
     seq: int('seq', { unsigned: true }).notNull(),
     instruction: text('instruction').notNull(),
     status: varchar('status', { length: 24 }).notNull().default('pending'),

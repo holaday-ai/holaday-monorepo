@@ -1,9 +1,9 @@
-import type { ActionResult, ScreenshotResult } from './vision-loop/playwright-executor.js';
 import {
   type BrowserNetworkPolicy,
   defaultBrowserNetworkPolicy,
   staticBrowserUrlSafetyMessage,
 } from './browser-network-policy.js';
+import type { ActionResult, ScreenshotResult } from './vision-loop/playwright-executor.js';
 
 const DIRECT_OPEN_INTENT =
   /^(?:打开|访问|前往|进入|open|visit|go\s+to)\s+(https?:\/\/[^\s，；。！？]+)$/iu;

@@ -1,19 +1,12 @@
-import {
-  ArrowUp,
-  ListChecks,
-  Loader2,
-  Paperclip,
-  Plus,
-  Puzzle,
-  Sparkles,
-  Target,
-  X,
-} from 'lucide-react';
-import * as React from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
 import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
-import { SkillLogo } from '@/components/SkillLogo';
 import { LocalChromePicker } from '@/components/LocalChromePicker';
+import { SkillLogo } from '@/components/SkillLogo';
+import {
+  type ComposerSubmitResult,
+  composerSubmitErrorMessage,
+  composerSubmittingStatus,
+  shouldClearComposerAfterSubmit,
+} from '@/components/composer-submit';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -29,28 +22,43 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
-import {
-  composerSubmittingStatus,
-  composerSubmitErrorMessage,
-  type ComposerSubmitResult,
-  shouldClearComposerAfterSubmit,
-} from '@/components/composer-submit';
-import { awaitingUserCopy, type AwaitingKind } from '@/lib/awaiting-user-copy';
+import { useBrainOptions } from '@/hooks/useBrainOptions';
+import { type AwaitingKind, awaitingUserCopy } from '@/lib/awaiting-user-copy';
 import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
-import {
-  normalizeSkillRows,
-  skillSelectionFromTaskDraft,
-  skillTaskAttachmentHandoffs,
-} from '@/lib/skills-page-state';
 import {
   detectSkillMentionTrigger,
   filterMentionSkills,
   stripSkillMention,
 } from '@/lib/skill-mention';
+import {
+  normalizeSkillRows,
+  skillSelectionFromTaskDraft,
+  skillTaskAttachmentHandoffs,
+} from '@/lib/skills-page-state';
 import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
+import { hasBrowserRecordForWorkbench } from '@/lib/workbench-state';
+import { useTaskStore } from '@/stores/task-store';
 import type { UiSkill, UiSkillSelection } from '@/types/task';
+import {
+  ArrowUp,
+  ChevronDown,
+  Cpu,
+  ImagePlus,
+  ListChecks,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  Paperclip,
+  Plus,
+  Puzzle,
+  Sparkles,
+  Target,
+  X,
+} from 'lucide-react';
+import * as React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 interface Props {
   onSubmit: (
@@ -121,6 +129,7 @@ interface Props {
   fullBleed?: boolean;
   /** Compact terminal follow-up composer so mobile result cards keep more room. */
   compact?: boolean;
+  approved?: boolean;
 }
 
 const ACCEPT_FILES = '.csv,.xlsx,.xls,.docx,.pdf,.txt,.json,.md';
@@ -130,16 +139,15 @@ const MAX_ATTACHMENTS = 5;
 const COMPOSER_SURFACE =
   'border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90';
 const COMPOSER_FIELD_FOCUS =
-  'focus-within:border-[#EA1F59]/40 focus-within:shadow-[0_8px_24px_rgba(17,24,39,0.08)] focus-within:ring-2 focus-within:ring-[#EA1F59]/10';
+  'focus-within:border-[#FF0061]/40 focus-within:shadow-[0_8px_24px_rgba(17,24,39,0.08)] focus-within:ring-2 focus-within:ring-[#FF0061]/10';
 const COMPOSER_DIVIDER = 'border-[#DCDDDD]/80 dark:border-white/10';
 const MODE_MENU_CLASS =
   'z-[80] rounded-[8px] border-[#DCDDDD] bg-white p-1.5 shadow-[0_12px_32px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card';
 const MODE_MENU_ITEM_CLASS =
-  'items-start rounded-[6px] py-2 text-[13px] focus:bg-[#EFEFEF]/70 data-[state=checked]:bg-[#EA1F59]/5 dark:focus:bg-white/10 dark:data-[state=checked]:bg-[#EA1F59]/10';
+  'items-start rounded-[6px] py-2 text-[13px] focus:bg-[#EFEFEF]/70 data-[state=checked]:bg-[#FF0061]/5 dark:focus:bg-white/10 dark:data-[state=checked]:bg-[#FF0061]/10';
 const ATTACHMENT_TRIGGER_CLASS =
   'inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-transparent bg-transparent text-[#595757] transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:text-foreground/75 dark:hover:bg-white/10';
-const ATTACHMENT_TRIGGER_ACTIVE =
-  'bg-[#EA1F59]/5 text-[#EA1F59] dark:bg-[#EA1F59]/10';
+const ATTACHMENT_TRIGGER_ACTIVE = 'bg-[#FF0061]/5 text-[#FF0061] dark:bg-[#FF0061]/10';
 const ATTACHMENT_MENU_ITEM_CLASS =
   'gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 dark:focus:bg-white/10';
 
@@ -193,13 +201,20 @@ export function InputArea({
   onPrefillConsumed,
   fullBleed,
   compact,
+  approved = false,
 }: Props): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
+  const hasExistingTask = useTaskStore((s) => Boolean(s.selectedTaskId));
+  const showChromePicker = useTaskStore((s) =>
+    hasBrowserRecordForWorkbench(s.tasks.find((task) => task.taskId === s.selectedTaskId) ?? null),
+  );
   const toast = useToast();
   const [value, setValue] = React.useState('');
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
   const [dragActive, setDragActive] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(false);
+  const imageInputRef = React.useRef<HTMLInputElement>(null);
   const mountedRef = React.useRef(false);
   // Local ref for the textarea so we can focus it from inside on
   // suggestion-chip prefill. The forwarded `inputRef` is also kept
@@ -211,8 +226,7 @@ export function InputArea({
       textareaRef.current = node;
       if (typeof inputRef === 'function') inputRef(node);
       else if (inputRef && typeof inputRef === 'object') {
-        (inputRef as React.MutableRefObject<HTMLTextAreaElement | null>).current =
-          node;
+        (inputRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = node;
       }
     },
     [inputRef],
@@ -298,23 +312,22 @@ export function InputArea({
   // on tasks.create as `expertMode`; the backend honours it when
   // not null.
   const [expertMode, setExpertMode] = React.useState<'normal' | 'expert' | 'auto'>('auto');
+  const brain = useBrainOptions();
   // New-task handoffs are consumed together so a task selected in the
   // Skill Center can arrive with several pre-uploaded attachments without
   // two effects racing to re-introduce each other's location state.
   React.useEffect(() => {
-    const state = location.state as
-      | {
-          attachFile?: unknown;
-          attachFiles?: unknown;
-          skillTaskDraft?: {
-            prompt?: unknown;
-            skillId?: unknown;
-            skillName?: unknown;
-            skillSource?: unknown;
-            expertMode?: unknown;
-          };
-        }
-      | null;
+    const state = location.state as {
+      attachFile?: unknown;
+      attachFiles?: unknown;
+      skillTaskDraft?: {
+        prompt?: unknown;
+        skillId?: unknown;
+        skillName?: unknown;
+        skillSource?: unknown;
+        expertMode?: unknown;
+      };
+    } | null;
     const handoffs = skillTaskAttachmentHandoffs(state);
     const draft = state?.skillTaskDraft;
     const prompt = typeof draft?.prompt === 'string' ? draft.prompt.trimEnd() : '';
@@ -392,13 +405,15 @@ export function InputArea({
    * stable — react-hooks/rules-of-hooks would error otherwise.
    */
   React.useEffect(() => {
-    const vv = (window as Window & {
-      visualViewport?: {
-        addEventListener: typeof window.addEventListener;
-        removeEventListener: typeof window.removeEventListener;
-        height: number;
-      };
-    }).visualViewport;
+    const vv = (
+      window as Window & {
+        visualViewport?: {
+          addEventListener: typeof window.addEventListener;
+          removeEventListener: typeof window.removeEventListener;
+          height: number;
+        };
+      }
+    ).visualViewport;
     if (!vv) return;
     const onResize = (): void => {
       const el = textareaRef.current;
@@ -420,9 +435,7 @@ export function InputArea({
   );
   const mentionMatches = React.useMemo(
     () =>
-      mentionTrigger
-        ? filterMentionSkills(mentionSkills, mentionTrigger.query).slice(0, 6)
-        : [],
+      mentionTrigger ? filterMentionSkills(mentionSkills, mentionTrigger.query).slice(0, 6) : [],
     [mentionSkills, mentionTrigger],
   );
 
@@ -435,11 +448,8 @@ export function InputArea({
   // tasks.reply has its own server-side gating, so showing the card
   // here is duplicate work that breaks the user.
   if (quotaExhausted && !replyMode && !followUpTarget) {
-    return (
-      <QuotaExhaustedCard plan={quotaPlan ?? 'free'} navigate={navigate} />
-    );
+    return <QuotaExhaustedCard plan={quotaPlan ?? 'free'} navigate={navigate} />;
   }
-
 
   async function ingestFiles(files: FileList | File[]): Promise<void> {
     if (!attachmentsAllowed) {
@@ -456,7 +466,9 @@ export function InputArea({
       // Pre-flight size check — fail-fast client-side before the
       // multipart roundtrip so the user gets immediate feedback.
       if (attachmentByteCap && file.size > attachmentByteCap) {
-        toast.show(`文件 "${file.name}" 超过 ${(attachmentByteCap / (1024 * 1024)).toFixed(0)}MB 上限`);
+        toast.show(
+          `文件 "${file.name}" 超过 ${(attachmentByteCap / (1024 * 1024)).toFixed(0)}MB 上限`,
+        );
         continue;
       }
       const draft: DraftAttachment = {
@@ -592,8 +604,7 @@ export function InputArea({
       }
       submitOk = shouldClearComposerAfterSubmit(result);
     } catch (err) {
-      const raw =
-        err instanceof Error ? err.message : typeof err === 'string' ? err : undefined;
+      const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : undefined;
       toast.show(composerSubmitErrorMessage(raw), 'error');
       submitOk = false;
     } finally {
@@ -630,7 +641,10 @@ export function InputArea({
   });
   const expertWorkflow =
     !replyMode && !followUpTarget
-      ? detectComposerExpertWorkflow(value, attachments.some((a) => a.status === 'ready'))
+      ? detectComposerExpertWorkflow(
+          value,
+          attachments.some((a) => a.status === 'ready'),
+        )
       : null;
   const modePills = composerModePills({
     taskMode,
@@ -654,9 +668,9 @@ export function InputArea({
     <div
       className={cn(
         'w-full',
-        fullBleed
-          ? ''
-          : 'mx-auto max-w-[760px] px-3 pb-4 sm:px-6 sm:pb-6',
+        approved && 'hd-approved-input',
+        approved && expanded && 'hd-input-expanded',
+        fullBleed ? '' : 'mx-auto max-w-[760px] px-3 pb-4 sm:px-6 sm:pb-6',
       )}
       onDragEnter={(e) => {
         if (!attachmentsAllowed) return;
@@ -684,20 +698,18 @@ export function InputArea({
     >
       <div
         className={cn(
-          'relative overflow-hidden border transition-[border-color,box-shadow]',
+          'hd-task-composer relative overflow-hidden border transition-[border-color,box-shadow]',
           fullBleed
             ? compact
-              ? 'rounded-[22px] border-[#F8CAD7] bg-[#FFF9FC] shadow-[0_14px_32px_rgba(234,31,89,0.065)]'
-              : 'rounded-[26px] border-[#EA1F59]/[0.18] bg-[#FFF4F8] shadow-[0_18px_42px_rgba(234,31,89,0.08)]'
+              ? 'rounded-[22px] border-[#F8CAD7] bg-[#FFF9FC] shadow-[0_14px_32px_rgba(255,0,97,0.065)]'
+              : 'rounded-[26px] border-[#FF0061]/[0.18] bg-[#FFF4F8] shadow-[0_18px_42px_rgba(255,0,97,0.08)]'
             : cn('rounded-lg', COMPOSER_SURFACE),
           fullBleed
             ? compact
-              ? 'focus-within:border-[#F4A9BE] focus-within:shadow-[0_12px_30px_rgba(234,31,89,0.075)] focus-within:ring-2 focus-within:ring-[#EA1F59]/[0.045]'
-              : 'focus-within:border-[#EA1F59]/30 focus-within:shadow-[0_20px_46px_rgba(234,31,89,0.11)] focus-within:ring-2 focus-within:ring-[#EA1F59]/[0.08]'
+              ? 'focus-within:border-[#F4A9BE] focus-within:shadow-[0_12px_30px_rgba(255,0,97,0.075)] focus-within:ring-2 focus-within:ring-[#FF0061]/[0.045]'
+              : 'focus-within:border-[#FF0061]/30 focus-within:shadow-[0_20px_46px_rgba(255,0,97,0.11)] focus-within:ring-2 focus-within:ring-[#FF0061]/[0.08]'
             : COMPOSER_FIELD_FOCUS,
-          dragActive
-            ? 'border-[#42C0EF]/60 ring-2 ring-[#42C0EF]/15'
-            : '',
+          dragActive ? 'border-[#42C0EF]/60 ring-2 ring-[#42C0EF]/15' : '',
         )}
       >
         {attachments.length > 0 && (
@@ -727,14 +739,14 @@ export function InputArea({
         {(selectedSkill || mentionMatches.length > 0) && (
           <div className="px-3 pt-2">
             {selectedSkill ? (
-              <span className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full bg-white/70 px-2 text-[12px] font-medium text-[#595757] shadow-[inset_0_0_0_1px_rgba(234,31,89,0.11)]">
+              <span className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full bg-white/70 px-2 text-[12px] font-medium text-[#595757] shadow-[inset_0_0_0_1px_rgba(255,0,97,0.11)]">
                 <SkillLogo
                   logoId={selectedSkill.skillId}
                   label={selectedSkill.skillName}
                   size="sm"
                   className="h-4 w-4 shrink-0 rounded-[5px] shadow-none"
                 />
-                <span className="shrink-0 text-[#EA1F59]/85">@</span>
+                <span className="shrink-0 text-[#FF0061]/85">@</span>
                 <span className="min-w-0 truncate">{selectedSkill.skillName}</span>
                 <button
                   type="button"
@@ -764,12 +776,8 @@ export function InputArea({
                       className="h-5 w-5 shrink-0 rounded-[6px] shadow-none"
                     />
                     <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
-                      <span className="text-[12px] font-medium text-foreground">
-                        {skill.name}
-                      </span>
-                      <span className="ml-1.5">
-                        {skill.description}
-                      </span>
+                      <span className="text-[12px] font-medium text-foreground">{skill.name}</span>
+                      <span className="ml-1.5">{skill.description}</span>
                     </span>
                   </button>
                 ))}
@@ -777,7 +785,9 @@ export function InputArea({
             ) : null}
           </div>
         )}
-        {!replyMode && !followUpTarget ? <LocalChromePicker disabled={disabled} /> : null}
+        {!approved && showChromePicker && !replyMode && !followUpTarget ? (
+          <LocalChromePicker disabled={disabled} />
+        ) : null}
         <Textarea
           ref={setTextareaRef}
           value={value}
@@ -786,11 +796,13 @@ export function InputArea({
           placeholder={
             replyMode
               ? awaitingUserCopy(replyKind).composerPlaceholder
-              : followUpTarget
+              : followUpTarget || hasExistingTask
                 ? '补充问题或下一步指令...'
                 : expertWorkflow
                   ? '补充直播场次、数据来源或你想要的报告形式...'
-                  : '描述你想让 HOLA DAY 做什么...'
+                  : approved
+                    ? '说说你想做的事...'
+                    : '描述你想让 HOLA DAY 做什么...'
           }
           rows={compact ? 1 : 2}
           className={cn(
@@ -819,122 +831,265 @@ export function InputArea({
             hand-rolled outside-click popover. Picks up focus
             management, escape-to-close, arrow-key navigation,
             and proper portal layering for free. */}
-        <div className={cn('absolute', fullBleed ? (compact ? 'bottom-7 left-7' : 'bottom-7 left-8') : 'bottom-2.5 left-2.5')}>
-            <DropdownMenu open={plusMenuOpen} onOpenChange={setPlusMenuOpen}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="附件与任务选项"
-                  title="附件与任务选项"
-                  className={cn(
-                    ATTACHMENT_TRIGGER_CLASS,
-                    fullBleed && 'h-9 w-9 rounded-[10px] text-[#57479C] hover:bg-white/65',
-                    plusMenuOpen && ATTACHMENT_TRIGGER_ACTIVE,
-                  )}
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                side="top"
-                align="start"
-                sideOffset={8}
-                className={cn('w-[206px]', MODE_MENU_CLASS)}
+        <div
+          className={cn(
+            'hd-composer-tools absolute',
+            fullBleed ? (compact ? 'bottom-7 left-7' : 'bottom-7 left-8') : 'bottom-2.5 left-2.5',
+          )}
+        >
+          <DropdownMenu open={plusMenuOpen} onOpenChange={setPlusMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="附件与任务选项"
+                title="附件与任务选项"
+                className={cn(
+                  ATTACHMENT_TRIGGER_CLASS,
+                  fullBleed && 'h-9 w-9 rounded-[10px] text-[#57479C] hover:bg-white/65',
+                  plusMenuOpen && ATTACHMENT_TRIGGER_ACTIVE,
+                )}
               >
-                <DropdownMenuItem
+                {approved ? <Paperclip className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="top"
+              align="start"
+              sideOffset={8}
+              className={cn('w-[206px]', MODE_MENU_CLASS)}
+            >
+              <DropdownMenuItem
+                className={ATTACHMENT_MENU_ITEM_CLASS}
+                onSelect={() => {
+                  setPlusMenuOpen(false);
+                  if (!attachmentsAllowed) {
+                    toast.show('免费版不支持附件，升级基础版可上传文件 / 图片');
+                    return;
+                  }
+                  fileInputRef.current?.click();
+                }}
+              >
+                <Paperclip className="h-4 w-4 text-[#595757]" />
+                <span className="font-medium text-foreground">
+                  添加照片和文件{!attachmentsAllowed && ' · 需升级'}
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="my-1 bg-[#DCDDDD]/80 dark:bg-white/10" />
+              <DropdownMenuRadioGroup
+                value={taskMode}
+                onValueChange={(mode) => setTaskMode(mode as 'auto' | 'plan')}
+              >
+                <DropdownMenuRadioItem
                   className={ATTACHMENT_MENU_ITEM_CLASS}
-                  onSelect={() => {
-                    setPlusMenuOpen(false);
-                    if (!attachmentsAllowed) {
-                      toast.show('免费版不支持附件，升级基础版可上传文件 / 图片');
-                      return;
-                    }
-                    fileInputRef.current?.click();
-                  }}
-                >
-                  <Paperclip className="h-4 w-4 text-[#595757]" />
-                  <span className="font-medium text-foreground">添加照片和文件{!attachmentsAllowed && ' · 需升级'}</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator className="my-1 bg-[#DCDDDD]/80 dark:bg-white/10" />
-                <DropdownMenuItem
-                  className={ATTACHMENT_MENU_ITEM_CLASS}
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    setTaskMode('plan');
-                  }}
+                  value="plan"
+                  showIndicator={false}
+                  onSelect={(event) => event.preventDefault()}
                 >
                   <ListChecks className="h-4 w-4 text-[#595757]" />
-                  <span className="min-w-0 flex-1 font-medium text-foreground">
-                    先出方案
-                  </span>
+                  <span className="min-w-0 flex-1 font-medium text-foreground">先出方案</span>
                   <MiniSwitch checked={taskMode === 'plan'} />
-                </DropdownMenuItem>
-                <DropdownMenuItem
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem
                   className={ATTACHMENT_MENU_ITEM_CLASS}
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    setTaskMode('auto');
-                  }}
+                  value="auto"
+                  showIndicator={false}
+                  onSelect={(event) => event.preventDefault()}
                 >
                   <Target className="h-4 w-4 text-[#595757]" />
-                  <span className="min-w-0 flex-1 font-medium text-foreground">
-                    自动执行
-                  </span>
+                  <span className="min-w-0 flex-1 font-medium text-foreground">自动执行</span>
                   <MiniSwitch checked={taskMode === 'auto'} />
-                </DropdownMenuItem>
-                <DropdownMenuSeparator className="my-1 bg-[#DCDDDD]/80 dark:bg-white/10" />
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator className="my-1 bg-[#DCDDDD]/80 dark:bg-white/10" />
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className="gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 data-[state=open]:bg-[#EFEFEF]/70 dark:focus:bg-white/10 dark:data-[state=open]:bg-white/10">
+                  <Puzzle className="h-4 w-4 text-[#595757]" />
+                  <span className="min-w-0 flex-1 font-medium text-foreground">技能</span>
+                  <span className="mr-1 text-[11px] text-muted-foreground">
+                    {pluginModeLabel(expertMode)}
+                  </span>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent sideOffset={8} className={cn('w-56', MODE_MENU_CLASS)}>
+                  <DropdownMenuRadioGroup
+                    value={expertMode}
+                    onValueChange={(v) => {
+                      if (v === 'normal' || v === 'expert' || v === 'auto') {
+                        setExpertMode(v);
+                      }
+                    }}
+                  >
+                    <DropdownMenuRadioItem value="auto" className={MODE_MENU_ITEM_CLASS}>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-[12px] font-medium text-foreground">自动</span>
+                        <span className="text-[11px] text-muted-foreground">
+                          需要时自动启用技能
+                        </span>
+                      </span>
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="expert" className={MODE_MENU_ITEM_CLASS}>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-[12px] font-medium text-foreground">开启</span>
+                        <span className="text-[11px] text-muted-foreground">强制使用技能</span>
+                      </span>
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="normal" className={MODE_MENU_ITEM_CLASS}>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-[12px] font-medium text-foreground">关闭</span>
+                        <span className="text-[11px] text-muted-foreground">
+                          跳过技能，优先速度
+                        </span>
+                      </span>
+                    </DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              {brain.options.length > 1 ? (
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger className="gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 data-[state=open]:bg-[#EFEFEF]/70 dark:focus:bg-white/10 dark:data-[state=open]:bg-white/10">
-                    <Puzzle className="h-4 w-4 text-[#595757]" />
-                    <span className="min-w-0 flex-1 font-medium text-foreground">
-                      技能
-                    </span>
+                    <Cpu className="h-4 w-4 text-[#595757]" />
+                    <span className="min-w-0 flex-1 font-medium text-foreground">模型</span>
                     <span className="mr-1 text-[11px] text-muted-foreground">
-                      {pluginModeLabel(expertMode)}
+                      {brain.selected.label}
                     </span>
                   </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent
-                    sideOffset={8}
-                    className={cn('w-56', MODE_MENU_CLASS)}
-                  >
+                  <DropdownMenuSubContent sideOffset={8} className={cn('w-56', MODE_MENU_CLASS)}>
                     <DropdownMenuRadioGroup
-                      value={expertMode}
-                      onValueChange={(v) => {
-                        if (v === 'normal' || v === 'expert' || v === 'auto') {
-                          setExpertMode(v);
-                        }
-                      }}
+                      value={brain.selected.id}
+                      onValueChange={(value) => brain.select(value)}
                     >
-                      <DropdownMenuRadioItem value="auto" className={MODE_MENU_ITEM_CLASS}>
-                        <span className="flex min-w-0 flex-1 flex-col">
-                          <span className="text-[12px] font-medium text-foreground">自动</span>
-                          <span className="text-[11px] text-muted-foreground">
-                            需要时自动启用技能
+                      {brain.options.map((option) => (
+                        <DropdownMenuRadioItem
+                          key={option.id}
+                          value={option.id}
+                          disabled={!option.configured}
+                          className={MODE_MENU_ITEM_CLASS}
+                        >
+                          <span className="flex min-w-0 flex-1 flex-col">
+                            <span className="text-[12px] font-medium text-foreground">
+                              {option.label}
+                            </span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {!option.configured
+                                ? '服务未配置'
+                                : option.adminOnly
+                                  ? '仅管理员可见'
+                                  : option.isDefault
+                                    ? '默认'
+                                    : '可选'}
+                            </span>
                           </span>
-                        </span>
-                      </DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="expert" className={MODE_MENU_ITEM_CLASS}>
-                        <span className="flex min-w-0 flex-1 flex-col">
-                          <span className="text-[12px] font-medium text-foreground">开启</span>
-                          <span className="text-[11px] text-muted-foreground">
-                            强制使用技能
-                          </span>
-                        </span>
-                      </DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="normal" className={MODE_MENU_ITEM_CLASS}>
-                        <span className="flex min-w-0 flex-1 flex-col">
-                          <span className="text-[12px] font-medium text-foreground">关闭</span>
-                          <span className="text-[11px] text-muted-foreground">
-                            跳过技能，优先速度
-                          </span>
-                        </span>
-                      </DropdownMenuRadioItem>
+                        </DropdownMenuRadioItem>
+                      ))}
                     </DropdownMenuRadioGroup>
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
+              ) : (
+                <div className="flex items-center gap-2.5 px-2 py-2 text-[13px]">
+                  <Cpu className="h-4 w-4 text-[#595757]" />
+                  <span className="min-w-0 flex-1 font-medium text-foreground">模型</span>
+                  <span className="mr-1 text-[11px] text-muted-foreground">
+                    {brain.selected.label}
+                  </span>
+                </div>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {approved && (
+            <>
+              <button
+                className="hd-prompt-icon"
+                type="button"
+                disabled={disabled || !attachmentsAllowed}
+                title="添加图片"
+                aria-label="添加图片"
+                onClick={() => imageInputRef.current?.click()}
+              >
+                <ImagePlus />
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className="hd-prompt-icon"
+                    type="button"
+                    title="选择技能"
+                    aria-label="选择技能"
+                  >
+                    <Sparkles />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  side="top"
+                  align="start"
+                  className="max-h-72 w-64 overflow-y-auto"
+                >
+                  {mentionSkills.length ? (
+                    mentionSkills.map((skill) => (
+                      <DropdownMenuItem key={skill.id} onSelect={() => applySkillMention(skill)}>
+                        <Sparkles className="h-4 w-4" />
+                        {skill.name}
+                      </DropdownMenuItem>
+                    ))
+                  ) : (
+                    <p className="px-3 py-2 text-xs text-muted-foreground">暂无可用技能</p>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {showChromePicker && !replyMode && !followUpTarget && (
+                <LocalChromePicker disabled={disabled} compact />
+              )}
+            </>
+          )}
+        </div>
+        {approved && (
+          <div className="hd-composer-actions">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="hd-prompt-mode"
+                  title="执行模式"
+                  aria-label="执行模式"
+                >
+                  <ListChecks />
+                  {taskMode === 'plan' ? '规划' : '自动'}
+                  <ChevronDown />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="end">
+                <DropdownMenuRadioGroup
+                  value={taskMode}
+                  onValueChange={(mode) => setTaskMode(mode as 'auto' | 'plan')}
+                >
+                  <DropdownMenuRadioItem value="auto">自动执行</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="plan">先规划，再执行</DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
-        </div>
+            <button
+              className="hd-prompt-icon"
+              type="button"
+              title={expanded ? '收起输入框' : '展开输入框'}
+              aria-label={expanded ? '收起输入框' : '展开输入框'}
+              aria-expanded={expanded}
+              onClick={() => setExpanded(!expanded)}
+            >
+              {expanded ? <Minimize2 /> : <Maximize2 />}
+            </button>
+          </div>
+        )}
+        {approved && (
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(event) => {
+              if (event.target.files) void ingestFiles(event.target.files);
+              event.target.value = '';
+            }}
+          />
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -951,24 +1106,24 @@ export function InputArea({
           onClick={() => void handleSubmit()}
           disabled={disabled || value.trim().length === 0}
           className={cn(
-            'absolute rounded-full focus-visible:ring-[#EA1F59]/25',
+            'hd-prompt-send absolute rounded-full focus-visible:ring-[#FF0061]/25',
             fullBleed
               ? compact
-                ? 'bottom-5 right-5 h-11 w-[116px] justify-between border border-[#EA1F59]/45 bg-white/60 px-5 pr-[50px] text-[#EA1F59] shadow-[0_10px_22px_rgba(234,31,89,0.12)] backdrop-blur hover:bg-white/80'
-                : 'bottom-6 right-7 h-12 w-[116px] justify-between border border-[#EA1F59]/45 bg-white/55 px-5 pr-[52px] text-[#EA1F59] shadow-[0_10px_24px_rgba(234,31,89,0.12)] backdrop-blur hover:bg-white/75'
-              : 'bottom-2.5 right-2.5 h-8 w-8 bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.18)] hover:bg-[#EA1F59]/90',
+                ? 'bottom-5 right-5 h-11 w-[116px] justify-between border border-[#FF0061]/45 bg-white/60 px-5 pr-[50px] text-[#FF0061] shadow-[0_10px_22px_rgba(255,0,97,0.12)] backdrop-blur hover:bg-white/80'
+                : 'bottom-6 right-7 h-12 w-[116px] justify-between border border-[#FF0061]/45 bg-white/55 px-5 pr-[52px] text-[#FF0061] shadow-[0_10px_24px_rgba(255,0,97,0.12)] backdrop-blur hover:bg-white/75'
+              : 'bottom-2.5 right-2.5 h-8 w-8 bg-[#FF0061] text-white shadow-[0_4px_12px_rgba(255,0,97,0.18)] hover:bg-[#FF0061]/90',
           )}
           aria-label={submitting ? submittingStatus : '发送'}
           title={submitting ? submittingStatus : '发送'}
         >
           {submitting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
-          ) : fullBleed ? (
+          ) : fullBleed && !approved ? (
             <>
               <span className="text-[15px] font-medium leading-none">Enter</span>
               <span
                 className={cn(
-                  'absolute right-0.5 top-0.5 flex items-center justify-center rounded-full bg-[#EA1F59] text-white shadow-[0_6px_16px_rgba(234,31,89,0.18)]',
+                  'absolute right-0.5 top-0.5 flex items-center justify-center rounded-full bg-[#FF0061] text-white shadow-[0_6px_16px_rgba(255,0,97,0.18)]',
                   compact ? 'h-10 w-10' : 'h-[44px] w-[44px]',
                 )}
               >
@@ -980,27 +1135,31 @@ export function InputArea({
           )}
         </Button>
       </div>
+      {approved && (
+        <div className="hd-prompt-bottom" aria-live="polite">
+          <span>Enter 发送 · Shift + Enter 换行</span>
+          <span>{submitting ? submittingStatus : ''}</span>
+        </div>
+      )}
       {!fullBleed && (
         <div className="mt-2 flex min-h-[28px] items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground/70">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          {submitting ? (
-            <span
-              aria-live="polite"
-              className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-2.5 py-1 text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] dark:text-foreground/75"
-            >
-              <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[#EA1F59]" />
-              <span className="truncate">{submittingStatus}</span>
-            </span>
-          ) : (
-            modePills.map((pill) => (
-              <ComposerModePill key={pill.label} pill={pill} />
-            ))
-          )}
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {submitting ? (
+              <span
+                aria-live="polite"
+                className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-[#FF0061]/25 bg-[#FF0061]/5 px-2.5 py-1 text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] dark:text-foreground/75"
+              >
+                <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[#FF0061]" />
+                <span className="truncate">{submittingStatus}</span>
+              </span>
+            ) : (
+              modePills.map((pill) => <ComposerModePill key={pill.label} pill={pill} />)
+            )}
+          </div>
+          <span className="hidden shrink-0 rounded-[6px] px-1.5 py-0.5 text-[#ADADAD] sm:inline">
+            Enter 发送
+          </span>
         </div>
-        <span className="hidden shrink-0 rounded-[6px] px-1.5 py-0.5 text-[#ADADAD] sm:inline">
-          Enter 发送
-        </span>
-      </div>
       )}
       {/* Phase 5b — multi-line detect. When the composer holds 2+
           non-empty lines AND we're not in a reply / follow-up flow,
@@ -1010,7 +1169,10 @@ export function InputArea({
       {!replyMode &&
         !followUpTarget &&
         (() => {
-          const lines = value.split('\n').map((l) => l.trim()).filter(Boolean);
+          const lines = value
+            .split('\n')
+            .map((l) => l.trim())
+            .filter(Boolean);
           if (lines.length < 2) return null;
           return (
             <button
@@ -1115,7 +1277,7 @@ function ComposerModePill({ pill }: { pill: ComposerModePillCopy }): JSX.Element
       className={cn(
         'inline-flex max-w-[180px] items-center rounded-full border px-2.5 py-1 font-medium shadow-[0_1px_2px_rgba(17,24,39,0.03)]',
         pill.tone === 'accent'
-          ? 'border-[#EA1F59]/20 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10'
+          ? 'border-[#FF0061]/20 bg-[#FF0061]/5 text-[#FF0061] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10'
           : 'border-[#DCDDDD]/70 bg-white/45 text-[#595757] dark:border-white/10 dark:bg-white/5 dark:text-foreground/75',
       )}
     >
@@ -1131,7 +1293,7 @@ function MiniSwitch({ checked }: { checked: boolean }): JSX.Element {
       className={cn(
         'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border transition-colors',
         checked
-          ? 'border-[#EA1F59]/30 bg-[#EA1F59]'
+          ? 'border-[#FF0061]/30 bg-[#FF0061]'
           : 'border-[#DCDDDD] bg-[#EFEFEF] dark:border-white/15 dark:bg-white/10',
       )}
     >
@@ -1165,20 +1327,21 @@ function ExpertWorkflowHint({
   const actions = guidanceActionsForWorkflow(workflow);
 
   return (
-    <div className={cn('border-b bg-[#FFC910]/10 px-3 py-2 text-xs text-[#595757] dark:bg-[#FFC910]/10 dark:text-foreground', COMPOSER_DIVIDER)}>
+    <div
+      className={cn(
+        'border-b bg-[#FFC910]/10 px-3 py-2 text-xs text-[#595757] dark:bg-[#FFC910]/10 dark:text-foreground',
+        COMPOSER_DIVIDER,
+      )}
+    >
       <div className="flex items-start gap-2">
         <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#57479C]" aria-hidden />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-medium">已匹配：{workflow.name}</span>
             {missingLabels.length > 0 ? (
-              <span className="text-muted-foreground">
-                还缺 {missingLabels.join('、')}
-              </span>
+              <span className="text-muted-foreground">还缺 {missingLabels.join('、')}</span>
             ) : (
-              <span className="text-muted-foreground">
-                信息已基本足够，发送后会按专家结构执行
-              </span>
+              <span className="text-muted-foreground">信息已基本足够，发送后会按专家结构执行</span>
             )}
           </div>
           <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] leading-4 text-muted-foreground">
@@ -1253,13 +1416,9 @@ function labelForWorkflowInput(input: ComposerExpertWorkflow['missingInputs'][nu
  * source being satisfied (the prior text-append flow misled the
  * model into thinking data was already available).
  */
-type GuidanceAction =
-  | { label: string; kind: 'text' }
-  | { label: string; kind: 'upload' };
+type GuidanceAction = { label: string; kind: 'text' } | { label: string; kind: 'upload' };
 
-function guidanceActionsForWorkflow(
-  workflow: ComposerExpertWorkflow,
-): GuidanceAction[] {
+function guidanceActionsForWorkflow(workflow: ComposerExpertWorkflow): GuidanceAction[] {
   const actions: GuidanceAction[] = [];
   if (workflow.missingInputs.includes('liveSession')) {
     actions.push(
@@ -1303,23 +1462,19 @@ function QuotaExhaustedCard({
   const copy = quotaExhaustedCopy(plan);
   return (
     <div className="mx-auto w-full max-w-3xl px-6 pb-6">
-      <div className="rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-5 py-4 shadow-[0_4px_18px_rgba(15,23,42,0.055)] [border-left-width:3px] dark:border-white/10 dark:border-l-[#EA1F59] dark:bg-card/90">
+      <div className="rounded-[8px] border border-[#DCDDDD] border-l-[#FF0061] bg-white px-5 py-4 shadow-[0_4px_18px_rgba(15,23,42,0.055)] [border-left-width:3px] dark:border-white/10 dark:border-l-[#FF0061] dark:bg-card/90">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
           <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[#FFC910]/35 bg-[#FFC910]/15 text-[#57479C]">
             <Sparkles className="h-3.5 w-3.5" />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="text-sm font-semibold text-foreground">
-                {copy.headline}
-              </div>
+              <div className="text-sm font-semibold text-foreground">{copy.headline}</div>
               <span className="rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] px-2 py-0.5 text-[11px] font-medium text-[#595757]">
                 {copy.badge}
               </span>
             </div>
-            <p className="mt-1 max-w-xl text-xs leading-5 text-[#595757]">
-              {copy.subline}
-            </p>
+            <p className="mt-1 max-w-xl text-xs leading-5 text-[#595757]">{copy.subline}</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {copy.actions.map((action) =>
                 action.primary ? (
@@ -1327,7 +1482,7 @@ function QuotaExhaustedCard({
                     key={action.kind}
                     size="sm"
                     onClick={() => navigate(action.path)}
-                    className="bg-[#EA1F59] text-white hover:bg-[#D91B51]"
+                    className="bg-[#FF0061] text-white hover:bg-[#D91B51]"
                   >
                     {action.label}
                   </Button>
@@ -1337,14 +1492,12 @@ function QuotaExhaustedCard({
                     size="sm"
                     variant="outline"
                     onClick={() => navigate(action.path)}
-                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 hover:text-[#EA1F59]"
+                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 hover:text-[#FF0061]"
                   >
-                    {action.kind === 'addon' && (
-                      <Plus className="mr-1.5 h-3.5 w-3.5" />
-                    )}
+                    {action.kind === 'addon' && <Plus className="mr-1.5 h-3.5 w-3.5" />}
                     {action.label}
                   </Button>
-                )
+                ),
               )}
             </div>
           </div>

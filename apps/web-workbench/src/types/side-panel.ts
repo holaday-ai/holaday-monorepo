@@ -53,9 +53,7 @@ export interface SidePanelComputeInput {
   isLiveBrowserTask: boolean;
   override: SidePanelOverride;
 }
-export function computeSidePanelMode(
-  input: SidePanelComputeInput,
-): SidePanelMode {
+export function computeSidePanelMode(input: SidePanelComputeInput): SidePanelMode {
   if (!input.hasSelectedTask) return 'closed';
   if (input.override === 'close') return 'closed';
   if (input.selectedNeedsBrowser) return 'browser-live';

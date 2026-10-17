@@ -83,6 +83,70 @@ function buildLogger(): Logger {
 }
 
 describe('generatePlanForUser', () => {
+  it('uses the explicit browser planning role and records its actual usage', async () => {
+    const calls: import('../llm-call-recorder.js').LlmCallRecord[] = [];
+    const createQwenAdapter = vi.fn((input) => ({
+      ...buildAdapter('SEARCH'),
+      metadata: {
+        ...buildAdapter('SEARCH').metadata,
+        model: input.environment.QWEN_STANDARD_MODEL,
+      },
+    }));
+    await generatePlanForUser(
+      {
+        environment: {
+          ...BASE_ENVIRONMENT,
+          BROWSER_BRAIN_PLANNING: 'alibaba-model-studio:qwen3.8-flash',
+        },
+        browserPlanning: true,
+        userExternalId: 'usr_canary',
+        userModelDataRegion: 'intl',
+        intent: '打开浏览器查找内容',
+        logger: buildLogger(),
+        taskId: 'tsk_plan',
+        recorder: {
+          record: async (call) => {
+            calls.push(call);
+          },
+        },
+      },
+      { createQwenAdapter },
+    );
+    expect(createQwenAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environment: expect.objectContaining({ QWEN_STANDARD_MODEL: 'qwen3.8-flash' }),
+      }),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      purpose: 'browser.planning',
+      taskExternalId: 'tsk_plan',
+      model: 'qwen3.8-flash',
+      inputTokens: 10,
+      outputTokens: 20,
+      status: 'ok',
+    });
+  });
+  it('defaults browser planning to flash without changing the generic standard model', async () => {
+    const createQwenAdapter = vi.fn(() => buildAdapter('SEARCH'));
+    await generatePlanForUser(
+      {
+        environment: BASE_ENVIRONMENT,
+        browserPlanning: true,
+        userExternalId: 'usr_canary',
+        userModelDataRegion: 'intl',
+        intent: '浏览器读取网页',
+        logger: buildLogger(),
+      },
+      { createQwenAdapter },
+    );
+    expect(createQwenAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environment: expect.objectContaining({ QWEN_STANDARD_MODEL: 'qwen3.8-flash' }),
+      }),
+    );
+    expect(BASE_ENVIRONMENT.QWEN_STANDARD_MODEL).toBe('qwen3.7-plus');
+  });
   it('uses the Qwen standard adapter for an eligible user and region', async () => {
     const createQwenAdapter = vi.fn(() => buildAdapter('QWEN_STEP'));
     const result = await generatePlanForUser(

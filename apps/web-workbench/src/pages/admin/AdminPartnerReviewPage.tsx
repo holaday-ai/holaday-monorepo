@@ -1,49 +1,44 @@
-import {
-  Banknote,
-  CheckCircle2,
-  Clipboard,
-  Loader2,
-  RefreshCw,
-  Search,
-  ShieldCheck,
-  XCircle,
-  type LucideIcon,
-} from 'lucide-react';
-import * as React from 'react';
-import { Link } from 'react-router-dom';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import {
-  formatDateTime,
-  formatInteger,
-  truncate,
-  useMountedRef,
-} from './admin-shared';
+  Banknote,
+  CheckCircle2,
+  Clipboard,
+  Loader2,
+  type LucideIcon,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  XCircle,
+} from 'lucide-react';
+import * as React from 'react';
+import { Link } from 'react-router-dom';
 import {
+  type AdminPartnerQueueName,
+  type AdminPartnerStatusKind,
+  type PartnerReconciliationState,
+  type PartnerRiskLotCloseResolutionKind,
   adminPartnerActionConfirmation,
   defaultPartnerReconciliationRange,
+  filterAdminPartnerOverview,
   formatPartnerCreditCents,
   formatPartnerMoneyCents,
-  filterAdminPartnerOverview,
   normalizeAdminPartnerOverview,
   normalizePartnerReconciliation,
-  partnerReconciliationCsv,
   partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
+  partnerReconciliationCsv,
+  partnerReviewStatusToken,
   partnerRiskCloseResolutionKindLabel,
   partnerRiskEventSeverityLabel,
   partnerRiskEventTypeLabel,
   partnerRiskLotActionPayload,
   partnerRiskLotQueueAction,
-  partnerReviewStatusToken,
-  type AdminPartnerStatusKind,
-  type AdminPartnerQueueName,
-  type PartnerRiskLotCloseResolutionKind,
-  type PartnerReconciliationState,
 } from './admin-partner-state';
+import { formatDateTime, formatInteger, truncate, useMountedRef } from './admin-shared';
 
 type OverviewState = ReturnType<typeof normalizeAdminPartnerOverview>;
 type EnabledOverviewState = Extract<OverviewState, { enabled: true }>;
@@ -70,7 +65,9 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const requestIdRef = React.useRef(0);
   const reconciliationRequestIdRef = React.useRef(0);
   const [data, setData] = React.useState<OverviewState | null>(null);
-  const [reconciliation, setReconciliation] = React.useState<PartnerReconciliationState | null>(null);
+  const [reconciliation, setReconciliation] = React.useState<PartnerReconciliationState | null>(
+    null,
+  );
   const [loading, setLoading] = React.useState(true);
   const [reconciliationLoading, setReconciliationLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -82,9 +79,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
     () => defaultPartnerReconciliationRange(new Date()),
     [],
   );
-  const [reconciliationTo, setReconciliationTo] = React.useState(
-    reconciliationDefaultRange.to,
-  );
+  const [reconciliationTo, setReconciliationTo] = React.useState(reconciliationDefaultRange.to);
   const [reconciliationFrom, setReconciliationFrom] = React.useState(
     reconciliationDefaultRange.from,
   );
@@ -102,7 +97,9 @@ export function AdminPartnerReviewPage(): JSX.Element {
   const [riskLotResolutionKinds, setRiskLotResolutionKinds] = React.useState<
     Record<string, PartnerRiskLotCloseResolutionKind>
   >({});
-  const [riskLotResolutionRefs, setRiskLotResolutionRefs] = React.useState<Record<string, string>>({});
+  const [riskLotResolutionRefs, setRiskLotResolutionRefs] = React.useState<Record<string, string>>(
+    {},
+  );
   const [queueSearch, setQueueSearch] = React.useState('');
   const [serverQueueSearch, setServerQueueSearch] = React.useState('');
   const [queueLimit, setQueueLimit] = React.useState(50);
@@ -140,13 +137,15 @@ export function AdminPartnerReviewPage(): JSX.Element {
           to: reconciliationTo || undefined,
         }),
       );
-      if (mountedRef.current && reconciliationRequestIdRef.current === requestId) setReconciliation(res);
+      if (mountedRef.current && reconciliationRequestIdRef.current === requestId)
+        setReconciliation(res);
     } catch (err) {
       if (mountedRef.current && reconciliationRequestIdRef.current === requestId) {
         setReconciliationError(pageErrorMessage(err));
       }
     } finally {
-      if (mountedRef.current && reconciliationRequestIdRef.current === requestId) setReconciliationLoading(false);
+      if (mountedRef.current && reconciliationRequestIdRef.current === requestId)
+        setReconciliationLoading(false);
     }
   }, [mountedRef, reconciliationFrom, reconciliationTo]);
 
@@ -277,7 +276,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
           type="button"
           onClick={() => void refresh()}
           disabled={loading || pendingAction !== null}
-          className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-[13px] font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-[13px] font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -289,8 +288,8 @@ export function AdminPartnerReviewPage(): JSX.Element {
       </header>
 
       {error && (
-        <div className="mb-4 rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/5 px-4 py-3 text-sm">
-          <div className="font-medium text-[#EA1F59]">数据暂时无法加载</div>
+        <div className="mb-4 rounded-[8px] border border-[#FF0061]/20 bg-[#FF0061]/5 px-4 py-3 text-sm">
+          <div className="font-medium text-[#FF0061]">数据暂时无法加载</div>
           <div className="mt-1 text-xs text-[#595757]">{error}</div>
         </div>
       )}
@@ -353,8 +352,7 @@ export function AdminPartnerReviewPage(): JSX.Element {
       ) : null}
       <ConfirmDialog
         open={pendingConfirmation !== null}
-        {...(pendingConfirmation?.confirmation ??
-          adminPartnerActionConfirmation(''))}
+        {...(pendingConfirmation?.confirmation ?? adminPartnerActionConfirmation(''))}
         confirmLabel="确认执行"
         destructive
         onConfirm={executeConfirmedAction}
@@ -444,7 +442,9 @@ function EnabledAdminPartnerReview({
   setWithdrawalReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setPayoutIds: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setRiskLotNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  setRiskLotResolutionKinds: React.Dispatch<React.SetStateAction<Record<string, PartnerRiskLotCloseResolutionKind>>>;
+  setRiskLotResolutionKinds: React.Dispatch<
+    React.SetStateAction<Record<string, PartnerRiskLotCloseResolutionKind>>
+  >;
   setRiskLotResolutionRefs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setReconciliationFrom: (value: string) => void;
   setReconciliationTo: (value: string) => void;
@@ -455,40 +455,76 @@ function EnabledAdminPartnerReview({
   submitManualKyc: () => Promise<void>;
   runAction: RunAdminAction;
 }): JSX.Element {
-  const truncatedQueues = new Set<AdminPartnerQueueName>(
-    data.coverage.truncatedQueues,
-  );
+  const truncatedQueues = new Set<AdminPartnerQueueName>(data.coverage.truncatedQueues);
   const hasHiddenRows = truncatedQueues.size > 0;
 
   return (
     <div className="space-y-5">
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-10">
-        <MetricCard label="待实名" value={data.metrics.pendingKycCount} truncated={truncatedQueues.has('kycProfiles')} />
-        <MetricCard label="待确认订单" value={data.metrics.pendingOrderCount} truncated={truncatedQueues.has('orders')} />
-        <MetricCard label="需复核订单" value={data.metrics.reviewRequiredOrderCount} truncated={truncatedQueues.has('orders')} />
-        <MetricCard label="待提现复核" value={data.metrics.pendingWithdrawalCount} truncated={truncatedQueues.has('withdrawals')} />
-        <MetricCard label="待出款" value={data.metrics.approvedWithdrawalCount} truncated={truncatedQueues.has('withdrawals')} />
-        <MetricCard label="已出款" value={data.metrics.paidWithdrawalCount} truncated={truncatedQueues.has('withdrawalHistory')} />
-        <MetricCard label="已拒绝" value={data.metrics.rejectedWithdrawalCount} truncated={truncatedQueues.has('withdrawalHistory')} />
-        <MetricCard label="已退回" value={data.metrics.returnedWithdrawalCount} truncated={truncatedQueues.has('withdrawalHistory')} />
-        <MetricCard label="风险批次" value={data.metrics.riskLotCount} truncated={truncatedQueues.has('riskLots')} tone={data.metrics.riskLotCount > 0 ? 'danger' : 'normal'} />
-        <MetricCard label="风险事件" value={data.metrics.riskEventCount} truncated={truncatedQueues.has('riskEvents')} tone={data.metrics.riskEventCount > 0 ? 'danger' : 'normal'} />
+        <MetricCard
+          label="待实名"
+          value={data.metrics.pendingKycCount}
+          truncated={truncatedQueues.has('kycProfiles')}
+        />
+        <MetricCard
+          label="待确认订单"
+          value={data.metrics.pendingOrderCount}
+          truncated={truncatedQueues.has('orders')}
+        />
+        <MetricCard
+          label="需复核订单"
+          value={data.metrics.reviewRequiredOrderCount}
+          truncated={truncatedQueues.has('orders')}
+        />
+        <MetricCard
+          label="待提现复核"
+          value={data.metrics.pendingWithdrawalCount}
+          truncated={truncatedQueues.has('withdrawals')}
+        />
+        <MetricCard
+          label="待出款"
+          value={data.metrics.approvedWithdrawalCount}
+          truncated={truncatedQueues.has('withdrawals')}
+        />
+        <MetricCard
+          label="已出款"
+          value={data.metrics.paidWithdrawalCount}
+          truncated={truncatedQueues.has('withdrawalHistory')}
+        />
+        <MetricCard
+          label="已拒绝"
+          value={data.metrics.rejectedWithdrawalCount}
+          truncated={truncatedQueues.has('withdrawalHistory')}
+        />
+        <MetricCard
+          label="已退回"
+          value={data.metrics.returnedWithdrawalCount}
+          truncated={truncatedQueues.has('withdrawalHistory')}
+        />
+        <MetricCard
+          label="风险批次"
+          value={data.metrics.riskLotCount}
+          truncated={truncatedQueues.has('riskLots')}
+          tone={data.metrics.riskLotCount > 0 ? 'danger' : 'normal'}
+        />
+        <MetricCard
+          label="风险事件"
+          value={data.metrics.riskEventCount}
+          truncated={truncatedQueues.has('riskEvents')}
+          tone={data.metrics.riskEventCount > 0 ? 'danger' : 'normal'}
+        />
       </section>
 
       {hasHiddenRows && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-[8px] border border-[#FFC910]/60 bg-[#FFC910]/10 px-4 py-3 text-[13px] text-[#595757]">
-          <span>
-            部分队列超过当前每类 {formatInteger(data.coverage.limit)} 条，计数以“+”标记。
-          </span>
+          <span>部分队列超过当前每类 {formatInteger(data.coverage.limit)} 条，计数以“+”标记。</span>
           {queueLimit < PARTNER_QUEUE_LIMIT_MAX ? (
             <button
               type="button"
               onClick={() =>
-                setQueueLimit((current) =>
-                  Math.min(PARTNER_QUEUE_LIMIT_MAX, current + 50),
-                )
+                setQueueLimit((current) => Math.min(PARTNER_QUEUE_LIMIT_MAX, current + 50))
               }
-              className="rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-1.5 text-[12px] font-medium text-[#595757] hover:border-[#ADADAD] hover:text-[#EA1F59]"
+              className="rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-1.5 text-[12px] font-medium text-[#595757] hover:border-[#ADADAD] hover:text-[#FF0061]"
             >
               加载更多
             </button>
@@ -528,7 +564,7 @@ function EnabledAdminPartnerReview({
       />
 
       <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-4">
-        <label className="flex min-w-0 items-center gap-2 rounded-[8px] border border-[#DCDDDD] px-3 focus-within:border-[#EA1F59] focus-within:ring-2 focus-within:ring-[#EA1F59]/15">
+        <label className="flex min-w-0 items-center gap-2 rounded-[8px] border border-[#DCDDDD] px-3 focus-within:border-[#FF0061] focus-within:ring-2 focus-within:ring-[#FF0061]/15">
           <Search className="h-4 w-4 shrink-0 text-[#595757]" aria-hidden />
           <input
             value={queueSearch}
@@ -610,7 +646,9 @@ function ReconciliationPanel({
         <div className="min-w-0">
           <h2 className="text-[15px] font-semibold">对账</h2>
           <div className="mt-0.5 text-[12px] text-muted-foreground">
-            {enabled ? `${enabled.range.from} 至 ${enabled.range.to} · ${enabled.range.basis}` : '—'}
+            {enabled
+              ? `${enabled.range.from} 至 ${enabled.range.to} · ${enabled.range.basis}`
+              : '—'}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -618,24 +656,36 @@ function ReconciliationPanel({
             type="date"
             value={from}
             onChange={(event) => setFrom(event.target.value)}
-            className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+            className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
             aria-label="对账开始日期"
           />
           <input
             type="date"
             value={to}
             onChange={(event) => setTo(event.target.value)}
-            className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+            className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
             aria-label="对账结束日期"
           />
-          <ActionButton icon={RefreshCw} label="刷新" compact pending={loading} onClick={onRefresh} />
-          <ActionButton icon={Clipboard} label="复制 CSV" compact pending={loading} onClick={onCopy} />
+          <ActionButton
+            icon={RefreshCw}
+            label="刷新"
+            compact
+            pending={loading}
+            onClick={onRefresh}
+          />
+          <ActionButton
+            icon={Clipboard}
+            label="复制 CSV"
+            compact
+            pending={loading}
+            onClick={onCopy}
+          />
         </div>
       </div>
 
       <div className="space-y-4 px-5 py-4">
         {error && (
-          <div className="rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/5 px-3 py-2 text-[13px] text-[#EA1F59]">
+          <div className="rounded-[8px] border border-[#FF0061]/20 bg-[#FF0061]/5 px-3 py-2 text-[13px] text-[#FF0061]">
             {error}
           </div>
         )}
@@ -650,12 +700,27 @@ function ReconciliationPanel({
           <>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
               <ReconciliationMetric label="订单数" value={formatInteger(metrics.orderCount)} />
-              <ReconciliationMetric label="完成订单" value={formatInteger(metrics.completedOrderCount)} />
-              <ReconciliationMetric label="年费收入" value={formatPartnerMoneyCents(metrics.membershipRevenueCnyCents)} />
-              <ReconciliationMetric label="充值本金" value={formatPartnerMoneyCents(metrics.rechargePrincipalCnyCents)} />
-              <ReconciliationMetric label="已出款" value={formatPartnerCreditCents(metrics.paidWithdrawalCreditCents)} />
+              <ReconciliationMetric
+                label="完成订单"
+                value={formatInteger(metrics.completedOrderCount)}
+              />
+              <ReconciliationMetric
+                label="年费收入"
+                value={formatPartnerMoneyCents(metrics.membershipRevenueCnyCents)}
+              />
+              <ReconciliationMetric
+                label="充值本金"
+                value={formatPartnerMoneyCents(metrics.rechargePrincipalCnyCents)}
+              />
+              <ReconciliationMetric
+                label="已出款"
+                value={formatPartnerCreditCents(metrics.paidWithdrawalCreditCents)}
+              />
               <ReconciliationMetric label="邀请数" value={formatInteger(metrics.referralCount)} />
-              <ReconciliationMetric label="邀请奖励" value={formatPartnerCreditCents(metrics.totalReferralRewardCreditCents)} />
+              <ReconciliationMetric
+                label="邀请奖励"
+                value={formatPartnerCreditCents(metrics.totalReferralRewardCreditCents)}
+              />
               <ReconciliationMetric
                 label="需复核订单"
                 value={formatInteger(metrics.reviewRequiredOrderCount)}
@@ -685,9 +750,15 @@ function ReconciliationPanel({
                       <tr key={row.provider} className="border-b border-[#EFEFEF] last:border-b-0">
                         <td className="py-2 pr-4 font-medium">{row.provider}</td>
                         <td className="py-2 pr-4 tabular-nums">{formatInteger(row.orderCount)}</td>
-                        <td className="py-2 pr-4 tabular-nums">{formatInteger(row.completedOrderCount)}</td>
-                        <td className="py-2 pr-4 tabular-nums">{formatPartnerMoneyCents(row.completedAmountCnyCents)}</td>
-                        <td className="py-2 tabular-nums">{formatInteger(row.reviewRequiredOrderCount)}</td>
+                        <td className="py-2 pr-4 tabular-nums">
+                          {formatInteger(row.completedOrderCount)}
+                        </td>
+                        <td className="py-2 pr-4 tabular-nums">
+                          {formatPartnerMoneyCents(row.completedAmountCnyCents)}
+                        </td>
+                        <td className="py-2 tabular-nums">
+                          {formatInteger(row.reviewRequiredOrderCount)}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -713,7 +784,12 @@ function ReconciliationMetric({
   return (
     <div className="min-w-0">
       <div className="text-[12px] text-muted-foreground">{label}</div>
-      <div className={cn('mt-1 truncate text-[16px] font-semibold tabular-nums', tone === 'danger' && 'text-[#EA1F59]')}>
+      <div
+        className={cn(
+          'mt-1 truncate text-[16px] font-semibold tabular-nums',
+          tone === 'danger' && 'text-[#FF0061]',
+        )}
+      >
         {value}
       </div>
     </div>
@@ -754,7 +830,7 @@ function ManualKycPanel({
   return (
     <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-4">
       <div className="mb-3 flex items-center gap-2">
-        <ShieldCheck className="h-4 w-4 text-[#EA1F59]" aria-hidden />
+        <ShieldCheck className="h-4 w-4 text-[#FF0061]" aria-hidden />
         <h2 className="text-[15px] font-semibold">实名状态</h2>
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_0.8fr_0.9fr_1fr_1fr_1.2fr_auto]">
@@ -762,12 +838,12 @@ function ManualKycPanel({
           value={userExternalId}
           onChange={(e) => setUserExternalId(e.target.value)}
           placeholder="用户 ID"
-          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
         />
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value as KycStatusInput)}
-          className="h-9 rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
         >
           <option value="passed">已通过</option>
           <option value="pending">待实名</option>
@@ -778,25 +854,25 @@ function ManualKycPanel({
           value={provider}
           onChange={(e) => setProvider(e.target.value)}
           placeholder="provider"
-          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
         />
         <input
           value={providerRef}
           onChange={(e) => setProviderRef(e.target.value)}
           placeholder="认证流水"
-          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
         />
         <input
           value={bankCardHash}
           onChange={(e) => setBankCardHash(e.target.value)}
           placeholder="银行卡哈希"
-          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
         />
         <input
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="备注"
-          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+          className="h-9 rounded-[8px] border border-[#DCDDDD] px-3 text-[13px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
         />
         <ActionButton
           icon={ShieldCheck}
@@ -827,16 +903,33 @@ function KycQueue({
       >
         {rows.map((row) => {
           const reviewer = row.reviewerUserId > 0 ? `审核人 #${row.reviewerUserId}` : '';
-          const reviewSummary = [row.reviewNote, reviewer, row.reviewSource].filter(Boolean).join(' / ');
+          const reviewSummary = [row.reviewNote, reviewer, row.reviewSource]
+            .filter(Boolean)
+            .join(' / ');
           return (
-            <tr key={row.kycExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
-              <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
-              <td className="px-3 py-3"><StatusBadge kind="kyc" status={row.status} /></td>
+            <tr
+              key={row.kycExternalId}
+              className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35"
+            >
+              <UserCell
+                userExternalId={row.userExternalId}
+                email={row.email}
+                displayName={row.displayName}
+              />
+              <td className="px-3 py-3">
+                <StatusBadge kind="kyc" status={row.status} />
+              </td>
               <td className="px-3 py-3 text-muted-foreground">{row.country}</td>
               <td className="px-3 py-3 text-muted-foreground">{truncate(row.provider, 24)}</td>
-              <td className="px-3 py-3 text-muted-foreground">{truncate(row.providerRef, 28) || '—'}</td>
-              <td className="px-3 py-3 text-muted-foreground">{truncate(reviewSummary, 40) || '—'}</td>
-              <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {truncate(row.providerRef, 28) || '—'}
+              </td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {truncate(reviewSummary, 40) || '—'}
+              </td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {formatDateTime(row.updatedAt as string | Date | null)}
+              </td>
               <td className="px-5 py-3">
                 <div className="flex flex-wrap gap-2">
                   <ActionButton
@@ -930,17 +1023,35 @@ function OrderQueue({
           const reviewNote = orderReviewNotes[row.orderExternalId] ?? '';
           const captureId = orderCaptureIds[row.orderExternalId] ?? '';
           const reviewSummary =
-            [row.reviewReason, row.reviewErrorName, row.reviewErrorMessage].filter(Boolean).join(' / ') ||
-            row.reviewApprovalNote;
+            [row.reviewReason, row.reviewErrorName, row.reviewErrorMessage]
+              .filter(Boolean)
+              .join(' / ') || row.reviewApprovalNote;
           return (
-            <tr key={row.orderExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
-              <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
-              <td className="px-3 py-3 text-muted-foreground">{row.orderKind === 'membership' ? '年费会员' : '充值'}</td>
-              <td className="px-3 py-3 tabular-nums">{formatPartnerMoneyCents(row.amountCnyCents)}</td>
-              <td className="px-3 py-3"><StatusBadge kind="order" status={row.status} /></td>
-              <td className="px-3 py-3 text-muted-foreground">{truncate(reviewSummary, 36) || '—'}</td>
+            <tr
+              key={row.orderExternalId}
+              className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35"
+            >
+              <UserCell
+                userExternalId={row.userExternalId}
+                email={row.email}
+                displayName={row.displayName}
+              />
+              <td className="px-3 py-3 text-muted-foreground">
+                {row.orderKind === 'membership' ? '年费会员' : '充值'}
+              </td>
+              <td className="px-3 py-3 tabular-nums">
+                {formatPartnerMoneyCents(row.amountCnyCents)}
+              </td>
+              <td className="px-3 py-3">
+                <StatusBadge kind="order" status={row.status} />
+              </td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {truncate(reviewSummary, 36) || '—'}
+              </td>
               <td className="px-3 py-3 text-muted-foreground">{row.provider}</td>
-              <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.createdAt as string | Date | null)}</td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {formatDateTime(row.createdAt as string | Date | null)}
+              </td>
               <td className="px-5 py-3">
                 <div className="flex flex-wrap items-center gap-2">
                   {reviewRequired && (
@@ -953,7 +1064,7 @@ function OrderQueue({
                         }))
                       }
                       placeholder="放行备注"
-                      className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                      className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                     />
                   )}
                   {!reviewRequired && (
@@ -966,7 +1077,7 @@ function OrderQueue({
                         }))
                       }
                       placeholder="支付流水"
-                      className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                      className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                     />
                   )}
                   <ActionButton
@@ -974,12 +1085,8 @@ function OrderQueue({
                     label={partnerOrderActionLabel(row.status)}
                     compact
                     pending={pendingAction === actionKey}
-                    disabled={
-                      reviewRequired ? !reviewNote.trim() : !captureId.trim()
-                    }
-                    disabledReason={
-                      reviewRequired ? '请先填写放行备注' : '请先填写真实支付流水'
-                    }
+                    disabled={reviewRequired ? !reviewNote.trim() : !captureId.trim()}
+                    disabledReason={reviewRequired ? '请先填写放行备注' : '请先填写真实支付流水'}
                     onClick={() =>
                       void runAction(
                         actionKey,
@@ -1049,13 +1156,28 @@ function WithdrawalQueue({
           const reason = withdrawalReasons[row.withdrawalExternalId] ?? '';
           const payoutId = payoutIds[row.withdrawalExternalId] ?? '';
           return (
-            <tr key={row.withdrawalExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
-              <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
-              <td className="px-3 py-3 tabular-nums">{formatPartnerCreditCents(row.amountCreditCents)}</td>
-              <td className="px-3 py-3"><StatusBadge kind="withdrawal" status={row.status} /></td>
+            <tr
+              key={row.withdrawalExternalId}
+              className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35"
+            >
+              <UserCell
+                userExternalId={row.userExternalId}
+                email={row.email}
+                displayName={row.displayName}
+              />
+              <td className="px-3 py-3 tabular-nums">
+                {formatPartnerCreditCents(row.amountCreditCents)}
+              </td>
+              <td className="px-3 py-3">
+                <StatusBadge kind="withdrawal" status={row.status} />
+              </td>
               <td className="px-3 py-3 tabular-nums text-muted-foreground">{row.riskScore}</td>
-              <td className="px-3 py-3 text-muted-foreground">{truncate(row.bankAccountFingerprint, 24) || '—'}</td>
-              <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.reviewDueAt as string | Date | null)}</td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {truncate(row.bankAccountFingerprint, 24) || '—'}
+              </td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {formatDateTime(row.reviewDueAt as string | Date | null)}
+              </td>
               <td className="px-5 py-3">
                 <div className="flex flex-wrap items-center gap-2">
                   {(row.status === 'requested' || row.status === 'reviewing') && (
@@ -1094,7 +1216,7 @@ function WithdrawalQueue({
                       }))
                     }
                     placeholder="审核 / 拒绝原因"
-                    className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                    className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                   />
                   <ActionButton
                     icon={XCircle}
@@ -1133,7 +1255,7 @@ function WithdrawalQueue({
                           }))
                         }
                         placeholder="出款流水"
-                        className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                        className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                       />
                       <ActionButton
                         icon={Banknote}
@@ -1196,7 +1318,9 @@ function WithdrawalHistory({
           const returnReason = withdrawalReasons[row.withdrawalExternalId] ?? '';
           const detail =
             row.status === 'paid'
-              ? [row.providerPayoutId, row.paidAt ? `出款 ${formatDateTime(row.paidAt)}` : ''].filter(Boolean).join(' / ')
+              ? [row.providerPayoutId, row.paidAt ? `出款 ${formatDateTime(row.paidAt)}` : '']
+                  .filter(Boolean)
+                  .join(' / ')
               : row.status === 'returned'
                 ? [
                     row.returnedReason || '资金退回',
@@ -1204,17 +1328,35 @@ function WithdrawalHistory({
                   ]
                     .filter(Boolean)
                     .join(' / ')
-                : [row.rejectionReason, row.rejectedAt ? `拒绝 ${formatDateTime(row.rejectedAt)}` : '']
-                  .filter(Boolean)
-                  .join(' / ');
+                : [
+                    row.rejectionReason,
+                    row.rejectedAt ? `拒绝 ${formatDateTime(row.rejectedAt)}` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' / ');
           return (
-            <tr key={row.withdrawalExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
-              <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
-              <td className="px-3 py-3 tabular-nums">{formatPartnerCreditCents(row.amountCreditCents)}</td>
-              <td className="px-3 py-3"><StatusBadge kind="withdrawal" status={row.status} /></td>
-              <td className="px-3 py-3 text-muted-foreground">{truncate(row.bankAccountFingerprint, 24) || '—'}</td>
+            <tr
+              key={row.withdrawalExternalId}
+              className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35"
+            >
+              <UserCell
+                userExternalId={row.userExternalId}
+                email={row.email}
+                displayName={row.displayName}
+              />
+              <td className="px-3 py-3 tabular-nums">
+                {formatPartnerCreditCents(row.amountCreditCents)}
+              </td>
+              <td className="px-3 py-3">
+                <StatusBadge kind="withdrawal" status={row.status} />
+              </td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {truncate(row.bankAccountFingerprint, 24) || '—'}
+              </td>
               <td className="px-3 py-3 text-muted-foreground">{truncate(detail, 42) || '—'}</td>
-              <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {formatDateTime(row.updatedAt as string | Date | null)}
+              </td>
               <td className="px-5 py-3">
                 {row.status === 'paid' ? (
                   <div className="flex flex-wrap items-center gap-2">
@@ -1227,7 +1369,7 @@ function WithdrawalHistory({
                         }))
                       }
                       placeholder="退回原因"
-                      className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                      className="h-8 w-36 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                     />
                     <ActionButton
                       icon={RefreshCw}
@@ -1285,14 +1427,26 @@ function RiskLotQueue({
   riskLotResolutionKinds: Record<string, PartnerRiskLotCloseResolutionKind>;
   riskLotResolutionRefs: Record<string, string>;
   setRiskLotNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  setRiskLotResolutionKinds: React.Dispatch<React.SetStateAction<Record<string, PartnerRiskLotCloseResolutionKind>>>;
+  setRiskLotResolutionKinds: React.Dispatch<
+    React.SetStateAction<Record<string, PartnerRiskLotCloseResolutionKind>>
+  >;
   setRiskLotResolutionRefs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   runAction: RunAdminAction;
 }): JSX.Element {
   return (
     <QueueSection title="风险批次" empty="暂无风险批次">
       <DataTable
-        headers={['用户', '批次', '本金', 'API Units', '批次状态', '风险状态', '风险信息', '更新时间', '操作']}
+        headers={[
+          '用户',
+          '批次',
+          '本金',
+          'API Units',
+          '批次状态',
+          '风险状态',
+          '风险信息',
+          '更新时间',
+          '操作',
+        ]}
         empty={rows.length === 0}
         colSpan={9}
       >
@@ -1323,15 +1477,32 @@ function RiskLotQueue({
             .filter(Boolean)
             .join(' / ');
           return (
-            <tr key={row.lotExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
-              <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
+            <tr
+              key={row.lotExternalId}
+              className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35"
+            >
+              <UserCell
+                userExternalId={row.userExternalId}
+                email={row.email}
+                displayName={row.displayName}
+              />
               <td className="px-3 py-3 text-muted-foreground">{truncate(row.lotExternalId, 18)}</td>
-              <td className="px-3 py-3 tabular-nums">{formatPartnerCreditCents(row.principalCreditCents)}</td>
-              <td className="px-3 py-3 tabular-nums text-muted-foreground">{formatInteger(row.apiUnits)}</td>
-              <td className="px-3 py-3 text-muted-foreground">{row.status === 'frozen' ? '已冻结' : row.status || '—'}</td>
-              <td className="px-3 py-3"><StatusBadge kind="risk" status={row.riskStatus} /></td>
+              <td className="px-3 py-3 tabular-nums">
+                {formatPartnerCreditCents(row.principalCreditCents)}
+              </td>
+              <td className="px-3 py-3 tabular-nums text-muted-foreground">
+                {formatInteger(row.apiUnits)}
+              </td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {row.status === 'frozen' ? '已冻结' : row.status || '—'}
+              </td>
+              <td className="px-3 py-3">
+                <StatusBadge kind="risk" status={row.riskStatus} />
+              </td>
               <td className="px-3 py-3 text-muted-foreground">{truncate(riskDetail, 52) || '—'}</td>
-              <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.updatedAt as string | Date | null)}</td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {formatDateTime(row.updatedAt as string | Date | null)}
+              </td>
               <td className="px-5 py-3">
                 <div className="flex flex-wrap items-center gap-2">
                   {action.action === 'closed' ? (
@@ -1347,7 +1518,7 @@ function RiskLotQueue({
                           }))
                         }
                         placeholder="风险备注"
-                        className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                        className="h-8 w-40 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                       />
                       <ActionButton
                         icon={action.action === 'freeze' ? ShieldCheck : RefreshCw}
@@ -1392,11 +1563,12 @@ function RiskLotQueue({
                         onChange={(event) =>
                           setRiskLotResolutionKinds((current) => ({
                             ...current,
-                            [row.lotExternalId]: event.target.value as PartnerRiskLotCloseResolutionKind,
+                            [row.lotExternalId]: event.target
+                              .value as PartnerRiskLotCloseResolutionKind,
                           }))
                         }
                         aria-label="关闭处理类型"
-                        className="h-8 w-24 rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                        className="h-8 w-24 rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                       >
                         <option value="manual">人工</option>
                         <option value="refund">退款</option>
@@ -1411,7 +1583,7 @@ function RiskLotQueue({
                           }))
                         }
                         placeholder="处理凭证"
-                        className="h-8 w-32 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+                        className="h-8 w-32 rounded-[8px] border border-[#DCDDDD] px-2 text-[12px] outline-none focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
                       />
                       <ActionButton
                         icon={XCircle}
@@ -1468,7 +1640,9 @@ function RiskEventHistory({ rows }: { rows: EnabledOverviewState['riskEvents'] }
         {rows.map((row) => {
           const detail = [
             row.riskReason,
-            row.riskResolutionKind ? `处理 ${partnerRiskCloseResolutionKindLabel(row.riskResolutionKind)}` : '',
+            row.riskResolutionKind
+              ? `处理 ${partnerRiskCloseResolutionKindLabel(row.riskResolutionKind)}`
+              : '',
             row.riskResolutionRef ? `凭证 ${truncate(row.riskResolutionRef, 24)}` : '',
             row.riskNote,
             row.reviewerUserId > 0 ? `处理人 #${row.reviewerUserId}` : '',
@@ -1476,14 +1650,29 @@ function RiskEventHistory({ rows }: { rows: EnabledOverviewState['riskEvents'] }
             .filter(Boolean)
             .join(' / ');
           return (
-            <tr key={row.riskEventExternalId} className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
-              <UserCell userExternalId={row.userExternalId} email={row.email} displayName={row.displayName} />
-              <td className="px-3 py-3 text-muted-foreground">{truncate(row.lotExternalId, 18) || '—'}</td>
-              <td className="px-3 py-3 text-muted-foreground">{partnerRiskEventTypeLabel(row.eventType)}</td>
-              <td className="px-3 py-3 text-muted-foreground">{partnerRiskEventSeverityLabel(row.severity)}</td>
+            <tr
+              key={row.riskEventExternalId}
+              className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35"
+            >
+              <UserCell
+                userExternalId={row.userExternalId}
+                email={row.email}
+                displayName={row.displayName}
+              />
+              <td className="px-3 py-3 text-muted-foreground">
+                {truncate(row.lotExternalId, 18) || '—'}
+              </td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {partnerRiskEventTypeLabel(row.eventType)}
+              </td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {partnerRiskEventSeverityLabel(row.severity)}
+              </td>
               <td className="px-3 py-3 text-muted-foreground">{row.status || '—'}</td>
               <td className="px-3 py-3 text-muted-foreground">{truncate(detail, 56) || '—'}</td>
-              <td className="px-3 py-3 text-muted-foreground">{formatDateTime(row.createdAt as string | Date | null)}</td>
+              <td className="px-3 py-3 text-muted-foreground">
+                {formatDateTime(row.createdAt as string | Date | null)}
+              </td>
             </tr>
           );
         })}
@@ -1506,8 +1695,14 @@ function MetricCard({
   return (
     <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-4 py-3">
       <div className="text-[12px] text-muted-foreground">{label}</div>
-      <div className={cn('mt-2 text-2xl font-semibold tabular-nums', tone === 'danger' && 'text-[#EA1F59]')}>
-        {formatInteger(value)}{truncated ? '+' : ''}
+      <div
+        className={cn(
+          'mt-2 text-2xl font-semibold tabular-nums',
+          tone === 'danger' && 'text-[#FF0061]',
+        )}
+      >
+        {formatInteger(value)}
+        {truncated ? '+' : ''}
       </div>
     </div>
   );
@@ -1550,7 +1745,10 @@ function DataTable({
       <thead>
         <tr className="border-b border-[#EFEFEF] text-left text-[11px] uppercase text-muted-foreground">
           {headers.map((header, index) => (
-            <th key={`${header}-${index}`} className={cn(index === 0 ? 'px-5' : 'px-3', 'py-3 font-medium')}>
+            <th
+              key={`${header}-${index}`}
+              className={cn(index === 0 ? 'px-5' : 'px-3', 'py-3 font-medium')}
+            >
               {header}
             </th>
           ))}
@@ -1583,7 +1781,10 @@ function UserCell({
   return (
     <td className="px-5 py-3">
       <div className="min-w-0">
-        <Link to={`/admin/users/${userExternalId}`} className="font-medium text-foreground hover:text-[#EA1F59]">
+        <Link
+          to={`/admin/users/${userExternalId}`}
+          className="font-medium text-foreground hover:text-[#FF0061]"
+        >
           {displayName !== '—' ? truncate(displayName, 18) : truncate(userExternalId, 18)}
         </Link>
         <div className="mt-0.5 text-[12px] text-muted-foreground">{truncate(email, 30)}</div>
@@ -1601,7 +1802,13 @@ function StatusBadge({
 }): JSX.Element {
   const token = partnerReviewStatusToken(kind, status);
   return (
-    <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium', token.textClass, token.bgClass)}>
+    <span
+      className={cn(
+        'inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium',
+        token.textClass,
+        token.bgClass,
+      )}
+    >
       {token.label}
     </span>
   );
@@ -1636,8 +1843,8 @@ function ActionButton({
         'inline-flex items-center justify-center gap-1.5 rounded-[8px] border text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
         compact ? 'h-8 px-2.5' : 'h-9 px-3',
         tone === 'danger'
-          ? 'border-[#EA1F59]/20 bg-white text-[#EA1F59] hover:bg-[#EA1F59]/5'
-          : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-[#EA1F59]',
+          ? 'border-[#FF0061]/20 bg-white text-[#FF0061] hover:bg-[#FF0061]/5'
+          : 'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-[#FF0061]',
       )}
     >
       {pending ? (

@@ -68,7 +68,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
 
   if (loading && !snap) {
     return compact ? null : (
-      <div className="px-2 pb-2">
+      <div className="hd-sidebar-quota px-2 pb-2">
         <div className="rounded-[10px] border border-[#DCDDDD]/70 bg-white/60 px-3 py-2 text-[11px] text-[#ADADAD] shadow-[0_4px_12px_rgba(17,24,39,0.035)] dark:border-white/10 dark:bg-white/[0.04]">
           读取额度...
         </div>
@@ -79,10 +79,10 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
     if (compact) return null;
     const copy = quotaRefreshStatusCopy({ error, hasSnapshot: false });
     return (
-      <div className="px-2 pb-2">
+      <div className="hd-sidebar-quota px-2 pb-2">
         <div className="rounded-[10px] border border-[#DCDDDD]/75 bg-white/65 px-3 py-2 text-[11px] shadow-[0_4px_12px_rgba(17,24,39,0.035)] dark:border-white/10 dark:bg-white/5">
           <div className="flex items-start gap-2">
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#EA1F59]" aria-hidden />
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FF0061]" aria-hidden />
             <div className="min-w-0 flex-1">
               <div className="font-medium text-foreground">{copy?.title ?? '额度暂时不可用'}</div>
               <div className="mt-0.5 leading-5 text-muted-foreground">
@@ -125,7 +125,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
           isUnmetered
             ? 'bg-[#42C0EF]/10 text-[#258CAE]'
             : outOfTasks
-              ? 'bg-[#EA1F59]/10 text-[#EA1F59]'
+              ? 'bg-[#FF0061]/10 text-[#FF0061]'
               : lowOnTasks
                 ? 'bg-[#FFC910]/15 text-[#595757]'
                 : 'text-muted-foreground hover:bg-[#EFEFEF]/60 dark:hover:bg-white/10',
@@ -138,7 +138,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
 
   if (snap.quotaMode === 'unmetered_test') {
     return (
-      <div className="px-2 pb-2">
+      <div className="hd-sidebar-quota px-2 pb-2">
         <button
           type="button"
           onClick={() => navigate('/usage')}
@@ -163,27 +163,28 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
   }
 
   return (
-    <div className="px-2 pb-2">
+    <div className="hd-sidebar-quota px-2 pb-2">
       <div
         className={cn(
           'rounded-[10px] border border-[#DCDDDD]/70 bg-white/72 px-3 py-2 text-left shadow-[0_4px_12px_rgba(17,24,39,0.035)] transition-colors dark:border-white/10 dark:bg-white/[0.04]',
-          'hover:border-[#EA1F59]/[0.22] hover:bg-[#EA1F59]/[0.035] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
+          'hover:border-[#FF0061]/[0.22] hover:bg-[#FF0061]/[0.035] dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10',
         )}
       >
         <button
           type="button"
           onClick={() => navigate(quotaIndicatorHref(snap))}
-          className="group flex w-full flex-col gap-1.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-[#EA1F59]/45"
+          title={`${periodLabel}额度，剩余 ${remaining} / ${totalLimit}${snap.opusRemaining != null ? `，Opus 剩余 ${snap.opusRemaining}` : ''}`}
+          className="group flex w-full flex-col gap-1.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-[#FF0061]/45"
         >
           <div className="flex items-center justify-between gap-2">
             <span className="truncate text-[10px] font-medium text-[#8B93A6]">
-              {periodLabel}额度
+              {planLabel(snap.plan)}
             </span>
             <span className="inline-flex items-center gap-1 rounded-[6px] text-[11px] font-semibold text-[#595757] dark:text-foreground">
               剩余 {remaining}
               <span className="text-[10px] font-medium text-[#ADADAD]">/ {totalLimit}</span>
             </span>
-            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border border-[#DCDDDD]/70 bg-white/65 text-[#ADADAD] transition-colors group-hover:border-[#EA1F59]/25 group-hover:text-[#EA1F59] dark:border-white/10 dark:bg-transparent">
+            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border border-[#DCDDDD]/70 bg-white/65 text-[#ADADAD] transition-colors group-hover:border-[#FF0061]/25 group-hover:text-[#FF0061] dark:border-white/10 dark:bg-transparent">
               <ArrowUpRight className="h-3 w-3" />
             </span>
           </div>
@@ -192,12 +193,12 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
             <div
               className={cn(
                 'h-full rounded-full transition-[width] duration-300',
-                outOfTasks ? 'bg-[#EA1F59]/75' : lowOnTasks ? 'bg-[#FFC910]' : 'bg-[#42C0EF]',
+                outOfTasks ? 'bg-[#FF0061]/75' : lowOnTasks ? 'bg-[#FFC910]' : 'bg-[#42C0EF]',
               )}
               style={{ width: `${usedPct}%` }}
             />
           </div>
-          <div className="flex items-center justify-between gap-2 text-[10px] text-[#8B93A6] dark:text-foreground/60">
+          <div className="sr-only">
             <span className="truncate">
               {snap.bonusTasks > 0 ? (
                 <>
@@ -217,12 +218,12 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
           </div>
         </button>
         {outOfTasks && (
-          <div className="mt-1.5 text-[10px] font-medium text-[#EA1F59]">
+          <div className="mt-1.5 text-[10px] font-medium text-[#FF0061]">
             {snap.plan === 'free' ? '今日额度已用完，明天再来或升级' : '本月额度已用完，购买加量包'}
           </div>
         )}
         {refreshCopy && (
-          <div className="mt-1.5 flex items-center justify-between gap-2 rounded-[7px] bg-[#EA1F59]/[0.08] px-2 py-1 text-[10px] text-[#EA1F59]">
+          <div className="mt-1.5 flex items-center justify-between gap-2 rounded-[7px] bg-[#FF0061]/[0.08] px-2 py-1 text-[10px] text-[#FF0061]">
             <span className="min-w-0 truncate" title={refreshCopy.body}>
               {refreshCopy.title}
             </span>
@@ -255,8 +256,8 @@ function QuotaRetryButton({
       className={cn(
         'inline-flex shrink-0 items-center justify-center rounded transition-colors disabled:cursor-not-allowed disabled:opacity-60',
         compact
-          ? 'h-5 w-5 hover:bg-[#EA1F59]/10'
-          : 'h-7 w-7 rounded-[6px] border border-[#DCDDDD]/75 bg-white/65 text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10',
+          ? 'h-5 w-5 hover:bg-[#FF0061]/10'
+          : 'h-7 w-7 rounded-[6px] border border-[#DCDDDD]/75 bg-white/65 text-[#595757] hover:border-[#FF0061]/25 hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10',
       )}
       aria-label={loading ? '正在重试额度刷新' : '重试额度刷新'}
     >

@@ -183,7 +183,27 @@ function scheduledFixture(
       else phase = sql.toLowerCase();
       await boundary(phase);
       if (phase === 'scan')
-        return [options.reminder ? [] : [[7, 42, 'synthetic scheduled task', 'once', null]], []];
+        // Positional row matching the scan's column order: id, user, intent,
+        // repeat, rrule, next_run_at, timezone + Batch 10.3 streak/prefs.
+        return [
+          options.reminder
+            ? []
+            : [
+                [
+                  7,
+                  42,
+                  'synthetic scheduled task',
+                  'once',
+                  null,
+                  '2026-10-04 00:00:00.000',
+                  'Asia/Shanghai',
+                  0,
+                  1,
+                  0,
+                ],
+              ],
+          [],
+        ];
       if (phase === 'reminder-scan')
         return [
           [

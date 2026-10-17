@@ -1,0 +1,401 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { type ClientRequest, request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import type { Page, Route } from 'playwright';
+import { currentOperationLifetime } from '../../execution/owned-operation.js';
+import {
+  type BrowserNetworkPolicy,
+  defaultBrowserNetworkPolicy,
+} from '../browser-network-policy.js';
+
+export interface DomainEgressConfig {
+  enabled: boolean;
+  domains: string[];
+  proxyUrl: string;
+  /**
+   * CAPTCHA-REDUCE-1: fixed-IP proxies (one endpoint per static ISP IP). A user
+   * is mapped to one of them for good, never rotated; overrides `proxyUrl`.
+   */
+  pool?: string[];
+  /**
+   * PROXY-BROWSER-1: `browser` (default with a pool) chains the listed domains
+   * at the browser's own loopback proxy, so Chrome does the TLS itself;
+   * `replay` keeps the Playwright route + Node re-request path.
+   */
+  mode?: DomainProxyMode;
+  maxBytes?: number;
+}
+export type DomainProxyMode = 'browser' | 'replay';
+/**
+ * The sites sent through the user's endpoint by default: those that refuse
+ * datacenter IPs and open through a mobile exit (OPEN-ANY-SITE-1, measured
+ * with the production launch flags, 2026-10-16): Reddit 0/2 direct → 3/4
+ * mobile, Medium 0/2 → 2/4. Sign-in hosts never go through the endpoint.
+ * BROWSER_DOMAIN_PROXY_DOMAINS replaces the list; learned sites are added.
+ */
+export const DEFAULT_PROXY_DOMAINS = [
+  // Reddit
+  'reddit.com',
+  'redditstatic.com',
+  'redditmedia.com',
+  'redd.it',
+  // Medium
+  'medium.com',
+];
+/**
+ * Sites that stay on the direct exit whatever is learned: they open from the
+ * datacenter and wall a proxy exit (Google search 19/20 direct, 0/20 mobile;
+ * YouTube 2/2 direct). BROWSER_DOMAIN_PROXY_DIRECT replaces the list.
+ */
+export const DIRECT_ONLY_DOMAINS = [
+  'google.com',
+  'gstatic.com',
+  'googleapis.com',
+  'recaptcha.net',
+  'youtube.com',
+  'ytimg.com',
+  'googlevideo.com',
+];
+/** Account and sign-in hosts never use the shared proxy, whatever the domain list. */
+const SIGN_IN_HOST = /^(?:accounts|myaccount|login|signin|sso|auth|passport|id)\./i;
+const list = (value: string | undefined) =>
+  (value ?? '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+/** Variable names only: configuration is read from the environment, never logged. */
+export const DOMAIN_PROXY_ENV = {
+  enabled: 'BROWSER_DOMAIN_PROXY_ENABLED',
+  domains: 'BROWSER_DOMAIN_PROXY_DOMAINS',
+  url: 'BROWSER_DOMAIN_PROXY_URL',
+  pool: 'BROWSER_DOMAIN_PROXY_POOL',
+  username: 'BROWSER_DOMAIN_PROXY_USERNAME',
+  password: 'BROWSER_DOMAIN_PROXY_PASSWORD',
+  mode: 'BROWSER_DOMAIN_PROXY_MODE',
+  direct: 'BROWSER_DOMAIN_PROXY_DIRECT',
+} as const;
+/**
+ * The proxy rule (what a PAC file would say): listed domains and their
+ * subdomains go through the ISP endpoint, sign-in hosts and everything else
+ * stay on the direct path.
+ */
+export function proxiedDomain(hostname: string, domains: readonly string[]): string | undefined {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  if (SIGN_IN_HOST.test(host)) return undefined;
+  return domains.find((entry) => host === entry || host.endsWith(`.${entry}`));
+}
+/** `host:port` or a full proxy URL; shared credentials fill in missing ones. */
+export function proxyPoolFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
+  const user = env[DOMAIN_PROXY_ENV.username] ?? '';
+  const pass = env[DOMAIN_PROXY_ENV.password] ?? '';
+  return list(env[DOMAIN_PROXY_ENV.pool]).map((entry) => {
+    const url = new URL(/^[a-z]+:\/\//i.test(entry) ? entry : `http://${entry}`);
+    if (!url.username && user) {
+      url.username = encodeURIComponent(user);
+      url.password = encodeURIComponent(pass);
+    }
+    return url.href;
+  });
+}
+export function domainEgressConfig(env: NodeJS.ProcessEnv = process.env): DomainEgressConfig {
+  const pool = proxyPoolFromEnv(env);
+  const domains = list(env[DOMAIN_PROXY_ENV.domains]).map((d) => d.toLowerCase());
+  return {
+    enabled: env[DOMAIN_PROXY_ENV.enabled] === 'true',
+    domains: domains.length || !pool.length ? domains : [...DEFAULT_PROXY_DOMAINS],
+    proxyUrl: env[DOMAIN_PROXY_ENV.url] ?? '',
+    ...(pool.length ? { pool } : {}),
+    mode: pool.length && env[DOMAIN_PROXY_ENV.mode] !== 'replay' ? 'browser' : 'replay',
+  };
+}
+/** Browser-level chaining: one fixed ISP endpoint per pool slot, or null when off. */
+export function browserProxyUpstreams(
+  env: NodeJS.ProcessEnv = process.env,
+): { endpoints: string[]; domains: string[]; direct: string[] } | null {
+  const config = domainEgressConfig(env);
+  if (!config.enabled || config.mode !== 'browser' || !config.pool?.length) return null;
+  const configured = list(env[DOMAIN_PROXY_ENV.direct]).map((d) => d.toLowerCase());
+  const direct = configured.length ? configured : [...DIRECT_ONLY_DOMAINS];
+  // Direct wins over the list too: an operator list cannot send these through.
+  const domains = config.domains.filter((d) => !proxiedDomain(d, direct));
+  return { endpoints: config.pool, domains, direct };
+}
+/** The pool slot a user always gets (stable across tasks and restarts). */
+export function proxyPoolSlot(affinityKey: string, size: number): number {
+  return createHash('sha256').update(affinityKey).digest().readUInt32BE(0) % size;
+}
+/** One immutable endpoint per task/session. No credentials, URLs or bodies enter telemetry. */
+export async function installDomainEgress(
+  page: Page,
+  config = domainEgressConfig(),
+  policy: Pick<BrowserNetworkPolicy, 'check'> = defaultBrowserNetworkPolicy,
+  ownsPage?: (candidate: Page) => boolean,
+  signal?: AbortSignal,
+  sessionKey: string = randomUUID(),
+  /** The user: picks the same pool IP for every task of this user. */
+  affinityKey: string = sessionKey,
+) {
+  const metrics = {
+    proxyRequestBytes: 0,
+    proxyResponseBytes: 0,
+    proxyRequests: 0,
+    directFallbacks: 0,
+    blockedMedia: 0,
+    failed: 0,
+    unit: 'http_payload_bytes',
+  };
+  // Browser mode proxies at launch (BrowserEgressProxy); nothing to route here.
+  if (!config.enabled || config.mode === 'browser')
+    return { metrics, interruption: () => null, dispose: async () => {} };
+  const lifetime = currentOperationLifetime();
+  let closed = false;
+  const pending = new Set<ClientRequest>();
+  const check = () => {
+    signal?.throwIfAborted();
+    if (closed) throw new Error('domain_proxy_closed');
+    if (lifetime) lifetime.drain.assertDispatch(lifetime.owner);
+  };
+  const stop = () => {
+    closed = true;
+    for (const req of pending) req.destroy(new Error('domain_proxy_cancelled'));
+  };
+  signal?.addEventListener('abort', stop, { once: true });
+  const template = config.proxyUrl;
+  const pinned = config.pool?.length
+    ? new URL(config.pool[proxyPoolSlot(affinityKey, config.pool.length)]!)
+    : null;
+  const proxyFor = (domain: string) => {
+    if (pinned) return pinned;
+    const identity = createHash('sha256')
+      .update(JSON.stringify([sessionKey, domain]))
+      .digest('hex')
+      .slice(0, 32);
+    return new URL(template.replace(/\{session\}|%7Bsession%7D/gi, identity));
+  };
+  const proxy = proxyFor('validation');
+  if (!['http:', 'https:'].includes(proxy.protocol) || !proxy.hostname || !config.domains.length)
+    throw new Error('domain_proxy_invalid_config');
+  const domains = [...config.domains];
+  const context = page.context();
+  // Only a web origin's service worker can answer page requests and bypass the
+  // route. The browser's own component extensions (Chrome ships one at start,
+  // chrome-extension://…) are not page traffic and must not block the proxy.
+  const webWorker = (worker: { url(): string }) => /^https?:/i.test(worker.url());
+  if (context.serviceWorkers().some(webWorker)) {
+    signal?.removeEventListener('abort', stop);
+    throw new Error('domain_proxy_service_worker_active');
+  }
+  const blockRegistration = () => {
+    const service = navigator.serviceWorker;
+    if (service)
+      Object.defineProperty(service, 'register', {
+        value: () => Promise.reject(new Error('Service workers disabled in proxy session')),
+        configurable: false,
+        writable: false,
+      });
+  };
+  await context.addInitScript(blockRegistration);
+  await page.evaluate(blockRegistration);
+  const workerStarted = (worker: { url(): string }) => {
+    if (!webWorker(worker)) return;
+    metrics.failed++;
+    stop();
+  };
+  context.on('serviceworker', workerStarted);
+  const belongs = async (candidate: Page): Promise<boolean> => {
+    if (candidate === page || ownsPage?.(candidate)) return true;
+    const opener = await candidate.opener().catch(() => null);
+    return opener ? belongs(opener) : false;
+  };
+  const handler = async (route: Route) => {
+    const request = route.request();
+    let owner: Page;
+    try {
+      owner = request.frame().page();
+    } catch {
+      return route.fallback();
+    }
+    if (!(await belongs(owner))) return route.fallback();
+    const url = new URL(request.url());
+    const domain = proxiedDomain(url.hostname, domains);
+    if (!domain) return route.fallback();
+    const proxy = proxyFor(domain);
+    try {
+      check();
+    } catch {
+      return route.abort('aborted');
+    }
+    const decision = await policy.check(url.href);
+    try {
+      check();
+    } catch {
+      return route.abort('aborted');
+    }
+    if (!decision.allowed || !decision.addresses[0]) {
+      metrics.failed++;
+      return route.abort('blockedbyclient');
+    }
+    if (
+      request.resourceType() === 'media' ||
+      /\.(?:mp4|m4v|webm|m3u8|mpd|ts|mp3|ogg)(?:$|\?)/i.test(url.pathname) ||
+      /(?:^|\.)googlevideo\.com$/i.test(url.hostname)
+    ) {
+      metrics.blockedMedia++;
+      return route.abort('blockedbyclient');
+    }
+    const body = request.postDataBuffer();
+    const headers = await request.allHeaders();
+    delete headers['proxy-authorization'];
+    delete headers['proxy-connection'];
+    delete headers.connection;
+    delete headers['content-length'];
+    headers.host = url.host;
+    headers['accept-encoding'] = 'identity';
+    const maxBytes = config.maxBytes ?? 5 * 1024 * 1024;
+    if ((body?.length ?? 0) > maxBytes) {
+      metrics.failed++;
+      return route.abort('blockedbyclient');
+    }
+    let responseStarted = false;
+    try {
+      const response = await new Promise<{
+        status: number;
+        headers: Record<string, string>;
+        body: Buffer;
+      }>((resolve, reject) => {
+        const secure = url.protocol === 'https:';
+        // Destination is the policy-approved IP even inside CONNECT: upstream DNS cannot rebind it.
+        const approvedHost = decision.addresses[0]!;
+        const authority = approvedHost.includes(':') ? `[${approvedHost}]` : approvedHost;
+        const auth =
+          proxy.username || proxy.password
+            ? `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString('base64')}`
+            : undefined;
+        check();
+        const upstream = (
+          secure ? httpsRequest : proxy.protocol === 'https:' ? httpsRequest : httpRequest
+        )(
+          secure
+            ? {
+                hostname: approvedHost,
+                servername: url.hostname,
+                port: Number(url.port || 443),
+                path: url.pathname + url.search,
+                method: request.method(),
+                headers,
+                agent: new HttpsProxyAgent(proxy),
+                timeout: 10000,
+              }
+            : {
+                hostname: proxy.hostname,
+                port: Number(proxy.port || (proxy.protocol === 'https:' ? 443 : 80)),
+                path: `http://${authority}:${url.port || 80}${url.pathname}${url.search}`,
+                method: request.method(),
+                headers: { ...headers, ...(auth ? { 'proxy-authorization': auth } : {}) },
+                agent: false,
+                timeout: 10000,
+              },
+          (res) => {
+            if ([407, 502, 503, 504].includes(res.statusCode ?? 0)) {
+              res.destroy();
+              reject(new Error('proxy_unavailable'));
+              return;
+            }
+            responseStarted = true;
+            if (
+              /^(?:video|audio)\//i.test(String(res.headers['content-type'] ?? '')) ||
+              Number(res.headers['content-length'] ?? 0) > maxBytes
+            ) {
+              metrics.blockedMedia++;
+              res.destroy();
+              reject(new Error('media_blocked'));
+              return;
+            }
+            const chunks: Buffer[] = [];
+            let size = 0;
+            res.on('data', (chunk: Buffer) => {
+              size += chunk.length;
+              metrics.proxyResponseBytes += chunk.length;
+              if (size > maxBytes) res.destroy(new Error('response_too_large'));
+              else chunks.push(chunk);
+            });
+            res.on('error', reject);
+            res.on('end', () => {
+              const resultHeaders: Record<string, string> = {};
+              for (const [key, value] of Object.entries(res.headers))
+                if (
+                  value !== undefined &&
+                  !['transfer-encoding', 'connection', 'content-length'].includes(key)
+                )
+                  resultHeaders[key] = Array.isArray(value) ? value.join('\n') : value;
+              resolve({
+                status: res.statusCode ?? 502,
+                headers: resultHeaders,
+                body: Buffer.concat(chunks),
+              });
+            });
+          },
+        );
+        pending.add(upstream);
+        upstream.once('close', () => pending.delete(upstream));
+        metrics.proxyRequests++;
+        upstream.on('timeout', () => upstream.destroy(new Error('proxy_timeout')));
+        upstream.on('error', reject);
+        if (body) {
+          metrics.proxyRequestBytes += body.length;
+          upstream.write(body);
+        }
+        upstream.end();
+      });
+      check();
+      await route.fulfill(response);
+    } catch {
+      // Never replay a write after an ambiguous upstream outcome.
+      if (
+        !closed &&
+        !signal?.aborted &&
+        !responseStarted &&
+        ['GET', 'HEAD'].includes(request.method())
+      ) {
+        metrics.directFallbacks++;
+        await route.fallback();
+      } else {
+        metrics.failed++;
+        await route.abort('failed');
+      }
+    }
+  };
+  const inFlight = new Set<Promise<void>>();
+  const guardedHandler = (route: Route) => {
+    const work = handler(route).catch(async () => {
+      metrics.failed++;
+      await route.abort('failed').catch(() => {});
+    });
+    inFlight.add(work);
+    void work.then(() => inFlight.delete(work));
+    return work;
+  };
+  try {
+    await context.route('**/*', guardedHandler);
+  } catch (error) {
+    stop();
+    context.off('serviceworker', workerStarted);
+    signal?.removeEventListener('abort', stop);
+    throw error;
+  }
+  return {
+    metrics,
+    interruption: () =>
+      closed && !signal?.aborted
+        ? { reason: 'proxy_stopped', message: '代理会话已停止，请重新开始任务。' }
+        : null,
+    dispose: async () => {
+      stop();
+      signal?.removeEventListener('abort', stop);
+      context.off('serviceworker', workerStarted);
+      await context.unroute('**/*', guardedHandler);
+      await Promise.allSettled([...inFlight]);
+    },
+  };
+}

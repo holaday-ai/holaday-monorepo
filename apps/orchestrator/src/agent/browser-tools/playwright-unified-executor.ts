@@ -1,0 +1,766 @@
+import { randomUUID } from 'node:crypto';
+import type { Dialog, Locator, Page } from 'playwright';
+import { stripTrackingFromUrl } from '../../execution/url-identity.js';
+import { probeBrowserBlocker } from './browser-blocker-probe.js';
+import { scrollWithEvidence } from './browser-scroll.js';
+import { browserToolError } from './browser-tool-error.js';
+import { ensureExecutionViewport } from './browser-viewport.js';
+import { CloudObservation, pageRoot } from './cloud-observation.js';
+import { redactPageText } from './page-redaction.js';
+import type { UnifiedBrowserAction } from './unified-tools.js';
+
+/** One tool result for the model: text always, an image only for `screenshot`. */
+export interface UnifiedToolResult {
+  ok: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+  interruption?: { reason: string; message: string };
+  effect?: {
+    urlChanged: boolean;
+    formChanged: boolean;
+    domChanged: boolean;
+    networkCategories: string[];
+    unexpected: boolean;
+    triggers?: Array<{ branch: string; method: string; url: string; action: string }>;
+    backgroundRequests?: Array<{ branch: string; method: string; url: string; action: string }>;
+    observationAvailable?: boolean;
+  };
+  form?: {
+    ref: string;
+    filled: boolean;
+    submitted: boolean;
+    /** The field belongs to a search box (GET query), not a business form. */
+    search?: boolean;
+    /** The field is a date control (native date input or a date picker). */
+    date?: boolean;
+  };
+  text: string;
+  image?: { mediaType: 'image/jpeg'; data: string };
+  /** Present on `download`: where the file was saved by the host. */
+  download?: BrowserDownloadReceipt;
+  /** Native JavaScript dialogs (alert/confirm/prompt) this action opened. */
+  dialogs?: Array<{ type: string; message: string }>;
+  tabId?: string;
+  openedTab?: boolean;
+  scroll?: {
+    beforeHeight: number;
+    afterHeight: number;
+    addedChars: number;
+    grew: boolean;
+    steps?: Array<{ beforeHeight: number; afterHeight: number; addedChars: number; grew: boolean }>;
+  };
+  /**
+   * Present on `snapshot`: absolute link targets on the page (full, before the
+   * model-facing shortening) and the shortened forms the model saw. Host-only
+   * evidence for grounding the answer's per-item links; never sent to the model.
+   */
+  links?: string[];
+  /** Page URL after the action. */
+  url?: string;
+}
+
+export interface BrowserDownloadReceipt {
+  fileId: string;
+  filename: string;
+  sizeBytes: number;
+  sha256: string;
+  downloadUrl: string;
+}
+
+export interface UnifiedExecutorOptions {
+  observationV2?: boolean;
+  taskIntent?: string;
+  /** Resolves task attachment ids to local file paths for `upload`. */
+  resolveUploads?: (fileIds: readonly string[]) => Promise<string[]>;
+  /** Persists a finished download; returns the host path. */
+  saveDownload?: (download: import('playwright').Download) => Promise<BrowserDownloadReceipt>;
+  actionTimeoutMs?: number;
+  maxSnapshotChars?: number;
+  maxExtractChars?: number;
+  /** Link URLs in snapshots are cut to this many characters (default 100, 0 = off). */
+  maxUrlChars?: number;
+}
+
+const DEFAULT_ACTION_TIMEOUT_MS = 10_000;
+const DEFAULT_MAX_SNAPSHOT_CHARS = 40_000;
+const DEFAULT_MAX_EXTRACT_CHARS = 20_000;
+const DEFAULT_MAX_URL_CHARS = 100;
+/** How long a click waits to see whether it opened a new tab or navigated. */
+const POPUP_WAIT_MS = 1_500;
+const URL_LINE = /^(\s*- \/url: )(.*)$/;
+
+/**
+ * Link URLs are 20–35% of a real page's AI snapshot (batch 12, eval sites),
+ * mostly tracking parameters. Clicks go by ref, so a shortened URL keeps the
+ * page readable at a fraction of the tokens.
+ *
+ * With `baseUrl` (the page's `document.baseURI`, which honours `<base href>`)
+ * every link is first resolved the way the browser resolves it, so the model
+ * sees the same absolute address that is recorded as observed evidence:
+ * `article?id=42` on `/news/index` reads `…/news/article?id=42`.
+ */
+export function shortenSnapshotUrls(tree: string, maxUrlChars: number, baseUrl?: string): string {
+  if (maxUrlChars <= 0) return tree;
+  return tree
+    .split('\n')
+    .map((line) => {
+      const match = URL_LINE.exec(line);
+      if (!match) return line;
+      const raw = match[2] ?? '';
+      const href = yamlScalar(raw);
+      const absolute = baseUrl ? resolveHref(href, baseUrl) : null;
+      const short = shortenUrl(absolute ?? href, maxUrlChars);
+      return short === href ? line : `${match[1]}${short}`;
+    })
+    .join('\n');
+}
+
+/**
+ * ariaSnapshot is YAML: a value such as `?id=2` or one containing `: ` is
+ * written quoted (`"?id=2"`). The link is the scalar, not the quotes.
+ */
+export function yamlScalar(raw: string): string {
+  const value = raw.trim();
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    try {
+      return JSON.parse(value) as string;
+    } catch {
+      return value.slice(1, -1);
+    }
+  }
+  if (value.length >= 2 && value.startsWith("'") && value.endsWith("'"))
+    return value.slice(1, -1).replace(/''/g, "'");
+  return value;
+}
+
+/**
+ * The absolute http(s) address a link points at, resolved against the page's
+ * base URL exactly as the browser does (existing percent-escapes are kept).
+ * Null for other schemes (mailto:, javascript:) or unparseable hrefs.
+ */
+export function resolveHref(href: string, baseUrl: string): string | null {
+  try {
+    const absolute = new URL(href.trim(), baseUrl).href;
+    return /^https?:/i.test(absolute) ? absolute : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The link the model sees: tracking parameters (utm_*, gclid, spm, …) and
+ * in-page anchors removed, everything that identifies the resource kept (ids,
+ * search terms, signatures, SPA hash routes). If that is still too long it is
+ * cut and marked with `…` — a cut link is never shown as if it were usable,
+ * and it is never recorded as observed evidence.
+ */
+export function shortenUrl(url: string, maxUrlChars: number): string {
+  if (maxUrlChars <= 0) return url;
+  const cleaned = stripTrackingFromUrl(url);
+  if (cleaned.length <= maxUrlChars) return cleaned;
+  return `${cleaned.slice(0, maxUrlChars)}…`;
+}
+
+/**
+ * The observed form of a link for grounding: the page's own URL without
+ * tracking parameters (what the model is shown when it fits), never a cut
+ * display form. With shortening off the model sees the raw URL, so that is it.
+ */
+export function observedLinkEvidence(absolute: string, maxUrlChars: number): string {
+  return maxUrlChars <= 0 ? absolute : stripTrackingFromUrl(absolute);
+}
+
+const MAX_SNAPSHOT_LINKS = 400;
+const MAX_EXTRACT_LINKS = 150;
+const MAX_LINK_TEXT_CHARS = 60;
+
+/** Visible text links on the page (absolute http(s) hrefs, first occurrence wins). */
+async function pageLinks(
+  page: Page,
+  timeout: number,
+): Promise<Array<{ text: string; url: string }>> {
+  const collect = page
+    .locator('a[href]')
+    .evaluateAll(
+      (nodes, limits) => {
+        const seen = new Set<string>();
+        const out: Array<{ text: string; url: string }> = [];
+        for (const node of nodes) {
+          const anchor = node as HTMLAnchorElement;
+          const text = (anchor.innerText || anchor.getAttribute('title') || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, limits.text);
+          if (!text || !/^https?:/i.test(anchor.href) || seen.has(anchor.href)) continue;
+          if (anchor.getClientRects().length === 0) continue;
+          seen.add(anchor.href);
+          out.push({ text, url: anchor.href });
+          if (out.length >= limits.count) break;
+        }
+        return out;
+      },
+      { text: MAX_LINK_TEXT_CHARS, count: MAX_EXTRACT_LINKS },
+    )
+    .catch(() => []);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<Array<{ text: string; url: string }>>((resolve) => {
+    timer = setTimeout(() => resolve([]), timeout);
+  });
+  try {
+    return await Promise.race([collect, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Observed link targets in an AI aria snapshot: resolved against the page's
+ * base URL (`document.baseURI`), tracking tokens removed — the same address
+ * `shortenSnapshotUrls` shows the model whenever it fits.
+ */
+export function snapshotLinks(tree: string, baseUrl: string, maxUrlChars: number): string[] {
+  const links = new Set<string>();
+  for (const line of tree.split('\n')) {
+    const raw = URL_LINE.exec(line)?.[2];
+    const href = raw ? yamlScalar(raw) : '';
+    if (!href || links.size >= MAX_SNAPSHOT_LINKS) continue;
+    const absolute = resolveHref(href, baseUrl);
+    if (absolute) links.add(observedLinkEvidence(absolute, maxUrlChars));
+  }
+  return [...links];
+}
+
+/**
+ * Executes unified tool calls on a Playwright page. Refs come from
+ * `ariaSnapshot({ mode: 'ai' })` and are resolved with `aria-ref=` locators, so
+ * a stale ref fails loudly ("请重新 snapshot") instead of clicking the wrong node.
+ * Never throws: failures return `{ ok: false, text }` for the model to replan.
+ */
+export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExecutorOptions = {}) {
+  const observation = options.observationV2 ? new CloudObservation(page) : null;
+  const timeout = options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
+  const maxSnapshot = options.maxSnapshotChars ?? DEFAULT_MAX_SNAPSHOT_CHARS;
+  const maxExtract = options.maxExtractChars ?? DEFAULT_MAX_EXTRACT_CHARS;
+  const maxUrlChars = options.maxUrlChars ?? DEFAULT_MAX_URL_CHARS;
+  let activeFrame = page.mainFrame();
+  const tabs = new Map<string, Page>([[`tab_${randomUUID()}`, page]]);
+  const registerTab = (target: Page) => {
+    let id = [...tabs].find(([, p]) => p === target)?.[0];
+    if (!id) {
+      id = `tab_${randomUUID()}`;
+      tabs.set(id, target);
+    }
+    return id;
+  };
+  const byRef = (ref: string) =>
+    observation?.locator(activeFrame, ref) ?? activeFrame.locator(`aria-ref=${ref}`);
+  // AP3 core-10: native dialogs are host receipts. Handling them keeps
+  // Playwright's default outcome (dismissed: alert closed, confirm cancelled,
+  // prompt empty) and records that one opened.
+  const dialogs: Array<{ type: string; message: string }> = [];
+  const onDialog = (dialog: Dialog) => {
+    dialogs.push({ type: dialog.type(), message: dialog.message().slice(0, 200) });
+    // A page-level handler (a harness, a test) owns the dialog; only record it.
+    const owner = dialog.page() as unknown as { listenerCount(event: string): number } | null;
+    if ((owner?.listenerCount('dialog') ?? 0) > 0) return;
+    dialog.dismiss().catch(() => {});
+  };
+  page.context().on('dialog', onDialog);
+
+  const snapshotWithLinks = async (): Promise<{ text: string; links: string[] }> => {
+    // Redact before truncating: a secret straddling the cut must not survive.
+    const redacted = await redactPageText(
+      page as never,
+      await (await pageRoot(page.mainFrame())).ariaSnapshot({ mode: 'ai', timeout }),
+    );
+    // Links resolve against document.baseURI (honours <base href>), not page.url().
+    const baseUrl = await page.evaluate(() => document.baseURI).catch(() => page.url());
+    const tree = shortenSnapshotUrls(redacted, maxUrlChars, baseUrl);
+    const header = `URL: ${page.url()}\n标题: ${await page.title()}\n`;
+    const visible = tree.length > maxSnapshot ? tree.slice(0, maxSnapshot) : tree;
+    const body = visible === tree ? tree : `${visible}\n…（已截断）`;
+    // Shortening maps lines 1:1, so the visible lines of the full tree are the
+    // links the model saw; links past the cut ground nothing.
+    const seen = redacted.split('\n').slice(0, visible.split('\n').length).join('\n');
+    return { text: `${header}${body}`, links: snapshotLinks(seen, baseUrl, maxUrlChars) };
+  };
+  const snapshotText = async (): Promise<string> => (await snapshotWithLinks()).text;
+
+  /**
+   * Follow a target=_blank popup as a real owned tab so later tab operations
+   * can return to the original page without replacing its navigation state.
+   */
+  const clickFollowingNewTab = async (ref: string): Promise<UnifiedToolResult> => {
+    const popup = page.waitForEvent('popup', { timeout: POPUP_WAIT_MS }).catch(() => null);
+    const navigated = page
+      .waitForEvent('framenavigated', { timeout: POPUP_WAIT_MS })
+      .then(() => null)
+      .catch(() => null);
+    await byRef(ref).click({ timeout });
+    const opened = await Promise.race([popup, navigated]);
+    if (!opened) return done(`已点击 ${ref}`);
+    await opened.waitForLoadState('domcontentloaded', { timeout }).catch(() => {});
+    await ensureExecutionViewport(opened);
+    registerTab(opened);
+    page = opened;
+    activeFrame = page.mainFrame();
+    return {
+      ...done(`已点击 ${ref}，打开新标签：${page.url()}`),
+      tabId: registerTab(page),
+      url: page.url(),
+    };
+  };
+
+  async function execute(action: UnifiedBrowserAction): Promise<UnifiedToolResult> {
+    try {
+      // A local-wall exception authorizes reading public data, never clicking through that wall.
+      if (
+        options.taskIntent &&
+        ['click', 'type', 'select', 'download', 'upload', 'click_at'].includes(action.tool)
+      ) {
+        const blocker = await probeBrowserBlocker(page, options.taskIntent);
+        if (blocker && 'disposition' in blocker && blocker.disposition === 'continue') {
+          const restricted =
+            '#movie_player,#player,ytd-player,#comments,ytd-comments,[aria-label="Comments" i],[role="region"],video,audio';
+          const inWall =
+            activeFrame !== page.mainFrame() ||
+            (action.tool === 'click_at'
+              ? await page.evaluate(
+                  ({ x, y, selector }) =>
+                    !document.elementFromPoint(x, y) ||
+                    !!document.elementFromPoint(x, y)?.closest(selector),
+                  { x: action.x, y: action.y, selector: restricted },
+                )
+              : 'ref' in action && action.ref
+                ? await byRef(action.ref).evaluate(
+                    (el, selector) => !!el.closest(selector),
+                    restricted,
+                  )
+                : true);
+          if (inWall)
+            return {
+              ok: false,
+              errorCode: 'local_wall_protected',
+              text: '该区域需用户验证；仅继续读取墙外公开信息，不点击登录、播放或验证控件。',
+            };
+        }
+      }
+      switch (action.tool) {
+        case 'read_page':
+        case 'sections':
+        case 'get_page_text':
+        case 'links':
+        case 'tables':
+        case 'scroll_until':
+          return fail('capability_missing');
+        case 'list_tabs':
+          return {
+            ...done(
+              JSON.stringify({
+                tabs: await Promise.all(
+                  [...tabs]
+                    .filter(([, p]) => !p.isClosed())
+                    .map(async ([tabId, p]) => ({ tabId, url: p.url(), title: await p.title() })),
+                ),
+              }),
+            ),
+            tabId: registerTab(page),
+          };
+        case 'new_tab': {
+          if ([...tabs.values()].filter((p) => !p.isClosed()).length >= 20)
+            return fail('任务标签数达到上限');
+          const opened = await page.context().newPage();
+          await ensureExecutionViewport(opened);
+          registerTab(opened);
+          page = opened;
+          activeFrame = page.mainFrame();
+          return {
+            ...done(JSON.stringify({ status: 'created', tabId: registerTab(page) })),
+            tabId: registerTab(page),
+            url: page.url(),
+          };
+        }
+        case 'switch_tab':
+        case 'close_tab': {
+          const target = tabs.get(action.targetTabId);
+          if (!target || target.isClosed()) return fail('标签不属于本任务或已关闭');
+          if (action.tool === 'close_tab') {
+            if ([...tabs.values()].filter((p) => !p.isClosed()).length <= 1)
+              return fail('不能关闭最后一个任务标签');
+            await target.close();
+            tabs.delete(action.targetTabId);
+            if (target === page) page = [...tabs.values()].find((p) => !p.isClosed())!;
+          } else {
+            page = target;
+            await page.bringToFront();
+          }
+          activeFrame = page.mainFrame();
+          return {
+            ...done(
+              JSON.stringify({
+                status: action.tool,
+                tabId: registerTab(page),
+                targetTabId: action.targetTabId,
+              }),
+            ),
+            tabId: registerTab(page),
+            url: page.url(),
+          };
+        }
+        case 'snapshot': {
+          const snapshot = await snapshotWithLinks();
+          return {
+            ok: true,
+            text: snapshot.text,
+            links: snapshot.links,
+            url: page.url(),
+            tabId: registerTab(page),
+          };
+        }
+        case 'click':
+          if (action.newTab) {
+            const target = byRef(action.ref);
+            const href = await target.getAttribute('href');
+            const link = href ? new URL(href, activeFrame.url()).href : '';
+            if (!/^https?:/i.test(link)) return fail('newTab 只允许已观察到的普通网页链接');
+            if (page.context().pages().length >= 20) return fail('任务标签数达到上限');
+            const [popup] = await Promise.all([
+              page
+                .context()
+                .waitForEvent('page', { timeout: Math.min(timeout, 5_000) })
+                .catch(() => null),
+              // An overlay or a script can keep the middle click from landing.
+              target
+                .click({ button: 'middle', timeout: Math.min(timeout, 5_000) })
+                .catch(() => {}),
+            ]);
+            // ACCEPT-283-R6 (BBC): when the middle click opens nothing (taken over
+            // or blocked), open the observed link itself in the new tab instead.
+            let opened = popup;
+            if (!opened) {
+              opened = await page.context().newPage();
+              await opened.goto(link, { waitUntil: 'commit', timeout }).catch(() => {});
+            } else if (opened.url() === 'about:blank') {
+              // The tab exists before its navigation starts: report the real page.
+              await opened.waitForURL((u) => u.href !== 'about:blank', { timeout }).catch(() => {});
+            }
+            await ensureExecutionViewport(opened);
+            page = opened;
+            activeFrame = opened.mainFrame();
+            const tabId = observation?.activate(opened) ?? registerTab(opened);
+            try {
+              await opened.waitForLoadState('domcontentloaded', { timeout });
+            } catch (error) {
+              return { ...browserToolError(error), tabId, openedTab: true, url: opened.url() };
+            }
+            return {
+              ...done(`已点击链接并打开新标签 ${tabId}`),
+              tabId,
+              openedTab: true,
+              url: opened.url(),
+            };
+          }
+          if (observation) {
+            await byRef(action.ref).click({ timeout });
+            return done(`已点击 ${action.ref}`);
+          }
+          return { ...(await clickFollowingNewTab(action.ref)), url: page.url() };
+        case 'type': {
+          const target = byRef(action.ref);
+          const field = await fieldKind(target, timeout);
+          // FIX-24 (core-10): a paragraph inside a rich editor (TinyMCE's
+          // contenteditable body) ignores fill; the editable host takes it.
+          const inEditor = await target
+            .evaluate((el) => !!el.parentElement?.isContentEditable)
+            .catch(() => false);
+          await (inEditor
+            ? target.locator(
+                'xpath=ancestor::*[@contenteditable][not(@contenteditable="false")][1]',
+              )
+            : target
+          ).fill(action.text, { timeout });
+          // A rich editor has no input value (inputValue throws): its typed text is
+          // checked in the editable host. Labels still resolve to their control.
+          if (observation) {
+            const value = await target.inputValue({ timeout }).catch(() => null);
+            const typed =
+              value !== null
+                ? value === action.text
+                : await target.evaluate((el, text) => {
+                    let host = el as HTMLElement;
+                    while (host.parentElement?.isContentEditable) host = host.parentElement;
+                    return host.isContentEditable && (host.innerText ?? '').includes(text);
+                  }, action.text);
+            if (!typed) return fail('输入值核验失败');
+          }
+          if (action.submit) await target.press('Enter', { timeout });
+          return {
+            ...done(`已在 ${action.ref} 输入${action.submit ? '并提交' : ''}`),
+            form: { ref: action.ref, filled: true, submitted: !!action.submit, ...field },
+          };
+        }
+        case 'select': {
+          const target = byRef(action.ref);
+          const field = await fieldKind(target, timeout);
+          try {
+            await target.selectOption({ label: action.value }, { timeout });
+          } catch {
+            await target.selectOption(action.value, { timeout });
+          }
+          return {
+            ...done(`已在 ${action.ref} 选择「${action.value}」`),
+            form: { ref: action.ref, filled: true, submitted: false, ...field },
+          };
+        }
+        case 'scroll': {
+          const scroll = await scrollWithEvidence(
+            activeFrame,
+            action.direction,
+            action.amount,
+            Math.min(timeout, 3500),
+            action.ref ? () => byRef(action.ref!).scrollIntoViewIfNeeded({ timeout }) : undefined,
+          );
+          return {
+            ...done(
+              JSON.stringify({
+                ...scroll,
+                status: scroll.grew ? 'content_grew' : 'no_growth',
+                instruction: '仅记录真实滚动增长，不能点击 next page 代替滚动',
+              }),
+            ),
+            scroll,
+            url: page.url(),
+          };
+        }
+        case 'navigate': {
+          const response = await page.goto(action.url, {
+            timeout: Math.max(timeout, 30_000),
+            waitUntil: 'domcontentloaded',
+          });
+          // AP3 core-07: a 403 page read as "已打开" kept the model on it until
+          // the step limit. Say what the server answered.
+          const httpStatus = response?.status() ?? 0;
+          if (httpStatus >= 400)
+            return {
+              ...done(
+                `已打开 ${page.url()}，但服务器返回 HTTP ${httpStatus}（拒绝访问或不存在），页面没有可用内容。用户没有指定网站时换一个公开页面；指定了网站则如实说明无法访问。`,
+              ),
+              url: page.url(),
+            };
+          return { ...done(`已打开 ${page.url()}`), url: page.url() };
+        }
+        case 'extract': {
+          const content = (
+            await redactPageText(
+              page as never,
+              await (await pageRoot(page.mainFrame())).innerText({ timeout }),
+            )
+          ).slice(0, maxExtract);
+          // innerText drops hrefs; list answers need each item's own link.
+          const anchors = await pageLinks(page, timeout);
+          const links: Array<{ text: string; url: string }> = [];
+          for (const anchor of anchors) {
+            const text = await redactPageText(page as never, anchor.text);
+            if (text) links.push({ text, url: shortenUrl(anchor.url, maxUrlChars) });
+          }
+          return {
+            ok: true,
+            text: JSON.stringify({
+              instruction: action.instruction,
+              fields: action.fields ?? [],
+              url: page.url(),
+              content,
+              links,
+            }),
+            links: anchors.map((anchor) => observedLinkEvidence(anchor.url, maxUrlChars)),
+            url: page.url(),
+          };
+        }
+        case 'screenshot': {
+          const buffer = await page.screenshot({ type: 'jpeg', quality: 70, timeout });
+          return {
+            ok: true,
+            text: '当前视口截图',
+            image: { mediaType: 'image/jpeg', data: buffer.toString('base64') },
+          };
+        }
+        case 'wait_for': {
+          const wait = action.timeoutMs ?? timeout;
+          if (action.text)
+            await page
+              .getByText(action.text)
+              .filter({ visible: true })
+              .first()
+              .waitFor({ timeout: wait });
+          if (action.ref) await byRef(action.ref).waitFor({ timeout: wait });
+          if (action.networkIdle) await page.waitForLoadState('networkidle', { timeout: wait });
+          return done('等待条件已满足');
+        }
+        case 'back':
+          await page.goBack({ timeout });
+          return done(`已后退到 ${page.url()}`);
+        case 'download': {
+          if (!options.saveDownload) return fail('当前环境不支持下载文件');
+          const [download] = await Promise.all([
+            page.waitForEvent('download', { timeout }),
+            byRef(action.ref).click({ timeout }),
+          ]);
+          const receipt = await options.saveDownload(download);
+          return {
+            ok: true,
+            text: JSON.stringify({ status: 'saved', ...receipt }),
+            download: receipt,
+          };
+        }
+        case 'upload': {
+          if (!options.resolveUploads) return fail('当前环境不支持上传附件');
+          const paths = await options.resolveUploads(action.fileIds);
+          await byRef(action.ref).setInputFiles(paths, { timeout });
+          return done(`已上传 ${paths.length} 个文件`);
+        }
+        case 'click_at':
+          await page.mouse.click(action.x, action.y);
+          return done(`已点击坐标 (${action.x}, ${action.y})`);
+      }
+    } catch (error) {
+      return browserToolError(error);
+    }
+  }
+
+  const withDialogs = async (action: UnifiedBrowserAction): Promise<UnifiedToolResult> => {
+    const start = dialogs.length;
+    const result = await wrappedExecute(action);
+    if (dialogs.length === start) return result;
+    const opened = dialogs.slice(start);
+    return {
+      ...result,
+      dialogs: opened,
+      text: `${result.text}\n浏览器弹出原生对话框：${opened
+        .map((d) => `${d.type}「${d.message}」`)
+        .join('；')}（已自动关闭：alert 确认、confirm 取消、prompt 不输入）。`,
+    };
+  };
+  const wrappedExecute = async (action: UnifiedBrowserAction): Promise<UnifiedToolResult> => {
+    if (!observation) {
+      if (action.tabId) {
+        const target = tabs.get(action.tabId);
+        if (!target || target.isClosed()) return fail('标签不属于本任务或已关闭');
+        page = target;
+        activeFrame = page.mainFrame();
+      }
+      return execute(action);
+    }
+    try {
+      const interruption = observation.interruption();
+      if (interruption)
+        return {
+          ok: false,
+          text: interruption.message,
+          interruption,
+          effect: observation.pendingEffect(),
+        };
+      if (action.tool === 'new_tab' || action.tool === 'close_tab')
+        return await observation.manageTab(action);
+      if (action.tool === 'switch_tab' || action.tool === 'list_tabs')
+        return (await observation.read(action))!;
+      const context = observation.resolve(action);
+      page = context.page;
+      activeFrame = context.frame;
+      if (action.tool === 'scroll_until')
+        return await observation.act(action, async () => (await observation.read(action))!);
+      if (action.tool === 'screenshot' && (await observation.sensitive(context.page)))
+        return { ok: true, text: '敏感页面截图已遮挡' };
+      if (action.tool === 'extract')
+        return (await observation.read({ ...action, tool: 'get_page_text', maxChars: 16000 }))!;
+      const read = await observation.read(action);
+      if (read) return read;
+      return await observation.act(action, () => execute(action));
+    } catch (error) {
+      const failure = browserToolError(error);
+      if (['stale_ref', 'stale_context'].includes(failure.errorCode)) {
+        const fresh = await observation.read({ tool: 'read_page' }).catch(() => null);
+        if (fresh?.ok)
+          failure.text += `\nfresh_observation (original action was NOT executed):\n${fresh.text}`;
+      }
+      return failure;
+    }
+  };
+  return {
+    execute: withDialogs,
+    recoverObservation: async () => (observation ? observation.read({ tool: 'read_page' }) : null),
+    ownsPage(candidate: Page) {
+      return observation ? observation.ownsPage(candidate) : [...tabs.values()].includes(candidate);
+    },
+    get page() {
+      return observation?.page ?? page;
+    },
+    supportedTools: {
+      download: Boolean(options.saveDownload),
+      upload: Boolean(options.resolveUploads),
+      tabs: true,
+    },
+    async blocker() {
+      return probeBrowserBlocker(observation?.page ?? page, options.taskIntent);
+    },
+    snapshot: snapshotText,
+    observation,
+    dispose: () => {
+      page.context().off('dialog', onDialog);
+      observation?.dispose();
+    },
+  };
+}
+
+/**
+ * AP4: what kind of field a fill/select acted on. A search box submits a GET
+ * query, not a business form (Deploy-22 core-02); a date control is what a
+ * "日期控件" request needs (core-08: httpbin's time input is not one).
+ */
+async function fieldKind(
+  target: Locator,
+  timeout: number,
+): Promise<{ search?: boolean; date?: boolean }> {
+  try {
+    return await target.evaluate(
+      (el) => {
+        const input = el as HTMLInputElement;
+        const type = (input.type ?? '').toLowerCase();
+        const words = [
+          input.name,
+          input.id,
+          input.getAttribute('placeholder'),
+          input.getAttribute('aria-label'),
+          input.getAttribute('autocomplete'),
+          el.className,
+        ]
+          .filter(Boolean)
+          .join(' ');
+        const form = input.form;
+        const search =
+          type === 'search' ||
+          el.getAttribute('role') === 'searchbox' ||
+          !!el.closest('[role="search"]') ||
+          (!!form &&
+            (form.method || 'get').toLowerCase() === 'get' &&
+            /search|\/s(?:\?|$)|[?&]q=/i.test(form.getAttribute('action') ?? '') &&
+            /^(?:q|query|search|wd|p|keyword|kw)$/i.test(input.name ?? ''));
+        const date =
+          ['date', 'datetime-local', 'month', 'week'].includes(type) ||
+          (type !== 'time' && /date|datepicker|日期|birth|生日|bday/i.test(words));
+        return { ...(search ? { search: true } : {}), ...(date ? { date: true } : {}) };
+      },
+      undefined,
+      { timeout: Math.min(timeout, 3000) },
+    );
+  } catch {
+    return {};
+  }
+}
+
+function done(text: string): UnifiedToolResult {
+  return { ok: true, text };
+}
+
+function fail(text: string): UnifiedToolResult {
+  return { ok: false, text };
+}

@@ -32,9 +32,7 @@ export const memoryRouter = router({
       .from(executionMemory)
       .where(eq(executionMemory.userId, user.id));
     const now = Date.now();
-    const valid = rows.filter(
-      (r) => r.expiresAt == null || r.expiresAt.getTime() > now,
-    );
+    const valid = rows.filter((r) => r.expiresAt == null || r.expiresAt.getTime() > now);
     valid.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
     return {
       memories: valid.map((r) => ({
@@ -81,9 +79,7 @@ export const memoryRouter = router({
       .where(eq(users.externalId, ctx.userId))
       .limit(1);
     if (!user) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
-    await ctx.db
-      .delete(executionMemory)
-      .where(eq(executionMemory.userId, user.id));
+    await ctx.db.delete(executionMemory).where(eq(executionMemory.userId, user.id));
     return { ok: true as const };
   }),
 });

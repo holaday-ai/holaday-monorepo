@@ -81,4 +81,9 @@ describe('friendlyTaskFailureReason', () => {
       '任务执行失败：操作未完成，请稍后再试。建议：简化任务描述后重试。',
     );
   });
+  it('never reports a login wall from a blank browser or a negated login diagnosis', () => {
+    expect(friendlyTaskFailureReason('failed', 'about:blank；无法确认是否需要登录')).not.toContain(
+      '该网站需要登录',
+    );
+  });
 });
