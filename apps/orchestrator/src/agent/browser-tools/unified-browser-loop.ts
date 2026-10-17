@@ -596,7 +596,7 @@ export async function runUnifiedBrowserLoop(
             results.push(
               toolResult(
                 call.id,
-                `${lines.join('；')}。引用必须从已读文本逐字复制（拼写、大小写、标点照抄），不要凭记忆写；需要时重新读取页面，修正引用后再 finish。`,
+                `${lines.join('；')}。引用必须从已读文本逐字复制（拼写、大小写、标点照抄），不要凭记忆或搜索摘要写；页面上确实没有的值写「未读到」，不要再引用。修正后再 finish。`,
                 true,
               ),
             );

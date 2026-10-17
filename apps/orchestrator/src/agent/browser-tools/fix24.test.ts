@@ -242,6 +242,7 @@ describe('core-10: a misquote gets one correction with the page text', () => {
       '「You successfuly clicked an alert」不是页面原文；已读页面上最接近的是「You successfully clicked an alert」',
     );
     expect(seen).toContain('引用必须从已读文本逐字复制');
+    expect(seen).toContain('页面上确实没有的值写「未读到」');
     expect(outcome).toMatchObject({ status: 'completed' });
   });
 
@@ -519,6 +520,95 @@ describe('core-07: a display:contents card link is read by the action gate', () 
         () => hidden,
       );
       expect(result.unverified).toBe('无法读取要点击的元素');
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
+describe('core-08: typing one field keeps the other refs of the same snapshot', () => {
+  const FORM =
+    '<form><label>Customer name <input name="custname"></label><label>Telephone <input name="custtel"></label>' +
+    '<label><input type="radio" name="size" value="medium"> Medium</label></form><div id="extra"></div>';
+  const refOf = (tree: string, label: string) =>
+    tree.match(new RegExp(`${label}"?[^\\n]*\\[ref=(e\\d+)\\]`))![1]!;
+  it('a second type and a radio click in the same turn are not stale', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(FORM);
+      const tools = createPlaywrightUnifiedExecutor(page, { observationV2: true });
+      try {
+        const read = JSON.parse((await tools.execute({ tool: 'read_page' })).text);
+        const rev = read.observationRevision;
+        const name = await tools.execute({
+          tool: 'type',
+          ref: refOf(read.tree, 'Customer name'),
+          text: 'Test',
+          observationRevision: rev,
+        } as never);
+        expect(name.ok, name.text).toBe(true);
+        const tel = await tools.execute({
+          tool: 'type',
+          ref: refOf(read.tree, 'Telephone'),
+          text: '123',
+          observationRevision: rev,
+        } as never);
+        expect(tel.ok, tel.text).toBe(true);
+        const radio = await tools.execute({
+          tool: 'click',
+          ref: refOf(read.tree, 'Medium'),
+          observationRevision: rev,
+        } as never);
+        expect(radio.ok, radio.text).toBe(true);
+        expect(await page.inputValue('[name=custtel]')).toBe('123');
+      } finally {
+        tools.dispose();
+      }
+    } finally {
+      await browser.close();
+    }
+  });
+  it('an edit that inserts nodes still makes the old revision stale, also after a new read', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      // Typing a name shows a validation note: the page structure changed.
+      await page.setContent(
+        FORM.replace(
+          '<input name="custname">',
+          `<input name="custname" oninput="document.getElementById('extra').append(Object.assign(document.createElement('p'), { textContent: 'Checked' }))">`,
+        ),
+      );
+      const tools = createPlaywrightUnifiedExecutor(page, { observationV2: true });
+      try {
+        const read = JSON.parse((await tools.execute({ tool: 'read_page' })).text);
+        const rev = read.observationRevision;
+        await tools.execute({
+          tool: 'type',
+          ref: refOf(read.tree, 'Customer name'),
+          text: 'Test',
+          observationRevision: rev,
+        } as never);
+        const afterDom = await tools.execute({
+          tool: 'type',
+          ref: refOf(read.tree, 'Telephone'),
+          text: '1',
+          observationRevision: rev,
+        } as never);
+        expect(afterDom.errorCode).toBe('stale_ref');
+        const again = JSON.parse((await tools.execute({ tool: 'read_page' })).text);
+        expect(again.observationRevision).not.toBe(rev);
+        const old = await tools.execute({
+          tool: 'type',
+          ref: refOf(again.tree, 'Telephone'),
+          text: '1',
+          observationRevision: rev,
+        } as never);
+        expect(old.errorCode).toBe('stale_ref');
+      } finally {
+        tools.dispose();
+      }
     } finally {
       await browser.close();
     }
