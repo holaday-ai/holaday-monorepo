@@ -184,7 +184,10 @@ function answerFacts(summary: string, intent = ''): Fact[] {
   }
   // A quoted string with Latin letters or digits claims literal page text
   // ("You clicked: Ok"); a negated mention ("而非 …") is not a claim.
-  for (const match of text.matchAll(/[“"「]([^”"」\n]{3,200})[”"」]/gu)) {
+  // Pair every quote, short ones too: skipping "阴" would pair its closing mark
+  // with the next opening one and quote the prose between them (FIX-24).
+  for (const match of text.matchAll(/[“"「]([^”"」\n]{1,200})[”"」]/gu)) {
+    if (match[1]!.trim().length < 3) continue;
     // "Impedit iure omnis..." quotes the opening of a passage: compare the excerpt.
     const quote = match[1]!.trim().replace(/^(?:\.{3,}|…+)\s*|\s*(?:\.{3,}|…+)$/gu, '');
     const before = text.slice(Math.max(0, match.index! - 12), match.index!);

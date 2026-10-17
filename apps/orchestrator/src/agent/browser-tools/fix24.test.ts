@@ -313,3 +313,19 @@ describe('core-02: every weather value comes from the read weather page', () => 
     ).toEqual(['风速风向「1 mph 西北」']);
   });
 });
+
+describe('core-02: short quotes keep the quote marks paired', () => {
+  it('does not quote the prose between two quoted values', () => {
+    const pages = [{ text: '今天（10/17） 阴 30/26℃\n周日（10/18） 小雨转阴 29/25℃' }] as never;
+    const summary =
+      '今天（10/17）天气为"阴"，温度"30/26℃"；明天（周日 10/18）天气为"小雨转阴"，温度"29/25℃"。';
+    expect(assessCompletionFacts({ summary, pages }).contradictions).toEqual([]);
+  });
+  it('still checks a quoted value the page never said', () => {
+    const pages = [{ text: '今天（10/17） 阴 30/26℃' }] as never;
+    expect(
+      assessCompletionFacts({ summary: '天气为"阴"，页面写着"Sunny 31/27℃"。', pages })
+        .contradictions,
+    ).toEqual(['原文引用「Sunny 31/27℃」 不是已读页面中的原文']);
+  });
+});
