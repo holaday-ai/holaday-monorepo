@@ -293,6 +293,9 @@ function sameSource(pageUrl: string | undefined, cited: string): boolean {
   }
 }
 
+const NOT_READ =
+  /^(?:未读到|未读取到|未找到|没有读到|页面未(?:提供|显示|列出)|not (?:shown|found|read)|n\/a)[。.]?$/i;
+
 export function assessCompletionFacts(input: {
   summary: string;
   fields?: unknown;
@@ -344,6 +347,8 @@ export function assessCompletionFacts(input: {
     const key = `${fact.name}|${fact.value}|${fact.tabId ?? ''}|${fact.sourceURL ?? ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    // "未读到" declares a value absent: it claims nothing about the page.
+    if (NOT_READ.test(fact.value.trim())) continue;
     const quoted = fact.value.match(/[“"「]([^”"」]{1,200})[”"」]/u)?.[1];
     const candidates = [fact.value, withoutNote(fact.value), quoted]
       .filter((v): v is string => Boolean(v))

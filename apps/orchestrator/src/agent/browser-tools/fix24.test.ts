@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
-import { nearestPassage } from './completion-fields.js';
+import { assessCompletionFacts, nearestPassage } from './completion-fields.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import { intentHosts, runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
-/** FIX-24: Deploy-24 production failures (core-08, core-10). */
+/** FIX-24: Deploy-24 production failures (core-02, core-08, core-10). */
 const P = '请使用云端浏览器，';
 const CORE08 = `${P}httpbin.org/forms/post 或 the-internet.herokuapp.com 填表单与日期控件，只填不提交并截图`;
 
@@ -247,5 +247,69 @@ describe('core-10: a misquote gets one correction with the page text', () => {
     ]);
     expect(outcome).toMatchObject({ status: 'failed' });
     expect(outcome.status === 'failed' && outcome.reason).toContain('不是已读页面中的原文');
+  });
+});
+
+describe('core-02: every weather value comes from the read weather page', () => {
+  const WEATHER = `${P}Google 搜索「新加坡 天气」读出天气卡片`;
+  const PAGE =
+    'heading "新加坡, 新加坡" [level=1]\n现在 82°\n体感温度 94°\n霾\n湿度 90%\n能见度 1.9 mi';
+  const fields = (values: Record<string, string>) =>
+    Object.entries(values).map(([name, value]) => ({ name, value }));
+  const run = (intent: string, answers: Array<Record<string, string>>) => {
+    const { adapter, seen } = scripted([
+      { name: 'navigate', input: { url: 'https://weather.com/zh-CN/sg/city/singapore/today' } },
+      { name: 'snapshot', input: {} },
+      ...answers.map((values) => ({
+        name: 'finish',
+        input: { status: 'completed', summary: '新加坡当前天气如下。', fields: fields(values) },
+      })),
+    ]);
+    const execute = async (action: { tool: string; url?: string }): Promise<UnifiedToolResult> =>
+      action.tool === 'navigate'
+        ? { ok: true, text: '已打开', url: action.url, tabId: 'w1' }
+        : {
+            ok: true,
+            text: PAGE,
+            url: 'https://weather.com/zh-CN/sg/city/singapore/today',
+            tabId: 'w1',
+          };
+    return runUnifiedBrowserLoop({ intent, adapter, maxSteps: 8, execute: execute as never }).then(
+      (outcome) => ({ outcome, seen: seen.join('\n') }),
+    );
+  };
+
+  it('a value not on the page is sent back once; 未读到 values then complete', async () => {
+    const { outcome, seen } = await run(WEATHER, [
+      { 当前温度: '82°F', 湿度: '90%', 风速风向: '1 mph 西北' },
+      { 当前温度: '82°', 湿度: '90%', 风速风向: '未读到' },
+    ]);
+    expect(seen).toContain(
+      '这些值没有在已读页面上逐字找到：当前温度「82°F」；风速风向「1 mph 西北」',
+    );
+    expect(seen).toContain('页面上读不到的项写「未读到」');
+    expect(outcome).toMatchObject({ status: 'completed' });
+    expect(outcome.status === 'completed' && outcome.summary).not.toContain('未核实');
+  });
+
+  it('a non-weather task keeps delivering with the 未核实 note, without a return', async () => {
+    const { outcome, seen } = await run(`${P}打开这个页面读出当前温度`, [{ 当前温度: '82°F' }]);
+    expect(seen).not.toContain('这些值没有在已读页面上逐字找到');
+    expect(outcome.status === 'completed' && outcome.summary).toContain('未核实');
+  });
+
+  it('未读到 declares absence and is not an unverified fact; a made-up value still is', () => {
+    const pages = [{ text: PAGE }] as never;
+    expect(
+      assessCompletionFacts({
+        summary: 'x',
+        fields: fields({ 风速风向: '未读到', 气压: '页面未提供', 当前温度: '82°' }),
+        pages,
+      }),
+    ).toEqual({ contradictions: [], unverified: [] });
+    expect(
+      assessCompletionFacts({ summary: 'x', fields: fields({ 风速风向: '1 mph 西北' }), pages })
+        .unverified,
+    ).toEqual(['风速风向「1 mph 西北」']);
   });
 });

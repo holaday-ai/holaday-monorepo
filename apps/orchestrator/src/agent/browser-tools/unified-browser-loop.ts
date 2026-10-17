@@ -44,7 +44,8 @@ export const UNIFIED_BROWSER_SYSTEM_PROMPT = `你在一个真实浏览器里替�
 9. 涉及序号（第N节/第N章/第N部分）时，先调用 sections 拿正文章节列表，按其中的 index 用 get_page_text(section=N) 读取；目录、导航、参考文献不算章节，不要自己数页面上的标题。答案里写明第N节的章节标题。
 10. 用户要 N 条/前 N 个时，答案按 1. 2. 3. 编号列满 N 条；不够就继续滚动、翻页或再读取，确实只有更少时如实写「只找到 M 条」。
 11. 用户要求某种控件（如日期控件）而当前页面没有时，换一个有该控件的页面去操作，不要用别的控件（如 time 时间控件）代替。用户点名了网站时只在这些网站内找，都没有就如实说明缺什么，不要换到别的网站；没点名时才换别的公开页面。
-12. 动作返回 stale_ref（ref 已失效）时，先 snapshot，再用新 ref 把同一个动作重做一次（同一个字段、同一个值），不要改用别的方式代替。`;
+12. 查天气等实时数值时，结果页没有天气卡片就打开一个天气来源页面并读取（snapshot/get_page_text），每个值照该页原样写（页面写「82°」就写「82°」，不自己加单位或换算）；页面上读不到的项写「未读到」，不用搜索摘要或记忆补。
+13. 动作返回 stale_ref（ref 已失效）时，先 snapshot，再用新 ref 把同一个动作重做一次（同一个字段、同一个值），不要改用别的方式代替。`;
 
 const CONTROL_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
   {
@@ -279,6 +280,9 @@ export async function runUnifiedBrowserLoop(
    */
   let rejectionsLeft = 1;
   let quoteCorrected = false;
+  /** FIX-24 (Deploy-24 core-02): every weather value comes from the read page. */
+  const wantsReadings = /天气|气温|weather|forecast/i.test(input.intent);
+  let readingsCorrected = false;
   /**
    * BROWSER-AUTOPILOT-3: a short count gets one automatic continuation; a wrong
    * "第N节" gets one correction with the real list, then fails.
@@ -722,6 +726,22 @@ export async function runUnifiedBrowserLoop(
             rejectionsLeft -= 1;
             held = { summary: withLimitations(summary), evidence };
             results.push(toolResult(call.id, remediationPrompt(gaps), true));
+            continue;
+          }
+          if (wantsReadings && facts.unverified.length && !readingsCorrected && !concludeNow) {
+            readingsCorrected = true;
+            await rejected(
+              summary,
+              given,
+              `数值未在已读页面逐字找到：${facts.unverified.join('；')}`,
+            );
+            results.push(
+              toolResult(
+                call.id,
+                `这些值没有在已读页面上逐字找到：${facts.unverified.join('；')}。请读取天气来源页面（snapshot/get_page_text），逐项照页面原样抄写（不自己加单位或换算）；页面上读不到的项写「未读到」，然后再 finish。`,
+                true,
+              ),
+            );
             continue;
           }
           const note = unverifiedNote(facts.unverified);
