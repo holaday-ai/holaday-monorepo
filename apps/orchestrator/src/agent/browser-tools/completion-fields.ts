@@ -79,6 +79,8 @@ export interface FactAssessment {
   contradictions: string[];
   /** Not found verbatim, not contradicted: delivered with a 未核实 note. */
   unverified: string[];
+  /** Quotes the pages never said, with the closest text they did say (FIX-24). */
+  misquoted?: Array<{ quote: string; nearest?: string }>;
 }
 
 interface Fact {
@@ -314,6 +316,7 @@ export function assessCompletionFacts(input: {
   const receipts = normalizeFact(input.receipts ?? '');
   const contradictions: string[] = [];
   const unverified: string[] = [];
+  const misquoted: Array<{ quote: string; nearest?: string }> = [];
   const seen = new Set<string>();
   const facts = [...explicitFacts(input.fields), ...answerFacts(input.summary, intent)].flatMap(
     (fact): Fact[] => {
@@ -425,6 +428,7 @@ export function assessCompletionFacts(input: {
     // A single page title that differs from the page's own main heading.
     if (fact.quote) {
       contradictions.push(`${label} 不是已读页面中的原文`);
+      misquoted.push({ quote: fact.value, nearest: nearestPassage(fact.value, input.pages) });
       continue;
     }
     if (TITLE_FIELD.test(fact.name) && !fact.listItem) {
@@ -448,7 +452,11 @@ export function assessCompletionFacts(input: {
     }
     unverified.push(label);
   }
-  return { contradictions: contradictions.slice(0, 8), unverified: unverified.slice(0, 8) };
+  return {
+    contradictions: contradictions.slice(0, 8),
+    unverified: unverified.slice(0, 8),
+    ...(misquoted.length && misquoted.length === contradictions.length ? { misquoted } : {}),
+  };
 }
 
 /** User-visible note for facts that could not be matched word for word. */
@@ -464,4 +472,48 @@ function listedNear(norm: string, title: string, url: string): boolean {
   for (let at = norm.indexOf(title); at >= 0; at = norm.indexOf(title, at + 1))
     if (norm.slice(at, at + title.length + 800).includes(url)) return true;
   return false;
+}
+
+/**
+ * The run of page words most like a misquote ("successfuly" for the page's
+ * "successfully"), as the page wrote it — for the model to copy, never to
+ * stand in for its answer.
+ */
+export function nearestPassage(quote: string, pages: ObservedEvidence[]): string | undefined {
+  const grams = (text: string) => {
+    const flat = normalizeFact(text).replace(/\s+/g, ' ');
+    const out = new Map<string, number>();
+    for (let i = 0; i < flat.length - 1; i++) {
+      const gram = flat.slice(i, i + 2);
+      out.set(gram, (out.get(gram) ?? 0) + 1);
+    }
+    return out;
+  };
+  const dice = (a: Map<string, number>, b: Map<string, number>) => {
+    let shared = 0;
+    let total = 0;
+    for (const [gram, n] of a) shared += Math.min(n, b.get(gram) ?? 0);
+    for (const n of a.values()) total += n;
+    for (const n of b.values()) total += n;
+    return total ? (2 * shared) / total : 0;
+  };
+  const target = grams(quote);
+  const width = quote.trim().split(/\s+/).length;
+  let best: { text: string; score: number } | undefined;
+  for (const page of pages)
+    for (const line of unescapeLiteralBreaks(page.text).split('\n')) {
+      const words = line.trim().split(/\s+/).filter(Boolean);
+      for (let size = Math.max(1, width - 1); size <= width + 1; size++)
+        for (let start = 0; start + size <= words.length; start++) {
+          const text = words
+            .slice(start, start + size)
+            .join(' ')
+            .replace(/^[\["'“「(]+|[\]"'”」),:;.]+$/gu, '');
+          const score = dice(target, grams(text));
+          if (score > (best?.score ?? 0)) best = { text, score };
+        }
+    }
+  return best && best.score >= 0.7 && normalizeFact(best.text) !== normalizeFact(quote)
+    ? best.text
+    : undefined;
 }

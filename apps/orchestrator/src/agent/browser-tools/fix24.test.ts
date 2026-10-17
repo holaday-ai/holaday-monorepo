@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { nearestPassage } from './completion-fields.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import { intentHosts, runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
-/** FIX-24: Deploy-24 production failures (core-08). */
+/** FIX-24: Deploy-24 production failures (core-08, core-10). */
 const P = '请使用云端浏览器，';
 const CORE08 = `${P}httpbin.org/forms/post 或 the-internet.herokuapp.com 填表单与日期控件，只填不提交并截图`;
 
@@ -177,5 +178,74 @@ describe('core-08: a stale ref is redone after a fresh snapshot', () => {
       '先 snapshot，再用新 ref 重做这次 type（同一个元素、同一个值）',
     );
     expect(outcome).toMatchObject({ status: 'completed' });
+  });
+});
+
+describe('core-10: a misquote gets one correction with the page text', () => {
+  const ALERTS = `${P}the-internet.herokuapp.com 的 iframe 与 JavaScript alerts`;
+  const page = (result: string) =>
+    `heading "JavaScript Alerts" [level=3]\nbutton "Click for JS Alert" [ref=e5]\nheading "Result:" [level=4]\nparagraph [ref=e9]: ${result}`;
+  const run = (final: string[]) => {
+    let result = '';
+    const { adapter, seen } = scripted([
+      { name: 'navigate', input: { url: 'https://the-internet.herokuapp.com/javascript_alerts' } },
+      { name: 'snapshot', input: {} },
+      // The first rejection: no native dialog yet (the general one-time return).
+      finish('已打开 JavaScript Alerts 页面。'),
+      { name: 'click', input: { ref: 'e5' } },
+      { name: 'snapshot', input: {} },
+      ...final.map((quote) => finish(`点击 "Click for JS Alert" 后页面 Result 显示 "${quote}"`)),
+    ]);
+    const execute = async (action: { tool: string; url?: string }): Promise<UnifiedToolResult> => {
+      if (action.tool === 'navigate') return { ok: true, text: '已打开', url: action.url };
+      if (action.tool === 'click') {
+        result = 'You successfully clicked an alert';
+        return {
+          ok: true,
+          text: '已点击',
+          dialogs: [{ type: 'alert', message: 'I am a JS Alert' }],
+        };
+      }
+      return {
+        ok: true,
+        text: page(result),
+        url: 'https://the-internet.herokuapp.com/javascript_alerts',
+      };
+    };
+    return runUnifiedBrowserLoop({
+      intent: ALERTS,
+      adapter,
+      maxSteps: 10,
+      execute: execute as never,
+    }).then((outcome) => ({ outcome, seen: seen.join('\n') }));
+  };
+
+  it('finds the page words closest to the misquote', () => {
+    const pages = [{ text: page('You successfully clicked an alert') }] as never;
+    expect(nearestPassage('You successfuly clicked an alert', pages)).toBe(
+      'You successfully clicked an alert',
+    );
+    expect(nearestPassage('Completely different words here', pages)).toBeUndefined();
+  });
+
+  it('after another rejection, the misquote is still corrected once and completes', async () => {
+    const { outcome, seen } = await run([
+      'You successfuly clicked an alert',
+      'You successfully clicked an alert',
+    ]);
+    expect(seen).toContain(
+      '「You successfuly clicked an alert」不是页面原文；已读页面上最接近的是「You successfully clicked an alert」',
+    );
+    expect(seen).toContain('引用必须从已读文本逐字复制');
+    expect(outcome).toMatchObject({ status: 'completed' });
+  });
+
+  it('a second misquote still fails: the correction is given once', async () => {
+    const { outcome } = await run([
+      'You successfuly clicked an alert',
+      'You successfuly clicked an alert',
+    ]);
+    expect(outcome).toMatchObject({ status: 'failed' });
+    expect(outcome.status === 'failed' && outcome.reason).toContain('不是已读页面中的原文');
   });
 });
