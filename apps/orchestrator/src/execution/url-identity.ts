@@ -221,6 +221,22 @@ export function urlResourceIdentity(raw: string, rules?: TrackingRules): string 
  * the SPA route when there is one (`#/post/7`); a root page with a resource
  * id (`/?id=3`) is a detail page.
  */
+/** A site's front page (`/`, `/index.html`, `/home`), not a detail page under it. */
+export function isSiteHomeUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw.trim().replace(/[)\].,;:，。]+$/, ''));
+  } catch {
+    return false;
+  }
+  const page = url.pathname.replace(/\/+$/, '').toLowerCase();
+  return (
+    (page === '' || /^\/(?:index|default|home)(?:\.(?:s?html?|php|aspx?))?$/.test(page)) &&
+    !/[?&](?:q|query|keyword|keywords|wd|search)=/i.test(url.search) &&
+    !isHashRoute(url.hash)
+  );
+}
+
 export function isNonDetailUrl(raw: string): boolean {
   let url: URL;
   try {

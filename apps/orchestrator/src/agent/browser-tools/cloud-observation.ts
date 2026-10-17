@@ -197,6 +197,8 @@ function collectObservationState() {
     __holadayObservation?: {
       id: string;
       version: number;
+      /** Mutations that added or removed nodes (not values, attributes or text). */
+      nodes: number;
       interceptedEnter: number;
       interceptedSearchEnter: number;
     };
@@ -205,11 +207,15 @@ function collectObservationState() {
     const current = {
       id: `${Date.now()}-${Math.random()}`,
       version: 0,
+      nodes: 0,
       interceptedEnter: 0,
       interceptedSearchEnter: 0,
     };
     root.__holadayObservation = current;
-    new MutationObserver(() => current.version++).observe(document, {
+    new MutationObserver((records) => {
+      current.version++;
+      if (records.some((record) => record.type === 'childList')) current.nodes++;
+    }).observe(document, {
       subtree: true,
       childList: true,
       attributes: true,
@@ -348,6 +354,7 @@ function collectObservationState() {
   return {
     documentId: root.__holadayObservation.id,
     version: root.__holadayObservation.version,
+    nodes: root.__holadayObservation.nodes,
     interceptedEnter: root.__holadayObservation.interceptedEnter,
     interceptedSearchEnter: root.__holadayObservation.interceptedSearchEnter ?? 0,
     forms: JSON.stringify(form),
@@ -419,7 +426,16 @@ export class CloudObservation {
   private frames = new Map<string, Frame>();
   private observations = new Map<
     Frame,
-    { fingerprint: string; revision: string; refs: Set<string>; document: string }
+    {
+      fingerprint: string;
+      /** The fingerprint without form values. */
+      structure: string;
+      revision: string;
+      /** Earlier revisions of the same structure: only form values changed since. */
+      accepted: Set<string>;
+      refs: Set<string>;
+      document: string;
+    }
   >();
   private virtualRefs = new Map<Frame, Map<string, number>>();
   private cursors = new Map<
@@ -734,16 +750,20 @@ export class CloudObservation {
   }
   private async fingerprint(frame: Frame) {
     const state = await observationState(frame);
-    return hash(
-      JSON.stringify([
-        state.documentId,
-        state.version,
-        state.forms,
-        state.dom,
-        state.url,
-        state.geometry,
-      ]),
-    );
+    // Structure: the same nodes, text and place. Value edits (input/change events
+    // and the attributes they touch) are not structure.
+    // Scrolling (a focused field scrolls into view) moves no element either.
+    const structure = [
+      state.documentId,
+      state.nodes,
+      state.dom,
+      state.url,
+      state.geometry.slice(2),
+    ];
+    return {
+      fingerprint: hash(JSON.stringify([...structure, state.version, state.forms])),
+      structure: hash(JSON.stringify(structure)),
+    };
   }
   async validate(action: UnifiedBrowserAction) {
     if (['new_tab', 'switch_tab', 'close_tab', 'list_tabs'].includes(action.tool)) return;
@@ -753,7 +773,10 @@ export class CloudObservation {
       if (
         !current ||
         !current.refs.has(action.ref) ||
-        action.observationRevision !== current.revision ||
+        // FIX-24 (core-08): typing into one field changes only form values; the
+        // other refs of that snapshot (the next field in the same turn) still hold.
+        (action.observationRevision !== current.revision &&
+          !current.accepted.has(action.observationRevision ?? '')) ||
         // BROWSER-AUTOPILOT-1: an aria ref stays bound to the element the model
         // saw; unrelated text changes (carousels, clocks) on a live page must not
         // invalidate it. A different document or URL still does.
@@ -768,14 +791,19 @@ export class CloudObservation {
     }
   }
   async metadata(frame: Frame) {
-    const fingerprint = await this.fingerprint(frame);
+    const { fingerprint, structure } = await this.fingerprint(frame);
     let current = this.observations.get(frame);
     if (!current || current.fingerprint !== fingerprint) {
+      const document = await this.documentKey(frame);
+      const valuesOnly =
+        !!current && current.structure === structure && current.document === document;
       current = {
         fingerprint,
+        structure,
         revision: randomUUID(),
-        refs: new Set(),
-        document: await this.documentKey(frame),
+        accepted: valuesOnly ? new Set([...current!.accepted, current!.revision]) : new Set(),
+        refs: valuesOnly ? current!.refs : new Set(),
+        document,
       };
       this.observations.set(frame, current);
     }
@@ -979,8 +1007,21 @@ export class CloudObservation {
         /^(\s*- \/url: )(.*)$/gm,
         (_m, p, u) => p + safeObservationUrl(String(u).replace(/^"|"$/g, ''), frame.url()),
       );
+      const before = this.observations.get(frame);
+      const prior = before && {
+        revision: before.revision,
+        structure: before.structure,
+        document: before.document,
+        accepted: before.accepted,
+      };
       const meta = await this.metadata(frame);
       const current = this.observations.get(frame)!;
+      // The same structure keeps the same elements and refs (only values may
+      // differ): refs from the earlier revision still hold. Anything else does not.
+      current.accepted =
+        prior && prior.structure === current.structure && prior.document === current.document
+          ? new Set([...prior.accepted, ...current.accepted, prior.revision])
+          : new Set();
       current.revision = randomUUID();
       meta.observationRevision = current.revision;
       current.refs = new Set(
@@ -1406,7 +1447,21 @@ export class CloudObservation {
       }
       result.text += `\npopup: ${JSON.stringify(observations)}`;
     }
-    if (isMutatingBrowserAction(action)) this.observations.delete(frame);
+    if (isMutatingBrowserAction(action)) {
+      // FIX-24 (core-08): an edit that changed only form values (same URL, text,
+      // nodes and nothing opened) keeps the snapshot's refs for the next field.
+      const kept = this.observations.get(frame);
+      const valuesOnly =
+        !!kept &&
+        !!after &&
+        result.ok &&
+        !unexpected &&
+        !opened.length &&
+        !effect.urlChanged &&
+        !effect.domChanged &&
+        (await this.fingerprint(frame).catch(() => null))?.structure === kept.structure;
+      if (!valuesOnly) this.observations.delete(frame);
+    }
     return result;
   }
 }

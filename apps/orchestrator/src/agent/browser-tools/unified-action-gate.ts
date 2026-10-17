@@ -416,7 +416,11 @@ async function targetAtPoint(
 /** A ref'd element is clicked at its centre after scrolling: read what is hit there. */
 async function targetAtRef(probe: TargetProbe, locator: Locator): Promise<ReadTarget | null> {
   await withTimeout(locator.scrollIntoViewIfNeeded({ timeout: DESCRIBE_TIMEOUT_MS }));
-  const box = await withTimeout(locator.boundingBox());
+  // A `display: contents` link (BBC article cards, FIX-24 core-07) has no box of
+  // its own: aim at the first child that is laid out; the hit is still read.
+  let box = await withTimeout(locator.boundingBox());
+  for (let i = 0; !box && i < 3; i++)
+    box = await withTimeout(locator.locator(`xpath=./*[${i + 1}]`).boundingBox());
   if (!box) return null;
   return targetAtPoint(probe, locator.page(), box.x + box.width / 2, box.y + box.height / 2);
 }

@@ -90,6 +90,11 @@ export interface OutputRequirementListSources {
   kind: 'list_sources';
   minItems: number;
   keyFields: ListKeyField[];
+  /**
+   * FIX-24: the items are search results. A result's own link is wherever it
+   * points, a site's home page included; the search page itself is not.
+   */
+  searchResults?: boolean;
 }
 
 export interface OutputRequirementGeneralLinks {
@@ -344,7 +349,8 @@ function inferListSourcesRequirement(
   // does not ask every row for a date (GitHub "今日新增 star" has none).
   if (/日期|时间|几点|\b(?:date|time|when)\b/i.test(text)) keyFields.push('date');
   if (/价格|价钱|报价|售价|prices?\b/i.test(text)) keyFields.push('price');
-  return { kind: 'list_sources', minItems, keyFields };
+  const searchResults = /搜索|检索|\bsearch(?:es|ed|ing)?\b/i.test(text);
+  return { kind: 'list_sources', minItems, keyFields, ...(searchResults ? { searchResults } : {}) };
 }
 
 export function isResearchOrRetrievalIntent(intent: string): boolean {
@@ -639,7 +645,11 @@ function criteriaForRequirement(req: OutputRequirement): SuccessCriterion[] {
               ? `，并写明${req.keyFields.map((field) => KEY_FIELD_LABELS[field]).join('、')}`
               : ''
           }`,
-          data: { minItems: req.minItems, keyFields: req.keyFields },
+          data: {
+            minItems: req.minItems,
+            keyFields: req.keyFields,
+            ...(req.searchResults ? { searchResults: true } : {}),
+          },
         },
       ];
     case 'general_with_links':

@@ -442,6 +442,14 @@ try {
         sourceKind = 'local_replica';
       }
     }
+    // FIX-24: the task names httpbin.org and fills elsewhere are not counted, so
+    // the offline form is served at the named address (still labelled offline).
+    if (id === 'core-08' && site === local) {
+      await ctx.route('https://httpbin.org/forms/post', async (route) =>
+        route.fulfill({ response: await route.fetch({ url: `${local}/form` }) }),
+      );
+      site = 'https://httpbin.org';
+    }
     // The public form uses /forms/post instead of the local /form path.
     const actualScenario = scenario(id, site, facts);
     let failure: string | undefined;

@@ -36,7 +36,7 @@ import {
 } from './task-verification-context.js';
 import { evaluateTemplateFill } from './template-fill-consistency.js';
 import { TEXT_URL_RE as URL_RE, trimTextUrl } from './text-urls.js';
-import { isNonDetailUrl, urlResourceIdentity } from './url-identity.js';
+import { isNonDetailUrl, isSiteHomeUrl, urlResourceIdentity } from './url-identity.js';
 import type { VerificationInputCoverage } from './verification-input-budget.js';
 
 export type FailureLevel = 'fixable' | 'needs_clarification' | 'hard_fail';
@@ -1023,6 +1023,9 @@ function checkListItemSources(criterion: SuccessCriterion, answerText: string): 
     (field) => field in LIST_KEY_FIELD_PATTERNS,
   );
   const items = extractStructuredItems(answerText).slice(0, Math.max(minItems, 1));
+  // FIX-24 (Deploy-24 D16/core-01): a search result that is a site's home page
+  // (holaapp.in/, tryholo.ai/) is that result's own link.
+  const searchResults = criterion.data?.searchResults === true;
   const problems: string[] = [];
   if (items.length < minItems) {
     problems.push(`只解析到 ${items.length} 条，要求 ${minItems} 条`);
@@ -1034,8 +1037,12 @@ function checkListItemSources(criterion: SuccessCriterion, answerText: string): 
     const url = item.url ? stripTrailingPunct(item.url) : null;
     if (!url) {
       missing.push('来源链接');
-    } else if (isNonDetailUrl(url)) {
-      missing.push('独立来源链接（不能用首页或搜索页）');
+    } else if (isNonDetailUrl(url) && !(searchResults && isSiteHomeUrl(url))) {
+      missing.push(
+        searchResults
+          ? '独立来源链接（不能用搜索结果页或列表页）'
+          : '独立来源链接（不能用首页或搜索页）',
+      );
     } else {
       // Same resource, not same string: /article/42#s1 and #s2, or a utm_*
       // variant, are one source (see url-identity.ts).

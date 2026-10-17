@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -1785,6 +1786,70 @@ describe('list_item_sources + multi-line list rows (FIX-BATCH-A)', () => {
         .map((n) => `${n}缺少独立来源链接（不能用首页或搜索页）`)
         .join('；'),
     );
+  });
+
+  // FIX-24 (Deploy-24 D16 / core-01): Brave returned site home pages as results.
+  const searchContract = buildContract({
+    taskId: 't-search',
+    intent: '请使用云端浏览器，Google 搜索「HOLA DAY AI」返回前5条标题和链接',
+    executionMode: 'browser',
+  });
+  const searchAnswer = (links: string[]) =>
+    links.map((link, i) => `${i + 1}. 标题：结果${i + 1}\n   链接：${link}`).join('\n\n');
+  it('a search result that is a site home page is that result’s own link', () => {
+    const links = [
+      'https://play.google.com/store/apps/details?id=ai.holaapp',
+      'https://holaapp.in/',
+      'https://tryholo.ai/',
+      'https://www.appbrain.com/app/hola/ai.holaapp',
+      'https://holaday.ai/',
+    ];
+    expect(listCheck(verify(searchContract, searchAnswer(links), links))).toMatchObject({
+      passed: true,
+    });
+  });
+  it('still rejects the search page, a list page or a shared link as a search result', () => {
+    for (const bad of [
+      'https://www.bing.com/search?q=HOLA+DAY+AI',
+      'https://example.com/tags/ai',
+      'https://holaapp.in/',
+    ]) {
+      const links = [
+        'https://holaapp.in/',
+        'https://a.test/1',
+        'https://b.test/2',
+        'https://c.test/3',
+        bad,
+      ];
+      expect(listCheck(verify(searchContract, searchAnswer(links), links))?.passed, bad).toBe(
+        false,
+      );
+    }
+  });
+  // Offline reproduction of Deploy-24 D16 / core-01 from the production Brave results.
+  const deploy24 = JSON.parse(
+    readFileSync(new URL('./fixtures/deploy24-brave-results.json', import.meta.url), 'utf8'),
+  ) as { resultUrls: string[]; cases: Array<{ id: string; intent: string; answer: string }> };
+  it.each(deploy24.cases)('passes the Deploy-24 production $id answer on Brave results', (c) => {
+    const contract = buildContract({
+      taskId: `t-${c.id}`,
+      intent: c.intent,
+      executionMode: 'browser',
+    });
+    expect(listCheck(verify(contract, c.answer, deploy24.resultUrls))).toMatchObject({
+      passed: true,
+    });
+  });
+  it('a news list still may not use a home page', () => {
+    expect(
+      listCheck(
+        verify(
+          newsContract,
+          news(() => 'https://36kr.com/'),
+          ['https://36kr.com/'],
+        ),
+      )?.passed,
+    ).toBe(false);
   });
 
   it('passes distinct article links grounded by the snapshot, with dates', () => {

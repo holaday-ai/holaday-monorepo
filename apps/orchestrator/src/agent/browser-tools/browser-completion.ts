@@ -66,6 +66,8 @@ export type BrowserTrace = Pick<
   fromTabId?: string;
   /** Text a successful `type` entered (a host fact for answer checks). */
   typedText?: string;
+  /** The page a form receipt was made on. */
+  pageUrl?: string;
 };
 /** A prohibition or an admission of non-completion is not a claim of execution. */
 function positiveActionText(text: string): string {
@@ -129,6 +131,13 @@ export function completionGap(
   )) {
     // "未能打开 / 无法访问 …" admits the opposite.
     if (/(?:未能|没能|无法|不能|未|没有|并未)\s*$/.test(claimed.slice(0, match.index!))) continue;
+    // "如需更多，可自行访问 weather.gov.sg" suggests a site to the user (FIX-24 core-02).
+    if (
+      /(?:可以?|自行|请|建议|如需[^。；\n]{0,20}|您可以?|也可)\s*$/.test(
+        claimed.slice(0, match.index!),
+      )
+    )
+      continue;
     const host = match[1]!.toLowerCase().replace(/^www\./, '');
     // Search engines are covered by the fallback's own receipts across attempts.
     if (/(?:^|\.)(?:google\.[a-z.]+|bing\.com|duckduckgo\.com|baidu\.com)$/.test(host)) continue;
@@ -163,7 +172,16 @@ export function completionGap(
       numericCount(count[1]!)
   )
     return '新标签数量没有足够的 new_tab 回执。';
-  if (/(?:切回|返回|回到).{0,10}(?:原|最初|第一个|源|来源|起始|初始).{0,5}标签/.test(claimed)) {
+  const opened = successful.some((entry) => entry.tool === 'new_tab' || entry.openedTab);
+  if (
+    /(?:切回|切换回|换回|返回|回到|switch(?:ed)? back to).{0,10}(?:原|最初|第一个|源|来源|起始|初始|first|original).{0,5}(?:标签|tab)/i.test(
+      claimed,
+    ) ||
+    // FIX-24 (Deploy-24 core-07): the task's own 回到第一个 is checked whatever
+    // the answer calls the tab it ended on ("切换回第一个新标签").
+    (opened &&
+      /(?:切回|切换回|换回|返回|回到)(?:到)?\s*(?:第一个|原来|最初|起始|初始|原)/.test(requested))
+  ) {
     // The original tab is the one active when the first new tab was opened —
     // never the new tab a click(newTab) receipt names.
     const first =
@@ -171,7 +189,10 @@ export function completionGap(
       successful.find((entry) => entry.tabId && !entry.openedTab && entry.tool !== 'new_tab')
         ?.tabId;
     const lastSwitch = successful.filter((entry) => entry.tool === 'switch_tab').at(-1);
-    if (!first || lastSwitch?.tabId !== first) return 'switch_tab 回执未证明切回原标签。';
+    if (!first || lastSwitch?.tabId !== first)
+      return first
+        ? `switch_tab 回执未证明切回原标签：起始标签是 ${first}（打开这些链接的页面），不是新打开的标签；请 switch_tab 到 ${first} 后再完成。`
+        : 'switch_tab 回执未证明切回原标签。';
   }
   const scrollText = `${requested} ${claimed}`;
   const scrollCount =
