@@ -172,7 +172,16 @@ export function completionGap(
       numericCount(count[1]!)
   )
     return '新标签数量没有足够的 new_tab 回执。';
-  if (/(?:切回|返回|回到).{0,10}(?:原|最初|第一个|源|来源|起始|初始).{0,5}标签/.test(claimed)) {
+  const opened = successful.some((entry) => entry.tool === 'new_tab' || entry.openedTab);
+  if (
+    /(?:切回|切换回|换回|返回|回到|switch(?:ed)? back to).{0,10}(?:原|最初|第一个|源|来源|起始|初始|first|original).{0,5}(?:标签|tab)/i.test(
+      claimed,
+    ) ||
+    // FIX-24 (Deploy-24 core-07): the task's own 回到第一个 is checked whatever
+    // the answer calls the tab it ended on ("切换回第一个新标签").
+    (opened &&
+      /(?:切回|切换回|换回|返回|回到)(?:到)?\s*(?:第一个|原来|最初|起始|初始|原)/.test(requested))
+  ) {
     // The original tab is the one active when the first new tab was opened —
     // never the new tab a click(newTab) receipt names.
     const first =

@@ -44,6 +44,29 @@ describe('switching back to the original tab (core-07)', () => {
     );
     expect(gap).toContain('起始标签是 source');
   });
+  // FIX-24 round fb: "切换回第一个新标签" slipped past the claim wording and completed.
+  it.each(['最后已切换回第一个新标签 new1。', '三个标题如上。'])(
+    'checks the task’s own 回到第一个 whatever the answer says: "%s"',
+    (claim) => {
+      const intent = '从一个页面打开3个链接到新标签，分别读标题后回到第一个';
+      expect(
+        completionGap(
+          intent,
+          claim,
+          [...opened, { tool: 'switch_tab', ok: true, tabId: 'new1' }],
+          false,
+        ),
+      ).toContain('起始标签是 source');
+      expect(
+        completionGap(
+          intent,
+          claim,
+          [...opened, { tool: 'switch_tab', ok: true, tabId: 'source' }],
+          false,
+        ),
+      ).toBeNull();
+    },
+  );
   it('the prompt says 回到第一个 means the starting tab', async () => {
     const { UNIFIED_BROWSER_SYSTEM_PROMPT } = await import('./unified-browser-loop.js');
     expect(UNIFIED_BROWSER_SYSTEM_PROMPT).toContain(

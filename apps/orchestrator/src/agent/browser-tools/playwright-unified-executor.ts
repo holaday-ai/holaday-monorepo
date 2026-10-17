@@ -468,9 +468,31 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
         case 'type': {
           const target = byRef(action.ref);
           const field = await fieldKind(target, timeout);
-          await target.fill(action.text, { timeout });
-          if (observation && (await target.inputValue()) !== action.text)
-            return fail('输入值核验失败');
+          // FIX-24 (core-10): a paragraph inside a rich editor (TinyMCE's
+          // contenteditable body) ignores fill; the editable host takes it.
+          const inEditor = await target
+            .evaluate((el) => !!el.parentElement?.isContentEditable)
+            .catch(() => false);
+          await (inEditor
+            ? target.locator(
+                'xpath=ancestor::*[@contenteditable][not(@contenteditable="false")][1]',
+              )
+            : target
+          ).fill(action.text, { timeout });
+          // A rich editor has no input value (inputValue throws): its typed text is
+          // checked in the editable host. Labels still resolve to their control.
+          if (observation) {
+            const value = await target.inputValue({ timeout }).catch(() => null);
+            const typed =
+              value !== null
+                ? value === action.text
+                : await target.evaluate((el, text) => {
+                    let host = el as HTMLElement;
+                    while (host.parentElement?.isContentEditable) host = host.parentElement;
+                    return host.isContentEditable && (host.innerText ?? '').includes(text);
+                  }, action.text);
+            if (!typed) return fail('输入值核验失败');
+          }
           if (action.submit) await target.press('Enter', { timeout });
           return {
             ...done(`已在 ${action.ref} 输入${action.submit ? '并提交' : ''}`),

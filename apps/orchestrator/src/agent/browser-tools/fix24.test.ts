@@ -1,8 +1,11 @@
+import { chromium } from 'playwright';
 import { describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { completionGap } from './browser-completion.js';
 import { assessCompletionFacts, nearestPassage } from './completion-fields.js';
+import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
+import { describeUnifiedAction } from './unified-action-gate.js';
 import { intentHosts, runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
 /** FIX-24: Deploy-24 production failures (core-02, core-08, core-10). */
@@ -108,8 +111,9 @@ describe('core-08: a named site bounds where the form may be filled', () => {
       '任务点名了 httpbin.org、the-internet.herokuapp.com，只能在这些网站内填写',
     );
     expect(log).toContain('demoqa.com 上的填写不算');
-    expect(log).toContain('只在这些网站内找日期控件，不要换到别的网站');
+    expect(log).toContain('只在这些网站内找日期控件：');
     expect(log).not.toContain('w3schools');
+    expect(log).toContain('不要打开登录、注册、付款页（如 /login）');
     expect(outcome).toMatchObject({ status: 'completed', partial: { missing: '日期控件' } });
   });
 
@@ -428,5 +432,95 @@ describe('core-02: a weather answer from result snippets is sent to a weather pa
     expect(completionGap(WEATHER, '已访问 weather.gov.sg 并读取了温度。', trace, false)).toContain(
       'weather.gov.sg',
     );
+  });
+});
+
+describe('core-10: typing into a rich editor in an iframe', () => {
+  it('a contenteditable editor is verified by its text, not an input value', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.route('http://editor.test/**', (route) =>
+        route.fulfill({
+          contentType: 'text/html',
+          body: route.request().url().endsWith('/frame')
+            ? '<body contenteditable="true" aria-label="Rich Text Area"><p>Your content goes here.</p></body>'
+            : '<h3>An iFrame containing the TinyMCE WYSIWYG Editor</h3><iframe src="/frame" title="Rich Text Area"></iframe>',
+        }),
+      );
+      await page.goto('http://editor.test/');
+      await page.frameLocator('iframe').locator('p').waitFor();
+      const tools = createPlaywrightUnifiedExecutor(page, { observationV2: true });
+      try {
+        const read = await tools.execute({ tool: 'read_page' });
+        const frame = (
+          JSON.parse(read.text).frames as Array<{
+            frameId: string;
+            sourceURL: string;
+            observationRevision: string;
+            tree: string;
+          }>
+        ).find((f) => f.sourceURL.endsWith('/frame'))!;
+        const ref = frame.tree.match(/paragraph[^\n]*\[ref=([a-z0-9]+)\]/)![1]!;
+        const typed = await tools.execute({
+          tool: 'type',
+          ref,
+          frameId: frame.frameId,
+          text: 'Hello from cloud browser',
+          observationRevision: frame.observationRevision,
+        } as never);
+        expect(typed.ok, typed.text).toBe(true);
+        expect(typed.form).toMatchObject({ filled: true });
+        expect(await page.frameLocator('iframe').locator('body').innerText()).toContain(
+          'Hello from cloud browser',
+        );
+      } finally {
+        tools.dispose();
+      }
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
+describe('core-07: a display:contents card link is read by the action gate', () => {
+  it('reads the card link through its laid-out child; one with no laid-out child stays unverified', async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+      await page.setContent(
+        '<a id="card" href="https://news.test/articles/1" style="display:contents"><div style="width:300px;height:120px">Community members grieve</div></a>',
+      );
+      const tools = createPlaywrightUnifiedExecutor(page, { observationV2: true });
+      try {
+        const tree = String(JSON.parse((await tools.execute({ tool: 'read_page' })).text).tree);
+        const ref = tree.match(/link "Community members grieve"[^\n]*\[ref=(e\d+)\]/)![1]!;
+        const card = await describeUnifiedAction(
+          page,
+          { tool: 'click', ref, newTab: true } as never,
+          () => null,
+        );
+        expect(card.unverified).toBeNull();
+        expect(card.objects).toContain('https://news.test/articles/1');
+      } finally {
+        tools.dispose();
+      }
+      // A link with neither a box nor a laid-out child cannot be read.
+      await page.setContent(
+        '<a href="https://news.test/x" style="display:contents"><span style="display:none">x</span></a>',
+      );
+      const hidden = page.locator('a');
+      const result = await describeUnifiedAction(
+        page,
+        { tool: 'click', ref: 'e1' } as never,
+        () => null,
+        undefined,
+        page.mainFrame(),
+        () => hidden,
+      );
+      expect(result.unverified).toBe('无法读取要点击的元素');
+    } finally {
+      await browser.close();
+    }
   });
 });
