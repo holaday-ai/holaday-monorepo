@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -1824,6 +1825,20 @@ describe('list_item_sources + multi-line list rows (FIX-BATCH-A)', () => {
         false,
       );
     }
+  });
+  // Offline reproduction of Deploy-24 D16 / core-01 from the production Brave results.
+  const deploy24 = JSON.parse(
+    readFileSync(new URL('./fixtures/deploy24-brave-results.json', import.meta.url), 'utf8'),
+  ) as { resultUrls: string[]; cases: Array<{ id: string; intent: string; answer: string }> };
+  it.each(deploy24.cases)('passes the Deploy-24 production $id answer on Brave results', (c) => {
+    const contract = buildContract({
+      taskId: `t-${c.id}`,
+      intent: c.intent,
+      executionMode: 'browser',
+    });
+    expect(listCheck(verify(contract, c.answer, deploy24.resultUrls))).toMatchObject({
+      passed: true,
+    });
   });
   it('a news list still may not use a home page', () => {
     expect(
