@@ -531,9 +531,9 @@ export async function runUnifiedBrowserLoop(
         !trace.some(
           (entry) => entry.tool === 'navigate' || entry.tool === 'new_tab' || entry.openedTab,
         ) &&
-        ((call.name === 'finish' && args.status !== 'completed') ||
-          (call.name === 'request_human' &&
-            ['login', 'captcha', 'payment'].includes(String(args.reason))))
+        // Asking the user which page to use, before opening the named site, is
+        // giving up too (NAV-EXIT-1 run n3: "请提供维基百科词条名称").
+        ((call.name === 'finish' && args.status !== 'completed') || call.name === 'request_human')
       ) {
         if (!blankNudged) {
           blankNudged = true;

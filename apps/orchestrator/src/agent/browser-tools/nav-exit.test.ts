@@ -54,10 +54,16 @@ function browser() {
   return { execute, actions, currentPageUrl: () => url };
 }
 
-const giveUp = (name: 'finish' | 'request_human') =>
+const giveUp = (name: 'finish' | 'request_human' | 'ask') =>
   name === 'finish'
     ? { name, input: { status: 'failed', summary: '浏览器无法判断是否需要登录。' } }
-    : { name, input: { reason: 'login', message: '可能需要登录。' } };
+    : name === 'ask'
+      ? // NAV-EXIT-1 run n3: a clarification before opening the named site.
+        {
+          name: 'request_human',
+          input: { reason: 'other', message: '请提供您想要总结的维基百科词条名称或链接。' },
+        }
+      : { name, input: { reason: 'login', message: '可能需要登录。' } };
 
 describe('the target a task names', () => {
   it.each([
@@ -72,7 +78,7 @@ describe('the target a task names', () => {
 });
 
 describe('giving up on the blank start page (core-06)', () => {
-  it.each(['finish', 'request_human'] as const)(
+  it.each(['finish', 'request_human', 'ask'] as const)(
     '%s on about:blank is sent back once to navigate first',
     async (name) => {
       const { adapter, seen } = scripted([
