@@ -326,6 +326,9 @@ export async function runUnifiedBrowserLoop(
   const wantsForm =
     namedHosts.length > 0 && /填表|填写|表单|日期控件|fill.*form|form.*fill/i.test(input.intent);
   let sectionRejected = false;
+  /** NAV-EXIT-1: the site the task names, opened before giving up on a blank page. */
+  const blankTarget = intentTargetUrl(input.intent);
+  let blankNudged = false;
   const wantedCount = requestedCount(input.intent);
   const wantedSection = requestedSection(input.intent);
   /** The latest body outline the model fetched: top-level and subsection titles. */
@@ -545,13 +548,40 @@ export async function runUnifiedBrowserLoop(
         continue;
       }
       const args = normalized;
+      // NAV-EXIT-1 (Deploy-25 core-06): giving up on the blank start page, before
+      // any navigation, when the task names its site. The model is first told to
+      // open it; if it gives up again the host opens it, then the model goes on.
+      let hostNavigate: string | undefined;
+      if (
+        blankTarget &&
+        input.currentPageUrl?.() === 'about:blank' &&
+        !trace.some(
+          (entry) => entry.tool === 'navigate' || entry.tool === 'new_tab' || entry.openedTab,
+        ) &&
+        // Asking the user which page to use, before opening the named site, is
+        // giving up too (NAV-EXIT-1 run n3: "请提供维基百科词条名称").
+        ((call.name === 'finish' && args.status !== 'completed') || call.name === 'request_human')
+      ) {
+        if (!blankNudged) {
+          blankNudged = true;
+          results.push(
+            toolResult(
+              call.id,
+              `浏览器还停在空白页（about:blank），还没有打开任何网页，谈不上登录墙或无法访问。请先 navigate 到任务里的目标网站（${blankTarget}）再继续；打开后确实做不到再如实说明。`,
+              true,
+            ),
+          );
+          continue;
+        }
+        hostNavigate = blankTarget;
+      }
       if (concludeNow && call.name !== 'finish')
         return {
           status: 'failed',
           reason: '连续读取没有新信息；无法证明已完成目标，已停止空转。',
           steps: step + 1,
         };
-      if (call.name === 'finish') {
+      if (call.name === 'finish' && !hostNavigate) {
         const summary = typeof args.summary === 'string' ? unescapeLiteralBreaks(args.summary) : '';
         // FAILURE-COPY-1 (FIX-24 core-08 ib): an honest "部分完成" sent as failed is
         // delivered as 部分完成 — only with receipts of the steps it did, and only
@@ -839,7 +869,7 @@ export async function runUnifiedBrowserLoop(
           steps: step + 1,
         };
       }
-      if (call.name === 'request_human') {
+      if (call.name === 'request_human' && !hostNavigate) {
         const reason = typeof args.reason === 'string' ? args.reason : 'other';
         if (
           ['login', 'captcha', 'payment'].includes(reason) &&
@@ -908,7 +938,9 @@ export async function runUnifiedBrowserLoop(
       }
       let action: UnifiedBrowserAction;
       try {
-        action = parseUnifiedBrowserAction(call.name, call.input);
+        action = hostNavigate
+          ? parseUnifiedBrowserAction('navigate', { url: hostNavigate })
+          : parseUnifiedBrowserAction(call.name, call.input);
       } catch (error) {
         results.push(
           toolResult(
@@ -1070,9 +1102,12 @@ export async function runUnifiedBrowserLoop(
         ['type', 'select', 'click'].includes(action.tool)
           ? `\n页面已变化，这个 ref 失效了：先 snapshot，再用新 ref 重做这次 ${action.tool}（同一个元素${action.tool === 'click' ? '' : '、同一个值'}），不要改用别的方式代替。`
           : '';
+      const hostNote = hostNavigate
+        ? `你还没有打开任何网页就要结束；宿主先按任务打开了目标网站 ${hostNavigate}。请读取页面后继续原任务。\n`
+        : '';
       const resultText = outcome.errorCode
-        ? `${outcome.text} (${outcome.errorCode}: ${outcome.errorMessage ?? ''})${staleRedo}`
-        : [outcome.text, ...localNotices].join('\n\n');
+        ? `${hostNote}${outcome.text} (${outcome.errorCode}: ${outcome.errorMessage ?? ''})${staleRedo}`
+        : hostNote + [outcome.text, ...localNotices].join('\n\n');
       seenTool(resultText);
       results.push(toolResult(call.id, resultText, !outcome.ok));
       if (outcome.image)
@@ -1331,3 +1366,32 @@ function hostOf(url: string | undefined): string | undefined {
 
 /** FAILURE-COPY-1: the task ended before opening any page — not a login question. */
 export const NOT_STARTED = '执行未开始：浏览器还没有打开目标页面就结束了。请重试。';
+
+/** Well-known sites a task names without a URL (NAV-EXIT-1: "维基百科长页面"). */
+const NAMED_SITES: Array<[RegExp, string]> = [
+  [/维基百科|wikipedia/i, 'https://zh.wikipedia.org/'],
+  [/百度百科/, 'https://baike.baidu.com/'],
+  [/youtube|油管/i, 'https://www.youtube.com/'],
+  [/hacker\s*news/i, 'https://news.ycombinator.com/'],
+  [/github/i, 'https://github.com/'],
+  [/知乎/, 'https://www.zhihu.com/'],
+  [/哔哩哔哩|b站|bilibili/i, 'https://www.bilibili.com/'],
+  [/豆瓣/, 'https://www.douban.com/'],
+  [/微博/, 'https://weibo.com/'],
+  [/reddit/i, 'https://www.reddit.com/'],
+];
+
+/** The page a task asks to work on: its URL, a named host, or a well-known site. */
+export function intentTargetUrl(intent: string): string | undefined {
+  const url = intent.match(/https?:\/\/[^\s，。、；"'「」<>]+/i)?.[0];
+  if (url) return url.replace(/[)\].,;:]+$/, '');
+  const host = intentHosts(intent)[0];
+  if (host) return `https://${host}/`;
+  // English-only tasks name English Wikipedia.
+  const site = NAMED_SITES.find(([pattern]) => pattern.test(intent))?.[1];
+  return site &&
+    /wikipedia/i.test(intent) &&
+    !/[\u4e00-\u9fff]/.test(intent.replace(/请使用云端浏览器，?/, ''))
+    ? 'https://en.wikipedia.org/'
+    : site;
+}

@@ -617,7 +617,7 @@ describe('core-08: typing one field keeps the other refs of the same snapshot', 
 
 describe('FAILURE-COPY-1: an honest 部分完成 sent as failed', () => {
   const CORE08 = `${P}httpbin.org/forms/post 或 the-internet.herokuapp.com 填表单与日期控件，只填不提交并截图`;
-  const run = (fills: boolean, summary: string, startBlank = false) => {
+  const run = (fills: boolean, summary: string, startBlank = false, intent = CORE08) => {
     const calls = [
       ...(startBlank
         ? []
@@ -630,7 +630,7 @@ describe('FAILURE-COPY-1: an honest 部分完成 sent as failed', () => {
     const { adapter } = scripted(calls);
     const browser = site([]);
     return runUnifiedBrowserLoop({
-      intent: CORE08,
+      intent,
       adapter,
       maxSteps: 8,
       execute: browser.execute as never,
@@ -656,7 +656,13 @@ describe('FAILURE-COPY-1: an honest 部分完成 sent as failed', () => {
     });
   });
   it('ending on the blank start page is "not started", not a login question', async () => {
-    const outcome = await run(false, '无法判断是否需要登录。', true);
+    // No named site: NAV-EXIT-1's navigate-first guard does not apply (INTEGRATE-26).
+    const outcome = await run(
+      false,
+      '无法判断是否需要登录。',
+      true,
+      `${P}找一个公开表单填写日期控件`,
+    );
     expect(outcome).toMatchObject({ status: 'failed', failureSource: 'not_started' });
     expect(outcome.status === 'failed' && outcome.reason).not.toMatch(/登录/);
   });
