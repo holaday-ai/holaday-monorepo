@@ -248,3 +248,32 @@ describe('blank-page guard × not-started copy (INTEGRATE-26)', () => {
     expect(outcome).toMatchObject({ status: 'completed' });
   });
 });
+
+describe('neutral pages when the task leaves the page open (INTEGRATE-26)', () => {
+  const firstMessage = async (intent: string) => {
+    const { adapter, seen } = scripted([
+      { name: 'finish', input: { status: 'failed', summary: 'x' } },
+    ]);
+    await runUnifiedBrowserLoop({
+      intent,
+      adapter,
+      maxSteps: 2,
+      execute: (async () => ({ ok: true, text: '' })) as never,
+      currentPageUrl: () => 'https://example.com/',
+    });
+    return seen[0]!;
+  };
+  it('suggests a neutral page when no page is named', async () => {
+    expect(
+      await firstMessage(`${P}从一个页面打开3个链接到新标签，分别读标题后回到第一个`),
+    ).toContain('请优先选百科、技术文档等中性内容页面');
+  });
+  it.each([
+    `${P}打开 https://www.bbc.com/zhongwen/simp ，从该页面打开3个链接到新标签`,
+    `${P}从一个页面打开3个链接：用 news.ycombinator.com`,
+    `${P}维基百科长页面，分段读取并总结第3节`,
+    `${P}Google 搜索「HOLA DAY AI」返回前5条标题和链接`,
+  ])('leaves a named site, or a task without a page to pick, alone: %s', async (intent) => {
+    expect(await firstMessage(intent)).not.toContain('中性内容页面');
+  });
+});

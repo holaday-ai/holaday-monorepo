@@ -254,7 +254,14 @@ export async function runUnifiedBrowserLoop(
   input: UnifiedBrowserLoopInput,
 ): Promise<UnifiedBrowserOutcome> {
   const maxSteps = input.maxSteps ?? 40;
-  const messages: NeutralMessage[] = [{ role: 'user', content: input.intent }];
+  const messages: NeutralMessage[] = [
+    {
+      role: 'user',
+      content: NEUTRAL_PAGE_PICK(input.intent)
+        ? `${input.intent}\n\n${NEUTRAL_PAGE_HINT}`
+        : input.intent,
+    },
+  ];
   const pageEvidence: ObservedEvidence[] = [];
   // Tabs read successfully and their latest listed titles. Kept apart from
   // pageEvidence, which evicts old reads of long pages.
@@ -1395,3 +1402,17 @@ export function intentTargetUrl(intent: string): string | undefined {
     ? 'https://en.wikipedia.org/'
     : site;
 }
+
+/**
+ * INTEGRATE-26: a task that leaves the page to the model ("从一个页面打开3个链接")
+ * is steered to neutral pages; news and politics pages trip the mainland
+ * endpoint's content inspection (DataInspectionFailed, LLM-RETRY-1 run l3).
+ * A task that names its site keeps it.
+ */
+export const NEUTRAL_PAGE_HINT =
+  '（任务没有指定页面：请优先选百科、技术文档等中性内容页面，例如维基百科条目或 MDN 文档，避免时政新闻类页面。）';
+const NEUTRAL_PAGE_PICK = (intent: string) =>
+  !intentTargetUrl(intent) &&
+  /(?:从)?(?:一|某)个(?:公开)?(?:页面|网页|网站)|任意(?:一个)?(?:页面|网页|网站)|随便.{0,4}(?:页面|网页|网站)|\b(?:a|any) (?:public )?(?:web ?)?page\b/i.test(
+    intent,
+  );
