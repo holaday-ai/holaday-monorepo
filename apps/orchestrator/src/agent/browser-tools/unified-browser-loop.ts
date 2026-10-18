@@ -27,6 +27,12 @@ import {
   requestedCount,
   requestedSection,
 } from './ordinal-requests.js';
+import {
+  PLAYBACK_PING,
+  type PlaybackReceipt,
+  admitsAutoplay,
+  claimsNoPlayback,
+} from './playback-guard.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import {
   UNIFIED_BROWSER_TOOLS,
@@ -149,6 +155,8 @@ export interface UnifiedBrowserLoopInput {
     disposition?: 'continue';
   } | null>;
   currentPageUrl?: () => string;
+  /** FIX-27: what the task's media actually played (the executor's playback receipt). */
+  playbackReceipt?: () => Promise<PlaybackReceipt | null>;
   checkInterruption?: () =>
     | { reason: string; message: string }
     | undefined
@@ -316,6 +324,9 @@ export async function runUnifiedBrowserLoop(
   let readingsCorrected = false;
   let weatherPageAsked = false;
   let bindingCorrected = false;
+  /** FIX-27: YouTube playback pings seen in action effects. */
+  let playbackPings = 0;
+  let playbackCorrected = false;
   /**
    * BROWSER-AUTOPILOT-3: a short count gets one automatic continuation; a wrong
    * "第N节" gets one correction with the real list, then fails.
@@ -640,6 +651,41 @@ export async function runUnifiedBrowserLoop(
             );
             staleTurn = true;
             continue;
+          }
+          // FIX-27 (Deploy-26 core-03): "未播放" needs a playback receipt that shows
+          // the media paused with ~0 s played, and no YouTube playback pings.
+          if (claimsNoPlayback(summary) && !admitsAutoplay(summary)) {
+            const playback = await input.playbackReceipt?.().catch(() => null);
+            const seconds = Math.round(playback?.playedSeconds ?? 0);
+            const played = !!playback && (playback.playing || playback.playedSeconds >= 1);
+            const proven = !!playback && !played && playbackPings === 0;
+            if (!proven) {
+              const why =
+                played || playbackPings
+                  ? `页面上的视频实际播放过${seconds ? `约 ${seconds} 秒` : ''}${playbackPings ? '（有 YouTube 播放统计请求）' : ''}，现已暂停。`
+                  : '没有播放状态回执能证明视频没有播放。';
+              await rejected(
+                summary,
+                typeof args.evidence === 'string' ? args.evidence : '',
+                `声称未播放但${why}`,
+              );
+              if (playbackCorrected || concludeNow)
+                return {
+                  status: 'failed',
+                  reason: `答案声称未播放，但${why}`,
+                  failureSource: 'task',
+                  steps: step + 1,
+                };
+              playbackCorrected = true;
+              results.push(
+                toolResult(
+                  call.id,
+                  `${why}不能写「未播放」。请如实写，例如「未主动播放；页面曾自动播放约 X 秒，已暂停」（不知道时长就写「页面曾自动播放，已暂停」），然后再 finish。`,
+                  true,
+                ),
+              );
+              continue;
+            }
           }
           const given =
             typeof args.evidence === 'string' ? unescapeLiteralBreaks(args.evidence).trim() : '';
@@ -1074,6 +1120,9 @@ export async function runUnifiedBrowserLoop(
           if (tab) failedNavigationTabs.add(tab);
         }
       }
+      playbackPings += (outcome.effect?.backgroundRequests ?? []).filter((request) =>
+        PLAYBACK_PING.test(request.url),
+      ).length;
       const { image: capturedImage, ...receipt } = outcome;
       trace.push({
         tool: action.tool,

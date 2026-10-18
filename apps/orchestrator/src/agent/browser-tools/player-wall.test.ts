@@ -79,7 +79,7 @@ it('completes public video metadata through the real runner and discloses the un
       expect(result.summary).toContain('33K views');
       expect(result.summary).toContain('非精确日期');
       expect(result.summary).toContain('播放器需登录验证');
-      expect(result.summary).toContain('未播放');
+      expect(result.summary).toContain('未主动播放');
     }
     expect(ticks).not.toContainEqual(
       expect.objectContaining({
@@ -92,7 +92,7 @@ it('completes public video metadata through the real runner and discloses the un
     expect(steps).toContain('navigate');
     expect(steps).toContain('read_page');
     expect(steps).not.toContain('click');
-    expect(JSON.stringify(requests[1])).toContain('未播放');
+    expect(JSON.stringify(requests[1])).toContain('未主动播放');
     expect(ticks).toContainEqual(
       expect.objectContaining({
         execution: expect.objectContaining({ actionKind: 'browser_local_wall', ok: true }),

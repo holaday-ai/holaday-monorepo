@@ -561,6 +561,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           JSON.stringify(event),
         ),
       currentPageUrl: () => tools.page.url(),
+      playbackReceipt: () => tools.playbackReceipt(),
       checkInterruption: async () => {
         const interruption =
           tools.observation?.interruption() ?? egress.interruption() ?? undefined;
