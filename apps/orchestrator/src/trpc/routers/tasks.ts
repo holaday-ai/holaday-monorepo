@@ -12139,25 +12139,24 @@ async function persistSupercarOutcome(
         ...(metadata ? { metadata } : {}),
       });
     }
-    if (outcome.status === 'timeout') {
-      return await repo.persistVisionOutcome(taskId, {
-        status: 'failed',
-        reason: friendlyTaskFailureReason(
-          outcome.status,
-          outcome.reason ?? 'supercar: task timeout',
-        ),
-        tickCount: outcome.iterations,
-        ...finalFields,
-        ...(metadata ? { metadata } : {}),
-      });
-    }
-    // 'failed'
+    // FAILURE-COPY-1: the user sees copy chosen by the failure's source; the
+    // raw reason and source stay in metadata for operators.
+    const raw =
+      outcome.reason ??
+      (outcome.status === 'timeout' ? 'supercar: task timeout' : 'supercar: task failed');
+    const failureMetadata = {
+      ...metadata,
+      failureDetail: {
+        source: outcome.failureSource ?? 'unknown',
+        raw: raw.slice(0, 1000),
+      },
+    };
     return await repo.persistVisionOutcome(taskId, {
       status: 'failed',
-      reason: friendlyTaskFailureReason(outcome.status, outcome.reason ?? 'supercar: task failed'),
+      reason: friendlyTaskFailureReason(outcome.status, raw, outcome.failureSource),
       tickCount: outcome.iterations,
       ...finalFields,
-      ...(metadata ? { metadata } : {}),
+      metadata: failureMetadata,
     });
   } catch (err) {
     // Best-effort — persistence failure is logged by the caller's .then().
@@ -12318,7 +12317,7 @@ function buildTaskTerminalMessage(
   }
   // failed / timeout — translate the internal reason into a
   // user-facing Chinese explanation + one actionable suggestion.
-  const friendly = friendlyTaskFailureReason(outcome.status, outcome.reason);
+  const friendly = friendlyTaskFailureReason(outcome.status, outcome.reason, outcome.failureSource);
   return {
     type: 'server.task.terminal',
     taskId,

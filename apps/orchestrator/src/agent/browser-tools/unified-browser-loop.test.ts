@@ -183,7 +183,12 @@ describe('unified browser loop', () => {
       adapter,
       execute: async () => ({ ok: true, text: '' }),
     });
-    expect(outcome).toMatchObject({ status: 'failed', reason: '模型服务暂时不可用，请稍后重试。' });
+    // LLM-RETRY-1: an error with no status or code is not retried and says so.
+    expect(outcome).toMatchObject({
+      status: 'failed',
+      reason: '模型服务请求失败，请稍后重试；管理员可查看调用诊断。',
+      modelFailure: true,
+    });
   });
 
   it('parses raw_arguments tool input instead of treating finish as empty', async () => {

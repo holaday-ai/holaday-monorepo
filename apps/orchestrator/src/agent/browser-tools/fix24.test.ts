@@ -107,10 +107,10 @@ describe('core-08: a named site bounds where the form may be filled', () => {
       currentPageUrl: browser.currentPageUrl,
     });
     const log = seen.join('\n');
+    // INTEGRATE-26: opening demoqa is refused outright, so nothing is filled there.
     expect(log).toContain(
-      '任务点名了 httpbin.org、the-internet.herokuapp.com，只能在这些网站内填写',
+      '任务点名了 httpbin.org、the-internet.herokuapp.com，只能在这些网站内找和填写，不打开 demoqa.com',
     );
-    expect(log).toContain('demoqa.com 上的填写不算');
     expect(log).toContain('只在这些网站内找日期控件：');
     expect(log).not.toContain('w3schools');
     expect(log).toContain('不要打开登录、注册、付款页（如 /login）');
@@ -612,5 +612,100 @@ describe('core-08: typing one field keeps the other refs of the same snapshot', 
     } finally {
       await browser.close();
     }
+  });
+});
+
+describe('FAILURE-COPY-1: an honest 部分完成 sent as failed', () => {
+  const CORE08 = `${P}httpbin.org/forms/post 或 the-internet.herokuapp.com 填表单与日期控件，只填不提交并截图`;
+  const run = (fills: boolean, summary: string, startBlank = false, intent = CORE08) => {
+    const calls = [
+      ...(startBlank
+        ? []
+        : [{ name: 'navigate', input: { url: 'https://httpbin.org/forms/post' } }]),
+      { name: 'snapshot', input: {} },
+      ...(fills ? [{ name: 'type', input: { ref: 'e21', text: 'Test' } }] : []),
+      { name: 'screenshot', input: {} },
+      { name: 'finish', input: { status: 'failed', summary } },
+    ];
+    const { adapter } = scripted(calls);
+    const browser = site([]);
+    return runUnifiedBrowserLoop({
+      intent,
+      adapter,
+      maxSteps: 8,
+      execute: browser.execute as never,
+      currentPageUrl: browser.currentPageUrl,
+    });
+  };
+  it('is delivered as 部分完成 when the steps it did have receipts', async () => {
+    const outcome = await run(
+      true,
+      '部分完成：已在 httpbin.org/forms/post 填写 Customer name=Test 并截图，未提交；两个网站都没有日期控件，日期未填写。',
+    );
+    expect(outcome).toMatchObject({ status: 'completed', partial: { wanted: 1 } });
+    expect(outcome.status === 'completed' && outcome.summary).toMatch(/^部分完成：已在 httpbin/);
+  });
+  it('stays failed without receipts of done work, or without the 部分完成 statement', async () => {
+    expect(await run(false, '部分完成：已填写表单。')).toMatchObject({
+      status: 'failed',
+      failureSource: 'task',
+    });
+    expect(await run(true, '两个网站都没有日期控件，任务失败。')).toMatchObject({
+      status: 'failed',
+      failureSource: 'task',
+    });
+  });
+  it('ending on the blank start page is "not started", not a login question', async () => {
+    // No named site: NAV-EXIT-1's navigate-first guard does not apply (INTEGRATE-26).
+    const outcome = await run(
+      false,
+      '无法判断是否需要登录。',
+      true,
+      `${P}找一个公开表单填写日期控件`,
+    );
+    expect(outcome).toMatchObject({ status: 'failed', failureSource: 'not_started' });
+    expect(outcome.status === 'failed' && outcome.reason).not.toMatch(/登录/);
+  });
+});
+
+describe('INTEGRATE-26: a form task on named sites does not open other sites', () => {
+  it('refuses demoqa; the named site still opens', async () => {
+    const { adapter, seen } = scripted([
+      { name: 'navigate', input: { url: 'https://demoqa.com/date-picker' } },
+      { name: 'navigate', input: { url: 'https://httpbin.org/forms/post' } },
+      { name: 'snapshot', input: {} },
+      { name: 'type', input: { ref: 'e21', text: 'Test' } },
+      { name: 'screenshot', input: {} },
+      finish(
+        '部分完成：已在 httpbin.org 填写 Customer name=Test，未提交并截图；两个网站都没有日期控件。',
+      ),
+    ]);
+    const browser = site([]);
+    await runUnifiedBrowserLoop({
+      intent: CORE08,
+      adapter,
+      maxSteps: 10,
+      execute: browser.execute as never,
+      currentPageUrl: browser.currentPageUrl,
+    });
+    const log = seen.join('\n');
+    expect(log).toContain('只能在这些网站内找和填写，不打开 demoqa.com');
+    expect(browser.currentPageUrl()).toBe('https://httpbin.org/forms/post');
+  });
+  it('a task without named sites may open any page', async () => {
+    const { adapter, seen } = scripted([
+      { name: 'navigate', input: { url: 'https://demoqa.com/date-picker' } },
+      finish('已打开。'),
+    ]);
+    const browser = site([]);
+    await runUnifiedBrowserLoop({
+      intent: `${P}找一个公开表单填写日期控件，只填不提交并截图`,
+      adapter,
+      maxSteps: 4,
+      execute: browser.execute as never,
+      currentPageUrl: browser.currentPageUrl,
+    });
+    expect(seen.join('\n')).not.toContain('只能在这些网站内找和填写');
+    expect(browser.currentPageUrl()).toBe('https://demoqa.com/date-picker');
   });
 });

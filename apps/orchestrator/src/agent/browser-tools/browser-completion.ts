@@ -127,17 +127,19 @@ export function completionGap(
     }),
   );
   for (const match of claimed.matchAll(
-    /(?:打开|访问|进入|跳转到|浏览了|opened|visited|navigated to)[^。；\n]{0,24}?\b((?:[a-z0-9-]+\.)+(?:com|net|org|cn|io|gov|edu|info|co|uk|sg|jp|de)\b)/gi,
+    /(?:打开|访问|进入|跳转到|浏览了|读取了|opened|visited|navigated to)[^。；\n]{0,24}?\b((?:[a-z0-9-]+\.)+(?:com|net|org|cn|io|gov|edu|info|co|uk|sg|jp|de)\b)/gi,
   )) {
-    // "未能打开 / 无法访问 …" admits the opposite.
-    if (/(?:未能|没能|无法|不能|未|没有|并未)\s*$/.test(claimed.slice(0, match.index!))) continue;
-    // "如需更多，可自行访问 weather.gov.sg" suggests a site to the user (FIX-24 core-02).
-    if (
-      /(?:可以?|自行|请|建议|如需[^。；\n]{0,20}|您可以?|也可)\s*$/.test(
-        claimed.slice(0, match.index!),
-      )
-    )
-      continue;
+    // FIX-26 (INTEGRATE-26 sa core-02): the words before the verb in the same
+    // clause decide. "未实际访问 / 没有打开" admit the opposite; "可进一步打开 /
+    // 可再打开 / 可自行访问 / 如需…" suggest a site to the user. "已打开 / 我访问了"
+    // claim it.
+    const clause =
+      claimed
+        .slice(0, match.index!)
+        .split(/[，,。；;：:！!？?\n]/)
+        .at(-1) ?? '';
+    if (/(?:未|没有|没|并未|无法|不能|不要|不必|尚未)[^已]{0,6}$/.test(clause)) continue;
+    if (/(?:可|自行|请|建议|如需|若需|如果需要|您可|也可)[^已我]{0,6}$/.test(clause)) continue;
     const host = match[1]!.toLowerCase().replace(/^www\./, '');
     // Search engines are covered by the fallback's own receipts across attempts.
     if (/(?:^|\.)(?:google\.[a-z.]+|bing\.com|duckduckgo\.com|baidu\.com)$/.test(host)) continue;
@@ -152,10 +154,24 @@ export function completionGap(
   ];
   for (const [pattern, tool] of claims)
     if (
-      pattern.test(claimed) &&
+      [...claimed.matchAll(new RegExp(pattern.source, 'gi'))].some(
+        (match) => tool !== 'switch_tab' || !pageTabSwitch(match[0]),
+      ) &&
       !successful.some((entry) => entry.tool === tool || (tool === 'new_tab' && entry.openedTab))
     )
       return `动作 ${tool} 没有成功工具回执，请实际执行或如实说明未完成。`;
+  // FIX-26 (INTEGRATE-26 sb core-07): three in-page anchors of one article are
+  // one page. Links opened from a page must reach pages other than it and
+  // each other (the #fragment does not count).
+  if (/打开.{0,8}(?:\d+|[一二两三四五六七八九十])\s*个?链接|open .{0,12}links?/i.test(intent)) {
+    const page = (url: string | undefined) => url?.split('#')[0]?.replace(/\/$/, '');
+    const opened = successful
+      .filter((entry) => entry.openedTab && entry.url)
+      .map((e) => page(e.url));
+    const source = page(successful.find((entry) => !entry.openedTab && entry.url)?.url);
+    if (opened.length && (new Set(opened).size < opened.length || opened.includes(source)))
+      return '打开的链接里有同一页面（只差 # 锚点，或就是起始页）：请换成指向不同页面的链接，各自读标题后再回到起始标签。';
+  }
   const numericCount = (value: string) =>
     (
       ({ 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }) as Record<
@@ -260,4 +276,18 @@ export function receiptEvidence(intent: string, trace: readonly BrowserTrace[]):
   )
     return '表单字段已填写，未提交；已截取当前页面截图。';
   return '';
+}
+
+/**
+ * FIX-26 (INTEGRATE-26 sb core-04): "切换到「视频」筛选标签" is a filter on the
+ * page, not a browser tab. A browser tab is still meant by 标签页 / 新标签 /
+ * 原标签 / 第一个 / 起始 / tab ids.
+ */
+function pageTabSwitch(text: string): boolean {
+  return (
+    /筛选|分类|过滤|类别|栏目|「[^」]{1,8}」|“[^”]{1,8}”|"[^"]{1,8}"/.test(text) &&
+    !/标签页|新标签|原标签|源标签|起始|初始|第一个|第\s*[一二三四五六七八九十\d]+\s*个|tab_/.test(
+      text,
+    )
+  );
 }

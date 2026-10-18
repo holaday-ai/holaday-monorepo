@@ -62,6 +62,8 @@ export function recordedBrowserAdapter(
           protocol: 'messages',
           lane: 'browser',
           role: context.role ?? 'execution',
+          // LLM-RETRY-1: every attempt is its own llm_calls row.
+          ...(options?.attempt ? { attempt: options.attempt } : {}),
         },
       };
       let result: NeutralMessagesResponse;

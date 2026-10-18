@@ -413,8 +413,12 @@ describe('canary task evidence and failure diagnostics', () => {
       });
       expect(page.viewportSize()).toEqual({ width: 1280, height: 800 });
       expect(outcome.status).toBe('failed');
-      expect(outcome.reason).toContain('about:blank');
-      expect(outcome.reason).not.toContain('该网站需要登录');
+      // FAILURE-COPY-1: a run that never opened a page is "not started".
+      expect(outcome).toMatchObject({
+        reason: '执行未开始：浏览器还没有打开目标页面就结束了。请重试。',
+        failureSource: 'not_started',
+      });
+      expect(outcome.reason).not.toMatch(/登录/);
       expect(onTick).toHaveBeenCalledWith(
         expect.objectContaining({
           execution: expect.objectContaining({
