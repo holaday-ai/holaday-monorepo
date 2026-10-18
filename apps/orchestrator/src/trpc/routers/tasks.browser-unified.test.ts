@@ -59,7 +59,7 @@ function saveRef(request: messages.NeutralMessagesRequest): string {
 
 // scrape-retry (FIX-INTENT-ROUTE-BROWSER): the scrape lane's one-time handoff re-enters
 // create with an internal ctx flag; it adopts the scrape task's row and is not charged again.
-it.each(['ready', 'timeout', 'scrape-retry'] as const)(
+it.each(['ready', 'timeout', 'timeout-persists', 'scrape-retry'] as const)(
   'unified executor through tasks.create: %s',
   async (scenario) => {
     expect(original.BROWSER_EXECUTOR).toBe('unified');
@@ -100,13 +100,18 @@ it.each(['ready', 'timeout', 'scrape-retry'] as const)(
       protocol: 'messages',
     } as const;
     const requests: messages.NeutralMessagesRequest[] = [];
+    // LLM-RETRY-1: a timed-out call is retried; turns count answered calls only.
+    let answered = 0;
     vi.spyOn(messages, 'createQwenMessagesAdapter').mockImplementation(() => ({
       metadata,
       async create(request) {
         requests.push(request);
-        const turn = requests.length;
-        if (scenario === 'timeout' && turn === 2)
+        if (
+          (scenario === 'timeout' && requests.length === 2) ||
+          (scenario === 'timeout-persists' && answered >= 1)
+        )
           throw new messages.MessagesAdapterError('REQUEST_TIMEOUT', 'Qwen request timeout');
+        const turn = ++answered;
         // The unified loop offers only its own tools and forces a tool call.
         expect(request.tools?.map((tool) => tool.name)).toEqual(
           expect.arrayContaining(['snapshot', 'click', 'finish']),
@@ -265,7 +270,7 @@ it.each(['ready', 'timeout', 'scrape-retry'] as const)(
       }
       expect(adopt).not.toHaveBeenCalled();
       expect(consume, diagnostics).toHaveBeenCalledWith(41, 'pro', false);
-      if (scenario === 'ready') {
+      if (scenario === 'ready' || scenario === 'timeout') {
         expect(outcome, diagnostics).toMatchObject({
           status: 'completed',
           metadata: {
@@ -276,9 +281,13 @@ it.each(['ready', 'timeout', 'scrape-retry'] as const)(
         });
         // The click really ran on the page.
         expect(await page.textContent('#status')).toBe('已保存');
-        expect(requests).toHaveLength(4);
-        // Every model turn lands in llm_calls (cost accounting), like the legacy loop.
-        expect(recorded).toHaveLength(4);
+        // A timed-out turn is sent again (one more request) and the click still ran once.
+        const extra = scenario === 'timeout' ? 1 : 0;
+        expect(requests).toHaveLength(4 + extra);
+        // Every model call, retries included, lands in llm_calls (cost accounting).
+        expect(recorded).toHaveLength(4 + extra);
+        if (scenario === 'timeout')
+          expect(recorded[1]).toMatchObject({ status: 'error', errorMessage: 'REQUEST_TIMEOUT' });
         expect(recorded[0]).toMatchObject({
           provider: 'alibaba-model-studio',
           model: 'qwen-unified-fixture',
@@ -287,10 +296,16 @@ it.each(['ready', 'timeout', 'scrape-retry'] as const)(
           status: 'ok',
         });
       } else {
+        // timeout-persists: three attempts of the second turn, then an honest failure.
         expect(outcome, diagnostics).toMatchObject({ status: 'failed' });
+        expect(JSON.stringify(outcome)).toContain('模型服务暂时不可用，有限重试后仍失败');
         expect(await page.textContent('#status')).toBe('草稿');
-        expect(recorded).toHaveLength(2);
-        expect(recorded[1]).toMatchObject({ status: 'error', errorMessage: 'REQUEST_TIMEOUT' });
+        expect(recorded).toHaveLength(4);
+        expect(recorded.slice(1)).toEqual(
+          Array(3).fill(
+            expect.objectContaining({ status: 'error', errorMessage: 'REQUEST_TIMEOUT' }),
+          ),
+        );
       }
     } finally {
       await page.close();

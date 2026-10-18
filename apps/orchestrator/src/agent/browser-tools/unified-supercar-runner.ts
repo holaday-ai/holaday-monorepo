@@ -736,8 +736,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       default:
         return {
           status: 'failed',
+          // LLM-RETRY-1: a model call that failed after its retries says so,
+          // even before any page was opened.
           reason:
-            page.url() === 'about:blank'
+            page.url() === 'about:blank' && !outcome.modelFailure
               ? '浏览器尚未打开目标页面（about:blank），无法判断站点登录状态。请重试；若持续失败请联系支持。'
               : (handoffFailure ?? outcome.reason),
           iterations: outcome.steps,

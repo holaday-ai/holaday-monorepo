@@ -120,6 +120,8 @@ export interface NeutralMessagesRequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   maxRetries?: number;
+  /** 1-based attempt of a call retried by `withModelRetry`; accounting only. */
+  attempt?: number;
 }
 
 export interface NeutralMessagesResponse {

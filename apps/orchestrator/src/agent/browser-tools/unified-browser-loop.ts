@@ -4,6 +4,11 @@ import type {
   NeutralMessage,
   NeutralToolDefinition,
 } from '../../llm/messages-adapter.js';
+import {
+  type ModelRetryOptions,
+  modelFailureReason,
+  withModelRetry,
+} from '../../llm/model-call-retry.js';
 import { SEARCH_RESULTS_ORIGIN } from '../search-fallback/search-results-page.js';
 import { prepareBrowserPlan } from './browser-brain-roles.js';
 import { type BrowserTrace, completionGap, receiptEvidence } from './browser-completion.js';
@@ -167,6 +172,8 @@ export interface UnifiedBrowserLoopInput {
   signal?: AbortSignal;
   /** Per model-turn timeout; the shared transport retries 429/5xx within it. */
   turnTimeoutMs?: number;
+  /** Test seam for withModelRetry (delays, sleep). */
+  modelRetry?: Pick<ModelRetryOptions, 'delaysMs' | 'sleep'>;
   onStep?: (step: { index: number; tool: string; ok: boolean }) => void;
   /**
    * Called before every browser action and again after a successful one
@@ -204,7 +211,13 @@ export type UnifiedBrowserOutcome =
       /** Fewer items than the user asked for: delivered as 部分完成, not completed. */
       partial?: { found: number; wanted: number; missing?: string };
     }
-  | { status: 'failed'; reason: string; steps: number }
+  | {
+      status: 'failed';
+      reason: string;
+      steps: number;
+      /** The model call itself failed (after retries): not a page or login problem. */
+      modelFailure?: boolean;
+    }
   | { status: 'awaiting_user'; reason: string; message: string; steps: number }
   | {
       status: 'cancelled';
@@ -367,18 +380,21 @@ export async function runUnifiedBrowserLoop(
   };
   const withLimitations = (summary: string) =>
     [summary, ...[...localNotices].filter((message) => !summary.includes(message))].join('\n\n');
+  // LLM-RETRY-1: retries happen here (withModelRetry), one attempt per call,
+  // so each attempt is recorded and the backoff is the same for both roles.
   const roleOptions = {
     ...(input.signal ? { signal: input.signal } : {}),
     timeoutMs: input.turnTimeoutMs ?? 120_000,
     maxRetries: 0,
   };
+  const retry = { ...(input.signal ? { signal: input.signal } : {}), ...input.modelRetry };
   if (input.signal?.aborted) return { status: 'cancelled', steps: 0 };
   if (input.adapter.browserBrain) {
     try {
-      const plan = await prepareBrowserPlan(
-        input.adapter.browserBrain.planning,
-        input.intent,
-        roleOptions,
+      const planning = input.adapter.browserBrain.planning;
+      const plan = await withModelRetry(
+        (attempt) => prepareBrowserPlan(planning, input.intent, { ...roleOptions, attempt }),
+        retry,
       );
       messages.push({
         role: 'user',
@@ -436,45 +452,42 @@ export async function runUnifiedBrowserLoop(
     }
     let response: Awaited<ReturnType<MessagesAdapter['create']>>;
     try {
-      response = await input.adapter.create(
-        {
-          maxTokens: 4_096,
-          system:
-            UNIFIED_BROWSER_SYSTEM_PROMPT +
-            (input.observationV2
-              ? '\n当前启用云端读取：每次交互带上 read_page 返回的 observationRevision/tabId/frameId；动作后重新读取，只有实际页面证据才能完成。cursor/ref 过期须重读。'
-              : ''),
-          messages: trimImages(compactToolResults(messages, input.fullPageResults)),
-          tools: concludeNow
-            ? CONTROL_TOOLS.filter((t) => t.name === 'finish')
-            : [
-                ...(input.observationV2
-                  ? [...cloudObservationTools(), ...CONTROL_TOOLS]
-                  : UNIFIED_LOOP_TOOLS
-                ).filter((tool) => {
-                  if (tool.name === 'web_search') return Boolean(input.webSearch);
-                  if (!input.supportedTools)
-                    return tool.name !== 'download' && tool.name !== 'upload';
-                  if (tool.name === 'download' || tool.name === 'upload')
-                    return input.supportedTools[tool.name];
-                  if (['new_tab', 'switch_tab', 'close_tab', 'list_tabs'].includes(tool.name))
-                    return input.supportedTools.tabs;
-                  return true;
-                }),
-                ...(input.readPage ? [READ_URL_TOOL] : []),
-              ],
-          toolChoice: { type: 'any' },
-        },
-        {
-          ...(input.signal ? { signal: input.signal } : {}),
-          timeoutMs: input.turnTimeoutMs ?? 120_000,
-          maxRetries: 2,
-        },
+      const request: Parameters<MessagesAdapter['create']>[0] = {
+        maxTokens: 4_096,
+        system:
+          UNIFIED_BROWSER_SYSTEM_PROMPT +
+          (input.observationV2
+            ? '\n当前启用云端读取：每次交互带上 read_page 返回的 observationRevision/tabId/frameId；动作后重新读取，只有实际页面证据才能完成。cursor/ref 过期须重读。'
+            : ''),
+        messages: trimImages(compactToolResults(messages, input.fullPageResults)),
+        tools: concludeNow
+          ? CONTROL_TOOLS.filter((t) => t.name === 'finish')
+          : [
+              ...(input.observationV2
+                ? [...cloudObservationTools(), ...CONTROL_TOOLS]
+                : UNIFIED_LOOP_TOOLS
+              ).filter((tool) => {
+                if (tool.name === 'web_search') return Boolean(input.webSearch);
+                if (!input.supportedTools)
+                  return tool.name !== 'download' && tool.name !== 'upload';
+                if (tool.name === 'download' || tool.name === 'upload')
+                  return input.supportedTools[tool.name];
+                if (['new_tab', 'switch_tab', 'close_tab', 'list_tabs'].includes(tool.name))
+                  return input.supportedTools.tabs;
+                return true;
+              }),
+              ...(input.readPage ? [READ_URL_TOOL] : []),
+            ],
+        toolChoice: { type: 'any' },
+      };
+      response = await withModelRetry(
+        (attempt) => input.adapter.create(request, { ...roleOptions, attempt }),
+        retry,
       );
-    } catch {
+    } catch (error) {
       if (input.signal?.aborted) return cancelled(step);
       return heldOr(
-        { status: 'failed', reason: '模型服务暂时不可用，请稍后重试。', steps: step },
+        { status: 'failed', reason: modelFailureReason(error), modelFailure: true, steps: step },
         step,
       );
     }
