@@ -6,6 +6,7 @@ import type {
 } from '../../llm/messages-adapter.js';
 import {
   type ModelRetryOptions,
+  isContentInspectionRefusal,
   modelFailureReason,
   withModelRetry,
 } from '../../llm/model-call-retry.js';
@@ -49,7 +50,7 @@ export const UNIFIED_BROWSER_SYSTEM_PROMPT = `你在一个真实浏览器里替�
 8. 用户要求从页面打开链接时，用该页面最新 ref 调用 click(newTab=true)，不可自己编网址再 navigate；用户没指定页面时，选一个含多个普通文章链接的公开页面（链接不够就换页面，不要反复读取同一页）。页面加载失败/超时、只有 list_tabs 标题而未成功读取正文，均不能作为已读标题报告。打开几个链接后要求「回到第一个/原来的/起始」时，指打开这些链接的起始页面所在的标签（不是第一个新标签），用 switch_tab 切回它的 tabId。
 9. 涉及序号（第N节/第N章/第N部分）时，先调用 sections 拿正文章节列表，按其中的 index 用 get_page_text(section=N) 读取；目录、导航、参考文献不算章节，不要自己数页面上的标题。答案里写明第N节的章节标题。
 10. 用户要 N 条/前 N 个时，答案按 1. 2. 3. 编号列满 N 条；不够就继续滚动、翻页或再读取，确实只有更少时如实写「只找到 M 条」。
-11. 用户要求某种控件（如日期控件）而当前页面没有时，换一个有该控件的页面去操作，不要用别的控件（如 time 时间控件）代替。用户点名了网站时只在这些网站内找（只看表单页，不打开登录、注册、付款页），都没有就如实说明缺什么，不要换到别的网站；没点名时才换别的公开页面。
+11. 用户要求某种控件（如日期控件）而当前页面没有时，换一个有该控件的页面去操作，不要用别的控件（如 time 时间控件）代替。用户点名了网站时只在这些网站内找（只看表单页，不打开登录、注册、付款页），都没有就把该网站表单上其余可填的项照样填好（不提交）并截图，再如实说明缺什么，不要换到别的网站；没点名时才换别的公开页面。
 12. 查天气等实时数值时，结果页没有天气卡片就打开一个天气来源页面并读取（snapshot/get_page_text），每个值照该页原样写（页面写「82°」就写「82°」，不自己加单位或换算）；页面上读不到的项写「未读到」，不用搜索摘要或记忆补。
 13. 动作返回 stale_ref（ref 已失效）时，先 snapshot，再用新 ref 把同一个动作重做一次（同一个字段、同一个值），不要改用别的方式代替。`;
 
@@ -307,6 +308,7 @@ export async function runUnifiedBrowserLoop(
    */
   let rejectionsLeft = 1;
   let quoteCorrected = false;
+  let inspectionRecoveries = 0;
   /** Still on the blank start page: nothing was opened, so no site was judged. */
   const notStarted = () => input.currentPageUrl?.() === 'about:blank';
   /** FIX-24 (Deploy-24 core-02): every weather value comes from the read page. */
@@ -504,6 +506,20 @@ export async function runUnifiedBrowserLoop(
       );
     } catch (error) {
       if (input.signal?.aborted) return cancelled(step);
+      // INTEGRATE-26 (core-03 ×2): content inspection refused page text the
+      // model had read (a YouTube page's recommendation list). That text is
+      // not sent again: the latest page results are removed, then all of them,
+      // and the model reads only what the task needs. Then it fails as before.
+      if (isContentInspectionRefusal(error) && inspectionRecoveries < 2) {
+        inspectionRecoveries += 1;
+        messages.splice(
+          0,
+          messages.length,
+          ...withoutPageContent(messages, inspectionRecoveries === 1 ? 'last' : 'all'),
+        );
+        messages.push({ role: 'user', content: INSPECTION_RECOVERY });
+        continue;
+      }
       return heldOr(
         {
           status: 'failed',
@@ -953,6 +969,18 @@ export async function runUnifiedBrowserLoop(
           toolResult(
             call.id,
             error instanceof UnifiedToolInputError ? error.message : '参数无效',
+            true,
+          ),
+        );
+        continue;
+      }
+      // INTEGRATE-26 (core-08 rb, BOSS rule): a form task on named sites never
+      // leaves them — rb went to demoqa for a date picker.
+      if (action.tool === 'navigate' && wantsForm && !onNamedSite(action.url)) {
+        results.push(
+          toolResult(
+            call.id,
+            `任务点名了 ${namedHosts.join('、')}，只能在这些网站内找和填写，不打开 ${hostOf(action.url) ?? '其他网站'}。点名网站没有所需控件时，把那里其余可填的项填好（不提交）并截图，再如实说明缺什么。`,
             true,
           ),
         );
@@ -1416,3 +1444,30 @@ const NEUTRAL_PAGE_PICK = (intent: string) =>
   /(?:从)?(?:一|某)个(?:公开)?(?:页面|网页|网站)|任意(?:一个)?(?:页面|网页|网站)|随便.{0,4}(?:页面|网页|网站)|\b(?:a|any) (?:public )?(?:web ?)?page\b/i.test(
     intent,
   );
+
+const INSPECTION_RECOVERY =
+  '刚才读取的页面内容未通过模型服务的内容安全检查，已从对话中移除，不会再发送。请只读取与任务直接相关的部分（例如 get_page_text 只取主体区域、加 maxChars，或 sections 后只读需要的一节），不要读整页推荐列表或评论区，然后继续原任务。';
+const REMOVED_PAGE_CONTENT = '[页面内容未通过内容安全检查，已移除]';
+
+/**
+ * Page content the model was sent, removed: tool results become a short
+ * notice and screenshots are dropped. `last`: the latest user turn only.
+ */
+function withoutPageContent(messages: NeutralMessage[], scope: 'last' | 'all'): NeutralMessage[] {
+  let lastUser = -1;
+  messages.forEach((message, index) => {
+    if (message.role === 'user' && typeof message.content !== 'string') lastUser = index;
+  });
+  return messages.map((message, index) => {
+    if (message.role !== 'user' || typeof message.content === 'string') return message;
+    if (scope === 'last' && index !== lastUser) return message;
+    return {
+      ...message,
+      content: message.content
+        .filter((block) => block.type !== 'image')
+        .map((block) =>
+          block.type === 'tool_result' ? { ...block, content: REMOVED_PAGE_CONTENT } : block,
+        ),
+    };
+  });
+}

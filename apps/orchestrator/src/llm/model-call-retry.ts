@@ -88,6 +88,14 @@ function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/** The mainland endpoint's content inspection refused what was sent. */
+export function isContentInspectionRefusal(error: unknown): boolean {
+  return (
+    error instanceof MessagesAdapterError &&
+    /data[_-]?inspection/i.test(error.diagnostics.providerCode ?? '')
+  );
+}
+
 /**
  * What the task reports when a model call failed for good: a transient error
  * after its retries, or the permanent cause as it is (credentials, balance,

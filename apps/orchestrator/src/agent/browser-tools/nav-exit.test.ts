@@ -277,3 +277,82 @@ describe('neutral pages when the task leaves the page open (INTEGRATE-26)', () =
     expect(await firstMessage(intent)).not.toContain('中性内容页面');
   });
 });
+
+describe('content inspection refusal (INTEGRATE-26 core-03)', () => {
+  const PAGE = 'heading "Me at the zoo" [level=1]\nRECOMMENDED: some unrelated title';
+  const run = async (refusals: number) => {
+    const { MessagesAdapterError } = await import('../../llm/messages-adapter.js');
+    const { safeProviderDiagnostics } = await import('../../llm/provider-error-diagnostics.js');
+    const requests: string[] = [];
+    const script = [
+      { name: 'navigate', input: { url: 'https://www.youtube.com/watch?v=jNQXAC9IVRw' } },
+      { name: 'snapshot', input: {} },
+      { name: 'finish', input: { status: 'completed', summary: '标题是「Me at the zoo」。' } },
+    ];
+    let answered = 0;
+    let refused = 0;
+    const adapter: MessagesAdapter = {
+      metadata: { provider: 'anthropic', model: 'fixture' },
+      async create(request) {
+        const sent = JSON.stringify(request.messages);
+        requests.push(sent);
+        // The provider refuses what holds the recommendation list; with
+        // `refusals` > 1 it keeps refusing whatever is sent after the read.
+        if ((sent.includes('RECOMMENDED') || (refusals > 1 && refused > 0)) && refused < refusals) {
+          refused += 1;
+          throw new MessagesAdapterError(
+            'PROVIDER_ERROR',
+            'x',
+            400,
+            safeProviderDiagnostics({ httpStatus: 400, providerCode: 'DataInspectionFailed' }),
+          );
+        }
+        const call = script[Math.min(answered++, script.length - 1)]!;
+        return {
+          id: String(answered),
+          metadata: { provider: 'anthropic', model: 'fixture' },
+          content: [{ type: 'tool_use', id: String(answered), ...call }],
+          stopReason: 'tool_use',
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    let url = 'about:blank';
+    const outcome = await runUnifiedBrowserLoop({
+      intent: `${P}YouTube 公开视频页读标题/频道/播放量/发布日期（不播放）`,
+      adapter,
+      maxSteps: 8,
+      modelRetry: { sleep: async () => {} },
+      execute: (async (action: { tool: string; url?: string }) => {
+        if (action.tool === 'navigate') {
+          url = action.url!;
+          return { ok: true, text: '已打开', url };
+        }
+        return { ok: true, text: PAGE, url };
+      }) as never,
+      currentPageUrl: () => url,
+    });
+    return { outcome, requests };
+  };
+  it('removes the refused page text, tells the model, and goes on', async () => {
+    const { outcome, requests } = await run(1);
+    const after = requests.at(-1)!;
+    expect(after).not.toContain('RECOMMENDED');
+    expect(after).toContain('已从对话中移除');
+    expect(outcome).toMatchObject({ status: 'completed' });
+  });
+  it('gives up honestly after two recoveries', async () => {
+    const { outcome } = await run(99);
+    expect(outcome).toMatchObject({
+      status: 'failed',
+      failureSource: 'model',
+      reason: '模型服务拒绝处理：页面内容未通过内容安全检查，可换一个页面或来源后重试。',
+    });
+  });
+});
