@@ -394,3 +394,101 @@ describe('ua core-08: an honest 部分完成 is delivered if the run then runs o
     expect(outcome.status).toBe('failed');
   });
 });
+
+describe('va core-08: a later answer failing does not undo the held 部分完成', () => {
+  const CORE08 =
+    '请使用云端浏览器，httpbin.org/forms/post 或 the-internet.herokuapp.com 填表单与日期控件，只填不提交并截图';
+  it('delivers the held 部分完成 when the last answer fails its check', async () => {
+    const bad = {
+      name: 'finish',
+      input: {
+        status: 'completed',
+        summary: '部分完成：另见字段。',
+        fields: [
+          {
+            name: 'the_internet_inputs_control',
+            value: '仅含 number spinbutton',
+            tabId: 'tab_closed',
+          },
+        ],
+      },
+    };
+    const { adapter } = scriptedLoop([
+      { name: 'navigate', input: { url: 'https://httpbin.org/forms/post' } },
+      { name: 'snapshot', input: {} },
+      { name: 'type', input: { ref: 'e21', text: 'Test User' } },
+      { name: 'screenshot', input: {} },
+      {
+        name: 'finish',
+        input: {
+          status: 'completed',
+          summary:
+            '部分完成：已在 httpbin.org/forms/post 填写 Customer name=Test User，未提交并截图；两个网站都没有日期控件。',
+        },
+      },
+      bad,
+      bad,
+      bad,
+    ]);
+    let url = 'about:blank';
+    const outcome = await runUnifiedBrowserLoop({
+      intent: CORE08,
+      adapter,
+      maxSteps: 14,
+      currentPageUrl: () => url,
+      execute: (async (action: { tool: string; url?: string; ref?: string }) => {
+        if (action.tool === 'navigate') {
+          url = action.url!;
+          return { ok: true, text: '已打开', url };
+        }
+        if (action.tool === 'type')
+          return {
+            ok: true,
+            text: '已输入',
+            form: { ref: action.ref, filled: true, submitted: false },
+          };
+        if (action.tool === 'screenshot')
+          return { ok: true, text: '截图', image: { mediaType: 'image/jpeg', data: 'AA==' } };
+        return { ok: true, text: 'textbox "Customer name" Test User', url };
+      }) as never,
+    });
+    expect(outcome).toMatchObject({ status: 'completed', partial: { missing: '日期控件' } });
+    expect(outcome.status === 'completed' && outcome.summary).toMatch(/^部分完成：已在 httpbin/);
+  });
+});
+
+describe('vb core-08: a form task that lands on a login page goes back instead of pausing', () => {
+  const run = (intent: string) => {
+    const { adapter, seen } = scriptedLoop([
+      { name: 'navigate', input: { url: 'https://the-internet.herokuapp.com/login' } },
+      { name: 'navigate', input: { url: 'https://httpbin.org/forms/post' } },
+      { name: 'finish', input: { status: 'failed', summary: '没有找到日期控件。' } },
+    ]);
+    let url = 'about:blank';
+    return runUnifiedBrowserLoop({
+      intent,
+      adapter,
+      maxSteps: 6,
+      currentPageUrl: () => url,
+      probeBlocker: async () =>
+        /\/login/.test(url)
+          ? { reason: 'login', message: '页面遇到登录墙，需要你接管登录；当前任务尚未完成。' }
+          : null,
+      execute: (async (action: { tool: string; url?: string }) => {
+        if (action.tool === 'navigate') url = action.url!;
+        return { ok: true, text: '已打开', url };
+      }) as never,
+    }).then((outcome) => ({ outcome, seen: seen.join('\n') }));
+  };
+  it('the form task is told to go back to the form', async () => {
+    const { outcome, seen } = await run(
+      '请使用云端浏览器，httpbin.org/forms/post 或 the-internet.herokuapp.com 填表单与日期控件，只填不提交并截图',
+    );
+    expect(seen).toContain('这是登录页，任务不需要登录');
+    expect(outcome.status).not.toBe('awaiting_user');
+  });
+  it('a task that is not a named-site form task still pauses at the login wall', async () => {
+    const { outcome } = await run('请使用云端浏览器，打开 the-internet.herokuapp.com 读取页面标题');
+    expect(outcome.status).toBe('awaiting_user');
+  });
+});

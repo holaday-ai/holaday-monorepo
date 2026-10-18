@@ -421,8 +421,17 @@ export async function runUnifiedBrowserLoop(
     }
   };
   const localNotices = new Set<string>();
+  /** FIX-27: the last probe found a login page the form task does not need. */
+  let formLoginDetour = false;
   const checkBlocker = async () => {
     const hit = await input.probeBlocker?.();
+    formLoginDetour = false;
+    // FIX-27 (vb core-08; FIX-24 fb/ha): a form task on named sites that wanders
+    // onto a login page does not need it: back to the form, not a takeover.
+    if (hit?.reason === 'login' && wantsForm && !/登录|login|sign\s*in/i.test(input.intent)) {
+      formLoginDetour = true;
+      return null;
+    }
     if (hit?.disposition === 'continue') {
       localNotices.add(hit.message);
       return null;
@@ -871,11 +880,15 @@ export async function runUnifiedBrowserLoop(
           if (blocking) {
             await rejected(summary, given, blocking);
             if (concludeNow || rejectionsLeft <= 0)
-              return {
-                status: 'failed',
-                reason: `完成结果未通过核验：${blocking}`,
-                steps: step + 1,
-              };
+              // FIX-27 (va core-08): a later answer failing does not undo the held
+              // honest 部分完成 that passed every check.
+              return partialHeld
+                ? { status: 'completed', ...partialHeld, steps: step + 1 }
+                : {
+                    status: 'failed',
+                    reason: `完成结果未通过核验：${blocking}`,
+                    steps: step + 1,
+                  };
             rejectionsLeft -= 1;
             results.push(
               toolResult(
@@ -1264,6 +1277,16 @@ export async function runUnifiedBrowserLoop(
       }
       if (outcome.ok && input.probeBlocker) {
         const blocker = await checkBlocker();
+        if (formLoginDetour) {
+          results.push(
+            toolResult(
+              call.id,
+              `${outcome.text}\n这是登录页，任务不需要登录：不要在这里登录，回到点名网站的表单页继续；点名网站没有所需控件时，把其余可填项填好（不提交）并截图，如实说明缺什么。`,
+            ),
+          );
+          staleTurn = true;
+          continue;
+        }
         if (blocker) {
           const handed =
             blocker.reason === 'captcha' ? await handCaptcha(blocker.message) : undefined;
