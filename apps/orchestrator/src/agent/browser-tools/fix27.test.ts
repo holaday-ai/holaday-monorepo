@@ -203,3 +203,194 @@ describe('a "未播放" answer is checked against the receipt and pings', () => 
     expect(outcome).toMatchObject({ status: 'completed' });
   });
 });
+
+/** FIX-27 rounds: ua core-07 read one of three titles; ua core-08 ran out of steps. */
+function scriptedLoop(calls: Array<{ name: string; input: Record<string, unknown> }>) {
+  let turn = 0;
+  const seen: string[] = [];
+  const adapter: MessagesAdapter = {
+    metadata: { provider: 'anthropic', model: 'fixture' },
+    async create(request) {
+      seen.push(JSON.stringify(request.messages.at(-1)));
+      const call = calls[Math.min(turn++, calls.length - 1)]!;
+      return {
+        id: String(turn),
+        metadata: { provider: 'anthropic', model: 'fixture' },
+        content: [{ type: 'tool_use', id: String(turn), ...call }],
+        stopReason: 'tool_use',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadInputTokens: null,
+          cacheCreationInputTokens: null,
+          complete: true,
+        },
+      };
+    },
+  };
+  return { adapter, seen };
+}
+
+describe('ua core-07: every opened tab is read and its title is in the answer', () => {
+  const OPEN3 = '请使用云端浏览器，从一个页面打开3个链接到新标签，分别读标题后回到第一个';
+  const TITLES: Record<string, string> = {
+    source: 'Python - 维基百科，自由的百科全书',
+    t1: 'CPython - 维基百科，自由的百科全书',
+    t2: 'PyPy - 维基百科，自由的百科全书',
+    t3: 'Stackless Python - 维基百科，自由的百科全书',
+  };
+  const browser = () => {
+    let active = 'source';
+    let next = 0;
+    const read = () => ({
+      ok: true,
+      tabId: active,
+      text: JSON.stringify({
+        tabId: active,
+        headings: [{ level: 1, text: TITLES[active] }],
+        tree: `heading "${TITLES[active]}" [level=1]`,
+      }),
+    });
+    const execute = async (action: {
+      tool: string;
+      targetTabId?: string;
+    }): Promise<UnifiedToolResult> => {
+      if (action.tool === 'click') {
+        active = `t${++next}`;
+        return {
+          ok: true,
+          text: `已打开新标签 ${active}`,
+          tabId: active,
+          openedTab: true,
+          url: `https://zh.wikipedia.org/wiki/${active}`,
+        };
+      }
+      if (action.tool === 'switch_tab') active = action.targetTabId!;
+      return read() as UnifiedToolResult;
+    };
+    return execute;
+  };
+  const open3 = [
+    { name: 'read_page', input: {} },
+    { name: 'click', input: { ref: 'e1', newTab: true } },
+    { name: 'switch_tab', input: { targetTabId: 'source' } },
+    { name: 'click', input: { ref: 'e2', newTab: true } },
+    { name: 'switch_tab', input: { targetTabId: 'source' } },
+    { name: 'click', input: { ref: 'e3', newTab: true } },
+    { name: 'switch_tab', input: { targetTabId: 't1' } },
+    { name: 'switch_tab', input: { targetTabId: 'source' } },
+  ];
+  const oneTitle = {
+    name: 'finish',
+    input: {
+      status: 'completed',
+      summary:
+        '打开了 CPython、PyPy、Stackless Python 三个链接，读取了第一个新标签标题「CPython - 维基百科，自由的百科全书」，已切回原标签。',
+    },
+  };
+  const allTitles = {
+    name: 'finish',
+    input: {
+      status: 'completed',
+      summary:
+        '三个新标签标题：1. CPython - 维基百科，自由的百科全书 2. PyPy - 维基百科，自由的百科全书 3. Stackless Python - 维基百科，自由的百科全书。已切回原标签。',
+    },
+  };
+  const loop = (calls: Array<{ name: string; input: Record<string, unknown> }>) => {
+    const { adapter, seen } = scriptedLoop(calls);
+    return runUnifiedBrowserLoop({
+      intent: OPEN3,
+      adapter,
+      maxSteps: 20,
+      observationV2: true,
+      supportedTools: { download: false, upload: false, tabs: true },
+      execute: browser() as never,
+    }).then((outcome) => ({ outcome, seen: seen.join('\n') }));
+  };
+  it('the ua answer (one title) is sent back naming the unread tabs; reading them completes', async () => {
+    const { outcome, seen } = await loop([
+      ...open3,
+      oneTitle,
+      { name: 'switch_tab', input: { targetTabId: 't2' } },
+      { name: 'switch_tab', input: { targetTabId: 't3' } },
+      { name: 'switch_tab', input: { targetTabId: 'source' } },
+      allTitles,
+    ]);
+    expect(seen).toContain('新标签 t2、t3 还没有读取');
+    expect(outcome).toMatchObject({ status: 'completed' });
+  });
+  it('a repeated one-title answer fails instead of completing', async () => {
+    const { outcome } = await loop([...open3, oneTitle, oneTitle]);
+    expect(outcome).toMatchObject({ status: 'failed', failureSource: 'task' });
+  });
+  it('an answer with every title read passes without a return', async () => {
+    const { outcome, seen } = await loop([
+      ...open3.slice(0, 6),
+      { name: 'switch_tab', input: { targetTabId: 't1' } },
+      { name: 'switch_tab', input: { targetTabId: 't2' } },
+      { name: 'switch_tab', input: { targetTabId: 't3' } },
+      { name: 'switch_tab', input: { targetTabId: 'source' } },
+      allTitles,
+    ]);
+    expect(seen).not.toContain('还没有读取');
+    expect(outcome).toMatchObject({ status: 'completed' });
+  });
+});
+
+describe('ua core-08: an honest 部分完成 is delivered if the run then runs out of steps', () => {
+  const CORE08 =
+    '请使用云端浏览器，httpbin.org/forms/post 或 the-internet.herokuapp.com 填表单与日期控件，只填不提交并截图';
+  const run = (fill: boolean) => {
+    const { adapter } = scriptedLoop([
+      { name: 'navigate', input: { url: 'https://httpbin.org/forms/post' } },
+      { name: 'snapshot', input: {} },
+      ...(fill ? [{ name: 'type', input: { ref: 'e21', text: 'Test User' } }] : []),
+      { name: 'screenshot', input: {} },
+      {
+        name: 'finish',
+        input: {
+          status: 'completed',
+          summary:
+            '部分完成：已在 httpbin.org/forms/post 填写 Customer name=Test User，未提交并截图；两个网站都没有日期控件。',
+        },
+      },
+      // Then it keeps looking around until the steps run out.
+      { name: 'navigate', input: { url: 'https://the-internet.herokuapp.com/' } },
+    ]);
+    let url = 'about:blank';
+    return runUnifiedBrowserLoop({
+      intent: CORE08,
+      adapter,
+      maxSteps: 9,
+      currentPageUrl: () => url,
+      execute: (async (action: { tool: string; url?: string; ref?: string }) => {
+        if (action.tool === 'navigate') {
+          url = action.url!;
+          return { ok: true, text: '已打开', url };
+        }
+        if (action.tool === 'type')
+          return {
+            ok: true,
+            text: '已输入',
+            form: { ref: action.ref, filled: true, submitted: false },
+          };
+        if (action.tool === 'screenshot')
+          return { ok: true, text: '截图', image: { mediaType: 'image/jpeg', data: 'AA==' } };
+        return {
+          ok: true,
+          text: 'textbox "Customer name" Test User\ntextbox "Preferred delivery time" type=time',
+          url,
+        };
+      }) as never,
+    });
+  };
+  it('delivers the held answer as 部分完成', async () => {
+    const outcome = await run(true);
+    expect(outcome).toMatchObject({ status: 'completed', partial: { missing: '日期控件' } });
+    expect(outcome.status === 'completed' && outcome.summary).toMatch(/^部分完成：已在 httpbin/);
+  });
+  it('with nothing filled, nothing is held and it fails as before', async () => {
+    const outcome = await run(false);
+    expect(outcome.status).toBe('failed');
+  });
+});

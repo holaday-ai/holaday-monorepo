@@ -276,6 +276,8 @@ export async function runUnifiedBrowserLoop(
   // pageEvidence, which evicts old reads of long pages.
   const readTabs = new Set<string>();
   const tabTitles = new Map<string, string>();
+  /** FIX-27: the title each tab had when it was read. */
+  const readTitles = new Map<string, string>();
   let activeTabId: string | undefined;
   let navigated = false;
   const failedNavigationUrls = new Set<string>();
@@ -294,7 +296,19 @@ export async function runUnifiedBrowserLoop(
     )
       return '';
     pageEvidence.push(item);
-    if (item.tabId) readTabs.add(item.tabId);
+    if (item.tabId) {
+      readTabs.add(item.tabId);
+      // FIX-27: a read's first level-1 heading is the document title.
+      try {
+        const heading = (
+          JSON.parse(text) as { headings?: Array<{ level?: number; text?: string }> }
+        ).headings?.[0];
+        if (heading?.level === 1 && heading.text?.trim())
+          readTitles.set(item.tabId, heading.text.trim());
+      } catch {
+        /* A plain snapshot carries no headings list. */
+      }
+    }
     while (
       pageEvidence.length > 16 ||
       pageEvidence.reduce((n, p) => n + p.text.length, 0) > 256_000
@@ -327,6 +341,11 @@ export async function runUnifiedBrowserLoop(
   /** FIX-27: YouTube playback pings seen in action effects. */
   let playbackPings = 0;
   let playbackCorrected = false;
+  /** FIX-27 (ua core-07): "分别读标题" needs every opened tab read and named. */
+  const readsOpenedTitles =
+    /打开.{0,8}(?:\d+|[一二两三四五六七八九十])\s*个?链接|open .{0,12}links?/i.test(input.intent) &&
+    /标题|titles?/i.test(input.intent);
+  let openTabsCorrected = false;
   /**
    * BROWSER-AUTOPILOT-3: a short count gets one automatic continuation; a wrong
    * "第N节" gets one correction with the real list, then fails.
@@ -443,9 +462,23 @@ export async function runUnifiedBrowserLoop(
     held && !input.requireBrowserEvidence
       ? { status: 'cancelled', steps, heldAnswer: held }
       : { status: 'cancelled', steps };
+  /**
+   * FIX-27 (ua core-08): an honest 部分完成 sent back once to look for a date
+   * control. It passed every evidence check; if the run then ends without
+   * another answer (steps, model), this is what is delivered, as 部分完成.
+   */
+  let partialHeld: {
+    summary: string;
+    evidence: string;
+    partial: { found: number; wanted: number; missing?: string };
+  } | null = null;
   /** Remediation must not end worse than the held answer would have. */
   const heldOr = (outcome: UnifiedBrowserOutcome, steps: number): UnifiedBrowserOutcome =>
-    held && !input.requireBrowserEvidence ? { status: 'completed', ...held, steps } : outcome;
+    partialHeld
+      ? { status: 'completed', ...partialHeld, steps }
+      : held && !input.requireBrowserEvidence
+        ? { status: 'completed', ...held, steps }
+        : outcome;
   const ALTERNATE =
     '用户选择「换个方式继续」：这个页面的验证码没有通过。不要再打开或重试被验证墙挡住的页面，改用其他公开来源完成任务；确实做不到就如实说明缺什么。';
   /**
@@ -651,6 +684,47 @@ export async function runUnifiedBrowserLoop(
             );
             staleTurn = true;
             continue;
+          }
+          // Reads carry tab ids and titles in cloud observation only.
+          if (readsOpenedTitles && input.observationV2) {
+            const flat = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
+            const answerText = flat(summary);
+            const opened = [
+              ...new Set(trace.filter((e) => e.ok && e.openedTab && e.tabId).map((e) => e.tabId!)),
+            ];
+            const unread = opened.filter((id) => !readTabs.has(id));
+            const unnamed = opened.filter((id) => {
+              const title = readTitles.get(id);
+              // "CPython - 维基百科，自由的百科全书": the part before the site suffix.
+              return title && !answerText.includes(flat(title.split(/\s+[-–—|]\s+/)[0]!));
+            });
+            if (unread.length || unnamed.length) {
+              const why = [
+                unread.length ? `新标签 ${unread.join('、')} 还没有读取` : '',
+                unnamed.length
+                  ? `新标签的标题没写进答案：${unnamed.map((id) => `「${readTitles.get(id)}」`).join('、')}`
+                  : '',
+              ]
+                .filter(Boolean)
+                .join('；');
+              await rejected(summary, typeof args.evidence === 'string' ? args.evidence : '', why);
+              if (openTabsCorrected || concludeNow)
+                return {
+                  status: 'failed',
+                  reason: `任务要求分别读取每个新标签的标题，但${why}。`,
+                  failureSource: 'task',
+                  steps: step + 1,
+                };
+              openTabsCorrected = true;
+              results.push(
+                toolResult(
+                  call.id,
+                  `任务要求分别读取每个新打开标签的标题：${why}。请 switch_tab 到每个新标签读取（read_page），把每个标题都写进答案，最后再切回起始标签后 finish。`,
+                  true,
+                ),
+              );
+              continue;
+            }
           }
           // FIX-27 (Deploy-26 core-03): "未播放" needs a playback receipt that shows
           // the media paused with ~0 s played, and no YouTube playback pings.
@@ -897,6 +971,28 @@ export async function runUnifiedBrowserLoop(
           if (dateMissing && !dateContinued && !concludeNow) {
             dateContinued = true;
             await rejected(summary, given, '要求的日期控件没有填写回执');
+            if (fills.length) {
+              const kept = [
+                summary,
+                fieldLines(args.fields, summary),
+                unverifiedNote(facts.unverified),
+              ]
+                .filter(Boolean)
+                .join('\n\n');
+              partialHeld = {
+                summary: withLimitations(
+                  /^\s*部分完成/.test(kept)
+                    ? kept
+                    : `部分完成：没有找到可填写的日期控件，日期未填写。\n\n${kept}`,
+                ),
+                evidence:
+                  hostProof ||
+                  given ||
+                  deriveEvidence(summary, observedText) ||
+                  observedText.slice(0, 500),
+                partial: { found: 0, wanted: 1, missing: '日期控件' },
+              };
+            }
             results.push(
               toolResult(
                 call.id,
