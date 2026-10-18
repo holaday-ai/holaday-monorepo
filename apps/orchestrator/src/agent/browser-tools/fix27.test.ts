@@ -492,3 +492,115 @@ describe('vb core-08: a form task that lands on a login page goes back instead o
     expect(outcome.status).toBe('awaiting_user');
   });
 });
+
+describe('wa core-08: an answer may not deny what the run did, nor leave out the fill', async () => {
+  const { deniedActions, omitsFill } = await import('./action-claims.js');
+  const wa = JSON.parse(
+    readFileSync(new URL('./fixtures/fix27-wa-core08.json', import.meta.url), 'utf8'),
+  ) as { answer: string };
+  const ran = {
+    visitedUrls: [
+      'https://httpbin.org/forms/post',
+      'https://the-internet.herokuapp.com/',
+      'https://the-internet.herokuapp.com/login',
+    ],
+    loginPageVisited: true,
+    filled: true,
+    typedTexts: ['Test User', '1234567890'],
+  };
+  it('the wa answer denies opening /login and leaves out the fill', () => {
+    expect(deniedActions(wa.answer, ran)[0]).toContain('不予打开');
+    expect(omitsFill(wa.answer, ran)).toBe(true);
+  });
+  it('the same words are fine when the run never opened a login page', () => {
+    const clean = { ...ran, visitedUrls: ran.visitedUrls.slice(0, 2), loginPageVisited: false };
+    expect(deniedActions(wa.answer, clean)).toEqual([]);
+  });
+  it.each([
+    [
+      '已在 YouTube 公开视频页（https://www.youtube.com/watch?v=x）读取到四项信息（未点击播放按钮、未改变播放器状态）',
+      ['https://www.youtube.com/watch?v=x'],
+    ],
+    [
+      '本次未打开 Google 结果页，而是读取了 https://search-results.holaday.invalid/search?q=x',
+      ['https://search-results.holaday.invalid/search?q=x', 'https://www.google.com/search?q=x'],
+    ],
+    ['本次未实际访问 weather.gov.sg', ['https://weather.yahoo.com/sg']],
+    ['httpbin 没有日期控件，因此未填写日期控件', ['https://httpbin.org/forms/post']],
+  ])('no denial: %s', (answer, urls) => {
+    expect(deniedActions(answer, { ...ran, visitedUrls: urls, loginPageVisited: false })).toEqual(
+      [],
+    );
+  });
+  it.each([['没有打开 the-internet.herokuapp.com/login 页面'], ['本次未进行表单填写']])(
+    'denial caught: %s',
+    (answer) => {
+      expect(deniedActions(answer, ran).length).toBeGreaterThan(0);
+    },
+  );
+  it('a fill is mentioned by its value or by 已…填写', () => {
+    expect(
+      omitsFill('部分完成：已在 httpbin.org/forms/post 填写 Customer name，未提交。', ran),
+    ).toBe(false);
+    expect(omitsFill('部分完成：Customer name 为 Test User，没有日期控件。', ran)).toBe(false);
+    expect(omitsFill('部分完成：没有日期控件。', { ...ran, filled: false })).toBe(false);
+  });
+
+  const loop = (answers: string[]) => {
+    const { adapter, seen } = scriptedLoop([
+      { name: 'navigate', input: { url: 'https://httpbin.org/forms/post' } },
+      { name: 'snapshot', input: {} },
+      { name: 'type', input: { ref: 'e21', text: 'Test User' } },
+      { name: 'screenshot', input: {} },
+      { name: 'navigate', input: { url: 'https://the-internet.herokuapp.com/login' } },
+      { name: 'navigate', input: { url: 'https://httpbin.org/forms/post' } },
+      ...answers.map((summary) => ({ name: 'finish', input: { status: 'completed', summary } })),
+    ]);
+    let url = 'about:blank';
+    return runUnifiedBrowserLoop({
+      intent:
+        '请使用云端浏览器，httpbin.org/forms/post 或 the-internet.herokuapp.com 填表单与日期控件，只填不提交并截图',
+      adapter,
+      maxSteps: 14,
+      currentPageUrl: () => url,
+      probeBlocker: async () =>
+        /\/login/.test(url) ? { reason: 'login', message: '页面遇到登录墙' } : null,
+      execute: (async (action: { tool: string; url?: string; ref?: string }) => {
+        if (action.tool === 'navigate') {
+          url = action.url!;
+          return { ok: true, text: '已打开', url };
+        }
+        if (action.tool === 'type')
+          return {
+            ok: true,
+            text: '已输入',
+            form: { ref: action.ref, filled: true, submitted: false },
+          };
+        if (action.tool === 'screenshot')
+          return { ok: true, text: '截图', image: { mediaType: 'image/jpeg', data: 'AA==' } };
+        return { ok: true, text: 'textbox "Customer name" Test User', url };
+      }) as never,
+    }).then((outcome) => ({ outcome, seen: seen.join('\n') }));
+  };
+  const honest =
+    '部分完成：已在 httpbin.org/forms/post 填写 Customer name=Test User，未提交并截图。查找日期控件时曾打开过 the-internet 的 /login 登录页，被提示不需要登录后回到表单页。两个网站都没有日期控件。';
+  it('the wa answer is sent back once; the honest rewrite is delivered', async () => {
+    const { outcome, seen } = await loop([wa.answer, honest]);
+    expect(seen).toContain('不要否认做过的事');
+    expect(outcome.status).toBe('completed');
+    expect(outcome.status === 'completed' && outcome.summary).toContain(
+      '曾打开过 the-internet 的 /login',
+    );
+  });
+  it('a repeated denial is not delivered as completed', async () => {
+    const { outcome } = await loop([wa.answer, wa.answer]);
+    expect(outcome.status).toBe('failed');
+  });
+});
+
+describe('部分完成 only when something asked for is missing', () => {
+  it('the prompt says so', async () => {
+    const { UNIFIED_BROWSER_SYSTEM_PROMPT } = await import('./unified-browser-loop.js');
+    expect(UNIFIED_BROWSER_SYSTEM_PROMPT).toContain('用户要的内容都齐了就不要写「部分完成」');
+  });
+});
