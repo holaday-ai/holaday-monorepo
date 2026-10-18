@@ -744,10 +744,19 @@ export async function runUnifiedBrowserLoop(
               ...new Set(trace.filter((e) => e.ok && e.openedTab && e.tabId).map((e) => e.tabId!)),
             ];
             const unread = opened.filter((id) => !readTabs.has(id));
+            // "CPython - 维基百科，自由的百科全书" → "CPython"; a wiki h1 reads
+            // "万维网[编辑]" (its edit link): neither suffix is part of the title.
+            const core = (title: string) =>
+              flat(
+                title
+                  .replace(/\s*\[(?:编辑|編輯|edit|编辑源代码|edit source)\]\s*/gi, ' ')
+                  .split(/\s+[-–—|]\s+/)[0]!,
+              );
             const unnamed = opened.filter((id) => {
-              const title = readTitles.get(id);
-              // "CPython - 维基百科，自由的百科全书": the part before the site suffix.
-              return title && !answerText.includes(flat(title.split(/\s+[-–—|]\s+/)[0]!));
+              const titles = [readTitles.get(id), tabTitles.get(id)].filter(
+                (t): t is string => !!t,
+              );
+              return titles.length > 0 && !titles.some((title) => answerText.includes(core(title)));
             });
             if (unread.length || unnamed.length) {
               const why = [

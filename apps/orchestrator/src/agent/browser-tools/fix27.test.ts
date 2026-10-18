@@ -323,6 +323,24 @@ describe('ua core-07: every opened tab is read and its title is in the answer', 
     const { outcome } = await loop([...open3, oneTitle, oneTitle]);
     expect(outcome).toMatchObject({ status: 'failed', failureSource: 'task' });
   });
+  it('a wiki h1 with its edit link ("万维网[编辑]") still matches the title (xa/xb core-07)', async () => {
+    const edited = { ...TITLES };
+    for (const id of ['t1', 't2', 't3']) TITLES[id] = `${edited[id]!.split(' - ')[0]}[编辑]`;
+    try {
+      const { outcome, seen } = await loop([
+        ...open3.slice(0, 6),
+        { name: 'switch_tab', input: { targetTabId: 't1' } },
+        { name: 'switch_tab', input: { targetTabId: 't2' } },
+        { name: 'switch_tab', input: { targetTabId: 't3' } },
+        { name: 'switch_tab', input: { targetTabId: 'source' } },
+        allTitles,
+      ]);
+      expect(seen).not.toContain('标题没写进答案');
+      expect(outcome).toMatchObject({ status: 'completed' });
+    } finally {
+      Object.assign(TITLES, edited);
+    }
+  });
   it('an answer with every title read passes without a return', async () => {
     const { outcome, seen } = await loop([
       ...open3.slice(0, 6),
