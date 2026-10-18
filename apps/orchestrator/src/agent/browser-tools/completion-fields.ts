@@ -81,6 +81,11 @@ export interface FactAssessment {
   unverified: string[];
   /** Quotes the pages never said, with the closest text they did say (FIX-24). */
   misquoted?: Array<{ quote: string; nearest?: string }>;
+  /**
+   * FIX-26: facts whose only problem is their source binding — bound to a tab
+   * that was never read, or read on another page (named in `where`).
+   */
+  binding?: Array<{ label: string; kind: 'unread' | 'other_page'; bound: string; where?: string }>;
 }
 
 interface Fact {
@@ -323,6 +328,7 @@ export function assessCompletionFacts(input: {
   const contradictions: string[] = [];
   const unverified: string[] = [];
   const misquoted: Array<{ quote: string; nearest?: string }> = [];
+  const binding: NonNullable<FactAssessment['binding']> = [];
   const seen = new Set<string>();
   const facts = [...explicitFacts(input.fields), ...answerFacts(input.summary, intent)].flatMap(
     (fact): Fact[] => {
@@ -410,6 +416,7 @@ export function assessCompletionFacts(input: {
     }
     if ((fact.tabId || fact.sourceURL) && !eligible.length) {
       contradictions.push(`${label} 所属页面（${sourceLabel(fact)}）未成功读取`);
+      binding.push({ label, kind: 'unread', bound: sourceLabel(fact) });
       continue;
     }
     if (
@@ -423,6 +430,21 @@ export function assessCompletionFacts(input: {
       )
     ) {
       contradictions.push(`${label} 来自其他页面，不是 ${sourceLabel(fact)} 的内容`);
+      const home = pages.find(
+        (page) =>
+          !bound(page) &&
+          candidates.some(
+            (v) => (v.length >= 4 || /\p{Script=Han}{2}/u.test(v)) && page.norm.includes(v),
+          ),
+      );
+      binding.push({
+        label,
+        kind: 'other_page',
+        bound: sourceLabel(fact),
+        ...(home?.tabId || home?.sourceURL
+          ? { where: home.tabId ? `标签 ${home.tabId}` : home.sourceURL! }
+          : {}),
+      });
       continue;
     }
     // Same context on the page with a different number (views, dates, prices,
@@ -470,6 +492,7 @@ export function assessCompletionFacts(input: {
     contradictions: contradictions.slice(0, 8),
     unverified: unverified.slice(0, 8),
     ...(misquoted.length && misquoted.length === contradictions.length ? { misquoted } : {}),
+    ...(binding.length && binding.length === contradictions.length ? { binding } : {}),
   };
 }
 

@@ -315,6 +315,7 @@ export async function runUnifiedBrowserLoop(
   const wantsReadings = /天气|气温|weather|forecast/i.test(input.intent);
   let readingsCorrected = false;
   let weatherPageAsked = false;
+  let bindingCorrected = false;
   /**
    * BROWSER-AUTOPILOT-3: a short count gets one automatic continuation; a wrong
    * "第N节" gets one correction with the real list, then fails.
@@ -657,6 +658,24 @@ export async function runUnifiedBrowserLoop(
             toolTexts: toolTexts.join('\n'),
             intent: input.intent,
           });
+          // FIX-26 (INTEGRATE-26 sa core-02): checked before the general checks,
+          // with its own one return, so a general return is not spent first.
+          // Values from result snippets are not a weather page's reading.
+          const onlyResults =
+            pageEvidence.length > 0 &&
+            pageEvidence.every((page) => page.sourceURL?.startsWith(SEARCH_RESULTS_ORIGIN));
+          if (wantsReadings && onlyResults && !weatherPageAsked && !concludeNow) {
+            weatherPageAsked = true;
+            await rejected(summary, given, '天气数值只来自搜索结果摘要，没有读取天气页面');
+            results.push(
+              toolResult(
+                call.id,
+                '这些天气数值来自搜索结果页的摘要，不是天气页面本身。请打开结果里的一个天气来源页面（click newTab 或 navigate 到该结果链接），读取后逐项照该页原样写；页面上读不到的项写「未读到」。打不开时如实说明。',
+                true,
+              ),
+            );
+            continue;
+          }
           // Integrity: claimed actions need host receipts, a page must have been
           // read, and hard facts must not contradict what was read.
           const blocking =
@@ -685,6 +704,45 @@ export async function runUnifiedBrowserLoop(
               toolResult(
                 call.id,
                 `${lines.join('；')}。引用必须从已读文本逐字复制（拼写、大小写、标点照抄），不要凭记忆或搜索摘要写；页面上确实没有的值写「未读到」，不要再引用。修正后再 finish。`,
+                true,
+              ),
+            );
+            continue;
+          }
+          // FIX-26 (INTEGRATE-26 sb core-02): a value bound to an unread tab, or
+          // read on another page, gets its own one correction saying where.
+          const binding =
+            blocking &&
+            !bindingCorrected &&
+            !concludeNow &&
+            blocking.startsWith('答案与已读页面矛盾')
+              ? facts.binding
+              : undefined;
+          if (binding?.length) {
+            bindingCorrected = true;
+            await rejected(summary, given, blocking!);
+            const unread = [
+              ...new Set(binding.filter((b) => b.kind === 'unread').map((b) => b.bound)),
+            ];
+            const moved = binding.filter((b) => b.kind === 'other_page');
+            results.push(
+              toolResult(
+                call.id,
+                [
+                  unread.length
+                    ? `${unread.join('、')} 打开后还没有读取：请先 read_page / get_page_text 读取它，再按读到的内容提交。`
+                    : '',
+                  moved.length
+                    ? `这些值是在本次读过的另一页上读到的，不是绑定的那一页：${moved
+                        .map((b) => `${b.label}${b.where ? ` → ${b.where}` : ''}`)
+                        .join(
+                          '；',
+                        )}。请把出处改绑到读到它的那一页（tabId/sourceURL），或写「未读到」。`
+                    : '',
+                  '修正出处后再 finish。',
+                ]
+                  .filter(Boolean)
+                  .join('\n'),
                 true,
               ),
             );
@@ -816,22 +874,6 @@ export async function runUnifiedBrowserLoop(
             rejectionsLeft -= 1;
             held = { summary: withLimitations(summary), evidence };
             results.push(toolResult(call.id, remediationPrompt(gaps), true));
-            continue;
-          }
-          // Values from result snippets are not a weather page's reading.
-          const onlyResults =
-            pageEvidence.length > 0 &&
-            pageEvidence.every((page) => page.sourceURL?.startsWith(SEARCH_RESULTS_ORIGIN));
-          if (wantsReadings && onlyResults && !weatherPageAsked && !concludeNow) {
-            weatherPageAsked = true;
-            await rejected(summary, given, '天气数值只来自搜索结果摘要，没有读取天气页面');
-            results.push(
-              toolResult(
-                call.id,
-                '这些天气数值来自搜索结果页的摘要，不是天气页面本身。请打开结果里的一个天气来源页面（click newTab 或 navigate 到该结果链接），读取后逐项照该页原样写；页面上读不到的项写「未读到」。打不开时如实说明。',
-                true,
-              ),
-            );
             continue;
           }
           if (wantsReadings && facts.unverified.length && !readingsCorrected && !concludeNow) {
