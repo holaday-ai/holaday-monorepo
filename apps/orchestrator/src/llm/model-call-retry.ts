@@ -96,8 +96,12 @@ function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
 export function modelFailureReason(error: unknown): string {
   if (isRetryableModelError(error)) return '模型服务暂时不可用，有限重试后仍失败，请稍后重试。';
   if (error instanceof MessagesAdapterError) {
-    if (/arrearage|insufficient[_-]?quota|billing/i.test(error.diagnostics.providerCode ?? ''))
+    const providerCode = error.diagnostics.providerCode ?? '';
+    if (/arrearage|insufficient[_-]?quota|billing/i.test(providerCode))
       return '模型服务账户余额不足（欠费），请联系管理员。';
+    // The mainland endpoint's content inspection refused what the page said.
+    if (/data[_-]?inspection/i.test(providerCode))
+      return '模型服务拒绝处理：页面内容未通过内容安全检查，可换一个页面或来源后重试。';
     if (error.code === 'PROVIDER_ERROR') return error.message;
     if (error.code === 'INVALID_REQUEST' || error.code === 'ADAPTER_DISABLED')
       return '模型服务配置或请求不受支持，请联系管理员检查。';

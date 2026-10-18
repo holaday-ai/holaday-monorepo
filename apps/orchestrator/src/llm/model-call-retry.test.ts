@@ -53,6 +53,11 @@ describe('which model errors are retried', () => {
   it('reports the permanent cause as it is', () => {
     expect(modelFailureReason(err('PROVIDER_ERROR', 401))).toContain('认证失败');
     expect(modelFailureReason(err('PROVIDER_ERROR', 400, 'Arrearage'))).toContain('欠费');
+    // LLM-RETRY-1 live run l3: BBC Chinese news failed the mainland content inspection.
+    expect(isRetryableModelError(err('PROVIDER_ERROR', 400, 'DataInspectionFailed'))).toBe(false);
+    expect(modelFailureReason(err('PROVIDER_ERROR', 400, 'DataInspectionFailed'))).toBe(
+      '模型服务拒绝处理：页面内容未通过内容安全检查，可换一个页面或来源后重试。',
+    );
     expect(modelFailureReason(err('REQUEST_TIMEOUT'))).toBe(
       '模型服务暂时不可用，有限重试后仍失败，请稍后重试。',
     );
