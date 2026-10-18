@@ -614,3 +614,50 @@ describe('core-08: typing one field keeps the other refs of the same snapshot', 
     }
   });
 });
+
+describe('FAILURE-COPY-1: an honest 部分完成 sent as failed', () => {
+  const CORE08 = `${P}httpbin.org/forms/post 或 the-internet.herokuapp.com 填表单与日期控件，只填不提交并截图`;
+  const run = (fills: boolean, summary: string, startBlank = false) => {
+    const calls = [
+      ...(startBlank
+        ? []
+        : [{ name: 'navigate', input: { url: 'https://httpbin.org/forms/post' } }]),
+      { name: 'snapshot', input: {} },
+      ...(fills ? [{ name: 'type', input: { ref: 'e21', text: 'Test' } }] : []),
+      { name: 'screenshot', input: {} },
+      { name: 'finish', input: { status: 'failed', summary } },
+    ];
+    const { adapter } = scripted(calls);
+    const browser = site([]);
+    return runUnifiedBrowserLoop({
+      intent: CORE08,
+      adapter,
+      maxSteps: 8,
+      execute: browser.execute as never,
+      currentPageUrl: browser.currentPageUrl,
+    });
+  };
+  it('is delivered as 部分完成 when the steps it did have receipts', async () => {
+    const outcome = await run(
+      true,
+      '部分完成：已在 httpbin.org/forms/post 填写 Customer name=Test 并截图，未提交；两个网站都没有日期控件，日期未填写。',
+    );
+    expect(outcome).toMatchObject({ status: 'completed', partial: { wanted: 1 } });
+    expect(outcome.status === 'completed' && outcome.summary).toMatch(/^部分完成：已在 httpbin/);
+  });
+  it('stays failed without receipts of done work, or without the 部分完成 statement', async () => {
+    expect(await run(false, '部分完成：已填写表单。')).toMatchObject({
+      status: 'failed',
+      failureSource: 'task',
+    });
+    expect(await run(true, '两个网站都没有日期控件，任务失败。')).toMatchObject({
+      status: 'failed',
+      failureSource: 'task',
+    });
+  });
+  it('ending on the blank start page is "not started", not a login question', async () => {
+    const outcome = await run(false, '无法判断是否需要登录。', true);
+    expect(outcome).toMatchObject({ status: 'failed', failureSource: 'not_started' });
+    expect(outcome.status === 'failed' && outcome.reason).not.toMatch(/登录/);
+  });
+});

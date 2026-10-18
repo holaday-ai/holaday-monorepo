@@ -592,6 +592,11 @@ export interface SupercarOutcome {
    * user asked for. Persisted as partial_success (部分完成), never completed.
    */
   partial?: { found: number; wanted: number };
+  /**
+   * FAILURE-COPY-1: where a failure came from. The user-facing copy depends on
+   * it: only a model call can be an "AI 服务认证失败", only a met wall a login.
+   */
+  failureSource?: 'model' | 'page' | 'tool' | 'not_started' | 'task';
 }
 
 export interface SupercarTickEvent {

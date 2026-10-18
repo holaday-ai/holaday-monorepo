@@ -30,7 +30,7 @@ import {
   createPlaywrightUnifiedExecutor,
 } from './playwright-unified-executor.js';
 import { createUnifiedActionGate } from './unified-action-gate.js';
-import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
+import { NOT_STARTED, runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
 /** Ledger entries are capped per task (MAX_ENTRIES_PER_TASK); links take at most this many. */
@@ -125,6 +125,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     return {
       status: 'failed',
       reason: '浏览器暂时不可用，请稍后重试。',
+      failureSource: 'tool',
       iterations: 0,
       toolsUsed: [],
     };
@@ -152,6 +153,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     return {
       status: 'failed',
       reason: '浏览器暂时不可用，请稍后重试。',
+      failureSource: 'tool',
       iterations: 0,
       toolsUsed: [],
     };
@@ -183,6 +185,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     return {
       status: 'failed',
       reason: '域名代理配置或浏览器上下文不支持安全代理，请检查配置后重试。',
+      failureSource: 'tool',
       iterations: 0,
       toolsUsed: [],
     };
@@ -737,11 +740,18 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         return {
           status: 'failed',
           // LLM-RETRY-1: a model call that failed after its retries says so,
-          // even before any page was opened.
-          reason:
-            page.url() === 'about:blank' && !outcome.modelFailure
-              ? '浏览器尚未打开目标页面（about:blank），无法判断站点登录状态。请重试；若持续失败请联系支持。'
-              : (handoffFailure ?? outcome.reason),
+          // even before any page was opened. FAILURE-COPY-1: ending on the blank
+          // start page is "not started", never a login question.
+          ...(page.url() === 'about:blank' && !outcome.modelFailure
+            ? { reason: NOT_STARTED, failureSource: 'not_started' as const }
+            : {
+                reason: handoffFailure ?? outcome.reason,
+                ...(handoffFailure
+                  ? { failureSource: 'tool' as const }
+                  : outcome.failureSource
+                    ? { failureSource: outcome.failureSource }
+                    : {}),
+              }),
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
         };

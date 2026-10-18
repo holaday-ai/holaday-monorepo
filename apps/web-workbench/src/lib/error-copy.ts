@@ -136,6 +136,12 @@ export function humaniseTaskError(raw: string | null | undefined): string {
   if (!raw) return '';
   const trimmed = raw.trim();
   if (!trimmed) return '';
+  // FAILURE-COPY-1 (Deploy-25 core-06/07): a task that ended before opening a
+  // page, or a model-service failure, is never a site login problem. Older
+  // servers worded the first as "…无法判断站点登录状态", which read as login.
+  if (/执行未开始|尚未打开目标页面|还没有打开目标页面/.test(trimmed))
+    return '执行未开始或中途退出：浏览器还没有打开目标页面就结束了。请重试。';
+  if (/^模型服务/.test(trimmed)) return trimmed;
   for (const rule of AI_SERVICE_RULES) {
     const m = trimmed.match(rule.match);
     if (m) return typeof rule.to === 'function' ? rule.to(m) : rule.to;
