@@ -238,6 +238,7 @@ export function snapshotLinks(tree: string, baseUrl: string, maxUrlChars: number
  */
 export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExecutorOptions = {}) {
   const observation = options.observationV2 ? new CloudObservation(page) : null;
+  if (observation) observation.intent = options.taskIntent;
   const timeout = options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
   const maxSnapshot = options.maxSnapshotChars ?? DEFAULT_MAX_SNAPSHOT_CHARS;
   const maxExtract = options.maxExtractChars ?? DEFAULT_MAX_EXTRACT_CHARS;
@@ -271,7 +272,10 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     // Redact before truncating: a secret straddling the cut must not survive.
     const redacted = await redactPageText(
       page as never,
-      await (await pageRoot(page.mainFrame())).ariaSnapshot({ mode: 'ai', timeout }),
+      await (await pageRoot(page.mainFrame(), options.taskIntent)).ariaSnapshot({
+        mode: 'ai',
+        timeout,
+      }),
     );
     // Links resolve against document.baseURI (honours <base href>), not page.url().
     const baseUrl = await page.evaluate(() => document.baseURI).catch(() => page.url());
@@ -553,7 +557,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           const content = (
             await redactPageText(
               page as never,
-              await (await pageRoot(page.mainFrame())).innerText({ timeout }),
+              await (await pageRoot(page.mainFrame(), options.taskIntent)).innerText({ timeout }),
             )
           ).slice(0, maxExtract);
           // innerText drops hrefs; list answers need each item's own link.

@@ -416,9 +416,24 @@ type ActionWindow = {
  * documents (e.g. the-internet /nested_frames), whose AI snapshot inlines the
  * child frames.
  */
-export async function pageRoot(frame: Frame) {
+export async function pageRoot(frame: Frame, intent?: string) {
+  const video = await videoMainRoot(frame, intent);
+  if (video) return video;
   const body = frame.locator('body');
   return (await body.count().catch(() => 0)) > 0 ? body : frame.locator(':root');
+}
+
+/**
+ * FIX-26 (INTEGRATE-26 core-03): a YouTube watch page is read from its video
+ * block — title, channel, views, date, description — not the recommendation
+ * list or comments, which tripped the mainland endpoint's content inspection.
+ * A task that asks for recommendations or comments reads the whole page.
+ */
+async function videoMainRoot(frame: Frame, intent?: string) {
+  if (!/^https?:\/\/(?:www\.|m\.)?youtube\.com\/(?:watch|shorts\/)/i.test(frame.url())) return null;
+  if (intent && /推荐|相关视频|评论|留言|recommend|related|comment/i.test(intent)) return null;
+  const block = frame.locator('ytd-watch-metadata').first();
+  return (await block.count().catch(() => 0)) > 0 ? block : null;
 }
 
 export class CloudObservation {
@@ -493,6 +508,8 @@ export class CloudObservation {
         }
       : undefined;
   }
+  /** The task, for what a read covers (FIX-26: a video page's main block). */
+  intent?: string;
   constructor(page: Page) {
     this.active = page;
     this.causality = new ActionCausality(page.context(), (frame, event) => {
@@ -968,7 +985,7 @@ export class CloudObservation {
     if (action.tool === 'snapshot' || action.tool === 'read_page') {
       let tree = await redactPageText(
         frame,
-        await (await pageRoot(frame)).ariaSnapshot({ mode: 'ai', timeout: 5000 }),
+        await (await pageRoot(frame, this.intent)).ariaSnapshot({ mode: 'ai', timeout: 5000 }),
       );
       // AI snapshots inline child frames, including cross-origin documents.
       // Expose child refs only through the separately scoped frame records below.
@@ -1096,6 +1113,16 @@ export class CloudObservation {
       });
     }
     if (action.tool === 'sections') {
+      // FIX-26: a video page has no article sections; its headings are the
+      // recommendation list. Point at the video block instead.
+      if (await videoMainRoot(frame, this.intent))
+        return json({
+          ...(await this.metadata(frame)),
+          scope: 'video',
+          sections: [],
+          instruction:
+            '这是视频页：用 read_page 或 get_page_text 读取视频信息区（标题、频道、播放量、发布时间、描述）。',
+        });
       const outline = (await frame.evaluate(ARTICLE_OUTLINE_EXPRESSION)) as ArticleOutline;
       const sections = JSON.parse(
         await redactPageText(frame, JSON.stringify(outline.sections)),
@@ -1135,7 +1162,7 @@ export class CloudObservation {
       } else if (section === undefined)
         text = await redactPageText(
           frame,
-          await (await pageRoot(frame)).innerText({ timeout: 5000 }),
+          await (await pageRoot(frame, this.intent)).innerText({ timeout: 5000 }),
         );
       else {
         // `section` is the article body outline index (see sections).
@@ -1182,8 +1209,10 @@ export class CloudObservation {
     if (action.tool === 'links') {
       const before = (await observationState(frame)).documentId;
       const beforeUrl = frame.url();
-      const anchorCount = await frame.locator('a[href]').count();
-      const raw = await frame.locator('a[href]').evaluateAll((nodes) =>
+      // FIX-26: on a video page only the video block's links (not recommendations).
+      const anchors = ((await videoMainRoot(frame, this.intent)) ?? frame).locator('a[href]');
+      const anchorCount = await anchors.count();
+      const raw = await anchors.evaluateAll((nodes) =>
         nodes
           .filter((n) => n.getClientRects().length)
           .slice(0, 10000)

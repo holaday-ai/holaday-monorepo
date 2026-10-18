@@ -160,6 +160,18 @@ export function completionGap(
       !successful.some((entry) => entry.tool === tool || (tool === 'new_tab' && entry.openedTab))
     )
       return `动作 ${tool} 没有成功工具回执，请实际执行或如实说明未完成。`;
+  // FIX-26 (INTEGRATE-26 sb core-07): three in-page anchors of one article are
+  // one page. Links opened from a page must reach pages other than it and
+  // each other (the #fragment does not count).
+  if (/打开.{0,8}(?:\d+|[一二两三四五六七八九十])\s*个?链接|open .{0,12}links?/i.test(intent)) {
+    const page = (url: string | undefined) => url?.split('#')[0]?.replace(/\/$/, '');
+    const opened = successful
+      .filter((entry) => entry.openedTab && entry.url)
+      .map((e) => page(e.url));
+    const source = page(successful.find((entry) => !entry.openedTab && entry.url)?.url);
+    if (opened.length && (new Set(opened).size < opened.length || opened.includes(source)))
+      return '打开的链接里有同一页面（只差 # 锚点，或就是起始页）：请换成指向不同页面的链接，各自读标题后再回到起始标签。';
+  }
   const numericCount = (value: string) =>
     (
       ({ 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }) as Record<

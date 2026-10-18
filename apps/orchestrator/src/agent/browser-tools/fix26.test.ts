@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
+import { chromium } from 'playwright';
 import { describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { completionGap } from './browser-completion.js';
+import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
@@ -282,5 +284,105 @@ describe('3b. a field bound to a tab that was opened but not read', () => {
       '标签 w1 打开后还没有读取：请先 read_page / get_page_text 读取它',
     );
     expect(outcome).toMatchObject({ status: 'completed' });
+  });
+});
+
+describe('4. a YouTube watch page is read from its video block (core-03)', () => {
+  const WATCH = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
+  const HTML =
+    '<div id="primary"><ytd-watch-metadata><h1>Me at the zoo</h1><a href="/@jawed">jawed</a>' +
+    '<div id="description">418M views 19 years ago</div></ytd-watch-metadata>' +
+    '<div id="comments"><h3>COMMENT one</h3></div></div>' +
+    '<div id="secondary"><h3><a href="/watch?v=other">RECOMMENDED other video</a></h3></div>';
+  const read = async (intent: string) => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.route(/youtube\.com/, (route) =>
+        route.fulfill({ contentType: 'text/html', body: HTML }),
+      );
+      await page.goto(WATCH);
+      const tools = createPlaywrightUnifiedExecutor(page, {
+        observationV2: true,
+        taskIntent: intent,
+      });
+      try {
+        const tree = String(JSON.parse((await tools.execute({ tool: 'read_page' })).text).tree);
+        const text = (await tools.execute({ tool: 'get_page_text' } as never)).text;
+        const links = (await tools.execute({ tool: 'links' } as never)).text;
+        const sections = (await tools.execute({ tool: 'sections' } as never)).text;
+        return { tree, text, links, sections };
+      } finally {
+        tools.dispose();
+      }
+    } finally {
+      await browser.close();
+    }
+  };
+  it('reads title, channel and views, not recommendations or comments', async () => {
+    const out = await read(`${P}YouTube 公开视频页读标题/频道/播放量/发布日期（不播放）`);
+    expect(out.tree).toContain('Me at the zoo');
+    expect(out.tree).toContain('418M views');
+    for (const part of [out.tree, out.text, out.links, out.sections]) {
+      expect(part).not.toContain('RECOMMENDED');
+      expect(part).not.toContain('COMMENT one');
+    }
+    expect(out.sections).toContain('这是视频页');
+  });
+  it('a task that asks for comments or recommendations reads the whole page', async () => {
+    const out = await read(`${P}打开这个 YouTube 视频，读出推荐列表和前几条评论`);
+    expect(out.tree).toContain('RECOMMENDED');
+    expect(out.tree).toContain('COMMENT one');
+  });
+});
+
+describe('5. links opened from a page reach different pages (core-07)', () => {
+  const OPEN3 = `${P}从一个页面打开3个链接到新标签，分别读标题后回到第一个`;
+  const start = {
+    tool: 'navigate',
+    ok: true,
+    url: 'https://en.wikipedia.org/wiki/Python_(programming_language)',
+    tabId: 'source',
+  };
+  const open = (url: string, id: string) => ({
+    tool: 'click',
+    ok: true,
+    openedTab: true,
+    tabId: id,
+    fromTabId: 'source',
+    url,
+  });
+  const back = { tool: 'switch_tab', ok: true, tabId: 'source' };
+  const claim = '三个标题如上，最后已切回起始标签。';
+  it('rejects in-page anchors of the start page (sb core-07)', () => {
+    const base = 'https://en.wikipedia.org/wiki/Python_(programming_language)';
+    const trace = [
+      start,
+      open(`${base}#History`, 'a'),
+      open(`${base}#Design`, 'b'),
+      open(`${base}#Syntax`, 'c'),
+      back,
+    ];
+    expect(completionGap(OPEN3, claim, trace as never, false)).toContain('只差 # 锚点');
+  });
+  it('rejects the same page opened twice', () => {
+    const trace = [
+      start,
+      open('https://en.wikipedia.org/wiki/Safari', 'a'),
+      open('https://en.wikipedia.org/wiki/Safari#x', 'b'),
+      open('https://en.wikipedia.org/wiki/MacBook', 'c'),
+      back,
+    ];
+    expect(completionGap(OPEN3, claim, trace as never, false)).toContain('只差 # 锚点');
+  });
+  it('accepts three different pages', () => {
+    const trace = [
+      start,
+      open('https://en.wikipedia.org/wiki/Safari', 'a'),
+      open('https://en.wikipedia.org/wiki/MacBook', 'b'),
+      open('https://en.wikipedia.org/wiki/Guido_van_Rossum', 'c'),
+      back,
+    ];
+    expect(completionGap(OPEN3, claim, trace as never, false)).toBeNull();
   });
 });
