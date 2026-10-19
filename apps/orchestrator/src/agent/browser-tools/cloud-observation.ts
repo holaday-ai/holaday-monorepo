@@ -12,9 +12,9 @@ import {
 import { scrollWithEvidence } from './browser-scroll.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { redactPageText } from './page-redaction.js';
-import { markYoutubeCollections } from './video-count.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import { type UnifiedBrowserAction, isMutatingBrowserAction } from './unified-tools.js';
+import { markYoutubeCollections } from './video-count.js';
 
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 const SENSITIVE_URL_PARAMETER =
