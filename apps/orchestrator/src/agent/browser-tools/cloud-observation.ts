@@ -452,6 +452,8 @@ export class CloudObservation {
       document: string;
     }
   >();
+  /** Every revision a read handed out, with the document and structure it showed. */
+  private issued = new Map<string, { document: string; structure: string }>();
   private virtualRefs = new Map<Frame, Map<string, number>>();
   private cursors = new Map<
     string,
@@ -787,13 +789,15 @@ export class CloudObservation {
     const { frame } = this.resolve(action);
     if ('ref' in action && action.ref) {
       const current = this.observations.get(frame);
+      const sent = action.observationRevision ?? '';
       if (
         !current ||
         !current.refs.has(action.ref) ||
         // FIX-24 (core-08): typing into one field changes only form values; the
         // other refs of that snapshot (the next field in the same turn) still hold.
-        (action.observationRevision !== current.revision &&
-          !current.accepted.has(action.observationRevision ?? '')) ||
+        (sent !== current.revision &&
+          !current.accepted.has(sent) &&
+          !this.miscopied(sent, current)) ||
         // BROWSER-AUTOPILOT-1: an aria ref stays bound to the element the model
         // saw; unrelated text changes (carousels, clocks) on a live page must not
         // invalidate it. A different document or URL still does.
@@ -806,6 +810,22 @@ export class CloudObservation {
       )
         throw new Error('stale_observation');
     }
+  }
+  /**
+   * FIX-27 (za core-02): a revision no read ever issued — mis-copied or left
+   * out — clicked the same ref three times and failed the task. Such a ref can
+   * only mean what the model saw when every read of this document showed the
+   * current structure; a revision that was issued but is out of date, or a
+   * document whose structure changed, stays stale.
+   */
+  private miscopied(sent: string, current: { document: string; structure: string }) {
+    if (this.issued.has(sent)) return false;
+    for (const seen of this.issued.values())
+      if (seen.document === current.document && seen.structure !== current.structure) return false;
+    return true;
+  }
+  private issue(current: { revision: string; document: string; structure: string }) {
+    this.issued.set(current.revision, { document: current.document, structure: current.structure });
   }
   async metadata(frame: Frame) {
     const { fingerprint, structure } = await this.fingerprint(frame);
@@ -823,6 +843,7 @@ export class CloudObservation {
         document,
       };
       this.observations.set(frame, current);
+      this.issue(current);
     }
     return {
       tabId: this.tabId(frame.page()),
@@ -1040,6 +1061,7 @@ export class CloudObservation {
           ? new Set([...prior.accepted, ...current.accepted, prior.revision])
           : new Set();
       current.revision = randomUUID();
+      this.issue(current);
       meta.observationRevision = current.revision;
       current.refs = new Set(
         [...safeTree.slice(0, 24000).matchAll(/\[ref=((?:f\d+)?e\d+)\]/g)].map((m) => m[1]!),

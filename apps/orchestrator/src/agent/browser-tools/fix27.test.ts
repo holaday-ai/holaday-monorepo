@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { classifyRuntimeAction } from '../supercar/runtime-action-policy.js';
 import { assessCompletionFacts } from './completion-fields.js';
 import { admitsAutoplay, claimsNoPlayback, forbidsPlayback } from './playback-guard.js';
 import type { PlaybackReceipt } from './playback-guard.js';
@@ -705,5 +706,171 @@ describe("core-02: split values and the page's own address", () => {
     expect(check('', [{ name: '雷达链接', value: radar, tabId: 'tab_search' }])).toEqual([
       `雷达链接「${radar}」 来自其他页面，不是 标签 tab_search 的内容`,
     ]);
+  });
+});
+
+/**
+ * FIX-27 — za core-02: right after a snapshot of the results page the model
+ * clicked e44 three times with a revision no read had issued (its arguments
+ * were not kept; e44 itself was valid, and the same click with the snapshot's
+ * revision opens the link). Three stale refs failed the task.
+ */
+describe('a mis-copied observation revision', () => {
+  let browser: Browser;
+  let server: Server;
+  let base: string;
+  beforeAll(async () => {
+    const { searchResultsHtml } = await import('../search-fallback/search-results-page.js');
+    server = createServer((req, res) => {
+      res.setHeader('content-type', 'text/html; charset=utf-8');
+      if (req.url?.startsWith('/target'))
+        return res.end('<!doctype html><title>Target</title><h1>Target page</h1>');
+      res.end(
+        searchResultsHtml({
+          query: '新加坡 天气',
+          label: 'Brave 搜索接口',
+          results: Array.from({ length: 10 }, (_, i) => ({
+            url: `${base}/target/${i}`,
+            title: `结果 ${i}`,
+            snippet: '摘要',
+          })),
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    browser = await chromium.launch({ headless: true });
+  });
+  afterAll(async () => {
+    await browser?.close();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  const open = async () => {
+    const page = await (await browser.newContext()).newPage();
+    const tools = createPlaywrightUnifiedExecutor(page, { observationV2: true });
+    await tools.execute({ tool: 'navigate', url: `${base}/results` } as never);
+    const read = JSON.parse((await tools.execute({ tool: 'snapshot' } as never)).text) as {
+      tree: string;
+      observationRevision: string;
+    };
+    const ref = read.tree.match(/link "结果 9" \[ref=(e\d+)\]/)![1]!;
+    return { page, tools, read, ref };
+  };
+
+  it.each([
+    ['a garbled revision', { observationRevision: 'e3dc01aa-c82a-48f2-a364-9e4ea4ab3e5' }],
+    ['no revision', {}],
+  ])('%s on an unchanged page clicks the ref the model saw', async (_label, revision) => {
+    const { page, tools, ref } = await open();
+    try {
+      const r = await tools.execute({ tool: 'click', ref, ...revision } as never);
+      expect(r.errorCode).toBeUndefined();
+      await page.waitForURL(/\/target\/9$/);
+    } finally {
+      tools.dispose();
+      await page.context().close();
+    }
+  });
+
+  it('a revision that was issued but is out of date stays stale', async () => {
+    const { page, tools, read, ref } = await open();
+    try {
+      await page.evaluate(() =>
+        document.querySelector('ol')!.prepend(document.createElement('li')),
+      );
+      const again = JSON.parse((await tools.execute({ tool: 'snapshot' } as never)).text);
+      expect(again.observationRevision).not.toBe(read.observationRevision);
+      const old = await tools.execute({
+        tool: 'click',
+        ref,
+        observationRevision: read.observationRevision,
+      } as never);
+      expect(old.errorCode).toBe('stale_ref');
+      expect(page.url()).toMatch(/\/results$/);
+    } finally {
+      tools.dispose();
+      await page.context().close();
+    }
+  });
+
+  it('a garbled revision after the structure changed stays stale', async () => {
+    const { page, tools, ref } = await open();
+    try {
+      await page.evaluate(() => {
+        const list = document.querySelector('ol')!;
+        list.prepend(list.lastElementChild!.cloneNode(true));
+      });
+      await tools.execute({ tool: 'snapshot' } as never);
+      const r = await tools.execute({
+        tool: 'click',
+        ref,
+        observationRevision: 'garbled',
+      } as never);
+      expect(r.errorCode).toBe('stale_ref');
+      expect(page.url()).toMatch(/\/results$/);
+    } finally {
+      tools.dispose();
+      await page.context().close();
+    }
+  });
+
+  it('a garbled revision on another document stays stale', async () => {
+    const { page, tools, ref } = await open();
+    try {
+      await page.goto(`${base}/results?again=1`);
+      const r = await tools.execute({
+        tool: 'click',
+        ref,
+        observationRevision: 'garbled',
+      } as never);
+      expect(r.errorCode).toBe('stale_ref');
+      expect(page.url()).toMatch(/again=1$/);
+    } finally {
+      tools.dispose();
+      await page.context().close();
+    }
+  });
+});
+
+/**
+ * FIX-27 — zb core-07: clicking a wiki preview whose text reads 「…locate
+ * shared resources…」 was taken for a 「share」 button and paused a read-only
+ * task for confirmation. English control words now match as whole words.
+ */
+describe('English control words are whole words', () => {
+  const zb =
+    'Browser service or Computer Browser Service is a feature of Microsoft Windows to let users easily browse and locate shared resources in neighboring computers. This is done by aggregating the informati';
+  it.each([
+    zb,
+    'Shareholders of the company',
+    'Removed from the list in 2019',
+    'Publisher: Penguin',
+    'Transferable skills',
+    'Sending data over HTTP',
+  ])('「%s」 is not a control that needs confirmation', (label) => {
+    expect(classifyRuntimeAction({ kind: 'click', label }).allowed).toBe(true);
+  });
+  it.each([
+    'Share',
+    'Send',
+    'Delete',
+    'Remove from cart',
+    'deleteItem',
+    'send_message',
+    'PayNow',
+    'Buy now',
+    'Buy it now',
+    'Place your order',
+    'Confirm and pay',
+    'Proceed to payment',
+    'Checkout',
+    'Publish post',
+    '发送',
+    '立即购买',
+  ])('「%s」 still needs confirmation', (label) => {
+    const verdict = classifyRuntimeAction({ kind: 'click', label });
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.requiresConfirmation).toBe(true);
   });
 });
