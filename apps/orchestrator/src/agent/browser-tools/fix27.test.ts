@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { assessCompletionFacts } from './completion-fields.js';
 import { admitsAutoplay, claimsNoPlayback, forbidsPlayback } from './playback-guard.js';
 import type { PlaybackReceipt } from './playback-guard.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
@@ -620,5 +621,89 @@ describe('部分完成 only when something asked for is missing', () => {
   it('the prompt says so', async () => {
     const { UNIFIED_BROWSER_SYSTEM_PROMPT } = await import('./unified-browser-loop.js');
     expect(UNIFIED_BROWSER_SYSTEM_PROMPT).toContain('用户要的内容都齐了就不要写「部分完成」');
+  });
+});
+
+/**
+ * FIX-27 17:45 — core-02 ya/yb: weather.com prints pressure as two nodes,
+ * 「"29.89"」「in」. The check missed 「29.89 in」 and told it against rainfall's
+ * 「0 in」; and the page's own address, filed under the results tab that linked
+ * to it (Brave lists /weather/today/l/…, which lands on /sg/city/singapore/today),
+ * was called 「来自其他页面」.
+ */
+describe("core-02: split values and the page's own address", () => {
+  const core02 = JSON.parse(
+    readFileSync(new URL('./fixtures/fix27-core02-weather.json', import.meta.url), 'utf8'),
+  ) as {
+    searchPage: { tabId: string; sourceURL: string; tree: string };
+    weatherPage: { tabId: string; sourceURL: string; tree: string; text: string };
+    answers: Record<'ya' | 'yb', string>;
+  };
+  const intent = '请使用云端浏览器，Google 搜索「新加坡 天气」读出天气卡片';
+  const weatherUrl = 'https://weather.com/zh-CN/sg/city/singapore/today';
+  const pages = [
+    { text: core02.searchPage.tree, tabId: 'tab_search', sourceURL: core02.searchPage.sourceURL },
+    {
+      text: core02.weatherPage.tree,
+      tabId: 'tab_weather',
+      sourceURL: core02.weatherPage.sourceURL,
+    },
+  ];
+  const check = (summary: string, fields: unknown[] = []) =>
+    assessCompletionFacts({ summary, fields, pages, intent }).contradictions;
+
+  it('the fixture is what the runs read', () => {
+    expect(core02.weatherPage.sourceURL).toBe(weatherUrl);
+    expect(core02.weatherPage.tree).toMatch(
+      /- generic \[ref=e\d+\]: "29\.89"\n\s*- generic \[ref=e\d+\]: in/,
+    );
+    expect(core02.weatherPage.tree).toMatch(/- paragraph \[ref=e\d+\]: 0 in/);
+    expect(core02.searchPage.tree).toContain('weather.com/zh-CN/weather/today/l/');
+    expect(core02.searchPage.tree).not.toContain(weatherUrl);
+  });
+
+  it.each(['ya', 'yb'] as const)("%s: the run's own answer passes", (round) => {
+    expect(
+      check(core02.answers[round], [
+        { name: '气压', value: '29.89 in', tabId: 'tab_weather' },
+        { name: '天气来源链接', value: weatherUrl, tabId: 'tab_search' },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('a text read with the value and unit on separate lines passes, and tells a mismatch', () => {
+    const text = [{ text: core02.weatherPage.text, tabId: 'tab_weather', sourceURL: weatherUrl }];
+    const facts = (value: string) =>
+      assessCompletionFacts({
+        summary: '',
+        fields: [{ name: '气压', value, tabId: 'tab_weather' }],
+        pages: text,
+        intent,
+      }).contradictions;
+    expect(facts('29.89 in')).toEqual([]);
+    expect(facts('29.99 in')).toEqual(['气压「29.99 in」 与页面不符；页面为「29.89 in」']);
+  });
+
+  it('a different pressure is told against the pressure, not the rainfall', () => {
+    expect(check('', [{ name: '气压', value: '29.99 in' }])).toEqual([
+      '气压「29.99 in」 与页面不符；页面为「29.89 in」',
+    ]);
+    expect(check('', [{ name: '气压', value: '29.99 in', tabId: 'tab_weather' }])).toEqual([
+      '气压「29.99 in」 与页面不符；页面为「29.89 in」',
+    ]);
+  });
+
+  it('joined nodes are matched as whole values only', () => {
+    // 「89 in」 is inside 「29.89 in」 only as a fragment.
+    expect(check('', [{ name: '气压', value: '89 in', tabId: 'tab_weather' }])).toEqual([
+      '气压「89 in」 与页面不符；页面为「29.89 in」',
+    ]);
+  });
+
+  it("a page the run never opened is still not the results tab's content", () => {
+    const radar = 'https://weather.com/zh-CN/sg/city/singapore/radar';
+    expect(check('', [{ name: '雷达链接', value: radar, tabId: 'tab_search' }])).toEqual([
+      `雷达链接「${radar}」 来自其他页面，不是 标签 tab_search 的内容`,
+    ]);
   });
 });
