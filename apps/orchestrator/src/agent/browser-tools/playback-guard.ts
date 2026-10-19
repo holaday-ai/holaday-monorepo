@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { BrowserContext, Page } from 'playwright';
 
 /**
@@ -35,37 +36,56 @@ export interface PlaybackReceipt {
   playing: boolean;
 }
 
-/** Runs before page scripts in every document of the context. */
-export const PLAYBACK_GUARD_SCRIPT = `(() => {
-  if (window.__hdPlayback) return;
-  const state = { everPlayed: new WeakSet() };
-  window.__hdPlayback = state;
-  const hold = (media) => {
-    try {
-      media.autoplay = false;
-      media.removeAttribute('autoplay');
-      if (!media.paused) media.pause();
-    } catch (_) {}
-  };
-  const play = HTMLMediaElement.prototype.play;
-  HTMLMediaElement.prototype.play = function () {
-    hold(this);
-    return Promise.resolve();
-  };
-  state.originalPlay = play;
-  document.addEventListener(
-    'playing',
-    (event) => {
-      const media = event.target;
-      if (!(media instanceof HTMLMediaElement)) return;
-      state.everPlayed.add(media);
-      hold(media);
-    },
-    true,
-  );
-  const sweep = () => document.querySelectorAll('video, audio').forEach(hold);
-  new MutationObserver(sweep).observe(document, { childList: true, subtree: true });
-  document.addEventListener('DOMContentLoaded', sweep);
+/**
+ * Runs before page scripts in every document of the context. An init script
+ * cannot be removed, so each install holds a token and the guard acts only
+ * while a token is held: a retained browser that a later task adopts plays
+ * normally once the 不播放 task has released its token (PR #286 review).
+ */
+export const playbackGuardScript = (token: string) => `(() => {
+  let state = window.__hdPlayback;
+  if (!state) {
+    state = { everPlayed: new WeakSet(), tokens: new Set() };
+    window.__hdPlayback = state;
+    const active = () => state.tokens.size > 0;
+    const hold = (media) => {
+      try {
+        media.autoplay = false;
+        media.removeAttribute('autoplay');
+        if (!media.paused) media.pause();
+      } catch (_) {}
+    };
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      if (!active()) return play.apply(this, arguments);
+      hold(this);
+      return Promise.resolve();
+    };
+    state.originalPlay = play;
+    document.addEventListener(
+      'playing',
+      (event) => {
+        const media = event.target;
+        if (!(media instanceof HTMLMediaElement) || !active()) return;
+        state.everPlayed.add(media);
+        hold(media);
+      },
+      true,
+    );
+    state.sweep = () => {
+      if (active()) document.querySelectorAll('video, audio').forEach(hold);
+    };
+    new MutationObserver(state.sweep).observe(document, { childList: true, subtree: true });
+    document.addEventListener('DOMContentLoaded', state.sweep);
+  }
+  state.tokens.add(${JSON.stringify(token)});
+  state.sweep();
+})();`;
+
+/** Gives the token back: the guard stops acting in this document and later ones. */
+const playbackReleaseScript = (token: string) => `(() => {
+  const state = window.__hdPlayback;
+  if (state) state.tokens.delete(${JSON.stringify(token)});
 })();`;
 
 const RECEIPT_EXPRESSION = `(() => {
@@ -85,17 +105,37 @@ const RECEIPT_EXPRESSION = `(() => {
   });
 })()`;
 
-/** Keep every page of the context paused; returns false when it could not install. */
-export async function installPlaybackGuard(context: BrowserContext): Promise<boolean> {
+/**
+ * Keep every page of the context paused; null when it could not install,
+ * otherwise the token `releasePlaybackGuard` gives back when the task ends.
+ */
+export async function installPlaybackGuard(context: BrowserContext): Promise<string | null> {
+  const token = randomUUID();
   try {
-    await context.addInitScript(PLAYBACK_GUARD_SCRIPT);
+    await context.addInitScript(playbackGuardScript(token));
     // Pages already open (the start page) get it now too.
     await Promise.all(
-      context.pages().map((page) => page.evaluate(PLAYBACK_GUARD_SCRIPT).catch(() => undefined)),
+      context
+        .pages()
+        .map((page) => page.evaluate(playbackGuardScript(token)).catch(() => undefined)),
     );
-    return true;
+    return token;
   } catch {
-    return false;
+    return null;
+  }
+}
+
+/** Ends the guard for this context's open and future pages. */
+export async function releasePlaybackGuard(context: BrowserContext, token: string): Promise<void> {
+  try {
+    await context.addInitScript(playbackReleaseScript(token));
+    await Promise.all(
+      context
+        .pages()
+        .map((page) => page.evaluate(playbackReleaseScript(token)).catch(() => undefined)),
+    );
+  } catch {
+    /* A closed context has no pages left to guard. */
   }
 }
 

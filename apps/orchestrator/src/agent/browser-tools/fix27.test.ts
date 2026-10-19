@@ -874,3 +874,231 @@ describe('English control words are whole words', () => {
     expect(verdict.requiresConfirmation).toBe(true);
   });
 });
+
+/**
+ * PR #286 review — four points from the automated review, each with its own
+ * test: the playback guard is given back when the task ends; one-token
+ * identifiers still need confirmation; a read tab with no title asks for
+ * list_tabs; a search query is not a disclosed form fill.
+ */
+describe('PR #286 review', () => {
+  describe('the playback guard is given back when the task ends', () => {
+    let browser: Browser;
+    let server: Server;
+    let base: string;
+    const html = `<!doctype html><body><video id="v" autoplay muted playsinline width="160" height="90"></video>
+<script>
+const c = document.createElement('canvas'); c.width = 160; c.height = 90;
+const g = c.getContext('2d'); let n = 0;
+setInterval(() => { g.fillStyle = n++ % 2 ? '#c00' : '#00c'; g.fillRect(0, 0, 160, 90); }, 50);
+const v = document.getElementById('v'); v.srcObject = c.captureStream(20);
+setTimeout(() => v.play().catch(() => {}), 300);
+</script></body>`;
+    beforeAll(async () => {
+      server = createServer((_req, res) => {
+        res.setHeader('content-type', 'text/html; charset=utf-8');
+        res.end(html);
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+      base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/watch`;
+      browser = await chromium.launch({
+        headless: true,
+        args: ['--autoplay-policy=no-user-gesture-required'],
+      });
+    });
+    afterAll(async () => {
+      await browser?.close();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
+    const visit = async (page: import('playwright').Page, intent: string) => {
+      const tools = createPlaywrightUnifiedExecutor(page, {
+        observationV2: true,
+        taskIntent: intent,
+      });
+      await tools.execute({ tool: 'navigate', url: `${base}?${Math.random()}` } as never);
+      await page.waitForTimeout(1500);
+      return { tools, receipt: (await tools.playbackReceipt())! };
+    };
+
+    it('a retained browser plays for the next task, and a later 不播放 task guards again', async () => {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      try {
+        const first = await visit(page, deploy26.prompt);
+        expect(first.receipt.playing).toBe(false);
+        await first.tools.releasePlayback();
+        first.tools.dispose();
+        // The page still open: its own play() works again.
+        await page.evaluate(() => (document.querySelector('video') as HTMLVideoElement).play());
+        await page.waitForTimeout(800);
+        expect(
+          await page.evaluate(() => !(document.querySelector('video') as HTMLVideoElement).paused),
+        ).toBe(true);
+        // The next task in the same context, without the constraint: new pages autoplay.
+        const second = await visit(page, '请使用云端浏览器，打开这个视频页读标题');
+        expect(second.receipt.playing).toBe(true);
+        expect(second.receipt.media[0]!.currentTime).toBeGreaterThan(0.5);
+        second.tools.dispose();
+        // A later 不播放 task in the same context is guarded again.
+        const third = await visit(page, deploy26.prompt);
+        expect(third.receipt.playing).toBe(false);
+        expect(third.receipt.playedSeconds).toBeLessThan(1);
+        third.tools.dispose();
+      } finally {
+        await context.close();
+      }
+    });
+
+    it('while the task runs, the guard holds', async () => {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      try {
+        const { tools } = await visit(page, deploy26.prompt);
+        await page.evaluate(() => (document.querySelector('video') as HTMLVideoElement).play());
+        await page.waitForTimeout(800);
+        expect((await tools.playbackReceipt())!.playing).toBe(false);
+        tools.dispose();
+      } finally {
+        await context.close();
+      }
+    });
+  });
+
+  it.each(['sendmessage', 'deleteaccount', 'publishpost', 'sharenow', 'removeitem'])(
+    'a one-token identifier 「%s」 still needs confirmation',
+    (name) => {
+      expect(classifyRuntimeAction({ kind: 'click', name }).requiresConfirmation).toBe(true);
+      expect(classifyRuntimeAction({ kind: 'click', label: name }).requiresConfirmation).toBe(true);
+    },
+  );
+
+  describe('a read tab with no title is asked for by list_tabs', () => {
+    const TITLES: Record<string, string> = {
+      t1: 'Alpha - Site',
+      t2: 'Beta - Site',
+      t3: 'Gamma - Site',
+    };
+    const execute = () => {
+      let active = 'source';
+      let next = 0;
+      return (async (action: { tool: string; targetTabId?: string }) => {
+        if (action.tool === 'click') {
+          active = `t${++next}`;
+          return { ok: true, text: `已打开新标签 ${active}`, tabId: active, openedTab: true };
+        }
+        if (action.tool === 'list_tabs')
+          return {
+            ok: true,
+            text: JSON.stringify({
+              tabs: Object.entries(TITLES).map(([tabId, title]) => ({ tabId, title })),
+            }),
+          };
+        if (action.tool === 'switch_tab') active = action.targetTabId!;
+        // No h1 on any page: the read carries no title.
+        return {
+          ok: true,
+          tabId: active,
+          text: JSON.stringify({ tabId: active, headings: [], tree: 'paragraph "text"' }),
+        };
+      }) as never;
+    };
+    const opened = [
+      { name: 'read_page', input: {} },
+      { name: 'click', input: { ref: 'e1', newTab: true } },
+      { name: 'switch_tab', input: { targetTabId: 't1' } },
+      { name: 'click', input: { ref: 'e2', newTab: true } },
+      { name: 'switch_tab', input: { targetTabId: 't2' } },
+      { name: 'click', input: { ref: 'e3', newTab: true } },
+      { name: 'switch_tab', input: { targetTabId: 't3' } },
+      { name: 'switch_tab', input: { targetTabId: 'source' } },
+    ];
+    const finish = (summary: string) => ({
+      name: 'finish',
+      input: { status: 'completed', summary },
+    });
+    const loop = (calls: Array<{ name: string; input: Record<string, unknown> }>) => {
+      const { adapter, seen } = scriptedLoop(calls);
+      return runUnifiedBrowserLoop({
+        intent: '请使用云端浏览器，从一个页面打开3个链接到新标签，分别读标题后回到第一个',
+        adapter,
+        maxSteps: 20,
+        observationV2: true,
+        supportedTools: { download: false, upload: false, tabs: true },
+        execute: execute(),
+      }).then((outcome) => ({ outcome, seen: seen.join('\n') }));
+    };
+    it('an answer naming nothing is sent back for list_tabs; with the titles it completes', async () => {
+      const { outcome, seen } = await loop([
+        ...opened,
+        finish('打开了 3 个链接并读取了标题，已切回原标签。'),
+        { name: 'list_tabs', input: {} },
+        finish('三个标题：Alpha - Site、Beta - Site、Gamma - Site。已切回原标签。'),
+      ]);
+      expect(seen).toContain('请用 list_tabs 查看它的标题');
+      expect(outcome).toMatchObject({ status: 'completed' });
+    });
+    it('after list_tabs, a missing title is told like any other', async () => {
+      const { outcome } = await loop([
+        ...opened,
+        { name: 'list_tabs', input: {} },
+        finish('标题：Alpha - Site。已切回原标签。'),
+        finish('标题：Alpha - Site。已切回原标签。'),
+      ]);
+      expect(outcome).toMatchObject({ status: 'failed', failureSource: 'task' });
+    });
+    it('a page with no title at all does not fail the task after the one return', async () => {
+      const { outcome } = await loop([
+        ...opened,
+        finish('打开了 3 个链接，这些页面都没有标题，已切回原标签。'),
+        finish('打开了 3 个链接，这些页面都没有标题，已切回原标签。'),
+      ]);
+      expect(outcome).toMatchObject({ status: 'completed' });
+    });
+  });
+
+  describe('a search query is not a disclosed form fill', () => {
+    const loop = (answers: string[]) => {
+      const { adapter, seen } = scriptedLoop([
+        { name: 'navigate', input: { url: 'https://httpbin.org/forms/post' } },
+        { name: 'type', input: { ref: 'e1', text: 'pizza order form' } },
+        { name: 'type', input: { ref: 'e21', text: 'Test User' } },
+        { name: 'screenshot', input: {} },
+        ...answers.map((summary) => ({ name: 'finish', input: { status: 'completed', summary } })),
+      ]);
+      return runUnifiedBrowserLoop({
+        intent: '请使用云端浏览器，在 httpbin.org/forms/post 填表单，只填不提交并截图',
+        adapter,
+        maxSteps: 12,
+        execute: (async (action: { tool: string; url?: string; ref?: string }) => {
+          if (action.tool === 'navigate') return { ok: true, text: '已打开', url: action.url };
+          if (action.tool === 'type')
+            return {
+              ok: true,
+              text: '已输入',
+              form: {
+                ref: action.ref,
+                filled: true,
+                submitted: false,
+                ...(action.ref === 'e1' ? { search: true } : {}),
+              },
+            };
+          if (action.tool === 'screenshot')
+            return { ok: true, text: '截图', image: { mediaType: 'image/jpeg', data: 'AA==' } };
+          return { ok: true, text: 'textbox "Customer name" Test User' };
+        }) as never,
+      }).then((outcome) => ({ outcome, seen: seen.join('\n') }));
+    };
+    it('an answer repeating only the search query is asked for the fields it filled', async () => {
+      const { seen } = await loop([
+        '搜索了「pizza order form」，打开了表单页并截图，未提交。',
+        '已在 httpbin.org/forms/post 填写 Customer name=Test User，未提交并截图。',
+      ]);
+      expect(seen).toContain('答案没有写出本次已经在表单里填写了哪些字段');
+    });
+    it('an answer naming the filled value passes without a return', async () => {
+      const { seen } = await loop(['Customer name 填入 Test User，未提交并截图。']);
+      expect(seen).not.toContain('答案没有写出本次已经在表单里填写了哪些字段');
+    });
+  });
+});

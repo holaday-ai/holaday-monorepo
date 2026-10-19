@@ -34,6 +34,14 @@ const IRREVERSIBLE_CONTROL_RE =
 const IRREVERSIBLE_CONTROL_EN_RE =
   /\b(?:confirm(?:\s*\w+)?\s*(?:pay(?:ment)?|order|booking)|pay\s*now|proceed(?:\s*\w+){0,2}\s*pay(?:ment)?|place(?:\s*\w+)?\s*order|submit(?:\s*\w+)?\s*order|checkout|purchase|buy(?:\s*\w+)?\s*now|transfer|withdraw|delete|remove|publish|send|share)\b/i;
 
+/**
+ * A label that is one token (「sendmessage」「deleteaccount」「publishpost」) has
+ * no word boundaries to go by: it is matched as before, by substring (PR #286
+ * review). Only text with spaces — prose — is held to whole words.
+ */
+const IRREVERSIBLE_CONTROL_TOKEN_RE =
+  /confirm\w*(?:pay|order|booking)|paynow|proceed\w*pay|place\w*order|submit\w*order|checkout|purchase|buy\w*now|transfer|withdraw|delete|remove|publish|send|share/i;
+
 export const TRANSACTION_PAGE_RE =
   /(?:\/|\b)(?:checkout|payment|cashier|order[-_/]?confirm|confirm[-_/]?order|order[-_/]?submit|submit[-_/]?order|booking\/confirm|settlement|pay)(?:\/|\b)|订单提交/i;
 
@@ -64,7 +72,13 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
   const signals = raw.map((value) => normalize(value)).filter(Boolean);
   const matchedSignal =
     signals.find((value) => IRREVERSIBLE_CONTROL_RE.test(value)) ??
-    raw.find((value) => !!value && IRREVERSIBLE_CONTROL_EN_RE.test(words(value)));
+    raw.find(
+      (value) =>
+        !!value?.trim() &&
+        (/\s/.test(value.trim())
+          ? IRREVERSIBLE_CONTROL_EN_RE.test(words(value))
+          : IRREVERSIBLE_CONTROL_TOKEN_RE.test(value)),
+    );
   const neutralTransactionSubmit =
     action.kind === 'click' &&
     isSubmitControl(action) &&

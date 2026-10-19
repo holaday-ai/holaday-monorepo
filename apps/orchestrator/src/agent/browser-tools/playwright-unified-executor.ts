@@ -7,7 +7,12 @@ import { browserToolError } from './browser-tool-error.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { CloudObservation, pageRoot } from './cloud-observation.js';
 import { redactPageText } from './page-redaction.js';
-import { forbidsPlayback, installPlaybackGuard, readPlayback } from './playback-guard.js';
+import {
+  forbidsPlayback,
+  installPlaybackGuard,
+  readPlayback,
+  releasePlaybackGuard,
+} from './playback-guard.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
 /** One tool result for the model: text always, an image only for `screenshot`. */
@@ -242,7 +247,16 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   if (observation) observation.intent = options.taskIntent;
   // FIX-27 (Deploy-26 core-03): 不播放 keeps every video of the task paused.
   const noPlayback = forbidsPlayback(options.taskIntent);
-  const playbackGuard = noPlayback ? installPlaybackGuard(page.context()) : Promise.resolve(false);
+  const playbackGuard = noPlayback ? installPlaybackGuard(page.context()) : Promise.resolve(null);
+  /** Gives the guard back so a later task in a retained browser can play (PR #286 review). */
+  let playbackReleased: Promise<void> | undefined;
+  const releasePlayback = () => {
+    if (!playbackReleased)
+      playbackReleased = playbackGuard.then((token) =>
+        token ? releasePlaybackGuard(page.context(), token) : undefined,
+      );
+    return playbackReleased;
+  };
   const timeout = options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
   const maxSnapshot = options.maxSnapshotChars ?? DEFAULT_MAX_SNAPSHOT_CHARS;
   const maxExtract = options.maxExtractChars ?? DEFAULT_MAX_EXTRACT_CHARS;
@@ -700,7 +714,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     },
     /** FIX-27: what the task's media actually played; null when it could not be read. */
     async playbackReceipt() {
-      return readPlayback(page.context(), await playbackGuard);
+      return readPlayback(page.context(), !!(await playbackGuard));
     },
     recoverObservation: async () => (observation ? observation.read({ tool: 'read_page' }) : null),
     ownsPage(candidate: Page) {
@@ -719,9 +733,11 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     },
     snapshot: snapshotText,
     observation,
+    releasePlayback,
     dispose: () => {
       page.context().off('dialog', onDialog);
       observation?.dispose();
+      void releasePlayback();
     },
   };
 }

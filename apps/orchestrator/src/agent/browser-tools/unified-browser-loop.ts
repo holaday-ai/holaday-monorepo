@@ -707,7 +707,8 @@ export async function runUnifiedBrowserLoop(
               visitedUrls: trace.filter((e) => e.ok && e.url).map((e) => e.url!),
               loginPageVisited,
               filled: formFills.length > 0,
-              typedTexts: trace.filter((e) => e.ok && e.typedText).map((e) => e.typedText!),
+              // Only form values: a search query the answer repeats is not a fill (PR #286 review).
+              typedTexts: formFills.filter((e) => e.typedText).map((e) => e.typedText!),
             };
             const denied = deniedActions(summary, run);
             const omitted = !denied.length && wantsForm && omitsFill(summary, run);
@@ -758,11 +759,21 @@ export async function runUnifiedBrowserLoop(
               );
               return titles.length > 0 && !titles.some((title) => answerText.includes(core(title)));
             });
-            if (unread.length || unnamed.length) {
+            // A read tab with no h1 and no listed title gives nothing to check the
+            // answer against: ask once for list_tabs (PR #286 review). A page with
+            // no title at all does not fail the task.
+            const untitled = opened.filter(
+              (id) => readTabs.has(id) && !readTitles.get(id) && !tabTitles.get(id),
+            );
+            const asksTitles = untitled.length > 0 && !openTabsCorrected && !concludeNow;
+            if (unread.length || unnamed.length || asksTitles) {
               const why = [
                 unread.length ? `新标签 ${unread.join('、')} 还没有读取` : '',
                 unnamed.length
                   ? `新标签的标题没写进答案：${unnamed.map((id) => `「${readTitles.get(id)}」`).join('、')}`
+                  : '',
+                asksTitles
+                  ? `新标签 ${untitled.join('、')} 没有读到标题（页面没有一级标题），请用 list_tabs 查看它的标题`
                   : '',
               ]
                 .filter(Boolean)

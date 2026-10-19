@@ -781,6 +781,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       );
     if (replayTimer) clearInterval(replayTimer);
     await replay?.dispose();
+    await tools.releasePlayback();
     tools.dispose();
     if (timeout) clearTimeout(timeout);
     clearInterval(cancelPoll);
