@@ -302,7 +302,9 @@ async function probeOnce(page: Page, intent?: string) {
               ...hit,
               disposition: 'continue',
               message: region.playerSurface
-                ? '播放器需登录验证，未播放，以下为页面公开信息。'
+                ? // FIX-27: we never press play; whether the page autoplayed is the
+                  // playback receipt's to say, not this notice's.
+                  '播放器需登录验证，未主动播放，以下为页面公开信息。'
                 : region.scope === 'comments'
                   ? '评论区需登录验证，未读取受限评论，以下为页面公开信息。'
                   : '局部组件需登录验证，未操作受限组件，以下为页面公开信息。',

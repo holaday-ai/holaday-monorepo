@@ -1,0 +1,50 @@
+{
+  "source": "Deploy-26 production core-03 (deploy26/core-evidence/core-03-json.json), 2026-10-18",
+  "prompt": "请使用云端浏览器，YouTube 公开视频页读标题/频道/播放量/发布日期（不播放）",
+  "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "answer": "已从 YouTube 公开视频页（未播放）读取到以下元数据：\n- 标题：Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)\n- 频道名称：Rick Astley\n- 播放量：1.8B views（页面显示为 \"1.8B views\"）\n- 发布日期/时间：16y ago（页面仅显示相对时间 \"16y ago\"，未显示具体日期）\n\n注：YouTube 该视频页面在公开访问时只展示相对发布时间（如 \"16y ago\"），没有直接给出绝对日期字符串；以上均按页面原样提取。",
+  "backgroundRequests": [
+    {
+      "url": "https://rr2---sn-ojnpo5-ci.googlevideo.com/videoplayback",
+      "method": "POST",
+      "action": "navigate",
+      "branch": "read_request"
+    },
+    {
+      "url": "https://www.youtube.com/api/stats/qoe",
+      "method": "POST",
+      "action": "navigate",
+      "branch": "read_request"
+    },
+    {
+      "url": "https://rr2---sn-ojnpo5-ci.googlevideo.com/videoplayback",
+      "method": "POST",
+      "action": "navigate",
+      "branch": "read_request"
+    },
+    {
+      "url": "https://www.youtube.com/api/stats/playback",
+      "method": "POST",
+      "action": "navigate",
+      "branch": "form_submit"
+    },
+    {
+      "url": "https://rr2---sn-ojnpo5-ci.googlevideo.com/videoplayback",
+      "method": "POST",
+      "action": "navigate",
+      "branch": "read_request"
+    },
+    {
+      "url": "https://www.youtube.com/api/stats/playback",
+      "method": "POST",
+      "action": "navigate",
+      "branch": "form_submit"
+    },
+    {
+      "url": "https://www.youtube.com/api/jnn/v1/GenerateIT",
+      "method": "POST",
+      "action": "navigate",
+      "branch": "unknown_post"
+    }
+  ]
+}

@@ -301,6 +301,53 @@ function sameSource(pageUrl: string | undefined, cited: string): boolean {
   }
 }
 
+/**
+ * FIX-27 (core-02): a page's text values in reading order — an accessibility
+ * tree's node values without roles, refs and link targets, a text read's
+ * non-empty lines. weather.com shows pressure as two nodes, 「"29.89"」 and
+ * 「in」, which only read as 「29.89 in」 side by side.
+ */
+function pageValues(lines: string[]): string[] {
+  const out: string[] = [];
+  for (const line of lines) {
+    if (/^-\s*\/url:/.test(line)) continue;
+    const node = /\[ref=|^-\s*text:/.test(line)
+      ? line.match(/^-\s*[a-z]+(?:\s+"(.*?)")?(?:\s*\[[^\]]*\])*\s*(?::\s*(.*))?$/)
+      : null;
+    const value = (node ? (node[2] ?? node[1] ?? '') : line).replace(/^"(.*)"$/, '$1').trim();
+    if (value) out.push(value);
+  }
+  return out;
+}
+
+/** `value` in `text` as a whole token run: 「29.89 in」 is not inside 「129.89 inch」. */
+function containsToken(text: string, value: string): boolean {
+  for (let at = text.indexOf(value); at >= 0; at = text.indexOf(value, at + 1)) {
+    const before = text[at - 1] ?? ' ';
+    const after = text[at + value.length] ?? ' ';
+    if (!/[\p{L}\p{N}.]/u.test(before) && !/[\p{L}\p{N}]/u.test(after)) return true;
+  }
+  return false;
+}
+
+/**
+ * The value printed after the fact's own label (「气压」 → 「29.86 in」) when it
+ * has the fact's shape, so a mismatch is told against the right line.
+ */
+function labelledValue(values: string[], label: string, shape: string): string | undefined {
+  const name = label.replace(/[:：]\s*$/, '');
+  if (!name) return undefined;
+  for (let i = 0; i < values.length; i += 1) {
+    if (values[i]!.replace(/[:：]\s*$/, '') !== name) continue;
+    for (let j = i + 1; j <= i + 4 && j < values.length; j += 1)
+      for (let k = 1; k <= 3 && j + k <= values.length; k += 1) {
+        const run = values.slice(j, j + k).join(' ');
+        if (/\d/.test(run) && skeleton(run) === shape) return run;
+      }
+  }
+  return undefined;
+}
+
 const NOT_READ =
   /^(?:未读到|未读取到|未找到|没有读到|页面未(?:提供|显示|列出)|not (?:shown|found|read)|n\/a)[。.]?$/i;
 
@@ -322,7 +369,8 @@ export function assessCompletionFacts(input: {
   const opensLinks = /打开.{0,12}链接|新标签|new tabs?|open .{0,20}links?/i.test(intent);
   const pages = input.pages.map((page) => {
     const lines = unescapeLiteralBreaks(page.text).split('\n').map(normalizeFact);
-    return { ...page, lines, norm: lines.join(' ') };
+    const values = pageValues(lines);
+    return { ...page, lines, norm: lines.join(' '), values, joined: values.join(' ') };
   });
   const receipts = normalizeFact(input.receipts ?? '');
   const contradictions: string[] = [];
@@ -385,12 +433,21 @@ export function assessCompletionFacts(input: {
         eligible.some(
           (page) =>
             page.norm.includes(v) ||
+            // A value split over adjacent nodes (「29.89」「in」).
+            (/\s/.test(v) && containsToken(page.joined, v)) ||
             (page.sourceURL &&
               (normalizeFact(page.sourceURL) === v || sameSource(page.sourceURL, fact.value))) ||
             page.links?.some((link) => normalizeFact(link.url) === v),
         ) ||
         // Host receipts (download, typed text, scroll) are facts whatever the binding.
         receipts.includes(v) ||
+        // FIX-27 (core-02): the address of a page the run read is that page's own
+        // fact, also when the answer files it under the results page that linked
+        // to it (Brave's /weather/today/l/… landed on /sg/city/singapore/today).
+        (/^https?:\/\//.test(v) &&
+          pages.some(
+            (page) => !!page.sourceURL && sameSource(page.sourceURL, fact.value.trim()),
+          )) ||
         // A result list ("title — URL") is proven by the listing page's own link,
         // also when the fact names the listing's tab (ACCEPT-283-R5 D16).
         (!opensLinks &&
@@ -453,9 +510,17 @@ export function assessCompletionFacts(input: {
     const value = normalizeFact(withoutNote(fact.value) ?? fact.value);
     const shape = skeleton(value);
     if (!fact.listItem && /\d/.test(value) && shape.replace(/[#\s]/g, '').length >= 2) {
-      const conflict = eligible
-        .flatMap((page) => page.lines)
-        .find((line) => /\d/.test(line) && skeleton(line).includes(shape));
+      // The value after the fact's own label first; 「0 in」 of rainfall is not
+      // the pressure's page value.
+      const name = normalizeFact(fact.name);
+      const labelled = eligible
+        .map((page) => labelledValue(page.values, name, shape))
+        .find((run) => run !== undefined);
+      const conflict =
+        labelled ??
+        eligible
+          .flatMap((page) => page.lines)
+          .find((line) => /\d/.test(line) && skeleton(line).includes(shape));
       if (conflict) {
         contradictions.push(`${label} 与页面不符；页面为「${conflict.trim().slice(0, 120)}」`);
         continue;

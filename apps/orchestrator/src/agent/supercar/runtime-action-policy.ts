@@ -23,7 +23,24 @@ export interface RuntimeActionVerdict {
 }
 
 const IRREVERSIBLE_CONTROL_RE =
-  /确认付款|确认支付|立即支付|去支付|付款|支付|提交订单|确认订单|立即下单|下单|购买|立即购买|结算|确认预订|提交预订|立即预订|转账|汇款|提现|充值|永久删除|删除账号|删除账户|删除文件|删除任务|删除项目|清空|发送消息|发送邮件|发送|发布|发表|公开分享|分享给|转发|授权扣款|自动扣费|confirm\w*(?:pay|order|booking)|paynow|proceed\w*pay|place\w*order|submit\w*order|checkout|purchase|buy\w*now|transfer|withdraw|delete|remove|publish|send|share/i;
+  /确认付款|确认支付|立即支付|去支付|付款|支付|提交订单|确认订单|立即下单|下单|购买|立即购买|结算|确认预订|提交预订|立即预订|转账|汇款|提现|充值|永久删除|删除账号|删除账户|删除文件|删除任务|删除项目|清空|发送消息|发送邮件|发送|发布|发表|公开分享|分享给|转发|授权扣款|自动扣费/;
+
+/**
+ * FIX-27 (zb core-07): English control words, as whole words of the label.
+ * Labels are compared without spaces, so a bare substring turned a wiki
+ * preview's 「…locate shared resources…」 into a 「share」 button and paused
+ * a read-only task for confirmation.
+ */
+const IRREVERSIBLE_CONTROL_EN_RE =
+  /\b(?:confirm(?:\s*\w+)?\s*(?:pay(?:ment)?|order|booking)|pay\s*now|proceed(?:\s*\w+){0,2}\s*pay(?:ment)?|place(?:\s*\w+)?\s*order|submit(?:\s*\w+)?\s*order|checkout|purchase|buy(?:\s*\w+)?\s*now|transfer|withdraw|delete|remove|publish|send|share)\b/i;
+
+/**
+ * A label that is one token (「sendmessage」「deleteaccount」「publishpost」) has
+ * no word boundaries to go by: it is matched as before, by substring (PR #286
+ * review). Only text with spaces — prose — is held to whole words.
+ */
+const IRREVERSIBLE_CONTROL_TOKEN_RE =
+  /confirm\w*(?:pay|order|booking)|paynow|proceed\w*pay|place\w*order|submit\w*order|checkout|purchase|buy\w*now|transfer|withdraw|delete|remove|publish|send|share/i;
 
 export const TRANSACTION_PAGE_RE =
   /(?:\/|\b)(?:checkout|payment|cashier|order[-_/]?confirm|confirm[-_/]?order|order[-_/]?submit|submit[-_/]?order|booking\/confirm|settlement|pay)(?:\/|\b)|订单提交/i;
@@ -51,10 +68,17 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
 
   if (action.kind === 'navigate') return { allowed: true };
 
-  const signals = [action.label, action.ariaLabel, action.title, action.placeholder, action.name]
-    .map((value) => normalize(value))
-    .filter(Boolean);
-  const matchedSignal = signals.find((value) => IRREVERSIBLE_CONTROL_RE.test(value));
+  const raw = [action.label, action.ariaLabel, action.title, action.placeholder, action.name];
+  const signals = raw.map((value) => normalize(value)).filter(Boolean);
+  const matchedSignal =
+    signals.find((value) => IRREVERSIBLE_CONTROL_RE.test(value)) ??
+    raw.find(
+      (value) =>
+        !!value?.trim() &&
+        (/\s/.test(value.trim())
+          ? IRREVERSIBLE_CONTROL_EN_RE.test(words(value))
+          : IRREVERSIBLE_CONTROL_TOKEN_RE.test(value)),
+    );
   const neutralTransactionSubmit =
     action.kind === 'click' &&
     isSubmitControl(action) &&
@@ -82,6 +106,11 @@ export function isAffirmativeActionConfirmation(message: string): boolean {
   return /确认(?:执行|继续|下单|支付)?|同意|批准|继续(?:执行|下单|支付)?|可以执行|按计划执行|yes|confirm|approve|proceed/i.test(
     text,
   );
+}
+
+/** Words of a label: 「deleteItem」「send_message」「Buy-Now」 split apart. */
+function words(value: string): string {
+  return value.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
 }
 
 function normalize(value: string | null | undefined): string {
