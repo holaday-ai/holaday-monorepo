@@ -20,7 +20,7 @@ const cases = JSON.parse(
 ) as {
   core04: { prompt: string; answer: string; page: { sourceURL: string; tree: string } };
   jaCore08: { answer: string; visitedUrls: string[] };
-  localAnswers: { c1: string; c4: string };
+  localAnswers: { c1: string; c4: string; e4: string };
 };
 
 function scriptedLoop(calls: Array<{ name: string; input: Record<string, unknown> }>) {
@@ -56,6 +56,27 @@ const finish = (summary: string) => ({ name: 'finish', input: { status: 'complet
  */
 describe('core-04: only single videos count toward 「前 N 个视频」', () => {
   const page = [{ text: cases.core04.page.tree, sourceURL: cases.core04.page.sourceURL }];
+  // The production run read these two results too; the captured tree is cut
+  // at 24 000 characters before them, so they are added as a links read.
+  const read = [
+    ...page,
+    {
+      text: '',
+      sourceURL: cases.core04.page.sourceURL,
+      links: [
+        {
+          text: 'Software Testing Course – Playwright, E2E, and AI Agents',
+          url: 'https://www.youtube.com/watch?v=jydYq7oAtD8',
+          kind: 'video',
+        },
+        {
+          text: 'Playwright Automation Full Course for Beginners | Build Production Level Framework from Scratch',
+          url: 'https://www.youtube.com/watch?v=bP3M7vCGT4g',
+          kind: 'video',
+        },
+      ],
+    },
+  ];
 
   it('reads the count the task asks for', () => {
     expect(requestedVideoCount(cases.core04.prompt)).toBe(5);
@@ -77,7 +98,7 @@ describe('core-04: only single videos count toward 「前 N 个视频」', () =>
   });
 
   it('the production answer is short: its two course cards are not videos', () => {
-    const short = videoShortfall(cases.core04.prompt, cases.core04.answer, page)!;
+    const short = videoShortfall(cases.core04.prompt, cases.core04.answer, read)!;
     expect(short).toMatchObject({ wanted: 5, videos: 3 });
     expect(short.notVideos.map((item) => item.title)).toEqual([
       'Playwright Beginner Tutorials',
@@ -87,7 +108,7 @@ describe('core-04: only single videos count toward 「前 N 个视频」', () =>
 
   it('without its own notes the page links still tell the course cards apart', () => {
     const bare = cases.core04.answer.replace(/（课程\/播放列表卡片）/g, '');
-    expect(videoShortfall(cases.core04.prompt, bare, page)).toMatchObject({ videos: 3 });
+    expect(videoShortfall(cases.core04.prompt, bare, read)).toMatchObject({ videos: 3 });
   });
 
   it('a video whose title starts like a course title is still a video', () => {
@@ -108,12 +129,12 @@ describe('core-04: only single videos count toward 「前 N 个视频」', () =>
     ]
       .map((title, i) => `${i + 1}. ${title}`)
       .join('\n');
-    expect(videoShortfall(cases.core04.prompt, five, page)).toBeNull();
+    expect(videoShortfall(cases.core04.prompt, five, read)).toBeNull();
     expect(
       videoShortfall(
         cases.core04.prompt,
         `部分完成：只找到 3 个视频，缺 2 个。\n${cases.core04.answer}`,
-        page,
+        read,
       ),
     ).toBeNull();
   });
@@ -123,7 +144,7 @@ describe('core-04: only single videos count toward 「前 N 个视频」', () =>
       .split('\n')
       .filter((line) => !/课程/.test(line))
       .join('\n');
-    expect(videoShortfall(cases.core04.prompt, three, page)).toBeNull();
+    expect(videoShortfall(cases.core04.prompt, three, read)).toBeNull();
   });
 
   const loop = (answers: string[]) => {
@@ -153,7 +174,7 @@ describe('core-04: only single videos count toward 「前 N 个视频」', () =>
       '3. Playwright with TypeScript : Learn Playwright Automation Tutorial from Scratch [6 Hours]',
     ].join('\n');
     const { outcome, seen } = await loop([cases.core04.answer, honest]);
-    expect(seen).toContain('答案里只有 3 个是单个视频');
+    expect(seen).toContain('这些不是视频');
     expect(seen).toContain('「Playwright Beginner Tutorials」');
     expect(outcome.status).toBe('completed');
     expect(outcome.status === 'completed' && outcome.summary).toMatch(/^部分完成/);
@@ -489,11 +510,16 @@ describe('course cards in other layouts', () => {
   const page = [{ text: cases.core04.page.tree, sourceURL: cases.core04.page.sourceURL }];
 
   it('the c1 and c4 answers are short against the production page read', () => {
-    expect(videoShortfall(cases.core04.prompt, cases.localAnswers.c1, page)).toMatchObject({
-      videos: 4,
-    });
-    expect(videoShortfall(cases.core04.prompt, cases.localAnswers.c4, page)?.videos).toBeLessThan(
-      5,
+    // Their other titles are real results outside the captured tree.
+    const c1 = videoShortfall(cases.core04.prompt, cases.localAnswers.c1, page)!;
+    expect(c1.notVideos.map((item) => item.title)).toEqual(['Playwright Beginner Tutorials']);
+    const c4 = videoShortfall(cases.core04.prompt, cases.localAnswers.c4, page)!;
+    expect(c4.notVideos.map((item) => item.title)).toEqual(
+      expect.arrayContaining([
+        'Playwright with TypeScript',
+        'Automation Testing - Playwright With JavaScript Tutorials - From Basic To Advanced',
+        'Playwright with Python',
+      ]),
     );
   });
 
@@ -542,5 +568,74 @@ describe('course cards in other layouts', () => {
     // Only attributes are added: every ref is still there.
     const refs = (tree: string) => [...tree.matchAll(/\[ref=(e\d+)\]/g)].map((m) => m[1]);
     expect(refs(marked)).toEqual(refs(cases.core04.page.tree));
+  });
+});
+
+/** FIX-28 e4 (bad1f6f8): three of five titles were in no read of the run, labelled 未核实 and delivered. */
+describe('titles that are not on the pages the run read', () => {
+  const page = [{ text: cases.core04.page.tree, sourceURL: cases.core04.page.sourceURL }];
+  it('the e4 answer is short: three titles were never read', () => {
+    const short = videoShortfall(cases.core04.prompt, cases.localAnswers.e4, page)!;
+    // (Its second title is a real result outside the captured tree.)
+    expect(short.notOnPage.map((item) => item.title)).toEqual(
+      expect.arrayContaining([
+        'Playwright Crash Course 2026 | Step-by-Step Automation Setup with Python & Pytest in VS Code',
+        'Complete Playwright Course - Getting Started to Advanced Level 🚀',
+        'Playwright: A Complete Guide to Modern Web Testing Framework',
+      ]),
+    );
+    expect(short.videos).toBeLessThan(5);
+  });
+  it('a bare prefix found in some description is not the title', () => {
+    const tree =
+      '- generic [ref=e1]: "FREE Complete Playwright Course covering everything from beginner"';
+    const answer =
+      '1. Complete Playwright Course - Getting Started to Advanced Level 🚀\n2. FREE Complete Playwright Course covering everything from beginner';
+    expect(
+      videoShortfall('请使用云端浏览器，YouTube 搜索「x」返回前2个视频标题', answer, [
+        { text: tree },
+      ]),
+    ).toMatchObject({ videos: 1 });
+  });
+  it('a title the page shows cut short still counts', () => {
+    const tree = `- link "Playwright Automation Tutorial for Beginners from Scr…" [ref=e1]:\n  - /url: https://www.youtube.com/watch?v=x1`;
+    const answer = [
+      'Playwright Automation Tutorial for Beginners from Scratch',
+      'What is Playwright? (🎭 Playwright introduction tutorial, features & demo)',
+    ]
+      .map((t, i) => `${i + 1}. ${t}`)
+      .join('\n');
+    expect(
+      videoShortfall('请使用云端浏览器，YouTube 搜索「x」返回前2个视频标题', answer, [
+        ...page,
+        { text: tree },
+      ]),
+    ).toBeNull();
+  });
+  const loop = (answers: string[]) => {
+    const { adapter, seen } = scriptedLoop([
+      { name: 'snapshot', input: {} },
+      ...answers.map(finish),
+    ]);
+    return runUnifiedBrowserLoop({
+      intent: cases.core04.prompt,
+      adapter,
+      maxSteps: 8,
+      execute: async () => ({
+        ok: true,
+        text: JSON.stringify({
+          tree: cases.core04.page.tree,
+          sourceURL: cases.core04.page.sourceURL,
+        }),
+      }),
+    }).then((outcome) => ({ outcome, seen: seen.join('\n') }));
+  };
+  it('sent back once naming them; repeated, it fails', async () => {
+    const once = await loop([cases.localAnswers.e4, cases.localAnswers.e4]);
+    expect(once.seen).toContain('这些标题不在本次读过的页面里');
+    expect(once.seen).toContain(
+      '「Complete Playwright Course - Getting Started to Advanced Level 🚀」',
+    );
+    expect(once.outcome).toMatchObject({ status: 'failed', failureSource: 'task' });
   });
 });

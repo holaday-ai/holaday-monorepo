@@ -172,18 +172,49 @@ export function videoShortfall(
   intent: string,
   summary: string,
   pages: ObservedEvidence[],
-): { wanted: number; videos: number; notVideos: AnsweredItem[] } | null {
+): { wanted: number; videos: number; notVideos: AnsweredItem[]; notOnPage: AnsweredItem[] } | null {
   const wanted = requestedVideoCount(intent);
   if (!wanted) return null;
   if (/^\s*(?:部分完成|未完成)/.test(summary)) return null;
   const items = answeredItems(summary, pages);
   if (!items.length) return null;
-  // Unknown items (a title the reads cannot resolve) are given the benefit of the doubt.
-  const videos = items.filter((item) => item.kind === 'video' || item.kind === 'unknown').length;
   const notVideos = items.filter((item) => item.kind === 'playlist' || item.kind === 'channel');
+  // FIX-28 (e4): a title no read of the run contains was not read from the page.
+  const read = flat(
+    pages
+      .map((page) => [page.text, ...(page.links ?? []).map((link) => link.text)].join('\n'))
+      .join('\n'),
+  );
+  const notOnPage = items.filter(
+    (item) => item.kind !== 'playlist' && item.kind !== 'channel' && !onPage(item.title, read),
+  );
+  // An item whose kind the reads cannot resolve, but which is on the page, is
+  // given the benefit of the doubt.
+  const videos = items.length - notVideos.length - notOnPage.length;
   // Too few items without padding is the general count check's (continue once,
-  // then 部分完成); this one is for items that are not videos counted as videos.
-  return videos < wanted && notVideos.length ? { wanted, videos, notVideos } : null;
+  // then 部分完成); this one is for items that are not videos, or not on the page.
+  return videos < wanted && (notVideos.length || notOnPage.length)
+    ? { wanted, videos, notVideos, notOnPage }
+    : null;
+}
+
+const flat = (text: string) => text.normalize('NFKC').replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * The title is in what was read — whole, or cut by the page (「…」 right after
+ * its first words). A bare prefix is not enough: 「Complete Playwright Course」
+ * also opens a playlist's description.
+ */
+function onPage(title: string, read: string): boolean {
+  const t = flat(title).trim();
+  if (t.length < 6 || read.includes(t)) return true;
+  for (let k = t.length - 1; k >= 20; k -= 1)
+    if (
+      read.includes(`${t.slice(0, k).trimEnd()}…`) ||
+      read.includes(`${t.slice(0, k).trimEnd()}...`)
+    )
+      return true;
+  return false;
 }
 
 /**

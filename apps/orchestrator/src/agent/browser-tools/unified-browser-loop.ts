@@ -905,9 +905,15 @@ export async function runUnifiedBrowserLoop(
           // cards, playlists and channels are not one, whatever the answer's notes say.
           const shortfall = videoShortfall(input.intent, summary, pageEvidence);
           if (shortfall) {
-            const why = `用户要前 ${shortfall.wanted} 个视频，答案里只有 ${shortfall.videos} 个是单个视频${
+            const why = `用户要前 ${shortfall.wanted} 个视频，答案里只有 ${shortfall.videos} 个是读到的单个视频${
               shortfall.notVideos.length
                 ? `；这些不是视频（课程/播放列表/合集/频道）：${shortfall.notVideos
+                    .map((item) => `「${item.title}」`)
+                    .join('、')}`
+                : ''
+            }${
+              shortfall.notOnPage.length
+                ? `；这些标题不在本次读过的页面里：${shortfall.notOnPage
                     .map((item) => `「${item.title}」`)
                     .join('、')}`
                 : ''
@@ -924,7 +930,7 @@ export async function runUnifiedBrowserLoop(
             results.push(
               toolResult(
                 call.id,
-                `${why}。只有链接是 /watch?v=（不带 list=）或 /shorts/ 的才算一个视频。请继续向下滚动（scroll 后再 snapshot 或 links）找满 ${shortfall.wanted} 个单个视频，按页面顺序编号列出；确实找不满时，summary 以「部分完成：」开头写明只找到几个、缺几个。`,
+                `${why}。只写本次读到的页面上实际有的视频标题，只有链接是 /watch?v=（不带 list=）或 /shorts/ 的才算一个视频。请继续向下滚动（scroll 后再 snapshot）找满 ${shortfall.wanted} 个单个视频，按页面顺序编号列出；确实找不满时，summary 以「部分完成：」开头写明只找到几个、缺几个。`,
                 true,
               ),
             );
