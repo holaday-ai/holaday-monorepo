@@ -56,10 +56,13 @@ export const playbackGuardScript = (token: string) => `(() => {
       } catch (_) {}
     };
     const play = HTMLMediaElement.prototype.play;
+    // Refused the way a browser refuses autoplay (NotAllowedError): a player told
+    // play() succeeded keeps redrawing its progress bar for a video that never
+    // moves, and a page that never settles leaves the replay without frames (FIX-28).
     HTMLMediaElement.prototype.play = function () {
       if (!active()) return play.apply(this, arguments);
       hold(this);
-      return Promise.resolve();
+      return Promise.reject(new DOMException('play() is not allowed in this task', 'NotAllowedError'));
     };
     state.originalPlay = play;
     document.addEventListener(
@@ -169,7 +172,8 @@ export const PLAYBACK_PING = /youtube\.com\/api\/stats\/(?:playback|watchtime)\b
 
 /** "未播放 / 没有播放 / did not play": a claim that nothing played. */
 export function claimsNoPlayback(answer: string): boolean {
-  return /(?:未|没有|没|不曾|未曾|并未|从未)\s*(?:主动\s*)?播放|(?:did\s+not|didn'?t|never)\s+play|not\s+played|no\s+playback/i.test(
+  // 「没有播放列表 / 没有播放次数 / 未显示播放量」 are about the page, not playback (FIX-28).
+  return /(?:未|没有|没|不曾|未曾|并未|从未)\s*(?:主动\s*)?播放(?!\s*(?:列表|量|次数|数|器|按钮|键|记录|历史|地址|链接|页|权限|清单))|(?:did\s+not|didn'?t|never)\s+play(?!list)|not\s+played|no\s+playback/i.test(
     answer,
   );
 }

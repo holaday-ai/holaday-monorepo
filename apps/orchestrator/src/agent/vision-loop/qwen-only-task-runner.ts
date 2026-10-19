@@ -48,7 +48,8 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   } catch {
     return { status: 'failed', reason: '浏览器暂时不可用，请稍后重试。', history: [] };
   }
-  const tools = createPlaywrightUnifiedExecutor(page);
+  // FIX-28: the task's own words decide 不播放 here too, and its receipt checks 「未播放」.
+  const tools = createPlaywrightUnifiedExecutor(page, { taskIntent: opts.intent });
   const trace: BrowserTrace[] = [];
   const perform = async (action: UnifiedBrowserAction) => {
     const result = await tools.execute(action);
@@ -114,6 +115,7 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
       requireBrowserEvidence: true,
       supportedTools: tools.supportedTools,
       probeBlocker: tools.blocker,
+      playbackReceipt: () => tools.playbackReceipt(),
       adapter: recordedBrowserAdapter(opts.messagesAdapter, {
         recorder: opts.recorder,
         userExternalId: opts.userId,
@@ -137,6 +139,7 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
         return { status: 'failed', reason: outcome.reason, history: [] };
     }
   } finally {
+    await tools.releasePlayback();
     tools.dispose();
   }
 }
