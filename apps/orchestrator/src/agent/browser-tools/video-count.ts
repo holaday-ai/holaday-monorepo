@@ -53,9 +53,78 @@ const NAME_METADATA =
 const clean = (text: string) =>
   text.normalize('NFKC').replace(DURATION_TAIL, '').replace(/\s+/g, ' ').trim().toLowerCase();
 
+const indentOf = (line: string) => line.length - line.trimStart().length;
+const HEADING = /^\s*-\s*'?heading\s+"((?:[^"\\]|\\.)*)"/;
+const LINK = /^\s*-\s*'?link\s+"((?:[^"\\]|\\.)*)"/;
+
+/**
+ * A node that says its card is a course or playlist, as a node of its own:
+ * 「16 lessons」「26 节课」「34 videos」「Course」「播放列表」「View full course」.
+ * (A title that merely contains 「Course」 is not such a node.)
+ */
+const COLLECTION_NODE =
+  /^(?:\d+\s*(?:lessons?|videos?|节课|个视频|集)|course|课程|playlist|播放列表|合集|mix|合辑|view full (?:course|playlist)|查看完整(?:课程|播放列表|列表))$/i;
+
+/** A tree node's own value: `- generic [ref=e1]: 16 lessons` → 16 lessons; `- link "Course" [ref=e2]` → Course. */
+function nodeValue(line: string): string | undefined {
+  const m = line.match(
+    /^\s*-\s*'?[a-z]+(?:\s+"((?:[^"\\]|\\.)*)")?(?:\s*\[[^\]]*\])*'?\s*(?::\s*(.*))?$/,
+  );
+  const value = (m?.[2] || m?.[1] || '').replace(/^"(.*)"$/, '$1').trim();
+  return value || undefined;
+}
+
+function subtreeEnd(lines: string[], i: number): number {
+  const own = indentOf(lines[i]!);
+  let j = i + 1;
+  while (j < lines.length && indentOf(lines[j]!) > own) j += 1;
+  return j;
+}
+
+/**
+ * FIX-28 (local c1/c4/h1): in some YouTube layouts a course card's title links
+ * to its first lesson (`/watch?v=…` without `list=`), so only the card says it
+ * is a course. A card is the largest ancestor of a heading that holds no other
+ * heading; it is a collection when one of its own nodes is a course/playlist
+ * mark. Returns the lines of collection cards' headings and their title links.
+ */
+function collectionTitleLines(lines: string[]): Set<number> {
+  const out = new Set<number>();
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!HEADING.test(lines[i]!)) continue;
+    let start = i;
+    let end = subtreeEnd(lines, i);
+    let level = indentOf(lines[i]!);
+    for (let k = i - 1; k >= 0; k -= 1) {
+      if (indentOf(lines[k]!) >= level) continue;
+      const kEnd = subtreeEnd(lines, k);
+      let headings = 0;
+      for (let j = k; j < kEnd && headings < 2; j += 1) if (HEADING.test(lines[j]!)) headings += 1;
+      if (headings > 1) break;
+      start = k;
+      end = kEnd;
+      level = indentOf(lines[k]!);
+    }
+    const titleEnd = subtreeEnd(lines, i);
+    let collection = false;
+    for (let j = start; j < end && !collection; j += 1) {
+      if (j >= i && j < titleEnd) continue;
+      const value = nodeValue(lines[j]!);
+      if (value && COLLECTION_NODE.test(value)) collection = true;
+    }
+    if (!collection) continue;
+    for (let j = i; j < titleEnd; j += 1) if (j === i || LINK.test(lines[j]!)) out.add(j);
+  }
+  return out;
+}
+
 /** Link name → the kinds of URL it points to, from every page the run read. */
-function linkKinds(pages: ObservedEvidence[]): Map<string, Set<ItemKind>> {
+function linkKinds(pages: ObservedEvidence[]): {
+  kinds: Map<string, Set<ItemKind>>;
+  collections: Set<string>;
+} {
   const kinds = new Map<string, Set<ItemKind>>();
+  const collections = new Set<string>();
   const add = (text: string, url: string) => {
     const kind = youtubeLinkKind(url);
     const name = clean(text);
@@ -70,6 +139,14 @@ function linkKinds(pages: ObservedEvidence[]): Map<string, Set<ItemKind>> {
     // An accessibility tree: `- link "Name" [ref=…]:` followed by `- /url: …`;
     // a video link's name may also be repeated in a `- text:` child.
     const lines = page.text.split('\n');
+    // Course/playlist cards by their own marks, whatever their title links to.
+    for (const j of collectionTitleLines(lines)) {
+      const quotedLine = lines[j]!.trimStart().startsWith("- '");
+      const raw = lines[j]!.match(HEADING)?.[1] ?? lines[j]!.match(LINK)?.[1];
+      if (!raw) continue;
+      const title = (quotedLine ? raw.replace(/''/g, "'") : raw).replace(/\\"/g, '"');
+      collections.add(clean(title));
+    }
     for (let i = 0; i < lines.length; i += 1) {
       // A line holding ": " is single-quoted YAML: `- 'link "A : B" [ref=…]':`.
       const quoted = lines[i]!.trimStart().startsWith("- '");
@@ -106,7 +183,7 @@ function linkKinds(pages: ObservedEvidence[]): Map<string, Set<ItemKind>> {
       for (const t of texts) add(t, url);
     }
   }
-  return kinds;
+  return { kinds, collections };
 }
 
 /** The model's own note on an item: 「（课程/播放列表卡片）」「（不是视频）」. */
@@ -125,7 +202,7 @@ export function answeredItems(summary: string, pages: ObservedEvidence[]): Answe
   const lines = summary.split('\n').map((line) => line.trim());
   let items = lines.filter((line) => /^\d{1,2}\s*[.)、．:：]/.test(line));
   if (items.length < 2) items = lines.filter((line) => /^[-*•]\s+\S/.test(line));
-  const kinds = linkKinds(pages);
+  const { kinds, collections } = linkKinds(pages);
   return items.map((line) => {
     const body = line.replace(/^(?:\d{1,2}\s*[.)、．:：]|[-*•])\s*/, '');
     const urls = [...body.matchAll(/https?:\/\/[^\s）)」"'，,；;]+/g)].map((m) => m[0]);
@@ -144,6 +221,20 @@ export function answeredItems(summary: string, pages: ObservedEvidence[]): Answe
       if (kind && kind !== 'video') return { line, title, kind, why: `链接 ${url}` };
     }
     const key = clean(title);
+    // A card that marks itself a course/playlist wins over where its title links.
+    if (
+      collections.has(key) ||
+      (key.length >= 6 &&
+        [...collections].some(
+          (name) => name.startsWith(key) && NAME_METADATA.test(name.slice(key.length)),
+        ))
+    )
+      return {
+        line,
+        title,
+        kind: 'playlist',
+        why: '页面上这张卡片标着课程/播放列表（如「N 节课」「Course」）',
+      };
     let seen = kinds.get(key);
     // A link whose name is the title followed by its length, channel or card kind.
     if (!seen && key.length >= 6)
@@ -225,6 +316,9 @@ function onPage(title: string, read: string): boolean {
  */
 export function markYoutubeCollections(tree: string): string {
   const lines = tree.split('\n');
+  for (const j of collectionTitleLines(lines))
+    if (LINK.test(lines[j]!) && !/\[youtube=/.test(lines[j]!))
+      lines[j] = lines[j]!.replace(/(\[ref=[^\]]+\])/, '$1 [youtube=playlist]');
   for (let i = 0; i < lines.length; i += 1) {
     if (!/^\s*-\s*'?link\b.*\[ref=[^\]]+\]/.test(lines[i]!) || /\[youtube=/.test(lines[i]!))
       continue;

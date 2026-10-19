@@ -639,3 +639,62 @@ describe('titles that are not on the pages the run read', () => {
     expect(once.outcome).toMatchObject({ status: 'failed', failureSource: 'task' });
   });
 });
+
+/**
+ * FIX-28 local c1/c4/h1: in some layouts a course card's title links to its
+ * first lesson (no list=). The card's own marks (「16 节课」, 「课程」, 「View
+ * full course」) say what it is.
+ */
+describe('a course card whose title links to its first lesson', () => {
+  const tree = [
+    '- generic [ref=e1] [cursor=pointer]:',
+    '  - link [ref=e2]:',
+    '    - /url: https://www.youtube.com/watch?v=lesson1',
+    '    - generic [ref=e3]: 16 节课',
+    '  - generic [ref=e4]:',
+    '    - heading "Playwright with TypeScript" [level=3] [ref=e5]:',
+    '      - link "Playwright with TypeScript" [ref=e6]:',
+    '        - /url: https://www.youtube.com/watch?v=lesson1',
+    '    - generic [ref=e7]:',
+    '      - link "SDET- QA" [ref=e8]:',
+    '        - /url: https://www.youtube.com/@sdetpavan',
+    '      - link "课程" [ref=e9]:',
+    '        - /url: https://www.youtube.com/@sdetpavan',
+    '- generic [ref=e10] [cursor=pointer]:',
+    '  - link [ref=e11]:',
+    '    - /url: https://www.youtube.com/watch?v=full1',
+    '    - generic [ref=e12]: 3:32:30',
+    '  - generic [ref=e13]:',
+    '    - heading "Playwright Automation Full Course for Beginners 3小时32分钟" [level=3] [ref=e14]:',
+    '      - link "Playwright Automation Full Course for Beginners 3小时32分钟" [ref=e15]:',
+    '        - /url: https://www.youtube.com/watch?v=full1',
+    '        - text: Playwright Automation Full Course for Beginners',
+    '    - generic [ref=e16]: 9 chapters',
+  ].join('\n');
+  it('the course card is a playlist, the 「Full Course」 video is a video', () => {
+    expect(
+      answeredItems(
+        '1. Playwright with TypeScript\n2. Playwright Automation Full Course for Beginners',
+        [{ text: tree }],
+      ).map((item) => item.kind),
+    ).toEqual(['playlist', 'video']);
+  });
+  it('the page read marks the course title, not the video', () => {
+    const marked = markYoutubeCollections(tree).split('\n');
+    expect(marked.find((l) => l.includes('link "Playwright with TypeScript"'))).toContain(
+      '[youtube=playlist]',
+    );
+    expect(marked.find((l) => l.includes('link "Playwright Automation Full Course'))).not.toContain(
+      '[youtube=playlist]',
+    );
+  });
+  it('an answer padded with it is short', () => {
+    expect(
+      videoShortfall(
+        '请使用云端浏览器，YouTube 搜索「x」返回前2个视频标题',
+        '1. Playwright with TypeScript\n2. Playwright Automation Full Course for Beginners',
+        [{ text: tree }],
+      ),
+    ).toMatchObject({ videos: 1 });
+  });
+});
