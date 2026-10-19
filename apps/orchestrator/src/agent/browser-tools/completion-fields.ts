@@ -360,6 +360,27 @@ function labelledValue(values: string[], label: string, shape: string): string |
   return undefined;
 }
 
+/**
+ * The page value a quote is only the label of (「You clicked」 / 「You clicked:」
+ * of 「You clicked: Cancel」), when the quote appears nowhere else in full.
+ */
+function cutQuote(candidates: string[], values: string[]): string | undefined {
+  for (const v of candidates) {
+    const bare = v.replace(/[:：]\s*$/, '').trim();
+    if (bare.length < 3) continue;
+    const holding = values.filter((value) => value.includes(v));
+    if (!holding.length) continue;
+    const cut = (value: string) => {
+      const colon = value.search(/[:：]/);
+      return (
+        colon > 0 && value.slice(0, colon).trim() === bare && /\S/.test(value.slice(colon + 1))
+      );
+    };
+    if (holding.every((value) => value !== v && cut(value))) return holding[0];
+  }
+  return undefined;
+}
+
 const NOT_READ =
   /^(?:未读到|未读取到|未找到|没有读到|页面未(?:提供|显示|列出)|not (?:shown|found|read)|n\/a)[。.]?$/i;
 
@@ -476,9 +497,30 @@ export function assessCompletionFacts(input: {
                 listedNear(page.norm, v, normalizeFact(fact.sourceURL!))),
           )),
     );
-    if (grounded) continue;
-    if (fact.quote && candidates.some((v) => normalizeFact(input.toolTexts ?? '').includes(v)))
-      continue;
+    // FIX-28 (rb2 core-10): 「You clicked」 is only the front of the page's 「You
+    // clicked: Cancel」 — a label quoted without its value is not the page's text.
+    const inTools =
+      !grounded &&
+      fact.quote &&
+      candidates.some((v) => normalizeFact(input.toolTexts ?? '').includes(v));
+    if ((grounded || inTools) && fact.quote) {
+      const cut = cutQuote(
+        candidates,
+        pages.flatMap((page) => page.values),
+      );
+      if (cut) {
+        contradictions.push(`${label} 只抄了页面原文的前半截`);
+        // The page's own casing of the whole text, for the model to copy.
+        const escaped = cut.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+        const whole =
+          input.pages
+            .map((page) => unescapeLiteralBreaks(page.text).match(new RegExp(escaped, 'i'))?.[0])
+            .find(Boolean) ?? cut;
+        misquoted.push({ quote: fact.value, nearest: whole });
+        continue;
+      }
+    }
+    if (grounded || inTools) continue;
     if (!pages.length) {
       contradictions.push(`${label} 没有成功读取的页面可以支持（页面未加载或未读取）`);
       continue;

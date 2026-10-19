@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { unvisitedChecks } from './action-claims.js';
 import { observationState } from './cloud-observation.js';
-import { observedEvidence } from './completion-fields.js';
+import { assessCompletionFacts, observedEvidence } from './completion-fields.js';
 import { claimsNoPlayback, installPlaybackGuard } from './playback-guard.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
@@ -33,6 +33,7 @@ const cases = JSON.parse(
     };
     failingAnswer: string;
   };
+  rb2Core10: string;
 };
 
 function scriptedLoop(calls: Array<{ name: string; input: Record<string, unknown> }>) {
@@ -805,5 +806,67 @@ describe('YouTube headings carry the kind of their card', () => {
       { level: 3, text: 'Video B 12分钟18秒钟', youtube: 'video' },
       { level: 2, text: 'Other' },
     ]);
+  });
+});
+
+/**
+ * FIX-28 rb2 core-10: the page said 「You successfully clicked an alert」 and
+ * 「You clicked: Cancel」; the answer quoted 「You clicked」 and 「You clicked:」,
+ * which matched as substrings of the second. A label quoted without its value
+ * is sent back with the page's whole text.
+ */
+describe('a quote that is only the label of a 「label: value」 text', () => {
+  const tree = [
+    '- heading "JavaScript Alerts" [level=3] [ref=e1]',
+    '- heading "Result:" [level=4] [ref=e17]',
+    '- paragraph [ref=e23]: "You clicked: Cancel"',
+    '- paragraph [ref=e24]: You successfully clicked an alert',
+    '- paragraph [ref=e25]: "You entered: null"',
+  ].join('\n');
+  const pages = [{ text: tree, sourceURL: 'https://the-internet.herokuapp.com/javascript_alerts' }];
+  const check = (summary: string) => assessCompletionFacts({ summary, pages, intent: 'x' });
+  it('the rb2 answer is a misquote, with the whole text', () => {
+    const facts = check(cases.rb2Core10);
+    expect(facts.contradictions.join('；')).toContain('只抄了页面原文');
+    expect((facts.misquoted ?? []).map((m) => m.nearest)).toEqual(
+      expect.arrayContaining([expect.stringContaining('You clicked: Cancel')]),
+    );
+  });
+  it.each([
+    '页面结果为「You clicked: Cancel」',
+    '页面结果为「You successfully clicked an alert」',
+    '页面结果为「You entered: null」',
+    '结果标题为「Result:」',
+  ])('a whole text passes: %s', (summary) => {
+    expect(check(summary).contradictions).toEqual([]);
+  });
+  it.each(['页面结果为「You clicked」', '页面结果为「You clicked:」', '页面结果为「You entered」'])(
+    'a cut one is sent back: %s',
+    (summary) => {
+      expect(check(summary).contradictions.join('')).toContain('只抄了页面原文');
+    },
+  );
+});
+
+describe('the loop sends a cut quote back with the whole text', () => {
+  const tree = [
+    '- heading "Result:" [level=4] [ref=e17]',
+    '- paragraph [ref=e23]: "You clicked: Cancel"',
+  ].join('\n');
+  it('「You clicked」 is returned once; 「You clicked: Cancel」 is delivered', async () => {
+    const { adapter, seen } = scriptedLoop([
+      { name: 'read_page', input: {} },
+      finish('点击 JS Confirm 后页面结果为「You clicked」。'),
+      finish('点击 JS Confirm 后页面结果为「You clicked: Cancel」。'),
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      // (A neutral task: the JavaScript-alerts dialog receipt is another check.)
+      intent: '请使用云端浏览器，读出页面上的结果',
+      adapter,
+      maxSteps: 6,
+      execute: async () => ({ ok: true, text: tree }),
+    });
+    expect(seen.join('\n')).toContain('最接近的是「You clicked: Cancel」');
+    expect(outcome.status === 'completed' && outcome.summary).toContain('「You clicked: Cancel」');
   });
 });
