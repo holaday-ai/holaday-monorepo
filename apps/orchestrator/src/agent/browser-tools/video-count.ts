@@ -135,6 +135,11 @@ function linkKinds(pages: ObservedEvidence[]): {
   };
   for (const page of pages) {
     for (const link of page.links ?? []) add(link.text, link.url);
+    // The read's headings, which list every card, with the kind its DOM says.
+    for (const card of page.youtubeCards ?? []) {
+      if (card.kind === 'playlist') collections.add(clean(card.title));
+      else add(card.title, 'https://www.youtube.com/watch?v=card');
+    }
     const indent = (line: string) => line.length - line.trimStart().length;
     // An accessibility tree: `- link "Name" [ref=…]:` followed by `- /url: …`;
     // a video link's name may also be repeated in a `- text:` child.
@@ -332,4 +337,52 @@ export function markYoutubeCollections(tree: string): string {
     }
   }
   return lines.join('\n');
+}
+
+/**
+ * FIX-28 (local c1/c4/h1/v2): the snapshot tree is cut at 24 000 characters,
+ * but its `headings` list carries every result card's title — without a
+ * link or a kind — and the model took titles from it, courses included. On a
+ * YouTube page each card's own DOM says what it is; this in-page expression
+ * returns `{ title, kind }` for the result cards: a course/playlist/mix card
+ * (a `list=`/`/playlist` link anywhere in it, or a lessons/course badge) or a
+ * single video (`/watch?v=` or `/shorts/`).
+ */
+export const YOUTUBE_CARD_KINDS_EXPRESSION = `(() => {
+  const MARK = /^(?:\\d+\\s*(?:lessons?|videos?|节课|个视频|集)|course|课程|playlist|播放列表|合集|mix|合辑)$/i;
+  const out = [];
+  const cards = document.querySelectorAll(
+    'ytd-video-renderer, ytd-playlist-renderer, ytd-radio-renderer, yt-lockup-view-model, ytd-reel-item-renderer, ytd-grid-video-renderer',
+  );
+  for (const card of cards) {
+    if (card.parentElement && card.parentElement.closest('yt-lockup-view-model, ytd-playlist-renderer')) continue;
+    const heading = card.querySelector('h3') || card.querySelector('#video-title');
+    const title = ((heading && heading.textContent) || '').replace(/\\s+/g, ' ').trim();
+    if (!title) continue;
+    const hrefs = Array.from(card.querySelectorAll('a[href]')).map((a) => a.getAttribute('href') || '');
+    const marked = Array.from(card.querySelectorAll('span, div, a, p, badge-shape')).some(
+      (node) => node.children.length === 0 && MARK.test((node.textContent || '').trim()),
+    );
+    const collection =
+      card.matches('ytd-playlist-renderer, ytd-radio-renderer') ||
+      hrefs.some((href) => /[?&]list=|^\\/playlist\\b|youtube\\.com\\/playlist\\b/.test(href)) ||
+      marked;
+    const video = hrefs.some((href) => /\\/watch\\?v=|\\/shorts\\//.test(href));
+    if (collection || video) out.push({ title: title.slice(0, 300), kind: collection ? 'playlist' : 'video' });
+    if (out.length >= 200) break;
+  }
+  return out;
+})()`;
+
+/** Headings with the kind of the YouTube card they title (exact or title-plus-length match). */
+export function markYoutubeHeadings<T extends { text?: string }>(
+  headings: T[],
+  cards: Array<{ title: string; kind: string }>,
+): Array<T & { youtube?: string }> {
+  const byTitle = new Map(cards.map((card) => [clean(card.title), card.kind]));
+  return headings.map((heading) => {
+    const key = clean(String(heading.text ?? ''));
+    const kind = byTitle.get(key);
+    return kind ? { ...heading, youtube: kind } : heading;
+  });
 }

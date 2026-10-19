@@ -5,6 +5,8 @@ export interface ObservedEvidence {
   tabId?: string;
   sourceURL?: string;
   links?: Array<{ text: string; url: string; kind?: string }>;
+  /** FIX-28: YouTube result cards' titles and kinds, from the read's headings. */
+  youtubeCards?: Array<{ title: string; kind: string }>;
 }
 /**
  * BROWSER-AUTOPILOT-1 — completion integrity, deliberately small.
@@ -62,9 +64,19 @@ export function observedEvidence(text: string, decoded: string, url?: string): O
           !!item && typeof item.text === 'string' && typeof item.url === 'string',
       )
     : [];
+  const youtubeCards = Array.isArray(meta.headings)
+    ? meta.headings.flatMap((heading) =>
+        heading &&
+        typeof heading.text === 'string' &&
+        (heading.youtube === 'playlist' || heading.youtube === 'video')
+          ? [{ title: heading.text, kind: heading.youtube as string }]
+          : [],
+      )
+    : [];
   return {
     text: decoded,
     links,
+    ...(youtubeCards.length ? { youtubeCards } : {}),
     ...(typeof meta.tabId === 'string' ? { tabId: meta.tabId } : {}),
     ...(typeof meta.sourceURL === 'string'
       ? { sourceURL: meta.sourceURL }

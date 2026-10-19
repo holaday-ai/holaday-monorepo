@@ -4,12 +4,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { unvisitedChecks } from './action-claims.js';
 import { observationState } from './cloud-observation.js';
+import { observedEvidence } from './completion-fields.js';
 import { claimsNoPlayback, installPlaybackGuard } from './playback-guard.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import {
+  YOUTUBE_CARD_KINDS_EXPRESSION,
   answeredItems,
   markYoutubeCollections,
+  markYoutubeHeadings,
   requestedVideoCount,
   videoShortfall,
   youtubeLinkKind,
@@ -21,6 +24,15 @@ const cases = JSON.parse(
   core04: { prompt: string; answer: string; page: { sourceURL: string; tree: string } };
   jaCore08: { answer: string; visitedUrls: string[] };
   localAnswers: { c1: string; c4: string; e4: string };
+  headingsRead: {
+    read: {
+      tabId?: string;
+      sourceURL: string;
+      tree: string;
+      headings: Array<Record<string, unknown>>;
+    };
+    failingAnswer: string;
+  };
 };
 
 function scriptedLoop(calls: Array<{ name: string; input: Record<string, unknown> }>) {
@@ -247,6 +259,30 @@ describe('a results page that starts with two course cards', () => {
       expect(click.ok).toBe(true);
     } finally {
       tools.dispose();
+      await context.close();
+    }
+  });
+
+  it.each([
+    ['title links with list=', (h: string) => h],
+    ['title links to its first lesson', (h: string) => h.replace(/&amp;list=PL[a-z]+"/g, '"')],
+  ])('the card kinds in the DOM (%s)', async (_label, layout) => {
+    const context = await browser.newContext();
+    await context.route('https://www.youtube.com/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: layout(html) }),
+    );
+    const page = await context.newPage();
+    try {
+      await page.goto(URL_);
+      const cards = (await page.evaluate(YOUTUBE_CARD_KINDS_EXPRESSION)) as Array<{
+        title: string;
+        kind: string;
+      }>;
+      const kindOf = (title: string) => cards.find((card) => card.title === title)?.kind;
+      expect(kindOf('Playwright Beginner Tutorials')).toBe('playlist');
+      expect(kindOf('Playwright with TypeScript')).toBe('playlist');
+      for (const title of VIDEOS) expect(kindOf(title)).toBe('video');
+    } finally {
       await context.close();
     }
   });
@@ -696,5 +732,78 @@ describe('a course card whose title links to its first lesson', () => {
         [{ text: tree }],
       ),
     ).toMatchObject({ videos: 1 });
+  });
+});
+
+/**
+ * FIX-28 root cause of local c1/c4/h1/v2: the snapshot tree is cut at 24 000
+ * characters while its headings list every card's title, without a kind; the
+ * model took course titles from it and the count could not tell them. Each
+ * heading of a YouTube card now carries the kind its card's DOM says.
+ */
+describe('YouTube headings carry the kind of their card', () => {
+  const text = JSON.stringify(cases.headingsRead.read);
+  const read = [
+    observedEvidence(
+      text,
+      `${cases.headingsRead.read.tree}\n${cases.headingsRead.read.headings.map((h) => h.text).join('\n')}`,
+    ),
+  ];
+
+  it('the read has the cards the tree was cut before', () => {
+    expect(cases.headingsRead.read.tree).not.toContain('Playwright with Python');
+    expect(read[0]!.youtubeCards).toEqual(
+      expect.arrayContaining([
+        { title: 'Playwright with Python', kind: 'playlist' },
+        { title: 'Playwright with TypeScript', kind: 'playlist' },
+      ]),
+    );
+  });
+
+  it('the answer that took course titles from the headings is short', () => {
+    const short = videoShortfall(cases.core04.prompt, cases.headingsRead.failingAnswer, read)!;
+    expect(short.notVideos.map((item) => item.title)).toEqual(
+      expect.arrayContaining([
+        'Playwright with TypeScript',
+        'Automation Testing - Playwright With JavaScript Tutorials - From Basic To Advanced',
+        'Playwright with Python',
+      ]),
+    );
+  });
+
+  it('the loop sends it back', async () => {
+    const { adapter, seen } = scriptedLoop([
+      { name: 'snapshot', input: {} },
+      finish(cases.headingsRead.failingAnswer),
+      finish(cases.headingsRead.failingAnswer),
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: cases.core04.prompt,
+      adapter,
+      maxSteps: 6,
+      execute: async () => ({ ok: true, text }),
+    });
+    expect(seen.join('\n')).toContain('「Playwright with Python」');
+    expect(outcome.status).toBe('failed');
+  });
+
+  it('marks headings by exact title or title plus length', () => {
+    expect(
+      markYoutubeHeadings(
+        [
+          { level: 3, text: 'Course A' },
+          { level: 3, text: 'Video B 12分钟18秒钟' },
+          { level: 2, text: 'Other' },
+        ],
+        [
+          { title: 'Course A', kind: 'playlist' },
+          { title: 'Video B', kind: 'video' },
+        ],
+      ),
+    ).toEqual([
+      { level: 3, text: 'Course A', youtube: 'playlist' },
+      { level: 3, text: 'Video B 12分钟18秒钟', youtube: 'video' },
+      { level: 2, text: 'Other' },
+    ]);
   });
 });

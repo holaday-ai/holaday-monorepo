@@ -14,7 +14,11 @@ import { ensureExecutionViewport } from './browser-viewport.js';
 import { redactPageText } from './page-redaction.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import { type UnifiedBrowserAction, isMutatingBrowserAction } from './unified-tools.js';
-import { markYoutubeCollections } from './video-count.js';
+import {
+  YOUTUBE_CARD_KINDS_EXPRESSION,
+  markYoutubeCollections,
+  markYoutubeHeadings,
+} from './video-count.js';
 
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 const SENSITIVE_URL_PARAMETER =
@@ -1093,7 +1097,16 @@ export class CloudObservation {
           ...(entry.index.includes('.') ? {} : { section: Number(entry.index) }),
         })),
       ];
-      const headings = JSON.parse(await redactPageText(frame, JSON.stringify(rawHeadings)));
+      // FIX-28: on YouTube, each heading that titles a result card says what the card is.
+      const cards = /(?:^|\.)youtube\.com$/.test(host)
+        ? ((await frame.evaluate(YOUTUBE_CARD_KINDS_EXPRESSION).catch(() => [])) as Array<{
+            title: string;
+            kind: string;
+          }>)
+        : [];
+      const headings = JSON.parse(
+        await redactPageText(frame, JSON.stringify(markYoutubeHeadings(rawHeadings, cards))),
+      );
       const frames: Array<Record<string, unknown>> = [];
       if (frame === page.mainFrame()) {
         let remaining = 16_000;
