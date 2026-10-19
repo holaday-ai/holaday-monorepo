@@ -42,8 +42,13 @@ export function youtubeLinkKind(url: string): ItemKind | null {
   return null;
 }
 
+/** A video link's name ends with its length: 「… 12 minutes, 18 seconds」「… 12分钟18秒钟」. */
 const DURATION_TAIL =
-  /\s+(?:\d+\s+(?:hours?|minutes?|seconds?|小时|分钟|秒)[,，\s]*)+(?:\s*(?:Now playing|正在播放))?$/i;
+  /(?:\s+(?:\d+\s+(?:hours?|minutes?|seconds?)[,，]?\s*)+|\s*(?:\d+\s*(?:小时|分钟|分|秒钟|秒))+)(?:\s*(?:Now playing|正在播放))?$/i;
+
+/** What may follow a title in a link's name: its length, channel or card kind, not more title. */
+const NAME_METADATA =
+  /^\s*(?:[·•|,，]|by\s|作者|课程|Course\b|播放列表|Playlist\b|合集|频道|\d+\s*(?:lessons?|videos?|节课|个视频|集|小时|分钟|秒|hours?|minutes?|seconds?))/i;
 
 const clean = (text: string) =>
   text.normalize('NFKC').replace(DURATION_TAIL, '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -61,6 +66,7 @@ function linkKinds(pages: ObservedEvidence[]): Map<string, Set<ItemKind>> {
   };
   for (const page of pages) {
     for (const link of page.links ?? []) add(link.text, link.url);
+    const indent = (line: string) => line.length - line.trimStart().length;
     // An accessibility tree: `- link "Name" [ref=…]:` followed by `- /url: …`;
     // a video link's name may also be repeated in a `- text:` child.
     const lines = page.text.split('\n');
@@ -69,7 +75,22 @@ function linkKinds(pages: ObservedEvidence[]): Map<string, Set<ItemKind>> {
       const quoted = lines[i]!.trimStart().startsWith("- '");
       const raw = lines[i]!.match(/-\s*'?link\s+"((?:[^"\\]|\\.)*)"/)?.[1];
       const name = raw && quoted ? raw.replace(/''/g, "'") : raw;
+      // A card title that is a heading: the first YouTube link inside it.
+      const heading = lines[i]!.match(/-\s*'?heading\s+"((?:[^"\\]|\\.)*)"/)?.[1];
+      if (heading) {
+        const own = indent(lines[i]!);
+        for (let j = i + 1; j < Math.min(lines.length, i + 8) && indent(lines[j]!) > own; j += 1) {
+          const u = lines[j]!.match(/-\s*\/url:\s*(\S+)/)?.[1];
+          if (u && youtubeLinkKind(u)) {
+            add((quoted ? heading.replace(/''/g, "'") : heading).replace(/\\"/g, '"'), u);
+            break;
+          }
+        }
+      }
       if (!name) continue;
+      // The snapshot's own mark on a course/playlist link (markYoutubeCollections).
+      if (/\[youtube=playlist\]/.test(lines[i]!))
+        add(name.replace(/\\"/g, '"'), 'https://www.youtube.com/playlist?list=marked');
       let url: string | undefined;
       const texts: string[] = [];
       // The link's own children only: its first /url, up to the next link.
@@ -122,7 +143,13 @@ export function answeredItems(summary: string, pages: ObservedEvidence[]): Answe
       const kind = youtubeLinkKind(url);
       if (kind && kind !== 'video') return { line, title, kind, why: `链接 ${url}` };
     }
-    const seen = kinds.get(clean(title));
+    const key = clean(title);
+    let seen = kinds.get(key);
+    // A link whose name is the title followed by its length, channel or card kind.
+    if (!seen && key.length >= 6)
+      for (const [name, set] of kinds)
+        if (name.startsWith(key) && NAME_METADATA.test(name.slice(key.length)))
+          seen = new Set([...(seen ?? []), ...set]);
     if (seen?.has('video')) return { line, title, kind: 'video' };
     if (seen?.size) {
       const kind = [...seen][0]!;
@@ -157,4 +184,27 @@ export function videoShortfall(
   // Too few items without padding is the general count check's (continue once,
   // then 部分完成); this one is for items that are not videos counted as videos.
   return videos < wanted && notVideos.length ? { wanted, videos, notVideos } : null;
+}
+
+/**
+ * FIX-28: on a YouTube page, a link to a course or playlist is marked in the
+ * snapshot (`[youtube=playlist]`), so the model reading the page sees that it
+ * is not one video. The mark sits with the link's other attributes; refs and
+ * names are untouched.
+ */
+export function markYoutubeCollections(tree: string): string {
+  const lines = tree.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^\s*-\s*'?link\b.*\[ref=[^\]]+\]/.test(lines[i]!) || /\[youtube=/.test(lines[i]!))
+      continue;
+    for (let j = i + 1; j < Math.min(lines.length, i + 4); j += 1) {
+      if (/^\s*-\s*'?link\b/.test(lines[j]!)) break;
+      const url = lines[j]!.match(/-\s*\/url:\s*(\S+)/)?.[1];
+      if (!url) continue;
+      if (youtubeLinkKind(url) === 'playlist')
+        lines[i] = lines[i]!.replace(/(\[ref=[^\]]+\])/, '$1 [youtube=playlist]');
+      break;
+    }
+  }
+  return lines.join('\n');
 }

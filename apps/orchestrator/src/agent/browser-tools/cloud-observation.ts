@@ -12,6 +12,7 @@ import {
 import { scrollWithEvidence } from './browser-scroll.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { redactPageText } from './page-redaction.js';
+import { markYoutubeCollections } from './video-count.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import { type UnifiedBrowserAction, isMutatingBrowserAction } from './unified-tools.js';
 
@@ -1041,10 +1042,18 @@ export class CloudObservation {
       this.virtualRefs.set(frame, virtual);
       // Snapshot reads may overlap harmless page updates; mutation actions still validate the resulting revision.
       // Rewrite only URL scalar lines; never shorten real resource identities.
-      const safeTree = tree.replace(
+      const urlSafe = tree.replace(
         /^(\s*- \/url: )(.*)$/gm,
         (_m, p, u) => p + safeObservationUrl(String(u).replace(/^"|"$/g, ''), frame.url()),
       );
+      // FIX-28 (Deploy-27 core-04): course cards and playlists read as such.
+      let host = '';
+      try {
+        host = new URL(frame.url()).hostname;
+      } catch {}
+      const safeTree = /(?:^|\.)youtube\.com$/.test(host)
+        ? markYoutubeCollections(urlSafe)
+        : urlSafe;
       const before = this.observations.get(frame);
       const prior = before && {
         revision: before.revision,

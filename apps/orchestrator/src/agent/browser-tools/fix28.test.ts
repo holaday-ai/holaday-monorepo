@@ -9,6 +9,7 @@ import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.j
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import {
   answeredItems,
+  markYoutubeCollections,
   requestedVideoCount,
   videoShortfall,
   youtubeLinkKind,
@@ -19,6 +20,7 @@ const cases = JSON.parse(
 ) as {
   core04: { prompt: string; answer: string; page: { sourceURL: string; tree: string } };
   jaCore08: { answer: string; visitedUrls: string[] };
+  localAnswers: { c1: string; c4: string };
 };
 
 function scriptedLoop(calls: Array<{ name: string; input: Record<string, unknown> }>) {
@@ -205,6 +207,28 @@ describe('a results page that starts with two course cards', () => {
     await tools.execute({ tool: 'navigate', url: URL_ } as never);
     return { context, tools };
   };
+
+  it('the snapshot marks the course cards, and refs still click', async () => {
+    const { context, tools } = await open();
+    try {
+      const read = JSON.parse((await tools.execute({ tool: 'snapshot' } as never)).text);
+      const tree = String(read.tree);
+      expect(tree).toMatch(
+        /link "Playwright Beginner Tutorials" \[ref=e\d+\][^\n]*\[youtube=playlist\]/,
+      );
+      expect(tree).not.toMatch(/link "What is Playwright\?[^\n]*\[youtube=playlist\]/);
+      const ref = tree.match(/link "Playwright Beginner Tutorials" \[ref=(e\d+)\]/)![1];
+      const click = await tools.execute({
+        tool: 'click',
+        ref,
+        observationRevision: read.observationRevision,
+      } as never);
+      expect(click.ok).toBe(true);
+    } finally {
+      tools.dispose();
+      await context.close();
+    }
+  });
 
   it('links: course cards are playlists, results are videos', async () => {
     const { context, tools } = await open();
@@ -451,5 +475,72 @@ describe('pages named as checked must have been opened', () => {
   it('a repeat is not delivered as completed', async () => {
     const { outcome } = await loop([claimed, claimed]);
     expect(outcome.status).toBe('failed');
+  });
+});
+
+/**
+ * FIX-28 local runs c1/c4 (559ae994) padded with course cards and were
+ * delivered: the cards were not recognised in the page they read (not
+ * reproducible later; YouTube serves several layouts). The page read now marks
+ * course/playlist links, and a title is matched by heading and by a link name
+ * that adds only its length, channel or card kind.
+ */
+describe('course cards in other layouts', () => {
+  const page = [{ text: cases.core04.page.tree, sourceURL: cases.core04.page.sourceURL }];
+
+  it('the c1 and c4 answers are short against the production page read', () => {
+    expect(videoShortfall(cases.core04.prompt, cases.localAnswers.c1, page)).toMatchObject({
+      videos: 4,
+    });
+    expect(videoShortfall(cases.core04.prompt, cases.localAnswers.c4, page)?.videos).toBeLessThan(
+      5,
+    );
+  });
+
+  it('a course title that is only a heading is told by the link inside it', () => {
+    const tree = [
+      '- heading "Playwright with Python" [level=3] [ref=e10]:',
+      '  - generic [ref=e11]:',
+      '    - link [ref=e12]:',
+      '      - /url: https://www.youtube.com/watch?v=abc&list=PLpython',
+      '- heading "Real Video Title" [level=3] [ref=e20]:',
+      '  - link "Real Video Title" [ref=e21]:',
+      '    - /url: https://www.youtube.com/watch?v=real1',
+    ].join('\n');
+    expect(
+      answeredItems('1. Playwright with Python\n2. Real Video Title', [{ text: tree }]).map(
+        (item) => item.kind,
+      ),
+    ).toEqual(['playlist', 'video']);
+  });
+
+  it('a link name that adds the card kind, channel or length after the title', () => {
+    const tree = [
+      '- link "Playwright with Java 课程 · SDET- QA" [ref=e1]:',
+      '  - /url: https://www.youtube.com/playlist?list=PLjava',
+      '- link "What is Playwright? (🎭 Playwright introduction tutorial, features & demo) 12分钟18秒钟" [ref=e2]:',
+      '  - /url: https://www.youtube.com/watch?v=wGr5rz8WGCE',
+      '- link "Playwright with TypeScript : Learn Playwright Automation" [ref=e3]:',
+      '  - /url: https://www.youtube.com/watch?v=ts1',
+    ].join('\n');
+    expect(
+      answeredItems(
+        '1. Playwright with Java\n2. What is Playwright? (🎭 Playwright introduction tutorial, features & demo)\n3. Playwright with TypeScript',
+        [{ text: tree }],
+      ).map((item) => item.kind),
+    ).toEqual(['playlist', 'video', 'unknown']);
+  });
+
+  it('the page read marks course and playlist links, nothing else', () => {
+    const marked = markYoutubeCollections(cases.core04.page.tree);
+    const line = (name: string) => marked.split('\n').find((l) => l.includes(`link "${name}"`))!;
+    expect(line('Playwright Beginner Tutorials')).toContain('[youtube=playlist]');
+    expect(line('Playwright with TypeScript')).toContain('[youtube=playlist]');
+    expect(marked.split('\n').find((l) => l.includes('link "What is Playwright?'))).not.toContain(
+      '[youtube=playlist]',
+    );
+    // Only attributes are added: every ref is still there.
+    const refs = (tree: string) => [...tree.matchAll(/\[ref=(e\d+)\]/g)].map((m) => m[1]);
+    expect(refs(marked)).toEqual(refs(cases.core04.page.tree));
   });
 });
