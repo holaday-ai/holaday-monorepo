@@ -948,7 +948,7 @@ const OPEN_ONLY_LABELS: ReadonlySet<string> = new Set([
 ]);
 
 const READ_ONLY_VERB_RE =
-  /读|阅读|看看|看一下|查看|总结|概括|摘要|提取|获取|列出|返回|告诉我|讲了什么|说了什么|写了什么|标题|正文|内容|作者|价格|评分|点赞|收藏数|评论数|简介|信息|summari[sz]e|extract|\bread\b|\btitles?\b|what (?:does|is on)|tell me/i;
+  /读|阅读|看看|看一下|查看|总结|概括|摘要|提取|获取|列出|返回|告诉我|讲了什么|说了什么|写了什么|标题|正文|内容|作者|价格|评分|点赞|收藏数|评论数|简介|信息|summari[sz]e|extract|\bread\b|\btitles?\b|\blist\b|\b(?:give|show) me\b|what (?:does|is|are)|tell me/i;
 
 /**
  * FIRECRAWL-1 — "打开 <url> 读标题 / 总结这页" reads one page: a fetch, not a

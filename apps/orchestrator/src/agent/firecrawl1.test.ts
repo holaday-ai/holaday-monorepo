@@ -280,6 +280,7 @@ describe('routing: reading one page goes to Firecrawl, driving a page to the bro
     '打开 https://www.xiaohongshu.com/explore/abc 读笔记标题、作者和点赞数',
     '打开京东 https://item.jd.com/100012043978.html 读商品标题和价格',
     'Open https://example.com/blog/post and summarize it',
+    'Open https://docs.python.org/3/whatsnew/3.12.html and list the first three highlights',
     'baike.baidu.com/item/西湖 讲了什么',
   ])('read-only page → scrape: %s', async (intent) => {
     const d = await route(intent);
