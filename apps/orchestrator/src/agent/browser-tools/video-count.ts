@@ -209,7 +209,12 @@ export function answeredItems(summary: string, pages: ObservedEvidence[]): Answe
   if (items.length < 2) items = lines.filter((line) => /^[-*•]\s+\S/.test(line));
   const { kinds, collections } = linkKinds(pages);
   return items.map((line) => {
-    const body = line.replace(/^(?:\d{1,2}\s*[.)、．:：]|[-*•])\s*/, '');
+    // A Markdown item (「[Title](https://…)」, 「**Title**」) is read as its text and link;
+    // brackets inside a title (「… [6 Hours]」) stay.
+    const body = line
+      .replace(/^(?:\d{1,2}\s*[.)、．:：]|[-*•])\s*/, '')
+      .replace(/\[((?:[^[\]\n]|\[[^[\]\n]*\])+)\]\((https?:\/\/[^)\s]+)\)/g, '$1 $2')
+      .replace(/\*\*([^*\n]+)\*\*|__([^_\n]+)__|`([^`\n]+)`/g, '$1$2$3');
     const urls = [...body.matchAll(/https?:\/\/[^\s）)」"'，,；;]+/g)].map((m) => m[0]);
     const title = body
       .replace(/^(?:标题|视频标题|title)\s*[:：]\s*/i, '')

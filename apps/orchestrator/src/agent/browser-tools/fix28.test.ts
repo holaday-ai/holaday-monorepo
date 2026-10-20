@@ -135,6 +135,42 @@ describe('core-04: only single videos count toward 「前 N 个视频」', () =>
     });
   });
 
+  // PR #288 review: 「1. [Title](https://www.youtube.com/watch?v=…)」 kept its brackets,
+  // so a grounded title was never found on the page.
+  const fiveVideos: Array<[string, string]> = [
+    ['What is Playwright? (🎭 Playwright introduction tutorial, features & demo)', 'wGr5rz8WGCE'],
+    ['Software Testing Course – Playwright, E2E, and AI Agents', 'jydYq7oAtD8'],
+    [
+      'Playwright with TypeScript : Learn Playwright Automation Tutorial from Scratch [6 Hours]',
+      'wawbt1cATsk',
+    ],
+    [
+      'Playwright Automation Full Course for Beginners | Build Production Level Framework from Scratch',
+      'bP3M7vCGT4g',
+    ],
+    ['Playwright Automation Tutorial for Beginners from Scratch', 'pq20Gd4LXeI'],
+  ];
+  it.each([
+    ['links', (t: string, id: string) => `[${t}](https://www.youtube.com/watch?v=${id})`],
+    ['bold titles', (t: string, id: string) => `**${t}** — https://www.youtube.com/watch?v=${id}`],
+    ['bold links', (t: string, id: string) => `**[${t}](https://www.youtube.com/watch?v=${id})**`],
+  ])('five videos written as Markdown %s pass', (_, item) => {
+    const answer = fiveVideos.map(([t, id], i) => `${i + 1}. ${item(t, id)}`).join('\n');
+    expect(answeredItems(answer, read).map((it) => it.title)).toEqual(fiveVideos.map(([t]) => t));
+    expect(videoShortfall(cases.core04.prompt, answer, read)).toBeNull();
+  });
+
+  it('a course card written as a Markdown link is still not a video', () => {
+    const answer = [
+      ...fiveVideos.slice(0, 3).map(([t, id]) => `[${t}](https://www.youtube.com/watch?v=${id})`),
+      '[Playwright Beginner Tutorials](https://www.youtube.com/playlist?list=PLhW3qG5bs-L9sJKoT1LC5grGT77sfW0Z8)',
+      '[Playwright with TypeScript](https://www.youtube.com/watch?v=4_m3HsaNwOE&list=PLUDwpEzHYYLtvMVjc-Va3RXLKtdB-ofc2)',
+    ]
+      .map((item, i) => `${i + 1}. ${item}`)
+      .join('\n');
+    expect(videoShortfall(cases.core04.prompt, answer, read)).toMatchObject({ videos: 3 });
+  });
+
   it('a video whose title starts like a course title is still a video', () => {
     const items = answeredItems(
       '1. Playwright with TypeScript : Learn Playwright Automation Tutorial from Scratch [6 Hours]\n2. What is Playwright? (🎭 Playwright introduction tutorial, features & demo)',
