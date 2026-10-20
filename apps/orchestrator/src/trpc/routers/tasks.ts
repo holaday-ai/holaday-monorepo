@@ -5988,7 +5988,11 @@ export const tasksRouter = router({
                       : null,
                   firecrawl: ctx.firecrawl ?? null,
                 });
-                const unifiedReadPage = createFirecrawlReadPage(ctx.firecrawl);
+                // FIRECRAWL-1: a browser retry of a page Firecrawl could not read gets
+                // no Firecrawl reader — fetching goes Firecrawl → browser, never back.
+                const unifiedReadPage = scrapeBrowserRetry
+                  ? undefined
+                  : createFirecrawlReadPage(ctx.firecrawl);
                 let captchaPrivacy = false;
                 let captchaNeedsRelease = false;
                 let pauseCaptchaWatchdog = () => {};

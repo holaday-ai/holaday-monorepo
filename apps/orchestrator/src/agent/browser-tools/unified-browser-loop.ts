@@ -1,3 +1,4 @@
+import { scrapedWall } from '../../firecrawl/scraped-page.js';
 import type {
   MessagesAdapter,
   NeutralInputContentBlock,
@@ -121,7 +122,8 @@ const CONTROL_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
 /** Offered only when a read-only page reader (Firecrawl) is configured. */
 export const READ_URL_TOOL: NeutralToolDefinition = {
   name: 'read_url',
-  description: '浏览器打不开、被拦截或只需要读正文时，只读获取网页正文（不能点击、登录或提交）。',
+  description:
+    '浏览器加载超时、网络出错打不开公开页面时，只读获取网页正文（不能点击、登录或提交）。遇到登录、验证码或拦截页时不能用它绕过，应交给用户或如实说明。',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -432,8 +434,15 @@ export async function runUnifiedBrowserLoop(
   let actionsCorrected = false;
   /** FIX-28: one return for pages named as checked that were never opened. */
   let checksCorrected = false;
+  /**
+   * FIRECRAWL-1: once a login, verification or block wall is met in this task,
+   * the read-only reader (Firecrawl) is closed — a wall is handed to the user
+   * or reported, never fetched around.
+   */
+  let wallMet = false;
   const checkBlocker = async () => {
     const hit = await input.probeBlocker?.();
+    if (hit) wallMet = true;
     formLoginDetour = false;
     if (hit?.reason === 'login') loginPageVisited = true;
     // FIX-27 (vb core-08; FIX-24 fb/ha): a form task on named sites that wanders
@@ -1222,6 +1231,7 @@ export async function runUnifiedBrowserLoop(
       }
       if (call.name === 'request_human' && !hostNavigate) {
         const reason = typeof args.reason === 'string' ? args.reason : 'other';
+        if (['login', 'captcha', 'payment', 'permission'].includes(reason)) wallMet = true;
         if (
           ['login', 'captcha', 'payment'].includes(reason) &&
           input.currentPageUrl?.() === 'about:blank'
@@ -1259,8 +1269,29 @@ export async function runUnifiedBrowserLoop(
       }
       if (call.name === 'read_url' && input.readPage) {
         const url = typeof args.url === 'string' ? args.url : '';
+        if (wallMet) {
+          results.push(
+            toolResult(
+              call.id,
+              '本任务已遇到登录、验证或拦截页面：不能改用只读抓取去取被挡住的内容。请按规则交给用户，或如实说明拿不到什么。',
+              true,
+            ),
+          );
+          continue;
+        }
         try {
           const page = await input.readPage(url);
+          if (scrapedWall(page.markdown)) {
+            wallMet = true;
+            results.push(
+              toolResult(
+                call.id,
+                '读取到的是登录、验证或拦截页，不是正文；不能把它当作页面内容，也不要再绕道读取。请按规则交给用户，或如实说明。',
+                true,
+              ),
+            );
+            continue;
+          }
           remember(JSON.stringify({ text: page.markdown, sourceURL: page.url }), page.url);
           trace.push({ tool: 'read_url', ok: true });
           results.push(

@@ -1,8 +1,13 @@
 import type { Logger } from 'pino';
 import { describe, expect, it, vi } from 'vitest';
+import { verifyDeterministic } from '../execution/answer-verifier.js';
+import { EvidenceLedger } from '../execution/evidence-ledger.js';
+import { buildContract } from '../execution/execution-contract.js';
 import { createFirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
+import type { MessagesAdapter } from '../llm/messages-adapter.js';
 import type { NeutralResponsesRequest, ResponsesAdapter } from '../llm/responses-adapter.js';
+import { runUnifiedBrowserLoop } from './browser-tools/unified-browser-loop.js';
 import { explainExecutionMode } from './intent-classifier.js';
 import {
   compactMarkdown,
@@ -306,5 +311,163 @@ describe('routing: reading one page goes to Firecrawl, driving a page to the bro
   it('「不播放 / 播放量」 is not playing', async () => {
     const d = await route('打开 https://www.youtube.com/watch?v=abc 读标题和播放量（不播放）');
     expect(d.mode).toBe('scrape');
+  });
+});
+
+/**
+ * Coordinator 06:20 — fetching goes Firecrawl → browser, never back: once the
+ * browser meets a login, verification or block wall in a task, its read-only
+ * reader (Firecrawl) is closed for that task, and a wall page it returns is
+ * not content.
+ */
+describe('the browser never fetches around a wall', () => {
+  function scripted(calls: Array<{ name: string; input: Record<string, unknown> }>) {
+    let turn = 0;
+    const seen: string[] = [];
+    const adapter: MessagesAdapter = {
+      metadata: { provider: 'anthropic', model: 'scripted' },
+      async create(request) {
+        seen.push(JSON.stringify(request.messages.at(-1)));
+        const call = calls[Math.min(turn++, calls.length - 1)]!;
+        return {
+          id: String(turn),
+          metadata: { provider: 'anthropic', model: 'scripted' },
+          content: [{ type: 'tool_use', id: String(turn), ...call }],
+          stopReason: 'tool_use',
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    return { adapter, seen };
+  }
+  const finishFailed = {
+    name: 'finish',
+    input: { status: 'failed', summary: '页面需要登录，拿不到正文。' },
+  };
+
+  it('after a login handover, read_url is refused and Firecrawl is not called', async () => {
+    const readPage = vi.fn(async (url: string) => ({
+      url,
+      title: 'T',
+      markdown: '正文'.repeat(400),
+    }));
+    const { adapter, seen } = scripted([
+      { name: 'request_human', input: { reason: 'login', message: '知乎需要登录' } },
+      { name: 'read_url', input: { url: 'https://www.zhihu.com/question/1' } },
+      finishFailed,
+    ]);
+    await runUnifiedBrowserLoop({
+      intent: '请使用云端浏览器，读知乎问题 https://www.zhihu.com/question/1 的标题',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+      readPage,
+      requestHuman: async () => true,
+    });
+    expect(readPage).not.toHaveBeenCalled();
+    expect(seen.join('\n')).toContain('不能改用只读抓取去取被挡住的内容');
+  });
+
+  it('after the page probe meets a wall, read_url is refused', async () => {
+    const readPage = vi.fn(async (url: string) => ({
+      url,
+      title: 'T',
+      markdown: '正文'.repeat(400),
+    }));
+    let probes = 0;
+    const { adapter } = scripted([
+      { name: 'finish', input: { status: 'completed', summary: '标题是 X' } },
+      { name: 'read_url', input: { url: 'https://www.zhihu.com/question/1' } },
+      finishFailed,
+    ]);
+    await runUnifiedBrowserLoop({
+      intent: '请使用云端浏览器，读知乎问题 https://www.zhihu.com/question/1 的标题',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+      readPage,
+      probeBlocker: async () =>
+        probes++ === 0 ? { reason: 'login', message: '页面要求登录' } : null,
+      requestHuman: async () => true,
+    } as never);
+    expect(readPage).not.toHaveBeenCalled();
+  });
+
+  it('a wall page read_url returns is not content', async () => {
+    const readPage = vi.fn(async (url: string) => ({
+      url,
+      title: '安全验证',
+      markdown: '请完成安全验证后继续访问',
+    }));
+    const { adapter, seen } = scripted([
+      { name: 'read_url', input: { url: 'https://www.zhihu.com/question/1' } },
+      finishFailed,
+    ]);
+    await runUnifiedBrowserLoop({
+      intent: '读知乎问题的标题',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+      readPage,
+    });
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(seen.join('\n')).toContain('读取到的是登录、验证或拦截页');
+  });
+
+  it('a plain read before any wall still works', async () => {
+    const readPage = vi.fn(async (url: string) => ({
+      url,
+      title: 'T',
+      markdown: '西湖面积6.38平方千米。',
+    }));
+    const { adapter, seen } = scripted([
+      { name: 'read_url', input: { url: 'https://baike.baidu.com/item/西湖' } },
+      { name: 'finish', input: { status: 'completed', summary: '面积 6.38平方千米' } },
+    ]);
+    await runUnifiedBrowserLoop({
+      intent: '读西湖词条的面积',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+      readPage,
+    });
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(seen.join('\n')).toContain('西湖面积6.38平方千米');
+  });
+});
+
+/** Coordinator 06:20 — the 30-character floor for one short page read, both ways. */
+describe('one short page read: 30 characters, not 100', () => {
+  const verify = (intent: string, answerText: string) => {
+    const contract = buildContract({ taskId: 'tsk_len', intent, executionMode: 'scrape' });
+    const id = contract.successCriteria.find((c) => c.type === 'word_count')?.id;
+    return verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_len'),
+      answerText,
+    }).checks.find((check) => check.criterionId === id);
+  };
+  const PAGE = '访问 https://www.zhihu.com/question/287581453 读这个问题的标题和第一个回答的作者';
+
+  it('a complete short answer passes', () => {
+    expect(
+      verify(
+        PAGE,
+        '问题标题：杭州西湖多大面积？\n第一个回答的作者：郝穴老汉\n来源：https://www.zhihu.com/question/287581453',
+      )?.passed,
+    ).toBe(true);
+  });
+
+  it('a short answer that says nothing still fails', () => {
+    expect(verify(PAGE, '页面未显示。')?.passed).toBe(false);
+    expect(verify(PAGE, '标题：杭州西湖')?.passed).toBe(false);
+  });
+
+  it('a search keeps the 100-character floor', () => {
+    expect(
+      verify('搜索一下杭州西湖有多大', '西湖面积约6.38平方千米，位于杭州市西湖区。')?.passed,
+    ).toBe(false);
   });
 });
