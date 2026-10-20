@@ -14,6 +14,11 @@ import { ensureExecutionViewport } from './browser-viewport.js';
 import { redactPageText } from './page-redaction.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import { type UnifiedBrowserAction, isMutatingBrowserAction } from './unified-tools.js';
+import {
+  YOUTUBE_CARD_KINDS_EXPRESSION,
+  markYoutubeCollections,
+  markYoutubeHeadings,
+} from './video-count.js';
 
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 const SENSITIVE_URL_PARAMETER =
@@ -1041,10 +1046,18 @@ export class CloudObservation {
       this.virtualRefs.set(frame, virtual);
       // Snapshot reads may overlap harmless page updates; mutation actions still validate the resulting revision.
       // Rewrite only URL scalar lines; never shorten real resource identities.
-      const safeTree = tree.replace(
+      const urlSafe = tree.replace(
         /^(\s*- \/url: )(.*)$/gm,
         (_m, p, u) => p + safeObservationUrl(String(u).replace(/^"|"$/g, ''), frame.url()),
       );
+      // FIX-28 (Deploy-27 core-04): course cards and playlists read as such.
+      let host = '';
+      try {
+        host = new URL(frame.url()).hostname;
+      } catch {}
+      const safeTree = /(?:^|\.)youtube\.com$/.test(host)
+        ? markYoutubeCollections(urlSafe)
+        : urlSafe;
       const before = this.observations.get(frame);
       const prior = before && {
         revision: before.revision,
@@ -1084,7 +1097,16 @@ export class CloudObservation {
           ...(entry.index.includes('.') ? {} : { section: Number(entry.index) }),
         })),
       ];
-      const headings = JSON.parse(await redactPageText(frame, JSON.stringify(rawHeadings)));
+      // FIX-28: on YouTube, each heading that titles a result card says what the card is.
+      const cards = /(?:^|\.)youtube\.com$/.test(host)
+        ? ((await frame.evaluate(YOUTUBE_CARD_KINDS_EXPRESSION).catch(() => [])) as Array<{
+            title: string;
+            kind: string;
+          }>)
+        : [];
+      const headings = JSON.parse(
+        await redactPageText(frame, JSON.stringify(markYoutubeHeadings(rawHeadings, cards))),
+      );
       const frames: Array<Record<string, unknown>> = [];
       if (frame === page.mainFrame()) {
         let remaining = 16_000;

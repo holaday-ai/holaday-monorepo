@@ -87,3 +87,60 @@ export function omitsFill(answer: string, run: RunActions): boolean {
     return false;
   return !/已(?:在[^。；\n]{0,40})?(?:填写|填入|填好)|填写了|填入了|已填/.test(answer);
 }
+
+/** "已检查 / 查看了 / 打开过 / 访问了 / 排查了 / checked / visited": a claimed look at a page. */
+const CHECKED =
+  /(?:已|都|均|逐(?:个|项|一)?)?\s*(?:检查|查看|打开|访问|进入|排查|浏览|看)(?:了|过)?|checked|visited|opened|looked\s+at/i;
+/** "均不含 / 都没有 / 均无 / 也无": what the named pages contain — it says they were looked at. */
+const CONTAINS = /(?:均|都|也)?\s*(?:不含|没有|无|未见|不存在|不包含)/;
+
+/**
+ * FIX-28 (FIX-27 ja core-08): 「其余表单页（inputs、dropdown、radio_buttons、
+ * tinymce）均不含日期选择器」 while the run never opened dropdown or
+ * radio_buttons. Pages the answer names as checked — by path (`/dropdown`) or
+ * as a bracketed list of path-like names after 「页」 — that no visited URL
+ * reached. Only explicitly named pages count.
+ */
+export function unvisitedChecks(answer: string, run: RunActions): string[] {
+  const visited = run.visitedUrls.map(pathOf).filter((v): v is NonNullable<typeof v> => !!v);
+  if (!visited.length) return [];
+  const segments = new Set(
+    visited.flatMap((v) =>
+      v.path
+        .split('/')
+        .filter(Boolean)
+        .map((s) => s.toLowerCase()),
+    ),
+  );
+  const out: string[] = [];
+  for (const sentence of answer.split(/[。；;\n]/)) {
+    if (DENIAL.test(sentence)) continue;
+    const named: string[] = [];
+    if (CHECKED.test(sentence))
+      for (const m of sentence.matchAll(/(?:^|[\s（(、,，:：「])\/([a-z][a-z0-9_-]*)/gi))
+        named.push(m[1]!.toLowerCase());
+    if (CHECKED.test(sentence) || CONTAINS.test(sentence))
+      for (const m of sentence.matchAll(/页(?:面)?\s*[（(]([^）)]{2,120})[）)]/g)) {
+        // A list of path-like names only (「inputs、dropdown」); a bracket that holds
+        // a title (「标题为 "An iFrame containing…"」) or a tab id is not one.
+        const names = m[1]!.split(/[、,，]/).map((name) => name.trim());
+        if (
+          names.every(
+            (name) =>
+              /^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$/.test(name) &&
+              name.length <= 30 &&
+              !/^(?:tab|frame)_|[0-9a-f]{6}/.test(name),
+          )
+        )
+          named.push(...names);
+      }
+    const missing = [...new Set(named)].filter(
+      (name) => !segments.has(name) && !segments.has(name.replace(/-/g, '_')),
+    );
+    if (missing.length)
+      out.push(
+        `答案说「${sentence.trim().slice(0, 80)}」，但本次没有打开过：${missing.join('、')}`,
+      );
+  }
+  return out;
+}

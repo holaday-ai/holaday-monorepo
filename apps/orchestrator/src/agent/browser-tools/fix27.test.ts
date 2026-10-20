@@ -955,7 +955,14 @@ setTimeout(() => v.play().catch(() => {}), 300);
       const page = await context.newPage();
       try {
         const { tools } = await visit(page, deploy26.prompt);
-        await page.evaluate(() => (document.querySelector('video') as HTMLVideoElement).play());
+        // FIX-28: refused the way a browser refuses autoplay.
+        const refused = await page.evaluate(() =>
+          (document.querySelector('video') as HTMLVideoElement).play().then(
+            () => 'played',
+            (error: DOMException) => error.name,
+          ),
+        );
+        expect(refused).toBe('NotAllowedError');
         await page.waitForTimeout(800);
         expect((await tools.playbackReceipt())!.playing).toBe(false);
         tools.dispose();
