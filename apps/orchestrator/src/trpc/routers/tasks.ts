@@ -642,6 +642,17 @@ function unmigratedLaneForExecutionMode(
   return null;
 }
 
+/** FIRECRAWL-1 — a scrape task's Firecrawl calls, credits and their cost (FIRECRAWL_COST_USD per credit). */
+function firecrawlUsage(usage: { calls: number; credits: number } | undefined): {
+  calls: number;
+  credits: number;
+  costUsd: number;
+} {
+  const calls = usage?.calls ?? 0;
+  const credits = usage?.credits ?? 0;
+  return { calls, credits, costUsd: Math.round(credits * appEnv.FIRECRAWL_COST_USD * 1e6) / 1e6 };
+}
+
 function coreLaneForExecutionMode(executionMode: string): 'generate' | 'scrape' | 'browser' | null {
   if (executionMode === 'browser') return 'browser';
   if (executionMode === 'generate' || executionMode === 'template_fill') return 'generate';
@@ -4506,6 +4517,8 @@ export const tasksRouter = router({
                     status: 'failed',
                     reason: 'scrape: Firecrawl 未配置（FIRECRAWL_API_KEY 缺失），任务无法执行',
                     tickCount: 0,
+                    // A platform failure: the task is refunded (platform-failure-refunds).
+                    errorCode: 'FIRECRAWL_NOT_CONFIGURED',
                   });
                   missingFirecrawlPersisted = persisted.persisted;
                 } catch (err) {
@@ -4535,14 +4548,15 @@ export const tasksRouter = router({
               // every feature flag is off (default). The firecrawl-null
               // early return above bails BEFORE this init so the registries
               // never see a task that won't terminate.
-              initExecution({
+              const scrapeExecutionInit = {
                 taskId,
                 intent: input.intent,
-                executionMode: 'scrape',
+                executionMode: 'scrape' as const,
                 expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
                 expertMode: expertModeOverride,
                 hasAttachments: attachmentBlocks.length > 0,
-              });
+              };
+              initExecution(scrapeExecutionInit);
               // Codex Pack B1 — planning chip (scrape lane).
               broadcastSubStatus(ctx.userId, taskId, 'planning');
 
@@ -4674,6 +4688,49 @@ export const tasksRouter = router({
                     };
                   }
 
+                  // FIRECRAWL-1 — the same task goes to the cloud browser once (no
+                  // second charge) when Firecrawl could not read the page, read a wall,
+                  // or its answer still disagreed with the page. Only if that handoff
+                  // cannot start does the scrape lane finish the task itself.
+                  let browserRetryFailure: string | null = null;
+                  const handOverToBrowser = async (reason: string): Promise<boolean> => {
+                    try {
+                      disposeExecution(taskId);
+                      broadcastToUser(ctx.userId, {
+                        type: 'server.task.progress',
+                        taskId,
+                        message: reason,
+                      });
+                      await tasksRouter
+                        .createCaller({ ...ctx, scrapeBrowserRetry: { taskId, reason } })
+                        .create(scrapeBrowserRetryInput(input));
+                      ctx.logger.info({ taskId, reason }, 'scrape: handed over to browser retry');
+                      return true;
+                    } catch (err) {
+                      browserRetryFailure = `${reason}，但浏览器重试未能启动`;
+                      initExecution(scrapeExecutionInit);
+                      ctx.logger.warn(
+                        { taskId, err: err instanceof Error ? err.message : String(err) },
+                        'scrape: browser retry could not start',
+                      );
+                      return false;
+                    }
+                  };
+                  const pageUnreadable =
+                    scrapeOutcome.status === 'failed' &&
+                    (scrapeOutcome.failureKind === 'firecrawl' ||
+                      scrapeOutcome.failureKind === 'empty' ||
+                      scrapeOutcome.failureKind === 'blocked' ||
+                      scrapeOutcome.failureKind === 'facts');
+                  if (
+                    pageUnreadable &&
+                    (await handOverToBrowser(
+                      `${scrapeOutcome.reason}，已自动改用云端浏览器重试一次`,
+                    ))
+                  ) {
+                    return;
+                  }
+
                   // A1 — scrape failed → fall back to generate. Generate has
                   // zero infra dependencies (no Brave, no Firecrawl) so it's
                   // always reachable; if the model can't answer the intent
@@ -4696,6 +4753,12 @@ export const tasksRouter = router({
                     outcome = {
                       status: 'completed',
                       summary: scrapeOutcome.summary,
+                    };
+                  } else if (pageUnreadable && scrapeOutcome.source === 'scrape') {
+                    // A named page nobody could read is not answered from memory.
+                    outcome = {
+                      status: 'failed',
+                      reason: browserRetryFailure ?? scrapeOutcome.reason ?? '网页抓取失败',
                     };
                   } else {
                     ctx.logger.warn(
@@ -4860,34 +4923,19 @@ export const tasksRouter = router({
                   // links / a count must get them. When the scrape answer falls short,
                   // hand the SAME task to the browser lane once (no second charge),
                   // recording why; only if that handoff cannot start does it fail here.
-                  let browserRetryFailure: string | null = null;
                   const searchRequirement = searchResultRequirement(input.intent);
-                  if (searchRequirement) {
+                  if (searchRequirement && !browserRetryFailure) {
                     const check =
                       outcome.status === 'completed'
                         ? searchResultsSatisfy(searchRequirement, outcome.summary)
                         : ({ ok: false, reason: '抓取没有得到结果' } as const);
-                    if (!check.ok) {
-                      const reason = `抓取结果不满足要求（${check.reason}），已自动改用云端浏览器重试一次`;
-                      try {
-                        disposeExecution(taskId);
-                        broadcastToUser(ctx.userId, {
-                          type: 'server.task.progress',
-                          taskId,
-                          message: reason,
-                        });
-                        await tasksRouter
-                          .createCaller({ ...ctx, scrapeBrowserRetry: { taskId, reason } })
-                          .create(scrapeBrowserRetryInput(input));
-                        ctx.logger.info({ taskId, reason }, 'scrape: handed over to browser retry');
-                        return;
-                      } catch (err) {
-                        browserRetryFailure = `${reason}，但浏览器重试未能启动`;
-                        ctx.logger.warn(
-                          { taskId, err: err instanceof Error ? err.message : String(err) },
-                          'scrape: browser retry could not start',
-                        );
-                      }
+                    if (
+                      !check.ok &&
+                      (await handOverToBrowser(
+                        `抓取结果不满足要求（${check.reason}），已自动改用云端浏览器重试一次`,
+                      ))
+                    ) {
+                      return;
                     }
                   }
 
@@ -4925,6 +4973,14 @@ export const tasksRouter = router({
                             'MODEL_MIGRATION_IN_PROGRESS',
                         }
                       : {}),
+                    // FIRECRAWL-1 — where the answer was read, and what the fetch cost.
+                    ...(scrapeOutcome.sources.length
+                      ? { finalUrl: scrapeOutcome.sources[0], sources: scrapeOutcome.sources }
+                      : {}),
+                    ...(scrapeOutcome.failureKind
+                      ? { scrapeFailureKind: scrapeOutcome.failureKind }
+                      : {}),
+                    firecrawl: firecrawlUsage(scrapeOutcome.firecrawl),
                     elapsedMs,
                   };
                   ctx.logger.info(
@@ -4994,11 +5050,13 @@ export const tasksRouter = router({
                   let scrapeTerminalPersisted = false;
 
                   try {
+                    const scrapeFinalUrl = scrapeOutcome.sources[0];
                     if (scrapeTerminalStatus === 'completed' && outcome.status === 'completed') {
                       const persisted = await repo.persistVisionOutcome(taskId, {
                         status: 'completed',
                         summary: outcome.summary,
                         tickCount: 1,
+                        ...(scrapeFinalUrl ? { finalUrl: scrapeFinalUrl } : {}),
                         metadata,
                       });
                       scrapeTerminalPersisted = persisted.persisted;
@@ -5010,6 +5068,7 @@ export const tasksRouter = router({
                         status: 'partial_success',
                         summary: outcome.summary,
                         tickCount: 1,
+                        ...(scrapeFinalUrl ? { finalUrl: scrapeFinalUrl } : {}),
                         metadata,
                         failedChecks: scrapeFailedChecks,
                       });

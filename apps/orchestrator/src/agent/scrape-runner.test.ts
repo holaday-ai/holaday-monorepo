@@ -169,10 +169,12 @@ describe('runScrapeTask — Qwen synthesis', () => {
     expect(firecrawl.search).not.toHaveBeenCalled();
     expect(outcome).toMatchObject({
       status: 'completed',
-      summary: '整理后的结果',
+      // FIRECRAWL-1: an answer that names no fetched page gets its source line.
+      summary: '整理后的结果\n\n来源：https://example.com/article',
       sources: ['https://example.com/article'],
       inputTokens: 100,
       outputTokens: 200,
+      firecrawl: { calls: 1, credits: 1 },
     });
     expect(deltas).toEqual(['整理后的结果']);
     expect(progress).toEqual(['正在抓取网页数据…', '正在分析整理…']);
@@ -274,7 +276,12 @@ describe('runScrapeTask — Firecrawl failures', () => {
       scrape: vi.fn(async () => ({ ok: false as const, error: 'secret key missing' })),
     });
     const outcome = await run({ adapter, firecrawl });
-    expect(outcome).toMatchObject({ status: 'failed', reason: '网页抓取失败，请稍后重试。' });
+    expect(outcome).toMatchObject({
+      status: 'failed',
+      reason: '网页抓取（Firecrawl）没有拿到正文：抓取服务返回错误',
+      failureKind: 'firecrawl',
+    });
+    expect(outcome.reason).not.toContain('secret');
     expect(adapter.stream).not.toHaveBeenCalled();
   });
 

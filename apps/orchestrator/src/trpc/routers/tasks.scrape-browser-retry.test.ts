@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as planning from '../../agent/core-task-plan.js';
 import { CoreTaskRepository } from '../../agent/core-task-repository.js';
+import * as generating from '../../agent/generate-runner.js';
 import * as classifier from '../../agent/intent-classifier.js';
 import * as scraping from '../../agent/scrape-runner.js';
 import { TaskRepository } from '../../agent/task-repository.js';
@@ -81,7 +82,7 @@ function context(): Context {
   } as unknown as Context;
 }
 
-function setup(summary: string, sources: string[] = []) {
+function setup(summary: string, sources: string[] = [], outcome?: scraping.ScrapeOutcome) {
   setFeatureFlagsForTest({ EVIDENCE_LEDGER: true, EXECUTION_CONTRACT: true });
   Object.assign(env, {
     ANTHROPIC_API_KEY: '',
@@ -104,15 +105,17 @@ function setup(summary: string, sources: string[] = []) {
     .spyOn(TaskRepository.prototype, 'persistVisionOutcome')
     .mockResolvedValue({ persisted: true });
   vi.spyOn(planning, 'prepareCoreTaskPlan').mockResolvedValue(null);
-  vi.spyOn(scraping, 'runScrapeTask').mockResolvedValue({
-    status: 'completed',
-    summary,
-    source: 'search',
-    sources,
-    inputTokens: 10,
-    outputTokens: 10,
-    durationMs: 1,
-  });
+  vi.spyOn(scraping, 'runScrapeTask').mockResolvedValue(
+    outcome ?? {
+      status: 'completed',
+      summary,
+      source: 'search',
+      sources,
+      inputTokens: 10,
+      outputTokens: 10,
+      durationMs: 1,
+    },
+  );
   let admitted: import('../../agent/core-task-admission.js').CoreAdmission | undefined;
   vi.spyOn(CoreTaskRepository.prototype, 'admit').mockImplementation(async (op) => {
     admitted = op;
@@ -210,5 +213,121 @@ describe('scrape → browser one-time retry for search-engine link requests', ()
       executionMode: 'scrape',
       browserRetryFailure: expect.stringContaining('但浏览器重试未能启动'),
     });
+  });
+});
+
+/**
+ * FIRECRAWL-1 — a named page Firecrawl could not read (error, wall, empty) or
+ * whose answer disagreed with it goes to the cloud browser once; it is never
+ * answered from the model's memory.
+ */
+describe('a page Firecrawl could not read goes to the browser', () => {
+  const PAGE = '总结 https://example.com/article 这一页';
+  const failedScrape = (
+    kind: scraping.ScrapeFailureKind,
+    reason: string,
+  ): scraping.ScrapeOutcome => ({
+    status: 'failed',
+    summary: '',
+    reason,
+    failureKind: kind,
+    source: 'scrape',
+    sources: [],
+    inputTokens: 0,
+    outputTokens: 0,
+    durationMs: 1,
+    firecrawl: { calls: 1, credits: 1 },
+  });
+
+  it.each([
+    ['blocked', '网页抓取（Firecrawl）拿到的是验证或登录页（页面提示「验证码」），没有正文'],
+    ['firecrawl', '网页抓取（Firecrawl）没有拿到正文：目标站点拒绝了抓取'],
+    ['empty', '网页抓取（Firecrawl）拿到的页面只有导航，没有正文'],
+    ['facts', '抓取内容核验未通过：原文引用「X」 不是已读页面中的原文'],
+  ] as const)(
+    '%s: handed over once, charged once, not answered from memory',
+    async (kind, reason) => {
+      const spies = setup('', [], failedScrape(kind, reason));
+      const generate = vi.spyOn(generating, 'runGenerateTask');
+      const result = await tasksRouter.createCaller(context()).create({
+        intent: PAGE,
+        expertMode: 'normal',
+      });
+      await vi.waitFor(() => expect(spies.retryCreate).toHaveBeenCalledTimes(1));
+      expect(spies.handoffs[0]?.scrapeBrowserRetry).toEqual({
+        taskId: result.taskId,
+        reason: `${reason}，已自动改用云端浏览器重试一次`,
+      });
+      expect(spies.consume).toHaveBeenCalledTimes(1);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(generate).not.toHaveBeenCalled();
+      expect(spies.persisted).not.toHaveBeenCalled();
+      expect(spies.settled).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fails honestly when the browser retry cannot start', async () => {
+    const spies = setup(
+      '',
+      [],
+      failedScrape('blocked', '网页抓取（Firecrawl）拿到的是验证或登录页'),
+    );
+    spies.retryCreate.mockRejectedValueOnce(new Error('BROWSER_RETRY_RUNTIME_UNAVAILABLE'));
+    const generate = vi.spyOn(generating, 'runGenerateTask');
+    await tasksRouter.createCaller(context()).create({ intent: PAGE, expertMode: 'normal' });
+    await vi.waitFor(
+      () => expect(spies.persisted.mock.calls.length + spies.settled.mock.calls.length).toBe(1),
+      { timeout: 10_000 },
+    );
+    expect(generate).not.toHaveBeenCalled();
+    expect(terminalMetadata(spies)).toMatchObject({
+      executionMode: 'scrape',
+      scrapeFailureKind: 'blocked',
+      browserRetryFailure: expect.stringContaining('但浏览器重试未能启动'),
+      firecrawl: { calls: 1, credits: 1 },
+    });
+    const write = JSON.stringify(
+      spies.persisted.mock.calls.at(-1) ?? spies.settled.mock.calls.at(-1),
+    );
+    expect(write).toContain('failed');
+    expect(write).toContain('验证或登录页');
+  });
+
+  it('records where the answer was read and what the fetch cost', async () => {
+    const spies = setup('', [], {
+      status: 'completed',
+      summary:
+        '这一页讲的是示例文章的要点，作者认为示例很重要，并给出三个理由。来源：https://example.com/article',
+      source: 'scrape',
+      sources: ['https://example.com/article'],
+      inputTokens: 10,
+      outputTokens: 10,
+      durationMs: 1,
+      firecrawl: { calls: 1, credits: 1 },
+    });
+    await tasksRouter.createCaller(context()).create({ intent: PAGE, expertMode: 'normal' });
+    await vi.waitFor(
+      () => expect(spies.persisted.mock.calls.length + spies.settled.mock.calls.length).toBe(1),
+      { timeout: 10_000 },
+    );
+    expect(spies.retryCreate).not.toHaveBeenCalled();
+    expect(terminalMetadata(spies)).toMatchObject({
+      finalUrl: 'https://example.com/article',
+      sources: ['https://example.com/article'],
+      firecrawl: { calls: 1, credits: 1, costUsd: env.FIRECRAWL_COST_USD },
+    });
+  });
+
+  it('a failed write-up of a page that was read does not go to the browser', async () => {
+    const spies = setup('', [], {
+      ...failedScrape('synthesis', '内容整理服务暂时不可用，请稍后重试。'),
+      sources: ['https://example.com/article'],
+    });
+    await tasksRouter.createCaller(context()).create({ intent: PAGE, expertMode: 'normal' });
+    await vi.waitFor(
+      () => expect(spies.persisted.mock.calls.length + spies.settled.mock.calls.length).toBe(1),
+      { timeout: 10_000 },
+    );
+    expect(spies.retryCreate).not.toHaveBeenCalled();
   });
 });
