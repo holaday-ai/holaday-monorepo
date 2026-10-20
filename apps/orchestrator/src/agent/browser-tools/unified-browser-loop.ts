@@ -445,6 +445,16 @@ export async function runUnifiedBrowserLoop(
    * or reported, never fetched around.
    */
   let wallMet = false;
+  /** FIRECRAWL-1: pages the browser failed to load (timeouts too) — the only ones read_url may read. */
+  const unloadedPages = new Set<string>();
+  const pageKey = (url: string) => {
+    try {
+      const u = new URL(url);
+      return `${u.host}${u.pathname.replace(/\/+$/, '')}${u.search}`.toLowerCase();
+    } catch {
+      return url.trim().toLowerCase();
+    }
+  };
   const checkBlocker = async () => {
     const hit = await input.probeBlocker?.();
     if (hit) wallMet = true;
@@ -1284,6 +1294,18 @@ export async function runUnifiedBrowserLoop(
           );
           continue;
         }
+        // Only a page the browser could not load: a page that opened shows what
+        // it shows (a risk notice, a login prompt) and is dealt with as such.
+        if (!unloadedPages.has(pageKey(url))) {
+          results.push(
+            toolResult(
+              call.id,
+              '只读获取只用于浏览器加载失败（超时、网络错误）的页面。这个页面浏览器已经打开：按页面实际显示的内容处理；若是登录、验证或风控提示，交给用户或如实说明，不能绕过。',
+              true,
+            ),
+          );
+          continue;
+        }
         try {
           const page = await input.readPage(url);
           if (scrapedWall(page.markdown)) {
@@ -1385,6 +1407,11 @@ export async function runUnifiedBrowserLoop(
       if (action.tool === 'navigate' || (action.tool === 'click' && action.newTab)) {
         const url = outcome.url ?? (action.tool === 'navigate' ? action.url : undefined);
         const tab = outcome.tabId ?? activeTabId;
+        if (action.tool === 'navigate') {
+          const target = pageKey(action.url);
+          if (outcome.ok && outcome.errorCode !== 'browser_timeout') unloadedPages.delete(target);
+          else unloadedPages.add(target);
+        }
         if (outcome.ok) {
           if (action.tool === 'navigate') navigated = true;
           if (url) failedNavigationUrls.delete(url);

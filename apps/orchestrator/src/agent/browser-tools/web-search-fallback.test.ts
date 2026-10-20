@@ -101,6 +101,10 @@ describe('read_url tool', () => {
   it('is offered only with a reader, and its page text can back the evidence', async () => {
     const fc = firecrawl();
     const { a, requests } = adapter([
+      // FIRECRAWL-1: read_url is for a page the browser failed to load.
+      () => [
+        { type: 'tool_use', id: 'n1', name: 'navigate', input: { url: 'https://example.com/a' } },
+      ],
       () => [
         { type: 'tool_use', id: 'r1', name: 'read_url', input: { url: 'https://example.com/a' } },
       ],
@@ -116,7 +120,10 @@ describe('read_url tool', () => {
     const outcome = await runUnifiedBrowserLoop({
       intent: 'x',
       adapter: a,
-      execute: async () => ({ ok: true, text: '' }),
+      execute: async (action) =>
+        action.tool === 'navigate'
+          ? { ok: false, text: '页面加载超时', errorCode: 'browser_timeout' }
+          : { ok: true, text: '' },
       readPage: createFirecrawlReadPage(fc),
     });
     expect(requests[0]?.tools?.some((tool) => tool.name === READ_URL_TOOL.name)).toBe(true);

@@ -397,6 +397,11 @@ describe('the browser never fetches around a wall', () => {
     expect(readPage).not.toHaveBeenCalled();
   });
 
+  const timesOut = async (action: { tool: string }) =>
+    action.tool === 'navigate'
+      ? { ok: false, text: '页面加载超时', errorCode: 'browser_timeout' as const }
+      : { ok: true, text: '' };
+
   it('a wall page read_url returns is not content', async () => {
     const readPage = vi.fn(async (url: string) => ({
       url,
@@ -404,13 +409,14 @@ describe('the browser never fetches around a wall', () => {
       markdown: '请完成安全验证后继续访问',
     }));
     const { adapter, seen } = scripted([
+      { name: 'navigate', input: { url: 'https://www.zhihu.com/question/1' } },
       { name: 'read_url', input: { url: 'https://www.zhihu.com/question/1' } },
       finishFailed,
     ]);
     await runUnifiedBrowserLoop({
       intent: '读知乎问题的标题',
       adapter,
-      execute: async () => ({ ok: true, text: '' }),
+      execute: timesOut as never,
       readPage,
     });
     expect(readPage).toHaveBeenCalledTimes(1);
@@ -446,17 +452,42 @@ describe('the browser never fetches around a wall', () => {
       markdown: '西湖面积6.38平方千米。',
     }));
     const { adapter, seen } = scripted([
+      { name: 'navigate', input: { url: 'https://baike.baidu.com/item/西湖' } },
       { name: 'read_url', input: { url: 'https://baike.baidu.com/item/西湖' } },
       { name: 'finish', input: { status: 'completed', summary: '面积 6.38平方千米' } },
     ]);
     await runUnifiedBrowserLoop({
       intent: '读西湖词条的面积',
       adapter,
-      execute: async () => ({ ok: true, text: '' }),
+      execute: timesOut as never,
       readPage,
     });
     expect(readPage).toHaveBeenCalledTimes(1);
     expect(seen.join('\n')).toContain('西湖面积6.38平方千米');
+  });
+
+  // fcr4 xhs-b: the note opened on 小红书's risk notice ("IP存在风险"), no blocker
+  // was detected, and the model fetched the note through read_url instead.
+  it('a page the browser opened is not fetched around, whatever it shows', async () => {
+    const readPage = vi.fn(async (url: string) => ({
+      url,
+      title: 'T',
+      markdown: '正文'.repeat(400),
+    }));
+    const { adapter, seen } = scripted([
+      { name: 'navigate', input: { url: 'https://www.xiaohongshu.com/explore/abc' } },
+      { name: 'read_url', input: { url: 'https://www.xiaohongshu.com/explore/abc' } },
+      { name: 'read_url', input: { url: 'https://www.xiaohongshu.com/explore/other' } },
+      finishFailed,
+    ]);
+    await runUnifiedBrowserLoop({
+      intent: '请使用云端浏览器，读这篇小红书笔记的标题',
+      adapter,
+      execute: async () => ({ ok: true, text: '安全限制 IP存在风险，请切换可靠网络环境后重试' }),
+      readPage,
+    });
+    expect(readPage).not.toHaveBeenCalled();
+    expect(seen.join('\n')).toContain('只读获取只用于浏览器加载失败');
   });
 });
 
