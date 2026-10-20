@@ -175,6 +175,11 @@ export interface UnifiedBrowserLoopInput {
   execute: (action: UnifiedBrowserAction) => Promise<UnifiedToolResult>;
   /** Qwen Responses built-in web_search, or Firecrawl when configured. */
   webSearch?: (query: string) => Promise<WebSearchHit[]>;
+  /**
+   * FIRECRAWL-1: the search used once this task met a wall — without the
+   * Firecrawl fallback. Absent: no search after a wall.
+   */
+  webSearchAfterWall?: (query: string) => Promise<WebSearchHit[]>;
   /** Read-only page text (Firecrawl scrape) for pages the browser cannot open. */
   readPage?: (url: string) => Promise<{ url: string; title: string; markdown: string }>;
   /** Resolves when the user finished the handoff; rejects/false to stop. */
@@ -1304,14 +1309,15 @@ export async function runUnifiedBrowserLoop(
       }
       if (call.name === 'web_search') {
         const query = typeof args.query === 'string' ? args.query : '';
-        if (!input.webSearch || !query) {
+        const webSearch = wallMet ? input.webSearchAfterWall : input.webSearch;
+        if (!webSearch || !query) {
           results.push(
             toolResult(call.id, '当前环境没有联网搜索，请直接 navigate 到已知网址。', true),
           );
           continue;
         }
         try {
-          const hits = (await input.webSearch(query)).slice(0, 8);
+          const hits = (await webSearch(query)).slice(0, 8);
           results.push(toolResult(call.id, JSON.stringify(hits)));
         } catch {
           results.push(toolResult(call.id, '搜索失败，请换个关键词或直接打开已知网址。', true));

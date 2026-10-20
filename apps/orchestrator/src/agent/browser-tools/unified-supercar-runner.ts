@@ -581,6 +581,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         : {}),
       adapter,
       ...(opts.unifiedWebSearch ? { webSearch: opts.unifiedWebSearch } : {}),
+      ...(opts.unifiedWebSearchAfterWall
+        ? { webSearchAfterWall: opts.unifiedWebSearchAfterWall }
+        : {}),
       ...(opts.unifiedReadPage ? { readPage: opts.unifiedReadPage } : {}),
       maxSteps: opts.maxIterations ?? 40,
       signal: controller.signal,

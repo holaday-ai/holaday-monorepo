@@ -417,6 +417,28 @@ describe('the browser never fetches around a wall', () => {
     expect(seen.join('\n')).toContain('读取到的是登录、验证或拦截页');
   });
 
+  it('after a wall, web search has no Firecrawl fallback; before it, it does', async () => {
+    const withFirecrawl = vi.fn(async () => [{ title: 'A', url: 'https://a.example/' }]);
+    const primaryOnly = vi.fn(async () => [{ title: 'B', url: 'https://b.example/' }]);
+    const { adapter } = scripted([
+      { name: 'web_search', input: { query: '西湖 面积' } },
+      { name: 'request_human', input: { reason: 'login', message: '京东需要登录' } },
+      { name: 'web_search', input: { query: '京东 商品 价格' } },
+      finishFailed,
+    ]);
+    await runUnifiedBrowserLoop({
+      intent: '请使用云端浏览器，读京东商品价格',
+      adapter,
+      execute: async () => ({ ok: true, text: '' }),
+      webSearch: withFirecrawl,
+      webSearchAfterWall: primaryOnly,
+      requestHuman: async () => true,
+    });
+    expect(withFirecrawl).toHaveBeenCalledTimes(1);
+    expect(primaryOnly).toHaveBeenCalledTimes(1);
+    expect(primaryOnly).toHaveBeenCalledWith('京东 商品 价格');
+  });
+
   it('a plain read before any wall still works', async () => {
     const readPage = vi.fn(async (url: string) => ({
       url,

@@ -5981,12 +5981,19 @@ export const tasksRouter = router({
                   lane: 'browser',
                   ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
                 });
+                const unifiedPrimarySearch =
+                  unifiedBrowserRuntime.kind === 'ready'
+                    ? createResponsesWebSearch(unifiedBrowserRuntime.responses('fast'))
+                    : null;
+                // FIRECRAWL-1: Firecrawl is the browser's search fallback only before any
+                // wall in the task, and never on a retry of a page Firecrawl could not read.
                 const unifiedWebSearch = createFallbackWebSearch({
-                  primary:
-                    unifiedBrowserRuntime.kind === 'ready'
-                      ? createResponsesWebSearch(unifiedBrowserRuntime.responses('fast'))
-                      : null,
-                  firecrawl: ctx.firecrawl ?? null,
+                  primary: unifiedPrimarySearch,
+                  firecrawl: scrapeBrowserRetry ? null : (ctx.firecrawl ?? null),
+                });
+                const unifiedWebSearchAfterWall = createFallbackWebSearch({
+                  primary: unifiedPrimarySearch,
+                  firecrawl: null,
                 });
                 // FIRECRAWL-1: a browser retry of a page Firecrawl could not read gets
                 // no Firecrawl reader — fetching goes Firecrawl → browser, never back.
@@ -6000,6 +6007,7 @@ export const tasksRouter = router({
                 const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
                   browserCapabilities: taskBrowserCapabilities,
                   ...(unifiedWebSearch ? { unifiedWebSearch } : {}),
+                  ...(unifiedWebSearchAfterWall ? { unifiedWebSearchAfterWall } : {}),
                   ...(unifiedReadPage ? { unifiedReadPage } : {}),
                   messagesAdapter: browserMessagesAdapter,
                   taskId,

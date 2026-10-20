@@ -738,6 +738,8 @@ export interface RunSupercarOptions {
   >;
   /** BROWSER_EXECUTOR=unified only: web search (Qwen built-in, Firecrawl fallback). */
   unifiedWebSearch?: (query: string) => Promise<Array<{ title: string; url: string }>>;
+  /** FIRECRAWL-1: web search once the task met a wall (no Firecrawl fallback). */
+  unifiedWebSearchAfterWall?: (query: string) => Promise<Array<{ title: string; url: string }>>;
   /** BROWSER_EXECUTOR=unified only: read-only page text (Firecrawl scrape). */
   unifiedReadPage?: (url: string) => Promise<{ url: string; title: string; markdown: string }>;
   /** Region-resolved production model. Omission retains the legacy fixture path. */
