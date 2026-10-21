@@ -364,6 +364,51 @@ describe('a search the run did make may be said', () => {
   });
 });
 
+describe('local f29a jd: a login wall reached between browser actions', () => {
+  it('is handed to the user at the next turn, not searched around', async () => {
+    let walled = false;
+    const { adapter } = scriptedLoop([
+      { name: 'navigate', input: { url: 'https://item.jd.com/1.html' } },
+      { name: 'snapshot', input: {} },
+      { name: 'web_search', input: { query: '100142621606' } },
+      { name: 'web_search', input: { query: '100142621606 价格' } },
+      { name: 'finish', input: { status: 'failed', summary: '多次搜索也无结果' } },
+    ]);
+    const searches: string[] = [];
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '打开 https://item.jd.com/1.html 读商品标题和页面显示的价格',
+      adapter,
+      maxSteps: 10,
+      // The page moves on to the login page while the model only searches.
+      webSearch: async (query: string) => {
+        searches.push(query);
+        walled = true;
+        return [];
+      },
+      captchaHandoff: async () => true,
+      probeBlocker: async () =>
+        walled
+          ? { reason: 'login', message: '页面遇到登录墙，需要你接管登录；当前任务尚未完成。' }
+          : null,
+      execute: (async (action: { tool: string }) => {
+        return action.tool === 'navigate'
+          ? { ok: true, text: '已打开', url: 'https://item.jd.com/1.html' }
+          : { ok: true, text: JSON.stringify({ tree: '- heading "商品详情" [level=1] [ref=e1]' }) };
+      }) as never,
+    } as never);
+    expect(outcome).toMatchObject({ status: 'awaiting_user', reason: 'login' });
+    expect(searches).toEqual(['100142621606']);
+  });
+  it('"多次搜索" without a search is a claimed search', () => {
+    expect(
+      unperformedActions('多次搜索“100142621606”也无结果。', {
+        visitedUrls: ['https://item.jd.com/1.html'],
+        searched: false,
+      }),
+    ).toHaveLength(1);
+  });
+});
+
 describe('core-07: the return names a tab only listed by list_tabs (no "undefined")', () => {
   it('the listed title is shown', async () => {
     let active = 'source';

@@ -568,6 +568,11 @@ export async function runUnifiedBrowserLoop(
     if (input.signal?.aborted) return cancelled(step);
     if (input.captchaHandoff && !captchaDeclined) {
       const wall = await checkBlocker();
+      // FIX-29 (local f29a jd): JD sent the item page on to passport.jd.com after the
+      // last browser action; the model then only searched (no browser action, so no
+      // post-action probe) and the login wall seen here each turn was never handed over.
+      if (wall && wall.reason !== 'captcha')
+        return { status: 'awaiting_user', ...wall, steps: step };
       if (wall?.reason === 'captcha') {
         const handed = await handCaptcha(wall.message);
         if (handed === undefined) return { status: 'awaiting_user', ...wall, steps: step };

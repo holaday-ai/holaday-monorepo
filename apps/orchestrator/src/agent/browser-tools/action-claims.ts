@@ -147,7 +147,7 @@ export function unvisitedChecks(answer: string, run: RunActions): string[] {
 
 /** "通过搜索引擎检索 / 搜索了 / 尝试搜索 / searched": a search the run says it ran. */
 const SEARCH_CLAIM =
-  /(?:搜索引擎|网页搜索|联网搜索|站内搜索)?\s*(?:检索|搜索|搜寻|查找)(?:了|过)?\s*(?:该|这个|此|视频|页面|相关|目标|关键词|ID|id)|(?:通过|使用|用|借助|尝试|又|再|已|还)\s*(?:搜索引擎|网页搜索|联网搜索|搜索|检索)|(?:搜索|检索)(?:了|过)|\b(?:searched|searching)\b|\b(?:a|another|web) search\b/i;
+  /(?:搜索引擎|网页搜索|联网搜索|站内搜索)?\s*(?:检索|搜索|搜寻|查找)(?:了|过)?\s*(?:该|这个|此|视频|页面|相关|目标|关键词|ID|id)|(?:通过|使用|用|借助|尝试|又|再|已|还)\s*(?:搜索引擎|网页搜索|联网搜索|搜索|检索)|(?:搜索|检索)(?:了|过)|(?:多次|反复|几次|一再)\s*(?:搜索|检索)|\b(?:searched|searching)\b|\b(?:a|another|web) search\b/i;
 /** "换了来源 / 改用其他网站 / tried other sources": a second source the run says it tried. */
 const SOURCE_CLAIM =
   /(?:换|改用|换用|切换到|尝试)(?:了)?\s*(?:其他|别的|另一个?|另外的?|备用)\s*(?:来源|网站|站点|渠道|数据源)|(?:其他|别的|另一个?)(?:来源|网站|站点|渠道)(?:也|均|都)|\b(?:other|another|alternative) (?:sources?|sites?)\b/i;
