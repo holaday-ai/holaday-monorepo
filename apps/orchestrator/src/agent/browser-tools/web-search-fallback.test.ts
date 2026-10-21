@@ -101,6 +101,10 @@ describe('read_url tool', () => {
   it('is offered only with a reader, and its page text can back the evidence', async () => {
     const fc = firecrawl();
     const { a, requests } = adapter([
+      // FIRECRAWL-1: read_url is for a page the network could not reach.
+      () => [
+        { type: 'tool_use', id: 'n1', name: 'navigate', input: { url: 'https://example.com/a' } },
+      ],
       () => [
         { type: 'tool_use', id: 'r1', name: 'read_url', input: { url: 'https://example.com/a' } },
       ],
@@ -116,7 +120,15 @@ describe('read_url tool', () => {
     const outcome = await runUnifiedBrowserLoop({
       intent: 'x',
       adapter: a,
-      execute: async () => ({ ok: true, text: '' }),
+      execute: async (action) =>
+        action.tool === 'navigate'
+          ? {
+              ok: false,
+              text: '浏览器导航或网络请求失败',
+              errorCode: 'browser_network_failed',
+              errorMessage: 'page.goto: net::ERR_NAME_NOT_RESOLVED at [URL redacted]',
+            }
+          : { ok: true, text: '' },
       readPage: createFirecrawlReadPage(fc),
     });
     expect(requests[0]?.tools?.some((tool) => tool.name === READ_URL_TOOL.name)).toBe(true);

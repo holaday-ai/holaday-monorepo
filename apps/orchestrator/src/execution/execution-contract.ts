@@ -716,6 +716,8 @@ function summariseIntent(intent: string): string {
  *
  *   - scrape          → 100. The runner has bytes from Firecrawl;
  *                       answers should weave them into a real summary.
+ *                       30 for a short prompt about one named page
+ *                       (FIRECRAWL-1: "读标题和价格" answers in a line).
  *   - generate, short → 10.  Translation / Q&A; answers can be one
  *                       sentence. "short" = prompt < 100 chars AND
  *                       no attachments (attachments imply analysis).
@@ -727,7 +729,12 @@ function summariseIntent(intent: string): string {
  * tuning lives ONLY here; verifier is unchanged.
  */
 function pickChecklistMinWordCount(inputs: ContractInputs): number {
-  if (inputs.executionMode === 'scrape') return 100;
+  if (inputs.executionMode === 'scrape') {
+    // FIRECRAWL-1: reading named fields off one page ("读标题和价格") is a
+    // short answer by nature; a search or a long brief still needs a summary.
+    const onePage = /https?:\/\/|www\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,24}\//i.test(inputs.intent);
+    return onePage && inputs.intent.length < 160 && inputs.hasAttachments !== true ? 30 : 100;
+  }
   // Plain Q&A — arithmetic / greeting / short knowledge — can answer in
   // a few chars ("2" / "你好！"). The 10-char floor wrongly flags those
   // 结果内容不足. classifyLightweightTask is keyword-only (no LLM) and

@@ -221,7 +221,16 @@ describe('buildContract — dynamic word_count threshold (Phase 1 follow-up)', (
     expect(wordCountMin(c)).toBe(50);
   });
 
-  it('scrape mode → min=100 regardless of prompt length', () => {
+  it('scrape of one named page with a short prompt → min=30 (FIRECRAWL-1)', () => {
+    const c = buildContract({
+      taskId: 'tsk_scrape_page',
+      intent: '访问 https://www.zhihu.com/question/287581453 读这个问题的标题',
+      executionMode: 'scrape',
+    });
+    expect(wordCountMin(c)).toBe(30);
+  });
+
+  it('scrape mode → min=100 for a search, whatever the prompt length', () => {
     const c = buildContract({
       taskId: 'tsk_scrape_short',
       intent: '搜小红书',

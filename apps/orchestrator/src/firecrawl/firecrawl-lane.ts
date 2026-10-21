@@ -19,6 +19,10 @@
  * Retry: one extra attempt on transport failure (network throw / 5xx
  * not yet implemented). Application-level errors (4xx, success=false)
  * do NOT retry — bad URL stays bad.
+ *
+ * FIRECRAWL-1: basic fetching only. No stealth, proxy, mobile, location or
+ * actions option is ever sent; a page behind a wall goes to the browser
+ * lane, which hands it to the user instead of getting around it.
  */
 
 export interface FirecrawlScrapeOk {
@@ -26,6 +30,10 @@ export interface FirecrawlScrapeOk {
   markdown: string;
   url: string;
   title?: string;
+  /** Credits Firecrawl reports for the call (1 when it does not say). */
+  credits?: number;
+  /** HTTP status Firecrawl got from the target page. */
+  statusCode?: number;
 }
 
 export interface FirecrawlSearchResult {
@@ -37,6 +45,8 @@ export interface FirecrawlSearchResult {
 export interface FirecrawlSearchOk {
   ok: true;
   results: FirecrawlSearchResult[];
+  /** Credits Firecrawl reports for the call (one per result when it does not say). */
+  credits?: number;
 }
 
 export interface FirecrawlError {
@@ -196,7 +206,13 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
             error?: string;
             data?: {
               markdown?: string;
-              metadata?: { title?: string; sourceURL?: string };
+              metadata?: {
+                title?: string;
+                sourceURL?: string;
+                url?: string;
+                creditsUsed?: number;
+                statusCode?: number;
+              };
             };
           }
         | undefined;
@@ -208,11 +224,16 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
         return { ok: false, error: 'firecrawl: no markdown in response' };
       }
       const title = j.data?.metadata?.title;
+      const credits = j.data?.metadata?.creditsUsed;
       return {
         ok: true,
         markdown,
         url: j.data?.metadata?.sourceURL ?? trimmed,
         ...(title ? { title } : {}),
+        credits: typeof credits === 'number' && credits >= 0 ? credits : 1,
+        ...(typeof j.data?.metadata?.statusCode === 'number'
+          ? { statusCode: j.data.metadata.statusCode }
+          : {}),
       };
     },
 
@@ -238,6 +259,7 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
             success?: boolean;
             error?: string;
             data?: Array<{ url?: string; title?: string; markdown?: string }>;
+            creditsUsed?: number;
           }
         | undefined;
       if (!j || j.success === false) {
@@ -251,7 +273,12 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
           markdown: r.markdown!,
           ...(r.title ? { title: r.title } : {}),
         }));
-      return { ok: true, results };
+      const credits = j.creditsUsed;
+      return {
+        ok: true,
+        results,
+        credits: typeof credits === 'number' && credits >= 0 ? credits : results.length,
+      };
     },
   };
 }

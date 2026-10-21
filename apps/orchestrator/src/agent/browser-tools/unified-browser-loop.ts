@@ -1,3 +1,4 @@
+import { scrapedWall } from '../../firecrawl/scraped-page.js';
 import type {
   MessagesAdapter,
   NeutralInputContentBlock,
@@ -121,7 +122,8 @@ const CONTROL_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
 /** Offered only when a read-only page reader (Firecrawl) is configured. */
 export const READ_URL_TOOL: NeutralToolDefinition = {
   name: 'read_url',
-  description: '浏览器打不开、被拦截或只需要读正文时，只读获取网页正文（不能点击、登录或提交）。',
+  description:
+    '网址无法解析或网络断开、浏览器打不开公开页面时，只读获取网页正文（不能点击、登录或提交）。加载慢、连接被拒、被拦截、遇到登录或验证码时不能用它绕过，应交给用户或如实说明。',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -173,6 +175,11 @@ export interface UnifiedBrowserLoopInput {
   execute: (action: UnifiedBrowserAction) => Promise<UnifiedToolResult>;
   /** Qwen Responses built-in web_search, or Firecrawl when configured. */
   webSearch?: (query: string) => Promise<WebSearchHit[]>;
+  /**
+   * FIRECRAWL-1: the search used once this task met a wall — without the
+   * Firecrawl fallback. Absent: no search after a wall.
+   */
+  webSearchAfterWall?: (query: string) => Promise<WebSearchHit[]>;
   /** Read-only page text (Firecrawl scrape) for pages the browser cannot open. */
   readPage?: (url: string) => Promise<{ url: string; title: string; markdown: string }>;
   /** Resolves when the user finished the handoff; rejects/false to stop. */
@@ -285,15 +292,16 @@ export async function runUnifiedBrowserLoop(
   const failedNavigationUrls = new Set<string>();
   const failedNavigationTabs = new Set<string>();
   const fromPageLinks = /从.{0,20}(?:页面|网页).{0,24}(?:打开|点击).{0,12}链接/.test(input.intent);
-  const remember = (text: string, url?: string) => {
+  /** `fetched`: read_url's text of a page the browser could not reach, not the browser's error page. */
+  const remember = (text: string, url?: string, fetched = false) => {
     const decoded = observedPageText(text);
     if (!decoded) return '';
     const item = observedEvidence(text, decoded.slice(0, 64_000), url);
     activeTabId = item.tabId ?? activeTabId;
     if (
-      (item.tabId && failedNavigationTabs.has(item.tabId)) ||
+      (!fetched && item.tabId && failedNavigationTabs.has(item.tabId)) ||
       (item.sourceURL &&
-        (failedNavigationUrls.has(item.sourceURL) ||
+        ((!fetched && failedNavigationUrls.has(item.sourceURL)) ||
           /^(?:chrome-error|edge-error|about:neterror)/.test(item.sourceURL)))
     )
       return '';
@@ -432,8 +440,25 @@ export async function runUnifiedBrowserLoop(
   let actionsCorrected = false;
   /** FIX-28: one return for pages named as checked that were never opened. */
   let checksCorrected = false;
+  /**
+   * FIRECRAWL-1: once a login, verification or block wall is met in this task,
+   * the read-only reader (Firecrawl) is closed — a wall is handed to the user
+   * or reported, never fetched around.
+   */
+  let wallMet = false;
+  /** FIRECRAWL-1: pages whose name did not resolve or whose network was down — the only ones read_url may read. */
+  const unloadedPages = new Set<string>();
+  const pageKey = (url: string) => {
+    try {
+      const u = new URL(url);
+      return `${u.host}${u.pathname.replace(/\/+$/, '')}${u.search}`.toLowerCase();
+    } catch {
+      return url.trim().toLowerCase();
+    }
+  };
   const checkBlocker = async () => {
     const hit = await input.probeBlocker?.();
+    if (hit) wallMet = true;
     formLoginDetour = false;
     if (hit?.reason === 'login') loginPageVisited = true;
     // FIX-27 (vb core-08; FIX-24 fb/ha): a form task on named sites that wanders
@@ -1222,6 +1247,7 @@ export async function runUnifiedBrowserLoop(
       }
       if (call.name === 'request_human' && !hostNavigate) {
         const reason = typeof args.reason === 'string' ? args.reason : 'other';
+        if (['login', 'captcha', 'payment', 'permission'].includes(reason)) wallMet = true;
         if (
           ['login', 'captcha', 'payment'].includes(reason) &&
           input.currentPageUrl?.() === 'about:blank'
@@ -1259,9 +1285,42 @@ export async function runUnifiedBrowserLoop(
       }
       if (call.name === 'read_url' && input.readPage) {
         const url = typeof args.url === 'string' ? args.url : '';
+        if (wallMet) {
+          results.push(
+            toolResult(
+              call.id,
+              '本任务已遇到登录、验证或拦截页面：不能改用只读抓取去取被挡住的内容。请按规则交给用户，或如实说明拿不到什么。',
+              true,
+            ),
+          );
+          continue;
+        }
+        // Only a page the browser could not load: a page that opened shows what
+        // it shows (a risk notice, a login prompt) and is dealt with as such.
+        if (!unloadedPages.has(pageKey(url))) {
+          results.push(
+            toolResult(
+              call.id,
+              '只读获取只用于网址无法解析、网络断开的页面。这个页面浏览器已经打开或只是加载慢、被拦截：按页面实际显示的内容处理；若是登录、验证或风控提示，交给用户或如实说明，不能绕过。',
+              true,
+            ),
+          );
+          continue;
+        }
         try {
           const page = await input.readPage(url);
-          remember(JSON.stringify({ text: page.markdown, sourceURL: page.url }), page.url);
+          if (scrapedWall(page.markdown, page.title)) {
+            wallMet = true;
+            results.push(
+              toolResult(
+                call.id,
+                '读取到的是登录、验证或拦截页，不是正文；不能把它当作页面内容，也不要再绕道读取。请按规则交给用户，或如实说明。',
+                true,
+              ),
+            );
+            continue;
+          }
+          remember(JSON.stringify({ text: page.markdown, sourceURL: page.url }), page.url, true);
           trace.push({ tool: 'read_url', ok: true });
           results.push(
             toolResult(call.id, `URL: ${page.url}\n标题: ${page.title}\n${page.markdown}`),
@@ -1273,14 +1332,15 @@ export async function runUnifiedBrowserLoop(
       }
       if (call.name === 'web_search') {
         const query = typeof args.query === 'string' ? args.query : '';
-        if (!input.webSearch || !query) {
+        const webSearch = wallMet ? input.webSearchAfterWall : input.webSearch;
+        if (!webSearch || !query) {
           results.push(
             toolResult(call.id, '当前环境没有联网搜索，请直接 navigate 到已知网址。', true),
           );
           continue;
         }
         try {
-          const hits = (await input.webSearch(query)).slice(0, 8);
+          const hits = (await webSearch(query)).slice(0, 8);
           results.push(toolResult(call.id, JSON.stringify(hits)));
         } catch {
           results.push(toolResult(call.id, '搜索失败，请换个关键词或直接打开已知网址。', true));
@@ -1348,6 +1408,21 @@ export async function runUnifiedBrowserLoop(
       if (action.tool === 'navigate' || (action.tool === 'click' && action.newTab)) {
         const url = outcome.url ?? (action.tool === 'navigate' ? action.url : undefined);
         const tab = outcome.tabId ?? activeTabId;
+        if (action.tool === 'navigate') {
+          // DEPLOY-29 review: only a name that did not resolve or a network that is
+          // down. A timeout, a reset, a refused or unreachable address, or an HTTP
+          // error may be a slow verification page or a firewall turning this
+          // browser's IP away, which read_url must not route around.
+          const target = pageKey(action.url);
+          const unreachable =
+            !outcome.ok &&
+            outcome.errorCode === 'browser_network_failed' &&
+            /ERR_NAME_NOT_RESOLVED|ERR_NAME_RESOLUTION_FAILED|ERR_INTERNET_DISCONNECTED|ENOTFOUND|EAI_AGAIN/i.test(
+              outcome.errorMessage ?? '',
+            );
+          if (unreachable) unloadedPages.add(target);
+          else unloadedPages.delete(target);
+        }
         if (outcome.ok) {
           if (action.tool === 'navigate') navigated = true;
           if (url) failedNavigationUrls.delete(url);

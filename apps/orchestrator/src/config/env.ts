@@ -156,6 +156,12 @@ const baseEnvSchema = z.object({
   FIRECRAWL_API_KEY: z.string().optional().default(''),
   /** Override the Firecrawl base URL — defaults to api.firecrawl.dev. */
   FIRECRAWL_BASE_URL: z.string().url().default('https://api.firecrawl.dev'),
+  /**
+   * FIRECRAWL-1 — USD per Firecrawl credit, for the cost each scrape task
+   * records in its result metadata. Default is the Hobby plan's rate ($16 /
+   * 3 000 credits), an upper estimate; set the account's real rate.
+   */
+  FIRECRAWL_COST_USD: z.coerce.number().nonnegative().default(0.0053),
 
   /**
    * Sprint #5 — Gemini image generation ("nano banana"). When set, the

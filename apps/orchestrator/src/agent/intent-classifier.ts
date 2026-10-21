@@ -917,6 +917,75 @@ function matchInteractionPattern(intent: string): string | null {
   return null;
 }
 
+/**
+ * FIRECRAWL-1 — actions only a live page can do: scroll for more, open tabs,
+ * play media, use an on-page calculator. "播放量 / 不播放" are not playing.
+ */
+const BROWSER_ONLY_ACTION_PATTERNS: readonly [RegExp, string][] = [
+  [/滚动(?!新闻|播报|字幕|更新)|下拉加载|往下翻|向下翻|翻到底|\bscroll(?:ing|s)?\b/i, '滚动加载'],
+  [/新标签|标签页|多个标签|\bnew tabs?\b|\bin (?:a )?new tab/i, '多标签操作'],
+  [
+    /(?<![不别勿未没无])播放(?!量|次数|列表|器|数|记录|地址|页|按钮|键|时长)|\bplay (?:the |this )?(?:video|song|audio)\b/i,
+    '播放媒体',
+  ],
+  [/计算器|在线工具|\bcalculator\b/i, '在线工具操作'],
+];
+
+/** "不要/无需/请勿再/别…播放" is not asking to play (PR #290 review). */
+const NEGATED_PLAYBACK_RE =
+  /(?:不要|不用|不必|无需|无须|请勿|切勿|勿|别|不|没有|未|禁止|避免)\s*(?:再|去|直接|自动|点击)?\s*播放|(?:don'?t|do not|without|no|never)\s+(?:auto-?)?play(?:ing)?\b/gi;
+
+function matchBrowserOnlyAction(intent: string): string | null {
+  const affirmative = intent.replace(NEGATED_PLAYBACK_RE, ' ');
+  for (const [pattern, label] of BROWSER_ONLY_ACTION_PATTERNS) {
+    if (pattern.test(affirmative)) return label;
+  }
+  return null;
+}
+
+/** Interaction rules that only say "go to this page" — reading it needs no driving. */
+const OPEN_ONLY_LABELS: ReadonlySet<string> = new Set([
+  '中文打开页面',
+  '中文打开站点或在线工具',
+  'open page',
+  'open platform page',
+  'navigate to page',
+]);
+
+const READ_ONLY_VERB_RE =
+  /读|阅读|看看|看一下|查看|总结|概括|摘要|提取|获取|列出|返回|告诉我|讲了什么|说了什么|写了什么|标题|正文|内容|作者|价格|评分|点赞|收藏数|评论数|简介|信息|summari[sz]e|extract|\bread\b|\btitles?\b|\blist\b|\b(?:give|show) me\b|what (?:does|is|are)|tell me/i;
+
+/**
+ * FIRECRAWL-1 — "打开 <url> 读标题 / 总结这页" reads one page: a fetch, not a
+ * drive. Only when every interaction rule it trips is a plain "open the page"
+ * (a named-site rule too when the user gave the exact page URL) and nothing
+ * needs the live page. A bare "打开 https://example.com" still opens it.
+ */
+/**
+ * DEPLOY-29 review: a sentence that also asks to act on the page (order, post,
+ * sign in, type, submit…) is not a read, whatever else it reads. Fields named
+ * like an action (点赞数 / 评论数 / 发布日期 / 收藏数 / 注册资本) are still reads.
+ */
+const PAGE_ACTION_RE =
+  /下单|购买(?!链接|渠道|方式|入口|人数|记录)|买(?:一|个|下|了|入)|支付(?!方式)|付款|加购|加入购物车|结算|发(?:一条|条|个|帖|推|送|微博|朋友圈|动态)|发布(?!时间|日期|于|会|方)|发表(?!时间|日期|于)|评论(?!数|区|量|内容|列表)|回复(?!数|量)|输入|填(?:写|表|入|上|好|一下)|提交|登录(?!墙|页|界面)|登陆(?!墙|页)|注册(?!时间|日期|资本|地)|收藏(?!数|量)|关注(?!者|数|度|人数)|点赞(?!数|量)|转发(?!数|量)|上传|预订|预约|报名|搜索框|(?:里|上|中)搜(?:索|一下)|\bsign(?:ing)?\s+(?:in|up)\b|\blog(?:ging)?\s*in\b|\bregister\b|\b(?:post|tweet|publish)\s+(?:a|an|it|this|the)\b|\bbuy\b|\bpurchase\b|\bplace (?:an )?order\b|\border\s+(?:it|this|one|now)\b|\bcheckout\b|\bpay\b|\bsubmit\b|\btype\s+(?:in|into|the)\b|\bfill\s+(?:in|out)\b|\bcomment\s+on\b|\breply\b|\blike\s+(?:it|this|the)\b|\bfollow\s+(?:it|this|them|him|her)\b|\bsubscribe\b|\bupload\b|\badd to cart\b|\bbook\s+(?:a|an|it|this)\b|\breserve\b|\bsearch for\b/i;
+
+function matchReadOnlyPageIntent(intent: string): string | null {
+  const url = URL_REGEX.exec(intent);
+  const target = url ?? DOMAIN_REGEX.exec(intent);
+  if (!target || !READ_ONLY_VERB_RE.test(intent) || matchBrowserOnlyAction(intent)) return null;
+  if (PAGE_ACTION_RE.test(intent)) return null;
+  const labels = INTERACTION_PATTERNS.filter(([pattern]) => pattern.test(intent)).map(
+    ([, label]) => label,
+  );
+  // No "open" wording: a bare domain with a page path ("baike.baidu.com/item/西湖
+  // 讲了什么") is that page; a URL is left to the url rule below, and a dotted
+  // file name ("report.pdf") has no path.
+  if (!labels.length) return !url && target[0].includes('/') ? target[0].slice(0, 64) : null;
+  const allowed = (label: string) =>
+    OPEN_ONLY_LABELS.has(label) || (!!url && label === '指名站点执行');
+  return labels.every(allowed) ? target[0].slice(0, 64) : null;
+}
+
 function matchSearchPattern(intent: string): string | null {
   for (const [pattern, label] of SEARCH_PATTERNS) {
     if (pattern.test(intent)) return label;
@@ -1173,6 +1242,18 @@ function decide(intent: string, ctx: { hasFileAttachment: boolean }): RouteDecis
     };
   }
 
+  // FIRECRAWL-1 — scroll / tabs / playback need a live page whatever the wording.
+  const browserOnly = matchBrowserOnlyAction(routingIntent);
+  if (browserOnly) {
+    return { mode: 'browser', source: 'kw:interaction', match: browserOnly };
+  }
+  // FIRECRAWL-1 — reading one named page goes to Firecrawl first (the scrape
+  // lane hands it to the browser when Firecrawl cannot read it).
+  const readOnlyPage = matchReadOnlyPageIntent(routingIntent);
+  if (readOnlyPage) {
+    return { mode: 'scrape', source: 'kw:read-only-page', match: readOnlyPage };
+  }
+
   // 1. Interaction verb / pattern wins — agent must drive a live page.
   // Checked BEFORE image so "make a poster in canva.com" / "在 figma
   // 设计海报" drive the named site instead of generating a local
@@ -1295,6 +1376,7 @@ export async function explainExecutionMode(opts: ClassifyOpts): Promise<Executio
     'kw:image',
     'kw:interaction',
     'kw:url',
+    'kw:read-only-page',
     'kw:search-pattern',
     'kw:search-verb',
     'kw:ecommerce-listing',
