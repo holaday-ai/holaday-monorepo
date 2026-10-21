@@ -521,7 +521,7 @@ describe('the browser never fetches around a wall', () => {
       readPage,
     });
     expect(readPage).not.toHaveBeenCalled();
-    expect(seen.join('\n')).toContain('只读获取只用于网址无法解析、网络不可达的页面');
+    expect(seen.join('\n')).toContain('只读获取只用于网址无法解析、网络断开的页面');
   });
 });
 
@@ -750,9 +750,20 @@ describe('read_url only where the network failed', () => {
       { errorCode: 'browser_network_failed', errorMessage: 'net::ERR_NAME_NOT_RESOLVED' },
       true,
     ],
+    // Coordinator review #2: refused / unreachable may be a firewall turning this IP away.
     [
       'an unreachable address',
       { errorCode: 'browser_network_failed', errorMessage: 'net::ERR_ADDRESS_UNREACHABLE' },
+      false,
+    ],
+    [
+      'a refused connection',
+      { errorCode: 'browser_network_failed', errorMessage: 'net::ERR_CONNECTION_REFUSED' },
+      false,
+    ],
+    [
+      'a network that is down',
+      { errorCode: 'browser_network_failed', errorMessage: 'net::ERR_INTERNET_DISCONNECTED' },
       true,
     ],
   ] as const)('after %s: read_url %s', async (_, failure, allowed) => {
