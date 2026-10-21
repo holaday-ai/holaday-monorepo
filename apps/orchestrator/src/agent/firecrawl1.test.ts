@@ -623,6 +623,35 @@ describe('challenge pages, titles and statuses are walls', () => {
     expect(scrapedWall(markdown + footer)).not.toBeNull();
   });
 
+  // fcr9 jd: Firecrawl got JD's login notice with status 200.
+  it("JD's 「京东验证」 login notice is a wall", () => {
+    expect(
+      scrapedWall(
+        '验证一下，购物无忧 请点击下方按钮登录，查看更多精彩内容 前往登录 遇到问题点我反馈',
+        '京东验证',
+      ),
+    ).not.toBeNull();
+    expect(
+      scrapedWall('验证一下，购物无忧 请点击下方按钮登录，查看更多精彩内容 前往登录'),
+    ).not.toBeNull();
+  });
+
+  it.each(['安全验证', '京东验证 - 京东', 'Security Check', 'Sign in | Example', 'Access Denied'])(
+    'a short notice title makes the page a wall: %s',
+    (title) => {
+      expect(scrapedWall(`# x${footer}`, title)).not.toBeNull();
+    },
+  );
+
+  it.each([
+    '如何设计登录与验证流程：一份完整指南',
+    'Verification of distributed systems — a survey',
+    '登录页设计规范',
+    'Login form best practices',
+  ])('a title that mentions login or verification is a page: %s', (title) => {
+    expect(scrapedWall(`# ${title}${footer}`, title)).toBeNull();
+  });
+
   it('a title that is a challenge makes the page a wall', () => {
     expect(scrapedWall(`# Welcome${footer}`, 'Just a moment...')).not.toBeNull();
     expect(scrapedWall(`# Welcome${footer}`, 'Attention Required! | Cloudflare')).not.toBeNull();
