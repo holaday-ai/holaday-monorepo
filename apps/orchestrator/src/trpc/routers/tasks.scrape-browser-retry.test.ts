@@ -257,6 +257,8 @@ describe('a page Firecrawl could not read goes to the browser', () => {
       expect(spies.handoffs[0]?.scrapeBrowserRetry).toEqual({
         taskId: result.taskId,
         reason: `${reason}，已自动改用云端浏览器重试一次`,
+        // DEPLOY-29 review: the scrape attempt's Firecrawl spend goes with it.
+        firecrawl: { calls: 1, credits: 1 },
       });
       expect(spies.consume).toHaveBeenCalledTimes(1);
       await new Promise((resolve) => setTimeout(resolve, 20));

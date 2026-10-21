@@ -4702,7 +4702,16 @@ export const tasksRouter = router({
                         message: reason,
                       });
                       await tasksRouter
-                        .createCaller({ ...ctx, scrapeBrowserRetry: { taskId, reason } })
+                        .createCaller({
+                          ...ctx,
+                          scrapeBrowserRetry: {
+                            taskId,
+                            reason,
+                            ...(scrapeOutcome.firecrawl
+                              ? { firecrawl: scrapeOutcome.firecrawl }
+                              : {}),
+                          },
+                        })
                         .create(scrapeBrowserRetryInput(input));
                       ctx.logger.info({ taskId, reason }, 'scrape: handed over to browser retry');
                       return true;
@@ -7299,7 +7308,13 @@ export const tasksRouter = router({
                           ...searchFallbackChain,
                         ],
                         ...(scrapeBrowserRetry
-                          ? { browserRetryReason: scrapeBrowserRetry.reason }
+                          ? {
+                              browserRetryReason: scrapeBrowserRetry.reason,
+                              // DEPLOY-29 review: the scrape attempt's Firecrawl spend.
+                              ...(scrapeBrowserRetry.firecrawl
+                                ? { firecrawl: firecrawlUsage(scrapeBrowserRetry.firecrawl) }
+                                : {}),
+                            }
                           : {}),
                         ...(executionModeDecision
                           ? { executionModeReason: executionModeDecision }

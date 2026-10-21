@@ -123,7 +123,7 @@ const CONTROL_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
 export const READ_URL_TOOL: NeutralToolDefinition = {
   name: 'read_url',
   description:
-    '浏览器加载超时、网络出错打不开公开页面时，只读获取网页正文（不能点击、登录或提交）。遇到登录、验证码或拦截页时不能用它绕过，应交给用户或如实说明。',
+    '网址无法解析或网络不可达、浏览器打不开公开页面时，只读获取网页正文（不能点击、登录或提交）。加载慢、被拦截、遇到登录或验证码时不能用它绕过，应交给用户或如实说明。',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -292,15 +292,16 @@ export async function runUnifiedBrowserLoop(
   const failedNavigationUrls = new Set<string>();
   const failedNavigationTabs = new Set<string>();
   const fromPageLinks = /从.{0,20}(?:页面|网页).{0,24}(?:打开|点击).{0,12}链接/.test(input.intent);
-  const remember = (text: string, url?: string) => {
+  /** `fetched`: read_url's text of a page the browser could not reach, not the browser's error page. */
+  const remember = (text: string, url?: string, fetched = false) => {
     const decoded = observedPageText(text);
     if (!decoded) return '';
     const item = observedEvidence(text, decoded.slice(0, 64_000), url);
     activeTabId = item.tabId ?? activeTabId;
     if (
-      (item.tabId && failedNavigationTabs.has(item.tabId)) ||
+      (!fetched && item.tabId && failedNavigationTabs.has(item.tabId)) ||
       (item.sourceURL &&
-        (failedNavigationUrls.has(item.sourceURL) ||
+        ((!fetched && failedNavigationUrls.has(item.sourceURL)) ||
           /^(?:chrome-error|edge-error|about:neterror)/.test(item.sourceURL)))
     )
       return '';
@@ -445,7 +446,7 @@ export async function runUnifiedBrowserLoop(
    * or reported, never fetched around.
    */
   let wallMet = false;
-  /** FIRECRAWL-1: pages the browser failed to load (timeouts too) — the only ones read_url may read. */
+  /** FIRECRAWL-1: pages the network could not reach (DNS, no route) — the only ones read_url may read. */
   const unloadedPages = new Set<string>();
   const pageKey = (url: string) => {
     try {
@@ -1300,7 +1301,7 @@ export async function runUnifiedBrowserLoop(
           results.push(
             toolResult(
               call.id,
-              '只读获取只用于浏览器加载失败（超时、网络错误）的页面。这个页面浏览器已经打开：按页面实际显示的内容处理；若是登录、验证或风控提示，交给用户或如实说明，不能绕过。',
+              '只读获取只用于网址无法解析、网络不可达的页面。这个页面浏览器已经打开或只是加载慢、被拦截：按页面实际显示的内容处理；若是登录、验证或风控提示，交给用户或如实说明，不能绕过。',
               true,
             ),
           );
@@ -1308,7 +1309,7 @@ export async function runUnifiedBrowserLoop(
         }
         try {
           const page = await input.readPage(url);
-          if (scrapedWall(page.markdown)) {
+          if (scrapedWall(page.markdown, page.title)) {
             wallMet = true;
             results.push(
               toolResult(
@@ -1319,7 +1320,7 @@ export async function runUnifiedBrowserLoop(
             );
             continue;
           }
-          remember(JSON.stringify({ text: page.markdown, sourceURL: page.url }), page.url);
+          remember(JSON.stringify({ text: page.markdown, sourceURL: page.url }), page.url, true);
           trace.push({ tool: 'read_url', ok: true });
           results.push(
             toolResult(call.id, `URL: ${page.url}\n标题: ${page.title}\n${page.markdown}`),
@@ -1408,9 +1409,18 @@ export async function runUnifiedBrowserLoop(
         const url = outcome.url ?? (action.tool === 'navigate' ? action.url : undefined);
         const tab = outcome.tabId ?? activeTabId;
         if (action.tool === 'navigate') {
+          // DEPLOY-29 review: only a page the network could not reach at all (DNS,
+          // no route, refused). A timeout, a reset or an HTTP error may be a slow
+          // verification page or an IP block, which read_url must not route around.
           const target = pageKey(action.url);
-          if (outcome.ok && outcome.errorCode !== 'browser_timeout') unloadedPages.delete(target);
-          else unloadedPages.add(target);
+          const unreachable =
+            !outcome.ok &&
+            outcome.errorCode === 'browser_network_failed' &&
+            /ERR_NAME_NOT_RESOLVED|ERR_NAME_RESOLUTION_FAILED|ERR_ADDRESS_UNREACHABLE|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION_REFUSED|ENOTFOUND|EAI_AGAIN/i.test(
+              outcome.errorMessage ?? '',
+            );
+          if (unreachable) unloadedPages.add(target);
+          else unloadedPages.delete(target);
         }
         if (outcome.ok) {
           if (action.tool === 'navigate') navigated = true;

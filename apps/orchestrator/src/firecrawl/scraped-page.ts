@@ -40,17 +40,36 @@ export function compactMarkdown(markdown: string): string {
     .replace(/\n{3,}/g, '\n\n');
 }
 
+/** Wording that only a verification, login or block notice uses. */
 const WALL_RE =
-  /验证码|安全验证|人机验证|请完成验证|滑动验证|拖动滑块|登录后查看|请先登录|登录后继续|扫码登录|访问受限|访问被拒绝|请求可能存在威胁|已被拦截|captcha|verify (?:that )?you are (?:a )?human|are you a robot|just a moment|access denied|enable javascript and cookies|sign in to continue|log in to continue|unusual traffic|request blocked/i;
+  /验证码|安全验证|人机验证|请完成验证|滑动验证|拖动滑块|登录后查看|请先登录|登录后继续|扫码登录|访问受限|访问被拒绝|请求可能存在威胁|已被拦截|访问过于频繁|当前环境异常|captcha|verify (?:that )?you are (?:a )?human|are you a robot|just a moment|access denied|enable javascript and cookies|sign in to continue|log in to continue|please (?:log|sign) in to (?:view|continue)|unusual traffic|request blocked/i;
+
+/**
+ * Challenge-page wording that no ordinary page carries (DEPLOY-29 review):
+ * Cloudflare, PerimeterX, Imperva and Chinese risk-control notices. Near the
+ * top of a page it is a wall whatever the page's length (long footers).
+ */
+const CHALLENGE_RE =
+  /verifying you are human|review the security of your connection|checking your browser|attention required!?\s*\|?\s*cloudflare|you have been blocked|access to this page has been denied|pardon our interruption|完成验证后即可继续访问|当前环境异常|访问过于频繁，请稍后再试|please (?:log|sign) in to (?:view|see|continue)/i;
 
 /**
  * FIRECRAWL-1 — a fetched "page" that is only a verification, login or block
- * notice (short, with such wording). A long article that mentions 验证码 is not.
+ * notice: its title says so, challenge wording near its top, or a short page
+ * with such wording. A long article that mentions 验证码 is not.
  */
-export function scrapedWall(markdown: string): string | null {
+export function scrapedWall(markdown: string, title?: string): string | null {
+  const titleHit = title ? (CHALLENGE_RE.exec(title) ?? WALL_RE.exec(title)) : null;
+  if (titleHit) return titleHit[0];
   const text = plainText(compactMarkdown(markdown)).replace(/\s+/g, ' ').trim();
+  const challenge = CHALLENGE_RE.exec(text.slice(0, 1500));
+  if (challenge) return challenge[0];
   const hit = WALL_RE.exec(text);
   return hit && text.length < 600 ? hit[0] : null;
+}
+
+/** Firecrawl's own reading of the target's answer: these statuses are walls, not pages. */
+export function wallStatus(statusCode: number | undefined): boolean {
+  return statusCode === 401 || statusCode === 403 || statusCode === 429 || statusCode === 503;
 }
 
 /** Fetched markdown as the page evidence the completion-facts check reads. */

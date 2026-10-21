@@ -17,6 +17,7 @@ import {
   plainText,
   scrapedEvidence,
   scrapedWall,
+  wallStatus,
 } from '../firecrawl/scraped-page.js';
 import { type ResponsesAdapter, ResponsesAdapterError } from '../llm/responses-adapter.js';
 import { assessCompletionFacts, unverifiedNote } from './browser-tools/completion-fields.js';
@@ -91,15 +92,21 @@ const DOMAIN_PATH_REGEX = /\b(?:[a-z0-9-]+\.)+[a-z]{2,24}\/[^\s　-〿＀-￯]*/
  * web TLD, so a file name ("report.pdf", "notes.md") is not taken for a site.
  */
 const BARE_DOMAIN_REGEX =
-  /(?<![\w.@/-])(?:[a-z0-9-]+\.)+(?:com|cn|net|org|io|ai|dev|app|co|edu|gov|info|me|tv|xyz|site|tech|top|hk|tw|jp|kr|sg|uk|de|fr|us|ca|au|in|ru|br|it|es|nl)(?![\w-])/i;
+  /(?<![\w.@/-])(?:[A-Za-z0-9-]+\.)+(?:com|cn|net|org|io|ai|dev|app|co|edu|gov|info|me|tv|xyz|site|tech|top|hk|tw|jp|kr|sg|uk|de|fr|us|ca|au|in|ru|br|it|es|nl)(?![\w-])/g;
+/** Searching or comparing names a topic, not one page to fetch (DEPLOY-29 review). */
+const SEARCH_OR_COMPARE_RE =
+  /搜索|搜一下|查找|最新|新闻|对比|比较|区别|\b(?:search|compare|versus|vs\.?|news|latest)\b/i;
 
 export function extractTargetUrl(intent: string): string | null {
   const match = URL_REGEX.exec(intent);
   if (!match) {
     const domainPath = DOMAIN_PATH_REGEX.exec(intent);
     if (domainPath) return `https://${domainPath[0].replace(TRAILING_TRIM, '')}`;
-    const bare = BARE_DOMAIN_REGEX.exec(intent);
-    return bare ? `https://${bare[0]}` : null;
+    // One lower-case domain ("ASP.NET" / "Socket.IO" are names), and only when
+    // the sentence reads that site rather than searching or comparing.
+    const bare = [...intent.matchAll(BARE_DOMAIN_REGEX)].map((m) => m[0]);
+    if (bare.length !== 1 || bare[0] !== bare[0]!.toLowerCase()) return null;
+    return SEARCH_OR_COMPARE_RE.test(intent.replace(bare[0]!, ' ')) ? null : `https://${bare[0]}`;
   }
   let url = match[0].replace(TRAILING_TRIM, '');
   if (url.startsWith('www.')) url = `https://${url}`;
@@ -192,7 +199,9 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
       });
     }
     usage.credits += result.credits ?? 1;
-    const wall = scrapedWall(result.markdown);
+    const wall = wallStatus(result.statusCode)
+      ? `HTTP ${result.statusCode}`
+      : scrapedWall(result.markdown, result.title);
     if (wall) {
       log.warn({ code: 'FIRECRAWL_SCRAPE_WALL', wall }, 'scrape-runner: fetched page is a wall');
       return failed({
@@ -248,7 +257,7 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
     }
     usage.credits += result.credits ?? result.results.length;
     // A result that is only a wall is not material.
-    const readable = result.results.filter((item) => !scrapedWall(item.markdown));
+    const readable = result.results.filter((item) => !scrapedWall(item.markdown, item.title));
     if (readable.length === 0) {
       return failed({
         start,

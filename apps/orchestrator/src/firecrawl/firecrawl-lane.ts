@@ -32,6 +32,8 @@ export interface FirecrawlScrapeOk {
   title?: string;
   /** Credits Firecrawl reports for the call (1 when it does not say). */
   credits?: number;
+  /** HTTP status Firecrawl got from the target page. */
+  statusCode?: number;
 }
 
 export interface FirecrawlSearchResult {
@@ -204,7 +206,13 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
             error?: string;
             data?: {
               markdown?: string;
-              metadata?: { title?: string; sourceURL?: string; url?: string; creditsUsed?: number };
+              metadata?: {
+                title?: string;
+                sourceURL?: string;
+                url?: string;
+                creditsUsed?: number;
+                statusCode?: number;
+              };
             };
           }
         | undefined;
@@ -223,6 +231,9 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
         url: j.data?.metadata?.sourceURL ?? trimmed,
         ...(title ? { title } : {}),
         credits: typeof credits === 'number' && credits >= 0 ? credits : 1,
+        ...(typeof j.data?.metadata?.statusCode === 'number'
+          ? { statusCode: j.data.metadata.statusCode }
+          : {}),
       };
     },
 

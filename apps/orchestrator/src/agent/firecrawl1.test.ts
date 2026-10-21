@@ -426,9 +426,14 @@ describe('the browser never fetches around a wall', () => {
     expect(readPage).not.toHaveBeenCalled();
   });
 
-  const timesOut = async (action: { tool: string }) =>
+  const unreachable = async (action: { tool: string }) =>
     action.tool === 'navigate'
-      ? { ok: false, text: '页面加载超时', errorCode: 'browser_timeout' as const }
+      ? {
+          ok: false,
+          text: '浏览器导航或网络请求失败',
+          errorCode: 'browser_network_failed' as const,
+          errorMessage: 'page.goto: net::ERR_NAME_NOT_RESOLVED at [URL redacted]',
+        }
       : { ok: true, text: '' };
 
   it('a wall page read_url returns is not content', async () => {
@@ -445,7 +450,7 @@ describe('the browser never fetches around a wall', () => {
     await runUnifiedBrowserLoop({
       intent: '读知乎问题的标题',
       adapter,
-      execute: timesOut as never,
+      execute: unreachable as never,
       readPage,
     });
     expect(readPage).toHaveBeenCalledTimes(1);
@@ -488,7 +493,7 @@ describe('the browser never fetches around a wall', () => {
     await runUnifiedBrowserLoop({
       intent: '读西湖词条的面积',
       adapter,
-      execute: timesOut as never,
+      execute: unreachable as never,
       readPage,
     });
     expect(readPage).toHaveBeenCalledTimes(1);
@@ -516,7 +521,7 @@ describe('the browser never fetches around a wall', () => {
       readPage,
     });
     expect(readPage).not.toHaveBeenCalled();
-    expect(seen.join('\n')).toContain('只读获取只用于浏览器加载失败');
+    expect(seen.join('\n')).toContain('只读获取只用于网址无法解析、网络不可达的页面');
   });
 });
 
@@ -572,5 +577,188 @@ describe('the scrape → browser retry keeps the attachments', () => {
       fileIds: ['fil_a', 'fil_b'],
       expertMode: 'normal',
     });
+  });
+});
+
+/** DEPLOY-29 review, blocking 1: a sentence that also acts on the page is not a read. */
+describe('reading and acting in one sentence goes to the browser', () => {
+  const route = async (intent: string) =>
+    explainExecutionMode({ intent, logger: logger() as never });
+  it.each([
+    '打开 https://shop.example.com/item/1 查看价格然后下单',
+    '打开 https://example.com/cart 下单并告诉我价格',
+    '打开 https://x.com/home 发一条推文，内容是hello，然后告诉我链接',
+    'Open https://example.com/login and sign in, then tell me my balance',
+    '打开 https://example.com 搜索框输入iphone并告诉我结果',
+    'Open https://shop.example.com/item/1, add to cart and tell me the total',
+    '打开 https://example.com/form 填写姓名并告诉我页面标题',
+  ])('→ browser: %s', async (intent) => {
+    expect((await route(intent)).mode).toBe('browser');
+  });
+  it.each([
+    '打开 https://www.douyin.com/video/1 读标题、点赞数、评论数和发布日期',
+    '打开 https://www.zhihu.com/question/1 读标题和关注者数',
+    '打开 https://www.qcc.com/firm/1 读注册资本和注册时间',
+    '打开 https://www.xiaohongshu.com/explore/abc 读收藏数和评论区第一条',
+    'Open https://example.com/blog/post and summarize the post',
+  ])('fields named like actions are still reads → scrape: %s', async (intent) => {
+    expect((await route(intent)).mode).toBe('scrape');
+  });
+});
+
+/** DEPLOY-29 review, blocking 2: challenge and block pages are not content. */
+describe('challenge pages, titles and statuses are walls', () => {
+  const footer = `\n\n${'Footer link text about the company and its products. '.repeat(30)}`;
+  it.each([
+    'Verifying you are human. This may take a few seconds.',
+    'example.com needs to review the security of your connection before proceeding.',
+    'Checking your browser before accessing example.com.',
+    'Attention Required! | Cloudflare\n\nSorry, you have been blocked',
+    'Access to this page has been denied.',
+    'Pardon Our Interruption\n\nAs you were browsing something about your browser made us think you were a bot.',
+    '当前环境异常，完成验证后即可继续访问。',
+    '访问过于频繁，请稍后再试',
+    'Please log in to view this content.',
+  ])('a challenge near the top is a wall even on a long page: %s', (markdown) => {
+    expect(scrapedWall(markdown + footer)).not.toBeNull();
+  });
+
+  it('a title that is a challenge makes the page a wall', () => {
+    expect(scrapedWall(`# Welcome${footer}`, 'Just a moment...')).not.toBeNull();
+    expect(scrapedWall(`# Welcome${footer}`, 'Attention Required! | Cloudflare')).not.toBeNull();
+  });
+
+  it('an article that discusses such pages further down is not a wall', () => {
+    const article = `# How bot protection works\n\n${'Websites protect themselves from automated abuse in several ways. '.repeat(40)}\nOne common message reads "Checking your browser before accessing".`;
+    expect(scrapedWall(article, 'How bot protection works')).toBeNull();
+  });
+
+  it.each([401, 403, 429, 503])(
+    'Firecrawl status %i is a blocked failure, not content',
+    async (status) => {
+      const firecrawl: FirecrawlLane = {
+        scrape: vi.fn(async (url: string) => ({
+          ok: true as const,
+          url,
+          markdown: `# Some page${footer}`,
+          title: 'Some page',
+          credits: 1,
+          statusCode: status,
+        })),
+        search: vi.fn(),
+      };
+      const adapter = answers('x');
+      const outcome = await run(firecrawl, adapter);
+      expect(outcome).toMatchObject({ status: 'failed', failureKind: 'blocked' });
+      expect(outcome.reason).toContain(`HTTP ${status}`);
+      expect(adapter.stream).not.toHaveBeenCalled();
+    },
+  );
+
+  it('status 200 with a real page is content', async () => {
+    const firecrawl: FirecrawlLane = {
+      scrape: vi.fn(async (url: string) => ({
+        ok: true as const,
+        url,
+        markdown: ARTICLE,
+        title: '西湖_百度百科',
+        credits: 1,
+        statusCode: 200,
+      })),
+      search: vi.fn(),
+    };
+    expect((await run(firecrawl, answers('西湖湖面面积为6.38平方千米。'))).status).toBe(
+      'completed',
+    );
+  });
+});
+
+/** DEPLOY-29 review (non-blocking, fixed): read_url only for a page the network could not reach. */
+describe('read_url only where the network failed', () => {
+  function scripted2(calls: Array<{ name: string; input: Record<string, unknown> }>) {
+    let turn = 0;
+    const seen: string[] = [];
+    const adapter: MessagesAdapter = {
+      metadata: { provider: 'anthropic', model: 'scripted' },
+      async create(request) {
+        seen.push(JSON.stringify(request.messages.at(-1)));
+        const call = calls[Math.min(turn++, calls.length - 1)]!;
+        return {
+          id: String(turn),
+          metadata: { provider: 'anthropic', model: 'scripted' },
+          content: [{ type: 'tool_use', id: String(turn), ...call }],
+          stopReason: 'tool_use',
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    return { adapter, seen };
+  }
+  it.each([
+    [
+      'a timeout (a slow verification page)',
+      { errorCode: 'browser_timeout', errorMessage: 'Timeout 30000ms exceeded' },
+      false,
+    ],
+    [
+      'an HTTP error (an IP block)',
+      { errorCode: 'browser_network_failed', errorMessage: 'net::ERR_HTTP_RESPONSE_CODE_FAILURE' },
+      false,
+    ],
+    [
+      'a reset connection',
+      { errorCode: 'browser_network_failed', errorMessage: 'net::ERR_CONNECTION_RESET' },
+      false,
+    ],
+    [
+      'an unresolved name',
+      { errorCode: 'browser_network_failed', errorMessage: 'net::ERR_NAME_NOT_RESOLVED' },
+      true,
+    ],
+    [
+      'an unreachable address',
+      { errorCode: 'browser_network_failed', errorMessage: 'net::ERR_ADDRESS_UNREACHABLE' },
+      true,
+    ],
+  ] as const)('after %s: read_url %s', async (_, failure, allowed) => {
+    const readPage = vi.fn(async (url: string) => ({
+      url,
+      title: 'T',
+      markdown: '正文'.repeat(400),
+    }));
+    const { adapter } = scripted2([
+      { name: 'navigate', input: { url: 'https://example.com/a' } },
+      { name: 'read_url', input: { url: 'https://example.com/a' } },
+      { name: 'finish', input: { status: 'failed', summary: '打不开' } },
+    ]);
+    await runUnifiedBrowserLoop({
+      intent: '读这一页的标题',
+      adapter,
+      execute: (async (action: { tool: string }) =>
+        action.tool === 'navigate'
+          ? { ok: false, text: '失败', ...failure }
+          : { ok: true, text: '' }) as never,
+      readPage,
+    });
+    expect(readPage).toHaveBeenCalledTimes(allowed ? 1 : 0);
+  });
+});
+
+/** DEPLOY-29 review (non-blocking, fixed): one bare domain to read, not a topic or a name. */
+describe('bare domains that are not one page to fetch', () => {
+  it.each([
+    '搜索 openai.com 最新新闻',
+    '比较 github.com 和 gitlab.com',
+    'compare vercel.com vs netlify.com',
+    '介绍一下 ASP.NET 的优点',
+    'Socket.IO 怎么用',
+  ])('no single target: %s', (intent) => {
+    expect(extractTargetUrl(intent)).toBeNull();
   });
 });

@@ -101,7 +101,7 @@ describe('read_url tool', () => {
   it('is offered only with a reader, and its page text can back the evidence', async () => {
     const fc = firecrawl();
     const { a, requests } = adapter([
-      // FIRECRAWL-1: read_url is for a page the browser failed to load.
+      // FIRECRAWL-1: read_url is for a page the network could not reach.
       () => [
         { type: 'tool_use', id: 'n1', name: 'navigate', input: { url: 'https://example.com/a' } },
       ],
@@ -122,7 +122,12 @@ describe('read_url tool', () => {
       adapter: a,
       execute: async (action) =>
         action.tool === 'navigate'
-          ? { ok: false, text: '页面加载超时', errorCode: 'browser_timeout' }
+          ? {
+              ok: false,
+              text: '浏览器导航或网络请求失败',
+              errorCode: 'browser_network_failed',
+              errorMessage: 'page.goto: net::ERR_NAME_NOT_RESOLVED at [URL redacted]',
+            }
           : { ok: true, text: '' },
       readPage: createFirecrawlReadPage(fc),
     });

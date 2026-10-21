@@ -123,5 +123,10 @@ export type Context = Awaited<ReturnType<ReturnType<typeof makeCreateContext>>> 
    * tasks.create to retry the SAME task once in the browser. Set by server code
    * on a copied context, never parsed from request data.
    */
-  scrapeBrowserRetry?: { taskId: string; reason: string };
+  scrapeBrowserRetry?: {
+    taskId: string;
+    reason: string;
+    /** FIRECRAWL-1: what the scrape attempt spent before handing over. */
+    firecrawl?: { calls: number; credits: number };
+  };
 };
