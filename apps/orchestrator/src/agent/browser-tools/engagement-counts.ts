@@ -171,7 +171,7 @@ export function engagementClaims(
   const claims: Array<{ kind: EngagementKind; value: string; text: string }> = [];
   const kindOf = (word: string) => ENGAGEMENT_KINDS.find((kind) => KIND_WORDS[kind].test(word));
   const labelFirst = new RegExp(
-    String.raw`(点赞|获赞|评论|收藏|分享|转发|投币|likes?|comments?|shares?|favou?rites?|reposts?)(?:数|量|次数|数量|count)?\s*[*\x60]*\s*(?:[:：]|为|是|有)?\s*[「“"']?\s*(${COUNT})(?![\d年月日号:：/-])`,
+    String.raw`(点赞|获赞|评论|收藏|分享|转发|投币|(?<![A-Za-z])(?:likes?|comments?|shares?|favou?rites?|reposts?)\b)(?:数|量|次数|数量|count)?\s*[*\x60]*\s*(?:[:：]|为|是|有)?\s*[「“"']?\s*(${COUNT})(?![\d年月日号:：/-])`,
     'giu',
   );
   for (const m of answer.matchAll(labelFirst)) {

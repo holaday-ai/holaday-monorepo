@@ -139,6 +139,11 @@ describe("an answer's engagement number is that counter's", () => {
     ]);
     expect(engagementClaims('点赞数：无法确认（页面只有图标）')).toEqual([]);
     expect(engagementClaims('发布时间：2025-05-21，标题见上')).toEqual([]);
+    // PR #291 review: a dislike count is not a like count.
+    expect(engagementClaims('Dislikes: 5')).toEqual([]);
+    expect(engagementClaims('Likes: 471, dislikes: 5')).toEqual([
+      expect.objectContaining({ kind: '点赞', value: '471' }),
+    ]);
   });
   it('r7: 97 is the share count, not the like count', () => {
     const [why] = assessEngagementClaims(r7, [marked]);
@@ -362,6 +367,38 @@ describe('a search the run did make may be said', () => {
     expect(seen.join('\n')).not.toContain('没有做过任何搜索');
     expect(outcome).toMatchObject({ status: 'completed' });
   });
+  it('typing into a name field is not a search (PR #291 review)', async () => {
+    const tree = '- textbox "Customer name" [ref=e2]\n- heading "Order" [level=1] [ref=e1]';
+    const { adapter, seen } = scriptedLoop([
+      { name: 'navigate', input: { url: 'https://shop.example/' } },
+      { name: 'snapshot', input: {} },
+      { name: 'type', input: { ref: 'e2', text: 'Test User' } },
+      {
+        name: 'finish',
+        input: { status: 'completed', summary: '已搜索收纳盒，结果页标题：Order' },
+      },
+      {
+        name: 'finish',
+        input: {
+          status: 'completed',
+          summary: '已在 Customer name 填入 Test User，页面标题：Order',
+        },
+      },
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '打开 https://shop.example/ 填写姓名',
+      adapter,
+      maxSteps: 10,
+      execute: (async (action: { tool: string }) =>
+        action.tool === 'navigate'
+          ? { ok: true, text: '已打开', url: 'https://shop.example/' }
+          : action.tool === 'type'
+            ? { ok: true, text: '已输入' }
+            : { ok: true, text: JSON.stringify({ tree }) }) as never,
+    });
+    expect(seen.join('\n')).toContain('没有做过任何搜索');
+    expect(outcome.status === 'completed' && outcome.summary).not.toContain('已搜索');
+  });
 });
 
 describe('local f29a jd: a login wall reached between browser actions', () => {
@@ -553,10 +590,12 @@ describe('Deploy-29 fc-jd: a run whose browser control is lost on a login page',
       await page.close();
     }
   }
-  it('the login page goes to the user, not 「已取消」', async () => {
-    const { outcome } = await scenario(true, 'https://item.jd.com/100142621606.html');
-    expect(outcome.status).toBe('awaiting_user');
-    expect(outcome.status === 'awaiting_user' && outcome.question).toMatch(/登录/);
+  it('the login page is named, with a rerun, not 「已取消」 (the closed control cannot be handed over)', async () => {
+    const { outcome, control } = await scenario(true, 'https://item.jd.com/100142621606.html');
+    expect(outcome.status).toBe('failed');
+    expect(outcome.status === 'failed' && outcome.reason).toMatch(/登录/);
+    expect(outcome.status === 'failed' && outcome.reason).toContain('请重新执行任务');
+    expect(control.snapshot()).toMatchObject({ phase: 'closed', error: 'viewport_failed' });
   }, 20000);
   it('without a wall, it fails and says why', async () => {
     const { outcome } = await scenario(true, 'https://plain.example/item');

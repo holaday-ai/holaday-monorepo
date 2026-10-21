@@ -431,8 +431,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       if (!control.canAgentAct()) {
         // FIX-29 (Deploy-29 fc-jd): a viewer connecting mid-run queued a resize; the
         // run then stopped as 「已取消」 on JD's login page, with no handover. A
-        // control closed by a failure (not by the user) is said, and a wall in
-        // front of the page still goes to the user.
+        // control closed by a failure (not by the user) is said. It cannot be
+        // handed to the user (review() refuses a control closed with an error,
+        // PR #291 review): a wall in front of the page is named, with a rerun,
+        // which pauses at the wall with a working control.
         const state = control.snapshot();
         logger.warn(
           { taskId: opts.taskId, phase: state.phase, error: state.error, url: page.url() },
@@ -440,21 +442,14 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         );
         if (!state.error) return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
         const blocker = await tools.blocker().catch(() => null);
-        if (blocker && !('disposition' in blocker && blocker.disposition === 'continue'))
-          return {
-            kind: 'stop',
-            outcome: {
-              status: 'awaiting_user',
-              reason: blocker.reason,
-              message: blocker.message,
-              steps: 0,
-            },
-          };
+        const walled = blocker && !('disposition' in blocker && blocker.disposition === 'continue');
         return {
           kind: 'stop',
           outcome: {
             status: 'failed',
-            reason: '云端浏览器的画面同步中断，任务没能继续执行；已打开的页面仍保留，请重新执行。',
+            reason: walled
+              ? `${blocker.message.replace(/；?当前任务尚未完成。?$/, '')}。但云端浏览器的画面同步中断，这次无法交给你接管；请重新执行任务，遇到这个页面时会暂停交给你处理。`
+              : '云端浏览器的画面同步中断，任务没能继续执行；已打开的页面仍保留，请重新执行。',
             steps: 0,
           },
         };

@@ -452,14 +452,13 @@ export async function runUnifiedBrowserLoop(
   // What a claim of a search or another source needs (FIX-29).
   const sources = () => ({
     visitedUrls: trace.filter((e) => e.ok && e.url).map((e) => e.url!),
-    // Text typed into the page (a search box most of the time) or a results URL counts.
+    // A search box filled (or submitted), a search button clicked, or a results URL.
     searched:
       webSearched ||
       trace.some(
         (e) =>
           e.ok &&
           (e.form?.search ||
-            e.tool === 'type' ||
             (!!e.url && /[?&](?:q|wd|query|keyword|search|k)=|\/search\b/i.test(e.url))),
       ),
   });
@@ -1493,13 +1492,14 @@ export async function runUnifiedBrowserLoop(
       playbackPings += (outcome.effect?.backgroundRequests ?? []).filter((request) =>
         PLAYBACK_PING.test(request.url),
       ).length;
-      // FIX-29: a click on the page's own search button is a search.
-      if (outcome.ok && action.tool === 'click') {
-        const clicked = pageEvidence
+      // FIX-29: a click on the page's own search button, or text typed into its search
+      // box, is a search; a name or date field is not (PR #291 review).
+      if (outcome.ok && (action.tool === 'click' || action.tool === 'type')) {
+        const target = pageEvidence
           .at(-1)
           ?.text.split('\n')
           .find((line) => line.includes(`[ref=${action.ref}]`));
-        if (clicked && /搜索|检索|查询|search/i.test(clicked)) webSearched = true;
+        if (target && /搜索|检索|查询|search/i.test(target)) webSearched = true;
       }
       const { image: capturedImage, ...receipt } = outcome;
       trace.push({
