@@ -7,6 +7,7 @@ import { createFirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 import type { MessagesAdapter } from '../llm/messages-adapter.js';
 import type { NeutralResponsesRequest, ResponsesAdapter } from '../llm/responses-adapter.js';
+import { scrapeBrowserRetryInput } from '../trpc/routers/tasks.js';
 import { runUnifiedBrowserLoop } from './browser-tools/unified-browser-loop.js';
 import { explainExecutionMode } from './intent-classifier.js';
 import {
@@ -154,6 +155,23 @@ describe('walls and empty pages', () => {
     );
     expect(extractTargetUrl('总结 report.pdf 的内容')).toBeNull();
   });
+
+  // PR #290 review: a read-only "打开 example.com 查看标题" is routed to scrape;
+  // the page is fetched, not searched for.
+  it.each([
+    ['打开 example.com 查看标题', 'https://example.com'],
+    ['看看 news.ycombinator.com 首页第一条', 'https://news.ycombinator.com'],
+    ['Open developer.mozilla.org and tell me the title', 'https://developer.mozilla.org'],
+  ])('a bare domain is that site: %s', (intent, url) => {
+    expect(extractTargetUrl(intent)).toBe(url);
+  });
+
+  it.each(['总结 report.pdf 的内容', '把 notes.md 翻译成英文', '邮件发到 a@example.com'])(
+    'a file name or an e-mail address is not a site: %s',
+    (intent) => {
+      expect(extractTargetUrl(intent)).toBeNull();
+    },
+  );
 });
 
 describe('the scrape runner', () => {
@@ -308,9 +326,20 @@ describe('routing: reading one page goes to Firecrawl, driving a page to the bro
     expect(d).toMatchObject({ mode: 'browser', source });
   });
 
-  it('「不播放 / 播放量」 is not playing', async () => {
-    const d = await route('打开 https://www.youtube.com/watch?v=abc 读标题和播放量（不播放）');
+  it.each([
+    '打开 https://www.youtube.com/watch?v=abc 读标题和播放量（不播放）',
+    '打开 https://www.youtube.com/watch?v=abc 读标题，不要播放视频',
+    '打开 https://www.bilibili.com/video/BV1xx 读标题，无需播放',
+    '打开 https://www.douyin.com/video/1 读作者，请勿再播放',
+    "Open https://www.youtube.com/watch?v=abc and read the title, don't play it",
+  ])('a negated playback is not playing (PR #290 review): %s', async (intent) => {
+    const d = await route(intent);
     expect(d.mode).toBe('scrape');
+  });
+
+  it('playing after a negated clause still is', async () => {
+    const d = await route('不要静音，打开 https://www.bilibili.com/video/BV1xx 播放这个视频');
+    expect(d).toMatchObject({ mode: 'browser', source: 'kw:interaction' });
   });
 });
 
@@ -522,5 +551,26 @@ describe('one short page read: 30 characters, not 100', () => {
     expect(
       verify('搜索一下杭州西湖有多大', '西湖面积约6.38平方千米，位于杭州市西湖区。')?.passed,
     ).toBe(false);
+  });
+});
+
+/** PR #290 review: the browser retry is the same request, attachments included. */
+describe('the scrape → browser retry keeps the attachments', () => {
+  it('drops only what would make it another task', () => {
+    expect(
+      scrapeBrowserRetryInput({
+        intent: '把上传的 PDF 和 https://example.com/spec 对比',
+        fileIds: ['fil_a', 'fil_b'],
+        clientRequestId: 'req_1',
+        retryOfTaskId: 'tsk_old',
+        publicCloudContinuationOf: 'tsk_prev',
+        localChrome: true,
+        expertMode: 'normal',
+      }),
+    ).toEqual({
+      intent: '把上传的 PDF 和 https://example.com/spec 对比',
+      fileIds: ['fil_a', 'fil_b'],
+      expertMode: 'normal',
+    });
   });
 });

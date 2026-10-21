@@ -86,11 +86,20 @@ const EN_LEADING_SEARCH_VERBS =
 /** A bare domain with a page path ("baike.baidu.com/item/西湖"): that page. */
 const DOMAIN_PATH_REGEX = /\b(?:[a-z0-9-]+\.)+[a-z]{2,24}\/[^\s　-〿＀-￯]*/i;
 
+/**
+ * A bare domain ("打开 example.com 查看标题", PR #290 review): only with a common
+ * web TLD, so a file name ("report.pdf", "notes.md") is not taken for a site.
+ */
+const BARE_DOMAIN_REGEX =
+  /(?<![\w.@/-])(?:[a-z0-9-]+\.)+(?:com|cn|net|org|io|ai|dev|app|co|edu|gov|info|me|tv|xyz|site|tech|top|hk|tw|jp|kr|sg|uk|de|fr|us|ca|au|in|ru|br|it|es|nl)(?![\w-])/i;
+
 export function extractTargetUrl(intent: string): string | null {
   const match = URL_REGEX.exec(intent);
   if (!match) {
     const domainPath = DOMAIN_PATH_REGEX.exec(intent);
-    return domainPath ? `https://${domainPath[0].replace(TRAILING_TRIM, '')}` : null;
+    if (domainPath) return `https://${domainPath[0].replace(TRAILING_TRIM, '')}`;
+    const bare = BARE_DOMAIN_REGEX.exec(intent);
+    return bare ? `https://${bare[0]}` : null;
   }
   let url = match[0].replace(TRAILING_TRIM, '');
   if (url.startsWith('www.')) url = `https://${url}`;

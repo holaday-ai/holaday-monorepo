@@ -931,9 +931,14 @@ const BROWSER_ONLY_ACTION_PATTERNS: readonly [RegExp, string][] = [
   [/计算器|在线工具|\bcalculator\b/i, '在线工具操作'],
 ];
 
+/** "不要/无需/请勿再/别…播放" is not asking to play (PR #290 review). */
+const NEGATED_PLAYBACK_RE =
+  /(?:不要|不用|不必|无需|无须|请勿|切勿|勿|别|不|没有|未|禁止|避免)\s*(?:再|去|直接|自动|点击)?\s*播放|(?:don'?t|do not|without|no|never)\s+(?:auto-?)?play(?:ing)?\b/gi;
+
 function matchBrowserOnlyAction(intent: string): string | null {
+  const affirmative = intent.replace(NEGATED_PLAYBACK_RE, ' ');
   for (const [pattern, label] of BROWSER_ONLY_ACTION_PATTERNS) {
-    if (pattern.test(intent)) return label;
+    if (pattern.test(affirmative)) return label;
   }
   return null;
 }

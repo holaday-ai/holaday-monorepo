@@ -1128,8 +1128,10 @@ function isTaskCreateReplay(value: unknown): value is TaskCreateReplay {
 /**
  * FIX-INTENT-ROUTE-BROWSER — the same request, re-entered for the one-time
  * scrape → browser retry. Fields that would make it a different or duplicate
- * task (idempotency key, retry/continuation links, local Chrome, attachments)
- * are dropped; the original task row is adopted instead of inserting one.
+ * task (idempotency key, retry/continuation links, local Chrome) are dropped;
+ * the original task row is adopted instead of inserting one. Attachments stay
+ * (FIRECRAWL-1, PR #290 review): "compare this PDF with <url>" is still that
+ * request in the browser; their owner check and task link are idempotent.
  */
 export function scrapeBrowserRetryInput<
   T extends {
@@ -1137,7 +1139,6 @@ export function scrapeBrowserRetryInput<
     retryOfTaskId?: unknown;
     publicCloudContinuationOf?: unknown;
     localChrome?: unknown;
-    fileIds?: unknown;
   },
 >(input: T) {
   const {
@@ -1145,7 +1146,6 @@ export function scrapeBrowserRetryInput<
     retryOfTaskId: _retryOfTaskId,
     publicCloudContinuationOf: _publicCloudContinuationOf,
     localChrome: _localChrome,
-    fileIds: _fileIds,
     ...rest
   } = input;
   return rest;
