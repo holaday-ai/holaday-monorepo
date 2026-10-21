@@ -1,4 +1,5 @@
 import { TEXT_URL_RE } from '../../execution/text-urls.js';
+import { assessEngagementClaims } from './engagement-counts.js';
 
 export interface ObservedEvidence {
   text: string;
@@ -393,7 +394,8 @@ function pageValues(lines: string[]): string[] {
   const out: string[] = [];
   for (const line of lines) {
     if (/^-\s*\/url:/.test(line)) continue;
-    const node = /\[ref=|^-\s*text:/.test(line)
+    // FIX-29: a counter's text line carries its kind (`- text [互动=点赞]: "20"`).
+    const node = /\[ref=|^-\s*text\b/.test(line)
       ? line.match(/^-\s*[a-z]+(?:\s+"(.*?)")?(?:\s*\[[^\]]*\])*\s*(?::\s*(.*))?$/)
       : null;
     // 「- link "Sauce Labs" [ref=e23]:」 ends in a colon with nothing after it:
@@ -714,6 +716,13 @@ export function assessCompletionFacts(input: {
     }
     unverified.push(label);
   }
+  // FIX-29: a like/comment/favourite/share number must be that counter's, not the icon next to it.
+  contradictions.push(
+    ...assessEngagementClaims(
+      input.summary,
+      input.pages.map((page) => page.text),
+    ),
+  );
   return {
     contradictions: contradictions.slice(0, 8),
     unverified: unverified.slice(0, 8),

@@ -1,5 +1,6 @@
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
+import { logger } from '../config/logger.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import {
   type AppliedBrowserViewport,
@@ -60,8 +61,17 @@ export function createOwnedScreencastInputBridge(options: {
       const session = current();
       if (!session) return; // no runner: keep viewing without mutating its layout
       session.control.queueViewport(async (signal) => {
-        if (!allowed() || current() !== session) return;
-        await input(() => action(signal));
+        try {
+          if (!allowed() || current() !== session) return;
+          await input(() => action(signal));
+        } catch (err) {
+          // FIX-29 (Deploy-29 fc-jd): a failed resize closes the runner's control.
+          logger.warn(
+            { taskId: instance.taskId, err: err instanceof Error ? err.message : String(err) },
+            'screencast: queued viewport resize failed',
+          );
+          throw err;
+        }
       });
     },
   });

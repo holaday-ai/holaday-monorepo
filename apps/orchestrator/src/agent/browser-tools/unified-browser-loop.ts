@@ -12,7 +12,13 @@ import {
   withModelRetry,
 } from '../../llm/model-call-retry.js';
 import { SEARCH_RESULTS_ORIGIN } from '../search-fallback/search-results-page.js';
-import { deniedActions, omitsFill, unvisitedChecks } from './action-claims.js';
+import {
+  deniedActions,
+  omitsFill,
+  unperformedActions,
+  unvisitedChecks,
+  withoutUnperformed,
+} from './action-claims.js';
 import { prepareBrowserPlan } from './browser-brain-roles.js';
 import { type BrowserTrace, completionGap, receiptEvidence } from './browser-completion.js';
 import { completionDiagnostic } from './completion-diagnostic.js';
@@ -440,6 +446,23 @@ export async function runUnifiedBrowserLoop(
   let actionsCorrected = false;
   /** FIX-28: one return for pages named as checked that were never opened. */
   let checksCorrected = false;
+  /** FIX-29: a failure text claiming a search or source the run never made was sent back. */
+  let failureClaimsCorrected = false;
+  let webSearched = false;
+  // What a claim of a search or another source needs (FIX-29).
+  const sources = () => ({
+    visitedUrls: trace.filter((e) => e.ok && e.url).map((e) => e.url!),
+    // Text typed into the page (a search box most of the time) or a results URL counts.
+    searched:
+      webSearched ||
+      trace.some(
+        (e) =>
+          e.ok &&
+          (e.form?.search ||
+            e.tool === 'type' ||
+            (!!e.url && /[?&](?:q|wd|query|keyword|search|k)=|\/search\b/i.test(e.url))),
+      ),
+  });
   /**
    * FIRECRAWL-1: once a login, verification or block wall is met in this task,
    * the read-only reader (Firecrawl) is closed — a wall is handed to the user
@@ -767,7 +790,11 @@ export async function runUnifiedBrowserLoop(
                     steps: step + 1,
                   };
             // FIX-28 (FIX-27 ja core-08): pages named as checked that the run never opened.
-            const unchecked = unvisitedChecks(summary, run);
+            const unchecked = [
+              ...unvisitedChecks(summary, run),
+              // FIX-29: a search or another source the run never made.
+              ...unperformedActions(summary, sources()),
+            ];
             if (unchecked.length) {
               await rejected(
                 summary,
@@ -827,7 +854,7 @@ export async function runUnifiedBrowserLoop(
               const why = [
                 unread.length ? `新标签 ${unread.join('、')} 还没有读取` : '',
                 unnamed.length
-                  ? `新标签的标题没写进答案：${unnamed.map((id) => `「${readTitles.get(id)}」`).join('、')}`
+                  ? `新标签的标题没写进答案：${unnamed.map((id) => `「${readTitles.get(id) ?? tabTitles.get(id)}」`).join('、')}`
                   : '',
                 asksTitles
                   ? `新标签 ${untitled.join('、')} 没有读到标题（页面没有一级标题），请用 list_tabs 查看它的标题`
@@ -1237,10 +1264,32 @@ export async function runUnifiedBrowserLoop(
             steps: step + 1,
           };
         }
+        // FIX-29 (FIRECRAWL-1 r4 fc-douyin): a failure text that claims a search or
+        // another source the run never made is sent back once, then delivered without it.
+        const unperformed = unperformedActions(summary, sources());
+        if (unperformed.length && !failureClaimsCorrected && !concludeNow) {
+          failureClaimsCorrected = true;
+          await rejected(
+            summary,
+            typeof args.evidence === 'string' ? args.evidence : '',
+            unperformed.join('；'),
+          );
+          results.push(
+            toolResult(
+              call.id,
+              `失败说明里写了本次没做过的动作：${unperformed.join('；')}。请只写本次实际做过的步骤（打开过哪些页面、用过哪些工具、看到了什么），没做过的不要写，然后再 finish。`,
+              true,
+            ),
+          );
+          continue;
+        }
         // A failed navigation cannot establish a login wall, even if the model guesses one.
         return {
           status: 'failed',
-          reason: notStarted() ? NOT_STARTED : summary || '任务未完成。',
+          reason: notStarted()
+            ? NOT_STARTED
+            : (unperformed.length ? withoutUnperformed(summary, sources()) : summary) ||
+              '任务未完成。',
           failureSource: notStarted() ? 'not_started' : 'task',
           steps: step + 1,
         };
@@ -1339,6 +1388,7 @@ export async function runUnifiedBrowserLoop(
           );
           continue;
         }
+        webSearched = true;
         try {
           const hits = (await webSearch(query)).slice(0, 8);
           results.push(toolResult(call.id, JSON.stringify(hits)));
@@ -1438,6 +1488,14 @@ export async function runUnifiedBrowserLoop(
       playbackPings += (outcome.effect?.backgroundRequests ?? []).filter((request) =>
         PLAYBACK_PING.test(request.url),
       ).length;
+      // FIX-29: a click on the page's own search button is a search.
+      if (outcome.ok && action.tool === 'click') {
+        const clicked = pageEvidence
+          .at(-1)
+          ?.text.split('\n')
+          .find((line) => line.includes(`[ref=${action.ref}]`));
+        if (clicked && /搜索|检索|查询|search/i.test(clicked)) webSearched = true;
+      }
       const { image: capturedImage, ...receipt } = outcome;
       trace.push({
         tool: action.tool,

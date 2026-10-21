@@ -11,6 +11,7 @@ import {
 } from './article-outline.js';
 import { scrollWithEvidence } from './browser-scroll.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
+import { markEngagementCounts } from './engagement-counts.js';
 import { redactPageText } from './page-redaction.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import { type UnifiedBrowserAction, isMutatingBrowserAction } from './unified-tools.js';
@@ -1055,9 +1056,11 @@ export class CloudObservation {
       try {
         host = new URL(frame.url()).hostname;
       } catch {}
-      const safeTree = /(?:^|\.)youtube\.com$/.test(host)
-        ? markYoutubeCollections(urlSafe)
-        : urlSafe;
+      // FIX-29: a bare count next to an icon says which counter it is (点赞/评论/收藏/分享).
+      const safeTree = await markEngagementCounts(
+        frame,
+        /(?:^|\.)youtube\.com$/.test(host) ? markYoutubeCollections(urlSafe) : urlSafe,
+      );
       const before = this.observations.get(frame);
       const prior = before && {
         revision: before.revision,
