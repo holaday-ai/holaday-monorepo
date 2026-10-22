@@ -194,7 +194,7 @@ describe('implicit form submission (Enter)', () => {
     ],
     [
       'a form with only weak signals',
-      `<form id="searchform" class="search-box" ${counter}><input class="search-input" aria-label="客服" placeholder="Search or ask a question"></form>`,
+      `<form id="searchform" class="search-box" ${counter}><input class="search-input" name="q" aria-label="客服" placeholder="Search or ask a question"></form>`,
     ],
     [
       // Review #2: GET alone is no search signal (a chat widget in a GET form whose JS posts).
@@ -204,6 +204,11 @@ describe('implicit form submission (Enter)', () => {
     [
       'an action that only contains 「search」 as part of another word',
       `<form method="get" action="/x/search-and-delete" ${counter}><input aria-label="客服"></form>`,
+    ],
+    [
+      // FIX-31 review: chat wording vetoes even a search-pointing form with name=q.
+      'a chat box in a search form',
+      `<form action="/search" method="get" ${counter}><input name="q" aria-label="客服" placeholder="有问题请咨询"></form>`,
     ],
     [
       // FIX-31: GET + a message field (not a search parameter name) still asks.

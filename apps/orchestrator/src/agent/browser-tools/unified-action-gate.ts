@@ -198,26 +198,33 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
   // search signal; a placeholder/class/name saying search is how a chat box looks too.
   const rawFormAction = form?.getAttribute('action') || '';
   const actionPath = rawFormAction.replace(/^(?:[a-z]+:)?\/\/[^/]+/i, '');
+  // FIX-31 review: a support/chat box worded like search is never a search box.
+  const chatLike =
+    /客服|聊天|留言|咨询|对话|\bchat|\bmessages?\b|\bask\b|\bsupport\b|\bconversation/i.test(
+      [
+        el.getAttribute('name'),
+        el.getAttribute('id'),
+        el.getAttribute('placeholder'),
+        el.getAttribute('aria-label'),
+        el.getAttribute('class'),
+        form?.getAttribute('id'),
+        form?.getAttribute('class'),
+      ].join(' '),
+    );
   const fieldSearch =
     String(el.getAttribute('type') || '').toLowerCase() === 'search' ||
     el.getAttribute('role') === 'searchbox' ||
-    // FIX-31 (Deploy-31 core-04): a GET form whose field carries a search parameter name —
-    // YouTube's 「action=/results」 + 「name=search_query」, Google/Baidu/Bing q/wd.
-    (!!form &&
-      /^(?:get)?$/i.test(String(form.getAttribute('method') || '')) &&
-      /^(?:q|query|search_query|search|keyword|keywords|wd|kw|k|s)$/i.test(
-        el.getAttribute('name') || '',
-      )) ||
     // Known site rules: IKEA's header search and Gaode's route from/to boxes are
     // bare inputs, no form.
     (/(?:^|\s)s-input(?:\s|$)/.test(el.getAttribute('class') || '') &&
       /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname)) ||
     (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
       /(?:^|\.)amap\.com$/i.test(location.hostname));
+  // YouTube's search form posts to /results (FIX-31 core-04).
   const formSearch =
     !!form &&
     (form.getAttribute('role') === 'search' ||
-      /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|search(?:page)?(?:\.[a-z]{2,5})?)(?:[/?#]|$)/i.test(
+      /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|results|search(?:page)?(?:\.[a-z]{2,5})?)(?:[/?#]|$)/i.test(
         actionPath,
       ) ||
       /[?&](?:q|query|wd|kw|keyword|k)=/i.test(rawFormAction) ||
@@ -249,7 +256,7 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
       : null,
     fieldSignal: parts.join(' ').slice(0, 1200),
     hasAmountField,
-    searchLike: (formSearch || fieldSearch) && method !== 'post',
+    searchLike: !chatLike && (formSearch || fieldSearch) && method !== 'post',
   };
 };
 

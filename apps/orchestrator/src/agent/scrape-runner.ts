@@ -508,8 +508,12 @@ const NOT_SHOWN_RE =
 /** FIX-31: a short question after one value (「QQ音乐热歌榜第一名是啥」「上证指数现在多少点」). */
 const ONE_VALUE_QUESTION_RE =
   /第一|第1|头条|多少|几|是啥|是什么|是谁|哪(?:一|个|张|天|年)?|\bwhat(?:'s| is)\b|\bhow (?:many|much)\b|\bwho\b|\bwhen\b/i;
+/**
+ * The answer turns to say the asked value itself is missing: 「…，但歌曲名称页面未显示」.
+ * A side field (「3658点，成交额页面未显示」) or 缺失 as a topic word (「维生素D缺失」) is not.
+ */
 const VALUE_MISSING_RE =
-  /(?:页面)?(?:未|没有|没)(?:显示|展示|获取到?|拿到|抓到|找到)|无法(?:确认|获取|确定)|缺失|not (?:shown|found|available)/i;
+  /(?:但|不过|可惜|然而|只是|\bbut\b|\bhowever\b)[^。\n]{0,30}(?:(?:页面)?(?:未|没有|没)(?:显示|展示|获取到?|拿到|抓到|找到)|无法(?:确认|获取|确定)|not (?:shown|found|available))/i;
 
 export function answerNotObtained(summary: string, intent = ''): boolean {
   if (NOT_OBTAINED_RE.test(summary.slice(0, 240))) return true;

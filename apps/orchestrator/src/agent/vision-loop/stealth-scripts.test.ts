@@ -132,10 +132,10 @@ describe('STEALTH_INIT_SCRIPT', () => {
 });
 
 describe('isStealthEnabled', () => {
-  it('defaults to true when STEALTH_ENABLED is unset', () => {
+  it('defaults to false when STEALTH_ENABLED is unset (FIX-31: no fingerprint spoofing)', () => {
     const prev = process.env.STEALTH_ENABLED;
     delete process.env.STEALTH_ENABLED;
-    expect(isStealthEnabled()).toBe(true);
+    expect(isStealthEnabled()).toBe(false);
     if (prev !== undefined) process.env.STEALTH_ENABLED = prev;
   });
 

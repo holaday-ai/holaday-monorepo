@@ -165,14 +165,12 @@ export async function humanScroll(page: PageLike, deltaY: number): Promise<void>
 }
 
 /**
- * Env gate: humanize on by default. Set `HUMANIZE_ENABLED=false` /
- * `0` / empty to bypass — e.g. during E2E timing measurements or on
- * machines where the extra 200 – 800 ms inter-action pause makes
- * dogfood feel sluggish.
+ * Env gate. FIX-31 (coordinator review): off unless `HUMANIZE_ENABLED` is
+ * explicitly truthy — unset means no detection-evading mouse paths or typing jitter.
  */
 export function isHumanizeEnabled(): boolean {
   const raw = process.env.HUMANIZE_ENABLED;
-  if (raw === undefined) return true;
+  if (raw === undefined) return false;
   const lower = raw.trim().toLowerCase();
   return !(lower === 'false' || lower === '0' || lower === 'no' || lower === '');
 }

@@ -195,6 +195,7 @@ describe('FIX-31：A股通道只接明确的股票问题（Deploy-31 b-v06）', 
     { symbol: '000001', displayName: '平安银行' },
     { symbol: '601857', displayName: '中国石油' },
     { symbol: '600519', displayName: '贵州茅台' },
+    { symbol: '002594', displayName: '比亚迪' },
   ];
   const search = async (q: string): Promise<ResolvedStock[]> => {
     const full = T.filter((s) => s.displayName && q.includes(s.displayName));
@@ -224,6 +225,9 @@ describe('FIX-31：A股通道只接明确的股票问题（Deploy-31 b-v06）', 
     ['第一创业股价', '002797'],
     ['中国平安今天涨了吗', '601318'],
     ['贵州茅台', '600519'],
+    // 协调方复审：选了 A 股技能时，≥3 字全称本身就算。
+    ['比亚迪最新消息', '002594'],
+    ['贵州茅台分红多少', '600519'],
   ])('真股票问题仍进：%s', async (intent, symbol) => {
     expect((await ctx(intent)).match?.stocks.map((s) => s.symbol)).toContain(symbol);
   });

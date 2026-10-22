@@ -5,7 +5,6 @@ import {
   type DegradationContext,
   type DegradationStrategy,
   ExtensionFallbackStrategy,
-  ProfileRotationStrategy,
   ProxySwapStrategy,
   SearchApiFallbackStrategy,
   SearchEngineSwapStrategy,
@@ -145,13 +144,12 @@ describe('DegradationChain.tryNext — ordering + skip semantics', () => {
 });
 
 describe('defaultStrategies', () => {
-  it('registers exactly five tiers, sorted by level', () => {
+  it('registers four tiers, sorted by level (FIX-31: no profile/UA rotation)', () => {
     const chain = new DegradationChain(defaultStrategies());
     const levels = chain.getStrategies().map((s) => s.level);
-    expect(levels).toEqual([1, 2, 3, 4, 5]);
+    expect(levels).toEqual([2, 3, 4, 5]);
     const ids = chain.getStrategies().map((s) => s.id);
     expect(ids).toEqual([
-      'profile_rotation',
       'proxy_swap',
       'search_engine_swap',
       'search_api_fallback',
@@ -160,40 +158,9 @@ describe('defaultStrategies', () => {
   });
 });
 
-describe('ProfileRotationStrategy', () => {
-  it('clears cookies on every context and installs a UA override', async () => {
-    const clearCalls: string[] = [];
-    const addInitCalls: Array<{ content: string }> = [];
-    const fakeContexts = [
-      {
-        clearCookies: async () => {
-          clearCalls.push('c1');
-        },
-        addInitScript: async (opts: { content: string }) => {
-          addInitCalls.push(opts);
-        },
-      },
-      {
-        clearCookies: async () => {
-          clearCalls.push('c2');
-        },
-        addInitScript: async (opts: { content: string }) => {
-          addInitCalls.push(opts);
-        },
-      },
-    ];
-    const fakeExecutor = { browser: { contexts: () => fakeContexts } } as never;
-    const s = new ProfileRotationStrategy();
-    const r = await s.execute(ctx({ executor: fakeExecutor }));
-    expect(r.ok).toBe(true);
-    expect(clearCalls).toEqual(['c1', 'c2']);
-    expect(addInitCalls).toHaveLength(2);
-    expect(addInitCalls[0]?.content).toMatch(/userAgent/);
-  });
-
-  it('canTry is false when no executor is attached', async () => {
-    const s = new ProfileRotationStrategy();
-    expect(await s.canTry(ctx({ executor: null }))).toBe(false);
+describe('no identity disguise (FIX-31)', () => {
+  it('the default chain has no profile / user-agent rotation', () => {
+    expect(defaultStrategies().map((s) => s.id)).not.toContain('profile_rotation');
   });
 });
 
@@ -294,12 +261,8 @@ describe('DegradationChain end-to-end escalation', () => {
     } as never;
 
     const chain = new DegradationChain();
-    // First pass: profile rotation (level 1) fires because it's first
-    // and canTry=true.
-    const r1 = await chain.tryNext(ctx({ executor: fakeExecutor }), 0);
-    expect(r1?.strategy).toBe('profile_rotation');
-    // Second pass: proxy skipped (no env), so we land on engine swap.
-    const r2 = await chain.tryNext(ctx({ executor: fakeExecutor }), 1);
+    // First pass: proxy skipped (no env), so we land on engine swap.
+    const r2 = await chain.tryNext(ctx({ executor: fakeExecutor }), 0);
     expect(r2?.strategy).toBe('search_engine_swap');
     // Third pass: search API skipped (no env), so we hit extension.
     const r3 = await chain.tryNext(ctx({ executor: fakeExecutor }), 3);

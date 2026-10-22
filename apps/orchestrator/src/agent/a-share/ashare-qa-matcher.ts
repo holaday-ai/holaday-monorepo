@@ -430,9 +430,19 @@ function justTheName(text: string, names: ReadonlyArray<string | null>): boolean
  *   - 否则只认本地字典的非常用词别名或 ≥3 字的名称片段（2 字常用词窗口一律不收），且不是旅游美食
  *     这类话题，再要求有股票语境或整句就是这个名称。
  */
-function acceptShortHit(text: string, stock: ResolvedStock, stockContext: boolean): boolean {
+function acceptShortHit(
+  text: string,
+  stock: ResolvedStock,
+  stockContext: boolean,
+  /** The user picked the A-share skill: a full company name (≥3 字) is enough. */
+  inSkillContext = false,
+): boolean {
   if (nameAppearsIn(text, stock.displayName))
-    return stockContext || justTheName(text, [stock.displayName]);
+    return (
+      stockContext ||
+      (inSkillContext && compact(stock.displayName ?? '').length >= 3) ||
+      justTheName(text, [stock.displayName])
+    );
   if (isNonStockTopic(text)) return false;
   const alias = aliasIn(text, stock);
   if (!alias && nameOverlap(text, stock.displayName) < 3) return false;
@@ -443,6 +453,7 @@ async function searchShort(
   text: string,
   search: SymbolSearchFn,
   signal: boolean,
+  inSkillContext = false,
 ): Promise<ResolvedStock[]> {
   let found: ResolvedStock[] = [];
   try {
@@ -450,7 +461,7 @@ async function searchShort(
   } catch {
     found = [];
   }
-  return found.filter((s) => acceptShortHit(text, s, signal));
+  return found.filter((s) => acceptShortHit(text, s, signal, inSkillContext));
 }
 
 /**
@@ -633,7 +644,7 @@ export async function resolveAshareInContext(
   // 短问句：整句 name-search（结果过 acceptShortHit，挡「关于宁德的旅游攻略」这类短名误配）。
   // 长句（批次 11.2）：有 A股信号才抽候选词逐个查（≤3 次），全名原样在句中才收。
   if (shouldNameSearch(text)) {
-    stocks = await searchShort(text, search, hasStockContext(text));
+    stocks = await searchShort(text, search, hasStockContext(text), true);
   } else if (shouldExtractFromLongText(text)) {
     stocks = await resolveLongSentenceStocks(text, search);
   }

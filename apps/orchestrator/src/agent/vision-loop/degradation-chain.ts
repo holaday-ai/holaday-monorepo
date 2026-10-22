@@ -1,11 +1,15 @@
 /**
  * DegradationChain — tiered response when the anti-bot detector fires.
  * Runs strategies in escalating order so we spend user-visible
- * disruption budget minimally. Cheapest tries go first: profile reset
- * costs nothing; proxy swap costs a network hop; search-engine swap
+ * disruption budget minimally. Cheapest tries go first: proxy swap
+ * costs a network hop; search-engine swap
  * changes the URL; search-API fallback paid data; punting to the
  * user's extension is last because it breaks the "headless server
  * does the work" promise.
+ *
+ * FIX-31 (coordinator review, red line 「不伪造指纹」): the former level-1
+ * profile rotation (clear cookies + random navigator.userAgent) is removed — a
+ * wall goes to the user or is reported, never disguised.
  *
  * Each strategy is gated by `canTry(ctx)` so skip-when-unconfigured
  * is first-class — a deployment without PROXY_LIST silently skips
@@ -54,68 +58,6 @@ export interface DegradationStrategy {
 // ---------------------------------------------------------------------------
 // Concrete strategies
 // ---------------------------------------------------------------------------
-
-/**
- * Level 1 — same Chromium, same proxy, but wipe the identity bits a
- * detector most commonly fingerprints: cookies + a fresh user-agent.
- * We don't relaunch the browser (Playwright is attached via CDP, not
- * owner); we clear per-context cookies and push a `navigator.userAgent`
- * override through addInitScript. Cheap; first line of defence.
- */
-export class ProfileRotationStrategy implements DegradationStrategy {
-  readonly id = 'profile_rotation';
-  readonly level = 1;
-
-  async canTry(ctx: DegradationContext): Promise<boolean> {
-    return ctx.executor !== null;
-  }
-
-  async execute(ctx: DegradationContext): Promise<DegradationResult> {
-    const executor = ctx.executor;
-    if (!executor) {
-      return { ok: false, strategy: this.id, level: this.level, message: 'no executor' };
-    }
-    const browser = (executor as unknown as { browser?: unknown }).browser as
-      | {
-          contexts?: () => Array<{
-            clearCookies?: () => Promise<void>;
-            addInitScript?: (opts: { content: string }) => Promise<void>;
-          }>;
-        }
-      | null
-      | undefined;
-    const ctxList = browser?.contexts?.() ?? [];
-    let cookiesCleared = 0;
-    for (const c of ctxList) {
-      try {
-        await c.clearCookies?.();
-        cookiesCleared += 1;
-      } catch {
-        /* best-effort */
-      }
-    }
-    const newUA = pickRandomUA();
-    for (const c of ctxList) {
-      try {
-        await c.addInitScript?.({
-          content: `Object.defineProperty(navigator,'userAgent',{get:()=>${JSON.stringify(newUA)},configurable:true});`,
-        });
-      } catch {
-        /* best-effort */
-      }
-    }
-    logger.info(
-      { action: 'degrade', level: this.level, strategy: this.id, cookiesCleared, ua: newUA },
-      'degrade: rotated profile (cookies + UA)',
-    );
-    return {
-      ok: true,
-      strategy: this.id,
-      level: this.level,
-      message: `cleared cookies on ${cookiesCleared} ctx + UA swap`,
-    };
-  }
-}
 
 /**
  * Level 2 — proxy swap. Needs `PROXY_LIST` (comma-separated http/socks
@@ -236,8 +178,7 @@ export class SearchApiFallbackStrategy implements DegradationStrategy {
 
 /**
  * Level 5 — hand off to the user's Chrome extension. Last resort: the
- * page is scraping-hostile even with a clean profile and alternate
- * engines, so we let the user's authenticated browser drive. Returns
+ * page is scraping-hostile even with alternate engines, so we let the user's authenticated browser drive. Returns
  * `handoffToExtension:true` — task-runner flips `onExecutorFallback`
  * and Layer 5's existing plumbing does the rest.
  */
@@ -351,7 +292,6 @@ export class DegradationChain {
 
 export function defaultStrategies(): DegradationStrategy[] {
   return [
-    new ProfileRotationStrategy(),
     new ProxySwapStrategy(),
     new SearchEngineSwapStrategy(),
     new SearchApiFallbackStrategy(),
@@ -362,19 +302,6 @@ export function defaultStrategies(): DegradationStrategy[] {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-// A small pool — not for cloaking (that needs a real UA DB); just
-// enough to shift the fingerprint when a detector memoised our UA.
-const UA_POOL = [
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
-];
-
-function pickRandomUA(): string {
-  const i = Math.floor(Math.random() * UA_POOL.length);
-  return UA_POOL[i] ?? UA_POOL[0]!;
-}
 
 async function currentPageUrl(executor: PlaywrightExecutor | null): Promise<string> {
   if (!executor) return '';

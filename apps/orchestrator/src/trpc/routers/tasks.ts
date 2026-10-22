@@ -12357,7 +12357,7 @@ async function convergePlanStatusOnSuccess(
  * doesn't need to differentiate.
  */
 /** FIX-31 review: the A-share index probe before choosing the index lane. */
-const INDEX_PROBE_MS = 2_500;
+const INDEX_PROBE_MS = 2_000;
 
 /** The value, or null once `ms` have passed (the work itself is left to finish). */
 async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | null> {

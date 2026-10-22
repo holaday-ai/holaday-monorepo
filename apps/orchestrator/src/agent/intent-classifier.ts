@@ -1042,9 +1042,9 @@ const LIVE_QUESTION_RE =
   /多少|几|是什么|是啥|啥|哪|吗|么|怎样|如何|？|\?|\bwhat\b|\bwhen\b|\bwhich\b|\bhow\s+(?:many|much)\b|\bcheck\b|\bfind\b|\btell me\b/i;
 const WRITING_RE =
   /写(?:一|个|篇|段|首|封)|帮我写|撰写|起草|润色|改写|翻译|续写|作文|文案|写诗|小说|\btranslate\b|\bwrite\s+(?:a|an|me|my)\b|\bdraft\b|\brewrite\b|\bpolish\b/i;
-/** Writing new text (copy, a post, an article), not reworking text that already exists. */
+/** Creating copy for a platform: 「写/想/起 N 条…文案/标题/选题」 (FIX-31 review). */
 const WRITING_FOR_PLATFORM_RE =
-  /帮我写|写(?:一|个|几|两|三|四|五|篇|段|条|首|封|\d)|撰写|起草|文案|写诗|作文|续写|\bwrite\s+(?:a|an|me|my)\b|\bdraft\b/i;
+  /(?:写|想|起|拟|生成|撰写)[^，。\n]{0,12}(?:文案|标题|选题|脚本|口播|种草文|帖子|笔记)|\b(?:write|draft)\b[^.\n]{0,30}\b(?:captions?|copy|titles?|headlines?|posts?|scripts?)\b/i;
 const TRANSFORMS_TEXT_RE =
   /翻译|改写|润色|总结|概括|\btranslate\b|\brewrite\b|\bpolish\b|\bsummari[sz]e\b/i;
 const STRATEGY_TOPIC_RE =
@@ -1071,7 +1071,11 @@ function siteDomain(intent: string): string | undefined {
 export function matchLiveInfoIntent(
   intent: string,
 ): { mode: 'scrape' | 'browser'; match: string } | null {
-  if (WRITING_RE.test(intent) && !URL_REGEX.test(intent)) return null;
+  // Writing is not a lookup — but reworking live content (「翻译今天的新闻」) still needs it.
+  // Text handed over with the request (「翻译成英文：今天天气很好」) is the content itself.
+  const reworksLive =
+    TRANSFORMS_TEXT_RE.test(intent) && !/[：:]\s*\S|这段|这句|这篇|下面|以下|如下/.test(intent);
+  if (WRITING_RE.test(intent) && !reworksLive && !URL_REGEX.test(intent)) return null;
   if (PROVIDED_TEXT_RE.test(intent) && !URL_REGEX.test(intent)) return null;
   // A strategy or analysis topic about a platform is not a lookup on it.
   if (STRATEGY_TOPIC_RE.test(intent)) return null;

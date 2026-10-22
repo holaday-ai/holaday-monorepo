@@ -11,13 +11,12 @@ const logger = { info() {}, warn() {}, debug() {}, error() {} } as never;
 const route = async (intent: string) => (await explainExecutionMode({ intent, logger })).mode;
 
 describe('ct-create: writing for a platform is writing, not reading it', () => {
-  it.each([
-    '帮我写 3 条小红书露营文案',
-    '给抖音写一段母婴好物的口播文案',
-    '帮我写一篇知乎风格的回答',
-  ])('%s → generate', async (intent) => {
-    expect(await route(intent)).toBe('generate');
-  });
+  it.each(['帮我写 3 条小红书露营文案', '给抖音写一段母婴好物的口播文案', '帮我想 5 个小红书标题'])(
+    '%s → generate',
+    async (intent) => {
+      expect(await route(intent)).toBe('generate');
+    },
+  );
   it.each([
     ['小红书上搜 杭州西湖攻略 第一条笔记标题和作者', 'browser'],
     [
@@ -28,6 +27,8 @@ describe('ct-create: writing for a platform is writing, not reading it', () => {
     // PR #293 review: reworking text that is on the platform needs that text.
     ['翻译知乎上问题《为什么天空是蓝的》的最高赞回答', 'scrape'],
     ['改写小红书上某博主最新一篇笔记', 'scrape'],
+    // Coordinator review: reworking live content still reads it; handed-over text does not.
+    ['翻译今天的新闻', 'scrape'],
   ])('reading a platform still reads it: %s → %s', async (intent, mode) => {
     expect(await route(intent)).toBe(mode);
   });
@@ -69,5 +70,17 @@ describe('v06: the one value asked for is the one the answer could not see', () 
         '打开 https://www.xiaohongshu.com/explore/6929ba55000000001e023ef8 读这篇笔记的标题、作者和点赞数',
       ),
     ).toBe(false);
+  });
+});
+
+describe('coordinator review: the one-value rule fires only on the asked value', () => {
+  it.each([
+    ['上证指数现在多少点', '**3658点**，跌55点；成交额页面未显示。'],
+    ['维生素D缺失有什么症状', '维生素D缺失常见症状有骨痛、乏力、肌肉无力。'],
+  ])('%s: a side field or a topic word is not 「没拿到」', (intent, answer) => {
+    expect(answerNotObtained(answer, intent)).toBe(false);
+  });
+  it('「把这段话翻译成英文：…」 stays in generate', async () => {
+    expect(await route('把这段话翻译成英文：今天天气很好')).toBe('generate');
   });
 });
