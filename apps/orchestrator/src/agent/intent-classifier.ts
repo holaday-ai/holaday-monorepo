@@ -1048,13 +1048,29 @@ const STRATEGY_TOPIC_RE =
 const SITE_PAGES_RE =
   /(?:进|点进|打开|点开)(?:去)?.{0,16}(?:详情页|第[一二三四五六七八九十1-9]\S{0,3}(?:本|个|条|篇|页)|内页)/;
 
+/** The user hands over the text to work on: 「总结下面这段…：<text>」. */
+const PROVIDED_TEXT_RE =
+  /(?:总结|概括|摘要|归纳|分析|改写|提炼|梳理)[^：:\n]{0,20}(?:下面|以下|如下|这段|这篇|这些)|(?:总结|概括|摘要|归纳|分析|改写|提炼|梳理|summari[sz]e|analy[sz]e|rewrite)[^：:\n]{0,30}[：:]\s*\S[\s\S]{40,}/i;
+/** A file name or a framework is not a site: 「main.py 报错」「Vue.js 和 React」. */
+const NOT_A_DOMAIN_RE =
+  /\.(?:py|js|ts|tsx|jsx|mjs|cjs|md|json|ya?ml|txt|csv|java|go|rs|rb|php|cpp|hpp|sh|vue|css|scss|log|xlsx?|docx?|pptx?|pdf|png|jpe?g|gif|svg|zip|exe|dmg|apk|ipynb)$/i;
+
+function siteDomain(intent: string): string | undefined {
+  for (const m of intent.matchAll(new RegExp(DOMAIN_REGEX.source, 'gi'))) {
+    const host = m[0].split('/')[0]!;
+    if (!NOT_A_DOMAIN_RE.test(host)) return m[0];
+  }
+  return undefined;
+}
+
 export function matchLiveInfoIntent(
   intent: string,
 ): { mode: 'scrape' | 'browser'; match: string } | null {
   if (WRITING_RE.test(intent) && !URL_REGEX.test(intent)) return null;
+  if (PROVIDED_TEXT_RE.test(intent) && !URL_REGEX.test(intent)) return null;
   // A strategy or analysis topic about a platform is not a lookup on it.
   if (STRATEGY_TOPIC_RE.test(intent)) return null;
-  const domain = DOMAIN_REGEX.exec(intent)?.[0];
+  const domain = siteDomain(intent);
   const source = intent.match(LIVE_SOURCE_RE)?.[0];
   if ((domain || source) && SITE_PAGES_RE.test(intent))
     return { mode: 'browser', match: (domain ?? source)!.slice(0, 64) };

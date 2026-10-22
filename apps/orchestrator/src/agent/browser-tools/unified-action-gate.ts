@@ -194,27 +194,21 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
   const submit = form?.querySelector(
     'button[type="submit"], button:not([type]), input[type="submit"], input[type="image"]',
   );
-  const own = [
-    el.getAttribute('type'),
-    el.getAttribute('name'),
-    el.getAttribute('id'),
-    el.getAttribute('placeholder'),
-    el.getAttribute('aria-label'),
-    el.getAttribute('role'),
-    // FIX-30 v01: Bilibili's box is only 「class="nav-search-input"」.
-    el.getAttribute('class'),
-  ]
-    .filter(Boolean)
-    .join(' ');
-  const formSearch =
-    form?.getAttribute('role') === 'search' ||
-    /\/(?:s|search)(?:[/?]|$)/i.test(form?.getAttribute('action') || '') ||
-    // 「<form id="nav-searchform">」 with no action and no submit button.
-    /search/i.test(`${form?.getAttribute('id') || ''} ${form?.getAttribute('class') || ''}`);
+  // FIX-30 review blocker 1: Enter goes through without asking only for a strong
+  // search signal; a placeholder/class/name saying search is how a chat box looks too.
+  const rawFormAction = form?.getAttribute('action') || '';
+  const actionPath = rawFormAction.replace(/^(?:[a-z]+:)?\/\/[^/]+/i, '');
   const fieldSearch =
-    /(?:^|\s)search(?:\s|$)|搜索|搜一搜|查找|search|(?:^|\s)(?:q|query|keyword|keywords|wd|kw)(?:\s|$)/i.test(
-      own,
-    );
+    String(el.getAttribute('type') || '').toLowerCase() === 'search' ||
+    el.getAttribute('role') === 'searchbox';
+  const formSearch =
+    !!form &&
+    (form.getAttribute('role') === 'search' ||
+      /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|search[\w.-]*)(?:[/?#]|$)/i.test(actionPath) ||
+      /[?&](?:q|query|wd|kw|keyword|k)=/i.test(rawFormAction) ||
+      String(form.getAttribute('method') || '').toLowerCase() === 'get' ||
+      // Known site rule: Bilibili's header search has no action and no button.
+      (form.id === 'nav-searchform' && /(?:^|\.)bilibili\.com$/i.test(location.hostname)));
   const method = (form?.getAttribute('method') || 'get').toLowerCase();
   return {
     hasForm: Boolean(form),

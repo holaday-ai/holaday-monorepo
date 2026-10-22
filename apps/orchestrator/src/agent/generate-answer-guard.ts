@@ -10,14 +10,25 @@ import type { CoreQualityFailure } from './core-task-settlement.js';
 const TOOL_TAG_RE =
   /<\/?(?:computer_use|tool_name|tool_call|tool_use|function_call|function_calls|invoke|parameter)\b[^>]*>/gi;
 const TOOL_JSON_LINE_RE = /^\s*\{\s*"(?:action|tool|tool_name|function)"\s*:[^\n]*\}\s*$/gim;
+/** A first-person opener announcing an action (「我来帮你查看…」 "I'll check…"). */
 const OPENER_RE =
-  /^(?:好的[，,。！!]?\s*)?(?:我来|让我|我先|我将|我会|稍等|马上|正在|先)(?:帮你|为你|给你|去)?(?:查|看|打开|搜索|检索|访问|浏览|确认)|^(?:sure[,!.]?\s*)?(?:I'?ll|I will|let me|I'm going to|I am going to)\s+(?:check|look|search|open|browse|find|visit|fetch)/i;
+  /^(?:好的[，,。！!]?\s*)?(?:我来|让我|我先|我将|我会|稍等|马上|正在)(?:帮你|为你|给你|去)?(?:查|看|打开|搜索|检索|访问|浏览|确认)|^(?:sure[,!.]?\s*)?(?:I'?ll|I will|let me|I'm going to|I am going to)\s+(?:check|look|search|open|browse|find|visit|fetch)/i;
+/** What may follow an opener without being content: 「先打开网站看看」「请稍候」. */
+const MORE_OPENER_RE =
+  /^(?:然后|再|先|稍等|请稍候|马上)?[^，,。]{0,6}(?:打开|访问|搜索|查看|查一下|看看|看一下|浏览)[^，,。]{0,30}$|^(?:请稍候|稍等|one moment|please wait)/i;
+/**
+ * A sentence citing a web source as where facts came from: 「根据维基百科，…」
+ * 「据官网显示…」「以下数据来自官网」「according to Wikipedia」. Advice
+ * (「请参考官网」「以官网为准」) and the user's own material (「根据你提供的网页内容」) are not.
+ */
 const CLAIMED_SOURCE_RE =
-  /(?:根据|据|来自|参考|摘自|引自|查阅了?|查询了?)[^，。\n]{0,8}(?:维基百科|百度百科|百科|官网|官方网站|官方文档|网站|网页|新闻报道|报道|搜索结果)|\baccording to (?:the )?(?:wikipedia|official (?:site|website|docs?|documentation)|the website|search results|news reports?)\b/i;
+  /(?:根据|据|依据|来自|摘自|引自|查阅了|查询了)(?!你|您|用户|上文|上面|以上|下面|以下|所给|提供|前面)[^，。\n]{0,10}(?:维基百科|百度百科|百科|官网|官方网站|官方文档|网站|网页|新闻报道|报道|搜索结果)|\baccording to (?:the )?(?:wikipedia|official (?:site|website|docs?|documentation)|the website|search results|news reports?)\b/i;
+/** Pasted material this long counts as what the answer may be "根据". */
+const USER_MATERIAL_MIN_CHARS = 200;
 
 export function answerQualityFailure(
   answer: string,
-  opts: { readSources: boolean },
+  opts: { readSources: boolean; userMaterial?: string },
 ): CoreQualityFailure | null {
   const text = answer.trim();
   if (!text) return null;
@@ -31,8 +42,23 @@ export function answerQualityFailure(
     return 'NON_ANSWER';
   if (flat(text.replace(TOOL_JSON_LINE_RE, ' ').replace(/`{3}\w*/g, ' ')).length < 15)
     return 'NON_ANSWER';
-  // An opener with nothing after it: no 「：」 introducing an answer.
-  if (text.length <= 80 && OPENER_RE.test(text) && !/[：:=]/.test(text)) return 'NON_ANSWER';
-  if (!opts.readSources && CLAIMED_SOURCE_RE.test(text)) return 'UNREAD_SOURCE';
+  // A first-person opener with nothing of substance after it. Instructions
+  // (「先打开设置，再点通用→关于本机」) are an answer.
+  if (text.length <= 120 && OPENER_RE.test(text) && !/[：:=]/.test(text)) {
+    const rest = text
+      .split(/[。！!？?\n]+/)
+      .map((sentence) => sentence.trim())
+      .filter(Boolean)
+      .slice(1);
+    if (rest.every((sentence) => MORE_OPENER_RE.test(sentence))) return 'NON_ANSWER';
+  }
+  const material = (opts.userMaterial ?? '').trim();
+  if (
+    !opts.readSources &&
+    material.length < USER_MATERIAL_MIN_CHARS &&
+    !/https?:\/\//i.test(material) &&
+    CLAIMED_SOURCE_RE.test(text)
+  )
+    return 'UNREAD_SOURCE';
   return null;
 }

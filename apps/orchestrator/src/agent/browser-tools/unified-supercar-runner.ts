@@ -264,14 +264,20 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   let activeRemaining = budgetMs;
   let activeSince = Date.now();
   let timeout = activeRemaining ? setTimeout(() => controller.abort(), activeRemaining) : undefined;
+  // Waiting for the user never counts against the budget (captcha, login, a
+  // confirmation — every awaiting_user wait). Nested waits suspend once.
+  let suspended = 0;
   const suspendTimeout = () => {
+    if (suspended++ > 0) return;
     if (timeout) clearTimeout(timeout);
+    timeout = undefined;
     if (activeRemaining !== undefined)
       activeRemaining = Math.max(1, activeRemaining - (Date.now() - activeSince));
   };
   const resumeTimeout = () => {
+    if (suspended === 0 || --suspended > 0) return;
     activeSince = Date.now();
-    if (activeRemaining !== undefined)
+    if (activeRemaining !== undefined && !controller.signal.aborted)
       timeout = setTimeout(() => controller.abort(), activeRemaining);
   };
   let binding: { control: BrowserControl; finish: () => void } | undefined;
@@ -360,6 +366,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     question: string,
     awaitingKind: SupercarAwaitingKind,
   ): Promise<string | null> => {
+    // FIX-30 review: a login wall the user takes 5+ minutes on is not a timeout.
+    suspendTimeout();
     await replay?.pause();
     try {
       await safe(() =>
@@ -387,6 +395,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       });
     } finally {
       replay?.resume();
+      resumeTimeout();
     }
   };
   // Runtime safety boundary: the same LIVE-VETO the legacy loop applies before
@@ -840,6 +849,8 @@ export function readsOnePage(intent: string): boolean {
     !/填|表单|勾选|下载|上传|搜索|搜一下|搜|滚动|新标签|标签页|分别|每个|逐个|对比|比较|前\s*\d+|翻页|登录|注册|预订|下单|购买|加购|\bfill\b|\bdownload\b|\bupload\b|\bsearch\b|\bscroll\b|\btabs?\b|\bcompare\b|\btop\s*\d+/i.test(
       intent,
     ) &&
-    /https?:\/\/|www\.|打开|读|看|告诉我|是谁|是什么|多少|\bopen\b|\bread\b|\bwhat\b/i.test(intent)
+    /https?:\/\/|www\.|打开|读|看(?:下|一下)?(?=这|该|页面|网页|标题)|告诉我|是谁|是什么|多少|\bopen\b|\bread\b|\bwhat\b/i.test(
+      intent,
+    )
   );
 }

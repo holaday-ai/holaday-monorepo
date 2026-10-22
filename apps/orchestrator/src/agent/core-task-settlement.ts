@@ -174,10 +174,11 @@ export const CORE_LOCAL_FAILURE_COPY: Readonly<Record<CoreLocalFailure, string>>
 export type CoreQualityFailure = 'NON_ANSWER' | 'UNREAD_SOURCE';
 export const CORE_QUALITY_FAILURE_COPY: Readonly<Record<CoreQualityFailure, string>> =
   Object.freeze({
+    // A platform fault: refunded once per task (quota/platform-failure-refunds.ts).
     NON_ANSWER:
-      '没有生成实际答案：模型只输出了工具调用指令或「我来查一下」之类的开场白。这个问题需要联网读取网页，请补充具体网址，或注明「请使用云端浏览器」后重试。',
+      '没有生成实际答案：模型只输出了工具调用指令或「我来查一下」之类的开场白，这是平台的问题。这个问题需要联网读取网页，可以注明「请使用云端浏览器」后重试。',
     UNREAD_SOURCE:
-      '答案说内容来自某个网站或资料，但本任务并没有读取它，不能作为已核实的结果交付。请补充具体网址，或注明「请使用云端浏览器」后重试。',
+      '答案说内容来自某个网站或资料，但本任务并没有读取它，这些内容无法核实，所以没有作为结果交付。',
   });
 /** What a failed quality check was about, in the user's words. */
 const ISSUE_COPY: Readonly<Record<string, string>> = Object.freeze({

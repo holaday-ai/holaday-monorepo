@@ -7466,6 +7466,7 @@ export const tasksRouter = router({
                         const navSignal = detectNavFailure(outcome.summary, {
                           url: finalState.finalUrl,
                           text: finalState.finalPageText,
+                          intent: input.intent,
                         });
                         if (navSignal.detected) {
                           ctx.logger.info(

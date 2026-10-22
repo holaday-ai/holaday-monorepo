@@ -73,6 +73,29 @@ const WRITE_PATH_RE =
 const READ_PATH_RE =
   /(?:^|[/._-])(?:suggest(?:ions?)?|sug|autocomplete|autosuggest|typeahead|complete|recommend|search|query|hint|lookup|predict)(?:[/._-]|$)/i;
 
+/**
+ * A write named in the query or the body rather than the path:
+ * 「POST /api?action=addCart」, 「{"action":"addCart"}」, 「op=submit」.
+ */
+const WRITE_INTENT_RE =
+  /(?:^|[?&"'{,;\s])(?:action|op|operation|method|type|cmd|act|do)["']?\s*[:=]\s*["']?[\w.-]*?(?:add|cart|order|pay|submit|send|post|comment|message|follow|like|collect|favou?rite|login|register|signup|create|delete|remove|save|update|publish|reply)/i;
+
+function writeIntentPayload(url: URL, request: Request): boolean {
+  let body = '';
+  try {
+    body = (request.postData() ?? '').slice(0, 65536);
+  } catch {
+    body = '';
+  }
+  let decoded = `${url.search} ${body}`;
+  try {
+    decoded = decodeURIComponent(decoded.replace(/\+/g, ' '));
+  } catch {
+    /* keep the raw text */
+  }
+  return WRITE_INTENT_RE.test(decoded);
+}
+
 /** Akamai Bot Manager's sensor POST (BestBuy): an opaque path, a 「{"sensor_data":…}」 body. */
 function botSensorPost(request: Request): boolean {
   try {
@@ -703,6 +726,7 @@ export class CloudObservation {
       !resourceWrite &&
       !navigation &&
       !WRITE_PATH_RE.test(url.pathname) &&
+      !writeIntentPayload(url, r) &&
       (READ_PATH_RE.test(url.pathname) || botSensorPost(r));
     const unknownPost =
       r.method() === 'POST' && graphql !== 'query' && !passiveBeacon && !searchRead;
@@ -1589,28 +1613,25 @@ export class CloudObservation {
  */
 async function searchFieldAt(target: Locator): Promise<boolean> {
   try {
+    // FIX-30 review blocker 1: only a strong signal makes a search box — a weak one
+    // (placeholder 「Search or ask a question」, a class) is how a chat box looks too.
     // No named local functions in page code (tsx keepNames adds __name).
     return await target.evaluate(
       (el) => {
         const input = el as HTMLInputElement;
-        const type = String(input.type || '').toLowerCase();
-        const words = [
-          input.name,
-          input.id,
-          input.getAttribute('placeholder'),
-          input.getAttribute('aria-label'),
-          input.getAttribute('title'),
-        ]
-          .filter(Boolean)
-          .join(' ');
-        const form = input.form;
+        const form = input.form ?? el.closest('form');
+        const action = form?.getAttribute('action') || '';
+        const actionPath = action.replace(/^(?:[a-z]+:)?\/\/[^/]+/i, '');
         return (
-          type === 'search' ||
+          String(input.getAttribute('type') || '').toLowerCase() === 'search' ||
           el.getAttribute('role') === 'searchbox' ||
-          !!el.closest('[role="search"]') ||
-          (!!form && /search|\/s(?:\?|$)|[?&]q=/i.test(form.getAttribute('action') || '')) ||
-          /^(?:q|query|search|wd|kw|keyword|k|field-keywords)$/i.test(input.name || '') ||
-          /search|搜索|搜一搜/i.test(words)
+          (!!form &&
+            (form.getAttribute('role') === 'search' ||
+              /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|search[\w.-]*)(?:[/?#]|$)/i.test(actionPath) ||
+              /[?&](?:q|query|wd|kw|keyword|k)=/i.test(action) ||
+              String(form.getAttribute('method') || '').toLowerCase() === 'get' ||
+              // Known site rule: Bilibili's header search has no action and no button.
+              (form.id === 'nav-searchform' && /(?:^|\.)bilibili\.com$/i.test(location.hostname))))
         );
       },
       undefined,

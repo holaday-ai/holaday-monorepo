@@ -353,6 +353,10 @@ async function executeCoreTask(
           readSources:
             (reviewed.outcome.sourceUrls?.length ?? outcome.sourceUrls?.length ?? 0) > 0 ||
             input.blocks.some((block) => block.type !== 'text'),
+          // Text the user pasted is material the answer may cite (「根据你提供的网页内容」).
+          userMaterial: input.blocks
+            .map((block) => (block.type === 'text' ? block.text : ''))
+            .join('\n'),
         });
         if (qualityFailure) {
           input.logger.info(

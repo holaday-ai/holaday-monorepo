@@ -2,6 +2,7 @@ import { type Server, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { summariseVerificationFailure } from '../execution/execution-pipeline.js';
 import { matchExpertWorkflow } from '../execution/expert-workflow-registry.js';
 import { scrapedWall } from '../firecrawl/scraped-page.js';
 import { platformFailureReason } from '../quota/platform-failure-refunds.js';
@@ -86,20 +87,47 @@ describe('1 · a generate "answer" that is not an answer is not delivered', () =
     '下面是一个 JSON 示例：\n```json\n{"action": "deploy", "env": "prod"}\n```\n其中 action 表示动作。',
     '我来解释一下：二分查找的时间复杂度是 O(log n)，因为每次把区间减半。',
     '根据《民法典》第一千零四十三条，家庭应当树立优良家风。',
+    // FIX-30 review blocker 3: advice, the user's own material, and instructions.
+    'iPhone 16 的起售价大约是 5999 元，具体价格请参考官网。',
+    '具体以官网公布为准，建议出发前查看官方网站。',
+    '根据你提供的网页内容，这款耳机续航约 30 小时。',
+    '先打开设置，再点通用→关于本机，就能看到型号。',
+    '我来解释：先打开设置，再点通用。',
+    '我会帮你列个清单。第一步准备材料，第二步按顺序核对，第三步记录结果。',
   ])('a real answer passes: %s', (answer) => {
     expect(answerQualityFailure(answer, none)).toBeNull();
   });
-  it('the failure says what is missing, and is not a platform refund', () => {
-    for (const copy of Object.values(CORE_QUALITY_FAILURE_COPY)) {
-      expect(copy).toMatch(/请补充具体网址/);
-      expect(
-        platformFailureReason({
-          status: 'failed',
-          errorCode: 'CORE_EXECUTION_FAILED',
-          errorMessage: copy,
-        }),
-      ).toBeNull();
-    }
+  it.each([
+    ['据官网显示，iPhone 16 Pro 起售价为 7999 元。'],
+    ['以下数据来自维基百科：杭州常住人口 1270 万。'],
+    ['According to Wikipedia, Hangzhou has 12.7 million residents.'],
+  ])('a fact cited to an unread web source is UNREAD_SOURCE: %s', (answer) => {
+    expect(answerQualityFailure(answer, none)).toBe('UNREAD_SOURCE');
+  });
+  it('pasted material counts as what the answer is 「根据」', () => {
+    const answer = '根据网页内容，这款耳机续航约 30 小时。';
+    expect(answerQualityFailure(answer, none)).toBe('UNREAD_SOURCE');
+    expect(
+      answerQualityFailure(answer, {
+        readSources: false,
+        userMaterial: `总结这段：${'产品参数说明。'.repeat(40)}`,
+      }),
+    ).toBeNull();
+  });
+  it('an opener followed by more opener is still NON_ANSWER', () => {
+    expect(answerQualityFailure('好的，我来帮你查一下。请稍候。', none)).toBe('NON_ANSWER');
+  });
+  it('NON_ANSWER is a platform failure (refunded once per task); UNREAD_SOURCE is not', () => {
+    const reason = (copy: string) =>
+      platformFailureReason({
+        status: 'failed',
+        errorCode: 'CORE_EXECUTION_FAILED',
+        errorMessage: copy,
+      });
+    expect(reason(CORE_QUALITY_FAILURE_COPY.NON_ANSWER)).toBe('CORE_PLATFORM_FAILURE');
+    expect(reason(CORE_QUALITY_FAILURE_COPY.UNREAD_SOURCE)).toBeNull();
+    // Says honestly what happened; does not send the user to 「补充网址后重试」.
+    expect(CORE_QUALITY_FAILURE_COPY.UNREAD_SOURCE).not.toMatch(/补充|重试/);
   });
 });
 
@@ -313,23 +341,47 @@ describe('5 · checks that misjudged and a time cap', () => {
     const summary = "418 I'm a teapot：服务器拒绝尝试用茶壶煮咖啡。";
     const url = 'https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Reference/Status/418';
     const mdn = `HTTP 418 I'm a teapot 客户端错误响应代码表示服务器拒绝冲泡咖啡，因为它永远是一个茶壶。${'规范与浏览器兼容性说明。'.repeat(150)}`;
+    const intent =
+      '请使用云端浏览器，打开 https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Status/418 告诉我这个状态码是干嘛的';
     expect(detectNavFailure(summary).detected).toBe(true);
-    expect(detectNavFailure(summary, { url, text: mdn }).detected).toBe(false);
+    // The target's own site (redirected within it), loaded, saying it itself: not a failure.
+    expect(detectNavFailure(summary, { url, text: mdn, intent }).detected).toBe(false);
+    // Same page text but no target named, or the run ended on another site
+    // (a failed jump leaves the previous page): still a failure.
+    expect(detectNavFailure(summary, { url, text: mdn }).detected).toBe(true);
+    expect(
+      detectNavFailure(summary, { url: 'https://www.bing.com/search?q=418', text: mdn, intent })
+        .detected,
+    ).toBe(true);
+    expect(
+      detectNavFailure('页面加载超时，无法访问该网址', {
+        url: 'https://www.example.com/',
+        text: mdn,
+        intent: '打开 https://thisdomaindoesnotexist12345.com 看看',
+      }).detected,
+    ).toBe(true);
     // An http(s) URL alone is no receipt: a timed-out goto keeps the URL.
-    expect(detectNavFailure('页面加载超时，无法访问该网址', { url }).detected).toBe(true);
-    expect(detectNavFailure(summary, { url }).detected).toBe(true);
+    expect(detectNavFailure('页面加载超时，无法访问该网址', { url, intent }).detected).toBe(true);
+    expect(detectNavFailure(summary, { url, intent }).detected).toBe(true);
     // A short error page (5xx / timeout) that says it is still a failure.
     expect(
-      detectNavFailure('无法连接到该站点', { url, text: 'Error 522 无法连接到该站点' }).detected,
+      detectNavFailure('无法连接到该站点', { url, text: 'Error 522 无法连接到该站点', intent })
+        .detected,
     ).toBe(true);
     // Real content that does not itself say the failure: the answer's failure stands.
     expect(
-      detectNavFailure('无法连接到该站点', { url, text: '规范与浏览器兼容性说明。'.repeat(200) })
-        .detected,
+      detectNavFailure('无法连接到该站点', {
+        url,
+        text: '规范与浏览器兼容性说明。'.repeat(200),
+        intent,
+      }).detected,
     ).toBe(true);
     expect(
-      detectNavFailure('无法连接到该站点', { url: 'chrome-error://chromewebdata/', text: mdn })
-        .detected,
+      detectNavFailure('无法连接到该站点', {
+        url: 'chrome-error://chromewebdata/',
+        text: mdn,
+        intent,
+      }).detected,
     ).toBe(true);
   });
   it('c03: one page read gets the 300 s cap; multi-step work does not', () => {
@@ -417,16 +469,27 @@ describe('2 · read-only search is not a write; real writes still pause', () => 
                 searchBox(`fetch('/lByGV9hoI/F/uHglT4qg/X1YQ',{method:'POST',body:'x'})`)
               : req.url === '/recent'
                 ? searchBox(`fetch('/api/recent-searches',{method:'POST',body:'q=1'})`)
-                : req.url === '/comment'
-                  ? // Typing into a comment box that posts by XHR: still a write.
-                    page(
-                      `<textarea aria-label="写评论" oninput="fetch('/x/7/post',{method:'POST',body:'x'})"></textarea>`,
-                    )
-                  : req.url === '/favorite'
-                    ? page(
-                        `<button onclick="fetch('/api/favorite',{method:'POST',body:'x'})">收藏</button>`,
+                : req.url === '/addcart-query'
+                  ? searchBox(`fetch('/api/suggest?action=addCart',{method:'POST',body:'q=1'})`)
+                  : req.url === '/addcart-body'
+                    ? searchBox(
+                        `fetch('/api/search',{method:'POST',body:JSON.stringify({action:'addCart',sku:1})})`,
                       )
-                    : page('ok');
+                    : req.url === '/chat'
+                      ? // A support chat box worded like a search box: typing sends the message.
+                        page(
+                          `<div class="chat-widget"><input aria-label="客服" placeholder="Search or ask a question" oninput="fetch('/conversations',{method:'POST',body:JSON.stringify({text:this.value})})"></div>`,
+                        )
+                      : req.url === '/comment'
+                        ? // Typing into a comment box that posts by XHR: still a write.
+                          page(
+                            `<textarea aria-label="写评论" oninput="fetch('/x/7/post',{method:'POST',body:'x'})"></textarea>`,
+                          )
+                        : req.url === '/favorite'
+                          ? page(
+                              `<button onclick="fetch('/api/favorite',{method:'POST',body:'x'})">收藏</button>`,
+                            )
+                          : page('ok');
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(html);
     });
@@ -472,7 +535,11 @@ describe('2 · read-only search is not a write; real writes still pause', () => 
     const r = await act('/suggest', /(?:searchbox|textbox) "Search" \[ref=(e\d+)\]/, 'type');
     expect(r.interruption).toBeUndefined();
   }, 30000);
-  it.each(['/opaque', '/recent'])(
+  it('a chat box worded 「Search or ask a question」 that posts the message still pauses', async () => {
+    const r = await act('/chat', /textbox "客服" \[ref=(e\d+)\]/, 'type');
+    expect(r.interruption?.reason).toBe('unexpected_effect');
+  }, 30000);
+  it.each(['/opaque', '/recent', '/addcart-query', '/addcart-body'])(
     'a search-box POST that is not positively a read still pauses: %s',
     async (path) => {
       const r = await act(path, /(?:searchbox|textbox) "Search" \[ref=(e\d+)\]/, 'type');
@@ -488,4 +555,48 @@ describe('2 · read-only search is not a write; real writes still pause', () => 
     const r = await act('/favorite', /button "收藏" \[ref=(e\d+)\]/, 'click');
     expect(r.interruption?.reason).toBe('unexpected_effect');
   }, 30000);
+});
+
+describe('coordinator review — non-blocking items done in this round', () => {
+  it.each([
+    '总结下面这段最近的新闻：OpenAI 本周发布了新模型，支持更长上下文，价格下调一半，开发者反响积极，多家公司宣布接入。',
+    'main.py 报错怎么办',
+    'Vue.js 和 React 哪个好学',
+  ])('text the user gave, a file name, a framework: not a site lookup — %s', async (intent) => {
+    expect(await route(intent)).toBe('generate');
+  });
+  it('a real site question still is', async () => {
+    expect(await route('Node.js 官网最新 LTS 是多少')).toBe('scrape');
+    expect(await route('python.org 最新版本是多少')).toBe('scrape');
+  });
+  it('a target named in English is covered by its Chinese name', () => {
+    expect(
+      uncoveredTargets('Google 和 Apple 的市值', '谷歌市值约 2.1 万亿美元，苹果约 3.4 万亿美元。'),
+    ).toEqual([]);
+    expect(uncoveredTargets('Google 和 Apple 的市值', '谷歌市值约 2.1 万亿美元。')).toEqual([
+      { target: 'Apple', kind: 'missing' },
+    ]);
+  });
+  it('「帮我看看小红书上露营的笔记」 is not a one-page read; 「看下这个页面」 is', () => {
+    expect(readsOnePage('请使用云端浏览器，帮我看看小红书上露营的笔记')).toBe(false);
+    expect(readsOnePage('请使用云端浏览器，看下这个页面的标题')).toBe(true);
+  });
+  it('a check detail meant for logs is not shown to the user', () => {
+    const v = (detail: string) =>
+      summariseVerificationFailure({
+        passed: false,
+        checks: [
+          {
+            criterionId: 'c1',
+            passed: false,
+            checker: 'deterministic',
+            detail,
+            severity: 'fixable',
+          },
+        ],
+      } as never);
+    expect(v('length 93 outside [100, ∞]')).toBe('质量校验未通过：回答内容太短，没有给出完整结果');
+    expect(v('only 0 URL(s) found')).toBe('质量校验未通过：没有通过格式或数据规则检查');
+    expect(v('缺少来源链接')).toBe('质量校验未通过：缺少来源链接');
+  });
 });

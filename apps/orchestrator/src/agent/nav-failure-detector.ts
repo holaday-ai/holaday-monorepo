@@ -146,7 +146,7 @@ export function detectNavFailure(
    * FIX-30 (BENCH-1 r04): the page the run ended on. An http(s) URL alone proves
    * nothing (a timed-out goto keeps it); the receipt is the page's own text.
    */
-  finalPage?: { url?: string | null; text?: string | null },
+  finalPage?: { url?: string | null; text?: string | null; intent?: string | null },
 ): NavFailureSignal {
   if (!summary) return { detected: false };
   const trimmed = summary.trim();
@@ -160,8 +160,9 @@ export function detectNavFailure(
   for (const p of STRONG_PATTERNS) {
     if (p.re.test(trimmed)) {
       // MDN's 418 page itself says 「服务器拒绝…」: the answer quotes a page that
-      // loaded — an http(s) page with real content saying the same thing. Error
-      // pages (chrome-error://, a short 5xx/timeout page) stay failures.
+      // loaded — the target's own site, with real content saying the same thing.
+      // Error pages (chrome-error://, a short 5xx/timeout page), the previous page
+      // a failed jump left behind, or a target never named stay failures.
       if (loadedPageSays(finalPage, p.re)) return { detected: false };
       return {
         detected: true,
@@ -178,10 +179,45 @@ export function detectNavFailure(
 const MIN_LOADED_PAGE_TEXT = 1500;
 
 function loadedPageSays(
-  page: { url?: string | null; text?: string | null } | undefined,
+  page: { url?: string | null; text?: string | null; intent?: string | null } | undefined,
   re: RegExp,
 ): boolean {
   if (!page?.url || !/^https?:\/\//i.test(page.url)) return false;
+  let finalSite: string;
+  try {
+    finalSite = siteOf(new URL(page.url).hostname);
+  } catch {
+    return false;
+  }
+  const targets = targetSites(page.intent ?? '');
+  if (!targets.includes(finalSite)) return false;
   const text = page.text?.trim() ?? '';
   return text.length >= MIN_LOADED_PAGE_TEXT && re.test(text);
+}
+
+const SECOND_LEVEL = /^(?:com|net|org|gov|edu|co|ac|ne|or)$/;
+
+/** developer.mozilla.org → mozilla.org; news.bbc.co.uk → bbc.co.uk. */
+function siteOf(hostname: string): string {
+  const labels = hostname.toLowerCase().replace(/\.$/, '').split('.');
+  const keep =
+    labels.length >= 3 && labels.at(-1)!.length === 2 && SECOND_LEVEL.test(labels.at(-2)!) ? 3 : 2;
+  return labels.slice(-keep).join('.');
+}
+
+/** Sites the request names, by URL or bare domain (a redirect within one site is the same target). */
+function targetSites(intent: string): string[] {
+  const out = new Set<string>();
+  for (const m of intent.matchAll(/https?:\/\/[^\s)）」"'<>]+/gi)) {
+    try {
+      out.add(siteOf(new URL(m[0]).hostname));
+    } catch {
+      /* not a URL */
+    }
+  }
+  for (const m of intent.matchAll(
+    /\b(?:[a-z0-9-]+\.)+(?:com|org|net|io|dev|cn|gov|edu|co|uk|jp|de|app)\b/gi,
+  ))
+    out.add(siteOf(m[0]));
+  return [...out];
 }

@@ -546,15 +546,25 @@ export function extractFailedChecks(
 }
 
 /**
+ * FIX-30 review: a deterministic check's own detail (「length 93 outside [100, ∞]」)
+ * is not for the user; Chinese details already are.
+ */
+function userFacingDetail(detail: string): string {
+  if (/[\u4e00-\u9fff]/.test(detail)) return detail;
+  if (/^length \d+ outside\b/.test(detail)) return '回答内容太短，没有给出完整结果';
+  return '没有通过格式或数据规则检查';
+}
+
+/**
  * Codex Pack A3 — synthesise a short Chinese failure reason from the
  * verifier's check list. Picks the first failing check with a
  * `severity` hint, falling back to the suggested-fix string.
  */
 export function summariseVerificationFailure(verification: VerificationResult): string {
   const failed = verification.checks.find((c) => !c.passed && c.severity);
-  if (failed) return `质量校验未通过：${failed.detail}`;
+  if (failed) return `质量校验未通过：${userFacingDetail(failed.detail)}`;
   const generic = verification.checks.find((c) => !c.passed);
-  if (generic) return `质量校验未通过：${generic.detail}`;
+  if (generic) return `质量校验未通过：${userFacingDetail(generic.detail)}`;
   if (verification.suggestedFix) return verification.suggestedFix.split('\n')[0]!;
   return '质量校验未通过';
 }

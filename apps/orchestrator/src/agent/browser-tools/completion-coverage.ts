@@ -26,11 +26,32 @@ export function namedTargets(intent: string): string[] {
   return [...new Set(out.map((t) => t.trim()).filter((t) => t.length >= 3))];
 }
 
-/** A target named by its own words, or by its last word's stem (alerts → alert). */
+/** Common names an answer writes in Chinese (「Google 和 Apple 的市值」 → 谷歌/苹果). */
+const ALIASES: Readonly<Record<string, readonly string[]>> = {
+  google: ['谷歌', 'alphabet'],
+  apple: ['苹果'],
+  microsoft: ['微软'],
+  amazon: ['亚马逊'],
+  tesla: ['特斯拉'],
+  meta: ['facebook', '脸书'],
+  nvidia: ['英伟达'],
+  netflix: ['奈飞', '网飞'],
+  openai: ['open ai'],
+  samsung: ['三星'],
+  intel: ['英特尔'],
+  alibaba: ['阿里巴巴', '阿里'],
+  tencent: ['腾讯'],
+  baidu: ['百度'],
+  youtube: ['油管'],
+  wikipedia: ['维基百科', '维基'],
+};
+
+/** A target named by its own words, an alias, or its last word's stem (alerts → alert). */
 function mentions(text: string, target: string): boolean {
   const lower = text.toLowerCase();
   const t = target.toLowerCase();
   if (lower.includes(t)) return true;
+  if ((ALIASES[t] ?? []).some((alias) => lower.includes(alias))) return true;
   const last = t.split(/\s+/).at(-1)!.replace(/s$/, '');
   return last.length >= 4 && lower.includes(last);
 }
