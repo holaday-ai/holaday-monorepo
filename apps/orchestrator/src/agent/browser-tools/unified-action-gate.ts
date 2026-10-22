@@ -201,9 +201,12 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
   const fieldSearch =
     String(el.getAttribute('type') || '').toLowerCase() === 'search' ||
     el.getAttribute('role') === 'searchbox' ||
-    // Known site rule: IKEA's header search is a bare input, no form.
+    // Known site rules: IKEA's header search and Gaode's route from/to boxes are
+    // bare inputs, no form.
     (/(?:^|\s)s-input(?:\s|$)/.test(el.getAttribute('class') || '') &&
-      /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname));
+      /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname)) ||
+    (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
+      /(?:^|\.)amap\.com$/i.test(location.hostname));
   const formSearch =
     !!form &&
     (form.getAttribute('role') === 'search' ||

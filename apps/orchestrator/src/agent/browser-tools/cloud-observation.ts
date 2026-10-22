@@ -63,7 +63,8 @@ const KNOWN_TELEMETRY: ReadonlyArray<readonly [host: RegExp, path: RegExp]> = [
   // metrics, Alibaba's mmstat (高德/淘宝), GrowingIO (宜家), Baidu Tongji.
   [/^unagi(?:-[a-z]+)?\.amazon\.com$/, /^\/1\/events\//],
   [/(?:^|\.)mmstat\.com$/, /^\//],
-  [/(?:^|\.)growingio\.com$/, /^\/v\d+\/[^/]+\/web\/(?:action|pv|track)$/],
+  // FIX-30 review rerun (IKEA p07): GrowingIO custom events go to /custom/<id>/web/cstm.
+  [/(?:^|\.)growingio\.com$/, /^\/(?:v\d+|custom)\/[^/]+\/web\/(?:action|pv|track|cstm)$/],
   [/^hm\.baidu\.com$/, /^\/hm\.gif$/],
 ];
 /** A path that writes something a user would see or be charged for. */
@@ -1635,9 +1636,11 @@ async function searchFieldAt(target: Locator): Promise<boolean> {
               (form.id === 'nav-searchform' && /(?:^|\.)bilibili\.com$/i.test(location.hostname)) ||
               (/^SearchPanel_searchForm/.test(form.getAttribute('class') || '') &&
                 /(?:^|\.)amap\.com$/i.test(location.hostname)))) ||
-          // IKEA's header search is a bare input, no form.
+          // IKEA's header search and Gaode's route from/to boxes are bare inputs, no form.
           (/(?:^|\s)s-input(?:\s|$)/.test(el.getAttribute('class') || '') &&
-            /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname))
+            /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname)) ||
+          (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
+            /(?:^|\.)amap\.com$/i.test(location.hostname))
         );
       },
       undefined,

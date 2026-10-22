@@ -247,6 +247,12 @@ describe('implicit form submission (Enter)', () => {
       'https://www.ikea.cn/cn/zh/',
       /textbox "search"/,
     ],
+    [
+      'Gaode route',
+      `<input placeholder="请输入起点" aria-label="起点" class="ant-input LocationItem_input__VHxTO" type="text">`,
+      'https://www.amap.com/ssr/dir',
+      /textbox "起点"/,
+    ],
   ])(
     'lets %s search submit on its own site (known site rule)',
     async (_site, html, url, field) => {

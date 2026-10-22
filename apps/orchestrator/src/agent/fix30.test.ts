@@ -8,6 +8,7 @@ import { scrapedWall } from '../firecrawl/scraped-page.js';
 import { platformFailureReason } from '../quota/platform-failure-refunds.js';
 import { unperformedActions } from './browser-tools/action-claims.js';
 import { completionGap } from './browser-tools/browser-completion.js';
+import { passiveTelemetryRequest } from './browser-tools/cloud-observation.js';
 import {
   answerDates,
   namedTargets,
@@ -551,6 +552,20 @@ describe('2 · read-only search is not a write; real writes still pause', () => 
     const r = await act('/comment', /textbox "写评论" \[ref=(e\d+)\]/, 'type');
     expect(r.interruption?.reason).toBe('unexpected_effect');
   }, 30000);
+  it('GrowingIO custom events (IKEA) are telemetry; a look-alike host is not', () => {
+    expect(
+      passiveTelemetryRequest(
+        new URL('https://api-os.growingio.com/custom/89f223324127f5da/web/cstm'),
+        'fetch',
+      ),
+    ).toBe(true);
+    expect(
+      passiveTelemetryRequest(
+        new URL('https://growingio.com.evil.test/custom/x/web/cstm'),
+        'fetch',
+      ),
+    ).toBe(false);
+  });
   it('a 收藏 click that posts still pauses', async () => {
     const r = await act('/favorite', /button "收藏" \[ref=(e\d+)\]/, 'click');
     expect(r.interruption?.reason).toBe('unexpected_effect');
