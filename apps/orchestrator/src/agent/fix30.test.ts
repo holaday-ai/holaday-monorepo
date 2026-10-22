@@ -95,6 +95,11 @@ describe('1 · a generate "answer" that is not an answer is not delivered', () =
     '先打开设置，再点通用→关于本机，就能看到型号。',
     '我来解释：先打开设置，再点通用。',
     '我会帮你列个清单。第一步准备材料，第二步按顺序核对，第三步记录结果。',
+    // Review #2: 据 inside 数据/证据/依据 cites nothing.
+    '完整数据可在官网查询。',
+    '4',
+    '你好！',
+    '目前没有证据显示官网已经下架该产品，建议以官网公告为准。',
   ])('a real answer passes: %s', (answer) => {
     expect(answerQualityFailure(answer, none)).toBeNull();
   });
@@ -476,21 +481,26 @@ describe('2 · read-only search is not a write; real writes still pause', () => 
                     ? searchBox(
                         `fetch('/api/search',{method:'POST',body:JSON.stringify({action:'addCart',sku:1})})`,
                       )
-                    : req.url === '/chat'
-                      ? // A support chat box worded like a search box: typing sends the message.
+                    : req.url === '/chat-get'
+                      ? // Review #2: a chat widget inside a GET form whose JS posts the message.
                         page(
-                          `<div class="chat-widget"><input aria-label="客服" placeholder="Search or ask a question" oninput="fetch('/conversations',{method:'POST',body:JSON.stringify({text:this.value})})"></div>`,
+                          `<form method="get"><input aria-label="客服" placeholder="Search or ask a question" oninput="fetch('/conversations',{method:'POST',body:JSON.stringify({text:this.value})})"></form>`,
                         )
-                      : req.url === '/comment'
-                        ? // Typing into a comment box that posts by XHR: still a write.
+                      : req.url === '/chat'
+                        ? // A support chat box worded like a search box: typing sends the message.
                           page(
-                            `<textarea aria-label="写评论" oninput="fetch('/x/7/post',{method:'POST',body:'x'})"></textarea>`,
+                            `<div class="chat-widget"><input aria-label="客服" placeholder="Search or ask a question" oninput="fetch('/conversations',{method:'POST',body:JSON.stringify({text:this.value})})"></div>`,
                           )
-                        : req.url === '/favorite'
-                          ? page(
-                              `<button onclick="fetch('/api/favorite',{method:'POST',body:'x'})">收藏</button>`,
+                        : req.url === '/comment'
+                          ? // Typing into a comment box that posts by XHR: still a write.
+                            page(
+                              `<textarea aria-label="写评论" oninput="fetch('/x/7/post',{method:'POST',body:'x'})"></textarea>`,
                             )
-                          : page('ok');
+                          : req.url === '/favorite'
+                            ? page(
+                                `<button onclick="fetch('/api/favorite',{method:'POST',body:'x'})">收藏</button>`,
+                              )
+                            : page('ok');
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(html);
     });
@@ -536,10 +546,14 @@ describe('2 · read-only search is not a write; real writes still pause', () => 
     const r = await act('/suggest', /(?:searchbox|textbox) "Search" \[ref=(e\d+)\]/, 'type');
     expect(r.interruption).toBeUndefined();
   }, 30000);
-  it('a chat box worded 「Search or ask a question」 that posts the message still pauses', async () => {
-    const r = await act('/chat', /textbox "客服" \[ref=(e\d+)\]/, 'type');
-    expect(r.interruption?.reason).toBe('unexpected_effect');
-  }, 30000);
+  it.each(['/chat', '/chat-get'])(
+    'a chat box worded 「Search or ask a question」 that posts the message still pauses: %s',
+    async (path) => {
+      const r = await act(path, /textbox "客服" \[ref=(e\d+)\]/, 'type');
+      expect(r.interruption?.reason).toBe('unexpected_effect');
+    },
+    30000,
+  );
   it.each(['/opaque', '/recent', '/addcart-query', '/addcart-body'])(
     'a search-box POST that is not positively a read still pauses: %s',
     async (path) => {

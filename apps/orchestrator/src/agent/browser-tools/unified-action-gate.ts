@@ -210,9 +210,10 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
   const formSearch =
     !!form &&
     (form.getAttribute('role') === 'search' ||
-      /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|search[\w.-]*)(?:[/?#]|$)/i.test(actionPath) ||
+      /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|search(?:page)?(?:\.[a-z]{2,5})?)(?:[/?#]|$)/i.test(
+        actionPath,
+      ) ||
       /[?&](?:q|query|wd|kw|keyword|k)=/i.test(rawFormAction) ||
-      String(form.getAttribute('method') || '').toLowerCase() === 'get' ||
       // Known site rules (DOM checked 2026-10-22): Bilibili's header search and
       // Gaode's search panel have no action and no button.
       (form.id === 'nav-searchform' && /(?:^|\.)bilibili\.com$/i.test(location.hostname)) ||

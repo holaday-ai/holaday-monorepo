@@ -535,46 +535,50 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             captchaHandoffWanted: () => !opts.searchWallReplaceable?.(page.url()),
             captchaHandoff: async (_message: string) => {
               suspendTimeout();
-              await replay?.pause();
-              const result = await captchaHandoffs.wait({
-                taskId: opts.taskId,
-                userId: opts.userExternalId ?? '',
-                control: control!,
-                hasWall: async () => {
-                  const hit = await tools.blocker();
-                  return (
-                    hit?.reason === 'captcha' &&
-                    !('disposition' in hit && hit.disposition === 'continue')
-                  );
-                },
-                onWaiting: async () => {
-                  await opts.onAwaitingUser?.({
-                    question:
-                      '网站要求人机验证，请在下方浏览器中完成验证。AI 已暂停，最多等待 10 分钟。',
-                    at: new Date(),
-                    currentUrl: page.url(),
-                    awaitingKind: 'captcha',
-                    captchaHandoff: true,
-                  });
-                },
-                onResumed: async () => (await opts.onCaptchaHandoffEnd?.(true)) ?? true,
-                challenge: () => inspectChallenge(page),
-                signal: controller.signal,
-                timeoutMs: opts.captchaWaitMs,
-                pollMs: opts.captchaPollMs,
-              });
-              if (result !== 'resumed' && result !== 'alternate') {
-                handoffFailure =
-                  result === 'timeout'
-                    ? '等待用户完成验证码已超时，任务未完成。'
-                    : '用户已放弃验证，任务未完成。';
-                await opts.onCaptchaHandoffEnd?.(false);
+              try {
+                await replay?.pause();
+                const result = await captchaHandoffs.wait({
+                  taskId: opts.taskId,
+                  userId: opts.userExternalId ?? '',
+                  control: control!,
+                  hasWall: async () => {
+                    const hit = await tools.blocker();
+                    return (
+                      hit?.reason === 'captcha' &&
+                      !('disposition' in hit && hit.disposition === 'continue')
+                    );
+                  },
+                  onWaiting: async () => {
+                    await opts.onAwaitingUser?.({
+                      question:
+                        '网站要求人机验证，请在下方浏览器中完成验证。AI 已暂停，最多等待 10 分钟。',
+                      at: new Date(),
+                      currentUrl: page.url(),
+                      awaitingKind: 'captcha',
+                      captchaHandoff: true,
+                    });
+                  },
+                  onResumed: async () => (await opts.onCaptchaHandoffEnd?.(true)) ?? true,
+                  challenge: () => inspectChallenge(page),
+                  signal: controller.signal,
+                  timeoutMs: opts.captchaWaitMs,
+                  pollMs: opts.captchaPollMs,
+                });
+                if (result !== 'resumed' && result !== 'alternate') {
+                  handoffFailure =
+                    result === 'timeout'
+                      ? '等待用户完成验证码已超时，任务未完成。'
+                      : '用户已放弃验证，任务未完成。';
+                  await opts.onCaptchaHandoffEnd?.(false);
+                }
+                lastSnapshot = '';
+                if (result === 'alternate') captchaAlternate = true;
+                if (result === 'resumed' || result === 'alternate') replay?.resume();
+                return result === 'alternate' ? 'alternate' : result === 'resumed';
+              } finally {
+                // Same as parkForReply: the budget resumes whatever the handoff ended with.
+                resumeTimeout();
               }
-              lastSnapshot = '';
-              if (result === 'alternate') captchaAlternate = true;
-              if (result === 'resumed' || result === 'alternate') replay?.resume();
-              resumeTimeout();
-              return result === 'alternate' ? 'alternate' : result === 'resumed';
             },
           }
         : {}),

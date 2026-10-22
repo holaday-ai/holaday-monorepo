@@ -197,6 +197,15 @@ describe('implicit form submission (Enter)', () => {
       `<form id="searchform" class="search-box" ${counter}><input class="search-input" name="q" aria-label="客服" placeholder="Search or ask a question"></form>`,
     ],
     [
+      // Review #2: GET alone is no search signal (a chat widget in a GET form whose JS posts).
+      'a GET form with nothing pointing at search',
+      `<form method="get" ${counter}><input aria-label="客服" placeholder="Search or ask a question"></form>`,
+    ],
+    [
+      'an action that only contains 「search」 as part of another word',
+      `<form method="get" action="/x/search-and-delete" ${counter}><input aria-label="客服"></form>`,
+    ],
+    [
       'the same form id on another site',
       `<form id="nav-searchform" ${counter}><input aria-label="客服" placeholder="搜索"></form>`,
     ],
@@ -216,6 +225,10 @@ describe('implicit form submission (Enter)', () => {
     [
       'Amazon',
       `<form role="search" action="/s" method="GET" ${counter}><input aria-label="Search Amazon" name="field-keywords"></form>`,
+    ],
+    [
+      'searchpage.jsp',
+      `<form method="get" action="/site/searchpage.jsp" ${counter}><input aria-label="Search Amazon" name="st"></form>`,
     ],
     [
       'Taobao',

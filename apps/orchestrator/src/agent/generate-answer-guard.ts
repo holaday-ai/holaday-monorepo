@@ -19,10 +19,11 @@ const MORE_OPENER_RE =
 /**
  * A sentence citing a web source as where facts came from: 「根据维基百科，…」
  * 「据官网显示…」「以下数据来自官网」「according to Wikipedia」. Advice
- * (「请参考官网」「以官网为准」) and the user's own material (「根据你提供的网页内容」) are not.
+ * (「请参考官网」「以官网为准」), the user's own material (「根据你提供的网页内容」),
+ * and 据 inside 数据/证据/依据 (「完整数据可在官网查询」) are not.
  */
 const CLAIMED_SOURCE_RE =
-  /(?:根据|据|依据|来自|摘自|引自|查阅了|查询了)(?!你|您|用户|上文|上面|以上|下面|以下|所给|提供|前面)[^，。\n]{0,10}(?:维基百科|百度百科|百科|官网|官方网站|官方文档|网站|网页|新闻报道|报道|搜索结果)|\baccording to (?:the )?(?:wikipedia|official (?:site|website|docs?|documentation)|the website|search results|news reports?)\b/i;
+  /(?:根据|(?<![数证依根占凭])据|来自|摘自|引自|查阅了|查询了)(?!你|您|用户|上文|上面|以上|下面|以下|所给|提供|前面)[^，。\n]{0,10}(?:维基百科|百度百科|百科|官网|官方网站|官方文档|网站|网页|新闻报道|报道|搜索结果)|\baccording to (?:the )?(?:wikipedia|official (?:site|website|docs?|documentation)|the website|search results|news reports?)\b/i;
 /** Pasted material this long counts as what the answer may be "根据". */
 const USER_MATERIAL_MIN_CHARS = 200;
 
@@ -40,7 +41,11 @@ export function answerQualityFailure(
     flat(text.replace(TOOL_TAG_RE, ' ').replace(/[{}[\]"':,]/g, ' ')).length < 60
   )
     return 'NON_ANSWER';
-  if (flat(text.replace(TOOL_JSON_LINE_RE, ' ').replace(/`{3}\w*/g, ' ')).length < 15)
+  // Only when there was such a line: a short answer (「4」「你好！」) is an answer.
+  if (
+    new RegExp(TOOL_JSON_LINE_RE.source, 'im').test(text) &&
+    flat(text.replace(TOOL_JSON_LINE_RE, ' ').replace(/`{3}\w*/g, ' ')).length < 15
+  )
     return 'NON_ANSWER';
   // A first-person opener with nothing of substance after it. Instructions
   // (「先打开设置，再点通用→关于本机」) are an answer.
