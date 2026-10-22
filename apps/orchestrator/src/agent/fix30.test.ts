@@ -246,6 +246,7 @@ describe('3 · interactive tasks go to the browser; scrape "not obtained" is ret
     // r06 / v06 (FIX-30 round 2).
     '抓取的 rfc-editor.org 页面是首页，没有 RFC 9110 的条目信息。当前抓取内容里缺这部分，没法直接回答。',
     '第1名的歌手是 **A2O LITE / A2O**，时长 03:28，但歌曲名称在抓取内容中缺失，无法确认具体是哪首歌。',
+    '第一名是 **A2O LITE / A2O** 演唱的歌曲，时长 03:28。\n\n不过抓取内容中歌曲名称没有显示出来，只抓到了歌手信息。',
   ])('a scrape answer that did not get it is retried: %s', (answer) => {
     expect(answerNotObtained(answer)).toBe(true);
   });
