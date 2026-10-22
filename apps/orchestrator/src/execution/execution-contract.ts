@@ -737,7 +737,7 @@ function pickChecklistMinWordCount(inputs: ContractInputs): number {
     // now routed to scrape without a URL — is answered in a line too.
     const oneValue =
       inputs.intent.length < 60 &&
-      /第一|第1|头条|多少|几|是啥|是什么|是谁|哪(?:一|个|张|天|年)?|\bwhat(?:'s| is)\b|\bhow (?:many|much)\b|\bwho\b|\bwhen\b/i.test(
+      /第一|第1|头条|多少|几|是啥|是什么|是谁|哪(?:一|个|张|天|年)?|开放时间|营业时间|出生日期|地址|评分|\bwhat(?:'s| is)\b|\bhow (?:many|much)\b|\bwho\b|\bwhen\b/i.test(
         inputs.intent,
       );
     return (onePage && inputs.intent.length < 160) || oneValue

@@ -170,6 +170,23 @@ describe('implicit form submission (Enter)', () => {
     expect(park).not.toHaveBeenCalled();
     expect(decision).toEqual({ kind: 'proceed' });
   }, 60_000);
+
+  it('lets Bilibili-style search (form id nav-searchform, no action/button) submit (FIX-30 v01)', async () => {
+    const { decision, park } = await submitCase(
+      `<form id="nav-searchform" ${counter}><div class="nav-search-content"><input class="nav-search-input" type="text" maxlength="100"></div></form>`,
+      /textbox/,
+    );
+    expect(park).not.toHaveBeenCalled();
+    expect(decision).toEqual({ kind: 'proceed' });
+  }, 60_000);
+
+  it('still parks a "search"-named form that posts a payment', async () => {
+    const { park } = await submitCase(
+      `<form id="searchform" action="/payment" ${counter}><input class="nav-search-input" aria-label="金额"></form>`,
+      /textbox "金额"/,
+    );
+    expect(park).toHaveBeenCalledWith(expect.stringContaining('付款'), 'browser_action');
+  }, 60_000);
 });
 
 describe('confirmation never outranks a cancel', () => {

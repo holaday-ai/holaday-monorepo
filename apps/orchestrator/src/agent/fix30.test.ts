@@ -243,12 +243,16 @@ describe('3 · interactive tasks go to the browser; scrape "not obtained" is ret
     '- 评分：页面未显示\n- 人均：页面未显示\n- 地址：杭州市西湖区',
     // c04: the JD link landed on the login page.
     '根据提供的抓取内容，这个链接跳转到了京东的**登录页面**，没有显示任何商品信息。',
+    // r06 / v06 (FIX-30 round 2).
+    '抓取的 rfc-editor.org 页面是首页，没有 RFC 9110 的条目信息。当前抓取内容里缺这部分，没法直接回答。',
+    '第1名的歌手是 **A2O LITE / A2O**，时长 03:28，但歌曲名称在抓取内容中缺失，无法确认具体是哪首歌。',
   ])('a scrape answer that did not get it is retried: %s', (answer) => {
     expect(answerNotObtained(answer)).toBe(true);
   });
   it.each([
     '- 标题：仙桥洞\n- 作者：Clara\n- 点赞数：页面未显示',
     'Slack 在 G2 上总评分 4.5/5，共 40,008 条评论。',
+    '鲁迅的出生日期是 **1881年9月25日**。来源：百度百科',
   ])('a real answer with one missing field is not: %s', (answer) => {
     expect(answerNotObtained(answer)).toBe(false);
   });

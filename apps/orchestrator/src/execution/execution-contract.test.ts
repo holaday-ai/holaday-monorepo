@@ -237,6 +237,12 @@ describe('buildContract — dynamic word_count threshold (Phase 1 follow-up)', (
       executionMode: 'scrape',
     });
     expect(wordCountMin(c)).toBe(30);
+    const hours = buildContract({
+      taskId: 'tsk_scrape_hours',
+      intent: '携程上 杭州西湖风景名胜区 的开放时间',
+      executionMode: 'scrape',
+    });
+    expect(wordCountMin(hours)).toBe(30);
   });
 
   it('scrape mode → min=100 for a search, whatever the prompt length', () => {

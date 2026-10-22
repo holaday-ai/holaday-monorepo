@@ -201,12 +201,16 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
     el.getAttribute('placeholder'),
     el.getAttribute('aria-label'),
     el.getAttribute('role'),
+    // FIX-30 v01: Bilibili's box is only 「class="nav-search-input"」.
+    el.getAttribute('class'),
   ]
     .filter(Boolean)
     .join(' ');
   const formSearch =
     form?.getAttribute('role') === 'search' ||
-    /\/(?:s|search)(?:[/?]|$)/i.test(form?.getAttribute('action') || '');
+    /\/(?:s|search)(?:[/?]|$)/i.test(form?.getAttribute('action') || '') ||
+    // 「<form id="nav-searchform">」 with no action and no submit button.
+    /search/i.test(`${form?.getAttribute('id') || ''} ${form?.getAttribute('class') || ''}`);
   const fieldSearch =
     /(?:^|\s)search(?:\s|$)|搜索|搜一搜|查找|search|(?:^|\s)(?:q|query|keyword|keywords|wd|kw)(?:\s|$)/i.test(
       own,
