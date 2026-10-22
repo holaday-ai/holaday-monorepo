@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { Frame, Page, Request } from 'playwright';
+import type { Frame, Locator, Page, Request } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { TRANSACTION_PAGE_RE } from '../supercar/runtime-action-policy.js';
 import { ActionCausality } from './action-causality.js';
@@ -58,7 +58,53 @@ const KNOWN_TELEMETRY: ReadonlyArray<readonly [host: RegExp, path: RegExp]> = [
   // YouTube's InnerTube reads go by POST too: player config, results, pages.
   [/(?:^|\.)youtube\.com$/, /^\/youtubei\/v1\/(?:player|next|browse|search|guide|get_watch)$/],
   [/(?:^|\.)googlevideo\.com$/, /^\/videoplayback$/],
+  // FIX-30 (BENCH-1 pauses, fix-30/pause-triggers.md): analytics fired from the
+  // page's own keydown/click listeners while the run searched — Amazon's client
+  // metrics, Alibaba's mmstat (高德/淘宝), GrowingIO (宜家), Baidu Tongji.
+  [/^unagi(?:-[a-z]+)?\.amazon\.com$/, /^\/1\/events\//],
+  [/(?:^|\.)mmstat\.com$/, /^\//],
+  // FIX-30 review rerun (IKEA p07): GrowingIO custom events go to /custom/<id>/web/cstm.
+  [/(?:^|\.)growingio\.com$/, /^\/(?:v\d+|custom)\/[^/]+\/web\/(?:action|pv|track|cstm)$/],
+  [/^hm\.baidu\.com$/, /^\/hm\.gif$/],
 ];
+/** A path that writes something a user would see or be charged for. */
+const WRITE_PATH_RE =
+  /cart|order|checkout|pay|login|log[-_]?in|sign[-_]?(?:in|up)|register|favou?rite|collect(?!or)|follow|like|subscribe|publish|comment|message|send|submit|create|delete|remove|update|vote|review|booking|reserve|address|account|password|recent|history|save|preference|setting|profile/i;
+/** A path segment that names a suggestion/search read (Taobao mtop …recommend/2.0/). */
+const READ_PATH_RE =
+  /(?:^|[/._-])(?:suggest(?:ions?)?|sug|autocomplete|autosuggest|typeahead|complete|recommend|search|query|hint|lookup|predict)(?:[/._-]|$)/i;
+
+/**
+ * A write named in the query or the body rather than the path:
+ * 「POST /api?action=addCart」, 「{"action":"addCart"}」, 「op=submit」.
+ */
+const WRITE_INTENT_RE =
+  /(?:^|[?&"'{,;\s])(?:action|op|operation|method|type|cmd|act|do)["']?\s*[:=]\s*["']?[\w.-]*?(?:add|cart|order|pay|submit|send|post|comment|message|follow|like|collect|favou?rite|login|register|signup|create|delete|remove|save|update|publish|reply)/i;
+
+function writeIntentPayload(url: URL, request: Request): boolean {
+  let body = '';
+  try {
+    body = (request.postData() ?? '').slice(0, 65536);
+  } catch {
+    body = '';
+  }
+  let decoded = `${url.search} ${body}`;
+  try {
+    decoded = decodeURIComponent(decoded.replace(/\+/g, ' '));
+  } catch {
+    /* keep the raw text */
+  }
+  return WRITE_INTENT_RE.test(decoded);
+}
+
+/** Akamai Bot Manager's sensor POST (BestBuy): an opaque path, a 「{"sensor_data":…}」 body. */
+function botSensorPost(request: Request): boolean {
+  try {
+    return /^\s*\{\s*"sensor_data"\s*:/.test(request.postData() ?? '');
+  } catch {
+    return false;
+  }
+}
 /**
  * A request that only reports telemetry: a beacon to a telemetry path, or a
  * known analytics/media-statistics endpoint. A transaction path or action
@@ -415,6 +461,8 @@ type ActionWindow = {
   inFlight: Set<Request>;
   lastActivity: number;
   action: string;
+  /** FIX-30: a `type` into the page's search box. */
+  searchField?: boolean;
 };
 
 /**
@@ -656,8 +704,6 @@ export class CloudObservation {
     // A beacon with telemetry semantics is not a form/API mutation. Transaction
     // paths and action parameters still take precedence, even on /collect.
     const passiveBeacon = !transactional && passiveTelemetryRequest(url, r.resourceType());
-    const unknownPost = r.method() === 'POST' && graphql !== 'query' && !passiveBeacon;
-    const candidate = transactional || resourceWrite || methodWrite || unknownPost;
     const key = `${r.method()}:${url.origin}${url.pathname}`;
     // Timing alone does not establish causation. Only an instrumented trusted
     // interaction (or its async continuation) can attribute a write to us.
@@ -669,6 +715,23 @@ export class CloudObservation {
           (w.causes.get(key) ?? 0) > Date.now() - 500 &&
           (!requestPage || w.pages.has(requestPage)),
       );
+    // FIX-30 (BENCH-1 淘宝/BestBuy): a POST fired while typing into the page's
+    // search box is a read only when it is positively one — a suggestion/search
+    // path, or Akamai's sensor body — and its path names no write (recent
+    // searches, preferences…). Anything else, an opaque path included, still
+    // pauses; a navigating submit is still a candidate, and no path exempts a click.
+    const searchRead =
+      r.method() === 'POST' &&
+      !!cause?.searchField &&
+      !transactional &&
+      !resourceWrite &&
+      !navigation &&
+      !WRITE_PATH_RE.test(url.pathname) &&
+      !writeIntentPayload(url, r) &&
+      (READ_PATH_RE.test(url.pathname) || botSensorPost(r));
+    const unknownPost =
+      r.method() === 'POST' && graphql !== 'query' && !passiveBeacon && !searchRead;
+    const candidate = transactional || resourceWrite || methodWrite || unknownPost;
     const write = candidate && !!cause;
     const branch =
       transactional || resourceWrite
@@ -1402,6 +1465,9 @@ export class CloudObservation {
       inFlight: new Set(),
       lastActivity: Date.now(),
       action: action.tool,
+      ...(action.tool === 'type' && 'ref' in action && action.ref
+        ? { searchField: await searchFieldAt(this.locator(frame, action.ref)) }
+        : {}),
     };
     this.actionWindow = window;
     this.pendingAction = window;
@@ -1539,5 +1605,49 @@ export class CloudObservation {
       if (!valuesOnly) this.observations.delete(frame);
     }
     return result;
+  }
+}
+
+/**
+ * FIX-30: whether a `type` target is the page's search box (the executor's
+ * fieldKind test, plus a search word in its name/placeholder/label).
+ */
+async function searchFieldAt(target: Locator): Promise<boolean> {
+  try {
+    // FIX-30 review blocker 1: only a strong signal makes a search box — a weak one
+    // (placeholder 「Search or ask a question」, a class) is how a chat box looks too.
+    // No named local functions in page code (tsx keepNames adds __name).
+    return await target.evaluate(
+      (el) => {
+        const input = el as HTMLInputElement;
+        const form = input.form ?? el.closest('form');
+        const action = form?.getAttribute('action') || '';
+        const actionPath = action.replace(/^(?:[a-z]+:)?\/\/[^/]+/i, '');
+        return (
+          String(input.getAttribute('type') || '').toLowerCase() === 'search' ||
+          el.getAttribute('role') === 'searchbox' ||
+          (!!form &&
+            (form.getAttribute('role') === 'search' ||
+              /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|search(?:page)?(?:\.[a-z]{2,5})?)(?:[/?#]|$)/i.test(
+                actionPath,
+              ) ||
+              /[?&](?:q|query|wd|kw|keyword|k)=/i.test(action) ||
+              // Known site rules (DOM checked 2026-10-22): Bilibili's header search and
+              // Gaode's search panel have no action and no button.
+              (form.id === 'nav-searchform' && /(?:^|\.)bilibili\.com$/i.test(location.hostname)) ||
+              (/^SearchPanel_searchForm/.test(form.getAttribute('class') || '') &&
+                /(?:^|\.)amap\.com$/i.test(location.hostname)))) ||
+          // IKEA's header search and Gaode's route from/to boxes are bare inputs, no form.
+          (/(?:^|\s)s-input(?:\s|$)/.test(el.getAttribute('class') || '') &&
+            /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname)) ||
+          (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
+            /(?:^|\.)amap\.com$/i.test(location.hostname))
+        );
+      },
+      undefined,
+      { timeout: 1000 },
+    );
+  } catch {
+    return false;
   }
 }

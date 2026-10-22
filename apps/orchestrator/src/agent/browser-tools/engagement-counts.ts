@@ -24,7 +24,7 @@ const MARKUP_HINTS: ReadonlyArray<readonly [EngagementKind, string]> = [
 
 /** Words in a line of page text or an answer that name each kind. */
 const KIND_WORD_SOURCES: Record<EngagementKind, string> = {
-  点赞: String.raw`点赞|获赞|赞|顶|(?<!dis)likes?\b|喜欢`,
+  点赞: String.raw`点赞|获赞|赞(?!助)|顶|(?<!dis)likes?\b|\blike this video\b|喜欢`,
   评论: String.raw`评论|comments?\b`,
   收藏: String.raw`收藏|favou?rites?\b|bookmarks?\b|saves?\b`,
   分享: String.raw`分享|shares?\b`,
@@ -177,7 +177,10 @@ export async function markEngagementCounts(frame: Frame, tree: string): Promise<
       if (indentOf(lines[j]!) === indent && TEXT_COUNT_LINE.test(lines[j]!)) counts += 1;
     if (counts === 1) candidates.push({ index, ref });
   }
+  // A heavy page with many bare numbers does not hold up the read (review): 3 s in all.
+  const deadline = Date.now() + 3000;
   for (const { index, ref } of candidates) {
+    if (Date.now() > deadline) break;
     const kind = await frame
       .locator(`aria-ref=${ref}`)
       .evaluate(counterKind, MARKUP_HINTS, { timeout: 1000 })

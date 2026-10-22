@@ -929,7 +929,22 @@ const BROWSER_ONLY_ACTION_PATTERNS: readonly [RegExp, string][] = [
     '播放媒体',
   ],
   [/计算器|在线工具|\bcalculator\b/i, '在线工具操作'],
+  // FIX-30 (BENCH-1 f05/d02): filling a form, ticking boxes, downloading a file.
+  [
+    /(?:表单|输入框|文本框|示例表单).{0,24}填|(?<![不别勿未没无])填(?:写|入|上)?\s*(?:[A-Za-z][A-Za-z ]{0,20}[A-Za-z]\s+[A-Za-z]|[“"「]|姓名|名字|邮箱|电话|手机号|first name|last name)|(?<![不别勿未没无])(?:勾选|勾上|打勾)|\bfill (?:in|out) (?:the |this |a |an )?(?:form|fields?|details|name|email)\b|\b(?:check|tick) (?:the |both |all )?(?:boxes|checkboxes)\b/i,
+    '填写表单',
+  ],
+  [
+    /(?<![不别勿未没无真])下载(?!链接|地址|量|次数|页|按钮|入口)\s*(?:https?:\/\/|这个|该|那个|一下|文件|附件|安装包)|\bdownload\s+(?:https?:\/\/|this|the file)/i,
+    '下载文件',
+  ],
 ];
+
+/** FIX-30 (BENCH-1 v01/c05): searching on a named site is the site's own search box. */
+const SITE_SEARCH_RE = new RegExp(
+  `(?:${['小红书', '淘宝', '天猫', '京东', '拼多多', '抖音', 'bilibili', 'b站', '携程', '美团', '大众点评', '微博', '知乎', '豆瓣', 'github', 'youtube', 'amazon'].join('|')})(?:上|里|内|网站上)?\\s*(?:搜一下|搜一搜|搜索|搜|查找)|站内搜索`,
+  'i',
+);
 
 /** "不要/无需/请勿再/别…播放" is not asking to play (PR #290 review). */
 const NEGATED_PLAYBACK_RE =
@@ -937,6 +952,7 @@ const NEGATED_PLAYBACK_RE =
 
 function matchBrowserOnlyAction(intent: string): string | null {
   const affirmative = intent.replace(NEGATED_PLAYBACK_RE, ' ');
+  if (SITE_SEARCH_RE.test(affirmative)) return '站内搜索';
   for (const [pattern, label] of BROWSER_ONLY_ACTION_PATTERNS) {
     if (pattern.test(affirmative)) return label;
   }
@@ -967,13 +983,14 @@ const READ_ONLY_VERB_RE =
  * like an action (点赞数 / 评论数 / 发布日期 / 收藏数 / 注册资本) are still reads.
  */
 const PAGE_ACTION_RE =
-  /下单|购买(?!链接|渠道|方式|入口|人数|记录)|买(?:一|个|下|了|入)|支付(?!方式)|付款|加购|加入购物车|结算|发(?:一条|条|个|帖|推|送|微博|朋友圈|动态)|发布(?!时间|日期|于|会|方)|发表(?!时间|日期|于)|评论(?!数|区|量|内容|列表)|回复(?!数|量)|输入|填(?:写|表|入|上|好|一下)|提交|登录(?!墙|页|界面)|登陆(?!墙|页)|注册(?!时间|日期|资本|地)|收藏(?!数|量)|关注(?!者|数|度|人数)|点赞(?!数|量)|转发(?!数|量)|上传|预订|预约|报名|搜索框|(?:里|上|中)搜(?:索|一下)|\bsign(?:ing)?\s+(?:in|up)\b|\blog(?:ging)?\s*in\b|\bregister\b|\b(?:post|tweet|publish)\s+(?:a|an|it|this|the)\b|\bbuy\b|\bpurchase\b|\bplace (?:an )?order\b|\border\s+(?:it|this|one|now)\b|\bcheckout\b|\bpay\b|\bsubmit\b|\btype\s+(?:in|into|the)\b|\bfill\s+(?:in|out)\b|\bcomment\s+on\b|\breply\b|\blike\s+(?:it|this|the)\b|\bfollow\s+(?:it|this|them|him|her)\b|\bsubscribe\b|\bupload\b|\badd to cart\b|\bbook\s+(?:a|an|it|this)\b|\breserve\b|\bsearch for\b/i;
+  /下单|购买(?!链接|渠道|方式|入口|人数|记录)|买(?:一|个|下|了|入)|支付(?!方式|宝)|付款|加购|加入购物车|结算(?!周期|方式|时间|日)|发(?:一条|条|个|帖|推|送|微博|朋友圈|动态)|发布(?!时间|日期|于|会|方|者|人|的)|发表(?!时间|日期|于)|(?<!读|看|热门|用户|最新|精选|全部|前\d{0,2}条?)评论(?!数|区|量|内容|列表)|(?<!第一条|第\d条|一条|读|看|最新|热门)回复(?!数|量|内容)|输入(?!法)|填(?:写|表|入|上|好|一下)|提交|登录(?!墙|页|界面)|登陆(?!墙|页)|注册(?!时间|日期|资本|地|号|码)|收藏(?!数|量|夹)|关注(?!者|数|度|人数|点|的)|点赞(?!数|量)|转发(?!数|量)|上传|预订|预约|报名|搜索框|(?:里|上|中)搜(?:索|一下)|\bsign(?:ing)?\s+(?:in|up)\b|\blog(?:ging)?\s*in\b|\bregister\b|\b(?:post|tweet|publish)\s+(?:a|an|it|this|the)\b|\bbuy\b|\bpurchase\b|\bplace (?:an )?order\b|\border\s+(?:it|this|one|now)\b|\bcheckout\b|\bpay\b(?!\s+(?:scale|rate|range|grade|band|gap))|\bsubmit\b|\btype\s+(?:in|into|the)\b|\bfill\s+(?:in|out)\b|\bcomment\s+on\b|\breply\b|\blike\s+(?:it|this|the)\b|\bfollow\s+(?:it|this|them|him|her)\b|\bsubscribe\b|\bupload\b|\badd to cart\b|\bbook\s+(?:a|an|it|this)\b|\breserve\b|\bsearch for\b/i;
 
 function matchReadOnlyPageIntent(intent: string): string | null {
   const url = URL_REGEX.exec(intent);
   const target = url ?? DOMAIN_REGEX.exec(intent);
   if (!target || !READ_ONLY_VERB_RE.test(intent) || matchBrowserOnlyAction(intent)) return null;
-  if (PAGE_ACTION_RE.test(intent)) return null;
+  // FIX-30: an action word inside the URL (「/login」) is not an action.
+  if (PAGE_ACTION_RE.test(intent.replace(new RegExp(URL_REGEX.source, 'gi'), ' '))) return null;
   const labels = INTERACTION_PATTERNS.filter(([pattern]) => pattern.test(intent)).map(
     ([, label]) => label,
   );
@@ -1006,6 +1023,64 @@ function matchSearchVerb(intent: string): string | null {
 
 function isNonExecutionPlatformTopic(intent: string): boolean {
   return NON_EXECUTION_PLATFORM_TOPIC_PATTERNS.some((pattern) => pattern.test(intent));
+}
+
+/**
+ * FIX-30 (BENCH-1 r01/r03/r05/r06/p04/n01/n03/n06/m03/v03/v04/v06/c01): a question
+ * whose answer lives on the web — a named web source (百科/官网/官方文档/新浪/QQ音乐/
+ * spotify/google maps…), a live value asked "now" (指数/汇率/天气/榜/头条/新闻/版本…), or
+ * a bare domain with a question — went to generate, which read nothing and answered
+ * from memory or with tool-call text. Writing and translation stay in generate.
+ */
+const LIVE_SOURCE_RE =
+  /维基百科|维基|百度百科|互动百科|wikipedia|官网|官方网站|官方文档|官方博客|官方公告|\bofficial\s+(?:site|website|docs?|documentation|blog)\b|新浪|网易新闻|腾讯新闻|澎湃|网易云音乐|qq\s*音乐|酷狗|酷我|spotify|apple\s+music|google\s*maps?|谷歌地图|bing\s+maps|rfc-editor|\bnpm\b|\bpypi\b|github\s*trending/i;
+const LIVE_TIME_RE =
+  /现在|目前|当前|今天|今日|实时|最新|最近|这周|本周|近一周|近期|\bnow\b|\btoday\b|\bcurrent(?:ly)?\b|\blatest\b|\brecent(?:ly)?\b|\bthis\s+week\b/i;
+const LIVE_TOPIC_RE =
+  /指数|股价|汇率|大盘|行情|收盘|开盘|天气|气温|榜单?|排行|头条|热搜|新闻|报价|价格|多少钱|版本|评分|播放量|粉丝数?|订阅|月听众|\bstock\b|\bprice\b|\bweather\b|\bheadlines?\b|\bnews\b|\bcharts?\b|\bversion\b|\brelease\b|\brating\b/i;
+const LIVE_QUESTION_RE =
+  /多少|几|是什么|是啥|啥|哪|吗|么|怎样|如何|？|\?|\bwhat\b|\bwhen\b|\bwhich\b|\bhow\s+(?:many|much)\b|\bcheck\b|\bfind\b|\btell me\b/i;
+const WRITING_RE =
+  /写(?:一|个|篇|段|首|封)|帮我写|撰写|起草|润色|改写|翻译|续写|作文|文案|写诗|小说|\btranslate\b|\bwrite\s+(?:a|an|me|my)\b|\bdraft\b|\brewrite\b|\bpolish\b/i;
+const STRATEGY_TOPIC_RE =
+  /策略|营销|运营|方案|规划|转化率|优化建议|增长|\bstrategy\b|\bmarketing\b|\bcampaign\b|\bplaybook\b|\bconversion\b/i;
+/** Going into pages of a site (「进第一本书和第二本书的详情页」) needs the browser. */
+const SITE_PAGES_RE =
+  /(?:进|点进|打开|点开)(?:去)?.{0,16}(?:详情页|第[一二三四五六七八九十1-9]\S{0,3}(?:本|个|条|篇|页)|内页)/;
+
+/** The user hands over the text to work on: 「总结下面这段…：<text>」. */
+const PROVIDED_TEXT_RE =
+  /(?:总结|概括|摘要|归纳|分析|改写|提炼|梳理)[^：:\n]{0,20}(?:下面|以下|如下|这段|这篇|这些)|(?:总结|概括|摘要|归纳|分析|改写|提炼|梳理|summari[sz]e|analy[sz]e|rewrite)[^：:\n]{0,30}[：:]\s*\S[\s\S]{40,}/i;
+/** A file name or a framework is not a site: 「main.py 报错」「Vue.js 和 React」. */
+const NOT_A_DOMAIN_RE =
+  /\.(?:py|js|ts|tsx|jsx|mjs|cjs|md|json|ya?ml|txt|csv|java|go|rs|rb|php|cpp|hpp|sh|vue|css|scss|log|xlsx?|docx?|pptx?|pdf|png|jpe?g|gif|svg|zip|exe|dmg|apk|ipynb)$/i;
+
+function siteDomain(intent: string): string | undefined {
+  for (const m of intent.matchAll(new RegExp(DOMAIN_REGEX.source, 'gi'))) {
+    const host = m[0].split('/')[0]!;
+    if (!NOT_A_DOMAIN_RE.test(host)) return m[0];
+  }
+  return undefined;
+}
+
+export function matchLiveInfoIntent(
+  intent: string,
+): { mode: 'scrape' | 'browser'; match: string } | null {
+  if (WRITING_RE.test(intent) && !URL_REGEX.test(intent)) return null;
+  if (PROVIDED_TEXT_RE.test(intent) && !URL_REGEX.test(intent)) return null;
+  // A strategy or analysis topic about a platform is not a lookup on it.
+  if (STRATEGY_TOPIC_RE.test(intent)) return null;
+  const domain = siteDomain(intent);
+  const source = intent.match(LIVE_SOURCE_RE)?.[0];
+  if ((domain || source) && SITE_PAGES_RE.test(intent))
+    return { mode: 'browser', match: (domain ?? source)!.slice(0, 64) };
+  if (source) return { mode: 'scrape', match: source };
+  const time = intent.match(LIVE_TIME_RE)?.[0];
+  const topic = intent.match(LIVE_TOPIC_RE)?.[0];
+  if (time && topic) return { mode: 'scrape', match: `${time}…${topic}` };
+  if (domain && LIVE_QUESTION_RE.test(intent))
+    return { mode: 'scrape', match: domain.slice(0, 64) };
+  return null;
 }
 
 function matchDomainInfoIntent(intent: string): string | null {
@@ -1306,6 +1381,13 @@ function decide(intent: string, ctx: { hasFileAttachment: boolean }): RouteDecis
   const site = hasAny(routingIntent, SITE_NAMES);
   if (site) {
     return { mode: 'scrape', source: 'kw:site', match: site };
+  }
+  // FIX-30: answers that live on the web are not written from memory.
+  const live = matchLiveInfoIntent(routingIntent);
+  if (live) {
+    return live.mode === 'browser'
+      ? { mode: 'browser', source: 'kw:interaction', match: live.match }
+      : { mode: 'scrape', source: 'kw:live-info', match: live.match };
   }
   const info = hasAny(routingIntent, INFO_VERBS);
   if (info) {

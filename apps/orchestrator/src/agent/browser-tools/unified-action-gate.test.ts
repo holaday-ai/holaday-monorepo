@@ -120,9 +120,14 @@ describe('frames and real click targets', () => {
 });
 
 describe('implicit form submission (Enter)', () => {
-  const submitCase = async (html: string, field: RegExp) => {
+  const submitCase = async (html: string, field: RegExp, url?: string) => {
     const page = await browser.newPage();
-    await page.setContent(html);
+    if (url) {
+      await page.route(url, (route) =>
+        route.fulfill({ contentType: 'text/html; charset=utf-8', body: html }),
+      );
+      await page.goto(url);
+    } else await page.setContent(html);
     const ref = await refOf(page, field);
     const { gate, park } = gateFor(page);
     const decision = await gate({ tool: 'type', ref, text: '1', submit: true }, 'before');
@@ -169,6 +174,126 @@ describe('implicit form submission (Enter)', () => {
     );
     expect(park).not.toHaveBeenCalled();
     expect(decision).toEqual({ kind: 'proceed' });
+  }, 60_000);
+
+  it('lets Bilibili-style search (form id nav-searchform, no action/button) submit (FIX-30 v01)', async () => {
+    const { decision, park } = await submitCase(
+      `<form id="nav-searchform" ${counter}><div class="nav-search-content"><input class="nav-search-input" type="text" maxlength="100"></div></form>`,
+      /textbox/,
+      'https://www.bilibili.com/',
+    );
+    expect(park).not.toHaveBeenCalled();
+    expect(decision).toEqual({ kind: 'proceed' });
+  }, 60_000);
+
+  it.each([
+    // FIX-30 review blocker 1: a support chat box worded like a search box.
+    [
+      'no form',
+      `<div class="chat"><input aria-label="客服" placeholder="Search or ask a question"></div>`,
+    ],
+    [
+      'a form with only weak signals',
+      `<form id="searchform" class="search-box" ${counter}><input class="search-input" name="q" aria-label="客服" placeholder="Search or ask a question"></form>`,
+    ],
+    [
+      // Review #2: GET alone is no search signal (a chat widget in a GET form whose JS posts).
+      'a GET form with nothing pointing at search',
+      `<form method="get" ${counter}><input aria-label="客服" placeholder="Search or ask a question"></form>`,
+    ],
+    [
+      'an action that only contains 「search」 as part of another word',
+      `<form method="get" action="/x/search-and-delete" ${counter}><input aria-label="客服"></form>`,
+    ],
+    [
+      'the same form id on another site',
+      `<form id="nav-searchform" ${counter}><input aria-label="客服" placeholder="搜索"></form>`,
+    ],
+  ])(
+    'asks before Enter in a chat-like box (%s)',
+    async (_case, html) => {
+      const { park } = await submitCase(html, /textbox "客服"/);
+      expect(park).toHaveBeenCalledWith(
+        expect.stringContaining('无法确认回车会提交什么'),
+        'browser_action',
+      );
+    },
+    60_000,
+  );
+
+  it.each([
+    [
+      'Amazon',
+      `<form role="search" action="/s" method="GET" ${counter}><input aria-label="Search Amazon" name="field-keywords"></form>`,
+    ],
+    [
+      'searchpage.jsp',
+      `<form method="get" action="/site/searchpage.jsp" ${counter}><input aria-label="Search Amazon" name="st"></form>`,
+    ],
+    [
+      'Taobao',
+      `<form id="J_TSearchForm" action="//s.taobao.com/search" ${counter}><input aria-label="请输入搜索文字" name="q" role="combobox"></form>`,
+    ],
+  ])(
+    'lets %s-style site search submit',
+    async (_site, html) => {
+      const { park, decision } = await submitCase(
+        html,
+        /(?:textbox|combobox) "(?:Search Amazon|请输入搜索文字)"/,
+      );
+      expect(park).not.toHaveBeenCalled();
+      expect(decision).toEqual({ kind: 'proceed' });
+    },
+    60_000,
+  );
+
+  it.each([
+    [
+      'Gaode',
+      `<form class="SearchPanel_searchForm__9IQNm" ${counter}><input type="text" class="SearchPanel_searchInput__GcqoT" aria-label="地点" placeholder="搜索地点、公交、地铁"></form>`,
+      'https://www.amap.com/',
+      /textbox "地点"/,
+    ],
+    [
+      'IKEA',
+      `<input class="s-input" aria-label="search" placeholder="">`,
+      'https://www.ikea.cn/cn/zh/',
+      /textbox "search"/,
+    ],
+    [
+      'Gaode route',
+      `<input placeholder="请输入起点" aria-label="起点" class="ant-input LocationItem_input__VHxTO" type="text">`,
+      'https://www.amap.com/ssr/dir',
+      /textbox "起点"/,
+    ],
+  ])(
+    'lets %s search submit on its own site (known site rule)',
+    async (_site, html, url, field) => {
+      const { park, decision } = await submitCase(html, field, url);
+      expect(park).not.toHaveBeenCalled();
+      expect(decision).toEqual({ kind: 'proceed' });
+    },
+    60_000,
+  );
+
+  it('the same IKEA-style input on another site still asks', async () => {
+    const { park } = await submitCase(
+      `<input class="s-input" aria-label="search" placeholder="">`,
+      /textbox "search"/,
+      'https://chat.example.com/',
+    );
+    expect(park).toHaveBeenCalledWith(
+      expect.stringContaining('无法确认回车会提交什么'),
+      'browser_action',
+    );
+  }, 60_000);
+
+  it('still parks a "search"-named form that posts a payment', async () => {
+    const { park } = await submitCase(
+      `<form id="searchform" action="/payment" ${counter}><input class="nav-search-input" aria-label="金额"></form>`,
+      /textbox "金额"/,
+    );
+    expect(park).toHaveBeenCalledWith(expect.stringContaining('付款'), 'browser_action');
   }, 60_000);
 });
 

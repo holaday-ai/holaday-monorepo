@@ -1,4 +1,5 @@
 import { TEXT_URL_RE } from '../../execution/text-urls.js';
+import { staleForRecentIntent, uncoveredTargets } from './completion-coverage.js';
 import { assessEngagementClaims } from './engagement-counts.js';
 
 export interface ObservedEvidence {
@@ -716,6 +717,20 @@ export function assessCompletionFacts(input: {
     }
     unverified.push(label);
   }
+  // FIX-30: every named target answered (core-10), and recent means recent (n03).
+  for (const gap of uncoveredTargets(intent, input.summary, input.pages))
+    contradictions.push(
+      gap.kind === 'missing'
+        ? `任务要求的「${gap.target}」在答案里没有出现：请完成并写出这一部分，做不到就如实说明，不要只交另一部分`
+        : `答案提到了「${gap.target}」，但本次读过的页面里都没有它（没有打开过这一部分）：请打开并读取它再写，做不到就如实写「${gap.target} 部分未完成」，不要说已验证`,
+    );
+  const stale = staleForRecentIntent(
+    intent,
+    input.summary,
+    new Date(),
+    input.pages.map((page) => page.text),
+  );
+  if (stale) contradictions.push(stale);
   // FIX-29: a like/comment/favourite/share number must be that counter's, not the icon next to it.
   contradictions.push(
     ...assessEngagementClaims(

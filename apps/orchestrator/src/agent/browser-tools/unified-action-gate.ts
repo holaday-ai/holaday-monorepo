@@ -194,23 +194,31 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
   const submit = form?.querySelector(
     'button[type="submit"], button:not([type]), input[type="submit"], input[type="image"]',
   );
-  const own = [
-    el.getAttribute('type'),
-    el.getAttribute('name'),
-    el.getAttribute('id'),
-    el.getAttribute('placeholder'),
-    el.getAttribute('aria-label'),
-    el.getAttribute('role'),
-  ]
-    .filter(Boolean)
-    .join(' ');
-  const formSearch =
-    form?.getAttribute('role') === 'search' ||
-    /\/(?:s|search)(?:[/?]|$)/i.test(form?.getAttribute('action') || '');
+  // FIX-30 review blocker 1: Enter goes through without asking only for a strong
+  // search signal; a placeholder/class/name saying search is how a chat box looks too.
+  const rawFormAction = form?.getAttribute('action') || '';
+  const actionPath = rawFormAction.replace(/^(?:[a-z]+:)?\/\/[^/]+/i, '');
   const fieldSearch =
-    /(?:^|\s)search(?:\s|$)|搜索|搜一搜|查找|search|(?:^|\s)(?:q|query|keyword|keywords|wd|kw)(?:\s|$)/i.test(
-      own,
-    );
+    String(el.getAttribute('type') || '').toLowerCase() === 'search' ||
+    el.getAttribute('role') === 'searchbox' ||
+    // Known site rules: IKEA's header search and Gaode's route from/to boxes are
+    // bare inputs, no form.
+    (/(?:^|\s)s-input(?:\s|$)/.test(el.getAttribute('class') || '') &&
+      /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname)) ||
+    (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
+      /(?:^|\.)amap\.com$/i.test(location.hostname));
+  const formSearch =
+    !!form &&
+    (form.getAttribute('role') === 'search' ||
+      /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|search(?:page)?(?:\.[a-z]{2,5})?)(?:[/?#]|$)/i.test(
+        actionPath,
+      ) ||
+      /[?&](?:q|query|wd|kw|keyword|k)=/i.test(rawFormAction) ||
+      // Known site rules (DOM checked 2026-10-22): Bilibili's header search and
+      // Gaode's search panel have no action and no button.
+      (form.id === 'nav-searchform' && /(?:^|\.)bilibili\.com$/i.test(location.hostname)) ||
+      (/^SearchPanel_searchForm/.test(form.getAttribute('class') || '') &&
+        /(?:^|\.)amap\.com$/i.test(location.hostname)));
   const method = (form?.getAttribute('method') || 'get').toLowerCase();
   return {
     hasForm: Boolean(form),

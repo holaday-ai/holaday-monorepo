@@ -108,8 +108,23 @@ export function extractTargetUrl(intent: string): string | null {
     if (bare.length !== 1 || bare[0] !== bare[0]!.toLowerCase()) return null;
     return SEARCH_OR_COMPARE_RE.test(intent.replace(bare[0]!, ' ')) ? null : `https://${bare[0]}`;
   }
-  let url = match[0].replace(TRAILING_TRIM, '');
+  let url = keepBalancedParen(match[0], match[0].replace(TRAILING_TRIM, ''));
   if (url.startsWith('www.')) url = `https://${url}`;
+  return url;
+}
+
+/**
+ * FIX-30 (BENCH-1 r09): trailing punctuation goes, but a closing 「)」 that closes
+ * a 「(」 inside the URL is part of it — 「…/Transformer_(deep_learning_architecture)」.
+ */
+export function keepBalancedParen(raw: string, trimmed: string): string {
+  let url = trimmed;
+  while (
+    url.length < raw.length &&
+    raw[url.length] === ')' &&
+    (url.match(/\(/g)?.length ?? 0) > (url.match(/\)/g)?.length ?? 0)
+  )
+    url += ')';
   return url;
 }
 
@@ -382,6 +397,26 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
         });
       }
     }
+    // FIX-30 (BENCH-1 m02/m04/v01/f05/d02/c05): an answer that says the page did
+    // not have it (「没拿到」「缺少浏览器环境」, most fields 「页面未显示」) is not a
+    // completed answer: the browser gets one try at the live page.
+    if (answerNotObtained(summary)) {
+      log.info(
+        { code: 'SCRAPE_NOT_OBTAINED' },
+        'scrape-runner: answer says the page did not have it',
+      );
+      return failed({
+        start,
+        reason:
+          '网页抓取没有拿到所需内容（页面可能要求交互或动态加载），已自动改用云端浏览器重试一次',
+        kind: 'empty',
+        source: scrapeSource,
+        firecrawl: usage,
+        sources: usedSources,
+        inputTokens: tokens.input,
+        outputTokens: tokens.output,
+      });
+    }
     const notes: string[] = [];
     if (result.status === 'incomplete')
       notes.push('【提示】内容因长度限制被截断，如需完整版请追问。');
@@ -459,4 +494,23 @@ function firecrawlReason(error: string): string {
   if (/HTTP 403|forbidden|blocked/i.test(error)) return '目标站点拒绝访问';
   if (/abort|timeout|timed out/i.test(error)) return '抓取超时';
   return '抓取服务返回错误';
+}
+
+const NOT_OBTAINED_RE =
+  /缺少浏览器(?:环境)?|需要(?:在)?(?:真实|云端)?浏览器(?:中|里)?(?:操作|打开|执行)|(?:无法|不能|没法)(?:在此|直接|在这里)?(?:填写|下载|操作|执行|交互|搜索)|没(?:能|有)?(?:拿到|获取到|读到|抓到)|没有(?:显示|展示|任何)(?:任何)?(?:商品|内容|信息|数据|结果)|未能(?:获取|读取|找到|抓取|拿到)|拿不到|无法获取|(?:抓取|抓到)(?:到的)?(?:内容|结果|页面|数据)(?:里|中)?(?:没有|不含|未包含|缺)|在抓取(?:到的)?(?:内容|结果|数据)(?:里|中)缺失|(?:抓取|抓到)(?:到的)?(?:内容|结果|页面|数据)(?:里|中)[^。\n]{0,12}(?:没有|未)(?:显示|展示|出现)|(?:没法|无法|不能)(?:直接)?回答|\b(?:could not|couldn't|unable to)\s+(?:find|get|retrieve|access|read|fill|download)\b/i;
+const NOT_SHOWN_RE =
+  /^\s*(?:\*\*)?(?:页面未显示|未显示|未找到|没有找到|未获取到?|无法获取|没拿到|不详|未知|暂无|n\/a|not (?:shown|found|available))(?:\*\*)?[。.]?\s*$/i;
+
+/**
+ * FIX-30: the scrape answer itself says the fetched page did not have what was
+ * asked — in its opening, or in at least half of its labelled fields.
+ */
+export function answerNotObtained(summary: string): boolean {
+  if (NOT_OBTAINED_RE.test(summary.slice(0, 240))) return true;
+  const fields = summary
+    .split('\n')
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)、])\s*/, '').trim())
+    .filter((line) => /^[^：:]{1,24}[：:]/.test(line));
+  const empty = fields.filter((line) => NOT_SHOWN_RE.test(line.replace(/^[^：:]{1,24}[：:]/, '')));
+  return fields.length >= 2 && empty.length * 2 >= fields.length;
 }

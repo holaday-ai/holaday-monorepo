@@ -199,7 +199,10 @@ describe('core-10: a misquote gets one correction with the page text', () => {
       finish('已打开 JavaScript Alerts 页面。'),
       { name: 'click', input: { ref: 'e5' } },
       { name: 'snapshot', input: {} },
-      ...final.map((quote) => finish(`点击 "Click for JS Alert" 后页面 Result 显示 "${quote}"`)),
+      // FIX-30: the answer covers both named targets (iframe stated as not done).
+      ...final.map((quote) =>
+        finish(`点击 "Click for JS Alert" 后页面 Result 显示 "${quote}"；iframe 部分本次未完成。`),
+      ),
     ]);
     const execute = async (action: { tool: string; url?: string }): Promise<UnifiedToolResult> => {
       if (action.tool === 'navigate') return { ok: true, text: '已打开', url: action.url };

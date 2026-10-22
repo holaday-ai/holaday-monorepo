@@ -1,6 +1,9 @@
 import type { PlanId } from '@holaday/shared-types';
 import { and, eq, gt, isNull } from 'drizzle-orm';
-import { CORE_LOCAL_FAILURE_COPY } from '../agent/core-task-settlement.js';
+import {
+  CORE_LOCAL_FAILURE_COPY,
+  CORE_QUALITY_FAILURE_COPY,
+} from '../agent/core-task-settlement.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { quotaRefunds } from '../db/schema/quota-refunds.js';
@@ -26,6 +29,9 @@ const PLATFORM_ERROR_CODES: ReadonlySet<string> = new Set([
 const PLATFORM_CORE_REASONS: ReadonlySet<string> = new Set([
   '生成未完成，请稍后重试',
   ...Object.values(CORE_LOCAL_FAILURE_COPY),
+  // FIX-30 review: the model wrote out a tool call or an empty opener — ours.
+  // UNREAD_SOURCE (an answer claiming an unread source) is not refunded.
+  CORE_QUALITY_FAILURE_COPY.NON_ANSWER,
 ]);
 
 export function platformFailureReason(task: {

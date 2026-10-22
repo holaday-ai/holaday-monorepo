@@ -42,6 +42,7 @@ import {
   type CoreSettlement,
   prepareCoreSettlement,
 } from './core-task-settlement.js';
+import { answerQualityFailure } from './generate-answer-guard.js';
 import { runGenerateTask } from './generate-runner.js';
 
 const CORE_IMAGE_MEDIA_TYPES: ReadonlySet<string> = new Set([
@@ -344,6 +345,35 @@ async function executeCoreTask(
       }
       if (!registry.read(handle)) throw new StaleRound();
       if (!verification || !outcome.generation) throw new Error('CORE_REVIEW_UNAVAILABLE');
+      // FIX-30: tool-call text, an opener, or a web source nobody read is not an answer.
+      if (status === 'completed' || status === 'partial_success') {
+        const qualityFailure = answerQualityFailure(summary, {
+          // Read evidence is a source the run actually fetched, or an attachment —
+          // never the existence of the source-trust review (always present).
+          readSources:
+            (reviewed.outcome.sourceUrls?.length ?? outcome.sourceUrls?.length ?? 0) > 0 ||
+            input.blocks.some((block) => block.type !== 'text'),
+          // Text the user pasted is material the answer may cite (「根据你提供的网页内容」).
+          userMaterial: input.blocks
+            .map((block) => (block.type === 'text' ? block.text : ''))
+            .join('\n'),
+        });
+        if (qualityFailure) {
+          input.logger.info(
+            { taskId: identity.taskId, code: qualityFailure },
+            'core-task: answer is not an answer; settling as failed',
+          );
+          return prepareCoreSettlement({
+            admission,
+            status: 'failed',
+            result: { reason: 'CORE_EXECUTION_FAILED' },
+            generation: outcome.generation,
+            verification,
+            sourceTrust: reviewed.sourceTrust,
+            qualityFailure,
+          });
+        }
+      }
       if (
         input.resultNotice &&
         (status === 'completed' || status === 'partial_success') &&

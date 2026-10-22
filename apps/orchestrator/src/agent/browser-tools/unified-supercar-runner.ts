@@ -256,17 +256,28 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     },
   };
   running.set(opts.taskId, controller);
-  let activeRemaining = opts.timeoutMs;
+  // FIX-30 (BENCH-1 c03: Bilibili ran 636 s): reading one page gets 300 s at most;
+  // past that the run fails as a timeout, said as such.
+  const budgetMs = readsOnePage(opts.intent)
+    ? Math.min(opts.timeoutMs ?? READ_ONE_PAGE_TIMEOUT_MS, READ_ONE_PAGE_TIMEOUT_MS)
+    : opts.timeoutMs;
+  let activeRemaining = budgetMs;
   let activeSince = Date.now();
   let timeout = activeRemaining ? setTimeout(() => controller.abort(), activeRemaining) : undefined;
+  // Waiting for the user never counts against the budget (captcha, login, a
+  // confirmation — every awaiting_user wait). Nested waits suspend once.
+  let suspended = 0;
   const suspendTimeout = () => {
+    if (suspended++ > 0) return;
     if (timeout) clearTimeout(timeout);
+    timeout = undefined;
     if (activeRemaining !== undefined)
       activeRemaining = Math.max(1, activeRemaining - (Date.now() - activeSince));
   };
   const resumeTimeout = () => {
+    if (suspended === 0 || --suspended > 0) return;
     activeSince = Date.now();
-    if (activeRemaining !== undefined)
+    if (activeRemaining !== undefined && !controller.signal.aborted)
       timeout = setTimeout(() => controller.abort(), activeRemaining);
   };
   let binding: { control: BrowserControl; finish: () => void } | undefined;
@@ -355,6 +366,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     question: string,
     awaitingKind: SupercarAwaitingKind,
   ): Promise<string | null> => {
+    // FIX-30 review: a login wall the user takes 5+ minutes on is not a timeout.
+    suspendTimeout();
     await replay?.pause();
     try {
       await safe(() =>
@@ -382,6 +395,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       });
     } finally {
       replay?.resume();
+      resumeTimeout();
     }
   };
   // Runtime safety boundary: the same LIVE-VETO the legacy loop applies before
@@ -447,7 +461,11 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           (await Promise.resolve(opts.isTaskCancelled?.()).catch(() => false))
         )
           return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
-        const blocker = await tools.blocker().catch(() => null);
+        // The page may be mid-navigation: the wall probe gets 5 s (review).
+        const blocker = await Promise.race([
+          tools.blocker().catch(() => null),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+        ]);
         const walled = blocker && !('disposition' in blocker && blocker.disposition === 'continue');
         return {
           kind: 'stop',
@@ -517,46 +535,50 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             captchaHandoffWanted: () => !opts.searchWallReplaceable?.(page.url()),
             captchaHandoff: async (_message: string) => {
               suspendTimeout();
-              await replay?.pause();
-              const result = await captchaHandoffs.wait({
-                taskId: opts.taskId,
-                userId: opts.userExternalId ?? '',
-                control: control!,
-                hasWall: async () => {
-                  const hit = await tools.blocker();
-                  return (
-                    hit?.reason === 'captcha' &&
-                    !('disposition' in hit && hit.disposition === 'continue')
-                  );
-                },
-                onWaiting: async () => {
-                  await opts.onAwaitingUser?.({
-                    question:
-                      '网站要求人机验证，请在下方浏览器中完成验证。AI 已暂停，最多等待 10 分钟。',
-                    at: new Date(),
-                    currentUrl: page.url(),
-                    awaitingKind: 'captcha',
-                    captchaHandoff: true,
-                  });
-                },
-                onResumed: async () => (await opts.onCaptchaHandoffEnd?.(true)) ?? true,
-                challenge: () => inspectChallenge(page),
-                signal: controller.signal,
-                timeoutMs: opts.captchaWaitMs,
-                pollMs: opts.captchaPollMs,
-              });
-              if (result !== 'resumed' && result !== 'alternate') {
-                handoffFailure =
-                  result === 'timeout'
-                    ? '等待用户完成验证码已超时，任务未完成。'
-                    : '用户已放弃验证，任务未完成。';
-                await opts.onCaptchaHandoffEnd?.(false);
+              try {
+                await replay?.pause();
+                const result = await captchaHandoffs.wait({
+                  taskId: opts.taskId,
+                  userId: opts.userExternalId ?? '',
+                  control: control!,
+                  hasWall: async () => {
+                    const hit = await tools.blocker();
+                    return (
+                      hit?.reason === 'captcha' &&
+                      !('disposition' in hit && hit.disposition === 'continue')
+                    );
+                  },
+                  onWaiting: async () => {
+                    await opts.onAwaitingUser?.({
+                      question:
+                        '网站要求人机验证，请在下方浏览器中完成验证。AI 已暂停，最多等待 10 分钟。',
+                      at: new Date(),
+                      currentUrl: page.url(),
+                      awaitingKind: 'captcha',
+                      captchaHandoff: true,
+                    });
+                  },
+                  onResumed: async () => (await opts.onCaptchaHandoffEnd?.(true)) ?? true,
+                  challenge: () => inspectChallenge(page),
+                  signal: controller.signal,
+                  timeoutMs: opts.captchaWaitMs,
+                  pollMs: opts.captchaPollMs,
+                });
+                if (result !== 'resumed' && result !== 'alternate') {
+                  handoffFailure =
+                    result === 'timeout'
+                      ? '等待用户完成验证码已超时，任务未完成。'
+                      : '用户已放弃验证，任务未完成。';
+                  await opts.onCaptchaHandoffEnd?.(false);
+                }
+                lastSnapshot = '';
+                if (result === 'alternate') captchaAlternate = true;
+                if (result === 'resumed' || result === 'alternate') replay?.resume();
+                return result === 'alternate' ? 'alternate' : result === 'resumed';
+              } finally {
+                // Same as parkForReply: the budget resumes whatever the handoff ended with.
+                resumeTimeout();
               }
-              lastSnapshot = '';
-              if (result === 'alternate') captchaAlternate = true;
-              if (result === 'resumed' || result === 'alternate') replay?.resume();
-              resumeTimeout();
-              return result === 'alternate' ? 'alternate' : result === 'resumed';
             },
           }
         : {}),
@@ -738,7 +760,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         };
       case 'cancelled': {
         const timedOut =
-          controller.signal.aborted && Boolean(opts.timeoutMs) && !(await opts.isTaskCancelled?.());
+          controller.signal.aborted && Boolean(budgetMs) && !(await opts.isTaskCancelled?.());
         // Out of time during the remediation turn: deliver the held answer for
         // verification (it explains what is missing) instead of a bare timeout.
         if (timedOut && outcome.heldAnswer) {
@@ -822,4 +844,17 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     running.delete(opts.taskId);
     parked.delete(opts.taskId);
   }
+}
+
+const READ_ONE_PAGE_TIMEOUT_MS = 300_000;
+/** A read of one page: no form, file, search, scroll, tab or multi-item work. */
+export function readsOnePage(intent: string): boolean {
+  return (
+    !/填|表单|勾选|下载|上传|搜索|搜一下|搜|滚动|新标签|标签页|分别|每个|逐个|对比|比较|前\s*\d+|翻页|登录|注册|预订|下单|购买|加购|\bfill\b|\bdownload\b|\bupload\b|\bsearch\b|\bscroll\b|\btabs?\b|\bcompare\b|\btop\s*\d+/i.test(
+      intent,
+    ) &&
+    /https?:\/\/|www\.|打开|读|看(?:下|一下)?(?=这|该|页面|网页|标题)|告诉我|是谁|是什么|多少|\bopen\b|\bread\b|\bwhat\b/i.test(
+      intent,
+    )
+  );
 }

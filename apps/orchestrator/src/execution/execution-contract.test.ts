@@ -230,6 +230,21 @@ describe('buildContract — dynamic word_count threshold (Phase 1 follow-up)', (
     expect(wordCountMin(c)).toBe(30);
   });
 
+  it('scrape asking for one value with a short prompt → min=30 (FIX-30 c09)', () => {
+    const c = buildContract({
+      taskId: 'tsk_scrape_one_value',
+      intent: '微博热搜榜第一是啥',
+      executionMode: 'scrape',
+    });
+    expect(wordCountMin(c)).toBe(30);
+    const hours = buildContract({
+      taskId: 'tsk_scrape_hours',
+      intent: '携程上 杭州西湖风景名胜区 的开放时间',
+      executionMode: 'scrape',
+    });
+    expect(wordCountMin(hours)).toBe(30);
+  });
+
   it('scrape mode → min=100 for a search, whatever the prompt length', () => {
     const c = buildContract({
       taskId: 'tsk_scrape_short',
