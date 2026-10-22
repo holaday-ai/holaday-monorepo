@@ -400,7 +400,7 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
     // FIX-30 (BENCH-1 m02/m04/v01/f05/d02/c05): an answer that says the page did
     // not have it (「没拿到」「缺少浏览器环境」, most fields 「页面未显示」) is not a
     // completed answer: the browser gets one try at the live page.
-    if (answerNotObtained(summary)) {
+    if (answerNotObtained(summary, opts.intent)) {
       log.info(
         { code: 'SCRAPE_NOT_OBTAINED' },
         'scrape-runner: answer says the page did not have it',
@@ -505,8 +505,23 @@ const NOT_SHOWN_RE =
  * FIX-30: the scrape answer itself says the fetched page did not have what was
  * asked — in its opening, or in at least half of its labelled fields.
  */
-export function answerNotObtained(summary: string): boolean {
+/** FIX-31: a short question after one value (「QQ音乐热歌榜第一名是啥」「上证指数现在多少点」). */
+const ONE_VALUE_QUESTION_RE =
+  /第一|第1|头条|多少|几|是啥|是什么|是谁|哪(?:一|个|张|天|年)?|\bwhat(?:'s| is)\b|\bhow (?:many|much)\b|\bwho\b|\bwhen\b/i;
+const VALUE_MISSING_RE =
+  /(?:页面)?(?:未|没有|没)(?:显示|展示|获取到?|拿到|抓到|找到)|无法(?:确认|获取|确定)|缺失|not (?:shown|found|available)/i;
+
+export function answerNotObtained(summary: string, intent = ''): boolean {
   if (NOT_OBTAINED_RE.test(summary.slice(0, 240))) return true;
+  // The one value asked for is the one the answer says it could not see (v06:
+  // 「第一名的歌手是 A2O…，但歌曲名称页面未显示」): that is not an answer.
+  if (
+    intent.length > 0 &&
+    intent.length < 60 &&
+    ONE_VALUE_QUESTION_RE.test(intent) &&
+    VALUE_MISSING_RE.test(summary.slice(0, 300))
+  )
+    return true;
   const fields = summary
     .split('\n')
     .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)、])\s*/, '').trim())

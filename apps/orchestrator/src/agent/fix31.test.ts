@@ -46,3 +46,25 @@ describe('v06: 「在抓取的数据中未显示」 is not obtained (retried in 
     expect(answerNotObtained('QQ音乐热歌榜第一名是《NEON》，演唱者 A2O LITE / A2O。')).toBe(false);
   });
 });
+
+describe('v06: the one value asked for is the one the answer could not see', () => {
+  it('「第一名是啥」 answered with 「歌曲名称页面未显示」 is not obtained', () => {
+    expect(
+      answerNotObtained(
+        'QQ音乐热歌榜（2026-10-22）第一名的歌手是 **A2O LITE / A2O**，时长 03:28，但歌曲名称页面未显示。',
+        'QQ音乐热歌榜第一名是啥',
+      ),
+    ).toBe(true);
+  });
+  it('a full one-value answer, or a list answer with one field missing, is not', () => {
+    expect(
+      answerNotObtained('**3658.03点**，跌55.00点（2026-10-22 15:00 收盘）', '上证指数现在多少点'),
+    ).toBe(false);
+    expect(
+      answerNotObtained(
+        '- 标题：西湖一日游攻略\n- 作者：Clara\n- 点赞数：页面未显示',
+        '打开 https://www.xiaohongshu.com/explore/6929ba55000000001e023ef8 读这篇笔记的标题、作者和点赞数',
+      ),
+    ).toBe(false);
+  });
+});
