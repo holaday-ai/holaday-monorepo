@@ -379,14 +379,21 @@ export function assessResultTrust(input: {
     }
   } else if (kind === 'ecommerce_listing' && requirement?.kind === 'ecommerce') {
     const rows = extractStructuredItems(resultText);
+    // FIX-31: links only when the user asked for them (OutputRequirementEcommerce.requireLinks).
+    const links = requirement.requireLinks !== false;
     const completeRows = rows.filter(
-      (row) => Boolean(row.name) && row.price != null && Boolean(row.url),
+      (row) => Boolean(row.name) && row.price != null && (!links || Boolean(row.url)),
     );
     const uniqueUrls = new Set(completeRows.map((row) => row.url));
-    if (completeRows.length < requirement.minItems || uniqueUrls.size < requirement.minItems) {
+    if (
+      completeRows.length < requirement.minItems ||
+      (links && uniqueUrls.size < requirement.minItems)
+    ) {
       failedChecks.push({
         type: 'ecommerce_rows',
-        detail: `可核验商品只有 ${completeRows.length} 条、独立链接 ${uniqueUrls.size} 个，要求至少 ${requirement.minItems} 条名称/价格/商品链接完整的结果`,
+        detail: links
+          ? `可核验商品只有 ${completeRows.length} 条、独立链接 ${uniqueUrls.size} 个，要求至少 ${requirement.minItems} 条名称/价格/商品链接完整的结果`
+          : `可核验商品只有 ${completeRows.length} 条，要求至少 ${requirement.minItems} 条名称/价格完整的结果`,
       });
     }
   }

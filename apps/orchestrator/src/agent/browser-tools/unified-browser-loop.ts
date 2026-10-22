@@ -894,12 +894,18 @@ export async function runUnifiedBrowserLoop(
           if (input.playbackReceipt && claimsNoPlayback(summary) && !admitsAutoplay(summary)) {
             const playback = await input.playbackReceipt().catch(() => null);
             const seconds = Math.round(playback?.playedSeconds ?? 0);
-            const played = !!playback && (playback.playing || playback.playedSeconds >= 1);
+            // FIX-31 (Deploy-31 dy-1, currentTime=1): a `playing` event that the guard
+            // paused at once is autoplay too; a progress bar the page set without one is not.
+            const played =
+              !!playback &&
+              (playback.playing ||
+                playback.playedSeconds >= 1 ||
+                playback.media.some((media) => media.everPlayed));
             const proven = !!playback && !played && playbackPings === 0;
             if (!proven) {
               const why =
                 played || playbackPings
-                  ? `页面上的视频实际播放过${seconds ? `约 ${seconds} 秒` : ''}${playbackPings ? '（有 YouTube 播放统计请求）' : ''}，现已暂停。`
+                  ? `页面上的视频${seconds ? `实际播放过约 ${seconds} 秒` : '曾自动开始播放'}${playbackPings ? '（有 YouTube 播放统计请求）' : ''}，现已暂停。`
                   : '没有播放状态回执能证明视频没有播放。';
               await rejected(
                 summary,
@@ -1240,7 +1246,10 @@ export async function runUnifiedBrowserLoop(
           // Fields are part of the answer: show the ones the summary leaves out.
           const listed = fieldLines(args.fields, summary);
           const answer = [summary, listed, note].filter(Boolean).join('\n\n');
-          if (short || dateMissing || declaredPartial) {
+          // FIX-31 (core-10 / xhs-read): an answer that itself opens with 「部分完成」 is
+          // delivered as 部分完成 whatever finish status came with it.
+          const saysPartial = /^\s*(?:部分完成|partially completed)/i.test(summary);
+          if (short || dateMissing || declaredPartial || saysPartial) {
             const lead = short
               ? `部分完成：只找到 ${found}/${wantedCount} 条。`
               : dateMissing

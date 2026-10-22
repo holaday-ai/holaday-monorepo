@@ -914,6 +914,8 @@ function checkPriceSort(criterion: SuccessCriterion, answerText: string): CheckR
 function checkEcommerceRows(criterion: SuccessCriterion, answerText: string): CheckResult {
   const minItems = Number(criterion.data?.minItems ?? 0);
   const minUniqueUrls = Number(criterion.data?.minUniqueUrls ?? 0);
+  // FIX-31: links only when the user asked for them (see OutputRequirementEcommerce).
+  const requireLinks = criterion.data?.requireLinks !== false;
   const rows = extractStructuredItems(answerText);
   if (rows.length === 0) {
     return {
@@ -931,7 +933,7 @@ function checkEcommerceRows(criterion: SuccessCriterion, answerText: string): Ch
     const missing: string[] = [];
     if (!row.name) missing.push('名称');
     if (row.price == null) missing.push('价格');
-    if (!row.url) missing.push('链接');
+    if (requireLinks && !row.url) missing.push('链接');
     if (missing.length > 0) {
       incomplete.push(`第 ${i + 1} 行缺少${missing.join('、')}`);
     }
@@ -969,7 +971,7 @@ function checkEcommerceRows(criterion: SuccessCriterion, answerText: string): Ch
     passed,
     checker: 'deterministic',
     detail: passed
-      ? `已解析 ${rows.length} 条商品（${rows[0]!.source}），均包含名称、价格、链接，唯一链接 ${uniqueUrls.size} 个`
+      ? `已解析 ${rows.length} 条商品（${rows[0]!.source}），均包含名称、价格${requireLinks ? `、链接，唯一链接 ${uniqueUrls.size} 个` : ''}`
       : detailParts.join('；'),
     severity: passed ? undefined : 'fixable',
   };

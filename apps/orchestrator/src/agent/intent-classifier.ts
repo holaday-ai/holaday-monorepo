@@ -1042,6 +1042,14 @@ const LIVE_QUESTION_RE =
   /多少|几|是什么|是啥|啥|哪|吗|么|怎样|如何|？|\?|\bwhat\b|\bwhen\b|\bwhich\b|\bhow\s+(?:many|much)\b|\bcheck\b|\bfind\b|\btell me\b/i;
 const WRITING_RE =
   /写(?:一|个|篇|段|首|封)|帮我写|撰写|起草|润色|改写|翻译|续写|作文|文案|写诗|小说|\btranslate\b|\bwrite\s+(?:a|an|me|my)\b|\bdraft\b|\brewrite\b|\bpolish\b/i;
+/**
+ * Creating text for a platform: 「写/想/起 N 条…文案/标题/选题」「写一篇知乎风格的回答」
+ * (FIX-31 reviews #1/#2).
+ */
+const WRITING_FOR_PLATFORM_RE =
+  /(?:写|想|起|拟|生成|撰写)[^，。\n]{0,12}(?:文案|标题|选题|脚本|口播|种草文|帖子|笔记|回答|文章|短文|博文|长文|小作文)|\b(?:write|draft)\b[^.\n]{0,30}\b(?:captions?|copy|titles?|headlines?|posts?|scripts?)\b/i;
+const TRANSFORMS_TEXT_RE =
+  /翻译|改写|润色|总结|概括|\btranslate\b|\brewrite\b|\bpolish\b|\bsummari[sz]e\b/i;
 const STRATEGY_TOPIC_RE =
   /策略|营销|运营|方案|规划|转化率|优化建议|增长|\bstrategy\b|\bmarketing\b|\bcampaign\b|\bplaybook\b|\bconversion\b/i;
 /** Going into pages of a site (「进第一本书和第二本书的详情页」) needs the browser. */
@@ -1066,7 +1074,11 @@ function siteDomain(intent: string): string | undefined {
 export function matchLiveInfoIntent(
   intent: string,
 ): { mode: 'scrape' | 'browser'; match: string } | null {
-  if (WRITING_RE.test(intent) && !URL_REGEX.test(intent)) return null;
+  // Writing is not a lookup — but reworking live content (「翻译今天的新闻」) still needs it.
+  // Text handed over with the request (「翻译成英文：今天天气很好」) is the content itself.
+  const reworksLive =
+    TRANSFORMS_TEXT_RE.test(intent) && !/[：:]\s*\S|这段|这句|这篇|下面|以下|如下/.test(intent);
+  if (WRITING_RE.test(intent) && !reworksLive && !URL_REGEX.test(intent)) return null;
   if (PROVIDED_TEXT_RE.test(intent) && !URL_REGEX.test(intent)) return null;
   // A strategy or analysis topic about a platform is not a lookup on it.
   if (STRATEGY_TOPIC_RE.test(intent)) return null;
@@ -1377,6 +1389,12 @@ function decide(intent: string, ctx: { hasFileAttachment: boolean }): RouteDecis
   const search = matchSearchVerb(routingIntent);
   if (search) {
     return { mode: 'scrape', source: 'kw:search-verb', match: search };
+  }
+  // FIX-31 (Deploy-31 ct-create 「帮我写 3 条小红书露营文案」 went to scrape): writing new
+  // text for a platform is writing, not reading the platform. Translating, rewriting or
+  // polishing something on the platform (「翻译知乎上…的最高赞回答」) still needs its text.
+  if (WRITING_FOR_PLATFORM_RE.test(routingIntent) && !TRANSFORMS_TEXT_RE.test(routingIntent)) {
+    return { mode: 'generate', source: 'default' };
   }
   const site = hasAny(routingIntent, SITE_NAMES);
   if (site) {

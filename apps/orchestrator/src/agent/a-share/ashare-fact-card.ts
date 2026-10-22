@@ -46,6 +46,7 @@ import type {
   AnnouncementRow,
   DragonTigerRow,
   FundamentalsRow,
+  IndexRow,
   KlineRow,
   NorthboundRow,
   StockNewsRow,
@@ -263,7 +264,17 @@ export async function buildAshareFactCard(
  * （避免「今天」等普通词被 name-search 误命中成个股，BOSS E16 修）。getIndexQuote('cn')
  * 返上证指数/深证成指/创业板指 spot，逐条溯源 + 免责。纯客观行情，无解读、无闸门。
  */
-export async function buildIndexCard(deps: FactCardDeps): Promise<string> {
+/** FIX-31（Deploy-31 b-n06）：指数行情有没有可用数据——没有就不进指数 lane。 */
+export function indexQuoteUsable(env: AkEnvelope<IndexRow>): boolean {
+  return !env.error && env.data.length > 0;
+}
+
+export async function buildIndexCard(
+  deps: FactCardDeps & {
+    /** 调用方已取到的指数行情（先判可用再进 lane），不再重复请求。 */
+    quote?: AkEnvelope<IndexRow>;
+  },
+): Promise<string> {
   const now = deps.now ?? new Date();
   const mode = deps.mode ?? 'prod';
   const iso = new Intl.DateTimeFormat('en-CA', {
@@ -272,7 +283,7 @@ export async function buildIndexCard(deps: FactCardDeps): Promise<string> {
     month: '2-digit',
     day: '2-digit',
   }).format(now);
-  const env = await deps.client.getIndexQuote('cn');
+  const env = deps.quote ?? (await deps.client.getIndexQuote('cn'));
   const lines: string[] = [
     `# 📊 HOLA DAY · A股大盘速览（${dateHeader(iso)}）`,
     `> 生成于 ${fmtClock(now.toISOString())} ｜ 三大指数客观行情聚合，**不构成投资建议**。`,

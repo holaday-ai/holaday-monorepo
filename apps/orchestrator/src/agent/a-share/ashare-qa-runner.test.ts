@@ -6,7 +6,12 @@ import { describe, expect, it } from 'vitest';
 import type { AkshareClient } from './akshare-client.js';
 import { replayClient } from './ashare-eval-replay.client.js';
 import { QWEN_SECTION7_PERIOD_MIXUP } from './ashare-eval-replay.fixtures.js';
-import { buildIndexCard, buildPanoramaContext, fetchPanoramaData } from './ashare-fact-card.js';
+import {
+  buildIndexCard,
+  buildPanoramaContext,
+  fetchPanoramaData,
+  indexQuoteUsable,
+} from './ashare-fact-card.js';
 import { complianceGate } from './ashare-qa-gate.js';
 import {
   isDeepQuery,
@@ -1082,4 +1087,40 @@ it('failed risk sources are unavailable rather than negative evidence', async ()
   );
   expect(r.answer).toContain('风险数据暂不可用');
   expect(r.answer).not.toContain('未检测到上述风险信号');
+});
+
+describe('FIX-31：指数拿不到数据就不进指数 lane（Deploy-31 b-n06）', () => {
+  const envelope = (data: unknown[], error?: string) =>
+    ({
+      data,
+      count: data.length,
+      source: 'akshare:stock_zh_index_spot_sina',
+      fetched_at: 'x',
+      disclaimer: 'x',
+      ...(error ? { error } : {}),
+    }) as never;
+  it('error 或空数据 → 不可用；有数据 → 可用', () => {
+    expect(indexQuoteUsable(envelope([], 'timeout'))).toBe(false);
+    expect(indexQuoteUsable(envelope([]))).toBe(false);
+    expect(indexQuoteUsable(envelope([{ 名称: '上证指数', 最新价: 3658.03, 涨跌幅: -1.48 }]))).toBe(
+      true,
+    );
+  });
+  it('已取到的行情直接用，不再请求', async () => {
+    let calls = 0;
+    const client = {
+      getIndexQuote: async () => {
+        calls += 1;
+        return envelope([]);
+      },
+    } as never;
+    const md = await buildIndexCard({
+      client,
+      now: NOW,
+      quote: envelope([{ 名称: '上证指数', 最新价: 3658.03, 涨跌幅: -1.48 }]),
+    });
+    expect(calls).toBe(0);
+    expect(md).toContain('上证指数 3,658.03（-1.48%）');
+    expect(md).not.toContain('数据暂不可用');
+  });
 });

@@ -8,7 +8,7 @@
  * 见 docs/SKILL_ROUTER_PATTERN.md「matcher 注册点」。
  */
 
-import { localNameSpans, lookupLocalNames } from './ashare-name-dictionary.js';
+import { LOCAL_STOCK_NAMES, localNameSpans, lookupLocalNames } from './ashare-name-dictionary.js';
 import type { AshareQaMatch, QaKind, ResolvedStock } from './ashare-qa-types.js';
 import { resolveStocks } from './ashare-stock-resolver.js';
 
@@ -374,21 +374,86 @@ function isNonStockTopic(text: string): boolean {
 }
 
 /**
- * 短句 name-search 结果的收货条件（批次 11.2 顺手补：短句也会被短名窗口误配，如
- * 「帮我写一份关于宁德的旅游攻略」=14 字 → 宁德时代）：
- *   全名原样在句中 → 收；否则必须有 A股信号（术语/问句/深度词）且不是旅游美食这类话题，
- *   或者整句就是个名字（≤6 字，如「茅台」「看看茅台」）。
+ * FIX-31（Deploy-31 b-v06「QQ音乐热歌榜第一名是啥」→ 第一创业/第一医药）：股票语境 = A股术语，
+ * 或股票/A股/大盘/指数/市值/板块/涨跌这类词。问句词（啥/吗/多少）不是股票语境。
  */
-function acceptShortHit(text: string, stock: ResolvedStock, signal: boolean): boolean {
-  if (nameAppearsIn(text, stock.displayName)) return true;
+const STOCK_CONTEXT_RE = /股|大盘|指数|市值|板块|涨跌/i;
+function hasStockContext(text: string): boolean {
+  return ASHARE_TERMS.some((t) => text.includes(t)) || STOCK_CONTEXT_RE.test(text);
+}
+
+/** 句子与名称最长的共同片段长度（「茅台为什么跌」 vs 贵州茅台 → 2）。 */
+function nameOverlap(text: string, name: string | null): number {
+  if (!name) return 0;
+  const t = compact(text);
+  for (let len = Math.min(name.length, t.length); len > 0; len -= 1)
+    for (let i = 0; i + len <= name.length; i += 1)
+      if (t.includes(name.slice(i, i + len))) return len;
+  return 0;
+}
+
+/** 本地字典里这只股票的非常用词别名（「茅台/招行/格力」）出现在句子里。 */
+function aliasIn(text: string, stock: ResolvedStock): string | null {
+  const entry = LOCAL_STOCK_NAMES.find((s) => s.symbol === stock.symbol);
+  return entry?.aliases?.find((a) => text.includes(a)) ?? null;
+}
+
+/** 去掉「看看/查一下/怎么样/详细分析…」后，整句就是这个名称（或其中一段）：「茅台」「看看贵州茅台」。 */
+function justTheName(text: string, names: ReadonlyArray<string | null>): boolean {
+  let rest = compact(text);
+  for (const w of [
+    ...DEEP_TERMS,
+    '看一下',
+    '看看',
+    '看下',
+    '查一下',
+    '查查',
+    '查下',
+    '搜一下',
+    '帮我',
+    '一下',
+    '怎么样',
+    '如何',
+    '呢',
+    '吧',
+    '啊',
+  ])
+    rest = rest.split(w).join('');
+  rest = rest.replace(/[。？?！!，,、]/g, '');
+  return rest.length > 0 && names.some((n) => !!n && compact(n).includes(rest));
+}
+
+/**
+ * 短句 name-search 结果的收货条件。akshare 用 2-4 字窗口做短名匹配，「第一/中国/平安/今天」这类常用词
+ * 会撞上股票简称，所以：
+ *   - 全名原样在句中：有股票语境，或整句就是这个名称 → 收；
+ *   - 否则只认本地字典的非常用词别名或 ≥3 字的名称片段（2 字常用词窗口一律不收），且不是旅游美食
+ *     这类话题，再要求有股票语境或整句就是这个名称。
+ */
+function acceptShortHit(
+  text: string,
+  stock: ResolvedStock,
+  stockContext: boolean,
+  /** The user picked the A-share skill: a full company name (≥3 字) is enough. */
+  inSkillContext = false,
+): boolean {
+  if (nameAppearsIn(text, stock.displayName))
+    return (
+      stockContext ||
+      (inSkillContext && compact(stock.displayName ?? '').length >= 3) ||
+      justTheName(text, [stock.displayName])
+    );
   if (isNonStockTopic(text)) return false;
-  return signal || text.trim().length <= 6;
+  const alias = aliasIn(text, stock);
+  if (!alias && nameOverlap(text, stock.displayName) < 3) return false;
+  return stockContext || justTheName(text, [stock.displayName, alias]);
 }
 
 async function searchShort(
   text: string,
   search: SymbolSearchFn,
   signal: boolean,
+  inSkillContext = false,
 ): Promise<ResolvedStock[]> {
   let found: ResolvedStock[] = [];
   try {
@@ -396,7 +461,7 @@ async function searchShort(
   } catch {
     found = [];
   }
-  return found.filter((s) => acceptShortHit(text, s, signal));
+  return found.filter((s) => acceptShortHit(text, s, signal, inSkillContext));
 }
 
 /**
@@ -522,7 +587,7 @@ export async function resolveAshareQa(
   // 长句（批次 11.2）：抽候选词逐个查，全名原样在句中才收（E16：长查询不乱匹配名称）。
   const text = opts.intent ?? '';
   let found: ResolvedStock[] = [];
-  if (shouldNameSearch(text)) found = await searchShort(text, search, true);
+  if (shouldNameSearch(text)) found = await searchShort(text, search, hasStockContext(text));
   else if (!isIndexQuery(text)) found = await resolveLongSentenceStocks(text, search);
   if (found.length === 0) return null;
   return {
@@ -578,9 +643,8 @@ export async function resolveAshareInContext(
 
   // 短问句：整句 name-search（结果过 acceptShortHit，挡「关于宁德的旅游攻略」这类短名误配）。
   // 长句（批次 11.2）：有 A股信号才抽候选词逐个查（≤3 次），全名原样在句中才收。
-  const hasQuestion = QUESTION_MARKERS.some((t) => text.includes(t));
   if (shouldNameSearch(text)) {
-    stocks = await searchShort(text, search, hasTerm || hasQuestion || deep);
+    stocks = await searchShort(text, search, hasStockContext(text), true);
   } else if (shouldExtractFromLongText(text)) {
     stocks = await resolveLongSentenceStocks(text, search);
   }

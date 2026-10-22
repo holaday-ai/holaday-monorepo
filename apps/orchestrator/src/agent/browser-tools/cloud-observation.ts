@@ -1623,12 +1623,28 @@ async function searchFieldAt(target: Locator): Promise<boolean> {
         const form = input.form ?? el.closest('form');
         const action = form?.getAttribute('action') || '';
         const actionPath = action.replace(/^(?:[a-z]+:)?\/\/[^/]+/i, '');
+        // YouTube's search form posts to /results (FIX-31 core-04).
+        // FIX-31 review: a support/chat box worded like search is never a search box.
+        if (
+          /客服|聊天|留言|咨询|对话|\bchat|\bmessages?\b|\bask\b|\bsupport\b|\bconversation/i.test(
+            [
+              input.getAttribute('name'),
+              input.id,
+              input.getAttribute('placeholder'),
+              input.getAttribute('aria-label'),
+              input.getAttribute('class'),
+              form?.id,
+              form?.getAttribute('class'),
+            ].join(' '),
+          )
+        )
+          return false;
         return (
           String(input.getAttribute('type') || '').toLowerCase() === 'search' ||
           el.getAttribute('role') === 'searchbox' ||
           (!!form &&
             (form.getAttribute('role') === 'search' ||
-              /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|search(?:page)?(?:\.[a-z]{2,5})?)(?:[/?#]|$)/i.test(
+              /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|results|search(?:page)?(?:\.[a-z]{2,5})?)(?:[/?#]|$)/i.test(
                 actionPath,
               ) ||
               /[?&](?:q|query|wd|kw|keyword|k)=/i.test(action) ||

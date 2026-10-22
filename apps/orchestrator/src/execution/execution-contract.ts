@@ -75,6 +75,12 @@ export interface OutputRequirementEcommerce {
   minItems: number;
   /** Required price ordering, or null when the user did not specify. */
   sortOrder: 'asc' | 'desc' | null;
+  /**
+   * FIX-31 (Deploy-31 b-p02): the user asked for each product's link. Without that ask a
+   * row needs only name and price — demanding links made the model invent them
+   * (「https://www.amazon.com/.s-asin%20a:has(h2)」). Absent = true (older contracts).
+   */
+  requireLinks?: boolean;
 }
 
 export interface OutputRequirementComparison {
@@ -357,12 +363,28 @@ export function isResearchOrRetrievalIntent(intent: string): boolean {
   return isSharedResearchOrRetrievalIntent(intent);
 }
 
+/**
+ * FIX-31 (Deploy-31 fc-jd): one product's own page — 「item.jd.com/100142621606.html 读商品标题和价格」 —
+ * is not a product list; the list checks (≥5 rows) cannot pass on it.
+ */
+const SINGLE_PRODUCT_URL_RE =
+  /https?:\/\/(?:item(?:\.m)?\.jd\.com\/\d+\.html|(?:detail\.tmall\.com|item\.taobao\.com)\/item\.htm|(?:www\.)?amazon\.[a-z.]+\/(?:[^\s/]+\/)?dp\/[A-Z0-9]{10})/i;
+
 function inferEcommerceRequirement(text: string): OutputRequirement | null {
   const ecomCue =
     /商品|货品|榜单|排行|淘宝|天猫|京东|拼多多|电商|amazon|亚马逊|\bsku\b|商城|网购/i.test(text);
   if (!ecomCue) return null;
   const productQuantityPattern =
     /(\d+|[一二两三四五六七八九十])\s*(?:款|个|种)\s*(?:(?:淘宝|天猫|京东|拼多多|亚马逊)\s*)?(?:商品|货品)/i;
+  // Any count of several (前3 / 前三个 / 两款 / 5条 / top 3) keeps it a list.
+  if (
+    SINGLE_PRODUCT_URL_RE.test(text) &&
+    !productQuantityPattern.test(text) &&
+    !/前\s*(?:\d+|[一二两三四五六七八九十]+)|\btop\s*\d|(?:[2-9]|\d{2,}|[二两三四五六七八九十])\s*(?:个|款|条|件|家|种)/i.test(
+      text,
+    )
+  )
+    return null;
 
   // Only derive output evidence here; the original intent/history remains
   // untouched. A content-writing clause is not a request for its subject's
@@ -416,6 +438,7 @@ function inferEcommerceRequirement(text: string): OutputRequirement | null {
     kind: 'ecommerce',
     minItems: Number.isFinite(minItems) && minItems > 0 ? minItems : 5,
     sortOrder: sortAsc ? 'asc' : sortDesc ? 'desc' : null,
+    ...(/链接|网址|地址|\b(?:links?|urls?)\b/i.test(text) ? {} : { requireLinks: false }),
   };
 }
 
@@ -512,6 +535,8 @@ export function browserOutputGuidance(contract: ExecutionContract | undefined): 
   const requirement = contract?.outputRequirement;
   if (requirement?.kind === 'list_sources') return listSourcesGuidance(requirement);
   if (requirement?.kind === 'ecommerce') {
+    if (requirement.requireLinks === false)
+      return `逐条列出至少 ${requirement.minItems} 个商品，每条写出名称和价格（照页面原样）；用户没要链接，不需要写链接，拿不到时写明“未获取到”，不要编造。`;
     return [
       `逐条列出至少 ${requirement.minItems} 个商品，每条写出名称、价格和该商品自己的详情页链接（例如 item.jd.com/数字.html）。`,
       '不能用搜索结果页、活动页或列表页链接代替商品链接，也不能多条共用一个链接；拿不到时写明“未获取到”，不要编造。',
@@ -603,12 +628,19 @@ function criteriaForRequirement(req: OutputRequirement): SuccessCriterion[] {
           description: `结构化结果至少 ${req.minItems} 条`,
           data: { min: req.minItems },
         },
-        {
-          id: newCriterionId(),
-          type: 'ecommerce_rows',
-          description: `每行商品必须同时包含名称、价格、链接（至少 ${req.minItems} 条，尽量每行独立商品链接）`,
-          data: { minItems: req.minItems, minUniqueUrls: req.minItems },
-        },
+        req.requireLinks === false
+          ? {
+              id: newCriterionId(),
+              type: 'ecommerce_rows',
+              description: `每行商品必须包含名称、价格（至少 ${req.minItems} 条）`,
+              data: { minItems: req.minItems, minUniqueUrls: 0, requireLinks: false },
+            }
+          : {
+              id: newCriterionId(),
+              type: 'ecommerce_rows',
+              description: `每行商品必须同时包含名称、价格、链接（至少 ${req.minItems} 条，尽量每行独立商品链接）`,
+              data: { minItems: req.minItems, minUniqueUrls: req.minItems },
+            },
       ];
       if (req.sortOrder) {
         criteria.push({

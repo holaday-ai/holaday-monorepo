@@ -206,6 +206,16 @@ describe('implicit form submission (Enter)', () => {
       `<form method="get" action="/x/search-and-delete" ${counter}><input aria-label="客服"></form>`,
     ],
     [
+      // FIX-31 review: chat wording vetoes even a search-pointing form with name=q.
+      'a chat box in a search form',
+      `<form action="/search" method="get" ${counter}><input name="q" aria-label="客服" placeholder="有问题请咨询"></form>`,
+    ],
+    [
+      // FIX-31: GET + a message field (not a search parameter name) still asks.
+      'a GET form whose field is a message',
+      `<form method="get" ${counter}><input aria-label="客服" name="message" placeholder="Search or ask a question"></form>`,
+    ],
+    [
       'the same form id on another site',
       `<form id="nav-searchform" ${counter}><input aria-label="客服" placeholder="搜索"></form>`,
     ],
@@ -233,6 +243,23 @@ describe('implicit form submission (Enter)', () => {
     [
       'Taobao',
       `<form id="J_TSearchForm" action="//s.taobao.com/search" ${counter}><input aria-label="请输入搜索文字" name="q" role="combobox"></form>`,
+    ],
+    // FIX-31 (Deploy-31 core-04): GET form + a search parameter name.
+    [
+      'YouTube',
+      `<form id="search-form" action="/results" ${counter}><input aria-label="请输入搜索文字" name="search_query" role="combobox"></form>`,
+    ],
+    [
+      'Google',
+      `<form action="/search" method="GET" ${counter}><textarea aria-label="请输入搜索文字" name="q"></textarea></form>`,
+    ],
+    [
+      'Baidu',
+      `<form name="f" action="/s" ${counter}><input aria-label="请输入搜索文字" name="wd"></form>`,
+    ],
+    [
+      'Bing',
+      `<form action="/search" ${counter}><textarea aria-label="请输入搜索文字" name="q"></textarea></form>`,
     ],
   ])(
     'lets %s-style site search submit',

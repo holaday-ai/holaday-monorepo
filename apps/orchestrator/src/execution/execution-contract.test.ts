@@ -531,3 +531,46 @@ describe('list answers need per-item sources (FIX-BATCH-A)', () => {
     expect(suffix).toContain('即使它是某个网站的首页');
   });
 });
+
+describe('FIX-31 — one product page is not a product list (Deploy-31 fc-jd)', () => {
+  const types = (intent: string) =>
+    buildContract({ taskId: 'tsk_fix31', intent, executionMode: 'scrape' }).successCriteria.map(
+      (c) => c.type,
+    );
+  it.each([
+    '打开 https://item.jd.com/100142621606.html 读商品标题和页面显示的价格',
+    'https://item.jd.com/100142621606.html 这个多少钱',
+    'amazon https://www.amazon.com/dp/B0DZJXN9FJ 这个商品现在什么价格',
+  ])('no list checks for %s', (intent) => {
+    expect(types(intent)).not.toContain('ecommerce_rows');
+    expect(types(intent)).not.toContain('result_count');
+  });
+  it.each([
+    '淘宝上 小米充电宝 20000毫安 最便宜的前5个，要价格和链接',
+    '京东 https://item.jd.com/100142621606.html 同款里最便宜的前3个商品价格',
+    // PR #293 review: Chinese counts.
+    '京东 https://item.jd.com/100142621606.html 同款里最便宜的前三个',
+    '京东 https://item.jd.com/100142621606.html 再找两款同价位的',
+  ])('a request for several products keeps them: %s', (intent) => {
+    expect(types(intent)).toContain('ecommerce_rows');
+  });
+});
+
+describe('FIX-31 — product links only when the user asks for them (Deploy-31 b-p02)', () => {
+  const rows = (intent: string) =>
+    buildContract({
+      taskId: 'tsk_fix31_links',
+      intent,
+      executionMode: 'browser',
+    }).successCriteria.find((c) => c.type === 'ecommerce_rows');
+  it('names and prices only: rows need no link', () => {
+    const c = rows('请使用云端浏览器，amazon.com 搜 usb c cable 前3个商品名和价格');
+    expect(c?.data).toMatchObject({ minItems: 3, minUniqueUrls: 0, requireLinks: false });
+    expect(c?.description).not.toContain('链接');
+  });
+  it('links asked for: rows keep their own links', () => {
+    const c = rows('淘宝上 小米充电宝 20000毫安 最便宜的前5个，要价格和链接');
+    expect(c?.data).toMatchObject({ minItems: 5, minUniqueUrls: 5 });
+    expect(c?.data?.requireLinks).toBeUndefined();
+  });
+});
