@@ -401,10 +401,14 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
     // not have it (「没拿到」「缺少浏览器环境」, most fields 「页面未显示」) is not a
     // completed answer: the browser gets one try at the live page.
     if (answerNotObtained(summary)) {
-      log.info({ code: 'SCRAPE_NOT_OBTAINED' }, 'scrape-runner: answer says the page did not have it');
+      log.info(
+        { code: 'SCRAPE_NOT_OBTAINED' },
+        'scrape-runner: answer says the page did not have it',
+      );
       return failed({
         start,
-        reason: '网页抓取没有拿到所需内容（页面可能要求交互或动态加载），已自动改用云端浏览器重试一次',
+        reason:
+          '网页抓取没有拿到所需内容（页面可能要求交互或动态加载），已自动改用云端浏览器重试一次',
         kind: 'empty',
         source: scrapeSource,
         firecrawl: usage,

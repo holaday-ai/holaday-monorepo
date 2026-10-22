@@ -81,12 +81,18 @@ export function staleForRecentIntent(
   intent: string,
   answer: string,
   now = new Date(),
+  /** The read pages: their newest date is "now" for the asked window, when they have one. */
+  pageTexts: readonly string[] = [],
 ): string | null {
   const window = RECENT.find(([re]) => re.test(intent));
   if (!window) return null;
   const dates = answerDates(answer);
   if (!dates.length) return null;
-  const limit = now.getTime() - window[1] * 86_400_000;
+  const pageDates = pageTexts.flatMap((text) => answerDates(text));
+  const anchor = pageDates.length
+    ? Math.min(now.getTime(), Math.max(...pageDates.map((d) => d.getTime())))
+    : now.getTime();
+  const limit = anchor - window[1] * 86_400_000;
   if (dates.some((d) => d.getTime() >= limit)) return null;
   const newest = new Date(Math.max(...dates.map((d) => d.getTime()))).toISOString().slice(0, 10);
   return `问的是「${intent.match(window[0])![0]}」的内容，但答案里最新的日期是 ${newest}，都不在这个时间范围内；只给这个时间范围内的内容，没有就如实说明`;

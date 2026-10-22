@@ -358,7 +358,10 @@ describe('core settlement preparation', () => {
       status: 'failed',
       result: { reason: 'SYNTHETIC_PRIVATE_DETAIL' },
     });
-    expect(op.result).toEqual({ reason: '质量校验未通过：没有通过格式或数据规则检查', tickCount: 1 });
+    expect(op.result).toEqual({
+      reason: '质量校验未通过：没有通过格式或数据规则检查',
+      tickCount: 1,
+    });
     expect(JSON.stringify(op)).not.toContain('SYNTHETIC_PRIVATE_DETAIL');
     expect(op.verificationPassed).toBe(false);
     expect(op.verification.issueCodes).toContain('DETERMINISTIC_CHECK_FAILED');

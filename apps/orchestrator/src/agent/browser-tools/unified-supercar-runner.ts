@@ -452,7 +452,11 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           (await Promise.resolve(opts.isTaskCancelled?.()).catch(() => false))
         )
           return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
-        const blocker = await tools.blocker().catch(() => null);
+        // The page may be mid-navigation: the wall probe gets 5 s (review).
+        const blocker = await Promise.race([
+          tools.blocker().catch(() => null),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+        ]);
         const walled = blocker && !('disposition' in blocker && blocker.disposition === 'continue');
         return {
           kind: 'stop',
@@ -835,6 +839,7 @@ export function readsOnePage(intent: string): boolean {
   return (
     !/填|表单|勾选|下载|上传|搜索|搜一下|搜|滚动|新标签|标签页|分别|每个|逐个|对比|比较|前\s*\d+|翻页|登录|注册|预订|下单|购买|加购|\bfill\b|\bdownload\b|\bupload\b|\bsearch\b|\bscroll\b|\btabs?\b|\bcompare\b|\btop\s*\d+/i.test(
       intent,
-    ) && /https?:\/\/|www\.|打开|读|看|告诉我|是谁|是什么|多少|\bopen\b|\bread\b|\bwhat\b/i.test(intent)
+    ) &&
+    /https?:\/\/|www\.|打开|读|看|告诉我|是谁|是什么|多少|\bopen\b|\bread\b|\bwhat\b/i.test(intent)
   );
 }

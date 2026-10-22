@@ -1048,7 +1048,9 @@ const STRATEGY_TOPIC_RE =
 const SITE_PAGES_RE =
   /(?:进|点进|打开|点开)(?:去)?.{0,16}(?:详情页|第[一二三四五六七八九十1-9]\S{0,3}(?:本|个|条|篇|页)|内页)/;
 
-export function matchLiveInfoIntent(intent: string): { mode: 'scrape' | 'browser'; match: string } | null {
+export function matchLiveInfoIntent(
+  intent: string,
+): { mode: 'scrape' | 'browser'; match: string } | null {
   if (WRITING_RE.test(intent) && !URL_REGEX.test(intent)) return null;
   // A strategy or analysis topic about a platform is not a lookup on it.
   if (STRATEGY_TOPIC_RE.test(intent)) return null;
@@ -1060,7 +1062,8 @@ export function matchLiveInfoIntent(intent: string): { mode: 'scrape' | 'browser
   const time = intent.match(LIVE_TIME_RE)?.[0];
   const topic = intent.match(LIVE_TOPIC_RE)?.[0];
   if (time && topic) return { mode: 'scrape', match: `${time}…${topic}` };
-  if (domain && LIVE_QUESTION_RE.test(intent)) return { mode: 'scrape', match: domain.slice(0, 64) };
+  if (domain && LIVE_QUESTION_RE.test(intent))
+    return { mode: 'scrape', match: domain.slice(0, 64) };
   return null;
 }
 

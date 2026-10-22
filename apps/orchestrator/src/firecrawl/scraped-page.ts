@@ -86,7 +86,7 @@ export function scrapedWall(markdown: string, title?: string): string | null {
   // has little else — 「Captcha - Wikipedia」「两步验证」「Login - Wikipedia」 are articles.
   // Repeated boilerplate (a footer printed over and over) is not "else".
   const distinct = [...new Set(text.split(/(?<=[.!?。！？])\s*/))].join(' ');
-  if (titleHit && (distinct.length < 600 || hit)) return titleHit[0];
+  if (titleHit && (distinct.length < 600 || (hit && text.length < 600))) return titleHit[0];
   return hit && text.length < 600 ? hit[0] : null;
 }
 
