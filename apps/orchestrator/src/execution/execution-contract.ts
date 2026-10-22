@@ -376,10 +376,13 @@ function inferEcommerceRequirement(text: string): OutputRequirement | null {
   if (!ecomCue) return null;
   const productQuantityPattern =
     /(\d+|[一二两三四五六七八九十])\s*(?:款|个|种)\s*(?:(?:淘宝|天猫|京东|拼多多|亚马逊)\s*)?(?:商品|货品)/i;
+  // Any count of several (前3 / 前三个 / 两款 / 5条 / top 3) keeps it a list.
   if (
     SINGLE_PRODUCT_URL_RE.test(text) &&
     !productQuantityPattern.test(text) &&
-    !/前\s*\d|\btop\s*\d/i.test(text)
+    !/前\s*(?:\d+|[一二两三四五六七八九十]+)|\btop\s*\d|(?:[2-9]|\d{2,}|[二两三四五六七八九十])\s*(?:个|款|条|件|家|种)/i.test(
+      text,
+    )
   )
     return null;
 

@@ -3456,10 +3456,21 @@ export const tasksRouter = router({
               const indexCardModule = indexIntent
                 ? await import('../../agent/a-share/ashare-fact-card.js')
                 : null;
-              const indexQuote = indexCardModule ? await aksClient.getIndexQuote('cn') : null;
-              if (indexCardModule && indexQuote && !indexCardModule.indexQuoteUsable(indexQuote)) {
+              // The probe sits on the request path, so it is capped: a slow upstream
+              // (12–30 s seen in production) costs at most INDEX_PROBE_MS, then the
+              // general route reads public quote pages instead.
+              const indexQuote = indexCardModule
+                ? await withDeadline(aksClient.getIndexQuote('cn'), INDEX_PROBE_MS)
+                : null;
+              if (
+                indexCardModule &&
+                (!indexQuote || !indexCardModule.indexQuoteUsable(indexQuote))
+              ) {
                 ctx.logger.warn(
-                  { userId: ctx.userId, error: indexQuote.error ?? 'empty' },
+                  {
+                    userId: ctx.userId,
+                    error: indexQuote ? (indexQuote.error ?? 'empty') : `probe>${INDEX_PROBE_MS}ms`,
+                  },
                   'ashare-index: no index data; falling back to the general route',
                 );
                 indexIntent = false;
@@ -12345,6 +12356,24 @@ async function convergePlanStatusOnSuccess(
  * and the persisted result simply omits the screenshot. The caller
  * doesn't need to differentiate.
  */
+/** FIX-31 review: the A-share index probe before choosing the index lane. */
+const INDEX_PROBE_MS = 2_500;
+
+/** The value, or null once `ms` have passed (the work itself is left to finish). */
+async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work.catch(() => null),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function finalStatePersistFields(finalState: CapturedFinalState): CapturedFinalState {
   return {
     ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),

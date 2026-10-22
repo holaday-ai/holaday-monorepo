@@ -548,6 +548,9 @@ describe('FIX-31 — one product page is not a product list (Deploy-31 fc-jd)', 
   it.each([
     '淘宝上 小米充电宝 20000毫安 最便宜的前5个，要价格和链接',
     '京东 https://item.jd.com/100142621606.html 同款里最便宜的前3个商品价格',
+    // PR #293 review: Chinese counts.
+    '京东 https://item.jd.com/100142621606.html 同款里最便宜的前三个',
+    '京东 https://item.jd.com/100142621606.html 再找两款同价位的',
   ])('a request for several products keeps them: %s', (intent) => {
     expect(types(intent)).toContain('ecommerce_rows');
   });

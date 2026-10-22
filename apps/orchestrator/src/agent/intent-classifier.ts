@@ -1042,6 +1042,11 @@ const LIVE_QUESTION_RE =
   /多少|几|是什么|是啥|啥|哪|吗|么|怎样|如何|？|\?|\bwhat\b|\bwhen\b|\bwhich\b|\bhow\s+(?:many|much)\b|\bcheck\b|\bfind\b|\btell me\b/i;
 const WRITING_RE =
   /写(?:一|个|篇|段|首|封)|帮我写|撰写|起草|润色|改写|翻译|续写|作文|文案|写诗|小说|\btranslate\b|\bwrite\s+(?:a|an|me|my)\b|\bdraft\b|\brewrite\b|\bpolish\b/i;
+/** Writing new text (copy, a post, an article), not reworking text that already exists. */
+const WRITING_FOR_PLATFORM_RE =
+  /帮我写|写(?:一|个|几|两|三|四|五|篇|段|条|首|封|\d)|撰写|起草|文案|写诗|作文|续写|\bwrite\s+(?:a|an|me|my)\b|\bdraft\b/i;
+const TRANSFORMS_TEXT_RE =
+  /翻译|改写|润色|总结|概括|\btranslate\b|\brewrite\b|\bpolish\b|\bsummari[sz]e\b/i;
 const STRATEGY_TOPIC_RE =
   /策略|营销|运营|方案|规划|转化率|优化建议|增长|\bstrategy\b|\bmarketing\b|\bcampaign\b|\bplaybook\b|\bconversion\b/i;
 /** Going into pages of a site (「进第一本书和第二本书的详情页」) needs the browser. */
@@ -1378,9 +1383,10 @@ function decide(intent: string, ctx: { hasFileAttachment: boolean }): RouteDecis
   if (search) {
     return { mode: 'scrape', source: 'kw:search-verb', match: search };
   }
-  // FIX-31 (Deploy-31 ct-create 「帮我写 3 条小红书露营文案」 went to scrape): writing for a
-  // platform is writing, not reading the platform. A URL or a search on the site came earlier.
-  if (WRITING_RE.test(routingIntent)) {
+  // FIX-31 (Deploy-31 ct-create 「帮我写 3 条小红书露营文案」 went to scrape): writing new
+  // text for a platform is writing, not reading the platform. Translating, rewriting or
+  // polishing something on the platform (「翻译知乎上…的最高赞回答」) still needs its text.
+  if (WRITING_FOR_PLATFORM_RE.test(routingIntent) && !TRANSFORMS_TEXT_RE.test(routingIntent)) {
     return { mode: 'generate', source: 'default' };
   }
   const site = hasAny(routingIntent, SITE_NAMES);

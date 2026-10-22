@@ -25,6 +25,9 @@ describe('ct-create: writing for a platform is writing, not reading it', () => {
       'scrape',
     ],
     ['QQ音乐热歌榜第一名是啥', 'scrape'],
+    // PR #293 review: reworking text that is on the platform needs that text.
+    ['翻译知乎上问题《为什么天空是蓝的》的最高赞回答', 'scrape'],
+    ['改写小红书上某博主最新一篇笔记', 'scrape'],
   ])('reading a platform still reads it: %s → %s', async (intent, mode) => {
     expect(await route(intent)).toBe(mode);
   });
