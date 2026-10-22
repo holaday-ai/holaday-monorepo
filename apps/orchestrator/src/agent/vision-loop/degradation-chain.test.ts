@@ -5,7 +5,6 @@ import {
   type DegradationContext,
   type DegradationStrategy,
   ExtensionFallbackStrategy,
-  ProxySwapStrategy,
   SearchApiFallbackStrategy,
   SearchEngineSwapStrategy,
   defaultStrategies,
@@ -144,48 +143,20 @@ describe('DegradationChain.tryNext — ordering + skip semantics', () => {
 });
 
 describe('defaultStrategies', () => {
-  it('registers four tiers, sorted by level (FIX-31: no profile/UA rotation)', () => {
+  it('registers three tiers, sorted by level (FIX-31: no identity or egress change)', () => {
     const chain = new DegradationChain(defaultStrategies());
     const levels = chain.getStrategies().map((s) => s.level);
-    expect(levels).toEqual([2, 3, 4, 5]);
+    expect(levels).toEqual([3, 4, 5]);
     const ids = chain.getStrategies().map((s) => s.id);
-    expect(ids).toEqual([
-      'proxy_swap',
-      'search_engine_swap',
-      'search_api_fallback',
-      'extension_fallback',
-    ]);
+    expect(ids).toEqual(['search_engine_swap', 'search_api_fallback', 'extension_fallback']);
   });
 });
 
 describe('no identity disguise (FIX-31)', () => {
-  it('the default chain has no profile / user-agent rotation', () => {
-    expect(defaultStrategies().map((s) => s.id)).not.toContain('profile_rotation');
-  });
-});
-
-describe('ProxySwapStrategy env gating', () => {
-  it('canTry returns false when PROXY_LIST is unset', async () => {
-    const prev = process.env.PROXY_LIST;
-    delete process.env.PROXY_LIST;
-    const s = new ProxySwapStrategy();
-    expect(await s.canTry()).toBe(false);
-    if (prev !== undefined) process.env.PROXY_LIST = prev;
-  });
-
-  it('canTry returns true when PROXY_LIST contains at least one entry', async () => {
-    const prev = process.env.PROXY_LIST;
-    process.env.PROXY_LIST = 'http://proxy-a:8080,http://proxy-b:8080';
-    const s = new ProxySwapStrategy();
-    expect(await s.canTry()).toBe(true);
-    const r = await s.execute();
-    // Stub implementation: ok:false + diagnostic message noting the
-    // connectOverCDP constraint. Regression guard so we remember to
-    // flip this to ok:true once we ship the relaunch path.
-    expect(r.ok).toBe(false);
-    expect(r.message).toMatch(/proxy swap noted/);
-    if (prev === undefined) delete process.env.PROXY_LIST;
-    else process.env.PROXY_LIST = prev;
+  it('the default chain has no profile / user-agent rotation and no proxy swap', () => {
+    const ids = defaultStrategies().map((s) => s.id);
+    expect(ids).not.toContain('profile_rotation');
+    expect(ids).not.toContain('proxy_swap');
   });
 });
 
@@ -243,13 +214,11 @@ describe('ExtensionFallbackStrategy', () => {
 });
 
 describe('DegradationChain end-to-end escalation', () => {
-  it('on a search-flavoured task with no proxy/search-API env, lands on search_engine_swap first', async () => {
+  it('on a search-flavoured task with no search-API env, lands on search_engine_swap first', async () => {
     const prev = {
-      P: process.env.PROXY_LIST,
       S: process.env.SERPAPI_KEY,
       G: process.env.GOOGLE_SEARCH_API_KEY,
     };
-    delete process.env.PROXY_LIST;
     delete process.env.SERPAPI_KEY;
     delete process.env.GOOGLE_SEARCH_API_KEY;
 
@@ -261,7 +230,7 @@ describe('DegradationChain end-to-end escalation', () => {
     } as never;
 
     const chain = new DegradationChain();
-    // First pass: proxy skipped (no env), so we land on engine swap.
+    // First pass: engine swap (the first tier) for a search-flavoured task.
     const r2 = await chain.tryNext(ctx({ executor: fakeExecutor }), 0);
     expect(r2?.strategy).toBe('search_engine_swap');
     // Third pass: search API skipped (no env), so we hit extension.
@@ -269,7 +238,6 @@ describe('DegradationChain end-to-end escalation', () => {
     expect(r3?.strategy).toBe('extension_fallback');
     expect(r3?.handoffToExtension).toBe(true);
 
-    if (prev.P !== undefined) process.env.PROXY_LIST = prev.P;
     if (prev.S !== undefined) process.env.SERPAPI_KEY = prev.S;
     if (prev.G !== undefined) process.env.GOOGLE_SEARCH_API_KEY = prev.G;
   });

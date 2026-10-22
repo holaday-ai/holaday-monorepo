@@ -11,12 +11,16 @@ const logger = { info() {}, warn() {}, debug() {}, error() {} } as never;
 const route = async (intent: string) => (await explainExecutionMode({ intent, logger })).mode;
 
 describe('ct-create: writing for a platform is writing, not reading it', () => {
-  it.each(['帮我写 3 条小红书露营文案', '给抖音写一段母婴好物的口播文案', '帮我想 5 个小红书标题'])(
-    '%s → generate',
-    async (intent) => {
-      expect(await route(intent)).toBe('generate');
-    },
-  );
+  it.each([
+    '帮我写 3 条小红书露营文案',
+    '给抖音写一段母婴好物的口播文案',
+    '帮我想 5 个小红书标题',
+    // Review #2: writing a piece in a platform's style is writing.
+    '帮我写一篇知乎风格的回答',
+    '写一段适合发微博的短文，主题是秋天',
+  ])('%s → generate', async (intent) => {
+    expect(await route(intent)).toBe('generate');
+  });
   it.each([
     ['小红书上搜 杭州西湖攻略 第一条笔记标题和作者', 'browser'],
     [

@@ -450,7 +450,10 @@ export class PlaywrightExecutor {
         context.setDefaultNavigationTimeout(45_000);
         const isActive = () => generation === this.cleanContextGeneration;
         await this.applyNetworkPolicyToContexts(browser, isActive, browserLease);
-        await this.applyStealthToContexts(browser, isActive);
+        // FIX-31 review #2: launchManaged (dev / browser-eval) is gated like connect.
+        if (isStealthEnabled()) {
+          await this.applyStealthToContexts(browser, isActive);
+        }
         this.assertContextGeneration(generation);
         return { ok: true };
       } catch (err) {
@@ -781,6 +784,8 @@ export class PlaywrightExecutor {
    * just falls back to un-stealthed behaviour.
    */
   private async applyStealthToContexts(browser: Browser, isActive?: () => boolean): Promise<void> {
+    // Checked again here so no caller can inject the spoofing script with the switch off.
+    if (!isStealthEnabled()) return;
     if (isActive?.() === false) throw new Error('CLEAN_CONTEXT_DISPOSED');
     const contexts = browser.contexts();
     for (const ctx of contexts) {

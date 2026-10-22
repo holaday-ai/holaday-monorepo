@@ -1042,9 +1042,12 @@ const LIVE_QUESTION_RE =
   /多少|几|是什么|是啥|啥|哪|吗|么|怎样|如何|？|\?|\bwhat\b|\bwhen\b|\bwhich\b|\bhow\s+(?:many|much)\b|\bcheck\b|\bfind\b|\btell me\b/i;
 const WRITING_RE =
   /写(?:一|个|篇|段|首|封)|帮我写|撰写|起草|润色|改写|翻译|续写|作文|文案|写诗|小说|\btranslate\b|\bwrite\s+(?:a|an|me|my)\b|\bdraft\b|\brewrite\b|\bpolish\b/i;
-/** Creating copy for a platform: 「写/想/起 N 条…文案/标题/选题」 (FIX-31 review). */
+/**
+ * Creating text for a platform: 「写/想/起 N 条…文案/标题/选题」「写一篇知乎风格的回答」
+ * (FIX-31 reviews #1/#2).
+ */
 const WRITING_FOR_PLATFORM_RE =
-  /(?:写|想|起|拟|生成|撰写)[^，。\n]{0,12}(?:文案|标题|选题|脚本|口播|种草文|帖子|笔记)|\b(?:write|draft)\b[^.\n]{0,30}\b(?:captions?|copy|titles?|headlines?|posts?|scripts?)\b/i;
+  /(?:写|想|起|拟|生成|撰写)[^，。\n]{0,12}(?:文案|标题|选题|脚本|口播|种草文|帖子|笔记|回答|文章|短文|博文|长文|小作文)|\b(?:write|draft)\b[^.\n]{0,30}\b(?:captions?|copy|titles?|headlines?|posts?|scripts?)\b/i;
 const TRANSFORMS_TEXT_RE =
   /翻译|改写|润色|总结|概括|\btranslate\b|\brewrite\b|\bpolish\b|\bsummari[sz]e\b/i;
 const STRATEGY_TOPIC_RE =
