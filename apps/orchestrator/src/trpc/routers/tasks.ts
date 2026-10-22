@@ -3451,8 +3451,21 @@ export const tasksRouter = router({
               }
               // 指数 lane（E16）：「查今天A股三大指数收盘 / 大盘怎么样」类指数/大盘问句 → 确定性
               // 三大指数速览卡（无 LLM、无闸门），不进个股 lane（防普通词 name-search 误命中个股）。
-              if (indexIntent) {
-                const { buildIndexCard } = await import('../../agent/a-share/ashare-fact-card.js');
+              // FIX-31（Deploy-31 b-n06「三大指数：数据暂不可用」仍 completed）：先取行情，拿不到就
+              // 不进这条 lane，回落常规路由（抓取公开行情页，必要时交浏览器），不交一张空卡。
+              const indexCardModule = indexIntent
+                ? await import('../../agent/a-share/ashare-fact-card.js')
+                : null;
+              const indexQuote = indexCardModule ? await aksClient.getIndexQuote('cn') : null;
+              if (indexCardModule && indexQuote && !indexCardModule.indexQuoteUsable(indexQuote)) {
+                ctx.logger.warn(
+                  { userId: ctx.userId, error: indexQuote.error ?? 'empty' },
+                  'ashare-index: no index data; falling back to the general route',
+                );
+                indexIntent = false;
+              }
+              if (indexIntent && indexCardModule && indexQuote) {
+                const { buildIndexCard } = indexCardModule;
                 const taskId = newExternalId('task');
                 await repo.insertTask(
                   { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
@@ -3474,7 +3487,7 @@ export const tasksRouter = router({
                     let answer: string;
                     let terminalStatus: 'completed' | 'failed' = 'completed';
                     try {
-                      answer = `${stockAnswerPrefix}${await buildIndexCard({ client: aksClient, now: stockAnalysisNow })}`;
+                      answer = `${stockAnswerPrefix}${await buildIndexCard({ client: aksClient, now: stockAnalysisNow, quote: indexQuote })}`;
                     } catch (err) {
                       ctx.logger.error({ err, taskId }, 'ashare-index: lane failed');
                       answer = `${stockAnswerPrefix}抱歉，A股大盘指数查询处理失败，请稍后重试。`;

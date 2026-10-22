@@ -357,12 +357,25 @@ export function isResearchOrRetrievalIntent(intent: string): boolean {
   return isSharedResearchOrRetrievalIntent(intent);
 }
 
+/**
+ * FIX-31 (Deploy-31 fc-jd): one product's own page — 「item.jd.com/100142621606.html 读商品标题和价格」 —
+ * is not a product list; the list checks (≥5 rows) cannot pass on it.
+ */
+const SINGLE_PRODUCT_URL_RE =
+  /https?:\/\/(?:item(?:\.m)?\.jd\.com\/\d+\.html|(?:detail\.tmall\.com|item\.taobao\.com)\/item\.htm|(?:www\.)?amazon\.[a-z.]+\/(?:[^\s/]+\/)?dp\/[A-Z0-9]{10})/i;
+
 function inferEcommerceRequirement(text: string): OutputRequirement | null {
   const ecomCue =
     /商品|货品|榜单|排行|淘宝|天猫|京东|拼多多|电商|amazon|亚马逊|\bsku\b|商城|网购/i.test(text);
   if (!ecomCue) return null;
   const productQuantityPattern =
     /(\d+|[一二两三四五六七八九十])\s*(?:款|个|种)\s*(?:(?:淘宝|天猫|京东|拼多多|亚马逊)\s*)?(?:商品|货品)/i;
+  if (
+    SINGLE_PRODUCT_URL_RE.test(text) &&
+    !productQuantityPattern.test(text) &&
+    !/前\s*\d|\btop\s*\d/i.test(text)
+  )
+    return null;
 
   // Only derive output evidence here; the original intent/history remains
   // untouched. A content-writing clause is not a request for its subject's

@@ -201,6 +201,13 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
   const fieldSearch =
     String(el.getAttribute('type') || '').toLowerCase() === 'search' ||
     el.getAttribute('role') === 'searchbox' ||
+    // FIX-31 (Deploy-31 core-04): a GET form whose field carries a search parameter name —
+    // YouTube's 「action=/results」 + 「name=search_query」, Google/Baidu/Bing q/wd.
+    (!!form &&
+      /^(?:get)?$/i.test(String(form.getAttribute('method') || '')) &&
+      /^(?:q|query|search_query|search|keyword|keywords|wd|kw|k|s)$/i.test(
+        el.getAttribute('name') || '',
+      )) ||
     // Known site rules: IKEA's header search and Gaode's route from/to boxes are
     // bare inputs, no form.
     (/(?:^|\s)s-input(?:\s|$)/.test(el.getAttribute('class') || '') &&

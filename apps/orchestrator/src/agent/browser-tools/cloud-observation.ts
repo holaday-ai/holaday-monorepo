@@ -1626,6 +1626,13 @@ async function searchFieldAt(target: Locator): Promise<boolean> {
         return (
           String(input.getAttribute('type') || '').toLowerCase() === 'search' ||
           el.getAttribute('role') === 'searchbox' ||
+          // FIX-31 (Deploy-31 core-04): a GET form whose field carries a search parameter
+          // name — YouTube's 「action=/results」 + 「name=search_query」, Google/Baidu/Bing q/wd.
+          (!!form &&
+            /^(?:get)?$/i.test(String(form.getAttribute('method') || '')) &&
+            /^(?:q|query|search_query|search|keyword|keywords|wd|kw|k|s)$/i.test(
+              input.getAttribute('name') || '',
+            )) ||
           (!!form &&
             (form.getAttribute('role') === 'search' ||
               /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|search(?:page)?(?:\.[a-z]{2,5})?)(?:[/?#]|$)/i.test(

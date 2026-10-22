@@ -185,3 +185,46 @@ describe('短句行为不回退', () => {
     expect(r.match?.stocks.map((s) => s.symbol)).toContain('603335');
   });
 });
+
+describe('FIX-31：A股通道只接明确的股票问题（Deploy-31 b-v06）', () => {
+  // 仿生产 akshare：2 字常用词窗口会撞上「第一创业/第一医药/中国平安/平安银行/中国石油」。
+  const T: ReadonlyArray<ResolvedStock> = [
+    { symbol: '002797', displayName: '第一创业' },
+    { symbol: '600833', displayName: '第一医药' },
+    { symbol: '601318', displayName: '中国平安' },
+    { symbol: '000001', displayName: '平安银行' },
+    { symbol: '601857', displayName: '中国石油' },
+    { symbol: '600519', displayName: '贵州茅台' },
+  ];
+  const search = async (q: string): Promise<ResolvedStock[]> => {
+    const full = T.filter((s) => s.displayName && q.includes(s.displayName));
+    if (full.length) return full;
+    const hits = new Map<string, ResolvedStock>();
+    for (let i = 0; i + 2 <= q.length; i += 1) {
+      const w = q.slice(i, i + 2);
+      for (const s of T) if (s.displayName?.includes(w)) hits.set(s.symbol, s);
+    }
+    return [...hits.values()];
+  };
+  const ctx = (intent: string) =>
+    resolveAshareInContext({ intent, watchlist: [], now: NOW }, search);
+  const plain = (intent: string) => resolveAshareQa({ intent, watchlist: [], now: NOW }, search);
+
+  it.each([
+    'QQ音乐热歌榜第一名是啥',
+    '中国最高的山',
+    '平安夜是哪天',
+    '第一次去杭州玩什么',
+    '中国好声音第一季冠军是谁',
+  ])('非股票句（含股票简称片段）不进 A股通道：%s', async (intent) => {
+    expect((await ctx(intent)).match).toBeNull();
+    expect(await plain(intent)).toBeNull();
+  });
+  it.each([
+    ['第一创业股价', '002797'],
+    ['中国平安今天涨了吗', '601318'],
+    ['贵州茅台', '600519'],
+  ])('真股票问题仍进：%s', async (intent, symbol) => {
+    expect((await ctx(intent)).match?.stocks.map((s) => s.symbol)).toContain(symbol);
+  });
+});

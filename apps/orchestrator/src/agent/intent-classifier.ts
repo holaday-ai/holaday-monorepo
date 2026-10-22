@@ -1378,6 +1378,11 @@ function decide(intent: string, ctx: { hasFileAttachment: boolean }): RouteDecis
   if (search) {
     return { mode: 'scrape', source: 'kw:search-verb', match: search };
   }
+  // FIX-31 (Deploy-31 ct-create 「帮我写 3 条小红书露营文案」 went to scrape): writing for a
+  // platform is writing, not reading the platform. A URL or a search on the site came earlier.
+  if (WRITING_RE.test(routingIntent)) {
+    return { mode: 'generate', source: 'default' };
+  }
   const site = hasAny(routingIntent, SITE_NAMES);
   if (site) {
     return { mode: 'scrape', source: 'kw:site', match: site };
