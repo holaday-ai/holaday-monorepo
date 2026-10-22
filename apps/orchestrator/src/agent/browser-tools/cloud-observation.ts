@@ -68,7 +68,19 @@ const KNOWN_TELEMETRY: ReadonlyArray<readonly [host: RegExp, path: RegExp]> = [
 ];
 /** A path that writes something a user would see or be charged for. */
 const WRITE_PATH_RE =
-  /cart|order|checkout|pay|login|log[-_]?in|sign[-_]?(?:in|up)|register|favou?rite|collect(?!or)|follow|like|subscribe|publish|comment|message|send|submit|create|delete|remove|update|vote|review|booking|reserve|address|account|password/i;
+  /cart|order|checkout|pay|login|log[-_]?in|sign[-_]?(?:in|up)|register|favou?rite|collect(?!or)|follow|like|subscribe|publish|comment|message|send|submit|create|delete|remove|update|vote|review|booking|reserve|address|account|password|recent|history|save|preference|setting|profile/i;
+/** A path segment that names a suggestion/search read (Taobao mtop …recommend/2.0/). */
+const READ_PATH_RE =
+  /(?:^|[/._-])(?:suggest(?:ions?)?|sug|autocomplete|autosuggest|typeahead|complete|recommend|search|query|hint|lookup|predict)(?:[/._-]|$)/i;
+
+/** Akamai Bot Manager's sensor POST (BestBuy): an opaque path, a 「{"sensor_data":…}」 body. */
+function botSensorPost(request: Request): boolean {
+  try {
+    return /^\s*\{\s*"sensor_data"\s*:/.test(request.postData() ?? '');
+  } catch {
+    return false;
+  }
+}
 /**
  * A request that only reports telemetry: a beacon to a telemetry path, or a
  * known analytics/media-statistics endpoint. A transaction path or action
@@ -679,17 +691,19 @@ export class CloudObservation {
           (w.causes.get(key) ?? 0) > Date.now() - 500 &&
           (!requestPage || w.pages.has(requestPage)),
       );
-    // FIX-30 (BENCH-1 淘宝/BestBuy): suggestion reads and sensor/analytics POSTs
-    // fired while typing into the page's search box write nothing — unless the
-    // path names a write. A navigating form submit is still a candidate, and a
-    // path alone (「/search」 on an unknown host) never exempts a click.
+    // FIX-30 (BENCH-1 淘宝/BestBuy): a POST fired while typing into the page's
+    // search box is a read only when it is positively one — a suggestion/search
+    // path, or Akamai's sensor body — and its path names no write (recent
+    // searches, preferences…). Anything else, an opaque path included, still
+    // pauses; a navigating submit is still a candidate, and no path exempts a click.
     const searchRead =
       r.method() === 'POST' &&
       !!cause?.searchField &&
       !transactional &&
       !resourceWrite &&
       !navigation &&
-      !WRITE_PATH_RE.test(url.pathname);
+      !WRITE_PATH_RE.test(url.pathname) &&
+      (READ_PATH_RE.test(url.pathname) || botSensorPost(r));
     const unknownPost =
       r.method() === 'POST' && graphql !== 'query' && !passiveBeacon && !searchRead;
     const candidate = transactional || resourceWrite || methodWrite || unknownPost;

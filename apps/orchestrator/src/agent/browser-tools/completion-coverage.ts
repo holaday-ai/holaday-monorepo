@@ -114,31 +114,57 @@ const RECENT: Array<[RegExp, number]> = [
 ];
 const MONTHS = 'jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec';
 
-export function answerDates(answer: string): Date[] {
-  const out: Date[] = [];
-  const push = (y: number, m: number, d: number) => {
+function datedSpans(text: string): Array<{ date: Date; index: number }> {
+  const out: Array<{ date: Date; index: number }> = [];
+  const push = (y: number, m: number, d: number, index: number) => {
     const date = new Date(Date.UTC(y, m - 1, d));
-    if (y > 1990 && m >= 1 && m <= 12 && d >= 1 && d <= 31) out.push(date);
+    if (y > 1990 && m >= 1 && m <= 12 && d >= 1 && d <= 31) out.push({ date, index });
   };
-  for (const m of answer.matchAll(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})日?/g))
-    push(Number(m[1]), Number(m[2]), Number(m[3]));
-  for (const m of answer.matchAll(
+  for (const m of text.matchAll(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})日?/g))
+    push(Number(m[1]), Number(m[2]), Number(m[3]), m.index);
+  for (const m of text.matchAll(
     new RegExp(`\\b(${MONTHS})[a-z]*\\.?\\s+(\\d{1,2}),?\\s+(20\\d{2})\\b`, 'gi'),
   ))
     push(
       Number(m[3]),
       MONTHS.split('|').indexOf(m[1]!.slice(0, 3).toLowerCase()) + 1,
       Number(m[2]),
+      m.index,
     );
-  for (const m of answer.matchAll(
+  for (const m of text.matchAll(
     new RegExp(`\\b(\\d{1,2})\\s+(${MONTHS})[a-z]*\\.?\\s+(20\\d{2})\\b`, 'gi'),
   ))
     push(
       Number(m[3]),
       MONTHS.split('|').indexOf(m[2]!.slice(0, 3).toLowerCase()) + 1,
       Number(m[1]),
+      m.index,
     );
   return out;
+}
+
+export function answerDates(answer: string): Date[] {
+  return datedSpans(answer).map((span) => span.date);
+}
+
+/**
+ * Dates the answer gives as an item's own date — 「（2025-08-07）」「· 2025-08-08」
+ * 「发布于 …」「Published Oct 19, 2026」 or leading an item — not a date the item
+ * talks about (「回顾 2024年3月5日 的发布会」).
+ */
+function publicationDates(answer: string): Date[] {
+  return datedSpans(answer)
+    .filter(({ index }) => {
+      const before = answer.slice(Math.max(0, index - 12), index);
+      return (
+        /(?:发布|发表|更新|日期|时间|published|posted|updated|date)\s*(?:于|在|时间|日期)?\s*[:：]?\s*$/i.test(
+          before,
+        ) ||
+        /[（(\[·|—–]\s*$|\s[-–]\s*$/.test(before) ||
+        /(?:^|\n)\s*(?:[-*•]|\d+[.)、])?\s*$/.test(before)
+      );
+    })
+    .map((span) => span.date);
 }
 
 /** Every dated item is older than the asked window (with slack): not recent content. */
@@ -151,7 +177,8 @@ export function staleForRecentIntent(
 ): string | null {
   const window = RECENT.find(([re]) => re.test(intent));
   if (!window) return null;
-  const dates = answerDates(answer);
+  // Only an item's own date can show it is old; a date it discusses cannot.
+  const dates = publicationDates(answer);
   if (!dates.length) return null;
   const pageDates = pageTexts.flatMap((text) => answerDates(text));
   const anchor = pageDates.length

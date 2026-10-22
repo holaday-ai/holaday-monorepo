@@ -142,12 +142,13 @@ const STRONG_PATTERNS: PatternMatch[] = [
  */
 export function detectNavFailure(
   summary: string | undefined | null,
-  /** FIX-30 (BENCH-1 r04): the page the run ended on; a loaded http(s) page is no nav failure. */
-  finalUrl?: string | null,
+  /**
+   * FIX-30 (BENCH-1 r04): the page the run ended on. An http(s) URL alone proves
+   * nothing (a timed-out goto keeps it); the receipt is the page's own text.
+   */
+  finalPage?: { url?: string | null; text?: string | null },
 ): NavFailureSignal {
   if (!summary) return { detected: false };
-  // MDN's 418 page itself says 「服务器拒绝…」; Chrome leaves a failed load on chrome-error://.
-  if (finalUrl && /^https?:\/\//i.test(finalUrl)) return { detected: false };
   const trimmed = summary.trim();
   if (trimmed.length === 0) return { detected: false };
   // Conservative gate — only treat the summary as a nav-failure
@@ -158,6 +159,10 @@ export function detectNavFailure(
 
   for (const p of STRONG_PATTERNS) {
     if (p.re.test(trimmed)) {
+      // MDN's 418 page itself says 「服务器拒绝…」: the answer quotes a page that
+      // loaded — an http(s) page with real content saying the same thing. Error
+      // pages (chrome-error://, a short 5xx/timeout page) stay failures.
+      if (loadedPageSays(finalPage, p.re)) return { detected: false };
       return {
         detected: true,
         kind: p.kind,
@@ -167,4 +172,16 @@ export function detectNavFailure(
     }
   }
   return { detected: false };
+}
+
+/** Below this much visible text a page is an error/interstitial page, not content. */
+const MIN_LOADED_PAGE_TEXT = 1500;
+
+function loadedPageSays(
+  page: { url?: string | null; text?: string | null } | undefined,
+  re: RegExp,
+): boolean {
+  if (!page?.url || !/^https?:\/\//i.test(page.url)) return false;
+  const text = page.text?.trim() ?? '';
+  return text.length >= MIN_LOADED_PAGE_TEXT && re.test(text);
 }

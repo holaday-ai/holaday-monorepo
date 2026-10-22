@@ -348,8 +348,11 @@ async function executeCoreTask(
       // FIX-30: tool-call text, an opener, or a web source nobody read is not an answer.
       if (status === 'completed' || status === 'partial_success') {
         const qualityFailure = answerQualityFailure(summary, {
+          // Read evidence is a source the run actually fetched, or an attachment —
+          // never the existence of the source-trust review (always present).
           readSources:
-            Boolean(reviewed.sourceTrust) || input.blocks.some((block) => block.type !== 'text'),
+            (reviewed.outcome.sourceUrls?.length ?? outcome.sourceUrls?.length ?? 0) > 0 ||
+            input.blocks.some((block) => block.type !== 'text'),
         });
         if (qualityFailure) {
           input.logger.info(

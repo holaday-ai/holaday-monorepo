@@ -117,6 +117,29 @@ describe('1 · recent means recent; 3 · every named target answered', () => {
       staleForRecentIntent('最近一周关于 OpenAI 的新闻有哪些', '1. xx（2026年10月19日）', now),
     ).toBeNull();
     expect(staleForRecentIntent('OpenAI 的历史', '2015-12-11 成立', now)).toBeNull();
+    // BENCH-1 n03's real answer: 「… - BBC News 中文 · 2025-08-08」.
+    expect(
+      staleForRecentIntent(
+        '最近一周关于 OpenAI 的新闻有哪些',
+        '- [OpenAI推出新版本GPT-5 - BBC News 中文 · 2025-08-08](https://www.bbc.com/x)',
+        now,
+      ),
+    ).toContain('2025-08-08');
+    // A current article that discusses an older event: that date is not its own.
+    expect(
+      staleForRecentIntent(
+        '最近一周关于 OpenAI 的新闻有哪些',
+        '1. OpenAI 回顾了 2024年3月5日 发布会上公布的路线图，并更新了时间表。',
+        now,
+      ),
+    ).toBeNull();
+    expect(
+      staleForRecentIntent(
+        'latest OpenAI news this week',
+        '- OpenAI recap: the model launched on Mar 5, 2024 is now open-weight.',
+        now,
+      ),
+    ).toBeNull();
     expect(
       answerDates('Oct 19, 2026 and 3 March 2025').map((d) => d.toISOString().slice(0, 10)),
     ).toEqual(['2026-10-19', '2025-03-03']);
@@ -288,16 +311,26 @@ describe('5 · checks that misjudged and a time cap', () => {
   });
   it('r04: a page that loaded is no nav failure, even if it says 「服务器拒绝」', () => {
     const summary = "418 I'm a teapot：服务器拒绝尝试用茶壶煮咖啡。";
+    const url = 'https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Reference/Status/418';
+    const mdn = `HTTP 418 I'm a teapot 客户端错误响应代码表示服务器拒绝冲泡咖啡，因为它永远是一个茶壶。${'规范与浏览器兼容性说明。'.repeat(150)}`;
     expect(detectNavFailure(summary).detected).toBe(true);
+    expect(detectNavFailure(summary, { url, text: mdn }).detected).toBe(false);
+    // An http(s) URL alone is no receipt: a timed-out goto keeps the URL.
+    expect(detectNavFailure('页面加载超时，无法访问该网址', { url }).detected).toBe(true);
+    expect(detectNavFailure(summary, { url }).detected).toBe(true);
+    // A short error page (5xx / timeout) that says it is still a failure.
     expect(
-      detectNavFailure(
-        summary,
-        'https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Reference/Status/418',
-      ).detected,
-    ).toBe(false);
-    expect(detectNavFailure('无法连接到该站点', 'chrome-error://chromewebdata/').detected).toBe(
-      true,
-    );
+      detectNavFailure('无法连接到该站点', { url, text: 'Error 522 无法连接到该站点' }).detected,
+    ).toBe(true);
+    // Real content that does not itself say the failure: the answer's failure stands.
+    expect(
+      detectNavFailure('无法连接到该站点', { url, text: '规范与浏览器兼容性说明。'.repeat(200) })
+        .detected,
+    ).toBe(true);
+    expect(
+      detectNavFailure('无法连接到该站点', { url: 'chrome-error://chromewebdata/', text: mdn })
+        .detected,
+    ).toBe(true);
   });
   it('c03: one page read gets the 300 s cap; multi-step work does not', () => {
     expect(
@@ -364,22 +397,36 @@ describe('2 · read-only search is not a write; real writes still pause', () => 
   const page = (body: string) => `<!doctype html><meta charset="utf-8"><body>${body}</body>`;
   beforeAll(async () => {
     server = createServer((req, res) => {
+      const searchBox = (post: string) =>
+        page(
+          `<form role="search" action="/s"><input name="q" aria-label="Search" oninput="${post}"></form>`,
+        );
       const html =
         req.url === '/search'
-          ? // BestBuy: a sensor POST with a random path, fired by the search box's input listener.
-            page(
-              `<form role="search" action="/s"><input name="q" aria-label="Search" oninput="fetch('/lByGV9hoI/F/uHglT4qg/sensor',{method:'POST',body:'x'})"></form>`,
+          ? // BestBuy: Akamai's sensor POST — opaque path, sensor_data body — from the input listener.
+            searchBox(
+              `fetch('/lByGV9hoI/F/uHglT4qg/X1YQ',{method:'POST',body:JSON.stringify({sensor_data:'2;0;1'})})`,
             )
-          : req.url === '/comment'
-            ? // Typing into a comment box that posts by XHR: still a write.
-              page(
-                `<textarea aria-label="写评论" oninput="fetch('/x/7/post',{method:'POST',body:'x'})"></textarea>`,
+          : req.url === '/suggest'
+            ? // Taobao: the mtop suggestion read.
+              searchBox(
+                `fetch('/h5/mtop.relationrecommend.wirelessrecommend.recommend/2.0/',{method:'POST',body:'data=1'})`,
               )
-            : req.url === '/favorite'
-              ? page(
-                  `<button onclick="fetch('/api/favorite',{method:'POST',body:'x'})">收藏</button>`,
-                )
-              : page('ok');
+            : req.url === '/opaque'
+              ? // An opaque POST from the search box is not proof of a read.
+                searchBox(`fetch('/lByGV9hoI/F/uHglT4qg/X1YQ',{method:'POST',body:'x'})`)
+              : req.url === '/recent'
+                ? searchBox(`fetch('/api/recent-searches',{method:'POST',body:'q=1'})`)
+                : req.url === '/comment'
+                  ? // Typing into a comment box that posts by XHR: still a write.
+                    page(
+                      `<textarea aria-label="写评论" oninput="fetch('/x/7/post',{method:'POST',body:'x'})"></textarea>`,
+                    )
+                  : req.url === '/favorite'
+                    ? page(
+                        `<button onclick="fetch('/api/favorite',{method:'POST',body:'x'})">收藏</button>`,
+                      )
+                    : page('ok');
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(html);
     });
@@ -421,6 +468,18 @@ describe('2 · read-only search is not a write; real writes still pause', () => 
     const r = await act('/search', /(?:searchbox|textbox) "Search" \[ref=(e\d+)\]/, 'type');
     expect(r.interruption).toBeUndefined();
   }, 30000);
+  it('Taobao: a suggestion read while typing into the search box does not pause', async () => {
+    const r = await act('/suggest', /(?:searchbox|textbox) "Search" \[ref=(e\d+)\]/, 'type');
+    expect(r.interruption).toBeUndefined();
+  }, 30000);
+  it.each(['/opaque', '/recent'])(
+    'a search-box POST that is not positively a read still pauses: %s',
+    async (path) => {
+      const r = await act(path, /(?:searchbox|textbox) "Search" \[ref=(e\d+)\]/, 'type');
+      expect(r.interruption?.reason).toBe('unexpected_effect');
+    },
+    30000,
+  );
   it('typing into a comment box that posts still pauses', async () => {
     const r = await act('/comment', /textbox "写评论" \[ref=(e\d+)\]/, 'type');
     expect(r.interruption?.reason).toBe('unexpected_effect');

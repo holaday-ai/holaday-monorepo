@@ -7463,7 +7463,10 @@ export const tasksRouter = router({
                       // as one bullet are not flipped (≤400 char gate).
                       if (outcome.status === 'completed' && outcome.summary) {
                         // FIX-30 (BENCH-1 r04): a page that loaded is not a failed navigation.
-                        const navSignal = detectNavFailure(outcome.summary, finalState.finalUrl);
+                        const navSignal = detectNavFailure(outcome.summary, {
+                          url: finalState.finalUrl,
+                          text: finalState.finalPageText,
+                        });
                         if (navSignal.detected) {
                           ctx.logger.info(
                             {

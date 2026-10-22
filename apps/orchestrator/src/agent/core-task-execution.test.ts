@@ -346,6 +346,28 @@ afterEach(() => {
 });
 
 describe('transactional core execution with real runner and review', () => {
+  // FIX-30 review: the always-present source-trust review is not read evidence.
+  it.each([
+    [[], 'failed'],
+    [
+      [{ title: '杭州市', url: 'https://zh.wikipedia.org/wiki/杭州市', provenance: 'web_search' }],
+      'completed',
+    ],
+  ] as const)('「根据维基百科」 with sources %j settles %s', async (sources, status) => {
+    const f = fixture();
+    const claimed = `根据维基百科的杭州市词条，杭州常住人口为 1270 万人。${'该数字为 2025 年统计口径，按常住人口计。'.repeat(8)}`;
+    const stream = f.responses.stream.bind(f.responses);
+    f.responses.stream = async (request) => ({
+      ...(await stream(request)),
+      text: claimed,
+      sources: [...sources],
+    });
+    f.input.blocks = [{ type: 'text', text: '杭州人口多少' }];
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('committed');
+    expect(f.writes.at(-1)?.status).toBe(status);
+  });
+
   it.each(['normal', 'auto', 'expert'] as const)(
     'freezes full legacy rules and enforces semantic review in %s mode',
     async (expertMode) => {
