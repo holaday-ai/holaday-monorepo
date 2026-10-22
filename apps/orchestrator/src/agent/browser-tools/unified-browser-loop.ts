@@ -1246,7 +1246,10 @@ export async function runUnifiedBrowserLoop(
           // Fields are part of the answer: show the ones the summary leaves out.
           const listed = fieldLines(args.fields, summary);
           const answer = [summary, listed, note].filter(Boolean).join('\n\n');
-          if (short || dateMissing || declaredPartial) {
+          // FIX-31 (core-10 / xhs-read): an answer that itself opens with 「部分完成」 is
+          // delivered as 部分完成 whatever finish status came with it.
+          const saysPartial = /^\s*(?:部分完成|partially completed)/i.test(summary);
+          if (short || dateMissing || declaredPartial || saysPartial) {
             const lead = short
               ? `部分完成：只找到 ${found}/${wantedCount} 条。`
               : dateMissing

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { matchExpertWorkflow } from '../execution/expert-workflow-registry.js';
 import { explainExecutionMode } from './intent-classifier.js';
+import { answerNotObtained } from './scrape-runner.js';
 
 /**
  * FIX-31 (Deploy-31 rollback) — routing pieces that are not in the A-share,
@@ -31,5 +32,17 @@ describe('ct-create: writing for a platform is writing, not reading it', () => {
     expect(
       matchExpertWorkflow({ intent: '帮我想 5 个小红书爆款选题，品类是护肤' } as never)?.workflowId,
     ).toBe('content-topic');
+  });
+});
+
+describe('v06: 「在抓取的数据中未显示」 is not obtained (retried in the browser)', () => {
+  it.each([
+    '根据 QQ音乐热歌榜（2026-10-22 更新）的数据，第1名的歌手是 **A2O LITE / A2O**，时长 03:28，但歌曲名称在抓取的数据中未显示。',
+    '抓取的内容里没有显示具体价格。',
+  ])('%s', (answer) => {
+    expect(answerNotObtained(answer)).toBe(true);
+  });
+  it('a full answer is not', () => {
+    expect(answerNotObtained('QQ音乐热歌榜第一名是《NEON》，演唱者 A2O LITE / A2O。')).toBe(false);
   });
 });

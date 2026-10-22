@@ -223,6 +223,27 @@ describe('a "未播放" answer is checked against the receipt and pings', () => 
     expect(seen).not.toContain('不能写「未播放」');
     expect(outcome).toMatchObject({ status: 'completed' });
   });
+  // FIX-31 (local core-10 / xhs-read): finish(status=completed) whose answer opens with
+  // 「部分完成」 is delivered as 部分完成, not completed.
+  it('an answer opening with 「部分完成」 is partial whatever finish status came with it', async () => {
+    const { outcome } = await run(
+      [
+        '部分完成：标题「Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)」，频道 Rick Astley；点赞数页面被拦截，未能读取。',
+      ],
+      paused,
+    );
+    expect(outcome).toMatchObject({ status: 'completed' });
+    expect((outcome as { partial?: unknown }).partial).toBeDefined();
+  });
+  it('a full answer is not partial', async () => {
+    const { outcome } = await run(
+      [
+        '标题「Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)」，频道 Rick Astley。',
+      ],
+      paused,
+    );
+    expect((outcome as { partial?: unknown }).partial).toBeUndefined();
+  });
   it('no receipt at all: "未播放" cannot be delivered as completed', async () => {
     const { outcome } = await run([deploy26.answer, deploy26.answer], null);
     expect(outcome.status).toBe('failed');

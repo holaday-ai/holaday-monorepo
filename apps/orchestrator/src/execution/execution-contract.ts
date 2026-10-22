@@ -75,6 +75,12 @@ export interface OutputRequirementEcommerce {
   minItems: number;
   /** Required price ordering, or null when the user did not specify. */
   sortOrder: 'asc' | 'desc' | null;
+  /**
+   * FIX-31 (Deploy-31 b-p02): the user asked for each product's link. Without that ask a
+   * row needs only name and price — demanding links made the model invent them
+   * (「https://www.amazon.com/.s-asin%20a:has(h2)」). Absent = true (older contracts).
+   */
+  requireLinks?: boolean;
 }
 
 export interface OutputRequirementComparison {
@@ -429,6 +435,7 @@ function inferEcommerceRequirement(text: string): OutputRequirement | null {
     kind: 'ecommerce',
     minItems: Number.isFinite(minItems) && minItems > 0 ? minItems : 5,
     sortOrder: sortAsc ? 'asc' : sortDesc ? 'desc' : null,
+    ...(/链接|网址|地址|\b(?:links?|urls?)\b/i.test(text) ? {} : { requireLinks: false }),
   };
 }
 
@@ -525,6 +532,8 @@ export function browserOutputGuidance(contract: ExecutionContract | undefined): 
   const requirement = contract?.outputRequirement;
   if (requirement?.kind === 'list_sources') return listSourcesGuidance(requirement);
   if (requirement?.kind === 'ecommerce') {
+    if (requirement.requireLinks === false)
+      return `逐条列出至少 ${requirement.minItems} 个商品，每条写出名称和价格（照页面原样）；用户没要链接，不需要写链接，拿不到时写明“未获取到”，不要编造。`;
     return [
       `逐条列出至少 ${requirement.minItems} 个商品，每条写出名称、价格和该商品自己的详情页链接（例如 item.jd.com/数字.html）。`,
       '不能用搜索结果页、活动页或列表页链接代替商品链接，也不能多条共用一个链接；拿不到时写明“未获取到”，不要编造。',
@@ -616,12 +625,19 @@ function criteriaForRequirement(req: OutputRequirement): SuccessCriterion[] {
           description: `结构化结果至少 ${req.minItems} 条`,
           data: { min: req.minItems },
         },
-        {
-          id: newCriterionId(),
-          type: 'ecommerce_rows',
-          description: `每行商品必须同时包含名称、价格、链接（至少 ${req.minItems} 条，尽量每行独立商品链接）`,
-          data: { minItems: req.minItems, minUniqueUrls: req.minItems },
-        },
+        req.requireLinks === false
+          ? {
+              id: newCriterionId(),
+              type: 'ecommerce_rows',
+              description: `每行商品必须包含名称、价格（至少 ${req.minItems} 条）`,
+              data: { minItems: req.minItems, minUniqueUrls: 0, requireLinks: false },
+            }
+          : {
+              id: newCriterionId(),
+              type: 'ecommerce_rows',
+              description: `每行商品必须同时包含名称、价格、链接（至少 ${req.minItems} 条，尽量每行独立商品链接）`,
+              data: { minItems: req.minItems, minUniqueUrls: req.minItems },
+            },
       ];
       if (req.sortOrder) {
         criteria.push({
