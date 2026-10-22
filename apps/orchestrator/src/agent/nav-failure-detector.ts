@@ -140,8 +140,14 @@ const STRONG_PATTERNS: PatternMatch[] = [
  * failure message that mirrors what the sidebar shows for explicit
  * give_up rows.
  */
-export function detectNavFailure(summary: string | undefined | null): NavFailureSignal {
+export function detectNavFailure(
+  summary: string | undefined | null,
+  /** FIX-30 (BENCH-1 r04): the page the run ended on; a loaded http(s) page is no nav failure. */
+  finalUrl?: string | null,
+): NavFailureSignal {
   if (!summary) return { detected: false };
+  // MDN's 418 page itself says 「服务器拒绝…」; Chrome leaves a failed load on chrome-error://.
+  if (finalUrl && /^https?:\/\//i.test(finalUrl)) return { detected: false };
   const trimmed = summary.trim();
   if (trimmed.length === 0) return { detected: false };
   // Conservative gate — only treat the summary as a nav-failure

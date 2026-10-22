@@ -256,7 +256,12 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     },
   };
   running.set(opts.taskId, controller);
-  let activeRemaining = opts.timeoutMs;
+  // FIX-30 (BENCH-1 c03: Bilibili ran 636 s): reading one page gets 300 s at most;
+  // past that the run fails as a timeout, said as such.
+  const budgetMs = readsOnePage(opts.intent)
+    ? Math.min(opts.timeoutMs ?? READ_ONE_PAGE_TIMEOUT_MS, READ_ONE_PAGE_TIMEOUT_MS)
+    : opts.timeoutMs;
+  let activeRemaining = budgetMs;
   let activeSince = Date.now();
   let timeout = activeRemaining ? setTimeout(() => controller.abort(), activeRemaining) : undefined;
   const suspendTimeout = () => {
@@ -738,7 +743,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         };
       case 'cancelled': {
         const timedOut =
-          controller.signal.aborted && Boolean(opts.timeoutMs) && !(await opts.isTaskCancelled?.());
+          controller.signal.aborted && Boolean(budgetMs) && !(await opts.isTaskCancelled?.());
         // Out of time during the remediation turn: deliver the held answer for
         // verification (it explains what is missing) instead of a bare timeout.
         if (timedOut && outcome.heldAnswer) {
@@ -822,4 +827,14 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     running.delete(opts.taskId);
     parked.delete(opts.taskId);
   }
+}
+
+const READ_ONE_PAGE_TIMEOUT_MS = 300_000;
+/** A read of one page: no form, file, search, scroll, tab or multi-item work. */
+export function readsOnePage(intent: string): boolean {
+  return (
+    !/填|表单|勾选|下载|上传|搜索|搜一下|搜|滚动|新标签|标签页|分别|每个|逐个|对比|比较|前\s*\d+|翻页|登录|注册|预订|下单|购买|加购|\bfill\b|\bdownload\b|\bupload\b|\bsearch\b|\bscroll\b|\btabs?\b|\bcompare\b|\btop\s*\d+/i.test(
+      intent,
+    ) && /https?:\/\/|www\.|打开|读|看|告诉我|是谁|是什么|多少|\bopen\b|\bread\b|\bwhat\b/i.test(intent)
+  );
 }

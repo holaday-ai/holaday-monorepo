@@ -72,8 +72,10 @@ export type BrowserTrace = Pick<
 /** A prohibition or an admission of non-completion is not a claim of execution. */
 function positiveActionText(text: string): string {
   return text
+    // FIX-30 (BENCH-1 d04): 「下载链接给我」 names a link, not a download to do.
+    .replace(/下载(?:链接|地址|页面?|入口|按钮)|download\s+(?:link|url|page|button)s?/gi, ' ')
     .replace(
-      /(?:不要|不用|不需要|无需|不必|禁止|没有|并未|尚未|未曾|未|不)(?:成功|实际)?\s*(?:下载|上传|切换|切回|返回|新建|创建|打开|滚动|读取|截图|截屏|填写|填表|填入)[^，,。；;.!?\n]*/g,
+      /(?:不要|不用|不需要|无需|不必|禁止|没有|并未|尚未|未曾|未|不)(?:成功|实际|真的?|真正)?\s*(?:下载|上传|切换|切回|返回|新建|创建|打开|滚动|读取|截图|截屏|填写|填表|填入)[^，,。；;.!?\n]*/g,
       ' ',
     )
     .replace(

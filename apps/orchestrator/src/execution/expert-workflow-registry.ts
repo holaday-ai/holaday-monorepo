@@ -146,10 +146,21 @@ function matchesContentTopic(opts: MatchOpts): boolean {
   // BOTH are explicitly asked). This function therefore doesn't need
   // an exclusion clause — the order in WORKFLOWS handles it.
   const lower = opts.intent.toLowerCase();
+  // FIX-30 (Deploy-29 fc-xhs / fc-douyin): 「打开 https://www.xiaohongshu.com/… 读这篇
+  // 笔记的标题」 reads a page — the 标题 is the page's, and the platform name may only
+  // be in the URL. A read of a given page is never a content-planning request.
+  if (READS_A_PAGE_RE.test(opts.intent) && !CREATES_CONTENT_RE.test(opts.intent)) return false;
   const hasTask = CONTENT_TASK_TERMS.some((t) => lower.includes(t.toLowerCase()));
   const hasPlatform = CONTENT_PLATFORM_TERMS.some((t) => lower.includes(t.toLowerCase()));
   return hasTask && hasPlatform;
 }
+
+/** A URL to read, or 打开/访问/读 a page. */
+const READS_A_PAGE_RE =
+  /https?:\/\/|www\.|(?:打开|访问|读取?|看下|看一下|查看)(?:一下)?.{0,40}(?:页面|网页|笔记|视频|链接|词条)|\b(?:open|read|visit)\b/i;
+/** Asking for content to be made: 写/生成/起/想/策划/选题/文案 … */
+const CREATES_CONTENT_RE =
+  /帮我写|写(?:一|个|几|篇|段|条)|生成|起(?:个|几个)?标题|想(?:几个|一些)?(?:选题|标题)|策划|创作|选题(?:方向|规划|清单)?|文案|脚本|\bwrite\b|\bgenerate\b|\bdraft\b|\bbrainstorm\b/i;
 
 function matchesDouyinReview(opts: MatchOpts): boolean {
   // Keyword match on intent — three buckets, all required:

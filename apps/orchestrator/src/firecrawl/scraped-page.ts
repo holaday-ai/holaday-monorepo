@@ -75,14 +75,18 @@ function noticeTitle(title: string): RegExpExecArray | null {
  * with such wording. A long article that mentions 验证码 is not.
  */
 export function scrapedWall(markdown: string, title?: string): string | null {
-  const titleHit = title
-    ? (CHALLENGE_RE.exec(title) ?? WALL_RE.exec(title) ?? noticeTitle(title))
-    : null;
-  if (titleHit) return titleHit[0];
   const text = plainText(compactMarkdown(markdown)).replace(/\s+/g, ' ').trim();
   const challenge = CHALLENGE_RE.exec(text.slice(0, 1500));
   if (challenge) return challenge[0];
   const hit = WALL_RE.exec(text);
+  const titleHit = title
+    ? (CHALLENGE_RE.exec(title) ?? WALL_RE.exec(title) ?? noticeTitle(title))
+    : null;
+  // FIX-30 (DEPLOY-29 review #2): a title alone is a wall only on a page that
+  // has little else — 「Captcha - Wikipedia」「两步验证」「Login - Wikipedia」 are articles.
+  // Repeated boilerplate (a footer printed over and over) is not "else".
+  const distinct = [...new Set(text.split(/(?<=[.!?。！？])\s*/))].join(' ');
+  if (titleHit && (distinct.length < 600 || hit)) return titleHit[0];
   return hit && text.length < 600 ? hit[0] : null;
 }
 

@@ -473,7 +473,14 @@ describe('core settlement database boundary', () => {
     const update = queries.find((q) => q.sql.startsWith('update'));
     if (!update) throw new Error('missing settlement update');
     expect(JSON.stringify(queries)).not.toContain('SYNTHETIC_REJECTED_CANDIDATE');
-    expect(update.params).toContain(JSON.stringify({ tickCount: 1, reason: '质量校验未通过' }));
+    // FIX-30: the fixed reason may name what was found (fixed copy, never the detail).
+    expect(
+      update.params.some(
+        (param) =>
+          typeof param === 'string' &&
+          /^\{"tickCount":1,"reason":"质量校验未通过(?:：[^"]+)?"\}$/.test(param),
+      ),
+    ).toBe(true);
     // Base is the new allowed payload, never JSON_SET(oldResult, ...) retaining an old summary.
     expect(update.sql).toContain('`result` = JSON_SET(CAST(? AS JSON),');
   });
