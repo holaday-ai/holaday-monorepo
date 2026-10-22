@@ -200,15 +200,21 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
   const actionPath = rawFormAction.replace(/^(?:[a-z]+:)?\/\/[^/]+/i, '');
   const fieldSearch =
     String(el.getAttribute('type') || '').toLowerCase() === 'search' ||
-    el.getAttribute('role') === 'searchbox';
+    el.getAttribute('role') === 'searchbox' ||
+    // Known site rule: IKEA's header search is a bare input, no form.
+    (/(?:^|\s)s-input(?:\s|$)/.test(el.getAttribute('class') || '') &&
+      /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname));
   const formSearch =
     !!form &&
     (form.getAttribute('role') === 'search' ||
       /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|search[\w.-]*)(?:[/?#]|$)/i.test(actionPath) ||
       /[?&](?:q|query|wd|kw|keyword|k)=/i.test(rawFormAction) ||
       String(form.getAttribute('method') || '').toLowerCase() === 'get' ||
-      // Known site rule: Bilibili's header search has no action and no button.
-      (form.id === 'nav-searchform' && /(?:^|\.)bilibili\.com$/i.test(location.hostname)));
+      // Known site rules (DOM checked 2026-10-22): Bilibili's header search and
+      // Gaode's search panel have no action and no button.
+      (form.id === 'nav-searchform' && /(?:^|\.)bilibili\.com$/i.test(location.hostname)) ||
+      (/^SearchPanel_searchForm/.test(form.getAttribute('class') || '') &&
+        /(?:^|\.)amap\.com$/i.test(location.hostname)));
   const method = (form?.getAttribute('method') || 'get').toLowerCase();
   return {
     hasForm: Boolean(form),

@@ -234,6 +234,41 @@ describe('implicit form submission (Enter)', () => {
     60_000,
   );
 
+  it.each([
+    [
+      'Gaode',
+      `<form class="SearchPanel_searchForm__9IQNm" ${counter}><input type="text" class="SearchPanel_searchInput__GcqoT" aria-label="地点" placeholder="搜索地点、公交、地铁"></form>`,
+      'https://www.amap.com/',
+      /textbox "地点"/,
+    ],
+    [
+      'IKEA',
+      `<input class="s-input" aria-label="search" placeholder="">`,
+      'https://www.ikea.cn/cn/zh/',
+      /textbox "search"/,
+    ],
+  ])(
+    'lets %s search submit on its own site (known site rule)',
+    async (_site, html, url, field) => {
+      const { park, decision } = await submitCase(html, field, url);
+      expect(park).not.toHaveBeenCalled();
+      expect(decision).toEqual({ kind: 'proceed' });
+    },
+    60_000,
+  );
+
+  it('the same IKEA-style input on another site still asks', async () => {
+    const { park } = await submitCase(
+      `<input class="s-input" aria-label="search" placeholder="">`,
+      /textbox "search"/,
+      'https://chat.example.com/',
+    );
+    expect(park).toHaveBeenCalledWith(
+      expect.stringContaining('无法确认回车会提交什么'),
+      'browser_action',
+    );
+  }, 60_000);
+
   it('still parks a "search"-named form that posts a payment', async () => {
     const { park } = await submitCase(
       `<form id="searchform" action="/payment" ${counter}><input class="nav-search-input" aria-label="金额"></form>`,
