@@ -5,6 +5,7 @@ import {
   saveBrowserProfile,
 } from '../../browser-profiles/profile-store.js';
 import { browserCapabilities } from '../../config/browser-capabilities.js';
+import { logger } from '../../config/logger.js';
 import { reviewListAnswer } from '../../execution/answer-verifier.js';
 import { browserOutputGuidance } from '../../execution/execution-contract.js';
 import { getContract } from '../../execution/execution-pipeline.js';
@@ -427,8 +428,38 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           kind: 'skip',
           message: '用户已交还控制权；从当前页面重新 snapshot，不重放旧动作。',
         };
-      if (!control.canAgentAct())
-        return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
+      if (!control.canAgentAct()) {
+        // FIX-29 (Deploy-29 fc-jd): a viewer connecting mid-run queued a resize; the
+        // run then stopped as 「已取消」 on JD's login page, with no handover. A
+        // control closed by a failure (not by the user) is said. It cannot be
+        // handed to the user (review() refuses a control closed with an error,
+        // PR #291 review): a wall in front of the page is named, with a rerun,
+        // which pauses at the wall with a working control.
+        const state = control.snapshot();
+        logger.warn(
+          { taskId: opts.taskId, phase: state.phase, error: state.error, url: page.url() },
+          'supercar: browser control unavailable at an action boundary',
+        );
+        // The user's cancel comes first, also when an input was cut off by it (review 4).
+        if (
+          !state.error ||
+          controller.signal.aborted ||
+          (await Promise.resolve(opts.isTaskCancelled?.()).catch(() => false))
+        )
+          return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
+        const blocker = await tools.blocker().catch(() => null);
+        const walled = blocker && !('disposition' in blocker && blocker.disposition === 'continue');
+        return {
+          kind: 'stop',
+          outcome: {
+            status: 'failed',
+            reason: walled
+              ? `${blocker.message.replace(/；?当前任务尚未完成。?$/, '')}。但云端浏览器的画面同步中断，这次无法交给你接管；请重新执行任务，遇到这个页面时会暂停交给你处理。`
+              : '云端浏览器的画面同步中断，任务没能继续执行；已打开的页面仍保留，请重新执行。',
+            steps: 0,
+          },
+        };
+      }
     }
     if (phase === 'before' && tools.observation) {
       try {
