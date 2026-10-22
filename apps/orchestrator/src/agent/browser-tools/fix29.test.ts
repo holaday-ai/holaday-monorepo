@@ -7,7 +7,7 @@ import type { RunSupercarOptions } from '../supercar/agent-loop.js';
 import { BrowserControl } from '../supercar/browser-control.js';
 import { unperformedActions, withoutUnperformed } from './action-claims.js';
 import { assessCompletionFacts, observedEvidence } from './completion-fields.js';
-import { assessEngagementClaims, engagementClaims } from './engagement-counts.js';
+import { assessEngagementClaims, engagementClaims, sameCount } from './engagement-counts.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
@@ -150,6 +150,27 @@ describe("an answer's engagement number is that counter's", () => {
     expect(why).toContain('「20」');
     expect(why).toContain('标注的是分享数');
   });
+  it('万/亿/k/w counts compare by value, at the page precision (review 2)', () => {
+    for (const [answer, page] of [
+      ['12000', '1.2万'],
+      ['12345', '1.2万'],
+      ['1.2万', '12000'],
+      ['3.4亿', '340000000'],
+      ['1500', '1.5k'],
+      ['23000', '2.3w'],
+      ['4740', '4740'],
+    ])
+      expect(sameCount(answer!, page!), `${answer} ~ ${page}`).toBe(true);
+    for (const [answer, page] of [
+      ['13000', '1.2万'],
+      ['97', '20'],
+      ['1.3万', '12000'],
+    ])
+      expect(sameCount(answer!, page!), `${answer} !~ ${page}`).toBe(false);
+    const favourites = '- generic [ref=e9] [互动=收藏]: "1.2万"';
+    expect(assessEngagementClaims('收藏数：12000', [favourites])).toEqual([]);
+    expect(assessEngagementClaims('收藏数：15000', [favourites])).toHaveLength(1);
+  });
   it('the right numbers pass', () => {
     expect(assessEngagementClaims('点赞 20，评论 2，收藏 10，分享 97', [marked])).toEqual([]);
   });
@@ -255,6 +276,16 @@ describe('a search or another source the run never made', () => {
     expect(unperformedActions(r4, douyin)).toEqual([expect.stringContaining('没有做过任何搜索')]);
     expect(withoutUnperformed(r4, douyin)).not.toMatch(/检索/);
     expect(withoutUnperformed(r4, douyin)).toContain('需要用户登录后');
+  });
+  it('only the claimed clause of a comma-joined failure text goes (review 3)', () => {
+    const line =
+      '页面在未登录状态下只显示导航栏，提示需要登录才能查看，尝试通过搜索引擎检索该视频 ID 也无结果，需要用户登录后才能读取。';
+    expect(withoutUnperformed(line, douyin)).toBe(
+      '页面在未登录状态下只显示导航栏，提示需要登录才能查看，需要用户登录后才能读取。',
+    );
+    // r4: the true steps around the claimed search stay.
+    expect(withoutUnperformed(r4, douyin)).toContain('尝试通过 extract 提取结构化数据、截图确认');
+    expect(withoutUnperformed('又通过搜索引擎检索了一次。', douyin)).toBe('');
   });
   it('a run that did search, or opened a search page, may say so', () => {
     expect(unperformedActions(r4, { ...douyin, searched: true })).toEqual([]);
@@ -436,6 +467,37 @@ describe('local f29a jd: a login wall reached between browser actions', () => {
     expect(outcome).toMatchObject({ status: 'awaiting_user', reason: 'login' });
     expect(searches).toEqual(['100142621606']);
   });
+  it('an unreadable page (still loading) is not handed over (review D1)', async () => {
+    let loading = false;
+    const { adapter } = scriptedLoop([
+      { name: 'navigate', input: { url: 'https://item.jd.com/1.html' } },
+      { name: 'snapshot', input: {} },
+      { name: 'web_search', input: { query: '100142621606' } },
+      { name: 'finish', input: { status: 'failed', summary: '没有读到价格' } },
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '打开 https://item.jd.com/1.html 读商品标题和页面显示的价格',
+      adapter,
+      maxSteps: 10,
+      webSearch: async () => {
+        loading = true;
+        return [];
+      },
+      captchaHandoff: async () => true,
+      probeBlocker: async () =>
+        loading
+          ? { reason: 'page_unreadable', message: '无法确认当前页面状态，请重新读取后继续。' }
+          : null,
+      execute: (async (action: { tool: string }) =>
+        action.tool === 'navigate'
+          ? { ok: true, text: '已打开', url: 'https://item.jd.com/1.html' }
+          : {
+              ok: true,
+              text: JSON.stringify({ tree: '- heading "商品详情" [level=1] [ref=e1]' }),
+            }) as never,
+    } as never);
+    expect(outcome.status).not.toBe('awaiting_user');
+  });
   it('"多次搜索" without a search is a claimed search', () => {
     expect(
       unperformedActions('多次搜索“100142621606”也无结果。', {
@@ -517,7 +579,7 @@ describe('core-07: the return names a tab only listed by list_tabs (no "undefine
 });
 
 describe('Deploy-29 fc-jd: a run whose browser control is lost on a login page', () => {
-  async function scenario(failViewport: boolean, target: string) {
+  async function scenario(failViewport: boolean, target: string, cancelAtTurn2 = false) {
     const page = await browser.newPage();
     // As on JD: the item page opens, then sends the anonymous visitor to the login page.
     await page.route('https://item.jd.com/**', (route) =>
@@ -550,6 +612,7 @@ describe('Deploy-29 fc-jd: a run whose browser control is lost on a login page',
         routingV2: false,
       },
       timeoutMs: 8000,
+      isTaskCancelled: async () => cancelAtTurn2 && turn >= 2,
       messagesAdapter: {
         metadata: { provider: 'anthropic', model: 'fixture' },
         async create() {
@@ -601,6 +664,10 @@ describe('Deploy-29 fc-jd: a run whose browser control is lost on a login page',
     const { outcome } = await scenario(true, 'https://plain.example/item');
     expect(outcome).toMatchObject({ status: 'failed' });
     expect(outcome.status === 'failed' && outcome.reason).toContain('画面同步中断');
+  }, 20000);
+  it("the user's cancel comes first: cancelled, not failed (review 4)", async () => {
+    const { outcome } = await scenario(true, 'https://item.jd.com/100142621606.html', true);
+    expect(outcome.status).toBe('cancelled');
   }, 20000);
   it('a viewport that applies does not stop the run', async () => {
     const { outcome } = await scenario(false, 'https://item.jd.com/100142621606.html');

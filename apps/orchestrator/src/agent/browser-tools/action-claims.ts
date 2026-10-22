@@ -196,11 +196,25 @@ export function unperformedActions(answer: string, run: RunSources): string[] {
   return out;
 }
 
-/** The answer without the sentences that `unperformedActions` flagged. */
+/**
+ * The answer without the clauses that `unperformedActions` flagged. A failure
+ * text is often one comma-joined line (「页面显示登录墙，搜索引擎检索也无结果，需要
+ * 登录」): only the flagged clause goes, the true ones stay (coordinator review 3).
+ */
 export function withoutUnperformed(answer: string, run: RunSources): string {
   return answer
     .split(/(?<=[。；;\n])/)
-    .filter((sentence) => !unperformedActions(sentence, run).length)
+    .map((sentence) => {
+      if (!unperformedActions(sentence, run).length) return sentence;
+      const end = sentence.match(/[。；;\n]+$/)?.[0] ?? '';
+      const kept = sentence
+        .slice(0, sentence.length - end.length)
+        .split(/(?<=[，,、])/)
+        .filter((clause) => !unperformedActions(clause, run).length)
+        .join('')
+        .replace(/[，,、\s]+$/, '');
+      return kept ? `${kept}${end}` : '';
+    })
     .join('')
     .trim();
 }

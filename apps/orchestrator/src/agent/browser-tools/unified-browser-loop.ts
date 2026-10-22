@@ -570,7 +570,9 @@ export async function runUnifiedBrowserLoop(
       // FIX-29 (local f29a jd): JD sent the item page on to passport.jd.com after the
       // last browser action; the model then only searched (no browser action, so no
       // post-action probe) and the login wall seen here each turn was never handed over.
-      if (wall && wall.reason !== 'captcha')
+      // Only a login or permission wall: "page_unreadable" (a page still loading behind a
+      // search) is not a wall (coordinator review D1).
+      if (wall && (wall.reason === 'login' || wall.reason === 'permission'))
         return { status: 'awaiting_user', ...wall, steps: step };
       if (wall?.reason === 'captcha') {
         const handed = await handCaptcha(wall.message);

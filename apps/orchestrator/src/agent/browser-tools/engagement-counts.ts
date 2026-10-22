@@ -51,6 +51,32 @@ export function normalizeCount(value: string): string {
     .toLowerCase();
 }
 
+const UNIT: Record<string, number> = { 万: 1e4, 亿: 1e8, 千: 1e3, k: 1e3, m: 1e6 };
+
+/**
+ * Whether an answer's count is the page's: 「12000」 is the page's 「1.2万」, also
+ * unrounded (「12345」); a page count without a unit is exact (coordinator review 2).
+ */
+export function sameCount(answer: string, page: string): boolean {
+  const parse = (raw: string) => {
+    const m = normalizeCount(raw).match(/^(\d+(?:\.\d+)?)(万|亿|千|k|m)?$/);
+    return m
+      ? {
+          n: Number(m[1]),
+          unit: m[2] ? UNIT[m[2]]! : 1,
+          decimals: m[1]!.split('.')[1]?.length ?? 0,
+        }
+      : null;
+  };
+  const a = parse(answer);
+  const p = parse(page);
+  if (!a || !p) return normalizeCount(answer) === normalizeCount(page);
+  const value = a.n * a.unit;
+  if (p.unit === 1) return value === p.n;
+  // The answer's value at the page's unit, rounded to the page's own precision.
+  return Math.abs(value / p.unit - p.n) < 10 ** -p.decimals / 2 + 1e-9;
+}
+
 /**
  * In-page: the kind of counter an element showing a bare number belongs to.
  * First its own markup and that of its nearest ancestors (climbing stops at an
@@ -234,10 +260,10 @@ export function assessEngagementClaims(answer: string, pageTexts: readonly strin
   const out: string[] = [];
   for (const claim of claims) {
     const own = marks.get(claim.kind);
-    if (own?.has(claim.value) || worded.get(claim.kind)?.has(claim.value)) continue;
-    const other = [...marks].find(
-      ([kind, values]) => kind !== claim.kind && values.has(claim.value),
-    )?.[0];
+    const hit = (values?: Set<string>) =>
+      !!values && [...values].some((v) => sameCount(claim.value, v));
+    if (hit(own) || hit(worded.get(claim.kind))) continue;
+    const other = [...marks].find(([kind, values]) => kind !== claim.kind && hit(values))?.[0];
     if (own?.size) {
       out.push(
         `答案的${claim.kind}数「${claim.value}」与页面不符：页面标注为${claim.kind}的数字是「${[...own].join('、')}」${other ? `，「${claim.value}」标注的是${other}数` : ''}`,
@@ -246,7 +272,7 @@ export function assessEngagementClaims(answer: string, pageTexts: readonly strin
       out.push(
         `答案的${claim.kind}数「${claim.value}」在页面上标注的是${other}数，不是${claim.kind}数`,
       );
-    } else if (bare.has(claim.value)) {
+    } else if (hit(bare)) {
       out.push(
         `答案的${claim.kind}数「${claim.value}」在页面上只是图标旁的数字，没有标签能确认它是${claim.kind}数；请用 snapshot 查看带 [互动=…] 标注的数字，读不到标签就如实写「无法确认${claim.kind}数」，不要按图标顺序猜`,
       );

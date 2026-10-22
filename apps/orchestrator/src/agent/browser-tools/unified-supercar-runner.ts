@@ -440,7 +440,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           { taskId: opts.taskId, phase: state.phase, error: state.error, url: page.url() },
           'supercar: browser control unavailable at an action boundary',
         );
-        if (!state.error) return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
+        // The user's cancel comes first, also when an input was cut off by it (review 4).
+        if (
+          !state.error ||
+          controller.signal.aborted ||
+          (await Promise.resolve(opts.isTaskCancelled?.()).catch(() => false))
+        )
+          return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
         const blocker = await tools.blocker().catch(() => null);
         const walled = blocker && !('disposition' in blocker && blocker.disposition === 'continue');
         return {
