@@ -157,7 +157,7 @@ function matchesContentTopic(opts: MatchOpts): boolean {
 
 /** A URL to read, or 打开/访问/读 a page. */
 const READS_A_PAGE_RE =
-  /https?:\/\/|www\.|(?:打开|访问|读取?|看下|看一下|查看)(?:一下)?.{0,40}(?:页面|网页|笔记|视频|链接|词条)|\b(?:open|read|visit)\b/i;
+  /https?:\/\/|www\.|(?:打开|访问|读取?|看下|看一下|查看)(?:一下)?.{0,40}(?:页面|网页|笔记|视频|链接|词条)|(?:上|里|内)?\s*搜(?:索|一下|一搜)?\s*\S.{0,30}(?:第[一二三1-3]|前\s*\d|是谁|多少|叫什么|标题和作者)|\b(?:open|read|visit)\b/i;
 /** Asking for content to be made: 写/生成/起/想/策划/选题/文案 … */
 const CREATES_CONTENT_RE =
   /帮我写|写(?:一|个|几|篇|段|条)|生成|起(?:个|几个)?标题|想(?:几个|一些)?(?:选题|标题)|策划|创作|选题(?:方向|规划|清单)?|文案|脚本|\bwrite\b|\bgenerate\b|\bdraft\b|\bbrainstorm\b/i;

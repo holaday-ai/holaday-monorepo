@@ -733,7 +733,18 @@ function pickChecklistMinWordCount(inputs: ContractInputs): number {
     // FIRECRAWL-1: reading named fields off one page ("读标题和价格") is a
     // short answer by nature; a search or a long brief still needs a summary.
     const onePage = /https?:\/\/|www\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,24}\//i.test(inputs.intent);
-    return onePage && inputs.intent.length < 160 && inputs.hasAttachments !== true ? 30 : 100;
+    // FIX-30 (BENCH-1 c09 「微博热搜榜第一是啥」): a short question for one value —
+    // now routed to scrape without a URL — is answered in a line too.
+    const oneValue =
+      inputs.intent.length < 60 &&
+      /第一|第1|头条|多少|几|是啥|是什么|是谁|哪(?:一|个|张|天|年)?|\bwhat(?:'s| is)\b|\bhow (?:many|much)\b|\bwho\b|\bwhen\b/i.test(
+        inputs.intent,
+      );
+    return (onePage && inputs.intent.length < 160) || oneValue
+      ? inputs.hasAttachments !== true
+        ? 30
+        : 100
+      : 100;
   }
   // Plain Q&A — arithmetic / greeting / short knowledge — can answer in
   // a few chars ("2" / "你好！"). The 10-char floor wrongly flags those

@@ -26,17 +26,82 @@ export function namedTargets(intent: string): string[] {
   return [...new Set(out.map((t) => t.trim()).filter((t) => t.length >= 3))];
 }
 
-/** A target is covered by its own words, or by its last word's stem (alerts → alert). */
-function covered(answer: string, target: string): boolean {
-  const lower = answer.toLowerCase();
+/** A target named by its own words, or by its last word's stem (alerts → alert). */
+function mentions(text: string, target: string): boolean {
+  const lower = text.toLowerCase();
   const t = target.toLowerCase();
   if (lower.includes(t)) return true;
   const last = t.split(/\s+/).at(-1)!.replace(/s$/, '');
   return last.length >= 4 && lower.includes(last);
 }
 
-export function uncoveredTargets(intent: string, answer: string): string[] {
-  return namedTargets(intent).filter((target) => !covered(answer, target));
+/** 「iframe 部分未完成」「没能打开 iframe 页」: the part is said to be not done. */
+function saidNotDone(answer: string, target: string): boolean {
+  const lower = answer.toLowerCase();
+  const at = lower.indexOf(target.toLowerCase().split(/\s+/)[0]!);
+  if (at < 0) return false;
+  // 「该页面本身不包含 iframe」: said to be absent, not claimed as checked.
+  if (
+    /(?:不包含|未包含|不含|并无|并没有|没有)\s*(?:任何)?\s*$/.test(
+      lower.slice(Math.max(0, at - 8), at),
+    )
+  )
+    return true;
+  const around = lower.slice(Math.max(0, at - 24), at + target.length + 24);
+  return /未完成|没有完成|没完成|未能|没能|无法完成|无法打开|无法读取|做不到|跳过|没有做|未做|not (?:done|completed|opened)|could not|couldn't|skipped/.test(
+    around,
+  );
+}
+
+const QUOTE_RE = /["“「『]([^"”」』\n]{4,120})["”」』]/g;
+
+/**
+ * The answer quotes, in a sentence about the target, text found on a read page —
+ * an iframe's own content is read through its frame, where the word 「iframe」
+ * itself is not in the text.
+ */
+function quotedFromPage(answer: string, target: string, pageText: string): boolean {
+  return answer
+    .split(/[。；;\n]/)
+    .filter((sentence) => mentions(sentence, target))
+    .some((sentence) =>
+      [...sentence.matchAll(QUOTE_RE)].some((m) =>
+        pageText.includes(m[1]!.trim().replace(/\s+/g, ' ').toLowerCase()),
+      ),
+    );
+}
+
+export type TargetGap = { target: string; kind: 'missing' | 'unread' };
+
+/**
+ * Each named target is in the answer — and either in a page the run read (its
+ * text or address) or said to be not done. core-10 (FIX-30 f30c) wrote 「iframe 与
+ * JavaScript alerts … 均已验证通过」 having opened only the alerts page.
+ */
+export function uncoveredTargets(
+  intent: string,
+  answer: string,
+  pages?: readonly { text: string; sourceURL?: string }[],
+): TargetGap[] {
+  const gaps: TargetGap[] = [];
+  // With next to no recorded page text, absence from it proves nothing.
+  const read = pages?.some((page) => page.text.trim().length >= 40) ? pages : undefined;
+  const pageText = (read ?? [])
+    .map((page) => page.text)
+    .join('\n')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+  for (const target of namedTargets(intent)) {
+    if (!mentions(answer, target)) gaps.push({ target, kind: 'missing' });
+    else if (
+      read &&
+      !saidNotDone(answer, target) &&
+      !read.some((page) => mentions(`${page.text} ${page.sourceURL ?? ''}`, target)) &&
+      !quotedFromPage(answer, target, pageText)
+    )
+      gaps.push({ target, kind: 'unread' });
+  }
+  return gaps;
 }
 
 const RECENT: Array<[RegExp, number]> = [

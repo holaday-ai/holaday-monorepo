@@ -718,10 +718,11 @@ export function assessCompletionFacts(input: {
     unverified.push(label);
   }
   // FIX-30: every named target answered (core-10), and recent means recent (n03).
-  const missing = uncoveredTargets(intent, input.summary);
-  if (missing.length)
+  for (const gap of uncoveredTargets(intent, input.summary, input.pages))
     contradictions.push(
-      `任务要求的${missing.map((t) => `「${t}」`).join('、')}在答案里没有出现：请完成并写出这一部分，做不到就如实说明，不要只交另一部分`,
+      gap.kind === 'missing'
+        ? `任务要求的「${gap.target}」在答案里没有出现：请完成并写出这一部分，做不到就如实说明，不要只交另一部分`
+        : `答案提到了「${gap.target}」，但本次读过的页面里都没有它（没有打开过这一部分）：请打开并读取它再写，做不到就如实写「${gap.target} 部分未完成」，不要说已验证`,
     );
   const stale = staleForRecentIntent(
     intent,

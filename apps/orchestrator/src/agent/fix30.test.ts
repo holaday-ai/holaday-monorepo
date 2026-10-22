@@ -137,10 +137,50 @@ describe('1 · recent means recent; 3 · every named target answered', () => {
     expect(namedTargets(intent)).toEqual(['iframe', 'JavaScript alerts']);
     const alertsOnly =
       '已在 javascript_alerts 页面点击三个按钮：弹出 alert「I am a JS Alert」，页面结果显示 "You entered: null"';
-    expect(uncoveredTargets(intent, alertsOnly)).toEqual(['iframe']);
+    expect(uncoveredTargets(intent, alertsOnly)).toEqual([{ target: 'iframe', kind: 'missing' }]);
+    // f30c: 「iframe … 均已验证通过」 having read only the alerts page.
+    const claimed = `${alertsOnly}。任务要求的 iframe 与 JavaScript alerts 均已验证通过。`;
+    const alertsPage = [
+      {
+        text: 'JavaScript Alerts\nHere are some examples of different JavaScript alerts\nClick for JS Alert\nResult:\nYou entered: null',
+        sourceURL: 'https://the-internet.herokuapp.com/javascript_alerts',
+      },
+    ];
+    expect(uncoveredTargets(intent, claimed, alertsPage)).toEqual([
+      { target: 'iframe', kind: 'unread' },
+    ]);
+    // Read, or honestly not done: covered.
     expect(
-      uncoveredTargets(intent, `${alertsOnly}；iframe 内文字为 Your content goes here.`),
+      uncoveredTargets(intent, claimed, [
+        ...alertsPage,
+        {
+          text: 'An iFrame containing the TinyMCE WYSIWYG Editor',
+          sourceURL: 'https://the-internet.herokuapp.com/iframe',
+        },
+      ]),
     ).toEqual([]);
+    expect(uncoveredTargets(intent, `${alertsOnly}；iframe 部分本次未完成。`, alertsPage)).toEqual(
+      [],
+    );
+    // Said to be absent, or its frame content quoted from a read frame: not a false claim.
+    expect(
+      uncoveredTargets(intent, `${alertsOnly}。该页面本身不包含 iframe。`, alertsPage),
+    ).toEqual([]);
+    const framePage = { text: 'paragraph "Your content goes here." TinyMCE is in read-only mode' };
+    expect(
+      uncoveredTargets(intent, `${alertsOnly}。进入 iframe 后读到 "Your content goes here."`, [
+        ...alertsPage,
+        framePage,
+      ]),
+    ).toEqual([]);
+    expect(
+      uncoveredTargets(intent, `${alertsOnly}。进入 iframe 后读到 "Welcome to the Internet"`, [
+        ...alertsPage,
+        framePage,
+      ]),
+    ).toEqual([{ target: 'iframe', kind: 'unread' }]);
+    // No page text worth the name recorded: nothing to hold the answer to.
+    expect(uncoveredTargets(intent, claimed, [{ text: '(page text not recorded)' }])).toEqual([]);
     const page = observedEvidence('x', 'I am a JS Alert You entered: null', 'https://x/');
     expect(
       assessCompletionFacts({ summary: alertsOnly, pages: [page], intent }).contradictions,
@@ -159,6 +199,8 @@ describe('7 · content-topic takes content planning, not page reads (Deploy-29)'
   it.each([
     '打开 https://www.xiaohongshu.com/explore/6929ba55000000001e023ef8 读这篇笔记的标题、作者和点赞数',
     '打开 https://www.douyin.com/video/7507106798919601427 读视频标题、作者和点赞数（不播放）',
+    // c05: a site search that reads the first result.
+    '小红书上搜 杭州西湖攻略 第一条笔记标题和作者',
   ])('a page read is not content-topic: %s', (intent) => {
     expect(matchExpertWorkflow({ intent } as never)).toBeNull();
   });
@@ -166,6 +208,7 @@ describe('7 · content-topic takes content planning, not page reads (Deploy-29)'
     '帮我想 5 个小红书爆款选题，品类是护肤',
     '抖音 母婴品类 生成 10 个选题',
     '小红书标题怎么起更吸引人',
+    '小红书上搜一下护肤爆款，帮我想 5 个选题',
   ])('content planning still is: %s', (intent) => {
     expect(matchExpertWorkflow({ intent } as never)?.workflowId).toBe('content-topic');
   });
@@ -198,6 +241,8 @@ describe('3 · interactive tasks go to the browser; scrape "not obtained" is ret
     '页面没有显示外婆家的评分，抓取到的内容里没有点评数据。',
     '缺少浏览器环境，无法在此填写表单。以下是表单 HTML：<form>…</form>',
     '- 评分：页面未显示\n- 人均：页面未显示\n- 地址：杭州市西湖区',
+    // c04: the JD link landed on the login page.
+    '根据提供的抓取内容，这个链接跳转到了京东的**登录页面**，没有显示任何商品信息。',
   ])('a scrape answer that did not get it is retried: %s', (answer) => {
     expect(answerNotObtained(answer)).toBe(true);
   });
