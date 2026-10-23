@@ -198,6 +198,15 @@ export function publishCoreExecutionEvent(userId: string, event: CoreExecutionEv
     });
     return;
   }
+  if (event.type === 'rerouted') {
+    broadcastToUser(userId, {
+      ...identity,
+      type: 'server.task.rerouted',
+      to: event.to,
+      message: event.reason,
+    });
+    return;
+  }
   const op = event.settlement;
   if (op.status === 'awaiting_user') {
     broadcastToUser(userId, {

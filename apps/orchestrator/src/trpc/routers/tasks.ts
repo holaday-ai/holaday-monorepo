@@ -3960,6 +3960,26 @@ export const tasksRouter = router({
                   // Batch 05 wired the image/video lanes back to real executors.
                   mediaLaneAvailable: true,
                 }),
+                // FIX-34: a generate round with no answer (tool syntax / an opener) is the
+                // same task wanting a page operated — the browser lane takes it once, uncharged.
+                retryInBrowser: async (taskId: string, reason: string) => {
+                  try {
+                    await tasksRouter
+                      .createCaller({
+                        ...ctx,
+                        scrapeBrowserRetry: { taskId, reason, from: 'generate' },
+                      })
+                      .create(scrapeBrowserRetryInput(input));
+                    ctx.logger.info({ taskId, reason }, 'generate: handed over to browser retry');
+                    return true;
+                  } catch (err) {
+                    ctx.logger.warn(
+                      { taskId, err: err instanceof Error ? err.message : String(err) },
+                      'generate: browser retry could not start',
+                    );
+                    return false;
+                  }
+                },
               });
             }
 
@@ -5579,6 +5599,7 @@ export const tasksRouter = router({
                   status: willQueueDispatch ? 'queued' : 'executing',
                   sourceContext: browserSourceContext,
                   reason: scrapeBrowserRetry.reason,
+                  ...(scrapeBrowserRetry.from ? { from: scrapeBrowserRetry.from } : {}),
                 });
                 if (!adopted.persisted)
                   throw new TRPCError({ code: 'CONFLICT', message: 'BROWSER_RETRY_TASK_CHANGED' });

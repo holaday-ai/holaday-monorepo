@@ -145,8 +145,19 @@ const TOPIC_RE = new RegExp(
   'i',
 );
 
+/**
+ * FIX-34 (FIX-33 review): brands that are also plain English words (「search target customers」
+ * 「search threads about…」) are a site only with 「on/at」 or their domain.
+ */
+const PLAIN_WORD_BRANDS = new Set(['target', 'threads', 'booking']);
+const EN_BRAND_ALT = BRANDS.filter((b) => /^[a-z ]+$/.test(b) && !PLAIN_WORD_BRANDS.has(b))
+  .sort((a, b) => b.length - a.length)
+  .map(brandPattern)
+  .join('|');
+const WORD_BRAND_ALT = [...PLAIN_WORD_BRANDS].join('|');
+
 const SEARCH_RE = new RegExp(
-  String.raw`(?:在|去|上|到|用|打开|进入|访问)\s*${NAMED_SITE}${WHERE}(?:搜一下|搜一搜|搜索|搜|查找|查一下|查询|查|找一下|找找|找)|\bsearch\s+(?:on\s+)?(?:${BRAND_ALT})\b|\b(?:on|at)\s+(?:${BRAND_ALT})\b[^.\n]{0,40}\bsearch\b|\bsearch\b[^.\n]{1,60}\b(?:on|at)\s+(?:${BRAND_ALT})\b`,
+  String.raw`(?:在|去|上|到|用|打开|进入|访问)\s*${NAMED_SITE}${WHERE}(?:搜一下|搜一搜|搜索|搜|查找|查一下|查询|查|找一下|找找|找)|\bsearch\s+(?:on\s+)?(?:${EN_BRAND_ALT})\b|\bsearch\s+(?:on\s+(?:${WORD_BRAND_ALT})\b|(?:${WORD_BRAND_ALT})\.(?:com|net)\b)|\b(?:on|at)\s+(?:${BRAND_ALT})\b[^.\n]{0,40}\bsearch\b|\bsearch\b[^.\n]{1,60}\b(?:on|at)\s+(?:${BRAND_ALT})\b`,
   'i',
 );
 const VIEW_RE = new RegExp(

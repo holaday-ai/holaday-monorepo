@@ -941,6 +941,10 @@ const BROWSER_ONLY_ACTION_PATTERNS: readonly [RegExp, string][] = [
   ],
 ];
 
+/** FIX-34: 「我在小红书/抖音/微博上看到…，是真的吗」 — checking a claim seen on a platform. */
+const HEARSAY_CHECK_RE =
+  /(?:在|从)?\s*(?:抖音|小红书|微博|知乎|b\s*站|bilibili|快手|朋友圈|网上|微信|视频号|头条|贴吧|youtube|tiktok)\s*(?:上|里)?\s*(?:看到|刷到|看见|听说|读到)[^？?]{0,120}(?:是真的吗|是真的么|真的假的|真的吗|可信吗|靠谱吗|是不是真的|是谣言吗)/i;
+
 /** FIX-30 (BENCH-1 v01/c05): searching on a named site is the site's own search box. */
 const SITE_SEARCH_RE = new RegExp(
   `(?:${['小红书', '淘宝', '天猫', '京东', '拼多多', '抖音', 'bilibili', 'b站', '携程', '美团', '大众点评', '微博', '知乎', '豆瓣', 'github', 'youtube', 'amazon'].join('|')})(?:上|里|内|网站上)?\\s*(?:搜一下|搜一搜|搜索|搜|查找)|站内搜索`,
@@ -1335,6 +1339,11 @@ function decide(intent: string, ctx: { hasFileAttachment: boolean }): RouteDecis
   const browserOnly = matchBrowserOnlyAction(routingIntent);
   if (browserOnly) {
     return { mode: 'browser', source: 'kw:interaction', match: browserOnly };
+  }
+  // FIX-34 (FIX-33 review): 「我在抖音上看到…是真的吗」 asks whether a claim is true — not to
+  // read that site. It is answered, not scraped.
+  if (HEARSAY_CHECK_RE.test(routingIntent) && !URL_REGEX.test(routingIntent)) {
+    return { mode: 'generate', source: 'kw:hearsay-check' };
   }
   // FIRECRAWL-1 — reading one named page goes to Firecrawl first (the scrape
   // lane hands it to the browser when Firecrawl cannot read it).

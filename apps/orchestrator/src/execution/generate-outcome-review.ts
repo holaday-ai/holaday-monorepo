@@ -90,10 +90,9 @@ export async function reviewGenerateOutcome(
   const record = (entry: Omit<EvidenceEntry, 'id' | 'timestamp' | 'taskId'>) =>
     core ? registry.record(core.handle, entry) : recordEvidence(input.taskId, entry);
   let outcome = input.outcome;
-  if (
-    (outcome.status === 'completed' || (core && outcome.status === 'awaiting_user')) &&
-    outcome.summary
-  ) {
+  // FIX-34: a clarifying question (content-topic asks for missing inputs) is shown to
+  // the user too — on every lane it goes through the same tool-syntax filter.
+  if ((outcome.status === 'completed' || outcome.status === 'awaiting_user') && outcome.summary) {
     const summary = sanitizeFinalText(outcome.summary);
     if (summary !== outcome.summary) outcome = { ...outcome, summary };
   }

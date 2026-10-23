@@ -748,9 +748,18 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     return created;
   }
   const uncertainWriteMessage = '任务接收或创建状态未确认，请保留输入并刷新核对，不要重复提交。';
+  /** FIX-34: a core task now in browser mode was handed over; its identity is retired. */
+  function retireHandedOver(
+    taskId: string,
+    row: { executionMode?: unknown; executionId?: unknown; executionRevision?: unknown },
+  ): void {
+    if (row.executionMode === 'browser') executionOrder.handOver(taskId, row, false);
+  }
   function seedExecutionOrder(taskId: string): void {
     const task = get().tasks.find((t) => t.taskId === taskId);
-    if (task) executionOrder.seed(taskId, task, isTerminalStatus(task.status));
+    if (!task) return;
+    retireHandedOver(taskId, task);
+    executionOrder.seed(taskId, task, isTerminalStatus(task.status));
   }
   function coversPending(
     observed: ExecutionIdentity | undefined,
@@ -794,6 +803,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     const previous = new Map(prev.tasks.map((task) => [task.taskId, task]));
     const changed = new Set<string>();
     for (const row of rows) {
+      retireHandedOver(row.taskId, row);
       const identity = readExecutionIdentity(row);
       const old = previous.get(row.taskId);
       if (
@@ -831,6 +841,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       const rawDetail = await trpc.tasks.detail.query({ taskId });
       if (myToken !== hydrateToken || !isCurrentSession(generation)) return;
       const detail: Record<string, unknown> = isTaskListRecord(rawDetail) ? rawDetail : {};
+      retireHandedOver(taskId, { ...detail, executionMode: extractExecutionMode(detail.result) });
       const detailIdentity = readExecutionIdentity(detail);
       const detailOrder = executionOrder.accept(taskId, detail, {
         source: 'detail',
@@ -2033,6 +2044,29 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     },
 
     applyServerMessage(msg) {
+      if (msg.type === 'server.task.rerouted') {
+        // FIX-34: the core round produced no answer and handed this task to the browser
+        // lane. Its events carry no execution identity, so the round's identity stops
+        // ordering them; the unusable draft is dropped and the browser takes over.
+        seedExecutionOrder(msg.taskId);
+        const order = executionOrder.accept(msg.taskId, msg, { source: 'event' });
+        if (order === 'reconcile') void hydrateDetail(msg.taskId);
+        if (order === 'ignore' || order === 'reconcile') return;
+        executionOrder.handOver(msg.taskId, msg);
+        set((prev) => ({
+          ...clearCoreRoundRuntime(prev, new Set([msg.taskId])),
+          tasks: prev.tasks.map((task) =>
+            task.taskId === msg.taskId
+              ? { ...task, status: 'executing' as const, executionMode: 'browser' as const }
+              : task,
+          ),
+          subStatusByTask: {
+            ...prev.subStatusByTask,
+            [msg.taskId]: { subStatus: 'browsing' as const, since: Date.now() },
+          },
+        }));
+        return;
+      }
       if (
         'taskId' in msg &&
         [

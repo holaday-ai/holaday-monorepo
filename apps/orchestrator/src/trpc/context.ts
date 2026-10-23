@@ -128,5 +128,7 @@ export type Context = Awaited<ReturnType<ReturnType<typeof makeCreateContext>>> 
     reason: string;
     /** FIRECRAWL-1: what the scrape attempt spent before handing over. */
     firecrawl?: { calls: number; credits: number };
+    /** FIX-34: the lane handing over (default scrape); a core generate round says 'generate'. */
+    from?: 'scrape' | 'generate';
   };
 };

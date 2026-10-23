@@ -838,6 +838,8 @@ export class TaskRepository {
     status: 'executing' | 'queued';
     sourceContext: Record<string, unknown>;
     reason: string;
+    /** FIX-34: the lane handing over. */
+    from?: 'scrape' | 'generate';
   }): Promise<{ persisted: boolean }> {
     let persisted = false;
     await this.db.transaction(async (tx) => {
@@ -860,6 +862,11 @@ export class TaskRepository {
           status: params.status,
           result: { executionMode: 'browser' },
           sourceContext: params.sourceContext,
+          // FIX-34: a core generate round handing over leaves no core record behind — the
+          // browser lane's row is a legacy row, and the round's late writes go stale.
+          ...(params.from === 'generate'
+            ? { executionId: null, executionRevision: 0, coreRecordVersion: 0 }
+            : {}),
         })
         .where(and(eq(tasks.id, row.id), eq(tasks.status, 'executing')));
       if (extractMysqlAffectedRows(updated) !== 1) return;
@@ -868,7 +875,7 @@ export class TaskRepository {
         taskId: row.id,
         type: 'task.rerouted',
         actor: 'system',
-        payload: { from: 'scrape', to: 'browser', reason: params.reason },
+        payload: { from: params.from ?? 'scrape', to: 'browser', reason: params.reason },
       });
       persisted = true;
     });

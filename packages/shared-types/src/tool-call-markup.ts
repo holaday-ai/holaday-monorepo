@@ -49,11 +49,53 @@ function stripToolJson(text: string): string {
   return out + text.slice(from);
 }
 
-function stripPlain(text: string): string {
+/**
+ * FIX-34 (FIX-33 review): only a tool-call *structure* is removed. A tag named like a
+ * tool artifact (`tool_call`, `li_call`, `function_calls`, `computer_use`, any
+ * `ns:` tag), an `invoke name=…`, a tool JSON or a bare `browser_use` line is one; a lone
+ * `<function>` / `<parameter>` / `<arguments>` in prose (「用 <function> 包住函数名」) is a
+ * word, and stays unless such a structure is present in the same text.
+ */
+const STRUCTURE_RE =
+  /<\/?(?:[a-z][\w-]*:[a-z][\w-]*|(?:[a-z]+_)+[a-z]+)\b[^<>]*>|<invoke\s+name=|<(?:function|arguments?|parameters?|args)\b[^<>]*>\s*[a-z]+_(?:use|call)\b/i;
+
+function hasStructure(text: string): boolean {
+  return (
+    STRUCTURE_RE.test(text) ||
+    new RegExp(TOOL_JSON_START_RE.source).test(text) ||
+    new RegExp(TOOL_NAME_LINE_RE.source, 'im').test(text)
+  );
+}
+
+function stripPlain(text: string, structured = hasStructure(text)): string {
+  if (!structured) return text;
   return stripToolJson(text.replace(PAIRED_RE, '').replace(TAG_RE, '')).replace(
     TOOL_NAME_LINE_RE,
     '',
   );
+}
+
+/**
+ * FIX-34: the cloud browser's internal element refs (「Google Logo（ref=e23）」, 「标题
+ * ref=e255」) are page-snapshot handles, not something the user can read or use. `REFS`
+ * is one ref or a run of them (「ref=e12、e13、e23」).
+ */
+const REFS = String.raw`ref=e\d+(?:\s*[、,，/和及–~-]\s*(?:ref=)?e\d+)*\b`;
+const INTERNAL_REF_RES: Array<[RegExp, string]> = [
+  // 「（ref=e23）」「（ref=e12、e13）」: the whole parenthetical goes.
+  [new RegExp(String.raw`\s*[（(]\s*${REFS}\s*[)）]`, 'g'), ''],
+  [/\s*\[ref=e\d+\]/g, ''],
+  // 「（h2，ref=e36）」 → 「（h2）」; 「（ref=e77，frame …）」 → 「（frame …）」.
+  [new RegExp(String.raw`\s*[，,、；;]\s*${REFS}(?=\s*[)）])`, 'g'), ''],
+  [new RegExp(String.raw`(?<=[（(])\s*${REFS}\s*[，,、；;]\s*`, 'g'), ''],
+  // 「对应 snapshot 中的 ref=e12、e13。」 still names something: 「…中的相应元素。」
+  [new RegExp(String.raw`(?<=的)\s*${REFS}(?=\s*[。；;，,])`, 'g'), '相应元素'],
+  [new RegExp(String.raw`[ \t]?\b${REFS}`, 'g'), ''],
+];
+
+function stripRefs(text: string): string {
+  if (!text.includes('ref=e')) return text;
+  return INTERNAL_REF_RES.reduce((out, [re, to]) => out.replace(re, to), text);
 }
 
 /** True when the text carries tool-call syntax anywhere (code included). */
@@ -66,15 +108,16 @@ export function hasToolCallMarkup(text: string): boolean {
  * `code: true` also inside code (what is left to judge as an answer).
  */
 export function stripToolCallMarkup(text: string, opts: { code?: boolean } = {}): string {
-  if (opts.code) return tidy(stripPlain(text.replace(/```\w*/g, ' ')));
+  if (opts.code) return tidy(stripRefs(stripPlain(text.replace(/```\w*/g, ' '))));
   let out = '';
   let from = 0;
+  const structured = hasStructure(text.replace(CODE_RE, ' '));
   for (const match of text.matchAll(CODE_RE)) {
     const start = match.index ?? 0;
-    out += stripPlain(text.slice(from, start)) + match[0];
+    out += stripRefs(stripPlain(text.slice(from, start), structured)) + match[0];
     from = start + match[0].length;
   }
-  const stripped = out + stripPlain(text.slice(from));
+  const stripped = out + stripRefs(stripPlain(text.slice(from), structured));
   return stripped === text ? text : tidy(stripped);
 }
 

@@ -157,6 +157,30 @@ export async function browserPanelFitChecks(page, server, width, out) {
     assertWhole(await measure(page), `phone@390 from ${width}`);
     await page.screenshot({ path: path.join(out, `after-fix33-${width}-phone.png`), animations: 'disabled' });
     items.push({ item: 'browser-panel-fit', label: 'phone 390x844' });
+
+    // FIX-34: with viewport v2 the phone sheet asks for a mobile-width page (scale ≈ 1),
+    // not a 1280-wide desktop page shrunk to ~0.3.
+    await page.request.get(`${server.origin}/__ui_seed/viewport-v2?on=1`);
+    const beforePhone = (await requests(server)).length;
+    server.setFrame(edgeMarkedFrame(390, 760));
+    await page.goto(baseUrl);
+    if (!(await page.locator('canvas').count()) && (await sheetButton.count()))
+      await sheetButton.click();
+    await waitForFrame(page, 390, 760);
+    const phoneSent = (await requests(server))
+      .slice(beforePhone)
+      .filter((r) => r.input.type === 'viewport');
+    assert.ok(phoneSent.length > 0, 'phone v2: no viewport request');
+    for (const r of phoneSent)
+      assert.ok(
+        r.input.width >= 320 && r.input.width <= 600,
+        `phone v2: not a mobile viewport ${JSON.stringify(r.input)}`,
+      );
+    const phoneFit = await measure(page);
+    assertWhole(phoneFit, `phone v2@390 from ${width}`);
+    assert.ok(phoneFit.scale > 0.8, `phone v2: page shrunk to ${phoneFit.scale}`);
+    await page.screenshot({ path: path.join(out, `after-fix34-${width}-phone-v2.png`), animations: 'disabled' });
+    items.push({ item: 'browser-panel-fit', label: `phone v2 mobile viewport ${phoneSent.at(-1).input.width}` });
   } finally {
     server.setFrame(BROWSER_FRAME);
     await page.request.get(`${server.origin}/__ui_seed/viewport-v2?on=0`);

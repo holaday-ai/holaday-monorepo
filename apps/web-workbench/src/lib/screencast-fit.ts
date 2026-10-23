@@ -216,6 +216,15 @@ export function placeScreencastActual({
   };
 }
 
+/**
+ * FIX-34: a frame's device scale without v2 geometry — its width over the CSS viewport the
+ * panel asked for (default desktop 1280), in half steps (1, 1.5, 2).
+ */
+export function framePixelRatio(sourceWidth: number, cssWidth = 1280): number {
+  if (!isPositiveFinite(sourceWidth) || !isPositiveFinite(cssWidth)) return 1;
+  return Math.max(1, Math.round((sourceWidth / cssWidth) * 2) / 2);
+}
+
 export function mapClientPointToScreencast({
   clientX,
   clientY,

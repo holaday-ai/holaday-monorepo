@@ -8,6 +8,8 @@ const MIN_HEIGHT = 800;
 const MAX_WIDTH = 1440;
 const MAX_HEIGHT = 1200;
 const RESIZE_NOISE_PX = 6;
+/** The widest mobile viewport a phone sheet asks for. */
+const MOBILE_HOST_MAX = 600;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -58,9 +60,18 @@ export type BrowserViewportRenderMode = 'auto' | 'desktop' | 'panel';
 export function fitDesktopViewportForHost(input: {
   hostWidth: number;
   hostHeight: number;
+  /** The phone sheet (not a narrow desktop panel): the site's mobile layout. */
+  mobile?: boolean;
 }): BrowserViewportSize | null {
   const { hostWidth, hostHeight } = input;
   if (![hostWidth, hostHeight].every((v) => Number.isFinite(v) && v > 0)) return null;
+  // FIX-34 (FIX-33 review): on a phone the page gets its mobile layout at the sheet's own
+  // size (scale ≈ 1) instead of a desktop page shrunk to ~0.3.
+  if (input.mobile)
+    return {
+      width: clamp(Math.round(hostWidth), 320, MOBILE_HOST_MAX),
+      height: clamp(Math.round(hostHeight), 480, 2400),
+    };
   const width = clamp(Math.round(hostWidth), 1280, 1920);
   return { width, height: clamp(Math.round((width * hostHeight) / hostWidth), 600, 2400) };
 }

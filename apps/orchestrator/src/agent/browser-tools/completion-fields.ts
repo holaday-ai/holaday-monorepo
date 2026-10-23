@@ -150,6 +150,11 @@ export interface FactAssessment {
   /** Quotes the pages never said, with the closest text they did say (FIX-24). */
   misquoted?: Array<{ quote: string; nearest?: string }>;
   /**
+   * FIX-34 (Deploy-34 dy-2): a name the answer hedges (「推断作者为“X”」) that the page
+   * shows as a node of its own — to be written plainly. Never blocks completion.
+   */
+  hedgedNames?: Array<{ label: string; name: string }>;
+  /**
    * FIX-26: facts whose only problem is their source binding — bound to a tab
    * that was never read, or read on another page (named in `where`).
    */
@@ -529,6 +534,18 @@ function cutQuote(candidates: string[], values: string[]): string | undefined {
 const NOT_READ =
   /^(?:未读到|未读取到|未找到|没有读到|页面未(?:提供|显示|列出)|not (?:shown|found|read)|n\/a)[。.]?$/i;
 
+const NAME_FIELD = /作者|频道|博主|up\s*主|账号|店铺|author|channel|uploader/i;
+const HEDGE_RE =
+  /推断|推测|疑似|可能(?:是|为)|相关账号|未(?:显式|直接|明确)?(?:展示|显示|给出|标注)|not (?:explicitly )?shown|likely|appears to be/i;
+
+/** The names a hedged value puts forward: 「“小喵麻麻/喵妈”」 → 小喵麻麻, 喵妈. */
+function hedgedCandidates(value: string): string[] {
+  return [...value.matchAll(/[“"「『]([^”"」』\n]{1,40})[”"」』]/g)]
+    .flatMap((m) => (m[1] ?? '').split(/[/／、]/))
+    .map((name) => name.trim().replace(/^[@#]/, ''))
+    .filter((name) => name.length >= 2);
+}
+
 export function assessCompletionFacts(input: {
   summary: string;
   fields?: unknown;
@@ -563,6 +580,7 @@ export function assessCompletionFacts(input: {
   const unverified: string[] = [];
   const misquoted: Array<{ quote: string; nearest?: string }> = [];
   const binding: NonNullable<FactAssessment['binding']> = [];
+  const hedged: NonNullable<FactAssessment['hedgedNames']> = [];
   const seen = new Set<string>();
   const facts = [...explicitFacts(input.fields), ...answerFacts(input.summary, intent)].flatMap(
     (fact): Fact[] => {
@@ -592,6 +610,21 @@ export function assessCompletionFacts(input: {
     seen.add(key);
     // "未读到" declares a value absent: it claims nothing about the page.
     if (NOT_READ.test(fact.value.trim())) continue;
+    // FIX-34 (dy-2): a hedge about a name says what the page lacks — not a page quote.
+    // When the page does show one of its names as a node of its own (the author link),
+    // the name is written plainly instead.
+    if (NAME_FIELD.test(fact.name) && HEDGE_RE.test(fact.value)) {
+      // The answer's field stops at 「；」: the names it puts forward follow on its line.
+      const line =
+        unescapeLiteralBreaks(input.summary)
+          .split('\n')
+          .find((l) => l.includes(fact.value)) ?? fact.value;
+      const shown = hedgedCandidates(line).find((name) =>
+        pages.some((page) => page.values.some((v) => v.replace(/^@\s*/, '') === name)),
+      );
+      if (shown) hedged.push({ label: `${fact.name}「${fact.value.slice(0, 120)}」`, name: shown });
+      continue;
+    }
     // The quoted part of a labelled value; a quote's own inner quote is only a piece of it.
     const quoted = fact.quote ? undefined : quotedRuns(fact.value)[0]?.quote;
     const candidates = [fact.value, withoutNote(fact.value), quoted, stripEdgeQuotes(fact.value)]
@@ -811,6 +844,7 @@ export function assessCompletionFacts(input: {
     unverified: unverified.slice(0, 8),
     ...(misquoted.length && misquoted.length === contradictions.length ? { misquoted } : {}),
     ...(binding.length && binding.length === contradictions.length ? { binding } : {}),
+    ...(hedged.length ? { hedgedNames: hedged.slice(0, 4) } : {}),
   };
 }
 
