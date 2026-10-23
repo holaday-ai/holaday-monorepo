@@ -217,7 +217,7 @@ export async function runAshareQa(
     return { answer: assemblePlain(body), degraded: false, interpreted: false };
   }
 
-  const factContext = buildFactContext(data, match);
+  const factContext = buildFactContext(data, match, undefined, now);
   let interpretation = '';
   try {
     interpretation = (

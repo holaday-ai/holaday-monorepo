@@ -135,7 +135,10 @@ function liveQuote(
     const nowMin = beijingMinutes(now);
     const tradedUntil = nowMin >= 11 * 60 + 30 && nowMin < 13 * 60 ? 11 * 60 + 30 : nowMin;
     const [h = 0, m = 0] = time.slice(11, 16).split(':').map(Number);
-    if (tradedUntil - (h * 60 + m) > LIVE_QUOTE_MAX_LAG_MIN) return null;
+    // Not too old, and not ahead of the trading clock: a time-only snapshot taken before
+    // the open can still carry yesterday's 15:00 (Codex review on PR #296).
+    const quoteMin = h * 60 + m;
+    if (tradedUntil - quoteMin > LIVE_QUOTE_MAX_LAG_MIN || nowMin - quoteMin < -1) return null;
   }
   return { row, time };
 }
@@ -418,7 +421,12 @@ export async function buildIndexCard(
 }
 
 /** 一只个股的紧凑上下文块（盘面必留；公告只留前 annCap 条标题）。 */
-function contextBlock(p: PerStock, dt: AkEnvelope<DragonTigerRow>, annCap: number): string {
+function contextBlock(
+  p: PerStock,
+  dt: AkEnvelope<DragonTigerRow>,
+  annCap: number,
+  now: Date | undefined,
+): string {
   const b: string[] = [`【${stockLabel(p.stock)}】`];
   const last = p.kline.error ? undefined : p.kline.data[p.kline.data.length - 1];
   // FIX-33：收盘价带它的日期，解读层不会把昨日收盘说成「今天」。
@@ -427,10 +435,11 @@ function contextBlock(p: PerStock, dt: AkEnvelope<DragonTigerRow>, annCap: numbe
       ? `- 盘面：最近收盘（${String(pick(last, ['日期']) ?? '日期未提供').slice(0, 10)}） ${fmtNum(pick(last, ['收盘']))} 涨跌幅 ${fmtPct(pick(last, ['涨跌幅']))} 成交额 ${fmtYiYuan(pick(last, ['成交额']))}`
       : '- 盘面：当日行情数据暂不可用',
   );
-  const quote = p.quote?.error ? undefined : p.quote?.data[0];
-  if (quote && toNum(quote.最新价) !== null)
+  // Only the quote the card itself shows as live (same verdict), never a stale row.
+  const live = now ? liveQuote(p.quote, now) : null;
+  if (live)
     b.push(
-      `- 实时报价：最新价 ${fmtNum(quote.最新价)} 涨跌幅 ${fmtPct(quote.涨跌幅)}（行情时间 ${String(quote.行情时间 ?? '未提供')}）`,
+      `- 实时报价：最新价 ${fmtNum(live.row.最新价)} 涨跌幅 ${fmtPct(live.row.涨跌幅)}（行情时间 ${live.time}）`,
     );
   if (p.ann.error) b.push('- 公告：数据暂不可用');
   else {
@@ -482,11 +491,17 @@ function contextBlock(p: PerStock, dt: AkEnvelope<DragonTigerRow>, annCap: numbe
  * 策略：①盘面事实**永远保留**；公告**只留标题**（默认前 6 条）；超 maxChars 时
  * 把公告标题压到前 2 条重建；仍超则硬切片并注明。市场级北向附在末尾。
  */
-export function buildFactContext(data: FactData, match: AshareQaMatch, maxChars = 3500): string {
+export function buildFactContext(
+  data: FactData,
+  match: AshareQaMatch,
+  maxChars = 3500,
+  /** The answer's clock: a live quote enters the context only when the card shows it live. */
+  now?: Date,
+): string {
   const head = `日期：${dateHeader(match.dateIso)}`;
   const nbLine = northboundContextLine(data.northbound);
   const assemble = (annCap: number): string =>
-    [head, ...data.perStock.map((p) => contextBlock(p, data.dragonTiger, annCap)), nbLine]
+    [head, ...data.perStock.map((p) => contextBlock(p, data.dragonTiger, annCap, now)), nbLine]
       .filter(Boolean)
       .join('\n');
 

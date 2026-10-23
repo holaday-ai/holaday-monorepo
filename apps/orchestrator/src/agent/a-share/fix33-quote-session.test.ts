@@ -150,7 +150,7 @@ describe('FIX-33 #3 · an A-share price always says when it is from', () => {
     const data = await fetchFactData(client({ klineDate: '2026-10-22', quote: LIVE }), MATCH, {
       now: INTRADAY,
     });
-    const ctx = buildFactContext(data, MATCH);
+    const ctx = buildFactContext(data, MATCH, undefined, INTRADAY);
     expect(ctx).toContain('最近收盘（2026-10-22） 1,318.49');
     expect(ctx).toContain('实时报价：最新价 1,332.27');
   });
@@ -199,5 +199,31 @@ describe('FIX-33 #3 · an A-share price always says when it is from', () => {
       { 代码: '600519', 最新价: 1331, 涨跌幅: 1, 行情时间: '2026-10-23 14:12:00' },
     ]);
     expect(quoteStale(await card(at1412, INTRADAY))).toBe(false);
+  });
+
+  it('the interpretation context leaves out a quote the card does not show as live', async () => {
+    const at1130 = env([
+      { 代码: '600519', 最新价: 1330, 涨跌幅: 0.9, 行情时间: '2026-10-23 11:30:00' },
+    ]);
+    const data = await fetchFactData(client({ klineDate: '2026-10-22', quote: at1130 }), MATCH, {
+      now: INTRADAY,
+    });
+    const ctx = buildFactContext(data, MATCH, undefined, INTRADAY);
+    expect(ctx).not.toContain('实时报价');
+    expect(ctx).not.toContain('1,330');
+    expect(buildFactContext(data, MATCH)).not.toContain('实时报价');
+  });
+
+  it("a time-only snapshot ahead of the trading clock (yesterday's 15:00 at 9:35) is not live", async () => {
+    const early = at('2026-10-23T09:35:00');
+    const quote = env([{ 代码: '600519', 最新价: 1318.49, 涨跌幅: 0.67, 行情时间: '15:00:00' }], {
+      fetched_at: '2026-10-23T01:35:02Z',
+    });
+    const md = await buildAshareFactCard(
+      { client: client({ klineDate: '2026-10-22', quote }), now: early },
+      MATCH,
+    );
+    expect(md).toContain('以下为 10 月 22 日收盘价，非实时');
+    expect(quoteStale(md)).toBe(true);
   });
 });

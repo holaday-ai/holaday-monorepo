@@ -10,6 +10,7 @@ import {
   deliverableAnswer,
 } from './generate-answer-guard.js';
 import { explainExecutionMode } from './intent-classifier.js';
+import { namedSiteSearch } from './named-site-search.js';
 import { answerNotObtained, timeSensitiveIntent } from './scrape-runner.js';
 import { planSearchFallback } from './search-fallback/search-engine-fallback.js';
 import { sanitizeFinalText } from './text-sanitizer.js';
@@ -117,6 +118,10 @@ describe('FIX-33 #2 · a search on a named site goes to the site, never generate
     ['video + 教程', '在 YouTube 搜 python 教程'],
     ['english', 'search best buy for usb c cable'],
     ['english on-site', 'on Amazon, search for a usb c hub and tell me the first price'],
+    // Codex review: a topic word inside the search term is still a search.
+    ['search term with 算法', '在 BestBuy 搜算法导论'],
+    ['search term with 报告', '在京东搜一下数据分析报告模板'],
+    ['search term with 历史', '在 YouTube 搜中国历史纪录片'],
   ])('%s → browser', async (_id, intent) => {
     expect(await route(intent)).toBe('browser');
   });
@@ -135,6 +140,16 @@ describe('FIX-33 #2 · a search on a named site goes to the site, never generate
     '在亚马逊上搜东西怎么按销量排序',
   ])('topics about a site stay generate: %s', async (intent) => {
     expect(await route(intent)).toBe('generate');
+  });
+
+  it.each(['在淘宝搜索算法是什么', '在京东搜索的排名规则是怎样的', '在 BestBuy 怎么按价格排序'])(
+    'asking how a site searches is not a site search: %s',
+    (text) => {
+      expect(namedSiteSearch(text)).toBeNull();
+    },
+  );
+  it.each(['在 BestBuy 搜算法导论', '在 BestBuy 搜索算法导论'])('%s is a site search', (text) => {
+    expect(namedSiteSearch(text)).not.toBeNull();
   });
 
   const amazonSg =
