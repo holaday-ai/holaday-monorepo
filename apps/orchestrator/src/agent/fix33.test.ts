@@ -181,6 +181,16 @@ describe('FIX-33 #5 · an answer that says it did not get it is not completed', 
       'QQ音乐热歌榜（2026-10-23）第1名：\n\n- **歌手**：A2O LITE / A2O\n- **时长**：03:28\n- **歌曲名称**：页面未显示\n\n抓取到的热歌榜页面第1名位置只渲染出了歌手和时长，歌曲标题没有加载出来，所以无法确认具体是哪首歌。';
     expect(answerNotObtained(answer, '在 QQ 音乐看热歌榜第一名')).toBe(true);
     expect(answerNotObtained('第1名是《NEON》，歌手 A2O LITE / A2O。确认无误。', '')).toBe(false);
+    const bare =
+      'QQ音乐热歌榜（2026-10-23）第一名：\n\n- **歌手**：A2O LITE / A2O\n- **时长**：03:28\n- **歌曲名称**：页面未显示\n\n数据来源：[QQ音乐热歌榜](https://y.qq.com/n/ryqq/toplist/26)';
+    expect(answerNotObtained(bare, '在 QQ 音乐看热歌榜第一名')).toBe(true);
+    // A side field missing is not the answer missing.
+    expect(
+      answerNotObtained(
+        '- 收盘：3690.48 点\n- 涨跌幅：+0.89%\n- 成交额：页面未显示',
+        '上证指数现在多少点',
+      ),
+    ).toBe(false);
   });
   it('new-google: 「不执行浏览器操作…不是 Google 搜索的第一条」 is not obtained', () => {
     expect(answerNotObtained(google, '打开 google.com 搜索 Claude 并总结第一条')).toBe(true);

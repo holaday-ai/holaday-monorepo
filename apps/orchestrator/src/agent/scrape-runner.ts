@@ -580,6 +580,9 @@ const VALUE_MISSING_RE =
 const IDENTITY_UNKNOWN_RE =
   /无法(?:确认|确定|判断|得知)(?:具体)?(?:是)?哪(?:一)?(?:首|个|本|部|家|款|位|条|篇|只|支)|(?:标题|歌名|曲名|名称|名字)(?:没有|未能?|并未)(?:被)?(?:加载|显示|渲染|读取)出来|\b(?:can(?:no|')t|unable to) (?:tell|confirm|determine) which\b/i;
 
+/** The label of the field that names the thing asked for. */
+const NAME_LABEL_RE = /名称|歌名|曲名|标题|名字|书名|片名|\bname\b|\btitle\b/i;
+
 export function answerNotObtained(summary: string, intent = ''): boolean {
   if (NOT_OBTAINED_RE.test(summary.slice(0, 240))) return true;
   if (IDENTITY_UNKNOWN_RE.test(summary.slice(0, 600))) return true;
@@ -597,5 +600,14 @@ export function answerNotObtained(summary: string, intent = ''): boolean {
     .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)、])\s*/, '').trim())
     .filter((line) => /^[^：:]{1,24}[：:]/.test(line));
   const empty = fields.filter((line) => NOT_SHOWN_RE.test(line.replace(/^[^：:]{1,24}[：:]/, '')));
+  // FIX-33 (new-qq: 「歌手：A2O … 歌曲名称：页面未显示」 for 「热歌榜第一名」): when one thing
+  // is asked for, its name missing is the answer missing (a side field like 成交额 is not).
+  if (
+    intent.length > 0 &&
+    intent.length < 60 &&
+    ONE_VALUE_QUESTION_RE.test(intent) &&
+    empty.some((line) => NAME_LABEL_RE.test(line.replace(/[：:][\s\S]*$/, '')))
+  )
+    return true;
   return fields.length >= 2 && empty.length * 2 >= fields.length;
 }
