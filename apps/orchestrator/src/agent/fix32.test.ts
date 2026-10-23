@@ -165,6 +165,14 @@ describe('core-07 vp=0: opening links is not asking for links', () => {
 });
 
 describe('BENCH-1 r06: an English 「not in the fetched content」 is not obtained', () => {
+  it('the f32d answer (「抓取的内容里没有」) goes to the browser too', () => {
+    expect(
+      answerNotObtained(
+        '从 [rfc-editor.org](https://rfc-editor.org) 首页抓取的内容里没有 RFC 9110 的信息——页面只列出了最新的几篇 RFC。要拿到标题和发布日期，需要访问它的专属信息页，所以标题和发布日期我无法给出。',
+        "what's the title of RFC 9110 and when was it published? check rfc-editor.org",
+      ),
+    ).toBe(true);
+  });
   it('the f32b answer goes to the browser; a real answer does not', () => {
     expect(
       answerNotObtained(
