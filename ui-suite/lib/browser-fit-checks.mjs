@@ -114,7 +114,9 @@ export async function browserPanelFitChecks(page, server, width, out) {
     const fit = page.getByRole('button', { name: '适应面板', exact: true });
     const actual = page.getByRole('button', { name: '100% 原尺寸', exact: true });
     assert.equal(await fit.getAttribute('aria-pressed'), 'true', 'fit is the default');
-    await actual.click();
+    // Switching scale repaints a page-sized canvas; allow more than the suite's 2.5 s
+    // default under load (a parallel run timed out here, alone it passes).
+    await actual.click({ timeout: 10_000 });
     await page.waitForTimeout(200);
     const oneToOne = await measure(page);
     assert.ok(Math.abs(oneToOne.scale - 1) < 0.01, `100%: scale ${oneToOne.scale}`);
@@ -123,14 +125,14 @@ export async function browserPanelFitChecks(page, server, width, out) {
       path: path.join(out, `after-fix33-${width}-actual-size.png`),
       animations: 'disabled',
     });
-    await fit.click();
+    await fit.click({ timeout: 10_000 });
     await page.waitForTimeout(200);
     assertWhole(await measure(page), `fit restored@${width}`);
 
     // Takeover: a click on the scaled page lands on the same page pixel.
     const takeover = page.getByRole('button', { name: '接管浏览器', exact: true });
     if (await takeover.count()) {
-      await takeover.click();
+      await takeover.click({ timeout: 10_000 });
       await page.waitForTimeout(300);
       const m = await measure(page);
       const [left, top, right, bottom] = m.rect;
