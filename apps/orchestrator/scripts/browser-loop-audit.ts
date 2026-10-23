@@ -489,6 +489,8 @@ try {
         intent,
         executor: { getPage: async () => page },
         messagesAdapter: adapter,
+        // The named sites are served from the loopback fixture above.
+        unifiedLocalFixtures: !live,
         maxIterations: 45,
         timeoutMs: 100000,
         browserCapabilities: {

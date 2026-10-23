@@ -223,6 +223,11 @@ export interface UnifiedBrowserLoopInput {
    * page itself has (「价格：未获取到（仅显示 See options）」), or null.
    */
   partialNote?: (summary: string, pageText?: string) => string | null;
+  /**
+   * Offline audits only: named sites are served from a loopback fixture, so the site lock
+   * lets local test hosts through. Production never sets it (PR #295 review).
+   */
+  localFixtures?: boolean;
 }
 
 /** Remediation turn after the pre-delivery review found gaps in the answer. */
@@ -1479,7 +1484,8 @@ export async function runUnifiedBrowserLoop(
         action.tool === 'navigate' &&
         lockedDomains.length > 0 &&
         !onDomains(action.url, lockedDomains) &&
-        !seenOnReadPage(action.url)
+        !seenOnReadPage(action.url) &&
+        !(input.localFixtures && localTestHost(action.url))
       ) {
         results.push(
           toolResult(
@@ -1977,6 +1983,18 @@ export function siteLock(intent: string, namedHosts = intentHosts(intent)): stri
   const onward = /(?:并|再|然后|同时|另外|顺便)\s*(?:在|去|到|用|上|打开|查)/.exec(intent);
   if (onward && named(intent.slice(onward.index)).length === 0) return [];
   return [...new Set(named(intent))];
+}
+
+/**
+ * Deploy-33 (browser:loop-audit): with `localFixtures`, a loopback or local test host is
+ * the fixture standing in for the named site.
+ */
+function localTestHost(url: string | undefined): boolean {
+  const host = hostOf(url);
+  return (
+    !!host &&
+    (['localhost', '127.0.0.1', '[::1]'].includes(host) || /\.(?:localhost|test)$/.test(host))
+  );
 }
 
 function onDomains(url: string | undefined, domains: readonly string[]): boolean {

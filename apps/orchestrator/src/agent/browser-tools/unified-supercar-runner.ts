@@ -643,6 +643,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         ? { webSearchAfterWall: opts.unifiedWebSearchAfterWall }
         : {}),
       ...(opts.unifiedReadPage ? { readPage: opts.unifiedReadPage } : {}),
+      ...(opts.unifiedLocalFixtures ? { localFixtures: true } : {}),
       maxSteps: opts.maxIterations ?? 40,
       signal: controller.signal,
       async execute(action) {
