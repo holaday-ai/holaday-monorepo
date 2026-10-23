@@ -99,6 +99,12 @@ const clean = (value: string) =>
     .trim();
 
 /** Only successful content reads enter this store; listings and navigation receipts do not. */
+/** A currency amount as it appears on a page (S$8.90, SGD 11.46, ¥99, $14.99). */
+const PRICE_SHAPE_RE = /(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?/gi;
+
+/** Appended to a read whose snapshot was cut at its size budget. */
+export const SNAPSHOT_TRUNCATED = '[快照截断：以下内容未读到]';
+
 export function observedEvidence(text: string, decoded: string, url?: string): ObservedEvidence {
   let meta: Record<string, unknown> = {};
   try {
@@ -122,7 +128,9 @@ export function observedEvidence(text: string, decoded: string, url?: string): O
       )
     : [];
   return {
-    text: decoded,
+    // FIX-34 (Deploy-34 amazon-sg): a snapshot cut at its budget says so, so 「价格：未获取到」
+    // for the item it ends on is the page's truth, not a missed read.
+    text: meta.truncated === true ? `${decoded}\n${SNAPSHOT_TRUNCATED}` : decoded,
     links,
     ...(youtubeCards.length ? { youtubeCards } : {}),
     ...(typeof meta.tabId === 'string' ? { tabId: meta.tabId } : {}),
@@ -675,6 +683,14 @@ export function assessCompletionFacts(input: {
       contradictions.push(`${label} 没有成功读取的页面可以支持（页面未加载或未读取）`);
       continue;
     }
+    // FIX-34 (Deploy-34 amazon-sg): an item's name or price bound to a tab the run never
+    // read is still grounded when a read page shows it beside that same item's title.
+    if (
+      (fact.tabId || fact.sourceURL) &&
+      !eligible.length &&
+      candidates.some((v) => itemShownOnPage(input.summary, v, pages))
+    )
+      continue;
     if ((fact.tabId || fact.sourceURL) && !eligible.length) {
       contradictions.push(`${label} 所属页面（${sourceLabel(fact)}）未成功读取`);
       binding.push({ label, kind: 'unread', bound: sourceLabel(fact) });
@@ -723,11 +739,17 @@ export function assessCompletionFacts(input: {
       const labelled = eligible
         .map((page) => labelledValue(page.values.map(scrub), name, shape))
         .find((run) => run !== undefined);
+      // FIX-34 (Deploy-34 amazon-sg): on a page listing several prices, a price-shaped line
+      // (「kitchen bestsellers under s$30」) belongs to another item; only a single-price
+      // page (one product) can contradict a price that way.
+      const lines = eligible.flatMap((page) => page.lines.map(scrub));
+      const listing =
+        priceValue && new Set(lines.flatMap((line) => line.match(PRICE_SHAPE_RE) ?? [])).size > 1;
       const conflict =
         labelled ??
-        eligible
-          .flatMap((page) => page.lines.map(scrub))
-          .find((line) => /\d/.test(line) && skeleton(line).includes(shape));
+        (listing
+          ? undefined
+          : lines.find((line) => /\d/.test(line) && skeleton(line).includes(shape)));
       if (conflict) {
         contradictions.push(`${label} 与页面不符；页面为「${conflict.trim().slice(0, 120)}」`);
         continue;
@@ -849,4 +871,33 @@ export function nearestPassage(quote: string, pages: ObservedEvidence[]): string
   return best && best.score >= 0.7 && normalizeFact(best.text) !== normalizeFact(quote)
     ? best.text
     : undefined;
+}
+
+/**
+ * FIX-34: the answer's row holding `value` (as its name or its price), and a read page
+ * where that row's name is followed within 600 characters by its price.
+ */
+function itemShownOnPage(
+  summary: string,
+  value: string,
+  pages: ReadonlyArray<{ norm: string }>,
+): boolean {
+  const rows = summary
+    .split('\n')
+    .map((line) => normalizeFact(line))
+    .filter((line) => line.includes(value));
+  return rows.some((row) => {
+    const price = row.match(/(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?/i)?.[0];
+    const name = row
+      .replace(/^\s*(?:\d+[.)、]\s*)?(?:名称|商品名?|标题|name)?\s*[:：]?\s*/i, '')
+      .split(/[；;]|\s[—–]\s|(?:价格|售价|price)\s*[:：]/i)[0]
+      ?.trim()
+      .slice(0, 40);
+    if (!price || !name || name.length < 8) return false;
+    return pages.some((page) => {
+      for (let at = page.norm.indexOf(name); at >= 0; at = page.norm.indexOf(name, at + 1))
+        if (page.norm.slice(at, at + name.length + 600).includes(price)) return true;
+      return false;
+    });
+  });
 }

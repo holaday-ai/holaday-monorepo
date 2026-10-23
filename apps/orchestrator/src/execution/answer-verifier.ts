@@ -776,7 +776,7 @@ const DECLARED_NO_PRICE_RE =
 
 /** A state the page shows instead of a price (Amazon 「See options」, JD 「已下架」). */
 const NO_PRICE_STATE_RE =
-  /see (?:all buying )?options|no featured offers|currently unavailable|cannot be shipped|not available|unavailable|暂无报价|暂无价格|已下架|下架|无货|缺货|售罄|不可配送|无法配送/i;
+  /\[快照截断|see (?:all buying )?options|no featured offers|currently unavailable|cannot be shipped|not available|unavailable|暂无报价|暂无价格|已下架|下架|无货|缺货|售罄|不可配送|无法配送/i;
 
 /**
  * PR #294 review: the page itself must show the gap. The row's item name is on a page
