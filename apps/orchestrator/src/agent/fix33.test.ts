@@ -9,6 +9,7 @@ import {
 } from './generate-answer-guard.js';
 import { explainExecutionMode } from './intent-classifier.js';
 import { answerNotObtained, timeSensitiveIntent } from './scrape-runner.js';
+import { planSearchFallback } from './search-fallback/search-engine-fallback.js';
 import { sanitizeFinalText } from './text-sanitizer.js';
 
 /** Deploy-33 new-bestbuy, verbatim from the task record BOSS saw. */
@@ -187,5 +188,18 @@ describe('FIX-33 #5 · an answer that says it did not get it is not completed', 
     for (const intent of ['在 QQ 音乐看热歌榜第一名', '网易云飙升榜前三', '豆瓣电影排行榜'])
       expect(timeSensitiveIntent(intent)).toBe(true);
     expect(timeSensitiveIntent('RFC 9110 的标题是什么')).toBe(false);
+  });
+});
+
+describe('FIX-33 #5 · 「打开 google.com 搜索 X 并总结第一条」 searches for X', () => {
+  const wall = { url: 'https://www.google.com/sorry/index?continue=x', captcha: true };
+  it.each([
+    ['打开 google.com 搜索 Claude 并总结第一条', 'Claude'],
+    ['Google 搜索 合并PDF 工具并告诉我第一个结果', '合并PDF 工具'],
+    ['去 Google 搜索 openai sora 然后打开第一条', 'openai sora'],
+    ['search Claude and summarize the first result on google.com', 'Claude'],
+    ['Google 搜索 新加坡 天气 返回前5条', '新加坡 天气'],
+  ])('%s → %s', (intent, query) => {
+    expect(planSearchFallback(intent, wall)?.query).toBe(query);
   });
 });
