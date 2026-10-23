@@ -2,6 +2,7 @@ import { hasToolCallMarkup, stripToolCallMarkup } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import { browserCompletionVerdict } from '../execution/execution-pipeline.js';
 import { platformFailureReason } from '../quota/platform-failure-refunds.js';
+import { passiveTelemetryRequest } from './browser-tools/cloud-observation.js';
 import { CORE_QUALITY_FAILURE_COPY } from './core-task-settlement.js';
 import {
   TOOL_CALL_TEXT_ONLY,
@@ -239,5 +240,22 @@ describe('FIX-33 #5 · a browser answer short of the rows asked for is partial',
         originalText: answer,
       }).status,
     ).toBe('completed');
+  });
+});
+
+describe('FIX-33 · Amazon regional stores report search metrics, not writes', () => {
+  it.each([
+    'https://unagi.amazon.sg/1/events/com.amazon.eel.SearchAutocompleteUIServiceMetrics.nexus',
+    'https://unagi.amazon.co.jp/1/events/com.amazon.csm.csa.prod',
+    'https://unagi-eu.amazon.de/1/events/com.amazon.csm.csa.prod',
+  ])('%s is telemetry', (url) => {
+    expect(passiveTelemetryRequest(new URL(url), 'fetch')).toBe(true);
+  });
+  it.each([
+    'https://www.amazon.sg/cart/add-to-cart',
+    'https://unagi.amazon.evil.com/1/events/x',
+    'https://unagi.amazon.sg/cart/add',
+  ])('%s is not', (url) => {
+    expect(passiveTelemetryRequest(new URL(url), 'fetch')).toBe(false);
   });
 });
