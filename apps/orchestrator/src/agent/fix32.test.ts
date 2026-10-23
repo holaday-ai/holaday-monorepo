@@ -11,6 +11,7 @@ import { classifyIntentForOutputRequirement } from '../execution/execution-contr
 import { namedSiteDomains } from '../execution/source-domain-consistency.js';
 import { answerQualityFailure, pastedMaterial } from './generate-answer-guard.js';
 import { detectNavFailure } from './nav-failure-detector.js';
+import { answerNotObtained } from './scrape-runner.js';
 import { sharedHostingSite } from './shared-hosting.js';
 
 /** FIX-32 (QUEUE 31): Deploy-32 findings and the FIX-30/31 review leftovers. */
@@ -160,5 +161,22 @@ describe('core-07 vp=0: opening links is not asking for links', () => {
     '找一下 RFC 9110 的原文，附上链接',
   ])('%s → still needs a link', (intent) => {
     expect(classifyIntentForOutputRequirement(intent).kind).toBe('general_with_links');
+  });
+});
+
+describe('BENCH-1 r06: an English 「not in the fetched content」 is not obtained', () => {
+  it('the f32b answer goes to the browser; a real answer does not', () => {
+    expect(
+      answerNotObtained(
+        "The fetched content from rfc-editor.org only shows the latest RFCs (RFC10054, RFC10055, RFC10065 from October 2026) on the homepage. RFC 9110's title and publication date are not included in the provided content.",
+        "what's the title of RFC 9110 and when was it published? check rfc-editor.org",
+      ),
+    ).toBe(true);
+    expect(
+      answerNotObtained(
+        'RFC 9110 is titled "HTTP Semantics" and was published in June 2022.',
+        "what's the title of RFC 9110 and when was it published? check rfc-editor.org",
+      ),
+    ).toBe(false);
   });
 });

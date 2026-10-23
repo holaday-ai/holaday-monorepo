@@ -308,3 +308,53 @@ describe('runScrapeTask — Firecrawl failures', () => {
     expect(adapter.stream).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * FIX-32 (BENCH-1 r03/n06): Firecrawl search serves cached pages (zh-cn/download two days
+ * old said v24.22.0 after v24.22.1). A question about now reads stale results again.
+ */
+describe('fresh results for questions about now', () => {
+  const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString();
+  const lane = () =>
+    scrapeLane({
+      search: vi.fn(async () => ({
+        ok: true as const,
+        results: [
+          {
+            url: 'https://nodejs.org/zh-cn/download',
+            markdown: '# 下载 Node.js\n\nLTS v24.22.0',
+            title: '下载 Node.js',
+            cachedAt: twoDaysAgo,
+          },
+        ],
+        credits: 1,
+      })),
+      scrape: vi.fn(async (url: string) => ({
+        ok: true as const,
+        markdown: '# 下载 Node.js\n\nLTS v24.22.1',
+        url,
+        credits: 1,
+      })),
+    });
+  it('re-reads a stale copy and labels when each source was read', async () => {
+    const adapter = makeAdapter();
+    const firecrawl = lane();
+    const outcome = await run({ intent: 'nodejs官网最新的LTS版本是多少', adapter, firecrawl });
+    expect(firecrawl.scrape).toHaveBeenCalledWith('https://nodejs.org/zh-cn/download', {
+      fresh: true,
+    });
+    const request = JSON.stringify(vi.mocked(adapter.stream).mock.calls.at(0)?.[0]);
+    expect(request).toContain('v24.22.1');
+    expect(request).not.toContain('v24.22.0');
+    expect(request).toMatch(/抓取时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
+    expect(outcome.firecrawl).toEqual({ calls: 2, credits: 2 });
+  });
+  it('a question that is not about now keeps the cached copy, labelled with its age', async () => {
+    const adapter = makeAdapter();
+    const firecrawl = lane();
+    await run({ intent: '搜索 Node.js 的下载页面介绍', adapter, firecrawl });
+    expect(firecrawl.scrape).not.toHaveBeenCalled();
+    const request = JSON.stringify(vi.mocked(adapter.stream).mock.calls.at(0)?.[0]);
+    expect(request).toContain(`抓取时间：${twoDaysAgo.slice(0, 16).replace('T', ' ')} UTC`);
+  });
+});
