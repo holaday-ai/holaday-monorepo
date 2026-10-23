@@ -134,7 +134,7 @@ function liveQuote(
   if (ashareIntraday(now)) {
     const nowMin = beijingMinutes(now);
     const tradedUntil = nowMin >= 11 * 60 + 30 && nowMin < 13 * 60 ? 11 * 60 + 30 : nowMin;
-    const [h, m] = time.slice(11, 16).split(':').map(Number);
+    const [h = 0, m = 0] = time.slice(11, 16).split(':').map(Number);
     if (tradedUntil - (h * 60 + m) > LIVE_QUOTE_MAX_LAG_MIN) return null;
   }
   return { row, time };
