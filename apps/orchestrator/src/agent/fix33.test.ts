@@ -176,6 +176,12 @@ describe('FIX-33 #5 · an answer that says it did not get it is not completed', 
     expect(answerNotObtained(qq, '在 QQ 音乐看热歌榜第一名')).toBe(true);
     expect(answerNotObtained('第1名是《晴天》，歌手周杰伦，但时长缺失。', '')).toBe(false);
   });
+  it('new-qq rerun: 「歌曲名称：页面未显示…无法确认具体是哪首歌」 is not obtained', () => {
+    const answer =
+      'QQ音乐热歌榜（2026-10-23）第1名：\n\n- **歌手**：A2O LITE / A2O\n- **时长**：03:28\n- **歌曲名称**：页面未显示\n\n抓取到的热歌榜页面第1名位置只渲染出了歌手和时长，歌曲标题没有加载出来，所以无法确认具体是哪首歌。';
+    expect(answerNotObtained(answer, '在 QQ 音乐看热歌榜第一名')).toBe(true);
+    expect(answerNotObtained('第1名是《NEON》，歌手 A2O LITE / A2O。确认无误。', '')).toBe(false);
+  });
   it('new-google: 「不执行浏览器操作…不是 Google 搜索的第一条」 is not obtained', () => {
     expect(answerNotObtained(google, '打开 google.com 搜索 Claude 并总结第一条')).toBe(true);
   });

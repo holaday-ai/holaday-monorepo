@@ -573,8 +573,16 @@ const ONE_VALUE_QUESTION_RE =
 const VALUE_MISSING_RE =
   /(?:但|不过|可惜|然而|只是|\bbut\b|\bhowever\b)[^。\n]{0,30}(?:(?:页面)?(?:未|没有|没)(?:显示|展示|获取到?|拿到|抓到|找到)|无法(?:确认|获取|确定)|缺失|空缺|丢失|not (?:shown|found|available))/i;
 
+/**
+ * FIX-33 (new-qq rerun: 「歌曲名称：页面未显示 … 歌曲标题没有加载出来，所以无法确认具体是哪首歌」):
+ * the answer says it does not know which thing the answer is.
+ */
+const IDENTITY_UNKNOWN_RE =
+  /无法(?:确认|确定|判断|得知)(?:具体)?(?:是)?哪(?:一)?(?:首|个|本|部|家|款|位|条|篇|只|支)|(?:标题|歌名|曲名|名称|名字)(?:没有|未能?|并未)(?:被)?(?:加载|显示|渲染|读取)出来|\b(?:can(?:no|')t|unable to) (?:tell|confirm|determine) which\b/i;
+
 export function answerNotObtained(summary: string, intent = ''): boolean {
   if (NOT_OBTAINED_RE.test(summary.slice(0, 240))) return true;
+  if (IDENTITY_UNKNOWN_RE.test(summary.slice(0, 600))) return true;
   // The one value asked for is the one the answer says it could not see (v06:
   // 「第一名的歌手是 A2O…，但歌曲名称页面未显示」): that is not an answer.
   if (
