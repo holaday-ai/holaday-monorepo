@@ -97,7 +97,22 @@ export function ashareIntraday(now: Date): boolean {
   return minutes >= 9 * 60 + 30 && minutes < 15 * 60;
 }
 
-/** 当天的报价及其「日期 时间」；没有、或不是当天的 → null。 */
+/** 北京时间的分钟数（0–1439）。 */
+function beijingMinutes(at: Date): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(at);
+  const get = (type: string) => Number(parts.find((x) => x.type === type)?.value ?? Number.NaN);
+  return get('hour') * 60 + get('minute');
+}
+
+/** 盘中报价最多落后这么多分钟仍算实时（午休时以 11:30 收市为准）。 */
+const LIVE_QUOTE_MAX_LAG_MIN = 10;
+
+/** 当天、且盘中够新的报价及其「日期 时间」；否则 null。 */
 function liveQuote(
   quote: AkEnvelope<StockQuoteRow> | undefined,
   now: Date,
@@ -106,14 +121,23 @@ function liveQuote(
   if (!quote || !row || toNum(row.最新价) === null) return null;
   const today = beijingIso(now);
   const t = String(row.行情时间 ?? '').trim();
+  let time: string | null = null;
   if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(t))
-    return t.slice(0, 10) === today ? { row, time: t.slice(0, 19) } : null;
-  // 新浪全市场快照只给时分秒：取数就在当天，日期即抓取日。
-  const fetched = new Date(quote.fetched_at);
-  const day = Number.isNaN(fetched.getTime()) ? today : beijingIso(fetched);
-  return /^\d{2}:\d{2}/.test(t) && day === today
-    ? { row, time: `${today} ${t.slice(0, 5)}` }
-    : null;
+    time = t.slice(0, 10) === today ? t.slice(0, 19) : null;
+  else if (/^\d{2}:\d{2}/.test(t)) {
+    // 新浪全市场快照只给时分秒：取数就在当天，日期即抓取日。
+    const fetched = new Date(quote.fetched_at);
+    const day = Number.isNaN(fetched.getTime()) ? today : beijingIso(fetched);
+    time = day === today ? `${today} ${t.slice(0, 8)}` : null;
+  }
+  if (!time) return null;
+  if (ashareIntraday(now)) {
+    const nowMin = beijingMinutes(now);
+    const tradedUntil = nowMin >= 11 * 60 + 30 && nowMin < 13 * 60 ? 11 * 60 + 30 : nowMin;
+    const [h, m] = time.slice(11, 16).split(':').map(Number);
+    if (tradedUntil - (h * 60 + m) > LIVE_QUOTE_MAX_LAG_MIN) return null;
+  }
+  return { row, time };
 }
 
 /** 盘中却没有当天报价时卡片写的话：调用方据此按部分完成交付（FIX-33）。 */

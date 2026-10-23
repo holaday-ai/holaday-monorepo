@@ -186,4 +186,18 @@ describe('FIX-33 #3 · an A-share price always says when it is from', () => {
     });
     expect(closed).toContain('非交易时段，为最近一个交易日收盘后的行情');
   });
+
+  it('an intraday quote must be fresh: hours old is not real-time; lunch counts from 11:30', async () => {
+    const at1130 = env([
+      { 代码: '600519', 最新价: 1330, 涨跌幅: 0.9, 行情时间: '2026-10-23 11:30:00' },
+    ]);
+    const card = (quote: AkEnvelope<Record<string, unknown>>, now: Date) =>
+      buildAshareFactCard({ client: client({ klineDate: '2026-10-22', quote }), now }, MATCH);
+    expect(quoteStale(await card(at1130, INTRADAY))).toBe(true);
+    expect(quoteStale(await card(at1130, LUNCH))).toBe(false);
+    const at1412 = env([
+      { 代码: '600519', 最新价: 1331, 涨跌幅: 1, 行情时间: '2026-10-23 14:12:00' },
+    ]);
+    expect(quoteStale(await card(at1412, INTRADAY))).toBe(false);
+  });
 });
