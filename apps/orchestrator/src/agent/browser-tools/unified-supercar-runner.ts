@@ -631,8 +631,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       intent: guidance ? `${opts.intent}\n\n【结果要求】\n${guidance}` : opts.intent,
       ...(contract && guidance
         ? {
-            reviewFinish: (summary: string) => reviewListAnswer(contract, summary),
-            partialNote: (summary: string) => listPartialNote(contract, summary),
+            reviewFinish: (summary: string, pageText?: string) =>
+              reviewListAnswer(contract, summary, pageText),
+            partialNote: (summary: string, pageText?: string) =>
+              listPartialNote(contract, summary, pageText),
           }
         : {}),
       adapter,

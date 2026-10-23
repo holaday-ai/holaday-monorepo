@@ -774,10 +774,43 @@ function parsePriceText(s: string): number | null {
 const DECLARED_NO_PRICE_RE =
   /(?:价格|售价|报价|price)\**\s*[：:]?\s*\**\s*(?:未获取到|未读到|未读取到|未显示|页面未显示|未标(?:价|明)|无(?:具体|明确)?(?:价格|报价|标价|售价)|暂无|不详|not\s+(?:shown|listed|available)|unavailable|n\/a)|(?:仅|只)显示\s*["“「]?see options/i;
 
-/** 1-based rows whose price the answer honestly declares absent from the page. */
-export function declaredMissingPriceRows(answerText: string): number[] {
+/** A state the page shows instead of a price (Amazon 「See options」, JD 「已下架」). */
+const NO_PRICE_STATE_RE =
+  /see (?:all buying )?options|no featured offers|currently unavailable|cannot be shipped|not available|unavailable|暂无报价|暂无价格|已下架|下架|无货|缺货|售罄|不可配送|无法配送/i;
+
+/**
+ * PR #294 review: the page itself must show the gap. The row's item name is on a page
+ * the run read, and after it — before any price — the page shows a no-price state.
+ */
+function pageLacksPrice(name: string | null, pageText: string): boolean {
+  const flat = (v: string) => v.replace(/\s+/g, ' ').toLowerCase();
+  // 「名称：Anker USB C…；价格：未获取到」 — the name alone, without its label or price field.
+  const bare =
+    (name ?? '')
+      .replace(/\*\*/g, '')
+      .replace(/^\s*(?:名称|商品名?|标题|name)\s*[:：]\s*/i, '')
+      .split(/[；;]|\s[—–]\s|(?:价格|售价|price)\s*[:：]/i)[0] ?? '';
+  const key = flat(bare).slice(0, 30).trim();
+  if (key.length < 4) return false;
+  const text = flat(pageText);
+  for (let at = text.indexOf(key); at >= 0; at = text.indexOf(key, at + 1)) {
+    const after = text.slice(at + key.length, at + key.length + 500);
+    const state = after.search(NO_PRICE_STATE_RE);
+    if (state >= 0 && !PRICE_TOKEN_RE.test(after.slice(0, state))) return true;
+  }
+  return false;
+}
+
+/**
+ * 1-based rows whose price the answer declares absent and the read page shows absent.
+ * Without page text nothing is exempt.
+ */
+export function declaredMissingPriceRows(answerText: string, pageText?: string): number[] {
+  if (!pageText) return [];
   return extractStructuredItems(answerText).flatMap((row, i) =>
-    row.price == null && DECLARED_NO_PRICE_RE.test(row.raw) ? [i + 1] : [],
+    row.price == null && DECLARED_NO_PRICE_RE.test(row.raw) && pageLacksPrice(row.name, pageText)
+      ? [i + 1]
+      : [],
   );
 }
 
@@ -932,7 +965,11 @@ function checkPriceSort(criterion: SuccessCriterion, answerText: string): CheckR
  * Bullet rows are audited like every other row: complete triples pass;
  * incomplete rows fail with the same missing-field detail.
  */
-function checkEcommerceRows(criterion: SuccessCriterion, answerText: string): CheckResult {
+function checkEcommerceRows(
+  criterion: SuccessCriterion,
+  answerText: string,
+  pageText?: string,
+): CheckResult {
   const minItems = Number(criterion.data?.minItems ?? 0);
   const minUniqueUrls = Number(criterion.data?.minUniqueUrls ?? 0);
   // FIX-31: links only when the user asked for them (see OutputRequirementEcommerce).
@@ -950,7 +987,7 @@ function checkEcommerceRows(criterion: SuccessCriterion, answerText: string): Ch
     };
   }
   const incomplete: string[] = [];
-  const declared = new Set(declaredMissingPriceRows(answerText));
+  const declared = new Set(declaredMissingPriceRows(answerText, pageText));
   rows.forEach((row, i) => {
     const missing: string[] = [];
     if (!row.name) missing.push('名称');
@@ -1115,14 +1152,19 @@ function checkListItemSources(criterion: SuccessCriterion, answerText: string): 
  * or null when the answer meets them. Deterministic and ledger-free, so the
  * browser loop can ask the model for one targeted retry before it finishes.
  */
-export function reviewListAnswer(contract: ExecutionContract, answerText: string): string | null {
+export function reviewListAnswer(
+  contract: ExecutionContract,
+  answerText: string,
+  /** What the run read; only a page that shows a price missing excuses it. */
+  pageText?: string,
+): string | null {
   const gaps: string[] = [];
   for (const criterion of contract.successCriteria) {
     const check =
       criterion.type === 'list_item_sources'
         ? checkListItemSources(criterion, answerText)
         : criterion.type === 'ecommerce_rows'
-          ? checkEcommerceRows(criterion, answerText)
+          ? checkEcommerceRows(criterion, answerText, pageText)
           : null;
     // An honest gap is delivered as 部分完成 (listPartialNote), not sent back.
     if (check && !check.passed && !check.detail.startsWith('部分完成：')) gaps.push(check.detail);
@@ -1134,10 +1176,14 @@ export function reviewListAnswer(contract: ExecutionContract, answerText: string
  * FIX-32 (Deploy-32 b-p02): the lead for a list answer whose only gap is a price the page
  * does not show, or null. The browser loop delivers such an answer as 部分完成.
  */
-export function listPartialNote(contract: ExecutionContract, answerText: string): string | null {
+export function listPartialNote(
+  contract: ExecutionContract,
+  answerText: string,
+  pageText?: string,
+): string | null {
   for (const criterion of contract.successCriteria) {
     if (criterion.type !== 'ecommerce_rows') continue;
-    const check = checkEcommerceRows(criterion, answerText);
+    const check = checkEcommerceRows(criterion, answerText, pageText);
     if (!check.passed && check.detail.startsWith('部分完成：')) return check.detail;
   }
   return null;

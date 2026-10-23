@@ -13,6 +13,7 @@ import {
   modelFailureReason,
   withModelRetry,
 } from '../../llm/model-call-retry.js';
+import { namedAddressHosts } from '../scrape-runner.js';
 import { SEARCH_RESULTS_ORIGIN } from '../search-fallback/search-results-page.js';
 import {
   deniedActions,
@@ -216,12 +217,12 @@ export interface UnifiedBrowserLoopInput {
    * The first time it reports a gap the model gets one remediation turn; the
    * second finish is returned as-is for the verifier to judge.
    */
-  reviewFinish?: (summary: string) => string | null;
+  reviewFinish?: (summary: string, pageText?: string) => string | null;
   /**
    * FIX-32 (Deploy-32 b-p02): the 部分完成 lead for an answer whose only gap is one the
    * page itself has (「价格：未获取到（仅显示 See options）」), or null.
    */
-  partialNote?: (summary: string) => string | null;
+  partialNote?: (summary: string, pageText?: string) => string | null;
 }
 
 /** Remediation turn after the pre-delivery review found gaps in the answer. */
@@ -393,7 +394,7 @@ export async function runUnifiedBrowserLoop(
    */
   const lockedDomains = [
     ...new Set([
-      ...namedHosts.map((host) => siteOf(host) ?? host),
+      ...[...namedHosts, ...namedAddressHosts(input.intent)].map((host) => siteOf(host) ?? host),
       ...namedSiteDomains(input.intent),
     ]),
   ];
@@ -1242,7 +1243,8 @@ export async function runUnifiedBrowserLoop(
             given ||
             deriveEvidence(summary, observedText) ||
             observedText.slice(0, 500);
-          const gaps = rejectionsLeft > 0 ? (input.reviewFinish?.(summary) ?? null) : null;
+          const gaps =
+            rejectionsLeft > 0 ? (input.reviewFinish?.(summary, observedText) ?? null) : null;
           if (gaps) {
             await rejected(summary, given, gaps);
             if (concludeNow) return { status: 'failed', reason: gaps, steps: step + 1 };
@@ -1274,7 +1276,7 @@ export async function runUnifiedBrowserLoop(
           // FIX-31 (core-10 / xhs-read): an answer that itself opens with 「部分完成」 is
           // delivered as 部分完成 whatever finish status came with it.
           const saysPartial = /^\s*(?:部分完成|partially completed)/i.test(summary);
-          const pageGap = input.partialNote?.(summary) ?? null;
+          const pageGap = input.partialNote?.(summary, observedText) ?? null;
           if (short || dateMissing || declaredPartial || saysPartial || pageGap) {
             const lead = short
               ? `部分完成：只找到 ${found}/${wantedCount} 条。`

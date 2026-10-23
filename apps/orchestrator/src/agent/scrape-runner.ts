@@ -97,6 +97,27 @@ const BARE_DOMAIN_REGEX =
 const SEARCH_OR_COMPARE_RE =
   /搜索|搜一下|查找|最新|新闻|对比|比较|区别|\b(?:search|compare|versus|vs\.?|news|latest)\b/i;
 
+/**
+ * FIX-32 (PR #294 review): every host the task names by address — explicit URLs of any
+ * TLD, domain paths, bare domains — read with extractTargetUrl's own patterns.
+ */
+export function namedAddressHosts(intent: string): string[] {
+  const hosts = new Set<string>();
+  const add = (raw: string) => {
+    try {
+      const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+      hosts.add(url.hostname.toLowerCase().replace(/^www\./, ''));
+    } catch {
+      /* not an address */
+    }
+  };
+  for (const m of intent.matchAll(new RegExp(URL_REGEX.source, 'gi')))
+    add(m[0].replace(TRAILING_TRIM, ''));
+  for (const m of intent.matchAll(new RegExp(DOMAIN_PATH_REGEX.source, 'gi'))) add(m[0]);
+  for (const m of intent.matchAll(BARE_DOMAIN_REGEX)) add(m[0]);
+  return [...hosts];
+}
+
 export function extractTargetUrl(intent: string): string | null {
   const match = URL_REGEX.exec(intent);
   if (!match) {

@@ -112,6 +112,18 @@ describe('b-p02: prices on a regional page', () => {
       pages: [page],
     });
     expect(facts.contradictions.join('；')).not.toMatch(/delivery/i);
+    // PR #294 review: the fee goes, the item's own price on the same line stays.
+    const sameLine = observedEvidence(
+      'x',
+      '- generic: Price S$14.99, S$9.53 delivery',
+      'https://a.example/dp/1',
+    );
+    expect(
+      assessCompletionFacts({ summary: '价格：S$12.99', pages: [sameLine] }).contradictions,
+    ).toEqual([expect.stringContaining('与页面不符')]);
+    expect(
+      assessCompletionFacts({ summary: '价格：S$14.99', pages: [sameLine] }).contradictions,
+    ).toEqual([]);
     // A different price that is not a fee still contradicts.
     const priced = observedEvidence(
       'x',
@@ -167,8 +179,8 @@ describe('b-p02: an honest gap on the page is delivered as 部分完成', () => 
       maxSteps: 6,
       execute: site.execute as never,
       currentPageUrl: site.currentPageUrl,
-      reviewFinish: (summary: string) => reviewListAnswer(contract, summary),
-      partialNote: (summary: string) => listPartialNote(contract, summary),
+      reviewFinish: (summary: string, page?: string) => reviewListAnswer(contract, summary, page),
+      partialNote: (summary: string, page?: string) => listPartialNote(contract, summary, page),
       onCompletionRejected: async (event: unknown) => {
         rejected.push(event);
       },
@@ -221,6 +233,22 @@ describe('b-m01: 高德 stays 高德; a masked login page goes to the user', () 
       'https://item.jd.com/100142621606.html',
       'https://search.jd.com/Search?keyword=iPhone',
     ]);
+  });
+  it('PR #294 review: an address on any TLD locks its site', async () => {
+    const { adapter } = scripted([
+      { name: 'navigate', input: { url: 'https://docs.example.tech/guide' } },
+      { name: 'navigate', input: { url: 'https://mirror.example.org/guide' } },
+      { name: 'finish', input: { status: 'failed', summary: '没有读到。' } },
+    ]);
+    const site = browser(() => 'heading "Guide"');
+    await runUnifiedBrowserLoop({
+      intent: '请使用云端浏览器，打开 https://docs.example.tech/guide 读第一段',
+      adapter,
+      maxSteps: 6,
+      execute: site.execute as never,
+      currentPageUrl: site.currentPageUrl,
+    });
+    expect(site.opened).toEqual(['https://docs.example.tech/guide']);
   });
   it('a link the run read on the named site may be followed', async () => {
     const { adapter } = scripted([

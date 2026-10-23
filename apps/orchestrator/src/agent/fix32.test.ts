@@ -51,11 +51,30 @@ describe('b-p02: a regional price is a price; a price the page lacks is said, no
       extractStructuredItems('1. USB C 100W Cable\n2. 8K 60Hz Cable').map((r) => r.price),
     ).toEqual([null, null]);
   });
+  // The results page as read: item 1's card shows 「See options」 where a price would be.
+  const RESULTS_PAGE = [
+    'Anker USB C to USB C Cable, 60W Fast Charging Cable (2-Pack, 6 ft, Black) 4.7 out of 5 stars See options',
+    'LISEN USB C to USB C Cable, 240W Fast Charging Type C Charger Cord (6.6FT) SGD 11.46',
+    'USB C Monitor Cable 2FT, 8K@60Hz, 20Gbps, 100W SGD 15.32',
+  ].join('\n');
   it('the Deploy-32 first answer is not sent back; it is delivered as 部分完成', () => {
-    expect(declaredMissingPriceRows(P02_ROUND1)).toEqual([1]);
-    expect(reviewListAnswer(rowsContract, P02_ROUND1)).toBeNull();
-    expect(listPartialNote(rowsContract, P02_ROUND1)).toBe(
+    expect(declaredMissingPriceRows(P02_ROUND1, RESULTS_PAGE)).toEqual([1]);
+    expect(reviewListAnswer(rowsContract, P02_ROUND1, RESULTS_PAGE)).toBeNull();
+    expect(listPartialNote(rowsContract, P02_ROUND1, RESULTS_PAGE)).toBe(
       '部分完成：第 1 条页面未显示价格（答案已如实说明）',
+    );
+  });
+  it('PR #294 review: the claim needs a page that shows the price missing', () => {
+    // No page read, or the page shows a price for that item: still 「缺少价格」.
+    expect(declaredMissingPriceRows(P02_ROUND1)).toEqual([]);
+    expect(reviewListAnswer(rowsContract, P02_ROUND1)).toContain('第 1 行缺少价格');
+    const priced = RESULTS_PAGE.replace('See options', 'SGD 14.99 See options');
+    expect(reviewListAnswer(rowsContract, P02_ROUND1, priced)).toContain('第 1 行缺少价格');
+    expect(listPartialNote(rowsContract, P02_ROUND1, priced)).toBeNull();
+    // Every row 「未获取到」 while the page lists prices: sent back.
+    const allMissing = P02_ROUND1.replace(/价格：SGD [0-9.]+/g, '价格：未获取到');
+    expect(reviewListAnswer(rowsContract, allMissing, RESULTS_PAGE)).toMatch(
+      /第 2 行缺少价格；第 3 行缺少价格/,
     );
   });
   it('a row that just leaves the price out is still sent back', () => {
@@ -71,8 +90,8 @@ describe('b-p02: a regional price is a price; a price the page lacks is said, no
       '未获取到（该商品卡片仅显示 "See options"，无具体价格）',
       'S$14.99',
     );
-    expect(reviewListAnswer(rowsContract, full)).toBeNull();
-    expect(listPartialNote(rowsContract, full)).toBeNull();
+    expect(reviewListAnswer(rowsContract, full, RESULTS_PAGE)).toBeNull();
+    expect(listPartialNote(rowsContract, full, RESULTS_PAGE)).toBeNull();
   });
 });
 
@@ -159,6 +178,8 @@ describe('core-07 vp=0: opening links is not asking for links', () => {
   it.each([
     'python.org 最新版 python 的 macOS 安装包下载链接给我（不用真下载）',
     '找一下 RFC 9110 的原文，附上链接',
+    // PR #294 review: opening one link does not cancel the link asked for elsewhere.
+    '打开下面的链接并总结，回答中保留原始链接',
   ])('%s → still needs a link', (intent) => {
     expect(classifyIntentForOutputRequirement(intent).kind).toBe('general_with_links');
   });

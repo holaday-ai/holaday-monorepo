@@ -280,8 +280,8 @@ export function classifyIntentForOutputRequirement(intent: string): {
   // for links in the answer. 链接 counts only when it is not what gets opened or clicked.
   const explicitLinkRequest =
     /来源|引用|参考链接|参考资料|出处|reference|source\s+url|cite|引用链接/i.test(text) ||
-    (/链接/.test(text) && !/(?:打开|点开|点击|点进|进入|访问)[^，。,;；]{0,8}链接/.test(text)) ||
-    /(?:给|附|列|带|贴|发|提供|输出|返回)[^，。,;；]{0,6}(?:链接|网址|url)|链接[^，。,;；]{0,4}(?:给我|发我|列出)/i.test(
+    /链接/.test(text.replace(/(?:打开|点开|点击|点进|进入|访问)[^，。,;；链]{0,8}链接/g, ' ')) ||
+    /(?:给|附|列|带|贴|发|提供|输出|返回|保留|包含)[^，。,;；]{0,6}(?:链接|网址|url)|链接[^，。,;；]{0,4}(?:给我|发我|列出)/i.test(
       text,
     );
   const researchOrRetrievalIntent = isResearchOrRetrievalIntent(text);

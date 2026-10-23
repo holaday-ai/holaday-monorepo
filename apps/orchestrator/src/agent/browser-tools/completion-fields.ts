@@ -390,9 +390,16 @@ function currencyForms(value: string): string[] {
   );
 }
 
-/** Lines about a fee, not the item's price (D31 b-p02: 「s$9.53 delivery wed, oct 28」). */
-const FEE_LINE_RE =
-  /deliver|shipping|import (?:fees?|charges?)|运费|配送费|邮费|快递费|税费|免运费|包邮/i;
+/**
+ * A fee amount, not the item's price (D31 b-p02: 「s$9.53 delivery wed, oct 28」). Only the
+ * amount goes: 「price s$14.99, s$9.53 delivery」 still shows the item's own price.
+ */
+const CURRENCY_MARK = '(?:[a-z]{0,3}\\$|[¥€£₩₹]|\\b[a-z]{3} ?)?';
+const FEE_AMOUNT_RE = new RegExp(
+  `${CURRENCY_MARK}\\d[\\d.,]*\\s*(?:delivery|shipping|import (?:fees?|charges?)|运费|配送费|邮费|快递费)` +
+    `|(?:运费|配送费|邮费|快递费|delivery(?: fee)?|shipping(?: fee)?)\\s*[:：]?\\s*${CURRENCY_MARK}\\d[\\d.,]*`,
+  'gi',
+);
 
 function sourceLabel(fact: Fact) {
   return fact.tabId ? `标签 ${fact.tabId}` : (fact.sourceURL ?? '该页面');
@@ -712,15 +719,15 @@ export function assessCompletionFacts(input: {
       const name = normalizeFact(fact.name);
       // FIX-32: a price is never contradicted by the delivery fee shaped like it.
       const priceValue = currencyForms(value).length > 0 || /价|price/i.test(fact.name);
-      const relevant = (run: string) => !priceValue || !FEE_LINE_RE.test(run);
+      const scrub = (run: string) => (priceValue ? run.replace(FEE_AMOUNT_RE, ' ') : run);
       const labelled = eligible
-        .map((page) => labelledValue(page.values, name, shape))
-        .find((run) => run !== undefined && relevant(run));
+        .map((page) => labelledValue(page.values.map(scrub), name, shape))
+        .find((run) => run !== undefined);
       const conflict =
         labelled ??
         eligible
-          .flatMap((page) => page.lines)
-          .find((line) => /\d/.test(line) && skeleton(line).includes(shape) && relevant(line));
+          .flatMap((page) => page.lines.map(scrub))
+          .find((line) => /\d/.test(line) && skeleton(line).includes(shape));
       if (conflict) {
         contradictions.push(`${label} 与页面不符；页面为「${conflict.trim().slice(0, 120)}」`);
         continue;
