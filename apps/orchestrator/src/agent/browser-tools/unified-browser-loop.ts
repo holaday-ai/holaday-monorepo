@@ -1,3 +1,4 @@
+import { siteOf } from '../../browser-pool/egress-learning.js';
 import { namedSiteDomains } from '../../execution/source-domain-consistency.js';
 import { scrapedWall } from '../../firecrawl/scraped-page.js';
 import type {
@@ -386,8 +387,16 @@ export async function runUnifiedBrowserLoop(
   let offSiteContinued = false;
   const wantsForm =
     namedHosts.length > 0 && /填表|填写|表单|日期控件|fill.*form|form.*fill/i.test(input.intent);
-  /** FIX-32: sites named by address or by name (「高德地图」); the run stays on them. */
-  const lockedDomains = [...new Set([...namedHosts, ...namedSiteDomains(input.intent)])];
+  /**
+   * FIX-32: sites named by address or by name (「高德地图」); the run stays on them — the
+   * whole site (item.jd.com → jd.com), each shared-hosting subdomain on its own.
+   */
+  const lockedDomains = [
+    ...new Set([
+      ...namedHosts.map((host) => siteOf(host) ?? host),
+      ...namedSiteDomains(input.intent),
+    ]),
+  ];
   const seenOnReadPage = (url: string) => {
     const host = hostOf(url);
     return (

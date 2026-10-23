@@ -202,6 +202,26 @@ describe('b-m01: 高德 stays 高德; a masked login page goes to the user', () 
     expect(seen.join('\n')).toContain('不要换到 map.baidu.com');
     expect(outcome.status).toBe('failed');
   });
+  it('a named address locks its whole site, not just that host', async () => {
+    const { adapter } = scripted([
+      { name: 'navigate', input: { url: 'https://item.jd.com/100142621606.html' } },
+      { name: 'navigate', input: { url: 'https://search.jd.com/Search?keyword=iPhone' } },
+      { name: 'navigate', input: { url: 'https://www.taobao.com/' } },
+      { name: 'finish', input: { status: 'failed', summary: '没有读到价格。' } },
+    ]);
+    const site = browser(() => 'heading "商品"');
+    await runUnifiedBrowserLoop({
+      intent: '京东 https://item.jd.com/100142621606.html 这个多少钱',
+      adapter,
+      maxSteps: 6,
+      execute: site.execute as never,
+      currentPageUrl: site.currentPageUrl,
+    });
+    expect(site.opened).toEqual([
+      'https://item.jd.com/100142621606.html',
+      'https://search.jd.com/Search?keyword=iPhone',
+    ]);
+  });
   it('a link the run read on the named site may be followed', async () => {
     const { adapter } = scripted([
       { name: 'navigate', input: { url: 'https://www.amap.com/' } },
