@@ -42,7 +42,7 @@ import {
   type CoreSettlement,
   prepareCoreSettlement,
 } from './core-task-settlement.js';
-import { answerQualityFailure } from './generate-answer-guard.js';
+import { answerQualityFailure, deliverableAnswer } from './generate-answer-guard.js';
 import { runGenerateTask } from './generate-runner.js';
 
 const CORE_IMAGE_MEDIA_TYPES: ReadonlySet<string> = new Set([
@@ -347,17 +347,23 @@ async function executeCoreTask(
       if (!verification || !outcome.generation) throw new Error('CORE_REVIEW_UNAVAILABLE');
       // FIX-30: tool-call text, an opener, or a web source nobody read is not an answer.
       if (status === 'completed' || status === 'partial_success') {
-        const qualityFailure = answerQualityFailure(summary, {
-          // Read evidence is a source the run actually fetched, or an attachment —
-          // never the existence of the source-trust review (always present).
-          readSources:
-            (reviewed.outcome.sourceUrls?.length ?? outcome.sourceUrls?.length ?? 0) > 0 ||
-            input.blocks.some((block) => block.type !== 'text'),
-          // Text the user pasted is material the answer may cite (「根据你提供的网页内容」).
-          userMaterial: input.blocks
-            .map((block) => (block.type === 'text' ? block.text : ''))
-            .join('\n'),
-        });
+        // The review already sanitised `summary`; the raw text tells whether it was
+        // only tool-call syntax (FIX-33: sanitised to nothing, it is still no answer).
+        const rawSummary = outcome.status === 'completed' ? outcome.summary : '';
+        const qualityFailure =
+          (rawSummary && deliverableAnswer(rawSummary) === null ? 'NON_ANSWER' : null) ??
+          answerQualityFailure(summary, {
+            // Read evidence is a source the run actually fetched, or an attachment —
+            // never the existence of the source-trust review (always present).
+            readSources:
+              (reviewed.outcome.sourceUrls?.length ?? outcome.sourceUrls?.length ?? 0) > 0 ||
+              input.blocks.some((block) => block.type !== 'text'),
+            intent,
+            // Text the user pasted is material the answer may cite (「根据你提供的网页内容」).
+            userMaterial: input.blocks
+              .map((block) => (block.type === 'text' ? block.text : ''))
+              .join('\n'),
+          });
         if (qualityFailure) {
           input.logger.info(
             { taskId: identity.taskId, code: qualityFailure },
@@ -374,6 +380,9 @@ async function executeCoreTask(
           });
         }
       }
+      // FIX-33: what is delivered carries no tool-call syntax (code blocks stay).
+      if (status === 'completed' || status === 'partial_success')
+        summary = deliverableAnswer(summary) ?? summary;
       if (
         input.resultNotice &&
         (status === 'completed' || status === 'partial_success') &&

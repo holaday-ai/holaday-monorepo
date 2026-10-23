@@ -34,6 +34,7 @@ import {
   runDirectOpen,
   verifyDirectOpenUrlSafety,
 } from '../../agent/direct-open.js';
+import { deliverableAnswer } from '../../agent/generate-answer-guard.js';
 import { type GenerateOutcome, runGenerateTask } from '../../agent/generate-runner.js';
 import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
 import {
@@ -4876,6 +4877,17 @@ export const tasksRouter = router({
                         outputTokens: 0,
                         durationMs: 0,
                       };
+                    }
+                    if (
+                      generateOutcome.status === 'completed' &&
+                      deliverableAnswer(generateOutcome.summary) === null &&
+                      (await handOverToBrowser(
+                        '模型只写出了浏览器操作指令、没有给出答案，已自动改用云端浏览器重试一次',
+                      ))
+                    ) {
+                      // FIX-33: the fallback "answer" was a tool call — the user wants a
+                      // page operated, so the same task goes to the browser once.
+                      return;
                     }
                     if (generateOutcome.status === 'completed') {
                       outcome = {

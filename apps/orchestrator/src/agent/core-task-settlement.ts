@@ -156,7 +156,7 @@ const inputSchema = z
       })
       .optional(),
     localFailure: z.enum(['EXECUTION_BUSY', 'REVIEW_FAILED']).optional(),
-    qualityFailure: z.enum(['NON_ANSWER', 'UNREAD_SOURCE']).optional(),
+    qualityFailure: z.enum(['NON_ANSWER', 'UNREAD_SOURCE', 'UNREAD_LISTING']).optional(),
   })
   .strict();
 
@@ -171,7 +171,7 @@ export const CORE_LOCAL_FAILURE_COPY: Readonly<Record<CoreLocalFailure, string>>
  * the answer; r01: 「根据维基百科」 with nothing read). The answer's own fault, so —
  * unlike CORE_LOCAL_FAILURE_COPY — not a platform failure for refunds.
  */
-export type CoreQualityFailure = 'NON_ANSWER' | 'UNREAD_SOURCE';
+export type CoreQualityFailure = 'NON_ANSWER' | 'UNREAD_SOURCE' | 'UNREAD_LISTING';
 export const CORE_QUALITY_FAILURE_COPY: Readonly<Record<CoreQualityFailure, string>> =
   Object.freeze({
     // A platform fault: refunded once per task (quota/platform-failure-refunds.ts).
@@ -179,6 +179,9 @@ export const CORE_QUALITY_FAILURE_COPY: Readonly<Record<CoreQualityFailure, stri
       '没有生成实际答案：模型只输出了工具调用指令或「我来查一下」之类的开场白，这是平台的问题。这个问题需要联网读取网页，可以注明「请使用云端浏览器」后重试。',
     UNREAD_SOURCE:
       '答案说内容来自某个网站或资料，但本任务并没有读取它，这些内容无法核实，所以没有作为结果交付。',
+    // FIX-33: a site search answered from memory — ours (it was routed to generate).
+    UNREAD_LISTING:
+      '这个问题要看网站上实时的商品和价格，但本任务没有读取任何网页，凭记忆写出的商品和价格无法核实，所以没有作为结果交付（本次不扣次数）。可以注明「请使用云端浏览器」后重试。',
   });
 /** What a failed quality check was about, in the user's words. */
 const ISSUE_COPY: Readonly<Record<string, string>> = Object.freeze({

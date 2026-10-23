@@ -27,6 +27,7 @@
 
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
+import { namedSiteSearch, namedSiteView } from './named-site-search.js';
 
 export type ExecutionMode =
   | 'browser'
@@ -952,7 +953,8 @@ const NEGATED_PLAYBACK_RE =
 
 function matchBrowserOnlyAction(intent: string): string | null {
   const affirmative = intent.replace(NEGATED_PLAYBACK_RE, ' ');
-  if (SITE_SEARCH_RE.test(affirmative)) return '站内搜索';
+  // FIX-33: any named store / map / video / music / social site, regional stores too.
+  if (SITE_SEARCH_RE.test(affirmative) || namedSiteSearch(affirmative)) return '站内搜索';
   for (const [pattern, label] of BROWSER_ONLY_ACTION_PATTERNS) {
     if (pattern.test(affirmative)) return label;
   }
@@ -1396,7 +1398,7 @@ function decide(intent: string, ctx: { hasFileAttachment: boolean }): RouteDecis
   if (WRITING_FOR_PLATFORM_RE.test(routingIntent) && !TRANSFORMS_TEXT_RE.test(routingIntent)) {
     return { mode: 'generate', source: 'default' };
   }
-  const site = hasAny(routingIntent, SITE_NAMES);
+  const site = hasAny(routingIntent, SITE_NAMES) ?? namedSiteView(routingIntent);
   if (site) {
     return { mode: 'scrape', source: 'kw:site', match: site };
   }

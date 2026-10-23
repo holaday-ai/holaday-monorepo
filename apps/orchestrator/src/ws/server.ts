@@ -9,6 +9,7 @@ import {
   selectedChromeSessionCommandSchema,
 } from '@holaday/shared-types';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
+import { TOOL_CALL_TEXT_ONLY, deliverableAnswer } from '../agent/generate-answer-guard.js';
 import type { Planner } from '../agent/planner.js';
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { TaskController, type TaskState } from '../agent/task-controller.js';
@@ -904,14 +905,33 @@ export function broadcastToUser(userId: string, msg: ServerMessage): number {
   }
   const set = clientsByUser.get(userId);
   if (!set) return 0;
+  const shown = withoutToolCallText(msg);
   let count = 0;
   for (const client of set) {
     if (client.socket.readyState === WebSocket.OPEN) {
-      send(client.socket, msg);
+      send(client.socket, shown);
       count += 1;
     }
   }
   return count;
+}
+
+/**
+ * FIX-33: the live terminal event shows what `persistVisionOutcome` stores — no
+ * tool-call syntax, and a "result" that was only that arrives as failed.
+ */
+function withoutToolCallText(msg: ServerMessage): ServerMessage {
+  if (
+    msg.type !== 'server.task.terminal' ||
+    (msg.status !== 'completed' && msg.status !== 'partial_success') ||
+    !msg.summary
+  )
+    return msg;
+  const shown = deliverableAnswer(msg.summary);
+  if (shown === msg.summary) return msg;
+  if (shown !== null) return { ...msg, summary: shown };
+  const { summary: _summary, ...rest } = msg;
+  return { ...rest, status: 'failed', reason: TOOL_CALL_TEXT_ONLY.reason };
 }
 
 /** Update an in-memory TaskState for every connected socket of `userId`. */
