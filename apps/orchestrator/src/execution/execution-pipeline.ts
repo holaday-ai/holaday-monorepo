@@ -304,8 +304,13 @@ export function browserCompletionVerdict(input: {
     ? input.originalText
     : input.verifiedText;
   const unique = [...new Set(notes)].slice(0, 6);
+  // FIX-33 (new-amazon-sg: 「价格：未获取到」 + 「可核验商品只有 2 条，要求至少 3 条」 was
+  // completed): fewer complete rows than asked is 部分完成, as the note says.
+  const short = failed.some((check) =>
+    ['ecommerce_rows', 'result_count'].includes(check.criterionType ?? ''),
+  );
   return {
-    status: input.partial ? 'partial_success' : 'completed',
+    status: input.partial || short ? 'partial_success' : 'completed',
     text: unique.length ? `${kept}\n\n核验提示：${unique.join('；')}` : kept,
     notes: unique,
   };

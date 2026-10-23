@@ -1,5 +1,6 @@
 import { hasToolCallMarkup, stripToolCallMarkup } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
+import { browserCompletionVerdict } from '../execution/execution-pipeline.js';
 import { platformFailureReason } from '../quota/platform-failure-refunds.js';
 import { CORE_QUALITY_FAILURE_COPY } from './core-task-settlement.js';
 import {
@@ -201,5 +202,42 @@ describe('FIX-33 #5 · 「打开 google.com 搜索 X 并总结第一条」 searc
     ['Google 搜索 新加坡 天气 返回前5条', '新加坡 天气'],
   ])('%s → %s', (intent, query) => {
     expect(planSearchFallback(intent, wall)?.query).toBe(query);
+  });
+});
+
+describe('FIX-33 #5 · a browser answer short of the rows asked for is partial', () => {
+  const verification = (criterionType: string, detail: string) =>
+    ({
+      taskId: 't',
+      passed: false,
+      tier: 'deterministic',
+      failureLevel: 'needs_clarification',
+      checks: [
+        { criterionId: 'c1', criterionType, passed: false, checker: 'deterministic', detail },
+      ],
+    }) as never;
+  const answer = '1. BELKIN … S$8.90\n2. UGREEN … S$17.29\n3. UGREEN … 价格：未获取到';
+  it('new-amazon-sg: 「可核验商品只有 2 条，要求至少 3 条」 → partial_success with the note', () => {
+    const verdict = browserCompletionVerdict({
+      runnerStatus: 'completed',
+      verification: verification(
+        'ecommerce_rows',
+        '第 3 行缺少价格；可核验商品只有 2 条，要求至少 3 条名称/价格完整的结果',
+      ),
+      verifiedText: answer,
+      originalText: answer,
+    });
+    expect(verdict.status).toBe('partial_success');
+    expect(verdict.text).toContain('核验提示：第 3 行缺少价格');
+  });
+  it('a missing source link alone still only annotates', () => {
+    expect(
+      browserCompletionVerdict({
+        runnerStatus: 'completed',
+        verification: verification('url_count', 'only 0 URL(s) found'),
+        verifiedText: answer,
+        originalText: answer,
+      }).status,
+    ).toBe('completed');
   });
 });
