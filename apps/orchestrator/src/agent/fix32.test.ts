@@ -173,6 +173,14 @@ describe('BENCH-1 r06: an English 「not in the fetched content」 is not obtain
       ),
     ).toBe(true);
   });
+  it('the f32f answer (「没有包含 RFC 9110 的具体信息」) goes to the browser too', () => {
+    expect(
+      answerNotObtained(
+        '提供的 rfc-editor.org 首页抓取内容中只列出了最新的几篇 RFC（如 RFC 10055、RFC 10065、RFC 10054），没有包含 RFC 9110 的具体信息。',
+        "what's the title of RFC 9110 and when was it published? check rfc-editor.org",
+      ),
+    ).toBe(true);
+  });
   it('the f32d answer (「抓取的内容里没有」) goes to the browser too', () => {
     expect(
       answerNotObtained(
