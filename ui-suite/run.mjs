@@ -14,6 +14,7 @@ import { measureLayout, layoutFindings } from './lib/layout-checks.mjs';
 import { auditViewports } from './lib/viewports.mjs';
 import { p2Checks } from './lib/p2-checks.mjs';
 import { round3Checks, browserInputOverlayChecks, scheduledChoiceChecks } from './lib/round3-checks.mjs';
+import { browserPanelFitChecks } from './lib/browser-fit-checks.mjs';
 import { inspectControls, reusableControls, waitForSeedContent } from './lib/interaction.mjs';
 import { canonicalUrl, inventory, scenarioSlug, writeInventory } from './lib/inventory.mjs';
 import {
@@ -379,6 +380,13 @@ try {
         }
         if (!screenOnly && scenario.taskMode === 'browser' && ['executing', 'awaiting_user'].includes(scenario.status)) {
           entry.regressions = await browserInputOverlayChecks(page, scenario.pattern, width, artifacts);
+          await reset();
+        }
+        if (!screenOnly && scenario.pattern === 'task:browser:executing') {
+          entry.regressions = [
+            ...(entry.regressions ?? []),
+            ...(await browserPanelFitChecks(page, server, width, artifacts)),
+          ];
           await reset();
         }
         if (!screenOnly && scenario.pattern === 'task:scrape:completed') {

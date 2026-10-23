@@ -34,6 +34,7 @@ import {
   runDirectOpen,
   verifyDirectOpenUrlSafety,
 } from '../../agent/direct-open.js';
+import { deliverableAnswer } from '../../agent/generate-answer-guard.js';
 import { type GenerateOutcome, runGenerateTask } from '../../agent/generate-runner.js';
 import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
 import {
@@ -3324,6 +3325,9 @@ export const tasksRouter = router({
                       const { runAshareQa, runAsharePanorama } = await import(
                         '../../agent/a-share/ashare-qa-runner.js'
                       );
+                      const { quoteStale } = await import(
+                        '../../agent/a-share/ashare-fact-card.js'
+                      );
                       // 技能 markdown（人设/红线）→ DB skills.manifest.body；缺则内置兜底人设
                       // （合规硬约束已在 runner 的 system prompt，故缺 markdown 也安全）。
                       let skillMarkdown: string | null = null;
@@ -3345,7 +3349,7 @@ export const tasksRouter = router({
                       const FALLBACK_PERSONA =
                         '你是严谨的 A股信息分析助手：只聚合公开信息、客观陈述事实，绝不荐股、不预测涨跌、不给买卖或择时建议。';
                       let answer: string;
-                      let terminalStatus: 'completed' | 'failed' = 'completed';
+                      let terminalStatus: 'completed' | 'partial_success' | 'failed' = 'completed';
                       try {
                         // deep 意图（详细分析/全面看看）→ 七维全景版（含 ④基本面⑤估值 + ⑦分析师视角）；
                         // 否则轻量速览（①②③ + ③解读）。⑦ prompt 自含人设，不依赖 skillMarkdown。
@@ -3372,6 +3376,8 @@ export const tasksRouter = router({
                           ashareQaMatch,
                         );
                         answer = `${stockAnswerPrefix}${r.answer}`;
+                        // FIX-33: intraday with no live quote — the card only has a close.
+                        if (quoteStale(r.answer)) terminalStatus = 'partial_success';
                         ctx.logger.info(
                           {
                             taskId,
@@ -3390,9 +3396,9 @@ export const tasksRouter = router({
                         let asharePersisted = false;
                         const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
                         if (taskInternalId != null) {
-                          if (terminalStatus === 'completed') {
+                          if (terminalStatus !== 'failed') {
                             const persisted = await repo.persistVisionOutcome(taskId, {
-                              status: 'completed',
+                              status: terminalStatus,
                               summary: answer,
                               tickCount: 1,
                               metadata: {
@@ -3420,11 +3426,11 @@ export const tasksRouter = router({
                             asharePersisted = persisted.persisted;
                           }
                         }
-                        if (asharePersisted && terminalStatus === 'completed') {
+                        if (asharePersisted && terminalStatus !== 'failed') {
                           broadcastToUser(ctx.userId, {
                             type: 'server.task.terminal',
                             taskId,
-                            status: 'completed',
+                            status: terminalStatus,
                             summary: answer,
                           });
                         } else if (asharePersisted) {
@@ -4876,6 +4882,17 @@ export const tasksRouter = router({
                         outputTokens: 0,
                         durationMs: 0,
                       };
+                    }
+                    if (
+                      generateOutcome.status === 'completed' &&
+                      deliverableAnswer(generateOutcome.summary) === null &&
+                      (await handOverToBrowser(
+                        '模型只写出了浏览器操作指令、没有给出答案，已自动改用云端浏览器重试一次',
+                      ))
+                    ) {
+                      // FIX-33: the fallback "answer" was a tool call — the user wants a
+                      // page operated, so the same task goes to the browser once.
+                      return;
                     }
                     if (generateOutcome.status === 'completed') {
                       outcome = {

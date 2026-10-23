@@ -192,6 +192,30 @@ export function placeScreencastReadableTop({
   };
 }
 
+/**
+ * FIX-33 「100% 原尺寸」: one page CSS pixel per screen pixel (a device-scale frame is
+ * drawn at 1/pixelRatio); the host scrolls instead of shrinking the page.
+ */
+export function placeScreencastActual({
+  sourceWidth,
+  sourceHeight,
+  pixelRatio = 1,
+}: {
+  sourceWidth: number;
+  sourceHeight: number;
+  pixelRatio?: number;
+}): ScreencastContainPlacement | null {
+  if (!isPositiveFinite(sourceWidth) || !isPositiveFinite(sourceHeight)) return null;
+  const scale = 1 / (isPositiveFinite(pixelRatio) ? pixelRatio : 1);
+  return {
+    width: Math.max(1, Math.round(sourceWidth * scale)),
+    height: Math.max(1, Math.round(sourceHeight * scale)),
+    scale,
+    offsetX: 0,
+    offsetY: 0,
+  };
+}
+
 export function mapClientPointToScreencast({
   clientX,
   clientY,

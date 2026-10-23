@@ -23,6 +23,8 @@ const PLATFORM_ERROR_CODES: ReadonlySet<string> = new Set([
   'MODEL_PROVIDER_NOT_CONFIGURED',
   'MODEL_MIGRATION_IN_PROGRESS',
   'FIRECRAWL_NOT_CONFIGURED',
+  // FIX-33: a legacy lane delivered nothing but tool-call syntax.
+  'TOOL_CALL_TEXT_ONLY',
 ]);
 
 /** Core settlements store a fixed reason: generation-only and local failures are ours. */
@@ -32,6 +34,8 @@ const PLATFORM_CORE_REASONS: ReadonlySet<string> = new Set([
   // FIX-30 review: the model wrote out a tool call or an empty opener — ours.
   // UNREAD_SOURCE (an answer claiming an unread source) is not refunded.
   CORE_QUALITY_FAILURE_COPY.NON_ANSWER,
+  // FIX-33: a named-site search routed to generate and answered from memory.
+  CORE_QUALITY_FAILURE_COPY.UNREAD_LISTING,
 ]);
 
 export function platformFailureReason(task: {

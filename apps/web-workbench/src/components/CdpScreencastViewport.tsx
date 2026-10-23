@@ -14,12 +14,14 @@ import {
   type BrowserViewportSize,
   browserViewportForHost,
   browserViewportV2ForHost,
+  fitDesktopViewportForHost,
   shouldSendBrowserViewport,
 } from '@/lib/browser-workspace-viewport';
 import { hdDebug } from '@/lib/hd-debug';
 import {
   mapClientPointToBrowserFrame,
   mapClientPointToScreencast,
+  placeScreencastActual,
   placeScreencastContainTop,
   placeScreencastReadableTop,
   readableScreencastAutoScrollKey,
@@ -78,6 +80,11 @@ interface Props {
    */
   onUrlChange?: (url: string) => void;
   fitMode?: 'contain' | 'readable';
+  /**
+   * FIX-33 「适应面板 / 100% 原尺寸」: `fit` (default) scales the whole page into the
+   * panel keeping its aspect ratio; `actual` shows it 1:1 and the panel scrolls.
+   */
+  displayMode?: 'fit' | 'actual';
   viewportV2?: boolean;
   /** Explicit desktop profile; panel size never silently changes it. */
   desktopViewport?: BrowserViewportSize;
@@ -123,6 +130,7 @@ export function CdpScreencastViewport({
   reconnectSignal = 0,
   onUrlChange,
   fitMode = 'contain',
+  displayMode = 'fit',
   viewportV2 = false,
   desktopViewport,
   className,
@@ -194,7 +202,7 @@ export function CdpScreencastViewport({
     hostRef.current?.scrollTo({ left: 0, top: 0 });
     inputBridgeStateRef.current = INITIAL_CDP_INPUT_BRIDGE_STATE;
     if (hiddenInputRef.current) hiddenInputRef.current.value = '';
-  }, [fitMode, wsUrl]);
+  }, [fitMode, displayMode, wsUrl]);
 
   const [status, setStatus] = React.useState<CdpScreencastStatus>('idle');
   const onStatusChangeRef = React.useRef(onStatusChange);
@@ -283,10 +291,15 @@ export function CdpScreencastViewport({
             hostWidth: host.clientWidth,
             hostHeight: host.clientHeight,
             renderMode: 'auto',
+            // Without an explicit profile the page lays out at a desktop width
+            // shaped like the panel (FIX-33), not at the narrow panel width.
             desktopViewport:
               desktopWidth !== undefined && desktopHeight !== undefined
                 ? { width: desktopWidth, height: desktopHeight }
-                : undefined,
+                : (fitDesktopViewportForHost({
+                    hostWidth: host.clientWidth,
+                    hostHeight: host.clientHeight,
+                  }) ?? undefined),
           })
         : browserViewportForHost({ hostWidth: rect.width, hostHeight: rect.height });
       const deviceScaleFactor = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
@@ -358,12 +371,20 @@ export function CdpScreencastViewport({
         !viewportV2 && fitMode === 'readable'
           ? placeScreencastReadableTop
           : placeScreencastContainTop;
-      const placement = place({
-        hostWidth: viewportV2 ? host.clientWidth : rect.width,
-        hostHeight: viewportV2 ? host.clientHeight : rect.height,
-        sourceWidth: srcW,
-        sourceHeight: srcH,
-      });
+      const geometry = geometryRef.current;
+      const placement =
+        displayMode === 'actual'
+          ? placeScreencastActual({
+              sourceWidth: srcW,
+              sourceHeight: srcH,
+              pixelRatio: geometry?.cssWidth ? srcW / geometry.cssWidth : 1,
+            })
+          : place({
+              hostWidth: viewportV2 ? host.clientWidth : rect.width,
+              hostHeight: viewportV2 ? host.clientHeight : rect.height,
+              sourceWidth: srcW,
+              sourceHeight: srcH,
+            });
       if (!placement) return;
       // Keep the remote page pinned to the top. Portrait readable
       // mode may make wide desktop pages horizontally scrollable, so
@@ -412,7 +433,7 @@ export function CdpScreencastViewport({
       window.removeEventListener('resize', onWindowResize);
       sourceDimsRecomputeRef.current = null;
     };
-  }, [fitMode, status, wsUrl, viewportV2]);
+  }, [fitMode, displayMode, status, wsUrl, viewportV2]);
 
   const drawFrameRef = React.useRef(drawFrame);
   drawFrameRef.current = drawFrame;
@@ -845,7 +866,9 @@ export function CdpScreencastViewport({
         ref={hostRef}
         className={cn(
           'cdp-screencast-host relative w-full min-h-0 min-w-0 flex-1',
-          !viewportV2 && fitMode === 'readable' ? 'overflow-auto' : 'overflow-hidden',
+          displayMode === 'actual' || (!viewportV2 && fitMode === 'readable')
+            ? 'overflow-auto'
+            : 'overflow-hidden',
         )}
       >
         <div

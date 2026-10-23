@@ -164,7 +164,7 @@ export async function runAshareQa(
 ): Promise<AshareQaResult> {
   const now = deps.now ?? new Date();
   const mode = deps.mode ?? 'prod';
-  const data = await fetchFactData(deps.client, match);
+  const data = await fetchFactData(deps.client, match, { now });
   let body = renderFactCard(data, match, now, mode);
 
   // 看懂层 P1（flag 注入）：轻量速览追加 ★ 核心子集注解（腿A 确定性，零新增 LLM；
@@ -217,7 +217,7 @@ export async function runAshareQa(
     return { answer: assemblePlain(body), degraded: false, interpreted: false };
   }
 
-  const factContext = buildFactContext(data, match);
+  const factContext = buildFactContext(data, match, undefined, now);
   let interpretation = '';
   try {
     interpretation = (
@@ -360,7 +360,7 @@ export async function runAsharePanorama(
 ): Promise<AshareQaResult> {
   const now = deps.now ?? new Date();
   const mode = deps.mode ?? 'prod';
-  const data = await fetchPanoramaData(deps.client, match);
+  const data = await fetchPanoramaData(deps.client, match, now);
   deps.logger.info(
     {
       ...deps.context,
@@ -413,7 +413,7 @@ export async function runAsharePanorama(
       );
     }
   }
-  const context = buildPanoramaContext(data, match);
+  const context = buildPanoramaContext(data, match, now);
 
   let interpretation = '';
   try {

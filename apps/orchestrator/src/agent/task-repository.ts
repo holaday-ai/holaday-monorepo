@@ -34,6 +34,7 @@ import {
   isTaskTerminalStatus,
   taskRunnerOutcomeSourceStatuses,
 } from '../task-status.js';
+import { TOOL_CALL_TEXT_ONLY, deliverableAnswer } from './generate-answer-guard.js';
 import type { PendingConfirm, PlannedStep, TaskState } from './task-controller.js';
 import { runQueueDatabase, runQueueWrite } from './task-queue-persistence.js';
 import { normalizeVideoRetryIntent } from './video/video-retry-policy.js';
@@ -1075,6 +1076,20 @@ export class TaskRepository {
           metadata?: Record<string, unknown>;
         },
   ): Promise<{ persisted: boolean }> {
+    // FIX-33: the last display filter on every legacy lane — tool-call syntax never
+    // reaches the user, and a "result" that was only that is not completed.
+    if (outcome.status === 'completed' || outcome.status === 'partial_success') {
+      const shown = deliverableAnswer(outcome.summary);
+      if (shown === null) {
+        const { summary: _summary, status: _status, ...evidence } = outcome;
+        outcome = {
+          ...evidence,
+          status: 'failed',
+          reason: TOOL_CALL_TEXT_ONLY.reason,
+          errorCode: TOOL_CALL_TEXT_ONLY.code,
+        };
+      } else if (shown !== outcome.summary) outcome = { ...outcome, summary: shown };
+    }
     const [taskRow] = await runQueueDatabase(() =>
       this.db
         .select({ id: tasks.id, result: tasks.result })

@@ -92,7 +92,11 @@ export function planSearchFallback(intent: string, wall: SearchWall): SearchFall
   query ??=
     intent
       .match(/(?:搜索|检索|查询|搜一下|\bsearch(?:\s+for)?\b)\s*[:：]?\s+([^\n，,。；;]+)/i)?.[1]
-      ?.split(/返回|读出|列出|前\s*\d+|\b(?:return|give|top)\b/i)[0]
+      // FIX-33 (new-google 「搜索 Claude 并总结第一条」 searched for 「Claude 并总结第一条」):
+      // what the user asks done with the results is not part of the query.
+      ?.split(
+        /返回|读出|列出|前\s*\d+|\b(?:return|give|top)\b|\s*(?:并且?|然后|再|随后|之后)\s*(?=总结|概括|告诉|列出|读|看|打开|点开|返回|给)|\s+(?:总结|概括|告诉我)|\s+(?:and|then)\s+(?:summari[sz]e|tell|open|read|list|give)\b/i,
+      )[0]
       ?.trim() ?? null;
   if (!query || query.length > 500 || /[\r\n]/.test(query)) return null;
   const to: Engine = from === 'Bing' ? 'DuckDuckGo' : 'Bing';

@@ -55,7 +55,6 @@ import { externalLinkConfirmDescription, safeExternalHttpHref } from '@/lib/exte
 import { hdDebug } from '@/lib/hd-debug';
 import {
   fitScreencastContain,
-  fitScreencastReadable,
   readableScreencastAutoScrollKey,
   readableScreencastStartScrollLeft,
 } from '@/lib/screencast-fit';
@@ -516,6 +515,9 @@ function CloudBrowserPanel({
   const streamTransport = React.useMemo(() => readStreamTransport(), []);
   const usingCdp = streamTransport === 'cdp';
   const [viewportV2, setViewportV2] = React.useState(false);
+  // FIX-33: the live page is fitted into the panel whole by default (BOSS: a page cut
+  // off on the right, reachable only by scrollbars); 100% is an explicit choice.
+  const [displayMode, setDisplayMode] = React.useState<'fit' | 'actual'>('fit');
   React.useEffect(() => {
     let live = true;
     setViewportV2(false);
@@ -1013,13 +1015,17 @@ function CloudBrowserPanel({
     if (natW <= 0 || natH <= 0) return;
     const hostW = host.clientWidth;
     const hostH = host.clientHeight;
-    const fitFn = isSheet ? fitScreencastReadable : fitScreencastContain;
-    const fit = fitFn({
-      hostWidth: hostW,
-      hostHeight: hostH,
-      sourceWidth: natW,
-      sourceHeight: natH,
-    });
+    // FIX-33: a phone sheet sees the whole page too (it used to be a wider, readable
+    // crop scrolled sideways); 100% shows it at its own size.
+    const actual = displayMode === 'actual';
+    const fit = actual
+      ? { width: natW, height: natH, scale: 1 }
+      : fitScreencastContain({
+          hostWidth: hostW,
+          hostHeight: hostH,
+          sourceWidth: natW,
+          sourceHeight: natH,
+        });
     if (!fit) return;
     img.style.width = `${fit.width}px`;
     img.style.height = `${fit.height}px`;
@@ -1029,7 +1035,7 @@ function CloudBrowserPanel({
       hostHeight: hostH,
       contentWidth: fit.width,
     });
-    if (isSheet && !interactive && frameKey && screencastAutoScrolledKeyRef.current !== frameKey) {
+    if (actual && !interactive && frameKey && screencastAutoScrolledKeyRef.current !== frameKey) {
       screencastAutoScrolledKeyRef.current = frameKey;
       const startLeft = readableScreencastStartScrollLeft({
         contentWidth: fit.width,
@@ -1037,7 +1043,7 @@ function CloudBrowserPanel({
       });
       host.scrollTo({ left: startLeft, top: 0 });
     }
-  }, [frame?.imageBase64, interactive, isSheet]);
+  }, [frame?.imageBase64, interactive, displayMode]);
   React.useEffect(() => {
     const host = screencastHostRef.current;
     if (!host) return;
@@ -1731,11 +1737,11 @@ function CloudBrowserPanel({
               <div
                 className={cn(
                   'relative h-full min-h-0 min-w-0',
-                  isSheet && !viewportV2 ? 'shrink-0' : 'w-full',
-                  isSheet && !viewportV2 ? 'overflow-auto' : 'overflow-hidden',
+                  isSheet && !viewportV2 && !usingCdp ? 'shrink-0' : 'w-full',
+                  isSheet && !viewportV2 && !usingCdp ? 'overflow-auto' : 'overflow-hidden',
                 )}
                 style={
-                  isSheet && !viewportV2
+                  isSheet && !viewportV2 && !usingCdp
                     ? {
                         // noVNC handles its own internal canvas scale.
                         // In a portrait sheet, giving it only the
@@ -1756,7 +1762,8 @@ function CloudBrowserPanel({
                     viewOnly={!interactiveActive}
                     controlLease={ownership.lease}
                     viewportV2={viewportV2}
-                    fitMode={isSheet && !viewportV2 ? 'readable' : 'contain'}
+                    fitMode="contain"
+                    displayMode={displayMode}
                     onStatusChange={(s: CdpScreencastStatus) =>
                       // Reuse the VNC status state — the enum values
                       // overlap exactly so the existing
@@ -2015,6 +2022,7 @@ function CloudBrowserPanel({
           </div>
           {!viewportV2 &&
             liveBrowserCanPan &&
+            !usingCdp &&
             !terminalSessionUnavailable &&
             !hibernated &&
             !interactiveActive &&
@@ -2023,7 +2031,7 @@ function CloudBrowserPanel({
                 左右滑动查看页面
               </div>
             )}
-          {!fullscreen && useVnc && showHeader && !(isSheet && viewportV2) && (
+          {!fullscreen && useVnc && showHeader && (usingCdp || !(isSheet && viewportV2)) && (
             <footer
               className={cn(
                 'flex items-center justify-between border-t bg-white/78 text-muted-foreground backdrop-blur dark:bg-background/75',
@@ -2031,12 +2039,16 @@ function CloudBrowserPanel({
                 BROWSER_DIVIDER,
               )}
             >
-              <span>
-                {browserViewportFooterLabel({
-                  usingCdp,
-                  viewport: displayFrame?.viewport,
-                })}
-              </span>
+              {usingCdp ? (
+                <BrowserDisplayModeToggle mode={displayMode} onChange={setDisplayMode} />
+              ) : (
+                <span>
+                  {browserViewportFooterLabel({
+                    usingCdp,
+                    viewport: displayFrame?.viewport,
+                  })}
+                </span>
+              )}
               <span>{vncStatus === 'connected' ? '画面实时同步' : ''}</span>
             </footer>
           )}
@@ -3391,5 +3403,40 @@ function FullscreenFloatingToolbar({
         </button>
       )}
     </div>
+  );
+}
+
+/** FIX-33 「适应面板 / 100% 原尺寸」 — local display only; the remote page is not resized. */
+function BrowserDisplayModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: 'fit' | 'actual';
+  onChange: (mode: 'fit' | 'actual') => void;
+}): JSX.Element {
+  const option = (value: 'fit' | 'actual', label: string, title: string) => (
+    <button
+      type="button"
+      aria-pressed={mode === value}
+      title={title}
+      onClick={() => onChange(value)}
+      className={cn(
+        'rounded px-1.5 leading-5 transition-colors',
+        mode === value
+          ? 'bg-[#FF0061] text-white'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+      )}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <fieldset
+      aria-label="画面显示方式"
+      className="m-0 inline-flex min-w-0 items-center gap-0.5 border-0 p-0"
+    >
+      {option('fit', '适应面板', '按面板大小等比缩放，完整显示整个页面')}
+      {option('actual', '100% 原尺寸', '按页面原始尺寸显示，可滚动查看')}
+    </fieldset>
   );
 }

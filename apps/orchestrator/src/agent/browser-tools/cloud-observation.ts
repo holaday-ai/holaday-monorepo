@@ -61,7 +61,11 @@ const KNOWN_TELEMETRY: ReadonlyArray<readonly [host: RegExp, path: RegExp]> = [
   // FIX-30 (BENCH-1 pauses, fix-30/pause-triggers.md): analytics fired from the
   // page's own keydown/click listeners while the run searched — Amazon's client
   // metrics, Alibaba's mmstat (高德/淘宝), GrowingIO (宜家), Baidu Tongji.
-  [/^unagi(?:-[a-z]+)?\.amazon\.com$/, /^\/1\/events\//],
+  // FIX-33 (new-amazon-sg paused on unagi.amazon.sg): the regional stores too.
+  [
+    /^unagi(?:-[a-z]+)?\.amazon\.(?:com|sg|co\.jp|co\.uk|de|fr|it|es|nl|se|pl|ca|in|ae|sa|eg|cn|com\.(?:au|mx|br|tr|be))$/,
+    /^\/1\/events\//,
+  ],
   [/(?:^|\.)mmstat\.com$/, /^\//],
   // FIX-30 review rerun (IKEA p07): GrowingIO custom events go to /custom/<id>/web/cstm.
   [/(?:^|\.)growingio\.com$/, /^\/(?:v\d+|custom)\/[^/]+\/web\/(?:action|pv|track|cstm)$/],

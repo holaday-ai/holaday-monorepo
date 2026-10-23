@@ -39,3 +39,29 @@ export function syntheticFrame(width = 960, height = 600) {
 }
 
 export const BROWSER_FRAME = syntheticFrame();
+
+/**
+ * FIX-33: a page-sized surface whose last 16 columns are dark, so a check can see that
+ * the right edge of the remote page is on screen (not cut off behind a scrollbar).
+ */
+export function edgeMarkedFrame(width, height) {
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < width; x++) {
+      const offset = y * (width * 3 + 1) + 1 + x * 3;
+      const edge = x >= width - 16 || y >= height - 16;
+      const accent = y < 45;
+      raw.set(edge ? [17, 24, 39] : accent ? [255, 0, 97] : [248, 250, 252], offset);
+    }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]).toString('base64');
+}

@@ -13,40 +13,7 @@
  * exists for readability.
  */
 
-const TOOL_TAG_NAMES = [
-  'tool_call',
-  'tool_calls',
-  'tool_response',
-  'tool_use',
-  'tool_result',
-  'function_calls',
-  'function_call',
-  'function_response',
-  'invoke',
-  'parameter',
-];
-
-/**
- * Build a regex that matches an opening + closing tag pair (with
- * arbitrary content between them, including newlines) for any of
- * the tag names. Greedy match `[\s\S]*?` is non-greedy so
- * "a <tool_call>x</tool_call> b <tool_call>y</tool_call> c"
- * strips both pairs cleanly without eating the middle text.
- */
-function buildPairedRegex(): RegExp {
-  const tagAlternation = TOOL_TAG_NAMES.join('|');
-  return new RegExp(`<(${tagAlternation})\\b[^>]*>[\\s\\S]*?</\\1\\s*>`, 'gi');
-}
-
-const PAIRED_TAG_RE = buildPairedRegex();
-
-/**
- * Standalone fragments that escaped the paired strip — orphan
- * opening or closing tags that didn't have a partner. We don't
- * try to be clever about content; if we see `<tool_call>` without
- * a closer, drop it. Same for the closer alone.
- */
-const ORPHAN_TAG_RE = new RegExp(`</?(?:${TOOL_TAG_NAMES.join('|')})\\b[^>]*/?>`, 'gi');
+import { stripToolCallMarkup } from '@holaday/shared-types';
 
 /**
  * Massive base64 blobs (e.g. inline screenshots the model occasionally
@@ -320,9 +287,10 @@ const STRAY_CLOSER_LINE_RE = /^[ \t]*[\}\]]{1,3}[\s,]*$/gm;
 export function sanitizeFinalText(input: string | null | undefined): string {
   if (!input) return '';
   let text = input;
-  // 1. XML tool envelopes (paired + orphan).
-  text = text.replace(PAIRED_TAG_RE, '');
-  text = text.replace(ORPHAN_TAG_RE, '');
+  // 1. XML tool envelopes (paired + orphan) and any other tool-call syntax
+  //    (FIX-33: `<li_call><function>browser_use</function>…`) — see tool-call-markup.ts.
+  //    Code the user asked about (fences, inline code) is left alone.
+  text = stripToolCallMarkup(text);
   // 2. Tool-response JSON blocks — handled BEFORE the bare-base64
   //    pass because the JSON wrapping (`"data": "..."`) has no
   //    whitespace boundary, so STANDALONE_BASE64_RE wouldn't catch
