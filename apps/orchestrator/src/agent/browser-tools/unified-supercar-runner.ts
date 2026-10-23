@@ -6,7 +6,7 @@ import {
 } from '../../browser-profiles/profile-store.js';
 import { browserCapabilities } from '../../config/browser-capabilities.js';
 import { logger } from '../../config/logger.js';
-import { reviewListAnswer } from '../../execution/answer-verifier.js';
+import { listPartialNote, reviewListAnswer } from '../../execution/answer-verifier.js';
 import { browserOutputGuidance } from '../../execution/execution-contract.js';
 import { getContract } from '../../execution/execution-pipeline.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
@@ -630,7 +630,12 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       },
       intent: guidance ? `${opts.intent}\n\n【结果要求】\n${guidance}` : opts.intent,
       ...(contract && guidance
-        ? { reviewFinish: (summary: string) => reviewListAnswer(contract, summary) }
+        ? {
+            reviewFinish: (summary: string, pageText?: string) =>
+              reviewListAnswer(contract, summary, pageText),
+            partialNote: (summary: string, pageText?: string) =>
+              listPartialNote(contract, summary, pageText),
+          }
         : {}),
       adapter,
       ...(opts.unifiedWebSearch ? { webSearch: opts.unifiedWebSearch } : {}),

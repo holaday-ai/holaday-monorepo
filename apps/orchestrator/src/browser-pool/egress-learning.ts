@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { dirname, join } from 'node:path';
 import { browserProxyUpstreams, proxiedDomain } from '../agent/browser-tools/domain-egress.js';
+import { sharedHostingSite } from '../agent/shared-hosting.js';
 
 /**
  * OPEN-ANY-SITE-1 — sites seen blocking the datacenter egress (a verification
@@ -39,6 +40,8 @@ export function siteOf(hostname: string): string | null {
   const host = hostname.toLowerCase().replace(/\.$/, '');
   if (!host || isIP(host) || !host.includes('.')) return null;
   if (/(?:^|\.)(?:localhost|local|internal|invalid|test|example|onion)$/.test(host)) return null;
+  const shared = sharedHostingSite(host);
+  if (shared) return shared;
   const labels = host.split('.');
   const lastTwo = labels.slice(-2).join('.');
   return labels.slice(TWO_LEVEL.has(lastTwo) && labels.length > 2 ? -3 : -2).join('.');

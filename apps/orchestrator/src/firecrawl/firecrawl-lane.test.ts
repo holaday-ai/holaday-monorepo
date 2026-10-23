@@ -267,3 +267,42 @@ it('caller abort stops Firecrawl retries within the task budget', async () => {
   await pending;
   expect(calls).toBe(1);
 });
+
+/** FIX-32 (BENCH-1 r03/n06): cached search results carry their age; a fresh scrape asks for none. */
+describe('createFirecrawlLane — freshness', () => {
+  it('search reports when a result was cached', async () => {
+    const { fetch, calls } = makeFetch({
+      status: 200,
+      body: {
+        success: true,
+        data: [
+          {
+            url: 'https://nodejs.org/zh-cn/download',
+            markdown: 'LTS v24.22.0',
+            metadata: { cachedAt: '2026-10-21T00:35:14.707Z' },
+          },
+          { url: 'https://nodejs.org/zh-tw/download', markdown: 'LTS v24.22.1' },
+        ],
+      },
+    });
+    const result = await makeLane(fetch).search('nodejs 最新 LTS');
+    expect(result).toMatchObject({
+      ok: true,
+      results: [
+        { url: 'https://nodejs.org/zh-cn/download', cachedAt: '2026-10-21T00:35:14.707Z' },
+        { url: 'https://nodejs.org/zh-tw/download' },
+      ],
+    });
+    expect(result.ok && 'cachedAt' in result.results[1]!).toBe(false);
+    expect(JSON.parse(String(calls[0]?.init?.body))).not.toHaveProperty('maxAge');
+  });
+  it('a fresh scrape sends maxAge 0; a plain one does not', async () => {
+    const page = { status: 200, body: { success: true, data: { markdown: '# x' } } };
+    const { fetch, calls } = makeFetch(page, page);
+    const lane = makeLane(fetch);
+    await lane.scrape('https://nodejs.org/', { fresh: true });
+    await lane.scrape('https://nodejs.org/');
+    expect(JSON.parse(String(calls[0]?.init?.body))).toMatchObject({ maxAge: 0 });
+    expect(JSON.parse(String(calls[1]?.init?.body))).not.toHaveProperty('maxAge');
+  });
+});

@@ -359,6 +359,48 @@ function withoutNote(value: string): string | null {
 
 const skeleton = (value: string) => value.replace(/\d+(?:\.\d+)?/g, '#');
 
+/**
+ * FIX-32 (Deploy-32 b-p02): a regional page writes one price as 「S$11.46」 or 「SGD 11.46」.
+ * The other spellings of a normalized price value, so either grounds the other.
+ */
+const CURRENCY_SYMBOLS: Record<string, string[]> = {
+  sgd: ['s$'],
+  usd: ['us$'],
+  hkd: ['hk$'],
+  twd: ['nt$'],
+  aud: ['a$', 'au$'],
+  cad: ['c$', 'ca$'],
+  cny: ['¥'],
+  rmb: ['¥'],
+  jpy: ['¥'],
+  eur: ['€'],
+  gbp: ['£'],
+  krw: ['₩'],
+  inr: ['₹'],
+};
+function currencyForms(value: string): string[] {
+  const m = value.match(/^([a-z]{3}|[a-z]{0,2}\$|[¥€£₩₹])\s?(\d+(?:\.\d+)?)$/);
+  if (!m) return [];
+  const [, unit, amount] = m as unknown as [string, string, string];
+  const codes = CURRENCY_SYMBOLS[unit]
+    ? [unit]
+    : Object.keys(CURRENCY_SYMBOLS).filter((code) => CURRENCY_SYMBOLS[code]!.includes(unit));
+  return codes.flatMap((code) =>
+    [code, ...CURRENCY_SYMBOLS[code]!].flatMap((form) => [`${form}${amount}`, `${form} ${amount}`]),
+  );
+}
+
+/**
+ * A fee amount, not the item's price (D31 b-p02: 「s$9.53 delivery wed, oct 28」). Only the
+ * amount goes: 「price s$14.99, s$9.53 delivery」 still shows the item's own price.
+ */
+const CURRENCY_MARK = '(?:[a-z]{0,3}\\$|[¥€£₩₹]|\\b[a-z]{3} ?)?';
+const FEE_AMOUNT_RE = new RegExp(
+  `${CURRENCY_MARK}\\d[\\d.,]*\\s*(?:delivery|shipping|import (?:fees?|charges?)|运费|配送费|邮费|快递费)` +
+    `|(?:运费|配送费|邮费|快递费|delivery(?: fee)?|shipping(?: fee)?)\\s*[:：]?\\s*${CURRENCY_MARK}\\d[\\d.,]*`,
+  'gi',
+);
+
 function sourceLabel(fact: Fact) {
   return fact.tabId ? `标签 ${fact.tabId}` : (fact.sourceURL ?? '该页面');
 }
@@ -546,7 +588,8 @@ export function assessCompletionFacts(input: {
     const quoted = fact.quote ? undefined : quotedRuns(fact.value)[0]?.quote;
     const candidates = [fact.value, withoutNote(fact.value), quoted, stripEdgeQuotes(fact.value)]
       .filter((v): v is string => Boolean(v))
-      .map(normalizeFact);
+      .map(normalizeFact)
+      .flatMap((v) => [v, ...currencyForms(v)]);
     const bound = (page: (typeof pages)[number]) =>
       (!fact.tabId || page.tabId === fact.tabId) &&
       (!fact.sourceURL || sameSource(page.sourceURL, fact.sourceURL));
@@ -674,13 +717,16 @@ export function assessCompletionFacts(input: {
       // The value after the fact's own label first; 「0 in」 of rainfall is not
       // the pressure's page value.
       const name = normalizeFact(fact.name);
+      // FIX-32: a price is never contradicted by the delivery fee shaped like it.
+      const priceValue = currencyForms(value).length > 0 || /价|price/i.test(fact.name);
+      const scrub = (run: string) => (priceValue ? run.replace(FEE_AMOUNT_RE, ' ') : run);
       const labelled = eligible
-        .map((page) => labelledValue(page.values, name, shape))
+        .map((page) => labelledValue(page.values.map(scrub), name, shape))
         .find((run) => run !== undefined);
       const conflict =
         labelled ??
         eligible
-          .flatMap((page) => page.lines)
+          .flatMap((page) => page.lines.map(scrub))
           .find((line) => /\d/.test(line) && skeleton(line).includes(shape));
       if (conflict) {
         contradictions.push(`${label} 与页面不符；页面为「${conflict.trim().slice(0, 120)}」`);

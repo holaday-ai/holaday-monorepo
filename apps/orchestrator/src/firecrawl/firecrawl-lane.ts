@@ -40,6 +40,11 @@ export interface FirecrawlSearchResult {
   url: string;
   markdown: string;
   title?: string;
+  /**
+   * FIX-32 (BENCH-1 r03/n06): when Firecrawl served the page from its cache, the time it
+   * was fetched. Search results can be days old (and v1 search ignores maxAge).
+   */
+  cachedAt?: string;
 }
 
 export interface FirecrawlSearchOk {
@@ -59,6 +64,8 @@ export type FirecrawlSearchResultBundle = FirecrawlSearchOk | FirecrawlError;
 
 export interface FirecrawlScrapeOpts {
   signal?: AbortSignal;
+  /** FIX-32: fetch the page now, never from Firecrawl's cache (maxAge 0). */
+  fresh?: boolean;
 }
 
 export interface FirecrawlSearchOpts {
@@ -196,6 +203,7 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
         {
           url: trimmed,
           formats: ['markdown'],
+          ...(scrapeOpts?.fresh ? { maxAge: 0 } : {}),
         },
         scrapeOpts?.signal,
       );
@@ -258,7 +266,12 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
         | {
             success?: boolean;
             error?: string;
-            data?: Array<{ url?: string; title?: string; markdown?: string }>;
+            data?: Array<{
+              url?: string;
+              title?: string;
+              markdown?: string;
+              metadata?: { cachedAt?: string };
+            }>;
             creditsUsed?: number;
           }
         | undefined;
@@ -272,6 +285,7 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
           url: r.url!,
           markdown: r.markdown!,
           ...(r.title ? { title: r.title } : {}),
+          ...(typeof r.metadata?.cachedAt === 'string' ? { cachedAt: r.metadata.cachedAt } : {}),
         }));
       const credits = j.creditsUsed;
       return {

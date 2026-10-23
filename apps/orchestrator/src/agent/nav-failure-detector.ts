@@ -26,6 +26,7 @@
  * (which catches separate failure modes like empty / fabricated URL).
  */
 import type { NavErrorKind } from './nav-error-translator.js';
+import { sharedHostingSite } from './shared-hosting.js';
 
 export interface NavFailureSignal {
   detected: boolean;
@@ -197,8 +198,10 @@ function loadedPageSays(
 
 const SECOND_LEVEL = /^(?:com|net|org|gov|edu|co|ac|ne|or)$/;
 
-/** developer.mozilla.org → mozilla.org; news.bbc.co.uk → bbc.co.uk. */
+/** developer.mozilla.org → mozilla.org; news.bbc.co.uk → bbc.co.uk; alice.github.io stays. */
 function siteOf(hostname: string): string {
+  const shared = sharedHostingSite(hostname);
+  if (shared) return shared;
   const labels = hostname.toLowerCase().replace(/\.$/, '').split('.');
   const keep =
     labels.length >= 3 && labels.at(-1)!.length === 2 && SECOND_LEVEL.test(labels.at(-2)!) ? 3 : 2;

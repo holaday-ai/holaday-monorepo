@@ -218,6 +218,10 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
     // bare inputs, no form.
     (/(?:^|\s)s-input(?:\s|$)/.test(el.getAttribute('class') || '') &&
       /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname)) ||
+    // FIX-32: Best Buy's header search is a bare textarea; Enter opens
+    // /site/searchpage.jsp?st=… by GET (DOM and request checked 2026-10-22).
+    (el.getAttribute('id') === 'autocomplete-search-bar' &&
+      /(?:^|\.)bestbuy\.com$/i.test(location.hostname)) ||
     (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
       /(?:^|\.)amap\.com$/i.test(location.hostname));
   // YouTube's search form posts to /results (FIX-31 core-04).

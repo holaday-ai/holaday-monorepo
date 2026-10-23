@@ -295,6 +295,27 @@ describe('a page Firecrawl could not read goes to the browser', () => {
     expect(write).toContain('验证或登录页');
   });
 
+  // FIX-32: a search whose every result was a wall is not answered from memory either.
+  it('a search whose results were all walls fails honestly when the browser cannot start', async () => {
+    const spies = setup('', [], {
+      ...failedScrape('blocked', '网络搜索（Firecrawl）拿到的结果页都是验证或登录页'),
+      source: 'search',
+    });
+    spies.retryCreate.mockRejectedValueOnce(new Error('BROWSER_RETRY_RUNTIME_UNAVAILABLE'));
+    const generate = vi.spyOn(generating, 'runGenerateTask');
+    await tasksRouter.createCaller(context()).create({ intent: PAGE, expertMode: 'normal' });
+    await vi.waitFor(
+      () => expect(spies.persisted.mock.calls.length + spies.settled.mock.calls.length).toBe(1),
+      { timeout: 10_000 },
+    );
+    expect(generate).not.toHaveBeenCalled();
+    const write = JSON.stringify(
+      spies.persisted.mock.calls.at(-1) ?? spies.settled.mock.calls.at(-1),
+    );
+    expect(write).toContain('failed');
+    expect(write).toContain('都是验证或登录页');
+  });
+
   it('records where the answer was read and what the fetch cost', async () => {
     const spies = setup('', [], {
       status: 'completed',

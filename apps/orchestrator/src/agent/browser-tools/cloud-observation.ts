@@ -97,6 +97,45 @@ function writeIntentPayload(url: URL, request: Request): boolean {
   return WRITE_INTENT_RE.test(decoded);
 }
 
+/**
+ * FIX-32: QQ 音乐's one RPC endpoint carries reads and writes alike; the body names the
+ * method. Only methods checked to be reads pass (public GET 2026-10-22: chart detail,
+ * chart list, search). The web client's `encoding=ag-1` bodies are encrypted — no method
+ * can be read there, so they stay unknown and pause, as do writes and unknown methods.
+ */
+const QQ_MUSIC_READ_METHODS = new Set([
+  'musicToplist.ToplistInfoServer.GetDetail',
+  'musicToplist.ToplistInfoServer.GetAll',
+  'music.search.SearchCgiService.DoSearchForQQMusicDesktop',
+]);
+export function qqMusicReadRpc(url: URL, body: string): boolean {
+  if (!/(?:^|\.)y\.qq\.com$/i.test(url.hostname)) return false;
+  if (!/^\/cgi-bin\/music[us]?\.fcg$/i.test(url.pathname) || url.searchParams.has('encoding'))
+    return false;
+  if (body.length > 65536) return false;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+  const calls = Object.entries(payload as Record<string, unknown>).filter(
+    ([key]) => key !== 'comm',
+  );
+  return (
+    calls.length > 0 &&
+    calls.every(([, call]) => {
+      const { module, method } = (call ?? {}) as { module?: unknown; method?: unknown };
+      return (
+        typeof module === 'string' &&
+        typeof method === 'string' &&
+        QQ_MUSIC_READ_METHODS.has(`${module}.${method}`)
+      );
+    })
+  );
+}
+
 /** Akamai Bot Manager's sensor POST (BestBuy): an opaque path, a 「{"sensor_data":…}」 body. */
 function botSensorPost(request: Request): boolean {
   try {
@@ -369,40 +408,54 @@ function collectObservationState() {
             ),
         ),
       );
-  const sensitive =
-    sensitiveKeypad ||
-    fields.some((element) => {
-      const input = element as HTMLInputElement;
-      const style = getComputedStyle(input);
-      if (
-        input.disabled ||
-        input.readOnly ||
-        input.type === 'hidden' ||
-        !input.getClientRects().length ||
-        style.visibility === 'hidden' ||
-        style.display === 'none'
+  // FIX-32 review: the same decision as before, with its cause kept for the handover copy.
+  const fieldKinds = fields.map((element) => {
+    const input = element as HTMLInputElement;
+    const style = getComputedStyle(input);
+    if (
+      input.disabled ||
+      input.readOnly ||
+      input.type === 'hidden' ||
+      !input.getClientRects().length ||
+      style.visibility === 'hidden' ||
+      style.display === 'none'
+    )
+      return null;
+    const identity = [
+      input.name,
+      input.id,
+      input.getAttribute('aria-label'),
+      input.labels?.[0]?.innerText,
+      input.placeholder,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    if (
+      /^cc-/i.test(input.autocomplete) ||
+      /(?:cvv|cvc|card[-_ ]?(?:number|no)|credit[-_ ]?card|pay(?:ment)?[-_ ]?(?:password|pin)|银行卡|卡号|支付密码)/i.test(
+        identity,
       )
-        return false;
-      const identity = [
-        input.name,
-        input.id,
-        input.getAttribute('aria-label'),
-        input.labels?.[0]?.innerText,
-        input.placeholder,
-      ]
-        .filter(Boolean)
-        .join(' ');
-      return (
-        input.type === 'password' ||
-        /^(?:one-time-code|cc-)/i.test(input.autocomplete) ||
-        /(?:otp|cvv|cvc|card[-_ ]?(?:number|no)|credit[-_ ]?card|pay(?:ment)?[-_ ]?(?:password|pin)|验证码|两步验证|银行卡|卡号|支付密码)/i.test(
-          identity,
-        )
-      );
-    }) ||
-    /(?:^|\/)(?:login|signin|sign-in|log-in|checkout|payment|cashier|pay|2fa|verify-identity)(?:\/|$)/i.test(
-      location.pathname,
-    );
+    )
+      return 'payment';
+    if (
+      input.type === 'password' ||
+      /^one-time-code/i.test(input.autocomplete) ||
+      /(?:otp|验证码|两步验证)/i.test(identity)
+    )
+      return 'login';
+    return null;
+  });
+  const paymentPath = /(?:^|\/)(?:checkout|payment|cashier|pay)(?:\/|$)/i.test(location.pathname);
+  const loginPath = /(?:^|\/)(?:login|signin|sign-in|log-in|2fa|verify-identity)(?:\/|$)/i.test(
+    location.pathname,
+  );
+  const maskReason: 'payment' | 'login' | null =
+    sensitiveKeypad || paymentPath || fieldKinds.includes('payment')
+      ? 'payment'
+      : loginPath || fieldKinds.includes('login')
+        ? 'login'
+        : null;
+  const sensitive = maskReason !== null;
   return {
     documentId: root.__holadayObservation.id,
     version: root.__holadayObservation.version,
@@ -426,6 +479,7 @@ function collectObservationState() {
           .filter(Boolean),
       ),
     sensitive,
+    maskReason,
     geometry: [scrollX, scrollY, innerWidth, innerHeight],
   };
 }
@@ -729,8 +783,16 @@ export class CloudObservation {
       !WRITE_PATH_RE.test(url.pathname) &&
       !writeIntentPayload(url, r) &&
       (READ_PATH_RE.test(url.pathname) || botSensorPost(r));
+    let rpcRead = false;
+    if (r.method() === 'POST' && !transactional) {
+      try {
+        rpcRead = qqMusicReadRpc(url, r.postData() ?? '');
+      } catch {
+        rpcRead = false;
+      }
+    }
     const unknownPost =
-      r.method() === 'POST' && graphql !== 'query' && !passiveBeacon && !searchRead;
+      r.method() === 'POST' && graphql !== 'query' && !passiveBeacon && !searchRead && !rpcRead;
     const candidate = transactional || resourceWrite || methodWrite || unknownPost;
     const write = candidate && !!cause;
     const branch =
@@ -929,15 +991,20 @@ export class CloudObservation {
       : frame.locator('input').nth(index);
   }
   async sensitive(page: Page) {
+    return (await this.maskReason(page)) !== null;
+  }
+  /** Why a page is masked (FIX-32 review: the handover says which), or null. */
+  async maskReason(page: Page): Promise<'payment' | 'login' | 'unreadable' | null> {
     // An unreadable child frame cannot be asserted safe to record.
     for (const frame of page.frames()) {
       try {
-        if ((await observationState(frame)).sensitive) return true;
+        const state = await observationState(frame);
+        if (state.sensitive) return state.maskReason ?? 'login';
       } catch {
-        return true;
+        return 'unreadable';
       }
     }
-    return false;
+    return null;
   }
   async read(action: UnifiedBrowserAction): Promise<UnifiedToolResult | null> {
     const { page, frame } = ['switch_tab', 'list_tabs'].includes(action.tool)
@@ -1004,12 +1071,14 @@ export class CloudObservation {
       ].includes(action.tool)
     )
       return null;
-    if (await this.sensitive(page))
+    const maskReason = await this.maskReason(page);
+    if (maskReason)
       return json({
         ...(await this.metadata(frame)),
         redacted: true,
         tree: '已遮挡，未读取：敏感输入页面，请用户接管',
         status: 'redacted_unread',
+        maskReason,
         end: false,
         truncated: true,
       });
@@ -1656,6 +1725,10 @@ async function searchFieldAt(target: Locator): Promise<boolean> {
           // IKEA's header search and Gaode's route from/to boxes are bare inputs, no form.
           (/(?:^|\s)s-input(?:\s|$)/.test(el.getAttribute('class') || '') &&
             /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname)) ||
+          // FIX-32: Best Buy's header search is a bare textarea; Enter opens
+          // /site/searchpage.jsp?st=… by GET (DOM and request checked 2026-10-22).
+          (el.id === 'autocomplete-search-bar' &&
+            /(?:^|\.)bestbuy\.com$/i.test(location.hostname)) ||
           (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
             /(?:^|\.)amap\.com$/i.test(location.hostname))
         );

@@ -293,6 +293,14 @@ describe('implicit form submission (Enter)', () => {
       'https://www.amap.com/ssr/dir',
       /textbox "起点"/,
     ],
+    // FIX-32: Best Buy's header search as read on 2026-10-22 (no form; Enter → GET
+    // /site/searchpage.jsp?st=…).
+    [
+      'Best Buy',
+      `<div id="autocomplete-search-bar-container"><textarea id="autocomplete-search-bar" class="sugg-search-bar-input-adjust" data-testid="SearchBarExtendable-TestID" maxlength="280" aria-label="What can we help you find? Suggestions appear below" placeholder="Search Best Buy"></textarea></div>`,
+      'https://www.bestbuy.com/',
+      /textbox "What can we help you find\? Suggestions appear below"/,
+    ],
   ])(
     'lets %s search submit on its own site (known site rule)',
     async (_site, html, url, field) => {
@@ -302,6 +310,18 @@ describe('implicit form submission (Enter)', () => {
     },
     60_000,
   );
+
+  it('the same Best Buy textarea on another site still asks (FIX-32)', async () => {
+    const { park } = await submitCase(
+      `<textarea id="autocomplete-search-bar" aria-label="What can we help you find? Suggestions appear below"></textarea>`,
+      /textbox "What can we help you find\? Suggestions appear below"/,
+      'https://chat.example.com/',
+    );
+    expect(park).toHaveBeenCalledWith(
+      expect.stringContaining('无法确认回车会提交什么'),
+      'browser_action',
+    );
+  }, 60_000);
 
   it('the same IKEA-style input on another site still asks', async () => {
     const { park } = await submitCase(

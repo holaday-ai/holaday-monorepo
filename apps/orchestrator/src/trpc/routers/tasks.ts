@@ -4787,8 +4787,12 @@ export const tasksRouter = router({
                       status: 'completed',
                       summary: scrapeOutcome.summary,
                     };
-                  } else if (pageUnreadable && scrapeOutcome.source === 'scrape') {
-                    // A named page nobody could read is not answered from memory.
+                  } else if (
+                    pageUnreadable &&
+                    (scrapeOutcome.source === 'scrape' || scrapeOutcome.failureKind === 'blocked')
+                  ) {
+                    // A named page nobody could read is not answered from memory; nor is a
+                    // search whose every result was a wall (FIX-32).
                     outcome = {
                       status: 'failed',
                       reason: browserRetryFailure ?? scrapeOutcome.reason ?? '网页抓取失败',

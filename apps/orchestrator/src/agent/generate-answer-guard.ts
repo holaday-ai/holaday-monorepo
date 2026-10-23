@@ -24,8 +24,16 @@ const MORE_OPENER_RE =
  */
 const CLAIMED_SOURCE_RE =
   /(?:根据|(?<![数证依根占凭])据|来自|摘自|引自|查阅了|查询了)(?!你|您|用户|上文|上面|以上|下面|以下|所给|提供|前面)[^，。\n]{0,10}(?:维基百科|百度百科|百科|官网|官方网站|官方文档|网站|网页|新闻报道|报道|搜索结果)|\baccording to (?:the )?(?:wikipedia|official (?:site|website|docs?|documentation)|the website|search results|news reports?)\b/i;
-/** Pasted material this long counts as what the answer may be "根据". */
-const USER_MATERIAL_MIN_CHARS = 200;
+/**
+ * FIX-32 (FIX-30 review): what the answer may be "根据" is material the user actually
+ * pasted — a quote or code block, a long quoted passage, or a long text after a colon
+ * (「翻译这段：……」) — not a long request, nor a bare URL nobody read.
+ */
+const PASTED_MATERIAL_RE =
+  /^\s*>\s?\S|```[\s\S]{20,}```|[「“"『][^」”"』]{40,}[」”"』]|[：:]\s*\S[^\n]{59,}|[：:]\s*\n(?:[^\n]*\S[^\n]*\n?){2,}/m;
+export function pastedMaterial(text: string): boolean {
+  return PASTED_MATERIAL_RE.test(text);
+}
 
 export function answerQualityFailure(
   answer: string,
@@ -57,13 +65,7 @@ export function answerQualityFailure(
       .slice(1);
     if (rest.every((sentence) => MORE_OPENER_RE.test(sentence))) return 'NON_ANSWER';
   }
-  const material = (opts.userMaterial ?? '').trim();
-  if (
-    !opts.readSources &&
-    material.length < USER_MATERIAL_MIN_CHARS &&
-    !/https?:\/\//i.test(material) &&
-    CLAIMED_SOURCE_RE.test(text)
-  )
+  if (!opts.readSources && !pastedMaterial(opts.userMaterial ?? '') && CLAIMED_SOURCE_RE.test(text))
     return 'UNREAD_SOURCE';
   return null;
 }
