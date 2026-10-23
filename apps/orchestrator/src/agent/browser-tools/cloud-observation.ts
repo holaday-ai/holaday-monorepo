@@ -70,7 +70,33 @@ const KNOWN_TELEMETRY: ReadonlyArray<readonly [host: RegExp, path: RegExp]> = [
   // FIX-30 review rerun (IKEA p07): GrowingIO custom events go to /custom/<id>/web/cstm.
   [/(?:^|\.)growingio\.com$/, /^\/(?:v\d+|custom)\/[^/]+\/web\/(?:action|pv|track|cstm)$/],
   [/^hm\.baidu\.com$/, /^\/hm\.gif$/],
+  // FIX-34 (Deploy-34 new-bestbuy, 2/2 paused): BestBuy's web event stream, posted while the
+  // search box is typed into (production trace: …/v1/events/digital-experience-event).
+  [/^streams\.bestbuy\.com$/, /^\/customer\/web-streams\/v\d+\/events\/[a-z0-9-]+$/i],
 ];
+
+/**
+ * FIX-34: the shape of a POST body — top-level key names (JSON / form) and its length, never
+ * a value — recorded on an unknown POST so a pause can be checked against real evidence.
+ */
+export function postBodyShape(body: string): string {
+  const text = body.slice(0, 65536);
+  try {
+    const value = JSON.parse(text);
+    if (value && typeof value === 'object' && !Array.isArray(value))
+      return `json{${Object.keys(value).slice(0, 12).join(',')}} ${body.length}B`;
+    return `json ${Array.isArray(value) ? 'array' : typeof value} ${body.length}B`;
+  } catch {
+    /* not JSON */
+  }
+  if (/^[\w.%-]+=[^&]*(?:&[\w.%-]+=[^&]*)*$/.test(text))
+    return `form{${text
+      .split('&')
+      .slice(0, 12)
+      .map((pair) => pair.split('=')[0])
+      .join(',')}} ${body.length}B`;
+  return `opaque ${body.length}B`;
+}
 /** A path that writes something a user would see or be charged for. */
 const WRITE_PATH_RE =
   /cart|order|checkout|pay|login|log[-_]?in|sign[-_]?(?:in|up)|register|favou?rite|collect(?!or)|follow|like|subscribe|publish|comment|message|send|submit|create|delete|remove|update|vote|review|booking|reserve|address|account|password|recent|history|save|preference|setting|profile/i;
@@ -138,6 +164,14 @@ export function qqMusicReadRpc(url: URL, body: string): boolean {
       );
     })
   );
+}
+
+function safeBodyShape(request: Request): string {
+  try {
+    return postBodyShape(request.postData() ?? '');
+  } catch {
+    return 'unreadable';
+  }
 }
 
 /** Akamai Bot Manager's sensor POST (BestBuy): an opaque path, a 「{"sensor_data":…}」 body. */
@@ -511,6 +545,7 @@ type ActionWindow = {
     method: string;
     url: string;
     at: number;
+    bodyShape?: string;
   }>;
   frame: Frame;
   origin: string;
@@ -587,6 +622,7 @@ export class CloudObservation {
     branch: string;
     method: string;
     url: string;
+    bodyShape?: string;
   }> = [];
   private readonly causality: ActionCausality;
   private readonly windows = new Map<string, ActionWindow>();
@@ -821,6 +857,7 @@ export class CloudObservation {
       method: r.method(),
       url: safeObservationUrl(url.origin + url.pathname),
       at: Date.now(),
+      ...(unknownPost ? { bodyShape: safeBodyShape(r) } : {}),
     };
     if (write && cause) {
       cause.causes.delete(key);
@@ -1578,6 +1615,7 @@ export class CloudObservation {
       method: r.method,
       url: r.url,
       action: action.tool,
+      ...(r.bodyShape ? { bodyShape: r.bodyShape } : {}),
     }));
     const newReceipt =
       (window.interactive &&

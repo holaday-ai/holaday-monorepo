@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { declaredMissingPriceRows, listPartialNote } from '../../execution/answer-verifier.js';
 import type { ExecutionContract } from '../../execution/execution-contract.js';
+import { passiveTelemetryRequest, postBodyShape } from './cloud-observation.js';
 import {
   SNAPSHOT_TRUNCATED,
   assessCompletionFacts,
@@ -95,5 +96,29 @@ describe('FIX-34 #2 · amazon.sg: each item is checked against its own listing r
     expect(
       assessCompletionFacts({ summary: '价格：S$14.99', pages: [page] }).contradictions,
     ).toEqual([expect.stringContaining('与页面不符')]);
+  });
+});
+
+describe('FIX-34 #3 · BestBuy: only the verified event stream is telemetry', () => {
+  it.each([
+    'https://streams.bestbuy.com/customer/web-streams/v1/events/digital-experience-event',
+    'https://streams.bestbuy.com/customer/web-streams/v2/events/search-event',
+  ])('%s is telemetry', (url) => {
+    expect(passiveTelemetryRequest(new URL(url), 'fetch')).toBe(true);
+  });
+  it.each([
+    // The opaque POST from the same production trace stays unknown (pauses) until verified.
+    'https://www.bestbuy.com/UwDIPyzV11/p0Vavwpy92/GzamhpEV/EBt0AQ/L0o/-O0UPdlMY',
+    'https://streams.bestbuy.com.evil.example/customer/web-streams/v1/events/x',
+    'https://streams.bestbuy.com/customer/web-streams/v1/cart/add',
+    'https://www.bestbuy.com/customer/web-streams/v1/events/digital-experience-event',
+  ])('%s is not', (url) => {
+    expect(passiveTelemetryRequest(new URL(url), 'fetch')).toBe(false);
+  });
+  it('an unknown POST records its body shape — key names and length, never values', () => {
+    expect(postBodyShape('{"sensor_data":"3;0;1;0;secret"}')).toBe('json{sensor_data} 32B');
+    expect(postBodyShape('a=1&token=xyz')).toBe('form{a,token} 13B');
+    expect(postBodyShape('\u0001\u0002binary')).toBe('opaque 8B');
+    expect(postBodyShape('{"sensor_data":"x"}')).not.toContain('"x"');
   });
 });
