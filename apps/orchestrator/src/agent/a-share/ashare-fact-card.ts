@@ -54,7 +54,7 @@ import type {
   UnlockRow,
   ValuationRow,
 } from './briefing-types.js';
-import { type PerfSignal, detectAllPerf, perfLine } from './perf-trend-engine.js';
+import { type LivePrice, type PerfSignal, detectAllPerf, perfLine } from './perf-trend-engine.js';
 import { RISK_DISCLAIMER, type RiskSignal, detectAllRisks, riskLine } from './risk-radar-engine.js';
 
 export interface FactCardDeps {
@@ -155,6 +155,20 @@ function liveQuote(
     if (tradedUntil - quoteMin > LIVE_QUOTE_MAX_LAG_MIN || nowMin - quoteMin < -1) return null;
   }
   return { row, time };
+}
+
+/** FIX-34：卡片认作实时的报价（liveQuote 同一判定）→ 走势段可称「当前价」的价格。 */
+export function livePrices(
+  entries: readonly { symbol: string; quote?: AkEnvelope<StockQuoteRow> }[],
+  now: Date,
+): Record<string, LivePrice> {
+  const out: Record<string, LivePrice> = {};
+  for (const { symbol, quote } of entries) {
+    const live = liveQuote(quote, now);
+    const price = live ? toNum(live.row.最新价) : null;
+    if (live && price !== null) out[symbol] = { price, time: live.time };
+  }
+  return out;
 }
 
 /** 盘中却没有当天报价时卡片写的话：调用方据此按部分完成交付（FIX-33）。 */
@@ -1081,13 +1095,16 @@ export interface PerfData {
 export async function fetchPerfData(
   client: AkshareClient,
   match: AshareQaMatch,
+  /** FIX-34：盘中够新的实时报价（按股票代码）；没有的股按最近收盘价写走势。 */
+  live: Record<string, LivePrice> = {},
 ): Promise<PerfData> {
   const bySymbol: Record<string, PerfSignal[]> = {};
   await Promise.all(
     match.stocks.map(async (s) => {
       const kl = await client.getStockKline(s.symbol, 250); // 近1年(覆盖F3+F1/F2近3月切片)
       const series = kl.error ? [] : kl.data;
-      bySymbol[s.symbol] = detectAllPerf({ series });
+      const now = live[s.symbol];
+      bySymbol[s.symbol] = detectAllPerf({ series, ...(now ? { live: now } : {}) });
     }),
   );
   return { bySymbol };
