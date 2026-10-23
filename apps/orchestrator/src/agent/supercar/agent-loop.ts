@@ -742,6 +742,11 @@ export interface RunSupercarOptions {
   unifiedWebSearchAfterWall?: (query: string) => Promise<Array<{ title: string; url: string }>>;
   /** BROWSER_EXECUTOR=unified only: read-only page text (Firecrawl scrape). */
   unifiedReadPage?: (url: string) => Promise<{ url: string; title: string; markdown: string }>;
+  /**
+   * Offline audits only (browser:loop-audit): named sites are served from a loopback
+   * fixture, so the site lock lets local hosts through. Never set in production.
+   */
+  unifiedLocalFixtures?: boolean;
   /** Region-resolved production model. Omission retains the legacy fixture path. */
   messagesAdapter?: MessagesAdapter;
   /** Opt-in until navigation and input channels share the same owner receipt. */

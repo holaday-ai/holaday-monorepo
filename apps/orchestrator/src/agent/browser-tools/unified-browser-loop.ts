@@ -223,6 +223,11 @@ export interface UnifiedBrowserLoopInput {
    * page itself has (「价格：未获取到（仅显示 See options）」), or null.
    */
   partialNote?: (summary: string, pageText?: string) => string | null;
+  /**
+   * Offline audits only: named sites are served from a loopback fixture, so the site lock
+   * lets local test hosts through. Production never sets it (PR #295 review).
+   */
+  localFixtures?: boolean;
 }
 
 /** Remediation turn after the pre-delivery review found gaps in the answer. */
@@ -1480,7 +1485,7 @@ export async function runUnifiedBrowserLoop(
         lockedDomains.length > 0 &&
         !onDomains(action.url, lockedDomains) &&
         !seenOnReadPage(action.url) &&
-        !localTestHost(action.url)
+        !(input.localFixtures && localTestHost(action.url))
       ) {
         results.push(
           toolResult(
@@ -1981,8 +1986,8 @@ export function siteLock(intent: string, namedHosts = intentHosts(intent)): stri
 }
 
 /**
- * Deploy-33 (browser:loop-audit): a loopback or local test host is a fixture standing in
- * for the named site, never a public substitute for it — the site lock leaves it alone.
+ * Deploy-33 (browser:loop-audit): with `localFixtures`, a loopback or local test host is
+ * the fixture standing in for the named site.
  */
 function localTestHost(url: string | undefined): boolean {
   const host = hostOf(url);
