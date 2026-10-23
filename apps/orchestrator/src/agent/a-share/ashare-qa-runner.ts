@@ -164,7 +164,7 @@ export async function runAshareQa(
 ): Promise<AshareQaResult> {
   const now = deps.now ?? new Date();
   const mode = deps.mode ?? 'prod';
-  const data = await fetchFactData(deps.client, match);
+  const data = await fetchFactData(deps.client, match, { now });
   let body = renderFactCard(data, match, now, mode);
 
   // 看懂层 P1（flag 注入）：轻量速览追加 ★ 核心子集注解（腿A 确定性，零新增 LLM；

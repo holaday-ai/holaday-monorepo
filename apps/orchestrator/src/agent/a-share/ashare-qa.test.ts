@@ -260,7 +260,8 @@ describe('buildAshareFactCard', () => {
     expect(md).toContain('③（如有）为分析师判断·未经证实');
     expect(md).toContain('**均不构成投资建议**');
     expect(md).toContain('## 贵州茅台（600519）');
-    expect(md).toContain('收盘 1,279.00，涨跌幅 +0.24%，成交额 32.30亿元');
+    // FIX-33：价格带日期；fixture 日线行没给日期就如实写「日期未提供」。
+    expect(md).toContain('收盘（日期未提供） 1,279.00，涨跌幅 +0.24%，成交额 32.30亿元');
     // 公告：当日 + 含空格链接 encodeURI
     expect(md).toContain(
       '06-12 贵州茅台2025年度股东会决议公告 — [巨潮](http://www.cninfo.com.cn/d?t=2026-06-12%2020:50)',

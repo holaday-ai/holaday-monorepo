@@ -70,6 +70,56 @@ interface PerStock {
   kline: AkEnvelope<KlineRow>;
   ann: AkEnvelope<AnnouncementRow>;
   unlock: AkEnvelope<UnlockRow>;
+  /** FIX-33：交易时段才取的实时报价（盘中「今天股价」不能拿昨日收盘作答）。 */
+  quote?: AkEnvelope<StockQuoteRow>;
+}
+
+/** 北京时间的 'YYYY-MM-DD'。 */
+function beijingIso(at: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(at);
+}
+
+/**
+ * FIX-33（Deploy-33 as-mt：14:20 盘中问「贵州茅台今天股价多少」，卡片在今天的标题下给了
+ * 10/22 收盘价）：工作日北京时间 9:30–15:00（含午休）当天尚未收盘，日线末行是上一交易日。
+ */
+export function ashareIntraday(now: Date): boolean {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const get = (type: string) => parts.find((x) => x.type === type)?.value ?? '';
+  if (get('weekday') === 'Sat' || get('weekday') === 'Sun') return false;
+  const minutes = Number(get('hour')) * 60 + Number(get('minute'));
+  return minutes >= 9 * 60 + 30 && minutes < 15 * 60;
+}
+
+/** 当天的报价及其「日期 时间」；没有、或不是当天的 → null。 */
+function liveQuote(
+  quote: AkEnvelope<StockQuoteRow> | undefined,
+  now: Date,
+): { row: StockQuoteRow; time: string } | null {
+  const row = quote?.error ? undefined : quote?.data[0];
+  if (!quote || !row || toNum(row.最新价) === null) return null;
+  const today = beijingIso(now);
+  const t = String(row.行情时间 ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(t))
+    return t.slice(0, 10) === today ? { row, time: t.slice(0, 19) } : null;
+  // 新浪全市场快照只给时分秒：取数就在当天，日期即抓取日。
+  const fetched = new Date(quote.fetched_at);
+  const day = Number.isNaN(fetched.getTime()) ? today : beijingIso(fetched);
+  return /^\d{2}:\d{2}/.test(t) && day === today
+    ? { row, time: `${today} ${t.slice(0, 5)}` }
+    : null;
+}
+
+/** 盘中却没有当天报价时卡片写的话：调用方据此按部分完成交付（FIX-33）。 */
+export const NOT_REALTIME_NOTE = '非实时（未取到今日实时行情）';
+export function quoteStale(answer: string): boolean {
+  return answer.includes(NOT_REALTIME_NOTE);
 }
 
 /** iso('YYYY-MM-DD') ± days → compact 'YYYYMMDD'（正午 UTC，与口径一致）。 */
@@ -82,15 +132,41 @@ function shiftCompact(iso: string, days: number): string {
   return `${y}${m}${dd}`;
 }
 
-/** ① 盘面事实：kline 末行=当日。 */
-function marketFactLines(p: PerStock, mode: BriefingMode): string[] {
+/**
+ * ① 盘面事实。每个价格都带日期/时间（FIX-33）：日线末行标「最近收盘（日期）」；盘中有当天
+ * 报价时先给「最新价…行情时间」，没有则写明「以下为 X 月 X 日收盘价，非实时」。
+ */
+function marketFactLines(
+  p: PerStock,
+  mode: BriefingMode,
+  now: Date,
+  quote: AkEnvelope<StockQuoteRow> | undefined = p.quote,
+): string[] {
+  const intraday = ashareIntraday(now);
+  const live = liveQuote(quote, now);
+  const quoteLine =
+    live && quote
+      ? [
+          `- 最新价 ${fmtNum(live.row.最新价)}，涨跌幅 ${fmtPct(live.row.涨跌幅)}；行情时间 ${live.time}（${sourceTag(quote)}）`,
+        ]
+      : [];
   const last = p.kline.error ? undefined : p.kline.data[p.kline.data.length - 1];
-  if (p.kline.error || !last) return [unavailableLine('当日行情', p.kline, mode)];
-  return [
-    `- 收盘 ${fmtNum(pick(last, ['收盘']))}，涨跌幅 ${fmtPct(pick(last, ['涨跌幅']))}，成交额 ${fmtYiYuan(
-      pick(last, ['成交额']),
-    )}（${sourceTag(p.kline)}）`,
-  ];
+  if (p.kline.error || !last) return [...quoteLine, unavailableLine('当日行情', p.kline, mode)];
+  const day = String(pick(last, ['日期']) ?? '').slice(0, 10);
+  const facts = `${fmtNum(pick(last, ['收盘']))}，涨跌幅 ${fmtPct(pick(last, ['涨跌幅']))}，成交额 ${fmtYiYuan(
+    pick(last, ['成交额']),
+  )}（${sourceTag(p.kline)}）`;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return [...quoteLine, `- 收盘（日期未提供） ${facts}`];
+  // 盘中日线末行若已是今天，那是未收盘的盘中数，不叫「收盘」。
+  if (intraday && day === beijingIso(now))
+    return [...quoteLine, `- 今日盘中（${day}，未收盘，非最终收盘价） ${facts}`];
+  const [, m, d] = day.split('-').map(Number);
+  if (intraday && !live)
+    return [
+      `- 以下为 ${m} 月 ${d} 日收盘价，${NOT_REALTIME_NOTE}`,
+      `- 最近收盘（${day}） ${facts}`,
+    ];
+  return [...quoteLine, `- 最近收盘（${day}） ${facts}`];
 }
 
 /** ② 公告（近 7 日窗口由 service 取，此处只展返回）。 */
@@ -198,7 +274,10 @@ export interface FactData {
 export async function fetchFactData(
   client: AkshareClient,
   match: AshareQaMatch,
+  /** 传入「现在」且在交易时段 → 每股多取一次实时报价（FIX-33）。 */
+  opts: { now?: Date } = {},
 ): Promise<FactData> {
+  const withQuote = opts.now !== undefined && ashareIntraday(opts.now);
   const annStart = shiftCompact(match.dateIso, -7);
   const [northbound, dragonTiger, ...perStock] = await Promise.all([
     client.getNorthboundFlow(),
@@ -209,6 +288,7 @@ export async function fetchFactData(
         kline: await client.getStockKline(stock.symbol),
         ann: await client.getStockAnnouncements(stock.symbol, annStart, match.dateCompact),
         unlock: await client.getShareUnlock(stock.symbol),
+        ...(withQuote ? { quote: await client.getStockQuote(stock.symbol) } : {}),
       }),
     ),
   ]);
@@ -230,7 +310,7 @@ export function renderFactCard(
   ];
   for (const p of data.perStock) {
     lines.push(`## ${stockLabel(p.stock)}`);
-    lines.push('**① 盘面事实**', ...marketFactLines(p, mode), '');
+    lines.push('**① 盘面事实**', ...marketFactLines(p, mode, now), '');
     lines.push('**② 同期已披露信息**');
     lines.push(...announcementLines(p, mode));
     lines.push(...dragonTigerLines(p.stock.symbol, data.dragonTiger, mode));
@@ -252,8 +332,9 @@ export async function buildAshareFactCard(
   deps: FactCardDeps,
   match: AshareQaMatch,
 ): Promise<string> {
-  const data = await fetchFactData(deps.client, match);
-  const body = renderFactCard(data, match, deps.now ?? new Date(), deps.mode ?? 'prod');
+  const now = deps.now ?? new Date();
+  const data = await fetchFactData(deps.client, match, { now });
+  const body = renderFactCard(data, match, now, deps.mode ?? 'prod');
   return `${body}\n\n${QA_DISCLAIMER_BLOCK}`;
 }
 
@@ -300,6 +381,14 @@ export async function buildIndexCard(
       lines.push(`- ${name} ${close}（${pct}）${amt}`);
     }
     lines.push(`  （${sourceTag(env)}）`);
+    // FIX-33：指数快照没有行情时间字段——写明抓取时刻，以及它是盘中还是收盘后的数。
+    const fetched = new Date(env.fetched_at);
+    const when = Number.isNaN(fetched.getTime()) ? now : fetched;
+    lines.push(
+      `- 行情时间：抓取于 ${beijingIso(when)} ${fmtClock(when.toISOString())}（${
+        ashareIntraday(when) ? '盘中实时，未收盘' : '非交易时段，为最近一个交易日收盘后的行情'
+      }）`,
+    );
   }
   return `${lines.join('\n').trimEnd()}\n\n${QA_DISCLAIMER_BLOCK}`;
 }
@@ -308,11 +397,17 @@ export async function buildIndexCard(
 function contextBlock(p: PerStock, dt: AkEnvelope<DragonTigerRow>, annCap: number): string {
   const b: string[] = [`【${stockLabel(p.stock)}】`];
   const last = p.kline.error ? undefined : p.kline.data[p.kline.data.length - 1];
+  // FIX-33：收盘价带它的日期，解读层不会把昨日收盘说成「今天」。
   b.push(
     last
-      ? `- 盘面：收盘 ${fmtNum(pick(last, ['收盘']))} 涨跌幅 ${fmtPct(pick(last, ['涨跌幅']))} 成交额 ${fmtYiYuan(pick(last, ['成交额']))}`
+      ? `- 盘面：最近收盘（${String(pick(last, ['日期']) ?? '日期未提供').slice(0, 10)}） ${fmtNum(pick(last, ['收盘']))} 涨跌幅 ${fmtPct(pick(last, ['涨跌幅']))} 成交额 ${fmtYiYuan(pick(last, ['成交额']))}`
       : '- 盘面：当日行情数据暂不可用',
   );
+  const quote = p.quote?.error ? undefined : p.quote?.data[0];
+  if (quote && toNum(quote.最新价) !== null)
+    b.push(
+      `- 实时报价：最新价 ${fmtNum(quote.最新价)} 涨跌幅 ${fmtPct(quote.涨跌幅)}（行情时间 ${String(quote.行情时间 ?? '未提供')}）`,
+    );
   if (p.ann.error) b.push('- 公告：数据暂不可用');
   else {
     const titles = p.ann.data.map((r) => String(pick(r, ['公告标题']) ?? '')).filter(Boolean);
@@ -622,9 +717,13 @@ function quoteLines(quote: AkEnvelope<StockQuoteRow> | undefined, mode: Briefing
   const row = quote?.error ? undefined : quote?.data[0];
   if (!quote || !row || toNum(row.最新价) === null)
     return [unavailableLine('最新报价', quote ?? ({ error: '' } as AkEnvelope), mode)];
-  const time =
-    typeof row.行情时间 === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(row.行情时间)
-      ? row.行情时间.slice(0, 19)
+  const raw = String(row.行情时间 ?? '').trim();
+  const fetched = new Date(quote.fetched_at);
+  // FIX-33：价格都带日期；只有时分的快照注明抓取日期，不替它编交易日。
+  const time = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(raw)
+    ? raw.slice(0, 19)
+    : /^\d{2}:\d{2}/.test(raw) && !Number.isNaN(fetched.getTime())
+      ? `${raw.slice(0, 5)}（抓取于 ${beijingIso(fetched)}）`
       : '未提供';
   return [
     `- 最新价 ${fmtNum(row.最新价)}，涨跌幅 ${fmtPct(row.涨跌幅)}；行情时间 ${time}（${sourceTag(quote)}）`,
@@ -669,13 +768,8 @@ export function renderPanoramaBody(
     lines.push(`## ${stockLabel(p.stock)}`, '');
     lines.push(
       '**① 盘面事实**',
-      ...quoteLines(pano?.quote, mode),
-      ...marketFactLines(p, mode).map((line) =>
-        line.replace(
-          '- 收盘 ',
-          `- 最近收盘（${String(p.kline.data.at(-1)?.日期 ?? '日期未提供')}） `,
-        ),
-      ),
+      ...(liveQuote(pano?.quote, now) || ashareIntraday(now) ? [] : quoteLines(pano?.quote, mode)),
+      ...marketFactLines(p, mode, now, pano?.quote),
       '',
     );
     lines.push('**② 资金面**');
