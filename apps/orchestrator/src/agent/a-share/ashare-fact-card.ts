@@ -792,7 +792,12 @@ export function renderPanoramaBody(
     lines.push(`## ${stockLabel(p.stock)}`, '');
     lines.push(
       '**① 盘面事实**',
-      ...(liveQuote(pano?.quote, now) || ashareIntraday(now) ? [] : quoteLines(pano?.quote, mode)),
+      // A live quote is in ①'s first line; intraday an old one is replaced by the
+      // 「非实时」 note, but a missing one still says so.
+      ...(liveQuote(pano?.quote, now) ||
+      (ashareIntraday(now) && !pano?.quote?.error && toNum(pano?.quote?.data[0]?.最新价) !== null)
+        ? []
+        : quoteLines(pano?.quote, mode)),
       ...marketFactLines(p, mode, now, pano?.quote),
       '',
     );
