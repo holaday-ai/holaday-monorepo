@@ -16,8 +16,13 @@ const mime = {
   '.json': 'application/json',
   '.txt': 'text/plain',
 };
-export async function startSeedServer(appDir, { port = 0 } = {}) {
-  let seed = createSeed();
+export async function startSeedServer(
+  appDir,
+  { port = 0, frame: frameOverride = null, viewportV2 = false } = {},
+) {
+  // FIX-33: the browser-panel audit replays page-sized frames, with and without viewport v2.
+  const fresh = () => Object.assign(createSeed(), { viewportV2 });
+  let seed = fresh();
   let broadcastBrowser = () => {};
   const uploads = new Map();
   const dist = path.resolve(appDir, 'dist');
@@ -30,8 +35,12 @@ export async function startSeedServer(appDir, { port = 0 } = {}) {
         res.end(JSON.stringify(value));
       };
       if (url.pathname === '/__ui_seed/reset') {
-        seed = createSeed();
+        seed = fresh();
         uploads.clear();
+        return json({ ok: true });
+      }
+      if (url.pathname === '/__ui_seed/viewport-v2') {
+        seed.viewportV2 = url.searchParams.get('on') === '1';
         return json({ ok: true });
       }
       if (url.pathname === '/__ui_seed/state')
@@ -164,7 +173,7 @@ export async function startSeedServer(appDir, { port = 0 } = {}) {
   server.on('upgrade', (req, socket, head) =>
     sockets.handleUpgrade(req, socket, head, (ws) => sockets.emit('connection', ws, req)),
   );
-  const frame = BROWSER_FRAME;
+  let frame = frameOverride ?? BROWSER_FRAME;
   const sendFrame = (ws) => {
     const state = seed.browserSessions[ws.localTaskId];
     if (ws.readyState !== 1 || !state) return;
@@ -191,7 +200,19 @@ export async function startSeedServer(appDir, { port = 0 } = {}) {
       if (taskId)
         seed.requests.push({
           name: 'local.browser.input',
-          input: { taskId, type: msg.payload?.type ?? msg.type },
+          input: {
+            taskId,
+            type: msg.payload?.type ?? msg.type,
+            // FIX-33: where a takeover click landed and what viewport the panel asked for.
+            ...(['mouseDown', 'mouseUp', 'viewport'].includes(msg.payload?.type)
+              ? {
+                  x: msg.payload.x,
+                  y: msg.payload.y,
+                  width: msg.payload.width,
+                  height: msg.payload.height,
+                }
+              : {}),
+          },
         });
     });
   });
@@ -200,6 +221,11 @@ export async function startSeedServer(appDir, { port = 0 } = {}) {
     origin: `http://127.0.0.1:${server.address().port}`,
     get seed() {
       return seed;
+    },
+    /** Replace the live frame (base64 PNG/JPEG) and push it to open screencasts. */
+    setFrame(next) {
+      frame = next;
+      broadcastBrowser();
     },
     close: async () => {
       for (const ws of sockets.clients) ws.terminate();

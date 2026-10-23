@@ -1212,7 +1212,12 @@ export function dispatch(s, name, input = {}, method = 'GET') {
     case 'videoEditing.getProject':
       throw new ExpectedSeedError(403, 'FORBIDDEN', '继续剪辑暂未开放');
     case 'browserReplay.capabilities':
-      return { viewportV2: false, observationV2: false, replayV1: false, routingV2: false };
+      return {
+        viewportV2: Boolean(s.viewportV2),
+        observationV2: false,
+        replayV1: false,
+        routingV2: false,
+      };
     case 'browserReplay.read':
       return { frames: [], events: [] };
   }

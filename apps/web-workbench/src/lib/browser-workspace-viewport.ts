@@ -49,6 +49,22 @@ export function shouldSendBrowserViewport(
 
 export type BrowserViewportRenderMode = 'auto' | 'desktop' | 'panel';
 
+/**
+ * FIX-33 (BOSS: a w3schools page cut off on the right, only reachable by scrollbars):
+ * the remote page lays out at a desktop width (never the narrow panel width that made
+ * wide pages overflow inside the remote browser) with the panel's aspect ratio, so the
+ * frame scales down to fill the panel width and is seen whole.
+ */
+export function fitDesktopViewportForHost(input: {
+  hostWidth: number;
+  hostHeight: number;
+}): BrowserViewportSize | null {
+  const { hostWidth, hostHeight } = input;
+  if (![hostWidth, hostHeight].every((v) => Number.isFinite(v) && v > 0)) return null;
+  const width = clamp(Math.round(hostWidth), 1280, 1920);
+  return { width, height: clamp(Math.round((width * hostHeight) / hostWidth), 600, 2400) };
+}
+
 /** Keep desktop breakpoints, but fill the visible portrait surface instead of
  * shrinking a landscape page into the top third. Explicit profiles are useful
  * to callers that need a fixed source viewport (including transport tests). */
