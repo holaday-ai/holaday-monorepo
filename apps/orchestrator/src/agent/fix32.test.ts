@@ -102,9 +102,10 @@ describe('b-m01: the site the user named', () => {
       ['amap.com', 'gaode.com'],
     ],
     ['请使用云端浏览器，去京东搜 AirPods 价格', ['jd.com']],
-    ['在亚马逊上搜 usb c cable', ['amazon.com', 'amazon.cn']],
+    // FIX-32 review: the brand's regional stores come with it.
+    ['在亚马逊上搜 usb c cable', ['amazon.com', 'amazon.cn', 'amazon.sg']],
   ])('%s → %j', (intent, domains) => {
-    expect(namedSiteDomains(intent)).toEqual(domains);
+    expect(namedSiteDomains(intent)).toEqual(expect.arrayContaining(domains));
   });
   it.each([
     '苹果和亚马逊的市值对比',
@@ -223,5 +224,36 @@ describe('BENCH-1 r06: an English 「not in the fetched content」 is not obtain
         "what's the title of RFC 9110 and when was it published? check rfc-editor.org",
       ),
     ).toBe(false);
+  });
+});
+
+describe('FIX-32 review 2: Amazon regional stores, brand word boundaries', () => {
+  it.each([
+    ['在亚马逊新加坡站搜 usb c cable，列出前三个的名称和价格', 'amazon.sg'],
+    ['去亚马逊日本站看看这款耳机多少钱', 'amazon.co.jp'],
+    ['在京东上搜 iPhone 16', 'jd.com'],
+  ])('%s → includes %s', (intent, domain) => {
+    expect(namedSiteDomains(intent)).toContain(domain);
+  });
+  it.each(['在京东方官网看看最新的屏幕产品', '去淘宝客联盟后台'])('%s → no lock', (intent) => {
+    expect(namedSiteDomains(intent)).toEqual([]);
+  });
+});
+
+describe('FIX-32 review 3: the 「没拿到」 sentence needs its verb', () => {
+  it.each([
+    '以下是未来7天的数据：周五 25°C，周六 23°C。',
+    '未来一周的信息如下：周五晴，周六多云。',
+    '据报道，他没有透露更多的信息，但确认产品将在明年发布。',
+  ])('a real answer is not 「没拿到」: %s', (answer) => {
+    expect(answerNotObtained(answer, '杭州未来一周天气怎么样')).toBe(false);
+  });
+  it('the r06 answers still are', () => {
+    expect(
+      answerNotObtained(
+        '提供的 rfc-editor.org 首页抓取内容中只列出了最新的几篇 RFC，没有包含 RFC 9110 的具体信息。',
+        "what's the title of RFC 9110 and when was it published? check rfc-editor.org",
+      ),
+    ).toBe(true);
   });
 });

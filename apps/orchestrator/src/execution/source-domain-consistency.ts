@@ -47,7 +47,29 @@ export const SITE_DOMAIN_RULES: readonly SiteDomainRule[] = [
   { brand: /\blinear\b/i, domains: ['linear.app'], label: 'Linear' },
   { brand: /\bgithub\b/i, domains: ['github.com'], label: 'GitHub' },
   { brand: /\blinkedin\b|领英/i, domains: ['linkedin.com'], label: 'LinkedIn' },
-  { brand: /\bamazon\b|亚马逊/i, domains: ['amazon.com', 'amazon.cn'], label: 'Amazon' },
+  {
+    brand: /\bamazon\b|亚马逊/i,
+    // FIX-32 review: the brand's regional stores are the same site (亚马逊新加坡站 → amazon.sg).
+    domains: [
+      'amazon.com',
+      'amazon.cn',
+      'amazon.sg',
+      'amazon.co.jp',
+      'amazon.de',
+      'amazon.co.uk',
+      'amazon.com.au',
+      'amazon.ca',
+      'amazon.fr',
+      'amazon.it',
+      'amazon.es',
+      'amazon.in',
+      'amazon.ae',
+      'amazon.nl',
+      'amazon.com.mx',
+      'amazon.com.br',
+    ],
+    label: 'Amazon',
+  },
 ];
 
 /** The user explicitly allows non-named sources → check disabled. */
@@ -122,9 +144,13 @@ export function namedSiteDomains(intent: string | null | undefined): string[] {
   if (ALLOW_OTHER_SOURCES_RE.test(t)) return [];
   // Named as the place to work, not as a subject (「苹果和亚马逊的市值」); Linear and
   // Notion are also plain English words — those lock only by their own domain.
+  // FIX-32 review: a brand word ends the name — 「在京东方官网」 is not 京东 — unless what
+  // follows is a usage word or a region (「亚马逊新加坡站」).
+  const end =
+    '(?=$|[^\\u4e00-\\u9fff]|[上里网官搜查看找买的和与跟页首商自店站]|(?:中国|美国|日本|新加坡|德国|英国|澳洲|澳大利亚|加拿大|法国|印度|海外|国际|全球))';
   const used = (brand: RegExp) =>
     new RegExp(
-      `(?:在|去|到|用|打开|上|从|通过|进入?)\\s*(?:${brand.source})|(?:${brand.source})\\s*(?:上|里|网站|官网|app|搜|查|看|找|买)`,
+      `(?:在|去|到|用|打开|上|从|通过|进入?)\\s*(?:${brand.source})${end}|(?:${brand.source})\\s*(?:上|里|网站|官网|app|搜|查|看|找|买)`,
       'i',
     ).test(t);
   return [

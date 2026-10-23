@@ -392,21 +392,19 @@ export async function runUnifiedBrowserLoop(
    * FIX-32: sites named by address or by name (「高德地图」); the run stays on them — the
    * whole site (item.jd.com → jd.com), each shared-hosting subdomain on its own.
    */
-  const lockedDomains = [
-    ...new Set([
-      ...[...namedHosts, ...namedAddressHosts(input.intent)].map((host) => siteOf(host) ?? host),
-      ...namedSiteDomains(input.intent),
-    ]),
-  ];
+  const lockedDomains = siteLock(input.intent, namedHosts);
+  /** FIX-32 review: hosts web_search returned (also after a wall); its results may be opened. */
+  const searchHitHosts = new Set<string>();
   const seenOnReadPage = (url: string) => {
     const host = hostOf(url);
     return (
       !!host &&
-      pageEvidence.some(
-        (page) =>
-          page.links?.some((link) => hostOf(link.url) === host) ||
-          page.text.toLowerCase().includes(host),
-      )
+      (searchHitHosts.has(host) ||
+        pageEvidence.some(
+          (page) =>
+            page.links?.some((link) => hostOf(link.url) === host) ||
+            page.text.toLowerCase().includes(host),
+        ))
     );
   };
   let sectionRejected = false;
@@ -1438,6 +1436,10 @@ export async function runUnifiedBrowserLoop(
         webSearched = true;
         try {
           const hits = (await webSearch(query)).slice(0, 8);
+          for (const hit of hits) {
+            const host = hostOf(hit.url);
+            if (host) searchHitHosts.add(host);
+          }
           results.push(toolResult(call.id, JSON.stringify(hits)));
         } catch {
           results.push(toolResult(call.id, '搜索失败，请换个关键词或直接打开已知网址。', true));
@@ -1637,24 +1639,20 @@ export async function runUnifiedBrowserLoop(
       // FIX-32 (Deploy-32 b-m01): every read of 高德's route page came back masked (its SMS
       // login form, not a wall the probe above knows) and the model went on to 百度地图.
       // A page we may not read is the user's.
-      if (outcome.ok && redactedRead(outcome.text)) {
+      const masked = outcome.ok ? redactedRead(outcome.text) : null;
+      if (masked) {
         if (wantsForm && !/登录|login|sign\s*in/i.test(input.intent)) {
           results.push(
             toolResult(
               call.id,
-              '这是需要登录或验证码的页面，任务不需要登录：不要在这里填写，回到点名网站的表单页继续；点名网站没有所需控件时，把其余可填项填好（不提交）并截图，如实说明缺什么。',
+              '这是需要登录、验证码或支付信息的页面，任务不需要：不要在这里填写，回到点名网站的表单页继续；点名网站没有所需控件时，把其余可填项填好（不提交）并截图，如实说明缺什么。',
             ),
           );
           staleTurn = true;
           continue;
         }
         wallMet = true;
-        return {
-          status: 'awaiting_user',
-          reason: 'login',
-          message: SENSITIVE_PAGE_MESSAGE,
-          steps: step + 1,
-        };
+        return { status: 'awaiting_user', ...MASKED_PAGE[masked], steps: step + 1 };
       }
       if (outcome.interruption)
         return {
@@ -1960,6 +1958,27 @@ function hostOf(url: string | undefined): string | undefined {
   }
 }
 
+/**
+ * FIX-32: the sites a run stays on — named by address, by brand (「高德地图」) or as a
+ * well-known site (「维基百科」), each as its whole site. A request that sends the run on
+ * to another place it does not name in a way we can resolve (「并在 MDN 查」) is not locked.
+ */
+export function siteLock(intent: string, namedHosts = intentHosts(intent)): string[] {
+  const named = (text: string) => [
+    ...[...(text === intent ? namedHosts : intentHosts(text)), ...namedAddressHosts(text)].map(
+      (host) => siteOf(host) ?? host,
+    ),
+    ...namedSiteDomains(text),
+    ...NAMED_SITES.filter(([pattern]) => pattern.test(text)).map(([, url]) => {
+      const host = hostOf(url)!;
+      return siteOf(host) ?? host;
+    }),
+  ];
+  const onward = /(?:并|再|然后|同时|另外|顺便)\s*(?:在|去|到|用|上|打开|查)/.exec(intent);
+  if (onward && named(intent.slice(onward.index)).length === 0) return [];
+  return [...new Set(named(intent))];
+}
+
 function onDomains(url: string | undefined, domains: readonly string[]): boolean {
   const host = hostOf(url);
   return !!host && domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
@@ -1972,12 +1991,31 @@ export const NOT_STARTED = '执行未开始：浏览器还没有打开目标页�
 export const SENSITIVE_PAGE_MESSAGE =
   '页面上有需要你本人填写的登录或验证码输入框，页面内容已遮挡、无法代为读取。请在浏览器中接管（登录或关闭登录弹窗）后继续。';
 
-function redactedRead(text: string): boolean {
+/** FIX-32 review: the handover says why the page was masked. */
+export const MASKED_PAGE = {
+  login: { reason: 'login', message: SENSITIVE_PAGE_MESSAGE },
+  payment: {
+    reason: 'payment',
+    message:
+      '这是支付或结算页面，涉及付款信息，不代为操作，页面内容已遮挡。如需继续，请在浏览器中自行处理。',
+  },
+  unreadable: {
+    reason: 'permission',
+    message:
+      '页面内容（含内嵌页面）无法安全读取，已遮挡、未代为读取。请在浏览器中查看后告诉我如何继续。',
+  },
+} as const;
+
+/** The masking cause of a masked read, or null for a page that was read. */
+function redactedRead(text: string): keyof typeof MASKED_PAGE | null {
   try {
-    const value = JSON.parse(text) as { status?: unknown; redacted?: unknown };
-    return value?.status === 'redacted_unread';
+    const value = JSON.parse(text) as { status?: unknown; maskReason?: unknown };
+    if (value?.status !== 'redacted_unread') return null;
+    return value.maskReason === 'payment' || value.maskReason === 'unreadable'
+      ? value.maskReason
+      : 'login';
   } catch {
-    return false;
+    return null;
   }
 }
 

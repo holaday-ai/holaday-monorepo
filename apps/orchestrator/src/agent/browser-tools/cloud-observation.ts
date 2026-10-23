@@ -408,40 +408,54 @@ function collectObservationState() {
             ),
         ),
       );
-  const sensitive =
-    sensitiveKeypad ||
-    fields.some((element) => {
-      const input = element as HTMLInputElement;
-      const style = getComputedStyle(input);
-      if (
-        input.disabled ||
-        input.readOnly ||
-        input.type === 'hidden' ||
-        !input.getClientRects().length ||
-        style.visibility === 'hidden' ||
-        style.display === 'none'
+  // FIX-32 review: the same decision as before, with its cause kept for the handover copy.
+  const fieldKinds = fields.map((element) => {
+    const input = element as HTMLInputElement;
+    const style = getComputedStyle(input);
+    if (
+      input.disabled ||
+      input.readOnly ||
+      input.type === 'hidden' ||
+      !input.getClientRects().length ||
+      style.visibility === 'hidden' ||
+      style.display === 'none'
+    )
+      return null;
+    const identity = [
+      input.name,
+      input.id,
+      input.getAttribute('aria-label'),
+      input.labels?.[0]?.innerText,
+      input.placeholder,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    if (
+      /^cc-/i.test(input.autocomplete) ||
+      /(?:cvv|cvc|card[-_ ]?(?:number|no)|credit[-_ ]?card|pay(?:ment)?[-_ ]?(?:password|pin)|银行卡|卡号|支付密码)/i.test(
+        identity,
       )
-        return false;
-      const identity = [
-        input.name,
-        input.id,
-        input.getAttribute('aria-label'),
-        input.labels?.[0]?.innerText,
-        input.placeholder,
-      ]
-        .filter(Boolean)
-        .join(' ');
-      return (
-        input.type === 'password' ||
-        /^(?:one-time-code|cc-)/i.test(input.autocomplete) ||
-        /(?:otp|cvv|cvc|card[-_ ]?(?:number|no)|credit[-_ ]?card|pay(?:ment)?[-_ ]?(?:password|pin)|验证码|两步验证|银行卡|卡号|支付密码)/i.test(
-          identity,
-        )
-      );
-    }) ||
-    /(?:^|\/)(?:login|signin|sign-in|log-in|checkout|payment|cashier|pay|2fa|verify-identity)(?:\/|$)/i.test(
-      location.pathname,
-    );
+    )
+      return 'payment';
+    if (
+      input.type === 'password' ||
+      /^one-time-code/i.test(input.autocomplete) ||
+      /(?:otp|验证码|两步验证)/i.test(identity)
+    )
+      return 'login';
+    return null;
+  });
+  const paymentPath = /(?:^|\/)(?:checkout|payment|cashier|pay)(?:\/|$)/i.test(location.pathname);
+  const loginPath = /(?:^|\/)(?:login|signin|sign-in|log-in|2fa|verify-identity)(?:\/|$)/i.test(
+    location.pathname,
+  );
+  const maskReason: 'payment' | 'login' | null =
+    sensitiveKeypad || paymentPath || fieldKinds.includes('payment')
+      ? 'payment'
+      : loginPath || fieldKinds.includes('login')
+        ? 'login'
+        : null;
+  const sensitive = maskReason !== null;
   return {
     documentId: root.__holadayObservation.id,
     version: root.__holadayObservation.version,
@@ -465,6 +479,7 @@ function collectObservationState() {
           .filter(Boolean),
       ),
     sensitive,
+    maskReason,
     geometry: [scrollX, scrollY, innerWidth, innerHeight],
   };
 }
@@ -976,15 +991,20 @@ export class CloudObservation {
       : frame.locator('input').nth(index);
   }
   async sensitive(page: Page) {
+    return (await this.maskReason(page)) !== null;
+  }
+  /** Why a page is masked (FIX-32 review: the handover says which), or null. */
+  async maskReason(page: Page): Promise<'payment' | 'login' | 'unreadable' | null> {
     // An unreadable child frame cannot be asserted safe to record.
     for (const frame of page.frames()) {
       try {
-        if ((await observationState(frame)).sensitive) return true;
+        const state = await observationState(frame);
+        if (state.sensitive) return state.maskReason ?? 'login';
       } catch {
-        return true;
+        return 'unreadable';
       }
     }
-    return false;
+    return null;
   }
   async read(action: UnifiedBrowserAction): Promise<UnifiedToolResult | null> {
     const { page, frame } = ['switch_tab', 'list_tabs'].includes(action.tool)
@@ -1051,12 +1071,14 @@ export class CloudObservation {
       ].includes(action.tool)
     )
       return null;
-    if (await this.sensitive(page))
+    const maskReason = await this.maskReason(page);
+    if (maskReason)
       return json({
         ...(await this.metadata(frame)),
         redacted: true,
         tree: '已遮挡，未读取：敏感输入页面，请用户接管',
         status: 'redacted_unread',
+        maskReason,
         end: false,
         truncated: true,
       });

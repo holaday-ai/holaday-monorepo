@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { listPartialNote, reviewListAnswer } from '../../execution/answer-verifier.js';
 import type { ExecutionContract } from '../../execution/execution-contract.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
-import { qqMusicReadRpc } from './cloud-observation.js';
+import { observationState, qqMusicReadRpc } from './cloud-observation.js';
 import { assessCompletionFacts, observedEvidence } from './completion-fields.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
-import { SENSITIVE_PAGE_MESSAGE, runUnifiedBrowserLoop } from './unified-browser-loop.js';
+import {
+  MASKED_PAGE,
+  SENSITIVE_PAGE_MESSAGE,
+  runUnifiedBrowserLoop,
+  siteLock,
+} from './unified-browser-loop.js';
 
 /** FIX-32 (QUEUE 31): browser-side fixes for Deploy-32 b-p02 / b-m01 / v06. */
 
@@ -293,4 +298,100 @@ describe('b-m01: 高德 stays 高德; a masked login page goes to the user', () 
     });
     expect(site.opened).toEqual(['https://ditu.amap.com/dir?type=car']);
   });
+});
+
+/** FIX-32 coordinator review (PR #294 head c325c967). */
+describe('review 1: the site lock leaves room for the search fallback and a named second site', () => {
+  it('a result web_search returned may be opened under the lock (Google walled)', async () => {
+    const { adapter } = scripted([
+      { name: 'navigate', input: { url: 'https://www.google.com/search?q=Claude' } },
+      { name: 'web_search', input: { query: 'Claude' } },
+      { name: 'navigate', input: { url: 'https://www.anthropic.com/claude' } },
+      { name: 'navigate', input: { url: 'https://unrelated.example/' } },
+      { name: 'finish', input: { status: 'failed', summary: '没有读到。' } },
+    ]);
+    const site = browser(() => 'heading "Claude"');
+    await runUnifiedBrowserLoop({
+      intent: '请使用云端浏览器，打开 google.com 搜索 Claude 并总结第一条',
+      adapter,
+      maxSteps: 8,
+      execute: site.execute as never,
+      currentPageUrl: site.currentPageUrl,
+      webSearch: async () => [{ title: 'Claude', url: 'https://www.anthropic.com/claude' }],
+    });
+    expect(site.opened).toEqual([
+      'https://www.google.com/search?q=Claude',
+      'https://www.anthropic.com/claude',
+    ]);
+  });
+  it.each([
+    ['总结 https://a.example.com/x 并在维基百科查作者', ['example.com', 'wikipedia.org']],
+    ['请使用云端浏览器，打开 google.com 搜索 Claude 并总结第一条', ['google.com']],
+    // A second place we cannot name: no lock rather than a wrong one.
+    ['总结 https://a.example.com/x 并在 MDN 查作者', []],
+  ])('%s → %j', (intent, sites) => {
+    expect(siteLock(intent)).toEqual(sites);
+  });
+});
+
+describe('review 4: the handover says why the page was masked', () => {
+  const masked = (maskReason?: string) =>
+    JSON.stringify({
+      redacted: true,
+      status: 'redacted_unread',
+      ...(maskReason ? { maskReason } : {}),
+    });
+  it.each([
+    ['login', 'login', MASKED_PAGE.login.message],
+    ['payment', 'payment', MASKED_PAGE.payment.message],
+    ['unreadable', 'permission', MASKED_PAGE.unreadable.message],
+    [undefined, 'login', MASKED_PAGE.login.message],
+  ])('%s → %s', async (maskReason, reason, message) => {
+    const { adapter } = scripted([
+      { name: 'navigate', input: { url: 'https://shop.example/checkout' } },
+      { name: 'read_page', input: {} },
+    ]);
+    const site = browser(() => masked(maskReason));
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '请使用云端浏览器，打开 https://shop.example/checkout 看看订单金额',
+      adapter,
+      maxSteps: 4,
+      execute: site.execute as never,
+      currentPageUrl: site.currentPageUrl,
+    });
+    expect(outcome).toMatchObject({ status: 'awaiting_user', reason, message });
+  });
+  it('the observer names the cause without changing what it masks', async () => {
+    const chromium = (await import('playwright')).chromium;
+    const b = await chromium.launch({ headless: true });
+    try {
+      const page = await b.newPage();
+      const state = async (html: string, path = '/') => {
+        await page.route('**/*', (r) =>
+          r.fulfill({ contentType: 'text/html; charset=utf-8', body: html }),
+        );
+        await page.goto(`https://masked.example${path}`);
+        await page.unroute('**/*');
+        return observationState(page.mainFrame());
+      };
+      expect(await state('<input type="password">')).toMatchObject({
+        sensitive: true,
+        maskReason: 'login',
+      });
+      expect(await state('<input placeholder="银行卡号">')).toMatchObject({
+        sensitive: true,
+        maskReason: 'payment',
+      });
+      expect(await state('<p>订单</p>', '/checkout')).toMatchObject({
+        sensitive: true,
+        maskReason: 'payment',
+      });
+      expect(await state('<input placeholder="搜索">')).toMatchObject({
+        sensitive: false,
+        maskReason: null,
+      });
+    } finally {
+      await b.close();
+    }
+  }, 60_000);
 });
