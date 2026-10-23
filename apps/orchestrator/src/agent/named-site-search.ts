@@ -133,12 +133,17 @@ const BRAND_ALT = [...BRANDS]
 const NAMED_SITE = String.raw`(?:${BRAND_ALT})(?:\.(?:com|cn|co|sg|jp|uk|de|ca|au|in|my|ph|th|vn|tw|hk|net|fr)){0,2}(?:\s*(?:[一-龥]{1,5}|[a-z]{2,12})\s*(?:站|版|分站|区))?`;
 const WHERE = String.raw`\s*(?:上面|上|里面|里|内|中|网站上?|官网|app|平台|首页)?\s*(?:[，,]\s*)?`;
 /**
- * Asking how the site's search works (「搜索排名的算法是什么」「怎么按销量排序」) is a
- * topic, not a search. Words like 算法/报告 inside what is searched for are not
- * (「在 BestBuy 搜算法导论」, Codex review on PR #296).
+ * Asking how the site's search works (「淘宝搜索算法」「京东的搜索排名规则是怎样的」
+ * 「在亚马逊上怎么按销量排序」) is a topic, not a search. Only the words right after the
+ * site or the search verb count: 「在 BestBuy 搜算法导论」 is a search (协调方复审 4).
  */
-const TOPIC_RE =
-  /(?:算法|规则|机制|原理|逻辑|技巧|策略)(?:是什么|是怎样|是怎么|怎么|如何|有哪些)|是什么(?:原理|机制|算法)|(?:怎么|如何)(?:按|用|使用|设置|筛选|排序|搜|提高|优化)|(?:搜索?|查找)(?:的)?(?:功能|排名|算法|规则|机制|逻辑|原理|技巧|优化|引擎|框)(?=$|[的是怎如有吗，。？?！!\s])/;
+const META = String.raw`(?:功能|排名|排序|算法|规则|机制|逻辑|原理|技巧|优化|引擎|框|结果页)+(?=$|[的是怎如有吗，。？?！!\s])`;
+const SEARCH_VERB = String.raw`(?:搜一下|搜一搜|搜索|搜|查找|查一下|查询|查|找一下|找找|找)`;
+/** The site, then optionally a search verb (with a generic object), then a meta word or a how-to. */
+const TOPIC_RE = new RegExp(
+  String.raw`${NAMED_SITE}\s*的?${WHERE}(?:${SEARCH_VERB}(?:东西|商品|内容|结果)?\s*的?)?(?:${META}|(?:怎么|如何)(?:搜|按|排序|筛选|设置|使用|用))`,
+  'i',
+);
 
 const SEARCH_RE = new RegExp(
   String.raw`(?:在|去|上|到|用|打开|进入|访问)\s*${NAMED_SITE}${WHERE}(?:搜一下|搜一搜|搜索|搜|查找|查一下|查询|查|找一下|找找|找)|\bsearch\s+(?:on\s+)?(?:${BRAND_ALT})\b|\b(?:on|at)\s+(?:${BRAND_ALT})\b[^.\n]{0,40}\bsearch\b|\bsearch\b[^.\n]{1,60}\b(?:on|at)\s+(?:${BRAND_ALT})\b`,

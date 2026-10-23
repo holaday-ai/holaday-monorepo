@@ -142,13 +142,23 @@ describe('FIX-33 #2 · a search on a named site goes to the site, never generate
     expect(await route(intent)).toBe('generate');
   });
 
-  it.each(['在淘宝搜索算法是什么', '在京东搜索的排名规则是怎样的', '在 BestBuy 怎么按价格排序'])(
-    'asking how a site searches is not a site search: %s',
-    (text) => {
-      expect(namedSiteSearch(text)).toBeNull();
-    },
-  );
-  it.each(['在 BestBuy 搜算法导论', '在 BestBuy 搜索算法导论'])('%s is a site search', (text) => {
+  it.each([
+    '在淘宝搜索算法是什么',
+    '在京东搜索的排名规则是怎样的',
+    '在 BestBuy 怎么按价格排序',
+    '淘宝搜索算法',
+    '京东的搜索排名规则是怎样的',
+    '在亚马逊上搜东西怎么按销量排序',
+  ])('asking how a site searches is not a site search: %s', (text) => {
+    expect(namedSiteSearch(text)).toBeNull();
+  });
+  it.each([
+    '在 BestBuy 搜算法导论',
+    '在 BestBuy 搜索算法导论',
+    '在京东搜一下数据分析报告模板',
+    '在 B 站搜一下 python 怎么用的视频',
+    '在 YouTube 搜中国历史纪录片',
+  ])('%s is a site search', (text) => {
     expect(namedSiteSearch(text)).not.toBeNull();
   });
 

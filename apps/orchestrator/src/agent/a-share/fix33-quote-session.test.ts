@@ -9,7 +9,9 @@ import {
   buildAshareFactCard,
   buildFactContext,
   buildIndexCard,
+  buildPanoramaContext,
   fetchFactData,
+  fetchPanoramaData,
   quoteStale,
 } from './ashare-fact-card.js';
 import { runAsharePanorama, runAshareQa } from './ashare-qa-runner.js';
@@ -36,6 +38,8 @@ function client(opts: {
   klineDate: string;
   quote?: AkEnvelope<Record<string, unknown>>;
   calls?: string[];
+  /** Trading calendar answer: true/false, null = calendar unavailable. */
+  tradingDay?: boolean | null;
 }): AkshareClient {
   return {
     getStockAnnouncements: () => Promise.resolve(env([])),
@@ -53,7 +57,14 @@ function client(opts: {
     getStockNews: () => Promise.resolve(env([])),
     getFundamentals: () => Promise.resolve(env([])),
     getValuation: () => Promise.resolve(env([])),
-    getTradingDay: () => Promise.resolve(env([{ is_trading_day: true }])),
+    getTradingDay: () =>
+      Promise.resolve(
+        opts.tradingDay === undefined
+          ? env([{ is_trading_day: true }])
+          : opts.tradingDay === null
+            ? env([], { error: 'unavailable' })
+            : env([{ is_trading_day: opts.tradingDay }]),
+      ),
     // biome-ignore lint/suspicious/noExplicitAny: fake
   } as any;
 }
@@ -209,8 +220,9 @@ describe('FIX-33 #3 · an A-share price always says when it is from', () => {
       now: INTRADAY,
     });
     const ctx = buildFactContext(data, MATCH, undefined, INTRADAY);
-    expect(ctx).not.toContain('实时报价');
-    expect(ctx).not.toContain('1,330');
+    // 复审 1: an old quote is 「最近报价」 with its time — never 实时 / 当前价.
+    expect(ctx).toContain('最近报价：1,330.00（报价时间 2026-10-23 11:30:00');
+    expect(ctx).not.toMatch(/实时|当前价/);
     expect(buildFactContext(data, MATCH)).not.toContain('实时报价');
   });
 
@@ -225,5 +237,62 @@ describe('FIX-33 #3 · an A-share price always says when it is from', () => {
     );
     expect(md).toContain('以下为 10 月 22 日收盘价，非实时');
     expect(quoteStale(md)).toBe(true);
+  });
+
+  // 复审 3: 国庆 (2026-10-01, a Thursday) is not a trading session.
+  const NATIONAL_DAY_NOON = at('2026-10-01T12:10:00');
+  it('National Day noon: no quote, 「最近收盘（日期）」, not partial', async () => {
+    const calls: string[] = [];
+    const md = await buildAshareFactCard(
+      {
+        client: client({ klineDate: '2026-09-30', quote: LIVE, calls, tradingDay: false }),
+        now: NATIONAL_DAY_NOON,
+      },
+      { ...MATCH, dateIso: '2026-10-01', dateCompact: '20261001' },
+    );
+    expect(calls).toEqual([]);
+    expect(md).toContain('- 最近收盘（2026-09-30） 1,318.49');
+    expect(md).not.toMatch(/非实时|盘中/);
+    expect(quoteStale(md)).toBe(false);
+  });
+  it('index card on National Day noon never says 盘中实时; an unknown calendar says 最近报价', async () => {
+    const quote = env([{ 名称: '上证指数', 最新价: 3301.2, 涨跌幅: 0.4 }], {
+      fetched_at: '2026-10-01T04:10:00Z',
+    });
+    const holiday = await buildIndexCard({
+      client: client({ klineDate: '', tradingDay: false }),
+      now: NATIONAL_DAY_NOON,
+      quote,
+    });
+    expect(holiday).not.toContain('盘中实时');
+    expect(holiday).toContain('非交易时段，为最近一个交易日收盘后的行情');
+    const unknown = await buildIndexCard({
+      client: client({ klineDate: '', tradingDay: null }),
+      now: NATIONAL_DAY_NOON,
+      quote,
+    });
+    expect(unknown).not.toContain('盘中实时');
+    expect(unknown).toContain('- 最近报价（抓取于 2026-10-01 12:10；未能确认今天是否交易日）');
+  });
+  it('the light card with an unavailable calendar stays conservative (non-real-time, partial)', async () => {
+    const md = await buildAshareFactCard(
+      {
+        client: client({ klineDate: '2026-10-22', quote: env([]), tradingDay: null }),
+        now: INTRADAY,
+      },
+      MATCH,
+    );
+    expect(quoteStale(md)).toBe(true);
+  });
+
+  it('the panorama model input labels an old intraday quote 最近报价, never 实时/当前价', async () => {
+    const at1130 = env([
+      { 代码: '600519', 最新价: 1330, 涨跌幅: 0.9, 行情时间: '2026-10-23 11:30:00' },
+    ]);
+    const c = client({ klineDate: '2026-10-22', quote: at1130 });
+    const data = await fetchPanoramaData(c, MATCH, INTRADAY);
+    const ctx = buildPanoramaContext(data, MATCH, INTRADAY);
+    expect(ctx).toContain('最近报价：1,330.00（报价时间 2026-10-23 11:30:00');
+    expect(ctx).not.toMatch(/实时|当前价|最新价 1,330/);
   });
 });

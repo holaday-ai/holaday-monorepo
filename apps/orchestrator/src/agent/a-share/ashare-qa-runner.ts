@@ -360,7 +360,7 @@ export async function runAsharePanorama(
 ): Promise<AshareQaResult> {
   const now = deps.now ?? new Date();
   const mode = deps.mode ?? 'prod';
-  const data = await fetchPanoramaData(deps.client, match);
+  const data = await fetchPanoramaData(deps.client, match, now);
   deps.logger.info(
     {
       ...deps.context,
@@ -413,7 +413,7 @@ export async function runAsharePanorama(
       );
     }
   }
-  const context = buildPanoramaContext(data, match);
+  const context = buildPanoramaContext(data, match, now);
 
   let interpretation = '';
   try {
