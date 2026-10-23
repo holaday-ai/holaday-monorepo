@@ -1585,27 +1585,6 @@ export async function runUnifiedBrowserLoop(
             steps: step + 1,
           };
       } else if (outcome.ok && isMutatingBrowserAction(action)) staleFailures = 0;
-      // FIX-32 (Deploy-32 b-m01): every read of 高德's route page came back masked (its SMS
-      // login form) and the model went on to 百度地图. A page we may not read is the user's.
-      if (outcome.ok && redactedRead(outcome.text)) {
-        if (wantsForm && !/登录|login|sign\s*in/i.test(input.intent)) {
-          results.push(
-            toolResult(
-              call.id,
-              '这是需要登录或验证码的页面，任务不需要登录：不要在这里填写，回到点名网站的表单页继续；点名网站没有所需控件时，把其余可填项填好（不提交）并截图，如实说明缺什么。',
-            ),
-          );
-          staleTurn = true;
-          continue;
-        }
-        wallMet = true;
-        return {
-          status: 'awaiting_user',
-          reason: 'login',
-          message: SENSITIVE_PAGE_MESSAGE,
-          steps: step + 1,
-        };
-      }
       if (
         outcome.ok &&
         ['read_page', 'snapshot', 'get_page_text', 'links', 'tables'].includes(action.tool)
@@ -1652,6 +1631,28 @@ export async function runUnifiedBrowserLoop(
           staleTurn = true;
           continue;
         }
+      }
+      // FIX-32 (Deploy-32 b-m01): every read of 高德's route page came back masked (its SMS
+      // login form, not a wall the probe above knows) and the model went on to 百度地图.
+      // A page we may not read is the user's.
+      if (outcome.ok && redactedRead(outcome.text)) {
+        if (wantsForm && !/登录|login|sign\s*in/i.test(input.intent)) {
+          results.push(
+            toolResult(
+              call.id,
+              '这是需要登录或验证码的页面，任务不需要登录：不要在这里填写，回到点名网站的表单页继续；点名网站没有所需控件时，把其余可填项填好（不提交）并截图，如实说明缺什么。',
+            ),
+          );
+          staleTurn = true;
+          continue;
+        }
+        wallMet = true;
+        return {
+          status: 'awaiting_user',
+          reason: 'login',
+          message: SENSITIVE_PAGE_MESSAGE,
+          steps: step + 1,
+        };
       }
       if (outcome.interruption)
         return {
