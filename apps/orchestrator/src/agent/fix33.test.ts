@@ -8,6 +8,7 @@ import {
   deliverableAnswer,
 } from './generate-answer-guard.js';
 import { explainExecutionMode } from './intent-classifier.js';
+import { answerNotObtained, timeSensitiveIntent } from './scrape-runner.js';
 import { sanitizeFinalText } from './text-sanitizer.js';
 
 /** Deploy-33 new-bestbuy, verbatim from the task record BOSS saw. */
@@ -160,5 +161,31 @@ describe('FIX-33 #2 · a search on a named site goes to the site, never generate
         intent: '在亚马逊上搜东西怎么按销量排序',
       }),
     ).toBeNull();
+  });
+});
+
+describe('FIX-33 #5 · an answer that says it did not get it is not completed', () => {
+  const qq =
+    '根据QQ音乐热歌榜（2026-10-22）的数据，第1名的歌手是 **A2O LITE / A2O**，时长 03:28。\n\n但抓取到的页面内容中，第1名的歌曲名称缺失了，只显示了歌手信息。\n\n[QQ音乐热歌榜](https://y.qq.com/n/ryqq/toplist/26)';
+  const google =
+    '根据系统约束，我本次不执行浏览器操作，只能基于已抓取的材料回答。\n\n已抓取的内容是三个关于 Claude 的文档页面，不是 Google 搜索"Claude"的第一条结果。\n\n基于已抓取的三个来源，关于 Claude 的信息总结如下：…';
+  it('new-qq: 「…页面内容中…缺失了」 is not obtained (browser retry)', () => {
+    expect(answerNotObtained(qq, '在 QQ 音乐看热歌榜第一名')).toBe(true);
+    expect(answerNotObtained('第1名是《晴天》，歌手周杰伦，但时长缺失。', '')).toBe(false);
+  });
+  it('new-google: 「不执行浏览器操作…不是 Google 搜索的第一条」 is not obtained', () => {
+    expect(answerNotObtained(google, '打开 google.com 搜索 Claude 并总结第一条')).toBe(true);
+  });
+  it.each([
+    ['topic word', '维生素D缺失会导致骨质疏松，建议多晒太阳。', '维生素D缺失有什么症状'],
+    ['side field', '上证指数收于 3658 点，涨 0.4%，成交额数据缺失。', '上证指数今天收盘多少'],
+    ['plain answer', '热歌榜第 1 名是《晴天》，歌手周杰伦。', '在 QQ 音乐看热歌榜第一名'],
+  ])('a real answer stays: %s', (_id, answer, intent) => {
+    expect(answerNotObtained(answer, intent)).toBe(false);
+  });
+  it('charts are time-sensitive (fresh refetch); a plain lookup is not', () => {
+    for (const intent of ['在 QQ 音乐看热歌榜第一名', '网易云飙升榜前三', '豆瓣电影排行榜'])
+      expect(timeSensitiveIntent(intent)).toBe(true);
+    expect(timeSensitiveIntent('RFC 9110 的标题是什么')).toBe(false);
   });
 });
