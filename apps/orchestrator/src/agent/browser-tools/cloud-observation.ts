@@ -97,6 +97,45 @@ function writeIntentPayload(url: URL, request: Request): boolean {
   return WRITE_INTENT_RE.test(decoded);
 }
 
+/**
+ * FIX-32: QQ 音乐's one RPC endpoint carries reads and writes alike; the body names the
+ * method. Only methods checked to be reads pass (public GET 2026-10-22: chart detail,
+ * chart list, search). The web client's `encoding=ag-1` bodies are encrypted — no method
+ * can be read there, so they stay unknown and pause, as do writes and unknown methods.
+ */
+const QQ_MUSIC_READ_METHODS = new Set([
+  'musicToplist.ToplistInfoServer.GetDetail',
+  'musicToplist.ToplistInfoServer.GetAll',
+  'music.search.SearchCgiService.DoSearchForQQMusicDesktop',
+]);
+export function qqMusicReadRpc(url: URL, body: string): boolean {
+  if (!/(?:^|\.)y\.qq\.com$/i.test(url.hostname)) return false;
+  if (!/^\/cgi-bin\/music[us]?\.fcg$/i.test(url.pathname) || url.searchParams.has('encoding'))
+    return false;
+  if (body.length > 65536) return false;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+  const calls = Object.entries(payload as Record<string, unknown>).filter(
+    ([key]) => key !== 'comm',
+  );
+  return (
+    calls.length > 0 &&
+    calls.every(([, call]) => {
+      const { module, method } = (call ?? {}) as { module?: unknown; method?: unknown };
+      return (
+        typeof module === 'string' &&
+        typeof method === 'string' &&
+        QQ_MUSIC_READ_METHODS.has(`${module}.${method}`)
+      );
+    })
+  );
+}
+
 /** Akamai Bot Manager's sensor POST (BestBuy): an opaque path, a 「{"sensor_data":…}」 body. */
 function botSensorPost(request: Request): boolean {
   try {
@@ -729,8 +768,16 @@ export class CloudObservation {
       !WRITE_PATH_RE.test(url.pathname) &&
       !writeIntentPayload(url, r) &&
       (READ_PATH_RE.test(url.pathname) || botSensorPost(r));
+    let rpcRead = false;
+    if (r.method() === 'POST' && !transactional) {
+      try {
+        rpcRead = qqMusicReadRpc(url, r.postData() ?? '');
+      } catch {
+        rpcRead = false;
+      }
+    }
     const unknownPost =
-      r.method() === 'POST' && graphql !== 'query' && !passiveBeacon && !searchRead;
+      r.method() === 'POST' && graphql !== 'query' && !passiveBeacon && !searchRead && !rpcRead;
     const candidate = transactional || resourceWrite || methodWrite || unknownPost;
     const write = candidate && !!cause;
     const branch =
@@ -1656,6 +1703,10 @@ async function searchFieldAt(target: Locator): Promise<boolean> {
           // IKEA's header search and Gaode's route from/to boxes are bare inputs, no form.
           (/(?:^|\s)s-input(?:\s|$)/.test(el.getAttribute('class') || '') &&
             /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname)) ||
+          // FIX-32: Best Buy's header search is a bare textarea; Enter opens
+          // /site/searchpage.jsp?st=… by GET (DOM and request checked 2026-10-22).
+          (el.id === 'autocomplete-search-bar' &&
+            /(?:^|\.)bestbuy\.com$/i.test(location.hostname)) ||
           (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
             /(?:^|\.)amap\.com$/i.test(location.hostname))
         );

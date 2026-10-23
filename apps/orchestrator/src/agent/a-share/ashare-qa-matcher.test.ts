@@ -231,4 +231,22 @@ describe('FIX-31：A股通道只接明确的股票问题（Deploy-31 b-v06）', 
   ])('真股票问题仍进：%s', async (intent, symbol) => {
     expect((await ctx(intent)).match?.stocks.map((s) => s.symbol)).toContain(symbol);
   });
+
+  // FIX-32：商品涨价不是股价涨跌。
+  it.each(['中国石油加油站涨价了吗', '茅台酒涨价了吗', '茅台酒价格今年涨了吗', '油价今天涨了吗'])(
+    '商品涨价不进 A股通道：%s',
+    async (intent) => {
+      const r = await ctx(intent);
+      expect(r.match).toBeNull();
+      expect(r.hasSignal).toBe(false);
+      expect(await plain(intent)).toBeNull();
+    },
+  );
+  it.each([
+    ['中国石油股价涨了吗', '601857'],
+    ['茅台为什么跌', '600519'],
+    ['贵州茅台今天股价多少', '600519'],
+  ])('股价涨跌仍进：%s', async (intent, symbol) => {
+    expect((await ctx(intent)).match?.stocks.map((s) => s.symbol)).toContain(symbol);
+  });
 });

@@ -690,9 +690,7 @@ function tryExtractNumberedListItems(answerText: string): ParsedItem[] {
     if (firstUrl) name = name.replace(firstUrl, '').trim();
     // Strip the price token off the name with a separate parse so
     // dropping ¥ doesn't catch random digits embedded in the name.
-    const priceMatch = first.match(
-      /[¥￥$]\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?\s*(?:元|RMB|人民币)/i,
-    );
+    const priceMatch = first.match(PRICE_TOKEN_RE);
     if (priceMatch) name = name.replace(priceMatch[0], '').trim();
     // Trim residual punctuation (separators between fields).
     name = name.replace(/^[—\-·,，:：、\s]+|[—\-·,，:：、\s]+$/g, '').trim();
@@ -750,14 +748,37 @@ function pickNumber(v: unknown): number | null {
   return null;
 }
 
+/**
+ * FIX-32 (Deploy-32 b-p02): a regional page shows 「SGD 11.46」 — a currency code is a
+ * price as much as a symbol is. Symbols (S$/US$/HK$ end in $), codes before or after.
+ */
+const CURRENCY_CODE = 'SGD|USD|HKD|EUR|GBP|JPY|CNY|RMB|AUD|CAD|NZD|MYR|TWD|KRW|INR|THB|CHF';
+const AMOUNT = '([0-9]+(?:,[0-9]{3})*(?:\\.[0-9]+)?)';
+const PRICE_TOKEN_RE = new RegExp(
+  `[¥￥$€£₩₹]\\s*${AMOUNT}|\\b(?:${CURRENCY_CODE})\\s*${AMOUNT}|${AMOUNT}\\s*(?:元|人民币|(?:${CURRENCY_CODE})\\b)`,
+  'i',
+);
+
 function parsePriceText(s: string): number | null {
-  const m = s.match(
-    /[¥￥$]\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)|([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*(?:元|RMB|人民币)/i,
-  );
+  const m = s.match(PRICE_TOKEN_RE);
   if (!m) return null;
-  const raw = (m[1] ?? m[2] ?? '').replace(/,/g, '');
+  const raw = (m[1] ?? m[2] ?? m[3] ?? '').replace(/,/g, '');
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * FIX-32 (Deploy-32 b-p02): a row that says its price is not on the page
+ * (「价格：未获取到（该商品卡片仅显示 "See options"）」) is an honest gap, not a missing field.
+ */
+const DECLARED_NO_PRICE_RE =
+  /(?:价格|售价|报价|price)\**\s*[：:]?\s*\**\s*(?:未获取到|未读到|未读取到|未显示|页面未显示|未标(?:价|明)|无(?:具体|明确)?(?:价格|报价|标价|售价)|暂无|不详|not\s+(?:shown|listed|available)|unavailable|n\/a)|(?:仅|只)显示\s*["“「]?see options/i;
+
+/** 1-based rows whose price the answer honestly declares absent from the page. */
+export function declaredMissingPriceRows(answerText: string): number[] {
+  return extractStructuredItems(answerText).flatMap((row, i) =>
+    row.price == null && DECLARED_NO_PRICE_RE.test(row.raw) ? [i + 1] : [],
+  );
 }
 
 function extractUrlFromCell(c: string): string | null {
@@ -929,10 +950,11 @@ function checkEcommerceRows(criterion: SuccessCriterion, answerText: string): Ch
     };
   }
   const incomplete: string[] = [];
+  const declared = new Set(declaredMissingPriceRows(answerText));
   rows.forEach((row, i) => {
     const missing: string[] = [];
     if (!row.name) missing.push('名称');
-    if (row.price == null) missing.push('价格');
+    if (row.price == null && !declared.has(i + 1)) missing.push('价格');
     if (requireLinks && !row.url) missing.push('链接');
     if (missing.length > 0) {
       incomplete.push(`第 ${i + 1} 行缺少${missing.join('、')}`);
@@ -965,6 +987,17 @@ function checkEcommerceRows(criterion: SuccessCriterion, answerText: string): Ch
     );
   }
   if (incomplete.length > 0) detailParts.push(incomplete.join('；'));
+  // FIX-32: every other row complete, some prices honestly not on the page — 部分完成.
+  if (passed && declared.size > 0) {
+    return {
+      criterionId: criterion.id,
+      criterionType: 'ecommerce_rows',
+      passed: false,
+      checker: 'deterministic',
+      detail: declaredPriceGap([...declared]),
+      severity: 'fixable',
+    };
+  }
   return {
     criterionId: criterion.id,
     criterionType: 'ecommerce_rows',
@@ -975,6 +1008,10 @@ function checkEcommerceRows(criterion: SuccessCriterion, answerText: string): Ch
       : detailParts.join('；'),
     severity: passed ? undefined : 'fixable',
   };
+}
+
+function declaredPriceGap(rows: number[]): string {
+  return `部分完成：第 ${rows.join('、')} 条页面未显示价格（答案已如实说明）`;
 }
 
 function isLikelyEcommerceAggregateUrl(url: string): boolean {
@@ -1010,7 +1047,7 @@ const LIST_KEY_FIELD_PATTERNS: Record<string, { label: string; re: RegExp }> = {
     label: '发布日期/时间',
     re: /\d{4}\s*[-/.年]\s*\d{1,2}(?:\s*[-/.月]\s*\d{1,2})?|\d{1,2}\s*月\s*\d{1,2}\s*日|\b\d{1,2}:\d{2}\b|\d+\s*(?:秒|分钟|小时|天)前|刚刚|今天|今日|昨天|\b\d+\s*(?:minutes?|hours?|days?)\s+ago\b/i,
   },
-  price: { label: '价格', re: /[¥￥$]\s*\d|\d+(?:\.\d+)?\s*(?:元|RMB|人民币)/i },
+  price: { label: '价格', re: PRICE_TOKEN_RE },
 };
 
 /**
@@ -1087,9 +1124,23 @@ export function reviewListAnswer(contract: ExecutionContract, answerText: string
         : criterion.type === 'ecommerce_rows'
           ? checkEcommerceRows(criterion, answerText)
           : null;
-    if (check && !check.passed) gaps.push(check.detail);
+    // An honest gap is delivered as 部分完成 (listPartialNote), not sent back.
+    if (check && !check.passed && !check.detail.startsWith('部分完成：')) gaps.push(check.detail);
   }
   return gaps.length > 0 ? gaps.join('；') : null;
+}
+
+/**
+ * FIX-32 (Deploy-32 b-p02): the lead for a list answer whose only gap is a price the page
+ * does not show, or null. The browser loop delivers such an answer as 部分完成.
+ */
+export function listPartialNote(contract: ExecutionContract, answerText: string): string | null {
+  for (const criterion of contract.successCriteria) {
+    if (criterion.type !== 'ecommerce_rows') continue;
+    const check = checkEcommerceRows(criterion, answerText);
+    if (!check.passed && check.detail.startsWith('部分完成：')) return check.detail;
+  }
+  return null;
 }
 
 function checkDuplicateCandidateUrls(

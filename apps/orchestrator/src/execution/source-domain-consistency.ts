@@ -113,6 +113,29 @@ export function detectRequiredSites(intent: string | null | undefined): SiteDoma
   return SITE_DOMAIN_RULES.filter((r) => r.brand.test(t));
 }
 
+/**
+ * FIX-32 (Deploy-32 b-m01): the domains of the sites the user named by brand
+ * (「高德地图」 → amap.com, gaode.com), or none when other sources are allowed.
+ */
+export function namedSiteDomains(intent: string | null | undefined): string[] {
+  const t = intent ?? '';
+  if (ALLOW_OTHER_SOURCES_RE.test(t)) return [];
+  // Named as the place to work, not as a subject (「苹果和亚马逊的市值」); Linear and
+  // Notion are also plain English words — those lock only by their own domain.
+  const used = (brand: RegExp) =>
+    new RegExp(
+      `(?:在|去|到|用|打开|上|从|通过|进入?)\\s*(?:${brand.source})|(?:${brand.source})\\s*(?:上|里|网站|官网|app|搜|查|看|找|买)`,
+      'i',
+    ).test(t);
+  return [
+    ...new Set(
+      SITE_DOMAIN_RULES.filter(
+        (rule) => rule.label !== 'Linear' && rule.label !== 'Notion' && used(rule.brand),
+      ).flatMap((rule) => rule.domains),
+    ),
+  ];
+}
+
 export interface SourceDomainVerdict {
   /** Labels of the sites the intent named (empty → no check ran). */
   readonly requiredLabels: readonly string[];

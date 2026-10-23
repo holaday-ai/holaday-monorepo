@@ -1,3 +1,4 @@
+import { namedSiteDomains } from '../../execution/source-domain-consistency.js';
 import { scrapedWall } from '../../firecrawl/scraped-page.js';
 import type {
   MessagesAdapter,
@@ -215,6 +216,11 @@ export interface UnifiedBrowserLoopInput {
    * second finish is returned as-is for the verifier to judge.
    */
   reviewFinish?: (summary: string) => string | null;
+  /**
+   * FIX-32 (Deploy-32 b-p02): the 部分完成 lead for an answer whose only gap is one the
+   * page itself has (「价格：未获取到（仅显示 See options）」), or null.
+   */
+  partialNote?: (summary: string) => string | null;
 }
 
 /** Remediation turn after the pre-delivery review found gaps in the answer. */
@@ -376,13 +382,23 @@ export async function runUnifiedBrowserLoop(
   );
   /** FIX-24 (Deploy-24 core-08): sites the task names; fills elsewhere do not count. */
   const namedHosts = intentHosts(input.intent);
-  const onNamedSite = (url: string | undefined) => {
-    const host = hostOf(url);
-    return !!host && namedHosts.some((named) => host === named || host.endsWith(`.${named}`));
-  };
+  const onNamedSite = (url: string | undefined) => onDomains(url, namedHosts);
   let offSiteContinued = false;
   const wantsForm =
     namedHosts.length > 0 && /填表|填写|表单|日期控件|fill.*form|form.*fill/i.test(input.intent);
+  /** FIX-32: sites named by address or by name (「高德地图」); the run stays on them. */
+  const lockedDomains = [...new Set([...namedHosts, ...namedSiteDomains(input.intent)])];
+  const seenOnReadPage = (url: string) => {
+    const host = hostOf(url);
+    return (
+      !!host &&
+      pageEvidence.some(
+        (page) =>
+          page.links?.some((link) => hostOf(link.url) === host) ||
+          page.text.toLowerCase().includes(host),
+      )
+    );
+  };
   let sectionRejected = false;
   /** NAV-EXIT-1: the site the task names, opened before giving up on a blank page. */
   const blankTarget = intentTargetUrl(input.intent);
@@ -1249,12 +1265,13 @@ export async function runUnifiedBrowserLoop(
           // FIX-31 (core-10 / xhs-read): an answer that itself opens with 「部分完成」 is
           // delivered as 部分完成 whatever finish status came with it.
           const saysPartial = /^\s*(?:部分完成|partially completed)/i.test(summary);
-          if (short || dateMissing || declaredPartial || saysPartial) {
+          const pageGap = input.partialNote?.(summary) ?? null;
+          if (short || dateMissing || declaredPartial || saysPartial || pageGap) {
             const lead = short
               ? `部分完成：只找到 ${found}/${wantedCount} 条。`
               : dateMissing
                 ? '部分完成：没有找到可填写的日期控件，日期未填写。'
-                : '';
+                : (pageGap ?? '');
             return {
               status: 'completed',
               summary: withLimitations(
@@ -1268,7 +1285,11 @@ export async function runUnifiedBrowserLoop(
                 : {
                     found: 0,
                     wanted: 1,
-                    missing: dateMissing ? '日期控件' : '答案中说明的未完成部分',
+                    missing: dateMissing
+                      ? '日期控件'
+                      : pageGap
+                        ? '页面未显示的字段'
+                        : '答案中说明的未完成部分',
                   },
             };
           }
@@ -1439,6 +1460,23 @@ export async function runUnifiedBrowserLoop(
         );
         continue;
       }
+      // FIX-32 (Deploy-32 b-m01): the user named the site; another site is not a
+      // substitute. A link this run saw on a page it read may still be followed.
+      if (
+        action.tool === 'navigate' &&
+        lockedDomains.length > 0 &&
+        !onDomains(action.url, lockedDomains) &&
+        !seenOnReadPage(action.url)
+      ) {
+        results.push(
+          toolResult(
+            call.id,
+            `任务点名了 ${lockedDomains.join('、')}，只在这个网站内完成，不要换到 ${hostOf(action.url) ?? '其他网站'}。这个网站要求登录或验证时调用 request_human 交给用户；读不到就如实说明缺什么（结果按「部分完成」或未完成交付），不要用别的网站代替。`,
+            true,
+          ),
+        );
+        continue;
+      }
       if (action.tool === 'navigate' && fromPageLinks && navigated) {
         results.push(
           toolResult(
@@ -1538,6 +1576,27 @@ export async function runUnifiedBrowserLoop(
             steps: step + 1,
           };
       } else if (outcome.ok && isMutatingBrowserAction(action)) staleFailures = 0;
+      // FIX-32 (Deploy-32 b-m01): every read of 高德's route page came back masked (its SMS
+      // login form) and the model went on to 百度地图. A page we may not read is the user's.
+      if (outcome.ok && redactedRead(outcome.text)) {
+        if (wantsForm && !/登录|login|sign\s*in/i.test(input.intent)) {
+          results.push(
+            toolResult(
+              call.id,
+              '这是需要登录或验证码的页面，任务不需要登录：不要在这里填写，回到点名网站的表单页继续；点名网站没有所需控件时，把其余可填项填好（不提交）并截图，如实说明缺什么。',
+            ),
+          );
+          staleTurn = true;
+          continue;
+        }
+        wallMet = true;
+        return {
+          status: 'awaiting_user',
+          reason: 'login',
+          message: SENSITIVE_PAGE_MESSAGE,
+          steps: step + 1,
+        };
+      }
       if (
         outcome.ok &&
         ['read_page', 'snapshot', 'get_page_text', 'links', 'tables'].includes(action.tool)
@@ -1889,8 +1948,26 @@ function hostOf(url: string | undefined): string | undefined {
   }
 }
 
+function onDomains(url: string | undefined, domains: readonly string[]): boolean {
+  const host = hostOf(url);
+  return !!host && domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+}
+
 /** FAILURE-COPY-1: the task ended before opening any page — not a login question. */
 export const NOT_STARTED = '执行未开始：浏览器还没有打开目标页面就结束了。请重试。';
+
+/** FIX-32: a read the observer masked because the page shows a login/verification-code form. */
+export const SENSITIVE_PAGE_MESSAGE =
+  '页面上有需要你本人填写的登录或验证码输入框，页面内容已遮挡、无法代为读取。请在浏览器中接管（登录或关闭登录弹窗）后继续。';
+
+function redactedRead(text: string): boolean {
+  try {
+    const value = JSON.parse(text) as { status?: unknown; redacted?: unknown };
+    return value?.status === 'redacted_unread';
+  } catch {
+    return false;
+  }
+}
 
 /** Well-known sites a task names without a URL (NAV-EXIT-1: "维基百科长页面"). */
 const NAMED_SITES: Array<[RegExp, string]> = [

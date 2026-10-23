@@ -276,8 +276,14 @@ export function classifyIntentForOutputRequirement(intent: string): {
   requirement: OutputRequirement | null;
 } {
   const text = intent;
+  // FIX-32 (core-07 vp=0): 「打开3个链接到新标签，分别读标题」 opens links; it does not ask
+  // for links in the answer. 链接 counts only when it is not what gets opened or clicked.
   const explicitLinkRequest =
-    /链接|来源|引用|参考链接|参考资料|出处|reference|source\s+url|cite|引用链接/i.test(text);
+    /来源|引用|参考链接|参考资料|出处|reference|source\s+url|cite|引用链接/i.test(text) ||
+    (/链接/.test(text) && !/(?:打开|点开|点击|点进|进入|访问)[^，。,;；]{0,8}链接/.test(text)) ||
+    /(?:给|附|列|带|贴|发|提供|输出|返回)[^，。,;；]{0,6}(?:链接|网址|url)|链接[^，。,;；]{0,4}(?:给我|发我|列出)/i.test(
+      text,
+    );
   const researchOrRetrievalIntent = isResearchOrRetrievalIntent(text);
 
   // Stock — explicit market-data phrasing. "价格" alone is too broad

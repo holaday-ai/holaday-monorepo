@@ -379,7 +379,25 @@ function isNonStockTopic(text: string): boolean {
  */
 const STOCK_CONTEXT_RE = /股|大盘|指数|市值|板块|涨跌/i;
 function hasStockContext(text: string): boolean {
-  return ASHARE_TERMS.some((t) => text.includes(t)) || STOCK_CONTEXT_RE.test(text);
+  const t = withoutGoodsPrice(text);
+  return hasAshareTerm(t) || STOCK_CONTEXT_RE.test(t);
+}
+
+/**
+ * FIX-32：「中国石油加油站涨价了吗」「茅台酒涨价了吗」问的是商品价格。涨/跌只在股价语境里算 A股术语，
+ * 「涨价/降价/价格上涨/油价涨」这类商品价格说法先去掉再看（股价 不在内）。
+ */
+const GOODS_PRICE_RE =
+  /涨价|跌价|降价|提价|调价|(?:(?<!股)价格?|(?:油|房|菜|肉|金|电|水|票|酒|烟)价)[^，。？?！!]{0,6}?(?:上涨|下跌|上调|下调|涨|跌)/g;
+function withoutGoodsPrice(text: string): string {
+  return text.replace(GOODS_PRICE_RE, ' ');
+}
+function hasAshareTerm(text: string): boolean {
+  const t = withoutGoodsPrice(text);
+  return ASHARE_TERMS.some((term) => t.includes(term));
+}
+function talksGoodsPrice(text: string): boolean {
+  return new RegExp(GOODS_PRICE_RE.source).test(text);
 }
 
 /** 句子与名称最长的共同片段长度（「茅台为什么跌」 vs 贵州茅台 → 2）。 */
@@ -440,7 +458,8 @@ function acceptShortHit(
   if (nameAppearsIn(text, stock.displayName))
     return (
       stockContext ||
-      (inSkillContext && compact(stock.displayName ?? '').length >= 3) ||
+      // FIX-32: 「中国石油加油站涨价了吗」 names the company but asks a goods price.
+      (inSkillContext && compact(stock.displayName ?? '').length >= 3 && !talksGoodsPrice(text)) ||
       justTheName(text, [stock.displayName])
     );
   if (isNonStockTopic(text)) return false;
@@ -498,7 +517,7 @@ export async function resolveLongSentenceStocks(
 /** 长句抽名的前置条件：句中已有 A股信号（术语 / 深度分析词），且不是指数/大盘问句。 */
 function shouldExtractFromLongText(text: string): boolean {
   if (text.trim().length <= NAME_SEARCH_MAX_LEN || isIndexQuery(text)) return false;
-  return ASHARE_TERMS.some((t) => text.includes(t)) || isDeepQuery(text);
+  return hasAshareTerm(text) || isDeepQuery(text);
 }
 
 export interface MatchAshareQaOpts {
@@ -532,7 +551,7 @@ interface IntentGate {
 function intentGate(opts: MatchAshareQaOpts): IntentGate {
   const text = opts.intent ?? '';
   const isRole = opts.roleId === ASHARE_ROLE_ID;
-  const hasTerm = isRole || ASHARE_TERMS.some((t) => text.includes(t));
+  const hasTerm = isRole || hasAshareTerm(text);
   const hasQuestion = QUESTION_MARKERS.some((t) => text.includes(t));
   const wantsWatchlist = WATCHLIST_TERMS.some((t) => text.includes(t));
 
@@ -612,7 +631,7 @@ export async function resolveAshareInContext(
   search: SymbolSearchFn,
 ): Promise<{ match: AshareQaMatch | null; hasSignal: boolean; indexIntent: boolean }> {
   const text = opts.intent ?? '';
-  const hasTerm = ASHARE_TERMS.some((t) => text.includes(t)); // 含持仓语境词
+  const hasTerm = hasAshareTerm(text); // 含持仓语境词
   const wantsWatchlist = WATCHLIST_TERMS.some((t) => text.includes(t));
   const deep = isDeepQuery(text);
   const toMatch = (stocks: ResolvedStock[]): AshareQaMatch => {
