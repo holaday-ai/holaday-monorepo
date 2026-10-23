@@ -219,6 +219,22 @@ describe('b-m01: 高德 stays 高德; a masked login page goes to the user', () 
     expect(seen.join('\n')).toContain('不要换到 map.baidu.com');
     expect(outcome.status).toBe('failed');
   });
+  it('Deploy-33: a local fixture host stands in for the named site; a public one does not', async () => {
+    const { adapter } = scripted([
+      { name: 'navigate', input: { url: 'http://127.0.0.1:53781/iframe' } },
+      { name: 'navigate', input: { url: 'https://demo.example.com/iframe' } },
+      { name: 'finish', input: { status: 'failed', summary: '没有读到。' } },
+    ]);
+    const site = browser(() => 'heading "iframe"');
+    await runUnifiedBrowserLoop({
+      intent: '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts',
+      adapter,
+      maxSteps: 6,
+      execute: site.execute as never,
+      currentPageUrl: site.currentPageUrl,
+    });
+    expect(site.opened).toEqual(['http://127.0.0.1:53781/iframe']);
+  });
   it('a named address locks its whole site, not just that host', async () => {
     const { adapter } = scripted([
       { name: 'navigate', input: { url: 'https://item.jd.com/100142621606.html' } },

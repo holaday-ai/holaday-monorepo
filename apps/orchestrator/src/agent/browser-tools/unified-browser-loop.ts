@@ -1479,7 +1479,8 @@ export async function runUnifiedBrowserLoop(
         action.tool === 'navigate' &&
         lockedDomains.length > 0 &&
         !onDomains(action.url, lockedDomains) &&
-        !seenOnReadPage(action.url)
+        !seenOnReadPage(action.url) &&
+        !localTestHost(action.url)
       ) {
         results.push(
           toolResult(
@@ -1977,6 +1978,18 @@ export function siteLock(intent: string, namedHosts = intentHosts(intent)): stri
   const onward = /(?:并|再|然后|同时|另外|顺便)\s*(?:在|去|到|用|上|打开|查)/.exec(intent);
   if (onward && named(intent.slice(onward.index)).length === 0) return [];
   return [...new Set(named(intent))];
+}
+
+/**
+ * Deploy-33 (browser:loop-audit): a loopback or local test host is a fixture standing in
+ * for the named site, never a public substitute for it — the site lock leaves it alone.
+ */
+function localTestHost(url: string | undefined): boolean {
+  const host = hostOf(url);
+  return (
+    !!host &&
+    (['localhost', '127.0.0.1', '[::1]'].includes(host) || /\.(?:localhost|test)$/.test(host))
+  );
 }
 
 function onDomains(url: string | undefined, domains: readonly string[]): boolean {
