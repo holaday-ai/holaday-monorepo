@@ -1539,7 +1539,6 @@ describe('TaskRepository task terminal state persistence', () => {
       taskExternalId: 'tsk_state_machine',
       awaitingKind: 'login_required',
       result: { executionMode: 'browser' },
-      sourceContext: { reroutedFrom: 'generate' },
     });
 
     expect(result.persisted).toBe(false);
@@ -1864,6 +1863,7 @@ describe('TaskRepository.adoptTaskForBrowserRetry (FIX-34)', () => {
       executionRevision: 0,
       coreRecordVersion: 0,
       result: { executionMode: 'browser' },
+      sourceContext: { reroutedFrom: 'generate' },
     });
     expect(captured.eventPayload?.payload).toEqual({
       from: 'generate',
