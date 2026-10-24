@@ -56,6 +56,32 @@ describe('FIX-34 #2 · amazon.sg: each item is checked against its own listing r
     expect(declaredMissingPriceRows(answer, page.text)).toEqual([3]);
     expect(listPartialNote(rowsContract, answer, page.text)).toMatch(/^部分完成：第 3 条/);
   });
+  it('a carousel heading and rating nodes between the cut item and the cut do not count as its price', () => {
+    const tree = [
+      `- link "${T1}" [ref=e255]`,
+      '- link "S$8.90" [ref=e276]',
+      `- link "${T2}" [ref=e331]`,
+      '- link "S$17.29" [ref=e344]',
+      `- link "${T3}" [ref=e394]`,
+      '- link "4.5 out of 5 stars, rating details" [ref=e400]',
+      '- link "12,345 ratings" [ref=e401]',
+      '- generic [ref=e402]: 1K+ bought in past month',
+      '- generic [ref=e403]: Climate Pledge Friendly — products with sustainability certifications',
+      '- heading "Kitchen bestsellers under S$30" [ref=e404]',
+      '- link "Shop now" [ref=e405]',
+    ].join('\n');
+    const raw = JSON.stringify({ tabId: 'tab_list', sourceURL: LISTING, tree, truncated: true });
+    const page = observedEvidence(raw, tree, LISTING);
+    expect(declaredMissingPriceRows(rows('未获取到（快照截断）'), page.text)).toEqual([3]);
+    // The same page with item 3's own price before the cut: still sent back.
+    const priced = tree.replace('- link "4.5 out', '- link "S$21.41" [ref=e399]\n- link "4.5 out');
+    const pricedPage = observedEvidence(
+      JSON.stringify({ tabId: 'tab_list', sourceURL: LISTING, tree: priced, truncated: true }),
+      priced,
+      LISTING,
+    );
+    expect(declaredMissingPriceRows(rows('未获取到'), pricedPage.text)).toEqual([]);
+  });
   it('not truncated and the price is shown: 「未获取到」 is still sent back', () => {
     const page = listing(false, 'S$21.41');
     expect(page.text).not.toContain(SNAPSHOT_TRUNCATED);
