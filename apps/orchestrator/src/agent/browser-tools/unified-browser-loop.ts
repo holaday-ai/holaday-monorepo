@@ -371,6 +371,8 @@ export async function runUnifiedBrowserLoop(
   /** FIX-28 (Deploy-27 core-04): one return for an answer short of the videos asked. */
   let videoCountAsked = false;
   let bindingCorrected = false;
+  /** FIX-34: one correction for listed prices no read page shows. */
+  let pricesCorrected = false;
   /** FIX-27: YouTube playback pings seen in action effects. */
   let playbackPings = 0;
   let playbackCorrected = false;
@@ -1098,6 +1100,27 @@ export async function runUnifiedBrowserLoop(
                 ]
                   .filter(Boolean)
                   .join('\n'),
+                true,
+              ),
+            );
+            continue;
+          }
+          // FIX-34 (f34l amazon-sg): a price written for an item the snapshot was cut at
+          // gets its own one correction saying how to read it — not the run's only return.
+          const unreadPrices =
+            blocking &&
+            !pricesCorrected &&
+            !concludeNow &&
+            blocking.startsWith('答案与已读页面矛盾')
+              ? facts.unreadPrices
+              : undefined;
+          if (unreadPrices?.length) {
+            pricesCorrected = true;
+            await rejected(summary, given, blocking!);
+            results.push(
+              toolResult(
+                call.id,
+                `${unreadPrices.join('；')} 不在本次读过的任何页面文本里（截图上看到的不算已读）。页面快照在该商品处截断时：向下滚动（scroll）后再 snapshot / get_page_text 读到它，或点开该商品读取详情页（read_page / get_page_text）；读到后照页面原样写，读不到就写「未获取到」。其余内容不变，再 finish。`,
                 true,
               ),
             );

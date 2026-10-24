@@ -176,6 +176,11 @@ export interface FactAssessment {
     bound: string;
     where?: string;
   }>;
+  /**
+   * FIX-34: listed prices no read page shows (written for the item a snapshot was cut
+   * at) — when they are the only contradictions, they get their own one correction.
+   */
+  unreadPrices?: string[];
 }
 
 interface Fact {
@@ -593,6 +598,7 @@ export function assessCompletionFacts(input: {
   const misquoted: Array<{ quote: string; nearest?: string }> = [];
   const binding: NonNullable<FactAssessment['binding']> = [];
   const hedged: NonNullable<FactAssessment['hedgedNames']> = [];
+  const unreadPrices: string[] = [];
   const seen = new Set<string>();
   const facts = [...explicitFacts(input.fields), ...answerFacts(input.summary, intent)].flatMap(
     (fact): Fact[] => {
@@ -825,6 +831,7 @@ export function assessCompletionFacts(input: {
         contradictions.push(
           `${label} 不在任何已读页面上：列表在该商品处截断时写「未获取到」，或打开该商品页读取后再写`,
         );
+        unreadPrices.push(label);
         continue;
       }
     }
@@ -884,6 +891,9 @@ export function assessCompletionFacts(input: {
     unverified: unverified.slice(0, 8),
     ...(misquoted.length && misquoted.length === contradictions.length ? { misquoted } : {}),
     ...(binding.length && binding.length === contradictions.length ? { binding } : {}),
+    ...(unreadPrices.length && unreadPrices.length === contradictions.length
+      ? { unreadPrices }
+      : {}),
     ...(hedged.length ? { hedgedNames: hedged.slice(0, 4) } : {}),
   };
 }
