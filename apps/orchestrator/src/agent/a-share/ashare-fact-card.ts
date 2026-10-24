@@ -126,6 +126,16 @@ export async function tradingDayKnown(client: AkshareClient, iso: string): Promi
   }
 }
 
+/**
+ * 盘中「现在」与 `at`（行情或抓取时刻）之间的成交分钟差：午休时以 11:30 收市为准；
+ * `at` 比现在超前 1 分钟以上 → null（不是今天这一盘的数）。
+ */
+function tradingLagMinutes(now: Date, atMin: number): number | null {
+  const nowMin = beijingMinutes(now);
+  const tradedUntil = nowMin >= 11 * 60 + 30 && nowMin < 13 * 60 ? 11 * 60 + 30 : nowMin;
+  return nowMin - atMin < -1 ? null : tradedUntil - atMin;
+}
+
 /** 当天、且盘中够新的报价及其「日期 时间」；否则 null。 */
 function liveQuote(
   quote: AkEnvelope<StockQuoteRow> | undefined,
@@ -146,13 +156,11 @@ function liveQuote(
   }
   if (!time) return null;
   if (ashareIntraday(now)) {
-    const nowMin = beijingMinutes(now);
-    const tradedUntil = nowMin >= 11 * 60 + 30 && nowMin < 13 * 60 ? 11 * 60 + 30 : nowMin;
     const [h = 0, m = 0] = time.slice(11, 16).split(':').map(Number);
     // Not too old, and not ahead of the trading clock: a time-only snapshot taken before
     // the open can still carry yesterday's 15:00 (Codex review on PR #296).
-    const quoteMin = h * 60 + m;
-    if (tradedUntil - quoteMin > LIVE_QUOTE_MAX_LAG_MIN || nowMin - quoteMin < -1) return null;
+    const lag = tradingLagMinutes(now, h * 60 + m);
+    if (lag === null || lag > LIVE_QUOTE_MAX_LAG_MIN) return null;
   }
   return { row, time };
 }
@@ -456,12 +464,19 @@ export async function buildIndexCard(
     const when = Number.isNaN(fetched.getTime()) ? now : fetched;
     const stamp = `${beijingIso(when)} ${fmtClock(when.toISOString())}`;
     const day = ashareIntraday(when) ? await tradingDayKnown(deps.client, beijingIso(when)) : false;
+    // FIX-34：盘中抓取、但现在已落后 10 分钟以上（缓存的旧快照）不是实时。
+    const stale =
+      day === true &&
+      (beijingIso(when) !== beijingIso(now) ||
+        (tradingLagMinutes(now, beijingMinutes(when)) ?? 0) > LIVE_QUOTE_MAX_LAG_MIN);
     lines.push(
       day === null
         ? `- 最近报价（抓取于 ${stamp}；未能确认今天是否交易日）`
-        : `- 行情时间：抓取于 ${stamp}（${
-            day ? '盘中实时，未收盘' : '非交易时段，为最近一个交易日收盘后的行情'
-          }）`,
+        : stale
+          ? `- 最近报价（抓取于 ${stamp}，${NOT_REALTIME_NOTE}）`
+          : `- 行情时间：抓取于 ${stamp}（${
+              day ? '盘中实时，未收盘' : '非交易时段，为最近一个交易日收盘后的行情'
+            }）`,
     );
   }
   return `${lines.join('\n').trimEnd()}\n\n${QA_DISCLAIMER_BLOCK}`;

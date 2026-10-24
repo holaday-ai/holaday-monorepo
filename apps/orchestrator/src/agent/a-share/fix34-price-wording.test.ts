@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { AkshareClient } from './akshare-client.js';
+import { buildIndexCard } from './ashare-fact-card.js';
 import { complianceGate } from './ashare-qa-gate.js';
 import { runAsharePanorama, runAshareQa } from './ashare-qa-runner.js';
 import type { AkEnvelope } from './briefing-types.js';
@@ -138,5 +139,43 @@ describe('FIX-34 #1 · 走势 says which price it uses', () => {
       ).passed,
     ).toBe(true);
     expect(complianceGate('最近收盘 1,335.00，处在年内中部。', closeOnly).passed).toBe(true);
+  });
+});
+
+describe('FIX-34 #1 · the index card calls only a fresh snapshot 盘中实时', () => {
+  const indexClient = () =>
+    ({
+      getTradingDay: async () => ({
+        data: [{ is_trading_day: true }],
+        count: 1,
+        source: 'fixture',
+        fetched_at: '',
+      }),
+    }) as unknown as AkshareClient;
+  const card = (fetchedAt: string, nowIso: string) =>
+    buildIndexCard({
+      client: indexClient(),
+      now: new Date(nowIso),
+      quote: {
+        data: [{ 名称: '上证指数', 最新价: 3301.2, 涨跌幅: 0.4 }],
+        count: 1,
+        source: 'fixture',
+        fetched_at: fetchedAt,
+      },
+    } as never);
+  it('fetched 2 minutes ago, intraday → 盘中实时', async () => {
+    expect(await card('2026-10-26T06:18:00Z', '2026-10-26T14:20:00+08:00')).toContain(
+      '（盘中实时，未收盘）',
+    );
+  });
+  it('a cached 09:40 snapshot read at 14:20 → 最近报价, 非实时', async () => {
+    const text = await card('2026-10-26T01:40:00Z', '2026-10-26T14:20:00+08:00');
+    expect(text).toContain('- 最近报价（抓取于 2026-10-26 09:40，非实时（未取到今日实时行情））');
+    expect(text).not.toContain('盘中实时');
+  });
+  it('lunch: a snapshot from 11:29 is still the latest trade at 12:40', async () => {
+    expect(await card('2026-10-26T03:29:00Z', '2026-10-26T12:40:00+08:00')).toContain(
+      '（盘中实时，未收盘）',
+    );
   });
 });

@@ -69,6 +69,23 @@ function assertWhole(m, label) {
   assert.ok(right - left >= (cr - cl) * 0.98 || bottom - top >= (cb - ct) * 0.98, `${label}: not fitted`);
 }
 
+/**
+ * The phone sheet's canvas, opened if it is not up. The canvas is waited for first:
+ * checked straight after navigation it may not be attached yet, and the first
+ * 「浏览器」 button is then not necessarily the visible sheet trigger (a 2.5 s click
+ * timeout, 1 run in 3 at 1366×768).
+ */
+async function openPhoneSheet(page) {
+  const up = await page
+    .locator('canvas')
+    .first()
+    .waitFor({ state: 'attached', timeout: 4000 })
+    .then(() => true, () => false);
+  if (up) return;
+  const trigger = page.getByRole('button', { name: /浏览器/ }).filter({ visible: true }).first();
+  if (await trigger.count()) await trigger.click({ timeout: 10_000 });
+}
+
 async function requests(server) {
   return server.seed.requests.filter((r) => r.name === 'local.browser.input');
 }
@@ -77,6 +94,8 @@ export async function browserPanelFitChecks(page, server, width, out) {
   const items = [];
   const baseUrl = page.url();
   const viewport = page.viewportSize();
+  // A failure names the step it happened in (a bare click timeout says nothing).
+  let step = 'fit';
   try {
     for (const v2 of [false, true]) {
       await page.request.get(`${server.origin}/__ui_seed/viewport-v2?on=${v2 ? 1 : 0}`);
@@ -107,6 +126,7 @@ export async function browserPanelFitChecks(page, server, width, out) {
     }
     await page.request.get(`${server.origin}/__ui_seed/viewport-v2?on=0`);
 
+    step = '100%';
     // 「100% 原尺寸」 is 1:1 and scrolls; 「适应面板」 brings the whole page back.
     server.setFrame(edgeMarkedFrame(1280, 800));
     await page.goto(baseUrl);
@@ -129,6 +149,7 @@ export async function browserPanelFitChecks(page, server, width, out) {
     await page.waitForTimeout(200);
     assertWhole(await measure(page), `fit restored@${width}`);
 
+    step = 'takeover';
     // Takeover: a click on the scaled page lands on the same page pixel.
     const takeover = page.getByRole('button', { name: '接管浏览器', exact: true });
     if (await takeover.count()) {
@@ -147,25 +168,24 @@ export async function browserPanelFitChecks(page, server, width, out) {
       items.push({ item: 'browser-takeover-click-mapping', label: `${down.input.x},${down.input.y}` });
     }
 
+    step = 'phone';
     // Phone width: the same page, whole.
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(baseUrl);
-    const sheetButton = page.getByRole('button', { name: /浏览器/ }).first();
-    if (!(await page.locator('canvas').count()) && (await sheetButton.count()))
-      await sheetButton.click();
+    await openPhoneSheet(page);
     await waitForFrame(page, 1280, 800);
     assertWhole(await measure(page), `phone@390 from ${width}`);
     await page.screenshot({ path: path.join(out, `after-fix33-${width}-phone.png`), animations: 'disabled' });
     items.push({ item: 'browser-panel-fit', label: 'phone 390x844' });
 
+    step = 'phone-v2';
     // FIX-34: with viewport v2 the phone sheet asks for a mobile-width page (scale ≈ 1),
     // not a 1280-wide desktop page shrunk to ~0.3.
     await page.request.get(`${server.origin}/__ui_seed/viewport-v2?on=1`);
     const beforePhone = (await requests(server)).length;
     server.setFrame(edgeMarkedFrame(390, 760));
     await page.goto(baseUrl);
-    if (!(await page.locator('canvas').count()) && (await sheetButton.count()))
-      await sheetButton.click();
+    await openPhoneSheet(page);
     await waitForFrame(page, 390, 760);
     const phoneSent = (await requests(server))
       .slice(beforePhone)
@@ -181,6 +201,9 @@ export async function browserPanelFitChecks(page, server, width, out) {
     assert.ok(phoneFit.scale > 0.8, `phone v2: page shrunk to ${phoneFit.scale}`);
     await page.screenshot({ path: path.join(out, `after-fix34-${width}-phone-v2.png`), animations: 'disabled' });
     items.push({ item: 'browser-panel-fit', label: `phone v2 mobile viewport ${phoneSent.at(-1).input.width}` });
+  } catch (error) {
+    if (error instanceof Error) error.message = `browser-fit[${step}]: ${error.message}`;
+    throw error;
   } finally {
     server.setFrame(BROWSER_FRAME);
     await page.request.get(`${server.origin}/__ui_seed/viewport-v2?on=0`);
