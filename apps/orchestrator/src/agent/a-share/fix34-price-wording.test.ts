@@ -126,6 +126,18 @@ describe('FIX-34 #1 · 走势 says which price it uses', () => {
     }
   });
 
+  it('after the close a same-day morning quote never replaces the close (Codex review #297)', async () => {
+    const EVENING = at('2026-10-26T20:30:00');
+    const morning = env([
+      { 代码: '600519', 最新价: 1100, 涨跌幅: -3, 行情时间: '2026-10-26 10:19:58' },
+    ]);
+    for (const deep of [false, true]) {
+      const line = position((await run(EVENING, morning, true, deep)).answer);
+      expect(line).toMatch(/最近收盘价 1,335\.00（2026-10-23）/);
+      expect(line).not.toMatch(/当前价|1,100/);
+    }
+  });
+
   it('an interpretation calling the close 「当前股价」 is dropped unless a live quote is in context', () => {
     const closeOnly = '- 盘面：最近收盘（2026-10-23） 1,335.00 涨跌幅 +1.25%';
     expect(complianceGate('当前股价 1,335.00 处在年内中部。', closeOnly)).toMatchObject({

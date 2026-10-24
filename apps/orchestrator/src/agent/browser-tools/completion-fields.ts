@@ -965,12 +965,20 @@ function itemShownOnPage(
     const name = row
       .replace(/^\s*(?:\d+[.)、]\s*)?(?:名称|商品名?|标题|name)?\s*[:：]?\s*/i, '')
       .split(/[；;]|\s[—–]\s|(?:价格|售价|price)\s*[:：]/i)[0]
-      ?.trim()
-      .slice(0, 40);
+      ?.trim();
     if (!price || !name || name.length < 8) return false;
+    // The whole name (a 「…, 2M」 is not the 「…, 1M」 that shares its first 40 characters),
+    // and the first price after it on the page is this one — that item's own entry
+    // (Codex review on PR #297).
     return pages.some((page) => {
-      for (let at = page.norm.indexOf(name); at >= 0; at = page.norm.indexOf(name, at + 1))
-        if (page.norm.slice(at, at + name.length + 600).includes(price)) return true;
+      for (let at = page.norm.indexOf(name); at >= 0; at = page.norm.indexOf(name, at + 1)) {
+        const end = at + name.length;
+        if (/[\p{L}\p{N}]/u.test(page.norm[end] ?? '')) continue;
+        const first = page.norm
+          .slice(end, end + 600)
+          .match(/(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?/i)?.[0];
+        if (first && normalizeFact(first) === normalizeFact(price)) return true;
+      }
       return false;
     });
   });

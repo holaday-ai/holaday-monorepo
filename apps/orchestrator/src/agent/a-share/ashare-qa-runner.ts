@@ -15,6 +15,7 @@
 import type { AkshareClient } from './akshare-client.js';
 import {
   QA_DISCLAIMER_BLOCK,
+  ashareIntraday,
   buildFactContext,
   buildPanoramaContext,
   fetchFactData,
@@ -98,6 +99,7 @@ export const ASHARE_QA_GUIDANCE = [
   '> 本助手仅做客观信息聚合，**不提供买卖建议、不预测涨跌、不做投资判断**。',
   '',
   QA_DISCLAIMER_BLOCK,
+  ashareIntraday,
 ].join('\n');
 
 function buildSystem(skillMarkdown: string, kind: AshareQaMatch['kind']): string {
@@ -210,6 +212,7 @@ export async function runAshareQa(
         livePrices(
           data.perStock.map((p) => ({ symbol: p.stock.symbol, quote: p.quote })),
           now,
+          data.intraday ?? ashareIntraday(now),
         ),
       );
       const perfLines = renderPerfStar(data, perf);
@@ -423,6 +426,7 @@ export async function runAsharePanorama(
             quote: data.bySymbol[p.stock.symbol]?.quote,
           })),
           now,
+          data.intraday ?? ashareIntraday(now),
         ),
       );
       const perfLines = renderPerfSection(data, perf);

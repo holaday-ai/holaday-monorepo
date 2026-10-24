@@ -165,12 +165,18 @@ function liveQuote(
   return { row, time };
 }
 
-/** FIX-34：卡片认作实时的报价（liveQuote 同一判定）→ 走势段可称「当前价」的价格。 */
+/**
+ * FIX-34：卡片认作实时的报价（liveQuote 同一判定）→ 走势段可称「当前价」的价格。
+ * 只在交易时段（`session`：时钟 + 日历）才有；收盘后/节假日一律按最近收盘价（盘外
+ * liveQuote 不看新旧，上午缓存的报价不能顶替收盘价——Codex review on PR #297）。
+ */
 export function livePrices(
   entries: readonly { symbol: string; quote?: AkEnvelope<StockQuoteRow> }[],
   now: Date,
+  session: boolean,
 ): Record<string, LivePrice> {
   const out: Record<string, LivePrice> = {};
+  if (!session || !ashareIntraday(now)) return out;
   for (const { symbol, quote } of entries) {
     const live = liveQuote(quote, now);
     const price = live ? toNum(live.row.最新价) : null;

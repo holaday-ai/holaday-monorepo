@@ -119,6 +119,38 @@ describe('FIX-34 #2 · amazon.sg: each item is checked against its own listing r
     });
     expect(facts.contradictions).toEqual([]);
   });
+  it('a variant sharing the first 40 characters does not borrow its price (Codex review #297)', () => {
+    // Only the 1M cable and its price were read; the answer names the 2M variant.
+    const tree = [`- link "${T2}" [ref=e331]`, '- link "S$17.29" [ref=e344]'].join('\n');
+    const page = observedEvidence(
+      JSON.stringify({ tabId: 'tab_list', sourceURL: LISTING, tree }),
+      tree,
+      LISTING,
+    );
+    const facts = assessCompletionFacts({
+      summary: `1. 名称：${T3}；价格：S$17.29`,
+      fields: [
+        { name: '商品1名称', value: T3, tabId: 'tab_detail' },
+        { name: '商品1价格', value: 'S$17.29', tabId: 'tab_detail' },
+      ],
+      pages: [page],
+    });
+    expect(facts.contradictions.join('；')).toMatch(/未成功读取/);
+  });
+  it('a price is borrowed only from the entry right after the item name', () => {
+    const tree = [`- link "${T3}" [ref=e394]`, '- link "S$21.41" [ref=e409]'].join('\n');
+    const page = observedEvidence(
+      JSON.stringify({ tabId: 'tab_list', sourceURL: LISTING, tree }),
+      tree,
+      LISTING,
+    );
+    const ok = assessCompletionFacts({
+      summary: `1. 名称：${T3}；价格：S$21.41`,
+      fields: [{ name: '商品1价格', value: 'S$21.41', tabId: 'tab_detail' }],
+      pages: [page],
+    });
+    expect(ok.contradictions).toEqual([]);
+  });
   it('「kitchen bestsellers under s$30」 does not contradict an item price on a listing', () => {
     const facts = assessCompletionFacts({
       summary: rows('S$21.41'),
