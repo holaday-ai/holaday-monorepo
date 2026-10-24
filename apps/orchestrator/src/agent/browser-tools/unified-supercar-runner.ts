@@ -30,6 +30,7 @@ import {
   type UnifiedToolResult,
   createPlaywrightUnifiedExecutor,
 } from './playwright-unified-executor.js';
+import { siteEntryHint } from './site-entry-hints.js';
 import { createUnifiedActionGate } from './unified-action-gate.js';
 import { NOT_STARTED, runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
@@ -304,6 +305,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   // completed list answer misses per-item sources or key fields.
   const contract = getContract(opts.taskId);
   const guidance = browserOutputGuidance(contract);
+  const siteHint = siteEntryHint(opts.intent);
   const groundedLinks = new Set<string>();
   /**
    * Links and pages the model actually saw ground its per-item citations in
@@ -628,7 +630,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           );
         return interruption;
       },
-      intent: guidance ? `${opts.intent}\n\n【结果要求】\n${guidance}` : opts.intent,
+      intent: [
+        opts.intent,
+        guidance ? `【结果要求】\n${guidance}` : '',
+        siteHint ? `【站点提示】\n${siteHint}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
       ...(contract && guidance
         ? {
             reviewFinish: (summary: string, pageText?: string) =>

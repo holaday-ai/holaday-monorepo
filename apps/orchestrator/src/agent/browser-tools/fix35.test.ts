@@ -5,6 +5,7 @@ import type { ExecutionContract } from '../../execution/execution-contract.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { declaredAbsentFields } from './completion-fields.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
+import { siteEntryHint } from './site-entry-hints.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
 /** FIX-35 0b (Deploy-35 dy-2, tsk_wsrgpcoFZkhupdK4rWaLS): a named field given as absent. */
@@ -180,4 +181,20 @@ describe('FIX-35 0a · b-p02 through the loop: the honest See-options gap is not
       summary: expect.stringMatching(/^部分完成：第 1 条/),
     });
   });
+});
+
+describe('FIX-35 #4 · QQ 音乐 charts are opened by their own page, not clicked into', () => {
+  it.each([
+    ['QQ音乐热歌榜第一名是啥', 'toplist/26'],
+    ['在 QQ 音乐看飙升榜前三', 'toplist/62'],
+    ['qq音乐新歌榜第一首', 'toplist/27'],
+  ])('%s → %s', (intent, path) => {
+    expect(siteEntryHint(intent)).toContain(`https://y.qq.com/n/ryqq/${path}`);
+  });
+  it.each(['QQ音乐上周杰伦最火的歌', '网易云热歌榜第一名', '帮我写 3 条小红书露营文案'])(
+    '%s → no hint',
+    (intent) => {
+      expect(siteEntryHint(intent)).toBeNull();
+    },
+  );
 });
