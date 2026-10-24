@@ -263,3 +263,37 @@ describe('FIX-34 #1 · the index card calls only a fresh snapshot 盘中实时',
     );
   });
 });
+
+describe('FIX-35 #3 · the index snapshot’s own clock time (sina ticktime) decides 盘中实时', () => {
+  const card = (tick: string, fetchedAt: string, nowIso: string, tradingDay = true) =>
+    buildIndexCard({
+      client: {
+        getTradingDay: async () => ({
+          data: [{ is_trading_day: tradingDay }],
+          count: 1,
+          source: 'fixture',
+          fetched_at: '',
+        }),
+      } as unknown as AkshareClient,
+      now: new Date(nowIso),
+      quote: {
+        data: [{ 名称: '上证指数', 最新价: 3301.2, 涨跌幅: 0.4, 行情时间: tick }],
+        count: 1,
+        source: 'fixture',
+        fetched_at: fetchedAt,
+      },
+    } as never);
+  it('a 14:20:55 tick read at 14:22 on a trading day → 盘中实时, stamped with its own time', async () => {
+    const text = await card('14:20:55', '2026-10-26T06:21:00Z', '2026-10-26T14:22:00+08:00');
+    expect(text).toContain('- 行情时间：2026-10-26 14:20（盘中实时，未收盘）');
+  });
+  it('a 09:41 tick fetched at 14:19 is old: 最近报价 with its own time', async () => {
+    const text = await card('09:41:00', '2026-10-26T06:19:00Z', '2026-10-26T14:20:00+08:00');
+    expect(text).toContain('- 最近报价（行情时间 2026-10-26 09:41，非实时');
+  });
+  it('on a weekend the 15:35 tick is not dated Saturday', async () => {
+    const text = await card('15:35:30', '2026-10-24T02:00:00Z', '2026-10-24T10:00:00+08:00', false);
+    expect(text).not.toContain('2026-10-24 15:35');
+    expect(text).toContain('非交易时段');
+  });
+});
