@@ -794,12 +794,16 @@ function pageLacksPrice(name: string | null, pageText: string): boolean {
   if (key.length < 4) return false;
   const text = flat(pageText);
   for (let at = text.indexOf(key); at >= 0; at = text.indexOf(key, at + 1)) {
+    const after = text.slice(at + key.length, at + key.length + 2000);
+    // FIX-35 0a (Deploy-35 b-p02): the row's own state first — 「See options」 /
+    // 「Currently unavailable」 right after its title, with no price before it. A cut marker
+    // further down must not hide it (the next rows' prices lie between).
+    const state = after.slice(0, 500).search(NO_PRICE_STATE_RE);
+    if (state >= 0 && !PRICE_TOKEN_RE.test(withoutPriceCaps(after.slice(0, state)))) return true;
     // FIX-34: the cut can come well after a long title (rating and review nodes) — the
     // snapshot's own end marker is looked for further than a row's own state words.
-    const after = text.slice(at + key.length, at + key.length + 2000);
     const cut = after.indexOf(SNAPSHOT_CUT);
-    const state = cut >= 0 ? cut : after.slice(0, 500).search(NO_PRICE_STATE_RE);
-    if (state >= 0 && !PRICE_TOKEN_RE.test(withoutPriceCaps(after.slice(0, state)))) return true;
+    if (cut >= 0 && !PRICE_TOKEN_RE.test(withoutPriceCaps(after.slice(0, cut)))) return true;
   }
   return false;
 }

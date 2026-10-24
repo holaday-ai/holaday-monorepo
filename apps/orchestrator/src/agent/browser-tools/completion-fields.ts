@@ -1075,3 +1075,56 @@ function itemShownOnPage(
     });
   });
 }
+
+/** Fields a user names in a read request (「读视频标题、作者，以及点赞数…」). */
+const ASKABLE_FIELDS = [
+  '标题',
+  '作者',
+  '频道',
+  '点赞数',
+  '评论数',
+  '收藏数',
+  '分享数',
+  '播放量',
+  '价格',
+  '发布日期',
+  '回答数',
+  '库存',
+  '评分',
+  '地址',
+  '开放时间',
+] as const;
+/** 「页面未显示」「未获取到（…）」: the answer says the page had no such value. */
+const DECLARED_ABSENT_RE =
+  /^\s*[*_`]*\s*(?:页面(?:上|中)?(?:未|没有)(?:显示|提供|列出|给出)|未(?:在页面(?:上|中)?)?(?:显示|获取到|读到|读取到|找到|展示)|没有读到|not (?:shown|found|read|displayed)|n\/a)/i;
+
+/**
+ * FIX-35 0b (Deploy-35 dy-2): fields the user asked for by name that the answer gives as
+ * absent. Such an answer is 部分完成, not completed.
+ */
+export function declaredAbsentFields(intent: string, summary: string, fields?: unknown): string[] {
+  const asked = ASKABLE_FIELDS.filter((name) => intent.includes(name));
+  if (!asked.length) return [];
+  const values = new Map<string, string[]>();
+  const add = (name: string, value: string) =>
+    values.set(name, [...(values.get(name) ?? []), value]);
+  for (const line of unescapeLiteralBreaks(summary).split('\n'))
+    for (const m of line.matchAll(/([\p{Script=Han}A-Za-z]{2,6})\s*[*`]*\s*[:：]\s*([^；;\n]+)/gu))
+      add(m[1]!, m[2]!);
+  for (const f of explicitFacts(fields)) add(f.name, f.value);
+  const prose = unescapeLiteralBreaks(summary);
+  return asked.filter(
+    (name) =>
+      [...values].some(
+        ([label, vals]) =>
+          (label === name || label.endsWith(name)) && vals.some((v) => DECLARED_ABSENT_RE.test(v)),
+      ) ||
+      // 「页面未显示作者名称」「作者字段按页面原样写“页面未显示”」 — prose, not a 作者：value line.
+      new RegExp(
+        `(?:页面(?:上|中)?)?(?:未|没有)(?:显示|提供|列出|给出|找到|读到|获取到)${name}`,
+      ).test(prose) ||
+      new RegExp(
+        `${name}(?:名称|字段)?[^。；;\\n：:（(]{0,10}?[为写]\\s*[“"「]?(?:页面(?:上|中)?未显示|未显示|未获取到|未读到|未找到)`,
+      ).test(prose),
+  );
+}

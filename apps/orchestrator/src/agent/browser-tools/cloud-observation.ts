@@ -79,6 +79,29 @@ const KNOWN_TELEMETRY: ReadonlyArray<readonly [host: RegExp, path: RegExp]> = [
  * FIX-34: the shape of a POST body — top-level key names (JSON / form) and its length, never
  * a value — recorded on an unknown POST so a pause can be checked against real evidence.
  */
+/** A POST to a site's own human/bot verification step (amazon /checkpoint/validate). */
+export function verificationPost(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (
+      (/(?:^|\.)amazon\.(?:com|sg|ca|in|de|fr|it|es|nl|se|pl|ae|sa|eg|co\.uk|co\.jp|com\.au|com\.mx|com\.br|com\.tr|com\.be)$/.test(
+        u.hostname,
+      ) &&
+        /^\/(?:checkpoint\/|errors\/validatecaptcha)/i.test(u.pathname)) ||
+      /\/(?:captcha|challenge)(?:\/|$)/i.test(u.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+function verificationHost(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '验证页';
+  }
+}
+
 export function postBodyShape(body: string): string {
   const text = body.slice(0, 65536);
   try {
@@ -1683,12 +1706,20 @@ export class CloudObservation {
       unexpected,
     };
     result.effect = effect;
+    // FIX-35 0a (Deploy-35 b-p02): a form posted to the site's own verification page
+    // (amazon's checkpoint 「Continue」) is a wall, handed over as one — still a pause.
+    const verification = triggers.find((t) => verificationPost(t.url));
     if (unexpected)
-      result.interruption = {
-        reason: 'unexpected_effect',
-        message:
-          '检测到写请求或交易状态变化，已暂停后续操作。第一次副作用无法事前阻止，请核对结果后确认如何继续。',
-      };
+      result.interruption = verification
+        ? {
+            reason: 'captcha',
+            message: `页面进入了网站自己的验证页（${verificationHost(verification.url)}），需要你接管完成验证；当前任务尚未完成。`,
+          }
+        : {
+            reason: 'unexpected_effect',
+            message:
+              '检测到写请求或交易状态变化，已暂停后续操作。第一次副作用无法事前阻止，请核对结果后确认如何继续。',
+          };
     if (opened.length) {
       const observations = [];
       for (const p of opened) {
