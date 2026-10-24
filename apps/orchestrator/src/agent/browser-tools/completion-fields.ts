@@ -808,6 +808,13 @@ export function assessCompletionFacts(input: {
         new RegExp(`^(?:${PRICE_SHAPE_RE.source})$`, 'i').test(
           value.replace(/[。.，,]$/, '').trim(),
         ) &&
+        // A value the answer says it read on a given page is that page's question
+        // (the binding check asks for the page to be read), not a second contradiction.
+        !facts.some(
+          (other) =>
+            (other.tabId || other.sourceURL) &&
+            normalizeFact(withoutNote(other.value) ?? other.value) === value,
+        ) &&
         !pages.some((page) => candidates.some((v) => page.norm.includes(v)))
       ) {
         contradictions.push(

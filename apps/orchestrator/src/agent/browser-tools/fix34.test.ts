@@ -126,6 +126,15 @@ describe('FIX-34 #2 · amazon.sg: each item is checked against its own listing r
     });
     expect(facts.contradictions.join('；')).not.toMatch(/kitchen/i);
   });
+  it('a price bound to an unread detail tab gets only the binding correction (f34h)', () => {
+    const facts = assessCompletionFacts({
+      summary: rows('S$21.53'),
+      fields: [{ name: '商品3价格', value: 'S$21.53', tabId: 'tab_detail' }],
+      pages: [listing(true)],
+    });
+    expect(facts.contradictions).toHaveLength(1);
+    expect(facts.binding).toEqual([expect.objectContaining({ kind: 'unread' })]);
+  });
   it('「未获取到（…）」 in a field is an absence, not an unverified value (f34g)', () => {
     const facts = assessCompletionFacts({
       summary: rows('未获取到（快照截断）'),
