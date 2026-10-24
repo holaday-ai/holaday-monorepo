@@ -4696,6 +4696,8 @@ describe('FIX-34 · generate round handed to the browser lane', () => {
       status: 'executing',
       executionMode: 'browser',
     });
+    // The browser lane started before the event: the detail is read to catch up.
+    expect(detailQuery).toHaveBeenCalledWith({ taskId: 'tsk_h' });
     apply({ taskId: 'tsk_h', type: 'server.task.stream', delta: '浏览器读到的价格' });
     expect(useTaskStore.getState().streamingByTask.tsk_h).toBe('浏览器读到的价格');
   });

@@ -1,5 +1,7 @@
+import { stripToolCallBlocks } from '@holaday/shared-types';
 import type { Logger } from 'pino';
 
+import { asksForToolCallExample } from '../agent/generate-answer-guard.js';
 import { sanitizeFinalText } from '../agent/text-sanitizer.js';
 import type { VerificationResult } from './answer-verifier.js';
 import {
@@ -93,7 +95,9 @@ export async function reviewGenerateOutcome(
   // FIX-34: a clarifying question (content-topic asks for missing inputs) is shown to
   // the user too — on every lane it goes through the same tool-syntax filter.
   if ((outcome.status === 'completed' || outcome.status === 'awaiting_user') && outcome.summary) {
-    const summary = sanitizeFinalText(outcome.summary);
+    const cleaned = sanitizeFinalText(outcome.summary);
+    // 协调方复审阻塞 3: a ```json tool-call block the user did not ask for is not shown.
+    const summary = asksForToolCallExample(intent) ? cleaned : stripToolCallBlocks(cleaned);
     if (summary !== outcome.summary) outcome = { ...outcome, summary };
   }
 

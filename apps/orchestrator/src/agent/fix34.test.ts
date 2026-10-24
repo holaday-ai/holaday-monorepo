@@ -1,6 +1,7 @@
 import { stripToolCallMarkup } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import { reviewGenerateOutcome } from '../execution/generate-outcome-review.js';
+import { platformFailureReason } from '../quota/platform-failure-refunds.js';
 import { assessCompletionFacts, observedEvidence } from './browser-tools/completion-fields.js';
 import { UNIFIED_BROWSER_SYSTEM_PROMPT } from './browser-tools/unified-browser-loop.js';
 import {
@@ -159,5 +160,88 @@ describe('FIX-34 #4i · an author the page shows is written plainly', () => {
   });
   it('the browser prompt says to write a visible name directly', () => {
     expect(UNIFIED_BROWSER_SYSTEM_PROMPT).toContain('不写「推断」「相关账号」');
+  });
+});
+
+describe('FIX-34 review blocker 3 · every tool-call shape is recognised', () => {
+  // BOSS's Deploy-33 screenshot, verbatim (also in fix33.test.ts).
+  const BOSS =
+    `我来帮你在 BestBuy 搜索 usb c cable。\n\n${lt}li_call>\n${lt}function>browser_use${lt}/function>\n` +
+    `${lt}arguments>\n{"action": "navigate", "url": ""}${lt}/arguments>\n${lt}/li_call>`;
+  it.each([
+    ['function= with JSON', `${lt}function=browser_use>{"url":"https://x.test"}${lt}/function>`],
+    [
+      'function= with parameter=',
+      `${lt}function=browser_use>${lt}parameter=url>https://x.test${lt}/parameter>${lt}/function>`,
+    ],
+    ['name + arguments JSON', '{"name":"browser_use","arguments":{"action":"navigate","url":"x"}}'],
+    ['BOSS screenshot', BOSS],
+  ])('%s alone is NON_ANSWER and never shown', (_id, call) => {
+    // The screenshot text carries its own opener.
+    const answer = call.startsWith('我来') ? call : `我来帮你打开页面。\n${call}`;
+    expect(answerQualityFailure(answer, none)).toBe('NON_ANSWER');
+    expect(deliverableAnswer(answer)).toBeNull();
+  });
+  it.each([
+    `${lt}function=browser_use>{"url":"https://x.test"}${lt}/function>`,
+    `${lt}function=browser_use>${lt}parameter=url>https://x.test${lt}/parameter>${lt}/function>`,
+    '{"name":"browser_use","arguments":{"action":"navigate","url":"x"}}',
+  ])('beside a real answer it is removed without leftovers: %s', (call) => {
+    const shown = deliverableAnswer(`第一个结果是 Insignia USB-C 线，售价 $14.99。\n${call}`);
+    expect(shown).toBe('第一个结果是 Insignia USB-C 线，售价 $14.99。');
+  });
+  const review = (intent: string, summary: string) =>
+    reviewGenerateOutcome({
+      taskId: 'tsk_blk3',
+      intent,
+      outcome: { status: 'completed', summary },
+    } as never).then((r) => (r.outcome.status === 'completed' ? r.outcome.summary : null));
+  const block =
+    '```json\n{"name": "browser_use", "arguments": {"action": "navigate", "url": "https://www.bestbuy.com"}}\n```';
+  it('an unasked ```json tool-call block is not shown', async () => {
+    expect(await review('BestBuy 上 usb c 线多少钱', `第一个结果售价 $14.99。\n\n${block}`)).toBe(
+      '第一个结果售价 $14.99。',
+    );
+  });
+  it('asked for a tool-call JSON example, the block is the answer', async () => {
+    const answer = `下面是一个工具调用示例：\n\n${block}`;
+    expect(await review('给我一个工具调用 JSON 示例', answer)).toBe(answer);
+  });
+  it('a generic JSON example block stays', async () => {
+    const answer =
+      '下面是一个 JSON 示例：\n```json\n{"action": "deploy", "env": "prod"}\n```\n其中 action 表示动作。';
+    expect(await review('JSON 怎么写', answer)).toBe(answer);
+  });
+  it('prose tag words are still untouched', () => {
+    const answer = `在 XML 里用 ${lt}arguments> 包住 JSON，用 ${lt}function> 写名字。`;
+    expect(deliverableAnswer(answer)).toBe(answer);
+  });
+});
+
+describe('FIX-34 review · non-blocking', () => {
+  it('ref cleanup never touches a URL', () => {
+    const answer = '详情页 https://www.amazon.sg/x/dp/B0?ref=e23&th=1 上价格 S$21.41（ref=e204）。';
+    expect(deliverableAnswer(answer)).toBe(
+      '详情页 https://www.amazon.sg/x/dp/B0?ref=e23&th=1 上价格 S$21.41。',
+    );
+  });
+});
+
+describe('FIX-34 review · a handed-over generate task that fails is refunded', () => {
+  const failed = { status: 'failed', errorCode: 'VISION_GAVE_UP', errorMessage: '页面没读到' };
+  it('the browser retry of a NON_ANSWER fails → refunded like the NON_ANSWER', () => {
+    expect(platformFailureReason({ ...failed, sourceContext: { reroutedFrom: 'generate' } })).toBe(
+      'GENERATE_REROUTED_FAILED',
+    );
+  });
+  it.each([
+    ['an ordinary browser failure', { ...failed, sourceContext: {} }],
+    ['a scrape retry', { ...failed, sourceContext: { reroutedFrom: 'scrape' } }],
+    [
+      'a cancelled handed-over task',
+      { ...failed, status: 'cancelled', sourceContext: { reroutedFrom: 'generate' } },
+    ],
+  ])('%s is not', (_id, task) => {
+    expect(platformFailureReason(task)).toBeNull();
   });
 });

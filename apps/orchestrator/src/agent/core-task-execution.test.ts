@@ -1070,6 +1070,8 @@ describe('FIX-34 #4 · a generate round with no answer is retried once in the br
     const f = noAnswer();
     const handed: string[] = [];
     f.input.retryInBrowser = async (reason) => {
+      // Announced only after the retry has started (FIX-34 review).
+      expect(f.events.some((e) => e.type === 'rerouted')).toBe(false);
       handed.push(reason);
       return true;
     };
@@ -1090,6 +1092,8 @@ describe('FIX-34 #4 · a generate round with no answer is retried once in the br
     expect(await started.completion).toBe('committed');
     expect(f.writes).toHaveLength(1);
     expect(f.writes[0]?.status).toBe('failed');
+    // Nothing was announced: the SPA stays on the generate round's failure.
+    expect(f.events.some((e) => e.type === 'rerouted')).toBe(false);
   });
 
   it('without a browser lane the round fails as before', async () => {

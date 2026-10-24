@@ -311,12 +311,6 @@ async function executeCoreTask(
         if (error instanceof StaleRound) return 'stale';
         if (error instanceof BrowserHandOver) {
           if (!registry.read(handle)) return 'stale';
-          safelyPublish(input, {
-            ...identity,
-            type: 'rerouted',
-            to: 'browser',
-            reason: error.reason,
-          });
           let started = false;
           try {
             started = (await input.retryInBrowser?.(error.reason)) === true;
@@ -324,6 +318,14 @@ async function executeCoreTask(
             started = false;
           }
           if (started) {
+            // Only a retry that started is announced (FIX-34 review): the SPA switches to
+            // the browser lane and catches up on its events from the task detail.
+            safelyPublish(input, {
+              ...identity,
+              type: 'rerouted',
+              to: 'browser',
+              reason: error.reason,
+            });
             input.logger.info({ taskId: identity.taskId }, 'core-task: handed over to the browser');
             return 'handedOver';
           }

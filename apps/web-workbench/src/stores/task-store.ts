@@ -2065,6 +2065,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             [msg.taskId]: { subStatus: 'browsing' as const, since: Date.now() },
           },
         }));
+        // The browser lane started before this event was sent: catch up on it.
+        void hydrateDetail(msg.taskId);
         return;
       }
       if (

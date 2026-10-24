@@ -810,15 +810,14 @@ const SNAPSHOT_CUT = '[快照截断';
  * (Deploy-34 amazon-sg: a carousel heading between the cut item and the cut).
  */
 function withoutPriceCaps(text: string): string {
-  return text
-    .replace(/heading "[^"]*"/g, ' ')
-    .replace(
-      new RegExp(
-        String.raw`(?:under|below|over|less than|up to|from|低于|不到|以下|以上)\s*(?:${PRICE_TOKEN_RE.source})|(?:${PRICE_TOKEN_RE.source})\s*(?:以下|以内|以上|起)`,
-        'gi',
-      ),
-      ' ',
-    );
+  return text.replace(/heading "[^"]*"/g, ' ').replace(
+    new RegExp(
+      // Not 「from S$x」: that is often the item's own (lowest) price.
+      String.raw`(?:under|below|over|less than|up to|低于|不到|以下|以上)\s*(?:${PRICE_TOKEN_RE.source})|(?:${PRICE_TOKEN_RE.source})\s*(?:以下|以内|以上)`,
+      'gi',
+    ),
+    ' ',
+  );
 }
 
 /**

@@ -861,7 +861,12 @@ export class TaskRepository {
         .set({
           status: params.status,
           result: { executionMode: 'browser' },
-          sourceContext: params.sourceContext,
+          // FIX-34 review: a handed-over generate task that then fails is refunded like
+          // the NON_ANSWER it replaced (platform-failure-refunds reads this).
+          sourceContext:
+            params.from === 'generate'
+              ? { ...params.sourceContext, reroutedFrom: 'generate' }
+              : params.sourceContext,
           // FIX-34: a core generate round handing over leaves no core record behind — the
           // browser lane's row is a legacy row, and the round's late writes go stale.
           ...(params.from === 'generate'

@@ -1539,6 +1539,7 @@ describe('TaskRepository task terminal state persistence', () => {
       taskExternalId: 'tsk_state_machine',
       awaitingKind: 'login_required',
       result: { executionMode: 'browser' },
+      sourceContext: { reroutedFrom: 'generate' },
     });
 
     expect(result.persisted).toBe(false);
@@ -1873,6 +1874,7 @@ describe('TaskRepository.adoptTaskForBrowserRetry (FIX-34)', () => {
   it('a scrape retry keeps the row head as it was', async () => {
     const { captured } = await adopt();
     expect(captured.taskUpdate).not.toHaveProperty('executionId');
+    expect(captured.taskUpdate?.sourceContext).toEqual({});
     expect(captured.eventPayload?.payload).toMatchObject({ from: 'scrape' });
   });
 });

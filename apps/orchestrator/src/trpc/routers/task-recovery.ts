@@ -43,7 +43,12 @@ export type TaskRefundState =
   | 'not_charged';
 
 export function deriveTaskRefundState(
-  task: { status: string; errorCode: string | null; errorMessage: string | null },
+  task: {
+    status: string;
+    errorCode: string | null;
+    errorMessage: string | null;
+    sourceContext?: unknown;
+  },
   ledger: { chargedAt: Date; refundedAt: Date | null } | null,
   now: number = Date.now(),
 ): TaskRefundState {
@@ -111,6 +116,7 @@ export const taskRecoveryRouter = router({
           status: tasksTable.status,
           errorCode: tasksTable.errorCode,
           errorMessage: tasksTable.errorMessage,
+          sourceContext: tasksTable.sourceContext,
           result: tasksTable.result,
           executionId: tasksTable.executionId,
           executionRevision: tasksTable.executionRevision,

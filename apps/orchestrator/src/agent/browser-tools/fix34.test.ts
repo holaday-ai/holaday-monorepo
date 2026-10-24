@@ -224,6 +224,32 @@ describe('FIX-34 #2 · amazon.sg: each item is checked against its own listing r
     });
     expect(facts.contradictions.join('；')).toMatch(/不在任何已读页面上/);
   });
+  it('「from S$19.99」 after the cut item is its price, so 「未获取到」 is sent back (review)', () => {
+    const tree = [
+      `- link "${T1}" [ref=e255]`,
+      '- link "S$8.90" [ref=e276]',
+      `- link "${T2}" [ref=e331]`,
+      '- link "S$17.29" [ref=e344]',
+      `- link "${T3}" [ref=e394]`,
+      '- generic [ref=e395]: from S$19.99',
+    ].join('\n');
+    const page = observedEvidence(
+      JSON.stringify({ tabId: 'tab_list', sourceURL: LISTING, tree, truncated: true }),
+      tree,
+      LISTING,
+    );
+    expect(declaredMissingPriceRows(rows('未获取到'), page.text)).toEqual([]);
+  });
+  it('a made-up 「原价 S$x」 note is not refused on its own; the made-up price is (review)', () => {
+    const facts = assessCompletionFacts({
+      summary: rows('S$18.88（原价 S$23.93）'),
+      pages: [listing(true)],
+    });
+    const all = facts.contradictions.join('；');
+    expect(all).toMatch(/价格「S\$18\.88（原价 S\$23\.93）」 不在任何已读页面上/);
+    // The note's own fact (原价 S$23.93) is not a whole price value: not refused by itself.
+    expect(facts.contradictions.filter((c) => c.startsWith('价格（括注）'))).toEqual([]);
+  });
   it('「未获取到（…）」 in a field is an absence, not an unverified value (f34g)', () => {
     const facts = assessCompletionFacts({
       summary: rows('未获取到（快照截断）'),
