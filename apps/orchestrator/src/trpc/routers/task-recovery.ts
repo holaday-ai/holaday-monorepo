@@ -48,6 +48,7 @@ export function deriveTaskRefundState(
     errorCode: string | null;
     errorMessage: string | null;
     sourceContext?: unknown;
+    result?: unknown;
   },
   ledger: { chargedAt: Date; refundedAt: Date | null } | null,
   now: number = Date.now(),

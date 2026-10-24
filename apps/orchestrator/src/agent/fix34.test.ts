@@ -227,21 +227,37 @@ describe('FIX-34 review · non-blocking', () => {
   });
 });
 
-describe('FIX-34 review · a handed-over generate task that fails is refunded', () => {
-  const failed = { status: 'failed', errorCode: 'VISION_GAVE_UP', errorMessage: '页面没读到' };
-  it('the browser retry of a NON_ANSWER fails → refunded like the NON_ANSWER', () => {
-    expect(platformFailureReason({ ...failed, sourceContext: { reroutedFrom: 'generate' } })).toBe(
-      'GENERATE_REROUTED_FAILED',
-    );
+describe('FIX-34 review → FIX-35 #2 · a handed-over generate task: platform failures refunded', () => {
+  const rerouted = { reroutedFrom: 'generate' };
+  const failed = (errorCode: string, source?: string) => ({
+    status: 'failed',
+    errorCode,
+    errorMessage: '',
+    sourceContext: rerouted,
+    result: source ? { metadata: { failureDetail: { source } } } : {},
   });
   it.each([
-    ['an ordinary browser failure', { ...failed, sourceContext: {} }],
-    ['a scrape retry', { ...failed, sourceContext: { reroutedFrom: 'scrape' } }],
+    ['the browser model unavailable', failed('VISION_GAVE_UP', 'model')],
+    ['a tool / executor error', failed('VISION_GAVE_UP', 'tool')],
+    ['the browser never started', failed('VISION_GAVE_UP', 'not_started')],
+    ['the browser session unavailable', failed('BROWSER_SESSION_UNAVAILABLE')],
+    ['a watchdog timeout', failed('SUPERCAR_WATCHDOG_TIMEOUT')],
+  ])('%s → refunded like the NON_ANSWER', (_id, task) => {
+    expect(platformFailureReason(task)).toBe('GENERATE_REROUTED_FAILED');
+  });
+  it.each([
+    ['an honest 「做不到」 (task)', failed('VISION_GAVE_UP', 'task')],
+    ['a wall left to the user (awaiting timeout)', failed('AWAITING_USER_TIMEOUT')],
     [
-      'a cancelled handed-over task',
-      { ...failed, status: 'cancelled', sourceContext: { reroutedFrom: 'generate' } },
+      'an ordinary browser failure (not handed over)',
+      { ...failed('VISION_GAVE_UP', 'model'), sourceContext: {} },
     ],
-  ])('%s is not', (_id, task) => {
+    [
+      'a scrape retry',
+      { ...failed('VISION_GAVE_UP', 'model'), sourceContext: { reroutedFrom: 'scrape' } },
+    ],
+    ['a cancelled handed-over task', { ...failed('VISION_GAVE_UP', 'model'), status: 'cancelled' }],
+  ])('%s → ordinary rules (not refunded here)', (_id, task) => {
     expect(platformFailureReason(task)).toBeNull();
   });
 });

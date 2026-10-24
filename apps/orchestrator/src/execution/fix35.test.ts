@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
+import { stripToolCallMarkup } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import { verificationPost } from '../agent/browser-tools/cloud-observation.js';
+import { deliverableAnswer } from '../agent/generate-answer-guard.js';
 import { declaredMissingPriceRows, listPartialNote } from './answer-verifier.js';
 import type { ExecutionContract } from './execution-contract.js';
 
@@ -64,5 +66,22 @@ describe('FIX-35 0a · a post to the site’s own verification page is a wall, h
     'https://www.bestbuy.com/checkpoint-deals',
   ])('%s is not', (url) => {
     expect(verificationPost(url)).toBe(false);
+  });
+});
+
+describe('FIX-35 #1 · plain JSON in prose is not a tool call', () => {
+  it.each([
+    '用户数据示例：{"name":"Alice","args":["--verbose"]}，其中 args 是命令行参数。',
+    '返回体形如 {"name": "Bob", "input": "hello"}，name 是用户名。',
+  ])('%s stays', (text) => {
+    expect(stripToolCallMarkup(text)).toBe(text);
+    expect(deliverableAnswer(text)).toBe(text);
+  });
+  it.each([
+    '第一条结果售价 $14.99。\n{"name":"browser_use","input":{"action":"navigate"}}',
+    '第一条结果售价 $14.99。\n{"name":"web_search","query":"x"}',
+    '第一条结果售价 $14.99。\n{"name":"search","arguments":{"q":"x"}}',
+  ])('%s is still removed', (text) => {
+    expect(deliverableAnswer(text)).toBe('第一条结果售价 $14.99。');
   });
 });

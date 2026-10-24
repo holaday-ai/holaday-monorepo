@@ -38,19 +38,42 @@ const PLATFORM_CORE_REASONS: ReadonlySet<string> = new Set([
   CORE_QUALITY_FAILURE_COPY.UNREAD_LISTING,
 ]);
 
+/** Browser-lane failures that are ours: the executor, its session, the queue, a timeout. */
+const BROWSER_PLATFORM_CODES: ReadonlySet<string> = new Set([
+  'VISION_DRIVER_FAILED',
+  'BROWSER_SESSION_UNAVAILABLE',
+  'UPSTREAM_UNAVAILABLE',
+  'SUPERCAR_WATCHDOG_TIMEOUT',
+  'QUEUE_TIMEOUT',
+  'QUEUE_REJECTED',
+]);
+/** `result.metadata.failureDetail.source` of a browser failure that was ours. */
+const PLATFORM_FAILURE_SOURCES: ReadonlySet<string> = new Set(['model', 'tool', 'not_started']);
+function failureSource(result: unknown): string {
+  const source = (result as { metadata?: { failureDetail?: { source?: unknown } } } | null)
+    ?.metadata?.failureDetail?.source;
+  return typeof source === 'string' ? source : '';
+}
+
 export function platformFailureReason(task: {
   status: string;
   errorCode: string | null;
   errorMessage: string | null;
   sourceContext?: unknown;
+  result?: unknown;
 }): string | null {
   if (task.status !== 'failed') return null;
-  // FIX-34 review: our generate round gave no answer and we moved the task to the
-  // browser; if that retry fails too, it is refunded as the NON_ANSWER would have been.
+  // FIX-34 review → FIX-35 #2: our generate round gave no answer and we moved the task to
+  // the browser. If that retry fails for a platform cause (model, executor, network,
+  // timeout) it is refunded as the NON_ANSWER would have been; an honest 「做不到」 or a
+  // wall the user left (login, captcha) follows the ordinary rules below.
   if (
     task.sourceContext &&
     typeof task.sourceContext === 'object' &&
-    (task.sourceContext as { reroutedFrom?: unknown }).reroutedFrom === 'generate'
+    (task.sourceContext as { reroutedFrom?: unknown }).reroutedFrom === 'generate' &&
+    ((task.errorCode !== null &&
+      (PLATFORM_ERROR_CODES.has(task.errorCode) || BROWSER_PLATFORM_CODES.has(task.errorCode))) ||
+      PLATFORM_FAILURE_SOURCES.has(failureSource(task.result)))
   )
     return 'GENERATE_REROUTED_FAILED';
   if (task.errorCode === 'CORE_EXECUTION_FAILED')
@@ -107,6 +130,7 @@ export async function sweepPlatformFailureRefunds(
       errorCode: tasks.errorCode,
       errorMessage: tasks.errorMessage,
       sourceContext: tasks.sourceContext,
+      result: tasks.result,
     })
     .from(quotaRefunds)
     .innerJoin(tasks, eq(tasks.externalId, quotaRefunds.taskExternalId))
