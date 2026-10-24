@@ -19,6 +19,10 @@
  * Retry: one extra attempt on transport failure (network throw / 5xx
  * not yet implemented). Application-level errors (4xx, success=false)
  * do NOT retry — bad URL stays bad.
+ *
+ * FIRECRAWL-1: basic fetching only. No stealth, proxy, mobile, location or
+ * actions option is ever sent; a page behind a wall goes to the browser
+ * lane, which hands it to the user instead of getting around it.
  */
 
 export interface FirecrawlScrapeOk {
@@ -26,17 +30,28 @@ export interface FirecrawlScrapeOk {
   markdown: string;
   url: string;
   title?: string;
+  /** Credits Firecrawl reports for the call (1 when it does not say). */
+  credits?: number;
+  /** HTTP status Firecrawl got from the target page. */
+  statusCode?: number;
 }
 
 export interface FirecrawlSearchResult {
   url: string;
   markdown: string;
   title?: string;
+  /**
+   * FIX-32 (BENCH-1 r03/n06): when Firecrawl served the page from its cache, the time it
+   * was fetched. Search results can be days old (and v1 search ignores maxAge).
+   */
+  cachedAt?: string;
 }
 
 export interface FirecrawlSearchOk {
   ok: true;
   results: FirecrawlSearchResult[];
+  /** Credits Firecrawl reports for the call (one per result when it does not say). */
+  credits?: number;
 }
 
 export interface FirecrawlError {
@@ -47,12 +62,19 @@ export interface FirecrawlError {
 export type FirecrawlScrapeResult = FirecrawlScrapeOk | FirecrawlError;
 export type FirecrawlSearchResultBundle = FirecrawlSearchOk | FirecrawlError;
 
+export interface FirecrawlScrapeOpts {
+  signal?: AbortSignal;
+  /** FIX-32: fetch the page now, never from Firecrawl's cache (maxAge 0). */
+  fresh?: boolean;
+}
+
 export interface FirecrawlSearchOpts {
+  signal?: AbortSignal;
   limit?: number;
 }
 
 export interface FirecrawlLane {
-  scrape(url: string): Promise<FirecrawlScrapeResult>;
+  scrape(url: string, opts?: FirecrawlScrapeOpts): Promise<FirecrawlScrapeResult>;
   search(query: string, opts?: FirecrawlSearchOpts): Promise<FirecrawlSearchResultBundle>;
 }
 
@@ -86,13 +108,18 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
   async function request(
     path: string,
     body: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<{ ok: true; json: unknown } | { ok: false; error: string }> {
+    if (signal?.aborted) return { ok: false, error: 'firecrawl: request cancelled' };
     if (!apiKey) {
       return { ok: false, error: 'firecrawl: api key not configured (FIRECRAWL_API_KEY empty)' };
     }
-    let lastErr: string = 'unknown';
+    let lastErr = 'unknown';
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const controller = new AbortController();
+      const abortFromCaller = () => controller.abort();
+      signal?.addEventListener('abort', abortFromCaller, { once: true });
+      if (signal?.aborted) controller.abort();
       const startedAt = Date.now();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
@@ -143,10 +170,10 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
         return { ok: true, json };
       } catch (err) {
         clearTimeout(timer);
+        if (signal?.aborted) return { ok: false, error: 'firecrawl: request cancelled' };
         lastErr = err instanceof Error ? err.message : String(err);
         const isAbort =
-          err instanceof Error &&
-          (err.name === 'AbortError' || /aborted|abort/i.test(err.message));
+          err instanceof Error && (err.name === 'AbortError' || /aborted|abort/i.test(err.message));
         logger?.warn(
           {
             path,
@@ -156,24 +183,30 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
             isAbort,
             err: lastErr,
           },
-          isAbort
-            ? 'firecrawl: request aborted (timeout)'
-            : 'firecrawl: transport failure',
+          isAbort ? 'firecrawl: request aborted (timeout)' : 'firecrawl: transport failure',
         );
         // network/timeout — retry once
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abortFromCaller);
       }
     }
     return { ok: false, error: `firecrawl: ${lastErr} (after ${MAX_ATTEMPTS} attempts)` };
   }
 
   return {
-    async scrape(url: string): Promise<FirecrawlScrapeResult> {
+    async scrape(url: string, scrapeOpts?: FirecrawlScrapeOpts): Promise<FirecrawlScrapeResult> {
       const trimmed = url.trim();
       if (!trimmed) return { ok: false, error: 'firecrawl: empty url' };
-      const result = await request('/v1/scrape', {
-        url: trimmed,
-        formats: ['markdown'],
-      });
+      const result = await request(
+        '/v1/scrape',
+        {
+          url: trimmed,
+          formats: ['markdown'],
+          ...(scrapeOpts?.fresh ? { maxAge: 0 } : {}),
+        },
+        scrapeOpts?.signal,
+      );
       if (!result.ok) return { ok: false, error: result.error };
       const j = result.json as
         | {
@@ -181,7 +214,13 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
             error?: string;
             data?: {
               markdown?: string;
-              metadata?: { title?: string; sourceURL?: string };
+              metadata?: {
+                title?: string;
+                sourceURL?: string;
+                url?: string;
+                creditsUsed?: number;
+                statusCode?: number;
+              };
             };
           }
         | undefined;
@@ -193,29 +232,47 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
         return { ok: false, error: 'firecrawl: no markdown in response' };
       }
       const title = j.data?.metadata?.title;
+      const credits = j.data?.metadata?.creditsUsed;
       return {
         ok: true,
         markdown,
         url: j.data?.metadata?.sourceURL ?? trimmed,
         ...(title ? { title } : {}),
+        credits: typeof credits === 'number' && credits >= 0 ? credits : 1,
+        ...(typeof j.data?.metadata?.statusCode === 'number'
+          ? { statusCode: j.data.metadata.statusCode }
+          : {}),
       };
     },
 
-    async search(query: string, searchOpts?: FirecrawlSearchOpts): Promise<FirecrawlSearchResultBundle> {
+    async search(
+      query: string,
+      searchOpts?: FirecrawlSearchOpts,
+    ): Promise<FirecrawlSearchResultBundle> {
       const trimmed = query.trim();
       if (!trimmed) return { ok: false, error: 'firecrawl: empty query' };
       const limit = Math.max(1, Math.min(20, searchOpts?.limit ?? 5));
-      const result = await request('/v1/search', {
-        query: trimmed,
-        limit,
-        scrapeOptions: { formats: ['markdown'] },
-      });
+      const result = await request(
+        '/v1/search',
+        {
+          query: trimmed,
+          limit,
+          scrapeOptions: { formats: ['markdown'] },
+        },
+        searchOpts?.signal,
+      );
       if (!result.ok) return { ok: false, error: result.error };
       const j = result.json as
         | {
             success?: boolean;
             error?: string;
-            data?: Array<{ url?: string; title?: string; markdown?: string }>;
+            data?: Array<{
+              url?: string;
+              title?: string;
+              markdown?: string;
+              metadata?: { cachedAt?: string };
+            }>;
+            creditsUsed?: number;
           }
         | undefined;
       if (!j || j.success === false) {
@@ -228,8 +285,14 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
           url: r.url!,
           markdown: r.markdown!,
           ...(r.title ? { title: r.title } : {}),
+          ...(typeof r.metadata?.cachedAt === 'string' ? { cachedAt: r.metadata.cachedAt } : {}),
         }));
-      return { ok: true, results };
+      const credits = j.creditsUsed;
+      return {
+        ok: true,
+        results,
+        credits: typeof credits === 'number' && credits >= 0 ? credits : results.length,
+      };
     },
   };
 }

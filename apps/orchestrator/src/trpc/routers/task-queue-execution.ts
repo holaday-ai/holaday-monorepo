@@ -3,6 +3,7 @@ import {
   type OperationLifetime,
   currentOperationLifetime,
 } from '../../execution/owned-operation.js';
+import { currentBrain, runWithBrain } from '../../llm/model-catalog.js';
 import { assertQueueAdmission } from '../../queue/task-queue-lifetime.js';
 import type { EnqueueResult } from '../../queue/task-queue.js';
 import type { Context } from '../context.js';
@@ -52,14 +53,18 @@ export function enqueueTaskExecution<C extends Context>(
     assertQueueAdmission(controller, lifetime);
     return { ...ctx, executionLifetime: lifetime };
   };
+  // Queued work starts later from the queue's own context: carry the request's
+  // model-catalog brain explicitly so every lane keeps the task's selection.
+  const brain = currentBrain();
+  const withBrain = <T>(fn: () => T): T => (brain ? runWithBrain(brain, fn) : fn());
   const result = ctx.taskQueue.enqueue({
     executionLifetime: parent,
     taskId: input.taskId,
     userId: input.userId,
-    runFn: (life) => input.runFn(bind(life)),
-    onStart: (life) => input.onStart(bind(life)),
+    runFn: (life) => withBrain(() => input.runFn(bind(life))),
+    onStart: (life) => withBrain(() => input.onStart(bind(life))),
     ...(input.onTimeout
-      ? { onTimeout: (life?: OperationLifetime) => input.onTimeout?.(bind(life)) }
+      ? { onTimeout: (life?: OperationLifetime) => withBrain(() => input.onTimeout?.(bind(life))) }
       : {}),
   });
   // Only a proven capacity refusal may enter the caller's business failure write.

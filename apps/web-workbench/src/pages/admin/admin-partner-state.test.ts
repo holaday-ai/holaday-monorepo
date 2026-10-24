@@ -2,21 +2,21 @@ import { describe, expect, it } from 'vitest';
 import * as adminPartnerState from './admin-partner-state';
 import {
   adminPartnerActionConfirmation,
+  filterAdminPartnerOverview,
   formatPartnerCreditCents,
   formatPartnerMoneyCents,
-  partnerReconciliationCsv,
-  filterAdminPartnerOverview,
   normalizeAdminPartnerOverview,
   normalizePartnerReconciliation,
   normalizeRiskScore,
   partnerKycQueueReviewPayload,
   partnerOrderActionLabel,
+  partnerReconciliationCsv,
+  partnerReviewStatusToken,
   partnerRiskCloseResolutionKindLabel,
   partnerRiskEventSeverityLabel,
   partnerRiskEventTypeLabel,
   partnerRiskLotActionPayload,
   partnerRiskLotQueueAction,
-  partnerReviewStatusToken,
 } from './admin-partner-state';
 
 describe('partner reconciliation date range', () => {
@@ -31,11 +31,7 @@ describe('partner reconciliation date range', () => {
     ).defaultPartnerReconciliationRange;
 
     expect(defaultPartnerReconciliationRange).toBeTypeOf('function');
-    expect(
-      defaultPartnerReconciliationRange?.(
-        new Date('2026-07-30T16:30:00.000Z'),
-      ),
-    ).toEqual({
+    expect(defaultPartnerReconciliationRange?.(new Date('2026-07-30T16:30:00.000Z'))).toEqual({
       from: '2026-07-25',
       to: '2026-07-31',
     });
@@ -46,8 +42,7 @@ describe('adminPartnerActionConfirmation', () => {
   it('names the pending operation and explains the production impact', () => {
     expect(adminPartnerActionConfirmation('提现已出款')).toEqual({
       title: '确认执行“提现已出款”？',
-      description:
-        '该操作会立即写入生产审核或账务状态。请再次核对对象、金额、原因和凭证信息。',
+      description: '该操作会立即写入生产审核或账务状态。请再次核对对象、金额、原因和凭证信息。',
     });
   });
 
@@ -654,7 +649,12 @@ describe('normalizePartnerReconciliation', () => {
         totalReferralRewardCreditCents: 2_000_00,
       },
       providerBreakdown: [
-        { provider: 'wechat', orderCount: 2, completedOrderCount: 1, completedAmountCnyCents: 999_00 },
+        {
+          provider: 'wechat',
+          orderCount: 2,
+          completedOrderCount: 1,
+          completedAmountCnyCents: 999_00,
+        },
       ],
       orders: [
         {
@@ -746,11 +746,7 @@ describe('normalizePartnerReconciliation', () => {
     });
 
     const csv = partnerReconciliationCsv(state);
-    expect(csv).toContain(
-      `"'=HYPERLINK(""https://attacker.invalid"",""open"")"`,
-    );
-    expect(csv).not.toContain(
-      `"=HYPERLINK(""https://attacker.invalid"",""open"")"`,
-    );
+    expect(csv).toContain(`"'=HYPERLINK(""https://attacker.invalid"",""open"")"`);
+    expect(csv).not.toContain(`"=HYPERLINK(""https://attacker.invalid"",""open"")"`);
   });
 });

@@ -11,11 +11,11 @@
  * chain the handler uses (select.from.where.limit / update.set.where).
  */
 
+import { TRPCError } from '@trpc/server';
 import type { Request, Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
-import { TRPCError } from '@trpc/server';
-import { createWebhookTasksHandler, resolveApiKey } from './webhook-handler.js';
 import { generateApiKey } from './api-key-service.js';
+import { createWebhookTasksHandler, resolveApiKey } from './webhook-handler.js';
 
 const fakeLogger = {
   info: vi.fn(),
@@ -97,10 +97,7 @@ function makeFakeDb(state: { keys: FakeApiKeyRow[]; users: FakeUserRow[] }) {
           async where(_predicate: any): Promise<void> {
             lastUpdate = { table: name, values };
           },
-          then(
-            onfulfilled?: (value: void) => unknown,
-            onrejected?: (reason: unknown) => unknown,
-          ) {
+          then(onfulfilled?: (value: void) => unknown, onrejected?: (reason: unknown) => unknown) {
             // Support the handler's fire-and-forget update().catch
             // pattern — promises chained off a non-awaited update
             // need a usable then() so the chain doesn't NPE.
@@ -122,11 +119,7 @@ function makeFakeDb(state: { keys: FakeApiKeyRow[]; users: FakeUserRow[] }) {
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function tableName(table: any): string {
-    return (
-      table[Symbol.for('drizzle:Name')] ??
-      table?._?.name ??
-      String(table?.name ?? '')
-    );
+    return table[Symbol.for('drizzle:Name')] ?? table?._?.name ?? String(table?.name ?? '');
   }
   return {
     db: { select, update } as unknown as Parameters<typeof createWebhookTasksHandler>[0]['db'],
@@ -163,12 +156,14 @@ function makeRes() {
   return { res: res as Response, captured };
 }
 
-function makeReq(opts: {
-  auth?: string;
-  body?: unknown;
-  path?: string;
-  headers?: Record<string, string>;
-} = {}): Request {
+function makeReq(
+  opts: {
+    auth?: string;
+    body?: unknown;
+    path?: string;
+    headers?: Record<string, string>;
+  } = {},
+): Request {
   const lowerHeaders: Record<string, string> = {};
   for (const [k, v] of Object.entries(opts.headers ?? {})) {
     lowerHeaders[k.toLowerCase()] = v;
@@ -327,10 +322,7 @@ describe('createWebhookTasksHandler', () => {
     const { handler, plaintext, dispatch } = setup({ userStatus: 'suspended' });
     const { res, captured } = makeRes();
 
-    await handler(
-      makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'run report' } }),
-      res,
-    );
+    await handler(makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'run report' } }), res);
 
     expect(captured).toMatchObject({ status: 401, json: { error: 'invalid_api_key' } });
     expect(dispatch).not.toHaveBeenCalled();
@@ -342,10 +334,7 @@ describe('createWebhookTasksHandler', () => {
       const { handler, plaintext, dispatch } = setup({ userStatus });
       const { res, captured } = makeRes();
 
-      await handler(
-        makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'run report' } }),
-        res,
-      );
+      await handler(makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'run report' } }), res);
 
       expect(captured).toMatchObject({ status: 401, json: { error: 'invalid_api_key' } });
       expect(dispatch).not.toHaveBeenCalled();
@@ -362,10 +351,9 @@ describe('createWebhookTasksHandler', () => {
     await handler(req, res);
     expect(captured.status).toBe(200);
     expect(captured.json).toEqual({ taskId: 'tsk_X', status: 'pending' });
-    expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'usr_test' }),
-      { intent: 'translate hello world to chinese' },
-    );
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ userId: 'usr_test' }), {
+      intent: 'translate hello world to chinese',
+    });
   });
 
   it('401: missing Authorization header', async () => {
@@ -379,30 +367,21 @@ describe('createWebhookTasksHandler', () => {
   it('401: malformed bearer (wrong prefix)', async () => {
     const { handler } = setup();
     const { res, captured } = makeRes();
-    await handler(
-      makeReq({ auth: 'Bearer sk_test_abc', body: { prompt: 'x' } }),
-      res,
-    );
+    await handler(makeReq({ auth: 'Bearer sk_test_abc', body: { prompt: 'x' } }), res);
     expect(captured.status).toBe(401);
   });
 
   it('401: revoked key', async () => {
     const { handler, plaintext } = setup({ revoked: true });
     const { res, captured } = makeRes();
-    await handler(
-      makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'x' } }),
-      res,
-    );
+    await handler(makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'x' } }), res);
     expect(captured.status).toBe(401);
   });
 
   it('401: expired key', async () => {
     const { handler, plaintext } = setup({ expired: true });
     const { res, captured } = makeRes();
-    await handler(
-      makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'x' } }),
-      res,
-    );
+    await handler(makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'x' } }), res);
     expect(captured.status).toBe(401);
   });
 
@@ -437,10 +416,7 @@ describe('createWebhookTasksHandler', () => {
       }),
     });
     const { res, captured } = makeRes();
-    await handler(
-      makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'x' } }),
-      res,
-    );
+    await handler(makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'x' } }), res);
     expect(captured.status).toBe(429);
     expect((captured.json as { error: string }).error).toBe('quota_exceeded');
   });
@@ -453,10 +429,7 @@ describe('createWebhookTasksHandler', () => {
       }),
     });
     const { res, captured } = makeRes();
-    await handler(
-      makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'x' } }),
-      res,
-    );
+    await handler(makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'x' } }), res);
     expect(captured.status).toBe(429);
   });
 
@@ -465,10 +438,7 @@ describe('createWebhookTasksHandler', () => {
       dispatchThrow: new Error('something broke'),
     });
     const { res, captured } = makeRes();
-    await handler(
-      makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'x' } }),
-      res,
-    );
+    await handler(makeReq({ auth: `Bearer ${plaintext}`, body: { prompt: 'x' } }), res);
     expect(captured.status).toBe(500);
   });
 
@@ -517,9 +487,11 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
    *   - INSERT INTO webhook_idempotency appends to state.idempotency
    *   - UPDATE api_keys last_used_at is silently accepted
    */
-  function setup(options: {
-    buildContextForUser?: (userExternalId: string) => import('../trpc/context.js').Context;
-  } = {}) {
+  function setup(
+    options: {
+      buildContextForUser?: (userExternalId: string) => import('../trpc/context.js').Context;
+    } = {},
+  ) {
     const { plaintext, hash } = generateApiKey();
     interface IdemRow {
       userId: number;
@@ -551,11 +523,7 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     function tableName(table: any): string {
-      return (
-        table[Symbol.for('drizzle:Name')] ??
-        table?._?.name ??
-        String(table?.name ?? '')
-      );
+      return table[Symbol.for('drizzle:Name')] ?? table?._?.name ?? String(table?.name ?? '');
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db: any = {
@@ -597,15 +565,13 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
                             s.includes(`value: ${i.userId}`) &&
                             s.includes(`value: '${i.idempotencyKey}'`),
                         )
-                        .map(
-                          ({ requestHash, taskId, responseJson, expiresAt, createdAt }) => ({
-                            requestHash,
-                            taskId,
-                            responseJson,
-                            expiresAt,
-                            createdAt,
-                          }),
-                        );
+                        .map(({ requestHash, taskId, responseJson, expiresAt, createdAt }) => ({
+                          requestHash,
+                          taskId,
+                          responseJson,
+                          expiresAt,
+                          createdAt,
+                        }));
                     }
                     return [];
                   },
@@ -817,12 +783,8 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
       r2.res,
     );
     expect(r2.captured.status).toBe(409);
-    expect((r2.captured.json as { error: string }).error).toBe(
-      'idempotency_conflict',
-    );
-    expect((r2.captured.json as { originalTaskId: string }).originalTaskId).toBe(
-      'tsk_fresh',
-    );
+    expect((r2.captured.json as { error: string }).error).toBe('idempotency_conflict');
+    expect((r2.captured.json as { originalTaskId: string }).originalTaskId).toBe('tsk_fresh');
     expect(dispatch).not.toHaveBeenCalled();
   });
 
@@ -866,9 +828,7 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
       r.res,
     );
     expect(r.captured.status).toBe(425);
-    expect((r.captured.json as { error: string }).error).toBe(
-      'idempotency_in_flight',
-    );
+    expect((r.captured.json as { error: string }).error).toBe('idempotency_in_flight');
     // Critical: dispatch MUST NOT fire (atomic-claim P1 guarantee).
     expect(dispatch).not.toHaveBeenCalled();
   });
@@ -908,9 +868,7 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
       r.res,
     );
     expect(r.captured.status).toBe(503);
-    expect((r.captured.json as { error: string }).error).toBe(
-      'idempotency_unavailable',
-    );
+    expect((r.captured.json as { error: string }).error).toBe('idempotency_unavailable');
     // Critical: dispatch MUST NOT fire — that's the whole point of
     // fail-closed. Letting it through would create the task without
     // the idempotency row, defeating retry safety.
@@ -936,7 +894,7 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
     expect(state.idempotency).toHaveLength(0);
   });
 
-  it('dispatch failure releases the claim so retries aren\'t blocked (NEW Codex P1)', async () => {
+  it("dispatch failure releases the claim so retries aren't blocked (NEW Codex P1)", async () => {
     // First call: dispatch throws → handler returns 5xx + must
     // release the claim row so the next retry sees a fresh slot.
     // Second call (same key) should then succeed cleanly.
@@ -1002,10 +960,7 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
     let failFinalizeOnce = true;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (db as any).update = (table: any) => {
-      const name =
-        table[Symbol.for('drizzle:Name')] ??
-        table?._?.name ??
-        String(table?.name ?? '');
+      const name = table[Symbol.for('drizzle:Name')] ?? table?._?.name ?? String(table?.name ?? '');
       if (name === 'webhook_idempotency' && failFinalizeOnce) {
         return {
           set() {
@@ -1042,10 +997,7 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
     const originalUpdate = (db as any).update.bind(db);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (db as any).update = (table: any) => {
-      const name =
-        table[Symbol.for('drizzle:Name')] ??
-        table?._?.name ??
-        String(table?.name ?? '');
+      const name = table[Symbol.for('drizzle:Name')] ?? table?._?.name ?? String(table?.name ?? '');
       if (name === 'webhook_idempotency') {
         return {
           set() {

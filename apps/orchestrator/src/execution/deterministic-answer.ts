@@ -48,10 +48,7 @@ function tryArithmetic(text: string): string | null {
   // bare expression. Longest alternatives first.
   s = s
     .replace(/[？?]/g, '')
-    .replace(
-      /等于几|等于多少|是多少|得多少|结果是?|等于|计算|算一下|算算|请问|帮我|多少/g,
-      ' ',
-    );
+    .replace(/等于几|等于多少|是多少|得多少|结果是?|等于|计算|算一下|算算|请问|帮我|多少/g, ' ');
   // Normalise operators (longest Chinese forms first).
   s = s
     .replace(/加上|加/g, '+')

@@ -130,10 +130,10 @@ describe('tool registry', () => {
     expect(classifyTaskType(intent), intent).toBe('hybrid');
   });
 
-  it.each([
-    '今天上海天气',
-    'What is the Tesla stock price today?',
-  ])('keeps pure fact lookups in the search tool profile: %s', (intent) => {
-    expect(classifyTaskType(intent)).toBe('search');
-  });
+  it.each(['今天上海天气', 'What is the Tesla stock price today?'])(
+    'keeps pure fact lookups in the search tool profile: %s',
+    (intent) => {
+      expect(classifyTaskType(intent)).toBe('search');
+    },
+  );
 });

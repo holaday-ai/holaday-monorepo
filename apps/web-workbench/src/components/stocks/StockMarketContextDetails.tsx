@@ -23,7 +23,7 @@ export function MarketTemperatureDetails({
             className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-[#ECEFF3]"
           >
             <span className="bg-[#18A76F]" style={{ width: `${breadth.upPercent}%` }} aria-hidden />
-            <span className="flex-1 bg-[#EA1F59]" aria-hidden />
+            <span className="flex-1 bg-[#FF0061]" aria-hidden />
           </div>
         ) : null}
       </MarketTemperatureDetail>
@@ -55,14 +55,17 @@ function MarketTemperatureDetail({
 }
 
 function marketTemperatureObservation(score: number, upPercent?: number): string {
-  const observation = score >= 70
-    ? '情绪偏热，警惕追涨与个股分化'
-    : score >= 58
-      ? '情绪偏乐观，继续核对成交持续性'
-      : score >= 45
-        ? '多空相对均衡，关注个股分化'
-        : '情绪偏谨慎，优先控制回撤风险';
-  return upPercent === undefined ? observation : `上涨占比 ${upPercent.toFixed(1)}% · ${observation}`;
+  const observation =
+    score >= 70
+      ? '情绪偏热，警惕追涨与个股分化'
+      : score >= 58
+        ? '情绪偏乐观，继续核对成交持续性'
+        : score >= 45
+          ? '多空相对均衡，关注个股分化'
+          : '情绪偏谨慎，优先控制回撤风险';
+  return upPercent === undefined
+    ? observation
+    : `上涨占比 ${upPercent.toFixed(1)}% · ${observation}`;
 }
 
 function marketBreadth(note: string): { upPercent: number } | null {

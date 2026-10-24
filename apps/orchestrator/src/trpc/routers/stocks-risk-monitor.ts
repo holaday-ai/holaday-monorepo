@@ -16,18 +16,24 @@ import {
 } from './stocks-risk-radar.js';
 
 export const stockRiskMonitorsInputSchema = stockRiskRadarInputSchema.strict();
-export const createStockRiskMonitorInputSchema = z.object({
-  snapshotId: z.string().regex(/^stkshot_[a-f0-9]{24}$/),
-  dataAsOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  trustMode: z.literal('current'),
-  symbol: z.string().regex(/^\d{6}$/),
-}).strict();
+export const createStockRiskMonitorInputSchema = z
+  .object({
+    snapshotId: z.string().regex(/^stkshot_[a-f0-9]{24}$/),
+    dataAsOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    trustMode: z.literal('current'),
+    symbol: z.string().regex(/^\d{6}$/),
+  })
+  .strict();
 
 async function requireUserId(
   db: typeof import('../../db/client.js').db,
   externalId: string,
 ): Promise<number> {
-  const [row] = await db.select({ id: users.id }).from(users).where(eq(users.externalId, externalId)).limit(1);
+  const [row] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.externalId, externalId))
+    .limit(1);
   if (!row) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
   return row.id;
 }
@@ -71,13 +77,14 @@ export const stockRiskMonitorProcedures = {
             intent,
             logger: ctx.logger,
           }),
-        loadRadar: () => runTrustedStockRiskRadar({
-          db: ctx.db,
-          userId,
-          logger: ctx.logger,
-          client,
-          input,
-        }),
+        loadRadar: () =>
+          runTrustedStockRiskRadar({
+            db: ctx.db,
+            userId,
+            logger: ctx.logger,
+            client,
+            input,
+          }),
       });
     }),
 } as const;

@@ -1,0 +1,477 @@
+
+ RUN  v2.1.8 /Users/yaleiqi/.codex/worktrees/fix-sidebar-toggle/holaday-monorepo/apps/web-workbench
+
+stderr | src/components/ui/sidebar-toggle.test.tsx > adaptive sidebar toggle > opens and closes an overlay without changing saved preference true
+Warning: React does not recognize the `forceCollapsed` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `forcecollapsed` instead. If you accidentally passed it from a parent component, remove it from the DOM element.
+    at div
+    at Provider (file:///Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/node_modules/.pnpm/@radix-ui+react-context@1.1.2_@types+react@18.3.18_react@18.3.1/node_modules/@radix-ui/react-context/dist/index.mjs:27:15)
+    at TooltipProvider (file:///Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/node_modules/.pnpm/@radix-ui+react-tooltip@1.2.8_@types+react-dom@18.3.5_@types+react@18.3.18__@types+reac_8cbd639379add447c68e616284cb3e3d/node_modules/@radix-ui/react-tooltip/dist/index.mjs:29:5)
+    at /Users/yaleiqi/.codex/worktrees/fix-sidebar-toggle/holaday-monorepo/apps/web-workbench/src/components/ui/sidebar.tsx:43:5
+    at Fixture (/Users/yaleiqi/.codex/worktrees/fix-sidebar-toggle/holaday-monorepo/apps/web-workbench/src/components/ui/sidebar-toggle.test.tsx:21:20)
+
+ ❯ src/components/ui/sidebar-toggle.test.tsx (7 tests | 6 failed) 151ms
+   × adaptive sidebar toggle > opens and closes an overlay without changing saved preference true 35ms
+     → expected null to be 'false' // Object.is equality
+   × adaptive sidebar toggle > opens and closes an overlay without changing saved preference false 4ms
+     → expected null to be 'false' // Object.is equality
+   × adaptive sidebar toggle > dismisses on an outside click or Escape and supports the keyboard toggle 20ms
+     → expected null to be 'false' // Object.is equality
+   × adaptive sidebar toggle > keeps portalled sidebar menus usable and lets Escape close the menu first 52ms
+     → Unable to find an accessible element with the role "button" and name "切换侧边栏"
+
+Here are the accessible roles:
+
+  menu:
+
+  Name "侧栏菜单":
+  [36m<div[39m
+    [33maria-labelledby[39m=[32m"radix-:r6:"[39m
+    [33maria-orientation[39m=[32m"vertical"[39m
+    [33mclass[39m=[32m"z-[var(--z-dropdown)] min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"[39m
+    [33mdata-align[39m=[32m"center"[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-menu-content[39m=[32m""[39m
+    [33mdata-side[39m=[32m"bottom"[39m
+    [33mdata-state[39m=[32m"open"[39m
+    [33mdir[39m=[32m"ltr"[39m
+    [33mid[39m=[32m"radix-:r7:"[39m
+    [33mrole[39m=[32m"menu"[39m
+    [33mstyle[39m=[32m"--radix-dropdown-menu-content-transform-origin: var(--radix-popper-transform-origin); --radix-dropdown-menu-content-available-width: var(--radix-popper-available-width); --radix-dropdown-menu-content-available-height: var(--radix-popper-available-height); --radix-dropdown-menu-trigger-width: var(--radix-popper-anchor-width); --radix-dropdown-menu-trigger-height: var(--radix-popper-anchor-height); pointer-events: auto; outline-color: none; outline-style: none; outline-width: initial;"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  menuitem:
+
+  Name "侧栏操作":
+  [36m<div[39m
+    [33mclass[39m=[32m"relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0"[39m
+    [33mdata-highlighted[39m=[32m""[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-collection-item[39m=[32m""[39m
+    [33mrole[39m=[32m"menuitem"[39m
+    [33mtabindex[39m=[32m"0"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body[39m
+  [33mdata-scroll-locked[39m=[32m"1"[39m
+  [33mstyle[39m=[32m"pointer-events: none;"[39m
+[36m>[39m
+  [36m<span[39m
+    [33maria-hidden[39m=[32m"true"[39m
+    [33mdata-aria-hidden[39m=[32m"true"[39m
+    [33mdata-radix-focus-guard[39m=[32m""[39m
+    [33mstyle[39m=[32m"opacity: 0; position: fixed; pointer-events: none; outline-color: none; outline-style: none; outline-width: initial;"[39m
+    [33mtabindex[39m=[32m"0"[39m
+  [36m/>[39m
+  [36m<div[39m
+    [33maria-hidden[39m=[32m"true"[39m
+    [33mdata-aria-hidden[39m=[32m"true"[39m
+  [36m>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"group/sidebar-wrapper flex min-h-svh w-full has-[[data-variant=inset]]:bg-sidebar"[39m
+      [33mstyle[39m=[32m"--sidebar-width: 16rem; --sidebar-width-icon: 3rem;"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"group peer hidden md:block text-sidebar-foreground"[39m
+        [33mdata-collapsible[39m=[32m"icon"[39m
+        [33mdata-side[39m=[32m"left"[39m
+        [33mdata-state[39m=[32m"collapsed"[39m
+        [33mdata-variant[39m=[32m"floating"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"hd-sidebar-spacer duration-[620ms] relative h-svh w-[--sidebar-width] bg-transparent transition-[width] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none group-data-[collapsible=offcanvas]:w-0 group-data-[side=right]:rotate-180 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4))]"[39m
+        [36m/>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"duration-[620ms] fixed inset-y-0 z-10 hidden h-svh w-[--sidebar-width] transition-[left,right,width] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none md:flex left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow"[39m
+            [33mdata-sidebar[39m=[32m"sidebar"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"切换侧边栏"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7"[39m
+              [33mdata-sidebar[39m=[32m"trigger"[39m
+              [33mtitle[39m=[32m"切换侧边栏"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33mclass[39m=[32m"lucide lucide-panel-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<rect[39m
+                  [33mheight[39m=[32m"18"[39m
+                  [33mrx[39m=[32m"2"[39m
+                  [33mwidth[39m=[32m"18"[39m
+                  [33mx[39m=[32m"3"[39m
+                  [33my[39m=[32m"3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M9 3v18"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"sr-only"[39m
+              [36m>[39m
+                [0m切换侧边栏[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-controls[39m=[32m"radix-:r7:"[39m
+              [33maria-expanded[39m=[32m"true"[39m
+              [33maria-haspopup[39m=[32m"menu"[39m
+              [33mdata-state[39m=[32m"open"[39m
+              [33mid[39m=[32m"radix-:r6:"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m侧栏菜单[0m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<button[39m
+        [33mtype[39m=[32m"button"[39m
+      [36m>[39m
+        [0m内容区域[0m
+      [36m</button>[39m
+      [36m<output[39m
+        [33maria-label[39m=[32m"保存的侧栏偏好"[39m
+      [36m>[39m
+        [0mfalse[0m
+      [36m</output>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+  [36m<div[39m
+    [33mdata-radix-popper-content-wrapper[39m=[32m""[39m
+    [33mdir[39m=[32m"ltr"[39m
+    [33mstyle[39m=[32m"position: fixed; left: 0px; top: 0px; transform: translate(0px, 4px); min-width: max-content; --radix-popper-available-width: 0px; --radix-popper-available-height: -4px; --radix-popper-anchor-width: 0px; --radix-popper-anchor-height: 0px; --radix-popper-transform-origin: 50% 0px;"[39m
+  [36m>[39m
+    [36m<div[39m
+      [33maria-labelledby[39m=[32m"radix-:r6:"[39m
+      [33maria-orientation[39m=[32m"vertical"[39m
+      [33mclass[39m=[32m"z-[var(--z-dropdown)] min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"[39m
+      [33mdata-align[39m=[32m"center"[39m
+      [33mdata-orientation[39m=[32m"vertical"[39m
+      [33mdata-radix-menu-content[39m=[32m""[39m
+      [33mdata-side[39m=[32m"bottom"[39m
+      [33mdata-state[39m=[32m"open"[39m
+      [33mdir[39m=[32m"ltr"[39m
+      [33mid[39m=[32m"radix-:r7:"[39m
+      [33mrole[39m=[32m"menu"[39m
+      [33mstyle[39m=[32m"--radix-dropdown-menu-content-transform-origin: var(--radix-popper-transform-origin); --radix-dropdown-menu-content-available-width: var(--radix-popper-available-width); --radix-dropdown-menu-content-available-height: var(--radix-popper-available-height); --radix-dropdown-menu-trigger-width: var(--radix-popper-anchor-width); --radix-dropdown-menu-trigger-height: var(--radix-popper-anchor-height); pointer-events: auto; outline-color: none; outline-style: none; outline-width: initial;"[39m
+      [33mtabindex[39m=[32m"-1"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0"[39m
+        [33mdata-highlighted[39m=[32m""[39m
+        [33mdata-orientation[39m=[32m"vertical"[39m
+        [33mdata-radix-collection-item[39m=[32m""[39m
+        [33mrole[39m=[32m"menuitem"[39m
+        [33mtabindex[39m=[32m"0"[39m
+      [36m>[39m
+        [0m侧栏操作[0m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+  [36m<span[39m
+    [33maria-hidden[39m=[32m"true"[39m
+    [33mdata-aria-hidden[39m=[32m"true"[39m
+    [33mdata-radix-focus-guard[39m=[32m""[39m
+    [33mstyle[39m=[32m"opacity: 0; position: fixed; pointer-events: none; outline-color: none; outline-style: none; outline-width: initial;"[39m
+    [33mtabindex[39m=[32m"0"[39m
+  [36m/>[39m
+[36m</body>[39m
+   × adaptive sidebar toggle > restores preference true when the viewport leaves forced mode 11ms
+     → expected null to be 'true' // Object.is equality
+   × adaptive sidebar toggle > restores preference false when the viewport leaves forced mode 10ms
+     → expected null to be 'false' // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/ui/sidebar-toggle.test.tsx > adaptive sidebar toggle > opens and closes an overlay without changing saved preference true
+ FAIL  src/components/ui/sidebar-toggle.test.tsx > adaptive sidebar toggle > opens and closes an overlay without changing saved preference false
+AssertionError: expected null to be 'false' // Object.is equality
+
+- Expected:
+"false"
+
++ Received:
+null
+
+ ❯ src/components/ui/sidebar-toggle.test.tsx:46:52
+     44|     render(<Fixture forced defaultOpen={saved} />);
+     45|     const cookie = document.cookie;
+     46|     expect(toggle().getAttribute('aria-expanded')).toBe('false');
+       |                                                    ^
+     47|     expect(toggle().title).toBe('展开侧边栏');
+     48|     await user.click(toggle());
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/components/ui/sidebar-toggle.test.tsx > adaptive sidebar toggle > dismisses on an outside click or Escape and supports the keyboard toggle
+AssertionError: expected null to be 'false' // Object.is equality
+
+- Expected:
+"false"
+
++ Received:
+null
+
+ ❯ src/components/ui/sidebar-toggle.test.tsx:66:52
+     64|     await user.click(toggle());
+     65|     await user.click(screen.getByRole('button', { name: '内容区域' }));
+     66|     expect(toggle().getAttribute('aria-expanded')).toBe('false');
+       |                                                    ^
+     67|     fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
+     68|     expect(toggle().getAttribute('aria-expanded')).toBe('true');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/components/ui/sidebar-toggle.test.tsx > adaptive sidebar toggle > keeps portalled sidebar menus usable and lets Escape close the menu first
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "切换侧边栏"
+
+Here are the accessible roles:
+
+  menu:
+
+  Name "侧栏菜单":
+  [36m<div[39m
+    [33maria-labelledby[39m=[32m"radix-:r6:"[39m
+    [33maria-orientation[39m=[32m"vertical"[39m
+    [33mclass[39m=[32m"z-[var(--z-dropdown)] min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"[39m
+    [33mdata-align[39m=[32m"center"[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-menu-content[39m=[32m""[39m
+    [33mdata-side[39m=[32m"bottom"[39m
+    [33mdata-state[39m=[32m"open"[39m
+    [33mdir[39m=[32m"ltr"[39m
+    [33mid[39m=[32m"radix-:r7:"[39m
+    [33mrole[39m=[32m"menu"[39m
+    [33mstyle[39m=[32m"--radix-dropdown-menu-content-transform-origin: var(--radix-popper-transform-origin); --radix-dropdown-menu-content-available-width: var(--radix-popper-available-width); --radix-dropdown-menu-content-available-height: var(--radix-popper-available-height); --radix-dropdown-menu-trigger-width: var(--radix-popper-anchor-width); --radix-dropdown-menu-trigger-height: var(--radix-popper-anchor-height); pointer-events: auto; outline-color: none; outline-style: none; outline-width: initial;"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  menuitem:
+
+  Name "侧栏操作":
+  [36m<div[39m
+    [33mclass[39m=[32m"relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0"[39m
+    [33mdata-highlighted[39m=[32m""[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-collection-item[39m=[32m""[39m
+    [33mrole[39m=[32m"menuitem"[39m
+    [33mtabindex[39m=[32m"0"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body[39m
+  [33mdata-scroll-locked[39m=[32m"1"[39m
+  [33mstyle[39m=[32m"pointer-events: none;"[39m
+[36m>[39m
+  [36m<span[39m
+    [33maria-hidden[39m=[32m"true"[39m
+    [33mdata-aria-hidden[39m=[32m"true"[39m
+    [33mdata-radix-focus-guard[39m=[32m""[39m
+    [33mstyle[39m=[32m"opacity: 0; position: fixed; pointer-events: none; outline-color: none; outline-style: none; outline-width: initial;"[39m
+    [33mtabindex[39m=[32m"0"[39m
+  [36m/>[39m
+  [36m<div[39m
+    [33maria-hidden[39m=[32m"true"[39m
+    [33mdata-aria-hidden[39m=[32m"true"[39m
+  [36m>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"group/sidebar-wrapper flex min-h-svh w-full has-[[data-variant=inset]]:bg-sidebar"[39m
+      [33mstyle[39m=[32m"--sidebar-width: 16rem; --sidebar-width-icon: 3rem;"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"group peer hidden md:block text-sidebar-foreground"[39m
+        [33mdata-collapsible[39m=[32m"icon"[39m
+        [33mdata-side[39m=[32m"left"[39m
+        [33mdata-state[39m=[32m"collapsed"[39m
+        [33mdata-variant[39m=[32m"floating"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"hd-sidebar-spacer duration-[620ms] relative h-svh w-[--sidebar-width] bg-transparent transition-[width] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none group-data-[collapsible=offcanvas]:w-0 group-data-[side=right]:rotate-180 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4))]"[39m
+        [36m/>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"duration-[620ms] fixed inset-y-0 z-10 hidden h-svh w-[--sidebar-width] transition-[left,right,width] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none md:flex left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow"[39m
+            [33mdata-sidebar[39m=[32m"sidebar"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"切换侧边栏"[39m
+              [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7"[39m
+              [33mdata-sidebar[39m=[32m"trigger"[39m
+              [33mtitle[39m=[32m"切换侧边栏"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33mclass[39m=[32m"lucide lucide-panel-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<rect[39m
+                  [33mheight[39m=[32m"18"[39m
+                  [33mrx[39m=[32m"2"[39m
+                  [33mwidth[39m=[32m"18"[39m
+                  [33mx[39m=[32m"3"[39m
+                  [33my[39m=[32m"3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M9 3v18"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"sr-only"[39m
+              [36m>[39m
+                [0m切换侧边栏[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-controls[39m=[32m"radix-:r7:"[39m
+              [33maria-expanded[39m=[32m"true"[39m
+              [33maria-haspopup[39m=[32m"menu"[39m
+              [33mdata-state[39m=[32m"open"[39m
+              [33mid[39m=[32m"radix-:r6:"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m侧栏菜单[0m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<button[39m
+        [33mtype[39m=[32m"button"[39m
+      [36m>[39m
+        [0m内容区域[0m
+      [36m</button>[39m
+      [36m<output[39m
+        [33maria-label[39m=[32m"保存的侧栏偏好"[39m
+      [36m>[39m
+        [0mfalse[0m
+      [36m</output>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+  [36m<div[39m
+    [33mdata-radix-popper-content-wrapper[39m=[32m""[39m
+    [33mdir[39m=[32m"ltr"[39m
+    [33mstyle[39m=[32m"position: fixed; left: 0px; top: 0px; transform: translate(0px, 4px); min-width: max-content; --radix-popper-available-width: 0px; --radix-popper-available-height: -4px; --radix-popper-anchor-width: 0px; --radix-popper-anchor-height: 0px; --radix-popper-transform-origin: 50% 0px;"[39m
+  [36m>[39m
+    [36m<div[39m
+      [33maria-labelledby[39m=[32m"radix-:r6:"[39m
+      [33maria-orientation[39m=[32m"vertical"[39m
+      [33mclass[39m=[32m"z-[var(--z-dropdown)] min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"[39m
+      [33mdata-align[39m=[32m"center"[39m
+      [33mdata-orientation[39m=[32m"vertical"[39m
+      [33mdata-radix-menu-content[39m=[32m""[39m
+      [33mdata-side[39m=[32m"bottom"[39m
+      [33mdata-state[39m=[32m"open"[39m
+      [33mdir[39m=[32m"ltr"[39m
+      [33mid[39m=[32m"radix-:r7:"[39m
+      [33mrole[39m=[32m"menu"[39m
+      [33mstyle[39m=[32m"--radix-dropdown-menu-content-transform-origin: var(--radix-popper-transform-origin); --radix-dropdown-menu-content-available-width: var(--radix-popper-available-width); --radix-dropdown-menu-content-available-height: var(--radix-popper-available-height); --radix-dropdown-menu-trigger-width: var(--radix-popper-anchor-width); --radix-dropdown-menu-trigger-height: var(--radix-popper-anchor-height); pointer-events: auto; outline-color: none; outline-style: none; outline-width: initial;"[39m
+      [33mtabindex[39m=[32m"-1"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0"[39m
+        [33mdata-highlighted[39m=[32m""[39m
+        [33mdata-orientation[39m=[32m"vertical"[39m
+        [33mdata-radix-collection-item[39m=[32m""[39m
+        [33mrole[39m=[32m"menuitem"[39m
+        [33mtabindex[39m=[32m"0"[39m
+      [36m>[39m
+        [0m侧栏操作[0m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+  [36m<span[39m
+    [33maria-hidden[39m=[32m"true"[39m
+    [33mdata-aria-hidden[39m=[32m"true"[39m
+    [33mdata-radix-focus-guard[39m=[32m""[39m
+    [33mstyle[39m=[32m"opacity: 0; position: fixed; pointer-events: none; outline-color: none; outline-style: none; outline-width: initial;"[39m
+    [33mtabindex[39m=[32m"0"[39m
+  [36m/>[39m
+[36m</body>[39m
+ ❯ Object.getElementError ../../../../ui-p2-batch/holaday-monorepo/node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../../../ui-p2-batch/holaday-monorepo/node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../../../ui-p2-batch/holaday-monorepo/node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../../../ui-p2-batch/holaday-monorepo/node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ toggle src/components/ui/sidebar-toggle.test.tsx:34:29
+     32|   );
+     33| }
+     34| const toggle = () => screen.getByRole('button', { name: '切换侧边栏' }…
+       |                             ^
+     35| const preference = () => screen.getByLabelText('保存的侧栏偏好').textC…
+     36| afterEach(() => {
+ ❯ src/components/ui/sidebar-toggle.test.tsx:81:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  src/components/ui/sidebar-toggle.test.tsx > adaptive sidebar toggle > restores preference true when the viewport leaves forced mode
+AssertionError: expected null to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+null
+
+ ❯ src/components/ui/sidebar-toggle.test.tsx:95:52
+     93|     rerender(<Fixture forced={false} defaultOpen={saved} />);
+     94|     expect(screen.queryByRole('dialog', { name: '侧边栏导航' })).toBeN…
+     95|     expect(toggle().getAttribute('aria-expanded')).toBe(String(saved));
+       |                                                    ^
+     96|     expect(preference()).toBe(String(saved));
+     97|     rerender(<Fixture forced defaultOpen={saved} />);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  src/components/ui/sidebar-toggle.test.tsx > adaptive sidebar toggle > restores preference false when the viewport leaves forced mode
+AssertionError: expected null to be 'false' // Object.is equality
+
+- Expected:
+"false"
+
++ Received:
+null
+
+ ❯ src/components/ui/sidebar-toggle.test.tsx:95:52
+     93|     rerender(<Fixture forced={false} defaultOpen={saved} />);
+     94|     expect(screen.queryByRole('dialog', { name: '侧边栏导航' })).toBeN…
+     95|     expect(toggle().getAttribute('aria-expanded')).toBe(String(saved));
+       |                                                    ^
+     96|     expect(preference()).toBe(String(saved));
+     97|     rerender(<Fixture forced defaultOpen={saved} />);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 1 passed (7)
+   Start at  03:33:51
+   Duration  1.09s (transform 89ms, setup 0ms, collect 333ms, tests 151ms, environment 255ms, prepare 39ms)
+
+undefined
+/Users/yaleiqi/.codex/worktrees/fix-sidebar-toggle/holaday-monorepo/apps/web-workbench:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/components/ui/sidebar-toggle.test.tsx --maxWorkers=1 --minWorkers=1

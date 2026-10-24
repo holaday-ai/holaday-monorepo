@@ -103,13 +103,15 @@ export const dataCategories: readonly DataCategoryDefinition[] = [
   {
     id: 'cross_task_memory',
     displayName: '跨任务 AI 记忆',
-    description: '从已完成任务摘要提取并用于后续相关任务的上下文。',
+    description: '从已完成任务摘要提取站点操作经验与用户偏好，并用于后续相关任务的上下文。',
     dataElements: ['偏好', '网站状态', '任务历史', '执行建议'],
     sources: ['已完成任务的任务指令与结果摘要'],
     purposes: ['在后续相关任务中提供个性化上下文'],
     sensitivity: 'sensitive',
     storageLocations: ['HOLA DAY 执行记忆存储'],
-    processorIds: ['holaday_internal', 'anthropic'],
+    // Extraction runs on the model runtime's generate lane: 千问 (DashScope) by
+    // default; the admin model catalog may route it to Claude.
+    processorIds: ['holaday_internal', 'dashscope', 'anthropic'],
     retentionPolicyId: 'memory_entry_lifecycle',
     rightsCapabilityId: 'memory_self_service',
     evidence: [
@@ -239,23 +241,31 @@ export const dataCategories: readonly DataCategoryDefinition[] = [
   {
     id: 'extension_login_cookies',
     displayName: '扩展登录态',
-    description: '固定同步域名清单内、用于任务浏览器继承登录状态的真实 Cookie。',
+    description: '旧版固定清单 Cookie，以及用户逐站授权的加密登录状态；新版默认关闭。',
     dataElements: ['真实 Cookie 值', 'Cookie 名称', '域名', '路径', '安全与同站标记', '到期时间'],
-    sources: ['登录状态下的扩展固定同步域名清单'],
+    sources: ['旧版固定同步域名清单的遗留数据；新版用户明确选择的单站字段'],
     purposes: ['让 HOLA DAY 任务浏览器继承 Chrome 中已有的登录状态'],
     sensitivity: 'highly_sensitive',
-    storageLocations: ['HOLA DAY 待注入 Cookie 存储', 'HOLA DAY 任务浏览器执行环境'],
+    storageLocations: [
+      'HOLA DAY 待注入 Cookie 存储',
+      'HOLA DAY 加密会话 vault',
+      'HOLA DAY 隔离任务浏览器执行环境',
+    ],
     processorIds: ['holaday_internal'],
     retentionPolicyId: 'cookie_injection_mixed',
     rightsCapabilityId: 'extension_cookie_mixed',
     evidence: [
       source(
         'apps/extension/src/background/cookie-sync.ts',
-        '扩展读取固定同步域名清单内的 Cookie。',
+        '固定同步域名清单的旧自动入口已停用。',
       ),
       source(
         'apps/orchestrator/src/cookies/sync-service.ts',
         'Cookie 同步服务验证并处理同步记录。',
+      ),
+      source(
+        'apps/orchestrator/src/browser-session-vault/vault.ts',
+        '新版按站点授权、加密存储、撤销和期限校验，默认关闭。',
       ),
       source(
         'apps/orchestrator/src/db/schema/pending-cookies.ts',

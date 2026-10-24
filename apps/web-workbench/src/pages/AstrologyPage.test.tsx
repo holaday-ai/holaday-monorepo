@@ -28,7 +28,7 @@ vi.mock('@/lib/trpc', () => ({
 afterEach(cleanup);
 
 describe('AstrologyPageShell', () => {
-  it('keeps the mobile title below the fixed shell controls', () => {
+  it('keeps the title below fixed shell controls on mobile and desktop', () => {
     const { container } = render(
       <AstrologyPageShell liveProvider={false} profileStorageScope={null} />,
     );
@@ -39,7 +39,7 @@ describe('AstrologyPageShell', () => {
     const shellClassName = container.firstElementChild?.className ?? '';
     expect(shellClassName).toContain('max-w-[1180px]');
     expect(shellClassName).toContain('!pt-14');
-    expect(shellClassName).toContain('min-[769px]:!pt-5');
+    expect(shellClassName).toContain('min-[769px]:!pt-20');
     expect(shellClassName).not.toContain('!pt-4');
   });
 

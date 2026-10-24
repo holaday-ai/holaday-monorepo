@@ -169,10 +169,12 @@ describe('runScrapeTask — Qwen synthesis', () => {
     expect(firecrawl.search).not.toHaveBeenCalled();
     expect(outcome).toMatchObject({
       status: 'completed',
-      summary: '整理后的结果',
+      // FIRECRAWL-1: an answer that names no fetched page gets its source line.
+      summary: '整理后的结果\n\n来源：https://example.com/article',
       sources: ['https://example.com/article'],
       inputTokens: 100,
       outputTokens: 200,
+      firecrawl: { calls: 1, credits: 1 },
     });
     expect(deltas).toEqual(['整理后的结果']);
     expect(progress).toEqual(['正在抓取网页数据…', '正在分析整理…']);
@@ -274,7 +276,12 @@ describe('runScrapeTask — Firecrawl failures', () => {
       scrape: vi.fn(async () => ({ ok: false as const, error: 'secret key missing' })),
     });
     const outcome = await run({ adapter, firecrawl });
-    expect(outcome).toMatchObject({ status: 'failed', reason: '网页抓取失败，请稍后重试。' });
+    expect(outcome).toMatchObject({
+      status: 'failed',
+      reason: '网页抓取（Firecrawl）没有拿到正文：抓取服务返回错误',
+      failureKind: 'firecrawl',
+    });
+    expect(outcome.reason).not.toContain('secret');
     expect(adapter.stream).not.toHaveBeenCalled();
   });
 
@@ -299,5 +306,55 @@ describe('runScrapeTask — Firecrawl failures', () => {
     expect(outcome).toMatchObject({ status: 'failed', reason: '请输入要搜索的内容。' });
     expect(firecrawl.search).not.toHaveBeenCalled();
     expect(adapter.stream).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * FIX-32 (BENCH-1 r03/n06): Firecrawl search serves cached pages (zh-cn/download two days
+ * old said v24.22.0 after v24.22.1). A question about now reads stale results again.
+ */
+describe('fresh results for questions about now', () => {
+  const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString();
+  const lane = () =>
+    scrapeLane({
+      search: vi.fn(async () => ({
+        ok: true as const,
+        results: [
+          {
+            url: 'https://nodejs.org/zh-cn/download',
+            markdown: '# 下载 Node.js\n\nLTS v24.22.0',
+            title: '下载 Node.js',
+            cachedAt: twoDaysAgo,
+          },
+        ],
+        credits: 1,
+      })),
+      scrape: vi.fn(async (url: string) => ({
+        ok: true as const,
+        markdown: '# 下载 Node.js\n\nLTS v24.22.1',
+        url,
+        credits: 1,
+      })),
+    });
+  it('re-reads a stale copy and labels when each source was read', async () => {
+    const adapter = makeAdapter();
+    const firecrawl = lane();
+    const outcome = await run({ intent: 'nodejs官网最新的LTS版本是多少', adapter, firecrawl });
+    expect(firecrawl.scrape).toHaveBeenCalledWith('https://nodejs.org/zh-cn/download', {
+      fresh: true,
+    });
+    const request = JSON.stringify(vi.mocked(adapter.stream).mock.calls.at(0)?.[0]);
+    expect(request).toContain('v24.22.1');
+    expect(request).not.toContain('v24.22.0');
+    expect(request).toMatch(/抓取时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
+    expect(outcome.firecrawl).toEqual({ calls: 2, credits: 2 });
+  });
+  it('a question that is not about now keeps the cached copy, labelled with its age', async () => {
+    const adapter = makeAdapter();
+    const firecrawl = lane();
+    await run({ intent: '搜索 Node.js 的下载页面介绍', adapter, firecrawl });
+    expect(firecrawl.scrape).not.toHaveBeenCalled();
+    const request = JSON.stringify(vi.mocked(adapter.stream).mock.calls.at(0)?.[0]);
+    expect(request).toContain(`抓取时间：${twoDaysAgo.slice(0, 16).replace('T', ' ')} UTC`);
   });
 });

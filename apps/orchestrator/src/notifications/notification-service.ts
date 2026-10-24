@@ -16,19 +16,16 @@
  * without spinning up MySQL.
  */
 
-import { eq, and } from 'drizzle-orm';
 import { newExternalId } from '@holaday/shared-types';
+import { and, eq } from 'drizzle-orm';
 import type { Logger } from 'pino';
+import { notificationChannels, notifications } from '../db/schema/notifications.js';
 import {
-  notificationChannels,
-  notifications,
-} from '../db/schema/notifications.js';
-import {
-  sendWebhook,
   type NotificationPlatform,
   type NotificationType,
-  type WebhookContext,
   type SendResult,
+  type WebhookContext,
+  sendWebhook,
 } from './webhook-sender.js';
 
 export interface NotifyInput {
@@ -94,10 +91,7 @@ function typeToStatus(type: NotificationType): WebhookContext['status'] {
  *     error} on any failure. The allSettled wrap is belt-and-braces
  *     in case a future sender misbehaves.
  */
-export async function notify(
-  deps: NotifyDeps,
-  input: NotifyInput,
-): Promise<NotifyResult> {
+export async function notify(deps: NotifyDeps, input: NotifyInput): Promise<NotifyResult> {
   const send = deps.send ?? sendWebhook;
   const externalId = newExternalId('notification');
 

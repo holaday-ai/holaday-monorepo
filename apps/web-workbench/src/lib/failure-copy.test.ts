@@ -7,16 +7,20 @@ import {
 } from './failure-copy';
 
 describe('classifyFriendlyFailure', () => {
-  const unsupportedZip = '任务未完成：当前文件生成工具不支持 ZIP 格式，升级套餐无法解决。请确认是否接受其他可用格式，或使用支持该格式的工具。';
+  const unsupportedZip =
+    '任务未完成：当前文件生成工具不支持 ZIP 格式，升级套餐无法解决。请确认是否接受其他可用格式，或使用支持该格式的工具。';
 
-  it.each([unsupportedZip, 'FILE_FORMAT_UNSUPPORTED:zip'])('surfaces unsupported output formats instead of generic retry advice: %s', (reason) => {
-    const copy = classifyFriendlyFailure(reason);
-    expect(copy.title).toContain('ZIP');
-    expect(copy.subtitle).toContain('升级套餐无法解决');
-    expect(copy.nextStep).toContain('其他可用格式');
-    expect(failureResultCopyText(reason)).not.toMatch(/重试|重新执行|更具体/);
-    expect(terminalAllowsRerun('failed', reason)).toBe(false);
-  });
+  it.each([unsupportedZip, 'FILE_FORMAT_UNSUPPORTED:zip'])(
+    'surfaces unsupported output formats instead of generic retry advice: %s',
+    (reason) => {
+      const copy = classifyFriendlyFailure(reason);
+      expect(copy.title).toContain('ZIP');
+      expect(copy.subtitle).toContain('升级套餐无法解决');
+      expect(copy.nextStep).toContain('其他可用格式');
+      expect(failureResultCopyText(reason)).not.toMatch(/重试|重新执行|更具体/);
+      expect(terminalAllowsRerun('failed', reason)).toBe(false);
+    },
+  );
 
   it('shows every unsupported requested format', () => {
     expect(classifyFriendlyFailure('FILE_FORMAT_UNSUPPORTED:zip,psd').title).toContain('ZIP、PSD');
@@ -78,7 +82,9 @@ describe('classifyFriendlyFailure', () => {
       subtitle: '请打开 HOLA DAY 扩展后重试；如果不用扩展，也可以重新执行任务。',
       nextStep: '打开 HOLA DAY 扩展，再重新执行任务。',
     });
-    expect(classifyFriendlyFailure('Could not establish connection. Receiving end does not exist.')).toEqual({
+    expect(
+      classifyFriendlyFailure('Could not establish connection. Receiving end does not exist.'),
+    ).toEqual({
       title: '浏览器扩展未连接',
       subtitle: '请打开 HOLA DAY 扩展后重试；如果不用扩展，也可以重新执行任务。',
       nextStep: '打开 HOLA DAY 扩展，再重新执行任务。',
@@ -86,12 +92,16 @@ describe('classifyFriendlyFailure', () => {
   });
 
   it('explains extension disconnects without making them look like generic timeouts', () => {
-    expect(classifyFriendlyFailure('浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试')).toEqual({
-      title: '浏览器扩展已断开',
-      subtitle: '扩展连接在执行中断开。请重新打开 HOLA DAY 扩展后重试。',
-      nextStep: '确认扩展在线，再重新执行当前任务。',
-    });
-    expect(classifyFriendlyFailure('The message port closed before a response was received.')).toEqual({
+    expect(classifyFriendlyFailure('浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试')).toEqual(
+      {
+        title: '浏览器扩展已断开',
+        subtitle: '扩展连接在执行中断开。请重新打开 HOLA DAY 扩展后重试。',
+        nextStep: '确认扩展在线，再重新执行当前任务。',
+      },
+    );
+    expect(
+      classifyFriendlyFailure('The message port closed before a response was received.'),
+    ).toEqual({
       title: '浏览器扩展已断开',
       subtitle: '扩展连接在执行中断开。请重新打开 HOLA DAY 扩展后重试。',
       nextStep: '确认扩展在线，再重新执行当前任务。',
@@ -136,7 +146,11 @@ describe('classifyFriendlyFailure', () => {
   });
 
   it('classifies fast page changes as transient page switching', () => {
-    expect(classifyFriendlyFailure('Execution context was destroyed, most likely because of a navigation')).toEqual({
+    expect(
+      classifyFriendlyFailure(
+        'Execution context was destroyed, most likely because of a navigation',
+      ),
+    ).toEqual({
       title: '页面正在切换',
       subtitle: '网站跳转太快导致本次步骤失效，请重新执行当前任务。',
       nextStep: '重新执行时尽量从稳定页面开始。',
@@ -189,14 +203,12 @@ describe('classifyFriendlyFailure', () => {
   it('builds friendly, raw-error-free copy text for failed results', () => {
     // The footer copy/download must never serialise the raw technical
     // error the user can't read.
-    expect(
-      failureResultCopyText('Protocol error (Page.navigate): Target closed'),
-    ).toBe(
+    expect(failureResultCopyText('Protocol error (Page.navigate): Target closed')).toBe(
       '浏览器连接中断\n浏览器会话已断开，请重新执行任务。\n下一步：重新执行任务会建立新的浏览器会话。',
     );
-    expect(
-      failureResultCopyText('Protocol error (Page.navigate): Target closed'),
-    ).not.toMatch(/Protocol error|Target closed/);
+    expect(failureResultCopyText('Protocol error (Page.navigate): Target closed')).not.toMatch(
+      /Protocol error|Target closed/,
+    );
     // Empty / unknown errors still yield a usable summary, never '' .
     expect(failureResultCopyText('')).toBe(
       '任务未能完成\n请重试，或换一种描述方式（更具体的指令、提供示例数据）。\n下一步：换一种更具体的描述后重新执行。',
@@ -208,5 +220,63 @@ describe('classifyFriendlyFailure', () => {
       '浏览器连接中断，请重新执行任务。',
     );
     expect(friendlyFailureDetail('目标网站要求登录')).toBe('目标网站要求登录');
+  });
+});
+
+describe('non-browser failure recovery', () => {
+  it('does not prescribe browser navigation for attached writing failure', () => {
+    const copy = classifyFriendlyFailure('浏览器页面为空白 about:blank，未检测到 cat.png 附件', {
+      executionMode: 'generate',
+      errorCode: 'INPUT_ATTACHMENT_UNAVAILABLE',
+    });
+    expect([copy.title, copy.subtitle, copy.nextStep].join(' ')).not.toMatch(/浏览器|网址|网站/);
+    expect(copy.nextStep).toMatch(/附件|上传/);
+  });
+  it('reports video quality rejection without turning unauthorized branding into a login failure', () => {
+    const copy = classifyFriendlyFailure('unauthorized_text_or_brand', {
+      executionMode: 'video_creation',
+      errorCode: 'VIDEO_QUALITY_FAILED',
+    });
+    expect(copy.title).not.toMatch(/登录|浏览器/);
+    expect(copy.nextStep).toMatch(/重新生成/);
+  });
+});
+
+it('shows a safe, specific reason for unwanted text and branding in a rejected video', () => {
+  const copy = classifyFriendlyFailure(
+    '画面出现了未要求的文字或品牌，视频未交付。请调整描述后重新生成。',
+    { executionMode: 'video_creation' },
+  );
+  expect(copy.subtitle).toContain('未要求的文字或品牌');
+  expect(copy.nextStep).toContain('重新生成');
+  expect(JSON.stringify(copy)).not.toMatch(/浏览器|网址/);
+});
+
+it.each([
+  ['scrape', '网页采集'],
+  ['image', '图片生成'],
+  ['video_creation', '视频生成'],
+  ['generate', '生成'],
+])('names the actual %s lane for generic failures', (executionMode, label) => {
+  const copy = classifyFriendlyFailure('request failed', { executionMode });
+  expect(copy.title).toContain(label);
+  expect(JSON.stringify(copy)).not.toMatch(/浏览器|换.*网址/);
+});
+
+describe('executor gave up for lack of a capability (FIX-D11)', () => {
+  it('does not blame the website or suggest another URL', () => {
+    const errorText =
+      '任务执行失败：无法完成任务：当前浏览器环境为空白页（about:blank），没有任何可操作的上传入口或编辑器；同时尝试使用 upload 工具时返回"当前环境不支持上传附件"，因此无法将您本次上传的 cat.png 嵌入文章。';
+    const copy = classifyFriendlyFailure(errorText, {
+      executionMode: 'browser',
+      errorCode: 'VISION_GAVE_UP',
+    });
+    expect(copy.title).toBe('任务未能完成');
+    expect(`${copy.title}${copy.subtitle}${copy.nextStep}`).not.toMatch(/浏览器遇到问题|网址/);
+    // A generate-lane failure never shows browser copy (A7).
+    const generated = classifyFriendlyFailure('浏览器 timeout', { executionMode: 'generate' });
+    expect(`${generated.title}${generated.subtitle}${generated.nextStep}`).not.toMatch(
+      /浏览器遇到问题|网址/,
+    );
   });
 });

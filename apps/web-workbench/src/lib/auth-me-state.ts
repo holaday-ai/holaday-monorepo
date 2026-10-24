@@ -3,6 +3,7 @@ export interface NormalizedAuthMeProfile {
   readonly email: string | null;
   readonly phone: string | null;
   readonly displayName: string | null;
+  readonly avatarUrl?: string;
   readonly plan: string;
   readonly multiUser: boolean;
   readonly selectedRoles: string[];
@@ -22,6 +23,7 @@ export function normalizeAuthMeProfile(value: unknown): NormalizedAuthMeProfile 
     email: authNullableText(raw.email),
     phone: authNullableText(raw.phone),
     displayName: authNullableText(raw.displayName),
+    ...(authNullableText(raw.avatarUrl) ? { avatarUrl: authSafeText(raw.avatarUrl) } : {}),
     plan: authSafeText(raw.plan) || 'free',
     multiUser: Boolean(raw.multiUser),
     selectedRoles: normalizeSelectedRoles(raw.selectedRoles),
@@ -30,9 +32,7 @@ export function normalizeAuthMeProfile(value: unknown): NormalizedAuthMeProfile 
     teamProjectsEnabled: raw.teamProjectsEnabled === true,
     teamTaskLifecycleEnabled: raw.teamTaskLifecycleEnabled === true,
     modelDataRegion:
-      raw.modelDataRegion === 'cn' || raw.modelDataRegion === 'intl'
-        ? raw.modelDataRegion
-        : null,
+      raw.modelDataRegion === 'cn' || raw.modelDataRegion === 'intl' ? raw.modelDataRegion : null,
   };
 }
 

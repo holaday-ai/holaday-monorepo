@@ -65,8 +65,7 @@ describe('classifyReplyIntent', () => {
 
     it('does NOT match a long message that mentions login as part of context', () => {
       // The 30-char cap dodges this false positive.
-      const long =
-        '我已经登录进去了，但页面显示访问被拒绝，可能是账号权限不够，需要换一个号';
+      const long = '我已经登录进去了，但页面显示访问被拒绝，可能是账号权限不够，需要换一个号';
       expect(classifyReplyIntent(long)).not.toBe('login_completed');
     });
   });

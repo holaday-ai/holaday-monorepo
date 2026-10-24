@@ -4,8 +4,8 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readEnergyProgress } from '../energy-progress';
-import type { LightTestId } from './test-content';
 import { TestExperience } from './TestExperience';
+import type { LightTestId } from './test-content';
 
 const storage = new Map<string, string>();
 

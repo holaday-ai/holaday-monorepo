@@ -29,7 +29,7 @@
  * Read-only dry run by default. Pass `--apply` to write changes.
  */
 
-import { and, eq, gte, inArray, like, or, sql } from 'drizzle-orm';
+import { and, gte, inArray, like, or, sql } from 'drizzle-orm';
 import { db, pool } from '../src/db/client.js';
 import { tasks as tasksTable } from '../src/db/schema/index.js';
 
@@ -66,9 +66,7 @@ async function main(): Promise<void> {
       ),
     );
 
-  console.log(
-    `[cleanup] window: last ${WINDOW_HOURS}h (since ${cutoff.toISOString()})`,
-  );
+  console.log(`[cleanup] window: last ${WINDOW_HOURS}h (since ${cutoff.toISOString()})`);
   console.log(`[cleanup] candidates matched: ${candidates.length}`);
   for (const r of candidates) {
     const msgPreview = (r.errorMessage ?? '').slice(0, 100).replace(/\s+/g, ' ');
@@ -102,7 +100,7 @@ async function main(): Promise<void> {
     })
     .where(inArray(tasksTable.id, ids));
 
-  console.log(`\n[cleanup] applied. drizzle result:`, result);
+  console.log('\n[cleanup] applied. drizzle result:', result);
 
   // Quick verify — re-read the same rows and print the new state.
   const after = await db
@@ -114,7 +112,7 @@ async function main(): Promise<void> {
     .from(tasksTable)
     .where(inArray(tasksTable.id, ids));
 
-  console.log(`[cleanup] post-update state:`);
+  console.log('[cleanup] post-update state:');
   for (const r of after) {
     console.log(
       `  - ${r.externalId}  status=${r.status}  msg="${(r.errorMessage ?? '').slice(0, 80)}"`,

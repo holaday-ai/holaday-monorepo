@@ -1,19 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  directOpenUrlSafetyMessage,
   extractDirectOpenUrl,
   extractRunnableDirectOpenUrl,
-  directOpenUrlSafetyMessage,
-  verifyDirectOpenUrlSafety,
   offlineBrowserUnavailableMessage,
   runDirectOpen,
+  verifyDirectOpenUrlSafety,
 } from './direct-open.js';
 
 describe('extractDirectOpenUrl', () => {
   it('extracts an explicit URL from a simple open command', () => {
     expect(extractDirectOpenUrl('打开 https://example.com')).toBe('https://example.com/');
-    expect(extractDirectOpenUrl('Open http://example.com/path')).toBe(
-      'http://example.com/path',
-    );
+    expect(extractDirectOpenUrl('Open http://example.com/path')).toBe('http://example.com/path');
   });
 
   it('does not claim multi-step browser work', () => {
@@ -53,17 +51,13 @@ describe('extractDirectOpenUrl', () => {
 
   it('blocks loopback, private-network, and metadata targets', () => {
     expect(directOpenUrlSafetyMessage('http://localhost:3000/')).toMatch(/本机.*内网/);
-    expect(directOpenUrlSafetyMessage('http://127.0.0.1:4001/healthz')).toMatch(
-      /本机.*内网/,
-    );
+    expect(directOpenUrlSafetyMessage('http://127.0.0.1:4001/healthz')).toMatch(/本机.*内网/);
     expect(directOpenUrlSafetyMessage('http://10.0.0.8/')).toMatch(/本机.*内网/);
     expect(directOpenUrlSafetyMessage('http://169.254.169.254/latest/meta-data/')).toMatch(
       /本机.*内网/,
     );
     expect(directOpenUrlSafetyMessage('http://[::1]/')).toMatch(/本机.*内网/);
-    expect(directOpenUrlSafetyMessage('http://[::ffff:127.0.0.1]/')).toMatch(
-      /本机.*内网/,
-    );
+    expect(directOpenUrlSafetyMessage('http://[::ffff:127.0.0.1]/')).toMatch(/本机.*内网/);
     expect(directOpenUrlSafetyMessage('https://example.com/')).toBeNull();
   });
 
@@ -82,15 +76,13 @@ describe('extractDirectOpenUrl', () => {
 
 describe('extractRunnableDirectOpenUrl', () => {
   it('never bypasses the user confirmation required by plan mode', () => {
-    expect(
-      extractRunnableDirectOpenUrl('打开 https://example.com', 'plan'),
-    ).toBeNull();
-    expect(
-      extractRunnableDirectOpenUrl('打开 https://example.com', 'auto'),
-    ).toBe('https://example.com/');
-    expect(
-      extractRunnableDirectOpenUrl('打开 https://example.com', undefined),
-    ).toBe('https://example.com/');
+    expect(extractRunnableDirectOpenUrl('打开 https://example.com', 'plan')).toBeNull();
+    expect(extractRunnableDirectOpenUrl('打开 https://example.com', 'auto')).toBe(
+      'https://example.com/',
+    );
+    expect(extractRunnableDirectOpenUrl('打开 https://example.com', undefined)).toBe(
+      'https://example.com/',
+    );
   });
 });
 

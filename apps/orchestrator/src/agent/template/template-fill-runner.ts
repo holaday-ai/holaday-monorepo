@@ -20,18 +20,18 @@
  */
 
 import type { Logger } from 'pino';
-import {
-  validateFillJson,
-  countPlaceholders,
-  type PlaceholderSchema,
-  type PlaceholderField,
-  type FillJson,
-  type FillData,
-  type TemplateFormat,
-} from './placeholder-schema.js';
-import { inspectTemplate, checkPlaceholderBudget } from './template-safety.js';
 import { decodeUploadFilename, looksLikeMojibake } from '../../files/file-service.js';
 import * as docxEngine from './docx-template-engine.js';
+import {
+  type FillData,
+  type FillJson,
+  type PlaceholderField,
+  type PlaceholderSchema,
+  type TemplateFormat,
+  countPlaceholders,
+  validateFillJson,
+} from './placeholder-schema.js';
+import { checkPlaceholderBudget, inspectTemplate } from './template-safety.js';
 import * as xlsxEngine from './xlsx-template-engine.js';
 
 /** Matches the SPA's metadata.attachments entry shape (task-store.ts). */
@@ -46,11 +46,7 @@ export interface TemplateAttachment {
   kind: 'output';
 }
 
-export type TemplateFillStatus =
-  | 'completed'
-  | 'partial_success'
-  | 'failed'
-  | 'awaiting_user';
+export type TemplateFillStatus = 'completed' | 'partial_success' | 'failed' | 'awaiting_user';
 
 export interface RunTemplateFillResult {
   status: TemplateFillStatus;
@@ -307,9 +303,7 @@ export async function runTemplateFillTask(
 
   // 14. Final text + terminal status.
   const status: TemplateFillStatus =
-    validated.missing.length > 0 ||
-    validated.flagged.length > 0 ||
-    skippedLoops.length > 0
+    validated.missing.length > 0 || validated.flagged.length > 0 || skippedLoops.length > 0
       ? 'partial_success'
       : 'completed';
   return {
@@ -388,7 +382,7 @@ export function buildUserPrompt(
 ): string {
   const parts = ['模板占位符 schema：', describeSchema(schema), ''];
   parts.push('用户指令 / 内联数据：', (intent || '（无）').trim(), '');
-  if (dataText && dataText.trim()) {
+  if (dataText?.trim()) {
     parts.push('数据文件内容：', dataText.trim(), '');
   }
   parts.push('请输出填充 JSON。');
@@ -482,8 +476,7 @@ function buildFinalText(
   if (missing.length > 0) {
     lines.push('');
     lines.push(
-      `⚠️ 以下 ${missing.length} 个字段未能从你提供的数据中找到，已留空：${missing.join('、')}。` +
-        '请补充这些数据后重试，或在下载的文件中手动填写。',
+      `⚠️ 以下 ${missing.length} 个字段未能从你提供的数据中找到，已留空：${missing.join('、')}。请补充这些数据后重试，或在下载的文件中手动填写。`,
     );
   }
   if (flagged.length > 0) {
@@ -495,9 +488,7 @@ function buildFinalText(
   if (skippedLoops.length > 0) {
     lines.push('');
     lines.push(
-      `⚠️ 以下 ${skippedLoops.length} 个循环段未填充（v1 暂仅支持单行循环，多行循环支持开发中）：` +
-        `${skippedLoops.map((n) => `{#${n}}…{/${n}}`).join('、')}。` +
-        '请把每个循环放在同一行后重试，或等待多行循环上线；其余字段已正常填充。',
+      `⚠️ 以下 ${skippedLoops.length} 个循环段未填充（v1 暂仅支持单行循环，多行循环支持开发中）：${skippedLoops.map((n) => `{#${n}}…{/${n}}`).join('、')}。请把每个循环放在同一行后重试，或等待多行循环上线；其余字段已正常填充。`,
     );
   }
   lines.push('');
@@ -512,9 +503,7 @@ function buildPreviewMarkdown(
   format: TemplateFormat,
 ): string {
   const lines: string[] = [];
-  lines.push(
-    `你的账号暂不支持生成 .${format} 文件，以下是模板「${filename}」的字段填充预览：`,
-  );
+  lines.push(`你的账号暂不支持生成 .${format} 文件，以下是模板「${filename}」的字段填充预览：`);
   lines.push('');
   lines.push(...renderFilledTable(schema, data));
   lines.push('');

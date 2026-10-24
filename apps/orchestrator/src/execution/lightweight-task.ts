@@ -56,9 +56,7 @@ const QUESTION_RE =
  * Returns the lightweight category of an intent, or null when it has any
  * web / action / file signal (those keep their normal verification).
  */
-export function classifyLightweightTask(
-  intent: string | null | undefined,
-): LightweightKind | null {
+export function classifyLightweightTask(intent: string | null | undefined): LightweightKind | null {
   const text = (intent ?? '').replace(/\s+/g, ' ').trim();
   if (!text || text.length > 200) return null;
 

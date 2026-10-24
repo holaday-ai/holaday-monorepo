@@ -74,7 +74,13 @@ export const PLAN_CATALOGUE: Readonly<Record<PlanId, PlanDefinition>> = {
     historyDays: 7,
     rolesAllowed: 0,
     featuresZh: ['Sonnet 模型', '全部技能', '搜索 + 基础浏览器', '7 天任务历史', '1 并发'],
-    featuresEn: ['Sonnet model', 'All skills', 'Search + basic browser', '7-day history', '1 concurrent'],
+    featuresEn: [
+      'Sonnet model',
+      'All skills',
+      'Search + basic browser',
+      '7-day history',
+      '1 concurrent',
+    ],
   },
   basic: {
     id: 'basic',

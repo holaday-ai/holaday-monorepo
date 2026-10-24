@@ -1,0 +1,33 @@
+{
+  "candidate": "935ae492b7c7fce03a19ad46fefefb8a224046ec",
+  "sourceHash": "04cf9ab295a86a5a61fa8e2e6c9a6d193df88d11ad09db78825b93cfc1e45e58",
+  "suiteSourceHash": "64df7757c6ef4848d4ef816ec6af06d37cf584e41edad2ac6bfd5fb728986720",
+  "buildHash": "c79b825d261a088aea582df94e9fd4fdd6411a103fd2784017f22fc5bce7ff2f",
+  "seed": "2026-10-09-v2",
+  "browserVersion": "147.0.7727.15",
+  "platform": "darwin",
+  "startedAt": "2026-10-10T07:35:08.314Z",
+  "finishedAt": "2026-10-10T10:18:19.356Z",
+  "status": "passed",
+  "expectedPages": 240,
+  "pages": 240,
+  "severities": {
+    "P1": 0,
+    "P2": 369,
+    "P3": 0
+  },
+  "rules": {
+    "unexplained-truncation": 219,
+    "selected-tab-semantics": 81,
+    "visual-difference": 45,
+    "unexplained-text-truncation": 24
+  },
+  "coverageGaps": [],
+  "controls": {
+    "passed": 5429,
+    "disabled": 708,
+    "idempotent": 255,
+    "shared-reference": 9430,
+    "protocol-link": 39
+  }
+}

@@ -5,6 +5,7 @@ import { inspect } from 'node:util';
 import { type WebSocket, WebSocketServer } from 'ws';
 import { ExecutionDrain } from '../execution/execution-drain.js';
 import type { OperationLifetime } from '../execution/owned-operation.js';
+import { VncReadOnlyFilter } from '../streaming/vnc-readonly.js';
 import type { BrokerDataAcquisition } from './broker-endpoints.js';
 import { type BrokerVncAccess, BrokerVncConnection } from './broker-vnc-connection.js';
 
@@ -14,6 +15,7 @@ const MAX_BYTES = 8 * 1024 * 1024;
 /** Server-only original request, supplied after initial authentication by the
  * pool's private instance binding. Neither an identity DTO nor a public grant. */
 export interface BrokerVncSessionRequest {
+  viewportV2?: boolean;
   request: IncomingMessage;
   socket: Socket;
   head: Buffer;
@@ -341,7 +343,20 @@ export class BrokerVncSession {
   #relay(source: WebSocket, target: WebSocket): void {
     const relay: Relay = { source, target, queue: [], bytes: 0, since: 0, sending: false };
     this.#relays.push(relay);
+    const readOnlyFilter =
+      source === this.#client && this.#options.viewportV2 ? new VncReadOnlyFilter() : null;
     source.on('message', (bytes, binary) => {
+      if (readOnlyFilter) {
+        try {
+          bytes = readOnlyFilter.receive(
+            Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes as ArrayBuffer),
+          );
+        } catch {
+          this.#fail();
+          return;
+        }
+        if (!(bytes as Buffer).length) return;
+      }
       try {
         if (!binary || !Buffer.isBuffer(bytes)) throw invalid();
         this.#enqueue(relay, bytes, false);

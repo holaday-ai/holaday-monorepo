@@ -2,7 +2,7 @@ import { HOLA_CREDIT_CNY_CENTS, newExternalId } from '@holaday/shared-types';
 import { and, eq, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
-import { partnerReferrals, type PartnerReferral } from '../db/schema/partner.js';
+import { type PartnerReferral, partnerReferrals } from '../db/schema/partner.js';
 import { CreditLedgerService } from './credit-ledger-service.js';
 
 const REFERRAL_RECHARGE_REWARD_BPS = 2_000;
@@ -84,7 +84,10 @@ function assertInvitePayloadMatches(
 export class ReferralService {
   private readonly ledger?: ReferralLedgerPoster;
 
-  constructor(private readonly db: DB, deps: ReferralServiceDeps = {}) {
+  constructor(
+    private readonly db: DB,
+    deps: ReferralServiceDeps = {},
+  ) {
     this.ledger = deps.ledger;
   }
 
@@ -169,7 +172,9 @@ export class ReferralService {
       }
 
       if (referral.status !== 'pending') {
-        throw new PartnerReferralConflictError(`Partner referral cannot be rewarded from status ${referral.status}`);
+        throw new PartnerReferralConflictError(
+          `Partner referral cannot be rewarded from status ${referral.status}`,
+        );
       }
 
       const metadata = {
@@ -237,7 +242,10 @@ export class ReferralService {
     });
   }
 
-  private async readByInviteeUserId(db: DB, inviteeUserId: number): Promise<PartnerReferral | null> {
+  private async readByInviteeUserId(
+    db: DB,
+    inviteeUserId: number,
+  ): Promise<PartnerReferral | null> {
     const [row] = await db
       .select()
       .from(partnerReferrals)

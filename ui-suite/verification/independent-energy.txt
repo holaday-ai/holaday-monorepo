@@ -1,0 +1,3 @@
+{"text":"依次找出眼前五种颜色、四种触感和三种声音，让注意力从纷乱想法回到真实环境。","measure":{"clientHeight":18,"scrollHeight":36,"clientWidth":322,"scrollWidth":322,"title":"","description":null}}
+{"text":"如果任务很多却很难开始，用五个问题找出注意力最容易安定的位置，再带走一个小动作。","measure":{"clientHeight":18,"scrollHeight":36,"clientWidth":322,"scrollWidth":322,"title":"","description":null}}
+{"text":"用不到一分钟接住十二颗能量光点，让注意力从等待和焦虑里暂时转向简单、即时的反馈。","measure":{"clientHeight":18,"scrollHeight":36,"clientWidth":322,"scrollWidth":322,"title":"","description":null}}

@@ -114,8 +114,6 @@ describe('api key settings state helpers', () => {
 
   it('keeps API key action context on failures', () => {
     expect(apiKeySettingsActionError('创建失败', {})).toBe('创建失败：请稍后重试');
-    expect(apiKeySettingsActionError('撤销失败', 'Key 已撤销')).toBe(
-      '撤销失败：Key 已撤销',
-    );
+    expect(apiKeySettingsActionError('撤销失败', 'Key 已撤销')).toBe('撤销失败：Key 已撤销');
   });
 });

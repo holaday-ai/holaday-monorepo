@@ -1,12 +1,12 @@
 import sharp from 'sharp';
 import type { FfmpegExecOpts } from './ffmpeg-exec.js';
 import {
-  normalizeVideoQualityImage,
   type VideoQualityAnalysisInput,
   type VideoQualityAnalyzer,
   type VideoQualityFrameCommand,
   type VideoQualityReferenceImage,
   type VideoQualityResult,
+  normalizeVideoQualityImage,
 } from './video-quality-verifier.js';
 
 const SAMPLE_RATIOS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
@@ -167,9 +167,7 @@ function parseCompatibilityEvidence(text: string): VideoQualityResult {
       status: 'fail',
       failedChecks: failures.map((check) => COMPATIBILITY_FAILURES[check.id].code),
       reason: failures
-        .map(
-          (check) => `${COMPATIBILITY_FAILURES[check.id].label}：${check.reason}`,
-        )
+        .map((check) => `${COMPATIBILITY_FAILURES[check.id].label}：${check.reason}`)
         .join('；'),
     };
   } catch {

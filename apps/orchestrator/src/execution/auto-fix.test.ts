@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { autoFix, pickSimilarUrl } from './auto-fix.js';
 import { verifyDeterministic } from './answer-verifier.js';
-import { buildContract } from './execution-contract.js';
+import { autoFix, pickSimilarUrl, tidyDroppedUrls } from './auto-fix.js';
 import { EvidenceLedger } from './evidence-ledger.js';
+import { buildContract } from './execution-contract.js';
 import { CONTENT_TOPIC_WORKFLOW } from './expert-workflow-content-topic.js';
 
 describe('pickSimilarUrl', () => {
@@ -38,9 +38,7 @@ describe('pickSimilarUrl', () => {
 
   it('strips www. for host comparison', () => {
     const grounded = ['https://www.example.com/x'];
-    expect(pickSimilarUrl('https://example.com/x', grounded)).toBe(
-      'https://www.example.com/x',
-    );
+    expect(pickSimilarUrl('https://example.com/x', grounded)).toBe('https://www.example.com/x');
   });
 
   it('does not replace a specific child page with its parent directory', () => {
@@ -55,9 +53,26 @@ describe('pickSimilarUrl', () => {
       'https://docs.python.org/3/tutorial/appetite.html',
       'https://docs.python.org/3/tutorial/',
     ];
+    expect(pickSimilarUrl('https://docs.python.org/3/tutorial/appetites.html', grounded)).toBe(
+      'https://docs.python.org/3/tutorial/appetite.html',
+    );
+  });
+});
+
+describe('pickSimilarUrl — never a homepage or search page for an item (A2)', () => {
+  it('does not replace an article link with the site root', () => {
+    // Acceptance A2: three 36kr article links all became https://36kr.com/.
     expect(
-      pickSimilarUrl('https://docs.python.org/3/tutorial/appetites.html', grounded),
-    ).toBe('https://docs.python.org/3/tutorial/appetite.html');
+      pickSimilarUrl('https://36kr.com/p/4016638963421319', ['https://36kr.com/']),
+    ).toBeUndefined();
+  });
+
+  it('does not replace a product link with a search page', () => {
+    expect(
+      pickSimilarUrl('https://item.jd.com/100012345.html', [
+        'https://item.jd.com/search?keyword=x',
+      ]),
+    ).toBeUndefined();
   });
 });
 
@@ -87,12 +102,8 @@ describe('autoFix — URL fabrication', () => {
   }
 
   it('substitutes a fabricated URL with a similar grounded one', () => {
-    const answer =
-      'Per https://example.com/help/wrong-page we should refresh. ' +
-      'x'.repeat(60);
-    const { contract, ledger, verification } = setup(answer, [
-      'https://example.com/help/index',
-    ]);
+    const answer = `Per https://example.com/help/wrong-page we should refresh. ${'x'.repeat(60)}`;
+    const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     expect(out.fixed).toContain('https://example.com/help/index');
     expect(out.fixed).not.toContain('wrong-page');
@@ -101,12 +112,8 @@ describe('autoFix — URL fabrication', () => {
   });
 
   it('drops a fabricated URL when no grounded candidate is similar (no placeholder)', () => {
-    const answer =
-      'See https://made-up-citation.example/article for context. ' +
-      'x'.repeat(60);
-    const { contract, ledger, verification } = setup(answer, [
-      'https://example.com/help/index',
-    ]);
+    const answer = `See https://made-up-citation.example/article for context. ${'x'.repeat(60)}`;
+    const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     // Phase 1 follow-up: the URL is removed without leaving a
     // placeholder. The surrounding sentence still reads cleanly
@@ -116,7 +123,7 @@ describe('autoFix — URL fabrication', () => {
     expect(out.fixed).not.toContain('[未验证');
     expect(out.applied[0]!.kind).toBe('url_drop');
     // The leading "See " text is preserved.
-    expect(out.fixed).toContain('See  for context.');
+    expect(out.fixed).toContain('See for context.');
   });
 
   it('keeps an all-URL answer meaningful after dropping every ungrounded URL', () => {
@@ -141,16 +148,55 @@ describe('autoFix — URL fabrication', () => {
     expect(recheck.passed).toBe(true);
   });
 
+  it('FIX-35 复审 #1 (r06/l02): a dropped URL leaves no empty `` / 「」 / 链接「」 behind', () => {
+    const answer = [
+      '抓取内容中没有包含 RFC 9110 的标题和发布时间。要回答这个问题，需要补充抓取 RFC 9110 的具体信息页（如 `https://www.rfc-editor.org/rfc/rfc9110`）或站内搜索结果。',
+      '然后我可以帮你打开 https://github.com/notifications 看具体条数。',
+      '',
+      '未核实：以下内容未能在已读页面中逐字找到，请自行确认——链接「https://www.rfc-editor.org/rfc/rfc9110」',
+    ].join('\n');
+    const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    expect(out.fixed).not.toMatch(/`\s*`|「\s*」|未核实/);
+    expect(out.fixed).toContain('具体信息页或站内搜索结果');
+    expect(out.fixed).toContain('帮你打开 看具体条数');
+  });
+
+  it('FIX-35 复审 #2: only the dropped URL’s spot is cleaned — code, tables, prose 「」 stay', () => {
+    const code =
+      '```py\nx    = 1   # aligned\nyy   = 22  # aligned\nurl  = `https://made-up.example/a`\n```';
+    const table = '| 名称 |   价格 |\n|---|---:|\n| A    |  $9.99 |';
+    const answer = [
+      '空字符串写作 「」 即可，参见 `https://made-up.example/doc` 和  两个空格。',
+      code,
+      table,
+      '',
+      '未核实：以下内容未能在已读页面中逐字找到，请自行确认——价格「$9.99」；链接「https://made-up.example/doc」',
+      'x'.repeat(40),
+    ].join('\n');
+    const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    expect(out.fixed).not.toContain('made-up.example');
+    expect(out.fixed).toContain('空字符串写作 「」 即可，参见 和  两个空格。');
+    expect(out.fixed).toContain(
+      '```py\nx    = 1   # aligned\nyy   = 22  # aligned\nurl  = ``\n```',
+    );
+    expect(out.fixed).toContain(table);
+    expect(out.fixed).toContain('请自行确认——价格「$9.99」\n');
+    expect(out.fixed).not.toContain('\u0000');
+  });
+
+  it('FIX-35 复审 #2: without a dropped URL the text is untouched', () => {
+    const text = '空字符串写作 「」，代码 `` 也可以，表格  对齐。';
+    expect(tidyDroppedUrls(text)).toBe(text);
+  });
+
   it('markdown link with ungrounded URL collapses to plain text (no empty href)', () => {
     // BOSS Phase 1 follow-up — the SPA's markdown renderer turns
     // an empty `href=""` into a self-link. autoFix must drop the
     // whole `[text](url)` pair instead of leaving `[text]()`.
-    const answer =
-      '推荐资源：[LearnPython.org](https://learnpython.org) 是一个不错的入门站点。' +
-      ' '.repeat(40) + 'x'.repeat(40);
-    const { contract, ledger, verification } = setup(answer, [
-      'https://example.com/help/index',
-    ]);
+    const answer = `推荐资源：[LearnPython.org](https://learnpython.org) 是一个不错的入门站点。${' '.repeat(40)}${'x'.repeat(40)}`;
+    const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     expect(out.fixed).toContain('LearnPython.org');
     expect(out.fixed).not.toContain('[LearnPython.org]');
@@ -162,24 +208,16 @@ describe('autoFix — URL fabrication', () => {
   });
 
   it('markdown link with grounded URL stays intact', () => {
-    const answer =
-      '查阅 [help index](https://example.com/help/index) 了解详情。' +
-      'x'.repeat(60);
-    const { contract, ledger, verification } = setup(answer, [
-      'https://example.com/help/index',
-    ]);
+    const answer = `查阅 [help index](https://example.com/help/index) 了解详情。${'x'.repeat(60)}`;
+    const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     expect(out.fixed).toContain('[help index](https://example.com/help/index)');
     expect(out.applied).toHaveLength(0);
   });
 
   it('markdown link with similar grounded URL gets substituted', () => {
-    const answer =
-      '查阅 [help](https://example.com/help/wrong) 了解详情。' +
-      'x'.repeat(60);
-    const { contract, ledger, verification } = setup(answer, [
-      'https://example.com/help/index',
-    ]);
+    const answer = `查阅 [help](https://example.com/help/wrong) 了解详情。${'x'.repeat(60)}`;
+    const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     expect(out.fixed).toContain('[help](https://example.com/help/index)');
     expect(out.fixed).not.toContain('wrong');
@@ -187,23 +225,16 @@ describe('autoFix — URL fabrication', () => {
   });
 
   it('preserves trailing punctuation when substituting', () => {
-    const answer =
-      'See (https://example.com/help/wrong). It explains. ' + 'x'.repeat(60);
-    const { contract, ledger, verification } = setup(answer, [
-      'https://example.com/help/index',
-    ]);
+    const answer = `See (https://example.com/help/wrong). It explains. ${'x'.repeat(60)}`;
+    const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     // Closing paren must still be there.
     expect(out.fixed).toContain('https://example.com/help/index)');
   });
 
   it('leaves grounded URLs untouched even when other URLs are fabricated', () => {
-    const answer =
-      'Real: https://example.com/help/index. Fake: https://fake.example.org/x. ' +
-      'x'.repeat(60);
-    const { contract, ledger, verification } = setup(answer, [
-      'https://example.com/help/index',
-    ]);
+    const answer = `Real: https://example.com/help/index. Fake: https://fake.example.org/x. ${'x'.repeat(60)}`;
+    const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
     expect(out.fixed).toContain('https://example.com/help/index');
     expect(out.fixed).not.toContain('fake.example.org');
@@ -218,7 +249,7 @@ describe('autoFix — passes verification through unchanged', () => {
       executionMode: 'generate',
     });
     const ledger = new EvidenceLedger('tsk_pass');
-    const answer = 'Plain answer with no URLs at all but long enough.' + 'x'.repeat(60);
+    const answer = `Plain answer with no URLs at all but long enough.${'x'.repeat(60)}`;
     const verification = verifyDeterministic({
       contract,
       ledger,
@@ -252,7 +283,7 @@ describe('autoFix — passes verification through unchanged', () => {
       sourceDetail: 'submit',
       confidence: 'observed',
     });
-    const answer = 'Did the search.' + 'x'.repeat(60);
+    const answer = `Did the search.${'x'.repeat(60)}`;
     const verification = verifyDeterministic({
       contract,
       ledger,
@@ -305,10 +336,7 @@ describe('autoFix — ecommerce empty URLs', () => {
     const out = autoFix({ contract, ledger, verification: v1, answerText: answer });
     expect(out.fixed).toContain('"url": "https://item.jd.com/100123.html"');
     expect(out.fixed).toContain('"url": "https://item.jd.com/100456.html"');
-    expect(out.applied.map((op) => op.kind)).toEqual([
-      'empty_url_fill',
-      'empty_url_fill',
-    ]);
+    expect(out.applied.map((op) => op.kind)).toEqual(['empty_url_fill', 'empty_url_fill']);
     const v2 = verifyDeterministic({ contract, ledger, answerText: out.fixed });
     expect(v2.passed).toBe(true);
   });
@@ -423,7 +451,9 @@ describe('autoFix — duplicate candidate links', () => {
     expect(out.fixed).toContain('Uobei Shibuya');
     expect(out.fixed).toContain('Ichiran Shibuya');
     expect(out.fixed).toContain('Gyukatsu Motomura');
-    expect(out.fixed.match(new RegExp(repeatedUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))).toHaveLength(1);
+    expect(
+      out.fixed.match(new RegExp(repeatedUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')),
+    ).toHaveLength(1);
     expect(out.fixed).toContain('同一来源页');
 
     const v2 = verifyDeterministic({ contract, ledger, answerText: out.fixed });
@@ -450,7 +480,7 @@ describe('autoFix — missing fields note', () => {
       sourceDetail: 'msg',
       confidence: 'observed',
     });
-    const answer = '本场 GMV ¥100000，分析下转化和复购。' + 'x'.repeat(220);
+    const answer = `本场 GMV ¥100000，分析下转化和复购。${'x'.repeat(220)}`;
     const verification = verifyDeterministic({
       contract,
       ledger,
@@ -553,9 +583,7 @@ describe('autoFix — re-verify after fix', () => {
       sourceDetail: 'goto',
       confidence: 'observed',
     });
-    const answer =
-      'Source: https://example.com/help/missing-page is the canonical doc. ' +
-      'x'.repeat(60);
+    const answer = `Source: https://example.com/help/missing-page is the canonical doc. ${'x'.repeat(60)}`;
     const v1 = verifyDeterministic({ contract, ledger, answerText: answer });
     expect(v1.passed).toBe(false);
     const out = autoFix({ contract, ledger, verification: v1, answerText: answer });

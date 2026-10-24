@@ -1,17 +1,17 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import { once } from 'node:events';
+import { WS_SUBPROTOCOL } from '@holaday/shared-types';
 import { afterEach, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
-import { WS_SUBPROTOCOL } from '@holaday/shared-types';
-import { createOrdinaryMaintenanceStore } from './ordinary-maintenance-store.js';
 // Release client itself is exercised over a real Unix socket.
 // @ts-expect-error JS deployment CLI has no declaration file.
 import { requestMaintenance } from '../../../../scripts/browser-maintenance-client.mjs';
+import { createOrdinaryMaintenanceStore } from './ordinary-maintenance-store.js';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -23,13 +23,13 @@ async function fixture(scenario = 'normal') {
   const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
   await fs.writeFile(
     join(directory, 'state.json'),
-    JSON.stringify({
+    `${JSON.stringify({
       schemaVersion: 1,
       ...identity,
       bootId: '0'.repeat(32),
       mode: 'closed',
       needsReconciliation: false,
-    }) + '\n',
+    })}\n`,
     { mode: 0o600 },
   );
   const require = createRequire(import.meta.url);
@@ -75,11 +75,11 @@ async function fixture(scenario = 'normal') {
     const existing = messages.find(predicate);
     if (existing) return existing;
     return await new Promise<any>((resolve, reject) => {
-      const timer = setTimeout(() => done(new Error('synthetic child timeout: ' + stderr)), 15000);
+      const timer = setTimeout(() => done(new Error(`synthetic child timeout: ${stderr}`)), 15000);
       const onMessage = (value: any) => {
         if (predicate(value)) done(null, value);
       };
-      const onExit = () => done(new Error('synthetic child exited: ' + stderr));
+      const onExit = () => done(new Error(`synthetic child exited: ${stderr}`));
       function done(error: Error | null, value?: any) {
         clearTimeout(timer);
         child.off('message', onMessage);
@@ -107,13 +107,13 @@ async function fixture(scenario = 'normal') {
       op,
       timeoutMs,
     });
-  const url = 'http://127.0.0.1:' + ready.httpPort;
+  const url = `http://127.0.0.1:${ready.httpPort}`;
   return { directory, identity, child, ready, wait, command, control, url, messages };
 }
 
 it('real child retains original browser work after HTTP return, rejects new work, then retires actual listeners', async () => {
   const f = await fixture();
-  const socket = new WebSocket('ws://127.0.0.1:' + f.ready.wsPort, WS_SUBPROTOCOL);
+  const socket = new WebSocket(`ws://127.0.0.1:${f.ready.wsPort}`, WS_SUBPROTOCOL);
   cleanup.push(async () => {
     socket.terminate();
   });
@@ -129,7 +129,7 @@ it('real child retains original browser work after HTTP return, rejects new work
   );
   await expect.poll(() => messages.find((m) => m.type === 'server.welcome')).toBeTruthy();
   const clientId = messages.find((m) => m.type === 'server.welcome').clientId;
-  const response = await fetch(f.url + '/task', {
+  const response = await fetch(`${f.url}/task`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ clientId }),
@@ -145,9 +145,9 @@ it('real child retains original browser work after HTTP return, rejects new work
   const sent = messages.find((m) => m.type === 'server.extension.tool_call');
   await f.control('close');
   events.push('maintenance-closed');
-  expect((await fetch(f.url + '/task', { method: 'POST' })).status).toBe(503);
-  expect((await fetch(f.url + '/payment/callback', { method: 'POST' })).status).toBe(503);
-  expect((await fetch(f.url + '/healthz')).status).toBe(200);
+  expect((await fetch(`${f.url}/task`, { method: 'POST' })).status).toBe(503);
+  expect((await fetch(`${f.url}/payment/callback`, { method: 'POST' })).status).toBe(503);
+  expect((await fetch(`${f.url}/healthz`)).status).toBe(200);
   const before = await f.command('snapshot');
   expect(before.writes).toBe(1);
   expect(before.records).toEqual([
@@ -209,7 +209,7 @@ it('real child retains original browser work after HTTP return, rejects new work
     'idle-proven',
     'listeners-closed',
   ]);
-  await expect(fetch(f.url + '/healthz')).rejects.toThrow();
+  await expect(fetch(`${f.url}/healthz`)).rejects.toThrow();
   await expect(fs.stat(join(f.directory, 'writer.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
 });
 

@@ -12,10 +12,7 @@ import {
 
 describe('CDP screencast reconnect state', () => {
   it('backs off repeated sockets that open and close without painting a frame', () => {
-    const firstClose = cdpReconnectTransition(
-      INITIAL_CDP_RECONNECT_STATE,
-      'socket-closed',
-    );
+    const firstClose = cdpReconnectTransition(INITIAL_CDP_RECONNECT_STATE, 'socket-closed');
     expect(firstClose).toEqual({
       state: { consecutiveFailures: 1 },
       delayMs: 500,
@@ -89,9 +86,7 @@ describe('CDP screencast input bridge', () => {
   });
 
   it('ignores IME key noise and inserts only the final composed text', () => {
-    const composing = cdpCompositionStartTransition(
-      INITIAL_CDP_INPUT_BRIDGE_STATE,
-    );
+    const composing = cdpCompositionStartTransition(INITIAL_CDP_INPUT_BRIDGE_STATE);
     const keyNoise = cdpKeyTransition(composing, {
       phase: 'down',
       key: 'Process',

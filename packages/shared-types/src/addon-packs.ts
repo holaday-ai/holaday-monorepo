@@ -63,10 +63,7 @@ export const ADDON_PACK_CATALOGUE: Readonly<Record<AddonPackId, AddonPackDefinit
   },
 } as const;
 
-export function getAddonPackPriceCents(
-  packId: AddonPackId,
-  currency: 'usd' | 'cny',
-): number {
+export function getAddonPackPriceCents(packId: AddonPackId, currency: 'usd' | 'cny'): number {
   const def = ADDON_PACK_CATALOGUE[packId];
   return currency === 'cny' ? def.priceCnyCents : def.priceUsdCents;
 }

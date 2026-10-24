@@ -19,7 +19,10 @@
  */
 
 import type { Logger } from 'pino';
-import type { CDPSession } from 'playwright';
+import type { CDPSession, Page } from 'playwright';
+// Detaching a parallel CDP session clears device metrics even though Playwright's
+// Page survives. Retain the explicitly observed remote pixel ratio per Page.
+const pagePixelRatios = new WeakMap<Page, number>();
 import { BrowserInputOutcomeUnknownError } from '../agent/supercar/browser-control.js';
 
 export type InputMessage =
@@ -43,7 +46,7 @@ export type InputMessage =
       shiftKey?: boolean;
     }
   | { type: 'insertText'; text: string }
-  | { type: 'viewport'; width: number; height: number };
+  | { type: 'viewport'; width: number; height: number; deviceScaleFactor?: number };
 
 /** CDP modifier bitmask: alt=1, ctrl=2, meta=4, shift=8. */
 function modifiersBitmask(m: {
@@ -130,7 +133,7 @@ export class CdpInputHandler {
     Extract<InputMessage, { type: 'keyDown' | 'keyUp' }>
   >();
   private readonly pressedButtons = new Map<
-    string,
+    'left' | 'middle' | 'right',
     Extract<InputMessage, { type: 'mouseDown' | 'mouseUp' }>
   >();
 
@@ -146,6 +149,9 @@ export class CdpInputHandler {
     private readonly onInputDispatched?: (message: InputMessage) => void,
     /** Revoke ownership immediately; this is NOT a physical-stop receipt. */
     private readonly onInputUncertain?: () => void,
+    private readonly preserveDeviceScaleFactor = false,
+    private readonly getPage?: () => Promise<Page>,
+    private readonly maxViewportHeight = 1600,
   ) {}
 
   /**
@@ -198,16 +204,45 @@ export class CdpInputHandler {
             msg.width < 240 ||
             msg.width > 1920 ||
             msg.height < 240 ||
-            msg.height > 1600
+            msg.height > this.maxViewportHeight
           ) {
             return;
           }
           const width = Math.round(msg.width);
           const height = Math.round(msg.height);
+          const requestedRatio = msg.deviceScaleFactor;
+          if (
+            requestedRatio !== undefined &&
+            (!Number.isFinite(requestedRatio) || requestedRatio < 1 || requestedRatio > 2)
+          )
+            return;
+          const pixelRatio = this.preserveDeviceScaleFactor
+            ? (
+                await send('Runtime.evaluate', {
+                  expression: 'window.devicePixelRatio',
+                  returnByValue: true,
+                })
+              ).result.value
+            : 1;
+          const page = this.preserveDeviceScaleFactor ? await this.getPage?.() : undefined;
+          const observedRatio =
+            typeof pixelRatio === 'number' &&
+            Number.isFinite(pixelRatio) &&
+            pixelRatio > 0 &&
+            pixelRatio <= 4
+              ? pixelRatio
+              : 1;
+          const deviceScaleFactor =
+            this.preserveDeviceScaleFactor && requestedRatio !== undefined
+              ? requestedRatio
+              : page
+                ? (pagePixelRatios.get(page) ?? observedRatio)
+                : observedRatio;
+          if (page) pagePixelRatios.set(page, deviceScaleFactor);
           await send('Emulation.setDeviceMetricsOverride', {
             width,
             height,
-            deviceScaleFactor: 1,
+            deviceScaleFactor,
             mobile: false,
             screenWidth: width,
             screenHeight: height,
@@ -217,6 +252,11 @@ export class CdpInputHandler {
         case 'mouseMove':
           await send('Input.dispatchMouseEvent', {
             type: 'mouseMoved',
+            button: this.pressedButtons.keys().next().value ?? 'none',
+            buttons: [...this.pressedButtons.keys()].reduce(
+              (bits, button) => bits | (button === 'left' ? 1 : button === 'right' ? 2 : 4),
+              0,
+            ),
             x: msg.x,
             y: msg.y,
           });

@@ -114,6 +114,7 @@ function safeQualityChecks(err: unknown): string[] {
 }
 
 function qualityCheckDetail(check: string): string {
+  if (check === 'unauthorized_text_or_brand') return '画面出现未要求的文字或品牌，问题视频未交付';
   if (/duration|length|too_short/.test(check)) return '成片时长未达到生成要求';
   if (/hand|finger|limb|arm|body|anatom|melt|fused|extra/.test(check)) {
     return '成片手部或肢体结构异常';
@@ -285,6 +286,8 @@ export function mapVideoFailureReason(err: unknown): string {
     if (checks.some((check) => /audio|voice|sound|volume|silent/.test(check))) {
       return VIDEO_FAILURE_REASONS.qualityAudio;
     }
+    if (checks.includes('unauthorized_text_or_brand'))
+      return '画面出现了未要求的文字或品牌，视频未交付。请调整描述后重新生成。';
     if (checks.some((check) => /subtitle|text|brand|logo|watermark|copy/.test(check))) {
       return VIDEO_FAILURE_REASONS.qualityText;
     }
@@ -325,6 +328,12 @@ export function mapVideoFailureReason(err: unknown): string {
         /(?:exceeded\s+your\s+current\s+quota|check\s+your\s+plan\s+and\s+billing)/i.test(
           e.detail,
         )))
+  ) {
+    return VIDEO_FAILURE_REASONS.providerQuota;
+  }
+  if (
+    (name === 'ImageProviderError' || name === 'FalQueueError') &&
+    (kind === 'exhausted_balance' || e.status === 429)
   ) {
     return VIDEO_FAILURE_REASONS.providerQuota;
   }

@@ -20,7 +20,11 @@ describe('sendRuntimeMessageWithRetry', () => {
 
   it('retries when the service worker reports an internal failure', async () => {
     const sendMessage = vi.fn((_message: unknown, callback: (response?: unknown) => void) => {
-      callback(sendMessage.mock.calls.length === 1 ? { ok: false, reason: 'internal_error' } : { ok: true });
+      callback(
+        sendMessage.mock.calls.length === 1
+          ? { ok: false, reason: 'internal_error' }
+          : { ok: true },
+      );
     });
     setRuntimeSendMessage(sendMessage);
 
@@ -125,9 +129,11 @@ describe('sendRuntimeMessageWithRetry', () => {
   });
 
   it('returns null after retryable failures are exhausted', async () => {
-    setRuntimeSendMessage(vi.fn((_message: unknown, callback: (response?: unknown) => void) => {
-      callback({ ok: false, reason: 'internal_error' });
-    }));
+    setRuntimeSendMessage(
+      vi.fn((_message: unknown, callback: (response?: unknown) => void) => {
+        callback({ ok: false, reason: 'internal_error' });
+      }),
+    );
 
     const pending = sendRuntimeMessageWithRetry<{ ok: boolean }>(
       { type: 'holaday.status' },

@@ -110,3 +110,16 @@ def test_get_kline_sina_computes_pct(monkeypatch):
     assert r["涨跌幅"] == round((1279.0 - 1272.0) / 1272.0 * 100, 2)  # 末2行算
     assert r["成交额"] == 3230008220.0
     assert "sina" in src
+
+
+def test_index_ticktimes_from_sina_payload():
+    """FIX-35 #3: the snapshot's own time (ticktime) per index; anything else is dropped."""
+    payload = [
+        {"symbol": "sh000001", "code": "000001", "ticktime": "15:35:30"},
+        {"symbol": "sz399001", "code": "399001", "ticktime": "15:00:03"},
+        {"symbol": "sz399006", "code": "399006", "ticktime": "bad"},
+        {"symbol": "sh000300", "code": "000300", "ticktime": "15:00:00"},
+        "junk",
+    ]
+    assert adp.index_ticktimes(payload) == {"sh000001": "15:35:30", "sz399001": "15:00:03"}
+    assert adp.index_ticktimes({"error": 1}) == {}

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { ECOM_DAILY_WORKFLOW } from './expert-workflow-ecom-daily.js';
-import { parseInputs } from './expert-workflow-parser.js';
 import { runIntake } from './expert-workflow-intake.js';
+import { parseInputs } from './expert-workflow-parser.js';
 
 const W = ECOM_DAILY_WORKFLOW;
 
@@ -23,9 +23,7 @@ describe('ECOM_DAILY_WORKFLOW — shape', () => {
   it('2 required + 9 optional inputs', () => {
     expect(W.requiredInputs).toHaveLength(2);
     expect(W.optionalInputs).toHaveLength(9);
-    expect(W.requiredInputs.map((i) => i.name).sort()).toEqual(
-      ['report_date', 'revenue'].sort(),
-    );
+    expect(W.requiredInputs.map((i) => i.name).sort()).toEqual(['report_date', 'revenue'].sort());
   });
 
   it('every required input has extractPattern', () => {
@@ -49,12 +47,7 @@ describe('ECOM_DAILY_WORKFLOW — shape', () => {
       .map((s) => s.id)
       .sort();
     expect(annotated).toEqual(
-      [
-        'anomaly_diagnosis',
-        'channel_analysis',
-        'core_metrics',
-        'trend_alert',
-      ].sort(),
+      ['anomaly_diagnosis', 'channel_analysis', 'core_metrics', 'trend_alert'].sort(),
     );
   });
 
@@ -88,10 +81,7 @@ describe('ECOM_DAILY_WORKFLOW — shape', () => {
 
 describe('ECOM_DAILY_WORKFLOW — parseInputs', () => {
   it('extracts both required from a structured input', () => {
-    const r = parseInputs(
-      '日期 2026-05-09 营收 ¥520000 订单 1300 客单价 400 转化率 5.5%',
-      W,
-    );
+    const r = parseInputs('日期 2026-05-09 营收 ¥520000 订单 1300 客单价 400 转化率 5.5%', W);
     expect(r.extracted.report_date).toBe('2026-05-09');
     expect(r.extracted.revenue).toBe(520000);
     expect(r.extracted.orders).toBe(1300);
@@ -141,10 +131,7 @@ describe('ECOM_DAILY_WORKFLOW — parseInputs', () => {
 
 describe('ECOM_DAILY_WORKFLOW — runIntake validators', () => {
   it('revenue ÷ orders ≠ aov → contradiction (catch by 20% tolerance)', () => {
-    const r = runIntake(
-      W,
-      '昨日 营收 30万 订单 1500 客单价 100 UV 10000 转化率 15%',
-    );
+    const r = runIntake(W, '昨日 营收 30万 订单 1500 客单价 100 UV 10000 转化率 15%');
     // revenue/orders = 200, declared aov = 100, drift 100% > 20%
     expect(r.kind).toBe('contradiction');
     if (r.kind !== 'contradiction') return;
@@ -165,10 +152,7 @@ describe('ECOM_DAILY_WORKFLOW — runIntake validators', () => {
   it('roi declared vs revenue/ad_spend > 30% drift → contradiction', () => {
     // revenue=100k, ad_spend=10k, calculated ROI=10. declared 1:3 → 3.
     // drift = (10-3)/3 = 233%, way over 30%.
-    const r = runIntake(
-      W,
-      '昨日 营收 10万 投放消耗 1万 ROI 1:3',
-    );
+    const r = runIntake(W, '昨日 营收 10万 投放消耗 1万 ROI 1:3');
     expect(r.kind).toBe('contradiction');
     if (r.kind !== 'contradiction') return;
     const fail = r.validatorResults.find((v) => v.validatorId === 'roi_ad_spend_check');

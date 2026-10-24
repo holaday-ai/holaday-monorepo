@@ -12,6 +12,7 @@
  * F4「买卖意愿」→「交投意愿」、「买卖双方」→「市场」(避「买/卖」)。其余逐字照抄。
  */
 
+import { fmtNum } from './ashare-format.js';
 import type { KlineRow } from './briefing-types.js';
 
 export type PerfKey = 'range' | 'drawdown' | 'position' | 'volume';
@@ -47,6 +48,22 @@ function volumes(series: KlineRow[]): number[] {
 }
 
 // ── F1 区间涨跌幅（★；默认近3月）──────────────────────────────────────────
+/** 序列末行（最近收盘）的日期 'YYYY-MM-DD'；没有 → ''。 */
+function lastDate(series: KlineRow[]): string {
+  const d = String(series.at(-1)?.日期 ?? '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : '';
+}
+
+/**
+ * FIX-34：走势句用的是哪个价——实时报价（盘中、够新）才可称「当前价」并带行情时间；
+ * 否则一律是「最近收盘价（日期）」。
+ */
+export interface LivePrice {
+  price: number;
+  /** 'YYYY-MM-DD HH:MM[:SS]'（北京时间）。 */
+  time: string;
+}
+
 export function detectF1(series: KlineRow[], periodLabel = '近3月'): PerfSignal | null {
   const c = closes(series);
   const n = PERIOD_DAYS[periodLabel] ?? 63;
@@ -60,8 +77,8 @@ export function detectF1(series: KlineRow[], periodLabel = '近3月'): PerfSigna
     key: 'range',
     label: '区间变动',
     measure: '选定周期内股价整体变动幅度',
-    // periodLabel 已含「近」（近1月/近3月/近1年），不重复加。
-    finding: `${periodLabel}累计变动 ${fmtSigned(pct)}。`,
+    // periodLabel 已含「近」（近1月/近3月/近1年），不重复加。FIX-34：注明截至哪天收盘。
+    finding: `${periodLabel}累计变动 ${fmtSigned(pct)}${lastDate(series) ? `（截至 ${lastDate(series)} 收盘）` : ''}。`,
     star: true,
   };
 }
@@ -94,23 +111,30 @@ export function detectF2(series: KlineRow[], periodLabel = '近3月'): PerfSigna
 }
 
 // ── F3 当前价历史区间位置（★；近1年；>80高位 / 20~80中部 / <20低位）──────────
-export function detectF3(series: KlineRow[]): PerfSignal | null {
+export function detectF3(series: KlineRow[], live?: LivePrice): PerfSignal | null {
   const c = closes(series).slice(-(PERIOD_DAYS.近1年 ?? 244));
   if (c.length < 20) return null; // 不足近1年样本（新股）→ 不出
-  const cur = c[c.length - 1] as number;
-  const hi = Math.max(...c);
-  const lo = Math.min(...c);
+  // FIX-34（Deploy-34 as-mt）：「当前价格处在…」在盘中可能其实是昨收。写明用的是哪个价、哪天/几点。
+  const cur = live ? live.price : (c[c.length - 1] as number);
+  const hi = Math.max(...c, cur);
+  const lo = Math.min(...c, cur);
   if (hi === lo) return null;
   const pos = ((cur - lo) / (hi - lo)) * 100;
-  let finding: string;
-  if (pos > 80) finding = '当前价格接近近一年高位区间，处于相对高位。';
-  else if (pos < 20) finding = '当前价格接近近一年低位区间，处于相对低位。';
-  else finding = '当前价格处在近一年区间的中部。';
+  const date = lastDate(series);
+  const price = live
+    ? `当前价 ${fmtNum(cur)}（行情时间 ${live.time}）`
+    : `最近收盘价 ${fmtNum(cur)}${date ? `（${date}）` : ''}`;
+  const tier =
+    pos > 80
+      ? '接近近一年高位区间，处于相对高位'
+      : pos < 20
+        ? '接近近一年低位区间，处于相对低位'
+        : '处在近一年区间的中部';
   return {
     key: 'position',
     label: '区间位置',
-    measure: '现价处在近一年最高最低之间的位置',
-    finding,
+    measure: '价格在近一年最高与最低之间的位置，0% 为最低、100% 为最高',
+    finding: `${price}位于近一年区间的 ${Math.round(pos)}%，${tier}。`,
     star: true,
   };
 }
@@ -144,6 +168,8 @@ export interface PerfInputs {
   series: KlineRow[];
   /** F1/F2 周期（默认近3月）。 */
   periodLabel?: string;
+  /** 盘中够新的实时报价（liveQuote 认可才传）；没有 → 走势一律按最近收盘价写。 */
+  live?: LivePrice;
 }
 
 /** 全检测：F1→F4 固定顺序，能算才入；数据不足返空。纯函数零 LLM。 */
@@ -152,7 +178,7 @@ export function detectAllPerf(input: PerfInputs): PerfSignal[] {
   return [
     detectF1(input.series, p),
     detectF2(input.series, p),
-    detectF3(input.series),
+    detectF3(input.series, input.live),
     detectF4(input.series),
   ].filter((s): s is PerfSignal => s !== null);
 }

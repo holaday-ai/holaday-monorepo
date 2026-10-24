@@ -13,26 +13,26 @@
  *      "添加渠道" CTA that opens AddChannelModal.
  */
 
-import { Loader2, MessageSquare, Pencil, Plus, Trash2 } from 'lucide-react';
-import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import {
-  maskWebhookUrl,
   NOTIFICATION_PLATFORM_LABEL,
+  maskWebhookUrl,
   notificationChannelDeleteDescription,
 } from '@/lib/notification-channel-copy';
 import {
+  type NotificationChannelRow,
   normalizeNotificationChannels,
   notificationChannelsLoadErrorCopy,
   notificationChannelsLoadErrorMessage,
-  type NotificationChannelRow,
 } from '@/lib/notification-channel-state';
 import { pageActionError } from '@/lib/page-error-copy';
-import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
 import { Row, Section } from '@/pages/PageShell';
+import { Loader2, MessageSquare, Pencil, Plus, Trash2 } from 'lucide-react';
+import * as React from 'react';
 import { AddChannelModal, type ChannelDraft } from './AddChannelModal';
 
 export function NotificationToggle({
@@ -53,7 +53,7 @@ export function NotificationToggle({
       className={cn(
         'flex h-8 w-12 cursor-pointer items-center rounded-full p-1 transition-colors',
         pending && 'cursor-wait opacity-70',
-        enabled ? 'bg-[#EA1F59]' : 'bg-muted-foreground/40',
+        enabled ? 'bg-[#FF0061]' : 'bg-muted-foreground/40',
       )}
       title={pending ? `正在更新${accessibleName}` : `${action}${accessibleName}`}
     >
@@ -104,8 +104,7 @@ export function NotificationsSection(): JSX.Element {
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [modalOpen, setModalOpen] = React.useState(false);
-  const [editingChannel, setEditingChannel] =
-    React.useState<NotificationChannelRow | null>(null);
+  const [editingChannel, setEditingChannel] = React.useState<NotificationChannelRow | null>(null);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
   const [pendingChannelId, setPendingChannelId] = React.useState<string | null>(null);
   // S2 — 每日 A股简报 opt-in（null=加载中）。后端 watchlists.briefingStatus/enable/disable。
@@ -188,9 +187,7 @@ export function NotificationsSection(): JSX.Element {
       if (!mountedRef.current) return;
       // Revert on failure
       setChannels((prev) =>
-        prev.map((c) =>
-          c.channelId === row.channelId ? { ...c, enabled: row.enabled } : c,
-        ),
+        prev.map((c) => (c.channelId === row.channelId ? { ...c, enabled: row.enabled } : c)),
       );
       toast.show(pageActionError('操作失败', err), 'error');
     } finally {
@@ -199,15 +196,15 @@ export function NotificationsSection(): JSX.Element {
   };
 
   const handleSave = async (draft: ChannelDraft): Promise<void> => {
+    // Legacy custom channels can no longer be saved (Batch 10.3 allowlist);
+    // the modal already blocks this, the guard narrows the platform type.
+    if (draft.platform === 'custom') return;
     try {
       if (editingChannel) {
         await trpc.notificationChannels.update.mutate({
           channelId: editingChannel.channelId,
           platform: draft.platform,
           webhookUrl: draft.webhookUrl,
-          ...(draft.platform === 'custom'
-            ? { customTemplate: draft.customTemplate }
-            : {}),
         });
         if (!mountedRef.current) return;
         toast.show('已更新通知渠道', 'info');
@@ -215,9 +212,6 @@ export function NotificationsSection(): JSX.Element {
         await trpc.notificationChannels.create.mutate({
           platform: draft.platform,
           webhookUrl: draft.webhookUrl,
-          ...(draft.platform === 'custom'
-            ? { customTemplate: draft.customTemplate }
-            : {}),
         });
         if (!mountedRef.current) return;
         toast.show('已添加通知渠道', 'info');
@@ -250,16 +244,13 @@ export function NotificationsSection(): JSX.Element {
   const pendingDeleteChannel =
     confirmDelete === null
       ? null
-      : channels.find((row) => row.channelId === confirmDelete) ?? null;
+      : (channels.find((row) => row.channelId === confirmDelete) ?? null);
   const loadErrorCopy = notificationChannelsLoadErrorCopy(loadError);
 
   return (
     <>
       <Section title="通知设置">
-        <Row
-          label="站内通知"
-          description="任务开始、提前提醒、完成或失败时在右上角铃铛收到通知。"
-        >
+        <Row label="站内通知" description="任务开始、提前提醒、完成或失败时在右上角铃铛收到通知。">
           <span className="text-xs text-muted-foreground">默认开启</span>
         </Row>
         <Row
@@ -297,19 +288,12 @@ export function NotificationsSection(): JSX.Element {
             </Button>
           </div>
           {loadError && !loading && (
-            <div className="mx-4 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-3 py-2 text-xs text-muted-foreground">
+            <div className="mx-4 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#FF0061]/25 bg-[#FF0061]/5 px-3 py-2 text-xs text-muted-foreground">
               <span className="min-w-0 flex-1">
-                <span className="block font-medium text-[#EA1F59]">
-                  {loadErrorCopy.title}
-                </span>
+                <span className="block font-medium text-[#FF0061]">{loadErrorCopy.title}</span>
                 <span className="mt-1 block">{loadErrorCopy.body}</span>
               </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => void refresh()}
-              >
+              <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>
                 重试
               </Button>
             </div>
@@ -328,61 +312,61 @@ export function NotificationsSection(): JSX.Element {
               {channels.map((row) => {
                 const rowPending = pendingChannelId === row.channelId;
                 return (
-                <li
-                  key={row.channelId}
-                  className="flex items-center gap-3 rounded-md border border-[#DCDDDD] bg-white px-3 py-2 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85"
-                >
-                  <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-[#EFEFEF]/55 text-[#595757] dark:border-white/10 dark:bg-white/10 dark:text-foreground">
-                    <MessageSquare className="h-3.5 w-3.5" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">
-                        {NOTIFICATION_PLATFORM_LABEL[row.platform]}
-                      </span>
-                      {!row.enabled && (
-                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                          已禁用
+                  <li
+                    key={row.channelId}
+                    className="flex items-center gap-3 rounded-md border border-[#DCDDDD] bg-white px-3 py-2 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85"
+                  >
+                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-[#EFEFEF]/55 text-[#595757] dark:border-white/10 dark:bg-white/10 dark:text-foreground">
+                      <MessageSquare className="h-3.5 w-3.5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">
+                          {NOTIFICATION_PLATFORM_LABEL[row.platform]}
                         </span>
-                      )}
+                        {!row.enabled && (
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            已禁用
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground"
+                        title={maskWebhookUrl(row.webhookUrl)}
+                      >
+                        {maskWebhookUrl(row.webhookUrl)}
+                      </div>
                     </div>
-                    <div
-                      className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground"
-                      title={maskWebhookUrl(row.webhookUrl)}
+                    <NotificationToggle
+                      accessibleName={`${NOTIFICATION_PLATFORM_LABEL[row.platform]}通知渠道`}
+                      enabled={row.enabled}
+                      pending={rowPending}
+                      onToggle={() => void handleToggle(row)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingChannel(row);
+                        setModalOpen(true);
+                      }}
+                      disabled={rowPending}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-40 dark:hover:bg-white/10"
+                      aria-label={`编辑${NOTIFICATION_PLATFORM_LABEL[row.platform]}通知渠道`}
+                      title={rowPending ? '正在更新' : '编辑'}
                     >
-                      {maskWebhookUrl(row.webhookUrl)}
-                    </div>
-                  </div>
-                  <NotificationToggle
-                    accessibleName={`${NOTIFICATION_PLATFORM_LABEL[row.platform]}通知渠道`}
-                    enabled={row.enabled}
-                    pending={rowPending}
-                    onToggle={() => void handleToggle(row)}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingChannel(row);
-                      setModalOpen(true);
-                    }}
-                    disabled={rowPending}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-40 dark:hover:bg-white/10"
-                    aria-label={`编辑${NOTIFICATION_PLATFORM_LABEL[row.platform]}通知渠道`}
-                    title={rowPending ? '正在更新' : '编辑'}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmDelete(row.channelId)}
-                    disabled={rowPending}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
-                    aria-label="删除渠道"
-                    title={rowPending ? '正在更新' : '删除'}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </li>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(row.channelId)}
+                      disabled={rowPending}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#FF0061]/10 hover:text-[#FF0061] disabled:pointer-events-none disabled:opacity-40"
+                      aria-label="删除渠道"
+                      title={rowPending ? '正在更新' : '删除'}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </li>
                 );
               })}
             </ul>

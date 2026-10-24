@@ -13,7 +13,9 @@ export type ActionKind =
   | 'extract'
   | 'wait'
   | 'eval'
-  | 'screenshot';
+  | 'screenshot'
+  | 'scroll'
+  | 'select';
 
 export interface DriverAction {
   kind: ActionKind;

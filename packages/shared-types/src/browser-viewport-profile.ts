@@ -30,11 +30,7 @@
  * browser's logical viewport matches them too (window-size flag).
  */
 
-export type BrowserViewportProfile =
-  | 'sidepanel'
-  | 'desktop'
-  | 'fullscreen'
-  | 'mobile';
+export type BrowserViewportProfile = 'sidepanel' | 'desktop' | 'fullscreen' | 'mobile';
 
 export interface ViewportDimensions {
   /** CSS pixels of the browser's logical viewport. */
@@ -43,17 +39,16 @@ export interface ViewportDimensions {
   height: number;
 }
 
-export const VIEWPORT_PROFILES: Readonly<
-  Record<BrowserViewportProfile, ViewportDimensions>
-> = Object.freeze({
-  // Keep the side panel narrow enough to trigger mobile/narrow-site
-  // layouts. 768px still leaves many sites in tablet/desktop mode,
-  // which only produces a tiny desktop page inside a portrait rail.
-  sidepanel: { width: 430, height: 760 },
-  desktop: { width: 1280, height: 800 },
-  fullscreen: { width: 1440, height: 960 },
-  mobile: { width: 390, height: 844 },
-});
+export const VIEWPORT_PROFILES: Readonly<Record<BrowserViewportProfile, ViewportDimensions>> =
+  Object.freeze({
+    // Keep the side panel narrow enough to trigger mobile/narrow-site
+    // layouts. 768px still leaves many sites in tablet/desktop mode,
+    // which only produces a tiny desktop page inside a portrait rail.
+    sidepanel: { width: 430, height: 760 },
+    desktop: { width: 1280, height: 800 },
+    fullscreen: { width: 1440, height: 960 },
+    mobile: { width: 390, height: 844 },
+  });
 
 /**
  * The profile picked when a caller doesn't specify. Matches the
@@ -82,16 +77,12 @@ export function dimensionsForProfile(
  * underlying processes expect. Centralising here keeps the formats
  * consistent across spawn.ts + the X11 / CDP layers.
  */
-export function xvfbScreenForProfile(
-  profile: BrowserViewportProfile | undefined,
-): string {
+export function xvfbScreenForProfile(profile: BrowserViewportProfile | undefined): string {
   const { width, height } = dimensionsForProfile(profile);
   return `${width}x${height}x24`;
 }
 
-export function braveWindowSizeForProfile(
-  profile: BrowserViewportProfile | undefined,
-): string {
+export function braveWindowSizeForProfile(profile: BrowserViewportProfile | undefined): string {
   const { width, height } = dimensionsForProfile(profile);
   return `${width},${height}`;
 }
@@ -101,9 +92,7 @@ export function braveWindowSizeForProfile(
  * a string comes in from an HTTP body and we want to treat unknown
  * values as "fall back to default" rather than 400-ing the request.
  */
-export function isBrowserViewportProfile(
-  v: unknown,
-): v is BrowserViewportProfile {
+export function isBrowserViewportProfile(v: unknown): v is BrowserViewportProfile {
   return (
     typeof v === 'string' &&
     (v === 'sidepanel' || v === 'desktop' || v === 'fullscreen' || v === 'mobile')

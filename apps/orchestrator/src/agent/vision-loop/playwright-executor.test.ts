@@ -100,8 +100,7 @@ describe('PlaywrightExecutor.connect', () => {
         }),
       },
       chromium: {
-        connectOverCDP: async () =>
-          ({ contexts: () => [context], close: async () => {} }) as never,
+        connectOverCDP: async () => ({ contexts: () => [context], close: async () => {} }) as never,
       },
     });
     await exec.connect('http://127.0.0.1:9222');
@@ -381,6 +380,7 @@ describe('PlaywrightExecutor.accessibilitySnapshot', () => {
     const exec = new PlaywrightExecutor();
     const { page } = makeFakePage({
       ariaSnapshot: async () => sampleYaml,
+      evaluate: async () => [],
     });
     const r = await exec.accessibilitySnapshot(page);
     expect(r.error).toBeUndefined();
@@ -399,11 +399,41 @@ describe('PlaywrightExecutor.accessibilitySnapshot', () => {
 
   it('handles an empty snapshot (e.g. chrome:// pages)', async () => {
     const exec = new PlaywrightExecutor();
-    const { page } = makeFakePage({ ariaSnapshot: async () => '' });
+    const { page } = makeFakePage({ ariaSnapshot: async () => '', evaluate: async () => [] });
     const r = await exec.accessibilitySnapshot(page);
     expect(r.text).toBe('');
     expect(r.refs).toEqual([]);
     expect(r.error).toBeUndefined();
+  });
+
+  it('masks password / OTP values the page reports before annotating', async () => {
+    const exec = new PlaywrightExecutor();
+    const { page } = makeFakePage({
+      ariaSnapshot: async () =>
+        [
+          '- textbox "密码": hunter2!',
+          '- textbox "验证码": "834921"',
+          '- text: 已发送 834921',
+        ].join('\n'),
+      evaluate: async () => ['hunter2!', '834921'],
+    });
+    const r = await exec.accessibilitySnapshot(page);
+    expect(r.error).toBeUndefined();
+    expect(r.text).not.toMatch(/hunter2|834921/);
+    expect(r.text).toContain('[REDACTED]');
+  });
+
+  it('returns no snapshot when the sensitive values cannot be read (fail closed)', async () => {
+    const exec = new PlaywrightExecutor();
+    const { page } = makeFakePage({
+      ariaSnapshot: async () => '- textbox "密码": hunter2!',
+      evaluate: async () => {
+        throw new Error('context destroyed');
+      },
+    });
+    const r = await exec.accessibilitySnapshot(page);
+    expect(r.text).toBe('');
+    expect(r.error).toMatch(/脱敏失败/);
   });
 
   it('wraps ariaSnapshot errors without throwing', async () => {
@@ -852,10 +882,7 @@ describe('PlaywrightExecutor.navigate — goto-no-op fallback', () => {
       ok: false,
       message: 'navigate redirect blocked: 不能访问内网地址',
     });
-    expect(checks).toEqual([
-      'https://public.example/redirect',
-      'http://127.0.0.1/internal',
-    ]);
+    expect(checks).toEqual(['https://public.example/redirect', 'http://127.0.0.1/internal']);
   });
 
   it('detects url-stayed-blank, opens a fresh page, and retries the goto there', async () => {

@@ -89,9 +89,7 @@ const FILE_CLAIM_FILENAME_RE =
 const FILE_CLAIM_VERB_FIRST_RE =
   /(?:已(?:生成|创建|完成|备好)了?|(?:生成|创建|备好|准备好)了|为你(?:生成|创建|准备)(?:好|了)?|下载文件)\s*[:：]?\s*[`'"「『（(\[]?\s*[\w\-]+\.(?:pdf|md|markdown|csv|json|xlsx|docx|txt|pptx)\b/i;
 
-export function answerClaimsDownloadableFile(
-  answerText: string | null | undefined,
-): boolean {
+export function answerClaimsDownloadableFile(answerText: string | null | undefined): boolean {
   if (!answerText) return false;
   return (
     FILE_CLAIM_RE.test(answerText) ||
@@ -133,9 +131,7 @@ export function fileFamily(file: OutputFileDescriptor): string {
  * a `name.ext` filename in the prose). Empty when only a generic
  * "可下载文件" is claimed — any document then satisfies it.
  */
-export function claimedDownloadFamilies(
-  answerText: string | null | undefined,
-): Set<string> {
+export function claimedDownloadFamilies(answerText: string | null | undefined): Set<string> {
   const fams = new Set<string>();
   if (!answerText) return fams;
   // The stem before the extension may be CJK (e.g. "会议纪要模板.md"); a

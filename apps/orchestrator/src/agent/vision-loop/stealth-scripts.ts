@@ -141,14 +141,13 @@ export const STEALTH_INIT_SCRIPT = `(() => {
 })();`;
 
 /**
- * Env gate: stealth is on by default. Set `STEALTH_ENABLED=false` /
- * `0` / empty to opt out (e.g. for E2E tests that measure real-Chrome
- * baseline fingerprints). The boolean read is intentionally lenient
- * — anything other than explicitly falsy is "on".
+ * Env gate. FIX-31 (coordinator review, red line 「不伪造指纹」): off unless
+ * `STEALTH_ENABLED` is explicitly truthy — unset means no fingerprint spoofing.
+ * A wall is handed to the user or reported, never evaded.
  */
 export function isStealthEnabled(): boolean {
   const raw = process.env.STEALTH_ENABLED;
-  if (raw === undefined) return true;
+  if (raw === undefined) return false;
   const lower = raw.trim().toLowerCase();
   return !(lower === 'false' || lower === '0' || lower === 'no' || lower === '');
 }

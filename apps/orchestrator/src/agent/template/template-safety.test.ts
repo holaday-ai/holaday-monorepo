@@ -1,17 +1,17 @@
-import { describe, it, expect } from 'vitest';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
-import * as XLSX from 'xlsx';
 import PizZip from 'pizzip';
+import { describe, expect, it } from 'vitest';
+import * as XLSX from 'xlsx';
 import {
-  inspectTemplate,
-  parseZipEntries,
-  checkBombLimits,
-  detectFormat,
-  hasMacro,
-  findExternalRelThreat,
-  checkPlaceholderBudget,
   TEMPLATE_LIMITS,
   type ZipEntry,
+  checkBombLimits,
+  checkPlaceholderBudget,
+  detectFormat,
+  findExternalRelThreat,
+  hasMacro,
+  inspectTemplate,
+  parseZipEntries,
 } from './template-safety.js';
 
 async function realDocx(): Promise<Buffer> {

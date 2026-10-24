@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
-  _resetLedgerRegistryForTest,
-  disposeLedger,
   EvidenceLedger,
-  getLedger,
-  getOrCreateLedger,
   MAX_ENTRIES_PER_TASK,
   MAX_FACT_CHARS,
+  _resetLedgerRegistryForTest,
+  disposeLedger,
+  getLedger,
+  getOrCreateLedger,
 } from './evidence-ledger.js';
 
 describe('EvidenceLedger', () => {
@@ -70,13 +70,22 @@ describe('EvidenceLedger', () => {
   it('getByType filters correctly', () => {
     const ledger = new EvidenceLedger('tsk_z');
     ledger.add({
-      fact: 'a', sourceType: 'user_input', sourceDetail: 's', confidence: 'observed',
+      fact: 'a',
+      sourceType: 'user_input',
+      sourceDetail: 's',
+      confidence: 'observed',
     });
     ledger.add({
-      fact: 'b', sourceType: 'browser_state', sourceDetail: 's', confidence: 'observed',
+      fact: 'b',
+      sourceType: 'browser_state',
+      sourceDetail: 's',
+      confidence: 'observed',
     });
     ledger.add({
-      fact: 'c', sourceType: 'browser_state', sourceDetail: 's', confidence: 'observed',
+      fact: 'c',
+      sourceType: 'browser_state',
+      sourceDetail: 's',
+      confidence: 'observed',
     });
     expect(ledger.getByType('browser_state')).toHaveLength(2);
     expect(ledger.getByType('user_input')).toHaveLength(1);
@@ -86,13 +95,22 @@ describe('EvidenceLedger', () => {
   it('getObservedFacts only returns observed-confidence entries', () => {
     const ledger = new EvidenceLedger('tsk_o');
     ledger.add({
-      fact: 'a', sourceType: 'user_input', sourceDetail: 's', confidence: 'observed',
+      fact: 'a',
+      sourceType: 'user_input',
+      sourceDetail: 's',
+      confidence: 'observed',
     });
     ledger.add({
-      fact: 'b', sourceType: 'inference', sourceDetail: 's', confidence: 'inferred',
+      fact: 'b',
+      sourceType: 'inference',
+      sourceDetail: 's',
+      confidence: 'inferred',
     });
     ledger.add({
-      fact: 'c', sourceType: 'tool_result', sourceDetail: 's', confidence: 'extracted',
+      fact: 'c',
+      sourceType: 'tool_result',
+      sourceDetail: 's',
+      confidence: 'extracted',
     });
     expect(ledger.getObservedFacts()).toHaveLength(1);
     expect(ledger.getObservedFacts()[0]!.fact).toBe('a');
@@ -147,7 +165,10 @@ describe('EvidenceLedger', () => {
   it('toJSON returns a plain serialisable snapshot', () => {
     const ledger = new EvidenceLedger('tsk_json');
     ledger.add({
-      fact: 'a', sourceType: 'user_input', sourceDetail: 's', confidence: 'observed',
+      fact: 'a',
+      sourceType: 'user_input',
+      sourceDetail: 's',
+      confidence: 'observed',
     });
     const snap = ledger.toJSON();
     // Round-trippable with no class instances.

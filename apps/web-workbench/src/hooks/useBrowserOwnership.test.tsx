@@ -1,23 +1,55 @@
 // @vitest-environment happy-dom
-import { act, renderHook, waitFor, cleanup } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 const { query, mutate } = vi.hoisted(() => ({ query: vi.fn(), mutate: vi.fn() }));
-vi.mock('@/lib/trpc', () => ({ trpc: { tasks: { browserControlState: { query }, browserControl: { mutate } } } }));
+vi.mock('@/lib/trpc', () => ({
+  trpc: { tasks: { browserControlState: { query }, browserControl: { mutate } } },
+}));
 import { useBrowserOwnership } from './useBrowserOwnership';
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
-const state = (taskId: string, phase = 'agent', lease: string | null = null) => ({ taskId, phase, lease, supported: true, error: null, mode: 'running' });
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+});
+const state = (taskId: string, phase = 'agent', lease: string | null = null) => ({
+  taskId,
+  phase,
+  lease,
+  supported: true,
+  error: null,
+  mode: 'running',
+});
 
 describe('browser ownership UI', () => {
+  it('reads a session not yet registered as starting, never after it was confirmed', async () => {
+    const unavailable = { ...state('one'), supported: false, error: 'session_unavailable' };
+    query.mockResolvedValue(unavailable);
+    const { result } = renderHook(() => useBrowserOwnership('one', true));
+    expect(result.current.starting).toBe(true);
+    await waitFor(() => expect(result.current.error).toBe('session_unavailable'));
+    expect(result.current.starting).toBe(true);
+    query.mockResolvedValue(state('one'));
+    await waitFor(() => expect(result.current.supported).toBe(true), { timeout: 3000 });
+    expect(result.current.starting).toBe(false);
+    query.mockResolvedValue(unavailable);
+    await waitFor(() => expect(result.current.supported).toBe(false), { timeout: 3000 });
+    expect(result.current.starting).toBe(false);
+  });
+
   it('never exposes an offline lease for even one render when reconnecting', async () => {
     query.mockResolvedValue(state('one', 'human', 'offline'));
     const rendered: Array<string | null> = [];
-    const { rerender } = renderHook(({ connected }) => {
-      const value = useBrowserOwnership('one', connected);
-      rendered.push(value.lease);
-      return value;
-    }, { initialProps: { connected: false } });
+    const { rerender } = renderHook(
+      ({ connected }) => {
+        const value = useBrowserOwnership('one', connected);
+        rendered.push(value.lease);
+        return value;
+      },
+      { initialProps: { connected: false } },
+    );
     await waitFor(() => expect(query).toHaveBeenCalled());
-    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      await Promise.resolve();
+    });
     query.mockImplementation(() => new Promise(() => {}));
     rendered.length = 0;
     rerender({ connected: true });
@@ -27,41 +59,78 @@ describe('browser ownership UI', () => {
   it('ignores a takeover mutation from the previous task', async () => {
     query.mockImplementation(({ taskId }: { taskId: string }) => Promise.resolve(state(taskId)));
     let oldReply!: (value: unknown) => void;
-    mutate.mockImplementation(() => new Promise((resolve) => { oldReply = resolve; }));
-    const { result, rerender } = renderHook(({ task }) => useBrowserOwnership(task, true), { initialProps: { task: 'one' } });
+    mutate.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          oldReply = resolve;
+        }),
+    );
+    const { result, rerender } = renderHook(({ task }) => useBrowserOwnership(task, true), {
+      initialProps: { task: 'one' },
+    });
     await waitFor(() => expect(result.current.supported).toBe(true));
     let request!: Promise<void>;
-    act(() => { request = result.current.request('takeover'); });
+    act(() => {
+      request = result.current.request('takeover');
+    });
     rerender({ task: 'two' });
-    await act(async () => { oldReply(state('one', 'human', 'stale')); await request; });
+    await act(async () => {
+      oldReply(state('one', 'human', 'stale'));
+      await request;
+    });
     expect(result.current.lease).toBeNull();
     expect(result.current.state?.taskId).toBe('two');
   });
   it('opens input only after server confirmation and closes it immediately on handback', async () => {
     query.mockResolvedValue(state('one'));
     let confirm!: (value: unknown) => void;
-    mutate.mockImplementation(() => new Promise((resolve) => { confirm = resolve; }));
+    mutate.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          confirm = resolve;
+        }),
+    );
     const { result } = renderHook(() => useBrowserOwnership('one', true));
     await waitFor(() => expect(result.current.supported).toBe(true));
     let request!: Promise<void>;
-    act(() => { request = result.current.request('takeover'); });
+    act(() => {
+      request = result.current.request('takeover');
+    });
     expect(result.current.lease).toBeNull();
-    await act(async () => { confirm(state('one', 'human', 'lease')); await request; });
+    await act(async () => {
+      confirm(state('one', 'human', 'lease'));
+      await request;
+    });
     expect(result.current.lease).toBe('lease');
-    act(() => { request = result.current.request('return'); });
+    act(() => {
+      request = result.current.request('return');
+    });
     expect(result.current.lease).toBeNull();
-    await act(async () => { confirm(state('one', 'resuming')); await request; });
+    await act(async () => {
+      confirm(state('one', 'resuming'));
+      await request;
+    });
     expect(result.current.lease).toBeNull();
   });
 
   it('ignores a previous task response and revokes input when disconnected', async () => {
     let oldReply!: (value: unknown) => void;
-    query.mockImplementation(({ taskId }: { taskId: string }) => taskId === 'one'
-      ? new Promise((resolve) => { oldReply = resolve; }) : Promise.resolve(state('two', 'human', 'new')));
-    const { result, rerender } = renderHook(({ task, connected }) => useBrowserOwnership(task, connected), { initialProps: { task: 'one', connected: true } });
+    query.mockImplementation(({ taskId }: { taskId: string }) =>
+      taskId === 'one'
+        ? new Promise((resolve) => {
+            oldReply = resolve;
+          })
+        : Promise.resolve(state('two', 'human', 'new')),
+    );
+    const { result, rerender } = renderHook(
+      ({ task, connected }) => useBrowserOwnership(task, connected),
+      { initialProps: { task: 'one', connected: true } },
+    );
     rerender({ task: 'two', connected: true });
     await waitFor(() => expect(result.current.lease).toBe('new'));
-    await act(async () => { oldReply(state('one', 'human', 'old')); });
+    await act(async () => {
+      oldReply(state('one', 'human', 'old'));
+    });
     expect(result.current.lease).toBe('new');
     rerender({ task: 'two', connected: false });
     expect(result.current.lease).toBeNull();
@@ -72,7 +141,9 @@ describe('browser ownership UI', () => {
     mutate.mockRejectedValue(new Error('network lost'));
     const { result } = renderHook(() => useBrowserOwnership('one', true));
     await waitFor(() => expect(result.current.lease).toBe('old'));
-    await act(async () => { await result.current.request('return'); });
+    await act(async () => {
+      await result.current.request('return');
+    });
     expect(result.current.lease).toBeNull();
     expect(result.current.error).toBeTruthy();
   });

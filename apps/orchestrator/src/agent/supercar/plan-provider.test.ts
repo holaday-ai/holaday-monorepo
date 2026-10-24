@@ -54,22 +54,25 @@ describe('resolvePlanProviderRoute', () => {
     ).toEqual({ provider: 'unavailable', reason: 'ROLLOUT_NOT_ALLOWED' });
   });
 
-  it.each(['intl', 'cn'] as const)('uses standard Qwen Messages in the persisted %s region', (region) => {
-    const createMessages = vi.fn(() => buildAdapter(region));
-    const route = resolvePlanProviderRoute({
-      environment: BASE_ENVIRONMENT,
-      userExternalId: 'usr_canary',
-      userModelDataRegion: region,
-      createMessages,
-    });
+  it.each(['intl', 'cn'] as const)(
+    'uses standard Qwen Messages in the persisted %s region',
+    (region) => {
+      const createMessages = vi.fn(() => buildAdapter(region));
+      const route = resolvePlanProviderRoute({
+        environment: BASE_ENVIRONMENT,
+        userExternalId: 'usr_canary',
+        userModelDataRegion: region,
+        createMessages,
+      });
 
-    expect(route).toMatchObject({ provider: 'qwen', region });
-    expect(createMessages).toHaveBeenCalledWith({
-      environment: BASE_ENVIRONMENT,
-      region,
-      purpose: 'standard',
-    });
-  });
+      expect(route).toMatchObject({ provider: 'qwen', region });
+      expect(createMessages).toHaveBeenCalledWith({
+        environment: BASE_ENVIRONMENT,
+        region,
+        purpose: 'standard',
+      });
+    },
+  );
 
   it('returns the shared runtime reason when the plan lane is disabled', () => {
     expect(

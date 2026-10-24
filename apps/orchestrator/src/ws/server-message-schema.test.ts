@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import { parseServerMessage } from '@holaday/shared-types';
+import { describe, expect, it } from 'vitest';
 
 describe('server message schema', () => {
   it('accepts max_steps_reached as a task control pause reason', () => {

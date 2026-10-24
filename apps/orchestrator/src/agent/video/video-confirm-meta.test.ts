@@ -461,3 +461,15 @@ describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
     }
   });
 });
+
+it('gives unwanted branding a safe reason without exposing verifier text', () => {
+  const error = {
+    name: 'SimpleVideoError',
+    kind: 'quality',
+    failedChecks: ['unauthorized_text_or_brand'],
+    qualityReason: 'private verifier message',
+  };
+  expect(videoQualityFailureOutcome(error).failedChecks).toEqual([
+    { type: 'unauthorized_text_or_brand', detail: '画面出现未要求的文字或品牌，问题视频未交付' },
+  ]);
+});

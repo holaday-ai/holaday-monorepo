@@ -11,15 +11,27 @@ describe('task input quota gate', () => {
     ['metered', 0, true],
     ['metered', -1, true],
     ['metered', 1, false],
-  ] as const)('%s with %s tasks remaining is exhausted=%s', (quotaMode, tasksRemaining, expected) => {
-    const snap: QuotaSnapshot = {
-      plan: 'free', quotaMode, tasksRemaining,
-      tasksUsed: 3, tasksLimit: 3, bonusTasks: 0,
-      period: 'day', opusUsed: 0, opusLimit: null, opusRemaining: null,
-      bonusOpus: 0, concurrencyLimit: 1, concurrentCount: 0,
-    };
-    expect(isQuotaExhausted(snap)).toBe(expected);
-  });
+  ] as const)(
+    '%s with %s tasks remaining is exhausted=%s',
+    (quotaMode, tasksRemaining, expected) => {
+      const snap: QuotaSnapshot = {
+        plan: 'free',
+        quotaMode,
+        tasksRemaining,
+        tasksUsed: 3,
+        tasksLimit: 3,
+        bonusTasks: 0,
+        period: 'day',
+        opusUsed: 0,
+        opusLimit: null,
+        opusRemaining: null,
+        bonusOpus: 0,
+        concurrencyLimit: 1,
+        concurrentCount: 0,
+      };
+      expect(isQuotaExhausted(snap)).toBe(expected);
+    },
+  );
   it('does not declare an unloaded snapshot exhausted', () => {
     expect(isQuotaExhausted(null)).toBe(false);
   });

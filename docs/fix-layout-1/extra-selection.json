@@ -1,0 +1,46 @@
+{
+  "cases": [
+    "/",
+    "/skills",
+    "/stocks",
+    "/stocks/discovery",
+    "/cosmic",
+    "/video",
+    "/image",
+    "/planned",
+    "/files",
+    "/projects",
+    "/projects/:projectId",
+    "/settings",
+    "/settings/roles",
+    "/billing",
+    "/usage",
+    "/profile",
+    "/plan",
+    "/connections",
+    "/history",
+    "/starred",
+    "/plugins",
+    "/schedule",
+    "task:browser:executing",
+    "task:browser:completed",
+    "task:browser:failed",
+    "task:browser:awaiting_user",
+    "task:browser:cancelled",
+    "task:generate:executing",
+    "task:generate:completed",
+    "task:generate:failed",
+    "task:generate:awaiting_user",
+    "task:generate:cancelled"
+  ],
+  "viewports": [
+    {
+      "width": 1366,
+      "height": 768
+    },
+    {
+      "width": 1200,
+      "height": 1200
+    }
+  ]
+}

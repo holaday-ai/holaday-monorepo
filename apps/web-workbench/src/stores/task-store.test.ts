@@ -1,14 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { trpc } from '@/lib/trpc';
 import { showImageOption } from '@/lib/video-history-row';
+import { shouldConnectTaskBrowserForWorkbench } from '@/lib/workbench-state';
 import type { UiTask } from '@/types/task';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   mergeFirstPageWithPreservedSelection,
   mergeTaskPagesReplacingDuplicates,
+  normaliseDetailStepStatus,
   normalizeTaskDetailSteps,
   normalizeTaskListCursor,
   normalizeTaskListRows,
-  normaliseDetailStepStatus,
   pruneRuntimeStateForTerminalTasks,
   setStoreNavigate,
   toUiTask,
@@ -17,6 +18,7 @@ import {
 
 vi.mock('@/lib/trpc', () => ({
   trpc: {
+    taskRecovery: { failureContext: { query: vi.fn() } },
     tasks: {
       list: { query: vi.fn() },
       detail: { query: vi.fn() },
@@ -40,6 +42,15 @@ const moveToProjectMutate = vi.mocked(trpc.tasks.moveToProject.mutate);
 const starMutate = vi.mocked(trpc.tasks.star.mutate);
 
 beforeEach(() => {
+  vi.mocked(trpc.taskRecovery.failureContext.query)
+    .mockReset()
+    .mockResolvedValue({
+      taskId: 'tsk_original',
+      refund: { state: 'not_charged', refundedAt: null },
+      inputFiles: [],
+      unavailableInputCount: 0,
+      executionMode: null,
+    });
   listQuery.mockReset();
   detailQuery.mockReset();
   createMutate.mockReset();
@@ -54,34 +65,50 @@ beforeEach(() => {
 
 describe('rerun execution target', () => {
   const original: UiTask = {
-    taskId: 'tsk_original', title: '原任务', intent: '读取选定页面', status: 'failed',
-    tickCount: 0, createdAt: new Date(),
+    taskId: 'tsk_original',
+    title: '原任务',
+    intent: '读取选定页面',
+    status: 'failed',
+    tickCount: 0,
+    createdAt: new Date(),
   };
   const unrelatedSelection = {
-    extensionClientId: 'other-connection', tabId: 99,
-    expectedUrl: 'https://other.example', selectionId: 'fresh-other-selection', title: 'Other',
+    extensionClientId: 'other-connection',
+    tabId: 99,
+    expectedUrl: 'https://other.example',
+    selectionId: 'fresh-other-selection',
+    title: 'Other',
   };
 
-  it.each([null, unrelatedSelection])('never silently reruns a local task on default or unrelated Chrome (%j)', async selection => {
-    useTaskStore.setState({
-      tasks: [{ ...original, browserSource: 'local-chrome' }],
-      selectedTaskId: original.taskId, composerMode: 'task', localChromeSelection: selection,
-    });
-    const result = await useTaskStore.getState().rerunTask(original.taskId);
-    expect(result).toEqual({ error: expect.stringMatching(/新任务.*重新选择.*Chrome/) });
-    expect(createMutate).not.toHaveBeenCalled();
-    expect(useTaskStore.getState().selectedTaskId).toBe(original.taskId);
-    expect(useTaskStore.getState().localChromeSelection).toEqual(selection);
-  });
+  it.each([null, unrelatedSelection])(
+    'never silently reruns a local task on default or unrelated Chrome (%j)',
+    async (selection) => {
+      useTaskStore.setState({
+        tasks: [{ ...original, browserSource: 'local-chrome' }],
+        selectedTaskId: original.taskId,
+        composerMode: 'task',
+        localChromeSelection: selection,
+      });
+      const result = await useTaskStore.getState().rerunTask(original.taskId);
+      expect(result).toEqual({ error: expect.stringMatching(/新任务.*重新选择.*Chrome/) });
+      expect(createMutate).not.toHaveBeenCalled();
+      expect(useTaskStore.getState().selectedTaskId).toBe(original.taskId);
+      expect(useTaskStore.getState().localChromeSelection).toEqual(selection);
+    },
+  );
 
   it('refuses a missing source task instead of guessing its browser', async () => {
-    expect(await useTaskStore.getState().rerunTask('tsk_missing')).toEqual({ error: expect.any(String) });
+    expect(await useTaskStore.getState().rerunTask('tsk_missing')).toEqual({
+      error: expect.any(String),
+    });
     expect(createMutate).not.toHaveBeenCalled();
   });
 
   it('does not redirect an ordinary rerun to a pending Chrome selection', async () => {
     useTaskStore.setState({ tasks: [original], localChromeSelection: unrelatedSelection });
-    expect(await useTaskStore.getState().rerunTask(original.taskId)).toEqual({ error: expect.stringMatching(/Chrome/) });
+    expect(await useTaskStore.getState().rerunTask(original.taskId)).toEqual({
+      error: expect.stringMatching(/Chrome/),
+    });
     expect(createMutate).not.toHaveBeenCalled();
     expect(useTaskStore.getState().localChromeSelection).toEqual(unrelatedSelection);
   });
@@ -90,88 +117,243 @@ describe('rerun execution target', () => {
     useTaskStore.setState({ tasks: [original] });
     createMutate.mockResolvedValueOnce({ taskId: 'tsk_retry', status: 'pending' } as never);
     listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
-    detailQuery.mockResolvedValueOnce({ taskId: 'tsk_retry', status: 'pending', intent: original.intent, steps: [], result: null } as never);
-    expect(await useTaskStore.getState().rerunTask(original.taskId)).toEqual({ taskId: 'tsk_retry' });
+    detailQuery.mockResolvedValueOnce({
+      taskId: 'tsk_retry',
+      status: 'pending',
+      intent: original.intent,
+      steps: [],
+      result: null,
+    } as never);
+    expect(await useTaskStore.getState().rerunTask(original.taskId)).toEqual({
+      taskId: 'tsk_retry',
+    });
     expect(createMutate).toHaveBeenCalledTimes(1);
     expect(createMutate.mock.calls[0]?.[0]).toMatchObject({ intent: '读取选定页面' });
     expect(createMutate.mock.calls[0]?.[0]?.localChrome).toBeUndefined();
+  });
+
+  it('resends the original input attachments on retry (batch 10.2)', async () => {
+    useTaskStore.setState({ tasks: [original] });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_retry_files', status: 'pending' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValueOnce({
+      taskId: 'tsk_retry_files',
+      status: 'pending',
+      steps: [],
+      result: null,
+    } as never);
+    await useTaskStore.getState().rerunTask(original.taskId, undefined, {
+      fileIds: ['fil_a', 'fil_b', 'fil_a'],
+      retryOfTaskId: original.taskId,
+    });
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({
+      intent: '读取选定页面',
+      fileIds: ['fil_a', 'fil_b'],
+      retryOfTaskId: original.taskId,
+    });
+    expect(createMutate.mock.calls[0]?.[0]?.imageOptions).toBeUndefined();
+  });
+
+  it('keeps completed-task reruns on the existing create path', async () => {
+    useTaskStore.setState({ tasks: [{ ...original, status: 'completed' }] });
+    vi.mocked(trpc.taskRecovery.failureContext.query).mockResolvedValueOnce({
+      taskId: original.taskId,
+      refund: { state: 'not_charged', refundedAt: null },
+      inputFiles: [{ fileId: 'fil_original', filename: 'original.txt', mimetype: 'text/plain' }],
+      unavailableInputCount: 0,
+      executionMode: 'generate',
+    });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_repeat', status: 'pending' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValueOnce({
+      taskId: 'tsk_repeat',
+      status: 'pending',
+      steps: [],
+      result: null,
+    } as never);
+    expect(await useTaskStore.getState().rerunTask(original.taskId)).toEqual({
+      taskId: 'tsk_repeat',
+    });
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({ fileIds: ['fil_original'] });
+    expect(createMutate.mock.calls[0]?.[0]?.retryOfTaskId).toBeUndefined();
+  });
+
+  it('keeps image routing options when retrying a failed image task', async () => {
+    const imageOptions = {
+      goal: 'free',
+      model: 'auto',
+      aspectRatio: '1:1',
+      imageCount: 1,
+      mode: 'free',
+    } as unknown as NonNullable<UiTask['imageOptions']>;
+    useTaskStore.setState({ tasks: [{ ...original, executionMode: 'image', imageOptions }] });
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_retry_image', status: 'pending' } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValueOnce({
+      taskId: 'tsk_retry_image',
+      status: 'pending',
+      steps: [],
+      result: null,
+    } as never);
+    await useTaskStore
+      .getState()
+      .rerunTask(original.taskId, undefined, { fileIds: ['fil_subject'] });
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({
+      fileIds: ['fil_subject'],
+      imageOptions,
+    });
   });
 
   it('preserves the combined user context when rebuilding an ordinary interrupted task', async () => {
     useTaskStore.setState({ tasks: [original] });
     createMutate.mockResolvedValueOnce({ taskId: 'tsk_rebuilt', status: 'pending' } as never);
     listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
-    detailQuery.mockResolvedValueOnce({ taskId: 'tsk_rebuilt', status: 'pending', steps: [], result: null } as never);
+    detailQuery.mockResolvedValueOnce({
+      taskId: 'tsk_rebuilt',
+      status: 'pending',
+      steps: [],
+      result: null,
+    } as never);
     await useTaskStore.getState().rerunTask(original.taskId, '原描述\n[当前补充]\n新增要求');
     expect(createMutate.mock.calls[0]?.[0]?.intent).toBe('原描述\n[当前补充]\n新增要求');
   });
 
   it('does not treat a completed local task follow-up as a fresh default-browser task', async () => {
-    useTaskStore.setState({ tasks: [{ ...original, status: 'completed', browserSource: 'local-chrome' }] });
+    useTaskStore.setState({
+      tasks: [{ ...original, status: 'completed', browserSource: 'local-chrome' }],
+    });
     createMutate.mockResolvedValueOnce({ taskId: 'tsk_wrong_browser', status: 'pending' } as never);
     listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
     detailQuery.mockResolvedValueOnce({ status: 'pending', steps: [], result: null } as never);
-    expect(await useTaskStore.getState().createTask('在原页面继续', [], original.taskId)).toEqual({ error: expect.stringMatching(/重新选择.*Chrome/) });
+    expect(await useTaskStore.getState().createTask('在原页面继续', [], original.taskId)).toEqual({
+      error: expect.stringMatching(/重新选择.*Chrome/),
+    });
     expect(createMutate).not.toHaveBeenCalled();
   });
 });
 
 describe('persisted follow-up suggestions', () => {
   it('sends the selected Chrome identity and preserves local task identity through hydration', async () => {
-    const selected = { extensionClientId: 'connection', tabId: 42, expectedUrl: 'https://work.example', selectionId: 'e2215e8d-7b6c-4711-ab15-460f51e558a4', title: 'Work' };
+    const selected = {
+      extensionClientId: 'connection',
+      tabId: 42,
+      expectedUrl: 'https://work.example',
+      selectionId: 'e2215e8d-7b6c-4711-ab15-460f51e558a4',
+      title: 'Work',
+    };
     useTaskStore.setState({ localChromeSelection: selected });
-    createMutate.mockResolvedValueOnce({ taskId: 'tsk_local', status: 'executing', executionMode: 'browser', browserSource: 'local-chrome' } as never);
+    createMutate.mockResolvedValueOnce({
+      taskId: 'tsk_local',
+      status: 'executing',
+      executionMode: 'browser',
+      browserSource: 'local-chrome',
+    } as never);
     listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
-    detailQuery.mockResolvedValue({ taskId: 'tsk_local', status: 'executing', intent: '查看详情', browserSource: 'local-chrome', steps: [], result: null } as never);
+    detailQuery.mockResolvedValue({
+      taskId: 'tsk_local',
+      status: 'executing',
+      intent: '查看详情',
+      browserSource: 'local-chrome',
+      steps: [],
+      result: null,
+    } as never);
     await useTaskStore.getState().createTask('查看详情', []);
     const { title: _title, ...target } = selected;
     expect(createMutate).toHaveBeenCalledWith(expect.objectContaining({ localChrome: target }));
     expect(useTaskStore.getState().localChromeSelection).toBeNull();
-    expect(useTaskStore.getState().tasks.find(task => task.taskId === 'tsk_local')?.browserSource).toBe('local-chrome');
-    expect(toUiTask({ taskId: 'tsk_local', status: 'executing', browserSource: 'local-chrome', result: null } as never).browserSource).toBe('local-chrome');
+    expect(
+      useTaskStore.getState().tasks.find((task) => task.taskId === 'tsk_local')?.browserSource,
+    ).toBe('local-chrome');
+    expect(
+      toUiTask({
+        taskId: 'tsk_local',
+        status: 'executing',
+        browserSource: 'local-chrome',
+        result: null,
+      } as never).browserSource,
+    ).toBe('local-chrome');
   });
   it('restores suggestions after reset and detail hydration without a new task call', async () => {
-    detailQuery.mockResolvedValueOnce({status:'completed',intent:'fixture',result:{summary:'done',followUpSuggestions:['完善方案']},steps:[]} as never);
+    detailQuery.mockResolvedValueOnce({
+      status: 'completed',
+      intent: 'fixture',
+      result: { summary: 'done', followUpSuggestions: ['完善方案'] },
+      steps: [],
+    } as never);
     useTaskStore.getState().reset();
-    useTaskStore.getState().selectTask('tsk_restored','ui');
+    useTaskStore.getState().selectTask('tsk_restored', 'ui');
     await flushPromises();
     expect(useTaskStore.getState().suggestionsByTask.tsk_restored).toEqual(['完善方案']);
     expect(createMutate).not.toHaveBeenCalled();
   });
   it('normalizes malformed and duplicate persisted values', async () => {
-    detailQuery.mockResolvedValueOnce({status:'completed',result:{summary:'done',followUpSuggestions:[null,{},' ',' 完善方案 ','完善方案',17,'比较方案']},steps:[]} as never);
-    useTaskStore.getState().selectTask('tsk_normalized','ui');
+    detailQuery.mockResolvedValueOnce({
+      status: 'completed',
+      result: {
+        summary: 'done',
+        followUpSuggestions: [null, {}, ' ', ' 完善方案 ', '完善方案', 17, '比较方案'],
+      },
+      steps: [],
+    } as never);
+    useTaskStore.getState().selectTask('tsk_normalized', 'ui');
     await flushPromises();
-    expect(useTaskStore.getState().suggestionsByTask.tsk_normalized).toEqual(['完善方案','比较方案']);
+    expect(useTaskStore.getState().suggestionsByTask.tsk_normalized).toEqual([
+      '完善方案',
+      '比较方案',
+    ]);
   });
   it('does not restore suggestions for a noncompleted task', async () => {
-    detailQuery.mockResolvedValueOnce({status:'awaiting_user',result:{followUpSuggestions:['过期建议']},steps:[]} as never);
-    useTaskStore.getState().selectTask('tsk_waiting','ui');
+    detailQuery.mockResolvedValueOnce({
+      status: 'awaiting_user',
+      result: { followUpSuggestions: ['过期建议'] },
+      steps: [],
+    } as never);
+    useTaskStore.getState().selectTask('tsk_waiting', 'ui');
     await flushPromises();
     expect(useTaskStore.getState().suggestionsByTask.tsk_waiting).toBeUndefined();
   });
-  it('does not replace a live suggestion frame with an older detail response',async()=>{
-    let resolve!:(value:never)=>void;
-    detailQuery.mockImplementationOnce(()=>new Promise(done=>{resolve=done;}));
-    useTaskStore.getState().selectTask('tsk_live','ui');
+  it('does not replace a live suggestion frame with an older detail response', async () => {
+    let resolve!: (value: never) => void;
+    detailQuery.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    useTaskStore.getState().selectTask('tsk_live', 'ui');
     useTaskStore.getState().applyServerMessage({
       type: 'server.supercar.suggestions',
       taskId: 'tsk_live',
       suggestions: ['最新后续建议'],
     });
-    resolve({status:'completed',result:{summary:'done',followUpSuggestions:['旧的后续建议']},steps:[]} as never);
+    resolve({
+      status: 'completed',
+      result: { summary: 'done', followUpSuggestions: ['旧的后续建议'] },
+      steps: [],
+    } as never);
     await flushPromises();
     expect(useTaskStore.getState().suggestionsByTask.tsk_live).toEqual(['最新后续建议']);
   });
-  it.each([{first:[]},{first:['旧的后续建议']}])('refreshes a preexisting cached suggestion list from a newer detail ($first)',async({first})=>{
-    detailQuery.mockResolvedValueOnce({status:'completed',result:{summary:'done',followUpSuggestions:first},steps:[]} as never);
-    useTaskStore.getState().selectTask('tsk_updated','ui');
-    await flushPromises();
-    detailQuery.mockResolvedValueOnce({status:'completed',result:{summary:'done',followUpSuggestions:['后台保存的建议']},steps:[]} as never);
-    useTaskStore.getState().selectTask('tsk_updated','ui');
-    await flushPromises();
-    expect(useTaskStore.getState().suggestionsByTask.tsk_updated).toEqual(['后台保存的建议']);
-  });
+  it.each([{ first: [] }, { first: ['旧的后续建议'] }])(
+    'refreshes a preexisting cached suggestion list from a newer detail ($first)',
+    async ({ first }) => {
+      detailQuery.mockResolvedValueOnce({
+        status: 'completed',
+        result: { summary: 'done', followUpSuggestions: first },
+        steps: [],
+      } as never);
+      useTaskStore.getState().selectTask('tsk_updated', 'ui');
+      await flushPromises();
+      detailQuery.mockResolvedValueOnce({
+        status: 'completed',
+        result: { summary: 'done', followUpSuggestions: ['后台保存的建议'] },
+        steps: [],
+      } as never);
+      useTaskStore.getState().selectTask('tsk_updated', 'ui');
+      await flushPromises();
+      expect(useTaskStore.getState().suggestionsByTask.tsk_updated).toEqual(['后台保存的建议']);
+    },
+  );
 });
 
 describe('normaliseDetailStepStatus', () => {
@@ -388,9 +570,7 @@ describe('toUiTask', () => {
       failureLevel: 'fixable',
     } as never);
 
-    expect(task.failedChecks).toEqual([
-      { type: 'source_count', detail: '缺少来源链接' },
-    ]);
+    expect(task.failedChecks).toEqual([{ type: 'source_count', detail: '缺少来源链接' }]);
   });
 
   it('humanises failed task result reasons from tasks.list rows', () => {
@@ -455,9 +635,7 @@ describe('toUiTask', () => {
       failureLevel: null,
     } as never);
 
-    expect(task.resultText).toBe(
-      '结果已显示：\n\n页面上清楚呈现了 **(128 + 256) / 3 = 128**',
-    );
+    expect(task.resultText).toBe('结果已显示：\n\n页面上清楚呈现了 **(128 + 256) / 3 = 128**');
     expect(task.resultText).not.toContain('"model"');
     expect(task.resultText).not.toContain('"finalUrl"');
   });
@@ -825,10 +1003,7 @@ describe('task page merging', () => {
     const selected = task({ taskId: 'tsk_selected', status: 'completed' });
     const first = task({ taskId: 'tsk_first', status: 'executing' });
 
-    expect(mergeFirstPageWithPreservedSelection([first], selected)).toEqual([
-      selected,
-      first,
-    ]);
+    expect(mergeFirstPageWithPreservedSelection([first], selected)).toEqual([selected, first]);
     expect(mergeFirstPageWithPreservedSelection([selected, first], selected)).toEqual([
       selected,
       first,
@@ -838,25 +1013,83 @@ describe('task page merging', () => {
 
 describe('refreshTaskList', () => {
   it('accepts a newer list round after an old terminal row', async () => {
-    const old = task({ taskId: 'tsk_round', executionId: 'old', executionRevision: 1, status: 'completed' });
-    const fresh = task({ taskId: 'tsk_round', executionId: 'new', executionRevision: 2, status: 'executing' });
+    const old = task({
+      taskId: 'tsk_round',
+      executionId: 'old',
+      executionRevision: 1,
+      status: 'completed',
+    });
+    const fresh = task({
+      taskId: 'tsk_round',
+      executionId: 'new',
+      executionRevision: 2,
+      status: 'executing',
+    });
     expect(mergeTaskPagesReplacingDuplicates([old], [fresh])[0]).toMatchObject(fresh);
     useTaskStore.setState({ tasks: [old] });
-    listQuery.mockResolvedValueOnce({ tasks: [taskRow({ taskId: 'tsk_round', executionId: 'new', executionRevision: 2, status: 'executing' })], nextCursor: null } as never);
+    listQuery.mockResolvedValueOnce({
+      tasks: [
+        taskRow({
+          taskId: 'tsk_round',
+          executionId: 'new',
+          executionRevision: 2,
+          status: 'executing',
+        }),
+      ],
+      nextCursor: null,
+    } as never);
     await useTaskStore.getState().refreshTaskList();
-    expect(useTaskStore.getState().tasks[0]).toMatchObject({ executionId: 'new', status: 'executing' });
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      executionId: 'new',
+      status: 'executing',
+    });
   });
-  it.each(['refreshTaskList', 'loadMoreTasks'] as const)('does not apply a same-round list snapshot fetched before a new stream: %s', async action => {
-    let resolve!: (value: never) => void;
-    listQuery.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-    useTaskStore.setState({ tasks: [task({ taskId: 'tsk_same', executionId: 'round', executionRevision: 2, status: 'executing' })], tasksCursor: 51, tasksHasMore: true });
-    const pending = useTaskStore.getState()[action]();
-    useTaskStore.getState().applyServerMessage({ taskId: 'tsk_same', executionId: 'round', executionRevision: 2, type: 'server.task.stream', delta: '更新的流' });
-    resolve({ tasks: [taskRow({ taskId: 'tsk_same', executionId: 'round', executionRevision: 2, status: 'awaiting_user' })], nextCursor: null } as never);
-    await pending;
-    expect(useTaskStore.getState().streamingByTask.tsk_same).toBe('更新的流');
-    expect(useTaskStore.getState().tasks[0]?.status).toBe('executing');
-  });
+  it.each(['refreshTaskList', 'loadMoreTasks'] as const)(
+    'does not apply a same-round list snapshot fetched before a new stream: %s',
+    async (action) => {
+      let resolve!: (value: never) => void;
+      listQuery.mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            resolve = done;
+          }),
+      );
+      useTaskStore.setState({
+        tasks: [
+          task({
+            taskId: 'tsk_same',
+            executionId: 'round',
+            executionRevision: 2,
+            status: 'executing',
+          }),
+        ],
+        tasksCursor: 51,
+        tasksHasMore: true,
+      });
+      const pending = useTaskStore.getState()[action]();
+      useTaskStore.getState().applyServerMessage({
+        taskId: 'tsk_same',
+        executionId: 'round',
+        executionRevision: 2,
+        type: 'server.task.stream',
+        delta: '更新的流',
+      });
+      resolve({
+        tasks: [
+          taskRow({
+            taskId: 'tsk_same',
+            executionId: 'round',
+            executionRevision: 2,
+            status: 'awaiting_user',
+          }),
+        ],
+        nextCursor: null,
+      } as never);
+      await pending;
+      expect(useTaskStore.getState().streamingByTask.tsk_same).toBe('更新的流');
+      expect(useTaskStore.getState().tasks[0]?.status).toBe('executing');
+    },
+  );
   it('keeps video quote controls stable while detail hydration follows a list refresh', async () => {
     listQuery.mockResolvedValueOnce({
       tasks: [
@@ -1143,7 +1376,9 @@ describe('selectTask detail hydration', () => {
     });
 
     await expect(resultPromise).resolves.toEqual({ taskId: 'tsk_new' });
-    expect(useTaskStore.getState().tasks.some((t) => t.taskId.startsWith('local_pending_'))).toBe(false);
+    expect(useTaskStore.getState().tasks.some((t) => t.taskId.startsWith('local_pending_'))).toBe(
+      false,
+    );
     expect(useTaskStore.getState().tasks[0]).toMatchObject({
       taskId: 'tsk_new',
       title: null,
@@ -1162,9 +1397,7 @@ describe('selectTask detail hydration', () => {
       executionMode: 'browser',
     });
 
-    expect(
-      mergeTaskPagesReplacingDuplicates([optimistic], [canonical]),
-    ).toEqual([
+    expect(mergeTaskPagesReplacingDuplicates([optimistic], [canonical])).toEqual([
       expect.objectContaining({
         taskId: 'tsk_child',
         replyToTaskId: 'tsk_parent',
@@ -1182,9 +1415,7 @@ describe('selectTask detail hydration', () => {
       executionMode: undefined,
     });
 
-    expect(
-      mergeTaskPagesReplacingDuplicates([optimistic], [canonical]),
-    ).toEqual([
+    expect(mergeTaskPagesReplacingDuplicates([optimistic], [canonical])).toEqual([
       expect.objectContaining({
         taskId: 'tsk_browser_starting',
         executionMode: 'browser',
@@ -1193,13 +1424,17 @@ describe('selectTask detail hydration', () => {
   });
 
   it('removes the local pending task row after a definite create rejection', async () => {
-    createMutate.mockRejectedValueOnce(Object.assign(new Error('invalid input'), { data: { code: 'BAD_REQUEST' } }) as never);
+    createMutate.mockRejectedValueOnce(
+      Object.assign(new Error('invalid input'), { data: { code: 'BAD_REQUEST' } }) as never,
+    );
 
     const resultPromise = useTaskStore.getState().createTask('打开 https://example.com', []);
     expect(useTaskStore.getState().tasks[0]?.taskId).toMatch(/^local_pending_/);
 
     await expect(resultPromise).resolves.toMatchObject({ error: expect.any(String) });
-    expect(useTaskStore.getState().tasks.some((t) => t.taskId.startsWith('local_pending_'))).toBe(false);
+    expect(useTaskStore.getState().tasks.some((t) => t.taskId.startsWith('local_pending_'))).toBe(
+      false,
+    );
     // The caller owns contextual task-create feedback. Mirroring the same
     // error into the shell-level channel renders a second toast.
     expect(useTaskStore.getState().error).toBeNull();
@@ -1251,6 +1486,30 @@ describe('selectTask detail hydration', () => {
     });
   });
 
+  it('keeps research attachments and the trusted snapshot when creating a stock task', async () => {
+    createMutate.mockResolvedValueOnce({
+      taskId: 'tsk_stock_files',
+      status: 'executing',
+      executionMode: 'generate',
+    } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    const context = {
+      snapshotId: 'stkshot_0123456789abcdef01234567',
+      dataAsOf: '2026-08-11',
+      trustMode: 'historical' as const,
+      evidenceIds: ['quote:603528:2026-08-11'],
+    };
+    await useTaskStore.getState().createStockTask('结合财报比较股票', context, ['file_report']);
+    expect(createMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intent: '结合财报比较股票',
+        fileIds: ['file_report'],
+        taskSource: 'stock_dashboard',
+        stockContext: context,
+      }),
+    );
+  });
+
   it('uses the current workbench viewport profile for direct retry entry points', async () => {
     createMutate.mockResolvedValueOnce({
       taskId: 'tsk_new',
@@ -1296,21 +1555,23 @@ describe('selectTask detail hydration', () => {
     } as never);
     listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
 
-    await useTaskStore.getState().createTask(
-      '生成图片：一张夏日海报',
-      [],
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
-        model: 'nano_banana_pro',
-        aspectRatio: '4:3',
-        imageCount: 3,
-      },
-    );
+    await useTaskStore
+      .getState()
+      .createTask(
+        '生成图片：一张夏日海报',
+        [],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          model: 'nano_banana_pro',
+          aspectRatio: '4:3',
+          imageCount: 3,
+        },
+      );
 
     expect(createMutate).toHaveBeenCalledWith({
       intent: '生成图片：一张夏日海报',
@@ -1332,20 +1593,13 @@ describe('selectTask detail hydration', () => {
     } as never);
     listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
 
-    await useTaskStore.getState().createTask(
-      '帮我做直播复盘',
-      [],
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
+    await useTaskStore
+      .getState()
+      .createTask('帮我做直播复盘', [], undefined, undefined, undefined, undefined, undefined, {
         skillId: 'douyin-live-ops',
         skillName: '抖音直播与运营',
         skillSource: 'manual',
-      },
-    );
+      });
 
     expect(createMutate).toHaveBeenCalledWith({
       intent: '帮我做直播复盘',
@@ -1356,76 +1610,164 @@ describe('selectTask detail hydration', () => {
     });
   });
 
-  it.each(['completed', 'awaiting_user'] as const)('restores saved plan replies on a fresh detail load: %s', async (status) => {
-    const history = ['预算改为600元，先别执行', '确认'];
+  it.each(['completed', 'awaiting_user'] as const)(
+    'restores saved plan replies on a fresh detail load: %s',
+    async (status) => {
+      const history = ['预算改为600元，先别执行', '确认'];
+      detailQuery.mockResolvedValueOnce({
+        intent: '合成交流会',
+        status,
+        steps: [],
+        createdAt: '2026-09-07T10:00:00Z',
+        planText: '最初的处理思路',
+        result:
+          status === 'completed'
+            ? {
+                summary: '最终清单',
+                metadata: { planReplyHistory: history, approvedPlanText: '修订方案600元' },
+              }
+            : { planReplyHistory: history, planText: '修订方案600元' },
+      } as never);
+      useTaskStore.getState().selectTask('tsk_plan_history', 'ui');
+      await flushPromises();
+      const state = useTaskStore.getState();
+      expect(state.userRepliesByTask.tsk_plan_history?.map((r) => r.text)).toEqual(history);
+      expect(new Set(state.userRepliesByTask.tsk_plan_history?.map((r) => r.at)).size).toBe(2);
+      expect(state.tasks.find((t) => t.taskId === 'tsk_plan_history')?.planText).toBe(
+        '修订方案600元',
+      );
+    },
+  );
+
+  it('does not erase a newer local reply when reading an older saved history', async () => {
+    useTaskStore.setState({
+      userRepliesByTask: {
+        tsk_plan_history: [
+          { at: 1, text: '预算600元' },
+          { at: 2, text: '确认' },
+        ],
+      },
+    });
     detailQuery.mockResolvedValueOnce({
-      intent: '合成交流会', status, steps: [], createdAt: '2026-09-07T10:00:00Z',
-      planText: '最初的处理思路',
-      result: status === 'completed'
-        ? { summary: '最终清单', metadata: { planReplyHistory: history, approvedPlanText: '修订方案600元' } }
-        : { planReplyHistory: history, planText: '修订方案600元' },
+      status: 'awaiting_user',
+      steps: [],
+      result: { planReplyHistory: ['预算600元'] },
     } as never);
     useTaskStore.getState().selectTask('tsk_plan_history', 'ui');
     await flushPromises();
-    const state = useTaskStore.getState();
-    expect(state.userRepliesByTask.tsk_plan_history?.map(r => r.text)).toEqual(history);
-    expect(new Set(state.userRepliesByTask.tsk_plan_history?.map(r => r.at)).size).toBe(2);
-    expect(state.tasks.find(t => t.taskId === 'tsk_plan_history')?.planText).toBe('修订方案600元');
+    expect(useTaskStore.getState().userRepliesByTask.tsk_plan_history).toEqual([
+      { at: 1, text: '预算600元' },
+      { at: 2, text: '确认' },
+    ]);
   });
 
-  it('does not erase a newer local reply when reading an older saved history', async () => {
-    useTaskStore.setState({ userRepliesByTask: { tsk_plan_history: [{ at: 1, text: '预算600元' }, { at: 2, text: '确认' }] } });
-    detailQuery.mockResolvedValueOnce({ status: 'awaiting_user', steps: [], result: { planReplyHistory: ['预算600元'] } } as never);
-    useTaskStore.getState().selectTask('tsk_plan_history', 'ui');
-    await flushPromises();
-    expect(useTaskStore.getState().userRepliesByTask.tsk_plan_history).toEqual([{ at: 1, text: '预算600元' }, { at: 2, text: '确认' }]);
-  });
+  it.each([false, true])(
+    'refreshes history after a concurrent reply, including when the old response contains it: %s',
+    async (oldResponseIncludesReply) => {
+      let resolveDetail!: (value: never) => void;
+      detailQuery.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveDetail = resolve;
+          }),
+      );
+      detailQuery.mockResolvedValueOnce({
+        status: 'awaiting_user',
+        steps: [],
+        result: { planReplyHistory: ['确认', '预算600元', '确认'] },
+      } as never);
+      replyMutate.mockResolvedValue({ ok: true, state: 'stillAwaiting' } as never);
+      useTaskStore.getState().selectTask('tsk_plan_history', 'ui');
+      await useTaskStore.getState().replyToTask('tsk_plan_history', '确认');
+      resolveDetail({
+        status: 'awaiting_user',
+        steps: [],
+        result: {
+          planReplyHistory: oldResponseIncludesReply
+            ? ['确认', '预算600元', '确认']
+            : ['确认', '预算600元'],
+        },
+      } as never);
+      await flushPromises();
+      expect(
+        useTaskStore.getState().userRepliesByTask.tsk_plan_history?.map((r) => r.text),
+      ).toEqual(['确认', '预算600元', '确认']);
+      expect(replyMutate).toHaveBeenCalledWith({ taskId: 'tsk_plan_history', message: '确认' });
+    },
+  );
 
-  it.each([false, true])('refreshes history after a concurrent reply, including when the old response contains it: %s', async (oldResponseIncludesReply) => {
-    let resolveDetail!: (value: never) => void;
-    detailQuery.mockImplementationOnce(() => new Promise(resolve => { resolveDetail = resolve; }));
-    detailQuery.mockResolvedValueOnce({ status: 'awaiting_user', steps: [], result: { planReplyHistory: ['确认', '预算600元', '确认'] } } as never);
-    replyMutate.mockResolvedValue({ ok: true, state: 'stillAwaiting' } as never);
-    useTaskStore.getState().selectTask('tsk_plan_history', 'ui');
-    await useTaskStore.getState().replyToTask('tsk_plan_history', '确认');
-    resolveDetail({ status: 'awaiting_user', steps: [], result: { planReplyHistory: oldResponseIncludesReply ? ['确认', '预算600元', '确认'] : ['确认', '预算600元'] } } as never);
-    await flushPromises();
-    expect(useTaskStore.getState().userRepliesByTask.tsk_plan_history?.map(r => r.text)).toEqual(['确认', '预算600元', '确认']);
-    expect(replyMutate).toHaveBeenCalledWith({ taskId: 'tsk_plan_history', message: '确认' });
-  });
-
-  it.each([false, true])('restores history and keeps a failed local reply after pending writes settle: %s', async (firstWriteSucceeds) => {
-    let resolveDetail!: (value: never) => void;
-    let rejectReply!: (error: Error) => void;
-    detailQuery.mockImplementationOnce(() => new Promise(resolve => { resolveDetail = resolve; }));
-    const saved = firstWriteSucceeds ? ['预算600元', '确认'] : ['预算600元'];
-    detailQuery.mockResolvedValueOnce({ status: 'awaiting_user', steps: [], result: { planReplyHistory: saved } } as never);
-    if (firstWriteSucceeds) replyMutate.mockResolvedValueOnce({ ok: true, state: 'stillAwaiting' } as never);
-    replyMutate.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectReply = reject; }));
-    useTaskStore.getState().selectTask('tsk_plan_history', 'ui');
-    const first = firstWriteSucceeds ? useTaskStore.getState().replyToTask('tsk_plan_history', '确认') : null;
-    const failed = useTaskStore.getState().replyToTask('tsk_plan_history', '稍后补充地点');
-    await first;
-    rejectReply(new Error('fixture transport failure'));
-    await failed;
-    resolveDetail({ status: 'awaiting_user', steps: [], result: { planReplyHistory: ['预算600元'] } } as never);
-    await flushPromises();
-    expect(useTaskStore.getState().userRepliesByTask.tsk_plan_history?.map(r => r.text)).toEqual([...saved, '稍后补充地点']);
-    expect(detailQuery).toHaveBeenCalledTimes(2);
-  });
+  it.each([false, true])(
+    'restores history and keeps a failed local reply after pending writes settle: %s',
+    async (firstWriteSucceeds) => {
+      let resolveDetail!: (value: never) => void;
+      let rejectReply!: (error: Error) => void;
+      detailQuery.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveDetail = resolve;
+          }),
+      );
+      const saved = firstWriteSucceeds ? ['预算600元', '确认'] : ['预算600元'];
+      detailQuery.mockResolvedValueOnce({
+        status: 'awaiting_user',
+        steps: [],
+        result: { planReplyHistory: saved },
+      } as never);
+      if (firstWriteSucceeds)
+        replyMutate.mockResolvedValueOnce({ ok: true, state: 'stillAwaiting' } as never);
+      replyMutate.mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectReply = reject;
+          }),
+      );
+      useTaskStore.getState().selectTask('tsk_plan_history', 'ui');
+      const first = firstWriteSucceeds
+        ? useTaskStore.getState().replyToTask('tsk_plan_history', '确认')
+        : null;
+      const failed = useTaskStore.getState().replyToTask('tsk_plan_history', '稍后补充地点');
+      await first;
+      rejectReply(new Error('fixture transport failure'));
+      await failed;
+      resolveDetail({
+        status: 'awaiting_user',
+        steps: [],
+        result: { planReplyHistory: ['预算600元'] },
+      } as never);
+      await flushPromises();
+      expect(
+        useTaskStore.getState().userRepliesByTask.tsk_plan_history?.map((r) => r.text),
+      ).toEqual([...saved, '稍后补充地点']);
+      expect(detailQuery).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it('keeps a failed amendment before the later successful confirmation after hydration', async () => {
-    detailQuery.mockResolvedValue({ status: 'awaiting_user', steps: [], result: { planReplyHistory: ['预算600元'] } } as never);
+    detailQuery.mockResolvedValue({
+      status: 'awaiting_user',
+      steps: [],
+      result: { planReplyHistory: ['预算600元'] },
+    } as never);
     useTaskStore.getState().selectTask('tsk_plan_history', 'ui');
     await flushPromises();
-    replyMutate.mockRejectedValueOnce(Object.assign(new Error('fixture application rejection'), { data: { code: 'BAD_REQUEST' } }));
+    replyMutate.mockRejectedValueOnce(
+      Object.assign(new Error('fixture application rejection'), { data: { code: 'BAD_REQUEST' } }),
+    );
     await useTaskStore.getState().replyToTask('tsk_plan_history', '地点改为线上');
     await flushPromises();
-    detailQuery.mockResolvedValueOnce({ status: 'awaiting_user', steps: [], result: { planReplyHistory: ['预算600元', '确认'] } } as never);
+    detailQuery.mockResolvedValueOnce({
+      status: 'awaiting_user',
+      steps: [],
+      result: { planReplyHistory: ['预算600元', '确认'] },
+    } as never);
     replyMutate.mockResolvedValueOnce({ ok: true, state: 'stillAwaiting' } as never);
     await useTaskStore.getState().replyToTask('tsk_plan_history', '确认');
     await flushPromises();
-    expect(useTaskStore.getState().userRepliesByTask.tsk_plan_history?.map(r => r.text)).toEqual(['预算600元', '地点改为线上', '确认']);
+    expect(useTaskStore.getState().userRepliesByTask.tsk_plan_history?.map((r) => r.text)).toEqual([
+      '预算600元',
+      '地点改为线上',
+      '确认',
+    ]);
   });
 
   it('survives malformed detail rows and synthesizes a safe selected task', async () => {
@@ -1678,12 +2020,132 @@ describe('selectTask detail hydration', () => {
 });
 
 describe('loadMoreTasks', () => {
+  it('stops after five hidden pages, blocks repeat clicks, and resets on refresh', async () => {
+    useTaskStore.setState({ tasks: [], tasksCursor: 51, tasksHasMore: true });
+    let pages = 0;
+    listQuery.mockImplementation(async () => {
+      pages += 1;
+      return {
+        tasks: [taskRow({ taskId: `hidden_${pages}` })],
+        nextCursor: pages < 6 ? 51 + pages * 50 : null,
+      } as never;
+    });
+    await useTaskStore.getState().loadMoreTasks(() => new Set());
+    expect(listQuery).toHaveBeenCalledTimes(5);
+    expect(useTaskStore.getState()).toMatchObject({
+      tasksVisiblePageLimitReached: true,
+      tasksHasMore: true,
+      tasksCursor: 301,
+      loadingMore: false,
+      error: null,
+    });
+    await useTaskStore.getState().loadMoreTasks(() => new Set());
+    expect(listQuery).toHaveBeenCalledTimes(5);
+    listQuery.mockResolvedValue({ tasks: [], nextCursor: 51 } as never);
+    await useTaskStore.getState().refreshTaskList();
+    expect(useTaskStore.getState().tasksVisiblePageLimitReached).toBe(false);
+  });
+  it('keeps pagination available when the fifth page adds a visible task', async () => {
+    useTaskStore.setState({ tasks: [], tasksCursor: 51, tasksHasMore: true });
+    let pages = 0;
+    listQuery.mockImplementation(async () => {
+      pages += 1;
+      return {
+        tasks: [taskRow({ taskId: pages === 5 ? 'visible_last' : `hidden_${pages}` })],
+        nextCursor: 51 + pages * 50,
+      } as never;
+    });
+    await useTaskStore
+      .getState()
+      .loadMoreTasks(
+        (rows) =>
+          new Set(rows.filter((row) => row.taskId.startsWith('visible')).map((row) => row.taskId)),
+      );
+    expect(listQuery).toHaveBeenCalledTimes(5);
+    expect(useTaskStore.getState()).toMatchObject({
+      tasksVisiblePageLimitReached: false,
+      tasksHasMore: true,
+    });
+  });
+
+  it('skips fully hidden pages until a new visible task arrives while holding one loading lock', async () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'visible_first' })],
+      tasksCursor: 51,
+      tasksHasMore: true,
+    });
+    listQuery.mockResolvedValueOnce({
+      tasks: [taskRow({ taskId: 'hidden_old' })],
+      nextCursor: 101,
+    } as never);
+    listQuery.mockImplementationOnce(async () => {
+      expect(useTaskStore.getState().loadingMore).toBe(true);
+      await useTaskStore.getState().loadMoreTasks();
+      return { tasks: [taskRow({ taskId: 'visible_next' })], nextCursor: 151 } as never;
+    });
+    await useTaskStore
+      .getState()
+      .loadMoreTasks(
+        (rows) =>
+          new Set(rows.filter((row) => row.taskId.startsWith('visible')).map((row) => row.taskId)),
+      );
+    expect(useTaskStore.getState().tasks.map((row) => row.taskId)).toEqual([
+      'visible_first',
+      'hidden_old',
+      'visible_next',
+    ]);
+    expect(useTaskStore.getState().tasksCursor).toBe(151);
+    expect(useTaskStore.getState().loadingMore).toBe(false);
+    expect(listQuery).toHaveBeenCalledTimes(2);
+  });
+  it('exhausts hidden pages and terminates a repeated cursor without spinning', async () => {
+    useTaskStore.setState({ tasks: [], tasksCursor: 51, tasksHasMore: true });
+    listQuery.mockResolvedValueOnce({
+      tasks: [taskRow({ taskId: 'hidden_1' })],
+      nextCursor: 101,
+    } as never);
+    listQuery.mockResolvedValueOnce({
+      tasks: [taskRow({ taskId: 'hidden_2' })],
+      nextCursor: null,
+    } as never);
+    await useTaskStore.getState().loadMoreTasks(() => new Set());
+    expect(useTaskStore.getState().tasks).toHaveLength(2);
+    expect(useTaskStore.getState().tasksHasMore).toBe(false);
+    listQuery.mockReset().mockResolvedValue({ tasks: [], nextCursor: 51 } as never);
+    useTaskStore.setState({ tasksCursor: 51, tasksHasMore: true });
+    await useTaskStore.getState().loadMoreTasks(() => new Set());
+    expect(listQuery).toHaveBeenCalledTimes(1);
+    expect(useTaskStore.getState().error).toBeTruthy();
+    expect(useTaskStore.getState().loadingMore).toBe(false);
+  });
+
   it('does not let a rejected old page clear the current execution runtime', async () => {
-    useTaskStore.setState({ tasks: [task({ taskId: 'tsk_page', status: 'executing', executionId: 'new', executionRevision: 2 })], tasksCursor: 51, tasksHasMore: true,
-      streamingByTask: { tsk_page: '新输出' }, progressByTask: { tsk_page: '新进度' } });
-    listQuery.mockResolvedValueOnce({ tasks: [taskRow({ taskId: 'tsk_page', status: 'completed', executionId: 'old', executionRevision: 1, result: { summary: '旧结果' } })], nextCursor: null } as never);
+    useTaskStore.setState({
+      tasks: [
+        task({ taskId: 'tsk_page', status: 'executing', executionId: 'new', executionRevision: 2 }),
+      ],
+      tasksCursor: 51,
+      tasksHasMore: true,
+      streamingByTask: { tsk_page: '新输出' },
+      progressByTask: { tsk_page: '新进度' },
+    });
+    listQuery.mockResolvedValueOnce({
+      tasks: [
+        taskRow({
+          taskId: 'tsk_page',
+          status: 'completed',
+          executionId: 'old',
+          executionRevision: 1,
+          result: { summary: '旧结果' },
+        }),
+      ],
+      nextCursor: null,
+    } as never);
     await useTaskStore.getState().loadMoreTasks();
-    expect(useTaskStore.getState().tasks[0]).toMatchObject({ executionRevision: 2, status: 'executing' });
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      executionRevision: 2,
+      status: 'executing',
+    });
     expect(useTaskStore.getState().streamingByTask.tsk_page).toBe('新输出');
     expect(useTaskStore.getState().progressByTask.tsk_page).toBe('新进度');
     expect(useTaskStore.getState().terminalTaskIds.has('tsk_page')).toBe(false);
@@ -1721,11 +2183,7 @@ describe('loadMoreTasks', () => {
     const state = useTaskStore.getState();
     expect(state.loadingMore).toBe(false);
     expect(state.tasksHasMore).toBe(false);
-    expect(state.tasks.map((item) => item.taskId)).toEqual([
-      'tsk_dup',
-      'tsk_stable',
-      'tsk_new',
-    ]);
+    expect(state.tasks.map((item) => item.taskId)).toEqual(['tsk_dup', 'tsk_stable', 'tsk_new']);
     expect(state.tasks[0]).toMatchObject({
       taskId: 'tsk_dup',
       status: 'completed',
@@ -1765,10 +2223,7 @@ describe('loadMoreTasks', () => {
     expect(state.loadingMore).toBe(false);
     expect(state.tasksHasMore).toBe(false);
     expect(state.tasksCursor).toBeNull();
-    expect(state.tasks.map((item) => item.taskId)).toEqual([
-      'tsk_existing',
-      'tsk_next',
-    ]);
+    expect(state.tasks.map((item) => item.taskId)).toEqual(['tsk_existing', 'tsk_next']);
     expect(state.tasks[1]).toMatchObject({
       intent: '未命名任务',
       status: 'unknown',
@@ -1866,9 +2321,9 @@ describe('moveTaskToProject', () => {
     moveToProjectMutate.mockRejectedValueOnce(new Error('offline'));
     useTaskStore.setState({ tasks: [original], error: null });
 
-    await expect(
-      useTaskStore.getState().moveTaskToProject('tsk_move', 'proj_b'),
-    ).resolves.toEqual({ error: '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。' });
+    await expect(useTaskStore.getState().moveTaskToProject('tsk_move', 'proj_b')).resolves.toEqual({
+      error: '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    });
 
     expect(moveToProjectMutate).toHaveBeenCalledWith({
       taskId: 'tsk_move',
@@ -1883,14 +2338,12 @@ describe('moveTaskToProject', () => {
   it('keeps the optimistic project move when the server accepts it', async () => {
     moveToProjectMutate.mockResolvedValueOnce({ ok: true } as never);
     useTaskStore.setState({
-      tasks: [
-        task({ taskId: 'tsk_move', status: 'completed', projectId: 'proj_a' }),
-      ],
+      tasks: [task({ taskId: 'tsk_move', status: 'completed', projectId: 'proj_a' })],
     });
 
-    await expect(
-      useTaskStore.getState().moveTaskToProject('tsk_move', null),
-    ).resolves.toEqual({ ok: true });
+    await expect(useTaskStore.getState().moveTaskToProject('tsk_move', null)).resolves.toEqual({
+      ok: true,
+    });
 
     expect(useTaskStore.getState().tasks[0]?.projectId).toBeNull();
   });
@@ -1915,9 +2368,7 @@ describe('deleteTask', () => {
     });
 
     expect(deleteMutate).toHaveBeenCalledWith({ taskId: 'tsk_active' });
-    expect(useTaskStore.getState().tasks.map((item) => item.taskId)).toEqual([
-      'tsk_other',
-    ]);
+    expect(useTaskStore.getState().tasks.map((item) => item.taskId)).toEqual(['tsk_other']);
     expect(useTaskStore.getState().selectedTaskId).toBeNull();
     expect(useTaskStore.getState().composerMode).toBe('new');
     expect(navigate).toHaveBeenCalledWith(null);
@@ -2027,120 +2478,359 @@ describe('deleteTask', () => {
 });
 
 describe('replyToTask', () => {
-  it.each(['refresh', 'page', 'detail'] as const)('clears prior-round runtime when %s restores a newer executing identity before WS', async source => {
-    useTaskStore.setState({ tasks: [task({ taskId: 'tsk_restore', executionId: 'old', executionRevision: 1, status: 'executing' })],
-      tasksCursor: 51, tasksHasMore: true, streamingByTask: { tsk_restore: '旧草稿', keep: '保留' },
-      progressByTask: { tsk_restore: '旧进度' }, suggestionsByTask: { tsk_restore: ['旧建议'] },
-      thinkingByTask: { tsk_restore: { summary: '旧思考', at: 1 } } });
-    if (source === 'detail') {
-      detailQuery.mockResolvedValueOnce({ taskId: 'tsk_restore', executionId: 'new', executionRevision: 2, status: 'executing', result: {}, steps: [] } as never);
-      useTaskStore.getState().selectTask('tsk_restore', 'ui');
-      await flushPromises();
-    } else {
-      listQuery.mockResolvedValueOnce({ tasks: [taskRow({ taskId: 'tsk_restore', executionId: 'new', executionRevision: 2, status: 'executing' })], nextCursor: null } as never);
-      await useTaskStore.getState()[source === 'refresh' ? 'refreshTaskList' : 'loadMoreTasks']();
-    }
-    expect(useTaskStore.getState().streamingByTask.tsk_restore).toBeUndefined();
-    expect(useTaskStore.getState().progressByTask.tsk_restore).toBeUndefined();
-    expect(useTaskStore.getState().suggestionsByTask.tsk_restore).toBeUndefined();
-    expect(useTaskStore.getState().thinkingByTask.tsk_restore).toBeUndefined();
-    useTaskStore.getState().applyServerMessage({ taskId: 'tsk_restore', executionId: 'new', executionRevision: 2, type: 'server.task.stream', delta: '新草稿' });
-    expect(useTaskStore.getState().streamingByTask.tsk_restore).toBe('新草稿');
-    expect(useTaskStore.getState().streamingByTask.keep).toBe('保留');
-  });
+  it.each(['refresh', 'page', 'detail'] as const)(
+    'clears prior-round runtime when %s restores a newer executing identity before WS',
+    async (source) => {
+      useTaskStore.setState({
+        tasks: [
+          task({
+            taskId: 'tsk_restore',
+            executionId: 'old',
+            executionRevision: 1,
+            status: 'executing',
+          }),
+        ],
+        tasksCursor: 51,
+        tasksHasMore: true,
+        streamingByTask: { tsk_restore: '旧草稿', keep: '保留' },
+        progressByTask: { tsk_restore: '旧进度' },
+        suggestionsByTask: { tsk_restore: ['旧建议'] },
+        thinkingByTask: { tsk_restore: { summary: '旧思考', at: 1 } },
+      });
+      if (source === 'detail') {
+        detailQuery.mockResolvedValueOnce({
+          taskId: 'tsk_restore',
+          executionId: 'new',
+          executionRevision: 2,
+          status: 'executing',
+          result: {},
+          steps: [],
+        } as never);
+        useTaskStore.getState().selectTask('tsk_restore', 'ui');
+        await flushPromises();
+      } else {
+        listQuery.mockResolvedValueOnce({
+          tasks: [
+            taskRow({
+              taskId: 'tsk_restore',
+              executionId: 'new',
+              executionRevision: 2,
+              status: 'executing',
+            }),
+          ],
+          nextCursor: null,
+        } as never);
+        await useTaskStore.getState()[source === 'refresh' ? 'refreshTaskList' : 'loadMoreTasks']();
+      }
+      expect(useTaskStore.getState().streamingByTask.tsk_restore).toBeUndefined();
+      expect(useTaskStore.getState().progressByTask.tsk_restore).toBeUndefined();
+      expect(useTaskStore.getState().suggestionsByTask.tsk_restore).toBeUndefined();
+      expect(useTaskStore.getState().thinkingByTask.tsk_restore).toBeUndefined();
+      useTaskStore.getState().applyServerMessage({
+        taskId: 'tsk_restore',
+        executionId: 'new',
+        executionRevision: 2,
+        type: 'server.task.stream',
+        delta: '新草稿',
+      });
+      expect(useTaskStore.getState().streamingByTask.tsk_restore).toBe('新草稿');
+      expect(useTaskStore.getState().streamingByTask.keep).toBe('保留');
+    },
+  );
   it('blocks a new create request after dispatched transport failure and retains its pending input', async () => {
     createMutate.mockRejectedValueOnce(new TypeError('Failed to fetch'));
-    expect(await useTaskStore.getState().createTask('传输未知的任务', ['fil_1'])).toHaveProperty('error', expect.stringContaining('未确认'));
-    expect(useTaskStore.getState().tasks[0]).toMatchObject({ intent: '传输未知的任务', status: 'unknown' });
+    expect(await useTaskStore.getState().createTask('传输未知的任务', ['fil_1'])).toHaveProperty(
+      'error',
+      expect.stringContaining('未确认'),
+    );
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      intent: '传输未知的任务',
+      status: 'unknown',
+    });
     await useTaskStore.getState().createTask('传输未知的任务', ['fil_1']);
     expect(createMutate).toHaveBeenCalledTimes(1);
   });
   it('blocks a second reply after dispatched transport failure even if detail shows another question', async () => {
-    useTaskStore.setState({ tasks: [task({ taskId: 'tsk_lost', status: 'awaiting_user', executionId: 'old', executionRevision: 1 })] });
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_lost',
+          status: 'awaiting_user',
+          executionId: 'old',
+          executionRevision: 1,
+        }),
+      ],
+    });
     replyMutate.mockRejectedValueOnce(new TypeError('Failed to fetch'));
-    expect(await useTaskStore.getState().replyToTask('tsk_lost', '这次修改')).toHaveProperty('error', expect.stringContaining('未确认'));
-    detailQuery.mockResolvedValueOnce({ taskId: 'tsk_lost', executionId: 'new', executionRevision: 2, status: 'awaiting_user', awaitingQuestion: '下一问题', result: {}, steps: [] } as never);
+    expect(await useTaskStore.getState().replyToTask('tsk_lost', '这次修改')).toHaveProperty(
+      'error',
+      expect.stringContaining('未确认'),
+    );
+    detailQuery.mockResolvedValueOnce({
+      taskId: 'tsk_lost',
+      executionId: 'new',
+      executionRevision: 2,
+      status: 'awaiting_user',
+      awaitingQuestion: '下一问题',
+      result: {},
+      steps: [],
+    } as never);
     useTaskStore.getState().selectTask('tsk_lost', 'ui');
     await flushPromises();
     await useTaskStore.getState().replyToTask('tsk_lost', '这次修改');
     expect(replyMutate).toHaveBeenCalledTimes(1);
-    expect(useTaskStore.getState().userRepliesByTask.tsk_lost?.map(r => r.text)).toEqual(['这次修改']);
+    expect(useTaskStore.getState().userRepliesByTask.tsk_lost?.map((r) => r.text)).toEqual([
+      '这次修改',
+    ]);
   });
   it('permits corrected input after a definite application rejection', async () => {
-    replyMutate.mockRejectedValueOnce(Object.assign(new Error('输入不合法'), { data: { code: 'BAD_REQUEST' } }));
+    replyMutate.mockRejectedValueOnce(
+      Object.assign(new Error('输入不合法'), { data: { code: 'BAD_REQUEST' } }),
+    );
     await useTaskStore.getState().replyToTask('tsk_rejected', '不合法输入');
     replyMutate.mockResolvedValueOnce({ ok: true, state: 'stillAwaiting' } as never);
-    expect(await useTaskStore.getState().replyToTask('tsk_rejected', '修正输入')).toEqual({ ok: true });
+    expect(await useTaskStore.getState().replyToTask('tsk_rejected', '修正输入')).toEqual({
+      ok: true,
+    });
     expect(replyMutate).toHaveBeenCalledTimes(2);
   });
-  it.each(['creationUnconfirmed', 'acceptedUnconfirmed'])('preserves an early create terminal when the late ACK is %s', async admissionState => {
-    let resolve!: (value: never) => void;
-    createMutate.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-    listQuery.mockResolvedValue({ tasks: [], nextCursor: null } as never);
-    const pending = useTaskStore.getState().createTask('已收到终态的创建');
-    const identity = { taskId: 'tsk_observed_create', executionId: 'first', executionRevision: 1 };
-    useTaskStore.getState().applyServerMessage({ ...identity, type: 'server.task.terminal', status: 'completed', summary: '已保存结果' });
-    resolve({ ...identity, executionMode: 'generate', status: 'executing', admissionState } as never);
-    expect(await pending).toEqual({ taskId: identity.taskId });
-    expect(useTaskStore.getState().tasks.find(t => t.taskId === identity.taskId)).toMatchObject({ status: 'completed', resultText: '已保存结果' });
-  });
+  it.each(['creationUnconfirmed', 'acceptedUnconfirmed'])(
+    'preserves an early create terminal when the late ACK is %s',
+    async (admissionState) => {
+      let resolve!: (value: never) => void;
+      createMutate.mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            resolve = done;
+          }),
+      );
+      listQuery.mockResolvedValue({ tasks: [], nextCursor: null } as never);
+      const pending = useTaskStore.getState().createTask('已收到终态的创建');
+      const identity = {
+        taskId: 'tsk_observed_create',
+        executionId: 'first',
+        executionRevision: 1,
+      };
+      useTaskStore.getState().applyServerMessage({
+        ...identity,
+        type: 'server.task.terminal',
+        status: 'completed',
+        summary: '已保存结果',
+      });
+      resolve({
+        ...identity,
+        executionMode: 'generate',
+        status: 'executing',
+        admissionState,
+      } as never);
+      expect(await pending).toEqual({ taskId: identity.taskId });
+      expect(useTaskStore.getState().tasks.find((t) => t.taskId === identity.taskId)).toMatchObject(
+        { status: 'completed', resultText: '已保存结果' },
+      );
+    },
+  );
   it('converges a conflicting frame to the fresh authoritative detail identity', async () => {
-    useTaskStore.setState({ tasks: [task({ taskId: 'tsk_truth', executionId: 'local', executionRevision: 3, status: 'executing' })], streamingByTask: { tsk_truth: '需对账的输出' } });
-    detailQuery.mockResolvedValueOnce({ taskId: 'tsk_truth', executionId: 'truth', executionRevision: 3, status: 'completed', result: { summary: '权威结果' }, steps: [] } as never);
-    useTaskStore.getState().applyServerMessage({ taskId: 'tsk_truth', type: 'server.task.terminal', executionId: 'truth', executionRevision: 3, status: 'completed', summary: '事件结果' });
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_truth',
+          executionId: 'local',
+          executionRevision: 3,
+          status: 'executing',
+        }),
+      ],
+      streamingByTask: { tsk_truth: '需对账的输出' },
+    });
+    detailQuery.mockResolvedValueOnce({
+      taskId: 'tsk_truth',
+      executionId: 'truth',
+      executionRevision: 3,
+      status: 'completed',
+      result: { summary: '权威结果' },
+      steps: [],
+    } as never);
+    useTaskStore.getState().applyServerMessage({
+      taskId: 'tsk_truth',
+      type: 'server.task.terminal',
+      executionId: 'truth',
+      executionRevision: 3,
+      status: 'completed',
+      summary: '事件结果',
+    });
     await flushPromises();
-    expect(useTaskStore.getState().tasks[0]).toMatchObject({ executionId: 'truth', resultText: '权威结果', status: 'completed' });
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      executionId: 'truth',
+      resultText: '权威结果',
+      status: 'completed',
+    });
     expect(useTaskStore.getState().streamingByTask.tsk_truth).toBeUndefined();
   });
   it('does not unlock an unconfirmed new admission when detail still shows the prior question', async () => {
-    useTaskStore.setState({ tasks: [task({ taskId: 'tsk_pending', status: 'awaiting_user', executionId: 'old', executionRevision: 1 })], selectedTaskId: 'tsk_pending' });
-    detailQuery.mockResolvedValue({ taskId: 'tsk_pending', status: 'awaiting_user', executionId: 'old', executionRevision: 1, awaitingQuestion: '旧问题', steps: [] } as never);
-    replyMutate.mockResolvedValue({ ok: false, state: 'acceptedUnconfirmed', executionId: 'pending', executionRevision: 2 } as never);
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_pending',
+          status: 'awaiting_user',
+          executionId: 'old',
+          executionRevision: 1,
+        }),
+      ],
+      selectedTaskId: 'tsk_pending',
+    });
+    detailQuery.mockResolvedValue({
+      taskId: 'tsk_pending',
+      status: 'awaiting_user',
+      executionId: 'old',
+      executionRevision: 1,
+      awaitingQuestion: '旧问题',
+      steps: [],
+    } as never);
+    replyMutate.mockResolvedValue({
+      ok: false,
+      state: 'acceptedUnconfirmed',
+      executionId: 'pending',
+      executionRevision: 2,
+    } as never);
     await useTaskStore.getState().replyToTask('tsk_pending', '新的回复');
     await flushPromises();
     await useTaskStore.getState().replyToTask('tsk_pending', '新的回复');
     expect(replyMutate).toHaveBeenCalledTimes(1);
-    useTaskStore.getState().applyServerMessage({ taskId: 'tsk_pending', type: 'server.supercar.awaiting_user', executionId: 'pending', executionRevision: 2, question: '新问题', awaitingKind: 'clarification' });
+    useTaskStore.getState().applyServerMessage({
+      taskId: 'tsk_pending',
+      type: 'server.supercar.awaiting_user',
+      executionId: 'pending',
+      executionRevision: 2,
+      question: '新问题',
+      awaitingKind: 'clarification',
+    });
     replyMutate.mockResolvedValueOnce({ ok: true, state: 'stillAwaiting' } as never);
     await useTaskStore.getState().replyToTask('tsk_pending', '稍等');
     expect(replyMutate).toHaveBeenCalledTimes(2);
   });
   it('does not relock a new execution already observed before its unconfirmed ACK', async () => {
     let resolve!: (value: never) => void;
-    replyMutate.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-    useTaskStore.setState({ tasks: [task({ taskId: 'tsk_early_ack', status: 'awaiting_user', executionId: 'old', executionRevision: 1 })] });
+    replyMutate.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_early_ack',
+          status: 'awaiting_user',
+          executionId: 'old',
+          executionRevision: 1,
+        }),
+      ],
+    });
     const pending = useTaskStore.getState().replyToTask('tsk_early_ack', '新要求');
-    useTaskStore.getState().applyServerMessage({ taskId: 'tsk_early_ack', type: 'server.supercar.awaiting_user', executionId: 'new', executionRevision: 2, question: '新问题', awaitingKind: 'clarification' });
-    resolve({ ok: false, state: 'acceptedUnconfirmed', executionId: 'new', executionRevision: 2 } as never);
+    useTaskStore.getState().applyServerMessage({
+      taskId: 'tsk_early_ack',
+      type: 'server.supercar.awaiting_user',
+      executionId: 'new',
+      executionRevision: 2,
+      question: '新问题',
+      awaitingKind: 'clarification',
+    });
+    resolve({
+      ok: false,
+      state: 'acceptedUnconfirmed',
+      executionId: 'new',
+      executionRevision: 2,
+    } as never);
     await pending;
     replyMutate.mockResolvedValueOnce({ ok: true, state: 'stillAwaiting' } as never);
     await useTaskStore.getState().replyToTask('tsk_early_ack', '稍等');
     expect(replyMutate).toHaveBeenCalledTimes(2);
   });
   it('does not let an old frame replace a round already restored by the task list', () => {
-    useTaskStore.setState({ tasks: [task({ taskId: 'tsk_seed', executionId: 'persisted', executionRevision: 3, status: 'awaiting_user' })] });
-    useTaskStore.getState().applyServerMessage({ taskId: 'tsk_seed', type: 'server.task.stream', executionId: 'old', executionRevision: 2, delta: '旧内容' });
-    expect(useTaskStore.getState().tasks[0]).toMatchObject({ executionRevision: 3, status: 'awaiting_user' });
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_seed',
+          executionId: 'persisted',
+          executionRevision: 3,
+          status: 'awaiting_user',
+        }),
+      ],
+    });
+    useTaskStore.getState().applyServerMessage({
+      taskId: 'tsk_seed',
+      type: 'server.task.stream',
+      executionId: 'old',
+      executionRevision: 2,
+      delta: '旧内容',
+    });
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      executionRevision: 3,
+      status: 'awaiting_user',
+    });
     expect(useTaskStore.getState().streamingByTask.tsk_seed).toBeUndefined();
   });
   it('reconciles a conflicting identity without replacing visible content', () => {
-    useTaskStore.setState({ tasks: [task({ taskId: 'tsk_conflict', executionId: 'known', executionRevision: 3, status: 'executing' })] });
-    useTaskStore.getState().applyServerMessage({ taskId: 'tsk_conflict', type: 'server.task.terminal', executionId: 'conflict', executionRevision: 3, status: 'completed', summary: '不能覆盖' });
-    expect(useTaskStore.getState().tasks[0]).toMatchObject({ executionId: 'known', status: 'executing' });
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_conflict',
+          executionId: 'known',
+          executionRevision: 3,
+          status: 'executing',
+        }),
+      ],
+    });
+    useTaskStore.getState().applyServerMessage({
+      taskId: 'tsk_conflict',
+      type: 'server.task.terminal',
+      executionId: 'conflict',
+      executionRevision: 3,
+      status: 'completed',
+      summary: '不能覆盖',
+    });
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      executionId: 'known',
+      status: 'executing',
+    });
     expect(detailQuery).toHaveBeenCalledWith({ taskId: 'tsk_conflict' });
   });
   it('restores complete original core replies rather than the legacy truncated history view', async () => {
     const original = `  ${'保留完整修改要求。'.repeat(600)}  `;
-    detailQuery.mockResolvedValue({ taskId: 'tsk_history', status: 'awaiting_user', executionId: 'saved', executionRevision: 4,
-      awaitingQuestion: '继续补充', result: { coreRequirements: { userTurns: [original, '确认'] } }, steps: [] } as never);
+    detailQuery.mockResolvedValue({
+      taskId: 'tsk_history',
+      status: 'awaiting_user',
+      executionId: 'saved',
+      executionRevision: 4,
+      awaitingQuestion: '继续补充',
+      result: { coreRequirements: { userTurns: [original, '确认'] } },
+      steps: [],
+    } as never);
     useTaskStore.getState().selectTask('tsk_history', 'ui');
     await flushPromises();
-    expect(useTaskStore.getState().userRepliesByTask.tsk_history?.map(t => t.text)).toEqual([original, '确认']);
+    expect(useTaskStore.getState().userRepliesByTask.tsk_history?.map((t) => t.text)).toEqual([
+      original,
+      '确认',
+    ]);
   });
   it('accepts a newer persisted round after observing an old terminal', async () => {
     useTaskStore.setState({ tasks: [task({ taskId: 'tsk_newdetail', status: 'executing' })] });
-    useTaskStore.getState().applyServerMessage({ taskId: 'tsk_newdetail', type: 'server.task.terminal', executionId: 'old', executionRevision: 1, status: 'completed', summary: '旧结果' });
-    detailQuery.mockResolvedValue({ taskId: 'tsk_newdetail', status: 'awaiting_user', executionId: 'new', executionRevision: 2, awaitingQuestion: '新问题', result: {}, steps: [] } as never);
+    useTaskStore.getState().applyServerMessage({
+      taskId: 'tsk_newdetail',
+      type: 'server.task.terminal',
+      executionId: 'old',
+      executionRevision: 1,
+      status: 'completed',
+      summary: '旧结果',
+    });
+    detailQuery.mockResolvedValue({
+      taskId: 'tsk_newdetail',
+      status: 'awaiting_user',
+      executionId: 'new',
+      executionRevision: 2,
+      awaitingQuestion: '新问题',
+      result: {},
+      steps: [],
+    } as never);
     useTaskStore.getState().selectTask('tsk_newdetail', 'ui');
     await flushPromises();
     expect(useTaskStore.getState().tasks[0]?.status).toBe('awaiting_user');
@@ -2149,61 +2839,149 @@ describe('replyToTask', () => {
   });
   it('does not replace an early core create terminal with its optimistic ACK row', async () => {
     let resolve!: (value: never) => void;
-    createMutate.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    createMutate.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
     listQuery.mockResolvedValue({ tasks: [], nextCursor: null } as never);
     const pending = useTaskStore.getState().createTask('整理合成资料');
     const identity = { taskId: 'tsk_early', executionId: 'first', executionRevision: 1 };
-    useTaskStore.getState().applyServerMessage({ ...identity, type: 'server.task.terminal', status: 'completed', summary: '已保存结果' });
-    resolve({ ...identity, executionMode: 'generate', status: 'executing', admissionState: 'resumed' } as never);
+    useTaskStore.getState().applyServerMessage({
+      ...identity,
+      type: 'server.task.terminal',
+      status: 'completed',
+      summary: '已保存结果',
+    });
+    resolve({
+      ...identity,
+      executionMode: 'generate',
+      status: 'executing',
+      admissionState: 'resumed',
+    } as never);
     await pending;
-    expect(useTaskStore.getState().tasks.find(t => t.taskId === 'tsk_early')).toMatchObject({ status: 'completed', resultText: '已保存结果', intent: '整理合成资料' });
+    expect(useTaskStore.getState().tasks.find((t) => t.taskId === 'tsk_early')).toMatchObject({
+      status: 'completed',
+      resultText: '已保存结果',
+      intent: '整理合成资料',
+    });
   });
   it('keeps the draft and blocks duplicate create after an unconfirmed shell insert', async () => {
-    createMutate.mockResolvedValue({ taskId: 'tsk_uncertain', status: 'executing', executionMode: 'generate', executionId: null, executionRevision: 0, admissionState: 'creationUnconfirmed' } as never);
+    createMutate.mockResolvedValue({
+      taskId: 'tsk_uncertain',
+      status: 'executing',
+      executionMode: 'generate',
+      executionId: null,
+      executionRevision: 0,
+      admissionState: 'creationUnconfirmed',
+    } as never);
     const result = await useTaskStore.getState().createTask('保留这段输入', ['fil_input']);
     expect(result).toHaveProperty('error', expect.stringContaining('未确认'));
-    expect(useTaskStore.getState().tasks.find(t => t.taskId === 'tsk_uncertain')?.status).toBe('unknown');
+    expect(useTaskStore.getState().tasks.find((t) => t.taskId === 'tsk_uncertain')?.status).toBe(
+      'unknown',
+    );
     await useTaskStore.getState().createTask('保留这段输入', ['fil_input']);
     expect(createMutate).toHaveBeenCalledTimes(1);
   });
   it('keeps the composer on an unconfirmed reply and does not re-submit it', async () => {
-    replyMutate.mockResolvedValue({ ok: false, state: 'acceptedUnconfirmed', executionId: 'accepted', executionRevision: 2 } as never);
+    replyMutate.mockResolvedValue({
+      ok: false,
+      state: 'acceptedUnconfirmed',
+      executionId: 'accepted',
+      executionRevision: 2,
+    } as never);
     const result = await useTaskStore.getState().replyToTask('tsk_uncertain', '保留修改');
     expect(result).toHaveProperty('error', expect.stringContaining('未确认'));
     await useTaskStore.getState().replyToTask('tsk_uncertain', '保留修改');
     expect(replyMutate).toHaveBeenCalledTimes(1);
   });
-  it.each(['stream', 'awaiting', 'terminal'] as const)('keeps new %s that arrived before its core reply ACK', async kind => {
-    let resolve!: (value: never) => void;
-    replyMutate.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-    useTaskStore.setState({ tasks: [task({ taskId: 'tsk_order', status: 'awaiting_user' })],
-      awaitingUserByTask: { tsk_order: { question: '旧问题', at: 1 } } });
-    const pending = useTaskStore.getState().replyToTask('tsk_order', '新要求');
-    const identity = { taskId: 'tsk_order', executionId: 'execution_new', executionRevision: 2 };
-    if (kind === 'stream') useTaskStore.getState().applyServerMessage({ ...identity, type: 'server.task.stream', delta: '新内容' });
-    if (kind === 'awaiting') useTaskStore.getState().applyServerMessage({ ...identity, type: 'server.supercar.awaiting_user', question: '新问题', awaitingKind: 'clarification' });
-    if (kind === 'terminal') useTaskStore.getState().applyServerMessage({ ...identity, type: 'server.task.terminal', status: 'completed', summary: '新结果' });
-    resolve({ ...identity, ok: true, state: 'resumed' } as never);
-    await pending;
-    const state = useTaskStore.getState();
-    if (kind === 'stream') expect(state.streamingByTask.tsk_order).toBe('新内容');
-    if (kind === 'awaiting') expect(state.awaitingUserByTask.tsk_order?.question).toBe('新问题');
-    if (kind === 'terminal') expect(state.tasks[0]?.resultText).toBe('新结果');
-  });
+  it.each(['stream', 'awaiting', 'terminal'] as const)(
+    'keeps new %s that arrived before its core reply ACK',
+    async (kind) => {
+      let resolve!: (value: never) => void;
+      replyMutate.mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            resolve = done;
+          }),
+      );
+      useTaskStore.setState({
+        tasks: [task({ taskId: 'tsk_order', status: 'awaiting_user' })],
+        awaitingUserByTask: { tsk_order: { question: '旧问题', at: 1 } },
+      });
+      const pending = useTaskStore.getState().replyToTask('tsk_order', '新要求');
+      const identity = { taskId: 'tsk_order', executionId: 'execution_new', executionRevision: 2 };
+      if (kind === 'stream')
+        useTaskStore
+          .getState()
+          .applyServerMessage({ ...identity, type: 'server.task.stream', delta: '新内容' });
+      if (kind === 'awaiting')
+        useTaskStore.getState().applyServerMessage({
+          ...identity,
+          type: 'server.supercar.awaiting_user',
+          question: '新问题',
+          awaitingKind: 'clarification',
+        });
+      if (kind === 'terminal')
+        useTaskStore.getState().applyServerMessage({
+          ...identity,
+          type: 'server.task.terminal',
+          status: 'completed',
+          summary: '新结果',
+        });
+      resolve({ ...identity, ok: true, state: 'resumed' } as never);
+      await pending;
+      const state = useTaskStore.getState();
+      if (kind === 'stream') expect(state.streamingByTask.tsk_order).toBe('新内容');
+      if (kind === 'awaiting') expect(state.awaitingUserByTask.tsk_order?.question).toBe('新问题');
+      if (kind === 'terminal') expect(state.tasks[0]?.resultText).toBe('新结果');
+    },
+  );
   it('ignores an older terminal after a newer core stream', () => {
     useTaskStore.setState({ tasks: [task({ taskId: 'tsk_order', status: 'awaiting_user' })] });
-    useTaskStore.getState().applyServerMessage({ taskId: 'tsk_order', type: 'server.task.stream', executionId: 'execution_new', executionRevision: 2, delta: '正在生成' });
-    useTaskStore.getState().applyServerMessage({ taskId: 'tsk_order', type: 'server.task.terminal', executionId: 'execution_old', executionRevision: 1, status: 'completed', summary: '过期结果' });
+    useTaskStore.getState().applyServerMessage({
+      taskId: 'tsk_order',
+      type: 'server.task.stream',
+      executionId: 'execution_new',
+      executionRevision: 2,
+      delta: '正在生成',
+    });
+    useTaskStore.getState().applyServerMessage({
+      taskId: 'tsk_order',
+      type: 'server.task.terminal',
+      executionId: 'execution_old',
+      executionRevision: 1,
+      status: 'completed',
+      summary: '过期结果',
+    });
     expect(useTaskStore.getState().tasks[0]?.status).toBe('executing');
     expect(useTaskStore.getState().tasks[0]?.resultText).toBeUndefined();
   });
   it('keeps live content when a detail requested earlier returns after it', async () => {
     let resolve!: (value: never) => void;
-    detailQuery.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    detailQuery.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
     useTaskStore.setState({ tasks: [task({ taskId: 'tsk_order', status: 'executing' })] });
     useTaskStore.getState().selectTask('tsk_order', 'ui');
-    useTaskStore.getState().applyServerMessage({ taskId: 'tsk_order', type: 'server.task.stream', executionId: 'execution_new', executionRevision: 2, delta: '新内容' });
-    resolve({ status: 'awaiting_user', awaitingQuestion: '旧问题', executionId: 'execution_old', executionRevision: 1, steps: [] } as never);
+    useTaskStore.getState().applyServerMessage({
+      taskId: 'tsk_order',
+      type: 'server.task.stream',
+      executionId: 'execution_new',
+      executionRevision: 2,
+      delta: '新内容',
+    });
+    resolve({
+      status: 'awaiting_user',
+      awaitingQuestion: '旧问题',
+      executionId: 'execution_old',
+      executionRevision: 1,
+      steps: [],
+    } as never);
     await flushPromises();
     expect(useTaskStore.getState().streamingByTask.tsk_order).toBe('新内容');
     expect(useTaskStore.getState().awaitingUserByTask.tsk_order).toBeUndefined();
@@ -2254,9 +3032,9 @@ describe('replyToTask', () => {
       },
     });
 
-    await expect(
-      useTaskStore.getState().replyToTask('tsk_wait', '登录好了', []),
-    ).resolves.toEqual({ ok: true });
+    await expect(useTaskStore.getState().replyToTask('tsk_wait', '登录好了', [])).resolves.toEqual({
+      ok: true,
+    });
 
     const state = useTaskStore.getState();
     expect(state.awaitingUserByTask.tsk_wait).toBeUndefined();
@@ -2292,9 +3070,9 @@ describe('replyToTask', () => {
       },
     });
 
-    await expect(
-      useTaskStore.getState().replyToTask('tsk_wait', '等一下', []),
-    ).resolves.toEqual({ ok: true });
+    await expect(useTaskStore.getState().replyToTask('tsk_wait', '等一下', [])).resolves.toEqual({
+      ok: true,
+    });
 
     const state = useTaskStore.getState();
     expect(state.awaitingUserByTask.tsk_wait?.awaitingKind).toBe('browser_action');
@@ -3136,9 +3914,7 @@ describe('applyServerMessage stale live frames after terminal', () => {
     const state = useTaskStore.getState();
     expect(state.webSearchByTask.tsk_done_supercar_aux).toBeUndefined();
     expect(state.thinkingByTask.tsk_done_supercar_aux).toBeUndefined();
-    expect(state.suggestionsByTask.tsk_done_supercar_aux).toEqual([
-      '完成后建议仍应允许到达',
-    ]);
+    expect(state.suggestionsByTask.tsk_done_supercar_aux).toEqual(['完成后建议仍应允许到达']);
   });
 });
 
@@ -3456,9 +4232,7 @@ describe('togglePin', () => {
     starMutate.mockRejectedValueOnce(new Error('offline'));
     useTaskStore.setState({ tasks: [task] });
 
-    await expect(useTaskStore.getState().togglePin('tsk_pinned', false)).rejects.toThrow(
-      'offline',
-    );
+    await expect(useTaskStore.getState().togglePin('tsk_pinned', false)).rejects.toThrow('offline');
 
     expect(useTaskStore.getState().tasks[0]?.starred).toBe(true);
     expect(starMutate).toHaveBeenCalledWith({ taskId: 'tsk_pinned', starred: false });
@@ -3467,9 +4241,7 @@ describe('togglePin', () => {
   it('rethrows missing-row pin failures so callers can roll back their own lists', async () => {
     starMutate.mockRejectedValueOnce(new Error('offline'));
 
-    await expect(useTaskStore.getState().togglePin('older_pin', false)).rejects.toThrow(
-      'offline',
-    );
+    await expect(useTaskStore.getState().togglePin('older_pin', false)).rejects.toThrow('offline');
 
     expect(starMutate).toHaveBeenCalledWith({ taskId: 'older_pin', starred: false });
   });
@@ -3515,3 +4287,439 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   });
   return { promise, resolve };
 }
+
+it.each([false, true])(
+  'retains the existing pet i2v subtype after hydration while a reference clip remains clone (%s)',
+  (clone) => {
+    const task = toUiTask({
+      taskId: 'tsk_pet_hydration',
+      intent: '眨眼',
+      status: 'awaiting_user',
+      createdAt: new Date(),
+      result: {
+        metadata: {
+          lane: 'video_creation_confirm',
+          petModel: 'wan_i2v',
+          videoOptions: {
+            tab: 'pet',
+            petModel: 'wan_i2v',
+            ...(clone ? { referenceVideoFileId: 'file_clip' } : {}),
+          },
+        },
+      },
+    } as never);
+    expect(task.videoType).toBe('pet');
+    expect(task.videoCreationMode).toBe(clone ? undefined : 'pet_i2v');
+  },
+);
+
+it('restores the real generation lane from durable core requirements after failure refresh', () => {
+  const task = toUiTask({
+    taskId: 'tsk_core_fail',
+    intent: '写短文',
+    status: 'failed',
+    createdAt: new Date(),
+    result: { reason: '生成未完成', coreRequirements: { schemaVersion: 1, phase: 'direct' } },
+  } as never);
+  expect(task.executionMode).toBe('generate');
+});
+
+it('keeps pet i2v selected before the server list hydrates the new quote', async () => {
+  createMutate.mockResolvedValueOnce({
+    taskId: 'tsk_pet_quote',
+    status: 'awaiting_user',
+    executionMode: 'generate',
+  } as never);
+  listQuery.mockImplementationOnce(() => new Promise(() => {}));
+  await useTaskStore
+    .getState()
+    .createTask('轻轻眨眼', undefined, undefined, undefined, undefined, undefined, {
+      tab: 'pet',
+      petModel: 'wan_i2v',
+      petImageFileId: 'file_pet',
+      durationSeconds: 5,
+    });
+  expect(useTaskStore.getState().tasks[0]).toMatchObject({
+    taskId: 'tsk_pet_quote',
+    videoType: 'pet',
+    videoCreationMode: 'pet_i2v',
+  });
+});
+
+describe('continue a Chrome-extension wait in the public cloud (FIX-D11)', () => {
+  const waiting: UiTask = {
+    taskId: 'tsk_wait',
+    title: '京东价格',
+    intent: '在京东查一下 iPhone 价格',
+    status: 'awaiting_user',
+    tickCount: 0,
+    createdAt: new Date(),
+    browserSource: 'local-chrome',
+  };
+  it('refuses an identity-required wait', async () => {
+    useTaskStore.setState({
+      tasks: [waiting],
+      awaitingUserByTask: {
+        tsk_wait: {
+          question: 'q',
+          at: 1,
+          awaitingKind: 'permission',
+          browserConnection: { reason: 'extension_offline', publicCloudAllowed: false },
+        },
+      },
+    });
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({
+      error: expect.stringMatching(/登录状态/),
+    });
+    expect(createMutate).not.toHaveBeenCalled();
+  });
+  const publicWait = () =>
+    useTaskStore.setState({
+      tasks: [waiting],
+      awaitingUserByTask: {
+        tsk_wait: {
+          question: 'q',
+          at: 1,
+          awaitingKind: 'permission',
+          browserConnection: { reason: 'extension_offline', publicCloudAllowed: true },
+        },
+      },
+    });
+  const quietRefresh = () => {
+    listQuery.mockResolvedValue({ tasks: [], nextCursor: null } as never);
+    detailQuery.mockResolvedValue({
+      taskId: 'tsk_public',
+      status: 'pending',
+      steps: [],
+      result: null,
+    } as never);
+  };
+  it('cancels the wait first, then creates one public-cloud task bound to the original', async () => {
+    publicWait();
+    quietRefresh();
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_public', status: 'pending' } as never);
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({
+      taskId: 'tsk_public',
+    });
+    const [cancelledAt] = abortMutate.mock.invocationCallOrder;
+    const [createdAt] = createMutate.mock.invocationCallOrder;
+    expect(cancelledAt).toBeLessThan(createdAt ?? 0);
+    expect(createMutate.mock.calls[0]?.[0]).toMatchObject({
+      intent: waiting.intent,
+      browserPreference: 'cloud-public',
+      clientRequestId: 'cloud-continue:tsk_wait',
+      publicCloudContinuationOf: 'tsk_wait',
+    });
+    expect(createMutate.mock.calls[0]?.[0]?.localChrome).toBeUndefined();
+    expect(useTaskStore.getState().browserPreference).toBeNull();
+    // Re-opening the original and pressing again returns the same replacement.
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({
+      taskId: 'tsk_public',
+    });
+    expect(abortMutate).toHaveBeenCalledTimes(1);
+    expect(createMutate).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    [
+      'HTTP 503',
+      () =>
+        abortMutate.mockRejectedValueOnce(
+          Object.assign(new Error('Service Unavailable'), { data: { httpStatus: 503 } }),
+        ),
+    ],
+    [
+      'ok:false (stale)',
+      () => abortMutate.mockResolvedValueOnce({ ok: false, state: 'stale' } as never),
+    ],
+    [
+      'still aborting',
+      () => abortMutate.mockResolvedValueOnce({ ok: true, state: 'aborting' } as never),
+    ],
+  ])(
+    'creates nothing when the cancel is not confirmed (%s), and stays retryable',
+    async (_label, failCancel) => {
+      publicWait();
+      quietRefresh();
+      failCancel();
+      expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({
+        error: expect.stringMatching(/未能确认取消，没有创建新任务/),
+      });
+      expect(createMutate).not.toHaveBeenCalled();
+      expect(useTaskStore.getState().publicCloudContinuationByTask.tsk_wait).toBeUndefined();
+      // A later retry with a confirmed cancel creates exactly one task.
+      abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+      createMutate.mockResolvedValueOnce({ taskId: 'tsk_public', status: 'pending' } as never);
+      expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({
+        taskId: 'tsk_public',
+      });
+      expect(createMutate).toHaveBeenCalledTimes(1);
+    },
+  );
+  it('a double click shares one attempt: one cancel, one create', async () => {
+    publicWait();
+    quietRefresh();
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    let releaseCreate!: (value: unknown) => void;
+    createMutate.mockReturnValueOnce(
+      new Promise((resolve) => {
+        releaseCreate = resolve;
+      }) as never,
+    );
+    const first = useTaskStore.getState().continueInPublicCloud('tsk_wait');
+    const second = useTaskStore.getState().continueInPublicCloud('tsk_wait');
+    await flushPromises();
+    releaseCreate({ taskId: 'tsk_public', status: 'pending' });
+    expect(await first).toEqual({ taskId: 'tsk_public' });
+    expect(await second).toEqual({ taskId: 'tsk_public' });
+    expect(abortMutate).toHaveBeenCalledTimes(1);
+    expect(createMutate).toHaveBeenCalledTimes(1);
+  });
+  it('a network failure after the cancel retries with the same server key and no second cancel', async () => {
+    publicWait();
+    quietRefresh();
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    createMutate.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({
+      error: expect.stringMatching(/原任务已取消.*不会重复创建/),
+    });
+    expect(useTaskStore.getState().publicCloudContinuationByTask.tsk_wait).toEqual({
+      stage: 'cancelled',
+    });
+    // The unknown write may have reached the server: the resend carries the same
+    // key, so the server replays that task instead of creating another.
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_public', status: 'pending' } as never);
+    expect(await useTaskStore.getState().continueInPublicCloud('tsk_wait')).toEqual({
+      taskId: 'tsk_public',
+    });
+    expect(abortMutate).toHaveBeenCalledTimes(1);
+    expect(createMutate).toHaveBeenCalledTimes(2);
+    expect(createMutate.mock.calls.map((call) => call[0]?.clientRequestId)).toEqual([
+      'cloud-continue:tsk_wait',
+      'cloud-continue:tsk_wait',
+    ]);
+    expect(
+      useTaskStore.getState().tasks.filter((task) => task.taskId.startsWith('local_pending_')),
+    ).toEqual([]);
+  });
+  it('the public-cloud choice never leaks into another task created meanwhile', async () => {
+    publicWait();
+    quietRefresh();
+    abortMutate.mockResolvedValueOnce({ ok: true, state: 'cancelled' } as never);
+    let releaseCreate!: (value: unknown) => void;
+    createMutate.mockReturnValueOnce(
+      new Promise((resolve) => {
+        releaseCreate = resolve;
+      }) as never,
+    );
+    const continuing = useTaskStore.getState().continueInPublicCloud('tsk_wait');
+    await flushPromises();
+    expect(useTaskStore.getState().browserPreference).toBeNull();
+    createMutate.mockResolvedValueOnce({ taskId: 'tsk_other', status: 'pending' } as never);
+    await useTaskStore.getState().createTask('打开淘宝查看 iPhone 价格');
+    expect(createMutate.mock.calls[1]?.[0]).not.toHaveProperty('browserPreference');
+    expect(createMutate.mock.calls[1]?.[0]).not.toHaveProperty('publicCloudContinuationOf');
+    releaseCreate({ taskId: 'tsk_public', status: 'pending' });
+    expect(await continuing).toEqual({ taskId: 'tsk_public' });
+  });
+  it('keeps the connection marker from tasks.detail after a refresh', async () => {
+    detailQuery.mockResolvedValueOnce({
+      taskId: 'tsk_wait',
+      status: 'awaiting_user',
+      intent: waiting.intent,
+      steps: [],
+      awaitingQuestion: '需要连接 HOLA DAY Chrome 插件：…',
+      awaitingKind: 'permission',
+      result: {
+        executionMode: 'browser',
+        metadata: {
+          browserSource: 'local-chrome',
+          browserConnection: { reason: 'extension_offline', publicCloudAllowed: false },
+        },
+      },
+    } as never);
+    useTaskStore.setState({ tasks: [{ ...waiting, status: 'executing' }] });
+    useTaskStore.getState().selectTask('tsk_wait', 'ui');
+    await flushPromises();
+    expect(useTaskStore.getState().awaitingUserByTask.tsk_wait?.browserConnection).toEqual({
+      reason: 'extension_offline',
+      publicCloudAllowed: false,
+    });
+  });
+});
+
+describe('frontend audit transport lane recovery', () => {
+  it.each(['去京东查一下 iPhone 15 的价格', '【验收 GitHub】打开 https://github.com/holaday-ai'])(
+    'restores browser lane after reopen: %s',
+    (intent) => {
+      useTaskStore.setState({
+        tasks: [
+          task({ taskId: 'tsk_phase', intent, status: 'executing', executionMode: undefined }),
+        ],
+        terminalTaskIds: new Set(),
+        subStatusByTask: {},
+      });
+      const store = useTaskStore.getState();
+      store.applyServerMessage({
+        type: 'server.vision.tick.start',
+        taskId: 'tsk_phase',
+        tickIndex: 0,
+        mode: 'screenshot',
+      });
+      expect(useTaskStore.getState().tasks[0].executionMode).toBe('browser');
+      expect(
+        shouldConnectTaskBrowserForWorkbench({
+          task: useTaskStore.getState().tasks[0],
+          hasRuntimeTextSignal: false,
+        }),
+      ).toBe(true);
+      const phase = useTaskStore.getState().subStatusByTask.tsk_phase;
+      store.applyServerMessage({
+        type: 'server.supercar.thinking',
+        taskId: 'tsk_phase',
+        summary: '检查页面',
+      });
+      store.applyServerMessage({
+        type: 'server.supercar.web_search',
+        taskId: 'tsk_phase',
+        iteration: 1,
+        query: '价格',
+      });
+      expect(useTaskStore.getState().subStatusByTask.tsk_phase).toEqual(phase);
+      expect(phase?.subStatus).toBe('browsing');
+    },
+  );
+  it('retains the durable browser lane after list refresh without inspecting intent', () => {
+    expect(
+      toUiTask({
+        taskId: 'tsk_refresh',
+        intent: '去京东查价格',
+        status: 'executing',
+        createdAt: new Date(),
+        result: { executionMode: 'browser' },
+      } as never).executionMode,
+    ).toBe('browser');
+  });
+  it('maps real generation stream and clears the phase at completion', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_phase', status: 'executing', executionMode: 'generate' })],
+      terminalTaskIds: new Set(),
+      subStatusByTask: {},
+    });
+    const store = useTaskStore.getState();
+    store.applyServerMessage({ type: 'server.task.stream', taskId: 'tsk_phase', delta: '结果' });
+    expect(useTaskStore.getState().subStatusByTask.tsk_phase?.subStatus).toBe('generating');
+    store.applyServerMessage({
+      type: 'server.task.terminal',
+      taskId: 'tsk_phase',
+      status: 'completed',
+      summary: '结果',
+    });
+    store.applyServerMessage({
+      type: 'server.supercar.thinking',
+      taskId: 'tsk_phase',
+      summary: '迟到事件',
+    });
+    expect(useTaskStore.getState().subStatusByTask.tsk_phase).toBeUndefined();
+    expect(useTaskStore.getState().tasks[0].executionMode).toBe('generate');
+  });
+});
+
+describe('CAPTCHA handoff state', () => {
+  it('resumes the original task and clears only its typed wait on verified handback', () => {
+    useTaskStore.setState({
+      selectedTaskId: 'tsk_captcha',
+      tasks: [
+        {
+          taskId: 'tsk_captcha',
+          title: 'Captcha',
+          intent: 'read',
+          status: 'awaiting_user',
+          tickCount: 2,
+          createdAt: new Date(),
+          awaitingKind: 'captcha',
+        },
+      ],
+      awaitingUserByTask: {
+        tsk_captcha: { question: 'Verify', at: 1, awaitingKind: 'captcha' },
+        tsk_other: { question: 'Other', at: 1 },
+      },
+      browserInteractive: true,
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.vision.captcha_resolved',
+      taskId: 'tsk_captcha',
+      reason: 'auto',
+    });
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      taskId: 'tsk_captcha',
+      status: 'executing',
+      tickCount: 2,
+    });
+    expect(state.awaitingUserByTask.tsk_captcha).toBeUndefined();
+    expect(state.awaitingUserByTask.tsk_other).toBeDefined();
+    expect(state.browserInteractive).toBe(false);
+  });
+  it('does not present a timed-out wait as resumed', () => {
+    useTaskStore.setState({
+      awaitingUserByTask: { tsk_captcha: { question: 'Verify', at: 1, awaitingKind: 'captcha' } },
+    });
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.vision.captcha_resolved',
+      taskId: 'tsk_captcha',
+      reason: 'timeout',
+    });
+    expect(useTaskStore.getState().awaitingUserByTask.tsk_captcha).toBeDefined();
+  });
+});
+
+describe('FIX-34 · generate round handed to the browser lane', () => {
+  const core = { executionId: 'gen', executionRevision: 3 };
+  it('drops the unusable draft and accepts the browser lane events', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_h', status: 'executing', executionMode: 'generate', ...core })],
+    });
+    const apply = useTaskStore.getState().applyServerMessage;
+    apply({ taskId: 'tsk_h', ...core, type: 'server.task.stream', delta: '我来帮你打开' });
+    apply({ taskId: 'tsk_h', type: 'server.task.stream', delta: '忽略' });
+    expect(useTaskStore.getState().streamingByTask.tsk_h).toBe('我来帮你打开');
+    apply({
+      taskId: 'tsk_h',
+      ...core,
+      type: 'server.task.rerouted',
+      to: 'browser',
+      message: '已自动改用云端浏览器重试一次',
+    });
+    expect(useTaskStore.getState().streamingByTask.tsk_h).toBeUndefined();
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      status: 'executing',
+      executionMode: 'browser',
+    });
+    // The browser lane started before the event: the detail is read to catch up.
+    expect(detailQuery).toHaveBeenCalledWith({ taskId: 'tsk_h' });
+    apply({ taskId: 'tsk_h', type: 'server.task.stream', delta: '浏览器读到的价格' });
+    expect(useTaskStore.getState().streamingByTask.tsk_h).toBe('浏览器读到的价格');
+  });
+  it('a stale reroute of an older round is ignored', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_s',
+          status: 'executing',
+          executionMode: 'generate',
+          executionId: 'newer',
+          executionRevision: 4,
+        }),
+      ],
+    });
+    useTaskStore.getState().applyServerMessage({
+      taskId: 'tsk_s',
+      ...core,
+      type: 'server.task.rerouted',
+      to: 'browser',
+      message: 'x',
+    });
+    expect(useTaskStore.getState().tasks[0]?.executionMode).toBe('generate');
+  });
+});

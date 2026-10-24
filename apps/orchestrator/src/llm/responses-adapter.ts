@@ -1,3 +1,6 @@
+import { pino } from 'pino';
+import { isAllowedMcpUrl } from './mcp-url-policy.js';
+import { type ModelConcurrencyGate, modelConcurrencyGate } from './model-concurrency.js';
 import { type ModelOperation, runModelOperation } from './model-operation.js';
 import type { QwenRoute, SafeQwenRouteMetadata } from './qwen-route.js';
 import { toSafeQwenRouteMetadata } from './qwen-route.js';
@@ -5,7 +8,19 @@ import { toSafeQwenRouteMetadata } from './qwen-route.js';
 export type NeutralBuiltinTool =
   | { type: 'web_search' }
   | { type: 'web_extractor' }
-  | { type: 'code_interpreter' };
+  | { type: 'code_interpreter' }
+  | NeutralMcpTool;
+
+/**
+ * Bailian (Model Studio) hosted MCP server over SSE. Authorization is added by
+ * the Qwen adapter from its own DashScope key at request time — never stored
+ * in config, never logged.
+ */
+export interface NeutralMcpTool {
+  type: 'mcp';
+  serverLabel: string;
+  serverUrl: string;
+}
 
 export interface NeutralResponseInputMessage {
   role: 'user' | 'assistant';
@@ -36,21 +51,35 @@ export interface NeutralResponseSource {
   provenance: 'web_search';
 }
 
+/** Non-Qwen brains carry no Alibaba region or endpoint identity. */
+export interface ExternalResponsesMetadata {
+  provider: 'anthropic' | 'openai';
+  model: string;
+  protocol: 'responses';
+  region?: undefined;
+  deploymentScope?: undefined;
+  endpointKind?: undefined;
+}
+
+export type ResponsesProviderMetadata = SafeQwenRouteMetadata | ExternalResponsesMetadata;
+
 export interface NeutralResponsesResult {
   id: string;
-  metadata: SafeQwenRouteMetadata;
+  metadata: ResponsesProviderMetadata;
   text: string;
   sources: NeutralResponseSource[];
   usage: {
     inputTokens: number;
     outputTokens: number;
+    /** Responses input_tokens includes cache hits. */
+    cachedInputTokens?: number | null;
   };
   status: 'completed' | 'incomplete';
   incompleteReason?: 'max_output_tokens';
 }
 
 export interface ResponsesAdapter {
-  readonly metadata: SafeQwenRouteMetadata;
+  readonly metadata: ResponsesProviderMetadata;
   stream(
     request: NeutralResponsesRequest,
     options?: {
@@ -77,10 +106,26 @@ const SAFE_ERROR_MESSAGES: Record<ResponsesAdapterErrorCode, string> = {
 };
 
 const MAX_PENDING_SSE_BYTES = 2 * 1024 * 1024;
+const mcpLog = pino({ level: 'warn', base: { service: 'orchestrator', module: 'responses-mcp' } });
+
+/** Second gate after config validation: never send the key to a non-Bailian host. */
+function isSafeMcpTool(tool: NeutralBuiltinTool): boolean {
+  if (tool.type !== 'mcp' || isAllowedMcpUrl(tool.serverUrl)) return true;
+  let host = 'invalid';
+  try {
+    host = new URL(tool.serverUrl).hostname;
+  } catch {
+    /* keep 'invalid' */
+  }
+  mcpLog.warn({ serverLabel: tool.serverLabel, host }, 'mcp tool dropped: host not allowed');
+  return false;
+}
+
 const ALLOWED_TOOL_TYPES = new Set<NeutralBuiltinTool['type']>([
   'web_search',
   'web_extractor',
   'code_interpreter',
+  'mcp',
 ]);
 
 export class ResponsesAdapterError extends Error {
@@ -96,12 +141,29 @@ export class ResponsesAdapterError extends Error {
 export function createQwenResponsesAdapter(input: {
   route: QwenRoute;
   fetchImpl?: typeof fetch;
+  /** Retries before any stream event for 429/502/503/504 and network errors. Default 2. */
+  maxRetries?: number;
+  retryBaseDelayMs?: number;
+  concurrencyGate?: ModelConcurrencyGate;
 }): ResponsesAdapter {
   if (input.route.protocol !== 'responses') {
     throw new ResponsesAdapterError('PROVIDER_ERROR');
   }
 
   const fetchImpl = input.fetchImpl ?? fetch;
+  const maxRetries =
+    input.maxRetries !== undefined &&
+    Number.isSafeInteger(input.maxRetries) &&
+    input.maxRetries >= 0
+      ? input.maxRetries
+      : DEFAULT_MAX_RETRIES;
+  const retryBaseDelayMs =
+    input.retryBaseDelayMs !== undefined &&
+    Number.isFinite(input.retryBaseDelayMs) &&
+    input.retryBaseDelayMs >= 0
+      ? input.retryBaseDelayMs
+      : DEFAULT_RETRY_BASE_DELAY_MS;
+  const gate = input.concurrencyGate ?? modelConcurrencyGate;
   const metadata = Object.freeze(toSafeQwenRouteMetadata(input.route));
 
   return {
@@ -126,43 +188,74 @@ export function createQwenResponsesAdapter(input: {
               }, options.timeoutMs)
             : undefined;
 
+        let releaseSlot: (() => void) | undefined;
         try {
           if (callerAborted) throw new ResponsesAdapterError('REQUEST_ABORTED');
           let body: string;
           try {
-            body = JSON.stringify(toProviderRequest(request, input.route.model));
-          } catch {
-            throw new ResponsesAdapterError('PROVIDER_ERROR');
-          }
-
-          let response: Response;
-          try {
-            response = await operation.run(() =>
-              fetchImpl(`${input.route.baseURL}/responses`, {
-                method: 'POST',
-                headers: {
-                  'content-type': 'application/json',
-                  accept: 'text/event-stream',
-                  authorization: `Bearer ${input.route.apiKey}`,
-                  ...(input.route.workspaceId
-                    ? { 'x-dashscope-workspace': input.route.workspaceId }
-                    : {}),
-                },
-                body,
-                signal: controller.signal,
-              }),
+            body = JSON.stringify(
+              toProviderRequest(request, input.route.model, input.route.apiKey),
             );
           } catch {
-            if (controller.signal.aborted) {
-              throw abortError({ callerAborted, timedOut });
-            }
             throw new ResponsesAdapterError('PROVIDER_ERROR');
           }
 
-          if (controller.signal.aborted || !response.ok) {
-            operation.cleanup(() => response.body?.cancel() ?? Promise.resolve());
+          let release: () => void;
+          try {
+            release = await gate.acquire(input.route.model, controller.signal);
+          } catch {
+            throw abortError({ callerAborted, timedOut });
+          }
+          releaseSlot = release;
+
+          // Retry only before any stream event has been read, so no partial
+          // text is ever replayed to the caller.
+          let response!: Response;
+          for (let attempt = 0; ; attempt += 1) {
             if (controller.signal.aborted) throw abortError({ callerAborted, timedOut });
-            throw new ResponsesAdapterError('PROVIDER_ERROR', response.status);
+            let candidate: Response | null = null;
+            try {
+              candidate = await operation.run(() =>
+                fetchImpl(`${input.route.baseURL}/responses`, {
+                  method: 'POST',
+                  headers: {
+                    'content-type': 'application/json',
+                    accept: 'text/event-stream',
+                    authorization: `Bearer ${input.route.apiKey}`,
+                    ...(input.route.workspaceId
+                      ? { 'x-dashscope-workspace': input.route.workspaceId }
+                      : {}),
+                  },
+                  body,
+                  signal: controller.signal,
+                }),
+              );
+            } catch {
+              if (controller.signal.aborted) {
+                throw abortError({ callerAborted, timedOut });
+              }
+              // Network error before any response: retryable below.
+            }
+
+            if (candidate && !controller.signal.aborted && candidate.ok) {
+              response = candidate;
+              break;
+            }
+            if (candidate) {
+              const disposed = candidate;
+              operation.cleanup(() => disposed.body?.cancel() ?? Promise.resolve());
+            }
+            if (controller.signal.aborted) throw abortError({ callerAborted, timedOut });
+            const status = candidate?.status ?? null;
+            const retryable = status === null || RETRYABLE_STATUS_CODES.has(status);
+            if (!retryable || attempt >= maxRetries) {
+              throw new ResponsesAdapterError('PROVIDER_ERROR', status);
+            }
+            await waitForRetry(
+              Math.max(retryBaseDelayMs * 2 ** attempt, retryAfterMs(candidate)),
+              controller.signal,
+              () => abortError({ callerAborted, timedOut }),
+            );
           }
           if (!response.body) {
             throw new ResponsesAdapterError('INVALID_RESPONSE', response.status);
@@ -185,6 +278,7 @@ export function createQwenResponsesAdapter(input: {
             throw new ResponsesAdapterError('INVALID_RESPONSE', response.status);
           }
         } finally {
+          releaseSlot?.();
           if (timeoutId !== undefined) clearTimeout(timeoutId);
           options?.signal?.removeEventListener('abort', abortFromCaller);
         }
@@ -193,9 +287,44 @@ export function createQwenResponsesAdapter(input: {
   };
 }
 
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_RETRY_BASE_DELAY_MS = 250;
+const MAX_RETRY_AFTER_MS = 10_000;
+const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504]);
+
+/** Honours a provider Retry-After (seconds or HTTP date), bounded so one header cannot stall a task. */
+function retryAfterMs(response: Response | null): number {
+  const value = response?.headers.get('retry-after')?.trim();
+  if (!value) return 0;
+  const seconds = Number(value);
+  const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(value) - Date.now();
+  return Number.isFinite(ms) && ms > 0 ? Math.min(ms, MAX_RETRY_AFTER_MS) : 0;
+}
+
+async function waitForRetry(
+  delayMs: number,
+  signal: AbortSignal,
+  toError: () => ResponsesAdapterError,
+): Promise<void> {
+  if (signal.aborted) throw toError();
+  if (delayMs <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(toError());
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 function toProviderRequest(
   request: NeutralResponsesRequest,
   model: string,
+  apiKey = '',
 ): Record<string, unknown> {
   return {
     model,
@@ -206,8 +335,18 @@ function toProviderRequest(
     ...(Array.isArray(request.tools)
       ? {
           tools: request.tools
-            .filter((tool) => ALLOWED_TOOL_TYPES.has(tool.type))
-            .map((tool) => ({ type: tool.type })),
+            .filter((tool) => ALLOWED_TOOL_TYPES.has(tool.type) && isSafeMcpTool(tool))
+            .map((tool) =>
+              tool.type === 'mcp'
+                ? {
+                    type: 'mcp',
+                    server_protocol: 'sse',
+                    server_label: tool.serverLabel,
+                    server_url: tool.serverUrl,
+                    headers: { Authorization: `Bearer ${apiKey}` },
+                  }
+                : { type: tool.type },
+            ),
         }
       : {}),
     ...(typeof request.temperature === 'number' && Number.isFinite(request.temperature)
@@ -411,7 +550,17 @@ function normalizeCompletion(
     metadata,
     text,
     sources: extractToolSources(rawCompletion.output),
-    usage: { inputTokens, outputTokens },
+    usage: {
+      inputTokens,
+      outputTokens,
+      ...(isRecord(rawCompletion.usage.input_tokens_details)
+        ? {
+            cachedInputTokens: readTokenCount(
+              rawCompletion.usage.input_tokens_details.cached_tokens,
+            ),
+          }
+        : {}),
+    },
     status,
     ...(incompleteReason ? { incompleteReason } : {}),
   };

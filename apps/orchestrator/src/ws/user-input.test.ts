@@ -1,13 +1,21 @@
-import { beforeAll, describe, expect, it } from 'vitest';
 import { clientVisionUserInputSchema } from '@holaday/shared-types';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import { dispatchUserInput } from './server.js';
-import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 
 it('does not let the legacy input channel bypass a controlled browser runner', async () => {
   const { executor, calls } = fakeExecutor();
-  const binding = browserControlSessions.start({ taskId: 'tsk_owned', userId: 'usr_owner', executor });
-  await dispatchUserInput({ type: 'client.vision.user_input', taskId: 'tsk_owned', kind: 'click', x: 1, y: 2 }, executor, 'usr_owner');
+  const binding = browserControlSessions.start({
+    taskId: 'tsk_owned',
+    userId: 'usr_owner',
+    executor,
+  });
+  await dispatchUserInput(
+    { type: 'client.vision.user_input', taskId: 'tsk_owned', kind: 'click', x: 1, y: 2 },
+    executor,
+    'usr_owner',
+  );
   expect(calls).toEqual([]);
   binding.finish();
 });
@@ -169,11 +177,7 @@ describe('dispatchUserInput — executor dispatch', () => {
 
   it('skips click when coords are missing (schema allows optional, dispatcher is defensive)', async () => {
     const { executor, calls } = fakeExecutor();
-    await dispatchUserInput(
-      { type: 'client.vision.user_input', kind: 'click' },
-      executor,
-      null,
-    );
+    await dispatchUserInput({ type: 'client.vision.user_input', kind: 'click' }, executor, null);
     expect(calls).toHaveLength(0);
   });
 

@@ -1,12 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ServerMessage } from '@holaday/shared-types';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   _resetExtensionToolInFlightForTests,
   extensionToolErrorPayload,
   getActiveTabForExtensionTool,
   handleExtensionToolCall,
-  normalizeScreenshotCaptureDataUrl,
   normalizeNavigateUrl,
+  normalizeScreenshotCaptureDataUrl,
   setExtensionToolTaskStopped,
   waitForTabComplete,
 } from './extension-tools.js';
@@ -211,30 +211,38 @@ describe('extensionToolErrorPayload', () => {
     });
     expect(
       extensionToolErrorPayload(
-        new Error('Cannot access contents of url "https://example.com/". Extension manifest must request permission.'),
+        new Error(
+          'Cannot access contents of url "https://example.com/". Extension manifest must request permission.',
+        ),
+      ),
+    ).toEqual({
+      message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
+      code: 'host_permission',
+    });
+    expect(extensionToolErrorPayload(new Error('Cannot access a chrome-extension:// URL'))).toEqual(
+      {
+        message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
+        code: 'host_permission',
+      },
+    );
+    expect(extensionToolErrorPayload(new Error('Requires activeTab permission'))).toEqual({
+      message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
+      code: 'host_permission',
+    });
+    expect(
+      extensionToolErrorPayload(
+        new Error(
+          'Cannot access contents of the page. Extension manifest must request permission.',
+        ),
       ),
     ).toEqual({
       message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
       code: 'host_permission',
     });
     expect(
-      extensionToolErrorPayload(new Error('Cannot access a chrome-extension:// URL')),
-    ).toEqual({
-      message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
-      code: 'host_permission',
-    });
-    expect(extensionToolErrorPayload(new Error('Requires activeTab permission'))).toEqual({
-      message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
-      code: 'host_permission',
-    });
-    expect(
-      extensionToolErrorPayload(new Error('Cannot access contents of the page. Extension manifest must request permission.')),
-    ).toEqual({
-      message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
-      code: 'host_permission',
-    });
-    expect(
-      extensionToolErrorPayload(new Error("Either the '<all_urls>' or 'activeTab' permission is required.")),
+      extensionToolErrorPayload(
+        new Error("Either the '<all_urls>' or 'activeTab' permission is required."),
+      ),
     ).toEqual({
       message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
       code: 'host_permission',
@@ -1214,7 +1222,9 @@ describe('handleExtensionToolCall', () => {
 
   it('returns the target URL when navigation lands on a Chrome error page', async () => {
     vi.mocked(send).mockClear();
-    const update = vi.fn(async () => ({ id: 2, url: 'https://missing.example/' }) as chrome.tabs.Tab);
+    const update = vi.fn(
+      async () => ({ id: 2, url: 'https://missing.example/' }) as chrome.tabs.Tab,
+    );
     const executeScript = vi.fn(async () => {
       throw new Error('Cannot access contents of url "chrome-error://chromewebdata/".');
     });

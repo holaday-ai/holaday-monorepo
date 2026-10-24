@@ -1,22 +1,24 @@
+import { reconcileNormalVideoParameters, videoParameterIssue } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import {
-  reconcileNormalVideoParameters,
-  videoParameterIssue,
-} from '@holaday/shared-types';
-import {
+  type VideoModel,
   cloneModeFromVideoModel,
   estimateCloneCny,
   estimateIpVideo,
   estimatePerSegmentCny,
   normalVideoModelFromSelection,
-  type VideoModel,
 } from './video';
 
 describe('clone video model contract', () => {
   it('maps only the two visible Wan Animate choices to backend service modes', () => {
     expect(cloneModeFromVideoModel('wan_animate_std')).toBe('wan-std');
     expect(cloneModeFromVideoModel('wan_animate_pro')).toBe('wan-pro');
-    for (const unsupported of ['veo_fast', 'veo_standard', 'happyhorse', 'wanxiang'] as VideoModel[]) {
+    for (const unsupported of [
+      'veo_fast',
+      'veo_standard',
+      'happyhorse',
+      'wanxiang',
+    ] as VideoModel[]) {
       expect(cloneModeFromVideoModel(unsupported)).toBeNull();
     }
   });
