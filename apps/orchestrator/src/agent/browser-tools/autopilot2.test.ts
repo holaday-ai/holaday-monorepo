@@ -37,7 +37,9 @@ describe('1. post-hoc success criteria only annotate a completed browser answer'
     });
     expect(verdict.status).toBe('completed');
     expect(verdict.text).toContain('已打开 3 个标签：A、B、C');
-    expect(verdict.text).toContain('核验提示：only 0 URL(s) found');
+    // FIX-35 复审 #1: the English internal detail is kept for operators, not shown.
+    expect(verdict.notes).toContain('only 0 URL(s) found (global scan fallback), need at least 1');
+    expect(verdict.text).not.toContain('URL(s) found');
     expect(verdict.text).not.toContain('未能给出可验证的结果');
   });
   it('still fails a completed answer that violated a constraint the user stated', () => {
