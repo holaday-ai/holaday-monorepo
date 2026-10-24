@@ -901,6 +901,19 @@ export const serverTaskStreamSchema = z.object({
  * "正在分析整理..." between Firecrawl and the LLM-stream. SPA shows
  * this as a small caption above the streaming output.
  */
+/**
+ * FIX-34: a core (generate) round that produced no answer hands the same task to the browser
+ * lane. The client forgets this round's execution identity so the browser lane's events
+ * (which carry none) are shown, and treats the task as a browser task from now on.
+ */
+export const serverTaskReroutedSchema = z.object({
+  ...executionIdentityFields,
+  type: z.literal('server.task.rerouted'),
+  taskId: z.string(),
+  to: z.literal('browser'),
+  message: z.string(),
+});
+
 export const serverTaskProgressSchema = z.object({
   ...executionIdentityFields,
   type: z.literal('server.task.progress'),
@@ -1032,6 +1045,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverSupercarThinkingSchema,
   serverTaskStreamSchema,
   serverTaskProgressSchema,
+  serverTaskReroutedSchema,
   serverBatchProgressSchema,
   serverExtensionToolCallSchema,
 ]);

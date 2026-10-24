@@ -1764,6 +1764,7 @@ function CloudBrowserPanel({
                     viewportV2={viewportV2}
                     fitMode="contain"
                     displayMode={displayMode}
+                    mobileViewport={isSheet}
                     onStatusChange={(s: CdpScreencastStatus) =>
                       // Reuse the VNC status state — the enum values
                       // overlap exactly so the existing

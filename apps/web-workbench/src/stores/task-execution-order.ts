@@ -24,18 +24,63 @@ export function readExecutionIdentity(value: {
 
 export class TaskExecutionOrder {
   private readonly snapshots = new Map<string, Snapshot>();
+  /** FIX-34: a core round handed to the browser lane; its identity no longer orders events. */
+  private readonly handedOver = new Map<string, ExecutionIdentity>();
   version(taskId: string): number {
     return this.snapshots.get(taskId)?.version ?? 0;
   }
   clear(): void {
     this.snapshots.clear();
+    this.handedOver.clear();
+  }
+  /**
+   * The core round `identity` handed this task to the browser lane, whose events carry no
+   * identity. The task row keeps that identity, so it reads as no identity until a newer
+   * core round (a reply) takes over. `bump` (the live event) invalidates reads in flight; a
+   * row or detail showing the handover (after a reload) retires it quietly.
+   */
+  handOver(
+    taskId: string,
+    value: { executionId?: unknown; executionRevision?: unknown },
+    bump = true,
+  ): void {
+    const read = readExecutionIdentity(value);
+    const identity = read ?? this.snapshots.get(taskId)?.identity;
+    if (!identity || identity === 'invalid') return;
+    const retired = this.handedOver.get(taskId);
+    if (retired && retired.executionRevision >= identity.executionRevision) return;
+    const known = this.snapshots.get(taskId)?.identity;
+    if (known && known.executionRevision > identity.executionRevision) return;
+    this.handedOver.set(taskId, identity);
+    if (bump || known)
+      this.snapshots.set(taskId, {
+        identity: null,
+        terminal: false,
+        version: this.version(taskId) + (bump ? 1 : 0),
+      });
+  }
+  private read(
+    taskId: string,
+    value: { executionId?: unknown; executionRevision?: unknown },
+  ): ExecutionIdentity | null | 'invalid' {
+    const identity = readExecutionIdentity(value);
+    const retired = this.handedOver.get(taskId);
+    if (!retired || !identity || identity === 'invalid') return identity;
+    if (identity.executionRevision > retired.executionRevision) {
+      this.handedOver.delete(taskId);
+      return identity;
+    }
+    return identity.executionRevision === retired.executionRevision &&
+      identity.executionId === retired.executionId
+      ? null
+      : identity;
   }
   seed(
     taskId: string,
     value: { executionId?: unknown; executionRevision?: unknown },
     terminal: boolean,
   ): void {
-    const identity = readExecutionIdentity(value);
+    const identity = this.read(taskId, value);
     if (!identity || identity === 'invalid') return;
     const previous = this.snapshots.get(taskId);
     if (
@@ -59,7 +104,7 @@ export class TaskExecutionOrder {
       afterTerminal?: boolean;
     },
   ): OrderDecision {
-    const identity = readExecutionIdentity(value);
+    const identity = this.read(taskId, value);
     if (identity === 'invalid') return 'reconcile';
     const previous = this.snapshots.get(taskId);
     const known = previous?.identity;

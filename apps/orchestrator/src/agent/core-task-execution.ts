@@ -42,7 +42,11 @@ import {
   type CoreSettlement,
   prepareCoreSettlement,
 } from './core-task-settlement.js';
-import { answerQualityFailure, deliverableAnswer } from './generate-answer-guard.js';
+import {
+  answerQualityFailure,
+  asksForToolCallExample,
+  deliverableAnswer,
+} from './generate-answer-guard.js';
 import { runGenerateTask } from './generate-runner.js';
 
 const CORE_IMAGE_MEDIA_TYPES: ReadonlySet<string> = new Set([
@@ -59,6 +63,8 @@ export type CoreExecutionEvent = ExecutionIdentity &
     | { type: 'stream'; delta: string }
     | { type: 'verifying' }
     | { type: 'unconfirmed' }
+    /** FIX-34: the same task moves to the browser lane; the client drops this round's identity. */
+    | { type: 'rerouted'; to: 'browser'; reason: string }
     | { type: 'settled'; settlement: CoreSettlement }
   );
 export interface CoreExecutionInput {
@@ -89,13 +95,19 @@ export interface CoreExecutionInput {
   resultNotice?: string;
   /** Optional follow-up channel; consumer must use settlement identity in its CAS. */
   afterSettlement?: (settlement: CoreSettlement) => Promise<void>;
+  /**
+   * FIX-34: when the answer is no answer (tool syntax / an opener — the user wanted a page
+   * operated), hand the same task to the browser lane once, uncharged. True when it started;
+   * the core round then ends without a settlement (the browser lane owns the row).
+   */
+  retryInBrowser?: (reason: string) => Promise<boolean>;
   recoveryClock?: CoreRecoveryClock;
   /** Internal integration seam, not a process-wide drain proof or client field. */
   lifetime?: OperationLifetime;
 }
 export interface CoreExecutionStart {
   ack: ExecutionIdentity & { state: 'resumed' | 'acceptedUnconfirmed' | 'notAdmitted' };
-  completion: Promise<'committed' | 'stale' | 'unconfirmed' | 'notDispatched'>;
+  completion: Promise<'committed' | 'stale' | 'unconfirmed' | 'notDispatched' | 'handedOver'>;
 }
 
 /** Server orchestration, not an HTTP endpoint. Authorization, phase selection and
@@ -297,6 +309,29 @@ async function executeCoreTask(
         op = await reviewAndPrepareSettlement(outcome);
       } catch (error) {
         if (error instanceof StaleRound) return 'stale';
+        if (error instanceof BrowserHandOver) {
+          if (!registry.read(handle)) return 'stale';
+          let started = false;
+          try {
+            started = (await input.retryInBrowser?.(error.reason)) === true;
+          } catch {
+            started = false;
+          }
+          if (started) {
+            // Only a retry that started is announced (FIX-34 review): the SPA switches to
+            // the browser lane and catches up on its events from the task detail.
+            safelyPublish(input, {
+              ...identity,
+              type: 'rerouted',
+              to: 'browser',
+              reason: error.reason,
+            });
+            input.logger.info({ taskId: identity.taskId }, 'core-task: handed over to the browser');
+            return 'handedOver';
+          }
+          // The browser retry could not start: the honest failure stands (refunded).
+          return await persistAndPublish(error.fallback);
+        }
         // A local review/preparation error is a known failure, not an
         // uncertain database commit: settle it as failed with readable copy.
         input.logger.warn(
@@ -345,13 +380,17 @@ async function executeCoreTask(
       }
       if (!registry.read(handle)) throw new StaleRound();
       if (!verification || !outcome.generation) throw new Error('CORE_REVIEW_UNAVAILABLE');
+      // The review already sanitised `summary`; the raw text tells whether it was
+      // only tool-call syntax (FIX-33: sanitised to nothing, it is still no answer).
+      const rawSummary = outcome.status === 'completed' ? outcome.summary : '';
+      const toolTextOnly =
+        Boolean(rawSummary) &&
+        !asksForToolCallExample(intent) &&
+        deliverableAnswer(rawSummary) === null;
       // FIX-30: tool-call text, an opener, or a web source nobody read is not an answer.
-      if (status === 'completed' || status === 'partial_success') {
-        // The review already sanitised `summary`; the raw text tells whether it was
-        // only tool-call syntax (FIX-33: sanitised to nothing, it is still no answer).
-        const rawSummary = outcome.status === 'completed' ? outcome.summary : '';
+      if (status === 'completed' || status === 'partial_success' || toolTextOnly) {
         const qualityFailure =
-          (rawSummary && deliverableAnswer(rawSummary) === null ? 'NON_ANSWER' : null) ??
+          (toolTextOnly ? 'NON_ANSWER' : null) ??
           answerQualityFailure(summary, {
             // Read evidence is a source the run actually fetched, or an attachment —
             // never the existence of the source-trust review (always present).
@@ -369,7 +408,7 @@ async function executeCoreTask(
             { taskId: identity.taskId, code: qualityFailure },
             'core-task: answer is not an answer; settling as failed',
           );
-          return prepareCoreSettlement({
+          const failed = prepareCoreSettlement({
             admission,
             status: 'failed',
             result: { reason: 'CORE_EXECUTION_FAILED' },
@@ -378,11 +417,20 @@ async function executeCoreTask(
             sourceTrust: reviewed.sourceTrust,
             qualityFailure,
           });
+          // FIX-34: no answer to a task that needed a page → the browser lane, once.
+          if (qualityFailure === 'NON_ANSWER' && input.retryInBrowser)
+            throw new BrowserHandOver(
+              '模型没有给出答案（只写了浏览器操作指令或开场白），已自动改用云端浏览器重试一次',
+              failed,
+            );
+          return failed;
         }
       }
       // FIX-33: what is delivered carries no tool-call syntax (code blocks stay).
       if (status === 'completed' || status === 'partial_success')
-        summary = deliverableAnswer(summary) ?? summary;
+        summary = asksForToolCallExample(intent)
+          ? summary
+          : (deliverableAnswer(summary) ?? summary);
       if (
         input.resultNotice &&
         (status === 'completed' || status === 'partial_success') &&
@@ -532,6 +580,16 @@ function settlementFor(input: {
 
 /** Thrown inside review when a newer round replaced this one. */
 class StaleRound extends Error {}
+
+/** FIX-34: the review decided to hand this round to the browser; `fallback` if it cannot. */
+class BrowserHandOver extends Error {
+  constructor(
+    readonly reason: string,
+    readonly fallback: CoreSettlement,
+  ) {
+    super('BROWSER_HAND_OVER');
+  }
+}
 
 /** A controlled failure for a locally known error; no model text or raw error is kept. */
 function localFailureSettlement(

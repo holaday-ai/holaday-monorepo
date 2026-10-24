@@ -4673,3 +4673,53 @@ describe('CAPTCHA handoff state', () => {
     expect(useTaskStore.getState().awaitingUserByTask.tsk_captcha).toBeDefined();
   });
 });
+
+describe('FIX-34 · generate round handed to the browser lane', () => {
+  const core = { executionId: 'gen', executionRevision: 3 };
+  it('drops the unusable draft and accepts the browser lane events', () => {
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_h', status: 'executing', executionMode: 'generate', ...core })],
+    });
+    const apply = useTaskStore.getState().applyServerMessage;
+    apply({ taskId: 'tsk_h', ...core, type: 'server.task.stream', delta: '我来帮你打开' });
+    apply({ taskId: 'tsk_h', type: 'server.task.stream', delta: '忽略' });
+    expect(useTaskStore.getState().streamingByTask.tsk_h).toBe('我来帮你打开');
+    apply({
+      taskId: 'tsk_h',
+      ...core,
+      type: 'server.task.rerouted',
+      to: 'browser',
+      message: '已自动改用云端浏览器重试一次',
+    });
+    expect(useTaskStore.getState().streamingByTask.tsk_h).toBeUndefined();
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      status: 'executing',
+      executionMode: 'browser',
+    });
+    // The browser lane started before the event: the detail is read to catch up.
+    expect(detailQuery).toHaveBeenCalledWith({ taskId: 'tsk_h' });
+    apply({ taskId: 'tsk_h', type: 'server.task.stream', delta: '浏览器读到的价格' });
+    expect(useTaskStore.getState().streamingByTask.tsk_h).toBe('浏览器读到的价格');
+  });
+  it('a stale reroute of an older round is ignored', () => {
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_s',
+          status: 'executing',
+          executionMode: 'generate',
+          executionId: 'newer',
+          executionRevision: 4,
+        }),
+      ],
+    });
+    useTaskStore.getState().applyServerMessage({
+      taskId: 'tsk_s',
+      ...core,
+      type: 'server.task.rerouted',
+      to: 'browser',
+      message: 'x',
+    });
+    expect(useTaskStore.getState().tasks[0]?.executionMode).toBe('generate');
+  });
+});

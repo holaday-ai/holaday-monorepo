@@ -31,6 +31,11 @@ export async function createCoreGenerateTask(args: {
   opusUsed: boolean;
   /** Fixed copy appended to a delivered text result (e.g. deferred 配图). */
   resultNotice?: string | null;
+  /**
+   * FIX-34: start the browser retry of this same task (uncharged); true when it started.
+   * Supplied by tasks.create, which owns the browser lane.
+   */
+  retryInBrowser?: (taskId: string, reason: string) => Promise<boolean>;
 }) {
   const { ctx, requirements, blocks } = args;
   if (
@@ -118,6 +123,9 @@ export async function createCoreGenerateTask(args: {
       semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
       publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
       ...(args.resultNotice ? { resultNotice: args.resultNotice } : {}),
+      ...(args.retryInBrowser
+        ? { retryInBrowser: (reason: string) => args.retryInBrowser!(taskId, reason) }
+        : {}),
       ...(requirements.phase === 'direct'
         ? {
             beforeGeneration: (op: CoreAdmission, isCurrent: () => boolean, deadline: number) =>

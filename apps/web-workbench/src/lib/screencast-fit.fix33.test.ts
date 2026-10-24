@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fitDesktopViewportForHost } from './browser-workspace-viewport';
 import {
+  framePixelRatio,
   mapClientPointToBrowserFrame,
   mapClientPointToScreencast,
   placeScreencastActual,
@@ -18,10 +19,16 @@ describe('FIX-33 #4 · the task browser shows the whole page', () => {
       width: 1500,
       height: 900,
     });
-    // Phone sheet: still desktop width, tall but bounded.
-    expect(fitDesktopViewportForHost({ hostWidth: 380, hostHeight: 684 })).toEqual({
-      width: 1280,
-      height: 2304,
+    // FIX-34: a phone sheet gets a mobile viewport at its own size (scale ≈ 1).
+    expect(fitDesktopViewportForHost({ hostWidth: 380, hostHeight: 684, mobile: true })).toEqual({
+      width: 380,
+      height: 684,
+    });
+    // A narrow desktop panel (1024 window) is still a desktop page.
+    expect(fitDesktopViewportForHost({ hostWidth: 471, hostHeight: 835 })?.width).toBe(1280);
+    expect(fitDesktopViewportForHost({ hostWidth: 300, hostHeight: 400, mobile: true })).toEqual({
+      width: 320,
+      height: 480,
     });
     expect(fitDesktopViewportForHost({ hostWidth: 0, hostHeight: 600 })).toBeNull();
   });
@@ -82,5 +89,19 @@ describe('FIX-33 #4 · the task browser shows the whole page', () => {
     });
     expect(v2?.x).toBeCloseTo(1152, 0);
     expect(v2?.y).toBeCloseTo(400, 0);
+  });
+
+  it('FIX-34: 100% without v2 geometry treats a DPR-2 frame as 2× (drawn at half size)', () => {
+    expect(framePixelRatio(2560, 1280)).toBe(2);
+    expect(framePixelRatio(1280, 1280)).toBe(1);
+    expect(framePixelRatio(1440)).toBe(1);
+    expect(framePixelRatio(2880, 1440)).toBe(2);
+    expect(
+      placeScreencastActual({
+        sourceWidth: 2560,
+        sourceHeight: 1600,
+        pixelRatio: framePixelRatio(2560),
+      })?.width,
+    ).toBe(1280);
   });
 });

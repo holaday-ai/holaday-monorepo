@@ -1052,3 +1052,67 @@ describe('transactional core execution with real runner and review', () => {
     );
   });
 });
+
+describe('FIX-34 #4 · a generate round with no answer is retried once in the browser', () => {
+  // The Deploy-34 BestBuy shape: the model wrote browser tool syntax instead of an answer.
+  const toolText =
+    '我来帮你打开 Best Buy 查看。\n<invoke name="browser_navigate">\n' +
+    '<parameter name="url">https://www.bestbuy.com</parameter>\n</invoke>';
+  function noAnswer() {
+    const f = fixture();
+    const stream = f.responses.stream.bind(f.responses);
+    f.responses.stream = async (request) => ({ ...(await stream(request)), text: toolText });
+    f.input.blocks = [{ type: 'text', text: '在 bestbuy.com 搜 airpods，告诉我第一个结果的价格' }];
+    return f;
+  }
+
+  it('hands the same task to the browser and leaves the round unsettled', async () => {
+    const f = noAnswer();
+    const handed: string[] = [];
+    f.input.retryInBrowser = async (reason) => {
+      // Announced only after the retry has started (FIX-34 review).
+      expect(f.events.some((e) => e.type === 'rerouted')).toBe(false);
+      handed.push(reason);
+      return true;
+    };
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('handedOver');
+    expect(handed).toHaveLength(1);
+    expect(f.writes).toHaveLength(0);
+    const rerouted = f.events.filter((e) => e.type === 'rerouted');
+    expect(rerouted).toHaveLength(1);
+    expect(rerouted[0]).toMatchObject({ to: 'browser', executionRevision: expect.any(Number) });
+    expect(f.events.some((e) => e.type === 'settled')).toBe(false);
+  });
+
+  it('settles the honest failure when the browser retry cannot start', async () => {
+    const f = noAnswer();
+    f.input.retryInBrowser = async () => false;
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('committed');
+    expect(f.writes).toHaveLength(1);
+    expect(f.writes[0]?.status).toBe('failed');
+    // Nothing was announced: the SPA stays on the generate round's failure.
+    expect(f.events.some((e) => e.type === 'rerouted')).toBe(false);
+  });
+
+  it('without a browser lane the round fails as before', async () => {
+    const f = noAnswer();
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('committed');
+    expect(f.writes[0]?.status).toBe('failed');
+    expect(f.events.some((e) => e.type === 'rerouted')).toBe(false);
+  });
+
+  it('a real answer is never handed over', async () => {
+    const f = fixture();
+    let called = false;
+    f.input.retryInBrowser = async () => {
+      called = true;
+      return true;
+    };
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('committed');
+    expect(called).toBe(false);
+  });
+});

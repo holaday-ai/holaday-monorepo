@@ -99,6 +99,24 @@ const clean = (value: string) =>
     .trim();
 
 /** Only successful content reads enter this store; listings and navigation receipts do not. */
+/** A currency amount as it appears on a page (S$8.90, SGD 11.46, ¥99, $14.99). */
+const PRICE_SHAPE_RE = /(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?/gi;
+
+/** Appended to a read whose snapshot was cut at its size budget. */
+export const SNAPSHOT_TRUNCATED = '[快照截断：以下内容未读到]';
+
+/**
+ * The cut marker goes where the tree was cut, not after the text that follows it (the
+ * page's other results and their prices came between the cut item and an end marker).
+ */
+function markCut(decoded: string, tree: unknown): string {
+  const tail = typeof tree === 'string' ? tree.trimEnd().slice(-120) : '';
+  const at = tail ? decoded.lastIndexOf(tail) : -1;
+  if (at < 0) return `${decoded}\n${SNAPSHOT_TRUNCATED}`;
+  const end = at + tail.length;
+  return `${decoded.slice(0, end)}\n${SNAPSHOT_TRUNCATED}${decoded.slice(end)}`;
+}
+
 export function observedEvidence(text: string, decoded: string, url?: string): ObservedEvidence {
   let meta: Record<string, unknown> = {};
   try {
@@ -122,7 +140,9 @@ export function observedEvidence(text: string, decoded: string, url?: string): O
       )
     : [];
   return {
-    text: decoded,
+    // FIX-34 (Deploy-34 amazon-sg): a snapshot cut at its budget says so, so 「价格：未获取到」
+    // for the item it ends on is the page's truth, not a missed read.
+    text: meta.truncated === true ? markCut(decoded, meta.tree) : decoded,
     links,
     ...(youtubeCards.length ? { youtubeCards } : {}),
     ...(typeof meta.tabId === 'string' ? { tabId: meta.tabId } : {}),
@@ -142,6 +162,11 @@ export interface FactAssessment {
   /** Quotes the pages never said, with the closest text they did say (FIX-24). */
   misquoted?: Array<{ quote: string; nearest?: string }>;
   /**
+   * FIX-34 (Deploy-34 dy-2): a name the answer hedges (「推断作者为“X”」) that the page
+   * shows as a node of its own — to be written plainly. Never blocks completion.
+   */
+  hedgedNames?: Array<{ label: string; name: string }>;
+  /**
    * FIX-26: facts whose only problem is their source binding — bound to a tab
    * that was never read, or read on another page (named in `where`).
    */
@@ -151,6 +176,11 @@ export interface FactAssessment {
     bound: string;
     where?: string;
   }>;
+  /**
+   * FIX-34: listed prices no read page shows (written for the item a snapshot was cut
+   * at) — when they are the only contradictions, they get their own one correction.
+   */
+  unreadPrices?: string[];
 }
 
 interface Fact {
@@ -519,7 +549,19 @@ function cutQuote(candidates: string[], values: string[]): string | undefined {
 }
 
 const NOT_READ =
-  /^(?:未读到|未读取到|未找到|没有读到|页面未(?:提供|显示|列出)|not (?:shown|found|read)|n\/a)[。.]?$/i;
+  /^(?:未读到|未读取到|未获取到|未找到|没有读到|页面未(?:提供|显示|列出)|not (?:shown|found|read)|n\/a)[。.]?$/i;
+
+const NAME_FIELD = /作者|频道|博主|up\s*主|账号|店铺|author|channel|uploader/i;
+const HEDGE_RE =
+  /推断|推测|疑似|可能(?:是|为)|相关账号|未(?:显式|直接|明确)?(?:展示|显示|给出|标注)|not (?:explicitly )?shown|likely|appears to be/i;
+
+/** The names a hedged value puts forward: 「“小喵麻麻/喵妈”」 → 小喵麻麻, 喵妈. */
+function hedgedCandidates(value: string): string[] {
+  return [...value.matchAll(/[“"「『]([^”"」』\n]{1,40})[”"」』]/g)]
+    .flatMap((m) => (m[1] ?? '').split(/[/／、]/))
+    .map((name) => name.trim().replace(/^[@#]/, ''))
+    .filter((name) => name.length >= 2);
+}
 
 export function assessCompletionFacts(input: {
   summary: string;
@@ -555,6 +597,8 @@ export function assessCompletionFacts(input: {
   const unverified: string[] = [];
   const misquoted: Array<{ quote: string; nearest?: string }> = [];
   const binding: NonNullable<FactAssessment['binding']> = [];
+  const hedged: NonNullable<FactAssessment['hedgedNames']> = [];
+  const unreadPrices: string[] = [];
   const seen = new Set<string>();
   const facts = [...explicitFacts(input.fields), ...answerFacts(input.summary, intent)].flatMap(
     (fact): Fact[] => {
@@ -583,7 +627,24 @@ export function assessCompletionFacts(input: {
     if (seen.has(key)) continue;
     seen.add(key);
     // "未读到" declares a value absent: it claims nothing about the page.
-    if (NOT_READ.test(fact.value.trim())) continue;
+    // FIX-34: 「未获取到（快照截断）」 too — the note explains the absence.
+    if (NOT_READ.test(fact.value.trim()) || NOT_READ.test((withoutNote(fact.value) ?? '').trim()))
+      continue;
+    // FIX-34 (dy-2): a hedge about a name says what the page lacks — not a page quote.
+    // When the page does show one of its names as a node of its own (the author link),
+    // the name is written plainly instead.
+    if (NAME_FIELD.test(fact.name) && HEDGE_RE.test(fact.value)) {
+      // The answer's field stops at 「；」: the names it puts forward follow on its line.
+      const line =
+        unescapeLiteralBreaks(input.summary)
+          .split('\n')
+          .find((l) => l.includes(fact.value)) ?? fact.value;
+      const shown = hedgedCandidates(line).find((name) =>
+        pages.some((page) => page.values.some((v) => v.replace(/^@\s*/, '') === name)),
+      );
+      if (shown) hedged.push({ label: `${fact.name}「${fact.value.slice(0, 120)}」`, name: shown });
+      continue;
+    }
     // The quoted part of a labelled value; a quote's own inner quote is only a piece of it.
     const quoted = fact.quote ? undefined : quotedRuns(fact.value)[0]?.quote;
     const candidates = [fact.value, withoutNote(fact.value), quoted, stripEdgeQuotes(fact.value)]
@@ -675,6 +736,14 @@ export function assessCompletionFacts(input: {
       contradictions.push(`${label} 没有成功读取的页面可以支持（页面未加载或未读取）`);
       continue;
     }
+    // FIX-34 (Deploy-34 amazon-sg): an item's name or price bound to a tab the run never
+    // read is still grounded when a read page shows it beside that same item's title.
+    if (
+      (fact.tabId || fact.sourceURL) &&
+      !eligible.length &&
+      candidates.some((v) => itemShownOnPage(input.summary, v, pages))
+    )
+      continue;
     if ((fact.tabId || fact.sourceURL) && !eligible.length) {
       contradictions.push(`${label} 所属页面（${sourceLabel(fact)}）未成功读取`);
       binding.push({ label, kind: 'unread', bound: sourceLabel(fact) });
@@ -723,13 +792,46 @@ export function assessCompletionFacts(input: {
       const labelled = eligible
         .map((page) => labelledValue(page.values.map(scrub), name, shape))
         .find((run) => run !== undefined);
+      // FIX-34 (Deploy-34 amazon-sg): on a page listing several prices, a price-shaped line
+      // (「kitchen bestsellers under s$30」) belongs to another item; only a single-price
+      // page (one product) can contradict a price that way.
+      const lines = eligible.flatMap((page) => page.lines.map(scrub));
+      const listing =
+        priceValue && new Set(lines.flatMap((line) => line.match(PRICE_SHAPE_RE) ?? [])).size > 1;
       const conflict =
         labelled ??
-        eligible
-          .flatMap((page) => page.lines.map(scrub))
-          .find((line) => /\d/.test(line) && skeleton(line).includes(shape));
+        (listing
+          ? undefined
+          : lines.find((line) => /\d/.test(line) && skeleton(line).includes(shape)));
       if (conflict) {
         contradictions.push(`${label} 与页面不符；页面为「${conflict.trim().slice(0, 120)}」`);
+        continue;
+      }
+      // …but a listed price that no read page shows at all was not read (f34d/f34f: a
+      // price written for the item the snapshot was cut at).
+      if (
+        listing &&
+        new RegExp(`^(?:${PRICE_SHAPE_RE.source})$`, 'i').test(
+          value.replace(/[。.，,]$/, '').trim(),
+        ) &&
+        // A value the answer says it read on a given page is that page's question
+        // (the binding check asks for the page to be read), not a second contradiction.
+        !facts.some(
+          (other) =>
+            (other.tabId || other.sourceURL) &&
+            !pages.some(
+              (page) =>
+                (!other.tabId || page.tabId === other.tabId) &&
+                (!other.sourceURL || sameSource(page.sourceURL, other.sourceURL)),
+            ) &&
+            normalizeFact(withoutNote(other.value) ?? other.value) === value,
+        ) &&
+        !pages.some((page) => candidates.some((v) => page.norm.includes(v)))
+      ) {
+        contradictions.push(
+          `${label} 不在任何已读页面上：列表在该商品处截断时写「未获取到」，或打开该商品页读取后再写`,
+        );
+        unreadPrices.push(label);
         continue;
       }
     }
@@ -789,6 +891,10 @@ export function assessCompletionFacts(input: {
     unverified: unverified.slice(0, 8),
     ...(misquoted.length && misquoted.length === contradictions.length ? { misquoted } : {}),
     ...(binding.length && binding.length === contradictions.length ? { binding } : {}),
+    ...(unreadPrices.length && unreadPrices.length === contradictions.length
+      ? { unreadPrices }
+      : {}),
+    ...(hedged.length ? { hedgedNames: hedged.slice(0, 4) } : {}),
   };
 }
 
@@ -849,4 +955,123 @@ export function nearestPassage(quote: string, pages: ObservedEvidence[]): string
   return best && best.score >= 0.7 && normalizeFact(best.text) !== normalizeFact(quote)
     ? best.text
     : undefined;
+}
+
+const CARD_PRICE_RE = /(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?/gi;
+/** A tree node line: 「- role "name" [ref=…]: text」 (an accessibility snapshot). */
+const TREE_NODE_RE = /^\s*-\s+'?[a-z]/;
+/** A node's own texts: its quoted name and the text after its colon. */
+function nodeTexts(line: string): string[] {
+  const t = line.trim();
+  return [
+    t.match(/"([^"]+)"/)?.[1],
+    t.match(/\]:\s*(.+)$/)?.[1] ?? t.match(/^-\s*'?[a-z]+:\s*(.+)$/)?.[1],
+  ]
+    .filter((v): v is string => Boolean(v?.trim()))
+    .map((v) => normalizeFact(v));
+}
+
+/**
+ * The product card around tree line `at` (协调方复审阻塞 2 / 复审 #2): the largest enclosing
+ * element (by the snapshot's indentation) that is still one product's — no node naming a
+ * different product (any node type; a longer or shorter title is a different one), at most
+ * one distinct price and at most one product link. An amazon listitem holds its title
+ * link, heading, rating and price; the list around it holds the next items.
+ */
+function cardAround(lines: string[], at: number, name: string): string[] | null {
+  if (!TREE_NODE_RE.test(lines[at]!)) return null;
+  const indent = (k: number) => lines[k]!.length - lines[k]!.trimStart().length;
+  const blockEnd = (a: number) => {
+    let e = a + 1;
+    while (e < lines.length && (!lines[e]!.trim() || indent(e) > indent(a))) e++;
+    return e;
+  };
+  const oneProduct = (from: number, to: number) => {
+    const block = lines.slice(from, to);
+    // A card's struck-through list price (「Was: S$23.93」「原价」) is not a second price.
+    const listPrice = new RegExp(
+      String.raw`(?:was|list(?:\s*price)?|typical(?:\s*price)?|rrp|原价|划线价)\s*:?\s*(?:${CARD_PRICE_RE.source})`,
+      'gi',
+    );
+    const text = block.map(normalizeFact).join('\n');
+    // Its value repeats in nodes of its own (「- generic: S$23.93」): drop it everywhere.
+    const listed = new Set(
+      [...text.matchAll(listPrice)].flatMap((m) =>
+        (m[0].match(CARD_PRICE_RE) ?? []).map(normalizeFact),
+      ),
+    );
+    const prices = new Set(
+      (text.match(CARD_PRICE_RE) ?? []).map(normalizeFact).filter((v) => !listed.has(v)),
+    );
+    // Product links: long link texts that are not a price (「S$8.90 Was: S$23.93」).
+    const links = new Set(
+      block.flatMap((line) => {
+        const m = line.trim().match(/^-\s*'?link\s+"([^"]{20,})"/);
+        return m && !new RegExp(CARD_PRICE_RE.source, 'i').test(m[1]!)
+          ? [normalizeFact(m[1]!)]
+          : [];
+      }),
+    );
+    const other = block.some((line) =>
+      nodeTexts(line).some(
+        (t) =>
+          t !== name &&
+          t.length >= 20 &&
+          !new RegExp(CARD_PRICE_RE.source, 'i').test(t) &&
+          // A different product: shares the title (a longer or shorter one), or is a
+          // product link of its own.
+          (t.includes(name) || name.includes(t) || /^-\s*'?link\s/.test(line.trim())),
+      ),
+    );
+    return prices.size <= 1 && links.size <= 1 && !other;
+  };
+  let [start, end] = [at, blockEnd(at)];
+  if (!oneProduct(start, end)) return null;
+  for (let a = at - 1, level = indent(at); a >= 0 && level > 0; a--) {
+    if (!lines[a]!.trim() || indent(a) >= level) continue;
+    level = indent(a);
+    const e = blockEnd(a);
+    if (!oneProduct(a, e)) break;
+    [start, end] = [a, e];
+  }
+  return lines.slice(start, end);
+}
+
+/**
+ * FIX-34: the answer's row holding `value` (as its name or its price), and a read page
+ * whose product card for that row's whole name also shows that price — the same element
+ * block, never a character window that runs into the next card (协调方复审阻塞 2).
+ */
+function itemShownOnPage(
+  summary: string,
+  value: string,
+  pages: ReadonlyArray<{ text: string }>,
+): boolean {
+  const rows = summary
+    .split('\n')
+    .map((line) => normalizeFact(line))
+    .filter((line) => line.includes(value));
+  return rows.some((row) => {
+    const price = row.match(new RegExp(CARD_PRICE_RE.source, 'i'))?.[0];
+    const name = row
+      .replace(/^\s*(?:\d+[.)、]\s*)?(?:名称|商品名?|标题|name)?\s*[:：]?\s*/i, '')
+      .split(/[；;]|\s[—–]\s|(?:价格|售价|price)\s*[:：]/i)[0]
+      ?.trim();
+    if (!price || !name || name.length < 8) return false;
+    const want = normalizeFact(price);
+    return pages.some((page) => {
+      const lines = unescapeLiteralBreaks(page.text).split('\n');
+      return lines.some((line, i) => {
+        const norm = normalizeFact(line);
+        const at = norm.indexOf(name);
+        // The whole name: 「…, 2M」 is not the 「…, 1M」 it shares a prefix with.
+        if (at < 0 || /[\p{L}\p{N}]/u.test(norm[at + name.length] ?? '')) return false;
+        return (cardAround(lines, i, name) ?? []).some((cardLine) =>
+          (normalizeFact(cardLine).match(CARD_PRICE_RE) ?? []).some(
+            (shown) => normalizeFact(shown) === want,
+          ),
+        );
+      });
+    });
+  });
 }

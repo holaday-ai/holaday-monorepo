@@ -776,7 +776,7 @@ const DECLARED_NO_PRICE_RE =
 
 /** A state the page shows instead of a price (Amazon 「See options」, JD 「已下架」). */
 const NO_PRICE_STATE_RE =
-  /see (?:all buying )?options|no featured offers|currently unavailable|cannot be shipped|not available|unavailable|暂无报价|暂无价格|已下架|下架|无货|缺货|售罄|不可配送|无法配送/i;
+  /\[快照截断|see (?:all buying )?options|no featured offers|currently unavailable|cannot be shipped|not available|unavailable|暂无报价|暂无价格|已下架|下架|无货|缺货|售罄|不可配送|无法配送/i;
 
 /**
  * PR #294 review: the page itself must show the gap. The row's item name is on a page
@@ -794,11 +794,30 @@ function pageLacksPrice(name: string | null, pageText: string): boolean {
   if (key.length < 4) return false;
   const text = flat(pageText);
   for (let at = text.indexOf(key); at >= 0; at = text.indexOf(key, at + 1)) {
-    const after = text.slice(at + key.length, at + key.length + 500);
-    const state = after.search(NO_PRICE_STATE_RE);
-    if (state >= 0 && !PRICE_TOKEN_RE.test(after.slice(0, state))) return true;
+    // FIX-34: the cut can come well after a long title (rating and review nodes) — the
+    // snapshot's own end marker is looked for further than a row's own state words.
+    const after = text.slice(at + key.length, at + key.length + 2000);
+    const cut = after.indexOf(SNAPSHOT_CUT);
+    const state = cut >= 0 ? cut : after.slice(0, 500).search(NO_PRICE_STATE_RE);
+    if (state >= 0 && !PRICE_TOKEN_RE.test(withoutPriceCaps(after.slice(0, state)))) return true;
   }
   return false;
+}
+
+const SNAPSHOT_CUT = '[快照截断';
+/**
+ * 「Kitchen bestsellers under S$30」「¥99 以下」 name a price band, not this item's price
+ * (Deploy-34 amazon-sg: a carousel heading between the cut item and the cut).
+ */
+function withoutPriceCaps(text: string): string {
+  return text.replace(/heading "[^"]*"/g, ' ').replace(
+    new RegExp(
+      // Not 「from S$x」: that is often the item's own (lowest) price.
+      String.raw`(?:under|below|over|less than|up to|低于|不到|以下|以上)\s*(?:${PRICE_TOKEN_RE.source})|(?:${PRICE_TOKEN_RE.source})\s*(?:以下|以内|以上)`,
+      'gi',
+    ),
+    ' ',
+  );
 }
 
 /**

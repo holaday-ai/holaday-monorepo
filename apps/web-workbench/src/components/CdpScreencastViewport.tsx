@@ -19,6 +19,7 @@ import {
 } from '@/lib/browser-workspace-viewport';
 import { hdDebug } from '@/lib/hd-debug';
 import {
+  framePixelRatio,
   mapClientPointToBrowserFrame,
   mapClientPointToScreencast,
   placeScreencastActual,
@@ -85,6 +86,8 @@ interface Props {
    * panel keeping its aspect ratio; `actual` shows it 1:1 and the panel scrolls.
    */
   displayMode?: 'fit' | 'actual';
+  /** FIX-34: the phone sheet — the remote page uses its mobile layout. */
+  mobileViewport?: boolean;
   viewportV2?: boolean;
   /** Explicit desktop profile; panel size never silently changes it. */
   desktopViewport?: BrowserViewportSize;
@@ -131,6 +134,7 @@ export function CdpScreencastViewport({
   onUrlChange,
   fitMode = 'contain',
   displayMode = 'fit',
+  mobileViewport = false,
   viewportV2 = false,
   desktopViewport,
   className,
@@ -299,6 +303,7 @@ export function CdpScreencastViewport({
                 : (fitDesktopViewportForHost({
                     hostWidth: host.clientWidth,
                     hostHeight: host.clientHeight,
+                    mobile: mobileViewport,
                   }) ?? undefined),
           })
         : browserViewportForHost({ hostWidth: rect.width, hostHeight: rect.height });
@@ -347,6 +352,7 @@ export function CdpScreencastViewport({
     viewportV2,
     desktopWidth,
     desktopHeight,
+    mobileViewport,
     invalidateGeometry,
   ]);
   React.useEffect(() => {
@@ -377,7 +383,11 @@ export function CdpScreencastViewport({
           ? placeScreencastActual({
               sourceWidth: srcW,
               sourceHeight: srcH,
-              pixelRatio: geometry?.cssWidth ? srcW / geometry.cssWidth : 1,
+              // FIX-34: without v2 geometry, a frame wider than the CSS viewport the panel
+              // asked for is a device-scale capture (DPR 2 → drawn at half size).
+              pixelRatio: geometry?.cssWidth
+                ? srcW / geometry.cssWidth
+                : framePixelRatio(srcW, lastViewportRef.current?.width),
             })
           : place({
               hostWidth: viewportV2 ? host.clientWidth : rect.width,

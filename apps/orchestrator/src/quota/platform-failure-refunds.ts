@@ -42,8 +42,17 @@ export function platformFailureReason(task: {
   status: string;
   errorCode: string | null;
   errorMessage: string | null;
+  sourceContext?: unknown;
 }): string | null {
   if (task.status !== 'failed') return null;
+  // FIX-34 review: our generate round gave no answer and we moved the task to the
+  // browser; if that retry fails too, it is refunded as the NON_ANSWER would have been.
+  if (
+    task.sourceContext &&
+    typeof task.sourceContext === 'object' &&
+    (task.sourceContext as { reroutedFrom?: unknown }).reroutedFrom === 'generate'
+  )
+    return 'GENERATE_REROUTED_FAILED';
   if (task.errorCode === 'CORE_EXECUTION_FAILED')
     return task.errorMessage && PLATFORM_CORE_REASONS.has(task.errorMessage)
       ? 'CORE_PLATFORM_FAILURE'
@@ -97,6 +106,7 @@ export async function sweepPlatformFailureRefunds(
       status: tasks.status,
       errorCode: tasks.errorCode,
       errorMessage: tasks.errorMessage,
+      sourceContext: tasks.sourceContext,
     })
     .from(quotaRefunds)
     .innerJoin(tasks, eq(tasks.externalId, quotaRefunds.taskExternalId))

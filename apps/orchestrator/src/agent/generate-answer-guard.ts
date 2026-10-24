@@ -47,7 +47,11 @@ export function answerQualityFailure(
   if (!text) return null;
   // Tool-call syntax (in code too) with nothing of substance left — only an
   // opener, or a few characters. A JSON or tag example inside an explanation is an answer.
-  if (hasToolCallMarkup(text) && !substantive(stripToolCallMarkup(text, { code: true })))
+  if (
+    !asksForToolCallExample(opts.intent ?? '') &&
+    hasToolCallMarkup(text) &&
+    !substantive(stripToolCallMarkup(text, { code: true }))
+  )
     return 'NON_ANSWER';
   if (openerOnly(text)) return 'NON_ANSWER';
   if (!opts.readSources && !pastedMaterial(opts.userMaterial ?? '') && CLAIMED_SOURCE_RE.test(text))
@@ -57,6 +61,16 @@ export function answerQualityFailure(
   if (!opts.readSources && PRICE_RE.test(text) && namedSiteSearch(opts.intent ?? ''))
     return 'UNREAD_LISTING';
   return null;
+}
+
+/**
+ * FIX-34 (FIX-33 review): the user asked for a tool-call / function-call example or its
+ * format — tool syntax is then the answer, not a leak.
+ */
+const TOOL_EXAMPLE_RE =
+  /(?:工具调用|函数调用|调用工具|tool[ _-]?(?:call|use)s?|function[ _-]?call(?:ing|s)?)[^。？?\n]{0,24}(?:示例|例子|样例|样本|格式|模板|怎么写|如何写|写法|json|xml|example|sample|format|template)|(?:示例|例子|样例|example|sample)[^。？?\n]{0,16}(?:工具调用|函数调用|tool[ _-]?call|function[ _-]?call)/i;
+export function asksForToolCallExample(intent: string): boolean {
+  return TOOL_EXAMPLE_RE.test(intent);
 }
 
 /**
@@ -91,7 +105,8 @@ export const TOOL_CALL_TEXT_ONLY = Object.freeze({
  * and/or an opener is left — such a result must not be marked completed.
  */
 export function deliverableAnswer(answer: string): string | null {
-  if (!hasToolCallMarkup(answer)) return answer;
+  // No tool syntax: only the internal element refs (FIX-34) can be dropped.
+  if (!hasToolCallMarkup(answer)) return stripToolCallMarkup(answer);
   const shown = stripToolCallMarkup(answer);
   return substantive(stripToolCallMarkup(answer, { code: true })) && shown.trim() ? shown : null;
 }

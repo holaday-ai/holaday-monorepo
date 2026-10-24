@@ -117,7 +117,7 @@ function fakeDbWithAffectedRows(affectedRows: number) {
 
   const transaction = async (cb: (tx: unknown) => Promise<void>) => {
     captured.transactionRan = true;
-    await cb({ update, insert });
+    await cb({ select, update, insert });
   };
 
   const db = { select, update, insert, transaction } as unknown as DB;
@@ -296,7 +296,7 @@ function fakeDbForStateTransitions(affectedRows = 1) {
 
   const transaction = async (cb: (tx: unknown) => Promise<void>) => {
     captured.transactionRan = true;
-    await cb({ update, insert });
+    await cb({ select, update, insert });
   };
 
   const db = { select, update, insert, transaction } as unknown as DB;
@@ -1838,5 +1838,43 @@ describe('TaskRepository task terminal state persistence', () => {
     const result = await repo.repromptVideoConfirm('tsk_state_machine', '请选择一个操作');
 
     expect(result.persisted).toBe(false);
+  });
+});
+
+describe('TaskRepository.adoptTaskForBrowserRetry (FIX-34)', () => {
+  const adopt = (from?: 'scrape' | 'generate') => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
+    return new TaskRepository(db)
+      .adoptTaskForBrowserRetry({
+        taskExternalId: 'tsk_fixture',
+        userId: 1,
+        status: 'executing',
+        sourceContext: {},
+        reason: 'r',
+        ...(from ? { from } : {}),
+      })
+      .then((res) => ({ res, captured }));
+  };
+  it('a generate hand-over leaves a legacy row: no core identity or record behind', async () => {
+    const { res, captured } = await adopt('generate');
+    expect(res.persisted).toBe(true);
+    expect(captured.taskUpdate).toMatchObject({
+      executionId: null,
+      executionRevision: 0,
+      coreRecordVersion: 0,
+      result: { executionMode: 'browser' },
+      sourceContext: { reroutedFrom: 'generate' },
+    });
+    expect(captured.eventPayload?.payload).toEqual({
+      from: 'generate',
+      to: 'browser',
+      reason: 'r',
+    });
+  });
+  it('a scrape retry keeps the row head as it was', async () => {
+    const { captured } = await adopt();
+    expect(captured.taskUpdate).not.toHaveProperty('executionId');
+    expect(captured.taskUpdate?.sourceContext).toEqual({});
+    expect(captured.eventPayload?.payload).toMatchObject({ from: 'scrape' });
   });
 });

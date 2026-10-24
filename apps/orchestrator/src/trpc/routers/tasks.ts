@@ -10,6 +10,7 @@ import {
   newExternalId,
   normalizeSkillIds,
   skillById,
+  stripToolCallBlocks,
   videoParameterIssue,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
@@ -34,7 +35,7 @@ import {
   runDirectOpen,
   verifyDirectOpenUrlSafety,
 } from '../../agent/direct-open.js';
-import { deliverableAnswer } from '../../agent/generate-answer-guard.js';
+import { asksForToolCallExample, deliverableAnswer } from '../../agent/generate-answer-guard.js';
 import { type GenerateOutcome, runGenerateTask } from '../../agent/generate-runner.js';
 import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
 import {
@@ -3960,6 +3961,26 @@ export const tasksRouter = router({
                   // Batch 05 wired the image/video lanes back to real executors.
                   mediaLaneAvailable: true,
                 }),
+                // FIX-34: a generate round with no answer (tool syntax / an opener) is the
+                // same task wanting a page operated — the browser lane takes it once, uncharged.
+                retryInBrowser: async (taskId: string, reason: string) => {
+                  try {
+                    await tasksRouter
+                      .createCaller({
+                        ...ctx,
+                        scrapeBrowserRetry: { taskId, reason, from: 'generate' },
+                      })
+                      .create(scrapeBrowserRetryInput(input));
+                    ctx.logger.info({ taskId, reason }, 'generate: handed over to browser retry');
+                    return true;
+                  } catch (err) {
+                    ctx.logger.warn(
+                      { taskId, err: err instanceof Error ? err.message : String(err) },
+                      'generate: browser retry could not start',
+                    );
+                    return false;
+                  }
+                },
               });
             }
 
@@ -5579,6 +5600,7 @@ export const tasksRouter = router({
                   status: willQueueDispatch ? 'queued' : 'executing',
                   sourceContext: browserSourceContext,
                   reason: scrapeBrowserRetry.reason,
+                  ...(scrapeBrowserRetry.from ? { from: scrapeBrowserRetry.from } : {}),
                 });
                 if (!adopted.persisted)
                   throw new TRPCError({ code: 'CONFLICT', message: 'BROWSER_RETRY_TASK_CHANGED' });
@@ -7488,7 +7510,12 @@ export const tasksRouter = router({
                       // computer_20251124 traces leaks here more often than
                       // in the generate / scrape lanes.
                       if (outcome.status === 'completed' && outcome.summary) {
-                        const cleaned = sanitizeFinalText(outcome.summary);
+                        const sanitised = sanitizeFinalText(outcome.summary);
+                        // FIX-34 review #2: an unasked ```json tool-call block is not shown
+                        // on the browser lane either.
+                        const cleaned = asksForToolCallExample(input.intent)
+                          ? sanitised
+                          : stripToolCallBlocks(sanitised);
                         if (cleaned !== outcome.summary) {
                           outcome = { ...outcome, summary: cleaned };
                         }

@@ -15,6 +15,7 @@
 import type { AkshareClient } from './akshare-client.js';
 import {
   QA_DISCLAIMER_BLOCK,
+  ashareIntraday,
   buildFactContext,
   buildPanoramaContext,
   fetchFactData,
@@ -22,6 +23,7 @@ import {
   fetchPerfData,
   fetchRiskData,
   fetchStarData,
+  livePrices,
   renderFactCard,
   renderPanoramaBody,
   renderPerfSection,
@@ -97,6 +99,7 @@ export const ASHARE_QA_GUIDANCE = [
   '> 本助手仅做客观信息聚合，**不提供买卖建议、不预测涨跌、不做投资判断**。',
   '',
   QA_DISCLAIMER_BLOCK,
+  ashareIntraday,
 ].join('\n');
 
 function buildSystem(skillMarkdown: string, kind: AshareQaMatch['kind']): string {
@@ -114,7 +117,9 @@ function buildSystem(skillMarkdown: string, kind: AshareQaMatch['kind']): string
     '3. **严禁**预测未来涨跌；只陈述「已发生的事实」与「可能的关联」，且关联用「或与…有关」「可能受…影响」这类措辞；',
     '   **不要用「后市/后续走势/未来表现/有望/看好」等前瞻措辞**——只做过去异动的因素归纳，不对将来下判断；',
     '4. 若上下文不足以归因，直接写「暂无足够公开信息支持本次异动归因」；',
-    `5. **段落最后一行必须原样写**：「${FIXED_TAIL}」。`,
+    // FIX-34：价格的时间口径跟着上下文走，最近收盘不是「当前价」。
+    '5. 提到价格时按上下文标注的口径写（「最近收盘（日期）」或「实时报价（行情时间）」），**不得把最近收盘称作当前价/现价/实时价**；',
+    `6. **段落最后一行必须原样写**：「${FIXED_TAIL}」。`,
     '不要复述①②的数据，不要写标题，直接输出 bullet + 最后那行固定话术。',
   ].join('\n');
 }
@@ -201,7 +206,15 @@ export async function runAshareQa(
   // 仅放宽 get_kline 取近1年序列本地算；取数失败/不足仅跳过走势层，不影响 ①②③）。
   if (deps.perfTrend) {
     try {
-      const perf = await fetchPerfData(deps.client, match);
+      const perf = await fetchPerfData(
+        deps.client,
+        match,
+        livePrices(
+          data.perStock.map((p) => ({ symbol: p.stock.symbol, quote: p.quote })),
+          now,
+          data.intraday ?? ashareIntraday(now),
+        ),
+      );
       const perfLines = renderPerfStar(data, perf);
       if (perfLines.length) body = `${body}\n${perfLines.join('\n')}`;
     } catch (e) {
@@ -297,6 +310,7 @@ export const SECTION7_SYSTEM = `# 角色
 - 不要用「今年/本季度/最近/目前」代替报告期去说财务数字或盈亏状态；要说扭亏或亏损，就写清是哪一期（如「2025年报扭亏，但2026Q1又亏了」）。
 ## 红线4 · 必须标数据时效
 - 收尾按口径分别标，如：（盘面截至收盘、财务基于2026Q1财报、估值截至06-14）。具体期次以上文为准；某维度缺时效就不引用其数字。
+- 价格只能按上文标注的口径说：「最近收盘（日期）」就说最近收盘，不得称「当前价/现价/实时价」；只有上文写了「实时报价…行情时间」才可以说当前价，并带行情时间。
 ## 红线5 · 固定收尾（原样照抄）
 - 最后一句必须原样写：以上为客观信息聚合，未经证实，不构成任何投资建议。
 
@@ -403,7 +417,18 @@ export async function runAsharePanorama(
   // 腿A 确定性、零新增 LLM、**不进 ⑦ 上下文**（F5 跨项串联=腿B 留后续）；取数失败/不足仅跳过该段。
   if (deps.perfTrend) {
     try {
-      const perf = await fetchPerfData(deps.client, match);
+      const perf = await fetchPerfData(
+        deps.client,
+        match,
+        livePrices(
+          data.perStock.map((p) => ({
+            symbol: p.stock.symbol,
+            quote: data.bySymbol[p.stock.symbol]?.quote,
+          })),
+          now,
+          data.intraday ?? ashareIntraday(now),
+        ),
+      );
       const perfLines = renderPerfSection(data, perf);
       if (perfLines.length) body = `${body}\n${perfLines.join('\n')}`;
     } catch (e) {

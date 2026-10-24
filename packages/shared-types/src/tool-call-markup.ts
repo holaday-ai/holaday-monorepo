@@ -15,7 +15,8 @@ const TAG_RE = new RegExp(String.raw`</?${TAG_NAME}\b[^<>]*/?>`, 'gi');
 /** A line that is nothing but a tool name: `browser_use`, `computer_use`, `tool_call`. */
 const TOOL_NAME_LINE_RE = /^[ \t]*[a-z]+_(?:use|call)[ \t]*$/gim;
 /** Where a JSON tool call starts: `{"action":`, `{ "tool_name":`, `{"function":`. */
-const TOOL_JSON_START_RE = /\{\s*"(?:action|tool|tool_name|tool_use|function|function_call)"\s*:/g;
+const TOOL_JSON_START_RE =
+  /\{\s*(?:"(?:action|tool|tool_name|tool_use|function|function_call)"\s*:|"name"\s*:\s*"(?:[a-z]+_(?:use|call)|[\w.-]+"\s*,\s*"(?:arguments|parameters|input|args))")/g;
 const CODE_RE = /```[\s\S]*?(?:```|$)|`[^`\n]+`/g;
 
 /** End index (exclusive) of the balanced `{…}` starting at `start`, or -1. */
@@ -49,11 +50,78 @@ function stripToolJson(text: string): string {
   return out + text.slice(from);
 }
 
-function stripPlain(text: string): string {
+/**
+ * FIX-34 (FIX-33 review): only a tool-call *structure* is removed. A tag named like a
+ * tool artifact (`tool_call`, `li_call`, `function_calls`, `computer_use`, any
+ * `ns:` tag), an `invoke name=…`, a tool JSON or a bare `browser_use` line is one; a lone
+ * `<function>` / `<parameter>` / `<arguments>` in prose (「用 <function> 包住函数名」) is a
+ * word, and stays unless such a structure is present in the same text.
+ */
+const STRUCTURE_RE =
+  /<\/?(?:[a-z][\w-]*:[a-z][\w-]*|(?:[a-z]+_)+[a-z]+)\b[^<>]*>|<invoke\s+name=|<(?:function|parameter|invoke|tool)=[\w.-]+\s*>|<(?:function|arguments?|parameters?|args)\b[^<>]*>\s*[a-z]+_(?:use|call)\b/i;
+
+function hasStructure(text: string): boolean {
+  return (
+    STRUCTURE_RE.test(text) ||
+    new RegExp(TOOL_JSON_START_RE.source).test(text) ||
+    new RegExp(TOOL_NAME_LINE_RE.source, 'im').test(text)
+  );
+}
+
+function stripPlain(text: string, structured = hasStructure(text)): string {
+  if (!structured) return text;
   return stripToolJson(text.replace(PAIRED_RE, '').replace(TAG_RE, '')).replace(
     TOOL_NAME_LINE_RE,
     '',
   );
+}
+
+/**
+ * FIX-34: the cloud browser's internal element refs (「Google Logo（ref=e23）」, 「标题
+ * ref=e255」) are page-snapshot handles, not something the user can read or use. `REFS`
+ * is one ref or a run of them (「ref=e12、e13、e23」).
+ */
+const REFS = String.raw`ref=e\d+(?:\s*[、,，/和及–~-]\s*(?:ref=)?e\d+)*\b`;
+const INTERNAL_REF_RES: Array<[RegExp, string]> = [
+  // 「（ref=e23）」「（ref=e12、e13）」: the whole parenthetical goes.
+  [new RegExp(String.raw`\s*[（(]\s*${REFS}\s*[)）]`, 'g'), ''],
+  [/\s*\[ref=e\d+\]/g, ''],
+  // 「（h2，ref=e36）」 → 「（h2）」; 「（ref=e77，frame …）」 → 「（frame …）」.
+  [new RegExp(String.raw`\s*[，,、；;]\s*${REFS}(?=\s*[)）])`, 'g'), ''],
+  [new RegExp(String.raw`(?<=[（(])\s*${REFS}\s*[，,、；;]\s*`, 'g'), ''],
+  // 「对应 snapshot 中的 ref=e12、e13。」 still names something: 「…中的相应元素。」
+  [new RegExp(String.raw`(?<=的)\s*${REFS}(?=\s*[。；;，,])`, 'g'), '相应元素'],
+  // Never inside a URL or a word (「/dp/B0?ref=e23」「preference=e5」).
+  [new RegExp(String.raw`[ \t]?(?<![?&=/#.\w-])${REFS}`, 'g'), ''],
+];
+
+function stripRefs(text: string): string {
+  if (!text.includes('ref=e')) return text;
+  return INTERNAL_REF_RES.reduce((out, [re, to]) => out.replace(re, to), text);
+}
+
+/**
+ * A fenced code block that is nothing but a browser/computer tool call written as JSON
+ * (「```json {"name":"browser_use","arguments":{…}}```」). Not a generic JSON example:
+ * `{"action":"deploy"}` explained in prose stays.
+ */
+const TOOL_CALL_JSON_RE =
+  /"name"\s*:\s*"[\w.-]*(?:_use|_call|browser|computer)[\w.-]*"|"(?:tool|tool_name|tool_use|function|function_call)"\s*:|"action"\s*:\s*"(?:navigate|goto|open|click|left_click|double_click|right_click|type|key|scroll|screenshot|snapshot|read_page|get_page_text|wait|wait_for|mouse_move|finish)"/i;
+const FENCED_RE = /```[\w-]*[ \t]*\n?([\s\S]*?)(?:```|$)/g;
+
+/**
+ * FIX-34 (协调方复审阻塞 3): removes fenced blocks that are only a tool-call JSON. Callers
+ * apply it unless the user asked for such an example (`asksForToolCallExample`).
+ */
+export function stripToolCallBlocks(text: string): string {
+  let removed = false;
+  const out = text.replace(FENCED_RE, (block, inner: string) => {
+    const body = inner.trim();
+    if (!/^[[{]/.test(body) || !TOOL_CALL_JSON_RE.test(body)) return block;
+    removed = true;
+    return '';
+  });
+  return removed ? tidy(out) : text;
 }
 
 /** True when the text carries tool-call syntax anywhere (code included). */
@@ -66,15 +134,16 @@ export function hasToolCallMarkup(text: string): boolean {
  * `code: true` also inside code (what is left to judge as an answer).
  */
 export function stripToolCallMarkup(text: string, opts: { code?: boolean } = {}): string {
-  if (opts.code) return tidy(stripPlain(text.replace(/```\w*/g, ' ')));
+  if (opts.code) return tidy(stripRefs(stripPlain(text.replace(/```\w*/g, ' '))));
   let out = '';
   let from = 0;
+  const structured = hasStructure(text.replace(CODE_RE, ' '));
   for (const match of text.matchAll(CODE_RE)) {
     const start = match.index ?? 0;
-    out += stripPlain(text.slice(from, start)) + match[0];
+    out += stripRefs(stripPlain(text.slice(from, start), structured)) + match[0];
     from = start + match[0].length;
   }
-  const stripped = out + stripPlain(text.slice(from));
+  const stripped = out + stripRefs(stripPlain(text.slice(from), structured));
   return stripped === text ? text : tidy(stripped);
 }
 

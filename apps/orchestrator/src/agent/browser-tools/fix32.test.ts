@@ -418,3 +418,63 @@ describe('review 4: the handover says why the page was masked', () => {
     }
   }, 60_000);
 });
+
+describe('FIX-34 (f34l amazon-sg): a price no read page shows gets its own correction', () => {
+  const row = (price: string) =>
+    `在亚马逊新加坡站搜索 usb c cable，前三个商品：\n\n1. 名称：Anker Cable A；价格：S$8.90\n2. 名称：Belkin Cable B；价格：S$12.50\n3. 名称：UGREEN 2 Pack USB C Cable 2M；价格：${price}`;
+  it('a made-up price is sent back once with how to read it; reading it then completes', async () => {
+    const { adapter, seen } = scripted([
+      { name: 'navigate', input: { url: 'https://www.amazon.sg/s?k=usb+c+cable' } },
+      { name: 'read_page', input: {} },
+      { name: 'finish', input: { status: 'completed', summary: row('S$19.43') } },
+      { name: 'scroll', input: { direction: 'down' } },
+      { name: 'read_page', input: {} },
+      { name: 'finish', input: { status: 'completed', summary: row('S$21.53') } },
+    ]);
+    let reads = 0;
+    const site = browser(() =>
+      ++reads < 3
+        ? 'link "Anker Cable A" S$8.90\nlink "Belkin Cable B" S$12.50\nlink "UGREEN 2 Pack USB C Cable 2M"'
+        : 'link "UGREEN 2 Pack USB C Cable 2M" S$21.53\nlink "Anker Cable A" S$8.90\nlink "Belkin Cable B" S$12.50',
+    );
+    const rejected: unknown[] = [];
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '在亚马逊新加坡站搜 usb c cable，列出前三个的名称和价格',
+      adapter,
+      maxSteps: 8,
+      execute: site.execute as never,
+      currentPageUrl: site.currentPageUrl,
+      onCompletionRejected: async (event: unknown) => {
+        rejected.push(event);
+      },
+    } as never);
+    expect(rejected).toHaveLength(1);
+    expect(seen.join('\n')).toContain('截图上看到的不算已读');
+    expect(outcome).toMatchObject({
+      status: 'completed',
+      summary: expect.stringContaining('S$21.53'),
+    });
+  });
+  it('still made up after the correction: the run does not complete with it', async () => {
+    const { adapter } = scripted([
+      { name: 'navigate', input: { url: 'https://www.amazon.sg/s?k=usb+c+cable' } },
+      { name: 'read_page', input: {} },
+      { name: 'finish', input: { status: 'completed', summary: row('S$19.43') } },
+      { name: 'finish', input: { status: 'completed', summary: row('S$21.53') } },
+      { name: 'finish', input: { status: 'completed', summary: row('S$21.53') } },
+    ]);
+    const site = browser(
+      () =>
+        'link "Anker Cable A" S$8.90\nlink "Belkin Cable B" S$12.50\nlink "UGREEN 2 Pack USB C Cable 2M"',
+    );
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '在亚马逊新加坡站搜 usb c cable，列出前三个的名称和价格',
+      adapter,
+      maxSteps: 8,
+      execute: site.execute as never,
+      currentPageUrl: site.currentPageUrl,
+      onCompletionRejected: async () => {},
+    } as never);
+    expect(outcome.status).not.toBe('completed');
+  });
+});
