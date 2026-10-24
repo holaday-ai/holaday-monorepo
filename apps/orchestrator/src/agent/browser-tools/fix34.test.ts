@@ -135,6 +135,14 @@ describe('FIX-34 #2 · amazon.sg: each item is checked against its own listing r
     expect(facts.contradictions).toHaveLength(1);
     expect(facts.binding).toEqual([expect.objectContaining({ kind: 'unread' })]);
   });
+  it('a made-up price bound to the listing tab itself is still sent back (f34i)', () => {
+    const facts = assessCompletionFacts({
+      summary: rows('S$18.88'),
+      fields: [{ name: '商品3价格', value: 'S$18.88', tabId: 'tab_list' }],
+      pages: [listing(true)],
+    });
+    expect(facts.contradictions.join('；')).toMatch(/不在任何已读页面上/);
+  });
   it('「未获取到（…）」 in a field is an absence, not an unverified value (f34g)', () => {
     const facts = assessCompletionFacts({
       summary: rows('未获取到（快照截断）'),

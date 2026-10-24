@@ -813,6 +813,11 @@ export function assessCompletionFacts(input: {
         !facts.some(
           (other) =>
             (other.tabId || other.sourceURL) &&
+            !pages.some(
+              (page) =>
+                (!other.tabId || page.tabId === other.tabId) &&
+                (!other.sourceURL || sameSource(page.sourceURL, other.sourceURL)),
+            ) &&
             normalizeFact(withoutNote(other.value) ?? other.value) === value,
         ) &&
         !pages.some((page) => candidates.some((v) => page.norm.includes(v)))
