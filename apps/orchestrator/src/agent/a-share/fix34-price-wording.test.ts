@@ -138,6 +138,53 @@ describe('FIX-34 #1 · 走势 says which price it uses', () => {
     }
   });
 
+  // 协调方复审阻塞 1：盘外没有「实时」。收盘后同日上午的缓存报价不进卡片、不进模型输入；
+  // 15:00 以后、带日期的报价才算今天的收盘价。
+  const panoramaAt = async (now: Date, quote: AkEnvelope<Record<string, unknown>>) => {
+    const seen: string[] = [];
+    const out = await runAsharePanorama(
+      {
+        client: client({ quote, tradingDay: true }),
+        now,
+        logger,
+        perfTrend: true,
+        interpret: async (...args: unknown[]) => {
+          seen.push(String((args[0] as { user?: string })?.user ?? JSON.stringify(args)));
+          return '';
+        },
+      } as never,
+      { ...MATCH, deep: true } as never,
+    );
+    return { answer: out.answer, input: seen.join('\n') };
+  };
+  it('evening: a cached 10:19 quote is not 实时/最新价/当前价 anywhere, card or model input', async () => {
+    const morning = env([
+      { 代码: '600519', 最新价: 1100, 涨跌幅: -3, 行情时间: '2026-10-26 10:19:58' },
+    ]);
+    const { answer, input } = await panoramaAt(at('2026-10-26T20:30:00'), morning);
+    expect(answer).not.toMatch(/实时报价|最新价 1,100|当前价/);
+    expect(answer).toContain('最近收盘（2026-10-23） 1,335.00');
+    expect(input).not.toMatch(/实时报价|1,100/);
+    expect(input).not.toMatch(/收盘价（2026-10-26）/);
+  });
+  it('evening: a dated quote from 15:00 is today’s close', async () => {
+    const closed = env([
+      { 代码: '600519', 最新价: 1342, 涨跌幅: 0.52, 行情时间: '2026-10-26 15:00:03' },
+    ]);
+    const { answer, input } = await panoramaAt(at('2026-10-26T20:30:00'), closed);
+    expect(answer).toContain('最近收盘（2026-10-26） 1,342.00');
+    expect(answer).not.toMatch(/实时报价|当前价/);
+    expect(input).toContain('收盘价（2026-10-26）');
+  });
+  it('a time-only 15:00 snapshot fetched on a holiday is not a close of that day', async () => {
+    const snapshot = {
+      ...env([{ 代码: '600519', 最新价: 1342, 涨跌幅: 0.52, 行情时间: '15:00:03' }]),
+      fetched_at: '2026-10-01T04:00:00Z',
+    };
+    const { answer } = await panoramaAt(HOLIDAY, snapshot);
+    expect(answer).not.toContain('最近收盘（2026-10-01）');
+  });
+
   it('an interpretation calling the close 「当前股价」 is dropped unless a live quote is in context', () => {
     const closeOnly = '- 盘面：最近收盘（2026-10-23） 1,335.00 涨跌幅 +1.25%';
     expect(complianceGate('当前股价 1,335.00 处在年内中部。', closeOnly)).toMatchObject({

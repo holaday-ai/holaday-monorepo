@@ -136,8 +136,8 @@ function tradingLagMinutes(now: Date, atMin: number): number | null {
   return nowMin - atMin < -1 ? null : tradedUntil - atMin;
 }
 
-/** 当天、且盘中够新的报价及其「日期 时间」；否则 null。 */
-function liveQuote(
+/** 今天的报价及其「日期 时间」（只有时分的快照以抓取日为日期）；不是今天的 → null。 */
+function todaysQuote(
   quote: AkEnvelope<StockQuoteRow> | undefined,
   now: Date,
 ): { row: StockQuoteRow; time: string } | null {
@@ -145,24 +145,53 @@ function liveQuote(
   if (!quote || !row || toNum(row.最新价) === null) return null;
   const today = beijingIso(now);
   const t = String(row.行情时间 ?? '').trim();
-  let time: string | null = null;
   if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(t))
-    time = t.slice(0, 10) === today ? t.slice(0, 19) : null;
-  else if (/^\d{2}:\d{2}/.test(t)) {
+    return t.slice(0, 10) === today ? { row, time: t.slice(0, 19) } : null;
+  if (/^\d{2}:\d{2}/.test(t)) {
     // 新浪全市场快照只给时分秒：取数就在当天，日期即抓取日。
     const fetched = new Date(quote.fetched_at);
     const day = Number.isNaN(fetched.getTime()) ? today : beijingIso(fetched);
-    time = day === today ? `${today} ${t.slice(0, 8)}` : null;
+    return day === today ? { row, time: `${today} ${t.slice(0, 8)}` } : null;
   }
-  if (!time) return null;
-  if (ashareIntraday(now)) {
-    const [h = 0, m = 0] = time.slice(11, 16).split(':').map(Number);
-    // Not too old, and not ahead of the trading clock: a time-only snapshot taken before
-    // the open can still carry yesterday's 15:00 (Codex review on PR #296).
-    const lag = tradingLagMinutes(now, h * 60 + m);
-    if (lag === null || lag > LIVE_QUOTE_MAX_LAG_MIN) return null;
-  }
-  return { row, time };
+  return null;
+}
+
+/**
+ * 交易时段（`session`：时钟 + 日历）内、今天且够新的报价；否则 null。盘外没有「实时」：
+ * 收盘后同一天上午缓存的报价不是实时（协调方复审阻塞 1）。
+ */
+function liveQuote(
+  quote: AkEnvelope<StockQuoteRow> | undefined,
+  now: Date,
+  session = ashareIntraday(now),
+): { row: StockQuoteRow; time: string } | null {
+  if (!session || !ashareIntraday(now)) return null;
+  const today = todaysQuote(quote, now);
+  if (!today) return null;
+  const [h = 0, m = 0] = today.time.slice(11, 16).split(':').map(Number);
+  // Not too old, and not ahead of the trading clock: a time-only snapshot taken before
+  // the open can still carry yesterday's 15:00 (Codex review on PR #296).
+  const lag = tradingLagMinutes(now, h * 60 + m);
+  return lag === null || lag > LIVE_QUOTE_MAX_LAG_MIN ? null : today;
+}
+
+/**
+ * 盘外：今天 15:00 及以后的报价就是今天的收盘价（日线可能还没更新到今天）；更早的
+ * 报价（缓存的上午快照）不用，按日线收盘价写。
+ */
+function closingQuote(
+  quote: AkEnvelope<StockQuoteRow> | undefined,
+  now: Date,
+  session = ashareIntraday(now),
+): { row: StockQuoteRow; date: string; time: string } | null {
+  if (session && ashareIntraday(now)) return null;
+  const today = todaysQuote(quote, now);
+  // Only a dated stamp: a time-only 15:00 snapshot fetched today can be the last trading
+  // day's close (a holiday, before the open).
+  const dated = /^\d{4}-\d{2}-\d{2}/.test(String(today?.row.行情时间 ?? '').trim());
+  return today && dated && today.time.slice(11, 16) >= '15:00'
+    ? { ...today, date: today.time.slice(0, 10) }
+    : null;
 }
 
 /**
@@ -176,9 +205,8 @@ export function livePrices(
   session: boolean,
 ): Record<string, LivePrice> {
   const out: Record<string, LivePrice> = {};
-  if (!session || !ashareIntraday(now)) return out;
   for (const { symbol, quote } of entries) {
-    const live = liveQuote(quote, now);
+    const live = liveQuote(quote, now, session);
     const price = live ? toNum(live.row.最新价) : null;
     if (live && price !== null) out[symbol] = { price, time: live.time };
   }
@@ -212,7 +240,7 @@ function marketFactLines(
   quote: AkEnvelope<StockQuoteRow> | undefined = p.quote,
   intraday = ashareIntraday(now),
 ): string[] {
-  const live = liveQuote(quote, now);
+  const live = liveQuote(quote, now, intraday);
   const quoteLine =
     live && quote
       ? [
@@ -220,8 +248,14 @@ function marketFactLines(
         ]
       : [];
   const last = p.kline.error ? undefined : p.kline.data[p.kline.data.length - 1];
+  const day = last ? String(pick(last, ['日期']) ?? '').slice(0, 10) : '';
+  // 盘外：今天 15:00 后的报价是今天的收盘（日线还没到今天时用它）；更早的不用。
+  const close = closingQuote(quote, now, intraday);
+  if (close && quote && !(/^\d{4}-\d{2}-\d{2}$/.test(day) && day >= close.date))
+    return [
+      `- 最近收盘（${close.date}） ${fmtNum(close.row.最新价)}，涨跌幅 ${fmtPct(close.row.涨跌幅)}（收盘后报价 ${close.time.slice(11)}，${sourceTag(quote)}）`,
+    ];
   if (p.kline.error || !last) return [...quoteLine, unavailableLine('当日行情', p.kline, mode)];
-  const day = String(pick(last, ['日期']) ?? '').slice(0, 10);
   const facts = `${fmtNum(pick(last, ['收盘']))}，涨跌幅 ${fmtPct(pick(last, ['涨跌幅']))}，成交额 ${fmtYiYuan(
     pick(last, ['成交额']),
   )}（${sourceTag(p.kline)}）`;
@@ -494,6 +528,7 @@ function contextBlock(
   dt: AkEnvelope<DragonTigerRow>,
   annCap: number,
   now: Date | undefined,
+  session: boolean | undefined,
 ): string {
   const b: string[] = [`【${stockLabel(p.stock)}】`];
   const last = p.kline.error ? undefined : p.kline.data[p.kline.data.length - 1];
@@ -505,13 +540,18 @@ function contextBlock(
   );
   // Only the quote the card itself shows as live (same verdict) is 实时报价; an old one is
   // 「最近报价」 with its time and never presented as the current price (复审 1).
-  const live = now ? liveQuote(p.quote, now) : null;
+  const live = now ? liveQuote(p.quote, now, session ?? ashareIntraday(now)) : null;
+  const close = now ? closingQuote(p.quote, now, session ?? ashareIntraday(now)) : null;
   const row = p.quote?.error ? undefined : p.quote?.data[0];
   if (live)
     b.push(
       `- 实时报价：最新价 ${fmtNum(live.row.最新价)} 涨跌幅 ${fmtPct(live.row.涨跌幅)}（行情时间 ${live.time}）`,
     );
-  else if (row && toNum(row.最新价) !== null)
+  else if (close)
+    b.push(
+      `- 收盘价（${close.date}）：${fmtNum(close.row.最新价)} 涨跌幅 ${fmtPct(close.row.涨跌幅)}（收盘后报价 ${close.time.slice(11)}）`,
+    );
+  else if (row && toNum(row.最新价) !== null && now && (session ?? ashareIntraday(now)))
     b.push(
       `- 最近报价：${fmtNum(row.最新价)}（报价时间 ${String(row.行情时间 ?? '未提供')}，已过时，不可当作今天的价格）`,
     );
@@ -575,7 +615,11 @@ export function buildFactContext(
   const head = `日期：${dateHeader(match.dateIso)}`;
   const nbLine = northboundContextLine(data.northbound);
   const assemble = (annCap: number): string =>
-    [head, ...data.perStock.map((p) => contextBlock(p, data.dragonTiger, annCap, now)), nbLine]
+    [
+      head,
+      ...data.perStock.map((p) => contextBlock(p, data.dragonTiger, annCap, now, data.intraday)),
+      nbLine,
+    ]
       .filter(Boolean)
       .join('\n');
 
@@ -886,8 +930,10 @@ export function renderPanoramaBody(
       '**① 盘面事实**',
       // A live quote is in ①'s first line; intraday an old one is replaced by the
       // 「非实时」 note, but a missing one still says so.
-      ...(liveQuote(pano?.quote, now) ||
-      (intraday && !pano?.quote?.error && toNum(pano?.quote?.data[0]?.最新价) !== null)
+      // 复审阻塞 1：盘外不列报价（收盘后的旧快照不是「最新价」）——①按收盘价写。
+      ...(!intraday ||
+      liveQuote(pano?.quote, now, intraday) ||
+      (!pano?.quote?.error && toNum(pano?.quote?.data[0]?.最新价) !== null)
         ? []
         : quoteLines(pano?.quote, mode)),
       ...marketFactLines(p, mode, now, pano?.quote, intraday),
@@ -932,10 +978,18 @@ export function buildPanoramaContext(
     const pano = data.bySymbol[p.stock.symbol];
     blocks.push(`【${stockLabel(p.stock)} · 基本面/估值】`);
     const row = pano?.quote?.error ? undefined : pano?.quote?.data[0];
+    const live = now ? liveQuote(pano?.quote, now, intraday) : null;
+    const close = now ? closingQuote(pano?.quote, now, intraday) : null;
     blocks.push(
-      intraday && now && !liveQuote(pano?.quote, now) && row && toNum(row.最新价) !== null
-        ? `- 最近报价：${fmtNum(row.最新价)}（报价时间 ${String(row.行情时间 ?? '未提供')}，已过时，不可当作今天的价格）`
-        : quoteLines(pano?.quote, 'prod').join('\n'),
+      live
+        ? quoteLines(pano?.quote, 'prod').join('\n')
+        : close
+          ? `- 收盘价（${close.date}）：${fmtNum(close.row.最新价)} 涨跌幅 ${fmtPct(close.row.涨跌幅)}（收盘后报价 ${close.time.slice(11)}）`
+          : !intraday
+            ? '' // 盘外按日线收盘价（上文 ①），旧快照不进模型输入
+            : row && toNum(row.最新价) !== null
+              ? `- 最近报价：${fmtNum(row.最新价)}（报价时间 ${String(row.行情时间 ?? '未提供')}，已过时，不可当作今天的价格）`
+              : quoteLines(pano?.quote, 'prod').join('\n'),
     );
     blocks.push(newsLines(pano?.news, match.dateIso).join('\n'));
     blocks.push(fundamentalsContext(pano?.fundamentals));
