@@ -140,7 +140,14 @@ const READ_ACTIONABLE = (
           target.getAttribute('formaction') ?? form.getAttribute('action') ?? '',
         ].join(' ') || null
       : null,
-    formMethod: form ? (form.getAttribute('method') || 'get').toLowerCase() : null,
+    // 复审 #2: a submit button's own formmethod wins over the form's method.
+    formMethod: form
+      ? (
+          (submitter && target.getAttribute('formmethod')) ||
+          form.getAttribute('method') ||
+          'get'
+        ).toLowerCase()
+      : null,
     // A custom element (or host) with no readable content and no open shadow
     // root: whatever is inside it cannot be seen from here.
     opaque:
@@ -238,7 +245,12 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
       (form.id === 'nav-searchform' && /(?:^|\.)bilibili\.com$/i.test(location.hostname)) ||
       (/^SearchPanel_searchForm/.test(form.getAttribute('class') || '') &&
         /(?:^|\.)amap\.com$/i.test(location.hostname)));
-  const method = (form?.getAttribute('method') || 'get').toLowerCase();
+  // Enter submits through the form's default button, which may carry its own formmethod.
+  const method = (
+    submit?.getAttribute('formmethod') ||
+    form?.getAttribute('method') ||
+    'get'
+  ).toLowerCase();
   return {
     hasForm: Boolean(form),
     action: form ? (form as HTMLFormElement).action || null : null,

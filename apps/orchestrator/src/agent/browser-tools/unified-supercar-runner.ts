@@ -284,6 +284,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   let binding: { control: BrowserControl; finish: () => void } | undefined;
   let control = opts.browserControl;
   let handoffFailure: string | undefined;
+  /** The handover ended because the control channel failed, not the user (FIX-35 复审 #2). */
+  let handoffPlatform = false;
   /** The user chose 换个方式继续: the answer does not come from the walled page. */
   let captchaAlternate = false;
   const withAlternateNotice = (summary: string) =>
@@ -570,7 +572,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                   handoffFailure =
                     result === 'timeout'
                       ? '等待用户完成验证码已超时，任务未完成。'
-                      : '用户已放弃验证，任务未完成。';
+                      : result === 'error'
+                        ? '验证码接管通道异常关闭，任务未完成，请稍后重试。'
+                        : '用户已放弃验证，任务未完成。';
+                  handoffPlatform = result === 'error';
                   await opts.onCaptchaHandoffEnd?.(false);
                 }
                 lastSnapshot = '';
@@ -821,7 +826,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                 // FIX-35 复审 #1: a verification handover the user timed out on or gave up is
                 // the user's wall, not a platform failure (no refund after a reroute).
                 ...(handoffFailure
-                  ? { failureSource: 'user_wall' as const }
+                  ? { failureSource: handoffPlatform ? ('tool' as const) : ('user_wall' as const) }
                   : outcome.failureSource
                     ? { failureSource: outcome.failureSource }
                     : {}),

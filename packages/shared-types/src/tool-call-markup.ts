@@ -23,13 +23,15 @@ const TOOL_NAME_LINE_RE = /^[ \t]*[a-z]+_(?:use|call)[ \t]*$/gim;
  *  - the name is one only a tool has (`browser_use`, `switch_tab`, `request_human`…);
  *  - the name is a tool that is also a word (`click`, `type`, `links`…) and call
  *    arguments follow it (`{"name":"click","timestamp":…}` is data);
- *  - any name is followed by `arguments` / `parameters`, or by an `input` / `args` object.
+ *  - any name is followed by `arguments` / `parameters`, or by an `input` / `args` object;
+ *  - 复审 #2: a tool word alone in its object (`{"name":"back"}`), or a `"type":"tool_use"`
+ *    block (`{"type":"tool_use","id":…,"name":…,"input":{…}}`).
  * The tool names come from the lists the model is offered (`MODEL_TOOL_NAMES`).
  */
 const TOOL_ONLY_NAMES = MODEL_TOOL_NAMES.filter((name) => name.includes('_'));
 const TOOL_WORD_NAMES = MODEL_TOOL_NAMES.filter((name) => !name.includes('_'));
 const TOOL_JSON_START_RE = new RegExp(
-  String.raw`\{\s*(?:"(?:action|tool|tool_name|tool_use|function|function_call)"\s*:|"name"\s*:\s*"(?:(?:[a-z]+_(?:use|call)|${TOOL_ONLY_NAMES.join('|')})"|(?:${TOOL_WORD_NAMES.join('|')})"\s*,\s*"(?:arguments|parameters|input|args)"|[\w.-]+"\s*,\s*"(?:arguments|parameters)"|[\w.-]+"\s*,\s*"(?:input|args)"\s*:\s*\{))`,
+  String.raw`\{\s*(?:"(?:action|tool|tool_name|tool_use|function|function_call)"\s*:|"type"\s*:\s*"tool_use"|"name"\s*:\s*"(?:(?:[a-z]+_(?:use|call)|${TOOL_ONLY_NAMES.join('|')})"|(?:${TOOL_WORD_NAMES.join('|')})"\s*(?:,\s*"(?:arguments|parameters|input|args)"|\})|[\w.-]+"\s*,\s*"(?:arguments|parameters)"|[\w.-]+"\s*,\s*"(?:input|args)"\s*:\s*\{))`,
   'g',
 );
 const CODE_RE = /```[\s\S]*?(?:```|$)|`[^`\n]+`/g;

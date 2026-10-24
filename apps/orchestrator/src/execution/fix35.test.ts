@@ -117,6 +117,7 @@ describe('FIX-35 #1 · plain JSON in prose is not a tool call', () => {
     '返回体形如 {"name": "Bob", "input": "hello"}，name 是用户名。',
     // A word that is also a tool name, with no call arguments: data (PR #298 review).
     'Event data: {"name":"click","timestamp":12345}.',
+    '类型字段示例：{"type":"text","name":"back"} 表示返回按钮的文案。',
     '埋点：{"name":"browser","version":"118"}，{"name":"finish","at":3}。',
     '{"name":"clickstream","input":1} 是一条埋点。',
   ])('%s stays', (text) => {
@@ -139,6 +140,10 @@ describe('FIX-35 #1 · plain JSON in prose is not a tool call', () => {
     '第一条结果售价 $14.99。\n{"name":"click_at","input":{"x":10,"y":20}}',
     '第一条结果售价 $14.99。\n{"name":"links","args":{}}',
     '第一条结果售价 $14.99。\n{"name":"request_human"}',
+    // 复审 #2 (optional): an Anthropic tool_use block, and a tool word with no arguments.
+    '第一条结果售价 $14.99。\n{"type":"tool_use","id":"toolu_1","name":"navigate","input":{"url":"https://x.com"}}',
+    '第一条结果售价 $14.99。\n{"name":"back"}',
+    '第一条结果售价 $14.99。\n{ "name": "snapshot" }',
   ])('%s is still removed', (text) => {
     expect(deliverableAnswer(text)).toBe('第一条结果售价 $14.99。');
   });
@@ -171,6 +176,9 @@ describe('FIX-35 复审 #1 · 同时修: r06 / internal notes / failure refs', (
   it.each([
     'RFC 9110 的标题是 HTTP Semantics，2022 年 6 月发布；它没有包含 HTTP/2 的帧格式。',
     'Node.js v24.22.1 的更新没有包含破坏性变更。',
+    // 复审 #2: a fetched page named as the source, then a fact about what something lacks.
+    '根据抓取的 Node.js 发布页，v24.22.1 的更新没有包含破坏性变更。',
+    '从抓取到的 RFC 9110 页面看，标题是 HTTP Semantics；它并未包含 HTTP/2 帧格式。',
   ])('an answer saying what a thing does not include is an answer: %s', (answer) => {
     expect(answerNotObtained(answer, 'RFC 9110 的标题')).toBe(false);
   });

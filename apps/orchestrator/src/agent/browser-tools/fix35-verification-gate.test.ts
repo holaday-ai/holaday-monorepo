@@ -216,3 +216,25 @@ describe('复审 #1: ordinary pages whose path says challenge / captcha are not 
     await page.close();
   });
 });
+
+describe('复审 #2: the submit button’s own formmethod decides the request method', () => {
+  const page2 = (formMethod: string, buttonMethod: string) =>
+    `<form method="${formMethod}" action="https://example.org/captcha/verify" onsubmit="window.sent=1;return false"><button formmethod="${buttonMethod}">Verify</button></form>`;
+  it('a GET form whose button says formmethod=post is a POST to /captcha/ → handed over', async () => {
+    const page = await browser.newPage();
+    await page.setContent(page2('get', 'post'));
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /button "Verify"/) }, 'before');
+    expect(park.mock.calls[0]?.[1]).toBe('captcha');
+    expect(await sent(page)).toBe(0);
+    await page.close();
+  });
+  it('a POST form whose button says formmethod=get is a GET → not a verification step', async () => {
+    const page = await browser.newPage();
+    await page.setContent(page2('post', 'get'));
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /button "Verify"/) }, 'before');
+    expect(park.mock.calls.some((call) => call[1] === 'captcha')).toBe(false);
+    await page.close();
+  });
+});

@@ -162,14 +162,33 @@ describe('autoFix — URL fabrication', () => {
     expect(out.fixed).toContain('帮你打开 看具体条数');
   });
 
-  it('FIX-35 复审 #1: a note keeps its other items; code the answer wrote stays', () => {
-    expect(
-      tidyDroppedUrls(
-        '未核实：以下内容未能在已读页面中逐字找到，请自行确认——价格「$9.99」；链接「」\n用 `npm i` 安装，```js\nx\n``` 照抄。',
-      ),
-    ).toBe(
-      '未核实：以下内容未能在已读页面中逐字找到，请自行确认——价格「$9.99」\n用 `npm i` 安装，```js\nx\n``` 照抄。',
+  it('FIX-35 复审 #2: only the dropped URL’s spot is cleaned — code, tables, prose 「」 stay', () => {
+    const code =
+      '```py\nx    = 1   # aligned\nyy   = 22  # aligned\nurl  = `https://made-up.example/a`\n```';
+    const table = '| 名称 |   价格 |\n|---|---:|\n| A    |  $9.99 |';
+    const answer = [
+      '空字符串写作 「」 即可，参见 `https://made-up.example/doc` 和  两个空格。',
+      code,
+      table,
+      '',
+      '未核实：以下内容未能在已读页面中逐字找到，请自行确认——价格「$9.99」；链接「https://made-up.example/doc」',
+      'x'.repeat(40),
+    ].join('\n');
+    const { contract, ledger, verification } = setup(answer, ['https://example.com/help/index']);
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    expect(out.fixed).not.toContain('made-up.example');
+    expect(out.fixed).toContain('空字符串写作 「」 即可，参见 和  两个空格。');
+    expect(out.fixed).toContain(
+      '```py\nx    = 1   # aligned\nyy   = 22  # aligned\nurl  = ``\n```',
     );
+    expect(out.fixed).toContain(table);
+    expect(out.fixed).toContain('请自行确认——价格「$9.99」\n');
+    expect(out.fixed).not.toContain('\u0000');
+  });
+
+  it('FIX-35 复审 #2: without a dropped URL the text is untouched', () => {
+    const text = '空字符串写作 「」，代码 `` 也可以，表格  对齐。';
+    expect(tidyDroppedUrls(text)).toBe(text);
   });
 
   it('markdown link with ungrounded URL collapses to plain text (no empty href)', () => {

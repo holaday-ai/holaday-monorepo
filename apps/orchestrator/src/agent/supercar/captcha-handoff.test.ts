@@ -64,6 +64,16 @@ it('cancel and timeout close admission without claiming completion', async () =>
   expect(g.control.snapshot().phase).toBe('closed');
   expect(g.resumed).not.toHaveBeenCalled();
 });
+it('FIX-35 复审 #2: the control channel closing on its own is an error, not the user giving up', async () => {
+  const f = await fixture();
+  f.control.close('observation_failed');
+  await vi.advanceTimersByTimeAsync(50);
+  expect(await f.result).toBe('error');
+  // The user's cancel is still 'cancelled'.
+  const g = await fixture();
+  expect(g.registry.cancel('t', 'u', g.control)).toBe(true);
+  expect(await g.result).toBe('cancelled');
+});
 it('keeps the user lease when the resume persistence fails', async () => {
   const f = await fixture();
   f.resumed.mockResolvedValue(false);
