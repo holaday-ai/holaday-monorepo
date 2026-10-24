@@ -6,6 +6,7 @@ import type { CDPSession, ElementHandle, Frame, Locator, Page } from 'playwright
 import { buildAuthParkQuestion } from '../login-detector.js';
 import type { RunSupercarOptions, SupercarAwaitingKind } from '../supercar/agent-loop.js';
 import { isAffirmativeActionConfirmation } from '../supercar/runtime-action-policy.js';
+import { verificationPost } from './cloud-observation.js';
 import type { ActionGateDecision } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
@@ -492,6 +493,27 @@ export interface UnifiedActionDescription {
   bindings?: Array<TargetBinding | null>;
   /** What the action acts on (link target, form action/method/fields), bound too. */
   objects?: string;
+  /** The site's own verification step this action would submit to: handed over, never sent. */
+  verification?: string | null;
+}
+
+/**
+ * FIX-35 (BENCH p02 rerun): amazon's 「Continue shopping」 interstitial is a bot check whose
+ * button posts to /checkpoint/validate. Clicking it passes the check for the user, so the
+ * click is handed over before it runs, not reported after it has gone out.
+ */
+function verificationTarget(
+  base: string,
+  ...targets: Array<string | null | undefined>
+): string | null {
+  // `formAction` / `href` carry the resolved and the as-written value (often relative).
+  for (const token of targets.flatMap((target) => target?.split(' ') ?? [])) {
+    try {
+      const url = new URL(token, base).href;
+      if (token && verificationPost(url)) return url;
+    } catch {}
+  }
+  return null;
 }
 
 const UNREADABLE_HOST = '目标位于无法读取内部内容的页面组件中';
@@ -513,6 +535,7 @@ function clickDescription(
       signals?.formAction ?? null,
       signals?.formMethod ?? null,
     ]),
+    verification: verificationTarget(pageUrl, signals?.formAction, signals?.href),
   };
 }
 
@@ -623,6 +646,7 @@ export async function describeUnifiedAction(
           form.fieldSignal,
           form.submitControl?.visibleText ?? null,
         ]),
+        verification: verificationTarget(pageUrl, form.action, form.rawAction),
       };
     }
     default:
@@ -809,6 +833,12 @@ export function createDescriptionActionGate<Action>(options: DescriptionActionGa
 
   return async (action: Action, phase: 'before' | 'after'): Promise<ActionGateDecision> => {
     const description = await options.describe(action, phase);
+    if (phase === 'before' && description.verification) {
+      const question = buildAuthParkQuestion('captcha', description.verification);
+      const reply = await options.park(question, 'captcha');
+      if (reply === null) return parkEnded(question);
+      return { kind: 'skip', message: TAKEOVER_RESUME_MESSAGE };
+    }
     let confirmed = false;
     const last = description.descriptors.length - 1;
     for (const [index, item] of description.descriptors.entries()) {
