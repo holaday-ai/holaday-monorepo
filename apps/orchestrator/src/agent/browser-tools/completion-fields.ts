@@ -105,6 +105,18 @@ const PRICE_SHAPE_RE = /(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*
 /** Appended to a read whose snapshot was cut at its size budget. */
 export const SNAPSHOT_TRUNCATED = '[快照截断：以下内容未读到]';
 
+/**
+ * The cut marker goes where the tree was cut, not after the text that follows it (the
+ * page's other results and their prices came between the cut item and an end marker).
+ */
+function markCut(decoded: string, tree: unknown): string {
+  const tail = typeof tree === 'string' ? tree.trimEnd().slice(-120) : '';
+  const at = tail ? decoded.lastIndexOf(tail) : -1;
+  if (at < 0) return `${decoded}\n${SNAPSHOT_TRUNCATED}`;
+  const end = at + tail.length;
+  return `${decoded.slice(0, end)}\n${SNAPSHOT_TRUNCATED}${decoded.slice(end)}`;
+}
+
 export function observedEvidence(text: string, decoded: string, url?: string): ObservedEvidence {
   let meta: Record<string, unknown> = {};
   try {
@@ -130,7 +142,7 @@ export function observedEvidence(text: string, decoded: string, url?: string): O
   return {
     // FIX-34 (Deploy-34 amazon-sg): a snapshot cut at its budget says so, so 「价格：未获取到」
     // for the item it ends on is the page's truth, not a missed read.
-    text: meta.truncated === true ? `${decoded}\n${SNAPSHOT_TRUNCATED}` : decoded,
+    text: meta.truncated === true ? markCut(decoded, meta.tree) : decoded,
     links,
     ...(youtubeCards.length ? { youtubeCards } : {}),
     ...(typeof meta.tabId === 'string' ? { tabId: meta.tabId } : {}),
@@ -532,7 +544,7 @@ function cutQuote(candidates: string[], values: string[]): string | undefined {
 }
 
 const NOT_READ =
-  /^(?:未读到|未读取到|未找到|没有读到|页面未(?:提供|显示|列出)|not (?:shown|found|read)|n\/a)[。.]?$/i;
+  /^(?:未读到|未读取到|未获取到|未找到|没有读到|页面未(?:提供|显示|列出)|not (?:shown|found|read)|n\/a)[。.]?$/i;
 
 const NAME_FIELD = /作者|频道|博主|up\s*主|账号|店铺|author|channel|uploader/i;
 const HEDGE_RE =
@@ -609,7 +621,9 @@ export function assessCompletionFacts(input: {
     if (seen.has(key)) continue;
     seen.add(key);
     // "未读到" declares a value absent: it claims nothing about the page.
-    if (NOT_READ.test(fact.value.trim())) continue;
+    // FIX-34: 「未获取到（快照截断）」 too — the note explains the absence.
+    if (NOT_READ.test(fact.value.trim()) || NOT_READ.test((withoutNote(fact.value) ?? '').trim()))
+      continue;
     // FIX-34 (dy-2): a hedge about a name says what the page lacks — not a page quote.
     // When the page does show one of its names as a node of its own (the author link),
     // the name is written plainly instead.
@@ -785,6 +799,20 @@ export function assessCompletionFacts(input: {
           : lines.find((line) => /\d/.test(line) && skeleton(line).includes(shape)));
       if (conflict) {
         contradictions.push(`${label} 与页面不符；页面为「${conflict.trim().slice(0, 120)}」`);
+        continue;
+      }
+      // …but a listed price that no read page shows at all was not read (f34d/f34f: a
+      // price written for the item the snapshot was cut at).
+      if (
+        listing &&
+        new RegExp(`^(?:${PRICE_SHAPE_RE.source})$`, 'i').test(
+          value.replace(/[。.，,]$/, '').trim(),
+        ) &&
+        !pages.some((page) => candidates.some((v) => page.norm.includes(v)))
+      ) {
+        contradictions.push(
+          `${label} 不在任何已读页面上：列表在该商品处截断时写「未获取到」，或打开该商品页读取后再写`,
+        );
         continue;
       }
     }

@@ -82,6 +82,27 @@ describe('FIX-34 #2 · amazon.sg: each item is checked against its own listing r
     );
     expect(declaredMissingPriceRows(rows('未获取到'), pricedPage.text)).toEqual([]);
   });
+  it('the cut is marked where the tree ends, before the text that follows it (f34e)', () => {
+    const tree = [
+      `- link "${T1}" [ref=e255]`,
+      '- link "S$8.90" [ref=e276]',
+      `- link "${T2}" [ref=e331]`,
+      '- link "S$17.29" [ref=e344]',
+      `- link "${T3}" [ref=e393]:`,
+      '  - /url: https://www.amazon.sg/UGREEN/dp/B08D6NCQ1Z/ref=sr_1_3',
+      `- heading "${T3}" [level=2] [ref=e394]`,
+      '- button "4.7 out of 5 stars, rating details" [ref=e398]',
+      '- link "20,384 ratings" [ref=e402]:',
+      '  - /url: https://www.amazon.sg/UGREEN/dp/B08D6NCQ1Z/ref=sr_1_3?dib=eyJ2Ij',
+    ].join('\n');
+    // The decoded observation goes on after the tree: the page's headings — other
+    // results, some with prices.
+    const decoded = `${tree}\n1-48 of over 6,000 results for "usb c cable"\nAnker USB C Cable S$12.99\nRelated searches\nNeed help?`;
+    const raw = JSON.stringify({ tabId: 'tab_list', sourceURL: LISTING, tree, truncated: true });
+    const page = observedEvidence(raw, decoded, LISTING);
+    expect(page.text.indexOf(SNAPSHOT_TRUNCATED)).toBeLessThan(page.text.indexOf('1-48 of'));
+    expect(declaredMissingPriceRows(rows('未获取到（快照截断）'), page.text)).toEqual([3]);
+  });
   it('not truncated and the price is shown: 「未获取到」 is still sent back', () => {
     const page = listing(false, 'S$21.41');
     expect(page.text).not.toContain(SNAPSHOT_TRUNCATED);
@@ -103,6 +124,22 @@ describe('FIX-34 #2 · amazon.sg: each item is checked against its own listing r
       summary: rows('S$21.41'),
       pages: [listing(false, 'S$21.41')],
     });
+    expect(facts.contradictions.join('；')).not.toMatch(/kitchen/i);
+  });
+  it('「未获取到（…）」 in a field is an absence, not an unverified value (f34g)', () => {
+    const facts = assessCompletionFacts({
+      summary: rows('未获取到（快照截断）'),
+      fields: [{ name: '第3个商品价格', value: '未获取到（该条目在快照中未显示价格）' }],
+      pages: [listing(true)],
+    });
+    expect(facts.unverified.join('；')).not.toContain('未获取到');
+  });
+  it('a listed price that no read page shows is sent back (f34f: S$17.90 for the cut item)', () => {
+    const facts = assessCompletionFacts({
+      summary: rows('S$17.90'),
+      pages: [listing(true)],
+    });
+    expect(facts.contradictions.join('；')).toMatch(/不在任何已读页面上/);
     expect(facts.contradictions.join('；')).not.toMatch(/kitchen/i);
   });
   it('a price shown nowhere beside item 3, bound to an unread tab, is still refused', () => {
