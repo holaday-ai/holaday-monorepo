@@ -30,6 +30,7 @@ import {
   type UnifiedToolResult,
   createPlaywrightUnifiedExecutor,
 } from './playwright-unified-executor.js';
+import { siteEntryHint } from './site-entry-hints.js';
 import { createUnifiedActionGate } from './unified-action-gate.js';
 import { NOT_STARTED, runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
@@ -283,6 +284,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   let binding: { control: BrowserControl; finish: () => void } | undefined;
   let control = opts.browserControl;
   let handoffFailure: string | undefined;
+  /** The handover ended because the control channel failed, not the user (FIX-35 复审 #2). */
+  let handoffPlatform = false;
   /** The user chose 换个方式继续: the answer does not come from the walled page. */
   let captchaAlternate = false;
   const withAlternateNotice = (summary: string) =>
@@ -304,6 +307,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   // completed list answer misses per-item sources or key fields.
   const contract = getContract(opts.taskId);
   const guidance = browserOutputGuidance(contract);
+  const siteHint = siteEntryHint(opts.intent);
   const groundedLinks = new Set<string>();
   /**
    * Links and pages the model actually saw ground its per-item citations in
@@ -568,7 +572,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                   handoffFailure =
                     result === 'timeout'
                       ? '等待用户完成验证码已超时，任务未完成。'
-                      : '用户已放弃验证，任务未完成。';
+                      : result === 'error'
+                        ? '验证码接管通道异常关闭，任务未完成，请稍后重试。'
+                        : '用户已放弃验证，任务未完成。';
+                  handoffPlatform = result === 'error';
                   await opts.onCaptchaHandoffEnd?.(false);
                 }
                 lastSnapshot = '';
@@ -628,7 +635,14 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           );
         return interruption;
       },
-      intent: guidance ? `${opts.intent}\n\n【结果要求】\n${guidance}` : opts.intent,
+      userIntent: opts.intent,
+      intent: [
+        opts.intent,
+        guidance ? `【结果要求】\n${guidance}` : '',
+        siteHint ? `【站点提示】\n${siteHint}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
       ...(contract && guidance
         ? {
             reviewFinish: (summary: string, pageText?: string) =>
@@ -809,8 +823,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             ? { reason: NOT_STARTED, failureSource: 'not_started' as const }
             : {
                 reason: handoffFailure ?? outcome.reason,
+                // FIX-35 复审 #1: a verification handover the user timed out on or gave up is
+                // the user's wall, not a platform failure (no refund after a reroute).
                 ...(handoffFailure
-                  ? { failureSource: 'tool' as const }
+                  ? { failureSource: handoffPlatform ? ('tool' as const) : ('user_wall' as const) }
                   : outcome.failureSource
                     ? { failureSource: outcome.failureSource }
                     : {}),

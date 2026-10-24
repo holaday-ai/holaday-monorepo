@@ -4,7 +4,11 @@ import type { ChallengeInfo } from './captcha-challenge.js';
 export const CAPTCHA_HANDOFF_MS = 10 * 60_000;
 /** After this many "我已完成" with the wall still up, the user may continue another way. */
 export const CAPTCHA_ROUNDS_BEFORE_ALTERNATE = 2;
-export type CaptchaHandoffResult = 'resumed' | 'alternate' | 'cancelled' | 'timeout';
+/**
+ * `error`: the control channel closed on its own (input outcome unknown, observation or
+ * viewport failure) — neither the user, the task nor the timer ended the wait (FIX-35 复审 #2).
+ */
+export type CaptchaHandoffResult = 'resumed' | 'alternate' | 'cancelled' | 'timeout' | 'error';
 export interface CaptchaHandoffStatus {
   failedRounds: number;
   alternateAvailable: boolean;
@@ -67,7 +71,9 @@ export class CaptchaHandoffs {
     let failedRounds = 0;
     let alternateChosen = false;
     let challenge: ChallengeInfo | null = null;
+    let stopped = false;
     const stop = (reason: CaptchaHandoffResult) => {
+      stopped = true;
       outcome = reason;
       o.control.close();
     };
@@ -127,7 +133,8 @@ export class CaptchaHandoffs {
       if (o.signal?.aborted) return outcome;
       challenge = (await o.challenge?.().catch(() => null)) ?? null;
       await o.onWaiting();
-      if (o.signal?.aborted || o.control.snapshot().phase === 'closed') return outcome;
+      if (o.signal?.aborted) return outcome;
+      if (o.control.snapshot().phase === 'closed') return stopped ? outcome : 'error';
       o.control.requestHuman();
       const receipt = await o.control.checkpoint(async () => {
         // "换个方式继续" resumes the agent with the wall still up, by design.
@@ -135,6 +142,7 @@ export class CaptchaHandoffs {
         if (!(await o.onResumed())) throw new Error('captcha_resume_not_persisted');
       });
       if (receipt.resumed) outcome = alternateChosen ? 'alternate' : 'resumed';
+      else if (!stopped && !o.signal?.aborted) outcome = 'error';
       return outcome;
     } finally {
       clearTimeout(timeout);

@@ -255,8 +255,10 @@ function fixFabricatedUrls(
     });
     // Preserve trailing punctuation that was on `raw` so the
     // surrounding sentence still reads cleanly.
-    return raw.slice(url.length);
+    return `${DROPPED}${raw.slice(url.length)}`;
   });
+
+  if (ops.some((op) => op.kind === 'url_drop')) working = tidyDroppedUrls(working);
 
   if (ops.some((op) => op.kind === 'url_drop') && !hasMeaningfulText(working)) {
     working = URL_DROP_EMPTY_FALLBACK;
@@ -267,6 +269,55 @@ function fixFabricatedUrls(
   }
 
   return { text: working, ops };
+}
+
+/** Where a dropped URL stood, until `tidyDroppedUrls` has cleaned up around it. */
+const DROPPED = '\u0000dropped-url\u0000';
+const FENCED_BLOCK_RE = /```[\s\S]*?(?:```|$)/g;
+
+/**
+ * FIX-35 复审 #1 (BENCH r06 / l02): a dropped URL left its wrapper behind — 「（如 ``）」, an
+ * empty 「」, and 「链接「」」 in the 未核实 note. 复审 #2: only where a URL was dropped;
+ * fenced code, tables and the rest of the answer stay exactly as written.
+ */
+export function tidyDroppedUrls(text: string): string {
+  if (!text.includes(DROPPED)) return text;
+  let out = '';
+  let from = 0;
+  for (const match of text.matchAll(FENCED_BLOCK_RE)) {
+    const start = match.index ?? 0;
+    out += tidyProse(text.slice(from, start)) + match[0].split(DROPPED).join('');
+    from = start + match[0].length;
+  }
+  return out + tidyProse(text.slice(from));
+}
+
+function tidyProse(text: string): string {
+  if (!text.includes(DROPPED)) return text;
+  const at = DROPPED;
+  return (
+    text
+      .split('\n')
+      .map((line) => {
+        const note = line.match(/^(未核实：[^—\n]*——)(.*)$/);
+        if (!note || !line.includes(at)) return line;
+        const items = note[2]!.split('；').filter((item) => !item.includes(`「${at}`));
+        return items.length ? `${note[1]}${items.join('；')}` : null;
+      })
+      .filter((line): line is string => line !== null)
+      .join('\n')
+      // The URL's wrapper shrinks to the marker, then the marker and one of the spaces around
+      // it go: 「参见 `url` 和」 → 「参见 和」, 「（如 `url`）」 → nothing.
+      .replace(
+        new RegExp(`[（(]\\s*(?:如|例如|e\\.g\\.,?)?\\s*\`[ \\t]*${at}[^\`\\n]*\`\\s*[)）]`, 'g'),
+        at,
+      )
+      .replace(new RegExp(`\`[ \\t]*${at}[^\`\\n]*\``, 'g'), at)
+      .replace(new RegExp(`「\\s*${at}\\s*」`, 'g'), at)
+      .replace(new RegExp(`[ \\t]+${at}(?=[ \\t])`, 'g'), '')
+      .split(at)
+      .join('')
+  );
 }
 
 function hasMeaningfulText(text: string): boolean {

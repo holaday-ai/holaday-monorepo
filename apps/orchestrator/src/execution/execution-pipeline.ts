@@ -309,9 +309,12 @@ export function browserCompletionVerdict(input: {
   const short = failed.some((check) =>
     ['ecommerce_rows', 'result_count'].includes(check.criterionType ?? ''),
   );
+  // FIX-35 复审 #1 (BENCH n02/t02): a check's English internal detail (「only 0 URL(s) found
+  // (global scan)…」) is for operators (`notes`); the user sees the ones written for them.
+  const visible = unique.filter((note) => /\p{Script=Han}/u.test(note));
   return {
     status: input.partial || short ? 'partial_success' : 'completed',
-    text: unique.length ? `${kept}\n\n核验提示：${unique.join('；')}` : kept,
+    text: visible.length ? `${kept}\n\n核验提示：${visible.join('；')}` : kept,
     notes: unique,
   };
 }

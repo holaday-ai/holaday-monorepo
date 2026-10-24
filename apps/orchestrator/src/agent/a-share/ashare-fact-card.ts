@@ -500,20 +500,33 @@ export async function buildIndexCard(
     // FIX-33：指数快照没有行情时间字段——写明抓取时刻，以及它是盘中还是收盘后的数。
     // 复审：只有日历确认是交易日、且在交易时段内才写「盘中实时」；节假日写非交易日；
     // 日历查不到就只写「最近报价（时间）」。
-    // 复审 #2：按报价自身的时间判断；sina 指数快照没有时间字段时才用抓取时刻。
+    // 复审 #2：按报价自身的时间判断；没有才用抓取时刻。FIX-35 #3：sina 指数快照的时间只有
+    // 时分秒（ticktime），日期取抓取日——只在抓取日是交易日时用（周末的 15:35 是上个交易日的）。
     const own = String(pick(env.data[0] ?? {}, ['行情时间', '时间']) ?? '').trim();
-    const ownAt = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(own)
-      ? new Date(`${own.slice(0, 10)}T${own.slice(11, 19).padEnd(8, ':00')}+08:00`)
-      : null;
     const fetched = new Date(env.fetched_at);
-    const when =
-      ownAt && !Number.isNaN(ownAt.getTime())
-        ? ownAt
-        : Number.isNaN(fetched.getTime())
-          ? now
-          : fetched;
+    const fetchedAt = Number.isNaN(fetched.getTime()) ? now : fetched;
+    const at = (iso: string, clock: string) =>
+      new Date(`${iso}T${clock.slice(0, 8).padEnd(8, ':00')}+08:00`);
+    const dated = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(own)
+      ? at(own.slice(0, 10), own.slice(11))
+      : null;
+    const fetchDay = await tradingDayKnown(deps.client, beijingIso(fetchedAt));
+    const onFetchDay =
+      !dated && /^\d{2}:\d{2}/.test(own) && fetchDay === true
+        ? at(beijingIso(fetchedAt), own)
+        : null;
+    // 复审 #1：开盘前（08:30）取到的还是上个交易日的 15:00——时钟晚于取数时刻就不是今天的，
+    // 不用它，按抓取时刻写「最近报价」（容 2 分钟时钟误差）。
+    const priorDayClock = !!onFetchDay && onFetchDay.getTime() > fetchedAt.getTime() + 2 * 60_000;
+    const clockOnly = priorDayClock ? null : onFetchDay;
+    const ownAt = [dated, clockOnly].find((d) => d && !Number.isNaN(d.getTime())) ?? null;
+    const when = ownAt ?? fetchedAt;
     const stamp = `${beijingIso(when)} ${fmtClock(when.toISOString())}`;
-    const day = ashareIntraday(when) ? await tradingDayKnown(deps.client, beijingIso(when)) : false;
+    const day = ashareIntraday(when)
+      ? beijingIso(when) === beijingIso(fetchedAt)
+        ? fetchDay
+        : await tradingDayKnown(deps.client, beijingIso(when))
+      : false;
     // FIX-34：盘中的数只有「现在」也在盘中、同一天、落后不超过 10 个成交分钟才是实时；
     // 14:58 的快照 15:05 读到、缓存的上午快照都只是「最近报价」（复审 #2）。
     const stale =
@@ -524,7 +537,7 @@ export async function buildIndexCard(
     lines.push(
       day === null
         ? `- 最近报价（抓取于 ${stamp}；未能确认今天是否交易日）`
-        : stale
+        : stale || priorDayClock
           ? `- 最近报价（${ownAt ? '行情时间' : '抓取于'} ${stamp}，${NOT_REALTIME_NOTE}）`
           : `- 行情时间：${ownAt ? '' : '抓取于 '}${stamp}（${
               day ? '盘中实时，未收盘' : '非交易时段，为最近一个交易日收盘后的行情'

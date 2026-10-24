@@ -6,6 +6,7 @@ import type { CDPSession, ElementHandle, Frame, Locator, Page } from 'playwright
 import { buildAuthParkQuestion } from '../login-detector.js';
 import type { RunSupercarOptions, SupercarAwaitingKind } from '../supercar/agent-loop.js';
 import { isAffirmativeActionConfirmation } from '../supercar/runtime-action-policy.js';
+import { amazonVerificationUrl, verificationPost } from './cloud-observation.js';
 import type { ActionGateDecision } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
@@ -139,7 +140,14 @@ const READ_ACTIONABLE = (
           target.getAttribute('formaction') ?? form.getAttribute('action') ?? '',
         ].join(' ') || null
       : null,
-    formMethod: form ? (form.getAttribute('method') || 'get').toLowerCase() : null,
+    // 复审 #2: a submit button's own formmethod wins over the form's method.
+    formMethod: form
+      ? (
+          (submitter && target.getAttribute('formmethod')) ||
+          form.getAttribute('method') ||
+          'get'
+        ).toLowerCase()
+      : null,
     // A custom element (or host) with no readable content and no open shadow
     // root: whatever is inside it cannot be seen from here.
     opaque:
@@ -237,7 +245,12 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
       (form.id === 'nav-searchform' && /(?:^|\.)bilibili\.com$/i.test(location.hostname)) ||
       (/^SearchPanel_searchForm/.test(form.getAttribute('class') || '') &&
         /(?:^|\.)amap\.com$/i.test(location.hostname)));
-  const method = (form?.getAttribute('method') || 'get').toLowerCase();
+  // Enter submits through the form's default button, which may carry its own formmethod.
+  const method = (
+    submit?.getAttribute('formmethod') ||
+    form?.getAttribute('method') ||
+    'get'
+  ).toLowerCase();
   return {
     hasForm: Boolean(form),
     action: form ? (form as HTMLFormElement).action || null : null,
@@ -492,6 +505,41 @@ export interface UnifiedActionDescription {
   bindings?: Array<TargetBinding | null>;
   /** What the action acts on (link target, form action/method/fields), bound too. */
   objects?: string;
+  /** The site's own verification step this action would submit to: handed over, never sent. */
+  verification?: string | null;
+}
+
+/**
+ * FIX-35 (BENCH p02 rerun): amazon's 「Continue shopping」 interstitial is a bot check whose
+ * button posts to /checkpoint/validate. Clicking it passes the check for the user, so the
+ * click is handed over before it runs, not reported after it has gone out.
+ */
+function verificationTarget(
+  base: string,
+  form: { rawAction: string | null; method: string | null } | null,
+  href?: string | null,
+): string | null {
+  const resolve = (value: string) => {
+    try {
+      return new URL(value, base).href;
+    } catch {
+      return null;
+    }
+  };
+  // 复审 #1: a link is a GET — only amazon's own (host-anchored) verification step counts.
+  for (const token of href?.split(' ') ?? []) {
+    const url = token ? resolve(token) : null;
+    if (url && amazonVerificationUrl(url)) return url;
+  }
+  if (!form) return null;
+  // The action as written; a form without one submits to the page itself, where only
+  // amazon's own verification page counts. The generic /captcha|/challenge paths need a
+  // POST to an action the form names.
+  const raw = form.rawAction?.trim() ?? '';
+  const url = resolve(raw || base);
+  if (!url) return null;
+  if (amazonVerificationUrl(url)) return url;
+  return raw && form.method?.toLowerCase() === 'post' && verificationPost(url) ? url : null;
 }
 
 const UNREADABLE_HOST = '目标位于无法读取内部内容的页面组件中';
@@ -513,6 +561,17 @@ function clickDescription(
       signals?.formAction ?? null,
       signals?.formMethod ?? null,
     ]),
+    verification: verificationTarget(
+      signals?.url ?? pageUrl,
+      signals?.formAction != null
+        ? {
+            // `formAction` is 「resolved as-written」; the as-written part is the action.
+            rawAction: signals.formAction.split(' ').slice(1).join(' '),
+            method: signals.formMethod ?? null,
+          }
+        : null,
+      signals?.href,
+    ),
   };
 }
 
@@ -623,6 +682,7 @@ export async function describeUnifiedAction(
           form.fieldSignal,
           form.submitControl?.visibleText ?? null,
         ]),
+        verification: verificationTarget(pageUrl, form),
       };
     }
     default:
@@ -809,6 +869,12 @@ export function createDescriptionActionGate<Action>(options: DescriptionActionGa
 
   return async (action: Action, phase: 'before' | 'after'): Promise<ActionGateDecision> => {
     const description = await options.describe(action, phase);
+    if (phase === 'before' && description.verification) {
+      const question = buildAuthParkQuestion('captcha', description.verification);
+      const reply = await options.park(question, 'captcha');
+      if (reply === null) return parkEnded(question);
+      return { kind: 'skip', message: TAKEOVER_RESUME_MESSAGE };
+    }
     let confirmed = false;
     const last = description.descriptors.length - 1;
     for (const [index, item] of description.descriptors.entries()) {

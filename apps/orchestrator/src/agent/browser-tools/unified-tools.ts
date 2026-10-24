@@ -8,27 +8,10 @@
  * the same mechanism as Playwright MCP — instead of a hand-written DOM walker.
  * Coordinate clicks exist only as a fallback for canvas / captcha regions.
  */
+import { OBSERVATION_TOOL_NAMES, UNIFIED_BROWSER_TOOL_NAMES } from '@holaday/shared-types';
 import type { NeutralToolDefinition } from '../../llm/messages-adapter.js';
 
-export const UNIFIED_BROWSER_TOOL_NAMES = [
-  'snapshot',
-  'click',
-  'type',
-  'select',
-  'scroll',
-  'navigate',
-  'extract',
-  'screenshot',
-  'wait_for',
-  'back',
-  'download',
-  'upload',
-  'click_at',
-  'list_tabs',
-  'new_tab',
-  'switch_tab',
-  'close_tab',
-] as const;
+export { UNIFIED_BROWSER_TOOL_NAMES };
 export type UnifiedBrowserToolName = (typeof UNIFIED_BROWSER_TOOL_NAMES)[number];
 
 const ref = {
@@ -418,16 +401,7 @@ export function isMutatingBrowserAction(action: UnifiedBrowserAction): boolean {
 }
 
 /** Only offered to the cloud lane when BROWSER_OBSERVATION_V2 is enabled. */
-export const OBSERVATION_TOOL_NAMES = [
-  'read_page',
-  'sections',
-  'get_page_text',
-  'links',
-  'tables',
-  'scroll_until',
-  'list_tabs',
-  'switch_tab',
-] as const;
+export { OBSERVATION_TOOL_NAMES };
 export function cloudObservationTools(): ReadonlyArray<NeutralToolDefinition> {
   const context = {
     tabId: { type: 'string' },
