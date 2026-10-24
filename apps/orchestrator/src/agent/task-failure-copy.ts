@@ -1,3 +1,4 @@
+import { stripToolCallMarkup } from '@holaday/shared-types';
 import {
   MODEL_TASK_FAILURE_COPY,
   type ModelTaskUnavailableReason,
@@ -8,8 +9,11 @@ export function modelTaskFailureReason(reason: ModelTaskUnavailableReason): stri
   return MODEL_TASK_FAILURE_COPY[reason];
 }
 
-/** Where a failure came from (see SupercarOutcome.failureSource). */
-export type TaskFailureSource = 'model' | 'page' | 'tool' | 'not_started' | 'task';
+/**
+ * Where a failure came from (see SupercarOutcome.failureSource). `user_wall`: a captcha /
+ * verification handover the user timed out on or gave up (FIX-35).
+ */
+export type TaskFailureSource = 'model' | 'page' | 'tool' | 'user_wall' | 'not_started' | 'task';
 
 const MODEL_UNAVAILABLE = '模型服务暂时不可用，可稍后重试。';
 // No "登录" wording: the UI would turn any mention into a login prompt.
@@ -67,7 +71,11 @@ export function friendlyTaskFailureReason(
   if (/captcha|recaptcha|人机验证|滑块|verify/.test(r)) {
     return '遇到验证码。建议：在右侧 Panel 中手动完成验证，登录态会保存，下次无需重复。';
   }
-  if (source !== 'tool' && /login|signin|sign ?in|passport|oauth|需要登录|登录墙/.test(r)) {
+  if (
+    source !== 'tool' &&
+    source !== 'user_wall' &&
+    /login|signin|sign ?in|passport|oauth|需要登录|登录墙/.test(r)
+  ) {
     return '该网站需要登录才能继续。建议：在右侧 Panel 中手动登录一次，登录态会保存，然后重试任务。';
   }
   if (/missing anthropic_api_key/.test(r)) {
@@ -91,7 +99,9 @@ function plainFailure(raw: string | null | undefined): string {
     // Strip a trailing sentence terminator so we don't double up on the
     // "。建议…" we append — a raw reason like "请求处理时间过长，正在重试。"
     // otherwise renders "…正在重试。。建议…".
-    const cleaned = trimmed.replace(/[。.!！?？;；,，、\s]+$/u, '');
+    // FIX-35 复审 #1 (BENCH d03): the model's own account carries the browser's element
+    // refs (「（ref=e11）」) — page handles, not something the user can read.
+    const cleaned = stripToolCallMarkup(trimmed).replace(/[。.!！?？;；,，、\s]+$/u, '');
     return `任务执行失败：${cleaned}。建议：简化任务描述后重试。`;
   }
   return '任务执行失败。建议：简化任务描述后重试。';

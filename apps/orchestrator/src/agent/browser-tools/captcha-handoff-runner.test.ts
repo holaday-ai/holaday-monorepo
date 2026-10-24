@@ -1,5 +1,6 @@
 import { type Browser, chromium } from 'playwright';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { platformFailureReason } from '../../quota/platform-failure-refunds.js';
 import type { RunSupercarOptions } from '../supercar/agent-loop.js';
 import { BrowserControl } from '../supercar/browser-control.js';
 import { captchaHandoffs } from '../supercar/captcha-handoff.js';
@@ -158,6 +159,25 @@ it('timeout exits truthfully and releases control instead of running more model 
   expect(replay.paused).toBe(true);
   expect(replay.resumes).toBe(0);
   expect(captchaHandoffs.active('captcha-fixture', 'fixture-user')).toBe(false);
+}, 10000);
+
+it('FIX-35 复审 #1: a handover the user left is the user’s wall — not refunded after a reroute', async () => {
+  const f = await scenario(80);
+  const outcome = await f.run;
+  expect(outcome).toMatchObject({ status: 'failed', failureSource: 'user_wall' });
+  // As persisted (tasks.ts: failureDetail.source = outcome.failureSource), handed over from generate.
+  const persisted = {
+    status: 'failed',
+    errorCode: 'VISION_GAVE_UP',
+    errorMessage: '',
+    sourceContext: { reroutedFrom: 'generate' },
+    result: {
+      metadata: {
+        failureDetail: { source: (outcome as { failureSource?: string }).failureSource },
+      },
+    },
+  };
+  expect(platformFailureReason(persisted)).toBeNull();
 }, 10000);
 it('an answer after 换个方式继续 says it does not come from the walled page', async () => {
   const f = await scenario(3000, [

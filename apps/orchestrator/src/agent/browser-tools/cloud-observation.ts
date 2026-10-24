@@ -75,21 +75,31 @@ const KNOWN_TELEMETRY: ReadonlyArray<readonly [host: RegExp, path: RegExp]> = [
   [/^streams\.bestbuy\.com$/, /^\/customer\/web-streams\/v\d+\/events\/[a-z0-9-]+$/i],
 ];
 
-/**
- * FIX-34: the shape of a POST body — top-level key names (JSON / form) and its length, never
- * a value — recorded on an unknown POST so a pause can be checked against real evidence.
- */
-/** A POST to a site's own human/bot verification step (amazon /checkpoint/validate). */
-export function verificationPost(url: string): boolean {
+const AMAZON_HOST_RE =
+  /(?:^|\.)amazon\.(?:cn|com|sg|ca|in|de|fr|it|es|nl|se|pl|ae|sa|eg|co\.uk|co\.jp|com\.au|com\.mx|com\.br|com\.tr|com\.be)$/;
+
+/** amazon's own verification step (host-anchored): /checkpoint/, /errors/validateCaptcha, /ap/cvf/. */
+export function amazonVerificationUrl(url: string): boolean {
   try {
     const u = new URL(url);
     return (
-      (/(?:^|\.)amazon\.(?:com|sg|ca|in|de|fr|it|es|nl|se|pl|ae|sa|eg|co\.uk|co\.jp|com\.au|com\.mx|com\.br|com\.tr|com\.be)$/.test(
-        u.hostname,
-      ) &&
-        /^\/(?:checkpoint\/|errors\/validatecaptcha)/i.test(u.pathname)) ||
-      /\/(?:captcha|challenge)(?:\/|$)/i.test(u.pathname)
+      AMAZON_HOST_RE.test(u.hostname) &&
+      /^\/(?:checkpoint\/|errors\/validatecaptcha|ap\/cvf\/)/i.test(u.pathname)
     );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A POST to a site's own human/bot verification step: amazon's, or a generic `/captcha/`,
+ * `/challenge/` path. The generic paths are only a verification step for a real POST — a
+ * link or a GET to `github.com/topics/challenge` is an ordinary page (FIX-35 复审 #1).
+ */
+export function verificationPost(url: string): boolean {
+  if (amazonVerificationUrl(url)) return true;
+  try {
+    return /\/(?:captcha|challenge)(?:\/|$)/i.test(new URL(url).pathname);
   } catch {
     return false;
   }
@@ -102,6 +112,10 @@ function verificationHost(url: string): string {
   }
 }
 
+/**
+ * FIX-34: the shape of a POST body — top-level key names (JSON / form) and its length, never
+ * a value — recorded on an unknown POST so a pause can be checked against real evidence.
+ */
 export function postBodyShape(body: string): string {
   const text = body.slice(0, 65536);
   try {
@@ -1708,7 +1722,9 @@ export class CloudObservation {
     result.effect = effect;
     // FIX-35 0a (Deploy-35 b-p02): a form posted to the site's own verification page
     // (amazon's checkpoint 「Continue」) is a wall, handed over as one — still a pause.
-    const verification = triggers.find((t) => verificationPost(t.url));
+    const verification = triggers.find((t) =>
+      t.method === 'POST' ? verificationPost(t.url) : amazonVerificationUrl(t.url),
+    );
     if (unexpected)
       result.interruption = verification
         ? {

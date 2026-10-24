@@ -132,4 +132,87 @@ describe('FIX-35 verification step is handed over before the action runs', () =>
     expect(decision).toMatchObject({ kind: 'proceed' });
     await page.close();
   });
+
+  it('hands over a link to amazon’s own validateCaptcha step', async () => {
+    const page = await browser.newPage();
+    await page.setContent(
+      '<a href="https://www.amazon.com/errors/validateCaptcha?amzn=x" onclick="window.sent=1;return false">Try different image</a>',
+    );
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /Try different image/) }, 'before');
+    expect(park.mock.calls[0]?.[1]).toBe('captcha');
+    expect(await sent(page)).toBe(0);
+    await page.close();
+  });
+
+  it('hands over an amazon.cn /ap/cvf/ verification form', async () => {
+    const page = await browser.newPage();
+    await page.setContent(FORM('https://www.amazon.cn/ap/cvf/verify'));
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /Continue shopping/) }, 'before');
+    expect(park.mock.calls[0]?.[1]).toBe('captcha');
+    await page.close();
+  });
+
+  it('hands over a POST form that names a generic /captcha/ action', async () => {
+    const page = await browser.newPage();
+    await page.setContent(FORM('https://example.org/captcha/verify'));
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /Continue shopping/) }, 'before');
+    expect(park.mock.calls[0]?.[1]).toBe('captcha');
+    await page.close();
+  });
+});
+
+describe('复审 #1: ordinary pages whose path says challenge / captcha are not a verification step', () => {
+  const noCaptcha = (park: ReturnType<typeof gateFor>['park']) =>
+    expect(park.mock.calls.some((call) => call[1] === 'captcha')).toBe(false);
+
+  it('a link to github.com/topics/challenge', async () => {
+    const page = await browser.newPage();
+    await page.setContent(
+      '<a href="https://github.com/topics/challenge" onclick="return false">challenge topic</a>',
+    );
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /challenge topic/) }, 'before');
+    noCaptcha(park);
+    await page.close();
+  });
+
+  it('a GET form whose action is a /captcha/ path', async () => {
+    const page = await browser.newPage();
+    await page.setContent(
+      '<form method="get" action="https://example.org/captcha/search" onsubmit="return false"><input aria-label="Search docs"><button>Search</button></form>',
+    );
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /button "Search"/) }, 'before');
+    noCaptcha(park);
+    await page.close();
+  });
+
+  it('a POST form with no action on a /challenge page (it submits to the page itself)', async () => {
+    const page = await browser.newPage();
+    await page.route('https://github.com/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<form method="post" onsubmit="return false"><input aria-label="Comment"><button>Comment</button></form>',
+      }),
+    );
+    await page.goto('https://github.com/topics/challenge');
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /button "Comment"/) }, 'before');
+    noCaptcha(park);
+    await page.close();
+  });
+
+  it('a link to a lookalike host', async () => {
+    const page = await browser.newPage();
+    await page.setContent(
+      '<a href="https://www.amazon.com.evil.example/checkpoint/validate" onclick="return false">continue</a>',
+    );
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /continue/) }, 'before');
+    noCaptcha(park);
+    await page.close();
+  });
 });

@@ -630,6 +630,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           );
         return interruption;
       },
+      userIntent: opts.intent,
       intent: [
         opts.intent,
         guidance ? `【结果要求】\n${guidance}` : '',
@@ -817,8 +818,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             ? { reason: NOT_STARTED, failureSource: 'not_started' as const }
             : {
                 reason: handoffFailure ?? outcome.reason,
+                // FIX-35 复审 #1: a verification handover the user timed out on or gave up is
+                // the user's wall, not a platform failure (no refund after a reroute).
                 ...(handoffFailure
-                  ? { failureSource: 'tool' as const }
+                  ? { failureSource: 'user_wall' as const }
                   : outcome.failureSource
                     ? { failureSource: outcome.failureSource }
                     : {}),

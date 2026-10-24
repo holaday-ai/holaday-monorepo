@@ -47,7 +47,11 @@ const BROWSER_PLATFORM_CODES: ReadonlySet<string> = new Set([
   'QUEUE_TIMEOUT',
   'QUEUE_REJECTED',
 ]);
-/** `result.metadata.failureDetail.source` of a browser failure that was ours. */
+/**
+ * `result.metadata.failureDetail.source` (the runner's `failureSource`, copied as is) of a
+ * browser failure that was ours. `tool` is the executor itself (browser unavailable, proxy
+ * config); a verification handover the user timed out on or gave up is `user_wall`, not here.
+ */
 const PLATFORM_FAILURE_SOURCES: ReadonlySet<string> = new Set(['model', 'tool', 'not_started']);
 function failureSource(result: unknown): string {
   const source = (result as { metadata?: { failureDetail?: { source?: unknown } } } | null)

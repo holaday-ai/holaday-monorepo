@@ -119,6 +119,52 @@ describe('FIX-35 0b · a named field given as absent is 部分完成, after one 
       partial: expect.objectContaining({ missing: '作者' }),
     });
   });
+  it('复审 #1: a failed finish after the screenshot look still delivers the held 部分完成', async () => {
+    const { adapter } = scripted([
+      { name: 'navigate', input: { url: URL_ } },
+      { name: 'snapshot', input: {} },
+      { name: 'finish', input: { status: 'completed', summary: PROD } },
+      { name: 'screenshot', input: {} },
+      { name: 'finish', input: { status: 'failed', summary: '截图里也没看到作者，任务未完成。' } },
+    ]);
+    const site = browser();
+    const outcome = await runUnifiedBrowserLoop({
+      intent: INTENT,
+      adapter,
+      maxSteps: 8,
+      execute: site.execute as never,
+      currentPageUrl: site.currentPageUrl,
+    } as never);
+    expect(outcome).toMatchObject({
+      status: 'completed',
+      summary: expect.stringMatching(/^部分完成：作者 页面上没有读到/),
+      partial: expect.objectContaining({ missing: '作者' }),
+    });
+  });
+  it('复审 #1: a field only the 【结果要求】 block names is not the user’s', async () => {
+    const own =
+      '打开 https://www.douyin.com/video/7377304298310389027 读视频标题，以及点赞数、评论数、收藏数、分享数（不播放）';
+    const { adapter } = scripted([
+      { name: 'navigate', input: { url: URL_ } },
+      { name: 'snapshot', input: {} },
+      { name: 'finish', input: { status: 'completed', summary: PROD } },
+    ]);
+    const site = browser();
+    const rejected: unknown[] = [];
+    const outcome = await runUnifiedBrowserLoop({
+      intent: `${own}\n\n【结果要求】\n逐条给出标题、作者、点赞数`,
+      userIntent: own,
+      adapter,
+      maxSteps: 8,
+      execute: site.execute as never,
+      currentPageUrl: site.currentPageUrl,
+      onCompletionRejected: async (event: unknown) => {
+        rejected.push(event);
+      },
+    } as never);
+    expect(rejected.filter((r) => JSON.stringify(r).includes('点名字段'))).toEqual([]);
+    expect((outcome as { partial?: unknown }).partial).toBeUndefined();
+  });
   it('read from the screenshot → no partial', async () => {
     const fixed = PROD.replace(
       '页面未显示作者名称（仅见评论区用户及合集名，未见视频发布者昵称），故作者字段按页面原样写“页面未显示”。',

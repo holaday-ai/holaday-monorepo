@@ -248,6 +248,8 @@ describe('FIX-34 review → FIX-35 #2 · a handed-over generate task: platform f
   it.each([
     ['an honest 「做不到」 (task)', failed('VISION_GAVE_UP', 'task')],
     ['a wall left to the user (awaiting timeout)', failed('AWAITING_USER_TIMEOUT')],
+    ['a captcha handover timed out / given up (复审 #1)', failed('VISION_GAVE_UP', 'user_wall')],
+    ['an unknown source', failed('VISION_GAVE_UP', 'unknown')],
     [
       'an ordinary browser failure (not handed over)',
       { ...failed('VISION_GAVE_UP', 'model'), sourceContext: {} },

@@ -291,6 +291,16 @@ describe('FIX-35 #3 · the index snapshot’s own clock time (sina ticktime) dec
     const text = await card('09:41:00', '2026-10-26T06:19:00Z', '2026-10-26T14:20:00+08:00');
     expect(text).toContain('- 最近报价（行情时间 2026-10-26 09:41，非实时');
   });
+  it('复审 #1: before the open (08:30) yesterday’s 15:00 tick is not dated today', async () => {
+    const text = await card('15:00:03', '2026-10-26T00:30:00Z', '2026-10-26T08:31:00+08:00');
+    expect(text).not.toContain('2026-10-26 15:00');
+    expect(text).toContain('- 最近报价（抓取于 2026-10-26 08:30，非实时');
+    expect(text).not.toContain('盘中实时');
+  });
+  it('复审 #1: a tick a few seconds after the fetch (clock skew) is still today’s', async () => {
+    const text = await card('14:21:30', '2026-10-26T06:21:00Z', '2026-10-26T14:22:00+08:00');
+    expect(text).toContain('- 行情时间：2026-10-26 14:21（盘中实时，未收盘）');
+  });
   it('on a weekend the 15:35 tick is not dated Saturday', async () => {
     const text = await card('15:35:30', '2026-10-24T02:00:00Z', '2026-10-24T10:00:00+08:00', false);
     expect(text).not.toContain('2026-10-24 15:35');

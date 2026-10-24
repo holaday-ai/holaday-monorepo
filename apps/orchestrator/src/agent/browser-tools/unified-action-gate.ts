@@ -6,7 +6,7 @@ import type { CDPSession, ElementHandle, Frame, Locator, Page } from 'playwright
 import { buildAuthParkQuestion } from '../login-detector.js';
 import type { RunSupercarOptions, SupercarAwaitingKind } from '../supercar/agent-loop.js';
 import { isAffirmativeActionConfirmation } from '../supercar/runtime-action-policy.js';
-import { verificationPost } from './cloud-observation.js';
+import { amazonVerificationUrl, verificationPost } from './cloud-observation.js';
 import type { ActionGateDecision } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
@@ -504,16 +504,30 @@ export interface UnifiedActionDescription {
  */
 function verificationTarget(
   base: string,
-  ...targets: Array<string | null | undefined>
+  form: { rawAction: string | null; method: string | null } | null,
+  href?: string | null,
 ): string | null {
-  // `formAction` / `href` carry the resolved and the as-written value (often relative).
-  for (const token of targets.flatMap((target) => target?.split(' ') ?? [])) {
+  const resolve = (value: string) => {
     try {
-      const url = new URL(token, base).href;
-      if (token && verificationPost(url)) return url;
-    } catch {}
+      return new URL(value, base).href;
+    } catch {
+      return null;
+    }
+  };
+  // 复审 #1: a link is a GET — only amazon's own (host-anchored) verification step counts.
+  for (const token of href?.split(' ') ?? []) {
+    const url = token ? resolve(token) : null;
+    if (url && amazonVerificationUrl(url)) return url;
   }
-  return null;
+  if (!form) return null;
+  // The action as written; a form without one submits to the page itself, where only
+  // amazon's own verification page counts. The generic /captcha|/challenge paths need a
+  // POST to an action the form names.
+  const raw = form.rawAction?.trim() ?? '';
+  const url = resolve(raw || base);
+  if (!url) return null;
+  if (amazonVerificationUrl(url)) return url;
+  return raw && form.method?.toLowerCase() === 'post' && verificationPost(url) ? url : null;
 }
 
 const UNREADABLE_HOST = '目标位于无法读取内部内容的页面组件中';
@@ -535,7 +549,17 @@ function clickDescription(
       signals?.formAction ?? null,
       signals?.formMethod ?? null,
     ]),
-    verification: verificationTarget(pageUrl, signals?.formAction, signals?.href),
+    verification: verificationTarget(
+      signals?.url ?? pageUrl,
+      signals?.formAction != null
+        ? {
+            // `formAction` is 「resolved as-written」; the as-written part is the action.
+            rawAction: signals.formAction.split(' ').slice(1).join(' '),
+            method: signals.formMethod ?? null,
+          }
+        : null,
+      signals?.href,
+    ),
   };
 }
 
@@ -646,7 +670,7 @@ export async function describeUnifiedAction(
           form.fieldSignal,
           form.submitControl?.visibleText ?? null,
         ]),
-        verification: verificationTarget(pageUrl, form.action, form.rawAction),
+        verification: verificationTarget(pageUrl, form),
       };
     }
     default:

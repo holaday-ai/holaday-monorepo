@@ -258,6 +258,8 @@ function fixFabricatedUrls(
     return raw.slice(url.length);
   });
 
+  if (ops.some((op) => op.kind === 'url_drop')) working = tidyDroppedUrls(working);
+
   if (ops.some((op) => op.kind === 'url_drop') && !hasMeaningfulText(working)) {
     working = URL_DROP_EMPTY_FALLBACK;
     ops.push({
@@ -267,6 +269,30 @@ function fixFabricatedUrls(
   }
 
   return { text: working, ops };
+}
+
+/**
+ * FIX-35 复审 #1 (BENCH r06 / l02): a dropped URL left its wrapper behind — 「（如 ``）」, an
+ * empty 「」, and 「链接「」」 in the 未核实 note. The empty wrappers go; a note left with
+ * no item goes with them.
+ */
+export function tidyDroppedUrls(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => {
+      const note = line.match(/^(未核实：[^—\n]*——)(.*)$/);
+      if (!note) return line;
+      const items = note[2]!.split('；').filter((item) => !/「\s*」\s*$/.test(item));
+      return items.length ? `${note[1]}${items.join('；')}` : null;
+    })
+    .filter((line): line is string => line !== null)
+    .join('\n')
+    .replace(/[（(]\s*(?:如|例如|e\.g\.,?)?\s*(?<!`)`[ \t]*`(?!`)\s*[)）]/g, '')
+    .replace(/(?<!`)`[ \t]*`(?!`)/g, '')
+    .replace(/「\s*」/g, '')
+    .replace(/(\S)[ \t]{2,}(?=\S)/g, '$1 ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd();
 }
 
 function hasMeaningfulText(text: string): boolean {

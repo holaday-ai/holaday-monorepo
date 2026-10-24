@@ -511,10 +511,14 @@ export async function buildIndexCard(
       ? at(own.slice(0, 10), own.slice(11))
       : null;
     const fetchDay = await tradingDayKnown(deps.client, beijingIso(fetchedAt));
-    const clockOnly =
+    const onFetchDay =
       !dated && /^\d{2}:\d{2}/.test(own) && fetchDay === true
         ? at(beijingIso(fetchedAt), own)
         : null;
+    // 复审 #1：开盘前（08:30）取到的还是上个交易日的 15:00——时钟晚于取数时刻就不是今天的，
+    // 不用它，按抓取时刻写「最近报价」（容 2 分钟时钟误差）。
+    const priorDayClock = !!onFetchDay && onFetchDay.getTime() > fetchedAt.getTime() + 2 * 60_000;
+    const clockOnly = priorDayClock ? null : onFetchDay;
     const ownAt = [dated, clockOnly].find((d) => d && !Number.isNaN(d.getTime())) ?? null;
     const when = ownAt ?? fetchedAt;
     const stamp = `${beijingIso(when)} ${fmtClock(when.toISOString())}`;
@@ -533,7 +537,7 @@ export async function buildIndexCard(
     lines.push(
       day === null
         ? `- 最近报价（抓取于 ${stamp}；未能确认今天是否交易日）`
-        : stale
+        : stale || priorDayClock
           ? `- 最近报价（${ownAt ? '行情时间' : '抓取于'} ${stamp}，${NOT_REALTIME_NOTE}）`
           : `- 行情时间：${ownAt ? '' : '抓取于 '}${stamp}（${
               day ? '盘中实时，未收盘' : '非交易时段，为最近一个交易日收盘后的行情'

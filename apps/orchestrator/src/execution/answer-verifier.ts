@@ -790,22 +790,37 @@ function pageLacksPrice(name: string | null, pageText: string): boolean {
       .replace(/\*\*/g, '')
       .replace(/^\s*(?:名称|商品名?|标题|name)\s*[:：]\s*/i, '')
       .split(/[；;]|\s[—–]\s|(?:价格|售价|price)\s*[:：]/i)[0] ?? '';
-  const key = flat(bare).slice(0, 30).trim();
-  if (key.length < 4) return false;
   const text = flat(pageText);
-  for (let at = text.indexOf(key); at >= 0; at = text.indexOf(key, at + 1)) {
-    const after = text.slice(at + key.length, at + key.length + 2000);
+  // FIX-35 复审 #1: the whole title, not its first 30 characters — two cards sharing a
+  // prefix (「Anker USB C … (2-Pack, 6 ft …」 / 「… 3.3 ft …」) are two items. An answer that
+  // shortened the title (「…」) is matched by the longest prefix the page has.
+  let key = flat(bare)
+    .replace(/(?:\.{3}|…)\s*$/, '')
+    .trim();
+  while (key.length >= 4 && !text.includes(key)) key = key.slice(0, -1).trimEnd();
+  if (key.length < 4) return false;
+  // Exempt only when every place the title appears shows no price: one showing a price
+  // means the row's price is on the page.
+  let lacks = false;
+  for (let at = text.indexOf(key); at >= 0; ) {
+    const next = text.indexOf(key, at + key.length);
+    const after = text.slice(
+      at + key.length,
+      Math.min(next >= 0 ? next : Number.POSITIVE_INFINITY, at + key.length + 2000),
+    );
     // FIX-35 0a (Deploy-35 b-p02): the row's own state first — 「See options」 /
     // 「Currently unavailable」 right after its title, with no price before it. A cut marker
     // further down must not hide it (the next rows' prices lie between).
-    const state = after.slice(0, 500).search(NO_PRICE_STATE_RE);
-    if (state >= 0 && !PRICE_TOKEN_RE.test(withoutPriceCaps(after.slice(0, state)))) return true;
     // FIX-34: the cut can come well after a long title (rating and review nodes) — the
     // snapshot's own end marker is looked for further than a row's own state words.
-    const cut = after.indexOf(SNAPSHOT_CUT);
-    if (cut >= 0 && !PRICE_TOKEN_RE.test(withoutPriceCaps(after.slice(0, cut)))) return true;
+    const stops = [after.slice(0, 500).search(NO_PRICE_STATE_RE), after.indexOf(SNAPSHOT_CUT)];
+    const stop = Math.min(...stops.filter((i) => i >= 0));
+    const before = Number.isFinite(stop) ? after.slice(0, stop) : after.slice(0, 500);
+    if (PRICE_TOKEN_RE.test(withoutPriceCaps(before))) return false;
+    if (Number.isFinite(stop)) lacks = true;
+    at = next;
   }
-  return false;
+  return lacks;
 }
 
 const SNAPSHOT_CUT = '[快照截断';

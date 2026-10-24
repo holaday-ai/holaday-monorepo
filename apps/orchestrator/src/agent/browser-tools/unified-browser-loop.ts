@@ -183,6 +183,11 @@ export interface UnifiedBrowserLoopInput {
     reason: string;
   }) => void | Promise<void>;
   intent: string;
+  /**
+   * The user's own words, before the runner appends 【结果要求】/【站点提示】. Which fields
+   * the user named is read from these (FIX-35 复审 #1); `intent` when absent.
+   */
+  userIntent?: string;
   adapter: MessagesAdapter;
   execute: (action: UnifiedBrowserAction) => Promise<UnifiedToolResult>;
   /** Qwen Responses built-in web_search, or Firecrawl when configured. */
@@ -1334,7 +1339,11 @@ export async function runUnifiedBrowserLoop(
           const saysPartial = /^\s*(?:部分完成|partially completed)/i.test(summary);
           // FIX-35 0b (Deploy-35 dy-2): a field the user named, written as 「页面未显示」, is
           // looked for once on a screenshot; still absent, the answer is 部分完成.
-          const absent = declaredAbsentFields(input.intent, summary, args.fields);
+          const absent = declaredAbsentFields(
+            input.userIntent ?? input.intent,
+            summary,
+            args.fields,
+          );
           // The page itself confirms the gap (a listed item showing only 「See options」):
           // an honest 部分完成, not a second look (FIX-35 0a).
           const listGap = input.partialNote?.(summary, observedText) ?? null;
@@ -1423,6 +1432,9 @@ export async function runUnifiedBrowserLoop(
           );
           continue;
         }
+        // FIX-35 复审 #1: a remediation (the 0b screenshot look, the date control) that ends
+        // in a failed finish still delivers the answer it held.
+        if (partialHeld) return { status: 'completed', ...partialHeld, steps: step + 1 };
         // A failed navigation cannot establish a login wall, even if the model guesses one.
         return {
           status: 'failed',
