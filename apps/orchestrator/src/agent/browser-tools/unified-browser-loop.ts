@@ -1,3 +1,4 @@
+import { stripToolCallBlocks } from '@holaday/shared-types';
 import { siteOf } from '../../browser-pool/egress-learning.js';
 import { namedSiteDomains } from '../../execution/source-domain-consistency.js';
 import { scrapedWall } from '../../firecrawl/scraped-page.js';
@@ -13,6 +14,7 @@ import {
   modelFailureReason,
   withModelRetry,
 } from '../../llm/model-call-retry.js';
+import { asksForToolCallExample } from '../generate-answer-guard.js';
 import { namedAddressHosts } from '../scrape-runner.js';
 import { SEARCH_RESULTS_ORIGIN } from '../search-fallback/search-results-page.js';
 import {
@@ -756,7 +758,12 @@ export async function runUnifiedBrowserLoop(
           steps: step + 1,
         };
       if (call.name === 'finish' && !hostNavigate) {
-        const summary = typeof args.summary === 'string' ? unescapeLiteralBreaks(args.summary) : '';
+        const written = typeof args.summary === 'string' ? unescapeLiteralBreaks(args.summary) : '';
+        // FIX-34 review #2: an unasked ```json tool-call block is not part of the answer
+        // (its keys are not page quotes either).
+        const summary = asksForToolCallExample(input.intent)
+          ? written
+          : stripToolCallBlocks(written);
         // FAILURE-COPY-1 (FIX-24 core-08 ib): an honest "部分完成" sent as failed is
         // delivered as 部分完成 — only with receipts of the steps it did, and only
         // after the same checks as a completed answer.

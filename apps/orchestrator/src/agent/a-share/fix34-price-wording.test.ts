@@ -232,6 +232,31 @@ describe('FIX-34 #1 · the index card calls only a fresh snapshot 盘中实时',
     expect(text).toContain('- 最近报价（抓取于 2026-10-26 09:40，非实时（未取到今日实时行情））');
     expect(text).not.toContain('盘中实时');
   });
+  it('a 14:58 snapshot read at 15:05 is not 盘中实时 (review #2)', async () => {
+    const text = await card('2026-10-26T06:58:00Z', '2026-10-26T15:05:00+08:00');
+    expect(text).not.toContain('盘中实时');
+    expect(text).toContain('- 最近报价（抓取于 2026-10-26 14:58，非实时');
+  });
+  it('a row with its own time is judged by it, not by when it was fetched (review #2)', async () => {
+    const own = (time: string, nowIso: string) =>
+      buildIndexCard({
+        client: indexClient(),
+        now: new Date(nowIso),
+        quote: {
+          data: [{ 名称: '上证指数', 最新价: 3301.2, 涨跌幅: 0.4, 行情时间: time }],
+          count: 1,
+          source: 'fixture',
+          fetched_at: '2026-10-26T06:19:00Z',
+        },
+      } as never);
+    // Fetched at 14:19 but the row says 09:40: an old row is not real-time.
+    expect(await own('2026-10-26 09:40:00', '2026-10-26T14:20:00+08:00')).toContain(
+      '- 最近报价（行情时间 2026-10-26 09:40，非实时',
+    );
+    expect(await own('2026-10-26 14:18:30', '2026-10-26T14:20:00+08:00')).toContain(
+      '（盘中实时，未收盘）',
+    );
+  });
   it('lunch: a snapshot from 11:29 is still the latest trade at 12:40', async () => {
     expect(await card('2026-10-26T03:29:00Z', '2026-10-26T12:40:00+08:00')).toContain(
       '（盘中实时，未收盘）',

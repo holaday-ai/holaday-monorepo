@@ -191,6 +191,56 @@ describe('FIX-34 #2 · amazon.sg: each item is checked against its own listing r
     });
     expect(facts.contradictions.join('；')).toMatch(/未成功读取/);
   });
+  // 复审 #2: a neighbour whose title contains ours, in another node type, is another product.
+  it('a neighbour titled 「…Braided 2-Pack」 in a heading does not lend its price to 「…Braided」', () => {
+    const short = 'Anker USB C Cable 240W 6ft Braided';
+    const tree = [
+      SEARCHBOX,
+      '- group [ref=e1]:',
+      `  - link "${short}" [ref=e2]`,
+      '  - generic [ref=e3]: S$9.99',
+      `  - heading "${short} 2-Pack" [level=2] [ref=e4]`,
+      '  - generic [ref=e5]: S$15.99',
+    ].join('\n');
+    const facts = assessCompletionFacts({
+      summary: `1. 名称：${short}；价格：S$15.99`,
+      fields: [{ name: '商品1价格', value: 'S$15.99', tabId: 'tab_detail' }],
+      pages: [cardPage('', tree)],
+    });
+    expect(facts.contradictions.join('；')).toMatch(/未成功读取/);
+  });
+  it('a whole page on one text line is no card', () => {
+    const text = `${T3} S$21.41 ${T2} S$17.29 ${T1} S$8.90`;
+    const facts = assessCompletionFacts({
+      summary: `3. 名称：${T3}；价格：S$17.29`,
+      fields: [{ name: '商品3价格', value: 'S$17.29', tabId: 'tab_detail' }],
+      pages: [observedEvidence(text, text, LISTING)],
+    });
+    expect(facts.contradictions.join('；')).toMatch(/未成功读取/);
+  });
+  it('a card’s struck-through 「Was」 price is not a second price; its own price grounds', () => {
+    const tree = [
+      SEARCHBOX,
+      '- list:',
+      '  - listitem [ref=e1]:',
+      `    - link "${T1}" [ref=e2]`,
+      `    - 'link "S$8.90 Was: S$23.93" [ref=e3]':`,
+      '      - generic [ref=e4]: S$8.90',
+      '      - generic [ref=e5]: "Was: S$23.93"',
+      '      - generic [ref=e6]: S$23.93',
+      '  - listitem [ref=e7]:',
+      `    - link "${T2}" [ref=e8]`,
+      '    - generic [ref=e9]: S$16.76',
+    ].join('\n');
+    const grounded = (price: string) =>
+      assessCompletionFacts({
+        summary: `1. 名称：${T1}；价格：${price}`,
+        fields: [{ name: '商品1价格', value: price, tabId: 'tab_detail' }],
+        pages: [cardPage('', tree)],
+      }).contradictions;
+    expect(grounded('S$8.90')).toEqual([]);
+    expect(grounded('S$16.76').join('；')).toMatch(/未成功读取/);
+  });
   it('a page without element structure grants no exemption (the page is read instead)', () => {
     const tree = [`- link "${T3}" [ref=e394]`, '- link "S$21.41" [ref=e409]'].join('\n');
     const facts = assessCompletionFacts({

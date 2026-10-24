@@ -10,6 +10,7 @@ import {
   newExternalId,
   normalizeSkillIds,
   skillById,
+  stripToolCallBlocks,
   videoParameterIssue,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
@@ -34,7 +35,7 @@ import {
   runDirectOpen,
   verifyDirectOpenUrlSafety,
 } from '../../agent/direct-open.js';
-import { deliverableAnswer } from '../../agent/generate-answer-guard.js';
+import { asksForToolCallExample, deliverableAnswer } from '../../agent/generate-answer-guard.js';
 import { type GenerateOutcome, runGenerateTask } from '../../agent/generate-runner.js';
 import { orderImageAttachmentIds } from '../../agent/image/image-input-order.js';
 import {
@@ -7509,7 +7510,12 @@ export const tasksRouter = router({
                       // computer_20251124 traces leaks here more often than
                       // in the generate / scrape lanes.
                       if (outcome.status === 'completed' && outcome.summary) {
-                        const cleaned = sanitizeFinalText(outcome.summary);
+                        const sanitised = sanitizeFinalText(outcome.summary);
+                        // FIX-34 review #2: an unasked ```json tool-call block is not shown
+                        // on the browser lane either.
+                        const cleaned = asksForToolCallExample(input.intent)
+                          ? sanitised
+                          : stripToolCallBlocks(sanitised);
                         if (cleaned !== outcome.summary) {
                           outcome = { ...outcome, summary: cleaned };
                         }

@@ -59,7 +59,9 @@ function saveRef(request: messages.NeutralMessagesRequest): string {
 
 // scrape-retry (FIX-INTENT-ROUTE-BROWSER): the scrape lane's one-time handoff re-enters
 // create with an internal ctx flag; it adopts the scrape task's row and is not charged again.
-it.each(['ready', 'timeout', 'timeout-persists', 'scrape-retry'] as const)(
+// tool-block (FIX-34 review #2): the browser lane's final summary carries an unasked
+// ```json tool-call block; it is delivered without it.
+it.each(['ready', 'timeout', 'timeout-persists', 'scrape-retry', 'tool-block'] as const)(
   'unified executor through tasks.create: %s',
   async (scenario) => {
     expect(original.BROWSER_EXECUTOR).toBe('unified');
@@ -127,7 +129,10 @@ it.each(['ready', 'timeout', 'timeout-persists', 'scrape-retry'] as const)(
                 : [
                     toolUse('f1', 'finish', {
                       status: 'completed',
-                      summary: '订单已保存。',
+                      summary:
+                        scenario === 'tool-block'
+                          ? '订单已保存。\n\n```json\n{"name": "browser_use", "arguments": {"action": "click", "ref": "e3"}}\n```'
+                          : '订单已保存。',
                       evidence: '已保存',
                     }),
                   ];
@@ -270,6 +275,13 @@ it.each(['ready', 'timeout', 'timeout-persists', 'scrape-retry'] as const)(
       }
       expect(adopt).not.toHaveBeenCalled();
       expect(consume, diagnostics).toHaveBeenCalledWith(41, 'pro', false);
+      if (scenario === 'tool-block') {
+        expect(outcome, diagnostics).toMatchObject({
+          status: 'completed',
+          summary: '订单已保存。',
+        });
+        return;
+      }
       if (scenario === 'ready' || scenario === 'timeout') {
         expect(outcome, diagnostics).toMatchObject({
           status: 'completed',

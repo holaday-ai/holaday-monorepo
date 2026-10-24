@@ -958,37 +958,80 @@ export function nearestPassage(quote: string, pages: ObservedEvidence[]): string
 }
 
 const CARD_PRICE_RE = /(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?/gi;
-/** A product title node: a link or heading whose own text is long enough to name an item. */
-const TITLE_NODE_RE = /^-\s*'?(?:link|heading)\s+"([^"]{20,})"/;
+/** A tree node line: 「- role "name" [ref=…]: text」 (an accessibility snapshot). */
+const TREE_NODE_RE = /^\s*-\s+'?[a-z]/;
+/** A node's own texts: its quoted name and the text after its colon. */
+function nodeTexts(line: string): string[] {
+  const t = line.trim();
+  return [
+    t.match(/"([^"]+)"/)?.[1],
+    t.match(/\]:\s*(.+)$/)?.[1] ?? t.match(/^-\s*'?[a-z]+:\s*(.+)$/)?.[1],
+  ]
+    .filter((v): v is string => Boolean(v?.trim()))
+    .map((v) => normalizeFact(v));
+}
 
 /**
- * The product card around tree line `at` (协调方复审阻塞 2): the largest enclosing element
- * (by the snapshot's indentation) that names no other product. An amazon listitem holds
- * its title link, heading, rating and price; the list around it holds the next items.
- * A page without a tree (plain text) has no elements — the card is the line itself.
+ * The product card around tree line `at` (协调方复审阻塞 2 / 复审 #2): the largest enclosing
+ * element (by the snapshot's indentation) that is still one product's — no node naming a
+ * different product (any node type; a longer or shorter title is a different one), at most
+ * one distinct price and at most one product link. An amazon listitem holds its title
+ * link, heading, rating and price; the list around it holds the next items.
  */
-function cardAround(lines: string[], at: number, name: string): string[] {
+function cardAround(lines: string[], at: number, name: string): string[] | null {
+  if (!TREE_NODE_RE.test(lines[at]!)) return null;
   const indent = (k: number) => lines[k]!.length - lines[k]!.trimStart().length;
   const blockEnd = (a: number) => {
     let e = a + 1;
     while (e < lines.length && (!lines[e]!.trim() || indent(e) > indent(a))) e++;
     return e;
   };
-  const namesAnother = (from: number, to: number) =>
-    lines.slice(from, to).some((line) => {
-      const title = line.trim().match(TITLE_NODE_RE)?.[1];
-      if (!title) return false;
-      const t = normalizeFact(title);
-      return (
-        !t.includes(name) && !name.includes(t) && !new RegExp(CARD_PRICE_RE.source, 'i').test(t)
-      );
-    });
+  const oneProduct = (from: number, to: number) => {
+    const block = lines.slice(from, to);
+    // A card's struck-through list price (「Was: S$23.93」「原价」) is not a second price.
+    const listPrice = new RegExp(
+      String.raw`(?:was|list(?:\s*price)?|typical(?:\s*price)?|rrp|原价|划线价)\s*:?\s*(?:${CARD_PRICE_RE.source})`,
+      'gi',
+    );
+    const text = block.map(normalizeFact).join('\n');
+    // Its value repeats in nodes of its own (「- generic: S$23.93」): drop it everywhere.
+    const listed = new Set(
+      [...text.matchAll(listPrice)].flatMap((m) =>
+        (m[0].match(CARD_PRICE_RE) ?? []).map(normalizeFact),
+      ),
+    );
+    const prices = new Set(
+      (text.match(CARD_PRICE_RE) ?? []).map(normalizeFact).filter((v) => !listed.has(v)),
+    );
+    // Product links: long link texts that are not a price (「S$8.90 Was: S$23.93」).
+    const links = new Set(
+      block.flatMap((line) => {
+        const m = line.trim().match(/^-\s*'?link\s+"([^"]{20,})"/);
+        return m && !new RegExp(CARD_PRICE_RE.source, 'i').test(m[1]!)
+          ? [normalizeFact(m[1]!)]
+          : [];
+      }),
+    );
+    const other = block.some((line) =>
+      nodeTexts(line).some(
+        (t) =>
+          t !== name &&
+          t.length >= 20 &&
+          !new RegExp(CARD_PRICE_RE.source, 'i').test(t) &&
+          // A different product: shares the title (a longer or shorter one), or is a
+          // product link of its own.
+          (t.includes(name) || name.includes(t) || /^-\s*'?link\s/.test(line.trim())),
+      ),
+    );
+    return prices.size <= 1 && links.size <= 1 && !other;
+  };
   let [start, end] = [at, blockEnd(at)];
+  if (!oneProduct(start, end)) return null;
   for (let a = at - 1, level = indent(at); a >= 0 && level > 0; a--) {
     if (!lines[a]!.trim() || indent(a) >= level) continue;
     level = indent(a);
     const e = blockEnd(a);
-    if (namesAnother(a, e)) break;
+    if (!oneProduct(a, e)) break;
     [start, end] = [a, e];
   }
   return lines.slice(start, end);
@@ -1023,7 +1066,7 @@ function itemShownOnPage(
         const at = norm.indexOf(name);
         // The whole name: 「…, 2M」 is not the 「…, 1M」 it shares a prefix with.
         if (at < 0 || /[\p{L}\p{N}]/u.test(norm[at + name.length] ?? '')) return false;
-        return cardAround(lines, i, name).some((cardLine) =>
+        return (cardAround(lines, i, name) ?? []).some((cardLine) =>
           (normalizeFact(cardLine).match(CARD_PRICE_RE) ?? []).some(
             (shown) => normalizeFact(shown) === want,
           ),
