@@ -16,12 +16,13 @@ const TAG_RE = new RegExp(String.raw`</?${TAG_NAME}\b[^<>]*/?>`, 'gi');
 const TOOL_NAME_LINE_RE = /^[ \t]*[a-z]+_(?:use|call)[ \t]*$/gim;
 /** Where a JSON tool call starts: `{"action":`, `{ "tool_name":`, `{"function":`. */
 /**
- * FIX-35 #1: `{"name":"Alice","args":…}` in prose is data, not a call. Only a known tool
- * name (`browser_use`, `web_search`, `navigate`…) or a name followed by `arguments` /
- * `parameters` is a tool JSON.
+ * FIX-35 #1: `{"name":"Alice","args":…}` in prose is data, not a call. A tool JSON is a
+ * name only a tool has (`browser_use`, `web_search`, `read_page`…), a word that is also a
+ * tool (`click`, `navigate`, `finish`…) only when call arguments follow it, or any name
+ * followed by `arguments` / `parameters`. `{"name":"click","timestamp":…}` is data.
  */
 const TOOL_JSON_START_RE =
-  /\{\s*(?:"(?:action|tool|tool_name|tool_use|function|function_call)"\s*:|"name"\s*:\s*"(?:[a-z]+_(?:use|call)|web_search|computer|browser|navigate|click|screenshot|snapshot|read_page|get_page_text|finish|[\w.-]+"\s*,\s*"(?:arguments|parameters))")/g;
+  /\{\s*(?:"(?:action|tool|tool_name|tool_use|function|function_call)"\s*:|"name"\s*:\s*"(?:(?:[a-z]+_(?:use|call)|web_search|read_page|get_page_text)"|(?:computer|browser|navigate|click|screenshot|snapshot|finish)"\s*,\s*"(?:arguments|parameters|input|args)"|[\w.-]+"\s*,\s*"(?:arguments|parameters)"))/g;
 const CODE_RE = /```[\s\S]*?(?:```|$)|`[^`\n]+`/g;
 
 /** End index (exclusive) of the balanced `{…}` starting at `start`, or -1. */

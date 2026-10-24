@@ -1347,6 +1347,16 @@ export async function runUnifiedBrowserLoop(
           ) {
             absentLooked = true;
             await rejected(summary, given, `点名字段写成了页面未显示：${absent.join('、')}`);
+            // The second look is optional: if it never ends in a finish (steps, model), this
+            // answer is still delivered, as the 部分完成 it would have been.
+            const lead = `部分完成：${absent.join('、')} 页面上没有读到。`;
+            partialHeld ??= {
+              summary: withLimitations(
+                /^\s*部分完成/.test(answer) ? answer : `${lead}\n\n${answer}`,
+              ),
+              evidence,
+              partial: { found: 0, wanted: 1, missing: absent.join('、') },
+            };
             results.push(
               toolResult(
                 call.id,

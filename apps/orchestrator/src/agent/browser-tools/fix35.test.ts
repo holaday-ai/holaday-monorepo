@@ -77,7 +77,7 @@ function browser() {
   };
   return { execute, currentPageUrl: () => url };
 }
-const run = (finishes: string[]) => {
+const run = (finishes: string[], maxSteps = 8) => {
   const { adapter, seen } = scripted([
     { name: 'navigate', input: { url: URL_ } },
     { name: 'snapshot', input: {} },
@@ -90,7 +90,7 @@ const run = (finishes: string[]) => {
   return runUnifiedBrowserLoop({
     intent: INTENT,
     adapter,
-    maxSteps: 8,
+    maxSteps,
     execute: site.execute as never,
     currentPageUrl: site.currentPageUrl,
     onCompletionRejected: async (event: unknown) => {
@@ -104,6 +104,15 @@ describe('FIX-35 0b · a named field given as absent is 部分完成, after one 
     const { outcome, rejected, seen } = await run([PROD]);
     expect(rejected).toHaveLength(1);
     expect(seen.join('\n')).toContain('请先 screenshot 看一眼');
+    expect(outcome).toMatchObject({
+      status: 'completed',
+      summary: expect.stringMatching(/^部分完成：作者 页面上没有读到/),
+      partial: expect.objectContaining({ missing: '作者' }),
+    });
+  });
+  it('the look never ends in a finish (step limit) → the answer is still 部分完成, not failed', async () => {
+    const { outcome, rejected } = await run([PROD], 3);
+    expect(rejected).toHaveLength(1);
     expect(outcome).toMatchObject({
       status: 'completed',
       summary: expect.stringMatching(/^部分完成：作者 页面上没有读到/),

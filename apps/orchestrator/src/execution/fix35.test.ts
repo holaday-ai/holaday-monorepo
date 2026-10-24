@@ -73,6 +73,10 @@ describe('FIX-35 #1 · plain JSON in prose is not a tool call', () => {
   it.each([
     '用户数据示例：{"name":"Alice","args":["--verbose"]}，其中 args 是命令行参数。',
     '返回体形如 {"name": "Bob", "input": "hello"}，name 是用户名。',
+    // A word that is also a tool name, with no call arguments: data (PR #298 review).
+    'Event data: {"name":"click","timestamp":12345}.',
+    '埋点：{"name":"browser","version":"118"}，{"name":"finish","at":3}。',
+    '{"name":"clickstream","input":1} 是一条埋点。',
   ])('%s stays', (text) => {
     expect(stripToolCallMarkup(text)).toBe(text);
     expect(deliverableAnswer(text)).toBe(text);
@@ -81,6 +85,9 @@ describe('FIX-35 #1 · plain JSON in prose is not a tool call', () => {
     '第一条结果售价 $14.99。\n{"name":"browser_use","input":{"action":"navigate"}}',
     '第一条结果售价 $14.99。\n{"name":"web_search","query":"x"}',
     '第一条结果售价 $14.99。\n{"name":"search","arguments":{"q":"x"}}',
+    '第一条结果售价 $14.99。\n{"name":"navigate","input":{"url":"https://x.com"}}',
+    '第一条结果售价 $14.99。\n{"name":"click","args":{"ref":"e12"}}',
+    '第一条结果售价 $14.99。\n{"name":"read_page"}',
   ])('%s is still removed', (text) => {
     expect(deliverableAnswer(text)).toBe('第一条结果售价 $14.99。');
   });
