@@ -108,14 +108,43 @@ describe('FIX-34 #2 · amazon.sg: each item is checked against its own listing r
     expect(page.text).not.toContain(SNAPSHOT_TRUNCATED);
     expect(declaredMissingPriceRows(rows('未获取到'), page.text)).toEqual([]);
   });
-  it('S$21.41 shown beside item 3 is grounded, though the answer binds it to an unread tab', () => {
+  // 协调方复审阻塞 2：名称与价格必须在同一个商品卡（快照的同一元素块）里。
+  const SEARCHBOX = '- searchbox "Search Amazon.sg" [ref=e20]: usb c cable';
+  /** A results list as the snapshot nests it: one listitem per product card. */
+  const cards = (items: Array<[string, string | null]>) =>
+    [
+      '- list:',
+      ...items.flatMap(([title, price], k) => [
+        `  - listitem [ref=e${k}0]:`,
+        `    - link "${title}" [ref=e${k}1]:`,
+        `      - /url: https://www.amazon.sg/x/dp/B0${k}/ref=sr_1_${k + 1}`,
+        `      - heading "${title}" [level=2] [ref=e${k}2]`,
+        `    - button "4.7 out of 5 stars, rating details" [ref=e${k}3]`,
+        ...(price ? [`    - link "${price}" [ref=e${k}4]`] : []),
+      ]),
+    ].join('\n');
+  const cardPage = (cardTree: string, tree = `${SEARCHBOX}\n${cardTree}`) =>
+    observedEvidence(
+      JSON.stringify({ tabId: 'tab_list', sourceURL: LISTING, tree }),
+      tree,
+      LISTING,
+    );
+  it('S$21.41 in item 3’s own card is grounded, though the answer binds it to an unread tab', () => {
     const facts = assessCompletionFacts({
       summary: rows('S$21.41（从该商品详情页获取）'),
       fields: [
         { name: '商品3名称', value: T3, tabId: 'tab_detail' },
         { name: '商品3价格', value: 'S$21.41', tabId: 'tab_detail' },
       ],
-      pages: [listing(false, 'S$21.41')],
+      pages: [
+        cardPage(
+          cards([
+            [T1, 'S$8.90'],
+            [T2, 'S$17.29'],
+            [T3, 'S$21.41'],
+          ]),
+        ),
+      ],
     });
     expect(facts.contradictions).toEqual([]);
   });
@@ -137,19 +166,39 @@ describe('FIX-34 #2 · amazon.sg: each item is checked against its own listing r
     });
     expect(facts.contradictions.join('；')).toMatch(/未成功读取/);
   });
-  it('a price is borrowed only from the entry right after the item name', () => {
-    const tree = [`- link "${T3}" [ref=e394]`, '- link "S$21.41" [ref=e409]'].join('\n');
-    const page = observedEvidence(
-      JSON.stringify({ tabId: 'tab_list', sourceURL: LISTING, tree }),
-      tree,
-      LISTING,
-    );
-    const ok = assessCompletionFacts({
-      summary: `1. 名称：${T3}；价格：S$21.41`,
-      fields: [{ name: '商品1价格', value: 'S$21.41', tabId: 'tab_detail' }],
-      pages: [page],
+  it('the next card’s price is not item 3’s, however close it is', () => {
+    const facts = assessCompletionFacts({
+      summary: rows('S$21.41'),
+      fields: [{ name: '商品3价格', value: 'S$21.41', tabId: 'tab_detail' }],
+      pages: [
+        cardPage(
+          cards([
+            [T1, 'S$8.90'],
+            [T2, 'S$17.29'],
+            [T3, null],
+            ['Anker USB C to USB C Cable 240W 6ft Braided', 'S$21.41'],
+          ]),
+        ),
+      ],
     });
-    expect(ok.contradictions).toEqual([]);
+    expect(facts.contradictions.join('；')).toMatch(/未成功读取/);
+  });
+  it('a 2M title is not found in the 1M card that shares its prefix', () => {
+    const facts = assessCompletionFacts({
+      summary: `1. 名称：${T3}；价格：S$17.29`,
+      fields: [{ name: '商品1价格', value: 'S$17.29', tabId: 'tab_detail' }],
+      pages: [cardPage(cards([[T2, 'S$17.29']]))],
+    });
+    expect(facts.contradictions.join('；')).toMatch(/未成功读取/);
+  });
+  it('a page without element structure grants no exemption (the page is read instead)', () => {
+    const tree = [`- link "${T3}" [ref=e394]`, '- link "S$21.41" [ref=e409]'].join('\n');
+    const facts = assessCompletionFacts({
+      summary: `3. 名称：${T3}；价格：S$21.41`,
+      fields: [{ name: '商品3价格', value: 'S$21.41', tabId: 'tab_detail' }],
+      pages: [cardPage(tree)],
+    });
+    expect(facts.binding).toEqual([expect.objectContaining({ kind: 'unread' })]);
   });
   it('「kitchen bestsellers under s$30」 does not contradict an item price on a listing', () => {
     const facts = assessCompletionFacts({

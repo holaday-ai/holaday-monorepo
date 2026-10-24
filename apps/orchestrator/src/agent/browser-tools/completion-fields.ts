@@ -947,39 +947,78 @@ export function nearestPassage(quote: string, pages: ObservedEvidence[]): string
     : undefined;
 }
 
+const CARD_PRICE_RE = /(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?/gi;
+/** A product title node: a link or heading whose own text is long enough to name an item. */
+const TITLE_NODE_RE = /^-\s*'?(?:link|heading)\s+"([^"]{20,})"/;
+
+/**
+ * The product card around tree line `at` (协调方复审阻塞 2): the largest enclosing element
+ * (by the snapshot's indentation) that names no other product. An amazon listitem holds
+ * its title link, heading, rating and price; the list around it holds the next items.
+ * A page without a tree (plain text) has no elements — the card is the line itself.
+ */
+function cardAround(lines: string[], at: number, name: string): string[] {
+  const indent = (k: number) => lines[k]!.length - lines[k]!.trimStart().length;
+  const blockEnd = (a: number) => {
+    let e = a + 1;
+    while (e < lines.length && (!lines[e]!.trim() || indent(e) > indent(a))) e++;
+    return e;
+  };
+  const namesAnother = (from: number, to: number) =>
+    lines.slice(from, to).some((line) => {
+      const title = line.trim().match(TITLE_NODE_RE)?.[1];
+      if (!title) return false;
+      const t = normalizeFact(title);
+      return (
+        !t.includes(name) && !name.includes(t) && !new RegExp(CARD_PRICE_RE.source, 'i').test(t)
+      );
+    });
+  let [start, end] = [at, blockEnd(at)];
+  for (let a = at - 1, level = indent(at); a >= 0 && level > 0; a--) {
+    if (!lines[a]!.trim() || indent(a) >= level) continue;
+    level = indent(a);
+    const e = blockEnd(a);
+    if (namesAnother(a, e)) break;
+    [start, end] = [a, e];
+  }
+  return lines.slice(start, end);
+}
+
 /**
  * FIX-34: the answer's row holding `value` (as its name or its price), and a read page
- * where that row's name is followed within 600 characters by its price.
+ * whose product card for that row's whole name also shows that price — the same element
+ * block, never a character window that runs into the next card (协调方复审阻塞 2).
  */
 function itemShownOnPage(
   summary: string,
   value: string,
-  pages: ReadonlyArray<{ norm: string }>,
+  pages: ReadonlyArray<{ text: string }>,
 ): boolean {
   const rows = summary
     .split('\n')
     .map((line) => normalizeFact(line))
     .filter((line) => line.includes(value));
   return rows.some((row) => {
-    const price = row.match(/(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?/i)?.[0];
+    const price = row.match(new RegExp(CARD_PRICE_RE.source, 'i'))?.[0];
     const name = row
       .replace(/^\s*(?:\d+[.)、]\s*)?(?:名称|商品名?|标题|name)?\s*[:：]?\s*/i, '')
       .split(/[；;]|\s[—–]\s|(?:价格|售价|price)\s*[:：]/i)[0]
       ?.trim();
     if (!price || !name || name.length < 8) return false;
-    // The whole name (a 「…, 2M」 is not the 「…, 1M」 that shares its first 40 characters),
-    // and the first price after it on the page is this one — that item's own entry
-    // (Codex review on PR #297).
+    const want = normalizeFact(price);
     return pages.some((page) => {
-      for (let at = page.norm.indexOf(name); at >= 0; at = page.norm.indexOf(name, at + 1)) {
-        const end = at + name.length;
-        if (/[\p{L}\p{N}]/u.test(page.norm[end] ?? '')) continue;
-        const first = page.norm
-          .slice(end, end + 600)
-          .match(/(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?/i)?.[0];
-        if (first && normalizeFact(first) === normalizeFact(price)) return true;
-      }
-      return false;
+      const lines = unescapeLiteralBreaks(page.text).split('\n');
+      return lines.some((line, i) => {
+        const norm = normalizeFact(line);
+        const at = norm.indexOf(name);
+        // The whole name: 「…, 2M」 is not the 「…, 1M」 it shares a prefix with.
+        if (at < 0 || /[\p{L}\p{N}]/u.test(norm[at + name.length] ?? '')) return false;
+        return cardAround(lines, i, name).some((cardLine) =>
+          (normalizeFact(cardLine).match(CARD_PRICE_RE) ?? []).some(
+            (shown) => normalizeFact(shown) === want,
+          ),
+        );
+      });
     });
   });
 }
