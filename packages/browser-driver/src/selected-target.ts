@@ -214,17 +214,16 @@ type Signals = Pick<
  * FIX-36 复审 #1: whether the target is a login field or a login / authorize control,
  * folded into its element signals (the orchestrator refuses typing / clicking there).
  */
-const withLogin = (signals: Signals, login: LoginContext | null | undefined): Signals =>
-  login?.loginField || login?.loginControl
-    ? {
-        ...signals,
-        element: {
-          ...signals.element,
-          ...(login.loginField ? { loginField: true } : {}),
-          ...(login.loginControl ? { loginControl: true } : {}),
-        },
-      }
-    : signals;
+const withLogin = (signals: Signals, login: LoginContext | null | undefined): Signals => ({
+  ...signals,
+  // Always present (复审 #2 #6): an absent field means an extension that cannot read them.
+  element: {
+    ...signals.element,
+    loginField: !!login?.loginField,
+    loginControl: !!login?.loginControl,
+    loginBlock: !!login?.loginBlock,
+  },
+});
 /** A field's own read (type / select / freshness), with its login context. */
 const readField = async (handle: ElementHandle<Element>): Promise<Signals> =>
   withLogin(

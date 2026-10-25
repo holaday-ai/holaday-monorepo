@@ -7020,6 +7020,7 @@ export const tasksRouter = router({
                     createFileFormats: supercarArgs.createFileFormats,
                     onCreateFile: supercarArgs.onCreateFile,
                     onBeforeAction: supercarArgs.onBeforeAction,
+                    logger: ctx.logger,
                     onAwaitingUser: supercarArgs.onAwaitingUser,
                   });
                 };

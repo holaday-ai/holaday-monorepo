@@ -258,27 +258,25 @@ describe('FIX-36 #9 · popups may be closed; credentials are never typed', () =>
     await page.close();
   });
 
-  it('a long form that also asks for a password: its date box is filled, its username box is not (local core-08)', async () => {
+  it('the-internet /large_form as it is: Details are filled, the Account block (with its password) is not (core-08)', async () => {
     const page = await browser.newPage();
+    // The live page's structure (checked 2026-10-25): an Account fieldset with a password box,
+    // then a Details fieldset with the date control.
     await page.setContent(
-      '<form><label>Username<input name="username"></label><label>Password<input type="password" name="password"></label><label>Birthday<input type="date" name="birthday" aria-label="Birthday"></label><label>Address<input name="address" aria-label="Address"></label></form>',
+      '<form id="large-form" action="/large_form" method="post"><fieldset><legend>Account</legend><label for="first-name">First name</label><input type="text" id="first-name" name="first_name"><label for="last-name">Last name</label><input type="text" id="last-name" name="last_name"><label>Email</label><input type="email" name="email"><label>Password</label><input type="password" name="password"><input type="text" name="nickname" placeholder="Nickname (optional)"></fieldset><fieldset><legend>Details</legend><label for="birthday">Birthday</label><input type="date" id="birthday" name="birthday"><span>Age</span><input type="number" name="age" aria-label="Age"><label for="bio">About you</label><textarea id="bio" name="bio"></textarea></fieldset></form>',
     );
     const { gate, park } = gateFor(page);
-    const date = await gate(
-      { tool: 'type', ref: await refOf(page, /textbox "Birthday"/), text: '2026-10-25' },
-      'before',
-    );
-    expect(date).toMatchObject({ kind: 'proceed' });
-    const address = await gate(
-      { tool: 'type', ref: await refOf(page, /textbox "Address"/), text: '杭州' },
-      'before',
-    );
-    expect(address).toMatchObject({ kind: 'proceed' });
-    const user = await gate(
-      { tool: 'type', ref: await refOf(page, /textbox "Username"/), text: 'tom' },
-      'before',
-    );
-    expect(user).toMatchObject({ kind: 'skip', message: expect.stringContaining('不代填') });
+    for (const [pattern, text] of [
+      [/textbox "Birthday"/, '2026-10-25'],
+      [/textbox "About you"/, '你好'],
+    ] as const)
+      expect(
+        await gate({ tool: 'type', ref: await refOf(page, pattern), text }, 'before'),
+      ).toMatchObject({ kind: 'proceed' });
+    for (const pattern of [/textbox "First name"/, /textbox "Nickname \(optional\)"/])
+      expect(
+        await gate({ tool: 'type', ref: await refOf(page, pattern), text: 'tom' }, 'before'),
+      ).toMatchObject({ kind: 'skip', message: expect.stringContaining('不代填') });
     expect(park).not.toHaveBeenCalled();
     await page.close();
   });

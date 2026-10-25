@@ -322,6 +322,31 @@ describe('FIX-36 复审 #1 #3 · what the scrape got goes with it to the browser
   });
 });
 
+describe('FIX-36 复审 #2 #2 · the partial answer kept for the browser is filtered and annotated', () => {
+  it('an invented trading date never reaches the 部分完成 answer; unverified facts are noted', async () => {
+    const { outcome } = await run(
+      '- 上证指数：3690.48\n- 成交额：页面未显示\n\n页面标题为「上证指数实时行情中心」。下一个交易日是周一（10月27日）。',
+      calendar,
+      { intent: '上证指数现在多少点，成交额多少' },
+    );
+    expect(outcome).toMatchObject({ status: 'failed', failureKind: 'empty' });
+    const kept = outcome.partialAnswer?.summary ?? '';
+    expect(kept).toContain('3690.48');
+    expect(kept).not.toContain('10月27日');
+    expect(kept).toMatch(/未核实：.*上证指数实时行情中心/);
+    const delivered = scrapePartialDelivery(outcome.partialAnswer!, '浏览器重试失败');
+    expect(delivered.summary).not.toContain('10月27日');
+  });
+  it('「上证指数：页面未显示。下一个交易日是周一（10月27日）。」 keeps nothing to deliver', async () => {
+    const { outcome } = await run(
+      '上证指数：页面未显示。下一个交易日是周一（10月27日）。',
+      calendar,
+    );
+    expect(outcome.status).toBe('failed');
+    expect(outcome.partialAnswer?.summary ?? '').not.toContain('10月27日');
+  });
+});
+
 describe('FIX-36 #4 · fc-jd: a login wall the scrape met is the browser’s to hand over', () => {
   it('the production answer is not a completed answer', () => {
     expect(

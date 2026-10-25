@@ -58,6 +58,8 @@ export interface RunSelectedChromeTaskOptions {
   /** Batch 09 — self-evolution capture (ACTION_CAPTURE); best-effort, never awaited by the task. */
   capture?: Pick<BrowserActionCaptureRecorder, 'recordToolCall' | 'recordOutcome'>;
   onBeforeAction?: RunSupercarOptions['onBeforeAction'];
+  /** FIX-36 复审 #2: notes an extension too old to read login fields (operators only). */
+  logger?: { warn: (obj: Record<string, unknown>, msg: string) => void };
   onAwaitingUser?: RunSupercarOptions['onAwaitingUser'];
   park?: (
     question: string,
@@ -704,6 +706,9 @@ async function runLoop(input: {
   return failed('已达到本机 Chrome 工具循环上限，任务未确认完成。', iterations, toolsUsed);
 }
 
+/** Tasks whose too-old extension has been noted once (复审 #2 #6). */
+const OLD_EXTENSION_NOTED = new WeakSet<object>();
+
 async function processTools(
   toolUses: NeutralToolUseBlock[],
   options: RunSelectedChromeTaskOptions,
@@ -913,6 +918,18 @@ async function processTools(
               if (!described.ok || !described.target) {
                 unavailable = true;
                 return { descriptors: [], unverified: null, transactional: null };
+              }
+              // 复审 #2 #6: an extension that reads login fields always says so (true / false);
+              // an older one says nothing — then only account words are refused (policy).
+              if (
+                described.target.element.loginField === undefined &&
+                !OLD_EXTENSION_NOTED.has(options)
+              ) {
+                OLD_EXTENSION_NOTED.add(options);
+                options.logger?.warn(
+                  { code: 'EXTENSION_LOGIN_FIELDS_UNKNOWN', taskId: options.taskId },
+                  'user browser: extension does not report login fields; please upgrade it',
+                );
               }
               return describeUserBrowserAction(action, described.target);
             },

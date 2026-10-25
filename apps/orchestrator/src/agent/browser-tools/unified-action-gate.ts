@@ -349,7 +349,9 @@ async function loginContextFor(
   const ifPopup = await loginContextOf(binding, true);
   if (
     !ifPopup ||
-    (ifPopup.loginField === plain.loginField && ifPopup.loginControl === plain.loginControl)
+    (ifPopup.loginField === plain.loginField &&
+      ifPopup.loginControl === plain.loginControl &&
+      ifPopup.loginBlock === plain.loginBlock)
   )
     return plain;
   return (await loginPopupShown(page)) ? ifPopup : plain;
@@ -1031,8 +1033,10 @@ export function describeUserBrowserAction(
     pageUrl: target.page.url,
     pageTxSignal,
     // FIX-36 复审 #1: typing / selecting in a login field, and any key there but Escape
-    // (Enter would submit the login), are refused; so is a login / authorize control.
-    ...((element.loginField || (action.kind === 'key' && element.loginControl)) &&
+    // (Enter would submit the login), are refused; so is a login / authorize / next control.
+    // 复审 #2: any key but Escape on a button of a login block may submit it too.
+    ...((element.loginField ||
+      (action.kind === 'key' && (element.loginControl || element.loginBlock))) &&
     !(action.kind === 'key' && action.payload.key === 'Escape')
       ? { credentialForm: true }
       : {}),

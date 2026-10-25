@@ -151,12 +151,20 @@ describe('FIX-36 复审 #1 · readLoginContext in the page', () => {
   it('any box of a login block is a login field, by the block alone; the route box is not', async () => {
     const page = await open(PAGE);
     const read = (css: string) => page.locator(css).evaluate(readLoginContext, false);
-    expect(await read('#invite')).toEqual({ loginField: true, loginControl: false });
-    expect(await read('#code')).toEqual({ loginField: true, loginControl: false });
-    expect(await read('#get')).toEqual({ loginField: false, loginControl: true });
-    expect(await read('#close')).toEqual({ loginField: false, loginControl: false });
-    expect(await read('#from')).toEqual({ loginField: false, loginControl: false });
-    expect(await read('[name=keyword]')).toEqual({ loginField: false, loginControl: false });
+    expect(await read('#invite')).toMatchObject({ loginField: true, loginControl: false });
+    expect(await read('#code')).toMatchObject({ loginField: true, loginControl: false });
+    expect(await read('#get')).toMatchObject({ loginField: false, loginControl: true });
+    expect(await read('#close')).toMatchObject({ loginField: false, loginControl: false });
+    expect(await read('#from')).toEqual({
+      loginField: false,
+      loginControl: false,
+      loginBlock: false,
+    });
+    expect(await read('[name=keyword]')).toEqual({
+      loginField: false,
+      loginControl: false,
+      loginBlock: false,
+    });
     await page.close();
   });
 
@@ -174,23 +182,31 @@ describe('FIX-36 复审 #1 · readLoginContext in the page', () => {
 });
 
 describe('FIX-36 复审 #1 · cloud browser: no popup needed', () => {
-  it('a box named only by its <label> (手机号码) is refused', async () => {
-    const page = await open(
-      '<form><label>手机号码 <input id="x"></label><label>收货城市 <input id="city"></label></form>',
-    );
+  it('a box named only by its <label> (账号) is refused', async () => {
+    const page = await open('<div><label>账号 <input id="x"></label><button>查询</button></div>');
     const { gate } = gateFor(page);
     expect(
-      await gate(
-        { tool: 'type', ref: await refOf(page, /textbox "手机号码"/), text: '13800000000' },
-        'before',
-      ),
+      await gate({ tool: 'type', ref: await refOf(page, /textbox "账号"/), text: 'tom' }, 'before'),
     ).toMatchObject({ kind: 'skip' });
-    expect(
-      await gate(
-        { tool: 'type', ref: await refOf(page, /textbox "收货城市"/), text: '杭州' },
-        'before',
-      ),
-    ).toMatchObject({ kind: 'proceed' });
+    await page.close();
+  });
+
+  it('复审 #2 #4 reverse: a contact or booking form’s phone and e-mail are filled', async () => {
+    const page = await open(
+      '<form><label>联系人 <input id="n"></label><label>手机号码 <input id="m" type="tel"></label><label>邮箱 <input id="e" type="email"></label><label>预约日期 <input type="date" id="d"></label><button>提交预约</button></form>',
+    );
+    const { gate } = gateFor(page);
+    for (const [name, text] of [
+      ['手机号码', '13800000000'],
+      ['邮箱', 'a@example.com'],
+      ['联系人', '张三'],
+    ])
+      expect(
+        await gate(
+          { tool: 'type', ref: await refOf(page, new RegExp(`textbox "${name}"`)), text },
+          'before',
+        ),
+      ).toMatchObject({ kind: 'proceed' });
     await page.close();
   });
 
@@ -380,5 +396,182 @@ describe('FIX-36 复审 #1 #5 · BROWSER_FULL_PAGE_READ=false also turns off pop
     expect(request.system).not.toContain('press_key');
     expect(request.system).toContain('4. 整页登录/验证码，或目标内容被验证墙挡住时');
     expect(request.tools.map((t) => t.name)).not.toContain('press_key');
+  });
+});
+
+/** 复审 #2 A3: a full-screen mask, a plain box inside it (no position of its own). */
+const A3 = `<main><h1>商品详情</h1><input type="search" aria-label="搜索商品"></main>
+<div style="position:fixed;inset:0;background:rgba(0,0,0,.5)">
+  <div style="margin:10% auto;width:360px;background:#fff">
+    <div>短信登录</div>
+    <input id="a3-phone" placeholder="请输入">
+    <input id="a3-code" placeholder="验证码">
+    <span id="a3-send" role="button" onclick="document.body.dataset.sent=1">发送</span>
+    <button id="a3-login" onclick="document.body.dataset.login=1">登录</button>
+    <span id="a3-close" role="button" aria-label="关闭">×</span>
+  </div>
+</div>`;
+/** 复审 #2 A2: 「账号」 is a sibling's text; a plain box, a password box, 登录 and 下一步. */
+const A2 = `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5)">
+  <div style="margin:10% auto;width:360px;background:#fff">
+    <div><span>账号</span><input id="a2-account"></div>
+    <div><span>密码</span><input id="a2-password" type="password"></div>
+    <button id="a2-login">登录</button>
+    <a id="a2-next" href="#next">下一步</a>
+  </div>
+</div>`;
+
+describe('FIX-36 复审 #2 #1 · a login box inside a full-screen mask', () => {
+  it('A3: the phone box, 「发送」 and 「登录」 are refused; × and the page’s search box are not', async () => {
+    const page = await open(A3);
+    const { gate, park } = gateFor(page);
+    expect(
+      await gate(
+        {
+          tool: 'type',
+          ref: await refOf(page, /textbox "请输入"$|textbox "请输入" \[/),
+          text: '13800000000',
+        },
+        'before',
+      ),
+    ).toMatchObject({ kind: 'skip' });
+    for (const name of ['发送', '登录'])
+      expect(
+        await gate(
+          { tool: 'click', ref: await refOf(page, new RegExp(`button "${name}"`)) },
+          'before',
+        ),
+      ).toMatchObject({ kind: 'skip', message: expect.stringContaining('不替用户点击') });
+    expect(
+      await gate({ tool: 'click', ref: await refOf(page, /button "关闭"/) }, 'before'),
+    ).toMatchObject({ kind: 'proceed' });
+    expect(
+      await gate(
+        { tool: 'type', ref: await refOf(page, /searchbox "搜索商品"/), text: '耳机' },
+        'before',
+      ),
+    ).toMatchObject({ kind: 'proceed' });
+    expect(park).not.toHaveBeenCalled();
+    expect(await page.locator('#a3-phone').inputValue()).toBe('');
+    expect(await page.locator('body').getAttribute('data-sent')).toBeNull();
+    await page.close();
+  });
+
+  it('A2: the account box (named by a sibling), 「登录」 and 「下一步」 are refused', async () => {
+    const page = await open(A2);
+    const { gate } = gateFor(page);
+    const read = (css: string) => page.locator(css).evaluate(readLoginContext, false);
+    expect(await read('#a2-account')).toMatchObject({ loginField: true });
+    for (const css of ['#a2-login', '#a2-next'])
+      expect(await read(css)).toMatchObject({ loginControl: true, loginBlock: true });
+    for (const name of ['登录', '下一步'])
+      expect(
+        await gate(
+          { tool: 'click', ref: await refOf(page, new RegExp(`(?:button|link) "${name}"`)) },
+          'before',
+        ),
+      ).toMatchObject({ kind: 'skip' });
+    await page.close();
+  });
+});
+
+describe('FIX-36 复审 #2 #3 · 下一步 / Next / 继续 of a login form', () => {
+  it('a step-one login form (account box + Next, no password yet): Next is a login control', async () => {
+    const page = await open(
+      '<form><label>Email or username <input name="username" autocomplete="username"></label><button type="button" id="next">Next</button><button type="button" id="help">Help</button></form>',
+    );
+    const read = (css: string) => page.locator(css).evaluate(readLoginContext, false);
+    expect(await read('#next')).toMatchObject({ loginControl: true, loginBlock: true });
+    expect((await read('#help')).loginControl).toBe(false);
+    await page.close();
+  });
+
+  it('the user’s own browser: Enter on any button of a login block is refused, Escape is not', () => {
+    const element = {
+      role: 'button',
+      visibleText: '帮助',
+      ariaLabel: null,
+      title: null,
+      placeholder: null,
+      name: null,
+      inputType: null,
+      tagName: 'button',
+      loginField: false,
+      loginControl: false,
+      loginBlock: true,
+    };
+    const target = {
+      token: '00000000-0000-4000-8000-000000000001',
+      elementId: '22222222-2222-4222-8222-222222222222',
+      objectDigest: 'a'.repeat(64),
+      tabId: 3,
+      frameId: 'main',
+      origin: 'https://fixture.test',
+      page: { url: 'https://fixture.test/login', transactional: false },
+      observationRevision: 1,
+      capturedAt: 1,
+      element,
+      form: null,
+    };
+    const enter = describeUserBrowserAction(
+      { kind: 'key', payload: { key: 'Enter' } } as never,
+      target,
+    );
+    expect(enter.descriptors[0]).toMatchObject({ credentialForm: true });
+    const escape = describeUserBrowserAction(
+      { kind: 'key', payload: { key: 'Escape' } } as never,
+      target,
+    );
+    expect(escape.descriptors[0]).not.toHaveProperty('credentialForm');
+    const click = describeUserBrowserAction({ kind: 'click', selector: {} } as never, {
+      ...target,
+      element: { ...element, loginControl: true, visibleText: '下一步' },
+    });
+    expect(classifyRuntimeAction(click.descriptors[0]!)).toMatchObject({ allowed: false });
+  });
+});
+
+describe('FIX-36 复审 #2 #5 · a page header’s 登录 / 注册 does not make its other boxes login boxes', () => {
+  it('the header city box is typed while the probe reports a login popup', async () => {
+    const page = await open(
+      '<header style="position:fixed;top:0;left:0;right:0;height:60px"><a href="/login">登录</a><a href="/reg">注册</a><input id="city" placeholder="选择城市"></header><main style="margin-top:80px"><p>正文</p></main>',
+    );
+    expect(await page.locator('#city').evaluate(readLoginContext, true)).toMatchObject({
+      loginField: false,
+    });
+    await page.close();
+  });
+});
+
+describe('FIX-36 复审 #2 #6 · an extension that does not report login fields', () => {
+  it('account words are still refused from the labels alone; a phone box is not', () => {
+    const base = { kind: 'type' as const, inputType: 'text', tagName: 'input' };
+    expect(classifyRuntimeAction({ ...base, placeholder: '请输入账号' })).toMatchObject({
+      allowed: false,
+      refuse: expect.any(String),
+    });
+    expect(classifyRuntimeAction({ ...base, placeholder: '请输入手机号' })).toMatchObject({
+      allowed: true,
+    });
+  });
+});
+
+describe('FIX-36 复审 #2 · readLoginContext survives serialisation', () => {
+  it('compiled with keepNames (as tsx runs it), its source has no __name helper', async () => {
+    const { createRequire } = await import('node:module');
+    const tsx = createRequire(import.meta.url).resolve('tsx');
+    const { transformSync } = createRequire(tsx)('esbuild') as typeof import('esbuild');
+    const { code } = transformSync(
+      `${readLoginContext.toString()}\nglobalThis.__compiled = readLoginContext;`,
+      { keepNames: true, loader: 'js' },
+    );
+    new Function(code)();
+    const compiled = (globalThis as { __compiled?: () => unknown }).__compiled!;
+    expect(compiled.toString()).not.toContain('__name');
+    const page = await open(A3);
+    expect(await page.locator('#a3-phone').evaluate(compiled as never, false)).toMatchObject({
+      loginField: true,
+    });
+    await page.close();
   });
 });

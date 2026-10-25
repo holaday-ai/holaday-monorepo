@@ -496,6 +496,34 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
         });
       }
     }
+    // FIX-36 (Deploy-36 b-n06): on a market / time-sensitive question (the dates are given), a
+    // month-day within a week of today that no read page, attached text, the question or the
+    // given dates carry is the model's own arithmetic. A sentence tying it to trading
+    // (交易日 / 休市 / 开盘…) is not delivered; any other is delivered with a note
+    // (复审 #1 #2). An attached image or file is evidence this check cannot read: it then
+    // checks nothing. Worked out before the not-obtained check: a partial answer kept for the
+    // browser retry is the filtered, annotated one (复审 #2 #2).
+    const attached = (opts.attachments ?? []).map((block) =>
+      block.type === 'text' && 'text' in block && typeof block.text === 'string'
+        ? block.text
+        : null,
+    );
+    const dateNotes: string[] = [];
+    let invented: string[] = [];
+    if (dates && !attached.includes(null)) {
+      const knownDays = knownMonthDays(context, opts.intent, ...attached);
+      for (const key of givenMonthDays(dates)) knownDays.add(key);
+      const unsupported = unsupportedDateSentences(summary, knownDays, dates.today);
+      invented = unsupported.filter((sentence) => TRADING_DATE_RE.test(sentence));
+      for (const sentence of unsupported.filter((line) => !TRADING_DATE_RE.test(line)))
+        for (const raw of unsupportedDates(sentence, knownDays, dates.today))
+          dateNotes.push(`日期「${raw}」`);
+    }
+    const dated = invented.length ? withoutSentences(summary, invented) : summary;
+    const unverifiedLine =
+      facts.unverified.length || dateNotes.length
+        ? unverifiedNote([...facts.unverified, ...dateNotes])
+        : '';
     // FIX-30 (BENCH-1 m02/m04/v01/f05/d02/c05): an answer that says the page did
     // not have it (「没拿到」「缺少浏览器环境」, most fields 「页面未显示」) is not a
     // completed answer: the browser gets one try at the live page.
@@ -504,7 +532,7 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
         { code: 'SCRAPE_NOT_OBTAINED' },
         'scrape-runner: answer says the page did not have it',
       );
-      const partial = scrapePartialAnswer(summary, opts.intent);
+      const partial = scrapePartialAnswer(dated, opts.intent);
       return failed({
         start,
         reason:
@@ -517,60 +545,44 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
         outputTokens: tokens.output,
         partialAnswer: partial && {
           ...partial,
-          summary: usedSources.some((url) => partial.summary.includes(url))
-            ? partial.summary
-            : `${partial.summary}\n\n来源：${usedSources.join('、')}`,
+          summary: [
+            partial.summary,
+            unverifiedLine,
+            usedSources.some((url) => partial.summary.includes(url))
+              ? ''
+              : `来源：${usedSources.join('、')}`,
+          ]
+            .filter(Boolean)
+            .join('\n\n'),
         },
       });
     }
-    // FIX-36 (Deploy-36 b-n06): on a market / time-sensitive question (the dates are given), a
-    // month-day within a week of today that no read page, attached text, the question or the
-    // given dates carry is the model's own arithmetic. A sentence tying it to trading
-    // (交易日 / 休市 / 开盘…) is not delivered; any other is delivered with a note
-    // (复审 #1 #2). An attached image or file is evidence this check cannot read: it then
-    // checks nothing.
-    const attached = (opts.attachments ?? []).map((block) =>
-      block.type === 'text' && 'text' in block && typeof block.text === 'string'
-        ? block.text
-        : null,
-    );
-    const dateNotes: string[] = [];
-    if (dates && !attached.includes(null)) {
-      const knownDays = knownMonthDays(context, opts.intent, ...attached);
-      for (const key of givenMonthDays(dates)) knownDays.add(key);
-      const unsupported = unsupportedDateSentences(summary, knownDays, dates.today);
-      const invented = unsupported.filter((sentence) => TRADING_DATE_RE.test(sentence));
-      for (const sentence of unsupported.filter((line) => !TRADING_DATE_RE.test(line)))
-        for (const raw of unsupportedDates(sentence, knownDays, dates.today))
-          dateNotes.push(`日期「${raw}」`);
-      if (invented.length) {
-        log.info(
-          { code: 'SCRAPE_UNSUPPORTED_DATE', sentences: invented.length },
-          'scrape-runner: answer states a trading date no read page carries',
-        );
-        summary = withoutSentences(summary, invented);
-        // Nothing left to deliver: the browser gets its one try, as for an answer not obtained.
-        const rest = summary
-          .replace(/\[[^\]]*\]\([^)]*\)|https?:\/\/\S+/g, '')
-          .replace(/^.*(?:来源|数据来源|source)\s*[:：].*$/gim, '');
-        if (!/[\p{L}\p{N}]/u.test(rest) || answerNotObtained(summary, opts.intent))
-          return failed({
-            start,
-            reason: '网页抓取的回答只剩页面上找不到的日期，已自动改用云端浏览器重试一次',
-            kind: 'empty',
-            source: scrapeSource,
-            firecrawl: usage,
-            sources: usedSources,
-            inputTokens: tokens.input,
-            outputTokens: tokens.output,
-          });
-      }
+    if (invented.length) {
+      log.info(
+        { code: 'SCRAPE_UNSUPPORTED_DATE', sentences: invented.length },
+        'scrape-runner: answer states a trading date no read page carries',
+      );
+      summary = dated;
+      // Nothing left to deliver: the browser gets its one try, as for an answer not obtained.
+      const rest = summary
+        .replace(/\[[^\]]*\]\([^)]*\)|https?:\/\/\S+/g, '')
+        .replace(/^.*(?:来源|数据来源|source)\s*[:：].*$/gim, '');
+      if (!/[\p{L}\p{N}]/u.test(rest) || answerNotObtained(summary, opts.intent))
+        return failed({
+          start,
+          reason: '网页抓取的回答只剩页面上找不到的日期，已自动改用云端浏览器重试一次',
+          kind: 'empty',
+          source: scrapeSource,
+          firecrawl: usage,
+          sources: usedSources,
+          inputTokens: tokens.input,
+          outputTokens: tokens.output,
+        });
     }
     const notes: string[] = [];
     if (result.status === 'incomplete')
       notes.push('【提示】内容因长度限制被截断，如需完整版请追问。');
-    if (facts.unverified.length || dateNotes.length)
-      notes.push(unverifiedNote([...facts.unverified, ...dateNotes]));
+    if (unverifiedLine) notes.push(unverifiedLine);
     // The answer names where it read: the fetched page itself.
     if (!usedSources.some((url) => summary.includes(url)))
       notes.push(`来源：${usedSources.join('、')}`);
@@ -705,7 +717,7 @@ const ASKED_KINDS: ReadonlyArray<readonly [RegExp, RegExp]> = [
     /名称|歌名|曲名|标题|名字|书名|片名|什么歌|哪首|哪本|哪部|是什么|是啥|是谁|第一|第1|榜首|头条|\bname\b|\btitle\b|\bwhat\b|\bwhich\b/i,
   ],
   [/价格|股价|\bprice\b/i, /价格|股价|价|多少钱|\bprice\b|\bcost\b/i],
-  [/点位/, /点位|多少点|指数/],
+  [/点位|指数/, /点位|多少点|指数/],
   [/评分/, /评分|几分|多少分|\brating\b|\bscore\b/i],
 ];
 const SIDE_FIELD_RE =

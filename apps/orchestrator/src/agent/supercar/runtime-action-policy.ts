@@ -137,19 +137,17 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
 /** A login step's own controls: refused wherever they are (FIX-36 复审 #1). */
 const STRONG_LOGIN_CONTROL_RE =
   /授权登录|确认授权|同意授权|同意并|一键登录|快捷登录|本机号码|(?:获取|发送|重新发送)(?:短信)?(?:验证码|动态码)/;
-const ACCOUNT_LABEL_RE =
-  /账号|帐号|账户|用户名|手机号|手机账号|电话号码|邮箱|e-?mail|username|account|phone|mobile/i;
+// 复审 #2: a phone / mailbox box is a login field only inside a login block (the page reads
+// that); on its own label only an account / user name is.
+const ACCOUNT_LABEL_RE = /账号|帐号|账户|用户名|登录名|username|account/i;
 const SEARCH_LABEL_RE = /搜索|search|查找|keyword/i;
 
-/** A box whose own signals name an account, phone or mailbox (not a search box). */
+/** A box whose own signals name an account or user name (not a search box). */
 function accountField(action: RuntimeAction): boolean {
-  const type = normalize(action.inputType);
-  if (type === 'search') return false;
+  if (normalize(action.inputType) === 'search') return false;
   const signals = [action.label, action.ariaLabel, action.placeholder, action.name].map(normalize);
   if (signals.some((value) => SEARCH_LABEL_RE.test(value))) return false;
-  return (
-    type === 'email' || type === 'tel' || signals.some((value) => ACCOUNT_LABEL_RE.test(value))
-  );
+  return signals.some((value) => ACCOUNT_LABEL_RE.test(value));
 }
 
 export function isAffirmativeActionConfirmation(message: string): boolean {
