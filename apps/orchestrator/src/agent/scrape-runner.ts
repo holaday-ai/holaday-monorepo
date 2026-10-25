@@ -21,6 +21,7 @@ import {
 } from '../firecrawl/scraped-page.js';
 import { type ResponsesAdapter, ResponsesAdapterError } from '../llm/responses-adapter.js';
 import {
+  askedFields,
   assessCompletionFacts,
   declaredAbsentFields,
   unverifiedNote,
@@ -783,7 +784,14 @@ export function scrapePartialAnswer(summary: string, intent = ''): ScrapePartial
       (line) => /^(?:[-*•]|\d{1,3}[.)、])\s*\S/.test(line) || /^[^：:]{1,24}[：:]\s*\S/.test(line),
     );
   const missingRows = rows.filter((line) => MISSING_ROW_RE.test(line));
-  if (!rows.length || missingRows.length === rows.length) return null;
+  // 复审 #2 (local xhs-read): a prose answer has no rows — count the fields the request names.
+  if (!rows.length) {
+    const asked = askedFields(intent);
+    const absent = declaredAbsentFields(intent, summary);
+    if (!absent.length || absent.length >= asked.length) return null;
+    return { summary, missing: absent, found: asked.length - absent.length, wanted: asked.length };
+  }
+  if (missingRows.length === rows.length) return null;
   const labels = missingRows
     .map(
       (line) =>

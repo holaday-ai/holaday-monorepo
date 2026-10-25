@@ -1139,6 +1139,11 @@ const DECLARED_ABSENT_RE =
  * FIX-35 0b (Deploy-35 dy-2): fields the user asked for by name that the answer gives as
  * absent. Such an answer is 部分完成, not completed.
  */
+/** The fields of ASKABLE_FIELDS a request names (复审 #2: a prose answer's 部分完成 count). */
+export function askedFields(intent: string): string[] {
+  return ASKABLE_FIELDS.filter((name) => intent.includes(name));
+}
+
 export function declaredAbsentFields(intent: string, summary: string, fields?: unknown): string[] {
   const asked = ASKABLE_FIELDS.filter((name) => intent.includes(name));
   if (!asked.length) return [];

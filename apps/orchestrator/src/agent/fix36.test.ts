@@ -316,6 +316,17 @@ describe('FIX-36 复审 #1 #3 · what the scrape got goes with it to the browser
     );
     expect(delivered.summary).toContain('9. 商品9 — 价格：¥99.00');
   });
+  it('复审 #2: a prose answer (no rows) is kept by the fields the request names (local xhs-read)', () => {
+    const prose = '这篇笔记的标题是「📍杭州｜西湖一日游攻略」，作者是 Clara，页面未显示点赞数。';
+    const intent = '读这篇笔记的标题、作者和点赞数';
+    expect(answerNotObtained(prose, intent)).toBe(true);
+    expect(scrapePartialAnswer(prose, intent)).toEqual({
+      summary: prose,
+      missing: ['点赞数'],
+      found: 2,
+      wanted: 3,
+    });
+  });
   it('a login-wall answer or one with nothing in it keeps nothing', () => {
     expect(scrapePartialAnswer(FC_JD, '京东这个商品的标题和价格')).toBeNull();
     expect(scrapePartialAnswer('- 标题：页面未显示\n- 作者：页面未显示', '标题和作者')).toBeNull();
