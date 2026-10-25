@@ -855,6 +855,10 @@ export interface RunSupercarOptions {
     pageUrl?: string | null;
     pageTitle?: string | null;
     pageTxSignal?: string | null;
+    /** FIX-36 #9: the field sits in a login / verification form or dialog. */
+    credentialForm?: boolean | null;
+    /** FIX-36 复审 #1: a login / sign-up / authorize control. */
+    loginControl?: boolean | null;
   }) =>
     | {
         allowed: boolean;
@@ -863,6 +867,8 @@ export interface RunSupercarOptions {
         requiresTakeover?: boolean;
         awaitingKind?: 'login' | 'permission';
         question?: string;
+        /** FIX-36 #9: this action is refused and the task goes on. */
+        refuse?: string;
       }
     | Promise<{
         allowed: boolean;
@@ -871,6 +877,8 @@ export interface RunSupercarOptions {
         requiresTakeover?: boolean;
         awaitingKind?: 'login' | 'permission';
         question?: string;
+        /** FIX-36 #9: this action is refused and the task goes on. */
+        refuse?: string;
       }>;
   /**
    * Phase 1 Playbook B4 — when true, the loop attaches the post-action

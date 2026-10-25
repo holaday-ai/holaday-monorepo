@@ -6,6 +6,7 @@ import { scrollWithEvidence } from './browser-scroll.js';
 import { browserToolError } from './browser-tool-error.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { CloudObservation, pageRoot } from './cloud-observation.js';
+import { SENSITIVE_SCREENSHOT_STYLE, fullPageRead } from './full-page-read.js';
 import { redactPageText } from './page-redaction.js';
 import {
   forbidsPlayback,
@@ -599,7 +600,12 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           };
         }
         case 'screenshot': {
-          const buffer = await page.screenshot({ type: 'jpeg', quality: 70, timeout });
+          const buffer = await page.screenshot({
+            type: 'jpeg',
+            quality: 70,
+            timeout,
+            style: SENSITIVE_SCREENSHOT_STYLE,
+          });
           return {
             ok: true,
             text: '当前视口截图',
@@ -621,6 +627,10 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
         case 'back':
           await page.goBack({ timeout });
           return done(`已后退到 ${page.url()}`);
+        case 'press_key':
+          if (!fullPageRead()) return fail('press_key 只在完整读取页面时可用');
+          await page.keyboard.press(action.key);
+          return done('已按 Escape（关闭弹窗）');
         case 'download': {
           if (!options.saveDownload) return fail('当前环境不支持下载文件');
           const [download] = await Promise.all([
@@ -690,7 +700,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
       activeFrame = context.frame;
       if (action.tool === 'scroll_until')
         return await observation.act(action, async () => (await observation.read(action))!);
-      if (action.tool === 'screenshot' && (await observation.sensitive(context.page)))
+      if (action.tool === 'screenshot' && (await observation.readMask(context.page)))
         return { ok: true, text: '敏感页面截图已遮挡' };
       if (action.tool === 'extract')
         return (await observation.read({ ...action, tool: 'get_page_text', maxChars: 16000 }))!;

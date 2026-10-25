@@ -16,6 +16,7 @@ export const UNIFIED_BROWSER_TOOL_NAMES = [
   'download',
   'upload',
   'click_at',
+  'press_key',
   'list_tabs',
   'new_tab',
   'switch_tab',

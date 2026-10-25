@@ -2,6 +2,7 @@
 import type { Frame, Page } from 'playwright';
 import { detectBrowserBlocker } from './browser-completion.js';
 import { canReadOutsideWall } from './browser-public-targets.js';
+import { LOGIN_POPUP_NOTICE, fullPageRead } from './full-page-read.js';
 
 /** Only visible task surfaces can block. Raw text stays local to this probe. */
 function collectSurface() {
@@ -216,6 +217,19 @@ export async function probeBrowserBlocker(page: Page, intent?: string) {
   return probeOnce(page, intent);
 }
 
+/**
+ * FIX-36 #9: with whole-page read on, a login popup (dialog, a login frame outside any
+ * component, or the page's own prompt) on a page that is not a login address (those hand over before this) is not a
+ * wall — the AI closes it or reads behind it, and
+ * asks for a takeover itself when the content truly needs one (a map canvas such as Gaode's
+ * has little text, yet its routes are behind the popup). Captchas still hand over.
+ */
+function loginPopup(hit: NonNullable<ReturnType<typeof detectBrowserBlocker>>) {
+  return fullPageRead() && hit.reason === 'login'
+    ? { ...hit, disposition: 'continue' as const, message: LOGIN_POPUP_NOTICE }
+    : null;
+}
+
 async function probeOnce(page: Page, intent?: string) {
   let readableContent = false;
   let targets: ReturnType<typeof collectSurface>['publicTargets'] | undefined;
@@ -291,6 +305,13 @@ async function probeOnce(page: Page, intent?: string) {
           scope: region.scope,
         });
         if (hit) {
+          // A popup (dialog) only: a player / comments / component wall keeps its own rule —
+          // continue when the target is readable outside it, hand over when it is the target.
+          const popup = region.scope === 'dialog' ? loginPopup(hit) : null;
+          if (popup) {
+            localNotice = popup;
+            continue;
+          }
           if (
             region.local &&
             main &&
@@ -324,6 +345,13 @@ async function probeOnce(page: Page, intent?: string) {
         scope: main ? 'document' : 'frame',
       });
       if (hit) {
+        // The page itself, or a login frame over it (a modal, or any frame outside a player /
+        // comments / region component — local f36v live-sh: eastmoney's login iframe).
+        const popup = main || visibility.modal || !visibility.local ? loginPopup(hit) : null;
+        if (popup) {
+          localNotice = popup;
+          continue;
+        }
         if (
           !main &&
           visibility.local &&

@@ -177,6 +177,31 @@ describe('scrape → browser one-time retry for search-engine link requests', ()
     expect(spies.settled).not.toHaveBeenCalled();
   });
 
+  it('carries what the scrape got to the browser retry (FIX-36 复审 #1 #3)', async () => {
+    const partialAnswer = {
+      summary: '1. A — ¥1\n2. B — 价格：页面未显示',
+      missing: ['价格'],
+      found: 1,
+      wanted: 2,
+    };
+    const spies = setup('', [], {
+      status: 'failed',
+      summary: '',
+      reason:
+        '网页抓取没有拿到所需内容（页面可能要求交互或动态加载），已自动改用云端浏览器重试一次',
+      failureKind: 'empty',
+      source: 'scrape',
+      sources: ['https://shop.example.test/list'],
+      inputTokens: 1,
+      outputTokens: 1,
+      durationMs: 1,
+      partialAnswer,
+    });
+    await tasksRouter.createCaller(context()).create({ intent: INTENT, expertMode: 'normal' });
+    await vi.waitFor(() => expect(spies.retryCreate).toHaveBeenCalledTimes(1));
+    expect(spies.handoffs[0]?.scrapeBrowserRetry?.scrapeAnswer).toEqual(partialAnswer);
+  });
+
   it('keeps the scrape answer when it already has the requested links', async () => {
     const urls = [1, 2, 3, 4, 5].map((n) => `https://site${n}.example.test/page`);
     const spies = setup(urls.map((url, i) => `${i + 1}. 结果 ${i + 1} ${url}`).join('\n'), urls);

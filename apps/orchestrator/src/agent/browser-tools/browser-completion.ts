@@ -8,6 +8,12 @@ export interface BrowserBlockerEvidence {
   visible: boolean;
   scope: 'document' | 'dialog' | 'player' | 'frame' | 'comments' | 'component';
 }
+const SMS_LOGIN_RE = /短信验证码|获取验证码|发送验证码|手机号(?:码)?登录|验证码登录|短信登录/;
+// FIX-36 复审 #1 #4: an image code (图形 / 图片验证码, 看不清 换一张) or a behaviour check next to
+// an SMS login is still a captcha.
+const BOT_CHECK_RE =
+  /滑块|滑动|拼图|人机验证|安全验证|点选|旋转|图形验证码|图片验证码|图形码|看不清|换一张|点击按钮进行验证|行为验证|captcha|robot|human|security check|unusual traffic/i;
+
 export function detectBrowserBlocker(page: {
   url: string;
   title: string;
@@ -26,7 +32,20 @@ export function detectBrowserBlocker(page: {
   const input = { url: page.url, title: page.title, prominentText: page.text };
   const captcha = detectCaptchaPage(input);
   const login = detectLoginPage(input);
-  const hit = captcha.matched ? captcha : login;
+  // FIX-36 #9 (Deploy-36 b-m01): Gaode's 「手机号 + 短信验证码」 popup is a login, not a bot
+  // check — 「验证码」 there is the SMS code. Only with no slider / puzzle / human-check sign.
+  const smsLogin =
+    captcha.matched &&
+    captcha.source === 'body' &&
+    captcha.match === '验证码' &&
+    SMS_LOGIN_RE.test(page.text) &&
+    !BOT_CHECK_RE.test(`${page.title} ${page.text}`);
+  const hit =
+    captcha.matched && !smsLogin
+      ? captcha
+      : smsLogin
+        ? { matched: true as const, source: 'body' as const, match: '短信验证码登录' }
+        : login;
   if (!hit.matched) return null;
   let frameHost = '';
   let framePath = '/';
@@ -39,7 +58,7 @@ export function detectBrowserBlocker(page: {
       .join('/')
       .slice(0, 300);
   } catch {}
-  const reason = captcha.matched ? 'captcha' : 'login';
+  const reason = captcha.matched && !smsLogin ? 'captcha' : 'login';
   return {
     reason,
     message:

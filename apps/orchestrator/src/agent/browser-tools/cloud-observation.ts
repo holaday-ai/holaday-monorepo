@@ -12,6 +12,7 @@ import {
 import { scrollWithEvidence } from './browser-scroll.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { markEngagementCounts } from './engagement-counts.js';
+import { fullPageRead } from './full-page-read.js';
 import { redactPageText } from './page-redaction.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import { type UnifiedBrowserAction, isMutatingBrowserAction } from './unified-tools.js';
@@ -1071,6 +1072,13 @@ export class CloudObservation {
   async sensitive(page: Page) {
     return (await this.maskReason(page)) !== null;
   }
+  /**
+   * The mask a read or screenshot applies: none while `BROWSER_FULL_PAGE_READ` is on (the
+   * default, FIX-36 #9). Recordings (replay) still use `sensitive`.
+   */
+  async readMask(page: Page): Promise<'payment' | 'login' | 'unreadable' | null> {
+    return fullPageRead() ? null : this.maskReason(page);
+  }
   /** Why a page is masked (FIX-32 review: the handover says which), or null. */
   async maskReason(page: Page): Promise<'payment' | 'login' | 'unreadable' | null> {
     // An unreadable child frame cannot be asserted safe to record.
@@ -1149,7 +1157,7 @@ export class CloudObservation {
       ].includes(action.tool)
     )
       return null;
-    const maskReason = await this.maskReason(page);
+    const maskReason = await this.readMask(page);
     if (maskReason)
       return json({
         ...(await this.metadata(frame)),

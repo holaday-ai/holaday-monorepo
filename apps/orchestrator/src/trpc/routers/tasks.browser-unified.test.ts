@@ -57,11 +57,25 @@ function saveRef(request: messages.NeutralMessagesRequest): string {
   return ref;
 }
 
+const SCRAPE_TEN = [
+  ...Array.from({ length: 9 }, (_, i) => `${i + 1}. 商品${i + 1} — ¥${i + 1}9.00`),
+  '10. 商品10 — 价格：页面未显示',
+].join('\n');
+
 // scrape-retry (FIX-INTENT-ROUTE-BROWSER): the scrape lane's one-time handoff re-enters
 // create with an internal ctx flag; it adopts the scrape task's row and is not charged again.
+// scrape-retry-partial (FIX-36 复审 #1 #3): the scrape got 9 of 10 prices; the browser retry
+// fails — the scrape's answer is delivered as 部分完成 naming the missing price.
 // tool-block (FIX-34 review #2): the browser lane's final summary carries an unasked
 // ```json tool-call block; it is delivered without it.
-it.each(['ready', 'timeout', 'timeout-persists', 'scrape-retry', 'tool-block'] as const)(
+it.each([
+  'ready',
+  'timeout',
+  'timeout-persists',
+  'scrape-retry',
+  'scrape-retry-partial',
+  'tool-block',
+] as const)(
   'unified executor through tasks.create: %s',
   async (scenario) => {
     expect(original.BROWSER_EXECUTOR).toBe('unified');
@@ -128,7 +142,7 @@ it.each(['ready', 'timeout', 'timeout-persists', 'scrape-retry', 'tool-block'] a
                 ? [toolUse('s2', 'snapshot', {})]
                 : [
                     toolUse('f1', 'finish', {
-                      status: 'completed',
+                      status: scenario === 'scrape-retry-partial' ? 'failed' : 'completed',
                       summary:
                         scenario === 'tool-block'
                           ? '订单已保存。\n\n```json\n{"name": "browser_use", "arguments": {"action": "click", "ref": "e3"}}\n```'
@@ -222,11 +236,21 @@ it.each(['ready', 'timeout', 'timeout-persists', 'scrape-retry', 'tool-block'] a
       executionRouter: null,
       browserPool: null,
       taskQueue: null,
-      ...(scenario === 'scrape-retry'
+      ...(scenario === 'scrape-retry' || scenario === 'scrape-retry-partial'
         ? {
             scrapeBrowserRetry: {
               taskId: 'task_scrape_retry1',
               reason: '抓取结果不满足要求（测试）',
+              ...(scenario === 'scrape-retry-partial'
+                ? {
+                    scrapeAnswer: {
+                      summary: SCRAPE_TEN,
+                      missing: ['价格'],
+                      found: 9,
+                      wanted: 10,
+                    },
+                  }
+                : {}),
             },
           }
         : {}),
@@ -248,6 +272,16 @@ it.each(['ready', 'timeout', 'timeout-persists', 'scrape-retry', 'tool-block'] a
         requests: requests.length,
       });
 
+      if (scenario === 'scrape-retry-partial') {
+        expect(outcome, diagnostics).toMatchObject({
+          status: 'partial_success',
+          summary: expect.stringMatching(/^部分完成：「价格」页面未显示（10 项中 9 项完整）/),
+        });
+        const summary = (outcome as { summary?: string }).summary ?? '';
+        for (let n = 1; n <= 9; n++) expect(summary).toContain(`商品${n} — ¥${n}9.00`);
+        expect(summary).toContain('商品10 — 价格：页面未显示');
+        return;
+      }
       if (scenario === 'scrape-retry') {
         // Same task, same charge: the scrape row is adopted, nothing new is inserted.
         expect(result.taskId).toBe('task_scrape_retry1');

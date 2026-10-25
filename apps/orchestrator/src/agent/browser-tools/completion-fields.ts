@@ -209,8 +209,10 @@ function explicitFacts(input: unknown): Fact[] {
     const f = field as Record<string, unknown>;
     const name = typeof f.name === 'string' ? f.name.slice(0, 80) : '字段';
     const value = typeof f.value === 'string' ? clean(f.value) : '';
-    // Summaries and explanations are the model's own words, not page facts.
-    if (!value || PROSE_FIELD.test(name) || value.length > 300) return [];
+    // Summaries and explanations are the model's own words, not page facts; a browser
+    // handle (tab / frame id, element ref) is no page fact either (FIX-36 core-07).
+    if (!value || PROSE_FIELD.test(name) || value.length > 300 || HANDLE_ONLY_RE.test(value))
+      return [];
     return [
       {
         name,
@@ -251,24 +253,31 @@ function beforeOuterComma(value: string): string {
   return value;
 }
 
+const HANDLE_ONLY_RE =
+  /^\s*(?:(?:tab|frame)_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|ref=e\d+)\s*$/;
+
 function answerFacts(summary: string, intent = ''): Fact[] {
   const text = unescapeLiteralBreaks(summary);
   const asked = normalizeFact(intent);
   const facts: Fact[] = [];
   const add = (fact: Fact) => {
+    // FIX-36 (core-07): a browser handle (tab id, element ref) is not a page fact to check.
+    if (HANDLE_ONLY_RE.test(fact.value)) return;
     if (fact.value && fact.value.length <= 300) facts.push(fact);
   };
   for (const url of text.match(TEXT_URL_RE) ?? []) add({ name: '链接', value: url });
   // A labelled run that lists URLs ("标题：1) https://… → X") is handled per item below;
+  // a label that ends its line ("读取标题：\n1. …") heads a list, each line checked below;
   // a numeric label whose value has no number is prose ("播放量为页面原样字符串").
   for (const match of text.matchAll(
-    new RegExp(`(${FACT_LABELS})\\s*[*\`]*\\s*(?:[:：]|为|是)\\s*([^\\n；;|。]+)`, 'giu'),
+    new RegExp(`(${FACT_LABELS})\\s*[*\`]*\\s*(?:[:：]|为|是)[ \\t]*([^\\n；;|。]+)`, 'giu'),
   )) {
     if (/https?:\/\//i.test(match[2]!)) continue;
     if (NUMERIC_LABEL.test(match[1]!) && !/\d/.test(match[2]!)) continue;
     // A quoted value is exactly what is inside the quotes; otherwise prose after a
     // full-width comma is not part of the value.
-    const raw = match[2]!.trim();
+    // "读取标题：1. Safari …；2. …" — the list marker is not part of the value (not "3.15.1").
+    const raw = match[2]!.trim().replace(/^\d{1,3}[.)、](?!\d)\s*/u, '');
     const first = quotedRuns(raw)[0];
     const quoted = first?.index === 0 ? first.quote : raw.match(/^『([^』]+)』/u)?.[1];
     // "大小：文件名为 …" — an enumeration header, not this label's value.
@@ -365,6 +374,25 @@ function answerFacts(summary: string, intent = ''): Fact[] {
     }
     // A short numbered list line without prose (e.g. search-result titles).
     const listed = line.match(/^\s*\d+[.)、]\s+(.+)$/u)?.[1];
+    // FIX-36 (Deploy-36 b-p02): 「名称 — SGD 11.47」 is a name and its price, each its own
+    // node on the page — checked apart, not as one run of text.
+    const priced = listed?.match(
+      /^(.+?)\s+[—–-]{1,2}\s+((?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?)\s*$/iu,
+    );
+    // …and 「sample.json，大小 95 bytes」 a file name and its size (local core-09).
+    const sized = listed?.match(
+      /^(.+?)[，,]\s*(?:文件)?大小[：:为]?\s*(\d[\d,]*\s*(?:bytes?|字节|kb|mb|b))\s*$/iu,
+    );
+    if (sized && !/https?:\/\//i.test(listed!)) {
+      add({ name: '条目', value: clean(sized[1]!), listItem: true });
+      add({ name: '文件大小', value: clean(sized[2]!), listItem: true });
+      continue;
+    }
+    if (priced && !/[：*]/.test(priced[1]!) && !/https?:\/\//i.test(listed!)) {
+      add({ name: '条目', value: clean(priced[1]!), listItem: true });
+      add({ name: '价格', value: clean(priced[2]!), listItem: true });
+      continue;
+    }
     if (
       listed &&
       !/[：*]/.test(listed) &&
@@ -408,6 +436,15 @@ const CURRENCY_SYMBOLS: Record<string, string[]> = {
   krw: ['₩'],
   inr: ['₹'],
 };
+/**
+ * FIX-36 (Deploy-36 core-09): 「1145 字节」 is the download receipt's 「1145 bytes」 /
+ * `"sizeBytes":1145` in another language.
+ */
+function byteForms(value: string): string[] {
+  const n = value.match(/^(\d+)\s*(?:字节|bytes?|b)$/)?.[1];
+  return n ? [`${n} bytes`, `"sizebytes":${n}`] : [];
+}
+
 function currencyForms(value: string): string[] {
   const m = value.match(/^([a-z]{3}|[a-z]{0,2}\$|[¥€£₩₹])\s?(\d+(?:\.\d+)?)$/);
   if (!m) return [];
@@ -650,7 +687,7 @@ export function assessCompletionFacts(input: {
     const candidates = [fact.value, withoutNote(fact.value), quoted, stripEdgeQuotes(fact.value)]
       .filter((v): v is string => Boolean(v))
       .map(normalizeFact)
-      .flatMap((v) => [v, ...currencyForms(v)]);
+      .flatMap((v) => [v, ...currencyForms(v), ...byteForms(v)]);
     const bound = (page: (typeof pages)[number]) =>
       (!fact.tabId || page.tabId === fact.tabId) &&
       (!fact.sourceURL || sameSource(page.sourceURL, fact.sourceURL));
@@ -1102,6 +1139,11 @@ const DECLARED_ABSENT_RE =
  * FIX-35 0b (Deploy-35 dy-2): fields the user asked for by name that the answer gives as
  * absent. Such an answer is 部分完成, not completed.
  */
+/** The fields of ASKABLE_FIELDS a request names (复审 #2: a prose answer's 部分完成 count). */
+export function askedFields(intent: string): string[] {
+  return ASKABLE_FIELDS.filter((name) => intent.includes(name));
+}
+
 export function declaredAbsentFields(intent: string, summary: string, fields?: unknown): string[] {
   const asked = ASKABLE_FIELDS.filter((name) => intent.includes(name));
   if (!asked.length) return [];

@@ -140,6 +140,17 @@ export const UNIFIED_BROWSER_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
     inputSchema: { type: 'object', additionalProperties: false, properties: {} },
   },
   {
+    name: 'press_key',
+    description:
+      '按键。只支持 Escape：关闭挡住页面的弹窗（登录提示、广告、Cookie 提示等）。点不到弹窗的 ×、「关闭」、「以后再说」时用它。',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { key: { type: 'string', enum: ['Escape'] } },
+      required: ['key'],
+    },
+  },
+  {
     name: 'download',
     description: '点击下载链接/按钮并保存文件。',
     inputSchema: {
@@ -210,6 +221,7 @@ export type UnifiedBrowserAction = (
   | { tool: 'screenshot' }
   | { tool: 'wait_for'; text?: string; ref?: string; networkIdle?: boolean; timeoutMs?: number }
   | { tool: 'back' }
+  | { tool: 'press_key'; key: 'Escape' }
   | { tool: 'download'; ref: string }
   | { tool: 'upload'; ref: string; fileIds: string[] }
   | { tool: 'click_at'; x: number; y: number }
@@ -301,6 +313,10 @@ function parseAction(name: string, input: unknown): UnifiedBrowserAction {
     case 'screenshot':
     case 'back':
       return { tool: name };
+    case 'press_key':
+      // FIX-36 #9: Escape only — it closes a popup; no other key is offered.
+      if (args.key !== 'Escape') throw new UnifiedToolInputError('press_key 只支持 Escape');
+      return { tool: 'press_key', key: 'Escape' };
     case 'click':
       if (args.newTab !== undefined && typeof args.newTab !== 'boolean')
         throw new UnifiedToolInputError('Invalid newTab');

@@ -1,12 +1,16 @@
-import type {
-  SelectedChromeSessionCommand,
-  UserBrowserTargetDescription,
+import {
+  type LoginContext,
+  type SelectedChromeSessionCommand,
+  type UserBrowserTargetDescription,
+  readLoginContext,
 } from '@holaday/shared-types';
 import type { CDPSession, ElementHandle, Frame, Locator, Page } from 'playwright';
 import { buildAuthParkQuestion } from '../login-detector.js';
 import type { RunSupercarOptions, SupercarAwaitingKind } from '../supercar/agent-loop.js';
 import { isAffirmativeActionConfirmation } from '../supercar/runtime-action-policy.js';
+import { probeBrowserBlocker } from './browser-blocker-probe.js';
 import { amazonVerificationUrl, verificationPost } from './cloud-observation.js';
+import { LOGIN_POPUP_NOTICE } from './full-page-read.js';
 import type { ActionGateDecision } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
@@ -43,6 +47,10 @@ interface ElementSignals {
   formMethod?: string | null;
   /** The hit is a host whose internals cannot be seen (closed shadow / custom element). */
   opaque?: boolean;
+  /** FIX-36 复审 #1: a login field (account, phone, code, or any box of a login block). */
+  credentialForm?: boolean;
+  /** FIX-36 复审 #1: a login / sign-up / authorize / 「获取验证码」 control. */
+  loginControl?: boolean;
 }
 
 /** What Enter in a field submits: the real form semantics, not just a button. */
@@ -293,7 +301,69 @@ function descriptor(
     inputType: signals?.type ?? null,
     tagName: signals?.tagName ?? null,
     pageUrl: signals?.url ?? pageUrl,
+    ...(signals?.credentialForm ? { credentialForm: true } : {}),
+    ...(signals?.loginControl ? { loginControl: true } : {}),
   };
+}
+
+/** Whether the page probe reports a login popup on this page (FIX-36 #9 whole-page read). */
+async function loginPopupShown(page: Page): Promise<boolean> {
+  const hit = await withTimeout(probeBrowserBlocker(page));
+  return !!hit && 'disposition' in hit && hit.message === LOGIN_POPUP_NOTICE;
+}
+
+const READ_LOGIN_CALL = `function (popup) { return (${readLoginContext.toString()})(this, popup); }`;
+
+/** The target's place in a login step, read on the very node the action acts on. */
+async function loginContextOf(
+  binding: TargetBinding | null,
+  popup: boolean,
+): Promise<LoginContext | null> {
+  if (binding?.kind === 'handle')
+    return withTimeout(binding.handle.evaluate(readLoginContext, popup));
+  if (binding?.kind === 'cdp') {
+    const result = await withTimeout(
+      binding.session.send('Runtime.callFunctionOn', {
+        objectId: binding.objectId,
+        functionDeclaration: READ_LOGIN_CALL,
+        arguments: [{ value: popup }],
+        returnByValue: true,
+      }),
+    );
+    return (result?.result.value as LoginContext | undefined) ?? null;
+  }
+  return null;
+}
+
+/**
+ * The target's login context. Whether the probe reports a login popup only matters when the
+ * two readings differ (a block that says 登录 without a code box): only then is the page
+ * probed — a probe before every action slows clicks on a busy page (Gaode) into stale refs.
+ */
+async function loginContextFor(
+  binding: TargetBinding | null,
+  page: Page,
+): Promise<LoginContext | null> {
+  const plain = await loginContextOf(binding, false);
+  if (!plain || (plain.loginField && plain.loginControl)) return plain;
+  const ifPopup = await loginContextOf(binding, true);
+  if (
+    !ifPopup ||
+    (ifPopup.loginField === plain.loginField &&
+      ifPopup.loginControl === plain.loginControl &&
+      ifPopup.loginBlock === plain.loginBlock)
+  )
+    return plain;
+  return (await loginPopupShown(page)) ? ifPopup : plain;
+}
+
+/** A read target with its login context folded into its signals. */
+async function withLogin(target: ReadTarget | null, page: Page): Promise<ReadTarget | null> {
+  if (!target) return null;
+  const login = await loginContextFor(target.binding, page);
+  return login?.loginControl
+    ? { ...target, signals: { ...target.signals, loginControl: true } }
+    : target;
 }
 
 async function withTimeout<T>(work: Promise<T>): Promise<T | null> {
@@ -544,6 +614,17 @@ function verificationTarget(
 
 const UNREADABLE_HOST = '目标位于无法读取内部内容的页面组件中';
 
+/** A typed / selected field's own signals, with whether it is a login field. */
+async function fieldSignals(
+  handle: ElementHandle | null,
+  page: Page,
+): Promise<ElementSignals | null> {
+  const signals = handle ? await withTimeout(handle.evaluate(READ_SELF)) : null;
+  if (!signals || !handle) return signals;
+  const login = await loginContextFor({ kind: 'handle', handle }, page);
+  return login?.loginField ? { ...signals, credentialForm: true } : signals;
+}
+
 function clickDescription(
   target: ReadTarget | null,
   fallbackLabel: string | null,
@@ -609,21 +690,21 @@ export async function describeUnifiedAction(
     case 'click':
     case 'download':
       return clickDescription(
-        locator ? await targetAtRef(probe, locator) : null,
+        await withLogin(locator ? await targetAtRef(probe, locator) : null, page),
         labelForRef(action.ref),
         pageUrl,
         '无法读取要点击的元素',
       );
     case 'click_at':
       return clickDescription(
-        await targetAtPoint(probe, page, action.x, action.y),
+        await withLogin(await targetAtPoint(probe, page, action.x, action.y), page),
         null,
         pageUrl,
         '无法识别该坐标处的元素（可能位于无法读取的嵌入页面中）',
       );
     case 'select': {
       const handle = locator ? await withTimeout(locator.elementHandle()) : null;
-      const signals = handle ? await withTimeout(handle.evaluate(READ_SELF)) : null;
+      const signals = await fieldSignals(handle, page);
       return {
         descriptors: [{ ...descriptor('click', signals, null, pageUrl), label: action.value }],
         unverified: signals ? null : '无法读取下拉框',
@@ -634,7 +715,7 @@ export async function describeUnifiedAction(
     }
     case 'type': {
       const handle = locator ? await withTimeout(locator.elementHandle()) : null;
-      const signals = handle ? await withTimeout(handle.evaluate(READ_SELF)) : null;
+      const signals = await fieldSignals(handle, page);
       const typed = descriptor('type', signals, labelForRef(action.ref), pageUrl);
       const binding: TargetBinding | null = handle ? { kind: 'handle', handle } : null;
       if (!signals)
@@ -842,6 +923,8 @@ export function createDescriptionActionGate<Action>(options: DescriptionActionGa
   ): Promise<'proceed' | 'confirmed' | ActionGateDecision> => {
     const verdict = await options.onBeforeAction(item);
     const where = item.pageUrl ?? item.url ?? options.pageUrl();
+    // FIX-36 #9: refused, not run, and the agent carries on (a login form's account box).
+    if (!verdict.allowed && verdict.refuse) return { kind: 'skip', message: verdict.refuse };
     if (!verdict.allowed && verdict.requiresTakeover) {
       const kind = verdict.awaitingKind ?? 'login';
       const question = buildAuthParkQuestion(kind, where);
@@ -949,6 +1032,15 @@ export function describeUserBrowserAction(
     tagName: element.tagName,
     pageUrl: target.page.url,
     pageTxSignal,
+    // FIX-36 复审 #1: typing / selecting in a login field, and any key there but Escape
+    // (Enter would submit the login), are refused; so is a login / authorize / next control.
+    // 复审 #2: any key but Escape on a button of a login block may submit it too.
+    ...((element.loginField ||
+      (action.kind === 'key' && (element.loginControl || element.loginBlock))) &&
+    !(action.kind === 'key' && action.payload.key === 'Escape')
+      ? { credentialForm: true }
+      : {}),
+    ...(element.loginControl && action.kind === 'click' ? { loginControl: true } : {}),
   };
   const form = target.form;
   const activates =

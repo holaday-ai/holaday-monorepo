@@ -37,8 +37,12 @@ describe('PR253 true input sensitivity and replay lifecycle', () => {
       await browser.close();
     }
   });
-  it('masks cashier paths and editable card/payment-password/OTP fields without claiming end', async () => {
+  // FIX-36 #9: whole-page read is the default now; the mask is what BROWSER_FULL_PAGE_READ=false
+  // brings back (config only).
+  it('with BROWSER_FULL_PAGE_READ=false: masks cashier paths and card/payment-password/OTP fields without claiming end', async () => {
     const browser = await chromium.launch({ headless: true });
+    const before = process.env.BROWSER_FULL_PAGE_READ;
+    process.env.BROWSER_FULL_PAGE_READ = 'false';
     try {
       for (const [path, html] of [
         ['/cashier/index', '<h1>确认付款</h1>'],
@@ -67,6 +71,8 @@ describe('PR253 true input sensitivity and replay lifecycle', () => {
         }
       }
     } finally {
+      if (before === undefined) delete process.env.BROWSER_FULL_PAGE_READ;
+      else process.env.BROWSER_FULL_PAGE_READ = before;
       await browser.close();
     }
   });

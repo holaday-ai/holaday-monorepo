@@ -11,6 +11,14 @@ export interface RuntimeAction {
   pageUrl?: string | null;
   pageTitle?: string | null;
   pageTxSignal?: string | null;
+  /**
+   * FIX-36 #9: the field sits in a login / verification form or dialog (one with a password
+   * or one-time-code field). With the page fully readable, its account / phone box is in
+   * reach too — typing there is the user's, like the password itself.
+   */
+  credentialForm?: boolean | null;
+  /** FIX-36 复审 #1: a login / sign-up / authorize / 「获取验证码」 control of a login step. */
+  loginControl?: boolean | null;
 }
 
 export interface RuntimeActionVerdict {
@@ -20,6 +28,11 @@ export interface RuntimeActionVerdict {
   requiresTakeover?: boolean;
   awaitingKind?: 'login' | 'permission';
   question?: string;
+  /**
+   * FIX-36 #9: this one action is refused and the task goes on — the agent is told why
+   * (a login form's account box: not typed, and no takeover the task did not ask for).
+   */
+  refuse?: string;
 }
 
 const IRREVERSIBLE_CONTROL_RE =
@@ -66,6 +79,29 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
     };
   }
 
+  // After the password / code box itself (a takeover, above): the login step's other boxes
+  // (typed or selected), and any box whose own label names an account / phone / mailbox.
+  if (
+    (action.kind !== 'navigate' && action.credentialForm) ||
+    (action.kind === 'type' && accountField(action))
+  ) {
+    const reason =
+      '这是登录或验证表单（账号、手机号、密码、验证码），不代填，这一步没有执行。任务确实需要登录才能继续时调用 request_human 请用户接管；否则关掉弹窗（×、「关闭」或 press_key Escape）或换别的页面继续。';
+    return { allowed: false, reason, refuse: reason };
+  }
+  // FIX-36 复审 #1: logging in, signing up or authorizing is the user's, never clicked for them.
+  if (
+    action.kind === 'click' &&
+    (action.loginControl ||
+      [action.label, action.ariaLabel, action.title].some((value) =>
+        STRONG_LOGIN_CONTROL_RE.test(normalize(value)),
+      ))
+  ) {
+    const reason =
+      '这是登录、注册、授权或获取验证码的按钮，不替用户点击，这一步没有执行。任务确实需要登录才能继续时调用 request_human 请用户接管；否则关掉弹窗（×、「关闭」或 press_key Escape）继续。';
+    return { allowed: false, reason, refuse: reason };
+  }
+
   if (action.kind === 'navigate') return { allowed: true };
 
   const raw = [action.label, action.ariaLabel, action.title, action.placeholder, action.name];
@@ -96,6 +132,22 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
     reason: `不可逆操作需要用户确认：${label}`,
     question: `即将执行“${label}”，这可能产生付款、下单、发送、发布或删除等外部影响。确认继续执行吗？`,
   };
+}
+
+/** A login step's own controls: refused wherever they are (FIX-36 复审 #1). */
+const STRONG_LOGIN_CONTROL_RE =
+  /授权登录|确认授权|同意授权|同意并|一键登录|快捷登录|本机号码|(?:获取|发送|重新发送)(?:短信)?(?:验证码|动态码)/;
+// 复审 #2: a phone / mailbox box is a login field only inside a login block (the page reads
+// that); on its own label only an account / user name is.
+const ACCOUNT_LABEL_RE = /账号|帐号|账户|用户名|登录名|username|account/i;
+const SEARCH_LABEL_RE = /搜索|search|查找|keyword/i;
+
+/** A box whose own signals name an account or user name (not a search box). */
+function accountField(action: RuntimeAction): boolean {
+  if (normalize(action.inputType) === 'search') return false;
+  const signals = [action.label, action.ariaLabel, action.placeholder, action.name].map(normalize);
+  if (signals.some((value) => SEARCH_LABEL_RE.test(value))) return false;
+  return signals.some((value) => ACCOUNT_LABEL_RE.test(value));
 }
 
 export function isAffirmativeActionConfirmation(message: string): boolean {
