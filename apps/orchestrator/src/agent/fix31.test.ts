@@ -64,16 +64,18 @@ describe('v06: the one value asked for is the one the answer could not see', () 
       ),
     ).toBe(true);
   });
-  it('a full one-value answer, or a list answer with one field missing, is not', () => {
+  it('a full one-value answer is not; a named field left 页面未显示 now goes to the browser (FIX-36 #2)', () => {
     expect(
       answerNotObtained('**3658.03点**，跌55.00点（2026-10-22 15:00 收盘）', '上证指数现在多少点'),
     ).toBe(false);
+    // FIX-36 #2 (coordinator): the scrape lane reuses 0b — a field the user named, given as
+    // 页面未显示, gets one browser try; still missing there, it is 部分完成.
     expect(
       answerNotObtained(
         '- 标题：西湖一日游攻略\n- 作者：Clara\n- 点赞数：页面未显示',
         '打开 https://www.xiaohongshu.com/explore/6929ba55000000001e023ef8 读这篇笔记的标题、作者和点赞数',
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 

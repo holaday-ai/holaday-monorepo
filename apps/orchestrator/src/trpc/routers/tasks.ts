@@ -4678,6 +4678,21 @@ export const tasksRouter = router({
                           ...(executionPlan ? { executionPlan } : {}),
                           firecrawl,
                           logger: ctx.logger,
+                          // FIX-36 (Deploy-36 b-n06): trading days come from the
+                          // exchange calendar, not from the model's arithmetic.
+                          tradingDay: async (iso: string) => {
+                            const [{ HttpAkshareClient }, { tradingDayKnown }] = await Promise.all([
+                              import('../../agent/a-share/akshare-http-client.js'),
+                              import('../../agent/a-share/ashare-fact-card.js'),
+                            ]);
+                            return tradingDayKnown(
+                              new HttpAkshareClient({
+                                baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+                                logger: ctx.logger,
+                              }),
+                              iso,
+                            );
+                          },
                           // Phase 24 RC follow-up — stream LLM deltas + push
                           // coarse Firecrawl-phase progress to the SPA. Same
                           // contract as generate-runner; broadcast errors are

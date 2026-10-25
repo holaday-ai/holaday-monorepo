@@ -407,9 +407,11 @@ function buildDatePrompt(): string {
   });
   // YYYY/MM/DD → YYYY-MM-DD for ISO-style readability.
   const cstIso = cstDate.replace(/\//g, '-');
+  // FIX-36 (Deploy-36 b-n06): the weekday too, so it is not worked out from the date.
+  const weekday = now.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'long' });
   return [
     '## 当前时间上下文',
-    `当前日期：${cstIso}（北京时间）`,
+    `当前日期：${cstIso}（${weekday}，北京时间）`,
     '用户时区：Asia/Shanghai (UTC+8)',
     '查询"最新"、"今天"、"本月"等信息时以上述日期为准。',
   ].join('\n');
