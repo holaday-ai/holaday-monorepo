@@ -1,7 +1,10 @@
 import { stripToolCallMarkup } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { deliverableAnswer } from '../generate-answer-guard.js';
 import { assessCompletionFacts, observedEvidence } from './completion-fields.js';
+import type { UnifiedToolResult } from './playwright-unified-executor.js';
+import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
 /** Deploy-36 core-07 (tsk_QKsCCDvwDQK5zybH9nbdF), the answer body verbatim. */
 const CORE_07 =
@@ -97,5 +100,73 @@ describe('FIX-36 #6 · core-09: 「1145 字节」 is the receipt’s 1145 bytes'
       receipts,
     });
     expect([...facts.unverified, ...facts.contradictions].join('；')).toContain('9999');
+  });
+});
+
+function scripted(calls: Array<{ name: string; input: Record<string, unknown> }>) {
+  let turn = 0;
+  const adapter: MessagesAdapter = {
+    metadata: { provider: 'anthropic', model: 'fixture' },
+    async create() {
+      const call = calls[Math.min(turn++, calls.length - 1)]!;
+      return {
+        id: String(turn),
+        metadata: { provider: 'anthropic', model: 'fixture' },
+        content: [{ type: 'tool_use', id: String(turn), ...call }],
+        stopReason: 'tool_use',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadInputTokens: null,
+          cacheCreationInputTokens: null,
+          complete: true,
+        },
+      };
+    },
+  };
+  return adapter;
+}
+
+const CHECKBOXES =
+  '- heading "Checkboxes" [level=3]\n- checkbox "checkbox 1"\n- checkbox "checkbox 2" [checked]\n- text: Powered by Elemental Selenium';
+const INTENT_10 = '请使用云端浏览器，打开 the-internet.herokuapp.com 的 iframe 与 checkboxes 页面';
+
+function runParts(finishes: string[]) {
+  let url = 'about:blank';
+  const execute = async (action: { tool: string; url?: string }): Promise<UnifiedToolResult> => {
+    if (action.tool === 'navigate') {
+      url = action.url!;
+      return { ok: true, text: `已打开 ${url}`, url };
+    }
+    return { ok: true, text: CHECKBOXES, url };
+  };
+  const adapter = scripted([
+    { name: 'navigate', input: { url: 'https://the-internet.herokuapp.com/checkboxes' } },
+    { name: 'snapshot', input: {} },
+    ...finishes.map((summary) => ({ name: 'finish', input: { status: 'completed', summary } })),
+  ]);
+  return runUnifiedBrowserLoop({
+    intent: INTENT_10,
+    adapter,
+    maxSteps: 8,
+    execute: execute as never,
+    currentPageUrl: () => url,
+  } as never);
+}
+
+describe('FIX-36 #3 · core-10: a named part never covered is 部分完成, not a failure', () => {
+  const only = 'checkboxes 页面有两个复选框：checkbox 1 未勾选，checkbox 2 已勾选。';
+  it('sent back once for 「iframe」, still without it → 部分完成 naming iframe', async () => {
+    const outcome = await runParts([only, only]);
+    expect(outcome).toMatchObject({
+      status: 'completed',
+      summary: expect.stringMatching(/^部分完成：任务要求的「iframe」部分未完成/),
+      partial: expect.objectContaining({ missing: 'iframe' }),
+    });
+  });
+  it('another contradiction left with it is still a failure', async () => {
+    const wrong = `${only} 页面标题为「Checkbox Page 9000」。`;
+    const outcome = await runParts([wrong, wrong]);
+    expect(outcome.status).toBe('failed');
   });
 });

@@ -1143,6 +1143,29 @@ export async function runUnifiedBrowserLoop(
           }
           if (blocking) {
             await rejected(summary, given, blocking);
+            // FIX-36 (Deploy-36 core-10): when what is left is only a part the task named
+            // and the answer never covered (「iframe」), everything else having passed, the
+            // covered part is delivered as 部分完成 naming the missing one — not a failure.
+            const missingParts =
+              blocking.startsWith('答案与已读页面矛盾') &&
+              facts.contradictions.length > 0 &&
+              facts.contradictions.every((c) => MISSING_PART_RE.test(c))
+                ? facts.contradictions.map((c) => c.match(MISSING_PART_RE)![1]!)
+                : [];
+            if ((concludeNow || rejectionsLeft <= 0) && !partialHeld && missingParts.length)
+              return {
+                status: 'completed',
+                summary: withLimitations(
+                  `部分完成：任务要求的${missingParts.map((p) => `「${p}」`).join('、')}部分未完成。\n\n${summary}`,
+                ),
+                evidence:
+                  hostProof ||
+                  given ||
+                  deriveEvidence(summary, observedText) ||
+                  observedText.slice(0, 500),
+                steps: step + 1,
+                partial: { found: 0, wanted: 1, missing: missingParts.join('、') },
+              };
             if (concludeNow || rejectionsLeft <= 0)
               // FIX-27 (va core-08): a later answer failing does not undo the held
               // honest 部分完成 that passed every check.
@@ -1940,6 +1963,9 @@ export function fieldLines(fields: unknown, summary: string): string {
   }
   return lines.join('\n');
 }
+
+/** completion-fields' 「任务要求的「X」在答案里没有出现」 contradiction. */
+const MISSING_PART_RE = /^任务要求的「([^」]+)」在答案里没有出现/;
 
 export function deriveEvidence(summary: string, pageText: string): string {
   if (!pageText) return '';
