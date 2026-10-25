@@ -99,6 +99,8 @@ function stripPlain(text: string, structured = hasStructure(text)): string {
  * is one ref or a run of them (「ref=e12、e13、e23」).
  */
 const REFS = String.raw`ref=e\d+(?:\s*[、,，/和及–~-]\s*(?:ref=)?e\d+)*\b`;
+/** A cloud-browser tab handle: `tab_` + a UUID. */
+const TAB = String.raw`tab_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b`;
 const INTERNAL_REF_RES: Array<[RegExp, string]> = [
   // 「（ref=e23）」「（ref=e12、e13）」: the whole parenthetical goes.
   [new RegExp(String.raw`\s*[（(]\s*${REFS}\s*[)）]`, 'g'), ''],
@@ -110,10 +112,16 @@ const INTERNAL_REF_RES: Array<[RegExp, string]> = [
   [new RegExp(String.raw`(?<=的)\s*${REFS}(?=\s*[。；;，,])`, 'g'), '相应元素'],
   // Never inside a URL or a word (「/dp/B0?ref=e23」「preference=e5」).
   [new RegExp(String.raw`[ \t]?(?<![?&=/#.\w-])${REFS}`, 'g'), ''],
+  // FIX-36 (Deploy-36 core-07): browser tab ids are the same kind of handle —
+  // 「…页面（tab_9eff90a8-…）」「（Python - Wikipedia, tab_9eff90a8-…）」.
+  [new RegExp(String.raw`\s*[（(]\s*${TAB}\s*[)）]`, 'g'), ''],
+  [new RegExp(String.raw`\s*[，,、；;]\s*${TAB}(?=\s*[)）])`, 'g'), ''],
+  [new RegExp(String.raw`(?<=[（(])\s*${TAB}\s*[，,、；;]\s*`, 'g'), ''],
+  [new RegExp(String.raw`[ \t]?(?<![?&=/#.\w-])${TAB}`, 'g'), ''],
 ];
 
 function stripRefs(text: string): string {
-  if (!text.includes('ref=e')) return text;
+  if (!text.includes('ref=e') && !text.includes('tab_')) return text;
   return INTERNAL_REF_RES.reduce((out, [re, to]) => out.replace(re, to), text);
 }
 

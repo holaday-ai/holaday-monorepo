@@ -251,11 +251,15 @@ function beforeOuterComma(value: string): string {
   return value;
 }
 
+const HANDLE_ONLY_RE = /^\s*(?:tab_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|ref=e\d+)\s*$/;
+
 function answerFacts(summary: string, intent = ''): Fact[] {
   const text = unescapeLiteralBreaks(summary);
   const asked = normalizeFact(intent);
   const facts: Fact[] = [];
   const add = (fact: Fact) => {
+    // FIX-36 (core-07): a browser handle (tab id, element ref) is not a page fact to check.
+    if (HANDLE_ONLY_RE.test(fact.value)) return;
     if (fact.value && fact.value.length <= 300) facts.push(fact);
   };
   for (const url of text.match(TEXT_URL_RE) ?? []) add({ name: '链接', value: url });
@@ -365,6 +369,16 @@ function answerFacts(summary: string, intent = ''): Fact[] {
     }
     // A short numbered list line without prose (e.g. search-result titles).
     const listed = line.match(/^\s*\d+[.)、]\s+(.+)$/u)?.[1];
+    // FIX-36 (Deploy-36 b-p02): 「名称 — SGD 11.47」 is a name and its price, each its own
+    // node on the page — checked apart, not as one run of text.
+    const priced = listed?.match(
+      /^(.+?)\s+[—–-]{1,2}\s+((?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?)\s*$/iu,
+    );
+    if (priced && !/[：*]/.test(priced[1]!) && !/https?:\/\//i.test(listed!)) {
+      add({ name: '条目', value: clean(priced[1]!), listItem: true });
+      add({ name: '价格', value: clean(priced[2]!), listItem: true });
+      continue;
+    }
     if (
       listed &&
       !/[：*]/.test(listed) &&
@@ -408,6 +422,15 @@ const CURRENCY_SYMBOLS: Record<string, string[]> = {
   krw: ['₩'],
   inr: ['₹'],
 };
+/**
+ * FIX-36 (Deploy-36 core-09): 「1145 字节」 is the download receipt's 「1145 bytes」 /
+ * `"sizeBytes":1145` in another language.
+ */
+function byteForms(value: string): string[] {
+  const n = value.match(/^(\d+)\s*(?:字节|bytes?|b)$/)?.[1];
+  return n ? [`${n} bytes`, `"sizebytes":${n}`] : [];
+}
+
 function currencyForms(value: string): string[] {
   const m = value.match(/^([a-z]{3}|[a-z]{0,2}\$|[¥€£₩₹])\s?(\d+(?:\.\d+)?)$/);
   if (!m) return [];
@@ -650,7 +673,7 @@ export function assessCompletionFacts(input: {
     const candidates = [fact.value, withoutNote(fact.value), quoted, stripEdgeQuotes(fact.value)]
       .filter((v): v is string => Boolean(v))
       .map(normalizeFact)
-      .flatMap((v) => [v, ...currencyForms(v)]);
+      .flatMap((v) => [v, ...currencyForms(v), ...byteForms(v)]);
     const bound = (page: (typeof pages)[number]) =>
       (!fact.tabId || page.tabId === fact.tabId) &&
       (!fact.sourceURL || sameSource(page.sourceURL, fact.sourceURL));
