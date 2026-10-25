@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 import { readLoginContext } from '@holaday/shared-types';
 import { type Browser, type CDPSession, type Page, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -200,7 +201,7 @@ describe('FIX-36 复审 #1 · cloud browser: no popup needed', () => {
       ['手机号码', '13800000000'],
       ['邮箱', 'a@example.com'],
       ['联系人', '张三'],
-    ])
+    ] as const)
       expect(
         await gate(
           { tool: 'type', ref: await refOf(page, new RegExp(`textbox "${name}"`)), text },
@@ -558,9 +559,11 @@ describe('FIX-36 复审 #2 #6 · an extension that does not report login fields'
 
 describe('FIX-36 复审 #2 · readLoginContext survives serialisation', () => {
   it('compiled with keepNames (as tsx runs it), its source has no __name helper', async () => {
-    const { createRequire } = await import('node:module');
     const tsx = createRequire(import.meta.url).resolve('tsx');
-    const { transformSync } = createRequire(tsx)('esbuild') as typeof import('esbuild');
+    // esbuild, as tsx (keepNames) uses it.
+    const { transformSync } = createRequire(tsx)('esbuild') as {
+      transformSync: (code: string, options: Record<string, unknown>) => { code: string };
+    };
     const { code } = transformSync(
       `${readLoginContext.toString()}\nglobalThis.__compiled = readLoginContext;`,
       { keepNames: true, loader: 'js' },
