@@ -43,6 +43,8 @@ interface ElementSignals {
   formMethod?: string | null;
   /** The hit is a host whose internals cannot be seen (closed shadow / custom element). */
   opaque?: boolean;
+  /** FIX-36 #9: inside a form / dialog that asks for a password or a one-time code. */
+  credentialForm?: boolean;
 }
 
 /** What Enter in a field submits: the real form semantics, not just a button. */
@@ -170,6 +172,26 @@ const READ_SELF = (el: Element): ElementSignals => ({
   type: el.getAttribute('type'),
   tagName: String(el.tagName || '').toLowerCase() || null,
   url: document.location ? document.location.href : null,
+  credentialForm: (() => {
+    const scope =
+      (el as HTMLInputElement).form ??
+      el.closest('form,dialog,[role="dialog"],[aria-modal="true"]');
+    if (!scope) return false;
+    return Array.from(scope.querySelectorAll('input')).some((input) => {
+      const field = input as HTMLInputElement;
+      const identity = [
+        field.name,
+        field.id,
+        field.placeholder,
+        field.getAttribute('aria-label'),
+      ].join(' ');
+      return (
+        field.type === 'password' ||
+        /^one-time-code/i.test(field.autocomplete || '') ||
+        /验证码|短信码|动态码|otp|verification ?code|passcode/i.test(identity)
+      );
+    });
+  })(),
 });
 
 const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
@@ -293,6 +315,7 @@ function descriptor(
     inputType: signals?.type ?? null,
     tagName: signals?.tagName ?? null,
     pageUrl: signals?.url ?? pageUrl,
+    ...(signals?.credentialForm ? { credentialForm: true } : {}),
   };
 }
 

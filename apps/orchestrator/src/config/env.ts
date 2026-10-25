@@ -284,6 +284,15 @@ const baseEnvSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+  /**
+   * FIX-36 #9 (BOSS 2026-10-25): the AI reads the whole page — a login or payment popup no
+   * longer masks it. 'false' restores the whole-page mask (config only, no code change).
+   * Typing credentials, solving captchas and unpaused writes stay forbidden either way.
+   */
+  BROWSER_FULL_PAGE_READ: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
   BROWSER_REPLAY_V1: z
     .enum(['true', 'false'])
     .default('false')

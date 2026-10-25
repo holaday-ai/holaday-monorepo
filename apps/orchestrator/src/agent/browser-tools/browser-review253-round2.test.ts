@@ -629,7 +629,10 @@ describe('round 2: can the new write check be sidestepped by common structures?'
       await page.close();
     }
   });
-  it('S cashier / bank card / payment password pages stay masked with end:false', async () => {
+  // FIX-36 #9: whole-page read is the default; this is the mask BROWSER_FULL_PAGE_READ=false restores.
+  it('S cashier / bank card / payment password pages stay masked with end:false (BROWSER_FULL_PAGE_READ=false)', async () => {
+    const before = process.env.BROWSER_FULL_PAGE_READ;
+    process.env.BROWSER_FULL_PAGE_READ = 'false';
     const cases: Record<string, string> = {
       '/cashier/index': '<h1>收银台</h1><p>应付 99 元</p>',
       '/trade/confirm': '<h1>确认付款</h1><label>银行卡号<input name="cardNo"></label>',
@@ -656,6 +659,8 @@ describe('round 2: can the new write check be sidestepped by common structures?'
         });
       }
     } finally {
+      if (before === undefined) delete process.env.BROWSER_FULL_PAGE_READ;
+      else process.env.BROWSER_FULL_PAGE_READ = before;
       tools.dispose();
       await page.close();
     }
@@ -775,7 +780,9 @@ describe('round2 GraphQL operation classification', () => {
 });
 
 describe('round2 custom keypad privacy', () => {
-  it('masks ten numeric keys near payment text for reads and replay', async () => {
+  it('masks ten numeric keys near payment text for reads (BROWSER_FULL_PAGE_READ=false) and replay (always)', async () => {
+    const before = process.env.BROWSER_FULL_PAGE_READ;
+    process.env.BROWSER_FULL_PAGE_READ = 'false';
     pages['/'] =
       `<main><h1>确认付款</h1><div role="grid">${Array.from({ length: 10 }, (_, i) => `<button>${i}</button>`).join('')}</div></main>`;
     const page = await browser.newPage();
@@ -788,7 +795,13 @@ describe('round2 custom keypad privacy', () => {
         expect(out.end).toBe(false);
       }
       expect(await tools.observation?.sensitive(page)).toBe(true);
+      // FIX-36 #9: by default the AI reads it; the recording stays masked.
+      process.env.BROWSER_FULL_PAGE_READ = 'true';
+      expect(JSON.parse((await tools.execute({ tool: 'read_page' })).text).redacted).not.toBe(true);
+      expect(await tools.observation?.sensitive(page)).toBe(true);
     } finally {
+      if (before === undefined) delete process.env.BROWSER_FULL_PAGE_READ;
+      else process.env.BROWSER_FULL_PAGE_READ = before;
       tools.dispose();
       await page.close();
     }

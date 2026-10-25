@@ -11,6 +11,12 @@ export interface RuntimeAction {
   pageUrl?: string | null;
   pageTitle?: string | null;
   pageTxSignal?: string | null;
+  /**
+   * FIX-36 #9: the field sits in a login / verification form or dialog (one with a password
+   * or one-time-code field). With the page fully readable, its account / phone box is in
+   * reach too — typing there is the user's, like the password itself.
+   */
+  credentialForm?: boolean | null;
 }
 
 export interface RuntimeActionVerdict {
@@ -51,6 +57,15 @@ const TRANSACTION_CONTEXT_RE =
 const PROCEED_CONTROL_RE = /继续|下一步|确定|完成|提交|continue|next|proceed|confirm|submit|done/i;
 
 export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdict {
+  if (action.kind === 'type' && action.credentialForm) {
+    return {
+      allowed: false,
+      requiresTakeover: true,
+      awaitingKind: 'login',
+      reason:
+        '这是登录或验证表单（账号、手机号、密码、验证码），不会由 Agent 代填，请由用户接管浏览器完成。',
+    };
+  }
   if (
     action.kind === 'type' &&
     (normalize(action.inputType) === 'password' ||

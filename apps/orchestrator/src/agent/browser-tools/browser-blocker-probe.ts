@@ -2,6 +2,7 @@
 import type { Frame, Page } from 'playwright';
 import { detectBrowserBlocker } from './browser-completion.js';
 import { canReadOutsideWall } from './browser-public-targets.js';
+import { LOGIN_POPUP_NOTICE, fullPageRead } from './full-page-read.js';
 
 /** Only visible task surfaces can block. Raw text stays local to this probe. */
 function collectSurface() {
@@ -216,6 +217,20 @@ export async function probeBrowserBlocker(page: Page, intent?: string) {
   return probeOnce(page, intent);
 }
 
+/**
+ * FIX-36 #9: with whole-page read on, a login popup (dialog, region or frame) over a page
+ * that has readable content is not a wall — the AI closes it or reads behind it. A login
+ * address (checked before this), a captcha or a page with nothing readable still hands over.
+ */
+function loginPopup(
+  hit: NonNullable<ReturnType<typeof detectBrowserBlocker>>,
+  readableContent: boolean,
+) {
+  return fullPageRead() && hit.reason === 'login' && readableContent
+    ? { ...hit, disposition: 'continue' as const, message: LOGIN_POPUP_NOTICE }
+    : null;
+}
+
 async function probeOnce(page: Page, intent?: string) {
   let readableContent = false;
   let targets: ReturnType<typeof collectSurface>['publicTargets'] | undefined;
@@ -291,6 +306,11 @@ async function probeOnce(page: Page, intent?: string) {
           scope: region.scope,
         });
         if (hit) {
+          const popup = loginPopup(hit, readableContent);
+          if (popup) {
+            localNotice = popup;
+            continue;
+          }
           if (
             region.local &&
             main &&
@@ -324,6 +344,11 @@ async function probeOnce(page: Page, intent?: string) {
         scope: main ? 'document' : 'frame',
       });
       if (hit) {
+        const popup = loginPopup(hit, readableContent);
+        if (popup) {
+          localNotice = popup;
+          continue;
+        }
         if (
           !main &&
           visibility.local &&

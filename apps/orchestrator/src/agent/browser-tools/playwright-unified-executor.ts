@@ -621,6 +621,9 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
         case 'back':
           await page.goBack({ timeout });
           return done(`已后退到 ${page.url()}`);
+        case 'press_key':
+          await page.keyboard.press(action.key);
+          return done('已按 Escape（关闭弹窗）');
         case 'download': {
           if (!options.saveDownload) return fail('当前环境不支持下载文件');
           const [download] = await Promise.all([
@@ -690,7 +693,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
       activeFrame = context.frame;
       if (action.tool === 'scroll_until')
         return await observation.act(action, async () => (await observation.read(action))!);
-      if (action.tool === 'screenshot' && (await observation.sensitive(context.page)))
+      if (action.tool === 'screenshot' && (await observation.readMask(context.page)))
         return { ok: true, text: '敏感页面截图已遮挡' };
       if (action.tool === 'extract')
         return (await observation.read({ ...action, tool: 'get_page_text', maxChars: 16000 }))!;
