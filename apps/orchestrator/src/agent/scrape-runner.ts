@@ -498,17 +498,45 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
         outputTokens: tokens.output,
       });
     }
-    // FIX-36 (Deploy-36 b-n06): a month-day that no read page, the question or the given
-    // dates carry is the model's own arithmetic — that sentence is not delivered.
-    const knownDays = knownMonthDays(context, opts.intent, beijingDay(opts.now?.() ?? new Date()));
-    for (const key of dates ? givenMonthDays(dates) : []) knownDays.add(key);
-    const invented = unsupportedDateSentences(summary, knownDays);
-    if (invented.length) {
-      log.info(
-        { code: 'SCRAPE_UNSUPPORTED_DATE', sentences: invented.length },
-        'scrape-runner: answer states a date no read page carries',
+    // FIX-36 (Deploy-36 b-n06): a month-day that no read page, attached text, the question or
+    // the given dates carry is the model's own arithmetic — that sentence is not delivered.
+    // An attached image or file is evidence this check cannot read, so it then drops nothing.
+    const attached = (opts.attachments ?? []).map((block) =>
+      block.type === 'text' && 'text' in block && typeof block.text === 'string'
+        ? block.text
+        : null,
+    );
+    if (!attached.includes(null)) {
+      const knownDays = knownMonthDays(
+        context,
+        opts.intent,
+        beijingDay(opts.now?.() ?? new Date()),
+        ...attached,
       );
-      summary = withoutSentences(summary, invented);
+      for (const key of dates ? givenMonthDays(dates) : []) knownDays.add(key);
+      const invented = unsupportedDateSentences(summary, knownDays);
+      if (invented.length) {
+        log.info(
+          { code: 'SCRAPE_UNSUPPORTED_DATE', sentences: invented.length },
+          'scrape-runner: answer states a date no read page carries',
+        );
+        summary = withoutSentences(summary, invented);
+        // Nothing left to deliver: the browser gets its one try, as for an answer not obtained.
+        const rest = summary
+          .replace(/\[[^\]]*\]\([^)]*\)|https?:\/\/\S+/g, '')
+          .replace(/^.*(?:来源|数据来源|source)\s*[:：].*$/gim, '');
+        if (!/[\p{L}\p{N}]/u.test(rest) || answerNotObtained(summary, opts.intent))
+          return failed({
+            start,
+            reason: '网页抓取的回答只剩页面上找不到的日期，已自动改用云端浏览器重试一次',
+            kind: 'empty',
+            source: scrapeSource,
+            firecrawl: usage,
+            sources: usedSources,
+            inputTokens: tokens.input,
+            outputTokens: tokens.output,
+          });
+      }
     }
     const notes: string[] = [];
     if (result.status === 'incomplete')

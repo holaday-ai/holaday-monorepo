@@ -192,6 +192,35 @@ describe('FIX-36 #9 · the page behind a login popup is read', () => {
   });
 });
 
+describe('FIX-36 #9 · a full-page screenshot never shows typed secrets (Codex P1 on PR #299)', () => {
+  const form = (card: string, otp: string, city: string) =>
+    `<form style="font:20px sans-serif"><label>卡号 <input name="cardNumber" value="${card}"></label><br><label>短信验证码 <input placeholder="请输入验证码" value="${otp}"></label><br><input type="password" value="${otp}"><br><label>城市 <input name="city" value="${city}"></label></form>`;
+  async function shot(html: string) {
+    const page = await browser.newPage({ viewport: { width: 640, height: 320 } });
+    await page.setContent(html);
+    const tools = createPlaywrightUnifiedExecutor(page, { observationV2: true });
+    try {
+      const result = await tools.execute({ tool: 'screenshot' });
+      expect(result.ok).toBe(true);
+      return (result as { image?: { data: string } }).image?.data;
+    } finally {
+      tools.dispose();
+      await page.close();
+    }
+  }
+
+  it('card, verification-code and password values are masked; the page is not touched', async () => {
+    const empty = await shot(form('', '', '杭州'));
+    const filled = await shot(form('4111111111111111', '123456', '杭州'));
+    expect(filled).toBeTruthy();
+    expect(filled).toBe(empty);
+  });
+
+  it('an ordinary field is still shown', async () => {
+    expect(await shot(form('', '', '杭州'))).not.toBe(await shot(form('', '', '')));
+  });
+});
+
 describe('FIX-36 #9 · popups may be closed; credentials are never typed', () => {
   it('the popup’s × (关闭) is clicked without a takeover', async () => {
     const page = await routePage();

@@ -12,3 +12,35 @@ export function fullPageRead(): boolean {
 /** The notice a login popup over a readable page leaves on the answer. */
 export const LOGIN_POPUP_NOTICE =
   '页面弹出了登录提示（未登录、未输入任何信息），以下为页面公开内容。';
+
+/** The signals of `collectSensitiveFieldValues` (observation-redaction.ts), as CSS. */
+const SENSITIVE_WORDS = [
+  'password',
+  'passwd',
+  'passcode',
+  'otp',
+  'cvv',
+  'cvc',
+  'card',
+  'ssn',
+  '密码',
+  '验证码',
+  '口令',
+  '动态码',
+  '校验码',
+  '安全码',
+];
+const SENSITIVE_FIELDS = [
+  'input[type="password" i]',
+  ...['password', 'one-time-code', 'cc-'].map((token) => `[autocomplete*="${token}" i]`),
+  ...['name', 'id', 'aria-label', 'placeholder'].flatMap((attr) =>
+    SENSITIVE_WORDS.map((word) => `input[${attr}*="${word}" i],textarea[${attr}*="${word}" i]`),
+  ),
+].join(',');
+
+/**
+ * FIX-36 #9 (Codex P1 on PR #299): a full-page screenshot still never shows what is typed in a
+ * password, one-time-code or card field. Applied only while the screenshot is taken (it
+ * reaches inner frames and shadow roots), so the page itself is not touched.
+ */
+export const SENSITIVE_SCREENSHOT_STYLE = `:is(${SENSITIVE_FIELDS}){color:transparent!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important;caret-color:transparent!important;background:#9e9e9e!important}`;

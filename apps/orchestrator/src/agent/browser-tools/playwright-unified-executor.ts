@@ -6,6 +6,7 @@ import { scrollWithEvidence } from './browser-scroll.js';
 import { browserToolError } from './browser-tool-error.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { CloudObservation, pageRoot } from './cloud-observation.js';
+import { SENSITIVE_SCREENSHOT_STYLE } from './full-page-read.js';
 import { redactPageText } from './page-redaction.js';
 import {
   forbidsPlayback,
@@ -599,7 +600,12 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           };
         }
         case 'screenshot': {
-          const buffer = await page.screenshot({ type: 'jpeg', quality: 70, timeout });
+          const buffer = await page.screenshot({
+            type: 'jpeg',
+            quality: 70,
+            timeout,
+            style: SENSITIVE_SCREENSHOT_STYLE,
+          });
           return {
             ok: true,
             text: '当前视口截图',

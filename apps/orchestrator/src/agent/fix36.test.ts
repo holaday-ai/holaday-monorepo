@@ -39,7 +39,11 @@ function logger(): Logger {
   } as unknown as Logger;
 }
 
-function run(answer: string, tradingDay?: (iso: string) => Promise<boolean | null>) {
+function run(
+  answer: string,
+  tradingDay?: (iso: string) => Promise<boolean | null>,
+  extra: Partial<Parameters<typeof runScrapeTask>[0]> = {},
+) {
   const requests: NeutralResponsesRequest[] = [];
   const adapter: ResponsesAdapter = {
     metadata: {
@@ -84,6 +88,7 @@ function run(answer: string, tradingDay?: (iso: string) => Promise<boolean | nul
     logger: logger(),
     now: () => NOW,
     ...(tradingDay ? { tradingDay } : {}),
+    ...extra,
   }).then((outcome) => ({ outcome, requests }));
 }
 
@@ -138,6 +143,30 @@ describe('FIX-36 #1 · b-n06: dates are given, a date no page carries is not del
     const known = knownMonthDays(SOHU);
     const answer = '价格 SGD 12.77，涨 0.89%，比例 10/27，版本 3.5。';
     expect(unsupportedDateSentences(answer, known)).toEqual([]);
+  });
+
+  it('a date from an attached text is evidence too (Codex P2 on PR #299)', async () => {
+    const answer = '上证指数最近收盘 3690.48 点。项目将于2026年11月12日上线。';
+    const { outcome } = await run(answer, calendar, {
+      attachments: [{ type: 'text', text: '项目计划：2026年11月12日上线。' }],
+    });
+    expect(outcome.summary).toContain('2026年11月12日上线');
+  });
+
+  it('with an attached image the dates cannot be checked, so none is dropped', async () => {
+    const answer = '上证指数最近收盘 3690.48 点。项目将于2026年11月12日上线。';
+    const { outcome } = await run(answer, calendar, {
+      attachments: [{ type: 'image', source: { media_type: 'image/png', data: 'AA==' } }],
+    });
+    expect(outcome.summary).toContain('2026年11月12日上线');
+  });
+
+  it('an answer that was only invented dates is no answer: the browser gets its try (Codex P2)', async () => {
+    const { outcome } = await run(
+      '下一个交易日是 10 月 27 日。\n\n[搜狐证券](https://q.stock.sohu.com/zs/000001/index.shtml)',
+      calendar,
+    );
+    expect(outcome).toMatchObject({ status: 'failed', failureKind: 'empty' });
   });
 
   it('withoutSentences leaves no empty paragraph behind', () => {
