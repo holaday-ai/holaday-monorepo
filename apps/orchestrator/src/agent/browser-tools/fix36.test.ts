@@ -58,6 +58,20 @@ describe('FIX-36 #6 · core-07: tab ids are browser handles, never shown', () =>
       ),
     ).toBe('已切换回起始标签（Web browser - Wikipedia）。');
   });
+  it('a label that ends its line heads a list, it is not the first item (local core-07)', () => {
+    const facts = assessCompletionFacts({
+      summary:
+        '已打开 3 个链接，并分别读取标题：\n1. Safari (web browser) - Wikipedia\n2. MacBook - Wikipedia',
+      pages: [
+        observedEvidence(
+          'x',
+          '- heading "Safari (web browser) - Wikipedia"\n- heading "MacBook - Wikipedia"',
+          'https://en.wikipedia.org/wiki/Safari',
+        ),
+      ],
+    });
+    expect(facts.unverified).toEqual([]);
+  });
   it('text that only looks like it stays (a word, a URL path)', () => {
     const text =
       '变量 tab_size 与 https://example.com/tab_9eff90a8-0b49-437e-a972-79de6d3ef019 不变。';

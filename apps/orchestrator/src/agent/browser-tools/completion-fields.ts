@@ -267,9 +267,10 @@ function answerFacts(summary: string, intent = ''): Fact[] {
   };
   for (const url of text.match(TEXT_URL_RE) ?? []) add({ name: '链接', value: url });
   // A labelled run that lists URLs ("标题：1) https://… → X") is handled per item below;
+  // a label that ends its line ("读取标题：\n1. …") heads a list, each line checked below;
   // a numeric label whose value has no number is prose ("播放量为页面原样字符串").
   for (const match of text.matchAll(
-    new RegExp(`(${FACT_LABELS})\\s*[*\`]*\\s*(?:[:：]|为|是)\\s*([^\\n；;|。]+)`, 'giu'),
+    new RegExp(`(${FACT_LABELS})\\s*[*\`]*\\s*(?:[:：]|为|是)[ \\t]*([^\\n；;|。]+)`, 'giu'),
   )) {
     if (/https?:\/\//i.test(match[2]!)) continue;
     if (NUMERIC_LABEL.test(match[1]!) && !/\d/.test(match[2]!)) continue;
