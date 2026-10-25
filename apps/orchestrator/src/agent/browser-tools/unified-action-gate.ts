@@ -335,10 +335,30 @@ async function loginContextOf(
   return null;
 }
 
+/**
+ * The target's login context. Whether the probe reports a login popup only matters when the
+ * two readings differ (a block that says 登录 without a code box): only then is the page
+ * probed — a probe before every action slows clicks on a busy page (Gaode) into stale refs.
+ */
+async function loginContextFor(
+  binding: TargetBinding | null,
+  page: Page,
+): Promise<LoginContext | null> {
+  const plain = await loginContextOf(binding, false);
+  if (!plain || (plain.loginField && plain.loginControl)) return plain;
+  const ifPopup = await loginContextOf(binding, true);
+  if (
+    !ifPopup ||
+    (ifPopup.loginField === plain.loginField && ifPopup.loginControl === plain.loginControl)
+  )
+    return plain;
+  return (await loginPopupShown(page)) ? ifPopup : plain;
+}
+
 /** A read target with its login context folded into its signals. */
 async function withLogin(target: ReadTarget | null, page: Page): Promise<ReadTarget | null> {
   if (!target) return null;
-  const login = await loginContextOf(target.binding, await loginPopupShown(page));
+  const login = await loginContextFor(target.binding, page);
   return login?.loginControl
     ? { ...target, signals: { ...target.signals, loginControl: true } }
     : target;
@@ -599,7 +619,7 @@ async function fieldSignals(
 ): Promise<ElementSignals | null> {
   const signals = handle ? await withTimeout(handle.evaluate(READ_SELF)) : null;
   if (!signals || !handle) return signals;
-  const login = await loginContextOf({ kind: 'handle', handle }, await loginPopupShown(page));
+  const login = await loginContextFor({ kind: 'handle', handle }, page);
   return login?.loginField ? { ...signals, credentialForm: true } : signals;
 }
 
