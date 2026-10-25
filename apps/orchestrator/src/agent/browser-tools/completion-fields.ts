@@ -251,7 +251,8 @@ function beforeOuterComma(value: string): string {
   return value;
 }
 
-const HANDLE_ONLY_RE = /^\s*(?:tab_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|ref=e\d+)\s*$/;
+const HANDLE_ONLY_RE =
+  /^\s*(?:(?:tab|frame)_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|ref=e\d+)\s*$/;
 
 function answerFacts(summary: string, intent = ''): Fact[] {
   const text = unescapeLiteralBreaks(summary);

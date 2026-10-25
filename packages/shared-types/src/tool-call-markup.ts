@@ -99,8 +99,8 @@ function stripPlain(text: string, structured = hasStructure(text)): string {
  * is one ref or a run of them (「ref=e12、e13、e23」).
  */
 const REFS = String.raw`ref=e\d+(?:\s*[、,，/和及–~-]\s*(?:ref=)?e\d+)*\b`;
-/** A cloud-browser tab handle: `tab_` + a UUID. */
-const TAB = String.raw`tab_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b`;
+/** A cloud-browser tab or frame handle: `tab_` / `frame_` + a UUID. */
+const TAB = String.raw`(?:tab|frame)_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b`;
 const INTERNAL_REF_RES: Array<[RegExp, string]> = [
   // 「（ref=e23）」「（ref=e12、e13）」: the whole parenthetical goes.
   [new RegExp(String.raw`\s*[（(]\s*${REFS}\s*[)）]`, 'g'), ''],
@@ -121,7 +121,7 @@ const INTERNAL_REF_RES: Array<[RegExp, string]> = [
 ];
 
 function stripRefs(text: string): string {
-  if (!text.includes('ref=e') && !text.includes('tab_')) return text;
+  if (!/ref=e|tab_|frame_/.test(text)) return text;
   return INTERNAL_REF_RES.reduce((out, [re, to]) => out.replace(re, to), text);
 }
 

@@ -19,6 +19,11 @@ describe('FIX-36 #6 · core-07: tab ids are browser handles, never shown', () =>
     expect(shown).toContain('（Python (programming language) - Wikipedia）。');
     expect(deliverableAnswer(CORE_07)).not.toMatch(/tab_[0-9a-f]{8}/);
   });
+  it('a frame id is the same kind of handle (seen in a core-10 rerun)', () => {
+    const text =
+      '成功定位到 TinyMCE 编辑器的 iframe（frame_d7f4ff1d-2402-41e1-9d12-4dc877bd4f5a）。';
+    expect(stripToolCallMarkup(text)).toBe('成功定位到 TinyMCE 编辑器的 iframe。');
+  });
   it('a tab id is not a fact to check (no 未核实 note on it)', () => {
     const facts = assessCompletionFacts({
       summary: '- 当前活动标签页：tab_9eff90a8-0b49-437e-a972-79de6d3ef019',
