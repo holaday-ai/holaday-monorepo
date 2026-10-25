@@ -377,6 +377,15 @@ function answerFacts(summary: string, intent = ''): Fact[] {
     const priced = listed?.match(
       /^(.+?)\s+[—–-]{1,2}\s+((?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?)\s*$/iu,
     );
+    // …and 「sample.json，大小 95 bytes」 a file name and its size (local core-09).
+    const sized = listed?.match(
+      /^(.+?)[，,]\s*(?:文件)?大小[：:为]?\s*(\d[\d,]*\s*(?:bytes?|字节|kb|mb|b))\s*$/iu,
+    );
+    if (sized && !/https?:\/\//i.test(listed!)) {
+      add({ name: '条目', value: clean(sized[1]!), listItem: true });
+      add({ name: '文件大小', value: clean(sized[2]!), listItem: true });
+      continue;
+    }
     if (priced && !/[：*]/.test(priced[1]!) && !/https?:\/\//i.test(listed!)) {
       add({ name: '条目', value: clean(priced[1]!), listItem: true });
       add({ name: '价格', value: clean(priced[2]!), listItem: true });

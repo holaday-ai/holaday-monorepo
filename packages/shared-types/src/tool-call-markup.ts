@@ -115,6 +115,8 @@ const INTERNAL_REF_RES: Array<[RegExp, string]> = [
   // FIX-36 (Deploy-36 core-07): browser tab ids are the same kind of handle —
   // 「…页面（tab_9eff90a8-…）」「（Python - Wikipedia, tab_9eff90a8-…）」.
   [new RegExp(String.raw`\s*[（(]\s*${TAB}\s*[)）]`, 'g'), ''],
+  // 「（Web browser - Wikipedia，tabId: tab_…）」: the label goes with the handle.
+  [new RegExp(String.raw`\s*[，,、；;]?\s*(?:tab ?id|frame ?id)\s*[:：=]\s*${TAB}`, 'gi'), ''],
   [new RegExp(String.raw`\s*[，,、；;]\s*${TAB}(?=\s*[)）])`, 'g'), ''],
   [new RegExp(String.raw`(?<=[（(])\s*${TAB}\s*[，,、；;]\s*`, 'g'), ''],
   [new RegExp(String.raw`[ \t]?(?<![?&=/#.\w-])${TAB}`, 'g'), ''],

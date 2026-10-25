@@ -51,6 +51,13 @@ describe('FIX-36 #6 · core-07: tab ids are browser handles, never shown', () =>
     });
     expect(facts.unverified).toEqual([]);
   });
+  it('a labelled handle goes with its label (local core-07: 「，tabId: tab_…」)', () => {
+    expect(
+      stripToolCallMarkup(
+        '已切换回起始标签（Web browser - Wikipedia，tabId: tab_9eff90a8-0b49-437e-a972-79de6d3ef019）。',
+      ),
+    ).toBe('已切换回起始标签（Web browser - Wikipedia）。');
+  });
   it('text that only looks like it stays (a word, a URL path)', () => {
     const text =
       '变量 tab_size 与 https://example.com/tab_9eff90a8-0b49-437e-a972-79de6d3ef019 不变。';
@@ -107,6 +114,14 @@ describe('FIX-36 #6 · core-09: 「1145 字节」 is the receipt’s 1145 bytes'
   it('the downloaded size in 字节 is grounded by the receipt', () => {
     const facts = assessCompletionFacts({
       summary: '- 文件名：Images.txt\n- 文件大小：1145 字节',
+      pages: [page],
+      receipts,
+    });
+    expect(facts.unverified).toEqual([]);
+  });
+  it('a listed 「文件名，大小 N bytes」 line is a name and a size (local core-09)', () => {
+    const facts = assessCompletionFacts({
+      summary: '1. Images.txt，大小 1145 bytes',
       pages: [page],
       receipts,
     });

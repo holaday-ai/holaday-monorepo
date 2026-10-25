@@ -205,6 +205,31 @@ describe('FIX-36 #9 · popups may be closed; credentials are never typed', () =>
     await page.close();
   });
 
+  it('a long form that also asks for a password: its date box is filled, its username box is not (local core-08)', async () => {
+    const page = await browser.newPage();
+    await page.setContent(
+      '<form><label>Username<input name="username"></label><label>Password<input type="password" name="password"></label><label>Birthday<input type="date" name="birthday" aria-label="Birthday"></label><label>Address<input name="address" aria-label="Address"></label></form>',
+    );
+    const { gate, park } = gateFor(page);
+    const date = await gate(
+      { tool: 'type', ref: await refOf(page, /textbox "Birthday"/), text: '2026-10-25' },
+      'before',
+    );
+    expect(date).toMatchObject({ kind: 'proceed' });
+    const address = await gate(
+      { tool: 'type', ref: await refOf(page, /textbox "Address"/), text: '杭州' },
+      'before',
+    );
+    expect(address).toMatchObject({ kind: 'proceed' });
+    const user = await gate(
+      { tool: 'type', ref: await refOf(page, /textbox "Username"/), text: 'tom' },
+      'before',
+    );
+    expect(user).toMatchObject({ kind: 'skip', message: expect.stringContaining('不代填') });
+    expect(park).not.toHaveBeenCalled();
+    await page.close();
+  });
+
   it('typing into the page’s own search box (outside the popup) is not', async () => {
     const page = await routePage();
     const { gate, park } = gateFor(page);

@@ -173,9 +173,24 @@ const READ_SELF = (el: Element): ElementSignals => ({
   tagName: String(el.tagName || '').toLowerCase() || null,
   url: document.location ? document.location.href : null,
   credentialForm: (() => {
-    const scope =
-      (el as HTMLInputElement).form ??
-      el.closest('form,dialog,[role="dialog"],[aria-modal="true"]');
+    // Only the account box of such a form (账号/用户名/手机号/邮箱…): a long form that also asks
+    // for a password still has date, address… boxes to fill (local core-08 /large_form).
+    const self = el as HTMLInputElement;
+    const own = [
+      self.name,
+      self.id,
+      self.placeholder,
+      el.getAttribute('aria-label'),
+      self.autocomplete,
+    ].join(' ');
+    if (
+      !['email', 'tel'].includes((self.type || '').toLowerCase()) &&
+      !/账号|帐号|账户|用户名|手机|电话|邮箱|login|user|account|email|e-mail|phone|mobile|username/i.test(
+        own,
+      )
+    )
+      return false;
+    const scope = self.form ?? el.closest('form,dialog,[role="dialog"],[aria-modal="true"]');
     if (!scope) return false;
     return Array.from(scope.querySelectorAll('input')).some((input) => {
       const field = input as HTMLInputElement;
