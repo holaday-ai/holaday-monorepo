@@ -276,7 +276,8 @@ function answerFacts(summary: string, intent = ''): Fact[] {
     if (NUMERIC_LABEL.test(match[1]!) && !/\d/.test(match[2]!)) continue;
     // A quoted value is exactly what is inside the quotes; otherwise prose after a
     // full-width comma is not part of the value.
-    const raw = match[2]!.trim();
+    // "读取标题：1. Safari …；2. …" — the list marker is not part of the value (not "3.15.1").
+    const raw = match[2]!.trim().replace(/^\d{1,3}[.)、](?!\d)\s*/u, '');
     const first = quotedRuns(raw)[0];
     const quoted = first?.index === 0 ? first.quote : raw.match(/^『([^』]+)』/u)?.[1];
     // "大小：文件名为 …" — an enumeration header, not this label's value.

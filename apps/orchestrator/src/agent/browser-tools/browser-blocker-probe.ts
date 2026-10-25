@@ -218,8 +218,8 @@ export async function probeBrowserBlocker(page: Page, intent?: string) {
 }
 
 /**
- * FIX-36 #9: with whole-page read on, a login popup (dialog, modal frame, or the page's own
- * prompt) on a page that is not a login address (those hand over before this) is not a
+ * FIX-36 #9: with whole-page read on, a login popup (dialog, a login frame outside any
+ * component, or the page's own prompt) on a page that is not a login address (those hand over before this) is not a
  * wall — the AI closes it or reads behind it, and
  * asks for a takeover itself when the content truly needs one (a map canvas such as Gaode's
  * has little text, yet its routes are behind the popup). Captchas still hand over.
@@ -345,8 +345,9 @@ async function probeOnce(page: Page, intent?: string) {
         scope: main ? 'document' : 'frame',
       });
       if (hit) {
-        // The page itself, or a login frame that pops up over it — not an embedded component.
-        const popup = main || visibility.modal ? loginPopup(hit) : null;
+        // The page itself, or a login frame over it (a modal, or any frame outside a player /
+        // comments / region component — local f36v live-sh: eastmoney's login iframe).
+        const popup = main || visibility.modal || !visibility.local ? loginPopup(hit) : null;
         if (popup) {
           localNotice = popup;
           continue;

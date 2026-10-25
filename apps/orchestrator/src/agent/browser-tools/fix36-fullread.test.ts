@@ -141,6 +141,30 @@ describe('FIX-36 #9 · the page behind a login popup is read', () => {
     await page.close();
   });
 
+  it('a login iframe over a quote page (not a dialog, not a component) is the AI’s to close (local live-sh)', async () => {
+    const page = await browser.newPage();
+    await page.route('https://quote.eastmoney.com/**', (r) =>
+      r.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: '<main><h1>上证指数 000001</h1><p>最新 3690.48 涨跌 +32.45 涨幅 +0.89% 今开 3623.57 最高 3691.40 最低 3574.27 昨收 3658.03 成交额 8987 亿元</p></main><div style="position:fixed;inset:15% 25%;background:#fff"><iframe src="https://exaccount2.eastmoney.com/Home/Login4" style="width:100%;height:100%;border:0"></iframe></div>',
+      }),
+    );
+    await page.route('https://exaccount2.eastmoney.com/**', (r) =>
+      r.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: '<h2>账号登录</h2><input placeholder="手机号/用户名"><input type="password"><button>登录</button>',
+      }),
+    );
+    await page.goto('https://quote.eastmoney.com/zs000001.html');
+    await page.frames()[1]?.waitForLoadState();
+    expect(await probeBrowserBlocker(page)).toMatchObject({
+      reason: 'login',
+      disposition: 'continue',
+      message: LOGIN_POPUP_NOTICE,
+    });
+    await page.close();
+  });
+
   it('a login address is still a wall to hand over', async () => {
     const page = await browser.newPage();
     await page.route('https://passport.example.com/**', (r) =>

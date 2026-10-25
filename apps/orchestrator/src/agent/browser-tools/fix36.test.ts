@@ -72,6 +72,24 @@ describe('FIX-36 #6 · core-07: tab ids are browser handles, never shown', () =>
     });
     expect(facts.unverified).toEqual([]);
   });
+  it('a list marker after the label is not part of the value (local f36v core-07)', () => {
+    const page = observedEvidence(
+      'x',
+      '- heading "Safari (web browser) - Wikipedia"\n- heading "Google Chrome - Wikipedia"',
+      'https://en.wikipedia.org/wiki/Safari',
+    );
+    const facts = assessCompletionFacts({
+      summary:
+        '已打开3个链接，并分别读取标题：1. Safari (web browser) - Wikipedia；2. Google Chrome - Wikipedia。',
+      pages: [page],
+    });
+    expect(facts.unverified).toEqual([]);
+    expect(
+      assessCompletionFacts({ summary: '标题：3.15.1 Release', pages: [page] }).unverified.join(
+        '；',
+      ),
+    ).toContain('「3.15.1 Release」');
+  });
   it('text that only looks like it stays (a word, a URL path)', () => {
     const text =
       '变量 tab_size 与 https://example.com/tab_9eff90a8-0b49-437e-a972-79de6d3ef019 不变。';
