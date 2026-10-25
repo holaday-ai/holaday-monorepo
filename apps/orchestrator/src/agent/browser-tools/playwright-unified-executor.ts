@@ -6,7 +6,7 @@ import { scrollWithEvidence } from './browser-scroll.js';
 import { browserToolError } from './browser-tool-error.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { CloudObservation, pageRoot } from './cloud-observation.js';
-import { SENSITIVE_SCREENSHOT_STYLE } from './full-page-read.js';
+import { SENSITIVE_SCREENSHOT_STYLE, fullPageRead } from './full-page-read.js';
 import { redactPageText } from './page-redaction.js';
 import {
   forbidsPlayback,
@@ -628,6 +628,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           await page.goBack({ timeout });
           return done(`已后退到 ${page.url()}`);
         case 'press_key':
+          if (!fullPageRead()) return fail('press_key 只在完整读取页面时可用');
           await page.keyboard.press(action.key);
           return done('已按 Escape（关闭弹窗）');
         case 'download': {

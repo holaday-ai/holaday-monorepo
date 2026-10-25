@@ -27,13 +27,14 @@ import {
 } from './browser-tools/completion-fields.js';
 import { type AttachmentBlock, attachmentContent } from './generate-runner.js';
 import {
-  beijingDay,
+  TRADING_DATE_RE,
   givenMonthDays,
   knownMonthDays,
   marketDatePrompt,
   marketDates,
   marketIntent,
   unsupportedDateSentences,
+  unsupportedDates,
   withoutSentences,
 } from './market-date-context.js';
 import {
@@ -65,6 +66,21 @@ export interface ScrapeOutcome {
   firecrawl?: { calls: number; credits: number };
   /** Facts the answer states that no fetched page shows verbatim. */
   unverified?: string[];
+  /**
+   * FIX-36 复审 #1 #3: on a not-obtained failure, what the scrape did get — carried to the
+   * browser retry and delivered as 部分完成 if that retry does not complete.
+   */
+  partialAnswer?: ScrapePartialAnswer;
+}
+
+export interface ScrapePartialAnswer {
+  /** The scrape answer, with its source. */
+  summary: string;
+  /** The asked fields it gives as 「页面未显示」. */
+  missing: string[];
+  /** Rows (items / fields) that are complete, of all rows. */
+  found: number;
+  wanted: number;
 }
 
 export interface RunScrapeOpts {
@@ -231,8 +247,10 @@ function failed(input: {
   sources?: string[];
   inputTokens?: number;
   outputTokens?: number;
+  partialAnswer?: ScrapePartialAnswer | null;
 }): ScrapeOutcome {
   return {
+    ...(input.partialAnswer ? { partialAnswer: input.partialAnswer } : {}),
     status: 'failed',
     summary: '',
     reason: input.reason,
@@ -486,6 +504,7 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
         { code: 'SCRAPE_NOT_OBTAINED' },
         'scrape-runner: answer says the page did not have it',
       );
+      const partial = scrapePartialAnswer(summary, opts.intent);
       return failed({
         start,
         reason:
@@ -496,29 +515,38 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
         sources: usedSources,
         inputTokens: tokens.input,
         outputTokens: tokens.output,
+        partialAnswer: partial && {
+          ...partial,
+          summary: usedSources.some((url) => partial.summary.includes(url))
+            ? partial.summary
+            : `${partial.summary}\n\n来源：${usedSources.join('、')}`,
+        },
       });
     }
-    // FIX-36 (Deploy-36 b-n06): a month-day that no read page, attached text, the question or
-    // the given dates carry is the model's own arithmetic — that sentence is not delivered.
-    // An attached image or file is evidence this check cannot read, so it then drops nothing.
+    // FIX-36 (Deploy-36 b-n06): on a market / time-sensitive question (the dates are given), a
+    // month-day within a week of today that no read page, attached text, the question or the
+    // given dates carry is the model's own arithmetic. A sentence tying it to trading
+    // (交易日 / 休市 / 开盘…) is not delivered; any other is delivered with a note
+    // (复审 #1 #2). An attached image or file is evidence this check cannot read: it then
+    // checks nothing.
     const attached = (opts.attachments ?? []).map((block) =>
       block.type === 'text' && 'text' in block && typeof block.text === 'string'
         ? block.text
         : null,
     );
-    if (!attached.includes(null)) {
-      const knownDays = knownMonthDays(
-        context,
-        opts.intent,
-        beijingDay(opts.now?.() ?? new Date()),
-        ...attached,
-      );
-      for (const key of dates ? givenMonthDays(dates) : []) knownDays.add(key);
-      const invented = unsupportedDateSentences(summary, knownDays);
+    const dateNotes: string[] = [];
+    if (dates && !attached.includes(null)) {
+      const knownDays = knownMonthDays(context, opts.intent, ...attached);
+      for (const key of givenMonthDays(dates)) knownDays.add(key);
+      const unsupported = unsupportedDateSentences(summary, knownDays, dates.today);
+      const invented = unsupported.filter((sentence) => TRADING_DATE_RE.test(sentence));
+      for (const sentence of unsupported.filter((line) => !TRADING_DATE_RE.test(line)))
+        for (const raw of unsupportedDates(sentence, knownDays, dates.today))
+          dateNotes.push(`日期「${raw}」`);
       if (invented.length) {
         log.info(
           { code: 'SCRAPE_UNSUPPORTED_DATE', sentences: invented.length },
-          'scrape-runner: answer states a date no read page carries',
+          'scrape-runner: answer states a trading date no read page carries',
         );
         summary = withoutSentences(summary, invented);
         // Nothing left to deliver: the browser gets its one try, as for an answer not obtained.
@@ -541,7 +569,8 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
     const notes: string[] = [];
     if (result.status === 'incomplete')
       notes.push('【提示】内容因长度限制被截断，如需完整版请追问。');
-    if (facts.unverified.length) notes.push(unverifiedNote(facts.unverified));
+    if (facts.unverified.length || dateNotes.length)
+      notes.push(unverifiedNote([...facts.unverified, ...dateNotes]));
     // The answer names where it read: the fetched page itself.
     if (!usedSources.some((url) => summary.includes(url)))
       notes.push(`来源：${usedSources.join('、')}`);
@@ -665,8 +694,27 @@ const WALL_ANSWER_RE =
 /** The name first: 「歌曲名称页面未显示。」 as the whole sentence (local reg-new-qq). */
 const STANDALONE_MISSING_AFTER_RE =
   /(?:^|[。！？!?\n])\s*(?:\*\*)?([^。！？!?\n，,；;]{1,24}?)(?:页面(?:上|中)?)?(?:未|没有)(?:显示|获取到?|读到|找到|列出|给出)(?=\s*(?:[。！？!?\n]|$))/g;
-const ASKED_VALUE_RE =
-  /名称|歌名|曲名|标题|名字|书名|片名|价格|股价|点位|评分|\bname\b|\btitle\b|\bprice\b/i;
+/**
+ * FIX-36 复审 #1 #6: the kinds of value a short question asks for. A missing value only counts
+ * when the question asks for its kind, and the missing thing is that value itself — not one
+ * of its side fields (「茅台股价 1500 元。页面未显示价格变化。」 has its answer).
+ */
+const ASKED_KINDS: ReadonlyArray<readonly [RegExp, RegExp]> = [
+  [
+    /名称|歌名|曲名|标题|名字|书名|片名|\bname\b|\btitle\b/i,
+    /名称|歌名|曲名|标题|名字|书名|片名|什么歌|哪首|哪本|哪部|是什么|是啥|是谁|第一|第1|榜首|头条|\bname\b|\btitle\b|\bwhat\b|\bwhich\b/i,
+  ],
+  [/价格|股价|\bprice\b/i, /价格|股价|价|多少钱|\bprice\b|\bcost\b/i],
+  [/点位/, /点位|多少点|指数/],
+  [/评分/, /评分|几分|多少分|\brating\b|\bscore\b/i],
+];
+const SIDE_FIELD_RE =
+  /变化|走势|涨跌|涨幅|跌幅|历史|趋势|对比|明细|区间|单位|来源|时间|日期|备注|说明/;
+
+function askedValueMissing(missing: string, intent: string): boolean {
+  if (SIDE_FIELD_RE.test(missing)) return false;
+  return ASKED_KINDS.some(([kind, asked]) => kind.test(missing) && asked.test(intent));
+}
 
 export function answerNotObtained(summary: string, intent = ''): boolean {
   if (NOT_OBTAINED_RE.test(summary.slice(0, 240))) return true;
@@ -682,7 +730,7 @@ export function answerNotObtained(summary: string, intent = ''): boolean {
       [
         ...summary.slice(0, 400).matchAll(STANDALONE_MISSING_RE),
         ...summary.slice(0, 400).matchAll(STANDALONE_MISSING_AFTER_RE),
-      ].some((m) => ASKED_VALUE_RE.test(m[1] ?? '')))
+      ].some((m) => askedValueMissing(m[1] ?? '', intent)))
   )
     return true;
   // FIX-36 (b-v06, as the browser's 0b): a field the user named (作者、点赞数…) given as
@@ -703,4 +751,52 @@ export function answerNotObtained(summary: string, intent = ''): boolean {
   )
     return true;
   return fields.length >= 2 && empty.length * 2 >= fields.length;
+}
+
+const MISSING_ROW_RE = /页面未显示|未显示|未获取到?|未找到|没有找到|未读到|暂无/;
+
+/**
+ * FIX-36 复审 #1 #3 (xhs-read): a not-obtained answer that still delivers some rows (items or
+ * labelled fields) — kept for the browser retry to fall back on. A wall, an opening that says
+ * nothing was obtained, or an answer whose every row is missing keeps nothing.
+ */
+export function scrapePartialAnswer(summary: string, intent = ''): ScrapePartialAnswer | null {
+  const head = summary.slice(0, 240);
+  if (NOT_OBTAINED_RE.test(head) || WALL_ANSWER_RE.test(head)) return null;
+  if (IDENTITY_UNKNOWN_RE.test(summary.slice(0, 600))) return null;
+  const rows = summary
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(
+      (line) => /^(?:[-*•]|\d{1,3}[.)、])\s*\S/.test(line) || /^[^：:]{1,24}[：:]\s*\S/.test(line),
+    );
+  const missingRows = rows.filter((line) => MISSING_ROW_RE.test(line));
+  if (!rows.length || missingRows.length === rows.length) return null;
+  const labels = missingRows
+    .map(
+      (line) =>
+        line.match(/([\p{Script=Han}A-Za-z]{2,8})\s*[*`]*\s*[:：]\s*[*`]*\s*(?:页面)?未/u)?.[1],
+    )
+    .filter((label): label is string => !!label);
+  const missing = [...new Set([...declaredAbsentFields(intent, summary), ...labels])];
+  return {
+    summary,
+    missing: missing.length ? missing : ['部分内容'],
+    found: rows.length - missingRows.length,
+    wanted: rows.length,
+  };
+}
+
+/** The 部分完成 answer when the browser retry did not complete (复审 #1 #3). */
+export function scrapePartialDelivery(
+  answer: ScrapePartialAnswer,
+  browserReason?: string | null,
+): { summary: string; partial: { found: number; wanted: number } } {
+  const missing = answer.missing.map((name) => `「${name}」`).join('、');
+  return {
+    summary: `部分完成：${missing}页面未显示（${answer.wanted} 项中 ${answer.found} 项完整）。云端浏览器重试没有完成${
+      browserReason ? `（${browserReason.replace(/[。.]\s*$/, '')}）` : ''
+    }，以下是网页抓取拿到的内容。\n\n${answer.summary}`,
+    partial: { found: answer.found, wanted: answer.wanted },
+  };
 }

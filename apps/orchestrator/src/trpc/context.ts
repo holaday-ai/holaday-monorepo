@@ -130,5 +130,7 @@ export type Context = Awaited<ReturnType<ReturnType<typeof makeCreateContext>>> 
     firecrawl?: { calls: number; credits: number };
     /** FIX-34: the lane handing over (default scrape); a core generate round says 'generate'. */
     from?: 'scrape' | 'generate';
+    /** FIX-36 复审 #1 #3: what the scrape got, delivered as 部分完成 if the retry fails. */
+    scrapeAnswer?: import('../agent/scrape-runner.js').ScrapePartialAnswer;
   };
 };

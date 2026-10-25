@@ -4680,19 +4680,10 @@ export const tasksRouter = router({
                           logger: ctx.logger,
                           // FIX-36 (Deploy-36 b-n06): trading days come from the
                           // exchange calendar, not from the model's arithmetic.
-                          tradingDay: async (iso: string) => {
-                            const [{ HttpAkshareClient }, { tradingDayKnown }] = await Promise.all([
-                              import('../../agent/a-share/akshare-http-client.js'),
-                              import('../../agent/a-share/ashare-fact-card.js'),
-                            ]);
-                            return tradingDayKnown(
-                              new HttpAkshareClient({
-                                baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
-                                logger: ctx.logger,
-                              }),
-                              iso,
-                            );
-                          },
+                          // One client per task (复审 #1 #7).
+                          tradingDay: (
+                            await import('../../agent/a-share/trading-calendar.js')
+                          ).taskTradingCalendar(ctx.logger),
                           // Phase 24 RC follow-up — stream LLM deltas + push
                           // coarse Firecrawl-phase progress to the SPA. Same
                           // contract as generate-runner; broadcast errors are
@@ -4775,6 +4766,9 @@ export const tasksRouter = router({
                             reason,
                             ...(scrapeOutcome.firecrawl
                               ? { firecrawl: scrapeOutcome.firecrawl }
+                              : {}),
+                            ...(scrapeOutcome.partialAnswer
+                              ? { scrapeAnswer: scrapeOutcome.partialAnswer }
                               : {}),
                           },
                         })
@@ -7091,6 +7085,31 @@ export const tasksRouter = router({
                   )
                     .then(async (rawOutcome) => {
                       let outcome = rawOutcome;
+                      // FIX-36 复审 #1 #3: the browser retry did not complete — deliver what the
+                      // scrape did get, as 部分完成 naming what is missing.
+                      if (
+                        scrapeBrowserRetry?.scrapeAnswer &&
+                        (outcome.status === 'failed' || outcome.status === 'timeout')
+                      ) {
+                        const delivered = (
+                          await import('../../agent/scrape-runner.js')
+                        ).scrapePartialDelivery(scrapeBrowserRetry.scrapeAnswer, outcome.reason);
+                        ctx.logger.info(
+                          {
+                            taskId,
+                            code: 'SCRAPE_PARTIAL_DELIVERED',
+                            browserStatus: outcome.status,
+                          },
+                          'browser retry did not complete: delivering the scrape answer as partial',
+                        );
+                        const { reason: _reason, failureSource: _failureSource, ...kept } = outcome;
+                        outcome = {
+                          ...kept,
+                          status: 'completed',
+                          summary: delivered.summary,
+                          partial: delivered.partial,
+                        };
+                      }
                       if (browserRoute.limitation && outcome.status === 'completed') {
                         outcome = {
                           ...outcome,

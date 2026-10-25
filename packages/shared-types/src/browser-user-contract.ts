@@ -48,6 +48,9 @@ export const userBrowserElementSignalsSchema = z
     name: signal,
     inputType: signal,
     tagName: signal,
+    /** FIX-36 复审 #1: read in the page by `readLoginContext` (absent from older extensions). */
+    loginField: z.boolean().optional(),
+    loginControl: z.boolean().optional(),
   })
   .strict();
 export const userBrowserTargetDescriptionSchema = z

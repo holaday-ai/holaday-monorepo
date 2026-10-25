@@ -9,8 +9,10 @@ export interface BrowserBlockerEvidence {
   scope: 'document' | 'dialog' | 'player' | 'frame' | 'comments' | 'component';
 }
 const SMS_LOGIN_RE = /短信验证码|获取验证码|发送验证码|手机号(?:码)?登录|验证码登录|短信登录/;
+// FIX-36 复审 #1 #4: an image code (图形 / 图片验证码, 看不清 换一张) or a behaviour check next to
+// an SMS login is still a captcha.
 const BOT_CHECK_RE =
-  /滑块|滑动|拼图|人机验证|安全验证|点选|旋转|captcha|robot|human|security check|unusual traffic/i;
+  /滑块|滑动|拼图|人机验证|安全验证|点选|旋转|图形验证码|图片验证码|图形码|看不清|换一张|点击按钮进行验证|行为验证|captcha|robot|human|security check|unusual traffic/i;
 
 export function detectBrowserBlocker(page: {
   url: string;

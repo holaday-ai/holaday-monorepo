@@ -1,7 +1,9 @@
-import type {
-  UserBrowserBinding,
-  UserBrowserElementSignals,
-  UserBrowserTargetDescription,
+import {
+  type LoginContext,
+  type UserBrowserBinding,
+  type UserBrowserElementSignals,
+  type UserBrowserTargetDescription,
+  readLoginContext,
 } from '@holaday/shared-types';
 import type { ElementHandle, Frame, Locator, Page } from 'playwright-crx';
 import type { DriverAction } from './driver.js';
@@ -209,6 +211,27 @@ type Signals = Pick<
   'elementId' | 'objectDigest' | 'element' | 'form'
 >;
 /**
+ * FIX-36 复审 #1: whether the target is a login field or a login / authorize control,
+ * folded into its element signals (the orchestrator refuses typing / clicking there).
+ */
+const withLogin = (signals: Signals, login: LoginContext | null | undefined): Signals =>
+  login?.loginField || login?.loginControl
+    ? {
+        ...signals,
+        element: {
+          ...signals.element,
+          ...(login.loginField ? { loginField: true } : {}),
+          ...(login.loginControl ? { loginControl: true } : {}),
+        },
+      }
+    : signals;
+/** A field's own read (type / select / freshness), with its login context. */
+const readField = async (handle: ElementHandle<Element>): Promise<Signals> =>
+  withLogin(
+    (await handle.evaluate(readElement)) as Signals,
+    await handle.evaluate(readLoginContext, false),
+  );
+/**
  * Runs on the node Chromium hit-tests at the click point (`this`), which can be
  * inside open or closed shadow roots. `inside`: the hit is the selected
  * element or a shadow-including descendant of it; `document`: the observed
@@ -232,6 +255,7 @@ const HIT_READ = `async function (selectedId) {
     opaque: /^(?:IFRAME|FRAME|OBJECT|EMBED|PORTAL|FENCEDFRAME)$/.test(node.tagName),
     document: version ? version.document : null,
     read: inside ? await (${readElement.toString()})(node) : null,
+    login: inside ? (${readLoginContext.toString()})(node, false) : null,
   };
 }`;
 /** Same read for the deepest focused element (key actions). */
@@ -240,6 +264,7 @@ const FOCUS_READ = `async function () {
   return {
     document: version ? version.document : null,
     read: await (${readElement.toString()})(this),
+    login: (${readLoginContext.toString()})(this, false),
   };
 }`;
 /** Tabs/addresses that are a payment or order step; the full address
@@ -415,12 +440,13 @@ export class SelectedTargetResolver {
         opaque: boolean;
         document: unknown;
         read: Signals | null;
+        login: LoginContext | null;
       } | null;
       if (!value) throw new Error('target_unreadable');
       if (!value.inside || !value.read) throw new Error('target_obscured');
       // What a click inside it would hit is unknown: the user decides.
       if (value.opaque) throw new Error('target_unreadable');
-      return { frame: this.frameFor(value.document), signals: value.read };
+      return { frame: this.frameFor(value.document), signals: withLogin(value.read, value.login) };
     });
   }
   /**
@@ -469,10 +495,14 @@ export class SelectedTargetResolver {
           const value = (await this.callOn(current, FOCUS_READ)) as {
             document: unknown;
             read: Signals;
+            login: LoginContext | null;
           } | null;
           if (!value?.read || /^(?:body|html)$/.test(value.read.element.tagName ?? ''))
             throw new Error('target_missing');
-          return { frame: this.frameFor(value.document), signals: value.read };
+          return {
+            frame: this.frameFor(value.document),
+            signals: withLogin(value.read, value.login),
+          };
         }
         current = next;
       }
@@ -560,7 +590,7 @@ export class SelectedTargetResolver {
           if (hit.frame !== frame) throw new Error('target_obscured');
           signals = hit.signals;
           point = { ...at, selectedId };
-        } else signals = (await handle.evaluate(readElement)) as Signals;
+        } else signals = await readField(handle);
       }
       let frameId = this.frames.get(frame);
       if (!frameId) {
@@ -636,7 +666,7 @@ export class SelectedTargetResolver {
         case 'select': {
           const handle = ticket.handle;
           if (!handle) throw new Error('target_binding_required');
-          const fresh = await handle.evaluate(readElement);
+          const fresh = await readField(handle);
           if (!(await handle.isVisible()) || canonical(fresh) !== expected)
             throw new Error('target_changed');
           if (action.kind === 'type') {

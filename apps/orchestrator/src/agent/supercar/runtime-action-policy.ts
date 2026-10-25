@@ -17,6 +17,8 @@ export interface RuntimeAction {
    * reach too — typing there is the user's, like the password itself.
    */
   credentialForm?: boolean | null;
+  /** FIX-36 复审 #1: a login / sign-up / authorize / 「获取验证码」 control of a login step. */
+  loginControl?: boolean | null;
 }
 
 export interface RuntimeActionVerdict {
@@ -77,10 +79,26 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
     };
   }
 
-  // After the password / code box itself (a takeover, above): the form's other boxes.
-  if (action.kind === 'type' && action.credentialForm) {
+  // After the password / code box itself (a takeover, above): the login step's other boxes
+  // (typed or selected), and any box whose own label names an account / phone / mailbox.
+  if (
+    (action.kind !== 'navigate' && action.credentialForm) ||
+    (action.kind === 'type' && accountField(action))
+  ) {
     const reason =
-      '这是登录或验证表单（账号、手机号、密码、验证码），不代填，这一步没有执行。任务确实需要登录才能继续时调用 request_human 请用户接管；否则关掉弹窗或换别的页面继续。';
+      '这是登录或验证表单（账号、手机号、密码、验证码），不代填，这一步没有执行。任务确实需要登录才能继续时调用 request_human 请用户接管；否则关掉弹窗（×、「关闭」或 press_key Escape）或换别的页面继续。';
+    return { allowed: false, reason, refuse: reason };
+  }
+  // FIX-36 复审 #1: logging in, signing up or authorizing is the user's, never clicked for them.
+  if (
+    action.kind === 'click' &&
+    (action.loginControl ||
+      [action.label, action.ariaLabel, action.title].some((value) =>
+        STRONG_LOGIN_CONTROL_RE.test(normalize(value)),
+      ))
+  ) {
+    const reason =
+      '这是登录、注册、授权或获取验证码的按钮，不替用户点击，这一步没有执行。任务确实需要登录才能继续时调用 request_human 请用户接管；否则关掉弹窗（×、「关闭」或 press_key Escape）继续。';
     return { allowed: false, reason, refuse: reason };
   }
 
@@ -114,6 +132,24 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
     reason: `不可逆操作需要用户确认：${label}`,
     question: `即将执行“${label}”，这可能产生付款、下单、发送、发布或删除等外部影响。确认继续执行吗？`,
   };
+}
+
+/** A login step's own controls: refused wherever they are (FIX-36 复审 #1). */
+const STRONG_LOGIN_CONTROL_RE =
+  /授权登录|确认授权|同意授权|同意并|一键登录|快捷登录|本机号码|(?:获取|发送|重新发送)(?:短信)?(?:验证码|动态码)/;
+const ACCOUNT_LABEL_RE =
+  /账号|帐号|账户|用户名|手机号|手机账号|电话号码|邮箱|e-?mail|username|account|phone|mobile/i;
+const SEARCH_LABEL_RE = /搜索|search|查找|keyword/i;
+
+/** A box whose own signals name an account, phone or mailbox (not a search box). */
+function accountField(action: RuntimeAction): boolean {
+  const type = normalize(action.inputType);
+  if (type === 'search') return false;
+  const signals = [action.label, action.ariaLabel, action.placeholder, action.name].map(normalize);
+  if (signals.some((value) => SEARCH_LABEL_RE.test(value))) return false;
+  return (
+    type === 'email' || type === 'tel' || signals.some((value) => ACCOUNT_LABEL_RE.test(value))
+  );
 }
 
 export function isAffirmativeActionConfirmation(message: string): boolean {

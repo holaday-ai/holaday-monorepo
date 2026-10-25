@@ -939,7 +939,13 @@ async function processTools(
             await publish(errorResult(tool.id, 'action_gate_stopped'));
             continue;
           } else if (decision.kind === 'skip') {
-            await publish(errorResult(tool.id, 'replan_required'));
+            // FIX-36 复审 #1: a refused step says why (a login field / control is never acted on).
+            await publish(
+              errorResult(tool.id, 'replan_required', {
+                execution: 'not executed',
+                ...(decision.message ? { message: decision.message } : {}),
+              }),
+            );
             continue;
           } else verdict = { allowed: true };
         } else if (action.kind === 'goto')

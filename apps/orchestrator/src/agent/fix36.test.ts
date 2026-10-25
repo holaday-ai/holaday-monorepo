@@ -9,7 +9,12 @@ import {
   unsupportedDateSentences,
   withoutSentences,
 } from './market-date-context.js';
-import { answerNotObtained, runScrapeTask } from './scrape-runner.js';
+import {
+  answerNotObtained,
+  runScrapeTask,
+  scrapePartialAnswer,
+  scrapePartialDelivery,
+} from './scrape-runner.js';
 
 /** Deploy-36 b-n06 (tsk_L5YWgfXacP8WXhaWm9dwc), verbatim. Monday after 10-24 is 10-26. */
 const B_N06 =
@@ -169,6 +174,52 @@ describe('FIX-36 #1 · b-n06: dates are given, a date no page carries is not del
     expect(outcome).toMatchObject({ status: 'failed', failureKind: 'empty' });
   });
 
+  it('复审 #1 #2: a page’s English, 「10/23」 and 「10.23」 dates are known dates', () => {
+    const known = knownMonthDays(
+      'Updated 13 October 2026 · Oct 23, 2026 close · 10/21 盘后 · 10.20 公告',
+    );
+    for (const key of ['10-13', '10-23', '10-21', '10-20']) expect(known.has(key)).toBe(true);
+  });
+
+  it('复审 #1 #2: 「5-20日均线」 is a span, not May 20', () => {
+    expect(unsupportedDateSentences('股价站上5-20日均线，10日均线走平。', new Set())).toEqual([]);
+  });
+
+  it('复审 #1 #2: a date more than a week from today is not checked', () => {
+    expect(
+      unsupportedDateSentences('该指数于 2026 年 10 月 13 日创下新高。', new Set(), '2026-10-25'),
+    ).toEqual([]);
+  });
+
+  it('复审 #1 #2: 「昨天（10月24日）」 is a given date and stays', async () => {
+    const { outcome } = await run(
+      '上证指数最近收盘 3690.48 点。昨天（10月24日）是周六。',
+      calendar,
+    );
+    expect(outcome.summary).toContain('昨天（10月24日）是周六');
+  });
+
+  it('复审 #1 #2: an unsupported date not tied to trading is noted, not dropped', async () => {
+    const { outcome } = await run(
+      '上证指数最近收盘 3690.48 点，相关公告于 10 月 22 日发布。',
+      calendar,
+    );
+    expect(outcome.status).toBe('completed');
+    expect(outcome.summary).toContain('相关公告于 10 月 22 日发布');
+    expect(outcome.summary).toMatch(/未核实：.*日期「10 月 22 日」/);
+  });
+
+  it('复审 #1 #2: a question that is not about markets or time gets no date check', async () => {
+    const { outcome } = await run(
+      '西湖面积 6.38 平方千米。下一个交易日是 10 月 27 日。',
+      calendar,
+      {
+        intent: '西湖的面积是多少',
+      },
+    );
+    expect(outcome.summary).toContain('10 月 27 日');
+  });
+
   it('withoutSentences leaves no empty paragraph behind', () => {
     const answer = 'A。\n\n今天休市，下一个交易日是 10 月 27 日。\n\nB。';
     const drop = unsupportedDateSentences(answer, new Set());
@@ -225,6 +276,49 @@ describe('FIX-36 #2 · b-v06: 「页面未显示」 then a guess is not an answe
         '打开 https://www.xiaohongshu.com/explore/x 读这篇笔记的标题、作者和点赞数',
       ),
     ).toBe(false);
+  });
+});
+
+describe('FIX-36 复审 #1 #6 · only the asked value missing sends the scrape to the browser', () => {
+  it('「茅台股价 1500 元。页面未显示价格变化。」 is an answer', () => {
+    expect(
+      answerNotObtained('茅台股价 1500 元。页面未显示价格变化。', '贵州茅台今天股价多少'),
+    ).toBe(false);
+  });
+  it('the price itself missing is not', () => {
+    expect(answerNotObtained('页面未显示股价。', '贵州茅台今天股价多少')).toBe(true);
+  });
+  it('a name missing when a price is asked is a side field', () => {
+    expect(answerNotObtained('茅台股价 1500 元。页面未显示公司全称。', '茅台股价多少')).toBe(false);
+  });
+});
+
+describe('FIX-36 复审 #1 #3 · what the scrape got goes with it to the browser', () => {
+  const ten = [
+    ...Array.from({ length: 9 }, (_, i) => `${i + 1}. 商品${i + 1} — 价格：¥${i + 1}9.00`),
+    '10. 商品10 — 价格：页面未显示',
+  ].join('\n');
+  const intent = '列出这个页面前10个商品的名称和价格';
+  it('1 of 10 prices 「页面未显示」: rerouted, with the other 9 kept', () => {
+    expect(answerNotObtained(ten, intent)).toBe(true);
+    expect(scrapePartialAnswer(ten, intent)).toEqual({
+      summary: ten,
+      missing: ['价格'],
+      found: 9,
+      wanted: 10,
+    });
+  });
+  it('the retry did not complete → 部分完成 naming the missing price, the 9 delivered', () => {
+    const delivered = scrapePartialDelivery(scrapePartialAnswer(ten, intent)!, '页面被风控拦截。');
+    expect(delivered.partial).toEqual({ found: 9, wanted: 10 });
+    expect(delivered.summary).toMatch(
+      /^部分完成：「价格」页面未显示（10 项中 9 项完整）。云端浏览器重试没有完成（页面被风控拦截），/,
+    );
+    expect(delivered.summary).toContain('9. 商品9 — 价格：¥99.00');
+  });
+  it('a login-wall answer or one with nothing in it keeps nothing', () => {
+    expect(scrapePartialAnswer(FC_JD, '京东这个商品的标题和价格')).toBeNull();
+    expect(scrapePartialAnswer('- 标题：页面未显示\n- 作者：页面未显示', '标题和作者')).toBeNull();
   });
 });
 

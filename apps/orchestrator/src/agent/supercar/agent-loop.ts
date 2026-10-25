@@ -857,6 +857,8 @@ export interface RunSupercarOptions {
     pageTxSignal?: string | null;
     /** FIX-36 #9: the field sits in a login / verification form or dialog. */
     credentialForm?: boolean | null;
+    /** FIX-36 复审 #1: a login / sign-up / authorize control. */
+    loginControl?: boolean | null;
   }) =>
     | {
         allowed: boolean;

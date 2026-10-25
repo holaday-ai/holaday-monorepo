@@ -8,6 +8,12 @@
  *
  * `unsupportedDateSentences` is the check after the answer: a month-day the answer states
  * that no read page, the question or these given dates carry is not delivered.
+ *
+ * FIX-36 复审 #1 #2: the check only runs where these dates are given (market / time-sensitive
+ * questions), only on dates within a week of today, and only drops a sentence that ties the
+ * date to trading (交易日 / 休市 / 开盘…); another unsupported date is noted, not dropped.
+ * The page side also reads English (「13 October 2026」「Oct 23, 2026」), 「10/23」 and
+ * 「10.23」 dates; a moving-average span (「5-20日均线」) is no date.
  */
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -77,6 +83,7 @@ export function marketDatePrompt(dates: MarketDates): string {
   const lines = [
     '## 日期与交易日（系统给出，直接引用，不要自己推算）',
     `今天：${dates.today}（${weekday(dates.today)}，北京时间）`,
+    `昨天：${shiftDay(dates.today, -1)}（${weekday(shiftDay(dates.today, -1))}）；明天：${shiftDay(dates.today, 1)}（${weekday(shiftDay(dates.today, 1))}）`,
   ];
   if (dates.todayTrading === null || !dates.previousTradingDay || !dates.nextTradingDay) {
     lines.push(
@@ -100,8 +107,12 @@ export function marketDatePrompt(dates: MarketDates): string {
 const DATE_RE =
   /(?:(\d{4})\s*[-/.年]\s*)?(\d{1,2})\s*(?:[-/.]|月)\s*(\d{1,2})\s*(?:日|号)?(?![\d:：])/g;
 
-function monthDays(text: string): string[] {
-  const out: string[] = [];
+/** What follows a 「N-M日」 that is a span, not a date (「5-20日均线」「3-5日内」). */
+const SPAN_AFTER_RE = /^\s*(?:均线|均|线|K线|内|以内|之内)/;
+
+/** Month-day mentions of `text`: the raw text and its `M-D` key. */
+function dateMentions(text: string): Array<{ raw: string; key: string }> {
+  const out: Array<{ raw: string; key: string }> = [];
   for (const m of text.matchAll(DATE_RE)) {
     const month = Number(m[2]);
     const day = Number(m[3]);
@@ -109,10 +120,36 @@ function monthDays(text: string): string[] {
     if (month < 1 || month > 12 || day < 1 || day > 31) continue;
     const raw = m[0];
     if (!m[1] && !/[月日号]/.test(raw)) continue;
-    out.push(`${month}-${day}`);
+    if (SPAN_AFTER_RE.test(text.slice(m.index! + raw.length))) continue;
+    out.push({ raw: raw.trim(), key: `${month}-${day}` });
   }
   return out;
 }
+
+function monthDays(text: string): string[] {
+  return dateMentions(text).map((m) => m.key);
+}
+
+const EN_MONTHS = [
+  'jan',
+  'feb',
+  'mar',
+  'apr',
+  'may',
+  'jun',
+  'jul',
+  'aug',
+  'sep',
+  'oct',
+  'nov',
+  'dec',
+];
+const EN_MONTH = '(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?';
+/** 「13 October 2026」「23 Oct」 and 「Oct 23, 2026」「October 13th」. */
+const EN_DATE_RE = new RegExp(
+  `\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+${EN_MONTH}|\\b${EN_MONTH}\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`,
+  'gi',
+);
 
 /** Date-like text of a page or label, normalised to `M-D` keys. */
 export function knownMonthDays(...texts: ReadonlyArray<string | null | undefined>): Set<string> {
@@ -123,6 +160,14 @@ export function knownMonthDays(...texts: ReadonlyArray<string | null | undefined
     // ISO stamps without 年/月 (「2026-10-23 15:00」) are calendar dates too.
     for (const m of text.matchAll(/\b\d{4}-(\d{1,2})-(\d{1,2})\b/g))
       known.add(`${Number(m[1])}-${Number(m[2])}`);
+    // A page may write 「10/23」「10.23」 or English dates: the page side reads them all.
+    for (const m of text.matchAll(/(?<![\d.])(\d{1,2})[/.](\d{1,2})(?![\d])/g))
+      known.add(`${Number(m[1])}-${Number(m[2])}`);
+    for (const m of text.matchAll(EN_DATE_RE)) {
+      const month = EN_MONTHS.indexOf((m[2] ?? m[3] ?? '').toLowerCase().slice(0, 3)) + 1;
+      const day = Number(m[1] ?? m[4]);
+      if (month && day >= 1 && day <= 31) known.add(`${month}-${day}`);
+    }
   }
   return known;
 }
@@ -131,13 +176,40 @@ export function knownMonthDays(...texts: ReadonlyArray<string | null | undefined
  * Sentences of `answer` that state a month-day none of `known` carries. Sentences end at
  * 。！？；, a line break or a list item.
  */
-export function unsupportedDateSentences(answer: string, known: Set<string>): string[] {
+export function unsupportedDateSentences(
+  answer: string,
+  known: Set<string>,
+  today?: string,
+): string[] {
   const out: string[] = [];
   for (const sentence of answer.split(/(?<=[。！？；!?])|\n/)) {
-    if (monthDays(sentence).some((key) => !known.has(key))) out.push(sentence);
+    if (unsupportedDates(sentence, known, today).length) out.push(sentence);
   }
   return out.filter((s) => s.trim());
 }
+
+/** Days either side of today a stated date is checked within (older dates are history). */
+const CHECK_WINDOW_DAYS = 7;
+
+/** The month-days of `text` that `known` lacks, within a week of `today` when given. */
+export function unsupportedDates(text: string, known: Set<string>, today?: string): string[] {
+  return dateMentions(text)
+    .filter(({ key }) => !known.has(key) && (!today || nearToday(key, today)))
+    .map(({ raw }) => raw);
+}
+
+function nearToday(key: string, today: string): boolean {
+  const [month, day] = key.split('-').map(Number) as [number, number];
+  const year = Number(today.slice(0, 4));
+  const now = Date.parse(`${today}T00:00:00Z`);
+  // 「1月2日」 asked on 12-30 is next year's.
+  return [year - 1, year, year + 1].some(
+    (y) => Math.abs(Date.UTC(y, month - 1, day) - now) <= CHECK_WINDOW_DAYS * 86_400_000,
+  );
+}
+
+/** A sentence that ties a date to trading: the arithmetic b-n06 got wrong. */
+export const TRADING_DATE_RE = /交易日|休市|开盘|开市|闭市|收市|停牌|复牌|交易时段/;
 
 /** `answer` without those sentences (and without a paragraph they leave empty). */
 export function withoutSentences(answer: string, sentences: readonly string[]): string {
@@ -151,7 +223,13 @@ export function withoutSentences(answer: string, sentences: readonly string[]): 
 
 /** Keys of the dates the system gave the model. */
 export function givenMonthDays(dates: MarketDates): string[] {
-  return [dates.today, dates.previousTradingDay, dates.nextTradingDay]
+  return [
+    dates.today,
+    shiftDay(dates.today, -1),
+    shiftDay(dates.today, 1),
+    dates.previousTradingDay,
+    dates.nextTradingDay,
+  ]
     .filter((iso): iso is string => !!iso)
     .map((iso) => `${Number(iso.slice(5, 7))}-${Number(iso.slice(8, 10))}`);
 }
