@@ -518,11 +518,11 @@ describe('FIX-36 复审 #2 #3 · 下一步 / Next / 继续 of a login form', () 
       target,
     );
     expect(enter.descriptors[0]).toMatchObject({ credentialForm: true });
-    const escape = describeUserBrowserAction(
+    const escaped = describeUserBrowserAction(
       { kind: 'key', payload: { key: 'Escape' } } as never,
       target,
     );
-    expect(escape.descriptors[0]).not.toHaveProperty('credentialForm');
+    expect(escaped.descriptors[0]).not.toHaveProperty('credentialForm');
     const click = describeUserBrowserAction({ kind: 'click', selector: {} } as never, {
       ...target,
       element: { ...element, loginControl: true, visibleText: '下一步' },
