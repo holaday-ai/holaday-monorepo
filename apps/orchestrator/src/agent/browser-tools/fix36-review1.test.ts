@@ -169,16 +169,21 @@ describe('FIX-36 复审 #1 · readLoginContext in the page', () => {
     await page.close();
   });
 
-  it('a popup that only says 登录 counts once the probe reports a login popup', async () => {
+  it('a popup that says 登录 counts by itself (复审 #3); a wordy fixed layer only once the probe reports a popup', async () => {
     const page = await open(
       '<main><p>正文</p></main><div style="position:fixed;left:30%;top:20%;width:40%;height:40%"><p>登录后查看更多</p><input id="nick" placeholder="昵称"><button id="go">登录</button></div>',
     );
     const read = (css: string, popup: boolean) =>
       page.locator(css).evaluate(readLoginContext, popup);
-    expect((await read('#nick', false)).loginField).toBe(false);
-    expect((await read('#nick', true)).loginField).toBe(true);
-    expect((await read('#go', true)).loginControl).toBe(true);
+    expect((await read('#nick', false)).loginField).toBe(true);
+    expect((await read('#go', false)).loginControl).toBe(true);
     await page.close();
+    const wordy = await open(
+      `<main><p>正文</p></main><div style="position:fixed;left:10%;top:20%;width:80%;height:60%"><p>${'公告内容，'.repeat(100)}登录后查看更多</p><input id="nick" placeholder="昵称"></div>`,
+    );
+    expect((await wordy.locator('#nick').evaluate(readLoginContext, false)).loginField).toBe(false);
+    expect((await wordy.locator('#nick').evaluate(readLoginContext, true)).loginField).toBe(true);
+    await wordy.close();
   });
 });
 
@@ -575,6 +580,78 @@ describe('FIX-36 复审 #2 · readLoginContext survives serialisation', () => {
     expect(await page.locator('#a3-phone').evaluate(compiled as never, false)).toMatchObject({
       loginField: true,
     });
+    await page.close();
+  });
+});
+
+describe('FIX-36 复审 #3 · login popups without a visible code box, without the probe', () => {
+  const MASK = (inner: string) =>
+    `<main>x</main><div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center"><div style="width:340px">${inner}</div></div>`;
+  const flags = async (page: Page, css: string, popup = false) => {
+    const v = await page.locator(css).evaluate(readLoginContext, popup);
+    return `${v.loginField ? 'F' : '-'}${v.loginControl ? 'C' : '-'}`;
+  };
+
+  it('S1: step one, a phone box (already filled) and 下一步 — no code box yet', async () => {
+    const page = await open(
+      MASK(
+        '<p>手机号登录</p><input id="ph" placeholder="请输入手机号" value="13800000000"><button id="go">下一步</button>',
+      ),
+    );
+    expect(await flags(page, '#ph')).toBe('F-');
+    expect(await flags(page, '#go')).toBe('-C');
+    await page.close();
+  });
+
+  it('S2 / H: the code box hidden until 发送 — 获取验证码, 发送 and 下一步 are login controls', async () => {
+    const page = await open(
+      MASK(
+        '<p>手机号登录</p><input id="ph" placeholder="请输入"><input placeholder="验证码" style="display:none"><span id="send" role="button">发送</span><button id="get">获取验证码</button><button id="go">下一步</button>',
+      ),
+    );
+    expect(await flags(page, '#ph')).toBe('F-');
+    for (const css of ['#send', '#get', '#go']) expect(await flags(page, css)).toBe('-C');
+    await page.close();
+  });
+
+  it('a hidden code box with no 登录 words (欢迎回来 / 继续) is still a login popup', async () => {
+    const page = await open(
+      MASK(
+        '<p>欢迎回来</p><input id="ph" placeholder="请输入"><input placeholder="请输入验证码" style="display:none"><button id="send">发送</button><button id="go">继续</button>',
+      ),
+    );
+    expect(await flags(page, '#ph')).toBe('F-');
+    expect(await flags(page, '#send')).toBe('-C');
+    expect(await flags(page, '#go')).toBe('-C');
+    await page.close();
+  });
+
+  it('a sign-up popup with 7 boxes and a password is a login block', async () => {
+    const page = await open(
+      `<main><input id="kw" aria-label="搜索地点"></main>${MASK(
+        `<p>注册</p>${Array.from({ length: 5 }, (_, i) => `<input id="f${i}" placeholder="字段${i}">`).join('')}<input id="ph" placeholder="请输入"><input type="password"><button id="go">注册</button>`,
+      )}`,
+    );
+    for (const css of ['#ph', '#f0']) expect(await flags(page, css)).toBe('F-');
+    expect(await flags(page, '#go')).toBe('-C');
+    expect(await flags(page, '#kw')).toBe('--');
+    await page.close();
+  });
+
+  it('reverse: a plain fixed top bar (a div, not <header>) with 登录 / 注册 and a city box', async () => {
+    const page = await open(
+      '<div style="position:fixed;top:0;left:0;width:100%;height:60px"><a id="l" href="/login">登录</a> <a href="/reg">注册</a><input id="city" placeholder="选择城市"></div><main style="margin-top:80px">content</main>',
+    );
+    for (const popup of [false, true]) expect(await flags(page, '#city', popup)).toBe('--');
+    await page.close();
+  });
+
+  it('reverse: booking, contact and checkout forms stay fillable', async () => {
+    const page = await open(
+      `<form id="b">${Array.from({ length: 5 }, (_, i) => `<input placeholder="项${i}">`).join('')}<input id="tel" type="tel" placeholder="联系电话"><input id="mail" type="email"><button id="nx">下一步</button></form><form><input id="addr" placeholder="收货地址"><input id="mob" type="tel" placeholder="手机号"><button id="ct">继续</button></form>`,
+    );
+    for (const css of ['#tel', '#mail', '#nx', '#addr', '#mob', '#ct'])
+      expect(await flags(page, css)).toBe('--');
     await page.close();
   });
 });
