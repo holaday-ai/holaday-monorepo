@@ -209,8 +209,10 @@ function explicitFacts(input: unknown): Fact[] {
     const f = field as Record<string, unknown>;
     const name = typeof f.name === 'string' ? f.name.slice(0, 80) : '字段';
     const value = typeof f.value === 'string' ? clean(f.value) : '';
-    // Summaries and explanations are the model's own words, not page facts.
-    if (!value || PROSE_FIELD.test(name) || value.length > 300) return [];
+    // Summaries and explanations are the model's own words, not page facts; a browser
+    // handle (tab / frame id, element ref) is no page fact either (FIX-36 core-07).
+    if (!value || PROSE_FIELD.test(name) || value.length > 300 || HANDLE_ONLY_RE.test(value))
+      return [];
     return [
       {
         name,

@@ -35,7 +35,8 @@ const KIND_WORDS = Object.fromEntries(
   ENGAGEMENT_KINDS.map((kind) => [kind, new RegExp(KIND_WORD_SOURCES[kind], 'i')]),
 ) as Record<EngagementKind, RegExp>;
 
-const COUNT = String.raw`\d[\d.,]*\s*(?:万|亿|千|[wkm])?\+?`;
+// FIX-36: 「4740\n评论」 is two lines — the unit sits on the number's own line.
+const COUNT = String.raw`\d[\d.,]*[ \t]*(?:万|亿|千|[wkm])?\+?`;
 /** A snapshot line whose whole text is one count: `- generic [ref=e456]: "20"`. */
 const COUNT_LINE = new RegExp(
   String.raw`^(\s*-\s*[\w-]+(?: "[^"]*")?) \[ref=((?:f\d+)?e\d+)\]([^:\n]*): "?(${COUNT})"?$`,
@@ -199,19 +200,23 @@ export function engagementClaims(
 ): Array<{ kind: EngagementKind; value: string; text: string }> {
   const claims: Array<{ kind: EngagementKind; value: string; text: string }> = [];
   const kindOf = (word: string) => ENGAGEMENT_KINDS.find((kind) => KIND_WORDS[kind].test(word));
+  // FIX-36 (local reg-dy-2): a numbered list's marker is no count — 「3. 点赞数：4740」 is not
+  // 「3 点赞」.
+  const text = answer.replace(/^([ \t]*)\d{1,3}[.)、][ \t]+/gm, '$1');
   const labelFirst = new RegExp(
     String.raw`(点赞|获赞|评论|收藏|分享|转发|投币|(?<![A-Za-z])(?:likes?|comments?|shares?|favou?rites?|reposts?)\b)(?:数|量|次数|数量|count)?\s*[*\x60]*\s*(?:[:：]|为|是|有)?\s*[「“"']?\s*(${COUNT})(?![\d年月日号:：/-])`,
     'giu',
   );
-  for (const m of answer.matchAll(labelFirst)) {
+  for (const m of text.matchAll(labelFirst)) {
     const kind = kindOf(m[1]!);
     if (kind) claims.push({ kind, value: normalizeCount(m[2]!), text: m[0].trim() });
   }
   const numberFirst = new RegExp(
-    String.raw`(?<![\d.])(${COUNT})\s*(?:个|次|人)?\s*(赞|点赞|评论|收藏|分享|转发|likes?|comments?|shares?)`,
+    // On one line: 「4740\n评论数：214」 is two lines, not 「4740 评论」.
+    String.raw`(?<![\d.])(${COUNT})[ \t]*(?:个|次|人)?[ \t]*(赞|点赞|评论|收藏|分享|转发|likes?|comments?|shares?)`,
     'giu',
   );
-  for (const m of answer.matchAll(numberFirst)) {
+  for (const m of text.matchAll(numberFirst)) {
     const kind = kindOf(m[2]!);
     if (kind && !claims.some((c) => c.kind === kind && c.value === normalizeCount(m[1]!)))
       claims.push({ kind, value: normalizeCount(m[1]!), text: m[0].trim() });

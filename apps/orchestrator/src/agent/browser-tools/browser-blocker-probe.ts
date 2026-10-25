@@ -218,15 +218,13 @@ export async function probeBrowserBlocker(page: Page, intent?: string) {
 }
 
 /**
- * FIX-36 #9: with whole-page read on, a login popup (dialog, region or frame) over a page
- * that has readable content is not a wall — the AI closes it or reads behind it. A login
- * address (checked before this), a captcha or a page with nothing readable still hands over.
+ * FIX-36 #9: with whole-page read on, a login prompt on a page that is not a login address
+ * (those hand over before this) is not a wall — the AI closes it or reads behind it, and
+ * asks for a takeover itself when the content truly needs one (a map canvas such as Gaode's
+ * has little text, yet its routes are behind the popup). Captchas still hand over.
  */
-function loginPopup(
-  hit: NonNullable<ReturnType<typeof detectBrowserBlocker>>,
-  readableContent: boolean,
-) {
-  return fullPageRead() && hit.reason === 'login' && readableContent
+function loginPopup(hit: NonNullable<ReturnType<typeof detectBrowserBlocker>>) {
+  return fullPageRead() && hit.reason === 'login'
     ? { ...hit, disposition: 'continue' as const, message: LOGIN_POPUP_NOTICE }
     : null;
 }
@@ -306,7 +304,7 @@ async function probeOnce(page: Page, intent?: string) {
           scope: region.scope,
         });
         if (hit) {
-          const popup = loginPopup(hit, readableContent);
+          const popup = loginPopup(hit);
           if (popup) {
             localNotice = popup;
             continue;
@@ -344,7 +342,7 @@ async function probeOnce(page: Page, intent?: string) {
         scope: main ? 'document' : 'frame',
       });
       if (hit) {
-        const popup = loginPopup(hit, readableContent);
+        const popup = loginPopup(hit);
         if (popup) {
           localNotice = popup;
           continue;

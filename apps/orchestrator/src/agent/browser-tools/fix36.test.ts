@@ -24,6 +24,20 @@ describe('FIX-36 #6 · core-07: tab ids are browser handles, never shown', () =>
       '成功定位到 TinyMCE 编辑器的 iframe（frame_d7f4ff1d-2402-41e1-9d12-4dc877bd4f5a）。';
     expect(stripToolCallMarkup(text)).toBe('成功定位到 TinyMCE 编辑器的 iframe。');
   });
+  it('a tab id in the finish fields is not a fact to check either (local core-07 rerun)', () => {
+    const facts = assessCompletionFacts({
+      summary: '已切回起始页面。',
+      fields: [{ name: '当前活动标签', value: 'tab_9eff90a8-0b49-437e-a972-79de6d3ef019' }],
+      pages: [
+        observedEvidence(
+          'x',
+          '- heading "Browser" [level=1]',
+          'https://en.wikipedia.org/wiki/Browser',
+        ),
+      ],
+    });
+    expect(facts.unverified).toEqual([]);
+  });
   it('a tab id is not a fact to check (no 未核实 note on it)', () => {
     const facts = assessCompletionFacts({
       summary: '- 当前活动标签页：tab_9eff90a8-0b49-437e-a972-79de6d3ef019',
@@ -173,5 +187,28 @@ describe('FIX-36 #3 · core-10: a named part never covered is 部分完成, not 
     const wrong = `${only} 页面标题为「Checkbox Page 9000」。`;
     const outcome = await runParts([wrong, wrong]);
     expect(outcome.status).toBe('failed');
+  });
+});
+
+describe('FIX-36 · a numbered list marker is no engagement count (local reg-dy-2)', () => {
+  const page = observedEvidence(
+    'dy',
+    '- text [互动=点赞]: "4740"\n- text [互动=评论]: "214"\n- text [互动=收藏]: "4369"\n- text [互动=分享]: "1652"',
+    'https://www.douyin.com/video/7377304298310389027',
+  );
+  it('「3. 点赞数：4740」 is 4740 likes, not 3', () => {
+    const facts = assessCompletionFacts({
+      summary:
+        '1. 视频标题：第52集\n2. 作者：小喵麻麻\n3. 点赞数：4740\n4. 评论数：214\n5. 收藏数：4369\n6. 分享数：1652',
+      pages: [page],
+    });
+    expect(facts.contradictions).toEqual([]);
+  });
+  it('a wrong count in the same list is still caught', () => {
+    const facts = assessCompletionFacts({
+      summary: '3. 点赞数：9999\n4. 评论数：214',
+      pages: [page],
+    });
+    expect(facts.contradictions.join('；')).toContain('9999');
   });
 });

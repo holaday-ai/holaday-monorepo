@@ -634,6 +634,9 @@ const STANDALONE_MISSING_RE =
  */
 const WALL_ANSWER_RE =
   /需要(?:你|您)?(?:先)?登录(?:后)?(?:才能|方可)|请(?:你|您)?(?:自己|先)?登录后|(?:遇到|是|被)(?:了)?(?:登录墙|验证墙|人机验证)|需要(?:完成)?(?:人机)?验证(?:后)?才能|\b(?:log ?in|sign in) (?:is )?required\b|\bplease (?:log ?in|sign in)\b/i;
+/** The name first: 「歌曲名称页面未显示。」 as the whole sentence (local reg-new-qq). */
+const STANDALONE_MISSING_AFTER_RE =
+  /(?:^|[。！？!?\n])\s*(?:\*\*)?([^。！？!?\n，,；;]{1,24}?)(?:页面(?:上|中)?)?(?:未|没有)(?:显示|获取到?|读到|找到|列出|给出)(?=\s*(?:[。！？!?\n]|$))/g;
 const ASKED_VALUE_RE =
   /名称|歌名|曲名|标题|名字|书名|片名|价格|股价|点位|评分|\bname\b|\btitle\b|\bprice\b/i;
 
@@ -648,9 +651,10 @@ export function answerNotObtained(summary: string, intent = ''): boolean {
     intent.length < 60 &&
     ONE_VALUE_QUESTION_RE.test(intent) &&
     (VALUE_MISSING_RE.test(summary.slice(0, 300)) ||
-      [...summary.slice(0, 400).matchAll(STANDALONE_MISSING_RE)].some((m) =>
-        ASKED_VALUE_RE.test(m[1] ?? ''),
-      ))
+      [
+        ...summary.slice(0, 400).matchAll(STANDALONE_MISSING_RE),
+        ...summary.slice(0, 400).matchAll(STANDALONE_MISSING_AFTER_RE),
+      ].some((m) => ASKED_VALUE_RE.test(m[1] ?? '')))
   )
     return true;
   // FIX-36 (b-v06, as the browser's 0b): a field the user named (作者、点赞数…) given as

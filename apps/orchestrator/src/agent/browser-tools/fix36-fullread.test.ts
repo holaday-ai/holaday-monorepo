@@ -125,6 +125,37 @@ describe('FIX-36 #9 · the page behind a login popup is read', () => {
     await page.close();
   });
 
+  it('a map page with little text (canvas) and a login popup: still the AI’s to close', async () => {
+    const page = await browser.newPage();
+    await page.route('https://www.amap.com/**', (r) =>
+      r.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: '<canvas width="800" height="600"></canvas><div role="dialog" aria-modal="true" style="position:fixed;inset:20%;background:#fff"><h2>手机号登录</h2><input placeholder="手机号码"><button>发送验证码</button><button>立即登录</button></div>',
+      }),
+    );
+    await page.goto('https://www.amap.com/');
+    expect(await probeBrowserBlocker(page)).toMatchObject({
+      reason: 'login',
+      disposition: 'continue',
+    });
+    await page.close();
+  });
+
+  it('a login address is still a wall to hand over', async () => {
+    const page = await browser.newPage();
+    await page.route('https://passport.example.com/**', (r) =>
+      r.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: '<h1>账号登录</h1><input placeholder="用户名"><input type="password"><button>登录</button>',
+      }),
+    );
+    await page.goto('https://passport.example.com/login');
+    const hit = await probeBrowserBlocker(page);
+    expect(hit).toMatchObject({ reason: 'login' });
+    expect((hit as { disposition?: string }).disposition).toBeUndefined();
+    await page.close();
+  });
+
   it('a captcha is still handed over', async () => {
     const page = await browser.newPage();
     await page.setContent(

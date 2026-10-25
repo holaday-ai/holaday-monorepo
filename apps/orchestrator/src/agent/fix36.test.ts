@@ -158,6 +158,14 @@ describe('FIX-36 #2 · b-v06: 「页面未显示」 then a guess is not an answe
   it('the production answer is not obtained → browser retry', () => {
     expect(answerNotObtained(B_V06, 'QQ音乐热歌榜第一名是啥')).toBe(true);
   });
+  it('the name first, as its own sentence (local reg-new-qq): 「歌曲名称页面未显示。」', () => {
+    expect(
+      answerNotObtained(
+        'QQ音乐热歌榜（2026-10-25）第1名的歌手是**许嵩**，时长 04:24。\n\n歌曲名称页面未显示。\n\n来源：https://y.qq.com/n/ryqq/toplist/26',
+        '在 QQ 音乐看热歌榜第一名',
+      ),
+    ).toBe(true);
+  });
   it('the full answer from the chart page is an answer', () => {
     expect(
       answerNotObtained(
