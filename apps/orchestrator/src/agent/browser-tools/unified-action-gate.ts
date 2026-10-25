@@ -865,6 +865,8 @@ export function createDescriptionActionGate<Action>(options: DescriptionActionGa
   ): Promise<'proceed' | 'confirmed' | ActionGateDecision> => {
     const verdict = await options.onBeforeAction(item);
     const where = item.pageUrl ?? item.url ?? options.pageUrl();
+    // FIX-36 #9: refused, not run, and the agent carries on (a login form's account box).
+    if (!verdict.allowed && verdict.refuse) return { kind: 'skip', message: verdict.refuse };
     if (!verdict.allowed && verdict.requiresTakeover) {
       const kind = verdict.awaitingKind ?? 'login';
       const question = buildAuthParkQuestion(kind, where);

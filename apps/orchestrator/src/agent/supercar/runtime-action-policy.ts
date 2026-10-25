@@ -26,6 +26,11 @@ export interface RuntimeActionVerdict {
   requiresTakeover?: boolean;
   awaitingKind?: 'login' | 'permission';
   question?: string;
+  /**
+   * FIX-36 #9: this one action is refused and the task goes on — the agent is told why
+   * (a login form's account box: not typed, and no takeover the task did not ask for).
+   */
+  refuse?: string;
 }
 
 const IRREVERSIBLE_CONTROL_RE =
@@ -57,15 +62,6 @@ const TRANSACTION_CONTEXT_RE =
 const PROCEED_CONTROL_RE = /继续|下一步|确定|完成|提交|continue|next|proceed|confirm|submit|done/i;
 
 export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdict {
-  if (action.kind === 'type' && action.credentialForm) {
-    return {
-      allowed: false,
-      requiresTakeover: true,
-      awaitingKind: 'login',
-      reason:
-        '这是登录或验证表单（账号、手机号、密码、验证码），不会由 Agent 代填，请由用户接管浏览器完成。',
-    };
-  }
   if (
     action.kind === 'type' &&
     (normalize(action.inputType) === 'password' ||
@@ -79,6 +75,13 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
       awaitingKind: 'login',
       reason: '检测到密码或验证码输入框，请由用户接管浏览器完成，不会由 Agent 代填凭证。',
     };
+  }
+
+  // After the password / code box itself (a takeover, above): the form's other boxes.
+  if (action.kind === 'type' && action.credentialForm) {
+    const reason =
+      '这是登录或验证表单（账号、手机号、密码、验证码），不代填，这一步没有执行。任务确实需要登录才能继续时调用 request_human 请用户接管；否则关掉弹窗或换别的页面继续。';
+    return { allowed: false, reason, refuse: reason };
   }
 
   if (action.kind === 'navigate') return { allowed: true };

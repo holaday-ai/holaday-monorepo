@@ -181,15 +181,27 @@ describe('FIX-36 #9 · popups may be closed; credentials are never typed', () =>
     await page.close();
   });
 
-  it('typing a phone number into the login popup is handed over (credential form)', async () => {
+  it('typing a phone number into the login popup is refused, and the task goes on (no takeover)', async () => {
     const page = await routePage();
     const { gate, park } = gateFor(page);
-    await gate(
+    const decision = await gate(
       { tool: 'type', ref: await refOf(page, /textbox "请输入手机号"/), text: '13800000000' },
       'before',
     );
-    expect(park.mock.calls[0]?.[1]).toBe('login');
+    expect(decision).toMatchObject({ kind: 'skip', message: expect.stringContaining('不代填') });
+    expect(park).not.toHaveBeenCalled();
     expect(await page.locator('input[name=phone]').inputValue()).toBe('');
+    await page.close();
+  });
+
+  it('typing into the verification-code box itself is still a takeover, as before', async () => {
+    const page = await routePage();
+    const { gate, park } = gateFor(page);
+    await gate(
+      { tool: 'type', ref: await refOf(page, /textbox "请输入短信验证码"/), text: '1234' },
+      'before',
+    );
+    expect(park.mock.calls[0]?.[1]).toBe('login');
     await page.close();
   });
 
