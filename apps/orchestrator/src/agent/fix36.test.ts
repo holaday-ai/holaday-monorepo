@@ -327,6 +327,18 @@ describe('FIX-36 复审 #1 #3 · what the scrape got goes with it to the browser
       wanted: 3,
     });
   });
+  it('复审 #2: a wall named as one field’s reason keeps the rest (local xhs-read, verbatim)', () => {
+    const answer =
+      '这篇笔记的信息：\n\n- **标题**：📍杭州｜西湖一日游攻略（保姆级不费腿版）\n- **作者**：[Clara](https://www.xiaohongshu.com/user/profile/63367cff000000001801f7fa)\n- **点赞数**：页面未显示（需要登录才能查看互动数据）\n\n来源：[小红书](https://www.xiaohongshu.com/explore/6929ba55000000001e023ef8)';
+    const intent =
+      '打开 https://www.xiaohongshu.com/explore/6929ba55000000001e023ef8 读这篇笔记的标题、作者和点赞数';
+    expect(answerNotObtained(answer, intent)).toBe(true);
+    expect(scrapePartialAnswer(answer, intent)).toMatchObject({
+      missing: ['点赞数'],
+      found: 2,
+      wanted: 3,
+    });
+  });
   it('a login-wall answer or one with nothing in it keeps nothing', () => {
     expect(scrapePartialAnswer(FC_JD, '京东这个商品的标题和价格')).toBeNull();
     expect(scrapePartialAnswer('- 标题：页面未显示\n- 作者：页面未显示', '标题和作者')).toBeNull();

@@ -774,7 +774,13 @@ const MISSING_ROW_RE = /页面未显示|未显示|未获取到?|未找到|没有
  * nothing was obtained, or an answer whose every row is missing keeps nothing.
  */
 export function scrapePartialAnswer(summary: string, intent = ''): ScrapePartialAnswer | null {
-  const head = summary.slice(0, 240);
+  // A wall named as one field's reason (「点赞数：页面未显示（需要登录才能查看互动数据）」,
+  // local xhs-read) is that field missing, not the whole answer a wall.
+  const head = summary
+    .split('\n')
+    .filter((line) => !MISSING_ROW_RE.test(line))
+    .join('\n')
+    .slice(0, 240);
   if (NOT_OBTAINED_RE.test(head) || WALL_ANSWER_RE.test(head)) return null;
   if (IDENTITY_UNKNOWN_RE.test(summary.slice(0, 600))) return null;
   const rows = summary
@@ -782,7 +788,9 @@ export function scrapePartialAnswer(summary: string, intent = ''): ScrapePartial
     .map((line) => line.trim())
     .filter(
       (line) => /^(?:[-*•]|\d{1,3}[.)、])\s*\S/.test(line) || /^[^：:]{1,24}[：:]\s*\S/.test(line),
-    );
+    )
+    // A source line is where the answer was read, not one of its rows.
+    .filter((line) => !/^(?:[-*•]\s*)?(?:来源|数据来源|source)\s*[:：]/i.test(line));
   const missingRows = rows.filter((line) => MISSING_ROW_RE.test(line));
   // 复审 #2 (local xhs-read): a prose answer has no rows — count the fields the request names.
   if (!rows.length) {
