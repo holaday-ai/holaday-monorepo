@@ -83,7 +83,7 @@ function collectSurface() {
   let overlay: Element | null = null;
   const centre = document.elementsFromPoint(innerWidth / 2, innerHeight / 2)[0] ?? null;
   let inner = false;
-  for (let el = centre; el && el !== document.body; el = el.parentElement) {
+  for (let el: Element | null = centre; el && el !== document.body; el = el.parentElement) {
     const r = el.getBoundingClientRect();
     const s = getComputedStyle(el);
     const area = r.width * r.height;
