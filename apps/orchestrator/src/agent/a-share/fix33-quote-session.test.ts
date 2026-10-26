@@ -130,18 +130,20 @@ describe('FIX-33 #3 · an A-share price always says when it is from', () => {
     expect(quoteStale(md)).toBe(false);
   });
 
-  it('after the close: no quote call, 「最近收盘（日期）」, not partial', async () => {
-    for (const [now, day] of [
-      [AFTER_CLOSE, '2026-10-23'],
-      [PRE_OPEN, '2026-10-22'],
-      [SATURDAY, '2026-10-23'],
+  it('outside trading hours: 「最近收盘（日期）」, not partial', async () => {
+    // FIX-38: a trading day's evening asks once for the 15:00 quote (a 14:19 one is not a close);
+    // before the open and at weekends there is no quote to ask for.
+    for (const [now, day, quoted] of [
+      [AFTER_CLOSE, '2026-10-23', ['quote']],
+      [PRE_OPEN, '2026-10-22', []],
+      [SATURDAY, '2026-10-23', []],
     ] as const) {
       const calls: string[] = [];
       const md = await buildAshareFactCard(
         { client: client({ klineDate: day, quote: LIVE, calls }), now },
         MATCH,
       );
-      expect(calls).toEqual([]);
+      expect(calls).toEqual(quoted);
       expect(md).toContain(`- 最近收盘（${day}） 1,318.49`);
       expect(md).not.toContain('非实时');
       expect(quoteStale(md)).toBe(false);

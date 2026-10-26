@@ -62,6 +62,8 @@ export interface LivePrice {
   price: number;
   /** 'YYYY-MM-DD HH:MM[:SS]'（北京时间）。 */
   time: string;
+  /** FIX-38：收盘后当日 15:00 的报价——是当天收盘价，不是「当前价」。 */
+  close?: boolean;
 }
 
 export function detectF1(series: KlineRow[], periodLabel = '近3月'): PerfSignal | null {
@@ -121,9 +123,11 @@ export function detectF3(series: KlineRow[], live?: LivePrice): PerfSignal | nul
   if (hi === lo) return null;
   const pos = ((cur - lo) / (hi - lo)) * 100;
   const date = lastDate(series);
-  const price = live
-    ? `当前价 ${fmtNum(cur)}（行情时间 ${live.time}）`
-    : `最近收盘价 ${fmtNum(cur)}${date ? `（${date}）` : ''}`;
+  const price = live?.close
+    ? `最近收盘价 ${fmtNum(cur)}（${live.time.slice(0, 16)}）`
+    : live
+      ? `当前价 ${fmtNum(cur)}（行情时间 ${live.time}）`
+      : `最近收盘价 ${fmtNum(cur)}${date ? `（${date}）` : ''}`;
   const tier =
     pos > 80
       ? '接近近一年高位区间，处于相对高位'

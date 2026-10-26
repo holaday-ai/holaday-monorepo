@@ -5,6 +5,9 @@ import type {
   NeutralMessagesResponse,
   NeutralOutputContentBlock,
 } from '../llm/messages-adapter.js';
+import type { AkshareClient } from './a-share/akshare-client.js';
+import { ashareAfterClose, buildAshareFactCard } from './a-share/ashare-fact-card.js';
+import type { AkEnvelope } from './a-share/briefing-types.js';
 import { unverifiedNote } from './browser-tools/completion-fields.js';
 import { runUnifiedBrowserLoop } from './browser-tools/unified-browser-loop.js';
 import { hasInternalRef, stripInternalRefs } from './internal-refs.js';
@@ -110,5 +113,108 @@ describe('FIX-38 #1 · core-11: no element ref or tab id reaches the user', () =
       requestHuman: async () => false,
     });
     expect(JSON.stringify(paused)).not.toMatch(/ref e\d/);
+  });
+});
+
+const beijing = (at: string) => new Date(`${at}+08:00`);
+const envelope = <T>(data: T[], fetchedAt = '2026-10-26T08:14:00Z'): AkEnvelope<T> =>
+  ({ data, count: data.length, source: 'akshare:fake', fetched_at: fetchedAt }) as AkEnvelope<T>;
+
+/**
+ * Deploy-38 as-mt (16:14 Monday 10-26): sina's daily K-line still ended at 10-23 (1,335.00)
+ * while the 15:00 quote was already 1,349.98 +1.12%.
+ */
+function akshare(opts: {
+  quote: Record<string, unknown>;
+  tradingDay?: boolean;
+  calls: string[];
+}): AkshareClient {
+  return {
+    getStockAnnouncements: () => Promise.resolve(envelope([])),
+    getShareUnlock: () => Promise.resolve(envelope([])),
+    getStockKline: () =>
+      Promise.resolve(
+        envelope([{ 日期: '2026-10-23', 收盘: 1335, 涨跌幅: 1.25, 成交额: 7_677_216_283 }]),
+      ),
+    getStockQuote: () => {
+      opts.calls.push('quote');
+      return Promise.resolve(envelope([{ 代码: '600519', ...opts.quote }]));
+    },
+    getDragonTiger: () => Promise.resolve(envelope([])),
+    getNorthboundFlow: () => Promise.resolve(envelope([])),
+    getTradingDay: () => Promise.resolve(envelope([{ is_trading_day: opts.tradingDay ?? true }])),
+    // biome-ignore lint/suspicious/noExplicitAny: fake
+  } as any;
+}
+const MOUTAI = {
+  kind: 'info' as const,
+  stocks: [{ symbol: '600519', displayName: '贵州茅台' }],
+  dateIso: '2026-10-26',
+  dateCompact: '20261026',
+};
+const CLOSE_QUOTE = { 最新价: 1349.98, 涨跌幅: 1.12, 行情时间: '2026-10-26 15:00:00' };
+
+describe('FIX-38 #2 · after a trading day’s close, the 15:00 quote is that day’s close', () => {
+  it('Deploy-38 as-mt replay: 「最近收盘（2026-10-26 15:00） 1,349.98」, not the 10-23 K-line', async () => {
+    const calls: string[] = [];
+    const md = await buildAshareFactCard(
+      { client: akshare({ quote: CLOSE_QUOTE, calls }), now: beijing('2026-10-26T16:14:00') },
+      MOUTAI,
+    );
+    expect(calls).toEqual(['quote']);
+    expect(md).toContain('- 最近收盘（2026-10-26 15:00） 1,349.98，涨跌幅 +1.12%（收盘后报价');
+    expect(md).not.toContain('最近收盘（2026-10-23）');
+    expect(md).not.toMatch(/实时|当前价|最新价/);
+  });
+
+  it('reverse: during trading hours the quote is 最新价 with its time, not a close', async () => {
+    const calls: string[] = [];
+    const md = await buildAshareFactCard(
+      {
+        client: akshare({
+          quote: { 最新价: 1338.92, 涨跌幅: 0.29, 行情时间: '2026-10-26 13:01:00' },
+          calls,
+        }),
+        now: beijing('2026-10-26T13:02:00'),
+      },
+      MOUTAI,
+    );
+    expect(md).toContain('最新价 1,338.92，涨跌幅 +0.29%；行情时间 2026-10-26 13:01:00');
+    expect(md).not.toContain('最近收盘（2026-10-26');
+  });
+
+  it('reverse: a quote from before 15:00 is no close — the dated K-line close stays', async () => {
+    const calls: string[] = [];
+    const md = await buildAshareFactCard(
+      {
+        client: akshare({
+          quote: { 最新价: 1340, 涨跌幅: 0.37, 行情时间: '2026-10-26 14:30:00' },
+          calls,
+        }),
+        now: beijing('2026-10-26T16:14:00'),
+      },
+      MOUTAI,
+    );
+    expect(md).toContain('- 最近收盘（2026-10-23） 1,335.00');
+    expect(md).not.toContain('1,340');
+  });
+
+  it('reverse: a holiday evening, before the open and a weekend ask for no quote', async () => {
+    for (const [now, tradingDay] of [
+      [beijing('2026-10-01T16:00:00'), false],
+      [beijing('2026-10-26T09:00:00'), true],
+      [beijing('2026-10-24T16:00:00'), true],
+    ] as const) {
+      const calls: string[] = [];
+      const md = await buildAshareFactCard(
+        { client: akshare({ quote: CLOSE_QUOTE, tradingDay, calls }), now },
+        MOUTAI,
+      );
+      expect(calls).toEqual([]);
+      expect(md).toContain('- 最近收盘（2026-10-23） 1,335.00');
+    }
+    expect(ashareAfterClose(beijing('2026-10-26T14:59:00'))).toBe(false);
+    expect(ashareAfterClose(beijing('2026-10-26T15:00:00'))).toBe(true);
+    expect(ashareAfterClose(beijing('2026-10-24T16:00:00'))).toBe(false);
   });
 });
