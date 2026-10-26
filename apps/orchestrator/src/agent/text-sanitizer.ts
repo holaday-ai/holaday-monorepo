@@ -14,6 +14,7 @@
  */
 
 import { stripToolCallMarkup } from '@holaday/shared-types';
+import { stripInternalRefs } from './internal-refs.js';
 
 /**
  * Massive base64 blobs (e.g. inline screenshots the model occasionally
@@ -325,7 +326,9 @@ export function sanitizeFinalText(input: string | null | undefined): string {
   //     the inline substring strips can leave behind.
   for (const re of CLAUDE_SIGNATURE_PATTERNS) text = text.replace(re, '');
   for (const re of CLAUDE_FOOTER_LINE_RE) text = text.replace(re, '');
-  // 11. Collapse whitespace gaps left by the strips.
+  // 11. FIX-38: the browser's element refs and tab / frame ids are not the user's business.
+  text = stripInternalRefs(text);
+  // 12. Collapse whitespace gaps left by the strips.
   text = text.replace(TRIPLE_BLANK_RE, '\n\n');
   return text.trim();
 }

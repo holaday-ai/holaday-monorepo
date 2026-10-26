@@ -58,6 +58,7 @@ import {
   parseUnifiedBrowserAction,
 } from './unified-tools.js';
 import { videoShortfall } from './video-count.js';
+import { stripInternalRefs } from '../internal-refs.js';
 
 /** Rule 4 with whole-page read (FIX-36 #9): popups are the AI's to close. */
 const FULL_READ_RULE_4 =
@@ -313,6 +314,37 @@ const MAX_CONTEXT_IMAGES = 2;
 export async function runUnifiedBrowserLoop(
   input: UnifiedBrowserLoopInput,
 ): Promise<UnifiedBrowserOutcome> {
+  const outcome = await browserLoop(input);
+  // FIX-38 (Deploy-38 core-11): whatever way the loop ends, the user never reads an
+  // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
+  switch (outcome.status) {
+    case 'completed':
+      return { ...outcome, summary: stripInternalRefs(outcome.summary) };
+    case 'failed':
+      return { ...outcome, reason: stripInternalRefs(outcome.reason) };
+    case 'awaiting_user':
+      return {
+        ...outcome,
+        reason: stripInternalRefs(outcome.reason),
+        message: stripInternalRefs(outcome.message),
+      };
+    case 'cancelled':
+      return {
+        ...outcome,
+        ...(outcome.reason ? { reason: stripInternalRefs(outcome.reason) } : {}),
+        ...(outcome.heldAnswer
+          ? {
+              heldAnswer: {
+                ...outcome.heldAnswer,
+                summary: stripInternalRefs(outcome.heldAnswer.summary),
+              },
+            }
+          : {}),
+      };
+  }
+}
+
+async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrowserOutcome> {
   const maxSteps = input.maxSteps ?? 40;
   const messages: NeutralMessage[] = [
     {
