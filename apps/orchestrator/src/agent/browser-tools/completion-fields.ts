@@ -196,6 +196,10 @@ interface Fact {
 
 const PROSE_FIELD =
   /summary|总结|概述|摘要|说明|备注|注释|^注$|解释|描述|内容|结论|note|remark|explanation|description|overview|reason|原因/i;
+/** A field naming the page read (「页面：X - 维基百科」), compared with that page's h1. */
+const PAGE_FIELD = /^(?:当前)?(?:页面|网页)(?:名称|标题)?$|^(?:current )?page$/i;
+/** A document title's site suffix: 「 - 维基百科」「 - Wikipedia」「 | 知乎」. */
+const SITE_SUFFIX_RE = /\s*[-–—|·]\s*[^-–—|·]{1,30}$/;
 /** The page's own title — not a section, chapter or list-item title. */
 const TITLE_FIELD = /^(?:视频|页面|网页|文章|商品)?标题$|^(?:page |video )?title$/i;
 const NUMERIC_LABEL = /播放量|观看次数|价格|售价|大小|日期|发布时间|views|price|size|published/i;
@@ -881,7 +885,7 @@ export function assessCompletionFacts(input: {
       });
       continue;
     }
-    if (TITLE_FIELD.test(fact.name) && !fact.listItem) {
+    if ((TITLE_FIELD.test(fact.name) || PAGE_FIELD.test(fact.name)) && !fact.listItem) {
       const headings = new Set(
         eligible
           .map((page) => page.text.match(/heading "([^"]+)" \[level=1\]/)?.[1])
@@ -895,10 +899,17 @@ export function assessCompletionFacts(input: {
             .replace(/\s*(?:\[?编辑\]?|\[?edit\]?)$/i, '')
             .trim()
         : '';
-      if (heading && !candidates.some((v) => v.includes(main) || main.includes(v))) {
+      if (
+        TITLE_FIELD.test(fact.name) &&
+        heading &&
+        !candidates.some((v) => v.includes(main) || main.includes(v))
+      ) {
         contradictions.push(`${label} 与页面一级标题「${heading.slice(0, 120)}」不符`);
         continue;
       }
+      // FIX-37 (Deploy-37 core-06): 「页面：中国历史 - 维基百科」 is the read page's document
+      // title — its h1 plus the site's suffix — so it is grounded, not 未核实.
+      if (main && candidates.some((v) => v.replace(SITE_SUFFIX_RE, '').trim() === main)) continue;
     }
     unverified.push(label);
   }

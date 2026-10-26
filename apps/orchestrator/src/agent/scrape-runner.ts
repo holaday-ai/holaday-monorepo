@@ -724,12 +724,23 @@ const ASKED_KINDS: ReadonlyArray<readonly [RegExp, RegExp]> = [
 const SIDE_FIELD_RE =
   /变化|走势|涨跌|涨幅|跌幅|历史|趋势|对比|明细|区间|单位|来源|时间|日期|备注|说明/;
 
+/**
+ * FIX-37 (Deploy-37 b-v06, verbatim 「第一名的**歌曲名称页面未显示**，只显示歌手是**许嵩**」): the
+ * asked kind named right before 「（页面）未显示」, anywhere in a sentence — not only at its
+ * start or end. The few characters before it are kept so a side field (「历史价格页面未显示」)
+ * is still told apart.
+ */
+const INLINE_MISSING_RE =
+  /([^。！？!?\n，,；;]{0,6}?(?:名称|歌名|曲名|标题|名字|书名|片名|价格|股价|点位|指数|评分|\bname\b|\btitle\b|\bprice\b))\s*(?:页面(?:上|中)?)?(?:未|没有|没)(?:显示|获取到?|读到|找到|列出|给出)/gi;
+
 function askedValueMissing(missing: string, intent: string): boolean {
   if (SIDE_FIELD_RE.test(missing)) return false;
   return ASKED_KINDS.some(([kind, asked]) => kind.test(missing) && asked.test(intent));
 }
 
-export function answerNotObtained(summary: string, intent = ''): boolean {
+export function answerNotObtained(answer: string, intent = ''): boolean {
+  // Markdown emphasis (「**歌曲名称页面未显示**」) does not split a sentence (FIX-37 b-v06).
+  const summary = answer.replace(/\*\*|__/g, '');
   if (NOT_OBTAINED_RE.test(summary.slice(0, 240))) return true;
   if (IDENTITY_UNKNOWN_RE.test(summary.slice(0, 600))) return true;
   if (WALL_ANSWER_RE.test(summary.slice(0, 240))) return true;
@@ -743,6 +754,7 @@ export function answerNotObtained(summary: string, intent = ''): boolean {
       [
         ...summary.slice(0, 400).matchAll(STANDALONE_MISSING_RE),
         ...summary.slice(0, 400).matchAll(STANDALONE_MISSING_AFTER_RE),
+        ...summary.slice(0, 400).matchAll(INLINE_MISSING_RE),
       ].some((m) => askedValueMissing(m[1] ?? '', intent)))
   )
     return true;
