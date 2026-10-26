@@ -15,6 +15,7 @@ import {
   withModelRetry,
 } from '../../llm/model-call-retry.js';
 import { asksForToolCallExample } from '../generate-answer-guard.js';
+import { stripInternalRefs } from '../internal-refs.js';
 import { namedAddressHosts } from '../scrape-runner.js';
 import { SEARCH_RESULTS_ORIGIN } from '../search-fallback/search-results-page.js';
 import {
@@ -58,7 +59,6 @@ import {
   parseUnifiedBrowserAction,
 } from './unified-tools.js';
 import { videoShortfall } from './video-count.js';
-import { stripInternalRefs } from '../internal-refs.js';
 
 /** Rule 4 with whole-page read (FIX-36 #9): popups are the AI's to close. */
 const FULL_READ_RULE_4 =

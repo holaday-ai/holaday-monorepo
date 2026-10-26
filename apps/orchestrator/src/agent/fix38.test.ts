@@ -54,7 +54,9 @@ describe('FIX-38 #1 · core-11: no element ref or tab id reaches the user', () =
     expect(hasInternalRef(CORE_11)).toBe(true);
     expect(hasInternalRef(shown)).toBe(false);
     expect(shown).not.toMatch(/\be\d{1,3}\b/);
-    expect(shown).toContain('共读到7个段落块，底部显示 "Powered by Elemental Selenium and Sauce Labs"。');
+    expect(shown).toContain(
+      '共读到7个段落块，底部显示 "Powered by Elemental Selenium and Sauce Labs"。',
+    );
     expect(shown).toContain('- visible_paragraphs：7段拉丁文占位文本');
     expect(shown).toContain('visible_paragraphs「7段拉丁文占位文本」');
     expect(shown).not.toContain('「」');
@@ -98,7 +100,9 @@ describe('FIX-38 #1 · core-11: no element ref or tab id reaches the user', () =
     const failed = await runUnifiedBrowserLoop({
       intent: '读取页面',
       adapter: scriptedAdapter([
-        () => [call('finish', { status: 'failed', summary: '按钮 ref e12 点不动（tab_9eff90a8-…）' })],
+        () => [
+          call('finish', { status: 'failed', summary: '按钮 ref e12 点不动（tab_9eff90a8-…）' }),
+        ],
       ]),
       execute: async () => ({ ok: true, text: '' }),
     });

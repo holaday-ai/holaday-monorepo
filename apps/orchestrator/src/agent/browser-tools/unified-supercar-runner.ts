@@ -26,6 +26,7 @@ import { BrowserReplayRecorder } from './browser-replay.js';
 import { browserToolError } from './browser-tool-error.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { installDomainEgress } from './domain-egress.js';
+import { SENSITIVE_SCREENSHOT_STYLE } from './full-page-read.js';
 import {
   type UnifiedToolResult,
   createPlaywrightUnifiedExecutor,
@@ -532,6 +533,23 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   try {
     binding = opts.browserControlFactory?.();
     control = binding?.control ?? control;
+    // FIX-38 #5: the captcha as the user is asked to solve it, sensitive boxes masked — task
+    // evidence for acceptance (a few per task, one per page).
+    const captchaShots = new Set<string>();
+    const captchaEvidence = async (rule: string) => {
+      const url = tools.page.url();
+      if (!opts.onCaptchaEvidence || captchaShots.has(url) || captchaShots.size >= 3) return;
+      captchaShots.add(url);
+      await safe(async () => {
+        const jpeg = await tools.page.screenshot({
+          type: 'jpeg',
+          quality: 70,
+          timeout: 5_000,
+          style: SENSITIVE_SCREENSHOT_STYLE,
+        });
+        await opts.onCaptchaEvidence?.({ jpeg, url, at: new Date(), rule });
+      });
+    };
     const outcome = await runUnifiedBrowserLoop({
       ...(control
         ? {
@@ -596,7 +614,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         const blocker = await tools.blocker();
         if (blocker && 'evidence' in blocker) {
           const continued = 'disposition' in blocker && blocker.disposition === 'continue';
-          if (!continued && blocker.reason === 'captcha') learnBlock?.(tools.page.url(), 'captcha');
+          if (!continued && blocker.reason === 'captcha') {
+            learnBlock?.(tools.page.url(), 'captcha');
+            await captchaEvidence(blocker.evidence.rule);
+          }
           await recordDiagnostic(
             continued ? 'browser_local_wall' : 'browser_blocker',
             continued ? undefined : `browser_${blocker.reason}_wall`,

@@ -769,6 +769,16 @@ export interface RunSupercarOptions {
    */
   learnEgressBlocks?: boolean;
   onCaptchaHandoffEnd?: (resumed: boolean) => Promise<boolean>;
+  /**
+   * FIX-38 #5: the page at the moment a captcha is handed over (password / code boxes masked),
+   * kept as task evidence for acceptance. Never shown to the user or in the result.
+   */
+  onCaptchaEvidence?: (shot: {
+    jpeg: Buffer;
+    url: string;
+    at: Date;
+    rule: string;
+  }) => Promise<void>;
   browserControlFactory?: () => { control: BrowserControl; finish: () => void };
   /** External task id (task_…). Correlates hooks and WS frames. */
   taskId: string;

@@ -14,7 +14,8 @@ import { LOGIN_POPUP_NOTICE } from './full-page-read.js';
  */
 const PAGE_BEHIND = `<main><h1>高德地图</h1>${Array.from(
   { length: 24 },
-  (_, i) => `<a href="/place/${i}">杭州景点 ${i}：西湖、灵隐寺、宋城、西溪湿地等热门地点的路线与周边信息</a>`,
+  (_, i) =>
+    `<a href="/place/${i}">杭州景点 ${i}：西湖、灵隐寺、宋城、西溪湿地等热门地点的路线与周边信息</a>`,
 ).join('<br>')}</main>`;
 const popup = (slider: boolean) => `<!doctype html><meta charset="utf-8"><title>高德地图</title>
 ${PAGE_BEHIND}
@@ -58,7 +59,10 @@ describe('FIX-38 #3 · Gaode: a full-screen login mask is a popup; with a slider
   it('the slider popup hands over as a captcha (never 「回车提交什么」, never typed into)', async () => {
     const page = await open(popup(true));
     try {
-      const hit = await probeBrowserBlocker(page, '高德地图查一下杭州东站到西湖断桥怎么走，大概多久');
+      const hit = await probeBrowserBlocker(
+        page,
+        '高德地图查一下杭州东站到西湖断桥怎么走，大概多久',
+      );
       expect(hit).toMatchObject({ reason: 'captcha' });
       expect((hit as { disposition?: string }).disposition).toBeUndefined();
       // Its boxes and buttons stay out of the AI's hands.
