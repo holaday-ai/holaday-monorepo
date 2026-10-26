@@ -56,10 +56,11 @@ export function fencedFileIds(answerText: string | null | undefined): Set<string
  * Whether the answer prose OFFERS the user a generated downloadable
  * file. Conservative: keyed on explicit generation / download phrasing
  * so a source link ending in `.pdf` or a passing filename mention does
- * not trip it.
+ * not trip it. FIX-37 (Deploy-37 b-d04): 「下载链接：https://…」 points at a page's own file
+ * (python.org's .pkg), not one we generated.
  */
 const FILE_CLAIM_RE =
-  /文件已生成|已生成(?:好|了)?(?:一个|这个)?(?:可下载)?文件|点击下载|从上方卡片下载|可从.{0,6}卡片下载|可下载文件卡片|可下载的?\s*(?:Markdown|markdown|PDF|pdf|文档|表格|文件|CSV|csv)|PDF\s*已(?:生成|创建)|下载链接\s*[:：]|供你下载|文件供下载|为你生成(?:了|好)?(?:一个|这个)?文件|生成(?:了|好)(?:一个|这个)?(?:可下载)?(?:的)?(?:Markdown|PDF|文档|表格|文件)/;
+  /文件已生成|已生成(?:好|了)?(?:一个|这个)?(?:可下载)?文件|点击下载|从上方卡片下载|可从.{0,6}卡片下载|可下载文件卡片|可下载的?\s*(?:Markdown|markdown|PDF|pdf|文档|表格|文件|CSV|csv)|PDF\s*已(?:生成|创建)|下载链接\s*[:：](?!\s*[[(<（「]?\s*https?:\/\/)|供你下载|文件供下载|为你生成(?:了|好)?(?:一个|这个)?文件|生成(?:了|好)(?:一个|这个)?(?:可下载)?(?:的)?(?:Markdown|PDF|文档|表格|文件)/;
 
 /**
  * A document FILENAME immediately followed by a generation / download

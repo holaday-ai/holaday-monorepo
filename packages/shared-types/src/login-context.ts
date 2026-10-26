@@ -211,6 +211,28 @@ export function readLoginContext(node: Node, popupReported: boolean): LoginConte
         blocks.push({ block: p, popup: fixedAbove, modal: false, ...found });
     }
   }
+  // FIX-37 (coordinator fixture R as written): a sign-up form with no container at all — the
+  // box and a visible password box both sit right under <body>, and the page says 注册 / 登录 /
+  // 手机号. Only then is <body> the block; real pages wrap their forms, so nothing else widens.
+  if (
+    !anchored &&
+    doc.body &&
+    el.parentElement === doc.body &&
+    Array.from(doc.body.children).some(
+      (child) =>
+        child.matches('input[type="password" i]') &&
+        (child as HTMLElement).getClientRects().length > 0,
+    ) &&
+    SIGNUP_RE.test(doc.body.innerText ?? '')
+  )
+    blocks.push({
+      block: doc.body,
+      popup: false,
+      modal: false,
+      coded: true,
+      codedAny: true,
+      account: false,
+    });
   if (framed)
     blocks.push({
       block: doc.body,

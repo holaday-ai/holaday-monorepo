@@ -65,6 +65,10 @@ function errEnvelope<T>(source: string, error: string, errorCode: string): AkEnv
   };
 }
 
+/** A quote that timed out (ours or akshare-mcp's single-flight wait) is asked once more. */
+const QUOTE_RETRY_CODES = new Set(['UPSTREAM_TIMEOUT', 'SINGLE_FLIGHT_TIMEOUT']);
+const QUOTE_RETRY_DELAY_MS = 500;
+
 type CircuitGroup = 'quote' | 'intraday' | 'kline' | 'news' | 'calendar' | 'risk' | 'market';
 const sharedCircuits = new Map<string, CircuitBreaker>();
 
@@ -237,8 +241,22 @@ export class HttpAkshareClient implements AkshareClient {
     const qs = days && days > 0 ? `?days=${days}` : '';
     return this.get<KlineRow>(`/kline/${encodeURIComponent(symbol)}${qs}`);
   }
-  getStockQuote(symbol: string) {
-    return this.get<StockQuoteRow>(`/quote/${encodeURIComponent(symbol)}`);
+  /**
+   * FIX-37 (Deploy-37 reg-as-mt / live-mt): a stock's quote is its minute series, cached in
+   * akshare-mcp for only 15 s; a refresh that meets a slow Sina upstream outlasts our timeout,
+   * and two cards asking at once both lose it (live 05:03 UTC: /quote/600519 timed out twice).
+   * The slow fetch still finishes and fills the cache, so a timed-out quote is asked once more.
+   */
+  async getStockQuote(symbol: string) {
+    const path = `/quote/${encodeURIComponent(symbol)}`;
+    const first = await this.get<StockQuoteRow>(path);
+    if (!first.error || !QUOTE_RETRY_CODES.has(first.error_code ?? '')) return first;
+    this.logger?.warn(
+      { path, errorCode: first.error_code },
+      'akshare-http: quote timed out, asking once more',
+    );
+    await new Promise((resolve) => setTimeout(resolve, QUOTE_RETRY_DELAY_MS));
+    return this.get<StockQuoteRow>(path);
   }
   getStockIntraday(symbol: string) {
     return this.get<IntradayRow>(`/intraday/${encodeURIComponent(symbol)}`);
