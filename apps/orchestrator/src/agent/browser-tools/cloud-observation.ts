@@ -282,12 +282,30 @@ const ANCHORED_LOG_ENDPOINTS: ReadonlyArray<readonly [host: RegExp, path: string
   [/^t2\.xiaohongshu\.com$/, '/api/v2/collect'],
 ];
 
+/** Largest log body let through (observed: 0 B BestBuy, 680 B Xiaohongshu). */
+const LOG_BODY_MAX = 4096;
+
 export function anchoredLogPost(url: URL, method: string, postData: string): boolean {
   return (
     method === 'POST' &&
+    // 协调方复核: `…/log-events?action=addToCart` names a write — never a log post.
+    !url.search &&
     ANCHORED_LOG_ENDPOINTS.some(
       ([host, path]) => host.test(url.hostname) && url.pathname === path,
     ) &&
+    opaqueLogBody(postData)
+  );
+}
+
+/**
+ * 协调方复核: empty or opaque, and small. A multipart form (`Content-Disposition: form-data`)
+ * or broken JSON (`{` / `[` first) is something filled in, not opaque.
+ */
+function opaqueLogBody(postData: string): boolean {
+  return (
+    postData.length <= LOG_BODY_MAX &&
+    !/content-disposition\s*:\s*form-data/i.test(postData) &&
+    !/^\s*[{[]/.test(postData) &&
     postBodyShape(postData).startsWith('opaque ')
   );
 }

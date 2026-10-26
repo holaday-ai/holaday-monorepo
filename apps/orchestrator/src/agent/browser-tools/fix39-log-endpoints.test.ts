@@ -65,6 +65,20 @@ describe('FIX-39 · anchoredLogPost: exact host + path, empty / opaque body only
       OPAQUE_680,
       false,
     ],
+    // 协调方复核 on PR #302.
+    ['upa-logger with a query naming a write', `${UPA}?action=addToCart`, 'POST', '', false],
+    ['t2 collect with any query', `${XHS}?note_id=1`, 'POST', OPAQUE_680, false],
+    [
+      'upa-logger with a multipart form',
+      UPA,
+      'POST',
+      '------x\r\nContent-Disposition: form-data; name="sku"\r\n\r\n6505727\r\n------x--',
+      false,
+    ],
+    ['upa-logger with broken JSON', UPA, 'POST', '{"action":"addToCart","sku":', false],
+    ['t2 collect with a broken JSON array', XHS, 'POST', '[{"note_id":"1"', false],
+    ['t2 collect over 4 KB', XHS, 'POST', '\u0008'.padEnd(4097, '\u0000'), false],
+    ['t2 collect at exactly 4 KB', XHS, 'POST', '\u0008'.padEnd(4096, '\u0000'), true],
   ])('%s → %s', (_label, url, method, body, expected) => {
     expect(anchoredLogPost(new URL(url), method, body)).toBe(expected);
   });
