@@ -600,6 +600,21 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           };
         }
         case 'screenshot': {
+          // FIX-39 #3 (Deploy-38/39 core-08): with focus left in large_form's date box, the cloud
+          // browser's screenshot timed out 3–4 times in a row; it worked again once focus moved
+          // to another box (Deploy-38). A focused date / time / colour box or select may hold a
+          // native picker open: let it go first. Nothing is typed, changed or submitted.
+          await page
+            .evaluate(() => {
+              const active = document.activeElement;
+              if (
+                active instanceof HTMLSelectElement ||
+                (active instanceof HTMLInputElement &&
+                  /^(?:date|datetime-local|month|week|time|color)$/.test(active.type))
+              )
+                active.blur();
+            })
+            .catch(() => {});
           const buffer = await page.screenshot({
             type: 'jpeg',
             quality: 70,

@@ -133,6 +133,26 @@ describe('FIX-38 #1 · core-11: no element ref or tab id reaches the user', () =
     );
   });
 
+  // FIX-39 #4 (Deploy-39 core-07 / core-08): no 「，）」 left where a handle was.
+  it.each([
+    [
+      '切回起始页面（Web browser - Wikipedia，tab_9eff90a8-0b49-437e-a972-79de6d3ef019）',
+      '切回起始页面（Web browser - Wikipedia）',
+    ],
+    ['日期控件（Birthday，type=date，ref=e900005）', '日期控件（Birthday，type=date）'],
+    ['（tab_9eff90a8-0b49-437e-a972-79de6d3ef019，Web browser）', '（Web browser）'],
+    ['标题 A，ref e12，标题 B', '标题 A，标题 B'],
+    ['列表（e12、e13）已读', '列表已读'],
+  ])('复审 FIX-39 #4: %s → %s', (input, expected) => {
+    expect(stripInternalRefs(input)).toBe(expected);
+  });
+  it.each(['价格（含税，不含运费）', '（A，B）', 'a, (b, c)'])(
+    'reverse FIX-39 #4: 「%s」 without a ref is left as written',
+    (text) => {
+      expect(stripInternalRefs(text)).toBe(text);
+    },
+  );
+
   it('a ref removed next to code leaves the code as written (Codex on PR #301)', () => {
     expect(stripInternalRefs('点击按钮 ref e12 后运行：if (value === "") reset();')).toBe(
       '点击按钮后运行：if (value === "") reset();',
