@@ -268,6 +268,38 @@ export function bestBuySensorShape(url: URL, method: string, postData: string): 
   }
 }
 
+/**
+ * FIX-39 (Deploy-35/36/39 BestBuy, Deploy-39 xhs-read): two log endpoints the page posts to on
+ * its own. Across the acceptance records they went out 47 / 195 times while the AI only read the
+ * page (snapshot, wait_for, a key press), and the three BestBuy pauses / one Xiaohongshu pause
+ * were the same request landing in a typing or popup-closing window. Exact host and path only,
+ * and only an empty or opaque body — a JSON or form body (something a person filled in) still
+ * pauses. Xiaohongshu's real 收藏 is `edith.xiaohongshu.com/api/sns/web/v1/note/collect`, which
+ * this never matches.
+ */
+const ANCHORED_LOG_ENDPOINTS: ReadonlyArray<readonly [host: RegExp, path: string]> = [
+  [/^upa-logger\.[a-z0-9-]+\.aws\.openshift\.bestbuy\.com$/, '/log-events'],
+  [/^t2\.xiaohongshu\.com$/, '/api/v2/collect'],
+];
+
+export function anchoredLogPost(url: URL, method: string, postData: string): boolean {
+  return (
+    method === 'POST' &&
+    ANCHORED_LOG_ENDPOINTS.some(
+      ([host, path]) => host.test(url.hostname) && url.pathname === path,
+    ) &&
+    postBodyShape(postData).startsWith('opaque ')
+  );
+}
+
+function anchoredLogRequest(url: URL, request: Request): boolean {
+  try {
+    return anchoredLogPost(url, request.method(), request.postData() ?? '');
+  } catch {
+    return false;
+  }
+}
+
 function bestBuySensorPost(url: URL, request: Request): boolean {
   try {
     return bestBuySensorShape(url, request.method(), request.postData() ?? '');
@@ -893,7 +925,9 @@ export class CloudObservation {
     // paths and action parameters still take precedence, even on /collect.
     const passiveBeacon =
       !transactional &&
-      (passiveTelemetryRequest(url, r.resourceType()) || bestBuySensorPost(url, r));
+      (passiveTelemetryRequest(url, r.resourceType()) ||
+        bestBuySensorPost(url, r) ||
+        anchoredLogRequest(url, r));
     const key = `${r.method()}:${url.origin}${url.pathname}`;
     // Timing alone does not establish causation. Only an instrumented trusted
     // interaction (or its async continuation) can attribute a write to us.
