@@ -221,6 +221,36 @@ function botSensorPost(request: Request): boolean {
   }
 }
 /**
+ * FIX-38 #4 (Deploy-38 new-bestbuy / reg-new-bestbuy; evidence FIX-36 #5): BestBuy's bot
+ * sensor. The page sends it on load and on its own timers, whatever the user does: a one-field
+ * JSON body (`{"body":…}`, about 4.3 KB) to a random many-segment path on www.bestbuy.com
+ * (`/8KDozX93j/xk/gO/RcnBJZU540yNkQ/z8hYSJf3/…`). Only that host, that path shape and that
+ * body pass; a real BestBuy write (cart, sign-in…) has a named path and still pauses. The
+ * request itself is neither faked nor blocked.
+ */
+function bestBuySensorPost(url: URL, request: Request): boolean {
+  if (url.hostname !== 'www.bestbuy.com' || request.method() !== 'POST' || url.search) return false;
+  const segments = url.pathname.split('/').slice(1);
+  if (
+    segments.length < 6 ||
+    segments.length > 12 ||
+    !segments.every((segment) => /^[A-Za-z0-9]{2,24}$/.test(segment)) ||
+    // Random, not words: most segments mix upper and lower case.
+    segments.filter((segment) => /[a-z]/.test(segment) && /[A-Z]/.test(segment)).length * 2 <
+      segments.length
+  )
+    return false;
+  try {
+    const body: unknown = JSON.parse(request.postData() ?? '');
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+    const values = Object.values(body);
+    return values.length === 1 && typeof values[0] === 'string';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * A request that only reports telemetry: a beacon to a telemetry path, or a
  * known analytics/media-statistics endpoint. A transaction path or action
  * parameter is never telemetry, whatever the host.
@@ -835,7 +865,9 @@ export class CloudObservation {
     const methodWrite = ['PUT', 'PATCH', 'DELETE'].includes(r.method());
     // A beacon with telemetry semantics is not a form/API mutation. Transaction
     // paths and action parameters still take precedence, even on /collect.
-    const passiveBeacon = !transactional && passiveTelemetryRequest(url, r.resourceType());
+    const passiveBeacon =
+      !transactional &&
+      (passiveTelemetryRequest(url, r.resourceType()) || bestBuySensorPost(url, r));
     const key = `${r.method()}:${url.origin}${url.pathname}`;
     // Timing alone does not establish causation. Only an instrumented trusted
     // interaction (or its async continuation) can attribute a write to us.
