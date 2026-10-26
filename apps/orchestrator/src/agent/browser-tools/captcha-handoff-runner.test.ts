@@ -35,7 +35,7 @@ afterEach(async () => {
   await browser?.close();
 });
 type Call = { name: string; input: Record<string, unknown> };
-async function scenario(timeout = 3000, script?: Call[]) {
+async function scenario(timeout = 3000, script?: Call[], extra: Partial<RunSupercarOptions> = {}) {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   await page.route('https://www.google.com/**', (route) =>
@@ -77,6 +77,7 @@ async function scenario(timeout = 3000, script?: Call[]) {
       wait();
     },
     onCaptchaHandoffEnd: async () => true,
+    ...extra,
     messagesAdapter: {
       metadata: { provider: 'anthropic', model: 'fixture' },
       async create() {
@@ -149,6 +150,54 @@ it('retains one runner and excludes AI while user clears the wall, even beyond t
     await f.run;
   }
 }, 10000);
+it('FIX-38 #5: the captcha frame at handover is kept as evidence, once per page', async () => {
+  const shots: Array<{ jpeg: Buffer; url: string; rule: string }> = [];
+  const f = await scenario(80, undefined, {
+    onCaptchaEvidence: async (shot) => {
+      shots.push(shot);
+    },
+  });
+  await f.run;
+  expect(shots).toHaveLength(1);
+  expect(shots[0]!.url).toBe('https://www.google.com/sorry/index');
+  expect(shots[0]!.rule).toMatch(/^captcha:/);
+  // A real JPEG of the page as the user was asked to solve it.
+  expect(shots[0]!.jpeg.subarray(0, 2).toString('hex')).toBe('ffd8');
+  expect(shots[0]!.jpeg.byteLength).toBeGreaterThan(1000);
+}, 10000);
+
+it('FIX-38 复审 #1: CAPTCHA_HANDOFF_EVIDENCE_ENABLED=false keeps no screenshot', async () => {
+  const shots: unknown[] = [];
+  process.env.CAPTCHA_HANDOFF_EVIDENCE_ENABLED = 'false';
+  try {
+    const f = await scenario(80, undefined, {
+      onCaptchaEvidence: async (shot) => {
+        shots.push(shot);
+      },
+    });
+    await f.run;
+    expect(f.events).toEqual([
+      expect.objectContaining({ awaitingKind: 'captcha', captchaHandoff: true }),
+    ]);
+    expect(shots).toEqual([]);
+  } finally {
+    delete process.env.CAPTCHA_HANDOFF_EVIDENCE_ENABLED;
+  }
+}, 10000);
+
+it('FIX-38 #5: a failing evidence hook never blocks the handover', async () => {
+  const f = await scenario(80, undefined, {
+    onCaptchaEvidence: async () => {
+      throw new Error('storage down');
+    },
+  });
+  const outcome = await f.run;
+  expect(outcome.status).toBe('failed');
+  expect(f.events).toEqual([
+    expect.objectContaining({ awaitingKind: 'captcha', captchaHandoff: true }),
+  ]);
+}, 10000);
+
 it('timeout exits truthfully and releases control instead of running more model calls', async () => {
   const f = await scenario(80);
   const outcome = await f.run;

@@ -44,3 +44,29 @@ const SENSITIVE_FIELDS = [
  * reaches inner frames and shadow roots), so the page itself is not touched.
  */
 export const SENSITIVE_SCREENSHOT_STYLE = `:is(${SENSITIVE_FIELDS}){color:transparent!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important;caret-color:transparent!important;background:#9e9e9e!important}`;
+
+/** Contact boxes: a phone number or e-mail a user (or autofill) put in. */
+const CONTACT_FIELDS = [
+  'input[type="tel" i]',
+  'input[type="email" i]',
+  ...['tel', 'email'].map((token) => `input[autocomplete*="${token}" i]`),
+  ...['name', 'id', 'aria-label', 'placeholder'].flatMap((attr) =>
+    ['手机', '电话', '邮箱', 'phone', 'mobile', 'email', 'e-mail'].map(
+      (word) => `input[${attr}*="${word}" i]`,
+    ),
+  ),
+].join(',');
+
+/**
+ * FIX-38 #5 复审 #1: the captcha handover screenshot also hides a filled phone / e-mail box —
+ * it is kept as acceptance evidence, and whatever the page or autofill put there is not ours.
+ */
+export const CAPTCHA_SCREENSHOT_STYLE = `${SENSITIVE_SCREENSHOT_STYLE}:is(${CONTACT_FIELDS}){color:transparent!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important;caret-color:transparent!important;background:#9e9e9e!important}`;
+
+/**
+ * FIX-38 #5 复审 #1: the handover screenshot is written unless
+ * `CAPTCHA_HANDOFF_EVIDENCE_ENABLED=false` (a config change, no code change).
+ */
+export function captchaHandoffEvidence(): boolean {
+  return process.env.CAPTCHA_HANDOFF_EVIDENCE_ENABLED !== 'false';
+}

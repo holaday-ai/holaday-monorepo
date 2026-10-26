@@ -15,6 +15,7 @@ import {
   withModelRetry,
 } from '../../llm/model-call-retry.js';
 import { asksForToolCallExample } from '../generate-answer-guard.js';
+import { stripInternalRefs } from '../internal-refs.js';
 import { namedAddressHosts } from '../scrape-runner.js';
 import { SEARCH_RESULTS_ORIGIN } from '../search-fallback/search-results-page.js';
 import {
@@ -313,6 +314,49 @@ const MAX_CONTEXT_IMAGES = 2;
 export async function runUnifiedBrowserLoop(
   input: UnifiedBrowserLoopInput,
 ): Promise<UnifiedBrowserOutcome> {
+  // FIX-38 复审 #1: the element ids the browser gave out in this run — only these may be
+  // dropped from 「按钮 e7」 (「矩阵元素 e12」 on a maths page is the page's own text).
+  const seen = new Set<string>();
+  const outcome = await browserLoop({
+    ...input,
+    execute: async (action) => {
+      const result = await input.execute(action);
+      for (const match of (result.text ?? '').matchAll(/\bref=(e\d{1,6})\b/g))
+        seen.add(match[1]!.toLowerCase());
+      return result;
+    },
+  });
+  const strip = (text: string) => stripInternalRefs(text, seen);
+  // FIX-38 (Deploy-38 core-11): whatever way the loop ends, the user never reads an
+  // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
+  switch (outcome.status) {
+    case 'completed':
+      return { ...outcome, summary: strip(outcome.summary) };
+    case 'failed':
+      return { ...outcome, reason: strip(outcome.reason) };
+    case 'awaiting_user':
+      return {
+        ...outcome,
+        reason: strip(outcome.reason),
+        message: strip(outcome.message),
+      };
+    case 'cancelled':
+      return {
+        ...outcome,
+        ...(outcome.reason ? { reason: strip(outcome.reason) } : {}),
+        ...(outcome.heldAnswer
+          ? {
+              heldAnswer: {
+                ...outcome.heldAnswer,
+                summary: strip(outcome.heldAnswer.summary),
+              },
+            }
+          : {}),
+      };
+  }
+}
+
+async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrowserOutcome> {
   const maxSteps = input.maxSteps ?? 40;
   const messages: NeutralMessage[] = [
     {

@@ -6572,6 +6572,45 @@ export const tasksRouter = router({
                       ctx.logger.warn({ err, taskId }, 'supercar: broadcast web_search failed');
                     }
                   },
+                  // FIX-38 #5: the captcha frame at handover, as task evidence for acceptance
+                  // (evidence_artifacts, purpose captcha_handoff) — not in the result, not shown.
+                  async onCaptchaEvidence(shot) {
+                    if (!taskDbId) return;
+                    try {
+                      const { storagePath } = await getSharedStorageProvider({
+                        logger: ctx.logger,
+                      }).put({
+                        userExternalId: taskId,
+                        kind: 'output',
+                        fileExternalId: newExternalId('file'),
+                        filename: 'captcha-handoff.jpg',
+                        buffer: shot.jpeg,
+                        mimetype: 'image/jpeg',
+                      });
+                      await new EvidenceArtifactRepository(ctx.db).create({
+                        ownerUserId: userRow.id,
+                        taskId: taskDbId,
+                        artifactKind: 'screenshot',
+                        purpose: 'captcha_handoff',
+                        finalUrl: shot.url.slice(0, 2048),
+                        r2Bucket: process.env.R2_BUCKET ?? 'local',
+                        r2Key: storagePath,
+                        contentType: 'image/jpeg',
+                        sizeBytes: shot.jpeg.byteLength,
+                        sha256: createHash('sha256').update(shot.jpeg).digest('hex'),
+                        capturedAt: shot.at,
+                        collectorLane: 'captcha-handoff',
+                        retentionPolicy: 'task_30d',
+                        expiresAt: new Date(shot.at.getTime() + 30 * 86_400_000),
+                        metadataJson: { rule: shot.rule },
+                      });
+                    } catch (err) {
+                      ctx.logger.warn(
+                        { err: err instanceof Error ? err.message : String(err), taskId },
+                        'supercar: captcha handoff screenshot not saved (non-blocking)',
+                      );
+                    }
+                  },
                   async onCaptchaHandoffEnd(resumed) {
                     if (!resumed) {
                       captchaNeedsRelease = true;

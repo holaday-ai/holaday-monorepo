@@ -1,4 +1,5 @@
 import { TEXT_URL_RE } from '../../execution/text-urls.js';
+import { stripInternalRefs } from '../internal-refs.js';
 import { staleForRecentIntent, uncoveredTargets } from './completion-coverage.js';
 import { assessEngagementClaims } from './engagement-counts.js';
 
@@ -212,7 +213,8 @@ function explicitFacts(input: unknown): Fact[] {
     if (!field || typeof field !== 'object') return [];
     const f = field as Record<string, unknown>;
     const name = typeof f.name === 'string' ? f.name.slice(0, 80) : '字段';
-    const value = typeof f.value === 'string' ? clean(f.value) : '';
+    // FIX-38: 「7段占位文本（ref e12…）」 is checked as 「7段占位文本」.
+    const value = typeof f.value === 'string' ? clean(stripInternalRefs(f.value)) : '';
     // Summaries and explanations are the model's own words, not page facts; a browser
     // handle (tab / frame id, element ref) is no page fact either (FIX-36 core-07).
     if (!value || PROSE_FIELD.test(name) || value.length > 300 || HANDLE_ONLY_RE.test(value))
@@ -264,9 +266,11 @@ function answerFacts(summary: string, intent = ''): Fact[] {
   const text = unescapeLiteralBreaks(summary);
   const asked = normalizeFact(intent);
   const facts: Fact[] = [];
-  const add = (fact: Fact) => {
-    // FIX-36 (core-07): a browser handle (tab id, element ref) is not a page fact to check.
-    if (HANDLE_ONLY_RE.test(fact.value)) return;
+  const add = (raw: Fact) => {
+    // FIX-36 (core-07): a browser handle (tab id, element ref) is not a page fact to check;
+    // FIX-38: nor is one inside a value.
+    if (HANDLE_ONLY_RE.test(raw.value)) return;
+    const fact = { ...raw, value: stripInternalRefs(raw.value).trim() };
     if (fact.value && fact.value.length <= 300) facts.push(fact);
   };
   for (const url of text.match(TEXT_URL_RE) ?? []) add({ name: '链接', value: url });
@@ -948,8 +952,14 @@ export function assessCompletionFacts(input: {
 
 /** User-visible note for facts that could not be matched word for word. */
 export function unverifiedNote(unverified: readonly string[]): string {
-  return unverified.length
-    ? `未核实：以下内容未能在已读页面中逐字找到，请自行确认——${unverified.join('；')}`
+  // FIX-38: no element ref in the note; an item that quoted only a ref is no item.
+  const quote = /[「“][^」”]*[」”]/u;
+  const items = unverified
+    .map((item) => [item, stripInternalRefs(item)] as const)
+    .filter(([item, kept]) => kept.trim() && (!quote.test(item) || quote.test(kept)))
+    .map(([, kept]) => kept);
+  return items.length
+    ? `未核实：以下内容未能在已读页面中逐字找到，请自行确认——${items.join('；')}`
     : '';
 }
 

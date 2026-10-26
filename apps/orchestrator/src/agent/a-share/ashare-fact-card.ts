@@ -97,6 +97,18 @@ export function ashareIntraday(now: Date): boolean {
   return minutes >= 9 * 60 + 30 && minutes < 15 * 60;
 }
 
+/**
+ * FIX-38 (Deploy-38 as-mt / live-byd)：工作日 15:00 收盘后到当天结束——当日 15:00 的报价
+ * 就是当天收盘价，新浪日线常常要晚些才更新到今天。
+ */
+export function ashareAfterClose(now: Date): boolean {
+  const weekday = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    weekday: 'short',
+  }).format(now);
+  return weekday !== 'Sat' && weekday !== 'Sun' && beijingMinutes(now) >= 15 * 60;
+}
+
 /** 北京时间的分钟数（0–1439）。 */
 function beijingMinutes(at: Date): number {
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -198,6 +210,7 @@ function closingQuote(
  * FIX-34：卡片认作实时的报价（liveQuote 同一判定）→ 走势段可称「当前价」的价格。
  * 只在交易时段（`session`：时钟 + 日历）才有；收盘后/节假日一律按最近收盘价（盘外
  * liveQuote 不看新旧，上午缓存的报价不能顶替收盘价——Codex review on PR #297）。
+ * FIX-38：收盘后当日 15:00 的报价（closingQuote 同一判定）作为收盘价传入（`close: true`）。
  */
 export function livePrices(
   entries: readonly { symbol: string; quote?: AkEnvelope<StockQuoteRow> }[],
@@ -207,8 +220,12 @@ export function livePrices(
   const out: Record<string, LivePrice> = {};
   for (const { symbol, quote } of entries) {
     const live = liveQuote(quote, now, session);
-    const price = live ? toNum(live.row.最新价) : null;
-    if (live && price !== null) out[symbol] = { price, time: live.time };
+    // FIX-38：收盘后，当日 15:00 的报价就是走势该用的收盘价（日线可能还停在上一交易日）。
+    const close = live ? null : closingQuote(quote, now, session);
+    const at = live ?? close;
+    const price = at ? toNum(at.row.最新价) : null;
+    if (at && price !== null)
+      out[symbol] = { price, time: at.time, ...(close ? { close: true } : {}) };
   }
   return out;
 }
@@ -253,7 +270,7 @@ function marketFactLines(
   const close = closingQuote(quote, now, intraday);
   if (close && quote && !(/^\d{4}-\d{2}-\d{2}$/.test(day) && day >= close.date))
     return [
-      `- 最近收盘（${close.date}） ${fmtNum(close.row.最新价)}，涨跌幅 ${fmtPct(close.row.涨跌幅)}（收盘后报价 ${close.time.slice(11)}，${sourceTag(quote)}）`,
+      `- 最近收盘（${close.date} ${close.time.slice(11, 16)}） ${fmtNum(close.row.最新价)}，涨跌幅 ${fmtPct(close.row.涨跌幅)}（收盘后报价，${sourceTag(quote)}）`,
     ];
   if (p.kline.error || !last) return [...quoteLine, unavailableLine('当日行情', p.kline, mode)];
   const facts = `${fmtNum(pick(last, ['收盘']))}，涨跌幅 ${fmtPct(pick(last, ['涨跌幅']))}，成交额 ${fmtYiYuan(
@@ -385,11 +402,21 @@ export async function fetchFactData(
    */
   opts: { now?: Date; quote?: boolean } = {},
 ): Promise<FactData> {
-  const intraday =
+  const clock =
     opts.now === undefined
-      ? undefined
-      : ashareIntraday(opts.now) && (await tradingDayKnown(client, beijingIso(opts.now))) !== false;
-  const withQuote = intraday === true && opts.quote !== false;
+      ? null
+      : ashareIntraday(opts.now)
+        ? 'intraday'
+        : ashareAfterClose(opts.now)
+          ? 'afterClose'
+          : null;
+  const tradingDay =
+    opts.now !== undefined &&
+    clock !== null &&
+    (await tradingDayKnown(client, beijingIso(opts.now))) !== false;
+  const intraday = opts.now === undefined ? undefined : clock === 'intraday' && tradingDay;
+  // FIX-38：交易日收盘后也取一次报价——15:00 的报价是当天收盘价（日线可能还没到今天）。
+  const withQuote = tradingDay && opts.quote !== false;
   const annStart = shiftCompact(match.dateIso, -7);
   const [northbound, dragonTiger, ...perStock] = await Promise.all([
     client.getNorthboundFlow(),

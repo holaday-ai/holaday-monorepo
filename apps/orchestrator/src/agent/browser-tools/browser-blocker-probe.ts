@@ -73,56 +73,101 @@ function collectSurface() {
         (el.matches('article,ytd-search,ytd-item-section-renderer,ytd-watch-metadata') ||
           el.querySelectorAll('a[href],p').length >= 2),
     );
-  const regions = Array.from(
+  const regionElements = Array.from(
     document.querySelectorAll(`[role="dialog"],[aria-modal="true"],dialog[open],${localRegions}`),
+  ).filter(visible);
+  // FIX-38 (Deploy-38 b-m01): Gaode's login popup is a plain full-screen fixed layer (no
+  // role=dialog) with a smaller box in the middle — a popup all the same. The topmost layer
+  // at the viewport's centre: fixed, covering most of it, stacked high (z-index ≥ 100) or
+  // dimming the page, and holding a smaller box.
+  let overlay: Element | null = null;
+  const centre = document.elementsFromPoint(innerWidth / 2, innerHeight / 2)[0] ?? null;
+  let inner = false;
+  for (let el: Element | null = centre; el && el !== document.body; el = el.parentElement) {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    const area = r.width * r.height;
+    if (s.position === 'fixed' && area >= innerWidth * innerHeight * 0.6) {
+      const alpha = Number(s.backgroundColor.match(/rgba\([^)]*,\s*([\d.]+)\)/)?.[1] ?? '1');
+      if (inner && (Number(s.zIndex) >= 100 || (alpha > 0 && alpha < 1))) overlay = el;
+      break;
+    }
+    if (area > 0 && area <= innerWidth * innerHeight * 0.5) inner = true;
+  }
+  // 复审 #1: a page's whole fixed shell is no popup — a popup lies over other visible content,
+  // or says little (a login box: ≤ 400 characters).
+  if (overlay) {
+    const layer = overlay;
+    const beneath = document
+      .elementsFromPoint(innerWidth / 2, innerHeight / 2)
+      .some(
+        (el) =>
+          el !== document.body &&
+          el !== document.documentElement &&
+          !layer.contains(el) &&
+          !el.contains(layer),
+      );
+    if (!beneath && text(layer).trim().length > 400) overlay = null;
+  }
+  if (
+    overlay &&
+    !regionElements.some(
+      (el) => el.contains(overlay as Element) || (overlay as Element).contains(el),
+    )
   )
-    .filter(visible)
-    .map((el) => {
-      const r = el.getBoundingClientRect();
-      const value = text(el);
-      const auth = hasAuthInput(el);
-      const cookie = /cookie|consent|隐私|同意.*条款/i.test(value) && !auth;
-      const player = el.matches('#movie_player,#player,ytd-player');
-      const playerSurface =
-        player ||
-        !!el.closest(
-          'yt-playability-error-supported-renderers#error-screen,yt-player-interstitial-renderer',
-        );
-      const comments = el.matches('#comments,ytd-comments,[aria-label="Comments" i]');
-      const component = el.matches('[role="region"]');
-      const modal = el.getAttribute('aria-modal') === 'true' || el.matches('dialog[open]');
-      const obstructs =
-        playerSurface ||
-        comments ||
-        component ||
-        modal ||
-        !readable ||
-        r.width * r.height >= innerWidth * innerHeight * 0.4;
-      return {
-        scope: player
-          ? ('player' as const)
-          : comments
-            ? ('comments' as const)
-            : component
-              ? ('component' as const)
-              : ('dialog' as const),
-        playerSurface,
-        local:
-          (playerSurface || comments || component) &&
-          r.width * r.height < innerWidth * innerHeight * 0.8 &&
-          !modal &&
-          !el.closest('[aria-modal="true"],dialog[open]'),
-        text: value,
-        blocking:
-          !cookie &&
-          obstructs &&
-          r.width * r.height >= innerWidth * innerHeight * 0.015 &&
-          r.bottom > 0 &&
-          r.right > 0 &&
-          r.top < innerHeight &&
-          r.left < innerWidth,
-      };
-    });
+    regionElements.push(overlay);
+  const regions = regionElements.map((el) => {
+    const r = el.getBoundingClientRect();
+    const value = text(el);
+    const auth = hasAuthInput(el);
+    // A login popup's own 「我已阅读并同意《服务条款》《隐私政策》」 line is no cookie banner
+    // (FIX-38, Gaode).
+    const cookie =
+      !auth &&
+      (/cookie|consent/i.test(value) ||
+        (/隐私|同意.*条款/.test(value) && !/登录|注册|验证码|滑块|log ?in|sign ?in/i.test(value)));
+    const player = el.matches('#movie_player,#player,ytd-player');
+    const playerSurface =
+      player ||
+      !!el.closest(
+        'yt-playability-error-supported-renderers#error-screen,yt-player-interstitial-renderer',
+      );
+    const comments = el.matches('#comments,ytd-comments,[aria-label="Comments" i]');
+    const component = el.matches('[role="region"]');
+    const modal =
+      el === overlay || el.getAttribute('aria-modal') === 'true' || el.matches('dialog[open]');
+    const obstructs =
+      playerSurface ||
+      comments ||
+      component ||
+      modal ||
+      !readable ||
+      r.width * r.height >= innerWidth * innerHeight * 0.4;
+    return {
+      scope: player
+        ? ('player' as const)
+        : comments
+          ? ('comments' as const)
+          : component
+            ? ('component' as const)
+            : ('dialog' as const),
+      playerSurface,
+      local:
+        (playerSurface || comments || component) &&
+        r.width * r.height < innerWidth * innerHeight * 0.8 &&
+        !modal &&
+        !el.closest('[aria-modal="true"],dialog[open]'),
+      text: value,
+      blocking:
+        !cookie &&
+        obstructs &&
+        r.width * r.height >= innerWidth * innerHeight * 0.015 &&
+        r.bottom > 0 &&
+        r.right > 0 &&
+        r.top < innerHeight &&
+        r.left < innerWidth,
+    };
+  });
   const primary =
     document.querySelector('ytd-watch-metadata') ??
     document.querySelector('main,[role="main"],article') ??

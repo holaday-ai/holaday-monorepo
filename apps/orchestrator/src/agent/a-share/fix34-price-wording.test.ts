@@ -105,6 +105,10 @@ describe('FIX-34 #1 · 走势 says which price it uses', () => {
     { 代码: '600519', 最新价: 1340.5, 涨跌幅: 0.4, 行情时间: '2026-10-26 10:19:58' },
   ]);
   const OLD = env([{ 代码: '600519', 最新价: 1330, 涨跌幅: 0.1, 行情时间: '2026-10-26 09:40:00' }]);
+  // FIX-38 (Deploy-38 as-mt): the trading day's 15:00 quote, while the K-line still ends 10-23.
+  const CLOSED = env([
+    { 代码: '600519', 最新价: 1349.98, 涨跌幅: 1.12, 行情时间: '2026-10-26 15:00:00' },
+  ]);
 
   it.each([
     [
@@ -116,6 +120,13 @@ describe('FIX-34 #1 · 走势 says which price it uses', () => {
     ],
     ['intraday, stale quote', INTRADAY, OLD, true, /最近收盘价 1,335\.00（2026-10-23）/],
     ['after the close', AFTER_CLOSE, undefined, true, /最近收盘价 1,335\.00（2026-10-23）/],
+    [
+      'after the close, the 15:00 quote',
+      at('2026-10-26T16:14:00'),
+      CLOSED,
+      true,
+      /最近收盘价 1,349\.98（2026-10-26 15:00）/,
+    ],
     ['holiday noon', HOLIDAY, LIVE, false, /最近收盘价 1,335\.00（2026-10-23）/],
   ] as const)('light and panorama cards, %s', async (_label, now, quote, tradingDay, expected) => {
     for (const deep of [false, true]) {
@@ -172,7 +183,7 @@ describe('FIX-34 #1 · 走势 says which price it uses', () => {
       { 代码: '600519', 最新价: 1342, 涨跌幅: 0.52, 行情时间: '2026-10-26 15:00:03' },
     ]);
     const { answer, input } = await panoramaAt(at('2026-10-26T20:30:00'), closed);
-    expect(answer).toContain('最近收盘（2026-10-26） 1,342.00');
+    expect(answer).toContain('最近收盘（2026-10-26 15:00） 1,342.00');
     expect(answer).not.toMatch(/实时报价|当前价/);
     expect(input).toContain('收盘价（2026-10-26）');
   });

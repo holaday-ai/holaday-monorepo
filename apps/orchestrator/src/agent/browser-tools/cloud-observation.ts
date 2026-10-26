@@ -221,6 +221,62 @@ function botSensorPost(request: Request): boolean {
   }
 }
 /**
+ * FIX-38 #4 (Deploy-38 new-bestbuy / reg-new-bestbuy; evidence FIX-36 #5): BestBuy's bot
+ * sensor. The page sends it on load and on its own timers, whatever the user does: a one-field
+ * JSON body (`{"body":…}`, about 4.3 KB) to a random many-segment path on www.bestbuy.com
+ * (`/8KDozX93j/xk/gO/RcnBJZU540yNkQ/z8hYSJf3/…`). Only that host, that path shape and that
+ * body pass; a real BestBuy write (cart, sign-in…) has a named path and still pauses. The
+ * request itself is neither faked nor blocked.
+ */
+/** Words a real BestBuy endpoint path carries; a sensor's random segments never do. */
+const BESTBUY_WORD_RE =
+  /api|cart|checkout|order|account|identity|signin|graphql|gateway|site|services/i;
+
+/**
+ * 复审 #1: CamelCase words (`/site/CustomerService/api/v2/AddToCart/SubmitOrder`,
+ * `/gateway/graphql/AbCd/…`, `/identity/signin/AbCd/…`) are no sensor. A sensor path has
+ * 6–12 random segments, none a word or a version, most of them with digits (production:
+ * 6 of 8); its body is the sensor's own single key (`body` / `sensor_data`) holding a
+ * string of about 1 KB or more (production: 4.3 KB).
+ */
+export function bestBuySensorShape(url: URL, method: string, postData: string): boolean {
+  if (url.hostname !== 'www.bestbuy.com' || method !== 'POST' || url.search) return false;
+  const segments = url.pathname.split('/').slice(1);
+  if (
+    segments.length < 6 ||
+    segments.length > 12 ||
+    !segments.every((segment) => /^[A-Za-z0-9]{2,24}$/.test(segment)) ||
+    segments.some((segment) => BESTBUY_WORD_RE.test(segment) || /^v\d+$/i.test(segment)) ||
+    // Random, not words: most segments mix upper and lower case, and carry digits.
+    segments.filter((segment) => /[a-z]/.test(segment) && /[A-Z]/.test(segment)).length * 2 <
+      segments.length ||
+    segments.filter((segment) => /\d/.test(segment)).length < Math.max(3, segments.length * 0.4)
+  )
+    return false;
+  try {
+    const body: unknown = JSON.parse(postData);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+    const entries = Object.entries(body);
+    return (
+      entries.length === 1 &&
+      (entries[0]![0] === 'body' || entries[0]![0] === 'sensor_data') &&
+      typeof entries[0]![1] === 'string' &&
+      entries[0]![1].length >= 1000
+    );
+  } catch {
+    return false;
+  }
+}
+
+function bestBuySensorPost(url: URL, request: Request): boolean {
+  try {
+    return bestBuySensorShape(url, request.method(), request.postData() ?? '');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * A request that only reports telemetry: a beacon to a telemetry path, or a
  * known analytics/media-statistics endpoint. A transaction path or action
  * parameter is never telemetry, whatever the host.
@@ -835,7 +891,9 @@ export class CloudObservation {
     const methodWrite = ['PUT', 'PATCH', 'DELETE'].includes(r.method());
     // A beacon with telemetry semantics is not a form/API mutation. Transaction
     // paths and action parameters still take precedence, even on /collect.
-    const passiveBeacon = !transactional && passiveTelemetryRequest(url, r.resourceType());
+    const passiveBeacon =
+      !transactional &&
+      (passiveTelemetryRequest(url, r.resourceType()) || bestBuySensorPost(url, r));
     const key = `${r.method()}:${url.origin}${url.pathname}`;
     // Timing alone does not establish causation. Only an instrumented trusted
     // interaction (or its async continuation) can attribute a write to us.
