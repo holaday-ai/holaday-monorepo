@@ -733,6 +733,24 @@ const SIDE_FIELD_RE =
 const INLINE_MISSING_RE =
   /([^。！？!?\n，,；;]{0,6}?(?:名称|歌名|曲名|标题|名字|书名|片名|价格|股价|点位|指数|评分|\bname\b|\btitle\b|\bprice\b))\s*(?:页面(?:上|中)?)?(?:未|没有|没)(?:显示|获取到?|读到|找到|列出|给出)/gi;
 
+/** A name that belongs to something else than the thing asked for (「专辑名称」「作者名字」). */
+const SECONDARY_NAME_RE =
+  /专辑|作者|歌手|演唱者|作词|作曲|导演|主演|出版社|公司|品牌|店铺|商家|卖家|频道|up主|作品集|系列|album|artist|author|brand|store|channel/i;
+/** The answer names the thing itself (《晴天》「…」), so another missing name is a side field. */
+const NAMED_VALUE_RE = /《[^》]{1,60}》|「[^」]{1,60}」|“[^”]{1,60}”/;
+
+/**
+ * FIX-37 (Codex on PR #300): an inline 「X名称页面未显示」 is the asked value missing only when
+ * X is not something else (「专辑名称」 beside 「第一名是《晴天》」) and, for a name, the answer does
+ * not already give one.
+ */
+function inlineAskedValueMissing(missing: string, answer: string, intent: string): boolean {
+  if (!askedValueMissing(missing, intent)) return false;
+  if (SECONDARY_NAME_RE.test(missing)) return false;
+  const isName = /名称|歌名|曲名|标题|名字|书名|片名|\bname\b|\btitle\b/i.test(missing);
+  return !(isName && NAMED_VALUE_RE.test(answer));
+}
+
 function askedValueMissing(missing: string, intent: string): boolean {
   if (SIDE_FIELD_RE.test(missing)) return false;
   return ASKED_KINDS.some(([kind, asked]) => kind.test(missing) && asked.test(intent));
@@ -754,8 +772,10 @@ export function answerNotObtained(answer: string, intent = ''): boolean {
       [
         ...summary.slice(0, 400).matchAll(STANDALONE_MISSING_RE),
         ...summary.slice(0, 400).matchAll(STANDALONE_MISSING_AFTER_RE),
-        ...summary.slice(0, 400).matchAll(INLINE_MISSING_RE),
-      ].some((m) => askedValueMissing(m[1] ?? '', intent)))
+      ].some((m) => askedValueMissing(m[1] ?? '', intent)) ||
+      [...summary.slice(0, 400).matchAll(INLINE_MISSING_RE)].some((m) =>
+        inlineAskedValueMissing(m[1] ?? '', summary, intent),
+      ))
   )
     return true;
   // FIX-36 (b-v06, as the browser's 0b): a field the user named (作者、点赞数…) given as

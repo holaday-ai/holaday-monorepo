@@ -32,6 +32,19 @@ describe('FIX-37 #1 · b-v06: 「第一名的**歌曲名称页面未显示**」 
         'QQ音乐热歌榜第一名是啥',
       ),
     ).toBe(false);
+    // Codex on PR #300: the asked name is given; another name missing is a side field.
+    expect(
+      answerNotObtained(
+        'QQ音乐热歌榜第一名是《晴天》，歌手周杰伦，专辑名称页面未显示。',
+        'QQ音乐热歌榜第一名是啥',
+      ),
+    ).toBe(false);
+    expect(
+      answerNotObtained(
+        '第一名是「晴天」，歌曲名称页面未显示完整版本号。',
+        'QQ音乐热歌榜第一名是啥',
+      ),
+    ).toBe(false);
   });
 });
 
