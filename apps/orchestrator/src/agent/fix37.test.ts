@@ -48,6 +48,44 @@ describe('FIX-37 #1 · b-v06: 「第一名的**歌曲名称页面未显示**」 
   });
 });
 
+describe('FIX-37 复审 #1 · quotes exempt only the asked thing given as the answer (anb.mjs)', () => {
+  const Q = 'QQ音乐热歌榜第一名是啥';
+  it.each([
+    ['b-v06 verbatim', B_V06, Q, true],
+    [
+      'guess in 《》 with 可能是',
+      '热歌榜第一名的歌曲名称页面未显示，可能是《天龙八部之宿敌》（从飙升榜推测），歌手许嵩。',
+      Q,
+      true,
+    ],
+    ['「」 around 页面未显示', '第一名：歌曲名称「页面未显示」，歌手许嵩。', Q, true],
+    ['「」 around singer', '第一名的歌曲名称页面未显示，歌手为「许嵩」。', Q, true],
+    ['“” quoting the page label', '第一名的歌曲名称页面未显示，页面只写了“热歌榜”。', Q, true],
+    [
+      'album asked, album missing',
+      '第一名是《晴天》，专辑名称页面未显示。',
+      'QQ音乐热歌榜第一名的专辑名称是什么',
+      true,
+    ],
+    ['author asked missing', '这本书《三体》的作者名字页面未显示。', '这本书的作者名字是谁', true],
+    [
+      'company asked missing',
+      '该品牌的公司名称页面未显示。',
+      '这个品牌是哪家公司的？公司名称是什么',
+      true,
+    ],
+    ['correct answer', 'QQ音乐热歌榜第一名是《天龙八部之宿敌》，歌手许嵩。', Q, false],
+    [
+      'Codex 《晴天》 (album not asked)',
+      'QQ音乐热歌榜第一名是《晴天》，歌手周杰伦，专辑名称页面未显示。',
+      Q,
+      false,
+    ],
+  ] as const)('%s → %s', (_name, answer, intent, expected) => {
+    expect(answerNotObtained(answer, intent)).toBe(expected);
+  });
+});
+
 describe('FIX-37 #2 · a timed-out stock quote is asked once more', () => {
   const quote = {
     data: [{ 代码: '600519', 最新价: 1338.92, 涨跌幅: 0.29, 行情时间: '2026-10-26 13:03:00' }],
