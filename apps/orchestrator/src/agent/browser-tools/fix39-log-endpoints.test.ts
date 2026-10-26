@@ -153,3 +153,48 @@ describe('FIX-39 · in the executor: the log posts no longer pause, writes still
     30_000,
   );
 });
+
+describe('FIX-39 #3 · a screenshot first lets go of a focused date box (core-08)', () => {
+  let browser: Browser;
+  beforeAll(async () => {
+    browser = await chromium.launch({ headless: true });
+  }, 60_000);
+  afterAll(async () => {
+    await browser?.close();
+  });
+
+  const shoot = async (focus: string) => {
+    const page = await browser.newPage();
+    await page.setContent(
+      `<form onsubmit="window.submitted=1;return false"><input id="birthday" type="date" value="1990-01-01"><input id="name" value="Tom"><select id="pick"><option>a</option></select></form>`,
+    );
+    await page.focus(focus);
+    const tools = createPlaywrightUnifiedExecutor(page, { observationV2: true });
+    try {
+      const shot = await tools.execute({ tool: 'screenshot' } as never);
+      const state = await page.evaluate(() => ({
+        active: document.activeElement?.id ?? '',
+        birthday: (document.getElementById('birthday') as HTMLInputElement).value,
+        submitted: (window as unknown as { submitted?: number }).submitted ?? 0,
+      }));
+      return { ok: shot.ok, ...state };
+    } finally {
+      tools.dispose();
+      await page.close();
+    }
+  };
+
+  it('a focused date box and a focused select are released; the value stays, nothing is submitted', async () => {
+    expect(await shoot('#birthday')).toEqual({
+      ok: true,
+      active: '',
+      birthday: '1990-01-01',
+      submitted: 0,
+    });
+    expect((await shoot('#pick')).active).toBe('');
+  }, 30_000);
+
+  it('reverse: a focused text box keeps its focus', async () => {
+    expect(await shoot('#name')).toMatchObject({ ok: true, active: 'name' });
+  }, 30_000);
+});
