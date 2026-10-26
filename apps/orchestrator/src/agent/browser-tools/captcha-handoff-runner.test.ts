@@ -166,6 +166,25 @@ it('FIX-38 #5: the captcha frame at handover is kept as evidence, once per page'
   expect(shots[0]!.jpeg.byteLength).toBeGreaterThan(1000);
 }, 10000);
 
+it('FIX-38 复审 #1: CAPTCHA_HANDOFF_EVIDENCE_ENABLED=false keeps no screenshot', async () => {
+  const shots: unknown[] = [];
+  process.env.CAPTCHA_HANDOFF_EVIDENCE_ENABLED = 'false';
+  try {
+    const f = await scenario(80, undefined, {
+      onCaptchaEvidence: async (shot) => {
+        shots.push(shot);
+      },
+    });
+    await f.run;
+    expect(f.events).toEqual([
+      expect.objectContaining({ awaitingKind: 'captcha', captchaHandoff: true }),
+    ]);
+    expect(shots).toEqual([]);
+  } finally {
+    delete process.env.CAPTCHA_HANDOFF_EVIDENCE_ENABLED;
+  }
+}, 10000);
+
 it('FIX-38 #5: a failing evidence hook never blocks the handover', async () => {
   const f = await scenario(80, undefined, {
     onCaptchaEvidence: async () => {

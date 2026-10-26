@@ -2,7 +2,7 @@ import { readLoginContext } from '@holaday/shared-types';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { probeBrowserBlocker } from './browser-blocker-probe.js';
-import { LOGIN_POPUP_NOTICE } from './full-page-read.js';
+import { CAPTCHA_SCREENSHOT_STYLE, LOGIN_POPUP_NOTICE } from './full-page-read.js';
 
 /**
  * FIX-38 #3 (Deploy-38 b-m01, `deploy38/wall-evidence/b-m01.png`): Gaode's login popup as
@@ -96,6 +96,11 @@ describe('FIX-38 #3 · Gaode: a full-screen login mask is a popup; with a slider
       `<div style="position:fixed;inset:0;z-index:1">${PAGE_BEHIND}<a href="/login">登录</a></div>`,
     ],
     [
+      // 复审 #1: the page's own fixed shell with a centred panel and nothing under it.
+      'a fixed z-index shell holding the whole page in a centred panel',
+      `<div style="position:fixed;inset:0;z-index:100;overflow:auto"><div style="width:50%;margin:5% auto">${PAGE_BEHIND}<a href="/login">登录</a> 请登录后评论</div></div>`,
+    ],
+    [
       'a cookie bar along the bottom',
       `${PAGE_BEHIND}<div style="position:fixed;left:0;right:0;bottom:0;height:80px;z-index:9999;background:#fff">本站使用 cookie，继续浏览即表示同意隐私条款 <button>同意</button></div>`,
     ],
@@ -107,6 +112,22 @@ describe('FIX-38 #3 · Gaode: a full-screen login mask is a popup; with a slider
     const page = await open(`<!doctype html><meta charset="utf-8"><title>高德地图</title>${body}`);
     try {
       expect(await probeBrowserBlocker(page)).toBeNull();
+    } finally {
+      await page.close();
+    }
+  });
+
+  it('复审 #1: the handover screenshot style hides filled phone / e-mail boxes, not a search box', async () => {
+    const page = await open(
+      `<!doctype html><meta charset="utf-8"><input id="tel" type="tel" value="13800138000"><input id="mail" type="email" value="a@b.cn"><input id="phone" placeholder="手机号码" value="13800138000"><input id="code" placeholder="短信验证码" value="123456"><input id="q" type="search" value="usb c cable">`,
+    );
+    try {
+      await page.addStyleTag({ content: CAPTCHA_SCREENSHOT_STYLE });
+      const fill = (id: string) =>
+        page.$eval(`#${id}`, (el) => getComputedStyle(el).webkitTextFillColor);
+      for (const id of ['tel', 'mail', 'phone', 'code'])
+        expect(await fill(id)).toBe('rgba(0, 0, 0, 0)');
+      expect(await fill('q')).not.toBe('rgba(0, 0, 0, 0)');
     } finally {
       await page.close();
     }

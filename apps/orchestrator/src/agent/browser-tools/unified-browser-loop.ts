@@ -314,29 +314,41 @@ const MAX_CONTEXT_IMAGES = 2;
 export async function runUnifiedBrowserLoop(
   input: UnifiedBrowserLoopInput,
 ): Promise<UnifiedBrowserOutcome> {
-  const outcome = await browserLoop(input);
+  // FIX-38 复审 #1: the element ids the browser gave out in this run — only these may be
+  // dropped from 「按钮 e7」 (「矩阵元素 e12」 on a maths page is the page's own text).
+  const seen = new Set<string>();
+  const outcome = await browserLoop({
+    ...input,
+    execute: async (action) => {
+      const result = await input.execute(action);
+      for (const match of (result.text ?? '').matchAll(/\bref=(e\d{1,6})\b/g))
+        seen.add(match[1]!.toLowerCase());
+      return result;
+    },
+  });
+  const strip = (text: string) => stripInternalRefs(text, seen);
   // FIX-38 (Deploy-38 core-11): whatever way the loop ends, the user never reads an
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {
     case 'completed':
-      return { ...outcome, summary: stripInternalRefs(outcome.summary) };
+      return { ...outcome, summary: strip(outcome.summary) };
     case 'failed':
-      return { ...outcome, reason: stripInternalRefs(outcome.reason) };
+      return { ...outcome, reason: strip(outcome.reason) };
     case 'awaiting_user':
       return {
         ...outcome,
-        reason: stripInternalRefs(outcome.reason),
-        message: stripInternalRefs(outcome.message),
+        reason: strip(outcome.reason),
+        message: strip(outcome.message),
       };
     case 'cancelled':
       return {
         ...outcome,
-        ...(outcome.reason ? { reason: stripInternalRefs(outcome.reason) } : {}),
+        ...(outcome.reason ? { reason: strip(outcome.reason) } : {}),
         ...(outcome.heldAnswer
           ? {
               heldAnswer: {
                 ...outcome.heldAnswer,
-                summary: stripInternalRefs(outcome.heldAnswer.summary),
+                summary: strip(outcome.heldAnswer.summary),
               },
             }
           : {}),

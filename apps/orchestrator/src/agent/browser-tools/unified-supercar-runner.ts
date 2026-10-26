@@ -26,7 +26,7 @@ import { BrowserReplayRecorder } from './browser-replay.js';
 import { browserToolError } from './browser-tool-error.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { installDomainEgress } from './domain-egress.js';
-import { SENSITIVE_SCREENSHOT_STYLE } from './full-page-read.js';
+import { CAPTCHA_SCREENSHOT_STYLE, captchaHandoffEvidence } from './full-page-read.js';
 import {
   type UnifiedToolResult,
   createPlaywrightUnifiedExecutor,
@@ -538,14 +538,20 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     const captchaShots = new Set<string>();
     const captchaEvidence = async (rule: string) => {
       const url = tools.page.url();
-      if (!opts.onCaptchaEvidence || captchaShots.has(url) || captchaShots.size >= 3) return;
+      if (
+        !opts.onCaptchaEvidence ||
+        !captchaHandoffEvidence() ||
+        captchaShots.has(url) ||
+        captchaShots.size >= 3
+      )
+        return;
       captchaShots.add(url);
       await safe(async () => {
         const jpeg = await tools.page.screenshot({
           type: 'jpeg',
           quality: 70,
           timeout: 5_000,
-          style: SENSITIVE_SCREENSHOT_STYLE,
+          style: CAPTCHA_SCREENSHOT_STYLE,
         });
         await opts.onCaptchaEvidence?.({ jpeg, url, at: new Date(), rule });
       });

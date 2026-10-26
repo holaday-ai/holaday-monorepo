@@ -1,5 +1,6 @@
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { bestBuySensorShape } from './cloud-observation.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 
 /**
@@ -107,4 +108,92 @@ describe('FIX-38 #4 · BestBuy: the bot sensor POST is not a write; BestBuy writ
     );
     expect(r.interruption?.reason).toBe('unexpected_effect');
   }, 30_000);
+});
+
+// 协调方复审 #1 夹具 fix-38/review1-fixtures/bb.mjs, every case with its expected value.
+describe('FIX-38 复审 #1 · bb.mjs: only the sensor shape passes', () => {
+  const S = `{"sensor_data":"${'x'.repeat(4300)}"}`;
+  const SENSOR = '/8KDozX93j/xk/gO/RcnBJZU540yNkQ/z8hYSJf3/AbCd/EfGh';
+  it.each([
+    ['real sensor', `https://www.bestbuy.com${SENSOR}`, S, true],
+    ['uppercase host (the same host)', `https://WWW.BESTBUY.COM${SENSOR}`, S, true],
+    [
+      'production sensor, body key',
+      `https://www.bestbuy.com${SENSOR_PATH}`,
+      `{"body":"${'x'.repeat(4276)}"}`,
+      true,
+    ],
+    [
+      'lookalike host',
+      'https://www.bestbuy.com.evil.io/8KDozX93j/xk/gO/RcnBJZU540yNkQ/z8hYSJf3/AbCd',
+      S,
+      false,
+    ],
+    ['subdomain', 'https://api.bestbuy.com/8KDozX93j/xk/gO/RcnBJZU540yNkQ/z8hYSJf3/AbCd', S, false],
+    [
+      'trailing dot host',
+      'https://www.bestbuy.com./8KDozX93j/xk/gO/RcnBJZU540yNkQ/z8hYSJf3/AbCd',
+      S,
+      false,
+    ],
+    [
+      'cart api',
+      'https://www.bestbuy.com/cart/api/v1/addToCart',
+      '{"items":[{"skuId":"1"}]}',
+      false,
+    ],
+    [
+      'camelcase 6-seg write',
+      'https://www.bestbuy.com/site/CustomerService/api/v2/AddToCart/SubmitOrder',
+      '{"payload":"sku=123"}',
+      false,
+    ],
+    [
+      'camelcase 6-seg write, sensor body',
+      'https://www.bestbuy.com/site/CustomerService/api/v2/AddToCart/SubmitOrder',
+      S,
+      false,
+    ],
+    [
+      'graphql mutation string',
+      'https://www.bestbuy.com/gateway/graphql/AbCd/EfGh/IjKl/MnOp',
+      '{"query":"mutation { addToCart(sku:1) }"}',
+      false,
+    ],
+    [
+      'graphql path, sensor body',
+      'https://www.bestbuy.com/gateway/graphql/AbCd/EfGh/IjKl/MnOp',
+      S,
+      false,
+    ],
+    [
+      'identity',
+      'https://www.bestbuy.com/identity/signin/AbCd/EfGh/IjKl/MnOp',
+      '{"token":"x"}',
+      false,
+    ],
+    [
+      'identity path, sensor body',
+      'https://www.bestbuy.com/identity/signin/AbCd/EfGh/IjKl/MnOp',
+      S,
+      false,
+    ],
+    ['trailing slash', `https://www.bestbuy.com${SENSOR}/`, S, false],
+    ['two fields', `https://www.bestbuy.com${SENSOR}`, '{"a":"x","b":"y"}', false],
+    ['nested', `https://www.bestbuy.com${SENSOR}`, '{"a":{"b":1}}', false],
+    ['dup keys', `https://www.bestbuy.com${SENSOR}`, '{"a":"x","a":"y"}', false],
+    [
+      'another single key',
+      `https://www.bestbuy.com${SENSOR}`,
+      `{"payload":"${'x'.repeat(4300)}"}`,
+      false,
+    ],
+    ['a short sensor body', `https://www.bestbuy.com${SENSOR}`, '{"sensor_data":"x"}', false],
+    ['segments without digits', 'https://www.bestbuy.com/AbCd/EfGh/IjKl/MnOp/QrSt/UvWx', S, false],
+  ])('%s → %s', (_label, url, body, expected) => {
+    expect(bestBuySensorShape(new URL(url), 'POST', body)).toBe(expected);
+  });
+  it('a GET is no sensor POST', () => {
+    expect(bestBuySensorShape(new URL(`https://www.bestbuy.com${SENSOR}`), 'GET', S)).toBe(false);
+  });
 });

@@ -228,23 +228,49 @@ function botSensorPost(request: Request): boolean {
  * body pass; a real BestBuy write (cart, sign-in…) has a named path and still pauses. The
  * request itself is neither faked nor blocked.
  */
-function bestBuySensorPost(url: URL, request: Request): boolean {
-  if (url.hostname !== 'www.bestbuy.com' || request.method() !== 'POST' || url.search) return false;
+/** Words a real BestBuy endpoint path carries; a sensor's random segments never do. */
+const BESTBUY_WORD_RE =
+  /api|cart|checkout|order|account|identity|signin|graphql|gateway|site|services/i;
+
+/**
+ * 复审 #1: CamelCase words (`/site/CustomerService/api/v2/AddToCart/SubmitOrder`,
+ * `/gateway/graphql/AbCd/…`, `/identity/signin/AbCd/…`) are no sensor. A sensor path has
+ * 6–12 random segments, none a word or a version, most of them with digits (production:
+ * 6 of 8); its body is the sensor's own single key (`body` / `sensor_data`) holding a
+ * string of about 1 KB or more (production: 4.3 KB).
+ */
+export function bestBuySensorShape(url: URL, method: string, postData: string): boolean {
+  if (url.hostname !== 'www.bestbuy.com' || method !== 'POST' || url.search) return false;
   const segments = url.pathname.split('/').slice(1);
   if (
     segments.length < 6 ||
     segments.length > 12 ||
     !segments.every((segment) => /^[A-Za-z0-9]{2,24}$/.test(segment)) ||
-    // Random, not words: most segments mix upper and lower case.
+    segments.some((segment) => BESTBUY_WORD_RE.test(segment) || /^v\d+$/i.test(segment)) ||
+    // Random, not words: most segments mix upper and lower case, and carry digits.
     segments.filter((segment) => /[a-z]/.test(segment) && /[A-Z]/.test(segment)).length * 2 <
-      segments.length
+      segments.length ||
+    segments.filter((segment) => /\d/.test(segment)).length < Math.max(3, segments.length * 0.4)
   )
     return false;
   try {
-    const body: unknown = JSON.parse(request.postData() ?? '');
+    const body: unknown = JSON.parse(postData);
     if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
-    const values = Object.values(body);
-    return values.length === 1 && typeof values[0] === 'string';
+    const entries = Object.entries(body);
+    return (
+      entries.length === 1 &&
+      (entries[0]![0] === 'body' || entries[0]![0] === 'sensor_data') &&
+      typeof entries[0]![1] === 'string' &&
+      entries[0]![1].length >= 1000
+    );
+  } catch {
+    return false;
+  }
+}
+
+function bestBuySensorPost(url: URL, request: Request): boolean {
+  try {
+    return bestBuySensorShape(url, request.method(), request.postData() ?? '');
   } catch {
     return false;
   }

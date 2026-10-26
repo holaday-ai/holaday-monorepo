@@ -75,7 +75,6 @@ describe('FIX-38 #1 · core-11: no element ref or tab id reaches the user', () =
 
   it.each([
     ['点击了 [ref=e30] 的按钮', '点击了的按钮'],
-    ['我点了按钮 e7 后出现结果', '我点了按钮后出现结果'],
     ['切回 tab_9eff90a8-1234-4abc-8def-0123456789ab 读标题', '切回读标题'],
     ['切回 tab_9eff90a8-… 后读到标题', '切回后读到标题'],
     ['iframe（frame_0a1b2c3d-1111-2222-3333-444455556666）里写着 Hello', 'iframe里写着 Hello'],
@@ -97,6 +96,41 @@ describe('FIX-38 #1 · core-11: no element ref or tab id reaches the user', () =
   ])('reverse: 「%s」 is left as written', (text) => {
     expect(stripInternalRefs(text)).toBe(text);
     expect(sanitizeFinalText(text)).toBe(text);
+  });
+
+  // 协调方复审 #1 夹具 fix-38/review1-fixtures/ir.mjs, every case with its expected value.
+  it.each([
+    ['点击了按钮（ref e12）后页面跳转。', '点击了按钮后页面跳转。'],
+    ['读取了 e12–e23 共 12 段（e12、e13、e19–e23）。', '读取了 e12–e23 共 12 段。'],
+    ['页面（tab_9eff90a8-0b49-437e-a972-79de6d3ef019）已关闭', '页面已关闭'],
+    ['运行 e2e 测试：`if (value === "") reset();`', null],
+    ['config: tab_size = 4, frame_rate = 60, tab_width=8', null],
+    ['ffmpeg -i in.mp4 -vf fps=30 frame_0001.png', null],
+    ['URL: https://example.com/item?ref=e12&tab_abc123=1', null],
+    ['The E3 conference and e3 chip; model e5-2690 v4 CPU', null],
+    ['坐标 (e1, e2) 处；矩阵元素 e12 与 e21 相等。', null],
+    ['公式 e^2 和 1e10，订单号 e123456 已发货。', null],
+    ['标签 e3 已选中', null],
+    ['git hash frame_deadbeef12 and tab_cafe0001', null],
+    ['数学：基向量 (e1–e3) 构成正交基。', null],
+    ['链接 e2 指向首页', null],
+  ])('复审 #1 ir.mjs: %s', (input, expected) => {
+    expect(stripInternalRefs(input)).toBe(expected ?? input);
+    expect(sanitizeFinalText(input)).toBe(expected ?? input);
+  });
+
+  it('复审 #1: 「按钮 e7」 goes only when the browser gave out e7 in this run', () => {
+    expect(stripInternalRefs('我点了按钮 e7 后出现结果', new Set(['e7']))).toBe(
+      '我点了按钮后出现结果',
+    );
+    expect(stripInternalRefs('我点了按钮 e7 后出现结果')).toBe('我点了按钮 e7 后出现结果');
+    expect(stripInternalRefs('矩阵元素 e12 与 e21 相等', new Set(['e7']))).toBe(
+      '矩阵元素 e12 与 e21 相等',
+    );
+    // A ref inside a URL or code stays, the one in prose goes.
+    expect(stripInternalRefs('见 https://x.test/?ref=e12 和 `ref=e3`，按钮（ref e9）已点')).toBe(
+      '见 https://x.test/?ref=e12 和 `ref=e3`，按钮已点',
+    );
   });
 
   it('a ref removed next to code leaves the code as written (Codex on PR #301)', () => {
@@ -129,6 +163,26 @@ describe('FIX-38 #1 · core-11: no element ref or tab id reaches the user', () =
       requestHuman: async () => false,
     });
     expect(JSON.stringify(paused)).not.toMatch(/ref e\d/);
+  });
+
+  it('复审 #1: the loop drops 「按钮 e7」 for a ref its own snapshot gave out, not a page’s 「元素 e12」', async () => {
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '读取页面',
+      adapter: scriptedAdapter([
+        () => [call('snapshot', {}, 's1')],
+        () => [
+          call('finish', {
+            status: 'failed',
+            summary: '点了按钮 e7 没反应；页面写着矩阵元素 e12 与 e21 相等',
+          }),
+        ],
+      ]),
+      execute: async () => ({ ok: true, text: '- button "提交" [ref=e7]' }),
+    });
+    expect(outcome).toMatchObject({
+      status: 'failed',
+      reason: '点了按钮没反应；页面写着矩阵元素 e12 与 e21 相等',
+    });
   });
 });
 

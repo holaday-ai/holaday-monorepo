@@ -94,6 +94,21 @@ function collectSurface() {
     }
     if (area > 0 && area <= innerWidth * innerHeight * 0.5) inner = true;
   }
+  // 复审 #1: a page's whole fixed shell is no popup — a popup lies over other visible content,
+  // or says little (a login box: ≤ 400 characters).
+  if (overlay) {
+    const layer = overlay;
+    const beneath = document
+      .elementsFromPoint(innerWidth / 2, innerHeight / 2)
+      .some(
+        (el) =>
+          el !== document.body &&
+          el !== document.documentElement &&
+          !layer.contains(el) &&
+          !el.contains(layer),
+      );
+    if (!beneath && text(layer).trim().length > 400) overlay = null;
+  }
   if (
     overlay &&
     !regionElements.some(
