@@ -108,9 +108,9 @@ function collectSurface() {
     // A login popup's own 「我已阅读并同意《服务条款》《隐私政策》」 line is no cookie banner
     // (FIX-38, Gaode).
     const cookie =
-      /cookie|consent|隐私|同意.*条款/i.test(value) &&
       !auth &&
-      !/登录|注册|验证码|滑块|log ?in|sign ?in/i.test(value);
+      (/cookie|consent/i.test(value) ||
+        (/隐私|同意.*条款/.test(value) && !/登录|注册|验证码|滑块|log ?in|sign ?in/i.test(value)));
     const player = el.matches('#movie_player,#player,ytd-player');
     const playerSurface =
       player ||
