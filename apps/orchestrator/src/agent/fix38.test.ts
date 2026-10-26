@@ -91,9 +91,21 @@ describe('FIX-38 #1 · core-11: no element ref or tab id reaches the user', () =
     'reference e-mail: a@b.com',
     '公式 (e2) 成立',
     'tab_size 设为 4',
+    // Codex on PR #301: code next to an 「e2e」 is untouched — empty strings, calls, indentation.
+    'e2e example: if (value === "") reset();',
+    'Model E12:\n    def f():\n        return ()',
   ])('reverse: 「%s」 is left as written', (text) => {
     expect(stripInternalRefs(text)).toBe(text);
     expect(sanitizeFinalText(text)).toBe(text);
+  });
+
+  it('a ref removed next to code leaves the code as written (Codex on PR #301)', () => {
+    expect(stripInternalRefs('点击按钮 ref e12 后运行：if (value === "") reset();')).toBe(
+      '点击按钮后运行：if (value === "") reset();',
+    );
+    expect(stripInternalRefs('Clicked [ref=e5] then ran:\n    f("")\n    g()')).toBe(
+      'Clicked then ran:\n    f("")\n    g()',
+    );
   });
 
   it('a failure and a pause the loop ends with carry no ref either', async () => {

@@ -41,20 +41,31 @@ export function hasInternalRef(text: string): boolean {
   return INTERNAL_REF_RE.test(text);
 }
 
+/**
+ * Where a ref was removed (a private-use character no answer carries). Cleanup happens only
+ * around it, so an untouched `if (value === "") reset();` next to 「e2e」 stays as written.
+ */
+const CUT = '\uE000';
+
 /** `text` without element refs or tab / frame handles; other text is left as written. */
 export function stripInternalRefs(text: string): string {
   if (!text || !/\be\d|\b(?:tab|frame)_/i.test(text)) return text;
-  const stripped = text
-    .replace(BRACKETED_RE, '')
-    .replace(NOUN_ID_RE, '$1')
-    .replace(INLINE_REF_RE, '')
-    .replace(HANDLE_RE, '')
-    // What the removal leaves behind: empty quotes / brackets, a space before punctuation.
-    .replace(/[「“"『]\s*[」”"』]/gu, '')
-    .replace(/[（(]\s*[）)]/gu, '')
-    .replace(/[ \t]+([，。、；：,.;:！？）)」])/gu, '$1')
-    .replace(/[ \t]{2,}/g, ' ')
-    // 「点击了 的按钮」: a removed id leaves no gap between Chinese words.
-    .replace(/([\u4e00-\u9fff])[ \t]+([\u4e00-\u9fff])/gu, '$1$2');
-  return stripped === text ? text : stripped.replace(/[ \t]+$/gm, '');
+  const marked = text
+    .replace(BRACKETED_RE, CUT)
+    .replace(NOUN_ID_RE, `$1${CUT}`)
+    .replace(INLINE_REF_RE, CUT)
+    .replace(HANDLE_RE, CUT);
+  if (!marked.includes(CUT)) return text;
+  return (
+    marked
+      // What a removal leaves behind: quotes / brackets that held only the ref,
+      .replace(/[「“"『]\s*\uE000+\s*[」”"』]/gu, '')
+      .replace(/[（(]\s*\uE000+\s*[）)]/gu, '')
+      // a gap before punctuation or between Chinese words (「点击了 的按钮」),
+      .replace(/[ \t]*\uE000+[ \t]*(?=[，。、；：,.;:！？）)」』”])/gu, '')
+      .replace(/([\u4e00-\u9fff])[ \t]*\uE000+[ \t]*(?=[\u4e00-\u9fff])/gu, '$1')
+      // or at a line's start or end; anywhere else one space stays.
+      .replace(/^[ \t]*\uE000+[ \t]*|[ \t]*\uE000+[ \t]*$/gmu, '')
+      .replace(/[ \t]*\uE000+[ \t]*/gu, ' ')
+  );
 }
