@@ -58,6 +58,11 @@ function stripPlain(text: string, seen: ReadonlySet<string>): string {
   if (!marked.includes(CUT)) return text;
   return (
     marked
+      // FIX-39 #4: a list separator left next to the removed ref — 「（Web browser，tab_…）」,
+      // 「（tab_…，Web browser）」, 「A，ref e12，B」 — goes with it (only at a removal).
+      .replace(/[，,、；;][ \t]*\uE000+[ \t]*(?=[）)\]】」』])/gu, '')
+      .replace(/([（(\[【])[ \t]*\uE000+[ \t]*[，,、；;][ \t]*/gu, '$1')
+      .replace(/([，,、；;])[ \t]*\uE000+[ \t]*[，,、；;][ \t]*/gu, '$1')
       // What a removal leaves behind: quotes / brackets that held only the ref,
       .replace(/[「“"『]\s*+\s*[」”"』]/gu, '')
       .replace(/[（(]\s*+\s*[）)]/gu, '')
