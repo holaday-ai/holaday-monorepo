@@ -36,6 +36,7 @@ import {
   unescapeLiteralBreaks,
   unverifiedNote,
 } from './completion-fields.js';
+import { contentIds, namedContentUrl, onNamedContent } from './content-target.js';
 import { fullPageRead } from './full-page-read.js';
 import {
   answerCount,
@@ -486,9 +487,24 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     );
   };
   let sectionRejected = false;
+  /** FIX-41: the page read has fewer body sections than the 「第N节」 asked for. */
+  let sectionMissing = false;
   /** NAV-EXIT-1: the site the task names, opened before giving up on a blank page. */
   const blankTarget = intentTargetUrl(input.intent);
   let blankNudged = false;
+  /** FIX-41 (Deploy-41 dy-1): the one piece of content the task names by address. */
+  const namedContent = namedContentUrl(input.userIntent ?? input.intent);
+  let contentCorrected = false;
+  /** The page, or an address the answer cites, that shows other content than the named one. */
+  const offNamedContent = (named: string, summary: string) => {
+    const current = input.currentPageUrl?.();
+    if (!onNamedContent(named, current)) return current!;
+    return (
+      [...summary.matchAll(/https?:\/\/[^\s，。、；"'「」<>()（）]+/gi)]
+        .map((match) => match[0])
+        .find((url) => contentIds(url).length && !onNamedContent(named, url)) ?? null
+    );
+  };
   const wantedCount = requestedCount(input.intent);
   const wantedSection = requestedSection(input.intent);
   /** The latest body outline the model fetched: top-level and subsection titles. */
@@ -867,6 +883,29 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             staleTurn = true;
             continue;
           }
+          // FIX-41 (Deploy-41 dy-1): the page the answer was read from is other content than
+          // the one the task names. Sent back once to the named page, then never completed.
+          const offContent = namedContent ? offNamedContent(namedContent, summary) : null;
+          if (offContent) {
+            const why = `当前页面 ${offContent} 不是任务点名的 ${namedContent}（内容 id 不同），这个页面上的标题、作者、数字都不是用户要的`;
+            await rejected(summary, typeof args.evidence === 'string' ? args.evidence : '', why);
+            if (contentCorrected || concludeNow)
+              return {
+                status: 'failed',
+                reason: `页面跳到了别的内容（${offContent}），没能在任务点名的 ${namedContent} 上读到所需信息；为避免误导，没有交付别的内容的信息。`,
+                failureSource: 'task',
+                steps: step + 1,
+              };
+            contentCorrected = true;
+            results.push(
+              toolResult(
+                call.id,
+                `${why}。请 navigate 回 ${namedContent}，重新 snapshot，只用这个页面上的内容作答后再 finish；回去后仍到不了这个内容就如实说明。`,
+                true,
+              ),
+            );
+            continue;
+          }
           // FIX-27 (wa core-08): what the answer says the run did not do, or left
           // out, against what it did.
           {
@@ -938,6 +977,18 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           }
           // Reads carry tab ids and titles in cloud observation only.
           if (readsOpenedTitles && input.observationV2) {
+            // FIX-41 (Deploy-41 core-07): a read carries the page's h1, not its document title
+            // (「Safari (web browser) - Wikipedia」), so the answer's tab titles were marked
+            // 未核实. The host lists the tabs itself: their titles are host facts.
+            if (
+              input.supportedTools?.tabs !== false &&
+              trace.some((entry) => entry.ok && entry.openedTab)
+            ) {
+              const listed = await input.execute({ tool: 'list_tabs' }).catch(() => null);
+              if (listed?.ok)
+                for (const [tabId, title] of listedTabTitles(listed.text))
+                  tabTitles.set(tabId, title);
+            }
             const flat = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
             const answerText = flat(summary);
             const opened = [
@@ -1272,6 +1323,31 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               .then((result) => (result.ok ? outlineFrom(result.text) : null))
               .catch(() => null);
             const current = live ?? outline;
+            // FIX-41 (Deploy-41 core-06): the page has no Nth section at all — another page is
+            // tried once (the task may leave the page open), then it is 部分完成, never completed.
+            sectionMissing = !!current && current.top.length < wantedSection;
+            if (sectionMissing && !sectionRejected && !concludeNow) {
+              sectionRejected = true;
+              const reason = `所选页面正文只有 ${current!.top.length} 节，没有第${wantedSection}节`;
+              await rejected(summary, given, reason);
+              partialHeld ??= {
+                summary: withLimitations(
+                  /^\s*部分完成/.test(summary)
+                    ? summary
+                    : `部分完成：${reason}，没能总结第${wantedSection}节。\n\n${summary}`,
+                ),
+                evidence: given || observedText.slice(0, 500),
+                partial: { found: 0, wanted: 1, missing: `第${wantedSection}节` },
+              };
+              results.push(
+                toolResult(
+                  call.id,
+                  `${reason}，答案不能按「完成」交付。任务没有点名具体页面时，换一个正文有第${wantedSection}节的长条目（先 sections 确认章节数），用 get_page_text(section=${wantedSection}) 读取后再 finish；任务点名了这个页面，就如实说明没有第${wantedSection}节，结果会按「部分完成」交付。`,
+                  true,
+                ),
+              );
+              continue;
+            }
             const claim = current
               ? checkSectionClaim(summary, wantedSection, current.top, current.sub)
               : null;
@@ -1376,7 +1452,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               toolResult(
                 call.id,
                 namedHosts.length
-                  ? `任务要求操作日期控件，但本次没有在 ${sites} 的日期控件里填写过（time 时间控件不算）。只在这些网站内找日期控件：看站点首页的示例/页面列表，只打开名称与日期、表单相关的页面，不要打开登录、注册、付款页（如 /login），也不要换到别的网站；没有就直接如实说明，结果会按「部分完成」交付。`
+                  ? `任务要求操作日期控件，但本次没有在 ${sites} 的日期控件里填写过（time 时间控件不算）。${namedHosts.includes('the-internet.herokuapp.com') ? 'the-internet.herokuapp.com 的日期框在 https://the-internet.herokuapp.com/large_form（Birthday，type=date），去那里填写。' : ''}只在这些网站内找日期控件：看站点首页的示例/页面列表，只打开名称与日期、表单相关的页面，不要打开登录、注册、付款页（如 /login），也不要换到别的网站；没有就直接如实说明，结果会按「部分完成」交付。`
                   : '任务要求操作日期控件，但本次没有在日期控件里填写过（time 时间控件不算）。当前页面没有日期控件时，换一个有日期控件的公开表单页再填写（例如 https://www.w3schools.com/tags/tryhtml5_input_type_date.htm 的日期输入框），仍然只填不提交并截图；确实找不到时如实说明，结果会按「部分完成」交付。',
                 true,
               ),
@@ -1461,12 +1537,14 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           }
           const pageGap =
             listGap ?? (absent.length ? `部分完成：${absent.join('、')} 页面上没有读到。` : null);
-          if (short || dateMissing || declaredPartial || saysPartial || pageGap) {
+          if (short || dateMissing || sectionMissing || declaredPartial || saysPartial || pageGap) {
             const lead = short
               ? `部分完成：只找到 ${found}/${wantedCount} 条。`
               : dateMissing
                 ? '部分完成：没有找到可填写的日期控件，日期未填写。'
-                : (pageGap ?? '');
+                : sectionMissing
+                  ? `部分完成：所选页面正文没有第${wantedSection}节。`
+                  : (pageGap ?? '');
             return {
               status: 'completed',
               summary: withLimitations(
@@ -1482,11 +1560,13 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
                     wanted: 1,
                     missing: dateMissing
                       ? '日期控件'
-                      : pageGap
-                        ? absent.length && !listGap
-                          ? absent.join('、')
-                          : '页面未显示的字段'
-                        : '答案中说明的未完成部分',
+                      : sectionMissing
+                        ? `第${wantedSection}节`
+                        : pageGap
+                          ? absent.length && !listGap
+                            ? absent.join('、')
+                            : '页面未显示的字段'
+                          : '答案中说明的未完成部分',
                   },
             };
           }
@@ -1798,6 +1878,33 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         repeatedReads = 0;
         seenReads.clear();
       }
+      // FIX-41 (Deploy-41 dy-1): closing a popup (Esc / ×) moved the page off the content the
+      // task names — the host opens the named page again before anything is read there.
+      let backNote = '';
+      const closedPopup =
+        action.tool === 'press_key' ||
+        (action.tool === 'click' &&
+          !action.newTab &&
+          /关闭|close|dismiss|[×✕╳]/i.test(
+            pageEvidence
+              .at(-1)
+              ?.text.split('\n')
+              .find((line) => line.includes(`[ref=${action.ref}]`)) ?? '',
+          ));
+      const leftFor = input.currentPageUrl?.() ?? outcome.url;
+      if (namedContent && outcome.ok && closedPopup && !onNamedContent(namedContent, leftFor)) {
+        const back = { tool: 'navigate', url: namedContent } as const;
+        const allowed = (await input.gateAction?.(back, 'before'))?.kind ?? 'proceed';
+        const reopened = allowed === 'proceed' ? await input.execute(back) : null;
+        if (reopened) {
+          const { image: _image, ...reopenedReceipt } = reopened;
+          trace.push({ tool: 'navigate', ...reopenedReceipt });
+        }
+        backNote = reopened?.ok
+          ? `\n关闭弹层后页面跳到了别的内容（${leftFor}），不是任务点名的 ${namedContent}；宿主已重新打开点名页面。请重新 snapshot，只读这个页面上的内容；不要再用 Esc 关弹层，弹层挡住时点它自己的关闭按钮或直接读取。`
+          : `\n关闭弹层后页面跳到了别的内容（${leftFor}），不是任务点名的 ${namedContent}。请 navigate 回 ${namedContent} 再读取，不要用这个页面的内容作答。`;
+        staleTurn = true;
+      }
       if (outcome.ok && input.probeBlocker) {
         const blocker = await checkBlocker();
         if (formLoginDetour) {
@@ -1893,7 +2000,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         : '';
       const resultText = outcome.errorCode
         ? `${hostNote}${outcome.text} (${outcome.errorCode}: ${outcome.errorMessage ?? ''})${staleRedo}`
-        : hostNote + [outcome.text, ...localNotices].join('\n\n');
+        : hostNote + [outcome.text, ...localNotices].join('\n\n') + backNote;
       seenTool(resultText);
       results.push(toolResult(call.id, resultText, !outcome.ok));
       if (outcome.image)
