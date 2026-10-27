@@ -285,6 +285,47 @@ const STRAY_CLOSER_LINE_RE = /^[ \t]*[\}\]]{1,3}[\s,]*$/gm;
  * Empty / falsy input returns empty string — never undefined,
  * never null. The DB column is `result.summary: string`.
  */
+/**
+ * FIX-40 (Deploy-39/40 new-google: 「Claude is Anthropic&#x27;s AI」): an HTML entity copied out
+ * of a page is decoded — apostrophes, quotes, ampersands, spaces, numeric characters. `&lt;` /
+ * `&gt;` (and numeric < >) stay as they are, so no tag is made; fenced and inline code is left
+ * alone.
+ */
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+  '#39': "'",
+};
+export function decodeHtmlEntities(text: string): string {
+  if (!text.includes('&')) return text;
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
+    .map((part, i) =>
+      i % 2
+        ? part
+        : part.replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|[a-z]+);/gi, (whole, name: string) => {
+            const lower = name.toLowerCase();
+            if (NAMED_ENTITIES[lower] !== undefined) return NAMED_ENTITIES[lower]!;
+            if (!lower.startsWith('#')) return whole;
+            const code = lower.startsWith('#x')
+              ? Number.parseInt(lower.slice(2), 16)
+              : Number.parseInt(lower.slice(1), 10);
+            if (
+              !Number.isFinite(code) ||
+              code < 0x20 ||
+              code === 0x3c ||
+              code === 0x3e ||
+              code > 0x10ffff
+            )
+              return whole;
+            return String.fromCodePoint(code);
+          }),
+    )
+    .join('');
+}
+
 export function sanitizeFinalText(input: string | null | undefined): string {
   if (!input) return '';
   let text = input;
@@ -328,6 +369,8 @@ export function sanitizeFinalText(input: string | null | undefined): string {
   for (const re of CLAUDE_FOOTER_LINE_RE) text = text.replace(re, '');
   // 11. FIX-38: the browser's element refs and tab / frame ids are not the user's business.
   text = stripInternalRefs(text);
+  // FIX-40: HTML entities copied from a page read as the characters they stand for.
+  text = decodeHtmlEntities(text);
   // 12. Collapse whitespace gaps left by the strips.
   text = text.replace(TRIPLE_BLANK_RE, '\n\n');
   return text.trim();
