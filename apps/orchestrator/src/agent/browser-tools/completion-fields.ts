@@ -332,14 +332,40 @@ function answerFacts(summary: string, intent = ''): Fact[] {
       add({ name: '原文引用', value: quote, quote: true });
   }
   let headers: string[] | undefined;
+  /**
+   * FIX-42 (Deploy-42 dy-1 / xhs-read): 「| 项目 | 内容 |」 over 「| **标题** | … |」 is a label/value
+   * table — its first row is a row, not the header (its labels were checked as 标题 values).
+   */
+  let keyValue = false;
+  let previous: string[] | undefined;
   for (const line of text.split('\n')) {
+    if (!line.trim().startsWith('|')) {
+      previous = undefined;
+      keyValue = false;
+    }
     if (line.trim().startsWith('|')) {
       const cells = line
         .trim()
         .replace(/^\||\|$/g, '')
         .split('|')
         .map(clean);
-      if (cells.every((cell) => /^:?-+:?$/.test(cell))) continue;
+      if (cells.every((cell) => /^:?-+:?$/.test(cell))) {
+        // The row over the separator is the header.
+        if (
+          previous?.length === 2 &&
+          !previous.some((cell) => new RegExp(FACT_LABELS, 'i').test(cell))
+        ) {
+          headers = undefined;
+          keyValue = true;
+        }
+        continue;
+      }
+      previous = cells;
+      if (keyValue) {
+        if (cells.length === 2 && new RegExp(FACT_LABELS, 'i').test(cells[0]!))
+          add({ name: cells[0]!, value: cells[1]!.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') });
+        continue;
+      }
       if (!headers && cells.some((cell) => new RegExp(FACT_LABELS, 'i').test(cell))) {
         headers = cells;
         continue;

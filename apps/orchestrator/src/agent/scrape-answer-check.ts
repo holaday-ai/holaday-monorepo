@@ -32,9 +32,10 @@ const VALUE_MISSING_RE =
 /**
  * FIX-33 (new-qq rerun: 「歌曲名称：页面未显示 … 歌曲标题没有加载出来，所以无法确认具体是哪首歌」):
  * the answer says it does not know which thing the answer is.
+ * FIX-42 (Deploy-42 b-v06): 「无法确认第一名的具体歌名」 says so too.
  */
 export const IDENTITY_UNKNOWN_RE =
-  /无法(?:确认|确定|判断|得知)(?:具体)?(?:是)?哪(?:一)?(?:首|个|本|部|家|款|位|条|篇|只|支)|(?:标题|歌名|曲名|名称|名字)(?:没有|未能?|并未)(?:被)?(?:加载|显示|渲染|读取)出来|\b(?:can(?:no|')t|unable to) (?:tell|confirm|determine) which\b/i;
+  /无法(?:确认|确定|判断|得知)(?:具体)?(?:是)?哪(?:一)?(?:首|个|本|部|家|款|位|条|篇|只|支)|无法(?:确认|确定|得知|知道)[^。\n，,；;]{0,12}?(?:歌名|曲名|歌曲名称|书名|片名|标题)|(?:标题|歌名|曲名|名称|名字)(?:没有|未能?|并未)(?:被)?(?:加载|显示|渲染|读取)出来|\b(?:can(?:no|')t|unable to) (?:tell|confirm|determine) which\b/i;
 
 /** The label of the field that names the thing asked for. */
 const NAME_LABEL_RE = /名称|歌名|曲名|标题|名字|书名|片名|\bname\b|\btitle\b/i;
@@ -44,7 +45,7 @@ const NAME_LABEL_RE = /名称|歌名|曲名|标题|名字|书名|片名|\bname\b
  * field (「成交额页面未显示」) is not the answer missing.
  */
 const STANDALONE_MISSING_RE =
-  /(?:^|[。！？!?\n])\s*(?:\*\*)?(?:页面(?:上|中)?)?(?:未|没有|没)(?:显示|获取到?|读到|找到|列出|给出)([^。！？!?\n]{0,24})/g;
+  /(?:^|[。！？!?\n])\s*(?:\*\*)?(?:页面(?:上|中)?)?(?:未|没有|没)(?:被|能)?(?:显示|获取到?|读到|找到|列出|给出|抓取到?|抓到|读取到?|拿到|提取到?|加载出来)([^。！？!?\n]{0,24})/g;
 /**
  * FIX-36 (Deploy-36 fc-jd): 「京东需要登录才能查看该商品页面，请你自己登录后告诉我继续」 — the
  * fetched page was a login wall. A wall is the browser's to hand over, not a completed answer.
@@ -53,7 +54,7 @@ export const WALL_ANSWER_RE =
   /需要(?:你|您)?(?:先)?登录(?:后)?(?:才能|方可)|请(?:你|您)?(?:自己|先)?登录后|(?:遇到|是|被)(?:了)?(?:登录墙|验证墙|人机验证)|需要(?:完成)?(?:人机)?验证(?:后)?才能|\b(?:log ?in|sign in) (?:is )?required\b|\bplease (?:log ?in|sign in)\b/i;
 /** The name first: 「歌曲名称页面未显示。」 as the whole sentence (local reg-new-qq). */
 const STANDALONE_MISSING_AFTER_RE =
-  /(?:^|[。！？!?\n])\s*(?:\*\*)?([^。！？!?\n，,；;]{1,24}?)(?:页面(?:上|中)?)?(?:未|没有)(?:显示|获取到?|读到|找到|列出|给出)(?=\s*(?:[。！？!?\n]|$))/g;
+  /(?:^|[。！？!?\n])\s*(?:\*\*)?([^。！？!?\n，,；;]{1,24}?)(?:页面(?:上|中)?)?(?:未|没有)(?:被|能)?(?:显示|获取到?|读到|找到|列出|给出|抓取到?|抓到|读取到?|拿到|提取到?|加载出来)(?=\s*(?:[。！？!?\n]|$))/g;
 /**
  * FIX-36 复审 #1 #6: the kinds of value a short question asks for. A missing value only counts
  * when the question asks for its kind, and the missing thing is that value itself — not one
@@ -76,9 +77,10 @@ const SIDE_FIELD_RE =
  * asked kind named right before 「（页面）未显示」, anywhere in a sentence — not only at its
  * start or end. The few characters before it are kept so a side field (「历史价格页面未显示」)
  * is still told apart.
+ * FIX-42 (Deploy-42 b-v06, 「第一名的**歌曲名称未被抓取到**」): 未被抓取到 / 未能读取 / 没拿到 say the same.
  */
 const INLINE_MISSING_RE =
-  /([^。！？!?\n，,；;]{0,6}?(?:名称|歌名|曲名|标题|名字|书名|片名|价格|股价|点位|指数|评分|\bname\b|\btitle\b|\bprice\b))\s*[「『“"]?\s*(?:页面(?:上|中)?)?(?:未|没有|没)(?:显示|获取到?|读到|找到|列出|给出)/gi;
+  /([^。！？!?\n，,；;]{0,6}?(?:名称|歌名|曲名|标题|名字|书名|片名|价格|股价|点位|指数|评分|\bname\b|\btitle\b|\bprice\b))\s*[「『“"]?\s*(?:页面(?:上|中)?)?(?:未|没有|没)(?:被|能)?(?:显示|获取到?|读到|找到|列出|给出|抓取到?|抓到|读取到?|拿到|提取到?|加载出来)/gi;
 
 /** A name that belongs to something else than the thing asked for (「专辑名称」「作者名字」). */
 const SECONDARY_NAME_RE =

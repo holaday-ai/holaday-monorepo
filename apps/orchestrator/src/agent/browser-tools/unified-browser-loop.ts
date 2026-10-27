@@ -2137,6 +2137,13 @@ export function fieldLines(fields: unknown, summary: string): string {
     const text = unescapeLiteralBreaks(value).trim();
     if (!text || summary.includes(text) || /summary|总结|概述|摘要|说明|备注|note/i.test(name))
       continue;
+    // FIX-42 (Deploy-42 core-06): the browser's own ids are no answer field (「- tabId：…」).
+    if (
+      /^(?:tab_?id|frame_?id|ref|observation_?revision|snapshot_?id|target_?tab_?id)$/i.test(
+        name.trim(),
+      )
+    )
+      continue;
     lines.push(`- ${name}：${text}`);
   }
   return lines.join('\n');

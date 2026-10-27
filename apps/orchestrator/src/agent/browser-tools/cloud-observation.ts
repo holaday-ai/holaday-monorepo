@@ -230,7 +230,7 @@ function botSensorPost(request: Request): boolean {
  */
 /** Words a real BestBuy endpoint path carries; a sensor's random segments never do. */
 const BESTBUY_WORD_RE =
-  /api|cart|checkout|order|account|identity|signin|graphql|gateway|site|services/i;
+  /api|cart|checkout|order|account|identity|signin|login|payment|graphql|gateway|site|services/i;
 
 /**
  * 复审 #1: CamelCase words (`/site/CustomerService/api/v2/AddToCart/SubmitOrder`,
@@ -238,14 +238,24 @@ const BESTBUY_WORD_RE =
  * 6–12 random segments, none a word or a version, most of them with digits (production:
  * 6 of 8); its body is the sensor's own single key (`body` / `sensor_data`) holding a
  * string of about 1 KB or more (production: 4.3 KB).
+ * FIX-42 (Deploy-42 new-bestbuy / reg-new-bestbuy): the sensor also posts to 5 segments, one of
+ * them with a dash (`/b7-ENUDhYbI1cpWgkajc/GJEfLSQa3L/QGlgenIRVwc/dH0wKkY/mOCApAQ`, 4233 B
+ * `{"body":…}`); across the acceptance records that shape went out 31 times while the AI only
+ * opened, clicked or typed elsewhere. A dash inside a random segment is allowed; a word made of
+ * dashes (`add-to-cart`) is not.
  */
 export function bestBuySensorShape(url: URL, method: string, postData: string): boolean {
   if (url.hostname !== 'www.bestbuy.com' || method !== 'POST' || url.search) return false;
   const segments = url.pathname.split('/').slice(1);
   if (
-    segments.length < 6 ||
+    segments.length < 5 ||
     segments.length > 12 ||
-    !segments.every((segment) => /^[A-Za-z0-9]{2,24}$/.test(segment)) ||
+    !segments.every(
+      (segment) =>
+        /^[A-Za-z0-9-]{2,24}$/.test(segment) &&
+        (segment.match(/[A-Za-z0-9]/g) ?? []).length >= 2 &&
+        !/^[a-z]+(?:-[a-z]+)+$/i.test(segment),
+    ) ||
     segments.some((segment) => BESTBUY_WORD_RE.test(segment) || /^v\d+$/i.test(segment)) ||
     // Random, not words: most segments mix upper and lower case, and carry digits.
     segments.filter((segment) => /[a-z]/.test(segment) && /[A-Z]/.test(segment)).length * 2 <

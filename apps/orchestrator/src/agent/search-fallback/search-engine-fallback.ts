@@ -353,10 +353,17 @@ export async function runSearchWithFallback(
  * ACCEPT-283-R4: the in-browser results page (`.invalid`, never resolvable) is
  * not a link to show the user; the answer names the search API instead.
  */
-function withoutInternalPages(outcome: SupercarOutcome): SupercarOutcome {
+export function cleanInternalAddresses(text: string): string {
   // The page's origin (SEARCH_RESULTS_ORIGIN) up to the end of the URL.
-  const internal = /https:\/\/search-results\.holaday\.invalid[^\s，。；、)）\]」]*/g;
-  const clean = (text: string) => text.replace(internal, '搜索接口结果页');
+  // FIX-42 (Deploy-42 reg-new-google): stop at any bracket or quote — 「…?q=Claude（Brave 搜索接口，…）」
+  // swallowed 「（Brave」 into the address.
+  const internal =
+    /https:\/\/search-results\.holaday\.invalid[^\s，。；、：！？（）()[\]「」『』《》【】“”"'<>]*/g;
+  return text.replace(internal, '搜索接口结果页');
+}
+
+function withoutInternalPages(outcome: SupercarOutcome): SupercarOutcome {
+  const clean = cleanInternalAddresses;
   return {
     ...outcome,
     ...('summary' in outcome && outcome.summary ? { summary: clean(outcome.summary) } : {}),
