@@ -32,10 +32,17 @@ const VALUE_MISSING_RE =
 /**
  * FIX-33 (new-qq rerun: 「歌曲名称：页面未显示 … 歌曲标题没有加载出来，所以无法确认具体是哪首歌」):
  * the answer says it does not know which thing the answer is.
- * FIX-42 (Deploy-42 b-v06): 「无法确认第一名的具体歌名」 says so too.
  */
 export const IDENTITY_UNKNOWN_RE =
-  /无法(?:确认|确定|判断|得知)(?:具体)?(?:是)?哪(?:一)?(?:首|个|本|部|家|款|位|条|篇|只|支)|无法(?:确认|确定|得知|知道)[^。\n，,；;]{0,12}?(?:歌名|曲名|歌曲名称|书名|片名|标题)|(?:标题|歌名|曲名|名称|名字)(?:没有|未能?|并未)(?:被)?(?:加载|显示|渲染|读取)出来|\b(?:can(?:no|')t|unable to) (?:tell|confirm|determine) which\b/i;
+  /无法(?:确认|确定|判断|得知)(?:具体)?(?:是)?哪(?:一)?(?:首|个|本|部|家|款|位|条|篇|只|支)|(?:标题|歌名|曲名|名称|名字)(?:没有|未能?|并未)(?:被)?(?:加载|显示|渲染|读取)出来|\b(?:can(?:no|')t|unable to) (?:tell|confirm|determine) which\b/i;
+
+/**
+ * FIX-42 (Deploy-42 b-v06): 「无法确认第一名的具体歌名」 — a name it cannot tell. Only the asked one
+ * counts (PR #305 review: 「第一名是《晴天》…无法确认专辑的标题」 has its answer), so it goes
+ * through the same checks as an inline 「X未显示」.
+ */
+const UNKNOWN_NAME_RE =
+  /无法(?:确认|确定|得知|知道)([^。！？!?\n，,；;]{0,12}?(?:歌名|曲名|歌曲名称|书名|片名|标题))/g;
 
 /** The label of the field that names the thing asked for. */
 const NAME_LABEL_RE = /名称|歌名|曲名|标题|名字|书名|片名|\bname\b|\btitle\b/i;
@@ -141,9 +148,10 @@ export function answerNotObtained(answer: string, intent = ''): boolean {
         ...summary.slice(0, 400).matchAll(STANDALONE_MISSING_RE),
         ...summary.slice(0, 400).matchAll(STANDALONE_MISSING_AFTER_RE),
       ].some((m) => askedValueMissing(m[1] ?? '', intent)) ||
-      [...summary.slice(0, 400).matchAll(INLINE_MISSING_RE)].some((m) =>
-        inlineAskedValueMissing(m[1] ?? '', summary, intent),
-      ))
+      [
+        ...summary.slice(0, 400).matchAll(INLINE_MISSING_RE),
+        ...summary.slice(0, 600).matchAll(UNKNOWN_NAME_RE),
+      ].some((m) => inlineAskedValueMissing(m[1] ?? '', summary, intent)))
   )
     return true;
   // FIX-36 (b-v06, as the browser's 0b): a field the user named (作者、点赞数…) given as

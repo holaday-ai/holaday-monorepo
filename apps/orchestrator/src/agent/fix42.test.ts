@@ -29,6 +29,9 @@ describe('FIX-42 #1 · b-v06: a scrape answer without the asked name is not obta
     ['上证指数现在 3648.30 点，成交额未被抓取到。', '上证指数现在多少点'],
     ['第一名是《我好像在哪见过你》（薛之谦），无法确认这首歌的发行日期。', B_V06_INTENT],
     ['QQ音乐热歌榜第一名是《我好像在哪见过你》，歌手薛之谦。', B_V06_INTENT],
+    // PR #305 review: a title it cannot tell that is not the one asked for.
+    ['第一名是《晴天》，歌手周杰伦。无法确认专辑的标题。', B_V06_INTENT],
+    ['第一名是《晴天》，歌手周杰伦。无法确认这首歌的英文标题。', B_V06_INTENT],
   ])('reverse: 「%s」 is an answer', (answer, intent) => {
     expect(answerNotObtained(answer, intent)).toBe(false);
   });
