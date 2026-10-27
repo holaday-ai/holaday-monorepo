@@ -230,7 +230,7 @@ function botSensorPost(request: Request): boolean {
  */
 /** Words a real BestBuy endpoint path carries; a sensor's random segments never do. */
 const BESTBUY_WORD_RE =
-  /api|cart|checkout|order|account|identity|signin|graphql|gateway|site|services/i;
+  /api|cart|checkout|order|account|identity|signin|login|payment|graphql|gateway|site|services|save|wish|list|profile|remove|add|update|delete|user|reward|subscribe|register|address/i;
 
 /**
  * 复审 #1: CamelCase words (`/site/CustomerService/api/v2/AddToCart/SubmitOrder`,
@@ -238,14 +238,24 @@ const BESTBUY_WORD_RE =
  * 6–12 random segments, none a word or a version, most of them with digits (production:
  * 6 of 8); its body is the sensor's own single key (`body` / `sensor_data`) holding a
  * string of about 1 KB or more (production: 4.3 KB).
+ * FIX-42 (Deploy-42 new-bestbuy / reg-new-bestbuy): the sensor also posts to 5 segments, one of
+ * them with a dash (`/b7-ENUDhYbI1cpWgkajc/GJEfLSQa3L/QGlgenIRVwc/dH0wKkY/mOCApAQ`, 4233 B
+ * `{"body":…}`); across the acceptance records that shape went out 31 times while the AI only
+ * opened, clicked or typed elsewhere. A dash inside a random segment is allowed; a word made of
+ * dashes (`add-to-cart`) is not.
  */
 export function bestBuySensorShape(url: URL, method: string, postData: string): boolean {
   if (url.hostname !== 'www.bestbuy.com' || method !== 'POST' || url.search) return false;
   const segments = url.pathname.split('/').slice(1);
   if (
-    segments.length < 6 ||
+    segments.length < 5 ||
     segments.length > 12 ||
-    !segments.every((segment) => /^[A-Za-z0-9]{2,24}$/.test(segment)) ||
+    !segments.every(
+      (segment) =>
+        /^[A-Za-z0-9-]{2,24}$/.test(segment) &&
+        (segment.match(/[A-Za-z0-9]/g) ?? []).length >= 2 &&
+        !/^[a-z]+(?:-[a-z]+)+$/i.test(segment),
+    ) ||
     segments.some((segment) => BESTBUY_WORD_RE.test(segment) || /^v\d+$/i.test(segment)) ||
     // Random, not words: most segments mix upper and lower case, and carry digits.
     segments.filter((segment) => /[a-z]/.test(segment) && /[A-Z]/.test(segment)).length * 2 <
@@ -253,19 +263,29 @@ export function bestBuySensorShape(url: URL, method: string, postData: string): 
     segments.filter((segment) => /\d/.test(segment)).length < Math.max(3, segments.length * 0.4)
   )
     return false;
+  // DEPLOY-43 复审 #2: exactly one string member as written (a duplicate key is no sensor), and its
+  // value is the sensor's opaque string — never JSON (`{"body":"{\"action\":\"addToCart\"…}"}`)
+  // nor `key=value&key=…` pairs.
+  const member = postData.match(
+    /^\s*\{\s*"(?:body|sensor_data)"\s*:\s*("(?:[^"\\]|\\.)*")\s*\}\s*$/,
+  );
+  if (!member) return false;
+  let value: string;
   try {
-    const body: unknown = JSON.parse(postData);
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
-    const entries = Object.entries(body);
-    return (
-      entries.length === 1 &&
-      (entries[0]![0] === 'body' || entries[0]![0] === 'sensor_data') &&
-      typeof entries[0]![1] === 'string' &&
-      entries[0]![1].length >= 1000
-    );
+    value = JSON.parse(member[1]!) as string;
   } catch {
     return false;
   }
+  if (value.length < 1000) return false;
+  if (/^\s*[{[]/.test(value)) {
+    try {
+      const inner: unknown = JSON.parse(value);
+      if (inner && typeof inner === 'object') return false;
+    } catch {
+      /* Not JSON: an opaque string that starts with a bracket. */
+    }
+  }
+  return !/[A-Za-z_][\w.%-]{0,40}=[^&=]{0,200}&[A-Za-z_][\w.%-]{0,40}=/.test(value);
 }
 
 /**

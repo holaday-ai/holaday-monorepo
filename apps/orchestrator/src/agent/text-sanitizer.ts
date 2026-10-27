@@ -355,15 +355,22 @@ const TOOL_CALL_RE = new RegExp(
 );
 /** A tool argument written into prose (「均使用 newTab=true 在新标签中打开」「（end=true，未截断）」). */
 const TOOL_ARG_RE =
-  /\b(?:newTab\s*=\s*true|end\s*=\s*true|section\s*=\s*(\d+)|(?:targetTabId|observationRevision|ref)\s*=\s*[\w-]*)/g;
-const toolArgWords = (whole: string, section?: string) =>
+  /\b(?:newTab\s*=\s*true|end\s*=\s*true|section\s*=\s*(\d+)|truncated\s*=\s*(true|false)|sizeBytes\s*=\s*(\d+)|(?:targetTabId|tabId|frameId|observationRevision|ref)\s*=\s*[\w-]*)/g;
+/** FIX-42 (Deploy-42 core-06 / core-09): 「truncated=false」「sizeBytes=0」 read as words too. */
+const toolArgWords = (whole: string, section?: string, truncated?: string, size?: string) =>
   /^newTab/.test(whole)
     ? '新标签页'
     : /^end/.test(whole)
       ? '已读到末尾'
       : section
         ? `第${section}节`
-        : '';
+        : truncated
+          ? truncated === 'true'
+            ? '有截断'
+            : '未截断'
+          : size
+            ? `${size} 字节`
+            : '';
 const TOOL_NAME_RE = new RegExp(
   `\\b(${Object.keys(TOOL_WORDS)
     .filter((name) => name.includes('_'))
@@ -380,7 +387,9 @@ export function humanizeToolMentions(text: string): string {
   return (
     text
       // PR #304 review: an address (a source link, a Markdown link target) is left as it is.
-      .split(/(```[\s\S]*?```|`[^`\n]*`|\]\([^)\n]*\)|\b(?:https?:\/\/|www\.)[^\s<>"'）」”]+)/i)
+      .split(
+        /(```[\s\S]*?```|`[^`\n]*`|\]\([^)\n]*\)|\b(?:https?:\/\/|www\.)[^\s<>"'（）「」『』《》【】“”，。；]+)/i,
+      )
       .map((part, i) =>
         i % 2
           ? part
@@ -391,6 +400,17 @@ export function humanizeToolMentions(text: string): string {
               // What an emptied argument leaves: 「（，未截断）」「（）」.
               .replace(/（\s*[，,]\s*/g, '（')
               .replace(/（\s*）/g, ''),
+      )
+      .join('')
+      // FIX-42 (Deploy-42 core-06): the browser's own id field left empty 「- tabId：」 goes.
+      .split(/(```[\s\S]*?```)/)
+      .map((part, i) =>
+        i % 2
+          ? part
+          : part.replace(
+              /^[ \t]*[-*•][ \t]+(?:tab_?id|frame_?id|ref|observation_?revision|snapshot_?id|target_?tab_?id)[ \t]*[：:][ \t]*(?:\n|$)/gim,
+              '',
+            ),
       )
       .join('')
   );
