@@ -706,14 +706,30 @@ function tryExtractNumberedListItems(answerText: string): ParsedItem[] {
 
 const BULLET_LIST_RE = /^\s*[-*+]\s+(.+)$/;
 
+/** 「第1条标题：…」「Result 1 link: …」: the ordinal a bullet names. */
+const BULLET_ORDINAL_RE = /^(?:第\s*(\d{1,3})\s*(?:条|个|项)|(?:result|item)\s*#?(\d{1,3})\b)/i;
+
 function tryExtractBulletItems(answerText: string): ParsedItem[] {
   const lines = answerText.split(/\r?\n/);
   const items: ParsedItem[] = [];
+  let lastOrdinal: string | null = null;
   for (const raw of lines) {
     const m = raw.match(BULLET_LIST_RE);
     if (!m || !m[1]) continue;
     const body = m[1].trim();
     if (!body) continue;
+    // FIX-41 (Deploy-41 core-01): 「- 第1条标题：…」 then 「- 第1条链接：…」 are one result
+    // written on two lines, not two results (the title line was flagged 缺少来源链接).
+    const ordinal = body.match(BULLET_ORDINAL_RE);
+    const n = ordinal ? (ordinal[1] ?? ordinal[2])! : null;
+    const previous = items.at(-1);
+    if (n && n === lastOrdinal && previous) {
+      previous.raw = `${previous.raw}\n${body}`;
+      previous.url ??= extractUrlFromCell(body);
+      previous.price ??= parsePriceText(body);
+      continue;
+    }
+    lastOrdinal = n;
     items.push({
       name: body,
       price: parsePriceText(body),

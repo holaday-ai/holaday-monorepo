@@ -401,6 +401,15 @@ function answerFacts(summary: string, intent = ''): Fact[] {
       add({ name: '价格', value: clean(priced[2]!), listItem: true });
       continue;
     }
+    // FIX-41 (local f41a core-07): 「Safari (web browser) → 新标签，标题为“Safari (web browser) -
+    // Wikipedia”」 — prose around a quoted title: the quoted title is what the line claims.
+    const quoted = listed
+      ? [...listed.matchAll(/[“「"]([^”」"\n]{2,150})[”」"]/gu)].map((match) => clean(match[1]!))
+      : [];
+    if (quoted.length && !/https?:\/\//i.test(listed!)) {
+      for (const value of quoted) add({ name: '条目', value, listItem: true });
+      continue;
+    }
     if (
       listed &&
       !/[：*]/.test(listed) &&

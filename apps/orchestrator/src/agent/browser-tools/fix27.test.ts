@@ -1038,7 +1038,7 @@ setTimeout(() => v.play().catch(() => {}), 300);
       t2: 'Beta - Site',
       t3: 'Gamma - Site',
     };
-    const execute = () => {
+    const execute = (titles: Record<string, string> = TITLES) => {
       let active = 'source';
       let next = 0;
       return (async (action: { tool: string; targetTabId?: string }) => {
@@ -1050,7 +1050,7 @@ setTimeout(() => v.play().catch(() => {}), 300);
           return {
             ok: true,
             text: JSON.stringify({
-              tabs: Object.entries(TITLES).map(([tabId, title]) => ({ tabId, title })),
+              tabs: Object.entries(titles).map(([tabId, title]) => ({ tabId, title })),
             }),
           };
         if (action.tool === 'switch_tab') active = action.targetTabId!;
@@ -1076,7 +1076,10 @@ setTimeout(() => v.play().catch(() => {}), 300);
       name: 'finish',
       input: { status: 'completed', summary },
     });
-    const loop = (calls: Array<{ name: string; input: Record<string, unknown> }>) => {
+    const loop = (
+      calls: Array<{ name: string; input: Record<string, unknown> }>,
+      titles?: Record<string, string>,
+    ) => {
       const { adapter, seen } = scriptedLoop(calls);
       return runUnifiedBrowserLoop({
         intent: '请使用云端浏览器，从一个页面打开3个链接到新标签，分别读标题后回到第一个',
@@ -1084,18 +1087,26 @@ setTimeout(() => v.play().catch(() => {}), 300);
         maxSteps: 20,
         observationV2: true,
         supportedTools: { download: false, upload: false, tabs: true },
-        execute: execute(),
+        execute: execute(titles),
       }).then((outcome) => ({ outcome, seen: seen.join('\n') }));
     };
-    it('an answer naming nothing is sent back for list_tabs; with the titles it completes', async () => {
+    // FIX-41: the host lists the tabs itself at finish, so their titles are known without
+    // the model calling list_tabs; an answer naming none of them is sent back with them.
+    it('an answer naming nothing is sent back with the listed titles; with them it completes', async () => {
       const { outcome, seen } = await loop([
         ...opened,
         finish('打开了 3 个链接并读取了标题，已切回原标签。'),
-        { name: 'list_tabs', input: {} },
         finish('三个标题：Alpha - Site、Beta - Site、Gamma - Site。已切回原标签。'),
       ]);
-      expect(seen).toContain('请用 list_tabs 查看它的标题');
+      expect(seen).toContain('新标签的标题没写进答案：「Alpha - Site」');
       expect(outcome).toMatchObject({ status: 'completed' });
+    });
+    it('pages whose tabs list no title are asked for by list_tabs once', async () => {
+      const { seen } = await loop(
+        [...opened, finish('打开了 3 个链接并读取了标题，已切回原标签。'), finish('同上。')],
+        { t1: '', t2: '', t3: '' },
+      );
+      expect(seen).toContain('请用 list_tabs 查看它的标题');
     });
     it('after list_tabs, a missing title is told like any other', async () => {
       const { outcome } = await loop([
@@ -1107,11 +1118,14 @@ setTimeout(() => v.play().catch(() => {}), 300);
       expect(outcome).toMatchObject({ status: 'failed', failureSource: 'task' });
     });
     it('a page with no title at all does not fail the task after the one return', async () => {
-      const { outcome } = await loop([
-        ...opened,
-        finish('打开了 3 个链接，这些页面都没有标题，已切回原标签。'),
-        finish('打开了 3 个链接，这些页面都没有标题，已切回原标签。'),
-      ]);
+      const { outcome } = await loop(
+        [
+          ...opened,
+          finish('打开了 3 个链接，这些页面都没有标题，已切回原标签。'),
+          finish('打开了 3 个链接，这些页面都没有标题，已切回原标签。'),
+        ],
+        { t1: '', t2: '', t3: '' },
+      );
       expect(outcome).toMatchObject({ status: 'completed' });
     });
   });
