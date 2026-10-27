@@ -353,6 +353,17 @@ const TOOL_CALL_RE = new RegExp(
   `\\b(${Object.keys(TOOL_WORDS).join('|')})\\s*\\(\\s*(?:[a-zA-Z_]\\w*\\s*=\\s*[^()\\n,]{0,60}(?:\\s*,\\s*[a-zA-Z_]\\w*\\s*=\\s*[^()\\n,]{0,60})*)?\\s*\\)`,
   'g',
 );
+/** A tool argument written into prose (「均使用 newTab=true 在新标签中打开」「（end=true，未截断）」). */
+const TOOL_ARG_RE =
+  /\b(?:newTab\s*=\s*true|end\s*=\s*true|section\s*=\s*(\d+)|(?:targetTabId|observationRevision|ref)\s*=\s*[\w-]*)/g;
+const toolArgWords = (whole: string, section?: string) =>
+  /^newTab/.test(whole)
+    ? '新标签页'
+    : /^end/.test(whole)
+      ? '已读到末尾'
+      : section
+        ? `第${section}节`
+        : '';
 const TOOL_NAME_RE = new RegExp(
   `\\b(${Object.keys(TOOL_WORDS)
     .filter((name) => name.includes('_'))
@@ -375,7 +386,11 @@ export function humanizeToolMentions(text: string): string {
           ? part
           : part
               .replace(TOOL_CALL_RE, (_whole, name: string) => TOOL_WORDS[name]!)
-              .replace(TOOL_NAME_RE, (name: string) => TOOL_WORDS[name]!),
+              .replace(TOOL_NAME_RE, (name: string) => TOOL_WORDS[name]!)
+              .replace(TOOL_ARG_RE, toolArgWords)
+              // What an emptied argument leaves: 「（，未截断）」「（）」.
+              .replace(/（\s*[，,]\s*/g, '（')
+              .replace(/（\s*）/g, ''),
       )
       .join('')
   );

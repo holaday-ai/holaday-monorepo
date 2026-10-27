@@ -573,6 +573,11 @@ describe("FIX-41 · the browser's call syntax in an answer is written as the act
     ['通过 click(newTab=true) 依次打开', '通过 点击 依次打开'],
     ['用 get_page_text(section=3) 分段读取', '用 读取正文 分段读取'],
     ['list_tabs 显示 3 个标签', '查看标签页列表 显示 3 个标签'],
+    // Local A/B (B core-07, B core-06): arguments left in prose.
+    ['均使用 newTab=true 在新标签中打开', '均使用 新标签页 在新标签中打开'],
+    ['一次性完整读取（end=true，未截断）', '一次性完整读取（已读到末尾，未截断）'],
+    ['按 section=3 读取', '按 第3节 读取'],
+    ['切回起始标签（targetTabId=）', '切回起始标签'],
   ])('%s → %s', (input, expected) => {
     expect(humanizeToolMentions(input)).toBe(expected);
   });
@@ -583,6 +588,8 @@ describe("FIX-41 · the browser's call syntax in an answer is written as the act
     '在 Python 里写 `click(newTab=True)` 即可',
     '```\nawait page.click(selector)\n```',
     'the links(list) are below',
+    'the end=near the start of the line',
+    '设置 a=true 即可',
     // PR #304 review: addresses are not prose.
     '[文档](https://example.org/web_search?q=foo)',
     '来源 https://example.org/docs/get_page_text#list_tabs 已读',
