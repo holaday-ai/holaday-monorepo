@@ -366,16 +366,19 @@ const TOOL_NAME_RE = new RegExp(
  * arguments, or a snake_case tool name, is written as the action it is; code is left alone.
  */
 export function humanizeToolMentions(text: string): string {
-  return text
-    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
-    .map((part, i) =>
-      i % 2
-        ? part
-        : part
-            .replace(TOOL_CALL_RE, (_whole, name: string) => TOOL_WORDS[name]!)
-            .replace(TOOL_NAME_RE, (name: string) => TOOL_WORDS[name]!),
-    )
-    .join('');
+  return (
+    text
+      // PR #304 review: an address (a source link, a Markdown link target) is left as it is.
+      .split(/(```[\s\S]*?```|`[^`\n]*`|\]\([^)\n]*\)|\b(?:https?:\/\/|www\.)[^\s<>"'）」”]+)/i)
+      .map((part, i) =>
+        i % 2
+          ? part
+          : part
+              .replace(TOOL_CALL_RE, (_whole, name: string) => TOOL_WORDS[name]!)
+              .replace(TOOL_NAME_RE, (name: string) => TOOL_WORDS[name]!),
+      )
+      .join('')
+  );
 }
 
 export function sanitizeFinalText(input: string | null | undefined): string {

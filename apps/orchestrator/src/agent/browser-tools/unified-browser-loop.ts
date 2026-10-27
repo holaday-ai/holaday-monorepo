@@ -1896,11 +1896,19 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
       const leftFor = input.currentPageUrl?.() ?? outcome.url;
       if (namedContent && outcome.ok && closedPopup && !onNamedContent(namedContent, leftFor)) {
         const back = { tool: 'navigate', url: namedContent } as const;
-        const allowed = (await input.gateAction?.(back, 'before'))?.kind ?? 'proceed';
-        const reopened = allowed === 'proceed' ? await input.execute(back) : null;
+        // PR #304 review: the reopen is a host action like any other — a gate that stops the
+        // task (a veto, an expired handoff) ends it here, as on the normal action path.
+        const allowed = await input.gateAction?.(back, 'before');
+        if (allowed?.kind === 'stop') return { ...allowed.outcome, steps: step + 1 };
+        if (input.signal?.aborted) return cancelled(step + 1);
+        const reopened = !allowed || allowed.kind === 'proceed' ? await input.execute(back) : null;
         if (reopened) {
           const { image: _image, ...reopenedReceipt } = reopened;
           trace.push({ tool: 'navigate', ...reopenedReceipt });
+        }
+        if (reopened?.ok && input.gateAction) {
+          const landed = await input.gateAction(back, 'after');
+          if (landed.kind === 'stop') return { ...landed.outcome, steps: step + 1 };
         }
         backNote = reopened?.ok
           ? `\n关闭弹层后页面跳到了别的内容（${leftFor}），不是任务点名的 ${namedContent}；宿主已重新打开点名页面。请重新 snapshot，只读这个页面上的内容；不要再用 Esc 关弹层，弹层挡住时点它自己的关闭按钮或直接读取。`

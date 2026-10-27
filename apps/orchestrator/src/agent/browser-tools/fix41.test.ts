@@ -213,6 +213,34 @@ describe('FIX-41 #1 · dy-1: Esc moved the page to another video', () => {
     expect(outcome).toMatchObject({ status: 'completed' });
   });
 
+  it('PR #304 review: a gate that stops the reopen ends the task with its outcome', async () => {
+    const site = douyin();
+    const { adapter } = scriptedLoop([...ORIGINAL, finish(`视频标题为「${NAMED_TITLE}」。`)]);
+    let gated = 0;
+    const outcome = await runUnifiedBrowserLoop({
+      intent: DY1_PROMPT,
+      adapter,
+      maxSteps: 20,
+      observationV2: true,
+      execute: site.execute,
+      currentPageUrl: site.currentPageUrl,
+      gateAction: async (action, phase) =>
+        action.tool === 'navigate' && phase === 'before' && ++gated === 2
+          ? {
+              kind: 'stop',
+              outcome: {
+                status: 'awaiting_user',
+                reason: 'login',
+                message: '请用户接管',
+                steps: 0,
+              },
+            }
+          : { kind: 'proceed' },
+    });
+    expect(outcome).toMatchObject({ status: 'awaiting_user', reason: 'login' });
+    expect(site.calls.filter((call) => call.tool === 'navigate')).toHaveLength(1);
+  });
+
   it('reverse: a task that names no content is not held to its first page', async () => {
     const site = douyin();
     const { adapter } = scriptedLoop([...ORIGINAL, finish(`视频标题为「${OTHER_TITLE}」。`)]);
@@ -555,6 +583,10 @@ describe("FIX-41 · the browser's call syntax in an answer is written as the act
     '在 Python 里写 `click(newTab=True)` 即可',
     '```\nawait page.click(selector)\n```',
     'the links(list) are below',
+    // PR #304 review: addresses are not prose.
+    '[文档](https://example.org/web_search?q=foo)',
+    '来源 https://example.org/docs/get_page_text#list_tabs 已读',
+    '见 www.example.org/read_page?x=switch_tab',
   ])('reverse: 「%s」 is left as written', (text) => {
     expect(humanizeToolMentions(text)).toBe(text);
   });
