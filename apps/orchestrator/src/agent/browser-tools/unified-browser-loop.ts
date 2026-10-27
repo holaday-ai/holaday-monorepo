@@ -1509,14 +1509,12 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           // The page itself confirms the gap (a listed item showing only 「See options」):
           // an honest 部分完成, not a second look (FIX-35 0a).
           const listGap = input.partialNote?.(summary, observedText) ?? null;
-          if (
-            absent.length &&
-            !listGap &&
-            !absentLooked &&
-            !concludeNow &&
-            !trace.some((entry) => entry.tool === 'screenshot' && entry.ok)
-          ) {
+          if (absent.length && !listGap && !absentLooked && !concludeNow) {
             absentLooked = true;
+            // FIX-43 (Deploy-43 reg-dy-2): the run had a screenshot showing 「小喵麻麻」 top right and
+            // still wrote 作者「页面未显示」 — the login popup hid the rest of the page from the read.
+            // One look either way: close the popup by its own ×, read again, then the screenshot.
+            const shot = trace.some((entry) => entry.tool === 'screenshot' && entry.ok);
             await rejected(summary, given, `点名字段写成了页面未显示：${absent.join('、')}`);
             // The second look is optional: if it never ends in a finish (steps, model), this
             // answer is still delivered, as the 部分完成 it would have been.
@@ -1531,7 +1529,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             results.push(
               toolResult(
                 call.id,
-                `${absent.join('、')} 写成了页面未显示，但还没看过页面截图（登录弹窗等可能挡住了文字，名字常在页面角落）。请先 screenshot 看一眼：截图里看得到就照截图原样写（注明「截图读取」）；确实看不到再写「页面未显示」。其余内容不变，再 finish。`,
+                shot
+                  ? `${absent.join('、')} 写成了页面未显示，但登录弹窗打开时，弹窗后面的页面常读不到（名字常在页面右上角或标题旁）。请先点弹窗自己的关闭按钮（×，不要按 Esc）关掉它，再 snapshot 重读；仍读不到就再 screenshot，截图里看得到就照截图原样写（注明「截图读取」），确实看不到再写「页面未显示」。其余内容不变，再 finish。`
+                  : `${absent.join('、')} 写成了页面未显示，但还没看过页面截图（登录弹窗等可能挡住了文字，名字常在页面角落）。请先 screenshot 看一眼：截图里看得到就照截图原样写（注明「截图读取」）；确实看不到再写「页面未显示」。其余内容不变，再 finish。`,
                 true,
               ),
             );
@@ -1597,6 +1597,57 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             ),
           );
           continue;
+        }
+        // FIX-43 (Deploy-43 core-06): the model gave up because the page it picked has no 第N节
+        // (《维基百科历史》 has two). A task that names no page is sent back once to pick another;
+        // still none, its own account is delivered as 部分完成 — what it read stays the answer.
+        if (
+          wantedSection !== null &&
+          input.observationV2 &&
+          pageEvidence.length &&
+          !wallMet &&
+          !concludeNow
+        ) {
+          const live = await input
+            .execute({ tool: 'sections' })
+            .then((result) => (result.ok ? outlineFrom(result.text) : null))
+            .catch(() => null);
+          const current = live ?? outline;
+          // An article that has sections, just fewer — not a wall or an empty page.
+          if (current && current.top.length > 0 && current.top.length < wantedSection) {
+            const reason = `所选页面正文只有 ${current.top.length} 节，没有第${wantedSection}节`;
+            const namesPage = /https?:\/\/[^\s/]+\/\S/.test(input.userIntent ?? input.intent);
+            if (!sectionRejected && !namesPage) {
+              sectionRejected = true;
+              await rejected(
+                summary,
+                typeof args.evidence === 'string' ? args.evidence : '',
+                reason,
+              );
+              results.push(
+                toolResult(
+                  call.id,
+                  `${reason}。任务没有点名具体页面：换一个正文有第${wantedSection}节的长条目（先 sections 确认章节数），用 get_page_text(section=${wantedSection}) 读取后再 finish；换了还是没有，再如实说明，结果会按「部分完成」交付。`,
+                  true,
+                ),
+              );
+              continue;
+            }
+            return {
+              status: 'completed',
+              summary: withLimitations(
+                /^\s*部分完成/.test(summary)
+                  ? summary
+                  : `部分完成：${reason}，没能总结第${wantedSection}节。\n\n${summary}`,
+              ),
+              evidence: pageEvidence
+                .map((page) => page.text)
+                .join('\n')
+                .slice(0, 500),
+              steps: step + 1,
+              partial: { found: 0, wanted: 1, missing: `第${wantedSection}节` },
+            };
+          }
         }
         // FIX-35 复审 #1: a remediation (the 0b screenshot look, the date control) that ends
         // in a failed finish still delivers the answer it held.

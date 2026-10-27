@@ -305,16 +305,107 @@ const ANCHORED_LOG_ENDPOINTS: ReadonlyArray<readonly [host: RegExp, path: string
 /** Largest log body let through (observed: 0 B BestBuy, 680 B Xiaohongshu). */
 const LOG_BODY_MAX = 4096;
 
-export function anchoredLogPost(url: URL, method: string, postData: string): boolean {
+/**
+ * FIX-43 (协调方同意 fix-42/report.md §4): two telemetry posts with a known, keyed body. Across the
+ * acceptance records Xiaohongshu's performance SDK posted 240 times (239 in the background) and
+ * 高德's device log 17 times (14 on page load); each paused once or more when it landed in a click.
+ * Exact host and path, POST without a query, at most 8 KB, every key on the list — a key that
+ * names a note, comment, favourite, follow, phone, code or password is never let through.
+ */
+const XHS_APM_KEYS = new Set([
+  'clientTime',
+  'context_sdkSessionId',
+  'context_pageSessionId',
+  'context_sdkSeqId',
+  'context_nameTracker',
+  'context_platform',
+  'context_appVersion',
+  'context_osVersion',
+  'context_deviceModel',
+  'context_deviceId',
+  'context_package',
+  'context_networkType',
+]);
+/** 「可以多出少量 context_* 键」: at most this many context keys beyond the list. */
+const XHS_APM_EXTRA_CONTEXT = 4;
+const AMAP_COLLAPSAR_KEYS = new Set([
+  'adiu',
+  'buildVersion',
+  'channel',
+  'content',
+  'diu',
+  'env',
+  'h5Version',
+  'idfa',
+  'imei',
+  'md5',
+  'miniProgramVersion',
+  'mode',
+]);
+const KEYED_LOG_BODY_MAX = 8192;
+/** Keys of something a person did or typed — never telemetry. */
+const PERSONAL_KEY_RE =
+  /note|comment|collect|favou?rite|like|follow|phone|mobile|tel\b|sms|code|captcha|password|passwd|pwd|token|account|user_?id|uid/i;
+
+function jsonKeys(value: unknown, depth = 0): string[] {
+  if (!value || typeof value !== 'object' || depth > 4) return [];
+  if (Array.isArray(value)) return value.flatMap((item) => jsonKeys(item, depth + 1));
+  return Object.entries(value).flatMap(([key, item]) => [key, ...jsonKeys(item, depth + 1)]);
+}
+
+function xhsApmBody(postData: string): boolean {
+  let body: unknown;
+  try {
+    body = JSON.parse(postData);
+  } catch {
+    return false;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  const keys = Object.keys(body);
+  const extra = keys.filter((key) => !XHS_APM_KEYS.has(key));
   return (
-    method === 'POST' &&
-    // 协调方复核: `…/log-events?action=addToCart` names a write — never a log post.
-    !url.search &&
-    ANCHORED_LOG_ENDPOINTS.some(
-      ([host, path]) => host.test(url.hostname) && url.pathname === path,
-    ) &&
-    opaqueLogBody(postData)
+    keys.includes('clientTime') &&
+    extra.every((key) => /^context_[A-Za-z]{1,40}$/.test(key)) &&
+    extra.length <= XHS_APM_EXTRA_CONTEXT &&
+    !jsonKeys(body).some((key) => PERSONAL_KEY_RE.test(key) && !XHS_APM_KEYS.has(key))
   );
+}
+
+function amapCollapsarBody(postData: string): boolean {
+  if (/^\s*[{[]/.test(postData) || /content-disposition\s*:/i.test(postData)) return false;
+  const form = new URLSearchParams(postData);
+  const keys = [...form.keys()];
+  if (!keys.length || new Set(keys).size !== keys.length) return false;
+  if (!keys.every((key) => AMAP_COLLAPSAR_KEYS.has(key))) return false;
+  // `content` is the SDK's opaque log string: no field a person fills in inside it.
+  const content = form.get('content') ?? '';
+  return !/(?:phone|mobile|password|passwd|pwd|sms|verify_?code|captcha|\bcode)\s*["']?\s*[=:]/i.test(
+    content,
+  );
+}
+
+const KEYED_LOG_ENDPOINTS: ReadonlyArray<
+  readonly [host: string, path: string, body: (postData: string) => boolean]
+> = [
+  ['apm-fe.xiaohongshu.com', '/api/data', xhsApmBody],
+  ['collapsar.amap.com', '/alc/h5/upload', amapCollapsarBody],
+];
+
+export function anchoredLogPost(url: URL, method: string, postData: string): boolean {
+  if (
+    method !== 'POST' ||
+    // 协调方复核: `…/log-events?action=addToCart` names a write — never a log post.
+    url.search
+  )
+    return false;
+  if (
+    ANCHORED_LOG_ENDPOINTS.some(([host, path]) => host.test(url.hostname) && url.pathname === path)
+  )
+    return opaqueLogBody(postData);
+  const keyed = KEYED_LOG_ENDPOINTS.find(
+    ([host, path]) => url.hostname === host && url.pathname === path,
+  );
+  return !!keyed && postData.length <= KEYED_LOG_BODY_MAX && keyed[2](postData);
 }
 
 /**

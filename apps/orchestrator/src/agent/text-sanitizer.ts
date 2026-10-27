@@ -416,6 +416,28 @@ export function humanizeToolMentions(text: string): string {
   );
 }
 
+/**
+ * FIX-43 (Deploy-43 dy-1 「没有任何 `[互动=…]` 类标签」, google-direct-1 「当前页面 sourceURL 为…」): the
+ * product's own annotation and field names, in any final answer, read as words. Code and
+ * addresses are left alone.
+ */
+export function plainInternalWords(text: string): string {
+  return text
+    .split(
+      /(```[\s\S]*?```|`[^`\n]*`(?!\s*类)|\b(?:https?:\/\/|www\.)[^\s<>"'（）「」『』《》【】“”，。；]+)/i,
+    )
+    .map((part, i) =>
+      i % 2
+        ? part
+        : part
+            .replace(/`?\[互动=[^\]`\n]*\]`?\s*类?/g, '互动类型')
+            .replace(/页面\s*sourceURL\b\s*(?=[\u4e00-\u9fff])/g, '页面地址')
+            .replace(/页面\s*sourceURL\b/g, '页面地址')
+            .replace(/\bsourceURL\b/g, '页面地址'),
+    )
+    .join('');
+}
+
 export function sanitizeFinalText(input: string | null | undefined): string {
   if (!input) return '';
   let text = input;
@@ -461,6 +483,7 @@ export function sanitizeFinalText(input: string | null | undefined): string {
   text = stripInternalRefs(text);
   // FIX-40: HTML entities copied from a page read as the characters they stand for.
   text = decodeHtmlEntities(text);
+  text = plainInternalWords(text);
   // 12. Collapse whitespace gaps left by the strips.
   text = text.replace(TRIPLE_BLANK_RE, '\n\n');
   return text.trim();
