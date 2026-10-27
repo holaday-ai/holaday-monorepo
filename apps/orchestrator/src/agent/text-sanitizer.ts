@@ -326,6 +326,58 @@ export function decodeHtmlEntities(text: string): string {
     .join('');
 }
 
+/** The browser tools a model may name in its answer, as the user reads them. */
+const TOOL_WORDS: Record<string, string> = {
+  switch_tab: '切换标签页',
+  new_tab: '新建标签页',
+  list_tabs: '查看标签页列表',
+  read_page: '读取页面',
+  get_page_text: '读取正文',
+  press_key: '按键',
+  wait_for: '等待页面',
+  read_url: '只读获取',
+  web_search: '联网搜索',
+  request_human: '请用户接管',
+  scroll_until: '滚动读取',
+  click: '点击',
+  navigate: '打开网址',
+  snapshot: '读取页面',
+  sections: '读取章节目录',
+  links: '读取链接',
+  tables: '读取表格',
+  extract: '提取',
+  screenshot: '截图',
+  scroll: '滚动',
+};
+const TOOL_CALL_RE = new RegExp(
+  `\\b(${Object.keys(TOOL_WORDS).join('|')})\\s*\\(\\s*(?:[a-zA-Z_]\\w*\\s*=\\s*[^()\\n,]{0,60}(?:\\s*,\\s*[a-zA-Z_]\\w*\\s*=\\s*[^()\\n,]{0,60})*)?\\s*\\)`,
+  'g',
+);
+const TOOL_NAME_RE = new RegExp(
+  `\\b(${Object.keys(TOOL_WORDS)
+    .filter((name) => name.includes('_'))
+    .join('|')})\\b`,
+  'g',
+);
+
+/**
+ * FIX-41 (local f41b core-07): 「通过 click(newTab=true) 打开」「switch_tab(targetTabId=) 回执确认」
+ * — the browser's own call syntax in an answer is tool code (red line). A call with named
+ * arguments, or a snake_case tool name, is written as the action it is; code is left alone.
+ */
+export function humanizeToolMentions(text: string): string {
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
+    .map((part, i) =>
+      i % 2
+        ? part
+        : part
+            .replace(TOOL_CALL_RE, (_whole, name: string) => TOOL_WORDS[name]!)
+            .replace(TOOL_NAME_RE, (name: string) => TOOL_WORDS[name]!),
+    )
+    .join('');
+}
+
 export function sanitizeFinalText(input: string | null | undefined): string {
   if (!input) return '';
   let text = input;

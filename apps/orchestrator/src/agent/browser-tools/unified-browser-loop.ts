@@ -18,6 +18,7 @@ import { asksForToolCallExample } from '../generate-answer-guard.js';
 import { stripInternalRefs } from '../internal-refs.js';
 import { namedAddressHosts } from '../scrape-runner.js';
 import { SEARCH_RESULTS_ORIGIN } from '../search-fallback/search-results-page.js';
+import { humanizeToolMentions } from '../text-sanitizer.js';
 import {
   deniedActions,
   omitsFill,
@@ -327,7 +328,8 @@ export async function runUnifiedBrowserLoop(
       return result;
     },
   });
-  const strip = (text: string) => stripInternalRefs(text, seen);
+  // FIX-41: nor the browser's call syntax (「switch_tab(targetTabId=…)」), once its ids are gone.
+  const strip = (text: string) => humanizeToolMentions(stripInternalRefs(text, seen));
   // FIX-38 (Deploy-38 core-11): whatever way the loop ends, the user never reads an
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {

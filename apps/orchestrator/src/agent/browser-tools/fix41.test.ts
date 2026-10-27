@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { extractStructuredItems, reviewListAnswer } from '../../execution/answer-verifier.js';
 import type { ExecutionContract } from '../../execution/execution-contract.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { humanizeToolMentions } from '../text-sanitizer.js';
 import { assessCompletionFacts } from './completion-fields.js';
 import { contentIds, namedContentUrl, onNamedContent } from './content-target.js';
 import { siteEntryHint } from './site-entry-hints.js';
@@ -532,5 +533,53 @@ describe('FIX-41 #4 · core-07 (local f41a): a quoted title inside a list line i
     expect(facts(tabs.filter((tab) => tab.tabId !== 't2')).unverified.join('；')).toContain(
       'Google Chrome - Wikipedia',
     );
+  });
+});
+
+describe("FIX-41 · the browser's call syntax in an answer is written as the action (local f41b core-07)", () => {
+  /** Local f41b core-07, as the model wrote it (before the tab id was dropped). */
+  const F41B =
+    '已从起始页面（Wikipedia "Web browser"）通过 click(newTab=true) 依次打开3个链接到新标签页。操作结束后，已通过 switch_tab(targetTabId=tab_3f2a9c1e-7b4d-4e2a-9c1e-7b4d4e2a9c1e) 切换回起始页面，switch_tab 回执确认当前活动标签页为 Web browser - Wikipedia。';
+
+  it.each([
+    ['通过 click(newTab=true) 依次打开', '通过 点击 依次打开'],
+    ['用 get_page_text(section=3) 分段读取', '用 读取正文 分段读取'],
+    ['list_tabs 显示 3 个标签', '查看标签页列表 显示 3 个标签'],
+  ])('%s → %s', (input, expected) => {
+    expect(humanizeToolMentions(input)).toBe(expected);
+  });
+
+  it.each([
+    'click here to continue',
+    'scroll down to the footer',
+    '在 Python 里写 `click(newTab=True)` 即可',
+    '```\nawait page.click(selector)\n```',
+    'the links(list) are below',
+  ])('reverse: 「%s」 is left as written', (text) => {
+    expect(humanizeToolMentions(text)).toBe(text);
+  });
+
+  it('a browser answer is delivered without call syntax or a dangling id', async () => {
+    const { adapter } = scriptedLoop([
+      { name: 'navigate', input: { url: 'https://en.wikipedia.org/wiki/Web_browser' } },
+      { name: 'read_page', input: {} },
+      finish(
+        '已通过 read_page 读取页面，用 get_page_text(section=1) 读了第一段；list_tabs 显示标签 tab_3f2a9c1e-7b4d-4e2a-9c1e-7b4d4e2a9c1e 的标题为 Web browser - Wikipedia。',
+      ),
+    ]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '请使用云端浏览器，读一下 Web browser 词条',
+      adapter,
+      maxSteps: 5,
+      execute: (async () => ({
+        ok: true,
+        url: 'https://en.wikipedia.org/wiki/Web_browser',
+        text: 'Web browser - Wikipedia',
+      })) as never,
+    });
+    const shown = (outcome as { summary: string }).summary;
+    expect(shown).not.toMatch(/read_page|get_page_text|list_tabs|section=|tab_[0-9a-f]/);
+    expect(shown).toContain('用 读取正文 读了第一段');
+    expect(humanizeToolMentions(F41B)).not.toMatch(/click\(|switch_tab\b/);
   });
 });
