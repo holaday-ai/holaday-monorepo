@@ -15,7 +15,8 @@ const SNAPSHOT_ID = String.raw`e\d{2,6}`;
 const SEP = String.raw`\s*(?:[、,，/;；]|和|及|与|至|到|and|[–—~-])\s*`;
 /** e12、e13、e19–e23 / e12, e13 and e19-e23 */
 const ID_LIST = String.raw`${ID}(?:${SEP}${ID})*`;
-const REF = String.raw`ref\s*[=:：]?\s*`;
+// FIX-40 (Deploy-40 core-11): the plural too — 「(refs e12, e13, e19…)」「refs: e12–e23」.
+const REF = String.raw`refs?\s*[=:：]?\s*`;
 
 /**
  * A bracket holding only element ids: with 「ref」 (「（ref e12、e13）」「[ref=e12]」), or without

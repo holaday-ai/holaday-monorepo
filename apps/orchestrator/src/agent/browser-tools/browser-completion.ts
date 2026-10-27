@@ -171,18 +171,27 @@ export function completionGap(
   }
   const claims: Array<[RegExp, string]> = [
     [/(?:切回|切换|返回).{0,10}(?:标签|tab)|switched? (?:back )?to.{0,20}tab/i, 'switch_tab'],
-    [/(?:新建|打开|创建).{0,8}(?:新标签|\d+个标签)|opened? .{0,12}new tabs?/i, 'new_tab'],
+    // FIX-40: 「在新标签页中打开了…」 / 「in a new tab」 claim a new tab too.
+    [
+      /(?:新建|打开|创建).{0,8}(?:新标签|\d+个标签)|(?:在|于)\s*(?:\d+\s*个)?新(?:的)?标签页?.{0,6}(?:打开|读取|访问)|opened? .{0,12}new tabs?|\bin (?:a )?new tabs?\b/i,
+      'new_tab',
+    ],
     [/\bread_url\b/i, 'read_url'],
     [/(?:已|成功).{0,6}(?:上传)|uploaded/i, 'upload'],
   ];
-  for (const [pattern, tool] of claims)
+  for (const [pattern, tool] of claims) {
+    // FIX-40 (Deploy-40 core-04): 「切换到 Videos 标签」「点开『热门』标签」 is a control on the
+    // page, not a browser tab (FIX-26 kept). Only a browser tab (标签页 / 新标签 / 第 N 个 /
+    // 起始 / tab_… / new tab) needs a switch_tab receipt.
+    const needed = [...claimed.matchAll(new RegExp(pattern.source, 'gi'))].some(
+      (match) => tool !== 'switch_tab' || browserTabWords(match[0]),
+    );
     if (
-      [...claimed.matchAll(new RegExp(pattern.source, 'gi'))].some(
-        (match) => tool !== 'switch_tab' || !pageTabSwitch(match[0]),
-      ) &&
+      needed &&
       !successful.some((entry) => entry.tool === tool || (tool === 'new_tab' && entry.openedTab))
     )
       return `动作 ${tool} 没有成功工具回执，请实际执行或如实说明未完成。`;
+  }
   // FIX-26 (INTEGRATE-26 sb core-07): three in-page anchors of one article are
   // one page. Links opened from a page must reach pages other than it and
   // each other (the #fragment does not count).
@@ -306,11 +315,9 @@ export function receiptEvidence(intent: string, trace: readonly BrowserTrace[]):
  * page, not a browser tab. A browser tab is still meant by 标签页 / 新标签 /
  * 原标签 / 第一个 / 起始 / tab ids.
  */
-function pageTabSwitch(text: string): boolean {
-  return (
-    /筛选|分类|过滤|类别|栏目|「[^」]{1,8}」|“[^”]{1,8}”|"[^"]{1,8}"/.test(text) &&
-    !/标签页|新标签|原标签|源标签|起始|初始|第一个|第\s*[一二三四五六七八九十\d]+\s*个|tab_/.test(
-      text,
-    )
+/** A browser tab, not a tab control on the page (FIX-40; FIX-36 筛选/分类 kept as page words). */
+function browserTabWords(text: string): boolean {
+  return /标签页|新标签|原标签|源标签|起始|初始|第一个|第\s*[一二三四五六七八九十\d]+\s*个|tab_|\b(?:new|first|original|previous|browser|other|last|second|third)\s+tabs?\b|\btab\s*#?\d|\b\d+(?:st|nd|rd|th)\s+tab\b/i.test(
+    text,
   );
 }
