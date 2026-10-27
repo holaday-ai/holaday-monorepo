@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { extractStructuredItems, reviewListAnswer } from '../../execution/answer-verifier.js';
 import type { ExecutionContract } from '../../execution/execution-contract.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { assessCompletionFacts } from './completion-fields.js';
 import { contentIds, namedContentUrl, onNamedContent } from './content-target.js';
 import { siteEntryHint } from './site-entry-hints.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
@@ -500,6 +501,36 @@ describe("FIX-41 #4 · core-07: new tabs' document titles are host facts", () =>
     });
     expect((outcome as { summary: string }).summary).toContain(
       '新标签2标题「MacBook Air - Wikipedia」',
+    );
+  });
+});
+
+describe('FIX-41 #4 · core-07 (local f41a): a quoted title inside a list line is what is checked', () => {
+  /** Local f41a core-07, verbatim list. */
+  const F41A_CORE_07 =
+    '已从维基百科“Web browser”条目页面依次点击3个浏览器词条链接并在新标签中打开：\n1. Safari (web browser) → 新标签，标题为“Safari (web browser) - Wikipedia”；\n2. Google Chrome → 新标签，标题为“Google Chrome - Wikipedia”；\n3. Microsoft Edge → 新标签，标题为“Microsoft Edge - Wikipedia”。';
+  const tabs = [
+    { text: 'Safari (web browser) - Wikipedia', tabId: 't1' },
+    { text: 'Google Chrome - Wikipedia', tabId: 't2' },
+    { text: 'Microsoft Edge - Wikipedia', tabId: 't3' },
+    { text: 'heading "Web browser"', tabId: 'source' },
+  ];
+  const facts = (pages: typeof tabs) =>
+    assessCompletionFacts({
+      summary: F41A_CORE_07,
+      pages,
+      receipts: '',
+      toolTexts: '',
+      intent: '请使用云端浏览器，从一个页面打开3个链接到新标签，分别读标题后回到第一个',
+    });
+
+  it('the three listed tab titles are verified', () => {
+    expect(facts(tabs).unverified).toEqual([]);
+  });
+
+  it('reverse: a quoted title no tab has is still unverified', () => {
+    expect(facts(tabs.filter((tab) => tab.tabId !== 't2')).unverified.join('；')).toContain(
+      'Google Chrome - Wikipedia',
     );
   });
 });
