@@ -6,11 +6,13 @@ import { declaredAbsentFields } from './browser-tools/completion-fields.js';
  * checks — the coordinator's fixtures run it on its own (FIX-37 复审 #1).
  */
 
+// FIX-43 (local A/B reg-dy-2): 「页面没有加载出视频内容，显示的是"视频数据加载中"」 — the page itself
+// never rendered; a side part not loaded (「评论区没有加载出来」) is not this.
 // FIX-35 复审 #1 (BENCH r06): 「抓取内容中…没有包含 RFC 9110 的标题和发布时间」 is 没拿到 too —
 // only when the fetched content itself is what lacks it (复审 #2: 「根据抓取的 Node.js 发布页，
 // …更新没有包含破坏性变更」 is an answer).
 export const NOT_OBTAINED_RE =
-  /缺少浏览器(?:环境)?|需要(?:在)?(?:真实|云端)?浏览器(?:中|里)?(?:操作|打开|执行)|(?:无法|不能|没法)(?:在此|直接|在这里)?(?:填写|下载|操作|执行|交互|搜索)|没(?:能|有)?(?:拿到|获取到|读到|抓到)|没有(?:显示|展示|任何)(?:任何)?(?:商品|内容|信息|数据|结果)|未能(?:获取|读取|找到|抓取|拿到)|拿不到|无法获取|无法给出|(?:抓取|抓到)(?:的|到的)?(?:内容|结果|页面|数据)(?:里|中)[^。\n]{0,80}?(?:没有|并未|未)包含|(?:没有|并未|未)(?:包含|提供|列出|收录|涉及)[^，。；\n]{0,24}的(?:相关|具体|详细)?(?:条目)?(?:信息|内容|数据)(?!库)|(?:抓取|抓到)(?:到)?的?(?:内容|结果|页面|数据)(?:里|中)?(?:没有|不含|未包含|缺)|在抓取(?:到)?的?(?:内容|结果|数据)(?:里|中)缺失|(?:抓取|抓到)(?:到)?的?(?:页面)?(?:内容|结果|页面|数据)(?:里|中)[^。\n]{0,20}(?:缺失|空缺|丢失)|(?:不|无法|没有|未)执行浏览器操作|不是[^，。\n]{0,24}(?:搜索|检索)[^，。\n]{0,24}的?第[一1](?:条|个|名)|(?:抓取|抓到)(?:到)?的?(?:内容|结果|页面|数据)(?:里|中)[^。\n]{0,12}(?:没有|未)(?:显示|展示|出现)|(?:没法|无法|不能)(?:直接)?回答|\b(?:could not|couldn't|unable to)\s+(?:find|get|retrieve|access|read|fill|download)\b|\b(?:not|isn't|aren't) (?:included|shown|present|listed|available) in the (?:provided|fetched|scraped|crawled) (?:content|page|data|results?)\b|\bthe (?:fetched|provided|scraped|crawled) (?:content|page|data) (?:does not|doesn't) (?:include|contain|show)\b/i;
+  /(?:页面|视频|内容|数据|正文)[^。\n，,；;]{0,6}(?:没有|未能?)加载(?:出|完成)|无法读取任何|缺少浏览器(?:环境)?|需要(?:在)?(?:真实|云端)?浏览器(?:中|里)?(?:操作|打开|执行)|(?:无法|不能|没法)(?:在此|直接|在这里)?(?:填写|下载|操作|执行|交互|搜索)|没(?:能|有)?(?:拿到|获取到|读到|抓到)|没有(?:显示|展示|任何)(?:任何)?(?:商品|内容|信息|数据|结果)|未能(?:获取|读取|找到|抓取|拿到)|拿不到|无法获取|无法给出|(?:抓取|抓到)(?:的|到的)?(?:内容|结果|页面|数据)(?:里|中)[^。\n]{0,80}?(?:没有|并未|未)包含|(?:没有|并未|未)(?:包含|提供|列出|收录|涉及)[^，。；\n]{0,24}的(?:相关|具体|详细)?(?:条目)?(?:信息|内容|数据)(?!库)|(?:抓取|抓到)(?:到)?的?(?:内容|结果|页面|数据)(?:里|中)?(?:没有|不含|未包含|缺)|在抓取(?:到)?的?(?:内容|结果|数据)(?:里|中)缺失|(?:抓取|抓到)(?:到)?的?(?:页面)?(?:内容|结果|页面|数据)(?:里|中)[^。\n]{0,20}(?:缺失|空缺|丢失)|(?:不|无法|没有|未)执行浏览器操作|不是[^，。\n]{0,24}(?:搜索|检索)[^，。\n]{0,24}的?第[一1](?:条|个|名)|(?:抓取|抓到)(?:到)?的?(?:内容|结果|页面|数据)(?:里|中)[^。\n]{0,12}(?:没有|未)(?:显示|展示|出现)|(?:没法|无法|不能)(?:直接)?回答|\b(?:could not|couldn't|unable to)\s+(?:find|get|retrieve|access|read|fill|download)\b|\b(?:not|isn't|aren't) (?:included|shown|present|listed|available) in the (?:provided|fetched|scraped|crawled) (?:content|page|data|results?)\b|\bthe (?:fetched|provided|scraped|crawled) (?:content|page|data) (?:does not|doesn't) (?:include|contain|show)\b/i;
 const NOT_SHOWN_RE =
   /^\s*(?:\*\*)?(?:页面未显示|未显示|未找到|没有找到|未获取到?|无法获取|没拿到|不详|未知|暂无|n\/a|not (?:shown|found|available))(?:\*\*)?[。.]?\s*$/i;
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { answerNotObtained } from '../scrape-answer-check.js';
 import { plainInternalWords, sanitizeFinalText } from '../text-sanitizer.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
@@ -221,5 +222,24 @@ describe('FIX-43 #4 · internal words in an answer read as words', () => {
     '见 https://example.org/?sourceURL=1',
   ])('reverse: 「%s」 is left as written', (text) => {
     expect(plainInternalWords(text)).toBe(text);
+  });
+});
+
+describe('FIX-43 #3 · a scrape of a page that never rendered is not obtained (local A/B reg-dy-2)', () => {
+  const Q =
+    '打开 https://www.douyin.com/video/7377304298310389027 读视频标题、作者，以及点赞数、评论数、收藏数、分享数（不播放）';
+  it.each([
+    '抓取到的页面内容不完整，显示"视频数据加载中"和"直播加载中"，没有加载出实际的视频信息。\n\n缺少的信息：\n- 视频标题\n- 作者\n\n页面没有加载完成，无法读取任何视频相关数据。',
+    '页面没有加载出视频内容，显示的是"视频数据加载中"状态。\n\n缺失的信息：\n- 视频标题\n- 作者',
+  ])('local A/B verbatim → not obtained (the browser gets its try)', (answer) => {
+    expect(answerNotObtained(answer, Q)).toBe(true);
+  });
+  it('reverse: a side part not loaded, with the answer given', () => {
+    expect(
+      answerNotObtained(
+        '视频标题：第52集 | 柠檬巴巴露亚；作者：小喵麻麻；点赞 4741。评论区没有加载出来。',
+        Q,
+      ),
+    ).toBe(false);
   });
 });
