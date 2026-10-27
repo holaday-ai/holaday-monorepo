@@ -2137,11 +2137,13 @@ export function fieldLines(fields: unknown, summary: string): string {
     const text = unescapeLiteralBreaks(value).trim();
     if (!text || summary.includes(text) || /summary|总结|概述|摘要|说明|备注|note/i.test(name))
       continue;
-    // FIX-42 (Deploy-42 core-06): the browser's own ids are no answer field (「- tabId：…」).
+    // FIX-42 (Deploy-42 core-06): the browser's own ids are no answer field (「- tabId：…」) —
+    // only when the value is one (DEPLOY-43 复审 #4: a 「ref」 field may be a real reference).
     if (
       /^(?:tab_?id|frame_?id|ref|observation_?revision|snapshot_?id|target_?tab_?id)$/i.test(
         name.trim(),
-      )
+      ) &&
+      /^(?:e\d{1,6}|(?:tab|frame)_[\w-]+|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.test(text)
     )
       continue;
     lines.push(`- ${name}：${text}`);

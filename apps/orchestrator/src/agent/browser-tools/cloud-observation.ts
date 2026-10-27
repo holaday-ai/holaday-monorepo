@@ -230,7 +230,7 @@ function botSensorPost(request: Request): boolean {
  */
 /** Words a real BestBuy endpoint path carries; a sensor's random segments never do. */
 const BESTBUY_WORD_RE =
-  /api|cart|checkout|order|account|identity|signin|login|payment|graphql|gateway|site|services/i;
+  /api|cart|checkout|order|account|identity|signin|login|payment|graphql|gateway|site|services|save|wish|list|profile|remove|add|update|delete|user|reward|subscribe|register|address/i;
 
 /**
  * 复审 #1: CamelCase words (`/site/CustomerService/api/v2/AddToCart/SubmitOrder`,
@@ -263,19 +263,29 @@ export function bestBuySensorShape(url: URL, method: string, postData: string): 
     segments.filter((segment) => /\d/.test(segment)).length < Math.max(3, segments.length * 0.4)
   )
     return false;
+  // DEPLOY-43 复审 #2: exactly one string member as written (a duplicate key is no sensor), and its
+  // value is the sensor's opaque string — never JSON (`{"body":"{\"action\":\"addToCart\"…}"}`)
+  // nor `key=value&key=…` pairs.
+  const member = postData.match(
+    /^\s*\{\s*"(?:body|sensor_data)"\s*:\s*("(?:[^"\\]|\\.)*")\s*\}\s*$/,
+  );
+  if (!member) return false;
+  let value: string;
   try {
-    const body: unknown = JSON.parse(postData);
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
-    const entries = Object.entries(body);
-    return (
-      entries.length === 1 &&
-      (entries[0]![0] === 'body' || entries[0]![0] === 'sensor_data') &&
-      typeof entries[0]![1] === 'string' &&
-      entries[0]![1].length >= 1000
-    );
+    value = JSON.parse(member[1]!) as string;
   } catch {
     return false;
   }
+  if (value.length < 1000) return false;
+  if (/^\s*[{[]/.test(value)) {
+    try {
+      const inner: unknown = JSON.parse(value);
+      if (inner && typeof inner === 'object') return false;
+    } catch {
+      /* Not JSON: an opaque string that starts with a bracket. */
+    }
+  }
+  return !/[A-Za-z_][\w.%-]{0,40}=[^&=]{0,200}&[A-Za-z_][\w.%-]{0,40}=/.test(value);
 }
 
 /**

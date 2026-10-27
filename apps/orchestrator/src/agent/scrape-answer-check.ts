@@ -43,6 +43,12 @@ export const IDENTITY_UNKNOWN_RE =
  */
 const UNKNOWN_NAME_RE =
   /无法(?:确认|确定|得知|知道)([^。！？!?\n，,；;]{0,12}?(?:歌名|曲名|歌曲名称|书名|片名|标题))/g;
+/** DEPLOY-43 复审 #3: the name first — 「具体歌名无法确认」「第一名的歌名不确定」「歌名未确认」. */
+const UNKNOWN_NAME_AFTER_RE =
+  /([^。！？!?\n，,；;]{0,8}?(?:歌名|曲名|歌曲名称|书名|片名|标题|名称|名字))\s*(?:不确定|未确认|未能确认|无法确认|无法确定|无法得知)/g;
+/** The phrase points at the asked name itself (「第一名的具体歌名」), not another one (「第二名的」「英文标题」). */
+const ASKED_NAME_POINTER_RE = /具体|第\s*[一1]\s*名|榜首|冠军/;
+const OTHER_NAME_POINTER_RE = /第\s*[二三四五六七八九十2-9]|英文|中文|原名|别名|副标题|另一/;
 
 /** The label of the field that names the thing asked for. */
 const NAME_LABEL_RE = /名称|歌名|曲名|标题|名字|书名|片名|\bname\b|\btitle\b/i;
@@ -102,6 +108,12 @@ const ANSWERED_NAME_RE =
 const MISSING_MARK_RE = /未显示|未获取|未读到|未找到|没有显示|无法(?:获取|确认)|不详|未知/;
 /** A hedged name is a guess, not an answer (「可能是《X》（从飙升榜推测）」). */
 const HEDGE_RE = /可能|推测|疑似|或许|大概|应该是|猜/;
+/** DEPLOY-43 复审 #3: 「《晴天》（来自飙升榜）」 — a name taken from another chart than the asked one is a guess. */
+const OTHER_CHART_RE = /(?:来自|取自|出自|摘自)\s*[^，。；）)\n]{0,10}?([\p{L}\d]{1,8}榜)/gu;
+function hedged(answer: string, intent: string): boolean {
+  if (HEDGE_RE.test(answer)) return true;
+  return [...answer.matchAll(OTHER_CHART_RE)].some((m) => !intent.includes(m[1]!.slice(-3)));
+}
 
 /**
  * FIX-37 (Codex on PR #300 + 复审 #1): an inline 「X名称页面未显示」 is the asked value missing unless
@@ -119,11 +131,28 @@ function inlineAskedValueMissing(missing: string, answer: string, intent: string
     return false;
   }
   const isName = /名称|歌名|曲名|标题|名字|书名|片名|\bname\b|\btitle\b/i.test(missing);
-  if (!isName || HEDGE_RE.test(answer)) return true;
+  if (!isName || hedged(answer, intent)) return true;
+  // DEPLOY-43 复审 #3: the chart's own name (「歌曲：《热歌榜》」) is no answered name.
   const answered = [...answer.matchAll(ANSWERED_NAME_RE)].some(
-    (m) => !MISSING_MARK_RE.test(m[1] ?? ''),
+    (m) => !MISSING_MARK_RE.test(m[1] ?? '') && !intent.includes(m[1] ?? ''),
   );
   return !answered;
+}
+
+/**
+ * DEPLOY-43 复审 #3: an answer saying the asked name itself is unknown (「第一名的具体歌名无法确认」,
+ * front or back) is not answered by a 《name》 elsewhere; another name it cannot tell (「第二名的歌名」
+ * 「英文标题」「专辑的标题」) goes through the inline checks.
+ */
+function unknownAskedName(phrase: string, answer: string, intent: string): boolean {
+  if (!askedValueMissing(phrase, intent)) return false;
+  if (
+    ASKED_NAME_POINTER_RE.test(phrase) &&
+    !OTHER_NAME_POINTER_RE.test(phrase) &&
+    !(phrase.match(SECONDARY_NAME_RE) ?? []).length
+  )
+    return true;
+  return inlineAskedValueMissing(phrase, answer, intent);
 }
 
 function askedValueMissing(missing: string, intent: string): boolean {
@@ -137,6 +166,15 @@ export function answerNotObtained(answer: string, intent = ''): boolean {
   if (NOT_OBTAINED_RE.test(summary.slice(0, 240))) return true;
   if (IDENTITY_UNKNOWN_RE.test(summary.slice(0, 600))) return true;
   if (WALL_ANSWER_RE.test(summary.slice(0, 240))) return true;
+  // DEPLOY-43 复审 #3: the question names a chart, the answer's name comes from another one
+  // (「第一名是《晴天》（取自飙升榜）」 for 热歌榜) — a guess about the asked chart, not its answer.
+  if (
+    /榜/.test(intent) &&
+    [...summary.slice(0, 600).matchAll(OTHER_CHART_RE)].some(
+      (m) => !intent.includes(m[1]!.slice(-3)),
+    )
+  )
+    return true;
   // The one value asked for is the one the answer says it could not see (v06:
   // 「第一名的歌手是 A2O…，但歌曲名称页面未显示」): that is not an answer.
   if (
@@ -148,10 +186,13 @@ export function answerNotObtained(answer: string, intent = ''): boolean {
         ...summary.slice(0, 400).matchAll(STANDALONE_MISSING_RE),
         ...summary.slice(0, 400).matchAll(STANDALONE_MISSING_AFTER_RE),
       ].some((m) => askedValueMissing(m[1] ?? '', intent)) ||
+      [...summary.slice(0, 400).matchAll(INLINE_MISSING_RE)].some((m) =>
+        inlineAskedValueMissing(m[1] ?? '', summary, intent),
+      ) ||
       [
-        ...summary.slice(0, 400).matchAll(INLINE_MISSING_RE),
         ...summary.slice(0, 600).matchAll(UNKNOWN_NAME_RE),
-      ].some((m) => inlineAskedValueMissing(m[1] ?? '', summary, intent)))
+        ...summary.slice(0, 600).matchAll(UNKNOWN_NAME_AFTER_RE),
+      ].some((m) => unknownAskedName(m[1] ?? '', summary, intent)))
   )
     return true;
   // FIX-36 (b-v06, as the browser's 0b): a field the user named (作者、点赞数…) given as
