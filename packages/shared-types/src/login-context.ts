@@ -254,7 +254,8 @@ export function readLoginContext(node: Node, popupReported: boolean): LoginConte
     );
   });
   // DEPLOY-46 复审 #2: a popup asking for a code — four or more one-character boxes, or its text
-  // saying 验证码 / code / 重新获取 / 「60秒后」 — is a code block whatever its boxes are named.
+  // saying 验证码 / 重新获取 / 「60秒后」 / a verification code — is a code block whatever its boxes are
+  // named. PR #309 review: a bare 「code」 is not one (「Enter ZIP code」, a coupon code).
   // 复审 #3: a popup about 实名 / 身份证 keeps even its name box a login field.
   let codeBlock = false;
   let realName = false;
@@ -269,7 +270,9 @@ export function readLoginContext(node: Node, popupReported: boolean): LoginConte
     ).length;
     if (
       singles >= 4 ||
-      /验证码|动态码|校验码|\bcode\b|重新获取|重新发送|\d+\s*(?:秒|s)\s*后/i.test(text)
+      /验证码|动态码|校验码|重新获取|重新发送|\d+\s*(?:秒|s)\s*后|\b(?:verification|security|one[- ]time|sms|text|login|sign[- ]in|confirmation|access|otp)\s+code\b|\bcode\s+(?:we|was|has been)\s+sent\b|\benter\s+(?:the|your)?\s*code\b|\bresend\b/i.test(
+        text,
+      )
     )
       codeBlock = true;
     if (/实名|身份证/.test(text)) realName = true;

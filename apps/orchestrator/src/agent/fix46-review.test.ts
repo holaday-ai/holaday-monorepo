@@ -94,6 +94,22 @@ describe('DEPLOY-46 复审 #2 #3 · lc_test5: code popups and 实名 popups', ()
     expect((await read(html, '#d0')).loginField).toBe(true);
     expect((await read(html, '#d3')).loginField).toBe(true);
   });
+  it.each([
+    [
+      'a ZIP code dialog',
+      '<div role="dialog"><p>Enter ZIP code</p><input id="x" name="postal_code"><button>Save</button></div>',
+    ],
+    [
+      'a coupon code dialog',
+      '<div role="dialog"><p>Have a coupon code?</p><input id="x" name="coupon"><button>Apply</button></div>',
+    ],
+    [
+      'a promo popup',
+      MASK('<p>Enter your promo code at checkout</p><input id="x" placeholder="Address">'),
+    ],
+  ])('PR #309 review · reverse: %s is no code block', async (_name, html) => {
+    expect((await read(html, '#x')).loginField).toBe(false);
+  });
   it('the English code dialog’s Verify is a login control', async () => {
     const html = `<div role="dialog"><p>Enter the code we sent</p>${digits('text')}<button id="go">Verify</button></div>`;
     expect((await read(html, '#go')).loginControl).toBe(true);
