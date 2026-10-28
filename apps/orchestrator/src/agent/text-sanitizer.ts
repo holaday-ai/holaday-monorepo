@@ -397,6 +397,14 @@ export function humanizeToolMentions(text: string): string {
               .replace(TOOL_CALL_RE, (_whole, name: string) => TOOL_WORDS[name]!)
               .replace(TOOL_NAME_RE, (name: string) => TOOL_WORDS[name]!)
               .replace(TOOL_ARG_RE, toolArgWords)
+              // FIX-44 (DEPLOY-45 local A/B core-11 「执行了5次向下滚动操作（scroll amount=5, direction=down）」
+              // 「多次返回 content_grew 状态」): a bracket of bare call arguments goes; the scroll
+              // receipt's status reads as words.
+              .replace(
+                /\s*[（(]\s*(?:[a-z_]+\s+)?[a-zA-Z_]+\s*=\s*[\w.-]+(?:\s*[,，]\s*[a-zA-Z_]+\s*=\s*[\w.-]+)*\s*[）)]/g,
+                '',
+              )
+              .replace(/\bcontent_grew\b\s*(?:状态)?/g, '内容增长')
               // What an emptied argument leaves: 「（，未截断）」「（）」.
               .replace(/（\s*[，,]\s*/g, '（')
               .replace(/（\s*）/g, ''),

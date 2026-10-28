@@ -3,7 +3,7 @@ import { extractStructuredItems, reviewListAnswer } from '../../execution/answer
 import type { ExecutionContract } from '../../execution/execution-contract.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { answerNotObtained } from '../scrape-answer-check.js';
-import { plainInternalWords, sanitizeFinalText } from '../text-sanitizer.js';
+import { humanizeToolMentions, plainInternalWords, sanitizeFinalText } from '../text-sanitizer.js';
 import { assessCompletionFacts } from './completion-fields.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
@@ -270,5 +270,26 @@ describe('FIX-44 #4b · a scrape that says the video itself did not load is not 
     '视频标题：第52集 | 柠檬巴巴露亚；作者：小喵麻麻；点赞 4741，没有加载出视频的评论区。',
   ])('reverse: 「%s」 is an answer', (answer) => {
     expect(answerNotObtained(answer, Q)).toBe(false);
+  });
+});
+
+describe('FIX-44 #3b · bare call arguments in an answer go (local A/B core-11)', () => {
+  /** DEPLOY-45 local A/B, B core-11 (tsk_SD8BYDSLs55tokHSyyYJT), the opening as delivered. */
+  const B_CORE_11 =
+    '已成功导航至 https://the-internet.herokuapp.com/infinite_scroll 并执行了5次向下滚动操作（scroll amount=5, direction=down）。滚动过程中页面高度从1091增长至3107，多次返回 content_grew 状态，确认无限滚动机制正常触发内容加载。';
+
+  it('verbatim', () => {
+    expect(humanizeToolMentions(B_CORE_11)).toBe(
+      '已成功导航至 https://the-internet.herokuapp.com/infinite_scroll 并执行了5次向下滚动操作。滚动过程中页面高度从1091增长至3107，多次返回 内容增长，确认无限滚动机制正常触发内容加载。',
+    );
+  });
+
+  it.each([
+    '方程的解（x 取 2 时）成立',
+    '在代码里写 `(amount=5)` 即可',
+    '见 https://example.org/?a=1&b=2',
+    '价格（含税）为 ¥99',
+  ])('reverse: 「%s」 is left as written', (text) => {
+    expect(humanizeToolMentions(text)).toBe(text);
   });
 });
