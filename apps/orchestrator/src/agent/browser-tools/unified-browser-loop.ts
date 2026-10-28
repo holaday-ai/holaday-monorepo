@@ -2268,6 +2268,9 @@ export function fieldLines(fields: unknown, summary: string): string {
     const text = unescapeLiteralBreaks(value).trim();
     if (!text || summary.includes(text) || /summary|总结|概述|摘要|说明|备注|note/i.test(name))
       continue;
+    // DEPLOY-46 (local A/B, A core-11): a value that is only element refs (「e12, e13, e19」) is the
+    // browser's own handles, never an answer field.
+    if (/^e\d{1,6}(?:\s*[,，、]\s*e\d{1,6})*$/i.test(text)) continue;
     // FIX-42 (Deploy-42 core-06): the browser's own ids are no answer field (「- tabId：…」) —
     // only when the value is one (DEPLOY-43 复审 #4: a 「ref」 field may be a real reference).
     if (

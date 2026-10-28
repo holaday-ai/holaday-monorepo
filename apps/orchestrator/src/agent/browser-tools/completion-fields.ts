@@ -356,8 +356,10 @@ function beforeOuterComma(value: string): string {
   return value;
 }
 
+// DEPLOY-46 (local A/B, A core-11 「visible_text_blocks_after_5_scrolls：e12, e13, e19…」): a list
+// of element refs is a browser handle too.
 const HANDLE_ONLY_RE =
-  /^\s*(?:(?:tab|frame)_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|ref=e\d+)\s*$/;
+  /^\s*(?:(?:tab|frame)_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|ref=e\d+|e\d{1,6}(?:\s*[,，、]\s*e\d{1,6})+)\s*$/;
 
 function answerFacts(summary: string, intent = ''): Fact[] {
   const text = unescapeLiteralBreaks(summary);

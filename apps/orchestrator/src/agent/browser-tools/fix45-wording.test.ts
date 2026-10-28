@@ -270,3 +270,26 @@ describe('FIX-45 #5 · the 未核实 note names a field in Chinese too (local A/
     expect(facts.unverified.join('；')).not.toContain('js_confirm_dialog_text');
   });
 });
+
+describe('DEPLOY-46 local A/B · core-11: a field that is only element refs is not listed nor checked', () => {
+  /** A core-11 (tsk_UuKT8B5oJHAMfaRtzH7us), the field as delivered. */
+  const FIELD = {
+    name: 'visible_text_blocks_after_5_scrolls',
+    value: 'e12, e13, e19, e20, e21, e22, e23',
+  };
+  it('not listed', () => {
+    expect(fieldLines([FIELD], '已滚动5次并读取内容。')).toBe('');
+  });
+  it('not in the 未核实 note', () => {
+    const facts = assessCompletionFacts({
+      summary: '已滚动5次并读取内容。',
+      fields: [FIELD],
+      pages: [{ text: 'heading "Infinite Scroll" Lorem ipsum' }],
+      intent: '请使用云端浏览器，the-internet.herokuapp.com/infinite_scroll 滚动5次后读内容',
+    });
+    expect(facts.unverified.join('；')).not.toContain('e12');
+  });
+  it('reverse: a value that merely contains e-numbers stays', () => {
+    expect(fieldLines([{ name: '型号', value: 'e12 Pro' }], '')).toBe('- 型号：e12 Pro');
+  });
+});
