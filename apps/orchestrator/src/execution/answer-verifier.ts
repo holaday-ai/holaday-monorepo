@@ -706,8 +706,12 @@ function tryExtractNumberedListItems(answerText: string): ParsedItem[] {
 
 const BULLET_LIST_RE = /^\s*[-*+]\s+(.+)$/;
 
-/** 「第1条标题：…」「Result 1 link: …」: the ordinal a bullet names. */
-const BULLET_ORDINAL_RE = /^(?:第\s*(\d{1,3})\s*(?:条|个|项)|(?:result|item)\s*#?(\d{1,3})\b)/i;
+/**
+ * 「第1条标题：…」「Result 1 link: …」: the ordinal a bullet names. FIX-44 (Deploy-44 core-01):
+ * 「结果1_标题：…」「结果1_链接：…」 too — 「_」 is a word character, so no \b after the digits.
+ */
+const BULLET_ORDINAL_RE =
+  /^(?:第\s*(\d{1,3})\s*(?:条|个|项)|(?:result|item|(?:搜索)?结果)\s*#?(\d{1,3})(?!\d))/i;
 
 function tryExtractBulletItems(answerText: string): ParsedItem[] {
   const lines = answerText.split(/\r?\n/);
