@@ -2,6 +2,7 @@ import { readLoginContext } from '@holaday/shared-types';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { declaredAbsentFields } from './browser-tools/completion-fields.js';
+import { answerNotObtained } from './scrape-answer-check.js';
 
 /** DEPLOY-46 复审 #1: the coordinator's fix-45/review1-fixtures/fa.mjs, case for case. */
 describe('DEPLOY-46 复审 #1 · fa.mjs: only a real value of the same item, shown on a read page, fills a gap', () => {
@@ -123,5 +124,33 @@ describe('DEPLOY-46 复审 #2 #3 · lc_test5: code popups and 实名 popups', ()
     ],
   ])('reverse: %s stays fillable', async (_name, html) => {
     expect((await read(html, '#x')).loginField).toBe(false);
+  });
+});
+
+describe('DEPLOY-46 local A/B · b-v06 / new-qq: a scrape without the song name is not obtained', () => {
+  it.each([
+    // B b-v06 (tsk_v6L5e6S9E27HM9kFJgwmU)
+    [
+      'QQ音乐热歌榜第一名是啥',
+      '根据抓取的 QQ音乐热歌榜 数据（2026-10-28），第一名是**薛之谦**的歌曲，时长 04:39。\n\n不过抓取内容中歌曲名称未完整显示，只看到了歌手信息。',
+    ],
+    // A new-qq (tsk_wgNi4tgY7oDKDiGKeSCdF)
+    [
+      '在 QQ 音乐看热歌榜第一名',
+      '根据 QQ音乐热歌榜（2026-10-28 更新）的抓取数据：\n\n**第1名**：歌手是**薛之谦**，时长 04:39\n\n不过页面抓取时歌曲名部分未能显示，只拿到了歌手和时长信息。',
+    ],
+    // B new-qq (tsk_pKgmpCbwLRLzVVNDBAwuf)
+    [
+      '在 QQ 音乐看热歌榜第一名',
+      '根据 QQ 音乐热歌榜（2026-10-28 数据）：\n\n**第1名**：薛之谦，时长 **04:39**\n\n具体歌曲名页面未渲染出来，只抓到歌手和时长。需要的话可以告诉我歌名我帮你查。',
+    ],
+  ])('%s — verbatim → not obtained (the browser gets its try)', (q, answer) => {
+    expect(answerNotObtained(answer, q)).toBe(true);
+  });
+  it.each([
+    'QQ音乐热歌榜第一名是《我好像在哪见过你》，歌手薛之谦，专辑名称未完整显示。',
+    'QQ音乐热歌榜第一名是《我好像在哪见过你》，歌手薛之谦，时长 04:39。',
+  ])('reverse: 「%s」 is an answer', (answer) => {
+    expect(answerNotObtained(answer, 'QQ音乐热歌榜第一名是啥')).toBe(false);
   });
 });
