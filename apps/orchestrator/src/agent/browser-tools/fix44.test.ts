@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { extractStructuredItems, reviewListAnswer } from '../../execution/answer-verifier.js';
 import type { ExecutionContract } from '../../execution/execution-contract.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
-import { plainInternalWords, sanitizeFinalText } from '../text-sanitizer.js';
+import { answerNotObtained } from '../scrape-answer-check.js';
+import { humanizeToolMentions, plainInternalWords, sanitizeFinalText } from '../text-sanitizer.js';
 import { assessCompletionFacts } from './completion-fields.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
@@ -243,5 +244,54 @@ describe('FIX-44 #4 · reg-dy-2: a named field given as absent is read from the 
       status: 'completed',
       partial: { missing: '作者' },
     });
+  });
+});
+
+describe('FIX-44 #4b · a scrape that says the video itself did not load is not obtained (local A/B dy-2)', () => {
+  const Q =
+    '打开 https://www.douyin.com/video/7377304298310389027 读视频标题、作者，以及点赞数、评论数、收藏数、分享数（不播放）';
+  /** DEPLOY-45 local A/B, B dy-2 (tsk_s3TWqCZ6npDY7hUUjrRT6), the scrape answer as delivered. */
+  const B_DY_2 =
+    '抓取到的页面内容不完整。页面显示"视频数据加载中"和"直播加载中"，没有加载出视频的实际内容。\n\n**缺少的信息：**\n- 视频标题\n- 作者名称\n- 点赞数、评论数、收藏数、分享数';
+
+  it('verbatim → not obtained (the browser gets its try)', () => {
+    expect(answerNotObtained(B_DY_2, Q)).toBe(true);
+  });
+
+  it.each(['没有加载出页面内容。', '页面一直转圈，未能加载出视频。'])(
+    '「%s」 → not obtained',
+    (answer) => {
+      expect(answerNotObtained(answer, Q)).toBe(true);
+    },
+  );
+
+  it.each([
+    '视频标题：第52集 | 柠檬巴巴露亚；作者：小喵麻麻；点赞 4741。没有加载出推荐视频。',
+    '视频标题：第52集 | 柠檬巴巴露亚；作者：小喵麻麻；点赞 4741，没有加载出视频的评论区。',
+  ])('reverse: 「%s」 is an answer', (answer) => {
+    expect(answerNotObtained(answer, Q)).toBe(false);
+  });
+});
+
+describe('FIX-44 #3b · bare call arguments in an answer go (local A/B core-11)', () => {
+  /** DEPLOY-45 local A/B, B core-11 (tsk_SD8BYDSLs55tokHSyyYJT), the opening as delivered. */
+  const B_CORE_11 =
+    '已成功导航至 https://the-internet.herokuapp.com/infinite_scroll 并执行了5次向下滚动操作（scroll amount=5, direction=down）。滚动过程中页面高度从1091增长至3107，多次返回 content_grew 状态，确认无限滚动机制正常触发内容加载。';
+
+  it('verbatim', () => {
+    expect(humanizeToolMentions(B_CORE_11)).toBe(
+      '已成功导航至 https://the-internet.herokuapp.com/infinite_scroll 并执行了5次向下滚动操作。滚动过程中页面高度从1091增长至3107，多次返回 内容增长，确认无限滚动机制正常触发内容加载。',
+    );
+  });
+
+  it.each([
+    '方程的解（x 取 2 时）成立',
+    '方程的解（x=2）成立',
+    '研究结果（n=120, p=0.03）显示差异显著。',
+    '在代码里写 `(amount=5)` 即可',
+    '见 https://example.org/?a=1&b=2',
+    '价格（含税）为 ¥99',
+  ])('reverse: 「%s」 is left as written', (text) => {
+    expect(humanizeToolMentions(text)).toBe(text);
   });
 });
