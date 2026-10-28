@@ -305,16 +305,161 @@ const ANCHORED_LOG_ENDPOINTS: ReadonlyArray<readonly [host: RegExp, path: string
 /** Largest log body let through (observed: 0 B BestBuy, 680 B Xiaohongshu). */
 const LOG_BODY_MAX = 4096;
 
-export function anchoredLogPost(url: URL, method: string, postData: string): boolean {
+/**
+ * FIX-43 (协调方同意 fix-42/report.md §4): two telemetry posts with a known, keyed body. Across the
+ * acceptance records Xiaohongshu's performance SDK posted 240 times (239 in the background) and
+ * 高德's device log 17 times (14 on page load); each paused once or more when it landed in a click.
+ * Exact host and path, POST without a query, at most 8 KB, every key on the list — a key that
+ * names a note, comment, favourite, follow, phone, code or password is never let through.
+ */
+const XHS_APM_KEYS = new Set([
+  'clientTime',
+  'context_sdkSessionId',
+  'context_pageSessionId',
+  'context_sdkSeqId',
+  'context_nameTracker',
+  'context_platform',
+  'context_appVersion',
+  'context_osVersion',
+  'context_deviceModel',
+  'context_deviceId',
+  'context_package',
+  'context_networkType',
+]);
+/** 「可以多出少量 context_* 键」: at most this many context keys beyond the list. */
+const XHS_APM_EXTRA_CONTEXT = 4;
+const AMAP_COLLAPSAR_KEYS = new Set([
+  'adiu',
+  'buildVersion',
+  'channel',
+  'content',
+  'diu',
+  'env',
+  'h5Version',
+  'idfa',
+  'imei',
+  'md5',
+  'miniProgramVersion',
+  'mode',
+]);
+const KEYED_LOG_BODY_MAX = 8192;
+/** Keys or values of something a person did or typed — never telemetry. */
+const PERSONAL_KEY_RE =
+  /note|comment|collect|favou?rite|like|follow|phone|mobile|tel\b|sms|code|captcha|password|passwd|pwd|token|account|user_?id|uid/i;
+/** DEPLOY-43 复审 #1: the values are checked too, with the action words a write carries. */
+const PERSONAL_VALUE_RE =
+  /note|comment|collect|favou?rite|like|follow|phone|mobile|sms|code|captcha|password|passwd|pwd|token|login|logon|signin|register|share/i;
+const KEYED_JSON_MAX_DEPTH = 4;
+
+/** Every key of a JSON value, or null when it nests deeper than the limit (DEPLOY-43 复审 #1). */
+function jsonKeys(value: unknown, depth = 0): string[] | null {
+  if (!value || typeof value !== 'object') return [];
+  if (depth > KEYED_JSON_MAX_DEPTH) return null;
+  const children = Array.isArray(value)
+    ? value.map((item) => jsonKeys(item, depth + 1))
+    : Object.entries(value).map(([key, item]) => {
+        const keys = jsonKeys(item, depth + 1);
+        return keys && [key, ...keys];
+      });
+  return children.some((keys) => keys === null) ? null : (children.flat() as string[]);
+}
+
+function xhsApmBody(postData: string): boolean {
+  let body: unknown;
+  try {
+    body = JSON.parse(postData);
+  } catch {
+    return false;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  const entries = Object.entries(body);
+  const keys = entries.map(([key]) => key);
+  const extra = keys.filter((key) => !XHS_APM_KEYS.has(key));
+  const allKeys = jsonKeys(body);
   return (
-    method === 'POST' &&
-    // 协调方复核: `…/log-events?action=addToCart` names a write — never a log post.
-    !url.search &&
-    ANCHORED_LOG_ENDPOINTS.some(
-      ([host, path]) => host.test(url.hostname) && url.pathname === path,
-    ) &&
-    opaqueLogBody(postData)
+    !!allKeys &&
+    keys.includes('clientTime') &&
+    extra.every((key) => /^context_[A-Za-z]{1,40}$/.test(key)) &&
+    extra.length <= XHS_APM_EXTRA_CONTEXT &&
+    !allKeys.some((key) => PERSONAL_KEY_RE.test(key) && !XHS_APM_KEYS.has(key)) &&
+    // DEPLOY-43 复审 #1: the SDK sends flat strings and numbers — an object is something else,
+    // and a value naming a note, a like or a follow is an action.
+    entries.every(
+      ([, value]) =>
+        (typeof value === 'string' && !PERSONAL_VALUE_RE.test(value)) ||
+        (typeof value === 'number' && Number.isFinite(value)),
+    )
   );
+}
+
+/**
+ * DEPLOY-43 复审 #1: the device log's `mode`. The acceptance records keep body shapes, not values,
+ * so no `mode` value was ever seen: only these plain ones pass; any other value still pauses.
+ */
+const AMAP_COLLAPSAR_MODES = /^(?:web|h5|wap|pc|\d)$/i;
+/** A key/value pair in readable text: 「phone=138…」「"mobile" : "138"」. */
+const KEY_VALUE_RE = /[A-Za-z_][\w.-]{0,30}\s*["']?\s*[=:]\s*["']?[A-Za-z0-9\u4e00-\u9fff]/;
+
+/** The readable forms of `content`: as sent, URL-decoded (twice at most), base64-decoded text. */
+function contentReadings(content: string): string[] {
+  const readings = [content];
+  let current = content;
+  for (let i = 0; i < 2 && /%[0-9a-f]{2}/i.test(current); i += 1) {
+    try {
+      current = decodeURIComponent(current);
+      readings.push(current);
+    } catch {
+      break;
+    }
+  }
+  if (/^[A-Za-z0-9+/_-]{8,}={0,2}$/.test(content)) {
+    const bytes = Buffer.from(content, 'base64');
+    // gzip (`H4sI…`, what the SDK sends) or other binary is opaque: random bytes would read as
+    // pairs by chance. Only decoded text is read.
+    const printable = [...bytes].filter((b) => (b >= 0x20 && b < 0x7f) || b === 0x0a).length;
+    if (bytes.length && printable / bytes.length > 0.9) readings.push(bytes.toString('latin1'));
+  }
+  return readings;
+}
+
+function amapCollapsarBody(postData: string): boolean {
+  if (/^\s*[{[]/.test(postData) || /content-disposition\s*:/i.test(postData)) return false;
+  const form = new URLSearchParams(postData);
+  const keys = [...form.keys()];
+  if (!keys.length || new Set(keys).size !== keys.length) return false;
+  if (!keys.every((key) => AMAP_COLLAPSAR_KEYS.has(key))) return false;
+  const mode = form.get('mode');
+  if (mode !== null && !AMAP_COLLAPSAR_MODES.test(mode)) return false;
+  // `content` is the SDK's opaque log string: in no reading of it is there a field a person
+  // fills in, nor any key/value pair (DEPLOY-43 复审 #1).
+  const content = form.get('content') ?? '';
+  if (contentReadings(content).some((text) => KEY_VALUE_RE.test(text))) return false;
+  // The other fields are short device values, no action words.
+  return keys.every((key) => key === 'content' || !PERSONAL_VALUE_RE.test(form.get(key) ?? ''));
+}
+
+const KEYED_LOG_ENDPOINTS: ReadonlyArray<
+  readonly [host: string, path: string, body: (postData: string) => boolean]
+> = [
+  ['apm-fe.xiaohongshu.com', '/api/data', xhsApmBody],
+  ['collapsar.amap.com', '/alc/h5/upload', amapCollapsarBody],
+];
+
+export function anchoredLogPost(url: URL, method: string, postData: string): boolean {
+  if (
+    method !== 'POST' ||
+    // 协调方复核: `…/log-events?action=addToCart` names a write — never a log post.
+    url.search
+  )
+    return false;
+  if (
+    ANCHORED_LOG_ENDPOINTS.some(([host, path]) => host.test(url.hostname) && url.pathname === path)
+  )
+    return opaqueLogBody(postData);
+  const keyed = KEYED_LOG_ENDPOINTS.find(
+    ([host, path]) => url.hostname === host && url.pathname === path,
+  );
+  return !!keyed && postData.length <= KEYED_LOG_BODY_MAX && keyed[2](postData);
 }
 
 /**
