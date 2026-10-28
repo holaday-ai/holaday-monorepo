@@ -371,10 +371,13 @@ const toolArgWords = (whole: string, section?: string, truncated?: string, size?
           : size
             ? `${size} 字节`
             : '';
-/** FIX-44 #3b: 「（scroll amount=5, direction=down）」 — the scroll call's own arguments in brackets. */
+/**
+ * FIX-44 #3b: 「（scroll amount=5, direction=down）」 — the scroll call's own arguments in brackets;
+ * FIX-45 (Deploy-45 core-11): after a few words too, 「（每次 amount=5）」.
+ */
 const CALL_ARG = '(?:amount|direction|delta_?[xy]?|pixels|times|repeat|steps|timeout_?ms|wait_?ms)';
 const CALL_ARGS_BRACKET_RE = new RegExp(
-  `\\s*[（(]\\s*(?:(?:${Object.keys(TOOL_WORDS).join('|')})\\s+)?${CALL_ARG}\\s*=\\s*[\\w.-]+(?:\\s*[,，]\\s*${CALL_ARG}\\s*=\\s*[\\w.-]+)*\\s*[）)]`,
+  `\\s*[（(]\\s*(?:[\\u4e00-\\u9fff]{1,4}\\s*)?(?:(?:${Object.keys(TOOL_WORDS).join('|')})\\s+)?${CALL_ARG}\\s*=\\s*[\\w.-]+(?:\\s*[,，]\\s*${CALL_ARG}\\s*=\\s*[\\w.-]+)*\\s*[）)]`,
   'gi',
 );
 const TOOL_NAME_RE = new RegExp(
@@ -409,6 +412,11 @@ export function humanizeToolMentions(text: string): string {
               // 「（x=2）」「（n=120, p=0.03）」 are page content.
               .replace(CALL_ARGS_BRACKET_RE, '')
               .replace(/\bcontent_grew\b\s*(?:状态)?/g, '内容增长')
+              // FIX-45 (Deploy-45 core-10 「最后一次 snapshot 显示…」): the read's tool name beside Chinese.
+              .replace(
+                /(?<=[\u4e00-\u9fff]\s?)snapshot\b|\bsnapshot(?=\s?[\u4e00-\u9fff])/g,
+                '页面读取',
+              )
               // What an emptied argument leaves: 「（，未截断）」「（）」.
               .replace(/（\s*[，,]\s*/g, '（')
               .replace(/（\s*）/g, ''),

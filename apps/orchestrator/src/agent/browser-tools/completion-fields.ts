@@ -1206,6 +1206,19 @@ export function askedFields(intent: string): string[] {
   return ASKABLE_FIELDS.filter((name) => intent.includes(name));
 }
 
+/**
+ * FIX-45 (Deploy-45 b-p02 「第3条商品在搜索结果页快照中未显示价格，已打开其详情页读取到价格为 S$12.80」):
+ * the gap is told and then filled — in the same sentence or the next one the field's value is
+ * read after all. Not absent.
+ */
+function filledAfter(prose: string, at: number, name: string): boolean {
+  const next = prose.slice(at).match(/^[^。！？!?\n]*(?:[。！？!?\n][^。！？!?\n]*)?/)![0];
+  const absent = '(?![“"「]?(?:页面(?:上|中)?)?(?:未|没有|无法|不详|空|无))';
+  return new RegExp(
+    `(?:(?:读到|读取到|获取到|拿到|找到|补上|补齐)了?(?:其|该|它的)?${name}|${name})\\s*(?:为|是|[：:])\\s*${absent}[^\\s，,。；;]`,
+  ).test(next);
+}
+
 export function declaredAbsentFields(intent: string, summary: string, fields?: unknown): string[] {
   const asked = ASKABLE_FIELDS.filter((name) => intent.includes(name));
   if (!asked.length) return [];
@@ -1224,9 +1237,14 @@ export function declaredAbsentFields(intent: string, summary: string, fields?: u
           (label === name || label.endsWith(name)) && vals.some((v) => DECLARED_ABSENT_RE.test(v)),
       ) ||
       // 「页面未显示作者名称」「作者字段按页面原样写“页面未显示”」 — prose, not a 作者：value line.
-      new RegExp(
-        `(?:页面(?:上|中)?)?(?:未|没有)(?:显示|提供|列出|给出|找到|读到|获取到)${name}`,
-      ).test(prose) ||
+      [
+        ...prose.matchAll(
+          new RegExp(
+            `(?:页面(?:上|中)?)?(?:未|没有)(?:显示|提供|列出|给出|找到|读到|获取到)${name}`,
+            'g',
+          ),
+        ),
+      ].some((m) => !filledAfter(prose, m.index! + m[0].length, name)) ||
       new RegExp(
         `${name}(?:名称|字段)?[^。；;\\n：:（(]{0,10}?[为写]\\s*[“"「]?(?:页面(?:上|中)?未显示|未显示|未获取到|未读到|未找到)`,
       ).test(prose),

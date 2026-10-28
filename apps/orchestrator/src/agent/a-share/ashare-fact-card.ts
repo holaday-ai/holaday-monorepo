@@ -232,8 +232,10 @@ export function livePrices(
 
 /** 盘中却没有当天报价时卡片写的话：调用方据此按部分完成交付（FIX-33）。 */
 export const NOT_REALTIME_NOTE = '非实时（未取到今日实时行情）';
+/** FIX-45：交易日收盘后，当天的收盘价没取到时卡片写的话：同样按部分完成交付。 */
+export const CLOSE_NOT_FETCHED_NOTE = '今日收盘价暂未取到（行情源未返回当天数据）';
 export function quoteStale(answer: string): boolean {
-  return answer.includes(NOT_REALTIME_NOTE);
+  return answer.includes(NOT_REALTIME_NOTE) || answer.includes(CLOSE_NOT_FETCHED_NOTE);
 }
 
 /** iso('YYYY-MM-DD') ± days → compact 'YYYYMMDD'（正午 UTC，与口径一致）。 */
@@ -284,6 +286,13 @@ function marketFactLines(
   if (intraday && !live)
     return [
       `- 以下为 ${m} 月 ${d} 日收盘价，${NOT_REALTIME_NOTE}`,
+      `- 最近收盘（${day}） ${facts}`,
+    ];
+  // FIX-45 (DEPLOY-45 本机 A/B as-mt，15:45)：交易日收盘后报价两次超时、日线还停在前一天——
+  // 不能只写「最近收盘（10-27）」让人当成今天的，要说今天的收盘价没取到。
+  if (!intraday && quote && ashareAfterClose(now) && day < beijingIso(now))
+    return [
+      `- 以下为 ${m} 月 ${d} 日收盘价，${CLOSE_NOT_FETCHED_NOTE}`,
       `- 最近收盘（${day}） ${facts}`,
     ];
   return [...quoteLine, `- 最近收盘（${day}） ${facts}`];
