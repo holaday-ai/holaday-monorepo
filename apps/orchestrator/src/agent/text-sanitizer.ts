@@ -371,6 +371,12 @@ const toolArgWords = (whole: string, section?: string, truncated?: string, size?
           : size
             ? `${size} 字节`
             : '';
+/** FIX-44 #3b: 「（scroll amount=5, direction=down）」 — the scroll call's own arguments in brackets. */
+const CALL_ARG = '(?:amount|direction|delta_?[xy]?|pixels|times|repeat|steps|timeout_?ms|wait_?ms)';
+const CALL_ARGS_BRACKET_RE = new RegExp(
+  `\\s*[（(]\\s*(?:(?:${Object.keys(TOOL_WORDS).join('|')})\\s+)?${CALL_ARG}\\s*=\\s*[\\w.-]+(?:\\s*[,，]\\s*${CALL_ARG}\\s*=\\s*[\\w.-]+)*\\s*[）)]`,
+  'gi',
+);
 const TOOL_NAME_RE = new RegExp(
   `\\b(${Object.keys(TOOL_WORDS)
     .filter((name) => name.includes('_'))
@@ -398,12 +404,10 @@ export function humanizeToolMentions(text: string): string {
               .replace(TOOL_NAME_RE, (name: string) => TOOL_WORDS[name]!)
               .replace(TOOL_ARG_RE, toolArgWords)
               // FIX-44 (DEPLOY-45 local A/B core-11 「执行了5次向下滚动操作（scroll amount=5, direction=down）」
-              // 「多次返回 content_grew 状态」): a bracket of bare call arguments goes; the scroll
-              // receipt's status reads as words.
-              .replace(
-                /\s*[（(]\s*(?:[a-z_]+\s+)?[a-zA-Z_]+\s*=\s*[\w.-]+(?:\s*[,，]\s*[a-zA-Z_]+\s*=\s*[\w.-]+)*\s*[）)]/g,
-                '',
-              )
+              // 「多次返回 content_grew 状态」): a bracket of the browser's own call arguments goes; the
+              // scroll receipt's status reads as words. PR #308 review: only those argument names —
+              // 「（x=2）」「（n=120, p=0.03）」 are page content.
+              .replace(CALL_ARGS_BRACKET_RE, '')
               .replace(/\bcontent_grew\b\s*(?:状态)?/g, '内容增长')
               // What an emptied argument leaves: 「（，未截断）」「（）」.
               .replace(/（\s*[，,]\s*/g, '（')

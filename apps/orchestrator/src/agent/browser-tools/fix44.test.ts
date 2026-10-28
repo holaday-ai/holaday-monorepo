@@ -286,6 +286,8 @@ describe('FIX-44 #3b · bare call arguments in an answer go (local A/B core-11)'
 
   it.each([
     '方程的解（x 取 2 时）成立',
+    '方程的解（x=2）成立',
+    '研究结果（n=120, p=0.03）显示差异显著。',
     '在代码里写 `(amount=5)` 即可',
     '见 https://example.org/?a=1&b=2',
     '价格（含税）为 ¥99',
