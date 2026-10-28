@@ -247,14 +247,20 @@ function closeBrackets(value: string): string {
   return depth > 0 && open > 0 ? value.slice(0, open).trim() : value;
 }
 
-/** Text up to the first full-width comma that is not inside brackets. */
+/**
+ * Text up to the first full-width comma that is not inside brackets. FIX-44 (Deploy-44
+ * core-06 「（章节标题：研究課題），…」): a closing bracket the value never opened ends the
+ * field there — the field sat inside the prose's own parenthetical.
+ */
 function beforeOuterComma(value: string): string {
   let depth = 0;
   for (let i = 0; i < value.length; i++) {
     const ch = value[i]!;
     if ('（(【['.includes(ch)) depth++;
-    else if ('）)】]'.includes(ch)) depth = Math.max(0, depth - 1);
-    else if (ch === '，' && depth === 0) return value.slice(0, i);
+    else if ('）)】]'.includes(ch)) {
+      if (depth === 0) return value.slice(0, i);
+      depth--;
+    } else if (ch === '，' && depth === 0) return value.slice(0, i);
   }
   return value;
 }

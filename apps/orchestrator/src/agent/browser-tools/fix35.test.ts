@@ -103,7 +103,7 @@ describe('FIX-35 0b · a named field given as absent is 部分完成, after one 
   it('still absent after the screenshot → 部分完成：作者…, never plain completed', async () => {
     const { outcome, rejected, seen } = await run([PROD]);
     expect(rejected).toHaveLength(1);
-    expect(seen.join('\n')).toContain('请先 screenshot 看一眼');
+    expect(seen.join('\n')).toContain('screenshot 看一眼');
     expect(outcome).toMatchObject({
       status: 'completed',
       summary: expect.stringMatching(/^部分完成：作者 页面上没有读到/),

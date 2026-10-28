@@ -1515,6 +1515,13 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             // still wrote 作者「页面未显示」 — the login popup hid the rest of the page from the read.
             // One look either way: close the popup by its own ×, read again, then the screenshot.
             const shot = trace.some((entry) => entry.tool === 'screenshot' && entry.ok);
+            // FIX-44 (Deploy-44 reg-dy-2 vs dy-2, same question): the popup hides the page behind
+            // it from snapshot (the accessibility tree); get_page_text reads the page's own text,
+            // popup or not — dy-2 read 「小喵麻麻」 that way. Read the text first.
+            const textRead = trace.some((entry) => entry.tool === 'get_page_text' && entry.ok);
+            const readText = textRead
+              ? ''
+              : '请先 get_page_text 读一次页面正文（弹窗挡住时 snapshot 读不到它后面的页面，正文读取不受影响）；';
             await rejected(summary, given, `点名字段写成了页面未显示：${absent.join('、')}`);
             // The second look is optional: if it never ends in a finish (steps, model), this
             // answer is still delivered, as the 部分完成 it would have been.
@@ -1530,8 +1537,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               toolResult(
                 call.id,
                 shot
-                  ? `${absent.join('、')} 写成了页面未显示，但登录弹窗打开时，弹窗后面的页面常读不到（名字常在页面右上角或标题旁）。请先点弹窗自己的关闭按钮（×，不要按 Esc）关掉它，再 snapshot 重读；仍读不到就再 screenshot，截图里看得到就照截图原样写（注明「截图读取」），确实看不到再写「页面未显示」。其余内容不变，再 finish。`
-                  : `${absent.join('、')} 写成了页面未显示，但还没看过页面截图（登录弹窗等可能挡住了文字，名字常在页面角落）。请先 screenshot 看一眼：截图里看得到就照截图原样写（注明「截图读取」）；确实看不到再写「页面未显示」。其余内容不变，再 finish。`,
+                  ? `${absent.join('、')} 写成了页面未显示，但登录弹窗打开时，弹窗后面的页面常读不到（名字常在页面右上角或标题旁）。${readText}${textRead ? '请' : '仍读不到再'}点弹窗自己的关闭按钮（×，不要按 Esc）关掉它，再 snapshot 重读；仍读不到就再 screenshot，截图里看得到就照截图原样写（注明「截图读取」），确实看不到再写「页面未显示」。其余内容不变，再 finish。`
+                  : `${absent.join('、')} 写成了页面未显示，但还没看过页面截图（登录弹窗等可能挡住了文字，名字常在页面角落）。${readText}${textRead ? '请先' : '仍读不到再'} screenshot 看一眼：截图里看得到就照截图原样写（注明「截图读取」）；确实看不到再写「页面未显示」。其余内容不变，再 finish。`,
                 true,
               ),
             );
