@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { humanizeToolMentions, sanitizeFinalText } from '../text-sanitizer.js';
+import { declinedTargets } from './completion-coverage.js';
 import { fieldLabel, fieldLines, runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
 function scriptedLoop(calls: Array<{ name: string; input: Record<string, unknown> }>) {
@@ -126,5 +127,132 @@ describe('FIX-45 #5 · core-03: the wall notice is not said twice, and points up
     expect(outcome.status === 'completed' && outcome.summary).toContain(
       '播放器需登录验证，未主动播放，以上为页面公开信息。',
     );
+  });
+});
+
+describe('FIX-45 · core-10 (local A/B B): a named part the answer says it did not do is no completed answer', () => {
+  /** FIX-45 local A/B, B core-10 (tsk_ibM62QTQwBxXiBHoF5DZC), verbatim but the 未核实 note. */
+  const B_CORE_10 =
+    '已在 the-internet.herokuapp.com/javascript_alerts 页面依次点击三个按钮触发原生对话框：\n1. Click for JS Alert → 弹出 alert「I am a JS Alert」，自动确认后页面 Result 显示 "You successfully clicked an alert"。\n2. Click for JS Confirm → 弹出 confirm「I am a JS Confirm」，自动取消后页面 Result 显示 "You clicked: Cancel"。\n3. Click for JS Prompt → 弹出 prompt「I am a JS prompt」，未输入直接关闭后页面 Result 显示 "You entered: null"。\n\n注：该页面不包含 iframe；用户提及的 iframe 未在 JavaScript Alerts 页面体现，本次仅按用户明确要求的 JavaScript alerts 交互执行并记录结果。';
+  const ALERTS_PAGE = {
+    text: 'heading "JavaScript Alerts" button "Click for JS Alert" button "Click for JS Confirm" button "Click for JS Prompt" Result: You entered: null',
+    sourceURL: 'https://the-internet.herokuapp.com/javascript_alerts',
+  };
+
+  it('verbatim: iframe is a declined part (only the alerts page was read)', () => {
+    expect(
+      declinedTargets(
+        '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts',
+        B_CORE_10,
+        [ALERTS_PAGE],
+      ),
+    ).toEqual(['iframe']);
+  });
+  it('reverse: the iframe page was read — nothing declined', () => {
+    expect(
+      declinedTargets(
+        '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts',
+        B_CORE_10,
+        [
+          ALERTS_PAGE,
+          {
+            text: 'heading "An iFrame containing the TinyMCE WYSIWYG Editor" iframe',
+            sourceURL: 'https://the-internet.herokuapp.com/iframe',
+          },
+        ],
+      ),
+    ).toEqual([]);
+  });
+
+  // The same shape in the loop, with a part that needs no dialog receipts: 「iframe 与 checkboxes」.
+  const INTENT = '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 checkboxes';
+  const BOXES = 'https://the-internet.herokuapp.com/checkboxes';
+  const IFRAME = 'https://the-internet.herokuapp.com/iframe';
+  const DECLINED =
+    '已在 the-internet.herokuapp.com/checkboxes 页面读取到两个复选框：checkbox 1 未勾选，checkbox 2 已勾选。\n\n注：该页面不包含 iframe；本次仅按 checkboxes 执行并记录结果。';
+  const PAGE = (url: string) =>
+    url === IFRAME
+      ? 'heading "An iFrame containing the TinyMCE WYSIWYG Editor" iframe Rich Text Area Your content goes here.'
+      : 'heading "Checkboxes" checkbox 1 checkbox 2 checked';
+  const run = (calls: Array<{ name: string; input: Record<string, unknown> }>) => {
+    let url = 'about:blank';
+    const seen: string[] = [];
+    let turn = 0;
+    const adapter: MessagesAdapter = {
+      metadata: { provider: 'anthropic', model: 'fixture' },
+      async create(request) {
+        seen.push(JSON.stringify(request.messages.at(-1)));
+        const call = calls[Math.min(turn++, calls.length - 1)]!;
+        return {
+          id: String(turn),
+          metadata: { provider: 'anthropic', model: 'fixture' },
+          content: [{ type: 'tool_use', id: String(turn), ...call }],
+          stopReason: 'tool_use',
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    return runUnifiedBrowserLoop({
+      intent: INTENT,
+      adapter,
+      maxSteps: 12,
+      observationV2: true,
+      currentPageUrl: () => url,
+      execute: (async (action: { tool: string; url?: string }) => {
+        if (action.tool === 'navigate') url = action.url!;
+        return { ok: true, url, text: JSON.stringify({ sourceURL: url, tree: PAGE(url) }) };
+      }) as never,
+    }).then((outcome) => ({ outcome, seen: seen.join('\n') }));
+  };
+  const finish = (summary: string) => ({ name: 'finish', input: { status: 'completed', summary } });
+
+  it('declined once: sent back; still not done: 部分完成 (missing iframe)', async () => {
+    const { outcome, seen } = await run([
+      { name: 'navigate', input: { url: BOXES } },
+      { name: 'snapshot', input: {} },
+      finish(DECLINED),
+      finish(DECLINED),
+    ]);
+    expect(seen).toContain('任务点名要做「iframe」');
+    expect(outcome).toMatchObject({ status: 'completed', partial: { missing: 'iframe' } });
+    expect(outcome.status === 'completed' && outcome.summary).toMatch(
+      /^部分完成：「iframe」部分未完成/,
+    );
+  });
+
+  it('sent back, it opens /iframe and finishes both: completed', async () => {
+    const both =
+      '1. iframe：页面标题为「An iFrame containing the TinyMCE WYSIWYG Editor」，编辑器内容为「Your content goes here.」。\n2. checkboxes：checkbox 1 未勾选，checkbox 2 已勾选。';
+    const { outcome } = await run([
+      { name: 'navigate', input: { url: BOXES } },
+      { name: 'snapshot', input: {} },
+      finish(DECLINED),
+      { name: 'navigate', input: { url: IFRAME } },
+      { name: 'snapshot', input: {} },
+      finish(both),
+    ]);
+    expect(outcome.status).toBe('completed');
+    expect(outcome).not.toHaveProperty('partial');
+  });
+
+  it('reverse: an answer that did both parts is not sent back', async () => {
+    const both =
+      '1. iframe：页面标题为「An iFrame containing the TinyMCE WYSIWYG Editor」。\n2. checkboxes：checkbox 1 未勾选，checkbox 2 已勾选。';
+    const { outcome, seen } = await run([
+      { name: 'navigate', input: { url: IFRAME } },
+      { name: 'snapshot', input: {} },
+      { name: 'navigate', input: { url: BOXES } },
+      { name: 'snapshot', input: {} },
+      finish(both),
+    ]);
+    expect(seen).not.toContain('任务点名要做');
+    expect(outcome.status).toBe('completed');
+    expect(outcome).not.toHaveProperty('partial');
   });
 });

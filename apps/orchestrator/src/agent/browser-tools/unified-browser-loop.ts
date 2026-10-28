@@ -28,6 +28,7 @@ import {
 } from './action-claims.js';
 import { prepareBrowserPlan } from './browser-brain-roles.js';
 import { type BrowserTrace, completionGap, receiptEvidence } from './browser-completion.js';
+import { declinedTargets } from './completion-coverage.js';
 import { completionDiagnostic } from './completion-diagnostic.js';
 import {
   type ObservedEvidence,
@@ -431,6 +432,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   let quoteCorrected = false;
   /** FIX-35 0b: one look at a screenshot before a named field is given as absent. */
   let absentLooked = false;
+  /** FIX-45: a named part the answer says it did not do is sent back once. */
+  let declinedLooked = false;
   /** FIX-34 (dy-2): one plain-wording correction for a hedged name the page shows. */
   let namesCorrected = false;
   let inspectionRecoveries = 0;
@@ -1551,8 +1554,39 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             );
             continue;
           }
+          // FIX-45 (local A/B core-10 B): 「该页面不包含 iframe；本次仅按…JavaScript alerts 执行」 —
+          // a named part not done is sent back once to be found; still not done, 部分完成.
+          const declined = declinedTargets(input.userIntent ?? input.intent, summary, [
+            ...pageEvidence,
+            ...readTabTitles(tabTitles, readTabs),
+          ]);
+          if (declined.length && !declinedLooked && !concludeNow) {
+            declinedLooked = true;
+            await rejected(summary, given, `点名的部分没有做：${declined.join('、')}`);
+            const lead = `部分完成：「${declined.join('、')}」部分未完成。`;
+            partialHeld ??= {
+              summary: withLimitations(
+                /^\s*部分完成/.test(answer) ? answer : `${lead}\n\n${answer}`,
+              ),
+              evidence,
+              partial: { found: 0, wanted: 1, missing: declined.join('、') },
+            };
+            results.push(
+              toolResult(
+                call.id,
+                `任务点名要做「${declined.join('、')}」，答案却说没有做（或说当前页面不含它）。它常在同一站点的另一个页面（例如首页列出的同名链接）：请找到并打开它读取，再和已完成的部分一起 finish；确实做不到，就以「部分完成」交付并写明缺这一部分。`,
+                true,
+              ),
+            );
+            continue;
+          }
           const pageGap =
-            listGap ?? (absent.length ? `部分完成：${absent.join('、')} 页面上没有读到。` : null);
+            listGap ??
+            (absent.length
+              ? `部分完成：${absent.join('、')} 页面上没有读到。`
+              : declined.length
+                ? `部分完成：「${declined.join('、')}」部分未完成。`
+                : null);
           if (short || dateMissing || sectionMissing || declaredPartial || saysPartial || pageGap) {
             const lead = short
               ? `部分完成：只找到 ${found}/${wantedCount} 条。`
@@ -1581,7 +1615,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
                         : pageGap
                           ? absent.length && !listGap
                             ? absent.join('、')
-                            : '页面未显示的字段'
+                            : declined.length && !listGap
+                              ? declined.join('、')
+                              : '页面未显示的字段'
                           : '答案中说明的未完成部分',
                   },
             };
