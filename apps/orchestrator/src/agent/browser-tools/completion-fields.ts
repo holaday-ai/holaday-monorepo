@@ -207,6 +207,97 @@ const NUMERIC_LABEL = /播放量|观看次数|价格|售价|大小|日期|发布
 const FACT_LABELS =
   '标题|频道|作者|播放量|观看次数|发布日期(?:或页面相对日期)?|发布时间|日期|价格|售价|文件名|文件大小|大小|title|channel|author|views|published|price|filename|size|tab\\s*\\d+\\s*title';
 
+/**
+ * FIX-45 (Deploy-45 dy-1 「- video_title：」, b-d04 「- latest_version：」, core-10 「- js_alert_result：」):
+ * a snake_case / camelCase field name reads in Chinese (in the field list and the 未核实 note); a word with no entry keeps its own
+ * spelling, the underscores gone.
+ */
+const FIELD_WORDS: Record<string, string> = {
+  video: '视频',
+  title: '标题',
+  author: '作者',
+  name: '名称',
+  nickname: '昵称',
+  channel: '频道',
+  like: '点赞',
+  likes: '点赞',
+  comment: '评论',
+  comments: '评论',
+  collect: '收藏',
+  favorite: '收藏',
+  share: '分享',
+  shares: '分享',
+  count: '数',
+  num: '数',
+  views: '播放量',
+  view: '播放',
+  latest: '最新',
+  version: '版本',
+  release: '发布',
+  publish: '发布',
+  published: '发布',
+  date: '日期',
+  time: '时间',
+  result: '结果',
+  status: '状态',
+  js: 'JS',
+  alert: 'Alert',
+  confirm: 'Confirm',
+  prompt: 'Prompt',
+  dialog: '对话框',
+  text: '文字',
+  macos: 'macOS',
+  compatibility: '适用系统',
+  download: '下载',
+  url: '链接',
+  link: '链接',
+  file: '文件',
+  size: '大小',
+  price: '价格',
+  rating: '评分',
+  review: '评价',
+  reviews: '评价',
+  stock: '库存',
+  original: '起始',
+  current: '当前',
+  page: '页面',
+  tab: '标签页',
+  first: '第一',
+  second: '第二',
+  item: '条目',
+  product: '商品',
+  description: '描述',
+  source: '来源',
+  total: '总',
+  temperature: '温度',
+  humidity: '湿度',
+  weather: '天气',
+  address: '地址',
+};
+export function fieldLabel(name: string): string {
+  const trimmed = name.trim();
+  if (
+    !/^(?:[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+|[a-z]{2,}[a-z0-9]*(?:[A-Z][a-z0-9]+)+)$/.test(
+      trimmed,
+    )
+  )
+    return trimmed;
+  const words = trimmed
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .split('_')
+    .filter(Boolean)
+    .map((word) => FIELD_WORDS[word.toLowerCase()] ?? word);
+  return words.reduce(
+    (out, word) =>
+      !out
+        ? word
+        : /[A-Za-z0-9]$/.test(out) && /^[A-Za-z0-9]/.test(word)
+          ? `${out} ${word}`
+          : `${out}${word}`,
+    '',
+  );
+}
+
 function explicitFacts(input: unknown): Fact[] {
   if (!Array.isArray(input)) return [];
   return input.slice(0, 60).flatMap((field): Fact[] => {
@@ -741,7 +832,7 @@ export function assessCompletionFacts(input: {
       (!fact.tabId || page.tabId === fact.tabId) &&
       (!fact.sourceURL || sameSource(page.sourceURL, fact.sourceURL));
     const eligible = pages.filter(bound);
-    const label = `${fact.name}「${fact.value.slice(0, 120)}」`;
+    const label = `${fieldLabel(fact.name)}「${fact.value.slice(0, 120)}」`;
     const isVideoKindMismatch =
       videoSearch &&
       pages.some((page) =>

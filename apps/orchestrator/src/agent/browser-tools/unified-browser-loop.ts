@@ -34,6 +34,7 @@ import {
   type ObservedEvidence,
   assessCompletionFacts,
   declaredAbsentFields,
+  fieldLabel,
   observedEvidence,
   unescapeLiteralBreaks,
   unverifiedNote,
@@ -2254,96 +2255,7 @@ export function readTabTitles(
 /** An answer that already says a login prompt or verification is on the page. */
 const LOGIN_TOLD_RE = /登录(?:验证|提示|弹窗|框|墙)|需(?:要)?登录|登录.{0,4}(?:弹窗|提示)/;
 
-/**
- * FIX-45 (Deploy-45 dy-1 「- video_title：」, b-d04 「- latest_version：」, core-10 「- js_alert_result：」):
- * a snake_case / camelCase field name reads in Chinese; a word with no entry keeps its own
- * spelling, the underscores gone.
- */
-const FIELD_WORDS: Record<string, string> = {
-  video: '视频',
-  title: '标题',
-  author: '作者',
-  name: '名称',
-  nickname: '昵称',
-  channel: '频道',
-  like: '点赞',
-  likes: '点赞',
-  comment: '评论',
-  comments: '评论',
-  collect: '收藏',
-  favorite: '收藏',
-  share: '分享',
-  shares: '分享',
-  count: '数',
-  num: '数',
-  views: '播放量',
-  view: '播放',
-  latest: '最新',
-  version: '版本',
-  release: '发布',
-  publish: '发布',
-  published: '发布',
-  date: '日期',
-  time: '时间',
-  result: '结果',
-  status: '状态',
-  js: 'JS',
-  alert: 'Alert',
-  confirm: 'Confirm',
-  prompt: 'Prompt',
-  dialog: '对话框',
-  text: '文字',
-  macos: 'macOS',
-  compatibility: '适用系统',
-  download: '下载',
-  url: '链接',
-  link: '链接',
-  file: '文件',
-  size: '大小',
-  price: '价格',
-  rating: '评分',
-  review: '评价',
-  reviews: '评价',
-  stock: '库存',
-  original: '起始',
-  current: '当前',
-  page: '页面',
-  tab: '标签页',
-  first: '第一',
-  second: '第二',
-  item: '条目',
-  product: '商品',
-  description: '描述',
-  source: '来源',
-  total: '总',
-  temperature: '温度',
-  humidity: '湿度',
-  weather: '天气',
-  address: '地址',
-};
-export function fieldLabel(name: string): string {
-  const trimmed = name.trim();
-  if (
-    !/^(?:[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+|[a-z]{2,}[a-z0-9]*(?:[A-Z][a-z0-9]+)+)$/.test(
-      trimmed,
-    )
-  )
-    return trimmed;
-  const words = trimmed
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .split('_')
-    .filter(Boolean)
-    .map((word) => FIELD_WORDS[word.toLowerCase()] ?? word);
-  return words.reduce(
-    (out, word) =>
-      !out
-        ? word
-        : /[A-Za-z0-9]$/.test(out) && /^[A-Za-z0-9]/.test(word)
-          ? `${out} ${word}`
-          : `${out}${word}`,
-    '',
-  );
-}
+export { fieldLabel };
 
 export function fieldLines(fields: unknown, summary: string): string {
   if (!Array.isArray(fields)) return '';

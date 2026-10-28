@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { humanizeToolMentions, sanitizeFinalText } from '../text-sanitizer.js';
 import { declinedTargets } from './completion-coverage.js';
+import { assessCompletionFacts } from './completion-fields.js';
 import { fieldLabel, fieldLines, runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
 function scriptedLoop(calls: Array<{ name: string; input: Record<string, unknown> }>) {
@@ -254,5 +255,18 @@ describe('FIX-45 · core-10 (local A/B B): a named part the answer says it did n
     expect(seen).not.toContain('任务点名要做');
     expect(outcome.status).toBe('completed');
     expect(outcome).not.toHaveProperty('partial');
+  });
+});
+
+describe('FIX-45 #5 · the 未核实 note names a field in Chinese too (local A/B core-10 B rerun)', () => {
+  it('「js_confirm_dialog_text「I am a JS Confirm」」 reads as 「JS Confirm对话框文字「I am a JS Confirm」」', () => {
+    const facts = assessCompletionFacts({
+      summary: '已触发三种原生对话框。',
+      fields: [{ name: 'js_confirm_dialog_text', value: 'I am a JS Confirm' }],
+      pages: [{ text: 'heading "JavaScript Alerts" Result: You clicked: Cancel' }],
+      intent: '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts',
+    });
+    expect(facts.unverified).toContain('JS Confirm对话框文字「I am a JS Confirm」');
+    expect(facts.unverified.join('；')).not.toContain('js_confirm_dialog_text');
   });
 });
