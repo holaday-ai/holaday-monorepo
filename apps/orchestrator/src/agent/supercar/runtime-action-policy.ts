@@ -86,7 +86,9 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
     (action.kind === 'type' && accountField(action))
   ) {
     const reason =
-      '这是登录或验证表单（账号、手机号、密码、验证码），不代填，这一步没有执行。任务确实需要登录才能继续时调用 request_human 请用户接管；否则关掉弹窗（×、「关闭」或 press_key Escape）或换别的页面继续。';
+      // FIX-45 (Deploy-45 core-08): the model read this as the whole form refused and gave up on the
+      // date box; the refusal is this box only.
+      '这个框是登录或验证用的（账号、手机号、邮箱、密码、验证码），不代填，这一步没有执行。同一表单里的其他普通字段（姓名、日期、地址等）可以照常填写。任务确实需要登录才能继续时调用 request_human 请用户接管；否则关掉弹窗（×、「关闭」或 press_key Escape）或换别的页面继续。';
     return { allowed: false, reason, refuse: reason };
   }
   // FIX-36 复审 #1: logging in, signing up or authorizing is the user's, never clicked for them.

@@ -28,11 +28,13 @@ import {
 } from './action-claims.js';
 import { prepareBrowserPlan } from './browser-brain-roles.js';
 import { type BrowserTrace, completionGap, receiptEvidence } from './browser-completion.js';
+import { declinedTargets } from './completion-coverage.js';
 import { completionDiagnostic } from './completion-diagnostic.js';
 import {
   type ObservedEvidence,
   assessCompletionFacts,
   declaredAbsentFields,
+  fieldLabel,
   observedEvidence,
   unescapeLiteralBreaks,
   unverifiedNote,
@@ -431,6 +433,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   let quoteCorrected = false;
   /** FIX-35 0b: one look at a screenshot before a named field is given as absent. */
   let absentLooked = false;
+  /** FIX-45: a named part the answer says it did not do is sent back once. */
+  let declinedLooked = false;
   /** FIX-34 (dy-2): one plain-wording correction for a hedged name the page shows. */
   let namesCorrected = false;
   let inspectionRecoveries = 0;
@@ -615,8 +619,15 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     }
     return hit;
   };
+  // FIX-45 (Deploy-45 core-03): the notice follows the answer, so it points up (「以上为…」); an
+  // answer that already tells of the login prompt gets no second one.
   const withLimitations = (summary: string) =>
-    [summary, ...[...localNotices].filter((message) => !summary.includes(message))].join('\n\n');
+    [
+      summary,
+      ...[...localNotices]
+        .filter((message) => !summary.includes(message) && !LOGIN_TOLD_RE.test(summary))
+        .map((message) => message.replace('以下为页面公开', '以上为页面公开')),
+    ].join('\n\n');
   // LLM-RETRY-1: retries happen here (withModelRetry), one attempt per call,
   // so each attempt is recorded and the backoff is the same for both roles.
   const roleOptions = {
@@ -1505,6 +1516,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             input.userIntent ?? input.intent,
             summary,
             args.fields,
+            pageEvidence.map((page) => page.text),
           );
           // The page itself confirms the gap (a listed item showing only 「See options」):
           // an honest 部分完成, not a second look (FIX-35 0a).
@@ -1544,8 +1556,39 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             );
             continue;
           }
+          // FIX-45 (local A/B core-10 B): 「该页面不包含 iframe；本次仅按…JavaScript alerts 执行」 —
+          // a named part not done is sent back once to be found; still not done, 部分完成.
+          const declined = declinedTargets(input.userIntent ?? input.intent, summary, [
+            ...pageEvidence,
+            ...readTabTitles(tabTitles, readTabs),
+          ]);
+          if (declined.length && !declinedLooked && !concludeNow) {
+            declinedLooked = true;
+            await rejected(summary, given, `点名的部分没有做：${declined.join('、')}`);
+            const lead = `部分完成：「${declined.join('、')}」部分未完成。`;
+            partialHeld ??= {
+              summary: withLimitations(
+                /^\s*部分完成/.test(answer) ? answer : `${lead}\n\n${answer}`,
+              ),
+              evidence,
+              partial: { found: 0, wanted: 1, missing: declined.join('、') },
+            };
+            results.push(
+              toolResult(
+                call.id,
+                `任务点名要做「${declined.join('、')}」，答案却说没有做（或说当前页面不含它）。它常在同一站点的另一个页面（例如首页列出的同名链接）：请找到并打开它读取，再和已完成的部分一起 finish；确实做不到，就以「部分完成」交付并写明缺这一部分。`,
+                true,
+              ),
+            );
+            continue;
+          }
           const pageGap =
-            listGap ?? (absent.length ? `部分完成：${absent.join('、')} 页面上没有读到。` : null);
+            listGap ??
+            (absent.length
+              ? `部分完成：${absent.join('、')} 页面上没有读到。`
+              : declined.length
+                ? `部分完成：「${declined.join('、')}」部分未完成。`
+                : null);
           if (short || dateMissing || sectionMissing || declaredPartial || saysPartial || pageGap) {
             const lead = short
               ? `部分完成：只找到 ${found}/${wantedCount} 条。`
@@ -1574,7 +1617,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
                         : pageGap
                           ? absent.length && !listGap
                             ? absent.join('、')
-                            : '页面未显示的字段'
+                            : declined.length && !listGap
+                              ? declined.join('、')
+                              : '页面未显示的字段'
                           : '答案中说明的未完成部分',
                   },
             };
@@ -2208,6 +2253,11 @@ export function readTabTitles(
 }
 
 /** Structured `fields` values the summary does not already state, as answer lines. */
+/** An answer that already says a login prompt or verification is on the page. */
+const LOGIN_TOLD_RE = /登录(?:验证|提示|弹窗|框|墙)|需(?:要)?登录|登录.{0,4}(?:弹窗|提示)/;
+
+export { fieldLabel };
+
 export function fieldLines(fields: unknown, summary: string): string {
   if (!Array.isArray(fields)) return '';
   const lines: string[] = [];
@@ -2218,6 +2268,9 @@ export function fieldLines(fields: unknown, summary: string): string {
     const text = unescapeLiteralBreaks(value).trim();
     if (!text || summary.includes(text) || /summary|总结|概述|摘要|说明|备注|note/i.test(name))
       continue;
+    // DEPLOY-46 (local A/B, A core-11): a value that is only element refs (「e12, e13, e19」) is the
+    // browser's own handles, never an answer field.
+    if (/^e\d{1,6}(?:\s*[,，、]\s*e\d{1,6})*$/i.test(text)) continue;
     // FIX-42 (Deploy-42 core-06): the browser's own ids are no answer field (「- tabId：…」) —
     // only when the value is one (DEPLOY-43 复审 #4: a 「ref」 field may be a real reference).
     if (
@@ -2227,7 +2280,7 @@ export function fieldLines(fields: unknown, summary: string): string {
       /^(?:e\d{1,6}|(?:tab|frame)_[\w-]+|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.test(text)
     )
       continue;
-    lines.push(`- ${name}：${text}`);
+    lines.push(`- ${fieldLabel(name)}：${text}`);
   }
   return lines.join('\n');
 }

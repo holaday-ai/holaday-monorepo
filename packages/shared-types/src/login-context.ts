@@ -26,8 +26,8 @@ export interface LoginContext {
  * (`popupReported`). Never a page header / nav.
  * A login field: a box naming an account / user name on its own; a password / code box
  * (「6位数字」 included); a phone / mailbox box only inside a login block or login form (a
- * contact or booking form's phone and e-mail stay fillable); any box of a login block. Search
- * boxes never.
+ * contact or booking form's phone and e-mail stay fillable); any other box of a login block, but
+ * a plain name / date / number / address box (FIX-45). Search boxes never.
  * A login control: 「授权登录 / 一键登录 / 同意并… / 获取验证码」 anywhere; 登录 / 注册 / 授权 /
  * 下一步 / 继续 / Next / Continue, and 发送 / 获取 / 重新获取 / a countdown, inside a login
  * block or login form.
@@ -253,8 +253,32 @@ export function readLoginContext(node: Node, popupReported: boolean): LoginConte
       (popup && popupReported && LOGIN_RE.test(text) && !header)
     );
   });
+  // DEPLOY-46 复审 #2: a popup asking for a code — four or more one-character boxes, or its text
+  // saying 验证码 / 重新获取 / 「60秒后」 / a verification code — is a code block whatever its boxes are
+  // named. PR #309 review: a bare 「code」 is not one (「Enter ZIP code」, a coupon code).
+  // 复审 #3: a popup about 实名 / 身份证 keeps even its name box a login field.
+  let codeBlock = false;
+  let realName = false;
+  for (const { block, popup, modal } of blocks) {
+    if (!popup && !modal) continue;
+    if (block.matches(HEADER) || block.closest(HEADER)) continue;
+    const text = ((block as HTMLElement).innerText ?? block.textContent ?? '').slice(0, 2000);
+    const singles = Array.from(block.querySelectorAll('input')).filter(
+      (field) =>
+        field.getAttribute('maxlength') === '1' &&
+        (field as HTMLElement).getClientRects().length > 0,
+    ).length;
+    if (
+      singles >= 4 ||
+      /验证码|动态码|校验码|重新获取|重新发送|\d+\s*(?:秒|s)\s*后|\b(?:verification|security|one[- ]time|sms|text|login|sign[- ]in|confirmation|access|otp)\s+code\b|\bcode\s+(?:we|was|has been)\s+sent\b|\benter\s+(?:the|your)?\s*code\b|\bresend\b/i.test(
+        text,
+      )
+    )
+      codeBlock = true;
+    if (/实名|身份证/.test(text)) realName = true;
+  }
   const loginForm = !!form && !!(scans.get(form)?.coded || scans.get(form)?.account);
-  const loginBlock = inBlock || loginForm;
+  const loginBlock = inBlock || codeBlock || loginForm;
   const typing =
     tag === 'textarea' ||
     tag === 'select' ||
@@ -266,13 +290,29 @@ export function readLoginContext(node: Node, popupReported: boolean): LoginConte
     el.getAttribute('role') === 'searchbox' ||
     !!el.closest('[role="search"]') ||
     SEARCH_RE.test(identity);
+  // FIX-45 (Deploy-45 core-08: /large_form's 「Account」 fieldset holds First name, Last name, Email,
+  // Password, Nickname): inside a login block, a box that plainly asks for something else — a
+  // name, date, number, address, birthday — stays fillable; account, phone, mailbox, password and
+  // code boxes do not, nor a nickname (a login popup's 昵称 box is its account, FIX-36 复审 #3).
+  // PR #309 review: not a `number` box by its type alone — an unnamed number box of a phone
+  // login is the phone; a number box passes only by its own name (年龄 / age).
+  const plain =
+    (['date', 'datetime-local', 'month', 'week', 'time', 'color', 'range'].includes(type) ||
+      /first[\s_-]?name|last[\s_-]?name|given[\s_-]?name|family[\s_-]?name|full[\s_-]?name|姓名|名字|birthday|birth|生日|出生|address|地址|city|城市|country|国家|\bage\b|年龄|\bbio\b|about/i.test(
+        identity,
+      )) &&
+    !['email', 'tel', 'password'].includes(type) &&
+    !ACCOUNT_RE.test(identity) &&
+    !CODE_RE.test(identity) &&
+    !CONTACT_RE.test(identity);
   const loginField =
     typing &&
     !search &&
     (type === 'password' ||
       ACCOUNT_RE.test(identity) ||
       CODE_RE.test(identity) ||
-      inBlock ||
+      codeBlock ||
+      (inBlock && !(plain && !realName)) ||
       (loginForm && (['email', 'tel'].includes(type) || CONTACT_RE.test(identity))));
   const text = [
     typing ? '' : ((el as HTMLElement).innerText ?? el.textContent ?? ''),
@@ -287,6 +327,8 @@ export function readLoginContext(node: Node, popupReported: boolean): LoginConte
   const loginControl =
     !typing &&
     (STRONG_RE.test(text) ||
+      (codeBlock &&
+        /verify|验证|确认|confirm|下一步|\bnext\b|继续|continue|提交|submit|登录/i.test(text)) ||
       (loginBlock && CONTROL_RE.test(text)) ||
       (loginBlock && CODE_CONTROL_RE.test(text)));
   return { loginField, loginControl, loginBlock };

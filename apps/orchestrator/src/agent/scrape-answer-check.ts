@@ -96,9 +96,10 @@ const SIDE_FIELD_RE =
  * start or end. The few characters before it are kept so a side field (「历史价格页面未显示」)
  * is still told apart.
  * FIX-42 (Deploy-42 b-v06, 「第一名的**歌曲名称未被抓取到**」): 未被抓取到 / 未能读取 / 没拿到 say the same.
+ * DEPLOY-46 (local A/B b-v06 / new-qq): 「歌曲名称未完整显示」「歌曲名部分未能显示」「歌曲名页面未渲染出来」 too.
  */
 const INLINE_MISSING_RE =
-  /([^。！？!?\n，,；;]{0,6}?(?:名称|歌名|曲名|标题|名字|书名|片名|价格|股价|点位|指数|评分|\bname\b|\btitle\b|\bprice\b))\s*[「『“"]?\s*(?:页面(?:上|中)?)?(?:未|没有|没)(?:被|能)?(?:显示|获取到?|读到|找到|列出|给出|抓取到?|抓到|读取到?|拿到|提取到?|加载出来)/gi;
+  /([^。！？!?\n，,；;]{0,6}?(?:名称|歌名|曲名|标题|名字|书名|片名|价格|股价|点位|指数|评分|\bname\b|\btitle\b|\bprice\b))\s*(?:部分|内容)?\s*[「『“"]?\s*(?:页面(?:上|中)?)?(?:未|没有|没)(?:被|能)?(?:完整)?(?:显示|渲染|获取到?|读到|找到|列出|给出|抓取到?|抓到|读取到?|拿到|提取到?|加载出来)/gi;
 
 /** A name that belongs to something else than the thing asked for (「专辑名称」「作者名字」). */
 const SECONDARY_NAME_RE =

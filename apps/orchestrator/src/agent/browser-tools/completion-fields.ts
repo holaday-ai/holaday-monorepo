@@ -207,6 +207,97 @@ const NUMERIC_LABEL = /播放量|观看次数|价格|售价|大小|日期|发布
 const FACT_LABELS =
   '标题|频道|作者|播放量|观看次数|发布日期(?:或页面相对日期)?|发布时间|日期|价格|售价|文件名|文件大小|大小|title|channel|author|views|published|price|filename|size|tab\\s*\\d+\\s*title';
 
+/**
+ * FIX-45 (Deploy-45 dy-1 「- video_title：」, b-d04 「- latest_version：」, core-10 「- js_alert_result：」):
+ * a snake_case / camelCase field name reads in Chinese (in the field list and the 未核实 note); a word with no entry keeps its own
+ * spelling, the underscores gone.
+ */
+const FIELD_WORDS: Record<string, string> = {
+  video: '视频',
+  title: '标题',
+  author: '作者',
+  name: '名称',
+  nickname: '昵称',
+  channel: '频道',
+  like: '点赞',
+  likes: '点赞',
+  comment: '评论',
+  comments: '评论',
+  collect: '收藏',
+  favorite: '收藏',
+  share: '分享',
+  shares: '分享',
+  count: '数',
+  num: '数',
+  views: '播放量',
+  view: '播放',
+  latest: '最新',
+  version: '版本',
+  release: '发布',
+  publish: '发布',
+  published: '发布',
+  date: '日期',
+  time: '时间',
+  result: '结果',
+  status: '状态',
+  js: 'JS',
+  alert: 'Alert',
+  confirm: 'Confirm',
+  prompt: 'Prompt',
+  dialog: '对话框',
+  text: '文字',
+  macos: 'macOS',
+  compatibility: '适用系统',
+  download: '下载',
+  url: '链接',
+  link: '链接',
+  file: '文件',
+  size: '大小',
+  price: '价格',
+  rating: '评分',
+  review: '评价',
+  reviews: '评价',
+  stock: '库存',
+  original: '起始',
+  current: '当前',
+  page: '页面',
+  tab: '标签页',
+  first: '第一',
+  second: '第二',
+  item: '条目',
+  product: '商品',
+  description: '描述',
+  source: '来源',
+  total: '总',
+  temperature: '温度',
+  humidity: '湿度',
+  weather: '天气',
+  address: '地址',
+};
+export function fieldLabel(name: string): string {
+  const trimmed = name.trim();
+  if (
+    !/^(?:[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+|[a-z]{2,}[a-z0-9]*(?:[A-Z][a-z0-9]+)+)$/.test(
+      trimmed,
+    )
+  )
+    return trimmed;
+  const words = trimmed
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .split('_')
+    .filter(Boolean)
+    .map((word) => FIELD_WORDS[word.toLowerCase()] ?? word);
+  return words.reduce(
+    (out, word) =>
+      !out
+        ? word
+        : /[A-Za-z0-9]$/.test(out) && /^[A-Za-z0-9]/.test(word)
+          ? `${out} ${word}`
+          : `${out}${word}`,
+    '',
+  );
+}
+
 function explicitFacts(input: unknown): Fact[] {
   if (!Array.isArray(input)) return [];
   return input.slice(0, 60).flatMap((field): Fact[] => {
@@ -265,8 +356,10 @@ function beforeOuterComma(value: string): string {
   return value;
 }
 
+// DEPLOY-46 (local A/B, A core-11 「visible_text_blocks_after_5_scrolls：e12, e13, e19…」): a list
+// of element refs is a browser handle too.
 const HANDLE_ONLY_RE =
-  /^\s*(?:(?:tab|frame)_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|ref=e\d+)\s*$/;
+  /^\s*(?:(?:tab|frame)_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|ref=e\d+|e\d{1,6}(?:\s*[,，、]\s*e\d{1,6})+)\s*$/;
 
 function answerFacts(summary: string, intent = ''): Fact[] {
   const text = unescapeLiteralBreaks(summary);
@@ -741,7 +834,7 @@ export function assessCompletionFacts(input: {
       (!fact.tabId || page.tabId === fact.tabId) &&
       (!fact.sourceURL || sameSource(page.sourceURL, fact.sourceURL));
     const eligible = pages.filter(bound);
-    const label = `${fact.name}「${fact.value.slice(0, 120)}」`;
+    const label = `${fieldLabel(fact.name)}「${fact.value.slice(0, 120)}」`;
     const isVideoKindMismatch =
       videoSearch &&
       pages.some((page) =>
@@ -1206,7 +1299,48 @@ export function askedFields(intent: string): string[] {
   return ASKABLE_FIELDS.filter((name) => intent.includes(name));
 }
 
-export function declaredAbsentFields(intent: string, summary: string, fields?: unknown): string[] {
+/**
+ * FIX-45 (Deploy-45 b-p02 「第3条商品在搜索结果页快照中未显示价格，已打开其详情页读取到价格为 S$12.80」):
+ * the gap is told and then filled — in the same sentence or the next one the field's value is
+ * read after all. Not absent. DEPLOY-46 复审 #1: only a real value (not 「推测是…」「待确认」「谁」
+ * 「？」「—」), of the same item (not another one, nor a 推荐 / 相关 / 其他 item), that a page the
+ * run read shows. With no pages to check it against, nothing is filled.
+ */
+function filledAfter(prose: string, at: number, name: string, pages?: readonly string[]): boolean {
+  if (!pages?.length) return false;
+  const next = prose.slice(at).match(/^[^。！？!?\n]*(?:[。！？!?\n][^。！？!?\n]*)?/)![0];
+  const absent = '(?![“"「]?(?:页面(?:上|中)?)?(?:未|没有|无法|不详|空|无))';
+  const unsure =
+    '(?!(?:推测|估计|大概|可能|也许|疑似|似乎|待确认|待定|待查|不清楚|不确定|不详|未知|谁|什么|哪|[？?—–\\-…]))';
+  const filled = new RegExp(
+    `(?:(?:读到|读取到|获取到|拿到|找到|补上|补齐)了?(?:其|该|它的)?${name}|${name})\\s*(?:为|是|[：:])\\s*${absent}${unsure}(\\S[^，,。；;\\n]{0,79})`,
+  ).exec(next);
+  if (!filled) return false;
+  // PR #309 review: 「第一个视频未显示作者，第二个视频的作者为张三」 — a value for another item fills
+  // nothing. Every item named between the gap and the value is the gap's own item.
+  const before = next.slice(0, filled.index + filled[0].length - filled[1]!.length);
+  if (/推荐|相关|其他|其余|另一|别的/.test(before)) return false;
+  const start = Math.max(
+    ...['。', '！', '？', '!', '?', '\n'].map((c) => prose.lastIndexOf(c, at - 1)),
+  );
+  const own = [...prose.slice(start + 1, at).matchAll(ITEM_RE)].at(-1)?.[0].replace(/\s+/g, '');
+  if (![...before.matchAll(ITEM_RE)].every((m) => m[0].replace(/\s+/g, '') === own)) return false;
+  // The value is the page's: found on a page the run read.
+  const value = normalizeFact(filled[1]!.trim().replace(/^[“"「『]|[”"」』]$/g, ''));
+  return /[\p{L}\p{N}]/u.test(value) && pages.some((page) => normalizeFact(page).includes(value));
+}
+
+/** An item a sentence is about: 「第3条」「第二个」「另一个」「其他」. */
+const ITEM_RE =
+  /第\s*[一二三四五六七八九十百\d]+\s*(?:个|条|项|本|篇|款|件|位|首|名|家|部|只)?|另一(?:个|条|项|本|篇|款|件|位)?|其他|其余/g;
+
+export function declaredAbsentFields(
+  intent: string,
+  summary: string,
+  fields?: unknown,
+  /** DEPLOY-46 复审 #1: the read pages' text — a gap is filled only by a value they show. */
+  pages?: readonly string[],
+): string[] {
   const asked = ASKABLE_FIELDS.filter((name) => intent.includes(name));
   if (!asked.length) return [];
   const values = new Map<string, string[]>();
@@ -1224,9 +1358,14 @@ export function declaredAbsentFields(intent: string, summary: string, fields?: u
           (label === name || label.endsWith(name)) && vals.some((v) => DECLARED_ABSENT_RE.test(v)),
       ) ||
       // 「页面未显示作者名称」「作者字段按页面原样写“页面未显示”」 — prose, not a 作者：value line.
-      new RegExp(
-        `(?:页面(?:上|中)?)?(?:未|没有)(?:显示|提供|列出|给出|找到|读到|获取到)${name}`,
-      ).test(prose) ||
+      [
+        ...prose.matchAll(
+          new RegExp(
+            `(?:页面(?:上|中)?)?(?:未|没有)(?:显示|提供|列出|给出|找到|读到|获取到)${name}`,
+            'g',
+          ),
+        ),
+      ].some((m) => !filledAfter(prose, m.index! + m[0].length, name, pages)) ||
       new RegExp(
         `${name}(?:名称|字段)?[^。；;\\n：:（(]{0,10}?[为写]\\s*[“"「]?(?:页面(?:上|中)?未显示|未显示|未获取到|未读到|未找到)`,
       ).test(prose),

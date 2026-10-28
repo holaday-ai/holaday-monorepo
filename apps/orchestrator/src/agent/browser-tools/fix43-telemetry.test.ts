@@ -77,7 +77,8 @@ describe('FIX-43 #1 · Xiaohongshu apm-fe and 高德 collapsar telemetry are let
       XHS,
       xhsBody({ context_a: 1, context_b: 2, context_c: 3, context_d: 4, context_e: 5 }),
     ],
-    ['xhs over 8 KB', XHS, xhsBody({ context_pad: 'x'.repeat(8200) })],
+    // FIX-45: an apm-fe batch may be up to 32 KB.
+    ['xhs over 32 KB', XHS, xhsBody({ context_pad: 'x'.repeat(32_800) })],
     ['xhs not JSON', XHS, 'clientTime=1&context_platform=PC'],
     [
       'xhs real 收藏 on edith',

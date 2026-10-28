@@ -204,9 +204,13 @@ export function qqMusicReadRpc(url: URL, body: string): boolean {
   );
 }
 
-function safeBodyShape(request: Request): string {
+function safeBodyShape(request: Request, url?: URL): string {
   try {
-    return postBodyShape(request.postData() ?? '');
+    const body = request.postData() ?? '';
+    // FIX-45 (Deploy-45 b-m01: no value of the collapsar log was ever seen): a keyed log
+    // endpoint's pause says which check refused it.
+    const why = url ? keyedLogCheck(url, body) : null;
+    return `${postBodyShape(body)}${why ? ` check:${why}` : ''}`;
   } catch {
     return 'unreadable';
   }
@@ -364,32 +368,49 @@ function jsonKeys(value: unknown, depth = 0): string[] | null {
   return children.some((keys) => keys === null) ? null : (children.flat() as string[]);
 }
 
-function xhsApmBody(postData: string): boolean {
-  let body: unknown;
-  try {
-    body = JSON.parse(postData);
-  } catch {
-    return false;
-  }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+/** Why one apm-fe record is not the SDK's flat log object — or null when it is. */
+function xhsApmRecordCheck(body: unknown): string | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'not-object';
   const entries = Object.entries(body);
   const keys = entries.map(([key]) => key);
   const extra = keys.filter((key) => !XHS_APM_KEYS.has(key));
   const allKeys = jsonKeys(body);
-  return (
-    !!allKeys &&
-    keys.includes('clientTime') &&
-    extra.every((key) => /^context_[A-Za-z]{1,40}$/.test(key)) &&
-    extra.length <= XHS_APM_EXTRA_CONTEXT &&
-    !allKeys.some((key) => PERSONAL_KEY_RE.test(key) && !XHS_APM_KEYS.has(key)) &&
-    // DEPLOY-43 复审 #1: the SDK sends flat strings and numbers — an object is something else,
-    // and a value naming a note, a like or a follow is an action.
-    entries.every(
-      ([, value]) =>
+  if (!allKeys) return 'too-deep';
+  if (!keys.includes('clientTime')) return 'no-clientTime';
+  const unlisted = extra.filter((key) => !/^context_[A-Za-z]{1,40}$/.test(key));
+  if (unlisted.length) return `key:${unlisted.slice(0, 3).join('+')}`;
+  if (extra.length > XHS_APM_EXTRA_CONTEXT) return `extra-context:${extra.length}`;
+  const personal = allKeys.find((key) => PERSONAL_KEY_RE.test(key) && !XHS_APM_KEYS.has(key));
+  if (personal) return `personal-key:${personal}`;
+  // DEPLOY-43 复审 #1: the SDK sends flat strings and numbers — an object is something else,
+  // and a value naming a note, a like or a follow is an action.
+  const bad = entries.find(
+    ([, value]) =>
+      !(
         (typeof value === 'string' && !PERSONAL_VALUE_RE.test(value)) ||
-        (typeof value === 'number' && Number.isFinite(value)),
-    )
+        (typeof value === 'number' && Number.isFinite(value))
+      ),
   );
+  return bad ? `value:${bad[0]}` : null;
+}
+
+/** FIX-45 (Deploy-45 wall-xhs, a 22,628 B array): the SDK batches its records in one array. */
+const XHS_APM_MAX_RECORDS = 64;
+
+function xhsApmCheck(postData: string): string | null {
+  let body: unknown;
+  try {
+    body = JSON.parse(postData);
+  } catch {
+    return 'not-json';
+  }
+  if (!Array.isArray(body)) return xhsApmRecordCheck(body);
+  if (!body.length || body.length > XHS_APM_MAX_RECORDS) return `records:${body.length}`;
+  for (const [i, record] of body.entries()) {
+    const why = xhsApmRecordCheck(record);
+    if (why) return `record${i}:${why}`;
+  }
+  return null;
 }
 
 /**
@@ -422,28 +443,52 @@ function contentReadings(content: string): string[] {
   return readings;
 }
 
-function amapCollapsarBody(postData: string): boolean {
-  if (/^\s*[{[]/.test(postData) || /content-disposition\s*:/i.test(postData)) return false;
+/** A `mode` value as evidence: short plain values verbatim, anything else only by its length. */
+const evidenceValue = (value: string) =>
+  /^[A-Za-z0-9_.-]{1,16}$/.test(value) ? value : `len${value.length}`;
+
+/** Why a collapsar body is not the device log — or null when it is (FIX-45: the reason is kept). */
+function amapCollapsarCheck(postData: string): string | null {
+  if (/^\s*[{[]/.test(postData) || /content-disposition\s*:/i.test(postData)) return 'not-form';
   const form = new URLSearchParams(postData);
   const keys = [...form.keys()];
-  if (!keys.length || new Set(keys).size !== keys.length) return false;
-  if (!keys.every((key) => AMAP_COLLAPSAR_KEYS.has(key))) return false;
+  if (!keys.length || new Set(keys).size !== keys.length) return 'keys:empty-or-repeated';
+  const unlisted = keys.filter((key) => !AMAP_COLLAPSAR_KEYS.has(key));
+  if (unlisted.length) return `key:${unlisted.slice(0, 3).join('+')}`;
   const mode = form.get('mode');
-  if (mode !== null && !AMAP_COLLAPSAR_MODES.test(mode)) return false;
+  if (mode !== null && !AMAP_COLLAPSAR_MODES.test(mode)) return `mode=${evidenceValue(mode)}`;
   // `content` is the SDK's opaque log string: in no reading of it is there a field a person
   // fills in, nor any key/value pair (DEPLOY-43 复审 #1).
   const content = form.get('content') ?? '';
-  if (contentReadings(content).some((text) => KEY_VALUE_RE.test(text))) return false;
+  const paired = contentReadings(content).findIndex((text) => KEY_VALUE_RE.test(text));
+  if (paired >= 0) return `content:pair-in-reading${paired}`;
   // The other fields are short device values, no action words.
-  return keys.every((key) => key === 'content' || !PERSONAL_VALUE_RE.test(form.get(key) ?? ''));
+  const worded = keys.find(
+    (key) => key !== 'content' && PERSONAL_VALUE_RE.test(form.get(key) ?? ''),
+  );
+  return worded ? `value:${worded}` : null;
 }
 
 const KEYED_LOG_ENDPOINTS: ReadonlyArray<
-  readonly [host: string, path: string, body: (postData: string) => boolean]
+  readonly [host: string, path: string, max: number, check: (postData: string) => string | null]
 > = [
-  ['apm-fe.xiaohongshu.com', '/api/data', xhsApmBody],
-  ['collapsar.amap.com', '/alc/h5/upload', amapCollapsarBody],
+  // FIX-45: an apm-fe batch (an array of records) may be up to 32 KB.
+  ['apm-fe.xiaohongshu.com', '/api/data', 32_768, xhsApmCheck],
+  ['collapsar.amap.com', '/alc/h5/upload', KEYED_LOG_BODY_MAX, amapCollapsarCheck],
 ];
+
+/**
+ * FIX-45: why a POST to one of the keyed log endpoints still pauses — the failing check only
+ * (key names, a short `mode`, which reading of `content`), never the values — or null.
+ */
+export function keyedLogCheck(url: URL, postData: string): string | null {
+  const keyed = KEYED_LOG_ENDPOINTS.find(
+    ([host, path]) => url.hostname === host && url.pathname === path,
+  );
+  if (!keyed) return null;
+  if (postData.length > keyed[2]) return `size:${postData.length}`;
+  return keyed[3](postData);
+}
 
 export function anchoredLogPost(url: URL, method: string, postData: string): boolean {
   if (
@@ -459,7 +504,7 @@ export function anchoredLogPost(url: URL, method: string, postData: string): boo
   const keyed = KEYED_LOG_ENDPOINTS.find(
     ([host, path]) => url.hostname === host && url.pathname === path,
   );
-  return !!keyed && postData.length <= KEYED_LOG_BODY_MAX && keyed[2](postData);
+  return !!keyed && postData.length <= keyed[2] && keyed[3](postData) === null;
 }
 
 /**
@@ -1170,7 +1215,7 @@ export class CloudObservation {
       method: r.method(),
       url: safeObservationUrl(url.origin + url.pathname),
       at: Date.now(),
-      ...(unknownPost ? { bodyShape: safeBodyShape(r) } : {}),
+      ...(unknownPost ? { bodyShape: safeBodyShape(r, url) } : {}),
     };
     if (write && cause) {
       cause.causes.delete(key);
@@ -2016,8 +2061,11 @@ export class CloudObservation {
           }
         : {
             reason: 'unexpected_effect',
-            message:
-              '检测到写请求或交易状态变化，已暂停后续操作。第一次副作用无法事前阻止，请核对结果后确认如何继续。',
+            // FIX-45 (Deploy-45 b-m01 / wall-xhs / BestBuy): a background POST nothing could place
+            // is no write the page showed — say so, not 「写请求或交易状态变化」.
+            message: triggers.every((t) => t.branch === 'unknown_post')
+              ? '页面发出了一个无法确认的后台请求，我先停下请你确认；当前任务尚未完成。'
+              : '检测到写请求或交易状态变化，已暂停后续操作。第一次副作用无法事前阻止，请核对结果后确认如何继续。',
           };
     if (opened.length) {
       const observations = [];

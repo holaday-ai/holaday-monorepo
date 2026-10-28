@@ -125,6 +125,24 @@ export function uncoveredTargets(
   return gaps;
 }
 
+/**
+ * FIX-45 (local A/B core-10 B: 「该页面不包含 iframe；…本次仅按用户明确要求的 JavaScript alerts 交互
+ * 执行」, delivered as completed): a named target the answer itself says was not done, and that
+ * no page the run read has. Honest, so no contradiction — but no completed answer either.
+ */
+export function declinedTargets(
+  intent: string,
+  answer: string,
+  pages?: readonly { text: string; sourceURL?: string }[],
+): string[] {
+  return namedTargets(intent).filter(
+    (target) =>
+      mentions(answer, target) &&
+      saidNotDone(answer, target) &&
+      !(pages ?? []).some((page) => mentions(`${page.text} ${page.sourceURL ?? ''}`, target)),
+  );
+}
+
 const RECENT: Array<[RegExp, number]> = [
   [/今天|今日|\btoday\b/i, 3],
   [
