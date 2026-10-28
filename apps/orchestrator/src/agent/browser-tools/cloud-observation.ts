@@ -343,14 +343,25 @@ const AMAP_COLLAPSAR_KEYS = new Set([
   'mode',
 ]);
 const KEYED_LOG_BODY_MAX = 8192;
-/** Keys of something a person did or typed — never telemetry. */
+/** Keys or values of something a person did or typed — never telemetry. */
 const PERSONAL_KEY_RE =
   /note|comment|collect|favou?rite|like|follow|phone|mobile|tel\b|sms|code|captcha|password|passwd|pwd|token|account|user_?id|uid/i;
+/** DEPLOY-43 复审 #1: the values are checked too, with the action words a write carries. */
+const PERSONAL_VALUE_RE =
+  /note|comment|collect|favou?rite|like|follow|phone|mobile|sms|code|captcha|password|passwd|pwd|token|login|logon|signin|register|share/i;
+const KEYED_JSON_MAX_DEPTH = 4;
 
-function jsonKeys(value: unknown, depth = 0): string[] {
-  if (!value || typeof value !== 'object' || depth > 4) return [];
-  if (Array.isArray(value)) return value.flatMap((item) => jsonKeys(item, depth + 1));
-  return Object.entries(value).flatMap(([key, item]) => [key, ...jsonKeys(item, depth + 1)]);
+/** Every key of a JSON value, or null when it nests deeper than the limit (DEPLOY-43 复审 #1). */
+function jsonKeys(value: unknown, depth = 0): string[] | null {
+  if (!value || typeof value !== 'object') return [];
+  if (depth > KEYED_JSON_MAX_DEPTH) return null;
+  const children = Array.isArray(value)
+    ? value.map((item) => jsonKeys(item, depth + 1))
+    : Object.entries(value).map(([key, item]) => {
+        const keys = jsonKeys(item, depth + 1);
+        return keys && [key, ...keys];
+      });
+  return children.some((keys) => keys === null) ? null : (children.flat() as string[]);
 }
 
 function xhsApmBody(postData: string): boolean {
@@ -361,14 +372,54 @@ function xhsApmBody(postData: string): boolean {
     return false;
   }
   if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
-  const keys = Object.keys(body);
+  const entries = Object.entries(body);
+  const keys = entries.map(([key]) => key);
   const extra = keys.filter((key) => !XHS_APM_KEYS.has(key));
+  const allKeys = jsonKeys(body);
   return (
+    !!allKeys &&
     keys.includes('clientTime') &&
     extra.every((key) => /^context_[A-Za-z]{1,40}$/.test(key)) &&
     extra.length <= XHS_APM_EXTRA_CONTEXT &&
-    !jsonKeys(body).some((key) => PERSONAL_KEY_RE.test(key) && !XHS_APM_KEYS.has(key))
+    !allKeys.some((key) => PERSONAL_KEY_RE.test(key) && !XHS_APM_KEYS.has(key)) &&
+    // DEPLOY-43 复审 #1: the SDK sends flat strings and numbers — an object is something else,
+    // and a value naming a note, a like or a follow is an action.
+    entries.every(
+      ([, value]) =>
+        (typeof value === 'string' && !PERSONAL_VALUE_RE.test(value)) ||
+        (typeof value === 'number' && Number.isFinite(value)),
+    )
   );
+}
+
+/**
+ * DEPLOY-43 复审 #1: the device log's `mode`. The acceptance records keep body shapes, not values,
+ * so no `mode` value was ever seen: only these plain ones pass; any other value still pauses.
+ */
+const AMAP_COLLAPSAR_MODES = /^(?:web|h5|wap|pc|\d)$/i;
+/** A key/value pair in readable text: 「phone=138…」「"mobile" : "138"」. */
+const KEY_VALUE_RE = /[A-Za-z_][\w.-]{0,30}\s*["']?\s*[=:]\s*["']?[A-Za-z0-9\u4e00-\u9fff]/;
+
+/** The readable forms of `content`: as sent, URL-decoded (twice at most), base64-decoded text. */
+function contentReadings(content: string): string[] {
+  const readings = [content];
+  let current = content;
+  for (let i = 0; i < 2 && /%[0-9a-f]{2}/i.test(current); i += 1) {
+    try {
+      current = decodeURIComponent(current);
+      readings.push(current);
+    } catch {
+      break;
+    }
+  }
+  if (/^[A-Za-z0-9+/_-]{8,}={0,2}$/.test(content)) {
+    const bytes = Buffer.from(content, 'base64');
+    // gzip (`H4sI…`, what the SDK sends) or other binary is opaque: random bytes would read as
+    // pairs by chance. Only decoded text is read.
+    const printable = [...bytes].filter((b) => (b >= 0x20 && b < 0x7f) || b === 0x0a).length;
+    if (bytes.length && printable / bytes.length > 0.9) readings.push(bytes.toString('latin1'));
+  }
+  return readings;
 }
 
 function amapCollapsarBody(postData: string): boolean {
@@ -377,11 +428,14 @@ function amapCollapsarBody(postData: string): boolean {
   const keys = [...form.keys()];
   if (!keys.length || new Set(keys).size !== keys.length) return false;
   if (!keys.every((key) => AMAP_COLLAPSAR_KEYS.has(key))) return false;
-  // `content` is the SDK's opaque log string: no field a person fills in inside it.
+  const mode = form.get('mode');
+  if (mode !== null && !AMAP_COLLAPSAR_MODES.test(mode)) return false;
+  // `content` is the SDK's opaque log string: in no reading of it is there a field a person
+  // fills in, nor any key/value pair (DEPLOY-43 复审 #1).
   const content = form.get('content') ?? '';
-  return !/(?:phone|mobile|password|passwd|pwd|sms|verify_?code|captcha|\bcode)\s*["']?\s*[=:]/i.test(
-    content,
-  );
+  if (contentReadings(content).some((text) => KEY_VALUE_RE.test(text))) return false;
+  // The other fields are short device values, no action words.
+  return keys.every((key) => key === 'content' || !PERSONAL_VALUE_RE.test(form.get(key) ?? ''));
 }
 
 const KEYED_LOG_ENDPOINTS: ReadonlyArray<

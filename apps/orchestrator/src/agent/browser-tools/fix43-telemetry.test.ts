@@ -174,3 +174,101 @@ describe('FIX-43 #1 · in the executor: the two telemetry posts no longer pause,
     30_000,
   );
 });
+
+/** DEPLOY-43 复审 #1: the coordinator's fix-43/review1-fixtures/p306.mjs, case for case. */
+describe('DEPLOY-43 复审 #1 · p306 fixture: values, depth, mode and content are checked', () => {
+  const base = { clientTime: 1, context_sdkSessionId: 'a', context_platform: 'PC' };
+  const ab = (o: Record<string, string> = {}) =>
+    new URLSearchParams({ adiu: 'a', content: 'H4sIAAAA', mode: 'web', ...o }).toString();
+  it.each([
+    ['xhs ok', XHS, JSON.stringify(base), true],
+    ['xhs host case (the same host)', XHS.replace('apm-fe', 'APM-FE'), JSON.stringify(base), true],
+    ['xhs trailing dot', XHS.replace('.com', '.com.'), JSON.stringify(base), false],
+    [
+      'xhs userinfo',
+      'https://apm-fe.xiaohongshu.com@evil.io/api/data',
+      JSON.stringify(base),
+      false,
+    ],
+    ['xhs edith', 'https://edith.xiaohongshu.com/api/data', JSON.stringify(base), false],
+    [
+      'xhs path /api/data/',
+      'https://apm-fe.xiaohongshu.com/api/data/',
+      JSON.stringify(base),
+      false,
+    ],
+    [
+      'xhs nested action in a listed key',
+      XHS,
+      JSON.stringify({ ...base, context_nameTracker: { action: 'like_note', target: '6929ba55' } }),
+      false,
+    ],
+    [
+      'xhs context_action extra = follow',
+      XHS,
+      JSON.stringify({ ...base, context_action: 'follow', context_target: 'u123' }),
+      false,
+    ],
+    ['xhs context_like', XHS, JSON.stringify({ ...base, context_like: 1 }), false],
+    [
+      'xhs nested deeper than the limit',
+      XHS,
+      JSON.stringify({
+        ...base,
+        context_nameTracker: { a: { b: { c: { d: { e: { note_id: 1 } } } } } },
+      }),
+      false,
+    ],
+    [
+      'xhs a value naming a note and a like',
+      XHS,
+      JSON.stringify({ ...base, context_route: '/explore/6929ba55 note like' }),
+      false,
+    ],
+    ['amap ok', AMAP, ab(), true],
+    ['amap content phone', AMAP, ab({ content: 'phone=13800138000' }), false],
+    [
+      'amap content double-encoded',
+      AMAP,
+      ab({ content: 'phone%3D13800138000%26code%3D1234' }),
+      false,
+    ],
+    ['amap content json-ish', AMAP, ab({ content: '{"mobile" : "138"}' }), false],
+    [
+      'amap content base64 phone',
+      AMAP,
+      ab({ content: Buffer.from('phone=13800138000&code=1234').toString('base64') }),
+      false,
+    ],
+    ['amap mode=login', AMAP, ab({ mode: 'login' }), false],
+    ['amap case host (the same host)', AMAP.replace('collapsar', 'COLLAPSAR'), ab(), true],
+    // 复审 #1 additions.
+    [
+      'xhs a listed key holding an array',
+      XHS,
+      JSON.stringify({ ...base, context_platform: ['PC', 'like'] }),
+      false,
+    ],
+    [
+      'xhs a value with login',
+      XHS,
+      JSON.stringify({ ...base, context_nameTracker: 'loginModal' }),
+      false,
+    ],
+    ['amap content with any key=value', AMAP, ab({ content: 'sku=1&qty=2' }), false],
+    ['amap mode an unseen value', AMAP, ab({ mode: 'send_sms' }), false],
+    ['amap a device field with an action word', AMAP, ab({ channel: 'login_h5' }), false],
+  ])('%s → %s', (_label, url, body, expected) => {
+    expect(anchoredLogPost(new URL(url), 'POST', body)).toBe(expected);
+  });
+  it('the gzip base64 the SDK sends stays opaque (its bytes are not read as pairs)', () => {
+    const gzipLike = Buffer.from([
+      0x1f,
+      0x8b,
+      0x08,
+      0x00,
+      ...Array.from({ length: 2400 }, (_, i) => (i * 37 + 61) % 256),
+    ]).toString('base64');
+    expect(anchoredLogPost(new URL(AMAP), 'POST', ab({ content: gzipLike }))).toBe(true);
+  });
+});

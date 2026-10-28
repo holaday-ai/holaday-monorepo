@@ -1633,12 +1633,35 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               );
               continue;
             }
+            // DEPLOY-43 复审 #2: like every other 部分完成, what it says is checked against the
+            // pages read — anything not found there is listed under 「未核实」.
+            const typedText = trace
+              .filter((entry) => entry.ok && entry.tool === 'type' && entry.typedText)
+              .map((entry) => entry.typedText)
+              .join('\n');
+            const facts = assessCompletionFacts({
+              summary,
+              fields: args.fields,
+              pages: [...pageEvidence, ...readTabTitles(tabTitles, readTabs)],
+              receipts: [receiptEvidence(input.intent, trace), typedText]
+                .filter(Boolean)
+                .join('\n'),
+              toolTexts: toolTexts.join('\n'),
+              intent: input.intent,
+            });
+            const answer = [
+              summary,
+              fieldLines(args.fields, summary),
+              unverifiedNote(facts.unverified),
+            ]
+              .filter(Boolean)
+              .join('\n\n');
             return {
               status: 'completed',
               summary: withLimitations(
-                /^\s*部分完成/.test(summary)
-                  ? summary
-                  : `部分完成：${reason}，没能总结第${wantedSection}节。\n\n${summary}`,
+                /^\s*部分完成/.test(answer)
+                  ? answer
+                  : `部分完成：${reason}，没能总结第${wantedSection}节。\n\n${answer}`,
               ),
               evidence: pageEvidence
                 .map((page) => page.text)

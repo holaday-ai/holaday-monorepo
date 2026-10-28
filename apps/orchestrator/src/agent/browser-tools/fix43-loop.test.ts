@@ -109,6 +109,22 @@ describe('FIX-43 #2 · core-06: a give-up on a page without 第N节 is sent back
     expect(seen).toContain('换一个正文有第3节的长条目');
   });
 
+  it('复审 #2: the 部分完成 is checked against the pages read — what no page shows is 未核实', async () => {
+    const withField = {
+      name: 'finish',
+      input: {
+        status: 'failed',
+        summary: CORE_06,
+        fields: [{ name: '第2节标题', value: '维基百科的未来' }],
+      },
+    };
+    const { outcome } = await run([...SHORT_READ, withField, withField]);
+    expect(outcome).toMatchObject({ status: 'completed', partial: { missing: '第3节' } });
+    const shown = (outcome as { summary: string }).summary;
+    expect(shown).toContain('未核实');
+    expect(shown).toContain('维基百科的未来');
+  });
+
   it('given up again: its own account is delivered as 部分完成, not failed', async () => {
     const { outcome } = await run([
       ...SHORT_READ,
@@ -240,6 +256,28 @@ describe('FIX-43 #3 · a scrape of a page that never rendered is not obtained (l
         '视频标题：第52集 | 柠檬巴巴露亚；作者：小喵麻麻；点赞 4741。评论区没有加载出来。',
         Q,
       ),
+    ).toBe(false);
+  });
+});
+
+describe('DEPLOY-43 复审 #2–#4', () => {
+  it("#3 reverse: a sentence about an API's sourceURL parameter is left as written", () => {
+    for (const text of [
+      '调用接口时传入 sourceURL 参数即可',
+      'The sourceURL field of the response is optional.',
+    ])
+      expect(plainInternalWords(text)).toBe(text);
+  });
+  it('#4 reverse: a side part not loaded (下方推荐内容) is not the answer missing', () => {
+    const Q = '打开 https://www.douyin.com/video/7377304298310389027 读视频标题、作者';
+    expect(
+      answerNotObtained(
+        '视频标题：第52集 | 柠檬巴巴露亚；作者：小喵麻麻。下方推荐内容没有加载出来。',
+        Q,
+      ),
+    ).toBe(false);
+    expect(
+      answerNotObtained('视频标题：第52集；作者：小喵麻麻。下方推荐视频没有加载出来。', Q),
     ).toBe(false);
   });
 });

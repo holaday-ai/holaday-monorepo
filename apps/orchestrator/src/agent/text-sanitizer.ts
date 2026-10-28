@@ -432,8 +432,9 @@ export function plainInternalWords(text: string): string {
         : part
             .replace(/`?\[互动=[^\]`\n]*\]`?\s*类?/g, '互动类型')
             .replace(/页面\s*sourceURL\b\s*(?=[\u4e00-\u9fff])/g, '页面地址')
-            .replace(/页面\s*sourceURL\b/g, '页面地址')
-            .replace(/\bsourceURL\b/g, '页面地址'),
+            // DEPLOY-43 复审 #3: only the page's own 「页面 sourceURL 为…」; a sentence about an
+            // API's sourceURL parameter is left as written.
+            .replace(/页面\s*sourceURL\b/g, '页面地址'),
     )
     .join('');
 }
