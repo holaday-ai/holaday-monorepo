@@ -177,6 +177,8 @@ describe('FIX-45 #4 · in the executor: the pause names a background request, an
       message: '页面发出了一个无法确认的后台请求，我先停下请你确认；当前任务尚未完成。',
     });
     expect(r.interruption?.message).not.toContain('写请求或交易状态变化');
-    expect(r.effect?.triggers?.[0]?.bodyShape).toMatch(/^form\{adiu,.*\} \d+B check:mode=mini$/);
+    expect((r.effect?.triggers?.[0] as { bodyShape?: string } | undefined)?.bodyShape).toMatch(
+      /^form\{adiu,.*\} \d+B check:mode=mini$/,
+    );
   }, 30_000);
 });

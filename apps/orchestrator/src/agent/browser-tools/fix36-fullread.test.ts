@@ -258,7 +258,9 @@ describe('FIX-36 #9 · popups may be closed; credentials are never typed', () =>
     await page.close();
   });
 
-  it('the-internet /large_form as it is: Details are filled, the Account block (with its password) is not (core-08)', async () => {
+  // FIX-45 #2 (Deploy-45 core-08, coordinator's rule): inside the Account block only the account,
+  // mailbox, password, code (and nickname) boxes are refused; First name is filled like Details.
+  it('the-internet /large_form as it is: Details and First name are filled; Email and Nickname are not (core-08)', async () => {
     const page = await browser.newPage();
     // The live page's structure (checked 2026-10-25): an Account fieldset with a password box,
     // then a Details fieldset with the date control.
@@ -269,11 +271,14 @@ describe('FIX-36 #9 · popups may be closed; credentials are never typed', () =>
     for (const [pattern, text] of [
       [/textbox "Birthday"/, '2026-10-25'],
       [/textbox "About you"/, '你好'],
+      [/textbox "First name"/, 'Tom'],
     ] as const)
       expect(
         await gate({ tool: 'type', ref: await refOf(page, pattern), text }, 'before'),
       ).toMatchObject({ kind: 'proceed' });
-    for (const pattern of [/textbox "First name"/, /textbox "Nickname \(optional\)"/])
+    // Email carries an unlinked <label>: in the tree it is the first unnamed box. (The password
+    // box is a takeover, not this refusal — FIX-36's own tests.)
+    for (const pattern of [/textbox "Nickname \(optional\)"/, /textbox \[ref=e7\]/])
       expect(
         await gate({ tool: 'type', ref: await refOf(page, pattern), text: 'tom' }, 'before'),
       ).toMatchObject({ kind: 'skip', message: expect.stringContaining('不代填') });
