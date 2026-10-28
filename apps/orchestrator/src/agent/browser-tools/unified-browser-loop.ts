@@ -1516,6 +1516,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             input.userIntent ?? input.intent,
             summary,
             args.fields,
+            pageEvidence.map((page) => page.text),
           );
           // The page itself confirms the gap (a listed item showing only 「See options」):
           // an honest 部分完成, not a second look (FIX-35 0a).

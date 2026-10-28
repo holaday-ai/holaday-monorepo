@@ -24,7 +24,11 @@ const timedOut = <T>(): AkEnvelope<T> =>
  * DEPLOY-45 local A/B as-mt (15:45 Wednesday 10-28): /quote/600519 timed out twice; sina's daily
  * K-line still ended at 10-27 (1,355.90 +0.44%). The day's close was 1,330.75 −1.85%.
  */
-function akshare(quote: AkEnvelope<unknown>, kline: AkEnvelope<unknown>): AkshareClient {
+function akshare(
+  quote: AkEnvelope<unknown>,
+  kline: AkEnvelope<unknown>,
+  calendar: AkEnvelope<unknown> = envelope([{ is_trading_day: true }]),
+): AkshareClient {
   return {
     getStockAnnouncements: () => Promise.resolve(envelope([])),
     getShareUnlock: () => Promise.resolve(envelope([])),
@@ -32,7 +36,7 @@ function akshare(quote: AkEnvelope<unknown>, kline: AkEnvelope<unknown>): Akshar
     getStockQuote: () => Promise.resolve(quote),
     getDragonTiger: () => Promise.resolve(envelope([])),
     getNorthboundFlow: () => Promise.resolve(envelope([])),
-    getTradingDay: () => Promise.resolve(envelope([{ is_trading_day: true }])),
+    getTradingDay: () => Promise.resolve(calendar),
     // biome-ignore lint/suspicious/noExplicitAny: fake
   } as any;
 }
@@ -96,5 +100,27 @@ describe('FIX-45 #3 · as-mt after the close: a close that was not fetched is sa
     );
     expect(md).toContain('- 最近收盘（2026-10-27） 1,355.90');
     expect(quoteStale(md)).toBe(false);
+  });
+});
+
+describe('DEPLOY-46 复审 #4 · the not-fetched note only when the calendar confirms a trading day', () => {
+  it('calendar unavailable (a weekday holiday cannot be ruled out): no note, not partial', async () => {
+    const md = await buildAshareFactCard(
+      { client: akshare(timedOut(), KLINE_1027, timedOut()), now: beijing('2026-10-28T15:45:00') },
+      MOUTAI,
+    );
+    expect(md).not.toContain('今日收盘价暂未取到');
+    expect(md).toContain('- 最近收盘（2026-10-27） 1,355.90');
+    expect(quoteStale(md)).toBe(false);
+  });
+  it('reverse: the calendar says holiday — no quote asked, no note', async () => {
+    const md = await buildAshareFactCard(
+      {
+        client: akshare(timedOut(), KLINE_1027, envelope([{ is_trading_day: false }])),
+        now: beijing('2026-10-28T15:45:00'),
+      },
+      MOUTAI,
+    );
+    expect(md).not.toContain('今日收盘价暂未取到');
   });
 });

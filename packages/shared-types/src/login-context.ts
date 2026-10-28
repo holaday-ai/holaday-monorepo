@@ -253,8 +253,29 @@ export function readLoginContext(node: Node, popupReported: boolean): LoginConte
       (popup && popupReported && LOGIN_RE.test(text) && !header)
     );
   });
+  // DEPLOY-46 复审 #2: a popup asking for a code — four or more one-character boxes, or its text
+  // saying 验证码 / code / 重新获取 / 「60秒后」 — is a code block whatever its boxes are named.
+  // 复审 #3: a popup about 实名 / 身份证 keeps even its name box a login field.
+  let codeBlock = false;
+  let realName = false;
+  for (const { block, popup, modal } of blocks) {
+    if (!popup && !modal) continue;
+    if (block.matches(HEADER) || block.closest(HEADER)) continue;
+    const text = ((block as HTMLElement).innerText ?? block.textContent ?? '').slice(0, 2000);
+    const singles = Array.from(block.querySelectorAll('input')).filter(
+      (field) =>
+        field.getAttribute('maxlength') === '1' &&
+        (field as HTMLElement).getClientRects().length > 0,
+    ).length;
+    if (
+      singles >= 4 ||
+      /验证码|动态码|校验码|\bcode\b|重新获取|重新发送|\d+\s*(?:秒|s)\s*后/i.test(text)
+    )
+      codeBlock = true;
+    if (/实名|身份证/.test(text)) realName = true;
+  }
   const loginForm = !!form && !!(scans.get(form)?.coded || scans.get(form)?.account);
-  const loginBlock = inBlock || loginForm;
+  const loginBlock = inBlock || codeBlock || loginForm;
   const typing =
     tag === 'textarea' ||
     tag === 'select' ||
@@ -287,7 +308,8 @@ export function readLoginContext(node: Node, popupReported: boolean): LoginConte
     (type === 'password' ||
       ACCOUNT_RE.test(identity) ||
       CODE_RE.test(identity) ||
-      (inBlock && !plain) ||
+      codeBlock ||
+      (inBlock && !(plain && !realName)) ||
       (loginForm && (['email', 'tel'].includes(type) || CONTACT_RE.test(identity))));
   const text = [
     typing ? '' : ((el as HTMLElement).innerText ?? el.textContent ?? ''),
@@ -302,6 +324,8 @@ export function readLoginContext(node: Node, popupReported: boolean): LoginConte
   const loginControl =
     !typing &&
     (STRONG_RE.test(text) ||
+      (codeBlock &&
+        /verify|验证|确认|confirm|下一步|\bnext\b|继续|continue|提交|submit|登录/i.test(text)) ||
       (loginBlock && CONTROL_RE.test(text)) ||
       (loginBlock && CODE_CONTROL_RE.test(text)));
   return { loginField, loginControl, loginBlock };

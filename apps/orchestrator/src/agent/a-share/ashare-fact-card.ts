@@ -258,6 +258,8 @@ function marketFactLines(
   now: Date,
   quote: AkEnvelope<StockQuoteRow> | undefined = p.quote,
   intraday = ashareIntraday(now),
+  /** DEPLOY-46 复审 #4：只有日历确认今天是交易日，才说「今日收盘价暂未取到」。 */
+  tradingDayConfirmed = false,
 ): string[] {
   const live = liveQuote(quote, now, intraday);
   const quoteLine =
@@ -289,8 +291,9 @@ function marketFactLines(
       `- 最近收盘（${day}） ${facts}`,
     ];
   // FIX-45 (DEPLOY-45 本机 A/B as-mt，15:45)：交易日收盘后报价两次超时、日线还停在前一天——
-  // 不能只写「最近收盘（10-27）」让人当成今天的，要说今天的收盘价没取到。
-  if (!intraday && quote && ashareAfterClose(now) && day < beijingIso(now))
+  // 不能只写「最近收盘（10-27）」让人当成今天的，要说今天的收盘价没取到（日历确认是交易日时；
+  // 日历查不到就不写，免得工作日假期被误标——DEPLOY-46 复审 #4）。
+  if (!intraday && quote && tradingDayConfirmed && ashareAfterClose(now) && day < beijingIso(now))
     return [
       `- 以下为 ${m} 月 ${d} 日收盘价，${CLOSE_NOT_FETCHED_NOTE}`,
       `- 最近收盘（${day}） ${facts}`,
@@ -399,6 +402,8 @@ export interface FactData {
   northbound: AkEnvelope<NorthboundRow>;
   /** 交易时段且日历未否认（节假日 = false）；未取时按钟点判断。 */
   intraday?: boolean;
+  /** DEPLOY-46 复审 #4：交易日历确认今天是交易日（不是「查不到」）。 */
+  tradingDayConfirmed?: boolean;
 }
 
 /** 一次并行取数（市场级北向/龙虎榜各一次 + 每股 kline/公告/解禁）。 */
@@ -419,10 +424,11 @@ export async function fetchFactData(
         : ashareAfterClose(opts.now)
           ? 'afterClose'
           : null;
-  const tradingDay =
-    opts.now !== undefined &&
-    clock !== null &&
-    (await tradingDayKnown(client, beijingIso(opts.now))) !== false;
+  const calendar =
+    opts.now !== undefined && clock !== null
+      ? await tradingDayKnown(client, beijingIso(opts.now))
+      : null;
+  const tradingDay = opts.now !== undefined && clock !== null && calendar !== false;
   const intraday = opts.now === undefined ? undefined : clock === 'intraday' && tradingDay;
   // FIX-38：交易日收盘后也取一次报价——15:00 的报价是当天收盘价（日线可能还没到今天）。
   const withQuote = tradingDay && opts.quote !== false;
@@ -440,7 +446,13 @@ export async function fetchFactData(
       }),
     ),
   ]);
-  return { perStock, dragonTiger, northbound, ...(intraday === undefined ? {} : { intraday }) };
+  return {
+    perStock,
+    dragonTiger,
+    northbound,
+    ...(intraday === undefined ? {} : { intraday }),
+    ...(calendar === true ? { tradingDayConfirmed: true } : {}),
+  };
 }
 
 /** 渲染展示用接地事实卡（markdown，①②，无解读）。 */
@@ -460,7 +472,14 @@ export function renderFactCard(
     lines.push(`## ${stockLabel(p.stock)}`);
     lines.push(
       '**① 盘面事实**',
-      ...marketFactLines(p, mode, now, p.quote, data.intraday ?? ashareIntraday(now)),
+      ...marketFactLines(
+        p,
+        mode,
+        now,
+        p.quote,
+        data.intraday ?? ashareIntraday(now),
+        data.tradingDayConfirmed === true,
+      ),
       '',
     );
     lines.push('**② 同期已披露信息**');

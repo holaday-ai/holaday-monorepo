@@ -1300,31 +1300,45 @@ export function askedFields(intent: string): string[] {
 /**
  * FIX-45 (Deploy-45 b-p02 「第3条商品在搜索结果页快照中未显示价格，已打开其详情页读取到价格为 S$12.80」):
  * the gap is told and then filled — in the same sentence or the next one the field's value is
- * read after all. Not absent.
+ * read after all. Not absent. DEPLOY-46 复审 #1: only a real value (not 「推测是…」「待确认」「谁」
+ * 「？」「—」), of the same item (not another one, nor a 推荐 / 相关 / 其他 item), that a page the
+ * run read shows. With no pages to check it against, nothing is filled.
  */
-function filledAfter(prose: string, at: number, name: string): boolean {
+function filledAfter(prose: string, at: number, name: string, pages?: readonly string[]): boolean {
+  if (!pages?.length) return false;
   const next = prose.slice(at).match(/^[^。！？!?\n]*(?:[。！？!?\n][^。！？!?\n]*)?/)![0];
   const absent = '(?![“"「]?(?:页面(?:上|中)?)?(?:未|没有|无法|不详|空|无))';
+  const unsure =
+    '(?!(?:推测|估计|大概|可能|也许|疑似|似乎|待确认|待定|待查|不清楚|不确定|不详|未知|谁|什么|哪|[？?—–\\-…]))';
   const filled = new RegExp(
-    `(?:(?:读到|读取到|获取到|拿到|找到|补上|补齐)了?(?:其|该|它的)?${name}|${name})\\s*(?:为|是|[：:])\\s*${absent}[^\\s，,。；;]`,
+    `(?:(?:读到|读取到|获取到|拿到|找到|补上|补齐)了?(?:其|该|它的)?${name}|${name})\\s*(?:为|是|[：:])\\s*${absent}${unsure}(\\S[^，,。；;\\n]{0,79})`,
   ).exec(next);
   if (!filled) return false;
   // PR #309 review: 「第一个视频未显示作者，第二个视频的作者为张三」 — a value for another item fills
   // nothing. Every item named between the gap and the value is the gap's own item.
+  const before = next.slice(0, filled.index + filled[0].length - filled[1]!.length);
+  if (/推荐|相关|其他|其余|另一|别的/.test(before)) return false;
   const start = Math.max(
     ...['。', '！', '？', '!', '?', '\n'].map((c) => prose.lastIndexOf(c, at - 1)),
   );
   const own = [...prose.slice(start + 1, at).matchAll(ITEM_RE)].at(-1)?.[0].replace(/\s+/g, '');
-  return [...next.slice(0, filled.index + filled[0].length).matchAll(ITEM_RE)].every(
-    (m) => m[0].replace(/\s+/g, '') === own,
-  );
+  if (![...before.matchAll(ITEM_RE)].every((m) => m[0].replace(/\s+/g, '') === own)) return false;
+  // The value is the page's: found on a page the run read.
+  const value = normalizeFact(filled[1]!.trim().replace(/^[“"「『]|[”"」』]$/g, ''));
+  return /[\p{L}\p{N}]/u.test(value) && pages.some((page) => normalizeFact(page).includes(value));
 }
 
 /** An item a sentence is about: 「第3条」「第二个」「另一个」「其他」. */
 const ITEM_RE =
   /第\s*[一二三四五六七八九十百\d]+\s*(?:个|条|项|本|篇|款|件|位|首|名|家|部|只)?|另一(?:个|条|项|本|篇|款|件|位)?|其他|其余/g;
 
-export function declaredAbsentFields(intent: string, summary: string, fields?: unknown): string[] {
+export function declaredAbsentFields(
+  intent: string,
+  summary: string,
+  fields?: unknown,
+  /** DEPLOY-46 复审 #1: the read pages' text — a gap is filled only by a value they show. */
+  pages?: readonly string[],
+): string[] {
   const asked = ASKABLE_FIELDS.filter((name) => intent.includes(name));
   if (!asked.length) return [];
   const values = new Map<string, string[]>();
@@ -1349,7 +1363,7 @@ export function declaredAbsentFields(intent: string, summary: string, fields?: u
             'g',
           ),
         ),
-      ].some((m) => !filledAfter(prose, m.index! + m[0].length, name)) ||
+      ].some((m) => !filledAfter(prose, m.index! + m[0].length, name, pages)) ||
       new RegExp(
         `${name}(?:名称|字段)?[^。；;\\n：:（(]{0,10}?[为写]\\s*[“"「]?(?:页面(?:上|中)?未显示|未显示|未获取到|未读到|未找到)`,
       ).test(prose),
