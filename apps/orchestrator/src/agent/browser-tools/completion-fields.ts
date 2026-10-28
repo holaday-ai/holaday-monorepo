@@ -1305,10 +1305,24 @@ export function askedFields(intent: string): string[] {
 function filledAfter(prose: string, at: number, name: string): boolean {
   const next = prose.slice(at).match(/^[^。！？!?\n]*(?:[。！？!?\n][^。！？!?\n]*)?/)![0];
   const absent = '(?![“"「]?(?:页面(?:上|中)?)?(?:未|没有|无法|不详|空|无))';
-  return new RegExp(
+  const filled = new RegExp(
     `(?:(?:读到|读取到|获取到|拿到|找到|补上|补齐)了?(?:其|该|它的)?${name}|${name})\\s*(?:为|是|[：:])\\s*${absent}[^\\s，,。；;]`,
-  ).test(next);
+  ).exec(next);
+  if (!filled) return false;
+  // PR #309 review: 「第一个视频未显示作者，第二个视频的作者为张三」 — a value for another item fills
+  // nothing. Every item named between the gap and the value is the gap's own item.
+  const start = Math.max(
+    ...['。', '！', '？', '!', '?', '\n'].map((c) => prose.lastIndexOf(c, at - 1)),
+  );
+  const own = [...prose.slice(start + 1, at).matchAll(ITEM_RE)].at(-1)?.[0].replace(/\s+/g, '');
+  return [...next.slice(0, filled.index + filled[0].length).matchAll(ITEM_RE)].every(
+    (m) => m[0].replace(/\s+/g, '') === own,
+  );
 }
+
+/** An item a sentence is about: 「第3条」「第二个」「另一个」「其他」. */
+const ITEM_RE =
+  /第\s*[一二三四五六七八九十百\d]+\s*(?:个|条|项|本|篇|款|件|位|首|名|家|部|只)?|另一(?:个|条|项|本|篇|款|件|位)?|其他|其余/g;
 
 export function declaredAbsentFields(intent: string, summary: string, fields?: unknown): string[] {
   const asked = ASKABLE_FIELDS.filter((name) => intent.includes(name));

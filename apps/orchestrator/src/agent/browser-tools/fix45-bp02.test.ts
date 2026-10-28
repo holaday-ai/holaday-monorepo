@@ -73,3 +73,19 @@ describe('FIX-45 #1 · b-p02: a gap told and then filled is not a field given as
     expect(outcome.status === 'completed' && outcome.summary).not.toMatch(/^部分完成/);
   });
 });
+
+describe('PR #309 review · a value for another item fills no gap', () => {
+  const Q = '读取两个视频的标题和作者';
+  it.each([
+    '第一个视频未显示作者，第二个视频的作者为张三。',
+    '第一个视频未显示作者。第二个视频作者：张三。',
+    '第1条未显示作者，另一条的作者为张三。',
+  ])('「%s」 → 作者 still absent', (text) => {
+    expect(declaredAbsentFields(Q, text)).toEqual(['作者']);
+  });
+  it('the same item named again still fills it', () => {
+    expect(
+      declaredAbsentFields(Q, '第一个视频的列表页未显示作者，打开第一个视频详情页读到作者为张三。'),
+    ).toEqual([]);
+  });
+});

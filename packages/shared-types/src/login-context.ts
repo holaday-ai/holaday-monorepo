@@ -270,10 +270,10 @@ export function readLoginContext(node: Node, popupReported: boolean): LoginConte
   // Password, Nickname): inside a login block, a box that plainly asks for something else — a
   // name, date, number, address, birthday — stays fillable; account, phone, mailbox, password and
   // code boxes do not, nor a nickname (a login popup's 昵称 box is its account, FIX-36 复审 #3).
+  // PR #309 review: not a `number` box by its type alone — an unnamed number box of a phone
+  // login is the phone; a number box passes only by its own name (年龄 / age).
   const plain =
-    (['date', 'datetime-local', 'month', 'week', 'time', 'number', 'color', 'range'].includes(
-      type,
-    ) ||
+    (['date', 'datetime-local', 'month', 'week', 'time', 'color', 'range'].includes(type) ||
       /first[\s_-]?name|last[\s_-]?name|given[\s_-]?name|family[\s_-]?name|full[\s_-]?name|姓名|名字|birthday|birth|生日|出生|address|地址|city|城市|country|国家|\bage\b|年龄|\bbio\b|about/i.test(
         identity,
       )) &&

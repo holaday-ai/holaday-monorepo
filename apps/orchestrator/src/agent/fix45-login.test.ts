@@ -117,3 +117,15 @@ describe('FIX-45 #2 · core-08: only account, mailbox, password and code boxes a
     expect(verdict.reason).toContain('同一表单里的其他普通字段（姓名、日期、地址等）可以照常填写');
   });
 });
+
+describe('PR #309 review · a number box in a login block needs its own name to be plain', () => {
+  it('an unnamed number box of a phone login stays a login field', async () => {
+    const html = MASK(
+      '<p>手机号登录</p><input id="n" type="number"><input type="password"><button>登录</button>',
+    );
+    expect((await fields(html, ['#n']))['#n']).toBe(true);
+  });
+  it('reverse: large_form Age (name="age") is still fillable', async () => {
+    expect((await fields(LARGE_FORM, ['input[name=age]']))['input[name=age]']).toBe(false);
+  });
+});
