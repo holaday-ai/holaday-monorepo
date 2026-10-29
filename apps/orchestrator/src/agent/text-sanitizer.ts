@@ -412,6 +412,8 @@ export function humanizeToolMentions(text: string): string {
               // 「（x=2）」「（n=120, p=0.03）」 are page content.
               .replace(CALL_ARGS_BRACKET_RE, '')
               .replace(/\bcontent_grew\b\s*(?:状态)?/g, '内容增长')
+              // FIX-46 (Deploy-46 core-02 「点击 AccuWeather 新加坡天气链接（click newTab）」).
+              .replace(/\bclick\s+newTab\b/gi, '在新标签页打开')
               // FIX-45 (Deploy-45 core-10 「最后一次 snapshot 显示…」): the read's tool name beside Chinese.
               .replace(
                 /(?<=[\u4e00-\u9fff]\s?)snapshot\b|\bsnapshot(?=\s?[\u4e00-\u9fff])/g,

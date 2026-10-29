@@ -273,9 +273,19 @@ const FIELD_WORDS: Record<string, string> = {
   humidity: '湿度',
   weather: '天气',
   address: '地址',
+  content: '内容',
+  snippet: '片段',
+  start: '开始',
+  end: '结束',
 };
 export function fieldLabel(name: string): string {
   const trimmed = name.trim();
+  // FIX-46 (Deploy-46 core-11 「content snippet start」): an English phrase of plain words reads in
+  // Chinese when every word has an entry; otherwise it is left as written.
+  if (/^[a-z]+(?: [a-z]+){1,4}$/i.test(trimmed)) {
+    const words = trimmed.split(' ').map((word) => FIELD_WORDS[word.toLowerCase()]);
+    return words.every(Boolean) ? words.join('') : trimmed;
+  }
   if (
     !/^(?:[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+|[a-z]{2,}[a-z0-9]*(?:[A-Z][a-z0-9]+)+)$/.test(
       trimmed,

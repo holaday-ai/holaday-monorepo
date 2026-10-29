@@ -586,6 +586,7 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
           outputTokens: tokens.output,
         });
     }
+    summary = unlinkCodeTermsToSource(summary, usedSources);
     const notes: string[] = [];
     if (result.status === 'incomplete')
       notes.push('【提示】内容因长度限制被截断，如需完整版请追问。');
@@ -728,4 +729,18 @@ export function scrapePartialDelivery(
     }，以下是网页抓取拿到的内容。\n\n${answer.summary}`,
     partial: { found: answer.found, wanted: answer.wanted },
   };
+}
+
+/**
+ * FIX-46 (Deploy-46 fc-mdn 「…应改用 [`410 Gone`](…/Status/404) 状态码」): a code term linked to the page
+ * the answer read is a link to the wrong place — the term is kept, the link goes. Links whose
+ * text names the source (「[MDN](…)」) and links to other pages are left alone.
+ */
+export function unlinkCodeTermsToSource(summary: string, sources: readonly string[]): string {
+  const read = new Set(sources.map((url) => url.replace(/[#?].*$/, '').replace(/\/$/, '')));
+  return summary.replace(
+    /\[(`[^`\]\n]{1,60}`)\]\(([^)\s]+)\)/g,
+    (whole, term: string, url: string) =>
+      read.has(url.replace(/[#?].*$/, '').replace(/\/$/, '')) ? term : whole,
+  );
 }
