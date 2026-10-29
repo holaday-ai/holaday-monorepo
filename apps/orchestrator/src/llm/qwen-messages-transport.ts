@@ -1,3 +1,8 @@
+import {
+  TRANSPORT_RESPONSE_META,
+  type TransportResponseMeta,
+  responseRequestId,
+} from './invalid-response-forensics.js';
 import type { AnthropicCompatibleClient } from './messages-adapter.js';
 import { type ModelConcurrencyGate, modelConcurrencyGate } from './model-concurrency.js';
 import { runModelOperation } from './model-operation.js';
@@ -6,11 +11,6 @@ import {
   responseErrorDiagnostics,
   safeProviderDiagnostics,
 } from './provider-error-diagnostics.js';
-import {
-  TRANSPORT_RESPONSE_META,
-  type TransportResponseMeta,
-  responseRequestId,
-} from './invalid-response-forensics.js';
 import type { QwenRoute } from './qwen-route.js';
 
 export type QwenTransportErrorCode =

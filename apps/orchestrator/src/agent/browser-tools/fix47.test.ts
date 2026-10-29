@@ -2,8 +2,8 @@ import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { answerNotObtained } from '../scrape-answer-check.js';
 import { scrapePartialAnswer } from '../scrape-runner.js';
-import { searchResultsHtml } from '../search-fallback/search-results-page.js';
 import { normalizeResults } from '../search-fallback/search-provider.js';
+import { searchResultsHtml } from '../search-fallback/search-results-page.js';
 import { humanizeToolMentions } from '../text-sanitizer.js';
 import { assessCompletionFacts, declaredAbsentFields } from './completion-fields.js';
 
