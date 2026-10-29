@@ -414,6 +414,14 @@ export function humanizeToolMentions(text: string): string {
               .replace(/\bcontent_grew\b\s*(?:状态)?/g, '内容增长')
               // FIX-46 (Deploy-46 core-02 「点击 AccuWeather 新加坡天气链接（click newTab）」).
               .replace(/\bclick\s+newTab\b/gi, '在新标签页打开')
+              // FIX-47 (Deploy-47 core-06 「通过 sections 定位到第3节」「继续以 cursor 续读至末尾」): the
+              // outline read and its continuation point, named as a tool beside a verb. Other uses
+              // (「CSS cursor 属性」, English prose) are left alone.
+              .replace(
+                /(通过|使用|调用|用|以|按)\s*sections\s*(?=定位|读取|找到|查看|列出|获取)/g,
+                '$1章节目录',
+              )
+              .replace(/(以|用|按|带上?)\s*cursor\s*(?=续读|继续|接着|往下)/g, '$1断点')
               // FIX-45 (Deploy-45 core-10 「最后一次 snapshot 显示…」): the read's tool name beside Chinese.
               .replace(
                 /(?<=[\u4e00-\u9fff]\s?)snapshot\b|\bsnapshot(?=\s?[\u4e00-\u9fff])/g,

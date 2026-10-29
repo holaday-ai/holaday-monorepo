@@ -702,6 +702,19 @@ export function scrapePartialAnswer(summary: string, intent = ''): ScrapePartial
     return { summary, missing: absent, found: asked.length - absent.length, wanted: asked.length };
   }
   if (missingRows.length === rows.length) return null;
+  // FIX-47 (Deploy-47 dy-1): the named counts are said in prose to be unknown (「无法确认各项具体数值」),
+  // no row reads 未显示 — count the fields the request names, not the rows.
+  const proseAbsent = missingRows.length ? [] : declaredAbsentFields(intent, summary);
+  if (proseAbsent.length) {
+    const asked = askedFields(intent);
+    if (proseAbsent.length >= asked.length) return null;
+    return {
+      summary,
+      missing: proseAbsent,
+      found: asked.length - proseAbsent.length,
+      wanted: asked.length,
+    };
+  }
   const labels = missingRows
     .map(
       (line) =>

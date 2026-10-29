@@ -6,6 +6,11 @@ import {
   responseErrorDiagnostics,
   safeProviderDiagnostics,
 } from './provider-error-diagnostics.js';
+import {
+  TRANSPORT_RESPONSE_META,
+  type TransportResponseMeta,
+  responseRequestId,
+} from './invalid-response-forensics.js';
 import type { QwenRoute } from './qwen-route.js';
 
 export type QwenTransportErrorCode =
@@ -33,6 +38,8 @@ export class QwenTransportError extends Error {
     public readonly diagnostics: ProviderErrorDiagnostics = safeProviderDiagnostics({
       httpStatus: status,
     }),
+    /** FIX-47: a 2xx body that was not JSON, for the INVALID_RESPONSE record (never logged). */
+    public readonly responseMeta?: TransportResponseMeta,
   ) {
     super(SAFE_ERROR_MESSAGES[code]);
     this.name = 'QwenTransportError';
@@ -147,15 +154,40 @@ export function createQwenMessagesTransport(input: {
                 throwAbortError({ callerAborted, timedOut });
               }
               if (response.ok) {
+                // FIX-47: the body is read as text so an invalid one can be kept as evidence.
+                let text: string | undefined;
                 try {
-                  const value = await operation.run(() => response.json());
+                  text = await operation.run(() => response.text());
                   if (controller.signal.aborted) throwAbortError({ callerAborted, timedOut });
+                  const value: unknown = JSON.parse(text);
+                  const meta: TransportResponseMeta = {
+                    httpStatus: response.status,
+                    requestId: responseRequestId(response.headers),
+                    elapsedMs: Date.now() - startedAt,
+                    text,
+                  };
+                  if (value && typeof value === 'object')
+                    Object.defineProperty(value, TRANSPORT_RESPONSE_META, { value: meta });
                   return value;
-                } catch {
+                } catch (error) {
+                  if (error instanceof QwenTransportError) throw error;
                   if (!response.body?.locked)
                     operation.cleanup(() => response.body?.cancel() ?? Promise.resolve());
                   if (controller.signal.aborted) throwAbortError({ callerAborted, timedOut });
-                  throw new QwenTransportError('INVALID_RESPONSE', response.status);
+                  const requestId = responseRequestId(response.headers);
+                  throw new QwenTransportError(
+                    'INVALID_RESPONSE',
+                    response.status,
+                    safeProviderDiagnostics({ httpStatus: response.status, requestId }),
+                    text === undefined
+                      ? undefined
+                      : {
+                          httpStatus: response.status,
+                          requestId,
+                          elapsedMs: Date.now() - startedAt,
+                          text,
+                        },
+                  );
                 }
               }
 
@@ -203,6 +235,7 @@ export function createQwenMessagesTransport(input: {
                   elapsedMs: Date.now() - startedAt,
                   retryCount: retries,
                 }),
+                error.responseMeta,
               );
             throw error;
           } finally {

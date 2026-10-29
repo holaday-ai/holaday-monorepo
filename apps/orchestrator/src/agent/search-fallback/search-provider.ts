@@ -8,6 +8,8 @@
  * by environment variable name only; no key is read here unless an operator
  * sets one, and keys never enter logs or results.
  */
+import { decodeHtmlEntities } from '../text-sanitizer.js';
+
 export interface WebSearchResult {
   title: string;
   url: string;
@@ -38,10 +40,14 @@ export const SEARCH_API_ENV = {
   qwenModel: 'BROWSER_SEARCH_API_QWEN_MODEL',
 } as const;
 
+/**
+ * FIX-47 (Deploy-47 reg-new-google): Brave writes its text as HTML — 「Anthropic&#x27;s」 was shown
+ * on the results page as those characters, and the answer's 「Anthropic's」 was marked 未核实.
+ * Tags go, entities read as the characters they stand for (the page escapes again).
+ */
 const clean = (value: unknown, max: number) =>
   typeof value === 'string'
-    ? value
-        .replace(/<[^>]+>/g, '')
+    ? decodeHtmlEntities(value.replace(/<[^>]+>/g, ''))
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, max)

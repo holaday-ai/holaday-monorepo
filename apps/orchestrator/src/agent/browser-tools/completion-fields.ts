@@ -519,8 +519,10 @@ function answerFacts(summary: string, intent = ''): Fact[] {
     const listed = line.match(/^\s*\d+[.)、]\s+(.+)$/u)?.[1];
     // FIX-36 (Deploy-36 b-p02): 「名称 — SGD 11.47」 is a name and its price, each its own
     // node on the page — checked apart, not as one run of text.
+    // FIX-47 (Deploy-47 b-p02 「… — S$12.81（从该商品详情页读取）」): a note after the price says where
+    // it was read; the name and the price are still the facts.
     const priced = listed?.match(
-      /^(.+?)\s+[—–-]{1,2}\s+((?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?)\s*$/iu,
+      /^(.+?)\s+[—–-]{1,2}\s+((?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?)\s*(?:[（(][^（）()\n]{1,40}[)）])?\s*$/iu,
     );
     // …and 「sample.json，大小 95 bytes」 a file name and its size (local core-09).
     const sized = listed?.match(
@@ -1059,6 +1061,10 @@ export function assessCompletionFacts(input: {
       // title — its h1 plus the site's suffix — so it is grounded, not 未核实.
       if (main && candidates.some((v) => v.replace(SITE_SUFFIX_RE, '').trim() === main)) continue;
     }
+    // FIX-47 (Deploy-47 core-06 「导致大量“AI幻觉案例”」 on the English Wikipedia page): Chinese words
+    // for a page with no Chinese text are a translation — no read page could show them verbatim.
+    // A Chinese page that lacks them still gets the note.
+    if (translatedWords(fact.value) && pages.every((page) => englishPage(page.text))) continue;
     unverified.push(label);
   }
   // FIX-30: every named target answered (core-10), and recent means recent (n03).
@@ -1092,6 +1098,21 @@ export function assessCompletionFacts(input: {
       : {}),
     ...(hedged.length ? { hedgedNames: hedged.slice(0, 4) } : {}),
   };
+}
+
+const latinCount = (text: string) => text.match(/[A-Za-z]/g)?.length ?? 0;
+const hanCount = (text: string) => text.match(/\p{Script=Han}/gu)?.length ?? 0;
+/**
+ * Words mostly written in Chinese characters (「AI幻觉案例」). A number can always be checked
+ * as written, so a value with digits is never only a translation.
+ */
+function translatedWords(value: string): boolean {
+  return !/\d/.test(value) && hanCount(value) >= 2 && hanCount(value) >= latinCount(value);
+}
+/** A page of English text — its language menu's 「中文」 aside; a few lines are not enough to tell. */
+function englishPage(text: string): boolean {
+  const latin = latinCount(text);
+  return latin >= 200 && hanCount(text) * 50 < latin;
 }
 
 /** User-visible note for facts that could not be matched word for word. */
@@ -1296,9 +1317,14 @@ const ASKABLE_FIELDS = [
   '地址',
   '开放时间',
 ] as const;
-/** 「页面未显示」「未获取到（…）」: the answer says the page had no such value. */
+/**
+ * 「页面未显示」「未获取到（…）」: the answer says the page had no such value. FIX-47 (Deploy-47 dy-1):
+ * 「无法确认」 gives no value either.
+ */
 const DECLARED_ABSENT_RE =
-  /^\s*[*_`]*\s*(?:页面(?:上|中)?(?:未|没有)(?:显示|提供|列出|给出)|未(?:在页面(?:上|中)?)?(?:显示|获取到|读到|读取到|找到|展示)|没有读到|not (?:shown|found|read|displayed)|n\/a)/i;
+  /^\s*[*_`]*\s*(?:页面(?:上|中)?(?:未|没有)(?:显示|提供|列出|给出)|未(?:在页面(?:上|中)?)?(?:显示|获取到|读到|读取到|找到|展示)|没有读到|(?:无法|不能|未能)(?:确认|确定|判断)|not (?:shown|found|read|displayed)|n\/a)/i;
+/** FIX-47: a sentence saying which number is which cannot be told (「没有标签能确认…无法确认各项具体数值」). */
+const UNSURE_RE = /(?:无法|不能|未能|没法)(?:确认|确定|判断|对应|区分)|没有标签能?(?:确认|对应)/;
 
 /**
  * FIX-35 0b (Deploy-35 dy-2): fields the user asked for by name that the answer gives as
@@ -1378,6 +1404,22 @@ export function declaredAbsentFields(
       ].some((m) => !filledAfter(prose, m.index! + m[0].length, name, pages)) ||
       new RegExp(
         `${name}(?:名称|字段)?[^。；;\\n：:（(]{0,10}?[为写]\\s*[“"「]?(?:页面(?:上|中)?未显示|未显示|未获取到|未读到|未找到)`,
-      ).test(prose),
+      ).test(prose) ||
+      unsureCount(prose, name),
   );
+}
+
+/**
+ * FIX-47 (Deploy-47 dy-1, verbatim 「页面上显示了 20、2、10、97 这几个数字，但没有标签能确认它们分别对应
+ * 点赞、评论、收藏还是分享，无法确认各项具体数值」): a count the user named, said in prose to be
+ * unknown and given no number anywhere, was not obtained. A count with its number (「点赞 4741」
+ * 「评论数为 215」) is answered, whatever else the answer cannot confirm.
+ */
+function unsureCount(prose: string, name: string): boolean {
+  if (!name.endsWith('数')) return false;
+  const stem = name.slice(0, -1);
+  if (new RegExp(`${stem}(?:数|量)?[^。！？!?\\n\\d，,、]{0,6}?\\d`).test(prose)) return false;
+  return prose
+    .split(/[。！？!?\n]/)
+    .some((sentence) => sentence.includes(stem) && UNSURE_RE.test(sentence));
 }
