@@ -41,10 +41,29 @@ export interface TransportResponseMeta {
   requestId: string | null;
   elapsedMs: number;
   /**
-   * DEPLOY-48 复审 #3: only for a body that was not JSON, and already masked (credentials and
-   * personal identifiers, ≤ 4 KB). A parsed body is summarised from its structure instead.
+   * A body that was not JSON, described without its words (PR #311 review: a truncated JSON body
+   * still carries generated text). A parsed body is summarised from its structure instead.
    */
-  maskedText?: string;
+  unparsed?: { bytes: number; sketch: string };
+}
+
+/**
+ * PR #311 review: what an unparseable body looked like — its size and form, never its text
+ * (「{"content":[{"type":"text","text":"杭州市…」 cut short keeps nothing of the address).
+ */
+export function unparsedSketch(text: string): { bytes: number; sketch: string } {
+  const head = text.trimStart()[0] ?? '';
+  const shape = !text.trim()
+    ? 'empty'
+    : head === '{' || head === '['
+      ? 'json_unparseable'
+      : head === '<'
+        ? 'html_or_xml'
+        : 'text';
+  return {
+    bytes: Buffer.byteLength(text, 'utf8'),
+    sketch: JSON.stringify({ shape, chars: text.length, lines: text.split('\n').length }),
+  };
 }
 
 export const TRANSPORT_RESPONSE_META: unique symbol = Symbol('holaday.transportResponseMeta');
@@ -156,7 +175,8 @@ export function invalidResponseForensics(input: {
   secrets?: readonly string[];
 }): InvalidResponseForensics {
   const raw = input.raw;
-  const text = input.kind === 'not_json' ? (input.meta?.maskedText ?? '') : structuralBody(raw);
+  const unparsed = input.kind === 'not_json' ? input.meta?.unparsed : undefined;
+  const text = input.kind === 'not_json' ? (unparsed?.sketch ?? '') : structuralBody(raw);
   const content = isRecord(raw) && Array.isArray(raw.content) ? raw.content : [];
   return {
     kind: input.kind,
@@ -180,7 +200,7 @@ export function invalidResponseForensics(input: {
           outputTokens: count(raw.usage, 'output_tokens'),
         }
       : null,
-    responseBytes: Buffer.byteLength(text, 'utf8'),
+    responseBytes: unparsed?.bytes ?? Buffer.byteLength(text, 'utf8'),
     body: maskForensicBody(text, input.secrets),
   };
 }

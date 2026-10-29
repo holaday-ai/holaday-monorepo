@@ -108,13 +108,18 @@ describe('FIX-47 #4 · an INVALID_RESPONSE keeps what came back', () => {
       expect((await failure(JSON.stringify(body))).forensics?.kind).toBe(kind);
   });
 
-  it('a body that is not JSON is kept as sent', async () => {
+  it('a body that is not JSON is described by its size and form, not its words', async () => {
     const error = await failure('<html>upstream reset</html>', {
       'x-dashscope-request-id': 'ds-9',
     });
     expect(error.code).toBe('INVALID_RESPONSE');
     expect(error.forensics).toMatchObject({ kind: 'not_json', httpStatus: 200, requestId: 'ds-9' });
-    expect(error.forensics?.body).toBe('<html>upstream reset</html>');
+    expect(JSON.parse(error.forensics?.body ?? '{}')).toEqual({
+      shape: 'html_or_xml',
+      chars: 27,
+      lines: 1,
+    });
+    expect(error.forensics?.responseBytes).toBe(27);
   });
 
   it('the route key and workspace never stay in the kept body', async () => {
@@ -168,7 +173,7 @@ describe('DEPLOY-48 复审 #3 · evidence hardening', () => {
     ]);
   });
 
-  it('the not-JSON body is masked when it is kept, and never serialised with the error', async () => {
+  it('the not-JSON body keeps no words, and nothing is serialised with the error', async () => {
     const { QwenTransportError } = await import('./qwen-messages-transport.js');
     const { createQwenMessagesTransport } = await import('./qwen-messages-transport.js');
     const transport = createQwenMessagesTransport({
@@ -186,7 +191,11 @@ describe('DEPLOY-48 复审 #3 · evidence hardening', () => {
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(QwenTransportError);
     const meta = (error as InstanceType<typeof QwenTransportError>).responseMeta;
-    expect(meta?.maskedText).toBe('oops [密钥] [邮箱]');
+    expect(meta?.unparsed).toEqual({
+      bytes: 33,
+      sketch: JSON.stringify({ shape: 'text', chars: 33, lines: 1 }),
+    });
+    expect(JSON.stringify(meta)).not.toContain('cn-secret-key-123456');
     expect(Object.keys(error as object)).not.toContain('responseMeta');
     expect(JSON.stringify(error)).not.toContain('oops');
   });
@@ -239,5 +248,18 @@ describe('PR #311 review · only the shape of a parsed body is kept', () => {
       usage: { prompt_tokens: 12, completion_tokens: 9 },
       error: { code: 'x', message: '<11 chars>' },
     });
+  });
+});
+
+describe('PR #311 review · a truncated JSON body keeps nothing of its text', () => {
+  it('an unterminated response with an address and a door code', async () => {
+    const error = await failure(
+      '{"content":[{"type":"text","text":"杭州市西湖区龙井路1号，门禁码4821',
+    );
+    expect(error.forensics?.kind).toBe('not_json');
+    const body = error.forensics?.body ?? '';
+    expect(body).not.toContain('龙井路');
+    expect(body).not.toContain('4821');
+    expect(JSON.parse(body)).toMatchObject({ shape: 'json_unparseable', lines: 1 });
   });
 });

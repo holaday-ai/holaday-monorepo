@@ -1,8 +1,8 @@
 import {
   TRANSPORT_RESPONSE_META,
   type TransportResponseMeta,
-  maskForensicBody,
   responseRequestId,
+  unparsedSketch,
 } from './invalid-response-forensics.js';
 import type { AnthropicCompatibleClient } from './messages-adapter.js';
 import { type ModelConcurrencyGate, modelConcurrencyGate } from './model-concurrency.js';
@@ -189,11 +189,8 @@ export function createQwenMessagesTransport(input: {
                           httpStatus: response.status,
                           requestId,
                           elapsedMs: Date.now() - startedAt,
-                          // DEPLOY-48 复审 #3: masked where it is kept, not later.
-                          maskedText: maskForensicBody(text, [
-                            input.route.apiKey,
-                            input.route.workspaceId ?? '',
-                          ]),
+                          // PR #311 review: its size and form only, never its words.
+                          unparsed: unparsedSketch(text),
                         },
                   );
                 }
