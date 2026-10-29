@@ -1116,7 +1116,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             summary,
             fields: args.fields,
             pages: [...pageEvidence, ...readTabTitles(tabTitles, readTabs)],
-            receipts: [hostProof, typed].filter(Boolean).join('\n'),
+            receipts: [hostProof, typed, dialogReceipts(trace)].filter(Boolean).join('\n'),
             toolTexts: toolTexts.join('\n'),
             intent: input.intent,
           });
@@ -1695,7 +1695,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               summary,
               fields: args.fields,
               pages: [...pageEvidence, ...readTabTitles(tabTitles, readTabs)],
-              receipts: [receiptEvidence(input.intent, trace), typedText]
+              receipts: [receiptEvidence(input.intent, trace), typedText, dialogReceipts(trace)]
                 .filter(Boolean)
                 .join('\n'),
               toolTexts: toolTexts.join('\n'),
@@ -2257,6 +2257,18 @@ export function readTabTitles(
 const LOGIN_TOLD_RE = /登录(?:验证|提示|弹窗|框|墙)|需(?:要)?登录|登录.{0,4}(?:弹窗|提示)/;
 
 export { fieldLabel };
+
+/**
+ * FIX-46 (Deploy-46 core-10 「未核实：Alert message「I am a JS Alert」」): the native dialogs the run
+ * handled are host receipts — their text grounds a fact the way a read page does.
+ */
+function dialogReceipts(trace: readonly BrowserTrace[]): string {
+  return trace
+    .filter((entry) => entry.ok)
+    .flatMap((entry) => entry.dialogs ?? [])
+    .map((dialog) => dialog.message)
+    .join('\n');
+}
 
 export function fieldLines(fields: unknown, summary: string): string {
   if (!Array.isArray(fields)) return '';
