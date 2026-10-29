@@ -1461,6 +1461,12 @@ export function declaredAbsentFields(
  * 「评论数为 215」) is answered, whatever else the answer cannot confirm.
  */
 const CN_NUMERALS = '零一二两三四五六七八九十百千万亿';
+const DERIVED_METRIC =
+  '(?:增长|增幅|趋势|变化|走势|涨跌|历史|排名|占比|来源|原因|对比|分布|构成|口径|速度)';
+/** An unsure phrase that is about a metric derived from the count, not its value. */
+const DERIVED_DOUBT_RE = new RegExp(
+  `(?:无法|不能|未能|没法)(?:确认|确定|判断)[^，,；;。]{0,10}?${DERIVED_METRIC}|${DERIVED_METRIC}[^，,；;。]{0,6}?(?:无法|不能|未能|没法)(?:确认|确定|判断)`,
+);
 /** DEPLOY-48 复审 #4: a guessed number is no answer (「点赞数可能是 20」「推测为 20」). */
 const HEDGED_VALUE_RE = /可能|推测|猜测|估计|大概|或许|疑似|应该是|似乎/;
 /** DEPLOY-48 复审 #4: 「无法确认各项具体数值」 — every count asked for is unknown. */
@@ -1501,7 +1507,9 @@ function countState(prose: string, name: string): 'value' | 'doubt' | null {
       const m = value.exec(clause);
       // DEPLOY-48 复审 #4: a number guessed (「可能是 20」) or said to be unsure in its clause
       // (「点赞数20无法确认」) is no value.
-      const unsure = UNSURE_RE.test(clause);
+      // PR #311 review: doubt about a related metric (「无法确认点赞数的增长趋势」) is no doubt about
+      // the count itself.
+      const unsure = UNSURE_RE.test(clause) && !DERIVED_DOUBT_RE.test(clause);
       const hedged = !!m && HEDGED_VALUE_RE.test(m[1] ?? '');
       // A value given in a clause that doubts it (「…分别为 20、2…（无法确认对应关系）」) is doubted too.
       if (((mention.test(clause) || m) && (unsure || hedged)) || ALL_COUNTS_UNSURE_RE.test(clause))

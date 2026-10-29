@@ -411,3 +411,19 @@ describe('PR #311 review (8089106c)', () => {
     expect([...facts.unverified, ...facts.contradictions].join('\n')).not.toContain('S$30」');
   });
 });
+
+describe('PR #311 review (918c350d)', () => {
+  it('doubt about a related metric keeps the count answered', () => {
+    expect(declaredAbsentFields('读取点赞数', '点赞数为20。无法确认点赞数的增长趋势。')).toEqual(
+      [],
+    );
+    expect(declaredAbsentFields('读取点赞数', '点赞数为20（增长趋势无法确认）。')).toEqual([]);
+  });
+
+  it('reverse: doubt about the value itself still withdraws it', () => {
+    expect(declaredAbsentFields('读取点赞数', '点赞数为20。复核后无法确认点赞数。')).toEqual([
+      '点赞数',
+    ]);
+    expect(declaredAbsentFields('读取点赞数', '点赞数可能是 20（无法确认）。')).toEqual(['点赞数']);
+  });
+});
