@@ -146,14 +146,35 @@ const DIAGNOSTIC_TEXT_PATHS = new Set([
   'choices.*.message.role',
 ]);
 
+/** The places whose numbers are the provider's own counters or codes. */
+const DIAGNOSTIC_NUMBER_PATHS = new Set([
+  'status',
+  'code',
+  'error.code',
+  'content.*.index',
+  'choices.*.index',
+  'usage.input_tokens',
+  'usage.output_tokens',
+  'usage.cache_read_input_tokens',
+  'usage.cache_creation_input_tokens',
+  'usage.prompt_tokens',
+  'usage.completion_tokens',
+  'usage.total_tokens',
+]);
+
 /**
- * DEPLOY-48 复审 #3 + PR #311 review: a parsed body as kept is its shape only. Numbers, booleans
- * and nulls stay; text stays only at a known diagnostic path (`stop_reason`, `content.*.type`…),
- * cut to 80 characters; any other text — block text, tool inputs, `choices[].message.content`, an
- * error's message — becomes its length (「<11 chars>」), wherever it sits.
+ * DEPLOY-48 复审 #3 + PR #311 review: a parsed body as kept is its shape only. Numbers stay only
+ * at the provider's counters and codes (`usage.*`, `error.code`…), text only at a known diagnostic
+ * path (`stop_reason`, `content.*.type`…, cut to 80 characters); booleans and every other number
+ * or text — block text, tool inputs, `choices[].message.content`, an error's message — become a
+ * placeholder (「<number>」「<11 chars>」), wherever they sit. Nulls stay.
  */
 function shapeOf(value: unknown, path: string, depth: number): unknown {
-  if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (value === null) return value;
+  // PR #311 review: a number is data too (a tool input `{ pin: 4821 }`); only counters and codes
+  // the provider writes keep theirs.
+  if (typeof value === 'number') return DIAGNOSTIC_NUMBER_PATHS.has(path) ? value : '<number>';
+  if (typeof value === 'boolean') return '<boolean>';
   if (typeof value === 'string')
     return DIAGNOSTIC_TEXT_PATHS.has(path) && value.length <= 80
       ? value

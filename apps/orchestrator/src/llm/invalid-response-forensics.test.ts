@@ -169,7 +169,7 @@ describe('DEPLOY-48 复审 #3 · evidence hardening', () => {
     expect(error.forensics?.body).not.toContain('用户问的是');
     expect(JSON.parse(error.forensics?.body ?? '{}').content).toEqual([
       { type: 'thinking', thinking: '<11 chars>' },
-      { type: 'text', text: 7 },
+      { type: 'text', text: '<number>' },
     ]);
   });
 
@@ -329,6 +329,31 @@ describe('PR #311 review · keys that carry data are not kept', () => {
         { type: 'tool_use', name: 'type_text', input: { '<key 0: 11 chars>': '<4 chars>' } },
       ],
       '<key 2: 5 chars>': { '<key 0: 5 chars>': '<1 chars>' },
+    });
+  });
+});
+
+describe('PR #311 review · numbers are kept only where the provider counts', () => {
+  it('a numeric tool input is summarised; token counts stay', async () => {
+    const error = await failure(
+      JSON.stringify({
+        id: 'msg_1',
+        content: [{ type: 'tool_use', name: 'unlock', input: { pin: 4821, remember: true } }],
+        usage: { input_tokens: 5021, output_tokens: 0 },
+      }),
+    );
+    const body = error.forensics?.body ?? '';
+    expect(body).not.toContain('4821');
+    expect(JSON.parse(body)).toEqual({
+      id: 'msg_1',
+      content: [
+        {
+          type: 'tool_use',
+          name: 'unlock',
+          input: { '<key 0: 3 chars>': '<number>', '<key 1: 8 chars>': '<boolean>' },
+        },
+      ],
+      usage: { input_tokens: 5021, output_tokens: 0 },
     });
   });
 });
