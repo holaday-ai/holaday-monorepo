@@ -539,7 +539,8 @@ function answerFacts(summary: string, intent = ''): Fact[] {
       add({ name: '价格', value: clean(priced[2]!), listItem: true });
       // PR #311 review: every price in a note is checked (「原价 S$30 现价 S$99」), and what is left
       // with a number in it too.
-      for (const piece of (priced[3] ?? '').split(/[，,；;、]/)) {
+      // PR #311 review: not at a thousands separator (「S$1,299」 is one price).
+      for (const piece of (priced[3] ?? '').split(/[，；;、]|,(?!\d{3}\b)/)) {
         if (!/\d|[$¥￥€£]|\b(?:sgd|usd|rmb|cny)\b/i.test(piece)) continue;
         const prices = piece.match(PRICE_SHAPE_RE) ?? [];
         for (const price of prices)
@@ -1510,7 +1511,8 @@ function countState(prose: string, name: string): 'value' | 'doubt' | null {
       // PR #311 review: doubt about a related metric (「无法确认点赞数的增长趋势」) is no doubt about
       // the count itself.
       const unsure = UNSURE_RE.test(clause) && !DERIVED_DOUBT_RE.test(clause);
-      const hedged = !!m && HEDGED_VALUE_RE.test(m[1] ?? '');
+      // PR #311 review: the guess may open the clause too (「推测点赞数为20」).
+      const hedged = !!m && HEDGED_VALUE_RE.test(`${clause.slice(0, m.index)}${m[1] ?? ''}`);
       // A value given in a clause that doubts it (「…分别为 20、2…（无法确认对应关系）」) is doubted too.
       if (((mention.test(clause) || m) && (unsure || hedged)) || ALL_COUNTS_UNSURE_RE.test(clause))
         state.set(item, 'doubt');

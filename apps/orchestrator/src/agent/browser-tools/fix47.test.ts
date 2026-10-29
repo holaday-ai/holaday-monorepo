@@ -427,3 +427,27 @@ describe('PR #311 review (918c350d)', () => {
     expect(declaredAbsentFields('读取点赞数', '点赞数可能是 20（无法确认）。')).toEqual(['点赞数']);
   });
 });
+
+describe('PR #311 review (1ffc43e9)', () => {
+  it('a guess that opens the clause is no value', () => {
+    expect(declaredAbsentFields('读取点赞数', '点赞数：页面未显示。推测点赞数为20。')).toEqual([
+      '点赞数',
+    ]);
+    // Reverse: a plain later value still fills it.
+    expect(
+      declaredAbsentFields('读取点赞数', '点赞数：页面未显示。复核后读到点赞数为20。'),
+    ).toEqual([]);
+  });
+
+  it('a thousands-separated price in a note is one price', () => {
+    const facts = assessCompletionFacts({
+      summary: '1. Anker Cable — SGD 12.81（原价 S$1,299）',
+      pages: [
+        {
+          text: '- link "Anker Cable"\n- text: SGD 12.81\n- text: S$1.00 shipping\n- text: 299 reviews',
+        },
+      ],
+    });
+    expect([...facts.unverified, ...facts.contradictions].join('\n')).toContain('1,299');
+  });
+});
