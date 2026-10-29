@@ -175,8 +175,10 @@ function shapeOf(value: unknown, path: string, depth: number): unknown {
   // the provider writes keep theirs.
   if (typeof value === 'number') return DIAGNOSTIC_NUMBER_PATHS.has(path) ? value : '<number>';
   if (typeof value === 'boolean') return '<boolean>';
+  // PR #311 review: even at a diagnostic path, only an identifier-like value (no spaces, no
+  // Chinese) is kept; the record masks credentials in it as well.
   if (typeof value === 'string')
-    return DIAGNOSTIC_TEXT_PATHS.has(path) && value.length <= 80
+    return DIAGNOSTIC_TEXT_PATHS.has(path) && /^[A-Za-z0-9_.:/-]{1,80}$/.test(value)
       ? value
       : `<${value.length} chars>`;
   if (depth >= 6) return Array.isArray(value) ? `<array of ${value.length}>` : `<${typeof value}>`;
@@ -251,6 +253,32 @@ function receivedBytes(raw: unknown): number {
   }
 }
 
+/** PR #311 review: the stop reasons and block types a provider writes; anything else is data. */
+const STOP_REASONS = new Set([
+  'end_turn',
+  'tool_use',
+  'max_tokens',
+  'stop_sequence',
+  'pause_turn',
+  'refusal',
+  'stop',
+  'length',
+  'tool_calls',
+  'content_filter',
+]);
+const BLOCK_TYPES = new Set([
+  'text',
+  'tool_use',
+  'thinking',
+  'redacted_thinking',
+  'tool_result',
+  'image',
+  'server_tool_use',
+  'web_search_tool_result',
+]);
+const known = (value: string, allowed: Set<string>) =>
+  allowed.has(value) ? value : `<${value.length} chars>`;
+
 /** The record for one invalid response; `raw` is the parsed body (or nothing, for `not_json`). */
 export function invalidResponseForensics(input: {
   kind: InvalidResponseKind;
@@ -275,11 +303,15 @@ export function invalidResponseForensics(input: {
     toolCount: Array.isArray(input.request.tools) ? input.request.tools.length : 0,
     messageCount: Array.isArray(input.request.messages) ? input.request.messages.length : 0,
     stopReason:
-      isRecord(raw) && typeof raw.stop_reason === 'string' ? raw.stop_reason.slice(0, 40) : null,
+      isRecord(raw) && typeof raw.stop_reason === 'string'
+        ? known(raw.stop_reason, STOP_REASONS)
+        : null,
     contentTypes: content
       .slice(0, 20)
       .map((block) =>
-        isRecord(block) && typeof block.type === 'string' ? block.type.slice(0, 40) : typeof block,
+        isRecord(block) && typeof block.type === 'string'
+          ? known(block.type, BLOCK_TYPES)
+          : typeof block,
       ),
     usage: isRecord(raw)
       ? {

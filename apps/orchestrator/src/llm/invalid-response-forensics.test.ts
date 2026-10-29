@@ -357,3 +357,30 @@ describe('PR #311 review · numbers are kept only where the provider counts', ()
     });
   });
 });
+
+describe('PR #311 review · extracted fields are known values only', () => {
+  it('a stop reason or block type that is not a known value keeps only its length', async () => {
+    const error = await failure(
+      JSON.stringify({
+        id: 'm',
+        stop_reason: 'cn-secret-key-123456',
+        content: [{ type: '杭州市西湖区龙井路1号' }],
+      }),
+    );
+    expect(error.forensics?.stopReason).toBe('<20 chars>');
+    expect(error.forensics?.contentTypes).toEqual(['<11 chars>']);
+    expect(JSON.stringify(error.forensics)).not.toContain('cn-secret-key-123456');
+    expect(JSON.stringify(error.forensics)).not.toContain('龙井路');
+  });
+
+  it('known values stay', async () => {
+    const error = await failure(
+      JSON.stringify({
+        id: 'm',
+        stop_reason: 'end_turn',
+        content: [{ type: 'thinking', thinking: 'x' }],
+      }),
+    );
+    expect(error.forensics).toMatchObject({ stopReason: 'end_turn', contentTypes: ['thinking'] });
+  });
+});

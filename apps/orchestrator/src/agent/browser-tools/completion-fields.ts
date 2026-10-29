@@ -537,10 +537,15 @@ function answerFacts(summary: string, intent = ''): Fact[] {
     if (priced && !/[：*]/.test(priced[1]!) && !/https?:\/\//i.test(listed!)) {
       add({ name: '条目', value: clean(priced[1]!), listItem: true });
       add({ name: '价格', value: clean(priced[2]!), listItem: true });
+      // PR #311 review: every price in a note is checked (「原价 S$30 现价 S$99」), and what is left
+      // with a number in it too.
       for (const piece of (priced[3] ?? '').split(/[，,；;、]/)) {
         if (!/\d|[$¥￥€£]|\b(?:sgd|usd|rmb|cny)\b/i.test(piece)) continue;
-        const price = piece.match(PRICE_SHAPE_RE)?.[0];
-        add({ name: '价格（括注）', value: clean(price ?? piece), listItem: true });
+        const prices = piece.match(PRICE_SHAPE_RE) ?? [];
+        for (const price of prices)
+          add({ name: '价格（括注）', value: clean(price), listItem: true });
+        const rest = prices.reduce((left, price) => left.replace(price, ' '), piece);
+        if (/\d/.test(rest)) add({ name: '括注', value: clean(rest), listItem: true });
       }
       continue;
     }
@@ -1426,23 +1431,26 @@ export function declaredAbsentFields(
   const prose = unescapeLiteralBreaks(summary);
   return asked.filter(
     (name) =>
-      [...values].some(
+      // PR #311 review: 「点赞数：无法确认。复核后读到点赞数为20」 — a count the answer ends up giving,
+      // for every item it names, is answered whatever it said first.
+      countState(prose, name) !== 'value' &&
+      ([...values].some(
         ([label, vals]) =>
           (label === name || label.endsWith(name)) && vals.some((v) => DECLARED_ABSENT_RE.test(v)),
       ) ||
-      // 「页面未显示作者名称」「作者字段按页面原样写“页面未显示”」 — prose, not a 作者：value line.
-      [
-        ...prose.matchAll(
-          new RegExp(
-            `(?:页面(?:上|中)?)?(?:未|没有)(?:显示|提供|列出|给出|找到|读到|获取到)${name}`,
-            'g',
+        // 「页面未显示作者名称」「作者字段按页面原样写“页面未显示”」 — prose, not a 作者：value line.
+        [
+          ...prose.matchAll(
+            new RegExp(
+              `(?:页面(?:上|中)?)?(?:未|没有)(?:显示|提供|列出|给出|找到|读到|获取到)${name}`,
+              'g',
+            ),
           ),
-        ),
-      ].some((m) => !filledAfter(prose, m.index! + m[0].length, name, pages)) ||
-      new RegExp(
-        `${name}(?:名称|字段)?[^。；;\\n：:（(]{0,10}?[为写]\\s*[“"「]?(?:页面(?:上|中)?未显示|未显示|未获取到|未读到|未找到)`,
-      ).test(prose) ||
-      unsureCount(prose, name),
+        ].some((m) => !filledAfter(prose, m.index! + m[0].length, name, pages)) ||
+        new RegExp(
+          `${name}(?:名称|字段)?[^。；;\\n：:（(]{0,10}?[为写]\\s*[“"「]?(?:页面(?:上|中)?未显示|未显示|未获取到|未读到|未找到)`,
+        ).test(prose) ||
+        unsureCount(prose, name)),
   );
 }
 
@@ -1459,7 +1467,16 @@ const HEDGED_VALUE_RE = /可能|推测|猜测|估计|大概|或许|疑似|应该
 const ALL_COUNTS_UNSURE_RE =
   /(?:无法|不能|未能|没法)(?:确认|确定|判断|对应|区分)(?:各项|各个|每项|每个|这些|它们的?)(?:具体)?(?:数值|数字|计数|数据)/;
 function unsureCount(prose: string, name: string): boolean {
-  if (!name.endsWith('数')) return false;
+  return countState(prose, name) === 'doubt';
+}
+
+/**
+ * What the answer last says about a count, over every item it names: 'doubt' when some item's
+ * last word on it is a doubt, 'value' when every item ends with a value, null when it is not
+ * mentioned either way.
+ */
+function countState(prose: string, name: string): 'value' | 'doubt' | null {
+  if (!name.endsWith('数')) return null;
   const stem = name.slice(0, -1);
   // PR #311 review: a value and an unsure phrase are about the counts in their own clause
   // (「点赞数为一万，评论数无法确认」「无法确认点赞数；评论数为215」); 「、」 joins the counts one phrase
@@ -1492,5 +1509,6 @@ function unsureCount(prose: string, name: string): boolean {
       else if (m) state.set(item, 'value');
     }
   }
-  return [...state.values()].includes('doubt');
+  const states = [...state.values()];
+  return states.includes('doubt') ? 'doubt' : states.length ? 'value' : null;
 }
