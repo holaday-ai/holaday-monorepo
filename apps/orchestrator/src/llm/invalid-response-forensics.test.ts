@@ -276,3 +276,30 @@ describe('PR #311 review · responseBytes is the size received, not the summary'
     expect(error.forensics?.body.length).toBeLessThan(200);
   });
 });
+
+describe('PR #311 review · text is kept only at known diagnostic paths', () => {
+  it("a tool input's own code / id keys are summarised like any other user data", async () => {
+    const error = await failure(
+      JSON.stringify({
+        id: 'msg_1',
+        content: [
+          {
+            type: 'tool_use',
+            name: 'type_text',
+            input: { code: '4821', id: '杭州市西湖区龙井路1号' },
+          },
+        ],
+      }),
+    );
+    expect(error.forensics?.kind).toBe('bad_tool_use_block');
+    const body = error.forensics?.body ?? '';
+    expect(body).not.toContain('4821');
+    expect(body).not.toContain('龙井路');
+    expect(JSON.parse(body)).toEqual({
+      id: 'msg_1',
+      content: [
+        { type: 'tool_use', name: 'type_text', input: { code: '<4 chars>', id: '<11 chars>' } },
+      ],
+    });
+  });
+});

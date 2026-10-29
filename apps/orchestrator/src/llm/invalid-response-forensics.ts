@@ -121,8 +121,12 @@ function count(container: unknown, key: string): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
-/** Fields whose text is a diagnostic value, never generated or user text. */
-const DIAGNOSTIC_TEXT_KEYS = new Set([
+/**
+ * The places in a response whose text is a diagnostic value, never generated or user text —
+ * paths, not key names (PR #311 review: a tool input's own `code` / `id` keys are user data).
+ * `*` is any array index.
+ */
+const DIAGNOSTIC_TEXT_PATHS = new Set([
   'id',
   'type',
   'object',
@@ -130,40 +134,47 @@ const DIAGNOSTIC_TEXT_KEYS = new Set([
   'model',
   'stop_reason',
   'stop_sequence',
-  'finish_reason',
-  'code',
   'status',
   'request_id',
+  'code',
+  'content.*.type',
+  'content.*.id',
+  'content.*.name',
+  'error.type',
+  'error.code',
+  'choices.*.finish_reason',
+  'choices.*.message.role',
 ]);
 
 /**
  * DEPLOY-48 复审 #3 + PR #311 review: a parsed body as kept is its shape only. Numbers, booleans
- * and nulls stay; text stays only under a diagnostic key (`type`, `stop_reason`, `code`…), cut to
- * 80 characters; any other text — `content`, `choices[].message.content`, an error's message, a
- * thinking block — becomes its length (「<11 chars>」), wherever it sits.
+ * and nulls stay; text stays only at a known diagnostic path (`stop_reason`, `content.*.type`…),
+ * cut to 80 characters; any other text — block text, tool inputs, `choices[].message.content`, an
+ * error's message — becomes its length (「<11 chars>」), wherever it sits.
  */
-function shapeOf(value: unknown, key: string | null, depth: number): unknown {
+function shapeOf(value: unknown, path: string, depth: number): unknown {
   if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
   if (typeof value === 'string')
-    return key !== null && DIAGNOSTIC_TEXT_KEYS.has(key) && value.length <= 80
+    return DIAGNOSTIC_TEXT_PATHS.has(path) && value.length <= 80
       ? value
       : `<${value.length} chars>`;
   if (depth >= 6) return Array.isArray(value) ? `<array of ${value.length}>` : `<${typeof value}>`;
+  const at = (key: string) => (path ? `${path}.${key}` : key);
   if (Array.isArray(value)) {
-    const items = value.slice(0, 50).map((item) => shapeOf(item, null, depth + 1));
+    const items = value.slice(0, 50).map((item) => shapeOf(item, at('*'), depth + 1));
     return value.length > 50 ? [...items, `<${value.length - 50} more>`] : items;
   }
   if (isRecord(value))
     return Object.fromEntries(
       Object.entries(value)
         .slice(0, 40)
-        .map(([k, v]) => [k.slice(0, 40), shapeOf(v, k, depth + 1)]),
+        .map(([k, v]) => [k.slice(0, 40), shapeOf(v, at(k), depth + 1)]),
     );
   return `<${typeof value}>`;
 }
 
 function structuralBody(raw: unknown): string {
-  return JSON.stringify(shapeOf(raw, null, 0)) ?? '';
+  return JSON.stringify(shapeOf(raw, '', 0)) ?? '';
 }
 
 /** A parsed body's size when no transport measured it (another client): its JSON form. */
