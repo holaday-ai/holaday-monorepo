@@ -86,6 +86,8 @@ export function recordedBrowserAdapter(
                 requestMeta: {
                   ...base.requestMeta,
                   providerError: safeProviderDiagnostics(error.diagnostics),
+                  // FIX-47: which check failed and what came back (masked, ≤ 4 KB).
+                  ...(error.forensics ? { invalidResponse: error.forensics } : {}),
                 },
               }
             : {}),
