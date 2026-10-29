@@ -263,3 +263,16 @@ describe('PR #311 review · a truncated JSON body keeps nothing of its text', ()
     expect(JSON.parse(body)).toMatchObject({ shape: 'json_unparseable', lines: 1 });
   });
 });
+
+describe('PR #311 review · responseBytes is the size received, not the summary', () => {
+  it('a long thinking block counts in full', async () => {
+    const raw = JSON.stringify({
+      id: 'm',
+      content: [{ type: 'thinking', thinking: '思'.repeat(3000) }],
+    });
+    const error = await failure(raw);
+    expect(error.forensics?.kind).toBe('empty_content');
+    expect(error.forensics?.responseBytes).toBe(Buffer.byteLength(raw, 'utf8'));
+    expect(error.forensics?.body.length).toBeLessThan(200);
+  });
+});

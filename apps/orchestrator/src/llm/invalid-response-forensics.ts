@@ -40,6 +40,8 @@ export interface TransportResponseMeta {
   httpStatus: number;
   requestId: string | null;
   elapsedMs: number;
+  /** PR #311 review: the body's size as received (UTF-8 bytes), before any summary. */
+  bodyBytes?: number;
   /**
    * A body that was not JSON, described without its words (PR #311 review: a truncated JSON body
    * still carries generated text). A parsed body is summarised from its structure instead.
@@ -164,6 +166,15 @@ function structuralBody(raw: unknown): string {
   return JSON.stringify(shapeOf(raw, null, 0)) ?? '';
 }
 
+/** A parsed body's size when no transport measured it (another client): its JSON form. */
+function receivedBytes(raw: unknown): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(raw) ?? '', 'utf8');
+  } catch {
+    return 0;
+  }
+}
+
 /** The record for one invalid response; `raw` is the parsed body (or nothing, for `not_json`). */
 export function invalidResponseForensics(input: {
   kind: InvalidResponseKind;
@@ -200,7 +211,7 @@ export function invalidResponseForensics(input: {
           outputTokens: count(raw.usage, 'output_tokens'),
         }
       : null,
-    responseBytes: unparsed?.bytes ?? Buffer.byteLength(text, 'utf8'),
+    responseBytes: unparsed?.bytes ?? input.meta?.bodyBytes ?? receivedBytes(raw),
     body: maskForensicBody(text, input.secrets),
   };
 }

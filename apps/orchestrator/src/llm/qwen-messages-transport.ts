@@ -169,6 +169,8 @@ export function createQwenMessagesTransport(input: {
                     httpStatus: response.status,
                     requestId: responseRequestId(response.headers),
                     elapsedMs: Date.now() - startedAt,
+                    // PR #311 review: the size as received; the text itself is not kept.
+                    bodyBytes: Buffer.byteLength(text, 'utf8'),
                   };
                   if (value && typeof value === 'object')
                     Object.defineProperty(value, TRANSPORT_RESPONSE_META, { value: meta });
