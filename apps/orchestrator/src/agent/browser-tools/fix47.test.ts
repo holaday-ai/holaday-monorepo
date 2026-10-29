@@ -64,6 +64,9 @@ describe('PR #311 review', () => {
     expect(declaredAbsentFields('读取点赞数和评论数', '点赞数为一万，评论数无法确认。')).toEqual([
       '评论数',
     ]);
+    expect(declaredAbsentFields('读取点赞数和评论数', '无法确认点赞数；评论数为215。')).toEqual([
+      '点赞数',
+    ]);
   });
 
   it('a labelled name on an English page is still checked as written', () => {

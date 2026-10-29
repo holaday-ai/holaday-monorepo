@@ -1427,12 +1427,11 @@ const CN_NUMERALS = '零一二两三四五六七八九十百千万亿';
 function unsureCount(prose: string, name: string): boolean {
   if (!name.endsWith('数')) return false;
   const stem = name.slice(0, -1);
-  // PR #311 review: a value in Chinese numerals (「点赞数为一万」) is a value too.
-  if (new RegExp(`${stem}(?:数|量)?[^。！？!?\\n\\d，,、]{0,6}?[\\d${CN_NUMERALS}]`).test(prose))
-    return false;
-  // PR #311 review: the unsure phrase is about the counts in its own clause (「点赞数为一万，评论数
-  // 无法确认」 leaves 点赞数 answered); 「、」 joins the counts one phrase names.
-  return prose
-    .split(/[。！？!?\n，,；;]/)
-    .some((clause) => clause.includes(stem) && UNSURE_RE.test(clause));
+  // PR #311 review: a value and an unsure phrase are about the counts in their own clause
+  // (「点赞数为一万，评论数无法确认」「无法确认点赞数；评论数为215」); 「、」 joins the counts one phrase
+  // names. A value in Chinese numerals (「一万」) is a value too.
+  const value = new RegExp(`${stem}(?:数|量)?[^\\d、]{0,6}?[\\d${CN_NUMERALS}]`);
+  const clauses = prose.split(/[。！？!?\n，,；;]/);
+  if (clauses.some((clause) => value.test(clause))) return false;
+  return clauses.some((clause) => clause.includes(stem) && UNSURE_RE.test(clause));
 }
