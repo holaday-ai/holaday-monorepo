@@ -163,8 +163,8 @@ describe('DEPLOY-48 复审 #3 · evidence hardening', () => {
     expect(error.forensics?.kind).toBe('bad_text_block');
     expect(error.forensics?.body).not.toContain('用户问的是');
     expect(JSON.parse(error.forensics?.body ?? '{}').content).toEqual([
-      { type: 'thinking', chars: 11 },
-      { type: 'text', chars: 0 },
+      { type: 'thinking', thinking: '<11 chars>' },
+      { type: 'text', text: 7 },
     ]);
   });
 
@@ -192,16 +192,52 @@ describe('DEPLOY-48 复审 #3 · evidence hardening', () => {
   });
 
   it('evidence that cannot be gathered never replaces the INVALID_RESPONSE', async () => {
-    const circular: Record<string, unknown> = { id: 'm', content: [] };
-    circular.self = circular;
     const { createAnthropicCompatibleMessagesAdapter } = await import('./messages-adapter.js');
     const adapter = createAnthropicCompatibleMessagesAdapter({
-      client: { messages: { create: async () => circular } } as never,
+      client: { messages: { create: async () => ({ id: 'm', content: [] }) } } as never,
       metadata: { provider: 'anthropic', model: 'fixture' },
     });
-    const error = await adapter.create(REQUEST as never).catch((e: unknown) => e);
+    // A request the evidence cannot size (JSON has no BigInt): gathering it throws.
+    const unsizable = {
+      ...REQUEST,
+      tools: [{ name: 'n', description: 'd', inputSchema: { type: 'object', max: 1n } }],
+    };
+    const error = await adapter.create(unsizable as never).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(MessagesAdapterError);
     expect((error as MessagesAdapterError).code).toBe('INVALID_RESPONSE');
     expect((error as MessagesAdapterError).forensics).toBeUndefined();
+  });
+});
+
+describe('PR #311 review · only the shape of a parsed body is kept', () => {
+  it('generated text outside content (an OpenAI-shaped body) keeps only its length', async () => {
+    const error = await failure(
+      JSON.stringify({
+        id: 'chatcmpl-1',
+        object: 'chat.completion',
+        model: 'qwen3.8-max',
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: { role: 'assistant', content: '杭州市西湖区龙井路1号，门禁码 4821' },
+          },
+        ],
+        usage: { prompt_tokens: 12, completion_tokens: 9 },
+        error: { code: 'x', message: '用户地址：杭州市西湖区' },
+      }),
+    );
+    const body = error.forensics?.body ?? '';
+    expect(error.forensics?.kind).toBe('no_content_array');
+    expect(body).not.toContain('龙井路');
+    expect(body).not.toContain('4821');
+    expect(body).not.toContain('西湖区');
+    expect(JSON.parse(body)).toEqual({
+      id: 'chatcmpl-1',
+      object: 'chat.completion',
+      model: 'qwen3.8-max',
+      choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: '<20 chars>' } }],
+      usage: { prompt_tokens: 12, completion_tokens: 9 },
+      error: { code: 'x', message: '<11 chars>' },
+    });
   });
 });

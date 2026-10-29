@@ -100,28 +100,49 @@ function count(container: unknown, key: string): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+/** Fields whose text is a diagnostic value, never generated or user text. */
+const DIAGNOSTIC_TEXT_KEYS = new Set([
+  'id',
+  'type',
+  'object',
+  'role',
+  'model',
+  'stop_reason',
+  'stop_sequence',
+  'finish_reason',
+  'code',
+  'status',
+  'request_id',
+]);
+
 /**
- * DEPLOY-48 复审 #3: a parsed body as kept — every field but `content`, whose blocks keep only their
- * type and the length of their text (a model's words may repeat the user's question).
+ * DEPLOY-48 复审 #3 + PR #311 review: a parsed body as kept is its shape only. Numbers, booleans
+ * and nulls stay; text stays only under a diagnostic key (`type`, `stop_reason`, `code`…), cut to
+ * 80 characters; any other text — `content`, `choices[].message.content`, an error's message, a
+ * thinking block — becomes its length (「<11 chars>」), wherever it sits.
  */
+function shapeOf(value: unknown, key: string | null, depth: number): unknown {
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string')
+    return key !== null && DIAGNOSTIC_TEXT_KEYS.has(key) && value.length <= 80
+      ? value
+      : `<${value.length} chars>`;
+  if (depth >= 6) return Array.isArray(value) ? `<array of ${value.length}>` : `<${typeof value}>`;
+  if (Array.isArray(value)) {
+    const items = value.slice(0, 50).map((item) => shapeOf(item, null, depth + 1));
+    return value.length > 50 ? [...items, `<${value.length - 50} more>`] : items;
+  }
+  if (isRecord(value))
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 40)
+        .map(([k, v]) => [k.slice(0, 40), shapeOf(v, k, depth + 1)]),
+    );
+  return `<${typeof value}>`;
+}
+
 function structuralBody(raw: unknown): string {
-  if (!isRecord(raw)) return Array.isArray(raw) ? `[array of ${raw.length}]` : typeof raw;
-  const blocks = Array.isArray(raw.content)
-    ? raw.content.slice(0, 50).map((block) => {
-        if (!isRecord(block)) return { type: typeof block };
-        const chars = Object.entries(block).reduce<number>(
-          (sum, [key, v]) => sum + (key !== 'type' && typeof v === 'string' ? v.length : 0),
-          0,
-        );
-        return {
-          type: typeof block.type === 'string' ? block.type.slice(0, 40) : typeof block.type,
-          chars,
-        };
-      })
-    : raw.content === undefined
-      ? undefined
-      : `[${typeof raw.content}${typeof raw.content === 'string' ? `, ${raw.content.length} chars` : ''}]`;
-  return JSON.stringify({ ...raw, ...(blocks !== undefined ? { content: blocks } : {}) });
+  return JSON.stringify(shapeOf(raw, null, 0)) ?? '';
 }
 
 /** The record for one invalid response; `raw` is the parsed body (or nothing, for `not_json`). */
