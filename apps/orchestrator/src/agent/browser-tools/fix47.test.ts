@@ -344,3 +344,20 @@ describe('PR #311 review · a value fills only its own item', () => {
     ).toEqual([]);
   });
 });
+
+describe('PR #311 review · what is said last about a count stands', () => {
+  it('a later retraction withdraws an earlier value', () => {
+    expect(
+      declaredAbsentFields(
+        '读取点赞数',
+        '点赞数为20。复核后无法确认点赞数，之前的20其实是评论数。',
+      ),
+    ).toEqual(['点赞数']);
+  });
+
+  it('reverse: a later confirmed value fills an earlier gap', () => {
+    expect(declaredAbsentFields('读取点赞数', '点赞数无法确认。复核后读到点赞数为20。')).toEqual(
+      [],
+    );
+  });
+});

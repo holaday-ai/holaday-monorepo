@@ -298,8 +298,37 @@ describe('PR #311 review · text is kept only at known diagnostic paths', () => 
     expect(JSON.parse(body)).toEqual({
       id: 'msg_1',
       content: [
-        { type: 'tool_use', name: 'type_text', input: { code: '<4 chars>', id: '<11 chars>' } },
+        {
+          type: 'tool_use',
+          name: 'type_text',
+          input: { '<key 0: 4 chars>': '<4 chars>', '<key 1: 2 chars>': '<11 chars>' },
+        },
       ],
+    });
+  });
+});
+
+describe('PR #311 review · keys that carry data are not kept', () => {
+  it('a tool input keyed by an address keeps neither the key nor the value', async () => {
+    const error = await failure(
+      JSON.stringify({
+        id: 'msg_1',
+        content: [
+          { type: 'tool_use', name: 'type_text', input: { 杭州市西湖区龙井路1号: '4821' } },
+        ],
+        extra: { 张三的手机: 'x' },
+      }),
+    );
+    const body = error.forensics?.body ?? '';
+    expect(body).not.toContain('龙井路');
+    expect(body).not.toContain('4821');
+    expect(body).not.toContain('张三');
+    expect(JSON.parse(body)).toEqual({
+      id: 'msg_1',
+      content: [
+        { type: 'tool_use', name: 'type_text', input: { '<key 0: 11 chars>': '<4 chars>' } },
+      ],
+      '<key 2: 5 chars>': { '<key 0: 5 chars>': '<1 chars>' },
     });
   });
 });

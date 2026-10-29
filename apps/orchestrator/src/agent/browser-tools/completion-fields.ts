@@ -1470,9 +1470,12 @@ function unsureCount(prose: string, name: string): boolean {
     'u',
   );
   // PR #311 review: a value fills only its own item's gap (「第一个视频点赞数无法确认。第二个视频点赞数为
-  // 215」 leaves the first one missing). The item is the last one named in the sentence so far.
-  const valued = new Set<string>();
-  const doubted = new Set<string>();
+  // 215」 leaves the first one missing), and what the answer says last about an item stands
+  // (「点赞数为20。复核后无法确认点赞数」 withdraws the 20). The item is the last one named in the
+  // sentence so far.
+  // The count itself, not a word that starts like it (「回答者」「评论区」).
+  const mention = new RegExp(`${stem}(?:数|量|(?=[、和与及或还]|[^\\p{Script=Han}]|$))`, 'u');
+  const state = new Map<string, 'value' | 'doubt'>();
   for (const sentence of prose.split(/[。！？!?\n]/)) {
     let item = '';
     for (const clause of sentence.split(/[，,；;]/)) {
@@ -1483,10 +1486,11 @@ function unsureCount(prose: string, name: string): boolean {
       // (「点赞数20无法确认」) is no value.
       const unsure = UNSURE_RE.test(clause);
       const hedged = !!m && HEDGED_VALUE_RE.test(m[1] ?? '');
-      if (m && !unsure && !hedged) valued.add(item);
-      if ((clause.includes(stem) && (unsure || hedged)) || ALL_COUNTS_UNSURE_RE.test(clause))
-        doubted.add(item);
+      // A value given in a clause that doubts it (「…分别为 20、2…（无法确认对应关系）」) is doubted too.
+      if (((mention.test(clause) || m) && (unsure || hedged)) || ALL_COUNTS_UNSURE_RE.test(clause))
+        state.set(item, 'doubt');
+      else if (m) state.set(item, 'value');
     }
   }
-  return [...doubted].some((item) => !valued.has(item));
+  return [...state.values()].includes('doubt');
 }

@@ -168,9 +168,53 @@ function shapeOf(value: unknown, path: string, depth: number): unknown {
     return Object.fromEntries(
       Object.entries(value)
         .slice(0, 40)
-        .map(([k, v]) => [k.slice(0, 40), shapeOf(v, at(k), depth + 1)]),
+        .map(([k, v], i) => [keyShape(k, path, i), shapeOf(v, at(k), depth + 1)]),
     );
   return `<${typeof value}>`;
+}
+
+/** The field names a provider response is built from; any other key may be data. */
+const RESPONSE_KEYS = new Set([
+  'id',
+  'type',
+  'object',
+  'role',
+  'model',
+  'stop_reason',
+  'stop_sequence',
+  'status',
+  'request_id',
+  'code',
+  'content',
+  'text',
+  'thinking',
+  'signature',
+  'name',
+  'input',
+  'tool_use_id',
+  'error',
+  'message',
+  'choices',
+  'index',
+  'finish_reason',
+  'delta',
+  'usage',
+  'input_tokens',
+  'output_tokens',
+  'cache_read_input_tokens',
+  'cache_creation_input_tokens',
+  'prompt_tokens',
+  'completion_tokens',
+  'total_tokens',
+]);
+
+/**
+ * PR #311 review: a key can carry data too (a tool input `{ '杭州市…': '4821' }`). A tool input's
+ * keys are the model's, never kept; elsewhere only a provider field name is kept as written.
+ */
+function keyShape(key: string, path: string, index: number): string {
+  const inInput = /(?:^|\.)input$/.test(path) || /(?:^|\.)input\./.test(path);
+  return !inInput && RESPONSE_KEYS.has(key) ? key : `<key ${index}: ${key.length} chars>`;
 }
 
 function structuralBody(raw: unknown): string {
