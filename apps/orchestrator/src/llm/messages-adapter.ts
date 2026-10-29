@@ -205,16 +205,27 @@ export function createAnthropicCompatibleMessagesAdapter(input: {
     metadata,
     async create(request, options) {
       const providerRequest = buildMessagesProviderRequest(request, metadata);
-      const evidence = (kind: InvalidResponseKind, raw: unknown, meta?: TransportResponseMeta) =>
-        invalidResponseForensics({
-          kind,
-          raw,
-          ...(meta ? { meta } : {}),
-          model: metadata.model,
-          request: providerRequest,
-          requestBytes: Buffer.byteLength(JSON.stringify(providerRequest), 'utf8'),
-          ...(input.secrets ? { secrets: input.secrets } : {}),
-        });
+      // DEPLOY-48 复审 #3: the evidence never replaces the INVALID_RESPONSE it describes — if
+      // gathering it fails, the error goes on without it.
+      const evidence = (
+        kind: InvalidResponseKind,
+        raw: unknown,
+        meta?: TransportResponseMeta,
+      ): InvalidResponseForensics | undefined => {
+        try {
+          return invalidResponseForensics({
+            kind,
+            raw,
+            ...(meta ? { meta } : {}),
+            model: metadata.model,
+            request: providerRequest,
+            requestBytes: Buffer.byteLength(JSON.stringify(providerRequest), 'utf8'),
+            ...(input.secrets ? { secrets: input.secrets } : {}),
+          });
+        } catch {
+          return undefined;
+        }
+      };
       let rawResponse: unknown;
       try {
         rawResponse = await input.client.messages.create(

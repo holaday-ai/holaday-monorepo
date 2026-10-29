@@ -40,8 +40,11 @@ export interface TransportResponseMeta {
   httpStatus: number;
   requestId: string | null;
   elapsedMs: number;
-  /** The body text as received, before any masking. */
-  text: string;
+  /**
+   * DEPLOY-48 复审 #3: only for a body that was not JSON, and already masked (credentials and
+   * personal identifiers, ≤ 4 KB). A parsed body is summarised from its structure instead.
+   */
+  maskedText?: string;
 }
 
 export const TRANSPORT_RESPONSE_META: unique symbol = Symbol('holaday.transportResponseMeta');
@@ -97,6 +100,30 @@ function count(container: unknown, key: string): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+/**
+ * DEPLOY-48 复审 #3: a parsed body as kept — every field but `content`, whose blocks keep only their
+ * type and the length of their text (a model's words may repeat the user's question).
+ */
+function structuralBody(raw: unknown): string {
+  if (!isRecord(raw)) return Array.isArray(raw) ? `[array of ${raw.length}]` : typeof raw;
+  const blocks = Array.isArray(raw.content)
+    ? raw.content.slice(0, 50).map((block) => {
+        if (!isRecord(block)) return { type: typeof block };
+        const chars = Object.entries(block).reduce<number>(
+          (sum, [key, v]) => sum + (key !== 'type' && typeof v === 'string' ? v.length : 0),
+          0,
+        );
+        return {
+          type: typeof block.type === 'string' ? block.type.slice(0, 40) : typeof block.type,
+          chars,
+        };
+      })
+    : raw.content === undefined
+      ? undefined
+      : `[${typeof raw.content}${typeof raw.content === 'string' ? `, ${raw.content.length} chars` : ''}]`;
+  return JSON.stringify({ ...raw, ...(blocks !== undefined ? { content: blocks } : {}) });
+}
+
 /** The record for one invalid response; `raw` is the parsed body (or nothing, for `not_json`). */
 export function invalidResponseForensics(input: {
   kind: InvalidResponseKind;
@@ -108,14 +135,7 @@ export function invalidResponseForensics(input: {
   secrets?: readonly string[];
 }): InvalidResponseForensics {
   const raw = input.raw;
-  let text = input.meta?.text;
-  if (text === undefined) {
-    try {
-      text = JSON.stringify(raw) ?? '';
-    } catch {
-      text = '';
-    }
-  }
+  const text = input.kind === 'not_json' ? (input.meta?.maskedText ?? '') : structuralBody(raw);
   const content = isRecord(raw) && Array.isArray(raw.content) ? raw.content : [];
   return {
     kind: input.kind,

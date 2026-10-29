@@ -148,3 +148,60 @@ describe('FIX-47 #4 · masking and the 4 KB cut', () => {
     expect(maskForensicBody(body)).toBe(body);
   });
 });
+
+describe('DEPLOY-48 复审 #3 · evidence hardening', () => {
+  it('a block keeps only its type and length, never its words', async () => {
+    const error = await failure(
+      JSON.stringify({
+        id: 'm',
+        content: [
+          { type: 'thinking', thinking: '用户问的是我的身份证号' },
+          { type: 'text', text: 7 },
+        ],
+      }),
+    );
+    expect(error.forensics?.kind).toBe('bad_text_block');
+    expect(error.forensics?.body).not.toContain('用户问的是');
+    expect(JSON.parse(error.forensics?.body ?? '{}').content).toEqual([
+      { type: 'thinking', chars: 11 },
+      { type: 'text', chars: 0 },
+    ]);
+  });
+
+  it('the not-JSON body is masked when it is kept, and never serialised with the error', async () => {
+    const { QwenTransportError } = await import('./qwen-messages-transport.js');
+    const { createQwenMessagesTransport } = await import('./qwen-messages-transport.js');
+    const transport = createQwenMessagesTransport({
+      route: {
+        protocol: 'messages',
+        baseURL: 'https://dashscope.aliyuncs.com/apps/anthropic',
+        apiKey: 'cn-secret-key-123456',
+        model: 'qwen3.8-max',
+      } as never,
+      retryBaseDelayMs: 0,
+      fetchImpl: async () => new Response('oops cn-secret-key-123456 a@b.com', { status: 200 }),
+    });
+    const error = await transport.messages
+      .create({ model: 'qwen3.8-max', max_tokens: 5, messages: [] } as never)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(QwenTransportError);
+    const meta = (error as InstanceType<typeof QwenTransportError>).responseMeta;
+    expect(meta?.maskedText).toBe('oops [密钥] [邮箱]');
+    expect(Object.keys(error as object)).not.toContain('responseMeta');
+    expect(JSON.stringify(error)).not.toContain('oops');
+  });
+
+  it('evidence that cannot be gathered never replaces the INVALID_RESPONSE', async () => {
+    const circular: Record<string, unknown> = { id: 'm', content: [] };
+    circular.self = circular;
+    const { createAnthropicCompatibleMessagesAdapter } = await import('./messages-adapter.js');
+    const adapter = createAnthropicCompatibleMessagesAdapter({
+      client: { messages: { create: async () => circular } } as never,
+      metadata: { provider: 'anthropic', model: 'fixture' },
+    });
+    const error = await adapter.create(REQUEST as never).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(MessagesAdapterError);
+    expect((error as MessagesAdapterError).code).toBe('INVALID_RESPONSE');
+    expect((error as MessagesAdapterError).forensics).toBeUndefined();
+  });
+});

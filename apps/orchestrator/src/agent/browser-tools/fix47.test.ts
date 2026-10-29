@@ -5,7 +5,11 @@ import { scrapePartialAnswer } from '../scrape-runner.js';
 import { normalizeResults } from '../search-fallback/search-provider.js';
 import { searchResultsHtml } from '../search-fallback/search-results-page.js';
 import { humanizeToolMentions } from '../text-sanitizer.js';
-import { assessCompletionFacts, declaredAbsentFields } from './completion-fields.js';
+import {
+  assessCompletionFacts,
+  declaredAbsentFields,
+  unverifiedNote,
+} from './completion-fields.js';
 
 const DY1_INTENT =
   '打开 https://www.douyin.com/video/7507106798919601427 读视频标题、作者，以及点赞数、评论数、收藏数、分享数（不播放）';
@@ -99,12 +103,16 @@ describe('FIX-47 #2 · the outline read and its continuation point read as words
 });
 
 describe('FIX-47 #3 · three 「未核实」 notes that were not', () => {
-  it('Deploy-47 core-06: Chinese words for an English page are a translation, not a quote', () => {
+  it('Deploy-47 core-06: Chinese words for an English page are noted as a rendering, not as 未核实', () => {
     const summary =
       '第3节「Applications」总结：\n8. **其他行业应用**：法律行业中生成式AI辅助研究导致大量“AI幻觉案例”，截至2026年已有法官对提交虚假判例引用的律师实施制裁。';
     const page =
       'Applications\nAI and machine learning technology is used in most of the essential applications of the 2020s, including search engines, targeting online advertisements, recommendation systems, driving internet traffic, targeted advertising, virtual assistants, autonomous vehicles and automatic language translation.\nGenerative AI used in legal research has produced a wave of AI hallucination cases, in which lawyers cited fictitious case law; by 2026 judges had sanctioned lawyers for it.\nLanguages: 中文 Español Deutsch';
-    expect(assessCompletionFacts({ summary, pages: [{ text: page }] }).unverified).toEqual([]);
+    // DEPLOY-48 复审 #1: written in quotes it is still noted, as 译述.
+    const facts = assessCompletionFacts({ summary, pages: [{ text: page }] });
+    expect(unverifiedNote(facts.unverified)).toBe(
+      '译述，未逐字核对：以下内容是对英文页面的中文转述，页面上没有这些字，请自行确认——条目「AI幻觉案例」',
+    );
   });
 
   it('reverse: on an English page, a value with a number is still checked', () => {
@@ -230,5 +238,89 @@ describe('FIX-47 #3 · three 「未核实」 notes that were not', () => {
       });
       expect(facts.unverified).toHaveLength(1);
     });
+  });
+});
+
+describe('DEPLOY-48 复审 #1 #2 #4 #5 (fixtures fix-47/review1-fixtures/p311*.mjs)', () => {
+  const EN = `Applications\n${'AI and machine learning technology is used in most of the essential applications of the 2020s, including search engines, targeting online advertisements, recommendation systems, driving internet traffic, targeted advertising, virtual assistants. '.repeat(2)}`;
+  const CN = '西湖位于浙江省杭州市西湖区龙井路1号，是中国大陆首批国家重点风景名胜区。'.repeat(4);
+  const note = (summary: string, text: string) =>
+    unverifiedNote(assessCompletionFacts({ summary, pages: [{ text }] }).unverified);
+
+  it('#1: a made-up quote on an English page is noted as a rendering, not let through', () => {
+    expect(note('总结：\n1. 页面提到“量子意识算法”。', EN)).toBe(
+      '译述，未逐字核对：以下内容是对英文页面的中文转述，页面上没有这些字，请自行确认——条目「量子意识算法」',
+    );
+    expect(note('总结：\n1. 页面提到“九成用户”。', EN)).toContain('「九成用户」');
+  });
+
+  it("#1: only a plain listed term, not written as the page's words, goes unnoted", () => {
+    expect(note('1. 量子意识算法', EN)).toBe('');
+  });
+
+  it('#1 reverse: on a Chinese page the same quote is plainly 未核实', () => {
+    expect(note('总结：\n1. 页面提到“量子意识算法”。', CN)).toBe(
+      '未核实：以下内容未能在已读页面中逐字找到，请自行确认——条目「量子意识算法」',
+    );
+    expect(note('1. 量子意识算法', CN)).toContain('未核实');
+  });
+
+  const listing = '- link "Anker Cable"\n- text: SGD 12.81';
+  it('#2: a price inside the bracket note is a fact of its own', () => {
+    const facts = assessCompletionFacts({
+      summary: '1. Anker Cable — SGD 12.81（原价 S$30）',
+      pages: [{ text: listing }],
+    });
+    expect([...facts.unverified, ...facts.contradictions].join('\n')).toContain('S$30');
+  });
+
+  it('#2: a note without numbers is only a note; the price itself is still checked', () => {
+    expect(
+      assessCompletionFacts({
+        summary: '1. Anker Cable — SGD 12.81（从详情页读取）',
+        pages: [{ text: listing }],
+      }).unverified,
+    ).toEqual([]);
+    const made = assessCompletionFacts({
+      summary: '1. Anker Cable — SGD 99.99（从详情页读取）',
+      pages: [{ text: listing }],
+    });
+    expect([...made.unverified, ...made.contradictions].join('\n')).toContain('99.99');
+  });
+
+  const DY =
+    '打开 https://www.douyin.com/video/1 读视频标题、作者，以及点赞数、评论数、收藏数、分享数';
+  it('#4: a guessed or doubted number is no answer', () => {
+    expect(declaredAbsentFields(DY, '标题：A。作者：B。点赞数可能是 20（无法确认）。')).toEqual([
+      '点赞数',
+    ]);
+    expect(declaredAbsentFields(DY, '标题：A。作者：B。点赞数推测为 20。')).toEqual(['点赞数']);
+    expect(declaredAbsentFields(DY, '标题：A。作者：B。点赞数20无法确认。')).toEqual(['点赞数']);
+  });
+
+  it('#4: 「无法确认各项具体数值」 leaves every asked count missing', () => {
+    expect(
+      declaredAbsentFields(DY, '标题：A。作者：B。页面显示 20、2、10、97，无法确认各项具体数值。'),
+    ).toEqual(['点赞数', '评论数', '收藏数', '分享数']);
+    expect(
+      declaredAbsentFields(DY, '点赞、评论、收藏、分享分别为 20、2、10、97（无法确认对应关系）。'),
+    ).toEqual(['点赞数', '评论数', '收藏数', '分享数']);
+  });
+
+  it('#4 reverse: counts with their numbers, and doubt about something else, are answered', () => {
+    expect(
+      declaredAbsentFields(DY, '点赞 20，评论 2，收藏 10，分享 97。无法确认作者的粉丝数。'),
+    ).toEqual([]);
+    expect(
+      declaredAbsentFields(DY, '标题：A；作者：B；点赞 20，评论 2，收藏 10，分享数无法确认。'),
+    ).toEqual(['分享数']);
+  });
+
+  it('#5: a numeral inside an ordinary word is no value', () => {
+    expect(declaredAbsentFields('读取点赞数', '点赞十分多，但无法确认点赞数。')).toEqual([
+      '点赞数',
+    ]);
+    expect(declaredAbsentFields('读取点赞数', '点赞数为一万，评论区无法确认。')).toEqual([]);
+    expect(declaredAbsentFields('读取点赞数', '点赞数三千个，无法确认收藏。')).toEqual([]);
   });
 });

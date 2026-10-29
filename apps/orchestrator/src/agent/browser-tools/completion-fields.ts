@@ -520,9 +520,10 @@ function answerFacts(summary: string, intent = ''): Fact[] {
     // FIX-36 (Deploy-36 b-p02): 「名称 — SGD 11.47」 is a name and its price, each its own
     // node on the page — checked apart, not as one run of text.
     // FIX-47 (Deploy-47 b-p02 「… — S$12.81（从该商品详情页读取）」): a note after the price says where
-    // it was read; the name and the price are still the facts.
+    // it was read; the name and the price are still the facts. DEPLOY-48 复审 #2: a note with a number
+    // or a currency in it (「（原价 S$30）」) states facts of its own, checked below.
     const priced = listed?.match(
-      /^(.+?)\s+[—–-]{1,2}\s+((?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?)\s*(?:[（(][^（）()\n]{1,40}[)）])?\s*$/iu,
+      /^(.+?)\s+[—–-]{1,2}\s+((?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?)\s*(?:[（(]([^（）()\n]{1,40})[)）])?\s*$/iu,
     );
     // …and 「sample.json，大小 95 bytes」 a file name and its size (local core-09).
     const sized = listed?.match(
@@ -536,6 +537,11 @@ function answerFacts(summary: string, intent = ''): Fact[] {
     if (priced && !/[：*]/.test(priced[1]!) && !/https?:\/\//i.test(listed!)) {
       add({ name: '条目', value: clean(priced[1]!), listItem: true });
       add({ name: '价格', value: clean(priced[2]!), listItem: true });
+      for (const piece of (priced[3] ?? '').split(/[，,；;、]/)) {
+        if (!/\d|[$¥￥€£]|\b(?:sgd|usd|rmb|cny)\b/i.test(piece)) continue;
+        const price = piece.match(PRICE_SHAPE_RE)?.[0];
+        add({ name: '价格（括注）', value: clean(price ?? piece), listItem: true });
+      }
       continue;
     }
     // FIX-41 (local f41a core-07): 「Safari (web browser) → 新标签，标题为“Safari (web browser) -
@@ -1065,14 +1071,18 @@ export function assessCompletionFacts(input: {
     // for a page with no Chinese text are a translation — no read page could show them verbatim.
     // A Chinese page that lacks them still gets the note. PR #311 review: only a listed or quoted
     // term — a name, title or other labelled value (「作者：张三」) is still checked as written.
+    // DEPLOY-48 复审 #1: written as the page's words (in 「」/“”, or after 页面提到 / 原文) it is still
+    // noted — as a rendering not checked word for word; only a plain listed term goes unnoted.
     if (
       fact.listItem &&
       !NAME_FIELD.test(fact.name) &&
       !TITLE_FIELD.test(fact.name) &&
       translatedWords(fact.value) &&
       pages.every((page) => englishPage(page.text))
-    )
+    ) {
+      if (quotedAsPage(input.summary, fact.value)) unverified.push(`${label}${TRANSLATED_MARK}`);
       continue;
+    }
     unverified.push(label);
   }
   // FIX-30: every named target answered (core-10), and recent means recent (n03).
@@ -1108,6 +1118,15 @@ export function assessCompletionFacts(input: {
   };
 }
 
+/** Marks a translated term in the 未核实 list; `unverifiedNote` gives such terms their own line. */
+const TRANSLATED_MARK = '（译述）';
+/** The answer gives `value` as the page's own words: in quotes, or after 页面提到 / 原文 / 写道. */
+function quotedAsPage(summary: string, value: string): boolean {
+  const v = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(
+    `[「“"『]\\s*${v}\\s*[」”"』]|(?:页面|原文|文中|网页)(?:上|中|里)?(?:提到|写道|写着|称|说)?[^。！？\\n]{0,6}${v}`,
+  ).test(summary);
+}
 const latinCount = (text: string) => text.match(/[A-Za-z]/g)?.length ?? 0;
 const hanCount = (text: string) => text.match(/\p{Script=Han}/gu)?.length ?? 0;
 /**
@@ -1131,9 +1150,19 @@ export function unverifiedNote(unverified: readonly string[]): string {
     .map((item) => [item, stripInternalRefs(item)] as const)
     .filter(([item, kept]) => kept.trim() && (!quote.test(item) || quote.test(kept)))
     .map(([, kept]) => kept);
-  return items.length
-    ? `未核实：以下内容未能在已读页面中逐字找到，请自行确认——${items.join('；')}`
-    : '';
+  // DEPLOY-48 复审 #1: a Chinese rendering of an English page's words gets its own line.
+  const translated = items
+    .filter((item) => item.endsWith(TRANSLATED_MARK))
+    .map((item) => item.slice(0, -TRANSLATED_MARK.length));
+  const plain = items.filter((item) => !item.endsWith(TRANSLATED_MARK));
+  return [
+    plain.length ? `未核实：以下内容未能在已读页面中逐字找到，请自行确认——${plain.join('；')}` : '',
+    translated.length
+      ? `译述，未逐字核对：以下内容是对英文页面的中文转述，页面上没有这些字，请自行确认——${translated.join('；')}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /** `url` appears on the page right after `title` (the same result entry). */
@@ -1424,14 +1453,35 @@ export function declaredAbsentFields(
  * 「评论数为 215」) is answered, whatever else the answer cannot confirm.
  */
 const CN_NUMERALS = '零一二两三四五六七八九十百千万亿';
+/** DEPLOY-48 复审 #4: a guessed number is no answer (「点赞数可能是 20」「推测为 20」). */
+const HEDGED_VALUE_RE = /可能|推测|猜测|估计|大概|或许|疑似|应该是|似乎/;
+/** DEPLOY-48 复审 #4: 「无法确认各项具体数值」 — every count asked for is unknown. */
+const ALL_COUNTS_UNSURE_RE =
+  /(?:无法|不能|未能|没法)(?:确认|确定|判断|对应|区分)(?:各项|各个|每项|每个|这些|它们的?)(?:具体)?(?:数值|数字|计数|数据)/;
 function unsureCount(prose: string, name: string): boolean {
   if (!name.endsWith('数')) return false;
   const stem = name.slice(0, -1);
   // PR #311 review: a value and an unsure phrase are about the counts in their own clause
   // (「点赞数为一万，评论数无法确认」「无法确认点赞数；评论数为215」); 「、」 joins the counts one phrase
-  // names. A value in Chinese numerals (「一万」) is a value too.
-  const value = new RegExp(`${stem}(?:数|量)?[^\\d、]{0,6}?[\\d${CN_NUMERALS}]`);
+  // names. A value in Chinese numerals (「一万」) is a value too — DEPLOY-48 复审 #5: only as a
+  // number (followed by a unit, a non-Chinese character or the clause end), not 「十分多」.
+  const value = new RegExp(
+    `${stem}(?:数|量)?([^\\d、]{0,6}?)(?:\\d|[${CN_NUMERALS}]+(?=[个次人条]|[^\\p{Script=Han}]|$))`,
+    'u',
+  );
   const clauses = prose.split(/[。！？!?\n，,；;]/);
-  if (clauses.some((clause) => value.test(clause))) return false;
-  return clauses.some((clause) => clause.includes(stem) && UNSURE_RE.test(clause));
+  let doubted = false;
+  for (const clause of clauses) {
+    const m = value.exec(clause);
+    // DEPLOY-48 复审 #4: a number guessed (「可能是 20」) or said to be unsure in its clause
+    // (「点赞数20无法确认」) is no value.
+    const unsure = UNSURE_RE.test(clause);
+    if (m && !unsure && !HEDGED_VALUE_RE.test(m[1] ?? '')) return false;
+    if (
+      (clause.includes(stem) && (unsure || (m && HEDGED_VALUE_RE.test(m[1] ?? '')))) ||
+      ALL_COUNTS_UNSURE_RE.test(clause)
+    )
+      doubted = true;
+  }
+  return doubted;
 }

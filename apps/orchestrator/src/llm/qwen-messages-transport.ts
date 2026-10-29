@@ -1,6 +1,7 @@
 import {
   TRANSPORT_RESPONSE_META,
   type TransportResponseMeta,
+  maskForensicBody,
   responseRequestId,
 } from './invalid-response-forensics.js';
 import type { AnthropicCompatibleClient } from './messages-adapter.js';
@@ -32,17 +33,21 @@ const isRetryableStatus = (status: number) =>
   status === 408 || status === 429 || (status >= 500 && status <= 599);
 
 export class QwenTransportError extends Error {
+  declare readonly responseMeta?: TransportResponseMeta;
   constructor(
     public readonly code: QwenTransportErrorCode,
     public readonly status: number | null = null,
     public readonly diagnostics: ProviderErrorDiagnostics = safeProviderDiagnostics({
       httpStatus: status,
     }),
-    /** FIX-47: a 2xx body that was not JSON, for the INVALID_RESPONSE record (never logged). */
-    public readonly responseMeta?: TransportResponseMeta,
+    /** FIX-47: a 2xx body that was not JSON, for the INVALID_RESPONSE record (masked). */
+    responseMeta?: TransportResponseMeta,
   ) {
     super(SAFE_ERROR_MESSAGES[code]);
     this.name = 'QwenTransportError';
+    // DEPLOY-48 复审 #3: never written out with the error (log serialisation walks own enumerable
+    // properties only).
+    Object.defineProperty(this, 'responseMeta', { value: responseMeta, enumerable: false });
   }
 }
 
@@ -164,7 +169,6 @@ export function createQwenMessagesTransport(input: {
                     httpStatus: response.status,
                     requestId: responseRequestId(response.headers),
                     elapsedMs: Date.now() - startedAt,
-                    text,
                   };
                   if (value && typeof value === 'object')
                     Object.defineProperty(value, TRANSPORT_RESPONSE_META, { value: meta });
@@ -185,7 +189,11 @@ export function createQwenMessagesTransport(input: {
                           httpStatus: response.status,
                           requestId,
                           elapsedMs: Date.now() - startedAt,
-                          text,
+                          // DEPLOY-48 复审 #3: masked where it is kept, not later.
+                          maskedText: maskForensicBody(text, [
+                            input.route.apiKey,
+                            input.route.workspaceId ?? '',
+                          ]),
                         },
                   );
                 }
