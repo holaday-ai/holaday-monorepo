@@ -324,3 +324,23 @@ describe('DEPLOY-48 复审 #1 #2 #4 #5 (fixtures fix-47/review1-fixtures/p311*.m
     expect(declaredAbsentFields('读取点赞数', '点赞数三千个，无法确认收藏。')).toEqual([]);
   });
 });
+
+describe('PR #311 review · a value fills only its own item', () => {
+  it("one video's count does not answer another's", () => {
+    expect(
+      declaredAbsentFields(
+        '读取两个视频的点赞数',
+        '第一个视频点赞数无法确认。第二个视频点赞数为215。',
+      ),
+    ).toEqual(['点赞数']);
+    expect(
+      declaredAbsentFields('读取两个视频的点赞数', '第一个视频点赞数为215。第二个视频点赞数为12。'),
+    ).toEqual([]);
+    expect(
+      declaredAbsentFields(
+        '读取两个视频的点赞数',
+        '第一个视频点赞数无法确认，后来读到第一个视频点赞数为215。',
+      ),
+    ).toEqual([]);
+  });
+});

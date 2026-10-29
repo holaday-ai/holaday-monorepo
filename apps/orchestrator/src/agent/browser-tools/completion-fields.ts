@@ -1469,19 +1469,24 @@ function unsureCount(prose: string, name: string): boolean {
     `${stem}(?:数|量)?([^\\d、]{0,6}?)(?:\\d|[${CN_NUMERALS}]+(?=[个次人条]|[^\\p{Script=Han}]|$))`,
     'u',
   );
-  const clauses = prose.split(/[。！？!?\n，,；;]/);
-  let doubted = false;
-  for (const clause of clauses) {
-    const m = value.exec(clause);
-    // DEPLOY-48 复审 #4: a number guessed (「可能是 20」) or said to be unsure in its clause
-    // (「点赞数20无法确认」) is no value.
-    const unsure = UNSURE_RE.test(clause);
-    if (m && !unsure && !HEDGED_VALUE_RE.test(m[1] ?? '')) return false;
-    if (
-      (clause.includes(stem) && (unsure || (m && HEDGED_VALUE_RE.test(m[1] ?? '')))) ||
-      ALL_COUNTS_UNSURE_RE.test(clause)
-    )
-      doubted = true;
+  // PR #311 review: a value fills only its own item's gap (「第一个视频点赞数无法确认。第二个视频点赞数为
+  // 215」 leaves the first one missing). The item is the last one named in the sentence so far.
+  const valued = new Set<string>();
+  const doubted = new Set<string>();
+  for (const sentence of prose.split(/[。！？!?\n]/)) {
+    let item = '';
+    for (const clause of sentence.split(/[，,；;]/)) {
+      const named = [...clause.matchAll(ITEM_RE)].at(-1)?.[0].replace(/\s+/g, '');
+      if (named) item = named;
+      const m = value.exec(clause);
+      // DEPLOY-48 复审 #4: a number guessed (「可能是 20」) or said to be unsure in its clause
+      // (「点赞数20无法确认」) is no value.
+      const unsure = UNSURE_RE.test(clause);
+      const hedged = !!m && HEDGED_VALUE_RE.test(m[1] ?? '');
+      if (m && !unsure && !hedged) valued.add(item);
+      if ((clause.includes(stem) && (unsure || hedged)) || ALL_COUNTS_UNSURE_RE.test(clause))
+        doubted.add(item);
+    }
   }
-  return doubted;
+  return [...doubted].some((item) => !valued.has(item));
 }
