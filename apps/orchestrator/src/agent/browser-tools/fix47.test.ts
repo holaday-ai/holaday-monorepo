@@ -361,3 +361,29 @@ describe('PR #311 review · what is said last about a count stands', () => {
     );
   });
 });
+
+describe('DEPLOY-48 local A/B reg-dy-2 · a failed load is not obtained', () => {
+  const intent =
+    '打开 https://www.douyin.com/video/7377304298310389027 读视频标题、作者，以及点赞数、评论数、收藏数、分享数（不播放）';
+  it('verbatim B answer: the scrape hands the page to the browser', () => {
+    const answer =
+      '页面加载失败，显示"服务器出现问题，请稍后重试"。\n\n抓取到的内容只有导航菜单，没有视频标题、作者、点赞数、评论数、收藏数、分享数等任何视频信息。\n\n需要重新抓取或等待服务器恢复后才能获取数据。\n\n来源：https://www.douyin.com/video/7377304298310389027';
+    expect(answerNotObtained(answer, intent)).toBe(true);
+    expect(answerNotObtained('抓取到的内容只有导航菜单，没有视频信息。', intent)).toBe(true);
+  });
+
+  it('reverse: a load that failed once and was read after a retry is answered', () => {
+    expect(
+      answerNotObtained(
+        '页面加载失败过一次，重试后读到：\n- 标题：柠檬巴巴露亚\n- 作者：小喵麻麻\n- 点赞数：4741\n- 评论数：215\n- 收藏数：4369\n- 分享数：1652',
+        intent,
+      ),
+    ).toBe(false);
+    expect(
+      answerNotObtained(
+        '- 标题：柠檬巴巴露亚\n- 作者：小喵麻麻\n- 点赞数：4741\n- 评论数：215\n- 收藏数：4369\n- 分享数：1652\n视频下方没有任何广告。',
+        intent,
+      ),
+    ).toBe(false);
+  });
+});
