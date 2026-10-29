@@ -940,6 +940,42 @@ async function videoMainRoot(frame: Frame, intent?: string) {
 /** FIX-45/46: the pause for a background POST nothing could place (a telemetry mis-pause). */
 export const UNPLACED_POST_MESSAGE =
   '页面发出了一个无法确认的后台请求，我先停下请你确认；当前任务尚未完成。';
+const WRITE_PAUSE_MESSAGE =
+  '检测到写请求，已暂停后续操作。第一次副作用无法事前阻止，请核对结果后确认如何继续。';
+
+/**
+ * DEPLOY-47 复审 #1: 「无法确认的后台请求」 only for a known log endpoint the checks refused — its
+ * trigger carries the keyed check's reason, or it goes to one of the anchored log hosts. Any other
+ * unknown POST (BestBuy addToCart, 小红书 note/like, /passport/login, /api/v1/subscribe…) may be a real
+ * write: it is told as one.
+ */
+export function telemetryTrigger(trigger: {
+  branch: string;
+  url: string;
+  bodyShape?: string;
+}): boolean {
+  if (trigger.branch !== 'unknown_post') return false;
+  if (/ check:/.test(trigger.bodyShape ?? '')) return true;
+  let url: URL;
+  try {
+    url = new URL(trigger.url);
+  } catch {
+    return false;
+  }
+  return (
+    ANCHORED_LOG_ENDPOINTS.some(
+      ([host, path]) => host.test(url.hostname) && url.pathname === path,
+    ) || KEYED_LOG_ENDPOINTS.some(([host, path]) => url.hostname === host && url.pathname === path)
+  );
+}
+
+/** The pause wording for a set of triggers: a telemetry mis-pause only when every one is one. */
+export function pauseMessage(
+  triggers: ReadonlyArray<{ branch: string; url: string; bodyShape?: string }>,
+  write = WRITE_PAUSE_MESSAGE,
+): string {
+  return triggers.length && triggers.every(telemetryTrigger) ? UNPLACED_POST_MESSAGE : write;
+}
 
 export class CloudObservation {
   private tabs = new Map<string, Page>();
@@ -1018,9 +1054,7 @@ export class CloudObservation {
           reason: 'unexpected_effect',
           // FIX-46 (Deploy-46 wall-xhs): the late path names an unplaced background POST the same
           // way the immediate one does (FIX-45); a real write keeps its wording.
-          message: this.pendingTriggers.every((t) => t.branch === 'unknown_post')
-            ? UNPLACED_POST_MESSAGE
-            : '检测到写请求，已暂停后续操作。第一次副作用无法事前阻止，请核对结果后确认如何继续。',
+          message: pauseMessage(this.pendingTriggers),
         }
       : undefined;
   }
@@ -2077,9 +2111,10 @@ export class CloudObservation {
             reason: 'unexpected_effect',
             // FIX-45 (Deploy-45 b-m01 / wall-xhs / BestBuy): a background POST nothing could place
             // is no write the page showed — say so, not 「写请求或交易状态变化」.
-            message: triggers.every((t) => t.branch === 'unknown_post')
-              ? UNPLACED_POST_MESSAGE
-              : '检测到写请求或交易状态变化，已暂停后续操作。第一次副作用无法事前阻止，请核对结果后确认如何继续。',
+            message: pauseMessage(
+              triggers,
+              '检测到写请求或交易状态变化，已暂停后续操作。第一次副作用无法事前阻止，请核对结果后确认如何继续。',
+            ),
           };
     if (opened.length) {
       const observations = [];
