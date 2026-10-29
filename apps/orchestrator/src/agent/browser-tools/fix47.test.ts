@@ -59,6 +59,21 @@ describe('FIX-47 #1 · the named counts all 「无法确认」 is not a complete
   });
 });
 
+describe('PR #311 review', () => {
+  it('a count in Chinese numerals is answered; the unsure phrase is about its own clause', () => {
+    expect(declaredAbsentFields('读取点赞数和评论数', '点赞数为一万，评论数无法确认。')).toEqual([
+      '评论数',
+    ]);
+  });
+
+  it('a labelled name on an English page is still checked as written', () => {
+    const page = `Author: 李四\n${'This article explains how search engines rank pages and why relevance matters for readers. '.repeat(4)}`;
+    expect(
+      assessCompletionFacts({ summary: '- 作者：张三', pages: [{ text: page }] }).unverified,
+    ).toEqual(['作者「张三」']);
+  });
+});
+
 describe('FIX-47 #2 · the outline read and its continuation point read as words', () => {
   it('Deploy-47 core-06, verbatim', () => {
     const out = humanizeToolMentions(

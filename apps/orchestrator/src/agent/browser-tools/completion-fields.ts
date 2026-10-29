@@ -1063,8 +1063,16 @@ export function assessCompletionFacts(input: {
     }
     // FIX-47 (Deploy-47 core-06 「导致大量“AI幻觉案例”」 on the English Wikipedia page): Chinese words
     // for a page with no Chinese text are a translation — no read page could show them verbatim.
-    // A Chinese page that lacks them still gets the note.
-    if (translatedWords(fact.value) && pages.every((page) => englishPage(page.text))) continue;
+    // A Chinese page that lacks them still gets the note. PR #311 review: only a listed or quoted
+    // term — a name, title or other labelled value (「作者：张三」) is still checked as written.
+    if (
+      fact.listItem &&
+      !NAME_FIELD.test(fact.name) &&
+      !TITLE_FIELD.test(fact.name) &&
+      translatedWords(fact.value) &&
+      pages.every((page) => englishPage(page.text))
+    )
+      continue;
     unverified.push(label);
   }
   // FIX-30: every named target answered (core-10), and recent means recent (n03).
@@ -1415,11 +1423,16 @@ export function declaredAbsentFields(
  * unknown and given no number anywhere, was not obtained. A count with its number (「点赞 4741」
  * 「评论数为 215」) is answered, whatever else the answer cannot confirm.
  */
+const CN_NUMERALS = '零一二两三四五六七八九十百千万亿';
 function unsureCount(prose: string, name: string): boolean {
   if (!name.endsWith('数')) return false;
   const stem = name.slice(0, -1);
-  if (new RegExp(`${stem}(?:数|量)?[^。！？!?\\n\\d，,、]{0,6}?\\d`).test(prose)) return false;
+  // PR #311 review: a value in Chinese numerals (「点赞数为一万」) is a value too.
+  if (new RegExp(`${stem}(?:数|量)?[^。！？!?\\n\\d，,、]{0,6}?[\\d${CN_NUMERALS}]`).test(prose))
+    return false;
+  // PR #311 review: the unsure phrase is about the counts in its own clause (「点赞数为一万，评论数
+  // 无法确认」 leaves 点赞数 answered); 「、」 joins the counts one phrase names.
   return prose
-    .split(/[。！？!?\n]/)
-    .some((sentence) => sentence.includes(stem) && UNSURE_RE.test(sentence));
+    .split(/[。！？!?\n，,；;]/)
+    .some((clause) => clause.includes(stem) && UNSURE_RE.test(clause));
 }
