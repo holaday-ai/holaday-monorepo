@@ -451,3 +451,21 @@ describe('PR #311 review (1ffc43e9)', () => {
     expect([...facts.unverified, ...facts.contradictions].join('\n')).toContain('1,299');
   });
 });
+
+describe('PR #311 review (d59b2a5f)', () => {
+  it('one item declared absent stays missing when another item has its count', () => {
+    expect(
+      declaredAbsentFields(
+        '读取两个视频的点赞数',
+        '第一个视频点赞数：页面未显示。第二个视频点赞数为215。',
+      ),
+    ).toEqual(['点赞数']);
+  });
+
+  it('reverse: absence of another field beside a count is not the count missing', () => {
+    expect(declaredAbsentFields('读取点赞数', '点赞数 20（评论数未显示）。')).toEqual([]);
+    expect(
+      declaredAbsentFields('读取点赞数', '点赞数：页面未显示。复核后读到点赞数为20。'),
+    ).toEqual([]);
+  });
+});

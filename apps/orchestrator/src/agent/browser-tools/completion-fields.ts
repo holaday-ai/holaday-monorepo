@@ -1462,6 +1462,9 @@ export function declaredAbsentFields(
  * 「评论数为 215」) is answered, whatever else the answer cannot confirm.
  */
 const CN_NUMERALS = '零一二两三四五六七八九十百千万亿';
+/** The absence wordings `declaredAbsentFields` reads elsewhere (「页面未显示」「未获取到」「没有读到」). */
+const ABSENT_WORDS =
+  '(?:(?:未|没有)(?:显示|提供|列出|给出|获取到?|读到|读取到|找到|展示)|没有读到)';
 const DERIVED_METRIC =
   '(?:增长|增幅|趋势|变化|走势|涨跌|历史|排名|占比|来源|原因|对比|分布|构成|口径|速度)';
 /** An unsure phrase that is about a metric derived from the count, not its value. */
@@ -1499,6 +1502,11 @@ function countState(prose: string, name: string): 'value' | 'doubt' | null {
   // sentence so far.
   // The count itself, not a word that starts like it (「回答者」「评论区」).
   const mention = new RegExp(`${stem}(?:数|量|(?=[、和与及或还]|[^\\p{Script=Han}]|$))`, 'u');
+  // PR #311 review: the count declared absent (「第一个视频点赞数：页面未显示」), right beside it.
+  const absent = new RegExp(
+    `${stem}(?:数|量)?[^，,；;。\\d]{0,8}?(?:页面(?:上|中)?)?${ABSENT_WORDS}|${ABSENT_WORDS}${stem}`,
+    'u',
+  );
   const state = new Map<string, 'value' | 'doubt'>();
   for (const sentence of prose.split(/[。！？!?\n]/)) {
     let item = '';
@@ -1514,7 +1522,11 @@ function countState(prose: string, name: string): 'value' | 'doubt' | null {
       // PR #311 review: the guess may open the clause too (「推测点赞数为20」).
       const hedged = !!m && HEDGED_VALUE_RE.test(`${clause.slice(0, m.index)}${m[1] ?? ''}`);
       // A value given in a clause that doubts it (「…分别为 20、2…（无法确认对应关系）」) is doubted too.
-      if (((mention.test(clause) || m) && (unsure || hedged)) || ALL_COUNTS_UNSURE_RE.test(clause))
+      if (
+        ((mention.test(clause) || m) && (unsure || hedged)) ||
+        absent.test(clause) ||
+        ALL_COUNTS_UNSURE_RE.test(clause)
+      )
         state.set(item, 'doubt');
       else if (m) state.set(item, 'value');
     }
