@@ -405,8 +405,92 @@ const XHS_APM_RECORD_MAX = 4096;
 /**
  * Two fixed tokens every record carries, removed before the action-word check — nothing else:
  * the browser's 「(KHTML, like Gecko)」 and the 300031 page's own `error_code=` parameter name.
+ * DEPLOY-49 复审 #1: inside `measurement_data` only the first is removed.
  */
 const XHS_APM_FIXED_TOKENS = /\(KHTML, like Gecko\)|(?<=[?&])error_code(?==)/g;
+const XHS_APM_UA_TOKEN = /\(KHTML, like Gecko\)/g;
+/** DEPLOY-49 复审 #1: the 8 kinds captured — any other name (「addToCart」) is not the SDK's. */
+const XHS_APM_MEASUREMENT_NAMES = new Set([
+  'anti_spam_ds_fail',
+  'webmns_error',
+  'httpRequestTiming',
+  'infra_sec_web_api_walify',
+  'pageView',
+  'sec_restrict_web',
+  'infraBrowserResourceTiming',
+  'renderPerf',
+]);
+/**
+ * DEPLOY-49 复审 #1: only `url` and `name` hold a URL. Two kinds carry more as captured, kept so
+ * the real records still pass: httpRequestTiming's `matchedPath` (a copy of its `url`) and
+ * renderPerf's key script and key API. Every URL is checked alike (see {@link xhsApmUrlCheck}).
+ */
+const XHS_APM_URL_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
+  renderPerf: new Set(['keyJsName', 'keyApiName']),
+};
+const XHS_APM_URL_RE = /\/\/[A-Za-z0-9-]+\.[A-Za-z]{2,}/;
+/** Hosts the SDK's resource and request URLs name (www / edith / as.xiaohongshu.com, xhscdn). */
+const XHS_APM_URL_HOST_RE = /^(?:[a-z0-9-]+\.)*(?:xiaohongshu\.com|xhscdn\.com)$/;
+/** Path words of a write endpoint (「…/feed/post」「…/order/create」), as whole path tokens. */
+const WRITE_PATH_WORDS = new Set([
+  'post',
+  'create',
+  'add',
+  'order',
+  'orders',
+  'cart',
+  'buy',
+  'purchase',
+  'pay',
+  'payment',
+  'checkout',
+  'submit',
+  'publish',
+  'delete',
+  'remove',
+  'update',
+  'edit',
+  'upload',
+  'send',
+  'reply',
+  'vote',
+  'subscribe',
+  'activate',
+  'logout',
+]);
+const WRITE_PATH_PART_RE = /cart|checkout|purchase/i;
+/** Encoded content in a timing value: base64 (20+ characters), JSON, a `k=v&k=v` body. */
+const XHS_APM_BASE64_RE = /^[A-Za-z0-9+/=]{20,}$/;
+/** An API path as captured (「/api/sec/v1/sbtsource」) is spelt in that alphabet too; still read. */
+const XHS_APM_PATH_RE = /^(?:\/[A-Za-z0-9_.-]{1,40}){2,}$/;
+const XHS_APM_PAIRS_RE = /[A-Za-z_][\w.-]{0,30}=[^&\s]*&[A-Za-z_][\w.-]{0,30}=/;
+const XHS_APM_PAIR_RE = /[A-Za-z_][\w.-]{0,30}\s*["']?\s*[=:]\s*["']?[A-Za-z0-9\u4e00-\u9fff]/;
+
+/** A value as sent, URL-decoded (twice at most) and base64-decoded when that is text. */
+function xhsApmReadings(value: string): string[] {
+  const readings = [value];
+  let current = value;
+  for (let i = 0; i < 2 && /%[0-9a-f]{2}/i.test(current); i += 1) {
+    try {
+      current = decodeURIComponent(current);
+      readings.push(current);
+    } catch {
+      break;
+    }
+  }
+  // Short ones too (「bGlrZQ==」 is 「like」); only a decoding that is text is read.
+  if (/^[A-Za-z0-9+/_-]{4,}={0,2}$/.test(value)) {
+    const bytes = Buffer.from(value, 'base64');
+    const printable = [...bytes].filter((b) => (b >= 0x20 && b < 0x7f) || b === 0x0a).length;
+    if (bytes.length && printable / bytes.length > 0.9) readings.push(bytes.toString('latin1'));
+  }
+  return readings;
+}
+
+/** No reading of the value carries an action word (DEPLOY-49 复审 #1: decoded ones too). */
+function xhsApmUnworded(value: string, tokens: RegExp): boolean {
+  return xhsApmReadings(value).every((text) => !PERSONAL_VALUE_RE.test(text.replace(tokens, '')));
+}
 
 /** The value check shared by both record forms: a string without action words, or a number. */
 function xhsApmPlainValue(value: unknown): boolean {
@@ -414,8 +498,62 @@ function xhsApmPlainValue(value: unknown): boolean {
   return (
     typeof value === 'string' &&
     value.length <= XHS_APM_VALUE_MAX &&
-    !PERSONAL_VALUE_RE.test(value.replace(XHS_APM_FIXED_TOKENS, ''))
+    xhsApmUnworded(value, XHS_APM_FIXED_TOKENS)
   );
+}
+
+/** Why a URL (or a path) in a timing is not one of the SDK's own reads — or null. */
+function xhsApmUrlCheck(value: string): string | null {
+  const network = value.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(value);
+  let url: URL;
+  try {
+    url = new URL(value.startsWith('//') ? `https:${value}` : value, 'https://www.xiaohongshu.com');
+  } catch {
+    return 'url';
+  }
+  if (
+    network &&
+    (!/^https?:$/.test(url.protocol) ||
+      url.username ||
+      url.password ||
+      !XHS_APM_URL_HOST_RE.test(url.hostname))
+  )
+    return 'url-host';
+  // The SDK's reads carry no query; a query is where a write's fields would go.
+  if (url.search || url.hash || /[?#]/.test(value)) return 'url-query';
+  const tokens = url.pathname
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/);
+  if (tokens.some((token) => WRITE_PATH_WORDS.has(token)) || WRITE_PATH_PART_RE.test(url.pathname))
+    return 'url-write';
+  return null;
+}
+
+/** Why one `measurement_data` string is not a plain timing value — or null when it is. */
+function xhsApmDataStringCheck(
+  kind: string,
+  key: string,
+  value: string,
+  data: object,
+): string | null {
+  if (value.length > XHS_APM_VALUE_MAX) return 'value';
+  if (/^\s*[{[]/.test(value)) return 'json';
+  if (XHS_APM_BASE64_RE.test(value) && !XHS_APM_PATH_RE.test(value)) return 'base64';
+  const readings = xhsApmReadings(value);
+  if (XHS_APM_PAIRS_RE.test(value) || readings.slice(1).some((text) => XHS_APM_PAIR_RE.test(text)))
+    return 'pairs';
+  if (!xhsApmUnworded(value, XHS_APM_UA_TOKEN)) return 'value';
+  if (XHS_APM_URL_RE.test(value)) {
+    const urlKey =
+      key === 'url' ||
+      key === 'name' ||
+      (key === 'matchedPath' && value === (data as Record<string, unknown>).url) ||
+      XHS_APM_URL_KEYS[kind]?.has(key);
+    if (!urlKey || !/^(?:https?:)?\/\/\S+$/.test(value)) return 'url-key';
+    return xhsApmUrlCheck(value);
+  }
+  return /^\/[A-Za-z0-9]/.test(value) ? xhsApmUrlCheck(value) : null;
 }
 
 /** Why one measurement record is not the SDK's — or null when it is. */
@@ -430,15 +568,16 @@ function xhsApmMeasurementCheck(body: Record<string, unknown>): string | null {
   const personal = extra.find((key) => PERSONAL_KEY_RE.test(key));
   if (personal) return `personal-key:${personal}`;
   const name = body.measurement_name;
-  if (typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(name))
-    return 'measurement_name';
-  // The visitor id is opaque hex (empty before the SDK sets it), never a phone or a name.
+  if (typeof name !== 'string' || !XHS_APM_MEASUREMENT_NAMES.has(name)) return 'measurement_name';
+  // The visitor id is opaque hex as captured (32, empty before the SDK sets it) — never a phone.
   const userId = body.context_userId;
-  if (
-    userId !== undefined &&
-    !(typeof userId === 'string' && /^(?:[0-9a-f]{16,64})?$/.test(userId))
-  )
+  if (userId !== undefined && !(typeof userId === 'string' && /^(?:[0-9a-f]{32})?$/.test(userId)))
     return 'value:context_userId';
+  // The custom dimensions are short tags (「login」, empty) — not text.
+  const tag = ['custom_c1', 'custom_c2', 'c1', 'c2'].find(
+    (key) => key in body && !(typeof body[key] === 'string' && /^[\w.-]{0,32}$/.test(body[key])),
+  );
+  if (tag) return `value:${tag}`;
   const data = body.measurement_data;
   if (!data || typeof data !== 'object' || Array.isArray(data))
     return 'measurement_data:not-object';
@@ -451,8 +590,11 @@ function xhsApmMeasurementCheck(body: Record<string, unknown>): string | null {
   );
   if (badKey) return `measurement_data:key:${badKey[0].slice(0, 40)}`;
   // One level only: a nested object or array in the timings is something else.
-  const badField = fields.find(([, value]) => !xhsApmPlainValue(value));
-  if (badField) return `measurement_data:value:${badField[0]}`;
+  for (const [key, value] of fields) {
+    if (typeof value === 'number' && Number.isFinite(value)) continue;
+    const why = typeof value === 'string' ? xhsApmDataStringCheck(name, key, value, data) : 'value';
+    if (why) return `measurement_data:${why}:${key}`;
+  }
   const bad = Object.entries(body).find(
     ([key, value]) => key !== 'measurement_data' && !xhsApmPlainValue(value),
   );

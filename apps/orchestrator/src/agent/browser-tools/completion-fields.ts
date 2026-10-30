@@ -103,11 +103,15 @@ const clean = (value: string) =>
 /** A currency amount as it appears on a page (S$8.90, SGD 11.46, ¥99, $14.99). */
 const PRICE_SHAPE_RE = /(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?/gi;
 /** A price field's name (「价格」「原价」「price」) — PR #312 review: not 「评价数」 or 「价值」. */
-const PRICE_FIELD_RE = /价格|[原现售单定标划市均总报]价|^价$|price/i;
+const PRICE_FIELD_RE = /价格|[原现售单定标划市均总报]价|划线价|折后|到手|券后|^价$|price/i;
 /** A number said in yuan, or named a price: 「99 元」「原价 99」「价格：1,299」. */
 /** PR #312 review: the price word stays with the amount (「原价 99」), so 「299 reviews」 is no match. */
-const CN_PRICE_RE =
-  /(?:[原现售定标划市]?价(?:格)?\s*[:：为是]?\s*)?\d[\d,]*(?:\.\d+)?\s*元|[原现售定标划市]?价(?:格)?\s*[:：为是]?\s*\d[\d,]*(?:\.\d+)?/g;
+/** DEPLOY-49 复审 #1: 「划线价 / 折后 / 到手 / 券后」 name a price too. */
+const CN_PRICE_LABEL = '(?:(?:划线|[原现售定标划市])?价(?:格)?|(?:折后|到手|券后)价?)';
+const CN_PRICE_RE = new RegExp(
+  `(?:${CN_PRICE_LABEL}\\s*[:：为是]?\\s*)?\\d[\\d,]*(?:\\.\\d+)?\\s*元|${CN_PRICE_LABEL}\\s*[:：为是]?\\s*\\d[\\d,]*(?:\\.\\d+)?`,
+  'g',
+);
 /**
  * FIX-48 #3: the prices a bracket note states — a currency sign or code, or 「元 / 价」 — each as
  * written; a number with neither (「约 2 天送达」「库存 5 件」) is none.
@@ -124,7 +128,7 @@ function notePrices(piece: string): string[] {
  * the label stays with the amount, so another number on the page is no match.
  */
 const EN_PRICE_RE =
-  /\b(?:(?:original|list|regular|retail|sale|current|typical)\s+)?price\s*[:：]?\s*\d[\d,]*(?:\.\d+)?|\b(?:was|rrp|msrp)\s*[:：]?\s*\d[\d,]*(?:\.\d+)?/gi;
+  /\b(?:(?:original|list|regular|retail|sale|current|typical)\s+)?price\s*[:：]?\s*\d[\d,]*(?:\.\d+)?|\b(?:was|rrp|msrp|regular|sale)\s*[:：]?\s*\d[\d,]*(?:\.\d+)?/gi;
 
 /** Appended to a read whose snapshot was cut at its size budget. */
 export const SNAPSHOT_TRUNCATED = '[快照截断：以下内容未读到]';
@@ -1508,7 +1512,8 @@ const DERIVED_DOUBT_RE = new RegExp(
  * an approximate one (「大约 2 万」「约 2 万」 before it, 「一万以上」「2 万左右」 after it).
  */
 const HEDGED_VALUE_RE = /可能|推测|猜测|估计|大概|大约|或许|疑似|应该是|似乎|约\s*$/;
-const APPROX_AFTER_RE = /^[\d.,万千百亿wWkK]*\s*[个次人条]?\s*(?:以上|左右|上下)/;
+/** DEPLOY-49 复审 #1: the unit may stand apart from the number (「2 万左右」「3 k 以上」). */
+const APPROX_AFTER_RE = /^[\d.,]*\s*[万千百亿wWkK]?\s*[个次人条]?\s*(?:以上|左右|上下)/;
 /**
  * DEPLOY-48 复审 #4: 「无法确认各项具体数值」 — every count asked for is unknown. FIX-48 #3: in either
  * order and the usual variants (「各项具体数值无法确认」「无法确认各项的具体数值」「以上数值都无法确认」

@@ -39,10 +39,10 @@ describe('FIX-48 #1 · the apm-fe measurement record is a known shape', () => {
   it('evidence: every captured post on the login error page still pauses — on 「login」 in its values', () => {
     for (const post of CAPTURE.posts) {
       const why = check(post);
-      expect(why).toMatch(/value:|measurement_data:value:/);
+      expect(why).toMatch(/^(?:record\d+:)?(?:value:|measurement_data:)/);
       expect(anchoredLogPost(XHS, 'POST', JSON.stringify(post))).toBe(false);
     }
-    // Only the action-word check refuses them now, not the shape (FIX-45: `key:measurement_name…`).
+    // The value checks refuse them now, not the shape (FIX-45: `key:measurement_name…`).
     expect(check([byName('pageView')])).toBe('record0:value:context_matchedPath');
   });
 
@@ -57,7 +57,10 @@ describe('FIX-48 #1 · the apm-fe measurement record is a known shape', () => {
   it('reverse: the real sec_restrict_web record names the login redirect in `extra` — still pauses', () => {
     const r = on404(byName('sec_restrict_web'));
     delete r.c1;
-    expect(check(r)).toBe('measurement_data:value:extra');
+    // DEPLOY-49 复审 #1: its page URL is in a key that holds no URL; `extra` is a JSON string.
+    expect(check(r)).toBe('measurement_data:url-key:fromPath');
+    delete r.measurement_data.fromPath;
+    expect(check(r)).toBe('measurement_data:json:extra');
   });
 
   it('a batch of real records from the 404 page passes, record by record', () => {
@@ -77,8 +80,9 @@ describe('FIX-48 #1 · the apm-fe measurement record is a known shape', () => {
       'a timing of a like request',
       (r) => {
         r.measurement_data.url = '//edith.xiaohongshu.com/api/sns/web/v1/note/like';
+        r.measurement_data.matchedPath = r.measurement_data.url;
       },
-      /^measurement_data:value:url$/,
+      /^measurement_data:value:matchedPath$/,
     ],
     [
       'a follow in the page route',
@@ -92,7 +96,7 @@ describe('FIX-48 #1 · the apm-fe measurement record is a known shape', () => {
       (r) => {
         r.measurement_name = 'note_collect';
       },
-      /^value:measurement_name$/,
+      /^measurement_name$/,
     ],
     [
       'a nested object in the timings',
@@ -147,8 +151,9 @@ describe('FIX-48 #1 · the apm-fe measurement record is a known shape', () => {
       'a value over 1 KB',
       (r) => {
         r.measurement_data.url = `//as.xiaohongshu.com/${'x'.repeat(1100)}`;
+        r.measurement_data.matchedPath = r.measurement_data.url;
       },
-      /^measurement_data:value:url$/,
+      /^measurement_data:value:matchedPath$/,
     ],
     [
       'a record over 4 KB',
@@ -337,5 +342,171 @@ describe('FIX-48 #3 · 协调方复审 PR #311 的小问题', () => {
       pages: [{ text: listing }],
     });
     expect([...made.contradictions, unverifiedNote(made.unverified)].join('\n')).toContain('S$30');
+  });
+});
+
+describe('DEPLOY-49 复审 #1 · measurement values carry no encoded write (apm312.mjs)', () => {
+  /** The coordinator's base record: an httpRequestTiming of the home feed. */
+  const base = {
+    clientTime: 1793520000000,
+    context_sdkSessionId: 'a1b2',
+    context_platform: 'PC',
+    context_route: '/explore',
+    context_userAgent: 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130',
+    context_userId: '',
+    measurement_name: 'httpRequestTiming',
+    measurement_data: {
+      url: 'https://edith.xiaohongshu.com/api/sns/web/v1/homefeed',
+      duration: 123,
+      encodedBodySize: 2048,
+      status: 200,
+    },
+  };
+  const r = (o: Record<string, unknown> = {}, d: Record<string, unknown> = {}) =>
+    JSON.stringify([{ ...base, ...o, measurement_data: { ...base.measurement_data, ...d } }]);
+  const xhs = (body: string) => keyedLogCheck(XHS, body);
+
+  it('the real-looking record passes', () => {
+    expect(xhs(r())).toBeNull();
+    expect(anchoredLogPost(XHS, 'POST', r())).toBe(true);
+  });
+
+  it.each<[string, string, string]>([
+    [
+      'a JSON string with an action',
+      r({}, { payload: '{"action":"add","item":"1"}' }),
+      'json:payload',
+    ],
+    [
+      'a JSON string with no action word',
+      r({}, { payload: '{"op":"post","target":"6929ba55","text":"hi"}' }),
+      'json:payload',
+    ],
+    [
+      'base64 of note_id=1&action=like',
+      r({}, { blob: Buffer.from('note_id=1&action=like').toString('base64') }),
+      'base64:blob',
+    ],
+    ['a URL-encoded body', r({}, { body: 'item_id%3D1%26type%3Dpost' }), 'pairs:body'],
+    [
+      'a URL to the collect endpoint',
+      r({}, { url: 'https://edith.xiaohongshu.com/api/sns/web/v1/note/collect' }),
+      'value:url',
+    ],
+    [
+      'a URL to …/feed/post',
+      r({}, { url: 'https://edith.xiaohongshu.com/api/sns/web/v1/feed/post' }),
+      'url-write:url',
+    ],
+    [
+      'a URL to an order',
+      r({}, { url: 'https://www.xiaohongshu.com/api/store/order/create' }),
+      'url-write:url',
+    ],
+    ['a URL carrying phone digits', r({}, { url: 'https://x.com/?m=13800138000' }), 'url-host:url'],
+    [
+      'an `?error_code=` query in a URL',
+      r({}, { url: 'https://x.com/p?error_code=1' }),
+      'value:url',
+    ],
+    ['`error_code=` hiding a `code=`', r({}, { q: 'a&error_code=1&code=9' }), 'pairs:q'],
+    ['a nested object', r({}, { x: { action: 'like' } }), 'value:x'],
+  ])('reverse: %s still pauses', (_label, body, why) => {
+    expect(xhs(body)).toBe(`record0:measurement_data:${why}`);
+    expect(anchoredLogPost(XHS, 'POST', body)).toBe(false);
+  });
+
+  it.each<[string, string, string]>([
+    ['an arbitrary measurement name', r({ measurement_name: 'addToCart' }), 'measurement_name'],
+    [
+      '「like」 after the KHTML token',
+      r({ context_userAgent: '(KHTML, like Gecko) follow' }),
+      'value:context_userAgent',
+    ],
+    ['a login route', r({ context_route: '/login' }), 'value:context_route'],
+    ['a phone as the visitor id', r({ context_userId: '13800138000' }), 'value:context_userId'],
+    ['a 16-hex visitor id', r({ context_userId: '0123456789abcdef' }), 'value:context_userId'],
+    ['text in a custom dimension', r({ c1: 'post body text' }), 'value:c1'],
+  ])('reverse: %s still pauses', (_label, body, why) => {
+    expect(xhs(body)).toBe(`record0:${why}`);
+  });
+
+  it('a decoded reading is read too: base64 or URL-encoded action words, short pairs', () => {
+    expect(xhs(r({}, { t: Buffer.from('like').toString('base64') }))).toBe(
+      'record0:measurement_data:value:t',
+    );
+    expect(xhs(r({}, { t: '%6C%69%6B%65' }))).toBe('record0:measurement_data:value:t');
+    expect(xhs(r({}, { t: 'a%3D1' }))).toBe('record0:measurement_data:pairs:t');
+  });
+
+  it('only `url` / `name` hold a URL, and only the SDK’s hosts, no query', () => {
+    const feed = base.measurement_data.url;
+    expect(xhs(r({}, { source: feed }))).toBe('record0:measurement_data:url-key:source');
+    expect(xhs(r({}, { name: feed }))).toBeNull();
+    expect(xhs(r({}, { matchedPath: feed }))).toBeNull();
+    expect(xhs(r({}, { matchedPath: '//edith.xiaohongshu.com/api/sns/web/v1/feed' }))).toBe(
+      'record0:measurement_data:url-key:matchedPath',
+    );
+    expect(xhs(r({}, { url: `${feed}?num=1` }))).toBe('record0:measurement_data:url-query:url');
+    expect(xhs(r({}, { url: 'https://xiaohongshu.com.evil.io/a' }))).toBe(
+      'record0:measurement_data:url-host:url',
+    );
+    expect(xhs(r({}, { api_name: '/api/sns/web/v1/feed/post' }))).toBe(
+      'record0:measurement_data:url-write:api_name',
+    );
+  });
+
+  it.each(['httpRequestTiming', 'infra_sec_web_api_walify', 'pageView', 'renderPerf'])(
+    'the real %s record from the 404 page still passes',
+    (name) => {
+      expect(check([on404(byName(name))])).toBeNull();
+    },
+  );
+
+  it('the real resource timings from the 404 page still pass — as a batch too', () => {
+    const timings = records
+      .filter((rec) => rec.measurement_name === 'infraBrowserResourceTiming')
+      .map(on404)
+      .filter((rec) => !/login/.test(String(rec.measurement_data.name)));
+    expect(timings.length).toBeGreaterThan(0);
+    expect(check(timings)).toBeNull();
+  });
+});
+
+describe('DEPLOY-49 复审 #1 · 约数和价格标签 (p312.mjs)', () => {
+  const DY =
+    '打开 https://www.douyin.com/video/1 读视频标题、作者，以及点赞数、评论数、收藏数、分享数';
+
+  it.each([
+    '点赞 2 万左右。',
+    '点赞 3 k 以上。',
+    '点赞 2万 上下。',
+    '点赞约 2 万。',
+    '点赞 20000 上下。',
+  ])('%s is a guess', (text) => {
+    expect(declaredAbsentFields(DY, text)).toEqual(['点赞数']);
+  });
+
+  it('reverse: plain counts are answers', () => {
+    expect(declaredAbsentFields(DY, '点赞 2 万，评论 215，收藏 4369，分享 1652。')).toEqual([]);
+  });
+
+  const P = '- link "Anker Cable"\n- text: SGD 12.81\n- text: S$30';
+  const notes = (summary: string) =>
+    assessCompletionFacts({ summary, pages: [{ text: P }] }).unverified;
+
+  it.each([
+    ['划线价 99', '划线价 99'],
+    ['折后 9.9', '折后 9.9'],
+    ['到手价 8', '到手价 8'],
+    ['券后 9.9 元', '券后 9.9 元'],
+    ['regular 99', 'regular 99'],
+    ['sale 9.9', 'sale 9.9'],
+  ])('a bracket 「%s」 is checked as a price', (note, shown) => {
+    expect(notes(`1. Anker Cable — SGD 12.81（${note}）`)).toEqual([`价格（括注）「${shown}」`]);
+  });
+
+  it('reverse: a delivery note is no price', () => {
+    expect(notes('1. Anker Cable — SGD 12.81（约 2 天送达）')).toEqual([]);
   });
 });
