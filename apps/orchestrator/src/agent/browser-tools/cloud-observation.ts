@@ -428,7 +428,9 @@ const XHS_APM_MEASUREMENT_NAMES = new Set([
 const XHS_APM_URL_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   renderPerf: new Set(['keyJsName', 'keyApiName']),
 };
-const XHS_APM_URL_RE = /\/\/[A-Za-z0-9-]+\.[A-Za-z]{2,}/;
+/** A URL in a value: `//host.tld` anywhere, or a value that starts with `host.tld/` (no scheme). */
+const XHS_APM_URL_RE =
+  /\/\/[A-Za-z0-9-]+\.[A-Za-z]{2,}|^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?::\d+)?\//;
 /** Hosts the SDK's resource and request URLs name (www / edith / as.xiaohongshu.com, xhscdn). */
 const XHS_APM_URL_HOST_RE = /^(?:[a-z0-9-]+\.)*(?:xiaohongshu\.com|xhscdn\.com)$/;
 /** Path words of a write endpoint (「…/feed/post」「…/order/create」), as whole path tokens. */
@@ -502,17 +504,33 @@ function xhsApmPlainValue(value: unknown): boolean {
   );
 }
 
+/** A path that names a write endpoint (「…/feed/post」「…/order/create」), by whole tokens. */
+function xhsApmWritePath(path: string): boolean {
+  const tokens = path
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/);
+  return tokens.some((token) => WRITE_PATH_WORDS.has(token)) || WRITE_PATH_PART_RE.test(path);
+}
+
 /** Why a URL (or a path) in a timing is not one of the SDK's own reads — or null. */
 function xhsApmUrlCheck(value: string): string | null {
-  const network = value.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(value);
+  const path = value.startsWith('/') && !value.startsWith('//');
+  const href = /^[a-z][a-z0-9+.-]*:/i.test(value)
+    ? value
+    : value.startsWith('//')
+      ? `https:${value}`
+      : path
+        ? value
+        : `https://${value}`;
   let url: URL;
   try {
-    url = new URL(value.startsWith('//') ? `https:${value}` : value, 'https://www.xiaohongshu.com');
+    url = new URL(href, 'https://www.xiaohongshu.com');
   } catch {
     return 'url';
   }
   if (
-    network &&
+    !path &&
     (!/^https?:$/.test(url.protocol) ||
       url.username ||
       url.password ||
@@ -521,13 +539,7 @@ function xhsApmUrlCheck(value: string): string | null {
     return 'url-host';
   // The SDK's reads carry no query; a query is where a write's fields would go.
   if (url.search || url.hash || /[?#]/.test(value)) return 'url-query';
-  const tokens = url.pathname
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/);
-  if (tokens.some((token) => WRITE_PATH_WORDS.has(token)) || WRITE_PATH_PART_RE.test(url.pathname))
-    return 'url-write';
-  return null;
+  return xhsApmWritePath(url.pathname) ? 'url-write' : null;
 }
 
 /** Why one `measurement_data` string is not a plain timing value — or null when it is. */
@@ -550,10 +562,11 @@ function xhsApmDataStringCheck(
       key === 'name' ||
       (key === 'matchedPath' && value === (data as Record<string, unknown>).url) ||
       XHS_APM_URL_KEYS[kind]?.has(key);
-    if (!urlKey || !/^(?:https?:)?\/\/\S+$/.test(value)) return 'url-key';
+    if (!urlKey || /\s/.test(value)) return 'url-key';
     return xhsApmUrlCheck(value);
   }
-  return /^\/[A-Za-z0-9]/.test(value) ? xhsApmUrlCheck(value) : null;
+  if (/^\/[A-Za-z0-9]/.test(value)) return xhsApmUrlCheck(value);
+  return value.includes('/') && xhsApmWritePath(value) ? 'url-write' : null;
 }
 
 /** Why one measurement record is not the SDK's — or null when it is. */

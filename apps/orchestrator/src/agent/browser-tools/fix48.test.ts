@@ -454,6 +454,18 @@ describe('DEPLOY-49 复审 #1 · measurement values carry no encoded write (apm3
     expect(xhs(r({}, { api_name: '/api/sns/web/v1/feed/post' }))).toBe(
       'record0:measurement_data:url-write:api_name',
     );
+    // A URL without a scheme or `//` is still a URL.
+    expect(xhs(r({}, { url: 'edith.xiaohongshu.com/api/sns/web/v1/feed/post' }))).toBe(
+      'record0:measurement_data:url-write:url',
+    );
+    expect(xhs(r({}, { source: 'edith.xiaohongshu.com/api/sns/web/v1/homefeed' }))).toBe(
+      'record0:measurement_data:url-key:source',
+    );
+    expect(xhs(r({}, { url: 'evil.io/a' }))).toBe('record0:measurement_data:url-host:url');
+    // A path in any other value is read for write words too.
+    expect(xhs(r({}, { api_name: 'sns_web_v1/feed/post' }))).toBe(
+      'record0:measurement_data:url-write:api_name',
+    );
   });
 
   it.each(['httpRequestTiming', 'infra_sec_web_api_walify', 'pageView', 'renderPerf'])(
