@@ -24,13 +24,14 @@ const ROUTE_404 =
  * Deploy-48 record had no custom_c1 — it failed on `key:measurement_name+measurement_data` only).
  */
 const on404 = (record: Rec): Rec => {
-  const { custom_c1: _c1, ...rest } = {
+  const out: Rec = {
     ...record,
     context_matchedPath: '/404',
     context_route: ROUTE_404,
     context_artifactName: 'fe-404',
   };
-  return rest as Rec;
+  delete out.custom_c1;
+  return out;
 };
 const check = (body: unknown) => keyedLogCheck(XHS, JSON.stringify(body));
 
