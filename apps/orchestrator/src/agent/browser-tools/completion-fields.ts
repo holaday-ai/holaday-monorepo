@@ -1415,24 +1415,46 @@ export function askedFields(intent: string): string[] {
 }
 
 /** FIX-49 #3: no value — a missing marker or a guess (「作者：页面未显示」「标题为推测的…」). */
-const NO_VALUE = '(?:页面|未|没有|无法|不详|暂无|未知|不确定|推测|可能|大概|疑似)';
+const NO_VALUE_RE =
+  /^(?:页面(?:上|中)?(?:未|没有)|未(?:显示|获取|读|找到|知|提供|加载|能|列出)|没有|无法|不详|暂无|未知|不确定|推测|可能|大概|疑似|待定|待确认|无$|空$|n\/a$|null$|none$)/i;
+/** PR #313 review: a placeholder is no value (「—」「…」「？」「/」). */
+const PLACEHOLDER_RE = /^[\s—–\-…?？/\\.。·]*$/;
+/** The quotes and emphasis around a value (「「未知」」 is 未知). */
+const VALUE_EDGES_RE = /^[\s*_`「『“"《'‘]+|[\s*_`」』”"》'’]+$/g;
+/**
+ * PR #313 review: values said of another item (「推荐视频标题：A，作者：B」) are not the asked one's —
+ * each sentence is read only up to the first 推荐 / 相关 / 其他 / 其余 / 另一 / 别的.
+ */
+const OTHER_ITEM_RE = /推荐|相关|其他|其余|另一|别的/;
 
 /**
  * FIX-49 #3 (DEPLOY-49 复审): every field the request names has a value in the answer — a count
  * with its number (as `declaredAbsentFields` reads it), any other field with a value after
  * 「：」「为」「是」. Then an aside 「视频本身没有加载出来（不影响读取上述信息）」 is not 没拿到. With no
- * named field, nothing tells that, so this is false.
+ * named field, nothing tells that, so this is false. A missing marker or a placeholder, quoted or
+ * not, is no value; nor is a value given for another item.
  */
 export function everyAskedFieldGiven(intent: string, summary: string): boolean {
   const asked = askedFields(intent);
   if (!asked.length || declaredAbsentFields(intent, summary).length) return false;
-  const prose = unescapeLiteralBreaks(summary);
+  const own = unescapeLiteralBreaks(summary)
+    .split(/(?<=[。！？!?\n])/)
+    .map((sentence) => {
+      const other = sentence.search(OTHER_ITEM_RE);
+      return other < 0 ? sentence : `${sentence.slice(0, other)}\n`;
+    })
+    .join('');
   return asked.every((name) => {
-    const count = countState(prose, name);
+    const count = countState(own, name);
     if (count) return count === 'value';
-    return new RegExp(
-      `${name}[^：:\\n为是]{0,4}?(?:[:：]|为|是)\\s*[*_\`「“"《]*(?!${NO_VALUE})[^\\s，,。；;、*_\`」”》]`,
-    ).test(prose);
+    return [
+      ...own.matchAll(
+        new RegExp(`${name}[^：:\\n为是]{0,4}?(?:[:：]|为|是)([^，,。；;、\\n]*)`, 'g'),
+      ),
+    ].some((m) => {
+      const value = m[1]!.replace(VALUE_EDGES_RE, '');
+      return !!value && !NO_VALUE_RE.test(value) && !PLACEHOLDER_RE.test(value);
+    });
   });
 }
 

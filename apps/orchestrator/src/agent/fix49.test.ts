@@ -144,6 +144,37 @@ describe('FIX-49 #3 · everyAskedFieldGiven', () => {
   });
 });
 
+describe('PR #313 review · values of another item, quoted markers and placeholders give nothing', () => {
+  const TA = '读视频标题和作者';
+
+  it('another item’s fields do not stand for the asked one (comment 4425441566)', () => {
+    expect(answerNotObtained('目标视频没有加载出来。推荐视频标题：A，作者：B。', TA)).toBe(true);
+    expect(answerNotObtained('目标视频没有加载出来。相关视频的标题为A，作者为B。', TA)).toBe(true);
+    expect(
+      everyAskedFieldGiven(DY, `${READ.replace('- 点赞数：4741\n', '')}\n推荐视频点赞数：100`),
+    ).toBe(false);
+    // The asked item's own values before a 推荐 aside still count.
+    expect(answerNotObtained('标题：A，作者：B。页面右侧推荐视频没有加载出来。', TA)).toBe(false);
+    expect(everyAskedFieldGiven(TA, '标题：A，作者：B，其他推荐视频没加载。')).toBe(true);
+  });
+
+  it.each([
+    '目标视频没有加载出来。标题：「未知」，作者：「未知」。',
+    '目标视频没有加载出来。标题：“未显示”，作者：“未显示”。',
+    '目标视频没有加载出来。标题：—，作者：—。',
+    '目标视频没有加载出来。标题：…，作者：？',
+    '目标视频没有加载出来。标题：N/A，作者：无。',
+    '目标视频没有加载出来。标题：**页面未显示**，作者：「页面上未显示」。',
+  ])('「%s」 is 没拿到 (comment 4425441575)', (answer) => {
+    expect(answerNotObtained(answer, TA)).toBe(true);
+  });
+
+  it('a quoted real value is a value; a title that starts with 未 / 无 is not a marker', () => {
+    expect(everyAskedFieldGiven(TA, '标题：「柠檬巴巴露亚」，作者：“小喵麻麻”。')).toBe(true);
+    expect(everyAskedFieldGiven(TA, '标题：《未来简史》读书笔记，作者：无名氏。')).toBe(true);
+  });
+});
+
 describe('FIX-49 #6 · amazon location toaster dismiss (Deploy-49 b-p02)', () => {
   /** The online trigger: `https://www.amazon.com/portal-migration/hz/glow/dismiss-toaster`, json{toasterType,actionSource} 58B. */
   const PATH = '/portal-migration/hz/glow/dismiss-toaster';
