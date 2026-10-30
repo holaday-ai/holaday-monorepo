@@ -237,6 +237,9 @@ describe('FIX-48 #3 · 协调方复审 PR #311 的小问题', () => {
     '点赞20，评论2，收藏10，分享97。以上数据无法确认是否实时',
     '点赞20，评论2，收藏10，分享97，以上数据无法确认其实时性',
     '点赞20，评论2，收藏10，分享97。无法确认这些数据的增长趋势',
+    // PR #312 review: a doubt about another attribute of the counts.
+    '点赞20，评论2，收藏10，分享97，各项数据的采集时间无法确认',
+    '点赞20，评论2，收藏10，分享97，无法确认各项数据的采集时间',
   ])('reverse: 「%s」 doubts something else — the counts stand', (answer) => {
     expect(declaredAbsentFields(DY, `标题：A。作者：B。${answer}。`)).toEqual([]);
   });
@@ -282,6 +285,23 @@ describe('FIX-48 #3 · 协调方复审 PR #311 的小问题', () => {
   ])('reverse: 「%s」 — a price in the note is still checked', (summary, price) => {
     expect(flagged(summary)).toContain(price);
     expect(flagged(summary)).not.toMatch(/2 天/);
+  });
+
+  it('PR #312 review: an unsigned original price keeps its price word — 「299 reviews」 is no match', () => {
+    const pages = [{ text: `${listing}\n- text: 299 reviews` }];
+    const facts = assessCompletionFacts({
+      summary: '1. Anker Cable — SGD 12.81（原价 99）',
+      pages,
+    });
+    expect([...facts.contradictions, unverifiedNote(facts.unverified)].join('\n')).toContain(
+      '原价 99',
+    );
+    // Reverse: the page shows it — verified.
+    const shown = assessCompletionFacts({
+      summary: '1. Anker Cable — SGD 12.81（原价 99）',
+      pages: [{ text: `${listing}\n- text: 原价 99` }],
+    });
+    expect(shown.unverified).toEqual([]);
   });
 
   it('a price field with a delivery note: only the price is checked', () => {

@@ -105,8 +105,9 @@ const PRICE_SHAPE_RE = /(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*
 /** A price field's name (「价格」「原价」「price」). */
 const PRICE_FIELD_RE = /价|price/i;
 /** A number said in yuan, or named a price: 「99 元」「原价 99」「价格：1,299」. */
+/** PR #312 review: the price word stays with the amount (「原价 99」), so 「299 reviews」 is no match. */
 const CN_PRICE_RE =
-  /(?:价(?:格)?\s*[:：为是]?\s*)?\d[\d,]*(?:\.\d+)?\s*元|价(?:格)?\s*[:：为是]?\s*\d[\d,]*(?:\.\d+)?/g;
+  /(?:[原现售定标划市]?价(?:格)?\s*[:：为是]?\s*)?\d[\d,]*(?:\.\d+)?\s*元|[原现售定标划市]?价(?:格)?\s*[:：为是]?\s*\d[\d,]*(?:\.\d+)?/g;
 /**
  * FIX-48 #3: the prices a bracket note states — a currency sign or code, or 「元 / 价」 — each as
  * written; a number with neither (「约 2 天送达」「库存 5 件」) is none.
@@ -114,9 +115,7 @@ const CN_PRICE_RE =
 function notePrices(piece: string): string[] {
   const signed = piece.match(PRICE_SHAPE_RE) ?? [];
   const rest = signed.reduce((left, price) => left.replace(price, ' '), piece);
-  return [...signed, ...(rest.match(CN_PRICE_RE) ?? [])].map((price) =>
-    price.replace(/^价(?:格)?\s*[:：为是]?\s*/, '').trim(),
-  );
+  return [...signed, ...(rest.match(CN_PRICE_RE) ?? [])].map((price) => price.trim());
 }
 
 /** Appended to a read whose snapshot was cut at its size budget. */
@@ -1512,8 +1511,15 @@ const APPROX_AFTER_RE = /^[\d.,万千百亿wWkK]*\s*[个次人条]?\s*(?:以上|
 const UNSURE_VERB = '(?:无法|不能|未能|没法)(?:逐一|一一|逐项)?(?:确认|确定|判断|对应|区分)';
 const ALL_COUNTS =
   '(?:(?:各项|每项|每一项)(?:的)?(?:具体)?(?:数值|数字|计数|数据|数量)?|(?:各个|每个|这些|它们|以上|上述|全部|所有|这几个|这几项)(?:的)?(?:具体)?(?:数值|数字|计数|数据|数量))';
+/**
+ * PR #312 review: the counts themselves are what is doubted — 「各项数据的采集时间无法确认」 doubts a
+ * time. After the verb the collective phrase ends the clause (or says which is which); before it,
+ * only an adverb (都 / 均 / 暂时…) stands between them.
+ */
+const ALL_COUNTS_END = '(?=[，,；;。！？!?）)\\s]|$|分别|对应|是多少)';
+const ALL_COUNTS_ADVERB = '(?:都|均|也|皆|全都|暂时?|目前|仍然?|还)?';
 const ALL_COUNTS_UNSURE_RE = new RegExp(
-  `${UNSURE_VERB}(?!是否)[^，,；;。]{0,4}?${ALL_COUNTS}|${ALL_COUNTS}[^，,；;。]{0,6}?${UNSURE_VERB}(?!是否)`,
+  `${UNSURE_VERB}(?!是否)[^，,；;。]{0,4}?${ALL_COUNTS}${ALL_COUNTS_END}|${ALL_COUNTS}${ALL_COUNTS_ADVERB}${UNSURE_VERB}(?!是否)`,
 );
 function unsureCount(prose: string, name: string): boolean {
   return countState(prose, name) === 'doubt';
