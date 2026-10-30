@@ -204,6 +204,44 @@ export function qqMusicReadRpc(url: URL, body: string): boolean {
   );
 }
 
+/**
+ * FIX-49 #6 (Deploy-49 b-p02): closing amazon's location toaster posts
+ * `/portal-migration/hz/glow/dismiss-toaster` with `{toasterType, actionSource}` (58B) — UI state,
+ * not a write. Only that: an amazon.* host, that exact path, no query, exactly those two keys,
+ * each a short token naming no write (cart, order, address…). Adding to cart or changing the
+ * address still pauses.
+ */
+const TOASTER_WRITE_RE =
+  /cart|order|buy|purchase|checkout|address|pay|wish|subscri|delete|remove|add|update|save|submit/i;
+export function amazonToasterDismiss(url: URL, method: string, body: string): boolean {
+  // The store's own host (www.amazon.*), not one of its subdomains.
+  if (method !== 'POST' || !/^(?:www\.)?amazon\./.test(url.hostname)) return false;
+  if (!AMAZON_HOST_RE.test(url.hostname)) return false;
+  if (url.pathname !== '/portal-migration/hz/glow/dismiss-toaster' || url.search) return false;
+  if (body.length > 256) return false;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+  const entries = Object.entries(payload as Record<string, unknown>);
+  return (
+    entries.length === 2 &&
+    entries
+      .map(([key]) => key)
+      .sort()
+      .join() === 'actionSource,toasterType' &&
+    entries.every(
+      ([, value]) =>
+        typeof value === 'string' &&
+        /^[A-Za-z0-9_.:-]{1,40}$/.test(value) &&
+        !TOASTER_WRITE_RE.test(value),
+    )
+  );
+}
+
 function safeBodyShape(request: Request, url?: URL): string {
   try {
     const body = request.postData() ?? '';
@@ -1480,7 +1518,9 @@ export class CloudObservation {
     let rpcRead = false;
     if (r.method() === 'POST' && !transactional) {
       try {
-        rpcRead = qqMusicReadRpc(url, r.postData() ?? '');
+        rpcRead =
+          qqMusicReadRpc(url, r.postData() ?? '') ||
+          amazonToasterDismiss(url, r.method(), r.postData() ?? '');
       } catch {
         rpcRead = false;
       }

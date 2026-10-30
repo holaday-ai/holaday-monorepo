@@ -1,0 +1,280 @@
+import { describe, expect, it } from 'vitest';
+import { amazonToasterDismiss, keyedLogCheck } from './browser-tools/cloud-observation.js';
+import { everyAskedFieldGiven } from './browser-tools/completion-fields.js';
+import { answerNotObtained } from './scrape-answer-check.js';
+
+/** The Deploy-49 dy prompts (dy-2 / reg-dy-2). */
+const DY =
+  '打开 https://www.douyin.com/video/7377304298310389027 读视频标题、作者，以及点赞数、评论数、收藏数、分享数（不播放）';
+/** The coordinator's rd2.mjs answer: every asked field read. */
+const READ =
+  '- 标题：柠檬巴巴露亚\n- 作者：小喵麻麻\n- 点赞数：4741\n- 评论数：215\n- 收藏数：4369\n- 分享数：1652';
+
+describe('FIX-49 #1–#5 · 「没有加载出来」「无法提供」 tied to the asked fields (rd2.mjs)', () => {
+  it.each([
+    '推荐视频没有加载出来。',
+    '页面右侧推荐视频没有加载出来。',
+    '无法提供下载。',
+    '无法提供原视频文件。',
+    '无法提供更多评论。',
+    '视频本身没有加载出来（不影响读取上述信息）。',
+    '其他视频的信息无法提供。',
+    '更多评论内容无法提供。',
+  ])('every field read, then 「%s」 stays completed', (aside) => {
+    expect(answerNotObtained(`${READ}\n${aside}`, DY)).toBe(false);
+  });
+
+  it('a side part or something else unprovided is no 没拿到 even with fields missing (#1, #2)', () => {
+    expect(answerNotObtained('标题：柠檬巴巴露亚。页面右侧推荐视频没有加载出来。', DY)).toBe(false);
+    expect(answerNotObtained('标题：柠檬巴巴露亚。页面侧栏没有加载出来。', DY)).toBe(false);
+    expect(answerNotObtained('标题：柠檬巴巴露亚。其他视频的信息无法提供。', DY)).toBe(false);
+    expect(answerNotObtained('标题：柠檬巴巴露亚。更多评论内容无法提供。', DY)).toBe(false);
+    expect(answerNotObtained('标题：柠檬巴巴露亚。相关推荐数据都无法提供。', DY)).toBe(false);
+  });
+
+  it('the fields asked given, the page aside is not 没拿到 (#3)', () => {
+    expect(
+      answerNotObtained(
+        '标题：A，作者：B。视频内容没有加载出来，但页面文字已读到。',
+        '读视频标题和作者',
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    '目标视频的正文内容没有加载出来。',
+    '这个视频页面没有加载出来。',
+    '要查的视频没有加载出来。',
+    '要查的视频（7377304298310389027）的正文没有加载出来。',
+    '标题、作者等信息均无法提供。',
+    '以下字段无法提供：标题、作者。',
+    '缺失信息（无法提供）：标题',
+    '以上信息均无法提供。',
+    '所需数据都无法提供。',
+    // A field named before 「其他」 is still asked for.
+    '标题以及其他信息均无法提供。',
+    // A field named after the colon.
+    '这些信息无法提供：点赞数、评论数。',
+  ])('「%s」 is 没拿到 (#1, #4)', (answer) => {
+    expect(answerNotObtained(answer, DY)).toBe(true);
+  });
+
+  it('one asked field missing keeps the not-loaded reading (#3 needs every field)', () => {
+    expect(
+      answerNotObtained('- 标题：柠檬巴巴露亚\n- 作者：小喵麻麻\n视频本身没有加载出来。', DY),
+    ).toBe(true);
+    expect(
+      answerNotObtained(
+        '- 标题：柠檬巴巴露亚\n- 作者：无法确认\n- 点赞数：4741\n- 评论数：215\n- 收藏数：4369\n- 分享数：1652\n页面没有加载出来。',
+        DY,
+      ),
+    ).toBe(true);
+    // A guessed count is no value.
+    expect(
+      answerNotObtained(
+        '- 标题：柠檬巴巴露亚\n- 作者：小喵麻麻\n- 点赞数：可能是4741\n- 评论数：215\n- 收藏数：4369\n- 分享数：1652\n页面没有加载出来。',
+        DY,
+      ),
+    ).toBe(true);
+  });
+
+  it('a question naming no field: 「无法提供」 counts unless it is about something else', () => {
+    expect(answerNotObtained('这些数据都无法提供。', '上证指数现在多少点')).toBe(true);
+    expect(answerNotObtained('上证指数 3599.02 点。其他数据无法提供。', '上证指数现在多少点')).toBe(
+      false,
+    );
+  });
+
+  it('with no named field nothing is known to be given — the not-loaded reading stands', () => {
+    expect(answerNotObtained('目标页面没有加载出来。', '帮我看看这个页面')).toBe(true);
+    expect(answerNotObtained('以上信息均无法提供。', '')).toBe(true);
+  });
+
+  it('the DEPLOY-49 A verbatim is still 没拿到', () => {
+    const a =
+      '这个视频页面抓取时遇到了"服务器出现问题，请稍后重试"的错误，目标视频（7377304298310389027）的正文内容没有加载出来。\n\n**缺失信息（无法提供）：**\n- 视频标题\n- 作者\n- 点赞数、评论数、收藏数、分享数';
+    expect(answerNotObtained(a, DY)).toBe(true);
+  });
+});
+
+describe('FIX-49 #3 · everyAskedFieldGiven', () => {
+  it('reads labelled values, counts in prose, and 「为」', () => {
+    expect(everyAskedFieldGiven(DY, READ)).toBe(true);
+    expect(
+      everyAskedFieldGiven(
+        DY,
+        '视频标题为「第52集 | 柠檬巴巴露亚」，作者为「小喵麻麻」。互动数据：点赞数4741、评论数215、收藏数4369、分享数1652。',
+      ),
+    ).toBe(true);
+  });
+
+  it('no named field, a missing marker, a guess or a doubted count is not given', () => {
+    expect(everyAskedFieldGiven('帮我看看这个视频', READ)).toBe(false);
+    expect(everyAskedFieldGiven(DY, READ.replace('小喵麻麻', '页面未显示'))).toBe(false);
+    expect(everyAskedFieldGiven(DY, READ.replace('柠檬巴巴露亚', '推测为柠檬'))).toBe(false);
+    expect(everyAskedFieldGiven(DY, READ.replace('- 收藏数：4369', '- 收藏数：无法确认'))).toBe(
+      false,
+    );
+    expect(everyAskedFieldGiven(DY, READ.replace('\n- 分享数：1652', ''))).toBe(false);
+  });
+});
+
+describe('FIX-49 #6 · amazon location toaster dismiss (Deploy-49 b-p02)', () => {
+  /** The online trigger: `https://www.amazon.com/portal-migration/hz/glow/dismiss-toaster`, json{toasterType,actionSource} 58B. */
+  const PATH = '/portal-migration/hz/glow/dismiss-toaster';
+  const BODY = '{"toasterType":"AIS_INGRESS","actionSource":"glow_closed"}';
+  const dismiss = (url: string, body = BODY, method = 'POST') =>
+    amazonToasterDismiss(new URL(url), method, body);
+
+  it('the online request passes — amazon.com and the other stores', () => {
+    expect(BODY.length).toBe(58);
+    expect(dismiss(`https://www.amazon.com${PATH}`)).toBe(true);
+    expect(dismiss(`https://www.amazon.sg${PATH}`)).toBe(true);
+    expect(dismiss(`https://www.amazon.co.uk${PATH}`)).toBe(true);
+    expect(
+      dismiss(`https://amazon.com${PATH}`, '{"actionSource":"glow","toasterType":"AIS_INGRESS"}'),
+    ).toBe(true);
+  });
+
+  it('reverse: adding to cart and changing the address still pause', () => {
+    expect(
+      dismiss(
+        'https://www.amazon.com/cart/add-to-cart/ref=dp_start-bbf_1_glance',
+        '{"items":[{"asin":"B0C1234567","quantity":1}]}',
+      ),
+    ).toBe(false);
+    expect(
+      dismiss(
+        'https://www.amazon.com/portal-migration/hz/glow/address-change?actionSource=glow',
+        '{"locationType":"LOCATION_INPUT","zipCode":"10001","deviceType":"web","storeContext":"generic","pageType":"Gateway","actionSource":"glow"}',
+      ),
+    ).toBe(false);
+    // The dismiss path carrying an address change.
+    expect(
+      dismiss(
+        `https://www.amazon.com${PATH}`,
+        '{"locationType":"LOCATION_INPUT","zipCode":"10001","actionSource":"glow"}',
+      ),
+    ).toBe(false);
+  });
+
+  it.each<[string, string, string?, string?]>([
+    [
+      'a write word in a value',
+      `https://www.amazon.com${PATH}`,
+      '{"toasterType":"ADD_TO_CART","actionSource":"glow"}',
+    ],
+    [
+      'an address word',
+      `https://www.amazon.com${PATH}`,
+      '{"toasterType":"ADDRESS_SET","actionSource":"glow"}',
+    ],
+    [
+      'an order word',
+      `https://www.amazon.com${PATH}`,
+      '{"toasterType":"AIS","actionSource":"order_now"}',
+    ],
+    [
+      'a third key',
+      `https://www.amazon.com${PATH}`,
+      '{"toasterType":"AIS","actionSource":"glow","zipCode":"10001"}',
+    ],
+    ['one key only', `https://www.amazon.com${PATH}`, '{"toasterType":"AIS"}'],
+    [
+      'a value that is not a short token',
+      `https://www.amazon.com${PATH}`,
+      '{"toasterType":"AIS INGRESS now","actionSource":"glow"}',
+    ],
+    [
+      'a nested value',
+      `https://www.amazon.com${PATH}`,
+      '{"toasterType":{"a":1},"actionSource":"glow"}',
+    ],
+    [
+      'a long value',
+      `https://www.amazon.com${PATH}`,
+      `{"toasterType":"${'A'.repeat(41)}","actionSource":"glow"}`,
+    ],
+    ['not JSON', `https://www.amazon.com${PATH}`, 'toasterType=AIS&actionSource=glow'],
+    ['a query string', `https://www.amazon.com${PATH}?zip=10001`],
+    ['another path', 'https://www.amazon.com/portal-migration/hz/glow/dismiss-toaster/add'],
+    ['a subdomain', `https://unagi.amazon.com${PATH}`],
+    ['a lookalike host', `https://www.amazon.com.evil.io${PATH}`],
+    ['not amazon', `https://www.bestbuy.com${PATH}`],
+    ['a GET', `https://www.amazon.com${PATH}`, BODY, 'GET'],
+  ])('reverse: %s still pauses', (_label, url, body = BODY, method = 'POST') => {
+    expect(dismiss(url, body, method)).toBe(false);
+  });
+});
+
+describe('FIX-49 #7 · the widened URL keys (confirmed) still go through host / query / write checks', () => {
+  const XHS = new URL('https://apm-fe.xiaohongshu.com/api/data');
+  const base = {
+    clientTime: 1793520000000,
+    context_sdkSessionId: 'a1b2',
+    context_platform: 'PC',
+    context_route: '/explore',
+    context_userAgent: 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130',
+    context_userId: '',
+    measurement_name: 'renderPerf',
+    measurement_data: {
+      duration: 120,
+      keyJsName:
+        'https://fe-static.xhscdn.com/formula-static/xhs-pc-web/public/resource/js/index.1a2b3c.js',
+      keyApiName: 'https://edith.xiaohongshu.com/api/sns/web/v1/homefeed',
+    },
+  };
+  const render = (d: Record<string, unknown> = {}) =>
+    keyedLogCheck(
+      XHS,
+      JSON.stringify([{ ...base, measurement_data: { ...base.measurement_data, ...d } }]),
+    );
+
+  it('a read API and the SDK’s own script pass', () => {
+    expect(render()).toBeNull();
+  });
+
+  it.each<[string, string]>([
+    ['https://edith.xiaohongshu.com/api/sns/web/v1/feed/post', 'url-write'],
+    ['https://edith.xiaohongshu.com/api/store/order/create', 'url-write'],
+    ['edith.xiaohongshu.com/api/sns/web/v1/feed/post', 'url-write'],
+    ['https://edith.xiaohongshu.com/api/sns/web/v1/note/like', 'value'],
+    ['/api/sns/web/v1/comment/post', 'value'],
+    ['https://edith.xiaohongshu.com/api/sns/web/v1/homefeed?num=1', 'url-query'],
+    ['https://evil.io/api/sns/web/v1/homefeed', 'url-host'],
+  ])('keyApiName 「%s」 is refused (%s)', (value, why) => {
+    expect(render({ keyApiName: value })).toBe(`record0:measurement_data:${why}:keyApiName`);
+  });
+
+  it('keyJsName off the SDK’s hosts is refused', () => {
+    expect(render({ keyJsName: 'https://evil.io/a.js' })).toBe(
+      'record0:measurement_data:url-host:keyJsName',
+    );
+  });
+
+  it('the per-kind keys hold no URL for another kind; matchedPath = url is still checked as a URL', () => {
+    const timing = (d: Record<string, unknown>) =>
+      keyedLogCheck(
+        XHS,
+        JSON.stringify([
+          {
+            ...base,
+            measurement_name: 'httpRequestTiming',
+            measurement_data: d,
+          },
+        ]),
+      );
+    expect(
+      timing({
+        duration: 1,
+        keyApiName: 'https://edith.xiaohongshu.com/api/sns/web/v1/homefeed',
+      }),
+    ).toBe('record0:measurement_data:url-key:keyApiName');
+    const post = 'https://edith.xiaohongshu.com/api/sns/web/v1/feed/post';
+    expect(timing({ url: post, matchedPath: post, duration: 1 })).toBe(
+      'record0:measurement_data:url-write:url',
+    );
+    const feed = 'https://edith.xiaohongshu.com/api/sns/web/v1/homefeed';
+    expect(timing({ url: feed, matchedPath: feed, duration: 1 })).toBeNull();
+  });
+});

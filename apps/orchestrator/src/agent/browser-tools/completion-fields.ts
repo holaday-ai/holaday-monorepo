@@ -1414,6 +1414,28 @@ export function askedFields(intent: string): string[] {
   return ASKABLE_FIELDS.filter((name) => intent.includes(name));
 }
 
+/** FIX-49 #3: no value — a missing marker or a guess (「作者：页面未显示」「标题为推测的…」). */
+const NO_VALUE = '(?:页面|未|没有|无法|不详|暂无|未知|不确定|推测|可能|大概|疑似)';
+
+/**
+ * FIX-49 #3 (DEPLOY-49 复审): every field the request names has a value in the answer — a count
+ * with its number (as `declaredAbsentFields` reads it), any other field with a value after
+ * 「：」「为」「是」. Then an aside 「视频本身没有加载出来（不影响读取上述信息）」 is not 没拿到. With no
+ * named field, nothing tells that, so this is false.
+ */
+export function everyAskedFieldGiven(intent: string, summary: string): boolean {
+  const asked = askedFields(intent);
+  if (!asked.length || declaredAbsentFields(intent, summary).length) return false;
+  const prose = unescapeLiteralBreaks(summary);
+  return asked.every((name) => {
+    const count = countState(prose, name);
+    if (count) return count === 'value';
+    return new RegExp(
+      `${name}[^：:\\n为是]{0,4}?(?:[:：]|为|是)\\s*[*_\`「“"《]*(?!${NO_VALUE})[^\\s，,。；;、*_\`」”》]`,
+    ).test(prose);
+  });
+}
+
 /**
  * FIX-45 (Deploy-45 b-p02 「第3条商品在搜索结果页快照中未显示价格，已打开其详情页读取到价格为 S$12.80」):
  * the gap is told and then filled — in the same sentence or the next one the field's value is
