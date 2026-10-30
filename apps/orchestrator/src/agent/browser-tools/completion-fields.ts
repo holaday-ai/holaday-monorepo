@@ -115,8 +115,16 @@ const CN_PRICE_RE =
 function notePrices(piece: string): string[] {
   const signed = piece.match(PRICE_SHAPE_RE) ?? [];
   const rest = signed.reduce((left, price) => left.replace(price, ' '), piece);
-  return [...signed, ...(rest.match(CN_PRICE_RE) ?? [])].map((price) => price.trim());
+  return [...signed, ...(rest.match(CN_PRICE_RE) ?? []), ...(rest.match(EN_PRICE_RE) ?? [])].map(
+    (price) => price.trim(),
+  );
 }
+/**
+ * PR #312 review: an English label names a price as plainly (「original price 99」「was 99」「RRP 99」);
+ * the label stays with the amount, so another number on the page is no match.
+ */
+const EN_PRICE_RE =
+  /\b(?:(?:original|list|regular|retail|sale|current|typical)\s+)?price\s*[:：]?\s*\d[\d,]*(?:\.\d+)?|\b(?:was|rrp|msrp)\s*[:：]?\s*\d[\d,]*(?:\.\d+)?/gi;
 
 /** Appended to a read whose snapshot was cut at its size budget. */
 export const SNAPSHOT_TRUNCATED = '[快照截断：以下内容未读到]';
@@ -1516,10 +1524,12 @@ const ALL_COUNTS =
  * time. After the verb the collective phrase ends the clause (or says which is which); before it,
  * only an adverb (都 / 均 / 暂时…) stands between them.
  */
-const ALL_COUNTS_END = '(?=[，,；;。！？!?）)\\s]|$|分别|对应|是多少)';
+/** PR #312 review: doubting the values' accuracy withdraws them too (「…是否准确」「…的准确性」). */
+const ALL_COUNTS_ACCURACY = '(?:是否(?:准确|正确|真实|可靠)|的?(?:准确性|真实性|可靠性)|准确与否)';
+const ALL_COUNTS_END = `(?=[，,；;。！？!?）)\\s]|$|分别|对应|是多少|${ALL_COUNTS_ACCURACY})`;
 const ALL_COUNTS_ADVERB = '(?:都|均|也|皆|全都|暂时?|目前|仍然?|还)?';
 const ALL_COUNTS_UNSURE_RE = new RegExp(
-  `${UNSURE_VERB}(?!是否)[^，,；;。]{0,4}?${ALL_COUNTS}${ALL_COUNTS_END}|${ALL_COUNTS}${ALL_COUNTS_ADVERB}${UNSURE_VERB}(?!是否)`,
+  `${UNSURE_VERB}(?!是否)[^，,；;。]{0,4}?${ALL_COUNTS}${ALL_COUNTS_END}|${ALL_COUNTS}${ALL_COUNTS_ACCURACY}?${ALL_COUNTS_ADVERB}${UNSURE_VERB}(?!是否)`,
 );
 function unsureCount(prose: string, name: string): boolean {
   return countState(prose, name) === 'doubt';
