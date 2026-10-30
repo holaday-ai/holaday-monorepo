@@ -1543,6 +1543,23 @@ const ALL_COUNTS_ADVERB = '(?:都|均|也|皆|全都|暂时?|目前|仍然?|还)
 const ALL_COUNTS_UNSURE_RE = new RegExp(
   `${UNSURE_VERB}(?!是否)[^，,；;。]{0,4}?${ALL_COUNTS}${ALL_COUNTS_END}|${ALL_COUNTS}${ALL_COUNTS_ACCURACY}?${ALL_COUNTS_ADVERB}${UNSURE_VERB}(?!是否)`,
 );
+const ALL_COUNTS_UNSURE_G = new RegExp(ALL_COUNTS_UNSURE_RE.source, 'g');
+/**
+ * PR #312 review (f3a813e6): a collective doubt withdraws the counts unless what it doubts is
+ * freshness or a derived metric — read on the doubt itself and its object, up to an explanation
+ * (「无法确认各项具体数值（无法判断这些数据的来源）」 still doubts the values).
+ */
+function allCountsDoubted(clause: string): boolean {
+  return [...clause.matchAll(ALL_COUNTS_UNSURE_G)].some((m) => {
+    const object = clause
+      .slice(m.index + m[0].length)
+      .split(/[（(：:—]/)[0]!
+      .slice(0, 12);
+    const doubt = `${m[0]}${object}`;
+    return !DERIVED_DOUBT_RE.test(doubt) && !FRESHNESS_DOUBT_RE.test(doubt);
+  });
+}
+
 function unsureCount(prose: string, name: string): boolean {
   return countState(prose, name) === 'doubt';
 }
@@ -1595,9 +1612,7 @@ function countState(prose: string, name: string): 'value' | 'doubt' | null {
       if (
         ((mention.test(clause) || m) && (unsure || hedged)) ||
         absent.test(clause) ||
-        (ALL_COUNTS_UNSURE_RE.test(clause) &&
-          !DERIVED_DOUBT_RE.test(clause) &&
-          !FRESHNESS_DOUBT_RE.test(clause))
+        allCountsDoubted(clause)
       )
         state.set(item, 'doubt');
       else if (m) state.set(item, 'value');

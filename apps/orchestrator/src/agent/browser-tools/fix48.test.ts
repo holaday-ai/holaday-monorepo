@@ -485,6 +485,28 @@ describe('DEPLOY-49 复审 #1 · measurement values carry no encoded write (apm3
   });
 });
 
+describe('PR #312 review (f3a813e6) · a doubt in the explanation does not cancel the withdrawal', () => {
+  const DY =
+    '打开 https://www.douyin.com/video/1 读视频标题、作者，以及点赞数、评论数、收藏数、分享数';
+  const ALL = ['点赞数', '评论数', '收藏数', '分享数'];
+
+  it.each([
+    '点赞20，评论2，收藏10，分享97。但无法确认各项具体数值（无法判断这些数据的来源）。',
+    '点赞20，评论2，收藏10，分享97。但无法确认各项具体数值（其实时性也无法确认）。',
+    '点赞20，评论2，收藏10，分享97。各项数值无法确认：无法判断增长趋势。',
+  ])('%s withdraws every count', (text) => {
+    expect(declaredAbsentFields(DY, text)).toEqual(ALL);
+  });
+
+  it.each([
+    '点赞20，评论2，收藏10，分享97。以上数据无法确认其实时性。',
+    '点赞20，评论2，收藏10，分享97。各项数据无法确认增长趋势。',
+    '点赞20，评论2，收藏10，分享97。各项数据无法确认来源。',
+  ])('reverse: %s doubts something else', (text) => {
+    expect(declaredAbsentFields(DY, text)).toEqual([]);
+  });
+});
+
 describe('DEPLOY-49 复审 #1 · 约数和价格标签 (p312.mjs)', () => {
   const DY =
     '打开 https://www.douyin.com/video/1 读视频标题、作者，以及点赞数、评论数、收藏数、分享数';
