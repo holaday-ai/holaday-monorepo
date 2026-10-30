@@ -388,6 +388,27 @@ describe('DEPLOY-48 local A/B reg-dy-2 · a failed load is not obtained', () => 
   });
 });
 
+describe('DEPLOY-49 local A/B reg-dy-2 · the asked video not loaded, a 「无法提供」 list', () => {
+  const intent =
+    '打开 https://www.douyin.com/video/7377304298310389027 读视频标题、作者，以及点赞数、评论数、收藏数、分享数（不播放）';
+  it('verbatim A answer: the scrape hands the page to the browser', () => {
+    const answer =
+      '这个视频页面抓取时遇到了"服务器出现问题，请稍后重试"的错误，目标视频（7377304298310389027）的正文内容没有加载出来。\n\n**缺失信息（无法提供）：**\n- 视频标题\n- 作者\n- 点赞数、评论数、收藏数、分享数\n\n页面里能看到的是侧栏"接下来播放"里**另外两个视频**的信息，不是你要查的那个：\n- "这明明是一场电竞比赛，却差点变成拳击比赛。" @经典电竞 · 990.8K 赞\n\n来源：https://www.douyin.com/video/7377304298310389027';
+    expect(answerNotObtained(answer, intent)).toBe(true);
+    expect(answerNotObtained('该视频的正文内容没有加载出来。', intent)).toBe(true);
+    expect(answerNotObtained('指定页面（douyin）未加载出来。', intent)).toBe(true);
+    expect(answerNotObtained('缺失信息（无法提供）：视频标题、作者', intent)).toBe(true);
+    expect(answerNotObtained('以上信息均无法提供。', intent)).toBe(true);
+  });
+
+  it('reverse: a side part not loaded, the asked fields read', () => {
+    const read =
+      '- 标题：柠檬巴巴露亚\n- 作者：小喵麻麻\n- 点赞数：4741\n- 评论数：215\n- 收藏数：4369\n- 分享数：1652';
+    expect(answerNotObtained(`${read}\n该视频的评论区没有加载出来。`, intent)).toBe(false);
+    expect(answerNotObtained(`${read}\n该页面的推荐内容没有加载出来。`, intent)).toBe(false);
+  });
+});
+
 describe('PR #311 review (8089106c)', () => {
   it('a labelled 「无法确认」 is cleared by a count given later', () => {
     expect(

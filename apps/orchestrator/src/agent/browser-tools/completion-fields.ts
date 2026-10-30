@@ -102,6 +102,33 @@ const clean = (value: string) =>
 /** Only successful content reads enter this store; listings and navigation receipts do not. */
 /** A currency amount as it appears on a page (S$8.90, SGD 11.46, ¥99, $14.99). */
 const PRICE_SHAPE_RE = /(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?/gi;
+/** A price field's name (「价格」「原价」「price」) — PR #312 review: not 「评价数」 or 「价值」. */
+const PRICE_FIELD_RE = /价格|[原现售单定标划市均总报]价|划线价|折后|到手|券后|^价$|price/i;
+/** A number said in yuan, or named a price: 「99 元」「原价 99」「价格：1,299」. */
+/** PR #312 review: the price word stays with the amount (「原价 99」), so 「299 reviews」 is no match. */
+/** DEPLOY-49 复审 #1: 「划线价 / 折后 / 到手 / 券后」 name a price too. */
+const CN_PRICE_LABEL = '(?:(?:划线|[原现售定标划市])?价(?:格)?|(?:折后|到手|券后)价?)';
+const CN_PRICE_RE = new RegExp(
+  `(?:${CN_PRICE_LABEL}\\s*[:：为是]?\\s*)?\\d[\\d,]*(?:\\.\\d+)?\\s*元|${CN_PRICE_LABEL}\\s*[:：为是]?\\s*\\d[\\d,]*(?:\\.\\d+)?`,
+  'g',
+);
+/**
+ * FIX-48 #3: the prices a bracket note states — a currency sign or code, or 「元 / 价」 — each as
+ * written; a number with neither (「约 2 天送达」「库存 5 件」) is none.
+ */
+function notePrices(piece: string): string[] {
+  const signed = piece.match(PRICE_SHAPE_RE) ?? [];
+  const rest = signed.reduce((left, price) => left.replace(price, ' '), piece);
+  return [...signed, ...(rest.match(CN_PRICE_RE) ?? []), ...(rest.match(EN_PRICE_RE) ?? [])].map(
+    (price) => price.trim(),
+  );
+}
+/**
+ * PR #312 review: an English label names a price as plainly (「original price 99」「was 99」「RRP 99」);
+ * the label stays with the amount, so another number on the page is no match.
+ */
+const EN_PRICE_RE =
+  /\b(?:(?:original|list|regular|retail|sale|current|typical)\s+)?price\s*[:：]?\s*\d[\d,]*(?:\.\d+)?|\b(?:was|rrp|msrp|regular|sale)\s*[:：]?\s*\d[\d,]*(?:\.\d+)?/gi;
 
 /** Appended to a read whose snapshot was cut at its size budget. */
 export const SNAPSHOT_TRUNCATED = '[快照截断：以下内容未读到]';
@@ -277,6 +304,12 @@ const FIELD_WORDS: Record<string, string> = {
   snippet: '片段',
   start: '开始',
   end: '结束',
+  // FIX-48 #2 (Deploy-48 core-11 「final页面height」, b-d04 「macOS installer描述」).
+  final: '最终',
+  initial: '初始',
+  height: '高度',
+  width: '宽度',
+  installer: '安装包',
 };
 export function fieldLabel(name: string): string {
   const trimmed = name.trim();
@@ -292,11 +325,14 @@ export function fieldLabel(name: string): string {
     )
   )
     return trimmed;
-  const words = trimmed
+  const parts = trimmed
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .split('_')
-    .filter(Boolean)
-    .map((word) => FIELD_WORDS[word.toLowerCase()] ?? word);
+    .filter(Boolean);
+  // FIX-48 #2: a word with no entry would leave half a translation (「final页面height」) — the
+  // name then reads as its plain English words instead.
+  if (!parts.every((word) => FIELD_WORDS[word.toLowerCase()])) return parts.join(' ');
+  const words = parts.map((word) => FIELD_WORDS[word.toLowerCase()] as string);
   return words.reduce(
     (out, word) =>
       !out
@@ -540,14 +576,11 @@ function answerFacts(summary: string, intent = ''): Fact[] {
       // PR #311 review: every price in a note is checked (「原价 S$30 现价 S$99」), and what is left
       // with a number in it too.
       // PR #311 review: not at a thousands separator (「S$1,299」 is one price).
-      for (const piece of (priced[3] ?? '').split(/[，；;、]|,(?!\d{3}\b)/)) {
-        if (!/\d|[$¥￥€£]|\b(?:sgd|usd|rmb|cny)\b/i.test(piece)) continue;
-        const prices = piece.match(PRICE_SHAPE_RE) ?? [];
-        for (const price of prices)
+      // FIX-48 #3: only a price is checked — a note with a number that is no price (「约 2 天送达」)
+      // says nothing the page must show.
+      for (const piece of (priced[3] ?? '').split(/[，；;、]|,(?!\d{3}\b)/))
+        for (const price of notePrices(piece))
           add({ name: '价格（括注）', value: clean(price), listItem: true });
-        const rest = prices.reduce((left, price) => left.replace(price, ' '), piece);
-        if (/\d/.test(rest)) add({ name: '括注', value: clean(rest), listItem: true });
-      }
       continue;
     }
     // FIX-41 (local f41a core-07): 「Safari (web browser) → 新标签，标题为“Safari (web browser) -
@@ -809,11 +842,14 @@ export function assessCompletionFacts(input: {
       // Titles and list items often carry parentheses as part of the name.
       const split = fact.listItem || TITLE_FIELD.test(fact.name) ? null : splitNote(fact.value);
       if (!split || !/\d/.test(split.note)) return [fact];
-      // Only the pieces of the note that carry numbers are facts of their own.
-      const pieces = split.note
-        .split(/[，,；;、]/)
-        .map((piece) => piece.trim())
-        .filter((piece) => /\d/.test(piece));
+      // Only the pieces of the note that carry numbers are facts of their own — and of a price, only
+      // the prices in it (FIX-48 #3: 「S$7.40（约 2 天送达）」 is no second price).
+      const pieces = PRICE_FIELD_RE.test(fact.name)
+        ? split.note.split(/[，；;、]|,(?!\d{3}\b)/).flatMap(notePrices)
+        : split.note
+            .split(/[，,；;、]/)
+            .map((piece) => piece.trim())
+            .filter((piece) => /\d/.test(piece));
       return [
         fact,
         ...pieces.map((piece) => ({
@@ -1471,11 +1507,59 @@ const DERIVED_METRIC =
 const DERIVED_DOUBT_RE = new RegExp(
   `(?:无法|不能|未能|没法)(?:确认|确定|判断)[^，,；;。]{0,10}?${DERIVED_METRIC}|${DERIVED_METRIC}[^，,；;。]{0,6}?(?:无法|不能|未能|没法)(?:确认|确定|判断)`,
 );
-/** DEPLOY-48 复审 #4: a guessed number is no answer (「点赞数可能是 20」「推测为 20」). */
-const HEDGED_VALUE_RE = /可能|推测|猜测|估计|大概|或许|疑似|应该是|似乎/;
-/** DEPLOY-48 复审 #4: 「无法确认各项具体数值」 — every count asked for is unknown. */
-const ALL_COUNTS_UNSURE_RE =
-  /(?:无法|不能|未能|没法)(?:确认|确定|判断|对应|区分)(?:各项|各个|每项|每个|这些|它们的?)(?:具体)?(?:数值|数字|计数|数据)/;
+/**
+ * DEPLOY-48 复审 #4: a guessed number is no answer (「点赞数可能是 20」「推测为 20」). FIX-48 #3: nor
+ * an approximate one (「大约 2 万」「约 2 万」 before it, 「一万以上」「2 万左右」 after it).
+ */
+const HEDGED_VALUE_RE = /可能|推测|猜测|估计|大概|大约|或许|疑似|应该是|似乎|约\s*$/;
+/** DEPLOY-49 复审 #1: the unit may stand apart from the number (「2 万左右」「3 k 以上」). */
+const APPROX_AFTER_RE = /^[\d.,]*\s*[万千百亿wWkK]?\s*[个次人条]?\s*(?:以上|左右|上下)/;
+/**
+ * DEPLOY-48 复审 #4: 「无法确认各项具体数值」 — every count asked for is unknown. FIX-48 #3: in either
+ * order and the usual variants (「各项具体数值无法确认」「无法确认各项的具体数值」「以上数值都无法确认」
+ * 「不能确定每一项」「无法逐一确认」). 「各项」「每一项」 need no noun; 「每个」「这些」「以上」 do (「无法确认
+ * 每个视频的发布时间」 is about dates). Doubt about freshness or a derived metric (「以上数据无法确认
+ * 是否实时」「…的增长趋势」) is no doubt about the values.
+ */
+const UNSURE_VERB = '(?:无法|不能|未能|没法)(?:逐一|一一|逐项)?(?:确认|确定|判断|对应|区分)';
+const ALL_COUNTS =
+  '(?:(?:各项|每项|每一项)(?:的)?(?:具体)?(?:数值|数字|计数|数据|数量)?|(?:各个|每个|这些|它们|以上|上述|全部|所有|这几个|这几项)(?:的)?(?:具体)?(?:数值|数字|计数|数据|数量))';
+/**
+ * PR #312 review: the counts themselves are what is doubted — 「各项数据的采集时间无法确认」 doubts a
+ * time. After the verb the collective phrase ends the clause (or says which is which); before it,
+ * only an adverb (都 / 均 / 暂时…) stands between them.
+ */
+/** PR #312 review: doubting the values' accuracy withdraws them too (「…是否准确」「…的准确性」). */
+const ALL_COUNTS_ACCURACY = '(?:是否(?:准确|正确|真实|可靠)|的?(?:准确性|真实性|可靠性)|准确与否)';
+// PR #312 review: an explanation may follow (「…各项具体数值（页面没有标签）」「…各项数值：…」).
+const ALL_COUNTS_END = `(?=[，,；;。！？!?）)（(：:—\\s]|$|分别|对应|是多少|${ALL_COUNTS_ACCURACY})`;
+/**
+ * PR #312 review: a doubt whose object is freshness (「无法确认是否实时」「…其实时性」), not a freshness word
+ * anywhere in the clause (「无法确认各项具体数值（页面实时刷新…）」 still doubts the values).
+ */
+const FRESHNESS_DOUBT_RE =
+  /(?:无法|不能|未能|没法)(?:确认|确定|判断)[^，,；;。（(]{0,8}?(?:实时|最新|时效)|(?:实时|最新|时效)[^，,；;。（(]{0,4}?(?:无法|不能|未能|没法)(?:确认|确定|判断)/;
+const ALL_COUNTS_ADVERB = '(?:都|均|也|皆|全都|暂时?|目前|仍然?|还)?';
+const ALL_COUNTS_UNSURE_RE = new RegExp(
+  `${UNSURE_VERB}(?!是否)[^，,；;。]{0,4}?${ALL_COUNTS}${ALL_COUNTS_END}|${ALL_COUNTS}${ALL_COUNTS_ACCURACY}?${ALL_COUNTS_ADVERB}${UNSURE_VERB}(?!是否)`,
+);
+const ALL_COUNTS_UNSURE_G = new RegExp(ALL_COUNTS_UNSURE_RE.source, 'g');
+/**
+ * PR #312 review (f3a813e6): a collective doubt withdraws the counts unless what it doubts is
+ * freshness or a derived metric — read on the doubt itself and its object, up to an explanation
+ * (「无法确认各项具体数值（无法判断这些数据的来源）」 still doubts the values).
+ */
+function allCountsDoubted(clause: string): boolean {
+  return [...clause.matchAll(ALL_COUNTS_UNSURE_G)].some((m) => {
+    const object = clause
+      .slice(m.index + m[0].length)
+      .split(/[（(：:—]/)[0]!
+      .slice(0, 12);
+    const doubt = `${m[0]}${object}`;
+    return !DERIVED_DOUBT_RE.test(doubt) && !FRESHNESS_DOUBT_RE.test(doubt);
+  });
+}
+
 function unsureCount(prose: string, name: string): boolean {
   return countState(prose, name) === 'doubt';
 }
@@ -1493,7 +1577,7 @@ function countState(prose: string, name: string): 'value' | 'doubt' | null {
   // names. A value in Chinese numerals (「一万」) is a value too — DEPLOY-48 复审 #5: only as a
   // number (followed by a unit, a non-Chinese character or the clause end), not 「十分多」.
   const value = new RegExp(
-    `${stem}(?:数|量)?([^\\d、]{0,6}?)(?:\\d|[${CN_NUMERALS}]+(?=[个次人条]|[^\\p{Script=Han}]|$))`,
+    `${stem}(?:数|量)?([^\\d、]{0,6}?)(?:\\d|[${CN_NUMERALS}]+(?=[个次人条]|以上|左右|上下|[^\\p{Script=Han}]|$))`,
     'u',
   );
   // PR #311 review: a value fills only its own item's gap (「第一个视频点赞数无法确认。第二个视频点赞数为
@@ -1520,12 +1604,15 @@ function countState(prose: string, name: string): 'value' | 'doubt' | null {
       // the count itself.
       const unsure = UNSURE_RE.test(clause) && !DERIVED_DOUBT_RE.test(clause);
       // PR #311 review: the guess may open the clause too (「推测点赞数为20」).
-      const hedged = !!m && HEDGED_VALUE_RE.test(`${clause.slice(0, m.index)}${m[1] ?? ''}`);
+      const hedged =
+        !!m &&
+        (HEDGED_VALUE_RE.test(`${clause.slice(0, m.index)}${m[1] ?? ''}`) ||
+          APPROX_AFTER_RE.test(clause.slice(m.index + m[0].length)));
       // A value given in a clause that doubts it (「…分别为 20、2…（无法确认对应关系）」) is doubted too.
       if (
         ((mention.test(clause) || m) && (unsure || hedged)) ||
         absent.test(clause) ||
-        ALL_COUNTS_UNSURE_RE.test(clause)
+        allCountsDoubted(clause)
       )
         state.set(item, 'doubt');
       else if (m) state.set(item, 'value');
