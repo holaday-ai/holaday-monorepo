@@ -102,8 +102,8 @@ const clean = (value: string) =>
 /** Only successful content reads enter this store; listings and navigation receipts do not. */
 /** A currency amount as it appears on a page (S$8.90, SGD 11.46, ¥99, $14.99). */
 const PRICE_SHAPE_RE = /(?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?/gi;
-/** A price field's name (「价格」「原价」「price」). */
-const PRICE_FIELD_RE = /价|price/i;
+/** A price field's name (「价格」「原价」「price」) — PR #312 review: not 「评价数」 or 「价值」. */
+const PRICE_FIELD_RE = /价格|[原现售单定标划市均总报]价|^价$|price/i;
 /** A number said in yuan, or named a price: 「99 元」「原价 99」「价格：1,299」. */
 /** PR #312 review: the price word stays with the amount (「原价 99」), so 「299 reviews」 is no match. */
 const CN_PRICE_RE =
@@ -1528,6 +1528,12 @@ const ALL_COUNTS =
 const ALL_COUNTS_ACCURACY = '(?:是否(?:准确|正确|真实|可靠)|的?(?:准确性|真实性|可靠性)|准确与否)';
 // PR #312 review: an explanation may follow (「…各项具体数值（页面没有标签）」「…各项数值：…」).
 const ALL_COUNTS_END = `(?=[，,；;。！？!?）)（(：:—\\s]|$|分别|对应|是多少|${ALL_COUNTS_ACCURACY})`;
+/**
+ * PR #312 review: a doubt whose object is freshness (「无法确认是否实时」「…其实时性」), not a freshness word
+ * anywhere in the clause (「无法确认各项具体数值（页面实时刷新…）」 still doubts the values).
+ */
+const FRESHNESS_DOUBT_RE =
+  /(?:无法|不能|未能|没法)(?:确认|确定|判断)[^，,；;。（(]{0,8}?(?:实时|最新|时效)|(?:实时|最新|时效)[^，,；;。（(]{0,4}?(?:无法|不能|未能|没法)(?:确认|确定|判断)/;
 const ALL_COUNTS_ADVERB = '(?:都|均|也|皆|全都|暂时?|目前|仍然?|还)?';
 const ALL_COUNTS_UNSURE_RE = new RegExp(
   `${UNSURE_VERB}(?!是否)[^，,；;。]{0,4}?${ALL_COUNTS}${ALL_COUNTS_END}|${ALL_COUNTS}${ALL_COUNTS_ACCURACY}?${ALL_COUNTS_ADVERB}${UNSURE_VERB}(?!是否)`,
@@ -1586,7 +1592,7 @@ function countState(prose: string, name: string): 'value' | 'doubt' | null {
         absent.test(clause) ||
         (ALL_COUNTS_UNSURE_RE.test(clause) &&
           !DERIVED_DOUBT_RE.test(clause) &&
-          !/实时|时效|最新/.test(clause))
+          !FRESHNESS_DOUBT_RE.test(clause))
       )
         state.set(item, 'doubt');
       else if (m) state.set(item, 'value');

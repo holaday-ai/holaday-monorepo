@@ -234,6 +234,8 @@ describe('FIX-48 #3 · 协调方复审 PR #311 的小问题', () => {
     // PR #312 review: an explanation after the phrase.
     '点赞20，评论2，收藏10，分享97。但无法确认各项具体数值（页面没有标签）',
     '点赞20，评论2，收藏10，分享97。但无法确认各项具体数值：页面没有标签',
+    // PR #312 review: a freshness word in the explanation is no freshness doubt.
+    '点赞20，评论2，收藏10，分享97。但无法确认各项具体数值（页面实时刷新且没有标签）',
   ])('「%s」: the answer cannot confirm each count — all missing', (answer) => {
     expect(declaredAbsentFields(DY, `标题：A。作者：B。${answer}。`)).toEqual(COUNTS);
   });
@@ -313,6 +315,15 @@ describe('FIX-48 #3 · 协调方复审 PR #311 的小问题', () => {
       pages: [{ text: `${listing}\n- text: 原价 99` }],
     });
     expect(shown.unverified).toEqual([]);
+  });
+
+  it('PR #312 review: a review count is no price — its numeric note is still checked', () => {
+    const facts = assessCompletionFacts({
+      summary: '已读取。',
+      fields: [{ name: '评价数', value: '299（好评率 98%）' }],
+      pages: [{ text: '- text: 299' }],
+    });
+    expect(unverifiedNote(facts.unverified)).toContain('好评率 98%');
   });
 
   it('a price field with a delivery note: only the price is checked', () => {
