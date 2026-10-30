@@ -368,9 +368,102 @@ function jsonKeys(value: unknown, depth = 0): string[] | null {
   return children.some((keys) => keys === null) ? null : (children.flat() as string[]);
 }
 
+/**
+ * FIX-48 #1 (Deploy-48 xhs-read paused on `record0:key:measurement_name+measurement_data`): the
+ * SDK's measurement record — the flat log plus a name and one flat object of timings. Key names
+ * as captured locally 2026-10-29 on the 300031 page (29 records, 8 kinds: pageView,
+ * httpRequestTiming, infraBrowserResourceTiming, infra_sec_web_api_walify…).
+ */
+const XHS_APM_MEASUREMENT_KEYS = new Set([
+  ...XHS_APM_KEYS,
+  'context_matchedPath',
+  'context_route',
+  'context_userAgent',
+  'context_artifactName',
+  'context_artifactVersion',
+  'context_networkQuality',
+  'context_deviceLevel',
+  'context_feSdkVersion',
+  'context_accountHolderCountry',
+  'context_accountGeographicZone',
+  'context_userId',
+  'context_simpling',
+  'custom_c1',
+  'custom_c2',
+  // Copies of custom_c1/c2 on some records (sec_restrict_web).
+  'c1',
+  'c2',
+  'measurement_name',
+  'measurement_data',
+]);
+/** `measurement_data` keys seen that the sensitive-word check would misread (…Code…, collect…). */
+const XHS_APM_DATA_KEYS = new Set(['encodedBodySize', 'collectTime']);
+const XHS_APM_DATA_MAX_KEYS = 80;
+const XHS_APM_VALUE_MAX = 1024;
+/** Largest measurement record (observed 2.4 KB; a batch stays under 32 KB). */
+const XHS_APM_RECORD_MAX = 4096;
+/**
+ * Two fixed tokens every record carries, removed before the action-word check — nothing else:
+ * the browser's 「(KHTML, like Gecko)」 and the 300031 page's own `error_code=` parameter name.
+ */
+const XHS_APM_FIXED_TOKENS = /\(KHTML, like Gecko\)|(?<=[?&])error_code(?==)/g;
+
+/** The value check shared by both record forms: a string without action words, or a number. */
+function xhsApmPlainValue(value: unknown): boolean {
+  if (typeof value === 'number') return Number.isFinite(value);
+  return (
+    typeof value === 'string' &&
+    value.length <= XHS_APM_VALUE_MAX &&
+    !PERSONAL_VALUE_RE.test(value.replace(XHS_APM_FIXED_TOKENS, ''))
+  );
+}
+
+/** Why one measurement record is not the SDK's — or null when it is. */
+function xhsApmMeasurementCheck(body: Record<string, unknown>): string | null {
+  if (JSON.stringify(body).length > XHS_APM_RECORD_MAX) return 'record-size';
+  const keys = Object.keys(body);
+  if (typeof body.clientTime !== 'number') return 'no-clientTime';
+  const extra = keys.filter((key) => !XHS_APM_MEASUREMENT_KEYS.has(key));
+  const unlisted = extra.filter((key) => !/^context_[A-Za-z]{1,40}$/.test(key));
+  if (unlisted.length) return `key:${unlisted.slice(0, 3).join('+')}`;
+  if (extra.length > XHS_APM_EXTRA_CONTEXT) return `extra-context:${extra.length}`;
+  const personal = extra.find((key) => PERSONAL_KEY_RE.test(key));
+  if (personal) return `personal-key:${personal}`;
+  const name = body.measurement_name;
+  if (typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(name))
+    return 'measurement_name';
+  // The visitor id is opaque hex (empty before the SDK sets it), never a phone or a name.
+  const userId = body.context_userId;
+  if (
+    userId !== undefined &&
+    !(typeof userId === 'string' && /^(?:[0-9a-f]{16,64})?$/.test(userId))
+  )
+    return 'value:context_userId';
+  const data = body.measurement_data;
+  if (!data || typeof data !== 'object' || Array.isArray(data))
+    return 'measurement_data:not-object';
+  const fields = Object.entries(data);
+  if (fields.length > XHS_APM_DATA_MAX_KEYS) return `measurement_data:keys:${fields.length}`;
+  const badKey = fields.find(
+    ([key]) =>
+      !/^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(key) ||
+      (PERSONAL_KEY_RE.test(key) && !XHS_APM_DATA_KEYS.has(key)),
+  );
+  if (badKey) return `measurement_data:key:${badKey[0].slice(0, 40)}`;
+  // One level only: a nested object or array in the timings is something else.
+  const badField = fields.find(([, value]) => !xhsApmPlainValue(value));
+  if (badField) return `measurement_data:value:${badField[0]}`;
+  const bad = Object.entries(body).find(
+    ([key, value]) => key !== 'measurement_data' && !xhsApmPlainValue(value),
+  );
+  return bad ? `value:${bad[0]}` : null;
+}
+
 /** Why one apm-fe record is not the SDK's flat log object — or null when it is. */
 function xhsApmRecordCheck(body: unknown): string | null {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return 'not-object';
+  if ('measurement_name' in body && 'measurement_data' in body)
+    return xhsApmMeasurementCheck(body as Record<string, unknown>);
   const entries = Object.entries(body);
   const keys = entries.map(([key]) => key);
   const extra = keys.filter((key) => !XHS_APM_KEYS.has(key));

@@ -85,8 +85,10 @@ describe('FIX-45 #4 · an apm-fe batch: every record has the FIX-43 shape, 32 KB
       measurement_name: 'httpRequestTiming',
       measurement_data: { webId: 'x', source: 'web' },
     });
+    // FIX-48 #1: the measurement form is now known; on the login error page it still pauses,
+    // on the page path's 「login」.
     expect(keyedLogCheck(new URL(XHS), JSON.stringify([today]))).toBe(
-      'record0:key:custom_c1+measurement_name+measurement_data',
+      'record0:value:context_matchedPath',
     );
   });
 });
