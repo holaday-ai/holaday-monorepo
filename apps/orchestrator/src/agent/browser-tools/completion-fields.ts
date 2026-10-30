@@ -1526,7 +1526,8 @@ const ALL_COUNTS =
  */
 /** PR #312 review: doubting the values' accuracy withdraws them too (「…是否准确」「…的准确性」). */
 const ALL_COUNTS_ACCURACY = '(?:是否(?:准确|正确|真实|可靠)|的?(?:准确性|真实性|可靠性)|准确与否)';
-const ALL_COUNTS_END = `(?=[，,；;。！？!?）)\\s]|$|分别|对应|是多少|${ALL_COUNTS_ACCURACY})`;
+// PR #312 review: an explanation may follow (「…各项具体数值（页面没有标签）」「…各项数值：…」).
+const ALL_COUNTS_END = `(?=[，,；;。！？!?）)（(：:—\\s]|$|分别|对应|是多少|${ALL_COUNTS_ACCURACY})`;
 const ALL_COUNTS_ADVERB = '(?:都|均|也|皆|全都|暂时?|目前|仍然?|还)?';
 const ALL_COUNTS_UNSURE_RE = new RegExp(
   `${UNSURE_VERB}(?!是否)[^，,；;。]{0,4}?${ALL_COUNTS}${ALL_COUNTS_END}|${ALL_COUNTS}${ALL_COUNTS_ACCURACY}?${ALL_COUNTS_ADVERB}${UNSURE_VERB}(?!是否)`,

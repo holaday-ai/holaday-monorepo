@@ -231,6 +231,9 @@ describe('FIX-48 #3 · 协调方复审 PR #311 的小问题', () => {
     // PR #312 review: doubting the values' accuracy withdraws them.
     '点赞20，评论2，收藏10，分享97，但无法确认各项具体数值是否准确',
     '点赞20，评论2，收藏10，分享97，但各项数据的准确性无法确认',
+    // PR #312 review: an explanation after the phrase.
+    '点赞20，评论2，收藏10，分享97。但无法确认各项具体数值（页面没有标签）',
+    '点赞20，评论2，收藏10，分享97。但无法确认各项具体数值：页面没有标签',
   ])('「%s」: the answer cannot confirm each count — all missing', (answer) => {
     expect(declaredAbsentFields(DY, `标题：A。作者：B。${answer}。`)).toEqual(COUNTS);
   });
