@@ -97,6 +97,31 @@ describe('FIX-49 #1–#5 · 「没有加载出来」「无法提供」 tied to t
   });
 });
 
+describe('FIX-49 local A/B · B dy-2 「目标视频页面加载失败」 judged complete', () => {
+  /** B dy-2 (f49B-dy-2, scrape only, 10.5 s), verbatim. Base 390097b1 judged it complete too. */
+  const B_DY2 =
+    '目标视频页面加载失败，显示"服务器出现问题"。\n\n抓取到的内容只包含推荐列表中的其他视频，目标视频（7377304298310389027）的标题、作者、点赞数、评论数、收藏数、分享数都没有加载出来。\n\n需要重新抓取该页面才能获取这些信息。\n\n来源：https://www.douyin.com/video/7377304298310389027';
+
+  it('the verbatim answer is 没拿到 — and each half of it on its own', () => {
+    expect(answerNotObtained(B_DY2, DY)).toBe(true);
+    expect(answerNotObtained('目标视频页面加载失败，显示"服务器出现问题"。', DY)).toBe(true);
+    expect(answerNotObtained('该页面加载失败。', DY)).toBe(true);
+    expect(
+      answerNotObtained('目标视频（7377304298310389027）的标题、作者、点赞数都没有加载出来。', DY),
+    ).toBe(true);
+    expect(answerNotObtained('以上信息都没有加载出来。', DY)).toBe(true);
+  });
+
+  it('reverse: a load retried and read, a side part, another item’s field', () => {
+    expect(answerNotObtained(`目标视频页面加载失败后刷新重试，已读到：\n${READ}`, DY)).toBe(false);
+    expect(answerNotObtained(`${READ}\n该视频的评论区没有加载出来。`, DY)).toBe(false);
+    expect(answerNotObtained('标题：柠檬巴巴露亚。推荐视频的作者没有加载出来。', DY)).toBe(false);
+    expect(
+      answerNotObtained('上证指数 3599.02 点。评论区没有加载出来。', '上证指数现在多少点'),
+    ).toBe(false);
+  });
+});
+
 describe('FIX-49 #3 · everyAskedFieldGiven', () => {
   it('reads labelled values, counts in prose, and 「为」', () => {
     expect(everyAskedFieldGiven(DY, READ)).toBe(true);
