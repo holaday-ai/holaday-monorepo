@@ -422,3 +422,32 @@ describe('DEPLOY-50 复审 #3 · still loading, a pointer elsewhere, or one valu
     expect(everyAskedFieldGiven('读标题', '标题：小喵')).toBe(true);
   });
 });
+
+describe('DEPLOY-50 local A/B · A reg-new-qq 「歌曲名称在页面抓取过程中没有被正确提取出来」 judged complete', () => {
+  const QQ = '在 QQ 音乐看热歌榜第一名';
+  it('the A answer verbatim is 没拿到', () => {
+    const a =
+      '根据抓取的数据，QQ音乐热歌榜（2026-10-30期）第一名是**薛之谦**的歌曲，时长 04:39。\n\n不过歌曲名称在页面抓取过程中没有被正确提取出来，只显示了歌手信息。\n\n数据来源：[QQ音乐热歌榜](https://y.qq.com/n/ryqq/toplist/26)';
+    expect(answerNotObtained(a, QQ)).toBe(true);
+    expect(answerNotObtained('第一名的歌曲名称在抓取时未能成功识别出来。', QQ)).toBe(true);
+    expect(answerNotObtained('第一名的歌名在解析过程中没有被解析出。', QQ)).toBe(true);
+  });
+
+  it('the name given, or something else not extracted, stays completed', () => {
+    expect(
+      answerNotObtained(
+        '热歌榜第一名是《我好像在哪见过你》，薛之谦。专辑名称在抓取过程中没有被提取出来。',
+        QQ,
+      ),
+    ).toBe(false);
+    expect(
+      answerNotObtained(
+        '热歌榜第一名是《我好像在哪见过你》，薛之谦。封面图在加载时没有被正确识别。',
+        QQ,
+      ),
+    ).toBe(false);
+    expect(
+      answerNotObtained('热歌榜第一名是《我好像在哪见过你》，歌曲名称在页面中正确显示。', QQ),
+    ).toBe(false);
+  });
+});
