@@ -1415,6 +1415,71 @@ export function askedFields(intent: string): string[] {
 }
 
 /**
+ * FIX-49 #3: no value — a missing marker or a guess (「作者：页面未显示」「标题为推测的…」). DEPLOY-50
+ * 复审 #3: nor still loading, nor a pointer to another line (「加载中」「同上」).
+ */
+const NO_VALUE_RE =
+  /^(?:页面(?:上|中)?(?:未|没有)|未(?:显示|获取|读|找到|知|提供|加载|能|列出)|没有|无法|不详|暂无|未知|不确定|推测|可能|大概|疑似|待定|待确认|(?:正在)?加载中|正在加载|loading|见上|同上|如上|无$|空$|n\/a$|null$|none$)/i;
+/** PR #313 review: a placeholder is no value (「—」「…」「？」「/」). */
+const PLACEHOLDER_RE = /^[\s—–\-…?？/\\.。·]*$/;
+/** The quotes and emphasis around a value (「「未知」」 is 未知). */
+const VALUE_EDGES_RE = /^[\s*_`「『“"《'‘]+|[\s*_`」』”"》'’]+$/g;
+/**
+ * PR #313 review: values said of another item (「推荐视频标题：A，作者：B」) are not the asked one's —
+ * each sentence is read only up to the first 推荐 / 相关 / 其他 / 其余 / 另一 / 别的. DEPLOY-50 复审 #1:
+ * nor of where the page went instead (「页面跳转到了首页」「首页第一个视频的标题」「以下是热门视频」) —
+ * unless the request itself asks for that place (`placeWords`).
+ */
+const OTHER_ITEM_RE = /推荐|相关|其他|其余|另一|别的|跳转/;
+const OTHER_PLACE_WORDS = ['首页', '热门', '第一个视频', '第1个视频'];
+
+function otherItemAt(sentence: string, placeWords: string[]): number {
+  const at = [sentence.search(OTHER_ITEM_RE), ...placeWords.map((w) => sentence.indexOf(w))].filter(
+    (i) => i >= 0,
+  );
+  return at.length ? Math.min(...at) : -1;
+}
+
+/**
+ * FIX-49 #3 (DEPLOY-49 复审): every field the request names has a value in the answer — a count
+ * with its number (as `declaredAbsentFields` reads it), any other field with a value after
+ * 「：」「为」「是」. Then an aside 「视频本身没有加载出来（不影响读取上述信息）」 is not 没拿到. With no
+ * named field, nothing tells that, so this is false. A missing marker or a placeholder, quoted or
+ * not, is no value; nor is a value given for another item.
+ */
+export function everyAskedFieldGiven(intent: string, summary: string): boolean {
+  const asked = askedFields(intent);
+  if (!asked.length || declaredAbsentFields(intent, summary).length) return false;
+  const placeWords = OTHER_PLACE_WORDS.filter((w) => !intent.includes(w));
+  const own = unescapeLiteralBreaks(summary)
+    .split(/(?<=[。！？!?\n])/)
+    .map((sentence) => {
+      const other = otherItemAt(sentence, placeWords);
+      return other < 0 ? sentence : `${sentence.slice(0, other)}\n`;
+    })
+    .join('');
+  const values = asked.map((name) =>
+    [
+      ...own.matchAll(
+        new RegExp(`${name}[^：:\\n为是]{0,4}?(?:[:：]|为|是)([^，,。；;、\\n]*)`, 'g'),
+      ),
+    ].map((m) => m[1]!.replace(VALUE_EDGES_RE, '')),
+  );
+  // DEPLOY-50 复审 #3: one value said of every asked field (「标题：见上，作者：见上…」) tells none of
+  // them — except 0, a real count.
+  const first = values.map((v) => v[0]);
+  if (asked.length > 1 && first.every((v) => v && v === first[0]) && !/^0+$/.test(first[0]!))
+    return false;
+  return asked.every((name, i) => {
+    const count = countState(own, name);
+    if (count) return count === 'value';
+    return values[i]!.some(
+      (value) => !!value && !NO_VALUE_RE.test(value) && !PLACEHOLDER_RE.test(value),
+    );
+  });
+}
+
+/**
  * FIX-45 (Deploy-45 b-p02 「第3条商品在搜索结果页快照中未显示价格，已打开其详情页读取到价格为 S$12.80」):
  * the gap is told and then filled — in the same sentence or the next one the field's value is
  * read after all. Not absent. DEPLOY-46 复审 #1: only a real value (not 「推测是…」「待确认」「谁」

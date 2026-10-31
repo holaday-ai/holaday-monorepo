@@ -43,6 +43,7 @@ import {
   NOT_OBTAINED_RE,
   WALL_ANSWER_RE,
   answerNotObtained,
+  pageNotObtained,
 } from './scrape-answer-check.js';
 import {
   type ExpertMode,
@@ -683,7 +684,12 @@ export function scrapePartialAnswer(summary: string, intent = ''): ScrapePartial
     .filter((line) => !MISSING_ROW_RE.test(line))
     .join('\n')
     .slice(0, 240);
-  if (NOT_OBTAINED_RE.test(head) || WALL_ANSWER_RE.test(head)) return null;
+  if (
+    NOT_OBTAINED_RE.test(head) ||
+    pageNotObtained(head, summary, intent) ||
+    WALL_ANSWER_RE.test(head)
+  )
+    return null;
   if (IDENTITY_UNKNOWN_RE.test(summary.slice(0, 600))) return null;
   const rows = summary
     .split('\n')

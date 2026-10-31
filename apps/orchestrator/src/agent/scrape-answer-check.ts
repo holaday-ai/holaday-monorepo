@@ -1,4 +1,8 @@
-import { declaredAbsentFields } from './browser-tools/completion-fields.js';
+import {
+  askedFields,
+  declaredAbsentFields,
+  everyAskedFieldGiven,
+} from './browser-tools/completion-fields.js';
 
 /**
  * Whether a scrape answer says it did not obtain what was asked (the browser then gets one
@@ -6,22 +10,112 @@ import { declaredAbsentFields } from './browser-tools/completion-fields.js';
  * checks — the coordinator's fixtures run it on its own (FIX-37 复审 #1).
  */
 
-// FIX-43 (local A/B reg-dy-2): 「页面没有加载出视频内容，显示的是"视频数据加载中"」 — the page itself
-// never rendered; a side part not loaded (「评论区没有加载出来」「下方推荐内容没有加载出来」) is not
-// this (DEPLOY-43 复审 #4): the page or the video has to open its clause.
-// FIX-44 (local A/B dy-2 「页面显示"视频数据加载中"，没有加载出视频的实际内容」): the verb may open the
-// clause too, when what it did not load is the page or the video itself, nothing after.
 // FIX-35 复审 #1 (BENCH r06): 「抓取内容中…没有包含 RFC 9110 的标题和发布时间」 is 没拿到 too —
 // only when the fetched content itself is what lacks it (复审 #2: 「根据抓取的 Node.js 发布页，
 // …更新没有包含破坏性变更」 is an answer).
 // DEPLOY-48 (local A/B reg-dy-2, verbatim 「页面加载失败，显示"服务器出现问题，请稍后重试"。抓取到的内容只有导航
 // 菜单，没有视频标题、作者…等任何视频信息」): a failed load (not one retried and read), fetched content
 // that is only something else, and 「没有…等任何…信息」 are 没拿到 too.
-// DEPLOY-49 (local A/B reg-dy-2, A verbatim 「目标视频（7377…）的正文内容没有加载出来。缺失信息（无法提供）：」):
-// the asked page itself, named as such (目标 / 该 / 这个 / 指定…), not loaded; and a list of what
-// 「无法提供」. A side part of it (「该视频的评论区没有加载出来」) is still not this.
+// FIX-49: the 「没有加载出来」「无法提供」 wordings moved to `pageNotObtained` below — they need the
+// question's fields. FIX-49 local A/B (B dy-2, verbatim 「目标视频页面加载失败，显示"服务器出现问题"」):
+// the failed load may name the asked page (目标 / 该 / 这个…) first.
 export const NOT_OBTAINED_RE =
-  /(?:目标|该|这个|此|指定|所查)(?:视频|页面|网页|笔记|商品|帖子|文章)(?:页面?)?(?:[（(][^）)\n]{0,30}[）)])?的?(?:正文|主体|实际)?(?:内容|数据|信息)?(?:没有|未能?|并未)加载(?:出|完成)|缺失的?(?:信息|内容|数据|字段)\s*[（(]\s*无法提供|(?:信息|内容|数据|字段)(?:均|都|全部)?无法提供|(?:^|[。！？!?\n，,；;：:])\s*(?:页面|网页|视频页?)(?:加载|打开)失败(?![^。\n]{0,8}(?:后|重试|刷新))|(?:抓取|抓到)(?:到)?的?(?:内容|结果|页面|数据)(?:里|中)?只有[^。\n]{0,30}?[，,]\s*没有|没有[^。\n]{2,60}?等任何[^。\n]{0,8}?(?:信息|内容|数据)|(?:^|[。！？!?\n，,；;：:]|抓取(?:到)?的)\s*(?:整个)?(?:页面|网页|正文|视频(?:页面?|内容|数据|信息)?)[^。\n，,；;]{0,6}(?:没有|未能?)加载(?:出|完成)|(?:^|[。！？!?\n，,；;：:])\s*(?:没有|未能?)加载出(?:来)?(?:整个)?(?:页面|网页|正文|视频)的?(?:实际|任何|具体)?(?:内容|数据|信息)?(?=\s*(?:[。！？!?\n，,；;]|$))|无法读取任何|缺少浏览器(?:环境)?|需要(?:在)?(?:真实|云端)?浏览器(?:中|里)?(?:操作|打开|执行)|(?:无法|不能|没法)(?:在此|直接|在这里)?(?:填写|下载|操作|执行|交互|搜索)|没(?:能|有)?(?:拿到|获取到|读到|抓到)|没有(?:显示|展示|任何)(?:任何)?(?:商品|内容|信息|数据|结果)|未能(?:获取|读取|找到|抓取|拿到)|拿不到|无法获取|无法给出|(?:抓取|抓到)(?:的|到的)?(?:内容|结果|页面|数据)(?:里|中)[^。\n]{0,80}?(?:没有|并未|未)包含|(?:没有|并未|未)(?:包含|提供|列出|收录|涉及)[^，。；\n]{0,24}的(?:相关|具体|详细)?(?:条目)?(?:信息|内容|数据)(?!库)|(?:抓取|抓到)(?:到)?的?(?:内容|结果|页面|数据)(?:里|中)?(?:没有|不含|未包含|缺)|在抓取(?:到)?的?(?:内容|结果|数据)(?:里|中)缺失|(?:抓取|抓到)(?:到)?的?(?:页面)?(?:内容|结果|页面|数据)(?:里|中)[^。\n]{0,20}(?:缺失|空缺|丢失)|(?:不|无法|没有|未)执行浏览器操作|不是[^，。\n]{0,24}(?:搜索|检索)[^，。\n]{0,24}的?第[一1](?:条|个|名)|(?:抓取|抓到)(?:到)?的?(?:内容|结果|页面|数据)(?:里|中)[^。\n]{0,12}(?:没有|未)(?:显示|展示|出现)|(?:没法|无法|不能)(?:直接)?回答|\b(?:could not|couldn't|unable to)\s+(?:find|get|retrieve|access|read|fill|download)\b|\b(?:not|isn't|aren't) (?:included|shown|present|listed|available) in the (?:provided|fetched|scraped|crawled) (?:content|page|data|results?)\b|\bthe (?:fetched|provided|scraped|crawled) (?:content|page|data) (?:does not|doesn't) (?:include|contain|show)\b/i;
+  /(?:^|[。！？!?\n，,；;：:])\s*(?:(?:目标|该|这个|此|指定|所查|要查的?)(?:视频|笔记|商品|帖子|文章)?)?(?:页面|网页|视频页?)(?:加载|打开)失败(?![^。\n]{0,8}(?:后|重试|刷新))|(?:抓取|抓到)(?:到)?的?(?:内容|结果|页面|数据)(?:里|中)?只有[^。\n]{0,30}?[，,]\s*没有|没有[^。\n]{2,60}?等任何[^。\n]{0,8}?(?:信息|内容|数据)|无法读取任何|缺少浏览器(?:环境)?|需要(?:在)?(?:真实|云端)?浏览器(?:中|里)?(?:操作|打开|执行)|(?:无法|不能|没法)(?:在此|直接|在这里)?(?:填写|下载|操作|执行|交互|搜索)|没(?:能|有)?(?:拿到|获取到|读到|抓到)|没有(?:显示|展示|任何)(?:任何)?(?:商品|内容|信息|数据|结果)|未能(?:获取|读取|找到|抓取|拿到)|拿不到|无法获取|无法给出|(?:抓取|抓到)(?:的|到的)?(?:内容|结果|页面|数据)(?:里|中)[^。\n]{0,80}?(?:没有|并未|未)包含|(?:没有|并未|未)(?:包含|提供|列出|收录|涉及)[^，。；\n]{0,24}的(?:相关|具体|详细)?(?:条目)?(?:信息|内容|数据)(?!库)|(?:抓取|抓到)(?:到)?的?(?:内容|结果|页面|数据)(?:里|中)?(?:没有|不含|未包含|缺)|在抓取(?:到)?的?(?:内容|结果|数据)(?:里|中)缺失|(?:抓取|抓到)(?:到)?的?(?:页面)?(?:内容|结果|页面|数据)(?:里|中)[^。\n]{0,20}(?:缺失|空缺|丢失)|(?:不|无法|没有|未)执行浏览器操作|不是[^，。\n]{0,24}(?:搜索|检索)[^，。\n]{0,24}的?第[一1](?:条|个|名)|(?:抓取|抓到)(?:到)?的?(?:内容|结果|页面|数据)(?:里|中)[^。\n]{0,12}(?:没有|未)(?:显示|展示|出现)|(?:没法|无法|不能)(?:直接)?回答|\b(?:could not|couldn't|unable to)\s+(?:find|get|retrieve|access|read|fill|download)\b|\b(?:not|isn't|aren't) (?:included|shown|present|listed|available) in the (?:provided|fetched|scraped|crawled) (?:content|page|data|results?)\b|\bthe (?:fetched|provided|scraped|crawled) (?:content|page|data) (?:does not|doesn't) (?:include|contain|show)\b/i;
+/**
+ * FIX-43 (local A/B reg-dy-2): 「页面没有加载出视频内容，显示的是"视频数据加载中"」 — the page itself
+ * never rendered; a side part not loaded (「评论区没有加载出来」「下方推荐内容没有加载出来」) is not
+ * this (DEPLOY-43 复审 #4): the page or the video has to open its clause. FIX-49 #2: nor a side part
+ * between them (「页面右侧推荐视频没有加载出来」).
+ * FIX-44 (local A/B dy-2 「…没有加载出视频的实际内容」): the verb may open the clause too, when what it
+ * did not load is the page or the video itself, nothing after.
+ * DEPLOY-49 (local A/B reg-dy-2, A verbatim 「目标视频（7377…）的正文内容没有加载出来。缺失信息（无法提供）：」):
+ * the asked page itself, named as such (目标 / 该 / 这个 / 指定… FIX-49 #4: 要查的), not loaded; and a
+ * list of what is missing 「（无法提供）」.
+ */
+const PAGE_NOT_LOADED_RE =
+  /(?:目标|该|这个|此|指定|所查|要查的?)(?:视频|页面|网页|笔记|商品|帖子|文章)(?:页面?)?(?:[（(][^）)\n]{0,30}[）)])?的?(?:正文|主体|实际)?(?:内容|数据|信息)?(?:没有|未能?|并未)加载(?:出|完成)|缺失的?(?:信息|内容|数据|字段)\s*[（(]\s*无法提供|(?:^|[。！？!?\n，,；;：:]|抓取(?:到)?的)\s*(?:整个)?(?:页面|网页|正文|视频(?:页面?|内容|数据|信息)?)(?:(?!推荐|右侧|左侧|侧栏|侧边|评论|下方|底部)[^。\n，,；;]){0,6}(?:没有|未能?)加载(?:出|完成)|(?:^|[。！？!?\n，,；;：:])\s*(?:没有|未能?)加载出(?:来)?(?:整个)?(?:页面|网页|正文|视频)的?(?:实际|任何|具体)?(?:内容|数据|信息)?(?=\s*(?:[。！？!?\n，,；;]|$))/i;
+/** DEPLOY-49: 「标题、作者等信息均无法提供」 — counted only for what was asked (`unprovidedAsked`). */
+const UNPROVIDED_G = /(?:信息|内容|数据|字段)(?:均|都|全部)?无法提供/g;
+/**
+ * FIX-49 local A/B (B dy-2, verbatim 「目标视频（7377…）的标题、作者、点赞数、评论数、收藏数、分享数都没有加载
+ * 出来」): the asked fields themselves said not loaded. Only when the clause names one (or 以上 / 上述…)
+ * — 「评论区没有加载出来」 is a side part, whatever the question.
+ */
+const FIELDS_NOT_LOADED_G = /(?:都|均|全部|也)?(?:没有|未能?|并未)(?:被)?加载出(?:来)?/g;
+const UNPROVIDED_ANCHOR_RE = /以上|上述|所需|缺失|以下/;
+/** Something else than the thing asked (「其他视频的信息」「更多评论内容」「相关推荐数据」). */
+const UNPROVIDED_OTHER_RE = /其他|其余|更多|推荐|相关/;
+
+/**
+ * FIX-49 #1: 「…信息无法提供」 is the asked thing missing when its clause says which — a field the
+ * question names, or 以上 / 上述 / 所需 / 缺失 / 以下 — and not about something else (「其他视频的信息
+ * 无法提供」「更多评论内容无法提供」). A field named before such a word still counts (「标题以及其他信息
+ * 均无法提供」), as does one named after the colon (「以下字段无法提供：标题、作者」). A question
+ * naming no field counts it unless it is about something else. Fields 「没有加载出来」 count only
+ * when named before it.
+ */
+function unprovidedAsked(text: string, intent: string): boolean {
+  const asked = askedFields(intent);
+  const names = askedNameRes(asked);
+  const matches = [
+    ...[...text.matchAll(UNPROVIDED_G)].map((m) => ({ m, named: false })),
+    ...[...text.matchAll(FIELDS_NOT_LOADED_G)].map((m) => ({ m, named: true })),
+  ];
+  return matches.some(({ m, named }) => {
+    const start = Math.max(
+      ...['。', '！', '？', '!', '?', '\n', '，', ',', '；', ';'].map((c) =>
+        text.lastIndexOf(c, m.index - 1),
+      ),
+    );
+    const clause = text.slice(start + 1, m.index);
+    if (UNPROVIDED_ANCHOR_RE.test(clause)) return true;
+    const other = clause.search(UNPROVIDED_OTHER_RE);
+    // A question naming no field has none to tie it to: what is unprovided is what was asked,
+    // unless it is said to be something else (a wrong 没拿到 costs one browser try; a wrong
+    // completion does not show).
+    if (!asked.length) return !named && other < 0;
+    const lead = other < 0 ? clause : clause.slice(0, other);
+    if (names.some((name) => name.test(lead))) return true;
+    if (other >= 0 || named) return false;
+    const after = text.slice(m.index + m[0].length).match(/^[^。！？!?\n]*/)![0];
+    return names.some((name) => name.test(after));
+  });
+}
+
+/**
+ * DEPLOY-50 复审 #2: a field named in a list may drop its 数 / 量 / 次数 (「点赞、评论、收藏、分享数据均
+ * 无法提供」 for 点赞数 / 评论数) — the stem then ends the word (「评论区」 is not 评论数).
+ */
+function askedNameRes(asked: string[]): RegExp[] {
+  return asked.map((name) => {
+    const stem = name.replace(/(?:次数|数|量)$/, '');
+    if (stem === name || stem.length < 2) return new RegExp(name);
+    return new RegExp(`${stem}(?:次数|数|量|(?=[、和与及或还]|[^\\p{Script=Han}]|$))`, 'u');
+  });
+}
+
+/**
+ * DEPLOY-50 复审 #1: the asked thing itself, named as such (目标 / 该 / 这个 / 指定 / 所查 / 要查的),
+ * said not loaded — not a side part of it (「该视频的推荐内容」).
+ */
+const TARGET_NOT_LOADED_RE =
+  /(?:目标|该|这个|此|指定|所查|要查的?)(?:视频|页面|网页|笔记|商品|帖子|文章)(?:(?!推荐|右侧|左侧|侧栏|侧边|评论|下方|底部)[^。！？!?\n]){0,40}?(?:没有|未能?|并未)(?:被)?加载/;
+/** …and then read after all, said so in so many words. */
+const READ_ANYWAY_RE = /不影响|已(?:经)?读取|仍(?:然)?(?:能|可)?读(?:取)?到/;
+
+/**
+ * FIX-49: the page or the asked thing said not loaded, or the asked fields 「无法提供」 — 没拿到, unless
+ * (#3) every field the question names has its value in the answer after all (「视频本身没有加载出来
+ * （不影响读取上述信息）」). DEPLOY-50 复审 #1: when it is the asked thing named as not loaded, the
+ * values are another item's (「目标视频没有加载出来。首页第一个视频的标题：A…」) unless the answer says
+ * they were read anyway (不影响 / 已读取 / 仍读到).
+ */
+export function pageNotObtained(head: string, answer: string, intent: string): boolean {
+  if (!PAGE_NOT_LOADED_RE.test(head) && !unprovidedAsked(head, intent)) return false;
+  if (TARGET_NOT_LOADED_RE.test(head) && !READ_ANYWAY_RE.test(answer)) return true;
+  return !everyAskedFieldGiven(intent, answer);
+}
+
 const NOT_SHOWN_RE =
   /^\s*(?:\*\*)?(?:页面未显示|未显示|未找到|没有找到|未获取到?|无法获取|没拿到|不详|未知|暂无|n\/a|not (?:shown|found|available))(?:\*\*)?[。.]?\s*$/i;
 
@@ -103,9 +197,11 @@ const SIDE_FIELD_RE =
  * is still told apart.
  * FIX-42 (Deploy-42 b-v06, 「第一名的**歌曲名称未被抓取到**」): 未被抓取到 / 未能读取 / 没拿到 say the same.
  * DEPLOY-46 (local A/B b-v06 / new-qq): 「歌曲名称未完整显示」「歌曲名部分未能显示」「歌曲名页面未渲染出来」 too.
+ * DEPLOY-50 (local A/B A reg-new-qq, verbatim 「歌曲名称在页面抓取过程中没有被正确提取出来，只显示了歌手
+ * 信息」): where it happened may stand between (在…过程中 / 时), and 正确 / 成功 / 识别 / 解析 say the same.
  */
 const INLINE_MISSING_RE =
-  /([^。！？!?\n，,；;]{0,6}?(?:名称|歌名|曲名|标题|名字|书名|片名|价格|股价|点位|指数|评分|\bname\b|\btitle\b|\bprice\b))\s*(?:部分|内容)?\s*[「『“"]?\s*(?:页面(?:上|中)?)?(?:未|没有|没)(?:被|能)?(?:完整)?(?:显示|渲染|获取到?|读到|找到|列出|给出|抓取到?|抓到|读取到?|拿到|提取到?|加载出来)/gi;
+  /([^。！？!?\n，,；;]{0,6}?(?:名称|歌名|曲名|标题|名字|书名|片名|价格|股价|点位|指数|评分|\bname\b|\btitle\b|\bprice\b))\s*(?:部分|内容)?\s*[「『“"]?\s*(?:在[^。！？!?\n，,；;]{0,12}?(?:过程中|时|中|里))?\s*(?:页面(?:上|中)?)?(?:未|没有|没)(?:被|能)?(?:完整|正确|成功)?(?:显示|渲染|获取到?|读到|找到|列出|给出|抓取到?|抓到|读取到?|拿到|提取到?|识别出?|解析出?|加载出来)/gi;
 
 /** A name that belongs to something else than the thing asked for (「专辑名称」「作者名字」). */
 const SECONDARY_NAME_RE =
@@ -176,6 +272,7 @@ export function answerNotObtained(answer: string, intent = ''): boolean {
   // Markdown emphasis (「**歌曲名称页面未显示**」) does not split a sentence (FIX-37 b-v06).
   const summary = answer.replace(/\*\*|__/g, '');
   if (NOT_OBTAINED_RE.test(summary.slice(0, 240))) return true;
+  if (pageNotObtained(summary.slice(0, 240), summary, intent)) return true;
   if (IDENTITY_UNKNOWN_RE.test(summary.slice(0, 600))) return true;
   if (WALL_ANSWER_RE.test(summary.slice(0, 240))) return true;
   // DEPLOY-43 复审 #3: the question names a chart, the answer's name comes from another one
