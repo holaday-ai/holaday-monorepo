@@ -17,4 +17,9 @@ describe('FIX-50 #2 · 「点赞等数据均无法提供」', () => {
     expect(answerNotObtained(`点赞等互动数据均已读取。\n${READ}`, DY)).toBe(false);
     expect(answerNotObtained(`${READ}\n（推荐视频的点赞等数据无法提供）`, DY)).toBe(false);
   });
+
+  it('DEPLOY-51 review #1 (e314): 「等」 starting another word is not a list cut short', () => {
+    expect(answerNotObtained(`${READ}\n分享等级信息无法提供。`, DY)).toBe(false);
+    expect(answerNotObtained(`${READ}\n评论等待审核的内容无法提供。`, DY)).toBe(false);
+  });
 });

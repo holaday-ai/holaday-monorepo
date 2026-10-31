@@ -32,7 +32,9 @@ import {
   type FrameGap,
   type FrameRead,
   declinedTargets,
+  dropSentences,
   frameReadsOf,
+  mainFrameOf,
   iframeContentGap,
   listsFrames,
   readFrameId,
@@ -447,6 +449,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   const frameReads = new Map<string, FrameRead>();
   const mainFrameIds = new Set<string>();
   let framesSeen = false;
+  const framePages = new Map<string, string | undefined>();
+  let lastPage: string | undefined;
   /** FIX-50: an iframe described without a read of it (or against it) is sent back once. */
   let frameLooked = false;
   /** FIX-34 (dy-2): one plain-wording correction for a hedged name the page shows. */
@@ -1520,7 +1524,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           const note = unverifiedNote(facts.unverified);
           // Fields are part of the answer: show the ones the summary leaves out.
           const listed = fieldLines(args.fields, summary);
-          const answer = [summary, listed, note].filter(Boolean).join('\n\n');
+          let answer = [summary, listed, note].filter(Boolean).join('\n\n');
           // FIX-31 (core-10 / xhs-read): an answer that itself opens with 「部分完成」 is
           // delivered as 部分完成 whatever finish status came with it.
           const saysPartial = /^\s*(?:部分完成|partially completed)/i.test(summary);
@@ -1598,13 +1602,19 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           }
           // FIX-50 (Deploy-50 core-10): what the answer says is in an iframe is what the run read
           // from it; not read (or said otherwise), it is sent back once to read it, then 部分完成.
-          const frameGap = iframeContentGap(
+          let frameGap = iframeContentGap(
             input.userIntent ?? input.intent,
             summary,
             [...frameReads.values()],
             framesSeen,
             pageEvidence.map((page) => page.text),
           );
+          // DEPLOY-51 review #1 (#3): an iframe the task did not ask for, said to hold what no read
+          // shows: that sentence is taken out, and the task is not marked down for it.
+          if (frameGap?.kind === 'drop') {
+            answer = dropSentences(answer, frameGap.sentences);
+            frameGap = null;
+          }
           const frameLead = frameGap && FRAME_GAP_LEAD[frameGap.kind];
           if (frameGap && !frameLooked && !concludeNow) {
             frameLooked = true;
@@ -2174,10 +2184,22 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           const id = readFrameId(outcome.text);
           if (id) mainFrameIds.add(id);
           framesSeen ||= listsFrames(outcome.text);
+          // DEPLOY-51 review #1 (#2): a page read again (reloaded) lists its frames anew; a frame
+          // of that page it no longer lists is gone, and its earlier read no longer stands. Reads
+          // of other pages stay: they are what those pages held (core-10: /iframe, then alerts).
+          const page = mainFrameOf(outcome.text);
+          if (page) lastPage = page.url ?? page.id;
+          if (page?.listed)
+            for (const [key, of] of framePages)
+              if (of === lastPage && !page.listed.includes(key)) {
+                frameReads.delete(key);
+                framePages.delete(key);
+              }
         }
         for (const read of frameReadsOf(outcome.text, child)) {
           frameReads.delete(read.key);
           frameReads.set(read.key, read);
+          framePages.set(read.key, lastPage);
         }
       }
       if (outcome.ok && action.tool === 'sections') outline = outlineFrom(outcome.text) ?? outline;
@@ -2218,13 +2240,13 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
 const INVALID_ARGUMENTS = Symbol('invalid-arguments');
 
 /** FIX-50: how an answer whose iframe account does not hold is delivered after its one look. */
-const FRAME_GAP_LEAD: Record<FrameGap['kind'], string> = {
+const FRAME_GAP_LEAD: Record<Exclude<FrameGap['kind'], 'drop'>, string> = {
   unread: '部分完成：iframe 内容没有读到。',
   mismatch: '部分完成：答案中的 iframe 内容与本次读到的不一致。',
   unstated: '部分完成：iframe 内容没有写出。',
 };
 
-function frameRemedy(gap: FrameGap): string {
+function frameRemedy(gap: Exclude<FrameGap, { kind: 'drop' }>): string {
   if (gap.kind === 'unread')
     return '任务要读 iframe 里的内容（或答案写了它的内容），但本次还没有读到这个 iframe 本身：父页面的快照不含 iframe 里的内容，「跨源」只是说父页面看不到它，不是它的内容。请先 snapshot 当前页，在返回的 frames 列表里找到这个 iframe 的 frameId，用 read_page（带这个 frameId）读取它，照读到的原样写；读到的是空白就写「iframe 为空」。页面整体加载失败（如 Application error）就重新打开再读。仍读不到，就以「部分完成」交付并写明「iframe 内容没有读到」，不要猜它的内容。';
   const read = gap.read ? `「${gap.read}」` : '空白（就写「iframe 为空」）';
