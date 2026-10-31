@@ -84,13 +84,14 @@ function unprovidedAsked(text: string, intent: string): boolean {
 
 /**
  * DEPLOY-50 复审 #2: a field named in a list may drop its 数 / 量 / 次数 (「点赞、评论、收藏、分享数据均
- * 无法提供」 for 点赞数 / 评论数) — the stem then ends the word (「评论区」 is not 评论数).
+ * 无法提供」 for 点赞数 / 评论数) — the stem then ends the word (「评论区」 is not 评论数). FIX-50: or
+ * ends a list cut short with 等 (「点赞等数据均无法提供」).
  */
 function askedNameRes(asked: string[]): RegExp[] {
   return asked.map((name) => {
     const stem = name.replace(/(?:次数|数|量)$/, '');
     if (stem === name || stem.length < 2) return new RegExp(name);
-    return new RegExp(`${stem}(?:次数|数|量|(?=[、和与及或还]|[^\\p{Script=Han}]|$))`, 'u');
+    return new RegExp(`${stem}(?:次数|数|量|(?=[、和与及或还等]|[^\\p{Script=Han}]|$))`, 'u');
   });
 }
 
