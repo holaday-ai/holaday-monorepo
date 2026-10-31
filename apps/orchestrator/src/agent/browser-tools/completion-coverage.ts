@@ -228,3 +228,188 @@ export function staleForRecentIntent(
   const newest = new Date(Math.max(...dates.map((d) => d.getTime()))).toISOString().slice(0, 10);
   return `问的是「${intent.match(window[0])![0]}」的内容，但答案里最新的日期是 ${newest}，都不在这个时间范围内；只给这个时间范围内的内容，没有就如实说明`;
 }
+
+/**
+ * FIX-50 (Deploy-50 core-10, the rollback): 「该页包含一个 iframe，内容为跨源错误页」, delivered as
+ * completed — the iframe held 「Your content goes here.」 and the run never read it. What an answer
+ * says is inside an iframe has to be what the run read from that frame.
+ */
+export type FrameRead = { key: string; sourceURL?: string; text: string };
+
+/** The main frame's own id in a read (to tell a child-frame read by frameId from it). */
+export function readFrameId(text: string): string | undefined {
+  try {
+    const value = JSON.parse(text) as { frameId?: unknown };
+    return typeof value.frameId === 'string' ? value.frameId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The frames a read actually read: a child frame read by its own frameId (`child`), or the
+ * same-origin child frames a main-frame snapshot reads inline (`frames[].tree`). A frame listed
+ * only with a limitation (跨源 / 尚未就绪 / 超过预算) was not read.
+ */
+export function frameReadsOf(text: string, child: boolean): FrameRead[] {
+  let value: {
+    frameId?: unknown;
+    sourceURL?: unknown;
+    tree?: unknown;
+    text?: unknown;
+    frames?: unknown;
+  };
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const url = (item: { sourceURL?: unknown }) =>
+    typeof item.sourceURL === 'string' ? item.sourceURL : undefined;
+  if (child) {
+    const read = typeof value.tree === 'string' ? value.tree : value.text;
+    return typeof value.frameId === 'string' && typeof read === 'string'
+      ? [{ key: value.frameId, sourceURL: url(value), text: read }]
+      : [];
+  }
+  return (Array.isArray(value.frames) ? value.frames : []).flatMap((item) =>
+    item && typeof item.frameId === 'string' && typeof item.tree === 'string'
+      ? [{ key: item.frameId, sourceURL: url(item), text: item.tree }]
+      : [],
+  );
+}
+
+/** A read main frame that lists child frames, read or not (an iframe is on the page). */
+export function listsFrames(text: string): boolean {
+  try {
+    const value = JSON.parse(text) as { frames?: unknown };
+    return Array.isArray(value.frames) && value.frames.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** A frame whose document is an error page: not a read of its content. */
+const FRAME_ERROR_RE =
+  /application error|an error occurred in the application|this page isn[’']t working|refused to connect|拒绝了.{0,6}连接|无法访问此网站|404 not found|502 bad gateway|503 service unavailable/i;
+const FRAME_ERROR_URL_RE =
+  /^(?:chrome-error|edge-error|about:neterror)|herokucdn\.com\/error-pages/i;
+
+function frameErrored(read: FrameRead): boolean {
+  return FRAME_ERROR_RE.test(read.text) || FRAME_ERROR_URL_RE.test(read.sourceURL ?? '');
+}
+
+/** The page text of a frame read: names and text, without roles, refs or other annotations. */
+function framePieces(text: string): string[] {
+  return text
+    .split('\n')
+    .flatMap((line) => {
+      const bare = line.replace(/\[[^\]]*\]/g, ' ').trim();
+      const role = bare.match(/^-\s*[\w-]+(?:\s+"((?:[^"\\]|\\.)*)")?\s*(?::\s*(.*))?$/);
+      if (!role) return [bare];
+      return [role[1] ?? '', (role[2] ?? '').replace(/^"|"$/g, '')];
+    })
+    .map((piece) => piece.replace(/\s+/g, ' ').trim())
+    .filter((piece) => /[\p{L}\p{N}]/u.test(piece) && !/^(?:-\s*)?\/url:/.test(piece));
+}
+
+const IFRAME_WORD_RE = /iframe|i-frame|内嵌框架|嵌入(?:的)?框架|内联框架|子框架|框架(?:内|中|里)/i;
+/** 「内容为…」「显示…」「写着…」: what the iframe holds, said as fact. */
+const CONTENT_CLAIM_RE =
+  /(?:内容|文本|文字|正文)\s*(?:为|是|显示为?|写着|[:：])|显示(?:为|的是|着)?|写着|里面是|内有|呈现/;
+/** 「iframe 为空」「iframe 是空白的」: an empty frame, said as such. */
+const BLANK_CLAIM_RE =
+  /(?:iframe|框架)[^。！？；;\n]{0,16}?(?:为空|是空的|空白|没有(?:任何)?(?:文字|文本|内容)|无内容|内容为空)|\bempty\b/i;
+/** 「跨源错误页」「无法加载」: an iframe said to hold an error, not content. */
+const ERROR_CLAIM_RE = /跨源|跨域|错误|报错|error|无法(?:加载|显示|读取|访问)|加载失败|拒绝/i;
+/** 「iframe 内容没有读到」: the answer itself says the frame was not read. */
+const NOT_READ_RE =
+  /没(?:有)?(?:读|读取)到|未(?:能)?读(?:取)?到|无法读(?:取)?|未读取|没有读取|读不到/;
+
+const normal = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
+
+export type FrameGap =
+  | { kind: 'unread' }
+  | { kind: 'mismatch'; read: string }
+  | { kind: 'unstated'; read: string };
+
+/**
+ * An answer's account of an iframe, held against the frames the run read (the latest read of
+ * each; a page that failed and was reopened counts by its last good read).
+ * - `unread`: the iframe is asked for, or its content described, and no frame was read (or only an
+ *   error page) — no description of it can be right.
+ * - `mismatch`: it is described as empty, as an error, or by a quote, and the reads say otherwise.
+ * - `unstated`: the iframe is asked for, a frame was read, and the answer says nothing of it.
+ */
+export function iframeContentGap(
+  intent: string,
+  answer: string,
+  reads: readonly FrameRead[],
+  framesSeen: boolean,
+  pageTexts: readonly string[] = [],
+): FrameGap | null {
+  const asked = IFRAME_WORD_RE.test(intent);
+  const claims = iframeWindows(answer).map((window) => {
+    const verb = window.search(CONTENT_CLAIM_RE);
+    return {
+      blank: BLANK_CLAIM_RE.test(window),
+      claim: verb < 0 ? '' : window.slice(verb).replace(CONTENT_CLAIM_RE, '').trim(),
+      quotes: [...window.matchAll(QUOTE_RE)].map((m) => normal(m[1]!)),
+      notRead: NOT_READ_RE.test(window),
+    };
+  });
+  const said = claims.filter(
+    (c) => !c.notRead && (c.blank || c.quotes.length > 0 || c.claim.length > 0),
+  );
+  const pageText = normal(pageTexts.join(' '));
+  const good = reads.filter((read) => !frameErrored(read));
+  if (!good.length) {
+    // No frame read: a quote holds when a read page has it word for word (a reader that puts a
+    // frame's text in the page's own read, without frame records); an error or a 「为空」 never
+    // holds; other words hold only where no frame was listed unread (nothing to hold them to).
+    const unread = said.some((c) =>
+      c.quotes.length
+        ? c.quotes.some((q) => !pageText.includes(q))
+        : c.blank ||
+          ERROR_CLAIM_RE.test(c.claim) ||
+          (framesSeen && !pageText.includes(normal(c.claim))),
+    );
+    // An iframe the page lists and the question asks for, never read: nothing said of it holds.
+    return unread || (asked && framesSeen) ? { kind: 'unread' } : null;
+  }
+  const pieces = good.flatMap((read) => framePieces(read.text));
+  // The last good read stands (a page that failed and was reopened).
+  const shown = framePieces(good.at(-1)!.text).join(' ').slice(0, 160);
+  const readText = normal(pieces.join(' '));
+  for (const c of said) {
+    if (c.blank) {
+      if (shown) return { kind: 'mismatch', read: shown };
+      continue;
+    }
+    if (c.quotes.some((q) => !readText.includes(q) && !pageText.includes(q)))
+      return { kind: 'mismatch', read: shown };
+    if (!c.quotes.length && ERROR_CLAIM_RE.test(c.claim)) return { kind: 'mismatch', read: shown };
+  }
+  if (!asked) return null;
+  if (!shown) return said.some((c) => c.blank) ? null : { kind: 'unstated', read: '' };
+  const lower = normal(answer).replace(/[“”「」『』"]/g, '');
+  const stated = pieces.some(
+    (piece) => piece.length >= 4 && lower.includes(normal(piece).replace(/[.。!！]$/, '')),
+  );
+  return stated ? null : { kind: 'unstated', read: shown };
+}
+
+/**
+ * Where an answer speaks of an iframe: from each mention, its clause and the next one
+ * (「该页包含一个 iframe，内容为…」), unless the next one moves on (「，并导航至 /javascript_alerts…」).
+ */
+function iframeWindows(answer: string): string[] {
+  return answer.split(/[。！？!?；;\n]/).flatMap((sentence) =>
+    [...sentence.matchAll(new RegExp(IFRAME_WORD_RE.source, 'gi'))].map((m) => {
+      const [own = '', next = ''] = sentence.slice(m.index).split(/[，,]/);
+      return /^\s*(?:并|然后|接着|随后|再|之后|另外|同时|and\b|then\b)/i.test(next)
+        ? own
+        : `${own}，${next}`;
+    }),
+  );
+}

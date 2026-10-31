@@ -2002,7 +2002,13 @@ export class CloudObservation {
           .slice(0, 30)) {
           const info = { frameId: this.frameId(child), sourceURL: safeObservationUrl(child.url()) };
           if (!origin(frame) || origin(child) !== origin(frame)) {
-            frames.push({ ...info, limitation: '跨源 iframe：父页面快照不暴露其内部引用。' });
+            // FIX-50 (Deploy-50 core-10): 「跨源」 said what the parent cannot see, and was taken
+            // for what the iframe holds (「内容为跨源错误页」).
+            frames.push({
+              ...info,
+              limitation:
+                '跨源 iframe：父页面快照不含它的内容（这不是它的内容）；要读它，用这个 frameId 调 read_page。',
+            });
           } else if (remaining > 0) {
             try {
               const value = JSON.parse(
