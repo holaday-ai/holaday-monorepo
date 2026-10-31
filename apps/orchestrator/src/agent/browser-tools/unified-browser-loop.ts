@@ -34,9 +34,9 @@ import {
   declinedTargets,
   dropSentences,
   frameReadsOf,
-  mainFrameOf,
   iframeContentGap,
   listsFrames,
+  mainFrameOf,
   readFrameId,
 } from './completion-coverage.js';
 import { completionDiagnostic } from './completion-diagnostic.js';
