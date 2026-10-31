@@ -339,9 +339,10 @@ function framePieces(text: string): string[] {
 
 /**
  * DEPLOY-51 review #1: 「框架中」 alone is not an iframe (「Next.js 框架中」「欧盟监管框架中」); a
- * 框架 counts only as 子框架 / 内联框架, or after 内嵌 / 嵌入 (not 嵌入式).
+ * 框架 counts only as 子框架 / 内联框架 / 第二个框架, or after 内嵌 / 嵌入 (not 嵌入式).
  */
-const IFRAME_WORD_RE = /iframe|i-frame|内联框架|子框架|(?:内嵌|嵌入(?!式))[^。，,；;\n]{0,8}?框架/i;
+const IFRAME_WORD_RE =
+  /iframe|i-frame|内联框架|子框架|(?:内嵌|嵌入(?!式))[^。，,；;\n]{0,8}?框架|第[一二两三四五六七八九十\d]+个框架/i;
 /** 「内容为…」「显示…」「写着…」「iframe：…」: what the iframe holds, said as fact. */
 const CONTENT_CLAIM_RE =
   /(?:内容|文本|文字|正文)\s*(?:为|是|显示为?|写着|[:：])|显示(?:为|的是|着)?|写着|里面是|内有|呈现|^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:：]/i;
@@ -421,24 +422,39 @@ function quoteHolds(quote: string, pieces: readonly string[]): boolean {
   );
 }
 
-/** Unquoted words hold where a read frame or page has them, or they carry a frame's text. */
-function claimHolds(claim: string, pieces: readonly string[], pageText: string): boolean {
-  const c = bare(claim);
-  if (!c) return true;
-  const texts = pieces.map(bare).filter((text) => weight(text) >= 4);
-  return (
-    bare(pieces.join(' ')).includes(c) ||
-    pageText.includes(c) ||
-    texts.some((text) => c.includes(text))
-  );
+/** What is left of a claim once the frame's own text is taken out: only joining words, or nothing. */
+const CONNECTIVE_RE =
+  /^(?:[\s\p{P}\p{S}]|和|与|及|以及|并|等|其中|的|为|是|内容|文本|文字|一段|一句|\bthe\b|\ba\b|\btext\b|\band\b)*$/iu;
+
+/** A clause that goes on describing what came before it. */
+const CONTINUE_RE =
+  /^\s*(?:还|另有|以及|并有|也有|及|和|包括|包含|其中|此外|外加|附带|带有|有一?个|\balso\b|\bplus\b|\bwith\b)/i;
+
+/**
+ * A claim holds when it is the frame's text: the quotes in it hold, and taking out the quotes
+ * and every read text it carries leaves only joining words (DEPLOY-51 review #2: 「Your content
+ * goes here，还有一个提交按钮和管理员登录链接」 adds what no read shows).
+ */
+function claimHolds(claim: string, quotes: readonly string[], pieces: readonly string[]): boolean {
+  if (!quotes.every((q) => quoteHolds(q, pieces))) return false;
+  // Its own clause, and the ones that go on about it (「，还有一个提交按钮…」), not the next part of
+  // the answer (「，checkboxes 已读」).
+  const [own = '', ...more] = normal(claim).replace(FRAME_QUOTE_RE, ' ').split(/[，,]/);
+  let rest = [own, ...more.filter((part) => CONTINUE_RE.test(part))].join(' ');
+  for (const text of pieces
+    .map(bare)
+    .filter((text) => weight(text) >= 2)
+    .sort((a, b) => b.length - a.length))
+    rest = rest.split(text).join(' ');
+  return CONNECTIVE_RE.test(rest);
 }
 
 export type FrameGap =
   | { kind: 'unread' }
   | { kind: 'mismatch'; read: string }
   | { kind: 'unstated'; read: string }
-  /** DEPLOY-51 review #1 (#3): an iframe the task did not ask for — only these sentences go. */
-  | { kind: 'drop'; sentences: string[] };
+  /** DEPLOY-51 review #1 (#3): an iframe the task did not ask for — only these clauses go. */
+  | { kind: 'drop'; clauses: string[] };
 
 /**
  * An answer's account of an iframe, held against the frames the run read (the latest read of
@@ -448,8 +464,9 @@ export type FrameGap =
  * - `mismatch`: it is described as empty, as an error, by a quote or in words, and the reads (of
  *   the iframe named, when one is) say otherwise.
  * - `unstated`: the iframe is asked for, a frame was read, and the answer says nothing of it.
- * - `drop`: the task did not ask for an iframe, and what a sentence says one holds does not hold:
- *   that sentence is taken out, the rest of the answer stands.
+ * - `drop`: the task did not ask for an iframe, and what a clause says one holds does not hold:
+ *   that clause is taken out, the rest of the answer stands — unless it carries what was asked,
+ *   or nothing would be left; then it is sent back (`unread` / `mismatch`) like an asked one.
  */
 export function iframeContentGap(
   intent: string,
@@ -459,17 +476,20 @@ export function iframeContentGap(
   pageTexts: readonly string[] = [],
 ): FrameGap | null {
   const asked = IFRAME_WORD_RE.test(intent);
-  const claims = iframeWindows(answer, asked).flatMap(({ window, sentence, subject }) => {
+  const claims = iframeWindows(answer, asked).flatMap(({ window, clause, subject }) => {
     const verb = window.search(CONTENT_CLAIM_RE);
     // Not asked: only a sentence with the iframe as its subject says what it holds.
     if (!asked && verb >= 0) {
       const word = window.match(new RegExp(IFRAME_WORD_RE.source, 'i'))![0];
       if (verb > 0 && !SUBJECT_GAP_RE.test(window.slice(word.length, verb))) return [];
     }
-    const claim = verb < 0 ? '' : window.slice(verb).replace(CONTENT_CLAIM_RE, '').trim();
+    // What it holds is what follows the last verb (「iframe 中显示的是编辑器，内容为 "…"」,
+    // 「iframe：读取 iframe 中的文本内容为 "…"」); an earlier description is not the content.
+    const last = [...window.matchAll(new RegExp(CONTENT_CLAIM_RE.source, 'gi'))].at(-1);
+    const claim = last ? window.slice(last.index + last[0].length).trim() : '';
     return [
       {
-        sentence,
+        clause,
         subject,
         blank: BLANK_CLAIM_RE.test(window),
         claim,
@@ -498,7 +518,7 @@ export function iframeContentGap(
             (framesSeen && !pageText.includes(normal(c.claim)))
       )
         failed.push(c);
-    if (!asked) return failed.length ? { kind: 'drop', sentences: sentencesOf(failed) } : null;
+    if (!asked) return dropOr(intent, answer, failed, { kind: 'unread' });
     // An iframe the page lists and the question asks for, never read: nothing said of it holds.
     return failed.length || framesSeen ? { kind: 'unread' } : null;
   }
@@ -516,17 +536,15 @@ export function iframeContentGap(
     const pieces = piecesOf(frames);
     const holds = c.blank
       ? frames.some((r) => framePieces(r.text).length === 0)
-      : c.quotes.length
-        ? // A quote is the frame's own text: the page around it does not hold it.
-          c.quotes.every((q) => quoteHolds(q, pieces))
-        : // DEPLOY-51 review #1 (#1): words, unquoted, hold only where a read has them.
-          !ERROR_CLAIM_RE.test(c.claim) && claimHolds(c.claim, pieces, pageText);
+      : // DEPLOY-51 review #1 (#1) / #2 (#1): what is said, quoted or not, is the frame's text
+        // and no more — the page around it does not hold it.
+        !ERROR_CLAIM_RE.test(c.claim) && claimHolds(c.claim, c.quotes, pieces);
     if (!holds) {
       failed.push(c);
       read ||= shownOf(frames.length ? frames : current);
     }
   }
-  if (!asked) return failed.length ? { kind: 'drop', sentences: sentencesOf(failed) } : null;
+  if (!asked) return dropOr(intent, answer, failed, { kind: 'mismatch', read });
   if (failed.length) return { kind: 'mismatch', read };
   const pieces = piecesOf(current);
   const shown = shownOf(current);
@@ -541,20 +559,52 @@ export function iframeContentGap(
   return stated || said.some((c) => c.blank) ? null : { kind: 'unstated', read: shown };
 }
 
-function sentencesOf(claims: ReadonlyArray<{ sentence: string }>): string[] {
-  return [...new Set(claims.map((c) => c.sentence))];
+/** Generic words of a task, not what it asks for (「读页面标题」 asks for the 标题, not the 页面). */
+const TASK_WORDS =
+  /请使用|使用|云端|浏览器|打开|读取|查看|一下|页面|网页|网站|内容|显示|告诉|给出|返回/g;
+
+/**
+ * DEPLOY-51 review #2 (#2): an unasked iframe's clauses go only when nothing asked goes with them —
+ * no number the rest of the answer lacks, no word of the task — and something is left.
+ */
+function dropOr(
+  intent: string,
+  answer: string,
+  failed: ReadonlyArray<{ clause: string }>,
+  otherwise: FrameGap,
+): FrameGap | null {
+  if (!failed.length) return null;
+  const clauses = [...new Set(failed.map((c) => c.clause))];
+  const rest = dropClauses(answer, clauses);
+  const asks = intent.replace(TASK_WORDS, ' ').match(/\p{Script=Han}{2,}/gu) ?? [];
+  const pairs = asks.flatMap((run) => [...run].slice(1).map((ch, i) => run[i]! + ch));
+  const carries = (clause: string) =>
+    (clause.match(/\d+(?:[.,]\d+)?/g) ?? []).some((n) => !rest.includes(n)) ||
+    pairs.some((pair) => clause.includes(pair));
+  return /[\p{L}\p{N}]/u.test(rest) && !clauses.some(carries)
+    ? { kind: 'drop', clauses }
+    : otherwise;
 }
 
-/** DEPLOY-51 review #1 (#3): an answer without these sentences (and their end marks). */
-export function dropSentences(answer: string, sentences: readonly string[]): string {
+/**
+ * DEPLOY-51 review #2 (#2): an answer without these clauses — each the iframe's own, from the
+ * comma before it to the one after (「商品价格为 99 元，广告 iframe 显示的是一双鞋。」 keeps the price).
+ */
+export function dropClauses(answer: string, clauses: readonly string[]): string {
   let out = answer;
-  for (const sentence of sentences) {
-    const at = out.indexOf(sentence);
+  for (const clause of clauses) {
+    const at = out.indexOf(clause);
     if (at < 0) continue;
-    const end = out.slice(at + sentence.length).match(/^[。！？!?；;]?/)![0].length;
-    out = out.slice(0, at) + out.slice(at + sentence.length + end);
+    const before = out.slice(0, at).match(/\s*[，,]\s*$/)?.[0].length ?? 0;
+    const after = before
+      ? 0
+      : (out.slice(at + clause.length).match(/^\s*[，,。！？!?；;]?/)?.[0].length ?? 0);
+    out = out.slice(0, at - before) + out.slice(at + clause.length + after);
   }
-  return out.replace(/[ \t]+\n/g, '\n').trim();
+  return out
+    .replace(/[ \t]+\n/g, '\n')
+    .trim()
+    .replace(/[，,；;、]$/, '');
 }
 
 /**
@@ -567,7 +617,7 @@ export function dropSentences(answer: string, sentences: readonly string[]): str
 function iframeWindows(
   answer: string,
   asked: boolean,
-): Array<{ window: string; sentence: string; subject: string }> {
+): Array<{ window: string; clause: string; subject: string }> {
   return answer.split(/[。！？!?；;\n]/).flatMap((sentence) =>
     [...sentence.matchAll(new RegExp(IFRAME_WORD_RE.source, 'gi'))].map((m) => {
       const [own = '', next = ''] = sentence.slice(m.index).split(/[，,]/);
@@ -579,7 +629,7 @@ function iframeWindows(
       const verb = window.search(CONTENT_CLAIM_RE);
       return {
         window,
-        sentence: sentence.trim(),
+        clause: (lead + own).trim(),
         subject: lead + (verb < 0 ? window : window.slice(0, verb)),
       };
     }),

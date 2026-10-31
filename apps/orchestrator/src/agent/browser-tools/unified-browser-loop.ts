@@ -32,7 +32,7 @@ import {
   type FrameGap,
   type FrameRead,
   declinedTargets,
-  dropSentences,
+  dropClauses,
   frameReadsOf,
   iframeContentGap,
   listsFrames,
@@ -1610,9 +1610,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             pageEvidence.map((page) => page.text),
           );
           // DEPLOY-51 review #1 (#3): an iframe the task did not ask for, said to hold what no read
-          // shows: that sentence is taken out, and the task is not marked down for it.
+          // shows: that clause is taken out, and the task is not marked down for it.
           if (frameGap?.kind === 'drop') {
-            answer = dropSentences(answer, frameGap.sentences);
+            answer = dropClauses(answer, frameGap.clauses);
             frameGap = null;
           }
           const frameLead = frameGap && FRAME_GAP_LEAD[frameGap.kind];
@@ -2188,7 +2188,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           // of that page it no longer lists is gone, and its earlier read no longer stands. Reads
           // of other pages stay: they are what those pages held (core-10: /iframe, then alerts).
           const page = mainFrameOf(outcome.text);
-          if (page) lastPage = page.url ?? page.id;
+          // The same page with another #fragment is the same document.
+          if (page) lastPage = page.url?.replace(/#.*$/, '') ?? page.id;
           if (page?.listed)
             for (const [key, of] of framePages)
               if (of === lastPage && !page.listed.includes(key)) {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import {
   type FrameRead,
-  dropSentences,
+  dropClauses,
   frameReadsOf,
   iframeContentGap,
 } from './completion-coverage.js';
@@ -459,13 +459,13 @@ describe('DEPLOY-51 review #1 · iframe claims (fix-50/review1-fixtures/iframe31
     const yt = '标题：X。页面里的 YouTube iframe 显示的是《晴天》MV。';
     expect(gap('读页面标题', yt, [], ['heading "X"'])).toEqual({
       kind: 'drop',
-      sentences: ['页面里的 YouTube iframe 显示的是《晴天》MV'],
+      clauses: ['页面里的 YouTube iframe 显示的是《晴天》MV'],
     });
     expect(
       gap('读页面标题', '标题：X。页面里的 iframe 显示的是一个登录表单。', [AD], ['heading "X"']),
     ).toEqual({
       kind: 'drop',
-      sentences: ['页面里的 iframe 显示的是一个登录表单'],
+      clauses: ['页面里的 iframe 显示的是一个登录表单'],
     });
   });
 
@@ -518,9 +518,9 @@ describe('DEPLOY-51 review #1 · iframe claims (fix-50/review1-fixtures/iframe31
     });
   });
 
-  it('dropSentences takes out only those sentences', () => {
+  it('dropClauses takes out only those sentences', () => {
     expect(
-      dropSentences('标题：X。页面里的 YouTube iframe 显示的是《晴天》MV。作者：Y。', [
+      dropClauses('标题：X。页面里的 YouTube iframe 显示的是《晴天》MV。作者：Y。', [
         '页面里的 YouTube iframe 显示的是《晴天》MV',
       ]),
     ).toBe('标题：X。作者：Y。');
@@ -641,3 +641,165 @@ describe('DEPLOY-51 review #1 · in the loop', () => {
     expect((outcome as { summary: string }).summary).not.toContain('晴天');
   });
 });
+
+describe('DEPLOY-51 review #2 (fix-50/review2-fixtures)', () => {
+  const I = '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts';
+  const T: FrameRead = {
+    key: 'frame_1',
+    sourceURL: 'about:blank',
+    text: '- paragraph [ref=f1e3]: Your content goes here.',
+  };
+  const MCE: FrameRead = {
+    key: 'frame_1',
+    sourceURL: 'about:blank',
+    text: '- application "Rich Text Area. Press ALT-0 for help."\n- paragraph: Your content goes here.',
+  };
+  const AL = [
+    'heading "JavaScript Alerts" button "Click for JS Alert" Result: You successfully clicked an alert',
+  ];
+  const gap = (intent: string, answer: string, reads: FrameRead[], pages: string[]) =>
+    iframeContentGap(intent, answer, reads, true, pages);
+
+  it('#1 red line: the frame text with made-up details around it does not hold', () => {
+    for (const answer of [
+      'iframe 内容为 Your content goes here，还有一个提交按钮和管理员登录链接。',
+      'iframe 内容为 Hello。',
+      'iframe 内容为 An iFrame containing the TinyMCE WYSIWYG Editor。',
+      'iframe 显示 You successfully clicked an alert。',
+      'iframe 内容为「Your content goes here.」。第二个框架显示的是登录表单。',
+    ])
+      expect(gap(I, answer, [T], AL), answer).toEqual({
+        kind: 'mismatch',
+        read: 'Your content goes here.',
+      });
+  });
+
+  it('#1 reverse: the frame text as read, however phrased, holds', () => {
+    for (const [answer, read] of [
+      [LOCAL_B, T],
+      [LOCAL_B, MCE],
+      ['iframe 里是一个 TinyMCE 编辑器，内容为 Your content goes here.', MCE],
+      ['1. iframe：Your content goes here.\n2. alert 已点击。', T],
+      ['编辑器 iframe 的内容是「Your content goes here」。', T],
+      ['The iframe contains the text "Your content goes here."', T],
+      ['iframe 内容为 Your content goes here，checkboxes 已读。', T],
+    ] as const)
+      expect(gap(I, answer, [read], AL), answer).toBeNull();
+    const YT: FrameRead = {
+      key: 'f_yt',
+      sourceURL: 'https://www.youtube.com/embed/abc',
+      text: '- link "Never Gonna Give You Up"',
+    };
+    expect(
+      gap(
+        '读这篇文章标题',
+        '标题：X。文中嵌入的 YouTube iframe 显示的是《Never Gonna Give You Up》。',
+        [YT],
+        ['heading "X"'],
+      ),
+    ).toBeNull();
+  });
+
+  it('#2 an unasked iframe clause goes, the main answer around it stays', () => {
+    for (const [intent, answer, page, kept] of [
+      [
+        '查商品价格',
+        '商品价格为 99 元，广告 iframe 显示的是一双鞋。',
+        'price ¥99',
+        '商品价格为 99 元。',
+      ],
+      [
+        '读页面标题',
+        '标题：Example Domain，iframe 显示的是登录框',
+        'heading "Example Domain"',
+        '标题：Example Domain',
+      ],
+      [
+        '查天气',
+        '北京今天晴，气温 20 度；页面里的 iframe 显示的是广告',
+        '北京 晴 20',
+        '北京今天晴，气温 20 度',
+      ],
+    ] as const) {
+      const found = gap(intent, answer, [], [page]);
+      expect(found, answer).toMatchObject({ kind: 'drop' });
+      expect(dropClauses(answer, (found as { clauses: string[] }).clauses)).toBe(kept);
+    }
+  });
+
+  it('#2 the clause carries the asked value: not dropped, sent back', () => {
+    expect(
+      gap('查商品价格', 'iframe 显示的价格为 99 元，与主页面一致。', [], ['price ¥99']),
+    ).toEqual({
+      kind: 'unread',
+    });
+    // Nothing would be left.
+    expect(gap('读页面标题', 'iframe 显示的是登录框。', [], ['heading "X"'])).toEqual({
+      kind: 'unread',
+    });
+  });
+
+  it('#3 (small) the same page with another #fragment: an old frame read no longer stands', async () => {
+    const IFRAME = 'https://the-internet.herokuapp.com/iframe';
+    let reads = 0;
+    let turn = 0;
+    const calls = [
+      { name: 'navigate', input: { url: IFRAME } },
+      { name: 'snapshot', input: {} },
+      { name: 'read_page', input: { frameId: 'frame_1' } },
+      { name: 'snapshot', input: {} },
+      finishOf('iframe 内容为「Old text」。'),
+      finishOf('iframe 内容为「Old text」。'),
+    ];
+    const adapter: MessagesAdapter = {
+      metadata: { provider: 'anthropic', model: 'fixture' },
+      async create() {
+        const call = calls[Math.min(turn++, calls.length - 1)]!;
+        return {
+          id: String(turn),
+          metadata: { provider: 'anthropic', model: 'fixture' },
+          content: [{ type: 'tool_use', id: String(turn), ...call }],
+          stopReason: 'tool_use',
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '请使用云端浏览器，读 the-internet.herokuapp.com 的 iframe',
+      adapter,
+      maxSteps: 12,
+      observationV2: true,
+      currentPageUrl: () => IFRAME,
+      execute: (async (action: { tool: string; frameId?: string }) => {
+        if (action.frameId)
+          return {
+            ok: true,
+            url: IFRAME,
+            text: JSON.stringify({ frameId: action.frameId, tree: '- paragraph: Old text' }),
+          };
+        if (action.tool === 'snapshot') reads++;
+        return {
+          ok: true,
+          url: IFRAME,
+          text: JSON.stringify({
+            frameId: 'frame_main',
+            sourceURL: reads > 1 ? `${IFRAME}#top` : IFRAME,
+            tree: '- iframe [ref=e5]',
+            frames: [{ frameId: `frame_${reads}`, limitation: '跨源 iframe' }],
+          }),
+        };
+      }) as never,
+    });
+    expect((outcome as { summary: string }).summary).toMatch(/^部分完成：iframe 内容没有读到/);
+  });
+});
+
+function finishOf(summary: string) {
+  return { name: 'finish', input: { status: 'completed', summary } };
+}
