@@ -334,3 +334,91 @@ describe('FIX-49 #7 · the widened URL keys (confirmed) still go through host / 
     expect(timing({ url: feed, matchedPath: feed, duration: 1 })).toBeNull();
   });
 });
+
+describe('DEPLOY-50 复审 #1 · the asked thing named as not loaded, then another item’s data (rd3_313.mjs)', () => {
+  const VALS = '标题：A，作者：B，点赞数：1，评论数：2，收藏数：3，分享数：4';
+  it.each([
+    `目标视频没有加载出来。首页第一个视频的${VALS}`,
+    `目标视频没有加载出来。以下是热门视频：${VALS}`,
+    `这个视频页面没有加载出来，页面显示的是别的视频：${VALS}`,
+    `目标视频没有加载出来，页面跳转到了首页，首页视频${VALS}`,
+    '要查的视频没有加载出来。标题：A，作者：B，点赞数：0，评论数：0，收藏数：0，分享数：0',
+    `目标视频没有加载出来。${VALS}`,
+  ])('「%s」 is 没拿到', (answer) => {
+    expect(answerNotObtained(answer, DY)).toBe(true);
+  });
+
+  it('read anyway, said so, still counts (不影响 / 已读取 / 仍读到)', () => {
+    expect(
+      answerNotObtained(`目标视频的画面没有加载出来（不影响读取以下信息）。\n${READ}`, DY),
+    ).toBe(false);
+    expect(answerNotObtained(`该视频没有加载出来，刷新后已读取。\n${READ}`, DY)).toBe(false);
+    expect(answerNotObtained(`这个视频页面没有加载出来，但仍读到以下信息。\n${READ}`, DY)).toBe(
+      false,
+    );
+    // …but not when what was read is another item's.
+    expect(
+      answerNotObtained(`目标视频没有加载出来（不影响读取）。首页第一个视频的${VALS}`, DY),
+    ).toBe(true);
+  });
+
+  it('a generic aside with every value read stays completed', () => {
+    expect(answerNotObtained(`${VALS}。视频画面没有加载出来。`, DY)).toBe(false);
+    expect(answerNotObtained(`${VALS}。视频页面加载失败后刷新已读取。`, DY)).toBe(false);
+    expect(answerNotObtained(`视频本身没有加载出来（不影响读取上述信息）。\n${READ}`, DY)).toBe(
+      false,
+    );
+  });
+
+  it('首页 / 热门 / 第一个视频 / 跳转 mark another item, unless the request asks for that place', () => {
+    expect(everyAskedFieldGiven(DY, `首页第一个视频的${VALS}`)).toBe(false);
+    expect(everyAskedFieldGiven(DY, `以下是热门视频：${VALS}`)).toBe(false);
+    expect(everyAskedFieldGiven(DY, `页面跳转到了首页，${VALS}`)).toBe(false);
+    const home = '打开抖音首页，读第一个视频的标题、作者';
+    expect(everyAskedFieldGiven(home, '首页第一个视频的标题：A，作者：B')).toBe(true);
+  });
+});
+
+describe('DEPLOY-50 复审 #2 · a count named without its 数 / 量', () => {
+  it('「点赞、评论、收藏、分享数据均无法提供」 is the asked counts unprovided', () => {
+    expect(answerNotObtained('标题：A。作者：B。点赞、评论、收藏、分享数据均无法提供。', DY)).toBe(
+      true,
+    );
+    expect(answerNotObtained('标题：A。作者：B。点赞和评论数据都无法提供。', DY)).toBe(true);
+    const plays = '打开 https://www.bilibili.com/video/BV1 读标题和播放量';
+    expect(answerNotObtained('标题：A。播放数据无法提供。', plays)).toBe(true);
+  });
+
+  it('a word that only starts like the stem is not the count (「评论区」)', () => {
+    expect(answerNotObtained('标题：A，作者：B。评论区内容无法提供。', DY)).toBe(false);
+    expect(answerNotObtained(`评论区没有加载出来。\n${READ}`, DY)).toBe(false);
+  });
+});
+
+describe('DEPLOY-50 复审 #3 · still loading, a pointer elsewhere, or one value for all is no value', () => {
+  const ALL = (v: string) =>
+    `要查的视频没有加载出来。标题：${v}，作者：${v}，点赞数：${v}，评论数：${v}，收藏数：${v}，分享数：${v}`;
+  it.each(['加载中', '正在加载', 'Loading', '见上', '同上', '如上', '页面未显示'])(
+    '「%s」 in every field is 没拿到',
+    (v) => {
+      expect(answerNotObtained(ALL(v), DY)).toBe(true);
+    },
+  );
+
+  it.each(['加载中', '正在加载...', 'loading…', '见上', '同上', '如上'])(
+    '「%s」 gives the field no value',
+    (v) => {
+      expect(everyAskedFieldGiven('读标题和作者', `标题：A，作者：${v}`)).toBe(false);
+    },
+  );
+
+  it('the same value for every asked field tells none — except 0', () => {
+    expect(everyAskedFieldGiven('读标题和作者', '标题：小喵，作者：小喵')).toBe(false);
+    expect(everyAskedFieldGiven('读标题和作者', '标题：「小喵」，作者：小喵')).toBe(false);
+    expect(
+      everyAskedFieldGiven(DY, '标题：A，作者：B，点赞数：0，评论数：0，收藏数：0，分享数：0'),
+    ).toBe(true);
+    expect(everyAskedFieldGiven('读标题和作者', '标题：小喵日记，作者：小喵')).toBe(true);
+    expect(everyAskedFieldGiven('读标题', '标题：小喵')).toBe(true);
+  });
+});

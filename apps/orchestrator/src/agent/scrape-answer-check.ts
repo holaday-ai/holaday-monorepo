@@ -56,6 +56,7 @@ const UNPROVIDED_OTHER_RE = /其他|其余|更多|推荐|相关/;
  */
 function unprovidedAsked(text: string, intent: string): boolean {
   const asked = askedFields(intent);
+  const names = askedNameRes(asked);
   const matches = [
     ...[...text.matchAll(UNPROVIDED_G)].map((m) => ({ m, named: false })),
     ...[...text.matchAll(FIELDS_NOT_LOADED_G)].map((m) => ({ m, named: true })),
@@ -74,20 +75,44 @@ function unprovidedAsked(text: string, intent: string): boolean {
     // completion does not show).
     if (!asked.length) return !named && other < 0;
     const lead = other < 0 ? clause : clause.slice(0, other);
-    if (asked.some((name) => lead.includes(name))) return true;
+    if (names.some((name) => name.test(lead))) return true;
     if (other >= 0 || named) return false;
     const after = text.slice(m.index + m[0].length).match(/^[^。！？!?\n]*/)![0];
-    return asked.some((name) => after.includes(name));
+    return names.some((name) => name.test(after));
   });
 }
 
 /**
+ * DEPLOY-50 复审 #2: a field named in a list may drop its 数 / 量 / 次数 (「点赞、评论、收藏、分享数据均
+ * 无法提供」 for 点赞数 / 评论数) — the stem then ends the word (「评论区」 is not 评论数).
+ */
+function askedNameRes(asked: string[]): RegExp[] {
+  return asked.map((name) => {
+    const stem = name.replace(/(?:次数|数|量)$/, '');
+    if (stem === name || stem.length < 2) return new RegExp(name);
+    return new RegExp(`${stem}(?:次数|数|量|(?=[、和与及或还]|[^\\p{Script=Han}]|$))`, 'u');
+  });
+}
+
+/**
+ * DEPLOY-50 复审 #1: the asked thing itself, named as such (目标 / 该 / 这个 / 指定 / 所查 / 要查的),
+ * said not loaded — not a side part of it (「该视频的推荐内容」).
+ */
+const TARGET_NOT_LOADED_RE =
+  /(?:目标|该|这个|此|指定|所查|要查的?)(?:视频|页面|网页|笔记|商品|帖子|文章)(?:(?!推荐|右侧|左侧|侧栏|侧边|评论|下方|底部)[^。！？!?\n]){0,40}?(?:没有|未能?|并未)(?:被)?加载/;
+/** …and then read after all, said so in so many words. */
+const READ_ANYWAY_RE = /不影响|已(?:经)?读取|仍(?:然)?(?:能|可)?读(?:取)?到/;
+
+/**
  * FIX-49: the page or the asked thing said not loaded, or the asked fields 「无法提供」 — 没拿到, unless
  * (#3) every field the question names has its value in the answer after all (「视频本身没有加载出来
- * （不影响读取上述信息）」).
+ * （不影响读取上述信息）」). DEPLOY-50 复审 #1: when it is the asked thing named as not loaded, the
+ * values are another item's (「目标视频没有加载出来。首页第一个视频的标题：A…」) unless the answer says
+ * they were read anyway (不影响 / 已读取 / 仍读到).
  */
 export function pageNotObtained(head: string, answer: string, intent: string): boolean {
   if (!PAGE_NOT_LOADED_RE.test(head) && !unprovidedAsked(head, intent)) return false;
+  if (TARGET_NOT_LOADED_RE.test(head) && !READ_ANYWAY_RE.test(answer)) return true;
   return !everyAskedFieldGiven(intent, answer);
 }
 
