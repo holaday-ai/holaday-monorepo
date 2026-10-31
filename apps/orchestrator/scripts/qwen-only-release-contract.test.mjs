@@ -23,6 +23,26 @@ describe('Qwen-only release contract', () => {
     ]);
   });
 
+  it('admits only the catalog-gated provider adapters, nothing else', () => {
+    const result = scanProductionModelImports({
+      roots: ['src/index.ts'],
+      files: [
+        {
+          path: 'src/index.ts',
+          text: "import './llm/providers/openai-messages-adapter.js';\nimport './llm/dormant/anthropic-messages-adapter.js';\nimport './live.js';",
+        },
+        { path: 'src/llm/providers/openai-messages-adapter.ts', text: 'new OpenAI(options);' },
+        { path: 'src/llm/dormant/anthropic-messages-adapter.ts', text: 'new Anthropic(options);' },
+        { path: 'src/live.ts', text: 'const client = new OpenAI();' },
+      ],
+      inventory: { entries: [] },
+    });
+
+    assert.deepEqual(result.violations, [
+      { path: 'src/live.ts', rule: 'legacy_model_client', pattern: 'new_openai' },
+    ]);
+  });
+
   it('rejects a production path to the dormant boundary', () => {
     const result = scanProductionModelImports({
       roots: ['src/index.ts'],

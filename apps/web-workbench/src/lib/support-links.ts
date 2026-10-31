@@ -5,10 +5,7 @@ export interface SupportMailOptions {
   body?: string;
 }
 
-export function supportMailtoHref({
-  subject,
-  body,
-}: SupportMailOptions): string {
+export function supportMailtoHref({ subject, body }: SupportMailOptions): string {
   const params = new URLSearchParams();
   params.set('subject', subject);
   if (body) params.set('body', body);

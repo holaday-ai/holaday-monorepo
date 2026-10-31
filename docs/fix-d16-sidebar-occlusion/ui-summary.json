@@ -1,0 +1,27 @@
+{
+  "candidate": "8a527eca619d7f34dffa45a91a6248c6e2d02388",
+  "sourceHash": "319728daf27e97ad1a9ffe10fd010eb11af5e4addbb4c5088bef7eb5b48b3feb",
+  "suiteSourceHash": "30f8d6970b2eb49addf256635681f530b0d8b3660b24403eaf2d27f7a332ace0",
+  "buildHash": "497aa4ccc354585edac33bcccf3e7db21671ab181a52ac95a98e71354875c2cf",
+  "browserVersion": "147.0.7727.15",
+  "platform": "darwin",
+  "startedAt": "2026-10-12T13:39:38.348Z",
+  "finishedAt": "2026-10-12T13:43:49.757Z",
+  "status": "failed",
+  "coverageGaps": [
+    "Filtered run: not full release acceptance",
+    "Case-filtered run: not full release acceptance",
+    "1366x768-task_generate_executing: missing explicit visual baseline"
+  ],
+  "expectedPages": 1,
+  "findings": [],
+  "pages": [
+    {
+      "route": "task:generate:executing",
+      "width": 1366,
+      "height": 768,
+      "controls": 160,
+      "issues": []
+    }
+  ]
+}

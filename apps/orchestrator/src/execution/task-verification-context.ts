@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   type VerificationInputIssue,
   checkVerificationAdmission,
+  checkVerificationImages,
 } from './verification-input-budget.js';
 
 /** Server-owned legacy policy, never inferred from a candidate answer or material. */
@@ -48,7 +49,17 @@ export type VerificationMaterial =
       readonly key: string;
       readonly source: 'file' | 'provider';
       readonly reason: 'non_text' | 'source_body_unavailable';
+    }
+  | {
+      /** User-uploaded image, shown to both the generation model and the semantic reviewer. */
+      readonly kind: 'image';
+      readonly key: string;
+      readonly source: 'file';
+      readonly mediaType: VerificationImageMediaType;
+      readonly data: string;
     };
+
+export type VerificationImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
 
 export class VerificationContextError extends Error {
   constructor(public readonly code: VerificationInputIssue) {
@@ -109,6 +120,18 @@ const contextSchema = z
             reason: z.enum(['non_text', 'source_body_unavailable']),
           })
           .strict(),
+        z
+          .object({
+            kind: z.literal('image'),
+            key: z.string().min(1),
+            source: z.literal('file'),
+            mediaType: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']),
+            data: z
+              .string()
+              .min(1)
+              .regex(/^[A-Za-z0-9+/]+={0,2}$/),
+          })
+          .strict(),
       ]),
     ),
   })
@@ -120,7 +143,13 @@ export function createTaskVerificationContext(input: unknown): TaskVerificationC
   if (!parsed.success) throw new VerificationContextError('VERIFICATION_CONTEXT_INVALID');
   const context = parsed.data;
   const texts: string[] = [];
+  const images: string[] = [];
   const descriptors = context.materials.map((material) => {
+    if (material.kind === 'image') {
+      const { data, ...descriptor } = material;
+      images.push(data);
+      return descriptor;
+    }
     if (material.kind !== 'text') return material;
     const { text, ...descriptor } = material;
     texts.push(text);
@@ -131,6 +160,8 @@ export function createTaskVerificationContext(input: unknown): TaskVerificationC
     texts,
   );
   if (!budget.ok) throw new VerificationContextError(budget.code);
+  const imageBudget = checkVerificationImages(images);
+  if (!imageBudget.ok) throw new VerificationContextError(imageBudget.code);
   // Zod has copied every allowed field. Freeze that copy, never caller-owned objects.
   return freezeSnapshot(context);
 }
@@ -148,7 +179,10 @@ export function assessVerificationMaterials(context: TaskVerificationContext): {
   codes: readonly VerificationInputIssue[];
 } {
   if (
-    context.materials.some((material) => material.kind === 'unavailable' || !material.text.trim())
+    context.materials.some(
+      (material) =>
+        material.kind === 'unavailable' || (material.kind === 'text' && !material.text.trim()),
+    )
   ) {
     return { complete: false, codes: ['VERIFICATION_MATERIALS_INCOMPLETE'] };
   }
@@ -161,4 +195,32 @@ function freezeSnapshot<T>(value: T): T {
     Object.freeze(value);
   }
   return value;
+}
+
+/** The context without image bytes: what text-only channels (JSON payloads) may carry. */
+export function withoutImageData<T extends Pick<TaskVerificationContext, 'materials'>>(
+  context: T,
+): T {
+  return {
+    ...context,
+    materials: context.materials.map((material) =>
+      material.kind === 'image'
+        ? {
+            kind: 'image',
+            key: material.key,
+            source: material.source,
+            mediaType: material.mediaType,
+            note: '图片内容见随附图像',
+          }
+        : material,
+    ),
+  } as unknown as T;
+}
+
+export function verificationImages(
+  context: Pick<TaskVerificationContext, 'materials'> | undefined,
+): Array<{ mediaType: VerificationImageMediaType; data: string }> {
+  return (context?.materials ?? []).flatMap((material) =>
+    material.kind === 'image' ? [{ mediaType: material.mediaType, data: material.data }] : [],
+  );
 }

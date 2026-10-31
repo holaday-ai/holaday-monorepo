@@ -22,15 +22,8 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import type { SupercarOutcome } from './agent-loop.js';
-import {
-  buildOtaAuditRecord,
-  classifyOtaAction,
-  classifyOtaIntentSubtype,
-  isHostAllowed,
-  isOtaDomain,
-  type OtaAuditRecord,
-} from './ota-user-browser-policy.js';
 import {
   bodyMatchesCity,
   dominantSupportedCity,
@@ -41,6 +34,14 @@ import {
   resolveCtripHotelUrl,
   validateHotelJson,
 } from './ctrip-hotel-extractor.js';
+import {
+  type OtaAuditRecord,
+  buildOtaAuditRecord,
+  classifyOtaAction,
+  classifyOtaIntentSubtype,
+  isHostAllowed,
+  isOtaDomain,
+} from './ota-user-browser-policy.js';
 
 /** Result shape the extension returns for a `navigate` tool call. */
 export interface ExtensionNavigateResult {
@@ -50,19 +51,26 @@ export interface ExtensionNavigateResult {
 }
 
 export interface OtaReadonlyDeps {
-  /** Anthropic client — used to derive the query URL + extract hotels. */
-  readonly client: Anthropic;
+  /** Legacy Anthropic client; used only when no model-catalog adapter is given. */
+  readonly client?: Anthropic | null;
+  /** Model-catalog adapter (batch 04): the selected brain derives the URL + extracts hotels. */
+  readonly messagesAdapter?: MessagesAdapter;
   /** Dispatch a `navigate` tool call to the user's Chrome via the extension. */
-  readonly dispatchNavigate: (
-    url: string,
-  ) => Promise<{ ok: boolean; result?: ExtensionNavigateResult; error?: { message: string; code?: string } }>;
+  readonly dispatchNavigate: (url: string) => Promise<{
+    ok: boolean;
+    result?: ExtensionNavigateResult;
+    error?: { message: string; code?: string };
+  }>;
   /** Best-effort screenshot for evidence (optional; result ignored). */
   readonly dispatchScreenshot?: () => Promise<unknown>;
   /** Emit one structured audit record per attempted action. */
   readonly audit: (record: OtaAuditRecord) => void;
   /** User-visible progress line ("正在使用你的浏览器读取页面…"). */
   readonly onProgress?: (message: string) => void;
-  readonly logger: { info: (o: unknown, m?: string) => void; warn: (o: unknown, m?: string) => void };
+  readonly logger: {
+    info: (o: unknown, m?: string) => void;
+    warn: (o: unknown, m?: string) => void;
+  };
   readonly model?: string;
   /**
    * Step 2.5 canary scope — the navigate URL host must be in this set
@@ -75,7 +83,8 @@ export interface OtaReadonlyDeps {
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
-const LOGIN_WALL_RE = /需要登录|请登录|登录后(?:查看|继续)|扫码登录|未登录|whaleguard|请完成验证|账号登录/i;
+const LOGIN_WALL_RE =
+  /需要登录|请登录|登录后(?:查看|继续)|扫码登录|未登录|whaleguard|请完成验证|账号登录/i;
 
 function textFromMessage(msg: Anthropic.Message): string {
   return (msg.content ?? [])
@@ -86,12 +95,24 @@ function textFromMessage(msg: Anthropic.Message): string {
 }
 
 async function ask(
-  client: Anthropic,
+  deps: Pick<OtaReadonlyDeps, 'client' | 'messagesAdapter'>,
   model: string,
   system: string,
   user: string,
   maxTokens = 1500,
 ): Promise<string> {
+  if (deps.messagesAdapter) {
+    const response = await deps.messagesAdapter.create(
+      { maxTokens, system, messages: [{ role: 'user', content: user }] },
+      { timeoutMs: 60_000, maxRetries: 2 },
+    );
+    return response.content
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('')
+      .trim();
+  }
+  const client = deps.client;
+  if (!client) throw new Error('OTA model client unavailable');
   const msg = await client.messages.create({
     model,
     max_tokens: maxTokens,
@@ -117,7 +138,7 @@ const HOTEL_JSON_SYSTEM =
 function parseHotelFilters(intent: string): { maxPriceCNY?: number; topN: number } {
   const maxPriceCNY = parseHotelPriceLimit(intent);
   const top = intent.match(/(?:给|取|前|top|列)\s*(\d{1,2})/i);
-  const topN = top ? Math.min(10, Math.max(1, parseInt(top[1] ?? '5', 10))) : 5;
+  const topN = top ? Math.min(10, Math.max(1, Number.parseInt(top[1] ?? '5', 10))) : 5;
   return { ...(maxPriceCNY != null ? { maxPriceCNY } : {}), topN };
 }
 
@@ -139,16 +160,27 @@ function guardNavigate(deps: OtaReadonlyDeps, taskId: string, url: string): Guar
   }
   deps.audit(buildOtaAuditRecord({ taskId, domain: host, lane: 'user-browser', action, verdict }));
   if (!verdict.allowed) {
-    return { ok: false, host, reason: `只读模式拒绝打开该地址（${verdict.reason}）。仅允许携程查询页，不触达下单/支付页。` };
+    return {
+      ok: false,
+      host,
+      reason: `只读模式拒绝打开该地址（${verdict.reason}）。仅允许携程查询页，不触达下单/支付页。`,
+    };
   }
-  if (deps.allowedDomains && deps.allowedDomains.size > 0 && !isHostAllowed(host, deps.allowedDomains)) {
+  if (
+    deps.allowedDomains &&
+    deps.allowedDomains.size > 0 &&
+    !isHostAllowed(host, deps.allowedDomains)
+  ) {
     deps.audit(
       buildOtaAuditRecord({
         taskId,
         domain: host,
         lane: 'user-browser',
         action,
-        verdict: { allowed: false, reason: `navigate blocked: host not in canary allowlist (${host})` },
+        verdict: {
+          allowed: false,
+          reason: `navigate blocked: host not in canary allowlist (${host})`,
+        },
       }),
     );
     return { ok: false, host, reason: '该 OTA 域名暂不在灰度范围内，已停止读取。' };
@@ -184,7 +216,15 @@ async function navigateWithRetry(
     last = await deps.dispatchNavigate(url);
     if (!last.ok || !last.result) {
       deps.logger.info(
-        { event: 'ota.user_browser.read', taskId, targetCity, observedCity: null, readAttempt: attempt, staleDetected: false, navOk: false },
+        {
+          event: 'ota.user_browser.read',
+          taskId,
+          targetCity,
+          observedCity: null,
+          readAttempt: attempt,
+          staleDetected: false,
+          navOk: false,
+        },
         'ota: read attempt',
       );
       continue;
@@ -195,21 +235,35 @@ async function navigateWithRetry(
     const stale = targetCity ? !bodyMatchesCity(bodyText, targetCity) : false;
     const thin = bodyText.length < 40;
     deps.logger.info(
-      { event: 'ota.user_browser.read', taskId, targetCity, observedCity, readAttempt: attempt, staleDetected: stale, navOk: true },
+      {
+        event: 'ota.user_browser.read',
+        taskId,
+        targetCity,
+        observedCity,
+        readAttempt: attempt,
+        staleDetected: stale,
+        navOk: true,
+      },
       'ota: read attempt',
     );
     // Accept a login wall (handled upstream as awaiting_user) OR a
     // content-bearing, non-stale page that the caller's predicate is
     // happy with (flights: parseable list; hotels: any content).
     if (isLoginWall || (!stale && !thin && satisfied(bodyText))) {
-      return { nav: last, bodyText, finalUrl: last.result.finalUrl ?? '', attempts: attempt, stale };
+      return {
+        nav: last,
+        bodyText,
+        finalUrl: last.result.finalUrl ?? '',
+        attempts: attempt,
+        stale,
+      };
     }
     // unsatisfied / stale / thin → re-navigate (extension reloads the tab).
   }
   return {
     nav: last,
-    bodyText: last.ok && last.result ? last.result.bodyText ?? '' : '',
-    finalUrl: last.ok && last.result ? last.result.finalUrl ?? '' : '',
+    bodyText: last.ok && last.result ? (last.result.bodyText ?? '') : '',
+    finalUrl: last.ok && last.result ? (last.result.finalUrl ?? '') : '',
     attempts: maxAttempts,
     stale: true,
   };
@@ -259,7 +313,12 @@ export async function runOtaUserBrowserReadonly(opts: {
   iterations += 1;
   if (!resolved.knownSchema || !resolved.url) {
     deps.logger.info(
-      { taskId, city: resolved.city, knownSchema: resolved.knownSchema, reason: 'unknown-ctrip-hotel-schema' },
+      {
+        taskId,
+        city: resolved.city,
+        knownSchema: resolved.knownSchema,
+        reason: 'unknown-ctrip-hotel-schema',
+      },
       'ota: ctrip hotel schema unknown — not faking a URL',
     );
     return {
@@ -302,12 +361,18 @@ export async function runOtaUserBrowserReadonly(opts: {
     }
   }
   if (!isOtaDomain(finalUrl)) {
-    return { status: 'failed', reason: '页面跳转到了非 OTA 白名单地址，已停止读取。', iterations, toolsUsed };
+    return {
+      status: 'failed',
+      reason: '页面跳转到了非 OTA 白名单地址，已停止读取。',
+      iterations,
+      toolsUsed,
+    };
   }
   if (LOGIN_WALL_RE.test(bodyText) && bodyText.length < 600) {
     return {
       status: 'awaiting_user',
-      question: '该携程页面需要登录态。请在你的 Chrome 中登录携程后告诉我继续，我会用你的登录状态读取页面（仅查询，不下单/不预订）。',
+      question:
+        '该携程页面需要登录态。请在你的 Chrome 中登录携程后告诉我继续，我会用你的登录状态读取页面（仅查询，不下单/不预订）。',
       iterations,
       toolsUsed,
     };
@@ -342,10 +407,18 @@ export async function runOtaUserBrowserReadonly(opts: {
     const userMsg =
       `目标城市：${city}；价格上限：${filters.maxPriceCNY ?? '无'} 元；最多 ${filters.topN} 个。\n\n` +
       `页面可见文本：\n${bodyText.slice(0, 12000)}`;
-    modelText = await ask(deps.client, model, HOTEL_JSON_SYSTEM, userMsg, 2000);
+    modelText = await ask(deps, model, HOTEL_JSON_SYSTEM, userMsg, 2000);
   } catch (err) {
-    deps.logger.warn({ taskId, err: err instanceof Error ? err.message : String(err) }, 'ota-readonly: hotel model extract failed');
-    return { status: 'failed', reason: `已读取${city}携程酒店页面，但未能稳定识别符合条件的酒店名。`, iterations, toolsUsed };
+    deps.logger.warn(
+      { taskId, err: err instanceof Error ? err.message : String(err) },
+      'ota-readonly: hotel model extract failed',
+    );
+    return {
+      status: 'failed',
+      reason: `已读取${city}携程酒店页面，但未能稳定识别符合条件的酒店名。`,
+      iterations,
+      toolsUsed,
+    };
   }
   const valid = validateHotelJson({
     items: parseHotelJson(modelText),
@@ -353,11 +426,22 @@ export async function runOtaUserBrowserReadonly(opts: {
     topN: filters.topN,
   });
   deps.logger.info(
-    { taskId, city, modelItems: parseHotelJson(modelText).length, validHotels: valid.length, priceLimit: filters.maxPriceCNY ?? null },
+    {
+      taskId,
+      city,
+      modelItems: parseHotelJson(modelText).length,
+      validHotels: valid.length,
+      priceLimit: filters.maxPriceCNY ?? null,
+    },
     'ota: hotel model extraction validated',
   );
   if (valid.length > 0) {
-    const formatted = filterAndFormatHotels({ hotels: valid, city, url: finalUrl, topN: filters.topN });
+    const formatted = filterAndFormatHotels({
+      hotels: valid,
+      city,
+      url: finalUrl,
+      topN: filters.topN,
+    });
     return {
       status: 'completed',
       summary: `已用你的浏览器读取携程酒店结果页（仅查询，未预订）：\n\n${formatted.table ?? ''}`,
@@ -382,3 +466,5 @@ export async function runOtaUserBrowserReadonly(opts: {
     toolsUsed,
   };
 }
+/** V2 OTA and selected Chrome share the same observe/act/confirm/task-tab port. */
+export { runSelectedChromeTask as runOtaUserBrowserTask } from './selected-chrome-runner.js';

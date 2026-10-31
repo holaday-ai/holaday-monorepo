@@ -273,7 +273,7 @@ describe('core intermediate output review', () => {
     expect(settle(f, r).verification.issueCodes).toContain('DETERMINISTIC_CHECK_FAILED');
   });
 
-  it('keeps provider URL-only evidence when the real runner asks for clarification', async () => {
+  it('treats provider URL-only evidence as informational when the runner asks for clarification', async () => {
     const f = fixture({ phase: 'direct', workflow: null });
     const t = transports(
       '[AWAITING_USER_INPUT]这是合成参考 https://example.com/synthetic ，请确认您需要核对的对象。',
@@ -284,8 +284,9 @@ describe('core intermediate output review', () => {
     const outcome = await generate(f, t);
     expect(outcome.sourceUrls).toEqual(['https://example.com/synthetic']);
     const r = await review(f, t, outcome);
-    expect(settle(f, r).verification.issueCodes).toContain('VERIFICATION_MATERIALS_INCOMPLETE');
-    expect(t.semantic).toHaveLength(0);
+    // Observed URLs are informational; the clarification is reviewed normally.
+    expect(settle(f, r).verification.issueCodes).not.toContain('VERIFICATION_MATERIALS_INCOMPLETE');
+    expect(r.outcome.summary).not.toContain('来源已列出');
   });
 
   it.each(['draft', 'revise'] as const)(
@@ -387,7 +388,7 @@ describe('core intermediate output review', () => {
     expect(settle(f, r).verificationPassed).toBe(false);
   });
 
-  it('retains missing-material coverage and refuses unverified waiting content', async () => {
+  it('delivers a waiting step with missing-material coverage instead of failing it', async () => {
     const f = fixture({
       materials: [
         { kind: 'unavailable', key: 'file:synthetic', source: 'file', reason: 'non_text' },
@@ -395,8 +396,13 @@ describe('core intermediate output review', () => {
     });
     const t = transports();
     const r = await review(f, t, await generate(f, t));
-    expect(r.terminalStatus).toBe('failed');
-    expect(settle(f, r).verification.issueCodes).toContain('VERIFICATION_MATERIALS_INCOMPLETE');
+    // A plan/clarification that could not be fully verified is still shown to
+    // the user (with a notice added at settlement), never silently failed.
+    expect(r.terminalStatus).toBe('awaiting_user');
+    const op = settle(f, r);
+    expect(op.status).toBe('awaiting_user');
+    expect(op.verificationPassed).toBe(false);
+    expect(op.verification.issueCodes).toContain('VERIFICATION_MATERIALS_INCOMPLETE');
     expect(t.semantic).toHaveLength(0);
   });
 

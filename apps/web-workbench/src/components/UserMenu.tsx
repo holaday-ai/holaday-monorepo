@@ -1,3 +1,7 @@
+import { CharacterAvatar } from '@/components/CharacterAvatar';
+import { useExclusiveOverlay } from '@/lib/top-level-overlay';
+import { cn } from '@/lib/utils';
+import { type ThemeMode, useTheme } from '@/stores/theme-store';
 import {
   ChevronDown,
   ChevronRight,
@@ -15,11 +19,10 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { cn } from '@/lib/utils';
-import { type ThemeMode, useTheme } from '@/stores/theme-store';
 
 interface Props {
   displayName: string;
+  avatarUrl?: string | null;
   email: string | null;
   plan: string;
   onLogout(): void;
@@ -45,6 +48,7 @@ interface Props {
  */
 export function UserMenu({
   displayName,
+  avatarUrl,
   email,
   plan,
   onLogout,
@@ -54,7 +58,8 @@ export function UserMenu({
   compact = false,
   placement = 'sidebar',
 }: Props): JSX.Element {
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpenState] = React.useState(false);
+  const setOpen = useExclusiveOverlay(open, setOpenState);
   const ref = React.useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { mode, setMode } = useTheme();
@@ -64,26 +69,25 @@ export function UserMenu({
       setOpen(false);
       navigate(path);
     },
-    [navigate],
+    [navigate, setOpen],
   );
 
   React.useEffect(() => {
     if (!open) return;
-    const onClick = (e: MouseEvent): void => {
+    const onClick = (e: PointerEvent): void => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') setOpen(false);
     };
-    document.addEventListener('mousedown', onClick);
+    document.addEventListener('pointerdown', onClick, true);
     document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('pointerdown', onClick, true);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
-  const initial = (displayName || email || '?').slice(0, 1).toUpperCase();
   const planLabel = friendlyPlan(plan);
   const topbar = placement === 'topbar';
 
@@ -91,37 +95,30 @@ export function UserMenu({
     <div ref={ref} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={compact ? `用户菜单：${displayName || email || ''}` : undefined}
         title={compact ? displayName || email || '用户' : undefined}
         className={cn(
           topbar
-            ? 'flex h-11 items-center gap-2 rounded-full bg-transparent pl-0.5 pr-1 text-left transition-colors hover:bg-[#EFEFEF]/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 dark:hover:bg-white/10'
-            : 'flex items-center rounded-[10px] border border-[#DCDDDD]/60 bg-white/55 shadow-[0_4px_12px_rgba(17,24,39,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
+            ? 'flex h-11 items-center gap-2 rounded-full bg-transparent pl-0.5 pr-1 text-left transition-colors hover:bg-[#EFEFEF]/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 dark:hover:bg-white/10'
+            : 'flex items-center rounded-[10px] border border-[#DCDDDD]/60 bg-white/55 shadow-[0_4px_12px_rgba(17,24,39,0.035)] transition-colors hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10',
           !topbar && (compact ? 'h-9 w-9 justify-center' : 'h-11 w-full gap-2.5 px-2.5 text-left'),
           !topbar &&
             open &&
-            'border-[#EA1F59]/25 bg-[#EA1F59]/5 shadow-[0_10px_26px_rgba(234,31,89,0.08)] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
+            'border-[#FF0061]/25 bg-[#FF0061]/5 shadow-[0_10px_26px_rgba(255,0,97,0.08)] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10',
         )}
       >
-        <div
-          className={cn(
-            'flex shrink-0 items-center justify-center bg-[#EA1F59] font-semibold text-white shadow-[0_3px_10px_rgba(234,31,89,0.14)]',
-            topbar
-              ? 'h-10 w-10 rounded-full ring-2 ring-white'
-              : 'h-7 w-7 rounded-[9px] text-[13px]',
-          )}
-        >
-          {initial}
-        </div>
+        <CharacterAvatar
+          name={displayName || email || '用户'}
+          seed={email || displayName}
+          src={avatarUrl}
+          className={topbar ? 'h-[30px] w-[30px]' : 'h-7 w-7'}
+        />
         {topbar ? (
           <ChevronDown
-            className={cn(
-              'h-4 w-4 text-[#EA1F59] transition-transform',
-              open && 'rotate-180',
-            )}
+            className={cn('h-4 w-4 text-[#FF0061] transition-transform', open && 'rotate-180')}
           />
         ) : !compact ? (
           <div className="min-w-0 flex-1">
@@ -147,14 +144,17 @@ export function UserMenu({
         >
           {topbar ? (
             <div className="mb-3 flex items-center gap-3 px-1 pb-2">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#EA1F59] text-base font-semibold text-white ring-2 ring-[#F4D7E2]">
-                {initial}
-              </div>
+              <CharacterAvatar
+                name={displayName || email || '用户'}
+                seed={email || displayName}
+                src={avatarUrl}
+                className="h-11 w-11"
+              />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold text-[#111827]">
                   {displayName || email || '未命名'}
                 </div>
-                <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-[#EA1F59]/15 bg-[#EA1F59]/10 px-2 py-0.5 text-[10px] font-semibold text-[#EA1F59]">
+                <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-[#FF0061]/15 bg-[#FF0061]/10 px-2 py-0.5 text-[10px] font-semibold text-[#FF0061]">
                   <Crown className="h-3 w-3" />
                   {planLabel}
                 </div>
@@ -165,8 +165,17 @@ export function UserMenu({
               {email}
             </div>
           ) : null}
-          <div className={cn('border-b border-[#DCDDDD]/80 py-1 dark:border-white/10', topbar && 'space-y-1 pb-2')}>
-            <MenuItem topbar={topbar} icon={<UserIcon className="h-3.5 w-3.5" />} onClick={() => go('/profile')}>
+          <div
+            className={cn(
+              'border-b border-[#DCDDDD]/80 py-1 dark:border-white/10',
+              topbar && 'space-y-1 pb-2',
+            )}
+          >
+            <MenuItem
+              topbar={topbar}
+              icon={<UserIcon className="h-3.5 w-3.5" />}
+              onClick={() => go('/profile')}
+            >
               个人资料
             </MenuItem>
             <MenuItem
@@ -191,11 +200,22 @@ export function UserMenu({
               任务历史
             </MenuItem>
           </div>
-          <div className={cn('px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground', topbar && 'pt-3 text-[12px] normal-case tracking-normal')}>
+          <div
+            className={cn(
+              'px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground',
+              topbar && 'pt-3 text-[12px] normal-case tracking-normal',
+            )}
+          >
             外观
           </div>
           <ThemeSwitcher mode={mode} onChange={setMode} topbar={topbar} />
-          <div className={cn('mt-1 border-t border-[#DCDDDD]/80 pt-1 dark:border-white/10', topbar && 'mt-3 rounded-[14px] border bg-white p-1.5 shadow-[0_1px_3px_rgba(15,23,42,0.03)] dark:bg-transparent')}>
+          <div
+            className={cn(
+              'mt-1 border-t border-[#DCDDDD]/80 pt-1 dark:border-white/10',
+              topbar &&
+                'mt-3 rounded-[14px] border bg-white p-1.5 shadow-[0_1px_3px_rgba(15,23,42,0.03)] dark:bg-transparent',
+            )}
+          >
             {onClearUnsuccessfulTasks && unsuccessfulTaskCount > 0 && (
               <MenuItem
                 topbar={topbar}
@@ -248,14 +268,34 @@ function ThemeSwitcher({
   topbar?: boolean;
 }): JSX.Element {
   return (
-    <div className={cn('grid grid-cols-3 gap-1 bg-[#EFEFEF]/60 p-0.5 dark:bg-white/10', topbar ? 'rounded-full' : 'rounded-[8px]')}>
-      <ThemeOption topbar={topbar} active={mode === 'light'} onClick={() => onChange('light')} label="浅色">
+    <div
+      className={cn(
+        'grid grid-cols-3 gap-1 bg-[#EFEFEF]/60 p-0.5 dark:bg-white/10',
+        topbar ? 'rounded-full' : 'rounded-[8px]',
+      )}
+    >
+      <ThemeOption
+        topbar={topbar}
+        active={mode === 'light'}
+        onClick={() => onChange('light')}
+        label="浅色"
+      >
         <Sun className="h-3.5 w-3.5" />
       </ThemeOption>
-      <ThemeOption topbar={topbar} active={mode === 'dark'} onClick={() => onChange('dark')} label="深色">
+      <ThemeOption
+        topbar={topbar}
+        active={mode === 'dark'}
+        onClick={() => onChange('dark')}
+        label="深色"
+      >
         <Moon className="h-3.5 w-3.5" />
       </ThemeOption>
-      <ThemeOption topbar={topbar} active={mode === 'system'} onClick={() => onChange('system')} label="跟随系统">
+      <ThemeOption
+        topbar={topbar}
+        active={mode === 'system'}
+        onClick={() => onChange('system')}
+        label="跟随系统"
+      >
         <Monitor className="h-3.5 w-3.5" />
       </ThemeOption>
     </div>
@@ -285,7 +325,7 @@ function ThemeOption({
         'flex items-center justify-center gap-1 px-1 text-[10px] transition-colors',
         topbar ? 'h-7 rounded-full font-semibold' : 'flex-col rounded-[6px] py-1.5',
         active
-          ? 'bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(17,24,39,0.05)] dark:bg-card dark:text-foreground'
+          ? 'bg-white text-[#FF0061] shadow-[0_1px_2px_rgba(17,24,39,0.05)] dark:bg-card dark:text-foreground'
           : 'text-[#595757] hover:bg-white/65 hover:text-foreground dark:text-foreground/65 dark:hover:bg-white/10',
       )}
     >
@@ -315,16 +355,19 @@ function MenuItem({
       onClick={onClick}
       className={cn(
         'flex w-full items-center gap-2 text-left transition-colors',
-        topbar ? 'h-9 rounded-[10px] px-2.5 text-[12px] font-medium' : 'rounded-[6px] px-2.5 py-1.5 text-sm',
+        topbar
+          ? 'h-9 rounded-[10px] px-2.5 text-[12px] font-medium'
+          : 'rounded-[6px] px-2.5 py-1.5 text-sm',
         destructive
-          ? 'text-[#EA1F59] hover:bg-[#EA1F59]/10'
-          : 'text-[#595757] hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground',
+          ? 'text-[#FF0061] hover:bg-[#FF0061]/10'
+          : 'text-[#595757] hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground',
       )}
     >
       <span
         className={cn(
           'opacity-80',
-          topbar && 'flex h-6 w-6 items-center justify-center rounded-[8px] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]',
+          topbar &&
+            'flex h-6 w-6 items-center justify-center rounded-[8px] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]',
         )}
       >
         {icon}

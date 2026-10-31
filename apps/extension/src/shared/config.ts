@@ -42,9 +42,7 @@ const IS_PROD = import.meta.env.PROD;
 export const LOCAL_CHROME_QA = import.meta.env.VITE_LOCAL_CHROME_QA === '1';
 
 const PROD_HTTP = 'https://hd-app.orangebench.tech/api';
-const PROD_WS_ENDPOINTS = [
-  'wss://holaday.ai/ws',
-] as const;
+const PROD_WS_ENDPOINTS = ['wss://holaday.ai/ws'] as const;
 const DEV_HTTP = 'http://127.0.0.1:3001';
 const DEV_WS = 'ws://127.0.0.1:3002';
 
@@ -62,8 +60,7 @@ export const ORCHESTRATOR_WS_ENDPOINTS = import.meta.env.VITE_ORCHESTRATOR_WS
 
 const ORCHESTRATOR_WS_HEALTH_URL_OVERRIDE = import.meta.env.VITE_ORCHESTRATOR_WS_HEALTH_URL;
 
-export const ORCHESTRATOR_WS_HEALTH_URL =
-  getOrchestratorWsHealthUrl(ORCHESTRATOR_WS);
+export const ORCHESTRATOR_WS_HEALTH_URL = getOrchestratorWsHealthUrl(ORCHESTRATOR_WS);
 
 export function getOrchestratorWsHealthUrl(endpoint: string): string | null {
   // Local QA uses separate HTTP and raw WebSocket listeners, unlike the
@@ -109,9 +106,13 @@ export function isLocalQaWorkbenchUrl(value: string): boolean {
   try {
     const expected = new URL(WORKBENCH_URL);
     const actual = new URL(value);
-    return expected.protocol === 'http:' &&
+    return (
+      expected.protocol === 'http:' &&
       ['127.0.0.1', 'localhost'].includes(expected.hostname) &&
-      actual.origin === expected.origin && !actual.username && !actual.password;
+      actual.origin === expected.origin &&
+      !actual.username &&
+      !actual.password
+    );
   } catch {
     return false;
   }

@@ -103,6 +103,12 @@ export function splitMigrationStatements(sql) {
 
 export const REQUIRED_INDEXES = [
   {
+    table: 'tasks',
+    name: 'uk_tasks_public_cloud_continuation',
+    unique: true,
+    columns: ['public_cloud_continuation_task_id'],
+  },
+  {
     table: 'organizations',
     name: 'uk_organizations_external_id',
     unique: true,

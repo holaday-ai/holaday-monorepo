@@ -1,59 +1,57 @@
 /**
- * Phase 13 Dim 5 — cross-task memory.
+ * Cross-task memory (Phase 13 Dim 5; batch 06 rewired to the model runtime).
  *
- * After a task completes, run a separate Anthropic call (Sonnet to
- * keep cost down) that scans the task description + summary for
- * long-term-valuable facts. The model returns a JSON array of
- * memory entries which we upsert into `execution_memory` keyed by
- * (user_id, category, key_name).
+ * After a browser task completes, ONE short model call (the `generate` lane of
+ * the model runtime — 千问 by default; the admin model catalog may route it to
+ * Claude/GPT) scans the task description + summary and returns memory entries,
+ * which are upserted into `execution_memory` keyed by (user_id, category,
+ * key_name).
  *
- * On the next task start, fetch the user's memories and inject the
- * relevant ones into the agent's first user message under a
- * "你对这个用户的了解" section. Relevance is a cheap keyword match
- * — preferences always inject (small N, high value); other
- * categories only inject if their key_name shares a token with the
- * incoming intent.
+ * Batch 06 scope: ONLY two kinds are written —
+ *   site_state  — 站点操作: how a site works ("淘宝必须登录才能看价格")
+ *   preference  — 用户偏好: stable user preferences ("偏好京东而不是淘宝")
+ * Older categories already in the table (task_history / execution_tip) are
+ * still READ and injected, never newly written.
+ *
+ * On the next task start the relevant entries are injected into the agent's
+ * first user message ("你对这个用户的了解"). Users can delete one entry or
+ * clear all (memory router + `deleteForUser` / `clearForUser` here).
  */
 
-import Anthropic from '@anthropic-ai/sdk';
-import { and, eq, gt, isNull, or } from 'drizzle-orm';
 import { newExternalId } from '@holaday/shared-types';
+import { and, eq, gt, isNull, or } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import type { DB } from '../../db/client.js';
-import { executionMemory, type ExecutionMemory } from '../../db/schema/execution-memory.js';
+import { type ExecutionMemory, executionMemory } from '../../db/schema/execution-memory.js';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 
-export type MemoryCategory =
-  | 'preference'
-  | 'site_state'
-  | 'task_history'
-  | 'execution_tip';
+export type MemoryCategory = 'preference' | 'site_state' | 'task_history' | 'execution_tip';
 
-const VALID_CATEGORIES: ReadonlySet<MemoryCategory> = new Set([
+/** Categories the extractor may WRITE (batch 06: site operations + user preferences). */
+export const WRITABLE_MEMORY_CATEGORIES: ReadonlySet<MemoryCategory> = new Set([
   'preference',
   'site_state',
-  'task_history',
-  'execution_tip',
 ]);
 
-const EXTRACT_SYSTEM = `你是 HOLA DAY 的记忆提取器。给你一个刚完成的任务记录，从中提取值得长期记住的信息。
+const SITE_STATE_DEFAULT_TTL_DAYS = 30;
+const MAX_TTL_DAYS = 365;
+const MAX_ENTRIES_PER_TASK = 5;
 
-只提取这四类：
-- preference   — 用户的稳定偏好（"偏好京东而不是淘宝"、"喜欢简洁回复"）
-- site_state   — 网站使用建议（"淘宝必须登录才能看价格"、"小红书移动版搜索不稳定"）
-- task_history — 重要的一次性事件（"2026-04 升级 Pro"、"邮箱是 xxx@xxx"）
-- execution_tip — 给未来 agent 的执行经验（"查 MacBook 价格直接搜 Apple 官网更准"）
+export const EXTRACT_SYSTEM = `你是 HOLA DAY 的记忆提取器。给你一个刚完成的任务记录，从中提取值得长期记住的信息。
 
-输出格式：JSON 数组。每项 {"category": "...", "key": "...", "value": "...", "ttlDays": null | number}。
+只提取这两类：
+- site_state — 网站操作经验（"淘宝必须登录才能看价格"、"京东搜索框在页面顶部，回车即可搜索"）
+- preference — 用户的稳定偏好（"偏好京东而不是淘宝"、"喜欢简洁回复"）
 
+输出格式：JSON 数组。每项 {"category": "site_state" | "preference", "key": "...", "value": "...", "ttlDays": null | number}。
 key 用一句话描述这条记忆的标识（< 80 字符），value 是详细内容（< 500 字符）。
-ttlDays = null 表示永久（preference 默认永久），其他类别建议 30 天。
+preference 的 ttlDays 用 null（永久），site_state 建议 30。
 
 明确不要提取的：
-- 一次性的查询结果（"今天天气晴"）
-- 通用知识（"北京是首都"）
-- 临时状态（"正在上传文件"）
+- 任何个人身份或联系信息（姓名、电话、邮箱、地址、证件号、账号、密码、验证码、银行卡）
+- 一次性的查询结果（"今天天气晴"）、通用知识、临时状态
 
-如果没有值得记的，输出 \`[]\`。`;
+如果没有值得记的，输出 \`[]\`。只输出 JSON。`;
 
 export interface ExtractedMemory {
   category: MemoryCategory;
@@ -62,19 +60,59 @@ export interface ExtractedMemory {
   expiresAt: Date | null;
 }
 
+/** Obvious personal identifiers never stored even if the model returns them. */
+const PII_RE =
+  /(?:\b1[3-9]\d{9}\b)|(?:[\w.+-]+@[\w-]+\.[\w.]+)|(?:\b\d{15,19}\b)|(?:\b\d{17}[\dXx]\b)|密码|验证码|password/i;
+
+export function parseExtractedMemories(raw: string, now: Date = new Date()): ExtractedMemory[] {
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: ExtractedMemory[] = [];
+  for (const item of parsed) {
+    if (out.length >= MAX_ENTRIES_PER_TASK) break;
+    if (!item || typeof item !== 'object') continue;
+    const o = item as Record<string, unknown>;
+    if (
+      typeof o.category !== 'string' ||
+      !WRITABLE_MEMORY_CATEGORIES.has(o.category as MemoryCategory)
+    )
+      continue;
+    if (typeof o.key !== 'string' || !o.key.trim()) continue;
+    if (typeof o.value !== 'string' || !o.value.trim()) continue;
+    if (PII_RE.test(o.key) || PII_RE.test(o.value)) continue;
+    let ttlDays: number | null = null;
+    if (typeof o.ttlDays === 'number' && Number.isFinite(o.ttlDays) && o.ttlDays > 0)
+      ttlDays = Math.min(Math.round(o.ttlDays), MAX_TTL_DAYS);
+    if (o.category === 'site_state' && ttlDays === null) ttlDays = SITE_STATE_DEFAULT_TTL_DAYS;
+    out.push({
+      category: o.category as MemoryCategory,
+      keyName: o.key.trim().slice(0, 255),
+      value: o.value.trim().slice(0, 4_000),
+      expiresAt: ttlDays === null ? null : new Date(now.getTime() + ttlDays * 86_400_000),
+    });
+  }
+  return out;
+}
+
 export class MemoryService {
   constructor(
     private readonly db: DB,
     private readonly logger: Logger,
   ) {}
 
-  /**
-   * Pull the user's currently-valid memory rows. Used both by the
-   * agent-loop (to compose the user-message preamble) and by the
-   * memory-management UI in /settings.
-   */
+  /** The user's currently-valid memory rows. */
   async listForUser(userIdInternal: number): Promise<ExecutionMemory[]> {
-    const rows = await this.db
+    return this.db
       .select()
       .from(executionMemory)
       .where(
@@ -83,20 +121,14 @@ export class MemoryService {
           or(isNull(executionMemory.expiresAt), gt(executionMemory.expiresAt, new Date())),
         ),
       );
-    return rows;
   }
 
   /**
-   * Pick the memories worth injecting into the next task's user
-   * message. Preferences always go in (high-signal, small N);
-   * other categories filter on a token-overlap match against the
-   * incoming intent. Cap at 5 non-preference rows so the prompt
-   * doesn't bloat past usefulness.
+   * Memories worth injecting into the next task: preferences always (small
+   * N, high signal); other categories by token overlap with the intent,
+   * newest first, capped at 5.
    */
-  async pickRelevant(
-    userIdInternal: number,
-    intent: string,
-  ): Promise<ExecutionMemory[]> {
+  async pickRelevant(userIdInternal: number, intent: string): Promise<ExecutionMemory[]> {
     const all = await this.listForUser(userIdInternal);
     const lower = intent.toLowerCase();
     const tokens = lower.split(/\s+/).filter((t) => t.length >= 2);
@@ -109,44 +141,23 @@ export class MemoryService {
       }
       const keyLower = row.keyName.toLowerCase();
       const valueLower = row.value.toLowerCase();
-      // Token overlap on either the key or the value text.
       const matched =
         tokens.some((t) => keyLower.includes(t) || valueLower.includes(t)) ||
         keyLower.split(/\s+/).some((w) => lower.includes(w.toLowerCase()));
       if (matched) others.push(row);
     }
-    // Most-recent first within "others" so a newer site-state tip
-    // outranks a stale one when both match.
     others.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
     return [...prefs, ...others.slice(0, 5)];
   }
 
-  /**
-   * Render the picked memories as a user-message-ready preamble.
-   * Empty string when nothing to inject — caller appends only when
-   * the result is non-empty.
-   */
   formatForPrompt(memories: ExecutionMemory[]): string {
     if (memories.length === 0) return '';
     const lines = memories.map((m) => `- [${m.category}] ${m.keyName}：${m.value}`);
     return ['---', '你对这个用户的了解（来自过往任务）：', ...lines, '---'].join('\n');
   }
 
-  /**
-   * Upsert a single memory row by (user_id, category, key_name).
-   * Touches updated_at so the recency sort in pickRelevant works
-   * across re-saves.
-   */
-  async upsert(
-    userIdInternal: number,
-    entry: ExtractedMemory,
-  ): Promise<void> {
-    const now = new Date();
-    // Drizzle MySQL has `onDuplicateKeyUpdate` for natural-key
-    // upserts. The (user_id, category, key_name) unique index
-    // backs this, so a re-store of the same key bumps the value +
-    // touches updated_at.
-    void now;
+  /** Upsert one row by (user_id, category, key_name). */
+  async upsert(userIdInternal: number, entry: ExtractedMemory): Promise<void> {
     await this.db
       .insert(executionMemory)
       .values({
@@ -157,80 +168,62 @@ export class MemoryService {
         value: entry.value,
         expiresAt: entry.expiresAt,
       })
-      .onDuplicateKeyUpdate({
-        set: {
-          value: entry.value,
-          expiresAt: entry.expiresAt,
-        },
-      });
+      .onDuplicateKeyUpdate({ set: { value: entry.value, expiresAt: entry.expiresAt } });
+  }
+
+  /** 删除入口: remove one of the caller's rows (composite WHERE — never another user's). */
+  async deleteForUser(userIdInternal: number, externalId: string): Promise<void> {
+    await this.db
+      .delete(executionMemory)
+      .where(
+        and(eq(executionMemory.externalId, externalId), eq(executionMemory.userId, userIdInternal)),
+      );
+  }
+
+  /** 删除入口: wipe all of the caller's rows. */
+  async clearForUser(userIdInternal: number): Promise<void> {
+    await this.db.delete(executionMemory).where(eq(executionMemory.userId, userIdInternal));
   }
 
   /**
-   * Extract memories from a completed task via a Sonnet call. Best-
-   * effort: parse failures + Anthropic errors log and continue.
+   * Extract and store memories from a completed task with ONE call on the
+   * given adapter (resolve it from the model runtime's `generate` lane).
+   * Best-effort: model / parse failures log and return 0.
    */
   async extractAndStore(opts: {
-    apiKey: string;
+    adapter: MessagesAdapter;
     userIdInternal: number;
     intent: string;
     summary: string;
     sitesVisited?: string[];
     taskId?: string;
   }): Promise<number> {
-    const client = new Anthropic({ apiKey: opts.apiKey });
     try {
       const sites = opts.sitesVisited?.length ? `访问的网站：${opts.sitesVisited.join(', ')}` : '';
-      const userText = [
-        `任务描述：${opts.intent}`,
-        `任务结果：${opts.summary}`,
-        sites,
-      ]
+      const userText = [`任务描述：${opts.intent}`, `任务结果：${opts.summary}`, sites]
         .filter(Boolean)
         .join('\n');
-      const resp = await client.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 600,
-        system: [{ type: 'text', text: EXTRACT_SYSTEM, cache_control: { type: 'ephemeral' } }],
-        messages: [{ role: 'user', content: userText }],
-      });
+      const resp = await opts.adapter.create(
+        {
+          maxTokens: 600,
+          thinking: { type: 'disabled' },
+          temperature: 0,
+          system: [{ type: 'text', text: EXTRACT_SYSTEM, cacheControl: 'ephemeral' }],
+          messages: [{ role: 'user', content: userText.slice(0, 8_000) }],
+        },
+        { timeoutMs: 30_000, maxRetries: 1 },
+      );
       const raw = resp.content
-        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-        .map((b) => b.text.trim())
-        .join('\n')
-        .trim();
-      if (!raw) return 0;
-      // Tolerate ```json fences the model occasionally adds.
-      const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(cleaned);
-      } catch (err) {
-        this.logger.warn(
-          { taskId: opts.taskId, err: err instanceof Error ? err.message : String(err), preview: cleaned.slice(0, 200) },
-          'memory: extractor returned non-JSON',
-        );
-        return 0;
-      }
-      if (!Array.isArray(parsed)) return 0;
-      let stored = 0;
-      for (const item of parsed) {
-        if (!isExtractedMemoryShape(item)) continue;
-        const expires = item.ttlDays != null
-          ? new Date(Date.now() + item.ttlDays * 86_400_000)
-          : null;
-        await this.upsert(opts.userIdInternal, {
-          category: item.category,
-          keyName: String(item.key).slice(0, 255),
-          value: String(item.value).slice(0, 4_000),
-          expiresAt: expires,
-        });
-        stored += 1;
-      }
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n');
+      const entries = parseExtractedMemories(raw);
+      for (const entry of entries) await this.upsert(opts.userIdInternal, entry);
       this.logger.info(
-        { taskId: opts.taskId, stored, considered: (parsed as unknown[]).length },
+        { taskId: opts.taskId, stored: entries.length },
         'memory: extracted + stored',
       );
-      return stored;
+      return entries.length;
     } catch (err) {
       this.logger.warn(
         { taskId: opts.taskId, err: err instanceof Error ? err.message : String(err) },
@@ -239,21 +232,4 @@ export class MemoryService {
       return 0;
     }
   }
-}
-
-function isExtractedMemoryShape(v: unknown): v is {
-  category: MemoryCategory;
-  key: string;
-  value: string;
-  ttlDays: number | null;
-} {
-  if (!v || typeof v !== 'object') return false;
-  const o = v as Record<string, unknown>;
-  if (typeof o.category !== 'string' || !VALID_CATEGORIES.has(o.category as MemoryCategory)) {
-    return false;
-  }
-  if (typeof o.key !== 'string' || !o.key.trim()) return false;
-  if (typeof o.value !== 'string' || !o.value.trim()) return false;
-  if (o.ttlDays != null && typeof o.ttlDays !== 'number') return false;
-  return true;
 }

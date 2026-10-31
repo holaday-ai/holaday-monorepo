@@ -100,8 +100,8 @@ export const processors: readonly ProcessorDefinition[] = [
   {
     id: 'dashscope',
     displayName: 'DashScope',
-    purposes: ['任务视频与媒体处理'],
-    categoryIds: ['task_execution', 'media_assets'],
+    purposes: ['任务视频与媒体处理', '跨任务记忆提取（站点操作与用户偏好）'],
+    categoryIds: ['task_execution', 'cross_task_memory', 'media_assets'],
     activation: {
       mode: 'feature_conditional',
       configKeys: ['DASHSCOPE_API_KEY'],

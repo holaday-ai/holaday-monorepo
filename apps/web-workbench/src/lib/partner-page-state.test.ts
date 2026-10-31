@@ -10,12 +10,12 @@ import {
   partnerActionErrorMessage,
   partnerDraftKeyAfterSuccess,
   partnerDraftKeyFor,
+  partnerPaymentIntentDisplay,
   partnerPaymentProviderHint,
   partnerPaymentProviderLabel,
-  partnerPaymentIntentDisplay,
   partnerRechargeGate,
-  partnerWorkbenchRedirectTarget,
   partnerWithdrawalGate,
+  partnerWorkbenchRedirectTarget,
 } from './partner-page-state';
 
 function passedKycProfile(overrides: Record<string, unknown> = {}) {
@@ -466,9 +466,9 @@ describe('partner page state helpers', () => {
     expect(partnerActionErrorMessage(new Error('not_whole_cny'), '充值失败')).toBe(
       '金额必须为整元',
     );
-    expect(
-      partnerActionErrorMessage(new Error('partner membership required'), '充值失败'),
-    ).toBe('请先创建并完成年费会员订单');
+    expect(partnerActionErrorMessage(new Error('partner membership required'), '充值失败')).toBe(
+      '请先创建并完成年费会员订单',
+    );
     expect(
       partnerActionErrorMessage(
         new Error('partner KYC must be passed before recharge'),
@@ -505,26 +505,29 @@ describe('partner page state helpers', () => {
         '提现失败',
       ),
     ).toBe('银行卡变更冷却期内暂不能提现');
-    expect(
-      partnerActionErrorMessage(new Error('insufficient_available_credit'), '提现失败'),
-    ).toBe('可用 HOLA Credit 不足');
+    expect(partnerActionErrorMessage(new Error('insufficient_available_credit'), '提现失败')).toBe(
+      '可用 HOLA Credit 不足',
+    );
     expect(
       partnerActionErrorMessage(new Error('insufficient_withdrawable_credit'), '提现失败'),
     ).toBe('可提现 HOLA Credit 不足');
-    expect(
-      partnerActionErrorMessage(new Error('daily_platform_cap_exceeded'), '提现失败'),
-    ).toBe('今日平台提现额度已用完，请明天再试');
-    expect(
-      partnerActionErrorMessage(new Error('monthly_user_cap_exceeded'), '提现失败'),
-    ).toBe('本月提现额度已达上限，请下月再试');
+    expect(partnerActionErrorMessage(new Error('daily_platform_cap_exceeded'), '提现失败')).toBe(
+      '今日平台提现额度已用完，请明天再试',
+    );
+    expect(partnerActionErrorMessage(new Error('monthly_user_cap_exceeded'), '提现失败')).toBe(
+      '本月提现额度已达上限，请下月再试',
+    );
     expect(
       partnerActionErrorMessage(new Error('partner referral attribution conflict'), '邀请登记失败'),
     ).toBe('该账号已有邀请归因');
+    expect(partnerActionErrorMessage(new Error('partner KYC already passed'), '实名提交失败')).toBe(
+      '实名已通过，无需重复提交',
+    );
     expect(
-      partnerActionErrorMessage(new Error('partner KYC already passed'), '实名提交失败'),
-    ).toBe('实名已通过，无需重复提交');
-    expect(
-      partnerActionErrorMessage(new Error('partner KYC bank account fingerprint required'), '实名提交失败'),
+      partnerActionErrorMessage(
+        new Error('partner KYC bank account fingerprint required'),
+        '实名提交失败',
+      ),
     ).toBe('请填写银行卡认证指纹');
     expect(
       partnerActionErrorMessage(
@@ -532,9 +535,9 @@ describe('partner page state helpers', () => {
         '合伙人账本暂时无法加载',
       ),
     ).toBe('合伙人服务暂时未连接，请确认 orchestrator 已启动后重试');
-    expect(
-      partnerActionErrorMessage(new Error('partner ledger is disabled'), '操作失败'),
-    ).toBe('合伙人账本暂未开放');
+    expect(partnerActionErrorMessage(new Error('partner ledger is disabled'), '操作失败')).toBe(
+      '合伙人账本暂未开放',
+    );
     expect(
       partnerActionErrorMessage(
         new Error('SQLSTATE 23000: internal stack trace should not render'),
@@ -772,10 +775,6 @@ describe('partner page state helpers', () => {
     expect(changedDraft.fingerprint).toBe('amount=20000');
     expect(afterSuccess.key).not.toBe(changedDraft.key);
     expect(afterSuccess.fingerprint).toBe('amount=20000');
-    expect(issued).toEqual([
-      'partner-recharge:1',
-      'partner-recharge:2',
-      'partner-recharge:3',
-    ]);
+    expect(issued).toEqual(['partner-recharge:1', 'partner-recharge:2', 'partner-recharge:3']);
   });
 });

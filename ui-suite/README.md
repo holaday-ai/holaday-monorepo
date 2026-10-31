@@ -1,0 +1,68 @@
+# Local UI release gate
+
+Run from the repository root with Node 22 and installed workspace dependencies (including Playwright Chromium):
+
+```bash
+NODE_OPTIONS='--max-old-space-size=1536 --v8-pool-size=1' \
+UV_THREADPOOL_SIZE=1 GOMAXPROCS=1 pnpm ui:audit
+```
+
+The command builds **this checkout's frontend**, starts one loopback HTTP/WS seed server, and drives Chromium serially. It never starts the production orchestrator, reads an `.env`, logs into a real account or contacts a remote backend. External HTTP and WebSocket attempts are blocked and reported. Unknown seed routes fail closed. No secret, payment provider or database is required.
+
+Outputs: `ui-suite/report.md`, `report.json`, generated `inventory.md` / `inventory.json`, and `artifacts/*.png` including interaction-state evidence and visual diffs. JSON retains each control, its action path, outcome and requests. Baselines are under `baselines/<seed-version>/`.
+
+Exit 1 blocks a release for P1 findings, runtime errors, missing/incompatible baselines, filtered runs, startup failures or coverage gaps. P2 visual/text differences are reported for review; P3 guidance is in `known-issues.md`. A red initial baseline is expected where the candidate has real defects. Baseline creation never clears those defects.
+
+## Baselines and repeatability
+
+```bash
+# Explicit first baseline or reviewed replacement only.
+pnpm ui:audit --update-baseline
+# Subsequent candidate, same OS and Chromium version:
+pnpm ui:audit
+# Detector calibration: intentionally broken and repaired local fixtures.
+pnpm test:ui-suite
+```
+
+Screenshot comparison flags >1% pixels with an RGB channel difference >30. Time, locale, timezone, viewport size (1440×960, 1280×960, 1024×960, 1200×1000 and 1366×768), color scheme and reduced motion are fixed. Browser/OS/seed/viewport mismatch blocks comparison; candidate SHA and source/build hashes are recorded. Review image differences before updating a baseline. Fonts and browser versions affect pixels.
+
+To audit the other frontend branch without modifying it, keep this harness and dependencies here and set `UI_AUDIT_APP_DIR=/absolute/path/to/other-checkout/apps/web-workbench` and `UI_AUDIT_OUTPUT=/private/tmp/other-ui-audit`. The runner builds that candidate, validates its source hash, and compares against these baselines. The target's existing `dist` is replaced by a local build. Use its isolated worktree; do not point at a deployment directory. This has not been claimed as a green run of an unavailable future fix.
+
+Debugging case filter: `UI_AUDIT_CASES='["task:generate:completed", "/projects/:projectId"]' pnpm ui:audit`. This is diagnostic only and leaves a blocking coverage gap.
+
+Debugging filters: `UI_AUDIT_ROUTES='["/stocks"]' UI_AUDIT_WIDTHS='[1440]' pnpm ui:audit --screens-only`. Filters/screens-only **always leave a coverage gap** and cannot satisfy the release gate. `--skip-build` requires an exact candidate + source stamp from a previous build.
+
+This copy is based on the merged recovery mainline at `69febb6f`. The P2 batch refreshes reviewed desktop visual baselines in the standalone commit `bb174b40`; all 21 diffs above 0.05 have individual provenance in the [visual review](../docs/ui-p2-batch/visual-review.md). Round 3 product-specific P1 assertions remain in `lib/round3-checks.mjs`; `lib/p2-checks.mjs` adds terminal-plan, settings navigation and energy-spacing checks. Strict icon/URL truncation contracts, selected-control semantics and bounded business-ready replay are calibrated with positive and negative tests. Numeric geometry and visual thresholds are unchanged. The unfiltered candidate `1e20af78` completes 240/240 with P1=0, P2=17, coverage gaps=0 and exit=0; see the [P2 report](../docs/ui-p2-batch/report.md) and historical [validation ledger](validation.md).
+
+## What the evidence means
+
+- Static route/import scanning supplies candidates; actual Playwright traversal supplies observations. Conditional states not reachable from fixtures are not certified.
+- All 60 route patterns and 20 task-mode/status combinations run at all three widths. Alias pages retain their own screenshots and refer to already exercised canonical controls. Canonical identities include path, query and hash so settings sections remain distinct.
+- Calendar date cells are identified by visible grid position; flipping months tests the navigation but does not recursively enumerate every future date. The current visible slots and their opened controls are exercised.
+- Native open dialogs and the newest nested portal participate in modal layering; native fullscreen excludes only its hidden background; descendants of closed `details` are excluded until expanded. Repeated batch clone actions exercise the first and second rows; later identical rows explicitly reference that evidence instead of unbounded recursive cloning.
+- Each distinct control within its dialog/menu scope is exercised once (newly enabled controls are revisited) from a reset local seed; alternate paths to the same scoped control are deduplicated. New menu/dialog controls are explored to depth twenty, with a declared 400-control bound per page; exhaustion is a blocking gap.
+- Inputs are tested individually. Disabled submit buttons needing domain-specific multi-field workflows are recorded as disabled prerequisites. This is not end-to-end purchase, login, third-party integration, or complete workflow certification.
+- Menus exposing `aria-expanded` must close on a second click or Escape (inline expanded sections require the second click); their children are tested separately. Popovers/dialogs without expanded semantics must also close with Escape; the runner then restores the path from a clean seed before exploring nested controls. Ancestor replay does not repeat dismissal tests. Visible close/cancel controls are exercised separately. No silent exemption is made for broken controls.
+- Pagination must append distinct row identities. Unknown row structure is a coverage gap requiring a page-specific assertion.
+- Explicit display-off/transparent upload or checkbox inputs are excluded from geometry overlap; their visible controls and input actions remain tested. Scrollable containers and declared modal/menu layers avoid intentional overlap false positives.
+- Unauthenticated brand assets are replaced at exactly five known logo paths with a local SVG. Logo appearance is excluded; logo layout still participates. External popup destinations are fulfilled locally **at the requested URL**. This proves leaving `about:blank`, not the remote site's availability.
+- Browser tasks use a deterministic synthetic 960×600 surface over the real screencast WebSocket protocol, plus finite ownership/takeover/return and navigation contracts. This checks panel rendering and controls; it does not execute a remote browser or validate real websites.
+- Partner payments/browser-data grants remain default-off. Licensed CE.SDK media rendering is not provisioned. The default-off getProject response is the backend’s explicit 403 FORBIDDEN contract, listed in the network whitelist; no SDK fetch is needed. Any other CDN fetch remains blocked and reported.
+
+The seed server is intentionally a finite UI contract fixture, not the real backend. Backend correctness belongs to backend tests. Unknown RPCs are listed explicitly; they must be added from actual contracts before claiming their flows covered. This suite does not authorize a deployment.
+
+External mailto/tel links are recorded as protocol-link URI checks; this suite does not launch host applications or send messages. They are separate from clicked web URLs.
+
+Security UI fixtures use visibly synthetic credential placeholders only; they are never provisioned, usable, or read from host secrets.
+
+## Laptop layout audit
+
+`UI_AUDIT_VIEWPORTS` accepts explicit `{width,height}` pairs (and cannot be combined with `UI_AUDIT_WIDTHS`). Legacy width filters keep a 960px height. New screenshot IDs include the height except for the existing 960px baselines.
+
+```bash
+UI_AUDIT_CASES='["/","task:browser:executing","/stocks","/settings"]' \
+UI_AUDIT_VIEWPORTS='[{"width":1200,"height":1000},{"width":1366,"height":768}]' \
+pnpm ui:audit --layout-only
+```
+
+This bounded mode retains seeded readiness, runtime/network errors, geometry, task-state assertions and screenshots. It also measures document and bounded-container horizontal overflow, full-height shell/main/sidebar coverage, and a shell header painting over the browser toolbar. It skips control traversal and visual baseline comparison, explicitly records those gaps, and **never passes the full release gate**. A completed zero-P1 layout matrix is layout evidence only. Use the normal unfiltered command for the full interaction release gate; creating new viewport baselines requires separate visual review.

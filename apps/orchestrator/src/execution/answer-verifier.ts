@@ -1,3 +1,4 @@
+import type { EvidenceLedger } from './evidence-ledger.js';
 /**
  * Phase 1 — Answer verifier (deterministic tier).
  *
@@ -24,21 +25,19 @@
  *     facts — best-effort but catches the obvious cases (form
  *     submit / payment) without inventing a structured DSL.
  */
-import type {
-  ExecutionContract,
-  SuccessCriterion,
-} from './execution-contract.js';
-import type { EvidenceLedger } from './evidence-ledger.js';
+import type { ExecutionContract, SuccessCriterion } from './execution-contract.js';
 import type { ExpertWorkflowContract } from './expert-workflow-contract.js';
-import {
-  evaluateFileArtifact,
-  type OutputFileDescriptor,
-} from './file-artifact-consistency.js';
-import { evaluateSourceDomain } from './source-domain-consistency.js';
-import { evaluateTemplateFill } from './template-fill-consistency.js';
+import { type OutputFileDescriptor, evaluateFileArtifact } from './file-artifact-consistency.js';
 import { classifyLightweightTask } from './lightweight-task.js';
+import { evaluateSourceDomain } from './source-domain-consistency.js';
+import {
+  type TaskVerificationContext,
+  createTaskVerificationContext,
+} from './task-verification-context.js';
+import { evaluateTemplateFill } from './template-fill-consistency.js';
+import { TEXT_URL_RE as URL_RE, trimTextUrl } from './text-urls.js';
+import { isNonDetailUrl, isSiteHomeUrl, urlResourceIdentity } from './url-identity.js';
 import type { VerificationInputCoverage } from './verification-input-budget.js';
-import { type TaskVerificationContext, createTaskVerificationContext } from './task-verification-context.js';
 
 export type FailureLevel = 'fixable' | 'needs_clarification' | 'hard_fail';
 
@@ -107,7 +106,6 @@ export interface VerifyInputs {
   outputFiles?: ReadonlyArray<OutputFileDescriptor>;
 }
 
-const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
 // Permissible drift in cross-validation arithmetic (5%) — covers
 // rounding in the user's input ("GMV ¥100,000" vs computed 99,852.50).
 const CROSS_VALIDATION_TOLERANCE = 0.05;
@@ -137,16 +135,22 @@ const KNOWN_NUMERIC_KEYS = [
 // decides whether to actually block or just warn.
 const CONSTRAINT_CHECKERS: Record<string, (fact: string) => boolean> = {
   no_form_submit: (fact) => {
+    try {
+      const receipt = JSON.parse(fact);
+      if (receipt && typeof receipt === 'object' && typeof receipt.form?.submitted === 'boolean') {
+        return receipt.form.submitted || /^(?:submit|form_submit)$/.test(receipt.tool ?? '');
+      }
+    } catch {
+      // Legacy prose evidence still uses the conservative text detector below.
+    }
     if (/提交表单|表单提交/i.test(fact)) return true;
     // Avoid `\b` here — `_` counts as a word char in JS regex, so
     // `\bsubmit\b` wouldn't match "form_submit". Plain substring
     // co-occurrence is good enough for ledger fact text.
     return /submit/i.test(fact) && /form/i.test(fact);
   },
-  no_payment: (fact) =>
-    /payment|checkout|paypal|pay\s+now|支付|付款|结账|下单/i.test(fact),
-  no_credentials: (fact) =>
-    /password|credential|api[_ ]?key|secret|token|密码|凭证/i.test(fact),
+  no_payment: (fact) => /payment|checkout|paypal|pay\s+now|支付|付款|结账|下单/i.test(fact),
+  no_credentials: (fact) => /password|credential|api[_ ]?key|secret|token|密码|凭证/i.test(fact),
 };
 
 const CHINESE_CONSTRAINT_ALIASES: Record<string, string> = {
@@ -187,7 +191,9 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   // This check compares INPUT values, not assertions in the candidate. A plan
   // or clarification may legitimately ask the user to resolve that conflict.
   // Candidate claims still pass provenance/URL/artifact and semantic checks.
-  const numberCheck = deliveryStage ? null : checkNumberCrossValidation(ledger, inputs.verificationContext);
+  const numberCheck = deliveryStage
+    ? null
+    : checkNumberCrossValidation(ledger, inputs.verificationContext);
   if (numberCheck) checks.push(numberCheck);
 
   // 3. Workflow-specific checks (only when an expert workflow drove
@@ -222,10 +228,7 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   //    metadata.attachments. QA found ~1/3 of file tasks claiming a
   //    file with neither. Flag as fixable so the row reads
   //    partial_success instead of presenting a dead download link.
-  const fileArtifactCheck = checkFileArtifactConsistency(
-    answerText,
-    inputs.outputFiles ?? [],
-  );
+  const fileArtifactCheck = checkFileArtifactConsistency(answerText, inputs.outputFiles ?? []);
   if (fileArtifactCheck) checks.push(fileArtifactCheck);
 
   // 6. Source-domain consistency (Web-Agent roadmap Step 2). When the
@@ -237,11 +240,9 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   //    the user explicitly allowed other sources.
   // contract.goal is the one-line summarised intent (≤120 chars) — site
   // names sit at the head of these prompts, so it's a faithful proxy.
-  const sourceDomainCheck = deliveryStage ? null : checkSourceDomainConsistency(
-    contract.goal,
-    answerText,
-    finalUrl,
-  );
+  const sourceDomainCheck = deliveryStage
+    ? null
+    : checkSourceDomainConsistency(contract.goal, answerText, finalUrl);
   if (sourceDomainCheck) checks.push(sourceDomainCheck);
 
   // 7. Template-fill consistency (Phase 1 #1, §6) — backstop for the
@@ -249,10 +250,7 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   //    (保留了模板原有格式) must be backed by a real filled document. The
   //    runner grades this directly; this catches a runner miss and the
   //    generate-fallback path. No-op for every non-template answer.
-  const templateFillCheck = checkTemplateFillConsistency(
-    answerText,
-    inputs.outputFiles ?? [],
-  );
+  const templateFillCheck = checkTemplateFillConsistency(answerText, inputs.outputFiles ?? []);
   if (templateFillCheck) checks.push(templateFillCheck);
 
   const passed = checks.every((c) => c.passed);
@@ -301,6 +299,8 @@ function checkCriterion(
       return checkPriceSort(criterion, answerText);
     case 'ecommerce_rows':
       return checkEcommerceRows(criterion, answerText);
+    case 'list_item_sources':
+      return checkListItemSources(criterion, answerText);
     case 'custom':
       return checkCustom(criterion, ledger, answerText, contract, contextInput);
     default: {
@@ -318,10 +318,7 @@ function checkCriterion(
   }
 }
 
-function checkUrlMatch(
-  criterion: SuccessCriterion,
-  finalUrl: string | undefined,
-): CheckResult {
+function checkUrlMatch(criterion: SuccessCriterion, finalUrl: string | undefined): CheckResult {
   const domain = (criterion.data?.domain as string | undefined) ?? '';
   if (!domain) {
     return {
@@ -353,10 +350,7 @@ function checkUrlMatch(
   };
 }
 
-function checkDataPresent(
-  criterion: SuccessCriterion,
-  ledger: EvidenceLedger,
-): CheckResult {
+function checkDataPresent(criterion: SuccessCriterion, ledger: EvidenceLedger): CheckResult {
   const productive = ledger.entries.filter(
     (e) => e.confidence === 'observed' || e.confidence === 'extracted',
   );
@@ -395,10 +389,7 @@ function checkFileExists(criterion: SuccessCriterion): CheckResult {
   };
 }
 
-function checkFieldCount(
-  criterion: SuccessCriterion,
-  answerText: string,
-): CheckResult {
+function checkFieldCount(criterion: SuccessCriterion, answerText: string): CheckResult {
   const fields = (criterion.data?.fields as string[] | undefined) ?? [];
   if (fields.length === 0) {
     return {
@@ -421,12 +412,9 @@ function checkFieldCount(
   };
 }
 
-function checkWordCount(
-  criterion: SuccessCriterion,
-  answerText: string,
-): CheckResult {
+function checkWordCount(criterion: SuccessCriterion, answerText: string): CheckResult {
   const min = (criterion.data?.min as number | undefined) ?? 0;
-  const max = (criterion.data?.max as number | undefined) ?? Infinity;
+  const max = (criterion.data?.max as number | undefined) ?? Number.POSITIVE_INFINITY;
   const length = answerText.length;
   const passed = length >= min && length <= max;
   return {
@@ -434,8 +422,8 @@ function checkWordCount(
     passed,
     checker: 'deterministic',
     detail: passed
-      ? `length ${length} in [${min}, ${max === Infinity ? '∞' : max}]`
-      : `length ${length} outside [${min}, ${max === Infinity ? '∞' : max}]`,
+      ? `length ${length} in [${min}, ${max === Number.POSITIVE_INFINITY ? '∞' : max}]`
+      : `length ${length} outside [${min}, ${max === Number.POSITIVE_INFINITY ? '∞' : max}]`,
     // Too short = answer is a stub / error state — fixable by re-running.
     // Too long is unlikely but treated the same.
     severity: passed ? undefined : 'fixable',
@@ -503,15 +491,13 @@ function tryExtractJsonItems(answerText: string): ParsedItem[] {
             name: pickString(obj.name),
             price: pickNumber(obj.price),
             url:
-              typeof obj.url === 'string' && /^https?:\/\//i.test(obj.url)
-                ? obj.url.trim()
-                : null,
+              typeof obj.url === 'string' && /^https?:\/\//i.test(obj.url) ? obj.url.trim() : null,
             raw: JSON.stringify(obj),
             source: 'json',
           };
         });
     } catch {
-      continue;
+      // Not JSON: try the next candidate.
     }
   }
   return [];
@@ -597,9 +583,7 @@ function tryExtractJsonLikeItems(answerText: string): ParsedItem[] {
     items.push({
       name: match[1]?.trim() || null,
       price: pickJsonLikePrice(priceText),
-      url: urlMatch?.[1] && /^https?:\/\//i.test(urlMatch[1])
-        ? urlMatch[1].trim()
-        : null,
+      url: urlMatch?.[1] && /^https?:\/\//i.test(urlMatch[1]) ? urlMatch[1].trim() : null,
       raw: segment.trim(),
       source: 'json',
     });
@@ -664,47 +648,92 @@ function tryExtractTableItems(answerText: string): ParsedItem[] {
 }
 
 const NUMBERED_LIST_RE = /^\s*\d+[.、)]\s+(.+)$/;
+/** "价格：¥1498" / "链接：https://…" / "- 发布时间：…" under a numbered item. */
+const ITEM_CONTINUATION_RE =
+  /^(?:\s+\S|\s*[-*+]\s+\S|\s*\**[\p{Script=Han}A-Za-z]{1,8}\**\s*[：:]\s*\S)/u;
 
+/**
+ * Numbered items, including multi-line items whose price / link / date sit on
+ * indented or labelled lines below the title (common model markdown):
+ *
+ *   1. **商品名**
+ *      价格：¥1498.00
+ *      链接：https://item.jd.com/1.html
+ *
+ * The name comes from the first line only; price and URL from the whole item.
+ */
 function tryExtractNumberedListItems(answerText: string): ParsedItem[] {
   const lines = answerText.split(/\r?\n/);
-  const items: ParsedItem[] = [];
+  const blocks: Array<{ first: string; rest: string[] }> = [];
+  let current: { first: string; rest: string[] } | null = null;
   for (const raw of lines) {
     const m = raw.match(NUMBERED_LIST_RE);
-    if (!m || !m[1]) continue;
-    const body = m[1].trim();
-    const url = extractUrlFromCell(body);
-    const price = parsePriceText(body);
-    let name: string | null = body;
-    if (url) name = name.replace(url, '').trim();
+    if (m?.[1]) {
+      current = { first: m[1].trim(), rest: [] };
+      blocks.push(current);
+      continue;
+    }
+    if (!current) continue;
+    if (raw.trim() === '') continue;
+    if (ITEM_CONTINUATION_RE.test(raw) && !/^\s*#/.test(raw) && !/^\s*\|/.test(raw)) {
+      current.rest.push(raw.trim());
+    } else {
+      current = null;
+    }
+  }
+  return blocks.map(({ first, rest }): ParsedItem => {
+    const body = [first, ...rest].join('\n');
+    const url = extractUrlFromCell(first) ?? extractUrlFromCell(body);
+    const price = parsePriceText(first) ?? parsePriceText(rest.join('\n'));
+    let name: string | null = first;
+    const firstUrl = extractUrlFromCell(first);
+    if (firstUrl) name = name.replace(firstUrl, '').trim();
     // Strip the price token off the name with a separate parse so
     // dropping ¥ doesn't catch random digits embedded in the name.
-    const priceMatch = body.match(
-      /[¥￥$]\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?\s*(?:元|RMB|人民币)/i,
-    );
+    const priceMatch = first.match(PRICE_TOKEN_RE);
     if (priceMatch) name = name.replace(priceMatch[0], '').trim();
     // Trim residual punctuation (separators between fields).
     name = name.replace(/^[—\-·,，:：、\s]+|[—\-·,，:：、\s]+$/g, '').trim();
-    items.push({
+    return {
       name: name || null,
       price,
       url,
       raw: body,
       source: 'list',
-    });
-  }
-  return items;
+    };
+  });
 }
 
 const BULLET_LIST_RE = /^\s*[-*+]\s+(.+)$/;
 
+/**
+ * 「第1条标题：…」「Result 1 link: …」: the ordinal a bullet names. FIX-44 (Deploy-44 core-01):
+ * 「结果1_标题：…」「结果1_链接：…」 too — 「_」 is a word character, so no \b after the digits.
+ */
+const BULLET_ORDINAL_RE =
+  /^(?:第\s*(\d{1,3})\s*(?:条|个|项)|(?:result|item|(?:搜索)?结果)\s*#?(\d{1,3})(?!\d))/i;
+
 function tryExtractBulletItems(answerText: string): ParsedItem[] {
   const lines = answerText.split(/\r?\n/);
   const items: ParsedItem[] = [];
+  let lastOrdinal: string | null = null;
   for (const raw of lines) {
     const m = raw.match(BULLET_LIST_RE);
     if (!m || !m[1]) continue;
     const body = m[1].trim();
     if (!body) continue;
+    // FIX-41 (Deploy-41 core-01): 「- 第1条标题：…」 then 「- 第1条链接：…」 are one result
+    // written on two lines, not two results (the title line was flagged 缺少来源链接).
+    const ordinal = body.match(BULLET_ORDINAL_RE);
+    const n = ordinal ? (ordinal[1] ?? ordinal[2])! : null;
+    const previous = items.at(-1);
+    if (n && n === lastOrdinal && previous) {
+      previous.raw = `${previous.raw}\n${body}`;
+      previous.url ??= extractUrlFromCell(body);
+      previous.price ??= parsePriceText(body);
+      continue;
+    }
+    lastOrdinal = n;
     items.push({
       name: body,
       price: parsePriceText(body),
@@ -739,21 +768,115 @@ function pickNumber(v: unknown): number | null {
   return null;
 }
 
+/**
+ * FIX-32 (Deploy-32 b-p02): a regional page shows 「SGD 11.46」 — a currency code is a
+ * price as much as a symbol is. Symbols (S$/US$/HK$ end in $), codes before or after.
+ */
+const CURRENCY_CODE = 'SGD|USD|HKD|EUR|GBP|JPY|CNY|RMB|AUD|CAD|NZD|MYR|TWD|KRW|INR|THB|CHF';
+const AMOUNT = '([0-9]+(?:,[0-9]{3})*(?:\\.[0-9]+)?)';
+const PRICE_TOKEN_RE = new RegExp(
+  `[¥￥$€£₩₹]\\s*${AMOUNT}|\\b(?:${CURRENCY_CODE})\\s*${AMOUNT}|${AMOUNT}\\s*(?:元|人民币|(?:${CURRENCY_CODE})\\b)`,
+  'i',
+);
+
 function parsePriceText(s: string): number | null {
-  const m = s.match(
-    /[¥￥$]\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)|([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*(?:元|RMB|人民币)/i,
-  );
+  const m = s.match(PRICE_TOKEN_RE);
   if (!m) return null;
-  const raw = (m[1] ?? m[2] ?? '').replace(/,/g, '');
+  const raw = (m[1] ?? m[2] ?? m[3] ?? '').replace(/,/g, '');
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/**
+ * FIX-32 (Deploy-32 b-p02): a row that says its price is not on the page
+ * (「价格：未获取到（该商品卡片仅显示 "See options"）」) is an honest gap, not a missing field.
+ */
+const DECLARED_NO_PRICE_RE =
+  /(?:价格|售价|报价|price)\**\s*[：:]?\s*\**\s*(?:未获取到|未读到|未读取到|未显示|页面未显示|未标(?:价|明)|无(?:具体|明确)?(?:价格|报价|标价|售价)|暂无|不详|not\s+(?:shown|listed|available)|unavailable|n\/a)|(?:仅|只)显示\s*["“「]?see options/i;
+
+/** A state the page shows instead of a price (Amazon 「See options」, JD 「已下架」). */
+const NO_PRICE_STATE_RE =
+  /\[快照截断|see (?:all buying )?options|no featured offers|currently unavailable|cannot be shipped|not available|unavailable|暂无报价|暂无价格|已下架|下架|无货|缺货|售罄|不可配送|无法配送/i;
+
+/**
+ * PR #294 review: the page itself must show the gap. The row's item name is on a page
+ * the run read, and after it — before any price — the page shows a no-price state.
+ */
+function pageLacksPrice(name: string | null, pageText: string): boolean {
+  const flat = (v: string) => v.replace(/\s+/g, ' ').toLowerCase();
+  // 「名称：Anker USB C…；价格：未获取到」 — the name alone, without its label or price field.
+  const bare =
+    (name ?? '')
+      .replace(/\*\*/g, '')
+      .replace(/^\s*(?:名称|商品名?|标题|name)\s*[:：]\s*/i, '')
+      .split(/[；;]|\s[—–]\s|(?:价格|售价|price)\s*[:：]/i)[0] ?? '';
+  const text = flat(pageText);
+  // FIX-35 复审 #1: the whole title, not its first 30 characters — two cards sharing a
+  // prefix (「Anker USB C … (2-Pack, 6 ft …」 / 「… 3.3 ft …」) are two items. An answer that
+  // shortened the title (「…」) is matched by the longest prefix the page has.
+  let key = flat(bare)
+    .replace(/(?:\.{3}|…)\s*$/, '')
+    .trim();
+  while (key.length >= 4 && !text.includes(key)) key = key.slice(0, -1).trimEnd();
+  if (key.length < 4) return false;
+  // Exempt only when every place the title appears shows no price: one showing a price
+  // means the row's price is on the page.
+  let lacks = false;
+  for (let at = text.indexOf(key); at >= 0; ) {
+    const next = text.indexOf(key, at + key.length);
+    const after = text.slice(
+      at + key.length,
+      Math.min(next >= 0 ? next : Number.POSITIVE_INFINITY, at + key.length + 2000),
+    );
+    // FIX-35 0a (Deploy-35 b-p02): the row's own state first — 「See options」 /
+    // 「Currently unavailable」 right after its title, with no price before it. A cut marker
+    // further down must not hide it (the next rows' prices lie between).
+    // FIX-34: the cut can come well after a long title (rating and review nodes) — the
+    // snapshot's own end marker is looked for further than a row's own state words.
+    const stops = [after.slice(0, 500).search(NO_PRICE_STATE_RE), after.indexOf(SNAPSHOT_CUT)];
+    const stop = Math.min(...stops.filter((i) => i >= 0));
+    const before = Number.isFinite(stop) ? after.slice(0, stop) : after.slice(0, 500);
+    if (PRICE_TOKEN_RE.test(withoutPriceCaps(before))) return false;
+    if (Number.isFinite(stop)) lacks = true;
+    at = next;
+  }
+  return lacks;
+}
+
+const SNAPSHOT_CUT = '[快照截断';
+/**
+ * 「Kitchen bestsellers under S$30」「¥99 以下」 name a price band, not this item's price
+ * (Deploy-34 amazon-sg: a carousel heading between the cut item and the cut).
+ */
+function withoutPriceCaps(text: string): string {
+  return text.replace(/heading "[^"]*"/g, ' ').replace(
+    new RegExp(
+      // Not 「from S$x」: that is often the item's own (lowest) price.
+      String.raw`(?:under|below|over|less than|up to|低于|不到|以下|以上)\s*(?:${PRICE_TOKEN_RE.source})|(?:${PRICE_TOKEN_RE.source})\s*(?:以下|以内|以上)`,
+      'gi',
+    ),
+    ' ',
+  );
+}
+
+/**
+ * 1-based rows whose price the answer declares absent and the read page shows absent.
+ * Without page text nothing is exempt.
+ */
+export function declaredMissingPriceRows(answerText: string, pageText?: string): number[] {
+  if (!pageText) return [];
+  return extractStructuredItems(answerText).flatMap((row, i) =>
+    row.price == null && DECLARED_NO_PRICE_RE.test(row.raw) && pageLacksPrice(row.name, pageText)
+      ? [i + 1]
+      : [],
+  );
+}
+
 function extractUrlFromCell(c: string): string | null {
-  const md = c.match(/\[[^\]]+\]\((https?:\/\/[^)]+)\)/);
-  if (md && md[1]) return md[1];
-  const direct = c.match(/https?:\/\/\S+/);
-  if (direct) return direct[0].replace(/[)\].,;:]+$/, '');
+  const md = c.match(new RegExp(String.raw`\[[^\]]+\]\((${URL_RE.source})\)`, 'u'));
+  if (md?.[1]) return md[1];
+  const direct = c.match(URL_RE);
+  if (direct) return trimTextUrl(direct[0]!);
   return null;
 }
 
@@ -769,14 +892,25 @@ function extractUrlFromCell(c: string): string | null {
  * Soft (fixable) failure: lets the verifier downgrade the verdict
  * to partial_success rather than blocking.
  */
-function checkUrlCount(
-  criterion: SuccessCriterion,
-  answerText: string,
-): CheckResult {
+/**
+ * `.invalid` never resolves (RFC 2606): it names pages answered inside the
+ * task's own browser, such as a search API's results page, never a source.
+ */
+function isSourceUrl(url: string): boolean {
+  try {
+    return !/(?:^|\.)invalid\.?$/i.test(new URL(trimTextUrl(url)).hostname);
+  } catch {
+    return true;
+  }
+}
+
+function checkUrlCount(criterion: SuccessCriterion, answerText: string): CheckResult {
   const min = Number(criterion.data?.min ?? 1);
   const items = extractStructuredItems(answerText);
-  const itemUrls = items.map((it) => it.url).filter((u): u is string => Boolean(u));
-  const globalUrlCount = (answerText.match(URL_RE) ?? []).length;
+  const itemUrls = items
+    .map((it) => it.url)
+    .filter((u): u is string => Boolean(u) && isSourceUrl(u!));
+  const globalUrlCount = (answerText.match(URL_RE) ?? []).filter(isSourceUrl).length;
   // Fall back to global URL count when item-level URLs are below the
   // required floor. Browser execution answers often mix a small facts
   // table with a prose "page link" (Wikipedia / Skyscanner), which is
@@ -808,10 +942,7 @@ function checkUrlCount(
  * folds the prior numbered/bullet/table heuristics into a single
  * extractor; this checker just reads its output.
  */
-function checkResultCount(
-  criterion: SuccessCriterion,
-  answerText: string,
-): CheckResult {
+function checkResultCount(criterion: SuccessCriterion, answerText: string): CheckResult {
   const min = Number(criterion.data?.min ?? 1);
   const items = extractStructuredItems(answerText);
   const count = items.length;
@@ -837,15 +968,10 @@ function checkResultCount(
  * < 2 prices = vacuous pass (result_count handles "not enough rows").
  * Non-strict monotonic — ties allowed for identical prices.
  */
-function checkPriceSort(
-  criterion: SuccessCriterion,
-  answerText: string,
-): CheckResult {
+function checkPriceSort(criterion: SuccessCriterion, answerText: string): CheckResult {
   const direction = (criterion.data?.direction as 'asc' | 'desc' | undefined) ?? 'asc';
   const items = extractStructuredItems(answerText);
-  const prices = items
-    .map((it) => it.price)
-    .filter((p): p is number => p != null && p > 0);
+  const prices = items.map((it) => it.price).filter((p): p is number => p != null && p > 0);
   if (prices.length < 2) {
     return {
       criterionId: criterion.id,
@@ -900,9 +1026,12 @@ function checkPriceSort(
 function checkEcommerceRows(
   criterion: SuccessCriterion,
   answerText: string,
+  pageText?: string,
 ): CheckResult {
   const minItems = Number(criterion.data?.minItems ?? 0);
   const minUniqueUrls = Number(criterion.data?.minUniqueUrls ?? 0);
+  // FIX-31: links only when the user asked for them (see OutputRequirementEcommerce).
+  const requireLinks = criterion.data?.requireLinks !== false;
   const rows = extractStructuredItems(answerText);
   if (rows.length === 0) {
     return {
@@ -910,16 +1039,18 @@ function checkEcommerceRows(
       criterionType: 'ecommerce_rows',
       passed: false,
       checker: 'deterministic',
-      detail: '未能从回复中解析出结构化的商品列表（应当是 JSON 块、markdown 表格或 1. 2. 3. 编号列表）',
+      detail:
+        '未能从回复中解析出结构化的商品列表（应当是 JSON 块、markdown 表格或 1. 2. 3. 编号列表）',
       severity: 'fixable',
     };
   }
   const incomplete: string[] = [];
+  const declared = new Set(declaredMissingPriceRows(answerText, pageText));
   rows.forEach((row, i) => {
     const missing: string[] = [];
     if (!row.name) missing.push('名称');
-    if (row.price == null) missing.push('价格');
-    if (!row.url) missing.push('链接');
+    if (row.price == null && !declared.has(i + 1)) missing.push('价格');
+    if (requireLinks && !row.url) missing.push('链接');
     if (missing.length > 0) {
       incomplete.push(`第 ${i + 1} 行缺少${missing.join('、')}`);
     }
@@ -931,15 +1062,13 @@ function checkEcommerceRows(
   const uniqueUrls = new Set(
     rows
       .map((row) => row.url)
-      .filter((url): url is string => Boolean(url)),
+      .filter((url): url is string => Boolean(url))
+      .map((url) => urlResourceIdentity(stripTrailingPunct(url)) ?? url),
   );
   const tooFewUniqueUrls =
     minUniqueUrls > 0 && rows.length >= minItems && uniqueUrls.size < minUniqueUrls;
   const passed =
-    incomplete.length === 0 &&
-    aggregateLinkRows.length === 0 &&
-    !tooFew &&
-    !tooFewUniqueUrls;
+    incomplete.length === 0 && aggregateLinkRows.length === 0 && !tooFew && !tooFewUniqueUrls;
   const detailParts: string[] = [];
   if (tooFew) detailParts.push(`只解析到 ${rows.length} 行，要求至少 ${minItems} 条`);
   if (tooFewUniqueUrls) {
@@ -953,24 +1082,43 @@ function checkEcommerceRows(
     );
   }
   if (incomplete.length > 0) detailParts.push(incomplete.join('；'));
+  // FIX-32: every other row complete, some prices honestly not on the page — 部分完成.
+  if (passed && declared.size > 0) {
+    return {
+      criterionId: criterion.id,
+      criterionType: 'ecommerce_rows',
+      passed: false,
+      checker: 'deterministic',
+      detail: declaredPriceGap([...declared]),
+      severity: 'fixable',
+    };
+  }
   return {
     criterionId: criterion.id,
     criterionType: 'ecommerce_rows',
     passed,
     checker: 'deterministic',
     detail: passed
-      ? `已解析 ${rows.length} 条商品（${rows[0]!.source}），均包含名称、价格、链接，唯一链接 ${uniqueUrls.size} 个`
+      ? `已解析 ${rows.length} 条商品（${rows[0]!.source}），均包含名称、价格${requireLinks ? `、链接，唯一链接 ${uniqueUrls.size} 个` : ''}`
       : detailParts.join('；'),
     severity: passed ? undefined : 'fixable',
   };
 }
 
+function declaredPriceGap(rows: number[]): string {
+  return `部分完成：第 ${rows.join('、')} 条页面未显示价格（答案已如实说明）`;
+}
+
 function isLikelyEcommerceAggregateUrl(url: string): boolean {
+  if (isNonDetailUrl(url)) return true;
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
     const path = u.pathname.toLowerCase();
     if (host === 'search.jd.com') return true;
+    // re.jd.com landing pages and www.jd.com/jiage price digests list many products.
+    if (host === 're.jd.com') return true;
+    if (host.endsWith('jd.com') && path.startsWith('/jiage/')) return true;
     if (host.endsWith('.taobao.com')) {
       if (path.includes('/chanpin/')) return true;
       if (path.includes('/search')) return true;
@@ -984,6 +1132,119 @@ function isLikelyEcommerceAggregateUrl(url: string): boolean {
     return false;
   }
   return false;
+}
+
+/** Shared with the auto-fix layer and the eval scorer (see url-identity.ts). */
+export { isNonDetailUrl } from './url-identity.js';
+
+const LIST_KEY_FIELD_PATTERNS: Record<string, { label: string; re: RegExp }> = {
+  date: {
+    label: '发布日期/时间',
+    re: /\d{4}\s*[-/.年]\s*\d{1,2}(?:\s*[-/.月]\s*\d{1,2})?|\d{1,2}\s*月\s*\d{1,2}\s*日|\b\d{1,2}:\d{2}\b|\d+\s*(?:秒|分钟|小时|天)前|刚刚|今天|今日|昨天|\b\d+\s*(?:minutes?|hours?|days?)\s+ago\b/i,
+  },
+  price: { label: '价格', re: PRICE_TOKEN_RE },
+};
+
+/**
+ * FIX-BATCH-A — retrieved list items each need their own detail source and
+ * the requested key fields. A homepage / search page link, one link reused by
+ * every row, or a missing date/price fails: those answers cannot be checked
+ * item by item, even when the text itself reads well.
+ */
+function checkListItemSources(criterion: SuccessCriterion, answerText: string): CheckResult {
+  const minItems = Number(criterion.data?.minItems ?? 0);
+  const keyFields = ((criterion.data?.keyFields as string[] | undefined) ?? []).filter(
+    (field) => field in LIST_KEY_FIELD_PATTERNS,
+  );
+  const items = extractStructuredItems(answerText).slice(0, Math.max(minItems, 1));
+  // FIX-24 (Deploy-24 D16/core-01): a search result that is a site's home page
+  // (holaapp.in/, tryholo.ai/) is that result's own link.
+  const searchResults = criterion.data?.searchResults === true;
+  const problems: string[] = [];
+  if (items.length < minItems) {
+    problems.push(`只解析到 ${items.length} 条，要求 ${minItems} 条`);
+  }
+  const seen = new Map<string, number>();
+  items.forEach((item, i) => {
+    const n = i + 1;
+    const missing: string[] = [];
+    const url = item.url ? stripTrailingPunct(item.url) : null;
+    if (!url) {
+      missing.push('来源链接');
+    } else if (isNonDetailUrl(url) && !(searchResults && isSiteHomeUrl(url))) {
+      missing.push(
+        searchResults
+          ? '独立来源链接（不能用搜索结果页或列表页）'
+          : '独立来源链接（不能用首页或搜索页）',
+      );
+    } else {
+      // Same resource, not same string: /article/42#s1 and #s2, or a utm_*
+      // variant, are one source (see url-identity.ts).
+      const identity = urlResourceIdentity(url) ?? url;
+      const first = seen.get(identity);
+      if (first !== undefined) missing.push(`独立来源链接（与第 ${first} 条相同）`);
+      else seen.set(identity, n);
+    }
+    for (const field of keyFields) {
+      const pattern = LIST_KEY_FIELD_PATTERNS[field];
+      if (pattern && !pattern.re.test(item.raw)) missing.push(pattern.label);
+    }
+    if (missing.length > 0) problems.push(`第 ${n} 条缺少${missing.join('、')}`);
+  });
+  const passed = problems.length === 0;
+  return {
+    criterionId: criterion.id,
+    criterionType: 'list_item_sources',
+    passed,
+    checker: 'deterministic',
+    detail: passed
+      ? `前 ${items.length} 条均有独立来源链接${keyFields.length > 0 ? '和所需字段' : ''}`
+      : problems.join('；'),
+    severity: passed ? undefined : 'fixable',
+  };
+}
+
+/**
+ * Pre-delivery review of a browser answer against the list requirements in its
+ * contract (list_item_sources / ecommerce_rows). Returns the gaps in Chinese,
+ * or null when the answer meets them. Deterministic and ledger-free, so the
+ * browser loop can ask the model for one targeted retry before it finishes.
+ */
+export function reviewListAnswer(
+  contract: ExecutionContract,
+  answerText: string,
+  /** What the run read; only a page that shows a price missing excuses it. */
+  pageText?: string,
+): string | null {
+  const gaps: string[] = [];
+  for (const criterion of contract.successCriteria) {
+    const check =
+      criterion.type === 'list_item_sources'
+        ? checkListItemSources(criterion, answerText)
+        : criterion.type === 'ecommerce_rows'
+          ? checkEcommerceRows(criterion, answerText, pageText)
+          : null;
+    // An honest gap is delivered as 部分完成 (listPartialNote), not sent back.
+    if (check && !check.passed && !check.detail.startsWith('部分完成：')) gaps.push(check.detail);
+  }
+  return gaps.length > 0 ? gaps.join('；') : null;
+}
+
+/**
+ * FIX-32 (Deploy-32 b-p02): the lead for a list answer whose only gap is a price the page
+ * does not show, or null. The browser loop delivers such an answer as 部分完成.
+ */
+export function listPartialNote(
+  contract: ExecutionContract,
+  answerText: string,
+  pageText?: string,
+): string | null {
+  for (const criterion of contract.successCriteria) {
+    if (criterion.type !== 'ecommerce_rows') continue;
+    const check = checkEcommerceRows(criterion, answerText, pageText);
+    if (!check.passed && check.detail.startsWith('部分完成：')) return check.detail;
+  }
+  return null;
 }
 
 function checkDuplicateCandidateUrls(
@@ -1004,9 +1265,7 @@ function checkDuplicateCandidateUrls(
   for (const [url, group] of byUrl) {
     if (group.length < 2) continue;
     const distinctNames = new Set(
-      group
-        .map((row) => normalizeCandidateName(row.name ?? ''))
-        .filter(Boolean),
+      group.map((row) => normalizeCandidateName(row.name ?? '')).filter(Boolean),
     );
     if (distinctNames.size < 2) continue;
     const allLinkedRowsUseSameUrl = group.length === rows.length;
@@ -1022,9 +1281,7 @@ function checkDuplicateCandidateUrls(
       criterionType: 'duplicate_candidate_urls',
       passed: false,
       checker: 'deterministic',
-      detail:
-        `多候选结果中 ${group.length} 行复用了同一个链接 ${url}；` +
-        '若未取得每项独立链接，应只保留一次总来源，不要把同一个链接放到多行',
+      detail: `多候选结果中 ${group.length} 行复用了同一个链接 ${url}；若未取得每项独立链接，应只保留一次总来源，不要把同一个链接放到多行`,
       severity: 'fixable',
     };
   }
@@ -1042,7 +1299,7 @@ function normalizeCandidateName(value: string): string {
 }
 
 function stripTrailingPunct(url: string): string {
-  return url.replace(/[)\].,;:，。]+$/, '');
+  return trimTextUrl(url);
 }
 
 function isMultiCandidateIntent(intent: string): boolean {
@@ -1150,7 +1407,9 @@ function checkExpertClaimProvenance(
   if (isGroundedInputQuestion(answerText, contextInput)) {
     return {
       criterionId: 'generic.expert_claim_provenance',
-      criterionType: 'expert_claim_provenance', passed: true, checker: 'deterministic',
+      criterionType: 'expert_claim_provenance',
+      passed: true,
+      checker: 'deterministic',
       detail: '本轮仅询问用户已提供的同一指标与数值，不认证该数值正确。',
     };
   }
@@ -1191,15 +1450,19 @@ function isGroundedInputQuestion(
   input?: Pick<VerifyInputs, 'verificationContext' | 'deliveryStage'>,
 ): boolean {
   if (input?.deliveryStage !== 'clarification' || !input.verificationContext) return false;
-  const claim = text.trim().match(/^请确认(?:您|你)?提供的([^。！？?;；\n]{1,160})(?:是否准确|是否正确|对吗)[？?]$/u)?.[1];
+  const claim = text
+    .trim()
+    .match(/^请确认(?:您|你)?提供的([^。！？?;；\n]{1,160})(?:是否准确|是否正确|对吗)[？?]$/u)?.[1];
   if (!claim) return false;
   try {
     const context = createTaskVerificationContext(input.verificationContext);
     const normalize = (value: string) => value.replace(/[\s=：:]/g, '').replace(/％/g, '%');
     const expected = normalize(claim);
-    return [context.initialRequest, ...context.userTurns,
-      ...context.materials.flatMap(material => material.kind === 'text' ? [material.text] : [])]
-      .some(source => normalize(source).includes(expected));
+    return [
+      context.initialRequest,
+      ...context.userTurns,
+      ...context.materials.flatMap((material) => (material.kind === 'text' ? [material.text] : [])),
+    ].some((source) => normalize(source).includes(expected));
   } catch {
     return false;
   }
@@ -1262,8 +1525,7 @@ function checkEmptyResult(
   // never sees a near-empty result card; a one-line "搜索完成" stub
   // also flags now so 自动 retry / 追问 can intervene before we
   // call the task completed.
-  const hasContentChars =
-    /[A-Za-z0-9一-鿿぀-ゟ゠-ヿ]/.test(meaningful);
+  const hasContentChars = /[A-Za-z0-9一-鿿぀-ゟ゠-ヿ]/.test(meaningful);
   if (deliveryStage === 'clarification' && meaningful.length >= 1 && hasContentChars) return null;
   // Plain Q&A — arithmetic / greeting / short knowledge — has a
   // legitimately tiny answer ("2" / "你好！"). Pass on any non-empty
@@ -1273,11 +1535,7 @@ function checkEmptyResult(
   if (classifyLightweightTask(contract.goal) && meaningful.length >= 1 && hasContentChars) {
     return null;
   }
-  if (
-    allowsConciseFactAnswer(contract) &&
-    meaningful.length >= 3 &&
-    hasContentChars
-  ) {
+  if (allowsConciseFactAnswer(contract) && meaningful.length >= 3 && hasContentChars) {
     return null;
   }
   if (meaningful.length >= 20 && hasContentChars) return null;
@@ -1379,20 +1637,20 @@ function allowsConciseFactAnswer(contract: ExecutionContract): boolean {
     /报告|总结|分析|对比|列表|清单|多(个|条)|前\s*\d+|top\s*\d+|report|summary|analysis|compare|list/i.test(
       goal,
     );
-  return (asksForConciseAnswer || asksForSingleFact) && !asksForLongForm;
+  // A browser action ("打开订单并点击保存") is answered by a short confirmation
+  // such as "订单已保存。"; the 20-char floor is for retrieved content.
+  const asksForBrowserAction =
+    contract.tier === 'light' &&
+    /点击|提交|保存|填写|勾选|选中|切换|关闭|删除|上传|下载|发送|签到|关注|收藏|\b(?:click|submit|save|fill|toggle|upload|download)\b/i.test(
+      goal,
+    );
+  return (asksForConciseAnswer || asksForSingleFact || asksForBrowserAction) && !asksForLongForm;
 }
 
-function checkUrlGrounding(
-  answerText: string,
-  ledger: EvidenceLedger,
-): CheckResult | null {
-  const answerUrls = (answerText.match(URL_RE) ?? []).map((u) =>
-    u.replace(/[)\].,;:]+$/, ''),
-  );
+function checkUrlGrounding(answerText: string, ledger: EvidenceLedger): CheckResult | null {
+  const answerUrls = (answerText.match(URL_RE) ?? []).map(trimTextUrl);
   if (answerUrls.length === 0) return null;
-  const grounded = ledger.getGroundedUrls().map((u) =>
-    u.replace(/[)\].,;:]+$/, ''),
-  );
+  const grounded = ledger.getGroundedUrls().map(trimTextUrl);
   const groundedSet = new Set(grounded);
   const fabricated = answerUrls.filter((u) => !groundedSet.has(u));
   const passed = fabricated.length === 0;
@@ -1415,10 +1673,7 @@ function checkUrlGrounding(
  * integration step should write structured violation entries
  * instead of relying on substring matches when feasible.
  */
-function checkConstraints(
-  constraints: string[],
-  ledger: EvidenceLedger,
-): CheckResult | null {
+function checkConstraints(constraints: string[], ledger: EvidenceLedger): CheckResult | null {
   if (constraints.length === 0) return null;
   const canonicalised = new Set<string>();
   for (const c of constraints) {
@@ -1444,7 +1699,7 @@ function checkConstraints(
     }
     for (const key of canonicalised) {
       const checker = CONSTRAINT_CHECKERS[key];
-      if (checker && checker(e.fact)) {
+      if (checker?.(e.fact)) {
         violations.push(`${key}: "${e.fact.slice(0, 80)}"`);
       }
     }
@@ -1467,7 +1722,10 @@ function checkConstraints(
  * verify GMV ≈ 订单数 × 客单价 within tolerance. Same for
  * GMV ≈ UV × 转化率 × 客单价.
  */
-function checkNumberCrossValidation(ledger: EvidenceLedger, context?: TaskVerificationContext): CheckResult | null {
+function checkNumberCrossValidation(
+  ledger: EvidenceLedger,
+  context?: TaskVerificationContext,
+): CheckResult | null {
   const numericFacts = collectNumericFacts(ledger, context);
   if (numericFacts.size === 0) return null;
   const checks: { ok: boolean; note: string }[] = [];
@@ -1483,9 +1741,7 @@ function checkNumberCrossValidation(ledger: EvidenceLedger, context?: TaskVerifi
     const ok = withinTolerance(gmv, expected);
     checks.push({
       ok,
-      note: `GMV=${gmv} vs 订单数×客单价=${expected.toFixed(0)}${
-        ok ? ' ≈' : ' ≠'
-      }`,
+      note: `GMV=${gmv} vs 订单数×客单价=${expected.toFixed(0)}${ok ? ' ≈' : ' ≠'}`,
     });
   }
   if (gmv != null && uv != null && conv != null && aov != null) {
@@ -1495,9 +1751,7 @@ function checkNumberCrossValidation(ledger: EvidenceLedger, context?: TaskVerifi
     const ok = withinTolerance(gmv, expected);
     checks.push({
       ok,
-      note: `GMV=${gmv} vs UV×转化率×客单价=${expected.toFixed(0)}${
-        ok ? ' ≈' : ' ≠'
-      }`,
+      note: `GMV=${gmv} vs UV×转化率×客单价=${expected.toFixed(0)}${ok ? ' ≈' : ' ≠'}`,
     });
   }
 
@@ -1514,7 +1768,10 @@ function checkNumberCrossValidation(ledger: EvidenceLedger, context?: TaskVerifi
   };
 }
 
-function collectNumericFacts(ledger: EvidenceLedger, context?: TaskVerificationContext): Map<string, number> {
+function collectNumericFacts(
+  ledger: EvidenceLedger,
+  context?: TaskVerificationContext,
+): Map<string, number> {
   const out = new Map<string, number>();
   let facts: readonly string[];
   if (context !== undefined) {
@@ -1523,15 +1780,20 @@ function collectNumericFacts(ledger: EvidenceLedger, context?: TaskVerificationC
       // Explicit later user assignments supersede earlier ones. Materials
       // supply only fields not specified by the user; none go into the ledger.
       facts = [
-        ...[...snapshot.userTurns].reverse(), snapshot.initialRequest,
-        ...snapshot.materials.flatMap(material => material.kind === 'text' ? [material.text] : []),
+        ...[...snapshot.userTurns].reverse(),
+        snapshot.initialRequest,
+        ...snapshot.materials.flatMap((material) =>
+          material.kind === 'text' ? [material.text] : [],
+        ),
       ];
     } catch {
       // The separate coverage gate rejects invalid contexts, never legacy-fallback.
       return out;
     }
   } else {
-    facts = ledger.entries.filter(entry => entry.sourceType === 'user_input' || entry.sourceType === 'file_parse').map(entry => entry.fact);
+    facts = ledger.entries
+      .filter((entry) => entry.sourceType === 'user_input' || entry.sourceType === 'file_parse')
+      .map((entry) => entry.fact);
   }
   for (const fact of facts) {
     for (const key of KNOWN_NUMERIC_KEYS) {
@@ -1559,7 +1821,12 @@ function collectNumericFacts(ledger: EvidenceLedger, context?: TaskVerificationC
       const canonicalKey = context !== undefined && key === '订单' ? '订单数' : key;
       // Core uses newest explicit assignments even when a correction is smaller.
       // Legacy keeps its historical first/interesting-value behaviour.
-      if (!out.has(canonicalKey) || (context === undefined && n >= MIN_CROSSCHECK_VALUE && (out.get(canonicalKey) ?? 0) < MIN_CROSSCHECK_VALUE)) {
+      if (
+        !out.has(canonicalKey) ||
+        (context === undefined &&
+          n >= MIN_CROSSCHECK_VALUE &&
+          (out.get(canonicalKey) ?? 0) < MIN_CROSSCHECK_VALUE)
+      ) {
         out.set(canonicalKey, n);
       }
     }
@@ -1587,12 +1854,7 @@ function escapeRegex(s: string): string {
  * inside a section that demanded annotation. Stricter counting
  * belongs in the LLM tier because it is too noisy for deterministic.
  */
-const SOURCE_ANNOTATION_MARKERS = [
-  '[用户提供]',
-  '[系统计算]',
-  '[模型假设]',
-  '[外部来源]',
-] as const;
+const SOURCE_ANNOTATION_MARKERS = ['[用户提供]', '[系统计算]', '[模型假设]', '[外部来源]'] as const;
 const LEGACY_SOURCE_ANNOTATION_MARKERS = [
   '\u{1F7E2}',
   '\u{1F535}',
@@ -1748,8 +2010,8 @@ function checkWorkflowSourceAnnotation(
       // matters when the section exists.
       continue;
     }
-    const hasAny = [...SOURCE_ANNOTATION_MARKERS, ...LEGACY_SOURCE_ANNOTATION_MARKERS].some((marker) =>
-      body.includes(marker),
+    const hasAny = [...SOURCE_ANNOTATION_MARKERS, ...LEGACY_SOURCE_ANNOTATION_MARKERS].some(
+      (marker) => body.includes(marker),
     );
     if (!hasAny) unannotated.push(section.title);
   }
@@ -1777,10 +2039,7 @@ function checkWorkflowSourceAnnotation(
  * becomes needs_clarification regardless (the agent shouldn't
  * be answering yet). Empty answer hard-fails.
  */
-function classifyFailureLevel(
-  checks: CheckResult[],
-  contract: ExecutionContract,
-): FailureLevel {
+function classifyFailureLevel(checks: CheckResult[], contract: ExecutionContract): FailureLevel {
   const unprovidedRequired = contract.requiredInputs.some((r) => !r.provided);
   if (unprovidedRequired) return 'needs_clarification';
   const failed = checks.filter((c) => !c.passed);
@@ -1791,10 +2050,7 @@ function classifyFailureLevel(
   return 'fixable';
 }
 
-function buildSuggestion(
-  checks: CheckResult[],
-  ledger: EvidenceLedger,
-): string | undefined {
+function buildSuggestion(checks: CheckResult[], ledger: EvidenceLedger): string | undefined {
   const fixable = checks.filter((c) => !c.passed && c.severity === 'fixable');
   if (fixable.length === 0) return undefined;
   const lines = fixable.map((c) => `- ${c.detail}`);

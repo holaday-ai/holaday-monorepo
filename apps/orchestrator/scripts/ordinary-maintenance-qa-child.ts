@@ -1,14 +1,14 @@
+import { EventEmitter } from 'node:events';
 // Explicit synthetic child fixture. Never imported by production entrypoints.
 import fs from 'node:fs';
 import { join } from 'node:path';
-import { EventEmitter } from 'node:events';
 import express from 'express';
-import { createOrdinaryApplication } from '../src/execution/ordinary-application.js';
+import { runAccountClosureWorkerRuntime } from '../src/account-closure/worker.js';
 import { createHttpDrain } from '../src/execution/http-drain.js';
+import { createOrdinaryApplication } from '../src/execution/ordinary-application.js';
+import { readOrdinaryMaintenanceRecord } from '../src/execution/ordinary-maintenance-store.js';
 import { currentOperationLifetime, startOwnedOperation } from '../src/execution/owned-operation.js';
 import { createWsServer, sendExtensionToolCall } from '../src/ws/server.js';
-import { runAccountClosureWorkerRuntime } from '../src/account-closure/worker.js';
-import { readOrdinaryMaintenanceRecord } from '../src/execution/ordinary-maintenance-store.js';
 
 if (process.env.HOLADAY_MAINTENANCE_SYNTHETIC_CHILD !== '1' || !process.send)
   throw new Error('SYNTHETIC_CHILD_ONLY');

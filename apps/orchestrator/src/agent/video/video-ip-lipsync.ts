@@ -23,7 +23,7 @@ import {
   type VideoAvSyncReview,
   videoAvSyncAudit,
   videoAvSyncLogContext,
-} from './video-av-sync-verifier.js';
+} from './video-av-sync-audit.js';
 import { buildComposeCommand } from './video-compose.js';
 import { downloadToBuffer, downloadToFile } from './video-http.js';
 import { type AspectRatio, resolveAspect } from './video-lane-simple.js';
@@ -279,6 +279,7 @@ export async function runIpVideoCreation(
         // Provider queue time grows with output length. Keep the existing
         // conservative ceiling so in-spec clips do not surface false timeouts.
         maxWaitMs: lipSyncMaxWaitMs(audioMs),
+        billableDurationSeconds: audioMs / 1000,
       });
     } finally {
       try {

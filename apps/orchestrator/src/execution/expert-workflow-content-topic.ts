@@ -55,8 +55,7 @@ const REQUIRED_INPUTS: readonly WorkflowInput[] = [
     // Anchor on "品类"/"行业"/"做的是" so a stray noun in the intent
     // doesn't get mis-attributed. Capture group is permissive — accepts
     // 1-30 Chinese / Latin chars, stops at punctuation.
-    extractPattern:
-      /(?:品类|行业|赛道|做的是|做的)[\s:：是]*(?:为|是)?\s*([\w一-鿿]{1,30})/i,
+    extractPattern: /(?:品类|行业|赛道|做的是|做的)[\s:：是]*(?:为|是)?\s*([\w一-鿿]{1,30})/i,
   },
   {
     name: 'platform',
@@ -67,8 +66,7 @@ const REQUIRED_INPUTS: readonly WorkflowInput[] = [
     // direct lowercase string compare and would reject "bilibili" /
     // "xiaohongshu" against CJK enum values. The downstream model + UI
     // are happy with either form.
-    extractPattern:
-      /(小红书|抖音|视频号|B\s*站|bilibili|公众号|知乎|微博|xiaohongshu)/i,
+    extractPattern: /(小红书|抖音|视频号|B\s*站|bilibili|公众号|知乎|微博|xiaohongshu)/i,
   },
 ] as const;
 
@@ -113,8 +111,7 @@ const OPTIONAL_INPUTS: readonly WorkflowInput[] = [
     // Anchor on "选题数量"/"生成"/"出"/"要" then capture the number, then
     // require "个" (with or without "选题"). Examples that match:
     //   "选题数量 5" / "生成 8 个选题" / "出 10 个" / "要 6 个选题"
-    extractPattern:
-      /(?:选题数量|生成|出|要)\s*[:：]?\s*([\d.,]+)\s*个(?:选题)?/i,
+    extractPattern: /(?:选题数量|生成|出|要)\s*[:：]?\s*([\d.,]+)\s*个(?:选题)?/i,
     fallback: 5,
   },
   {

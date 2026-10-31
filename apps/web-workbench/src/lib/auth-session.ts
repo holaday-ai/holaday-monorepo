@@ -16,9 +16,7 @@ export function isAuthSessionError(err: unknown): boolean {
   return /\b(401|403)\b|unauthorized|forbidden/i.test(message);
 }
 
-export function authGateFailureStatus(
-  err: unknown,
-): 'no-auth' | 'error' {
+export function authGateFailureStatus(err: unknown): 'no-auth' | 'error' {
   return isAuthSessionError(err) ? 'no-auth' : 'error';
 }
 

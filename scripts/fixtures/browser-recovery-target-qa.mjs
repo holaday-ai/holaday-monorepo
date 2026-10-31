@@ -1,4 +1,3 @@
-import { ingressDiagnosticStage } from '../browser-first-cutover-ingress-diagnostics.mjs';
 // Actual recovery-machine Docker/age/import exercise. The caller creates the
 // dedicated no-network container/volume; this fixture never stops/removes one.
 // Payload and key are synthetic. Optional separate source container exercises
@@ -14,18 +13,19 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 import {
   encryptAgeBackup,
   inspectFirstCutoverRecoveryTarget,
   pullFirstCutoverAgeBackup,
   restoreFirstCutoverAgeBackup,
 } from '../browser-first-cutover-backup.mjs';
+import { ingressDiagnosticStage } from '../browser-first-cutover-ingress-diagnostics.mjs';
 import { serveFirstCutoverRecoverySession } from '../browser-first-cutover-recovery-session.mjs';
-import { verifyFirstCutoverQaRuntimeMaterials } from './browser-first-cutover-runtime-materials.qa.mjs';
 import { buildMaintenanceMigrationManifest } from '../browser-maintenance-manifest.mjs';
+import { verifyFirstCutoverQaRuntimeMaterials } from './browser-first-cutover-runtime-materials.qa.mjs';
 
 const [containerId, imageId, attempt, runtimeRoot, sourceContainerId, sourceAttempt] =
   process.argv.slice(2);
@@ -853,8 +853,7 @@ try {
   servingError = error;
   const cause = ingressDiagnosticStage(error);
   if (cause) {
-    const line =
-      'QA_RECOVERY_REJECTION ' + JSON.stringify({ component: 'server', stage: cause }) + '\n';
+    const line = `QA_RECOVERY_REJECTION ${JSON.stringify({ component: 'server', stage: cause })}\n`;
     persistSafeDiagnostics(Buffer.from(line));
     console.error(line.trimEnd());
   }

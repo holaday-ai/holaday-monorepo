@@ -48,10 +48,16 @@ describe('stocks dashboard snapshot', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(String(input));
       if (url.pathname === '/trading-calendar/latest') {
-        return new Response(JSON.stringify(envelope([{
-          requested_date: url.searchParams.get('on_or_before'),
-          latest_trading_date: '2026-08-14',
-        }])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                requested_date: url.searchParams.get('on_or_before'),
+                latest_trading_date: '2026-08-14',
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname.startsWith('/quote/')) {
         const symbol = url.pathname.split('/').at(-1);
@@ -59,26 +65,44 @@ describe('stocks dashboard snapshot', () => {
         maxActiveQuotes = Math.max(maxActiveQuotes, activeQuotes);
         await new Promise((resolve) => setTimeout(resolve, 5));
         activeQuotes -= 1;
-        return new Response(JSON.stringify(envelope([{
-          代码: symbol,
-          名称: symbol,
-          最新价: 10,
-          涨跌幅: 1,
-        }])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                代码: symbol,
+                名称: symbol,
+                最新价: 10,
+                涨跌幅: 1,
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname.startsWith('/kline/')) {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-08-13', 收盘: 9.9, 涨跌幅: 0 },
-          { 日期: '2026-08-14', 收盘: 10, 涨跌幅: 1 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 日期: '2026-08-13', 收盘: 9.9, 涨跌幅: 0 },
+              { 日期: '2026-08-14', 收盘: 10, 涨跌幅: 1 },
+            ]),
+          ),
+        );
       }
       return new Response(JSON.stringify(envelope([])));
     });
 
     await __stocksDashboardTest.buildDashboardSnapshot({
       logger: { warn: vi.fn() },
-      watchlistRows: symbols.map((symbol) => ({ symbol, market: 'A' as const, displayName: symbol })),
-      effectiveWatchlist: symbols.map((symbol) => ({ symbol, market: 'A' as const, displayName: symbol })),
+      watchlistRows: symbols.map((symbol) => ({
+        symbol,
+        market: 'A' as const,
+        displayName: symbol,
+      })),
+      effectiveWatchlist: symbols.map((symbol) => ({
+        symbol,
+        market: 'A' as const,
+        displayName: symbol,
+      })),
       now: new Date('2026-08-16T14:00:00.000Z'),
       includeSlowSignals: false,
     });
@@ -117,31 +141,51 @@ describe('stocks dashboard snapshot', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(String(input));
       if (url.pathname === '/trading-calendar/latest') {
-        return new Response(JSON.stringify(envelope([{
-          requested_date: url.searchParams.get('on_or_before'),
-          latest_trading_date: '2026-06-30',
-        }])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                requested_date: url.searchParams.get('on_or_before'),
+                latest_trading_date: '2026-06-30',
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/kline/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-06-29', 收盘: 6.03, 涨跌幅: -0.33, 成交额: 60_000_000 },
-          { 日期: '2026-06-30', 收盘: 6.10, 涨跌幅: 1.16, 成交额: 72_000_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 日期: '2026-06-29', 收盘: 6.03, 涨跌幅: -0.33, 成交额: 60_000_000 },
+              { 日期: '2026-06-30', 收盘: 6.1, 涨跌幅: 1.16, 成交额: 72_000_000 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/intraday/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 时间: '2026-06-30 09:30:00', 最新价: 6.04 },
-          { 时间: '2026-06-30 15:00:00', 最新价: 6.10 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 时间: '2026-06-30 09:30:00', 最新价: 6.04 },
+              { 时间: '2026-06-30 15:00:00', 最新价: 6.1 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/quote/603528') {
-        return new Response(JSON.stringify(envelope([{
-          代码: 'sh603528',
-          名称: '多伦科技',
-          最新价: 6.10,
-          涨跌幅: 1.16,
-          成交额: 72_000_000,
-        }])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                代码: 'sh603528',
+                名称: '多伦科技',
+                最新价: 6.1,
+                涨跌幅: 1.16,
+                成交额: 72_000_000,
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/stock-rankings/gainers') {
         return new Promise<Response>(() => undefined);
@@ -179,16 +223,18 @@ describe('stocks dashboard snapshot', () => {
     };
 
     let resolved = false;
-    const pendingSnapshot = __stocksDashboardTest.resolveDashboardSnapshot({
-      db: fakeDb as never,
-      logger: { warn: vi.fn() },
-      userInternalId: 1,
-      watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
-      effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
-    }).then((snapshot) => {
-      resolved = true;
-      return snapshot;
-    });
+    const pendingSnapshot = __stocksDashboardTest
+      .resolveDashboardSnapshot({
+        db: fakeDb as never,
+        logger: { warn: vi.fn() },
+        userInternalId: 1,
+        watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+        effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+      })
+      .then((snapshot) => {
+        resolved = true;
+        return snapshot;
+      });
 
     await persistStarted;
     const earlyOutcome = Promise.race([
@@ -211,38 +257,64 @@ describe('stocks dashboard snapshot', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(String(input));
       if (url.pathname === '/trading-calendar/latest') {
-        return new Response(JSON.stringify(envelope([{
-          requested_date: url.searchParams.get('on_or_before'),
-          latest_trading_date: '2026-06-30',
-        }])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                requested_date: url.searchParams.get('on_or_before'),
+                latest_trading_date: '2026-06-30',
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/kline/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-06-29', 收盘: 6.03, 涨跌幅: -0.33, 成交额: 60_000_000 },
-          { 日期: '2026-06-30', 收盘: 6.10, 涨跌幅: 1.16, 成交额: 72_000_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 日期: '2026-06-29', 收盘: 6.03, 涨跌幅: -0.33, 成交额: 60_000_000 },
+              { 日期: '2026-06-30', 收盘: 6.1, 涨跌幅: 1.16, 成交额: 72_000_000 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/intraday/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 时间: '2026-06-30 09:30:00', 最新价: 6.04 },
-          { 时间: '2026-06-30 15:00:00', 最新价: 6.10 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 时间: '2026-06-30 09:30:00', 最新价: 6.04 },
+              { 时间: '2026-06-30 15:00:00', 最新价: 6.1 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/quote/603528') {
-        return new Response(JSON.stringify(envelope([{
-          代码: 'sh603528',
-          名称: '多伦科技',
-          最新价: 6.10,
-          涨跌幅: 1.16,
-          成交额: 72_000_000,
-        }])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                代码: 'sh603528',
+                名称: '多伦科技',
+                最新价: 6.1,
+                涨跌幅: 1.16,
+                成交额: 72_000_000,
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/announcements/603528') {
-        return new Response(JSON.stringify(envelope([{
-          公告标题: '多伦科技重要公告',
-          公告时间: '2026-06-30 15:30:00',
-          公告链接: 'https://www.cninfo.com.cn/603528/notice.html',
-        }])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                公告标题: '多伦科技重要公告',
+                公告时间: '2026-06-30 15:30:00',
+                公告链接: 'https://www.cninfo.com.cn/603528/notice.html',
+              },
+            ]),
+          ),
+        );
       }
       return new Response(JSON.stringify(envelope([])));
     });
@@ -286,20 +358,20 @@ describe('stocks dashboard snapshot', () => {
     });
 
     expect(quickSnapshot.trust?.snapshotId).toBeTruthy();
-    const inFlightFullRefresh = Array.from(
-      __stocksDashboardTest.dashboardCache.values(),
-    )[0]?.refreshPromise;
+    const inFlightFullRefresh = Array.from(__stocksDashboardTest.dashboardCache.values())[0]
+      ?.refreshPromise;
     expect(inFlightFullRefresh).toBeTruthy();
     await fullPersistStarted;
 
     try {
-      const snapshotWhileFullPersistIsPending = await __stocksDashboardTest.resolveDashboardSnapshot({
-        db: fakeDb as never,
-        logger: { warn: vi.fn() },
-        userInternalId: 1,
-        watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
-        effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
-      });
+      const snapshotWhileFullPersistIsPending =
+        await __stocksDashboardTest.resolveDashboardSnapshot({
+          db: fakeDb as never,
+          logger: { warn: vi.fn() },
+          userInternalId: 1,
+          watchlistRows: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+          effectiveWatchlist: [{ symbol: '603528', market: 'A', displayName: '多伦科技' }],
+        });
 
       expect(snapshotWhileFullPersistIsPending.trust?.snapshotId).toBe(
         quickSnapshot.trust?.snapshotId,
@@ -374,9 +446,22 @@ describe('stocks dashboard snapshot', () => {
 
   it('builds discovery from source-backed news and announcements only', () => {
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
-      announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
-      stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
-    ) => Array<{ category: string; title: string; source: string; url?: string; time: string; imageUrl?: string }>;
+      announcements: Array<{
+        entry: { symbol: string; market: 'A'; displayName: string };
+        env: ReturnType<typeof envelope>;
+      }>,
+      stockNews: Array<{
+        entry: { symbol: string; market: 'A'; displayName: string };
+        env: ReturnType<typeof envelope>;
+      }>,
+    ) => Array<{
+      category: string;
+      title: string;
+      source: string;
+      url?: string;
+      time: string;
+      imageUrl?: string;
+    }>;
     const news = buildSourceDiscovery(
       [
         {
@@ -436,27 +521,32 @@ describe('stocks dashboard snapshot', () => {
   it('keeps all fetched self-news and important announcements while capping each market feed deliberately', () => {
     const makeAnnouncements = (symbol: string, name: string) => ({
       entry: { symbol, market: 'A' as const, displayName: name },
-      env: envelope(Array.from({ length: 20 }, (_, index) => ({
-        公告标题: `${name} 公告 ${index}`,
-        公告时间: `2026-08-${String(20 - index).padStart(2, '0')} 09:00:00`,
-        公告链接: `https://www.cninfo.com.cn/${symbol}/notice-${index}`,
-      }))) as never,
+      env: envelope(
+        Array.from({ length: 20 }, (_, index) => ({
+          公告标题: `${name} 公告 ${index}`,
+          公告时间: `2026-08-${String(20 - index).padStart(2, '0')} 09:00:00`,
+          公告链接: `https://www.cninfo.com.cn/${symbol}/notice-${index}`,
+        })),
+      ) as never,
     });
     const makeNews = (symbol: string, name: string) => ({
       entry: { symbol, market: 'A' as const, displayName: name },
-      env: envelope(Array.from({ length: 20 }, (_, index) => ({
-        新闻标题: `${name} 新闻 ${index}`,
-        发布时间: `2026-08-${String(20 - index).padStart(2, '0')} 10:00:00`,
-        文章来源: '真实来源',
-        新闻链接: `https://finance.eastmoney.com/a/20260808${symbol}${String(index).padStart(4, '0')}.html`,
-      }))) as never,
+      env: envelope(
+        Array.from({ length: 20 }, (_, index) => ({
+          新闻标题: `${name} 新闻 ${index}`,
+          发布时间: `2026-08-${String(20 - index).padStart(2, '0')} 10:00:00`,
+          文章来源: '真实来源',
+          新闻链接: `https://finance.eastmoney.com/a/20260808${symbol}${String(index).padStart(4, '0')}.html`,
+        })),
+      ) as never,
     });
-    const makeMarketRows = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => ({
-      新闻标题: `${prefix} 要闻 ${index}`,
-      发布时间: `2026-08-${String((index % 28) + 1).padStart(2, '0')} 10:00:00`,
-      文章来源: '真实来源',
-      新闻链接: `https://finance.eastmoney.com/a/20260808${prefix}${String(index).padStart(4, '0')}.html`,
-    }));
+    const makeMarketRows = (prefix: string, count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        新闻标题: `${prefix} 要闻 ${index}`,
+        发布时间: `2026-08-${String((index % 28) + 1).padStart(2, '0')} 10:00:00`,
+        文章来源: '真实来源',
+        新闻链接: `https://finance.eastmoney.com/a/20260808${prefix}${String(index).padStart(4, '0')}.html`,
+      }));
 
     const news = __stocksDashboardTest.buildNews(
       [makeAnnouncements('603528', '多伦科技'), makeAnnouncements('600497', '驰宏锌锗')],
@@ -479,35 +569,37 @@ describe('stocks dashboard snapshot', () => {
     const news = __stocksDashboardTest.buildNews(
       [],
       [],
-      [{
-        feed: 'A股要闻',
-        env: envelope([
-          {
-            新闻标题: '7月份居民消费价格同比上涨0.5%',
-            发布时间: '2026-08-09 10:00:00',
-            文章来源: '上海证券报',
-            新闻链接: 'https://finance.eastmoney.com/a/202608090000001.html',
-          },
-          {
-            新闻标题: '2026年7月份居民消费价格同比上涨0.5%',
-            发布时间: '2026-08-09 09:36:00',
-            文章来源: '每日经济新闻',
-            新闻链接: 'https://finance.eastmoney.com/a/202608090000002.html',
-          },
-          {
-            新闻标题: '国家统计局：7月份居民消费价格同比上涨0.5%',
-            发布时间: '2026-08-09 09:32:00',
-            文章来源: '界面新闻',
-            新闻链接: 'https://finance.eastmoney.com/a/202608090000003.html',
-          },
-          {
-            新闻标题: '7月份工业生产者出厂价格同比下降3.6%',
-            发布时间: '2026-08-09 09:20:00',
-            文章来源: '证券时报',
-            新闻链接: 'https://finance.eastmoney.com/a/202608090000004.html',
-          },
-        ]) as never,
-      }],
+      [
+        {
+          feed: 'A股要闻',
+          env: envelope([
+            {
+              新闻标题: '7月份居民消费价格同比上涨0.5%',
+              发布时间: '2026-08-09 10:00:00',
+              文章来源: '上海证券报',
+              新闻链接: 'https://finance.eastmoney.com/a/202608090000001.html',
+            },
+            {
+              新闻标题: '2026年7月份居民消费价格同比上涨0.5%',
+              发布时间: '2026-08-09 09:36:00',
+              文章来源: '每日经济新闻',
+              新闻链接: 'https://finance.eastmoney.com/a/202608090000002.html',
+            },
+            {
+              新闻标题: '国家统计局：7月份居民消费价格同比上涨0.5%',
+              发布时间: '2026-08-09 09:32:00',
+              文章来源: '界面新闻',
+              新闻链接: 'https://finance.eastmoney.com/a/202608090000003.html',
+            },
+            {
+              新闻标题: '7月份工业生产者出厂价格同比下降3.6%',
+              发布时间: '2026-08-09 09:20:00',
+              文章来源: '证券时报',
+              新闻链接: 'https://finance.eastmoney.com/a/202608090000004.html',
+            },
+          ]) as never,
+        },
+      ],
     );
 
     expect(news.filter((item) => item.feed === 'A股要闻').map((item) => item.title)).toEqual([
@@ -517,29 +609,35 @@ describe('stocks dashboard snapshot', () => {
   });
 
   it('collapses publisher-prefixed variants of one market event without hiding another story', () => {
-    const news = __stocksDashboardTest.buildNews([], [], [{
-      feed: 'A股要闻',
-      env: envelope([
+    const news = __stocksDashboardTest.buildNews(
+      [],
+      [],
+      [
         {
-          新闻标题: '中国银河策略：A股市场的三个验证窗口',
-          发布时间: '2026-08-09 10:00:00',
-          文章来源: '中国银河证券',
-          新闻链接: 'https://publisher.example/strategy-window-1',
+          feed: 'A股要闻',
+          env: envelope([
+            {
+              新闻标题: '中国银河策略：A股市场的三个验证窗口',
+              发布时间: '2026-08-09 10:00:00',
+              文章来源: '中国银河证券',
+              新闻链接: 'https://publisher.example/strategy-window-1',
+            },
+            {
+              新闻标题: '中国银河：A股市场“三个验证窗口”',
+              发布时间: '2026-08-09 09:55:00',
+              文章来源: '证券时报',
+              新闻链接: 'https://publisher.example/strategy-window-2',
+            },
+            {
+              新闻标题: '中国银河策略：消费板块盈利预期改善',
+              发布时间: '2026-08-09 09:40:00',
+              文章来源: '中国银河证券',
+              新闻链接: 'https://publisher.example/consumer-outlook',
+            },
+          ]) as never,
         },
-        {
-          新闻标题: '中国银河：A股市场“三个验证窗口”',
-          发布时间: '2026-08-09 09:55:00',
-          文章来源: '证券时报',
-          新闻链接: 'https://publisher.example/strategy-window-2',
-        },
-        {
-          新闻标题: '中国银河策略：消费板块盈利预期改善',
-          发布时间: '2026-08-09 09:40:00',
-          文章来源: '中国银河证券',
-          新闻链接: 'https://publisher.example/consumer-outlook',
-        },
-      ]) as never,
-    }]);
+      ],
+    );
 
     expect(news.filter((item) => item.feed === 'A股要闻').map((item) => item.title)).toEqual([
       '中国银河策略：A股市场的三个验证窗口',
@@ -549,29 +647,34 @@ describe('stocks dashboard snapshot', () => {
 
   it('collapses syndicated watchlist-news variants without hiding a distinct company event', () => {
     const entry = { symbol: '000963', market: 'A' as const, displayName: '华东医药' };
-    const news = __stocksDashboardTest.buildNews([], [{
-      entry,
-      env: envelope([
+    const news = __stocksDashboardTest.buildNews(
+      [],
+      [
         {
-          新闻标题: 'KIO015获欧盟MDR CE认证',
-          发布时间: '2026-08-09 10:30:00',
-          文章来源: '来源甲',
-          新闻链接: 'https://publisher.example/kio015-1',
+          entry,
+          env: envelope([
+            {
+              新闻标题: 'KIO015获欧盟MDR CE认证',
+              发布时间: '2026-08-09 10:30:00',
+              文章来源: '来源甲',
+              新闻链接: 'https://publisher.example/kio015-1',
+            },
+            {
+              新闻标题: '产品KIO015通过MDR认证并获CE标志',
+              发布时间: '2026-08-09 10:20:00',
+              文章来源: '来源乙',
+              新闻链接: 'https://publisher.example/kio015-2',
+            },
+            {
+              新闻标题: '上半年营收同比增长',
+              发布时间: '2026-08-09 10:10:00',
+              文章来源: '来源丙',
+              新闻链接: 'https://publisher.example/earnings',
+            },
+          ]) as never,
         },
-        {
-          新闻标题: '产品KIO015通过MDR认证并获CE标志',
-          发布时间: '2026-08-09 10:20:00',
-          文章来源: '来源乙',
-          新闻链接: 'https://publisher.example/kio015-2',
-        },
-        {
-          新闻标题: '上半年营收同比增长',
-          发布时间: '2026-08-09 10:10:00',
-          文章来源: '来源丙',
-          新闻链接: 'https://publisher.example/earnings',
-        },
-      ]) as never,
-    }]);
+      ],
+    );
 
     expect(news.filter((item) => item.feed === '自选股新闻').map((item) => item.title)).toEqual([
       '华东医药：KIO015获欧盟MDR CE认证',
@@ -580,29 +683,35 @@ describe('stocks dashboard snapshot', () => {
   });
 
   it('collapses a same-day market event with no English anchor while preserving another company event', () => {
-    const news = __stocksDashboardTest.buildNews([], [], [{
-      feed: 'A股要闻',
-      env: envelope([
+    const news = __stocksDashboardTest.buildNews(
+      [],
+      [],
+      [
         {
-          新闻标题: '明天“打新”宇树科技！A股“朋友圈”浮出水面',
-          发布时间: '2026-08-09 20:30:00',
-          新闻来源: '来源甲',
-          新闻链接: 'https://publisher.example/unitree-1',
+          feed: 'A股要闻',
+          env: envelope([
+            {
+              新闻标题: '明天“打新”宇树科技！A股“朋友圈”浮出水面',
+              发布时间: '2026-08-09 20:30:00',
+              新闻来源: '来源甲',
+              新闻链接: 'https://publisher.example/unitree-1',
+            },
+            {
+              新闻标题: '宇树科技即将开启申购，A股“朋友圈”浮出水面',
+              发布时间: '2026-08-09 19:57:00',
+              新闻来源: '来源乙',
+              新闻链接: 'https://publisher.example/unitree-2',
+            },
+            {
+              新闻标题: '宇树科技发布新一代机器人控制系统',
+              发布时间: '2026-08-09 19:40:00',
+              新闻来源: '来源丙',
+              新闻链接: 'https://publisher.example/unitree-product',
+            },
+          ]) as never,
         },
-        {
-          新闻标题: '宇树科技即将开启申购，A股“朋友圈”浮出水面',
-          发布时间: '2026-08-09 19:57:00',
-          新闻来源: '来源乙',
-          新闻链接: 'https://publisher.example/unitree-2',
-        },
-        {
-          新闻标题: '宇树科技发布新一代机器人控制系统',
-          发布时间: '2026-08-09 19:40:00',
-          新闻来源: '来源丙',
-          新闻链接: 'https://publisher.example/unitree-product',
-        },
-      ]) as never,
-    }]);
+      ],
+    );
 
     expect(news.filter((item) => item.feed === 'A股要闻').map((item) => item.title)).toEqual([
       '明天“打新”宇树科技！A股“朋友圈”浮出水面',
@@ -637,14 +746,20 @@ describe('stocks dashboard snapshot', () => {
   });
 
   it('keeps discovery pagination available when a real source page is partial', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(envelope([
-      {
-        新闻标题: '港股下一页仍有来源内容',
-        发布时间: '2026-08-08 11:00:00',
-        文章来源: '真实来源',
-        新闻链接: 'https://finance.eastmoney.com/a/202608083838244199.html',
-      },
-    ]))));
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify(
+          envelope([
+            {
+              新闻标题: '港股下一页仍有来源内容',
+              发布时间: '2026-08-08 11:00:00',
+              文章来源: '真实来源',
+              新闻链接: 'https://finance.eastmoney.com/a/202608083838244199.html',
+            },
+          ]),
+        ),
+      ),
+    );
 
     const result = await __stocksDashboardTest.loadMarketDiscoveryFeed({
       feed: '港股要闻',
@@ -666,32 +781,48 @@ describe('stocks dashboard snapshot', () => {
       const announcements = url.pathname.match(/^\/announcements\/(\d{6})$/)?.[1];
       if (stockNews) {
         requestedNewsSymbols.push(stockNews);
-        return new Response(JSON.stringify(envelope([
-          {
-            新闻标题: `${stockNews} 真实新闻`,
-            发布时间: '2026-08-08 11:00:00',
-            文章来源: '真实来源',
-            新闻链接: `https://finance.eastmoney.com/a/202608083838244${stockNews}.html`,
-          },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                新闻标题: `${stockNews} 真实新闻`,
+                发布时间: '2026-08-08 11:00:00',
+                文章来源: '真实来源',
+                新闻链接: `https://finance.eastmoney.com/a/202608083838244${stockNews}.html`,
+              },
+            ]),
+          ),
+        );
       }
       if (announcements) {
         requestedAnnouncementSymbols.push(announcements);
-        return new Response(JSON.stringify(envelope([
-          {
-            公告标题: `${announcements} 重要公告`,
-            公告时间: '2026-08-08 10:00:00',
-            公告链接: `https://www.cninfo.com.cn/${announcements}/notice.html`,
-          },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                公告标题: `${announcements} 重要公告`,
+                公告时间: '2026-08-08 10:00:00',
+                公告链接: `https://www.cninfo.com.cn/${announcements}/notice.html`,
+              },
+            ]),
+          ),
+        );
       }
       return new Response(JSON.stringify(envelope([])));
     });
 
     await __stocksDashboardTest.buildDashboardSnapshot({
       logger: { warn: vi.fn() },
-      watchlistRows: symbols.map((symbol) => ({ symbol, market: 'A' as const, displayName: symbol })),
-      effectiveWatchlist: symbols.map((symbol) => ({ symbol, market: 'A' as const, displayName: symbol })),
+      watchlistRows: symbols.map((symbol) => ({
+        symbol,
+        market: 'A' as const,
+        displayName: symbol,
+      })),
+      effectiveWatchlist: symbols.map((symbol) => ({
+        symbol,
+        market: 'A' as const,
+        displayName: symbol,
+      })),
       now: new Date('2026-08-08T04:00:00.000Z'),
       includeSlowSignals: true,
     });
@@ -701,25 +832,42 @@ describe('stocks dashboard snapshot', () => {
   });
 
   it('uses only declared source covers without deriving an unverified article image', () => {
-    const sourceDeclaredImageUrl = __stocksDashboardTest.sourceDeclaredImageUrl as (value?: unknown) => string | undefined;
+    const sourceDeclaredImageUrl = __stocksDashboardTest.sourceDeclaredImageUrl as (
+      value?: unknown,
+    ) => string | undefined;
 
-    expect(sourceDeclaredImageUrl('https://source.example/cover.jpg')).toBe('https://source.example/cover.jpg');
+    expect(sourceDeclaredImageUrl('https://source.example/cover.jpg')).toBe(
+      'https://source.example/cover.jpg',
+    );
     expect(sourceDeclaredImageUrl('data:image/png;base64,not-a-source-url')).toBeUndefined();
     expect(sourceDeclaredImageUrl('javascript:alert(1)')).toBeUndefined();
 
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
-      announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
-      stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
+      announcements: Array<{
+        entry: { symbol: string; market: 'A'; displayName: string };
+        env: ReturnType<typeof envelope>;
+      }>,
+      stockNews: Array<{
+        entry: { symbol: string; market: 'A'; displayName: string };
+        env: ReturnType<typeof envelope>;
+      }>,
     ) => Array<{ imageUrl?: string; imageKind?: string }>;
-    const [item] = buildSourceDiscovery([], [{
-      entry: { symbol: '603738', market: 'A', displayName: '泰晶科技' },
-      env: envelope([{
-        新闻标题: '没有公开封面的真实新闻',
-        发布时间: '2026-08-07 11:30:00',
-        文章来源: '真实来源',
-        新闻链接: 'https://finance.eastmoney.com/a/202608073834244063.html',
-      }]),
-    }]);
+    const [item] = buildSourceDiscovery(
+      [],
+      [
+        {
+          entry: { symbol: '603738', market: 'A', displayName: '泰晶科技' },
+          env: envelope([
+            {
+              新闻标题: '没有公开封面的真实新闻',
+              发布时间: '2026-08-07 11:30:00',
+              文章来源: '真实来源',
+              新闻链接: 'https://finance.eastmoney.com/a/202608073834244063.html',
+            },
+          ]),
+        },
+      ],
+    );
 
     expect(item?.imageUrl).toBeUndefined();
     expect(item?.imageKind).toBeUndefined();
@@ -727,33 +875,44 @@ describe('stocks dashboard snapshot', () => {
 
   it('keeps a declared cover and leaves non-Eastmoney coverless rows title-first', () => {
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
-      announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
-      stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
+      announcements: Array<{
+        entry: { symbol: string; market: 'A'; displayName: string };
+        env: ReturnType<typeof envelope>;
+      }>,
+      stockNews: Array<{
+        entry: { symbol: string; market: 'A'; displayName: string };
+        env: ReturnType<typeof envelope>;
+      }>,
     ) => Array<{ imageUrl?: string; imageKind?: string }>;
-    const rows = buildSourceDiscovery([], [{
-      entry: { symbol: '603738', market: 'A', displayName: '泰晶科技' },
-      env: envelope([
+    const rows = buildSourceDiscovery(
+      [],
+      [
         {
-          新闻标题: '公司公布业绩数据',
-          发布时间: '2026-08-07 12:30:00',
-          文章来源: '真实来源',
-          新闻链接: 'https://finance.eastmoney.com/a/202608073834244001.html',
-          新闻图片: 'https://np-newspic.dfcfw.com/download/D25550525489083947595_w210h154.jpg',
+          entry: { symbol: '603738', market: 'A', displayName: '泰晶科技' },
+          env: envelope([
+            {
+              新闻标题: '公司公布业绩数据',
+              发布时间: '2026-08-07 12:30:00',
+              文章来源: '真实来源',
+              新闻链接: 'https://finance.eastmoney.com/a/202608073834244001.html',
+              新闻图片: 'https://np-newspic.dfcfw.com/download/D25550525489083947595_w210h154.jpg',
+            },
+            {
+              新闻标题: '公司发布季度经营公告',
+              发布时间: '2026-08-07 12:20:00',
+              文章来源: '真实来源',
+              新闻链接: 'https://publisher.example/articles/quarterly-operations',
+            },
+            {
+              新闻标题: '公司发布投资者关系活动记录',
+              发布时间: '2026-08-07 12:10:00',
+              文章来源: '真实来源',
+              新闻链接: 'https://publisher.example/articles/investor-relations',
+            },
+          ]),
         },
-        {
-          新闻标题: '公司发布季度经营公告',
-          发布时间: '2026-08-07 12:20:00',
-          文章来源: '真实来源',
-          新闻链接: 'https://publisher.example/articles/quarterly-operations',
-        },
-        {
-          新闻标题: '公司发布投资者关系活动记录',
-          发布时间: '2026-08-07 12:10:00',
-          文章来源: '真实来源',
-          新闻链接: 'https://publisher.example/articles/investor-relations',
-        },
-      ]),
-    }]);
+      ],
+    );
 
     expect(rows[0]).toMatchObject({
       imageKind: 'source-cover',
@@ -765,71 +924,81 @@ describe('stocks dashboard snapshot', () => {
   });
 
   it('keeps an already-proxied verified cover when a cached dashboard is normalized again', () => {
-    const normalizeDiscoveryEditorialArt = __stocksDashboardTest.normalizeDiscoveryEditorialArt as (rows: Array<{
-      category: '公告' | '新闻';
-      title: string;
-      symbols: string[];
-      source: string;
-      url?: string;
-      time: string;
-      imageUrl?: string;
-      imageKind?: string;
-    }>) => Array<{ imageUrl?: string; imageKind?: string }>;
+    const normalizeDiscoveryEditorialArt = __stocksDashboardTest.normalizeDiscoveryEditorialArt as (
+      rows: Array<{
+        category: '公告' | '新闻';
+        title: string;
+        symbols: string[];
+        source: string;
+        url?: string;
+        time: string;
+        imageUrl?: string;
+        imageKind?: string;
+      }>,
+    ) => Array<{ imageUrl?: string; imageKind?: string }>;
     const proxied =
       '/api/stock-news/source-cover?url=https%3A%2F%2Fnp-newspic.dfcfw.com%2Fdownload%2FD25550525489083947595_w210h154.jpg';
 
-    const [row] = normalizeDiscoveryEditorialArt([{
-      category: '新闻',
-      title: '中国银河策略：A股市场的三个验证窗口',
-      symbols: [],
-      source: '银河证券',
-      url: 'http://finance.eastmoney.com/a/202608093835916746.html',
-      time: '08-09 15:00',
-      imageUrl: proxied,
-      imageKind: 'source-cover',
-    }]);
+    const [row] = normalizeDiscoveryEditorialArt([
+      {
+        category: '新闻',
+        title: '中国银河策略：A股市场的三个验证窗口',
+        symbols: [],
+        source: '银河证券',
+        url: 'http://finance.eastmoney.com/a/202608093835916746.html',
+        time: '08-09 15:00',
+        imageUrl: proxied,
+        imageKind: 'source-cover',
+      },
+    ]);
 
     expect(row).toMatchObject({ imageUrl: proxied, imageKind: 'source-cover' });
   });
 
   it('removes a persisted legacy market chart before rendering discovery', () => {
-    const normalizeDiscoveryEditorialArt = __stocksDashboardTest.normalizeDiscoveryEditorialArt as (rows: Array<{
-      category: '公告' | '新闻';
-      title: string;
-      symbols: string[];
-      source: string;
-      url?: string;
-      time: string;
-      imageUrl?: string;
-      imageKind?: string;
-    }>) => Array<{ imageUrl?: string; imageKind?: string }>;
+    const normalizeDiscoveryEditorialArt = __stocksDashboardTest.normalizeDiscoveryEditorialArt as (
+      rows: Array<{
+        category: '公告' | '新闻';
+        title: string;
+        symbols: string[];
+        source: string;
+        url?: string;
+        time: string;
+        imageUrl?: string;
+        imageKind?: string;
+      }>,
+    ) => Array<{ imageUrl?: string; imageKind?: string }>;
 
-    const [row] = normalizeDiscoveryEditorialArt([{
-      category: '新闻',
-      title: '泰晶科技：历史快照中的无封面新闻',
-      symbols: ['603738'],
-      source: '真实来源',
-      url: 'https://finance.eastmoney.com/a/202608073834244099.html',
-      time: '08-07 10:00',
-      imageUrl: 'https://webquoteklinepic.eastmoney.com/GetPic.aspx?nid=1.603738',
-      imageKind: 'market-chart',
-    }]);
+    const [row] = normalizeDiscoveryEditorialArt([
+      {
+        category: '新闻',
+        title: '泰晶科技：历史快照中的无封面新闻',
+        symbols: ['603738'],
+        source: '真实来源',
+        url: 'https://finance.eastmoney.com/a/202608073834244099.html',
+        time: '08-07 10:00',
+        imageUrl: 'https://webquoteklinepic.eastmoney.com/GetPic.aspx?nid=1.603738',
+        imageKind: 'market-chart',
+      },
+    ]);
 
     expect(row?.imageUrl).toBeUndefined();
     expect(row?.imageKind).toBeUndefined();
   });
 
   it('removes a stale local illustration incorrectly marked as a source cover', () => {
-    const normalizeDiscoveryEditorialArt = __stocksDashboardTest.normalizeDiscoveryEditorialArt as (rows: Array<{
-      category: '公告' | '新闻';
-      title: string;
-      symbols: string[];
-      source: string;
-      url?: string;
-      time: string;
-      imageUrl?: string;
-      imageKind?: string;
-    }>) => Array<{ imageUrl?: string; imageKind?: string }>;
+    const normalizeDiscoveryEditorialArt = __stocksDashboardTest.normalizeDiscoveryEditorialArt as (
+      rows: Array<{
+        category: '公告' | '新闻';
+        title: string;
+        symbols: string[];
+        source: string;
+        url?: string;
+        time: string;
+        imageUrl?: string;
+        imageKind?: string;
+      }>,
+    ) => Array<{ imageUrl?: string; imageKind?: string }>;
 
     const rows = normalizeDiscoveryEditorialArt([
       {
@@ -860,26 +1029,36 @@ describe('stocks dashboard snapshot', () => {
 
   it('keeps every fetched source-backed row for a multi-stock watchlist', () => {
     const buildSourceDiscovery = __stocksDashboardTest.buildNews as unknown as (
-      announcements: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
-      stockNews: Array<{ entry: { symbol: string; market: 'A'; displayName: string }; env: ReturnType<typeof envelope> }>,
+      announcements: Array<{
+        entry: { symbol: string; market: 'A'; displayName: string };
+        env: ReturnType<typeof envelope>;
+      }>,
+      stockNews: Array<{
+        entry: { symbol: string; market: 'A'; displayName: string };
+        env: ReturnType<typeof envelope>;
+      }>,
     ) => Array<{ category: string; symbols: string[] }>;
     const symbols = ['603528', '600497', '603738'];
     const announcements = symbols.map((symbol) => ({
       entry: { symbol, market: 'A' as const, displayName: symbol },
-      env: envelope(Array.from({ length: 6 }, (_, index) => ({
-        公告标题: `${symbol} 公告 ${index}`,
-        公告时间: `2026-08-07 ${String(index + 8).padStart(2, '0')}:00:00`,
-        公告链接: `https://www.cninfo.com.cn/${symbol}/notice-${index}`,
-      }))),
+      env: envelope(
+        Array.from({ length: 6 }, (_, index) => ({
+          公告标题: `${symbol} 公告 ${index}`,
+          公告时间: `2026-08-07 ${String(index + 8).padStart(2, '0')}:00:00`,
+          公告链接: `https://www.cninfo.com.cn/${symbol}/notice-${index}`,
+        })),
+      ),
     }));
     const stockNews = symbols.map((symbol) => ({
       entry: { symbol, market: 'A' as const, displayName: symbol },
-      env: envelope(Array.from({ length: 10 }, (_, index) => ({
-        新闻标题: `${symbol} 新闻 ${index}`,
-        发布时间: `2026-08-07 ${String(index + 8).padStart(2, '0')}:30:00`,
-        文章来源: '东方财富',
-        新闻链接: `https://finance.eastmoney.com/a/${symbol}${String(index).padStart(12, '0')}.html`,
-      }))),
+      env: envelope(
+        Array.from({ length: 10 }, (_, index) => ({
+          新闻标题: `${symbol} 新闻 ${index}`,
+          发布时间: `2026-08-07 ${String(index + 8).padStart(2, '0')}:30:00`,
+          文章来源: '东方财富',
+          新闻链接: `https://finance.eastmoney.com/a/${symbol}${String(index).padStart(12, '0')}.html`,
+        })),
+      ),
     }));
 
     const discovery = buildSourceDiscovery(announcements, stockNews);
@@ -937,19 +1116,16 @@ describe('stocks dashboard snapshot', () => {
     );
 
     expect(stock.spark).toEqual([5.9, 5.92]);
-    expect(stock.sparkLabels).toEqual([
-      '2026-07-31 09:31:00',
-      '2026-07-31 13:00:00',
-    ]);
+    expect(stock.sparkLabels).toEqual(['2026-07-31 09:31:00', '2026-07-31 13:00:00']);
   });
 
   it('does not turn a quote without a previous-close baseline into a flat 0 percent move', async () => {
     const client = {
       getStockKline: vi.fn(async () => envelope([])),
       getStockIntraday: vi.fn(async () => envelope([])),
-      getStockQuote: vi.fn(async () => envelope([
-        { 代码: 'sh603528', 最新价: 5.92, 成交额: 70_081_500 },
-      ])),
+      getStockQuote: vi.fn(async () =>
+        envelope([{ 代码: 'sh603528', 最新价: 5.92, 成交额: 70_081_500 }]),
+      ),
     };
 
     const stock = await __stocksDashboardTest.stockSnapshot(
@@ -975,27 +1151,56 @@ describe('stocks dashboard snapshot', () => {
         throw new Error('market pulse should not block the quick snapshot');
       }
       if (url.pathname === '/index/cn') {
-        return new Response(JSON.stringify(envelope([
-          { 代码: 'sh000001', 名称: '上证指数', 最新价: 4073.9, 涨跌幅: 1.16, 成交额: 500_000_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                代码: 'sh000001',
+                名称: '上证指数',
+                最新价: 4073.9,
+                涨跌幅: 1.16,
+                成交额: 500_000_000,
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/kline/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-06-26', 收盘: 7.11, 涨跌幅: 0.42, 成交量: 1000, 成交额: 7_100_000 },
-          { 日期: '2026-06-29', 收盘: 7.28, 涨跌幅: 2.39, 成交量: 2000, 成交额: 14_560_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 日期: '2026-06-26', 收盘: 7.11, 涨跌幅: 0.42, 成交量: 1000, 成交额: 7_100_000 },
+              { 日期: '2026-06-29', 收盘: 7.28, 涨跌幅: 2.39, 成交量: 2000, 成交额: 14_560_000 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/intraday/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 时间: '2026-06-29 09:30:00', 最新价: 7.22, 成交量: 1200 },
-          { 时间: '2026-06-29 09:31:00', 最新价: 7.25, 成交量: 1600 },
-          { 时间: '2026-06-29 09:32:00', 最新价: 7.28, 成交量: 1800 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 时间: '2026-06-29 09:30:00', 最新价: 7.22, 成交量: 1200 },
+              { 时间: '2026-06-29 09:31:00', 最新价: 7.25, 成交量: 1600 },
+              { 时间: '2026-06-29 09:32:00', 最新价: 7.28, 成交量: 1800 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/quote/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 7.31, 涨跌幅: 2.82, 成交量: 2400, 成交额: 17_544_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                代码: 'sh603528',
+                名称: '多伦科技',
+                最新价: 7.31,
+                涨跌幅: 2.82,
+                成交量: 2400,
+                成交额: 17_544_000,
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname.startsWith('/announcements/')) {
         throw new Error('announcements should not block the quick snapshot');
@@ -1043,32 +1248,54 @@ describe('stocks dashboard snapshot', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(String(input));
       if (url.pathname === '/trading-calendar/latest') {
-        return new Response(JSON.stringify(envelope([
-          {
-            requested_date: url.searchParams.get('on_or_before'),
-            latest_trading_date: '2026-08-14',
-          },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                requested_date: url.searchParams.get('on_or_before'),
+                latest_trading_date: '2026-08-14',
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/index/cn') {
         return new Response(JSON.stringify(envelope([])));
       }
       if (url.pathname === '/kline/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-08-08', 收盘: 6.31, 涨跌幅: -0.31, 成交额: 60_000_000 },
-          { 日期: '2026-08-11', 收盘: 6.38, 涨跌幅: 1.11, 成交额: 70_000_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 日期: '2026-08-08', 收盘: 6.31, 涨跌幅: -0.31, 成交额: 60_000_000 },
+              { 日期: '2026-08-11', 收盘: 6.38, 涨跌幅: 1.11, 成交额: 70_000_000 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/intraday/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 时间: '2026-08-11 09:30:00', 最新价: 6.32 },
-          { 时间: '2026-08-11 15:00:00', 最新价: 6.38 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 时间: '2026-08-11 09:30:00', 最新价: 6.32 },
+              { 时间: '2026-08-11 15:00:00', 最新价: 6.38 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/quote/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 6.38, 涨跌幅: 1.11, 成交额: 70_000_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                代码: 'sh603528',
+                名称: '多伦科技',
+                最新价: 6.38,
+                涨跌幅: 1.11,
+                成交额: 70_000_000,
+              },
+            ]),
+          ),
+        );
       }
       throw new Error(`unexpected path ${url.pathname}`);
     });
@@ -1090,11 +1317,13 @@ describe('stocks dashboard snapshot', () => {
       marketTimezone: 'Asia/Shanghai',
       marketSession: 'non-trading',
     });
-    expect(snapshot.trust?.sources).toContainEqual(expect.objectContaining({
-      key: 'quotes',
-      status: 'healthy',
-      dataAsOf: '2026-08-11',
-    }));
+    expect(snapshot.trust?.sources).toContainEqual(
+      expect.objectContaining({
+        key: 'quotes',
+        status: 'healthy',
+        dataAsOf: '2026-08-11',
+      }),
+    );
     expect(snapshot.trust?.evidenceIds).toContain('quote:603528:2026-08-11');
     expect(info).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1115,30 +1344,52 @@ describe('stocks dashboard snapshot', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(String(input));
       if (url.pathname === '/trading-calendar/latest') {
-        return new Response(JSON.stringify(envelope([
-          {
-            requested_date: url.searchParams.get('on_or_before'),
-            latest_trading_date: '2026-08-14',
-          },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                requested_date: url.searchParams.get('on_or_before'),
+                latest_trading_date: '2026-08-14',
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/index/cn') return new Response(JSON.stringify(envelope([])));
       if (url.pathname === '/kline/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-08-13', 收盘: 6.31, 涨跌幅: -0.31, 成交额: 60_000_000 },
-          { 日期: '2026-08-14', 收盘: 6.38, 涨跌幅: 1.11, 成交额: 70_000_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 日期: '2026-08-13', 收盘: 6.31, 涨跌幅: -0.31, 成交额: 60_000_000 },
+              { 日期: '2026-08-14', 收盘: 6.38, 涨跌幅: 1.11, 成交额: 70_000_000 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/intraday/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 时间: '2026-08-14 09:30:00', 最新价: 6.32 },
-          { 时间: '2026-08-14 15:00:00', 最新价: 6.38 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 时间: '2026-08-14 09:30:00', 最新价: 6.32 },
+              { 时间: '2026-08-14 15:00:00', 最新价: 6.38 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/quote/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 6.38, 涨跌幅: 1.11, 成交额: 70_000_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                代码: 'sh603528',
+                名称: '多伦科技',
+                最新价: 6.38,
+                涨跌幅: 1.11,
+                成交额: 70_000_000,
+              },
+            ]),
+          ),
+        );
       }
       throw new Error(`unexpected path ${url.pathname}`);
     });
@@ -1184,18 +1435,26 @@ describe('stocks dashboard snapshot', () => {
         );
       }
       if (url.pathname === '/kline/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-08-16', 收盘: 6.38, 涨跌幅: 0.15, 成交额: 60_000_000 },
-          { 日期: '2026-08-17', 收盘: 6.40, 涨跌幅: 0.31, 成交额: 35_186_100 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 日期: '2026-08-16', 收盘: 6.38, 涨跌幅: 0.15, 成交额: 60_000_000 },
+              { 日期: '2026-08-17', 收盘: 6.4, 涨跌幅: 0.31, 成交额: 35_186_100 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/intraday/603528') {
         return new Response(JSON.stringify(envelope([])));
       }
       if (url.pathname === '/quote/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 6.40, 涨跌幅: 0.31, 成交额: 35_186_100 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 代码: 'sh603528', 名称: '多伦科技', 最新价: 6.4, 涨跌幅: 0.31, 成交额: 35_186_100 },
+            ]),
+          ),
+        );
       }
       return new Response(JSON.stringify(envelope([])));
     });
@@ -1207,7 +1466,7 @@ describe('stocks dashboard snapshot', () => {
       changePct: 0.31,
       signal: '偏强' as const,
       report: '待生成' as const,
-      spark: [6.38, 6.40],
+      spark: [6.38, 6.4],
       sparkLabels: ['2026-08-17 09:30:00', '2026-08-17 15:00:00'],
       sparkKind: 'intraday' as const,
       sparkBaseline: 6.38,
@@ -1340,12 +1599,16 @@ describe('stocks dashboard snapshot', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(String(input));
       if (url.pathname === '/trading-calendar/latest') {
-        return new Response(JSON.stringify(envelope([
-          {
-            requested_date: url.searchParams.get('on_or_before'),
-            latest_trading_date: '2026-08-14',
-          },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                requested_date: url.searchParams.get('on_or_before'),
+                latest_trading_date: '2026-08-14',
+              },
+            ]),
+          ),
+        );
       }
       return new Response(JSON.stringify({ error: 'upstream unavailable' }), { status: 503 });
     });
@@ -1361,10 +1624,20 @@ describe('stocks dashboard snapshot', () => {
 
     expect(snapshot.freshness.status).toBe('partial');
     expect(snapshot.trust).toMatchObject({ mode: 'unavailable' });
-    expect(snapshot.trust?.sources).toEqual(expect.arrayContaining([
-      expect.objectContaining({ key: 'quotes', status: 'failed', errorCode: 'NO_VERIFIED_QUOTES' }),
-      expect.objectContaining({ key: 'news', status: 'failed', errorCode: 'UPSTREAM_UNAVAILABLE' }),
-    ]));
+    expect(snapshot.trust?.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'quotes',
+          status: 'failed',
+          errorCode: 'NO_VERIFIED_QUOTES',
+        }),
+        expect.objectContaining({
+          key: 'news',
+          status: 'failed',
+          errorCode: 'UPSTREAM_UNAVAILABLE',
+        }),
+      ]),
+    );
   });
 
   it('removes quote numbers and charts when a persisted snapshot is outside the safety window', () => {
@@ -1397,8 +1670,12 @@ describe('stocks dashboard snapshot', () => {
       source: 'akshare' as const,
       isFallbackWatchlist: false,
       watchlistStocks: [stock],
-      marketIndices: [{ name: '上证指数', price: '3634.44', changePct: 0.13, turnover: '5000.00亿元' }],
-      sectors: [{ name: '半导体', changePct: 3.2, leader: '兆易创新', flow: '领涨', spark: [1, 2] }],
+      marketIndices: [
+        { name: '上证指数', price: '3634.44', changePct: 0.13, turnover: '5000.00亿元' },
+      ],
+      sectors: [
+        { name: '半导体', changePct: 3.2, leader: '兆易创新', flow: '领涨', spark: [1, 2] },
+      ],
       starStocks: [stock],
       temperature: null,
       news: [],
@@ -1444,16 +1721,22 @@ describe('stocks dashboard snapshot', () => {
         return new Response(JSON.stringify({ error: 'kline timeout' }), { status: 503 });
       }
       if (url.pathname === '/intraday/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 时间: '2026-06-29 14:45:00', 最新价: 7.22, 成交量: 1200 },
-          { 时间: '2026-06-29 14:46:00', 最新价: 7.25, 成交量: 1600 },
-          { 时间: '2026-06-29 14:47:00', 最新价: 7.28, 成交量: 1800 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 时间: '2026-06-29 14:45:00', 最新价: 7.22, 成交量: 1200 },
+              { 时间: '2026-06-29 14:46:00', 最新价: 7.25, 成交量: 1600 },
+              { 时间: '2026-06-29 14:47:00', 最新价: 7.28, 成交量: 1800 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/quote/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 7.31, 涨跌幅: 2.82 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([{ 代码: 'sh603528', 名称: '多伦科技', 最新价: 7.31, 涨跌幅: 2.82 }]),
+          ),
+        );
       }
       throw new Error(`unexpected path ${url.pathname}`);
     });
@@ -1483,22 +1766,40 @@ describe('stocks dashboard snapshot', () => {
         return new Response(JSON.stringify(envelope([])));
       }
       if (url.pathname === '/kline/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-06-29', 收盘: 5.87, 涨跌幅: 0.1, 成交量: 1000, 成交额: 5_870_000 },
-          { 日期: '2026-06-30', 收盘: 5.92, 涨跌幅: 0.85, 成交量: 2000, 成交额: 11_840_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 日期: '2026-06-29', 收盘: 5.87, 涨跌幅: 0.1, 成交量: 1000, 成交额: 5_870_000 },
+              { 日期: '2026-06-30', 收盘: 5.92, 涨跌幅: 0.85, 成交量: 2000, 成交额: 11_840_000 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/intraday/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 时间: '2026-06-30 14:08:00', 最新价: 5.93 },
-          { 时间: '2026-06-30 14:09:00', 最新价: 5.92 },
-          { 时间: '2026-06-30 15:00:00', 最新价: 5.99 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 时间: '2026-06-30 14:08:00', 最新价: 5.93 },
+              { 时间: '2026-06-30 14:09:00', 最新价: 5.92 },
+              { 时间: '2026-06-30 15:00:00', 最新价: 5.99 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/quote/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 5.92, 涨跌幅: -1.82, 成交额: 70_081_500 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                代码: 'sh603528',
+                名称: '多伦科技',
+                最新价: 5.92,
+                涨跌幅: -1.82,
+                成交额: 70_081_500,
+              },
+            ]),
+          ),
+        );
       }
       throw new Error(`unexpected path ${url.pathname}`);
     });
@@ -1526,22 +1827,40 @@ describe('stocks dashboard snapshot', () => {
         return new Response(JSON.stringify(envelope([])));
       }
       if (url.pathname === '/kline/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-07-02', 收盘: 5.87, 涨跌幅: 0.1, 成交量: 1000, 成交额: 5_870_000 },
-          { 日期: '2026-07-03', 收盘: 6.07, 涨跌幅: 2.53, 成交量: 2000, 成交额: 80_291_100 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 日期: '2026-07-02', 收盘: 5.87, 涨跌幅: 0.1, 成交量: 1000, 成交额: 5_870_000 },
+              { 日期: '2026-07-03', 收盘: 6.07, 涨跌幅: 2.53, 成交量: 2000, 成交额: 80_291_100 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/intraday/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 时间: '2026-07-03 09:30:00', 最新价: 5.95 },
-          { 时间: '2026-07-03 11:30:00', 最新价: 6.02 },
-          { 时间: '2026-07-03 15:00:00', 最新价: 6.07 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 时间: '2026-07-03 09:30:00', 最新价: 5.95 },
+              { 时间: '2026-07-03 11:30:00', 最新价: 6.02 },
+              { 时间: '2026-07-03 15:00:00', 最新价: 6.07 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/quote/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 6.07, 涨跌幅: 2.53, 成交额: 80_291_100 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                代码: 'sh603528',
+                名称: '多伦科技',
+                最新价: 6.07,
+                涨跌幅: 2.53,
+                成交额: 80_291_100,
+              },
+            ]),
+          ),
+        );
       }
       throw new Error(`unexpected path ${url.pathname}`);
     });
@@ -1571,20 +1890,38 @@ describe('stocks dashboard snapshot', () => {
         return new Response(JSON.stringify(envelope([])));
       }
       if (url.pathname === '/kline/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-06-30', 收盘: 5.92, 涨跌幅: -1.82, 成交量: 2000, 成交额: 11_840_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 日期: '2026-06-30', 收盘: 5.92, 涨跌幅: -1.82, 成交量: 2000, 成交额: 11_840_000 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/intraday/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 时间: '14:08:00', 最新价: 5.93 },
-          { 时间: '14:09:00', 最新价: 5.92 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 时间: '14:08:00', 最新价: 5.93 },
+              { 时间: '14:09:00', 最新价: 5.92 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/quote/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 5.92, 涨跌幅: -1.82, 成交额: 70_081_500 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                代码: 'sh603528',
+                名称: '多伦科技',
+                最新价: 5.92,
+                涨跌幅: -1.82,
+                成交额: 70_081_500,
+              },
+            ]),
+          ),
+        );
       }
       throw new Error(`unexpected path ${url.pathname}`);
     });
@@ -1613,18 +1950,33 @@ describe('stocks dashboard snapshot', () => {
         return new Response(JSON.stringify(envelope([])));
       }
       if (url.pathname === '/kline/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-06-26', 收盘: 7.11, 涨跌幅: 0.42, 成交量: 1000, 成交额: 7_100_000 },
-          { 日期: '2026-06-29', 收盘: 7.28, 涨跌幅: 2.39, 成交量: 2000, 成交额: 14_560_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 日期: '2026-06-26', 收盘: 7.11, 涨跌幅: 0.42, 成交量: 1000, 成交额: 7_100_000 },
+              { 日期: '2026-06-29', 收盘: 7.28, 涨跌幅: 2.39, 成交量: 2000, 成交额: 14_560_000 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/intraday/603528') {
         return new Response(JSON.stringify({ error: 'intraday timeout' }), { status: 503 });
       }
       if (url.pathname === '/quote/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 7.31, 涨跌幅: 2.82, 成交量: 2400, 成交额: 17_544_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                代码: 'sh603528',
+                名称: '多伦科技',
+                最新价: 7.31,
+                涨跌幅: 2.82,
+                成交量: 2400,
+                成交额: 17_544_000,
+              },
+            ]),
+          ),
+        );
       }
       throw new Error(`unexpected path ${url.pathname}`);
     });
@@ -1688,12 +2040,16 @@ describe('stocks dashboard snapshot', () => {
     const next = {
       ...previous,
       updatedAt: '2026-06-29T12:01:00.000Z',
-      marketIndices: [{ name: '上证指数', price: '4073.90', changePct: 1.16, turnover: '16662.20亿元' }],
+      marketIndices: [
+        { name: '上证指数', price: '4073.90', changePct: 1.16, turnover: '16662.20亿元' },
+      ],
       sectors: [],
       temperature: null,
       news: [],
       leaderboards: {
-        gainers: [{ rank: 1, name: 'N科莱', price: '48.68', changePct: 211.65, reason: 'bj920072' }],
+        gainers: [
+          { rank: 1, name: 'N科莱', price: '48.68', changePct: 211.65, reason: 'bj920072' },
+        ],
         losers: [],
         amount: [],
       },
@@ -2156,8 +2512,9 @@ describe('stocks dashboard snapshot', () => {
   it('uses the persisted real snapshot after a process restart while AkShare is unavailable', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-30T08:00:00.000Z'));
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-      new Response(JSON.stringify(envelope([]))));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () => new Response(JSON.stringify(envelope([]))),
+    );
     const previousStock = {
       symbol: '603528',
       name: '多伦科技',
@@ -2239,16 +2596,32 @@ describe('stocks dashboard snapshot', () => {
         return new Response(JSON.stringify(envelope([])));
       }
       if (url.pathname === '/kline/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-06-30', 收盘: 5.86, 开盘: 5.8, 最高: 6.01, 最低: 5.8, 成交额: 60_989_093, 涨跌幅: -0.17 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                日期: '2026-06-30',
+                收盘: 5.86,
+                开盘: 5.8,
+                最高: 6.01,
+                最低: 5.8,
+                成交额: 60_989_093,
+                涨跌幅: -0.17,
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/intraday/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 时间: '2026-06-30 09:31:00', 最新价: 5.9, 成交量: 158200, 成交额: 928671 },
-          { 时间: '2026-06-30 09:32:00', 最新价: 5.88, 成交量: 159000, 成交额: 936787 },
-          { 时间: '2026-06-30 15:00:00', 最新价: 5.86, 成交量: 26800, 成交额: 157048 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 时间: '2026-06-30 09:31:00', 最新价: 5.9, 成交量: 158200, 成交额: 928671 },
+              { 时间: '2026-06-30 09:32:00', 最新价: 5.88, 成交量: 159000, 成交额: 936787 },
+              { 时间: '2026-06-30 15:00:00', 最新价: 5.86, 成交量: 26800, 成交额: 157048 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/quote/603528') {
         return new Response(JSON.stringify(envelope([])));
@@ -2340,22 +2713,40 @@ describe('stocks dashboard snapshot', () => {
         return new Response(JSON.stringify(envelope([])));
       }
       if (url.pathname === '/kline/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-07-02', 收盘: 5.87, 成交额: 60_989_093, 涨跌幅: -0.17 },
-          { 日期: '2026-07-03', 收盘: 6.07, 成交额: 80_291_100, 涨跌幅: 2.53 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 日期: '2026-07-02', 收盘: 5.87, 成交额: 60_989_093, 涨跌幅: -0.17 },
+              { 日期: '2026-07-03', 收盘: 6.07, 成交额: 80_291_100, 涨跌幅: 2.53 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/intraday/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 时间: '2026-07-03 09:30:00', 最新价: 5.95, 成交额: 1_000_000 },
-          { 时间: '2026-07-03 11:30:00', 最新价: 6.02, 成交额: 2_000_000 },
-          { 时间: '2026-07-03 15:00:00', 最新价: 6.07, 成交额: 3_000_000 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 时间: '2026-07-03 09:30:00', 最新价: 5.95, 成交额: 1_000_000 },
+              { 时间: '2026-07-03 11:30:00', 最新价: 6.02, 成交额: 2_000_000 },
+              { 时间: '2026-07-03 15:00:00', 最新价: 6.07, 成交额: 3_000_000 },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/quote/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 代码: 'sh603528', 名称: '多伦科技', 最新价: 6.07, 涨跌幅: 2.53, 成交额: 80_291_100 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                代码: 'sh603528',
+                名称: '多伦科技',
+                最新价: 6.07,
+                涨跌幅: 2.53,
+                成交额: 80_291_100,
+              },
+            ]),
+          ),
+        );
       }
       throw new Error(`unexpected path ${url.pathname}`);
     });
@@ -2476,7 +2867,9 @@ describe('stocks dashboard snapshot', () => {
         notes: ['上涨 2469 家，下跌 2933 家。'],
       },
       leaderboards: {
-        gainers: [{ rank: 1, name: 'N科莱', price: '48.68', changePct: 211.65, reason: 'bj920072' }],
+        gainers: [
+          { rank: 1, name: 'N科莱', price: '48.68', changePct: 211.65, reason: 'bj920072' },
+        ],
         losers: [],
         amount: [],
       },
@@ -2501,10 +2894,14 @@ describe('stocks dashboard snapshot', () => {
       const url = new URL(String(input));
       requestedPaths.push(url.pathname);
       if (url.pathname === '/kline/603528') {
-        return new Response(JSON.stringify(envelope([
-          { 日期: '2026-06-26', 收盘: 7.11, 涨跌幅: 0.42 },
-          { 日期: '2026-06-29', 收盘: 7.28, 涨跌幅: 2.39 },
-        ])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              { 日期: '2026-06-26', 收盘: 7.11, 涨跌幅: 0.42 },
+              { 日期: '2026-06-29', 收盘: 7.28, 涨跌幅: 2.39 },
+            ]),
+          ),
+        );
       }
       return new Response(JSON.stringify(envelope([])));
     });
@@ -2539,36 +2936,60 @@ describe('stocks dashboard snapshot', () => {
       if (url.pathname.startsWith('/stock-news/')) {
         const symbol = url.pathname.split('/').at(-1)!;
         requestedNewsSymbols.push(symbol);
-        return new Response(JSON.stringify(envelope([{
-          新闻标题: `${symbol} 的真实市场动态`,
-          发布时间: '2026-08-08 10:00:00',
-          文章来源: '东方财富',
-          新闻链接: `https://finance.eastmoney.com/a/${symbol}3838244063.html`,
-        }])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                新闻标题: `${symbol} 的真实市场动态`,
+                发布时间: '2026-08-08 10:00:00',
+                文章来源: '东方财富',
+                新闻链接: `https://finance.eastmoney.com/a/${symbol}3838244063.html`,
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/market-news/cn') {
-        return new Response(JSON.stringify(envelope([{
-          新闻标题: 'A股市场的真实要闻',
-          发布时间: '2026-08-08 10:05:00',
-          文章来源: '东方财富',
-          新闻链接: 'https://finance.eastmoney.com/a/202608083838244001.html',
-        }])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                新闻标题: 'A股市场的真实要闻',
+                发布时间: '2026-08-08 10:05:00',
+                文章来源: '东方财富',
+                新闻链接: 'https://finance.eastmoney.com/a/202608083838244001.html',
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/market-news/us') {
-        return new Response(JSON.stringify(envelope([{
-          新闻标题: '美股市场的真实要闻',
-          发布时间: '2026-08-08 10:04:00',
-          文章来源: '东方财富',
-          新闻链接: 'https://finance.eastmoney.com/a/202608083838244002.html',
-        }])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                新闻标题: '美股市场的真实要闻',
+                发布时间: '2026-08-08 10:04:00',
+                文章来源: '东方财富',
+                新闻链接: 'https://finance.eastmoney.com/a/202608083838244002.html',
+              },
+            ]),
+          ),
+        );
       }
       if (url.pathname === '/market-news/hk') {
-        return new Response(JSON.stringify(envelope([{
-          新闻标题: '港股市场的真实要闻',
-          发布时间: '2026-08-08 10:03:00',
-          文章来源: '东方财富',
-          新闻链接: 'https://finance.eastmoney.com/a/202608083838244003.html',
-        }])));
+        return new Response(
+          JSON.stringify(
+            envelope([
+              {
+                新闻标题: '港股市场的真实要闻',
+                发布时间: '2026-08-08 10:03:00',
+                文章来源: '东方财富',
+                新闻链接: 'https://finance.eastmoney.com/a/202608083838244003.html',
+              },
+            ]),
+          ),
+        );
       }
       return new Response(JSON.stringify(envelope([])));
     });
@@ -2582,17 +3003,21 @@ describe('stocks dashboard snapshot', () => {
     });
 
     expect(requestedNewsSymbols).toEqual(['603528']);
-    expect(snapshot.news.map((item) => item.url)).toEqual(expect.arrayContaining([
-      'https://finance.eastmoney.com/a/202608083838244001.html',
-      'https://finance.eastmoney.com/a/202608083838244002.html',
-      'https://finance.eastmoney.com/a/202608083838244003.html',
-    ]));
-    expect(snapshot.news).toEqual(expect.arrayContaining([
-      expect.objectContaining({ symbols: ['603528'], feed: '自选股新闻' }),
-      expect.objectContaining({ feed: 'A股要闻', title: 'A股市场的真实要闻' }),
-      expect.objectContaining({ feed: '美股要闻', title: '美股市场的真实要闻' }),
-      expect.objectContaining({ feed: '港股要闻', title: '港股市场的真实要闻' }),
-    ]));
+    expect(snapshot.news.map((item) => item.url)).toEqual(
+      expect.arrayContaining([
+        'https://finance.eastmoney.com/a/202608083838244001.html',
+        'https://finance.eastmoney.com/a/202608083838244002.html',
+        'https://finance.eastmoney.com/a/202608083838244003.html',
+      ]),
+    );
+    expect(snapshot.news).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ symbols: ['603528'], feed: '自选股新闻' }),
+        expect.objectContaining({ feed: 'A股要闻', title: 'A股市场的真实要闻' }),
+        expect.objectContaining({ feed: '美股要闻', title: '美股市场的真实要闻' }),
+        expect.objectContaining({ feed: '港股要闻', title: '港股市场的真实要闻' }),
+      ]),
+    );
   });
 
   it('preserves market indices and leaderboards when a later refresh loses them', () => {
@@ -2601,16 +3026,22 @@ describe('stocks dashboard snapshot', () => {
       source: 'akshare' as const,
       isFallbackWatchlist: false,
       watchlistStocks: [],
-      marketIndices: [{ name: '上证指数', price: '4073.90', changePct: 1.16, turnover: '16662.20亿元' }],
+      marketIndices: [
+        { name: '上证指数', price: '4073.90', changePct: 1.16, turnover: '16662.20亿元' },
+      ],
       sectors: [],
       starStocks: [],
       temperature: null,
       news: [],
       leaders: [{ rank: 1, name: 'N科莱', price: '48.68', changePct: 211.65, reason: 'bj920072' }],
       leaderboards: {
-        gainers: [{ rank: 1, name: 'N科莱', price: '48.68', changePct: 211.65, reason: 'bj920072' }],
+        gainers: [
+          { rank: 1, name: 'N科莱', price: '48.68', changePct: 211.65, reason: 'bj920072' },
+        ],
         losers: [{ rank: 1, name: '退市股', price: '1.00', changePct: -20, reason: 'sh000000' }],
-        amount: [{ rank: 1, name: '成交王', price: '10.00', changePct: 1, reason: '成交额 100亿元' }],
+        amount: [
+          { rank: 1, name: '成交王', price: '10.00', changePct: 1, reason: '成交额 100亿元' },
+        ],
       },
       freshness: {
         status: 'fresh' as const,

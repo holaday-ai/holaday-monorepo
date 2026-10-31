@@ -129,7 +129,8 @@ describe('evaluateSourceDomain — conservative edges', () => {
   it('mixed sources: third-party + named site present → pass (any-match)', () => {
     const v = evaluateSourceDomain({
       intent: '用豆瓣查奥本海默评分',
-      answerText: '评分 8.8，详情 https://movie.douban.com/subject/35593344/，另见 wiki.example.com',
+      answerText:
+        '评分 8.8，详情 https://movie.douban.com/subject/35593344/，另见 wiki.example.com',
     });
     expect(v.inconsistent).toBe(false);
   });

@@ -26,11 +26,7 @@ describe('auth session helpers', () => {
   });
 
   it('keeps transient gate failures retryable instead of expiring the session', () => {
-    expect(authGateFailureStatus({ data: { code: 'UNAUTHORIZED' } })).toBe(
-      'no-auth',
-    );
-    expect(authGateFailureStatus(new Error('Failed to fetch'))).toBe(
-      'error',
-    );
+    expect(authGateFailureStatus({ data: { code: 'UNAUTHORIZED' } })).toBe('no-auth');
+    expect(authGateFailureStatus(new Error('Failed to fetch'))).toBe('error');
   });
 });

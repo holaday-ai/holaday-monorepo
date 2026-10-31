@@ -118,4 +118,19 @@ export function makeCreateContext(deps: AppContextDeps) {
 export type Context = Awaited<ReturnType<ReturnType<typeof makeCreateContext>>> & {
   /** Internal nested-call ownership, never parsed from request data. */
   executionLifetime?: OperationLifetime;
+  /**
+   * Internal only (FIX-INTENT-ROUTE-BROWSER): the scrape lane re-enters
+   * tasks.create to retry the SAME task once in the browser. Set by server code
+   * on a copied context, never parsed from request data.
+   */
+  scrapeBrowserRetry?: {
+    taskId: string;
+    reason: string;
+    /** FIRECRAWL-1: what the scrape attempt spent before handing over. */
+    firecrawl?: { calls: number; credits: number };
+    /** FIX-34: the lane handing over (default scrape); a core generate round says 'generate'. */
+    from?: 'scrape' | 'generate';
+    /** FIX-36 复审 #1 #3: what the scrape got, delivered as 部分完成 if the retry fails. */
+    scrapeAnswer?: import('../agent/scrape-runner.js').ScrapePartialAnswer;
+  };
 };

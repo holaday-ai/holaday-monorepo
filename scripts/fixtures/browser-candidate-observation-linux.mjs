@@ -13,8 +13,8 @@ import {
   recordFirstCutoverFailure,
   resumeFirstCutoverCandidateWorker,
 } from '/source/browser-first-cutover-host.mjs';
-import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 import { candidatePreparationSystem } from '/source/browser-maintenance-host.mjs';
+import { acquireReleaseJournal } from '/source/browser-maintenance-journal.mjs';
 
 await fs.access('/.dockerenv');
 assert.equal(process.platform, 'linux');

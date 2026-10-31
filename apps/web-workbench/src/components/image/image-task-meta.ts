@@ -1,9 +1,11 @@
-import type {
-  CommercialImageUse,
-  ImageChangeTarget,
-  ImageCreationGoal,
-  ImageCreationOptions,
-  ImageStyleKey,
+import {
+  type CommercialImageUse,
+  IMAGE_MODEL_VALUES,
+  type ImageChangeTarget,
+  type ImageCreationGoal,
+  type ImageCreationOptions,
+  type ImageModel,
+  type ImageStyleKey,
 } from '@/types/image';
 import type { VideoAspect } from '@/types/video';
 import {
@@ -20,6 +22,7 @@ export interface ImageTaskMeta {
 }
 
 const IMAGE_STYLE_KEYS = new Set(IMAGE_STYLE_OPTIONS.map(({ key }) => key));
+const IMAGE_MODELS = new Set<string>(IMAGE_MODEL_VALUES);
 const IMAGE_ASPECT_RATIOS = new Set(IMAGE_ASPECT_OPTIONS.map(({ value }) => value));
 const IMAGE_GOALS = new Set(IMAGE_CREATION_GOALS);
 const COMMERCIAL_USES = new Set(COMMERCIAL_IMAGE_USES);
@@ -47,8 +50,7 @@ function asImageChangeTargets(value: unknown): ImageChangeTarget[] | null {
   if (!Array.isArray(value) || value.length > 5) return null;
   if (
     value.some(
-      (target) =>
-        typeof target !== 'string' || !CHANGE_TARGETS.has(target as ImageChangeTarget),
+      (target) => typeof target !== 'string' || !CHANGE_TARGETS.has(target as ImageChangeTarget),
     )
   ) {
     return null;
@@ -92,7 +94,8 @@ function parseImageOptions(value: unknown): ImageCreationOptions | undefined {
   const changeTargets = asImageChangeTargets(value.changeTargets);
   const visiblePrompt = parseVisiblePrompt(value.visiblePrompt);
   if (
-    (model !== 'nano_banana_2' && model !== 'nano_banana_pro') ||
+    typeof model !== 'string' ||
+    !IMAGE_MODELS.has(model) ||
     mode === null ||
     style === null ||
     goal === null ||
@@ -108,7 +111,7 @@ function parseImageOptions(value: unknown): ImageCreationOptions | undefined {
   }
 
   return {
-    model,
+    model: model as ImageModel,
     style,
     aspectRatio: aspectRatio as VideoAspect,
     imageCount: imageCount as 1 | 2 | 3 | 4,
@@ -125,18 +128,14 @@ function parseImageOptions(value: unknown): ImageCreationOptions | undefined {
   };
 }
 
-function parseSubjectConsistency(
-  value: unknown,
-): ImageTaskMeta['subjectConsistency'] | undefined {
+function parseSubjectConsistency(value: unknown): ImageTaskMeta['subjectConsistency'] | undefined {
   if (!isRecord(value)) return undefined;
   const checked = value.checked;
   const passed = value.passed;
   const failed = value.failed;
   const counts = [checked, passed, failed];
   if (
-    !counts.every(
-      (count) => Number.isInteger(count) && Number(count) >= 0 && Number(count) <= 8,
-    ) ||
+    !counts.every((count) => Number.isInteger(count) && Number(count) >= 0 && Number(count) <= 8) ||
     Number(passed) + Number(failed) !== Number(checked)
   ) {
     return undefined;

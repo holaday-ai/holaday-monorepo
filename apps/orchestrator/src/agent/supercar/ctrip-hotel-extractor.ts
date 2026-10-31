@@ -97,7 +97,7 @@ export function parseHotelPriceLimit(intent: string | null | undefined): number 
     /(?:预算|低于|不超过|不高于|不高过|最多)\s*(\d{2,5})|(\d{2,5})\s*元?\s*(?:以内|以下|之内)|(\d{2,5})\s*元/,
   );
   if (!m) return null;
-  const n = parseInt(m[1] ?? m[2] ?? m[3] ?? '', 10);
+  const n = Number.parseInt(m[1] ?? m[2] ?? m[3] ?? '', 10);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -118,7 +118,14 @@ export function resolveCtripHotelUrl(opts: {
   const checkin = fmtDate(addDays(now, 1));
   const checkout = fmtDate(addDays(now, 3));
   if (!city) {
-    return { city: null, knownSchema: false, url: null, cityId: null, checkin: null, checkout: null };
+    return {
+      city: null,
+      knownSchema: false,
+      url: null,
+      cityId: null,
+      checkin: null,
+      checkout: null,
+    };
   }
   const cityId = CTRIP_CITY_IDS[city];
   if (cityId == null) {
@@ -194,7 +201,8 @@ const LOCATION_RE =
 const HOTEL_SIGNAL_RE =
   /[1-5]\.\d\s*分?|[五四三二]钻|豪华型|高档型|舒适型|经济型|\d+\s*条(?:点评|评价)|星级|含早|早餐|大床|双床|入住/;
 // Ad / ranking / coupon cards — never extract these as hotels.
-const AD_CARD_RE = /广告|榜单|必住榜|口碑榜|金榜|银榜|领券|立减|满减|超值券|限时(?:抢|秒)|会员日|大促|专享券/;
+const AD_CARD_RE =
+  /广告|榜单|必住榜|口碑榜|金榜|银榜|领券|立减|满减|超值券|限时(?:抢|秒)|会员日|大促|专享券/;
 // First metadata token that ends the hotel-name prefix in a card chunk.
 const NAME_END_RE =
   /[1-5]\.\d|[五四三二]钻|豪华型|高档型|舒适型|经济型|星级|\d+\s*条(?:点评|评价)|[¥￥]|预订|[一-龥]{2,10}(?:商圈|cbd|CBD|新区|开发区|度假区|广场|火车站|高铁站|机场|地铁站|大学|景区|步行街|古镇|老街)|\d{2,}(?:人|条)/;
@@ -207,11 +215,19 @@ const NAME_NOISE_RE =
  *  it's the leading run before the first metadata token, page-noise
  *  stripped. Returns '' when nothing name-like remains. */
 function extractName(card: string): string {
-  const chunk = card.split(/[\n\r]+/).map((s) => s.trim()).filter(Boolean).pop() ?? card.trim();
+  const chunk =
+    card
+      .split(/[\n\r]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .pop() ?? card.trim();
   const end = chunk.search(NAME_END_RE);
   let name = (end > 0 ? chunk.slice(0, end) : chunk).trim();
   name = name.replace(NAME_NOISE_RE, '').trim();
-  name = name.replace(/^[\s|·,，、.。:：\-]+/, '').replace(/[\s|·,，、.。:：\-]+$/, '').trim();
+  name = name
+    .replace(/^[\s|·,，、.。:：\-]+/, '')
+    .replace(/[\s|·,，、.。:：\-]+$/, '')
+    .trim();
   if (name.length < 2 || name.length > 34) return '';
   if (!/[一-龥A-Za-z]/.test(name)) return '';
   return name;
@@ -233,7 +249,7 @@ export function extractCtripHotels(bodyText: string | null | undefined): CtripHo
   let prevEnd = 0;
   let m: RegExpExecArray | null;
   while ((m = priceRe.exec(text)) !== null) {
-    const price = parseInt((m[1] ?? '').replace(/,/g, ''), 10);
+    const price = Number.parseInt((m[1] ?? '').replace(/,/g, ''), 10);
     const cardStart = Math.max(prevEnd, m.index - 120);
     const card = text.slice(cardStart, m.index);
     prevEnd = m.index + m[0].length;
@@ -285,7 +301,7 @@ function coercePrice(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return Math.round(v);
   if (typeof v === 'string') {
     const m = v.replace(/,/g, '').match(/\d{2,6}/);
-    if (m) return parseInt(m[0], 10);
+    if (m) return Number.parseInt(m[0], 10);
   }
   return null;
 }
@@ -333,7 +349,7 @@ export function validateHotelJson(opts: {
   priceLimit?: number;
   topN?: number;
 }): CtripHotel[] {
-  const cap = opts.priceLimit ?? Infinity;
+  const cap = opts.priceLimit ?? Number.POSITIVE_INFINITY;
   const topN = opts.topN ?? 5;
   const seen = new Set<string>();
   const out: CtripHotel[] = [];
@@ -391,7 +407,7 @@ export function filterAndFormatHotels(opts: {
   topN?: number;
 }): HotelFilterResult {
   const topN = opts.topN ?? 5;
-  const cap = opts.maxPriceCNY ?? Infinity;
+  const cap = opts.maxPriceCNY ?? Number.POSITIVE_INFINITY;
   const within = opts.hotels.filter((h) => h.priceCNY <= cap);
   if (within.length === 0) {
     const lowest = opts.hotels.length > 0 ? Math.min(...opts.hotels.map((h) => h.priceCNY)) : null;

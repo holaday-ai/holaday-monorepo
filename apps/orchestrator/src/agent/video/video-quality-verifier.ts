@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import sharp from 'sharp';
+import type { MessagesAdapter, NeutralInputContentBlock } from '../../llm/messages-adapter.js';
 import type { FfmpegExecOpts } from './ffmpeg-exec.js';
 
 const QUALITY_MODEL = 'claude-sonnet-4-6';
@@ -755,6 +756,70 @@ export function createAnthropicVideoQualityAnalyzer(client: Anthropic): VideoQua
   };
 }
 
+/**
+ * Provider-neutral twin of `createAnthropicVideoQualityAnalyzer` for the
+ * Qwen-only runtime: same tools, prompt layout and token budgets, sent through
+ * the model-catalog Messages adapter (vision purpose → QWEN_VISION_MODEL,
+ * default qwen3.8-max).
+ */
+export function createMessagesVideoQualityAnalyzer(adapter: MessagesAdapter): VideoQualityAnalyzer {
+  return async (input) => {
+    const outputMode = input.outputMode ?? 'quality_verdict';
+    const selectedTool =
+      outputMode === 'required_action_evidence'
+        ? REQUIRED_ACTION_EVIDENCE_TOOL
+        : outputMode === 'clone_compatibility_evidence'
+          ? CLONE_COMPATIBILITY_EVIDENCE_TOOL
+          : QUALITY_VERDICT_TOOL;
+    const content: NeutralInputContentBlock[] = [];
+    for (const reference of input.references) {
+      content.push({ type: 'text', text: `参考素材：${reference.label}` });
+      content.push({
+        type: 'image',
+        source: { kind: 'base64', mediaType: reference.mediaType, data: reference.data },
+      });
+    }
+    if (input.references.length > 0) {
+      content.push({ type: 'text', text: '以下为待验收成片的九个时间点：' });
+    }
+    for (const frame of input.frames) {
+      content.push({
+        type: 'text',
+        text: `待验收成片抽样帧 · ${frame.timestampSeconds.toFixed(3)} 秒`,
+      });
+      content.push({
+        type: 'image',
+        source: { kind: 'base64', mediaType: frame.mediaType, data: frame.data },
+      });
+    }
+    content.push({ type: 'text', text: input.prompt });
+    const response = await adapter.create(
+      {
+        maxTokens:
+          outputMode === 'required_action_evidence'
+            ? 1_536
+            : outputMode === 'clone_compatibility_evidence'
+              ? 1_024
+              : 512,
+        tools: [
+          {
+            name: selectedTool.name,
+            description: selectedTool.description ?? '',
+            inputSchema: selectedTool.input_schema as Record<string, unknown>,
+          },
+        ],
+        toolChoice: { type: 'tool', name: selectedTool.name },
+        messages: [{ role: 'user', content }],
+      },
+      { timeoutMs: 75_000, maxRetries: 2 },
+    );
+    const block = response.content.find(
+      (item) => item.type === 'tool_use' && item.name === selectedTool.name,
+    );
+    return block && block.type === 'tool_use' ? JSON.stringify(block.input) : '';
+  };
+}
+
 class VideoQualityImageBudgetError extends Error {}
 
 export async function verifyFinalVideoQuality(
@@ -880,10 +945,7 @@ export async function verifyFinalVideoQuality(
           reason: lastResult.reason,
         });
       } catch (error) {
-        reportAnalysisIssue(
-          deps,
-          serviceErrorIssue(phase, attempt, maxAnalysisAttempts, error),
-        );
+        reportAnalysisIssue(deps, serviceErrorIssue(phase, attempt, maxAnalysisAttempts, error));
         // The production Anthropic analyzer owns transport retries and
         // Retry-After backoff. Repeating it again here would multiply a
         // provider outage into up to six identical requests.
@@ -947,12 +1009,7 @@ export async function verifyFinalVideoQuality(
     } catch (error) {
       reportAnalysisIssue(
         deps,
-        serviceErrorIssue(
-          'required_action_evidence',
-          attempt,
-          maxAnalysisAttempts,
-          error,
-        ),
+        serviceErrorIssue('required_action_evidence', attempt, maxAnalysisAttempts, error),
       );
       return unknownResult('动作证据质检服务暂时不可用');
     }

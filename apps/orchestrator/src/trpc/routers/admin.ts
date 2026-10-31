@@ -26,6 +26,7 @@ import type { DB } from '../../db/client.js';
 import { llmCalls } from '../../db/schema/llm-calls.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
+import { readTaskModelSelections } from '../../llm/model-catalog.js';
 import { adminProcedure, router } from '../trpc.js';
 import { adminFinanceRouter } from './admin-finance.js';
 import { adminLearningRouter } from './admin-learning.js';
@@ -35,11 +36,7 @@ import { adminPartnerRouter } from './admin-partner.js';
 function beijingDayStartUtc(at: Date, daysAgo = 0): Date {
   const shifted = new Date(at.getTime() + 8 * 3600_000);
   const utcDayStart = new Date(
-    Date.UTC(
-      shifted.getUTCFullYear(),
-      shifted.getUTCMonth(),
-      shifted.getUTCDate() - daysAgo,
-    ),
+    Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate() - daysAgo),
   );
   return new Date(utcDayStart.getTime() - 8 * 3600_000);
 }
@@ -48,11 +45,7 @@ function beijingDayStartUtc(at: Date, daysAgo = 0): Date {
 function beijingDayString(at: Date, daysAgo = 0): string {
   const shifted = new Date(at.getTime() + 8 * 3600_000);
   const d = new Date(
-    Date.UTC(
-      shifted.getUTCFullYear(),
-      shifted.getUTCMonth(),
-      shifted.getUTCDate() - daysAgo,
-    ),
+    Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate() - daysAgo),
   );
   return d.toISOString().slice(0, 10);
 }
@@ -76,19 +69,12 @@ function adminUserWhereClause(search: string | undefined) {
   return and(
     ne(users.role, 'system'),
     searchPattern
-      ? or(
-          like(users.email, searchPattern),
-          like(users.displayName, searchPattern),
-        )
+      ? or(like(users.email, searchPattern), like(users.displayName, searchPattern))
       : undefined,
   );
 }
 
-function buildAdminUserPageQuery(
-  db: DB,
-  input: AdminUserListInput,
-  monthStart: Date,
-) {
+function buildAdminUserPageQuery(db: DB, input: AdminUserListInput, monthStart: Date) {
   const monthTasksByUser = db
     .select({
       userId: tasks.userId,
@@ -244,9 +230,7 @@ export const adminRouter = router({
     // auto-emit `AS day`, so MySQL would reject `GROUP BY day` as
     // "Unknown column". Keeping the expression captured in a const
     // dedupes the literal.
-    const dayExpr = sql<
-      string
-    >`DATE(DATE_ADD(${tasks.createdAt}, INTERVAL 8 HOUR))`;
+    const dayExpr = sql<string>`DATE(DATE_ADD(${tasks.createdAt}, INTERVAL 8 HOUR))`;
     const trendRows = await ctx.db
       .select({
         day: dayExpr,
@@ -332,12 +316,8 @@ export const adminRouter = router({
       metrics: {
         todayTasks: { value: todayStats.total, prev: yStats.total },
         successRate: {
-          value:
-            todayTerm > 0
-              ? Math.round((todayStats.completed / todayTerm) * 1000) / 10
-              : 0,
-          prev:
-            yTerm > 0 ? Math.round((yStats.completed / yTerm) * 1000) / 10 : 0,
+          value: todayTerm > 0 ? Math.round((todayStats.completed / todayTerm) * 1000) / 10 : 0,
+          prev: yTerm > 0 ? Math.round((yStats.completed / yTerm) * 1000) / 10 : 0,
         },
         activeUsers: { value: activeToday, prev: activeYesterday },
         totalUsers: { value: totalUsers, prev: null as number | null },
@@ -350,9 +330,7 @@ export const adminRouter = router({
         status: r.status,
         createdAt: r.createdAt,
         durationMs:
-          r.startedAt && r.completedAt
-            ? r.completedAt.getTime() - r.startedAt.getTime()
-            : null,
+          r.startedAt && r.completedAt ? r.completedAt.getTime() - r.startedAt.getTime() : null,
         user: {
           userId: r.userId,
           displayName: r.displayName,
@@ -446,7 +424,13 @@ export const adminRouter = router({
             count: sql<number>`COUNT(*)`,
           })
           .from(tasks)
-          .where(and(inArray(tasks.userId, userIds), gte(tasks.createdAt, monthStart), eq(tasks.origin, 'user')))
+          .where(
+            and(
+              inArray(tasks.userId, userIds),
+              gte(tasks.createdAt, monthStart),
+              eq(tasks.origin, 'user'),
+            ),
+          )
           .groupBy(tasks.userId);
         for (const r of monthRows) {
           monthCountByUser.set(Number(r.userId), Number(r.count));
@@ -508,7 +492,13 @@ export const adminRouter = router({
       const [monthCountRow] = await ctx.db
         .select({ monthCount: sql<number>`COUNT(*)` })
         .from(tasks)
-        .where(and(eq(tasks.userId, user.id), gte(tasks.createdAt, monthStart), eq(tasks.origin, 'user')));
+        .where(
+          and(
+            eq(tasks.userId, user.id),
+            gte(tasks.createdAt, monthStart),
+            eq(tasks.origin, 'user'),
+          ),
+        );
       const monthTasks = Number(monthCountRow?.monthCount ?? 0);
 
       const recentTasks = await ctx.db
@@ -526,15 +516,19 @@ export const adminRouter = router({
         .orderBy(desc(tasks.id))
         .limit(50);
 
+      // Pre-0061 databases have no selection table: the column then shows "—".
+      const taskModels = await readTaskModelSelections(
+        ctx.db,
+        recentTasks.map((r) => r.taskId),
+      ).catch(() => new Map<string, { brainId: string; label: string | null }>());
+
       const modelDist = await ctx.db
         .select({
           model: llmCalls.model,
           calls: sql<number>`COUNT(*)`,
         })
         .from(llmCalls)
-        .where(
-          and(eq(llmCalls.userId, user.id), gte(llmCalls.createdAt, monthStart)),
-        )
+        .where(and(eq(llmCalls.userId, user.id), gte(llmCalls.createdAt, monthStart)))
         .groupBy(llmCalls.model)
         .orderBy(desc(sql`COUNT(*)`));
 
@@ -564,10 +558,12 @@ export const adminRouter = router({
           title: r.title,
           status: r.status,
           createdAt: r.createdAt,
+          model: (() => {
+            const selection = taskModels.get(r.taskId);
+            return selection ? (selection.label ?? selection.brainId) : null;
+          })(),
           durationMs:
-            r.startedAt && r.completedAt
-              ? r.completedAt.getTime() - r.startedAt.getTime()
-              : null,
+            r.startedAt && r.completedAt ? r.completedAt.getTime() - r.startedAt.getTime() : null,
         })),
       };
     }),

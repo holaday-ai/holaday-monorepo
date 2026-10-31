@@ -24,8 +24,8 @@
  * relative ordering so thinking signatures stay valid.
  */
 
-import { describe, expect, it } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
+import { describe, expect, it } from 'vitest';
 import { patchOrphanServerToolUses } from './agent-loop.js';
 
 type Block = Anthropic.Beta.BetaContentBlock;
@@ -104,9 +104,7 @@ describe('patchOrphanServerToolUses', () => {
     const input = [thinkingBlock(), orphan, textBlock('continuing')];
     const out = patchOrphanServerToolUses(input);
 
-    expect(out.orphansFixed).toEqual([
-      { name: 'code_execution', id: 'srvtoolu_orphan' },
-    ]);
+    expect(out.orphansFixed).toEqual([{ name: 'code_execution', id: 'srvtoolu_orphan' }]);
     expect(out.patched).toHaveLength(4);
     expect(out.patched[0]).toBe(input[0]); // thinking preserved by reference
     expect(out.patched[1]).toBe(orphan); // orphan kept
@@ -143,25 +141,16 @@ describe('patchOrphanServerToolUses', () => {
   it('mixed paired + orphan: only orphan patched, paired left alone', () => {
     const ok = serverToolUse('srvtoolu_ok', 'code_execution');
     const orphan = serverToolUse('srvtoolu_bad', 'code_execution');
-    const input = [
-      ok,
-      codeExecResult('srvtoolu_ok'),
-      textBlock('between'),
-      orphan,
-    ];
+    const input = [ok, codeExecResult('srvtoolu_ok'), textBlock('between'), orphan];
     const out = patchOrphanServerToolUses(input);
 
-    expect(out.orphansFixed).toEqual([
-      { name: 'code_execution', id: 'srvtoolu_bad' },
-    ]);
+    expect(out.orphansFixed).toEqual([{ name: 'code_execution', id: 'srvtoolu_bad' }]);
     expect(out.patched).toHaveLength(5);
     expect(out.patched[0]).toBe(ok);
     expect(out.patched[1]).toBe(input[1]); // existing result preserved
     expect(out.patched[2]).toBe(input[2]); // text preserved
     expect(out.patched[3]).toBe(orphan);
-    expect((out.patched[4] as { tool_use_id: string }).tool_use_id).toBe(
-      'srvtoolu_bad',
-    );
+    expect((out.patched[4] as { tool_use_id: string }).tool_use_id).toBe('srvtoolu_bad');
   });
 
   it('client tool_use blocks ignored (those round-trip via user tool_result, not server)', () => {

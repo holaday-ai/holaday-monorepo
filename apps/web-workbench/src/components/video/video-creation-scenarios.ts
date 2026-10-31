@@ -2,9 +2,10 @@ export type VideoCreationScenarioId =
   | 'product_highlight'
   | 'lifestyle_vlog'
   | 'action_remake'
-  | 'ip_presenter';
+  | 'ip_presenter'
+  | 'pet_motion';
 
-export type ProductionVideoTab = 'normal' | 'pet' | 'ip';
+export type ProductionVideoTab = 'normal' | 'pet' | 'pet_i2v' | 'ip';
 
 export interface VideoCreationStoryboardBeat {
   label: string;
@@ -150,9 +151,22 @@ export const VIDEO_CREATION_SCENARIOS: readonly VideoCreationScenario[] = [
   },
 ] as const;
 
+const PET_MOTION_SCENARIO: VideoCreationScenario = {
+  id: 'pet_motion',
+  videoTab: 'pet_i2v',
+  title: '宠物动起来',
+  description: '用宠物照片生成动态视频',
+  aspect: '9:16',
+  duration: '5 秒',
+  image: '/design-ref/video-scenario-action.jpg',
+  defaultPrompt: '',
+  storyboard: [],
+};
+
 const SCENARIO_BY_ID = new Map(VIDEO_CREATION_SCENARIOS.map((scenario) => [scenario.id, scenario]));
 
 export function videoCreationScenario(id: VideoCreationScenarioId): VideoCreationScenario {
+  if (id === 'pet_motion') return PET_MOTION_SCENARIO;
   return SCENARIO_BY_ID.get(id) ?? VIDEO_CREATION_SCENARIOS[0];
 }
 
@@ -164,6 +178,7 @@ export function scenarioForVideoTab(
   tab: ProductionVideoTab,
   preferredNormal: VideoCreationScenarioId = 'product_highlight',
 ): VideoCreationScenarioId {
+  if (tab === 'pet_i2v') return 'pet_motion';
   if (tab === 'pet') return 'action_remake';
   if (tab === 'ip') return 'ip_presenter';
   return videoTabForScenario(preferredNormal) === 'normal' ? preferredNormal : 'product_highlight';

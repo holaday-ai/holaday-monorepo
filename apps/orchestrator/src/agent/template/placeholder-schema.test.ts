@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  validateFillJson,
+  type PlaceholderSchema,
   countPlaceholders,
   flattenPlaceholderNames,
-  type PlaceholderSchema,
+  validateFillJson,
 } from './placeholder-schema.js';
 
 const invoiceSchema: PlaceholderSchema = {
@@ -137,7 +137,12 @@ describe('validateFillJson — missing detection', () => {
     const out = validateFillJson(invoiceSchema, {
       fields: { client_name: 'a', invoice_no: 'b', date: 'c', total: 'd' },
       // every row omits `price`
-      loops: { items: [{ desc: 'x', qty: '1' }, { desc: 'y', qty: '2' }] },
+      loops: {
+        items: [
+          { desc: 'x', qty: '1' },
+          { desc: 'y', qty: '2' },
+        ],
+      },
     });
     expect(out.missing).toContain('items.price');
     expect(out.missing).not.toContain('items.desc');
@@ -213,7 +218,7 @@ describe('validateFillJson — type errors', () => {
 
   it('rejects NaN / Infinity as non-writable', () => {
     const out = validateFillJson(invoiceSchema, {
-      fields: { client_name: NaN, invoice_no: Infinity },
+      fields: { client_name: Number.NaN, invoice_no: Number.POSITIVE_INFINITY },
     });
     expect(out.missing).toContain('client_name');
     expect(out.missing).toContain('invoice_no');
@@ -240,13 +245,7 @@ describe('validateFillJson — hostile / empty input (no fake success)', () => {
   it('null model output → everything missing, nothing written', () => {
     const out = validateFillJson(invoiceSchema, null);
     expect(out.data).toEqual({});
-    expect(out.missing).toEqual([
-      'client_name',
-      'date',
-      'invoice_no',
-      'items',
-      'total',
-    ]);
+    expect(out.missing).toEqual(['client_name', 'date', 'invoice_no', 'items', 'total']);
   });
 
   it('garbage shapes degrade safely rather than throwing', () => {
@@ -258,7 +257,6 @@ describe('validateFillJson — hostile / empty input (no fake success)', () => {
     expect(out.missing.length).toBeGreaterThan(0);
   });
 });
-
 
 describe('validateFillJson — derived-calc re-check (P1)', () => {
   const calcSchema: PlaceholderSchema = {

@@ -1198,10 +1198,20 @@ for (const roundTrip of [false, true]) {
         changed = true;
         queueMicrotask(() => {
           f.pool.retain('tsk_synthetic_vnc', 60000);
-          f.pool.adoptRetained('tsk_synthetic_vnc', 'tsk_synthetic_next', 'synthetic-user');
+          f.pool.adoptRetained(
+            'tsk_synthetic_vnc',
+            'tsk_synthetic_next',
+            'synthetic-user',
+            'anonymous',
+          );
           if (roundTrip) {
             f.pool.retain('tsk_synthetic_next', 60000);
-            f.pool.adoptRetained('tsk_synthetic_next', 'tsk_synthetic_vnc', 'synthetic-user');
+            f.pool.adoptRetained(
+              'tsk_synthetic_next',
+              'tsk_synthetic_vnc',
+              'synthetic-user',
+              'anonymous',
+            );
           }
         });
       }
@@ -1390,9 +1400,10 @@ it('strict Pool VNC uses only the original private instance and revokes an old t
     Buffer.concat([Buffer.from([0]), Buffer.from('synthetic input')]),
   );
   expect(f.pool.retain(instance.taskId, 60000)).toBe(true);
-  expect(f.pool.adoptRetained(instance.taskId, 'tsk_followup', 'synthetic-user') === instance).toBe(
-    true,
-  );
+  expect(
+    f.pool.adoptRetained(instance.taskId, 'tsk_followup', 'synthetic-user', 'anonymous') ===
+      instance,
+  ).toBe(true);
   await vi.waitFor(() => expect(frontend.client.readyState).toBe(WebSocket.CLOSED));
   expect(f.pool.peek('tsk_followup') === instance).toBe(true);
   expect(f.counts.creates).toBe(1);
@@ -1502,7 +1513,9 @@ it('strict Pool failed-task tombstone rejects retained adoption into its key', a
   ).result;
   expect(f.pool.retain(instance.taskId, 60000)).toBe(true);
   await failPoolAllocation(f, 'tsk_failed');
-  expect(f.pool.adoptRetained('tsk_source', 'tsk_failed', 'synthetic-user') === null).toBe(true);
+  expect(
+    f.pool.adoptRetained('tsk_source', 'tsk_failed', 'synthetic-user', 'anonymous') === null,
+  ).toBe(true);
   expect(f.pool.peek('tsk_source') === instance).toBe(true);
 });
 
@@ -1558,7 +1571,9 @@ it('strict Pool does not grant ownership or retention from mutable instance fiel
     { parent: f.owner, errorOutcome: 'known' },
   ).result;
   instance.retainedUntil = Date.now() + 60000;
-  expect(f.pool.adoptRetained(instance.taskId, 'tsk_followup', 'synthetic-user')).toBeNull();
+  expect(
+    f.pool.adoptRetained(instance.taskId, 'tsk_followup', 'synthetic-user', 'anonymous'),
+  ).toBeNull();
   instance.userId = 'synthetic-other';
   expect(f.pool.peekActiveForUser('synthetic-other') === null).toBe(true);
   expect(f.pool.peek('tsk_synthetic') === null).toBe(true);
@@ -1576,9 +1591,9 @@ it('strict Pool retention expiry cannot be renewed by changing the instance DTO'
   const now = Date.now();
   instance.retainedUntil = now + 600000;
   vi.spyOn(Date, 'now').mockReturnValue(now + 10001);
-  expect(f.pool.adoptRetained(instance.taskId, 'tsk_followup', 'synthetic-user') === null).toBe(
-    true,
-  );
+  expect(
+    f.pool.adoptRetained(instance.taskId, 'tsk_followup', 'synthetic-user', 'anonymous') === null,
+  ).toBe(true);
 });
 
 it('strict Pool expired private lease refuses a new VNC upstream before its timer runs', async () => {
@@ -1652,7 +1667,12 @@ it('strict Pool adoption rechecks private binding after the final logger revokes
       void closing.catch(() => {});
     }
   };
-  const adopted = f.pool.adoptRetained(instance.taskId, 'tsk_followup', 'synthetic-user');
+  const adopted = f.pool.adoptRetained(
+    instance.taskId,
+    'tsk_followup',
+    'synthetic-user',
+    'anonymous',
+  );
   expect(adopted === null).toBe(true);
   await expect(closing).rejects.toThrow('POOL_GROUP_EXIT_UNPROVEN');
 });

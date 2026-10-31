@@ -12,12 +12,14 @@
  * page is where the charts live.
  */
 
-import { Loader2, Search } from 'lucide-react';
-import * as React from 'react';
-import { Link } from 'react-router-dom';
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
+import { Loader2, Search } from 'lucide-react';
+import * as React from 'react';
+import { Link } from 'react-router-dom';
+import { AdminLearningEvolution } from './AdminLearningEvolution';
 import { learningEmptyCopy } from './admin-learning-copy';
 import {
   adminLoadErrorCopy,
@@ -119,6 +121,8 @@ export function AdminLearningPage(): JSX.Element {
         />
       </div>
 
+      <AdminLearningEvolution />
+
       {data && normalized.coverage.truncated && (
         <div className="mt-4 rounded-[8px] border border-[#FFC910]/60 bg-[#FFC910]/10 px-4 py-3 text-[13px] text-[#595757]">
           最近 90 天任务超过扫描上限；当前统计基于最新{' '}
@@ -137,22 +141,16 @@ export function AdminLearningPage(): JSX.Element {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索域名…"
-            className="w-full rounded-[8px] border border-[#DCDDDD] bg-white py-2 pl-9 pr-3 text-[13px] outline-none transition-colors focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
+            className="w-full rounded-[8px] border border-[#DCDDDD] bg-white py-2 pl-9 pr-3 text-[13px] outline-none transition-colors focus:border-[#FF0061] focus:ring-2 focus:ring-[#FF0061]/15"
           />
         </div>
         <FilterPill active={filter === 'all'} onClick={() => setFilter('all')}>
           全部
         </FilterPill>
-        <FilterPill
-          active={filter === 'highRisk'}
-          onClick={() => setFilter('highRisk')}
-        >
+        <FilterPill active={filter === 'highRisk'} onClick={() => setFilter('highRisk')}>
           仅高风险
         </FilterPill>
-        <FilterPill
-          active={filter === 'recentFail'}
-          onClick={() => setFilter('recentFail')}
-        >
+        <FilterPill active={filter === 'recentFail'} onClick={() => setFilter('recentFail')}>
           本周有未成功
         </FilterPill>
       </div>
@@ -160,7 +158,7 @@ export function AdminLearningPage(): JSX.Element {
       <section className="mt-4 rounded-[8px] border border-[#DCDDDD] bg-white p-0 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
         {error && (
           <div className="border-b border-[#EFEFEF] px-5 py-3 text-sm">
-            <div className="font-medium text-[#EA1F59]">{errorCopy.title}</div>
+            <div className="font-medium text-[#FF0061]">{errorCopy.title}</div>
             <div className="mt-1 text-xs text-[#595757]">{errorCopy.body}</div>
           </div>
         )}
@@ -213,7 +211,7 @@ export function AdminLearningPage(): JSX.Element {
                   'inline-flex h-7 items-center rounded-[8px] border border-[#DCDDDD] px-2',
                   offset === 0
                     ? 'cursor-not-allowed opacity-40'
-                    : 'hover:bg-[#EFEFEF] hover:text-[#EA1F59]',
+                    : 'hover:bg-[#EFEFEF] hover:text-[#FF0061]',
                 )}
               >
                 上一页
@@ -226,7 +224,7 @@ export function AdminLearningPage(): JSX.Element {
                   'inline-flex h-7 items-center rounded-[8px] border border-[#DCDDDD] px-2',
                   offset + PAGE_SIZE >= normalized.total
                     ? 'cursor-not-allowed opacity-40'
-                    : 'hover:bg-[#EFEFEF] hover:text-[#EA1F59]',
+                    : 'hover:bg-[#EFEFEF] hover:text-[#FF0061]',
                 )}
               >
                 下一页
@@ -282,7 +280,7 @@ function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
       <td className="px-3 py-3 text-right tabular-nums">
         <span className="text-[#1688AA]">{row.success}</span>
         <span className="text-muted-foreground"> / </span>
-        <span className="text-[#EA1F59]">{row.failed}</span>
+        <span className="text-[#FF0061]">{row.failed}</span>
         <span className="text-muted-foreground"> / </span>
         <span className="text-muted-foreground">{formatInteger(row.cancelled)}</span>
       </td>
@@ -304,7 +302,7 @@ function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
       <td className="px-5 py-3">
         <Link
           to={`/admin/learning/${encodeURIComponent(row.domain)}`}
-          className="text-[#EA1F59] hover:underline"
+          className="text-[#FF0061] hover:underline"
         >
           查看详情
         </Link>
@@ -315,9 +313,18 @@ function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
 
 function SuccessRateBar({ successRate }: { successRate: number }): JSX.Element {
   // Interpolate brand magenta (0%) → yellow (50%) → cyan (100%).
-  const r = successRate < 50 ? Math.round(234 + (successRate / 50) * (255 - 234)) : Math.round(255 - ((successRate - 50) / 50) * (255 - 66));
-  const g = successRate < 50 ? Math.round(31 + (successRate / 50) * (201 - 31)) : Math.round(201 - ((successRate - 50) / 50) * (201 - 192));
-  const b = successRate < 50 ? Math.round(89 - (successRate / 50) * (89 - 16)) : Math.round(16 + ((successRate - 50) / 50) * (239 - 16));
+  const r =
+    successRate < 50
+      ? Math.round(234 + (successRate / 50) * (255 - 234))
+      : Math.round(255 - ((successRate - 50) / 50) * (255 - 66));
+  const g =
+    successRate < 50
+      ? Math.round(31 + (successRate / 50) * (201 - 31))
+      : Math.round(201 - ((successRate - 50) / 50) * (201 - 192));
+  const b =
+    successRate < 50
+      ? Math.round(89 - (successRate / 50) * (89 - 16))
+      : Math.round(16 + ((successRate - 50) / 50) * (239 - 16));
   const color = `rgb(${r}, ${g}, ${b})`;
   return (
     <div className="flex items-center gap-2">
@@ -349,11 +356,11 @@ function MetricCard({
     <div
       className={cn(
         'rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)]',
-        highlight && 'border-[#EA1F59]/30',
+        highlight && 'border-[#FF0061]/30',
       )}
       style={
         highlight
-          ? { backgroundImage: 'linear-gradient(135deg, rgba(234,31,89,0.10) 0%, transparent 60%)' }
+          ? { backgroundImage: 'linear-gradient(135deg, rgba(255,0,97,0.10) 0%, transparent 60%)' }
           : undefined
       }
     >
@@ -376,17 +383,18 @@ function FilterPill({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <button
+    <ChoiceButton
+      selected={active}
       type="button"
       onClick={onClick}
       className={cn(
         'inline-flex h-7 items-center rounded-full border px-3 text-[12px] transition-colors',
         active
-          ? 'border-[#EA1F59] bg-[rgba(234,31,89,0.10)] text-[#EA1F59]'
-          : 'border-[#DCDDDD] bg-white text-muted-foreground hover:bg-[#EFEFEF] hover:text-[#EA1F59]',
+          ? 'border-[#FF0061] bg-[rgba(255,0,97,0.10)] text-[#FF0061]'
+          : 'border-[#DCDDDD] bg-white text-muted-foreground hover:bg-[#EFEFEF] hover:text-[#FF0061]',
       )}
     >
       {children}
-    </button>
+    </ChoiceButton>
   );
 }

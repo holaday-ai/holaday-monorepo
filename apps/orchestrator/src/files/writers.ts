@@ -19,17 +19,17 @@
 
 import { Buffer } from 'node:buffer';
 import { promises as fs } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { utils as xlsxUtils, write as xlsxWrite, type WorkSheet } from 'xlsx';
+import { fileURLToPath } from 'node:url';
+import { Document, HeadingLevel, Packer, Paragraph } from 'docx';
 import PDFDocument from 'pdfkit';
-import { Document, Packer, Paragraph, HeadingLevel } from 'docx';
 // pptxgenjs ships as both ESM (default export class) and CJS
 // (module.exports = class). With `esModuleInterop` the default
 // import works in TS but `new PptxGenJS()` then sees the namespace
 // shape under verbatimModuleSyntax. Use a star import + cast to
 // the constructor signature for portability.
 import * as pptxgen from 'pptxgenjs';
+import { type WorkSheet, utils as xlsxUtils, write as xlsxWrite } from 'xlsx';
 
 type PptxGenConstructor = new () => {
   addSlide(): {
@@ -40,28 +40,15 @@ type PptxGenConstructor = new () => {
   };
   write(opts: { outputType: string }): Promise<Buffer | string | Blob | ArrayBuffer>;
 };
-const PptxGenJS = (
-  (pptxgen as unknown as { default: PptxGenConstructor }).default ??
-    (pptxgen as unknown as PptxGenConstructor)
-) as PptxGenConstructor;
+const PptxGenJS = ((pptxgen as unknown as { default: PptxGenConstructor }).default ??
+  (pptxgen as unknown as PptxGenConstructor)) as PptxGenConstructor;
 
-export type CreateFileFormat =
-  | 'csv'
-  | 'txt'
-  | 'md'
-  | 'json'
-  | 'xlsx'
-  | 'pdf'
-  | 'docx'
-  | 'pptx';
+export type CreateFileFormat = 'csv' | 'txt' | 'md' | 'json' | 'xlsx' | 'pdf' | 'docx' | 'pptx';
 
 export const OPEN_FORMATS = ['csv', 'txt', 'md', 'json'] as const;
 export const OFFICE_FORMATS = ['xlsx', 'pdf', 'docx', 'pptx'] as const;
 
-export const ALL_FORMATS: readonly CreateFileFormat[] = [
-  ...OPEN_FORMATS,
-  ...OFFICE_FORMATS,
-];
+export const ALL_FORMATS: readonly CreateFileFormat[] = [...OPEN_FORMATS, ...OFFICE_FORMATS];
 
 const MIME_BY_FORMAT: Record<CreateFileFormat, string> = {
   csv: 'text/csv; charset=utf-8',
@@ -159,9 +146,7 @@ export function buildFileFormatGuidance(allowed: readonly string[]): string {
       .filter((s): s is string => s != null)
       .join('、');
     lines.push(
-      `若用户要的格式（${unavailable.join('/')}）不在可用列表：**绝不要声称已生成该格式、绝不要假装用 reportlab 等库直接生成**；` +
-        `你必须实际调用 create_file 以最接近的可用格式生成真实文件（${exMap}），` +
-        '然后在最终回答中说明「已改用 X 文件交付；PDF/Office 等格式需升级 Pro 套餐」。未调用 create_file 就不得声称已生成任何文件。',
+      `若用户要的格式（${unavailable.join('/')}）不在可用列表：**绝不要声称已生成该格式、绝不要假装用 reportlab 等库直接生成**；你必须实际调用 create_file 以最接近的可用格式生成真实文件（${exMap}），然后在最终回答中说明「已改用 X 文件交付；PDF/Office 等格式需升级 Pro 套餐」。未调用 create_file 就不得声称已生成任何文件。`,
     );
   }
   return lines.join('\n');
@@ -184,7 +169,9 @@ const FORMAT_REQUEST_PATTERNS: ReadonlyArray<readonly [CreateFileFormat, RegExp]
  * before open ones so "可下载的 PDF 文件" → 'pdf'. Used to inject a forceful
  * per-task directive when the requested format is unavailable on the plan.
  */
-export function detectRequestedFileFormat(intent: string | null | undefined): CreateFileFormat | null {
+export function detectRequestedFileFormat(
+  intent: string | null | undefined,
+): CreateFileFormat | null {
   const t = intent ?? '';
   for (const [fmt, re] of FORMAT_REQUEST_PATTERNS) {
     if (re.test(t)) return fmt;
@@ -207,10 +194,7 @@ export function buildUnavailableFormatDirective(
   if (!requested) return '';
   if (allowed.includes(requested)) return '';
   if (allowed.length === 0) {
-    return (
-      `【重要·文件格式】本账号当前套餐无法生成可下载文件，更无法生成 ${requested}。` +
-      '请诚实告知用户当前套餐不支持生成可下载文件，直接在正文给出内容，**切勿声称已生成任何文件或下载链接**。'
-    );
+    return `【重要·文件格式】本账号当前套餐无法生成可下载文件，更无法生成 ${requested}。请诚实告知用户当前套餐不支持生成可下载文件，直接在正文给出内容，**切勿声称已生成任何文件或下载链接**。`;
   }
   const fb = preferredFallbackFormat(requested, allowed) ?? 'md';
   return (
@@ -232,9 +216,7 @@ export function buildCreateFileToolDescription(allowed: readonly string[]): stri
   const unavailable = ALL_FORMATS.filter((f) => !allowed.includes(f));
   let note = ` 本账号可用格式：${allowed.join('/')}。`;
   if (unavailable.length > 0) {
-    note +=
-      `若用户要 ${unavailable.join('/')} 等不可用格式，请改用可用格式生成真实文件` +
-      '（pdf/docx/pptx→md，xlsx→csv），并在回答中说明已降级交付、该格式需升级 Pro，**不要声称已生成不可用格式**。';
+    note += `若用户要 ${unavailable.join('/')} 等不可用格式，请改用可用格式生成真实文件（pdf/docx/pptx→md，xlsx→csv），并在回答中说明已降级交付、该格式需升级 Pro，**不要声称已生成不可用格式**。`;
   }
   return base + note;
 }
@@ -245,10 +227,7 @@ export function buildCreateFileToolDescription(allowed: readonly string[]): stri
  * JSON-parseable; we surface the parse error in the file body so a
  * malformed call still yields something the user can see.
  */
-export async function renderFile(
-  format: CreateFileFormat,
-  content: string,
-): Promise<RenderResult> {
+export async function renderFile(format: CreateFileFormat, content: string): Promise<RenderResult> {
   const mimetype = MIME_BY_FORMAT[format];
   switch (format) {
     case 'txt':
@@ -336,13 +315,19 @@ function renderXlsx(content: string): Buffer {
     xlsxUtils.book_append_sheet(wb, sheet, 'Sheet1');
     return Buffer.from(xlsxWrite(wb, { type: 'buffer', bookType: 'xlsx' }));
   }
-  const sheets: Record<string, unknown> =
-    Array.isArray(parsed) ? { Sheet1: parsed } : (parsed as Record<string, unknown>);
+  const sheets: Record<string, unknown> = Array.isArray(parsed)
+    ? { Sheet1: parsed }
+    : (parsed as Record<string, unknown>);
   for (const [name, data] of Object.entries(sheets)) {
     let sheet: WorkSheet;
     if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0])) {
       sheet = xlsxUtils.aoa_to_sheet(data as unknown[][]);
-    } else if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object' && data[0] !== null) {
+    } else if (
+      Array.isArray(data) &&
+      data.length > 0 &&
+      typeof data[0] === 'object' &&
+      data[0] !== null
+    ) {
       sheet = xlsxUtils.json_to_sheet(data as Record<string, unknown>[]);
     } else {
       sheet = xlsxUtils.aoa_to_sheet([[name], [JSON.stringify(data)]]);
@@ -414,7 +399,10 @@ async function renderPdf(content: string): Promise<Buffer> {
  * Anything richer (tables, lists) falls through as plain paragraphs.
  */
 async function renderDocx(content: string): Promise<Buffer> {
-  const blocks = content.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  const blocks = content
+    .split(/\n\s*\n/)
+    .map((b) => b.trim())
+    .filter(Boolean);
   const paragraphs: Paragraph[] = [];
   for (const block of blocks) {
     if (block.startsWith('# ')) {
@@ -447,9 +435,10 @@ async function renderPptx(content: string): Promise<Buffer> {
   } catch {
     parsed = null;
   }
-  const slides = parsed?.slides && parsed.slides.length > 0
-    ? parsed.slides
-    : [{ title: 'Slide 1', bullets: content.split(/\n+/).filter(Boolean).slice(0, 8) }];
+  const slides =
+    parsed?.slides && parsed.slides.length > 0
+      ? parsed.slides
+      : [{ title: 'Slide 1', bullets: content.split(/\n+/).filter(Boolean).slice(0, 8) }];
   for (const s of slides) {
     const slide = pptx.addSlide();
     if (s.title) {

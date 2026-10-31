@@ -66,8 +66,22 @@ describe('parseImageTaskMeta', () => {
 
   it.each([
     { imageOptions: { model: 'nano_banana_2', aspectRatio: '1:1', imageCount: 1, mode: 'unsafe' } },
-    { imageOptions: { model: 'nano_banana_2', aspectRatio: '1:1', imageCount: 1, changeTargets: ['background', 'style', 'lighting', 'action', 'composition', 'extra'] } },
-    { imageOptions: { model: 'nano_banana_2', aspectRatio: '1:1', imageCount: 1, visiblePrompt: 'x'.repeat(4_001) } },
+    {
+      imageOptions: {
+        model: 'nano_banana_2',
+        aspectRatio: '1:1',
+        imageCount: 1,
+        changeTargets: ['background', 'style', 'lighting', 'action', 'composition', 'extra'],
+      },
+    },
+    {
+      imageOptions: {
+        model: 'nano_banana_2',
+        aspectRatio: '1:1',
+        imageCount: 1,
+        visiblePrompt: 'x'.repeat(4_001),
+      },
+    },
     { subjectConsistency: { checked: -1, passed: 0, failed: 0 } },
     { subjectConsistency: { checked: 1, passed: 2, failed: 0 } },
   ])('rejects malformed metadata without throwing: %o', (metadata) => {

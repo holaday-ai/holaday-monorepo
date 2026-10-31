@@ -188,7 +188,7 @@ export function OrganizationInviteDialog({
                   type="button"
                   size="sm"
                   onClick={() => void copyLink()}
-                  className="h-11 bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
+                  className="h-11 bg-[#FF0061] text-white hover:bg-[#FF0061]/90"
                 >
                   <Copy className="h-3.5 w-3.5" />
                   复制邀请链接
@@ -203,7 +203,7 @@ export function OrganizationInviteDialog({
                   aria-label="成员角色"
                   value={selectedRole}
                   onChange={(event) => setRole(event.target.value as InvitationRole)}
-                  className="mt-1.5 h-11 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm text-foreground outline-none focus-visible:border-[#EA1F59]/45 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/30 focus-visible:ring-offset-1"
+                  className="mt-1.5 h-11 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm text-foreground outline-none focus-visible:border-[#FF0061]/45 focus-visible:ring-2 focus-visible:ring-[#FF0061]/30 focus-visible:ring-offset-1"
                 >
                   {inviteRoles.map((candidate) => (
                     <option key={candidate} value={candidate}>
@@ -219,7 +219,7 @@ export function OrganizationInviteDialog({
                     aria-label="直属上级（可选）"
                     value={managerMemberId}
                     onChange={(event) => setManagerMemberId(event.target.value)}
-                    className="mt-1.5 h-11 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm text-foreground outline-none focus-visible:border-[#EA1F59]/45 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/30 focus-visible:ring-offset-1"
+                    className="mt-1.5 h-11 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 text-sm text-foreground outline-none focus-visible:border-[#FF0061]/45 focus-visible:ring-2 focus-visible:ring-[#FF0061]/30 focus-visible:ring-offset-1"
                   >
                     <option value="">暂不设置</option>
                     {managerCandidates.map((candidate) => (
@@ -231,7 +231,7 @@ export function OrganizationInviteDialog({
                 </label>
               ) : null}
               {error ? (
-                <p role="alert" className="text-xs text-[#EA1F59]">
+                <p role="alert" className="text-xs text-[#FF0061]">
                   {error}
                 </p>
               ) : null}
@@ -244,7 +244,7 @@ export function OrganizationInviteDialog({
                   size="sm"
                   onClick={() => void createLink()}
                   disabled={creating || inviteRoles.length === 0}
-                  className="h-11 bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
+                  className="h-11 bg-[#FF0061] text-white hover:bg-[#FF0061]/90"
                 >
                   <Link2 className="h-3.5 w-3.5" />
                   {creating ? '生成中…' : '生成邀请链接'}

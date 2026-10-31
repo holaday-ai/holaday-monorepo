@@ -49,7 +49,15 @@ describe('MFA secret storage and recovery codes', () => {
     const encrypted = encryptMfaSecret(secret);
     expect(encrypted).not.toContain(secret);
     expect(decryptMfaSecret(encrypted)).toBe(secret);
-    expect(() => decryptMfaSecret(`${encrypted.slice(0, -2)}aa`)).toThrow();
+    // Flip one bit of a decoded byte: rewriting the last base64url characters can
+    // leave the bytes as they were (the final character's low bits are padding).
+    for (const part of [1, 2, 3]) {
+      const fields = encrypted.split('.');
+      const bytes = Buffer.from(fields[part]!, 'base64url');
+      bytes[bytes.length - 1]! ^= 0x01;
+      fields[part] = bytes.toString('base64url');
+      expect(() => decryptMfaSecret(fields.join('.'))).toThrow();
+    }
   });
 
   it('creates normalized recovery-code material without storing plaintext', () => {

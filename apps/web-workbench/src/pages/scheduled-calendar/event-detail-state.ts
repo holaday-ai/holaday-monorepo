@@ -89,7 +89,9 @@ export function describeScheduledEventReminder(minutes: number | null): string {
   return `${hours} 小时前`;
 }
 
-export function describeScheduledEventRepeat(row: Pick<ScheduledTaskRow, 'repeatType' | 'rrule'>): string {
+export function describeScheduledEventRepeat(
+  row: Pick<ScheduledTaskRow, 'repeatType' | 'rrule'>,
+): string {
   if (row.rrule && row.rrule.trim().length > 0) {
     return `自定义：${row.rrule.length > 40 ? `${row.rrule.slice(0, 40)}…` : row.rrule}`;
   }

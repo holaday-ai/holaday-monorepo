@@ -13,46 +13,8 @@
  * exists for readability.
  */
 
-const TOOL_TAG_NAMES = [
-  'tool_call',
-  'tool_calls',
-  'tool_response',
-  'tool_use',
-  'tool_result',
-  'function_calls',
-  'function_call',
-  'function_response',
-  'invoke',
-  'parameter',
-];
-
-/**
- * Build a regex that matches an opening + closing tag pair (with
- * arbitrary content between them, including newlines) for any of
- * the tag names. Greedy match `[\s\S]*?` is non-greedy so
- * "a <tool_call>x</tool_call> b <tool_call>y</tool_call> c"
- * strips both pairs cleanly without eating the middle text.
- */
-function buildPairedRegex(): RegExp {
-  const tagAlternation = TOOL_TAG_NAMES.join('|');
-  return new RegExp(
-    `<(${tagAlternation})\\b[^>]*>[\\s\\S]*?</\\1\\s*>`,
-    'gi',
-  );
-}
-
-const PAIRED_TAG_RE = buildPairedRegex();
-
-/**
- * Standalone fragments that escaped the paired strip — orphan
- * opening or closing tags that didn't have a partner. We don't
- * try to be clever about content; if we see `<tool_call>` without
- * a closer, drop it. Same for the closer alone.
- */
-const ORPHAN_TAG_RE = new RegExp(
-  `</?(?:${TOOL_TAG_NAMES.join('|')})\\b[^>]*/?>`,
-  'gi',
-);
+import { stripToolCallMarkup } from '@holaday/shared-types';
+import { stripInternalRefs } from './internal-refs.js';
 
 /**
  * Massive base64 blobs (e.g. inline screenshots the model occasionally
@@ -78,8 +40,7 @@ const IMAGE_MARKER_BASE64_RE =
  * the base64 string. Stripped wholesale so the surrounding JSON
  * doesn't end up with a half-removed string literal.
  */
-const QUOTED_IMAGE_DATA_RE =
-  /"data"\s*:\s*"(?:\/9j\/|iVBORw0KGgo|R0lGOD|UklGR)[A-Za-z0-9+/=]*"/g;
+const QUOTED_IMAGE_DATA_RE = /"data"\s*:\s*"(?:\/9j\/|iVBORw0KGgo|R0lGOD|UklGR)[A-Za-z0-9+/=]*"/g;
 
 /**
  * Standalone bare base64 — surrounded by whitespace (or string
@@ -160,10 +121,7 @@ function stripToolJsonBlocks(text: string): string {
         return out;
       }
       const block = text.slice(start, j);
-      if (
-        TOOL_RESPONSE_MARKERS_RE.test(block) ||
-        looksLikeInternalResultMetadata(block)
-      ) {
+      if (TOOL_RESPONSE_MARKERS_RE.test(block) || looksLikeInternalResultMetadata(block)) {
         // Drop the block entirely; iterator continues at j.
       } else {
         out += block;
@@ -327,12 +285,201 @@ const STRAY_CLOSER_LINE_RE = /^[ \t]*[\}\]]{1,3}[\s,]*$/gm;
  * Empty / falsy input returns empty string — never undefined,
  * never null. The DB column is `result.summary: string`.
  */
+/**
+ * FIX-40 (Deploy-39/40 new-google: 「Claude is Anthropic&#x27;s AI」): an HTML entity copied out
+ * of a page is decoded — apostrophes, quotes, ampersands, spaces, numeric characters. `&lt;` /
+ * `&gt;` (and numeric < >) stay as they are, so no tag is made; fenced and inline code is left
+ * alone.
+ */
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+  '#39': "'",
+};
+export function decodeHtmlEntities(text: string): string {
+  if (!text.includes('&')) return text;
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
+    .map((part, i) =>
+      i % 2
+        ? part
+        : part.replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|[a-z]+);/gi, (whole, name: string) => {
+            const lower = name.toLowerCase();
+            if (NAMED_ENTITIES[lower] !== undefined) return NAMED_ENTITIES[lower]!;
+            if (!lower.startsWith('#')) return whole;
+            const code = lower.startsWith('#x')
+              ? Number.parseInt(lower.slice(2), 16)
+              : Number.parseInt(lower.slice(1), 10);
+            if (
+              !Number.isFinite(code) ||
+              code < 0x20 ||
+              code === 0x3c ||
+              code === 0x3e ||
+              code > 0x10ffff
+            )
+              return whole;
+            return String.fromCodePoint(code);
+          }),
+    )
+    .join('');
+}
+
+/** The browser tools a model may name in its answer, as the user reads them. */
+const TOOL_WORDS: Record<string, string> = {
+  switch_tab: '切换标签页',
+  new_tab: '新建标签页',
+  list_tabs: '查看标签页列表',
+  read_page: '读取页面',
+  get_page_text: '读取正文',
+  press_key: '按键',
+  wait_for: '等待页面',
+  read_url: '只读获取',
+  web_search: '联网搜索',
+  request_human: '请用户接管',
+  scroll_until: '滚动读取',
+  click: '点击',
+  navigate: '打开网址',
+  snapshot: '读取页面',
+  sections: '读取章节目录',
+  links: '读取链接',
+  tables: '读取表格',
+  extract: '提取',
+  screenshot: '截图',
+  scroll: '滚动',
+};
+const TOOL_CALL_RE = new RegExp(
+  `\\b(${Object.keys(TOOL_WORDS).join('|')})\\s*\\(\\s*(?:[a-zA-Z_]\\w*\\s*=\\s*[^()\\n,]{0,60}(?:\\s*,\\s*[a-zA-Z_]\\w*\\s*=\\s*[^()\\n,]{0,60})*)?\\s*\\)`,
+  'g',
+);
+/** A tool argument written into prose (「均使用 newTab=true 在新标签中打开」「（end=true，未截断）」). */
+const TOOL_ARG_RE =
+  /\b(?:newTab\s*=\s*true|end\s*=\s*true|section\s*=\s*(\d+)|truncated\s*=\s*(true|false)|sizeBytes\s*=\s*(\d+)|(?:targetTabId|tabId|frameId|observationRevision|ref)\s*=\s*[\w-]*)/g;
+/** FIX-42 (Deploy-42 core-06 / core-09): 「truncated=false」「sizeBytes=0」 read as words too. */
+const toolArgWords = (whole: string, section?: string, truncated?: string, size?: string) =>
+  /^newTab/.test(whole)
+    ? '新标签页'
+    : /^end/.test(whole)
+      ? '已读到末尾'
+      : section
+        ? `第${section}节`
+        : truncated
+          ? truncated === 'true'
+            ? '有截断'
+            : '未截断'
+          : size
+            ? `${size} 字节`
+            : '';
+/**
+ * FIX-44 #3b: 「（scroll amount=5, direction=down）」 — the scroll call's own arguments in brackets;
+ * FIX-45 (Deploy-45 core-11): after a few words too, 「（每次 amount=5）」.
+ */
+const CALL_ARG = '(?:amount|direction|delta_?[xy]?|pixels|times|repeat|steps|timeout_?ms|wait_?ms)';
+const CALL_ARGS_BRACKET_RE = new RegExp(
+  `\\s*[（(]\\s*(?:[\\u4e00-\\u9fff]{1,4}\\s*)?(?:(?:${Object.keys(TOOL_WORDS).join('|')})\\s+)?${CALL_ARG}\\s*=\\s*[\\w.-]+(?:\\s*[,，]\\s*${CALL_ARG}\\s*=\\s*[\\w.-]+)*\\s*[）)]`,
+  'gi',
+);
+const TOOL_NAME_RE = new RegExp(
+  `\\b(${Object.keys(TOOL_WORDS)
+    .filter((name) => name.includes('_'))
+    .join('|')})\\b`,
+  'g',
+);
+
+/**
+ * FIX-41 (local f41b core-07): 「通过 click(newTab=true) 打开」「switch_tab(targetTabId=) 回执确认」
+ * — the browser's own call syntax in an answer is tool code (red line). A call with named
+ * arguments, or a snake_case tool name, is written as the action it is; code is left alone.
+ */
+export function humanizeToolMentions(text: string): string {
+  return (
+    text
+      // PR #304 review: an address (a source link, a Markdown link target) is left as it is.
+      .split(
+        /(```[\s\S]*?```|`[^`\n]*`|\]\([^)\n]*\)|\b(?:https?:\/\/|www\.)[^\s<>"'（）「」『』《》【】“”，。；]+)/i,
+      )
+      .map((part, i) =>
+        i % 2
+          ? part
+          : part
+              .replace(TOOL_CALL_RE, (_whole, name: string) => TOOL_WORDS[name]!)
+              .replace(TOOL_NAME_RE, (name: string) => TOOL_WORDS[name]!)
+              .replace(TOOL_ARG_RE, toolArgWords)
+              // FIX-44 (DEPLOY-45 local A/B core-11 「执行了5次向下滚动操作（scroll amount=5, direction=down）」
+              // 「多次返回 content_grew 状态」): a bracket of the browser's own call arguments goes; the
+              // scroll receipt's status reads as words. PR #308 review: only those argument names —
+              // 「（x=2）」「（n=120, p=0.03）」 are page content.
+              .replace(CALL_ARGS_BRACKET_RE, '')
+              .replace(/\bcontent_grew\b\s*(?:状态)?/g, '内容增长')
+              // FIX-46 (Deploy-46 core-02 「点击 AccuWeather 新加坡天气链接（click newTab）」).
+              .replace(/\bclick\s+newTab\b/gi, '在新标签页打开')
+              // FIX-47 (Deploy-47 core-06 「通过 sections 定位到第3节」「继续以 cursor 续读至末尾」): the
+              // outline read and its continuation point, named as a tool beside a verb. Other uses
+              // (「CSS cursor 属性」, English prose) are left alone.
+              .replace(
+                /(通过|使用|调用|用|以|按)\s*sections\s*(?=定位|读取|找到|查看|列出|获取)/g,
+                '$1章节目录',
+              )
+              .replace(/(以|用|按|带上?)\s*cursor\s*(?=续读|继续|接着|往下)/g, '$1断点')
+              // FIX-45 (Deploy-45 core-10 「最后一次 snapshot 显示…」): the read's tool name beside Chinese.
+              .replace(
+                /(?<=[\u4e00-\u9fff]\s?)snapshot\b|\bsnapshot(?=\s?[\u4e00-\u9fff])/g,
+                '页面读取',
+              )
+              // What an emptied argument leaves: 「（，未截断）」「（）」.
+              .replace(/（\s*[，,]\s*/g, '（')
+              .replace(/（\s*）/g, ''),
+      )
+      .join('')
+      // FIX-42 (Deploy-42 core-06): the browser's own id field left empty 「- tabId：」 goes.
+      .split(/(```[\s\S]*?```)/)
+      .map((part, i) =>
+        i % 2
+          ? part
+          : part.replace(
+              /^[ \t]*[-*•][ \t]+(?:tab_?id|frame_?id|ref|observation_?revision|snapshot_?id|target_?tab_?id)[ \t]*[：:][ \t]*(?:\n|$)/gim,
+              '',
+            ),
+      )
+      .join('')
+  );
+}
+
+/**
+ * FIX-43 (Deploy-43 dy-1 「没有任何 `[互动=…]` 类标签」, google-direct-1 「当前页面 sourceURL 为…」): the
+ * product's own annotation and field names, in any final answer, read as words. Code and
+ * addresses are left alone.
+ */
+export function plainInternalWords(text: string): string {
+  return text
+    .split(
+      /(```[\s\S]*?```|`[^`\n]*`(?!\s*类)|\b(?:https?:\/\/|www\.)[^\s<>"'（）「」『』《》【】“”，。；]+)/i,
+    )
+    .map((part, i) =>
+      i % 2
+        ? part
+        : part
+            .replace(/`?\[互动=[^\]`\n]*\]`?\s*类?/g, '互动类型')
+            .replace(/页面\s*sourceURL\b\s*(?=[\u4e00-\u9fff])/g, '页面地址')
+            // DEPLOY-43 复审 #3: only the page's own 「页面 sourceURL 为…」; a sentence about an
+            // API's sourceURL parameter is left as written.
+            .replace(/页面\s*sourceURL\b/g, '页面地址')
+            // FIX-44 (Deploy-44 google-direct-1 「- currentURL：https://…」): the field name, and
+            // 「currentURL 为…」 in prose, read as 当前地址.
+            .replace(/^([ \t]*(?:[-*•][ \t]+)?\**)current_?url(?=\**[ \t]*[：:])/gim, '$1当前地址')
+            .replace(/(?:当前)?(?:页面\s*)?\bcurrent_?url\s*(?=为|是)/gi, '当前地址'),
+    )
+    .join('');
+}
+
 export function sanitizeFinalText(input: string | null | undefined): string {
   if (!input) return '';
   let text = input;
-  // 1. XML tool envelopes (paired + orphan).
-  text = text.replace(PAIRED_TAG_RE, '');
-  text = text.replace(ORPHAN_TAG_RE, '');
+  // 1. XML tool envelopes (paired + orphan) and any other tool-call syntax
+  //    (FIX-33: `<li_call><function>browser_use</function>…`) — see tool-call-markup.ts.
+  //    Code the user asked about (fences, inline code) is left alone.
+  text = stripToolCallMarkup(text);
   // 2. Tool-response JSON blocks — handled BEFORE the bare-base64
   //    pass because the JSON wrapping (`"data": "..."`) has no
   //    whitespace boundary, so STANDALONE_BASE64_RE wouldn't catch
@@ -367,7 +514,12 @@ export function sanitizeFinalText(input: string | null | undefined): string {
   //     the inline substring strips can leave behind.
   for (const re of CLAUDE_SIGNATURE_PATTERNS) text = text.replace(re, '');
   for (const re of CLAUDE_FOOTER_LINE_RE) text = text.replace(re, '');
-  // 11. Collapse whitespace gaps left by the strips.
+  // 11. FIX-38: the browser's element refs and tab / frame ids are not the user's business.
+  text = stripInternalRefs(text);
+  // FIX-40: HTML entities copied from a page read as the characters they stand for.
+  text = decodeHtmlEntities(text);
+  text = plainInternalWords(text);
+  // 12. Collapse whitespace gaps left by the strips.
   text = text.replace(TRIPLE_BLANK_RE, '\n\n');
   return text.trim();
 }
@@ -393,22 +545,19 @@ export function humaniseScrapeFailure(rawReason: string | undefined): string {
     ].join('\n');
   }
   if (/(no\s*results|empty|0\s*results|没有结果)/.test(r)) {
-    return [
-      '搜索没有返回任何结果。',
-      '建议：换更通用或更具体的关键词，或换一个数据源。',
-    ].join('\n');
+    return ['搜索没有返回任何结果。', '建议：换更通用或更具体的关键词，或换一个数据源。'].join(
+      '\n',
+    );
   }
   if (/(rate.?limit|429|throttl)/.test(r)) {
-    return [
-      '抓取被对方站点限流（429），稍后再试或更换 IP。',
-      '建议：休息几分钟后重试。',
-    ].join('\n');
+    return ['抓取被对方站点限流（429），稍后再试或更换 IP。', '建议：休息几分钟后重试。'].join(
+      '\n',
+    );
   }
   if (/(timeout|timed?\s*out|deadline)/.test(r)) {
-    return [
-      '抓取超时，可能是站点响应过慢或防爬严格。',
-      '建议：换一个数据源或简化查询。',
-    ].join('\n');
+    return ['抓取超时，可能是站点响应过慢或防爬严格。', '建议：换一个数据源或简化查询。'].join(
+      '\n',
+    );
   }
   // DNS / connection check runs BEFORE 404 — Node's "ENOTFOUND" error
   // string contains the substring "notfound" and would otherwise be
@@ -420,10 +569,7 @@ export function humaniseScrapeFailure(rawReason: string | undefined): string {
     ].join('\n');
   }
   if (/(not\s*found|404|no\s*such)/.test(r)) {
-    return [
-      '该页面不存在（404）。',
-      '建议：检查 URL 拼写，或换一个有效的链接。',
-    ].join('\n');
+    return ['该页面不存在（404）。', '建议：检查 URL 拼写，或换一个有效的链接。'].join('\n');
   }
   if (/firecrawl/.test(r)) {
     return `数据抓取服务返回错误：${rawReason}\n建议：稍后重试，或换一个数据源。`;

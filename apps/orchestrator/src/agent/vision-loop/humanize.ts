@@ -82,8 +82,8 @@ export async function humanMouseMove(
   // Perpendicular direction: rotate (dx, dy) 90° and normalise.
   const perpLen = Math.hypot(-dy, dx) || 1;
   const perpSign = Math.random() < 0.5 ? -1 : 1;
-  const ctrlX = start.x + dx / 2 + ((-dy / perpLen) * perpMag * perpSign);
-  const ctrlY = start.y + dy / 2 + ((dx / perpLen) * perpMag * perpSign);
+  const ctrlX = start.x + dx / 2 + (-dy / perpLen) * perpMag * perpSign;
+  const ctrlY = start.y + dy / 2 + (dx / perpLen) * perpMag * perpSign;
 
   for (let i = 1; i <= steps; i++) {
     const tBase = i / (steps + 1);
@@ -165,14 +165,12 @@ export async function humanScroll(page: PageLike, deltaY: number): Promise<void>
 }
 
 /**
- * Env gate: humanize on by default. Set `HUMANIZE_ENABLED=false` /
- * `0` / empty to bypass — e.g. during E2E timing measurements or on
- * machines where the extra 200 – 800 ms inter-action pause makes
- * dogfood feel sluggish.
+ * Env gate. FIX-31 (coordinator review): off unless `HUMANIZE_ENABLED` is
+ * explicitly truthy — unset means no detection-evading mouse paths or typing jitter.
  */
 export function isHumanizeEnabled(): boolean {
   const raw = process.env.HUMANIZE_ENABLED;
-  if (raw === undefined) return true;
+  if (raw === undefined) return false;
   const lower = raw.trim().toLowerCase();
   return !(lower === 'false' || lower === '0' || lower === 'no' || lower === '');
 }

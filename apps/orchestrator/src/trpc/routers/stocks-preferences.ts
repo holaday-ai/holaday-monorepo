@@ -28,10 +28,12 @@ async function requireUserId(db: Db, externalId: string): Promise<number> {
   return row.id;
 }
 
-export const updateStockPreferenceProfileInputSchema = z.object({
-  enabled: z.boolean(),
-  manualPreferences: manualStockPreferencesSchema,
-}).strict();
+export const updateStockPreferenceProfileInputSchema = z
+  .object({
+    enabled: z.boolean(),
+    manualPreferences: manualStockPreferencesSchema,
+  })
+  .strict();
 
 type LoadProfile = typeof loadStockPreferenceProfile;
 type UpdateProfile = typeof updateStockPreferenceControls;
@@ -64,11 +66,16 @@ export async function updatePreferenceProfileForUser(args: {
     enabled: input.enabled,
     manualPreferences: input.manualPreferences,
   });
-  args.logger?.info?.({
-    userId,
-    enabled: input.enabled,
-    manualDimensionCount: Object.values(input.manualPreferences).filter((values) => values.length > 0).length,
-  }, 'stocks-preferences: controls updated');
+  args.logger?.info?.(
+    {
+      userId,
+      enabled: input.enabled,
+      manualDimensionCount: Object.values(input.manualPreferences).filter(
+        (values) => values.length > 0,
+      ).length,
+    },
+    'stocks-preferences: controls updated',
+  );
   return (args.load ?? loadStockPreferenceProfile)({ db: args.db, userId, now: args.now });
 }
 
@@ -102,21 +109,27 @@ export async function withStockScreeningPreferenceRecording<T>(args: {
 }
 
 export const stockPreferenceProcedures = {
-  preferenceProfile: protectedProcedure.query(({ ctx }) => getPreferenceProfileForUser({
-    db: ctx.db,
-    userExternalId: ctx.userId,
-  })),
-  updatePreferenceProfile: protectedProcedure
-    .input(updateStockPreferenceProfileInputSchema)
-    .mutation(({ ctx, input }) => updatePreferenceProfileForUser({
+  preferenceProfile: protectedProcedure.query(({ ctx }) =>
+    getPreferenceProfileForUser({
       db: ctx.db,
       userExternalId: ctx.userId,
-      input,
+    }),
+  ),
+  updatePreferenceProfile: protectedProcedure
+    .input(updateStockPreferenceProfileInputSchema)
+    .mutation(({ ctx, input }) =>
+      updatePreferenceProfileForUser({
+        db: ctx.db,
+        userExternalId: ctx.userId,
+        input,
+        logger: ctx.logger,
+      }),
+    ),
+  clearPreferenceProfile: protectedProcedure.mutation(({ ctx }) =>
+    clearPreferenceProfileForUser({
+      db: ctx.db,
+      userExternalId: ctx.userId,
       logger: ctx.logger,
-    })),
-  clearPreferenceProfile: protectedProcedure.mutation(({ ctx }) => clearPreferenceProfileForUser({
-    db: ctx.db,
-    userExternalId: ctx.userId,
-    logger: ctx.logger,
-  })),
+    }),
+  ),
 };

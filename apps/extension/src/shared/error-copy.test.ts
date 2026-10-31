@@ -20,9 +20,9 @@ describe('humanizeExtensionError', () => {
   });
 
   it('maps extension connection failures to actionable copy', () => {
-    expect(humanizeExtensionError('Could not establish connection. Receiving end does not exist.')).toBe(
-      '浏览器扩展未连接，请重新加载 HOLA DAY 扩展后重试。',
-    );
+    expect(
+      humanizeExtensionError('Could not establish connection. Receiving end does not exist.'),
+    ).toBe('浏览器扩展未连接，请重新加载 HOLA DAY 扩展后重试。');
     expect(humanizeExtensionError('service worker restarting')).toBe(
       '浏览器扩展后台正在重启，请稍等几秒后重试。',
     );
@@ -37,7 +37,7 @@ describe('humanizeExtensionError', () => {
   it('maps websocket gateway failures to a non-technical recovery hint', () => {
     expect(
       humanizeExtensionError(
-        "WebSocket connection failed: Error during WebSocket handshake: Unexpected response code: 502",
+        'WebSocket connection failed: Error during WebSocket handshake: Unexpected response code: 502',
       ),
     ).toBe('浏览器代理服务暂时不可用，请稍后重试；如果刚更新扩展，请重新加载 HOLA DAY。');
   });
@@ -62,11 +62,7 @@ describe('humanizeExtensionError', () => {
     expect(humanizeExtensionError('net::ERR_INTERNET_DISCONNECTED')).toBe(
       '本机网络已断开，请恢复网络后重试。',
     );
-    expect(humanizeExtensionError('net::ERR_NAME_NOT_RESOLVED')).toBe(
-      '域名解析失败，请稍后重试。',
-    );
-    expect(humanizeExtensionError('net::ERR_NETWORK_CHANGED')).toBe(
-      '网络环境刚变化，请重试。',
-    );
+    expect(humanizeExtensionError('net::ERR_NAME_NOT_RESOLVED')).toBe('域名解析失败，请稍后重试。');
+    expect(humanizeExtensionError('net::ERR_NETWORK_CHANGED')).toBe('网络环境刚变化，请重试。');
   });
 });

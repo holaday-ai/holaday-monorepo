@@ -1,0 +1,185 @@
+[
+  {
+    "item": 1,
+    "width": 1440,
+    "ok": true,
+    "asserted": true
+  },
+  {
+    "item": 2,
+    "width": 1440,
+    "ok": true,
+    "asserted": true
+  },
+  {
+    "item": 3,
+    "width": 1440,
+    "ok": true,
+    "asserted": true
+  },
+  {
+    "item": 5,
+    "width": 1440,
+    "ok": true,
+    "asserted": true
+  },
+  {
+    "item": 6,
+    "width": 1440,
+    "ok": true
+  },
+  {
+    "item": 7,
+    "width": 1440,
+    "ok": true,
+    "breadthCount": 0
+  },
+  {
+    "item": 8,
+    "width": 1440,
+    "ok": true
+  },
+  {
+    "item": 9,
+    "width": 1440,
+    "ok": true
+  },
+  {
+    "item": 10,
+    "width": 1440,
+    "ok": true
+  },
+  {
+    "item": 11,
+    "width": 1440,
+    "ok": true,
+    "localPublisherFixture": true
+  },
+  {
+    "item": 12,
+    "width": 1440,
+    "ok": true
+  },
+  {
+    "item": 1,
+    "width": 1280,
+    "ok": true,
+    "asserted": true
+  },
+  {
+    "item": 2,
+    "width": 1280,
+    "ok": true,
+    "asserted": true
+  },
+  {
+    "item": 3,
+    "width": 1280,
+    "ok": true,
+    "asserted": true
+  },
+  {
+    "item": 5,
+    "width": 1280,
+    "ok": true,
+    "asserted": true
+  },
+  {
+    "item": 6,
+    "width": 1280,
+    "ok": true
+  },
+  {
+    "item": 7,
+    "width": 1280,
+    "ok": true,
+    "breadthCount": 0
+  },
+  {
+    "item": 8,
+    "width": 1280,
+    "ok": true
+  },
+  {
+    "item": 9,
+    "width": 1280,
+    "ok": true
+  },
+  {
+    "item": 10,
+    "width": 1280,
+    "ok": true
+  },
+  {
+    "item": 11,
+    "width": 1280,
+    "ok": true,
+    "localPublisherFixture": true
+  },
+  {
+    "item": 12,
+    "width": 1280,
+    "ok": true
+  },
+  {
+    "item": 1,
+    "width": 1024,
+    "ok": true,
+    "asserted": true
+  },
+  {
+    "item": 2,
+    "width": 1024,
+    "ok": true,
+    "asserted": true
+  },
+  {
+    "item": 3,
+    "width": 1024,
+    "ok": true,
+    "asserted": true
+  },
+  {
+    "item": 5,
+    "width": 1024,
+    "ok": true,
+    "asserted": true
+  },
+  {
+    "item": 6,
+    "width": 1024,
+    "ok": true
+  },
+  {
+    "item": 7,
+    "width": 1024,
+    "ok": true,
+    "breadthCount": 0
+  },
+  {
+    "item": 8,
+    "width": 1024,
+    "ok": true
+  },
+  {
+    "item": 9,
+    "width": 1024,
+    "ok": true
+  },
+  {
+    "item": 10,
+    "width": 1024,
+    "ok": true
+  },
+  {
+    "item": 11,
+    "width": 1024,
+    "ok": true,
+    "localPublisherFixture": true
+  },
+  {
+    "item": 12,
+    "width": 1024,
+    "ok": true
+  }
+]

@@ -8,7 +8,9 @@ export interface CreateTaskResponse {
   };
 }
 
-export function extractCreatedTaskId(response: CreateTaskResponse | null | undefined): string | null {
+export function extractCreatedTaskId(
+  response: CreateTaskResponse | null | undefined,
+): string | null {
   const raw = response?.result?.data?.taskId;
   if (typeof raw !== 'string') return null;
   const id = raw.trim();

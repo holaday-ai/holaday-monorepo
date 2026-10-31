@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  BrowserNetworkPolicy,
-  isPublicInternetAddress,
-} from './browser-network-policy.js';
+import { BrowserNetworkPolicy, isPublicInternetAddress } from './browser-network-policy.js';
 
 describe('isPublicInternetAddress', () => {
   it('accepts globally routable IPv4 and IPv6 addresses', () => {

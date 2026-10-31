@@ -81,4 +81,83 @@ describe('friendlyTaskFailureReason', () => {
       '任务执行失败：操作未完成，请稍后再试。建议：简化任务描述后重试。',
     );
   });
+  it('never reports a login wall from a blank browser or a negated login diagnosis', () => {
+    expect(friendlyTaskFailureReason('failed', 'about:blank；无法确认是否需要登录')).not.toContain(
+      '该网站需要登录',
+    );
+  });
+});
+
+/** FAILURE-COPY-1: the copy follows where the failure came from. */
+describe('failure copy by source', () => {
+  it('a model call failure is a model-service problem, never a login', () => {
+    expect(
+      friendlyTaskFailureReason(
+        'failed',
+        '模型服务暂时不可用，有限重试后仍失败，请稍后重试。',
+        'model',
+      ),
+    ).toBe('模型服务暂时不可用，有限重试后仍失败，请稍后重试。');
+    expect(friendlyTaskFailureReason('failed', 'Qwen transport request failed', 'model')).toBe(
+      '模型服务暂时不可用，可稍后重试。',
+    );
+  });
+  it('only a model call can be an AI-service credential failure', () => {
+    expect(
+      friendlyTaskFailureReason('failed', '模型服务认证失败，请联系管理员检查服务配置。', 'model'),
+    ).toContain('模型服务认证失败');
+    expect(
+      friendlyTaskFailureReason(
+        'failed',
+        'Anthropic API error: 401 authentication_error invalid x-api-key',
+      ),
+    ).toBe('AI 服务认证失败，请联系管理员检查 API key。');
+    // A page's HTTP 401 (the-internet /basic_auth) asks for a login on that page.
+    for (const source of ['page', undefined] as const) {
+      const copy = friendlyTaskFailureReason(
+        'failed',
+        'HTTP 401 Unauthorized at https://the-internet.herokuapp.com/basic_auth',
+        source,
+      );
+      expect(copy, String(source)).toContain('该网页要求登录或认证');
+      expect(copy).not.toContain('API key');
+    }
+  });
+  it('a task that ended before opening a page is "not started", with no login wording', () => {
+    for (const [raw, source] of [
+      ['执行未开始：浏览器还没有打开目标页面就结束了。请重试。', 'not_started'],
+      // What Deploy-25 core-06/core-07 persisted.
+      [
+        '浏览器尚未打开目标页面（about:blank），无法判断站点登录状态。请重试；若持续失败请联系支持。',
+        undefined,
+      ],
+    ] as const) {
+      const copy = friendlyTaskFailureReason('failed', raw, source);
+      expect(copy).toBe('执行未开始或中途退出：浏览器还没有打开目标页面就结束了。请重试。');
+      expect(copy).not.toMatch(/登录/);
+    }
+  });
+  it("the model's own account is shown as written, not keyword-matched", () => {
+    const copy = friendlyTaskFailureReason(
+      'failed',
+      '两个网站都没有日期控件；the-internet 的 /basic_auth 返回 401，没有遇到登录墙以外的阻碍',
+      'task',
+    );
+    expect(copy).toMatch(/^任务执行失败：两个网站都没有日期控件/);
+    expect(copy).not.toContain('AI 服务认证失败');
+    expect(copy).not.toContain('该网站需要登录');
+  });
+  it('a real login wall still reads as a login', () => {
+    expect(friendlyTaskFailureReason('failed', '页面遇到登录墙，需要登录', 'page')).toContain(
+      '该网站需要登录',
+    );
+  });
+  it("a page's 429 is the site's rate limit, a model's 429 is the AI service", () => {
+    expect(friendlyTaskFailureReason('failed', 'HTTP 429 Too Many Requests', 'page')).toContain(
+      '目标网站限制了访问频率',
+    );
+    expect(friendlyTaskFailureReason('failed', 'rate_limit_error 429')).toContain(
+      'AI 服务当前繁忙',
+    );
+  });
 });

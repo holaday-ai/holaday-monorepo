@@ -41,11 +41,7 @@ export function filterMentionSkills<T extends MentionableSkill>(
     .filter((skill) => skill.enabled !== false)
     .filter((skill) => {
       if (!normalizedQuery) return true;
-      const haystack = [
-        skill.id,
-        skill.name,
-        ...(skill.aliases ?? []),
-      ].map(normalizeQuery);
+      const haystack = [skill.id, skill.name, ...(skill.aliases ?? [])].map(normalizeQuery);
       return haystack.some((text) => text.includes(normalizedQuery));
     });
 }

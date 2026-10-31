@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  detectSkillMentionTrigger,
-  filterMentionSkills,
-  stripSkillMention,
-} from './skill-mention';
+import { detectSkillMentionTrigger, filterMentionSkills, stripSkillMention } from './skill-mention';
 
 const skills = [
   {
@@ -47,9 +43,7 @@ describe('skill mention helpers', () => {
   });
 
   it('strips the selected leading skill mention before submit', () => {
-    expect(stripSkillMention('@抖音直播与运营 帮我复盘', '抖音直播与运营')).toBe(
-      '帮我复盘',
-    );
+    expect(stripSkillMention('@抖音直播与运营 帮我复盘', '抖音直播与运营')).toBe('帮我复盘');
     expect(stripSkillMention('帮我复盘', '抖音直播与运营')).toBe('帮我复盘');
   });
 });

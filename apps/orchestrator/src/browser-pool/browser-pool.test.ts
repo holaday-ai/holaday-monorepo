@@ -12,16 +12,16 @@
  * dead detection, peekActiveForUser — runs for real.
  */
 
-import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { pino } from 'pino';
 import {
   type BrowserViewportProfile,
   braveWindowSizeForProfile,
   dimensionsForProfile,
   xvfbScreenForProfile,
 } from '@holaday/shared-types';
+import { pino } from 'pino';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BrowserPool, PoolCapacityError } from './browser-pool.js';
-import type { BrowserInstance, PoolConfig } from './types.js';
+import type { BrowserInstance, BrowserSessionTarget, PoolConfig } from './types.js';
 
 function makePool(maxInstances = 10): {
   pool: BrowserPool;
@@ -50,48 +50,46 @@ function makePool(maxInstances = 10): {
       taskId: string,
       userId: string,
       viewportProfile?: BrowserViewportProfile,
+      session?: BrowserSessionTarget,
     ) => {
-    const allocator = (
-      pool as unknown as { allocator: { claim: () => unknown; isFull: () => boolean } }
-    ).allocator;
-    if (allocator.isFull()) {
-      throw new PoolCapacityError(maxInstances);
-    }
-    const slot = allocator.claim() as {
-      index: number;
-      display: number;
-      cdpPort: number;
-      vncPort: number;
-      wsPort: number;
-    };
-    const inst: BrowserInstance = {
-      ...slot,
-      taskId,
-      userId,
-      userDataDir: `/tmp/test-task-${taskId}`,
-      executor: {
-        disconnect: vi.fn().mockResolvedValue(undefined),
-      } as unknown as BrowserInstance['executor'],
-      xvfbPid: 1000 + slot.index,
-      bravePid: 2000 + slot.index,
-      x11vncPid: 3000 + slot.index,
-      websockifyPid: 4000 + slot.index,
-      createdAt: Date.now(),
-      lastActiveAt: Date.now(),
-      status: 'ready',
-      ...(viewportProfile ? { viewportProfile } : {}),
-    };
-    (pool as unknown as { instances: Map<string, BrowserInstance> }).instances.set(
-      taskId,
-      inst,
-    );
-    return inst;
+      const allocator = (
+        pool as unknown as { allocator: { claim: () => unknown; isFull: () => boolean } }
+      ).allocator;
+      if (allocator.isFull()) {
+        throw new PoolCapacityError(maxInstances);
+      }
+      const slot = allocator.claim() as {
+        index: number;
+        display: number;
+        cdpPort: number;
+        vncPort: number;
+        wsPort: number;
+      };
+      const inst: BrowserInstance = {
+        ...slot,
+        taskId,
+        userId,
+        capabilities: session?.capabilities,
+        userDataDir: `/tmp/test-task-${taskId}`,
+        executor: {
+          disconnect: vi.fn().mockResolvedValue(undefined),
+        } as unknown as BrowserInstance['executor'],
+        xvfbPid: 1000 + slot.index,
+        bravePid: 2000 + slot.index,
+        x11vncPid: 3000 + slot.index,
+        websockifyPid: 4000 + slot.index,
+        createdAt: Date.now(),
+        lastActiveAt: Date.now(),
+        status: 'ready',
+        ...(viewportProfile ? { viewportProfile } : {}),
+      };
+      (pool as unknown as { instances: Map<string, BrowserInstance> }).instances.set(taskId, inst);
+      return inst;
     },
   );
   (pool as unknown as { spawnInstance: typeof spawnSpy }).spawnInstance = spawnSpy;
   const tearDownSpy = vi.fn(async () => undefined);
-  (pool as unknown as { tearDownInstance: typeof tearDownSpy }).tearDownInstance =
-    tearDownSpy;
+  (pool as unknown as { tearDownInstance: typeof tearDownSpy }).tearDownInstance = tearDownSpy;
   return { pool, spawnSpy, tearDownSpy };
 }
 
@@ -145,6 +143,37 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
         'tsk_panel',
         'usr_panel',
         'sidepanel',
+        expect.objectContaining({ capabilities: expect.objectContaining({ viewportV2: false }) }),
+      );
+    });
+
+    it('passes a frozen owner decision and desktop floor to the spawned canary task', async () => {
+      const capabilities = {
+        viewportV2: true,
+        observationV2: true,
+        replayV1: true,
+        routingV2: true,
+      };
+      await pool.allocate('tsk_canary', 'usr_canary', 'sidepanel', { capabilities });
+      const session = spawnSpy.mock.calls[0]?.[3];
+      expect(spawnSpy.mock.calls[0]?.[2]).toBe('desktop');
+      expect(session?.capabilities).toEqual(capabilities);
+      expect(Object.isFrozen(session?.capabilities)).toBe(true);
+      capabilities.replayV1 = false;
+      expect(session?.capabilities?.replayV1).toBe(true);
+    });
+
+    it('passes the task target site to session preparation (FIX-PR252)', async () => {
+      await pool.allocate('tsk_target', 'usr_panel', undefined, {
+        targetUrl: 'https://www.jd.com',
+      });
+      expect(spawnSpy).toHaveBeenCalledWith(
+        'tsk_target',
+        'usr_panel',
+        undefined,
+        expect.objectContaining({
+          targetUrl: 'https://www.jd.com',
+        }),
       );
     });
 
@@ -233,9 +262,7 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
       await small.pool.allocate('t1', 'u');
       await small.pool.allocate('t2', 'u');
       await small.pool.allocate('t3', 'u');
-      await expect(small.pool.allocate('t4', 'u')).rejects.toBeInstanceOf(
-        PoolCapacityError,
-      );
+      await expect(small.pool.allocate('t4', 'u')).rejects.toBeInstanceOf(PoolCapacityError);
     });
 
     it('canAllocate returns false at capacity, true otherwise', async () => {
@@ -340,11 +367,7 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
       const source = await pool.allocate('tsk_parent', 'usr_owner', 'desktop');
       pool.retain('tsk_parent', 60_000, 'terminal-review');
 
-      const adopted = pool.adoptRetained(
-        'tsk_parent',
-        'tsk_follow_up',
-        'usr_owner',
-      );
+      const adopted = pool.adoptRetained('tsk_parent', 'tsk_follow_up', 'usr_owner', 'anonymous');
 
       expect(adopted).toBe(source);
       expect(adopted?.taskId).toBe('tsk_follow_up');
@@ -358,19 +381,12 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
     it('releases the adopted task key when its browser dies later', async () => {
       const source = await pool.allocate('tsk_parent', 'usr_owner');
       pool.retain('tsk_parent', 60_000, 'terminal-review');
-      const adopted = pool.adoptRetained(
-        'tsk_parent',
-        'tsk_follow_up',
-        'usr_owner',
-      );
+      const adopted = pool.adoptRetained('tsk_parent', 'tsk_follow_up', 'usr_owner', 'anonymous');
 
       expect(adopted).toBe(source);
       (
         pool as unknown as {
-          handleUnexpectedChildDeath: (
-            instance: BrowserInstance,
-            label: string,
-          ) => void;
+          handleUnexpectedChildDeath: (instance: BrowserInstance, label: string) => void;
         }
       ).handleUnexpectedChildDeath(source, 'browser');
 
@@ -383,14 +399,10 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
 
     it('refuses handoff when the source is not retained or has another owner', async () => {
       await pool.allocate('tsk_active', 'usr_owner');
-      expect(
-        pool.adoptRetained('tsk_active', 'tsk_next', 'usr_owner'),
-      ).toBeNull();
+      expect(pool.adoptRetained('tsk_active', 'tsk_next', 'usr_owner', 'anonymous')).toBeNull();
 
       pool.retain('tsk_active', 60_000, 'terminal-review');
-      expect(
-        pool.adoptRetained('tsk_active', 'tsk_next', 'usr_other'),
-      ).toBeNull();
+      expect(pool.adoptRetained('tsk_active', 'tsk_next', 'usr_other', 'anonymous')).toBeNull();
       expect(pool.peek('tsk_active')).not.toBeNull();
       expect(pool.peek('tsk_next')).toBeNull();
     });
@@ -400,9 +412,7 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
       pool.retain('tsk_parent', 60_000, 'terminal-review');
       const destination = await pool.allocate('tsk_next', 'usr_owner');
 
-      expect(
-        pool.adoptRetained('tsk_parent', 'tsk_next', 'usr_owner'),
-      ).toBeNull();
+      expect(pool.adoptRetained('tsk_parent', 'tsk_next', 'usr_owner', 'anonymous')).toBeNull();
       expect(pool.peek('tsk_next')).toBe(destination);
       expect(pool.peek('tsk_parent')).not.toBeNull();
     });

@@ -2,6 +2,7 @@ import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, desc, eq, gt, inArray, isNull, lt, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
+import type { DB } from '../../db/client.js';
 import { readAffectedRows, readInsertId } from '../../db/mysql-result.js';
 import {
   plannedTaskItems,
@@ -12,6 +13,17 @@ import {
 import { stockRiskMonitors } from '../../db/schema/stock-risk-monitors.js';
 import { users } from '../../db/schema/users.js';
 import {
+  encodeOccurrenceContent,
+  parseOccurrenceContent,
+  preparePlannedTaskCreate,
+} from '../../planned/planned-executor.js';
+import { queuePlannedRun } from '../../planned/planned-runner.js';
+import {
+  assertPlannedEndsOnScope,
+  exclusiveUtcToEndDate,
+  resolvePlannedEndsAt,
+} from '../../planned/planned-task-dates.js';
+import {
   plannedCalendarInputSchema,
   plannedEndsOnInputSchema,
   plannedMutationResult,
@@ -20,22 +32,11 @@ import {
   validatePlannedRepeatRule,
 } from '../../planned/planned-task-input.js';
 import {
-  assertPlannedEndsOnScope,
-  exclusiveUtcToEndDate,
-  resolvePlannedEndsAt,
-} from '../../planned/planned-task-dates.js';
-import {
-  encodeOccurrenceContent,
-  parseOccurrenceContent,
-  preparePlannedTaskCreate,
-} from '../../planned/planned-executor.js';
-import {
+  type PlannedRepeatType,
   expandPlannedOccurrences,
   plannedTaskCanRunNow,
-  type PlannedRepeatType,
 } from '../../planned/planned-task-rules.js';
-import { queuePlannedRun } from '../../planned/planned-runner.js';
-import type { DB } from '../../db/client.js';
+import { rebaseRruleDtstart } from '../../schedule/rrule-zoned.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 const planIdInput = z.object({ plannedTaskId: z.string().min(1) });
@@ -91,9 +92,9 @@ async function assertFutureSplitAllowed(
     .limit(1)
     .for('update');
   if (
-    !lockedPlan
-    || lockedPlan.status === 'archived'
-    || lockedPlan.status !== input.expectedStatus
+    !lockedPlan ||
+    lockedPlan.status === 'archived' ||
+    lockedPlan.status !== input.expectedStatus
   ) {
     throw new TRPCError({
       code: 'CONFLICT',
@@ -148,6 +149,9 @@ function planView(plan: typeof plannedTasks.$inferSelect, items: readonly string
     nextRunAt: plan.nextRunAt,
     timezone: plan.timezone,
     reminderMinutes: plan.reminderMinutes,
+    notifyOnSuccess: plan.notifyOnSuccess,
+    failureNotifyThreshold: plan.failureNotifyThreshold,
+    consecutiveFailures: plan.consecutiveFailures,
     status: plan.status,
     lastRunAt: plan.lastRunAt,
     lastRunStatus: plan.lastRunStatus,
@@ -167,7 +171,12 @@ async function loadItemsByPlan(db: DB, planIds: readonly number[]) {
       instruction: plannedTaskItems.instruction,
     })
     .from(plannedTaskItems)
-    .where(and(inArray(plannedTaskItems.plannedTaskId, [...planIds]), eq(plannedTaskItems.enabled, true)))
+    .where(
+      and(
+        inArray(plannedTaskItems.plannedTaskId, [...planIds]),
+        eq(plannedTaskItems.enabled, true),
+      ),
+    )
     .orderBy(plannedTaskItems.plannedTaskId, plannedTaskItems.seq);
   for (const row of rows) {
     const bucket = byPlan.get(row.plannedTaskId) ?? [];
@@ -257,6 +266,7 @@ export const plannedTasksRouter = router({
         endsAt: plan.endsAt,
         repeatType: plan.repeatType as PlannedRepeatType,
         rrule: plan.rrule,
+        timezone: plan.timezone,
         rangeStart,
         rangeEnd,
         exceptions: planOverrides.map((override) => ({
@@ -283,91 +293,100 @@ export const plannedTasksRouter = router({
   detail: protectedProcedure
     .input(planIdInput.extend({ originalScheduledFor: z.string().datetime().optional() }))
     .query(async ({ ctx, input }) => {
-    const userId = await requireUserId(ctx);
-    const plan = await loadOwnedPlan(ctx.db, userId, input.plannedTaskId);
-    const items = await ctx.db
-      .select({ instruction: plannedTaskItems.instruction })
-      .from(plannedTaskItems)
-      .where(and(eq(plannedTaskItems.plannedTaskId, plan.id), eq(plannedTaskItems.enabled, true)))
-      .orderBy(plannedTaskItems.seq);
-    const base = planView(
-      plan,
-      items.map((item) => item.instruction),
-    );
-    if (!input.originalScheduledFor) return base;
-    const [override] = await ctx.db
-      .select({ instruction: plannedTaskOccurrenceOverrides.instruction })
-      .from(plannedTaskOccurrenceOverrides)
-      .where(
-        and(
-          eq(plannedTaskOccurrenceOverrides.plannedTaskId, plan.id),
-          eq(
-            plannedTaskOccurrenceOverrides.originalScheduledFor,
-            new Date(input.originalScheduledFor),
+      const userId = await requireUserId(ctx);
+      const plan = await loadOwnedPlan(ctx.db, userId, input.plannedTaskId);
+      const items = await ctx.db
+        .select({ instruction: plannedTaskItems.instruction })
+        .from(plannedTaskItems)
+        .where(and(eq(plannedTaskItems.plannedTaskId, plan.id), eq(plannedTaskItems.enabled, true)))
+        .orderBy(plannedTaskItems.seq);
+      const base = planView(
+        plan,
+        items.map((item) => item.instruction),
+      );
+      if (!input.originalScheduledFor) return base;
+      const [override] = await ctx.db
+        .select({ instruction: plannedTaskOccurrenceOverrides.instruction })
+        .from(plannedTaskOccurrenceOverrides)
+        .where(
+          and(
+            eq(plannedTaskOccurrenceOverrides.plannedTaskId, plan.id),
+            eq(
+              plannedTaskOccurrenceOverrides.originalScheduledFor,
+              new Date(input.originalScheduledFor),
+            ),
           ),
-        ),
-      )
-      .limit(1);
-    const content = parseOccurrenceContent(override?.instruction ?? null);
-    return content
-      ? {
-          ...base,
-          title: content.title,
-          instruction: content.instruction,
-          scope: content.items.length > 1 ? 'multiple' : 'single',
-          items: content.items,
-          itemCount: content.items.length,
-        }
-      : base;
-  }),
+        )
+        .limit(1);
+      const content = parseOccurrenceContent(override?.instruction ?? null);
+      return content
+        ? {
+            ...base,
+            title: content.title,
+            instruction: content.instruction,
+            scope: content.items.length > 1 ? 'multiple' : 'single',
+            items: content.items,
+            itemCount: content.items.length,
+          }
+        : base;
+    }),
 
-  create: protectedProcedure.input(plannedTaskCreateInputSchema).mutation(async ({ ctx, input }) => {
-    const userId = await requireUserId(ctx);
-    let prepared: ReturnType<typeof preparePlannedTaskCreate>;
-    let schedule: ReturnType<typeof resolveRequestedSchedule>;
-    let endsAt: Date | null;
-    try {
-      prepared = preparePlannedTaskCreate(input);
-      schedule = resolveRequestedSchedule({
-        scheduledAt: input.scheduledAt,
-        repeatType: input.repeatType,
-        rrule: input.rrule,
+  create: protectedProcedure
+    .input(plannedTaskCreateInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const userId = await requireUserId(ctx);
+      let prepared: ReturnType<typeof preparePlannedTaskCreate>;
+      let schedule: ReturnType<typeof resolveRequestedSchedule>;
+      let endsAt: Date | null;
+      try {
+        prepared = preparePlannedTaskCreate(input);
+        schedule = resolveRequestedSchedule({
+          scheduledAt: input.scheduledAt,
+          repeatType: input.repeatType,
+          rrule: input.rrule,
+          timezone: input.timezone,
+        });
+        endsAt = resolvePlannedEndsAt({
+          repeatType: input.repeatType,
+          endsOn: input.endsOn,
+          timezone: input.timezone,
+          firstEligibleRunAt: schedule.nextRunAt,
+        });
+      } catch (error) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      const externalId = newExternalId('plannedTask');
+      await ctx.db.transaction(async (tx) => {
+        const insert = await tx.insert(plannedTasks).values({
+          externalId,
+          userId,
+          title: prepared.title,
+          instruction: prepared.instruction,
+          notes: input.notes ?? null,
+          scope: prepared.scope,
+          repeatType: input.repeatType,
+          rrule: input.rrule,
+          firstRunAt: schedule.firstRunAt,
+          endsAt,
+          nextRunAt: schedule.nextRunAt,
+          timezone: input.timezone,
+          reminderMinutes: input.reminderMinutes ?? null,
+          ...(input.notifyOnSuccess !== undefined
+            ? { notifyOnSuccess: input.notifyOnSuccess }
+            : {}),
+          ...(input.failureNotifyThreshold !== undefined
+            ? { failureNotifyThreshold: input.failureNotifyThreshold }
+            : {}),
+          status: 'active',
+          itemCount: prepared.items.length,
+        });
+        await replacePlanItems(tx, readInsertId(insert), prepared.items);
       });
-      endsAt = resolvePlannedEndsAt({
-        repeatType: input.repeatType,
-        endsOn: input.endsOn,
-        timezone: input.timezone,
-        firstEligibleRunAt: schedule.nextRunAt,
-      });
-    } catch (error) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-    const externalId = newExternalId('plannedTask');
-    await ctx.db.transaction(async (tx) => {
-      const insert = await tx.insert(plannedTasks).values({
-        externalId,
-        userId,
-        title: prepared.title,
-        instruction: prepared.instruction,
-        notes: input.notes ?? null,
-        scope: prepared.scope,
-        repeatType: input.repeatType,
-        rrule: input.rrule,
-        firstRunAt: schedule.firstRunAt,
-        endsAt,
-        nextRunAt: schedule.nextRunAt,
-        timezone: input.timezone,
-        reminderMinutes: input.reminderMinutes ?? null,
-        status: 'active',
-        itemCount: prepared.items.length,
-      });
-      await replacePlanItems(tx, readInsertId(insert), prepared.items);
-    });
-    return plannedMutationResult(externalId, schedule);
-  }),
+      return plannedMutationResult(externalId, schedule);
+    }),
 
   update: protectedProcedure
     .input(
@@ -376,14 +395,20 @@ export const plannedTasksRouter = router({
         instruction: z.string().trim().max(4000).optional(),
         notes: z.string().trim().max(4000).nullable().optional(),
         items: z.array(z.string().trim().min(1).max(2000)).max(50).optional(),
-        repeatType: z
-          .enum(['once', 'daily', 'weekly', 'monthly', 'custom'])
-          .optional(),
+        repeatType: z.enum(['once', 'daily', 'weekly', 'monthly', 'custom']).optional(),
         scheduledAt: z.string().datetime().optional(),
         rrule: z.string().trim().max(255).nullable().optional(),
         timezone: z.string().trim().min(1).max(64).optional(),
         endsOn: plannedEndsOnInputSchema,
-        reminderMinutes: z.number().int().min(0).max(60 * 24 * 7).nullable().optional(),
+        reminderMinutes: z
+          .number()
+          .int()
+          .min(0)
+          .max(60 * 24 * 7)
+          .nullable()
+          .optional(),
+        notifyOnSuccess: z.boolean().optional(),
+        failureNotifyThreshold: z.number().int().min(1).max(10).optional(),
         editScope: z.enum(['occurrence', 'future', 'series']).optional(),
         originalScheduledFor: z.string().datetime().optional(),
       }),
@@ -441,6 +466,7 @@ export const plannedTasksRouter = router({
                 : input.rrule !== undefined
                   ? input.rrule
                   : plan.rrule,
+            timezone: input.timezone ?? plan.timezone,
           });
         } catch (error) {
           throw new TRPCError({
@@ -527,9 +553,9 @@ export const plannedTasksRouter = router({
             nextRunAt: schedule.nextRunAt,
             timezone: nextTimezone,
             reminderMinutes:
-              input.reminderMinutes !== undefined
-                ? input.reminderMinutes
-                : plan.reminderMinutes,
+              input.reminderMinutes !== undefined ? input.reminderMinutes : plan.reminderMinutes,
+            notifyOnSuccess: input.notifyOnSuccess ?? plan.notifyOnSuccess,
+            failureNotifyThreshold: input.failureNotifyThreshold ?? plan.failureNotifyThreshold,
             status: 'active',
             itemCount: prepared.items.length,
           });
@@ -549,12 +575,17 @@ export const plannedTasksRouter = router({
         updates.reminderMinutes = input.reminderMinutes;
         updates.lastReminderRun = null;
       }
+      if (input.notifyOnSuccess !== undefined) updates.notifyOnSuccess = input.notifyOnSuccess;
+      if (input.failureNotifyThreshold !== undefined) {
+        updates.failureNotifyThreshold = input.failureNotifyThreshold;
+      }
       if (input.scheduledAt !== undefined) {
         try {
           requestedSchedule = resolveRequestedSchedule({
             scheduledAt: input.scheduledAt,
             repeatType: (input.repeatType ?? plan.repeatType) as PlannedRepeatType,
             rrule: input.rrule !== undefined ? input.rrule : plan.rrule,
+            timezone: input.timezone ?? plan.timezone,
           });
           updates.firstRunAt = requestedSchedule.firstRunAt;
           updates.nextRunAt = requestedSchedule.nextRunAt;
@@ -580,8 +611,7 @@ export const plannedTasksRouter = router({
             existingEndsAt: plan.endsAt,
             existingTimezone: plan.timezone,
             timezone: input.timezone ?? plan.timezone,
-            firstEligibleRunAt:
-              requestedSchedule?.nextRunAt ?? plan.nextRunAt ?? plan.firstRunAt,
+            firstEligibleRunAt: requestedSchedule?.nextRunAt ?? plan.nextRunAt ?? plan.firstRunAt,
           });
         } catch (error) {
           throw new TRPCError({
@@ -671,7 +701,9 @@ export const plannedTasksRouter = router({
         const items = await ctx.db
           .select({ instruction: plannedTaskItems.instruction })
           .from(plannedTaskItems)
-          .where(and(eq(plannedTaskItems.plannedTaskId, plan.id), eq(plannedTaskItems.enabled, true)))
+          .where(
+            and(eq(plannedTaskItems.plannedTaskId, plan.id), eq(plannedTaskItems.enabled, true)),
+          )
           .orderBy(plannedTaskItems.seq);
         let newSeriesEndsAt: Date | null;
         try {
@@ -712,12 +744,15 @@ export const plannedTasksRouter = router({
             notes: plan.notes,
             scope: plan.scope,
             repeatType: plan.repeatType,
-            rrule: plan.rrule,
+            // Batch 10.3 — the moved series starts at the dropped time.
+            rrule: rebaseRruleDtstart(plan.rrule, scheduledFor),
             firstRunAt: scheduledFor,
             endsAt: newSeriesEndsAt,
             nextRunAt: scheduledFor,
             timezone: plan.timezone,
             reminderMinutes: plan.reminderMinutes,
+            notifyOnSuccess: plan.notifyOnSuccess,
+            failureNotifyThreshold: plan.failureNotifyThreshold,
             status: 'active',
             itemCount: plan.itemCount,
           });
@@ -751,6 +786,8 @@ export const plannedTasksRouter = router({
         .set({
           firstRunAt: scheduledFor,
           nextRunAt: scheduledFor,
+          // Batch 10.3 — keep an embedded DTSTART in step with first_run_at.
+          rrule: rebaseRruleDtstart(plan.rrule, scheduledFor),
           endsAt: seriesEndsAt,
           status: 'active',
           lastReminderRun: null,
@@ -786,6 +823,8 @@ export const plannedTasksRouter = router({
             from: original,
             rrule: plan.rrule,
             repeatType: plan.repeatType as PlannedRepeatType,
+            anchor: original,
+            timezone: plan.timezone,
           });
           await ctx.db
             .update(plannedTasks)
@@ -839,12 +878,7 @@ export const plannedTasksRouter = router({
     const result = await ctx.db
       .update(plannedTasks)
       .set({ status: nextStatus })
-      .where(
-        and(
-          eq(plannedTasks.id, plan.id),
-          eq(plannedTasks.status, plan.status),
-        ),
-      );
+      .where(and(eq(plannedTasks.id, plan.id), eq(plannedTasks.status, plan.status)));
     if (readAffectedRows(result) === 0) {
       throw new TRPCError({ code: 'CONFLICT', message: '任务状态刚刚发生变化，请刷新后重试' });
     }
@@ -870,10 +904,9 @@ export const plannedTasksRouter = router({
       const [lockedPlan] = await tx
         .select({ id: plannedTasks.id })
         .from(plannedTasks)
-        .where(and(
-          eq(plannedTasks.externalId, input.plannedTaskId),
-          eq(plannedTasks.userId, userId),
-        ))
+        .where(
+          and(eq(plannedTasks.externalId, input.plannedTaskId), eq(plannedTasks.userId, userId)),
+        )
         .limit(1)
         .for('update');
       if (!lockedPlan) {

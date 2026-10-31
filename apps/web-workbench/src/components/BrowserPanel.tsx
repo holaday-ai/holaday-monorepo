@@ -1,4 +1,73 @@
 import {
+  type CdpScreencastStatus,
+  CdpScreencastViewport,
+} from '@/components/CdpScreencastViewport';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { LocalChromeTaskPanel } from '@/components/LocalChromeTaskPanel';
+import { type VncStatus, VncViewport } from '@/components/VncViewport';
+import {
+  type BrowserControlAction,
+  type BrowserPanelHeaderStatus,
+  type TerminalBrowserRecoveryState,
+  type TerminalEvidenceScreenshotSource,
+  browserControlAction,
+  browserFrameCanPanInPortraitSheet,
+  browserInputFallbackMode,
+  browserLiveOverlayCopy,
+  browserPanelDotLabel,
+  browserPanelEvidenceHeaderStatus,
+  browserPanelHeaderStatus,
+  browserReconnectAffordanceDelay,
+  browserReleasedCardCopy,
+  browserStartupTargetUrl,
+  browserViewportFooterLabel,
+  browserWakeFeedback,
+  browserWorkspaceTaskIntent,
+  isBrowserInteractionActive,
+  shouldApplyBrowserTaskOperation,
+  shouldConnectBrowserStream,
+  shouldPreserveBrowserCanvasOnTaskSwitch,
+  shouldRemountBrowserStreamAfterRestore,
+  shouldShowBrowserFullscreen,
+  shouldShowBrowserHeader,
+  shouldShowBrowserLiveOverlay,
+  shouldShowTerminalEvidenceLedger,
+  shouldSuspectTerminalBrowserSession,
+  shouldUseTerminalEvidence,
+  taskOwnedBrowserFrame,
+  taskOwnedBrowserUrl,
+  terminalBrowserRecoveryRetryDelay,
+  terminalBrowserRecoveryWindow,
+  terminalBrowserSessionUnavailable,
+  terminalEvidenceContinuation,
+  terminalEvidenceFrameForTask,
+  terminalEvidenceFrameLabel,
+  terminalEvidenceLayout,
+} from '@/components/browser-panel-state';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
+import { useBrowserOwnership } from '@/hooks/useBrowserOwnership';
+import { useBrowserPanelDockInset } from '@/hooks/useBrowserPanelDockInset';
+import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
+import { browserNavExceptionMessage, browserNavFailureMessage } from '@/lib/browser-nav-copy';
+import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
+import { externalLinkConfirmDescription, safeExternalHttpHref } from '@/lib/external-link-copy';
+import { hdDebug } from '@/lib/hd-debug';
+import {
+  fitScreencastContain,
+  readableScreencastAutoScrollKey,
+  readableScreencastStartScrollLeft,
+} from '@/lib/screencast-fit';
+import { trpc } from '@/lib/trpc';
+import { useStreamToken } from '@/lib/use-stream-token';
+import { cn } from '@/lib/utils';
+import { shouldConnectTaskBrowserForWorkbench } from '@/lib/workbench-state';
+import { send as wsSend } from '@/lib/ws';
+import { useTaskStore } from '@/stores/task-store';
+import type { UiScreencast, UiStep, UiTaskStatus } from '@/types/task';
+import { isTerminalStatus } from '@/types/task';
+import { liveStatusLabel } from '@/utils/step-humanize';
+import {
   ArrowLeft,
   ArrowRight,
   Bot,
@@ -9,8 +78,8 @@ import {
   Globe,
   Hand,
   Keyboard,
-  LockKeyhole,
   ListChecks,
+  LockKeyhole,
   Maximize2,
   Minimize2,
   MousePointerClick,
@@ -19,80 +88,8 @@ import {
   X,
 } from 'lucide-react';
 import * as React from 'react';
-import { useBrowserOwnership } from '@/hooks/useBrowserOwnership';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { LocalChromeTaskPanel } from '@/components/LocalChromeTaskPanel';
-import { Button } from '@/components/ui/button';
-import {
-  browserLiveOverlayCopy,
-  browserReconnectAffordanceDelay,
-  browserControlAction,
-  browserInputFallbackMode,
-  browserStartupTargetUrl,
-  browserWorkspaceTaskIntent,
-  browserFrameCanPanInPortraitSheet,
-  browserPanelEvidenceHeaderStatus,
-  browserPanelHeaderStatus,
-  type BrowserPanelHeaderStatus,
-  type BrowserControlAction,
-  browserPanelDotLabel,
-  browserReleasedCardCopy,
-  browserViewportFooterLabel,
-  browserWakeFeedback,
-  shouldShowBrowserHeader,
-  shouldShowBrowserLiveOverlay,
-  shouldApplyBrowserTaskOperation,
-  shouldPreserveBrowserCanvasOnTaskSwitch,
-  shouldRemountBrowserStreamAfterRestore,
-  shouldSuspectTerminalBrowserSession,
-  shouldShowBrowserFullscreen,
-  shouldShowTerminalEvidenceLedger,
-  shouldConnectBrowserStream,
-  shouldUseTerminalEvidence,
-  isBrowserInteractionActive,
-  taskOwnedBrowserFrame,
-  taskOwnedBrowserUrl,
-  terminalEvidenceContinuation,
-  terminalEvidenceFrameForTask,
-  terminalEvidenceFrameLabel,
-  terminalEvidenceLayout,
-  terminalBrowserRecoveryWindow,
-  terminalBrowserRecoveryRetryDelay,
-  terminalBrowserSessionUnavailable,
-  type TerminalBrowserRecoveryState,
-  type TerminalEvidenceScreenshotSource,
-} from '@/components/browser-panel-state';
-import {
-  CdpScreencastViewport,
-  type CdpScreencastStatus,
-} from '@/components/CdpScreencastViewport';
-import { useToast } from '@/components/ui/toast';
-import { VncViewport, type VncStatus } from '@/components/VncViewport';
-import {
-  browserNavExceptionMessage,
-  browserNavFailureMessage,
-} from '@/lib/browser-nav-copy';
-import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
-import {
-  fitScreencastContain,
-  fitScreencastReadable,
-  readableScreencastAutoScrollKey,
-  readableScreencastStartScrollLeft,
-} from '@/lib/screencast-fit';
-import {
-  externalLinkConfirmDescription,
-  safeExternalHttpHref,
-} from '@/lib/external-link-copy';
-import { hdDebug } from '@/lib/hd-debug';
-import { trpc } from '@/lib/trpc';
-import { useStreamToken } from '@/lib/use-stream-token';
-import { shouldConnectTaskBrowserForWorkbench } from '@/lib/workbench-state';
-import { send as wsSend } from '@/lib/ws';
-import { cn } from '@/lib/utils';
-import { useTaskStore } from '@/stores/task-store';
-import type { UiScreencast, UiStep, UiTaskStatus } from '@/types/task';
-import { isTerminalStatus } from '@/types/task';
-import { liveStatusLabel } from '@/utils/step-humanize';
+import { BrowserReplay } from './BrowserReplay';
+import { CaptchaHandoffActions } from './CaptchaHandoffActions';
 
 /**
  * Emergency-only VNC bridge URL. CDP screencast is the production
@@ -165,17 +162,12 @@ function buildVncUrl(
  * userId path (most-recently-active task for the caller) when no
  * task is selected — keeps the panel populated on idle dashboards.
  */
-function buildScreencastUrl(
-  activeTaskId: string | null,
-  poolUserId: string | null,
-): string | null {
+function buildScreencastUrl(activeTaskId: string | null, poolUserId: string | null): string | null {
   if (typeof window === 'undefined') return null;
   const arg = activeTaskId ?? poolUserId;
   if (!arg) return null;
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${scheme}://${window.location.host}/screencast-ws/${encodeURIComponent(
-    arg,
-  )}`;
+  return `${scheme}://${window.location.host}/screencast-ws/${encodeURIComponent(arg)}`;
 }
 
 /**
@@ -185,9 +177,7 @@ function buildScreencastUrl(
 function readStreamTransport(): 'vnc' | 'cdp' {
   if (typeof window === 'undefined' || !VNC_FALLBACK_ENABLED) return 'cdp';
   try {
-    return window.localStorage.getItem('holaday.streamTransport') === 'vnc'
-      ? 'vnc'
-      : 'cdp';
+    return window.localStorage.getItem('holaday.streamTransport') === 'vnc' ? 'vnc' : 'cdp';
   } catch {
     return 'cdp';
   }
@@ -208,7 +198,13 @@ interface Props {
    * without losing the page they were watching. Missing == treated
    * as `clarification` for safety on legacy events.
    */
-  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action' | 'video_quote';
+  awaitingKind?:
+    | 'clarification'
+    | 'login'
+    | 'captcha'
+    | 'permission'
+    | 'browser_action'
+    | 'video_quote';
   /** Active task id — forwarded on user_input events so backend can correlate. */
   activeTaskId?: string | null;
   /**
@@ -280,9 +276,47 @@ interface Props {
  * headless Chrome" free-drive.
  */
 export function BrowserPanel(props: Props): JSX.Element | null {
-  const local = useTaskStore(state => state.tasks.find(task => task.taskId === props.activeTaskId)?.browserSource === 'local-chrome');
-  if (local && props.activeTaskId) return props.open === false ? null : <div className={props.layout === 'sheet' ? 'fixed inset-x-0 bottom-0 z-[75] h-[calc(100dvh-56px)] bg-background' : 'h-full w-full min-w-0'}><LocalChromeTaskPanel key={props.activeTaskId} taskId={props.activeTaskId} status={props.taskStatus} onClose={props.onClose} /></div>;
+  const local = useTaskStore(
+    (state) =>
+      state.tasks.find((task) => task.taskId === props.activeTaskId)?.browserSource ===
+      'local-chrome',
+  );
+  if (local && props.activeTaskId)
+    return props.open === false ? null : (
+      <LocalChromePanelFrame {...props} activeTaskId={props.activeTaskId} />
+    );
   return <CloudBrowserPanel {...props} />;
+}
+
+function LocalChromePanelFrame({
+  activeTaskId,
+  layout = 'rail',
+  taskStatus,
+  onClose,
+}: Props & { activeTaskId: string }): JSX.Element {
+  const frameRef = React.useRef<HTMLDivElement | null>(null);
+  const isSheet = layout === 'sheet';
+  // The rail panel must reserve its width for the fixed account dock too;
+  // without this the dock sat on top of the local panel's close button.
+  useBrowserPanelDockInset(frameRef, !isSheet);
+  return (
+    <div
+      ref={frameRef}
+      data-testid="local-chrome-panel-frame"
+      className={
+        isSheet
+          ? 'fixed inset-x-0 bottom-0 z-[75] h-[calc(100dvh-56px)] bg-background'
+          : 'h-full w-full min-w-0'
+      }
+    >
+      <LocalChromeTaskPanel
+        key={activeTaskId}
+        taskId={activeTaskId}
+        status={taskStatus}
+        onClose={onClose}
+      />
+    </div>
+  );
 }
 
 function CloudBrowserPanel({
@@ -318,6 +352,10 @@ function CloudBrowserPanel({
     awaitingKind !== 'clarification' &&
     // video_quote 是聊天内的报价卡(无浏览器会话)→ 不触发浏览器面板接管。
     awaitingKind !== 'video_quote';
+  // FIX-D11 — waiting for the Chrome extension has its own copy (not "拒绝访问").
+  const browserConnection = useTaskStore((s) =>
+    activeTaskId ? (s.awaitingUserByTask[activeTaskId]?.browserConnection ?? null) : null,
+  );
   const toast = useToast();
   const mountedRef = React.useRef(false);
   const activeTaskIdRef = React.useRef<string | null>(activeTaskId ?? null);
@@ -346,30 +384,21 @@ function CloudBrowserPanel({
     const el = panelRootRef.current;
     if (!el) return;
     if (typeof ResizeObserver === 'undefined') return;
-    const dockInsetProperty = '--holaday-browser-panel-inset';
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width ?? el.clientWidth;
       setIsNarrow(w > 0 && w < 500);
-      if (!isSheet && w > 0) {
-        document.documentElement.style.setProperty(
-          dockInsetProperty,
-          `${Math.ceil(w) + 16}px`,
-        );
-      }
     });
     ro.observe(el);
-    return () => {
-      ro.disconnect();
-      if (!isSheet) document.documentElement.style.removeProperty(dockInsetProperty);
-    };
-  }, [isSheet]);
+    return () => ro.disconnect();
+  }, []);
+  useBrowserPanelDockInset(panelRootRef, !isSheet);
   // Interactive mode is in the global store so the TaskStream's
   // "Continue in browser" button can flip it on from the left panel.
   const requestedInteractive = useTaskStore((s) => s.browserInteractive);
   const setInteractive = useTaskStore((s) => s.setBrowserInteractive);
 
   const activeTask = useTaskStore((s) =>
-    activeTaskId ? s.tasks.find((t) => t.taskId === activeTaskId) ?? null : null,
+    activeTaskId ? (s.tasks.find((t) => t.taskId === activeTaskId) ?? null) : null,
   );
   const taskIsTerminal = taskStatus ? isTerminalStatus(taskStatus) : false;
   const terminalEvidence = React.useMemo(
@@ -400,15 +429,12 @@ function CloudBrowserPanel({
   // and slot it in BETWEEN frameUrl and 'about:blank'. Reset on
   // active-task switch so the prior task's URL doesn't bleed in.
   const persistedFinalUrl =
-    activeTask?.finalUrl && !isBlankUrl(activeTask.finalUrl)
-      ? activeTask.finalUrl
-      : null;
-  const incomingFrameUrl =
-    frame?.url && !isBlankUrl(frame.url)
-      ? frame.url
-      : null;
-  const [lastKnownUrlState, setLastKnownUrlState] =
-    React.useState<{ taskId: string; url: string } | null>(null);
+    activeTask?.finalUrl && !isBlankUrl(activeTask.finalUrl) ? activeTask.finalUrl : null;
+  const incomingFrameUrl = frame?.url && !isBlankUrl(frame.url) ? frame.url : null;
+  const [lastKnownUrlState, setLastKnownUrlState] = React.useState<{
+    taskId: string;
+    url: string;
+  } | null>(null);
   const lastKnownUrl = taskOwnedBrowserUrl(activeTaskId ?? null, lastKnownUrlState);
   React.useEffect(() => {
     if (activeTaskId && incomingFrameUrl) {
@@ -422,15 +448,20 @@ function CloudBrowserPanel({
   // during a live session — including the renewable idle lease after
   // completion. The persisted final URL only wins after that real
   // browser is no longer available and the panel falls back to evidence.
-  const [cdpLiveUrlState, setCdpLiveUrlState] =
-    React.useState<{ taskId: string; url: string } | null>(null);
+  const [cdpLiveUrlState, setCdpLiveUrlState] = React.useState<{
+    taskId: string;
+    url: string;
+  } | null>(null);
   const cdpLiveUrl = taskOwnedBrowserUrl(activeTaskId ?? null, cdpLiveUrlState);
-  const onCdpUrlChange = React.useCallback((url: string) => {
-    if (!activeTaskId || !url || isBlankUrl(url)) return;
-    const taskUrl = { taskId: activeTaskId, url };
-    setCdpLiveUrlState(taskUrl);
-    setLastKnownUrlState(taskUrl);
-  }, [activeTaskId]);
+  const onCdpUrlChange = React.useCallback(
+    (url: string) => {
+      if (!activeTaskId || !url || isBlankUrl(url)) return;
+      const taskUrl = { taskId: activeTaskId, url };
+      setCdpLiveUrlState(taskUrl);
+      setLastKnownUrlState(taskUrl);
+    },
+    [activeTaskId],
+  );
   const lastCheckpointRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     lastCheckpointRef.current = null;
@@ -457,11 +488,7 @@ function CloudBrowserPanel({
   }, [activeTaskId, cdpLiveUrl, taskIsTerminal]);
   const terminalStatus = taskStatus ? isTerminalStatus(taskStatus) : false;
   const startupTargetUrl =
-    !terminalStatus &&
-    !cdpLiveUrl &&
-    !incomingFrameUrl &&
-    !persistedFinalUrl &&
-    !lastKnownUrl
+    !terminalStatus && !cdpLiveUrl && !incomingFrameUrl && !persistedFinalUrl && !lastKnownUrl
       ? browserStartupTargetUrl(activeTask?.intent)
       : null;
   const abortTask = useTaskStore((s) => s.abortTask);
@@ -487,6 +514,23 @@ function CloudBrowserPanel({
   // a live socket on every render.
   const streamTransport = React.useMemo(() => readStreamTransport(), []);
   const usingCdp = streamTransport === 'cdp';
+  const [viewportV2, setViewportV2] = React.useState(false);
+  // FIX-33: the live page is fitted into the panel whole by default (BOSS: a page cut
+  // off on the right, reachable only by scrollbars); 100% is an explicit choice.
+  const [displayMode, setDisplayMode] = React.useState<'fit' | 'actual'>('fit');
+  React.useEffect(() => {
+    let live = true;
+    setViewportV2(false);
+    void trpc.browserReplay.capabilities
+      .query(activeTaskId ? { taskId: activeTaskId } : undefined)
+      .then((capabilities) => {
+        if (live) setViewportV2(capabilities.viewportV2);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [poolUserId, activeTaskId]);
   // Phase 24 diagnostic — log the current task scope so DevTools can
   // confirm the panel is actually receiving the expected taskId from
   // its parent. Re-fires whenever the user picks a different task.
@@ -530,8 +574,7 @@ function CloudBrowserPanel({
   // endpoint and consumes the latest value only when a real reconnect is
   // needed, so credential rotation never tears down a healthy browser input
   // session. VNC remains URL-authenticated as an emergency-only fallback.
-  const { token: streamToken, refresh: refreshStreamToken } =
-    useStreamToken(shouldConnect);
+  const { token: streamToken, refresh: refreshStreamToken } = useStreamToken(shouldConnect);
   // VNC live stream — memoised so prop identity is stable across
   // re-renders (the viewport's effect re-runs on any URL change).
   const vncUrl = React.useMemo(() => {
@@ -555,7 +598,10 @@ function CloudBrowserPanel({
     });
   }, [screencastUrlForCdp, activeTaskId, taskTerminal, isNonPoolTask]);
   const [vncStatus, setVncStatus] = React.useState<VncStatus>('idle');
-  const ownership = useBrowserOwnership(usingCdp ? activeTaskId ?? null : null, vncStatus === 'connected');
+  const ownership = useBrowserOwnership(
+    usingCdp ? (activeTaskId ?? null) : null,
+    vncStatus === 'connected',
+  );
   const requestOwnership = ownership.request;
   const interactive = Boolean(ownership.lease);
   const previousIntent = React.useRef(false);
@@ -565,14 +611,31 @@ function CloudBrowserPanel({
     previousIntent.current = requestedInteractive;
     if (requestedInteractive && !interactive) void requestOwnership('takeover');
     else if (!requestedInteractive && interactive) void requestOwnership('return');
-  }, [requestedInteractive, interactive, requestOwnership, vncStatus, ownership.supported, ownership.pending]);
+  }, [
+    requestedInteractive,
+    interactive,
+    requestOwnership,
+    vncStatus,
+    ownership.supported,
+    ownership.pending,
+  ]);
   React.useEffect(() => {
     if (previousIntent.current !== requestedInteractive || ownership.pending) return;
-    if (ownership.state?.phase === 'human' || ownership.state?.phase === 'agent' || ownership.state?.phase === 'closed') {
+    if (
+      ownership.state?.phase === 'human' ||
+      ownership.state?.phase === 'agent' ||
+      ownership.state?.phase === 'closed'
+    ) {
       previousIntent.current = interactive;
       setInteractive(interactive);
     }
-  }, [ownership.state?.phase, ownership.pending, requestedInteractive, interactive, setInteractive]);
+  }, [
+    ownership.state?.phase,
+    ownership.pending,
+    requestedInteractive,
+    interactive,
+    setInteractive,
+  ]);
   // P3 hibernation detection: count consecutive failed attempts. The
   // pool's idle GC reaps after 5 min, after which /vnc-ws/ rejects
   // with HTTP 409 ("browser not allocated") which surfaces in noVNC
@@ -583,9 +646,7 @@ function CloudBrowserPanel({
   const [showReconnect, setShowReconnect] = React.useState(false);
   const [reconnectEpoch, setReconnectEpoch] = React.useState(0);
   const [hasPresentedLiveFrame, setHasPresentedLiveFrame] = React.useState(false);
-  const previousActiveTaskIdRef = React.useRef<string | null>(
-    activeTaskId ?? null,
-  );
+  const previousActiveTaskIdRef = React.useRef<string | null>(activeTaskId ?? null);
   const handlePresentedLiveFrame = React.useCallback(() => {
     setHasPresentedLiveFrame(true);
   }, []);
@@ -605,17 +666,20 @@ function CloudBrowserPanel({
     if (!preserveCanvas) setHasPresentedLiveFrame(false);
     previousActiveTaskIdRef.current = activeTaskId ?? null;
   }, [activeTask?.executionMode, activeTask?.replyToTaskId, activeTaskId]);
-  const handleVncStatus = React.useCallback((status: VncStatus) => {
-    setVncStatus(status);
-    if (!usingCdp && status === 'connected') setHasPresentedLiveFrame(true);
-    setVncAttemptFails((n) => {
-      if (status === 'connected') return 0;
-      // CDP reports `error` and then `close` for one failed socket. Count the
-      // close only so a single transient failure is not treated as two outages.
-      if (status === 'disconnected') return n + 1;
-      return n;
-    });
-  }, [usingCdp]);
+  const handleVncStatus = React.useCallback(
+    (status: VncStatus) => {
+      setVncStatus(status);
+      if (!usingCdp && status === 'connected') setHasPresentedLiveFrame(true);
+      setVncAttemptFails((n) => {
+        if (status === 'connected') return 0;
+        // CDP reports `error` and then `close` for one failed socket. Count the
+        // close only so a single transient failure is not treated as two outages.
+        if (status === 'disconnected') return n + 1;
+        return n;
+      });
+    },
+    [usingCdp],
+  );
   // Codex Pack B2 — long-connecting reconnect affordance. The viewer
   // sits in `connecting` state when noVNC is still finishing its TLS
   // handshake / RFB protocol negotiation. Usually 1-3s; if it drags
@@ -637,13 +701,7 @@ function CloudBrowserPanel({
       }),
     );
     return () => window.clearTimeout(timer);
-  }, [
-    activeTaskId,
-    browserConnectionReady,
-    hasPresentedLiveFrame,
-    reconnectEpoch,
-    taskTerminal,
-  ]);
+  }, [activeTaskId, browserConnectionReady, hasPresentedLiveFrame, reconnectEpoch, taskTerminal]);
   const handleManualReconnect = React.useCallback(() => {
     setShowReconnect(false);
     setVncStatus('idle');
@@ -712,20 +770,17 @@ function CloudBrowserPanel({
   // real stream connected while the user is present; if the process is gone,
   // restore the same task at its last trusted page before falling back to an
   // honestly labelled screenshot.
-  const [terminalConnectTimedOut, setTerminalConnectTimedOut] =
-    React.useState(false);
+  const [terminalConnectTimedOut, setTerminalConnectTimedOut] = React.useState(false);
   const [terminalRecoveryState, setTerminalRecoveryState] =
     React.useState<TerminalBrowserRecoveryState>('idle');
-  const [terminalRecoveryAttempt, setTerminalRecoveryAttempt] =
-    React.useState(0);
+  const [terminalRecoveryAttempt, setTerminalRecoveryAttempt] = React.useState(0);
   const terminalDisconnectedAtRef = React.useRef<number | null>(null);
   React.useEffect(() => {
     setTerminalRecoveryState('idle');
     setTerminalRecoveryAttempt(0);
     terminalDisconnectedAtRef.current = null;
   }, [activeTaskId]);
-  const terminalBrowserDisconnected =
-    taskTerminal && vncStatus !== 'connected';
+  const terminalBrowserDisconnected = taskTerminal && vncStatus !== 'connected';
   React.useEffect(() => {
     const recoveryWindow = terminalBrowserRecoveryWindow({
       disconnected: terminalBrowserDisconnected,
@@ -740,11 +795,7 @@ function CloudBrowserPanel({
       setTerminalConnectTimedOut(true);
     }, recoveryWindow.remainingMs);
     return () => window.clearTimeout(timer);
-  }, [
-    activeTaskId,
-    hasPresentedLiveFrame,
-    terminalBrowserDisconnected,
-  ]);
+  }, [activeTaskId, hasPresentedLiveFrame, terminalBrowserDisconnected]);
   const terminalSessionSuspected = shouldSuspectTerminalBrowserSession({
     taskIsTerminal: taskTerminal,
     liveStatus: vncStatus,
@@ -753,8 +804,7 @@ function CloudBrowserPanel({
     hasPresentedFrame: hasPresentedLiveFrame,
   });
   const terminalRestoreUrl =
-    safeExternalHttpHref(persistedFinalUrl) ??
-    safeExternalHttpHref(finalEvidenceFrame?.url);
+    safeExternalHttpHref(persistedFinalUrl) ?? safeExternalHttpHref(finalEvidenceFrame?.url);
   const terminalCanRestore = Boolean(activeTaskId && terminalRestoreUrl);
   const restoreTerminalSession = React.useCallback(
     async (announce = false): Promise<boolean> => {
@@ -789,9 +839,7 @@ function CloudBrowserPanel({
         }
         if (announce) {
           toast.show(
-            result.restored
-              ? '浏览器已恢复，可以继续操作'
-              : '浏览器仍在，可以继续操作',
+            result.restored ? '浏览器已恢复，可以继续操作' : '浏览器仍在，可以继续操作',
             'info',
           );
         }
@@ -804,14 +852,9 @@ function CloudBrowserPanel({
         }
         return false;
       }
-    }, [
-      activeTaskId,
-      refreshStreamToken,
-      taskTerminal,
-      terminalCanRestore,
-      toast,
-      usingCdp,
-    ]);
+    },
+    [activeTaskId, refreshStreamToken, taskTerminal, terminalCanRestore, toast, usingCdp],
+  );
   React.useEffect(() => {
     if (!taskTerminal) return;
     if (vncStatus === 'connected') {
@@ -820,10 +863,7 @@ function CloudBrowserPanel({
       return;
     }
     if (!terminalSessionSuspected || !terminalCanRestore) return;
-    if (
-      terminalRecoveryState !== 'idle' &&
-      terminalRecoveryState !== 'connected'
-    ) {
+    if (terminalRecoveryState !== 'idle' && terminalRecoveryState !== 'connected') {
       return;
     }
     void restoreTerminalSession(false);
@@ -885,9 +925,7 @@ function CloudBrowserPanel({
     preferLiveTerminalSession: taskTerminal && !terminalSessionUnavailable,
   });
   const displayFrameUrl =
-    displayFrame?.url && !isBlankUrl(displayFrame.url)
-      ? displayFrame.url
-      : null;
+    displayFrame?.url && !isBlankUrl(displayFrame.url) ? displayFrame.url : null;
   const displayUrl = terminalSessionUnavailable
     ? (persistedFinalUrl ?? displayFrameUrl ?? lastKnownUrl ?? 'about:blank')
     : (cdpLiveUrl ??
@@ -896,16 +934,21 @@ function CloudBrowserPanel({
       lastKnownUrl ??
       startupTargetUrl ??
       'about:blank');
-  const displayUrlIsPendingTarget =
-    startupTargetUrl != null && displayUrl === startupTargetUrl;
+  const displayUrlIsPendingTarget = startupTargetUrl != null && displayUrl === startupTargetUrl;
   // Request once per browser-wait episode. A stale login banner must not
   // immediately retake the browser after the user deliberately hands it back.
   const autoTakeoverEpisode = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (!browserAwaiting) { autoTakeoverEpisode.current = null; return; }
+    if (!browserAwaiting) {
+      autoTakeoverEpisode.current = null;
+      return;
+    }
     const episode = `${activeTaskId}:${awaitingKind}`;
     if (autoTakeoverEpisode.current === episode) return;
-    if (interactive) { autoTakeoverEpisode.current = episode; return; }
+    if (interactive) {
+      autoTakeoverEpisode.current = episode;
+      return;
+    }
     if (!usingCdp || !browserAwaiting || interactive) return;
     const hasLiveViewport = useVnc
       ? vncStatus === 'connected' || vncStatus === 'connecting'
@@ -914,24 +957,31 @@ function CloudBrowserPanel({
       autoTakeoverEpisode.current = episode;
       setInteractive(true);
     }
-  }, [usingCdp, browserAwaiting, interactive, activeTaskId, awaitingKind, useVnc, vncStatus, frame, setInteractive]);
+  }, [
+    usingCdp,
+    browserAwaiting,
+    interactive,
+    activeTaskId,
+    awaitingKind,
+    useVnc,
+    vncStatus,
+    frame,
+    setInteractive,
+  ]);
   // Recent steps for the in-panel activity overlay. Select WITHOUT a
   // fresh-array fallback — zustand treats each new `[]` as a changed
   // snapshot and infinite-loops the component (getSnapshot cache warn,
   // then React unmounts the tree → white screen). Instead, keep the
   // possibly-undefined value and default inside the memo so the
   // selector return is referentially stable per render.
-  const steps = useTaskStore((s) =>
-    activeTaskId ? s.stepsByTask[activeTaskId] : undefined,
-  );
+  const steps = useTaskStore((s) => (activeTaskId ? s.stepsByTask[activeTaskId] : undefined));
+  // FIX-D11 — "最近操作" narrates live work only: once the task is terminal no
+  // step may keep showing as "正在处理…".
   const recentSteps = React.useMemo(
-    () =>
-      (steps ?? EMPTY_STEPS)
-        .filter((s) => !TERMINAL_KINDS.has(s.actionKind ?? ''))
-        .slice(-3),
-    [steps],
+    () => recentActivitySteps(steps ?? EMPTY_STEPS, taskTerminal),
+    [steps, taskTerminal],
   );
-  const [activityVisible, setActivityVisible] = React.useState(true);
+  const [activityVisible, setActivityVisible] = React.useState(false);
   // Click-ripple visualisation on the screencast image. When the
   // agent (or the user in interactive mode) clicks, we animate a red
   // dot at the mapped coordinates for ~600ms so viewers can trace the
@@ -965,13 +1015,17 @@ function CloudBrowserPanel({
     if (natW <= 0 || natH <= 0) return;
     const hostW = host.clientWidth;
     const hostH = host.clientHeight;
-    const fitFn = isSheet ? fitScreencastReadable : fitScreencastContain;
-    const fit = fitFn({
-      hostWidth: hostW,
-      hostHeight: hostH,
-      sourceWidth: natW,
-      sourceHeight: natH,
-    });
+    // FIX-33: a phone sheet sees the whole page too (it used to be a wider, readable
+    // crop scrolled sideways); 100% shows it at its own size.
+    const actual = displayMode === 'actual';
+    const fit = actual
+      ? { width: natW, height: natH, scale: 1 }
+      : fitScreencastContain({
+          hostWidth: hostW,
+          hostHeight: hostH,
+          sourceWidth: natW,
+          sourceHeight: natH,
+        });
     if (!fit) return;
     img.style.width = `${fit.width}px`;
     img.style.height = `${fit.height}px`;
@@ -981,12 +1035,7 @@ function CloudBrowserPanel({
       hostHeight: hostH,
       contentWidth: fit.width,
     });
-    if (
-      isSheet &&
-      !interactive &&
-      frameKey &&
-      screencastAutoScrolledKeyRef.current !== frameKey
-    ) {
+    if (actual && !interactive && frameKey && screencastAutoScrolledKeyRef.current !== frameKey) {
       screencastAutoScrolledKeyRef.current = frameKey;
       const startLeft = readableScreencastStartScrollLeft({
         contentWidth: fit.width,
@@ -994,7 +1043,7 @@ function CloudBrowserPanel({
       });
       host.scrollTo({ left: startLeft, top: 0 });
     }
-  }, [frame?.imageBase64, interactive, isSheet]);
+  }, [frame?.imageBase64, interactive, displayMode]);
   React.useEffect(() => {
     const host = screencastHostRef.current;
     if (!host) return;
@@ -1033,9 +1082,7 @@ function CloudBrowserPanel({
   const hiddenCjkInputRef = React.useRef<HTMLInputElement | null>(null);
   const cjkComposingRef = React.useRef(false);
   const [cjkFallbackOpen, setCjkFallbackOpen] = React.useState(false);
-  const status: DotStatus = browserAwaiting
-    ? 'error'
-    : deriveDotStatus(taskStatus, Boolean(frame));
+  const status: DotStatus = browserAwaiting ? 'error' : deriveDotStatus(taskStatus, Boolean(frame));
 
   // Interactive mode only makes sense when there's something to drive.
   // VNC lane: the RFB canvas always has content once connected, so
@@ -1061,28 +1108,53 @@ function CloudBrowserPanel({
   });
   const evidenceHeaderActive = terminalSessionUnavailable;
   const displayedHeaderStatus = evidenceHeaderActive
-    ? browserPanelEvidenceHeaderStatus(
-        taskStatus,
-        finalEvidenceFrame?.url ?? persistedFinalUrl,
-      )
-    : usingCdp && !workspaceIdle ? {
-        ...headerStatus,
-        label: ownership.error === 'input_outcome_unknown' ? '会话异常'
-          : ownership.pending ? (ownership.state?.phase === 'human' ? '正在交还' : '正在交接')
-          : ownership.state?.phase === 'requested' ? '正在交接'
-          : ownership.state?.phase === 'resuming' ? '正在交还'
-          : ownership.error === 'observation_failed' ? '观察失败，可重试交还'
-          : interactive ? '你在操作' : !ownership.supported ? '仅观察' : taskIsTerminal ? '浏览器就绪' : 'AI 正在操作',
-        tooltip: ownership.error ? '暂未恢复 AI 操作，请检查连接或重试交还。' : headerStatus.tooltip,
-        showLabel: true,
-      } : headerStatus;
+    ? browserPanelEvidenceHeaderStatus(taskStatus, finalEvidenceFrame?.url ?? persistedFinalUrl)
+    : usingCdp && !workspaceIdle
+      ? {
+          ...headerStatus,
+          label:
+            ownership.error === 'input_outcome_unknown'
+              ? '会话异常'
+              : ownership.pending
+                ? ownership.state?.phase === 'human'
+                  ? '正在交还'
+                  : '正在交接'
+                : ownership.state?.phase === 'requested'
+                  ? '正在交接'
+                  : ownership.state?.phase === 'resuming'
+                    ? '正在交还'
+                    : ownership.error === 'observation_failed'
+                      ? '观察失败，可重试交还'
+                      : interactive
+                        ? '你在操作'
+                        : !ownership.supported
+                          ? ownership.starting && !taskIsTerminal
+                            ? '正在连接'
+                            : '仅观察'
+                          : taskIsTerminal
+                            ? '浏览器就绪'
+                            : 'AI 正在操作',
+          tooltip:
+            ownership.starting && !taskIsTerminal
+              ? '浏览器正在启动，AI 即将开始操作。'
+              : ownership.error
+                ? '暂未恢复 AI 操作，请检查连接或重试交还。'
+                : headerStatus.tooltip,
+          showLabel: true,
+        }
+      : headerStatus;
 
   const browserControl = browserControlAction({
     interactive,
     taskIsTerminal,
   });
-  const controlDisabled = !usingCdp || ownership.pending || ownership.state?.phase === 'requested' || ownership.state?.phase === 'resuming' ||
-    (!ownership.supported && !terminalSessionUnavailable) || ownership.error === 'input_outcome_unknown' ||
+  const controlDisabled =
+    !usingCdp ||
+    ownership.pending ||
+    ownership.state?.phase === 'requested' ||
+    ownership.state?.phase === 'resuming' ||
+    (!ownership.supported && !terminalSessionUnavailable) ||
+    ownership.error === 'input_outcome_unknown' ||
     (ownership.state?.phase === 'closed' && !taskIsTerminal);
   const inputFallbackMode = browserInputFallbackMode({
     interactiveActive,
@@ -1090,7 +1162,7 @@ function CloudBrowserPanel({
     fallbackOpen: cjkFallbackOpen,
   });
   React.useEffect(() => {
-    setActivityVisible(true);
+    setActivityVisible(false);
     setCjkFallbackOpen(false);
   }, [activeTaskId]);
   const handleUserTakeoverClick = React.useCallback(() => {
@@ -1274,7 +1346,10 @@ function CloudBrowserPanel({
       // Don't steal typing when the user is in a normal input/textarea
       // elsewhere on the page.
       const target = ev.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
         return;
       }
       const named = NAMED_KEYS[ev.key];
@@ -1409,7 +1484,7 @@ function CloudBrowserPanel({
                 controlLease={ownership.lease}
                 controlDisabled={controlDisabled}
                 onToggleInteractive={handleUserTakeoverClick}
-                navTaskId={evidenceHeaderActive ? null : activeTaskId ?? null}
+                navTaskId={evidenceHeaderActive ? null : (activeTaskId ?? null)}
                 controlsEnabled={!evidenceHeaderActive}
                 isExecuting={!evidenceHeaderActive && isExecuting}
                 aborting={aborting}
@@ -1435,121 +1510,137 @@ function CloudBrowserPanel({
               </div>
             </>
           )}
-          {!fullscreen && showHeader && (shouldConnect || evidenceHeaderActive || workspaceIdle) && (
-            <header
-              aria-label="浏览器工具栏"
-              className={cn(
-                'flex items-center border-b bg-white/92 backdrop-blur-md dark:bg-background/90',
-                isSheet ? 'h-11 gap-1.5 px-2 pt-3' : 'h-12 gap-2 px-3',
-                BROWSER_DIVIDER,
-              )}
-            >
-              <BrowserIdentity
-                state={displayedHeaderStatus}
-                compact={isNarrow || isSheet}
-              />
-              {!(evidenceHeaderActive && (isNarrow || isSheet)) && (
-                <BrowserConnectionChip state={displayedHeaderStatus} compact={isNarrow || isSheet} />
-              )}
-              {/* BOSS bug fix — when the panel is narrow (< 500px),
+          {!fullscreen &&
+            showHeader &&
+            (shouldConnect || evidenceHeaderActive || workspaceIdle) && (
+              <header
+                aria-label="浏览器工具栏"
+                className={cn(
+                  'flex items-center border-b bg-white/92 backdrop-blur-md dark:bg-background/90',
+                  isSheet ? 'h-11 gap-1.5 px-2 pt-3' : 'h-12 gap-2 px-3',
+                  BROWSER_DIVIDER,
+                )}
+              >
+                <BrowserIdentity state={displayedHeaderStatus} compact={isNarrow || isSheet} />
+                {!(evidenceHeaderActive && (isNarrow || isSheet)) && (
+                  <BrowserConnectionChip
+                    state={displayedHeaderStatus}
+                    compact={isNarrow || isSheet}
+                  />
+                )}
+                {/* BOSS bug fix — when the panel is narrow (< 500px),
                   hide back/forward to keep the URL bar legible. The
                   agent rarely needs them, and the user can take over
                   + use Brave's own gestures if they really need to
                   go back. Reload stays — it's the highest-utility
                   button when a page hangs. */}
-              {!evidenceHeaderActive && !workspaceIdle && !isNarrow && !isSheet && (
-                <div className="hidden items-center gap-1 sm:flex">
-                  <NavButton direction="back" title="后退" navTaskId={activeTaskId ?? null} controlLease={ownership.lease} />
-                  <NavButton direction="forward" title="前进" navTaskId={activeTaskId ?? null} controlLease={ownership.lease} />
-                </div>
-              )}
-              {!evidenceHeaderActive && !workspaceIdle && (
-                <NavButton direction="reload" title="刷新" navTaskId={activeTaskId ?? null} controlLease={ownership.lease} />
-              )}
-              <UrlBar
-                displayUrl={workspaceIdle ? '' : displayUrl}
-                interactiveActive={interactiveActive}
-                navTaskId={evidenceHeaderActive ? null : activeTaskId ?? null}
-                controlLease={ownership.lease}
-                readOnly={evidenceHeaderActive}
-                pendingTarget={displayUrlIsPendingTarget}
-                onLaunchTask={workspaceIdle ? onStartWorkspaceTask : undefined}
-              />
-              {!evidenceHeaderActive && isExecuting && activeTaskId && (
-                <button
-                  type="button"
-                  onClick={onStopClick}
-                  disabled={aborting}
-                  title="停止当前任务"
-                  aria-label="停止当前任务"
-                  className={cn(
-                    BROWSER_TOOL_BUTTON,
-                    'border',
-                    aborting
-                      ? 'cursor-wait border-[#DCDDDD] bg-[#EFEFEF] text-muted-foreground dark:border-white/10 dark:bg-white/5'
-                      : 'border-[#EA1F59]/35 bg-white text-[#EA1F59] hover:bg-[#EA1F59]/10 dark:border-[#EA1F59]/35 dark:bg-transparent dark:hover:bg-[#EA1F59]/10',
-                  )}
-                >
-                  <Square className="h-3 w-3" strokeWidth={2.5} />
-                </button>
-              )}
-              {!evidenceHeaderActive && !workspaceIdle && (
-                <button
-                  type="button"
-                  onClick={handleUserTakeoverClick}
-                  disabled={controlDisabled}
-                  title={browserControl.title}
-                  aria-label={browserControl.ariaLabel}
-                  aria-pressed={interactive}
-                  className={cn(
-                    'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[9px] border transition-colors',
-                    taskIsTerminal && !isNarrow && !isSheet ? 'px-2.5' : 'w-8',
-                    interactive
-                      ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
-                      : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5',
-                  )}
-                >
-                  {interactive ? (
-                    <Bot className="h-3.5 w-3.5" />
-                  ) : (
-                    <MousePointerClick className="h-3.5 w-3.5" />
-                  )}
-                  {taskIsTerminal && !isNarrow && !isSheet && (
-                    <span className="text-[11px] font-medium">{browserControl.label}</span>
-                  )}
-                </button>
-              )}
-              {/* Fullscreen toggle is a power-user feature; hide on
+                {!evidenceHeaderActive && !workspaceIdle && !isNarrow && !isSheet && (
+                  <div className="hidden items-center gap-1 sm:flex">
+                    <NavButton
+                      direction="back"
+                      title="后退"
+                      navTaskId={activeTaskId ?? null}
+                      controlLease={ownership.lease}
+                    />
+                    <NavButton
+                      direction="forward"
+                      title="前进"
+                      navTaskId={activeTaskId ?? null}
+                      controlLease={ownership.lease}
+                    />
+                  </div>
+                )}
+                {!evidenceHeaderActive && !workspaceIdle && (
+                  <NavButton
+                    direction="reload"
+                    title="刷新"
+                    navTaskId={activeTaskId ?? null}
+                    controlLease={ownership.lease}
+                  />
+                )}
+                <UrlBar
+                  displayUrl={workspaceIdle ? '' : displayUrl}
+                  interactiveActive={interactiveActive}
+                  navTaskId={evidenceHeaderActive ? null : (activeTaskId ?? null)}
+                  controlLease={ownership.lease}
+                  readOnly={evidenceHeaderActive}
+                  pendingTarget={displayUrlIsPendingTarget}
+                  onLaunchTask={workspaceIdle ? onStartWorkspaceTask : undefined}
+                />
+                {!evidenceHeaderActive && isExecuting && activeTaskId && (
+                  <button
+                    type="button"
+                    onClick={onStopClick}
+                    disabled={aborting}
+                    title="停止当前任务"
+                    aria-label="停止当前任务"
+                    className={cn(
+                      BROWSER_TOOL_BUTTON,
+                      'border',
+                      aborting
+                        ? 'cursor-wait border-[#DCDDDD] bg-[#EFEFEF] text-muted-foreground dark:border-white/10 dark:bg-white/5'
+                        : 'border-[#FF0061]/35 bg-white text-[#FF0061] hover:bg-[#FF0061]/10 dark:border-[#FF0061]/35 dark:bg-transparent dark:hover:bg-[#FF0061]/10',
+                    )}
+                  >
+                    <Square className="h-3 w-3" strokeWidth={2.5} />
+                  </button>
+                )}
+                {!evidenceHeaderActive && !workspaceIdle && (
+                  <button
+                    type="button"
+                    onClick={handleUserTakeoverClick}
+                    disabled={controlDisabled}
+                    title={browserControl.title}
+                    aria-label={browserControl.ariaLabel}
+                    aria-pressed={interactive}
+                    className={cn(
+                      'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[9px] border transition-colors',
+                      taskIsTerminal && !isNarrow && !isSheet ? 'px-2.5' : 'w-8',
+                      interactive
+                        ? 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]'
+                        : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5',
+                    )}
+                  >
+                    {interactive ? (
+                      <Bot className="h-3.5 w-3.5" />
+                    ) : (
+                      <MousePointerClick className="h-3.5 w-3.5" />
+                    )}
+                    {taskIsTerminal && !isNarrow && !isSheet && (
+                      <span className="text-[11px] font-medium">{browserControl.label}</span>
+                    )}
+                  </button>
+                )}
+                {/* Fullscreen toggle is a power-user feature; hide on
                   narrow panels (BOSS bug — toolbar was crowded). The
                   user can still open fullscreen from the keyboard
                   shortcut or by widening the panel first. */}
-              {shouldShowBrowserFullscreen({
-                available: Boolean(onToggleFullscreen),
-                workspaceIdle,
-                isNarrow,
-                isSheet,
-                evidenceHeaderActive,
-              }) && (
-                <button
-                  type="button"
-                  onClick={onToggleFullscreen}
-                  title={fullscreen ? '退出全屏 (Esc)' : '全屏浏览器模式'}
-                  aria-label={fullscreen ? '退出全屏' : '全屏浏览器模式'}
-                  aria-pressed={fullscreen}
-                  className={cn(
-                    BROWSER_TOOL_BUTTON,
-                  )}
-                >
-                  {fullscreen ? (
-                    <Minimize2 className="h-3.5 w-3.5" />
-                  ) : (
-                    <Maximize2 className="h-3.5 w-3.5" />
-                  )}
-                </button>
-              )}
-            </header>
-          )}
-          {browserAwaiting && !fullscreen && (
+                {shouldShowBrowserFullscreen({
+                  available: Boolean(onToggleFullscreen),
+                  workspaceIdle,
+                  isNarrow,
+                  isSheet,
+                  evidenceHeaderActive,
+                }) && (
+                  <button
+                    type="button"
+                    onClick={onToggleFullscreen}
+                    title={fullscreen ? '退出全屏 (Esc)' : '全屏浏览器模式'}
+                    aria-label={fullscreen ? '退出全屏' : '全屏浏览器模式'}
+                    aria-pressed={fullscreen}
+                    className={cn(BROWSER_TOOL_BUTTON)}
+                  >
+                    {fullscreen ? (
+                      <Minimize2 className="h-3.5 w-3.5" />
+                    ) : (
+                      <Maximize2 className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                )}
+              </header>
+            )}
+          {activeTaskId && <BrowserReplay key={activeTaskId} taskId={activeTaskId} />}
+          {browserAwaiting && (
             <div
               role="alert"
               className={cn(
@@ -1567,10 +1658,15 @@ function CloudBrowserPanel({
               </span>
               <div className="min-w-0 flex-1">
                 <div className={cn('font-semibold', isSheet ? 'text-[13px]' : 'text-sm')}>
-                  {awaitingUserCopy(awaitingKind).panelTitle}
+                  {awaitingUserCopy(awaitingKind, browserConnection).panelTitle}
                 </div>
-                <div className={cn('mt-0.5 text-muted-foreground', isSheet ? 'text-[11px] leading-snug' : 'text-xs')}>
-                  {awaitingUserCopy(awaitingKind).panelBody}
+                <div
+                  className={cn(
+                    'mt-0.5 text-muted-foreground',
+                    isSheet ? 'text-[11px] leading-snug' : 'text-xs',
+                  )}
+                >
+                  {awaitingUserCopy(awaitingKind, browserConnection).panelBody}
                 </div>
                 {/* Phase 1 follow-up — login park resume affordance.
                     Surfaces ONLY when:
@@ -1589,17 +1685,23 @@ function CloudBrowserPanel({
                     a new tab so the user can complete the login flow
                     on the live site, then come back and reply to the
                     task. */}
-                {awaitingKind === 'login' &&
-                  !frame &&
-                  persistedFinalUrl && (
-                    <SafeExternalLinkButton
-                      href={persistedFinalUrl}
-                      className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-[#FFC910]/60 bg-[#FFC910]/10 px-2.5 py-1 text-[11px] font-medium text-[#57479C] hover:bg-[#FFC910]/15 dark:border-[#FFC910]/35 dark:text-foreground"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      在新标签打开登录页
-                    </SafeExternalLinkButton>
-                  )}
+                {awaitingKind === 'captcha' && activeTaskId && (
+                  <CaptchaHandoffActions
+                    taskId={activeTaskId}
+                    {...(!fullscreen && onToggleFullscreen
+                      ? { onFullscreen: onToggleFullscreen }
+                      : {})}
+                  />
+                )}
+                {awaitingKind === 'login' && !frame && persistedFinalUrl && (
+                  <SafeExternalLinkButton
+                    href={persistedFinalUrl}
+                    className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-[#FFC910]/60 bg-[#FFC910]/10 px-2.5 py-1 text-[11px] font-medium text-[#57479C] hover:bg-[#FFC910]/15 dark:border-[#FFC910]/35 dark:text-foreground"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    在新标签打开登录页
+                  </SafeExternalLinkButton>
+                )}
               </div>
             </div>
           )}
@@ -1607,7 +1709,9 @@ function CloudBrowserPanel({
             ref={screencastHostRef}
             className={cn(
               'relative flex min-h-0 min-w-0 flex-1 items-center',
-              isSheet ? 'justify-start overflow-auto' : 'justify-center overflow-hidden',
+              isSheet && !viewportV2
+                ? 'justify-start overflow-auto'
+                : 'justify-center overflow-hidden',
               fullscreen || (useVnc && !isSheet) ? 'p-0' : isSheet ? 'p-1' : 'p-3',
               'bg-[#F6F7F9] dark:bg-white/[0.03]',
             )}
@@ -1624,26 +1728,20 @@ function CloudBrowserPanel({
                 onReExecute={onReExecute}
                 reExecuting={reExecuting}
                 onRestoreSession={
-                  terminalCanRestore
-                    ? () => restoreTerminalSession(true)
-                    : undefined
+                  terminalCanRestore ? () => restoreTerminalSession(true) : undefined
                 }
               />
             ) : hibernated ? (
-              <HibernationCard
-                lastFrame={displayFrame}
-                onWake={onWake}
-                waking={waking}
-              />
+              <HibernationCard lastFrame={displayFrame} onWake={onWake} waking={waking} />
             ) : useVnc ? (
               <div
                 className={cn(
                   'relative h-full min-h-0 min-w-0',
-                  isSheet ? 'shrink-0' : 'w-full',
-                  isSheet ? 'overflow-auto' : 'overflow-hidden',
+                  isSheet && !viewportV2 && !usingCdp ? 'shrink-0' : 'w-full',
+                  isSheet && !viewportV2 && !usingCdp ? 'overflow-auto' : 'overflow-hidden',
                 )}
                 style={
-                  isSheet
+                  isSheet && !viewportV2 && !usingCdp
                     ? {
                         // noVNC handles its own internal canvas scale.
                         // In a portrait sheet, giving it only the
@@ -1663,7 +1761,10 @@ function CloudBrowserPanel({
                     reconnectSignal={reconnectEpoch}
                     viewOnly={!interactiveActive}
                     controlLease={ownership.lease}
-                    fitMode={isSheet ? 'readable' : 'contain'}
+                    viewportV2={viewportV2}
+                    fitMode="contain"
+                    displayMode={displayMode}
+                    mobileViewport={isSheet}
                     onStatusChange={(s: CdpScreencastStatus) =>
                       // Reuse the VNC status state — the enum values
                       // overlap exactly so the existing
@@ -1677,7 +1778,7 @@ function CloudBrowserPanel({
                       interactiveActive
                         ? fullscreen
                           ? 'border-black/[0.06]'
-                          : 'ring-1 ring-inset ring-[#EA1F59]/25'
+                          : 'ring-1 ring-inset ring-[#FF0061]/25'
                         : isSheet && 'border-black/[0.06]',
                     )}
                   />
@@ -1686,15 +1787,16 @@ function CloudBrowserPanel({
                     // Codex Pack B2 — same reconnect-via-remount key.
                     key={`vnc-${reconnectEpoch}`}
                     wsUrl={vncUrl}
-                    viewOnly={!interactiveActive}
+                    viewOnly={viewportV2 || !interactiveActive}
                     onStatusChange={handleVncStatus}
-                    fitMode={isSheet ? 'readable' : 'contain'}
+                    viewportV2={viewportV2}
+                    fitMode={isSheet && !viewportV2 ? 'readable' : 'contain'}
                     className={cn(
                       isSheet && 'rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
                       interactiveActive
                         ? fullscreen
                           ? 'border-black/[0.06]'
-                          : 'ring-1 ring-inset ring-[#EA1F59]/25'
+                          : 'ring-1 ring-inset ring-[#FF0061]/25'
                         : isSheet && 'border-black/[0.06]',
                     )}
                   />
@@ -1736,21 +1838,23 @@ function CloudBrowserPanel({
                       interactiveActive
                         ? fullscreen
                           ? 'cursor-pointer border-black/[0.06]'
-                          : 'cursor-pointer border-[#EA1F59]/30 ring-1 ring-[#EA1F59]/10'
+                          : 'cursor-pointer border-[#FF0061]/30 ring-1 ring-[#FF0061]/10'
                         : 'border-black/[0.06]',
                     )}
                   />
                   {ripple && (
                     <span
                       aria-hidden
-                      className="pointer-events-none absolute block h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#EA1F59]/70 animate-click-pulse"
+                      className="pointer-events-none absolute block h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#FF0061]/70 animate-click-pulse"
                       style={{ left: ripple.x, top: ripple.y }}
                     />
                   )}
                   {activityVisible && recentSteps.length > 0 && (
                     <ActivityOverlay
                       steps={recentSteps}
+                      terminal={taskIsTerminal}
                       compact={isSheet}
+                      reserveInputSpace={interactiveActive && cjkFallbackOpen}
                       onClose={() => setActivityVisible(false)}
                     />
                   )}
@@ -1758,7 +1862,11 @@ function CloudBrowserPanel({
                     <button
                       type="button"
                       onClick={() => setActivityVisible(true)}
-                      className="absolute bottom-2 right-2 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
+                      className={cn(
+                        'absolute right-2 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60',
+                        'bottom-2',
+                        interactiveActive && cjkFallbackOpen && 'min-[769px]:bottom-16',
+                      )}
                       aria-label="显示操作日志"
                       title="显示操作日志"
                     >
@@ -1851,10 +1959,7 @@ function CloudBrowserPanel({
                 )}
               </div>
             )}
-            {useVnc &&
-              hasPresentedLiveFrame &&
-              showReconnect &&
-              vncStatus !== 'connected' && (
+            {useVnc && hasPresentedLiveFrame && showReconnect && vncStatus !== 'connected' && (
               <div
                 role="status"
                 aria-live="polite"
@@ -1876,7 +1981,9 @@ function CloudBrowserPanel({
             {useVnc && activityVisible && recentSteps.length > 0 && (
               <ActivityOverlay
                 steps={recentSteps}
+                terminal={taskIsTerminal}
                 compact={isSheet}
+                reserveInputSpace={inputFallbackMode === 'bar'}
                 onClose={() => setActivityVisible(false)}
               />
             )}
@@ -1884,7 +1991,11 @@ function CloudBrowserPanel({
               <button
                 type="button"
                 onClick={() => setActivityVisible(true)}
-                className="absolute bottom-2 right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
+                className={cn(
+                  'absolute right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60',
+                  'bottom-2',
+                  inputFallbackMode === 'bar' && 'min-[769px]:bottom-16',
+                )}
                 aria-label="显示操作日志"
                 title="显示操作日志"
               >
@@ -1910,12 +2021,18 @@ function CloudBrowserPanel({
               />
             )}
           </div>
-          {liveBrowserCanPan && !terminalSessionUnavailable && !hibernated && !interactiveActive && !showLiveOverlay && (
-            <div className="pointer-events-none absolute left-1/2 top-20 z-20 max-w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded-full bg-black/45 px-3 py-1 text-[11px] font-medium text-white shadow-sm backdrop-blur">
-              左右滑动查看页面
-            </div>
-          )}
-          {!fullscreen && useVnc && showHeader && (
+          {!viewportV2 &&
+            liveBrowserCanPan &&
+            !usingCdp &&
+            !terminalSessionUnavailable &&
+            !hibernated &&
+            !interactiveActive &&
+            !showLiveOverlay && (
+              <div className="pointer-events-none absolute left-1/2 top-20 z-20 max-w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded-full bg-black/45 px-3 py-1 text-[11px] font-medium text-white shadow-sm backdrop-blur">
+                左右滑动查看页面
+              </div>
+            )}
+          {!fullscreen && useVnc && showHeader && (usingCdp || !(isSheet && viewportV2)) && (
             <footer
               className={cn(
                 'flex items-center justify-between border-t bg-white/78 text-muted-foreground backdrop-blur dark:bg-background/75',
@@ -1923,12 +2040,16 @@ function CloudBrowserPanel({
                 BROWSER_DIVIDER,
               )}
             >
-              <span>
-                {browserViewportFooterLabel({
-                  usingCdp,
-                  viewport: displayFrame?.viewport,
-                })}
-              </span>
+              {usingCdp ? (
+                <BrowserDisplayModeToggle mode={displayMode} onChange={setDisplayMode} />
+              ) : (
+                <span>
+                  {browserViewportFooterLabel({
+                    usingCdp,
+                    viewport: displayFrame?.viewport,
+                  })}
+                </span>
+              )}
               <span>{vncStatus === 'connected' ? '画面实时同步' : ''}</span>
             </footer>
           )}
@@ -1974,9 +2095,7 @@ function TerminalEvidenceView({
   reExecuting: boolean;
   onRestoreSession?: () => Promise<boolean>;
 }): JSX.Element {
-  const [viewMode, setViewMode] = React.useState<'contain' | 'readable'>(
-    'contain',
-  );
+  const [viewMode, setViewMode] = React.useState<'contain' | 'readable'>('contain');
   const [naturalSize, setNaturalSize] = React.useState<{
     width: number;
     height: number;
@@ -1989,8 +2108,7 @@ function TerminalEvidenceView({
 
   const sourceWidth = naturalSize?.width || frame.viewport.width;
   const sourceHeight = naturalSize?.height || frame.viewport.height;
-  const sourceAspect =
-    sourceWidth > 0 && sourceHeight > 0 ? sourceWidth / sourceHeight : null;
+  const sourceAspect = sourceWidth > 0 && sourceHeight > 0 ? sourceWidth / sourceHeight : null;
   const layout = terminalEvidenceLayout({
     isNarrow,
     isSheet,
@@ -2007,9 +2125,7 @@ function TerminalEvidenceView({
     url: frame.url,
   });
   const screenshotCopy =
-    source === 'saved-screenshot'
-      ? '任务结束时保存的只读截图'
-      : '任务结束前最后可见的只读截图';
+    source === 'saved-screenshot' ? '任务结束时保存的只读截图' : '任务结束前最后可见的只读截图';
   const restoreSession = async (): Promise<void> => {
     if (!continuation || !onRestoreSession || continuing) return;
     setContinuing(true);
@@ -2024,18 +2140,19 @@ function TerminalEvidenceView({
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-white dark:bg-background">
       {shouldShowTerminalEvidenceLedger(fullscreen) && (
         <div className={cn('shrink-0 border-b bg-white/96 dark:bg-background/95', BROWSER_DIVIDER)}>
-          <div className={cn('flex min-w-0 items-start gap-2', isSheet ? 'px-3 pb-2 pt-3' : 'px-3 py-2.5')}>
+          <div
+            className={cn(
+              'flex min-w-0 items-start gap-2',
+              isSheet ? 'px-3 pb-2 pt-3' : 'px-3 py-2.5',
+            )}
+          >
             <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] bg-[#42C0EF]/12 text-[#118AB2] dark:text-[#42C0EF]">
               <ListChecks className="h-3.5 w-3.5" aria-hidden />
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-                <span className="text-[12px] font-semibold text-foreground">
-                  终态截图 · 只读
-                </span>
-                <span className="truncate text-[11px] text-muted-foreground">
-                  {title}
-                </span>
+                <span className="text-[12px] font-semibold text-foreground">终态截图 · 只读</span>
+                <span className="truncate text-[11px] text-muted-foreground">{title}</span>
               </div>
               <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
                 {screenshotCopy}，不能点击或输入；结果中的判断仍以来源和任务上下文为准。
@@ -2061,16 +2178,11 @@ function TerminalEvidenceView({
                   type="button"
                   onClick={() => void restoreSession()}
                   disabled={continuing}
-                  aria-label={
-                    continuing ? continuation.pendingLabel : continuation.label
-                  }
+                  aria-label={continuing ? continuation.pendingLabel : continuation.label}
                   title={continuation.description}
                   className="inline-flex h-7 items-center gap-1 rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
                 >
-                  <Globe
-                    className={cn('h-3 w-3', continuing && 'animate-pulse')}
-                    aria-hidden
-                  />
+                  <Globe className={cn('h-3 w-3', continuing && 'animate-pulse')} aria-hidden />
                   {continuing ? continuation.pendingLabel : continuation.label}
                 </button>
               )}
@@ -2078,13 +2190,9 @@ function TerminalEvidenceView({
                 <button
                   type="button"
                   onClick={() =>
-                    setViewMode((mode) =>
-                      mode === 'contain' ? 'readable' : 'contain',
-                    )
+                    setViewMode((mode) => (mode === 'contain' ? 'readable' : 'contain'))
                   }
-                  aria-label={
-                    viewMode === 'contain' ? '按原始尺寸查看' : '适应窗口查看'
-                  }
+                  aria-label={viewMode === 'contain' ? '按原始尺寸查看' : '适应窗口查看'}
                   className="inline-flex h-7 items-center rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[11px] font-medium text-foreground transition-colors hover:bg-[#EFEFEF]/60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
                 >
                   {viewMode === 'contain' ? '原始尺寸' : '适应窗口'}
@@ -2116,11 +2224,7 @@ function TerminalEvidenceView({
               ? 'flex-1 overflow-auto'
               : 'flex flex-1 items-center justify-center overflow-hidden',
         )}
-        style={
-          compactPreview && sourceAspect
-            ? { aspectRatio: String(sourceAspect) }
-            : undefined
-        }
+        style={compactPreview && sourceAspect ? { aspectRatio: String(sourceAspect) } : undefined}
       >
         <div
           className={cn(
@@ -2152,18 +2256,14 @@ function TerminalEvidenceView({
             }}
             className={cn(
               'block border-0 object-contain',
-              compactPreview || viewMode === 'readable'
-                ? 'h-full w-full'
-                : 'max-h-full max-w-full',
+              compactPreview || viewMode === 'readable' ? 'h-full w-full' : 'max-h-full max-w-full',
             )}
           />
           {!isSheet && compactPreview && (
             <div className="pointer-events-none absolute inset-x-2 bottom-2 flex min-w-0 items-center justify-between gap-2 rounded-[7px] bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur">
               <span className="truncate">{title}</span>
               {safeFinalUrl && (
-                <span className="max-w-[52%] truncate font-mono opacity-80">
-                  {frame.url}
-                </span>
+                <span className="max-w-[52%] truncate font-mono opacity-80">{frame.url}</span>
               )}
             </div>
           )}
@@ -2171,10 +2271,13 @@ function TerminalEvidenceView({
       </div>
 
       {!fullscreen && (
-        <div className={cn('flex shrink-0 min-w-0 items-center gap-2 border-t bg-white/96 px-3 py-2 text-[11px] dark:bg-background/95', BROWSER_DIVIDER)}>
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">
-            {title}
-          </span>
+        <div
+          className={cn(
+            'flex shrink-0 min-w-0 items-center gap-2 border-t bg-white/96 px-3 py-2 text-[11px] dark:bg-background/95',
+            BROWSER_DIVIDER,
+          )}
+        >
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">{title}</span>
           {safeFinalUrl && isSheet && (
             <SafeExternalLinkButton
               href={safeFinalUrl}
@@ -2194,10 +2297,7 @@ function TerminalEvidenceView({
               title={reExecuting ? '正在重新执行' : '重新执行'}
               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white text-foreground transition-colors hover:bg-[#EFEFEF]/60 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
             >
-              <RotateCw
-                className={cn('h-3.5 w-3.5', reExecuting && 'animate-spin')}
-                aria-hidden
-              />
+              <RotateCw className={cn('h-3.5 w-3.5', reExecuting && 'animate-spin')} aria-hidden />
             </button>
           )}
         </div>
@@ -2207,17 +2307,31 @@ function TerminalEvidenceView({
 }
 
 /**
+ * FIX-D11 — the up-to-3 live actions shown in "最近操作". A terminal task has
+ * no live action left, so nothing keeps reading "正在处理…" after it ended.
+ */
+export function recentActivitySteps(steps: readonly UiStep[], taskTerminal: boolean): UiStep[] {
+  if (taskTerminal) return [];
+  return steps.filter((s) => !TERMINAL_KINDS.has(s.actionKind ?? '')).slice(-3);
+}
+
+/**
  * Floating activity overlay on the bottom of the screencast image.
  * Shows up to 3 most-recent non-terminal actions so users can see the
  * agent narrate its work without reading the left-panel step stream.
  */
+
 function ActivityOverlay({
   steps,
+  terminal,
   compact = false,
+  reserveInputSpace = false,
   onClose,
 }: {
   steps: UiStep[];
+  terminal: boolean;
   compact?: boolean;
+  reserveInputSpace?: boolean;
   onClose: () => void;
 }): JSX.Element {
   const visibleSteps = compact ? steps.slice(-1) : steps;
@@ -2225,9 +2339,9 @@ function ActivityOverlay({
     <div
       className={cn(
         'pointer-events-none absolute rounded-md bg-black/55 text-white backdrop-blur-md',
-        compact
-          ? 'inset-x-1 bottom-1 px-2.5 py-1.5 text-[11px]'
-          : 'inset-x-2 bottom-2 px-3 py-2 text-[11px]',
+        compact ? 'inset-x-1 px-2.5 py-1.5 text-[11px]' : 'inset-x-2 px-3 py-2 text-[11px]',
+        compact ? 'bottom-1' : 'bottom-2',
+        reserveInputSpace && 'min-[769px]:bottom-16',
       )}
     >
       <div
@@ -2251,7 +2365,7 @@ function ActivityOverlay({
         {visibleSteps.map((s) => (
           <li key={s.tickIndex} className="flex items-start gap-1.5">
             <span className="shrink-0 text-white/50">{activityGlyph(s.actionKind)}</span>
-            <span className="min-w-0 flex-1 truncate">{summariseAction(s)}</span>
+            <span className="min-w-0 flex-1 truncate">{summariseAction(s, terminal)}</span>
           </li>
         ))}
       </ul>
@@ -2327,8 +2441,7 @@ const HiddenCjkInput = React.forwardRef<
       }}
       onCompositionEnd={(e) => {
         composingRef.current = false;
-        const text =
-          e.data ?? (e.target as HTMLInputElement).value ?? '';
+        const text = e.data ?? (e.target as HTMLInputElement).value ?? '';
         if (text) sendInsertText(text);
         // Wipe local + DOM value so the next composition starts fresh.
         setValue('');
@@ -2474,7 +2587,12 @@ function HibernationCard({
           浏览器已释放" is honest AND less alarming than "已休眠".
           Wake button demoted from black-CTA to muted text link so
           it doesn't compete with the final screenshot behind it. */}
-      <div className={cn('relative flex flex-col items-center gap-2.5 rounded-lg px-6 py-4 backdrop-blur', BROWSER_SURFACE)}>
+      <div
+        className={cn(
+          'relative flex flex-col items-center gap-2.5 rounded-lg px-6 py-4 backdrop-blur',
+          BROWSER_SURFACE,
+        )}
+      >
         <div
           className="flex h-9 w-9 items-center justify-center rounded-full bg-[#42C0EF]/15 text-[#42C0EF]"
           aria-hidden
@@ -2482,12 +2600,8 @@ function HibernationCard({
           <Check className="h-5 w-5" strokeWidth={2.5} />
         </div>
         <div className="text-center">
-          <div className="text-sm font-semibold text-foreground">
-            {releasedCopy.title}
-          </div>
-          <div className="mt-0.5 text-xs text-muted-foreground">
-            {releasedCopy.detail}
-          </div>
+          <div className="text-sm font-semibold text-foreground">{releasedCopy.title}</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">{releasedCopy.detail}</div>
         </div>
         <button
           type="button"
@@ -2539,8 +2653,13 @@ function EmptyBrowserState({
   const [reopening, setReopening] = React.useState(false);
   if (taskStatus === 'executing' && isBrowserTask) {
     return (
-      <div className={cn('flex max-w-[320px] flex-col items-center gap-2.5 rounded-[18px] px-6 py-5 text-center', BROWSER_SURFACE)}>
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#EA1F59]/10 text-[#EA1F59]">
+      <div
+        className={cn(
+          'flex max-w-[320px] flex-col items-center gap-2.5 rounded-[18px] px-6 py-5 text-center',
+          BROWSER_SURFACE,
+        )}
+      >
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#FF0061]/10 text-[#FF0061]">
           <Globe className="h-4 w-4 animate-pulse-dot" aria-hidden />
         </div>
         <div>
@@ -2580,15 +2699,20 @@ function EmptyBrowserState({
       onReExecute?.();
     };
     return (
-      <div className={cn('flex w-full max-w-[360px] flex-col items-center px-7 py-6 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
+      <div
+        className={cn(
+          'flex w-full max-w-[360px] flex-col items-center px-7 py-6 text-center text-muted-foreground',
+          BROWSER_SURFACE,
+          'rounded-lg',
+        )}
+      >
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#42C0EF]/12 text-[#118AB2] dark:text-[#42C0EF]">
           <Globe className="h-5 w-5" aria-hidden />
         </div>
-        <div className="mt-3 text-sm font-semibold text-foreground">
-          浏览器会话已结束
-        </div>
+        <div className="mt-3 text-sm font-semibold text-foreground">浏览器会话已结束</div>
         <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          任务结果{hasSavedScreenshot ? '和页面截图' : ''}已保存在左侧。重新打开会启动新的浏览器，不会改写原任务记录。
+          任务结果{hasSavedScreenshot ? '和页面截图' : ''}
+          已保存在左侧。重新打开会启动新的浏览器，不会改写原任务记录。
         </div>
         {(canReopen || onReExecute) && (
           <button
@@ -2607,7 +2731,13 @@ function EmptyBrowserState({
     );
   }
   return (
-    <div className={cn('flex max-w-[340px] flex-col items-center px-6 py-5 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-[18px]')}>
+    <div
+      className={cn(
+        'flex max-w-[340px] flex-col items-center px-6 py-5 text-center text-muted-foreground',
+        BROWSER_SURFACE,
+        'rounded-[18px]',
+      )}
+    >
       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#42C0EF]/12 text-[#118AB2]">
         <Globe className="h-5 w-5" aria-hidden />
       </div>
@@ -2640,13 +2770,17 @@ function SafeExternalLinkButton({
   title?: string;
 }): JSX.Element | null {
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
+  const requestExternalLink = (href: string) => {
+    if (needsExternalLinkConfirmation(href)) setPendingHref(href);
+    else openExternalLink(href);
+  };
   const safeHref = safeExternalHttpHref(href);
   if (!safeHref) return null;
   return (
     <>
       <button
         type="button"
-        onClick={() => setPendingHref(safeHref)}
+        onClick={() => requestExternalLink(safeHref)}
         className={className}
         aria-label={ariaLabel}
         title={title}
@@ -2656,16 +2790,14 @@ function SafeExternalLinkButton({
       <ConfirmDialog
         open={pendingHref !== null}
         title="即将打开外部链接"
-        description={
-          pendingHref ? externalLinkConfirmDescription(pendingHref) : undefined
-        }
+        description={pendingHref ? externalLinkConfirmDescription(pendingHref) : undefined}
         confirmLabel="打开"
         cancelLabel="取消"
         onClose={() => setPendingHref(null)}
         onConfirm={() => {
           const target = pendingHref;
           setPendingHref(null);
-          if (target) window.open(target, '_blank', 'noopener,noreferrer');
+          if (target) openExternalLink(target);
         }}
       />
     </>
@@ -2704,7 +2836,9 @@ function activityGlyph(kind?: string): string {
  * progress text ("正在操作浏览器…" etc.). Last-resort "步骤 N"
  * stays so the row is never empty.
  */
-function summariseAction(step: UiStep): string {
+export function summariseAction(step: UiStep, terminal = false): string {
+  if (terminal)
+    return `步骤 ${step.tickIndex + 1} · ${step.status === 'done' ? '已完成' : step.status === 'failed' ? '未完成' : '已结束'}`;
   const s = step.actionSummary?.trim();
   if (s && !/^[a-z_][a-z0-9_]*$/.test(s)) return s;
   if (step.actionKind) return liveStatusLabel(step.actionKind);
@@ -2778,7 +2912,7 @@ function StatusDot({
         'inline-block h-2 w-2 rounded-full',
         status === 'idle' && 'bg-muted-foreground/40',
         status === 'live' && 'animate-pulse-dot bg-[#42C0EF]',
-        status === 'error' && 'bg-[#EA1F59]',
+        status === 'error' && 'bg-[#FF0061]',
       )}
     />
   );
@@ -2828,10 +2962,8 @@ function BrowserConnectionChip({
           'border-[#FFC910]/55 bg-[#FFC910]/10 text-[#6A5B19] dark:border-[#FFC910]/35 dark:text-[#FFE17A]',
         state.tone === 'attention' &&
           'border-[#FFC910]/60 bg-[#FFC910]/15 text-[#57479C] dark:border-[#FFC910]/35 dark:text-foreground',
-        state.tone === 'takeover' &&
-          'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]',
-        state.tone === 'error' &&
-          'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]',
+        state.tone === 'takeover' && 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]',
+        state.tone === 'error' && 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]',
       )}
     >
       {state.label}
@@ -2884,7 +3016,8 @@ function UrlBar({
   // Local editing state. Resync to the prop whenever the agent
   // navigates (or the user clicks back/forward) so the bar always
   // reflects the live page url unless the user is mid-edit.
-  const [draft, setDraft] = React.useState(displayUrl);
+  const visibleAddress = isBlankUrl(displayUrl) ? '' : displayUrl;
+  const [draft, setDraft] = React.useState(visibleAddress);
   const [editing, setEditing] = React.useState(false);
   const [pending, setPending] = React.useState(false);
   const mountedRef = React.useRef(false);
@@ -2895,13 +3028,11 @@ function UrlBar({
     };
   }, []);
   React.useEffect(() => {
-    if (!editing) setDraft(displayUrl);
-  }, [displayUrl, editing]);
+    if (!editing) setDraft(visibleAddress);
+  }, [visibleAddress, editing]);
   const normalizedDraft = draft.trim().toLowerCase();
   const isSecurePage = normalizedDraft.startsWith('https://');
-  const isPageUrl =
-    normalizedDraft.startsWith('https://') ||
-    normalizedDraft.startsWith('http://');
+  const isPageUrl = normalizedDraft.startsWith('https://') || normalizedDraft.startsWith('http://');
   const UrlIcon = pending || pendingTarget ? RotateCw : isSecurePage ? LockKeyhole : Globe;
 
   const submit = async (): Promise<void> => {
@@ -2934,12 +3065,12 @@ function UrlBar({
       if (!res.ok) {
         const message = browserNavFailureMessage(res.reason, 'goto');
         if (message) toast.show(message, 'error');
-        setDraft(displayUrl);
+        setDraft(visibleAddress);
       }
     } catch (err) {
       toast.show(browserNavExceptionMessage(err, 'goto'), 'error');
       if (mountedRef.current) {
-        setDraft(displayUrl);
+        setDraft(visibleAddress);
       }
     } finally {
       if (mountedRef.current) {
@@ -2955,7 +3086,7 @@ function UrlBar({
         'group flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[10px] border px-2 transition-colors',
         'border-[#E6E7EB] bg-[#F6F7F9] text-muted-foreground hover:border-[#DCDDDD] hover:bg-white',
         'focus-within:border-[#ADADAD] focus-within:bg-white focus-within:text-foreground',
-        interactiveActive && 'border-[#EA1F59]/35 bg-[#EA1F59]/5',
+        interactiveActive && 'border-[#FF0061]/35 bg-[#FF0061]/5',
         readOnly && 'bg-white/70',
         pending && 'cursor-wait opacity-75',
       )}
@@ -2974,8 +3105,15 @@ function UrlBar({
         type="text"
         spellCheck={false}
         autoComplete="off"
+        data-browser-address="true"
         value={draft}
-        placeholder={onLaunchTask ? '输入网址或搜索内容' : '输入网址回车跳转'}
+        placeholder={
+          onLaunchTask
+            ? '输入网址或搜索内容'
+            : !visibleAddress
+              ? '尚未打开网页'
+              : '输入网址回车跳转'
+        }
         readOnly={readOnly || (!onLaunchTask && !controlLease)}
         onFocus={() => {
           if (!readOnly) setEditing(true);
@@ -2994,7 +3132,7 @@ function UrlBar({
             e.preventDefault();
             void submit();
           } else if (e.key === 'Escape') {
-            setDraft(displayUrl);
+            setDraft(visibleAddress);
             (e.target as HTMLInputElement).blur();
           }
         }}
@@ -3006,7 +3144,7 @@ function UrlBar({
               ? '浏览器启动栏 (输入网址或搜索内容，Enter 开始)'
               : pendingTarget
                 ? '浏览器目标地址 (正在打开，尚未确认到达)'
-              : '浏览器地址栏 (Enter 跳转, Esc 还原)'
+                : '浏览器地址栏 (Enter 跳转, Esc 还原)'
         }
         className={cn(
           'h-full min-w-0 flex-1 truncate border-0 bg-transparent px-0 font-mono text-[11px] outline-none',
@@ -3022,7 +3160,7 @@ function UrlBar({
           disabled={pending || !draft.trim()}
           title="开始浏览"
           aria-label="开始浏览"
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] bg-[#EA1F59] text-white transition-colors hover:bg-[#D71950] disabled:cursor-not-allowed disabled:bg-[#DCDDDD] disabled:text-white"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] bg-[#FF0061] text-white transition-colors hover:bg-[#D71950] disabled:cursor-not-allowed disabled:bg-[#DCDDDD] disabled:text-white"
         >
           <ArrowRight className="h-3.5 w-3.5" />
         </button>
@@ -3086,10 +3224,7 @@ function NavButton({
           }
         }
       }}
-      className={cn(
-        BROWSER_TOOL_BUTTON,
-        pending && 'opacity-50',
-      )}
+      className={cn(BROWSER_TOOL_BUTTON, pending && 'opacity-50')}
     >
       <Icon className="h-3.5 w-3.5" />
     </button>
@@ -3208,9 +3343,24 @@ function FullscreenFloatingToolbar({
       <BrowserConnectionChip state={status} compact={false} />
       {controlsEnabled && (
         <>
-          <NavButton direction="back" title="后退" navTaskId={navTaskId} controlLease={controlLease} />
-          <NavButton direction="forward" title="前进" navTaskId={navTaskId} controlLease={controlLease} />
-          <NavButton direction="reload" title="刷新" navTaskId={navTaskId} controlLease={controlLease} />
+          <NavButton
+            direction="back"
+            title="后退"
+            navTaskId={navTaskId}
+            controlLease={controlLease}
+          />
+          <NavButton
+            direction="forward"
+            title="前进"
+            navTaskId={navTaskId}
+            controlLease={controlLease}
+          />
+          <NavButton
+            direction="reload"
+            title="刷新"
+            navTaskId={navTaskId}
+            controlLease={controlLease}
+          />
         </>
       )}
       <UrlBar
@@ -3232,7 +3382,7 @@ function FullscreenFloatingToolbar({
             'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors',
             aborting
               ? 'cursor-wait border-white/20 bg-white/10 text-white/60'
-              : 'border-[#EA1F59]/35 bg-[#EA1F59]/15 text-white hover:bg-[#EA1F59]/25',
+              : 'border-[#FF0061]/35 bg-[#FF0061]/15 text-white hover:bg-[#FF0061]/25',
           )}
         >
           <Square className="h-3 w-3" strokeWidth={2.5} />
@@ -3247,16 +3397,47 @@ function FullscreenFloatingToolbar({
           aria-label={controlAction.ariaLabel}
           className={cn(
             'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10',
-            interactive && 'bg-[#EA1F59]/35 text-white',
+            interactive && 'bg-[#FF0061]/35 text-white',
           )}
         >
-          {interactive ? (
-            <Bot className="h-3.5 w-3.5" />
-          ) : (
-            <Hand className="h-3.5 w-3.5" />
-          )}
+          {interactive ? <Bot className="h-3.5 w-3.5" /> : <Hand className="h-3.5 w-3.5" />}
         </button>
       )}
     </div>
+  );
+}
+
+/** FIX-33 「适应面板 / 100% 原尺寸」 — local display only; the remote page is not resized. */
+function BrowserDisplayModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: 'fit' | 'actual';
+  onChange: (mode: 'fit' | 'actual') => void;
+}): JSX.Element {
+  const option = (value: 'fit' | 'actual', label: string, title: string) => (
+    <button
+      type="button"
+      aria-pressed={mode === value}
+      title={title}
+      onClick={() => onChange(value)}
+      className={cn(
+        'rounded px-1.5 leading-5 transition-colors',
+        mode === value
+          ? 'bg-[#FF0061] text-white'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+      )}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <fieldset
+      aria-label="画面显示方式"
+      className="m-0 inline-flex min-w-0 items-center gap-0.5 border-0 p-0"
+    >
+      {option('fit', '适应面板', '按面板大小等比缩放，完整显示整个页面')}
+      {option('actual', '100% 原尺寸', '按页面原始尺寸显示，可滚动查看')}
+    </fieldset>
   );
 }

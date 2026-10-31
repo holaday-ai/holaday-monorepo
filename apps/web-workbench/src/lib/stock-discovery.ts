@@ -47,18 +47,12 @@ const EDITORIAL_ART_BY_TOPIC = {
     '/stock-editorial-art/governance-3.jpg',
     '/stock-editorial-art/governance-5.jpg',
   ],
-  disclosure: [
-    '/stock-editorial-art/disclosure-1.jpg',
-    '/stock-editorial-art/governance-6.jpg',
-  ],
+  disclosure: ['/stock-editorial-art/disclosure-1.jpg', '/stock-editorial-art/governance-6.jpg'],
   investorRelations: [
     '/stock-editorial-art/investor-relations-1.jpg',
     '/stock-editorial-art/governance-5.jpg',
   ],
-  earnings: [
-    '/stock-editorial-art/earnings-1.jpg',
-    '/stock-editorial-art/earnings-2.jpg',
-  ],
+  earnings: ['/stock-editorial-art/earnings-1.jpg', '/stock-editorial-art/earnings-2.jpg'],
   chips: [
     '/stock-editorial-art/technology-1.jpg',
     '/stock-editorial-art/technology-2.jpg',
@@ -71,10 +65,7 @@ const EDITORIAL_ART_BY_TOPIC = {
     '/stock-editorial-art/technology-5.jpg',
     '/stock-editorial-art/technology-10.jpg',
   ],
-  aiCompute: [
-    '/stock-editorial-art/technology-10.jpg',
-    '/stock-editorial-art/technology-5.jpg',
-  ],
+  aiCompute: ['/stock-editorial-art/technology-10.jpg', '/stock-editorial-art/technology-5.jpg'],
   satellite: ['/stock-editorial-art/technology-9.jpg'],
   manufacturing: [
     '/stock-editorial-art/advanced-manufacturing-1.jpg',
@@ -115,10 +106,7 @@ const EDITORIAL_ART_BY_TOPIC = {
     '/stock-editorial-art/energy-5.jpg',
   ],
   macro: ['/stock-editorial-art/macro-1.jpg'],
-  market: [
-    '/stock-editorial-art/market-2.jpg',
-    '/stock-editorial-art/market-3.jpg',
-  ],
+  market: ['/stock-editorial-art/market-2.jpg', '/stock-editorial-art/market-3.jpg'],
   trade: [
     '/stock-editorial-art/market-4.jpg',
     '/stock-editorial-art/logistics-2.jpg',
@@ -130,11 +118,13 @@ function preciseEditorialArtOptions(item: DiscoveryMedia): readonly string[] {
   const text = `${item.title ?? ''} ${item.summary ?? ''}`.toLocaleLowerCase('zh-CN');
   if (!text.trim()) return [];
 
-  if (/董事会|股东大会|董事会议|监事会|会议决议|董事长/.test(text)) return EDITORIAL_ART_BY_TOPIC.board;
+  if (/董事会|股东大会|董事会议|监事会|会议决议|董事长/.test(text))
+    return EDITORIAL_ART_BY_TOPIC.board;
   if (item.category !== '公告' && /清仓|持仓曝光|机构持仓|私募巨头|基金持仓/.test(text)) {
     return EDITORIAL_ART_BY_TOPIC.market;
   }
-  if (/投资者关系|机构调研|业绩说明会|路演|接待调研/.test(text)) return EDITORIAL_ART_BY_TOPIC.investorRelations;
+  if (/投资者关系|机构调研|业绩说明会|路演|接待调研/.test(text))
+    return EDITORIAL_ART_BY_TOPIC.investorRelations;
   if (/财务总监|总经理变更|高管变更|任职|离任|辞职|增持|减持|回购|股权激励/.test(text)) {
     return EDITORIAL_ART_BY_TOPIC.investorRelations;
   }
@@ -144,7 +134,8 @@ function preciseEditorialArtOptions(item: DiscoveryMedia): readonly string[] {
   if (/业绩|营收|净利润|财报|预增|预亏|分红|毛利率|同比增长|扭亏/.test(text)) {
     return EDITORIAL_ART_BY_TOPIC.earnings;
   }
-  if (/cpo|光模块|光通信|光纤|通信网络|数据中心互联/.test(text)) return EDITORIAL_ART_BY_TOPIC.opticalNetwork;
+  if (/cpo|光模块|光通信|光纤|通信网络|数据中心互联/.test(text))
+    return EDITORIAL_ART_BY_TOPIC.opticalNetwork;
   if (/芯片|半导体|晶圆|存储器|存储芯片|集成电路|封装测试|先进制程/.test(text)) {
     return EDITORIAL_ART_BY_TOPIC.chips;
   }
@@ -156,7 +147,8 @@ function preciseEditorialArtOptions(item: DiscoveryMedia): readonly string[] {
     return EDITORIAL_ART_BY_TOPIC.manufacturing;
   }
   if (/汽车|新能源车|充电桩|动力电池|整车|重卡/.test(text)) return EDITORIAL_ART_BY_TOPIC.mobility;
-  if (/零售|服装|商超|门店|食品|饮料|餐饮|乳业|农产品/.test(text)) return EDITORIAL_ART_BY_TOPIC.retail;
+  if (/零售|服装|商超|门店|食品|饮料|餐饮|乳业|农产品/.test(text))
+    return EDITORIAL_ART_BY_TOPIC.retail;
   if (/医药|医疗|医院|药品|创新药|生物医药|医疗器械|疫苗/.test(text)) {
     return EDITORIAL_ART_BY_TOPIC.healthcare;
   }
@@ -171,7 +163,9 @@ function preciseEditorialArtOptions(item: DiscoveryMedia): readonly string[] {
   if (/居民消费价格|cpi|通胀|gdp|货币政策|央行|降息|加息|宏观经济/.test(text)) {
     return EDITORIAL_ART_BY_TOPIC.macro;
   }
-  if (/a股|港股|美股|股市|大盘|指数|行情|资金流|主力资金|北向资金|南向资金|etf|券商策略/.test(text)) {
+  if (
+    /a股|港股|美股|股市|大盘|指数|行情|资金流|主力资金|北向资金|南向资金|etf|券商策略/.test(text)
+  ) {
     return EDITORIAL_ART_BY_TOPIC.market;
   }
   return [];
@@ -205,7 +199,11 @@ function isVerifiedSourceCoverUrl(value: string): boolean {
   if (isReadableEastmoneyCover(value)) return true;
   try {
     const proxy = new URL(value, 'https://holaday.invalid');
-    if (proxy.origin !== 'https://holaday.invalid' || proxy.pathname !== '/api/stock-news/source-cover') return false;
+    if (
+      proxy.origin !== 'https://holaday.invalid' ||
+      proxy.pathname !== '/api/stock-news/source-cover'
+    )
+      return false;
     const source = proxy.searchParams.get('url');
     return source ? isReadableEastmoneyCover(source) : false;
   } catch {
@@ -238,7 +236,8 @@ export function diversifyDiscoveryEditorialArt<T extends DiscoveryMedia>(
     const editorialFallback = (): IndexedDiscoveryItem<T> => {
       const candidates = preciseEditorialArtOptions(item);
       if (candidates.length === 0) return titleFirst();
-      const offset = stableTextHash(`${item.title ?? ''}:${item.summary ?? ''}`) % candidates.length;
+      const offset =
+        stableTextHash(`${item.title ?? ''}:${item.summary ?? ''}`) % candidates.length;
       for (let index = 0; index < candidates.length; index += 1) {
         const candidate = candidates[(offset + index) % candidates.length];
         if (!candidate || usedImageUrls.has(candidate)) continue;

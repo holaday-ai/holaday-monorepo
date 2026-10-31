@@ -1,0 +1,461 @@
+
+> @holaday/web-workbench@0.0.0 test /Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench
+> vitest run src/components/InputArea.permissions.test.tsx --maxWorkers=1 --minWorkers=1
+
+
+ RUN  v2.1.8 /Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench
+
+ ❯ src/components/InputArea.permissions.test.tsx (9 tests | 1 failed) 316ms
+   × composer task choices independent of attachment entitlement > exposes exclusive execution mode selection without closing the menu 98ms
+     → Unable to find an accessible element with the role "menuitemradio" and name "自动执行"
+
+Here are the accessible roles:
+
+  menu:
+
+  Name "附件与任务选项":
+  [36m<div[39m
+    [33maria-labelledby[39m=[32m"radix-:r0:"[39m
+    [33maria-orientation[39m=[32m"vertical"[39m
+    [33mclass[39m=[32m"min-w-[8rem] overflow-hidden border text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 w-[206px] z-[80] rounded-[8px] border-[#DCDDDD] bg-white p-1.5 shadow-[0_12px_32px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card"[39m
+    [33mdata-align[39m=[32m"start"[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-menu-content[39m=[32m""[39m
+    [33mdata-side[39m=[32m"top"[39m
+    [33mdata-state[39m=[32m"open"[39m
+    [33mdir[39m=[32m"ltr"[39m
+    [33mid[39m=[32m"radix-:r1:"[39m
+    [33mrole[39m=[32m"menu"[39m
+    [33mstyle[39m=[32m"--radix-dropdown-menu-content-transform-origin: var(--radix-popper-transform-origin); --radix-dropdown-menu-content-available-width: var(--radix-popper-available-width); --radix-dropdown-menu-content-available-height: var(--radix-popper-available-height); --radix-dropdown-menu-trigger-width: var(--radix-popper-anchor-width); --radix-dropdown-menu-trigger-height: var(--radix-popper-anchor-height); pointer-events: auto; outline-color: none; outline-style: none; outline-width: initial;"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  menuitem:
+
+  Name "添加照片和文件":
+  [36m<div[39m
+    [33mclass[39m=[32m"relative flex cursor-default select-none items-center outline-none transition-colors focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0 gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 dark:focus:bg-white/10"[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-collection-item[39m=[32m""[39m
+    [33mrole[39m=[32m"menuitem"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "先出方案":
+  [36m<div[39m
+    [33mclass[39m=[32m"relative flex cursor-default select-none items-center outline-none transition-colors focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0 gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 dark:focus:bg-white/10"[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-collection-item[39m=[32m""[39m
+    [33mrole[39m=[32m"menuitem"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "自动执行":
+  [36m<div[39m
+    [33mclass[39m=[32m"relative flex cursor-default select-none items-center outline-none transition-colors focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0 gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 dark:focus:bg-white/10"[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-collection-item[39m=[32m""[39m
+    [33mrole[39m=[32m"menuitem"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "技能 自动":
+  [36m<div[39m
+    [33maria-controls[39m=[32m"radix-:r5:"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33mclass[39m=[32m"flex cursor-default select-none items-center outline-none [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 data-[state=open]:bg-[#EFEFEF]/70 dark:focus:bg-white/10 dark:data-[state=open]:bg-white/10"[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-collection-item[39m=[32m""[39m
+    [33mdata-state[39m=[32m"closed"[39m
+    [33mid[39m=[32m"radix-:r6:"[39m
+    [33mrole[39m=[32m"menuitem"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  separator:
+
+  Name "":
+  [36m<div[39m
+    [33maria-orientation[39m=[32m"horizontal"[39m
+    [33mclass[39m=[32m"-mx-1 h-px my-1 bg-[#DCDDDD]/80 dark:bg-white/10"[39m
+    [33mrole[39m=[32m"separator"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<div[39m
+    [33maria-orientation[39m=[32m"horizontal"[39m
+    [33mclass[39m=[32m"-mx-1 h-px my-1 bg-[#DCDDDD]/80 dark:bg-white/10"[39m
+    [33mrole[39m=[32m"separator"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body[39m
+  [33mdata-scroll-locked[39m=[32m"1"[39m
+  [33mstyle[39m=[32m"pointer-events: none;"[39m
+[36m>[39m
+  [36m<span[39m
+    [33maria-hidden[39m=[32m"true"[39m
+    [33mdata-aria-hidden[39m=[32m"true"[39m
+    [33mdata-radix-focus-guard[39m=[32m""[39m
+    [33mstyle[39m=[32m"opacity: 0; position: fixed; pointer-events: none; outline-color: none; outline-style: none; outline-width: initial;"[39m
+    [33mtabindex[39m=[32m"0"[39m
+  [36m/>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33maria-hidden[39m=[32m"true"[39m
+      [33mclass[39m=[32m"w-full mx-auto max-w-[760px] px-3 pb-4 sm:px-6 sm:pb-6"[39m
+      [33mdata-aria-hidden[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"hd-task-composer relative overflow-hidden border transition-[border-color,box-shadow] rounded-lg border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90 focus-within:border-[#FF0061]/40 focus-within:shadow-[0_8px_24px_rgba(17,24,39,0.08)] focus-within:ring-2 focus-within:ring-[#FF0061]/10"[39m
+      [36m>[39m
+        [36m<textarea[39m
+          [33mclass[39m=[32m"flex w-full rounded-md border-input py-2 focus-visible:outline-none focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none border-0 bg-transparent shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0 px-4 pr-14 text-[15px] min-h-[92px] pb-12 pt-4"[39m
+          [33mplaceholder[39m=[32m"描述你想让 HOLA DAY 做什么..."[39m
+          [33mrows[39m=[32m"2"[39m
+          [33mstyle[39m=[32m"max-height: 10rem;"[39m
+        [36m/>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"hd-composer-tools absolute bottom-2.5 left-2.5"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-controls[39m=[32m"radix-:r1:"[39m
+            [33maria-expanded[39m=[32m"true"[39m
+            [33maria-haspopup[39m=[32m"menu"[39m
+            [33maria-label[39m=[32m"附件与任务选项"[39m
+            [33mclass[39m=[32m"inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-transparent transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:text-foreground/75 dark:hover:bg-white/10 bg-[#FF0061]/5 text-[#FF0061] dark:bg-[#FF0061]/10"[39m
+            [33mdata-state[39m=[32m"open"[39m
+            [33mid[39m=[32m"radix-:r0:"[39m
+            [33mtitle[39m=[32m"附件与任务选项"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33mclass[39m=[32m"lucide lucide-plus h-4 w-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M5 12h14"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 5v14"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<input[39m
+          [33maccept[39m=[32m".csv,.xlsx,.xls,.docx,.pdf,.txt,.json,.md,.png,.jpg,.jpeg,.webp,.gif,image/*"[39m
+          [33mclass[39m=[32m"hidden"[39m
+          [33mmultiple[39m=[32m""[39m
+          [33mtype[39m=[32m"file"[39m
+        [36m/>[39m
+        [36m<button[39m
+          [33maria-label[39m=[32m"发送"[39m
+          [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hd-prompt-send absolute rounded-full focus-visible:ring-[#FF0061]/25 bottom-2.5 right-2.5 h-8 w-8 bg-[#FF0061] text-white shadow-[0_4px_12px_rgba(255,0,97,0.18)] hover:bg-[#FF0061]/90"[39m
+          [33mdisabled[39m=[32m""[39m
+          [33mtitle[39m=[32m"发送"[39m
+        [36m>[39m
+          [36m<svg[39m
+            [33mclass[39m=[32m"lucide lucide-arrow-up h-4 w-4"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"24"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"24"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<path[39m
+              [33md[39m=[32m"m5 12 7-7 7 7"[39m
+            [36m/>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M12 19V5"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+        [36m</button>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"mt-2 flex min-h-[28px] items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground/70"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 flex-wrap items-center gap-1.5"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"inline-flex max-w-[180px] items-center rounded-full border px-2.5 py-1 font-medium shadow-[0_1px_2px_rgba(17,24,39,0.03)] border-[#FF0061]/20 bg-[#FF0061]/5 text-[#FF0061] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10"[39m
+            [33mtitle[39m=[32m"会直接进入网页执行；遇到登录、验证码或信息不足会暂停等你补充。"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"truncate"[39m
+            [36m>[39m
+              [0m自动执行[0m
+            [36m</span>[39m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"inline-flex max-w-[180px] items-center rounded-full border px-2.5 py-1 font-medium shadow-[0_1px_2px_rgba(17,24,39,0.03)] border-[#DCDDDD]/70 bg-white/45 text-[#595757] dark:border-white/10 dark:bg-white/5 dark:text-foreground/75"[39m
+            [33mtitle[39m=[32m"需要专业流程时自动启用；否则走通用执行。"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"truncate"[39m
+            [36m>[39m
+              [0m技能自动[0m
+            [36m</span>[39m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"hidden shrink-0 rounded-[6px] px-1.5 py-0.5 text-[#ADADAD] sm:inline"[39m
+        [36m>[39m
+          [0mEnter 发送[0m
+        [36m</span>[3...
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/InputArea.permissions.test.tsx > composer task choices independent of attachment entitlement > exposes exclusive execution mode selection without closing the menu
+TestingLibraryElementError: Unable to find an accessible element with the role "menuitemradio" and name "自动执行"
+
+Here are the accessible roles:
+
+  menu:
+
+  Name "附件与任务选项":
+  [36m<div[39m
+    [33maria-labelledby[39m=[32m"radix-:r0:"[39m
+    [33maria-orientation[39m=[32m"vertical"[39m
+    [33mclass[39m=[32m"min-w-[8rem] overflow-hidden border text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 w-[206px] z-[80] rounded-[8px] border-[#DCDDDD] bg-white p-1.5 shadow-[0_12px_32px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card"[39m
+    [33mdata-align[39m=[32m"start"[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-menu-content[39m=[32m""[39m
+    [33mdata-side[39m=[32m"top"[39m
+    [33mdata-state[39m=[32m"open"[39m
+    [33mdir[39m=[32m"ltr"[39m
+    [33mid[39m=[32m"radix-:r1:"[39m
+    [33mrole[39m=[32m"menu"[39m
+    [33mstyle[39m=[32m"--radix-dropdown-menu-content-transform-origin: var(--radix-popper-transform-origin); --radix-dropdown-menu-content-available-width: var(--radix-popper-available-width); --radix-dropdown-menu-content-available-height: var(--radix-popper-available-height); --radix-dropdown-menu-trigger-width: var(--radix-popper-anchor-width); --radix-dropdown-menu-trigger-height: var(--radix-popper-anchor-height); pointer-events: auto; outline-color: none; outline-style: none; outline-width: initial;"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  menuitem:
+
+  Name "添加照片和文件":
+  [36m<div[39m
+    [33mclass[39m=[32m"relative flex cursor-default select-none items-center outline-none transition-colors focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0 gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 dark:focus:bg-white/10"[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-collection-item[39m=[32m""[39m
+    [33mrole[39m=[32m"menuitem"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "先出方案":
+  [36m<div[39m
+    [33mclass[39m=[32m"relative flex cursor-default select-none items-center outline-none transition-colors focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0 gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 dark:focus:bg-white/10"[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-collection-item[39m=[32m""[39m
+    [33mrole[39m=[32m"menuitem"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "自动执行":
+  [36m<div[39m
+    [33mclass[39m=[32m"relative flex cursor-default select-none items-center outline-none transition-colors focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0 gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 dark:focus:bg-white/10"[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-collection-item[39m=[32m""[39m
+    [33mrole[39m=[32m"menuitem"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "技能 自动":
+  [36m<div[39m
+    [33maria-controls[39m=[32m"radix-:r5:"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33mclass[39m=[32m"flex cursor-default select-none items-center outline-none [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 data-[state=open]:bg-[#EFEFEF]/70 dark:focus:bg-white/10 dark:data-[state=open]:bg-white/10"[39m
+    [33mdata-orientation[39m=[32m"vertical"[39m
+    [33mdata-radix-collection-item[39m=[32m""[39m
+    [33mdata-state[39m=[32m"closed"[39m
+    [33mid[39m=[32m"radix-:r6:"[39m
+    [33mrole[39m=[32m"menuitem"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  separator:
+
+  Name "":
+  [36m<div[39m
+    [33maria-orientation[39m=[32m"horizontal"[39m
+    [33mclass[39m=[32m"-mx-1 h-px my-1 bg-[#DCDDDD]/80 dark:bg-white/10"[39m
+    [33mrole[39m=[32m"separator"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<div[39m
+    [33maria-orientation[39m=[32m"horizontal"[39m
+    [33mclass[39m=[32m"-mx-1 h-px my-1 bg-[#DCDDDD]/80 dark:bg-white/10"[39m
+    [33mrole[39m=[32m"separator"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body[39m
+  [33mdata-scroll-locked[39m=[32m"1"[39m
+  [33mstyle[39m=[32m"pointer-events: none;"[39m
+[36m>[39m
+  [36m<span[39m
+    [33maria-hidden[39m=[32m"true"[39m
+    [33mdata-aria-hidden[39m=[32m"true"[39m
+    [33mdata-radix-focus-guard[39m=[32m""[39m
+    [33mstyle[39m=[32m"opacity: 0; position: fixed; pointer-events: none; outline-color: none; outline-style: none; outline-width: initial;"[39m
+    [33mtabindex[39m=[32m"0"[39m
+  [36m/>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33maria-hidden[39m=[32m"true"[39m
+      [33mclass[39m=[32m"w-full mx-auto max-w-[760px] px-3 pb-4 sm:px-6 sm:pb-6"[39m
+      [33mdata-aria-hidden[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"hd-task-composer relative overflow-hidden border transition-[border-color,box-shadow] rounded-lg border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90 focus-within:border-[#FF0061]/40 focus-within:shadow-[0_8px_24px_rgba(17,24,39,0.08)] focus-within:ring-2 focus-within:ring-[#FF0061]/10"[39m
+      [36m>[39m
+        [36m<textarea[39m
+          [33mclass[39m=[32m"flex w-full rounded-md border-input py-2 focus-visible:outline-none focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none border-0 bg-transparent shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0 px-4 pr-14 text-[15px] min-h-[92px] pb-12 pt-4"[39m
+          [33mplaceholder[39m=[32m"描述你想让 HOLA DAY 做什么..."[39m
+          [33mrows[39m=[32m"2"[39m
+          [33mstyle[39m=[32m"max-height: 10rem;"[39m
+        [36m/>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"hd-composer-tools absolute bottom-2.5 left-2.5"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-controls[39m=[32m"radix-:r1:"[39m
+            [33maria-expanded[39m=[32m"true"[39m
+            [33maria-haspopup[39m=[32m"menu"[39m
+            [33maria-label[39m=[32m"附件与任务选项"[39m
+            [33mclass[39m=[32m"inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-transparent transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:text-foreground/75 dark:hover:bg-white/10 bg-[#FF0061]/5 text-[#FF0061] dark:bg-[#FF0061]/10"[39m
+            [33mdata-state[39m=[32m"open"[39m
+            [33mid[39m=[32m"radix-:r0:"[39m
+            [33mtitle[39m=[32m"附件与任务选项"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33mclass[39m=[32m"lucide lucide-plus h-4 w-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M5 12h14"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 5v14"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<input[39m
+          [33maccept[39m=[32m".csv,.xlsx,.xls,.docx,.pdf,.txt,.json,.md,.png,.jpg,.jpeg,.webp,.gif,image/*"[39m
+          [33mclass[39m=[32m"hidden"[39m
+          [33mmultiple[39m=[32m""[39m
+          [33mtype[39m=[32m"file"[39m
+        [36m/>[39m
+        [36m<button[39m
+          [33maria-label[39m=[32m"发送"[39m
+          [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hd-prompt-send absolute rounded-full focus-visible:ring-[#FF0061]/25 bottom-2.5 right-2.5 h-8 w-8 bg-[#FF0061] text-white shadow-[0_4px_12px_rgba(255,0,97,0.18)] hover:bg-[#FF0061]/90"[39m
+          [33mdisabled[39m=[32m""[39m
+          [33mtitle[39m=[32m"发送"[39m
+        [36m>[39m
+          [36m<svg[39m
+            [33mclass[39m=[32m"lucide lucide-arrow-up h-4 w-4"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"24"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"24"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<path[39m
+              [33md[39m=[32m"m5 12 7-7 7 7"[39m
+            [36m/>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M12 19V5"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+        [36m</button>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"mt-2 flex min-h-[28px] items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground/70"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex min-w-0 flex-wrap items-center gap-1.5"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"inline-flex max-w-[180px] items-center rounded-full border px-2.5 py-1 font-medium shadow-[0_1px_2px_rgba(17,24,39,0.03)] border-[#FF0061]/20 bg-[#FF0061]/5 text-[#FF0061] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10"[39m
+            [33mtitle[39m=[32m"会直接进入网页执行；遇到登录、验证码或信息不足会暂停等你补充。"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"truncate"[39m
+            [36m>[39m
+              [0m自动执行[0m
+            [36m</span>[39m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"inline-flex max-w-[180px] items-center rounded-full border px-2.5 py-1 font-medium shadow-[0_1px_2px_rgba(17,24,39,0.03)] border-[#DCDDDD]/70 bg-white/45 text-[#595757] dark:border-white/10 dark:bg-white/5 dark:text-foreground/75"[39m
+            [33mtitle[39m=[32m"需要专业流程时自动启用；否则走通用执行。"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"truncate"[39m
+            [36m>[39m
+              [0m技能自动[0m
+            [36m</span>[39m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<span[39m
+          [33mclass[39m=[32m"hidden shrink-0 rounded-[6px] px-1.5 py-0.5 text-[#ADADAD] sm:inline"[39m
+        [36m>[39m
+          [0mEnter 发送[0m
+        [36m</span>[3...
+ ❯ Object.getElementError ../../node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/InputArea.permissions.test.tsx:52:25
+     50|     const { user } = mount(true);
+     51|     await user.click(screen.getByRole('button', { name: '附件与任务选…
+     52|     const auto = screen.getByRole('menuitemradio', { name: '自动执行' …
+       |                         ^
+     53|     const plan = screen.getByRole('menuitemradio', { name: '先出方案' …
+     54|     expect(auto.getAttribute('aria-checked')).toBe('true');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 passed (9)
+   Start at  01:05:30
+   Duration  1.79s (transform 434ms, setup 0ms, collect 837ms, tests 316ms, environment 304ms, prepare 45ms)
+
+/Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @holaday/web-workbench@0.0.0 test: `vitest run src/components/InputArea.permissions.test.tsx --maxWorkers=1 --minWorkers=1`
+Exit status 1

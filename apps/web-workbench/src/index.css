@@ -17,25 +17,25 @@
     --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 240 10% 3.9%;
-    /* Phase 20b — brand pink (#EA1F59) replaces the neutral default
+    /* Phase 20b — brand pink (#FF0061) replaces the neutral default
      * primary so all `bg-primary` / `text-primary` / `ring-primary`
      * surfaces (buttons, focus rings, selected sidebar items, pricing
      * "推荐" badge, etc.) pick up the brand color automatically. */
-    --primary: 343 83% 52%;
+    --primary: 337.1764705882 100% 50%;
     --primary-foreground: 0 0% 100%;
     --secondary: 240 4.8% 95.9%;
     --secondary-foreground: 240 5.9% 10%;
     --muted: 240 4.8% 95.9%;
     --muted-foreground: 240 3.8% 46.1%;
-    /* Brand accent uses the same #EA1F59 hue; lighter states should
+    /* Brand accent uses the same #FF0061 hue; lighter states should
      * come from opacity instead of drifting to a second pink. */
-    --accent: 343 83% 52%;
+    --accent: 337.1764705882 100% 50%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
-    --ring: 343 83% 52%;
+    --ring: 337.1764705882 100% 50%;
     --radius: 0.625rem;
     /* shadcn sidebar tokens (optimization #4). Sidebar reads as a
      * subtly differentiated surface — sidebar background sits at
@@ -45,12 +45,12 @@
      * highlights match the rest of the UI. */
     --sidebar-background: 0 0% 100%;
     --sidebar-foreground: 240 10% 3.9%;
-    --sidebar-primary: 343 83% 52%;
+    --sidebar-primary: 337.1764705882 100% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 240 4.8% 95.9%;
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 240 5.9% 90%;
-    --sidebar-ring: 343 83% 52%;
+    --sidebar-ring: 337.1764705882 100% 50%;
   }
 
   .dark {
@@ -68,29 +68,29 @@
     --popover-foreground: 0 0% 98%;
     /* Phase 20b — same brand pink in dark mode. White foreground
      * stays legible on the saturated pink in both themes. */
-    --primary: 343 83% 52%;
+    --primary: 337.1764705882 100% 50%;
     --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 14%;
     --secondary-foreground: 0 0% 98%;
     --muted: 0 0% 14%;
     --muted-foreground: 0 0% 70%;
-    --accent: 343 83% 52%;
+    --accent: 337.1764705882 100% 50%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
     --border: 0 0% 18%;
     --input: 0 0% 14%;
-    --ring: 343 83% 52%;
+    --ring: 337.1764705882 100% 50%;
     /* Dark mode sidebar tokens — sidebar bg slightly darker than
      * card so the rail reads as a distinct elevation layer. */
     --sidebar-background: 0 0% 5%;
     --sidebar-foreground: 0 0% 98%;
-    --sidebar-primary: 343 83% 52%;
+    --sidebar-primary: 337.1764705882 100% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 0 0% 14%;
     --sidebar-accent-foreground: 0 0% 98%;
     --sidebar-border: 0 0% 18%;
-    --sidebar-ring: 343 83% 52%;
+    --sidebar-ring: 337.1764705882 100% 50%;
   }
 }
 
@@ -117,8 +117,13 @@
  * one place.
  */
 @keyframes hola-skel {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 0.8; }
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.8;
+  }
 }
 .hola-skel {
   animation: hola-skel 1.4s ease-in-out infinite;
@@ -132,9 +137,19 @@
  * to produce the wave. Keep identical in both themes.
  */
 @keyframes hola-typing {
-  0% { opacity: 0.25; transform: translateY(0); }
-  30% { opacity: 1; transform: translateY(-2px); }
-  60%, 100% { opacity: 0.25; transform: translateY(0); }
+  0% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
 }
 .hola-typing-dot {
   display: inline-block;
@@ -145,8 +160,12 @@
   border-radius: 9999px;
   animation: hola-typing 1.2s infinite;
 }
-.hola-typing-dot:nth-child(2) { animation-delay: 0.15s; }
-.hola-typing-dot:nth-child(3) { animation-delay: 0.3s; }
+.hola-typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.hola-typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
 
 /*
  * noVNC RFB inserts its own screen / canvas DOM inside the container
@@ -174,7 +193,7 @@
 /* noVNC ships its canvas wrapped in a div that sometimes gets fixed
  * px sizes from scaleViewport. Relax them so they conform to our
  * flex layout instead of overflowing. */
-.vnc-viewport-host:not([data-fit-mode='readable']) > div {
+.vnc-viewport-host:not([data-fit-mode="readable"]) > div {
   max-width: 100%;
   max-height: 100%;
 }
@@ -190,10 +209,16 @@
  * back out so the user's eye finds the Panel after the scroll.
  */
 @keyframes vnc-flash {
-  0%   { box-shadow: 0 0 0 0px rgba(59, 130, 246, 0.0); }
-  25%  { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.4); }
-  100% { box-shadow: 0 0 0 0px rgba(59, 130, 246, 0.0); }
+  0% {
+    box-shadow: 0 0 0 0px rgba(59, 130, 246, 0.0);
+  }
+  25% {
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.4);
+  }
+  100% {
+    box-shadow: 0 0 0 0px rgba(59, 130, 246, 0.0);
+  }
 }
-.vnc-viewport-host[data-flash='1'] {
+.vnc-viewport-host[data-flash="1"] {
   animation: vnc-flash 1.5s ease-out 1;
 }

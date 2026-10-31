@@ -1,7 +1,7 @@
 import type { EnergyCompletionKind } from './energy-progress';
 import type { EnergyAstrologyPeriod } from './energy-types';
-import { REQUIRED_TEST_IDS, type LightTestId } from './experiences/test-content';
 import type { HoladayCardTheme } from './experiences/energy-card-content';
+import { type LightTestId, REQUIRED_TEST_IDS } from './experiences/test-content';
 
 export const ENERGY_PRACTICE_IDS = [
   'breath-window',
@@ -47,7 +47,10 @@ export function isEnergyContentTarget(value: unknown): value is EnergyContentTar
 
   switch (value.type) {
     case 'practice':
-      return hasOnlyKeys(value, ['type', 'practiceId']) && includes(ENERGY_PRACTICE_IDS, value.practiceId);
+      return (
+        hasOnlyKeys(value, ['type', 'practiceId']) &&
+        includes(ENERGY_PRACTICE_IDS, value.practiceId)
+      );
     case 'poll':
       return hasOnlyKeys(value, ['type', 'pollId']) && includes(ENERGY_POLL_IDS, value.pollId);
     case 'test':
@@ -88,6 +91,9 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[])
   return Object.keys(value).every((key) => allowed.includes(key));
 }
 
-function includes<const T extends readonly string[]>(values: T, value: unknown): value is T[number] {
+function includes<const T extends readonly string[]>(
+  values: T,
+  value: unknown,
+): value is T[number] {
   return typeof value === 'string' && values.includes(value as T[number]);
 }

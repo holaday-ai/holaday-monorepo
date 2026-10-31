@@ -1,0 +1,11 @@
+-- Retire the legacy automatic cookie sync: delete every queued legacy cookie
+-- payload (the plaintext `cookies_json` column and the old encrypted blob).
+-- These rows were collected without per-site consent and have no reader since
+-- the sync and pool injection were retired; site-grant imports live in
+-- `browser_session_vaults` and are not touched.
+--
+-- Cookie data only: no other table or column is read or changed. Repeatable:
+-- a second run deletes nothing. No backup is taken here; the release notes
+-- describe the operator's encrypted pre-run backup and its 7-day destruction.
+-- Apply after 0067 and before (or together with) the code deploy.
+DELETE FROM pending_cookies;

@@ -1,18 +1,14 @@
-import { describe, expect, it } from 'vitest';
 import {
   formatStockDateTimeLabel,
-  stockChartHoverTooltipKind,
   stockChartAxisTicks,
+  stockChartHoverTooltipKind,
 } from '@/lib/stock-chart-state';
 import { stockQuickCommands, stockTemporalCopy } from '@/lib/stock-temporal-copy';
+import { describe, expect, it } from 'vitest';
 
 describe('StockTasksPage chart helpers', () => {
   it('does not render future intraday axis labels past the latest real minute', () => {
-    const labels = [
-      '2026-06-30 09:30:00',
-      '2026-06-30 11:30:00',
-      '2026-06-30 14:09:00',
-    ];
+    const labels = ['2026-06-30 09:30:00', '2026-06-30 11:30:00', '2026-06-30 14:09:00'];
 
     const ticks = stockChartAxisTicks(labels, 'intraday');
 
@@ -55,6 +51,8 @@ describe('StockTasksPage temporal commands', () => {
   });
 
   it('retains current commands for a current trusted snapshot', () => {
-    expect(stockQuickCommands(stocks, stockTemporalCopy('current', '2026-08-14'))[0]).toBe('生成今日关注日报');
+    expect(stockQuickCommands(stocks, stockTemporalCopy('current', '2026-08-14'))[0]).toBe(
+      '生成今日关注日报',
+    );
   });
 });

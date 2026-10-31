@@ -1,13 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import {
-  maskWebhookUrl,
-  notificationChannelDeleteDescription,
-} from './notification-channel-copy';
+import { maskWebhookUrl, notificationChannelDeleteDescription } from './notification-channel-copy';
 
 describe('maskWebhookUrl', () => {
   it('masks a webhook URL without exposing the full URL', () => {
-    const url =
-      'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=super-secret-token';
+    const url = 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=super-secret-token';
 
     const masked = maskWebhookUrl(url);
 
@@ -36,8 +32,7 @@ describe('notificationChannelDeleteDescription', () => {
   it('uses the platform label and masked webhook URL', () => {
     const description = notificationChannelDeleteDescription({
       platform: 'wecom',
-      webhookUrl:
-        'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=super-secret-token',
+      webhookUrl: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=super-secret-token',
     });
 
     expect(description).toContain('企业微信 · qyapi.weixin.qq.com/...-token');

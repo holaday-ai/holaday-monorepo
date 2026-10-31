@@ -233,7 +233,11 @@ export const retentionPolicies: readonly RetentionPolicyDefinition[] = [
   {
     id: 'cookie_injection_mixed',
     trigger: '登录 cookie 同步或待注入记录创建',
-    rule: { kind: 'mixed', description: '即时注入或暂存；旧明文字段迁移未完成。' },
+    rule: {
+      kind: 'mixed',
+      description:
+        '旧路径已停用，遗留队列等待清理；新版默认关闭，导入最长7天、profile闲置7天/绝对30天且受授权期限限制，撤销清除密文。旧明文字段迁移需单独验收。',
+    },
     automationStatus: 'not_implemented',
     retryStatus: 'not_implemented',
     evidence: [

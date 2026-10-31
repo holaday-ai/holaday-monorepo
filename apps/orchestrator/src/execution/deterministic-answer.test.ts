@@ -76,6 +76,6 @@ describe('tryDeterministicLightweightAnswer — returns null (defers to model)',
     expect(tryDeterministicLightweightAnswer('')).toBeNull();
     expect(tryDeterministicLightweightAnswer(null)).toBeNull();
     expect(tryDeterministicLightweightAnswer(undefined)).toBeNull();
-    expect(tryDeterministicLightweightAnswer('1 + 1 ' + 'x'.repeat(50))).toBeNull();
+    expect(tryDeterministicLightweightAnswer(`1 + 1 ${'x'.repeat(50)}`)).toBeNull();
   });
 });

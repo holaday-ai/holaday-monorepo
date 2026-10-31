@@ -11,7 +11,7 @@ export type DiscoveryFeedFilter = DiscoveryFeed | '全部';
 
 export function parseDiscoveryFeed(search: string): DiscoveryFeedFilter {
   const feed = new URLSearchParams(search).get('feed');
-  return DISCOVERY_FEEDS.includes(feed as DiscoveryFeed) ? feed as DiscoveryFeed : '全部';
+  return DISCOVERY_FEEDS.includes(feed as DiscoveryFeed) ? (feed as DiscoveryFeed) : '全部';
 }
 
 export function discoveryFeedSearch(feed: DiscoveryFeedFilter): string {

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  notificationChannelTestErrorMessage,
-  notificationStatusFallback,
   normalizeNotificationChannels,
+  notificationChannelTestErrorMessage,
   notificationChannelsLoadErrorCopy,
   notificationChannelsLoadErrorMessage,
+  notificationStatusFallback,
 } from './notification-channel-state';
 
 describe('normalizeNotificationChannels', () => {
@@ -69,9 +69,7 @@ describe('notificationChannelsLoadErrorMessage', () => {
       '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
     );
     expect(notificationChannelsLoadErrorMessage('Webhook 不可用')).toBe('Webhook 不可用');
-    expect(notificationChannelsLoadErrorMessage({})).toBe(
-      '通知渠道暂时无法加载，请稍后重试。',
-    );
+    expect(notificationChannelsLoadErrorMessage({})).toBe('通知渠道暂时无法加载，请稍后重试。');
   });
 
   it('returns title/body copy for rendered load errors', () => {
@@ -102,18 +100,12 @@ describe('notificationChannelTestErrorMessage', () => {
     expect(notificationChannelTestErrorMessage({ status: 503 })).toBe(
       '发送失败，对方服务暂时没有接收，请稍后重试。',
     );
-    expect(notificationChannelTestErrorMessage({ status: 'bad' })).toBe(
-      '发送失败，请稍后重试。',
-    );
+    expect(notificationChannelTestErrorMessage({ status: 'bad' })).toBe('发送失败，请稍后重试。');
   });
 
   it('groups notification status fallbacks by likely next step', () => {
-    expect(notificationStatusFallback(401)).toBe(
-      '发送失败，请检查通知地址或签名配置后重试。',
-    );
-    expect(notificationStatusFallback(500)).toBe(
-      '发送失败，对方服务暂时没有接收，请稍后重试。',
-    );
+    expect(notificationStatusFallback(401)).toBe('发送失败，请检查通知地址或签名配置后重试。');
+    expect(notificationStatusFallback(500)).toBe('发送失败，对方服务暂时没有接收，请稍后重试。');
     expect(notificationStatusFallback(302)).toBe('发送失败，请稍后重试。');
   });
 });

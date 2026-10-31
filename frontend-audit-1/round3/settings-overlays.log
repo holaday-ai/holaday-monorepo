@@ -1,0 +1,6 @@
+sticky P1 []
+before { x: 1138.71875, y: 99.515625, width: 123.28125, height: 32 }
+normal scrolling reveals API form 1
+notice P1 []
+dismissible notices 1
+after dismissing notice opens closure dialog 1

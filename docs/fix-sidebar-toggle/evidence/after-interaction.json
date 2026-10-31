@@ -1,0 +1,119 @@
+[
+  {
+    "width": 1440,
+    "before": {
+      "sidebar": {
+        "x": 0,
+        "width": 318
+      },
+      "spacer": {
+        "x": 0,
+        "width": 318
+      },
+      "browserAddress": {
+        "x": 1229.96875,
+        "width": 69.03125
+      },
+      "state": "expanded",
+      "expanded": "true",
+      "title": "收起侧边栏",
+      "preference": null
+    },
+    "after": {
+      "sidebar": {
+        "x": 0,
+        "width": 82
+      },
+      "spacer": {
+        "x": 0,
+        "width": 80
+      },
+      "browserAddress": {
+        "x": 1105.96875,
+        "width": 193.03125
+      },
+      "state": "collapsed",
+      "expanded": "false",
+      "title": "展开侧边栏",
+      "preference": "sidebar:state=false"
+    }
+  },
+  {
+    "width": 1280,
+    "before": {
+      "sidebar": {
+        "x": 0,
+        "width": 82
+      },
+      "spacer": {
+        "x": 0,
+        "width": 80
+      },
+      "browserAddress": {
+        "x": 1019.96875,
+        "width": 119.03125
+      },
+      "state": "collapsed",
+      "expanded": "false",
+      "title": "展开侧边栏",
+      "preference": null
+    },
+    "after": {
+      "sidebar": {
+        "x": 0,
+        "width": 318
+      },
+      "spacer": {
+        "x": 0,
+        "width": 80
+      },
+      "browserAddress": {
+        "x": 1019.96875,
+        "width": 119.03125
+      },
+      "state": "expanded",
+      "expanded": "true",
+      "title": "收起侧边栏",
+      "preference": null
+    }
+  },
+  {
+    "width": 1024,
+    "before": {
+      "sidebar": {
+        "x": 0,
+        "width": 82
+      },
+      "spacer": {
+        "x": 0,
+        "width": 80
+      },
+      "browserAddress": {
+        "x": 857.96875,
+        "width": 25.03125
+      },
+      "state": "collapsed",
+      "expanded": "false",
+      "title": "展开侧边栏",
+      "preference": null
+    },
+    "after": {
+      "sidebar": {
+        "x": 0,
+        "width": 318
+      },
+      "spacer": {
+        "x": 0,
+        "width": 80
+      },
+      "browserAddress": {
+        "x": 857.96875,
+        "width": 25.03125
+      },
+      "state": "expanded",
+      "expanded": "true",
+      "title": "收起侧边栏",
+      "preference": null
+    }
+  }
+]

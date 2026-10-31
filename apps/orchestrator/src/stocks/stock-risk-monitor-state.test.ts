@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import type {
-  StockRiskSeverity,
-  StockRiskSignalRecord,
-  StockRiskSourceCheck,
-} from './stock-risk-radar-service.js';
 import {
   canonicalStockRiskMonitorSignals,
   compareStockRiskMonitorState,
   nextShanghaiPostmarketRun,
   stockRiskNotificationFingerprint,
 } from './stock-risk-monitor-state.js';
+import type {
+  StockRiskSeverity,
+  StockRiskSignalRecord,
+  StockRiskSourceCheck,
+} from './stock-risk-radar-service.js';
 
 function signal(
   key: StockRiskSignalRecord['key'],
@@ -64,18 +64,22 @@ describe('stock risk monitor state', () => {
       signal('forecast', '警示'),
     ]);
 
-    expect(compareStockRiskMonitorState(previous, current, [
-      check('pledge', 'checked'),
-      check('forecast', 'checked'),
-      check('insider', 'checked'),
-      check('announcements', 'checked'),
-    ])).toEqual({
+    expect(
+      compareStockRiskMonitorState(previous, current, [
+        check('pledge', 'checked'),
+        check('forecast', 'checked'),
+        check('insider', 'checked'),
+        check('announcements', 'checked'),
+      ]),
+    ).toEqual({
       added: [expect.objectContaining({ key: 'forecast', severity: '警示' })],
-      upgraded: [expect.objectContaining({
-        key: 'pledge',
-        severity: '高风险',
-        previousSeverity: '关注',
-      })],
+      upgraded: [
+        expect.objectContaining({
+          key: 'pledge',
+          severity: '高风险',
+          previousSeverity: '关注',
+        }),
+      ],
       resolved: [
         expect.objectContaining({ key: 'inquiry', severity: '警示' }),
         expect.objectContaining({ key: 'insider', severity: '关注' }),
@@ -90,10 +94,13 @@ describe('stock risk monitor state', () => {
       signal('reduction_plan', '关注'),
     ]);
 
-    expect(compareStockRiskMonitorState(previous, [], [
-      check('pledge', 'unavailable'),
-      check('announcements', 'unavailable'),
-    ])).toEqual({
+    expect(
+      compareStockRiskMonitorState(
+        previous,
+        [],
+        [check('pledge', 'unavailable'), check('announcements', 'unavailable')],
+      ),
+    ).toEqual({
       added: [],
       upgraded: [],
       resolved: [],
@@ -111,8 +118,9 @@ describe('stock risk monitor state', () => {
       }),
     ]);
 
-    expect(compareStockRiskMonitorState(previous, current, [check('forecast', 'checked')]))
-      .toEqual({ added: [], upgraded: [], resolved: [], unavailableChecks: [] });
+    expect(compareStockRiskMonitorState(previous, current, [check('forecast', 'checked')])).toEqual(
+      { added: [], upgraded: [], resolved: [], unavailableChecks: [] },
+    );
     expect(current[0]).toMatchObject({ evidenceId: 'evidence-new', sourceDataAsOf: '2026-08-20' });
   });
 
@@ -145,11 +153,14 @@ describe('stock risk monitor state', () => {
   });
 
   it('returns the next Shanghai 16:30 boundary before and at cutoff', () => {
-    expect(nextShanghaiPostmarketRun(new Date('2026-08-19T08:29:59.000Z')).toISOString())
-      .toBe('2026-08-19T08:30:00.000Z');
-    expect(nextShanghaiPostmarketRun(new Date('2026-08-19T08:30:00.000Z')).toISOString())
-      .toBe('2026-08-20T08:30:00.000Z');
-    expect(nextShanghaiPostmarketRun(new Date('2026-12-31T16:00:00.000Z')).toISOString())
-      .toBe('2027-01-01T08:30:00.000Z');
+    expect(nextShanghaiPostmarketRun(new Date('2026-08-19T08:29:59.000Z')).toISOString()).toBe(
+      '2026-08-19T08:30:00.000Z',
+    );
+    expect(nextShanghaiPostmarketRun(new Date('2026-08-19T08:30:00.000Z')).toISOString()).toBe(
+      '2026-08-20T08:30:00.000Z',
+    );
+    expect(nextShanghaiPostmarketRun(new Date('2026-12-31T16:00:00.000Z')).toISOString()).toBe(
+      '2027-01-01T08:30:00.000Z',
+    );
   });
 });

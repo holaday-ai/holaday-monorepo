@@ -88,6 +88,25 @@ describe('persistAndBroadcastBrowserDispatchFailure', () => {
 });
 
 describe('captureBrowserFinalState', () => {
+  it('keeps the final page text as an in-process receipt (FIX-30)', async () => {
+    const page = {
+      url: () => 'https://example.com/loaded',
+      evaluate: vi.fn(async () => 'Example Domain body text'),
+    };
+    const state = await captureBrowserFinalState({
+      executor: {
+        getPage: vi.fn(async () => page),
+        screenshot: vi.fn(async () => ({ error: 'renderer closed' })),
+      },
+      logger: { warn: vi.fn() },
+      taskId: 'task_text',
+    });
+    expect(state).toEqual({
+      finalUrl: 'https://example.com/loaded',
+      finalPageText: 'Example Domain body text',
+    });
+  });
+
   it('preserves the real URL even when screenshot capture fails', async () => {
     const logger = { warn: vi.fn() };
     const page = { url: () => 'https://example.com/continued' };

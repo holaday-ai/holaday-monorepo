@@ -48,10 +48,7 @@ describe('selectModelAndEffort — simple → Haiku', () => {
 
 describe('selectModelAndEffort — complex → Sonnet xhigh (NOT Opus)', () => {
   it('multi-step research routes to Sonnet xhigh', () => {
-    const out = selectModelAndEffort(
-      '帮我做一份关于多步骤研究流程的综合方案',
-      'none',
-    );
+    const out = selectModelAndEffort('帮我做一份关于多步骤研究流程的综合方案', 'none');
     expect(out.model).toBe('claude-sonnet-4-6');
     expect(out.effort).toBe('xhigh');
   });
@@ -117,10 +114,7 @@ describe('selectModelAndEffort — default → Sonnet high', () => {
 
 describe('selectModelAndEffort — keyword precedence', () => {
   it('complex keyword wins over a simple keyword in the same prompt', () => {
-    const out = selectModelAndEffort(
-      '翻译这段，并做跨领域综合分析',
-      'none',
-    );
+    const out = selectModelAndEffort('翻译这段，并做跨领域综合分析', 'none');
     expect(out.model).toBe('claude-sonnet-4-6');
     expect(out.effort).toBe('xhigh');
   });

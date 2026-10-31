@@ -18,14 +18,14 @@
  * the budget they paid for.
  */
 
-import { newExternalId, type PlanId } from '@holaday/shared-types';
+import { type PlanId, newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, desc, eq, inArray, lt, or } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   executeBatch,
-  isResumableBatchStatus,
   insertBatch,
+  isResumableBatchStatus,
   summarizeBatchItemStatuses,
 } from '../../agent/batch-executor.js';
 import { readAffectedRows } from '../../db/mysql-result.js';
@@ -77,9 +77,10 @@ function startBatchExecution(ctx: AuthenticatedContext, batchExternalId: string)
   });
 }
 
-async function requireUser(
-  ctx: { db: typeof import('../../db/client.js').db; userId: string },
-): Promise<{ id: number; externalId: string; planId: PlanId }> {
+async function requireUser(ctx: {
+  db: typeof import('../../db/client.js').db;
+  userId: string;
+}): Promise<{ id: number; externalId: string; planId: PlanId }> {
   const [row] = await ctx.db
     .select({ id: users.id, externalId: users.externalId, plan: users.plan })
     .from(users)
@@ -90,8 +91,7 @@ async function requireUser(
   }
   // `plan` is a varchar — coerce to PlanId, default to 'free' for
   // legacy / pre-Phase-10 rows that might carry a freer value.
-  const planId: PlanId =
-    row.plan === 'basic' || row.plan === 'pro' ? row.plan : 'free';
+  const planId: PlanId = row.plan === 'basic' || row.plan === 'pro' ? row.plan : 'free';
   return { id: row.id, externalId: row.externalId, planId };
 }
 
@@ -111,96 +111,93 @@ export const batchTasksRouter = router({
         .optional(),
     )
     .query(async ({ ctx, input }) => {
-    const user = await requireUser(ctx);
-    const limit = input?.limit ?? 50;
-    const whereParts = [eq(batchTasks.userId, user.id)];
-    if (input?.cursor) {
-      whereParts.push(
-        or(
-          lt(batchTasks.createdAt, input.cursor.createdAt),
-          and(
-            eq(batchTasks.createdAt, input.cursor.createdAt),
-            lt(batchTasks.id, input.cursor.id),
-          ),
-        )!,
-      );
-    }
-    const rows = await ctx.db
-      .select({
-        id: batchTasks.id,
-        externalId: batchTasks.externalId,
-        name: batchTasks.name,
-        status: batchTasks.status,
-        concurrency: batchTasks.concurrency,
-        itemsTotal: batchTasks.itemsTotal,
-        itemsDone: batchTasks.itemsDone,
-        itemsReview: batchTasks.itemsReview,
-        itemsFailed: batchTasks.itemsFailed,
-        createdAt: batchTasks.createdAt,
-        completedAt: batchTasks.completedAt,
-      })
-      .from(batchTasks)
-      .where(and(...whereParts))
-      .orderBy(desc(batchTasks.createdAt), desc(batchTasks.id))
-      .limit(limit + 1);
-    const hasMore = rows.length > limit;
-    const page = rows.slice(0, limit);
-    for (const batch of page) {
-      if (isResumableBatchStatus(batch.status)) {
-        startBatchExecution(ctx, batch.externalId);
+      const user = await requireUser(ctx);
+      const limit = input?.limit ?? 50;
+      const whereParts = [eq(batchTasks.userId, user.id)];
+      if (input?.cursor) {
+        whereParts.push(
+          or(
+            lt(batchTasks.createdAt, input.cursor.createdAt),
+            and(
+              eq(batchTasks.createdAt, input.cursor.createdAt),
+              lt(batchTasks.id, input.cursor.id),
+            ),
+          )!,
+        );
       }
-    }
-    const batchIds = page.map((r) => r.id);
-    const countsByBatch = new Map<
-      number,
-      ReturnType<typeof summarizeBatchItemStatuses>
-    >();
-    if (batchIds.length > 0) {
-      const itemRows = await ctx.db
+      const rows = await ctx.db
         .select({
-          batchId: batchTaskItems.batchId,
-          status: batchTaskItems.status,
+          id: batchTasks.id,
+          externalId: batchTasks.externalId,
+          name: batchTasks.name,
+          status: batchTasks.status,
+          concurrency: batchTasks.concurrency,
+          itemsTotal: batchTasks.itemsTotal,
+          itemsDone: batchTasks.itemsDone,
+          itemsReview: batchTasks.itemsReview,
+          itemsFailed: batchTasks.itemsFailed,
+          createdAt: batchTasks.createdAt,
+          completedAt: batchTasks.completedAt,
         })
-        .from(batchTaskItems)
-        .where(inArray(batchTaskItems.batchId, batchIds));
-      const statusesByBatch = new Map<number, Array<{ status: string }>>();
-      for (const item of itemRows) {
-        const bucket = statusesByBatch.get(item.batchId) ?? [];
-        bucket.push({ status: item.status });
-        statusesByBatch.set(item.batchId, bucket);
+        .from(batchTasks)
+        .where(and(...whereParts))
+        .orderBy(desc(batchTasks.createdAt), desc(batchTasks.id))
+        .limit(limit + 1);
+      const hasMore = rows.length > limit;
+      const page = rows.slice(0, limit);
+      for (const batch of page) {
+        if (isResumableBatchStatus(batch.status)) {
+          startBatchExecution(ctx, batch.externalId);
+        }
       }
-      for (const [id, statuses] of statusesByBatch) {
-        countsByBatch.set(id, summarizeBatchItemStatuses(statuses));
+      const batchIds = page.map((r) => r.id);
+      const countsByBatch = new Map<number, ReturnType<typeof summarizeBatchItemStatuses>>();
+      if (batchIds.length > 0) {
+        const itemRows = await ctx.db
+          .select({
+            batchId: batchTaskItems.batchId,
+            status: batchTaskItems.status,
+          })
+          .from(batchTaskItems)
+          .where(inArray(batchTaskItems.batchId, batchIds));
+        const statusesByBatch = new Map<number, Array<{ status: string }>>();
+        for (const item of itemRows) {
+          const bucket = statusesByBatch.get(item.batchId) ?? [];
+          bucket.push({ status: item.status });
+          statusesByBatch.set(item.batchId, bucket);
+        }
+        for (const [id, statuses] of statusesByBatch) {
+          countsByBatch.set(id, summarizeBatchItemStatuses(statuses));
+        }
       }
-    }
-    const items = page.map((r) => {
-      const counts = countsByBatch.get(r.id) ?? {
-        total: r.itemsTotal,
-        done: r.itemsDone,
-        review: r.itemsReview,
-        failed: r.itemsFailed,
-        cancelled: 0,
-      };
+      const items = page.map((r) => {
+        const counts = countsByBatch.get(r.id) ?? {
+          total: r.itemsTotal,
+          done: r.itemsDone,
+          review: r.itemsReview,
+          failed: r.itemsFailed,
+          cancelled: 0,
+        };
+        return {
+          batchId: r.externalId,
+          name: r.name,
+          status: r.status,
+          concurrency: r.concurrency,
+          itemsTotal: counts.total,
+          itemsDone: counts.done,
+          itemsReview: counts.review,
+          itemsFailed: counts.failed,
+          itemsCancelled: counts.cancelled,
+          createdAt: r.createdAt,
+          completedAt: r.completedAt,
+        };
+      });
+      const last = page[page.length - 1];
       return {
-        batchId: r.externalId,
-        name: r.name,
-        status: r.status,
-        concurrency: r.concurrency,
-        itemsTotal: counts.total,
-        itemsDone: counts.done,
-        itemsReview: counts.review,
-        itemsFailed: counts.failed,
-        itemsCancelled: counts.cancelled,
-        createdAt: r.createdAt,
-        completedAt: r.completedAt,
+        items,
+        nextCursor: hasMore && last ? { id: last.id, createdAt: last.createdAt } : null,
       };
-    });
-    const last = page[page.length - 1];
-    return {
-      items,
-      nextCursor: hasMore && last ? { id: last.id, createdAt: last.createdAt } : null,
-    };
-  }),
+    }),
 
   detail: protectedProcedure
     .input(z.object({ batchId: z.string().min(1) }))
@@ -209,9 +206,7 @@ export const batchTasksRouter = router({
       const [batch] = await ctx.db
         .select()
         .from(batchTasks)
-        .where(
-          and(eq(batchTasks.externalId, input.batchId), eq(batchTasks.userId, user.id)),
-        )
+        .where(and(eq(batchTasks.externalId, input.batchId), eq(batchTasks.userId, user.id)))
         .limit(1);
       if (!batch) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'batch not found' });
@@ -272,8 +267,7 @@ export const batchTasksRouter = router({
           prompt: i.prompt,
           status: i.status,
           errorMessage: i.errorMessage,
-          taskId:
-            i.taskInternalId !== null ? (tasksById.get(i.taskInternalId) ?? null) : null,
+          taskId: i.taskInternalId !== null ? (tasksById.get(i.taskInternalId) ?? null) : null,
           createdAt: i.createdAt,
           completedAt: i.completedAt,
         })),
@@ -284,10 +278,7 @@ export const batchTasksRouter = router({
     .input(
       z.object({
         name: z.string().trim().max(200).optional(),
-        prompts: z
-          .array(z.string().trim().min(1).max(2000))
-          .min(1)
-          .max(MAX_BATCH_ITEMS),
+        prompts: z.array(z.string().trim().min(1).max(2000)).min(1).max(MAX_BATCH_ITEMS),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -351,9 +342,7 @@ export const batchTasksRouter = router({
       const [row] = await ctx.db
         .select({ status: batchTasks.status })
         .from(batchTasks)
-        .where(
-          and(eq(batchTasks.externalId, input.batchId), eq(batchTasks.userId, user.id)),
-        )
+        .where(and(eq(batchTasks.externalId, input.batchId), eq(batchTasks.userId, user.id)))
         .limit(1);
       if (!row) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'batch not found' });

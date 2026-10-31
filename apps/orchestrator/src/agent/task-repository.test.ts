@@ -1,3 +1,5 @@
+import type { SQL } from 'drizzle-orm';
+import { MySqlDialect } from 'drizzle-orm/mysql-core';
 /**
  * Phase 3 R1 — unit tests for the awaiting_user state-machine guard
  * in `TaskRepository.persistVisionOutcome`. Heavyweight DB tests live
@@ -10,8 +12,6 @@
  * the fake to drive both branches.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { type SQL } from 'drizzle-orm';
-import { MySqlDialect } from 'drizzle-orm/mysql-core';
 
 import type { DB } from '../db/client.js';
 import type { TaskState } from './task-controller.js';
@@ -30,23 +30,44 @@ interface Captured {
 }
 
 describe('persistCurrentCompletedSuggestions', () => {
-  it.each([0, 1])('uses an atomic JSON patch and reports affected rows=%i', async (affectedRows) => {
-    const {db,captured}=fakeDbWithAffectedRows(affectedRows);
-    const saved=await new TaskRepository(db).persistCurrentCompletedSuggestions('tsk_fixture','original summary',['完善执行方案']);
-    expect(saved).toBe(affectedRows===1);
-    expect(Object.keys(captured.taskUpdate!)).toEqual(['result']);
-    const dialect=new MySqlDialect();
-    const patch=dialect.sqlToQuery(captured.taskUpdate!.result as SQL);
-    expect(patch.sql).toBe("JSON_SET(`tasks`.`result`, '$.followUpSuggestions', CAST(? AS JSON))");
-    expect(patch.params).toEqual(['["完善执行方案"]']);
-    const guard=dialect.sqlToQuery(captured.whereClauses[0] as SQL);
-    expect(guard.sql).toBe("(`tasks`.`external_id` = ? and `tasks`.`status` = ? and JSON_UNQUOTE(JSON_EXTRACT(`tasks`.`result`, '$.summary')) = ?)");
-    expect(guard.params).toEqual(['tsk_fixture','completed','original summary']);
-    expect(captured.eventInserts).toBe(0);
-  });
-  it.each([[],['x'],['x'.repeat(41)],['合成建议','合成建议','合成建议','合成建议']].map(items=>({items})))('rejects invalid suggestion payloads without writing ($items)',async({items})=>{
-    const {db,captured}=fakeDbWithAffectedRows(1);
-    expect(await new TaskRepository(db).persistCurrentCompletedSuggestions('tsk_fixture','summary',items)).toBe(false);
+  it.each([0, 1])(
+    'uses an atomic JSON patch and reports affected rows=%i',
+    async (affectedRows) => {
+      const { db, captured } = fakeDbWithAffectedRows(affectedRows);
+      const saved = await new TaskRepository(db).persistCurrentCompletedSuggestions(
+        'tsk_fixture',
+        'original summary',
+        ['完善执行方案'],
+      );
+      expect(saved).toBe(affectedRows === 1);
+      expect(Object.keys(captured.taskUpdate!)).toEqual(['result']);
+      const dialect = new MySqlDialect();
+      const patch = dialect.sqlToQuery(captured.taskUpdate!.result as SQL);
+      expect(patch.sql).toBe(
+        "JSON_SET(`tasks`.`result`, '$.followUpSuggestions', CAST(? AS JSON))",
+      );
+      expect(patch.params).toEqual(['["完善执行方案"]']);
+      const guard = dialect.sqlToQuery(captured.whereClauses[0] as SQL);
+      expect(guard.sql).toBe(
+        "(`tasks`.`external_id` = ? and `tasks`.`status` = ? and JSON_UNQUOTE(JSON_EXTRACT(`tasks`.`result`, '$.summary')) = ?)",
+      );
+      expect(guard.params).toEqual(['tsk_fixture', 'completed', 'original summary']);
+      expect(captured.eventInserts).toBe(0);
+    },
+  );
+  it.each(
+    [[], ['x'], ['x'.repeat(41)], ['合成建议', '合成建议', '合成建议', '合成建议']].map(
+      (items) => ({ items }),
+    ),
+  )('rejects invalid suggestion payloads without writing ($items)', async ({ items }) => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
+    expect(
+      await new TaskRepository(db).persistCurrentCompletedSuggestions(
+        'tsk_fixture',
+        'summary',
+        items,
+      ),
+    ).toBe(false);
     expect(captured.txUpdates).toBe(0);
   });
 });
@@ -96,7 +117,7 @@ function fakeDbWithAffectedRows(affectedRows: number) {
 
   const transaction = async (cb: (tx: unknown) => Promise<void>) => {
     captured.transactionRan = true;
-    await cb({ update, insert });
+    await cb({ select, update, insert });
   };
 
   const db = { select, update, insert, transaction } as unknown as DB;
@@ -124,57 +145,89 @@ function collectDrizzleParamValues(input: unknown, out: unknown[] = []): unknown
 }
 
 describe('scoped legacy reply writes', () => {
-  it.each(['resume', 'handoff'] as const)('guards both owner read and %s update against new core executions', async kind => {
-    const { db, captured } = fakeDbWithAffectedRows(0);
-    const repo = new TaskRepository(db, 'eval');
-    const result = kind === 'resume'
-      ? await repo.markAwaitingReplyResumed('tsk_scope', 42)
-      : await repo.markAwaitingReplyCompleted('tsk_scope', { summary: 'synthetic handoff' }, 42);
-    expect(result).toEqual({ persisted: false });
-    expect(captured.eventInserts).toBe(0);
-    for (const condition of [...captured.readWhereClauses, ...captured.whereClauses]) {
-      const guard = new MySqlDialect().sqlToQuery(condition as SQL);
-      expect(guard.sql).toContain('`tasks`.`user_id` = ?');
-      expect(guard.sql).toContain('`tasks`.`origin` = ?');
-      expect(guard.sql).toContain('`tasks`.`execution_id` is null');
-      expect(guard.sql).toContain('`tasks`.`execution_revision` = ?');
-      expect(guard.sql).toContain('`tasks`.`core_record_version` = ?');
-      expect(guard.params).toEqual(['tsk_scope', 'awaiting_user', 42, 'eval', 0, 0]);
-    }
-    expect(captured.readWhereClauses).toHaveLength(1);
-    expect(captured.whereClauses).toHaveLength(1);
-  });
-  it.each([0, -1, Number.NaN, 1.5])('rejects invalid owner %s before any database operation', async owner => {
-    const { db, captured } = fakeDbWithAffectedRows(1);
-    const repo = new TaskRepository(db);
-    await expect(repo.markAwaitingReplyResumed('tsk_scope', owner)).rejects.toThrow('LEGACY_REPLY_SCOPE_INVALID');
-    await expect(repo.markAwaitingReplyCompleted('tsk_scope', {}, owner)).rejects.toThrow('LEGACY_REPLY_SCOPE_INVALID');
-    expect(captured.readWhereClauses).toEqual([]);
-    expect(captured.txUpdates).toBe(0);
-  });
+  it.each(['resume', 'handoff'] as const)(
+    'guards both owner read and %s update against new core executions',
+    async (kind) => {
+      const { db, captured } = fakeDbWithAffectedRows(0);
+      const repo = new TaskRepository(db, 'eval');
+      const result =
+        kind === 'resume'
+          ? await repo.markAwaitingReplyResumed('tsk_scope', 42)
+          : await repo.markAwaitingReplyCompleted(
+              'tsk_scope',
+              { summary: 'synthetic handoff' },
+              42,
+            );
+      expect(result).toEqual({ persisted: false });
+      expect(captured.eventInserts).toBe(0);
+      for (const condition of [...captured.readWhereClauses, ...captured.whereClauses]) {
+        const guard = new MySqlDialect().sqlToQuery(condition as SQL);
+        expect(guard.sql).toContain('`tasks`.`user_id` = ?');
+        expect(guard.sql).toContain('`tasks`.`origin` = ?');
+        expect(guard.sql).toContain('`tasks`.`execution_id` is null');
+        expect(guard.sql).toContain('`tasks`.`execution_revision` = ?');
+        expect(guard.sql).toContain('`tasks`.`core_record_version` = ?');
+        expect(guard.params).toEqual(['tsk_scope', 'awaiting_user', 42, 'eval', 0, 0]);
+      }
+      expect(captured.readWhereClauses).toHaveLength(1);
+      expect(captured.whereClauses).toHaveLength(1);
+    },
+  );
+  it.each([0, -1, Number.NaN, 1.5])(
+    'rejects invalid owner %s before any database operation',
+    async (owner) => {
+      const { db, captured } = fakeDbWithAffectedRows(1);
+      const repo = new TaskRepository(db);
+      await expect(repo.markAwaitingReplyResumed('tsk_scope', owner)).rejects.toThrow(
+        'LEGACY_REPLY_SCOPE_INVALID',
+      );
+      await expect(repo.markAwaitingReplyCompleted('tsk_scope', {}, owner)).rejects.toThrow(
+        'LEGACY_REPLY_SCOPE_INVALID',
+      );
+      expect(captured.readWhereClauses).toEqual([]);
+      expect(captured.txUpdates).toBe(0);
+    },
+  );
 });
 
 describe('persistActiveCorePlan', () => {
-  it.each([0, 1])('only writes advisory plans to a still-executing task (%i affected)', async affected => {
-    const { db, captured } = fakeDbWithAffectedRows(affected);
-    const result = await new TaskRepository(db).persistActiveCorePlan('tsk_plan', 'Validated plan');
-    expect(result).toEqual({ persisted: affected === 1 });
-    expect(captured.taskUpdate).toEqual({ planText: 'Validated plan', planStatus: [] });
-    expect(collectDrizzleParamValues(captured.whereClauses)).toEqual(['tsk_plan', 'executing']);
-    expect(captured.eventInserts).toBe(0);
-  });
+  it.each([0, 1])(
+    'only writes advisory plans to a still-executing task (%i affected)',
+    async (affected) => {
+      const { db, captured } = fakeDbWithAffectedRows(affected);
+      const result = await new TaskRepository(db).persistActiveCorePlan(
+        'tsk_plan',
+        'Validated plan',
+      );
+      expect(result).toEqual({ persisted: affected === 1 });
+      expect(captured.taskUpdate).toEqual({ planText: 'Validated plan', planStatus: [] });
+      expect(collectDrizzleParamValues(captured.whereClauses)).toEqual(['tsk_plan', 'executing']);
+      expect(captured.eventInserts).toBe(0);
+    },
+  );
 });
 
 describe('isTaskExecuting', () => {
-  it.each(['executing', 'cancelled', 'completed', 'failed', 'awaiting_user', undefined])('fails closed for non-executing or missing rows: %s', async status => {
-    let condition: unknown;
-    const db = { select: () => ({ from: () => ({ where: (where: unknown) => {
-      condition = where;
-      return { limit: async () => status ? [{ status }] : [] };
-    } }) }) } as unknown as DB;
-    expect(await new TaskRepository(db).isTaskExecuting('tsk_active_guard')).toBe(status === 'executing');
-    expect(collectDrizzleParamValues(condition)).toEqual(['tsk_active_guard']);
-  });
+  it.each(['executing', 'cancelled', 'completed', 'failed', 'awaiting_user', undefined])(
+    'fails closed for non-executing or missing rows: %s',
+    async (status) => {
+      let condition: unknown;
+      const db = {
+        select: () => ({
+          from: () => ({
+            where: (where: unknown) => {
+              condition = where;
+              return { limit: async () => (status ? [{ status }] : []) };
+            },
+          }),
+        }),
+      } as unknown as DB;
+      expect(await new TaskRepository(db).isTaskExecuting('tsk_active_guard')).toBe(
+        status === 'executing',
+      );
+      expect(collectDrizzleParamValues(condition)).toEqual(['tsk_active_guard']);
+    },
+  );
 });
 
 describe('isCurrentCompletedOutcome', () => {
@@ -191,11 +244,19 @@ describe('isCurrentCompletedOutcome', () => {
     [null, false],
   ] as const)('accepts only the still-current successful result: %j', async (row, expected) => {
     let condition: unknown;
-    const db = { select: () => ({ from: () => ({ where: (where: unknown) => {
-      condition = where;
-      return { limit: async () => row ? [row] : [] };
-    } }) }) } as unknown as DB;
-    expect(await new TaskRepository(db).isCurrentCompletedOutcome('tsk_outcome_guard', 'Saved answer')).toBe(expected);
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: (where: unknown) => {
+            condition = where;
+            return { limit: async () => (row ? [row] : []) };
+          },
+        }),
+      }),
+    } as unknown as DB;
+    expect(
+      await new TaskRepository(db).isCurrentCompletedOutcome('tsk_outcome_guard', 'Saved answer'),
+    ).toBe(expected);
     expect(collectDrizzleParamValues(condition)).toEqual(['tsk_outcome_guard']);
   });
 });
@@ -235,7 +296,7 @@ function fakeDbForStateTransitions(affectedRows = 1) {
 
   const transaction = async (cb: (tx: unknown) => Promise<void>) => {
     captured.transactionRan = true;
-    await cb({ update, insert });
+    await cb({ select, update, insert });
   };
 
   const db = { select, update, insert, transaction } as unknown as DB;
@@ -283,6 +344,7 @@ function fakeDbForAtomicVideoConfirm(affectedRows = 1) {
     from: () => ({
       where: () => ({
         limit: async () => [{ id: 11 }],
+        for: async () => [{ id: 7 }],
       }),
     }),
   });
@@ -358,7 +420,7 @@ describe('TaskRepository.insertTask source context', () => {
     expect(inserts[0]).toMatchObject({ sourceContext });
   });
 
-  it('persists the repository task origin on every inserted task', async () => {
+  it('persists browser execution mode before dispatch alongside task origin', async () => {
     const inserts: Record<string, unknown>[] = [];
     const transaction = async (cb: (tx: unknown) => Promise<void>) => {
       await cb({
@@ -380,10 +442,10 @@ describe('TaskRepository.insertTask source context', () => {
         cursor: 0,
         pendingConfirm: null,
       },
-      { userId: 7, intent: 'run internal evaluation' },
+      { userId: 7, intent: '去京东查价格', executionMode: 'browser' },
     );
 
-    expect(inserts[0]).toMatchObject({ origin: 'eval' });
+    expect(inserts[0]).toMatchObject({ origin: 'eval', result: { executionMode: 'browser' } });
   });
 });
 
@@ -519,13 +581,7 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
 
     const params = collectDrizzleParamValues(captured.whereClauses.at(-1));
     expect(params).toEqual(
-      expect.arrayContaining([
-        1,
-        'pending',
-        'planning',
-        'queued',
-        'executing',
-      ]),
+      expect.arrayContaining([1, 'pending', 'planning', 'queued', 'executing']),
     );
     expect(params).not.toContain('paused');
     expect(params).not.toContain('awaiting_user');
@@ -546,14 +602,7 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
 
     const params = collectDrizzleParamValues(captured.whereClauses.at(-1));
     expect(params).toEqual(
-      expect.arrayContaining([
-        1,
-        'pending',
-        'planning',
-        'queued',
-        'executing',
-        'paused',
-      ]),
+      expect.arrayContaining([1, 'pending', 'planning', 'queued', 'executing', 'paused']),
     );
     expect(params).not.toContain('awaiting_user');
     expect(params).not.toContain('completed');
@@ -1373,13 +1422,7 @@ describe('TaskRepository task terminal state persistence', () => {
     });
     const params = collectDrizzleParamValues(captured.whereClauses.at(0));
     expect(params).toEqual(
-      expect.arrayContaining([
-        'tsk_state_machine',
-        'pending',
-        'planning',
-        'queued',
-        'executing',
-      ]),
+      expect.arrayContaining(['tsk_state_machine', 'pending', 'planning', 'queued', 'executing']),
     );
     expect(params).not.toContain('awaiting_user');
     expect(params).not.toContain('completed');
@@ -1514,13 +1557,7 @@ describe('TaskRepository task terminal state persistence', () => {
     });
     const params = collectDrizzleParamValues(captured.whereClauses.at(0));
     expect(params).toEqual(
-      expect.arrayContaining([
-        'tsk_state_machine',
-        'pending',
-        'planning',
-        'queued',
-        'executing',
-      ]),
+      expect.arrayContaining(['tsk_state_machine', 'pending', 'planning', 'queued', 'executing']),
     );
     expect(params).not.toContain('awaiting_user');
     expect(params).not.toContain('completed');
@@ -1658,7 +1695,7 @@ describe('TaskRepository task terminal state persistence', () => {
 
     expect(result).toBe(true);
     const sqlText = collectSqlText(captured.statements[0]);
-    expect(sqlText).toContain('status = \'completed\'');
+    expect(sqlText).toContain("status = 'completed'");
     expect(sqlText).toContain('awaiting_kind = NULL');
     expect(sqlText).toContain('awaiting_question = NULL');
     expect(sqlText).toContain('pause_reason = NULL');
@@ -1703,7 +1740,7 @@ describe('TaskRepository task terminal state persistence', () => {
       executionMetadata: { lane: 'video_creation' },
     });
 
-    expect(result).toEqual({ kind: 'created', taskInternalId: 22 });
+    expect(result).toEqual({ kind: 'created', taskInternalId: 22, priorQualityRejects: 0 });
     expect(captured.transactionRan).toBe(true);
     expect(collectSqlText(captured.statements[0])).toContain('video_creation_consumed');
     expect(captured.inserts).toHaveLength(2);
@@ -1746,8 +1783,8 @@ describe('TaskRepository task terminal state persistence', () => {
 
     expect(result.persisted).toBe(true);
     const sqlText = collectSqlText(captured.statements[0]);
-    expect(sqlText).toContain('status = \'awaiting_user\'');
-    expect(sqlText).toContain('awaiting_kind = \'video_quote\'');
+    expect(sqlText).toContain("status = 'awaiting_user'");
+    expect(sqlText).toContain("awaiting_kind = 'video_quote'");
     expect(sqlText).toContain('pause_reason = NULL');
     expect(sqlText).toContain('error_code = NULL');
     expect(sqlText).toContain('error_message = NULL');
@@ -1784,8 +1821,8 @@ describe('TaskRepository task terminal state persistence', () => {
 
     expect(result.persisted).toBe(true);
     const sqlText = collectSqlText(captured.statements[0]);
-    expect(sqlText).toContain('status = \'awaiting_user\'');
-    expect(sqlText).toContain('awaiting_kind = \'video_quote\'');
+    expect(sqlText).toContain("status = 'awaiting_user'");
+    expect(sqlText).toContain("awaiting_kind = 'video_quote'");
     expect(sqlText).toContain('pause_reason = NULL');
     expect(sqlText).toContain('error_code = NULL');
     expect(sqlText).toContain('error_message = NULL');
@@ -1801,5 +1838,43 @@ describe('TaskRepository task terminal state persistence', () => {
     const result = await repo.repromptVideoConfirm('tsk_state_machine', '请选择一个操作');
 
     expect(result.persisted).toBe(false);
+  });
+});
+
+describe('TaskRepository.adoptTaskForBrowserRetry (FIX-34)', () => {
+  const adopt = (from?: 'scrape' | 'generate') => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
+    return new TaskRepository(db)
+      .adoptTaskForBrowserRetry({
+        taskExternalId: 'tsk_fixture',
+        userId: 1,
+        status: 'executing',
+        sourceContext: {},
+        reason: 'r',
+        ...(from ? { from } : {}),
+      })
+      .then((res) => ({ res, captured }));
+  };
+  it('a generate hand-over leaves a legacy row: no core identity or record behind', async () => {
+    const { res, captured } = await adopt('generate');
+    expect(res.persisted).toBe(true);
+    expect(captured.taskUpdate).toMatchObject({
+      executionId: null,
+      executionRevision: 0,
+      coreRecordVersion: 0,
+      result: { executionMode: 'browser' },
+      sourceContext: { reroutedFrom: 'generate' },
+    });
+    expect(captured.eventPayload?.payload).toEqual({
+      from: 'generate',
+      to: 'browser',
+      reason: 'r',
+    });
+  });
+  it('a scrape retry keeps the row head as it was', async () => {
+    const { captured } = await adopt();
+    expect(captured.taskUpdate).not.toHaveProperty('executionId');
+    expect(captured.taskUpdate?.sourceContext).toEqual({});
+    expect(captured.eventPayload?.payload).toMatchObject({ from: 'scrape' });
   });
 });

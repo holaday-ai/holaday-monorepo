@@ -1,11 +1,13 @@
+import { createHash } from 'node:crypto';
 import {
   DEFAULT_TASK_ORIGIN,
   type PlanId,
   type TaskOrigin,
   newExternalId,
 } from '@holaday/shared-types';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
+import { recordQuotaCharge } from '../quota/platform-failure-refunds.js';
 import { type ConsumeReason, QuotaService } from '../quota/quota-service.js';
 
 /**
@@ -32,8 +34,10 @@ import {
   isTaskTerminalStatus,
   taskRunnerOutcomeSourceStatuses,
 } from '../task-status.js';
+import { TOOL_CALL_TEXT_ONLY, deliverableAnswer } from './generate-answer-guard.js';
 import type { PendingConfirm, PlannedStep, TaskState } from './task-controller.js';
 import { runQueueDatabase, runQueueWrite } from './task-queue-persistence.js';
+import { normalizeVideoRetryIntent } from './video/video-retry-policy.js';
 
 // Compatibility writes must not mutate a core execution admitted after the
 // router's read. Keep the same owner/origin/legacy predicate on read and CAS.
@@ -63,6 +67,25 @@ function legacyReplyGuard(taskId: string, userId: number | undefined, origin: Ta
  * rows back into a TaskState without changing the controller.
  */
 
+function canonicalVideoRequest(metadata: Record<string, unknown>): unknown {
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === 'object')
+      return Object.fromEntries(
+        Object.entries(value)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, item]) => [key, canonical(item)]),
+      );
+    return value;
+  };
+  return canonical({
+    videoType: metadata.videoType,
+    visualMode: metadata.visualMode,
+    videoOptions: metadata.videoOptions,
+    petModel: metadata.petModel,
+  });
+}
+
 export interface InsertTaskContext {
   /** Internal users.id (NOT the external usr_… id). */
   userId: number;
@@ -81,8 +104,24 @@ export interface InsertTaskContext {
    * false when omitted.
    */
   opusUsed?: boolean;
+  /** Persist the browser lane before dispatch, including queued tasks. */
+  executionMode?: 'browser';
   /** Immutable, server-validated context from a dedicated product surface. */
   sourceContext?: Record<string, unknown> | null;
+  /**
+   * This task is the public-cloud continuation of `originalTaskId`, which the
+   * caller already claimed with `claimToken`. The link is written in the same
+   * transaction as the insert: if the claim is gone, the insert rolls back.
+   */
+  publicCloudContinuation?: { originalTaskId: string; claimToken: string };
+}
+
+/** The original's continuation claim was lost before the replacement was linked. */
+export class PublicCloudContinuationLinkError extends Error {
+  constructor() {
+    super('public-cloud continuation claim lost before the replacement was linked');
+    this.name = 'PublicCloudContinuationLinkError';
+  }
 }
 
 type TaskRepositoryTransaction = Parameters<Parameters<DB['transaction']>[0]>[0];
@@ -169,6 +208,7 @@ export class TaskRepository {
         plan: serializePlan(state.plan),
         roleId: ctx.roleId ?? null,
         opusUsed: ctx.opusUsed ?? false,
+        ...(ctx.executionMode ? { result: { executionMode: ctx.executionMode } } : {}),
         sourceContext: ctx.sourceContext ?? null,
       });
       const taskRowId = readInsertId(insert);
@@ -195,7 +235,72 @@ export class TaskRepository {
         actor: 'system',
         payload: { intent: ctx.intent, planSize: state.plan.length },
       });
+
+      const continuation = ctx.publicCloudContinuation;
+      if (continuation) {
+        const linked = await tx
+          .update(tasks)
+          .set({ publicCloudContinuationTaskId: state.taskId })
+          .where(
+            and(
+              eq(tasks.externalId, continuation.originalTaskId),
+              eq(tasks.userId, ctx.userId),
+              eq(tasks.origin, this.taskOrigin),
+              eq(tasks.publicCloudContinuationTaskId, continuation.claimToken),
+            ),
+          );
+        if (extractMysqlAffectedRows(linked) !== 1) throw new PublicCloudContinuationLinkError();
+      }
     });
+  }
+
+  /**
+   * Reserve a cancelled original for exactly one public-cloud continuation.
+   * Atomic conditional update: of any number of concurrent callers at most one
+   * sees `true`, and an original that was ever linked can never be claimed again.
+   */
+  async claimPublicCloudContinuation(input: {
+    originalTaskId: string;
+    userId: number;
+    claimToken: string;
+  }): Promise<boolean> {
+    const claimed = await this.db
+      .update(tasks)
+      .set({ publicCloudContinuationTaskId: input.claimToken })
+      .where(
+        and(
+          eq(tasks.externalId, input.originalTaskId),
+          eq(tasks.userId, input.userId),
+          eq(tasks.origin, this.taskOrigin),
+          eq(tasks.status, 'cancelled'),
+          isNull(tasks.publicCloudContinuationTaskId),
+        ),
+      );
+    return extractMysqlAffectedRows(claimed) === 1;
+  }
+
+  /**
+   * Give the claim back when no replacement row was inserted. Only a pending
+   * `claim:` value can be cleared; a linked replacement id never is.
+   */
+  async releasePublicCloudContinuationClaim(input: {
+    originalTaskId: string;
+    userId: number;
+    claimToken: string;
+  }): Promise<void> {
+    if (!input.claimToken.startsWith('claim:')) return;
+    await this.db
+      .update(tasks)
+      .set({ publicCloudContinuationTaskId: null })
+      .where(
+        and(
+          eq(tasks.externalId, input.originalTaskId),
+          eq(tasks.userId, input.userId),
+          eq(tasks.origin, this.taskOrigin),
+          eq(tasks.publicCloudContinuationTaskId, input.claimToken),
+          sql`${tasks.publicCloudContinuationTaskId} LIKE 'claim:%'`,
+        ),
+      );
   }
 
   async applyStepResult(
@@ -407,7 +512,10 @@ export class TaskRepository {
     return { persisted: true };
   }
 
-  async markAwaitingReplyResumed(taskExternalId: string, legacyUserId?: number): Promise<{ persisted: boolean }> {
+  async markAwaitingReplyResumed(
+    taskExternalId: string,
+    legacyUserId?: number,
+  ): Promise<{ persisted: boolean }> {
     const guard = legacyReplyGuard(taskExternalId, legacyUserId, this.taskOrigin);
     const [taskRow] = await this.db
       .select({ id: tasks.id })
@@ -431,7 +539,9 @@ export class TaskRepository {
           errorCode: null,
           errorMessage: null,
         })
-        .where(guard ?? and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
+        .where(
+          guard ?? and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')),
+        );
       if (extractMysqlAffectedRows(result) === 0) {
         persisted = false;
         return;
@@ -477,7 +587,9 @@ export class TaskRepository {
           result: resultPayload,
           completedAt: new Date(),
         })
-        .where(guard ?? and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')));
+        .where(
+          guard ?? and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'awaiting_user')),
+        );
       if (extractMysqlAffectedRows(result) === 0) {
         persisted = false;
         return;
@@ -651,15 +763,23 @@ export class TaskRepository {
     return { persisted: extractMysqlAffectedRows(result) > 0 };
   }
 
-  async persistActiveCorePlan(taskExternalId: string, planText: string): Promise<{ persisted: boolean }> {
-    const result = await this.db.update(tasks).set({ planText, planStatus: [] })
+  async persistActiveCorePlan(
+    taskExternalId: string,
+    planText: string,
+  ): Promise<{ persisted: boolean }> {
+    const result = await this.db
+      .update(tasks)
+      .set({ planText, planStatus: [] })
       .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, 'executing')));
     return { persisted: extractMysqlAffectedRows(result) > 0 };
   }
 
   async isTaskExecuting(taskExternalId: string): Promise<boolean> {
-    const [row] = await this.db.select({ status: tasks.status }).from(tasks)
-      .where(eq(tasks.externalId, taskExternalId)).limit(1);
+    const [row] = await this.db
+      .select({ status: tasks.status })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
     return row?.status === 'executing';
   }
 
@@ -669,20 +789,25 @@ export class TaskRepository {
     suggestions: string[],
   ): Promise<boolean> {
     if (
-      !suggestions.length || suggestions.length > 3 ||
-      suggestions.some((item) =>
-        typeof item !== 'string' || item.trim().length < 4 || item.length > 40)
-    ) return false;
+      !suggestions.length ||
+      suggestions.length > 3 ||
+      suggestions.some(
+        (item) => typeof item !== 'string' || item.trim().length < 4 || item.length > 40,
+      )
+    )
+      return false;
     const result = await this.db
       .update(tasks)
       .set({
         result: sql`JSON_SET(${tasks.result}, '$.followUpSuggestions', CAST(${JSON.stringify(suggestions)} AS JSON))`,
       })
-      .where(and(
-        eq(tasks.externalId, taskExternalId),
-        eq(tasks.status, 'completed'),
-        sql`JSON_UNQUOTE(JSON_EXTRACT(${tasks.result}, '$.summary')) = ${summary}`,
-      ));
+      .where(
+        and(
+          eq(tasks.externalId, taskExternalId),
+          eq(tasks.status, 'completed'),
+          sql`JSON_UNQUOTE(JSON_EXTRACT(${tasks.result}, '$.summary')) = ${summary}`,
+        ),
+      );
     return extractMysqlAffectedRows(result) > 0;
   }
 
@@ -693,8 +818,73 @@ export class TaskRepository {
       .where(eq(tasks.externalId, taskExternalId))
       .limit(1);
     const result = normalizeJson(row?.result);
-    return row?.status === 'completed' && result !== null && typeof result === 'object' &&
-      'summary' in result && result.summary === summary;
+    return (
+      row?.status === 'completed' &&
+      result !== null &&
+      typeof result === 'object' &&
+      'summary' in result &&
+      result.summary === summary
+    );
+  }
+
+  /**
+   * FIX-INTENT-ROUTE-BROWSER — the scrape lane hands its still-executing task to
+   * the browser lane for one retry. Only an `executing` row of this user/origin
+   * is taken over; it keeps its id, intent and charge.
+   */
+  async adoptTaskForBrowserRetry(params: {
+    taskExternalId: string;
+    userId: number;
+    status: 'executing' | 'queued';
+    sourceContext: Record<string, unknown>;
+    reason: string;
+    /** FIX-34: the lane handing over. */
+    from?: 'scrape' | 'generate';
+  }): Promise<{ persisted: boolean }> {
+    let persisted = false;
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.externalId, params.taskExternalId),
+            eq(tasks.userId, params.userId),
+            eq(tasks.origin, this.taskOrigin),
+            eq(tasks.status, 'executing'),
+          ),
+        )
+        .limit(1);
+      if (!row) return;
+      const updated = await tx
+        .update(tasks)
+        .set({
+          status: params.status,
+          result: { executionMode: 'browser' },
+          // FIX-34 review: a handed-over generate task that then fails is refunded like
+          // the NON_ANSWER it replaced (platform-failure-refunds reads this).
+          sourceContext:
+            params.from === 'generate'
+              ? { ...params.sourceContext, reroutedFrom: 'generate' }
+              : params.sourceContext,
+          // FIX-34: a core generate round handing over leaves no core record behind — the
+          // browser lane's row is a legacy row, and the round's late writes go stale.
+          ...(params.from === 'generate'
+            ? { executionId: null, executionRevision: 0, coreRecordVersion: 0 }
+            : {}),
+        })
+        .where(and(eq(tasks.id, row.id), eq(tasks.status, 'executing')));
+      if (extractMysqlAffectedRows(updated) !== 1) return;
+      await tx.insert(taskEvents).values({
+        externalId: newExternalId('taskEvent'),
+        taskId: row.id,
+        type: 'task.rerouted',
+        actor: 'system',
+        payload: { from: params.from ?? 'scrape', to: 'browser', reason: params.reason },
+      });
+      persisted = true;
+    });
+    return { persisted };
   }
 
   async markQueuedTaskExecuting(taskExternalId: string): Promise<{ persisted: boolean }> {
@@ -898,9 +1088,23 @@ export class TaskRepository {
           metadata?: Record<string, unknown>;
         },
   ): Promise<{ persisted: boolean }> {
+    // FIX-33: the last display filter on every legacy lane — tool-call syntax never
+    // reaches the user, and a "result" that was only that is not completed.
+    if (outcome.status === 'completed' || outcome.status === 'partial_success') {
+      const shown = deliverableAnswer(outcome.summary);
+      if (shown === null) {
+        const { summary: _summary, status: _status, ...evidence } = outcome;
+        outcome = {
+          ...evidence,
+          status: 'failed',
+          reason: TOOL_CALL_TEXT_ONLY.reason,
+          errorCode: TOOL_CALL_TEXT_ONLY.code,
+        };
+      } else if (shown !== outcome.summary) outcome = { ...outcome, summary: shown };
+    }
     const [taskRow] = await runQueueDatabase(() =>
       this.db
-        .select({ id: tasks.id })
+        .select({ id: tasks.id, result: tasks.result })
         .from(tasks)
         .where(eq(tasks.externalId, taskExternalId))
         .limit(1),
@@ -969,6 +1173,21 @@ export class TaskRepository {
       if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
       if (outcome.finalViewport) result.finalViewport = outcome.finalViewport;
       if (outcome.metadata) result.metadata = outcome.metadata;
+    }
+    // The creation fingerprint is host-owned and must survive terminal
+    // settlement metadata replacement so later confirmations see rejects.
+    const priorRetryKey = (taskRow.result as { metadata?: { videoRetryKey?: unknown } } | null)
+      ?.metadata?.videoRetryKey;
+    if (typeof priorRetryKey === 'string' && /^[a-f0-9]{64}$/.test(priorRetryKey)) {
+      result.metadata = {
+        ...(result.metadata as Record<string, unknown> | undefined),
+        videoRetryKey: priorRetryKey,
+      };
+      if (
+        (taskRow.result as { metadata?: { videoRetryVersion?: unknown } } | null)?.metadata
+          ?.videoRetryVersion === 2
+      )
+        result.metadata = { ...(result.metadata as Record<string, unknown>), videoRetryVersion: 2 };
     }
     update.result = result;
 
@@ -1236,14 +1455,87 @@ export class TaskRepository {
     isBypass: boolean;
     intent: string;
     executionMetadata: Record<string, unknown>;
+    rejectRetryLimit?: number;
   }): Promise<
-    | { kind: 'created'; taskInternalId: number }
+    | { kind: 'created'; taskInternalId: number; priorQualityRejects: number }
     | { kind: 'stale' }
+    | { kind: 'reject_retry_limit' }
     | { kind: 'quota_denied'; reason: ConsumeReason }
   > {
     class StaleVideoQuoteError extends Error {}
+    const retryLimit = input.rejectRetryLimit ?? 3;
+    if (!Number.isInteger(retryLimit) || retryLimit < 1 || retryLimit > 100)
+      throw new Error('invalid video rejection retry limit');
+    const normalizedIntent = normalizeVideoRetryIntent(input.intent);
+    const fingerprint = (intent: string) =>
+      createHash('sha256')
+        .update(JSON.stringify([intent, canonicalVideoRequest(input.executionMetadata)]))
+        .digest('hex');
+    const retryKey = fingerprint(normalizedIntent);
     try {
       return await this.db.transaction(async (tx) => {
+        // Serialize confirmations per owner before inspecting failures and
+        // debiting: concurrent clicks cannot race the durable rejection budget.
+        await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.id, input.userId))
+          .for('update');
+        let priorQualityRejects = 0;
+        if (input.executionMetadata.visualMode === 'video') {
+          let inFlight = 0;
+          let terminalSequenceEnded = false;
+          let cursor: number | undefined;
+          // Read old fingerprints without backfilling history: verify their hash
+          // against the row's original intent and these exact production options.
+          // Page rather than taking only N terminal rows: pending attempts reserve
+          // budget, and intervening unrelated requests must not hide old rejects.
+          for (;;) {
+            const recent = await tx
+              .select({
+                id: tasks.id,
+                intent: tasks.intent,
+                status: tasks.status,
+                errorCode: tasks.errorCode,
+                retryKey: sql<string>`JSON_UNQUOTE(JSON_EXTRACT(${tasks.result}, '$.metadata.videoRetryKey'))`,
+              })
+              .from(tasks)
+              .where(
+                and(
+                  eq(tasks.userId, input.userId),
+                  cursor === undefined ? undefined : lt(tasks.id, cursor),
+                  inArray(tasks.status, ['queued', 'executing', 'failed', 'completed']),
+                  sql`JSON_EXTRACT(${tasks.result}, '$.metadata.videoRetryKey') IS NOT NULL`,
+                  or(
+                    sql`JSON_UNQUOTE(JSON_EXTRACT(${tasks.result}, '$.metadata.videoRetryKey')) = ${retryKey}`,
+                    sql`JSON_EXTRACT(${tasks.result}, '$.metadata.videoRetryVersion') IS NULL`,
+                  ),
+                ),
+              )
+              .orderBy(desc(tasks.id))
+              .limit(100);
+            for (const task of recent) {
+              if (
+                task.retryKey !== retryKey &&
+                (normalizeVideoRetryIntent(task.intent) !== normalizedIntent ||
+                  task.retryKey !== fingerprint(task.intent.trim()))
+              )
+                continue;
+              if (task.status === 'queued' || task.status === 'executing') inFlight++;
+              else if (!terminalSequenceEnded) {
+                if (task.status === 'failed' && task.errorCode === 'MEDIA_VIDEO_QUALITY_REJECTED')
+                  priorQualityRejects++;
+                else terminalSequenceEnded = true;
+              }
+              if (inFlight + priorQualityRejects >= retryLimit)
+                return { kind: 'reject_retry_limit' as const };
+            }
+            if (recent.length < 100) break;
+            const last = recent.at(-1);
+            if (!last) break;
+            cursor = last.id;
+          }
+        }
         if (!input.isBypass) {
           const quota = new QuotaService(tx as unknown as DB);
           const consumed = await quota.tryConsume(input.userId, input.planId, false);
@@ -1293,9 +1585,21 @@ export class TaskRepository {
           plan: [],
           roleId: 'video-creator',
           opusUsed: false,
-          result: { metadata: input.executionMetadata },
+          result: {
+            metadata: { ...input.executionMetadata, videoRetryKey: retryKey, videoRetryVersion: 2 },
+          },
         });
         const taskInternalId = readInsertId(insert);
+        if (!input.isBypass) {
+          // The same transaction owns debit, quote claim, child and refundable
+          // charge. Failure here rolls back the entire confirmation.
+          await recordQuotaCharge(tx as unknown as DB, {
+            taskExternalId: input.generationTaskExternalId,
+            userId: input.userId,
+            plan: input.planId,
+            isOpus: false,
+          });
+        }
         await tx.insert(taskEvents).values([
           {
             externalId: newExternalId('taskEvent'),
@@ -1317,7 +1621,7 @@ export class TaskRepository {
             payload: { intent: input.intent, planSize: 0, source: 'video_quote' },
           },
         ]);
-        return { kind: 'created' as const, taskInternalId };
+        return { kind: 'created' as const, taskInternalId, priorQualityRejects };
       });
     } catch (err) {
       if (err instanceof StaleVideoQuoteError) return { kind: 'stale' };

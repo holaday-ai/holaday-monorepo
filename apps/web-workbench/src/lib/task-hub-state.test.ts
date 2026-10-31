@@ -4,8 +4,8 @@ import {
   hasHistoryFilters,
   historyFilterRequestKey,
   historyPageSummary,
-  historyStatusFilterToServerStatuses,
   historyStatusFilterOptions,
+  historyStatusFilterToServerStatuses,
   mergeTaskHubRowsById,
   normalizeTaskHubCursor,
   normalizeTaskHubRows,
@@ -16,14 +16,14 @@ import {
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
   taskHubRowTitle,
-  taskHubStatusIconKind,
   taskHubRowTone,
+  taskHubStatusIconKind,
   taskHubStatusTone,
 } from './task-hub-state';
 
 describe('taskHubRowTone — P2-B resting tone', () => {
   it('failed / partial / cancelled get a subtle tone; others neutral', () => {
-    expect(taskHubRowTone('failed')).toContain('rgba(234,31,89');
+    expect(taskHubRowTone('failed')).toContain('rgba(255,0,97');
     expect(taskHubRowTone('partial_success')).toContain('rgba(255,201,16');
     expect(taskHubRowTone('cancelled')).toContain('rgba(89,87,87');
     expect(taskHubRowTone('completed')).toBe('');
@@ -54,9 +54,7 @@ describe('task hub state helpers', () => {
   });
 
   it('keeps failed and review-needed history filters separate', () => {
-    expect(historyStatusFilterOptions.find((option) => option.id === 'failed')?.label).toBe(
-      '失败',
-    );
+    expect(historyStatusFilterOptions.find((option) => option.id === 'failed')?.label).toBe('失败');
     expect(historyStatusFilterOptions.find((option) => option.id === 'review')?.label).toBe(
       '需复核',
     );
@@ -88,9 +86,7 @@ describe('task hub state helpers', () => {
         status: 'review',
         range: '30d',
       }),
-    ).toBe(
-      'review\n30d\n',
-    );
+    ).toBe('review\n30d\n');
   });
 
   it('summarizes history page states', () => {
@@ -237,9 +233,9 @@ describe('task hub state helpers', () => {
   });
 
   it('formats dates and errors defensively', () => {
-    const now = new Date('2026-05-24T12:00:00.000Z');
-    expect(formatTaskHubTime('2026-05-24T01:05:00.000Z', now)).toBe('今天 10:05');
-    expect(formatTaskHubTime('2026-05-20T01:05:00.000Z', now)).toBe('2026-05-20 10:05');
+    const now = new Date(2026, 4, 24, 12);
+    expect(formatTaskHubTime(new Date(2026, 4, 24, 10, 5), now)).toBe('今天 10:05');
+    expect(formatTaskHubTime(new Date(2026, 4, 20, 10, 5), now)).toBe('2026-05-20 10:05');
     expect(formatTaskHubTime('not-a-date', now)).toBe('—');
     expect(taskHubErrorMessage(new Error('offline'))).toBe(
       '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',

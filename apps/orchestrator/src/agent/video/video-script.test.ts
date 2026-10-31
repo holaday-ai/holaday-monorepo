@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type LlmComplete,
+  VideoScriptError,
   buildFallbackVideoScript,
   buildOptimizeSystemPrompt,
   buildScriptSystemPrompt,
   generateVideoScript,
   optimizeUserScript,
   segmentCapForText,
-  VideoScriptError,
-  type LlmComplete,
 } from './video-script.js';
 
-const llmReturning = (text: string): LlmComplete => async () => text;
+const llmReturning =
+  (text: string): LlmComplete =>
+  async () =>
+    text;
 
 const VALID = JSON.stringify({
   title: '夏天不晒黑的3个秘诀',
@@ -24,7 +27,10 @@ const VALID = JSON.stringify({
 
 describe('generateVideoScript', () => {
   it('parses a valid JSON reply into a VideoScript', async () => {
-    const out = await generateVideoScript({ userPrompt: '做个防晒种草视频' }, { llm: llmReturning(VALID) });
+    const out = await generateVideoScript(
+      { userPrompt: '做个防晒种草视频' },
+      { llm: llmReturning(VALID) },
+    );
     expect(out.title).toBe('夏天不晒黑的3个秘诀');
     expect(out.segments).toHaveLength(2);
     expect(out.segments[0]).toMatchObject({ type: 'voiceover' });
@@ -33,7 +39,7 @@ describe('generateVideoScript', () => {
   });
 
   it('strips markdown fences + surrounding prose', async () => {
-    const fenced = '好的，这是脚本：\n```json\n' + VALID + '\n```\n希望满意';
+    const fenced = `好的，这是脚本：\n\`\`\`json\n${VALID}\n\`\`\`\n希望满意`;
     const out = await generateVideoScript({ userPrompt: 'x' }, { llm: llmReturning(fenced) });
     expect(out.segments).toHaveLength(2);
   });
@@ -64,21 +70,26 @@ describe('generateVideoScript', () => {
 
   it('throws parse error when the schema is violated (no segments)', async () => {
     await expect(
-      generateVideoScript({ userPrompt: 'x' }, { llm: llmReturning('{"title":"x","segments":[]}') }),
+      generateVideoScript(
+        { userPrompt: 'x' },
+        { llm: llmReturning('{"title":"x","segments":[]}') },
+      ),
     ).rejects.toMatchObject({ kind: 'parse' });
   });
 
   it('throws empty error on a blank reply', async () => {
-    await expect(generateVideoScript({ userPrompt: 'x' }, { llm: llmReturning('   ') })).rejects.toMatchObject(
-      { kind: 'empty' },
-    );
+    await expect(
+      generateVideoScript({ userPrompt: 'x' }, { llm: llmReturning('   ') }),
+    ).rejects.toMatchObject({ kind: 'empty' });
   });
 
   it('throws llm error when the model call rejects', async () => {
     const llm: LlmComplete = async () => {
       throw new Error('anthropic 503');
     };
-    await expect(generateVideoScript({ userPrompt: 'x' }, { llm })).rejects.toMatchObject({ kind: 'llm' });
+    await expect(generateVideoScript({ userPrompt: 'x' }, { llm })).rejects.toMatchObject({
+      kind: 'llm',
+    });
   });
 });
 
@@ -119,7 +130,7 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
     for (const s of out.segments) {
       expect(s.type).toBe('broll');
       expect(s.text.length).toBeGreaterThan(0);
-      expect(s.visual && s.visual.length).toBeGreaterThan(0);
+      expect(s.visual?.length).toBeGreaterThan(0);
     }
   });
 
@@ -135,9 +146,7 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
   });
 
   it('builds a faithful one-segment fallback from the original request', () => {
-    const out = buildFallbackVideoScript(
-      '一个成年人的右手拿起蓝色陶瓷杯，停一秒，再放回原位。',
-    );
+    const out = buildFallbackVideoScript('一个成年人的右手拿起蓝色陶瓷杯，停一秒，再放回原位。');
 
     expect(out.title).toBe('按原描述生成');
     expect(out.segments).toEqual([
@@ -150,7 +159,9 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
   });
 
   it('throws empty on a blank user draft', async () => {
-    await expect(optimizeUserScript({ userText: '   ' }, { llm: llmReturning('x') })).rejects.toMatchObject({
+    await expect(
+      optimizeUserScript({ userText: '   ' }, { llm: llmReturning('x') }),
+    ).rejects.toMatchObject({
       kind: 'empty',
     });
   });
@@ -225,8 +236,7 @@ describe('段数按内容量动态定 (Problem 1 — 短文案不被硬凑成 6 
   });
 
   it('segmentCapForText: 一句话(~40字) → ≤2 段', () => {
-    const oneLine =
-      '夏天紫外线很强,出门前二十分钟涂够防晒,每两小时补涂一次,别让紫外线毁了你的皮肤';
+    const oneLine = '夏天紫外线很强,出门前二十分钟涂够防晒,每两小时补涂一次,别让紫外线毁了你的皮肤';
     expect(oneLine.replace(/\s/g, '').length).toBeLessThanOrEqual(60);
     expect(segmentCapForText(oneLine)).toBeLessThanOrEqual(2);
   });

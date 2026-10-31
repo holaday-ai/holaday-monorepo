@@ -475,7 +475,18 @@ const LIVESTREAM_COACH: AgentRole = {
 const CROSS_BORDER_ECOM: AgentRole = {
   name: '跨境电商运营专家',
   weight: 1.0,
-  keywords: ['跨境', 'amazon', '亚马逊', 'shopify', '独立站', 'ebay', '外贸', 'fba', '物流', '海外'],
+  keywords: [
+    '跨境',
+    'amazon',
+    '亚马逊',
+    'shopify',
+    '独立站',
+    'ebay',
+    '外贸',
+    'fba',
+    '物流',
+    '海外',
+  ],
   systemAddon: `## 你的专业角色：跨境电商运营专家
 
 你是跨境电商运营专家。回复要求：
@@ -499,7 +510,19 @@ const SOCIAL_MEDIA_STRATEGIST: AgentRole = {
 const GROWTH_HACKER: AgentRole = {
   name: '增长黑客',
   weight: 1.0,
-  keywords: ['增长', 'growth', '获客', 'cac', 'ltv', '漏斗', 'a/b测试', 'ab测试', '留存', '激活', 'aarrr'],
+  keywords: [
+    '增长',
+    'growth',
+    '获客',
+    'cac',
+    'ltv',
+    '漏斗',
+    'a/b测试',
+    'ab测试',
+    '留存',
+    '激活',
+    'aarrr',
+  ],
   systemAddon: `## 你的专业角色：增长黑客
 
 你是增长黑客。回复要求：
@@ -547,7 +570,16 @@ const VISUAL_STORYTELLER: AgentRole = {
 const IMAGE_PROMPT_ENGINEER: AgentRole = {
   name: '图像提示词工程师',
   weight: 1.0,
-  keywords: ['prompt', '提示词', 'midjourney', 'dall-e', 'stable diffusion', 'ai绘画', 'ai 绘画', '图像生成'],
+  keywords: [
+    'prompt',
+    '提示词',
+    'midjourney',
+    'dall-e',
+    'stable diffusion',
+    'ai绘画',
+    'ai 绘画',
+    '图像生成',
+  ],
   systemAddon: `## 你的专业角色：图像提示词工程师
 
 你是 AI 图像提示词工程师。回复要求：

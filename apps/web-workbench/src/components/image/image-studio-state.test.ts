@@ -11,7 +11,7 @@ describe('image studio draft state', () => {
   it('starts each goal with the approved provider-safe preset', () => {
     expect(createImageStudioDraft('inspiration')).toMatchObject({
       goal: 'inspiration',
-      model: 'nano_banana_2',
+      model: 'auto',
       style: 'random',
       aspectRatio: '1:1',
       imageCount: 1,
@@ -25,7 +25,7 @@ describe('image studio draft state', () => {
     expect(createImageStudioDraft('commercial', 'poster')).toMatchObject({
       goal: 'commercial',
       commercialUse: 'poster',
-      model: 'nano_banana_pro',
+      model: 'qwen_image',
       aspectRatio: '3:4',
     });
   });
@@ -64,7 +64,7 @@ describe('image studio draft state', () => {
     const poster = switchImageCreationGoal(manuallyAdjusted, 'commercial', 'poster');
 
     expect(poster.aspectRatio).toBe('16:9');
-    expect(poster.model).toBe('nano_banana_pro');
+    expect(poster.model).toBe('qwen_image');
     expect(poster.userOverriddenSettings.has('aspectRatio')).toBe(true);
   });
 

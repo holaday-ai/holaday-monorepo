@@ -1,23 +1,28 @@
-import { describe, it, expect, vi } from 'vitest';
-import type { Logger } from 'pino';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
-import ExcelJS from 'exceljs';
-import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
-import {
-  runTemplateFillTask,
-  parseFillJson,
-  buildUserPrompt,
-  type SaveTemplateFn,
-  type TemplateFillModelFn,
-  type TemplateAttachment,
-} from './template-fill-runner.js';
+import ExcelJS from 'exceljs';
+import type { Logger } from 'pino';
+import PizZip from 'pizzip';
+import { describe, expect, it, vi } from 'vitest';
 import type { PlaceholderSchema } from './placeholder-schema.js';
+import {
+  type SaveTemplateFn,
+  type TemplateAttachment,
+  type TemplateFillModelFn,
+  buildUserPrompt,
+  parseFillJson,
+  runTemplateFillTask,
+} from './template-fill-runner.js';
 
 function fakeLogger(): Logger {
   const noop = vi.fn();
   return {
-    info: noop, warn: noop, debug: noop, error: noop, fatal: noop, trace: noop,
+    info: noop,
+    warn: noop,
+    debug: noop,
+    error: noop,
+    fatal: noop,
+    trace: noop,
     child: () => fakeLogger(),
   } as unknown as Logger;
 }
@@ -34,7 +39,10 @@ function fullText(buf: Buffer): string {
 }
 
 /** A `save` that records the filled buffer so tests can inspect the output. */
-function capturingSave(): { save: SaveTemplateFn; captured: { buffer?: Buffer; filename?: string } } {
+function capturingSave(): {
+  save: SaveTemplateFn;
+  captured: { buffer?: Buffer; filename?: string };
+} {
   const captured: { buffer?: Buffer; filename?: string } = {};
   const save: SaveTemplateFn = async (out) => {
     captured.buffer = out.buffer;
@@ -66,10 +74,16 @@ describe('runTemplateFillTask — happy path', () => {
     const { save, captured } = capturingSave();
     const out = await runTemplateFillTask({
       intent: '客户是张三，编号 INV-1',
-      template: { buffer: template, filename: '发票模板.docx', mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+      template: {
+        buffer: template,
+        filename: '发票模板.docx',
+        mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      },
       allowedFormats: PRO_FORMATS,
       save,
-      model: modelReturning('{"fields":{"client_name":"张三","invoice_no":"INV-1"},"loops":{},"missing":[]}'),
+      model: modelReturning(
+        '{"fields":{"client_name":"张三","invoice_no":"INV-1"},"loops":{},"missing":[]}',
+      ),
       logger: fakeLogger(),
     });
 
@@ -196,13 +210,13 @@ describe('runTemplateFillTask — output filename defense (P0 / E10 mojibake)', 
   // (周报模板 → å¨æ¥…), so the output name inherited the garble. Defend at
   // output generation: repair the name (latin1→utf8) → clean Chinese.
   it('REPAIRS a recoverable mojibake template name → clean Chinese output', async () => {
-    const garble = Buffer.from('周报模板', 'utf8').toString('latin1') + '.xlsx';
+    const garble = `${Buffer.from('周报模板', 'utf8').toString('latin1')}.xlsx`;
     const name = await fill(garble);
     expect(name).toBe('周报模板-已填充.xlsx');
   });
 
   it('falls back to a clean default for an UNRECOVERABLE mojibake name', async () => {
-    const garble = String.fromCharCode(0x80, 0x81, 0x82) + '.xlsx';
+    const garble = `${String.fromCharCode(0x80, 0x81, 0x82)}.xlsx`;
     const name = await fill(garble);
     expect(name).toMatch(/^填充结果-\d{8}-\d{6}\.xlsx$/);
   });
@@ -225,7 +239,9 @@ describe('runTemplateFillTask — partial / honest paths', () => {
       template: { buffer: template, filename: 't.docx', mimetype: 'x' },
       allowedFormats: PRO_FORMATS,
       save,
-      model: modelReturning('{"fields":{"client_name":"张三"},"loops":{},"missing":["invoice_no","date"]}'),
+      model: modelReturning(
+        '{"fields":{"client_name":"张三"},"loops":{},"missing":["invoice_no","date"]}',
+      ),
       logger: fakeLogger(),
     });
     expect(out.status).toBe('partial_success');

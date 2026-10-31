@@ -8,6 +8,7 @@
  * 见 docs/SKILL_ROUTER_PATTERN.md「matcher 注册点」。
  */
 
+import { LOCAL_STOCK_NAMES, localNameSpans, lookupLocalNames } from './ashare-name-dictionary.js';
 import type { AshareQaMatch, QaKind, ResolvedStock } from './ashare-qa-types.js';
 import { resolveStocks } from './ashare-stock-resolver.js';
 
@@ -43,6 +44,19 @@ const ASHARE_TERMS = [
   '加仓',
   '减仓',
   '仓位',
+  // 估值/研究命令词（batch 10 BOSS 拍板）：启用 A股技能后，没有个股、没有其他术语的
+  // 估值类长句（「用 DCF 算一下宁德时代的合理估值」「/行业 白酒」）也必须进合规框架，
+  // 不得落到通用路径产出目标价/内在价值。5 个 fork 技能的命令词一并纳入。
+  'DCF',
+  'dcf',
+  '估值',
+  '目标价',
+  '合理价',
+  '内在价值',
+  '行业',
+  '对标',
+  '财报',
+  '论点',
 ];
 
 /** 问句标记。 */
@@ -130,7 +144,8 @@ const NON_A_SHARE_SECURITY_TERMS = [
 function isNonAshareSecurityQuery(text: string): boolean {
   const upper = text.toUpperCase();
   return NON_A_SHARE_SECURITY_TERMS.some((term) =>
-    /[A-Z$]/.test(term) ? upper.includes(term.toUpperCase()) : text.includes(term));
+    /[A-Z$]/.test(term) ? upper.includes(term.toUpperCase()) : text.includes(term),
+  );
 }
 
 /**
@@ -192,6 +207,319 @@ function shouldNameSearch(text: string): boolean {
   return !isIndexQuery(text) && text.trim().length <= NAME_SEARCH_MAX_LEN;
 }
 
+// ===== 批次 11.2：长句（>16 字）抽股票名 =====================================================
+// 生产里 name-search 走 akshare `searchSymbol(query)`：先「全名是 query 子串」，再拿 query 的 2-4 字
+// 中文窗口做短名匹配。整句丢进去，短名窗口会让任意 2-4 字片段撞上某只股票（E16「今天」→今天国际），
+// 所以长句以前干脆不搜。现在改为：
+//   1) 句子里必须已有 A股信号（术语 / 深度分析词），否则不抽（「帮我写一份关于宁德的旅游攻略」不动）；
+//   2) 先查本地字典（零网络，见 ashare-name-dictionary.ts），全名 + 非常用词别名；
+//   3) 再按 A股术语 / 问句词 / 虚词把句子切开，取 2-8 字的中文片段作候选词，**最多查 3 个**
+//      （LONG_SENTENCE_MAX_CANDIDATES），每个候选词一次 searchSymbol；
+//   4) akshare 返回的结果必须**全名原样出现在句子里**才收（挡住短名窗口的误配）。
+// 6 位代码不受长度限制，本来就由 resolveStocks 解析。
+
+/** 长句抽名：最多查几个候选词（每个一次 akshare 名称查询）。 */
+export const LONG_SENTENCE_MAX_CANDIDATES = 3;
+
+/** 句子是这类话题、且名称不是原样全名时，不认短名/别名（「宁德有什么好玩的」「茅台镇旅游攻略」）。 */
+const NON_STOCK_TOPIC_TERMS = [
+  '旅游',
+  '攻略',
+  '景点',
+  '好玩',
+  '美食',
+  '小吃',
+  '天气',
+  '酒店',
+  '民宿',
+  '机票',
+  '火车',
+  '自驾',
+  '游记',
+  '路线',
+  '特产',
+];
+
+/** 切候选词用的虚词 / 请求词（与 A股术语、问句词、深度词、指数词一起作切分点）。 */
+const FILLER_WORDS = [
+  '帮我',
+  '帮忙',
+  '麻烦',
+  '请问',
+  '请',
+  '给我',
+  '给出',
+  '一下',
+  '算一下',
+  '估一下',
+  '看一下',
+  '看看',
+  '查一下',
+  '查查',
+  '查询',
+  '测算',
+  '估算',
+  '计算',
+  '分析',
+  '了解',
+  '介绍',
+  '说说',
+  '讲讲',
+  '整理',
+  '总结',
+  '写一份',
+  '一份',
+  '报告',
+  '研报',
+  '模型',
+  '推导',
+  '过程',
+  '详细',
+  '合理',
+  '区间',
+  '价位',
+  '情况',
+  '最近',
+  '近期',
+  '今天',
+  '今日',
+  '昨天',
+  '现在',
+  '目前',
+  '这家',
+  '那家',
+  '这只',
+  '那只',
+  '公司',
+  '企业',
+  '谢谢',
+  '一个',
+  '这个',
+  '那个',
+  '可以',
+  '能不能',
+  '是不是',
+  '是否',
+  '还有',
+  '以及',
+  '用',
+  '算',
+  '估',
+  '的',
+  '了',
+  '和',
+  '与',
+  '跟',
+  '及',
+  '对',
+  '把',
+  '在',
+  '是',
+  '吧',
+  '呢',
+  '啊',
+  '我',
+  '你',
+];
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+}
+
+let splitRe: RegExp | null = null;
+function candidateSplitRe(): RegExp {
+  if (!splitRe) {
+    const words = [
+      ...new Set([
+        ...ASHARE_TERMS,
+        ...QUESTION_MARKERS,
+        ...ANOMALY_TERMS,
+        ...WATCHLIST_TERMS,
+        ...INDEX_TERMS,
+        ...DEEP_TERMS,
+        ...NON_STOCK_TOPIC_TERMS,
+        ...FILLER_WORDS,
+      ]),
+    ].sort((a, b) => b.length - a.length);
+    splitRe = new RegExp(words.map(escapeRe).join('|'), 'g');
+  }
+  splitRe.lastIndex = 0;
+  return splitRe;
+}
+
+/**
+ * 长句 → 候选名称片段（按出现顺序、去重；不截断，调用方按上限取）。`exclude` 里的串（如本地字典
+ * 已命中的名称）先挖掉，不重复查。
+ */
+export function extractNameCandidates(text: string, exclude: readonly string[] = []): string[] {
+  let t = text;
+  for (const e of exclude) t = t.split(e).join(' ');
+  t = t.replace(candidateSplitRe(), ' ');
+  const out: string[] = [];
+  for (const run of t.match(/[一-鿿]{2,8}/g) ?? []) {
+    if (!out.includes(run)) out.push(run);
+  }
+  return out;
+}
+
+function compact(s: string): string {
+  return s.replace(/\s+/g, '');
+}
+/** akshare 返回的全名是否原样出现在句子里（忽略空格）。 */
+function nameAppearsIn(text: string, name: string | null): boolean {
+  return !!name && compact(text).includes(compact(name));
+}
+function isNonStockTopic(text: string): boolean {
+  return NON_STOCK_TOPIC_TERMS.some((t) => text.includes(t));
+}
+
+/**
+ * FIX-31（Deploy-31 b-v06「QQ音乐热歌榜第一名是啥」→ 第一创业/第一医药）：股票语境 = A股术语，
+ * 或股票/A股/大盘/指数/市值/板块/涨跌这类词。问句词（啥/吗/多少）不是股票语境。
+ */
+const STOCK_CONTEXT_RE = /股|大盘|指数|市值|板块|涨跌/i;
+function hasStockContext(text: string): boolean {
+  const t = withoutGoodsPrice(text);
+  return hasAshareTerm(t) || STOCK_CONTEXT_RE.test(t);
+}
+
+/**
+ * FIX-32：「中国石油加油站涨价了吗」「茅台酒涨价了吗」问的是商品价格。涨/跌只在股价语境里算 A股术语，
+ * 「涨价/降价/价格上涨/油价涨」这类商品价格说法先去掉再看（股价 不在内）。
+ */
+const GOODS_PRICE_RE =
+  /涨价|跌价|降价|提价|调价|(?:(?<!股)价格?|(?:油|房|菜|肉|金|电|水|票|酒|烟)价)[^，。？?！!]{0,6}?(?:上涨|下跌|上调|下调|涨|跌)/g;
+function withoutGoodsPrice(text: string): string {
+  return text.replace(GOODS_PRICE_RE, ' ');
+}
+function hasAshareTerm(text: string): boolean {
+  const t = withoutGoodsPrice(text);
+  return ASHARE_TERMS.some((term) => t.includes(term));
+}
+function talksGoodsPrice(text: string): boolean {
+  return new RegExp(GOODS_PRICE_RE.source).test(text);
+}
+
+/** 句子与名称最长的共同片段长度（「茅台为什么跌」 vs 贵州茅台 → 2）。 */
+function nameOverlap(text: string, name: string | null): number {
+  if (!name) return 0;
+  const t = compact(text);
+  for (let len = Math.min(name.length, t.length); len > 0; len -= 1)
+    for (let i = 0; i + len <= name.length; i += 1)
+      if (t.includes(name.slice(i, i + len))) return len;
+  return 0;
+}
+
+/** 本地字典里这只股票的非常用词别名（「茅台/招行/格力」）出现在句子里。 */
+function aliasIn(text: string, stock: ResolvedStock): string | null {
+  const entry = LOCAL_STOCK_NAMES.find((s) => s.symbol === stock.symbol);
+  return entry?.aliases?.find((a) => text.includes(a)) ?? null;
+}
+
+/** 去掉「看看/查一下/怎么样/详细分析…」后，整句就是这个名称（或其中一段）：「茅台」「看看贵州茅台」。 */
+function justTheName(text: string, names: ReadonlyArray<string | null>): boolean {
+  let rest = compact(text);
+  for (const w of [
+    ...DEEP_TERMS,
+    '看一下',
+    '看看',
+    '看下',
+    '查一下',
+    '查查',
+    '查下',
+    '搜一下',
+    '帮我',
+    '一下',
+    '怎么样',
+    '如何',
+    '呢',
+    '吧',
+    '啊',
+  ])
+    rest = rest.split(w).join('');
+  rest = rest.replace(/[。？?！!，,、]/g, '');
+  return rest.length > 0 && names.some((n) => !!n && compact(n).includes(rest));
+}
+
+/**
+ * 短句 name-search 结果的收货条件。akshare 用 2-4 字窗口做短名匹配，「第一/中国/平安/今天」这类常用词
+ * 会撞上股票简称，所以：
+ *   - 全名原样在句中：有股票语境，或整句就是这个名称 → 收；
+ *   - 否则只认本地字典的非常用词别名或 ≥3 字的名称片段（2 字常用词窗口一律不收），且不是旅游美食
+ *     这类话题，再要求有股票语境或整句就是这个名称。
+ */
+function acceptShortHit(
+  text: string,
+  stock: ResolvedStock,
+  stockContext: boolean,
+  /** The user picked the A-share skill: a full company name (≥3 字) is enough. */
+  inSkillContext = false,
+): boolean {
+  if (nameAppearsIn(text, stock.displayName))
+    return (
+      stockContext ||
+      // FIX-32: 「中国石油加油站涨价了吗」 names the company but asks a goods price.
+      (inSkillContext && compact(stock.displayName ?? '').length >= 3 && !talksGoodsPrice(text)) ||
+      justTheName(text, [stock.displayName])
+    );
+  if (isNonStockTopic(text)) return false;
+  const alias = aliasIn(text, stock);
+  if (!alias && nameOverlap(text, stock.displayName) < 3) return false;
+  return stockContext || justTheName(text, [stock.displayName, alias]);
+}
+
+async function searchShort(
+  text: string,
+  search: SymbolSearchFn,
+  signal: boolean,
+  inSkillContext = false,
+): Promise<ResolvedStock[]> {
+  let found: ResolvedStock[] = [];
+  try {
+    found = await search(text);
+  } catch {
+    found = [];
+  }
+  return found.filter((s) => acceptShortHit(text, s, signal, inSkillContext));
+}
+
+/**
+ * 长句抽股票名（见上方设计说明）：本地字典 → 候选词逐个 searchSymbol（≤3 次）→ 全名原样在句中才收。
+ * 调用方负责「句中已有 A股信号」这一前置条件。
+ */
+export async function resolveLongSentenceStocks(
+  text: string,
+  search: SymbolSearchFn,
+): Promise<ResolvedStock[]> {
+  const allowAlias = !isNonStockTopic(text);
+  const out: ResolvedStock[] = lookupLocalNames(text, allowAlias);
+  const seen = new Set(out.map((s) => s.symbol));
+  const candidates = extractNameCandidates(text, localNameSpans(text, allowAlias)).slice(
+    0,
+    LONG_SENTENCE_MAX_CANDIDATES,
+  );
+  for (const c of candidates) {
+    let found: ResolvedStock[] = [];
+    try {
+      found = await search(c);
+    } catch {
+      found = [];
+    }
+    for (const s of found) {
+      if (seen.has(s.symbol) || !nameAppearsIn(text, s.displayName)) continue;
+      seen.add(s.symbol);
+      out.push(s);
+    }
+  }
+  return out.slice(0, 5);
+}
+
+/** 长句抽名的前置条件：句中已有 A股信号（术语 / 深度分析词），且不是指数/大盘问句。 */
+function shouldExtractFromLongText(text: string): boolean {
+  if (text.trim().length <= NAME_SEARCH_MAX_LEN || isIndexQuery(text)) return false;
+  return hasAshareTerm(text) || isDeepQuery(text);
+}
+
 export interface MatchAshareQaOpts {
   intent: string;
   roleId?: string | null;
@@ -223,7 +551,7 @@ interface IntentGate {
 function intentGate(opts: MatchAshareQaOpts): IntentGate {
   const text = opts.intent ?? '';
   const isRole = opts.roleId === ASHARE_ROLE_ID;
-  const hasTerm = isRole || ASHARE_TERMS.some((t) => text.includes(t));
+  const hasTerm = isRole || hasAshareTerm(text);
   const hasQuestion = QUESTION_MARKERS.some((t) => text.includes(t));
   const wantsWatchlist = WATCHLIST_TERMS.some((t) => text.includes(t));
 
@@ -274,14 +602,12 @@ export async function resolveAshareQa(
       deep,
     };
   }
-  // 仅短问句 / 明确个股指向才 name-search（E16：长查询不乱匹配名称）。
-  if (!shouldNameSearch(opts.intent ?? '')) return null;
+  // 短问句：整句 name-search（结果需过 acceptShortHit；门槛已过 = 有 A股信号）。
+  // 长句（批次 11.2）：抽候选词逐个查，全名原样在句中才收（E16：长查询不乱匹配名称）。
+  const text = opts.intent ?? '';
   let found: ResolvedStock[] = [];
-  try {
-    found = await search(opts.intent ?? '');
-  } catch {
-    found = [];
-  }
+  if (shouldNameSearch(text)) found = await searchShort(text, search, hasStockContext(text));
+  else if (!isIndexQuery(text)) found = await resolveLongSentenceStocks(text, search);
   if (found.length === 0) return null;
   return {
     kind: g.kind,
@@ -305,7 +631,7 @@ export async function resolveAshareInContext(
   search: SymbolSearchFn,
 ): Promise<{ match: AshareQaMatch | null; hasSignal: boolean; indexIntent: boolean }> {
   const text = opts.intent ?? '';
-  const hasTerm = ASHARE_TERMS.some((t) => text.includes(t)); // 含持仓语境词
+  const hasTerm = hasAshareTerm(text); // 含持仓语境词
   const wantsWatchlist = WATCHLIST_TERMS.some((t) => text.includes(t));
   const deep = isDeepQuery(text);
   const toMatch = (stocks: ResolvedStock[]): AshareQaMatch => {
@@ -334,16 +660,15 @@ export async function resolveAshareInContext(
     return { match: null, hasSignal: true, indexIntent: true };
   }
 
-  // 仅**短问句 / 明确个股指向**才 name-search（E16：长查询不乱匹配名称）。
+  // 短问句：整句 name-search（结果过 acceptShortHit，挡「关于宁德的旅游攻略」这类短名误配）。
+  // 长句（批次 11.2）：有 A股信号才抽候选词逐个查（≤3 次），全名原样在句中才收。
   if (shouldNameSearch(text)) {
-    try {
-      stocks = await search(text);
-    } catch {
-      stocks = [];
-    }
-    if (stocks.length > 0) {
-      return { match: toMatch(stocks), hasSignal: true, indexIntent: false };
-    }
+    stocks = await searchShort(text, search, hasStockContext(text), true);
+  } else if (shouldExtractFromLongText(text)) {
+    stocks = await resolveLongSentenceStocks(text, search);
+  }
+  if (stocks.length > 0) {
+    return { match: toMatch(stocks), hasSignal: true, indexIntent: false };
   }
   return { match: null, hasSignal: hasTerm || wantsWatchlist, indexIntent: false };
 }

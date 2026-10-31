@@ -1,7 +1,6 @@
-import { AlertCircle, Loader2, RotateCw, Search, X } from 'lucide-react';
-import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import {
+  type SearchOverlayRow,
   nextSearchActiveIndex,
   normalizeSearchOverlayRows,
   searchOverlayCanRetry,
@@ -9,17 +8,15 @@ import {
   searchOverlayNeedsAttention,
   searchOverlayRowCopy,
   searchOverlayRowTone,
-  searchOverlayStatusTone,
   searchOverlayStatusCopy,
-  type SearchOverlayRow,
+  searchOverlayStatusTone,
 } from '@/lib/search-overlay-state';
-import {
-  taskSearchEmptyCopy,
-  taskStatusLabel,
-} from '@/lib/task-status-copy';
+import { taskSearchEmptyCopy, taskStatusLabel } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import type { UiTask } from '@/types/task';
+import { AlertCircle, Loader2, RotateCw, Search, X } from 'lucide-react';
+import * as React from 'react';
 
 interface Props {
   open: boolean;
@@ -197,7 +194,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
         className="w-full max-w-lg overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_18px_60px_rgba(15,23,42,0.18)]"
       >
         <div className="flex items-center gap-2 border-b border-[#EFEFEF] px-3 py-2.5">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-[#EA1F59]/10 text-[#EA1F59]">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-[#FF0061]/10 text-[#FF0061]">
             <Search className="h-4 w-4" />
           </div>
           <input
@@ -208,22 +205,20 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
             placeholder="搜索任务…"
             className="h-8 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
-          {searching && (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-[#EA1F59]" />
-          )}
+          {searching && <Loader2 className="h-3.5 w-3.5 animate-spin text-[#FF0061]" />}
           <button
             type="button"
             onClick={onClose}
             aria-label="关闭"
             title="关闭"
-            className="flex h-8 w-8 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
+            className="flex h-8 w-8 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#FF0061]"
           >
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
         <ul className="max-h-[52vh] overflow-y-auto p-1.5">
           {statusCopy && filtered.length > 0 && (
-            <li className="mb-1.5 rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/5 px-3 py-2 text-xs text-[#EA1F59]">
+            <li className="mb-1.5 rounded-[8px] border border-[#FF0061]/20 bg-[#FF0061]/5 px-3 py-2 text-xs text-[#FF0061]">
               <div className="flex items-start gap-2">
                 <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                 <div className="min-w-0 flex-1">
@@ -239,7 +234,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                     disabled={!canRetry}
                     aria-label="重试搜索"
                     title="重试搜索"
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[#EA1F59]/20 text-[#EA1F59] transition-colors hover:bg-[#EA1F59]/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[#FF0061]/20 text-[#FF0061] transition-colors hover:bg-[#FF0061]/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <RotateCw className="h-3.5 w-3.5" aria-hidden />
                   </button>
@@ -259,9 +254,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
               <div className="mt-3 text-sm font-medium text-foreground/80">
                 {searching ? '正在搜索…' : emptyCopy.title}
               </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {emptyCopy.body}
-              </div>
+              <div className="mt-1 text-xs text-muted-foreground">{emptyCopy.body}</div>
               {statusCopy?.retry && (
                 <Button
                   type="button"
@@ -271,7 +264,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                   disabled={!canRetry}
                   aria-label="重试搜索"
                   title="重试搜索"
-                  className="mt-3 h-8 w-8 rounded-[8px] border-[#DCDDDD] hover:border-[#EA1F59]/40 hover:text-[#EA1F59]"
+                  className="mt-3 h-8 w-8 rounded-[8px] border-[#DCDDDD] hover:border-[#FF0061]/40 hover:text-[#FF0061]"
                 >
                   <RotateCw className="h-3.5 w-3.5" aria-hidden />
                 </Button>
@@ -281,8 +274,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
           {filtered.map((t, i) => {
             const copy = searchOverlayRowCopy(t);
             const needsAttention = searchOverlayNeedsAttention(t);
-            const restingTone =
-              !needsAttention && i !== active ? searchOverlayRowTone(t) : '';
+            const restingTone = !needsAttention && i !== active ? searchOverlayRowTone(t) : '';
             return (
               <li key={t.taskId}>
                 <button
@@ -298,27 +290,23 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                     needsAttention &&
                       'border-[#FFC910]/35 bg-[#FFC910]/[0.07] shadow-[inset_3px_0_0_rgba(255,201,16,0.75)]',
                     i === active && !needsAttention
-                      ? 'border-[#EA1F59]/20 bg-[#EA1F59]/10 shadow-[inset_3px_0_0_#EA1F59]'
+                      ? 'border-[#FF0061]/20 bg-[#FF0061]/10 shadow-[inset_3px_0_0_#FF0061]'
                       : needsAttention
                         ? 'hover:bg-[#FFC910]/[0.12]'
                         : 'hover:bg-[#EFEFEF]/60',
-                    i === active &&
-                      needsAttention &&
-                      'border-[#FFC910]/60 bg-[#FFC910]/[0.13]',
+                    i === active && needsAttention && 'border-[#FFC910]/60 bg-[#FFC910]/[0.13]',
                   )}
                 >
                   <div
                     className={cn(
-                      'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-[#EFEFEF] text-muted-foreground transition-colors group-hover:text-[#EA1F59]',
+                      'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-[#EFEFEF] text-muted-foreground transition-colors group-hover:text-[#FF0061]',
                       needsAttention && 'bg-[#FFC910]/20 text-[#8A6A00] group-hover:text-[#8A6A00]',
                     )}
                   >
                     <Search className="h-3.5 w-3.5" aria-hidden />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <span className="block truncate text-sm text-foreground">
-                      {copy.title}
-                    </span>
+                    <span className="block truncate text-sm text-foreground">{copy.title}</span>
                     {copy.secondary && (
                       <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
                         {copy.secondary}
@@ -366,8 +354,6 @@ function SearchStatusBadge({
 
 function KeyHint({ children }: { children: React.ReactNode }): JSX.Element {
   return (
-    <span className="rounded-[6px] border border-[#DCDDDD] bg-white px-1.5 py-0.5">
-      {children}
-    </span>
+    <span className="rounded-[6px] border border-[#DCDDDD] bg-white px-1.5 py-0.5">{children}</span>
   );
 }

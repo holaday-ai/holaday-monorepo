@@ -72,7 +72,10 @@ export function StockRiskMonitorSheet({
             <span>监控基于确定性规则和可信快照，不构成投资建议、买卖建议或收益预测。</span>
           </div>
           {error ? (
-            <div className="rounded-[9px] border border-[#F4B8C5] bg-[#FFF6F8] px-3.5 py-3 text-[11px] leading-[18px] text-[#A12A4C]" role="alert">
+            <div
+              className="rounded-[9px] border border-[#F4B8C5] bg-[#FFF6F8] px-3.5 py-3 text-[11px] leading-[18px] text-[#A12A4C]"
+              role="alert"
+            >
               {error}
             </div>
           ) : null}
@@ -91,9 +94,14 @@ export function StockRiskMonitorSheet({
             type="button"
             disabled={pending || !stock}
             onClick={() => void onConfirm()}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-[8px] bg-[#EA1F59] px-4 text-[12px] font-semibold text-white shadow-[0_5px_14px_rgba(234,31,89,0.18)] hover:bg-[#D91B51] disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-[8px] bg-[#FF0061] px-4 text-[12px] font-semibold text-white shadow-[0_5px_14px_rgba(255,0,97,0.18)] hover:bg-[#D91B51] disabled:cursor-not-allowed disabled:opacity-50 sm:h-9"
           >
-            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
+            {pending ? (
+              <Loader2
+                className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none"
+                aria-hidden
+              />
+            ) : null}
             {pending ? '正在建立监控' : '确认开始监控'}
           </button>
         </div>
@@ -121,7 +129,9 @@ function MonitorFact({
       <div className="min-w-0">
         <div className="text-[11px] font-semibold text-[#667085]">{title}</div>
         <div className="mt-1 text-[12px] font-semibold leading-5 text-[#1F2937]">{body}</div>
-        {note ? <div className="mt-0.5 text-[11px] leading-[18px] text-[#8B92A1]">{note}</div> : null}
+        {note ? (
+          <div className="mt-0.5 text-[11px] leading-[18px] text-[#8B92A1]">{note}</div>
+        ) : null}
       </div>
     </div>
   );

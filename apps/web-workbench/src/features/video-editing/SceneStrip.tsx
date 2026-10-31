@@ -51,9 +51,9 @@ export function SceneStrip({
               title={`选择第 ${index + 1} 段`}
               aria-pressed={selected}
               onClick={() => onSelect(scene.id)}
-              className={`group min-w-[78vw] snap-start overflow-hidden rounded-[18px] border bg-white text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/35 sm:min-w-0 ${
+              className={`group min-w-[78vw] snap-start overflow-hidden rounded-[18px] border bg-white text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/35 sm:min-w-0 ${
                 selected
-                  ? 'border-[#EA1F59] shadow-[0_10px_28px_rgba(234,31,89,0.12)]'
+                  ? 'border-[#FF0061] shadow-[0_10px_28px_rgba(255,0,97,0.12)]'
                   : 'border-[#E8E2E9] shadow-[0_4px_16px_rgba(66,43,71,0.05)] hover:-translate-y-0.5 hover:border-[#D9C8DC]'
               }`}
             >

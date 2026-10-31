@@ -5,6 +5,7 @@ import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { checkHostAkshare } from './akshare-production-gate.mjs';
 import { collectCutoverEvidence, publishCutoverEvidence } from './browser-cutover-evidence.mjs';
 import { acquireReleaseJournal } from './browser-maintenance-journal.mjs';
 import {
@@ -28,7 +29,7 @@ const same = (a, b) =>
   a.bootId === b?.bootId;
 const rootFor = (candidate) => `/opt/holaday-releases/${candidate}`;
 const stable = (error) =>
-  /^(MAINTENANCE_[A-Z_]+|LEGACY_DRAIN_UNSUPPORTED)$/.test(error?.message)
+  /^(MAINTENANCE_[A-Z_]+|AKSHARE_[A-Z_]+|LEGACY_DRAIN_UNSUPPORTED)$/.test(error?.message)
     ? error.message
     : 'MAINTENANCE_RELEASE_FAILED';
 
@@ -327,6 +328,7 @@ export function createHostReleaseAdapter(options, io = system) {
     return { attempt: current.attempt, candidate, configDigest, migrationDigest, inventoryDigest };
   };
   const readiness = async (identity, serviceOnly = false) => {
+    await checkHostAkshare(io.exec);
     await assertEvidenceOwnership();
     assertEvidenceWindow();
     const context = {
@@ -390,6 +392,7 @@ export function createHostReleaseAdapter(options, io = system) {
     preflight: async (identity) => {
       if (!same(identity, oldIdentity) || candidate === oldIdentity.candidate)
         throw new Error('MAINTENANCE_IDENTITY_MISMATCH');
+      await checkHostAkshare(io.exec);
       if (
         ![
           'readWindow',
