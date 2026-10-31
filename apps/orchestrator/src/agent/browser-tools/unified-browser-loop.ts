@@ -2161,7 +2161,12 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
       ) {
         remember(outcome.text, outcome.url);
       }
-      if (outcome.ok && ['snapshot', 'read_page', 'get_page_text'].includes(action.tool)) {
+      if (
+        outcome.ok &&
+        (['snapshot', 'read_page', 'get_page_text'].includes(action.tool) ||
+          // PR #314 review: a cloud switch_tab returns a read of the target tab, frames included.
+          (action.tool === 'switch_tab' && input.observationV2))
+      ) {
         // FIX-50: a read by frameId of a frame other than the main one is that frame's read.
         const asked = 'frameId' in action ? action.frameId : undefined;
         const child = !!asked && !mainFrameIds.has(asked);

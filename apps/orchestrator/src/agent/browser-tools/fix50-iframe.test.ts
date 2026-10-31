@@ -285,11 +285,73 @@ describe('FIX-50 #1 · in the loop', () => {
     );
   });
 
+  it('PR #314 review: the frame read by a cloud switch_tab counts (「iframe 为空」 completed)', async () => {
+    const empty =
+      '1. iframe：已读取 iframe，iframe 为空，里面没有文字。\n2. checkboxes：checkbox 1 未勾选，checkbox 2 已勾选。';
+    const { outcome } = await run(
+      [
+        { name: 'navigate', input: { url: IFRAME } },
+        { name: 'navigate', input: { url: BOXES } },
+        { name: 'snapshot', input: {} },
+        { name: 'navigate', input: { url: IFRAME } },
+        { name: 'switch_tab', input: { targetTabId: 'tab_1' } },
+        finish(empty),
+      ],
+      '- paragraph [ref=f1e3]',
+    );
+    expect(outcome.status).toBe('completed');
+    expect(outcome).not.toHaveProperty('partial');
+  });
+
   it('a blank frame, written 「iframe 为空」: completed', async () => {
     const empty =
       '1. iframe：已读取 iframe，iframe 为空，里面没有文字。\n2. checkboxes：checkbox 1 未勾选，checkbox 2 已勾选。';
     const { outcome } = await run([...visit, finish(empty)], '- paragraph [ref=f1e3]');
     expect(outcome.status).toBe('completed');
     expect(outcome).not.toHaveProperty('partial');
+  });
+});
+
+describe('PR #314 review · each frame by its own read; short text; cloud tab switches', () => {
+  const CONTENT: FrameRead = {
+    key: 'frame_1',
+    sourceURL: 'about:blank',
+    text: '- paragraph: Your content goes here.',
+  };
+  const EMPTY_AFTER: FrameRead = { key: 'frame_2', sourceURL: 'about:blank', text: '- paragraph' };
+  it('a content frame followed by an empty one: the quoted content holds', () => {
+    const answer = '编辑器 iframe 内容为「Your content goes here.」。';
+    expect(iframeContentGap(INTENT, answer, [CONTENT, EMPTY_AFTER], true)).toBeNull();
+    // 「为空」 holds for the empty frame too, and the corrective evidence is the filled frame.
+    expect(
+      iframeContentGap(INTENT, '第二个 iframe 为空。', [CONTENT, EMPTY_AFTER], true),
+    ).toBeNull();
+    expect(
+      iframeContentGap(INTENT, 'iframe 内容为跨源错误页。', [CONTENT, EMPTY_AFTER], true),
+    ).toEqual({ kind: 'mismatch', read: 'Your content goes here.' });
+  });
+  it('reverse: the same frame read again with content — the earlier blank read no longer stands', () => {
+    const later: FrameRead = { ...TINYMCE };
+    expect(iframeContentGap(INTENT, 'iframe 为空。', [BLANK, later], true)).toEqual({
+      kind: 'mismatch',
+      read: 'Your content goes here.',
+    });
+  });
+  it('a frame text shorter than four characters, quoted as it stands: no gap', () => {
+    const hello: FrameRead = {
+      key: 'frame_1',
+      sourceURL: 'about:blank',
+      text: '- paragraph: 你好',
+    };
+    expect(iframeContentGap(INTENT, 'iframe 内容为「你好」。', [hello], true)).toBeNull();
+    // reverse: not written, or another short quote, still does not hold.
+    expect(iframeContentGap(INTENT, 'iframe 已读取。', [hello], true)).toEqual({
+      kind: 'unstated',
+      read: '你好',
+    });
+    expect(iframeContentGap(INTENT, 'iframe 内容为「再见」。', [hello], true)).toEqual({
+      kind: 'mismatch',
+      read: '你好',
+    });
   });
 });

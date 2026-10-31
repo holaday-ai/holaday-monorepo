@@ -327,6 +327,8 @@ const NOT_READ_RE =
   /没(?:有)?(?:读|读取)到|未(?:能)?读(?:取)?到|无法读(?:取)?|未读取|没有读取|读不到/;
 
 const normal = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
+/** A quote of what a frame holds, however short (PR #314 review: a frame reading 「你好」). */
+const FRAME_QUOTE_RE = /["“「『]([^"”」』\n]{1,120})["”」』]/g;
 
 export type FrameGap =
   | { kind: 'unread' }
@@ -354,7 +356,7 @@ export function iframeContentGap(
     return {
       blank: BLANK_CLAIM_RE.test(window),
       claim: verb < 0 ? '' : window.slice(verb).replace(CONTENT_CLAIM_RE, '').trim(),
-      quotes: [...window.matchAll(QUOTE_RE)].map((m) => normal(m[1]!)),
+      quotes: [...window.matchAll(FRAME_QUOTE_RE)].map((m) => normal(m[1]!)),
       notRead: NOT_READ_RE.test(window),
     };
   });
@@ -378,12 +380,16 @@ export function iframeContentGap(
     return unread || (asked && framesSeen) ? { kind: 'unread' } : null;
   }
   const pieces = good.flatMap((read) => framePieces(read.text));
-  // The last good read stands (a page that failed and was reopened).
-  const shown = framePieces(good.at(-1)!.text).join(' ').slice(0, 160);
+  // PR #314 review: each frame as last read (by its frameId; a page that failed and was reopened
+  // counts by its last good read) — not the last frame of the page standing for all of them.
+  const current = [...new Map(good.map((read) => [read.key, read] as const)).values()];
+  const filled = current.filter((read) => framePieces(read.text).length > 0);
+  const shown = filled.length ? framePieces(filled.at(-1)!.text).join(' ').slice(0, 160) : '';
+  const blankRead = filled.length < current.length;
   const readText = normal(pieces.join(' '));
   for (const c of said) {
     if (c.blank) {
-      if (shown) return { kind: 'mismatch', read: shown };
+      if (!blankRead) return { kind: 'mismatch', read: shown };
       continue;
     }
     if (c.quotes.some((q) => !readText.includes(q) && !pageText.includes(q)))
@@ -391,12 +397,15 @@ export function iframeContentGap(
     if (!c.quotes.length && ERROR_CLAIM_RE.test(c.claim)) return { kind: 'mismatch', read: shown };
   }
   if (!asked) return null;
-  if (!shown) return said.some((c) => c.blank) ? null : { kind: 'unstated', read: '' };
+  if (!filled.length) return said.some((c) => c.blank) ? null : { kind: 'unstated', read: '' };
   const lower = normal(answer).replace(/[“”「」『』"]/g, '');
-  const stated = pieces.some(
-    (piece) => piece.length >= 4 && lower.includes(normal(piece).replace(/[.。!！]$/, '')),
-  );
-  return stated ? null : { kind: 'unstated', read: shown };
+  const quoted = new Set(said.flatMap((c) => c.quotes));
+  const stated = pieces.some((piece) => {
+    const text = normal(piece).replace(/[.。!！]$/, '');
+    // A short frame text counts when quoted as it stands (「你好」), not as any word in prose.
+    return text.length >= 4 ? lower.includes(text) : quoted.has(normal(piece)) || quoted.has(text);
+  });
+  return stated || said.some((c) => c.blank) ? null : { kind: 'unstated', read: shown };
 }
 
 /**
