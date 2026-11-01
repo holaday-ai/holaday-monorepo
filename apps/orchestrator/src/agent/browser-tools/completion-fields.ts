@@ -890,9 +890,16 @@ export function assessCompletionFacts(input: {
       .filter((v): v is string => Boolean(v))
       .map(normalizeFact)
       .flatMap((v) => [v, ...currencyForms(v), ...byteForms(v)]);
+    // FIX-51 (Deploy-51 core-07): a tab's listed title has its tab but no URL. A fact bound to both
+    // is on that page when the tab was read at that URL — not 「来自其他页面」.
+    const tabsAtSource = new Set(
+      pages.filter((page) => sameSource(page.sourceURL, fact.sourceURL ?? '')).map((p) => p.tabId),
+    );
     const bound = (page: (typeof pages)[number]) =>
       (!fact.tabId || page.tabId === fact.tabId) &&
-      (!fact.sourceURL || sameSource(page.sourceURL, fact.sourceURL));
+      (!fact.sourceURL ||
+        sameSource(page.sourceURL, fact.sourceURL) ||
+        (!page.sourceURL && !!page.tabId && tabsAtSource.has(page.tabId)));
     const eligible = pages.filter(bound);
     const label = `${fieldLabel(fact.name)}「${fact.value.slice(0, 120)}」`;
     const isVideoKindMismatch =
@@ -1493,7 +1500,8 @@ function filledAfter(prose: string, at: number, name: string, pages?: readonly s
   const unsure =
     '(?!(?:推测|估计|大概|可能|也许|疑似|似乎|待确认|待定|待查|不清楚|不确定|不详|未知|谁|什么|哪|[？?—–\\-…]))';
   const filled = new RegExp(
-    `(?:(?:读到|读取到|获取到|拿到|找到|补上|补齐)了?(?:其|该|它的)?${name}|${name})\\s*(?:为|是|[：:])\\s*${absent}${unsure}(\\S[^，,。；;\\n]{0,79})`,
+    // FIX-51 (Deploy-51 b-p02): 「读取到价格 S$12.77」「读取到价格文本 "S$12.77"」 say the value too.
+    `(?:(?:读到|读取到|获取到|拿到|找到|补上|补齐)了?(?:其|该|它的)?${name}(?:文本|文字|信息|数值|值)?\\s*(?:为|是|[：:])?|${name}\\s*(?:为|是|[：:]))\\s*${absent}${unsure}(\\S[^，,。；;\\n]{0,79})`,
   ).exec(next);
   if (!filled) return false;
   // PR #309 review: 「第一个视频未显示作者，第二个视频的作者为张三」 — a value for another item fills
@@ -1506,7 +1514,13 @@ function filledAfter(prose: string, at: number, name: string, pages?: readonly s
   const own = [...prose.slice(start + 1, at).matchAll(ITEM_RE)].at(-1)?.[0].replace(/\s+/g, '');
   if (![...before.matchAll(ITEM_RE)].every((m) => m[0].replace(/\s+/g, '') === own)) return false;
   // The value is the page's: found on a page the run read.
-  const value = normalizeFact(filled[1]!.trim().replace(/^[“"「『]|[”"」』]$/g, ''));
+  // Its note is not part of it (「S$12.77（来自详情页）」).
+  const value = normalizeFact(
+    filled[1]!
+      .replace(/\s*[（(].*$/, '')
+      .trim()
+      .replace(/^[“"「『]|[”"」』]$/g, ''),
+  );
   return /[\p{L}\p{N}]/u.test(value) && pages.some((page) => normalizeFact(page).includes(value));
 }
 

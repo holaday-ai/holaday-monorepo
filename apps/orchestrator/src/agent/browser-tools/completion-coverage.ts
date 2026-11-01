@@ -345,7 +345,7 @@ const IFRAME_WORD_RE =
   /iframe|i-frame|内联框架|子框架|(?:内嵌|嵌入(?!式))[^。，,；;\n]{0,8}?框架|第[一二两三四五六七八九十\d]+个框架/i;
 /** 「内容为…」「显示…」「写着…」「iframe：…」: what the iframe holds, said as fact. */
 const CONTENT_CLAIM_RE =
-  /(?:内容|文本|文字|正文)\s*(?:为|是|显示为?|写着|[:：])|显示(?:为|的是|着)?|写着|里面是|内有|呈现|^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:：]/i;
+  /(?:内容|文本|文字|正文)\s*(?:为|是|显示为?|写着|[:：])|显示了?(?:为|的是|着)?|写着|里面是|内有|呈现|还有|另有|^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:：]/i;
 /**
  * Between an iframe and the verb, when the task did not ask for it: the iframe is the subject
  * (「广告 iframe 显示…」「iframe（编辑器）里的内容为…」), not 「iframe 下方的价格显示为…」.
@@ -424,28 +424,34 @@ function quoteHolds(quote: string, pieces: readonly string[]): boolean {
 
 /** What is left of a claim once the frame's own text is taken out: only joining words, or nothing. */
 const CONNECTIVE_RE =
-  /^(?:[\s\p{P}\p{S}]|和|与|及|以及|并|等|其中|的|为|是|内容|文本|文字|一段|一句|\bthe\b|\ba\b|\btext\b|\band\b)*$/iu;
-
-/** A clause that goes on describing what came before it. */
-const CONTINUE_RE =
-  /^\s*(?:还|另有|以及|并有|也有|及|和|包括|包含|其中|此外|外加|附带|带有|有一?个|\balso\b|\bplus\b|\bwith\b)/i;
+  /^(?:[\s\p{P}\p{S}]|和|与|及|以及|并且?|另外|此外|同时|而且|且|等|其中|的|了|为|是|\bthe\b|\ba\b|\btext\b|\band\b|确认|证实|证明|验证|表明|说明|其|该|均|都|已|也|可|能够?|正常|正确|成功|完整|无误|一致|完成|无报错|无错误|内容|文本|文字|一段|一句|页面|iframe|i-frame|框架|内嵌|嵌入|内部|嵌套|元素|识别|交互性?|读取|读到|可读|编辑|输入|显示|加载|访问|使用)*$/iu;
 
 /**
- * A claim holds when it is the frame's text: the quotes in it hold, and taking out the quotes
- * and every read text it carries leaves only joining words (DEPLOY-51 review #2: 「Your content
- * goes here，还有一个提交按钮和管理员登录链接」 adds what no read shows).
+ * FIX-51 #2: what is said about a frame's text, not said to be in it — 「（TinyMCE 默认文本）」
+ * 「这段默认文字」「是 TinyMCE 编辑器的默认内容」「（读取自 frame_1）」「一个 TinyMCE 编辑器」. A note
+ * in brackets goes only when it is that kind of note: 「（还有一个登录链接）」 stays.
  */
-function claimHolds(claim: string, quotes: readonly string[], pieces: readonly string[]): boolean {
+const FRAME_ASIDE_RES = [
+  /[（(][^）)]*(?:默认|占位|示例|原文|读取自|来自|frame_|编辑器)[^）)]*[）)]/g,
+  /(?:这段|这句|这是|是)?\s*(?:tinymce|wysiwyg|富文本)?\s*(?:编辑器)?\s*的?\s*(?:默认|占位|示例)的?(?:文字|文本|内容)/g,
+  /(?:一个)?\s*(?:(?:tinymce|wysiwyg|富文本)\s*(?:编辑器|editor)?|编辑器|文本框|输入框)/g,
+];
+
+/**
+ * A claim holds when it is the frame's text: the quotes in it hold, and taking out the quotes,
+ * every read text it carries and the notes about them leaves only joining words (DEPLOY-51
+ * review #2: 「Your content goes here，还有一个提交按钮和管理员登录链接」 adds what no read shows).
+ */
+function claimHolds(claim: string, pieces: readonly string[]): boolean {
+  const quotes = [...claim.matchAll(FRAME_QUOTE_RE)].map((m) => normal(m[1]!));
   if (!quotes.every((q) => quoteHolds(q, pieces))) return false;
-  // Its own clause, and the ones that go on about it (「，还有一个提交按钮…」), not the next part of
-  // the answer (「，checkboxes 已读」).
-  const [own = '', ...more] = normal(claim).replace(FRAME_QUOTE_RE, ' ').split(/[，,]/);
-  let rest = [own, ...more.filter((part) => CONTINUE_RE.test(part))].join(' ');
+  let rest = normal(claim).replace(FRAME_QUOTE_RE, ' ');
   for (const text of pieces
     .map(bare)
     .filter((text) => weight(text) >= 2)
     .sort((a, b) => b.length - a.length))
     rest = rest.split(text).join(' ');
+  for (const aside of FRAME_ASIDE_RES) rest = rest.replace(aside, ' ');
   return CONNECTIVE_RE.test(rest);
 }
 
@@ -476,28 +482,29 @@ export function iframeContentGap(
   pageTexts: readonly string[] = [],
 ): FrameGap | null {
   const asked = IFRAME_WORD_RE.test(intent);
-  const claims = iframeWindows(answer, asked).flatMap(({ window, clause, subject }) => {
-    const verb = window.search(CONTENT_CLAIM_RE);
-    // Not asked: only a sentence with the iframe as its subject says what it holds.
-    if (!asked && verb >= 0) {
-      const word = window.match(new RegExp(IFRAME_WORD_RE.source, 'i'))![0];
-      if (verb > 0 && !SUBJECT_GAP_RE.test(window.slice(word.length, verb))) return [];
-    }
-    // What it holds is what follows the last verb (「iframe 中显示的是编辑器，内容为 "…"」,
-    // 「iframe：读取 iframe 中的文本内容为 "…"」); an earlier description is not the content.
-    const last = [...window.matchAll(new RegExp(CONTENT_CLAIM_RE.source, 'gi'))].at(-1);
-    const claim = last ? window.slice(last.index + last[0].length).trim() : '';
-    return [
-      {
-        clause,
-        subject,
-        blank: BLANK_CLAIM_RE.test(window),
-        claim,
-        quotes: [...claim.matchAll(FRAME_QUOTE_RE)].map((m) => normal(m[1]!)),
-        notRead: NOT_READ_RE.test(window),
-      },
-    ];
-  });
+  const claims = iframeWindows(answer, intent, asked).flatMap(
+    ({ window, parts, clause, subject }) => {
+      // Not asked: only a sentence with the iframe as its subject says what it holds.
+      const verb = window.search(CONTENT_CLAIM_RE);
+      if (!asked && verb >= 0) {
+        const word = window.match(new RegExp(IFRAME_WORD_RE.source, 'i'))?.[0] ?? '';
+        if (verb > 0 && !SUBJECT_GAP_RE.test(window.slice(word.length, verb))) return [];
+      }
+      return [
+        {
+          clause,
+          subject,
+          parts,
+          blank: BLANK_CLAIM_RE.test(window),
+          claim: parts.join('，'),
+          quotes: parts.flatMap((part) =>
+            [...part.matchAll(FRAME_QUOTE_RE)].map((m) => normal(m[1]!)),
+          ),
+          notRead: NOT_READ_RE.test(window),
+        },
+      ];
+    },
+  );
   const said = claims.filter(
     (c) => !c.notRead && (c.blank || c.quotes.length > 0 || bare(c.claim).length > 0),
   );
@@ -538,7 +545,7 @@ export function iframeContentGap(
       ? frames.some((r) => framePieces(r.text).length === 0)
       : // DEPLOY-51 review #1 (#1) / #2 (#1): what is said, quoted or not, is the frame's text
         // and no more — the page around it does not hold it.
-        !ERROR_CLAIM_RE.test(c.claim) && claimHolds(c.claim, c.quotes, pieces);
+        !ERROR_CLAIM_RE.test(c.claim) && c.parts.every((part) => claimHolds(part, pieces));
     if (!holds) {
       failed.push(c);
       read ||= shownOf(frames.length ? frames : current);
@@ -607,28 +614,69 @@ export function dropClauses(answer: string, clauses: readonly string[]): string 
     .replace(/[，,；;、]$/, '');
 }
 
+/** FIX-51 #1: 「编辑器下方还有…」, a sentence of its own about the frame of a task that asks for it. */
+const FRAME_ALIAS = '(?:该\\s*)?编辑器(?=[^，,]{0,8}?(?:还有|另有|显示|写着|内容))';
 /**
- * Where an answer speaks of an iframe: from each mention, its clause and — when the task asks
- * for the iframe — the next one (「该页包含一个 iframe，内容为…」), unless the next one moves on
- * (「，并导航至 /javascript_alerts…」). Not asked, the clause is the iframe's own (「页面嵌有
- * iframe，商品价格显示为 99 元」 says nothing of the iframe). `subject` is the clause up to the verb,
- * the words that name which iframe (「编辑器 iframe」「广告 iframe」).
+ * A clause that leaves the iframe: the run's next action, wherever it happens (「，并导航至…」
+ * 「，并成功在该 iframe 内点击段落元素」「，输入 "…" 后重新读取」), or the page around it.
+ */
+const MOVED_ON_RE =
+  /^\s*(?:(?:(?:并|然后|接着|随后|再|之后|另外|同时|and\b|then\b)\s*)?(?:成功|已|也)?\s*(?:在[^，,]{0,10}?[内中里上])?\s*(?:导航|打开|访问|点击|跳转|前往|进入|切换|触发|填写|输入|下载|滚动|返回|处理|完成|操作)|页面|主页面|父页面|该页|结果|result\b|标题)/i;
+
+/** The words of the task's other parts (「checkboxes」「alert」): a clause naming one left the iframe. */
+function otherParts(intent: string): string[] {
+  const words = intent
+    .replace(/\S*\.\S+/g, ' ')
+    .replace(new RegExp(IFRAME_WORD_RE.source, 'gi'), ' ')
+    .replace(TASK_WORDS, ' ');
+  return [
+    ...(words.match(/[a-z]{4,}/gi) ?? []).map((word) => word.toLowerCase().replace(/s$/, '')),
+    ...(words.match(/\p{Script=Han}{2,}/gu) ?? []).flatMap((run) =>
+      [...run].slice(1).map((ch, i) => run[i]! + ch),
+    ),
+  ];
+}
+
+/**
+ * Where an answer speaks of an iframe: from each mention, what it says. FIX-51 #1: asked, every
+ * later clause of the sentence too, whatever word it opens with (「，并且有一个管理员登录链接」
+ * 「，下方还有提交按钮」), until one leaves the iframe (「，并导航至 /javascript_alerts…」「，checkboxes
+ * 已读」). Not asked, the clause is the iframe's own (「页面嵌有 iframe，商品价格显示为 99 元」 says
+ * nothing of the iframe). `parts` start at the first clause that says what it holds; a clause's
+ * verb starts its part (「iframe 中显示的是编辑器，内容为 "…"」). `clause` is the iframe's own, and
+ * `subject` the words up to the verb that name which iframe (「编辑器 iframe」「广告 iframe」).
  */
 function iframeWindows(
   answer: string,
+  intent: string,
   asked: boolean,
-): Array<{ window: string; clause: string; subject: string }> {
+): Array<{ window: string; parts: string[]; clause: string; subject: string }> {
+  const others = asked ? otherParts(intent) : [];
+  const mention = new RegExp(
+    asked ? `${IFRAME_WORD_RE.source}|${FRAME_ALIAS}` : IFRAME_WORD_RE.source,
+    'gi',
+  );
   return answer.split(/[。！？!?；;\n]/).flatMap((sentence) =>
-    [...sentence.matchAll(new RegExp(IFRAME_WORD_RE.source, 'gi'))].map((m) => {
-      const [own = '', next = ''] = sentence.slice(m.index).split(/[，,]/);
+    [...sentence.matchAll(mention)].map((m) => {
+      const [own = '', ...later] = sentence.slice(m.index).split(/[，,]/);
       const lead = sentence.slice(0, m.index).split(/[，,]/).at(-1) ?? '';
-      const window =
-        !asked || /^\s*(?:并|然后|接着|随后|再|之后|另外|同时|and\b|then\b)/i.test(next)
-          ? own
-          : `${own}，${next}`;
+      const left = later.findIndex(
+        (part) =>
+          MOVED_ON_RE.test(part) || others.some((word) => part.toLowerCase().includes(word)),
+      );
+      const clauses = [own, ...(asked ? later.slice(0, left < 0 ? undefined : left) : [])];
+      const window = clauses.join('，');
+      const first = clauses.findIndex((part) => CONTENT_CLAIM_RE.test(part));
       const verb = window.search(CONTENT_CLAIM_RE);
       return {
         window,
+        parts:
+          first < 0
+            ? []
+            : clauses.slice(first).map((part) => {
+                const last = [...part.matchAll(new RegExp(CONTENT_CLAIM_RE.source, 'gi'))].at(-1);
+                return last ? part.slice(last.index + last[0].length).trim() : part.trim();
+              }),
         clause: (lead + own).trim(),
         subject: lead + (verb < 0 ? window : window.slice(0, verb)),
       };

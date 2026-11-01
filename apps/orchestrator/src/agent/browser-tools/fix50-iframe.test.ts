@@ -398,8 +398,9 @@ describe('DEPLOY-51 review #1 · iframe claims (fix-50/review1-fixtures/iframe31
         P,
       ),
     ).toMatchObject({ kind: 'mismatch' });
+    // FIX-51 #1: 「编辑器里写着…」 is said of the frame (was `unstated`, and is sent back either way).
     expect(gap(I, '编辑器里写着：Hello world。checkboxes 已读。iframe 已读取。', [T], P)).toEqual({
-      kind: 'unstated',
+      kind: 'mismatch',
       read: 'Your content goes here.',
     });
   });
@@ -682,9 +683,17 @@ describe('DEPLOY-51 review #2 (fix-50/review2-fixtures)', () => {
       ['1. iframe：Your content goes here.\n2. alert 已点击。', T],
       ['编辑器 iframe 的内容是「Your content goes here」。', T],
       ['The iframe contains the text "Your content goes here."', T],
-      ['iframe 内容为 Your content goes here，checkboxes 已读。', T],
     ] as const)
       expect(gap(I, answer, [read], AL), answer).toBeNull();
+    // The clause is about another part of the task, one the task names (FIX-51 #1).
+    expect(
+      gap(
+        '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 checkboxes',
+        'iframe 内容为 Your content goes here，checkboxes 已读。',
+        [T],
+        AL,
+      ),
+    ).toBeNull();
     const YT: FrameRead = {
       key: 'f_yt',
       sourceURL: 'https://www.youtube.com/embed/abc',
@@ -803,3 +812,75 @@ describe('DEPLOY-51 review #2 (fix-50/review2-fixtures)', () => {
 function finishOf(summary: string) {
   return { name: 'finish', input: { status: 'completed', summary } };
 }
+
+describe('FIX-51 #1 #2 · every later clause, asides aside (fix-51/review-fixtures/t4.mjs)', () => {
+  const I = '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts';
+  const T: FrameRead = {
+    key: 'frame_1',
+    sourceURL: 'about:blank',
+    text: '- paragraph [ref=f1e3]: Your content goes here.',
+  };
+  const MCE: FrameRead = {
+    key: 'frame_1',
+    sourceURL: 'about:blank',
+    text: '- application "Rich Text Area. Press ALT-0 for help."\n- paragraph: Your content goes here.',
+  };
+  const AL = [
+    'heading "JavaScript Alerts" button "Click for JS Alert" Result: You successfully clicked an alert',
+  ];
+  const gap = (answer: string, read = T) => iframeContentGap(I, answer, [read], true, AL);
+
+  it('#1 red line: made-up details after the frame text, whatever they open with', () => {
+    for (const answer of [
+      'iframe 内容为 Your content goes here，并且有一个管理员登录链接。',
+      'iframe 内容为 Your content goes here，另外显示了管理员登录链接。',
+      'iframe 内容为 Your content goes here 和一个管理员登录链接。',
+      'iframe 内容为 "Your content goes here."，下方还有提交按钮。',
+      'iframe 内容为 "Your content goes here."，以及一个上传图片按钮。',
+      'iframe 内容为 Your content goes here。编辑器下方还有一个管理员登录链接。',
+      'iframe 内容为 Your content goes here（还有一个管理员登录链接）。',
+      'iframe 内容为 Hello，另外显示了 Your content goes here。',
+    ])
+      expect(gap(answer), answer).toEqual({ kind: 'mismatch', read: 'Your content goes here.' });
+  });
+
+  it('#2 notes about the text are no claim, and are not sent back', () => {
+    for (const [answer, read] of [
+      ['iframe 中的编辑器内容为 "Your content goes here."，可正常编辑。', T],
+      ['iframe 内容为：Your content goes here（TinyMCE 默认文本）。', T],
+      ['iframe 显示 "Your content goes here." 这段默认文字。', T],
+      ['iframe 内的文本是 Your content goes here。', T],
+      ['iframe 里写着 “Your content goes here.”，是 TinyMCE 编辑器的默认内容。', MCE],
+      ['iframe 内容为 "Your content goes here."（读取自 frame_1）。', T],
+      ['The iframe shows the text: Your content goes here.', T],
+      ['iframe 中显示的是编辑器，内容为 "Your content goes here"。', T],
+    ] as const)
+      expect(gap(answer, read), answer).toBeNull();
+  });
+
+  it('a clause that left the iframe is not its content (core-10 verbatim, Deploy-51 local)', () => {
+    for (const answer of [
+      '1) 导航至 https://the-internet.herokuapp.com/iframe，页面包含一个 iframe，其内部正文段落文本为 "Your content goes here."，确认 iframe 内容可读；2) 导航至 https://the-internet.herokuapp.com/javascript_alerts，点击按钮。',
+      '从主页进入 Frames → iFrame，打开 https://the-internet.herokuapp.com/iframe，页面标题为 "An iFrame containing the TinyMCE WYSIWYG Editor"，确认存在 iframe（frameId），其内部正文为 "Your content goes here."。',
+      'iframe 内容为 "Your content goes here."，并导航至 /javascript_alerts 点击按钮，alert 已确认。',
+      'iframe 内容为 "Your content goes here."，页面标题为 An iFrame containing the TinyMCE WYSIWYG Editor。',
+      // Real answers of earlier runs, verbatim: a check of the read, or the run's next action.
+      '成功识别并读取内嵌 iframe（TinyMCE 编辑器），其默认内容为 "Your content goes here."，证实 iframe 加载正常且内容可读。',
+      '通过 read_page 发现嵌套 iframe，其中包含 TinyMCE 编辑器，正文内容为 "Your content goes here."，并成功在该 iframe 内点击段落元素验证可交互性。',
+      '页面中存在一个 iframe，其内部富文本区域内容为 "Your content goes here."，确认 iframe 正确加载且可读。',
+      '通过 frameId frame_03d0be1d-56e8-4a32-a765-25ff110d0897 定位到嵌套富文本区域，初始内容为 "Your content goes here."，输入 "Cloud browser test" 后重新读取确认内容已更新，证明可正确识别并交互 iframe 内部元素。',
+      '内嵌 iframe（id=mce_0_ifr）已渲染，内部文档显示文本 "Your content goes here."，确认内嵌框架内容正常加载。',
+    ])
+      expect(gap(answer), answer).toBeNull();
+  });
+
+  it('reverse: a check or an action word does not carry made-up content past the check', () => {
+    for (const answer of [
+      'iframe 内容为 "Your content goes here."，确认还有一个管理员登录链接。',
+      'iframe 内容为 "Your content goes here."，证实 iframe 里有管理员入口。',
+      'iframe 内容为 "Your content goes here."，有一个点击登录的链接。',
+      'iframe 内容为 "Your content goes here."，并有一个输入手机号的框。',
+    ])
+      expect(gap(answer), answer).toEqual({ kind: 'mismatch', read: 'Your content goes here.' });
+  });
+});
