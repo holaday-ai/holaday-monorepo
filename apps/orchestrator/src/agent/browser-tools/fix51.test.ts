@@ -339,3 +339,88 @@ describe('FIX-51 复审 #1 #1: what follows a real frame text is held to the fra
     expect(gap('iframe 内容为 "登录链接"。', IL, LINK)).toBeNull();
   });
 });
+
+describe('FIX-51 复审 #2: 「left the iframe」 is no way past the reads (fix-51/review2-fixtures/t7.mjs)', () => {
+  const I = '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts';
+  const IL = '请使用云端浏览器，读 the-internet.herokuapp.com 的 iframe 里的登录链接';
+  const T = {
+    key: 'frame_1',
+    sourceURL: 'about:blank',
+    text: '- paragraph [ref=f1e3]: Your content goes here.',
+  };
+  const AL = [
+    'https://the-internet.herokuapp.com/iframe heading "An iFrame containing the TinyMCE WYSIWYG Editor" button "Bold" button "Italic" link "Elemental Selenium"',
+    'heading "JavaScript Alerts" button "Click for JS Alert" Result: You successfully clicked an alert',
+  ];
+  const Q = 'iframe 内容为 "Your content goes here."';
+  const gap = (answer: string, intent = I, pages = AL) =>
+    iframeContentGap(intent, answer, [T], true, pages);
+
+  it.each([
+    [`${Q}，页面上还有管理员登录链接。`, I],
+    [`${Q}，页面上还有管理员登录链接。`, IL],
+    [`${Q}，页面中的登录链接为 https://evil.example/login。`, IL],
+    [`${Q}。登录链接为 https://evil.example/login。`, IL],
+    [`${Q}，标题为管理员后台。`, I],
+    [`${Q}，页面显示该编辑器内还有一个管理员链接。`, I],
+    [`${Q}。管理员链接很明显。`, I],
+    [`${Q}，网页底部（iframe 内）有管理员登录链接。`, I],
+    [
+      'The iframe contains "Your content goes here.". The page also has an admin login link inside the editor.',
+      I,
+    ],
+    [`${Q}，该页面在 iframe 下方还嵌着一个管理员登录表单。`, I],
+    [`${Q}，主页面上的 iframe 区域还显示了管理员入口。`, I],
+    [`${Q}，页面其余部分：管理员登录链接、提交按钮。`, I],
+    // Probed beyond the fixture.
+    [`${Q}。\n\n管理员链接很明显。`, I],
+    [`${Q}。任务完成。管理员链接很明显。`, I],
+    [`${Q}，页面上还有一个表单。`, I],
+    [`${Q}，页面上 JavaScript alerts 按钮旁还有管理员登录链接。`, I],
+    [`${Q}，页面链接为 https://the-internet.herokuapp.com.evil.example/。`, I],
+    [`${Q}，页面标题为 "管理员后台"。`, I],
+    [`${Q}，页面标题为 An iFrame，下方还有管理员按钮。`, I],
+    [`${Q}，页面上的编辑器工具栏有管理员登录链接。`, I],
+    ['The iframe contains "Your content goes here.". The page title is Admin Console.', I],
+    [`${Q}，and the page also has an admin login link.`, I],
+  ])('made up: %s', (answer, intent) => {
+    expect(gap(answer, intent)).toMatchObject({ kind: 'mismatch' });
+  });
+
+  it('a place word holds a clause to the frame alone, though the parent has the word', () => {
+    expect(
+      gap('The iframe contains "Your content goes here.". The page has Bold inside the editor.'),
+    ).toMatchObject({
+      kind: 'mismatch',
+    });
+    expect(gap(`${Q}。The page also has a Bold button.`)).toBeNull();
+  });
+
+  it.each([
+    `${Q}，页面标题为 An iFrame containing the TinyMCE WYSIWYG Editor。`,
+    `${Q}，页面上方是标题 An iFrame containing the TinyMCE WYSIWYG Editor。`,
+    `${Q}，标题为 "An iFrame containing the TinyMCE WYSIWYG Editor"。`,
+    `${Q}，编辑器工具栏有 Bold、Italic 按钮。`,
+    `${Q}，并导航至 /javascript_alerts 完成 alert。`,
+    `${Q}；JS Alert 弹出 "I am a JS Alert"。`,
+    `${Q}，页面显示正常。`,
+    `${Q}。页面加载完成。`,
+    `${Q}。任务已完成。`,
+    `${Q}。两部分均已实际打开、读取并验证，无未完成项。\n\n未核实：以下内容未能在已读页面中逐字找到，请自行确认——alert_text「I am a JS Alert」`,
+    `${Q}，页面底部有 Elemental Selenium 链接。`,
+    `${Q}，页面地址为 https://the-internet.herokuapp.com/iframe。`,
+    `${Q}。\n2) 点击 Click for JS Alert，结果为 You successfully clicked an alert。`,
+    `${Q}。The page title is An iFrame containing the TinyMCE WYSIWYG Editor.`,
+  ])('as read, or nothing named: %s', (answer) => {
+    expect(gap(answer)).toBeNull();
+  });
+
+  it('a mention with nothing said of the iframe holds nothing to the reads', () => {
+    expect(gap(`打开 /iframe，read_page 返回的 frames 列表包含 f1。${Q}`)).toBeNull();
+    expect(gap(`已读取 iframe，确认页面存在可访问的 iframe。${Q}`)).toBeNull();
+  });
+
+  it('no page read recorded: nothing to hold the clause to', () => {
+    expect(gap(`${Q}，页面标题为管理员后台。`, I, [])).toBeNull();
+  });
+});

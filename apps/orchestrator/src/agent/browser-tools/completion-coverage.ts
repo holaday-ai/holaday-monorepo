@@ -354,7 +354,7 @@ const FRAME_LABEL_RE = /^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:�
  * remark; and 「…/iframe，read_page 返回的列表包含…」 is not about it.
  */
 const ASKED_CLAIM_RE = new RegExp(
-  String.raw`${CONTENT_CLAIM_RE.source}|另含|含有?|包含|存在|看到|见到|(?<![没所具拥未])有(?![效关时些])|\b(?:contains?|shows?|displays?|has|have|includes?|reads|says)\b|\b(?:content|contents|text)\s+(?:is|are|reads|says)\b|\b(?:text|contents?)\b\s*(?=["“「:：])`,
+  String.raw`${CONTENT_CLAIM_RE.source}|另含|含有?|包含|嵌[着有]|存在|看到|见到|(?<![没所具拥未])有(?![效关时些])|\b(?:contains?|shows?|displays?|has|have|includes?|reads|says)\b|\b(?:content|contents|text)\s+(?:is|are|reads|says)\b|\b(?:text|contents?)\b\s*(?=["“「:：])`,
   'i',
 );
 /**
@@ -504,7 +504,7 @@ export function iframeContentGap(
   const asked = IFRAME_WORD_RE.test(intent);
   const pageText = normal(pageTexts.join(' '));
   const claims = iframeWindows(answer, intent, asked, pageText).flatMap(
-    ({ window, parts, clause, subject }) => {
+    ({ window, parts, around, clause, subject }) => {
       // Not asked: only a sentence with the iframe as its subject says what it holds.
       const verb = window.search(CONTENT_CLAIM_RE);
       if (!asked && verb >= 0) {
@@ -516,6 +516,7 @@ export function iframeContentGap(
           clause,
           subject,
           parts,
+          around,
           blank: BLANK_CLAIM_RE.test(window),
           claim: parts.join('，'),
           quotes: parts.flatMap((part) =>
@@ -573,6 +574,19 @@ export function iframeContentGap(
   }
   if (!asked) return dropOr(intent, answer, failed, { kind: 'mismatch', read });
   if (failed.length) return { kind: 'mismatch', read };
+  // 复审 #2: what is said right after it, of the page around the iframe, is in some read.
+  if (pageText) {
+    const others = otherParts(intent);
+    const text = (frames: readonly FrameRead[]) => normal(frames.map((r) => r.text).join(' '));
+    const off = claims.find(
+      (c) =>
+        !c.notRead &&
+        c.around.some(
+          (part) => !heldAround(part, text(namedFrames(c.subject, current)), pageText, others),
+        ),
+    );
+    if (off) return { kind: 'mismatch', read: shownOf(namedFrames(off.subject, current)) };
+  }
   const pieces = piecesOf(current);
   const shown = shownOf(current);
   if (!shown) return said.some((c) => c.blank) ? null : { kind: 'unstated', read: '' };
@@ -642,13 +656,19 @@ const NEXT_ACTION =
 const NEXT_ACTION_EN =
   'navigated|opened|visited|clicked|went|switched|typed|entered|scrolled|returned|completed|handled|triggered|dismissed|accepted';
 /**
- * A clause that leaves the iframe: the run's next action, wherever it happens (「，并导航至…」
- * 「，并成功在该 iframe 内点击段落元素」「，输入 "…" 后重新读取」), or the page around it.
+ * The run's next action, wherever it happens (「，并导航至…」「，并成功在该 iframe 内点击段落元素」
+ * 「，输入 "…" 后重新读取」), or the note on what was not verified: the answer has moved on.
  */
-const MOVED_ON_RE = new RegExp(
-  String.raw`^\s*(?:(?:(?:并|然后|接着|随后|再|之后|另外|同时|and\b|then\b)\s*)?(?:成功|已|也)?\s*(?:在[^，,]{0,10}?[内中里上])?\s*(?:${NEXT_ACTION})|(?:(?:and|then)\s+)*(?:i\s+|we\s+)?(?:${NEXT_ACTION_EN})\b|页面|主页面|父页面|该页|结果|result\b|标题|(?:the\s+)?page\b|title\b)`,
+const NEXT_STEP_RE = new RegExp(
+  String.raw`^\s*(?:未核实|(?:(?:并|然后|接着|随后|接下来|最后|再|之后|另外|同时|and\b|then\b)\s*)?(?:成功|已|也)?\s*(?:在[^，,]{0,10}?[内中里上])?\s*(?:${NEXT_ACTION})|(?:(?:and|then)\s+)*(?:i\s+|we\s+)?(?:${NEXT_ACTION_EN})\b)`,
   'i',
 );
+/** The page around the iframe (复审 #2: held to what was read, not let go). */
+const AROUND_RE =
+  /^\s*(?:页面|主页面|父页面|网页|该页|本页|此页|这个页面|整个页面|结果|result\b|标题|(?:the\s+)?(?:page|site)\b|title\b)/i;
+const LIST_MARK_RE = /^\s*(?:[-*•]|\d+[.)、）])\s*/;
+/** 「，alert 按钮旁还有…」: a part of the task named, and something more said to be there. */
+const SAID_MORE_RE = /还有|另有|还显示|还嵌|\balso\b/i;
 /**
  * FIX-51 复审 #1: saying there is something, with no subject of its own — 「，有一个登录链接」
  * 「。下方还有一个管理员登录链接」「。旁边是一个提交按钮」「, and also…」 — goes on about the iframe, even
@@ -668,6 +688,69 @@ function atParent(part: string, pageText: string): boolean {
     (word) => !/^(?:the|editor|toolbar|tinymce)$/i.test(word),
   );
   return words.length > 0 && words.every((word) => pageText.includes(word.toLowerCase()));
+}
+
+/** 复审 #2: said of where the iframe is, a clause is held to the frame's read alone. */
+const LOCATED_RE = /i-?frame|框架|编辑器|\beditor\b|富文本|tinymce|wysiwyg/;
+const ROLE_WORDS: ReadonlyArray<readonly [string, string]> = [
+  ['按钮', 'button'],
+  ['链接', 'link'],
+  ['表单', 'form'],
+  ['输入框', 'textbox'],
+  ['图片', 'img'],
+];
+/** Words that describe a page or a run rather than name what is on it. */
+const AROUND_WORDS_RE =
+  /主页面|父页面|这个页面|整个页面|页面|网页|该页|本页|此页|其余部分|其他部分|其余|其他|部分|上方|下方|上面|下面|顶部|底部|左侧|右侧|旁边|中间|页脚|页眉|副标题|主标题|大标题|标题|名称|地址|网址|按钮|链接|表单|输入框|图片|列表|区域|编辑器|内嵌|嵌入|框架|加载|正常|成功|完整|完成|任务|两部分|两项|全部|所有|实际|打开|来自|已读取|读取|读到|确认|证实|证明|验证|识别|发现|定位|包含|含有|存在|嵌套|渲染|交互|可读|可见|可用|无报错|无错误|无未完成项|结果|内容|文字|文本|正文|段落|默认|显示|[一二两三四五六七八九十\d]+\s*(?:个|段|处|条)|一段|以上|如下|这个|该|本|此|其|这|那|的|了|着|是|为|有|还|另|也|都|均|已|可|和|与|及|以及|并且|并|而且|且|或|等|在|内|里|中|上|下/g;
+const AROUND_WORDS_EN_RE =
+  /\b(?:the|a|an|of|on|in|at|to|by|is|are|was|were|be|this|that|it|its|there|here|has|have|had|contains?|containing|includes?|shows?|displays?|also|and|or|with|plus|page|site|url|title|heading|text|contents?|inside|within|below|above|top|bottom|rest|loaded|visible|editor|i-?frame|frame|tinymce|wysiwyg)\b/g;
+const LATIN_RUN_RE = /[a-z][\w'-]*(?:\s+[a-z0-9][\w'-]*)+/g;
+
+const namesOf = (text: string) =>
+  text
+    .replace(AROUND_WORDS_RE, ' ')
+    .replace(AROUND_WORDS_EN_RE, ' ')
+    .match(/[a-z][\w-]+|\p{Script=Han}{2,}/gu) ?? [];
+
+/** The longest word runs a read has, out of a run of words (a title said in passing). */
+function withoutRead(run: string, read: string): string {
+  const words = run.split(/\s+/);
+  for (let size = words.length; size >= 2; size--)
+    for (let at = 0; at + size <= words.length; at++) {
+      const piece = words.slice(at, at + size).join(' ');
+      if (read.includes(piece))
+        return `${withoutRead(words.slice(0, at).join(' '), read)} ${withoutRead(words.slice(at + size).join(' '), read)}`;
+    }
+  return run;
+}
+
+/**
+ * 复审 #2: a clause of the page around an iframe holds when what it names is in the reads, the
+ * parent's and the frame's (「，页面标题为 An iFrame…」); a clause placed in the iframe by a word of
+ * its own, in the frame's. A task's other part does not need reading here.
+ */
+function heldAround(
+  part: string,
+  frameText: string,
+  pageText: string,
+  others: readonly string[],
+): boolean {
+  const both = `${frameText} ${pageText}`;
+  let rest = normal(part);
+  const urls = rest.match(/https?:\/\/[^\s，,。；;）)"”」』]+/g) ?? [];
+  if (urls.some((url) => !both.includes(url.replace(/[./]+$/, '')))) return false;
+  for (const url of urls) rest = rest.replace(url, ' ');
+  const quotes = [...rest.matchAll(FRAME_QUOTE_RE)].map((m) => bare(m[1]!));
+  if (quotes.some((quote) => !both.includes(quote) && namesOf(quote).length)) return false;
+  rest = rest.replace(FRAME_QUOTE_RE, ' ').replace(LATIN_RUN_RE, (run) => withoutRead(run, both));
+  const within = LOCATED_RE.test(rest) ? frameText : both;
+  if (
+    ROLE_WORDS.some(([zh, en]) => rest.includes(zh) && !within.includes(zh) && !within.includes(en))
+  )
+    return false;
+  return namesOf(rest).every(
+    (word) => within.includes(word) || others.some((other) => word.includes(other)),
+  );
 }
 
 /** Quotes and brackets stay whole when text is cut (「"Hello, world"」「（默认文本，含…）」). */
@@ -713,9 +796,11 @@ function otherParts(intent: string): string[] {
 /**
  * Where an answer speaks of an iframe: from each mention, what it says. FIX-51 #1: asked, every
  * later clause of the sentence too, whatever word it opens with (「，并且有一个管理员登录链接」
- * 「，下方还有提交按钮」), until one leaves the iframe (「，并导航至 /javascript_alerts…」「，checkboxes
- * 已读」), and the sentences right after it with no subject of their own (「。下方还有…」). Not asked,
- * the clause is the iframe's own (「页面嵌有 iframe，商品价格显示为 99 元」 says nothing of the iframe).
+ * 「，下方还有提交按钮」), up to the run's next step or the task's other part (「，并导航至
+ * /javascript_alerts…」「，checkboxes 已读」), and the sentences right after it with no subject of
+ * their own (「。下方还有…」). What is said right after it of the page around it goes in `around`, held
+ * to every read (复审 #2: 「，页面上还有…」「。管理员链接很明显。」). Not asked, the clause is the
+ * iframe's own (「页面嵌有 iframe，商品价格显示为 99 元」 says nothing of the iframe).
  * `parts` start at the first clause that says what it holds, from its verb; a later clause is held
  * whole. `clause` is the iframe's own, and `subject` the words up to the verb that name which
  * iframe (「编辑器 iframe」「广告 iframe」).
@@ -725,27 +810,51 @@ function iframeWindows(
   intent: string,
   asked: boolean,
   pageText: string,
-): Array<{ window: string; parts: string[]; clause: string; subject: string }> {
+): Array<{
+  window: string;
+  parts: string[];
+  around: string[];
+  clause: string;
+  subject: string;
+}> {
   const others = asked ? otherParts(intent) : [];
   const mention = new RegExp(
     asked ? `${IFRAME_WORD_RE.source}|${FRAME_ALIAS}` : IFRAME_WORD_RE.source,
     'gi',
   );
-  const leaves = (part: string) =>
-    !FRAME_CLAIM_OPENER_RE.test(part) &&
-    (MOVED_ON_RE.test(part) ||
-      atParent(part, pageText) ||
-      others.some((word) => part.toLowerCase().includes(word)));
+  const names = (part: string) => others.some((word) => part.toLowerCase().includes(word));
+  // Later clauses, in order: said of the iframe (`claims`), or of the page around it once one has
+  // left it (`around`, 复审 #2), up to the next step of the run or another part of the task.
+  const sort = (parts: readonly string[], left: boolean) => {
+    const claims: string[] = [];
+    const around: string[] = [];
+    for (const raw of parts) {
+      const part = raw.replace(LIST_MARK_RE, '');
+      const opener = FRAME_CLAIM_OPENER_RE.test(part);
+      if (!opener && (NEXT_STEP_RE.test(part) || (names(part) && !SAID_MORE_RE.test(part))))
+        return { claims, around, left, moved: true };
+      if (atParent(part, pageText)) left = true;
+      else if (left || (!opener && (AROUND_RE.test(part) || names(part)))) {
+        left = true;
+        around.push(part.trim());
+      } else claims.push(part);
+    }
+    return { claims, around, left, moved: false };
+  };
   const out: ReturnType<typeof iframeWindows> = [];
-  let open: { parts: string[] } | undefined;
+  let open: { parts: string[]; around: string[]; left: boolean } | undefined;
   for (const sentence of cutOutside(answer, SENTENCE_SEP)) {
     const mentions = [...sentence.matchAll(mention)];
     if (!mentions.length) {
-      if (!sentence.trim()) continue;
-      // Goes on about the iframe with no subject of its own.
-      if (open && (FRAME_CLAIM_OPENER_RE.test(sentence) || FRAME_PLACED_RE.test(sentence)))
-        open.parts.push(...cutOutside(sentence, CLAUSE_SEP).map((part) => part.trim()));
-      else open = undefined;
+      // A list number, cut off by the sentence split, is nothing said.
+      if (!open || !/\p{L}/u.test(sentence)) continue;
+      // Goes on about the iframe with no subject of its own; with one, of the page around it.
+      const placed = FRAME_CLAIM_OPENER_RE.test(sentence) || FRAME_PLACED_RE.test(sentence);
+      const next = sort(cutOutside(sentence, CLAUSE_SEP), open.left || !placed);
+      open.parts.push(...next.claims.map((part) => part.trim()));
+      open.around.push(...next.around);
+      open.left = next.left;
+      if (next.moved) open = undefined;
       continue;
     }
     open = undefined;
@@ -761,8 +870,8 @@ function iframeWindows(
       const ownRe = asked && !named ? ASKED_CLAIM_RE : CONTENT_CLAIM_RE;
       const [own = '', ...later] = cutOutside(sentence.slice(m.index), CLAUSE_SEP);
       const lead = sentence.slice(0, m.index).split(/[，,]/).at(-1) ?? '';
-      const left = later.findIndex(leaves);
-      const clauses = [own, ...(asked ? later.slice(0, left < 0 ? undefined : left) : [])];
+      const after = sort(asked ? later : [], false);
+      const clauses = [own, ...after.claims];
       const window = clauses.join('，');
       // What a quote says is not the verb (「"Your content is here"」).
       const verbAt = (text: string, verbs: RegExp) =>
@@ -787,11 +896,14 @@ function iframeWindows(
       const entry = {
         window,
         parts,
+        // Right after what the iframe holds is said; a mention alone (「打开 /iframe，…」) says nothing.
+        around: parts.length ? after.around : [],
         clause: (lead + own).trim(),
         subject: lead + (verb < 0 ? window : window.slice(0, verb)),
       };
       out.push(entry);
-      if (asked && parts.length && left < 0) open = entry;
+      if (asked && !after.moved && parts.length)
+        open = { parts: entry.parts, around: entry.around, left: after.left };
     }
   }
   return out;

@@ -290,6 +290,30 @@ describe('FIX-50 #1 · in the loop', () => {
     );
   });
 
+  it('FIX-51 复审 #2: the frame right, the page around it made up: sent back, then 部分完成', async () => {
+    const made =
+      '1. iframe：内容为 "Your content goes here."，页面上还有管理员登录链接。\n2. checkboxes：checkbox 1 未勾选，checkbox 2 已勾选。';
+    const { outcome, seen } = await run(
+      [...visit, finish(made), finish(made)],
+      '- paragraph [ref=f1e3]: Your content goes here.',
+    );
+    expect(seen).toContain('iframe 的内容和本次读到的不一致');
+    expect(outcome.status === 'completed' && outcome.summary).toMatch(
+      /^部分完成：答案中的 iframe 内容与本次读到的不一致/,
+    );
+  });
+
+  it('FIX-51 复审 #2: the page around it as read, its address too: completed, not sent back', async () => {
+    const said = `1. iframe：内容为 "Your content goes here."，页面地址为 ${IFRAME}。\n2. checkboxes：checkbox 1 未勾选，checkbox 2 已勾选。`;
+    const { outcome, seen } = await run(
+      [...visit, finish(said)],
+      '- paragraph [ref=f1e3]: Your content goes here.',
+    );
+    expect(seen).not.toContain('iframe 的内容和本次读到的不一致');
+    expect(outcome.status).toBe('completed');
+    expect(outcome).not.toHaveProperty('partial');
+  });
+
   it('PR #314 review: the frame read by a cloud switch_tab counts (「iframe 为空」 completed)', async () => {
     const empty =
       '1. iframe：已读取 iframe，iframe 为空，里面没有文字。\n2. checkboxes：checkbox 1 未勾选，checkbox 2 已勾选。';

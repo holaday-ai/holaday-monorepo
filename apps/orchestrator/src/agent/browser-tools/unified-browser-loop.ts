@@ -1611,7 +1611,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             summary,
             [...frameReads.values()],
             framesSeen,
-            pageEvidence.map((page) => page.text),
+            pageEvidence.map((page) => `${page.sourceURL ?? ''} ${page.text}`),
           );
           // DEPLOY-51 review #1 (#3): an iframe the task did not ask for, said to hold what no read
           // shows: that clause is taken out, and the task is not marked down for it.
