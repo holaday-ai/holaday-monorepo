@@ -676,7 +676,7 @@ function sourceLabel(fact: Fact) {
  * Bing appends `rdr`/`rdrig` to the URL the answer cites; the same host and
  * path with every parameter the answer names is the same page.
  */
-function sameSource(pageUrl: string | undefined, cited: string): boolean {
+export function sameSource(pageUrl: string | undefined, cited: string): boolean {
   if (!pageUrl) return false;
   if (pageUrl === cited) return true;
   try {
@@ -890,16 +890,9 @@ export function assessCompletionFacts(input: {
       .filter((v): v is string => Boolean(v))
       .map(normalizeFact)
       .flatMap((v) => [v, ...currencyForms(v), ...byteForms(v)]);
-    // FIX-51 (Deploy-51 core-07): a tab's listed title has its tab but no URL. A fact bound to both
-    // is on that page when the tab was read at that URL — not 「来自其他页面」.
-    const tabsAtSource = new Set(
-      pages.filter((page) => sameSource(page.sourceURL, fact.sourceURL ?? '')).map((p) => p.tabId),
-    );
     const bound = (page: (typeof pages)[number]) =>
       (!fact.tabId || page.tabId === fact.tabId) &&
-      (!fact.sourceURL ||
-        sameSource(page.sourceURL, fact.sourceURL) ||
-        (!page.sourceURL && !!page.tabId && tabsAtSource.has(page.tabId)));
+      (!fact.sourceURL || sameSource(page.sourceURL, fact.sourceURL));
     const eligible = pages.filter(bound);
     const label = `${fieldLabel(fact.name)}「${fact.value.slice(0, 120)}」`;
     const isVideoKindMismatch =
@@ -1513,17 +1506,25 @@ function filledAfter(prose: string, at: number, name: string, pages?: readonly s
   );
   const own = [...prose.slice(start + 1, at).matchAll(ITEM_RE)].at(-1)?.[0].replace(/\s+/g, '');
   if (![...before.matchAll(ITEM_RE)].every((m) => m[0].replace(/\s+/g, '') === own)) return false;
-  // The value is the page's: found on a page the run read.
-  // Its note is not part of it (「S$12.77（来自详情页）」).
+  // The value is the page's: found on a page the run read. A note of where it came from is not
+  // part of it (「S$12.77（来自详情页）」); any other note stays, and no page shows that.
+  const said = next.slice(before.length);
+  const noted = said.match(/^([^（(，,。；;\n]*?)\s*[（(]([^）)\n]*)[）)]\s*(?=$|[，,。；;.\n])/);
+  const fromSource =
+    noted &&
+    SOURCE_NOTE_RE.test(noted[2]!) &&
+    !UNSURE_NOTE_RE.test(noted[2]!) &&
+    [...noted[2]!.matchAll(ITEM_RE)].every((m) => m[0].replace(/\s+/g, '') === own);
   const value = normalizeFact(
-    filled[1]!
-      .replace(/\s*[（(].*$/, '')
-      .trim()
-      .replace(/^[“"「『]|[”"」』]$/g, ''),
+    (fromSource ? noted[1]! : filled[1]!).trim().replace(/^[“"「『]|[”"」』]$/g, ''),
   );
   return /[\p{L}\p{N}]/u.test(value) && pages.some((page) => normalizeFact(page).includes(value));
 }
 
+/** FIX-51 复审 #1: a note saying where a value was read, and notes that doubt it. */
+const SOURCE_NOTE_RE = /^(?:来自|来源|读取?自|取自|出自|摘自|见|据|详情页|from\b|source\b)/i;
+const UNSURE_NOTE_RE =
+  /推测|估计|大概|可能|也许|疑似|似乎|未核实|未确认|未验证|待确认|待定|待查|不准确|不确定|不清楚|maybe|probably|unverified/i;
 /** An item a sentence is about: 「第3条」「第二个」「另一个」「其他」. */
 const ITEM_RE =
   /第\s*[一二三四五六七八九十百\d]+\s*(?:个|条|项|本|篇|款|件|位|首|名|家|部|只)?|另一(?:个|条|项|本|篇|款|件|位)?|其他|其余/g;

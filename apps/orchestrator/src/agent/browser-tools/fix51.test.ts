@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { hasInternalRef, stripInternalRefs } from '../internal-refs.js';
+import { iframeContentGap } from './completion-coverage.js';
 import { assessCompletionFacts, declaredAbsentFields } from './completion-fields.js';
-import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
+import {
+  listedTabTitles,
+  listedTabUrls,
+  readTabTitles,
+  runUnifiedBrowserLoop,
+} from './unified-browser-loop.js';
 
 describe('FIX-51 #4 · core-07: a tab bound by both tabId and sourceURL (Deploy-51 online)', () => {
   const TAB = 'tab_f0057b0d-3fca-4223-adb7-6467406b6a04';
@@ -12,9 +19,9 @@ describe('FIX-51 #4 · core-07: a tab bound by both tabId and sourceURL (Deploy-
   const pages = [
     { text: '- heading "Google Chrome" [level=1]', tabId: TAB, sourceURL: CHROME },
     { text: '- heading "Safari (web browser)" [level=1]', tabId: OTHER, sourceURL: SAFARI },
-    // The tab's listed document title: readTabTitles has its tab, no URL.
-    { text: 'Google Chrome - Wikipedia', tabId: TAB },
-    { text: 'Safari (web browser) - Wikipedia', tabId: OTHER },
+    // The tab's listed document title, with the address it was listed at (read there).
+    { text: 'Google Chrome - Wikipedia', tabId: TAB, sourceURL: CHROME },
+    { text: 'Safari (web browser) - Wikipedia', tabId: OTHER, sourceURL: SAFARI },
   ];
   const check = (fact: { tabId?: string; sourceURL?: string }) =>
     assessCompletionFacts({
@@ -39,6 +46,40 @@ describe('FIX-51 #4 · core-07: a tab bound by both tabId and sourceURL (Deploy-
       expect(check(fact).join(), JSON.stringify(fact)).toContain('来自其他页面');
     // Its tab with the URL of a page that tab never read.
     expect(check({ tabId: TAB, sourceURL: SAFARI }).join()).toContain('未成功读取');
+  });
+
+  it('复审 #1: a tab that went on from CHROME to FIREFOX does not give CHROME that title', () => {
+    const FIREFOX = 'https://en.wikipedia.org/wiki/Firefox';
+    const facts = (sourceURL: string) =>
+      assessCompletionFacts({
+        summary: 'Firefox - Wikipedia',
+        fields: [{ name: '标题', value: 'Firefox - Wikipedia', tabId: TAB, sourceURL }],
+        pages: [
+          { text: '- heading "Google Chrome" [level=1]', tabId: TAB, sourceURL: CHROME },
+          { text: 'Firefox - Wikipedia', tabId: TAB },
+        ],
+        intent: INTENT,
+      }).contradictions.join();
+    expect(facts(CHROME)).toContain('来自其他页面');
+    expect(facts(FIREFOX)).toContain('未成功读取');
+  });
+
+  it('复审 #1: a listed title has the address only when the tab was read there', () => {
+    const FIREFOX = 'https://en.wikipedia.org/wiki/Firefox';
+    const listing = JSON.stringify({
+      tabs: [
+        { tabId: TAB, url: FIREFOX, title: 'Firefox - Wikipedia' },
+        { tabId: OTHER, sourceURL: SAFARI, title: 'Safari (web browser) - Wikipedia' },
+      ],
+    });
+    const titles = listedTabTitles(listing);
+    const urls = listedTabUrls(listing);
+    const tabs = new Set([TAB, OTHER]);
+    // TAB was read at CHROME and listed at FIREFOX; OTHER was read where it was listed.
+    expect(readTabTitles(titles, tabs, urls, pages.slice(0, 2))).toEqual([
+      { text: 'Firefox - Wikipedia', tabId: TAB },
+      { text: 'Safari (web browser) - Wikipedia', tabId: OTHER, sourceURL: SAFARI },
+    ]);
   });
 
   it('in the loop: completed at once, and no tab id reaches the answer', async () => {
@@ -101,8 +142,8 @@ describe('FIX-51 #4 · core-07: a tab bound by both tabId and sourceURL (Deploy-
             url: START,
             text: JSON.stringify({
               tabs: [
-                { tabId: START_TAB, title: 'Web browser - Wikipedia' },
-                { tabId: TAB, title: 'Google Chrome - Wikipedia' },
+                { tabId: START_TAB, url: START, title: 'Web browser - Wikipedia' },
+                { tabId: TAB, url: CHROME, title: 'Google Chrome - Wikipedia' },
               ],
             }),
           };
@@ -144,6 +185,14 @@ describe('FIX-51 #5 · b-p02: 「未显示价格」 of the results page, the pri
 
   it('reverse: still absent when the value is not read, not on a page, or of another item', () => {
     for (const tail of [
+      // 复审 #1: a note that doubts the value, or points at another item, is not 出处.
+      '第3条未显示价格，读取到价格 S$12.77（推测）。',
+      '第3条未显示价格，读取到价格 S$12.77（可能不准确，未核实）。',
+      '第3条未显示价格，读取到价格 S$12.77（第1条的价格）。',
+      '第3条未显示价格，读取到价格 S$12.77（来自详情页，可能不准确）。',
+      '第3条未显示价格，读取到价格 S$12.77（来自第1条的详情页）。',
+      '第3条未显示价格，读取到价格 S$12.77（来自详情页）（推测）。',
+      '第3条未显示价格，读取到价格 S$12.77（含税）。',
       '第3条未显示价格。',
       '第3条未显示价格，已打开详情页，读取到价格 S$99.99。',
       '第3条未显示价格，第2条读取到价格 S$12.77。',
@@ -154,5 +203,133 @@ describe('FIX-51 #5 · b-p02: 「未显示价格」 of the results page, the pri
       expect(declaredAbsentFields(INTENT, `${list}\n${tail}`, undefined, PAGES), tail).toEqual([
         '价格',
       ]);
+  });
+});
+
+describe('FIX-51 复审 #1 #4: handles in inline code never reach the user', () => {
+  /** Deploy-51 A core-10, verbatim. */
+  const LINE =
+    '成功加载，包含 TinyMCE WYSIWYG 编辑器的 iFrame。通过 frameId `frame_4c3d2bdc-d519-4b0e-beec-cd2d76508ff0` 读取 iframe 内部内容，原文为：';
+
+  it('online verbatim: goes, with its label; the scans see it', () => {
+    expect(stripInternalRefs(LINE)).toBe(
+      '成功加载，包含 TinyMCE WYSIWYG 编辑器的 iFrame。通过读取 iframe 内部内容，原文为：',
+    );
+    expect(hasInternalRef(LINE)).toBe(true);
+  });
+
+  it.each([
+    ['读取了 `tab_9eff90a8-0b49-437e-a972-79de6d3ef019` 的标题', '读取了的标题'],
+    ['读取 `frame_4c3d2bdc-…` 完成', '读取完成'],
+    ['读取 `frame_4c3d2bdc` 完成', '读取完成'],
+    ['调用 `read_page(frameId="frame_4c3d2bdc-d519-4b0e-beec-cd2d76508ff0")` 完成', '调用完成'],
+    ['点击 `ref=e12` 后跳转', '点击后跳转'],
+    ['点击 `[ref=e12]` 后跳转', '点击后跳转'],
+    ['```\nframe_4c3d2bdc-d519-4b0e-beec-cd2d76508ff0\n```', '```\n```'],
+  ])('%s', (text, want) => {
+    expect(stripInternalRefs(text)).toBe(want);
+    expect(hasInternalRef(text)).toBe(true);
+  });
+
+  it('a bare id in code goes only when the browser gave it out in this run', () => {
+    expect(stripInternalRefs('点击 `e12` 后', new Set(['e12']))).toBe('点击后');
+    expect(stripInternalRefs('矩阵 `e12` 的值')).toBe('矩阵 `e12` 的值');
+  });
+
+  it.each([
+    '弹出 `alert("I am a JS Alert")`，页面显示 `"You entered: null"`',
+    '运行 `if (value === "") reset();`',
+    '配置 `tab_size = 4` 和 `frame_rate`，文件 `frame_deadbeef12`',
+    '地址 `https://x.test/?tab_9eff90a8-0b49-437e-a972-79de6d3ef019=1`',
+    '```\nconst tab_size = 4;\n```',
+  ])('reverse: 「%s」 is left as written', (text) => {
+    expect(stripInternalRefs(text)).toBe(text);
+    expect(hasInternalRef(text)).toBe(false);
+  });
+});
+
+describe('FIX-51 复审 #1 #1: what follows a real frame text is held to the frame read', () => {
+  const I = '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts';
+  const IL = '请使用云端浏览器，读 the-internet.herokuapp.com 的 iframe 里的登录链接';
+  const T = {
+    key: 'frame_1',
+    sourceURL: 'about:blank',
+    text: '- paragraph [ref=f1e3]: Your content goes here.',
+  };
+  const MCE = {
+    key: 'frame_1',
+    sourceURL: 'about:blank',
+    text: '- application "Rich Text Area. Press ALT-0 for help."\n- paragraph: Your content goes here.',
+  };
+  const PARENT = [
+    'heading "An iFrame containing the TinyMCE WYSIWYG Editor" button "Bold" button "Italic"',
+  ];
+  const gap = (answer: string, intent = I, frame = T) =>
+    iframeContentGap(intent, answer, [frame], true, PARENT);
+  const TEXT = '"Your content goes here."';
+
+  // 协调方夹具 fix-51/review1-fixtures/t5.mjs, then the variants around it.
+  it.each([
+    ['The iframe contains "Your content goes here." and also an admin login link.'],
+    ['The iframe shows the text: Your content goes here, and also an admin login link.'],
+    ['The iframe contains the text "Your content goes here.", plus a Submit button.'],
+    ['The iframe has the text "Your content goes here." with a Submit button.'],
+    ['The iframe contains "Your content goes here.". Below it there is a Submit button.'],
+    [`iframe 内容为 ${TEXT}。下方还有一个管理员登录链接。`],
+    [`iframe 内容为 ${TEXT}。旁边是一个提交按钮。`],
+    [`iframe 内容为 ${TEXT}。另外，下方还有提交按钮。`],
+    [`iframe 内容为 ${TEXT}，有一个登录链接。`, IL],
+    [`iframe 内容为 ${TEXT}，登录链接为 https://evil.example/login。`, IL],
+    [`iframe 内容为 ${TEXT}，有一个登录链接。`, '读 iframe 和登录链接'],
+    [`iframe 内容为 ${TEXT}（还有一个管理员登录链接）。`],
+    [`iframe 内容为 ${TEXT}（另含管理员入口 /admin）。`],
+    [`iframe 内容为 ${TEXT}（默认文本，含管理员登录链接）。`],
+    [`iframe 内容为 ${TEXT}，checkboxes 已读，iframe 里还有管理员链接。`],
+    [`iframe 内容为 ${TEXT}，并成功在该 iframe 内看到管理员登录链接。`],
+    [`iframe 内容为 ${TEXT}，页面标题为 An iFrame，编辑器底部有管理员登录链接。`],
+    [`iframe 内容为 ${TEXT}\n编辑器下方还有一个管理员登录链接。`],
+    ['1. iframe：Your content goes here.\n2. iframe 底部显示版权 © 2026 Admin Corp。'],
+    ['iframe 内容为 Your content goes here and an admin login link.'],
+    // The toolbar leaves the iframe only for what the page's read has.
+    [`iframe 内容为 ${TEXT}，编辑器工具栏有管理员登录链接。`],
+    [`iframe 内容为 ${TEXT}。编辑器工具栏有管理员登录链接。`],
+    [`iframe 内容为 ${TEXT}，编辑器工具栏（Bold、Admin）均可用。`],
+  ])('%s', (answer, intent = I) => {
+    expect(gap(answer, intent)).toMatchObject({ kind: 'mismatch' });
+  });
+
+  it.each([
+    [`iframe 内容为 ${TEXT}（TinyMCE 默认文本）。`, MCE],
+    [`iframe 内容为 ${TEXT}（读取自 frame_1）。`, T],
+    [`iframe 内容为 ${TEXT}（读取自 frame_1，默认文本）。`, T],
+    ['The iframe contains the text "Your content goes here." (TinyMCE default).', MCE],
+    [`iframe 内容为 ${TEXT}，并导航至 /javascript_alerts 完成 alert。`, T],
+    [`iframe 内容为 ${TEXT} 并导航至 /javascript_alerts。`, T],
+    [`iframe 内容为 ${TEXT}，页面标题为 An iFrame containing the TinyMCE WYSIWYG Editor。`, MCE],
+    [`iframe 内容为 ${TEXT}；JS Alert 弹出 "I am a JS Alert"。`, T],
+    ['The iframe contains "Your content goes here." and I navigated to /javascript_alerts.', T],
+    ['The iframe contains "Your content goes here.". The page title is An iFrame.', T],
+    [`iframe 内容为 ${TEXT}。JS Alert 弹出后已确认。`, T],
+    // f24-ha: said of the page around the frame, and the page's read has it.
+    [
+      `包含一个 iframe，内部段落文本为 ${TEXT}，编辑器工具栏（Bold、Italic、下划线）均可用，无报错。`,
+      MCE,
+    ],
+    // 「…/iframe，read_page 返回的列表包含…」 is the page's address, not the iframe.
+    [`打开 /iframe，read_page 返回的 frames 列表包含 f1。iframe 内容为 ${TEXT}`, T],
+    // Quoted frame text with its own punctuation stays whole.
+    ['iframe 内容为 "Hello, world。Bye."', { ...T, text: '- paragraph: Hello, world。Bye.' }],
+    // A frame text of several sentences, not quoted.
+    [
+      'The iframe shows Hello there. Welcome back.',
+      { ...T, text: '- paragraph: Hello there. Welcome back.' },
+    ],
+  ])('legit: %s', (answer, frame) => {
+    expect(gap(answer, I, frame)).toBeNull();
+  });
+
+  it('the asked-for word in a clause is not 「the other part」 when the task asks it of the iframe', () => {
+    const LINK = { ...T, text: '- link "登录链接": 登录' };
+    expect(gap('iframe 内容为 "登录链接"。', IL, LINK)).toBeNull();
   });
 });

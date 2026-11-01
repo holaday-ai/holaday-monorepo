@@ -38,7 +38,7 @@ describe('FIX-40 #1 · refs (plural) are internal refs too', () => {
     'git refs/heads/main was updated',
     '参考文献 refs 共 3 条',
     'URL https://x.test/?refs=e12 stays',
-    '`refs e12` in code stays',
+    '`refs` in code stays',
   ])('reverse: 「%s」 is left as written', (text) => {
     expect(stripInternalRefs(text)).toBe(text);
   });

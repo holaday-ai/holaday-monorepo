@@ -46,6 +46,7 @@ import {
   declaredAbsentFields,
   fieldLabel,
   observedEvidence,
+  sameSource,
   unescapeLiteralBreaks,
   unverifiedNote,
 } from './completion-fields.js';
@@ -386,6 +387,11 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   // pageEvidence, which evicts old reads of long pages.
   const readTabs = new Set<string>();
   const tabTitles = new Map<string, string>();
+  const tabUrls = new Map<string, string>();
+  const noteListedTabs = (listing: string) => {
+    for (const [tabId, title] of listedTabTitles(listing)) tabTitles.set(tabId, title);
+    for (const [tabId, url] of listedTabUrls(listing)) tabUrls.set(tabId, url);
+  };
   /** FIX-27: the title each tab had when it was read. */
   const readTitles = new Map<string, string>();
   let activeTabId: string | undefined;
@@ -1016,9 +1022,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               trace.some((entry) => entry.ok && entry.openedTab)
             ) {
               const listed = await input.execute({ tool: 'list_tabs' }).catch(() => null);
-              if (listed?.ok)
-                for (const [tabId, title] of listedTabTitles(listed.text))
-                  tabTitles.set(tabId, title);
+              if (listed?.ok) noteListedTabs(listed.text);
             }
             const flat = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
             const answerText = flat(summary);
@@ -1133,7 +1137,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           const facts = assessCompletionFacts({
             summary,
             fields: args.fields,
-            pages: [...pageEvidence, ...readTabTitles(tabTitles, readTabs)],
+            pages: [...pageEvidence, ...readTabTitles(tabTitles, readTabs, tabUrls, pageEvidence)],
             receipts: [hostProof, typed, dialogReceipts(trace)].filter(Boolean).join('\n'),
             toolTexts: toolTexts.join('\n'),
             intent: input.intent,
@@ -1578,7 +1582,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           // a named part not done is sent back once to be found; still not done, 部分完成.
           const declined = declinedTargets(input.userIntent ?? input.intent, summary, [
             ...pageEvidence,
-            ...readTabTitles(tabTitles, readTabs),
+            ...readTabTitles(tabTitles, readTabs, tabUrls, pageEvidence),
           ]);
           if (declined.length && !declinedLooked && !concludeNow) {
             declinedLooked = true;
@@ -1743,7 +1747,10 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             const facts = assessCompletionFacts({
               summary,
               fields: args.fields,
-              pages: [...pageEvidence, ...readTabTitles(tabTitles, readTabs)],
+              pages: [
+                ...pageEvidence,
+                ...readTabTitles(tabTitles, readTabs, tabUrls, pageEvidence),
+              ],
               receipts: [receiptEvidence(input.intent, trace), typedText, dialogReceipts(trace)]
                 .filter(Boolean)
                 .join('\n'),
@@ -2204,9 +2211,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         }
       }
       if (outcome.ok && action.tool === 'sections') outline = outlineFrom(outcome.text) ?? outline;
-      if (outcome.ok && action.tool === 'list_tabs') {
-        for (const [tabId, title] of listedTabTitles(outcome.text)) tabTitles.set(tabId, title);
-      }
+      if (outcome.ok && action.tool === 'list_tabs') noteListedTabs(outcome.text);
       const staleRedo =
         ['stale_ref', 'stale_context'].includes(outcome.errorCode ?? '') &&
         ['type', 'select', 'click'].includes(action.tool)
@@ -2335,18 +2340,45 @@ export function listedTabTitles(listing: string): Map<string, string> {
   return titles;
 }
 
+/** Tab id → address when listed, from a `list_tabs` result. */
+export function listedTabUrls(listing: string): Map<string, string> {
+  const urls = new Map<string, string>();
+  try {
+    const { tabs } = JSON.parse(listing) as {
+      tabs?: Array<{ tabId?: unknown; url?: unknown; sourceURL?: unknown }>;
+    };
+    for (const tab of Array.isArray(tabs) ? tabs : []) {
+      const url = tab?.sourceURL ?? tab?.url;
+      if (typeof tab?.tabId === 'string' && typeof url === 'string') urls.set(tab.tabId, url);
+    }
+  } catch {
+    /* No listing, no addresses. */
+  }
+  return urls;
+}
+
 /**
  * The browser-reported document title of a tab that was read successfully at
  * some point is part of that page, whenever it was listed. A tab never read (or
- * that failed to load) gets nothing from the listing.
+ * that failed to load) gets nothing from the listing. FIX-51 复审 #1: the title
+ * is of the page the tab was on when listed, so it binds to that address only
+ * when the tab was read there (a tab that read CHROME and went on to FIREFOX
+ * does not give CHROME the title 「Firefox - Wikipedia」).
  */
 export function readTabTitles(
   titles: Map<string, string>,
   readTabs: Set<string>,
+  urls: ReadonlyMap<string, string> = new Map(),
+  reads: readonly ObservedEvidence[] = [],
 ): ObservedEvidence[] {
   return [...titles]
     .filter(([tabId]) => readTabs.has(tabId))
-    .map(([tabId, title]) => ({ text: title, tabId }));
+    .map(([tabId, title]) => {
+      const url = urls.get(tabId);
+      return url && reads.some((read) => read.tabId === tabId && sameSource(read.sourceURL, url))
+        ? { text: title, tabId, sourceURL: url }
+        : { text: title, tabId };
+    });
 }
 
 /** Structured `fields` values the summary does not already state, as answer lines. */
