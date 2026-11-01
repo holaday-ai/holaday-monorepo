@@ -354,7 +354,7 @@ const FRAME_LABEL_RE = /^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:�
  * remark; and 「…/iframe，read_page 返回的列表包含…」 is not about it.
  */
 const ASKED_CLAIM_RE = new RegExp(
-  String.raw`${CONTENT_CLAIM_RE.source}|另含|含有?|包含|存在|看到|见到|(?<![没所具拥未])有(?![效关时些])|\b(?:contains?|shows?|displays?|has|have|includes?|reads|says)\b|\b(?:content|contents|text)\s+(?:is|are|reads|says)\b`,
+  String.raw`${CONTENT_CLAIM_RE.source}|另含|含有?|包含|存在|看到|见到|(?<![没所具拥未])有(?![效关时些])|\b(?:contains?|shows?|displays?|has|have|includes?|reads|says)\b|\b(?:content|contents|text)\s+(?:is|are|reads|says)\b|\b(?:text|contents?)\b\s*(?=["“「:：])`,
   'i',
 );
 /**
@@ -635,7 +635,8 @@ export function dropClauses(answer: string, clauses: readonly string[]): string 
 }
 
 /** FIX-51 #1: 「编辑器下方还有…」, a sentence of its own about the frame of a task that asks for it. */
-const FRAME_ALIAS = '(?:该\\s*)?编辑器(?=[^，,]{0,8}?(?:还有|另有|有|显示|写着|内容|含|看到))';
+const FRAME_ALIAS =
+  '(?:该\\s*)?编辑器(?=[^，,]{0,8}?(?:还有|另有|有|显示|写着|内容|含|看到))|(?:the\\s+)?editor(?=\\s+(?:also\\s+)?(?:has|contains|shows|displays|includes)\\b)';
 const NEXT_ACTION =
   '导航|打开|访问|点击|跳转|前往|进入|切换|触发|填写|输入|下载|滚动|返回|处理|完成|操作';
 const NEXT_ACTION_EN =
@@ -654,7 +655,10 @@ const MOVED_ON_RE = new RegExp(
  * with a word of the task in it.
  */
 const FRAME_CLAIM_OPENER_RE =
-  /^\s*(?:(?:此外|另外|同时|而且|并且|并|且|以及|also|and|plus|besides)[\s，,]*)*(?:(?:在|其)?(?:下方|下面|上方|上面|旁边|左侧|右侧|左边|右边|底部|顶部|内部|里面|其中|其下|其内)|(?:还|也|另)?有(?![效关时些])|另含|含有?|包含|below\b|above\b|beside\b|next to\b|underneath\b|there (?:is|are)\b|it (?:also )?(?:has|contains|shows)\b)|^\s*(?:also|plus)\b/i;
+  /^\s*(?:(?:此外|另外|同时|而且|并且|并|且|以及|also|and|plus|besides)[\s，,]*)*(?:(?:在|其)?(?:下方|下面|上方|上面|旁边|左侧|右侧|左边|右边|底部|顶部|内部|里面|其中|其下|其内)|(?:还|也|另)?有(?![效关时些])|(?:还|也)?(?:能|可以?)?看到|另含|含有?|包含|below\b|above\b|beside\b|next to\b|underneath\b|there (?:is|are)\b|it (?:also )?(?:has|contains|shows)\b)|^\s*(?:also|plus)\b/i;
+/** 「。提交按钮在下方。」「。一个提交按钮也在。」: placed by the frame, with nothing else said. */
+const FRAME_PLACED_RE =
+  /(?:也在|在(?:其)?(?:下方|下面|上方|上面|旁边|左侧|右侧|底部|顶部|内部|里面|其中))\s*$/;
 /** 复审 #1: 「编辑器工具栏（Bold、Italic…）」 is the page around the frame, when the page's read has it. */
 const TOOLBAR_RE =
   /^\s*(?:(?:该|其)\s*)?(?:(?:tinymce\s*)?(?:富文本)?\s*编辑器的?\s*)?工具栏|^\s*(?:the\s+)?(?:editor\s+)?toolbar\b/i;
@@ -739,7 +743,7 @@ function iframeWindows(
     if (!mentions.length) {
       if (!sentence.trim()) continue;
       // Goes on about the iframe with no subject of its own.
-      if (open && FRAME_CLAIM_OPENER_RE.test(sentence))
+      if (open && (FRAME_CLAIM_OPENER_RE.test(sentence) || FRAME_PLACED_RE.test(sentence)))
         open.parts.push(...cutOutside(sentence, CLAUSE_SEP).map((part) => part.trim()));
       else open = undefined;
       continue;
@@ -762,7 +766,9 @@ function iframeWindows(
       const window = clauses.join('，');
       // What a quote says is not the verb (「"Your content is here"」).
       const verbAt = (text: string, verbs: RegExp) =>
-        text.replace(FRAME_QUOTE_RE, (quote) => ' '.repeat(quote.length)).search(verbs);
+        text
+          .replace(FRAME_QUOTE_RE, (quote) => quote[0] + ' '.repeat(quote.length - 1))
+          .search(verbs);
       const first = atParent(own, pageText)
         ? -1
         : clauses.findIndex((part, i) => verbAt(part, i ? CONTENT_CLAIM_RE : ownRe) >= 0);

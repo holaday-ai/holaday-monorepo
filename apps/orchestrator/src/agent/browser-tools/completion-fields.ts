@@ -1510,6 +1510,9 @@ function filledAfter(prose: string, at: number, name: string, pages?: readonly s
   // part of it (「S$12.77（来自详情页）」); any other note stays, and no page shows that.
   const said = next.slice(before.length);
   const noted = said.match(/^([^（(，,。；;\n]*?)\s*[（(]([^）)\n]*)[）)]\s*(?=$|[，,。；;.\n])/);
+  // 「读取到价格 S$12.77，可能不准确」 doubts it as a note would.
+  if (UNSURE_NOTE_RE.test(said.replace(/[（(][^）)]*[）)]/g, '').split(/[，,。；;\n]/)[1] ?? ''))
+    return false;
   const fromSource =
     noted &&
     SOURCE_NOTE_RE.test(noted[2]!) &&
