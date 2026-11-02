@@ -46,7 +46,13 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   baidu: ['百度'],
   youtube: ['油管'],
   wikipedia: ['维基百科', '维基'],
-  // 复审 #4: what a page's English controls are called in Chinese (「加粗按钮」).
+};
+
+/**
+ * 复审 #4: what a page's English controls are called in Chinese (「加粗按钮」). 复审 #5: for which
+ * button an iframe claim means only; in `ALIASES`, 「登录未能完成」 would cover a target named login.
+ */
+const CONTROL_NAMES: Readonly<Record<string, readonly string[]>> = {
   bold: ['加粗'],
   italic: ['斜体'],
   underline: ['下划线'],
@@ -533,7 +539,9 @@ function modifierOf(before: string): string {
 function modifierHeld(word: string, within: string): boolean {
   return (
     within.includes(word) ||
-    Object.entries(ALIASES).some(([name, names]) => names.includes(word) && within.includes(name))
+    Object.entries({ ...ALIASES, ...CONTROL_NAMES }).some(
+      ([name, names]) => names.includes(word) && within.includes(name),
+    )
   );
 }
 
@@ -603,15 +611,50 @@ function claimGap(
 const DESCRIBING_RE =
   /一段|一句|一个|默认|初始|当前|实际|完整|占位符?|段落|文本|文字|内容|正文|原文|编辑器|富文本|tinymce|wysiwyg|读取到|读到|如下|以下|示例|上述|的|其|为|是|\b(?:the|a|an|default|placeholder|initial|sample|text|paragraph|editor)\b/gi;
 
-/** Taking out the frame's own text and the words that describe it, nothing is left. */
-function onlyDescribes(text: string, pieces: readonly string[]): boolean {
-  let rest = normal(text.replace(FRAME_QUOTE_RE, ' ').replace(/[（(][^）)]*[）)]/g, ' '));
+/** A text with its quotes and the frame's own text taken out. */
+function withoutFrameText(text: string, pieces: readonly string[]): string {
+  let rest = normal(text.replace(FRAME_QUOTE_RE, ' '));
   for (const piece of pieces
     .map(bare)
     .filter((piece) => weight(piece) >= 2)
     .sort((a, b) => b.length - a.length))
     rest = rest.split(piece).join(' ');
+  return rest.trim();
+}
+
+/** Taking out the frame's own text and the words that describe it, nothing is left. */
+function onlyDescribes(text: string, pieces: readonly string[]): boolean {
+  const rest = withoutFrameText(text.replace(/[（(][^）)]*[）)]/g, ' '), pieces);
   return !/[\p{L}\p{N}]/u.test(rest.replace(DESCRIBING_RE, ' '));
+}
+
+/** What is left of a claim once the frame's own text is taken out: only joining words, or nothing. */
+const CONNECTIVE_RE =
+  /^(?:[\s\p{P}\p{S}]|和|与|及|以及|并|等|其中|的|为|是|内容|文本|文字|一段|一句|\bthe\b|\ba\b|\btext\b|\band\b)*$/iu;
+/** A clause that goes on describing what came before it. */
+const CONTINUE_RE =
+  /^\s*(?:还|另有|以及|并有|也有|及|和|包括|包含|其中|此外|外加|附带|带有|有一?个|\balso\b|\bplus\b|\bwith\b)/i;
+
+/**
+ * 复审 #5: the line under the named checks (85262c28, DEPLOY-51 review #2) — what goes on from the
+ * frame's text (「，还有一段使用说明」「，此外还有一个计数器」) is the frame's text and joining words.
+ */
+function continuedGap(parts: readonly string[], pieces: readonly string[]): string | null {
+  for (const part of parts) {
+    const rest = withoutFrameText(part, pieces);
+    if (!CONTINUE_RE.test(rest)) continue;
+    // 「及默认段落文本 "…"」: words that only label a quote (and the quote is held on its own).
+    if (part.search(FRAME_QUOTE_RE) >= 0 && onlyDescribes(rest.replace(CONTINUE_RE, ''), pieces))
+      continue;
+    // 「，还显示 "…"」 goes on from its verb; 还有 and 另有 are what the line sends back.
+    const verbs = rest
+      .replace(/还有|另有/g, '  ')
+      .matchAll(new RegExp(CONTENT_CLAIM_RE.source, 'gi'));
+    const verb = [...verbs].at(-1);
+    if (!CONNECTIVE_RE.test(verb ? rest.slice(verb.index + verb[0].length) : rest))
+      return `续写「${part.trim()}」`;
+  }
+  return null;
 }
 
 const VALUE_VERB_RE =
@@ -702,7 +745,7 @@ function frameGapOf(
   const asked = IFRAME_WORD_RE.test(intent);
   const pageText = normal(pageTexts.join(' '));
   const claims = iframeWindows(answer, intent, asked, pageText).flatMap(
-    ({ window, parts, around, clause, whole, subject }) => {
+    ({ window, parts, continued, around, clause, whole, subject }) => {
       // Not asked: only a sentence with the iframe as its subject says what it holds.
       const verb = window.search(CONTENT_CLAIM_RE);
       if (!asked && verb >= 0) {
@@ -716,6 +759,7 @@ function frameGapOf(
           subject,
           window,
           parts,
+          continued,
           around,
           blank: BLANK_CLAIM_RE.test(window),
           claim: parts.join('，'),
@@ -781,6 +825,7 @@ function frameGapOf(
     if (c.blank) gap = frames.some((r) => framePieces(r.text).length === 0) ? null : '说成空的';
     else if (ERROR_CLAIM_RE.test(c.claim)) gap = '说成错误页';
     else if (c.parts.length) gap = valueGap([c.window, ...c.parts.slice(1)].join('\n'), pieces);
+    if (!c.blank) gap ||= continuedGap(c.continued, pieces);
     if (!c.blank)
       c.parts.forEach((part, i) => {
         // 复审 #4: what comes later with no word placing it in the frame may be on the page around
@@ -1063,6 +1108,8 @@ function iframeWindows(
 ): Array<{
   window: string;
   parts: string[];
+  /** What this sentence says on from what it holds, from the verb on; not the sentences after it. */
+  continued: string[];
   around: string[];
   clause: string;
   /** The clause as the answer wrote it, for the log. */
@@ -1168,6 +1215,15 @@ function iframeWindows(
         return at < 0 ? part : part.slice(0, at);
       };
       const mentioned = new RegExp(IFRAME_WORD_RE.source, 'i');
+      // 复审 #5: 「，以及 checkboxes…」 left the iframe, and goes on from it for the line all the same.
+      const saidAt = clauses.findIndex((part) => verbAt(part, CONTENT_CLAIM_RE) >= 0);
+      const continued = [
+        clauses[saidAt]
+          ?.slice(verbAt(clauses[saidAt]!, CONTENT_CLAIM_RE))
+          .replace(CONTENT_CLAIM_RE, '') ?? '',
+        ...clauses.slice(saidAt + 1),
+        ...(saidAt === 0 && later[0] ? [later[0]] : []),
+      ].filter((part) => !mentioned.test(part));
       const placedIn = named ? null : lead.match(PLACED_IN_RE);
       const inside = own.slice(m[0].length);
       const read =
@@ -1199,6 +1255,7 @@ function iframeWindows(
       const entry = {
         window,
         parts,
+        continued: named || saidAt < 0 ? [] : continued,
         // Right after what the iframe holds is said, or that it was read; a mention alone
         // (「打开 /iframe，…」「向 iframe 写入…」) says nothing.
         around: [

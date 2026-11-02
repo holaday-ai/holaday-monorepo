@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { logger } from '../../config/logger.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { hasInternalRef, stripInternalRefs } from '../internal-refs.js';
-import { iframeContentGap } from './completion-coverage.js';
+import { declinedTargets, iframeContentGap, uncoveredTargets } from './completion-coverage.js';
 import { assessCompletionFacts, declaredAbsentFields } from './completion-fields.js';
 import {
   listedTabTitles,
@@ -704,6 +704,86 @@ describe('FIX-51 复审 #4 (review4-fixtures/t10.mjs)', () => {
       ]),
     );
     info.mockRestore();
+  });
+});
+
+describe('FIX-51 复审 #5: no worse than the line (review5-fixtures/t11.mjs, t12.mjs)', () => {
+  const INTENT = '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts';
+  const FRAME = {
+    key: 'frame_1',
+    sourceURL: 'about:blank',
+    text: '- generic "Rich Text Area. Press ALT-0 for help."\n- paragraph [ref=f1e3]: Your content goes here.',
+  };
+  const PAGES = [
+    'https://the-internet.herokuapp.com/iframe heading "An iFrame containing the TinyMCE WYSIWYG Editor" button "Bold" button "Italic" link "Elemental Selenium"',
+    'https://the-internet.herokuapp.com/javascript_alerts heading "JavaScript Alerts" button "Click for JS Alert"',
+  ];
+  const QUOTED = 'iframe 内容为 "Your content goes here."';
+  const kind = (answer: string) => iframeContentGap(INTENT, answer, [FRAME], true, PAGES)?.kind;
+
+  it.each([
+    '，还有一段使用说明。',
+    '，还有一行版权信息。',
+    '，还有一个用于支付的按钮。',
+    '，还有欢迎使用字样。',
+    '，此外还有一个计数器。',
+    '，包括一个字数统计。',
+    '，带有一个保存提示。',
+    '，有一个上传区域。',
+    '，以及一段隐私政策。',
+    '，和一个隐藏字段。',
+    '，也有一个搜索框。',
+    '，附带一段帮助文字。',
+    ' with a privacy notice。',
+    '，以及一段 alert 说明。',
+  ])('what goes on from the frame text is held to it: %s', (rest) => {
+    expect(kind(QUOTED + rest)).toBe('mismatch');
+  });
+
+  it.each([
+    // f51Bz2: words that only label a quote.
+    'iframe 的 frameId 已读取，其内部可访问性树显示 "Rich Text Area. Press ALT-0 for help." 及默认段落文本 "Your content goes here."，确认 iframe 已正确加载。',
+    // What the line lets by stays let by: not this sentence, or not the frame any more.
+    `${QUOTED}。还需要说明的是页面已加载。`,
+    `${QUOTED}，页面标题为 An iFrame containing the TinyMCE WYSIWYG Editor。`,
+    // f30d: a clause with a mention of its own, and a page's address, are not what goes on.
+    '/iframe 页面标题为「An iFrame containing the TinyMCE WYSIWYG Editor」，包含一个嵌套 iframe，其内显示文本「Your content goes here.」',
+    // f36t: nothing was said it holds yet.
+    '通过 read_page 发现嵌套 iframe，其中包含 TinyMCE 编辑器，正文内容为 "Your content goes here."',
+  ])('goes on with nothing made up: %s', (answer) => {
+    expect(kind(answer)).toBeUndefined();
+  });
+
+  const SEARCH = '首页 搜索 登录 注册 search results: 10 items';
+  it.each([
+    [
+      '打开 example.cn 的 search 与 login 页面',
+      '已打开 search 页和登录页，均正常。',
+      SEARCH,
+      'login',
+    ],
+    ['打开 example.cn 的 search 与 login 页面', 'search 页已读；登录未能完成。', SEARCH, 'login'],
+    [
+      '打开 shop.cn 的 upload 与 download 页面',
+      '下载页已读，上传页面也正常。',
+      '下载中心 文件列表 上传 按钮 '.repeat(3),
+      'upload',
+    ],
+    [
+      '测试 the-internet 的 alert 与 checkboxes',
+      'checkboxes 已读：checkbox 2 勾选；弹窗已触发并关闭。',
+      'Checkboxes checkbox 1 checkbox 2 '.repeat(3),
+      'alert',
+    ],
+  ])("a control's Chinese name covers no target: %s / %s", (intent, answer, text, target) => {
+    const pages = [{ text, sourceURL: 'https://example.cn/page' }];
+    expect(uncoveredTargets(intent, answer, pages)).toContainEqual({ target, kind: 'missing' });
+    expect(declinedTargets(intent, answer, pages)).toEqual([]);
+  });
+
+  it('it still tells which button a claim means', () => {
+    expect(kind(`${QUOTED}，底部有 Elemental Selenium 链接，加粗按钮可用。`)).toBeUndefined();
+    expect(kind(`${QUOTED}，底部有提交按钮。`)).toBe('mismatch');
   });
 });
 
