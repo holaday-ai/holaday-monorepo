@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { logger } from '../../config/logger.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { hasInternalRef, stripInternalRefs } from '../internal-refs.js';
 import { iframeContentGap } from './completion-coverage.js';
@@ -422,5 +423,259 @@ describe('FIX-51 复审 #2: 「left the iframe」 is no way past the reads (fix-
 
   it('no page read recorded: nothing to hold the clause to', () => {
     expect(gap(`${Q}，页面标题为管理员后台。`, I, [])).toBeNull();
+  });
+});
+
+/** Real core-10 answers, verbatim (fix-51/review3-fixtures/c10.json): held wrongly by review #2's code. */
+const C10: Record<string, string> = {
+  '/browser-autopilot-3/eval/f1/items-f1-core-10-b.log':
+    '已成功完成两项验证：\n1. Iframe：在 https://the-internet.herokuapp.com/iframe 页面中，通过 frameId frame_5d4b5c94-ee4f-4e4f-9c5e-7e89929712dd 读取到 iframe 内部文本为 "Your content goes here."。\n2. JavaScript Alerts：在 https://the-internet.herokuapp.com/javascript_alerts 页面点击 "Click for JS Alert" 按钮（ref e12），浏览器自动接受了弹出的 JS Alert 对话框，页面 Result 区域更新显示 "You successfully clicked an alert"。\n\n两项任务均按预期成功执行并验证。',
+  '/browser-autopilot-3/eval/f1/items-f1-core-10-a.log':
+    '已成功在云端浏览器中完成 the-internet.herokuapp.com 的 iframe 与 JavaScript alerts 任务：\n\n1. **Iframe 处理**：导航至 /iframe 页面，成功读取嵌套 iframe 内的文本内容为 "Your content goes here."，确认已进入并读取了 iframe 上下文。\n\n2. **JavaScript Alerts 处理**：导航至 /javascript_alerts 页面，依次点击了三个按钮（JS Alert、JS Confirm、JS Prompt）。由于弹窗由环境自动处理，每次点击后 Result 区域会被最新操作的结果覆盖。最终一次 snapshot 捕获到的 Result 文本为 "You successfully clicked an alert"（对应最后一次点击的 JS Alert 按钮）。\n\n   - Confirm 和 Prompt 按钮均已成功点击且页面无报错，但由于弹窗自动处理后页面状态更新较快，未能在单次 snapshot 中同时捕获到三者的独立结果原文。根据页面设计，每个按钮点击后都会在 Result 区域显示对应反馈，已验证 Alert 类型的反馈文本准确无误。\n\n所有操作均通过云端浏览器真实执行，iframe 内容和 JS Alert 结果已从页面原样提取验证。',
+  '/integrate-281/eval/r4-run2-archive/f3/items-f3-core-10-a.log':
+    '已成功在云端浏览器中验证 the-internet.herokuapp.com 的 IFrames 与 JavaScript Alerts 功能：\n\n1. **IFrames 页面**（https://the-internet.herokuapp.com/iframe）：页面正确加载了一个 iframe，其内部嵌套了 TinyMCE WYSIWYG 编辑器，初始内容为 "Your content goes here."，确认 iframe 渲染正常。\n\n2. **JavaScript Alerts 页面**（https://the-internet.herokuapp.com/javascript_alerts）：依次点击三个按钮触发原生 JS 对话框：\n   - 点击 "Click for JS Alert" → 弹出 alert「I am a JS Alert」，自动确认后页面显示 "You successfully clicked an alert"\n   - 点击 "Click for JS Confirm" → 弹出 confirm「I am a JS Confirm」，自动取消后页面显示 "You clicked: Cancel"\n   - 点击 "Click for JS Prompt" → 弹出 prompt「I am a JS prompt」，未输入内容自动关闭后页面显示 "You entered:"\n\n所有弹窗均被浏览器正确拦截并处理，页面反馈结果符合预期，两项测试模块功能验证通过。',
+  '/browser-autopilot-1/round5/items-round5-core-10-b.log':
+    '已在云端浏览器中完成 the-internet.herokuapp.com 的 JavaScript Alerts 与 iframe 演示页面的只读验证：\n\n1. **JavaScript Alerts (`/javascript_alerts`)**\n   - 依次点击了 "Click for JS Alert"、"Click for JS Confirm"、"Click for JS Prompt" 三个按钮。\n   - 系统原生对话框由浏览器自动处理（接受/取消/未输入），页面反馈文本分别为：\n     * Alert → "You clicked: Ok"\n     * Confirm → "You clicked: Cancel"\n     * Prompt → "You entered: null"\n   - 说明当前自动化环境对 JS 弹窗采用默认响应，无法通过 DOM 操作绕过，符合安全要求。\n\n2. **IFrame (`/iframe`)**\n   - 成功识别并进入 TinyMCE 编辑器所在的 iframe（frameId: `frame_2544eb86-b246-4068-98a2-31d73e814cff`）。\n   - 在 iframe 上下文中读取到正文段落内容："Your content goes here."，证明可正常访问 iframe 内部元素。\n   - 主页面同时显示 TinyMCE 只读提示："TinyMCE is in read-only mode because you have no more editor loads available this month."，表明编辑器处于受限状态，未执行任何写入或提交操作。\n\n所有交互均为只读验证，未触发表单提交、登录或支付流程，符合安全原则。硬事实值已按页面原样提取至 fields。\n\n未核实：以下内容未能在已读页面中逐字找到，请自行确认——js_alert_result「You clicked: Ok」',
+  '/browser-autopilot-1/round5/items-round5-core-10-a.log':
+    '已完成 the-internet.herokuapp.com 的 JavaScript Alerts 与 Iframe 验证：\n\n1. **JavaScript Alert**：在 /javascript_alerts 页面点击 "Click for JS Alert"，浏览器弹出原生 alert 并自动接受，页面 Result 区域显示 "You successfully clicked an alert"（注意：该站点实际文案为此，而非规划建议中的 "You accepted a JS Alert!"）。\n\n2. **Iframe 交互**：在 /iframe 页面成功识别 TinyMCE 编辑器所在的 iframe（frameId: frame_bc300b8a-94a2-4dbd-acce-c432f89d1804），读取到内部段落内容为 "Your content goes here."，并可点击聚焦该元素，证明 iframe 上下文切换与元素定位正常。\n\n3. **限制说明**：当前 TinyMCE 编辑器处于只读/禁用状态（工具栏按钮均标记为 disabled），因此无法通过自动化向编辑器内写入新文本。这是站点本身配置所致，并非跨域或元素未找到错误。若需写入测试，需站点启用编辑器可编辑模式。\n\n4. **截图留证**：已对 alert 结果页和 iframe 编辑器页面分别截图，确认操作状态符合预期。\n\n无控制台致命错误，任务目标在站点允许范围内已完成。',
+};
+
+describe('FIX-51 复审 #3 #1: what is said ahead of the real frame text is held too (review3-fixtures/t9.mjs)', () => {
+  const I = '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts';
+  const FRAME = {
+    key: 'frame_1',
+    sourceURL: 'about:blank',
+    text: '- paragraph [ref=f1e3]: Your content goes here.',
+  };
+  const PAGES = [
+    'https://the-internet.herokuapp.com/iframe heading "An iFrame containing the TinyMCE WYSIWYG Editor" button "Bold" button "Italic" link "Elemental Selenium"',
+    'https://the-internet.herokuapp.com/javascript_alerts heading "JavaScript Alerts" button "Click for JS Alert" button "Click for JS Confirm" button "Click for JS Prompt" Result: You successfully clicked an alert',
+  ];
+  const gap = (answer: string) => iframeContentGap(I, answer, [FRAME], true, PAGES)?.kind ?? null;
+
+  it.each([
+    '已读取 iframe，管理员链接很明显。iframe 内容为 "Your content goes here."。',
+    '已读取 iframe，里面有一个管理员登录链接。正文为 "Your content goes here."。',
+    '管理员登录链接位于 iframe 中，iframe 内容为 "Your content goes here."。',
+    'iframe 中可见管理员登录链接，文本为 "Your content goes here."。',
+    'iframe 里有一个管理员登录链接；内容为 "Your content goes here."。',
+    'Your content goes here.（iframe 内），另有管理员登录链接。',
+    '已读取 iframe，管理员链接很明显，内容为 "Your content goes here."。',
+    '已读取 iframe。其中有一个管理员登录链接。正文为 "Your content goes here."。',
+    'iframe 里管理员链接很明显，内容为 "Your content goes here."。',
+    '管理员入口所在的 iframe 内容为 "Your content goes here."。',
+    'iframe 内容为 "Your content goes here."，确认管理员链接可见。',
+    'iframe 内容为 "Your content goes here."，证明可进入管理员后台。',
+    'iframe 内容为 "Your content goes here."，并可点击管理员登录链接。',
+    'iframe 内容为 "Your content goes here."。\n\n管理员链接很明显。',
+    'iframe 内容为 "Your content goes here."。\n- 页面还有一个管理员入口。',
+    '登录表单位于该 iframe 内，其内容为 "Your content goes here."。',
+    'The iframe was read and the admin panel is visible. Its text is "Your content goes here.".',
+    'Admin login link is inside the iframe, whose text is "Your content goes here.".',
+  ])('sent back: %s', (answer) => {
+    expect(gap(answer)).toBe('mismatch');
+  });
+
+  it.each([
+    '1. Iframe：在 https://the-internet.herokuapp.com/iframe 页面中，通过 frameId frame_5d4b 读取到 iframe 内部文本为 "Your content goes here."。',
+    '1. **Iframe 处理**：导航至 /iframe 页面，成功读取嵌套 iframe 内的文本内容为 "Your content goes here."，确认已进入并读取了 iframe 上下文。',
+    'iframe 内容为 "Your content goes here."，确认 iframe 渲染正常。',
+    'iframe 内部段落内容为 "Your content goes here."，并可点击聚焦该元素，证明 iframe 上下文切换与元素定位正常。',
+    'iframe 内容为 "Your content goes here."。\n\n所有交互均为只读验证，未触发表单提交，符合安全原则。',
+    'iframe 内容可见，文本为 "Your content goes here."。',
+    'The iframe text is "Your content goes here.", which confirms the frame was reached.',
+    'The iframe was read. Its text is "Your content goes here.".',
+  ])('as read: %s', (answer) => {
+    expect(gap(answer)).toBeNull();
+  });
+
+  it('Iframe：<another address> is held to the reads', () => {
+    expect(
+      gap(
+        'Iframe：在 https://evil.example/admin 页面中，iframe 文本为 "Your content goes here."。',
+      ),
+    ).toBe('mismatch');
+  });
+
+  it('the 5 real core-10 answers review #3 names are not sent back (review3-fixtures/c10.json)', () => {
+    const named = [
+      'f1/items-f1-core-10-b',
+      'f1/items-f1-core-10-a',
+      'r4-run2-archive/f3/items-f3-core-10-a',
+      'round5/items-round5-core-10-b',
+      'round5/items-round5-core-10-a',
+    ];
+    for (const [src, answer] of Object.entries(C10)) {
+      expect(named.some((item) => src.includes(item))).toBe(true);
+      expect(gap(answer)).toBeNull();
+    }
+  });
+});
+
+describe('FIX-51 复审 #3 #3: a tab closed unread is not asked for', () => {
+  afterEach(() => vi.restoreAllMocks());
+  const OPEN3 = '请使用云端浏览器，从一个页面打开3个链接到新标签，分别读标题后回到第一个';
+  const TITLES: Record<string, string> = {
+    source: 'Web browser',
+    tab_aaaaaaaa1: 'Safari',
+    tab_bbbbbbbb2: 'MacBook',
+    tab_cccccccc3: 'Wikipedia',
+    tab_dddddddd4: 'Firefox',
+  };
+  const run = async (script: Array<{ name: string; input: Record<string, unknown> }>) => {
+    let active = 'source';
+    let next = 0;
+    const open = ['tab_aaaaaaaa1', 'tab_bbbbbbbb2', 'tab_cccccccc3', 'tab_dddddddd4'];
+    let turn = 0;
+    const adapter: MessagesAdapter = {
+      metadata: { provider: 'anthropic', model: 'fixture' },
+      async create() {
+        const call = script[Math.min(turn++, script.length - 1)]!;
+        return {
+          id: String(turn),
+          metadata: { provider: 'anthropic', model: 'fixture' },
+          content: [{ type: 'tool_use', id: String(turn), ...call }],
+          stopReason: 'tool_use',
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    return runUnifiedBrowserLoop({
+      intent: OPEN3,
+      adapter,
+      maxSteps: 30,
+      observationV2: true,
+      supportedTools: { download: false, upload: false, tabs: true },
+      execute: (async (action: { tool: string; targetTabId?: string }) => {
+        if (action.tool === 'click') {
+          active = open[next++]!;
+          return { ok: true, text: `已打开新标签 ${active}`, tabId: active, openedTab: true };
+        }
+        if (action.tool === 'list_tabs')
+          return {
+            ok: true,
+            text: JSON.stringify({
+              tabs: Object.entries(TITLES).map(([tabId, title]) => ({ tabId, title })),
+            }),
+          };
+        if (action.tool === 'close_tab') {
+          active = 'source';
+          return { ok: true, text: '{"status":"close_tab"}', tabId: active };
+        }
+        if (action.tool === 'switch_tab') active = action.targetTabId!;
+        return {
+          ok: true,
+          tabId: active,
+          text: JSON.stringify({
+            tabId: active,
+            headings: [{ level: 1, text: TITLES[active] }],
+            tree: `heading "${TITLES[active]}" [level=1]`,
+          }),
+        };
+      }) as never,
+    });
+  };
+  const click = (n: number) => ({ name: 'click', input: { ref: `e${n}`, newTab: true } });
+  const read = { name: 'read_page', input: {} };
+  const to = (tab: string) => ({ name: 'switch_tab', input: { targetTabId: tab } });
+  const done = (summary: string) => ({ name: 'finish', input: { status: 'completed', summary } });
+  const ALL = '已打开3个链接到新标签，分别读取标题后切回第一个：Safari、MacBook、Wikipedia。';
+
+  it('4 opened, the 4th closed unread, the other 3 read: completed', async () => {
+    const outcome = await run([
+      read,
+      click(1),
+      read,
+      to('source'),
+      click(2),
+      read,
+      to('source'),
+      click(3),
+      read,
+      to('source'),
+      click(4),
+      { name: 'close_tab', input: { targetTabId: 'tab_dddddddd4' } },
+      to('source'),
+      done(ALL),
+    ]);
+    expect(outcome).toMatchObject({ status: 'completed' });
+  });
+
+  it('reverse: 4 opened, the 4th neither closed nor read: sent back, then failed', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => logger);
+    const outcome = await run([
+      read,
+      click(1),
+      read,
+      to('source'),
+      click(2),
+      read,
+      to('source'),
+      click(3),
+      read,
+      to('source'),
+      click(4),
+      to('source'),
+      done(ALL),
+      done(ALL),
+    ]);
+    expect(outcome).toMatchObject({ status: 'failed' });
+    const reason = (outcome as { reason: string }).reason;
+    expect(reason).toContain('还没有读取');
+    // The steps go to the log, with the start of the tab ids, and not into the reason.
+    const logged = warn.mock.calls.find((call) => call[1] === 'browser loop failed')?.[0] as {
+      steps: string[];
+    };
+    expect(logged.steps).toContain('click:dddddddd+');
+    expect(logged.steps).toContain('switch_tab:source');
+    expect(reason).not.toContain('click:');
+    expect(JSON.stringify(logged)).not.toContain('tab_dddddddd4');
+  });
+
+  it('reverse: 3 opened, one closed unread, 2 read: one short, sent back', async () => {
+    vi.spyOn(logger, 'warn').mockImplementation(() => logger);
+    const outcome = await run([
+      read,
+      click(1),
+      read,
+      to('source'),
+      click(2),
+      read,
+      to('source'),
+      click(3),
+      { name: 'close_tab', input: { targetTabId: 'tab_cccccccc3' } },
+      to('source'),
+      done('已打开3个链接到新标签，分别读取标题后切回第一个：Safari、MacBook。'),
+      done('已打开3个链接到新标签，分别读取标题后切回第一个：Safari、MacBook。'),
+    ]);
+    expect(outcome).toMatchObject({ status: 'failed' });
+    expect((outcome as { reason: string }).reason).toContain('还差 1 个');
+  });
+
+  it('a closed tab that was read still has its title asked for', async () => {
+    vi.spyOn(logger, 'warn').mockImplementation(() => logger);
+    const outcome = await run([
+      read,
+      click(1),
+      read,
+      to('source'),
+      click(2),
+      read,
+      to('source'),
+      click(3),
+      read,
+      { name: 'close_tab', input: { targetTabId: 'tab_cccccccc3' } },
+      to('source'),
+      done('已打开3个链接到新标签，分别读取标题后切回第一个：Safari、MacBook。'),
+      done('已打开3个链接到新标签，分别读取标题后切回第一个：Safari、MacBook。'),
+    ]);
+    expect(outcome).toMatchObject({ status: 'failed' });
+    expect((outcome as { reason: string }).reason).toContain('Wikipedia');
   });
 });

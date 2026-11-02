@@ -1,5 +1,6 @@
 import { stripToolCallBlocks } from '@holaday/shared-types';
 import { siteOf } from '../../browser-pool/egress-learning.js';
+import { logger } from '../../config/logger.js';
 import { namedSiteDomains } from '../../execution/source-domain-consistency.js';
 import { scrapedWall } from '../../firecrawl/scraped-page.js';
 import type {
@@ -332,15 +333,22 @@ export async function runUnifiedBrowserLoop(
   // FIX-38 复审 #1: the element ids the browser gave out in this run — only these may be
   // dropped from 「按钮 e7」 (「矩阵元素 e12」 on a maths page is the page's own text).
   const seen = new Set<string>();
+  // FIX-51 复审 #3: a failed run's steps, for the log only: tool names and the start of tab ids.
+  const steps: string[] = [];
   const outcome = await browserLoop({
     ...input,
     execute: async (action) => {
       const result = await input.execute(action);
+      const tab = 'targetTabId' in action ? action.targetTabId : result.tabId;
+      steps.push(
+        `${action.tool}${result.ok ? '' : '!'}${tab ? `:${tab.replace(/^tab_/, '').slice(0, 8)}` : ''}${result.openedTab ? '+' : ''}`,
+      );
       for (const match of (result.text ?? '').matchAll(/\bref=(e\d{1,6})\b/g))
         seen.add(match[1]!.toLowerCase());
       return result;
     },
   });
+  if (outcome.status === 'failed') logger.warn({ steps: steps.slice(-120) }, 'browser loop failed');
   // FIX-41: nor the browser's call syntax (「switch_tab(targetTabId=…)」), once its ids are gone.
   const strip = (text: string) => humanizeToolMentions(stripInternalRefs(text, seen));
   // FIX-38 (Deploy-38 core-11): whatever way the loop ends, the user never reads an
@@ -562,6 +570,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     while (toolTexts.reduce((n, t) => n + t.length, 0) > 256_000) toolTexts.shift();
   };
   const trace: BrowserTrace[] = [];
+  /** FIX-51 复审 #3: tabs the run closed — one never read cannot be read now. */
+  const closedTabs = new Set<string>();
   let staleFailures = 0;
   let repeatedReads = 0;
   const seenReads = new Set<string>();
@@ -1028,8 +1038,14 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             const answerText = flat(summary);
             const opened = [
               ...new Set(trace.filter((e) => e.ok && e.openedTab && e.tabId).map((e) => e.tabId!)),
-            ];
+            ].filter((id) => readTabs.has(id) || !closedTabs.has(id));
             const unread = opened.filter((id) => !readTabs.has(id));
+            // A tab closed unread does not count towards the links asked for.
+            const asked = input.intent.match(
+              /打开.{0,8}?(\d+|[一二两三四五六七八九十])\s*个?链接|open .{0,12}?(\d+) links?/i,
+            );
+            const wantedTabs = asked ? chineseCount(asked[1] ?? asked[2]!) : 0;
+            const short = closedTabs.size > 0 ? Math.max(0, wantedTabs - opened.length) : 0;
             // "CPython - 维基百科，自由的百科全书" → "CPython"; a wiki h1 reads
             // "万维网[编辑]" (its edit link): neither suffix is part of the title.
             const core = (title: string) =>
@@ -1051,8 +1067,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               (id) => readTabs.has(id) && !readTitles.get(id) && !tabTitles.get(id),
             );
             const asksTitles = untitled.length > 0 && !openTabsCorrected && !concludeNow;
-            if (unread.length || unnamed.length || asksTitles) {
+            if (unread.length || unnamed.length || asksTitles || short) {
               const why = [
+                short ? `关掉的标签没有读过，读过或还开着的新标签还差 ${short} 个` : '',
                 unread.length ? `新标签 ${unread.join('、')} 还没有读取` : '',
                 unnamed.length
                   ? `新标签的标题没写进答案：${unnamed.map((id) => `「${readTitles.get(id) ?? tabTitles.get(id)}」`).join('、')}`
@@ -2019,6 +2036,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           .find((line) => line.includes(`[ref=${action.ref}]`));
         if (target && /搜索|检索|查询|search/i.test(target)) webSearched = true;
       }
+      if (action.tool === 'close_tab' && outcome.ok) closedTabs.add(action.targetTabId);
       const { image: capturedImage, ...receipt } = outcome;
       trace.push({
         tool: action.tool,
@@ -2242,6 +2260,10 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     maxSteps,
   );
 }
+
+const CHINESE_COUNTS = '一二三四五六七八九十';
+const chineseCount = (value: string) =>
+  value === '两' ? 2 : CHINESE_COUNTS.indexOf(value) + 1 || Number(value);
 
 const INVALID_ARGUMENTS = Symbol('invalid-arguments');
 
