@@ -493,6 +493,8 @@ describe('FIX-51 复审 #3 #1: what is said ahead of the real frame text is held
     '1. **Iframe 验证**：访问 https://the-internet.herokuapp.com/iframe，页面标题为 "An iFrame containing the TinyMCE WYSIWYG Editor"。通过 页面读取 确认存在一个 iframe，其内部可访问性树原文为 "Your content goes here."，证明 iframe 已正确加载且内容可读。',
     '通过 snapshot 确认存在一个 iframe（frameId: frame_5efa），其内部可访问性树包含一个段落，原文为 "Your content goes here."，证明 iframe 已正确加载且内容可读。页面上未出现任何升级弹窗文字。',
     'iframe 内容为 "Your content goes here."，浏览器可正常呈现和读取该 iframe 内容。',
+    // Local A/B y4 on a1639c81, verbatim but for the frame id.
+    '通过 frameId frame_245f 切换到 iframe 内部上下文，读取到 iframe 内的段落文本原文为 "Your content goes here."，随后切回主框架确认状态正常。',
   ])('as read: %s', (answer) => {
     expect(gap(answer)).toBeNull();
   });

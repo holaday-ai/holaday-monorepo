@@ -655,7 +655,7 @@ export function dropClauses(answer: string, clauses: readonly string[]): string 
 const FRAME_ALIAS =
   '(?:该\\s*)?编辑器(?=[^，,]{0,8}?(?:还有|另有|有|显示|写着|内容|含|看到))|(?:the\\s+)?editor(?=\\s+(?:also\\s+)?(?:has|contains|shows|displays|includes)\\b)';
 const NEXT_ACTION =
-  '导航|打开|访问|点击|跳转|前往|进入|切换|触发|填写|输入|下载|滚动|返回|处理|完成|操作';
+  '导航|打开|访问|点击|跳转|前往|进入|切换|切回|回到|关闭|触发|填写|输入|下载|滚动|返回|处理|完成|操作';
 const NEXT_ACTION_EN =
   'navigated|opened|visited|clicked|went|switched|typed|entered|scrolled|returned|completed|handled|triggered|dismissed|accepted';
 /**
