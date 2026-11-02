@@ -75,6 +75,12 @@ const CONTROL_NAMES: Readonly<Record<string, readonly string[]>> = {
   download: ['下载'],
   upload: ['上传'],
   edit: ['编辑'],
+  undo: ['撤销'],
+  redo: ['重做'],
+  align: ['对齐'],
+  indent: ['缩进'],
+  format: ['格式'],
+  'read-only': ['只读'],
   alert: ['弹窗', '提示'],
   prompt: ['提示', '输入框'],
 };
@@ -635,12 +641,42 @@ const CONNECTIVE_RE =
 const CONTINUE_RE =
   /^\s*(?:还|另有|以及|并有|也有|及|和|包括|包含|其中|此外|外加|附带|带有|有一?个|\balso\b|\bplus\b|\bwith\b)/i;
 
+/** 复审 #6: 「，并有…」 may be of the page around the frame (「，并有 Bold、Italic 工具栏按钮」). */
+const AND_HAS_RE = /^\s*并有/;
+const COUNT_WORD_RE = /^[一二两三四五六七八九十几多每各些若干]*[个段行张条处种项]?/u;
+
+/** What 「并有」 says is in the parent page's reads or the frame's: quotes, what it names, its words. */
+function andHasGap(part: string, both: string): string | null {
+  for (const m of part.matchAll(FRAME_QUOTE_RE))
+    if (!both.includes(normal(m[1]!))) return `引号「${m[1]}」`;
+  const text = part.replace(AND_HAS_RE, ' ').replace(FRAME_QUOTE_RE, ' ');
+  const named = namedGap(text, both, both);
+  if (named) return named;
+  for (const term of text.replace(/[A-Za-z][\w'-]*/g, ' ').split(/[\s、，,（）()和与及或等]+/)) {
+    let word = term.replace(/提示|工具栏/g, '');
+    for (const thing of PAGE_THINGS) word = word.replace(thing, '');
+    const said = word.replace(COUNT_WORD_RE, '').replace(NOT_MODIFIER_RE, '');
+    if (said.length >= 2 && !modifierHeld(word, both) && !modifierHeld(said, both))
+      return `并有「${term}」`;
+  }
+  return null;
+}
+
 /**
  * 复审 #5: the line under the named checks (85262c28, DEPLOY-51 review #2) — what goes on from the
  * frame's text (「，还有一段使用说明」「，此外还有一个计数器」) is the frame's text and joining words.
  */
-function continuedGap(parts: readonly string[], pieces: readonly string[]): string | null {
+function continuedGap(
+  parts: readonly string[],
+  pieces: readonly string[],
+  both: string,
+): string | null {
   for (const part of parts) {
+    if (AND_HAS_RE.test(part)) {
+      const gap = andHasGap(part, both);
+      if (gap) return gap;
+      continue;
+    }
     const rest = withoutFrameText(part, pieces);
     if (!CONTINUE_RE.test(rest)) continue;
     // 「及默认段落文本 "…"」: words that only label a quote (and the quote is held on its own).
@@ -825,9 +861,11 @@ function frameGapOf(
     if (c.blank) gap = frames.some((r) => framePieces(r.text).length === 0) ? null : '说成空的';
     else if (ERROR_CLAIM_RE.test(c.claim)) gap = '说成错误页';
     else if (c.parts.length) gap = valueGap([c.window, ...c.parts.slice(1)].join('\n'), pieces);
-    if (!c.blank) gap ||= continuedGap(c.continued, pieces);
+    if (!c.blank) gap ||= continuedGap(c.continued, pieces, both);
     if (!c.blank)
       c.parts.forEach((part, i) => {
+        // 复审 #6: held in `continuedGap`, to the parent page's reads as well as the frame's.
+        if (asked && i && AND_HAS_RE.test(part)) return;
         // 复审 #4: what comes later with no word placing it in the frame may be on the page around
         // it (「，底部有 Elemental Selenium 链接」).
         gap ||= claimGap(part, pieces, i && !PLACED_INSIDE_RE.test(part) ? both : within, both);
@@ -839,7 +877,12 @@ function frameGapOf(
       read ||= shownOf(frames.length ? frames : current);
       why.reason ||= gap;
       why.clause ||= c.whole;
-    } else logUnverified(c.parts, c.whole, pieces);
+    } else
+      logUnverified(
+        c.parts.filter((part) => !AND_HAS_RE.test(part)),
+        c.whole,
+        pieces,
+      );
   }
   if (!asked) return dropOr(intent, answer, failed, { kind: 'mismatch', read });
   if (failed.length) return { kind: 'mismatch', read };

@@ -956,3 +956,60 @@ describe('FIX-51 复审 #3 #3: a tab closed unread is not asked for', () => {
     expect((outcome as { reason: string }).reason).toContain('Wikipedia');
   });
 });
+
+describe('FIX-51 复审 #6: 「并有」 is looked for in the parent page too (review5-fixtures/t14.mjs, t15.mjs)', () => {
+  const INTENT = '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts';
+  const FRAME = {
+    key: 'frame_1',
+    sourceURL: 'about:blank',
+    text: '- generic "Rich Text Area. Press ALT-0 for help."\n- paragraph [ref=f1e3]: Your content goes here.',
+  };
+  const PAGES = [
+    'https://the-internet.herokuapp.com/iframe heading "An iFrame containing the TinyMCE WYSIWYG Editor" toolbar button "Undo" button "Redo" button "Bold" button "Italic" link "Elemental Selenium" alert "TinyMCE is in read-only mode because you have no more editor loads available this month." button "Close"',
+    'https://the-internet.herokuapp.com/javascript_alerts heading "JavaScript Alerts" button "Click for JS Alert"',
+  ];
+  const QUOTED = 'iframe 内容为 "Your content goes here."';
+  const kind = (answer: string, pages = PAGES) =>
+    iframeContentGap(INTENT, answer, [FRAME], true, pages)?.kind;
+
+  it.each([
+    '，并有 Bold、Italic 工具栏按钮。',
+    '，并有工具栏（Bold、Italic）。',
+    '，并有 Elemental Selenium 链接。',
+    '，并有一个 Close 按钮。',
+    '，并有撤销、重做按钮。',
+    '，并有一个只读提示。',
+    '，并有 "TinyMCE is in read-only mode" 提示。',
+    '，并有 "Your content goes here."。',
+  ])('a thing the parent page has passes: %s', (rest) => {
+    expect(kind(QUOTED + rest)).toBeUndefined();
+  });
+
+  it.each([
+    '，并有一个计数器。',
+    '，并有一段使用说明。',
+    '，并有 Save 按钮。',
+    '，并有保存按钮。',
+    '，并有管理员入口。',
+    '，并有 "Admin login here" 提示。',
+    '，并有 Bold 按钮和一个计数器。',
+    '，并有一个用于支付的按钮。',
+  ])('what neither has is sent back: %s', (rest) => {
+    expect(kind(QUOTED + rest)).toBe('mismatch');
+  });
+
+  it('a page read that does not have it is sent back', () => {
+    const bare = ['https://the-internet.herokuapp.com/iframe heading "An iFrame"'];
+    for (const rest of [
+      '，并有撤销、重做按钮。',
+      '，并有一个只读提示。',
+      '，并有一个 Close 按钮。',
+    ])
+      expect(kind(QUOTED + rest, bare)).toBe('mismatch');
+  });
+
+  it('the other words that go on are still held to the frame', () => {
+    for (const rest of ['，还有 Bold 按钮。', '，以及一段 alert 说明。', '，也有一个搜索框。'])
+      expect(kind(QUOTED + rest)).toBe('mismatch');
+  });
+});
