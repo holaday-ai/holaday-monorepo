@@ -471,7 +471,6 @@ describe('FIX-51 复审 #3 #1: what is said ahead of the real frame text is held
     'iframe 内容为 "Your content goes here."。\n- 页面还有一个管理员入口。',
     '登录表单位于该 iframe 内，其内容为 "Your content goes here."。',
     '页面嵌入了一个 iframe，里面有一个管理员登录链接。',
-    'iframe 内容为假内容，其内部可访问性树原文为 "Your content goes here."。',
     '页面包含一个 iframe，其内部可访问性树原文为 "管理员后台"。',
     'The iframe was read and the admin panel is visible. Its text is "Your content goes here.".',
     'Admin login link is inside the iframe, whose text is "Your content goes here.".',
@@ -527,10 +526,82 @@ describe('FIX-51 复审 #3 #1: what is said ahead of the real frame text is held
       'round5/items-round5-core-10-b',
       'round5/items-round5-core-10-a',
     ];
+    // The page shows this notice; an answer quoting it after a new item is held to the read.
+    const notice =
+      'TinyMCE is in read-only mode because you have no more editor loads available this month.';
     for (const [src, answer] of Object.entries(C10)) {
       expect(named.some((item) => src.includes(item))).toBe(true);
-      expect(gap(answer)).toBeNull();
+      expect(iframeContentGap(I, answer, [FRAME], true, [...PAGES, notice])).toBeNull();
     }
+  });
+});
+
+describe('FIX-51 协调方决定: only what is named is held to the reads (review4-probe/probe4.mjs)', () => {
+  const I = '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts';
+  const FRAME = {
+    key: 'frame_1',
+    sourceURL: 'about:blank',
+    text: '- paragraph [ref=f1e3]: Your content goes here.',
+  };
+  const PAGES = [
+    'https://the-internet.herokuapp.com/iframe heading "An iFrame containing the TinyMCE WYSIWYG Editor" button "Bold" button "Italic" link "Elemental Selenium"',
+    'https://the-internet.herokuapp.com/javascript_alerts heading "JavaScript Alerts" button "Click for JS Alert" button "Click for JS Confirm" button "Click for JS Prompt" Result: You successfully clicked an alert',
+  ];
+  const Q = 'iframe 内容为 "Your content goes here."';
+  const gap = (answer: string) => iframeContentGap(I, answer, [FRAME], true, PAGES)?.kind ?? null;
+
+  it.each([
+    `${Q}。\n\n页面提示 "请登录后台"。`,
+    `${Q}。\n- 页面提示 "Session expired"。`,
+    `${Q}。\n\n页面底部有一行 Acme Corp 版权信息。`,
+    `${Q}。\n\n页面还有 https://evil.example/login。`,
+    `${Q}，随后切回主框架确认管理员链接可见。`,
+    `${Q}，然后回到首页，看到 Settings 菜单。`,
+    `${Q}。随后关闭弹窗，页面显示 "Welcome back"。`,
+    `${Q}，随后切回主框架，页面上还有一个注册入口。`,
+    `${Q}，name 为 mce_0_ifr。`,
+    `${Q}，标题为 Iframe Example。`,
+    'iframe 内容为 Hello world，另外显示了 Your content goes here。',
+    `${Q}，并有 Delete 按钮。`,
+    'iframe 中还有一张图片，内容为 "Your content goes here."。',
+  ])('names what no read has, sent back: %s', (answer) => {
+    expect(gap(answer)).toBe('mismatch');
+  });
+
+  it.each([
+    // Local A/B z3, sent back at 2e2acfeb.
+    `${Q}，所有可验证的成功条件均已满足：iframe 页正常展示并可读到指定内容、三种 JS 弹窗均可触发并被关闭、页面未卡死且有明确的结果反馈。`,
+    `${Q}，随后切回主框架确认状态正常。`,
+    `${Q}，然后回到主页面继续。`,
+    `${Q}。\n\n全部步骤已完成，符合预期。`,
+    `${Q}，确认 iframe 渲染正常，无报错。`,
+    `${Q}，页面很简单。`,
+    `${Q}，未执行登录，也没有点击任何链接。`,
+    '在 iframe 内编辑器中输入文本 "Hello from cloud browser"，文本为 "Your content goes here."。',
+  ])('names nothing, or what the run typed, stands: %s', (answer) => {
+    expect(gap(answer)).toBeNull();
+  });
+
+  it('what names nothing is logged, cut to 40 characters, and not sent back', () => {
+    const info = vi.spyOn(logger, 'info').mockImplementation(() => undefined as never);
+    const clause = '页面很简单'.repeat(10);
+    expect(gap(`${Q}，${clause}。`)).toBeNull();
+    expect(info).toHaveBeenCalledWith({ clause: clause.slice(0, 40) }, 'iframe 描述未核实');
+    info.mockRestore();
+  });
+
+  it('an error page or an empty frame said of a frame with text is still sent back', () => {
+    expect(gap('iframe 内容为跨源错误页。')).toBe('mismatch');
+    expect(gap('iframe 为空。')).toBe('mismatch');
+  });
+
+  it('a frame nobody asked about: a clause that names nothing stays, a named one goes', () => {
+    const price = '请使用云端浏览器，读 shop.example 的商品价格';
+    const ask = (answer: string) => iframeContentGap(price, answer, [FRAME], true, PAGES);
+    expect(ask('商品价格为 99 元，广告 iframe 显示的是一双鞋。')).toBeNull();
+    expect(ask('商品价格为 99 元，广告 iframe 显示 "Buy shoes now"。')).toMatchObject({
+      kind: 'drop',
+    });
   });
 });
 

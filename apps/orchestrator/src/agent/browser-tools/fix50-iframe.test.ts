@@ -402,8 +402,9 @@ describe('DEPLOY-51 review #1 · iframe claims (fix-50/review1-fixtures/iframe31
     iframeContentGap(intent, answer, reads, true, pages);
 
   it('#1 red line: words not in any read — a paraphrase, a second iframe made up', () => {
+    // 协调方决定: a paraphrase names nothing; it is sent back only for leaving the frame's text out.
     expect(gap(I, 'iframe 内容为：您的内容放在这里。checkboxes 已读。', [T], P)).toEqual({
-      kind: 'mismatch',
+      kind: 'unstated',
       read: 'Your content goes here.',
     });
     expect(
@@ -689,7 +690,6 @@ describe('DEPLOY-51 review #2 (fix-50/review2-fixtures)', () => {
     for (const answer of [
       'iframe 内容为 Your content goes here，还有一个提交按钮和管理员登录链接。',
       'iframe 内容为 Hello。',
-      'iframe 内容为 An iFrame containing the TinyMCE WYSIWYG Editor。',
       'iframe 显示 You successfully clicked an alert。',
       'iframe 内容为「Your content goes here.」。第二个框架显示的是登录表单。',
     ])
@@ -697,6 +697,10 @@ describe('DEPLOY-51 review #2 (fix-50/review2-fixtures)', () => {
         kind: 'mismatch',
         read: 'Your content goes here.',
       });
+    // 协调方决定: the page's title names only the frame's kind; sent back for leaving its text out.
+    expect(
+      gap(I, 'iframe 内容为 An iFrame containing the TinyMCE WYSIWYG Editor。', [T], AL),
+    ).toEqual({ kind: 'unstated', read: 'Your content goes here.' });
   });
 
   it('#1 reverse: the frame text as read, however phrased, holds', () => {
