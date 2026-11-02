@@ -34,6 +34,7 @@ import {
   type FrameRead,
   declinedTargets,
   dropClauses,
+  frameReadAfter,
   frameReadsOf,
   iframeContentGap,
   listsFrames,
@@ -2223,8 +2224,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               }
         }
         for (const read of frameReadsOf(outcome.text, child)) {
+          const held = frameReadAfter(frameReads.get(read.key), read);
           frameReads.delete(read.key);
-          frameReads.set(read.key, read);
+          frameReads.set(read.key, held);
           framePages.set(read.key, lastPage);
         }
       }

@@ -3,6 +3,7 @@ import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import {
   type FrameRead,
   dropClauses,
+  frameReadAfter,
   frameReadsOf,
   iframeContentGap,
 } from './completion-coverage.js';
@@ -834,6 +835,131 @@ describe('DEPLOY-51 review #2 (fix-50/review2-fixtures)', () => {
       }) as never,
     });
     expect((outcome as { summary: string }).summary).toMatch(/^部分完成：iframe 内容没有读到/);
+  });
+});
+
+describe('FIX-51 A/B w2: the run typed into the frame, and says what it held before', () => {
+  const IFRAME = 'https://the-internet.herokuapp.com/iframe';
+  const ANSWER =
+    'iframe 初始内容为 "Your content goes here."；输入后重新读取，内容为 "Hello from cloud browser"。';
+  const run = async (
+    second: { frameId: string; sourceURL: string; tree: string },
+    answer = ANSWER,
+  ) => {
+    let reads = 0;
+    let turn = 0;
+    const calls = [
+      { name: 'navigate', input: { url: IFRAME } },
+      { name: 'read_page', input: { frameId: 'frame_1' } },
+      { name: 'read_page', input: { frameId: 'frame_1' } },
+      finishOf(answer),
+      finishOf(answer),
+    ];
+    const adapter: MessagesAdapter = {
+      metadata: { provider: 'anthropic', model: 'fixture' },
+      async create() {
+        const call = calls[Math.min(turn++, calls.length - 1)]!;
+        return {
+          id: String(turn),
+          metadata: { provider: 'anthropic', model: 'fixture' },
+          content: [{ type: 'tool_use', id: String(turn), ...call }],
+          stopReason: 'tool_use',
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    return (await runUnifiedBrowserLoop({
+      intent: '请使用云端浏览器，读 the-internet.herokuapp.com 的 iframe',
+      adapter,
+      maxSteps: 12,
+      observationV2: true,
+      currentPageUrl: () => IFRAME,
+      execute: (async (action: { frameId?: string }) => {
+        if (!action.frameId)
+          return {
+            ok: true,
+            url: IFRAME,
+            text: JSON.stringify({
+              frameId: 'frame_main',
+              sourceURL: IFRAME,
+              tree: '- iframe [ref=e5]',
+              frames: [{ frameId: 'frame_1', limitation: '跨源 iframe' }],
+            }),
+          };
+        const read = reads++
+          ? second
+          : {
+              frameId: 'frame_1',
+              sourceURL: 'about:blank',
+              tree: '- paragraph: Your content goes here.',
+            };
+        return { ok: true, url: IFRAME, text: JSON.stringify(read) };
+      }) as never,
+    })) as { summary: string };
+  };
+
+  it('both reads of the document stand: not sent back', async () => {
+    const outcome = await run({
+      frameId: 'frame_1',
+      sourceURL: 'about:blank',
+      tree: '- paragraph: Hello from cloud browser',
+    });
+    expect(outcome.summary).toBe(ANSWER);
+  });
+
+  it('reverse: what no read of the document held is still sent back', async () => {
+    const outcome = await run(
+      {
+        frameId: 'frame_1',
+        sourceURL: 'about:blank',
+        tree: '- paragraph: Hello from cloud browser',
+      },
+      'iframe 初始内容为 "Never read text"；输入后重新读取，内容为 "Hello from cloud browser"。',
+    );
+    expect(outcome.summary).toMatch(/^部分完成：答案中的 iframe 内容与本次读到的不一致/);
+  });
+
+  it('reverse: another document in that frame replaces what the first one held', async () => {
+    const outcome = await run({
+      frameId: 'frame_1',
+      sourceURL: 'https://other.example/',
+      tree: '- paragraph: Hello from cloud browser',
+    });
+    expect(outcome.summary).toMatch(/^部分完成：答案中的 iframe 内容与本次读到的不一致/);
+  });
+
+  it('reverse: an error page read earlier is not what the frame held', () => {
+    const error: FrameRead = {
+      key: 'frame_1',
+      sourceURL: 'about:blank',
+      text: '- heading "Application error"',
+    };
+    const read: FrameRead = { key: 'frame_1', sourceURL: 'about:blank', text: '- paragraph: Hi' };
+    expect(frameReadAfter(error, read)).toEqual(read);
+  });
+
+  it('the frame as shown back is the latest read, not the earlier one', () => {
+    const first: FrameRead = {
+      key: 'frame_1',
+      sourceURL: 'about:blank',
+      text: '- paragraph: Your content goes here.',
+    };
+    const later: FrameRead = { ...first, text: '- paragraph: Hello' };
+    expect(
+      iframeContentGap(
+        '读 the-internet.herokuapp.com 的 iframe',
+        'iframe 内容为 "Made up"。',
+        [frameReadAfter(first, later)],
+        true,
+        ['page'],
+      ),
+    ).toEqual({ kind: 'mismatch', read: 'Hello' });
   });
 });
 

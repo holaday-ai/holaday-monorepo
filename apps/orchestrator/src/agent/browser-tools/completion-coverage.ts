@@ -236,7 +236,13 @@ export function staleForRecentIntent(
  * completed — the iframe held 「Your content goes here.」 and the run never read it. What an answer
  * says is inside an iframe has to be what the run read from that frame.
  */
-export type FrameRead = { key: string; sourceURL?: string; text: string };
+export type FrameRead = {
+  key: string;
+  sourceURL?: string;
+  text: string;
+  /** What this same document held when read earlier in the run (FIX-51 A/B w2). */
+  earlier?: string;
+};
 
 /** The main frame's own id in a read (to tell a child-frame read by frameId from it). */
 export function readFrameId(text: string): string | undefined {
@@ -313,6 +319,16 @@ export function mainFrameOf(
   } catch {
     return undefined;
   }
+}
+
+/**
+ * FIX-51 A/B w2: 「初始内容为 "…"」, then typed into the frame and read it again. What the frame held
+ * before stays a read of that document; another document (or an error page) in that frame is not it.
+ */
+export function frameReadAfter(before: FrameRead | undefined, read: FrameRead): FrameRead {
+  if (!before || before.sourceURL !== read.sourceURL || frameErrored(before)) return read;
+  if (before.text === read.text) return { ...read, earlier: before.earlier };
+  return { ...read, earlier: [before.earlier, before.text].filter(Boolean).join('\n') };
 }
 
 /** A frame whose document is an error page: not a read of its content. */
@@ -608,12 +624,16 @@ export function iframeContentGap(
   // PR #314 review: each frame as last read (by its frameId; a page that failed and was reopened
   // counts by its last good read) — not the last frame of the page standing for all of them.
   const current = [...new Map(good.map((r) => [r.key, r] as const)).values()];
-  const piecesOf = (frames: readonly FrameRead[]) => frames.flatMap((r) => framePieces(r.text));
+  const piecesOf = (frames: readonly FrameRead[]) =>
+    frames.flatMap((r) => framePieces(`${r.earlier ?? ''}\n${r.text}`));
   // The read as it stands, and its texts run together (a quote across two of them).
   const textOf = (frames: readonly FrameRead[]) =>
     normal(
       frames
-        .map((r) => `${r.sourceURL ?? ''} ${r.text} ${framePieces(r.text).join(' ')}`)
+        .map((r) => {
+          const held = `${r.earlier ?? ''}\n${r.text}`;
+          return `${r.sourceURL ?? ''} ${held} ${framePieces(held).join(' ')}`;
+        })
         .join(' '),
     );
   const shownOf = (frames: readonly FrameRead[]) => {
