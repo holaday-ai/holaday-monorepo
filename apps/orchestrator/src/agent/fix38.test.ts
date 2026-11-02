@@ -129,7 +129,7 @@ describe('FIX-38 #1 · core-11: no element ref or tab id reaches the user', () =
     );
     // A ref inside a URL or code stays, the one in prose goes.
     expect(stripInternalRefs('见 https://x.test/?ref=e12 和 `ref=e3`，按钮（ref e9）已点')).toBe(
-      '见 https://x.test/?ref=e12 和 `ref=e3`，按钮已点',
+      '见 https://x.test/?ref=e12 和，按钮已点',
     );
   });
 

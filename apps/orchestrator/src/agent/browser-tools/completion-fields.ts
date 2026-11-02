@@ -676,7 +676,7 @@ function sourceLabel(fact: Fact) {
  * Bing appends `rdr`/`rdrig` to the URL the answer cites; the same host and
  * path with every parameter the answer names is the same page.
  */
-function sameSource(pageUrl: string | undefined, cited: string): boolean {
+export function sameSource(pageUrl: string | undefined, cited: string): boolean {
   if (!pageUrl) return false;
   if (pageUrl === cited) return true;
   try {
@@ -1493,7 +1493,8 @@ function filledAfter(prose: string, at: number, name: string, pages?: readonly s
   const unsure =
     '(?!(?:推测|估计|大概|可能|也许|疑似|似乎|待确认|待定|待查|不清楚|不确定|不详|未知|谁|什么|哪|[？?—–\\-…]))';
   const filled = new RegExp(
-    `(?:(?:读到|读取到|获取到|拿到|找到|补上|补齐)了?(?:其|该|它的)?${name}|${name})\\s*(?:为|是|[：:])\\s*${absent}${unsure}(\\S[^，,。；;\\n]{0,79})`,
+    // FIX-51 (Deploy-51 b-p02): 「读取到价格 S$12.77」「读取到价格文本 "S$12.77"」 say the value too.
+    `(?:(?:读到|读取到|获取到|拿到|找到|补上|补齐)了?(?:其|该|它的)?${name}(?:文本|文字|信息|数值|值)?\\s*(?:为|是|[：:])?|${name}\\s*(?:为|是|[：:]))\\s*${absent}${unsure}(\\S[^，,。；;\\n]{0,79})`,
   ).exec(next);
   if (!filled) return false;
   // PR #309 review: 「第一个视频未显示作者，第二个视频的作者为张三」 — a value for another item fills
@@ -1505,11 +1506,28 @@ function filledAfter(prose: string, at: number, name: string, pages?: readonly s
   );
   const own = [...prose.slice(start + 1, at).matchAll(ITEM_RE)].at(-1)?.[0].replace(/\s+/g, '');
   if (![...before.matchAll(ITEM_RE)].every((m) => m[0].replace(/\s+/g, '') === own)) return false;
-  // The value is the page's: found on a page the run read.
-  const value = normalizeFact(filled[1]!.trim().replace(/^[“"「『]|[”"」』]$/g, ''));
+  // The value is the page's: found on a page the run read. A note of where it came from is not
+  // part of it (「S$12.77（来自详情页）」); any other note stays, and no page shows that.
+  const said = next.slice(before.length);
+  const noted = said.match(/^([^（(，,。；;\n]*?)\s*[（(]([^）)\n]*)[）)]\s*(?=$|[，,。；;.\n])/);
+  // 「读取到价格 S$12.77，可能不准确」 doubts it as a note would.
+  if (UNSURE_NOTE_RE.test(said.replace(/[（(][^）)]*[）)]/g, '').split(/[，,。；;\n]/)[1] ?? ''))
+    return false;
+  const fromSource =
+    noted &&
+    SOURCE_NOTE_RE.test(noted[2]!) &&
+    !UNSURE_NOTE_RE.test(noted[2]!) &&
+    [...noted[2]!.matchAll(ITEM_RE)].every((m) => m[0].replace(/\s+/g, '') === own);
+  const value = normalizeFact(
+    (fromSource ? noted[1]! : filled[1]!).trim().replace(/^[“"「『]|[”"」』]$/g, ''),
+  );
   return /[\p{L}\p{N}]/u.test(value) && pages.some((page) => normalizeFact(page).includes(value));
 }
 
+/** FIX-51 复审 #1: a note saying where a value was read, and notes that doubt it. */
+const SOURCE_NOTE_RE = /^(?:来自|来源|读取?自|取自|出自|摘自|见|据|详情页|from\b|source\b)/i;
+const UNSURE_NOTE_RE =
+  /推测|估计|大概|可能|也许|疑似|似乎|未核实|未确认|未验证|待确认|待定|待查|不准确|不确定|不清楚|maybe|probably|unverified/i;
 /** An item a sentence is about: 「第3条」「第二个」「另一个」「其他」. */
 const ITEM_RE =
   /第\s*[一二三四五六七八九十百\d]+\s*(?:个|条|项|本|篇|款|件|位|首|名|家|部|只)?|另一(?:个|条|项|本|篇|款|件|位)?|其他|其余/g;

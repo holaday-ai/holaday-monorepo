@@ -1,5 +1,6 @@
 import { stripToolCallBlocks } from '@holaday/shared-types';
 import { siteOf } from '../../browser-pool/egress-learning.js';
+import { logger } from '../../config/logger.js';
 import { namedSiteDomains } from '../../execution/source-domain-consistency.js';
 import { scrapedWall } from '../../firecrawl/scraped-page.js';
 import type {
@@ -33,6 +34,7 @@ import {
   type FrameRead,
   declinedTargets,
   dropClauses,
+  frameReadAfter,
   frameReadsOf,
   iframeContentGap,
   listsFrames,
@@ -46,6 +48,7 @@ import {
   declaredAbsentFields,
   fieldLabel,
   observedEvidence,
+  sameSource,
   unescapeLiteralBreaks,
   unverifiedNote,
 } from './completion-fields.js';
@@ -331,15 +334,22 @@ export async function runUnifiedBrowserLoop(
   // FIX-38 复审 #1: the element ids the browser gave out in this run — only these may be
   // dropped from 「按钮 e7」 (「矩阵元素 e12」 on a maths page is the page's own text).
   const seen = new Set<string>();
+  // FIX-51 复审 #3: a failed run's steps, for the log only: tool names and the start of tab ids.
+  const steps: string[] = [];
   const outcome = await browserLoop({
     ...input,
     execute: async (action) => {
       const result = await input.execute(action);
+      const tab = 'targetTabId' in action ? action.targetTabId : result.tabId;
+      steps.push(
+        `${action.tool}${result.ok ? '' : '!'}${tab ? `:${tab.replace(/^tab_/, '').slice(0, 8)}` : ''}${result.openedTab ? '+' : ''}`,
+      );
       for (const match of (result.text ?? '').matchAll(/\bref=(e\d{1,6})\b/g))
         seen.add(match[1]!.toLowerCase());
       return result;
     },
   });
+  if (outcome.status === 'failed') logger.warn({ steps: steps.slice(-120) }, 'browser loop failed');
   // FIX-41: nor the browser's call syntax (「switch_tab(targetTabId=…)」), once its ids are gone.
   const strip = (text: string) => humanizeToolMentions(stripInternalRefs(text, seen));
   // FIX-38 (Deploy-38 core-11): whatever way the loop ends, the user never reads an
@@ -386,6 +396,11 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   // pageEvidence, which evicts old reads of long pages.
   const readTabs = new Set<string>();
   const tabTitles = new Map<string, string>();
+  const tabUrls = new Map<string, string>();
+  const noteListedTabs = (listing: string) => {
+    for (const [tabId, title] of listedTabTitles(listing)) tabTitles.set(tabId, title);
+    for (const [tabId, url] of listedTabUrls(listing)) tabUrls.set(tabId, url);
+  };
   /** FIX-27: the title each tab had when it was read. */
   const readTitles = new Map<string, string>();
   let activeTabId: string | undefined;
@@ -428,6 +443,10 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     return decoded;
   };
   const rejected = async (summary: string, evidence: string, reason: string) => {
+    logger.info(
+      { reason: reason.slice(0, 160), clause: summary.trim().slice(0, 40) },
+      'browser finish rejected',
+    );
     try {
       await input.onCompletionRejected?.(completionDiagnostic({ summary, evidence, reason }));
     } catch {
@@ -556,6 +575,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     while (toolTexts.reduce((n, t) => n + t.length, 0) > 256_000) toolTexts.shift();
   };
   const trace: BrowserTrace[] = [];
+  /** FIX-51 复审 #3: tabs the run closed — one never read cannot be read now. */
+  const closedTabs = new Set<string>();
   let staleFailures = 0;
   let repeatedReads = 0;
   const seenReads = new Set<string>();
@@ -1016,16 +1037,20 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               trace.some((entry) => entry.ok && entry.openedTab)
             ) {
               const listed = await input.execute({ tool: 'list_tabs' }).catch(() => null);
-              if (listed?.ok)
-                for (const [tabId, title] of listedTabTitles(listed.text))
-                  tabTitles.set(tabId, title);
+              if (listed?.ok) noteListedTabs(listed.text);
             }
             const flat = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
             const answerText = flat(summary);
             const opened = [
               ...new Set(trace.filter((e) => e.ok && e.openedTab && e.tabId).map((e) => e.tabId!)),
-            ];
+            ].filter((id) => readTabs.has(id) || !closedTabs.has(id));
             const unread = opened.filter((id) => !readTabs.has(id));
+            // A tab closed unread does not count towards the links asked for.
+            const asked = input.intent.match(
+              /打开.{0,8}?(\d+|[一二两三四五六七八九十])\s*个?链接|open .{0,12}?(\d+) links?/i,
+            );
+            const wantedTabs = asked ? chineseCount(asked[1] ?? asked[2]!) : 0;
+            const short = closedTabs.size > 0 ? Math.max(0, wantedTabs - opened.length) : 0;
             // "CPython - 维基百科，自由的百科全书" → "CPython"; a wiki h1 reads
             // "万维网[编辑]" (its edit link): neither suffix is part of the title.
             const core = (title: string) =>
@@ -1047,8 +1072,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               (id) => readTabs.has(id) && !readTitles.get(id) && !tabTitles.get(id),
             );
             const asksTitles = untitled.length > 0 && !openTabsCorrected && !concludeNow;
-            if (unread.length || unnamed.length || asksTitles) {
+            if (unread.length || unnamed.length || asksTitles || short) {
               const why = [
+                short ? `关掉的标签没有读过，读过或还开着的新标签还差 ${short} 个` : '',
                 unread.length ? `新标签 ${unread.join('、')} 还没有读取` : '',
                 unnamed.length
                   ? `新标签的标题没写进答案：${unnamed.map((id) => `「${readTitles.get(id) ?? tabTitles.get(id)}」`).join('、')}`
@@ -1133,7 +1159,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           const facts = assessCompletionFacts({
             summary,
             fields: args.fields,
-            pages: [...pageEvidence, ...readTabTitles(tabTitles, readTabs)],
+            pages: [...pageEvidence, ...readTabTitles(tabTitles, readTabs, tabUrls, pageEvidence)],
             receipts: [hostProof, typed, dialogReceipts(trace)].filter(Boolean).join('\n'),
             toolTexts: toolTexts.join('\n'),
             intent: input.intent,
@@ -1578,7 +1604,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           // a named part not done is sent back once to be found; still not done, 部分完成.
           const declined = declinedTargets(input.userIntent ?? input.intent, summary, [
             ...pageEvidence,
-            ...readTabTitles(tabTitles, readTabs),
+            ...readTabTitles(tabTitles, readTabs, tabUrls, pageEvidence),
           ]);
           if (declined.length && !declinedLooked && !concludeNow) {
             declinedLooked = true;
@@ -1607,7 +1633,10 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             summary,
             [...frameReads.values()],
             framesSeen,
-            pageEvidence.map((page) => page.text),
+            pageEvidence.map((page) => `${page.sourceURL ?? ''} ${page.text}`),
+            trace.flatMap((entry) =>
+              entry.ok && entry.tool === 'type' && entry.typedText ? [entry.typedText] : [],
+            ),
           );
           // DEPLOY-51 review #1 (#3): an iframe the task did not ask for, said to hold what no read
           // shows: that clause is taken out, and the task is not marked down for it.
@@ -1743,7 +1772,10 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             const facts = assessCompletionFacts({
               summary,
               fields: args.fields,
-              pages: [...pageEvidence, ...readTabTitles(tabTitles, readTabs)],
+              pages: [
+                ...pageEvidence,
+                ...readTabTitles(tabTitles, readTabs, tabUrls, pageEvidence),
+              ],
               receipts: [receiptEvidence(input.intent, trace), typedText, dialogReceipts(trace)]
                 .filter(Boolean)
                 .join('\n'),
@@ -2012,6 +2044,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           .find((line) => line.includes(`[ref=${action.ref}]`));
         if (target && /搜索|检索|查询|search/i.test(target)) webSearched = true;
       }
+      if (action.tool === 'close_tab' && outcome.ok) closedTabs.add(action.targetTabId);
       const { image: capturedImage, ...receipt } = outcome;
       trace.push({
         tool: action.tool,
@@ -2198,15 +2231,14 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               }
         }
         for (const read of frameReadsOf(outcome.text, child)) {
+          const held = frameReadAfter(frameReads.get(read.key), read);
           frameReads.delete(read.key);
-          frameReads.set(read.key, read);
+          frameReads.set(read.key, held);
           framePages.set(read.key, lastPage);
         }
       }
       if (outcome.ok && action.tool === 'sections') outline = outlineFrom(outcome.text) ?? outline;
-      if (outcome.ok && action.tool === 'list_tabs') {
-        for (const [tabId, title] of listedTabTitles(outcome.text)) tabTitles.set(tabId, title);
-      }
+      if (outcome.ok && action.tool === 'list_tabs') noteListedTabs(outcome.text);
       const staleRedo =
         ['stale_ref', 'stale_context'].includes(outcome.errorCode ?? '') &&
         ['type', 'select', 'click'].includes(action.tool)
@@ -2237,6 +2269,10 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     maxSteps,
   );
 }
+
+const CHINESE_COUNTS = '一二三四五六七八九十';
+const chineseCount = (value: string) =>
+  value === '两' ? 2 : CHINESE_COUNTS.indexOf(value) + 1 || Number(value);
 
 const INVALID_ARGUMENTS = Symbol('invalid-arguments');
 
@@ -2335,18 +2371,45 @@ export function listedTabTitles(listing: string): Map<string, string> {
   return titles;
 }
 
+/** Tab id → address when listed, from a `list_tabs` result. */
+export function listedTabUrls(listing: string): Map<string, string> {
+  const urls = new Map<string, string>();
+  try {
+    const { tabs } = JSON.parse(listing) as {
+      tabs?: Array<{ tabId?: unknown; url?: unknown; sourceURL?: unknown }>;
+    };
+    for (const tab of Array.isArray(tabs) ? tabs : []) {
+      const url = tab?.sourceURL ?? tab?.url;
+      if (typeof tab?.tabId === 'string' && typeof url === 'string') urls.set(tab.tabId, url);
+    }
+  } catch {
+    /* No listing, no addresses. */
+  }
+  return urls;
+}
+
 /**
  * The browser-reported document title of a tab that was read successfully at
  * some point is part of that page, whenever it was listed. A tab never read (or
- * that failed to load) gets nothing from the listing.
+ * that failed to load) gets nothing from the listing. FIX-51 复审 #1: the title
+ * is of the page the tab was on when listed, so it binds to that address only
+ * when the tab was read there (a tab that read CHROME and went on to FIREFOX
+ * does not give CHROME the title 「Firefox - Wikipedia」).
  */
 export function readTabTitles(
   titles: Map<string, string>,
   readTabs: Set<string>,
+  urls: ReadonlyMap<string, string> = new Map(),
+  reads: readonly ObservedEvidence[] = [],
 ): ObservedEvidence[] {
   return [...titles]
     .filter(([tabId]) => readTabs.has(tabId))
-    .map(([tabId, title]) => ({ text: title, tabId }));
+    .map(([tabId, title]) => {
+      const url = urls.get(tabId);
+      return url && reads.some((read) => read.tabId === tabId && sameSource(read.sourceURL, url))
+        ? { text: title, tabId, sourceURL: url }
+        : { text: title, tabId };
+    });
 }
 
 /** Structured `fields` values the summary does not already state, as answer lines. */

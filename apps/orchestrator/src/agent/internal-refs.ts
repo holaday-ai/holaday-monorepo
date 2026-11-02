@@ -4,9 +4,12 @@
  * in the answer, its fields, the 未核实 note or a failure / pause message. 「页面上的按钮」 is
  * fine; 「ref e12」 is not.
  *
- * 复审 #1: only what is surely a handle goes. URLs, inline code and code blocks are left
- * alone (`?ref=e12&tab_abc123=1`, `if (value === "")`); 「坐标 (e1, e2)」「基向量 (e1–e3)」「矩阵
+ * 复审 #1: only what is surely a handle goes. URLs and code are left alone
+ * (`?ref=e12&tab_abc123=1`, `if (value === "")`); 「坐标 (e1, e2)」「基向量 (e1–e3)」「矩阵
  * 元素 e12」「链接 e2」 and `frame_deadbeef12` are ordinary text.
+ *
+ * FIX-51 复审 #1 (Deploy-51 A core-10 「通过 frameId `frame_4c3d2bdc-…` 读取」): backticks do not make a
+ * handle code. An inline code holding one goes whole, and a handle in a code block goes.
  */
 
 const ID = String.raw`e\d{1,6}`;
@@ -36,7 +39,14 @@ const NOUN_ID_RE = new RegExp(
 /** tab_ / frame_ handles: a UUID, whole or cut short (`tab_9eff90a8-…`). */
 const HANDLE_RE =
   /\s*\b(?:tab|frame)_[0-9a-f]{8}(?:(?:-[0-9a-f]{1,12}){1,4}(?:-?(?:…|\.\.\.))?|-?(?:…|\.\.\.))(?![\w-])/giu;
-/** Left as written: fenced code, inline code, URLs. */
+/** Code holding a handle: also one cut to its first eight digits (`frame_4c3d2bdc`). */
+const CODE_HANDLE_RE =
+  /\b(?:tab|frame)_[0-9a-f]{8}(?:(?:-[0-9a-f]{1,12}){1,4}(?:-?(?:…|\.\.\.))?|-?(?:…|\.\.\.))?(?![\w-])/iu;
+const CODE_REF_RE = new RegExp(String.raw`^\[?\s*${REF}${ID_LIST}\s*\]?$`, 'iu');
+const CODE_IDS_RE = new RegExp(String.raw`^${ID_LIST}$`, 'iu');
+/** 「frameId」 before a removed handle says nothing without it. */
+const HANDLE_LABEL_RE = /\b(?:frame|tab)\s*_?id\s*[=:：]?\s*(?=\uE000)/giu;
+/** Left as written, unless they hold a handle: fenced code, inline code, URLs. */
 const PROTECTED_RE = /```[\s\S]*?```|`[^`\n]*`|\bhttps?:\/\/[^\s<>"'）)」』]+/giu;
 
 /**
@@ -45,8 +55,22 @@ const PROTECTED_RE = /```[\s\S]*?```|`[^`\n]*`|\bhttps?:\/\/[^\s<>"'）)」』]+
  */
 const CUT = '';
 
+/** Code with the handles out; inline code holding one is a removal. URLs and other code stay. */
+function markCode(code: string, seen: ReadonlySet<string>): string {
+  if (code.startsWith('```')) return code.replace(HANDLE_RE, '');
+  if (!code.startsWith('`')) return code;
+  const inner = code.slice(1, -1).trim();
+  if (/https?:\/\//i.test(inner)) return code;
+  return CODE_HANDLE_RE.test(inner) ||
+    CODE_REF_RE.test(inner) ||
+    (CODE_IDS_RE.test(inner) &&
+      (inner.match(/e\d+/gi) ?? []).every((id) => seen.has(id.toLowerCase())))
+    ? CUT
+    : code;
+}
+
 function stripPlain(text: string, seen: ReadonlySet<string>): string {
-  if (!/\be\d|\b(?:tab|frame)_/i.test(text)) return text;
+  if (!text.includes(CUT) && !/\be\d|\b(?:tab|frame)_/i.test(text)) return text;
   const marked = text
     .replace(BRACKETED_RE, CUT)
     .replace(INLINE_REF_RE, CUT)
@@ -55,7 +79,8 @@ function stripPlain(text: string, seen: ReadonlySet<string>): string {
         ? `${noun}${CUT}`
         : whole,
     )
-    .replace(HANDLE_RE, CUT);
+    .replace(HANDLE_RE, CUT)
+    .replace(HANDLE_LABEL_RE, '');
   if (!marked.includes(CUT)) return text;
   return (
     marked
@@ -82,13 +107,14 @@ function stripPlain(text: string, seen: ReadonlySet<string>): string {
  */
 export function stripInternalRefs(text: string, seen: ReadonlySet<string> = new Set()): string {
   if (!text || !/\be\d|\b(?:tab|frame)_/i.test(text)) return text;
+  const marked = text.replace(PROTECTED_RE, (code) => markCode(code, seen));
   let out = '';
   let at = 0;
-  for (const match of text.matchAll(PROTECTED_RE)) {
-    out += stripPlain(text.slice(at, match.index), seen) + match[0];
+  for (const match of marked.matchAll(PROTECTED_RE)) {
+    out += stripPlain(marked.slice(at, match.index), seen) + match[0];
     at = match.index + match[0].length;
   }
-  return out + stripPlain(text.slice(at), seen);
+  return out + stripPlain(marked.slice(at), seen);
 }
 
 /** Any internal reference left in user-facing text. */
