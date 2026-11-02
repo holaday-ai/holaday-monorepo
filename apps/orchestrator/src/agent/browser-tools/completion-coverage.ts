@@ -345,7 +345,7 @@ const IFRAME_WORD_RE =
   /iframe|i-frame|内联框架|子框架|(?:内嵌|嵌入(?!式))[^。，,；;\n]{0,8}?框架|第[一二两三四五六七八九十\d]+个框架/i;
 /** 「内容为…」「显示…」「写着…」「iframe：…」: what the iframe holds, said as fact. */
 const CONTENT_CLAIM_RE =
-  /(?:内容|文本|文字|正文|原文)\s*(?:为|是|显示为?|写着|[:：])|显示了?(?:为|的是|着)?|写着|里面是|内有|呈现|还有|另有|^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:：]/i;
+  /(?:内容|文本|文字|正文|(?<!标题)原文)\s*(?:为|是|显示为?|写着|[:：])|显示了?(?:为|的是|着)?|写着|里面是|内有|呈现|还有|另有|^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:：]/i;
 /** 「iframe：…」: a label, and the sentence after it may have the verb (「iframe：读取到的文本内容为…」). */
 const FRAME_LABEL_RE = /^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:：]/i;
 /**
