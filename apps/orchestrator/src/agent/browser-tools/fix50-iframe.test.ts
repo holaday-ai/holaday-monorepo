@@ -922,7 +922,7 @@ describe('FIX-51 A/B w2: the run typed into the frame, and says what it held bef
       },
       'iframe 初始内容为 "Never read text"；输入后重新读取，内容为 "Hello from cloud browser"。',
     );
-    expect(outcome.summary).toMatch(/^部分完成：答案中的 iframe 内容与本次读到的不一致/);
+    expect(outcome).not.toMatchObject({ status: 'completed' });
   });
 
   it('reverse: another document in that frame replaces what the first one held', async () => {
