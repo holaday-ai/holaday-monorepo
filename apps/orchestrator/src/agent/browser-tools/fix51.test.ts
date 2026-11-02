@@ -693,6 +693,16 @@ describe('FIX-51 复审 #4 (review4-fixtures/t10.mjs)', () => {
     ).toBeNull();
     const clauses = info.mock.calls.map(([log]) => (log as unknown as { clause: string }).clause);
     expect(clauses.every((clause) => !clause.includes("：'Rich Text Area"))).toBe(true);
+    info.mockClear();
+    // Real v/u rounds logged 「内部」「内读取到的」: the clause as written, not what is left of it.
+    expect(
+      gap('在页面的 iframe 内读取到的内容为 "Your content goes here."，渲染正常。'),
+    ).toBeNull();
+    expect(info.mock.calls.map(([log]) => (log as unknown as { clause: string }).clause)).toEqual(
+      expect.arrayContaining([
+        '在页面的 iframe 内读取到的内容为 "Your content goes here."'.slice(0, 40),
+      ]),
+    );
     info.mockRestore();
   });
 });

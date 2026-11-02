@@ -633,12 +633,19 @@ function valueGap(text: string, pieces: readonly string[]): string | null {
 }
 
 /** 协调方决定: what names nothing and is not the frame's text is logged, not sent back. */
-function logUnverified(parts: readonly string[], clause: string, pieces: readonly string[]): void {
-  parts.forEach((part, i) => {
+function logUnverified(parts: readonly string[], whole: string, pieces: readonly string[]): void {
+  for (const part of parts) {
     const said = bare(part.replace(FRAME_QUOTE_RE, ' '));
     if (/\p{L}/u.test(said) && !pieces.some((piece) => bare(piece).includes(said)))
-      logger.info({ clause: (i ? part : clause).trim().slice(0, 40) }, 'iframe 描述未核实');
-  });
+      logger.info(
+        {
+          clause: (whole.includes(part.trim()) || part === parts[0] ? whole : part)
+            .trim()
+            .slice(0, 40),
+        },
+        'iframe 描述未核实',
+      );
+  }
 }
 
 export type FrameGap =
@@ -695,7 +702,7 @@ function frameGapOf(
   const asked = IFRAME_WORD_RE.test(intent);
   const pageText = normal(pageTexts.join(' '));
   const claims = iframeWindows(answer, intent, asked, pageText).flatMap(
-    ({ window, parts, around, clause, subject }) => {
+    ({ window, parts, around, clause, whole, subject }) => {
       // Not asked: only a sentence with the iframe as its subject says what it holds.
       const verb = window.search(CONTENT_CLAIM_RE);
       if (!asked && verb >= 0) {
@@ -705,6 +712,7 @@ function frameGapOf(
       return [
         {
           clause,
+          whole,
           subject,
           window,
           parts,
@@ -739,7 +747,7 @@ function frameGapOf(
       )
         failed.push(c);
     why.reason = 'frame 没有读到';
-    why.clause = failed[0]?.clause ?? '';
+    why.clause = failed[0]?.whole ?? '';
     if (!asked) return dropOr(intent, answer, failed, { kind: 'unread' });
     // An iframe the page lists and the question asks for, never read: nothing said of it holds.
     return failed.length || framesSeen ? { kind: 'unread' } : null;
@@ -785,8 +793,8 @@ function frameGapOf(
       failed.push(c);
       read ||= shownOf(frames.length ? frames : current);
       why.reason ||= gap;
-      why.clause ||= c.clause;
-    } else logUnverified(c.parts, c.clause, pieces);
+      why.clause ||= c.whole;
+    } else logUnverified(c.parts, c.whole, pieces);
   }
   if (!asked) return dropOr(intent, answer, failed, { kind: 'mismatch', read });
   if (failed.length) return { kind: 'mismatch', read };
@@ -804,13 +812,14 @@ function frameGapOf(
           return { kind: 'mismatch', read: shownOf(namedFrames(c.subject, current)) };
         }
       }
-      logUnverified(c.around, c.around[0] ?? '', piecesOf(current));
+      for (const part of c.around)
+        logUnverified([part], c.whole.includes(part) ? c.whole : part, piecesOf(current));
     }
   }
   const pieces = piecesOf(current);
   const shown = shownOf(current);
   why.reason = 'frame 读到的内容没有写出';
-  why.clause = claims[0]?.clause ?? '';
+  why.clause = claims[0]?.whole ?? '';
   if (!shown) return said.some((c) => c.blank) ? null : { kind: 'unstated', read: '' };
   const lower = normal(answer).replace(/[“”「」『』"]/g, '');
   const quoted = new Set(said.flatMap((c) => c.quotes));
@@ -1056,6 +1065,8 @@ function iframeWindows(
   parts: string[];
   around: string[];
   clause: string;
+  /** The clause as the answer wrote it, for the log. */
+  whole: string;
   subject: string;
 }> {
   const others = asked ? otherParts(intent) : [];
@@ -1195,6 +1206,7 @@ function iframeWindows(
           ...(parts.length || read ? after.around : []),
         ],
         clause: (lead + own).trim(),
+        whole: (lead + whole).trim(),
         subject: lead + (verb < 0 ? window : window.slice(0, verb)),
       };
       out.push(entry);
