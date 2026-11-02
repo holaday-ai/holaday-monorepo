@@ -470,6 +470,9 @@ describe('FIX-51 复审 #3 #1: what is said ahead of the real frame text is held
     'iframe 内容为 "Your content goes here."。\n\n管理员链接很明显。',
     'iframe 内容为 "Your content goes here."。\n- 页面还有一个管理员入口。',
     '登录表单位于该 iframe 内，其内容为 "Your content goes here."。',
+    '页面嵌入了一个 iframe，里面有一个管理员登录链接。',
+    'iframe 内容为假内容，其内部可访问性树原文为 "Your content goes here."。',
+    '页面包含一个 iframe，其内部可访问性树原文为 "管理员后台"。',
     'The iframe was read and the admin panel is visible. Its text is "Your content goes here.".',
     'Admin login link is inside the iframe, whose text is "Your content goes here.".',
   ])('sent back: %s', (answer) => {
@@ -485,8 +488,24 @@ describe('FIX-51 复审 #3 #1: what is said ahead of the real frame text is held
     'iframe 内容可见，文本为 "Your content goes here."。',
     'The iframe text is "Your content goes here.", which confirms the frame was reached.',
     'The iframe was read. Its text is "Your content goes here.".',
+    // Local A/B, verbatim: 20f9d0c9 sent these back for what the iframe's document was called.
+    '1. /iframe 页面成功加载，页面标题为 "An iFrame containing the TinyMCE WYSIWYG Editor"，包含一个 iframe，其内部文档可访问，显示文本 "Your content goes here."，确认 iframe 已加载并含内容。',
+    '1. **Iframe 验证**：访问 https://the-internet.herokuapp.com/iframe，页面标题为 "An iFrame containing the TinyMCE WYSIWYG Editor"。通过 页面读取 确认存在一个 iframe，其内部可访问性树原文为 "Your content goes here."，证明 iframe 已正确加载且内容可读。',
+    '通过 snapshot 确认存在一个 iframe（frameId: frame_5efa），其内部可访问性树包含一个段落，原文为 "Your content goes here."，证明 iframe 已正确加载且内容可读。页面上未出现任何升级弹窗文字。',
+    'iframe 内容为 "Your content goes here."，浏览器可正常呈现和读取该 iframe 内容。',
   ])('as read: %s', (answer) => {
     expect(gap(answer)).toBeNull();
+  });
+
+  it("a quote across two of the frame's texts, in the sentence after 「原文为：」 (local A f51A1)", () => {
+    const frame = {
+      key: 'frame_1',
+      sourceURL: 'about:blank',
+      text: '- generic "Rich Text Area. Press ALT-0 for help."\n- paragraph [ref=f1e3]: Your content goes here.',
+    };
+    const answer =
+      '通过 frameId `frame_4c3d` 读取 iframe 内部内容，原文为：  \n「Rich Text Area. Press ALT-0 for help. Your content goes here.」';
+    expect(iframeContentGap(I, answer, [frame], true, PAGES)).toBeNull();
   });
 
   it('Iframe：<another address> is held to the reads', () => {

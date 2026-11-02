@@ -345,7 +345,7 @@ const IFRAME_WORD_RE =
   /iframe|i-frame|内联框架|子框架|(?:内嵌|嵌入(?!式))[^。，,；;\n]{0,8}?框架|第[一二两三四五六七八九十\d]+个框架/i;
 /** 「内容为…」「显示…」「写着…」「iframe：…」: what the iframe holds, said as fact. */
 const CONTENT_CLAIM_RE =
-  /(?:内容|文本|文字|正文)\s*(?:为|是|显示为?|写着|[:：])|显示了?(?:为|的是|着)?|写着|里面是|内有|呈现|还有|另有|^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:：]/i;
+  /(?:内容|文本|文字|正文|原文)\s*(?:为|是|显示为?|写着|[:：])|显示了?(?:为|的是|着)?|写着|里面是|内有|呈现|还有|另有|^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:：]/i;
 /** 「iframe：…」: a label, and the sentence after it may have the verb (「iframe：读取到的文本内容为…」). */
 const FRAME_LABEL_RE = /^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:：]/i;
 /**
@@ -578,7 +578,9 @@ export function iframeContentGap(
   // 复审 #2: what is said right after it, of the page around the iframe, is in some read.
   if (pageText) {
     const others = otherParts(intent);
-    const text = (frames: readonly FrameRead[]) => normal(frames.map((r) => r.text).join(' '));
+    // The read as it stands, and its texts run together (a quote across two of them).
+    const text = (frames: readonly FrameRead[]) =>
+      normal(frames.map((r) => `${r.text} ${framePieces(r.text).join(' ')}`).join(' '));
     const off = claims.find(
       (c) =>
         !c.notRead &&
@@ -669,7 +671,7 @@ const AROUND_RE =
   /^\s*(?:页面|主页面|父页面|网页|该页|本页|此页|这个页面|整个页面|结果|result\b|标题|(?:the\s+)?(?:page|site)\b|title\b)/i;
 /** 复审 #3: what the run makes of it (「，确认 iframe 渲染正常」「，并可点击聚焦该元素」) is not the iframe's content. */
 const RUN_NOTE_RE =
-  /^\s*(?:(?:并|且|从而|以此|由此)\s*)?(?:确认|证实|证明|表明|说明|验证|(?:可以?|能够?)\s*(?:正常\s*)?(?:点击|聚焦|交互|编辑|访问|操作))|^\s*(?:which\s+)?(?:confirm(?:s|ing|ed)?|prov(?:es|ing)|verif(?:ies|ying)|indicat(?:es|ing))\b/i;
+  /^\s*(?:(?:并|且|从而|以此|由此)\s*)?(?:确认|证实|证明|表明|说明|验证|(?:浏览器\s*)?(?:可以?|能够?)\s*(?:正常\s*)?(?:点击|聚焦|交互|编辑|访问|操作|呈现|读取))|^\s*(?:which\s+)?(?:confirm(?:s|ing|ed)?|prov(?:es|ing)|verif(?:ies|ying)|indicat(?:es|ing))\b/i;
 const LIST_MARK_RE = /^\s*(?:[-*•]|\d+[.)、）])\s*/;
 /** 「，alert 按钮旁还有…」: a part of the task named, and something more said to be there. */
 const SAID_MORE_RE = /还有|另有|还显示|还嵌|\balso\b/i;
@@ -711,7 +713,7 @@ const AROUND_WORDS_EN_RE =
 const LATIN_RUN_RE = /[a-z][\w'-]*(?:\s+[a-z0-9][\w'-]*)+/g;
 
 /** 「，未执行任何写入」: nothing said to be there. */
-const SAID_ABSENT_RE = /^\s*(?:并\s*)?(?:未|没有|没|无)/;
+const SAID_ABSENT_RE = /^\s*(?:并\s*)?(?:页面上?\s*)?(?:未|没有|没|无)/;
 const namesOf = (text: string) =>
   text
     .replace(AROUND_WORDS_RE, ' ')
@@ -930,12 +932,9 @@ function iframeWindows(
         text
           .replace(FRAME_QUOTE_RE, (quote) => quote[0] + ' '.repeat(quote.length - 1))
           .search(verbs);
-      const opens = (part: string) => !named && FRAME_CLAIM_OPENER_RE.test(part);
       const first = atParent(own, pageText)
         ? -1
-        : clauses.findIndex((part, i) =>
-            i ? verbAt(part, CONTENT_CLAIM_RE) >= 0 || opens(part) : verbAt(part, ownRe) >= 0,
-          );
+        : clauses.findIndex((part, i) => verbAt(part, i ? CONTENT_CLAIM_RE : ownRe) >= 0);
       const verb = verbAt(window, ownRe);
       const parts =
         first < 0
@@ -943,11 +942,6 @@ function iframeWindows(
           : clauses.slice(first).map((part, i) => {
               if (i) return part.trim();
               const verbs = first ? CONTENT_CLAIM_RE : ownRe;
-              if (verbAt(part, verbs) < 0)
-                return part
-                  .replace(FRAME_CLAIM_OPENER_RE, '')
-                  .replace(FRAME_CLAIM_OPENER_RE, '')
-                  .trim();
               const from = part.slice(verbAt(part, verbs));
               const said = from.replace(verbs, '').trim();
               const next = FRAME_LABEL_RE.test(from) ? verbAt(said, CONTENT_CLAIM_RE) : -1;
@@ -976,11 +970,16 @@ function iframeWindows(
                 ? [before(inside, ownRe)]
                 : []),
               ...clauses
-                .slice(1, first < 0 ? (read ? undefined : 1) : first + 1)
+                .slice(1, first < 0 ? undefined : first + 1)
                 .map((part, i) =>
                   first > 0 && i === first - 1 ? before(part, CONTENT_CLAIM_RE) : part,
                 )
-                .filter((part) => !mentioned.test(part) && !opens(part) && /\p{L}/u.test(part)),
+                .filter(
+                  (part) =>
+                    (read || first >= 0 || FRAME_CLAIM_OPENER_RE.test(part)) &&
+                    !mentioned.test(part) &&
+                    /\p{L}/u.test(part),
+                ),
             ];
       const entry = {
         window,
