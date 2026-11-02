@@ -629,7 +629,9 @@ describe('FIX-51 复审 #3 #3: a tab closed unread is not asked for', () => {
     const reason = (outcome as { reason: string }).reason;
     expect(reason).toContain('还没有读取');
     // The steps go to the log, with the start of the tab ids, and not into the reason.
-    const logged = warn.mock.calls.find((call) => call[1] === 'browser loop failed')?.[0] as {
+    const logged = warn.mock.calls.find(
+      (call) => call[1] === 'browser loop failed',
+    )?.[0] as unknown as {
       steps: string[];
     };
     expect(logged.steps).toContain('click:dddddddd+');
