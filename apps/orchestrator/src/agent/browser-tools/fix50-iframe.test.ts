@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { logger } from '../../config/logger.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import {
   type FrameRead,
@@ -403,9 +404,8 @@ describe('DEPLOY-51 review #1 · iframe claims (fix-50/review1-fixtures/iframe31
     iframeContentGap(intent, answer, reads, true, pages);
 
   it('#1 red line: words not in any read — a paraphrase, a second iframe made up', () => {
-    // 协调方决定: a paraphrase names nothing; it is sent back only for leaving the frame's text out.
     expect(gap(I, 'iframe 内容为：您的内容放在这里。checkboxes 已读。', [T], P)).toEqual({
-      kind: 'unstated',
+      kind: 'mismatch',
       read: 'Your content goes here.',
     });
     expect(
@@ -691,6 +691,7 @@ describe('DEPLOY-51 review #2 (fix-50/review2-fixtures)', () => {
     for (const answer of [
       'iframe 内容为 Your content goes here，还有一个提交按钮和管理员登录链接。',
       'iframe 内容为 Hello。',
+      'iframe 内容为 An iFrame containing the TinyMCE WYSIWYG Editor。',
       'iframe 显示 You successfully clicked an alert。',
       'iframe 内容为「Your content goes here.」。第二个框架显示的是登录表单。',
     ])
@@ -698,10 +699,6 @@ describe('DEPLOY-51 review #2 (fix-50/review2-fixtures)', () => {
         kind: 'mismatch',
         read: 'Your content goes here.',
       });
-    // 协调方决定: the page's title names only the frame's kind; sent back for leaving its text out.
-    expect(
-      gap(I, 'iframe 内容为 An iFrame containing the TinyMCE WYSIWYG Editor。', [T], AL),
-    ).toEqual({ kind: 'unstated', read: 'Your content goes here.' });
   });
 
   it('#1 reverse: the frame text as read, however phrased, holds', () => {
@@ -960,6 +957,77 @@ describe('FIX-51 A/B w2: the run typed into the frame, and says what it held bef
         ['page'],
       ),
     ).toEqual({ kind: 'mismatch', read: 'Hello' });
+  });
+});
+
+describe('FIX-51 复审 #4 #4: the loop holds a quote after 输入 to what it typed', () => {
+  const IFRAME = 'https://the-internet.herokuapp.com/iframe';
+  const ANSWER = 'iframe 内容为 "Your content goes here."。在编辑器中输入 "Typed text" 后保存。';
+  const run = async (text: string) => {
+    let turn = 0;
+    const calls = [
+      { name: 'navigate', input: { url: IFRAME } },
+      { name: 'read_page', input: { frameId: 'frame_1' } },
+      { name: 'type', input: { ref: 'f1e3', frameId: 'frame_1', text } },
+      finishOf(ANSWER),
+      finishOf(ANSWER),
+    ];
+    const adapter: MessagesAdapter = {
+      metadata: { provider: 'anthropic', model: 'fixture' },
+      async create() {
+        const call = calls[Math.min(turn++, calls.length - 1)]!;
+        return {
+          id: String(turn),
+          metadata: { provider: 'anthropic', model: 'fixture' },
+          content: [{ type: 'tool_use', id: String(turn), ...call }],
+          stopReason: 'tool_use',
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    return (await runUnifiedBrowserLoop({
+      intent: '请使用云端浏览器，读 the-internet.herokuapp.com 的 iframe',
+      adapter,
+      maxSteps: 12,
+      observationV2: true,
+      currentPageUrl: () => IFRAME,
+      execute: (async (action: { tool: string; frameId?: string }) =>
+        action.tool === 'read_page'
+          ? {
+              ok: true,
+              url: IFRAME,
+              text: JSON.stringify({
+                frameId: 'frame_1',
+                sourceURL: 'about:blank',
+                tree: '- paragraph: Your content goes here.',
+              }),
+            }
+          : { ok: true, url: IFRAME, text: JSON.stringify({ frameId: 'frame_main' }) }) as never,
+    })) as { summary: string };
+  };
+
+  it('typed: stands', async () => {
+    expect((await run('Typed text')).summary).toBe(ANSWER);
+  });
+
+  it('not what it typed: sent back, and the reason is in the log', async () => {
+    const info = vi.spyOn(logger, 'info');
+    const outcome = await run('Other text');
+    expect(outcome).not.toMatchObject({ status: 'completed' });
+    expect(info).toHaveBeenCalledWith(
+      {
+        reason: expect.stringContaining('「Typed text」'),
+        clause: expect.stringContaining('iframe 内容为'),
+      },
+      'browser finish rejected',
+    );
+    info.mockRestore();
   });
 });
 

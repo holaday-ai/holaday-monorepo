@@ -46,6 +46,31 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   baidu: ['百度'],
   youtube: ['油管'],
   wikipedia: ['维基百科', '维基'],
+  // 复审 #4: what a page's English controls are called in Chinese (「加粗按钮」).
+  bold: ['加粗'],
+  italic: ['斜体'],
+  underline: ['下划线'],
+  submit: ['提交'],
+  login: ['登录', '登陆'],
+  'log in': ['登录', '登陆'],
+  'sign in': ['登录', '登陆'],
+  'sign up': ['注册'],
+  register: ['注册'],
+  logout: ['退出', '登出'],
+  'log out': ['退出', '登出'],
+  'sign out': ['退出', '登出'],
+  search: ['搜索'],
+  close: ['关闭'],
+  ok: ['确定', '确认'],
+  confirm: ['确认'],
+  cancel: ['取消'],
+  save: ['保存'],
+  delete: ['删除'],
+  download: ['下载'],
+  upload: ['上传'],
+  edit: ['编辑'],
+  alert: ['弹窗', '提示'],
+  prompt: ['提示', '输入框'],
 };
 
 /** A target named by its own words, an alias, or its last word's stem (alerts → alert). */
@@ -363,7 +388,7 @@ const IFRAME_WORD_RE =
   /iframe|i-frame|内联框架|子框架|(?:内嵌|嵌入(?!式))[^。，,；;\n]{0,8}?框架|第[一二两三四五六七八九十\d]+个框架/i;
 /** 「内容为…」「显示…」「写着…」「iframe：…」: what the iframe holds, said as fact. */
 const CONTENT_CLAIM_RE =
-  /(?:内容|文本|文字|正文|(?<!标题)原文)\s*(?:为|是|显示为?|写着|[:：])|显示了?(?:为|的是|着)?|写着|里面是|内有|呈现|还有|另有|^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:：]/i;
+  /(?:内容|文本|文字|正文|(?<!标题)原文)\s*(?:为|是|显示为?|写着|[:：])|被?(?:替换|改|更新|变)为|显示了?(?:为|的是|着)?|写着|里面是|[内里中]有|呈现|还有|另有|^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:：]/i;
 /** 「iframe：…」: a label, and the sentence after it may have the verb (「iframe：读取到的文本内容为…」). */
 const FRAME_LABEL_RE = /^(?:i-?frame|[^\s，,]*框架)\s*(?:中|里|内)?\s*[:：]/i;
 /**
@@ -388,7 +413,7 @@ const ERROR_CLAIM_RE =
   /(?<![无未没]|没有|\bno\s|\bwithout\s)(?:跨源|跨域|错误|报错|errors?\b|无法(?:加载|显示|读取|访问)|加载失败|拒绝)/i;
 /** 「iframe 内容没有读到」: the answer itself says the frame was not read. */
 const NOT_READ_RE =
-  /没(?:有)?(?:读|读取)到|未(?:能)?读(?:取)?到|无法读(?:取)?|未读取|没有读取|读不到/;
+  /没(?:有)?(?:读|读取)到|未(?:能)?读(?:取)?到|无法读(?:取)?|(?:未|没有)读取(?!的)|读不到/;
 
 const normal = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
 const bare = (text: string) =>
@@ -396,7 +421,8 @@ const bare = (text: string) =>
     .replace(/^[\s:：,，。.、"“”「」『』]+/, '')
     .replace(/[\s.。!！?？,，;；:："“”「」『』]+$/, '');
 /** A quote of what a frame holds, however short (PR #314 review: a frame reading 「你好」). */
-const FRAME_QUOTE_RE = /["“「『]([^"”」』\n]{1,120})["”」』]/g;
+const FRAME_QUOTE_RE =
+  /(?:["“「『]|(?<!\w)['‘])((?:[^"”」』'’\n]|['’](?=\w)){1,120})(?:["”」』]|['’](?!\w))/g;
 /** Length with a Han character counting as two letters. */
 const weight = (text: string) => text.length + (text.match(/\p{Script=Han}/gu)?.length ?? 0);
 
@@ -476,8 +502,41 @@ const PAGE_THINGS: readonly RegExp[] = [
   /广告|\bads?\b/i,
   /页脚|页眉|声明|条款|\b(?:footer|header|disclaimer|terms)\b/i,
 ];
-/** 「未执行登录」「无需登录」: not said to be there. */
-const NEGATED_RE = /(?:未|没有?|无|不(?![仅但只])|非|\b(?:no|not|without)\s)[^，,。；;]*$/i;
+/**
+ * 复审 #4: a negation covers the action it comes right before and the list after it (「未执行登录」「没有点击任何链接」「未触发表单提交、登录或支付」), not
+ * the sentence (「无需登录的管理员后台也可见」), and 非常、毫无疑问、无论、不同于、不仅、没想到 are none.
+ */
+const NEGATED_RE =
+  /(?:未|没有?(?!想到)|(?<!毫)无(?!论|疑)|不(?![仅但只同])|非(?!常))(?:[^，,。；;的、或和及与]{0,6}[、或和及与])*[^，,。；;的、或和及与]{0,6}$|\b(?:no|not|without)\s[\w\s-]{0,24}$/i;
+/** Where a modifier starts in a run of Han characters (「还有一个提交按钮」 → 提交). */
+const MODIFIER_CUT_RE =
+  /[一二两三四五六七八九十几多每各些个张条种处了的着有是和与及或在为到把将被让从向其该此这那本都也还已并且可能会要需看见含用以]/u;
+/** Said of where or how a thing is, not which it is (「底部按钮」「对应按钮」「点击按钮」). */
+const NOT_MODIFIER_RE =
+  /^(?:确认|验证|证实|证明|点击|触发|按下|使用|通过|发现|存在|包含|显示|主页面|页面|底部|顶部|上方|下方|左侧|右侧|旁边|中间|工具栏|相应|对应|相关|所有|全部|其他|其余|内部|编辑器|富文本)+/;
+const NOT_MODIFIER_EN_RE =
+  /^(?:an?|the|this|that|its|any|some|each|all|one|two|three|first|second)$/;
+
+/** Which button a text means (「提交按钮」「delete button」): the word right before the thing. */
+function modifierOf(before: string): string {
+  const latin = before.match(/(?:^|[^A-Za-z])([a-z][\w-]*)\s*$/)?.[1];
+  if (latin) return NOT_MODIFIER_EN_RE.test(latin) ? '' : latin;
+  let word = (before.match(/\p{Script=Han}+$/u)?.[0] ?? '')
+    .split(MODIFIER_CUT_RE)
+    .at(-1)!
+    .replace(NOT_MODIFIER_RE, '');
+  for (const thing of PAGE_THINGS) word = word.replace(thing, '');
+  return word.length >= 2 ? word : '';
+}
+
+/** A modifier is in the reads as it stands or as what the page calls it (加粗 ↔ Bold). */
+function modifierHeld(word: string, within: string): boolean {
+  return (
+    within.includes(word) ||
+    Object.entries(ALIASES).some(([name, names]) => names.includes(word) && within.includes(name))
+  );
+}
+
 /** Words of the run and of the kind of frame, not names on a page. */
 const RUN_NAME_RE =
   /^(?:i-?frame[\w-]*|frame[\w-]*|tab_[\w-]*|\w*url|read_page|snapshot|editor|tinymce|wysiwyg|javascript|an?|the|this|that|it|its)$/i;
@@ -488,6 +547,7 @@ function latinNames(text: string, prose: boolean): string[] {
   return [...text.matchAll(/[A-Za-z][\w'-]*/g)].flatMap((m) => {
     const word = m[0];
     if (!/[A-Z_\d]/.test(word) || RUN_NAME_RE.test(word) || /^[A-Z]{1,4}$/.test(word)) return [];
+    if (NEGATED_RE.test(text.slice(0, m.index))) return [];
     // In a sentence of its own, an opening capital is no name; after 「内容为」 it is what is said.
     const opens = /^[A-Z][a-z'-]*$/.test(word) && !/[\p{L}\p{N}]/u.test(text.slice(0, m.index));
     return prose && opens ? [] : [word.toLowerCase()];
@@ -495,55 +555,90 @@ function latinNames(text: string, prose: boolean): string[] {
 }
 
 /**
- * What a text (quotes taken out) names is in the reads: addresses in any read; things and Latin names
- * in `within`, unless it says they are not there. A task's other part need not be read here.
+ * What a text (quotes taken out) names and no read has, and why: addresses are looked for in any read;
+ * things, what they are called and Latin names in `within`. A task's other part need not be read here.
  */
-function namedHeld(
+function namedGap(
   text: string,
   within: string,
   both: string,
   others?: readonly string[],
-): boolean {
-  const urls = text.match(URL_RE) ?? [];
-  if (urls.some((url) => !both.includes(url.toLowerCase().replace(/[./]+$/, '')))) return false;
+): string | null {
+  for (const url of text.match(URL_RE) ?? [])
+    if (!both.includes(url.toLowerCase().replace(/[./]+$/, ''))) return `网址 ${url}`;
   const rest = text.replace(URL_RE, ' ');
-  if ((rest.match(HOST_RE) ?? []).some((host) => !both.includes(host.toLowerCase()))) return false;
-  const thingsHeld = PAGE_THINGS.every((thing) => {
-    const m = rest.match(thing);
-    return !m || thing.test(within) || NEGATED_RE.test(rest.slice(0, m.index));
-  });
-  return (
-    thingsHeld &&
-    latinNames(rest, others !== undefined).every((name) => {
-      return (
-        new RegExp(`(?<![a-z0-9])${name}(?:s|es)?(?![a-z0-9])`).test(within) ||
-        (others ?? []).some((other) => name.includes(other))
-      );
-    })
-  );
+  for (const host of rest.match(HOST_RE) ?? [])
+    if (!both.includes(host.toLowerCase())) return `网址 ${host}`;
+  for (const thing of PAGE_THINGS)
+    for (const m of rest.matchAll(new RegExp(thing.source, 'gi'))) {
+      const before = rest.slice(0, m.index);
+      if (NEGATED_RE.test(before)) continue;
+      if (within.search(thing) < 0) return `元素「${m[0]}」`;
+      const word = modifierOf(before);
+      if (word && !modifierHeld(word, within) && !others?.some((other) => word.includes(other)))
+        return `元素「${word}${m[0]}」`;
+    }
+  for (const name of latinNames(rest, others !== undefined))
+    if (
+      !new RegExp(`(?<![a-z0-9])${name}(?:s|es)?(?![a-z0-9])`).test(within) &&
+      !others?.some((other) => name.includes(other))
+    )
+      return `名称「${name}」`;
+  return null;
 }
 
-/** A claim holds when the quotes in it hold and what else it names is in the frame's read. */
-function claimHolds(
+/** What a claim says that does not hold: a quote, or what else it names, against the frame's read. */
+function claimGap(
   claim: string,
   pieces: readonly string[],
-  frameText: string,
+  within: string,
   both: string,
-): boolean {
-  const quotes = [...claim.matchAll(FRAME_QUOTE_RE)].map((m) => normal(m[1]!));
-  return (
-    quotes.every((q) => quoteHolds(q, pieces)) &&
-    namedHeld(claim.replace(FRAME_QUOTE_RE, ' '), frameText, both)
-  );
+): string | null {
+  for (const m of claim.matchAll(FRAME_QUOTE_RE))
+    if (!quoteHolds(normal(m[1]!), pieces)) return `引号「${m[1]}」`;
+  return namedGap(claim.replace(FRAME_QUOTE_RE, ' '), within, both);
+}
+
+/** 复审 #4: 「内容为…」 words that only say what kind of text it is, not what it says. */
+const DESCRIBING_RE =
+  /一段|一句|一个|默认|初始|当前|实际|完整|占位符?|段落|文本|文字|内容|正文|原文|编辑器|富文本|tinymce|wysiwyg|读取到|读到|如下|以下|示例|上述|的|其|为|是|\b(?:the|a|an|default|placeholder|initial|sample|text|paragraph|editor)\b/gi;
+
+/** Taking out the frame's own text and the words that describe it, nothing is left. */
+function onlyDescribes(text: string, pieces: readonly string[]): boolean {
+  let rest = normal(text.replace(FRAME_QUOTE_RE, ' ').replace(/[（(][^）)]*[）)]/g, ' '));
+  for (const piece of pieces
+    .map(bare)
+    .filter((piece) => weight(piece) >= 2)
+    .sort((a, b) => b.length - a.length))
+    rest = rest.split(piece).join(' ');
+  return !/[\p{L}\p{N}]/u.test(rest.replace(DESCRIBING_RE, ' '));
+}
+
+const VALUE_VERB_RE =
+  /(?:内容|文本|文字|正文|(?<!标题)原文)\s*(?:(?:为|是)(?!否)|[:：])|\b(?:content|contents|text)\s+(?:is|are|reads|says)\b/gi;
+
+/**
+ * 复审 #4: what comes after 「内容为 / 正文为 / 文本为」 is the iframe's content (「内容为假内容，正文为
+ * "…"」): up to a quote, it only describes what follows, or it is in the frame's read.
+ */
+function valueGap(text: string, pieces: readonly string[]): string | null {
+  const masked = text.replace(FRAME_QUOTE_RE, (quote) => quote[0] + ' '.repeat(quote.length - 1));
+  for (const m of masked.matchAll(VALUE_VERB_RE)) {
+    const after = text.slice(m.index + m[0].length);
+    const quote = after.search(/["“「『‘]|(?<!\w)'/);
+    const said = (quote < 0 ? after : after.slice(0, quote)).split(/[，,。；;\n]/)[0]!;
+    if (!onlyDescribes(said, pieces)) return `内容为「${said.trim()}」`;
+  }
+  return null;
 }
 
 /** 协调方决定: what names nothing and is not the frame's text is logged, not sent back. */
-function logUnverified(parts: readonly string[], pieces: readonly string[]): void {
-  for (const part of parts) {
+function logUnverified(parts: readonly string[], clause: string, pieces: readonly string[]): void {
+  parts.forEach((part, i) => {
     const said = bare(part.replace(FRAME_QUOTE_RE, ' '));
     if (/\p{L}/u.test(said) && !pieces.some((piece) => bare(piece).includes(said)))
-      logger.info({ clause: part.trim().slice(0, 40) }, 'iframe 描述未核实');
-  }
+      logger.info({ clause: (i ? part : clause).trim().slice(0, 40) }, 'iframe 描述未核实');
+  });
 }
 
 export type FrameGap =
@@ -571,6 +666,31 @@ export function iframeContentGap(
   reads: readonly FrameRead[],
   framesSeen: boolean,
   pageTexts: readonly string[] = [],
+  /** What the run typed; left out, a quote after 输入 is not held to it. */
+  typed?: readonly string[],
+): FrameGap | null {
+  const why = { reason: '', clause: '' };
+  const gap = frameGapOf(intent, answer, reads, framesSeen, pageTexts, typed, why);
+  if (gap)
+    logger.info(
+      {
+        kind: gap.kind,
+        reason: why.reason || gap.kind,
+        clause: (why.clause || answer).trim().slice(0, 40),
+      },
+      'iframe 核对退回',
+    );
+  return gap;
+}
+
+function frameGapOf(
+  intent: string,
+  answer: string,
+  reads: readonly FrameRead[],
+  framesSeen: boolean,
+  pageTexts: readonly string[],
+  typed: readonly string[] | undefined,
+  why: { reason: string; clause: string },
 ): FrameGap | null {
   const asked = IFRAME_WORD_RE.test(intent);
   const pageText = normal(pageTexts.join(' '));
@@ -586,6 +706,7 @@ export function iframeContentGap(
         {
           clause,
           subject,
+          window,
           parts,
           around,
           blank: BLANK_CLAIM_RE.test(window),
@@ -617,6 +738,8 @@ export function iframeContentGap(
             (framesSeen && !pageText.includes(normal(c.claim)))
       )
         failed.push(c);
+    why.reason = 'frame 没有读到';
+    why.clause = failed[0]?.clause ?? '';
     if (!asked) return dropOr(intent, answer, failed, { kind: 'unread' });
     // An iframe the page lists and the question asks for, never read: nothing said of it holds.
     return failed.length || framesSeen ? { kind: 'unread' } : null;
@@ -644,37 +767,50 @@ export function iframeContentGap(
     // DEPLOY-51 review #1 (#5): an iframe named by kind or host is held to that frame's read.
     const frames = namedFrames(c.subject, current);
     const pieces = piecesOf(frames);
-    const holds = c.blank
-      ? frames.some((r) => framePieces(r.text).length === 0)
-      : // DEPLOY-51 review #1 (#1) / #2 (#1): what is said, quoted or not, is the frame's text
-        // and no more — the page around it does not hold it.
-        !ERROR_CLAIM_RE.test(c.claim) &&
-        c.parts.every((part) =>
-          claimHolds(part, pieces, textOf(frames), `${textOf(current)} ${pageText}`),
-        );
-    if (holds) logUnverified(c.parts, pieces);
-    else {
+    const within = textOf(frames);
+    const both = `${textOf(current)} ${pageText}`;
+    let gap: string | null = null;
+    if (c.blank) gap = frames.some((r) => framePieces(r.text).length === 0) ? null : '说成空的';
+    else if (ERROR_CLAIM_RE.test(c.claim)) gap = '说成错误页';
+    else if (c.parts.length) gap = valueGap([c.window, ...c.parts.slice(1)].join('\n'), pieces);
+    if (!c.blank)
+      c.parts.forEach((part, i) => {
+        // 复审 #4: what comes later with no word placing it in the frame may be on the page around
+        // it (「，底部有 Elemental Selenium 链接」).
+        gap ||= claimGap(part, pieces, i && !PLACED_INSIDE_RE.test(part) ? both : within, both);
+        // 复审 #4: of a frame nobody asked about, only its own text stays (「广告 iframe 显示的是一双鞋」).
+        if (!asked && !onlyDescribes(part, pieces)) gap ||= `未问的 iframe「${part.trim()}」`;
+      });
+    if (gap) {
       failed.push(c);
       read ||= shownOf(frames.length ? frames : current);
-    }
+      why.reason ||= gap;
+      why.clause ||= c.clause;
+    } else logUnverified(c.parts, c.clause, pieces);
   }
   if (!asked) return dropOr(intent, answer, failed, { kind: 'mismatch', read });
   if (failed.length) return { kind: 'mismatch', read };
   // 复审 #2: what is said right after it, of the page around the iframe, is in some read.
   if (pageText) {
     const others = otherParts(intent);
-    const off = claims.find(
-      (c) =>
-        !c.notRead &&
-        c.around.some(
-          (part) => !heldAround(part, textOf(namedFrames(c.subject, current)), pageText, others),
-        ),
-    );
-    if (off) return { kind: 'mismatch', read: shownOf(namedFrames(off.subject, current)) };
-    for (const c of claims) if (!c.notRead) logUnverified(c.around, piecesOf(current));
+    for (const c of claims) {
+      if (c.notRead) continue;
+      for (const part of c.around) {
+        const within = textOf(namedFrames(c.subject, current));
+        const gap = aroundGap(part, within, pageText, others, typed);
+        if (gap) {
+          why.reason = gap;
+          why.clause = part;
+          return { kind: 'mismatch', read: shownOf(namedFrames(c.subject, current)) };
+        }
+      }
+      logUnverified(c.around, c.around[0] ?? '', piecesOf(current));
+    }
   }
   const pieces = piecesOf(current);
   const shown = shownOf(current);
+  why.reason = 'frame 读到的内容没有写出';
+  why.clause = claims[0]?.clause ?? '';
   if (!shown) return said.some((c) => c.blank) ? null : { kind: 'unstated', read: '' };
   const lower = normal(answer).replace(/[“”「」『』"]/g, '');
   const quoted = new Set(said.flatMap((c) => c.quotes));
@@ -784,11 +920,13 @@ function atParent(part: string, pageText: string): boolean {
 
 /** 复审 #2: said of where the iframe is, a clause is held to the frame's read alone. */
 const LOCATED_RE = /i-?frame|框架|编辑器|\beditor\b|富文本|tinymce|wysiwyg/;
-/** 「输入 "Hello"」: what the run typed, not what a page has. */
+const PLACED_INSIDE_RE = new RegExp(`${LOCATED_RE.source}|内部|里面|其中|其内`, 'i');
+/** 复审 #4: 「输入 "Hello"」: what the run typed, not what a page has. 「替换为」「写入」 are not this. */
 const TYPED_RE =
-  /(?:输入|写入|替换为?|键入|填入|\b(?:typed|entered)\b)(?:文字|文本|内容)?\s*["“「『][^"”」』\n]*["”」』]/gi;
-/** 「，未执行任何写入」: nothing said to be there. */
-const SAID_ABSENT_RE = /^\s*(?:并\s*)?(?:页面上?\s*)?(?:未|没有|没|无)/;
+  /(?:输入|键入|填入|\b(?:typed|entered)\b)(?:文字|文本|内容)?\s*(["“「『][^"”」』\n]*["”」』])/gi;
+/** 「，输入 "x" 后显示…」: the run's next step, and what it says comes of it is held. */
+const TYPE_STEP_RE =
+  /^\s*(?:(?:并|然后|接着|随后|再)\s*)?(?:成功)?\s*(?:在[^，,]{0,10}?[内中里上])?\s*(?:输入|键入|填入)/;
 const LATIN_RUN_RE = /[a-z][\w'-]*(?:\s+[a-z0-9][\w'-]*)+/g;
 
 /** The longest word runs a read has, out of a run of words (a title said in passing). */
@@ -808,17 +946,26 @@ function withoutRead(run: string, read: string): string {
  * parent's and the frame's (「，页面标题为 An iFrame…」); a clause placed in the iframe by a word of
  * its own, in the frame's. A task's other part does not need reading here.
  */
-function heldAround(
+function aroundGap(
   part: string,
   frameText: string,
   pageText: string,
   others: readonly string[],
-): boolean {
+  typed: readonly string[] | undefined,
+): string | null {
   const both = `${frameText} ${pageText}`;
-  if (SAID_ABSENT_RE.test(part)) return true;
-  const said = part.replace(TYPED_RE, ' ');
-  const quotes = [...said.matchAll(FRAME_QUOTE_RE)].map((m) => bare(m[1]!));
-  if (quotes.some((quote) => !both.includes(quote) && /[\p{L}\p{N}]/u.test(quote))) return false;
+  const said = part.replace(TYPED_RE, (whole, quote: string) =>
+    !typed || typed.some((text) => bare(text) === bare(quote)) ? ' ' : whole,
+  );
+  for (const m of said.matchAll(FRAME_QUOTE_RE)) {
+    const quote = bare(m[1]!);
+    if (
+      !both.includes(quote) &&
+      /[\p{L}\p{N}]/u.test(quote) &&
+      !NEGATED_RE.test(said.slice(0, m.index))
+    )
+      return `引号「${m[1]}」`;
+  }
   const rest = said.replace(FRAME_QUOTE_RE, ' ');
   // The editor's toolbar is on the page around the frame (复审 #1).
   const located =
@@ -826,16 +973,17 @@ function heldAround(
     LOCATED_RE.test(
       normal(rest.replace(URL_RE, ' ')).replace(LATIN_RUN_RE, (run) => withoutRead(run, both)),
     );
-  return namedHeld(rest, located ? frameText : both, both, others);
+  return namedGap(rest, located ? frameText : both, both, others);
 }
 
 /** Quotes and brackets stay whole when text is cut (「"Hello, world"」「（默认文本，含…）」). */
-const KEPT_WHOLE = '"[^"\\n]*"|“[^”\\n]*”|「[^」\\n]*」|『[^』\\n]*』|（[^）\\n]*）|\\([^)\\n]*\\)';
+const KEPT_WHOLE =
+  "\"[^\"\\n]*\"|“[^”\\n]*”|「[^」\\n]*」|『[^』\\n]*』|(?<!\\w)'(?:[^'\\n]|'(?=\\w))*'(?!\\w)|‘[^’\\n]*’|（[^）\\n]*）|\\([^)\\n]*\\)";
 function cutOutside(text: string, separator: string): string[] {
   const out: string[] = [];
   let at = 0;
   for (const m of text.matchAll(new RegExp(`${KEPT_WHOLE}|${separator}`, 'gi'))) {
-    if (/^["“「『（(]/.test(m[0])) continue;
+    if (/^["“「『'‘（(]/.test(m[0])) continue;
     out.push(text.slice(at, m.index));
     at = m.index + m[0].length;
   }
@@ -924,6 +1072,10 @@ function iframeWindows(
     for (const raw of parts) {
       const part = raw.replace(LIST_MARK_RE, '');
       const opener = FRAME_CLAIM_OPENER_RE.test(part);
+      if (!opener && TYPE_STEP_RE.test(part)) {
+        around.push(part.trim());
+        return { claims, around, left, moved: true };
+      }
       const back = !opener && BACK_STEP_RE.test(part);
       if (
         !opener &&

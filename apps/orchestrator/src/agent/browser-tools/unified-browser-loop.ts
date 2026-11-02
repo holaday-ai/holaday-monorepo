@@ -443,6 +443,10 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     return decoded;
   };
   const rejected = async (summary: string, evidence: string, reason: string) => {
+    logger.info(
+      { reason: reason.slice(0, 160), clause: summary.trim().slice(0, 40) },
+      'browser finish rejected',
+    );
     try {
       await input.onCompletionRejected?.(completionDiagnostic({ summary, evidence, reason }));
     } catch {
@@ -1630,6 +1634,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             [...frameReads.values()],
             framesSeen,
             pageEvidence.map((page) => `${page.sourceURL ?? ''} ${page.text}`),
+            trace.flatMap((entry) =>
+              entry.ok && entry.tool === 'type' && entry.typedText ? [entry.typedText] : [],
+            ),
           );
           // DEPLOY-51 review #1 (#3): an iframe the task did not ask for, said to hold what no read
           // shows: that clause is taken out, and the task is not marked down for it.

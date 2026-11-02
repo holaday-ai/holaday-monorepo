@@ -577,6 +577,7 @@ describe('FIX-51 协调方决定: only what is named is held to the reads (revie
     `${Q}，确认 iframe 渲染正常，无报错。`,
     `${Q}，页面很简单。`,
     `${Q}，未执行登录，也没有点击任何链接。`,
+    `${Q}，未触发表单提交、登录或支付流程。`,
     '在 iframe 内编辑器中输入文本 "Hello from cloud browser"，文本为 "Your content goes here."。',
   ])('names nothing, or what the run typed, stands: %s', (answer) => {
     expect(gap(answer)).toBeNull();
@@ -595,13 +596,104 @@ describe('FIX-51 协调方决定: only what is named is held to the reads (revie
     expect(gap('iframe 为空。')).toBe('mismatch');
   });
 
-  it('a frame nobody asked about: a clause that names nothing stays, a named one goes', () => {
+  it('a frame nobody asked about: only its own text stays (复审 #4)', () => {
     const price = '请使用云端浏览器，读 shop.example 的商品价格';
-    const ask = (answer: string) => iframeContentGap(price, answer, [FRAME], true, PAGES);
-    expect(ask('商品价格为 99 元，广告 iframe 显示的是一双鞋。')).toBeNull();
-    expect(ask('商品价格为 99 元，广告 iframe 显示 "Buy shoes now"。')).toMatchObject({
-      kind: 'drop',
-    });
+    for (const reads of [[FRAME], []])
+      for (const answer of [
+        '商品价格为 99 元，广告 iframe 显示的是一双鞋。',
+        '商品价格为 99 元，广告 iframe 里有一个注册按钮。',
+        '商品价格为 99 元，广告 iframe 显示 "Buy shoes now"。',
+      ])
+        expect(iframeContentGap(price, answer, reads, true, PAGES), answer).toMatchObject({
+          kind: 'drop',
+        });
+  });
+});
+
+describe('FIX-51 复审 #4 (review4-fixtures/t10.mjs)', () => {
+  const I = '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts';
+  const FRAME = {
+    key: 'frame_1',
+    sourceURL: 'about:blank',
+    text: '- generic "Rich Text Area. Press ALT-0 for help."\n- paragraph [ref=f1e3]: Your content goes here.',
+  };
+  const PAGES = [
+    'https://the-internet.herokuapp.com/iframe heading "An iFrame containing the TinyMCE WYSIWYG Editor" button "Bold" button "Italic" link "Elemental Selenium"',
+    'https://the-internet.herokuapp.com/javascript_alerts heading "JavaScript Alerts" button "Click for JS Alert" Result: You successfully clicked an alert',
+  ];
+  const Q = 'iframe 内容为 "Your content goes here."';
+  const gap = (answer: string, typed?: readonly string[]) =>
+    iframeContentGap(I, answer, [FRAME], true, PAGES, typed)?.kind ?? null;
+
+  it.each([
+    // #1 what a thing is called.
+    `${Q}，页面上还有一个提交按钮。`,
+    `${Q}，验证了支付按钮存在。`,
+    `${Q}，页面上还有一个退出链接。`,
+    `${Q}，输入 "x" 后显示管理员登录链接。`,
+    `${Q}，工具栏中可见支付按钮。`,
+    `${Q}，页面上还有一个 delete 按钮。`,
+    // #2 a negation covers what comes right after it.
+    `${Q}，无需登录的管理员后台也可见。`,
+    `${Q}，未读取的管理员链接很明显。`,
+    `${Q}，非常显眼的管理员登录链接在右上角。`,
+    `${Q}，毫无疑问页面上有管理员入口。`,
+    `${Q}，无论如何都能看到管理员后台。`,
+    `${Q}，不同于其他页面的是有一个管理员登录链接。`,
+    `${Q}，没想到页面上还有管理员登录链接。`,
+    `${Q}，不仅如此还有管理员登录链接。`,
+    // #3 what comes after 「内容为」 is the content.
+    'iframe 内容为欢迎来到我们的网站，正文为 "Your content goes here."。',
+    'iframe 内容为假内容，其内部可访问性树原文为 "Your content goes here."。',
+    'iframe 内容为 welcome aboard，正文为 "Your content goes here."。',
+    'iframe 内容为管理员登录表单，正文为 "Your content goes here."。',
+    // #4 替换为 is not typing.
+    `${Q}，页面已替换为 "管理员后台"。`,
+    `${Q}。iframe 内容被替换为 "请输入管理员密码"。`,
+  ])('sent back: %s', (answer) => {
+    expect(gap(answer)).toBe('mismatch');
+  });
+
+  it.each([
+    `${Q}，页面上有 Bold、Italic 按钮。`,
+    `${Q}，页面上还有加粗按钮。`,
+    `${Q}，底部有 Elemental Selenium 链接。`,
+    `${Q}，未执行登录，也没有点击任何链接。`,
+    'iframe 内容为一段默认文本 "Your content goes here."。',
+    'iframe 内容为 TinyMCE 默认段落 "Your content goes here."。',
+    'iframe 内容为编辑器的默认占位文字：Your content goes here.',
+    "iframe 内容为：'Rich Text Area. Press ALT-0 for help. Your content goes here.'。",
+  ])('stands: %s', (answer) => {
+    expect(gap(answer)).toBeNull();
+  });
+
+  it('#4 a quote after 输入 stands only for what the run typed', () => {
+    const typedIt =
+      '在 iframe 内编辑器中输入文本 "Hello from cloud browser"，文本为 "Your content goes here."。';
+    expect(gap(typedIt, ['Hello from cloud browser'])).toBeNull();
+    expect(gap(typedIt, ['something else'])).toBe('mismatch');
+    expect(gap(typedIt, [])).toBe('mismatch');
+    expect(gap(`${Q}，输入 "Admin" 后可见。`, ['Admin'])).toBeNull();
+    expect(gap(`${Q}，输入 "Admin" 后可见。`, ['other'])).toBe('mismatch');
+  });
+
+  it('each sending back is logged with its reason and the whole clause, cut to 40', () => {
+    const info = vi.spyOn(logger, 'info').mockImplementation(() => undefined as never);
+    expect(gap(`${Q}，页面上还有一个提交按钮。`)).toBe('mismatch');
+    expect(info).toHaveBeenCalledWith(
+      { kind: 'mismatch', reason: '元素「提交按钮」', clause: '页面上还有一个提交按钮' },
+      'iframe 核对退回',
+    );
+    info.mockClear();
+    // A single-quoted frame text stays whole, however many sentences it has.
+    expect(
+      gap(
+        "iframe 内容为：'Rich Text Area. Press ALT-0 for help. Your content goes here.'，渲染正常。",
+      ),
+    ).toBeNull();
+    const clauses = info.mock.calls.map(([log]) => (log as unknown as { clause: string }).clause);
+    expect(clauses.every((clause) => !clause.includes("：'Rich Text Area"))).toBe(true);
+    info.mockRestore();
   });
 });
 
