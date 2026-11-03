@@ -96,13 +96,68 @@ describe('FIX-52 #1 · core-04: what the answer says it left out is not a video 
     ]);
   });
 
+  // DEPLOY-53 coordinator's addendum: a whitelist, not more words. X is a playlist on the page.
+  const X = '"Playwright Beginner Tutorials"';
   it.each([
-    '说明："Playwright Beginner Tutorials" 已排除。',
-    '说明：排除了 "Playwright Beginner Tutorials"、"playlist"。',
-    '说明：播放列表（已剔除："Playwright Beginner Tutorials"、"playlist"）不在上面。',
-    '说明：播放列表如 "Playwright Beginner Tutorials"、"playlist" 等，均已剔除。',
-  ])('the name inside what is left out passes: %s', (summary) => {
-    expect(check(`1. What is Playwright?\n\n${summary}`)).toEqual([]);
+    ['A1', `排除了 ${X} 之外的所有广告，它排第一。`],
+    ['A2', `前5个视频（如 ${X}、"What is Playwright?"），均已过滤广告。`],
+    ['A4', `${X} 已排除），它其实排第一`],
+    ['A5', `第一名（已过滤 ${X}）其实就是它本身。`],
+    ['A7', `前 5 个视频：例如 ${X} 等，已剔除 Shorts 后排第一。`],
+    ['except, bracketed', `除（已剔除：${X}）外，它排第一。`],
+    ['put forward after the note', `（已剔除：${X}）它排第一。`],
+    ['put forward after the clause', `已剔除 ${X}，它是第一个视频。`],
+    ['put forward after the examples', `播放列表（如 ${X} 等），已按要求剔除，第一个视频就是它。`],
+  ])('%s is caught as online: %s', (_id, summary) => {
+    expect(check(summary).join()).toContain('播放列表/频道');
+  });
+
+  // The two online answers' notes (Deploy-52 core-04 evidence), word for word; their other
+  // playlist names are playlists on this page too.
+  const MORE_PLAYLISTS = [
+    'Playwright with TypeScript',
+    'Playwright Tutorial 2026 [FREE Full Course]',
+    'Automation Testing - Playwright With JavaScript Tutorials - From Basic To Advanced',
+    'Playwright Tutorial with JavaScript',
+    '海外教程',
+  ];
+  const ONLINE_PAGES = [
+    {
+      ...pages[0]!,
+      text: [pages[0]!.text, ...MORE_PLAYLISTS].join('\n'),
+      links: [
+        ...pages[0]!.links,
+        ...MORE_PLAYLISTS.map((text, i) => ({
+          text,
+          url: `https://www.youtube.com/playlist?list=o${i}`,
+          kind: 'playlist',
+        })),
+      ],
+    },
+  ];
+  it.each([
+    ['A3', '第一个视频：（已剔除：广告、"Playwright Beginner Tutorials"）'],
+    [
+      'online attempt 2',
+      '说明：搜索结果中穿插了广告与播放列表/课程（如 "Playwright Beginner Tutorials"、"Playwright with TypeScript"、"Playwright Tutorial 2026 [FREE Full Course]" 等），已按要求剔除，仅保留 /watch?v= 形式的单个视频。',
+    ],
+    [
+      'online attempt 3',
+      '说明：搜索结果中大量条目为播放列表/课程（如 "Playwright Beginner Tutorials"、"Automation Testing - Playwright With JavaScript Tutorials - From Basic To Advanced"、"Playwright Tutorial with JavaScript" 等），已按要求剔除；上述5条均为 links 返回的 kind="video" 项，URL 为 /watch?v=... 形式。',
+    ],
+    ['the clause form', '说明：已过滤播放列表 "Playwright Beginner Tutorials"。'],
+    // PR #317 review: the 除 of 剔除 and a 外 in the next title are no 「除…外」; 不是视频 puts nothing forward.
+    ['a 外 in the next title', '说明：（已剔除："Playwright Beginner Tutorials"、"海外教程"）'],
+    ['denied after the note', '说明：（已剔除："Playwright Beginner Tutorials"），它不是视频。'],
+    ['denied ahead of the note', '说明：这些不是视频（已剔除："Playwright Beginner Tutorials"）'],
+  ])('%s passes: %s', (_id, summary) => {
+    expect(
+      assessCompletionFacts({
+        summary: `1. What is Playwright?\n\n${summary}`,
+        pages: ONLINE_PAGES,
+        intent: VIDEO_INTENT,
+      }).contradictions,
+    ).toEqual([]);
   });
 });
 
