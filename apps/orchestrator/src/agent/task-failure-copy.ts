@@ -41,6 +41,8 @@ export function friendlyTaskFailureReason(
   // The model's own account of what it could not do is shown as written:
   // keyword rules would turn "没有遇到登录墙" into a login prompt.
   if (source === 'task') return plainFailure(raw);
+  // FIX-52 #8: the wait for the user ended, the site was not slow; the runner words these itself.
+  if (source === 'user_wall' && raw?.trim()) return raw.trim();
   const fromModel = !source && MODEL_SIGNAL.test(r);
   const unsupportedFile = /^FILE_FORMAT_UNSUPPORTED:([a-z0-9]+(?:,[a-z0-9]+)*)$/i.exec(raw ?? '');
   if (unsupportedFile?.[1]) {

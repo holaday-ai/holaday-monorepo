@@ -209,11 +209,23 @@ describe('FIX-52 #7 · the BestBuy sensor shapes of Deploy-51 and Deploy-52', ()
   const OPAQUE = 'a1B2'.repeat(980);
   const sensor = `{"sensor_data":"${OPAQUE}"}`;
   const body = `{"body":"${OPAQUE}"}`;
+  it.each(['Foo-Bar', 'foo_bar', 'FOO-BAR', 'Add-To-Cart'])(
+    'a segment of dashed words (%s) is no sensor',
+    (segment) => {
+      const path = `/${segment}/rKEj/0r0/lXG4i2D5pFY/u71OSmi5zu1tcG/Fht-GR0iXgM/O0d/MeHswRig`;
+      expect(bestBuySensorShape(new URL(`https://www.bestbuy.com${path}`), 'POST', sensor)).toBe(
+        false,
+      );
+    },
+  );
   it.each([
     ['/ZbNw/sBB0/d/H/CUq4bgxg/1LfENmG7YhO9wcartY/U3FqJk0lAg/aQ/ZnF3sdSAU', sensor],
     ['/ZbNw/sBB0/d/H/CUq4bgxg/hLfENmG7YhO9/EGpxJk0lAg/Yn/kNaxoZYkcb', sensor],
     ['/3Xje-E/v6Ja/7kNf/77_x/iOIAs2/XLE3JS9puu/C2QjSzUB/PVtVd2oI/aBcb', body],
     ['/xUJwkAxLQZzw9WGzcA08/QVbE2G9J/XEtocQ/ExkWbCU/YJCMb', body],
+    // The path the FIX-52 local A/B saw (body shape not recorded there, so both payloads).
+    ['/yg-HAYYlo/rKEj/0r0/lXG4i2D5pFY/u71OSmi5zu1tcG/Fht-GR0iXgM/O0d/MeHswRig', sensor],
+    ['/yg-HAYYlo/rKEj/0r0/lXG4i2D5pFY/u71OSmi5zu1tcG/Fht-GR0iXgM/O0d/MeHswRig', body],
   ])('%s is the sensor', (path, payload) => {
     expect(bestBuySensorShape(new URL(`https://www.bestbuy.com${path}`), 'POST', payload)).toBe(
       true,

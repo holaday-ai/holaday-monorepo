@@ -49,6 +49,15 @@ describe('friendlyTaskFailureReason', () => {
     );
   });
 
+  it('FIX-52 #8: a captcha wait that ran out says so, not that the site was slow', () => {
+    expect(
+      friendlyTaskFailureReason('failed', '等待用户完成验证码已超时，任务未完成。', 'user_wall'),
+    ).toBe('等待用户完成验证码已超时，任务未完成。');
+    expect(friendlyTaskFailureReason('failed', '用户已放弃验证，任务未完成。', 'user_wall')).toBe(
+      '用户已放弃验证，任务未完成。',
+    );
+  });
+
   it('does not leak unknown English technical failures', () => {
     expect(friendlyTaskFailureReason('failed', 'Unexpected protocol invariant violation')).toBe(
       '任务执行出错。请重试；如果反复出现，请联系 support@holaday.ai。',

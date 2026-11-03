@@ -289,6 +289,12 @@ function namesBestBuyWord(segment: string): boolean {
 }
 
 /**
+ * Words joined by dashes or underscores (`add-to-cart`, `Add_To_Cart`, `ADD-TO-CART`). FIX-52 #7: each
+ * part is written like a word; `yg-HAYYlo` (FIX-52 local A/B, 8 random segments) has no word in it.
+ */
+const DASHED_WORDS_RE = /^(?:[a-z]+|[A-Z]+|[A-Z][a-z]+)(?:[-_](?:[a-z]+|[A-Z]+|[A-Z][a-z]+))+$/;
+
+/**
  * 复审 #1: CamelCase words (`/site/CustomerService/api/v2/AddToCart/SubmitOrder`,
  * `/gateway/graphql/AbCd/…`, `/identity/signin/AbCd/…`) are no sensor. A sensor path has
  * 6–12 random segments, none a word or a version, most of them with digits (production:
@@ -310,7 +316,7 @@ export function bestBuySensorShape(url: URL, method: string, postData: string): 
       (segment) =>
         /^[A-Za-z0-9_-]{1,24}$/.test(segment) &&
         /[A-Za-z0-9]/.test(segment) &&
-        !/^[a-z]+(?:[-_][a-z]+)+$/i.test(segment),
+        !DASHED_WORDS_RE.test(segment),
     ) ||
     // FIX-52 #7: a sensor path has a stray one-letter segment or two (`/ZbNw/sBB0/d/H/…`), no more.
     segments.filter((segment) => segment.length === 1).length > 2 ||
