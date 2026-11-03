@@ -172,3 +172,15 @@ describe('humaniseTaskError — not started and model failures', () => {
     );
   });
 });
+
+describe('FIX-53 #4 · captcha handoff endings', () => {
+  it.each([
+    '等待用户完成验证码已超时，任务未完成。',
+    '用户已放弃验证，任务未完成。',
+    '等待验证时云端浏览器已关闭，任务未完成，请重新执行。',
+    '验证码接管通道异常关闭，任务未完成，请稍后重试。',
+    '验证码等待已结束，任务未完成。',
+  ])('stay as they are: %s', (reason) => {
+    expect(humaniseTaskError(reason)).toBe(reason);
+  });
+});
