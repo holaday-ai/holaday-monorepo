@@ -108,6 +108,14 @@ describe('FIX-52 #1 · core-04: what the answer says it left out is not a video 
     ['put forward after the note', `（已剔除：${X}）它排第一。`],
     ['put forward after the clause', `已剔除 ${X}，它是第一个视频。`],
     ['put forward after the examples', `播放列表（如 ${X} 等），已按要求剔除，第一个视频就是它。`],
+    // DEPLOY-53 coordinator's last round: other words for 「first」, and a judgement inside the list.
+    ['B1', `（已剔除：${X}）实为榜首。`],
+    ['B2', `已过滤广告 ${X}，位列首位。`],
+    ['B3', `（已剔除：广告、${X}、它才是首个视频）`],
+    ['B4', `搜索结果（如 ${X} 等），已按要求剔除，它居于榜首。`],
+    ['B7', `（已过滤：${X}）——榜单头一个。`],
+    ['B8', `最佳结果：（已过滤：${X}）`],
+    ['a judging phrase in the list', `（已剔除：${X}、最热门的那个）`],
   ])('%s is caught as online: %s', (_id, summary) => {
     expect(check(summary).join()).toContain('播放列表/频道');
   });
@@ -146,8 +154,13 @@ describe('FIX-52 #1 · core-04: what the answer says it left out is not a video 
       '说明：搜索结果中大量条目为播放列表/课程（如 "Playwright Beginner Tutorials"、"Automation Testing - Playwright With JavaScript Tutorials - From Basic To Advanced"、"Playwright Tutorial with JavaScript" 等），已按要求剔除；上述5条均为 links 返回的 kind="video" 项，URL 为 /watch?v=... 形式。',
     ],
     ['the clause form', '说明：已过滤播放列表 "Playwright Beginner Tutorials"。'],
-    // PR #317 review: the 除 of 剔除 and a 外 in the next title are no 「除…外」; 不是视频 puts nothing forward.
+    ['a kind in the list', '说明：（已剔除：Shorts、"Playwright Beginner Tutorials"）'],
+    // PR #318 review: the list's own spacing and 等 after a kind.
+    ['a spaced kind', '说明：（已剔除：Shorts 、"Playwright Beginner Tutorials"）'],
+    ['a kind and 等', '说明：（已剔除："Playwright Beginner Tutorials"、广告等）'],
+    // PR #317 review: the 除 of 剔除 and a 外 in the next title are no 「除…外」.
     ['a 外 in the next title', '说明：（已剔除："Playwright Beginner Tutorials"、"海外教程"）'],
+    // Online passes these too: its own check reads 「不是视频」 as no claim.
     ['denied after the note', '说明：（已剔除："Playwright Beginner Tutorials"），它不是视频。'],
     ['denied ahead of the note', '说明：这些不是视频（已剔除："Playwright Beginner Tutorials"）'],
   ])('%s passes: %s', (_id, summary) => {
