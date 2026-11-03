@@ -838,26 +838,39 @@ const EXPLANATION_RE =
   /说明|备注|注|搜索结果(?:页)?(?:中|里|内)?|大量条目|条目|穿插了?|混有|夹杂了?|为|有|包含了?|包括|广告|播放列表|课程|合集|频道|shorts|与|和|及|仅保留\s*\/watch\?v=\S*\s*形式的(?:单个|独立)?视频/giu;
 const PUNCTUATION_RE = /[\s\p{P}\p{S}]/gu;
 
-function onlyExplanation(before: string, after: string): boolean {
-  const rest = `${before.replace(HEADING_RE, '')} ${after}`;
+function onlyExplanation(before: string, after: string, heading: boolean): boolean {
+  const rest = `${heading ? before.replace(HEADING_RE, '') : before} ${after}`;
   return rest.replace(EXPLANATION_RE, '').replace(PUNCTUATION_RE, '') === '';
 }
 
 function leftOutAt(sentence: string, at: number, length: number): boolean {
   const before = sentence.slice(0, at);
   const after = sentence.slice(at + length);
-  for (const [leads, ends] of [
-    [NOTE_LEADS_RE, NOTE_ENDS_RE],
-    [CLAUSE_LEADS_RE, CLAUSE_ENDS_RE],
-    [EXAMPLES_LEAD_RE, EXAMPLES_END_RE],
+  // FIX-53 #2: a 「第 N 个视频：」 heading stands only before the bracket note (A3), never before
+  // 「已过滤广告 X」 (C1, C2) or the examples.
+  for (const [leads, ends, heading] of [
+    [NOTE_LEADS_RE, NOTE_ENDS_RE, true],
+    [CLAUSE_LEADS_RE, CLAUSE_ENDS_RE, false],
+    [EXAMPLES_LEAD_RE, EXAMPLES_END_RE, false],
   ] as const) {
     const lead = leads.exec(before);
     const end = lead && ends.exec(after);
-    if (lead && end && onlyExplanation(before.slice(0, lead.index), after.slice(end[0].length)))
+    if (
+      lead &&
+      end &&
+      onlyExplanation(before.slice(0, lead.index), after.slice(end[0].length), heading)
+    )
       return true;
   }
   return false;
 }
+
+/**
+ * FIX-53 #2 (B6): 「已剔除 X。它其实是最热门的结果。」 — the next sentence (on the line, or the
+ * next line) that opens on 它 / 该条 / 这个… speaks of X again, so X is not left out.
+ */
+const BACK_REFERENCE_RE =
+  /^\s*(?:它|其|该(?:条|项|个|视频|结果|列表)?|此(?:条|项|个)|这(?:个|条|一个|一条|项|部|一项)|那(?:个|条))/;
 
 /** The links tool's own kinds: 「kind="playlist"」 is its word, 「kind="Some Title"」 is a quote. */
 const LINK_KINDS = new Set([
@@ -880,13 +893,20 @@ function onlyLeftOut(summary: string, value: string): boolean {
   const name = value.trim().toLowerCase();
   if (!name) return false;
   let seen = false;
-  for (const line of unescapeLiteralBreaks(summary).split('\n')) {
-    for (const sentence of line.split(/[。；;]/)) {
+  const lines = unescapeLiteralBreaks(summary).split('\n');
+  for (const [l, line] of lines.entries()) {
+    const sentences = line.split(/[。；;]/);
+    for (const [i, sentence] of sentences.entries()) {
       const lower = sentence.toLowerCase();
       for (let at = lower.indexOf(name); at >= 0; at = lower.indexOf(name, at + name.length)) {
         seen = true;
-        if (!kindAttributeAt(sentence, at, name) && !leftOutAt(sentence, at, name.length))
-          return false;
+        if (kindAttributeAt(sentence, at, name)) continue;
+        if (!leftOutAt(sentence, at, name.length)) return false;
+        const next = [
+          ...sentences.slice(i + 1),
+          ...(lines.slice(l + 1).find((later) => later.trim()) ?? '').split(/[。；;]/),
+        ].find((later) => later.trim());
+        if (next && BACK_REFERENCE_RE.test(next)) return false;
       }
     }
   }

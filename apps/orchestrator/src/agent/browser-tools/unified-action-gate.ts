@@ -239,7 +239,10 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
     (el.getAttribute('id') === 'autocomplete-search-bar' &&
       /(?:^|\.)bestbuy\.com$/i.test(location.hostname)) ||
     (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
-      /(?:^|\.)amap\.com$/i.test(location.hostname));
+      /(?:^|\.)amap\.com$/i.test(location.hostname)) ||
+    // FIX-53 #6 (Deploy-53 local b-m01): the page Gaode serves the cloud browser has a bare
+    // `#searchipt` (no class, no form; DOM checked 2026-11-03), where Enter searches.
+    (el.getAttribute('id') === 'searchipt' && /(?:^|\.)amap\.com$/i.test(location.hostname));
   // YouTube's search form posts to /results (FIX-31 core-04).
   const formSearch =
     !!form &&

@@ -154,44 +154,49 @@ export const browserNavProcedure = protectedProcedure
     const session = browserControlSessions.get(instance, ctx.userId, input.taskId);
     if (!session) return { ok: false as const, reason: 'browser_control_not_owned' };
     try {
-      return await session.control.runHuman(input.controlLease ?? '', async (signal) => {
-        const page = await instance.executor.getPage();
-        const options = { timeout: 15_000, waitUntil: 'domcontentloaded' as const };
-        let target = input.url?.trim() ?? '';
-        if (input.direction === 'goto') {
-          if (!target) return { ok: false as const, reason: 'missing_url' };
-          if (!/^[a-z][a-z0-9+.-]*:/i.test(target)) target = `https://${target}`;
-          if (!/^https?:\/\//i.test(target)) return { ok: false as const, reason: 'bad_scheme' };
-          if (!(await defaultBrowserNetworkPolicy.check(target)).allowed)
-            return { ok: false as const, reason: 'blocked_target' };
-        }
-        signal.throwIfAborted();
-        if (ctx.browserPool?.peek(input.taskId ?? '') !== instance || instance.status !== 'ready')
-          throw new Error('browser_session_changed');
-        try {
-          if (input.direction === 'back') {
-            if (!(await page.goBack(options))) return { ok: false as const, reason: 'no_history' };
-          } else if (input.direction === 'forward') {
-            if (!(await page.goForward(options)))
-              return { ok: false as const, reason: 'no_history' };
-          } else if (input.direction === 'goto') await page.goto(target, options);
-          else await page.reload(options);
-          return { ok: true as const };
-        } catch {
-          // A navigation timeout does not establish whether the page changed.
-          void browserControlSessions
-            .quarantine(
-              instance,
-              () =>
-                ctx.browserPool?.release(instance.taskId, 'browser-navigation-unknown') ??
-                Promise.resolve(false),
-            )
-            .catch((error: unknown) =>
-              ctx.logger.warn({ error, taskId: instance.taskId }, 'browser stop unconfirmed'),
-            );
-          throw new BrowserInputOutcomeUnknownError();
-        }
-      });
+      return await session.control.runHuman(
+        input.controlLease ?? '',
+        async (signal) => {
+          const page = await instance.executor.getPage();
+          const options = { timeout: 15_000, waitUntil: 'domcontentloaded' as const };
+          let target = input.url?.trim() ?? '';
+          if (input.direction === 'goto') {
+            if (!target) return { ok: false as const, reason: 'missing_url' };
+            if (!/^[a-z][a-z0-9+.-]*:/i.test(target)) target = `https://${target}`;
+            if (!/^https?:\/\//i.test(target)) return { ok: false as const, reason: 'bad_scheme' };
+            if (!(await defaultBrowserNetworkPolicy.check(target)).allowed)
+              return { ok: false as const, reason: 'blocked_target' };
+          }
+          signal.throwIfAborted();
+          if (ctx.browserPool?.peek(input.taskId ?? '') !== instance || instance.status !== 'ready')
+            throw new Error('browser_session_changed');
+          try {
+            if (input.direction === 'back') {
+              if (!(await page.goBack(options)))
+                return { ok: false as const, reason: 'no_history' };
+            } else if (input.direction === 'forward') {
+              if (!(await page.goForward(options)))
+                return { ok: false as const, reason: 'no_history' };
+            } else if (input.direction === 'goto') await page.goto(target, options);
+            else await page.reload(options);
+            return { ok: true as const };
+          } catch {
+            // A navigation timeout does not establish whether the page changed.
+            void browserControlSessions
+              .quarantine(
+                instance,
+                () =>
+                  ctx.browserPool?.release(instance.taskId, 'browser-navigation-unknown') ??
+                  Promise.resolve(false),
+              )
+              .catch((error: unknown) =>
+                ctx.logger.warn({ error, taskId: instance.taskId }, 'browser stop unconfirmed'),
+              );
+            throw new BrowserInputOutcomeUnknownError();
+          }
+        },
+        'navigate',
+      );
     } catch (error) {
       return { ok: false as const, reason: error instanceof Error ? error.message : 'nav_failed' };
     }

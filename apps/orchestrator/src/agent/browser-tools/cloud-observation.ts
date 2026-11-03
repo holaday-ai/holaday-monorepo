@@ -410,7 +410,13 @@ const AMAP_COLLAPSAR_KEYS = new Set([
   'tid',
   'timestamp',
   'uid',
+  // FIX-53 #3 (Deploy-53 b-m01 `check:key:uploadTime+version`, 717 B / 1189 B): checked as values.
+  'uploadTime',
+  'version',
 ]);
+/** FIX-53 #8: an id or version that is a verb of a write is not a device value. */
+const ACTION_WORD_RE =
+  /submit|delete|remove|pay|order|buy|checkout|confirm|send|post|update|cancel|login|提交|删除|支付|下单|购买|确认|发送|登录/i;
 const KEYED_LOG_BODY_MAX = 8192;
 /** Keys or values of something a person did or typed — never telemetry. */
 const PERSONAL_KEY_RE =
@@ -767,14 +773,23 @@ function amapCollapsarCheck(postData: string): string | null {
   const keys = [...form.keys()];
   if (!keys.length || new Set(keys).size !== keys.length) return 'keys:empty-or-repeated';
   const unlisted = keys.filter((key) => !AMAP_COLLAPSAR_KEYS.has(key));
-  if (unlisted.length) return `key:${unlisted.slice(0, 8).join('+')}`;
+  // FIX-53 #3: every key that is not listed, so the next pause says all of them.
+  if (unlisted.length) return `key:${unlisted.join('+')}`;
   const mode = form.get('mode');
   if (mode !== null && !AMAP_COLLAPSAR_MODES.test(mode)) return `mode=${evidenceValue(mode)}`;
-  const timestamp = form.get('timestamp');
-  if (timestamp !== null && !/^\d{0,16}$/.test(timestamp)) return 'timestamp:not-a-number';
-  // A device or anonymous id: a short token, never free text or an address.
-  const notId = ['tid', 'uid'].find((key) => !/^[\w.-]{0,64}$/.test(form.get(key) ?? ''));
+  const notTime = ['timestamp', 'uploadTime'].find(
+    (key) => !/^\d{0,16}$/.test(form.get(key) ?? ''),
+  );
+  if (notTime) return `${notTime}:not-a-number`;
+  // A device or anonymous id: a short token, never free text, an address or a verb (FIX-53 #8).
+  const notId = ['tid', 'uid'].find((key) => {
+    const value = form.get(key) ?? '';
+    return !/^[\w.-]{0,64}$/.test(value) || ACTION_WORD_RE.test(value);
+  });
   if (notId) return `${notId}:not-an-id`;
+  const version = form.get('version') ?? '';
+  if (!/^[\w.-]{0,32}$/.test(version) || ACTION_WORD_RE.test(version))
+    return 'version:not-a-version';
   // `content` is the SDK's opaque log string: in no reading of it is there a field a person
   // fills in, nor any key/value pair (DEPLOY-43 复审 #1).
   const content = form.get('content') ?? '';
@@ -2525,7 +2540,9 @@ async function searchFieldAt(target: Locator): Promise<boolean> {
           (el.id === 'autocomplete-search-bar' &&
             /(?:^|\.)bestbuy\.com$/i.test(location.hostname)) ||
           (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
-            /(?:^|\.)amap\.com$/i.test(location.hostname))
+            /(?:^|\.)amap\.com$/i.test(location.hostname)) ||
+          // FIX-53 #6: Gaode's bare `#searchipt` on the page it serves the cloud browser.
+          (el.id === 'searchipt' && /(?:^|\.)amap\.com$/i.test(location.hostname))
         );
       },
       undefined,

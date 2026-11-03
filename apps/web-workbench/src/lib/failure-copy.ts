@@ -17,6 +17,19 @@ function unsupportedOutputFormats(errorText: string): string | undefined {
   return match?.[1]?.toUpperCase().replaceAll(',', '、');
 }
 
+/** The runner's captcha-handoff endings (unified-supercar-runner / unified-browser-loop). */
+const CAPTCHA_HANDOFF_ENDINGS: ReadonlyArray<readonly [RegExp, string, string]> = [
+  [
+    /等待用户完成验证码已超时[^。]*。?/,
+    '等待验证超时',
+    '重新执行；出现验证时，在下方浏览器里完成。',
+  ],
+  [/用户已放弃验证[^。]*。?/, '已放弃验证', '需要时重新执行，并在下方浏览器里完成验证。'],
+  [/等待验证时云端浏览器已关闭[^。]*。?/, '等待验证时浏览器已关闭', '重新执行当前任务。'],
+  [/验证码接管通道异常关闭[^。]*。?/, '验证接管中断', '稍后重新执行当前任务。'],
+  [/验证码等待已结束[^。]*。?/, '验证等待已结束', '重新执行；出现验证时，在下方浏览器里完成。'],
+];
+
 /**
  * Map a raw terminal failure message to the two-line headline shown
  * at the top of the result card. The task is already terminal here,
@@ -107,6 +120,12 @@ export function classifyFriendlyFailure(
     };
   }
   const haystack = (errorText ?? '').toLowerCase();
+  // FIX-53 #4 (Deploy-53 wall-zhihu): how a captcha handoff ended is the server's own sentence,
+  // shown as it is — never the generic 「操作超时 / 目标网站响应太慢」 its 「超时」 would match.
+  for (const [re, title, nextStep] of CAPTCHA_HANDOFF_ENDINGS) {
+    const sentence = re.exec(errorText ?? '')?.[0];
+    if (sentence) return { title, subtitle: sentence, nextStep };
+  }
   // FIX-D11 — the executor gave up because the task needed something the
   // browser lane cannot do (e.g. "当前环境不支持上传附件"). Not a site problem:
   // never suggest switching to another URL.

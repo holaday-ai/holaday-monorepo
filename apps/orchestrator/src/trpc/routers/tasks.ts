@@ -185,6 +185,7 @@ import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import type { PageLike, PlaywrightExecutor } from '../../agent/vision-loop/playwright-executor.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/qwen-only-task-runner.js';
+import { cutWhole } from '../../agent/whole-text.js';
 import {
   type ClaimResult as TaskCreateClaimResult,
   recordClaim as claimTaskCreate,
@@ -1048,9 +1049,9 @@ export function normalizeModeBPingOutcome(outcome: ModeBPingOutcome): Normalized
     };
   }
 
-  const title = typeof result.title === 'string' ? result.title.trim().slice(0, 300) : '';
+  const title = typeof result.title === 'string' ? cutWhole(result.title.trim(), 300) : '';
   const rawBodyText = typeof result.bodyText === 'string' ? result.bodyText.trim() : '';
-  const bodyText = rawBodyText.length > 12_000 ? rawBodyText.slice(0, 12_000) : rawBodyText;
+  const bodyText = cutWhole(rawBodyText, 12_000);
 
   return {
     ok: true,
@@ -5395,7 +5396,7 @@ export const tasksRouter = router({
                   try {
                     const persisted = await repo.persistVisionOutcome(taskId, {
                       status: 'failed',
-                      reason: `浏览器打开失败：${reason}`.slice(0, 500),
+                      reason: cutWhole(`浏览器打开失败：${reason}`, 500),
                       errorCode: 'DIRECT_OPEN_FAILED',
                       tickCount: 0,
                       metadata: { executionMode: 'browser', lane: 'direct_open' },
@@ -5405,7 +5406,7 @@ export const tasksRouter = router({
                         type: 'server.task.terminal',
                         taskId,
                         status: 'failed',
-                        reason: `浏览器打开失败：${reason}`.slice(0, 200),
+                        reason: cutWhole(`浏览器打开失败：${reason}`, 200),
                       });
                     }
                   } catch (persistErr) {
@@ -7472,7 +7473,7 @@ export const tasksRouter = router({
                         awaitingUserCount: 0,
                         modelFinalText:
                           outcome.status === 'completed'
-                            ? (outcome.summary ?? '').slice(0, 200)
+                            ? cutWhole(outcome.summary ?? '', 200)
                             : null,
                         ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
                         ...(finalState.finalViewport
@@ -8120,7 +8121,7 @@ export const tasksRouter = router({
                             : {};
                         const out = await repo.persistVisionOutcome(taskId, {
                           status: 'failed',
-                          reason: `runner threw: ${reason}`.slice(0, 500),
+                          reason: cutWhole(`runner threw: ${reason}`, 500),
                           tickCount: 0,
                           ...(failureFinalState.finalUrl
                             ? { finalUrl: failureFinalState.finalUrl }
@@ -8150,7 +8151,7 @@ export const tasksRouter = router({
                             type: 'server.task.terminal',
                             taskId,
                             status: 'failed',
-                            reason: `runner threw: ${reason}`.slice(0, 200),
+                            reason: cutWhole(`runner threw: ${reason}`, 200),
                           });
                         } catch {
                           /* swallow — broadcast is best-effort */
@@ -8546,7 +8547,7 @@ export const tasksRouter = router({
                               },
                               ...(info.ok
                                 ? {}
-                                : { errorMessage: (info.message ?? '').slice(0, 2000) }),
+                                : { errorMessage: cutWhole(info.message ?? '', 2000) }),
                               startedAt: new Date(Date.now() - info.durationMs),
                               completedAt: new Date(),
                             });

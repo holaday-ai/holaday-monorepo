@@ -26,6 +26,7 @@ import {
 } from '../../ws/server.js';
 import { defaultBrowserNetworkPolicy } from '../browser-network-policy.js';
 import type { UnifiedBrowserLoopInput } from '../browser-tools/unified-browser-loop.js';
+import { cutWhole } from '../whole-text.js';
 import {
   type AntiBotSignal,
   describeSignal,
@@ -587,7 +588,7 @@ function formatAntiBotPauseMessage(signal: AntiBotSignal, hint: string | null): 
 function cleanAntiBotHint(value: string | null): string | null {
   const trimmed = value?.replace(/\s+/g, ' ').trim();
   if (!trimmed) return null;
-  if (trimmed.length > 120) return `${trimmed.slice(0, 117)}...`;
+  if (trimmed.length > 120) return `${cutWhole(trimmed, 117)}...`;
   return trimmed;
 }
 

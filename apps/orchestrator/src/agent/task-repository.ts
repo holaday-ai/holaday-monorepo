@@ -38,6 +38,7 @@ import { TOOL_CALL_TEXT_ONLY, deliverableAnswer } from './generate-answer-guard.
 import type { PendingConfirm, PlannedStep, TaskState } from './task-controller.js';
 import { runQueueDatabase, runQueueWrite } from './task-queue-persistence.js';
 import { normalizeVideoRetryIntent } from './video/video-retry-policy.js';
+import { cutWhole, wellFormedJson } from './whole-text.js';
 
 // Compatibility writes must not mutate a core execution admitted after the
 // router's read. Keep the same owner/origin/legacy predicate on read and CAS.
@@ -1143,7 +1144,7 @@ export class TaskRepository {
       update.completedAt = new Date();
       update.pauseReason = null;
       update.errorCode = outcome.errorCode ?? 'VISION_GAVE_UP';
-      update.errorMessage = outcome.reason.slice(0, 2_000);
+      update.errorMessage = cutWhole(outcome.reason, 2_000);
       result.reason = outcome.reason;
       if (outcome.finalScreenshot) result.finalScreenshot = outcome.finalScreenshot;
       if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
@@ -1189,7 +1190,7 @@ export class TaskRepository {
       )
         result.metadata = { ...(result.metadata as Record<string, unknown>), videoRetryVersion: 2 };
     }
-    update.result = result;
+    update.result = wellFormedJson(result);
 
     // Phase 3 R1 (Codex follow-up) — atomic state-machine guard.
     // Earlier the guard was SELECT-status THEN UPDATE — a race window
