@@ -806,7 +806,7 @@ const LIST_SEP = '\\s*(?:、|,|，|/)\\s*';
  * A quoted title (long, its own colons), or one of the kinds of thing left out (「广告」「Shorts」) —
  * never a phrase that judges (「它才是首个视频」「最热门的那个」).
  */
-const LIST_ITEM = `(?:["'“「『][^"'”」』\\n]{1,160}["'”」』]|(?:广告|播放列表|课程|合集|频道|[Ss]horts|直播|短视频|推广内容)(?![^、,，/（）()]))`;
+const LIST_ITEM = `(?:["'“「『][^"'”」』\\n]{1,160}["'”」』]|(?:广告|播放列表|课程|合集|频道|[Ss]horts|直播|短视频|推广内容)(?=\\s*(?:[、,，/）)]|等|$)))`;
 /** The names listed ahead of this one, and behind it up to the bracket's end. */
 const ITEMS_AHEAD = `(?:${LIST_ITEM}${LIST_SEP})*`;
 const ITEMS_BEHIND = `(?:${LIST_SEP}${LIST_ITEM})*\\s*(?:等)?\\s*[）)]`;

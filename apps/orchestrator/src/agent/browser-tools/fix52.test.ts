@@ -155,6 +155,9 @@ describe('FIX-52 #1 · core-04: what the answer says it left out is not a video 
     ],
     ['the clause form', '说明：已过滤播放列表 "Playwright Beginner Tutorials"。'],
     ['a kind in the list', '说明：（已剔除：Shorts、"Playwright Beginner Tutorials"）'],
+    // PR #318 review: the list's own spacing and 等 after a kind.
+    ['a spaced kind', '说明：（已剔除：Shorts 、"Playwright Beginner Tutorials"）'],
+    ['a kind and 等', '说明：（已剔除："Playwright Beginner Tutorials"、广告等）'],
     // PR #317 review: the 除 of 剔除 and a 外 in the next title are no 「除…外」.
     ['a 外 in the next title', '说明：（已剔除："Playwright Beginner Tutorials"、"海外教程"）'],
     // Online passes these too: its own check reads 「不是视频」 as no claim.
