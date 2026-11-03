@@ -792,17 +792,21 @@ function cutQuote(candidates: string[], values: string[]): string | undefined {
 /**
  * FIX-52 #1 (Deploy-52 core-04): 「说明：…（如 "Playwright Beginner Tutorials"、…），已按要求剔除」 and
  * 「kind="playlist"」 say what the answer left out, not a video it claims. Every mention has to be so,
- * and only a whitelist counts (DEPLOY-53 coordinator's addendum): the name inside a note that only
- * leaves things out — 「（已剔除：A、X）」, 「已过滤[Shorts] X」 ending its clause, or the online answers'
- * 「（如 A、X 等），已按要求剔除」 — with nothing in the sentence putting it forward as a video
- * (排第一, 第 N 个, 就是…). 「除 X 之外」 is never left out. Anything else is checked as online.
+ * by whitelist only (DEPLOY-53 coordinator): the name inside a note that only leaves things out —
+ * 「（已剔除：A、X）」, 「已过滤[Shorts] X」 ending its clause, or the online answers' 「（如 A、X 等），已按要求
+ * 剔除」 — whose list holds only quoted titles or short nouns, and with nothing but explanation left in
+ * the sentence once the note is taken out (「说明：搜索结果中大量条目为播放列表/课程」). Anything else is
+ * checked as online. A claim in the next sentence is not looked at (FIX-53).
  */
 const LEFT_OUT_VERB = '(?:剔除|排除|过滤)';
 const OPEN_QUOTE = '["\'“「『]?';
 const CLOSE_QUOTE = '["\'”」』]?';
 const LIST_SEP = '\\s*(?:、|,|，|/)\\s*';
-/** A quoted title may be long and carry its own colons; a bare item is a short word. */
-const LIST_ITEM = `(?:["'“「『][^"'”」』\\n]{1,160}["'”」』]|[^、,，/（）()。；;:："'“”「」『』\\n]{1,60})`;
+/**
+ * A quoted title (long, its own colons), or one of the kinds of thing left out (「广告」「Shorts」) —
+ * never a phrase that judges (「它才是首个视频」「最热门的那个」).
+ */
+const LIST_ITEM = `(?:["'“「『][^"'”」』\\n]{1,160}["'”」』]|(?:广告|播放列表|课程|合集|频道|[Ss]horts|直播|短视频|推广内容)(?![^、,，/（）()]))`;
 /** The names listed ahead of this one, and behind it up to the bracket's end. */
 const ITEMS_AHEAD = `(?:${LIST_ITEM}${LIST_SEP})*`;
 const ITEMS_BEHIND = `(?:${LIST_SEP}${LIST_ITEM})*\\s*(?:等)?\\s*[）)]`;
@@ -816,39 +820,43 @@ const CLAUSE_LEADS_RE = new RegExp(
   `(?:已经?|已被|均已|都已)\\s*${LEFT_OUT_VERB}(?:了|掉)?\\s*(?:播放列表|shorts|广告)?\\s*${OPEN_QUOTE}\\s*$`,
   'i',
 );
-const CLAUSE_ENDS_RE = new RegExp(`^${CLOSE_QUOTE}\\s*(?:了|掉)?\\s*(?=[，,。；;！!？?）)]|$)`);
+const CLAUSE_ENDS_RE = new RegExp(`^${CLOSE_QUOTE}\\s*(?:了|掉)?(?=\\s*(?:[，,。；;！!？?）)]|$))`);
 /** The online answers: 「（如 A、X 等），已按要求剔除」, the verb ending its clause right after the bracket. */
 const EXAMPLES_LEAD_RE = new RegExp(
   `[（(]\\s*(?:如|例如|比如|诸如)\\s*${ITEMS_AHEAD}${OPEN_QUOTE}\\s*$`,
 );
 const EXAMPLES_END_RE = new RegExp(
-  `^${CLOSE_QUOTE}${ITEMS_BEHIND}\\s*[，,]?\\s*(?:(?:已经?|均已|都已|已按要求|按要求)\\s*)+${LEFT_OUT_VERB}(?:了|掉)?\\s*(?=[，,。；;]|$)`,
+  `^${CLOSE_QUOTE}${ITEMS_BEHIND}\\s*[，,]?\\s*(?:(?:已经?|均已|都已|已按要求|按要求)\\s*)+${LEFT_OUT_VERB}(?:了|掉)?(?=\\s*(?:[，,。；;]|$))`,
 );
-/** What puts the name forward as a result: 「它排第一」「第 2 个」「前 5 个」「就是它」「是…视频」. */
-const PUT_FORWARD_RE =
-  /排(?:在)?第\s*[一二三四五六七八九十\d]|第\s*[一二三四五六七八九十\d]+\s*(?:个|名|条|位)|前\s*[一二三四五六七八九十\d]+\s*(?:个|名|条)|(?<![不非])是[^，,。；;]*视频|就是/;
-/** Ahead of the note, an ordinal heading (「第一个视频：（已剔除：…）」) is only a heading. */
-const PUT_FORWARD_AHEAD_RE = /排(?:在)?第|就是|(?<![不非])是[^，,。；;（(]*视频/;
 /**
- * 「除 X 之外」「除（已剔除：X）外」: a 除 that is not the verb's own (剔除 / 排除), and 外 right after
- * the name or its list — not a 外 inside the next title (「"海外教程"」).
+ * What may stay in the sentence beside the note: the online answers' own explanation
+ * (「说明：搜索结果中穿插了广告与播放列表/课程」「，仅保留 /watch?v= 形式的单个视频」) and a
+ * 「第一个视频：」 heading ahead of it. Whatever is left after these and punctuation is a claim.
  */
-const EXCEPT_RE = /(?<![剔排])除[^，,。；;]*$/;
-const EXCEPT_ENDS_RE = new RegExp(
-  `^${CLOSE_QUOTE}(?:${LIST_SEP}${LIST_ITEM})*\\s*[）)]?\\s*(?:之外|以外|外)`,
-);
+const HEADING_RE = /^\s*第\s*[一二三四五六七八九十\d]+\s*个视频\s*[:：]/;
+const EXPLANATION_RE =
+  /说明|备注|注|搜索结果(?:页)?(?:中|里|内)?|大量条目|条目|穿插了?|混有|夹杂了?|为|有|包含了?|包括|广告|播放列表|课程|合集|频道|shorts|与|和|及|仅保留\s*\/watch\?v=\S*\s*形式的(?:单个|独立)?视频/giu;
+const PUNCTUATION_RE = /[\s\p{P}\p{S}]/gu;
+
+function onlyExplanation(before: string, after: string): boolean {
+  const rest = `${before.replace(HEADING_RE, '')} ${after}`;
+  return rest.replace(EXPLANATION_RE, '').replace(PUNCTUATION_RE, '') === '';
+}
 
 function leftOutAt(sentence: string, at: number, length: number): boolean {
   const before = sentence.slice(0, at);
   const after = sentence.slice(at + length);
-  if (EXCEPT_RE.test(before) && EXCEPT_ENDS_RE.test(after)) return false;
-  const examples = EXAMPLES_LEAD_RE.test(before) && EXAMPLES_END_RE.exec(after);
-  if (examples) return !PUT_FORWARD_RE.test(sentence);
-  const note =
-    (NOTE_LEADS_RE.test(before) && NOTE_ENDS_RE.exec(after)) ||
-    (CLAUSE_LEADS_RE.test(before) && CLAUSE_ENDS_RE.exec(after));
-  if (!note) return false;
-  return !PUT_FORWARD_AHEAD_RE.test(before) && !PUT_FORWARD_RE.test(after.slice(note[0].length));
+  for (const [leads, ends] of [
+    [NOTE_LEADS_RE, NOTE_ENDS_RE],
+    [CLAUSE_LEADS_RE, CLAUSE_ENDS_RE],
+    [EXAMPLES_LEAD_RE, EXAMPLES_END_RE],
+  ] as const) {
+    const lead = leads.exec(before);
+    const end = lead && ends.exec(after);
+    if (lead && end && onlyExplanation(before.slice(0, lead.index), after.slice(end[0].length)))
+      return true;
+  }
+  return false;
 }
 
 /** The links tool's own kinds: 「kind="playlist"」 is its word, 「kind="Some Title"」 is a quote. */
