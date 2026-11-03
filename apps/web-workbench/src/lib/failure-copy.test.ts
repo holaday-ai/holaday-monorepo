@@ -7,6 +7,28 @@ import {
 } from './failure-copy';
 
 describe('classifyFriendlyFailure', () => {
+  // FIX-53 #4 (Deploy-53 wall-zhihu): the task page said 「目标网站响应太慢」 after a 10-minute captcha wait.
+  it.each([
+    ['等待用户完成验证码已超时，任务未完成。', '等待验证超时'],
+    ['用户已放弃验证，任务未完成。', '已放弃验证'],
+    ['等待验证时云端浏览器已关闭，任务未完成，请重新执行。', '等待验证时浏览器已关闭'],
+    ['验证码接管通道异常关闭，任务未完成，请稍后重试。', '验证接管中断'],
+    ['验证码等待已结束，任务未完成。', '验证等待已结束'],
+  ])('a captcha handoff ending shows its own sentence: %s', (reason, title) => {
+    const copy = classifyFriendlyFailure(reason, { executionMode: 'browser' });
+    expect(copy.title).toBe(title);
+    expect(copy.subtitle).toBe(reason);
+    expect(`${copy.title}${copy.subtitle}${copy.nextStep}`).not.toMatch(/响应太慢|操作超时/);
+  });
+  it('with a prefix the sentence is still found', () => {
+    expect(
+      classifyFriendlyFailure('任务执行失败：等待用户完成验证码已超时，任务未完成。').subtitle,
+    ).toBe('等待用户完成验证码已超时，任务未完成。');
+  });
+  it('a site timeout is still a site timeout', () => {
+    expect(classifyFriendlyFailure('页面加载超时').subtitle).toBe('目标网站响应太慢，请稍后再试。');
+  });
+
   const unsupportedZip =
     '任务未完成：当前文件生成工具不支持 ZIP 格式，升级套餐无法解决。请确认是否接受其他可用格式，或使用支持该格式的工具。';
 

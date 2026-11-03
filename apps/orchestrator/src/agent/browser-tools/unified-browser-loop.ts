@@ -187,13 +187,33 @@ export interface WebSearchHit {
   url: string;
 }
 
+/** FIX-53 #1: told to the model when the wall went away and the person did nothing. */
+const WALL_CLEARED_ITSELF =
+  '验证页已经不在了，但等待期间没有收到用户的任何操作（不是用户完成的）。从当前页面重新 snapshot 后继续原任务，不要重放旧动作；答案里不要说用户完成或通过了验证。';
+/** A sentence that says the person cleared a verification (not 「需要 / 等待用户完成验证」). */
+const USER_CLEARED_RE =
+  /(?<!(?:需要|等待|请|待|需|让|若|如果|要)\s*)(?:用户|您|你)\s*(?:已经?|已)?\s*(?:手动|亲自|自行|成功)?\s*(?:完成|通过|处理|解决|完成了|通过了)\s*(?:了)?\s*(?:人机|安全|滑块|图形)?\s*(?:验证|验证码|校验)|(?:验证|验证码)\s*(?:已)?\s*由\s*(?:用户|您|你)\s*(?:手动)?\s*(?:完成|通过)|用户手动完成|\b(?:the )?user (?:has )?(?:manually )?(?:completed|solved|passed|cleared) (?:the )?(?:captcha|verification|challenge)/i;
+const SENTENCE_RE = /[^。！？!?\n]*(?:[。！？!?]|\n|$)/g;
+
+/** The sentences of an answer that say the person cleared a verification. */
+export function userClearClaims(text: string): string[] {
+  return (text.match(SENTENCE_RE) ?? []).filter((s) => s.trim() && USER_CLEARED_RE.test(s));
+}
+
+function withoutClaims(text: string, claims: readonly string[]): string {
+  let out = text;
+  for (const claim of claims) out = out.replace(claim, claim.endsWith('\n') ? '\n' : '');
+  return out.replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export interface UnifiedBrowserLoopInput {
   observationV2?: boolean;
   /**
    * Hands a captcha to the user. `alternate` (CAPTCHA-REDUCE-1): after two
-   * failed rounds the user chose to continue another way.
+   * failed rounds the user chose to continue another way. `cleared` (FIX-53 #1): the wall
+   * went away while the person sent no input — nobody may say the user cleared it.
    */
-  captchaHandoff?: (message: string) => Promise<boolean | 'alternate'>;
+  captchaHandoff?: (message: string) => Promise<boolean | 'alternate' | 'cleared'>;
   /** False when this wall need not be handed over (a search fallback replaces it). */
   captchaHandoffWanted?: () => boolean | Promise<boolean>;
   requireBrowserEvidence?: boolean;
@@ -725,17 +745,24 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
    * to leave it, and no wall in this task is handed to the user again.
    */
   let captchaDeclined = false;
+  /** FIX-53 #1: only a wait the person acted in lets an answer say they cleared the wall. */
+  let userClearedWall = false;
+  let userClaimAsked = false;
   /** Undefined: not handed over (the caller pauses as before, e.g. for a search fallback). */
   const handCaptcha = async (
     message: string,
-  ): Promise<'resumed' | 'alternate' | 'ended' | undefined> => {
+  ): Promise<'resumed' | 'cleared' | 'alternate' | 'ended' | undefined> => {
     if (!input.captchaHandoff) return undefined;
     if (captchaDeclined) return 'alternate';
     if (input.captchaHandoffWanted && !(await input.captchaHandoffWanted())) return undefined;
     const result = await input.captchaHandoff(message);
     if (result === 'alternate') captchaDeclined = true;
-    return result === 'alternate' ? 'alternate' : result ? 'resumed' : 'ended';
+    if (result === true) userClearedWall = true;
+    return result === 'alternate' || result === 'cleared' ? result : result ? 'resumed' : 'ended';
   };
+  /** What the model is told when a handed-over wall is gone. */
+  const afterWall = (handed: 'resumed' | 'cleared' | 'alternate', resumed: string) =>
+    handed === 'alternate' ? ALTERNATE : handed === 'cleared' ? WALL_CLEARED_ITSELF : resumed;
   for (let step = 0; step < maxSteps; step += 1) {
     if (input.signal?.aborted) return cancelled(step);
     if (input.captchaHandoff && !captchaDeclined) {
@@ -754,10 +781,10 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           return { status: 'failed', reason: '验证码等待已结束，任务未完成。', steps: step };
         messages.push({
           role: 'user',
-          content:
-            handed === 'alternate'
-              ? ALTERNATE
-              : '用户已完成验证；从当前页面重新 snapshot 后继续原任务，不要重启或重放旧动作。',
+          content: afterWall(
+            handed,
+            '用户已完成验证；从当前页面重新 snapshot 后继续原任务，不要重启或重放旧动作。',
+          ),
         });
       }
     }
@@ -901,9 +928,27 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         const written = typeof args.summary === 'string' ? unescapeLiteralBreaks(args.summary) : '';
         // FIX-34 review #2: an unasked ```json tool-call block is not part of the answer
         // (its keys are not page quotes either).
-        const summary = asksForToolCallExample(input.intent)
+        const answer = asksForToolCallExample(input.intent)
           ? written
           : stripToolCallBlocks(written);
+        // FIX-53 #1: no input reached the page from the person, so the answer may not say
+        // they cleared a verification. Sent back once; after that the claim is taken out.
+        const unseenClear = userClearedWall ? [] : userClearClaims(answer);
+        if (unseenClear.length && !userClaimAsked && !concludeNow) {
+          userClaimAsked = true;
+          await rejected(answer, '', '答案说用户完成了验证，但等待期间没有收到用户的任何操作');
+          results.push(
+            toolResult(
+              call.id,
+              `本次任务中没有收到用户的任何操作，验证页是自己消失的（或从未交给用户），不能写用户完成了验证：${unseenClear
+                .map((s) => `「${s.trim().slice(0, 60)}」`)
+                .join('、')}。请删掉这类说法，只写页面上实际读到的内容，然后再 finish。`,
+              true,
+            ),
+          );
+          continue;
+        }
+        const summary = unseenClear.length ? withoutClaims(answer, unseenClear) : answer;
         // FAILURE-COPY-1 (FIX-24 core-08 ib): an honest "部分完成" sent as failed is
         // delivered as 部分完成 — only with receipts of the steps it did, and only
         // after the same checks as a completed answer.
@@ -929,9 +974,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             results.push(
               toolResult(
                 call.id,
-                handed === 'alternate'
-                  ? ALTERNATE
-                  : '用户已完成验证，请先重新 snapshot 再决定，不重放旧动作。',
+                afterWall(handed, '用户已完成验证，请先重新 snapshot 再决定，不重放旧动作。'),
                 true,
               ),
             );
@@ -2191,9 +2234,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           results.push(
             toolResult(
               call.id,
-              handed === 'alternate'
-                ? ALTERNATE
-                : '用户已完成验证；当前页面已变化，请重新 snapshot 后继续。',
+              afterWall(handed, '用户已完成验证；当前页面已变化，请重新 snapshot 后继续。'),
             ),
           );
           staleTurn = true;

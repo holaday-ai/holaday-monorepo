@@ -531,6 +531,12 @@ const CLOSED_NEGATION_RE =
 const AFFIRMED_AFTER_RE =
   /^[^，,。；;]{0,8}?(?:很明显|明显|显眼|可见|可用|可点击?|存在|显示|位于|在[^，,。；;]{0,6}[上中内里方侧])/;
 
+/**
+ * FIX-53 #7: 「无需登录管理员后台可见」「未经授权…也可见」: a condition (no need to, without leave)
+ * negates the step it names, not the thing the sentence then says is there.
+ */
+const CONDITION_NEGATION_RE = /^(?:无需|无须|不需要?|不必|不用|未经|没经过?)/;
+
 /** Is the name at `start`–`end` of a text under a negation that reaches it? */
 function negatedAt(text: string, start: number, end: number): boolean {
   const before = text
@@ -538,7 +544,9 @@ function negatedAt(text: string, start: number, end: number): boolean {
     .replace(CLOSED_NEGATION_RE, (phrase) => ' '.repeat(phrase.length));
   const hit = before.match(NEGATED_RE);
   if (!hit) return false;
-  return !(/[、或和及与]/.test(hit[0]) && AFFIRMED_AFTER_RE.test(text.slice(end)));
+  const affirmed = AFFIRMED_AFTER_RE.test(text.slice(end));
+  if (affirmed && CONDITION_NEGATION_RE.test(hit[0])) return false;
+  return !(/[、或和及与]/.test(hit[0]) && affirmed);
 }
 
 /** Where a modifier starts in a run of Han characters (「还有一个提交按钮」 → 提交). */
@@ -567,11 +575,17 @@ const NAMED_BEFORE_RE =
   /(?:名为|名叫|叫做?|称为|命名为|标有|标着|写着|显示为)\s*([^\s，,。；;的]{2,20})\s*的?\s*$/;
 /** FIX-52 #10: 「按钮：提交」「按钮名为提交」「按钮（提交）」: said after the thing. */
 const NAMED_AFTER_RE =
-  /^\s*(?:[:：]|[（(]|名为|名叫|叫做?|称为|写着|标有|标着|文字为|文本为|名称[为是])\s*([^\s，,。；;）)]{2,20})/;
+  /^\s*(?:[:：]|[（(]|[，,]?\s*(?:名为|名叫|叫做?|称为|写着|标有|标着|文字为|文本为|名称[为是]))\s*([^\s，,。；;）)]{2,20})/;
+/** FIX-53 #7: 「用来提交订单的按钮」: what it is for names which one. */
+const PURPOSE_BEFORE_RE =
+  /(?:用来|用于|用以|可以|可用于|能够|负责)\s*([^\s，,。；;的]{2,20})\s*的\s*$/;
 
 /** Which one a text means, however it is written: right before the thing, or named apart from it. */
 function thingName(before: string, after: string): string {
-  const said = before.match(NAMED_BEFORE_RE)?.[1] ?? after.match(NAMED_AFTER_RE)?.[1];
+  const said =
+    before.match(NAMED_BEFORE_RE)?.[1] ??
+    after.match(NAMED_AFTER_RE)?.[1] ??
+    before.match(PURPOSE_BEFORE_RE)?.[1];
   return said ? said.toLowerCase() : modifierOf(before);
 }
 
@@ -748,7 +762,16 @@ const VALUE_VERB_RE =
  * ahead of the real quote. Only ahead of what the frame's text then says: a verb alone stays a
  * description (协调方决定), and 「显示正常」 says nothing.
  */
-const LEAD_VERB_RE = /显示(?:为|的是|着|了)?|写着|[里内中]面?(?:是|为)/g;
+const LEAD_VERB_RE =
+  /显示(?:为|的是|着|了)?|写着|[里内中]面?(?:是|为)|呈现(?:为|出|着|了)?|展示(?:了|着|出|为)?|标题(?:为|是)/g;
+/**
+ * FIX-53 #7: 「iframe 显示欢迎光临。正文为 "…"」 — the made-up text in a sentence of its own, the real
+ * quote in the next: one claim, so the two are read as one.
+ */
+const LEAD_THEN_VALUE_RE = new RegExp(
+  `((?:${LEAD_VERB_RE.source})[^。！？!?；;\\n]{1,40})[。；;]\\s*((?:内容|文本|文字|正文)\\s*(?:为|是|[:：]))`,
+  'g',
+);
 
 /**
  * 复审 #4: what comes after 「内容为 / 正文为 / 文本为」 is the iframe's content (「内容为假内容，正文为
@@ -759,6 +782,8 @@ function valueGap(text: string, pieces: readonly string[]): string | null {
   const firstValue = masked.search(new RegExp(VALUE_VERB_RE.source, 'i'));
   if (firstValue > 0)
     for (const m of masked.slice(0, firstValue).matchAll(LEAD_VERB_RE)) {
+      // A quoted title is the page's own (「iframe 页面（标题为 "An iFrame…"）」), held elsewhere.
+      if (/^标题/.test(m[0]) && /^\s*["“「『‘']/.test(text.slice(m.index + m[0].length))) continue;
       const said = text
         .slice(m.index + m[0].length, firstValue)
         .split(/[，,。；;\n]/)[0]!
@@ -794,7 +819,7 @@ function logUnverified(parts: readonly string[], whole: string, pieces: readonly
 const PLACED_BELOW_RE =
   /^\s*(?:(?:此外|另外|同时|而且|并且|并|且|以及)[\s，,]*)*(?:在|其)?(?:下方|下面|其下|底部|below\b|underneath\b)/i;
 const PLACED_ABOVE_RE =
-  /^\s*(?:(?:此外|另外|同时|而且|并且|并|且|以及)[\s，,]*)*(?:在|其)?(?:上方|上面|顶部|above\b)/i;
+  /^\s*(?:(?:此外|另外|同时|而且|并且|并|且|以及)[\s，,]*)*(?:在|其)?(?:(?:页面|网页|主页面|父页面)的?\s*)?(?:上方|上面|顶部|above\b)/i;
 /** The iframe's own line in a parent read (`- iframe [ref=e7]`), not a heading naming one. */
 const FRAME_LINE_RE = /(?:^|\n|\s-\s|^-\s)\s*iframe\s*(?:\[|$)/im;
 
@@ -914,6 +939,8 @@ function frameGapOf(
   typed: readonly string[] | undefined,
   why: { reason: string; clause: string },
 ): FrameGap | null {
+  // FIX-53 #7: a lead verb's sentence and the 「正文为」 sentence after it are one claim.
+  answer = answer.replace(LEAD_THEN_VALUE_RE, '$1，$2');
   const asked = IFRAME_WORD_RE.test(intent);
   const pageText = normal(pageTexts.join(' '));
   const claims = iframeWindows(answer, intent, asked, pageText).flatMap(
@@ -1040,7 +1067,8 @@ function frameGapOf(
       if (c.notRead) continue;
       for (const part of c.around) {
         const within = textOf(namedFrames(c.subject, current));
-        const gap = aroundGap(part, within, pageText, others, typed);
+        // FIX-53 #7: 「，页面顶部有 Elemental Selenium 链接」: where it is said to be is held too.
+        const gap = aroundGap(part, within, pageText, others, typed) ?? placedGap(part, pageTexts);
         if (gap) {
           why.reason = gap;
           why.clause = part;
@@ -1274,6 +1302,11 @@ const PLACED_IN_RE =
  * FIX-52 #9: what the answer goes on to say after the sentence that first says what the iframe holds,
  * in the sentences with no iframe of their own, up to the host's note.
  */
+const OUTSIDE_FRAME_RE = new RegExp(
+  `^\\s*(?:在|除了?)?\\s*(?:${IFRAME_WORD_RE.source})\\s*(?:之外|以外|外面|外)\\s*[，,]?`,
+  'i',
+);
+
 function laterClauses(answer: string, intent: string): string[] {
   const mention = new RegExp(`${IFRAME_WORD_RE.source}|${FRAME_ALIAS}`, 'i');
   const out: string[] = [];
@@ -1282,6 +1315,12 @@ function laterClauses(answer: string, intent: string): string[] {
     if (HOST_NOTE_RE.test(line) && past) break;
     for (const sentence of cutOutside(line, SENTENCE_SEP)) {
       if (mention.test(sentence)) {
+        // FIX-53 #7: 「iframe 之外，页面上还有…」 says nothing of the iframe: its clauses are later ones.
+        const outside = sentence.match(OUTSIDE_FRAME_RE);
+        if (outside && past) {
+          out.push(...cutOutside(sentence.slice(outside[0].length), CLAUSE_SEP));
+          continue;
+        }
         past = true;
         continue;
       }

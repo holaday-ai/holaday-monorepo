@@ -64,6 +64,12 @@ interface SubmitContext {
   fieldSignal: string;
   hasAmountField: boolean;
   searchLike: boolean;
+  /**
+   * FIX-53 #6 (Deploy-53 local b-m01): only a weak sign of a search box — role searchbox /
+   * combobox, or a 「搜索」 placeholder — on no form that posts. Enter goes through only for it,
+   * and the observer still pauses unless a read request follows (cloud-observation).
+   */
+  searchBox: boolean;
 }
 
 /**
@@ -282,6 +288,11 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
     fieldSignal: parts.join(' ').slice(0, 1200),
     hasAmountField,
     searchLike: !chatLike && (formSearch || fieldSearch) && method !== 'post',
+    searchBox:
+      !chatLike &&
+      method !== 'post' &&
+      (['searchbox', 'combobox'].includes(el.getAttribute('role') || '') ||
+        /搜索|search/i.test(el.getAttribute('placeholder') || '')),
   };
 };
 
@@ -748,7 +759,7 @@ export async function describeUnifiedAction(
           : null;
       // No visible submit control is not an exemption: Enter still submits.
       const unverified =
-        !transactional && !form.submitControl && !form.searchLike
+        !transactional && !form.submitControl && !form.searchLike && !form.searchBox
           ? '无法确认回车会提交什么（表单没有可识别的提交按钮）'
           : null;
       return {

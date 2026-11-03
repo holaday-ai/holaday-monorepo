@@ -18,6 +18,13 @@ export class BrowserInputOutcomeUnknownError extends Error {
 
 type BrowserAction<T = void> = (signal: AbortSignal) => Promise<T>;
 
+export interface HumanInputLog {
+  count: number;
+  /** Epoch ms of the first and the latest admitted input. */
+  firstAt: number | null;
+  lastAt: number | null;
+}
+
 /**
  * One running task's control handoff. A request is NOT a pause receipt:
  * only the runner, at a settled browser-action boundary, calls checkpoint.
@@ -39,6 +46,8 @@ export class BrowserControl {
     this.confirmStop = resolve;
   });
   private waiters = new Set<() => void>();
+  /** FIX-53 #1: when the person sent input while holding the lease — evidence, never contents. */
+  private readonly humanInputs: HumanInputLog = { count: 0, firstAt: null, lastAt: null };
 
   snapshot(): BrowserControlSnapshot {
     return {
@@ -142,7 +151,16 @@ export class BrowserControl {
     if (this.phase !== 'human' || !lease || lease !== this.lease) {
       throw new Error('browser_control_not_owned');
     }
+    const at = Date.now();
+    this.humanInputs.count += 1;
+    this.humanInputs.firstAt ??= at;
+    this.humanInputs.lastAt = at;
     return this.enqueue(action);
+  }
+
+  /** Every input the person's lease admitted so far (counts and times only). */
+  humanInputLog(): HumanInputLog {
+    return { ...this.humanInputs };
   }
 
   /** Accepted input transports register key/button cleanup, including across disconnects. */

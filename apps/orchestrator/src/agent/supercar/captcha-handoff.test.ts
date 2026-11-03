@@ -9,6 +9,7 @@ async function fixture() {
   let wall = true;
   const waiting = vi.fn(async () => {});
   const resumed = vi.fn(async () => true);
+  const activity = vi.fn();
   const result = registry.wait({
     taskId: 't',
     userId: 'u',
@@ -18,9 +19,11 @@ async function fixture() {
     onResumed: resumed,
     timeoutMs: 1000,
     pollMs: 50,
+    onActivity: activity,
   });
   await vi.advanceTimersByTimeAsync(0);
   return {
+    activity,
     registry,
     control,
     result,
@@ -40,9 +43,30 @@ it('wall → human lease → clear wall → automatic resume; agent is excluded 
   expect(f.resumed).not.toHaveBeenCalled();
   f.clear();
   await vi.advanceTimersByTimeAsync(50);
-  expect(await f.result).toBe('resumed');
+  // FIX-53 #1: the person sent nothing, so the wall cleared itself — not 「用户已完成验证」.
+  expect(await f.result).toBe('cleared');
   expect(f.control.canAgentAct()).toBe(true);
   expect(f.resumed).toHaveBeenCalledOnce();
+  expect(f.activity).toHaveBeenCalledWith(expect.objectContaining({ inputs: 0, confirmed: false }));
+});
+it('FIX-53 #1: input from the person during the wait makes the automatic resume theirs', async () => {
+  const f = await fixture();
+  const lease = f.control.snapshot().lease!;
+  await f.control.runHuman(lease, async () => {});
+  await f.control.runHuman(lease, async () => {});
+  f.clear();
+  await vi.advanceTimersByTimeAsync(50);
+  expect(await f.result).toBe('resumed');
+  const logged = f.activity.mock.calls[0]![0];
+  expect(logged).toMatchObject({ inputs: 2, confirmed: false, count: 2 });
+  expect(logged.firstAt).toBeTypeOf('number');
+});
+it('FIX-53 #1: a wait that times out still logs what the person did', async () => {
+  const f = await fixture();
+  await f.control.runHuman(f.control.snapshot().lease!, async () => {});
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(await f.result).toBe('timeout');
+  expect(f.activity).toHaveBeenCalledWith(expect.objectContaining({ inputs: 1 }));
 });
 it('manual continue checks the wall and owner before handback', async () => {
   const f = await fixture();

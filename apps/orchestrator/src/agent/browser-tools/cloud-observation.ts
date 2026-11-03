@@ -410,7 +410,13 @@ const AMAP_COLLAPSAR_KEYS = new Set([
   'tid',
   'timestamp',
   'uid',
+  // FIX-53 #3 (Deploy-53 b-m01 `check:key:uploadTime+version`, 717 B / 1189 B): checked as values.
+  'uploadTime',
+  'version',
 ]);
+/** FIX-53 #8: an id or version that is a verb of a write is not a device value. */
+const ACTION_WORD_RE =
+  /submit|delete|remove|pay|order|buy|checkout|confirm|send|post|update|cancel|login|提交|删除|支付|下单|购买|确认|发送|登录/i;
 const KEYED_LOG_BODY_MAX = 8192;
 /** Keys or values of something a person did or typed — never telemetry. */
 const PERSONAL_KEY_RE =
@@ -767,14 +773,23 @@ function amapCollapsarCheck(postData: string): string | null {
   const keys = [...form.keys()];
   if (!keys.length || new Set(keys).size !== keys.length) return 'keys:empty-or-repeated';
   const unlisted = keys.filter((key) => !AMAP_COLLAPSAR_KEYS.has(key));
-  if (unlisted.length) return `key:${unlisted.slice(0, 8).join('+')}`;
+  // FIX-53 #3: every key that is not listed, so the next pause says all of them.
+  if (unlisted.length) return `key:${unlisted.join('+')}`;
   const mode = form.get('mode');
   if (mode !== null && !AMAP_COLLAPSAR_MODES.test(mode)) return `mode=${evidenceValue(mode)}`;
-  const timestamp = form.get('timestamp');
-  if (timestamp !== null && !/^\d{0,16}$/.test(timestamp)) return 'timestamp:not-a-number';
-  // A device or anonymous id: a short token, never free text or an address.
-  const notId = ['tid', 'uid'].find((key) => !/^[\w.-]{0,64}$/.test(form.get(key) ?? ''));
+  const notTime = ['timestamp', 'uploadTime'].find(
+    (key) => !/^\d{0,16}$/.test(form.get(key) ?? ''),
+  );
+  if (notTime) return `${notTime}:not-a-number`;
+  // A device or anonymous id: a short token, never free text, an address or a verb (FIX-53 #8).
+  const notId = ['tid', 'uid'].find((key) => {
+    const value = form.get(key) ?? '';
+    return !/^[\w.-]{0,64}$/.test(value) || ACTION_WORD_RE.test(value);
+  });
   if (notId) return `${notId}:not-an-id`;
+  const version = form.get('version') ?? '';
+  if (!/^[\w.-]{0,32}$/.test(version) || ACTION_WORD_RE.test(version))
+    return 'version:not-a-version';
   // `content` is the SDK's opaque log string: in no reading of it is there a field a person
   // fills in, nor any key/value pair (DEPLOY-43 复审 #1).
   const content = form.get('content') ?? '';
@@ -1228,6 +1243,8 @@ type ActionWindow = {
   action: string;
   /** FIX-30: a `type` into the page's search box. */
   searchField?: boolean;
+  /** FIX-53 #6: only a weak search sign (role / placeholder): a read must follow its Enter. */
+  searchBox?: boolean;
 };
 
 /**
@@ -2315,7 +2332,10 @@ export class CloudObservation {
       lastActivity: Date.now(),
       action: action.tool,
       ...(action.tool === 'type' && 'ref' in action && action.ref
-        ? { searchField: await searchFieldAt(this.locator(frame, action.ref)) }
+        ? {
+            searchField: await searchFieldAt(this.locator(frame, action.ref)),
+            searchBox: await weakSearchBoxAt(this.locator(frame, action.ref)),
+          }
         : {}),
     };
     this.actionWindow = window;
@@ -2369,8 +2389,17 @@ export class CloudObservation {
       ((after?.interceptedSearchEnter ?? 0) > (before.interceptedSearchEnter ?? 0) &&
         after?.url === before.url &&
         after?.dom === before.dom);
+    // FIX-53 #6: an Enter let through on a weak search sign alone must be followed by a read
+    // (a GET for results or a new page); without one it is not known to be a search.
+    const unreadSearch =
+      action.tool === 'type' &&
+      !!action.submit &&
+      !!window.searchBox &&
+      !window.searchField &&
+      !this.requests.some((r) => !r.write && /^GET:(?:xhr|fetch|document)$/.test(r.category));
     const unexpected =
       writes.length > 0 ||
+      unreadSearch ||
       (action.tool === 'type' && action.submit && enterIntercepted) ||
       (window.interactive && opened.some((p) => TRANSACTION_PAGE_RE.test(p.url()))) ||
       (window.interactive &&
@@ -2383,6 +2412,13 @@ export class CloudObservation {
         branch: 'new_transaction_receipt',
         method: '',
         url: safeObservationUrl(after?.url ?? before.url),
+        action: action.tool,
+      });
+    if (unreadSearch)
+      triggers.push({
+        branch: 'search_without_read',
+        method: '',
+        url: safeObservationUrl(before.url),
         action: action.tool,
       });
     if (action.tool === 'type' && action.submit && enterIntercepted)
@@ -2476,6 +2512,30 @@ export class CloudObservation {
  * FIX-30: whether a `type` target is the page's search box (the executor's
  * fieldKind test, plus a search word in its name/placeholder/label).
  */
+/** FIX-53 #6: role searchbox / combobox or a 「搜索」 placeholder, never a chat box. */
+async function weakSearchBoxAt(target: Locator): Promise<boolean> {
+  try {
+    return await target.evaluate(
+      (el) =>
+        !/客服|聊天|留言|咨询|对话|\bchat|\bmessages?\b|\bask\b|\bsupport\b|\bconversation/i.test(
+          [
+            el.getAttribute('name'),
+            el.id,
+            el.getAttribute('placeholder'),
+            el.getAttribute('aria-label'),
+            el.getAttribute('class'),
+          ].join(' '),
+        ) &&
+        (['searchbox', 'combobox'].includes(el.getAttribute('role') || '') ||
+          /搜索|search/i.test(el.getAttribute('placeholder') || '')),
+      undefined,
+      { timeout: 1000 },
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function searchFieldAt(target: Locator): Promise<boolean> {
   try {
     // FIX-30 review blocker 1: only a strong signal makes a search box — a weak one

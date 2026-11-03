@@ -599,11 +599,25 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                   },
                   onResumed: async () => (await opts.onCaptchaHandoffEnd?.(true)) ?? true,
                   challenge: () => inspectChallenge(page),
+                  // FIX-53 #1: what the person did during the wait is the evidence for
+                  // 「用户已完成验证」; counts and times only, never the inputs.
+                  onActivity: (activity) =>
+                    logger.info(
+                      {
+                        taskId: opts.taskId,
+                        inputs: activity.inputs,
+                        confirmed: activity.confirmed,
+                        firstInputAt: activity.firstAt && new Date(activity.firstAt).toISOString(),
+                        lastInputAt: activity.lastAt && new Date(activity.lastAt).toISOString(),
+                      },
+                      'captcha wait user activity',
+                    ),
                   signal: controller.signal,
                   timeoutMs: opts.captchaWaitMs,
                   pollMs: opts.captchaPollMs,
                 });
-                if (result !== 'resumed' && result !== 'alternate') {
+                const goesOn = result === 'resumed' || result === 'cleared';
+                if (!goesOn && result !== 'alternate') {
                   handoffFailure =
                     result === 'timeout'
                       ? '等待用户完成验证码已超时，任务未完成。'
@@ -617,8 +631,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                 }
                 lastSnapshot = '';
                 if (result === 'alternate') captchaAlternate = true;
-                if (result === 'resumed' || result === 'alternate') replay?.resume();
-                return result === 'alternate' ? 'alternate' : result === 'resumed';
+                if (goesOn || result === 'alternate') replay?.resume();
+                return result === 'alternate' || result === 'cleared' ? result : goesOn;
               } finally {
                 clearInterval(keepBrowser);
                 // Same as parkForReply: the budget resumes whatever the handoff ended with.

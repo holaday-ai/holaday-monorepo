@@ -1,4 +1,4 @@
-import type { BrowserControl } from './browser-control.js';
+import type { BrowserControl, HumanInputLog } from './browser-control.js';
 import type { ChallengeInfo } from './captcha-challenge.js';
 
 export const CAPTCHA_HANDOFF_MS = 10 * 60_000;
@@ -8,7 +8,24 @@ export const CAPTCHA_ROUNDS_BEFORE_ALTERNATE = 2;
  * `error`: the control channel closed on its own (input outcome unknown, observation or
  * viewport failure) — neither the user, the task nor the timer ended the wait (FIX-35 复审 #2).
  */
-export type CaptchaHandoffResult = 'resumed' | 'alternate' | 'cancelled' | 'timeout' | 'error';
+export type CaptchaHandoffResult =
+  | 'resumed'
+  /**
+   * FIX-53 #1: the wall went away while the person sent no input and never pressed 我已完成 —
+   * the page (or the agent's own earlier actions) cleared it, not the user.
+   */
+  | 'cleared'
+  | 'alternate'
+  | 'cancelled'
+  | 'timeout'
+  | 'error';
+/** What the person did during one wait: the evidence behind `resumed` versus `cleared`. */
+export interface CaptchaHandoffActivity extends HumanInputLog {
+  /** Inputs admitted during this wait only. */
+  inputs: number;
+  /** The person pressed 我已完成 and the wall was gone. */
+  confirmed: boolean;
+}
 export interface CaptchaHandoffStatus {
   failedRounds: number;
   alternateAvailable: boolean;
@@ -26,6 +43,8 @@ interface WaitOptions {
   pageGone?: () => boolean;
   /** Challenge kind and hint shown with the card (read-only). */
   challenge?: () => Promise<ChallengeInfo | null>;
+  /** Called once when the wait ends, with what the person did in it. */
+  onActivity?: (activity: CaptchaHandoffActivity) => void;
   signal?: AbortSignal;
   timeoutMs?: number;
   pollMs?: number;
@@ -72,6 +91,9 @@ export class CaptchaHandoffs {
     let checking: Promise<boolean> | null = null;
     let failedRounds = 0;
     let alternateChosen = false;
+    let confirmed = false;
+    const inputsBefore = o.control.humanInputLog().count;
+    const inputsDuring = () => o.control.humanInputLog().count - inputsBefore;
     let challenge: ChallengeInfo | null = null;
     let stopped = false;
     const stop = (reason: CaptchaHandoffResult) => {
@@ -110,6 +132,7 @@ export class CaptchaHandoffs {
             }
             const lease = o.control.snapshot().lease;
             if (!lease || o.signal?.aborted) return false;
+            if (manual) confirmed = true;
             o.control.returnToAgent(lease);
             return true;
           } catch {
@@ -149,8 +172,10 @@ export class CaptchaHandoffs {
       });
       if (receipt.resumed) outcome = alternateChosen ? 'alternate' : 'resumed';
       else if (!stopped && !o.signal?.aborted) outcome = 'error';
+      if (outcome === 'resumed' && !confirmed && inputsDuring() === 0) outcome = 'cleared';
       return outcome;
     } finally {
+      o.onActivity?.({ ...o.control.humanInputLog(), inputs: inputsDuring(), confirmed });
       clearTimeout(timeout);
       clearInterval(poll);
       o.signal?.removeEventListener('abort', abort);
