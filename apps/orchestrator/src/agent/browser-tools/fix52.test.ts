@@ -119,6 +119,7 @@ describe('FIX-52 #1 · core-04: what the answer says it left out is not a video 
     'Playwright Tutorial 2026 [FREE Full Course]',
     'Automation Testing - Playwright With JavaScript Tutorials - From Basic To Advanced',
     'Playwright Tutorial with JavaScript',
+    '海外教程',
   ];
   const ONLINE_PAGES = [
     {
@@ -145,6 +146,10 @@ describe('FIX-52 #1 · core-04: what the answer says it left out is not a video 
       '说明：搜索结果中大量条目为播放列表/课程（如 "Playwright Beginner Tutorials"、"Automation Testing - Playwright With JavaScript Tutorials - From Basic To Advanced"、"Playwright Tutorial with JavaScript" 等），已按要求剔除；上述5条均为 links 返回的 kind="video" 项，URL 为 /watch?v=... 形式。',
     ],
     ['the clause form', '说明：已过滤播放列表 "Playwright Beginner Tutorials"。'],
+    // PR #317 review: the 除 of 剔除 and a 外 in the next title are no 「除…外」; 不是视频 puts nothing forward.
+    ['a 外 in the next title', '说明：（已剔除："Playwright Beginner Tutorials"、"海外教程"）'],
+    ['denied after the note', '说明：（已剔除："Playwright Beginner Tutorials"），它不是视频。'],
+    ['denied ahead of the note', '说明：这些不是视频（已剔除："Playwright Beginner Tutorials"）'],
   ])('%s passes: %s', (_id, summary) => {
     expect(
       assessCompletionFacts({

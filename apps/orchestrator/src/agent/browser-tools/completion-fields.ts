@@ -826,12 +826,17 @@ const EXAMPLES_END_RE = new RegExp(
 );
 /** What puts the name forward as a result: 「它排第一」「第 2 个」「前 5 个」「就是它」「是…视频」. */
 const PUT_FORWARD_RE =
-  /排(?:在)?第\s*[一二三四五六七八九十\d]|第\s*[一二三四五六七八九十\d]+\s*(?:个|名|条|位)|前\s*[一二三四五六七八九十\d]+\s*(?:个|名|条)|是[^，,。；;]*视频|就是/;
+  /排(?:在)?第\s*[一二三四五六七八九十\d]|第\s*[一二三四五六七八九十\d]+\s*(?:个|名|条|位)|前\s*[一二三四五六七八九十\d]+\s*(?:个|名|条)|(?<![不非])是[^，,。；;]*视频|就是/;
 /** Ahead of the note, an ordinal heading (「第一个视频：（已剔除：…）」) is only a heading. */
-const PUT_FORWARD_AHEAD_RE = /排(?:在)?第|就是|是[^，,。；;（(]*视频/;
-/** 「除 X 之外」「除（已剔除：X）外」, brackets and all, within the clause. */
-const EXCEPT_RE = /除[^，,。；;]*$/;
-const EXCEPT_ENDS_RE = /^[^，,。；;]*?(?:之外|以外|外)/;
+const PUT_FORWARD_AHEAD_RE = /排(?:在)?第|就是|(?<![不非])是[^，,。；;（(]*视频/;
+/**
+ * 「除 X 之外」「除（已剔除：X）外」: a 除 that is not the verb's own (剔除 / 排除), and 外 right after
+ * the name or its list — not a 外 inside the next title (「"海外教程"」).
+ */
+const EXCEPT_RE = /(?<![剔排])除[^，,。；;]*$/;
+const EXCEPT_ENDS_RE = new RegExp(
+  `^${CLOSE_QUOTE}(?:${LIST_SEP}${LIST_ITEM})*\\s*[）)]?\\s*(?:之外|以外|外)`,
+);
 
 function leftOutAt(sentence: string, at: number, length: number): boolean {
   const before = sentence.slice(0, at);
