@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { BrowserControl } from '../supercar/browser-control.js';
+import { type CaptchaHandoffActivity, CaptchaHandoffs } from '../supercar/captcha-handoff.js';
 import { cutWhole, wellFormedJson } from '../whole-text.js';
 import { anchoredLogPost, bestBuySensorShape, keyedLogCheck } from './cloud-observation.js';
 import { iframeContentGap } from './completion-coverage.js';
@@ -275,5 +277,75 @@ describe('FIX-53 #7 · iframe: the old holes', () => {
     ],
   ])('still passes: %s', (answer) => {
     expect(kind(answer)).toBeNull();
+  });
+});
+
+describe('FIX-53 #1 · end to end: a captcha that goes away on its own during the wait', () => {
+  const run = async (person: (control: BrowserControl) => Promise<void>) => {
+    const registry = new CaptchaHandoffs();
+    const control = new BrowserControl();
+    let up = true;
+    const { adapter, seen } = scripted([
+      { name: 'navigate', input: { url: 'https://shop.test/item' } },
+      { name: 'snapshot', input: {} },
+      {
+        name: 'finish',
+        input: {
+          status: 'completed',
+          summary: '用户已完成验证。页面一级标题是 Item，价格 12 元。',
+        },
+      },
+    ]);
+    const activity: CaptchaHandoffActivity[] = [];
+    const outcome = await runUnifiedBrowserLoop({
+      intent: '打开 https://shop.test/item 读价格',
+      adapter,
+      maxSteps: 6,
+      execute: async () => ({
+        ok: true,
+        text: 'heading "Item" [level=1]\n- text: 价格 12 元',
+        url: 'https://shop.test/item',
+      }),
+      probeBlocker: async () => (up ? (wall as never) : null),
+      captchaHandoff: async () => {
+        const waiting = registry.wait({
+          taskId: 't',
+          userId: 'u',
+          control,
+          hasWall: async () => up,
+          onWaiting: async () => {},
+          onResumed: async () => true,
+          onActivity: (a) => activity.push(a),
+          timeoutMs: 5_000,
+          pollMs: 20,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        await person(control);
+        // The page drops the wall by itself (a cookie set, a challenge passed in the background).
+        setTimeout(() => {
+          up = false;
+        }, 60);
+        const result = await waiting;
+        return result === 'alternate' || result === 'cleared' ? result : result === 'resumed';
+      },
+    });
+    return { outcome, seen: seen.join('\n'), activity };
+  };
+
+  it('nobody touched it: cleared, the model is told so, the claim is sent back and taken out', async () => {
+    const { outcome, seen, activity } = await run(async () => {});
+    expect(activity).toEqual([expect.objectContaining({ inputs: 0, confirmed: false })]);
+    expect(seen).toContain('不是用户完成的');
+    expect(seen).toContain('不能写用户完成了验证');
+    expect((outcome as { summary?: string }).summary ?? '').not.toContain('用户已完成验证');
+  });
+
+  it('the person clicked in the panel: their resume, and the answer may say so', async () => {
+    const { outcome, seen, activity } = await run(async (control) => {
+      await control.runHuman(control.snapshot().lease!, async () => {});
+    });
+    expect(activity).toEqual([expect.objectContaining({ inputs: 1 })]);
+    expect(seen).toContain('用户已完成验证；');
+    expect((outcome as { summary?: string }).summary ?? '').toContain('用户已完成验证');
   });
 });
