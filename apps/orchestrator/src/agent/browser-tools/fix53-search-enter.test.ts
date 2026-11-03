@@ -5,8 +5,9 @@ import { describeUnifiedAction } from './unified-action-gate.js';
 
 /**
  * FIX-53 #6 (Deploy-53 local b-m01): Enter in 高德's search box paused on 「无法确认回车会提交什么」.
- * Narrow: a searchbox / combobox (or a 「搜索」 placeholder) goes through, and the observer still
- * pauses unless a read request follows the Enter. The general Enter rule is unchanged.
+ * The page Gaode serves the cloud browser has a bare `<input id="searchipt">` (no class, no form;
+ * DOM checked 2026-11-03). Anchored to it on amap.com, as LocationItem_input is; every other
+ * site's Enter is still asked about before the action.
  */
 let browser: Browser;
 beforeAll(async () => {
@@ -16,36 +17,35 @@ afterAll(async () => {
   await browser?.close();
 });
 
-const SEARCH_JS = (read: boolean) =>
-  `<script>document.querySelector('input').addEventListener('keydown',e=>{if(e.key!=='Enter')return;e.preventDefault();${
-    read ? "fetch('/api/poi?keywords='+encodeURIComponent(e.target.value));" : ''
-  }document.body.insertAdjacentHTML('beforeend','<p>结果</p>');});</script>`;
+const SEARCH_JS = `<script>document.querySelector('input').addEventListener('keydown',e=>{if(e.key!=='Enter')return;e.preventDefault();fetch('/api/poi?keywords='+encodeURIComponent(e.target.value));document.body.insertAdjacentHTML('beforeend','<p>结果</p>');});</script>`;
+// As Gaode serves it (2026-11-03): `div.iptbox > input#searchipt`, in `header.searchbox`.
+const AMAP_BOX = `<section id="search" class="search"><header class="searchbox"><div class="iptbox"><input type="text" id="searchipt" placeholder="搜索位置、公交站、地铁站" maxlength="256" autocomplete="off"></div></header></section>${SEARCH_JS}`;
 const PAGES: Record<string, string> = {
-  '/combobox': `<input role="combobox" aria-label="搜索地点" placeholder="搜索地点、公交、地铁">${SEARCH_JS(true)}`,
-  '/placeholder': `<input placeholder="搜索地点、公交、地铁">${SEARCH_JS(true)}`,
-  '/no-read': `<input role="combobox" placeholder="搜索地点">${SEARCH_JS(false)}`,
-  '/chat': `<input placeholder="搜索或咨询客服">${SEARCH_JS(true)}`,
-  '/plain': `<input placeholder="昵称">${SEARCH_JS(true)}`,
-  '/post': `<form method="post" action="/save"><input role="combobox" placeholder="搜索"></form>`,
+  'ditu.amap.com/': AMAP_BOX,
+  'www.amap.com/': AMAP_BOX,
+  'shop.test/': `<input role="combobox" placeholder="搜索商品">${SEARCH_JS}`,
+  'shop.test/searchipt': `<input id="searchipt" placeholder="搜索商品">${SEARCH_JS}`,
+  'ditu.amap.com/other': `<input role="combobox" placeholder="搜索地点">${SEARCH_JS}`,
 };
 
-const open = async (path: string): Promise<Page> => {
+const open = async (url: string): Promise<Page> => {
   const page = await browser.newPage();
-  await page.route('https://**/*', (route) =>
-    new URL(route.request().url()).pathname.startsWith('/api/')
+  await page.route('https://**/*', (route) => {
+    const u = new URL(route.request().url());
+    return u.pathname.startsWith('/api/')
       ? route.fulfill({ contentType: 'application/json', body: '[]' })
       : route.fulfill({
           contentType: 'text/html; charset=utf-8',
-          body: `<!doctype html><meta charset="utf-8"><title>fixture</title><body>${PAGES[new URL(route.request().url()).pathname] ?? 'ok'}</body>`,
-        }),
-  );
-  await page.goto(`https://ditu.amap.com${path}`);
+          body: `<!doctype html><meta charset="utf-8"><title>fixture</title><body>${PAGES[`${u.host}${u.pathname}`] ?? 'ok'}</body>`,
+        });
+  });
+  await page.goto(url);
   return page;
 };
 
 describe('the gate before Enter', () => {
-  const gate = async (path: string) => {
-    const page = await open(path);
+  const gate = async (url: string) => {
+    const page = await open(url);
     try {
       return await describeUnifiedAction(
         page,
@@ -60,51 +60,47 @@ describe('the gate before Enter', () => {
     }
   };
 
-  it.each(['/combobox', '/placeholder', '/no-read'])(
-    'a search box goes through: %s',
-    async (p) => {
-      expect((await gate(p)).unverified).toBeNull();
+  it.each(['https://ditu.amap.com/', 'https://www.amap.com/'])(
+    "Gaode's search box goes through: %s",
+    async (url) => {
+      expect((await gate(url)).unverified).toBeNull();
     },
     30_000,
   );
 
-  it.each(['/chat', '/plain', '/post'])(
-    'anything else still asks: %s',
-    async (p) => {
-      expect((await gate(p)).unverified).toBe('无法确认回车会提交什么（表单没有可识别的提交按钮）');
+  it.each([
+    ['a combobox 「搜索商品」 on another site', 'https://shop.test/'],
+    ['#searchipt on another site', 'https://shop.test/searchipt'],
+    ['another box on amap.com', 'https://ditu.amap.com/other'],
+  ])(
+    '%s is still asked about',
+    async (_label, url) => {
+      expect((await gate(url)).unverified).toBe(
+        '无法确认回车会提交什么（表单没有可识别的提交按钮）',
+      );
     },
     30_000,
   );
 });
 
 describe('the observer after Enter', () => {
-  const enter = async (path: string) => {
-    const page = await open(path);
+  it("a search in Gaode's box does not pause", async () => {
+    const page = await open('https://ditu.amap.com/');
     const tools = createPlaywrightUnifiedExecutor(page, { observationV2: true });
     try {
       const state = JSON.parse((await tools.execute({ tool: 'read_page' } as never)).text);
-      const ref = state.tree.match(/(?:combobox|textbox)[^\n]*\[ref=(e\d+)\]/)![1];
-      return await tools.execute({
+      const ref = state.tree.match(/textbox[^\n]*\[ref=(e\d+)\]/)![1];
+      const r = await tools.execute({
         tool: 'type',
         ref,
         text: '西湖断桥',
         submit: true,
         observationRevision: state.observationRevision,
       } as never);
+      expect(r.interruption).toBeUndefined();
     } finally {
       tools.dispose();
       await page.close();
     }
-  };
-
-  it('a search that reads results does not pause', async () => {
-    const r = await enter('/combobox');
-    expect(r.interruption).toBeUndefined();
-  }, 30_000);
-
-  it('the same box with no read after Enter pauses', async () => {
-    const r = await enter('/no-read');
-    expect(r.interruption).toMatchObject({ reason: 'unexpected_effect' });
-    expect(r.effect?.triggers?.map((t) => t.branch)).toContain('search_without_read');
   }, 30_000);
 });

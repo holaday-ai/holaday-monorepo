@@ -19,9 +19,12 @@ export type CaptchaHandoffResult =
   | 'cancelled'
   | 'timeout'
   | 'error';
-/** What the person did during one wait: the evidence behind `resumed` versus `cleared`. */
+/**
+ * What the person did during one wait: the evidence behind `resumed` versus `cleared`. Counts and
+ * first / last times are of this wait only, and only presses, keys, text and navigations.
+ */
 export interface CaptchaHandoffActivity extends HumanInputLog {
-  /** Inputs admitted during this wait only. */
+  /** Acting inputs during this wait (the same as `count`). */
   inputs: number;
   /** The person pressed 我已完成 and the wall was gone. */
   confirmed: boolean;
@@ -92,8 +95,8 @@ export class CaptchaHandoffs {
     let failedRounds = 0;
     let alternateChosen = false;
     let confirmed = false;
-    const inputsBefore = o.control.humanInputLog().count;
-    const inputsDuring = () => o.control.humanInputLog().count - inputsBefore;
+    const startedAt = Date.now();
+    const inputsDuring = () => o.control.humanInputLog(startedAt).count;
     let challenge: ChallengeInfo | null = null;
     let stopped = false;
     const stop = (reason: CaptchaHandoffResult) => {
@@ -175,7 +178,8 @@ export class CaptchaHandoffs {
       if (outcome === 'resumed' && !confirmed && inputsDuring() === 0) outcome = 'cleared';
       return outcome;
     } finally {
-      o.onActivity?.({ ...o.control.humanInputLog(), inputs: inputsDuring(), confirmed });
+      const log = o.control.humanInputLog(startedAt);
+      o.onActivity?.({ ...log, inputs: log.count, confirmed });
       clearTimeout(timeout);
       clearInterval(poll);
       o.signal?.removeEventListener('abort', abort);

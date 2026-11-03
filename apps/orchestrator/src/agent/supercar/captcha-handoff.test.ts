@@ -52,8 +52,8 @@ it('wall → human lease → clear wall → automatic resume; agent is excluded 
 it('FIX-53 #1: input from the person during the wait makes the automatic resume theirs', async () => {
   const f = await fixture();
   const lease = f.control.snapshot().lease!;
-  await f.control.runHuman(lease, async () => {});
-  await f.control.runHuman(lease, async () => {});
+  await f.control.runHuman(lease, async () => {}, 'mouseDown');
+  await f.control.runHuman(lease, async () => {}, 'insertText');
   f.clear();
   await vi.advanceTimersByTimeAsync(50);
   expect(await f.result).toBe('resumed');
@@ -63,7 +63,7 @@ it('FIX-53 #1: input from the person during the wait makes the automatic resume 
 });
 it('FIX-53 #1: a wait that times out still logs what the person did', async () => {
   const f = await fixture();
-  await f.control.runHuman(f.control.snapshot().lease!, async () => {});
+  await f.control.runHuman(f.control.snapshot().lease!, async () => {}, 'keyDown');
   await vi.advanceTimersByTimeAsync(1000);
   expect(await f.result).toBe('timeout');
   expect(f.activity).toHaveBeenCalledWith(expect.objectContaining({ inputs: 1 }));
@@ -137,4 +137,50 @@ it('cancellation wins a race with resume persistence', async () => {
   await vi.advanceTimersByTimeAsync(50);
   expect(await f.result).toBe('cancelled');
   expect(f.control.snapshot().phase).toBe('closed');
+});
+it('FIX-53 #1 (协调方): moving, scrolling and the viewport are not the person acting', async () => {
+  const f = await fixture();
+  const lease = f.control.snapshot().lease!;
+  for (const kind of ['mouseMove', 'scroll', 'viewport', 'mouseUp', 'keyUp'] as const)
+    await f.control.runHuman(lease, async () => {}, kind);
+  await f.control.runHuman(lease, async () => {});
+  f.clear();
+  await vi.advanceTimersByTimeAsync(50);
+  expect(await f.result).toBe('cleared');
+  expect(f.activity).toHaveBeenCalledWith(
+    expect.objectContaining({ inputs: 0, count: 0, firstAt: null, lastAt: null }),
+  );
+});
+it('FIX-53 #1 (协调方): first and last are of this wait, not of the session', async () => {
+  vi.useFakeTimers();
+  const control = new BrowserControl();
+  const registry = new CaptchaHandoffs();
+  const run = async (act: boolean) => {
+    let wall = true;
+    const activity = vi.fn();
+    const result = registry.wait({
+      taskId: 't',
+      userId: 'u',
+      control,
+      hasWall: async () => wall,
+      onWaiting: async () => {},
+      onResumed: async () => true,
+      onActivity: activity,
+      timeoutMs: 1000,
+      pollMs: 50,
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    if (act) await control.runHuman(control.snapshot().lease!, async () => {}, 'navigate');
+    await vi.advanceTimersByTimeAsync(100);
+    wall = false;
+    await vi.advanceTimersByTimeAsync(50);
+    return { result: await result, logged: activity.mock.calls[0]![0] };
+  };
+  const first = await run(true);
+  expect(first.result).toBe('resumed');
+  await vi.advanceTimersByTimeAsync(5_000);
+  const second = await run(false);
+  expect(second.result).toBe('cleared');
+  expect(second.logged).toMatchObject({ inputs: 0, firstAt: null, lastAt: null });
+  expect(first.logged.firstAt).toBeTypeOf('number');
 });

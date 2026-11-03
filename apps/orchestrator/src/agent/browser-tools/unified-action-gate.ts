@@ -64,12 +64,6 @@ interface SubmitContext {
   fieldSignal: string;
   hasAmountField: boolean;
   searchLike: boolean;
-  /**
-   * FIX-53 #6 (Deploy-53 local b-m01): only a weak sign of a search box — role searchbox /
-   * combobox, or a 「搜索」 placeholder — on no form that posts. Enter goes through only for it,
-   * and the observer still pauses unless a read request follows (cloud-observation).
-   */
-  searchBox: boolean;
 }
 
 /**
@@ -245,7 +239,10 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
     (el.getAttribute('id') === 'autocomplete-search-bar' &&
       /(?:^|\.)bestbuy\.com$/i.test(location.hostname)) ||
     (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
-      /(?:^|\.)amap\.com$/i.test(location.hostname));
+      /(?:^|\.)amap\.com$/i.test(location.hostname)) ||
+    // FIX-53 #6 (Deploy-53 local b-m01): the page Gaode serves the cloud browser has a bare
+    // `#searchipt` (no class, no form; DOM checked 2026-11-03), where Enter searches.
+    (el.getAttribute('id') === 'searchipt' && /(?:^|\.)amap\.com$/i.test(location.hostname));
   // YouTube's search form posts to /results (FIX-31 core-04).
   const formSearch =
     !!form &&
@@ -288,11 +285,6 @@ const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
     fieldSignal: parts.join(' ').slice(0, 1200),
     hasAmountField,
     searchLike: !chatLike && (formSearch || fieldSearch) && method !== 'post',
-    searchBox:
-      !chatLike &&
-      method !== 'post' &&
-      (['searchbox', 'combobox'].includes(el.getAttribute('role') || '') ||
-        /搜索|search/i.test(el.getAttribute('placeholder') || '')),
   };
 };
 
@@ -759,7 +751,7 @@ export async function describeUnifiedAction(
           : null;
       // No visible submit control is not an exemption: Enter still submits.
       const unverified =
-        !transactional && !form.submitControl && !form.searchLike && !form.searchBox
+        !transactional && !form.submitControl && !form.searchLike
           ? '无法确认回车会提交什么（表单没有可识别的提交按钮）'
           : null;
       return {

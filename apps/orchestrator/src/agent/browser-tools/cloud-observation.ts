@@ -1243,8 +1243,6 @@ type ActionWindow = {
   action: string;
   /** FIX-30: a `type` into the page's search box. */
   searchField?: boolean;
-  /** FIX-53 #6: only a weak search sign (role / placeholder): a read must follow its Enter. */
-  searchBox?: boolean;
 };
 
 /**
@@ -2332,10 +2330,7 @@ export class CloudObservation {
       lastActivity: Date.now(),
       action: action.tool,
       ...(action.tool === 'type' && 'ref' in action && action.ref
-        ? {
-            searchField: await searchFieldAt(this.locator(frame, action.ref)),
-            searchBox: await weakSearchBoxAt(this.locator(frame, action.ref)),
-          }
+        ? { searchField: await searchFieldAt(this.locator(frame, action.ref)) }
         : {}),
     };
     this.actionWindow = window;
@@ -2389,17 +2384,8 @@ export class CloudObservation {
       ((after?.interceptedSearchEnter ?? 0) > (before.interceptedSearchEnter ?? 0) &&
         after?.url === before.url &&
         after?.dom === before.dom);
-    // FIX-53 #6: an Enter let through on a weak search sign alone must be followed by a read
-    // (a GET for results or a new page); without one it is not known to be a search.
-    const unreadSearch =
-      action.tool === 'type' &&
-      !!action.submit &&
-      !!window.searchBox &&
-      !window.searchField &&
-      !this.requests.some((r) => !r.write && /^GET:(?:xhr|fetch|document)$/.test(r.category));
     const unexpected =
       writes.length > 0 ||
-      unreadSearch ||
       (action.tool === 'type' && action.submit && enterIntercepted) ||
       (window.interactive && opened.some((p) => TRANSACTION_PAGE_RE.test(p.url()))) ||
       (window.interactive &&
@@ -2412,13 +2398,6 @@ export class CloudObservation {
         branch: 'new_transaction_receipt',
         method: '',
         url: safeObservationUrl(after?.url ?? before.url),
-        action: action.tool,
-      });
-    if (unreadSearch)
-      triggers.push({
-        branch: 'search_without_read',
-        method: '',
-        url: safeObservationUrl(before.url),
         action: action.tool,
       });
     if (action.tool === 'type' && action.submit && enterIntercepted)
@@ -2512,30 +2491,6 @@ export class CloudObservation {
  * FIX-30: whether a `type` target is the page's search box (the executor's
  * fieldKind test, plus a search word in its name/placeholder/label).
  */
-/** FIX-53 #6: role searchbox / combobox or a 「搜索」 placeholder, never a chat box. */
-async function weakSearchBoxAt(target: Locator): Promise<boolean> {
-  try {
-    return await target.evaluate(
-      (el) =>
-        !/客服|聊天|留言|咨询|对话|\bchat|\bmessages?\b|\bask\b|\bsupport\b|\bconversation/i.test(
-          [
-            el.getAttribute('name'),
-            el.id,
-            el.getAttribute('placeholder'),
-            el.getAttribute('aria-label'),
-            el.getAttribute('class'),
-          ].join(' '),
-        ) &&
-        (['searchbox', 'combobox'].includes(el.getAttribute('role') || '') ||
-          /搜索|search/i.test(el.getAttribute('placeholder') || '')),
-      undefined,
-      { timeout: 1000 },
-    );
-  } catch {
-    return false;
-  }
-}
-
 async function searchFieldAt(target: Locator): Promise<boolean> {
   try {
     // FIX-30 review blocker 1: only a strong signal makes a search box — a weak one
@@ -2585,7 +2540,9 @@ async function searchFieldAt(target: Locator): Promise<boolean> {
           (el.id === 'autocomplete-search-bar' &&
             /(?:^|\.)bestbuy\.com$/i.test(location.hostname)) ||
           (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
-            /(?:^|\.)amap\.com$/i.test(location.hostname))
+            /(?:^|\.)amap\.com$/i.test(location.hostname)) ||
+          // FIX-53 #6: Gaode's bare `#searchipt` on the page it serves the cloud browser.
+          (el.id === 'searchipt' && /(?:^|\.)amap\.com$/i.test(location.hostname))
         );
       },
       undefined,

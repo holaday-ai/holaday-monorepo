@@ -46,15 +46,19 @@ export function createOwnedScreencastInputBridge(options: {
       await options.beforeDispatch?.(envelope, signal);
     },
     onViewportRequested: options.onViewportRequested,
-    runOwnedInput: async (lease, action) => {
+    runOwnedInput: async (lease, action, kind) => {
       if (!allowed()) throw new Error('MAINTENANCE_INPUT_CLOSED');
       const session = current();
       if (!session) throw new Error('browser_control_unavailable');
-      await session.control.runHuman(lease ?? '', async (signal) => {
-        if (current() !== session) throw new Error('browser_session_changed');
-        if (options.releasePressed) session.control.beforeHandback(options.releasePressed);
-        await input(() => action(signal));
-      });
+      await session.control.runHuman(
+        lease ?? '',
+        async (signal) => {
+          if (current() !== session) throw new Error('browser_session_changed');
+          if (options.releasePressed) session.control.beforeHandback(options.releasePressed);
+          await input(() => action(signal));
+        },
+        kind,
+      );
     },
     queueViewport: (action) => {
       if (!allowed()) return;

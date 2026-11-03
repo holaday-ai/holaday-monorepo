@@ -21,6 +21,8 @@ interface DeferredScreencastInputBridgeOptions {
   runOwnedInput?: (
     lease: string | undefined,
     action: (signal: AbortSignal) => Promise<void>,
+    /** FIX-53 #1: which input it is, so only presses, keys and text count as the person acting. */
+    kind: InputMessage['type'],
   ) => Promise<void>;
   /** Accepted immediately; applied and acknowledged only at a runner checkpoint. */
   queueViewport?: (action: (signal: AbortSignal) => Promise<void>) => void;
@@ -147,7 +149,7 @@ export class DeferredScreencastInputBridge {
     } else if (this.runOwnedInput) {
       // A guarded input connection must never silently bypass layout coordination.
       if (message.type === 'viewport') throw new Error('browser_viewport_coordinator_required');
-      await this.runOwnedInput(lease, action);
+      await this.runOwnedInput(lease, action, message.type);
     } else {
       await action();
     }
