@@ -260,3 +260,39 @@ it('an answer after 换个方式继续 says it does not come from the walled pag
     await f.run;
   }
 }, 10000);
+
+it('FIX-52 #8: the browser closing under the wait is no cleared wall: no resume, no raw reason', async () => {
+  const ended: boolean[] = [];
+  const s = await scenario(3000, undefined, {
+    onCaptchaHandoffEnd: async (resumed: boolean) => {
+      ended.push(resumed);
+      return true;
+    },
+  });
+  await s.waiting;
+  await s.page.close();
+  const out = await s.run;
+  expect(ended).toEqual([false]);
+  expect(out.status).toBe('failed');
+  expect(JSON.stringify(out)).not.toContain('stale_context');
+  expect((out as { reason?: string }).reason).toContain('云端浏览器已关闭');
+  expect(s.calls.filter((name: string) => name === 'read_page')).toHaveLength(0);
+});
+
+it('FIX-52 #8: the browser is kept from idle reclaim for as long as the wait lasts', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  try {
+    const kept = vi.fn();
+    const s = await scenario(3000, undefined, { onBrowserKeepAlive: kept });
+    await s.waiting;
+    vi.advanceTimersByTime(90_000);
+    expect(kept.mock.calls.length).toBeGreaterThanOrEqual(3);
+    captchaHandoffs.cancel('captcha-fixture', 'fixture-user', s.control);
+    kept.mockClear();
+    await s.run;
+    vi.advanceTimersByTime(90_000);
+    expect(kept).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});

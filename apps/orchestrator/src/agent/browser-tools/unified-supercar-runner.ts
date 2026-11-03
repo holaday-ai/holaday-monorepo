@@ -40,6 +40,8 @@ import type { UnifiedBrowserAction } from './unified-tools.js';
 const MAX_GROUNDED_LINKS = 600;
 /** Same takeover window as the legacy loop: a parked task waits this long for the user. */
 const HANDOFF_WAIT_MS = 30 * 60_000;
+/** Well under the pool's idle reclaim (BROWSER_IDLE_TIMEOUT_MS, default 5 minutes). */
+const BROWSER_KEEP_ALIVE_MS = 30_000;
 const CANCEL_POLL_MS = 2_000;
 
 interface ParkedTask {
@@ -563,13 +565,22 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             captchaHandoffWanted: () => !opts.searchWallReplaceable?.(page.url()),
             captchaHandoff: async (_message: string) => {
               suspendTimeout();
+              // FIX-52 #8 (Deploy-52 wall-zhihu): nobody watching the panel, the pool's 5-minute idle
+              // reclaim closed the browser under a wait that promises 10 minutes.
+              const keepBrowser = setInterval(() => {
+                void safe(() => opts.onBrowserKeepAlive?.());
+              }, BROWSER_KEEP_ALIVE_MS);
               try {
                 await replay?.pause();
                 const result = await captchaHandoffs.wait({
                   taskId: opts.taskId,
                   userId: opts.userExternalId ?? '',
                   control: control!,
+                  pageGone: () => (tools.observation?.page ?? page).isClosed(),
                   hasWall: async () => {
+                    // A closed page shows no wall, and that does not mean the user cleared it.
+                    if ((tools.observation?.page ?? page).isClosed())
+                      throw new Error('stale_context');
                     const hit = await tools.blocker();
                     return (
                       hit?.reason === 'captcha' &&
@@ -597,7 +608,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                     result === 'timeout'
                       ? '等待用户完成验证码已超时，任务未完成。'
                       : result === 'error'
-                        ? '验证码接管通道异常关闭，任务未完成，请稍后重试。'
+                        ? (tools.observation?.page ?? page).isClosed()
+                          ? '等待验证时云端浏览器已关闭，任务未完成，请重新执行。'
+                          : '验证码接管通道异常关闭，任务未完成，请稍后重试。'
                         : '用户已放弃验证，任务未完成。';
                   handoffPlatform = result === 'error';
                   await opts.onCaptchaHandoffEnd?.(false);
@@ -607,6 +620,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                 if (result === 'resumed' || result === 'alternate') replay?.resume();
                 return result === 'alternate' ? 'alternate' : result === 'resumed';
               } finally {
+                clearInterval(keepBrowser);
                 // Same as parkForReply: the budget resumes whatever the handoff ended with.
                 resumeTimeout();
               }
@@ -616,6 +630,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       observationV2: capabilities.observationV2,
       requireBrowserEvidence: true,
       supportedTools: tools.supportedTools,
+      controlLabels: tools.controlLabels,
       probeBlocker: async () => {
         const blocker = await tools.blocker();
         if (blocker && 'evidence' in blocker) {

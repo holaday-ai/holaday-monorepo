@@ -6611,6 +6611,9 @@ export const tasksRouter = router({
                       );
                     }
                   },
+                  onBrowserKeepAlive() {
+                    if (ctx.browserPool && perUserExec) ctx.browserPool.touch(taskId);
+                  },
                   async onCaptchaHandoffEnd(resumed) {
                     if (!resumed) {
                       captchaNeedsRelease = true;

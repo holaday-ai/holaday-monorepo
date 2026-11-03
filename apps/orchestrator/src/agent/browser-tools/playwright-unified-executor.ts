@@ -756,6 +756,21 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     async blocker() {
       return probeBrowserBlocker(observation?.page ?? page, options.taskIntent);
     },
+    async controlLabels() {
+      const target = observation?.page ?? page;
+      const read = target.frames().map((frame) =>
+        frame
+          .evaluate(() =>
+            Array.from(document.querySelectorAll('[aria-label],[title]'))
+              .slice(0, 300)
+              .flatMap((el) => [el.getAttribute('aria-label'), el.getAttribute('title')])
+              .filter((label): label is string => !!label?.trim()),
+          )
+          .catch(() => [] as string[]),
+      );
+      const labels = (await Promise.all(read)).flat();
+      return labels.length ? [await redactPageText(target, labels.join('\n'))] : [];
+    },
     snapshot: snapshotText,
     observation,
     releasePlayback,

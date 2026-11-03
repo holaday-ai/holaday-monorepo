@@ -209,6 +209,11 @@ export interface FactAssessment {
    * at) — when they are the only contradictions, they get their own one correction.
    */
   unreadPrices?: string[];
+  /**
+   * FIX-52 #2 (Deploy-52 reg-new-amazon-sg): prices written as 「未获取到」 where the read was cut at
+   * its size budget: the page may well show them, and they get one correction to read further.
+   */
+  cutPrices?: string[];
 }
 
 interface Fact {
@@ -784,6 +789,91 @@ function cutQuote(candidates: string[], values: string[]): string | undefined {
   return undefined;
 }
 
+/**
+ * FIX-52 #1 (Deploy-52 core-04): 「说明：…（如 "Playwright Beginner Tutorials"、…），已按要求剔除」 and
+ * 「kind="playlist"」 say what the answer left out, not a video it claims. Every mention has to be so,
+ * and only the name inside the left-out part counts (DEPLOY-53 step 0): 「如 X…已剔除」, 「X 已排除」,
+ * 「排除了 X」, or a bracket the verb leads. The word elsewhere in the sentence (「X，已剔除广告」,
+ * 「「X」（已过滤 Shorts）」, 「已排除广告后的第二个视频：X」) leaves the name a claim.
+ */
+const LEFT_OUT_VERB = '(?:排除|剔除|过滤|去掉|去除|略去|跳过|未计入|不计入)';
+const OPEN_QUOTE = '["\'“「『]?';
+const CLOSE_QUOTE = '["\'”」』]?';
+/** The names listed ahead of this one: 「A、B、」「"A", "B", 」. */
+const LISTED_AHEAD = '(?:[^、,，/（）()。；;:：\\n]{1,60}?\\s*(?:、|,|/|和|及|与|以及)\\s*)*';
+/** 「排除了 X」「剔除掉 A、X」, or a bracket the verb leads: 「（已剔除：A、X）」. */
+const VERB_LEADS_RE = new RegExp(
+  `(?:${LEFT_OUT_VERB}(?:了|掉了?)|[（(]\\s*(?:已经?|已被|均已|都已)?\\s*${LEFT_OUT_VERB}(?:了|掉了?)?\\s*[:：]?)\\s*${LISTED_AHEAD}${OPEN_QUOTE}\\s*$`,
+);
+/** 「X 已排除」: the verb right after the name ends its clause. */
+const VERB_FOLLOWS_RE = new RegExp(
+  `^${CLOSE_QUOTE}\\s*(?:已经?|已被|被|均已|都已|也已)\\s*${LEFT_OUT_VERB}(?:了|掉了?)?\\s*(?:[）)，,。；;]|$)`,
+);
+/** 「（如 A、X」「播放列表如 X」: the examples, from their word to this name. */
+const EXAMPLE_LEADS_RE = new RegExp(
+  `(?:例如|比如|诸如|如|e\\.g\\.|such as)\\s*${LISTED_AHEAD}${OPEN_QUOTE}\\s*$`,
+  'i',
+);
+/** …the rest of the examples, then the verb: 「、Y 等），已按要求剔除」. */
+const EXAMPLE_ENDS_RE = new RegExp(
+  `^${CLOSE_QUOTE}(?:\\s*(?:、|,|/|和|及|与|以及)\\s*${OPEN_QUOTE}[^、,，/（）()。；;:："'“”「」『』\\n]{1,60}${CLOSE_QUOTE})*\\s*(?:等[^\\s，,。；;（）()]{0,6})?\\s*[）)]?\\s*[，,]?\\s*(?:(?:这些|此类|上述|以上|均|都|已经?|被|已被|按要求|一并|全部)\\s*)*${LEFT_OUT_VERB}`,
+);
+/** The links tool's own kinds: 「kind="playlist"」 is its word, 「kind="Some Title"」 is a quote. */
+const LINK_KINDS = new Set([
+  'video',
+  'playlist',
+  'channel',
+  'short',
+  'shorts',
+  'movie',
+  'live',
+  'mix',
+]);
+const KIND_ATTRIBUTE_RE = /\bkind\s*=\s*["'“「]?$/;
+
+function kindAttributeAt(text: string, at: number, name: string): boolean {
+  return LINK_KINDS.has(name.trim().toLowerCase()) && KIND_ATTRIBUTE_RE.test(text.slice(0, at));
+}
+
+function onlyLeftOut(summary: string, value: string): boolean {
+  const name = value.trim().toLowerCase();
+  if (!name) return false;
+  let seen = false;
+  for (const line of unescapeLiteralBreaks(summary).split('\n')) {
+    for (const sentence of line.split(/[。；;]/)) {
+      const lower = sentence.toLowerCase();
+      for (let at = lower.indexOf(name); at >= 0; at = lower.indexOf(name, at + name.length)) {
+        seen = true;
+        const before = sentence.slice(0, at);
+        const after = sentence.slice(at + name.length);
+        const leftOut =
+          kindAttributeAt(sentence, at, name) ||
+          (VERB_LEADS_RE.test(before) && !new RegExp(`^${CLOSE_QUOTE}\\s*的`).test(after)) ||
+          VERB_FOLLOWS_RE.test(after) ||
+          (EXAMPLE_LEADS_RE.test(before) && EXAMPLE_ENDS_RE.test(after));
+        if (!leftOut) return false;
+      }
+    }
+  }
+  return seen;
+}
+
+/** 「links 返回 kind="video" 的项」: the links tool's own word, no page text. */
+function onlyKindAttribute(summary: string, value: string): boolean {
+  const text = unescapeLiteralBreaks(summary);
+  const name = value.trim();
+  let seen = false;
+  for (let at = text.indexOf(name); at >= 0; at = text.indexOf(name, at + name.length)) {
+    if (!kindAttributeAt(text, at, name)) return false;
+    seen = true;
+  }
+  return seen;
+}
+
+/** FIX-52 #2: a numeric label with no number is prose to the facts, so 「价格：未获取到…」 is read here. */
+const UNREAD_PRICE_RE =
+  /(?:价格|售价|现价|price)\s*[*`]*\s*[:：为]\s*[*`]*\s*((?:未读到|未读取到|未获取到|未找到|没有读到|页面未(?:提供|显示|列出)|not (?:shown|found|read)|n\/a)[^\n；;。]*)/giu;
+
 const NOT_READ =
   /^(?:未读到|未读取到|未获取到|未找到|没有读到|页面未(?:提供|显示|列出)|not (?:shown|found|read)|n\/a)[。.]?$/i;
 
@@ -835,6 +925,10 @@ export function assessCompletionFacts(input: {
   const binding: NonNullable<FactAssessment['binding']> = [];
   const hedged: NonNullable<FactAssessment['hedgedNames']> = [];
   const unreadPrices: string[] = [];
+  const readWasCut = input.pages.some((page) => page.text.includes(SNAPSHOT_TRUNCATED));
+  const cutPrices = [...unescapeLiteralBreaks(input.summary).matchAll(UNREAD_PRICE_RE)]
+    .filter((m) => readWasCut || /截断|truncat/i.test(m[1]!))
+    .map((m) => `价格「${m[1]!.slice(0, 40)}」`);
   const seen = new Set<string>();
   const facts = [...explicitFacts(input.fields), ...answerFacts(input.summary, intent)].flatMap(
     (fact): Fact[] => {
@@ -885,6 +979,7 @@ export function assessCompletionFacts(input: {
       continue;
     }
     // The quoted part of a labelled value; a quote's own inner quote is only a piece of it.
+    if (fact.quote && onlyKindAttribute(input.summary, fact.value)) continue;
     const quoted = fact.quote ? undefined : quotedRuns(fact.value)[0]?.quote;
     const candidates = [fact.value, withoutNote(fact.value), quoted, stripEdgeQuotes(fact.value)]
       .filter((v): v is string => Boolean(v))
@@ -903,7 +998,8 @@ export function assessCompletionFacts(input: {
             ['playlist', 'channel'].includes(link.kind ?? '') &&
             candidates.includes(normalizeFact(link.text)),
         ),
-      );
+      ) &&
+      !onlyLeftOut(input.summary, stripEdgeQuotes(fact.value));
     if (isVideoKindMismatch) {
       contradictions.push(`${label} 在页面上是播放列表/频道，不是视频`);
       continue;
@@ -1156,6 +1252,7 @@ export function assessCompletionFacts(input: {
     ...(unreadPrices.length && unreadPrices.length === contradictions.length
       ? { unreadPrices }
       : {}),
+    ...(cutPrices.length ? { cutPrices: cutPrices.slice(0, 8) } : {}),
     ...(hedged.length ? { hedgedNames: hedged.slice(0, 4) } : {}),
   };
 }

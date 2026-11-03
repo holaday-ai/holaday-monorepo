@@ -22,6 +22,8 @@ interface WaitOptions {
   hasWall: () => Promise<boolean>;
   onWaiting: () => Promise<void>;
   onResumed: () => Promise<boolean>;
+  /** FIX-52 #8: the page itself is gone (its browser closed): no wait can end well. */
+  pageGone?: () => boolean;
   /** Challenge kind and hint shown with the card (read-only). */
   challenge?: () => Promise<ChallengeInfo | null>;
   signal?: AbortSignal;
@@ -126,6 +128,10 @@ export class CaptchaHandoffs {
     const abort = () => stop('cancelled');
     const timeout = setTimeout(() => stop('timeout'), o.timeoutMs ?? CAPTCHA_HANDOFF_MS);
     const poll = setInterval(() => {
+      if (o.pageGone?.()) {
+        if (!stopped) stop('error');
+        return;
+      }
       void entry.proceed();
     }, o.pollMs ?? 1000);
     o.signal?.addEventListener('abort', abort, { once: true });
