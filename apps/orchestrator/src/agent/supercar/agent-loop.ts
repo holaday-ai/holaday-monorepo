@@ -753,6 +753,8 @@ export interface RunSupercarOptions {
   browserControl?: BrowserControl;
   captchaWaitMs?: number;
   captchaPollMs?: number;
+  /** FIX-52 #8: keeps the browser from idle reclaim while a captcha wait has it. */
+  onBrowserKeepAlive?: () => void;
   /**
    * CAPTCHA-REDUCE-1: true when a search fallback can replace the walled page
    * (a search API or another engine); such a wall is not handed to the user.

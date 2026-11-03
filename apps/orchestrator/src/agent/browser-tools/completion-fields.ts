@@ -209,6 +209,11 @@ export interface FactAssessment {
    * at) — when they are the only contradictions, they get their own one correction.
    */
   unreadPrices?: string[];
+  /**
+   * FIX-52 #2 (Deploy-52 reg-new-amazon-sg): prices written as 「未获取到」 where the read was cut at
+   * its size budget: the page may well show them, and they get one correction to read further.
+   */
+  cutPrices?: string[];
 }
 
 interface Fact {
@@ -784,6 +789,51 @@ function cutQuote(candidates: string[], values: string[]): string | undefined {
   return undefined;
 }
 
+/**
+ * FIX-52 #1 (Deploy-52 core-04): 「说明：…（如 "Playwright Beginner Tutorials"、…），已按要求剔除」 and
+ * 「kind="playlist"」 say what the answer left out, not a video it claims. Every mention has to be so: a
+ * listed line counts as left out only with the word before the name, so 「1. X（已排除广告）」 stays a claim.
+ */
+const LEFT_OUT_RE =
+  /排除|剔除|除外|去掉|去除|过滤|略去|跳过|未计入|不计入?|未列入|不列入|不算|不属于|不是(?:单个)?视频|非视频|\b(?:excluded?|skipped|filtered|omitted|not counted)\b/i;
+const LISTED_LINE_RE = /^\s*(?:[-*•]|\d+[.)、）])\s*/;
+const KIND_ATTRIBUTE_RE = /\bkind\s*=\s*["'“「]?$/;
+
+function onlyLeftOut(summary: string, value: string): boolean {
+  const name = value.trim().toLowerCase();
+  if (!name) return false;
+  let seen = false;
+  for (const line of unescapeLiteralBreaks(summary).split('\n')) {
+    const listed = LISTED_LINE_RE.test(line);
+    for (const sentence of line.split(/[。；;]/)) {
+      const lower = sentence.toLowerCase();
+      for (let at = lower.indexOf(name); at >= 0; at = lower.indexOf(name, at + name.length)) {
+        seen = true;
+        const before = sentence.slice(0, at);
+        if (!KIND_ATTRIBUTE_RE.test(before) && !LEFT_OUT_RE.test(listed ? before : sentence))
+          return false;
+      }
+    }
+  }
+  return seen;
+}
+
+/** 「links 返回 kind="video" 的项」: the links tool's own word, no page text. */
+function onlyKindAttribute(summary: string, value: string): boolean {
+  const text = unescapeLiteralBreaks(summary);
+  const name = value.trim();
+  let seen = false;
+  for (let at = text.indexOf(name); at >= 0; at = text.indexOf(name, at + name.length)) {
+    if (!KIND_ATTRIBUTE_RE.test(text.slice(0, at))) return false;
+    seen = true;
+  }
+  return seen;
+}
+
+/** FIX-52 #2: a numeric label with no number is prose to the facts, so 「价格：未获取到…」 is read here. */
+const UNREAD_PRICE_RE =
+  /(?:价格|售价|现价|price)\s*[*`]*\s*[:：为]\s*[*`]*\s*((?:未读到|未读取到|未获取到|未找到|没有读到|页面未(?:提供|显示|列出)|not (?:shown|found|read)|n\/a)[^\n；;。]*)/giu;
+
 const NOT_READ =
   /^(?:未读到|未读取到|未获取到|未找到|没有读到|页面未(?:提供|显示|列出)|not (?:shown|found|read)|n\/a)[。.]?$/i;
 
@@ -835,6 +885,10 @@ export function assessCompletionFacts(input: {
   const binding: NonNullable<FactAssessment['binding']> = [];
   const hedged: NonNullable<FactAssessment['hedgedNames']> = [];
   const unreadPrices: string[] = [];
+  const readWasCut = input.pages.some((page) => page.text.includes(SNAPSHOT_TRUNCATED));
+  const cutPrices = [...unescapeLiteralBreaks(input.summary).matchAll(UNREAD_PRICE_RE)]
+    .filter((m) => readWasCut || /截断|truncat/i.test(m[1]!))
+    .map((m) => `价格「${m[1]!.slice(0, 40)}」`);
   const seen = new Set<string>();
   const facts = [...explicitFacts(input.fields), ...answerFacts(input.summary, intent)].flatMap(
     (fact): Fact[] => {
@@ -885,6 +939,7 @@ export function assessCompletionFacts(input: {
       continue;
     }
     // The quoted part of a labelled value; a quote's own inner quote is only a piece of it.
+    if (fact.quote && onlyKindAttribute(input.summary, fact.value)) continue;
     const quoted = fact.quote ? undefined : quotedRuns(fact.value)[0]?.quote;
     const candidates = [fact.value, withoutNote(fact.value), quoted, stripEdgeQuotes(fact.value)]
       .filter((v): v is string => Boolean(v))
@@ -903,7 +958,8 @@ export function assessCompletionFacts(input: {
             ['playlist', 'channel'].includes(link.kind ?? '') &&
             candidates.includes(normalizeFact(link.text)),
         ),
-      );
+      ) &&
+      !onlyLeftOut(input.summary, stripEdgeQuotes(fact.value));
     if (isVideoKindMismatch) {
       contradictions.push(`${label} 在页面上是播放列表/频道，不是视频`);
       continue;
@@ -1156,6 +1212,7 @@ export function assessCompletionFacts(input: {
     ...(unreadPrices.length && unreadPrices.length === contradictions.length
       ? { unreadPrices }
       : {}),
+    ...(cutPrices.length ? { cutPrices: cutPrices.slice(0, 8) } : {}),
     ...(hedged.length ? { hedgedNames: hedged.slice(0, 4) } : {}),
   };
 }

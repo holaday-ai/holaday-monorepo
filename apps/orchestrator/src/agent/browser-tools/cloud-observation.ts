@@ -275,6 +275,20 @@ const BESTBUY_WORD_RE =
   /api|cart|checkout|order|account|identity|signin|login|payment|graphql|gateway|site|services|save|wish|list|profile|remove|add|update|delete|user|reward|subscribe|register|address/i;
 
 /**
+ * FIX-52 #7 (Deploy-52 new-bestbuy `/ZbNw/sBB0/d/H/CUq4bgxg/1LfENmG7YhO9wcartY/U3FqJk0lAg/aQ/ZnF3sdSAU`):
+ * letters that happen to spell a word inside a random run (`9wcartY`) are no word. A word counts as a
+ * whole CamelCase or delimited token (`AddToCart`, `add_to_cart`), or anywhere in a segment of one case
+ * with no digits (`addtocart`), and a version segment counts too.
+ */
+function namesBestBuyWord(segment: string): boolean {
+  if (/^v\d+$/i.test(segment)) return true;
+  if (/^(?:[a-z_-]+|[A-Z_-]+)$/.test(segment)) return BESTBUY_WORD_RE.test(segment);
+  return (segment.match(/[A-Z]?[a-z]+|[A-Z]+/g) ?? []).some((token) =>
+    new RegExp(`^(?:${BESTBUY_WORD_RE.source})$`, 'i').test(token),
+  );
+}
+
+/**
  * 复审 #1: CamelCase words (`/site/CustomerService/api/v2/AddToCart/SubmitOrder`,
  * `/gateway/graphql/AbCd/…`, `/identity/signin/AbCd/…`) are no sensor. A sensor path has
  * 6–12 random segments, none a word or a version, most of them with digits (production:
@@ -294,15 +308,18 @@ export function bestBuySensorShape(url: URL, method: string, postData: string): 
     segments.length > 12 ||
     !segments.every(
       (segment) =>
-        /^[A-Za-z0-9-]{2,24}$/.test(segment) &&
-        (segment.match(/[A-Za-z0-9]/g) ?? []).length >= 2 &&
-        !/^[a-z]+(?:-[a-z]+)+$/i.test(segment),
+        /^[A-Za-z0-9_-]{1,24}$/.test(segment) &&
+        /[A-Za-z0-9]/.test(segment) &&
+        !/^[a-z]+(?:[-_][a-z]+)+$/i.test(segment),
     ) ||
-    segments.some((segment) => BESTBUY_WORD_RE.test(segment) || /^v\d+$/i.test(segment)) ||
+    // FIX-52 #7: a sensor path has a stray one-letter segment or two (`/ZbNw/sBB0/d/H/…`), no more.
+    segments.filter((segment) => segment.length === 1).length > 2 ||
+    segments.some(namesBestBuyWord) ||
     // Random, not words: most segments mix upper and lower case, and carry digits.
     segments.filter((segment) => /[a-z]/.test(segment) && /[A-Z]/.test(segment)).length * 2 <
       segments.length ||
-    segments.filter((segment) => /\d/.test(segment)).length < Math.max(3, segments.length * 0.4)
+    // FIX-52 #7: 2 of 5 (Deploy-51 `/xUJwkAxLQZzw9WGzcA08/QVbE2G9J/XEtocQ/ExkWbCU/YJCMb`).
+    segments.filter((segment) => /\d/.test(segment)).length < Math.max(2, segments.length * 0.4)
   )
     return false;
   // DEPLOY-43 复审 #2: exactly one string member as written (a duplicate key is no sensor), and its
@@ -383,6 +400,10 @@ const AMAP_COLLAPSAR_KEYS = new Set([
   'md5',
   'miniProgramVersion',
   'mode',
+  // FIX-52 #6 (Deploy-52 b-m01 `check:key:tid+timestamp+uid`, 3414 B): checked as device values.
+  'tid',
+  'timestamp',
+  'uid',
 ]);
 const KEYED_LOG_BODY_MAX = 8192;
 /** Keys or values of something a person did or typed — never telemetry. */
@@ -740,9 +761,14 @@ function amapCollapsarCheck(postData: string): string | null {
   const keys = [...form.keys()];
   if (!keys.length || new Set(keys).size !== keys.length) return 'keys:empty-or-repeated';
   const unlisted = keys.filter((key) => !AMAP_COLLAPSAR_KEYS.has(key));
-  if (unlisted.length) return `key:${unlisted.slice(0, 3).join('+')}`;
+  if (unlisted.length) return `key:${unlisted.slice(0, 8).join('+')}`;
   const mode = form.get('mode');
   if (mode !== null && !AMAP_COLLAPSAR_MODES.test(mode)) return `mode=${evidenceValue(mode)}`;
+  const timestamp = form.get('timestamp');
+  if (timestamp !== null && !/^\d{0,16}$/.test(timestamp)) return 'timestamp:not-a-number';
+  // A device or anonymous id: a short token, never free text or an address.
+  const notId = ['tid', 'uid'].find((key) => !/^[\w.-]{0,64}$/.test(form.get(key) ?? ''));
+  if (notId) return `${notId}:not-an-id`;
   // `content` is the SDK's opaque log string: in no reading of it is there a field a person
   // fills in, nor any key/value pair (DEPLOY-43 复审 #1).
   const content = form.get('content') ?? '';

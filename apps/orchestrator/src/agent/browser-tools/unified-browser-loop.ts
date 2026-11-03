@@ -198,6 +198,8 @@ export interface UnifiedBrowserLoopInput {
   captchaHandoffWanted?: () => boolean | Promise<boolean>;
   requireBrowserEvidence?: boolean;
   supportedTools?: { download: boolean; upload: boolean; tabs: boolean };
+  /** FIX-52 #5: the aria-label / title of the current page's controls, for the iframe check. */
+  controlLabels?: () => Promise<string[]>;
   probeBlocker?: () => Promise<{
     reason: string;
     message: string;
@@ -486,6 +488,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   let bindingCorrected = false;
   /** FIX-34: one correction for listed prices no read page shows. */
   let pricesCorrected = false;
+  let cutPricesAsked = false;
   /** FIX-27: YouTube playback pings seen in action effects. */
   let playbackPings = 0;
   let playbackCorrected = false;
@@ -1310,6 +1313,25 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             );
             continue;
           }
+          // FIX-52 #2 (Deploy-52 reg-new-amazon-sg): 「价格：未获取到（快照被截断）」 is not the page's
+          // truth until the page was read past the cut; a snapshot starts at the top again, so
+          // scrolling alone does not get there.
+          if (!blocking && facts.cutPrices?.length && !cutPricesAsked && !concludeNow) {
+            cutPricesAsked = true;
+            await rejected(
+              summary,
+              given,
+              `价格写成未获取到，但读取在截断处结束：${facts.cutPrices.join('；')}`,
+            );
+            results.push(
+              toolResult(
+                call.id,
+                `${facts.cutPrices.join('；')}：页面快照有长度上限，这只说明快照在这里截断了，不说明页面没有价格，再 snapshot 也还是从头开始。请用 get_page_text 分段读取（沿 cursor 往下读，直到读到这个商品或 end=true），读到后照页面原样写；读完确实没有，才写「未获取到」。其余内容不变，再 finish。`,
+                true,
+              ),
+            );
+            continue;
+          }
           if (blocking) {
             await rejected(summary, given, blocking);
             // FIX-36 (Deploy-36 core-10): when what is left is only a part the task named
@@ -1628,23 +1650,48 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           }
           // FIX-50 (Deploy-50 core-10): what the answer says is in an iframe is what the run read
           // from it; not read (or said otherwise), it is sent back once to read it, then 部分完成.
+          const framePages = () => [
+            ...pageEvidence.map((page) => `${page.sourceURL ?? ''} ${page.text}`),
+            // What a native dialog said is a page's own text too (FIX-52 #9: 「弹窗消息为 "…"」).
+            dialogReceipts(trace),
+          ];
+          const typedTexts = () =>
+            trace.flatMap((entry) =>
+              entry.ok && entry.tool === 'type' && entry.typedText ? [entry.typedText] : [],
+            );
           let frameGap = iframeContentGap(
             input.userIntent ?? input.intent,
             summary,
             [...frameReads.values()],
             framesSeen,
-            pageEvidence.map((page) => `${page.sourceURL ?? ''} ${page.text}`),
-            trace.flatMap((entry) =>
-              entry.ok && entry.tool === 'type' && entry.typedText ? [entry.typedText] : [],
-            ),
+            framePages(),
+            typedTexts(),
           );
+          // FIX-52 #5: 「关闭按钮可用」, and the read did not have what the page calls that button:
+          // before sending it back, the names its controls carry in aria-label / title.
+          if (frameGap?.kind === 'mismatch' && !frameGap.other && input.controlLabels) {
+            const labels = await input.controlLabels().catch(() => []);
+            if (labels.length)
+              frameGap = iframeContentGap(
+                input.userIntent ?? input.intent,
+                summary,
+                [...frameReads.values()],
+                framesSeen,
+                [...framePages(), labels.join(' ')],
+                typedTexts(),
+              );
+          }
           // DEPLOY-51 review #1 (#3): an iframe the task did not ask for, said to hold what no read
           // shows: that clause is taken out, and the task is not marked down for it.
           if (frameGap?.kind === 'drop') {
             answer = dropClauses(answer, frameGap.clauses);
             frameGap = null;
           }
-          const frameLead = frameGap && FRAME_GAP_LEAD[frameGap.kind];
+          const frameLead =
+            frameGap &&
+            (frameGap.kind === 'mismatch' && frameGap.other
+              ? '部分完成：答案中有内容与本次读到的页面不一致。'
+              : FRAME_GAP_LEAD[frameGap.kind]);
           if (frameGap && !frameLooked && !concludeNow) {
             frameLooked = true;
             await rejected(summary, given, frameLead!);
@@ -2286,6 +2333,8 @@ const FRAME_GAP_LEAD: Record<Exclude<FrameGap['kind'], 'drop'>, string> = {
 function frameRemedy(gap: Exclude<FrameGap, { kind: 'drop' }>): string {
   if (gap.kind === 'unread')
     return '任务要读 iframe 里的内容（或答案写了它的内容），但本次还没有读到这个 iframe 本身：父页面的快照不含 iframe 里的内容，「跨源」只是说父页面看不到它，不是它的内容。请先 snapshot 当前页，在返回的 frames 列表里找到这个 iframe 的 frameId，用 read_page（带这个 frameId）读取它，照读到的原样写；读到的是空白就写「iframe 为空」。页面整体加载失败（如 Application error）就重新打开再读。仍读不到，就以「部分完成」交付并写明「iframe 内容没有读到」，不要猜它的内容。';
+  if (gap.kind === 'mismatch' && gap.other)
+    return `答案里「${gap.other.slice(0, 60)}」这句说的东西，本次读到的页面上没有。只写读到的内容；没读到的就删掉这句，其余不变，再 finish。`;
   const read = gap.read ? `「${gap.read}」` : '空白（就写「iframe 为空」）';
   return gap.kind === 'mismatch'
     ? `答案里 iframe 的内容和本次读到的不一致：最近一次读到的 iframe 内容是${read}。请按读到的原样改写 iframe 部分（不要写没读到的内容，也不要说成错误页或跨源），其余不变，再 finish。`
