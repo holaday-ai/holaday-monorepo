@@ -791,27 +791,67 @@ function cutQuote(candidates: string[], values: string[]): string | undefined {
 
 /**
  * FIX-52 #1 (Deploy-52 core-04): 「说明：…（如 "Playwright Beginner Tutorials"、…），已按要求剔除」 and
- * 「kind="playlist"」 say what the answer left out, not a video it claims. Every mention has to be so: a
- * listed line counts as left out only with the word before the name, so 「1. X（已排除广告）」 stays a claim.
+ * 「kind="playlist"」 say what the answer left out, not a video it claims. Every mention has to be so,
+ * and only the name inside the left-out part counts (DEPLOY-53 step 0): 「如 X…已剔除」, 「X 已排除」,
+ * 「排除了 X」, or a bracket the verb leads. The word elsewhere in the sentence (「X，已剔除广告」,
+ * 「「X」（已过滤 Shorts）」, 「已排除广告后的第二个视频：X」) leaves the name a claim.
  */
-const LEFT_OUT_RE =
-  /排除|剔除|除外|去掉|去除|过滤|略去|跳过|未计入|不计入?|未列入|不列入|不算|不属于|不是(?:单个)?视频|非视频|\b(?:excluded?|skipped|filtered|omitted|not counted)\b/i;
-const LISTED_LINE_RE = /^\s*(?:[-*•]|\d+[.)、）])\s*/;
+const LEFT_OUT_VERB = '(?:排除|剔除|过滤|去掉|去除|略去|跳过|未计入|不计入)';
+const OPEN_QUOTE = '["\'“「『]?';
+const CLOSE_QUOTE = '["\'”」』]?';
+/** The names listed ahead of this one: 「A、B、」「"A", "B", 」. */
+const LISTED_AHEAD = '(?:[^、,，/（）()。；;:：\\n]{1,60}?\\s*(?:、|,|/|和|及|与|以及)\\s*)*';
+/** 「排除了 X」「剔除掉 A、X」, or a bracket the verb leads: 「（已剔除：A、X）」. */
+const VERB_LEADS_RE = new RegExp(
+  `(?:${LEFT_OUT_VERB}(?:了|掉了?)|[（(]\\s*(?:已经?|已被|均已|都已)?\\s*${LEFT_OUT_VERB}(?:了|掉了?)?\\s*[:：]?)\\s*${LISTED_AHEAD}${OPEN_QUOTE}\\s*$`,
+);
+/** 「X 已排除」: the verb right after the name ends its clause. */
+const VERB_FOLLOWS_RE = new RegExp(
+  `^${CLOSE_QUOTE}\\s*(?:已经?|已被|被|均已|都已|也已)\\s*${LEFT_OUT_VERB}(?:了|掉了?)?\\s*(?:[）)，,。；;]|$)`,
+);
+/** 「（如 A、X」「播放列表如 X」: the examples, from their word to this name. */
+const EXAMPLE_LEADS_RE = new RegExp(
+  `(?:例如|比如|诸如|如|e\\.g\\.|such as)\\s*${LISTED_AHEAD}${OPEN_QUOTE}\\s*$`,
+  'i',
+);
+/** …the rest of the examples, then the verb: 「、Y 等），已按要求剔除」. */
+const EXAMPLE_ENDS_RE = new RegExp(
+  `^${CLOSE_QUOTE}(?:\\s*(?:、|,|/|和|及|与|以及)\\s*${OPEN_QUOTE}[^、,，/（）()。；;:："'“”「」『』\\n]{1,60}${CLOSE_QUOTE})*\\s*(?:等[^\\s，,。；;（）()]{0,6})?\\s*[）)]?\\s*[，,]?\\s*(?:(?:这些|此类|上述|以上|均|都|已经?|被|已被|按要求|一并|全部)\\s*)*${LEFT_OUT_VERB}`,
+);
+/** The links tool's own kinds: 「kind="playlist"」 is its word, 「kind="Some Title"」 is a quote. */
+const LINK_KINDS = new Set([
+  'video',
+  'playlist',
+  'channel',
+  'short',
+  'shorts',
+  'movie',
+  'live',
+  'mix',
+]);
 const KIND_ATTRIBUTE_RE = /\bkind\s*=\s*["'“「]?$/;
+
+function kindAttributeAt(text: string, at: number, name: string): boolean {
+  return LINK_KINDS.has(name.trim().toLowerCase()) && KIND_ATTRIBUTE_RE.test(text.slice(0, at));
+}
 
 function onlyLeftOut(summary: string, value: string): boolean {
   const name = value.trim().toLowerCase();
   if (!name) return false;
   let seen = false;
   for (const line of unescapeLiteralBreaks(summary).split('\n')) {
-    const listed = LISTED_LINE_RE.test(line);
     for (const sentence of line.split(/[。；;]/)) {
       const lower = sentence.toLowerCase();
       for (let at = lower.indexOf(name); at >= 0; at = lower.indexOf(name, at + name.length)) {
         seen = true;
         const before = sentence.slice(0, at);
-        if (!KIND_ATTRIBUTE_RE.test(before) && !LEFT_OUT_RE.test(listed ? before : sentence))
-          return false;
+        const after = sentence.slice(at + name.length);
+        const leftOut =
+          kindAttributeAt(sentence, at, name) ||
+          (VERB_LEADS_RE.test(before) && !new RegExp(`^${CLOSE_QUOTE}\\s*的`).test(after)) ||
+          VERB_FOLLOWS_RE.test(after) ||
+          (EXAMPLE_LEADS_RE.test(before) && EXAMPLE_ENDS_RE.test(after));
+        if (!leftOut) return false;
       }
     }
   }
@@ -824,7 +864,7 @@ function onlyKindAttribute(summary: string, value: string): boolean {
   const name = value.trim();
   let seen = false;
   for (let at = text.indexOf(name); at >= 0; at = text.indexOf(name, at + name.length)) {
-    if (!KIND_ATTRIBUTE_RE.test(text.slice(0, at))) return false;
+    if (!kindAttributeAt(text, at, name)) return false;
     seen = true;
   }
   return seen;

@@ -79,6 +79,31 @@ describe('FIX-52 #1 · core-04: what the answer says it left out is not a video 
   ])('a playlist given as a video is still caught: %s', (summary) => {
     expect(check(summary).join()).toContain('播放列表/频道');
   });
+
+  // DEPLOY-53 step 0: the word somewhere in the sentence is not the name being left out.
+  it.each([
+    '第1个视频是 "Playwright Beginner Tutorials"，已剔除广告。',
+    '视频：「Playwright Beginner Tutorials」（已过滤 Shorts）',
+    '- 已排除广告后的第二个视频："Playwright Beginner Tutorials"',
+  ])('the left-out word away from the name leaves it a claim: %s', (summary) => {
+    expect(check(summary).join()).toContain('播放列表/频道');
+  });
+
+  it('kind= holds only a kind the links tool gives; any other quote is checked', () => {
+    // As online (deb7ed38): the made-up quote is not page text.
+    expect(check('视频 kind="Fabricated Title Here" 排第一。')).toEqual([
+      '原文引用「Fabricated Title Here」 不是已读页面中的原文',
+    ]);
+  });
+
+  it.each([
+    '说明："Playwright Beginner Tutorials" 已排除。',
+    '说明：排除了 "Playwright Beginner Tutorials"、"playlist"。',
+    '说明：播放列表（已剔除："Playwright Beginner Tutorials"、"playlist"）不在上面。',
+    '说明：播放列表如 "Playwright Beginner Tutorials"、"playlist" 等，均已剔除。',
+  ])('the name inside what is left out passes: %s', (summary) => {
+    expect(check(`1. What is Playwright?\n\n${summary}`)).toEqual([]);
+  });
 });
 
 describe('FIX-52 #2 · reg-new-amazon-sg: a price not read at a cut read gets one more look', () => {
