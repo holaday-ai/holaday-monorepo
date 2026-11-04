@@ -205,8 +205,12 @@ const USER_CLEARED_RE =
  */
 const WALL_WORD_RE =
   /验证|校验|人机|滑块|拼图|captcha|verification|challenge|security check|recaptcha|hcaptcha/i;
-/** Not a claim: a request, a wait or a condition right before the subject (「需要用户…」「请您…」). */
-const ASKED = String.raw`(?<!(?:需要|等待|请|待|需|让|若|如果|要|须|必须|得)\s*)`;
+/**
+ * Not a claim: a request, a wait or a condition right before the subject (「需要用户…」「请您…」).
+ * DEPLOY-56 第 0 步: 「请您 / 请你」 as a request also where the phrase starts after the subject
+ * (「请您手动完成滑块拼图。」 asks; 「用户手动完成滑块后…」 says it happened).
+ */
+const ASKED = String.raw`(?<!(?:需要|等待|请|待|需|让|若|如果|要|须|必须|得)\s*(?:用户|您|你)?\s*)`;
 const USER_CLEARED_MORE_RE = new RegExp(
   [
     String.raw`(?:被|由)\s*(?:用户|您|你|人工|真人)\s*(?:手动|亲自|自行)?\s*(?:完成|通过|解决|处理|搞定)`,

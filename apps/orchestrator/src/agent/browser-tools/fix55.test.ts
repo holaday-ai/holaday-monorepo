@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { anchoredLogPost, keyedLogCheck, valueShape } from './cloud-observation.js';
+import { anchoredLogPost, keyedLogCheck, segmentShape } from './cloud-observation.js';
 import { assessCompletionFacts } from './completion-fields.js';
 import { userClearClaims } from './unified-browser-loop.js';
 
 /** FIX-55: the Deploy-55 follow-ups. */
 
-describe('FIX-55 #1 · 高德 collapsar mode: only the online shape len19:a0._ passes', () => {
+describe('FIX-55 #1 → DEPLOY-56 第 0 步 · 高德 collapsar mode: the online set only; segment evidence', () => {
   const AMAP = new URL('https://collapsar.amap.com/alc/h5/upload');
   // The Deploy-55 online body's keys (b-m01, 3415 B, `check:mode=len19:a0._`); the values are
   // made-up device values of the same kinds — the evidence keeps no values.
@@ -26,15 +26,16 @@ describe('FIX-55 #1 · 高德 collapsar mode: only the online shape len19:a0._ p
       mode,
     }).toString();
 
-  it('a made-up value of exactly that shape passes', () => {
-    const mode = 'amap_h5.sdk2.web_v1';
-    expect(valueShape(mode)).toBe('len19:a0._');
-    expect(keyedLogCheck(AMAP, body(mode))).toBeNull();
-    expect(anchoredLogPost(AMAP, 'POST', body(mode))).toBe(true);
-  });
-
-  // FIX-54 复审 #1 (`fix-54/review1-fixtures/amode.mjs`): the values the multi-segment rule let
-  // through, as written and padded to the online shape — none may pass.
+  // DEPLOY-56 第 0 步 (协调方): six new ones; the previous round's review values; and the
+  // len19:a0._ values FIX-55 had let through.
+  const NEW = [
+    'lat39.916_lng116.39',
+    'gps.39_9.116_4abcde',
+    'sku_123.add_item1ab',
+    'cookie_ab1.sessxyz9',
+    'wechat.op1_xxxxxxxx',
+    'wx_appid.a1b2c3d4ef',
+  ];
   const REVIEW = [
     'user.email.xxx',
     'user.email.a1',
@@ -52,48 +53,37 @@ describe('FIX-55 #1 · 高德 collapsar mode: only the online shape len19:a0._ p
     'navi.start',
     'fav.add',
   ];
-  const toShape = (v: string) => {
-    let out = v.toLowerCase().replace(/[^a-z0-9._]/g, '');
-    if (!/_/.test(out)) out += '_';
-    if (!/\./.test(out)) out += '.';
-    if (!/\d/.test(out)) out += '1';
-    return `${out}x2_y3.z4a5b6c7d8e9f`.slice(0, 19);
-  };
+  const FIX55_PASSED = ['amap_h5.sdk2.web_v1', 'amap_h5.web_v2.abcd'];
 
-  it.each(REVIEW)('the review value pauses as written: %s', (mode) => {
-    expect(keyedLogCheck(AMAP, body(mode))).toBe(`mode=${valueShape(mode)}`);
-    expect(anchoredLogPost(AMAP, 'POST', body(mode))).toBe(false);
-  });
+  it.each([...NEW, ...REVIEW, ...FIX55_PASSED])(
+    'pauses, with segment-by-segment evidence and no part of the value: %s',
+    (mode) => {
+      const why = keyedLogCheck(AMAP, body(mode));
+      expect(why).toBe(`mode=${segmentShape(mode)}`);
+      expect(anchoredLogPost(AMAP, 'POST', body(mode))).toBe(false);
+      const evidence = (why ?? '').slice('mode='.length);
+      for (const part of mode.split(/[^A-Za-z0-9]+/).filter((p) => p.length >= 2))
+        expect(evidence).not.toContain(part);
+    },
+  );
 
-  it.each(REVIEW.map(toShape))('…and padded to len19:a0._ it still pauses: %s', (mode) => {
-    expect(valueShape(mode)).toBe('len19:a0._');
-    expect(keyedLogCheck(AMAP, body(mode))).toBe('mode=len19:a0._');
-    expect(anchoredLogPost(AMAP, 'POST', body(mode))).toBe(false);
-  });
-
-  it.each([
-    ['5 digits in a row', 'amap_h5.web12345_v1'],
-    ['an action word', 'amap_h5.submit_v1.a'],
-    ['a personal word', 'amap_h5.phone_v1.ab'],
-  ])('the online shape with %s pauses', (_label, mode) => {
-    expect(valueShape(mode)).toBe('len19:a0._');
-    expect(keyedLogCheck(AMAP, body(mode))).toBe('mode=len19:a0._');
-  });
-
-  it.each([
-    ['one character more', 'amap_h5.sdk2.web_v12', 'mode=len20:a0._'],
-    ['an upper-case letter', 'Amap_h5.sdk2.web_v1', 'mode=len19:aA0._'],
-    ['a dash in place of a dot', 'amap_h5-sdk2.web_v1', 'mode=len19:a0-._'],
-    ['no digit', 'amap_hx.sdkx.web_vx', 'mode=len19:a._'],
-    ['no underscore', 'amap.h5.sdk2.web.v1', 'mode=len19:a0.'],
-  ])('any other shape still pauses with its evidence: %s', (_label, mode, why) => {
-    expect(keyedLogCheck(AMAP, body(mode))).toBe(why);
-    expect(anchoredLogPost(AMAP, 'POST', body(mode))).toBe(false);
+  it('the evidence counts segments, gives each its length and kinds, and keeps the separators', () => {
+    expect(segmentShape('lat39.916_lng116.39')).toBe('seg4=len5:a0|.|len3:0|_|len6:a0|.|len2:0');
+    expect(segmentShape('amap_h5.sdk2.web_v1')).toBe(
+      'seg5=len4:a|_|len2:a0|.|len4:a0|.|len3:a|_|len2:a0',
+    );
+    expect(segmentShape('wx_appid.a1b2c3d4ef')).toBe('seg3=len2:a|_|len5:a|.|len10:a0');
+    expect(segmentShape('addToCart')).toBe('seg1=len9:aA');
+    expect(segmentShape('a--b c')).toBe('seg3=len1:a|--|len1:a|␣|len1:a');
+    expect(segmentShape('西湖·断桥')).toBe('seg2=len2:汉|?|len2:汉');
+    expect(segmentShape('')).toBe('seg0=');
   });
 
   it('the online set (web|h5|wap|pc|a digit) still passes', () => {
-    for (const mode of ['web', 'h5', 'WAP', 'pc', '2'])
+    for (const mode of ['web', 'h5', 'WAP', 'pc', '2']) {
       expect(keyedLogCheck(AMAP, body(mode))).toBeNull();
+      expect(anchoredLogPost(AMAP, 'POST', body(mode))).toBe(true);
+    }
   });
 });
 
@@ -184,6 +174,11 @@ describe('FIX-55 #3 · 「用户完成验证」: the remaining ways of saying it
     '需要经用户操作才能通过验证。',
     '验证码需由用户输入。',
     '验证不是经用户操作通过的。',
+    // DEPLOY-56 第 0 步: 「请您 / 请你」 is a request.
+    '请您手动完成滑块拼图。',
+    '请你手动完成滑块拼图后告诉我。',
+    '请您自己搞定验证码。',
+    '请你亲手完成登录验证。',
     'After the human solved it, the page loaded.',
   ])('is not a claim: %s', (sentence) => {
     expect(userClearClaims(sentence)).toEqual([]);

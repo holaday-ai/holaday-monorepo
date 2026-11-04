@@ -8,7 +8,7 @@ import {
 import type { ExecutionContract } from '../../execution/execution-contract.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { type BrowserTrace, completionGap } from './browser-completion.js';
-import { anchoredLogPost, keyedLogCheck, valueShape } from './cloud-observation.js';
+import { anchoredLogPost, keyedLogCheck, segmentShape, valueShape } from './cloud-observation.js';
 import { iframeContentGap } from './completion-coverage.js';
 import { assessCompletionFacts } from './completion-fields.js';
 import { runUnifiedBrowserLoop, userClearClaims } from './unified-browser-loop.js';
@@ -259,8 +259,9 @@ describe('FIX-54 #4 · 高德 collapsar: mode stays the online set; evidence is 
     'pc-poi-detail-v2',
   ])('a mode outside the online set pauses, with only its shape as evidence: %s', (mode) => {
     const why = keyedLogCheck(AMAP, body(mode));
-    expect(why).toBe(`mode=${valueShape(mode)}`);
-    expect(why).toMatch(/^mode=len\d+:[aA0._-]*$/);
+    expect(why).toBe(`mode=${segmentShape(mode)}`);
+    // DEPLOY-56 第 0 步: the evidence is segment by segment.
+    expect(why).toMatch(/^mode=seg\d+=len\d+:/);
     // No part of the value is in the evidence.
     for (const part of mode.split(/[._-]/).filter((p) => p.length >= 2))
       expect(why?.slice('mode='.length)).not.toContain(part);
