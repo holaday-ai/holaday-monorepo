@@ -737,6 +737,19 @@ function xhsApmCheck(postData: string): string | null {
  * so no `mode` value was ever seen: only these plain ones pass; any other value still pauses.
  */
 const AMAP_COLLAPSAR_MODES = /^(?:web|h5|wap|pc|\d)$/i;
+/**
+ * FIX-54 #4 (Deploy-54 b-m01 `check:mode=len19`, 3415 B): a 19-character mode. Only a value that
+ * reads as an SDK identifier passes — two or more segments (camelCase, snake_case, kebab-case,
+ * dotted), ASCII letters and digits, at most 32 characters, no action or personal word. A plain
+ * word, free text, Chinese, spaces or anything else still pauses.
+ */
+const AMAP_MODE_IDENTIFIER =
+  /^(?=.{3,32}$)[A-Za-z][a-z0-9]*(?:[A-Z][a-z0-9]*|[._-][A-Za-z0-9]+)+$/;
+const amapModeOk = (mode: string) =>
+  AMAP_COLLAPSAR_MODES.test(mode) ||
+  (AMAP_MODE_IDENTIFIER.test(mode) &&
+    !ACTION_WORD_RE.test(mode) &&
+    !PERSONAL_VALUE_RE.test(mode));
 /** A key/value pair in readable text: 「phone=138…」「"mobile" : "138"」. */
 const KEY_VALUE_RE = /[A-Za-z_][\w.-]{0,30}\s*["']?\s*[=:]\s*["']?[A-Za-z0-9\u4e00-\u9fff]/;
 
@@ -762,9 +775,29 @@ function contentReadings(content: string): string[] {
   return readings;
 }
 
-/** A `mode` value as evidence: short plain values verbatim, anything else only by its length. */
-const evidenceValue = (value: string) =>
-  /^[A-Za-z0-9_.-]{1,16}$/.test(value) ? value : `len${value.length}`;
+/**
+ * FIX-54 #4: a blocked value as evidence — its shape, never the value: the length and the kinds
+ * of character in it (a lower, A upper, 0 digit, 汉 Han, ␣ space; ASCII punctuation as itself,
+ * anything else ?). 「aiPc_search」 → 「len11:aA_」.
+ */
+export const valueShape = (value: string) => {
+  const kinds = new Set<string>();
+  for (const ch of value) {
+    if (/[a-z]/.test(ch)) kinds.add('a');
+    else if (/[A-Z]/.test(ch)) kinds.add('A');
+    else if (/\d/.test(ch)) kinds.add('0');
+    else if (/\p{Script=Han}/u.test(ch)) kinds.add('汉');
+    else if (/\s/.test(ch)) kinds.add('␣');
+    else if (/[!-/:-@[-`{-~]/.test(ch)) kinds.add(ch);
+    else kinds.add('?');
+  }
+  const order = ['a', 'A', '0', '汉', '␣'];
+  const sorted = [
+    ...order.filter((k) => kinds.has(k)),
+    ...[...kinds].filter((k) => !order.includes(k)).sort(),
+  ];
+  return `len${[...value].length}:${sorted.join('')}`;
+};
 
 /** Why a collapsar body is not the device log — or null when it is (FIX-45: the reason is kept). */
 function amapCollapsarCheck(postData: string): string | null {
@@ -776,20 +809,20 @@ function amapCollapsarCheck(postData: string): string | null {
   // FIX-53 #3: every key that is not listed, so the next pause says all of them.
   if (unlisted.length) return `key:${unlisted.join('+')}`;
   const mode = form.get('mode');
-  if (mode !== null && !AMAP_COLLAPSAR_MODES.test(mode)) return `mode=${evidenceValue(mode)}`;
+  if (mode !== null && !amapModeOk(mode)) return `mode=${valueShape(mode)}`;
   const notTime = ['timestamp', 'uploadTime'].find(
     (key) => !/^\d{0,16}$/.test(form.get(key) ?? ''),
   );
-  if (notTime) return `${notTime}:not-a-number`;
+  if (notTime) return `${notTime}:not-a-number:${valueShape(form.get(notTime) ?? '')}`;
   // A device or anonymous id: a short token, never free text, an address or a verb (FIX-53 #8).
   const notId = ['tid', 'uid'].find((key) => {
     const value = form.get(key) ?? '';
     return !/^[\w.-]{0,64}$/.test(value) || ACTION_WORD_RE.test(value);
   });
-  if (notId) return `${notId}:not-an-id`;
+  if (notId) return `${notId}:not-an-id:${valueShape(form.get(notId) ?? '')}`;
   const version = form.get('version') ?? '';
   if (!/^[\w.-]{0,32}$/.test(version) || ACTION_WORD_RE.test(version))
-    return 'version:not-a-version';
+    return `version:not-a-version:${valueShape(version)}`;
   // `content` is the SDK's opaque log string: in no reading of it is there a field a person
   // fills in, nor any key/value pair (DEPLOY-43 复审 #1).
   const content = form.get('content') ?? '';
@@ -799,7 +832,7 @@ function amapCollapsarCheck(postData: string): string | null {
   const worded = keys.find(
     (key) => key !== 'content' && PERSONAL_VALUE_RE.test(form.get(key) ?? ''),
   );
-  return worded ? `value:${worded}` : null;
+  return worded ? `value:${worded}:${valueShape(form.get(worded) ?? '')}` : null;
 }
 
 const KEYED_LOG_ENDPOINTS: ReadonlyArray<

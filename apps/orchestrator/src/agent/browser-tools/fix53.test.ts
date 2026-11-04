@@ -168,11 +168,11 @@ describe('FIX-53 #3 #8 · 高德 collapsar: uploadTime and version, and ids that
   });
 
   it.each([
-    ['uploadTime that is not a number', { uploadTime: '2026-11-03' }, 'uploadTime:not-a-number'],
-    ['a version with free text', { version: '1.2 下单' }, 'version:not-a-version'],
-    ['a version that is a verb', { version: 'submit' }, 'version:not-a-version'],
-    ['a uid that is a verb', { uid: 'confirm_pay' }, 'uid:not-an-id'],
-    ['a tid that is a verb', { tid: 'delete' }, 'tid:not-an-id'],
+    ['uploadTime that is not a number', { uploadTime: '2026-11-03' }, 'uploadTime:not-a-number:len10:0-'],
+    ['a version with free text', { version: '1.2 下单' }, 'version:not-a-version:len6:0汉␣.'],
+    ['a version that is a verb', { version: 'submit' }, 'version:not-a-version:len6:a'],
+    ['a uid that is a verb', { uid: 'confirm_pay' }, 'uid:not-an-id:len11:a_'],
+    ['a tid that is a verb', { tid: 'delete' }, 'tid:not-an-id:len6:a'],
   ])('%s pauses: %s', (_label, fields, why) => {
     expect(keyedLogCheck(new URL(AMAP), body(fields))).toBe(why);
     expect(anchoredLogPost(new URL(AMAP), 'POST', body(fields))).toBe(false);

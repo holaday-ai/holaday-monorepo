@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { listPartialNote, reviewListAnswer } from '../../execution/answer-verifier.js';
 import type { ExecutionContract } from '../../execution/execution-contract.js';
 import { type BrowserTrace, completionGap } from './browser-completion.js';
+import { anchoredLogPost, keyedLogCheck, valueShape } from './cloud-observation.js';
 import { assessCompletionFacts } from './completion-fields.js';
 
 /** FIX-54: the Deploy-54 rollback items and the FIX-53 leftovers, with the online text as fixtures. */
@@ -159,5 +160,54 @@ describe('FIX-54 #3 · amazon 「See options」: the offers price the card lists
     expect(listPartialNote(contract, UNREAD, bare)).toBe(
       '部分完成：第 3 条页面未显示价格（答案已如实说明）',
     );
+  });
+});
+
+describe('FIX-54 #4 · 高德 collapsar: a mode that reads as an SDK identifier; evidence is shapes', () => {
+  const AMAP = new URL('https://collapsar.amap.com/alc/h5/upload');
+  // The Deploy-54 online body's keys (b-m01, 3415 B, `check:mode=len19`); the values are
+  // made-up device values of the same kinds — the evidence keeps no values.
+  const body = (mode: string) =>
+    new URLSearchParams({
+      adiu: 'a1b2c3d4e5f6a7b8c9d0',
+      buildVersion: '20261101',
+      channel: 'amap_h5',
+      content: 'H4sIAAAAAAAAA'.padEnd(2400, 'Zx9Qv7Lm2Np4Rt6'),
+      diu: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
+      env: 'production',
+      h5Version: '1.0.0',
+      idfa: '',
+      imei: '',
+      md5: '9e107d9d372bb6826bd81d3542a419d6',
+      miniProgramVersion: '',
+      mode,
+    }).toString();
+
+  it.each(['amapH5WebSdkLogger', 'ai_pc_search_result', 'web.search.result', 'pc-poi-detail-v2'])(
+    'a 19-or-so-character identifier passes: %s',
+    (mode) => {
+      expect(keyedLogCheck(AMAP, body(mode))).toBeNull();
+      expect(anchoredLogPost(AMAP, 'POST', body(mode))).toBe(true);
+    },
+  );
+
+  it.each([
+    ['a plain word', 'searchresultpage', 'mode=len16:a'],
+    ['an action word', 'submitOrderConfirm', 'mode=len18:aA'],
+    ['a personal word', 'user_phone_number', 'mode=len17:a_'],
+    ['free text', 'search 西湖断桥', 'mode=len11:a汉␣'],
+    ['a key/value pair', 'q=xihu&from=pc', 'mode=len14:a&='],
+    ['too long', `a_${'b'.repeat(40)}`, 'mode=len42:a_'],
+    ['digits only', '1234567890123456789', 'mode=len19:0'],
+  ])('%s still pauses, with only its shape as evidence', (_label, mode, why) => {
+    expect(keyedLogCheck(AMAP, body(mode))).toBe(why);
+    expect(anchoredLogPost(AMAP, 'POST', body(mode))).toBe(false);
+  });
+
+  it('the shape keeps the length and the kinds of character, never the value', () => {
+    expect(valueShape('aiPc_search')).toBe('len11:aA_');
+    expect(valueShape('13800138000')).toBe('len11:0');
+    expect(valueShape('张三 x')).toBe('len4:a汉␣');
+    expect(valueShape('')).toBe('len0:');
   });
 });
