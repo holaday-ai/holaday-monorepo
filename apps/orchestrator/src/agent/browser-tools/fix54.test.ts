@@ -5,6 +5,7 @@ import type { ExecutionContract } from '../../execution/execution-contract.js';
 import { type BrowserTrace, completionGap } from './browser-completion.js';
 import { anchoredLogPost, keyedLogCheck, valueShape } from './cloud-observation.js';
 import { assessCompletionFacts } from './completion-fields.js';
+import { userClearClaims } from './unified-browser-loop.js';
 
 /** FIX-54: the Deploy-54 rollback items and the FIX-53 leftovers, with the online text as fixtures. */
 
@@ -209,5 +210,38 @@ describe('FIX-54 #4 · 高德 collapsar: a mode that reads as an SDK identifier;
     expect(valueShape('13800138000')).toBe('len11:0');
     expect(valueShape('张三 x')).toBe('len4:a汉␣');
     expect(valueShape('')).toBe('len0:');
+  });
+});
+
+describe('FIX-54 #6 · 「用户完成验证」: the other ways of saying it', () => {
+  it.each([
+    '验证码已被用户解决，随后继续搜索。',
+    '人机验证由人工完成后，页面恢复正常。',
+    '滑块验证已由真人手动完成。',
+    '已等待用户完成验证，随后重新读取了页面。',
+    '用户已经解决了验证码，我继续查询路线。',
+    'After the user completed the CAPTCHA, the results loaded.',
+    'The verification was completed by the user.',
+    'The user resolved the security check and I continued.',
+    'You solved the captcha, so the page opened.',
+  ])('is caught: %s', (sentence) => {
+    expect(userClearClaims(`路线如下。\n${sentence}`)).toEqual([sentence]);
+  });
+
+  it.each([
+    '需要用户完成验证后才能继续。',
+    '等待用户完成验证码已超时，任务未完成。',
+    '正在等待用户完成验证。',
+    '在等待用户完成验证后，再继续查询。',
+    '请您完成验证后回复我。',
+    '验证页已经不在了，但不是用户完成的。',
+    '验证页自行消失，并非由人工完成。',
+    '如需用户解决验证码，请在面板里操作。',
+    'If the user completes the CAPTCHA, I can continue.',
+    'Waiting for the user to complete the verification.',
+    'The challenge went away; it was not solved by the user.',
+    '用户已解决的问题：路线查询。',
+  ])('is not a claim: %s', (sentence) => {
+    expect(userClearClaims(sentence)).toEqual([]);
   });
 });

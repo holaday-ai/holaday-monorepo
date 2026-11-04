@@ -193,11 +193,38 @@ const WALL_CLEARED_ITSELF =
 /** A sentence that says the person cleared a verification (not 「需要 / 等待用户完成验证」). */
 const USER_CLEARED_RE =
   /(?<!(?:需要|等待|请|待|需|让|若|如果|要)\s*)(?:用户|您|你)\s*(?:已经?|已)?\s*(?:手动|亲自|自行|成功)?\s*(?:完成|通过|处理|解决|完成了|通过了)\s*(?:了)?\s*(?:人机|安全|滑块|图形)?\s*(?:验证|验证码|校验)|(?:验证|验证码)\s*(?:已)?\s*由\s*(?:用户|您|你)\s*(?:手动)?\s*(?:完成|通过)|用户手动完成|\b(?:the )?user (?:has )?(?:manually )?(?:completed|solved|passed|cleared) (?:the )?(?:captcha|verification|challenge)/i;
+/**
+ * FIX-54 #6 (复审 #2): the other ways of saying it — 「已被用户解决」「由人工完成」「已等待用户完成
+ * 验证，随后…」, and English. These need the sentence to name the verification, and not deny it
+ * (「不是用户完成的」「并非由人工」).
+ */
+const WALL_WORD_RE =
+  /验证|校验|人机|滑块|captcha|verification|challenge|security check|recaptcha|hcaptcha/i;
+const USER_CLEARED_MORE_RE = new RegExp(
+  [
+    String.raw`(?:被|由)\s*(?:用户|您|你|人工|真人)\s*(?:手动|亲自|自行)?\s*(?:完成|通过|解决|处理|搞定)`,
+    String.raw`(?<!(?:需要|等待|请|待|需|让|若|如果|要)\s*)(?:用户|您|你)\s*(?:已经?|已)?\s*(?:手动|亲自|自行|成功)?\s*(?:解决|搞定|处理好)了?`,
+    String.raw`人工\s*(?:手动)?\s*(?:完成|通过|解决|处理)`,
+    String.raw`已\s*等待\s*(?:用户|您|你)\s*(?:手动)?\s*完成[^。！？!?\n]{0,16}?(?:随后|之后|然后|完成后|后[，,])`,
+    String.raw`\b(?:after|once|when) (?:the )?user (?:had |has )?(?:manually )?(?:completed|solved|passed|cleared|finished|resolved)\b`,
+    String.raw`\b(?:the )?user (?:has |had )?(?:manually )?(?:finished|resolved|handled|got past|got through)\b`,
+    String.raw`\b(?:captcha|verification|challenge|security check)s? (?:was|were|has been|had been) (?:manually )?(?:completed|solved|passed|cleared|resolved|handled) by (?:the )?(?:user|you|a human|a person)\b`,
+    String.raw`\byou (?:have |had )?(?:manually )?(?:completed|solved|passed|cleared) (?:the )?(?:captcha|verification|challenge|security check)`,
+  ].join('|'),
+  'i',
+);
+const NOT_THE_USER_RE =
+  /(?:不是|并非|并不是|没有|未|无|不)\s*(?:由|被)?\s*(?:用户|您|你|人工|真人)|\bnot (?:by )?(?:the )?(?:user|you|a human)|\b(?:the )?user did not|\bno (?:user|human) (?:input|action)/i;
 const SENTENCE_RE = /[^。！？!?\n]*(?:[。！？!?]|\n|$)/g;
 
 /** The sentences of an answer that say the person cleared a verification. */
 export function userClearClaims(text: string): string[] {
-  return (text.match(SENTENCE_RE) ?? []).filter((s) => s.trim() && USER_CLEARED_RE.test(s));
+  return (text.match(SENTENCE_RE) ?? []).filter(
+    (s) =>
+      s.trim() &&
+      (USER_CLEARED_RE.test(s) ||
+        (WALL_WORD_RE.test(s) && USER_CLEARED_MORE_RE.test(s) && !NOT_THE_USER_RE.test(s))),
+  );
 }
 
 function withoutClaims(text: string, claims: readonly string[]): string {
