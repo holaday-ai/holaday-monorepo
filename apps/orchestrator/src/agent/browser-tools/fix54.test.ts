@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { listPartialNote, reviewListAnswer } from '../../execution/answer-verifier.js';
+import {
+  listPartialNote,
+  reviewListAnswer,
+  rowOfferPrice,
+} from '../../execution/answer-verifier.js';
 import type { ExecutionContract } from '../../execution/execution-contract.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { type BrowserTrace, completionGap } from './browser-completion.js';
@@ -170,6 +174,36 @@ describe('FIX-54 #3 · amazon 「See options」: the offers price the card lists
     expect(reviewListAnswer(contract, QUOTED, PAGE)).toBeNull();
   });
 
+  // DEPLOY-55 第 0 步 (复审 #1, 红线): an offers line under the NEXT card is not this card's.
+  it.each([
+    [
+      'the next title, then its rating, then its offers',
+      'INIU 240W USB-C Cable 2m 2-Pack\n4.7\n4.7 out of 5 stars\n (1.2K)\nS$9.22(2 new offers)\n',
+    ],
+    ['the next title right before the offers', 'INIU 240W USB-C Cable 2m\nS$9.22(2 new offers)\n'],
+    ['a rating block before the offers', '4.7 out of 5 stars\nS$9.22(2 new offers)\n'],
+    ['a price block before the offers', 'Price, product page\nS$6.62\nS$9.22(2 new offers)\n'],
+  ])("an offers line past the card's end is not its price: %s", (_label, next) => {
+    const page = PAGE.replace('S$9.22(2 new offers)\n', next);
+    expect(page).not.toBe(PAGE);
+    expect(rowOfferPrice(BELKIN, page)).toBeNull();
+    // Still the honest 部分完成 of FIX-32, and the retreat names no offer to copy.
+    expect(reviewListAnswer(contract, UNREAD, page)).toBeNull();
+    expect(listPartialNote(contract, UNREAD, page)).toBe(
+      '部分完成：第 3 条页面未显示价格（答案已如实说明）',
+    );
+  });
+
+  it("the card's own offers line, right under its state, is still found (CC's real page)", () => {
+    expect(rowOfferPrice(BELKIN, PAGE)).toBe('S$9.22(2 new offers)');
+    // Between the state lines and the offers only the card's own state words may lie.
+    const spaced = PAGE.replace(
+      'See options\nNo featured offers available\nS$9.22',
+      'See options\n\nNo featured offers available\n  S$9.22',
+    );
+    expect(rowOfferPrice(BELKIN, spaced)).toBe('S$9.22(2 new offers)');
+  });
+
   it('a 「See options」 card with no offers line is still an honest 部分完成 (FIX-32 kept)', () => {
     const bare = PAGE.replace('S$9.22(2 new offers)\n', '');
     expect(reviewListAnswer(contract, UNREAD, bare)).toBeNull();
@@ -179,7 +213,7 @@ describe('FIX-54 #3 · amazon 「See options」: the offers price the card lists
   });
 });
 
-describe('FIX-54 #4 · 高德 collapsar: a mode that reads as an SDK identifier; evidence is shapes', () => {
+describe('FIX-54 #4 · 高德 collapsar: mode stays the online set; evidence is shapes', () => {
   const AMAP = new URL('https://collapsar.amap.com/alc/h5/upload');
   // The Deploy-54 online body's keys (b-m01, 3415 B, `check:mode=len19`); the values are
   // made-up device values of the same kinds — the evidence keeps no values.
@@ -199,25 +233,43 @@ describe('FIX-54 #4 · 高德 collapsar: a mode that reads as an SDK identifier;
       mode,
     }).toString();
 
-  it.each(['amapH5WebSdkLogger', 'ai_pc_search_result', 'web.search.result', 'pc-poi-detail-v2'])(
-    'a 19-or-so-character identifier passes: %s',
-    (mode) => {
-      expect(keyedLogCheck(AMAP, body(mode))).toBeNull();
-      expect(anchoredLogPost(AMAP, 'POST', body(mode))).toBe(true);
-    },
-  );
-
+  // DEPLOY-55 第 0 步 (复审 #1, 协调方决定): no shape-based allowance — the set stays the online
+  // one (web|h5|wap|pc|a digit). The review's values (`fix-54/review1-fixtures/amode.mjs`) and the
+  // identifiers FIX-54 had let through all pause.
   it.each([
-    ['a plain word', 'searchresultpage', 'mode=len16:a'],
-    ['an action word', 'submitOrderConfirm', 'mode=len18:aA'],
-    ['a personal word', 'user_phone_number', 'mode=len17:a_'],
-    ['free text', 'search 西湖断桥', 'mode=len11:a汉␣'],
-    ['a key/value pair', 'q=xihu&from=pc', 'mode=len14:a&='],
-    ['too long', `a_${'b'.repeat(40)}`, 'mode=len42:a_'],
-    ['digits only', '1234567890123456789', 'mode=len19:0'],
-  ])('%s still pauses, with only its shape as evidence', (_label, mode, why) => {
-    expect(keyedLogCheck(AMAP, body(mode))).toBe(why);
+    'user.email.xxx',
+    'user.email.a1',
+    'user.name.zhang',
+    'user.addr.beijing',
+    'user.mail',
+    'account.id',
+    'idCard.no',
+    'wx.openid',
+    'tel.13800138000',
+    'loc.39_9.116_4',
+    'addToCart',
+    'route.save',
+    'navi.start',
+    'fav.add',
+    'routePlanH5',
+    'amapWebSdkV2',
+    'amapH5WebSdkLogger',
+    'ai_pc_search_result',
+    'web.search.result',
+    'pc-poi-detail-v2',
+  ])('a mode outside the online set pauses, with only its shape as evidence: %s', (mode) => {
+    const why = keyedLogCheck(AMAP, body(mode));
+    expect(why).toBe(`mode=${valueShape(mode)}`);
+    expect(why).toMatch(/^mode=len\d+:[^]*$/);
+    // No part of the value is in the evidence.
+    for (const part of mode.split(/[._-]/).filter((p) => p.length >= 2))
+      expect(why?.slice('mode='.length)).not.toContain(part);
     expect(anchoredLogPost(AMAP, 'POST', body(mode))).toBe(false);
+  });
+
+  it.each(['web', 'h5', 'WAP', 'pc', '2'])('the online set still passes: %s', (mode) => {
+    expect(keyedLogCheck(AMAP, body(mode))).toBeNull();
+    expect(anchoredLogPost(AMAP, 'POST', body(mode))).toBe(true);
   });
 
   it('the shape keeps the length and the kinds of character, never the value', () => {

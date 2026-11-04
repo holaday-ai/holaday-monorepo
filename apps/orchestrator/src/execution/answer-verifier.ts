@@ -813,6 +813,13 @@ const OFFER_PRICE_RE = new RegExp(
   'i',
 );
 
+/** The card's no-price state lines (「See options」「No featured offers available」) in a run. */
+const CARD_STATE_RUN_RE = new RegExp(
+  `^(?:[\\s·•|,，;；:：/-]|(?:${NO_PRICE_STATE_RE.source})(?:\\s*available\\b)?)+`,
+  'i',
+);
+const OFFER_AT_START_RE = new RegExp(`^(?:${OFFER_PRICE_RE.source})`, 'i');
+
 /** The offers price the page lists for a row whose card shows no price of its own. */
 export function rowOfferPrice(name: string | null, pageText: string): string | null {
   const offer = rowPriceState(name, pageText).offer;
@@ -862,9 +869,12 @@ function rowPriceState(name: string | null, pageText: string): { lacks: boolean;
     const stop = Math.min(...stops.filter((i) => i >= 0));
     const before = Number.isFinite(stop) ? after.slice(0, stop) : after.slice(0, 500);
     if (PRICE_TOKEN_RE.test(withoutPriceCaps(before))) return { lacks: false };
-    // The card's own offers line, before the next title or price block.
+    // The card's own offers line: only the card's own state words may lie between the
+    // state and it. DEPLOY-55 第 0 步 (复审 #1, 红线): a fixed window reached past the next
+    // card's title and rating to its 「S$9.22(2 new offers)」 — any other text (the next
+    // title, a rating or a price block) ends this card.
     if (state >= 0 && stop === state) {
-      const offer = after.slice(state, state + 160).match(OFFER_PRICE_RE)?.[0];
+      const offer = after.slice(state).replace(CARD_STATE_RUN_RE, '').match(OFFER_AT_START_RE)?.[0];
       if (offer) return { lacks: false, offer };
     }
     if (Number.isFinite(stop)) lacks = true;

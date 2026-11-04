@@ -738,15 +738,11 @@ function xhsApmCheck(postData: string): string | null {
  */
 const AMAP_COLLAPSAR_MODES = /^(?:web|h5|wap|pc|\d)$/i;
 /**
- * FIX-54 #4 (Deploy-54 b-m01 `check:mode=len19`, 3415 B): a 19-character mode. Only a value that
- * reads as an SDK identifier passes — two or more segments (camelCase, snake_case, kebab-case,
- * dotted), ASCII letters and digits, at most 32 characters, no action or personal word. A plain
- * word, free text, Chinese, spaces or anything else still pauses.
+ * FIX-54 #4 → DEPLOY-55 第 0 步 (协调方决定): no shape-based allowance for `mode` — a
+ * multi-segment 「identifier」 also let `user.email.xxx` / `tel.13800138000` / `addToCart`
+ * through. The set stays the online one; a blocked value leaves only its shape as evidence, and
+ * the next online pause names the exact shape to allow.
  */
-const AMAP_MODE_IDENTIFIER = /^(?=.{3,32}$)[A-Za-z][a-z0-9]*(?:[A-Z][a-z0-9]*|[._-][A-Za-z0-9]+)+$/;
-const amapModeOk = (mode: string) =>
-  AMAP_COLLAPSAR_MODES.test(mode) ||
-  (AMAP_MODE_IDENTIFIER.test(mode) && !ACTION_WORD_RE.test(mode) && !PERSONAL_VALUE_RE.test(mode));
 /** A key/value pair in readable text: 「phone=138…」「"mobile" : "138"」. */
 const KEY_VALUE_RE = /[A-Za-z_][\w.-]{0,30}\s*["']?\s*[=:]\s*["']?[A-Za-z0-9\u4e00-\u9fff]/;
 
@@ -806,7 +802,7 @@ function amapCollapsarCheck(postData: string): string | null {
   // FIX-53 #3: every key that is not listed, so the next pause says all of them.
   if (unlisted.length) return `key:${unlisted.join('+')}`;
   const mode = form.get('mode');
-  if (mode !== null && !amapModeOk(mode)) return `mode=${valueShape(mode)}`;
+  if (mode !== null && !AMAP_COLLAPSAR_MODES.test(mode)) return `mode=${valueShape(mode)}`;
   const notTime = ['timestamp', 'uploadTime'].find(
     (key) => !/^\d{0,16}$/.test(form.get(key) ?? ''),
   );
