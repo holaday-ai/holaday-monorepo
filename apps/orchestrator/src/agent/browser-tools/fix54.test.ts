@@ -260,7 +260,7 @@ describe('FIX-54 #4 · 高德 collapsar: mode stays the online set; evidence is 
   ])('a mode outside the online set pauses, with only its shape as evidence: %s', (mode) => {
     const why = keyedLogCheck(AMAP, body(mode));
     expect(why).toBe(`mode=${valueShape(mode)}`);
-    expect(why).toMatch(/^mode=len\d+:[^]*$/);
+    expect(why).toMatch(/^mode=len\d+:[aA0._-]*$/);
     // No part of the value is in the evidence.
     for (const part of mode.split(/[._-]/).filter((p) => p.length >= 2))
       expect(why?.slice('mode='.length)).not.toContain(part);
