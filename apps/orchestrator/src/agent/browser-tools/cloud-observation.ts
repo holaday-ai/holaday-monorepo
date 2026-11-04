@@ -741,7 +741,8 @@ const AMAP_COLLAPSAR_MODES = /^(?:web|h5|wap|pc|\d)$/i;
  * FIX-54 #4 → DEPLOY-55 第 0 步 (协调方决定): no shape-based allowance for `mode` — a
  * multi-segment 「identifier」 also let `user.email.xxx` / `tel.13800138000` / `addToCart`
  * through. The set stays the online one; a blocked value leaves only its shape as evidence, and
- * the next online pause names the exact shape to allow.
+ * the next online pause names the exact shape to allow. FIX-55 #1 allowed `len19:a0._`; DEPLOY-56
+ * 第 0 步 took it back (协调方决定) and records the shape segment by segment (`segmentShape`).
  */
 /** A key/value pair in readable text: 「phone=138…」「"mobile" : "138"」. */
 const KEY_VALUE_RE = /[A-Za-z_][\w.-]{0,30}\s*["']?\s*[=:]\s*["']?[A-Za-z0-9\u4e00-\u9fff]/;
@@ -792,6 +793,32 @@ export const valueShape = (value: string) => {
   return `len${[...value].length}:${sorted.join('')}`;
 };
 
+/**
+ * DEPLOY-56 第 0 步 (协调方决定): a blocked `mode` as evidence, segment by segment — the number of
+ * segments, each segment's length and kinds of character (as `valueShape`), and the separators
+ * between them; never the value. 「amap_h5.sdk2」 → 「seg3=len4:a|_|len2:a0|.|len4:a0」.
+ * A segment is a run of letters, digits or Han; everything else separates (ASCII punctuation as
+ * itself, whitespace ␣, anything else ?).
+ */
+export const segmentShape = (value: string) => {
+  const parts = value.match(/[A-Za-z0-9\p{Script=Han}]+|[^A-Za-z0-9\p{Script=Han}]+/gu) ?? [];
+  const out: string[] = [];
+  let segments = 0;
+  for (const part of parts) {
+    if (/^[A-Za-z0-9\p{Script=Han}]/u.test(part)) {
+      segments += 1;
+      out.push(valueShape(part));
+    } else {
+      out.push(
+        [...part]
+          .map((ch) => (/\s/.test(ch) ? '␣' : /[!-/:-@[-`{-~]/.test(ch) ? ch : '?'))
+          .join(''),
+      );
+    }
+  }
+  return `seg${segments}=${out.join('|')}`;
+};
+
 /** Why a collapsar body is not the device log — or null when it is (FIX-45: the reason is kept). */
 function amapCollapsarCheck(postData: string): string | null {
   if (/^\s*[{[]/.test(postData) || /content-disposition\s*:/i.test(postData)) return 'not-form';
@@ -802,7 +829,7 @@ function amapCollapsarCheck(postData: string): string | null {
   // FIX-53 #3: every key that is not listed, so the next pause says all of them.
   if (unlisted.length) return `key:${unlisted.join('+')}`;
   const mode = form.get('mode');
-  if (mode !== null && !AMAP_COLLAPSAR_MODES.test(mode)) return `mode=${valueShape(mode)}`;
+  if (mode !== null && !AMAP_COLLAPSAR_MODES.test(mode)) return `mode=${segmentShape(mode)}`;
   const notTime = ['timestamp', 'uploadTime'].find(
     (key) => !/^\d{0,16}$/.test(form.get(key) ?? ''),
   );
