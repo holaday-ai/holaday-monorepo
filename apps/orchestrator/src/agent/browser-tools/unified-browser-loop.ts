@@ -2145,6 +2145,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           ? { tabId: action.targetTabId }
           : {}),
         ...(action.tool === 'type' && outcome.ok ? { typedText: action.text } : {}),
+        ...(action.tool === 'close_tab' && outcome.ok ? { closedTabId: action.targetTabId } : {}),
         ...(outcome.form && input.currentPageUrl ? { pageUrl: input.currentPageUrl() } : {}),
         screenshot: !!capturedImage,
         ...((action.tool === 'new_tab' || (action.tool === 'click' && action.newTab)) &&
