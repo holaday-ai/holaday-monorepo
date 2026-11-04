@@ -573,9 +573,12 @@ function modifierOf(before: string): string {
 /** FIX-52 #10: 「名为提交的按钮」: which one, said before the thing with a word of naming. */
 const NAMED_BEFORE_RE =
   /(?:名为|名叫|叫做?|称为|命名为|标有|标着|写着|显示为)\s*([^\s，,。；;的]{2,20})\s*的?\s*$/;
-/** FIX-52 #10: 「按钮：提交」「按钮名为提交」「按钮（提交）」: said after the thing. */
+/**
+ * FIX-52 #10: 「按钮：提交」「按钮名为提交」「按钮（提交）」: said after the thing. FIX-54 #10: 「按钮名称：
+ * 提交」— what it is called (名称 / 名字 / 文字 / 文本 / 标题 / 标签 / 字样), then 为 / 是 / a colon.
+ */
 const NAMED_AFTER_RE =
-  /^\s*(?:[:：]|[（(]|[，,]?\s*(?:名为|名叫|叫做?|称为|写着|标有|标着|文字为|文本为|名称[为是]))\s*([^\s，,。；;）)]{2,20})/;
+  /^\s*(?:[:：]|[（(]|[，,]?\s*(?:名为|名叫|叫做?|称为|写着|标有|标着|(?:的\s*)?(?:名称|名字|文字|文本|标题|标签|字样)\s*(?:为|是|[:：])))\s*([^\s，,。；;）)]{2,20})/;
 /** FIX-53 #7: 「用来提交订单的按钮」: what it is for names which one. */
 const PURPOSE_BEFORE_RE =
   /(?:用来|用于|用以|可以|可用于|能够|负责)\s*([^\s，,。；;的]{2,20})\s*的\s*$/;
@@ -816,10 +819,14 @@ function logUnverified(parts: readonly string[], whole: string, pieces: readonly
 }
 
 /** FIX-52 #10: 「，下方还有 Bold 按钮」: said to be under the iframe. Checked against the read's order. */
+/**
+ * FIX-54 #10: a side is said as 上/顶 or 下/底 with 方/面/部/端/边, after an optional 最/正/靠
+ * (「页面最上方」「最顶端」「正下方」) — the shape of a position, not a list of its words.
+ */
 const PLACED_BELOW_RE =
-  /^\s*(?:(?:此外|另外|同时|而且|并且|并|且|以及)[\s，,]*)*(?:在|其)?(?:下方|下面|其下|底部|below\b|underneath\b)/i;
+  /^\s*(?:(?:此外|另外|同时|而且|并且|并|且|以及)[\s，,]*)*(?:在|其)?(?:(?:页面|网页|主页面|父页面)的?\s*)?(?:(?:最|正|靠)\s*)?(?:(?:下|底)(?:方|面|部|端|边)|其下|below\b|underneath\b|at the bottom\b)/i;
 const PLACED_ABOVE_RE =
-  /^\s*(?:(?:此外|另外|同时|而且|并且|并|且|以及)[\s，,]*)*(?:在|其)?(?:(?:页面|网页|主页面|父页面)的?\s*)?(?:上方|上面|顶部|above\b)/i;
+  /^\s*(?:(?:此外|另外|同时|而且|并且|并|且|以及)[\s，,]*)*(?:在|其)?(?:(?:页面|网页|主页面|父页面)的?\s*)?(?:(?:最|正|靠)\s*)?(?:(?:上|顶)(?:方|面|部|端|边)|above\b|at the top\b)/i;
 /** The iframe's own line in a parent read (`- iframe [ref=e7]`), not a heading naming one. */
 const FRAME_LINE_RE = /(?:^|\n|\s-\s|^-\s)\s*iframe\s*(?:\[|$)/im;
 

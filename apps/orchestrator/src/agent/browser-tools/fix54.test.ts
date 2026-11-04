@@ -5,6 +5,7 @@ import { listPartialNote, reviewListAnswer } from '../../execution/answer-verifi
 import type { ExecutionContract } from '../../execution/execution-contract.js';
 import { type BrowserTrace, completionGap } from './browser-completion.js';
 import { anchoredLogPost, keyedLogCheck, valueShape } from './cloud-observation.js';
+import { iframeContentGap } from './completion-coverage.js';
 import { assessCompletionFacts } from './completion-fields.js';
 import { runUnifiedBrowserLoop, userClearClaims } from './unified-browser-loop.js';
 
@@ -322,5 +323,53 @@ describe('FIX-54 #7 · a turn cut off at the output cap is never acted on', () =
       status: 'failed',
       reason: '模型输出过长被截断，未能给出完整答案，任务未完成。',
     });
+  });
+});
+
+describe('FIX-54 #10 · iframe: the old holes, by how a name and a side are said', () => {
+  const INTENT = '请使用云端浏览器，the-internet.herokuapp.com 的 iframe 与 JavaScript alerts';
+  const FRAME = {
+    key: 'frame_1',
+    sourceURL: 'about:srcdoc',
+    text: '- generic "Rich Text Area. Press ALT-0 for help." [active] [ref=f1e1]:\n  - paragraph [ref=f1e2]: Your content goes here.',
+  };
+  const PARENT = `https://the-internet.herokuapp.com/iframe
+- heading "An iFrame containing the TinyMCE WYSIWYG Editor" [level=3] [ref=e8]
+- menubar [ref=e12]:
+  - menuitem "File" [ref=e13]
+  - menuitem "Edit" [ref=e15]
+- toolbar "formatting" [ref=e40]:
+  - button "Bold" [ref=e41]
+- iframe [ref=e77]:
+- button "Close" [ref=e90]
+- link "Elemental Selenium" [ref=e99]`;
+  const ALERTS =
+    'https://the-internet.herokuapp.com/javascript_alerts heading "JavaScript Alerts" button "Click for JS Alert" Result: You successfully clicked an alert\nI am a JS Alert';
+  const kind = (answer: string) =>
+    iframeContentGap(INTENT, answer, [FRAME], true, [PARENT, ALERTS])?.kind ?? null;
+  const Q = 'iframe 内容为 "Your content goes here."';
+
+  it.each([
+    ['无须 (as 无需)', `${Q}，无须登录管理员后台可见`],
+    ['across sentences', `${Q}。页面上还有管理员登录链接。`],
+    ['部分完成说明 on its own line', `${Q}\n部分完成说明：iframe 下方还有管理员后台入口。`],
+    ['部分完成说明 with a half-width colon', `${Q}。部分完成说明: 页面还有管理员登录链接`],
+    ['按钮名称：', `${Q}，下方按钮名称：提交订单`],
+    ['按钮的文字是', `${Q}，下方按钮的文字是提交订单`],
+    ['页面最上方', `${Q}，页面最上方有 Elemental Selenium 链接`],
+    ['页面最顶端', `${Q}，页面最顶端有 Elemental Selenium 链接`],
+    ['正上方', `${Q}，正上方有 Elemental Selenium 链接`],
+  ])('%s is caught', (_label, answer) => {
+    expect(kind(answer)).toBe('mismatch');
+  });
+
+  it.each([
+    ['无须 with nothing claimed', `${Q}，无须登录即可查看`],
+    ['页面最上方, where the page has it', `${Q}，页面最上方有 File、Edit 菜单`],
+    ['最下方, where the page has it', `${Q}，页面最下方有 Elemental Selenium 链接`],
+    ['按钮名称 the page has', `${Q}，下方按钮名称：Close`],
+    ['the heading above', `${Q}。页面上方的标题是 An iFrame containing the TinyMCE WYSIWYG Editor。`],
+  ])('%s passes', (_label, answer) => {
+    expect(kind(answer)).toBeNull();
   });
 });
