@@ -743,6 +743,22 @@ const AMAP_COLLAPSAR_MODES = /^(?:web|h5|wap|pc|\d)$/i;
  * through. The set stays the online one; a blocked value leaves only its shape as evidence, and
  * the next online pause names the exact shape to allow.
  */
+/**
+ * FIX-55 #1 (Deploy-55 b-m01 online `check:mode=len19:a0._`): only that exact shape is allowed —
+ * 19 characters of lower-case letters, digits, `.` and `_`, with every one of those kinds present
+ * (the shape the evidence names) — and only when it carries no action or personal word and no run
+ * of 5+ digits (a phone, an id, a coordinate). Every other shape still pauses with its evidence.
+ */
+const AMAP_MODE_ONLINE_SHAPE = 'len19:a0._';
+const AMAP_MODE_PERSONAL_RE =
+  /user|e-?mail|mail|name|addr|id_?card|idcard|openid|unionid|\btel|tel\.|account|cart|save|fav|start|loc/i;
+const amapModeOk = (mode: string) =>
+  AMAP_COLLAPSAR_MODES.test(mode) ||
+  (valueShape(mode) === AMAP_MODE_ONLINE_SHAPE &&
+    !/\d{5,}/.test(mode) &&
+    !ACTION_WORD_RE.test(mode) &&
+    !PERSONAL_VALUE_RE.test(mode) &&
+    !AMAP_MODE_PERSONAL_RE.test(mode));
 /** A key/value pair in readable text: 「phone=138…」「"mobile" : "138"」. */
 const KEY_VALUE_RE = /[A-Za-z_][\w.-]{0,30}\s*["']?\s*[=:]\s*["']?[A-Za-z0-9\u4e00-\u9fff]/;
 
@@ -802,7 +818,7 @@ function amapCollapsarCheck(postData: string): string | null {
   // FIX-53 #3: every key that is not listed, so the next pause says all of them.
   if (unlisted.length) return `key:${unlisted.join('+')}`;
   const mode = form.get('mode');
-  if (mode !== null && !AMAP_COLLAPSAR_MODES.test(mode)) return `mode=${valueShape(mode)}`;
+  if (mode !== null && !amapModeOk(mode)) return `mode=${valueShape(mode)}`;
   const notTime = ['timestamp', 'uploadTime'].find(
     (key) => !/^\d{0,16}$/.test(form.get(key) ?? ''),
   );
