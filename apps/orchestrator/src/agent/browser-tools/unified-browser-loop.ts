@@ -204,7 +204,9 @@ const USER_CLEARED_RE =
  * (「不是用户完成的」「并非由人工」).
  */
 const WALL_WORD_RE =
-  /验证|校验|人机|滑块|captcha|verification|challenge|security check|recaptcha|hcaptcha/i;
+  /验证|校验|人机|滑块|拼图|captcha|verification|challenge|security check|recaptcha|hcaptcha/i;
+/** Not a claim: a request, a wait or a condition right before the subject (「需要用户…」「请您…」). */
+const ASKED = String.raw`(?<!(?:需要|等待|请|待|需|让|若|如果|要|须|必须|得)\s*)`;
 const USER_CLEARED_MORE_RE = new RegExp(
   [
     String.raw`(?:被|由)\s*(?:用户|您|你|人工|真人)\s*(?:手动|亲自|自行)?\s*(?:完成|通过|解决|处理|搞定)`,
@@ -215,11 +217,20 @@ const USER_CLEARED_MORE_RE = new RegExp(
     String.raw`\b(?:the )?user (?:has |had )?(?:manually )?(?:finished|resolved|handled|got past|got through)\b`,
     String.raw`\b(?:captcha|verification|challenge|security check)s? (?:was|were|has been|had been) (?:manually )?(?:completed|solved|passed|cleared|resolved|handled) by (?:the )?(?:user|you|a human|a person)\b`,
     String.raw`\byou (?:have |had )?(?:manually )?(?:completed|solved|passed|cleared) (?:the )?(?:captcha|verification|challenge|security check)`,
+    // FIX-55 #3: 自己搞定 / 亲手完成 / 手动完成滑块、拼图 / 已完成登录验证 / 经用户操作 /
+    // 用户帮忙、协助完成 / 验证码是用户输入的 / After the human solved it.
+    String.raw`${ASKED}(?:用户|您|你)\s*(?:已经?|已)?\s*(?:自己|亲手|亲自|自行)\s*(?:搞定|完成|通过|解决|处理)`,
+    String.raw`${ASKED}(?:用户|您|你)?\s*(?:已经?|已)?\s*手动\s*(?:完成|通过|拖动|拼)了?\s*(?:滑块|拼图)`,
+    String.raw`${ASKED}(?:用户|您|你)\s*(?:已经?|已)?\s*(?:手动|亲自|亲手|自行|自己)?\s*(?:完成|通过)了?\s*(?:登录|身份|短信|拼图|滑块)\s*(?:验证|校验)`,
+    String.raw`${ASKED}经\s*过?\s*(?:用户|您|你|人工|真人)\s*(?:的)?\s*(?:手动)?\s*(?:操作|处理)`,
+    String.raw`${ASKED}(?:用户|您|你|人工|真人)\s*(?:的)?\s*(?:帮忙|协助|帮助)`,
+    String.raw`(?:验证码|验证|校验码)\s*(?:是|为|由)\s*(?:用户|您|你|人工|真人)\s*(?:手动|亲自|亲手)?\s*(?:输入|填写|填入|输的|填的|键入)`,
+    String.raw`\b(?:after|once|when) (?:the )?(?:human|person) (?:had |has )?(?:manually )?(?:completed|solved|passed|cleared|finished|resolved|handled)\b`,
   ].join('|'),
   'i',
 );
 const NOT_THE_USER_RE =
-  /(?:不是|并非|并不是|没有|未|无|不)\s*(?:由|被)?\s*(?:用户|您|你|人工|真人)|\bnot (?:by )?(?:the )?(?:user|you|a human)|\b(?:the )?user did not|\bno (?:user|human) (?:input|action)/i;
+  /(?:不是|并非|并不是|没有|未|无|不)\s*(?:由|被|经过?)?\s*(?:用户|您|你|人工|真人)|\bnot (?:by )?(?:the )?(?:user|you|a human)|\b(?:the )?user did not|\bno (?:user|human) (?:input|action)/i;
 const SENTENCE_RE = /[^。！？!?\n]*(?:[。！？!?]|\n|$)/g;
 
 /** The sentences of an answer that say the person cleared a verification. */
