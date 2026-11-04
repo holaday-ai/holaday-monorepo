@@ -136,6 +136,10 @@ RULES.push(
 export const CAPTCHA_HANDOFF_ENDING_RE =
   /等待用户完成验证码已超时|用户已放弃验证|等待验证时云端浏览器已关闭|验证码接管通道异常关闭|验证码等待已结束/;
 
+const CAPTCHA_HANDOFF_SENTENCE_RE = new RegExp(
+  `(?:${CAPTCHA_HANDOFF_ENDING_RE.source})[^。！？!?\\n]*[。！？!?]?`,
+);
+
 export function humaniseTaskError(raw: string | null | undefined): string {
   if (!raw) return '';
   const trimmed = raw.trim();
@@ -148,7 +152,10 @@ export function humaniseTaskError(raw: string | null | undefined): string {
   if (/^模型服务/.test(trimmed)) return trimmed;
   // FIX-53 #4 (Deploy-53 wall-zhihu): how a captcha handoff ended is already the user's sentence;
   // its 「超时」 must not turn it into 「任务执行超时」 before the failure card reads it.
-  if (CAPTCHA_HANDOFF_ENDING_RE.test(trimmed)) return trimmed;
+  // FIX-54 #9: only that sentence, from the ending itself to its 。 — not a 「任务执行失败：」 lead
+  // or whatever text came with it.
+  const ending = trimmed.match(CAPTCHA_HANDOFF_SENTENCE_RE);
+  if (ending) return ending[0].trim();
   for (const rule of AI_SERVICE_RULES) {
     const m = trimmed.match(rule.match);
     if (m) return typeof rule.to === 'function' ? rule.to(m) : rule.to;

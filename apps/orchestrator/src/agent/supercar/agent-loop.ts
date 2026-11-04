@@ -756,6 +756,12 @@ export interface RunSupercarOptions {
   /** FIX-52 #8: keeps the browser from idle reclaim while a captcha wait has it. */
   onBrowserKeepAlive?: () => void;
   /**
+   * FIX-54 #8: holds the browser (pool `retain`, reason awaiting-reply) while the task waits for
+   * the person's reply, at most `ttlMs`; `onAwaitingReplyRelease` ends the hold.
+   */
+  onAwaitingReplyHold?: (ttlMs: number) => void;
+  onAwaitingReplyRelease?: () => void;
+  /**
    * CAPTCHA-REDUCE-1: true when a search fallback can replace the walled page
    * (a search API or another engine); such a wall is not handed to the user.
    */

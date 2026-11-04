@@ -184,3 +184,23 @@ describe('FIX-53 #4 · captcha handoff endings', () => {
     expect(humaniseTaskError(reason)).toBe(reason);
   });
 });
+
+describe('FIX-54 #9 · a captcha handoff ending keeps only its own sentence', () => {
+  it.each([
+    [
+      '任务执行失败：等待用户完成验证码已超时，任务未完成。',
+      '等待用户完成验证码已超时，任务未完成。',
+    ],
+    [
+      '页面一级标题是 Item。验证码等待已结束，任务未完成。\n{"stack":"Error at loop.ts:1"}',
+      '验证码等待已结束，任务未完成。',
+    ],
+    [
+      '已打开 zhihu.com 并读到 3 条回答；等待验证时云端浏览器已关闭，任务未完成，请重新执行。之后的内容不显示',
+      '等待验证时云端浏览器已关闭，任务未完成，请重新执行。',
+    ],
+    ['用户已放弃验证，任务未完成', '用户已放弃验证，任务未完成'],
+  ])('%s', (raw, shown) => {
+    expect(humaniseTaskError(raw)).toBe(shown);
+  });
+});

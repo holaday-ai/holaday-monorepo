@@ -87,6 +87,8 @@ export type BrowserTrace = Pick<
   typedText?: string;
   /** The page a form receipt was made on. */
   pageUrl?: string;
+  /** The tab a successful `close_tab` closed (its `tabId` is the tab left active). */
+  closedTabId?: string;
 };
 /** A prohibition or an admission of non-completion is not a claim of execution. */
 function positiveActionText(text: string): string {
@@ -197,12 +199,20 @@ export function completionGap(
   // each other (the #fragment does not count).
   if (/打开.{0,8}(?:\d+|[一二两三四五六七八九十])\s*个?链接|open .{0,12}links?/i.test(intent)) {
     const page = (url: string | undefined) => url?.split('#')[0]?.replace(/\/$/, '');
+    // FIX-54 (Deploy-54 core-07): only the tabs still open at delivery. A duplicate the
+    // model closed and replaced is not a link it is handing over.
+    const closed = new Set(
+      successful.flatMap((entry) => (entry.closedTabId ? [entry.closedTabId] : [])),
+    );
     const opened = successful
-      .filter((entry) => entry.openedTab && entry.url)
+      .filter((entry) => entry.openedTab && entry.url && !(entry.tabId && closed.has(entry.tabId)))
       .map((e) => page(e.url));
     const source = page(successful.find((entry) => !entry.openedTab && entry.url)?.url);
-    if (opened.length && (new Set(opened).size < opened.length || opened.includes(source)))
-      return '打开的链接里有同一页面（只差 # 锚点，或就是起始页）：请换成指向不同页面的链接，各自读标题后再回到起始标签。';
+    if (opened.length && (new Set(opened).size < opened.length || opened.includes(source))) {
+      // Deploy-54 core-07: name the start tab, so the redo does not end on the first new one.
+      const start = trace.find((entry) => entry.fromTabId)?.fromTabId;
+      return `打开的链接里有同一页面（只差 # 锚点，或就是起始页）：请换成指向不同页面的链接，各自读标题后再回到起始标签${start ? ` ${start}` : ''}。`;
+    }
   }
   const numericCount = (value: string) =>
     (

@@ -192,6 +192,7 @@ import {
   finalizeClaim as finalizeTaskCreateClaim,
   releaseClaim as releaseTaskCreateClaim,
 } from '../../api-keys/webhook-idempotency-service.js';
+import { AWAITING_REPLY } from '../../browser-pool/browser-pool.js';
 import {
   BrowserSessionRestoreFlights,
   restorableBrowserTarget,
@@ -6614,6 +6615,13 @@ export const tasksRouter = router({
                   },
                   onBrowserKeepAlive() {
                     if (ctx.browserPool && perUserExec) ctx.browserPool.touch(taskId);
+                  },
+                  onAwaitingReplyHold(ttlMs) {
+                    if (ctx.browserPool && perUserExec)
+                      ctx.browserPool.retain(taskId, ttlMs, AWAITING_REPLY);
+                  },
+                  onAwaitingReplyRelease() {
+                    if (ctx.browserPool && perUserExec) ctx.browserPool.unretain(taskId);
                   },
                   async onCaptchaHandoffEnd(resumed) {
                     if (!resumed) {

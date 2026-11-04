@@ -187,17 +187,49 @@ export interface WebSearchHit {
   url: string;
 }
 
+/** FIX-54 #7: the finish turn's output cap (an action turn keeps 4096). */
+const FINISH_MAX_TOKENS = 8_192;
+const TRUNCATED_RETRY =
+  '你上一轮的输出超过长度上限被截断了，那次调用没有执行。请只调用一次 finish：答案精简，只写用户问的结果和必要的来源，不要复述页面原文或过程；不要再调用其他工具。';
+
 /** FIX-53 #1: told to the model when the wall went away and the person did nothing. */
 const WALL_CLEARED_ITSELF =
   '验证页已经不在了，但等待期间没有收到用户的任何操作（不是用户完成的）。从当前页面重新 snapshot 后继续原任务，不要重放旧动作；答案里不要说用户完成或通过了验证。';
 /** A sentence that says the person cleared a verification (not 「需要 / 等待用户完成验证」). */
 const USER_CLEARED_RE =
   /(?<!(?:需要|等待|请|待|需|让|若|如果|要)\s*)(?:用户|您|你)\s*(?:已经?|已)?\s*(?:手动|亲自|自行|成功)?\s*(?:完成|通过|处理|解决|完成了|通过了)\s*(?:了)?\s*(?:人机|安全|滑块|图形)?\s*(?:验证|验证码|校验)|(?:验证|验证码)\s*(?:已)?\s*由\s*(?:用户|您|你)\s*(?:手动)?\s*(?:完成|通过)|用户手动完成|\b(?:the )?user (?:has )?(?:manually )?(?:completed|solved|passed|cleared) (?:the )?(?:captcha|verification|challenge)/i;
+/**
+ * FIX-54 #6 (复审 #2): the other ways of saying it — 「已被用户解决」「由人工完成」「已等待用户完成
+ * 验证，随后…」, and English. These need the sentence to name the verification, and not deny it
+ * (「不是用户完成的」「并非由人工」).
+ */
+const WALL_WORD_RE =
+  /验证|校验|人机|滑块|captcha|verification|challenge|security check|recaptcha|hcaptcha/i;
+const USER_CLEARED_MORE_RE = new RegExp(
+  [
+    String.raw`(?:被|由)\s*(?:用户|您|你|人工|真人)\s*(?:手动|亲自|自行)?\s*(?:完成|通过|解决|处理|搞定)`,
+    String.raw`(?<!(?:需要|等待|请|待|需|让|若|如果|要)\s*)(?:用户|您|你)\s*(?:已经?|已)?\s*(?:手动|亲自|自行|成功)?\s*(?:解决|搞定|处理好)了?`,
+    String.raw`人工\s*(?:手动)?\s*(?:完成|通过|解决|处理)`,
+    String.raw`已\s*等待\s*(?:用户|您|你)\s*(?:手动)?\s*完成[^。！？!?\n]{0,16}?(?:随后|之后|然后|完成后|后[，,])`,
+    String.raw`\b(?:after|once|when) (?:the )?user (?:had |has )?(?:manually )?(?:completed|solved|passed|cleared|finished|resolved)\b`,
+    String.raw`\b(?:the )?user (?:has |had )?(?:manually )?(?:finished|resolved|handled|got past|got through)\b`,
+    String.raw`\b(?:captcha|verification|challenge|security check)s? (?:was|were|has been|had been) (?:manually )?(?:completed|solved|passed|cleared|resolved|handled) by (?:the )?(?:user|you|a human|a person)\b`,
+    String.raw`\byou (?:have |had )?(?:manually )?(?:completed|solved|passed|cleared) (?:the )?(?:captcha|verification|challenge|security check)`,
+  ].join('|'),
+  'i',
+);
+const NOT_THE_USER_RE =
+  /(?:不是|并非|并不是|没有|未|无|不)\s*(?:由|被)?\s*(?:用户|您|你|人工|真人)|\bnot (?:by )?(?:the )?(?:user|you|a human)|\b(?:the )?user did not|\bno (?:user|human) (?:input|action)/i;
 const SENTENCE_RE = /[^。！？!?\n]*(?:[。！？!?]|\n|$)/g;
 
 /** The sentences of an answer that say the person cleared a verification. */
 export function userClearClaims(text: string): string[] {
-  return (text.match(SENTENCE_RE) ?? []).filter((s) => s.trim() && USER_CLEARED_RE.test(s));
+  return (text.match(SENTENCE_RE) ?? []).filter(
+    (s) =>
+      s.trim() &&
+      (USER_CLEARED_RE.test(s) ||
+        (WALL_WORD_RE.test(s) && USER_CLEARED_MORE_RE.test(s) && !NOT_THE_USER_RE.test(s))),
+  );
 }
 
 function withoutClaims(text: string, claims: readonly string[]): string {
@@ -604,6 +636,12 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   let repeatedReads = 0;
   const seenReads = new Set<string>();
   let concludeNow = false;
+  /**
+   * FIX-54 #7 (FIX-53 local b-m01 ×2): the model's turn hit the output cap, and the truncated
+   * finish was taken as a failed one. A cut-off turn is never acted on: the model gets one
+   * retry with a higher cap, finish only, and a shorter answer.
+   */
+  let truncatedRetry = false;
   const readSignature = (text: string) => {
     try {
       const value = JSON.parse(text);
@@ -790,15 +828,17 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     }
     let response: Awaited<ReturnType<MessagesAdapter['create']>>;
     try {
+      const finishOnly = concludeNow || truncatedRetry;
       const request: Parameters<MessagesAdapter['create']>[0] = {
-        maxTokens: 4_096,
+        // The finish turn writes the whole answer: it gets more room than an action turn.
+        maxTokens: finishOnly ? FINISH_MAX_TOKENS : 4_096,
         system:
           unifiedBrowserSystemPrompt() +
           (input.observationV2
             ? '\n当前启用云端读取：每次交互带上 read_page 返回的 observationRevision/tabId/frameId；动作后重新读取，只有实际页面证据才能完成。cursor/ref 过期须重读。'
             : ''),
         messages: trimImages(compactToolResults(messages, input.fullPageResults)),
-        tools: concludeNow
+        tools: finishOnly
           ? CONTROL_TOOLS.filter((t) => t.name === 'finish')
           : [
               ...(input.observationV2
@@ -851,6 +891,35 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         step,
       );
     }
+    if (response.stopReason === 'max_tokens') {
+      // The tool call in a cut-off turn is incomplete (a finish without its status or the end
+      // of its answer): it is not run, and a cut-off answer is never delivered as completed.
+      if (truncatedRetry)
+        return heldOr(
+          {
+            status: 'failed',
+            reason: '模型输出过长被截断，未能给出完整答案，任务未完成。',
+            failureSource: 'model',
+            steps: step + 1,
+          },
+          step + 1,
+        );
+      truncatedRetry = true;
+      const last = messages.at(-1);
+      const note: NeutralInputContentBlock = { type: 'text', text: TRUNCATED_RETRY };
+      if (last?.role === 'user')
+        messages[messages.length - 1] = {
+          ...last,
+          content:
+            typeof last.content === 'string'
+              ? [{ type: 'text', text: last.content }, note]
+              : [...last.content, note],
+        };
+      else messages.push({ role: 'user', content: [note] });
+      continue;
+    }
+    if (truncatedRetry && response.content.some((block) => block.type === 'tool_use'))
+      truncatedRetry = false;
     const calls = response.content.filter((block) => block.type === 'tool_use');
     if (calls.length === 0) {
       if (concludeNow)
@@ -1369,7 +1438,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             results.push(
               toolResult(
                 call.id,
-                `${facts.cutPrices.join('；')}：页面快照有长度上限，这只说明快照在这里截断了，不说明页面没有价格，再 snapshot 也还是从头开始。请用 get_page_text 分段读取（沿 cursor 往下读，直到读到这个商品或 end=true），读到后照页面原样写；读完确实没有，才写「未获取到」。其余内容不变，再 finish。`,
+                `${facts.cutPrices.join('；')}：页面快照有长度上限，这只说明快照在这里截断了，不说明页面没有价格，再 snapshot 也还是从头开始。请用 get_page_text 分段读取（沿 cursor 往下读，直到读到这个商品或 end=true），读到后照页面原样写；商品卡片只显示「See options / No featured offers available」时，紧跟其后的「S$…(N new offers)」就是该商品的报价，照原样写并注明是报价（引用原文时逐行分开引用，或用「 / 」隔开相邻两行），也可以打开该商品详情页读价格；读完确实没有，才写「未获取到」。其余内容不变，再 finish。`,
                 true,
               ),
             );
@@ -2145,6 +2214,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           ? { tabId: action.targetTabId }
           : {}),
         ...(action.tool === 'type' && outcome.ok ? { typedText: action.text } : {}),
+        ...(action.tool === 'close_tab' && outcome.ok ? { closedTabId: action.targetTabId } : {}),
         ...(outcome.form && input.currentPageUrl ? { pageUrl: input.currentPageUrl() } : {}),
         screenshot: !!capturedImage,
         ...((action.tool === 'new_tab' || (action.tool === 'click' && action.newTab)) &&

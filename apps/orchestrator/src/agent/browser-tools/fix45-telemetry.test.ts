@@ -95,14 +95,14 @@ describe('FIX-45 #4 · an apm-fe batch: every record has the FIX-43 shape, 32 KB
 
 describe('FIX-45 #4 · 高德 collapsar: the check that refused it is named', () => {
   it.each([
-    ['a mode value off the list', amapBody({ mode: 'mini' }), 'mode=mini'],
-    ['a long mode value, by length only', amapBody({ mode: 'x'.repeat(40) }), 'mode=len40'],
+    ['a mode value off the list', amapBody({ mode: 'mini' }), 'mode=len4:a'],
+    ['a long mode value, by length only', amapBody({ mode: 'x'.repeat(40) }), 'mode=len40:a'],
     [
       'a key/value pair in content',
       amapBody({ content: 'phone=13800138000&code=1234' }),
       'content:pair-in-reading0',
     ],
-    ['an action word in another field', amapBody({ channel: 'login' }), 'value:channel'],
+    ['an action word in another field', amapBody({ channel: 'login' }), 'value:channel:len5:a'],
     ['an off-list field', amapBody({ phone: '13800138000' }), 'key:phone'],
   ])('%s', (_label, body, why) => {
     expect(anchoredLogPost(new URL(AMAP), 'POST', body)).toBe(false);
@@ -180,7 +180,7 @@ describe('FIX-45 #4 · in the executor: the pause names a background request, an
     });
     expect(r.interruption?.message).not.toContain('写请求或交易状态变化');
     expect((r.effect?.triggers?.[0] as { bodyShape?: string } | undefined)?.bodyShape).toMatch(
-      /^form\{adiu,.*\} \d+B check:mode=mini$/,
+      /^form\{adiu,.*\} \d+B check:mode=len4:a$/,
     );
   }, 30_000);
 });

@@ -288,9 +288,9 @@ describe('FIX-52 #6 · 高德 collapsar with tid, timestamp, uid', () => {
     expect(anchoredLogPost(AMAP, 'POST', form())).toBe(true);
   });
   it.each([
-    ['timestamp text', { timestamp: 'order=1' }, 'timestamp:not-a-number'],
-    ['uid text', { uid: '张三 13800000000' }, 'uid:not-an-id'],
-    ['tid a url', { tid: 'https://x.io/?a=1' }, 'tid:not-an-id'],
+    ['timestamp text', { timestamp: 'order=1' }, 'timestamp:not-a-number:len7:a0='],
+    ['uid text', { uid: '张三 13800000000' }, 'uid:not-an-id:len14:0汉␣'],
+    ['tid a url', { tid: 'https://x.io/?a=1' }, 'tid:not-an-id:len17:a0./:=?'],
     ['a key off the list', { phone: '13800000000' }, 'key:phone'],
   ])('%s still pauses', (_label, over, why) => {
     expect(keyedLogCheck(AMAP, form(over))).toBe(why);

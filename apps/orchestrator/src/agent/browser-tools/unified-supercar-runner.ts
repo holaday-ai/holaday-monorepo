@@ -375,6 +375,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   ): Promise<string | null> => {
     // FIX-30 review: a login wall the user takes 5+ minutes on is not a timeout.
     suspendTimeout();
+    // FIX-54 #8: nobody watching the panel, the pool's 5-minute idle reclaim closed the browser
+    // under a wait that promises 30 minutes. The wait holds it, for the wait's own length.
+    await safe(() => opts.onAwaitingReplyHold?.(HANDOFF_WAIT_MS));
     await replay?.pause();
     try {
       await safe(() =>
@@ -401,6 +404,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         });
       });
     } finally {
+      await safe(() => opts.onAwaitingReplyRelease?.());
       replay?.resume();
       resumeTimeout();
     }
@@ -518,9 +522,17 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     const changedTab =
       ['new_tab', 'switch_tab', 'close_tab'].includes(action.tool) ||
       (phase === 'after' && action.tool === 'click' && action.newTab);
-    const targetPage = changedTab
-      ? tools.page
-      : (tools.observation?.resolve(action).page ?? tools.page);
+    // FIX-54 (local A/B B r2 new-amazon-sg): a tab or frame gone since the read threw out of the
+    // gate and ended the task as 「runner threw: stale_context」. The gate looks at the current
+    // page instead; the action itself then reports stale_context and the model reads again.
+    const resolvedPage = () => {
+      try {
+        return tools.observation?.resolve(action).page;
+      } catch {
+        return undefined;
+      }
+    };
+    const targetPage = changedTab ? tools.page : (resolvedPage() ?? tools.page);
     const result = await baseGateAction(targetPage)(action, phase);
     if (result.kind === 'proceed' && replay) {
       try {

@@ -168,7 +168,7 @@ describe('DEPLOY-47 复审 #1 · only a known log endpoint is told as 「无法�
     [
       'collapsar refused by its check',
       'https://collapsar.amap.com/alc/h5/upload',
-      'form{adiu,mode} 3414B check:mode=mini',
+      'form{adiu,mode} 3414B check:mode=len4:a',
     ],
     ['an anchored log host', 'https://t2.xiaohongshu.com/api/v2/collect', 'json{a} 900B'],
   ])('%s: told as an unplaced background request', async (_label, url, bodyShape) => {

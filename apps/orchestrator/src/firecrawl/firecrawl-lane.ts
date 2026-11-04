@@ -25,6 +25,8 @@
  * lane, which hands it to the user instead of getting around it.
  */
 
+import { xhsCountsLine, xhsNoteCounts, xhsNoteId } from './xhs-counts.js';
+
 export interface FirecrawlScrapeOk {
   ok: true;
   markdown: string;
@@ -198,11 +200,13 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
     async scrape(url: string, scrapeOpts?: FirecrawlScrapeOpts): Promise<FirecrawlScrapeResult> {
       const trimmed = url.trim();
       if (!trimmed) return { ok: false, error: 'firecrawl: empty url' };
+      // FIX-54 #2: a 小红书 note also comes as raw HTML, for its counts read by name.
+      const noteId = xhsNoteId(trimmed);
       const result = await request(
         '/v1/scrape',
         {
           url: trimmed,
-          formats: ['markdown'],
+          formats: noteId ? ['markdown', 'rawHtml'] : ['markdown'],
           ...(scrapeOpts?.fresh ? { maxAge: 0 } : {}),
         },
         scrapeOpts?.signal,
@@ -214,6 +218,7 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
             error?: string;
             data?: {
               markdown?: string;
+              rawHtml?: string;
               metadata?: {
                 title?: string;
                 sourceURL?: string;
@@ -227,10 +232,12 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
       if (!j || j.success === false) {
         return { ok: false, error: `firecrawl: ${j?.error ?? 'unknown error'}` };
       }
-      const markdown = j.data?.markdown ?? '';
+      let markdown = j.data?.markdown ?? '';
       if (!markdown) {
         return { ok: false, error: 'firecrawl: no markdown in response' };
       }
+      const counts = noteId && j.data?.rawHtml ? xhsNoteCounts(j.data.rawHtml, noteId) : null;
+      if (counts) markdown = `${xhsCountsLine(counts)}\n\n${markdown}`;
       const title = j.data?.metadata?.title;
       const credits = j.data?.metadata?.creditsUsed;
       return {
