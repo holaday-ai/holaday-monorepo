@@ -737,15 +737,45 @@ function adjacentLines(lines: readonly string[], value: string): boolean {
     .filter(Boolean);
   if (parts.length < 2 || parts.some((part) => part.length < 2)) return false;
   const rows = lines.filter((line) => line.trim());
+  const card = cardIndexes(rows);
   return rows.some((line, i) => {
     if (!line.includes(parts[0]!)) return false;
     let at = i;
     for (const part of parts.slice(1)) {
-      const next = rows.slice(at + 1, at + 4).findIndex((row) => row.includes(part));
+      // FIX-55 #2: the next part must be on the same item card — 「Anker 2M cable / S$12.45」
+      // joining one card's title to the next card's price is not the page's text.
+      const next = rows
+        .slice(at + 1, at + 4)
+        .findIndex((row, k) => row.includes(part) && card[at + 1 + k] === card[i]);
       if (next < 0) return false;
       at += 1 + next;
     }
     return true;
+  });
+}
+
+/**
+ * FIX-55 #2: which item card each line is on. A card starts at a title line — a long line that is
+ * not a price, a rating or one of the card's own state lines; a title that wraps onto a second
+ * line stays one card. Lines before the first title are card 0.
+ */
+const CARD_OWN_LINE_RE =
+  /^(?:no featured offers(?: available)?|see (?:all buying )?options|currently unavailable|price, product page|\d+[kK+]*\+? bought in past month|limited time deal|add to (?:cart|basket))\b/i;
+function isTitleLine(row: string): boolean {
+  const line = row.trim();
+  return (
+    line.length >= 30 &&
+    /[A-Za-z\p{Script=Han}]/u.test(line) &&
+    !/out of 5 stars/i.test(line) &&
+    !/^(?:[A-Z]{0,3}\$|[¥￥€£])\s*\d/.test(line) &&
+    !CARD_OWN_LINE_RE.test(line)
+  );
+}
+function cardIndexes(rows: readonly string[]): number[] {
+  let card = 0;
+  return rows.map((row, i) => {
+    if (isTitleLine(row) && !(i > 0 && isTitleLine(rows[i - 1]!))) card += 1;
+    return card;
   });
 }
 
