@@ -137,3 +137,14 @@ describe('tool registry', () => {
     expect(classifyTaskType(intent)).toBe('search');
   });
 });
+
+it('admits only five OrangeBench names for an enabled hybrid connection', () => {
+  const names = ['orangebench_create_project', 'orangebench_storyboard', 'orangebench_character_cards', 'orangebench_generate_episode', 'orangebench_multilingual_version'];
+  for (const name of names) {
+    expect(isToolAllowed(name, 'hybrid')).toBe(false);
+    expect(isToolAllowed(name, 'hybrid', { orangebench: true })).toBe(true);
+    expect(isToolAllowed(name, 'search', { orangebench: true })).toBe(false);
+    expect(isToolAllowed(name, 'browser', { orangebench: true })).toBe(false);
+  }
+  expect(filterTools([...names, 'orangebench_raw_model', 'bash'].map(name => ({ name })), 'hybrid', { orangebench: true }).map(x => x.name)).toEqual(names);
+});

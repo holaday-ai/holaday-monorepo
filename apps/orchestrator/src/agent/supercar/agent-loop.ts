@@ -67,7 +67,9 @@ import {
 } from '../site-configs/index.js';
 import { detectBlankPage } from '../blank-page-detector.js';
 import { translateNavError } from '../nav-error-translator.js';
-import { classifyTaskType, filterTools } from '../tool-registry.js';
+import { classifyTaskType, filterTools, isToolAllowed } from '../tool-registry.js';
+import { isOrangeBenchTool, type HostContext } from '../orangebench/contracts.js';
+import type { OrangeBenchTaskClient } from '../orangebench/client.js';
 // Layer C — pure matcher for the gated transaction-FORM-FIELD signal (explorer login-mode only).
 import { extractTxFieldSignal } from '../../playbook/explorer/explorer-guards.js';
 import {
@@ -749,6 +751,10 @@ export interface SupercarEvidenceEvent {
 }
 
 export interface RunSupercarOptions {
+  /** Explicit task-scoped MCP client; absent by default, never loaded by service env. */
+  orangebench?: OrangeBenchTaskClient;
+  /** Trusted host/UI callback; model arguments cannot provide this approval. */
+  onOrangeBenchApproval?: HostContext['onApproval'];
   /** External task id (task_…). Correlates hooks and WS frames. */
   taskId: string;
   /** Free-form user intent — the first user message. */
@@ -1161,12 +1167,13 @@ export function supercarAbort(taskId: string): boolean {
 const COMPUTER_USE_BETA = 'computer-use-2025-11-24';
 
 interface SupercarRunLifecycle {
+  orangebenchAbort?: AbortController;
   cancelled: boolean;
   handle: RunHandle;
 }
 
 export function runSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutcome> {
-  const lifecycle = { cancelled: false } as SupercarRunLifecycle;
+  const lifecycle = { cancelled: false, orangebenchAbort: opts.orangebench ? new AbortController() : undefined } as SupercarRunLifecycle;
   const handle: RunHandle = {
     resolveReply: null,
     handoffMessage: null,
@@ -1174,6 +1181,7 @@ export function runSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutco
     pendingAttachmentBlocks: null,
     abort: () => {
       lifecycle.cancelled = true;
+      lifecycle.orangebenchAbort?.abort();
       if (handle.resolveReply) {
         const resolve = handle.resolveReply;
         handle.resolveReply = null;
@@ -1198,6 +1206,7 @@ async function runSupercarTaskInternal(
     const durablyCancelled = await opts.isTaskCancelled?.();
     if (lifecycle.cancelled || durablyCancelled) {
       lifecycle.cancelled = true;
+      lifecycle.orangebenchAbort?.abort();
       return true;
     }
     return false;
@@ -2075,7 +2084,9 @@ async function runSupercarTaskInternal(
                   },
                 ]
               : []),
-          ], supercarTaskType) as Anthropic.Beta.BetaToolUnion[],
+            ...(opts.orangebench?.ready && opts.orangebench.taskId === opts.taskId
+              ? opts.orangebench.tools.map(tool => ({ type: 'custom' as const, name: tool.name, description: tool.description, input_schema: tool.inputSchema })) : []),
+          ], supercarTaskType, { orangebench: opts.orangebench?.ready === true && opts.orangebench.taskId === opts.taskId }) as Anthropic.Beta.BetaToolUnion[],
           betas,
           thinking: { type: 'adaptive' },
           // Phase 10 Tier 1: opt into server-side compaction so long
@@ -2775,6 +2786,19 @@ async function runSupercarTaskInternal(
               },
             ],
           });
+          continue;
+        }
+        // Optional OrangeBench connection: registry and trusted confirmation
+        // are enforced at dispatch too, including model-invented tool uses.
+        if (isOrangeBenchTool(toolUse.name)) {
+          const enabled = opts.orangebench?.ready === true && opts.orangebench.taskId === opts.taskId;
+          const result = enabled && isToolAllowed(toolUse.name, classifyTaskType(opts.intent), { orangebench: true })
+            ? await opts.orangebench!.dispatch(toolUse.name, toolUse.input, { taskId: opts.taskId,
+                onApproval: opts.onOrangeBenchApproval, isCancelled: cancellationRequested,
+                signal: lifecycle.orangebenchAbort ? AbortSignal.any([lifecycle.orangebenchAbort.signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))]) : undefined })
+            : { ok: false as const, error: 'tool_not_available' };
+          toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, is_error: !result.ok,
+            content: [{ type: 'text', text: JSON.stringify(result) }] });
           continue;
         }
         // -------- Custom `navigate` tool --------
