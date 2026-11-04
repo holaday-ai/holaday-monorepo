@@ -237,9 +237,10 @@ function mapFinishReason(
   reason: unknown,
   content: readonly NeutralOutputContentBlock[],
 ): NeutralMessagesResponse['stopReason'] {
+  // FIX-54 #7: a tool call cut off at the output cap is still a cut-off turn.
+  if (reason === 'length') return 'max_tokens';
   if (content.some((block) => block.type === 'tool_use')) return 'tool_use';
   if (reason === 'stop') return 'end_turn';
-  if (reason === 'length') return 'max_tokens';
   return 'unknown';
 }
 

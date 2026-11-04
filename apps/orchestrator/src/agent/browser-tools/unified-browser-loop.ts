@@ -187,6 +187,11 @@ export interface WebSearchHit {
   url: string;
 }
 
+/** FIX-54 #7: the finish turn's output cap (an action turn keeps 4096). */
+const FINISH_MAX_TOKENS = 8_192;
+const TRUNCATED_RETRY =
+  '你上一轮的输出超过长度上限被截断了，那次调用没有执行。请只调用一次 finish：答案精简，只写用户问的结果和必要的来源，不要复述页面原文或过程；不要再调用其他工具。';
+
 /** FIX-53 #1: told to the model when the wall went away and the person did nothing. */
 const WALL_CLEARED_ITSELF =
   '验证页已经不在了，但等待期间没有收到用户的任何操作（不是用户完成的）。从当前页面重新 snapshot 后继续原任务，不要重放旧动作；答案里不要说用户完成或通过了验证。';
@@ -631,6 +636,12 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   let repeatedReads = 0;
   const seenReads = new Set<string>();
   let concludeNow = false;
+  /**
+   * FIX-54 #7 (FIX-53 local b-m01 ×2): the model's turn hit the output cap, and the truncated
+   * finish was taken as a failed one. A cut-off turn is never acted on: the model gets one
+   * retry with a higher cap, finish only, and a shorter answer.
+   */
+  let truncatedRetry = false;
   const readSignature = (text: string) => {
     try {
       const value = JSON.parse(text);
@@ -817,15 +828,17 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     }
     let response: Awaited<ReturnType<MessagesAdapter['create']>>;
     try {
+      const finishOnly = concludeNow || truncatedRetry;
       const request: Parameters<MessagesAdapter['create']>[0] = {
-        maxTokens: 4_096,
+        // The finish turn writes the whole answer: it gets more room than an action turn.
+        maxTokens: finishOnly ? FINISH_MAX_TOKENS : 4_096,
         system:
           unifiedBrowserSystemPrompt() +
           (input.observationV2
             ? '\n当前启用云端读取：每次交互带上 read_page 返回的 observationRevision/tabId/frameId；动作后重新读取，只有实际页面证据才能完成。cursor/ref 过期须重读。'
             : ''),
         messages: trimImages(compactToolResults(messages, input.fullPageResults)),
-        tools: concludeNow
+        tools: finishOnly
           ? CONTROL_TOOLS.filter((t) => t.name === 'finish')
           : [
               ...(input.observationV2
@@ -878,6 +891,35 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         step,
       );
     }
+    if (response.stopReason === 'max_tokens') {
+      // The tool call in a cut-off turn is incomplete (a finish without its status or the end
+      // of its answer): it is not run, and a cut-off answer is never delivered as completed.
+      if (truncatedRetry)
+        return heldOr(
+          {
+            status: 'failed',
+            reason: '模型输出过长被截断，未能给出完整答案，任务未完成。',
+            failureSource: 'model',
+            steps: step + 1,
+          },
+          step + 1,
+        );
+      truncatedRetry = true;
+      const last = messages.at(-1);
+      const note: NeutralInputContentBlock = { type: 'text', text: TRUNCATED_RETRY };
+      if (last?.role === 'user')
+        messages[messages.length - 1] = {
+          ...last,
+          content:
+            typeof last.content === 'string'
+              ? [{ type: 'text', text: last.content }, note]
+              : [...last.content, note],
+        };
+      else messages.push({ role: 'user', content: [note] });
+      continue;
+    }
+    if (truncatedRetry && response.content.some((block) => block.type === 'tool_use'))
+      truncatedRetry = false;
     const calls = response.content.filter((block) => block.type === 'tool_use');
     if (calls.length === 0) {
       if (concludeNow)

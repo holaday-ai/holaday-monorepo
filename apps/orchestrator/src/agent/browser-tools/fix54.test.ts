@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { listPartialNote, reviewListAnswer } from '../../execution/answer-verifier.js';
 import type { ExecutionContract } from '../../execution/execution-contract.js';
 import { type BrowserTrace, completionGap } from './browser-completion.js';
 import { anchoredLogPost, keyedLogCheck, valueShape } from './cloud-observation.js';
 import { assessCompletionFacts } from './completion-fields.js';
-import { userClearClaims } from './unified-browser-loop.js';
+import { runUnifiedBrowserLoop, userClearClaims } from './unified-browser-loop.js';
 
 /** FIX-54: the Deploy-54 rollback items and the FIX-53 leftovers, with the online text as fixtures. */
 
@@ -243,5 +244,83 @@ describe('FIX-54 #6 · 「用户完成验证」: the other ways of saying it', (
     '用户已解决的问题：路线查询。',
   ])('is not a claim: %s', (sentence) => {
     expect(userClearClaims(sentence)).toEqual([]);
+  });
+});
+
+describe('FIX-54 #7 · a turn cut off at the output cap is never acted on', () => {
+  // FIX-53 local b-m01 w / w2: the route page was read, the finish turn hit 4096 output tokens,
+  // and the cut-off finish ended the task as 「任务未完成」.
+  type Turn = { name: string; input: Record<string, unknown>; stop?: 'max_tokens' };
+  const scripted = (turns: Turn[]) => {
+    let n = 0;
+    const requests: Array<{ maxTokens: number; tools: string[]; last: string }> = [];
+    const adapter: MessagesAdapter = {
+      metadata: { provider: 'anthropic', model: 'fixture' },
+      async create(request) {
+        requests.push({
+          maxTokens: request.maxTokens,
+          tools: (request.tools ?? []).map((t) => t.name),
+          last: JSON.stringify(request.messages.at(-1)),
+        });
+        const turn = turns[Math.min(n++, turns.length - 1)]!;
+        return {
+          id: String(n),
+          metadata: { provider: 'anthropic', model: 'fixture' },
+          content: [{ type: 'tool_use', id: String(n), name: turn.name, input: turn.input }],
+          stopReason: turn.stop ?? 'tool_use',
+          usage: {
+            inputTokens: 1,
+            outputTokens: turn.stop ? 4096 : 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    return { adapter, requests };
+  };
+  const ROUTE = '方案1 约32分钟 9.8公里';
+  const run = (turns: Turn[]) => {
+    const { adapter, requests } = scripted(turns);
+    const executed: string[] = [];
+    return runUnifiedBrowserLoop({
+      intent: '高德地图查一下杭州东站到西湖断桥怎么走，大概多久',
+      adapter,
+      maxSteps: 8,
+      execute: async (action) => {
+        executed.push(action.tool);
+        return { ok: true, text: `heading "路线" [level=1]\n- text: ${ROUTE}`, url: 'https://ditu.amap.com/dir' };
+      },
+    }).then((outcome) => ({ outcome, requests, executed }));
+  };
+  const nav = { name: 'navigate', input: { url: 'https://ditu.amap.com/dir' } };
+  const snap = { name: 'snapshot', input: {} };
+  // As the provider hands back a cut-off finish: no status, the answer stops mid-way.
+  const cut: Turn = { name: 'finish', input: { summary: '路线：方案1 约32分钟 9.8公里。详细步骤：1. 从杭州东站' }, stop: 'max_tokens' };
+  const done = { name: 'finish', input: { status: 'completed', summary: `杭州东站到西湖断桥：${ROUTE}。` } };
+
+  it('retries once with finish only and more room, and delivers the full answer', async () => {
+    const { outcome, requests } = await run([nav, snap, cut, done]);
+    expect(outcome).toMatchObject({ status: 'completed' });
+    expect((outcome as { summary?: string }).summary).toContain(ROUTE);
+    expect(requests[2]!.maxTokens).toBe(4096);
+    expect(requests[3]).toMatchObject({ maxTokens: 8192, tools: ['finish'] });
+    expect(requests[3]!.last).toContain('超过长度上限被截断');
+  });
+
+  it('a cut-off action call is not run either', async () => {
+    const cutClick: Turn = { name: 'click', input: { ref: 'e1' }, stop: 'max_tokens' };
+    const { executed } = await run([nav, snap, cutClick, done]);
+    expect(executed).toEqual(['navigate', 'snapshot']);
+  });
+
+  it('cut off twice: fails honestly, and the cut-off answer is not delivered as completed', async () => {
+    const cutDone: Turn = { ...done, stop: 'max_tokens' };
+    const { outcome } = await run([nav, snap, cutDone, cutDone]);
+    expect(outcome).toMatchObject({
+      status: 'failed',
+      reason: '模型输出过长被截断，未能给出完整答案，任务未完成。',
+    });
   });
 });
