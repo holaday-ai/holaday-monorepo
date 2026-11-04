@@ -197,6 +197,7 @@ import {
   restorableBrowserTarget,
   storedBrowserSessionPolicy,
 } from '../../browser-pool/browser-session-recovery.js';
+import { AWAITING_REPLY } from '../../browser-pool/browser-pool.js';
 import { finishTaskBrowser } from '../../browser-pool/finish-task-browser.js';
 import type { BrowserSessionPolicy } from '../../browser-pool/types.js';
 import { getVaultRuntime } from '../../browser-session-vault/runtime.js';
@@ -6614,6 +6615,13 @@ export const tasksRouter = router({
                   },
                   onBrowserKeepAlive() {
                     if (ctx.browserPool && perUserExec) ctx.browserPool.touch(taskId);
+                  },
+                  onAwaitingReplyHold(ttlMs) {
+                    if (ctx.browserPool && perUserExec)
+                      ctx.browserPool.retain(taskId, ttlMs, AWAITING_REPLY);
+                  },
+                  onAwaitingReplyRelease() {
+                    if (ctx.browserPool && perUserExec) ctx.browserPool.unretain(taskId);
                   },
                   async onCaptchaHandoffEnd(resumed) {
                     if (!resumed) {

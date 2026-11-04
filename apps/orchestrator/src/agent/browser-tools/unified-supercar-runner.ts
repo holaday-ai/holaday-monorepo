@@ -375,6 +375,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   ): Promise<string | null> => {
     // FIX-30 review: a login wall the user takes 5+ minutes on is not a timeout.
     suspendTimeout();
+    // FIX-54 #8: nobody watching the panel, the pool's 5-minute idle reclaim closed the browser
+    // under a wait that promises 30 minutes. The wait holds it, for the wait's own length.
+    await safe(() => opts.onAwaitingReplyHold?.(HANDOFF_WAIT_MS));
     await replay?.pause();
     try {
       await safe(() =>
@@ -401,6 +404,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         });
       });
     } finally {
+      await safe(() => opts.onAwaitingReplyRelease?.());
       replay?.resume();
       resumeTimeout();
     }

@@ -137,6 +137,13 @@ interface PoolProcessRecord {
   failure?: Error;
 }
 
+/**
+ * FIX-54 #8: the retention reason of a task waiting for the person's reply (parkForReply, at most
+ * 30 minutes). Unlike a terminal-review retention it holds its slot: capacity reclaim and
+ * follow-up adoption skip it, so while it lasts the pool has one slot fewer for new tasks.
+ */
+export const AWAITING_REPLY = 'awaiting-reply';
+
 export class BrowserPool {
   readonly #strict: boolean;
   #brokerRuntime?: BrokerPoolRuntime;
@@ -686,6 +693,31 @@ export class BrowserPool {
   }
 
   /**
+   * FIX-54 #8: end a retention while the task still runs — an awaiting-reply hold whose reply
+   * came (or whose wait ended). The browser goes back on the idle clock from now.
+   */
+  unretain(taskId: string): boolean {
+    const inst = this.instances.get(taskId);
+    if (!inst || inst.retainedUntil == null) return false;
+    const timer = this.retentionTimers.get(taskId);
+    if (timer) clearTimeout(timer);
+    this.retentionTimers.delete(taskId);
+    const now = Date.now();
+    delete inst.retainedUntil;
+    delete inst.retentionReason;
+    delete inst.retentionTtlMs;
+    inst.lastActiveAt = now;
+    const bound = this.#brokerBindings.get(inst);
+    if (bound) {
+      bound.retained = false;
+      bound.retainedUntil = undefined;
+      bound.retentionTtlMs = undefined;
+      bound.lastActiveAt = now;
+    }
+    return true;
+  }
+
+  /**
    * Move a retained terminal browser to a follow-up task. The browser process,
    * profile, cookies and current page stay intact; only the pool ownership key
    * changes. This is deliberately limited to retained instances so a follow-up
@@ -701,6 +733,8 @@ export class BrowserPool {
     if (this.shuttingDown) return null;
     const source = this.instances.get(sourceTaskId);
     if (source && !this.processesRunning(source)) return null;
+    // FIX-54 #8: an awaiting-reply hold belongs to a task that is still running.
+    if (source?.retentionReason === AWAITING_REPLY) return null;
     const broker = source && this.#brokerBindings.get(source);
     if (
       this.#strict &&
@@ -1012,7 +1046,10 @@ export class BrowserPool {
     return (
       this.allocator.availableCount() > 0 ||
       Array.from(this.instances.values()).some(
-        (inst) => inst.status === 'ready' && inst.retainedUntil != null,
+        (inst) =>
+          inst.status === 'ready' &&
+          inst.retainedUntil != null &&
+          inst.retentionReason !== AWAITING_REPLY,
       )
     );
   }
@@ -1175,6 +1212,8 @@ export class BrowserPool {
     let oldest: BrowserInstance | null = null;
     for (const inst of this.instances.values()) {
       if (inst.status !== 'ready' || inst.retainedUntil == null) continue;
+      // FIX-54 #8: capacity never takes the browser a person is coming back to.
+      if (inst.retentionReason === AWAITING_REPLY) continue;
       if (!oldest || inst.retainedUntil < (oldest.retainedUntil ?? Number.POSITIVE_INFINITY)) {
         oldest = inst;
       }

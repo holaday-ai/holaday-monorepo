@@ -20,7 +20,7 @@ import {
 } from '@holaday/shared-types';
 import { pino } from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { BrowserPool, PoolCapacityError } from './browser-pool.js';
+import { AWAITING_REPLY, BrowserPool, PoolCapacityError } from './browser-pool.js';
 import type { BrowserInstance, BrowserSessionTarget, PoolConfig } from './types.js';
 
 function makePool(maxInstances = 10): {
@@ -415,6 +415,70 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
       expect(pool.adoptRetained('tsk_parent', 'tsk_next', 'usr_owner', 'anonymous')).toBeNull();
       expect(pool.peek('tsk_next')).toBe(destination);
       expect(pool.peek('tsk_parent')).not.toBeNull();
+    });
+  });
+
+  describe('FIX-54 #8 · awaiting-reply hold (parkForReply, at most 30 minutes)', () => {
+    const gc = (p: BrowserPool) =>
+      (p as unknown as { runGcSweep: () => Promise<void> }).runGcSweep();
+
+    it('a waiting task is not reaped by the 5-minute idle GC; after the reply it is idle again', async () => {
+      await pool.allocate('tsk_wait', 'u');
+      expect(pool.retain('tsk_wait', 30 * 60_000, AWAITING_REPLY)).toBe(true);
+      pool.peek('tsk_wait')!.lastActiveAt = Date.now() - 600_000;
+      await gc(pool);
+      expect(pool.peek('tsk_wait')).not.toBeNull();
+      expect(pool.unretain('tsk_wait')).toBe(true);
+      expect(pool.peek('tsk_wait')?.retainedUntil).toBeUndefined();
+      // Back on the idle clock from the reply.
+      await gc(pool);
+      expect(pool.peek('tsk_wait')).not.toBeNull();
+      pool.peek('tsk_wait')!.lastActiveAt = Date.now() - 600_000;
+      await gc(pool);
+      expect(pool.peek('tsk_wait')).toBeNull();
+    });
+
+    it('the hold ends on its own after 30 minutes', async () => {
+      vi.useFakeTimers();
+      try {
+        const leased = makePool(1);
+        await leased.pool.allocate('tsk_wait', 'u');
+        leased.pool.retain('tsk_wait', 30 * 60_000, AWAITING_REPLY);
+        await vi.advanceTimersByTimeAsync(30 * 60_000 - 1);
+        expect(leased.pool.peek('tsk_wait')).not.toBeNull();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(leased.pool.peek('tsk_wait')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('holds its slot: capacity reclaim takes a terminal review browser, never the waiting one', async () => {
+      const two = makePool(2);
+      await two.pool.allocate('tsk_wait', 'u');
+      await two.pool.allocate('tsk_done', 'u');
+      two.pool.retain('tsk_wait', 30 * 60_000, AWAITING_REPLY);
+      two.pool.retain('tsk_done', 60 * 60_000, 'terminal-review');
+      await two.pool.allocate('tsk_next', 'u');
+      expect(two.pool.peek('tsk_wait')).not.toBeNull();
+      expect(two.pool.peek('tsk_done')).toBeNull();
+      // Full, and the only retained browser is a waiting one: no slot for new work.
+      expect(two.pool.canAllocate()).toBe(false);
+      await expect(two.pool.allocate('tsk_more', 'u')).rejects.toBeInstanceOf(PoolCapacityError);
+      expect(two.pool.peek('tsk_wait')).not.toBeNull();
+    });
+
+    it('a follow-up task cannot adopt a browser whose task is still waiting', async () => {
+      await pool.allocate('tsk_wait', 'usr_owner');
+      pool.retain('tsk_wait', 30 * 60_000, AWAITING_REPLY);
+      expect(pool.adoptRetained('tsk_wait', 'tsk_follow', 'usr_owner', 'anonymous')).toBeNull();
+      expect(pool.peek('tsk_wait')).not.toBeNull();
+    });
+
+    it('unretain on a browser with no hold is a no-op', async () => {
+      await pool.allocate('tsk_plain', 'u');
+      expect(pool.unretain('tsk_plain')).toBe(false);
+      expect(pool.unretain('tsk_missing')).toBe(false);
     });
   });
 
