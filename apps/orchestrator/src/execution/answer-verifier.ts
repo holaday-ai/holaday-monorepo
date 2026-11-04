@@ -1083,8 +1083,7 @@ function checkEcommerceRows(
     if (requireLinks && !row.url) missing.push('链接');
     if (missing.length > 0) {
       // FIX-54 #3: say where the price is when the card lists only offers.
-      const offer =
-        row.price == null && pageText ? rowOfferPrice(row.name, pageText) : null;
+      const offer = row.price == null && pageText ? rowOfferPrice(row.name, pageText) : null;
       incomplete.push(
         `第 ${i + 1} 行缺少${missing.join('、')}${offer ? `（页面在该商品下列出报价「${offer}」：照原样写并注明是报价，或打开该商品详情页读价格）` : ''}`,
       );

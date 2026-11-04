@@ -187,7 +187,10 @@ describe('FIX-53 #4 · captcha handoff endings', () => {
 
 describe('FIX-54 #9 · a captcha handoff ending keeps only its own sentence', () => {
   it.each([
-    ['任务执行失败：等待用户完成验证码已超时，任务未完成。', '等待用户完成验证码已超时，任务未完成。'],
+    [
+      '任务执行失败：等待用户完成验证码已超时，任务未完成。',
+      '等待用户完成验证码已超时，任务未完成。',
+    ],
     [
       '页面一级标题是 Item。验证码等待已结束，任务未完成。\n{"stack":"Error at loop.ts:1"}',
       '验证码等待已结束，任务未完成。',

@@ -192,12 +192,12 @@ import {
   finalizeClaim as finalizeTaskCreateClaim,
   releaseClaim as releaseTaskCreateClaim,
 } from '../../api-keys/webhook-idempotency-service.js';
+import { AWAITING_REPLY } from '../../browser-pool/browser-pool.js';
 import {
   BrowserSessionRestoreFlights,
   restorableBrowserTarget,
   storedBrowserSessionPolicy,
 } from '../../browser-pool/browser-session-recovery.js';
-import { AWAITING_REPLY } from '../../browser-pool/browser-pool.js';
 import { finishTaskBrowser } from '../../browser-pool/finish-task-browser.js';
 import type { BrowserSessionPolicy } from '../../browser-pool/types.js';
 import { getVaultRuntime } from '../../browser-session-vault/runtime.js';

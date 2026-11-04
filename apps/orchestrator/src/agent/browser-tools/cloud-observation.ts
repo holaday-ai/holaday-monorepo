@@ -743,13 +743,10 @@ const AMAP_COLLAPSAR_MODES = /^(?:web|h5|wap|pc|\d)$/i;
  * dotted), ASCII letters and digits, at most 32 characters, no action or personal word. A plain
  * word, free text, Chinese, spaces or anything else still pauses.
  */
-const AMAP_MODE_IDENTIFIER =
-  /^(?=.{3,32}$)[A-Za-z][a-z0-9]*(?:[A-Z][a-z0-9]*|[._-][A-Za-z0-9]+)+$/;
+const AMAP_MODE_IDENTIFIER = /^(?=.{3,32}$)[A-Za-z][a-z0-9]*(?:[A-Z][a-z0-9]*|[._-][A-Za-z0-9]+)+$/;
 const amapModeOk = (mode: string) =>
   AMAP_COLLAPSAR_MODES.test(mode) ||
-  (AMAP_MODE_IDENTIFIER.test(mode) &&
-    !ACTION_WORD_RE.test(mode) &&
-    !PERSONAL_VALUE_RE.test(mode));
+  (AMAP_MODE_IDENTIFIER.test(mode) && !ACTION_WORD_RE.test(mode) && !PERSONAL_VALUE_RE.test(mode));
 /** A key/value pair in readable text: 「phone=138…」「"mobile" : "138"」. */
 const KEY_VALUE_RE = /[A-Za-z_][\w.-]{0,30}\s*["']?\s*[=:]\s*["']?[A-Za-z0-9\u4e00-\u9fff]/;
 

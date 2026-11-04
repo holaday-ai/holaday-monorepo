@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { listPartialNote, reviewListAnswer } from '../../execution/answer-verifier.js';
 import type { ExecutionContract } from '../../execution/execution-contract.js';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { type BrowserTrace, completionGap } from './browser-completion.js';
 import { anchoredLogPost, keyedLogCheck, valueShape } from './cloud-observation.js';
 import { iframeContentGap } from './completion-coverage.js';
@@ -106,7 +106,10 @@ describe('FIX-54 #3 · amazon 「See options」: the offers price the card lists
   // amazon.sg 「usb c cable」 as get_page_text read it (local, 2026-11-04; trimmed). The Belkin
   // USB-C 2M card is the one Deploy-54 reg-new-amazon-sg had third: 「See options / No featured
   // offers available / S$9.22(2 new offers)」, the same offer as online.
-  const PAGE = readFileSync(new URL('./fixtures/amazon-sg-see-options.txt', import.meta.url), 'utf8');
+  const PAGE = readFileSync(
+    new URL('./fixtures/amazon-sg-see-options.txt', import.meta.url),
+    'utf8',
+  );
   const BELKIN =
     'Belkin USB-C to USB-C Cable (2M, 60W) - Soft, Flexible Fast-Charging Cable, Type C Charger Cord for iPhone 16 & 15 Series, Galaxy S25, MacBook, iPad, & More - White (USB 2.0)';
   const UGREEN =
@@ -133,18 +136,28 @@ describe('FIX-54 #3 · amazon 「See options」: the offers price the card lists
     ],
   } as unknown as ExecutionContract;
 
-  it('two adjacent lines quoted joined by 「 / 」 are the page\'s own text', () => {
-    const facts = assessCompletionFacts({ summary: QUOTED, pages, intent: '列出前三个的名称和价格' });
+  it("two adjacent lines quoted joined by 「 / 」 are the page's own text", () => {
+    const facts = assessCompletionFacts({
+      summary: QUOTED,
+      pages,
+      intent: '列出前三个的名称和价格',
+    });
     expect(facts.contradictions.join()).not.toContain('不是已读页面中的原文');
     expect(facts.contradictions).toEqual([]);
   });
 
   it('…but not lines that are apart on the page, nor a part the page does not have', () => {
     const apart = answer('S$9.22（页面显示为 "No featured offers available / S$19.21"）');
-    const made = answer('S$9.22（页面显示为 "No featured offers available / S$8.88(3 new offers)"）');
+    const made = answer(
+      'S$9.22（页面显示为 "No featured offers available / S$8.88(3 new offers)"）',
+    );
     for (const summary of [apart, made])
       expect(
-        assessCompletionFacts({ summary, pages, intent: '列出前三个的名称和价格' }).contradictions.join(),
+        assessCompletionFacts({
+          summary,
+          pages,
+          intent: '列出前三个的名称和价格',
+        }).contradictions.join(),
       ).toContain('不是已读页面中的原文');
   });
 
@@ -291,15 +304,26 @@ describe('FIX-54 #7 · a turn cut off at the output cap is never acted on', () =
       maxSteps: 8,
       execute: async (action) => {
         executed.push(action.tool);
-        return { ok: true, text: `heading "路线" [level=1]\n- text: ${ROUTE}`, url: 'https://ditu.amap.com/dir' };
+        return {
+          ok: true,
+          text: `heading "路线" [level=1]\n- text: ${ROUTE}`,
+          url: 'https://ditu.amap.com/dir',
+        };
       },
     }).then((outcome) => ({ outcome, requests, executed }));
   };
   const nav = { name: 'navigate', input: { url: 'https://ditu.amap.com/dir' } };
   const snap = { name: 'snapshot', input: {} };
   // As the provider hands back a cut-off finish: no status, the answer stops mid-way.
-  const cut: Turn = { name: 'finish', input: { summary: '路线：方案1 约32分钟 9.8公里。详细步骤：1. 从杭州东站' }, stop: 'max_tokens' };
-  const done = { name: 'finish', input: { status: 'completed', summary: `杭州东站到西湖断桥：${ROUTE}。` } };
+  const cut: Turn = {
+    name: 'finish',
+    input: { summary: '路线：方案1 约32分钟 9.8公里。详细步骤：1. 从杭州东站' },
+    stop: 'max_tokens',
+  };
+  const done = {
+    name: 'finish',
+    input: { status: 'completed', summary: `杭州东站到西湖断桥：${ROUTE}。` },
+  };
 
   it('retries once with finish only and more room, and delivers the full answer', async () => {
     const { outcome, requests } = await run([nav, snap, cut, done]);
@@ -368,7 +392,10 @@ describe('FIX-54 #10 · iframe: the old holes, by how a name and a side are said
     ['页面最上方, where the page has it', `${Q}，页面最上方有 File、Edit 菜单`],
     ['最下方, where the page has it', `${Q}，页面最下方有 Elemental Selenium 链接`],
     ['按钮名称 the page has', `${Q}，下方按钮名称：Close`],
-    ['the heading above', `${Q}。页面上方的标题是 An iFrame containing the TinyMCE WYSIWYG Editor。`],
+    [
+      'the heading above',
+      `${Q}。页面上方的标题是 An iFrame containing the TinyMCE WYSIWYG Editor。`,
+    ],
   ])('%s passes', (_label, answer) => {
     expect(kind(answer)).toBeNull();
   });

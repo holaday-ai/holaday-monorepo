@@ -12,7 +12,8 @@ const NOTE = '6929ba55000000001e023ef8';
 const URL_ = `https://www.xiaohongshu.com/explore/${NOTE}`;
 const RAW = readFileSync(new URL('./__fixtures__/xhs-note-6929ba55.html', import.meta.url), 'utf8');
 // The markdown lines as Firecrawl gave them, online and locally.
-const MARKDOWN = 'Edited at Jan 1\n\n24 comments\n\nLog in to comment\n\n15681,80024\n\nAppealGot it';
+const MARKDOWN =
+  'Edited at Jan 1\n\n24 comments\n\nLog in to comment\n\n15681,80024\n\nAppealGot it';
 
 describe('FIX-54 #2 · xhs-read: the note counts are read by field, not from the glued line', () => {
   it('finds the note id on note pages only', () => {
