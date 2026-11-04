@@ -802,7 +802,31 @@ const NO_PRICE_STATE_RE =
  * PR #294 review: the page itself must show the gap. The row's item name is on a page
  * the run read, and after it — before any price — the page shows a no-price state.
  */
+/**
+ * FIX-54 #3 (Deploy-53/54 reg-new-amazon-sg): Amazon's 「See options / No featured offers
+ * available」 card can still list the item's offers right below — 「S$9.22(2 new offers)」.
+ * That is a price the page shows for the row, not a missing one.
+ */
+const OFFER_PRICE_RE = new RegExp(
+  // 「S$」「HK$」「US$」: the letters before $ are part of the price.
+  `(?:[a-z]{1,2}(?=\\$))?(?:${PRICE_TOKEN_RE.source})\\s*\\(\\s*\\d+\\s+(?:new|used|new\\s*&\\s*used)?\\s*offers?\\s*\\)`,
+  'i',
+);
+
+/** The offers price the page lists for a row whose card shows no price of its own. */
+export function rowOfferPrice(name: string | null, pageText: string): string | null {
+  const offer = rowPriceState(name, pageText).offer;
+  if (!offer) return null;
+  // The state is read lower-cased: give the page's own spelling back.
+  const escaped = offer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  return pageText.match(new RegExp(escaped, 'i'))?.[0] ?? offer;
+}
+
 function pageLacksPrice(name: string | null, pageText: string): boolean {
+  return rowPriceState(name, pageText).lacks;
+}
+
+function rowPriceState(name: string | null, pageText: string): { lacks: boolean; offer?: string } {
   const flat = (v: string) => v.replace(/\s+/g, ' ').toLowerCase();
   // 「名称：Anker USB C…；价格：未获取到」 — the name alone, without its label or price field.
   const bare =
@@ -818,7 +842,7 @@ function pageLacksPrice(name: string | null, pageText: string): boolean {
     .replace(/(?:\.{3}|…)\s*$/, '')
     .trim();
   while (key.length >= 4 && !text.includes(key)) key = key.slice(0, -1).trimEnd();
-  if (key.length < 4) return false;
+  if (key.length < 4) return { lacks: false };
   // Exempt only when every place the title appears shows no price: one showing a price
   // means the row's price is on the page.
   let lacks = false;
@@ -833,14 +857,20 @@ function pageLacksPrice(name: string | null, pageText: string): boolean {
     // further down must not hide it (the next rows' prices lie between).
     // FIX-34: the cut can come well after a long title (rating and review nodes) — the
     // snapshot's own end marker is looked for further than a row's own state words.
-    const stops = [after.slice(0, 500).search(NO_PRICE_STATE_RE), after.indexOf(SNAPSHOT_CUT)];
+    const state = after.slice(0, 500).search(NO_PRICE_STATE_RE);
+    const stops = [state, after.indexOf(SNAPSHOT_CUT)];
     const stop = Math.min(...stops.filter((i) => i >= 0));
     const before = Number.isFinite(stop) ? after.slice(0, stop) : after.slice(0, 500);
-    if (PRICE_TOKEN_RE.test(withoutPriceCaps(before))) return false;
+    if (PRICE_TOKEN_RE.test(withoutPriceCaps(before))) return { lacks: false };
+    // The card's own offers line, before the next title or price block.
+    if (state >= 0 && stop === state) {
+      const offer = after.slice(state, state + 160).match(OFFER_PRICE_RE)?.[0];
+      if (offer) return { lacks: false, offer };
+    }
     if (Number.isFinite(stop)) lacks = true;
     at = next;
   }
-  return lacks;
+  return { lacks };
 }
 
 const SNAPSHOT_CUT = '[快照截断';
@@ -1052,7 +1082,12 @@ function checkEcommerceRows(
     if (row.price == null && !declared.has(i + 1)) missing.push('价格');
     if (requireLinks && !row.url) missing.push('链接');
     if (missing.length > 0) {
-      incomplete.push(`第 ${i + 1} 行缺少${missing.join('、')}`);
+      // FIX-54 #3: say where the price is when the card lists only offers.
+      const offer =
+        row.price == null && pageText ? rowOfferPrice(row.name, pageText) : null;
+      incomplete.push(
+        `第 ${i + 1} 行缺少${missing.join('、')}${offer ? `（页面在该商品下列出报价「${offer}」：照原样写并注明是报价，或打开该商品详情页读价格）` : ''}`,
+      );
     }
   });
   const aggregateLinkRows = rows

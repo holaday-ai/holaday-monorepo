@@ -1369,7 +1369,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             results.push(
               toolResult(
                 call.id,
-                `${facts.cutPrices.join('；')}：页面快照有长度上限，这只说明快照在这里截断了，不说明页面没有价格，再 snapshot 也还是从头开始。请用 get_page_text 分段读取（沿 cursor 往下读，直到读到这个商品或 end=true），读到后照页面原样写；读完确实没有，才写「未获取到」。其余内容不变，再 finish。`,
+                `${facts.cutPrices.join('；')}：页面快照有长度上限，这只说明快照在这里截断了，不说明页面没有价格，再 snapshot 也还是从头开始。请用 get_page_text 分段读取（沿 cursor 往下读，直到读到这个商品或 end=true），读到后照页面原样写；商品卡片只显示「See options / No featured offers available」时，紧跟其后的「S$…(N new offers)」就是该商品的报价，照原样写并注明是报价（引用原文时逐行分开引用，或用「 / 」隔开相邻两行），也可以打开该商品详情页读价格；读完确实没有，才写「未获取到」。其余内容不变，再 finish。`,
                 true,
               ),
             );

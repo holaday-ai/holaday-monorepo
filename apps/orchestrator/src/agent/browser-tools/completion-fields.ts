@@ -725,6 +725,30 @@ function pageValues(lines: string[]): string[] {
  * 「…」 is often retyped “”), and no space where nodes meet at Chinese text or
  * punctuation (「…搜索结果页。」「来源：…」 read as one sentence).
  */
+/**
+ * FIX-54 #3 (Deploy-54 reg-new-amazon-sg): 「No featured offers available / S$9.22(2 new
+ * offers)」 quotes two lines that follow each other on the page, joined by 「 / 」. Each part
+ * must be on the page, in order, each within the next few lines of the one before.
+ */
+function adjacentLines(lines: readonly string[], value: string): boolean {
+  const parts = value
+    .split(/\s+[/|]\s+|\s*[／｜]\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length < 2 || parts.some((part) => part.length < 2)) return false;
+  const rows = lines.filter((line) => line.trim());
+  return rows.some((line, i) => {
+    if (!line.includes(parts[0]!)) return false;
+    let at = i;
+    for (const part of parts.slice(1)) {
+      const next = rows.slice(at + 1, at + 4).findIndex((row) => row.includes(part));
+      if (next < 0) return false;
+      at += 1 + next;
+    }
+    return true;
+  });
+}
+
 function looseQuote(value: string): string {
   return value
     .replace(/[「」『』]/g, '"')
@@ -1069,6 +1093,8 @@ export function assessCompletionFacts(input: {
             // FIX-28 (sa2 core-11, D16): a quote read across adjacent nodes.
             ((fact.quote || /["「」『』]/.test(v)) &&
               containsToken(page.loose, looseQuote(v), true)) ||
+            // FIX-54 #3: adjacent lines quoted joined by 「 / 」.
+            (fact.quote && adjacentLines(page.lines, v)) ||
             (page.sourceURL &&
               (normalizeFact(page.sourceURL) === v || sameSource(page.sourceURL, fact.value))) ||
             page.links?.some((link) => normalizeFact(link.url) === v),
