@@ -18,6 +18,8 @@
  * Anthropic.Tool typing in each call site stays untouched.
  */
 
+import { ORANGEBENCH_TOOLS } from './orangebench/contracts.js';
+
 import { classifyAsSimpleSearch } from './supercar/execution-router.js';
 
 export type TaskType = 'browser' | 'search' | 'hybrid';
@@ -123,8 +125,9 @@ export function classifyTaskType(intent: string): TaskType {
  * Tools whose name is on `BANNED_TOOLS` always fail this check
  * regardless of task type.
  */
-export function isToolAllowed(toolName: string, taskType: TaskType): boolean {
+export function isToolAllowed(toolName: string, taskType: TaskType, capabilities: { orangebench?: boolean } = {}): boolean {
   if (BANNED_TOOLS.includes(toolName)) return false;
+  if ((ORANGEBENCH_TOOLS as readonly string[]).includes(toolName)) return taskType === 'hybrid' && capabilities.orangebench === true;
   return TOOL_SETS[taskType].includes(toolName);
 }
 
@@ -142,6 +145,7 @@ export function isToolAllowed(toolName: string, taskType: TaskType): boolean {
 export function filterTools<T extends { name?: string; type?: string }>(
   tools: readonly T[],
   taskType: TaskType,
+  capabilities: { orangebench?: boolean } = {},
 ): T[] {
   return tools.filter((t) => {
     // Anthropic beta tools sometimes have `type` instead of `name`
@@ -149,6 +153,6 @@ export function filterTools<T extends { name?: string; type?: string }>(
     // by `name` first, fall back to `type` so beta tools resolve.
     const ident = t.name ?? t.type;
     if (!ident) return false;
-    return isToolAllowed(ident, taskType);
+    return isToolAllowed(ident, taskType, capabilities);
   });
 }
