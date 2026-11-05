@@ -1,5 +1,4 @@
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { FailureHeaderCard } from '@/components/FailureHeaderCard';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
 import { PlanCard } from '@/components/PlanCard';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
@@ -18,6 +17,17 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/components/ui/toast';
 import { useTaskFailureContext } from '@/hooks/useTaskFailureContext';
+import {
+  type NextStepOption,
+  answerSourceCount,
+  failureTurn,
+  isEvidenceAttachment,
+  liveStatusText,
+  normalizeNextSteps,
+  partialLead,
+  processLinkLabel,
+  stepTimeline,
+} from '@/lib/assistant-turn';
 import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
 import {
   type BatchConfirmDecision,
@@ -38,7 +48,11 @@ import { taskActionError } from '@/lib/error-copy';
 import { EXPERT_RESULT_LABELS, expertResultUsageCopy } from '@/lib/expert-result-usage';
 import { needsExternalLinkConfirmation, openExternalLink } from '@/lib/external-link-copy';
 import { externalLinkConfirmDescription, safeExternalHttpHref } from '@/lib/external-link-copy';
-import { failureResultCopyText, terminalAllowsRerun } from '@/lib/failure-copy';
+import {
+  failureResultCopyText,
+  friendlyFailureDetail,
+  terminalAllowsRerun,
+} from '@/lib/failure-copy';
 import { downloadFileMetaLabel } from '@/lib/file-download-card-copy';
 import { formatFileSize } from '@/lib/file-size';
 import { hdDebug } from '@/lib/hd-debug';
@@ -57,7 +71,6 @@ import {
   shouldShowStepCard,
   stepDetailSummary,
   stepDisplayStepsForTask,
-  stepStatusText,
 } from '@/lib/step-card-state';
 import { taskDisplayIntent } from '@/lib/task-display-copy';
 import { refundStatusCopy, retryAttachmentNote } from '@/lib/task-failure-recovery';
@@ -101,7 +114,6 @@ import { isTerminalStatus } from '@/types/task';
 // before ReactMarkdown — protects history rows that pre-date the
 // orchestrator-side sanitiser too.
 import { sanitizeForRender } from '@/utils/render-sanitizer';
-import { friendlyHost, humanizeStep, humanizedGlyph, liveStatusLabel } from '@/utils/step-humanize';
 import {
   AlertCircle,
   Check,
@@ -133,6 +145,14 @@ import {
 import * as React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import {
+  LiveStatusLine,
+  NextStepChips,
+  ProcessDisclosure,
+  ProcessSection,
+  Timeline,
+  TurnOptions,
+} from './AssistantTurnParts';
 import { CaptchaHandoffActions } from './CaptchaHandoffActions';
 
 interface Props {
@@ -145,6 +165,8 @@ interface Props {
    * follow-up auto-detection inherits parent context.
    */
   onPickSuggestion?: (intent: string) => void;
+  /** FIX-57 #4: a picked next step / option is sent as the next instruction. */
+  onSendSuggestion?: (intent: string) => void;
 }
 
 // Stable empty-array reference so the zustand selector below returns
@@ -156,7 +178,6 @@ const EMPTY_REPLIES: Array<{ at: number; text: string }> = [];
 const PLAYED_TERMINAL_REVEAL_TASK_IDS = new Set<string>();
 const TRUST_SURFACE =
   'rounded-lg border border-[#DCDDDD] bg-white/95 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85';
-const TRUST_DIVIDER = 'border-[#DCDDDD]/80 dark:border-white/10';
 
 function useMountedRef(): React.MutableRefObject<boolean> {
   const mountedRef = React.useRef(false);
@@ -185,7 +206,7 @@ function useMountedRef(): React.MutableRefObject<boolean> {
  * 百度…" or "点击了'搜索'"), with a spinner-adorned status row for the
  * still-running tick.
  */
-export function TaskStream({ task, onPickSuggestion }: Props): JSX.Element {
+export function TaskStream({ task, onPickSuggestion, onSendSuggestion }: Props): JSX.Element {
   const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
   const userReplies = useTaskStore((s) => s.userRepliesByTask[task.taskId]) ?? EMPTY_REPLIES;
   const captchaWait = useTaskStore((s) => s.captchaWaitByTask[task.taskId]);
@@ -242,7 +263,6 @@ export function TaskStream({ task, onPickSuggestion }: Props): JSX.Element {
 
   const terminal = isTerminalStatus(task.status);
 
-  const humanLines = React.useMemo(() => buildHumanLines(steps), [steps]);
   // Prefer the live thinking event from the supercar loop; fall back to
   // the (currently null) legacy picker so the hook stays in place if we
   // ever add thinking to the vision-loop path too.
@@ -258,11 +278,11 @@ export function TaskStream({ task, onPickSuggestion }: Props): JSX.Element {
       <AgentBlock
         task={task}
         steps={steps}
-        humanLines={humanLines}
         thinking={thinking}
         terminal={terminal}
         screencastUrl={screencast?.url ?? null}
         onSuggestionPick={onPickSuggestion}
+        onSendSuggestion={onSendSuggestion}
         captchaWait={captchaWait}
         degrade={degrade}
         executorFallback={executorFallback}
@@ -274,28 +294,6 @@ export function TaskStream({ task, onPickSuggestion }: Props): JSX.Element {
       <div ref={scrollAnchorRef} />
     </div>
   );
-}
-
-interface HumanLine {
-  key: string;
-  text: string;
-  glyph: string;
-  status: UiStep['status'];
-}
-
-function buildHumanLines(steps: UiStep[]): HumanLine[] {
-  const out: HumanLine[] = [];
-  for (const step of steps) {
-    const text = humanizeStep(step);
-    if (!text) continue;
-    out.push({
-      key: String(step.tickIndex),
-      text,
-      glyph: humanizedGlyph(step.actionKind),
-      status: step.status,
-    });
-  }
-  return out;
 }
 
 /**
@@ -310,11 +308,11 @@ function pickThinking(_steps: UiStep[]): string | null {
 function AgentBlock({
   task,
   steps,
-  humanLines,
   thinking,
   terminal,
   screencastUrl,
   onSuggestionPick,
+  onSendSuggestion,
   captchaWait,
   degrade,
   executorFallback,
@@ -324,17 +322,17 @@ function AgentBlock({
 }: {
   task: UiTask;
   steps: UiStep[];
-  humanLines: HumanLine[];
   thinking: string | null;
   terminal: boolean;
   screencastUrl: string | null;
   onSuggestionPick?: (intent: string) => void;
+  onSendSuggestion?: (intent: string) => void;
   captchaWait: UiCaptchaWait | undefined;
   degrade: UiDegradeEvent | undefined;
   executorFallback: UiExecutorFallback | undefined;
   awaitingUser: UiAwaitingUser | undefined;
   webSearch: UiWebSearchEvent | undefined;
-  serverSuggestions?: string[];
+  serverSuggestions?: ReadonlyArray<string | NextStepOption>;
 }): JSX.Element {
   const publicCloudRetryPending = useTaskStore(
     (s) => s.publicCloudContinuationByTask[task.taskId]?.stage === 'cancelled',
@@ -371,34 +369,19 @@ function AgentBlock({
   // render a single LiveStatus below them while the task is
   // in-flight, derived from the latest non-null actionKind. If a
   // user wants the raw tool log they pop the "查看详细步骤" toggle.
-  const latestRunningKind = React.useMemo<string | undefined>(() => {
-    for (let i = steps.length - 1; i >= 0; i--) {
-      const s = steps[i];
-      if (!s) continue;
-      if (s.actionKind) return s.actionKind;
-    }
-    return undefined;
-  }, [steps]);
-  const latestRunningStatus = steps[steps.length - 1]?.status ?? 'done';
   const detailSteps = React.useMemo(
     () => stepDisplayStepsForTask(steps.filter(shouldShowStepCard), task.status),
     [steps, task.status],
   );
   const detailSummary = React.useMemo(() => stepDetailSummary(detailSteps), [detailSteps]);
 
-  const hasAnyActivity = taskStreamHasAnyActivity({
-    humanLineCount: humanLines.length,
-    captchaWait,
-    degrade,
-    executorFallback,
-    awaitingUser,
-    webSearch,
-    thinking,
-    progressMessage,
-    streamingText,
-    resultText: task.resultText,
-  });
-  const showInlineProgress = !terminal;
+  // FIX-57 #3: the status line's timeline and elapsed time.
+  const timeline = React.useMemo(() => stepTimeline(steps), [steps]);
+  const runStartedAt = React.useMemo(() => {
+    const created = new Date(task.createdAt).getTime();
+    if (Number.isFinite(created) && created > 0) return created;
+    return steps[0]?.startedAt ?? subStatusEntry?.since ?? Date.now();
+  }, [task.createdAt, steps, subStatusEntry?.since]);
   const hasTerminalArtifacts =
     Boolean(task.attachments?.length) || Boolean(task.finalUrl && task.finalUrl !== 'about:blank');
   const trustSummaryUrl = task.finalUrl ?? screencastUrl;
@@ -434,43 +417,31 @@ function AgentBlock({
           />
         )}
 
-        {thinking && <ThinkingBlock text={thinking} />}
-
-        {/* Codex Pack B1 — live sub-status chip. Shown when the runner
-            has broadcast a phase marker AND the task isn't terminal.
-            Takes precedence over BoardingLine since the chip is the
-            more specific surface ("正在操作浏览器… 45s" beats "正在
-            分析您的请求"). */}
-        {subStatusEntry &&
-          shouldRenderLiveSubStatus({
-            status: task.status,
-            terminal,
-            hasAwaitingUser: Boolean(awaitingUser),
-          }) && (
-            <LiveSubStatusChip subStatus={subStatusEntry.subStatus} since={subStatusEntry.since} />
-          )}
-        {!hasAnyActivity && !terminal && !subStatusEntry && <BoardingLine />}
-
-        {showInlineProgress && humanLines.length > 0 && <HumanLineList lines={humanLines} />}
-
-        {/* Live progress pill — one line, spinner + current tool
-         *  label. Shows while task is non-terminal and we have at
-         *  least one step. Replaces the old stack of "完成一步操作"
-         *  rows. The pill is *never* red while the task is still
-         *  running; a single failed tick does not mean the task is
-         *  failing. Only the task-level status controls colour. */}
-        {showInlineProgress && steps.length > 0 && (
-          <LiveStatus
-            kind={latestRunningKind}
-            taskTerminal={terminal}
-            taskStatus={task.status}
-            lastStepStatus={latestRunningStatus}
-          />
+        {/* FIX-57 #3: one live status line while the task runs — what I am doing now,
+            in plain words, with the elapsed time on long runs. It opens into the step
+            timeline; when the task is done it folds into 「查看过程」 under the answer. */}
+        {!terminal && !awaitingUser && task.status !== 'paused' && !streamingText && (
+          <LiveStatusLine
+            text={liveStatusText({
+              steps,
+              progressMessage,
+              subStatus:
+                subStatusEntry &&
+                shouldRenderLiveSubStatus({
+                  status: task.status,
+                  terminal,
+                  hasAwaitingUser: Boolean(awaitingUser),
+                })
+                  ? subStatusEntry.subStatus
+                  : null,
+            })}
+            since={runStartedAt}
+            timeline={timeline}
+          >
+            {thinking && <ThinkingBlock text={thinking} />}
+            {webSearch && <WebSearchLine event={webSearch} terminal={terminal} />}
+          </LiveStatusLine>
         )}
-
-        {showInlineProgress && screencastUrl && <CurrentUrlChip url={screencastUrl} />}
-
-        {webSearch && !awaitingUser && <WebSearchLine event={webSearch} terminal={terminal} />}
 
         {captchaWait && <CaptchaWaitBanner wait={captchaWait} />}
         {degrade && !executorFallback && <DegradeBanner event={degrade} />}
@@ -489,14 +460,6 @@ function AgentBlock({
         )}
 
         {task.status === 'paused' && <PausedTaskNotice reason={task.resultText} />}
-
-        {showTrustSummary && (
-          <TrustSummaryCard
-            task={task}
-            currentUrl={trustSummaryUrl}
-            onSuggestionPick={onSuggestionPick}
-          />
-        )}
 
         {/* Phase 24 RC follow-up — incremental streaming output for
          *  generate + scrape tasks. Render gate (Bug 1 fix):
@@ -519,7 +482,7 @@ function AgentBlock({
          *  no-op — only the supplementary controls (copy button,
          *  suggestion chips) light up when resultText lands. */}
         {!task.resultText && (progressMessage || streamingText) && (
-          <div className={cn(TRUST_SURFACE, 'px-5 py-4 text-foreground')}>
+          <div className="text-foreground">
             {progressMessage && !streamingText && (
               <div className="text-xs text-muted-foreground">
                 <span className="inline-block animate-pulse">●</span> {progressMessage}
@@ -568,6 +531,40 @@ function AgentBlock({
             // not render a second identical one (keeps one primary
             // re-run action; its 填入原描述 / copy stay as secondary).
             verificationBannerPresent={shouldShowVerificationBanner(task)}
+            onSendSuggestion={onSendSuggestion}
+            process={
+              <>
+                {timeline.length > 0 && (
+                  <ProcessSection title="过程">
+                    <Timeline lines={timeline} />
+                  </ProcessSection>
+                )}
+                {webSearch && <WebSearchLine event={webSearch} terminal={terminal} />}
+                {showTrustSummary && (
+                  <ProcessSection title="核对记录">
+                    <TrustSummaryCard task={task} currentUrl={trustSummaryUrl} embedded />
+                  </ProcessSection>
+                )}
+                {detailSteps.length > 0 && (
+                  <DetailToggle
+                    open={detailOpen}
+                    summary={detailSummary}
+                    onToggle={() => setDetailOpen((v) => !v)}
+                  >
+                    <div className="mt-2 space-y-2">
+                      {detailSteps.map((step, i) => (
+                        <StepCard
+                          key={step.tickIndex}
+                          step={step}
+                          isFirst={i === 0}
+                          isLast={i === detailSteps.length - 1}
+                        />
+                      ))}
+                    </div>
+                  </DetailToggle>
+                )}
+              </>
+            }
           />
         )}
         {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the
@@ -587,25 +584,6 @@ function AgentBlock({
             // empty results don't surface two identical "重新执行".
             verificationBannerPresent={shouldShowVerificationBanner(task)}
           />
-        )}
-
-        {detailSteps.length > 0 && (
-          <DetailToggle
-            open={detailOpen}
-            summary={detailSummary}
-            onToggle={() => setDetailOpen((v) => !v)}
-          >
-            <div className="mt-2 space-y-2">
-              {detailSteps.map((step, i) => (
-                <StepCard
-                  key={step.tickIndex}
-                  step={step}
-                  isFirst={i === 0}
-                  isLast={i === detailSteps.length - 1}
-                />
-              ))}
-            </div>
-          </DetailToggle>
         )}
       </div>
     </div>
@@ -656,10 +634,16 @@ function TrustSummaryCard({
   task,
   currentUrl,
   onSuggestionPick,
+  embedded = false,
 }: {
   task: UiTask;
   currentUrl?: string | null;
   onSuggestionPick?: (intent: string) => void;
+  /**
+   * FIX-57 #2: shown inside 「查看过程」 — all of its evidence kept, no frame, and no
+   * recovery buttons (the answer itself offers the ways on).
+   */
+  embedded?: boolean;
 }): JSX.Element {
   const toast = useToast();
   const mountedRef = useMountedRef();
@@ -737,7 +721,11 @@ function TrustSummaryCard({
   );
   const Icon = trustToneIcon(summary.tone);
   return (
-    <div className={cn(TRUST_SURFACE, 'px-4 py-3 text-sm', trustToneClass(summary.tone))}>
+    <div
+      className={
+        embedded ? 'text-sm' : cn(TRUST_SURFACE, 'px-4 py-3 text-sm', trustToneClass(summary.tone))
+      }
+    >
       <div className="flex items-start gap-2.5">
         <Icon className={cn('mt-0.5 h-4 w-4 shrink-0', trustToneIconClass(summary.tone))} />
         <div className="min-w-0 flex-1">
@@ -817,7 +805,7 @@ function TrustSummaryCard({
               </div>
             </details>
           )}
-          {recoveryActions.length > 0 && (
+          {!embedded && recoveryActions.length > 0 && (
             <div className="mt-3 border-t border-[#DCDDDD]/70 pt-3 dark:border-white/10">
               <div className="mb-2 text-[11px] font-medium text-muted-foreground">下一步</div>
               <div className="flex flex-wrap gap-2">
@@ -1341,37 +1329,6 @@ function PausedTaskNotice({ reason }: { reason?: string }): JSX.Element {
 }
 
 /**
- * Compact "agent is on SITE" chip shown in the stream while a task is
- * executing. Gives visibility of the agent's current location even
- * when the BrowserPanel is collapsed or off-screen on mobile. Hidden
- * once the task reaches a terminal status — the TerminalSummary's
- * "在新标签页打开 <url>" affordance takes over from there.
- */
-function CurrentUrlChip({ url }: { url: string }): JSX.Element | null {
-  if (!url || url === 'about:blank' || url.startsWith('chrome://') || isBrowserErrorUrl(url))
-    return null;
-  let host = '';
-  try {
-    host = new URL(url).hostname;
-  } catch {
-    return null;
-  }
-  const label = friendlyHost(host);
-  return (
-    <div className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[#DCDDDD] bg-white/80 px-2.5 py-1 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-white/5">
-      <Globe className="h-3 w-3 shrink-0 text-[#42C0EF]" />
-      <span className="truncate text-foreground/80">
-        当前页：<span className="font-medium">{label}</span>
-      </span>
-      <span className="shrink-0 text-muted-foreground/60">·</span>
-      <span className="max-w-[240px] truncate text-muted-foreground/70" title={url}>
-        {url}
-      </span>
-    </div>
-  );
-}
-
-/**
  * Inline "正在搜索 …" line for web_search events. When the event
  * carries `sources` (extracted from Anthropic's web_search_tool_result
  * block), the cards render below the query line so the user can see
@@ -1405,121 +1362,6 @@ function WebSearchLine({
   );
 }
 
-/**
- * Single-line live progress indicator. Shown while the task is still
- * running; content is driven by the latest tick's actionKind (text →
- * "正在思考…", navigate → "正在打开页面…", etc.). Spinner animates;
- * the row replaces itself as new ticks arrive, so the chat stream
- * stays calm instead of accumulating twenty "完成一步操作" rows.
- *
- * When the latest tick has status='done' we don't dim the spinner —
- * a done tick means "last tool finished, next one is about to fire",
- * which from the user's POV is still "working".
- */
-function LiveStatus({
-  kind,
-  taskTerminal,
-  taskStatus,
-  lastStepStatus,
-}: {
-  kind: string | undefined;
-  taskTerminal: boolean;
-  taskStatus: UiTask['status'];
-  lastStepStatus: UiStep['status'];
-}): JSX.Element {
-  // Color policy:
-  //   - Task running (not terminal) → muted text + magenta spinner
-  //     (brand color signals "actively working"). Phase 4 R2 4d.
-  //   - Task terminal + failed → red + AlertCircle
-  //   - Otherwise → neutral
-  const red = taskTerminal && taskStatus === 'failed';
-  const label = liveStatusLabel(kind);
-  // Intentionally unread: reserved for a future "warn but keep
-  // running" variant that would render in amber when a non-terminal
-  // task has a recently-failed tick. Not wired yet.
-  void lastStepStatus;
-  return (
-    <div
-      className={cn(
-        'flex items-center gap-2 text-[13px] leading-5',
-        red ? 'text-[#FF0061]' : 'text-muted-foreground',
-      )}
-    >
-      {red ? (
-        <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
-      ) : (
-        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[#FF0061]" aria-hidden />
-      )}
-      <span>{label}</span>
-    </div>
-  );
-}
-
-/**
- * Codex Pack B1 — live phase chip.
- *
- * Mirrors BoardingLine's visual weight but reads from the
- * subStatusByTask store entry: shows the phase label ("正在规划任务",
- * "正在操作浏览器", "正在生成回答", etc.) + three animated dots +,
- * when the phase has been running for > 30s, an elapsed-time
- * suffix ("45s") so the user knows the task is still alive on a
- * long-running phase. Tick at 1Hz to avoid hot-rendering.
- */
-function LiveSubStatusChip({
-  subStatus,
-  since,
-}: {
-  subStatus:
-    | 'planning'
-    | 'browsing'
-    | 'extracting'
-    | 'verifying'
-    | 'generating'
-    | 'generating_image';
-  since: number;
-}): JSX.Element {
-  const labels: Record<typeof subStatus, string> = {
-    planning: '正在规划任务',
-    browsing: '正在操作浏览器',
-    extracting: '正在提取数据',
-    verifying: '正在验证结果',
-    generating: '正在生成回答',
-    generating_image: '正在生成图片',
-  };
-  const [now, setNow] = React.useState(() => Date.now());
-  React.useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(interval);
-  }, []);
-  const elapsedSec = Math.max(0, Math.floor((now - since) / 1000));
-  const showTimer = elapsedSec >= 30;
-  const longRunningHint = liveSubStatusLongRunningHint(subStatus, elapsedSec);
-  return (
-    <div className="space-y-1 text-sm text-muted-foreground">
-      <div className="flex items-center gap-3">
-        <span className="text-foreground/70">{labels[subStatus]}</span>
-        <span aria-hidden className="flex items-end text-muted-foreground">
-          <span className="hola-typing-dot" />
-          <span className="hola-typing-dot" />
-          <span className="hola-typing-dot" />
-        </span>
-        {showTimer && (
-          <span className="text-[11px] tabular-nums text-muted-foreground/70">
-            {elapsedSec < 60
-              ? `${elapsedSec}s`
-              : `${Math.floor(elapsedSec / 60)}分${elapsedSec % 60}s`}
-          </span>
-        )}
-      </div>
-      {longRunningHint && (
-        <div className="max-w-[42rem] text-xs leading-5 text-muted-foreground/80">
-          {longRunningHint}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function liveSubStatusLongRunningHint(
   subStatus:
     | 'planning'
@@ -1546,93 +1388,6 @@ export function liveSubStatusLongRunningHint(
     return '尚未收到下一阶段更新，正在等待数据或核验结果。';
   }
   return null;
-}
-
-function BoardingLine(): JSX.Element {
-  return (
-    <div className="flex items-center gap-3 text-sm text-muted-foreground">
-      <span className="text-foreground/70">正在分析您的请求</span>
-      <span aria-hidden className="flex items-end text-muted-foreground">
-        <span className="hola-typing-dot" />
-        <span className="hola-typing-dot" />
-        <span className="hola-typing-dot" />
-      </span>
-    </div>
-  );
-}
-
-function HumanLineList({ lines }: { lines: HumanLine[] }): JSX.Element {
-  return (
-    <ul className="space-y-1.5">
-      {lines.map((line) => (
-        <li key={line.key} className="flex items-start gap-2 text-sm leading-relaxed">
-          <LineBadge status={line.status} glyph={line.glyph} />
-          <span
-            className={cn(
-              'min-w-0 flex-1',
-              line.status === 'failed' ? 'text-[#FF0061]' : 'text-foreground',
-              line.status === 'cancelled' && 'text-muted-foreground',
-              line.status === 'running' && 'text-foreground',
-            )}
-          >
-            {line.text}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function LineBadge({
-  status,
-  glyph,
-}: {
-  status: UiStep['status'];
-  glyph: string;
-}): JSX.Element {
-  const label = status === 'done' ? `${stepStatusText(status)} · ${glyph}` : stepStatusText(status);
-  if (status === 'running') {
-    return (
-      <span
-        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#FF0061]"
-        aria-label={label}
-        title={label}
-      >
-        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-      </span>
-    );
-  }
-  if (status === 'failed') {
-    return (
-      <span
-        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#FF0061]"
-        aria-label={label}
-        title={label}
-      >
-        <AlertCircle className="h-3.5 w-3.5" aria-hidden />
-      </span>
-    );
-  }
-  if (status === 'cancelled') {
-    return (
-      <span
-        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground"
-        aria-label={label}
-        title={label}
-      >
-        <CircleSlash className="h-3.5 w-3.5" aria-hidden />
-      </span>
-    );
-  }
-  return (
-    <span
-      className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#42C0EF]"
-      aria-label={label}
-      title={label}
-    >
-      <Check className="h-3.5 w-3.5" strokeWidth={3} aria-hidden />
-    </span>
-  );
 }
 
 function DetailToggle({
@@ -2382,6 +2137,8 @@ function TerminalSummary({
   expertMode,
   animateReveal = true,
   verificationBannerPresent = false,
+  onSendSuggestion,
+  process,
 }: {
   status: UiTask['status'];
   text: string;
@@ -2402,7 +2159,11 @@ function TerminalSummary({
    * generate-after-task path is more reliable than asking the agent
    * to emit a JSON block in its summary).
    */
-  serverSuggestions?: string[];
+  serverSuggestions?: ReadonlyArray<string | NextStepOption>;
+  /** FIX-57 #4: sends a picked next step / option as the next instruction. */
+  onSendSuggestion?: (intent: string) => void;
+  /** FIX-57 #2: what 「查看过程」 opens (timeline, sources, checks, step cards). */
+  process?: React.ReactNode;
   /**
    * Phase 4 R1 — downloadable artifacts from
    * `result.metadata.attachments[]`. Rendered as a row of
@@ -2476,8 +2237,9 @@ function TerminalSummary({
   // Backend suggestions take precedence; fall back to whatever the
   // model embedded in its text. Either way, the chip render path
   // below sees a single canonical `suggestions` array.
-  const suggestions =
-    serverSuggestions && serverSuggestions.length > 0 ? serverSuggestions : parsedSuggestions;
+  const suggestions = normalizeNextSteps(
+    serverSuggestions && serverSuggestions.length > 0 ? serverSuggestions : parsedSuggestions,
+  );
   // O10 — typewriter reveal of the SUMMARY text only (failed cards
   // skip this so users see the failure reason immediately). Resets
   // when text changes (new task / re-render with fresh content).
@@ -2506,10 +2268,7 @@ function TerminalSummary({
   // surface so the result reads as a work product, not a colored
   // alert dialog. Failure / cancellation get a small inline alert
   // block at the top of the card; the wrap itself stays calm.
-  const tone = {
-    wrap: cn(TRUST_SURFACE, 'px-5 py-4 text-foreground'),
-    divider: TRUST_DIVIDER,
-  };
+
   const safeCurrentUrl = safeExternalHttpHref(currentUrl);
   const hasRealUrl = safeCurrentUrl !== null;
   const endedOnBrowserErrorPage = isBrowserErrorUrl(currentUrl);
@@ -2615,59 +2374,65 @@ function TerminalSummary({
     },
     [ensureFailureContext, rerunTask, taskId, mountedRef, retryingIntent, toast],
   );
-  // Codex IA close-out — the result card no longer hosts the
-  // browser-panel entry. That moved to TaskToolbar at the top of the
-  // Main column so the result stays focused on the work product.
+  // FIX-57 #2/#5: the answer is one assistant message — no frame, no alert boxes. A failed
+  // or stopped run says in words what it did not get and offers the ways on; everything
+  // else (steps, sources, checks, final page, screenshots) sits behind 「查看过程」.
+  const canRetry = Boolean(intent) && terminalAllowsRerun(status, displayText ?? '');
+  const turn = React.useMemo(
+    () =>
+      isFailedLike
+        ? failureTurn({
+            status,
+            errorText: status === 'failed' ? (displayText ?? '') : '',
+            intent: intent ?? '',
+            finalUrl: currentUrl,
+            executionMode: failureExecutionMode,
+            canRetry,
+          })
+        : null,
+    [isFailedLike, status, displayText, intent, currentUrl, failureExecutionMode, canRetry],
+  );
+  const send = onSendSuggestion ?? onSuggestionPick;
+  const productAttachments = attachments?.filter((a) => !isEvidenceAttachment(a)) ?? [];
+  const evidenceAttachments = attachments?.filter((a) => isEvidenceAttachment(a)) ?? [];
+  const partial = status === 'partial_success' ? partialLead(revealed) : null;
+  const partialSaid = Boolean(partial?.lead);
+  const refund = isFailedLike ? refundStatusCopy(failureContext.context?.refund.state) : null;
+  const failureDetail =
+    status === 'failed' && displayText.trim() ? friendlyFailureDetail(displayText) : '';
+  const optionLabels = new Set(turn?.options.map((o) => o.label) ?? []);
+  const nextSteps = suggestions
+    .filter((step) => !optionLabels.has(step.label))
+    .slice(0, Math.max(0, 3 - (turn?.options.length ?? 0)));
+  const iconButton =
+    'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 dark:hover:bg-white/10';
   return (
-    <div className={cn('relative', tone.wrap)}>
-      {isFailedLike && (
-        <FailureHeaderCard
-          status={status}
-          executionMode={failureExecutionMode}
-          errorText={status === 'failed' ? (displayText ?? '') : ''}
-          onRetry={
-            terminalAllowsRerun(status, displayText ?? '') && intent
-              ? () => void handleRetry(intent)
-              : undefined
-          }
-          retrying={terminalAllowsRerun(status, displayText ?? '') && retryingIntent != null}
-          refund={refundStatusCopy(failureContext.context?.refund.state)}
-          attachmentNote={retryAttachmentNote(failureContext.context)}
-        />
+    <div className="group relative text-foreground" data-testid="assistant-answer">
+      {turn && (
+        <div
+          data-testid="failure-turn"
+          className="space-y-1.5 text-[15px] leading-7 text-foreground"
+        >
+          <p className="m-0">{turn.lead}</p>
+          <p className="m-0 text-foreground/80">{turn.why}</p>
+          {turn.options.length > 0 && status === 'failed' && (
+            <p className="m-0 text-foreground/80">我可以这样继续：</p>
+          )}
+        </div>
       )}
       {!isFailedLike && endedOnBrowserErrorPage && <BrowserErrorFinalUrlBanner />}
-      {/* Phase 4 R1 B.6 — expert-report header (only on success
-          panels; failed/cancelled never carry a workflow id). */}
       {!isFailedLike && expertWorkflowId && <ExpertReportHeader workflowId={expertWorkflowId} />}
-      {/* BOSS feedback — skip the markdown body for failed tasks
-          to avoid duplicating the error text already shown in
-          FailureHeaderCard's collapsible. Cancelled status keeps
-          the body because there's often partial content worth
-          preserving. */}
+      {status === 'partial_success' && (
+        <p className="m-0 mb-2 text-[15px] leading-7 text-foreground/80" data-testid="partial-lead">
+          {partial?.lead ??
+            '这次只算部分完成：有的内容还没拿全或没能核实，具体在「查看过程」的核对记录里。'}
+        </p>
+      )}
       {status === 'failed'
         ? null
         : (() => {
-            // Empty-result fallback. When the sanitized text is
-            // suspiciously short (< 20 chars after stripping markdown
-            // structure / ordinals / whitespace), surface a hint card
-            // instead of rendering a near-empty prose block. Common
-            // causes: model hit max_tokens before producing real content,
-            // post-check ate everything, tool output was structurally
-            // invalid. Threshold matches the orchestrator's answer-verifier
-            // checkEmptyResult so the SPA never displays a near-empty
-            // success card the backend would have flagged fixable.
-            //
-            // BUG-A2 fix (2026-05-20): bypass the empty-result card when
-            // the original (un-sanitized) answer is substantial (>200
-            // non-whitespace chars). Structured Chinese answers heavy on
-            // headers / tables / bullets sanitize to a small "meaningful"
-            // slice even when the user is reading a rich response — the
-            // sanitizer was stripping `^#{1,6}\s+.*$` (full header lines)
-            // and `[|*_]` table/emphasis markers, which over-eats long
-            // markdown reports. 200 is generous enough that no genuinely
-            // empty answer can hit it, but small enough to still catch
-            // the original failure mode (single-line stub / pure ordinals).
-            const sanitized = sanitizeMarkdownTrailingPunctuation(sanitizeForRender(revealed));
+            const body = partialSaid && partial ? partial.body : revealed;
+            const sanitized = sanitizeMarkdownTrailingPunctuation(sanitizeForRender(body));
             if (
               terminalResultContentInsufficient({
                 status,
@@ -2679,260 +2444,191 @@ function TerminalSummary({
             ) {
               const copy = terminalInsufficientCopy();
               return (
-                <div className="rounded-md border border-[#FFC910]/55 bg-[#FFC910]/10 px-3 py-2.5 text-sm text-[#595757] dark:border-[#FFC910]/35 dark:text-foreground">
-                  <div className="font-medium">{copy.title}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{copy.body}</div>
-                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                    {intent && !verificationBannerPresent && (
-                      <button
-                        type="button"
-                        onClick={() => void handleRetry(intent)}
-                        disabled={retryingIntent != null}
-                        aria-label={retryingIntent ? '正在重新执行任务' : '重新执行任务'}
-                        title={retryingIntent ? '正在重新执行' : '重新执行任务'}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#FF0061]/25 bg-[#FF0061]/5 px-3 text-[11px] font-medium text-[#FF0061] transition-colors hover:border-[#FF0061]/45 hover:bg-[#FF0061]/10 disabled:cursor-wait disabled:opacity-60 dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10 dark:text-foreground"
-                      >
-                        <RotateCcw
-                          className={cn('h-3.5 w-3.5', retryingIntent && 'animate-spin')}
-                        />
-                        <span>重新执行</span>
-                      </button>
-                    )}
-                    {intent && onSuggestionPick && (
-                      <button
-                        type="button"
-                        onClick={() => onSuggestionPick(intent)}
-                        aria-label="填入原描述"
-                        title="填入原描述后可编辑再发送"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#FFC910]/60 bg-white/70 px-3 text-[11px] font-medium text-[#57479C] transition-colors hover:bg-white dark:border-[#FFC910]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        填入原描述
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const feedback = displayText.trim() || '(空结果)';
-                        void copyTo(feedback, '反馈内容');
-                      }}
-                      aria-label="复制反馈内容"
-                      title="复制反馈"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white/60 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-white dark:border-white/10 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+                <div className="text-[15px] leading-7 text-foreground/85">
+                  <p className="m-0">{copy.title}</p>
+                  <p className="m-0 text-sm text-muted-foreground">{copy.body}</p>
+                  <TurnOptions
+                    options={[
+                      ...(intent && !verificationBannerPresent
+                        ? [{ kind: 'retry' as const, label: '再试一次' }]
+                        : []),
+                      ...(intent
+                        ? [
+                            {
+                              kind: 'prompt' as const,
+                              label: '把原来的要求填回输入框',
+                              prompt: intent,
+                            },
+                          ]
+                        : []),
+                    ]}
+                    onRetry={intent ? () => void handleRetry(intent) : undefined}
+                    retrying={retryingIntent != null}
+                    onSend={onSuggestionPick}
+                  />
                 </div>
               );
             }
             return (
-              <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
+              <div className="prose prose-neutral max-w-none text-[15px] leading-7 dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>
                   {sanitized}
                 </ReactMarkdown>
               </div>
             );
           })()}
-      {hasRealUrl && (
-        <div className={cn('mt-4 border-t pt-3 text-xs', tone.divider)}>
-          <button
-            type="button"
-            onClick={() => {
-              if (needsExternalLinkConfirmation(safeCurrentUrl)) setPendingLink(safeCurrentUrl);
-              else openExternalLink(safeCurrentUrl);
-            }}
-            className="group flex min-h-12 w-full min-w-0 items-start gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
-          >
-            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#EFEFEF]/70 text-[#595757] transition-colors group-hover:bg-white dark:bg-white/10 dark:text-foreground/80">
-              <ExternalLink className="h-3.5 w-3.5" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block font-medium text-foreground/85">打开页面链接</span>
-              <span className="mt-0.5 block truncate leading-5 text-muted-foreground">
-                {safeCurrentUrl}
-              </span>
-            </span>
-          </button>
+      {productAttachments.length > 0 && (
+        <div className="mt-3 flex flex-col gap-2">
+          {productAttachments.map((a) => (
+            <AttachmentRow key={a.fileId} attachment={a} />
+          ))}
         </div>
       )}
-      {/* Phase 4 R1 B.5 — AttachmentBar. Hidden when attachments is
-          empty/undefined. Rendered for every terminal status: failed
-          and cancelled tasks can still leave useful evidence files. */}
-      {attachments && attachments.length > 0 && (
-        <div className={cn('mt-3 flex flex-col gap-2 border-t pt-3', TRUST_DIVIDER)}>
-          <div className="text-[11px] font-medium tracking-wide text-muted-foreground">
-            产出文件
-          </div>
-          {attachments.map((a) => {
-            const payload = {
-              fileId: a.fileId,
-              filename: a.filename,
-              size: a.sizeBytes,
-              downloadUrl: a.downloadUrl,
-              expiresAt: a.expiresAt,
-              unavailable: a.availability === 'unavailable',
-            };
-            if (payload.unavailable) {
-              return <FileDownloadCard key={a.fileId} payload={payload} />;
-            }
-            // Phase 4 R2 — screenshots get a thumbnail preview; other
-            // kinds (PDF, generic file) keep the icon-only card.
-            if (a.kind === 'screenshot' || a.mimetype.startsWith('image/')) {
-              return <ScreenshotThumbnailCard key={a.fileId} payload={payload} />;
-            }
-            return <FileDownloadCard key={a.fileId} payload={payload} />;
-          })}
-        </div>
-      )}
-      {/* Phase 4 Codex follow-up — model-tier label, brand-neutral.
-          The previous text leaked the underlying model ID ("Claude
-          Sonnet 4.6") into the user-facing surface, which contradicts
-          B.1's whole-product-side sanitizer. Now we surface the tier
-          intent (deep vs. standard) without naming the upstream model;
-          the actual claude-* ID still lives in result.metadata for
-          analytics / debugging consumers. */}
-      {/* BOSS feedback — the "标准执行模式 / 深度思考模式" footer
-          surfaced the model tier to the user. Average users don't
-          need that signal; it added visual noise to every result
-          card. modelLabel still rides through props for analytics
-          / debugging consumers via result.metadata, just not
-          rendered here. */}
-      {/* Codex Pack C1 — expert-skill footer. Shows when a typed
-          workflow id was stamped on the task metadata (the matcher
-          fired OR the user forced expert mode). Single skill per
-          task is the only shape today (X = 1); the "X 个" phrasing
-          stays per spec so a future multi-skill path renders without
-          template change. */}
       {expertUsageCopy && (
         <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <Puzzle className="h-3 w-3 text-muted-foreground/70" />
           <span>{expertUsageCopy}</span>
         </div>
       )}
-      {/* Inline copy / share footer. Replaced the prior absolute-
-          positioned overlay (top-right, opacity-0 group-hover) which
-          obscured the first lines of the result on overflow and
-          never appeared on touch. Always visible, sits below the
-          body so it doesn't compete with the content. */}
-      {/* Footer (Codex IA pass). The primary action stays inline —
-          复制 — because it's the action 90% of users take first.
-          复制为 Markdown / 下载 .md / 分享任务 / 设为定时 fold into a
-          单一 Radix More menu so the row isn't a wall of text
-          buttons. 浏览器 lives in the top-right of the card;
-          the final-page external link keeps its own URL row below. */}
-      <div
-        className={cn(
-          'mt-3 flex items-center justify-end gap-2 border-t pt-3 text-xs text-muted-foreground',
-          tone.divider,
-        )}
-      >
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void copyTo(plainText, '纯文本')}
-            aria-label="复制纯文本结果"
-            title="复制"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#DCDDDD] bg-white/75 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.04)] transition-colors hover:border-[#FF0061]/35 hover:bg-[#FF0061]/5 hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:border-[#FF0061]/40 dark:hover:bg-[#FF0061]/10 dark:hover:text-foreground"
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label="打开更多结果操作"
-                title="更多"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#DCDDDD] bg-white/60 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:bg-white/10"
-              >
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              side="top"
-              sideOffset={8}
-              className="w-52 rounded-[8px] border-[#DCDDDD] bg-white p-1.5 shadow-[0_12px_28px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card"
+      {turn && (
+        <TurnOptions
+          options={turn.options}
+          onRetry={canRetry && intent ? () => void handleRetry(intent) : undefined}
+          retrying={retryingIntent != null}
+          onSend={send}
+        />
+      )}
+      <ProcessDisclosure
+        label={processLinkLabel(status === 'failed' ? 0 : answerSourceCount(displayText))}
+        actions={
+          <>
+            <button
+              type="button"
+              onClick={() => void copyTo(plainText, '纯文本')}
+              aria-label="复制纯文本结果"
+              title="复制"
+              className={iconButton}
             >
-              <DropdownMenuItem
-                onSelect={() => void copyTo(markdownText, '为 Markdown')}
-                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+              <Copy className="h-3.5 w-3.5" />
+            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="打开更多结果操作"
+                  title="更多"
+                  className={iconButton}
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                side="top"
+                sideOffset={8}
+                className="w-52 rounded-[8px] border-[#DCDDDD] bg-white p-1.5 shadow-[0_12px_28px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card"
               >
-                <FileText className="text-[#ADADAD]" />
-                <span>复制为 Markdown</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() => {
-                  if (downloadMarkdownFile(markdownText, taskId)) {
-                    toast.show('已开始下载 .md 文件');
-                  } else {
-                    toast.show('下载失败，请复制内容后手动保存', 'error');
-                  }
-                }}
-                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
-              >
-                <Download className="text-[#ADADAD]" />
-                <span>下载 .md</span>
-              </DropdownMenuItem>
-              {taskId && (
+                <DropdownMenuItem
+                  onSelect={() => void copyTo(markdownText, '为 Markdown')}
+                  className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+                >
+                  <FileText className="text-[#ADADAD]" />
+                  <span>复制为 Markdown</span>
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() => {
-                    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-                    void copyTo(`${origin}/?task=${encodeURIComponent(taskId)}`, '任务链接');
+                    if (downloadMarkdownFile(markdownText, taskId)) {
+                      toast.show('已开始下载 .md 文件');
+                    } else {
+                      toast.show('下载失败，请复制内容后手动保存', 'error');
+                    }
                   }}
                   className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
                 >
-                  <Link2 className="text-[#ADADAD]" />
-                  <span>分享任务</span>
+                  <Download className="text-[#ADADAD]" />
+                  <span>下载 .md</span>
                 </DropdownMenuItem>
-              )}
-              {!isFailedLike && intent && (
-                <DropdownMenuItem
-                  onSelect={() => setScheduleDialogOpen(true)}
-                  className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
-                >
-                  <Clock className="text-[#ADADAD]" />
-                  <span>设为定时</span>
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-      {/* Phase 4 R1 B.2 — FollowUpChips. The orchestrator inserts a
-          structured marker around explicit next-action suggestions
-          ("查看竞品" / "排查异常品"). Rendered as a chip rail above
-          the legacy "继续探索" block. Reuses onSuggestionPick which
-          inherits replyToTaskId via MainPanel's follow-up auto-
-          detect, so chip clicks land as proper follow-up turns. */}
+                {taskId && (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+                      void copyTo(`${origin}/?task=${encodeURIComponent(taskId)}`, '任务链接');
+                    }}
+                    className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+                  >
+                    <Link2 className="text-[#ADADAD]" />
+                    <span>分享任务</span>
+                  </DropdownMenuItem>
+                )}
+                {!isFailedLike && intent && (
+                  <DropdownMenuItem
+                    onSelect={() => setScheduleDialogOpen(true)}
+                    className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#FF0061] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+                  >
+                    <Clock className="text-[#ADADAD]" />
+                    <span>设为定时</span>
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        }
+      >
+        {process}
+        {hasRealUrl && (
+          <ProcessSection title="结束页面">
+            <button
+              type="button"
+              onClick={() => {
+                if (needsExternalLinkConfirmation(safeCurrentUrl)) setPendingLink(safeCurrentUrl);
+                else openExternalLink(safeCurrentUrl);
+              }}
+              className="inline-flex max-w-full items-center gap-1.5 text-left text-xs text-[#1687B8] underline-offset-2 hover:underline"
+            >
+              <ExternalLink className="h-3 w-3 shrink-0" />
+              <span className="truncate">{safeCurrentUrl}</span>
+            </button>
+          </ProcessSection>
+        )}
+        {evidenceAttachments.length > 0 && (
+          <ProcessSection title="页面截图">
+            <div className="flex flex-col gap-2">
+              {evidenceAttachments.map((a) => (
+                <AttachmentRow key={a.fileId} attachment={a} />
+              ))}
+            </div>
+          </ProcessSection>
+        )}
+        {(failureDetail || refund) && (
+          <ProcessSection title="失败详情">
+            {failureDetail && (
+              <p className="m-0 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
+                {failureDetail}
+              </p>
+            )}
+            {refund && (
+              <p
+                data-testid="failure-refund-status"
+                className="m-0 text-xs leading-5 text-muted-foreground"
+              >
+                <span className="font-medium text-foreground/80">{refund.label}</span>
+                <span className="mx-1">·</span>
+                {refund.detail}
+              </p>
+            )}
+            {canRetry && retryAttachmentNote(failureContext.context) && (
+              <p className="m-0 text-xs leading-5 text-muted-foreground">
+                {retryAttachmentNote(failureContext.context)}
+              </p>
+            )}
+          </ProcessSection>
+        )}
+      </ProcessDisclosure>
       {followUpActions.length > 0 && onSuggestionPick && revealed === displayText && (
         <FollowUpChips actions={followUpActions} onPick={onSuggestionPick} />
       )}
-      {/* Plain-text suggestion links. Kept as a compact next-step
-          card instead of loose text rows, so long suggestions stay
-          readable on mobile. Click fires onSuggestionPick which
-          routes through the parent's onSubmit (followUpTarget
-          detection inherits replyToTaskId for free parent context). */}
-      {suggestions.length > 0 && onSuggestionPick && revealed === displayText && (
-        <div className="mt-4 rounded-[8px] border border-[#DCDDDD] bg-white p-2.5 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
-          <div className="mb-2 flex items-center justify-between gap-3 px-1 text-[11px] font-medium tracking-wide text-muted-foreground">
-            下一步建议
-            <span>{suggestions.length} 项</span>
-          </div>
-          {suggestions.map((s, i) => (
-            <button
-              key={`${i}-${s.slice(0, 10)}`}
-              type="button"
-              onClick={() => onSuggestionPick(s)}
-              className="group flex min-h-10 w-full items-start gap-2.5 rounded-[6px] px-2.5 py-2.5 text-left text-xs text-[#595757] transition-colors hover:bg-[#EFEFEF]/55 hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground"
-            >
-              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#DCDDDD] bg-[#EFEFEF]/55 text-[11px] font-medium text-[#595757] transition-colors group-hover:border-[#FF0061]/35 group-hover:bg-[#FF0061]/5 group-hover:text-[#FF0061] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70">
-                {i + 1}
-              </span>
-              <span className="min-w-0 flex-1 leading-5">{s}</span>
-            </button>
-          ))}
-        </div>
+      {revealed === displayText && (
+        <NextStepChips steps={nextSteps} onSend={send} onEdit={onSuggestionPick} />
       )}
       <ExternalLinkConfirm
         href={pendingLink}
@@ -2942,9 +2638,6 @@ function TerminalSummary({
           openExternalLink(href);
         }}
       />
-      {/* Phase 5a — schedule-this-task dialog. `initialIntent` pre-
-          fills with the just-finished task's intent. Toast/refresh
-          handled inside the dialog; on success we just close it. */}
       <ScheduledTaskDialog
         open={scheduleDialogOpen}
         onClose={() => setScheduleDialogOpen(false)}
@@ -2953,6 +2646,23 @@ function TerminalSummary({
       />
     </div>
   );
+}
+
+/** One produced file (or evidence screenshot) as before: thumbnails for images. */
+function AttachmentRow({ attachment: a }: { attachment: UiTerminalAttachment }): JSX.Element {
+  const payload = {
+    fileId: a.fileId,
+    filename: a.filename,
+    size: a.sizeBytes,
+    downloadUrl: a.downloadUrl,
+    expiresAt: a.expiresAt,
+    unavailable: a.availability === 'unavailable',
+  };
+  if (payload.unavailable) return <FileDownloadCard payload={payload} />;
+  if (a.kind === 'screenshot' || a.mimetype.startsWith('image/')) {
+    return <ScreenshotThumbnailCard payload={payload} />;
+  }
+  return <FileDownloadCard payload={payload} />;
 }
 
 /**

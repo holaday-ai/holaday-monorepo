@@ -121,7 +121,7 @@ describe('core follow-up suggestions boundary', () => {
       expect(f.calls).toHaveLength(1);
       expect(f.calls[0]).toMatchObject({
         region: modelDataRegion,
-        options: { timeoutMs: 8000, maxRetries: 0 },
+        options: { timeoutMs: 15_000, maxRetries: 0 },
       });
       expect(f.frames).toEqual([steps('整理后续执行清单', '比较两种材料结构')]);
       expect(f.input.isCurrent).toHaveBeenCalledTimes(2);

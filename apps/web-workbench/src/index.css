@@ -167,6 +167,38 @@
   animation-delay: 0.3s;
 }
 
+/* FIX-57 #3: the live status line breathes while the task runs. */
+.hd-status-shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted-foreground)) 0%,
+    hsl(var(--muted-foreground)) 40%,
+    hsl(var(--foreground)) 50%,
+    hsl(var(--muted-foreground)) 60%,
+    hsl(var(--muted-foreground)) 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: hd-status-shimmer 2.2s linear infinite;
+}
+@keyframes hd-status-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hd-status-shimmer {
+    animation: none;
+    color: hsl(var(--muted-foreground));
+    background: none;
+  }
+}
+
 /*
  * noVNC RFB inserts its own screen / canvas DOM inside the container
  * our <VncViewport> exposes. We can't style those elements via React

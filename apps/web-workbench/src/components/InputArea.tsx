@@ -1229,15 +1229,8 @@ function composerModePills({
       },
     ];
   }
-  if (followUp) {
-    return [
-      {
-        label: '追问结果',
-        detail: '这条消息会接在当前任务结果后继续，不会丢失原记录。',
-        tone: 'accent',
-      },
-    ];
-  }
+  // FIX-57 #1: following up is just talking on — no 「追问结果」 mode label.
+  if (followUp) return [];
   const execution =
     taskMode === 'plan'
       ? {

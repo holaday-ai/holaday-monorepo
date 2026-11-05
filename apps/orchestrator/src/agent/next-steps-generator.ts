@@ -24,20 +24,21 @@ export interface NextStep {
 
 export type NextStepsOutcome = 'completed' | 'partial' | 'failed';
 
-const MAX_TOKENS = 500;
+const MAX_TOKENS = 700;
 export const NEXT_STEP_LABEL_MAX = 48;
-export const NEXT_STEP_PROMPT_MAX = 200;
+export const NEXT_STEP_PROMPT_MAX = 300;
 
-const SYSTEM_PROMPT = `你是用户的私人助理，刚替用户做完一件事。请预判用户接下来最可能想让你做什么，给出 0–3 个下一步提议。
+export const NEXT_STEPS_SYSTEM_PROMPT = `你是用户的私人助理，刚替用户做完一件事。请预判用户接下来最可能想让你做什么，给出 0–3 个下一步提议。
 
 要求：
 - 紧扣这次的目标和结果：具体到对象（哪只股票、哪个商品、哪个网站、哪段时间）和产出（对比表、提醒、摘要、清单…）。不要泛泛的「查看更多」「搜索相关新闻」「分析一下」。
 - 不重复这次已经回答过的内容；用户最近的任务可以帮你判断偏好和延续方向。
 - 结果是「部分完成」或「失败」时，第一条必须是补齐缺口的那一步（换个来源/换个时间/换个方式拿到缺的那部分）；失败的原因是需要登录或人机验证时，可以提议「你登录后我接着看」，但绝不提议替用户输入账号密码或绕过验证。
-- label：助理主动提议的口吻，第一人称，简短自然，可以用问句，例如「今天开盘后我再帮你拉一次实时点位，跟昨天收盘对比？」，不超过 40 个字。
+- label：助理主动提议的口吻，第一人称，简短自然，可以用问句，例如「今天开盘后我再帮你拉一次实时点位，跟昨天收盘对比？」，不超过 30 个字。
 - prompt：用户点了之后发给你的完整指令，用户的口吻，单独拿出来也能直接执行（写清对象、网站、要什么），不超过 150 个字。
 - 继承用户原话里的限制：用户说过「不要提交/不要购买/不要发送/不要点击…」，提议里绝不能出现相反的动作。
 - 不给买卖、投资建议，不预测涨跌；不出现内部工具名、网址参数或服务商名字。
+- 不提议换浏览器内核、伪装身份、换 IP、走代理或任何规避网站限制的做法。
 - 没有真正有价值的下一步就返回空数组，宁缺毋滥。
 
 只回复 JSON，不要其他文字，格式：{"steps":[{"label":"…","prompt":"…"}]}`;
@@ -85,10 +86,10 @@ export async function generateNextSteps(opts: GenerateNextStepsOptions): Promise
       {
         maxTokens: MAX_TOKENS,
         thinking: { type: 'disabled' },
-        system: SYSTEM_PROMPT,
+        system: NEXT_STEPS_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: nextStepsUserMessage(opts) }],
       },
-      { timeoutMs: 8000, maxRetries: 0 },
+      { timeoutMs: 15_000, maxRetries: 0 },
     );
     for (const b of resp.content) if (b.type === 'text') raw += b.text;
   } catch {
@@ -100,7 +101,8 @@ export async function generateNextSteps(opts: GenerateNextStepsOptions): Promise
 /** Internal references and provider names never reach the person. */
 const INTERNAL_RE =
   /\b(?:tab|frame)_[\w-]+|\bref\s*=\s*\S+|\[ref=[^\]]*\]|\b(?:firecrawl|brave|playwright|browserbase|qwen|dashscope|anthropic|claude|openai|gpt-\S+|tavily|serpapi)\b|read_page|get_page_text|web_search|snapshot|request_human/i;
-const BANNED_RE = /温馨提示|购买建议|风险提示|免责声明|买入|卖出|加仓|减仓|抄底|会涨|会跌|涨跌预测/;
+const BANNED_RE =
+  /温馨提示|购买建议|风险提示|免责声明|买入|卖出|加仓|减仓|抄底|会涨|会跌|涨跌预测|内核|指纹|伪装|代理|换\s*IP|user[\s-]?agent|破解/i;
 
 /** Tolerant parse: a fenced block, a bare object, or a bare array of either shape. */
 export function parseNextSteps(raw: string): NextStep[] {

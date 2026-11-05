@@ -283,7 +283,9 @@ describe('persisted follow-up suggestions', () => {
     useTaskStore.getState().reset();
     useTaskStore.getState().selectTask('tsk_restored', 'ui');
     await flushPromises();
-    expect(useTaskStore.getState().suggestionsByTask.tsk_restored).toEqual(['完善方案']);
+    expect(useTaskStore.getState().suggestionsByTask.tsk_restored).toEqual([
+      { label: '完善方案', prompt: '完善方案' },
+    ]);
     expect(createMutate).not.toHaveBeenCalled();
   });
   it('normalizes malformed and duplicate persisted values', async () => {
@@ -298,8 +300,8 @@ describe('persisted follow-up suggestions', () => {
     useTaskStore.getState().selectTask('tsk_normalized', 'ui');
     await flushPromises();
     expect(useTaskStore.getState().suggestionsByTask.tsk_normalized).toEqual([
-      '完善方案',
-      '比较方案',
+      { label: '完善方案', prompt: '完善方案' },
+      { label: '比较方案', prompt: '比较方案' },
     ]);
   });
   it('does not restore suggestions for a noncompleted task', async () => {
@@ -332,7 +334,9 @@ describe('persisted follow-up suggestions', () => {
       steps: [],
     } as never);
     await flushPromises();
-    expect(useTaskStore.getState().suggestionsByTask.tsk_live).toEqual(['最新后续建议']);
+    expect(useTaskStore.getState().suggestionsByTask.tsk_live).toEqual([
+      { label: '最新后续建议', prompt: '最新后续建议' },
+    ]);
   });
   it.each([{ first: [] }, { first: ['旧的后续建议'] }])(
     'refreshes a preexisting cached suggestion list from a newer detail ($first)',
@@ -351,7 +355,9 @@ describe('persisted follow-up suggestions', () => {
       } as never);
       useTaskStore.getState().selectTask('tsk_updated', 'ui');
       await flushPromises();
-      expect(useTaskStore.getState().suggestionsByTask.tsk_updated).toEqual(['后台保存的建议']);
+      expect(useTaskStore.getState().suggestionsByTask.tsk_updated).toEqual([
+        { label: '后台保存的建议', prompt: '后台保存的建议' },
+      ]);
     },
   );
 });
@@ -2441,7 +2447,7 @@ describe('deleteTask', () => {
         tsk_active: { iteration: 1, query: 'holaday', at: 1 },
       },
       thinkingByTask: { tsk_active: { summary: 'thinking', at: 1 } },
-      suggestionsByTask: { tsk_active: ['follow up'] },
+      suggestionsByTask: { tsk_active: [{ label: 'follow up', prompt: 'follow up' }] },
       streamingByTask: { tsk_active: 'stream' },
       progressByTask: { tsk_active: 'working' },
       subStatusByTask: {
@@ -2494,7 +2500,7 @@ describe('replyToTask', () => {
         tasksHasMore: true,
         streamingByTask: { tsk_restore: '旧草稿', keep: '保留' },
         progressByTask: { tsk_restore: '旧进度' },
-        suggestionsByTask: { tsk_restore: ['旧建议'] },
+        suggestionsByTask: { tsk_restore: [{ label: '旧建议', prompt: '旧建议' }] },
         thinkingByTask: { tsk_restore: { summary: '旧思考', at: 1 } },
       });
       if (source === 'detail') {
@@ -3914,7 +3920,9 @@ describe('applyServerMessage stale live frames after terminal', () => {
     const state = useTaskStore.getState();
     expect(state.webSearchByTask.tsk_done_supercar_aux).toBeUndefined();
     expect(state.thinkingByTask.tsk_done_supercar_aux).toBeUndefined();
-    expect(state.suggestionsByTask.tsk_done_supercar_aux).toEqual(['完成后建议仍应允许到达']);
+    expect(state.suggestionsByTask.tsk_done_supercar_aux).toEqual([
+      { label: '完成后建议仍应允许到达', prompt: '完成后建议仍应允许到达' },
+    ]);
   });
 });
 

@@ -57,6 +57,7 @@ describe('FIX-57 #4 · next steps', () => {
       { label: '要不要我判断该不该买入？', prompt: '分析上证指数现在是否该买入' },
       { label: '把账号密码给我，我替你登录？', prompt: '把账号密码给我，我登录查看' },
       { label: '读一下 tab_3 的内容？', prompt: '读 tab_3' },
+      { label: '换个浏览器内核再试一次？', prompt: '切换不同内核重新访问' },
       {
         label: '整理三大指数昨日表现对比表？',
         prompt: '把上证、深证、创业板昨天的表现整理成一张对比表',
@@ -105,13 +106,13 @@ describe('FIX-57 #4 · next steps', () => {
       }),
     ).toEqual([]);
     expect(seen).toHaveLength(1);
-    expect(seen[0]?.options).toEqual({ timeoutMs: 8000, maxRetries: 0 });
+    expect(seen[0]?.options).toEqual({ timeoutMs: 15_000, maxRetries: 0 });
   });
 
   it('repositories accept 1–3 steps of the right size only', () => {
     expect(validNextSteps([])).toBe(false);
     expect(validNextSteps([{ label: '整理对比表？', prompt: '整理对比表' }])).toBe(true);
     expect(validNextSteps([{ label: 'x'.repeat(49), prompt: '整理对比表' }])).toBe(false);
-    expect(validNextSteps([{ label: '整理对比表？', prompt: 'x'.repeat(201) }])).toBe(false);
+    expect(validNextSteps([{ label: '整理对比表？', prompt: 'x'.repeat(301) }])).toBe(false);
   });
 });
