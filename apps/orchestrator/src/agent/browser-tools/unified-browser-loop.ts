@@ -2910,7 +2910,7 @@ export const RESCUE_SITES = 2;
 export const RESCUE_SEARCH_SITES: readonly string[] = ['bing.com'];
 /** FIX-57 #5: what the model is told when a read task is stopped. */
 export const RESCUE_NOTE =
-  '不要登录，不要做验证，不要在登录或验证框里输入任何东西；也不要再打开被挡住的那个页面或用只读抓取去取它。换一条不需要登录的公开路线拿同类信息：同一网站的搜索页或列表页、比价网站、品牌官网或其他公开页面都可以，最多再换 2 个网站。找路线可以先 web_search；没有结果就用浏览器打开 https://cn.bing.com/search?q=关键词 搜一下，再打开结果里的公开页面（搜索页本身不算换网站）；同一网站的移动版页面（如 m. 开头）也可以试。搜索页要求验证时不要做，换别的路线。拿到了就照常 finish，并在答案开头写明信息来自哪个网站、和原来要看的页面不同；页面数据不是最新的就写明是哪个时间点的数据。两条路线都拿不到，就 finish(status=failed)，写清拿到了什么、缺什么、卡在哪一步。';
+  '不要登录，不要做验证，不要在登录或验证框里输入任何东西；也不要再打开被挡住的那个页面或用只读抓取去取它。换一条不需要登录的公开路线拿同类信息：同一网站的搜索页或列表页、比价网站、品牌官网或其他公开页面都可以，最多再换 2 个网站。找路线可以先 web_search；没有结果就用浏览器打开 https://cn.bing.com/search?q=关键词 搜一下，再打开结果里的公开页面（搜索页本身不算换网站）；同一网站的移动版页面（如 m. 开头）也可以试。搜索页要求验证时不要做，换别的路线。拿到了就照常 finish，并在答案开头写明信息来自哪个网站、和原来要看的页面不同；页面数据不是最新的就写明是哪个时间点的数据；只拿到一部分（如价格被遮挡、标题不完整）时 summary 以「部分完成：」开头写清缺什么。两条路线都拿不到，就 finish(status=failed)，写清拿到了什么、缺什么、卡在哪一步。';
 /** FIX-57 #5: the live status line shown while the run routes around a wall. */
 export const RESCUE_STATUS = {
   wall: '页面要登录或被拦下了，换个公开来源试试…',
