@@ -2408,7 +2408,7 @@ function TerminalSummary({
   const productAttachments = attachments?.filter((a) => !isEvidenceAttachment(a)) ?? [];
   const evidenceAttachments = attachments?.filter((a) => isEvidenceAttachment(a)) ?? [];
   const partial = status === 'partial_success' ? partialLead(revealed) : null;
-  const partialSaid = Boolean(partial?.lead);
+  const partialSaid = partial !== null && partial.lead !== null;
   const refund = isFailedLike ? refundStatusCopy(failureContext.context?.refund.state) : null;
   const failureDetail =
     status === 'failed' && displayText.trim() ? friendlyFailureDetail(displayText) : '';
@@ -2435,7 +2435,7 @@ function TerminalSummary({
       )}
       {!isFailedLike && endedOnBrowserErrorPage && <BrowserErrorFinalUrlBanner />}
       {!isFailedLike && expertWorkflowId && <ExpertReportHeader workflowId={expertWorkflowId} />}
-      {status === 'partial_success' && (
+      {status === 'partial_success' && partial?.lead !== '' && (
         <p className="m-0 mb-2 text-[15px] leading-7 text-foreground/80" data-testid="partial-lead">
           {partial?.lead ??
             '这次只算部分完成：有的内容还没拿全或没能核实，具体在「查看过程」的核对记录里。'}

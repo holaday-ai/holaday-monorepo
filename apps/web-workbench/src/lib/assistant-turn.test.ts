@@ -101,10 +101,9 @@ describe('FIX-57 #2 · the answer footer', () => {
   });
 
   it('a partial answer says so in words', () => {
-    expect(partialLead('部分完成：第 3 个没有价格')).toEqual({
-      lead: '这次只拿到了一部分，缺的我写在下面了。',
-      body: '第 3 个没有价格',
-    });
+    // 复审 #1: the answer's own first line says what is missing — no second preamble.
+    expect(partialLead('部分完成：第 3 个没有价格')).toEqual({ lead: '', body: '第 3 个没有价格' });
+    expect(partialLead('部分完成：').lead).toBe('这次只拿到了一部分，缺的我写在下面了。');
     expect(partialLead('上证收在 3686.17').lead).toBeNull();
   });
 });

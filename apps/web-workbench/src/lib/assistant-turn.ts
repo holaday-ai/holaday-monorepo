@@ -271,7 +271,9 @@ export function normalizeNextSteps(
 export function partialLead(text: string): { lead: string | null; body: string } {
   const m = text.match(/^\s*(?:\*\*)?部分完成(?:\*\*)?\s*[:：]\s*/);
   if (!m) return { lead: null, body: text };
-  return { lead: '这次只拿到了一部分，缺的我写在下面了。', body: text.slice(m[0].length) };
+  const body = text.slice(m[0].length);
+  // 复审 #1: the answer's own first line already says what is missing — no second preamble.
+  return { lead: body.trim() ? '' : '这次只拿到了一部分，缺的我写在下面了。', body };
 }
 
 function siteName(finalUrl: string | null | undefined, intent: string): string | null {

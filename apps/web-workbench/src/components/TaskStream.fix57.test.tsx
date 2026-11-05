@@ -107,7 +107,8 @@ it('a partial result is said in words', () => {
     status: 'partial_success',
     resultText: '部分完成：前两个有价格，第 3 个页面只显示 See options，没有价格。',
   });
-  expect(screen.getByText('这次只拿到了一部分，缺的我写在下面了。')).toBeTruthy();
+  expect(screen.queryByText('这次只拿到了一部分，缺的我写在下面了。')).toBeNull();
+  expect(screen.queryByText(/^部分完成：/)).toBeNull();
   expect(screen.getByText(/第 3 个页面只显示 See options/)).toBeTruthy();
 });
 

@@ -1926,14 +1926,12 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             continue;
           }
           const pageGap =
-            (listGap ??
-              (absent.length
-                ? `部分完成：${absent.join('、')} 页面上没有读到。`
-                : declined.length
-                  ? `部分完成：「${declined.join('、')}」部分未完成。`
-                  : frameLead)) ||
-            // FIX-57 #5: what a rescue got from another public page may be only part of it.
-            (rescueStarted && RESCUE_PARTIAL_RE.test(answer) ? RESCUE_PARTIAL_LEAD : null);
+            listGap ??
+            (absent.length
+              ? `部分完成：${absent.join('、')} 页面上没有读到。`
+              : declined.length
+                ? `部分完成：「${declined.join('、')}」部分未完成。`
+                : frameLead);
           if (short || dateMissing || sectionMissing || declaredPartial || saysPartial || pageGap) {
             const lead = short
               ? `部分完成：只找到 ${found}/${wantedCount} 条。`
@@ -2994,7 +2992,7 @@ export const RESCUE_NOTE =
 /** FIX-57 #5: a rescued answer that says part of it is masked, cut or login-only. */
 export const RESCUE_PARTIAL_RE =
   /遮挡|遮住|打码|打了码|脱敏|掩码|截断|被(?:部分)?隐藏|\d\?\?|\?\?\d|需(?:要)?登录(?:后)?(?:才|可)|登录后(?:才|可)(?:查看|看到|显示)|无法获[得取]完整|不完整/;
-export const RESCUE_PARTIAL_LEAD = '部分完成：有的内容页面上被遮住或截断了，要登录才看得到完整的。';
+
 /** FIX-57 复审 #1-4: short Chinese names for the sites a rescue usually lands on. */
 const RESCUE_SITE_NAMES: ReadonlyArray<[RegExp, string]> = [
   [/(^|\.)m\.jd\.com$|^item\.m\.jd\.com$/, '京东手机版'],
