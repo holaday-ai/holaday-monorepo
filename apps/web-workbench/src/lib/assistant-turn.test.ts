@@ -1,7 +1,9 @@
 import type { UiStep } from '@/types/task';
 import { describe, expect, it } from 'vitest';
 import {
+  answerLinks,
   answerSourceCount,
+  captchaRequestLine,
   elapsedLabel,
   failureOwnWords,
   failureTurn,
@@ -11,6 +13,7 @@ import {
   partialLead,
   processLinkLabel,
   shortLinkLabel,
+  splitUnverifiedNote,
   stepTimeline,
   stripInternalRefs,
   withoutRepeatedOffers,
@@ -303,12 +306,76 @@ describe('复审 #2', () => {
     ['任务执行失败：通义千问联网搜索接口返回空', '我这边的服务刚刚出了点问题'],
     ['任务执行失败：百炼通道超时，dashscope 503', '我这边的服务刚刚出了点问题'],
     [
-      '任务执行失败：read_page 在 frame_1 里找不到 ref=e45 元素，换 s2e17 也不行',
-      '读取页面在内嵌框里找不到元素，换那个元素也不行，这次没做完。',
+      '任务执行失败：read_page 在 frame_1 里找不到 ref=e45 元素，点击 s2e17 也不行',
+      '读取页面在内嵌框里找不到元素，点击那个元素也不行，这次没做完。',
     ],
   ])('3: %s', (errorText, lead) => {
     const turn = failureTurn({ status: 'failed', errorText, intent: '查价格', canRetry: true });
     expect(turn.lead).toContain(lead);
     expect(turn.lead).not.toMatch(/千问|通义|百炼|dashscope|read_page|frame_|ref=|s2e17|e45/i);
+  });
+});
+
+describe('复审 #3', () => {
+  it.each([
+    ['Friends s1e2 的剧情', 'Friends s1e2 的剧情'],
+    ['wait_for it 是一句口头禅', 'wait_for it 是一句口头禅'],
+    ['读取 snapshot 结果', '读取 snapshot 结果'],
+    ['调用 read_page 失败', '调用读取页面失败'],
+    ['snapshot(tab_2) 返回空', '读取页面返回空'],
+    ['点击 s3e17 没反应', '点击那个元素没反应'],
+    ['点击 e123', '点击那个按钮'],
+  ])('ids and tool names are replaced only where they are used as such: %s', (text, out) => {
+    expect(stripInternalRefs(text)).toBe(out);
+  });
+
+  it('「没问题的两款如下」 does not say what is missing', () => {
+    expect(partialLead('部分完成：没问题的两款如下。\n\n- A\n- B').lead).toBe(
+      '这次只拿到了一部分，缺的我写在下面了。',
+    );
+    expect(partialLead('部分完成：第 3 款没找到价格。').lead).toBe('');
+  });
+
+  it('BOSS run: 知乎, not zhihu.com; no 「比价网站」 for a question page; no 「我不会代做验证」', () => {
+    const turn = failureTurn({
+      status: 'failed',
+      errorText: '用户已放弃验证，任务未完成。',
+      intent:
+        '请使用云端浏览器，打开 https://www.zhihu.com/question/19550225 读问题标题和第一个回答',
+      canRetry: true,
+    });
+    expect(turn.lead.startsWith('知乎要求先做人机验证')).toBe(true);
+    expect(turn.why).toBe('');
+    expect(turn.options.map((o) => o.label)).toEqual([
+      '重新打开，遇到验证由你来完成',
+      '我换个不需要登录的公开来源找找',
+    ]);
+  });
+
+  it('BOSS run: the verifier note leaves the answer for 「查看过程」', () => {
+    const { body, unverified } = splitUnverifiedNote(
+      '1. A S$9.99\n\n未核实：以下内容未能在已读页面中逐字找到，请自行确认——价格「S$9.43」',
+    );
+    expect(body).toBe(
+      '1. A S$9.99\n\n有些内容我没能在页面上逐字核对到，细节在「查看过程」里，用之前可以再看一眼。',
+    );
+    expect(unverified).toBe('价格「S$9.43」');
+  });
+
+  it('BOSS run: the sources an answer cites are listed for 「查看过程」', () => {
+    expect(
+      answerLinks(
+        '收在 3689.91（[东方财富](https://quote.eastmoney.com/a)、[搜狐](https://q.stock.sohu.com/b)）',
+      ),
+    ).toEqual([
+      { label: '东方财富', url: 'https://quote.eastmoney.com/a' },
+      { label: '搜狐', url: 'https://q.stock.sohu.com/b' },
+    ]);
+  });
+
+  it('知乎 verification said once', () => {
+    expect(captchaRequestLine('知乎')).toBe(
+      '知乎要求先做人机验证，请在浏览器画面里完成（只能你本人操作），完成后我会自动接着做，最多等 10 分钟。',
+    );
   });
 });

@@ -581,12 +581,13 @@ export function WorkbenchApp(): JSX.Element {
       mode: sidePanelMode,
       isMobile,
       autoOpenedKey: mobileBrowserSheetAutoOpenedKeyRef.current,
+      needsUser: selectedNeedsBrowser,
     });
     mobileBrowserSheetAutoOpenedKeyRef.current = nextSheetState.autoOpenedKey;
     if (nextSheetState.shouldOpen) {
       setBrowserSheetOpen(true);
     }
-  }, [isMobile, selectedTaskId, sidePanelMode]);
+  }, [isMobile, selectedTaskId, sidePanelMode, selectedNeedsBrowser]);
 
   React.useEffect(() => {
     if (sidePanelMode !== 'closed') openBrowserWorkbench();

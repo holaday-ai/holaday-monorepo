@@ -68,14 +68,13 @@ export function CaptchaHandoffActions({
   };
   return (
     <div className="mt-3 space-y-2" data-testid="captcha-handoff-actions">
-      {status.challenge?.hint && (
+      {/* 复审 #3: the request line above already says who, where and how long — only a
+          specific challenge's how-to is added here. */}
+      {status.challenge?.hint && !/按网站提示完成验证/.test(status.challenge.hint) && (
         <p className="text-xs text-foreground" data-testid="captcha-hint">
           {status.challenge.hint}
         </p>
       )}
-      <p className="text-xs text-muted-foreground">
-        只有你可以操作验证；AI 已暂停。完成后自动继续，最多等待 10 分钟。
-      </p>
       {status.alternateAvailable && (
         <p className="text-xs text-muted-foreground">
           这道题连续没通过，可以不再做题，让 AI 换个方式继续（改用其他来源，做不到会如实说明）。

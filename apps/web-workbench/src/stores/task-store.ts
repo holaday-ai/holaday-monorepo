@@ -2695,6 +2695,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           };
           return {
             stepsByTask: { ...prev.stepsByTask, [msg.taskId]: [...existing, next] },
+            // FIX-57 复审 #3 (BOSS run, JD): a search lane that handed over to the browser
+            // left its streamed text on screen (「请你自己登录后告诉我继续」) and hid the
+            // status line. Browser steps supersede it.
+            ...(prev.streamingByTask[msg.taskId] !== undefined
+              ? { streamingByTask: omitRuntimeKey(prev.streamingByTask, msg.taskId) }
+              : {}),
             tasks: prev.tasks.map((t) => {
               if (t.taskId !== msg.taskId) return t;
               const { queuePosition: _queuePosition, ...rest } = t;

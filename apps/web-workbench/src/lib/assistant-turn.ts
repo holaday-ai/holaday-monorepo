@@ -20,18 +20,30 @@ import { classifyFriendlyFailure } from './failure-copy';
  * plain words (复审 #1-3) so the sentence still reads: 「在 tab_2 上点击 e123 没有反应」 →
  * 「在页面上点击那个按钮没有反应」. Web addresses are left alone (their `ref=` is the site's).
  */
+const TOOL_READ = '(?:read_page|get_page_text|snapshot|read_url)';
+const TOOL_SEARCH = '(?:web_search)';
+const TOOL_ACT =
+  '(?:click_ref|type_in_ref|press_key|wait_for|switch_tab|list_tabs|request_human|scroll_until)';
+/** 复审 #3: a tool name only where it is used as one — 「调用 read_page」, 「snapshot(…)」, or
+ * opening a sentence before Chinese; 「wait_for it」「读取 snapshot 结果」 stay as written. */
+const toolInContext = (names: string, to: string): Array<[RegExp, string]> => [
+  [
+    new RegExp(`(调用|工具|通过|执行|使用)\\s*(?:了\\s*)?${names}\\b(?:\\s*\\([^)]*\\))?`, 'g'),
+    `$1${to}`,
+  ],
+  [new RegExp(`\\b${names}\\s*\\([^)]*\\)`, 'g'), to],
+  [new RegExp(`(^|[。；;\\n]\\s*)${names}(?=\\s*[\\u4e00-\\u9fa5])`, 'g'), `$1${to}`],
+];
 const REF_REPLACEMENTS: ReadonlyArray<[RegExp, string]> = [
   [/\[?\bref\s*=\s*e?\d+\]?/gi, ''],
   [/\btab_[\w-]+/gi, '页面'],
   [/\bframe_[\w-]+/gi, '内嵌框'],
-  [/(?<![\w.-])s\d+e\d{1,6}\b/g, '那个元素'],
-  [/(?<![\w.-])e\d{1,6}\b/g, '那个按钮'],
-  [/\b(?:read_page|get_page_text|snapshot|read_url)\b/g, '读取页面'],
-  [/\b(?:web_search)\b/g, '搜索'],
-  [
-    /\b(?:click_ref|type_in_ref|press_key|wait_for|switch_tab|list_tabs|request_human|scroll_until)\b/g,
-    '操作',
-  ],
+  // 复审 #3: element ids only after a click or an input — 「Friends s1e2」 stays.
+  [/(点击|输入|点)\s*(?:了\s*)?s\d+e\d{1,6}\b/g, '$1那个元素'],
+  [/(点击|输入|点)\s*(?:了\s*)?e\d{1,6}\b/g, '$1那个按钮'],
+  ...toolInContext(TOOL_READ, '读取页面'),
+  ...toolInContext(TOOL_SEARCH, '搜索'),
+  ...toolInContext(TOOL_ACT, '操作'),
   [/\b(?:firecrawl|brave(?:\s+search)?|playwright|browserbase|tavily|serpapi)\b/gi, ''],
   [/\b(?:dashscope|anthropic|openai|qwen[\w.-]*|claude[\w.-]*|gpt-[\w.-]+)\b/gi, ' AI '],
   [/通义千问|千问|通义|百炼/g, ' AI '],
@@ -282,15 +294,19 @@ export function partialLead(text: string): { lead: string | null; body: string }
   // 复审 #1/#2: the answer's own first sentence is the lead — only when it says what is
   // missing (缺 / 没 / 未 / 只 / 部分 …); otherwise the fixed lead stays.
   const first = body.trim().split(/(?<=[。！？!?\n])/)[0] ?? '';
-  const saysMissing = /缺|没|未|只|部分|不全|不完整|打码|遮|截断|看不到|读不到/.test(first);
+  // 复审 #3: not a bare 「没」 (「没问题的两款如下」 says nothing is missing).
+  const saysMissing =
+    /缺|没有(?!问题)|没(?:拿到|读到|找到|查到|显示|能|给出|标|看到)|未(?:能|读到|找到|显示|拿到|获取|标|看到)|只(?:拿到|找到|读到|有|显示)|部分|不全|不完整|打码|遮|截断|看不到|读不到|拿不到|找不到|无法/.test(
+      first,
+    );
   return { lead: saysMissing ? '' : '这次只拿到了一部分，缺的我写在下面了。', body };
 }
 
-function siteName(finalUrl: string | null | undefined, intent: string): string | null {
+/** The site a task is on, by its short Chinese name when known (「知乎」, not 「zhihu.com」). */
+export function siteName(finalUrl: string | null | undefined, intent: string): string | null {
   const host = hostOf(finalUrl) ?? hostOf(intent.match(/https?:\/\/\S+/)?.[0]);
   if (!host) return null;
-  const name = friendlyHost(host);
-  return /[一-龥]/.test(name) ? name : name.replace(/^(?:passport|login|sso)\./, '');
+  return siteLabel(host.replace(/^(?:passport|login|sso)\./, '')).trim();
 }
 
 /** The agent's own first sentence of a failure reason, minus prefixes, URLs and advice. */
@@ -366,12 +382,23 @@ export function failureTurn(input: {
     executionMode: input.executionMode,
   });
   const site = siteName(input.finalUrl, intent);
+  // 复审 #3 (BOSS run, 知乎): 「比价网站」 only where prices are what the person wants.
+  const shopping =
+    /价格|价钱|多少钱|报价|商品|购买|比价|优惠|item\.|jd\.com|taobao|tmall|amazon|亚马逊|京东|淘宝|天猫/i.test(
+      intent,
+    );
   const publicSource: TurnOption | null = intent
-    ? {
-        kind: 'prompt',
-        label: '我去公开的搜索页或比价网站查同类信息',
-        prompt: `不用登录，换一个不需要登录的公开来源（站内搜索页、比价网站或品牌官网）帮我查：${intent}。答案里注明信息来自哪个网站。`,
-      }
+    ? shopping
+      ? {
+          kind: 'prompt',
+          label: '我去公开的搜索页或比价网站查同类信息',
+          prompt: `不用登录，换一个不需要登录的公开来源（站内搜索页、比价网站或品牌官网）帮我查：${intent}。答案里注明信息来自哪个网站。`,
+        }
+      : {
+          kind: 'prompt',
+          label: '我换个不需要登录的公开来源找找',
+          prompt: `不用登录，换一个不需要登录的公开来源（搜索引擎或相关的公开网站）帮我查：${intent}。答案里注明信息来自哪个网站。`,
+        }
     : null;
   // FIX-57 #5: the run already routed around the wall — say so, and do not offer it again.
   const triedElsewhere =
@@ -408,7 +435,7 @@ export function failureTurn(input: {
   if (/验证/.test(title)) {
     return {
       lead: `${site ?? '网站'}要求先做人机验证，这一步只能你本人来${tried}，所以${notGot}。`,
-      why: '我不会代做验证。',
+      why: '',
       options: [
         intent
           ? {
@@ -494,4 +521,38 @@ export function stepTimeline(
     out.push({ key: String(step.tickIndex), text, status: step.status });
   }
   return out.slice(-limit);
+}
+
+/**
+ * 复审 #3 (BOSS run, amazon): the verifier's 「未核实：以下内容未能在已读页面中逐字找到，请自行确认
+ * ——…」 note leaves the answer; the answer gets one plain sentence and 「查看过程」 keeps the items.
+ */
+export function splitUnverifiedNote(text: string): { body: string; unverified: string | null } {
+  const m = text.match(
+    /\n*\s*未核实[:：]\s*以下内容未能在已读页面中逐字找到，请自行确认——([\s\S]*?)(?=\n\s*\n|$)/,
+  );
+  if (!m) return { body: text, unverified: null };
+  const body = `${text.slice(0, m.index).trimEnd()}\n\n有些内容我没能在页面上逐字核对到，细节在「查看过程」里，用之前可以再看一眼。${text.slice((m.index ?? 0) + m[0].length)}`;
+  return { body: body.trim(), unverified: m[1]?.trim() || null };
+}
+
+/** The distinct links an answer cites, for the 「来源」 part of 「查看过程」. */
+export function answerLinks(text: string): Array<{ label: string; url: string }> {
+  const out: Array<{ label: string; url: string }> = [];
+  const seen = new Set<string>();
+  const push = (label: string, url: string) => {
+    const host = hostOf(url);
+    if (!host || seen.has(url)) return;
+    seen.add(url);
+    out.push({ label: label && !/^https?:/.test(label) ? label : siteLabel(host).trim(), url });
+  };
+  for (const m of text.matchAll(/\[([^\]]{1,60})\]\((https?:\/\/[^)\s]+)\)/g))
+    push(m[1] ?? '', m[2] ?? '');
+  for (const m of text.matchAll(/(?<!\]\()https?:\/\/[^\s)\]>"'，。）]+/g)) push('', m[0]);
+  return out.slice(0, 12);
+}
+
+/** 复审 #3 (BOSS run, 知乎): a verification handover said once, where the browser really is. */
+export function captchaRequestLine(site: string | null): string {
+  return `${site ?? '网站'}要求先做人机验证，请在浏览器画面里完成（只能你本人操作），完成后我会自动接着做，最多等 10 分钟。`;
 }

@@ -1,6 +1,5 @@
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
-import { PlanCard } from '@/components/PlanCard';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { SearchResultCard } from '@/components/SearchResultCard';
 import { StepCard } from '@/components/StepCard';
@@ -19,7 +18,9 @@ import { useToast } from '@/components/ui/toast';
 import { useTaskFailureContext } from '@/hooks/useTaskFailureContext';
 import {
   type NextStepOption,
+  answerLinks,
   answerSourceCount,
+  captchaRequestLine,
   failureTurn,
   isEvidenceAttachment,
   liveStatusText,
@@ -27,6 +28,8 @@ import {
   partialLead,
   processLinkLabel,
   shortLinkLabel,
+  siteName,
+  splitUnverifiedNote,
   stepTimeline,
   withoutRepeatedOffers,
 } from '@/lib/assistant-turn';
@@ -405,19 +408,8 @@ function AgentBlock({
          *  the user sees the upcoming-step list as soon as the
          *  orchestrator emits server.task.plan (or on tab re-open
          *  via tasks.detail hydration). */}
-        {task.planText && (
-          <PlanCard
-            planText={task.planText}
-            taskStatus={task.status}
-            {...(task.planStatus ? { planStatus: task.planStatus } : {})}
-            // Fold the plan card by default once the task has landed in
-            // a terminal state — at that point the result above and
-            // the step ticker below already cover what happened, and
-            // an expanded plan reads like a duplicate template log.
-            // Fold for all terminal statuses, including partial success.
-            defaultExpanded={!isTerminalStatus(task.status)}
-          />
-        )}
+        {/* FIX-57 复审 #3: no framed 「执行计划 0/2」 card — the plan sits, unframed, inside
+            the status line while running and under 「查看过程」 afterwards. */}
 
         {/* FIX-57 #3: one live status line while the task runs — what I am doing now,
             in plain words, with the elapsed time on long runs. It opens into the step
@@ -440,6 +432,7 @@ function AgentBlock({
             since={runStartedAt}
             timeline={timeline}
           >
+            {task.planText && <PlanNote text={task.planText} />}
             {thinking && <ThinkingBlock text={thinking} />}
             {webSearch && <WebSearchLine event={webSearch} terminal={terminal} />}
           </LiveStatusLine>
@@ -535,8 +528,20 @@ function AgentBlock({
             // re-run action; its 填入原描述 / copy stay as secondary).
             verificationBannerPresent={shouldShowVerificationBanner(task)}
             onSendSuggestion={onSendSuggestion}
+            hasProcess={
+              Boolean(task.planText) ||
+              timeline.length > 0 ||
+              Boolean(webSearch) ||
+              showTrustSummary ||
+              detailSteps.length > 0
+            }
             process={
               <>
+                {task.planText && (
+                  <ProcessSection title="计划">
+                    <PlanNote text={task.planText} />
+                  </ProcessSection>
+                )}
                 {timeline.length > 0 && (
                   <ProcessSection title="过程">
                     <Timeline lines={timeline} />
@@ -994,7 +999,18 @@ function AwaitingUserBanner({
   >(null);
   const kind = wait.awaitingKind ?? 'clarification';
   const copy = awaitingUserCopy(kind, wait.browserConnection);
-  const message = awaitingUserStreamMessage(kind, wait.question, wait.browserConnection);
+  const awaitingTask = useTaskStore((s) => s.tasks.find((t) => t.taskId === taskId));
+  const streamMessage = awaitingUserStreamMessage(kind, wait.question, wait.browserConnection);
+  // 复审 #3: a verification handover is one sentence — the site's name, where the browser is.
+  const message =
+    kind === 'captcha'
+      ? {
+          body: captchaRequestLine(
+            siteName(awaitingTask?.finalUrl ?? null, awaitingTask?.intent ?? ''),
+          ),
+          followUp: null,
+        }
+      : streamMessage;
   const [continuingPublic, setContinuingPublic] = React.useState(false);
   const Icon = AWAITING_KIND_ICON[kind] ?? AWAITING_KIND_ICON.clarification;
   const batchConfirm = wait.batchConfirm;
@@ -1454,6 +1470,18 @@ function stepDetailToneClass(tone: StepDetailSummary['tone']): string {
   if (tone === 'done') return 'border-[#42C0EF]/45 bg-[#42C0EF]/10 text-[#42C0EF]';
   if (tone === 'cancelled') return 'border-[#ADADAD]/55 bg-[#EFEFEF]/70 text-[#595757]';
   return 'border-[#DCDDDD] bg-white text-[#595757]';
+}
+
+/** FIX-57 复审 #3: the plan as plain text — its own heading dropped (no 「执行计划」 twice). */
+function PlanNote({ text }: { text: string }): JSX.Element {
+  const body = text
+    .replace(/^\s*#{1,6}\s*(?:执行计划|处理思路|计划)\s*\n+/u, '')
+    .replace(/^\s*\**(?:执行计划|处理思路)\**[:：]?\s*\n+/u, '');
+  return (
+    <div className="text-[13px] leading-6 text-muted-foreground">
+      <AwaitingMarkdown text={body} />
+    </div>
+  );
 }
 
 function ThinkingBlock({ text }: { text: string }): JSX.Element {
@@ -2151,6 +2179,7 @@ function TerminalSummary({
   verificationBannerPresent = false,
   onSendSuggestion,
   process,
+  hasProcess = false,
 }: {
   status: UiTask['status'];
   text: string;
@@ -2176,6 +2205,8 @@ function TerminalSummary({
   onSendSuggestion?: (intent: string) => void;
   /** FIX-57 #2: what 「查看过程」 opens (timeline, sources, checks, step cards). */
   process?: React.ReactNode;
+  /** 复审 #3: whether `process` has anything in it (else a plain line says so). */
+  hasProcess?: boolean;
   /**
    * Phase 4 R1 — downloadable artifacts from
    * `result.metadata.attachments[]`. Rendered as a row of
@@ -2407,7 +2438,11 @@ function TerminalSummary({
   const send = onSendSuggestion ?? onSuggestionPick;
   const productAttachments = attachments?.filter((a) => !isEvidenceAttachment(a)) ?? [];
   const evidenceAttachments = attachments?.filter((a) => isEvidenceAttachment(a)) ?? [];
-  const partial = status === 'partial_success' ? partialLead(revealed) : null;
+  // 复审 #3: the verifier's 「未核实：…」 note is folded into 「查看过程」.
+  const unverifiedSplit = splitUnverifiedNote(revealed);
+  const shownText = unverifiedSplit.body;
+  const links = answerLinks(displayText);
+  const partial = status === 'partial_success' ? partialLead(shownText) : null;
   const partialSaid = partial !== null && partial.lead !== null;
   const refund = isFailedLike ? refundStatusCopy(failureContext.context?.refund.state) : null;
   const failureDetail =
@@ -2444,7 +2479,7 @@ function TerminalSummary({
       {status === 'failed'
         ? null
         : (() => {
-            const body = partialSaid && partial ? partial.body : revealed;
+            const body = partialSaid && partial ? partial.body : shownText;
             const sanitized = sanitizeMarkdownTrailingPunctuation(sanitizeForRender(body));
             if (
               terminalResultContentInsufficient({
@@ -2595,6 +2630,35 @@ function TerminalSummary({
           </>
         }
       >
+        {links.length > 0 && (
+          <ProcessSection title="来源">
+            <ul className="m-0 list-none space-y-1 p-0 text-xs">
+              {links.map((link) => (
+                <li key={link.url} className="flex min-w-0 items-center gap-1.5">
+                  <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (needsExternalLinkConfirmation(link.url)) setPendingLink(link.url);
+                      else openExternalLink(link.url);
+                    }}
+                    className="min-w-0 truncate text-left text-[#1687B8] underline-offset-2 hover:underline"
+                    title={link.url}
+                  >
+                    {link.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </ProcessSection>
+        )}
+        {unverifiedSplit.unverified && (
+          <ProcessSection title="没能逐字核对的内容">
+            <p className="m-0 text-xs leading-5 text-muted-foreground">
+              {unverifiedSplit.unverified}
+            </p>
+          </ProcessSection>
+        )}
         {process}
         {hasRealUrl && (
           <ProcessSection title="结束页面">
@@ -2620,6 +2684,17 @@ function TerminalSummary({
             </div>
           </ProcessSection>
         )}
+        {links.length === 0 &&
+          !hasRealUrl &&
+          evidenceAttachments.length === 0 &&
+          !failureDetail &&
+          !refund &&
+          !unverifiedSplit.unverified &&
+          !hasProcess && (
+            <p className="m-0 text-xs leading-5 text-muted-foreground">
+              这次是直接联网检索后整理的，没有打开网页操作，也没有更多过程可看。
+            </p>
+          )}
         {(failureDetail || refund) && (
           <ProcessSection title="失败详情">
             {failureDetail && (

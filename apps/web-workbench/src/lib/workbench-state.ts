@@ -148,10 +148,17 @@ export function mobileBrowserSheetAutoOpenState(input: {
   mode: SidePanelMode;
   isMobile: boolean;
   autoOpenedKey: string | null;
+  /**
+   * FIX-57 复审 #3 (BOSS run, ~630px): on a narrow screen the browser sheet covered the
+   * conversation for the whole run. It opens by itself only when the person must act
+   * (a verification or login handover); otherwise they open it when they want to watch.
+   */
+  needsUser?: boolean;
 }): { shouldOpen: boolean; autoOpenedKey: string | null } {
   if (
     !input.isMobile ||
     !input.taskId ||
+    input.needsUser === false ||
     (input.mode !== 'browser-live' && input.mode !== 'browser-record')
   ) {
     return { shouldOpen: false, autoOpenedKey: input.autoOpenedKey };
