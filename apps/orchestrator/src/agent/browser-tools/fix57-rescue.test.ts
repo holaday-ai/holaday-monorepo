@@ -115,11 +115,14 @@ describe('FIX-57 #5 · a login wall on a read task: another public route first',
   it('at most 2 sites outside the named one', async () => {
     const { seen, opened } = await run(JD, [
       { name: 'navigate', input: { url: 'https://item.jd.com/100142621606.html' } },
+      { name: 'navigate', input: { url: 'https://cn.bing.com/search?q=100142621606' } },
       { name: 'navigate', input: { url: 'https://www.smzdm.com/' } },
       { name: 'navigate', input: { url: 'https://www.manmanbuy.com/' } },
       { name: 'navigate', input: { url: 'https://www.example-third.com/' } },
       { name: 'finish', input: { status: 'failed', summary: '公开来源都没有价格' } },
     ]);
+    // The search page found the routes; it is not one of the two.
+    expect(opened).toContain('https://cn.bing.com/search?q=100142621606');
     expect(opened).toContain('https://www.manmanbuy.com/');
     expect(opened).not.toContain('https://www.example-third.com/');
     expect(seen).toContain('不要换到 example-third.com');
