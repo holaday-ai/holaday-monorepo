@@ -310,13 +310,22 @@ export function failureTurn(input: {
       }
     : null;
   const retry: TurnOption | null = input.canRetry ? { kind: 'retry', label: '再试一次' } : null;
+  // FIX-57 #5: the run already routed around the wall (another source, a search) — say so,
+  // and do not offer the same again.
+  const triedElsewhere =
+    /替代(?:来源|路线|渠道)|换(?:了|个|一个)?(?:公开)?(?:来源|渠道|网站)|尝试.{0,16}搜索|搜索.{0,30}均无|均无(?:返回)?结果|比价网站.{0,10}(?:都|也)?(?:没有|无)/.test(
+      input.errorText,
+    );
+  const tried = triedElsewhere ? '我已经换公开来源（搜索、比价站）找过，也没找到。' : '';
+  const others = triedElsewhere ? null : publicSource;
   const title = friendly.title;
-  if (/登录/.test(title)) {
+  // A risk-control block reads like a wall to the person: same words, same ways on.
+  if (/登录/.test(title) || /风控|拦截|拦下/.test(input.errorText)) {
     return {
       lead,
       why: /风控|拦截|拦下|403|异常提示/.test(input.errorText)
-        ? `${site ?? '这个网站'}把页面拦下了，要登录或验证后才显示内容；我不能替你登录，也不会绕过它。`
-        : `${site ?? '这个网站'}要登录才能看到这部分内容，我不能替你登录，也不会绕过它。`,
+        ? `${site ?? '这个网站'}把页面拦下了，要登录或验证后才显示内容；我不能替你登录，也不会绕过它。${tried}`
+        : `${site ?? '这个网站'}要登录才能看到这部分内容，我不能替你登录，也不会绕过它。${tried}`,
       options: [
         intent
           ? {
@@ -325,14 +334,14 @@ export function failureTurn(input: {
               prompt: `我会在浏览器里自己登录${site ?? '这个网站'}。请重新打开刚才的页面，遇到登录页就暂停，等我登录好再继续：${intent}`,
             }
           : null,
-        publicSource,
+        others,
       ].filter((o): o is TurnOption => Boolean(o)),
     };
   }
   if (/验证/.test(title)) {
     return {
       lead,
-      why: `${site ?? '网站'}要求做人机验证，这一步只能由你本人完成，我不会代做。`,
+      why: `${site ?? '网站'}要求做人机验证，这一步只能由你本人完成，我不会代做。${tried}`,
       options: [
         intent
           ? {
@@ -341,15 +350,15 @@ export function failureTurn(input: {
               prompt: `重新执行：${intent}。遇到人机验证就暂停，等我自己完成验证后再继续。`,
             }
           : null,
-        publicSource,
+        others,
       ].filter((o): o is TurnOption => Boolean(o)),
     };
   }
   if (/超时|响应|连接|打开这个网站|浏览器|页面正在切换|休眠|中断|长时间/.test(title)) {
     return {
       lead,
-      why: `${site ?? '网站'}这次没有正常响应（${title}），不是你的问题。`,
-      options: [retry, publicSource].filter((o): o is TurnOption => Boolean(o)),
+      why: `${site ?? '网站'}这次没有正常响应（${title}），不是你的问题。${tried}`,
+      options: [retry, others].filter((o): o is TurnOption => Boolean(o)),
     };
   }
   return {

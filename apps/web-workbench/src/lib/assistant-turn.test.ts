@@ -127,6 +127,18 @@ describe('FIX-57 #5 · a failed run as an assistant message', () => {
       expect(text).not.toMatch(/https?:|结构性|自动审核|证据边界|任务未完成，结果不能/);
   });
 
+  it('a run that already tried other sources says so and does not offer them again', () => {
+    const turn = failureTurn({
+      status: 'failed',
+      errorText:
+        '任务执行失败：无法获取该商品信息。被京东风控拦截。尝试通过联网搜索搜索「京东 100142621606」等多种关键词，均无返回结果，未能找到替代来源。',
+      intent: '打开 https://item.jd.com/1.html 读商品标题和价格',
+      canRetry: true,
+    });
+    expect(turn.why).toContain('我已经换公开来源（搜索、比价站）找过，也没找到。');
+    expect(turn.options.map((o) => o.label)).toEqual(['你在浏览器里登录京东，我接着帮你看']);
+  });
+
   it('a captcha: only the person does it', () => {
     const turn = failureTurn({
       status: 'failed',

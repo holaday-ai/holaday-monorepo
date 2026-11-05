@@ -2913,7 +2913,7 @@ export const RESCUE_STATUS = {
 } as const;
 /** FIX-57 #5: a failed answer about a blocked, broken or empty page (not a refusal). */
 export const RESCUE_GIVE_UP_RE =
-  /登录|拦截|拦下|风控|验证|403|404|5\d\d|无法(?:访问|打开|加载|读取|获取|展示|显示)|打不开|超时|加载失败|没有(?:显示|展示|加载)|未(?:显示|展示|加载)|暂时无法|异常|空白|blocked|denied|forbidden|time(?:d\s*)?out|not\s+(?:available|found|load)|unavailable/i;
+  /登录|拦截|拦下|风控|验证|403|404|429|5\d\d|请求过多|访问受限|限流|无法(?:访问|打开|加载|读取|获取|展示|显示|正常)|打不开|超时|加载(?:失败|不出)|没有(?:显示|展示|加载)|未能?(?:显示|展示|加载|打开|读取|访问)|暂时无法|异常|空白|blocked|denied|forbidden|too\s+many\s+requests|rate.?limit|time(?:d\s*)?out|not\s+(?:available|found|load)|unavailable/i;
 
 /** FAILURE-COPY-1: the task ended before opening any page — not a login question. */
 export const NOT_STARTED = '执行未开始：浏览器还没有打开目标页面就结束了。请重试。';

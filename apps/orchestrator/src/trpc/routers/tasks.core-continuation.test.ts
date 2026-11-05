@@ -197,7 +197,7 @@ function fixture(options: { suggestions?: boolean; plan?: boolean; generatedText
               text:
                 body.max_tokens === 512
                   ? '{"steps":[{"text":"整理材料","tool":"文件处理"},{"text":"归纳结果","tool":"生成内容"}],"estimatedSeconds":6}'
-                  : body.max_tokens === 200
+                  : body.max_tokens === 700
                     ? '["发送邮件给所有人","整理后续会议清单"]'
                     : '{"status":"pass","issues":[]}',
             },
@@ -831,7 +831,9 @@ describe('real reply core routing and execution', () => {
     expect(f.requests).toHaveLength(3);
     expect(JSON.stringify(f.requests.at(-1)?.body)).toContain('不要发送邮件');
     const op = f.settlements[0];
-    expect(f.suggestionWrites).toHaveBeenCalledWith(op, ['整理后续会议清单']);
+    expect(f.suggestionWrites).toHaveBeenCalledWith(op, [
+      { label: '整理后续会议清单', prompt: '整理后续会议清单' },
+    ]);
     const frame = f.frames.find((frame) => frame.type === 'server.supercar.suggestions');
     expect(serverMessageSchema.parse(frame)).toMatchObject({
       executionId: op?.executionId,
@@ -1032,13 +1034,13 @@ describe('real task route durable ownership', () => {
         vi.stubGlobal('fetch', async (...args: Parameters<typeof fetch>) => {
           const response = await originalFetch(...args);
           const body = JSON.parse(String(args[1]?.body));
-          if (body.max_tokens === (lane === 'plan' ? 512 : 200)) await held;
+          if (body.max_tokens === (lane === 'plan' ? 512 : 700)) await held;
           return response;
         });
         await (lane === 'plan' ? f.createDirect() : f.reply());
         await vi.advanceTimersByTimeAsync(0);
         close();
-        await vi.advanceTimersByTimeAsync(lane === 'plan' ? 15001 : 4001);
+        await vi.advanceTimersByTimeAsync(lane === 'plan' ? 15001 : 15_001);
         const pending = controller.drain.snapshot();
         const terminalCount = f.frames.filter(
           (frame) => frame.type === 'server.task.terminal',

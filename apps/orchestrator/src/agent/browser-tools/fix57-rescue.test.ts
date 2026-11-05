@@ -219,6 +219,9 @@ describe('FIX-57 #5 · never routed around', () => {
     ])
       expect(WRITE_INTENT_RE.test(w)).toBe(true);
     expect(RESCUE_GIVE_UP_RE.test('页面被拦截')).toBe(true);
+    expect(RESCUE_GIVE_UP_RE.test('Instagram 返回 HTTP 429（请求过多），未能加载账号主页')).toBe(
+      true,
+    );
     expect(RESCUE_GIVE_UP_RE.test('型号不存在')).toBe(false);
   });
 });
