@@ -29,7 +29,7 @@ import { assertCoreTaskInput } from '../../agent/core-task-input.js';
 import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
 import { readCoreTaskRecord } from '../../agent/core-task-record.js';
 import type { CoreAcceptedRequirements } from '../../agent/core-task-requirements.js';
-import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
+import { nextStepsFrame, publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import {
   extractRunnableDirectOpenUrl,
   runDirectOpen,
@@ -52,6 +52,7 @@ import { withMediaCallContext } from '../../agent/media-call-recorder.js';
 // would otherwise label it "已完成" because the runner respected the
 // agent's terminal decision.
 import { detectNavFailure } from '../../agent/nav-failure-detector.js';
+import { generateNextSteps } from '../../agent/next-steps-generator.js';
 import { isExplicitPlanApproval, isPurePlanHold } from '../../agent/plan-mode.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
@@ -65,7 +66,6 @@ import {
   searchResultsSatisfy,
 } from '../../agent/search-result-requirement.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
-import { generateSuggestions } from '../../agent/suggestions-generator.js';
 import { resolveSuggestionsProviderRoute } from '../../agent/suggestions-provider.js';
 import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
 import { CAPTCHA_HANDOFF_MS, captchaHandoffs } from '../../agent/supercar/captcha-handoff.js';
@@ -4453,13 +4453,14 @@ export const tasksRouter = router({
                         intent: effectiveIntent,
                         summary,
                         isCurrent: () => repo.isCurrentCompletedOutcome(taskId, summary),
+                        recentIntents: () => repo.recentIntents(taskId),
                         persist: (suggestions) =>
                           repo.persistCurrentCompletedSuggestions(taskId, summary, suggestions),
                         publish: (suggestions) =>
                           broadcastToUser(ctx.userId, {
                             type: 'server.supercar.suggestions',
                             taskId,
-                            suggestions,
+                            ...nextStepsFrame(suggestions),
                           }),
                       }),
                     );
@@ -5256,13 +5257,14 @@ export const tasksRouter = router({
                         intent: effectiveIntent,
                         summary,
                         isCurrent: () => repo.isCurrentCompletedOutcome(taskId, summary),
+                        recentIntents: () => repo.recentIntents(taskId),
                         persist: (suggestions) =>
                           repo.persistCurrentCompletedSuggestions(taskId, summary, suggestions),
                         publish: (suggestions) =>
                           broadcastToUser(ctx.userId, {
                             type: 'server.supercar.suggestions',
                             taskId,
-                            suggestions,
+                            ...nextStepsFrame(suggestions),
                           }),
                       }),
                     );
@@ -8028,10 +8030,34 @@ export const tasksRouter = router({
                       // Cross-task memory extraction is paused until it has a dedicated
                       // Qwen implementation. Existing memories stay readable; production
                       // must not fall back to the dormant Anthropic extractor.
-                      if (terminalPersisted && outcome.status === 'completed' && outcome.summary) {
-                        // Post-task suggestions are Qwen-only. The shared runtime enforces
-                        // rollout, lane, persisted region and region-local credentials
-                        // before constructing a transport. There is no legacy fallback.
+                      // FIX-57 #4: next steps after every terminal browser outcome — a partial or
+                      // failed one leads with the step that fills the gap. Qwen-only, as before:
+                      // the shared runtime enforces rollout, lane, region and credentials.
+                      const nextStepsOutcome =
+                        supercarTerminalStatus === 'completed'
+                          ? ('completed' as const)
+                          : supercarTerminalStatus === 'partial_success'
+                            ? ('partial' as const)
+                            : supercarTerminalStatus === 'failed'
+                              ? ('failed' as const)
+                              : null;
+                      const nextStepsReason =
+                        'reason' in outcome && typeof outcome.reason === 'string'
+                          ? outcome.reason
+                          : null;
+                      const nextStepsSummary =
+                        outcome.status === 'completed'
+                          ? (outcome.summary ?? '')
+                          : (nextStepsReason ?? supercarFailureSummary ?? '');
+                      if (
+                        runTerminalSideEffects &&
+                        nextStepsOutcome &&
+                        nextStepsSummary.trim() &&
+                        (supercarTerminalStatus === 'completed' ||
+                          supercarTerminalStatus === 'partial_success' ||
+                          supercarTerminalStatus === 'failed')
+                      ) {
+                        const nextStepsStatus = supercarTerminalStatus;
                         let suggestionsRoute: ReturnType<
                           typeof resolveSuggestionsProviderRoute
                         > | null = null;
@@ -8064,32 +8090,43 @@ export const tasksRouter = router({
                               region: messagesAdapter.metadata.region,
                               deploymentScope: messagesAdapter.metadata.deploymentScope,
                               endpointKind: messagesAdapter.metadata.endpointKind,
+                              outcome: nextStepsOutcome,
                             },
                             'suggestions: Qwen selected',
                           );
-                          const completedSummary = outcome.summary;
-                          void runTaskBackground(ctx, async (ctx) =>
-                            generateSuggestions({
-                              messagesAdapter,
-                              intent: input.intent,
-                              summary: completedSummary,
-                            })
-                              .then((suggestions) => {
-                                if (suggestions.length === 0) return;
-                                try {
-                                  broadcastToUser(userId, {
-                                    type: 'server.supercar.suggestions',
-                                    taskId,
-                                    suggestions,
-                                  });
-                                } catch (err) {
-                                  ctx.logger.warn({ err, taskId }, 'suggestions: broadcast failed');
-                                }
-                              })
-                              .catch((err) =>
-                                ctx.logger.warn({ err, taskId }, 'suggestions: generate crashed'),
-                              ),
-                          );
+                          const nextStepsRepo = new TaskRepository(ctx.db, ctx.taskOrigin);
+                          const missing =
+                            outcome.status === 'completed'
+                              ? ((outcome.partial as { missing?: string } | undefined)?.missing ??
+                                null)
+                              : nextStepsSummary;
+                          void runTaskBackground(ctx, async (ctx) => {
+                            try {
+                              const recentIntents = await nextStepsRepo
+                                .recentIntents(taskId)
+                                .catch(() => []);
+                              const steps = await generateNextSteps({
+                                messagesAdapter,
+                                intent: input.intent,
+                                outcome: nextStepsOutcome,
+                                summary: nextStepsSummary,
+                                missing,
+                                recentIntents,
+                              });
+                              if (steps.length === 0) return;
+                              const persisted = await nextStepsRepo
+                                .persistTerminalNextSteps(taskId, nextStepsStatus, steps)
+                                .catch(() => false);
+                              if (!persisted) return;
+                              broadcastToUser(userId, {
+                                type: 'server.supercar.suggestions',
+                                taskId,
+                                ...nextStepsFrame(steps),
+                              });
+                            } catch (err) {
+                              ctx.logger.warn({ err, taskId }, 'suggestions: generate crashed');
+                            }
+                          });
                         }
                       }
                     })
@@ -11240,13 +11277,14 @@ export const tasksRouter = router({
                       intent: combinedIntent,
                       summary,
                       isCurrent: () => repo.isCurrentCompletedOutcome(input.taskId, summary),
+                      recentIntents: () => repo.recentIntents(input.taskId),
                       persist: (suggestions) =>
                         repo.persistCurrentCompletedSuggestions(input.taskId, summary, suggestions),
                       publish: (suggestions) =>
                         broadcastToUser(ctx.userId, {
                           type: 'server.supercar.suggestions',
                           taskId: input.taskId,
-                          suggestions,
+                          ...nextStepsFrame(suggestions),
                         }),
                     }),
                   );

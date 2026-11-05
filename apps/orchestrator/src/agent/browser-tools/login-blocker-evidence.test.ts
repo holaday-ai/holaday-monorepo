@@ -16,6 +16,8 @@ it('persists the sanitized wall source as a host-owned execution step before han
   const taskId = 'login-evidence';
   const ticks: SupercarTickEvent[] = [];
   const running = runUnifiedSupercarTask({
+    // FIX-57: this tests the handover itself (as after a rescue is used up).
+    browserRescue: false,
     taskId,
     userExternalId: 'owner',
     intent: 'Read public data',

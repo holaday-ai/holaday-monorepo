@@ -868,6 +868,14 @@ export const serverSupercarSuggestionsSchema = z.object({
   type: z.literal('server.supercar.suggestions'),
   taskId: z.string(),
   suggestions: z.array(z.string()).max(5),
+  /**
+   * FIX-57 #4: the same steps as offered to the person (assistant voice) with the
+   * instruction each one sends; `suggestions` carries the instructions for older clients.
+   */
+  nextSteps: z
+    .array(z.object({ label: z.string(), prompt: z.string() }))
+    .max(3)
+    .optional(),
 });
 
 export const serverSupercarThinkingSchema = z.object({

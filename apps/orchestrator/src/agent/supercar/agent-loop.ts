@@ -767,6 +767,11 @@ export interface RunSupercarOptions {
    */
   searchWallReplaceable?: (url: string) => boolean;
   /**
+   * FIX-57 #5 (unified runner): a read task stopped by a login wall first tries other
+   * public routes before the handover. Default on; tests of the park itself turn it off.
+   */
+  browserRescue?: boolean;
+  /**
    * CAPTCHA-REDUCE-1: restore and save this user's persistent browser profile
    * (anonymous cloud sessions only; off unless the profile store is configured).
    */

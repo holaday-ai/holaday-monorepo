@@ -106,7 +106,9 @@ describe('core admission database boundary', () => {
           () =>
             kind === 'plan'
               ? repo.persistAdvisoryPlan(operation(), '合成计划')
-              : repo.persistSuggestions(settlementOperation('completed'), ['整理后续执行清单']),
+              : repo.persistSuggestions(settlementOperation('completed'), [
+                  { label: '整理后续执行清单', prompt: '整理后续执行清单' },
+                ]),
           { errorOutcome: 'known', dispatch: 'immediate' },
         );
         expect(await owned.result).toBe(false);
@@ -128,7 +130,9 @@ describe('core admission database boundary', () => {
         () =>
           kind === 'plan'
             ? repo.persistAdvisoryPlan(operation(), '合成计划')
-            : repo.persistSuggestions(settlementOperation('completed'), ['整理后续执行清单']),
+            : repo.persistSuggestions(settlementOperation('completed'), [
+                { label: '整理后续执行清单', prompt: '整理后续执行清单' },
+              ]),
         { errorOutcome: 'known', dispatch: 'immediate' },
       );
       expect(await owned.result).toBe(false);
@@ -149,7 +153,9 @@ describe('core admission database boundary', () => {
         () =>
           kind === 'plan'
             ? repo.persistAdvisoryPlan(operation(), '合成计划')
-            : repo.persistSuggestions(settlementOperation('completed'), ['整理后续执行清单']),
+            : repo.persistSuggestions(settlementOperation('completed'), [
+                { label: '整理后续执行清单', prompt: '整理后续执行清单' },
+              ]),
         { errorOutcome: 'known', dispatch: 'immediate' },
       );
       expect(await owned.result).toBe(false);
@@ -203,7 +209,11 @@ describe('core admission database boundary', () => {
       },
     });
     const { repo, queries } = fixture();
-    expect(await repo.persistSuggestions(op, ['整理后续执行清单'])).toBe(true);
+    expect(
+      await repo.persistSuggestions(op, [
+        { label: '整理后续执行清单', prompt: '整理后续执行清单' },
+      ]),
+    ).toBe(true);
     const patch = queries.find((query) => query.sql.startsWith('update'));
     expect(patch?.sql).toContain('`execution_revision` = ?');
     expect(patch?.sql).toContain('`core_record_version` = ?');

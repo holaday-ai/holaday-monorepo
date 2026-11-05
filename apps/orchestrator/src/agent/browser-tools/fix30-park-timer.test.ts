@@ -53,6 +53,8 @@ function run(taskId: string, replyAfterMs: number | null) {
     try {
       const started = Date.now();
       const outcome = await runUnifiedSupercarTask({
+        // FIX-57: this tests the handover itself (as after a rescue is used up).
+        browserRescue: false,
         taskId,
         userExternalId: 'synthetic-owner',
         intent: '请使用云端浏览器，打开 https://fixture.test/article 读标题',

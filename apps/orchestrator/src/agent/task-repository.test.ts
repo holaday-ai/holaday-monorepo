@@ -37,16 +37,19 @@ describe('persistCurrentCompletedSuggestions', () => {
       const saved = await new TaskRepository(db).persistCurrentCompletedSuggestions(
         'tsk_fixture',
         'original summary',
-        ['完善执行方案'],
+        [{ label: '完善执行方案', prompt: '完善执行方案' }],
       );
       expect(saved).toBe(affectedRows === 1);
       expect(Object.keys(captured.taskUpdate!)).toEqual(['result']);
       const dialect = new MySqlDialect();
       const patch = dialect.sqlToQuery(captured.taskUpdate!.result as SQL);
       expect(patch.sql).toBe(
-        "JSON_SET(`tasks`.`result`, '$.followUpSuggestions', CAST(? AS JSON))",
+        "JSON_SET(`tasks`.`result`, '$.followUpSuggestions', CAST(? AS JSON), '$.nextSteps', CAST(? AS JSON))",
       );
-      expect(patch.params).toEqual(['["完善执行方案"]']);
+      expect(patch.params).toEqual([
+        '["完善执行方案"]',
+        '[{"label":"完善执行方案","prompt":"完善执行方案"}]',
+      ]);
       const guard = dialect.sqlToQuery(captured.whereClauses[0] as SQL);
       expect(guard.sql).toBe(
         "(`tasks`.`external_id` = ? and `tasks`.`status` = ? and JSON_UNQUOTE(JSON_EXTRACT(`tasks`.`result`, '$.summary')) = ?)",
@@ -56,8 +59,8 @@ describe('persistCurrentCompletedSuggestions', () => {
     },
   );
   it.each(
-    [[], ['x'], ['x'.repeat(41)], ['合成建议', '合成建议', '合成建议', '合成建议']].map(
-      (items) => ({ items }),
+    [[], ['x'], ['x'.repeat(49)], ['合成建议', '合成建议', '合成建议', '合成建议']].map(
+      (labels) => ({ items: labels.map((label) => ({ label, prompt: label })) }),
     ),
   )('rejects invalid suggestion payloads without writing ($items)', async ({ items }) => {
     const { db, captured } = fakeDbWithAffectedRows(1);

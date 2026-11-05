@@ -313,6 +313,13 @@ export interface UnifiedBrowserLoopInput {
   modelRetry?: Pick<ModelRetryOptions, 'delaysMs' | 'sleep'>;
   onStep?: (step: { index: number; tool: string; ok: boolean }) => void;
   /**
+   * FIX-57 #5: a read task stopped by a wall first tries other public routes (the
+   * supercar runner turns this on; off, a wall is handed over at once).
+   */
+  rescue?: boolean;
+  /** FIX-57 #5: the run starts routing around a wall (a live status line for the user). */
+  onRescue?: (message: string) => void | Promise<void>;
+  /**
    * Called before every browser action and again after a successful one
    * (`after`: the landed page). Irreversible actions park here for the user's
    * confirmation; absent → no gate.
@@ -798,6 +805,44 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
    * to leave it, and no wall in this task is handed to the user again.
    */
   let captchaDeclined = false;
+  /**
+   * FIX-57 #5: a read task stopped by a login / permission wall, or about to give up on a
+   * blocked or broken page, first tries other public routes — once per task, at most
+   * RESCUE_SITES new sites, inside the step limit. Nothing is typed into a wall and no
+   * captcha is touched; an answer from elsewhere names its source (the source-domain
+   * check still delivers it as 部分完成). A wall met again after that is handed over.
+   */
+  const rescueEligible =
+    input.rescue === true && !wantsForm && !WRITE_INTENT_RE.test(input.userIntent ?? input.intent);
+  let rescueStarted = false;
+  /** The walled page the rescue began on; a wall on another page is a new one. */
+  let rescueWallUrl: string | undefined;
+  let rescueWallSite: string | undefined;
+  const onRescueWall = () => rescueStarted && input.currentPageUrl?.() === rescueWallUrl;
+  const rescueSites = new Set<string>();
+  const startRescue = async (step: number, why: string): Promise<string | null> => {
+    if (!rescueEligible || rescueStarted || captchaDeclined || step + 4 >= maxSteps) return null;
+    rescueStarted = true;
+    rescueWallUrl = input.currentPageUrl?.();
+    const host = hostOf(rescueWallUrl);
+    rescueWallSite = host ? (siteOf(host) ?? host) : undefined;
+    await Promise.resolve(input.onRescue?.(RESCUE_STATUS[why === 'wall' ? 'wall' : 'stuck'])).catch(
+      () => undefined,
+    );
+    return `${why === 'wall' ? '这个页面要登录或被网站拦下了。' : '先别结束。'}${RESCUE_NOTE}`;
+  };
+  /** During a rescue the run may open up to RESCUE_SITES sites outside the named one. */
+  const rescueAllows = (url: string | undefined): boolean => {
+    if (!rescueStarted) return false;
+    const host = hostOf(url);
+    if (!host) return false;
+    const site = siteOf(host) ?? host;
+    if (site === rescueWallSite) return false;
+    if (rescueSites.has(site)) return true;
+    if (rescueSites.size >= RESCUE_SITES) return false;
+    rescueSites.add(site);
+    return true;
+  };
   /** FIX-53 #1: only a wait the person acted in lets an answer say they cleared the wall. */
   let userClearedWall = false;
   let userClaimAsked = false;
@@ -825,8 +870,16 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
       // post-action probe) and the login wall seen here each turn was never handed over.
       // Only a login or permission wall: "page_unreadable" (a page still loading behind a
       // search) is not a wall (coordinator review D1).
-      if (wall && (wall.reason === 'login' || wall.reason === 'permission'))
-        return { status: 'awaiting_user', ...wall, steps: step };
+      if (wall && (wall.reason === 'login' || wall.reason === 'permission')) {
+        // FIX-57 #5: the page the rescue began on is still the wall — the model moves first.
+        if (onRescueWall()) {
+          // fall through to the model turn
+        } else {
+          const note = await startRescue(step, 'wall');
+          if (!note) return { status: 'awaiting_user', ...wall, steps: step };
+          messages.push({ role: 'user', content: note });
+        }
+      }
       if (wall?.reason === 'captcha') {
         const handed = await handCaptcha(wall.message);
         if (handed === undefined) return { status: 'awaiting_user', ...wall, steps: step };
@@ -1047,6 +1100,19 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           if (blocker) {
             const handed =
               blocker.reason === 'captcha' ? await handCaptcha(blocker.message) : undefined;
+            const routed =
+              handed === undefined &&
+              (blocker.reason === 'login' || blocker.reason === 'permission');
+            const note = !routed
+              ? null
+              : onRescueWall()
+                ? `答案来自被挡住的页面，不能交付。${RESCUE_NOTE}`
+                : await startRescue(step, 'wall');
+            if (note) {
+              results.push(toolResult(call.id, note, true));
+              staleTurn = true;
+              continue;
+            }
             if (handed === undefined)
               return { status: 'awaiting_user', ...blocker, steps: step + 1 };
             if (handed === 'ended')
@@ -1982,6 +2048,15 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         // FIX-35 复审 #1: a remediation (the 0b screenshot look, the date control) that ends
         // in a failed finish still delivers the answer it held.
         if (partialHeld) return { status: 'completed', ...partialHeld, steps: step + 1 };
+        // FIX-57 #5: giving up on a blocked, broken or empty page — try another public route once.
+        if (!notStarted() && RESCUE_GIVE_UP_RE.test(summary)) {
+          const note = await startRescue(step, 'stuck');
+          if (note) {
+            results.push(toolResult(call.id, note, true));
+            staleTurn = true;
+            continue;
+          }
+        }
         // A failed navigation cannot establish a login wall, even if the model guesses one.
         return {
           status: 'failed',
@@ -2007,6 +2082,15 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             steps: step + 1,
           };
         const message = typeof args.message === 'string' ? args.message : '需要你接管浏览器。';
+        // FIX-57 #5: a login / permission stop on a read task first tries another public route.
+        if (reason === 'login' || reason === 'permission') {
+          const note = await startRescue(step, 'wall');
+          if (note) {
+            results.push(toolResult(call.id, note, true));
+            staleTurn = true;
+            continue;
+          }
+        }
         if (!input.requestHuman)
           return { status: 'awaiting_user', reason, message, steps: step + 1 };
         const handed = reason === 'captcha' ? await handCaptcha(message) : undefined;
@@ -2134,7 +2218,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         lockedDomains.length > 0 &&
         !onDomains(action.url, lockedDomains) &&
         !seenOnReadPage(action.url) &&
-        !(input.localFixtures && localTestHost(action.url))
+        !(input.localFixtures && localTestHost(action.url)) &&
+        !rescueAllows(action.url)
       ) {
         results.push(
           toolResult(
@@ -2313,6 +2398,18 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         if (blocker) {
           const handed =
             blocker.reason === 'captcha' ? await handCaptcha(blocker.message) : undefined;
+          const routed =
+            handed === undefined && (blocker.reason === 'login' || blocker.reason === 'permission');
+          const note = !routed
+            ? null
+            : onRescueWall()
+              ? `仍是被挡住的页面。${RESCUE_NOTE}`
+              : await startRescue(step, 'wall');
+          if (note) {
+            results.push(toolResult(call.id, `${outcome.text}\n${note}`));
+            staleTurn = true;
+            continue;
+          }
           if (handed === undefined) return { status: 'awaiting_user', ...blocker, steps: step + 1 };
           if (handed === 'ended')
             return { status: 'failed', reason: '验证码等待已结束，任务未完成。', steps: step + 1 };
@@ -2797,6 +2894,26 @@ function onDomains(url: string | undefined, domains: readonly string[]): boolean
   const host = hostOf(url);
   return !!host && domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
 }
+
+/**
+ * FIX-57 #5: tasks that change something, ask to log in, or want the person's own account
+ * data (another public site cannot show their orders) are never routed around.
+ */
+export const WRITE_INTENT_RE =
+  /订单|我的|账户|账号|个人中心|私信|消息通知|收藏夹|购物车|余额|积分|后台|收件箱|inbox|my\s+(?:orders?|account|cart)|提交|下单|购买|加购|加入购物车|付款|支付|结账|发送|发布|发帖|评论|回复|点赞|关注|登录|登陆|注册|预订|预约|报名|投递|填表|填写|表单|上传|删除|修改|取消订单|退款|submit|checkout|purchase|add\s+to\s+cart|log\s*in|sign\s*(?:in|up)|register|\bpost\b|\bsend\b|\bbook\b|upload|delete/i;
+/** FIX-57 #5: at most this many sites besides the walled one during a rescue. */
+export const RESCUE_SITES = 2;
+/** FIX-57 #5: what the model is told when a read task is stopped. */
+export const RESCUE_NOTE =
+  '不要登录，不要做验证，不要在登录或验证框里输入任何东西；也不要再打开被挡住的那个页面或用只读抓取去取它。换一条不需要登录的公开路线拿同类信息：同一网站的搜索页或列表页、比价网站、品牌官网或其他公开页面都可以，最多再换 2 个网站（可先 web_search 找路线）。拿到了就照常 finish，并在答案开头写明信息来自哪个网站、和原来要看的页面不同；页面数据不是最新的就写明是哪个时间点的数据。两条路线都拿不到，就 finish(status=failed)，写清拿到了什么、缺什么、卡在哪一步。';
+/** FIX-57 #5: the live status line shown while the run routes around a wall. */
+export const RESCUE_STATUS = {
+  wall: '页面要登录或被拦下了，换个公开来源试试…',
+  stuck: '这条路没走通，换个公开来源再试一次…',
+} as const;
+/** FIX-57 #5: a failed answer about a blocked, broken or empty page (not a refusal). */
+export const RESCUE_GIVE_UP_RE =
+  /登录|拦截|拦下|风控|验证|403|404|5\d\d|无法(?:访问|打开|加载|读取|获取|展示|显示)|打不开|超时|加载失败|没有(?:显示|展示|加载)|未(?:显示|展示|加载)|暂时无法|异常|空白|blocked|denied|forbidden|time(?:d\s*)?out|not\s+(?:available|found|load)|unavailable/i;
 
 /** FAILURE-COPY-1: the task ended before opening any page — not a login question. */
 export const NOT_STARTED = '执行未开始：浏览器还没有打开目标页面就结束了。请重试。';

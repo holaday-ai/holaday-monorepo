@@ -2,10 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { env } from '../config/env.js';
 import { createProductionModelRuntimeWiring } from '../llm/model-runtime-wiring.js';
 import { publishCoreTaskSuggestions } from './core-task-suggestions.js';
+import type { NextStep } from './next-steps-generator.js';
+
+const steps = (...labels: string[]): NextStep[] =>
+  labels.map((label) => ({ label, prompt: label }));
 
 function fixture(options: { allowed?: boolean; output?: string; failed?: boolean } = {}) {
   const calls: Array<{ region: string; request: unknown; options: unknown }> = [];
-  const frames: string[][] = [];
+  const frames: NextStep[][] = [];
   const wiring = createProductionModelRuntimeWiring(
     {
       ...env,
@@ -68,8 +72,8 @@ function fixture(options: { allowed?: boolean; output?: string; failed?: boolean
       intent: '整理提供的材料，归纳关键事实并输出一份简洁提纲。',
       summary: '合成材料的主要事实及待确认事项。',
       isCurrent: vi.fn(async () => true),
-      persist: vi.fn(async (_items: string[]) => true),
-      publish: (items: string[]) => {
+      persist: vi.fn(async (_items: NextStep[]) => true),
+      publish: (items: NextStep[]) => {
         frames.push(items);
       },
     },
@@ -80,10 +84,10 @@ describe('core follow-up suggestions boundary', () => {
   it('persists the same suggestions before delivering the live frame', async () => {
     const f = fixture();
     const events: string[] = [];
-    const saved: string[][] = [];
+    const saved: NextStep[][] = [];
     await publishCoreTaskSuggestions({
       ...f.input,
-      persist: async (items: string[]) => {
+      persist: async (items: NextStep[]) => {
         saved.push(items);
         events.push('persist');
         return true;
@@ -92,7 +96,7 @@ describe('core follow-up suggestions boundary', () => {
         events.push('publish');
       },
     });
-    expect(saved).toEqual([['整理后续执行清单', '比较两种材料结构']]);
+    expect(saved).toEqual([steps('整理后续执行清单', '比较两种材料结构')]);
     expect(events).toEqual(['persist', 'publish']);
   });
   it.each(['stale', 'failed'])(
@@ -117,9 +121,9 @@ describe('core follow-up suggestions boundary', () => {
       expect(f.calls).toHaveLength(1);
       expect(f.calls[0]).toMatchObject({
         region: modelDataRegion,
-        options: { timeoutMs: 4000, maxRetries: 0 },
+        options: { timeoutMs: 8000, maxRetries: 0 },
       });
-      expect(f.frames).toEqual([['整理后续执行清单', '比较两种材料结构']]);
+      expect(f.frames).toEqual([steps('整理后续执行清单', '比较两种材料结构')]);
       expect(f.input.isCurrent).toHaveBeenCalledTimes(2);
     },
   );
@@ -161,8 +165,8 @@ describe('core follow-up suggestions boundary', () => {
         '为8人的读书交流会拟定组织方案，不采购、不发送消息。\n预算上限改为600元，仍为45分钟，其余限制不变。\n确认方案，输出最终清单',
     });
     expect(f.input.persist).toHaveBeenCalledTimes(1);
-    expect(f.input.persist).toHaveBeenCalledWith(['整理活动执行清单']);
-    expect(f.frames).toEqual([['整理活动执行清单']]);
+    expect(f.input.persist).toHaveBeenCalledWith(steps('整理活动执行清单'));
+    expect(f.frames).toEqual([steps('整理活动执行清单')]);
   });
 
   it('inherits tail restrictions without trimming the original intent', async () => {
@@ -170,7 +174,7 @@ describe('core follow-up suggestions boundary', () => {
     const intent = `${'合成材料。'.repeat(150)}不要发送邮件`;
     await publishCoreTaskSuggestions({ ...f.input, intent });
     expect(JSON.stringify(f.calls[0]?.request)).toContain(intent);
-    expect(f.frames).toEqual([['整理后续执行清单']]);
+    expect(f.frames).toEqual([steps('整理后续执行清单')]);
   });
   it.each([{ output: 'not json' }, { output: '[]' }, { failed: true }])(
     'keeps empty, malformed and failed suggestions silent',
