@@ -8,7 +8,7 @@ import { shouldResetComposerOnSelectionChange } from '@/components/composer-rese
 import type { ComposerSubmitResult } from '@/components/composer-submit';
 import { Button } from '@/components/ui/button';
 import type { AwaitingKind } from '@/lib/awaiting-user-copy';
-import { taskDisplayIntent, taskDisplaySource } from '@/lib/task-display-copy';
+import { taskDisplaySource, taskDisplayTitle } from '@/lib/task-display-copy';
 import { taskStatusLabel } from '@/lib/task-status-copy';
 import { useTaskStore } from '@/stores/task-store';
 import type { SidePanelMode } from '@/types/side-panel';
@@ -197,7 +197,7 @@ export function MainPanel({
           <Menu className="h-4 w-4" />
         </Button>
         <div className="ml-2 min-w-0 flex-1 truncate pr-12 text-sm font-medium text-[#595757] dark:text-foreground/85">
-          {task ? taskDisplayIntent(task.intent) : <BrandWordmark className="h-3.5" />}
+          {task ? taskDisplayTitle(task, 40) : <BrandWordmark className="h-3.5" />}
         </div>
       </div>
       {showEmptyHome ? (
