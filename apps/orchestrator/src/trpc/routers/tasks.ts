@@ -52,7 +52,7 @@ import { withMediaCallContext } from '../../agent/media-call-recorder.js';
 // would otherwise label it "已完成" because the runner respected the
 // agent's terminal decision.
 import { detectNavFailure } from '../../agent/nav-failure-detector.js';
-import { generateNextSteps } from '../../agent/next-steps-generator.js';
+import { generateNextStepsWithTitle } from '../../agent/next-steps-generator.js';
 import { isExplicitPlanApproval, isPurePlanHold } from '../../agent/plan-mode.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
@@ -8105,7 +8105,7 @@ export const tasksRouter = router({
                               const recentIntents = await nextStepsRepo
                                 .recentIntents(taskId)
                                 .catch(() => []);
-                              const steps = await generateNextSteps({
+                              const { steps, title } = await generateNextStepsWithTitle({
                                 messagesAdapter,
                                 intent: input.intent,
                                 outcome: nextStepsOutcome,
@@ -8113,15 +8113,24 @@ export const tasksRouter = router({
                                 missing,
                                 recentIntents,
                               });
-                              if (steps.length === 0) return;
-                              const persisted = await nextStepsRepo
-                                .persistTerminalNextSteps(taskId, nextStepsStatus, steps)
-                                .catch(() => false);
-                              if (!persisted) return;
+                              // FIX-57 复审 #1-1d: the sidebar gets a real name, never over a rename.
+                              const titled = title
+                                ? await nextStepsRepo
+                                    .setGeneratedTitle(taskId, title)
+                                    .catch(() => false)
+                                : false;
+                              const persisted =
+                                steps.length > 0
+                                  ? await nextStepsRepo
+                                      .persistTerminalNextSteps(taskId, nextStepsStatus, steps)
+                                      .catch(() => false)
+                                  : false;
+                              if (!persisted && !titled) return;
                               broadcastToUser(userId, {
                                 type: 'server.supercar.suggestions',
                                 taskId,
-                                ...nextStepsFrame(steps),
+                                ...nextStepsFrame(persisted ? steps : []),
+                                ...(titled && title ? { title } : {}),
                               });
                             } catch (err) {
                               ctx.logger.warn({ err, taskId }, 'suggestions: generate crashed');

@@ -2943,11 +2943,20 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         return;
       }
       if (msg.type === 'server.supercar.suggestions') {
+        const generatedTitle = typeof msg.title === 'string' ? msg.title.trim() : '';
         set((prev) => ({
           suggestionsByTask: {
             ...prev.suggestionsByTask,
             [msg.taskId]: normalizeNextSteps(msg.nextSteps ?? msg.suggestions),
           },
+          // FIX-57 复审 #1-1d: a generated sidebar name, never over the person's own.
+          ...(generatedTitle
+            ? {
+                tasks: prev.tasks.map((t) =>
+                  t.taskId === msg.taskId && !t.title?.trim() ? { ...t, title: generatedTitle } : t,
+                ),
+              }
+            : {}),
         }));
         return;
       }

@@ -26,7 +26,9 @@ import {
   normalizeNextSteps,
   partialLead,
   processLinkLabel,
+  shortLinkLabel,
   stepTimeline,
+  withoutRepeatedOffers,
 } from '@/lib/assistant-turn';
 import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
 import {
@@ -2410,10 +2412,11 @@ function TerminalSummary({
   const refund = isFailedLike ? refundStatusCopy(failureContext.context?.refund.state) : null;
   const failureDetail =
     status === 'failed' && displayText.trim() ? friendlyFailureDetail(displayText) : '';
-  const optionLabels = new Set(turn?.options.map((o) => o.label) ?? []);
-  const nextSteps = suggestions
-    .filter((step) => !optionLabels.has(step.label))
-    .slice(0, Math.max(0, 3 - (turn?.options.length ?? 0)));
+  // 复审 #1-1a: the ways on and the next steps are one group, no offer twice.
+  const nextSteps = withoutRepeatedOffers(suggestions, turn?.options ?? []).slice(
+    0,
+    Math.max(0, 3 - (turn?.options.length ?? 0)),
+  );
   const iconButton =
     'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 dark:hover:bg-white/10';
   return (
@@ -2424,7 +2427,7 @@ function TerminalSummary({
           className="space-y-1.5 text-[15px] leading-7 text-foreground"
         >
           <p className="m-0">{turn.lead}</p>
-          <p className="m-0 text-foreground/80">{turn.why}</p>
+          {turn.why && <p className="m-0 text-foreground/80">{turn.why}</p>}
           {turn.options.length > 0 && status === 'failed' && (
             <p className="m-0 text-foreground/80">我可以这样继续：</p>
           )}
@@ -2500,6 +2503,8 @@ function TerminalSummary({
           <span>{expertUsageCopy}</span>
         </div>
       )}
+      {/* 复审 #1-1a: one group of ways on — the fixed options, then the next steps —
+          after the answer; 「查看过程」 comes last. */}
       {turn && (
         <TurnOptions
           options={turn.options}
@@ -2507,6 +2512,12 @@ function TerminalSummary({
           retrying={retryingIntent != null}
           onSend={send}
         />
+      )}
+      {followUpActions.length > 0 && onSuggestionPick && revealed === displayText && (
+        <FollowUpChips actions={followUpActions} onPick={onSuggestionPick} />
+      )}
+      {revealed === displayText && (
+        <NextStepChips steps={nextSteps} onSend={send} onEdit={onSuggestionPick} />
       )}
       <ProcessDisclosure
         label={processLinkLabel(status === 'failed' ? 0 : answerSourceCount(displayText))}
@@ -2634,12 +2645,6 @@ function TerminalSummary({
           </ProcessSection>
         )}
       </ProcessDisclosure>
-      {followUpActions.length > 0 && onSuggestionPick && revealed === displayText && (
-        <FollowUpChips actions={followUpActions} onPick={onSuggestionPick} />
-      )}
-      {revealed === displayText && (
-        <NextStepChips steps={nextSteps} onSend={send} onEdit={onSuggestionPick} />
-      )}
       <ExternalLinkConfirm
         href={pendingLink}
         onClose={() => setPendingLink(null)}
@@ -2820,7 +2825,7 @@ function makeMarkdownComponents(opts: {
           className="inline-flex min-h-7 items-center gap-1 rounded-[4px] px-0.5 align-middle text-[#FF0061] underline decoration-[#FF0061]/35 underline-offset-2 hover:text-[#FF0061] dark:text-[#FF0061] dark:hover:text-[#FF0061]"
           {...rest}
         >
-          {children}
+          {typeof children === 'string' ? shortLinkLabel(children, safeHref) : children}
           <ExternalLink className="h-3 w-3" aria-hidden />
         </a>
       );

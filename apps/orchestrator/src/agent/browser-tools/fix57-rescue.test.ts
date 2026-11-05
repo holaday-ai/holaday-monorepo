@@ -69,6 +69,27 @@ function run(
           : action.url!;
         return { ok: true, text: '已打开', url };
       }
+      if (/bing\.com/.test(url))
+        return {
+          ok: true,
+          text: JSON.stringify({
+            url,
+            tree: [
+              '- link "a" https://www.aaa-shop.com/p/1 [ref=e1]',
+              '- link "b" https://www.bbb-shop.com/p/2 [ref=e2]',
+              '- link "c" https://www.ccc-shop.com/p/3 [ref=e3]',
+              '- link "d" https://www.ddd-shop.com/p/4 [ref=e4]',
+            ].join('\n'),
+          }),
+        };
+      if (/item\.m\.jd\.com/.test(url))
+        return {
+          ok: true,
+          text: JSON.stringify({
+            url,
+            tree: '- heading "Apple iPhone 16 Pro" [level=1] [ref=e1]\n- text "¥7999"',
+          }),
+        };
       return { ok: true, text: JSON.stringify({ tree: '- heading "页面" [level=1] [ref=e1]' }) };
     }) as never,
   } as never).then((outcome) => ({ outcome, seen: seen.join('\n'), opened, onRescue }));
@@ -126,7 +147,7 @@ describe('FIX-57 #5 · a login wall on a read task: another public route first',
     expect(opened).toContain('https://cn.bing.com/search?q=100142621606');
     expect(opened).toContain('https://www.manmanbuy.com/');
     expect(opened).not.toContain('https://www.example-third.com/');
-    expect(seen).toContain('不要换到 example-third.com');
+    expect(seen).toContain('不要再打开 example-third.com');
   });
 
   it('the model asking for a login handover is routed around first, once', async () => {
@@ -137,6 +158,70 @@ describe('FIX-57 #5 · a login wall on a read task: another public route first',
     ]);
     expect(seen).toContain(ROUTE);
     expect(outcome).toMatchObject({ status: 'awaiting_user', reason: 'login' });
+  });
+});
+
+describe('FIX-57 复审 #1 · the cap holds and a rescued answer is 部分完成', () => {
+  it('2: Bing shows 4 other sites — the 3rd and 4th are refused (links on read pages count too)', async () => {
+    const { opened, seen } = await run(
+      JD,
+      [
+        { name: 'navigate', input: { url: 'https://item.jd.com/100142621606.html' } },
+        { name: 'navigate', input: { url: 'https://cn.bing.com/search?q=100142621606' } },
+        { name: 'snapshot', input: {} },
+        { name: 'navigate', input: { url: 'https://www.aaa-shop.com/p/1' } },
+        { name: 'navigate', input: { url: 'https://www.bbb-shop.com/p/2' } },
+        { name: 'navigate', input: { url: 'https://www.ccc-shop.com/p/3' } },
+        { name: 'navigate', input: { url: 'https://www.ddd-shop.com/p/4' } },
+        { name: 'finish', input: { status: 'failed', summary: '都没有价格' } },
+      ],
+      { maxSteps: 20 },
+    );
+    expect(opened).toContain('https://www.aaa-shop.com/p/1');
+    expect(opened).toContain('https://www.bbb-shop.com/p/2');
+    expect(opened).not.toContain('https://www.ccc-shop.com/p/3');
+    expect(opened).not.toContain('https://www.ddd-shop.com/p/4');
+    expect(seen).toContain('换网站已经到上限');
+  });
+
+  it('2: the walled address is not opened again, even from a search result', async () => {
+    const { opened, seen } = await run(
+      JD,
+      [
+        { name: 'navigate', input: { url: 'https://item.jd.com/100142621606.html' } },
+        {
+          name: 'navigate',
+          input: { url: 'https://cn.bing.com/search?q=item.jd.com+100142621606' },
+        },
+        { name: 'navigate', input: { url: 'https://item.jd.com/100142621606.html' } },
+        { name: 'finish', input: { status: 'failed', summary: '没拿到价格，原页面被拦截' } },
+      ],
+      { maxSteps: 20 },
+    );
+    expect(opened.filter((u) => u === 'https://item.jd.com/100142621606.html')).toHaveLength(1);
+    expect(seen).toContain('这是被挡住的原页面，不要再打开');
+  });
+
+  it('4: an answer found elsewhere is 部分完成, and the code says where it came from', async () => {
+    const { outcome } = await run(
+      JD,
+      [
+        { name: 'navigate', input: { url: 'https://item.jd.com/100142621606.html' } },
+        { name: 'navigate', input: { url: 'https://item.m.jd.com/product/100142621606.html' } },
+        { name: 'snapshot', input: {} },
+        {
+          name: 'finish',
+          input: { status: 'completed', summary: 'Apple iPhone 16 Pro，价格 ¥7999。' },
+        },
+      ],
+      { maxSteps: 20 },
+    );
+    expect(outcome.status).toBe('completed');
+    const done = outcome as { summary: string; partial?: { missing?: string } };
+    expect(done.summary).toMatch(
+      /^部分完成：这是从\[京东手机版\]\(https:\/\/item\.m\.jd\.com\/product\/100142621606\.html\)查到的，不是你给的京东页面。/,
+    );
+    expect(done.partial?.missing).toContain('京东页面上的内容');
   });
 });
 

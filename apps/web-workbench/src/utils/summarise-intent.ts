@@ -43,6 +43,21 @@ export function summariseIntent(intent: string, maxLen = 20): string {
     }
   }
 
+  // FIX-57 复审 #1-1d: 「使用云端浏览器，」「用浏览器」 says how, not what — drop it, and
+  // name a pasted address by its site so the row tells tasks apart.
+  t = t
+    .replace(
+      /^(?:请)?(?:使用|用|在|通过)?(?:云端|本地|真实)?浏览器(?:里|中|上)?(?:帮我)?[,，、:：\s]*/u,
+      '',
+    )
+    .replace(/(?:打开|访问|进入)\s*(https?:\/\/\S+)\s*/u, (m: string, url: string) => {
+      const name = addressName(url);
+      return name ? `${name} ` : m;
+    })
+    .replace(/https?:\/\/\S+/gu, (url) => addressName(url) ?? url)
+    .replace(/\s{2,}/g, ' ')
+    .trimStart();
+
   // Drop softening particles anywhere near the start.
   t = t.replace(/^(先|然后|接下来|顺便|顺路)[,，]?\s*/, '');
 
@@ -68,4 +83,29 @@ export function summariseIntent(intent: string, maxLen = 20): string {
   if (t.length <= maxLen) return t;
   // Trim by char (not byte) so CJK is safe.
   return `${t.slice(0, maxLen - 1).trim()}…`;
+}
+
+const ADDRESS_NAMES: ReadonlyArray<[RegExp, string]> = [
+  [/(^|\.)item\.(?:m\.)?jd\.com$/, '京东商品页'],
+  [/(^|\.)search\.jd\.com$/, '京东搜索'],
+  [/(^|\.)jd\.com$/, '京东'],
+  [/(^|\.)xiaohongshu\.com$/, '小红书笔记'],
+  [/(^|\.)zhihu\.com$/, '知乎问题'],
+  [/(^|\.)douyin\.com$/, '抖音视频'],
+  [/(^|\.)amap\.com$/, '高德地图'],
+  [/(^|\.)amazon\.[a-z.]+$/, '亚马逊'],
+  [/(^|\.)youtube\.com$/, 'YouTube'],
+  [/(^|\.)wikipedia\.org$/, '维基百科'],
+  [/(^|\.)baike\.baidu\.com$/, '百度百科'],
+  [/(^|\.)ctrip\.com$/, '携程'],
+];
+
+/** A pasted address of a known site, by the site's name; others stay as written. */
+function addressName(url: string): string | null {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '');
+    return ADDRESS_NAMES.find(([re]) => re.test(host))?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }

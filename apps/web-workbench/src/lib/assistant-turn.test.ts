@@ -7,10 +7,13 @@ import {
   failureTurn,
   liveStatusText,
   normalizeNextSteps,
+  offerKind,
   partialLead,
   processLinkLabel,
+  shortLinkLabel,
   stepTimeline,
   stripInternalRefs,
+  withoutRepeatedOffers,
 } from './assistant-turn';
 
 const step = (tickIndex: number, actionKind: string, actionSummary?: string): UiStep => ({
@@ -40,9 +43,14 @@ describe('FIX-57 #3 · the live status line', () => {
   it('never shows a ref id, a tab/frame id or a provider name', () => {
     const steps = [step(1, 'click', '点击 e123')];
     expect(liveStatusText({ steps })).toBe('在页面上找需要的内容…');
-    expect(
-      stripInternalRefs('读取 tab_3 的 frame_ab12（ref=e5）via Firecrawl 和 qwen3.8-max'),
-    ).toBe('读取 的 via 和');
+    // 复审 #1-3: replaced with plain words, so the sentence still reads; addresses are kept.
+    expect(stripInternalRefs('在 tab_2 上点击 e123 没有反应')).toBe('在页面上点击那个按钮没有反应');
+    expect(stripInternalRefs('正在读取 tab_3 上的 [ref=e123] 按钮')).toBe('正在读取页面上的按钮');
+    expect(stripInternalRefs('用千问总结页面')).toBe('用 AI 总结页面');
+    expect(stripInternalRefs('frame_2 里读到价格')).toBe('内嵌框里读到价格');
+    expect(stripInternalRefs('打开 https://www.amazon.com/dp/B0X/ref=sr_1_3?keywords=a')).toBe(
+      '打开 https://www.amazon.com/dp/B0X/ref=sr_1_3?keywords=a',
+    );
     const all = [
       step(1, 'navigate', '打开 https://www.jd.com/'),
       step(2, 'read_url'),
@@ -101,30 +109,32 @@ describe('FIX-57 #2 · the answer footer', () => {
   });
 });
 
-describe('FIX-57 #5 · a failed run as an assistant message', () => {
+const intent = '打开 https://item.jd.com/1.html 读商品标题和价格';
+
+describe('FIX-57 #5 / 复审 #1 · a failed run as an assistant message', () => {
   const JD =
     '任务执行失败：无法读取该京东商品的标题和价格。访问 https://item.jd.com/1.html 后被京东风控拦截，页面跳转到异常提示页（sourceURL: https://pc-frequent-pro.pf.jd.com/?reason=403），需要人工验证或登录后才可能正常展示。建议：简化任务描述后重试。';
 
-  it('always says what was not obtained, where it stuck, and offers ways on', () => {
+  it('says straight away what happened and what it did not get, then offers ways on', () => {
     const turn = failureTurn({
       status: 'failed',
       errorText: JD,
-      intent: '打开 https://item.jd.com/1.html 读商品标题和价格',
+      intent,
       finalUrl: 'https://pc-frequent-pro.pf.jd.com/?from=pc_item&reason=403',
       executionMode: 'browser',
       canRetry: true,
     });
-    expect(turn.lead).toBe('这次没拿到你要的结果：无法读取该京东商品的标题和价格。');
-    expect(turn.why).toContain('京东把页面拦下了');
-    expect(turn.why).toContain('不会绕过');
+    expect(turn.lead).toBe(
+      '京东把这个页面拦下了，要登录或验证后才显示，所以没拿到京东商品的标题和价格。',
+    );
+    expect(turn.why).toBe('我不能替你登录，也不会绕过它。');
     expect(turn.options.map((o) => o.label)).toEqual([
       '你在浏览器里登录京东，我接着帮你看',
       '我去公开的搜索页或比价网站查同类信息',
     ]);
     expect(turn.options[0]?.prompt).toContain('等我登录好再继续');
-    // No engineering words, no URLs in what the person reads.
     for (const text of [turn.lead, turn.why, ...turn.options.map((o) => o.label)])
-      expect(text).not.toMatch(/https?:|结构性|自动审核|证据边界|任务未完成，结果不能/);
+      expect(text).not.toMatch(/https?:|这次没拿到你要的结果：|结构性|自动审核|证据边界/);
   });
 
   it('a run that already tried other sources says so and does not offer them again', () => {
@@ -132,10 +142,12 @@ describe('FIX-57 #5 · a failed run as an assistant message', () => {
       status: 'failed',
       errorText:
         '任务执行失败：无法获取该商品信息。被京东风控拦截。尝试通过联网搜索搜索「京东 100142621606」等多种关键词，均无返回结果，未能找到替代来源。',
-      intent: '打开 https://item.jd.com/1.html 读商品标题和价格',
+      intent,
       canRetry: true,
     });
-    expect(turn.why).toContain('我已经换公开来源（搜索、比价站）找过，也没找到。');
+    expect(turn.lead).toBe(
+      '京东把这个页面拦下了，要登录或验证后才显示，我换了公开来源也没找到，所以没拿到商品信息。',
+    );
     expect(turn.options.map((o) => o.label)).toEqual(['你在浏览器里登录京东，我接着帮你看']);
   });
 
@@ -146,7 +158,7 @@ describe('FIX-57 #5 · a failed run as an assistant message', () => {
       intent: '打开知乎问题读标题',
       canRetry: true,
     });
-    expect(turn.lead).toMatch(/^这次没拿到你要的结果/);
+    expect(turn.lead).toMatch(/要求先做人机验证，这一步只能你本人来，所以/);
     expect(turn.options.length).toBeGreaterThan(0);
   });
 
@@ -160,27 +172,71 @@ describe('FIX-57 #5 · a failed run as an assistant message', () => {
     expect(turn.options.map((o) => o.kind)).toEqual(['retry', 'prompt']);
   });
 
-  it('our model service failing is said as ours, with a retry', () => {
+  it.each([
+    '任务执行失败：浏览器能力正在迁移到千问，暂时不可用。',
+    '这项能力正在迁移到千问，暂时不可用。',
+    '所选模型的服务尚未配置，请切换到千问后重试。',
+    '模型服务暂时不可用，有限重试后仍失败，请稍后重试。',
+  ])(
+    '复审 #1-3: our own service failing gets one fixed sentence, never its words: %s',
+    (errorText) => {
+      const turn = failureTurn({ status: 'failed', errorText, intent: '查价格', canRetry: true });
+      expect(turn.lead).toBe('我这边的服务刚刚出了点问题，这次没做完，你可以稍后再让我试一次。');
+      expect(turn.lead).not.toMatch(/千问|模型|迁移/);
+      expect(turn.options).toEqual([{ kind: 'retry', label: '再试一次' }]);
+    },
+  );
+
+  it("复审 #1-3: a ref in the agent's own words reads as plain words", () => {
     const turn = failureTurn({
       status: 'failed',
-      errorText: '模型服务暂时不可用，有限重试后仍失败，请稍后重试。',
-      intent: '读商品价格',
+      errorText: '任务执行失败：在 tab_2 上点击 e123 没有反应，页面没变化。',
+      intent: '查价格',
       canRetry: true,
     });
-    expect(turn.lead).toBe('这次没拿到你要的结果。');
-    expect(turn.why).toContain('我这边的模型服务');
-    expect(turn.options).toEqual([{ kind: 'retry', label: '再试一次' }]);
+    expect(turn.lead).toBe('在页面上点击那个按钮没有反应，页面没变化，这次没做完。');
   });
 
   it('a stopped run keeps what it got and offers to start over', () => {
     const turn = failureTurn({ status: 'cancelled', errorText: '', intent: 'x', canRetry: true });
-    expect(turn.lead).toBe('这次任务已取消，没有做完。');
+    expect(turn.lead).toBe('任务已取消，没有做完。');
     expect(turn.options).toEqual([{ kind: 'retry', label: '从头再做一次' }]);
   });
 
   it("the agent's own words lose prefixes, links and advice; long or technical ones are dropped", () => {
     expect(failureOwnWords(JD)).toBe('无法读取该京东商品的标题和价格');
     expect(failureOwnWords('Error: TIMEOUT_EXCEEDED at frame')).toBeNull();
+  });
+});
+
+describe('复审 #1-1a · the same offer is shown once', () => {
+  it('wall-jd: 「你登录京东后我接着抓…」 goes, the fixed login option stays', () => {
+    const options = failureTurn({
+      status: 'failed',
+      errorText: '任务执行失败：京东要求登录后才能查看价格。',
+      intent,
+      canRetry: true,
+    }).options;
+    const kept = withoutRepeatedOffers(
+      [
+        { label: '你登录京东后我接着抓标题和价格？', prompt: 'a' },
+        { label: '你手动打开京东页面后，我帮你读取标题和价格？', prompt: 'b' },
+        { label: '换个公开渠道帮你查这款商品？', prompt: 'c' },
+        { label: '把这款和天猫同款的价格做个对比？', prompt: 'd' },
+      ],
+      options,
+    );
+    expect(kept.map((k) => k.label)).toEqual(['把这款和天猫同款的价格做个对比？']);
+    expect(offerKind('你在浏览器里登录京东，我接着帮你看')).toBe('handover');
+  });
+});
+
+describe('复审 #1-1c · long bare links read as the site name', () => {
+  it('shortens only a bare long address', () => {
+    const url = 'https://item.m.jd.com/product/100142621606.html?ad_od=3';
+    expect(shortLinkLabel(url, url)).toBe('京东手机版');
+    expect(shortLinkLabel('京东手机版', url)).toBe('京东手机版');
+    expect(shortLinkLabel('https://a.cn/x', 'https://a.cn/x')).toBe('https://a.cn/x');
   });
 });
 

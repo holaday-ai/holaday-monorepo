@@ -85,8 +85,11 @@ it('a failed run says what it did not get and offers ways on — no red box, no 
     finalUrl: 'https://pc-frequent-pro.pf.jd.com/?from=pc_item&reason=403',
     failureLevel: 'hard_fail',
   });
-  expect(screen.getByText('这次没拿到你要的结果：无法读取该京东商品的标题和价格。')).toBeTruthy();
-  expect(screen.getByText(/京东把页面拦下了/)).toBeTruthy();
+  expect(
+    screen.getByText(
+      '京东把这个页面拦下了，要登录或验证后才显示，所以没拿到京东商品的标题和价格。',
+    ),
+  ).toBeTruthy();
   for (const gone of ['浏览器遇到问题', '拆成小步骤', '任务未完成，结果不能当作完成产物使用。'])
     expect(screen.queryByText(gone)).toBeNull();
   expect(screen.queryByRole('alert')).toBeNull();

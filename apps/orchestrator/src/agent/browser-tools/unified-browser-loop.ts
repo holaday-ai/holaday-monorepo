@@ -253,6 +253,13 @@ function withoutClaims(text: string, claims: readonly string[]): string {
   return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/** FIX-57 复审 #1-4: what a rescue routed around, for the loop's single exit. */
+export interface RescueState {
+  started: boolean;
+  /** The address that was walled (the one the user's task led to). */
+  blockedUrl?: string;
+}
+
 export interface UnifiedBrowserLoopInput {
   observationV2?: boolean;
   /**
@@ -319,6 +326,8 @@ export interface UnifiedBrowserLoopInput {
   rescue?: boolean;
   /** FIX-57 #5: the run starts routing around a wall (a live status line for the user). */
   onRescue?: (message: string) => void | Promise<void>;
+  /** FIX-57 复审 #1-4: filled by the loop — what the rescue was routing around (internal). */
+  rescueState?: RescueState;
   /**
    * Called before every browser action and again after a successful one
    * (`after`: the landed page). Irreversible actions park here for the user's
@@ -412,8 +421,10 @@ export async function runUnifiedBrowserLoop(
   const seen = new Set<string>();
   // FIX-51 复审 #3: a failed run's steps, for the log only: tool names and the start of tab ids.
   const steps: string[] = [];
-  const outcome = await browserLoop({
+  const rescueState: RescueState = input.rescueState ?? { started: false };
+  const looped = await browserLoop({
     ...input,
+    rescueState,
     execute: async (action) => {
       const result = await input.execute(action);
       const tab = 'targetTabId' in action ? action.targetTabId : result.tabId;
@@ -425,6 +436,12 @@ export async function runUnifiedBrowserLoop(
       return result;
     },
   });
+  // FIX-57 复审 #1-4 (coordinator): an answer a rescue found elsewhere is never 「完成」 —
+  // the code, not the model, says where it came from.
+  const outcome =
+    looped.status === 'completed' && rescueState.started
+      ? rescuedAnswer(looped, rescueState, input.currentPageUrl?.())
+      : looped;
   if (outcome.status === 'failed') logger.warn({ steps: steps.slice(-120) }, 'browser loop failed');
   // FIX-41: nor the browser's call syntax (「switch_tab(targetTabId=…)」), once its ids are gone.
   const strip = (text: string) => humanizeToolMentions(stripInternalRefs(text, seen));
@@ -818,14 +835,22 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   /** The walled page the rescue began on; a wall on another page is a new one. */
   let rescueWallUrl: string | undefined;
   let rescueWallSite: string | undefined;
+  /** 复审 #1-2: the address the run opened before the wall — never opened again in a rescue. */
+  let lastNavigateTarget: string | undefined;
+  let rescueBlockedUrl: string | undefined;
   const onRescueWall = () => rescueStarted && input.currentPageUrl?.() === rescueWallUrl;
   const rescueSites = new Set<string>();
   const startRescue = async (step: number, why: string): Promise<string | null> => {
     if (!rescueEligible || rescueStarted || captchaDeclined || step + 4 >= maxSteps) return null;
     rescueStarted = true;
     rescueWallUrl = input.currentPageUrl?.();
-    const host = hostOf(rescueWallUrl);
+    rescueBlockedUrl = lastNavigateTarget ?? rescueWallUrl;
+    const host = hostOf(rescueBlockedUrl) ?? hostOf(rescueWallUrl);
     rescueWallSite = host ? (siteOf(host) ?? host) : undefined;
+    if (input.rescueState) {
+      input.rescueState.started = true;
+      input.rescueState.blockedUrl = rescueBlockedUrl;
+    }
     await Promise.resolve(input.onRescue?.(RESCUE_STATUS[why === 'wall' ? 'wall' : 'stuck'])).catch(
       () => undefined,
     );
@@ -2215,15 +2240,51 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         );
         continue;
       }
+      // FIX-57 复审 #1-2: once a rescue began, every other site counts against its cap —
+      // links seen on read pages and search hits included — and the blocked address is not
+      // opened again.
+      let rescueOk = false;
+      if (action.tool === 'navigate' && !rescueStarted) lastNavigateTarget = action.url;
+      if (action.tool === 'navigate' && rescueStarted) {
+        const key = pageKey(action.url);
+        if (
+          (rescueBlockedUrl && key === pageKey(rescueBlockedUrl)) ||
+          (rescueWallUrl && key === pageKey(rescueWallUrl))
+        ) {
+          results.push(
+            toolResult(
+              call.id,
+              '这是被挡住的原页面，不要再打开。换别的公开页面，或用已经读到的内容 finish、如实说明缺什么。',
+              true,
+            ),
+          );
+          continue;
+        }
+        const host = hostOf(action.url);
+        const site = host ? (siteOf(host) ?? host) : undefined;
+        if (site && site !== rescueWallSite) {
+          if (!rescueAllows(action.url)) {
+            results.push(
+              toolResult(
+                call.id,
+                `换网站已经到上限（最多 ${RESCUE_SITES} 个）：不要再打开 ${host}。用已经读到的内容 finish，拿不到就如实说明拿到了什么、缺什么。`,
+                true,
+              ),
+            );
+            continue;
+          }
+          rescueOk = true;
+        }
+      }
       // FIX-32 (Deploy-32 b-m01): the user named the site; another site is not a
       // substitute. A link this run saw on a page it read may still be followed.
       if (
         action.tool === 'navigate' &&
         lockedDomains.length > 0 &&
         !onDomains(action.url, lockedDomains) &&
-        !seenOnReadPage(action.url) &&
-        !(input.localFixtures && localTestHost(action.url)) &&
-        !rescueAllows(action.url)
+        !rescueOk &&
+        !(!rescueStarted && seenOnReadPage(action.url)) &&
+        !(input.localFixtures && localTestHost(action.url))
       ) {
         results.push(
           toolResult(
@@ -2386,6 +2447,23 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           ? `\n关闭弹层后页面跳到了别的内容（${leftFor}），不是任务点名的 ${namedContent}；宿主已重新打开点名页面。请重新 snapshot，只读这个页面上的内容；不要再用 Esc 关弹层，弹层挡住时点它自己的关闭按钮或直接读取。`
           : `\n关闭弹层后页面跳到了别的内容（${leftFor}），不是任务点名的 ${namedContent}。请 navigate 回 ${namedContent} 再读取，不要用这个页面的内容作答。`;
         staleTurn = true;
+      }
+      // FIX-57 复审 #1-2: a click or tab switch that lands on another site counts too.
+      if (rescueStarted && outcome.ok && action.tool !== 'navigate') {
+        const now = input.currentPageUrl?.();
+        const host = hostOf(now);
+        const site = host ? (siteOf(host) ?? host) : undefined;
+        if (site && site !== rescueWallSite && !rescueAllows(now)) {
+          concludeNow = true;
+          results.push(
+            toolResult(
+              call.id,
+              `换网站已经到上限（最多 ${RESCUE_SITES} 个）：这个页面（${host}）不算，不要用它的内容。直接 finish，如实说明拿到了什么、缺什么。`,
+            ),
+          );
+          staleTurn = true;
+          continue;
+        }
       }
       if (outcome.ok && input.probeBlocker) {
         const blocker = await checkBlocker();
@@ -2912,12 +2990,59 @@ export const RESCUE_SITES = 2;
 export const RESCUE_SEARCH_SITES: readonly string[] = ['bing.com'];
 /** FIX-57 #5: what the model is told when a read task is stopped. */
 export const RESCUE_NOTE =
-  '不要登录，不要做验证，不要在登录或验证框里输入任何东西；也不要再打开被挡住的那个页面或用只读抓取去取它。换一条不需要登录的公开路线拿同类信息：同一网站的搜索页或列表页、比价网站、品牌官网或其他公开页面都可以，最多再换 2 个网站。找路线可以先 web_search；没有结果就用浏览器打开 https://cn.bing.com/search?q=关键词 搜一下，再打开结果里的公开页面（搜索页本身不算换网站）；同一网站的移动版页面（如 m. 开头）也可以试。搜索页要求验证时不要做，换别的路线。拿到了就照常 finish，并在答案开头写明信息来自哪个网站、和原来要看的页面不同；页面数据不是最新的就写明是哪个时间点的数据；只拿到一部分（如价格被遮挡、标题不完整）时 summary 以「部分完成：」开头写清缺什么。两条路线都拿不到，就 finish(status=failed)，写清拿到了什么、缺什么、卡在哪一步。';
+  '不要登录，不要做验证，不要在登录或验证框里输入任何东西；也不要再打开被挡住的那个页面或用只读抓取去取它。换一条不需要登录的公开路线拿同类信息：同一网站的移动版页面（如 m. 开头）、搜索页或列表页、比价网站、品牌官网或其他公开页面都可以，最多再换 2 个网站。找路线可以先 web_search；没有结果就用浏览器打开 https://cn.bing.com/search?q=关键词 搜一下，再打开结果里的公开页面（搜索页本身不算换网站）；搜索页要求验证时不要做，换别的路线。拿到了就照常 finish：来源说明由系统自动加在答案开头，你不用写；答案像跟用户说话一样写，提到网站用短名字加链接（如「[京东手机版](链接)」），不要贴完整网址，不要用「h1」「页面原样」「脱敏」「原指定」这类词；标题被截断、价格被打码、要登录才显示，都用大白话说清楚（如「价格没登录时被京东打了码，只显示 ¥7??9」）。页面数据不是最新的就写明是哪个时间点的数据。两条路线都拿不到，就 finish(status=failed)，写清拿到了什么、缺什么、卡在哪一步。';
 /** FIX-57 #5: a rescued answer that says part of it is masked, cut or login-only. */
 export const RESCUE_PARTIAL_RE =
-  /遮挡|脱敏|掩码|截断|被(?:部分)?隐藏|\d\?\?|\?\?\d|需(?:要)?登录(?:后)?(?:才|可)|登录后(?:才|可)(?:查看|看到|显示)|无法获[得取]完整|不完整/;
-export const RESCUE_PARTIAL_LEAD =
-  '部分完成：换到的公开页面只显示了部分内容（有的值被遮挡、截断或要登录才看得到）。';
+  /遮挡|遮住|打码|打了码|脱敏|掩码|截断|被(?:部分)?隐藏|\d\?\?|\?\?\d|需(?:要)?登录(?:后)?(?:才|可)|登录后(?:才|可)(?:查看|看到|显示)|无法获[得取]完整|不完整/;
+export const RESCUE_PARTIAL_LEAD = '部分完成：有的内容页面上被遮住或截断了，要登录才看得到完整的。';
+/** FIX-57 复审 #1-4: short Chinese names for the sites a rescue usually lands on. */
+const RESCUE_SITE_NAMES: ReadonlyArray<[RegExp, string]> = [
+  [/(^|\.)m\.jd\.com$|^item\.m\.jd\.com$/, '京东手机版'],
+  [/(^|\.)jd\.com$/, '京东'],
+  [/(^|\.)xiaohongshu\.com$/, '小红书'],
+  [/(^|\.)bing\.com$/, '必应搜索'],
+  [/(^|\.)smzdm\.com$/, '什么值得买'],
+  [/(^|\.)manmanbuy\.com$/, '慢慢买'],
+  [/(^|\.)taobao\.com$/, '淘宝'],
+  [/(^|\.)tmall\.com$/, '天猫'],
+  [/(^|\.)amazon\.[a-z.]+$/, '亚马逊'],
+  [/(^|\.)apple\.com(\.cn)?$/, '苹果官网'],
+  [/(^|\.)zhihu\.com$/, '知乎'],
+  [/(^|\.)baike\.baidu\.com$/, '百度百科'],
+  [/(^|\.)wikipedia\.org$/, '维基百科'],
+];
+
+export function rescueSiteName(url: string | undefined): string {
+  const host = hostOf(url);
+  if (!host) return '别的公开页面';
+  return RESCUE_SITE_NAMES.find(([re]) => re.test(host))?.[1] ?? host;
+}
+
+/**
+ * FIX-57 复审 #1-4: a rescued answer is 部分完成, led by one plain line the code writes:
+ * 「这是从[京东手机版](…)查到的，不是你给的京东页面。」 The model's own 「部分完成：」 is folded in.
+ */
+export function rescuedAnswer(
+  outcome: Extract<UnifiedBrowserOutcome, { status: 'completed' }>,
+  rescue: RescueState,
+  finalUrl: string | undefined,
+): Extract<UnifiedBrowserOutcome, { status: 'completed' }> {
+  const from = rescueSiteName(finalUrl);
+  const link = finalUrl && /^https?:\/\//.test(finalUrl) ? `[${from}](${finalUrl})` : from;
+  const given = rescueSiteName(rescue.blockedUrl);
+  const lead = `部分完成：这是从${link}查到的，不是你给的${given}页面。`;
+  const body = outcome.summary.replace(/^\s*(?:\*\*)?部分完成(?:\*\*)?\s*[:：]\s*/, '');
+  return {
+    ...outcome,
+    summary: `${lead}\n\n${body}`,
+    partial: outcome.partial ?? {
+      found: 0,
+      wanted: 1,
+      missing: `${given}页面上的内容（用的是${from}的公开信息）`,
+    },
+  };
+}
+
 /** FIX-57 #5: the live status line shown while the run routes around a wall. */
 export const RESCUE_STATUS = {
   wall: '页面要登录或被拦下了，换个公开来源试试…',

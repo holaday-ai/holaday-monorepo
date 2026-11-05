@@ -821,6 +821,15 @@ export class TaskRepository {
     return extractMysqlAffectedRows(result) > 0;
   }
 
+  /** FIX-57 复审 #1-1d: a generated sidebar title, only where the task has none (renames win). */
+  async setGeneratedTitle(taskExternalId: string, title: string): Promise<boolean> {
+    const result = await this.db
+      .update(tasks)
+      .set({ title })
+      .where(and(eq(tasks.externalId, taskExternalId), isNull(tasks.title)));
+    return extractMysqlAffectedRows(result) > 0;
+  }
+
   /** FIX-57 #4: the owner's latest other requests, newest first (for next-step continuity). */
   async recentIntents(taskExternalId: string, limit = 5): Promise<string[]> {
     const [owner] = await this.db

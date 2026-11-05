@@ -33,7 +33,8 @@ export const NEXT_STEPS_SYSTEM_PROMPT = `你是用户的私人助理，刚替用
 要求：
 - 紧扣这次的目标和结果：具体到对象（哪只股票、哪个商品、哪个网站、哪段时间）和产出（对比表、提醒、摘要、清单…）。不要泛泛的「查看更多」「搜索相关新闻」「分析一下」。
 - 不重复这次已经回答过的内容；用户最近的任务可以帮你判断偏好和延续方向。
-- 结果是「部分完成」或「失败」时，第一条必须是补齐缺口的那一步（换个来源/换个时间/换个方式拿到缺的那部分）；失败的原因是需要登录或人机验证时，可以提议「你登录后我接着看」，但绝不提议替用户输入账号密码或绕过验证。
+- 结果是「部分完成」时，第一条必须是补齐缺口的那一步（换个时间/换个方式拿到缺的那部分）。
+- 结果是「失败」时，界面已经固定给出「你登录后我接着看」「换公开来源查」「再试一次」「你来完成验证」这几种做法，不要再提这几类（意思相同的也不要），只提别的真正有用的下一步，没有就返回空；绝不提议替用户输入账号密码或绕过验证。
 - label：助理主动提议的口吻，第一人称，简短自然，可以用问句，例如「今天开盘后我再帮你拉一次实时点位，跟昨天收盘对比？」，不超过 30 个字。
 - prompt：用户点了之后发给你的完整指令，用户的口吻，单独拿出来也能直接执行（写清对象、网站、要什么），不超过 150 个字。
 - 继承用户原话里的限制：用户说过「不要提交/不要购买/不要发送/不要点击…」，提议里绝不能出现相反的动作。
@@ -41,7 +42,9 @@ export const NEXT_STEPS_SYSTEM_PROMPT = `你是用户的私人助理，刚替用
 - 不提议换浏览器内核、伪装身份、换 IP、走代理或任何规避网站限制的做法。
 - 没有真正有价值的下一步就返回空数组，宁缺毋滥。
 
-只回复 JSON，不要其他文字，格式：{"steps":[{"label":"…","prompt":"…"}]}`;
+另外给这个任务起一个侧栏标题 title：从任务内容和结果里提炼的名词短语，2–14 个字，说清对象和要什么，例如「京东 iPhone 16 Pro 价格」「上证指数点位」「西湖开放时间」；不要「请使用云端浏览器」「帮我」这类话，不要网址。
+
+只回复 JSON，不要其他文字，格式：{"title":"…","steps":[{"label":"…","prompt":"…"}]}`;
 
 export interface GenerateNextStepsOptions {
   messagesAdapter: MessagesAdapter;
@@ -79,7 +82,15 @@ export function nextStepsUserMessage(opts: Omit<GenerateNextStepsOptions, 'messa
 }
 
 export async function generateNextSteps(opts: GenerateNextStepsOptions): Promise<NextStep[]> {
-  if (!opts.intent.trim() || !opts.summary.trim()) return [];
+  return (await generateNextStepsWithTitle(opts)).steps;
+}
+
+/** FIX-57 复审 #1-1d: the same call also names the task for the sidebar. */
+export async function generateNextStepsWithTitle(
+  opts: GenerateNextStepsOptions,
+): Promise<{ steps: NextStep[]; title: string | null }> {
+  const none = { steps: [] as NextStep[], title: null };
+  if (!opts.intent.trim() || !opts.summary.trim()) return none;
   let raw = '';
   try {
     const resp = await opts.messagesAdapter.create(
@@ -93,9 +104,21 @@ export async function generateNextSteps(opts: GenerateNextStepsOptions): Promise
     );
     for (const b of resp.content) if (b.type === 'text') raw += b.text;
   } catch {
-    return [];
+    return none;
   }
-  return filterNextSteps(opts.intent, parseNextSteps(raw));
+  return { steps: filterNextSteps(opts.intent, parseNextSteps(raw)), title: parseTaskTitle(raw) };
+}
+
+/** The sidebar title from the same JSON: 2–20 chars, no address, no browser preamble. */
+export function parseTaskTitle(raw: string): string | null {
+  const m = raw.match(/"title"\s*:\s*"([^"]{1,60})"/);
+  const title = m?.[1]
+    ?.replace(/[「」『』"“”]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!title || title.length < 2 || title.length > 20) return null;
+  if (/https?:|www\.|云端浏览器|请使用|帮我/.test(title) || INTERNAL_RE.test(title)) return null;
+  return title;
 }
 
 /** Internal references and provider names never reach the person. */

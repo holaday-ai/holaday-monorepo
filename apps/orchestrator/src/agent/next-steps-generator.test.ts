@@ -5,6 +5,7 @@ import {
   generateNextSteps,
   nextStepsUserMessage,
   parseNextSteps,
+  parseTaskTitle,
   validNextSteps,
 } from './next-steps-generator.js';
 
@@ -114,5 +115,14 @@ describe('FIX-57 #4 · next steps', () => {
     expect(validNextSteps([{ label: '整理对比表？', prompt: '整理对比表' }])).toBe(true);
     expect(validNextSteps([{ label: 'x'.repeat(49), prompt: '整理对比表' }])).toBe(false);
     expect(validNextSteps([{ label: '整理对比表？', prompt: 'x'.repeat(301) }])).toBe(false);
+  });
+
+  it('复审 #1-1d: the same answer names the task for the sidebar', () => {
+    expect(parseTaskTitle('{"title":"京东 iPhone 16 Pro 价格","steps":[]}')).toBe(
+      '京东 iPhone 16 Pro 价格',
+    );
+    expect(parseTaskTitle('{"title":"使用云端浏览器","steps":[]}')).toBeNull();
+    expect(parseTaskTitle('{"title":"https://item.jd.com","steps":[]}')).toBeNull();
+    expect(parseTaskTitle('{"steps":[]}')).toBeNull();
   });
 });

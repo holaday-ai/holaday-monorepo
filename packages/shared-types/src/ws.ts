@@ -876,6 +876,8 @@ export const serverSupercarSuggestionsSchema = z.object({
     .array(z.object({ label: z.string(), prompt: z.string() }))
     .max(3)
     .optional(),
+  /** FIX-57 复审 #1-1d: a sidebar title generated from the task (only set when none was). */
+  title: z.string().max(40).optional(),
 });
 
 export const serverSupercarThinkingSchema = z.object({

@@ -15,16 +15,52 @@ import type { UiStep, UiTask } from '@/types/task';
 import { friendlyHost } from '@/utils/step-humanize';
 import { classifyFriendlyFailure } from './failure-copy';
 
-/** Internal references and provider names never reach the person. */
-const INTERNAL_REF_RE =
-  /\b(?:tab|frame)_[\w-]+|\[?\bref\s*=\s*[\w-]+\]?|\b(?:firecrawl|brave(?:\s+search)?|playwright|browserbase|dashscope|qwen[\w.-]*|anthropic|claude[\w.-]*|openai|gpt-[\w.-]+|tavily|serpapi)\b/gi;
+/**
+ * Internal references and provider names never reach the person. They are replaced with
+ * plain words (复审 #1-3) so the sentence still reads: 「在 tab_2 上点击 e123 没有反应」 →
+ * 「在页面上点击那个按钮没有反应」. Web addresses are left alone (their `ref=` is the site's).
+ */
+const REF_REPLACEMENTS: ReadonlyArray<[RegExp, string]> = [
+  [/\[?\bref\s*=\s*e?\d+\]?/gi, ''],
+  [/\btab_[\w-]+/gi, '页面'],
+  [/\bframe_[\w-]+/gi, '内嵌框'],
+  [/(?<![\w.-])e\d{1,6}\b/g, '那个按钮'],
+  [/\b(?:firecrawl|brave(?:\s+search)?|playwright|browserbase|tavily|serpapi)\b/gi, ''],
+  [/\b(?:dashscope|anthropic|openai|qwen[\w.-]*|claude[\w.-]*|gpt-[\w.-]+)\b/gi, ' AI '],
+  [/通义千问|千问|通义|百炼/g, ' AI '],
+];
+const URL_SPLIT_RE = /(https?:\/\/[^\s)\]>"'，。）]+)/g;
 
 export function stripInternalRefs(text: string): string {
   return text
-    .replace(INTERNAL_REF_RE, '')
+    .split(URL_SPLIT_RE)
+    .map((part, i) => {
+      if (i % 2 === 1) return part;
+      let out = part;
+      for (const [re, to] of REF_REPLACEMENTS) out = out.replace(re, to);
+      return out;
+    })
+    .join('')
     .replace(/[（(]\s*[)）]/g, '')
+    .replace(/([\u4e00-\u9fa5，。、])\s+(?=[\u4e00-\u9fa5，。、])/g, '$1')
     .replace(/\s{2,}/g, ' ')
     .trim();
+}
+
+/** True when text (outside its web addresses) names an internal ref or a provider. */
+export function hasInternalRef(text: string): boolean {
+  const outside = text.replace(URL_SPLIT_RE, ' ');
+  return REF_REPLACEMENTS.some(([re]) =>
+    new RegExp(re.source, re.flags.replace('g', '')).test(outside),
+  );
+}
+
+/** 复审 #1-1c: a bare long address shown as a link reads as the site's short name. */
+export function shortLinkLabel(text: string, href: string): string {
+  const t = text.trim();
+  if (!/^(?:https?:\/\/|www\.)/i.test(t) || t.length <= 30) return text;
+  const host = hostOf(href) ?? hostOf(t.startsWith('www.') ? `https://${t}` : t);
+  return host ? siteLabel(host).trim() : text;
 }
 
 function hostOf(url: string | undefined | null): string | null {
@@ -38,6 +74,7 @@ function hostOf(url: string | undefined | null): string | null {
 }
 
 const MORE_SITES: ReadonlyArray<[RegExp, string]> = [
+  [/(^|\.)m\.jd\.com$/, '京东手机版'],
   [/(^|\.)baike\.baidu\.com$/, '百度百科'],
   [/(^|\.)map\.baidu\.com$/, '百度地图'],
   [/(^|\.)zhihu\.com$/, '知乎'],
@@ -219,8 +256,7 @@ export function normalizeNextSteps(
     const label = typeof item === 'string' ? item : item?.label;
     const prompt = typeof item === 'string' ? item : (item?.prompt ?? item?.label);
     if (typeof label !== 'string' || typeof prompt !== 'string') continue;
-    INTERNAL_REF_RE.lastIndex = 0;
-    if (new RegExp(INTERNAL_REF_RE.source, 'i').test(`${label} ${prompt}`)) continue;
+    if (hasInternalRef(`${label} ${prompt}`)) continue;
     const l = label.trim();
     const p = prompt.trim();
     if (l.length < 2 || p.length < 2 || seen.has(l)) continue;
@@ -261,16 +297,30 @@ export function failureOwnWords(errorText: string): string | null {
 }
 
 export interface FailureTurn {
-  /** First sentence: what did not happen. Always present (honesty). */
+  /** First sentence: what happened, and that the result was not obtained (honesty). */
   lead: string;
-  /** Where it got stuck, in one plain sentence. */
+  /** One more plain sentence, or empty. */
   why: string;
   options: TurnOption[];
 }
 
+/** Our own model / service failing — never the person's fault, never shown verbatim. */
+const SERVICE_RE =
+  /模型|千问|通义|百炼|AI 服务|能力正在迁移|服务尚未配置|provider|PROVIDER_|LLM|MessagesAdapter/i;
+
+/** What the agent said it could not get: 「无法读取该京东商品的标题和价格」 → 「京东商品的标题和价格」. */
+export function missingObject(own: string | null): string | null {
+  if (!own) return null;
+  const m = own.match(
+    /(?:无法|未能|没能|没有|不能)(?:读取|获取|拿到|读到|找到|查到|显示)(?:到)?(?:该|这个|此)?(.{2,30}?)(?:[。，,；;（(]|$)/,
+  );
+  return m?.[1]?.trim() || null;
+}
+
 /**
- * A failed or cancelled run as an assistant message. The lead always states that the
- * result was not obtained; the options lead with the step that fills the gap.
+ * A failed or cancelled run as an assistant message (复审 #1-1b): the first sentence says
+ * directly what happened and that the result was not obtained — no 「这次没拿到你要的结果：」
+ * preamble. Options lead with the step that fills the gap.
  */
 export function failureTurn(input: {
   status: UiTask['status'];
@@ -281,27 +331,29 @@ export function failureTurn(input: {
   canRetry: boolean;
 }): FailureTurn {
   const intent = input.intent.trim();
+  const retry: TurnOption | null = input.canRetry ? { kind: 'retry', label: '再试一次' } : null;
   if (input.status === 'cancelled') {
     return {
-      lead: '这次任务已取消，没有做完。',
+      lead: '任务已取消，没有做完。',
       why: '停之前拿到的内容我留在下面了。',
       options: input.canRetry ? [{ kind: 'retry', label: '从头再做一次' }] : [],
     };
   }
-  // Our own model service failing is never the person's fault, nor the agent's words.
-  if (/^\s*(?:任务执行失败[:：]\s*)?(?:模型服务|AI 服务|模型调用)/.test(input.errorText)) {
+  // 复审 #1-3: model / service errors get one fixed sentence, never the raw text.
+  if (SERVICE_RE.test(input.errorText)) {
     return {
-      lead: '这次没拿到你要的结果。',
-      why: '是我这边的模型服务临时出了问题，不是你的要求有问题；过一会儿再试一次通常就好。',
-      options: input.canRetry ? [{ kind: 'retry', label: '再试一次' }] : [],
+      lead: '我这边的服务刚刚出了点问题，这次没做完，你可以稍后再让我试一次。',
+      why: '',
+      options: retry ? [retry] : [],
     };
   }
   const own = failureOwnWords(input.errorText);
+  const what = missingObject(own);
+  const notGot = what ? `没拿到${what}` : '这次没拿到你要的内容';
   const friendly = classifyFriendlyFailure(input.errorText, {
     executionMode: input.executionMode,
   });
   const site = siteName(input.finalUrl, intent);
-  const lead = own ? `这次没拿到你要的结果：${own}。` : '这次没拿到你要的结果。';
   const publicSource: TurnOption | null = intent
     ? {
         kind: 'prompt',
@@ -309,23 +361,20 @@ export function failureTurn(input: {
         prompt: `不用登录，换一个不需要登录的公开来源（站内搜索页、比价网站或品牌官网）帮我查：${intent}。答案里注明信息来自哪个网站。`,
       }
     : null;
-  const retry: TurnOption | null = input.canRetry ? { kind: 'retry', label: '再试一次' } : null;
-  // FIX-57 #5: the run already routed around the wall (another source, a search) — say so,
-  // and do not offer the same again.
+  // FIX-57 #5: the run already routed around the wall — say so, and do not offer it again.
   const triedElsewhere =
     /替代(?:来源|路线|渠道)|换(?:了|个|一个)?(?:公开)?(?:来源|渠道|网站)|尝试.{0,16}搜索|搜索.{0,30}均无|均无(?:返回)?结果|比价网站.{0,10}(?:都|也)?(?:没有|无)/.test(
       input.errorText,
     );
-  const tried = triedElsewhere ? '我已经换公开来源（搜索、比价站）找过，也没找到。' : '';
+  const tried = triedElsewhere ? '，我换了公开来源也没找到' : '';
   const others = triedElsewhere ? null : publicSource;
   const title = friendly.title;
-  // A risk-control block reads like a wall to the person: same words, same ways on.
+  const where = site ?? '这个网站';
   if (/登录/.test(title) || /风控|拦截|拦下/.test(input.errorText)) {
+    const blocked = /风控|拦截|拦下|403|异常提示/.test(input.errorText);
     return {
-      lead,
-      why: /风控|拦截|拦下|403|异常提示/.test(input.errorText)
-        ? `${site ?? '这个网站'}把页面拦下了，要登录或验证后才显示内容；我不能替你登录，也不会绕过它。${tried}`
-        : `${site ?? '这个网站'}要登录才能看到这部分内容，我不能替你登录，也不会绕过它。${tried}`,
+      lead: `${where}${blocked ? '把这个页面拦下了，要登录或验证后才显示' : '这个页面要登录才能看'}${tried}，所以${notGot}。`,
+      why: '我不能替你登录，也不会绕过它。',
       options: [
         intent
           ? {
@@ -340,8 +389,8 @@ export function failureTurn(input: {
   }
   if (/验证/.test(title)) {
     return {
-      lead,
-      why: `${site ?? '网站'}要求做人机验证，这一步只能由你本人完成，我不会代做。${tried}`,
+      lead: `${site ?? '网站'}要求先做人机验证，这一步只能你本人来${tried}，所以${notGot}。`,
+      why: '我不会代做验证。',
       options: [
         intent
           ? {
@@ -356,18 +405,41 @@ export function failureTurn(input: {
   }
   if (/超时|响应|连接|打开这个网站|浏览器|页面正在切换|休眠|中断|长时间/.test(title)) {
     return {
-      lead,
-      why: `${site ?? '网站'}这次没有正常响应（${title}），不是你的问题。${tried}`,
+      lead: `${site ?? '网站'}这次没有正常打开（${title}）${tried}，所以${notGot}。`,
+      why: '不是你的问题。',
       options: [retry, others].filter((o): o is TurnOption => Boolean(o)),
     };
   }
   return {
-    lead,
-    why: own
-      ? '我这次没能把它做完。可以让我再试一次，或者把要求说得更具体一点（比如给个例子）。'
-      : `${title}。${friendly.subtitle}`,
+    lead: own ? `${own}，这次没做完。` : `这次没做完：${title}。`,
+    why: own ? '可以让我再试一次，或者把要求说得更具体一点（比如给个例子）。' : friendly.subtitle,
     options: [retry].filter((o): o is TurnOption => Boolean(o)),
   };
+}
+
+/** 复审 #1-1a: what an option or a next step offers, so the same offer is shown once. */
+export function offerKind(label: string): string | null {
+  if (/登录|手动打开|你(?:自己|亲自)?打开|你来操作|接管/.test(label)) return 'handover';
+  if (/验证/.test(label)) return 'verify';
+  if (
+    /公开|比价|搜索页|换(?:个|一个)?(?:来源|渠道|网站|平台)|别的(?:来源|渠道|网站|平台)/.test(label)
+  )
+    return 'public';
+  if (/再试|重试|重新(?:执行|打开|试|读|抓)|从头再|稍后再/.test(label)) return 'retry';
+  return null;
+}
+
+/** Next steps that do not repeat an option already offered (same kind or same words). */
+export function withoutRepeatedOffers(
+  steps: readonly NextStepOption[],
+  options: readonly TurnOption[],
+): NextStepOption[] {
+  const kinds = new Set(options.map((o) => offerKind(o.label)).filter(Boolean));
+  const labels = new Set(options.map((o) => o.label));
+  return steps.filter((s) => {
+    const kind = offerKind(s.label);
+    return !labels.has(s.label) && !(kind && kinds.has(kind));
+  });
 }
 
 /** Screenshots are evidence (they live in 「查看过程」); other files are the product. */
