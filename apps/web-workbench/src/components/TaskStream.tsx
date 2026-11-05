@@ -481,9 +481,10 @@ function AgentBlock({
          *  so the transition to TerminalSummary is visually a
          *  no-op — only the supplementary controls (copy button,
          *  suggestion chips) light up when resultText lands. */}
-        {!task.resultText && (progressMessage || streamingText) && (
+        {!task.resultText && ((terminal && progressMessage) || streamingText) && (
           <div className="text-foreground">
-            {progressMessage && !streamingText && (
+            {/* FIX-57 #3: while running, the status line above carries the progress note. */}
+            {terminal && progressMessage && !streamingText && (
               <div className="text-xs text-muted-foreground">
                 <span className="inline-block animate-pulse">●</span> {progressMessage}
               </div>
@@ -1101,14 +1102,23 @@ function AwaitingUserBanner({
     [confirming, mountedRef, taskId, toast],
   );
   return (
-    <div className="rounded-lg border border-[#FFC910]/55 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FFC910]/35 dark:bg-card/85">
-      <div className="flex items-start gap-2.5">
-        <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[#57479C]" />
+    // FIX-57 #3: when the task needs the person, the live status line becomes this one
+    // request — same weight as the status line, with the way to act right next to it.
+    <div
+      data-testid="awaiting-request"
+      className="border-l-2 border-[#FFC910] py-1 pl-3 dark:border-[#FFC910]/70"
+    >
+      <div className="flex items-start gap-2">
+        <span aria-hidden className="relative mt-1.5 flex h-2 w-2 shrink-0">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#FFC910]/60 motion-reduce:animate-none" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-[#FFC910]" />
+        </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-[#57479C]">
+          <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+            <Icon className="h-3.5 w-3.5 shrink-0 text-[#57479C]" />
             {copy.title}
           </div>
-          <div className="mt-1 break-words text-sm leading-relaxed text-foreground">
+          <div className="mt-1 break-words text-sm leading-relaxed text-foreground/85">
             <AwaitingMarkdown text={message.body} />
           </div>
           {message.followUp && (

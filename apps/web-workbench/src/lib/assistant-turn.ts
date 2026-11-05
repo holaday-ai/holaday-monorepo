@@ -37,6 +37,30 @@ function hostOf(url: string | undefined | null): string | null {
   }
 }
 
+const MORE_SITES: ReadonlyArray<[RegExp, string]> = [
+  [/(^|\.)baike\.baidu\.com$/, '百度百科'],
+  [/(^|\.)map\.baidu\.com$/, '百度地图'],
+  [/(^|\.)zhihu\.com$/, '知乎'],
+  [/(^|\.)amap\.com$/, '高德地图'],
+  [/(^|\.)amazon\.[a-z.]+$/, '亚马逊'],
+  [/(^|\.)y\.qq\.com$/, 'QQ 音乐'],
+  [/(^|\.)sohu\.com$/, '搜狐'],
+  [/(^|\.)sina\.com(\.cn)?$/, '新浪'],
+  [/(^|\.)163\.com$/, '网易'],
+  [/(^|\.)investing\.com$/, '英为财情'],
+  [/(^|\.)10jqka\.com\.cn$/, '同花顺'],
+  [/(^|\.)youtube\.com$/, 'YouTube'],
+  [/(^|\.)wikipedia\.org$/, '维基百科'],
+  [/(^|\.)smzdm\.com$/, '什么值得买'],
+];
+
+/** A site's name for a sentence: 东方财富 / 知乎, or the bare host spaced off. */
+export function siteLabel(host: string): string {
+  const h = host.replace(/^www\./, '').toLowerCase();
+  const named = MORE_SITES.find(([re]) => re.test(h))?.[1] ?? friendlyHost(h);
+  return /[\u4e00-\u9fa5]/.test(named) ? named : ` ${named} `;
+}
+
 /** The site a step sequence is on: the latest `打开 <url>` navigate. */
 export function currentSiteLabel(steps: readonly UiStep[]): string | null {
   for (let i = steps.length - 1; i >= 0; i--) {
@@ -44,7 +68,7 @@ export function currentSiteLabel(steps: readonly UiStep[]): string | null {
     if (step?.actionKind !== 'navigate') continue;
     const url = step.actionSummary?.match(/https?:\/\/\S+/)?.[0];
     const host = hostOf(url);
-    if (host) return friendlyHost(host);
+    if (host) return siteLabel(host);
   }
   return null;
 }
@@ -109,7 +133,7 @@ export function liveStatusText(input: {
     case 'navigate': {
       const url = last.actionSummary?.match(/https?:\/\/\S+/)?.[0];
       const host = hostOf(url);
-      return `正在打开${host ? friendlyHost(host) : '页面'}…`;
+      return `正在打开${host ? siteLabel(host) : '页面'}…`.replace(/\s+…$/, '…');
     }
     case 'read_url':
       return `在读取${on}的内容…`;
@@ -195,8 +219,10 @@ export function normalizeNextSteps(
     const label = typeof item === 'string' ? item : item?.label;
     const prompt = typeof item === 'string' ? item : (item?.prompt ?? item?.label);
     if (typeof label !== 'string' || typeof prompt !== 'string') continue;
-    const l = stripInternalRefs(label);
-    const p = stripInternalRefs(prompt);
+    INTERNAL_REF_RE.lastIndex = 0;
+    if (new RegExp(INTERNAL_REF_RE.source, 'i').test(`${label} ${prompt}`)) continue;
+    const l = label.trim();
+    const p = prompt.trim();
     if (l.length < 2 || p.length < 2 || seen.has(l)) continue;
     seen.add(l);
     out.push({ label: l, prompt: p });
@@ -257,9 +283,17 @@ export function failureTurn(input: {
   const intent = input.intent.trim();
   if (input.status === 'cancelled') {
     return {
-      lead: '这次任务停下了，没有做完。',
+      lead: '这次任务已取消，没有做完。',
       why: '停之前拿到的内容我留在下面了。',
       options: input.canRetry ? [{ kind: 'retry', label: '从头再做一次' }] : [],
+    };
+  }
+  // Our own model service failing is never the person's fault, nor the agent's words.
+  if (/^\s*(?:任务执行失败[:：]\s*)?(?:模型服务|AI 服务|模型调用)/.test(input.errorText)) {
+    return {
+      lead: '这次没拿到你要的结果。',
+      why: '是我这边的模型服务临时出了问题，不是你的要求有问题；过一会儿再试一次通常就好。',
+      options: input.canRetry ? [{ kind: 'retry', label: '再试一次' }] : [],
     };
   }
   const own = failureOwnWords(input.errorText);
@@ -320,7 +354,9 @@ export function failureTurn(input: {
   }
   return {
     lead,
-    why: own ? friendly.subtitle.replace(/^请/, '可以') : `${title}。${friendly.subtitle}`,
+    why: own
+      ? '我这次没能把它做完。可以让我再试一次，或者把要求说得更具体一点（比如给个例子）。'
+      : `${title}。${friendly.subtitle}`,
     options: [retry].filter((o): o is TurnOption => Boolean(o)),
   };
 }
@@ -343,10 +379,13 @@ export function stepTimeline(
     const step = steps[i];
     if (!step) continue;
     const said = step.actionKind === 'text' ? stripInternalRefs(step.actionSummary ?? '') : '';
-    const text = (
-      said && said !== 'text' ? said : liveStatusText({ steps: steps.slice(0, i + 1) })
-    ).replace(/…$/, '');
-    if (!text || text === '正在思考下一步' || text === '正在处理') continue;
+    const live = said && said !== 'text' ? said : liveStatusText({ steps: steps.slice(0, i + 1) });
+    if (live === '正在思考下一步…' || live === '正在处理…') continue;
+    // Before any page opened there is nothing to read yet.
+    if (!said && live === '在读页面的内容…') continue;
+    // The timeline tells what was done: 「打开亚马逊」, not 「正在打开亚马逊…」.
+    const text = said ? said : live.replace(/…$/, '').replace(/^正在|^在(?=读|.+上)/, '');
+    if (!text) continue;
     const prev = out[out.length - 1];
     if (prev && prev.text === text) {
       prev.status = step.status;
