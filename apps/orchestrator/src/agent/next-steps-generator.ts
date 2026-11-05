@@ -34,7 +34,8 @@ export const NEXT_STEPS_SYSTEM_PROMPT = `你是用户的私人助理，刚替用
 - 紧扣这次的目标和结果：具体到对象（哪只股票、哪个商品、哪个网站、哪段时间）和产出（对比表、提醒、摘要、清单…）。不要泛泛的「查看更多」「搜索相关新闻」「分析一下」。
 - 不重复这次已经回答过的内容；用户最近的任务可以帮你判断偏好和延续方向。
 - 结果是「部分完成」时，第一条必须是补齐缺口的那一步（换个时间/换个方式拿到缺的那部分）。
-- 不要提议重试刚被拦下或打不开的同一个页面（如「再试一次访问 PC 版页面」）；不要跳到用户没提过、和任务明显无关的平台（用户问京东就别提亚马逊、eBay 这类）。
+- 不要提议重新打开刚被拦下或打不开的那个页面（包括它的电脑版、原链接）；补缺口可以去同一网站的别的页面（如「再打开第 3 条商品页拿价格」）。
+- 平台要和用户的任务对得上：用户给的链接域名就代表用户在用的平台（如 item.jd.com 就是京东）。不要跳到用户没提过、和任务无关的平台；用户自己说了要比价、跟其他平台比，才可以提其他平台。
 - 结果是「失败」时，界面已经固定给出「你登录后我接着看」「换公开来源查」「再试一次」「你来完成验证」这几种做法，不要再提这几类（意思相同的也不要），只提别的真正有用的下一步，没有就返回空；绝不提议替用户输入账号密码或绕过验证。
 - label：助理主动提议的口吻，第一人称，简短自然，可以用问句，例如「今天开盘后我再帮你拉一次实时点位，跟昨天收盘对比？」，不超过 30 个字。
 - prompt：用户点了之后发给你的完整指令，用户的口吻，单独拿出来也能直接执行（写清对象、网站、要什么），不超过 150 个字。
@@ -58,6 +59,8 @@ export interface GenerateNextStepsOptions {
   missing?: string | null;
   /** The person's latest other requests, newest first. */
   recentIntents?: readonly string[];
+  /** 复审 #3: addresses that stopped the run (never offered again). */
+  blockedUrls?: readonly string[];
 }
 
 const OUTCOME_LABEL: Record<NextStepsOutcome, string> = {
@@ -71,8 +74,22 @@ export function nextStepsUserMessage(opts: Omit<GenerateNextStepsOptions, 'messa
     .map((intent) => intent.replace(/\s+/g, ' ').trim().slice(0, 80))
     .filter(Boolean)
     .slice(0, 5);
+  const domains = [
+    ...new Set(
+      (opts.intent.match(/https?:\/\/[^\s)）」，。]+/g) ?? [])
+        .map((u) => {
+          try {
+            return new URL(u).hostname.replace(/^www\./, '');
+          } catch {
+            return '';
+          }
+        })
+        .filter(Boolean),
+    ),
+  ];
   return [
     `用户这次的要求：${opts.intent}`,
+    domains.length ? `用户给的链接域名：${domains.join('、')}` : '',
     `结果：${OUTCOME_LABEL[opts.outcome]}`,
     `${opts.outcome === 'failed' ? '失败原因' : '结果内容'}：${opts.summary.slice(0, 1200)}`,
     opts.missing ? `没拿到的部分：${opts.missing.slice(0, 300)}` : '',
@@ -109,8 +126,7 @@ export async function generateNextStepsWithTitle(
   }
   return {
     steps: relevantNextSteps(
-      opts.intent,
-      opts.outcome,
+      opts.blockedUrls ?? [],
       filterNextSteps(opts.intent, parseNextSteps(raw)),
     ),
     title: parseTaskTitle(raw),
@@ -172,26 +188,33 @@ export function parseNextSteps(raw: string): NextStep[] {
 }
 
 /** Shape, safety and the user's own prohibitions; at most 3, no duplicates. */
-/** Shopping / content platforms: a step may only name ones the person's request names. */
-const PLATFORM_RE =
-  /京东|淘宝|天猫|拼多多|亚马逊|amazon|ebay|best\s*buy|bestbuy|苏宁|唯品会|得物|闲鱼|小红书|抖音|知乎|微博|b站|哔哩哔哩|youtube|携程|美团|大众点评|高德|百度地图/gi;
-/** Retrying the very page that just stopped the run. */
-const RETRY_SAME_PAGE_RE =
-  /(?:再|重新|重)(?:试|次)?.{0,6}(?:访问|打开|进入|加载|读取)|(?:再试|重试).{0,8}(?:pc|电脑版|原页面|原链接|那个页面|这个页面|该页面)/i;
+/** A web address as host + path, for comparing a step's link with the walled one. */
+function pageOf(url: string): string | null {
+  try {
+    const u = new URL(url);
+    return `${u.hostname.replace(/^(?:(?:www|m|item)\.)+/, '')}${u.pathname.replace(/\/+$/, '')}`.toLowerCase();
+  } catch {
+    return null;
+  }
+}
 
-/** 复审 #2-2: no retry of the walled page, no unrelated platform. */
+/**
+ * 复审 #3: the one hard rule — no step that reopens the address that just stopped the run
+ * (judged by address, not wording). Which platforms fit is the model's call (the prompt
+ * gives it the request and its link domains).
+ */
 export function relevantNextSteps(
-  intent: string,
-  outcome: NextStepsOutcome,
+  blockedUrls: readonly string[],
   steps: readonly NextStep[],
 ): NextStep[] {
-  const named = new Set((intent.match(PLATFORM_RE) ?? []).map((p) => p.toLowerCase()));
+  const blocked = new Set(blockedUrls.map(pageOf).filter((p): p is string => Boolean(p)));
+  if (blocked.size === 0) return [...steps];
   return steps.filter((step) => {
-    const text = `${step.label} ${step.prompt}`;
-    if (outcome !== 'completed' && RETRY_SAME_PAGE_RE.test(step.label)) return false;
-    if (named.size === 0) return true;
-    const mentioned = (text.match(PLATFORM_RE) ?? []).map((p) => p.toLowerCase());
-    return mentioned.every((p) => named.has(p));
+    const links = `${step.label} ${step.prompt}`.match(/https?:\/\/[^\s)）」，。]+/g) ?? [];
+    return !links.some((link) => {
+      const page = pageOf(link);
+      return page !== null && blocked.has(page);
+    });
   });
 }
 

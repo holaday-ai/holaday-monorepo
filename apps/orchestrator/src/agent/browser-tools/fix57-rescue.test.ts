@@ -296,14 +296,32 @@ describe('复审 #2-1 · source lines the code already wrote', () => {
     '从[京东手机版](https://item.m.jd.com/p/1.html)读到的信息如下：',
     '从京东手机版读到的信息如下：',
     '以下是从京东手机版获取的商品信息：',
-    '信息来源：京东手机版 https://item.m.jd.com/p/1.html',
-    '信息来自京东移动版商品页。',
   ])('drops %s', (line) => {
     expect(withoutSourceLines(`${line}\n\n- 价格：¥7??9`)).toBe('- 价格：¥7??9');
   });
-  it('keeps sentences that only mention a page', () => {
-    const t = '从页面上看到的价格是 ¥99，标题被截断了。';
+  it.each([
+    '从页面上看到的价格是 ¥99，标题被截断了。',
+    '信息来自 2024 年 10 月的页面快照，可能不是最新价格。',
+    '数据来源：国家统计局 2025 年公报。',
+  ])('复审 #3-1: keeps a line that says when or from where else: %s', (t) => {
     expect(withoutSourceLines(t)).toBe(t);
+  });
+});
+
+describe('复审 #3 · a login asked for with reason 「other」 is routed around too', () => {
+  it('request_human(other, 「需要登录」) gets the rescue note first', async () => {
+    const { seen } = await run(JD, [
+      { name: 'navigate', input: { url: 'https://item.jd.com/100142621606.html' } },
+      {
+        name: 'request_human',
+        input: {
+          reason: 'other',
+          message: '京东需要登录才能查看这个商品页面，请你自己登录后告诉我继续。',
+        },
+      },
+      { name: 'finish', input: { status: 'failed', summary: '公开来源也没有价格' } },
+    ]);
+    expect(seen).toContain(ROUTE);
   });
 });
 

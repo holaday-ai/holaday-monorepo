@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../llm/messages-adapter.js';
 import {
+  NEXT_STEPS_SYSTEM_PROMPT,
   filterNextSteps,
   generateNextSteps,
   nextStepsUserMessage,
@@ -127,17 +128,47 @@ describe('FIX-57 #4 · next steps', () => {
     expect(parseTaskTitle('{"steps":[]}')).toBeNull();
   });
 
-  it('复审 #2-2: no retry of the walled page, no platform the request never named', () => {
+  it("复审 #3: the only hard rule — never reopen the walled address; platforms are the model's call", () => {
+    const walled = ['https://item.jd.com/100142621606.html'];
     const steps = [
-      { label: '再试一次访问 PC 版页面？', prompt: '重新打开 https://item.jd.com/1.html' },
-      { label: '查亚马逊同款价格对比？', prompt: '在亚马逊搜同款 iPhone 16 Pro 价格' },
-      { label: '你登录京东后我接着看完整价格？', prompt: '我登录京东后继续读价格' },
-      { label: '去苹果官网核对一下官方定价？', prompt: '在苹果官网查 iPhone 16 Pro 128GB 定价' },
+      {
+        label: '再打开那个京东页面试试？',
+        prompt: '重新打开 https://item.jd.com/100142621606.html 读价格',
+      },
+      {
+        label: '再打开第 3 条商品页拿价格？',
+        prompt: '打开 https://www.amazon.sg/dp/B0F8374PX3 读第 3 个商品的价格',
+      },
+      {
+        label: '再看亚马逊上第 3 个的价格？',
+        prompt: '在 amazon.com 搜 usb c cable，读第 3 个商品的价格',
+      },
+      { label: '顺便看看淘宝和拼多多的同款？', prompt: '在淘宝、拼多多搜同款，列出价格' },
     ];
+    expect(relevantNextSteps(walled, steps).map((s) => s.label)).toEqual([
+      '再打开第 3 条商品页拿价格？',
+      '再看亚马逊上第 3 个的价格？',
+      '顺便看看淘宝和拼多多的同款？',
+    ]);
+    // The mobile page of the same item is the same address.
     expect(
-      relevantNextSteps('打开京东商品页读标题和价格', 'partial', steps).map((s) => s.label),
-    ).toEqual(['你登录京东后我接着看完整价格？', '去苹果官网核对一下官方定价？']);
-    // A completed answer may offer to look again later; with no platform named, any may appear.
-    expect(relevantNextSteps('上证指数现在多少点', 'completed', steps)).toHaveLength(4);
+      relevantNextSteps(walled, [
+        { label: '手机版再试？', prompt: 'https://item.m.jd.com/100142621606.html' },
+      ]),
+    ).toEqual([]);
+    expect(relevantNextSteps([], steps)).toHaveLength(4);
+  });
+
+  it('复审 #3: the model is told which platform the link is and when other platforms fit', () => {
+    const msg = nextStepsUserMessage({
+      intent: '打开 https://item.jd.com/100142621606.html 读商品标题和价格',
+      outcome: 'partial',
+      summary: '价格被打码',
+    });
+    expect(msg).toContain('用户给的链接域名：item.jd.com');
+    expect(NEXT_STEPS_SYSTEM_PROMPT).toContain('item.jd.com 就是京东');
+    expect(NEXT_STEPS_SYSTEM_PROMPT).toContain(
+      '用户自己说了要比价、跟其他平台比，才可以提其他平台',
+    );
   });
 });

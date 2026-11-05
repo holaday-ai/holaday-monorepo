@@ -99,7 +99,8 @@ ${FULL_READ_RULE_4}
 10. 用户要 N 条/前 N 个时，答案按 1. 2. 3. 编号列满 N 条；不够就继续滚动、翻页或再读取，确实只有更少时如实写「只找到 M 条」。
 11. 用户要求某种控件（如日期控件）而当前页面没有时，换一个有该控件的页面去操作，不要用别的控件（如 time 时间控件）代替。用户点名了网站时只在这些网站内找（只看表单页，不打开登录、注册、付款页；登录页的账号、密码框不算要填的表单，碰到登录页就退回去换别的页面，不要为此请求登录），都没有就把该网站表单上其余可填的项照样填好（不提交）并截图，再如实说明缺什么，不要换到别的网站；没点名时才换别的公开页面。
 12. 查天气等实时数值时，结果页没有天气卡片就打开一个天气来源页面并读取（snapshot/get_page_text），每个值照该页原样写（页面写「82°」就写「82°」，不自己加单位或换算）；页面上读不到的项写「未读到」，不用搜索摘要或记忆补。
-13. 动作返回 stale_ref（ref 已失效）时，先 snapshot，再用新 ref 把同一个动作重做一次（同一个字段、同一个值），不要改用别的方式代替。`;
+13. 动作返回 stale_ref（ref 已失效）时，先 snapshot，再用新 ref 把同一个动作重做一次（同一个字段、同一个值），不要改用别的方式代替。
+14. summary 是写给用户看的，像跟人说话：不写「照页面原样」「名称：…；价格：…」这类格式说明，不提工具名；商品名太长时只写开头到关键规格那一段再加「…」（截取，不改字）；商品卡片没有主推价、只列了卖家报价时，说「这款没有主推价，有 N 个卖家报价 S$x」。`;
 
 /** The system prompt for the current read mode: rule 4 follows `BROWSER_FULL_PAGE_READ`. */
 export function unifiedBrowserSystemPrompt(): string {
@@ -2109,8 +2110,13 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             steps: step + 1,
           };
         const message = typeof args.message === 'string' ? args.message : '需要你接管浏览器。';
-        // FIX-57 #5: a login / permission stop on a read task first tries another public route.
-        if (reason === 'login' || reason === 'permission') {
+        // FIX-57 #5: a login / permission stop on a read task first tries another public route
+        // (复审 #3: also when the reason is 「other」 but the message asks for a login).
+        if (
+          reason === 'login' ||
+          reason === 'permission' ||
+          (reason === 'other' && /登录|登陆|log\s*in|sign\s*in/i.test(message))
+        ) {
           const note = await startRescue(step, 'wall');
           if (note) {
             results.push(toolResult(call.id, note, true));
@@ -3047,8 +3053,10 @@ export function rescuedAnswer(
  * FIX-57 复审 #2-1: the code says where a rescued answer came from; the model's own source
  * lines (「从[京东手机版](…)读到的信息如下：」「信息来自…」「来源：…」) would say it twice.
  */
+// 复审 #3-1: only a pure lead-in (「从[京东手机版](…)读到的信息如下：」) — a line that says
+// when or from where else (「信息来自 2024 年 10 月的页面快照…」「数据来源：国家统计局…」) stays.
 const SOURCE_LINE_RE =
-  /^\s*(?:(?:这是|以下(?:是|为)?|下面是)?\s*从\s*(?:\[[^\]]+\]\([^)]*\)|[^\s，。,:：]{1,24})\s*(?:上|中|里)?(?:查到|读到|读取到|获取到?|拿到|看到)的?(?:(?:商品|页面|公开)?(?:信息|内容|数据))?(?:如下)?\s*[:：。.]?|(?:信息|数据|内容)?来源\s*[:：].{0,120}|信息来自.{0,80}?[。.]?)\s*$/u;
+  /^\s*(?:这是|以下(?:是|为)?|下面是)?\s*从\s*(?:\[[^\]]+\]\([^)]*\)|[^\s，。,:：]{1,24})\s*(?:上|中|里)?(?:查到|读到|读取到|获取到?|拿到|看到)的?(?:(?:商品|页面|公开)?(?:信息|内容|数据))?\s*(?:如下)?\s*[:：]\s*$/u;
 
 export function withoutSourceLines(text: string): string {
   return text

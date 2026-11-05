@@ -4443,7 +4443,9 @@ export const tasksRouter = router({
                     generateTerminalStatus === 'completed' &&
                     outcome.status === 'completed'
                   ) {
-                    const summary = outcome.summary;
+                    // FIX-57 复审 #3: the saved answer went through deliverableAnswer — compare against
+                    // the same text, or the suggestions are judged stale and never saved.
+                    const summary = deliverableAnswer(outcome.summary) ?? outcome.summary;
                     void runTaskBackground(ctx, async (ctx) =>
                       publishCoreTaskSuggestions({
                         wiring: modelRuntimeWiring,
@@ -5247,7 +5249,9 @@ export const tasksRouter = router({
                     scrapeTerminalStatus === 'completed' &&
                     outcome.status === 'completed'
                   ) {
-                    const summary = outcome.summary;
+                    // FIX-57 复审 #3: the saved answer went through deliverableAnswer — compare against
+                    // the same text, or the suggestions are judged stale and never saved.
+                    const summary = deliverableAnswer(outcome.summary) ?? outcome.summary;
                     void runTaskBackground(ctx, async (ctx) =>
                       publishCoreTaskSuggestions({
                         wiring: modelRuntimeWiring,
@@ -8112,6 +8116,14 @@ export const tasksRouter = router({
                                 summary: nextStepsSummary,
                                 missing,
                                 recentIntents,
+                                // 复审 #3: a partial or failed run was stopped at the
+                                // address the person gave — never offered again.
+                                ...(nextStepsOutcome === 'completed'
+                                  ? {}
+                                  : {
+                                      blockedUrls:
+                                        input.intent.match(/https?:\/\/[^\s)）」，。]+/g) ?? [],
+                                    }),
                               });
                               // FIX-57 复审 #1-1d: the sidebar gets a real name, never over a rename.
                               const titled = title
@@ -11276,7 +11288,9 @@ export const tasksRouter = router({
                     status: 'completed',
                     ...(outcome.summary ? { summary: outcome.summary } : {}),
                   });
-                  const summary = outcome.summary;
+                  // FIX-57 复审 #3: the saved answer went through deliverableAnswer — compare against
+                  // the same text, or the suggestions are judged stale and never saved.
+                  const summary = deliverableAnswer(outcome.summary) ?? outcome.summary;
                   void runTaskBackground(ctx, async (ctx) =>
                     publishCoreTaskSuggestions({
                       wiring: modelRuntimeWiring,

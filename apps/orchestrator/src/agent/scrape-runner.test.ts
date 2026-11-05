@@ -177,7 +177,7 @@ describe('runScrapeTask — Qwen synthesis', () => {
       firecrawl: { calls: 1, credits: 1 },
     });
     expect(deltas).toEqual(['整理后的结果']);
-    expect(progress).toEqual(['正在抓取网页数据…', '正在分析整理…']);
+    expect(progress).toEqual(['正在抓取网页数据…', '在整理答案…']);
   });
 
   it('routes a non-URL intent through Firecrawl search', async () => {
@@ -346,7 +346,7 @@ describe('fresh results for questions about now', () => {
     const request = JSON.stringify(vi.mocked(adapter.stream).mock.calls.at(0)?.[0]);
     expect(request).toContain('v24.22.1');
     expect(request).not.toContain('v24.22.0');
-    expect(request).toMatch(/抓取时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
+    expect(request).toMatch(/读取时间：北京时间 \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
     expect(outcome.firecrawl).toEqual({ calls: 2, credits: 2 });
   });
   it('a question that is not about now keeps the cached copy, labelled with its age', async () => {
@@ -355,6 +355,8 @@ describe('fresh results for questions about now', () => {
     await run({ intent: '搜索 Node.js 的下载页面介绍', adapter, firecrawl });
     expect(firecrawl.scrape).not.toHaveBeenCalled();
     const request = JSON.stringify(vi.mocked(adapter.stream).mock.calls.at(0)?.[0]);
-    expect(request).toContain(`抓取时间：${twoDaysAgo.slice(0, 16).replace('T', ' ')} UTC`);
+    expect(request).toContain(
+      `读取时间：北京时间 ${new Date(Date.parse(twoDaysAgo) + 8 * 3600_000).toISOString().slice(0, 16).replace('T', ' ')}`,
+    );
   });
 });
