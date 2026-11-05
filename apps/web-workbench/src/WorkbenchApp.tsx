@@ -42,6 +42,7 @@ import {
   isLiveBrowserTaskForWorkbench,
   isWorkbenchTerminalTask,
   mobileBrowserSheetAutoOpenState,
+  mobileStaysInChat,
   preserveBrowserRecordAfterLive,
   taskFrameForWorkbench,
 } from '@/lib/workbench-state';
@@ -589,9 +590,17 @@ export function WorkbenchApp(): JSX.Element {
     }
   }, [isMobile, selectedTaskId, sidePanelMode, selectedNeedsBrowser]);
 
+  // FIX-57 复审 #3 (BOSS run, ~630px): on a narrow screen a running browser task used to open
+  // the workbench — and with it the full-screen sheet — by itself. There the conversation
+  // stays in front; the sheet opens when the person taps the browser button or must act.
+  const staysInChat = mobileStaysInChat({
+    isMobile,
+    override: sidePanelOverride,
+    needsUser: selectedNeedsBrowser,
+  });
   React.useEffect(() => {
-    if (sidePanelMode !== 'closed') openBrowserWorkbench();
-  }, [openBrowserWorkbench, sidePanelMode]);
+    if (sidePanelMode !== 'closed' && !staysInChat) openBrowserWorkbench();
+  }, [openBrowserWorkbench, sidePanelMode, staysInChat]);
 
   const previousBrowserWorkbenchOpenRef = React.useRef(browserWorkbenchOpen);
   React.useEffect(() => {

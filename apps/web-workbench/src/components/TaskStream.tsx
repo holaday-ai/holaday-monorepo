@@ -2692,7 +2692,7 @@ function TerminalSummary({
           !unverifiedSplit.unverified &&
           !hasProcess && (
             <p className="m-0 text-xs leading-5 text-muted-foreground">
-              这次是直接联网检索后整理的，没有打开网页操作，也没有更多过程可看。
+              这次是直接查数据后整理的，没有打开网页操作，也没有更多过程可看。
             </p>
           )}
         {(failureDetail || refund) && (

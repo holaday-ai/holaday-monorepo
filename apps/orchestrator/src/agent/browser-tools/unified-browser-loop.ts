@@ -450,7 +450,7 @@ export async function runUnifiedBrowserLoop(
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {
     case 'completed':
-      return { ...outcome, summary: strip(outcome.summary) };
+      return { ...outcome, summary: strip(plainAnswer(outcome.summary)) };
     case 'failed':
       return { ...outcome, reason: strip(outcome.reason) };
     case 'awaiting_user':
@@ -3058,13 +3058,61 @@ export function rescuedAnswer(
 const SOURCE_LINE_RE =
   /^\s*(?:这是|以下(?:是|为)?|下面是)?\s*从\s*(?:\[[^\]]+\]\([^)]*\)|[^\s，。,:：]{1,24})\s*(?:上|中|里)?(?:查到|读到|读取到|获取到?|拿到|看到)的?(?:(?:商品|页面|公开)?(?:信息|内容|数据))?\s*(?:如下)?\s*[:：]\s*$/u;
 
+// 复审 #3 (代 BOSS 京东): the same lead-in at the start of a line that goes on with the answer
+// (「从京东手机版页面读到的信息：商品标题…」) — only the lead-in goes.
+const SOURCE_PREFIX_RE =
+  /^(\s*)(?:这是|以下(?:是|为)?|下面是)?\s*从\s*(?:\[[^\]]+\]\([^)]*\)|[^\s，。,:：]{1,24})\s*(?:上|中|里)?(?:查到|读到|读取到|获取到?|拿到|看到)的?(?:(?:商品|页面|公开)?(?:信息|内容|数据))?\s*(?:如下)?\s*[:：]\s*(?=\S)/u;
+
 export function withoutSourceLines(text: string): string {
   return text
     .split('\n')
     .filter((line) => !SOURCE_LINE_RE.test(line))
+    .map((line) => line.replace(SOURCE_PREFIX_RE, '$1'))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+/**
+ * FIX-57 复审 #3 (代 BOSS 亚马逊): the answer is talk, not a data dump — rule 14 asks the model,
+ * and this makes sure: no 「（照页面原样）」 notes, a long product name cut (never reworded)
+ * to its head plus 「…」, and a card with no featured offer said in words.
+ */
+const VERBATIM_NOTE_RE = /\s*[（(][^（）()\n]{0,40}原样[^（）()\n]{0,20}[）)]/gu;
+const NO_FEATURED_RE =
+  /[（(][^（）\n]*?No featured offers? available[^（）\n]*?((?:S\$|US\$|\$|¥|￥)\s?[\d.,]+)\s*\((\d+) new offers?\)[^（）\n]*?[）)]/giu;
+const LONG_NAME_LINE_RE =
+  /^(\s*(?:\d+[.、)]|[-*•])\s+)(?:\*\*)?([^\n]{61,}?)(?:\*\*)?(\s+[—–]\s+|\s*[：:]\s*)((?:S\$|US\$|\$|¥|￥)\s?\d)/u;
+const NAME_HEAD = 56;
+
+function shortName(name: string): string {
+  const chars = Array.from(name);
+  if (chars.length <= NAME_HEAD + 4) return name;
+  let head = chars.slice(0, NAME_HEAD).join('');
+  const cut = Math.max(head.lastIndexOf(' '), head.lastIndexOf(','), head.lastIndexOf('，'));
+  if (cut > NAME_HEAD / 2) head = head.slice(0, cut);
+  head = head.replace(/[\s,，、;；:：\-–—]+$/u, '');
+  // Two listings often differ only in the last bit (「…, 1M」 / 「…, 2M」) — keep it.
+  const tail = /[,，]\s*([^,，]{1,12})$/u.exec(name)?.[1]?.trim();
+  return tail && /\d/.test(tail) && !head.endsWith(tail) ? `${head}…${tail}` : `${head}…`;
+}
+
+export function plainAnswer(text: string): string {
+  return text
+    .replace(VERBATIM_NOTE_RE, '')
+    .replace(
+      NO_FEATURED_RE,
+      (_m, price: string, n: string) => `（这款没有主推价，有 ${n} 个卖家报价 ${price}）`,
+    )
+    .split('\n')
+    .map((line) =>
+      line.replace(
+        LONG_NAME_LINE_RE,
+        (_m, lead: string, name: string, sep: string, price: string) =>
+          `${lead}${shortName(name)}${sep}${price}`,
+      ),
+    )
+    .join('\n');
 }
 
 /** FIX-57 #5: the live status line shown while the run routes around a wall. */

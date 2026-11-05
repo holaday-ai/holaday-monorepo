@@ -170,6 +170,19 @@ export function mobileBrowserSheetAutoOpenState(input: {
   return { shouldOpen: true, autoOpenedKey: nextKey };
 }
 
+/**
+ * FIX-57 复审 #3 (BOSS run, ~630px): on a narrow screen a running browser task does not open
+ * the browser workbench (a full-screen sheet there) by itself — the conversation stays in
+ * front until the person taps the browser button or has to act.
+ */
+export function mobileStaysInChat(input: {
+  isMobile: boolean;
+  override: 'open' | 'close' | null;
+  needsUser: boolean;
+}): boolean {
+  return input.isMobile && input.override !== 'open' && !input.needsUser;
+}
+
 export function normalizeTaskActionCount(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));

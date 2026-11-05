@@ -3554,6 +3554,33 @@ export const tasksRouter = router({
                           status: 'completed',
                           summary: answer,
                         });
+                        // FIX-57 复审 #3: after the close the index question takes this lane, so it
+                        // needs the same next-step suggestions as the search route.
+                        const shownAnswer = deliverableAnswer(answer) ?? answer;
+                        void runTaskBackground(ctx, async (ctx) =>
+                          publishCoreTaskSuggestions({
+                            wiring: modelRuntimeWiring,
+                            actorExternalId: ctx.userId,
+                            modelDataRegion: userRow.modelDataRegion,
+                            rawIntent: input.intent,
+                            intent: effectiveIntent,
+                            summary: shownAnswer,
+                            isCurrent: () => repo.isCurrentCompletedOutcome(taskId, shownAnswer),
+                            recentIntents: () => repo.recentIntents(taskId),
+                            persist: (suggestions) =>
+                              repo.persistCurrentCompletedSuggestions(
+                                taskId,
+                                shownAnswer,
+                                suggestions,
+                              ),
+                            publish: (suggestions) =>
+                              broadcastToUser(ctx.userId, {
+                                type: 'server.supercar.suggestions',
+                                taskId,
+                                ...nextStepsFrame(suggestions),
+                              }),
+                          }),
+                        );
                       } else if (indexPersisted) {
                         broadcastToUser(ctx.userId, {
                           type: 'server.task.terminal',

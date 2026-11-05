@@ -5,6 +5,7 @@ import {
   RESCUE_PARTIAL_RE,
   RESCUE_STATUS,
   WRITE_INTENT_RE,
+  plainAnswer,
   runUnifiedBrowserLoop,
   withoutSourceLines,
 } from './unified-browser-loop.js';
@@ -305,6 +306,41 @@ describe('复审 #2-1 · source lines the code already wrote', () => {
     '数据来源：国家统计局 2025 年公报。',
   ])('复审 #3-1: keeps a line that says when or from where else: %s', (t) => {
     expect(withoutSourceLines(t)).toBe(t);
+  });
+});
+
+describe('复审 #3 · 代 BOSS 体验: the answer reads like talk', () => {
+  it('京东: a lead-in that goes on with the answer loses only the lead-in', () => {
+    expect(
+      withoutSourceLines('从京东手机版页面读到的信息：商品标题显示为「Apple iPhone 16 Pro」。'),
+    ).toBe('商品标题显示为「Apple iPhone 16 Pro」。');
+  });
+
+  it('亚马逊: no 「照页面原样」, long names cut (kept apart), no featured offer in words', () => {
+    const raw = [
+      '在亚马逊新加坡站搜索 usb c cable 后，前三个商品信息如下（价格和名称均照页面原样）：',
+      '',
+      '1. UGREEN 2 Pack USB C to USB C Charger Cable, Type C 100W PD Fast Charging Cord Compatible with iPhone 15 Pro Max, MacBook Pro, Switch, 1M — S$10.92 Was: S$17.42',
+      '2. UGREEN 2 Pack USB C to USB C Charger Cable, Type C 100W PD Fast Charging Cord Compatible with iPhone 15 Pro Max, MacBook Pro, Switch, 2M — S$12.45 Was: S$21.22',
+      '3. Belkin Eco USB C to USB C 60W Braided Cable 3.3ft iPhone Charger Cord — S$9.43（页面标注 No featured offers available，下方显示 S$9.43 (1 new offer)）',
+    ].join('\n');
+    const out = plainAnswer(raw);
+    expect(out).not.toMatch(/原样|No featured/);
+    expect(out).toContain('前三个商品信息如下：');
+    const [one, two, three] = out.split('\n').filter((l) => /^\d\./.test(l));
+    expect(one).toMatch(
+      /^1\. UGREEN 2 Pack USB C to USB C Charger Cable, Type C 100W…1M — S\$10\.92/,
+    );
+    expect(two).toMatch(/…2M — S\$12\.45/);
+    expect(three).toBe(
+      '3. Belkin Eco USB C to USB C 60W Braided Cable 3.3ft… — S$9.43（这款没有主推价，有 1 个卖家报价 S$9.43）',
+    );
+  });
+
+  it('short names and lines without a price stay as they are', () => {
+    const t =
+      '1. Anker USB C Cable — S$8.90\n这是一段很长很长的说明文字，没有价格，也不是列表项，所以不应该被截断或改动任何一个字。';
+    expect(plainAnswer(t)).toBe(t);
   });
 });
 
