@@ -196,7 +196,8 @@ export function MainPanel({
         >
           <Menu className="h-4 w-4" />
         </Button>
-        <div className="ml-2 min-w-0 flex-1 truncate pr-12 text-sm font-medium text-[#595757] dark:text-foreground/85">
+        {/* FIX-57 复审 #3: room for both the browser button and the bell on the right. */}
+        <div className="ml-2 min-w-0 flex-1 truncate pr-24 text-sm font-medium text-[#595757] dark:text-foreground/85">
           {task ? taskDisplayTitle(task, 40) : <BrandWordmark className="h-3.5" />}
         </div>
       </div>
