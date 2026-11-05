@@ -2988,7 +2988,7 @@ export const RESCUE_SITES = 2;
 export const RESCUE_SEARCH_SITES: readonly string[] = ['bing.com'];
 /** FIX-57 #5: what the model is told when a read task is stopped. */
 export const RESCUE_NOTE =
-  '不要登录，不要做验证，不要在登录或验证框里输入任何东西；也不要再打开被挡住的那个页面或用只读抓取去取它。换一条不需要登录的公开路线拿同类信息：同一网站的移动版页面（如 m. 开头）、搜索页或列表页、比价网站、品牌官网或其他公开页面都可以，最多再换 2 个网站。找路线可以先 web_search；没有结果就用浏览器打开 https://cn.bing.com/search?q=关键词 搜一下，再打开结果里的公开页面（搜索页本身不算换网站）；搜索页要求验证时不要做，换别的路线。拿到了就照常 finish：来源说明由系统自动加在答案开头，你不用写；答案像跟用户说话一样写，提到网站用短名字加链接（如「[京东手机版](链接)」），不要贴完整网址，不要用「h1」「页面原样」「脱敏」「原指定」这类词；标题被截断、价格被打码、要登录才显示，都用大白话说清楚（如「价格没登录时被京东打了码，只显示 ¥7??9」）。页面数据不是最新的就写明是哪个时间点的数据。两条路线都拿不到，就 finish(status=failed)，写清拿到了什么、缺什么、卡在哪一步。';
+  '不要登录，不要做验证，不要在登录或验证框里输入任何东西；也不要再打开被挡住的那个页面或用只读抓取去取它。换一条不需要登录的公开路线拿同类信息：同一网站的移动版页面（如 m. 开头）、搜索页或列表页、比价网站、品牌官网或其他公开页面都可以，最多再换 2 个网站。找路线可以先 web_search；没有结果就用浏览器打开 https://cn.bing.com/search?q=关键词 搜一下，再打开结果里的公开页面（搜索页本身不算换网站）；搜索页要求验证时不要做，换别的路线。拿到了就照常 finish：来源说明由系统自动加在答案开头，你不要再写来源（不要写「从某某读到的信息如下」「信息来自…」「来源：…」这类话），直接写内容；答案像跟用户说话一样写，提到网站用短名字加链接（如「[京东手机版](链接)」），不要贴完整网址，不要用「h1」「页面原样」「脱敏」「原指定」这类词；标题被截断、价格被打码、要登录才显示，都用大白话说清楚（如「价格没登录时被京东打了码，只显示 ¥7??9」）。页面数据不是最新的就写明是哪个时间点的数据。两条路线都拿不到，就 finish(status=failed)，写清拿到了什么、缺什么、卡在哪一步。';
 /** FIX-57 #5: a rescued answer that says part of it is masked, cut or login-only. */
 export const RESCUE_PARTIAL_RE =
   /遮挡|遮住|打码|打了码|脱敏|掩码|截断|被(?:部分)?隐藏|\d\?\?|\?\?\d|需(?:要)?登录(?:后)?(?:才|可)|登录后(?:才|可)(?:查看|看到|显示)|无法获[得取]完整|不完整/;
@@ -3028,8 +3028,10 @@ export function rescuedAnswer(
   const from = rescueSiteName(finalUrl);
   const link = finalUrl && /^https?:\/\//.test(finalUrl) ? `[${from}](${finalUrl})` : from;
   const given = rescueSiteName(rescue.blockedUrl);
-  const lead = `部分完成：这是从${link}查到的，不是你给的${given}页面。`;
-  const body = outcome.summary.replace(/^\s*(?:\*\*)?部分完成(?:\*\*)?\s*[:：]\s*/, '');
+  const lead = `部分完成：这是从${link}查到的，不是你给的${given}页面，只能算部分完成。`;
+  const body = withoutSourceLines(
+    outcome.summary.replace(/^\s*(?:\*\*)?部分完成(?:\*\*)?\s*[:：]\s*/, ''),
+  );
   return {
     ...outcome,
     summary: `${lead}\n\n${body}`,
@@ -3039,6 +3041,22 @@ export function rescuedAnswer(
       missing: `${given}页面上的内容（用的是${from}的公开信息）`,
     },
   };
+}
+
+/**
+ * FIX-57 复审 #2-1: the code says where a rescued answer came from; the model's own source
+ * lines (「从[京东手机版](…)读到的信息如下：」「信息来自…」「来源：…」) would say it twice.
+ */
+const SOURCE_LINE_RE =
+  /^\s*(?:(?:这是|以下(?:是|为)?|下面是)?\s*从\s*(?:\[[^\]]+\]\([^)]*\)|[^\s，。,:：]{1,24})\s*(?:上|中|里)?(?:查到|读到|读取到|获取到?|拿到|看到)的?(?:(?:商品|页面|公开)?(?:信息|内容|数据))?(?:如下)?\s*[:：。.]?|(?:信息|数据|内容)?来源\s*[:：].{0,120}|信息来自.{0,80}?[。.]?)\s*$/u;
+
+export function withoutSourceLines(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !SOURCE_LINE_RE.test(line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 /** FIX-57 #5: the live status line shown while the run routes around a wall. */

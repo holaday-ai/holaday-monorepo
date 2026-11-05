@@ -257,3 +257,58 @@ describe('FIX-57 #4 · next steps', () => {
     ]);
   });
 });
+
+describe('复审 #2', () => {
+  it('3: the sidebar never shows half an emoji, and cuts at a word or mark when it can', async () => {
+    const { summariseIntent } = await import('@/utils/summarise-intent');
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    for (const s of [
+      '查a😀😀😀😀😀😀😀😀😀😀😀😀😀',
+      '用浏览器查一下😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀',
+      '请使用云端浏览器，【Deploy-16 核心验收 01】使用真实浏览器打开 https://www.sse.com.cn 看上证指数',
+    ]) {
+      const t = summariseIntent(s);
+      expect(lone.test(t)).toBe(false);
+      expect(Array.from(t).length).toBeLessThanOrEqual(20);
+    }
+    expect(
+      summariseIntent('请使用云端浏览器，amazon.com 搜 usb c cable 前3个商品名'),
+    ).not.toContain('浏览器');
+  });
+
+  it('4: a partial whose first sentence does not say what is missing keeps the fixed lead', () => {
+    expect(
+      partialLead(
+        '部分完成：京东商品页要求登录，价格没读到；下面是从其他来源找到的参考价。\n\n- 参考价 ¥199',
+      ).lead,
+    ).toBe('');
+    expect(partialLead('**部分完成**：缺第 3、4 款的评分。\n\n前两款……').lead).toBe('');
+    expect(partialLead('部分完成：按任务配置使用 Brave 搜索接口读取前 5 条结果。').lead).toBe(
+      '这次只拿到了一部分，缺的我写在下面了。',
+    );
+  });
+
+  it('4: no 「这个网站这个页面」', () => {
+    const turn = failureTurn({
+      status: 'failed',
+      errorText: '任务执行失败：京东要求登录后才能查看价格，我没有替你登录。建议：登录后重试',
+      intent: '查京东上 AirPods 价格',
+      canRetry: true,
+    });
+    expect(turn.lead).toBe('这个页面要登录才能看，所以这次没拿到你要的内容。');
+    expect(turn.lead).not.toContain('这个网站这个页面');
+  });
+
+  it.each([
+    ['任务执行失败：通义千问联网搜索接口返回空', '我这边的服务刚刚出了点问题'],
+    ['任务执行失败：百炼通道超时，dashscope 503', '我这边的服务刚刚出了点问题'],
+    [
+      '任务执行失败：read_page 在 frame_1 里找不到 ref=e45 元素，换 s2e17 也不行',
+      '读取页面在内嵌框里找不到元素，换那个元素也不行，这次没做完。',
+    ],
+  ])('3: %s', (errorText, lead) => {
+    const turn = failureTurn({ status: 'failed', errorText, intent: '查价格', canRetry: true });
+    expect(turn.lead).toContain(lead);
+    expect(turn.lead).not.toMatch(/千问|通义|百炼|dashscope|read_page|frame_|ref=|s2e17|e45/i);
+  });
+});

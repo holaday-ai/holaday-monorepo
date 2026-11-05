@@ -1,4 +1,4 @@
-import { summariseIntent } from '@/utils/summarise-intent';
+import { summariseIntent, truncateAtBoundary } from '@/utils/summarise-intent';
 
 export interface TaskDisplayCopyInput {
   readonly intent: string;
@@ -62,7 +62,6 @@ function looksLikeGeneratedImageCopy(source: string): boolean {
 }
 
 function truncateTaskDisplayText(source: string, maxLen: number): string {
-  if (source.length <= maxLen) return source;
-  if (maxLen <= 1) return '…';
-  return `${source.slice(0, maxLen - 1).trim()}…`;
+  // FIX-57 复审 #2-3: whole characters only (no half emoji).
+  return truncateAtBoundary(source, maxLen);
 }

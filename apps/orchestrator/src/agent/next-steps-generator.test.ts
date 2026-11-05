@@ -6,6 +6,7 @@ import {
   nextStepsUserMessage,
   parseNextSteps,
   parseTaskTitle,
+  relevantNextSteps,
   validNextSteps,
 } from './next-steps-generator.js';
 
@@ -124,5 +125,19 @@ describe('FIX-57 #4 · next steps', () => {
     expect(parseTaskTitle('{"title":"使用云端浏览器","steps":[]}')).toBeNull();
     expect(parseTaskTitle('{"title":"https://item.jd.com","steps":[]}')).toBeNull();
     expect(parseTaskTitle('{"steps":[]}')).toBeNull();
+  });
+
+  it('复审 #2-2: no retry of the walled page, no platform the request never named', () => {
+    const steps = [
+      { label: '再试一次访问 PC 版页面？', prompt: '重新打开 https://item.jd.com/1.html' },
+      { label: '查亚马逊同款价格对比？', prompt: '在亚马逊搜同款 iPhone 16 Pro 价格' },
+      { label: '你登录京东后我接着看完整价格？', prompt: '我登录京东后继续读价格' },
+      { label: '去苹果官网核对一下官方定价？', prompt: '在苹果官网查 iPhone 16 Pro 128GB 定价' },
+    ];
+    expect(
+      relevantNextSteps('打开京东商品页读标题和价格', 'partial', steps).map((s) => s.label),
+    ).toEqual(['你登录京东后我接着看完整价格？', '去苹果官网核对一下官方定价？']);
+    // A completed answer may offer to look again later; with no platform named, any may appear.
+    expect(relevantNextSteps('上证指数现在多少点', 'completed', steps)).toHaveLength(4);
   });
 });

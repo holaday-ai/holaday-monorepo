@@ -6,6 +6,7 @@ import {
   RESCUE_STATUS,
   WRITE_INTENT_RE,
   runUnifiedBrowserLoop,
+  withoutSourceLines,
 } from './unified-browser-loop.js';
 
 /**
@@ -219,9 +220,12 @@ describe('FIX-57 复审 #1 · the cap holds and a rescued answer is 部分完成
     expect(outcome.status).toBe('completed');
     const done = outcome as { summary: string; partial?: { missing?: string } };
     expect(done.summary).toMatch(
-      /^部分完成：这是从\[京东手机版\]\(https:\/\/item\.m\.jd\.com\/product\/100142621606\.html\)查到的，不是你给的京东页面。/,
+      /^部分完成：这是从\[京东手机版\]\(https:\/\/item\.m\.jd\.com\/product\/100142621606\.html\)查到的，不是你给的京东页面，只能算部分完成。/,
     );
     expect(done.partial?.missing).toContain('京东页面上的内容');
+    // 复审 #2-1: the model's own source line is not said a second time.
+    expect(done.summary).not.toContain('读到的信息如下');
+    expect(done.summary).toContain('Apple iPhone 16 Pro，价格 ¥7999。');
   });
 });
 
@@ -284,6 +288,22 @@ describe('FIX-57 #5 · what a rescue got only partly is 部分完成', () => {
     ])
       expect(RESCUE_PARTIAL_RE.test(t)).toBe(true);
     expect(RESCUE_PARTIAL_RE.test('价格：¥7999，标题：iPhone 16 Pro')).toBe(false);
+  });
+});
+
+describe('复审 #2-1 · source lines the code already wrote', () => {
+  it.each([
+    '从[京东手机版](https://item.m.jd.com/p/1.html)读到的信息如下：',
+    '从京东手机版读到的信息如下：',
+    '以下是从京东手机版获取的商品信息：',
+    '信息来源：京东手机版 https://item.m.jd.com/p/1.html',
+    '信息来自京东移动版商品页。',
+  ])('drops %s', (line) => {
+    expect(withoutSourceLines(`${line}\n\n- 价格：¥7??9`)).toBe('- 价格：¥7??9');
+  });
+  it('keeps sentences that only mention a page', () => {
+    const t = '从页面上看到的价格是 ¥99，标题被截断了。';
+    expect(withoutSourceLines(t)).toBe(t);
   });
 });
 

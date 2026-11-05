@@ -80,9 +80,29 @@ export function summariseIntent(intent: string, maxLen = 20): string {
   }
 
   t = t.trim();
-  if (t.length <= maxLen) return t;
-  // Trim by char (not byte) so CJK is safe.
-  return `${t.slice(0, maxLen - 1).trim()}…`;
+  return truncateAtBoundary(t, maxLen);
+}
+
+/**
+ * FIX-57 复审 #2-3: cut by whole characters (an emoji is one, never half of a surrogate
+ * pair), and where possible at a space or punctuation mark near the end.
+ */
+export function truncateAtBoundary(text: string, maxLen: number): string {
+  const chars = Array.from(text);
+  if (chars.length <= maxLen) return text;
+  if (maxLen <= 1) return '…';
+  const keep = chars.slice(0, maxLen - 1);
+  const floor = Math.ceil((maxLen - 1) / 2);
+  for (let i = keep.length - 1; i >= floor; i--) {
+    if (/[\s,，。、;；:：!！?？)）」】]/u.test(keep[i] ?? '')) {
+      const cut = keep
+        .slice(0, /[)）」】]/u.test(keep[i] ?? '') ? i + 1 : i)
+        .join('')
+        .trim();
+      if (cut) return `${cut}…`;
+    }
+  }
+  return `${keep.join('').trim()}…`;
 }
 
 const ADDRESS_NAMES: ReadonlyArray<[RegExp, string]> = [

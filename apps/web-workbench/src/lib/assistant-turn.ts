@@ -24,7 +24,14 @@ const REF_REPLACEMENTS: ReadonlyArray<[RegExp, string]> = [
   [/\[?\bref\s*=\s*e?\d+\]?/gi, ''],
   [/\btab_[\w-]+/gi, '页面'],
   [/\bframe_[\w-]+/gi, '内嵌框'],
+  [/(?<![\w.-])s\d+e\d{1,6}\b/g, '那个元素'],
   [/(?<![\w.-])e\d{1,6}\b/g, '那个按钮'],
+  [/\b(?:read_page|get_page_text|snapshot|read_url)\b/g, '读取页面'],
+  [/\b(?:web_search)\b/g, '搜索'],
+  [
+    /\b(?:click_ref|type_in_ref|press_key|wait_for|switch_tab|list_tabs|request_human|scroll_until)\b/g,
+    '操作',
+  ],
   [/\b(?:firecrawl|brave(?:\s+search)?|playwright|browserbase|tavily|serpapi)\b/gi, ''],
   [/\b(?:dashscope|anthropic|openai|qwen[\w.-]*|claude[\w.-]*|gpt-[\w.-]+)\b/gi, ' AI '],
   [/通义千问|千问|通义|百炼/g, ' AI '],
@@ -272,8 +279,11 @@ export function partialLead(text: string): { lead: string | null; body: string }
   const m = text.match(/^\s*(?:\*\*)?部分完成(?:\*\*)?\s*[:：]\s*/);
   if (!m) return { lead: null, body: text };
   const body = text.slice(m[0].length);
-  // 复审 #1: the answer's own first line already says what is missing — no second preamble.
-  return { lead: body.trim() ? '' : '这次只拿到了一部分，缺的我写在下面了。', body };
+  // 复审 #1/#2: the answer's own first sentence is the lead — only when it says what is
+  // missing (缺 / 没 / 未 / 只 / 部分 …); otherwise the fixed lead stays.
+  const first = body.trim().split(/(?<=[。！？!?\n])/)[0] ?? '';
+  const saysMissing = /缺|没|未|只|部分|不全|不完整|打码|遮|截断|看不到|读不到/.test(first);
+  return { lead: saysMissing ? '' : '这次只拿到了一部分，缺的我写在下面了。', body };
 }
 
 function siteName(finalUrl: string | null | undefined, intent: string): string | null {
@@ -371,11 +381,17 @@ export function failureTurn(input: {
   const tried = triedElsewhere ? '，我换了公开来源也没找到' : '';
   const others = triedElsewhere ? null : publicSource;
   const title = friendly.title;
-  const where = site ?? '这个网站';
   if (/登录/.test(title) || /风控|拦截|拦下/.test(input.errorText)) {
     const blocked = /风控|拦截|拦下|403|异常提示/.test(input.errorText);
     return {
-      lead: `${where}${blocked ? '把这个页面拦下了，要登录或验证后才显示' : '这个页面要登录才能看'}${tried}，所以${notGot}。`,
+      // 复审 #2-4: 「京东这个页面…」 or just 「这个页面…」 — never 「这个网站这个页面」.
+      lead: `${
+        blocked
+          ? site
+            ? `${site}把这个页面拦下了`
+            : '这个页面被拦下了'
+          : `${site ?? ''}这个页面要登录才能看`
+      }${blocked ? '，要登录或验证后才显示' : ''}${tried}，所以${notGot}。`,
       why: '我不能替你登录，也不会绕过它。',
       options: [
         intent
