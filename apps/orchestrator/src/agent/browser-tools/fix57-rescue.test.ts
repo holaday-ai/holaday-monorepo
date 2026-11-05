@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import {
   RESCUE_GIVE_UP_RE,
+  RESCUE_PARTIAL_RE,
   RESCUE_STATUS,
   WRITE_INTENT_RE,
   runUnifiedBrowserLoop,
@@ -185,6 +186,19 @@ describe('FIX-57 #5 · giving up on a blocked page: one more route first', () =>
       { maxSteps: 4 },
     );
     expect(seen).not.toContain(ROUTE);
+  });
+});
+
+describe('FIX-57 #5 · what a rescue got only partly is 部分完成', () => {
+  it('masked, cut or login-only values', () => {
+    for (const t of [
+      '价格：¥7??9（未登录脱敏）',
+      '标题被截断',
+      '完整价格需登录后才可见',
+      '价格被遮挡',
+    ])
+      expect(RESCUE_PARTIAL_RE.test(t)).toBe(true);
+    expect(RESCUE_PARTIAL_RE.test('价格：¥7999，标题：iPhone 16 Pro')).toBe(false);
   });
 });
 
