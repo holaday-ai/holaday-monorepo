@@ -556,6 +556,17 @@ describe('DEPLOY-57 第 0 步', () => {
         '1. Anker USB C Cable (240W, Nylon Braided Fast Charging Cord for iPhone 16, MacBook Pro, 2M) — S$12.99',
       ),
     ).toBe('1. Anker USB C Cable… — S$12.99');
+    // 第 0 步通过·顺手改: [] and 【】 too.
+    expect(
+      plainAnswer(
+        '1. Anker USB C Cable [240W, Nylon Braided Fast Charging Cord for iPhone 16, MacBook Pro, 2M] — S$12.99',
+      ),
+    ).toBe('1. Anker USB C Cable… — S$12.99');
+    expect(
+      plainAnswer(
+        '1. Anker USB C Cable【240W, Nylon Braided Fast Charging Cord for iPhone 16, MacBook Pro, 2M】 — S$12.99',
+      ),
+    ).toBe('1. Anker USB C Cable… — S$12.99');
   });
 
   it('3b: an English sentence without a price is not a product name', () => {
@@ -592,6 +603,9 @@ describe('DEPLOY-57 第 0 步', () => {
     ['无需登录，但被风控拦截', 'blocked'],
     ['verifier 拦截了答案。页面加载超时', 'stuck'],
     ['质量校验未通过；京东要求登录', 'login'],
+    ['京东商品页需要登录验证', 'login'],
+    ['页面需要完成安全验证', 'blocked'],
+    ['需要登录验证，但被风控拦截', 'blocked'],
   ])('5: the give-up words say why — %s', (said, kind) => {
     expect(giveUpKind(said)).toBe(kind);
   });

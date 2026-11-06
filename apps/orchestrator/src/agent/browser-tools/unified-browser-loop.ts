@@ -3357,14 +3357,16 @@ function shortName(name: string): string {
   if (cut > NAME_HEAD / 2) head = head.slice(0, cut);
   head = head.replace(/[\s,，、;；:：\-–—]+$/u, '');
   // 复审 #7: never cut inside a bracket (「Cable (6.6ft…」) — cut before it.
-  const open = Math.max(head.lastIndexOf('('), head.lastIndexOf('（'));
+  // 第 0 步通过·顺手改: [] and 【】 are brackets too.
+  const lastOf = (marks: string) => Math.max(...Array.from(marks, (m) => head.lastIndexOf(m)));
+  const open = lastOf('(（[【');
   // 第 0 步核对 2: wherever the bracket opens — 「Anker USB C Cable (240W, …」 → 「Anker USB C Cable…」.
-  if (open > 0 && open > Math.max(head.lastIndexOf(')'), head.lastIndexOf('）')))
+  if (open > 0 && open > lastOf(')）]】'))
     head = head.slice(0, open).replace(/[\s,，、;；:：\-–—]+$/u, '');
   // Two listings often differ only in the last bit (「…, 1M」 / 「…, 2M」) — keep it.
   const tail = /[,，]\s*([^,，]{1,12})$/u.exec(name)?.[1]?.trim();
   // 复审 #7: a tail that closes a bracket the head no longer opens (「2M)」) is left off.
-  const keep = tail && /\d/.test(tail) && !/[()（）]/.test(tail) && !head.endsWith(tail);
+  const keep = tail && /\d/.test(tail) && !/[()（）[\]【】]/u.test(tail) && !head.endsWith(tail);
   return keep ? `${head}…${tail}` : `${head}…`;
 }
 
@@ -3502,12 +3504,14 @@ export function giveUpKind(said: string): 'login' | 'blocked' | 'stuck' {
     .join('');
   // A block first: 「无需登录，但被风控拦截」 was blocked, not a login.
   if (
-    /拦截|拦下|风控|验证|403|429|请求过多|访问受限|限流|blocked|denied|forbidden|too\s+many\s+requests|rate.?limit/i.test(
+    /拦截|拦下|风控|403|429|请求过多|访问受限|限流|blocked|denied|forbidden|too\s+many\s+requests|rate.?limit/i.test(
       page,
     )
   )
     return 'blocked';
+  // 第 0 步通过·顺手改: 「需要登录验证」 is a login; 「验证」 alone (a check page) is a block.
   if (/登录|登陆|log\s*in|sign\s*in/i.test(page)) return 'login';
+  if (/验证/u.test(page)) return 'blocked';
   return 'stuck';
 }
 
