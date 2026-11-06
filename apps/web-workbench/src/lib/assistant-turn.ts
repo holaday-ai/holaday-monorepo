@@ -20,12 +20,19 @@ import { classifyFriendlyFailure } from './failure-copy';
  * plain words (复审 #1-3) so the sentence still reads: 「在 tab_2 上点击 e123 没有反应」 →
  * 「在页面上点击那个按钮没有反应」. Web addresses are left alone (their `ref=` is the site's).
  */
-const TOOL_READ = '(?:read_page|get_page_text|snapshot|read_url)';
+const TOOL_READ = '(?:read_page|get_page_text|read_url)';
 const TOOL_SEARCH = '(?:web_search)';
 const TOOL_ACT =
   '(?:click_ref|type_in_ref|press_key|wait_for|switch_tab|list_tabs|request_human|scroll_until)';
-/** 复审 #3: a tool name only where it is used as one — 「调用 read_page」, 「snapshot(…)」, or
- * opening a sentence before Chinese; 「wait_for it」「读取 snapshot 结果」 stay as written. */
+/** 复审 #4: a tool name with an underscore (read_page, web_search…) is always replaced,
+ * whatever is around it, together with its call parentheses. */
+const toolAlways = (names: string, to: string): Array<[RegExp, string]> => [
+  [new RegExp(`\\b${names}\\b(?:\\s*\\([^)]*\\))?`, 'g'), to],
+];
+/** 复审 #3: an ordinary English word used as a tool name (snapshot) only where it is used
+ * as one — 「调用 snapshot」, 「snapshot(…)」, or opening a sentence before Chinese;
+ * 「读取 snapshot 结果」 stays as written. */
+const TOOL_WORD = '(?:snapshot)';
 const toolInContext = (names: string, to: string): Array<[RegExp, string]> => [
   [
     new RegExp(`(调用|工具|通过|执行|使用)\\s*(?:了\\s*)?${names}\\b(?:\\s*\\([^)]*\\))?`, 'g'),
@@ -41,9 +48,10 @@ const REF_REPLACEMENTS: ReadonlyArray<[RegExp, string]> = [
   // 复审 #3: element ids only after a click or an input — 「Friends s1e2」 stays.
   [/(点击|输入|点)\s*(?:了\s*)?s\d+e\d{1,6}\b/g, '$1那个元素'],
   [/(点击|输入|点)\s*(?:了\s*)?e\d{1,6}\b/g, '$1那个按钮'],
-  ...toolInContext(TOOL_READ, '读取页面'),
-  ...toolInContext(TOOL_SEARCH, '搜索'),
-  ...toolInContext(TOOL_ACT, '操作'),
+  ...toolAlways(TOOL_READ, '读取页面'),
+  ...toolAlways(TOOL_SEARCH, '搜索'),
+  ...toolAlways(TOOL_ACT, '操作'),
+  ...toolInContext(TOOL_WORD, '读取页面'),
   [/\b(?:firecrawl|brave(?:\s+search)?|playwright|browserbase|tavily|serpapi)\b/gi, ''],
   [/\b(?:dashscope|anthropic|openai|qwen[\w.-]*|claude[\w.-]*|gpt-[\w.-]+)\b/gi, ' AI '],
   [/通义千问|千问|通义|百炼/g, ' AI '],

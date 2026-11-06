@@ -35,6 +35,7 @@ export const NEXT_STEPS_SYSTEM_PROMPT = `你是用户的私人助理，刚替用
 - 不重复这次已经回答过的内容；用户最近的任务可以帮你判断偏好和延续方向。
 - 结果是「部分完成」时，第一条必须是补齐缺口的那一步（换个时间/换个方式拿到缺的那部分）。
 - 不要提议重新打开刚被拦下或打不开的那个页面（包括它的电脑版、原链接）；补缺口可以去同一网站的别的页面（如「再打开第 3 条商品页拿价格」）。
+- 不要给「再试一次？」「重试一下？」这类原样重来的提议：每条提议都要说清换成什么做法、去哪个页面或要什么。
 - 平台要和用户的任务对得上：用户给的链接域名就代表用户在用的平台（如 item.jd.com 就是京东）。不要跳到用户没提过、和任务无关的平台；用户自己说了要比价、跟其他平台比，才可以提其他平台。
 - 结果是「失败」时，界面已经固定给出「你登录后我接着看」「换公开来源查」「再试一次」「你来完成验证」这几种做法，不要再提这几类（意思相同的也不要），只提别的真正有用的下一步，没有就返回空；绝不提议替用户输入账号密码或绕过验证。
 - label：助理主动提议的口吻，第一人称，简短自然，可以用问句，例如「今天开盘后我再帮你拉一次实时点位，跟昨天收盘对比？」，不超过 30 个字。
@@ -188,11 +189,22 @@ export function parseNextSteps(raw: string): NextStep[] {
 }
 
 /** Shape, safety and the user's own prohibitions; at most 3, no duplicates. */
-/** A web address as host + path, for comparing a step's link with the walled one. */
+/** 复审 #4: query parameters that name the item itself (淘宝 `item.htm?id=…`). */
+const ITEM_ID_PARAMS = new Set(['id', 'itemid', 'item_id', 'sku', 'skuid', 'sku_id']);
+
+/**
+ * A web address as host + path, plus its item-id parameters (复审 #4), for comparing a
+ * step's link with the walled one: `item.htm?id=111` and `item.htm?id=222` are two pages.
+ */
 function pageOf(url: string): string | null {
   try {
     const u = new URL(url);
-    return `${u.hostname.replace(/^(?:(?:www|m|item)\.)+/, '')}${u.pathname.replace(/\/+$/, '')}`.toLowerCase();
+    const ids = [...u.searchParams]
+      .filter(([key, value]) => ITEM_ID_PARAMS.has(key.toLowerCase()) && value)
+      .map(([key, value]) => `${key.toLowerCase()}=${value}`)
+      .sort();
+    const page = `${u.hostname.replace(/^(?:(?:www|m|item)\.)+/, '')}${u.pathname.replace(/\/+$/, '')}`;
+    return `${page}${ids.length ? `?${ids.join('&')}` : ''}`.toLowerCase();
   } catch {
     return null;
   }

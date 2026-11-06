@@ -159,6 +159,26 @@ describe('FIX-57 #4 · next steps', () => {
     expect(relevantNextSteps([], steps)).toHaveLength(4);
   });
 
+  it('复审 #4: an item id in the query is part of the address; bare retries are banned', () => {
+    const walled = ['https://item.taobao.com/item.htm?id=111'];
+    const steps = [
+      {
+        label: '再打开这个淘宝商品？',
+        prompt: '打开 https://item.taobao.com/item.htm?id=111&spm=a1 读价格',
+      },
+      {
+        label: '看看同店另一款的价格？',
+        prompt: '打开 https://item.taobao.com/item.htm?id=222 读价格',
+      },
+    ];
+    expect(relevantNextSteps(walled, steps).map((s) => s.label)).toEqual([
+      '看看同店另一款的价格？',
+    ]);
+    expect(NEXT_STEPS_SYSTEM_PROMPT).toContain(
+      '不要给「再试一次？」「重试一下？」这类原样重来的提议',
+    );
+  });
+
   it('复审 #3: the model is told which platform the link is and when other platforms fit', () => {
     const msg = nextStepsUserMessage({
       intent: '打开 https://item.jd.com/100142621606.html 读商品标题和价格',

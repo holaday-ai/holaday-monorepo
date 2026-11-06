@@ -5,6 +5,7 @@ import {
   RESCUE_PARTIAL_RE,
   RESCUE_STATUS,
   WRITE_INTENT_RE,
+  isReadOnlyIntent,
   plainAnswer,
   runUnifiedBrowserLoop,
   withoutSourceLines,
@@ -337,6 +338,17 @@ describe('复审 #3 · 代 BOSS 体验: the answer reads like talk', () => {
     );
   });
 
+  it.each([
+    ['价格：¥7??9（页面原样显示，未登录被打码）', '价格：¥7??9（未登录被打码）'],
+    ['价格：¥7??9（照页面原样）', '价格：¥7??9'],
+    ['价格：¥7??9（页面原样显示）', '价格：¥7??9'],
+    ['前三个如下（价格和名称均照页面原样）：', '前三个如下：'],
+    ['价格 ¥199（页面原样显示未登录价）', '价格 ¥199（未登录价）'],
+    ['评分 4.5（截断，照页面原样）', '评分 4.5（截断）'],
+  ])('复审 #4 诚实: only the 原样 words go, the rest of a note stays: %s', (text, out) => {
+    expect(plainAnswer(text)).toBe(out);
+  });
+
   it('short names and lines without a price stay as they are', () => {
     const t =
       '1. Anker USB C Cable — S$8.90\n这是一段很长很长的说明文字，没有价格，也不是列表项，所以不应该被截断或改动任何一个字。';
@@ -361,12 +373,42 @@ describe('复审 #3 · a login asked for with reason 「other」 is routed aroun
   });
 });
 
+describe('复审 #4 · only a plainly read-only task is routed around (whitelist)', () => {
+  it.each([
+    '收藏这个商品',
+    '领取优惠券',
+    '抢购这款手机',
+    '打开 https://item.jd.com/1.html',
+    '看看能不能领取优惠券',
+    '帮我看一下价格，然后抢购',
+    '把这个商品分享到微信',
+    '打开京东抢购这款手机',
+  ])('handed to the person: %s', (intent) => {
+    expect(isReadOnlyIntent(intent)).toBe(false);
+  });
+
+  it.each([
+    JD,
+    '读商品标题和价格',
+    '在亚马逊新加坡站搜 usb c cable，列出前三个的名称和价格',
+    '上证指数现在多少点',
+    '请使用云端浏览器，打开 https://item.taobao.com/item.htm?id=111 读价格',
+    '比较京东和淘宝上 AirPods 的价格',
+    'search amazon.sg for usb c cable and list the top 3 prices',
+  ])('routed around: %s', (intent) => {
+    expect(isReadOnlyIntent(intent)).toBe(true);
+  });
+});
+
 describe('FIX-57 #5 · never routed around', () => {
   it.each([
     ['rescue off', JD, false],
     ['a write task', '打开 https://item.jd.com/1.html 把商品加入购物车', true],
     ['a login task', '打开 https://item.jd.com/1.html 帮我登录京东看价格', true],
     ['own account data', '打开 https://order.jd.com/center/list.action 查我的订单', true],
+    ['复审 #4 收藏', '打开 https://item.jd.com/100142621606.html 收藏这个商品', true],
+    ['复审 #4 领券', '打开 https://item.jd.com/100142621606.html 领取优惠券', true],
+    ['复审 #4 抢购', '打开 https://item.jd.com/100142621606.html 抢购这款手机', true],
   ])('%s: the wall is handed over at once', async (_label, intent, rescue) => {
     const { outcome, seen, onRescue } = await run(
       intent as string,

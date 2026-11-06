@@ -831,7 +831,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
    * check still delivers it as 部分完成). A wall met again after that is handed over.
    */
   const rescueEligible =
-    input.rescue === true && !wantsForm && !WRITE_INTENT_RE.test(input.userIntent ?? input.intent);
+    input.rescue === true && !wantsForm && isReadOnlyIntent(input.userIntent ?? input.intent);
   let rescueStarted = false;
   /** The walled page the rescue began on; a wall on another page is a new one. */
   let rescueWallUrl: string | undefined;
@@ -2986,7 +2986,42 @@ function onDomains(url: string | undefined, domains: readonly string[]): boolean
  * data (another public site cannot show their orders) are never routed around.
  */
 export const WRITE_INTENT_RE =
-  /订单|我的|账户|账号|个人中心|私信|消息通知|收藏夹|购物车|余额|积分|后台|收件箱|inbox|my\s+(?:orders?|account|cart)|提交|下单|购买|加购|加入购物车|付款|支付|结账|发送|发布|发帖|评论|回复|点赞|关注|登录|登陆|注册|预订|预约|报名|投递|填表|填写|表单|上传|删除|修改|取消订单|退款|submit|checkout|purchase|add\s+to\s+cart|log\s*in|sign\s*(?:in|up)|register|\bpost\b|\bsend\b|\bbook\b|upload|delete/i;
+  /订单|我的|账户|账号|个人中心|私信|消息通知|收藏|购物车|领取|领券|抢购|秒杀|兑换|签到|订阅|投票|转发|分享到|加入|绑定|充值|申请|余额|积分|后台|收件箱|inbox|my\s+(?:orders?|account|cart)|提交|下单|购买|加购|加入购物车|付款|支付|结账|发送|发布|发帖|评论|回复|点赞|关注|登录|登陆|注册|预订|预约|报名|投递|填表|填写|表单|上传|删除|修改|取消订单|退款|submit|checkout|purchase|add\s+to\s+cart|log\s*in|sign\s*(?:in|up)|register|\bpost\b|\bsend\b|\bbook\b|upload|delete/i;
+/**
+ * FIX-57 复审 #4 (红线, coordinator): a rescue is for a task that is plainly read-only —
+ * a whitelist, not a list of write words to exclude. Every part of the request must be
+ * reading (读/查/看/列出/搜索/比较价格…), opening a page, or a question (多少/什么…); a
+ * part with any other action (收藏、领取优惠券、抢购…) hands the wall to the person.
+ * WRITE_INTENT_RE stays only as a second net for a write action inside a read part
+ * (「看看能不能领取优惠券」); it never makes a task eligible.
+ */
+const READ_VERB_RE =
+  /读|阅读|查|看|列出|列一下|列举|搜|检索|找|比较|比一下|比价|对比|获取|提取|抓取|总结|汇总|概括|摘要|告诉我|说说|统计|核对|识别|\b(?:read|look\s+up|check|find|search|list|compare|get|show|tell\s+me|what|which|how\s+(?:much|many))\b/i;
+const QUESTION_RE =
+  /多少|几[点元块个天次岁]|什么|哪[个些里家款]|是否|怎么样|如何|价格|价钱|报价|行情|点位|评分|[吗呢][？?]?$/;
+/** Opening, visiting or naming the browser — no action of its own. */
+const NAV_ONLY_RE =
+  /^(?:请|麻烦|帮我|帮忙|给我|你|使用|用|通过|在|到|去|进入|打开|访问|前往|登上|云端|真实|浏览器|一下|这个|那个|页面|网页|网站|链接|地址|[a-z0-9-]+(?:\.[a-z0-9-]+)+\S*|[\s:：])*$/iu;
+/** Parts of a request: split at punctuation and at 「然后/再/并且/接着/之后」. */
+const INTENT_PART_RE = /[，,。；;！!？?\n]|然后|并且|接着|之后|随后|顺便|再(?=[一-龥])/u;
+const QUOTED_RE = /「[^」]*」|“[^”]*”|"[^"]*"|『[^』]*』/gu;
+
+export function isReadOnlyIntent(intent: string): boolean {
+  // Addresses first: their 「?」「.」 are not sentence breaks.
+  const text = intent
+    .replace(/https?:\/\/\S+/giu, ' 链接 ')
+    .replace(QUOTED_RE, '「」')
+    .trim();
+  if (!text || WRITE_INTENT_RE.test(intent)) return false;
+  const parts = text
+    .split(INTENT_PART_RE)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!parts.some((part) => READ_VERB_RE.test(part) || QUESTION_RE.test(part))) return false;
+  return parts.every(
+    (part) => READ_VERB_RE.test(part) || QUESTION_RE.test(part) || NAV_ONLY_RE.test(part),
+  );
+}
 /** FIX-57 #5: at most this many sites besides the walled one during a rescue. */
 export const RESCUE_SITES = 2;
 /** FIX-57 #5: public search pages a rescue may open to find a route (not counted as routes). */
@@ -3078,7 +3113,28 @@ export function withoutSourceLines(text: string): string {
  * and this makes sure: no 「（照页面原样）」 notes, a long product name cut (never reworded)
  * to its head plus 「…」, and a card with no featured offer said in words.
  */
-const VERBATIM_NOTE_RE = /\s*[（(][^（）()\n]{0,40}原样[^（）()\n]{0,20}[）)]/gu;
+const VERBATIM_NOTE_RE = /(\s*)[（(]([^（）()\n]{0,60}原样[^（）()\n]{0,60})[）)]/gu;
+/** 复审 #4: the 「原样」 words themselves; whatever else a note says (打码、未登录…) stays. */
+const VERBATIM_WORDS_RE =
+  /(?:均|都|皆|全部|全)?(?:照|按|据)?(?:页面|网页|原文)?原样(?:显示|展示|列出|写出?|照录|保留|抄录)?(?:的)?/gu;
+/** A note part that only says 「(价格和名称均)照页面原样(显示)」. */
+const VERBATIM_ONLY_RE =
+  /^(?:(?:价格|名称|商品名|标题|数据|内容|信息|文字|数字|评分)[和与及、]?)*(?:均|都|皆|全部|全)?(?:照|按|据)?(?:页面|网页|原文)?原样(?:显示|展示|列出|写出?|照录|保留|抄录)?$/u;
+
+/**
+ * 复审 #4 (诚实): a note that only says 「照页面原样」 goes; in a note that says more
+ * (「页面原样显示，未登录被打码」) only the 原样 words go and the rest stays.
+ */
+function withoutVerbatimWords(_m: string, space: string, inner: string): string {
+  const rest = inner
+    .split(/[，,；;]/u)
+    .map((part) => part.trim())
+    .filter((part) => part && !VERBATIM_ONLY_RE.test(part))
+    .map((part) => part.replace(VERBATIM_WORDS_RE, '').trim())
+    .filter(Boolean)
+    .join('，');
+  return rest ? `${space}（${rest}）` : '';
+}
 const NO_FEATURED_RE =
   /[（(][^（）\n]*?No featured offers? available[^（）\n]*?((?:S\$|US\$|\$|¥|￥)\s?[\d.,]+)\s*\((\d+) new offers?\)[^（）\n]*?[）)]/giu;
 const LONG_NAME_LINE_RE =
@@ -3099,7 +3155,7 @@ function shortName(name: string): string {
 
 export function plainAnswer(text: string): string {
   return text
-    .replace(VERBATIM_NOTE_RE, '')
+    .replace(VERBATIM_NOTE_RE, withoutVerbatimWords)
     .replace(
       NO_FEATURED_RE,
       (_m, price: string, n: string) => `（这款没有主推价，有 ${n} 个卖家报价 ${price}）`,

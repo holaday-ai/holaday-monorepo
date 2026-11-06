@@ -319,13 +319,28 @@ describe('复审 #2', () => {
 describe('复审 #3', () => {
   it.each([
     ['Friends s1e2 的剧情', 'Friends s1e2 的剧情'],
-    ['wait_for it 是一句口头禅', 'wait_for it 是一句口头禅'],
     ['读取 snapshot 结果', '读取 snapshot 结果'],
     ['调用 read_page 失败', '调用读取页面失败'],
     ['snapshot(tab_2) 返回空', '读取页面返回空'],
     ['点击 s3e17 没反应', '点击那个元素没反应'],
     ['点击 e123', '点击那个按钮'],
   ])('ids and tool names are replaced only where they are used as such: %s', (text, out) => {
+    expect(stripInternalRefs(text)).toBe(out);
+  });
+
+  it.each([
+    ['用 read_page 读', '用读取页面读'],
+    ['调用 read_page 读取正文', '调用读取页面读取正文'],
+    ['read_page 没读到', '读取页面没读到'],
+    ['get_page_text 失败', '读取页面失败'],
+    ['web_search 返回空', '搜索返回空'],
+    ['request_human 交给用户', '操作交给用户'],
+    ['switch_tab 到第二个标签', '操作到第二个标签'],
+    ['click_ref 失败', '操作失败'],
+    ['页面里写的 wait_for it', '页面里写的操作 it'],
+    ['先 snapshot 再点击', '先 snapshot 再点击'],
+    ['用户 snapshot_id=3', '用户 snapshot_id=3'],
+  ])('复审 #4: a tool name with an underscore is always replaced: %s', (text, out) => {
     expect(stripInternalRefs(text)).toBe(out);
   });
 
