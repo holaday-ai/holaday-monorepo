@@ -9,6 +9,7 @@ import {
   parseTaskTitle,
   relevantNextSteps,
   validNextSteps,
+  withoutEchoes,
 } from './next-steps-generator.js';
 
 /** FIX-57 #4: next steps that continue this result, in the assistant's voice. */
@@ -33,7 +34,7 @@ const adapter = (text: string, seen: unknown[] = []): MessagesAdapter => ({
 });
 
 describe('FIX-57 #4 · next steps', () => {
-  it('parses {steps:[{label,prompt}]}, a fenced block, or a bare list of strings', () => {
+  it('parses {steps:[{label,prompt}]} or a fenced block; a bare string is not a step', () => {
     const one = {
       label: '要不要把三大指数整理成对比表？',
       prompt: '把上证、深证、创业板昨天的表现整理成对比表',
@@ -42,9 +43,7 @@ describe('FIX-57 #4 · next steps', () => {
     expect(
       parseNextSteps(`好的：\n\`\`\`json\n${JSON.stringify({ steps: [one] })}\n\`\`\``),
     ).toEqual([one]);
-    expect(parseNextSteps('["查看深证成指表现"]')).toEqual([
-      { label: '查看深证成指表现', prompt: '查看深证成指表现' },
-    ]);
+    expect(parseNextSteps('["查看深证成指表现"]')).toEqual([]);
     expect(parseNextSteps('not json')).toEqual([]);
   });
 
@@ -173,6 +172,24 @@ describe('FIX-57 #4 · next steps', () => {
     });
     expect(compare).not.toContain('用户这次没有要求比价或跨平台');
     expect(NEXT_STEPS_SYSTEM_PROMPT).toContain('就不要提「和京东同款对比」');
+  });
+
+  it('协调方第 3 次代体验: the request or a recent one said again is never a step', () => {
+    const asked = ['上证指数现在多少点', '亚马逊新加坡站 USB C 线价格'];
+    expect(
+      withoutEchoes(asked, [
+        { label: '上证指数现在多少点', prompt: '上证指数现在多少点' },
+        { label: '亚马逊新加坡站 USB C 线价格？', prompt: '帮我查亚马逊新加坡站 USB C 线价格' },
+        {
+          label: '创业板今天跌了 2.87%，要我看看是什么带动的吗？',
+          prompt: '查一下今天创业板指下跌的主要原因',
+        },
+      ]).map((s) => s.label),
+    ).toEqual(['创业板今天跌了 2.87%，要我看看是什么带动的吗？']);
+    // What came back in that run: a bare list of the recent requests → no steps at all.
+    expect(parseNextSteps('["上证指数现在多少点","亚马逊新加坡站 USB C 线价格"]')).toEqual([]);
+    expect(NEXT_STEPS_SYSTEM_PROMPT).toContain('绝不原样照抄用户这次的原话或最近任务的原话');
+    expect(NEXT_STEPS_SYSTEM_PROMPT).toContain('收盘后再告诉你三大指数的结果？');
   });
 
   it('复审 #4: an item id in the query is part of the address; bare retries are banned', () => {

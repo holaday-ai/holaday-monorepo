@@ -45,7 +45,7 @@ describe('FIX-57 #3 · the live status line', () => {
 
   it('never shows a ref id, a tab/frame id or a provider name', () => {
     const steps = [step(1, 'click', '点击 e123')];
-    expect(liveStatusText({ steps })).toBe('在页面上找需要的内容…');
+    expect(liveStatusText({ steps })).toBe('正在点页面上的一个选项…');
     // 复审 #1-3: replaced with plain words, so the sentence still reads; addresses are kept.
     expect(stripInternalRefs('在 tab_2 上点击 e123 没有反应')).toBe('在页面上点击那个按钮没有反应');
     expect(stripInternalRefs('正在读取 tab_3 上的 [ref=e123] 按钮')).toBe('正在读取页面上的按钮');

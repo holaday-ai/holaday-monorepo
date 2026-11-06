@@ -44,7 +44,9 @@ function fixture(options: { allowed?: boolean; output?: string; failed?: boolean
               content: [
                 {
                   type: 'text' as const,
-                  text: options.output ?? '["整理后续执行清单","比较两种材料结构"]',
+                  text:
+                    options.output ??
+                    '{"steps": [{"label": "整理后续执行清单", "prompt": "整理后续执行清单"}, {"label": "比较两种材料结构", "prompt": "比较两种材料结构"}]}',
                 },
               ],
               stopReason: 'end_turn',
@@ -157,7 +159,10 @@ describe('core follow-up suggestions boundary', () => {
     expect(f.frames).toEqual([]);
   });
   it('filters the prohibited procurement observed after plan approval before persistence and broadcast', async () => {
-    const f = fixture({ output: '["采购茶歇饮品与轻食","整理活动执行清单"]' });
+    const f = fixture({
+      output:
+        '{"steps": [{"label": "采购茶歇饮品与轻食", "prompt": "采购茶歇饮品与轻食"}, {"label": "整理活动执行清单", "prompt": "整理活动执行清单"}]}',
+    });
     await publishCoreTaskSuggestions({
       ...f.input,
       rawIntent: '确认方案，输出最终清单',
@@ -170,7 +175,10 @@ describe('core follow-up suggestions boundary', () => {
   });
 
   it('inherits tail restrictions without trimming the original intent', async () => {
-    const f = fixture({ output: '["发送总结邮件","整理后续执行清单"]' });
+    const f = fixture({
+      output:
+        '{"steps": [{"label": "发送总结邮件", "prompt": "发送总结邮件"}, {"label": "整理后续执行清单", "prompt": "整理后续执行清单"}]}',
+    });
     const intent = `${'合成材料。'.repeat(150)}不要发送邮件`;
     await publishCoreTaskSuggestions({ ...f.input, intent });
     expect(JSON.stringify(f.calls[0]?.request)).toContain(intent);

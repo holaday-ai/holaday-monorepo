@@ -338,6 +338,31 @@ describe('复审 #3 · 代 BOSS 体验: the answer reads like talk', () => {
     );
   });
 
+  it('复审 #6: a fact line with something new stays (PLUS 价)', () => {
+    const t = '价格 ¥7??9。\n- 价格：¥7??9，另有 PLUS 价 ¥7??0';
+    expect(plainAnswer(t)).toBe(t);
+    const note = '价格 ¥7??9。\n- 价格：¥7??9（未登录被打码）';
+    expect(plainAnswer(note)).toBe('价格 ¥7??9。');
+    const other = '价格 ¥7??9。\n- 价格：¥7??9（PLUS 会员 ¥7??0）';
+    expect(plainAnswer(other)).toBe(other);
+  });
+
+  it('协调方第 3 次代体验 亚马逊 Belkin: said once, no stray 「即」', () => {
+    expect(
+      plainAnswer(
+        '3. 名称：Belkin Eco USB C Cable；价格：该商品没有主推价，有 1 个卖家报价 S$9.43（No featured offers available S$9.43 (1 new offer)）',
+      ),
+    ).toBe('3. 名称：Belkin Eco USB C Cable；价格：该商品没有主推价，有 1 个卖家报价 S$9.43');
+    expect(
+      plainAnswer(
+        '3. Belkin Cable — 页面显示「No featured offers available」，即该商品没有主推价，有 1 个卖家报价 S$9.43。',
+      ),
+    ).toBe('3. Belkin Cable — 该商品没有主推价，有 1 个卖家报价 S$9.43。');
+    // A note that adds something stays.
+    const fresh = '1. UGREEN — S$10.92（限时优惠，原价 S$17.42）';
+    expect(plainAnswer(fresh)).toBe(fresh);
+  });
+
   it('协调方第 2 次代体验 京东: the price is said once', () => {
     const raw = [
       '部分完成：这是从[京东手机版](https://item.m.jd.com/product/100142621606.html)查到的，不是你给的京东页面，只能算部分完成。',
@@ -430,6 +455,8 @@ describe('复审 #4 · only a plainly read-only task is routed around (whitelist
     '看完价格以后帮我买一个',
     'check the price and add it to cart',
     '查一下价格，有货就下单',
+    '看价格低于7000的话直接拍',
+    '查到价格就去拍',
   ])('handed to the person: %s', (intent) => {
     expect(isReadOnlyIntent(intent)).toBe(false);
   });

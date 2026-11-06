@@ -33,6 +33,8 @@ export const NEXT_STEPS_SYSTEM_PROMPT = `你是用户的私人助理，刚替用
 要求：
 - 紧扣这次的目标和结果：具体到对象（哪只股票、哪个商品、哪个网站、哪段时间）和产出（对比表、提醒、摘要、清单…）。不要泛泛的「查看更多」「搜索相关新闻」「分析一下」。
 - 不重复这次已经回答过的内容；用户最近的任务可以帮你判断偏好和延续方向。
+- 绝不原样照抄用户这次的原话或最近任务的原话当作提议（最近任务只用来判断偏好）；每条提议都要是新的一步。
+- 行情、点位这类结果：从结果里最显眼的具体变化出发，例如「创业板今天跌了 2.87%，要我看看是什么带动的吗？」「收盘后再告诉你三大指数的结果？」；只陈述事实和查原因，不预测涨跌、不给买卖建议。
 - 结果是「部分完成」时，第一条必须是补齐缺口的那一步（换个时间/换个方式拿到缺的那部分）。
 - 不要提议重新打开刚被拦下或打不开的那个页面（包括它的电脑版、原链接）；补缺口可以去同一网站的别的页面（如「再打开第 3 条商品页拿价格」）。
 - 不要给「再试一次？」「重试一下？」这类原样重来的提议：每条提议都要说清换成什么做法、去哪个页面或要什么。
@@ -134,9 +136,9 @@ export async function generateNextStepsWithTitle(
     return none;
   }
   return {
-    steps: relevantNextSteps(
-      opts.blockedUrls ?? [],
-      filterNextSteps(opts.intent, parseNextSteps(raw)),
+    steps: withoutEchoes(
+      [opts.intent, ...(opts.recentIntents ?? [])],
+      relevantNextSteps(opts.blockedUrls ?? [], filterNextSteps(opts.intent, parseNextSteps(raw))),
     ),
     title: parseTaskTitle(raw),
   };
@@ -160,7 +162,7 @@ const INTERNAL_RE =
 const BANNED_RE =
   /温馨提示|购买建议|风险提示|免责声明|买入|卖出|加仓|减仓|抄底|会涨|会跌|涨跌预测|内核|指纹|伪装|代理|换\s*IP|user[\s-]?agent|破解/i;
 
-/** Tolerant parse: a fenced block, a bare object, or a bare array of either shape. */
+/** Tolerant parse: a fenced block, a bare object, or a bare array of {label, prompt} items. */
 export function parseNextSteps(raw: string): NextStep[] {
   if (!raw) return [];
   const trimmed = raw.trim();
@@ -180,10 +182,9 @@ export function parseNextSteps(raw: string): NextStep[] {
       : [];
   const out: NextStep[] = [];
   for (const item of list) {
-    if (typeof item === 'string') {
-      out.push({ label: item.trim(), prompt: item.trim() });
-      continue;
-    }
+    // 协调方第 3 次代体验: a bare string is not a step — the model echoing the person's
+    // recent requests (「上证指数现在多少点」) came back as one; nothing fills in for it.
+    if (typeof item === 'string') continue;
     if (!item || typeof item !== 'object') continue;
     const label = (item as { label?: unknown }).label;
     const prompt = (item as { prompt?: unknown }).prompt;
@@ -194,6 +195,21 @@ export function parseNextSteps(raw: string): NextStep[] {
     });
   }
   return out;
+}
+
+const echoKey = (text: string) =>
+  text
+    .replace(/请使用云端浏览器|请用浏览器|帮我|请/g, '')
+    .replace(/[\s，。？！、,.?!「」"“”：:]/g, '')
+    .toLowerCase();
+
+/**
+ * 协调方第 3 次代体验: a step is never this request or one of the recent ones said again —
+ * not as its label, not as what it sends. With nothing left, no step is shown.
+ */
+export function withoutEchoes(asked: readonly string[], steps: readonly NextStep[]): NextStep[] {
+  const said = new Set(asked.map(echoKey).filter((k) => k.length >= 2));
+  return steps.filter((step) => !said.has(echoKey(step.label)) && !said.has(echoKey(step.prompt)));
 }
 
 /** Shape, safety and the user's own prohibitions; at most 3, no duplicates. */

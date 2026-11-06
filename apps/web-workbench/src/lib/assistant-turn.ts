@@ -156,9 +156,21 @@ const READ_KINDS = new Set([
 ]);
 
 /** A visible label from a step summary (「点击 搜索」), never a bare ref id. */
+/** 复审 #6: accessibility roles and tag names (「generic」) are not something a person sees. */
+const ROLE_WORD =
+  '(?:generic|div|span|img|image|link|button|listitem|list|option|menuitem|menu|checkbox|radio|textbox|combobox|searchbox|heading|paragraph|section|article|region|group|cell|row|gridcell|tab|svg|path|a|li|ul|input|label|none|presentation|main|navigation|banner|figure|StaticText|元素|节点)';
+const ROLE_ONLY_RE = new RegExp(`^${ROLE_WORD}$`, 'i');
+const ROLE_PREFIX_RE = new RegExp(`^${ROLE_WORD}\\s*[:：]?\\s+(?=\\S)`, 'i');
+
 function stepTarget(summary: string | undefined, prefix: RegExp): string | null {
-  const raw = summary?.replace(prefix, '').trim();
-  if (!raw || /^(?:e|ref|s\d*e)\d+$/i.test(raw) || /ref=|tab_|frame_/.test(raw)) return null;
+  const raw = summary
+    ?.replace(prefix, '')
+    .trim()
+    .replace(ROLE_PREFIX_RE, '')
+    .replace(/^["'「“]+|["'」”]+$/g, '')
+    .trim();
+  if (!raw || ROLE_ONLY_RE.test(raw)) return null;
+  if (/^(?:e|ref|s\d*e)\d+$/i.test(raw) || /ref=|tab_|frame_/.test(raw)) return null;
   const clean = stripInternalRefs(raw).replace(/^「|」$/g, '');
   return clean && clean.length <= 18 ? clean : null;
 }
@@ -212,7 +224,7 @@ export function liveStatusText(input: {
     case 'click':
     case 'click_ref': {
       const target = stepTarget(last.actionSummary, /^点击\s*/);
-      return target ? `正在点「${target}」…` : `在${on}上找需要的内容…`;
+      return target ? `正在点「${target}」…` : `正在点${on}上的一个选项…`;
     }
     case 'type':
     case 'type_in_ref':
@@ -360,6 +372,8 @@ export function failureOwnWords(errorText: string): string | null {
   const first = text.split(/(?<=[。！？!?])/)[0]?.trim() ?? '';
   if (first.length < 6 || first.length > 90) return null;
   if (/[A-Z_]{6,}|error|exception|stack|\bat\s/i.test(first)) return null;
+  // 协调方第 3 次代体验: 「质量校验未通过：没有通过格式或数据规则检查」 is our own check talking.
+  if (INTERNAL_CHECK_RE.test(first)) return null;
   return first.replace(/[。.]$/, '');
 }
 
@@ -389,6 +403,52 @@ export function missingObject(own: string | null): string | null {
  * directly what happened and that the result was not obtained — no 「这次没拿到你要的结果：」
  * preamble. Options lead with the step that fills the gap.
  */
+/** 协调方第 3 次代体验: failure reasons that are our own checks, never shown as the lead. */
+const INTERNAL_CHECK_RE =
+  /质量校验|校验未通过|格式或数据规则|数据规则|规则检查|格式检查|结果复核|门禁|verifier|quality.?(?:gate|check)|schema|post.?check/i;
+/** A site named in words (「亚马逊新加坡站」), for a question asked without a link. */
+const NAMED_SITE_RE =
+  /亚马逊(?:新加坡|美国|日本|英国|德国|中国|澳洲|澳大利亚)?站?|amazon(?:\.[a-z.]+)?|京东|淘宝|天猫|拼多多|闲鱼|苏宁|唯品会|得物|携程|飞猪|美团|大众点评|知乎|小红书|抖音|哔哩哔哩|B ?站|微博|豆瓣|eBay|Shopee|Lazada/i;
+const LIVE_ASK_RE = /价格|价钱|多少钱|报价|售价|库存|有货|现货|实时|现在|今天|最新|price|stock/i;
+
+/**
+ * 协调方第 3 次代体验: 「点名网站 + 价格/库存/实时」 that did not get an answer — say what was
+ * not obtained, and offer to open that site and look now (the same request, in the browser).
+ */
+function liveSiteFailure(
+  intent: string,
+  finalUrl: string | null | undefined,
+  executionMode: string | undefined,
+  retry: TurnOption | null,
+): FailureTurn | null {
+  if (!intent || !LIVE_ASK_RE.test(intent)) return null;
+  const named = NAMED_SITE_RE.exec(intent)?.[0]?.trim();
+  const site = named ?? siteName(finalUrl, intent);
+  if (!site) return null;
+  const what = /库存|有货|现货|stock/i.test(intent)
+    ? '库存'
+    : /价格|价钱|多少钱|报价|售价|price/i.test(intent)
+      ? '实时价格'
+      : '实时信息';
+  const inBrowser = executionMode === 'browser';
+  return {
+    lead: `这次没拿到${site}的${what}。`,
+    why: inBrowser
+      ? '页面这次没给出要的内容，可以让我再打开一次看看。'
+      : '这种要看网站当前页面的问题，得打开网页实时查。',
+    options: [
+      inBrowser
+        ? null
+        : {
+            kind: 'prompt' as const,
+            label: `打开${site}帮你实时查`,
+            prompt: /^请使用云端浏览器/.test(intent) ? intent : `请使用云端浏览器，${intent}`,
+          },
+      retry,
+    ].filter((o): o is TurnOption => Boolean(o)),
+  };
+}
+
 export function failureTurn(input: {
   status: UiTask['status'];
   errorText: string;
@@ -487,11 +547,24 @@ export function failureTurn(input: {
       ].filter((o): o is TurnOption => Boolean(o)),
     };
   }
+  // In the browser a timeout or a broken page keeps its own words; our own check does not.
+  const live =
+    input.executionMode !== 'browser' || INTERNAL_CHECK_RE.test(input.errorText)
+      ? liveSiteFailure(intent, input.finalUrl, input.executionMode, retry)
+      : null;
+  if (live) return live;
   if (/超时|响应|连接|打开这个网站|浏览器|页面正在切换|休眠|中断|长时间/.test(title)) {
     return {
       lead: `${site ?? '网站'}这次没有正常打开（${title}）${tried}，所以${notGot}。`,
       why: '不是你的问题。',
       options: [retry, others].filter((o): o is TurnOption => Boolean(o)),
+    };
+  }
+  if (INTERNAL_CHECK_RE.test(input.errorText) || INTERNAL_CHECK_RE.test(title)) {
+    return {
+      lead: '这次没拿到你要的结果：答案没通过我自己的核对，所以没交给你。',
+      why: '可以让我再试一次；要是有想查的网站，告诉我，我直接打开它查。',
+      options: [retry].filter((o): o is TurnOption => Boolean(o)),
     };
   }
   return {

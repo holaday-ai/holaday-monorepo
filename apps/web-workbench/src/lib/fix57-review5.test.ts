@@ -1,6 +1,12 @@
 /** FIX-57 协调方第 2 次代体验 + 复审 #5 (web side). */
 import { describe, expect, it } from 'vitest';
-import { hasInternalRef, partialLoginStep, stripInternalRefs } from './assistant-turn';
+import {
+  failureTurn,
+  hasInternalRef,
+  liveStatusText,
+  partialLoginStep,
+  stripInternalRefs,
+} from './assistant-turn';
 
 const JD_INTENT =
   '请使用云端浏览器，打开 https://item.jd.com/100142621606.html 读商品标题和页面显示的价格';
@@ -46,5 +52,66 @@ describe('协调方第 2 次代体验 · data-source names never shown', () => {
 
   it('a suggestion naming the interface is dropped', () => {
     expect(hasInternalRef('再用 stock_zh_index_spot_sina 拉一次？')).toBe(true);
+  });
+});
+
+describe('协调方第 3 次代体验 · generate-lane failure reads like talk', () => {
+  it('亚马逊新加坡站 USB C 线价格 (generate, 质量校验未通过): no internal words; open the site first', () => {
+    const turn = failureTurn({
+      status: 'failed',
+      errorText: '质量校验未通过：没有通过格式或数据规则检查',
+      intent: '亚马逊新加坡站 USB C 线价格',
+      executionMode: 'generate',
+      canRetry: true,
+    });
+    expect(turn.lead).toBe('这次没拿到亚马逊新加坡站的实时价格。');
+    expect(`${turn.lead}${turn.why}`).not.toMatch(/质量校验|格式或数据规则|说得更具体/);
+    expect(turn.options[0]).toEqual({
+      kind: 'prompt',
+      label: '打开亚马逊新加坡站帮你实时查',
+      prompt: '请使用云端浏览器，亚马逊新加坡站 USB C 线价格',
+    });
+    expect(turn.options[1]).toEqual({ kind: 'retry', label: '再试一次' });
+  });
+
+  it('an internal check failure without a named site: plain words, never the check name', () => {
+    const turn = failureTurn({
+      status: 'failed',
+      errorText: '质量校验未通过：没有通过格式或数据规则检查',
+      intent: '帮我写一份周报提纲',
+      executionMode: 'generate',
+      canRetry: true,
+    });
+    expect(turn.lead).toBe('这次没拿到你要的结果：答案没通过我自己的核对，所以没交给你。');
+    expect(`${turn.lead}${turn.why}`).not.toMatch(/质量校验|格式或数据规则|说得更具体/);
+  });
+
+  it('already in the browser: no 「打开…」 offer again', () => {
+    const turn = failureTurn({
+      status: 'failed',
+      errorText: '质量校验未通过：没有通过格式或数据规则检查',
+      intent: '请使用云端浏览器，在亚马逊新加坡站搜 usb c cable 看价格',
+      executionMode: 'browser',
+      canRetry: true,
+    });
+    expect(turn.lead).toBe('这次没拿到亚马逊新加坡站的实时价格。');
+    expect(turn.options.map((o) => o.label)).toEqual(['再试一次']);
+  });
+});
+
+describe('复审 #6 · the status line never quotes a role name', () => {
+  const click = (actionSummary: string) =>
+    liveStatusText({
+      steps: [{ stepId: 's1', status: 'running', actionKind: 'click', actionSummary } as never],
+    });
+  it.each(['点击 generic', '点击 「generic」', '点击 div', '点击 img', '点击 link', '点击 button'])(
+    '%s → a plain sentence',
+    (summary) => {
+      expect(click(summary)).toBe('正在点页面上的一个选项…');
+    },
+  );
+  it('readable text is quoted, its role word dropped', () => {
+    expect(click('点击 button 搜索')).toBe('正在点「搜索」…');
+    expect(click('点击 加入购物车')).toBe('正在点「加入购物车」…');
   });
 });

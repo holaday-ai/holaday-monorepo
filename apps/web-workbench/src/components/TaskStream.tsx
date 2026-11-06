@@ -2893,6 +2893,9 @@ function makeMarkdownComponents(opts: {
     a: ({ href, children, ...rest }) => {
       const safeHref = safeExternalHttpHref(href);
       if (!safeHref) return <span {...rest}>{children}</span>;
+      const label = typeof children === 'string' ? shortLinkLabel(children, safeHref) : children;
+      // A short name (「京东手机版」) is never split; a long title still wraps on a phone.
+      const short = typeof label === 'string' && Array.from(label).length <= 16;
       return (
         <a
           href={safeHref}
@@ -2906,11 +2909,13 @@ function makeMarkdownComponents(opts: {
                 }
               : undefined
           }
-          className="inline-flex min-h-7 items-center gap-1 rounded-[4px] px-0.5 align-middle text-[#FF0061] underline decoration-[#FF0061]/35 underline-offset-2 hover:text-[#FF0061] dark:text-[#FF0061] dark:hover:text-[#FF0061]"
+          // 复审 #6: inline like the words around it (「这是从京东手机版查到的」 stays one line on a
+          // phone); the vertical padding keeps the tap area without changing the line height.
+          className={`${short ? 'whitespace-nowrap ' : 'break-words '}rounded-[4px] px-0.5 py-1 text-[#FF0061] underline decoration-[#FF0061]/35 underline-offset-2 hover:text-[#FF0061] dark:text-[#FF0061] dark:hover:text-[#FF0061]`}
           {...rest}
         >
-          {typeof children === 'string' ? shortLinkLabel(children, safeHref) : children}
-          <ExternalLink className="h-3 w-3" aria-hidden />
+          {label}
+          <ExternalLink className="ml-0.5 inline h-3 w-3 align-[-1px]" aria-hidden />
         </a>
       );
     },

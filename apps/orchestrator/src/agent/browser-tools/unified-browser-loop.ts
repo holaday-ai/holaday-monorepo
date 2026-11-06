@@ -3011,7 +3011,7 @@ const INTENT_PART_RE =
  * (拍下、买、加购、收藏、buy、order…) in any part, even one that also reads, hands it over.
  */
 const ACTION_RE =
-  /拍下|拍一[个件单]|买下|买了|(?:帮我|给我|替我|去|就|我要|我想|直接)买|买(?:一[个件台部]|两|三|它|这)|下单|购买|抢购|秒杀|领取|领券|收藏|关注|加购|加入|删除|修改|发送|发布|发帖|提交|付款|支付|结账|预约|预订|报名|投递|转发|分享|点赞|评论|回复|签到|充值|兑换|绑定|退款|退货|取消|保存到|下载|上传|开通|申请|填写|打卡|订阅|投票|登录|登陆|注册|\b(?:buy|order|purchase|pay|add|like|follow|subscribe|comment|reply|post|share|book|reserve|delete|remove|claim|redeem|download|upload|save|send|submit|checkout|sign\s*(?:in|up)|log\s*in|register)\b/iu;
+  /拍下|拍一[个件单]|直接拍|去拍|拍了|就拍|帮我拍|买下|买了|(?:帮我|给我|替我|去|就|我要|我想|直接)买|买(?:一[个件台部]|两|三|它|这)|下单|购买|抢购|秒杀|领取|领券|收藏|关注|加购|加入|删除|修改|发送|发布|发帖|提交|付款|支付|结账|预约|预订|报名|投递|转发|分享|点赞|评论|回复|签到|充值|兑换|绑定|退款|退货|取消|保存到|下载|上传|开通|申请|填写|打卡|订阅|投票|登录|登陆|注册|\b(?:buy|order|purchase|pay|add|like|follow|subscribe|comment|reply|post|share|book|reserve|delete|remove|claim|redeem|download|upload|save|send|submit|checkout|sign\s*(?:in|up)|log\s*in|register)\b/iu;
 const QUOTED_RE = /「[^」]*」|“[^”]*”|"[^"]*"|『[^』]*』/gu;
 
 export function isReadOnlyIntent(intent: string): boolean {
@@ -3172,8 +3172,20 @@ function withoutVerbatimClauses(
  * same line: the Chinese stays, the quote goes. Not explained: the quote is said in words.
  */
 const NO_FEATURED_QUOTE_RE =
-  /(?:页面(?:上)?(?:显示|写着|标注|写的是)?[：:]?\s*)?[「“"]([^」”"\n]*No featured offers? available[^」”"\n]*?)[」”"][，,；;]?\s*/giu;
+  /(?:页面(?:上)?(?:显示|写着|标注|写的是)?[：:]?\s*)?[「“"]([^」”"\n]*No featured offers? available[^」”"\n]*?)[」”"][，,；;]?\s*(?:即|也就是说?|意思是|意即)?[，,]?\s*/giu;
 const NO_FEATURED_PARTS_RE = /((?:S\$|US\$|\$|¥|￥)\s?[\d.,]+)\s*\((\d+) new offers?\)/iu;
+
+/** 复审 #6: 「…有 1 个卖家报价 S$9.43（这款没有主推价，有 1 个卖家报价 S$9.43）」 — a note in
+ * brackets that only repeats what the line already said before it goes. */
+const noteKey = (text: string) =>
+  text.replace(/这款|该商品|该款|此款|这件|仅|只|[\s，,。；;、：:]/gu, '').toLowerCase();
+
+function withoutRepeatedNotes(line: string): string {
+  return line.replace(/[（(]([^（）()\n]{4,})[）)]/gu, (m, inner: string, at: number) => {
+    const key = noteKey(inner);
+    return key.length >= 4 && noteKey(line.slice(0, at)).includes(key) ? '' : m;
+  });
+}
 
 function withoutNoFeaturedQuote(line: string): string {
   if (!/No featured offers? available/i.test(line)) return line;
@@ -3212,19 +3224,43 @@ const FACT_LINE_RE =
 const PRICE_TOKEN_RE =
   /(?:S\$|US\$|\$|¥|￥)\s?[\d?？.,]*\d[\d?？.,]*|(?:S\$|US\$|\$|¥|￥)\s?\d\?+\d/u;
 
+/** A bracketed note that only explains (打码、要登录、截断…) — no new fact of its own. */
+const EXPLAIN_ONLY_RE =
+  /^[^\d¥￥$]*(?:打码|打了码|遮挡|遮住|登录|截断|省略|看不到|隐藏|不全|显示|需要?|才能?)[^\d¥￥$]*$/u;
+const PRICE_TOKEN_ALL_RE = new RegExp(PRICE_TOKEN_RE.source, 'gu');
+
+/**
+ * 复审 #6: a fact line goes only when it says nothing new — every price in it (or its title)
+ * is already in the paragraph above, and what is left is filler or a note that only explains.
+ * 「- 价格：¥7??9，另有 PLUS 价 ¥7??0」 stays.
+ */
+function repeatsOnly(label: string, value: string, said: string): boolean {
+  const notes: string[] = [];
+  let rest = value.replace(/[（(]([^（）()\n]*)[）)]/gu, (_m, inner: string) => {
+    notes.push(inner);
+    return '';
+  });
+  if (!notes.every((note) => EXPLAIN_ONLY_RE.test(note))) return false;
+  if (/价/.test(label)) {
+    const prices = rest.match(PRICE_TOKEN_ALL_RE) ?? [];
+    if (!prices.length || !prices.every((p) => said.includes(p.replace(/\s+/g, '')))) return false;
+    rest = rest.replace(PRICE_TOKEN_ALL_RE, '');
+  } else {
+    const title = /「([^」]{4,})」/.exec(rest)?.[1] ?? rest.trim();
+    if (title.length < 4 || !said.includes(title.replace(/\s+/g, ''))) return false;
+    rest = rest.replace(/「[^」]*」/u, '').replace(title, '');
+  }
+  return /^[\s，,。.；;、：:约为是显示…]*$/u.test(rest);
+}
+
 function withoutRepeatedFacts(text: string): string {
-  const lines = text.split('\n');
   const prose: string[] = [];
   const out: string[] = [];
-  for (const line of lines) {
+  for (const line of text.split('\n')) {
     const m = FACT_LINE_RE.exec(line);
     if (m) {
-      const value = m[2] ?? '';
-      const key = /价/.test(m[1] ?? '')
-        ? PRICE_TOKEN_RE.exec(value)?.[0]
-        : (/「([^」]{4,})」/.exec(value)?.[1] ?? value.split(/[（(]/)[0]?.trim());
       const said = prose.join('\n').replace(/\s+/g, '');
-      if (key && key.length >= 3 && said.includes(key.replace(/\s+/g, ''))) continue;
+      if (repeatsOnly(m[1] ?? '', m[2] ?? '', said)) continue;
     } else if (!/^\s*(?:[-*•]|\d+[.、)])\s/.test(line)) {
       prose.push(line);
     }
@@ -3243,6 +3279,7 @@ export function plainAnswer(text: string): string {
     )
     .split('\n')
     .map(withoutNoFeaturedQuote)
+    .map(withoutRepeatedNotes)
     .map((line) =>
       line.replace(
         LONG_NAME_LINE_RE,

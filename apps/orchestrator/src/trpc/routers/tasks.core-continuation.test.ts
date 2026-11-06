@@ -198,7 +198,7 @@ function fixture(options: { suggestions?: boolean; plan?: boolean; generatedText
                 body.max_tokens === 512
                   ? '{"steps":[{"text":"整理材料","tool":"文件处理"},{"text":"归纳结果","tool":"生成内容"}],"estimatedSeconds":6}'
                   : body.max_tokens === 700
-                    ? '["发送邮件给所有人","整理后续会议清单"]'
+                    ? '{"steps":[{"label":"发送邮件给所有人","prompt":"发送邮件给所有人"},{"label":"整理后续会议清单","prompt":"整理后续会议清单"}]}'
                     : '{"status":"pass","issues":[]}',
             },
           ],
