@@ -159,7 +159,8 @@ const READ_KINDS = new Set([
 /** 复审 #6: accessibility roles and tag names (「generic」) are not something a person sees. */
 const ROLE_WORD =
   '(?:generic|div|span|img|image|link|button|listitem|list|option|menuitem|menu|checkbox|radio|textbox|combobox|searchbox|heading|paragraph|section|article|region|group|cell|row|gridcell|tab|svg|path|a|li|ul|input|label|none|presentation|main|navigation|banner|figure|StaticText|元素|节点)';
-const ROLE_ONLY_RE = new RegExp(`^${ROLE_WORD}$`);
+// DEPLOY-57 第 0 步 6: a target that is only a role word (「Menu」 too) is never quoted.
+const ROLE_ONLY_RE = new RegExp(`^${ROLE_WORD}$`, 'i');
 // 复审 #7: only a lowercase role word, or one right before a quote — 「Main Street 店」 stays.
 const ROLE_PREFIX_RE = new RegExp(
   `^(?:(?=[a-z])${ROLE_WORD}\\s*[:：]?\\s+(?=\\S)|${ROLE_WORD}\\s*[:：]?\\s*(?=["'「“]))`,
@@ -840,12 +841,22 @@ export function stepTimeline(
  * 复审 #3 (BOSS run, amazon): the verifier's 「未核实：以下内容未能在已读页面中逐字找到，请自行确认
  * ——…」 note leaves the answer; the answer gets one plain sentence and 「查看过程」 keeps the items.
  */
-export function splitUnverifiedNote(text: string): { body: string; unverified: string | null } {
+export function splitUnverifiedNote(
+  text: string,
+  opts: { partial?: boolean; en?: boolean } = {},
+): { body: string; unverified: string | null } {
   const m = text.match(
     /\n*\s*未核实[:：]\s*以下内容未能在已读页面中逐字找到，请自行确认——([\s\S]*?)(?=\n\s*\n|$)/,
   );
   if (!m) return { body: text, unverified: null };
-  const body = `${text.slice(0, m.index).trimEnd()}\n\n有些内容我没能在页面上逐字核对到，细节在「查看过程」里，用之前可以再看一眼。${text.slice((m.index ?? 0) + m[0].length)}`;
+  // DEPLOY-57 第 0 步 6: a partial answer already opens with 「只拿到了一部分」 — the items
+  // stay in 「查看过程」 and the answer does not say it a second time.
+  const said = opts.partial
+    ? ''
+    : opts.en
+      ? "\n\nSome details I couldn't match word for word on the page — they're listed under 「查看过程」; worth a look before you rely on them."
+      : '\n\n有些内容我没能在页面上逐字核对到，细节在「查看过程」里，用之前可以再看一眼。';
+  const body = `${text.slice(0, m.index).trimEnd()}${said}${text.slice((m.index ?? 0) + m[0].length)}`;
   return { body: body.trim(), unverified: m[1]?.trim() || null };
 }
 

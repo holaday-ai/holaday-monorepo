@@ -100,7 +100,7 @@ ${FULL_READ_RULE_4}
 11. 用户要求某种控件（如日期控件）而当前页面没有时，换一个有该控件的页面去操作，不要用别的控件（如 time 时间控件）代替。用户点名了网站时只在这些网站内找（只看表单页，不打开登录、注册、付款页；登录页的账号、密码框不算要填的表单，碰到登录页就退回去换别的页面，不要为此请求登录），都没有就把该网站表单上其余可填的项照样填好（不提交）并截图，再如实说明缺什么，不要换到别的网站；没点名时才换别的公开页面。
 12. 查天气等实时数值时，结果页没有天气卡片就打开一个天气来源页面并读取（snapshot/get_page_text），每个值照该页原样写（页面写「82°」就写「82°」，不自己加单位或换算）；页面上读不到的项写「未读到」，不用搜索摘要或记忆补。
 13. 动作返回 stale_ref（ref 已失效）时，先 snapshot，再用新 ref 把同一个动作重做一次（同一个字段、同一个值），不要改用别的方式代替。
-14. summary 是写给用户看的，像跟人说话：不写「照页面原样」「名称：…；价格：…」这类格式说明，不提工具名；商品名太长时只写开头到关键规格那一段再加「…」（截取，不改字）；商品卡片没有主推价、只列了卖家报价时，说「这款没有主推价，有 N 个卖家报价 S$x」。`;
+14. summary 是写给用户看的，像跟人说话：不写「照页面原样」「名称：…；价格：…」这类格式说明，不提工具名；不要向用户说明价格、名称是不是按「原样 / 原文」记录的（不写「页面原样价格」「按页面原文保留」这类话），照页面写就是了；商品名太长时只写开头到关键规格那一段再加「…」（截取，不改字）；商品卡片没有主推价、只列了卖家报价时，说「这款没有主推价，有 N 个卖家报价 S$x」。`;
 
 /** The system prompt for the current read mode: rule 4 follows `BROWSER_FULL_PAGE_READ`. */
 export function unifiedBrowserSystemPrompt(): string {
@@ -856,7 +856,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   const startRescue = async (
     step: number,
     why: string,
-    kind: 'login' | 'blocked' = 'login',
+    kind: 'login' | 'blocked' | 'stuck' = why === 'wall' ? 'login' : 'stuck',
+    said?: string,
   ): Promise<string | null> => {
     if (!rescueEligible || rescueStarted || captchaDeclined || step + 4 >= maxSteps) return null;
     rescueStarted = true;
@@ -867,8 +868,10 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     if (input.rescueState) {
       input.rescueState.started = true;
       input.rescueState.blockedUrl = rescueBlockedUrl;
-      input.rescueState.why = why === 'wall' ? kind : 'stuck';
+      input.rescueState.why = kind;
     }
+    // DEPLOY-57 第 0 步 5: why the rescue began, for the first line and for the log.
+    logger.info({ why, kind, said: said?.slice(0, 120) }, 'browser loop: rescue started');
     await Promise.resolve(input.onRescue?.(RESCUE_STATUS[why === 'wall' ? 'wall' : 'stuck'])).catch(
       () => undefined,
     );
@@ -2103,7 +2106,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         if (partialHeld) return { status: 'completed', ...partialHeld, steps: step + 1 };
         // FIX-57 #5: giving up on a blocked, broken or empty page — try another public route once.
         if (!notStarted() && RESCUE_GIVE_UP_RE.test(summary)) {
-          const note = await startRescue(step, 'stuck');
+          // DEPLOY-57 第 0 步 5: a page that loaded but asked for a login or was blocked is not
+          // 「没打开」 — the model's own give-up words say which it was.
+          const note = await startRescue(step, 'stuck', giveUpKind(summary ?? ''), summary);
           if (note) {
             results.push(toolResult(call.id, note, true));
             staleTurn = true;
@@ -3153,6 +3158,7 @@ export function rescuedAnswer(
       }），只拿到了一部分：`;
   const body = withoutSourceLines(
     outcome.summary.replace(/^\s*(?:\*\*)?部分完成(?:\*\*)?\s*[:：]\s*/, ''),
+    { name: from, url: finalUrl },
   );
   return {
     ...outcome,
@@ -3181,13 +3187,31 @@ const SOURCE_PREFIX_RE =
 
 /** 复审 #7: 「以上信息来自 [京东手机版](…)。」 — said by the first line and 「参考了 N 个来源」. */
 const SOURCE_SENTENCE_RE =
-  /\s*(?:以上|上述|这些|上面)(?:的)?(?:信息|内容|数据|结果)?(?:均|都|全部)?(?:来自|出自|取自|来源于)\s*(?:\[[^\]]+\]\([^)]*\)|[A-Za-z\u4e00-\u9fa5][A-Za-z\u4e00-\u9fa5.]{1,15}?)\s*(?:的)?(?:页面|网站|网页)?\s*(?:[。.]|$)|\s*(?:The )?(?:information|details|data) above (?:comes?|came|is) from\s*(?:\[[^\]]+\]\([^)]*\)|[A-Z][\w.]*(?: [A-Z][\w.]*)*)\s*(?:\.|$)/gu;
+  /\s*(?:以上|上述|这些|上面)(?:的)?(?:信息|内容|数据|结果)?(?:均|都|全部)?(?:来自|出自|取自|来源于)\s*(\[[^\]]+\]\([^)]*\)|[A-Za-z\u4e00-\u9fa5][A-Za-z\u4e00-\u9fa5.]{1,15}?)\s*(?:的)?(?:页面|网站|网页)?\s*(?:[。.]|$)|\s*(?:The )?(?:information|details|data) above (?:comes?|came|is) from\s*(\[[^\]]+\]\([^)]*\)|[A-Z][\w.]*(?: [A-Z][\w.]*)*)\s*(?:\.|$)/gu;
 
-export function withoutSourceLines(text: string): string {
+/** DEPLOY-57 第 0 步 6: the source said is the lead's own site (by name or by address). */
+function isLeadSource(said: string, site: { name?: string; url?: string }): boolean {
+  const link = /^\[([^\]]+)\]\(([^)]*)\)$/.exec(said);
+  const name = (link?.[1] ?? said).trim();
+  const host = hostOf(link?.[2])?.replace(/^(?:www|m|item)\./, '');
+  const leadHost = hostOf(site.url)?.replace(/^(?:www|m|item)\./, '');
+  return (!!site.name && name === site.name) || (!!host && !!leadHost && host === leadHost);
+}
+
+export function withoutSourceLines(
+  text: string,
+  lead: { name?: string; url?: string } = {},
+): string {
   return text
     .split('\n')
     .filter((line) => !SOURCE_LINE_RE.test(line))
-    .map((line) => line.replace(SOURCE_PREFIX_RE, '$1').replace(SOURCE_SENTENCE_RE, ''))
+    .map((line) =>
+      line
+        .replace(SOURCE_PREFIX_RE, '$1')
+        .replace(SOURCE_SENTENCE_RE, (m, zh?: string, en?: string) =>
+          isLeadSource((zh ?? en ?? '').trim(), lead) ? '' : m,
+        ),
+    )
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -3232,6 +3256,14 @@ const VERBATIM_SENTENCE_ONLY_RE =
 const META_CLAUSE_RE =
   /(?:按|照|据)(?:页面|网页)?原文(?:保留|记录|照录|摘录|抄录|列出)?|原文(?:保留|照录|摘录|抄录)|保留[^，,；;]{0,40}?字样|(?:原|英文)字样$/u;
 /** Clauses of a sentence that only say 「照页面原样」 go; the sentence goes if nothing is left. */
+/** DEPLOY-57 第 0 步 2: 「页面原样价格」 → 「价格」 — 页面原样 / 页面原文 used as a modifier. */
+const VERBATIM_MODIFIER_RE =
+  /(?<![按照据])(?:页面|网页)(?:原样|原文)的?(?=[\u4e00-\u9fa5])(?!保留|记录|显示|照录|摘录|抄录|列出|写)/gu;
+
+/** DEPLOY-57 第 0 步 1: only the words — 「价格按页面原文保留为 S$9.43」 → 「价格为 S$9.43」. */
+const META_WORDS_RE =
+  /(?:已|均|都|全部)?(?:按|照|据)(?:页面|网页)?(?:原文|原样)(?:保留|记录|照录|摘录|抄录|列出|显示|写)?|(?:原文|原样)(?:保留|照录|摘录|抄录)/gu;
+
 function withoutVerbatimClauses(
   _m: string,
   lead: string,
@@ -3242,7 +3274,15 @@ function withoutVerbatimClauses(
   const kept = sentence
     .split(/[，,；;]/u)
     .map((part) => part.trim())
-    .filter((part) => part && !VERBATIM_SENTENCE_ONLY_RE.test(part) && !META_CLAUSE_RE.test(part));
+    .map((part) => {
+      if (!part || !(VERBATIM_SENTENCE_ONLY_RE.test(part) || META_CLAUSE_RE.test(part)))
+        return part;
+      // A clause that carries a number or a price keeps it; only the 原样 / 原文 words go.
+      // (A number inside a quote — 「“(1 new offer)”字样」 — is the note, not a fact.)
+      const facts = part.replace(/[“"「『][^”"」』]*[”"」』]/gu, '');
+      return /\d|[¥￥$]/u.test(facts) ? part.replace(META_WORDS_RE, '').trim() : '';
+    })
+    .filter(Boolean);
   return kept.length ? `${lead}${space}${kept.join('，')}${end}` : lead;
 }
 
@@ -3256,6 +3296,8 @@ const NO_FEATURED_PARTS_RE = /((?:S\$|US\$|\$|¥|￥)\s?[\d.,]+)\s*\((\d+) new o
 
 /** 复审 #7: 「S$9.43(1 new offer)」 said in words. */
 const NEW_OFFER_RE = /((?:S\$|US\$|\$|¥|￥)\s?[\d.,]*\d)\s*\((\d+) new offers?\)/giu;
+/** DEPLOY-57 第 0 步 6: 「（S$12.99，2 new offers）」 — the count inside a note. */
+const NEW_OFFER_IN_NOTE_RE = /(?<=[（(，,、；;]\s*)(\d+) new offers?(?=\s*[）),，、；;])/giu;
 /** 复审 #7: the English 「as shown on the page」 notes and sentences. */
 const EN_VERBATIM_NOTE_RE =
   /\s*\((?:kept |copied |recorded |listed )?(?:verbatim|as shown(?: on the page)?|exactly as (?:shown|displayed)(?: on the page)?)\)/giu;
@@ -3292,8 +3334,6 @@ function withoutNoFeaturedQuote(line: string, en = false): string {
 
 const NO_FEATURED_RE =
   /[（(][^（）\n]*?No featured offers? available[^（）\n]*?((?:S\$|US\$|\$|¥|￥)\s?[\d.,]+)\s*\((\d+) new offers?\)[^（）\n]*?[）)]/giu;
-const LONG_NAME_LINE_RE =
-  /^(\s*(?:\d+[.、)]|[-*•])\s+)(?:\*\*)?([^\n]{61,}?)(?:\*\*)?(\s+[—–]\s+|\s*[：:]\s*)((?:S\$|US\$|\$|¥|￥)\s?\d)/u;
 const NAME_HEAD = 56;
 
 function shortName(name: string): string {
@@ -3319,7 +3359,7 @@ function shortName(name: string): string {
  * what the paragraph above already said goes — the fact is said once.
  */
 const FACT_LINE_RE =
-  /^\s*[-*•]\s*(?:\*\*)?(价格|售价|到手价|标题|商品标题|名称|商品名称?)(?:\*\*)?\s*[：:]\s*(.+)$/u;
+  /^\s*([-*•]\s*)?(?:\*\*)?(价格|售价|到手价|标题|商品标题|名称|商品名称?)(?:\*\*)?\s*[：:]\s*(.+)$/u;
 const PRICE_TOKEN_RE =
   /(?:S\$|US\$|\$|¥|￥)\s?[\d?？.,]*\d[\d?？.,]*|(?:S\$|US\$|\$|¥|￥)\s?\d\?+\d/u;
 
@@ -3346,7 +3386,10 @@ function repeatsOnly(label: string, value: string, said: string): boolean {
     rest = rest.replace(PRICE_TOKEN_ALL_RE, '');
   } else {
     const title = /「([^」]{4,})」/.exec(rest)?.[1] ?? rest.trim();
-    if (title.length < 4 || !said.includes(title.replace(/\s+/g, ''))) return false;
+    // DEPLOY-57 第 0 步 4: 「…原色...」 is said when 「…原色钛金属」 was — compare without the
+    // trailing ellipsis, as a prefix of what was said.
+    const head = title.replace(/(?:\.{2,}|…+)\s*$/u, '').replace(/\s+/g, '');
+    if (head.length < 4 || !said.includes(head)) return false;
     rest = rest.replace(/「[^」]*」/u, '').replace(title, '');
   }
   return /^[\s，,。.；;、：:约为是显示…]*$/u.test(rest);
@@ -3359,7 +3402,9 @@ function withoutRepeatedFacts(text: string): string {
     const m = FACT_LINE_RE.exec(line);
     if (m) {
       const said = prose.join('\n').replace(/\s+/g, '');
-      if (repeatsOnly(m[1] ?? '', m[2] ?? '', said)) continue;
+      if (repeatsOnly(m[2] ?? '', m[3] ?? '', said)) continue;
+      // A fact said in a line of its own (「商品标题：…」) counts for the lines after it.
+      if (!m[1]) prose.push(line);
     } else if (!/^\s*(?:[-*•]|\d+[.、)])\s/.test(line)) {
       prose.push(line);
     }
@@ -3368,10 +3413,43 @@ function withoutRepeatedFacts(text: string): string {
   return out.join('\n');
 }
 
+/**
+ * DEPLOY-57 第 0 步 3: a long English product name is cut whatever the line looks like —
+ * 「1. <名称> — S$…」, 「名称：<名称>；价格：…」, or the name on its own line with the price
+ * on the next. Only the name before the price is cut; the cut never lands inside a bracket.
+ */
+const ITEM_HEAD_RE = /^(\s*(?:(?:\d+[.、)]|[-*•])\s+)?(?:\*\*)?(?:(?:商品)?名称\s*[：:]\s*)?)/u;
+const NAME_END_RE =
+  /\*\*|\s+[—–]\s+|\s*[；;]\s*(?:价格|售价)|\s*(?:价格|售价)\s*[：:]|\s*[：:]\s*(?=(?:S\$|US\$|\$|¥|￥)\s?\d)|\s+(?=(?:S\$|US\$|\$|¥|￥)\s?\d)/u;
+
+const PRICE_AHEAD_RE = /(?:S\$|US\$|\$|¥|￥)\s?\d/u;
+const PRICE_LINE_RE =
+  /^\s*(?:[-*•]\s*)?(?:价格|售价|到手价|price)\s*[：:]|^\s*(?:S\$|US\$|\$|¥|￥)\s?\d/iu;
+
+/** Only a product name: a price follows it on the line, or (a list item) on the next line. */
+function withShortName(line: string, next: string | undefined): string {
+  const head = ITEM_HEAD_RE.exec(line)?.[1] ?? '';
+  const rest = line.slice(head.length);
+  if (!/^[A-Za-z0-9]/.test(rest)) return line;
+  const cut = NAME_END_RE.exec(rest);
+  const end = cut?.index ?? rest.length;
+  const priced = cut
+    ? PRICE_AHEAD_RE.test(rest.slice(end))
+    : /\S/.test(head) && next !== undefined && PRICE_LINE_RE.test(next);
+  if (!priced) return line;
+  const name = rest.slice(0, end);
+  const chars = Array.from(name);
+  if (chars.length <= NAME_HEAD + 4) return line;
+  const latin = chars.filter((c) => /[A-Za-z]/.test(c)).length;
+  if (latin / chars.length < 0.5) return line;
+  return `${head}${shortName(name.trimEnd())}${rest.slice(end)}`;
+}
+
 export function plainAnswer(text: string, en = false): string {
   const cleaned = text
     .replace(VERBATIM_NOTE_RE, withoutVerbatimWords)
     .replace(VERBATIM_SENTENCE_RE, withoutVerbatimClauses)
+    .replace(VERBATIM_MODIFIER_RE, '')
     .replace(EN_VERBATIM_NOTE_RE, '')
     .replace(EN_VERBATIM_SENTENCE_RE, '$1')
     .replace(NO_FEATURED_RE, (_m, price: string, n: string) =>
@@ -3382,24 +3460,35 @@ export function plainAnswer(text: string, en = false): string {
     .split('\n')
     .map((line) => withoutNoFeaturedQuote(line, en))
     .map((line) =>
-      line.replace(NEW_OFFER_RE, (_m, price: string, n: string) =>
-        en
-          ? `${price} (${n} seller offer${n === '1' ? '' : 's'})`
-          : `${price}（有 ${n} 个卖家报价）`,
-      ),
+      line
+        .replace(NEW_OFFER_RE, (_m, price: string, n: string) =>
+          en
+            ? `${price} (${n} seller offer${n === '1' ? '' : 's'})`
+            : `${price}（有 ${n} 个卖家报价）`,
+        )
+        .replace(NEW_OFFER_IN_NOTE_RE, (_m, n: string) =>
+          en ? `${n} seller offer${n === '1' ? '' : 's'}` : `有 ${n} 个卖家报价`,
+        ),
     )
     .map(withoutRepeatedNotes)
-    .map((line) =>
-      line.replace(
-        LONG_NAME_LINE_RE,
-        (_m, lead: string, name: string, sep: string, price: string) =>
-          `${lead}${shortName(name)}${sep}${price}`,
-      ),
-    )
+    .map((line, i, lines) => withShortName(line, lines[i + 1]))
     .join('\n');
   return withoutRepeatedFacts(cleaned)
     .replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, '\n\n')
     .trimEnd();
+}
+
+/** DEPLOY-57 第 0 步 5: what a give-up says the page did — asked for a login, was blocked, or
+ * did not open. */
+export function giveUpKind(said: string): 'login' | 'blocked' | 'stuck' {
+  if (/登录|登陆|log\s*in|sign\s*in/i.test(said)) return 'login';
+  if (
+    /拦截|拦下|风控|验证|403|429|请求过多|访问受限|限流|blocked|denied|forbidden|too\s+many\s+requests|rate.?limit/i.test(
+      said,
+    )
+  )
+    return 'blocked';
+  return 'stuck';
 }
 
 /** FIX-57 #5: the live status line shown while the run routes around a wall. */

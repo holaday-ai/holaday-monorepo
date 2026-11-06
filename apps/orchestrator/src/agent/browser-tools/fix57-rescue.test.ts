@@ -4,7 +4,9 @@ import {
   RESCUE_GIVE_UP_RE,
   RESCUE_PARTIAL_RE,
   RESCUE_STATUS,
+  UNIFIED_BROWSER_SYSTEM_PROMPT,
   WRITE_INTENT_RE,
+  giveUpKind,
   isEnglishIntent,
   isReadOnlyIntent,
   plainAnswer,
@@ -493,6 +495,103 @@ describe('复审 #7 · a rescued answer says where it came from once', () => {
   it('isEnglishIntent', () => {
     expect(isEnglishIntent('open https://item.jd.com/1.html and read the price')).toBe(true);
     expect(isEnglishIntent('打开 https://item.jd.com/1.html 读价格')).toBe(false);
+  });
+});
+
+describe('DEPLOY-57 第 0 步', () => {
+  it.each([
+    ['价格按页面原文保留为 S$9.43。', '价格为 S$9.43。'],
+    ['标题按页面原文保留，价格 S$9.43。', '价格 S$9.43。'],
+    ['已照页面原文记录，第 3 款 S$9.43 最便宜。', '第 3 款 S$9.43 最便宜。'],
+  ])('1: a clause with a price keeps it — %s', (text, out) => {
+    expect(plainAnswer(text)).toBe(out);
+  });
+
+  it('2: 「页面原样价格」 → 「价格」; the prompt says not to describe it', () => {
+    expect(
+      plainAnswer('在亚马逊新加坡站搜索“USB C cable”后，为您找到以下5个商品及其页面原样价格：'),
+    ).toBe('在亚马逊新加坡站搜索“USB C cable”后，为您找到以下5个商品及其价格：');
+    expect(plainAnswer('页面原文标题是「iPhone 16 Pro」。')).toBe('标题是「iPhone 16 Pro」。');
+    expect(UNIFIED_BROWSER_SYSTEM_PROMPT).toContain(
+      '不要向用户说明价格、名称是不是按「原样 / 原文」记录的',
+    );
+  });
+
+  it('3: long names are cut whatever the line looks like (real run: name, then 价格 on the next line)', () => {
+    const raw = [
+      '1. UGREEN 2 Pack USB C to USB C Charger Cable, Type C 100W PD Fast Charging Cord Compatible with iPhone 15 Pro Max, MacBook Pro, iPad Pro, Dell, Matebook, Chromebook, Pixel, Samsung S23 S22, Switch, 2M',
+      '   价格：S$12.45',
+      '2. Belkin Eco-Friendly Braided USB-A to USB-C Cable (6.6ft, 15W) - Soft and Flexible Fast Charging Cable, Type C Charger Cable for iPhone 16 and 15 Series 价格：S$8.21',
+      '- 名称：INIU 240W USB-C Charge Cable 2m 2-Pack, PD Fast Charging USB C to USB C Cable, Braided Type C to C Phone Charger Cord；价格：S$19.21',
+      '3. Anker Cable — S$8.90',
+    ];
+    const out = plainAnswer(raw.join('\n')).split('\n');
+    expect(out[0]).toBe('1. UGREEN 2 Pack USB C to USB C Charger Cable, Type C 100W…2M');
+    expect(out[1]).toBe('   价格：S$12.45');
+    expect(out[2]).toBe('2. Belkin Eco-Friendly Braided USB-A to USB-C Cable… 价格：S$8.21');
+    expect(out[3]).toBe('- 名称：INIU 240W USB-C Charge Cable 2m 2-Pack, PD Fast…；价格：S$19.21');
+    expect(out[4]).toBe('3. Anker Cable — S$8.90');
+    for (const line of out)
+      expect(Array.from(line.split(/价格|—/)[0] ?? '').length).toBeLessThanOrEqual(70);
+  });
+
+  it('3b: an English sentence without a price is not a product name', () => {
+    const prose =
+      'iframe 初始内容为 "Your content goes here."；输入后重新读取，内容为 "Hello from cloud browser"。';
+    expect(plainAnswer(prose)).toBe(prose);
+    const long =
+      'The page explains that the cable supports 100W fast charging for laptops and phones alike.';
+    expect(plainAnswer(long)).toBe(long);
+    const item =
+      '1. The page explains that the cable supports 100W fast charging for laptops and phones alike.';
+    expect(plainAnswer(item)).toBe(item);
+  });
+
+  it('4: a title said again with 「...」 at the end is said once (real run)', () => {
+    const raw = [
+      '商品标题：Apple/苹果/苹果【需签收激活】iPhone 16 Pro 128GB 原色钛金属（移动端页面标题被截断，末尾显示为「...」）',
+      '',
+      '价格：页面显示 ¥7??9，未登录状态下京东对价格做了打码处理，完整价格需要登录后才能查看。',
+      '',
+      '- 商品标题：Apple/苹果/苹果【需签收激活】iPhone 16 Pro 128GB 原色...',
+    ].join('\n');
+    const out = plainAnswer(raw);
+    expect(out.match(/商品标题：/g)).toHaveLength(1);
+    // A different title is not a repeat.
+    const other = '商品标题：iPhone 16 Pro 原色钛金属\n\n- 商品标题：iPhone 16 Pro Max 黑色...';
+    expect(plainAnswer(other)).toBe(other);
+  });
+
+  it.each([
+    ['京东商品页需要登录才能查看价格', 'login'],
+    ['页面被京东风控拦截，暂时无法展示', 'blocked'],
+    ['页面加载超时，没有打开', 'stuck'],
+  ])('5: the give-up words say why — %s', (said, kind) => {
+    expect(giveUpKind(said)).toBe(kind);
+  });
+
+  it('6: 「以上…来自 X」 goes only when X is the lead site; a note count is said in words', () => {
+    const URL_M = 'https://item.m.jd.com/product/100142621606.html';
+    const done = (summary: string) =>
+      ({ status: 'completed', summary, steps: 3 }) as Parameters<typeof rescuedAnswer>[0];
+    const state = {
+      started: true,
+      blockedUrl: 'https://item.jd.com/100142621606.html',
+      why: 'login' as const,
+    };
+    expect(
+      rescuedAnswer(done('价格 ¥7??9。以上信息来自京东手机版。'), state, URL_M).summary,
+    ).not.toContain('以上信息来自');
+    expect(
+      rescuedAnswer(done(`价格 ¥7??9。以上信息来自 [京东手机版](${URL_M})。`), state, URL_M)
+        .summary,
+    ).not.toContain('以上信息来自');
+    expect(
+      rescuedAnswer(done('参考价 ¥7999。以上信息来自什么值得买。'), state, URL_M).summary,
+    ).toContain('以上信息来自什么值得买。');
+    expect(plainAnswer('4. Belkin Cable — 卖家报价（S$12.99，2 new offers）')).toBe(
+      '4. Belkin Cable — 卖家报价（S$12.99，有 2 个卖家报价）',
+    );
   });
 });
 

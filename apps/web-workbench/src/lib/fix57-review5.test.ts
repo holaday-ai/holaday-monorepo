@@ -6,6 +6,7 @@ import {
   liveStatusText,
   partialLead,
   partialLoginStep,
+  splitUnverifiedNote,
   stripInternalRefs,
 } from './assistant-turn';
 import { optionLabelFor, rememberOptionLabel, resetOptionLabels } from './sent-option-labels';
@@ -225,5 +226,31 @@ describe('复审 #7 · partial lead, English login step, role words, bubble labe
       '打开亚马逊新加坡站帮你实时查',
     );
     expect(optionLabelFor('别的话')).toBeNull();
+  });
+});
+
+describe('DEPLOY-57 第 0 步 · web', () => {
+  it('a lone 「Menu」 is a role word', () => {
+    expect(
+      liveStatusText({
+        steps: [
+          {
+            stepId: 's1',
+            status: 'running',
+            actionKind: 'click',
+            actionSummary: '点击 Menu',
+          } as never,
+        ],
+      }),
+    ).toBe('正在点页面上的一个选项…');
+  });
+
+  it('a partial answer does not repeat 「没能逐字核对」 after its lead', () => {
+    const text =
+      '标题 A，价格 ¥7??9。\n\n未核实：以下内容未能在已读页面中逐字找到，请自行确认——价格「¥7??9」';
+    const partial = splitUnverifiedNote(text, { partial: true });
+    expect(partial.body).toBe('标题 A，价格 ¥7??9。');
+    expect(partial.unverified).toBe('价格「¥7??9」');
+    expect(splitUnverifiedNote(text).body).toContain('有些内容我没能在页面上逐字核对到');
   });
 });

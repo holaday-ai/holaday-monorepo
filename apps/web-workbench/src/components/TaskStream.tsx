@@ -2442,7 +2442,10 @@ function TerminalSummary({
   const productAttachments = attachments?.filter((a) => !isEvidenceAttachment(a)) ?? [];
   const evidenceAttachments = attachments?.filter((a) => isEvidenceAttachment(a)) ?? [];
   // 复审 #3: the verifier's 「未核实：…」 note is folded into 「查看过程」.
-  const unverifiedSplit = splitUnverifiedNote(revealed);
+  const unverifiedSplit = splitUnverifiedNote(revealed, {
+    partial: status === 'partial_success',
+    en: isEnglishTask(intent ?? ''),
+  });
   const shownText = unverifiedSplit.body;
   const links = answerLinks(displayText);
   const partial =
