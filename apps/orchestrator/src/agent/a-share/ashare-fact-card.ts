@@ -521,6 +521,59 @@ export function indexQuoteUsable(env: AkEnvelope<IndexRow>): boolean {
   return !env.error && env.data.length > 0;
 }
 
+/** FIX-57 复审 #5: when the index quote is from — shared by the card and the plain answer. */
+export interface IndexQuoteTiming {
+  /** The quote's own time when it has one, else the fetch time. */
+  when: Date;
+  ownAt: Date | null;
+  /** 「YYYY-MM-DD HH:MM」 in Beijing time. */
+  stamp: string;
+  /** Trading day at `when` (false outside the session); null when the calendar is unknown. */
+  day: boolean | null;
+  /** A session quote that is no longer live. */
+  stale: boolean;
+  /** Before the open: the clock is the previous trading day's close. */
+  priorDayClock: boolean;
+}
+
+export async function indexQuoteTiming(
+  client: AkshareClient,
+  env: AkEnvelope<IndexRow>,
+  now: Date,
+): Promise<IndexQuoteTiming> {
+  const own = String(pick(env.data[0] ?? {}, ['行情时间', '时间']) ?? '').trim();
+  const fetched = new Date(env.fetched_at);
+  const fetchedAt = Number.isNaN(fetched.getTime()) ? now : fetched;
+  const at = (iso: string, clock: string) =>
+    new Date(`${iso}T${clock.slice(0, 8).padEnd(8, ':00')}+08:00`);
+  const dated = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(own)
+    ? at(own.slice(0, 10), own.slice(11))
+    : null;
+  const fetchDay = await tradingDayKnown(client, beijingIso(fetchedAt));
+  const onFetchDay =
+    !dated && /^\d{2}:\d{2}/.test(own) && fetchDay === true ? at(beijingIso(fetchedAt), own) : null;
+  // 复审 #1：开盘前（08:30）取到的还是上个交易日的 15:00——时钟晚于取数时刻就不是今天的，
+  // 不用它，按抓取时刻写「最近报价」（容 2 分钟时钟误差）。
+  const priorDayClock = !!onFetchDay && onFetchDay.getTime() > fetchedAt.getTime() + 2 * 60_000;
+  const clockOnly = priorDayClock ? null : onFetchDay;
+  const ownAt = [dated, clockOnly].find((d) => d && !Number.isNaN(d.getTime())) ?? null;
+  const when = ownAt ?? fetchedAt;
+  const stamp = `${beijingIso(when)} ${fmtClock(when.toISOString())}`;
+  const day = ashareIntraday(when)
+    ? beijingIso(when) === beijingIso(fetchedAt)
+      ? fetchDay
+      : await tradingDayKnown(client, beijingIso(when))
+    : false;
+  // FIX-34：盘中的数只有「现在」也在盘中、同一天、落后不超过 10 个成交分钟才是实时；
+  // 14:58 的快照 15:05 读到、缓存的上午快照都只是「最近报价」（复审 #2）。
+  const stale =
+    day === true &&
+    (!ashareIntraday(now) ||
+      beijingIso(when) !== beijingIso(now) ||
+      (tradingLagMinutes(now, beijingMinutes(when)) ?? 0) > LIVE_QUOTE_MAX_LAG_MIN);
+  return { when, ownAt, stamp, day, stale, priorDayClock };
+}
+
 export async function buildIndexCard(
   deps: FactCardDeps & {
     /** 调用方已取到的指数行情（先判可用再进 lane），不再重复请求。 */
@@ -557,38 +610,11 @@ export async function buildIndexCard(
     // 日历查不到就只写「最近报价（时间）」。
     // 复审 #2：按报价自身的时间判断；没有才用抓取时刻。FIX-35 #3：sina 指数快照的时间只有
     // 时分秒（ticktime），日期取抓取日——只在抓取日是交易日时用（周末的 15:35 是上个交易日的）。
-    const own = String(pick(env.data[0] ?? {}, ['行情时间', '时间']) ?? '').trim();
-    const fetched = new Date(env.fetched_at);
-    const fetchedAt = Number.isNaN(fetched.getTime()) ? now : fetched;
-    const at = (iso: string, clock: string) =>
-      new Date(`${iso}T${clock.slice(0, 8).padEnd(8, ':00')}+08:00`);
-    const dated = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(own)
-      ? at(own.slice(0, 10), own.slice(11))
-      : null;
-    const fetchDay = await tradingDayKnown(deps.client, beijingIso(fetchedAt));
-    const onFetchDay =
-      !dated && /^\d{2}:\d{2}/.test(own) && fetchDay === true
-        ? at(beijingIso(fetchedAt), own)
-        : null;
-    // 复审 #1：开盘前（08:30）取到的还是上个交易日的 15:00——时钟晚于取数时刻就不是今天的，
-    // 不用它，按抓取时刻写「最近报价」（容 2 分钟时钟误差）。
-    const priorDayClock = !!onFetchDay && onFetchDay.getTime() > fetchedAt.getTime() + 2 * 60_000;
-    const clockOnly = priorDayClock ? null : onFetchDay;
-    const ownAt = [dated, clockOnly].find((d) => d && !Number.isNaN(d.getTime())) ?? null;
-    const when = ownAt ?? fetchedAt;
-    const stamp = `${beijingIso(when)} ${fmtClock(when.toISOString())}`;
-    const day = ashareIntraday(when)
-      ? beijingIso(when) === beijingIso(fetchedAt)
-        ? fetchDay
-        : await tradingDayKnown(deps.client, beijingIso(when))
-      : false;
-    // FIX-34：盘中的数只有「现在」也在盘中、同一天、落后不超过 10 个成交分钟才是实时；
-    // 14:58 的快照 15:05 读到、缓存的上午快照都只是「最近报价」（复审 #2）。
-    const stale =
-      day === true &&
-      (!ashareIntraday(now) ||
-        beijingIso(when) !== beijingIso(now) ||
-        (tradingLagMinutes(now, beijingMinutes(when)) ?? 0) > LIVE_QUOTE_MAX_LAG_MIN);
+    const { day, stale, priorDayClock, ownAt, stamp } = await indexQuoteTiming(
+      deps.client,
+      env,
+      now,
+    );
     lines.push(
       day === null
         ? `- 最近报价（抓取于 ${stamp}；未能确认今天是否交易日）`
@@ -600,6 +626,113 @@ export async function buildIndexCard(
     );
   }
   return `${lines.join('\n').trimEnd()}\n\n${QA_DISCLAIMER_BLOCK}`;
+}
+
+/**
+ * FIX-57 协调方第 2 次代体验: the task page answers 「上证指数现在多少点」 like an assistant,
+ * not a briefing card — the asked index first, the other two in one short line, the time
+ * said in words (还没开盘 / 现在 / 收盘), the source by a name people know, one quiet line
+ * instead of the disclaimer block. Same data and the same time verdict as the card.
+ */
+const INDEX_FOCUS: ReadonlyArray<[RegExp, string]> = [
+  [/上证|沪指|沪市/, '上证指数'],
+  [/深证|深成指|深市/, '深证成指'],
+  [/创业板/, '创业板指'],
+];
+const SOURCE_NAMES: ReadonlyArray<[RegExp, string]> = [
+  [/sina/i, '新浪财经'],
+  [/(?:^|[_:.])em(?:$|[_.])|eastmoney/i, '东方财富'],
+  [/ths|10jqka/i, '同花顺'],
+  [/baidu/i, '百度股市通'],
+];
+
+function indexSourceName(source: string | undefined): string {
+  return SOURCE_NAMES.find(([re]) => re.test(source ?? ''))?.[1] ?? '公开行情数据';
+}
+
+function moveWords(v: unknown): string {
+  const n = toNum(v);
+  if (n === null) return '涨跌幅暂缺';
+  if (n === 0) return '平盘';
+  return `${n > 0 ? '涨' : '跌'} ${Math.abs(n).toFixed(2)}%`;
+}
+
+/** Internal data-source names never reach the person (akshare, stock_zh_…, *_sina). */
+export function withoutDataSourceNames(text: string): string {
+  return text
+    .replace(/\s*[（(][^（）()\n]*akshare[^（）()\n]*[）)]/giu, '')
+    .replace(/\bakshare(?::[\w.+]+)?/giu, '公开行情数据')
+    .replace(/\b(?:stock|index|fund|bond)_[a-z0-9_]+\b/giu, '')
+    .replace(/\b[a-z0-9]+_(?:sina|em|ths)\b/giu, '')
+    .replace(/\bsina\s*接口/giu, '新浪财经')
+    .replace(/[ \t]{2,}/g, ' ');
+}
+
+export async function buildIndexAnswer(
+  deps: FactCardDeps & { quote?: AkEnvelope<IndexRow>; intent: string },
+): Promise<string> {
+  const now = deps.now ?? new Date();
+  const env = deps.quote ?? (await deps.client.getIndexQuote('cn'));
+  if (env.error || env.data.length === 0) {
+    return '我这边暂时没拿到三大指数的行情，稍后再问我一次，或者我去公开的行情页面帮你看。';
+  }
+  const rows = env.data.map((r) => ({
+    name: String(pick(r, ['名称']) ?? '指数'),
+    point: fmtNum(pick(r, ['最新价', '收盘'])),
+    move: moveWords(pick(r, ['涨跌幅'])),
+  }));
+  const focusName = INDEX_FOCUS.find(([re]) => re.test(deps.intent))?.[1];
+  const focus = focusName ? rows.find((r) => r.name === focusName) : undefined;
+  const others = rows.filter((r) => r !== focus);
+  const t = await indexQuoteTiming(deps.client, env, now);
+  const clock = fmtClock(t.when.toISOString());
+  const todayClose =
+    !!t.ownAt &&
+    beijingIso(t.ownAt) === beijingIso(now) &&
+    beijingMinutes(t.ownAt) >= 15 * 60 &&
+    beijingMinutes(now) >= 15 * 60;
+  let prevDay = '上个交易日';
+  if (t.priorDayClock) {
+    const yesterday = beijingIso(new Date(now.getTime() - 24 * 3600_000));
+    if ((await tradingDayKnown(deps.client, yesterday)) === true) prevDay = '昨天';
+  }
+  // How the time of the number is said, in front of 「上证 3,689.91，涨 0.10%」.
+  const say = (r: { name: string; point: string; move: string }) => {
+    if (t.day === null) return `${r.name}最近一次报价是 ${r.point} 点，${r.move}`;
+    if (t.priorDayClock) return `${r.name}${prevDay}收在 ${r.point} 点，${r.move}`;
+    if (t.day === true && !t.stale) return `${r.name}现在是 ${r.point} 点，${r.move}`;
+    if (t.day === true) return `${r.name}最近一次报价是 ${r.point} 点，${r.move}`;
+    if (todayClose) return `${r.name}今天收在 ${r.point} 点，${r.move}`;
+    return `${r.name}最近一个交易日收在 ${r.point} 点，${r.move}`;
+  };
+  const opener = t.priorDayClock
+    ? '还没开盘，'
+    : t.day === false
+      ? todayClose
+        ? '已经收盘了，'
+        : '现在不是交易时段，'
+      : '';
+  const when =
+    t.day === null
+      ? `（北京时间 ${t.stamp} 读到的，没能确认今天是不是交易日）`
+      : t.day === true && !t.stale
+        ? `（北京时间 ${clock} 的盘中行情，还没收盘）`
+        : t.day === true
+          ? `（北京时间 ${t.stamp} 的报价，不是实时行情）`
+          : '';
+  const short = (r: { name: string; point: string; move: string }) =>
+    `${r.name} ${r.point}（${r.move}）`;
+  const lines: string[] = [];
+  if (focus) {
+    lines.push(`${opener}${say(focus)}${when}。`);
+    if (others.length) lines.push(`另外，${others.map(short).join('，')}。`);
+  } else {
+    lines.push(`${opener}三大指数${when}：${rows.map((r) => say(r)).join('；')}。`);
+  }
+  if (t.priorDayClock) lines.push('开盘后（9:30）我可以再帮你看实时点位。');
+  lines.push(`数据来自${indexSourceName(env.source)}，可能有几分钟延迟。`);
+  lines.push('*仅供参考，不构成投资建议。*');
+  return withoutDataSourceNames(lines.join('\n\n'));
 }
 
 /** 一只个股的紧凑上下文块（盘面必留；公告只留前 annCap 条标题）。 */

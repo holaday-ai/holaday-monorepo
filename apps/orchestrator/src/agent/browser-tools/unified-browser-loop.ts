@@ -3003,7 +3003,15 @@ const QUESTION_RE =
 const NAV_ONLY_RE =
   /^(?:请|麻烦|帮我|帮忙|给我|你|使用|用|通过|在|到|去|进入|打开|访问|前往|登上|云端|真实|浏览器|一下|这个|那个|页面|网页|网站|链接|地址|[a-z0-9-]+(?:\.[a-z0-9-]+)+\S*|[\s:：])*$/iu;
 /** Parts of a request: split at punctuation and at 「然后/再/并且/接着/之后」. */
-const INTENT_PART_RE = /[，,。；;！!？?\n]|然后|并且|接着|之后|随后|顺便|再(?=[一-龥])/u;
+/** 复审 #5: 「读价格后帮我拍下」「… then buy it」 are two parts. */
+const INTENT_PART_RE =
+  /[，,。；;！!？?\n]|然后|并且|接着|之后|以后|随后|顺便|再(?=[一-龥])|(?<![最前然之以背今往落滞售善稍此日先午课饭战])后(?![面台续端缀来])|\b(?:and|then)\b/iu;
+/**
+ * 复审 #5: besides reading and opening a page, a part names no action at all — any of these
+ * (拍下、买、加购、收藏、buy、order…) in any part, even one that also reads, hands it over.
+ */
+const ACTION_RE =
+  /拍下|拍一[个件单]|买下|买了|(?:帮我|给我|替我|去|就|我要|我想|直接)买|买(?:一[个件台部]|两|三|它|这)|下单|购买|抢购|秒杀|领取|领券|收藏|关注|加购|加入|删除|修改|发送|发布|发帖|提交|付款|支付|结账|预约|预订|报名|投递|转发|分享|点赞|评论|回复|签到|充值|兑换|绑定|退款|退货|取消|保存到|下载|上传|开通|申请|填写|打卡|订阅|投票|登录|登陆|注册|\b(?:buy|order|purchase|pay|add|like|follow|subscribe|comment|reply|post|share|book|reserve|delete|remove|claim|redeem|download|upload|save|send|submit|checkout|sign\s*(?:in|up)|log\s*in|register)\b/iu;
 const QUOTED_RE = /「[^」]*」|“[^”]*”|"[^"]*"|『[^』]*』/gu;
 
 export function isReadOnlyIntent(intent: string): boolean {
@@ -3019,7 +3027,9 @@ export function isReadOnlyIntent(intent: string): boolean {
     .filter(Boolean);
   if (!parts.some((part) => READ_VERB_RE.test(part) || QUESTION_RE.test(part))) return false;
   return parts.every(
-    (part) => READ_VERB_RE.test(part) || QUESTION_RE.test(part) || NAV_ONLY_RE.test(part),
+    (part) =>
+      !ACTION_RE.test(part) &&
+      (READ_VERB_RE.test(part) || QUESTION_RE.test(part) || NAV_ONLY_RE.test(part)),
   );
 }
 /** FIX-57 #5: at most this many sites besides the walled one during a rescue. */
@@ -3116,10 +3126,10 @@ export function withoutSourceLines(text: string): string {
 const VERBATIM_NOTE_RE = /(\s*)[（(]([^（）()\n]{0,60}原样[^（）()\n]{0,60})[）)]/gu;
 /** 复审 #4: the 「原样」 words themselves; whatever else a note says (打码、未登录…) stays. */
 const VERBATIM_WORDS_RE =
-  /(?:均|都|皆|全部|全)?(?:照|按|据)?(?:页面|网页|原文)?原样(?:显示|展示|列出|写出?|照录|保留|抄录)?(?:的)?/gu;
+  /(?:均|都|皆|全部|全)?(?:照|按|据)?(?:页面|网页|原文)?原样(?:显示|展示|列出|写出?|照录|保留|抄录|记录|摘录)?(?:的)?/gu;
 /** A note part that only says 「(价格和名称均)照页面原样(显示)」. */
 const VERBATIM_ONLY_RE =
-  /^(?:(?:价格|名称|商品名|标题|数据|内容|信息|文字|数字|评分)[和与及、]?)*(?:均|都|皆|全部|全)?(?:照|按|据)?(?:页面|网页|原文)?原样(?:显示|展示|列出|写出?|照录|保留|抄录)?$/u;
+  /^(?:(?:价格|名称|商品名|标题|数据|内容|信息|文字|数字|评分)[和与及、]?)*(?:均|都|皆|全部|全)?(?:照|按|据)?(?:页面|网页|原文)?原样(?:显示|展示|列出|写出?|照录|保留|抄录|记录|摘录)?$/u;
 
 /**
  * 复审 #4 (诚实): a note that only says 「照页面原样」 goes; in a note that says more
@@ -3135,6 +3145,46 @@ function withoutVerbatimWords(_m: string, space: string, inner: string): string 
     .join('，');
   return rest ? `${space}（${rest}）` : '';
 }
+/**
+ * 协调方第 2 次代体验: a sentence of its own that only says so (「价格均照页面原样记录。」)
+ * goes too; a sentence that also says something else stays.
+ */
+const VERBATIM_SENTENCE_RE = /(^|[。！!\n])([ \t]*)([^。！!\n]*原样[^。！!\n]*)([。.!！]?)/gu;
+const VERBATIM_SENTENCE_ONLY_RE =
+  /^(?:以上|上面|这些|所有|下面)?(?:的)?(?:(?:价格|名称|商品名|标题|数据|内容|信息|文字|数字|评分)[和与及、]?)*(?:均|都|皆|全部|全)?(?:是)?(?:照|按|据)?(?:页面|网页|原文)?原样(?:显示|展示|列出|写出?|照录|保留|抄录|记录|摘录)?(?:的)?$/u;
+/** Clauses of a sentence that only say 「照页面原样」 go; the sentence goes if nothing is left. */
+function withoutVerbatimClauses(
+  _m: string,
+  lead: string,
+  space: string,
+  sentence: string,
+  end: string,
+): string {
+  const kept = sentence
+    .split(/[，,；;]/u)
+    .map((part) => part.trim())
+    .filter((part) => part && !VERBATIM_SENTENCE_ONLY_RE.test(part));
+  return kept.length ? `${lead}${space}${kept.join('，')}${end}` : lead;
+}
+
+/**
+ * A card without a featured offer, quoted in English and then explained in Chinese in the
+ * same line: the Chinese stays, the quote goes. Not explained: the quote is said in words.
+ */
+const NO_FEATURED_QUOTE_RE =
+  /(?:页面(?:上)?(?:显示|写着|标注|写的是)?[：:]?\s*)?[「“"]([^」”"\n]*No featured offers? available[^」”"\n]*?)[」”"][，,；;]?\s*/giu;
+const NO_FEATURED_PARTS_RE = /((?:S\$|US\$|\$|¥|￥)\s?[\d.,]+)\s*\((\d+) new offers?\)/iu;
+
+function withoutNoFeaturedQuote(line: string): string {
+  if (!/No featured offers? available/i.test(line)) return line;
+  const explained = /主推价|卖家报价/.test(line.replace(NO_FEATURED_QUOTE_RE, ''));
+  return line.replace(NO_FEATURED_QUOTE_RE, (_m, quote: string) => {
+    if (explained) return '';
+    const parts = NO_FEATURED_PARTS_RE.exec(quote);
+    return parts ? `没有主推价，有 ${parts[2]} 个卖家报价 ${parts[1]}。` : '';
+  });
+}
+
 const NO_FEATURED_RE =
   /[（(][^（）\n]*?No featured offers? available[^（）\n]*?((?:S\$|US\$|\$|¥|￥)\s?[\d.,]+)\s*\((\d+) new offers?\)[^（）\n]*?[）)]/giu;
 const LONG_NAME_LINE_RE =
@@ -3153,14 +3203,46 @@ function shortName(name: string): string {
   return tail && /\d/.test(tail) && !head.endsWith(tail) ? `${head}…${tail}` : `${head}…`;
 }
 
+/**
+ * 协调方第 2 次代体验 (京东): a 「- 价格：¥7??9…」 / 「- 标题：「…」」 line that only repeats
+ * what the paragraph above already said goes — the fact is said once.
+ */
+const FACT_LINE_RE =
+  /^\s*[-*•]\s*(?:\*\*)?(价格|售价|到手价|标题|商品标题|名称|商品名称?)(?:\*\*)?\s*[：:]\s*(.+)$/u;
+const PRICE_TOKEN_RE =
+  /(?:S\$|US\$|\$|¥|￥)\s?[\d?？.,]*\d[\d?？.,]*|(?:S\$|US\$|\$|¥|￥)\s?\d\?+\d/u;
+
+function withoutRepeatedFacts(text: string): string {
+  const lines = text.split('\n');
+  const prose: string[] = [];
+  const out: string[] = [];
+  for (const line of lines) {
+    const m = FACT_LINE_RE.exec(line);
+    if (m) {
+      const value = m[2] ?? '';
+      const key = /价/.test(m[1] ?? '')
+        ? PRICE_TOKEN_RE.exec(value)?.[0]
+        : (/「([^」]{4,})」/.exec(value)?.[1] ?? value.split(/[（(]/)[0]?.trim());
+      const said = prose.join('\n').replace(/\s+/g, '');
+      if (key && key.length >= 3 && said.includes(key.replace(/\s+/g, ''))) continue;
+    } else if (!/^\s*(?:[-*•]|\d+[.、)])\s/.test(line)) {
+      prose.push(line);
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
 export function plainAnswer(text: string): string {
-  return text
+  const cleaned = text
     .replace(VERBATIM_NOTE_RE, withoutVerbatimWords)
+    .replace(VERBATIM_SENTENCE_RE, withoutVerbatimClauses)
     .replace(
       NO_FEATURED_RE,
       (_m, price: string, n: string) => `（这款没有主推价，有 ${n} 个卖家报价 ${price}）`,
     )
     .split('\n')
+    .map(withoutNoFeaturedQuote)
     .map((line) =>
       line.replace(
         LONG_NAME_LINE_RE,
@@ -3169,6 +3251,9 @@ export function plainAnswer(text: string): string {
       ),
     )
     .join('\n');
+  return withoutRepeatedFacts(cleaned)
+    .replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, '\n\n')
+    .trimEnd();
 }
 
 /** FIX-57 #5: the live status line shown while the run routes around a wall. */

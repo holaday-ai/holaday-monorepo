@@ -37,6 +37,7 @@ export const NEXT_STEPS_SYSTEM_PROMPT = `你是用户的私人助理，刚替用
 - 不要提议重新打开刚被拦下或打不开的那个页面（包括它的电脑版、原链接）；补缺口可以去同一网站的别的页面（如「再打开第 3 条商品页拿价格」）。
 - 不要给「再试一次？」「重试一下？」这类原样重来的提议：每条提议都要说清换成什么做法、去哪个页面或要什么。
 - 平台要和用户的任务对得上：用户给的链接域名就代表用户在用的平台（如 item.jd.com 就是京东）。不要跳到用户没提过、和任务无关的平台；用户自己说了要比价、跟其他平台比，才可以提其他平台。
+- 用户这次没说比价、也没提到别的平台时，所有提议都只能留在这次任务的网站上，不能出现任何其他平台或网站（用户最近其他任务里的平台也不行）。例如用户只让你在亚马逊查价格，就不要提「和京东同款对比」。
 - 结果是「失败」时，界面已经固定给出「你登录后我接着看」「换公开来源查」「再试一次」「你来完成验证」这几种做法，不要再提这几类（意思相同的也不要），只提别的真正有用的下一步，没有就返回空；绝不提议替用户输入账号密码或绕过验证。
 - label：助理主动提议的口吻，第一人称，简短自然，可以用问句，例如「今天开盘后我再帮你拉一次实时点位，跟昨天收盘对比？」，不超过 30 个字。
 - prompt：用户点了之后发给你的完整指令，用户的口吻，单独拿出来也能直接执行（写清对象、网站、要什么），不超过 150 个字。
@@ -70,6 +71,10 @@ const OUTCOME_LABEL: Record<NextStepsOutcome, string> = {
   failed: '失败',
 };
 
+/** 协调方第 2 次代体验: the request itself asks to compare platforms. */
+const CROSS_PLATFORM_RE =
+  /比价|对比|比较|比一下|哪家|哪个平台|其他平台|别的平台|各平台|多个平台|跨平台|同款|全网|compare|vs\.?|versus/i;
+
 export function nextStepsUserMessage(opts: Omit<GenerateNextStepsOptions, 'messagesAdapter'>) {
   const recent = (opts.recentIntents ?? [])
     .map((intent) => intent.replace(/\s+/g, ' ').trim().slice(0, 80))
@@ -91,6 +96,9 @@ export function nextStepsUserMessage(opts: Omit<GenerateNextStepsOptions, 'messa
   return [
     `用户这次的要求：${opts.intent}`,
     domains.length ? `用户给的链接域名：${domains.join('、')}` : '',
+    CROSS_PLATFORM_RE.test(opts.intent)
+      ? ''
+      : '用户这次没有要求比价或跨平台：提议只能留在这次任务的网站上，不要出现其他平台。',
     `结果：${OUTCOME_LABEL[opts.outcome]}`,
     `${opts.outcome === 'failed' ? '失败原因' : '结果内容'}：${opts.summary.slice(0, 1200)}`,
     opts.missing ? `没拿到的部分：${opts.missing.slice(0, 300)}` : '',

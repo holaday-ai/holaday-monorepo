@@ -55,6 +55,12 @@ const REF_REPLACEMENTS: ReadonlyArray<[RegExp, string]> = [
   [/\b(?:firecrawl|brave(?:\s+search)?|playwright|browserbase|tavily|serpapi)\b/gi, ''],
   [/\b(?:dashscope|anthropic|openai|qwen[\w.-]*|claude[\w.-]*|gpt-[\w.-]+)\b/gi, ' AI '],
   [/通义千问|千问|通义|百炼/g, ' AI '],
+  // 协调方第 2 次代体验: data-source interface names (akshare:stock_zh_index_spot_sina).
+  [/\s*[（(][^（）()\n]*akshare[^（）()\n]*[）)]/gi, ''],
+  [/\bakshare(?::[\w.+]+)?/gi, '公开行情数据'],
+  [/\b(?:stock|index|fund|bond)_[a-z0-9_]+\b/gi, ''],
+  [/\b[a-z0-9]+_(?:sina|em|ths)\b/gi, ''],
+  [/\bsina\s*接口/gi, '新浪财经'],
 ];
 const URL_SPLIT_RE = /(https?:\/\/[^\s)\]>"'，。）]+)/g;
 
@@ -308,6 +314,31 @@ export function partialLead(text: string): { lead: string | null; body: string }
       first,
     );
   return { lead: saysMissing ? '' : '这次只拿到了一部分，缺的我写在下面了。', body };
+}
+
+/**
+ * 协调方第 2 次代体验 (京东): a partial answer that stopped at a login (masked price, login-only
+ * text) offers the most useful next step first — you log in, I read it properly. Same
+ * handover as the failed turn; the person logs in, never me.
+ */
+export function partialLoginStep(input: {
+  text: string;
+  intent: string;
+  finalUrl?: string | null;
+}): NextStepOption | null {
+  const intent = input.intent.trim();
+  if (!intent) return null;
+  if (
+    !/需(?:要)?登录|没登录|未登录|登录后(?:才|可)?(?:能)?(?:看|显示|查看)|要登录才/.test(input.text)
+  )
+    return null;
+  const site = siteName(null, intent) ?? siteName(input.finalUrl, '');
+  if (!site) return null;
+  const what = /价格|价钱|多少钱|报价|price/i.test(intent) ? '准确价格' : '完整内容';
+  return {
+    label: `你在浏览器里登录${site}，我帮你读${what}`,
+    prompt: `我会在浏览器里自己登录${site}。请重新打开刚才的页面，遇到登录页就暂停，等我登录好再继续：${intent}`,
+  };
 }
 
 /** The site a task is on, by its short Chinese name when known (「知乎」, not 「zhihu.com」). */

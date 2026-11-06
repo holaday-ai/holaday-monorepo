@@ -26,6 +26,7 @@ import {
   liveStatusText,
   normalizeNextSteps,
   partialLead,
+  partialLoginStep,
   processLinkLabel,
   shortLinkLabel,
   siteName,
@@ -2448,10 +2449,18 @@ function TerminalSummary({
   const failureDetail =
     status === 'failed' && displayText.trim() ? friendlyFailureDetail(displayText) : '';
   // 复审 #1-1a: the ways on and the next steps are one group, no offer twice.
-  const nextSteps = withoutRepeatedOffers(suggestions, turn?.options ?? []).slice(
-    0,
-    Math.max(0, 3 - (turn?.options.length ?? 0)),
-  );
+  // 协调方第 2 次代体验: a partial stopped by a login offers 「你登录，我帮你读」 first.
+  const loginStep =
+    status === 'partial_success'
+      ? partialLoginStep({ text: shownText, intent: intent ?? '', finalUrl: currentUrl })
+      : null;
+  const nextSteps = [
+    ...(loginStep ? [loginStep] : []),
+    ...withoutRepeatedOffers(suggestions, [
+      ...(turn?.options ?? []),
+      ...(loginStep ? [{ kind: 'prompt' as const, ...loginStep }] : []),
+    ]),
+  ].slice(0, Math.max(0, 3 - (turn?.options.length ?? 0)));
   const iconButton =
     'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 dark:hover:bg-white/10';
   return (

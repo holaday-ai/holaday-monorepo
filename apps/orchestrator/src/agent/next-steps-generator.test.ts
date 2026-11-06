@@ -159,6 +159,22 @@ describe('FIX-57 #4 · next steps', () => {
     expect(relevantNextSteps([], steps)).toHaveLength(4);
   });
 
+  it('协调方第 2 次代体验: no cross-platform step unless the request compares platforms', () => {
+    const only = nextStepsUserMessage({
+      intent: '在亚马逊新加坡站搜 usb c cable，列出前三个的名称和价格',
+      outcome: 'completed',
+      summary: '1. UGREEN — S$10.92',
+    });
+    expect(only).toContain('用户这次没有要求比价或跨平台');
+    const compare = nextStepsUserMessage({
+      intent: '比较京东和淘宝上 AirPods 的价格',
+      outcome: 'completed',
+      summary: '京东 ¥1299，淘宝 ¥1199',
+    });
+    expect(compare).not.toContain('用户这次没有要求比价或跨平台');
+    expect(NEXT_STEPS_SYSTEM_PROMPT).toContain('就不要提「和京东同款对比」');
+  });
+
   it('复审 #4: an item id in the query is part of the address; bare retries are banned', () => {
     const walled = ['https://item.taobao.com/item.htm?id=111'];
     const steps = [

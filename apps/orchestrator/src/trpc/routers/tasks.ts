@@ -3485,7 +3485,8 @@ export const tasksRouter = router({
                 indexIntent = false;
               }
               if (indexIntent && indexCardModule && indexQuote) {
-                const { buildIndexCard } = indexCardModule;
+                // FIX-57 协调方第 2 次代体验: the task page gets the plain answer, not the card.
+                const { buildIndexAnswer } = indexCardModule;
                 const taskId = newExternalId('task');
                 await repo.insertTask(
                   { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
@@ -3507,10 +3508,10 @@ export const tasksRouter = router({
                     let answer: string;
                     let terminalStatus: 'completed' | 'failed' = 'completed';
                     try {
-                      answer = `${stockAnswerPrefix}${await buildIndexCard({ client: aksClient, now: stockAnalysisNow, quote: indexQuote })}`;
+                      answer = `${stockAnswerPrefix}${await buildIndexAnswer({ client: aksClient, now: stockAnalysisNow, quote: indexQuote, intent: input.intent })}`;
                     } catch (err) {
                       ctx.logger.error({ err, taskId }, 'ashare-index: lane failed');
-                      answer = `${stockAnswerPrefix}抱歉，A股大盘指数查询处理失败，请稍后重试。`;
+                      answer = `${stockAnswerPrefix}我这边查三大指数时出了点问题，这次没拿到点位。稍后再问我一次就行。`;
                       terminalStatus = 'failed';
                     }
                     try {

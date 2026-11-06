@@ -338,6 +338,48 @@ describe('复审 #3 · 代 BOSS 体验: the answer reads like talk', () => {
     );
   });
 
+  it('协调方第 2 次代体验 京东: the price is said once', () => {
+    const raw = [
+      '部分完成：这是从[京东手机版](https://item.m.jd.com/product/100142621606.html)查到的，不是你给的京东页面，只能算部分完成。',
+      '',
+      '在京东移动版页面读到这款商品的标题是「Apple/苹果/苹果【需签收激活】iPhone 16 Pro 128GB 原色...」，价格显示为 ¥7??9，因为没登录被京东打了码。',
+      '',
+      '- 价格：¥7??9（未登录被遮挡，完整价格需登录后查看）',
+      '- 标题：「Apple/苹果/苹果【需签收激活】iPhone 16 Pro 128GB 原色...」',
+    ].join('\n');
+    const out = plainAnswer(raw);
+    expect(out).not.toContain('- 价格：');
+    expect(out).not.toContain('- 标题：');
+    expect(out.match(/¥7\?\?9/g)).toHaveLength(1);
+    // A list that says something new stays.
+    const fresh = '标题是「iPhone 16 Pro」。\n\n- 价格：¥7??9（未登录被遮挡）';
+    expect(plainAnswer(fresh)).toBe(fresh);
+  });
+
+  it('协调方第 2 次代体验 亚马逊: no closing 「原样」 sentence, the English quote goes', () => {
+    const raw = [
+      '在亚马逊新加坡站搜索 usb c cable，前三个商品的名称和价格如下：',
+      '',
+      '1. UGREEN 2 Pack USB C to USB C Charger Cable, Type C 100W…1M — S$10.92（原价 S$17.42）',
+      '3. Belkin Eco USB C to USB C 60W Braided Cable 3.3ft iPhone Charger Cord — 页面显示「No featured offers available S$9.43 (1 new offer)」，该商品没有主推价，仅有 1 个卖家报价 S$9.43。',
+      '',
+      '价格均照页面原样记录。',
+    ].join('\n');
+    const out = plainAnswer(raw);
+    expect(out).not.toMatch(/原样|No featured|new offer/);
+    expect(out.split('\n').at(-1)).toMatch(
+      /^3\. Belkin .*— 该商品没有主推价，仅有 1 个卖家报价 S\$9\.43。$/,
+    );
+    // Not explained in the line: the quote is said in Chinese.
+    expect(
+      plainAnswer(
+        '3. Belkin Cable — 页面显示「No featured offers available S$9.43 (1 new offer)」',
+      ),
+    ).toBe('3. Belkin Cable — 没有主推价，有 1 个卖家报价 S$9.43。');
+    // A sentence that says more than 「原样」 keeps the rest.
+    expect(plainAnswer('价格照页面原样记录，第 3 款要登录才显示。')).toBe('第 3 款要登录才显示。');
+  });
+
   it.each([
     ['价格：¥7??9（页面原样显示，未登录被打码）', '价格：¥7??9（未登录被打码）'],
     ['价格：¥7??9（照页面原样）', '价格：¥7??9'],
@@ -383,6 +425,11 @@ describe('复审 #4 · only a plainly read-only task is routed around (whitelist
     '帮我看一下价格，然后抢购',
     '把这个商品分享到微信',
     '打开京东抢购这款手机',
+    '读价格后帮我拍下',
+    'read the price on https://www.amazon.sg/dp/B0X then buy it',
+    '看完价格以后帮我买一个',
+    'check the price and add it to cart',
+    '查一下价格，有货就下单',
   ])('handed to the person: %s', (intent) => {
     expect(isReadOnlyIntent(intent)).toBe(false);
   });
@@ -395,6 +442,9 @@ describe('复审 #4 · only a plainly read-only task is routed around (whitelist
     '请使用云端浏览器，打开 https://item.taobao.com/item.htm?id=111 读价格',
     '比较京东和淘宝上 AirPods 的价格',
     'search amazon.sg for usb c cable and list the top 3 prices',
+    '看完后告诉我最后一个商品的价格',
+    '查一下这款手机的售后政策',
+    '读一下这个页面的后续更新',
   ])('routed around: %s', (intent) => {
     expect(isReadOnlyIntent(intent)).toBe(true);
   });
