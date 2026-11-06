@@ -245,12 +245,22 @@ describe('DEPLOY-57 第 0 步 · web', () => {
     ).toBe('正在点页面上的一个选项…');
   });
 
-  it('a partial answer does not repeat 「没能逐字核对」 after its lead', () => {
+  it('a partial answer keeps a short unverified note unless it is the gap itself', () => {
     const text =
       '标题 A，价格 ¥7??9。\n\n未核实：以下内容未能在已读页面中逐字找到，请自行确认——价格「¥7??9」';
     const partial = splitUnverifiedNote(text, { partial: true });
-    expect(partial.body).toBe('标题 A，价格 ¥7??9。');
+    // 核对 3: the lead says what is missing, not which items were not checked — a short note stays.
+    expect(partial.body).toBe(
+      '标题 A，价格 ¥7??9。\n\n其中有几项我没在页面上逐字核对到，见「查看过程」。',
+    );
     expect(partial.unverified).toBe('价格「¥7??9」');
+    expect(splitUnverifiedNote(text, { partial: true, en: true }).body).toContain(
+      "A few items here I couldn't match word for word on the page",
+    );
+    // Only when the unverified item is exactly the gap the first line names, it is not said again.
+    const gap =
+      '部分完成：第 3 款的价格 S$9.43 没能确认。\n\n其余两款……\n\n未核实：以下内容未能在已读页面中逐字找到，请自行确认——价格「S$9.43」';
+    expect(splitUnverifiedNote(gap, { partial: true }).body).not.toContain('逐字核对');
     expect(splitUnverifiedNote(text).body).toContain('有些内容我没能在页面上逐字核对到');
   });
 });

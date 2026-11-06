@@ -849,10 +849,33 @@ export function splitUnverifiedNote(
     /\n*\s*未核实[:：]\s*以下内容未能在已读页面中逐字找到，请自行确认——([\s\S]*?)(?=\n\s*\n|$)/,
   );
   if (!m) return { body: text, unverified: null };
-  // DEPLOY-57 第 0 步 6: a partial answer already opens with 「只拿到了一部分」 — the items
-  // stay in 「查看过程」 and the answer does not say it a second time.
+  // 第 0 步核对 3: a partial answer's lead says what is missing, not which written items were
+  // not checked — so a short note stays, unless those items are exactly the gap the lead names.
+  const items = (m[1] ?? '')
+    .split(/[；;]/u)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const before = text.slice(0, m.index);
+  const firstLine =
+    before.replace(/^\s*(?:\*\*)?部分完成(?:\*\*)?\s*[:：]\s*/u, '').split(/\n/)[0] ?? '';
+  // The first line has to name it as the gap (没能确认 / 缺 / 未…), not just state it.
+  const namesGap =
+    /缺|没(?:能|有|拿到|读到|找到|确认|核对)|未(?:能|读到|找到|确认|核对|获取)|无法|不确定|不全|拿不到|读不到|\bcouldn['’]t\b|\bnot (?:confirmed|verified|found)\b|\bmissing\b/iu.test(
+      firstLine,
+    );
+  const gapOnly =
+    namesGap &&
+    items.length > 0 &&
+    items.every((item) => {
+      const quoted = /「([^」]+)」/u.exec(item)?.[1] ?? item;
+      return firstLine.includes(quoted.trim());
+    });
   const said = opts.partial
-    ? ''
+    ? gapOnly
+      ? ''
+      : opts.en
+        ? "\n\nA few items here I couldn't match word for word on the page — see 「查看过程」."
+        : '\n\n其中有几项我没在页面上逐字核对到，见「查看过程」。'
     : opts.en
       ? "\n\nSome details I couldn't match word for word on the page — they're listed under 「查看过程」; worth a look before you rely on them."
       : '\n\n有些内容我没能在页面上逐字核对到，细节在「查看过程」里，用之前可以再看一眼。';

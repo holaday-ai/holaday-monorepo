@@ -535,6 +535,29 @@ describe('DEPLOY-57 第 0 步', () => {
       expect(Array.from(line.split(/价格|—/)[0] ?? '').length).toBeLessThanOrEqual(70);
   });
 
+  it.each([
+    '原文保留了作者的署名。',
+    '评论区原文照录如下：很好用。',
+    '页面引用的原文保留在第二段里，内容是「春眠不觉晓」。',
+  ])('核对 1: an answer sentence that only mentions 原文 stays — %s', (text) => {
+    expect(plainAnswer(text)).toBe(text);
+  });
+
+  it('核对 1: notes about fields still go', () => {
+    expect(plainAnswer('前三个如下。价格和名称均按页面原文记录。')).toBe('前三个如下。');
+    expect(plainAnswer('第3条没有主推价，已按页面原文保留“(1 new offer)”字样。')).toBe(
+      '第3条没有主推价。',
+    );
+  });
+
+  it('核对 2: a cut never lands inside a bracket, wherever it opens', () => {
+    expect(
+      plainAnswer(
+        '1. Anker USB C Cable (240W, Nylon Braided Fast Charging Cord for iPhone 16, MacBook Pro, 2M) — S$12.99',
+      ),
+    ).toBe('1. Anker USB C Cable… — S$12.99');
+  });
+
   it('3b: an English sentence without a price is not a product name', () => {
     const prose =
       'iframe 初始内容为 "Your content goes here."；输入后重新读取，内容为 "Hello from cloud browser"。';
@@ -566,6 +589,9 @@ describe('DEPLOY-57 第 0 步', () => {
     ['京东商品页需要登录才能查看价格', 'login'],
     ['页面被京东风控拦截，暂时无法展示', 'blocked'],
     ['页面加载超时，没有打开', 'stuck'],
+    ['无需登录，但被风控拦截', 'blocked'],
+    ['verifier 拦截了答案。页面加载超时', 'stuck'],
+    ['质量校验未通过；京东要求登录', 'login'],
   ])('5: the give-up words say why — %s', (said, kind) => {
     expect(giveUpKind(said)).toBe(kind);
   });

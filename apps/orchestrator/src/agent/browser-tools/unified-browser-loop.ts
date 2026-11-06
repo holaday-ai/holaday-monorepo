@@ -3255,6 +3255,13 @@ const VERBATIM_SENTENCE_ONLY_RE =
 /** 复审 #7: the same note in other words — 「已按页面原文保留“(1 new offer)”字样」. */
 const META_CLAUSE_RE =
   /(?:按|照|据)(?:页面|网页)?原文(?:保留|记录|照录|摘录|抄录|列出)?|原文(?:保留|照录|摘录|抄录)|保留[^，,；;]{0,40}?字样|(?:原|英文)字样$/u;
+/** 第 0 步核对 1: the subject is a field (价格 / 名称 / 标题…), or there is no subject at all. */
+const FIELD_WORDS = '(?:价格|售价|名称|商品名|标题|数据|字段|数字|评分|报价)';
+const FIELD_SUBJECT_RE = new RegExp(`^(?:${FIELD_WORDS}[和与及、]?)+`, 'u');
+const PURE_META_RE = new RegExp(
+  `^(?:${FIELD_WORDS}[和与及、]?)*(?:均|都|皆|全部|全)?(?:已)?(?:按|照|据)(?:页面|网页)?(?:原文|原样)(?:保留|记录|照录|摘录|抄录|列出|显示|写)?(?:了)?(?:[“"「『][^”"」』]*[”"」』](?:[与和、及][“"「『][^”"」』]*[”"」』])*)?(?:的)?(?:字样)?$`,
+  'u',
+);
 /** Clauses of a sentence that only say 「照页面原样」 go; the sentence goes if nothing is left. */
 /** DEPLOY-57 第 0 步 2: 「页面原样价格」 → 「价格」 — 页面原样 / 页面原文 used as a modifier. */
 const VERBATIM_MODIFIER_RE =
@@ -3275,12 +3282,18 @@ function withoutVerbatimClauses(
     .split(/[，,；;]/u)
     .map((part) => part.trim())
     .map((part) => {
-      if (!part || !(VERBATIM_SENTENCE_ONLY_RE.test(part) || META_CLAUSE_RE.test(part)))
-        return part;
-      // A clause that carries a number or a price keeps it; only the 原样 / 原文 words go.
-      // (A number inside a quote — 「“(1 new offer)”字样」 — is the note, not a fact.)
+      if (!part) return part;
+      // Only a note about how fields were written goes whole: 「价格和名称均照页面原样」,
+      // 「标题按页面原文保留」, 「已按页面原文保留“(1 new offer)”字样」.
+      if (VERBATIM_SENTENCE_ONLY_RE.test(part) || PURE_META_RE.test(part)) return '';
+      if (!META_CLAUSE_RE.test(part)) return part;
+      // A field clause that carries a number or a price keeps it; only the words go
+      // (「价格按页面原文保留为 S$9.43」 → 「价格为 S$9.43」). A number inside a quote is the note.
       const facts = part.replace(/[“"「『][^”"」』]*[”"」』]/gu, '');
-      return /\d|[¥￥$]/u.test(facts) ? part.replace(META_WORDS_RE, '').trim() : '';
+      if (FIELD_SUBJECT_RE.test(part) && /\d|[¥￥$]/u.test(facts))
+        return part.replace(META_WORDS_RE, '').trim();
+      // Anything else is the answer itself (「原文保留了作者的署名」「评论区原文照录如下：…」).
+      return part;
     })
     .filter(Boolean);
   return kept.length ? `${lead}${space}${kept.join('，')}${end}` : lead;
@@ -3345,7 +3358,8 @@ function shortName(name: string): string {
   head = head.replace(/[\s,，、;；:：\-–—]+$/u, '');
   // 复审 #7: never cut inside a bracket (「Cable (6.6ft…」) — cut before it.
   const open = Math.max(head.lastIndexOf('('), head.lastIndexOf('（'));
-  if (open > Math.max(head.lastIndexOf(')'), head.lastIndexOf('）')) && open > NAME_HEAD / 3)
+  // 第 0 步核对 2: wherever the bracket opens — 「Anker USB C Cable (240W, …」 → 「Anker USB C Cable…」.
+  if (open > 0 && open > Math.max(head.lastIndexOf(')'), head.lastIndexOf('）')))
     head = head.slice(0, open).replace(/[\s,，、;；:：\-–—]+$/u, '');
   // Two listings often differ only in the last bit (「…, 1M」 / 「…, 2M」) — keep it.
   const tail = /[,，]\s*([^,，]{1,12})$/u.exec(name)?.[1]?.trim();
@@ -3481,13 +3495,19 @@ export function plainAnswer(text: string, en = false): string {
 /** DEPLOY-57 第 0 步 5: what a give-up says the page did — asked for a login, was blocked, or
  * did not open. */
 export function giveUpKind(said: string): 'login' | 'blocked' | 'stuck' {
-  if (/登录|登陆|log\s*in|sign\s*in/i.test(said)) return 'login';
+  // 第 0 步核对: our own checks (「verifier 拦截了答案」) say nothing about the page.
+  const page = said
+    .split(/(?<=[。！？!?；;\n])/u)
+    .filter((part) => !/verifier|质量校验|质量门禁|门禁|结果复核|校验未通过/i.test(part))
+    .join('');
+  // A block first: 「无需登录，但被风控拦截」 was blocked, not a login.
   if (
     /拦截|拦下|风控|验证|403|429|请求过多|访问受限|限流|blocked|denied|forbidden|too\s+many\s+requests|rate.?limit/i.test(
-      said,
+      page,
     )
   )
     return 'blocked';
+  if (/登录|登陆|log\s*in|sign\s*in/i.test(page)) return 'login';
   return 'stuck';
 }
 
