@@ -104,7 +104,9 @@ export function nextStepsUserMessage(opts: Omit<GenerateNextStepsOptions, 'messa
     `结果：${OUTCOME_LABEL[opts.outcome]}`,
     `${opts.outcome === 'failed' ? '失败原因' : '结果内容'}：${opts.summary.slice(0, 1200)}`,
     opts.missing ? `没拿到的部分：${opts.missing.slice(0, 300)}` : '',
-    recent.length ? `用户最近的其他任务：\n${recent.map((r) => `- ${r}`).join('\n')}` : '',
+    recent.length
+      ? `用户最近的其他任务（只用来判断偏好，不能照抄）：\n${recent.map((r) => `- ${r}`).join('\n')}`
+      : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -197,19 +199,48 @@ export function parseNextSteps(raw: string): NextStep[] {
   return out;
 }
 
+/** 复审 #7: filler words, spaces and dashes do not make a request new. */
 const echoKey = (text: string) =>
   text
-    .replace(/请使用云端浏览器|请用浏览器|帮我|请/g, '')
-    .replace(/[\s，。？！、,.?!「」"“”：:]/g, '')
+    .replace(/请使用云端浏览器|请用浏览器/g, '')
+    .replace(
+      /帮我|帮忙|麻烦|给我|看看|看一下|查一下|查查|一下|再|请|吗|呢|吧|要不要|我来|我再/g,
+      '',
+    )
+    .replace(/[\s\-–—_，。？！、,.?!「」"“”：:；;（）()]/g, '')
     .toLowerCase();
+
+function bigrams(text: string): Set<string> {
+  const chars = Array.from(text);
+  const out = new Set<string>();
+  for (let i = 0; i < chars.length - 1; i++) out.add(`${chars[i]}${chars[i + 1]}`);
+  return out;
+}
+
+/** Same words, one inside the other, or nearly all the same pairs of characters. */
+function sameAsked(a: string, b: string): boolean {
+  if (a.length < 2 || b.length < 2) return false;
+  if (a === b) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (short.length >= 6 && long.includes(short) && short.length / long.length >= 0.6) return true;
+  const x = bigrams(a);
+  const y = bigrams(b);
+  let both = 0;
+  for (const g of x) if (y.has(g)) both++;
+  return x.size + y.size > 0 && (2 * both) / (x.size + y.size) >= 0.8;
+}
 
 /**
  * 协调方第 3 次代体验: a step is never this request or one of the recent ones said again —
- * not as its label, not as what it sends. With nothing left, no step is shown.
+ * not as its label, not as what it sends. With nothing left, no step is shown. 复审 #7:
+ * near copies count too (「上证指数-现在多少点」「帮我看看上证指数现在多少点」).
  */
 export function withoutEchoes(asked: readonly string[], steps: readonly NextStep[]): NextStep[] {
-  const said = new Set(asked.map(echoKey).filter((k) => k.length >= 2));
-  return steps.filter((step) => !said.has(echoKey(step.label)) && !said.has(echoKey(step.prompt)));
+  const said = asked.map(echoKey).filter((k) => k.length >= 2);
+  return steps.filter(
+    (step) =>
+      !said.some((k) => sameAsked(k, echoKey(step.label)) || sameAsked(k, echoKey(step.prompt))),
+  );
 }
 
 /** Shape, safety and the user's own prohibitions; at most 3, no duplicates. */

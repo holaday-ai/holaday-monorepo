@@ -159,8 +159,11 @@ const READ_KINDS = new Set([
 /** 复审 #6: accessibility roles and tag names (「generic」) are not something a person sees. */
 const ROLE_WORD =
   '(?:generic|div|span|img|image|link|button|listitem|list|option|menuitem|menu|checkbox|radio|textbox|combobox|searchbox|heading|paragraph|section|article|region|group|cell|row|gridcell|tab|svg|path|a|li|ul|input|label|none|presentation|main|navigation|banner|figure|StaticText|元素|节点)';
-const ROLE_ONLY_RE = new RegExp(`^${ROLE_WORD}$`, 'i');
-const ROLE_PREFIX_RE = new RegExp(`^${ROLE_WORD}\\s*[:：]?\\s+(?=\\S)`, 'i');
+const ROLE_ONLY_RE = new RegExp(`^${ROLE_WORD}$`);
+// 复审 #7: only a lowercase role word, or one right before a quote — 「Main Street 店」 stays.
+const ROLE_PREFIX_RE = new RegExp(
+  `^(?:(?=[a-z])${ROLE_WORD}\\s*[:：]?\\s+(?=\\S)|${ROLE_WORD}\\s*[:：]?\\s*(?=["'「“]))`,
+);
 
 function stepTarget(summary: string | undefined, prefix: RegExp): string | null {
   const raw = summary
@@ -313,19 +316,27 @@ export function normalizeNextSteps(
 }
 
 /** The answer of a partial result opens with 「部分完成：」; it is said in words instead. */
-export function partialLead(text: string): { lead: string | null; body: string } {
-  const m = text.match(/^\s*(?:\*\*)?部分完成(?:\*\*)?\s*[:：]\s*/);
+export function partialLead(text: string, en = false): { lead: string | null; body: string } {
+  const m = text.match(/^\s*(?:\*\*)?(?:部分完成|Partially done|Partial)(?:\*\*)?\s*[:：]\s*/i);
   if (!m) return { lead: null, body: text };
   const body = text.slice(m[0].length);
   // 复审 #1/#2: the answer's own first sentence is the lead — only when it says what is
   // missing (缺 / 没 / 未 / 只 / 部分 …); otherwise the fixed lead stays.
-  const first = body.trim().split(/(?<=[。！？!?\n])/)[0] ?? '';
+  // 复审 #7: links first — a 「?」 inside an address is not the end of a sentence.
+  const plain = body.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, '');
+  const first = plain.trim().split(/(?<=[。！？!?\n]|[.!?]\s)/)[0] ?? '';
   // 复审 #3: not a bare 「没」 (「没问题的两款如下」 says nothing is missing).
   const saysMissing =
-    /缺|没有(?!问题)|没(?:拿到|读到|找到|查到|显示|能|给出|标|看到)|未(?:能|读到|找到|显示|拿到|获取|标|看到)|只(?:拿到|找到|读到|有|显示)|部分|不全|不完整|打码|遮|截断|看不到|读不到|拿不到|找不到|无法/.test(
+    /缺|没有(?!问题)|没(?:拿到|读到|找到|查到|显示|能|给出|标|看到)|未(?:能|读到|找到|显示|拿到|获取|标|看到)|只(?:拿到|找到|读到|有|显示)|部分|不全|不完整|打码|遮|截断|看不到|读不到|拿不到|找不到|无法|\bonly\b|\bpart(?:ial|ly)?\b|\bmissing\b|couldn['’]t|could not|\bnot (?:shown|available|found|visible)|\bmasked\b|log ?in|cut off/i.test(
       first,
     );
-  return { lead: saysMissing ? '' : '这次只拿到了一部分，缺的我写在下面了。', body };
+  if (saysMissing) return { lead: '', body };
+  return {
+    lead: en
+      ? "I only got part of it — what's missing is below."
+      : '这次只拿到了一部分，缺的我写在下面了。',
+    body,
+  };
 }
 
 /**
@@ -341,9 +352,21 @@ export function partialLoginStep(input: {
   const intent = input.intent.trim();
   if (!intent) return null;
   if (
-    !/需(?:要)?登录|没登录|未登录|登录后(?:才|可)?(?:能)?(?:看|显示|查看)|要登录才/.test(input.text)
+    !/需(?:要)?登录|没登录|未登录|登录后(?:才|可)?(?:能)?(?:看|显示|查看)|要登录才|log ?in|sign ?in/i.test(
+      input.text,
+    )
   )
     return null;
+  // 复审 #7: an English task gets the step in English.
+  if (isEnglishTask(intent)) {
+    const site = taskSite(intent, input.finalUrl, true);
+    if (!site) return null;
+    const what = /price|cost|how much/i.test(intent) ? 'the exact price' : 'the full page';
+    return {
+      label: `Log in to ${site} in the browser and I'll read ${what}`,
+      prompt: `I'll log in to ${site} myself in the browser. Reopen the page, pause at the login page, and continue once I've logged in: ${intent}`,
+    };
+  }
   const site = siteName(null, intent) ?? siteName(input.finalUrl, '');
   if (!site) return null;
   const what = /价格|价钱|多少钱|报价|price/i.test(intent) ? '准确价格' : '完整内容';
@@ -405,11 +428,67 @@ export function missingObject(own: string | null): string | null {
  */
 /** 协调方第 3 次代体验: failure reasons that are our own checks, never shown as the lead. */
 const INTERNAL_CHECK_RE =
-  /质量校验|校验未通过|格式或数据规则|数据规则|规则检查|格式检查|结果复核|门禁|verifier|quality.?(?:gate|check)|schema|post.?check/i;
-/** A site named in words (「亚马逊新加坡站」), for a question asked without a link. */
-const NAMED_SITE_RE =
-  /亚马逊(?:新加坡|美国|日本|英国|德国|中国|澳洲|澳大利亚)?站?|amazon(?:\.[a-z.]+)?|京东|淘宝|天猫|拼多多|闲鱼|苏宁|唯品会|得物|携程|飞猪|美团|大众点评|知乎|小红书|抖音|哔哩哔哩|B ?站|微博|豆瓣|eBay|Shopee|Lazada/i;
-const LIVE_ASK_RE = /价格|价钱|多少钱|报价|售价|库存|有货|现货|实时|现在|今天|最新|price|stock/i;
+  /质量校验|校验未通过|格式或数据规则|数据规则|规则检查|格式检查|结果复核|质量门禁|门禁|verifier|quality.?(?:gate|check)|schema|post.?check/i;
+const LIVE_ASK_RE =
+  /价格|价钱|多少钱|报价|售价|库存|有货|现货|实时|现在|今天|最新|price|stock|in stock/i;
+
+/** 复审 #7: the turn speaks the task's language — an English task gets English. */
+export function isEnglishTask(intent: string): boolean {
+  const text = intent.replace(/https?:\/\/\S+/g, ' ');
+  return /[a-z]{3,}/i.test(text) && !/[㐀-鿿]/.test(text);
+}
+
+/** 复审 #7: sites by the name a person uses — 「亚马逊新加坡站」 / 「Amazon Singapore」, not amazon.sg. */
+const SITE_WORDS: ReadonlyArray<[RegExp, string, string]> = [
+  [/亚马逊新加坡站?|amazon\.sg\b|amazon\s+(?:sg|singapore)/i, '亚马逊新加坡站', 'Amazon Singapore'],
+  [/亚马逊美国站?|amazon\.com\b|amazon\s+us\b/i, '亚马逊美国站', 'Amazon US'],
+  [/亚马逊日本站?|amazon\.co\.jp\b|amazon\s+japan/i, '亚马逊日本站', 'Amazon Japan'],
+  [/亚马逊英国站?|amazon\.co\.uk\b|amazon\s+uk\b/i, '亚马逊英国站', 'Amazon UK'],
+  [/亚马逊|amazon/i, '亚马逊', 'Amazon'],
+  [/京东手机版|\bm\.jd\.com|item\.m\.jd\.com/i, '京东手机版', 'JD mobile'],
+  [/京东|jd\.com/i, '京东', 'JD.com'],
+  [/淘宝|taobao/i, '淘宝', 'Taobao'],
+  [/天猫|tmall/i, '天猫', 'Tmall'],
+  [/拼多多|pinduoduo|yangkeduo/i, '拼多多', 'Pinduoduo'],
+  [/知乎|zhihu/i, '知乎', 'Zhihu'],
+  [/小红书|xiaohongshu/i, '小红书', 'Xiaohongshu'],
+  [/抖音|douyin/i, '抖音', 'Douyin'],
+  [/哔哩哔哩|B ?站|bilibili/i, '哔哩哔哩', 'Bilibili'],
+  [/微博|weibo/i, '微博', 'Weibo'],
+  [/豆瓣|douban/i, '豆瓣', 'Douban'],
+  [/携程|ctrip|trip\.com/i, '携程', 'Trip.com'],
+  [/美团|meituan/i, '美团', 'Meituan'],
+  [/大众点评|dianping/i, '大众点评', 'Dianping'],
+  [/闲鱼|goofish/i, '闲鱼', 'Xianyu'],
+  [/苏宁|suning/i, '苏宁', 'Suning'],
+  [/唯品会|vip\.com/i, '唯品会', 'Vipshop'],
+  [/得物|dewu/i, '得物', 'Dewu'],
+  [/飞猪|fliggy/i, '飞猪', 'Fliggy'],
+  [/\bebay\b/i, 'eBay', 'eBay'],
+  [/shopee/i, 'Shopee', 'Shopee'],
+  [/lazada/i, 'Lazada', 'Lazada'],
+];
+
+/** The site the task names (in its words or its link), else the page it ended on. */
+export function taskSite(
+  intent: string,
+  finalUrl: string | null | undefined,
+  en: boolean,
+): string | null {
+  const link = intent.match(/https?:\/\/\S+/)?.[0];
+  for (const source of [
+    intent.replace(/https?:\/\/\S+/g, ' '),
+    hostOf(link) ?? '',
+    hostOf(finalUrl) ?? '',
+  ]) {
+    if (!source) continue;
+    const hit = SITE_WORDS.find(([re]) => re.test(source));
+    if (hit) return en ? hit[2] : hit[1];
+  }
+  const host = hostOf(link) ?? hostOf(finalUrl);
+  if (!host) return null;
+  return en ? host.replace(/^(?:www|m|item|passport|login|sso)\./, '') : siteName(finalUrl, intent);
+}
 
 /**
  * 协调方第 3 次代体验: 「点名网站 + 价格/库存/实时」 that did not get an answer — say what was
@@ -420,33 +499,87 @@ function liveSiteFailure(
   finalUrl: string | null | undefined,
   executionMode: string | undefined,
   retry: TurnOption | null,
+  en: boolean,
 ): FailureTurn | null {
   if (!intent || !LIVE_ASK_RE.test(intent)) return null;
-  const named = NAMED_SITE_RE.exec(intent)?.[0]?.trim();
-  const site = named ?? siteName(finalUrl, intent);
+  const site = taskSite(intent, finalUrl, en);
   if (!site) return null;
-  const what = /库存|有货|现货|stock/i.test(intent)
-    ? '库存'
-    : /价格|价钱|多少钱|报价|售价|price/i.test(intent)
-      ? '实时价格'
-      : '实时信息';
+  const stock = /库存|有货|现货|stock/i.test(intent);
+  const price = /价格|价钱|多少钱|报价|售价|price/i.test(intent);
   const inBrowser = executionMode === 'browser';
+  const open: TurnOption | null = inBrowser
+    ? null
+    : en
+      ? {
+          kind: 'prompt',
+          label: `Open ${site} and check it live`,
+          prompt: /\b(?:use|using|in|with|via|open)\s+(?:a\s+|the\s+)?(?:cloud\s+)?browser\b/i.test(
+            intent,
+          )
+            ? intent
+            : `Use the cloud browser: ${intent}`,
+        }
+      : {
+          kind: 'prompt',
+          label: `打开${site}帮你实时查`,
+          prompt: /^请使用云端浏览器/.test(intent) ? intent : `请使用云端浏览器，${intent}`,
+        };
+  if (en) {
+    const what = stock ? 'stock' : price ? 'live prices' : 'live information';
+    return {
+      lead: `I couldn't get the ${what} from ${site} this time.`,
+      why: inBrowser
+        ? "The page didn't show it this time — I can open it again."
+        : 'This needs the site’s current page, so it has to be checked live.',
+      options: [open, retry].filter((o): o is TurnOption => Boolean(o)),
+    };
+  }
+  const what = stock ? '库存' : price ? '实时价格' : '实时信息';
   return {
     lead: `这次没拿到${site}的${what}。`,
     why: inBrowser
       ? '页面这次没给出要的内容，可以让我再打开一次看看。'
       : '这种要看网站当前页面的问题，得打开网页实时查。',
-    options: [
-      inBrowser
-        ? null
-        : {
-            kind: 'prompt' as const,
-            label: `打开${site}帮你实时查`,
-            prompt: /^请使用云端浏览器/.test(intent) ? intent : `请使用云端浏览器，${intent}`,
-          },
-      retry,
-    ].filter((o): o is TurnOption => Boolean(o)),
+    options: [open, retry].filter((o): o is TurnOption => Boolean(o)),
   };
+}
+
+/**
+ * 复审 #7: our own check stopped an answer we wrote (周报、翻译、纪要…) — say what was not done
+ * and offer to do it again; never 「答案没通过我自己的核对」 or the check's name.
+ */
+export function notDoneLead(intent: string, en: boolean): string {
+  const word = (m: RegExpMatchArray | null) =>
+    m?.[1]
+      ?.replace(/^(?:一下|一份|一篇|一封|一个|一张|个|份|篇|封|张)/, '')
+      .replace(/(?:吧|呢|给我|一下)$/, '')
+      .trim();
+  if (en) {
+    if (/\btranslat/i.test(intent))
+      return "The translation didn't come out right this time — want me to try again?";
+    const obj = intent.match(
+      /\b(?:write|draft|make|create|prepare|summari[sz]e|organi[sz]e)\s+(?:me\s+)?(?:an?\s+|the\s+|my\s+|our\s+)?([a-z][a-z\s-]{1,30}?)(?=\s+(?:for|about|on|in|from|to|with|of)\b|[.,!?:;]|$)/i,
+    )?.[1];
+    return obj
+      ? `The ${obj.trim()} didn't come out right this time — want me to try again?`
+      : "That didn't come out right this time — want me to try again?";
+  }
+  if (/翻译/.test(intent)) return '这段翻译这次没做好，我再翻一次？';
+  const wrote = word(
+    intent.match(/(?:写|起草|拟)(?:一下|一份|一篇|一封|个|份|篇|封)?([^\s，。,.！!？?：:]{1,12})/),
+  );
+  if (wrote) return `${wrote}这次没写好，我再写一次？`;
+  const sorted = word(
+    intent.match(/(?:整理|总结|归纳|汇总|梳理)(?:一下|一份)?([^\s，。,.！!？?：:]{0,12})/),
+  );
+  if (sorted !== undefined) return `${sorted || '这份整理'}这次没整理好，我再整理一次？`;
+  const made = word(
+    intent.match(
+      /(?:做|生成|制作|画|设计)(?:一下|一份|一个|一张|个|份|张)?([^\s，。,.！!？?：:]{1,12})/,
+    ),
+  );
+  if (made) return `${made}这次没做好，我再做一次？`;
+  return '这次没做好，我再试一次？';
 }
 
 export function failureTurn(input: {
@@ -458,112 +591,180 @@ export function failureTurn(input: {
   canRetry: boolean;
 }): FailureTurn {
   const intent = input.intent.trim();
-  const retry: TurnOption | null = input.canRetry ? { kind: 'retry', label: '再试一次' } : null;
+  const en = isEnglishTask(intent);
+  const retry: TurnOption | null = input.canRetry
+    ? { kind: 'retry', label: en ? 'Try again' : '再试一次' }
+    : null;
   if (input.status === 'cancelled') {
-    return {
-      lead: '任务已取消，没有做完。',
-      why: '停之前拿到的内容我留在下面了。',
-      options: input.canRetry ? [{ kind: 'retry', label: '从头再做一次' }] : [],
-    };
+    return en
+      ? {
+          lead: 'The task was cancelled before it finished.',
+          why: 'What I had so far is below.',
+          options: input.canRetry ? [{ kind: 'retry', label: 'Start over' }] : [],
+        }
+      : {
+          lead: '任务已取消，没有做完。',
+          why: '停之前拿到的内容我留在下面了。',
+          options: input.canRetry ? [{ kind: 'retry', label: '从头再做一次' }] : [],
+        };
   }
   // 复审 #1-3: model / service errors get one fixed sentence, never the raw text.
   if (SERVICE_RE.test(input.errorText)) {
     return {
-      lead: '我这边的服务刚刚出了点问题，这次没做完，你可以稍后再让我试一次。',
+      lead: en
+        ? 'Something went wrong on my side, so this didn’t finish — you can ask me to try again in a moment.'
+        : '我这边的服务刚刚出了点问题，这次没做完，你可以稍后再让我试一次。',
       why: '',
       options: retry ? [retry] : [],
     };
   }
+  // 复审 #7: our own check comes first — 「verifier 拦截了答案」 is not a login wall.
+  if (INTERNAL_CHECK_RE.test(input.errorText)) {
+    const live = liveSiteFailure(intent, input.finalUrl, input.executionMode, retry, en);
+    if (live) return live;
+    return {
+      lead: notDoneLead(intent, en),
+      why: '',
+      options: [retry].filter((o): o is TurnOption => Boolean(o)),
+    };
+  }
   const own = failureOwnWords(input.errorText);
   const what = missingObject(own);
-  const notGot = what ? `没拿到${what}` : '这次没拿到你要的内容';
+  const notGot = en
+    ? "so I couldn't get what you asked for"
+    : what
+      ? `所以没拿到${what}`
+      : '所以这次没拿到你要的内容';
   const friendly = classifyFriendlyFailure(input.errorText, {
     executionMode: input.executionMode,
   });
-  const site = siteName(input.finalUrl, intent);
+  const site = en ? taskSite(intent, input.finalUrl, true) : siteName(input.finalUrl, intent);
   // 复审 #3 (BOSS run, 知乎): 「比价网站」 only where prices are what the person wants.
   const shopping =
-    /价格|价钱|多少钱|报价|商品|购买|比价|优惠|item\.|jd\.com|taobao|tmall|amazon|亚马逊|京东|淘宝|天猫/i.test(
+    /价格|价钱|多少钱|报价|商品|购买|比价|优惠|price|buy|product|item\.|jd\.com|taobao|tmall|amazon|亚马逊|京东|淘宝|天猫/i.test(
       intent,
     );
-  const publicSource: TurnOption | null = intent
-    ? shopping
-      ? {
-          kind: 'prompt',
-          label: '我去公开的搜索页或比价网站查同类信息',
-          prompt: `不用登录，换一个不需要登录的公开来源（站内搜索页、比价网站或品牌官网）帮我查：${intent}。答案里注明信息来自哪个网站。`,
-        }
-      : {
-          kind: 'prompt',
-          label: '我换个不需要登录的公开来源找找',
-          prompt: `不用登录，换一个不需要登录的公开来源（搜索引擎或相关的公开网站）帮我查：${intent}。答案里注明信息来自哪个网站。`,
-        }
-    : null;
+  const publicSource: TurnOption | null = !intent
+    ? null
+    : en
+      ? shopping
+        ? {
+            kind: 'prompt',
+            label: "I'll check public search or price-comparison pages instead",
+            prompt: `No login — use a public source that doesn't need one (site search, price-comparison sites or the brand's own site) for: ${intent}. Say which site the answer comes from.`,
+          }
+        : {
+            kind: 'prompt',
+            label: "I'll look for a public source that doesn't need a login",
+            prompt: `No login — use a public source that doesn't need one (a search engine or a related public site) for: ${intent}. Say which site the answer comes from.`,
+          }
+      : shopping
+        ? {
+            kind: 'prompt',
+            label: '我去公开的搜索页或比价网站查同类信息',
+            prompt: `不用登录，换一个不需要登录的公开来源（站内搜索页、比价网站或品牌官网）帮我查：${intent}。答案里注明信息来自哪个网站。`,
+          }
+        : {
+            kind: 'prompt',
+            label: '我换个不需要登录的公开来源找找',
+            prompt: `不用登录，换一个不需要登录的公开来源（搜索引擎或相关的公开网站）帮我查：${intent}。答案里注明信息来自哪个网站。`,
+          };
   // FIX-57 #5: the run already routed around the wall — say so, and do not offer it again.
   const triedElsewhere =
     /替代(?:来源|路线|渠道)|换(?:了|个|一个)?(?:公开)?(?:来源|渠道|网站)|尝试.{0,16}搜索|搜索.{0,30}均无|均无(?:返回)?结果|比价网站.{0,10}(?:都|也)?(?:没有|无)/.test(
       input.errorText,
     );
-  const tried = triedElsewhere ? '，我换了公开来源也没找到' : '';
+  const tried = triedElsewhere
+    ? en
+      ? ', and public sources did not have it either'
+      : '，我换了公开来源也没找到'
+    : '';
   const others = triedElsewhere ? null : publicSource;
   const title = friendly.title;
   if (/登录/.test(title) || /风控|拦截|拦下/.test(input.errorText)) {
     const blocked = /风控|拦截|拦下|403|异常提示/.test(input.errorText);
+    const login: TurnOption | null = !intent
+      ? null
+      : en
+        ? {
+            kind: 'prompt',
+            label: `Log in to ${site ?? 'the site'} in the browser and I'll pick it up`,
+            prompt: `I'll log in to ${site ?? 'the site'} myself in the browser. Reopen the page, pause at the login page, and continue once I've logged in: ${intent}`,
+          }
+        : {
+            kind: 'prompt',
+            label: `你在浏览器里登录${site ?? ''}，我接着帮你看`,
+            prompt: `我会在浏览器里自己登录${site ?? '这个网站'}。请重新打开刚才的页面，遇到登录页就暂停，等我登录好再继续：${intent}`,
+          };
     return {
       // 复审 #2-4: 「京东这个页面…」 or just 「这个页面…」 — never 「这个网站这个页面」.
-      lead: `${
-        blocked
-          ? site
-            ? `${site}把这个页面拦下了`
-            : '这个页面被拦下了'
-          : `${site ?? ''}这个页面要登录才能看`
-      }${blocked ? '，要登录或验证后才显示' : ''}${tried}，所以${notGot}。`,
-      why: '我不能替你登录，也不会绕过它。',
-      options: [
-        intent
-          ? {
-              kind: 'prompt',
-              label: `你在浏览器里登录${site ?? ''}，我接着帮你看`,
-              prompt: `我会在浏览器里自己登录${site ?? '这个网站'}。请重新打开刚才的页面，遇到登录页就暂停，等我登录好再继续：${intent}`,
-            }
-          : null,
-        others,
-      ].filter((o): o is TurnOption => Boolean(o)),
+      lead: en
+        ? `${
+            blocked
+              ? `${site ? `${site} blocked this page` : 'This page was blocked'} — it needs a login or a check first`
+              : `${site ? `This ${site} page` : 'This page'} needs a login`
+          }${tried}, ${notGot}.`
+        : `${
+            blocked
+              ? site
+                ? `${site}把这个页面拦下了`
+                : '这个页面被拦下了'
+              : `${site ?? ''}这个页面要登录才能看`
+          }${blocked ? '，要登录或验证后才显示' : ''}${tried}，${notGot}。`,
+      why: en
+        ? "I can't log in for you, and I won't get around it."
+        : '我不能替你登录，也不会绕过它。',
+      options: [login, others].filter((o): o is TurnOption => Boolean(o)),
     };
   }
   if (/验证/.test(title)) {
+    const verify: TurnOption | null = !intent
+      ? null
+      : en
+        ? {
+            kind: 'prompt',
+            label: 'Reopen it — you do the check when it shows',
+            prompt: `Run again: ${intent}. If a human check appears, pause until I finish it myself.`,
+          }
+        : {
+            kind: 'prompt',
+            label: '重新打开，遇到验证由你来完成',
+            prompt: `重新执行：${intent}。遇到人机验证就暂停，等我自己完成验证后再继续。`,
+          };
     return {
-      lead: `${site ?? '网站'}要求先做人机验证，这一步只能你本人来${tried}，所以${notGot}。`,
+      lead: en
+        ? `${site ?? 'The site'} wants a human check first — only you can do that${tried}, ${notGot}.`
+        : `${site ?? '网站'}要求先做人机验证，这一步只能你本人来${tried}，${notGot}。`,
       why: '',
-      options: [
-        intent
-          ? {
-              kind: 'prompt',
-              label: '重新打开，遇到验证由你来完成',
-              prompt: `重新执行：${intent}。遇到人机验证就暂停，等我自己完成验证后再继续。`,
-            }
-          : null,
-        others,
-      ].filter((o): o is TurnOption => Boolean(o)),
+      options: [verify, others].filter((o): o is TurnOption => Boolean(o)),
     };
   }
-  // In the browser a timeout or a broken page keeps its own words; our own check does not.
+  // In the browser a timeout or a broken page keeps its own words.
   const live =
-    input.executionMode !== 'browser' || INTERNAL_CHECK_RE.test(input.errorText)
-      ? liveSiteFailure(intent, input.finalUrl, input.executionMode, retry)
+    input.executionMode !== 'browser'
+      ? liveSiteFailure(intent, input.finalUrl, input.executionMode, retry, en)
       : null;
   if (live) return live;
   if (/超时|响应|连接|打开这个网站|浏览器|页面正在切换|休眠|中断|长时间/.test(title)) {
     return {
-      lead: `${site ?? '网站'}这次没有正常打开（${title}）${tried}，所以${notGot}。`,
-      why: '不是你的问题。',
+      lead: en
+        ? `${site ?? 'The site'} didn't open properly this time${tried}, ${notGot}.`
+        : `${site ?? '网站'}这次没有正常打开（${title}）${tried}，${notGot}。`,
+      why: en ? "It's not something you did." : '不是你的问题。',
       options: [retry, others].filter((o): o is TurnOption => Boolean(o)),
     };
   }
-  if (INTERNAL_CHECK_RE.test(input.errorText) || INTERNAL_CHECK_RE.test(title)) {
+  if (INTERNAL_CHECK_RE.test(title)) {
     return {
-      lead: '这次没拿到你要的结果：答案没通过我自己的核对，所以没交给你。',
-      why: '可以让我再试一次；要是有想查的网站，告诉我，我直接打开它查。',
+      lead: notDoneLead(intent, en),
+      why: '',
+      options: [retry].filter((o): o is TurnOption => Boolean(o)),
+    };
+  }
+  if (en) {
+    return {
+      lead: "This didn't finish — want me to try again?",
+      why: 'If it misses again, an example of what you want helps.',
       options: [retry].filter((o): o is TurnOption => Boolean(o)),
     };
   }

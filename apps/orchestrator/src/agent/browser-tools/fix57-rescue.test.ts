@@ -5,8 +5,10 @@ import {
   RESCUE_PARTIAL_RE,
   RESCUE_STATUS,
   WRITE_INTENT_RE,
+  isEnglishIntent,
   isReadOnlyIntent,
   plainAnswer,
+  rescuedAnswer,
   runUnifiedBrowserLoop,
   withoutSourceLines,
 } from './unified-browser-loop.js';
@@ -222,7 +224,7 @@ describe('FIX-57 复审 #1 · the cap holds and a rescued answer is 部分完成
     expect(outcome.status).toBe('completed');
     const done = outcome as { summary: string; partial?: { missing?: string } };
     expect(done.summary).toMatch(
-      /^部分完成：这是从\[京东手机版\]\(https:\/\/item\.m\.jd\.com\/product\/100142621606\.html\)查到的，不是你给的京东页面，只能算部分完成。/,
+      /^部分完成：这是从\[京东手机版\]\(https:\/\/item\.m\.jd\.com\/product\/100142621606\.html\)查到的（你给的京东页面要登录），只拿到了一部分：/,
     );
     expect(done.partial?.missing).toContain('京东页面上的内容');
     // 复审 #2-1: the model's own source line is not said a second time.
@@ -338,6 +340,35 @@ describe('复审 #3 · 代 BOSS 体验: the answer reads like talk', () => {
     );
   });
 
+  it('复审 #7 亚马逊 (real run): no 「按页面原文保留…字样」, offers in words, no cut inside a bracket', () => {
+    const raw = [
+      '在亚马逊新加坡站搜索“USB C cable”后，从搜索结果页读取到前5个商品的名称和价格如下：',
+      '',
+      '3. Belkin Eco USB C to USB C 60W Braided Cable 3.3ft… — S$9.43(1 new offer)  ',
+      '4. Belkin Eco-Friendly Braided USB-A to USB-C Cable (6.6ft, Charger Cord for iPhone 16 Pro Max, 2M) — S$8.21(2 new offers)  ',
+      '',
+      '第3、4条当前没有主推价，页面显示为卖家报价形式，已按页面原文保留“(1 new offer)”与“(2 new offers)”字样。',
+    ].join('\n');
+    const out = plainAnswer(raw);
+    expect(out).not.toMatch(/原文|字样|new offer/);
+    expect(out).toContain('— S$9.43（有 1 个卖家报价）');
+    expect(out).toContain('— S$8.21（有 2 个卖家报价）');
+    expect(out).toContain('4. Belkin Eco-Friendly Braided USB-A to USB-C Cable… — S$8.21');
+    expect(out.split('\n').at(-1)).toBe('第3、4条当前没有主推价，页面显示为卖家报价形式。');
+  });
+
+  it('复审 #7 English answers stay English', () => {
+    const raw = [
+      '1. Belkin Cable — S$9.43(1 new offer)',
+      '2. Anker Cable — S$8.90 (as shown on the page)',
+      '',
+      'Prices are recorded as shown on the page.',
+    ].join('\n');
+    const out = plainAnswer(raw, true);
+    expect(out).toBe('1. Belkin Cable — S$9.43 (1 seller offer)\n2. Anker Cable — S$8.90');
+    expect(out).not.toMatch(/[\u4e00-\u9fff]/);
+  });
+
   it('复审 #6: a fact line with something new stays (PLUS 价)', () => {
     const t = '价格 ¥7??9。\n- 价格：¥7??9，另有 PLUS 价 ¥7??0';
     expect(plainAnswer(t)).toBe(t);
@@ -420,6 +451,48 @@ describe('复审 #3 · 代 BOSS 体验: the answer reads like talk', () => {
     const t =
       '1. Anker USB C Cable — S$8.90\n这是一段很长很长的说明文字，没有价格，也不是列表项，所以不应该被截断或改动任何一个字。';
     expect(plainAnswer(t)).toBe(t);
+  });
+});
+
+describe('复审 #7 · a rescued answer says where it came from once', () => {
+  const done = (summary: string) =>
+    ({ status: 'completed', summary, steps: 3 }) as Parameters<typeof rescuedAnswer>[0];
+  const URL_M = 'https://item.m.jd.com/product/100142621606.html?ad_od=3';
+  it('one lead; 「以上信息来自…」 goes; a dated source sentence stays', () => {
+    const out = rescuedAnswer(
+      done(
+        '商品标题是「Apple iPhone 16 Pro」，价格没登录时被京东打了码，只显示 ¥7??9。以上信息来自 [京东手机版](https://item.m.jd.com/product/100142621606.html?ad_od=3)。',
+      ),
+      { started: true, blockedUrl: 'https://item.jd.com/100142621606.html', why: 'login' },
+      URL_M,
+    );
+    expect(out.summary).toBe(
+      `部分完成：这是从[京东手机版](${URL_M})查到的（你给的京东页面要登录），只拿到了一部分：\n\n商品标题是「Apple iPhone 16 Pro」，价格没登录时被京东打了码，只显示 ¥7??9。`,
+    );
+    const dated = rescuedAnswer(
+      done('价格 ¥7999。以上信息来自 2024 年 10 月的页面快照。'),
+      { started: true, blockedUrl: 'https://item.jd.com/1.html', why: 'blocked' },
+      URL_M,
+    );
+    expect(dated.summary).toContain('以上信息来自 2024 年 10 月的页面快照。');
+    expect(dated.summary).toContain('（你给的京东页面被拦下了）');
+  });
+
+  it('English task: English lead (the 部分完成 marker is stripped by the page)', () => {
+    const out = rescuedAnswer(
+      done('The title is Apple iPhone 16 Pro; the price is masked until you log in.'),
+      { started: true, blockedUrl: 'https://item.jd.com/100142621606.html', why: 'login' },
+      URL_M,
+      true,
+    );
+    expect(out.summary.split('\n')[0]).toBe(
+      `部分完成：I got this from [JD mobile](${URL_M}) (the JD.com page you gave needs a login), so it's only part of what you asked:`,
+    );
+  });
+
+  it('isEnglishIntent', () => {
+    expect(isEnglishIntent('open https://item.jd.com/1.html and read the price')).toBe(true);
+    expect(isEnglishIntent('打开 https://item.jd.com/1.html 读价格')).toBe(false);
   });
 });
 

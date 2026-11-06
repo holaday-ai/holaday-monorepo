@@ -10,6 +10,7 @@ import {
   type TurnOption,
   elapsedLabel,
 } from '@/lib/assistant-turn';
+import { rememberOptionLabel } from '@/lib/sent-option-labels';
 import { cn } from '@/lib/utils';
 import { ArrowUpRight, Check, ChevronDown, ChevronRight, Pencil, RotateCcw } from 'lucide-react';
 import * as React from 'react';
@@ -207,9 +208,13 @@ export function TurnOptions({
           key={`${option.kind}-${option.label}`}
           type="button"
           disabled={option.kind === 'retry' && retrying}
-          onClick={() =>
-            option.kind === 'retry' ? onRetry?.() : option.prompt && onSend?.(option.prompt)
-          }
+          onClick={() => {
+            if (option.kind === 'retry') return onRetry?.();
+            if (!option.prompt) return;
+            // 复审 #7: the person's bubble shows what they clicked; the instruction is unchanged.
+            rememberOptionLabel(option.prompt, option.label);
+            onSend?.(option.prompt);
+          }}
           className={CHIP}
         >
           {option.kind === 'retry' && (

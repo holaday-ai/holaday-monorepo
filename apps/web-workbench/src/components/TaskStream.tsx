@@ -22,6 +22,7 @@ import {
   answerSourceCount,
   captchaRequestLine,
   failureTurn,
+  isEnglishTask,
   isEvidenceAttachment,
   liveStatusText,
   normalizeNextSteps,
@@ -72,6 +73,7 @@ import {
   matchResultSourceBadgePrefix,
 } from '@/lib/result-source-badges';
 import { screenshotThumbnailPresentation } from '@/lib/screenshot-thumbnail-state';
+import { optionLabelFor } from '@/lib/sent-option-labels';
 import {
   type StepDetailSummary,
   shouldShowStepCard,
@@ -276,9 +278,9 @@ export function TaskStream({ task, onPickSuggestion, onSendSuggestion }: Props):
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 px-6 pb-10 pt-8 sm:pb-6">
-      <UserBubble intent={taskDisplayIntent(task.intent)} />
+      <UserBubble intent={optionLabelFor(task.intent) ?? taskDisplayIntent(task.intent)} />
       {userReplies.map((r) => (
-        <UserBubble key={r.at} intent={r.text} />
+        <UserBubble key={r.at} intent={optionLabelFor(r.text) ?? r.text} />
       ))}
 
       <AgentBlock
@@ -2443,7 +2445,8 @@ function TerminalSummary({
   const unverifiedSplit = splitUnverifiedNote(revealed);
   const shownText = unverifiedSplit.body;
   const links = answerLinks(displayText);
-  const partial = status === 'partial_success' ? partialLead(shownText) : null;
+  const partial =
+    status === 'partial_success' ? partialLead(shownText, isEnglishTask(intent ?? '')) : null;
   const partialSaid = partial !== null && partial.lead !== null;
   const refund = isFailedLike ? refundStatusCopy(failureContext.context?.refund.state) : null;
   const failureDetail =

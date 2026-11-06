@@ -259,6 +259,8 @@ export interface RescueState {
   started: boolean;
   /** The address that was walled (the one the user's task led to). */
   blockedUrl?: string;
+  /** 复审 #7: why the rescue began — said once in the answer's first line. */
+  why?: 'login' | 'blocked' | 'stuck';
 }
 
 export interface UnifiedBrowserLoopInput {
@@ -441,7 +443,12 @@ export async function runUnifiedBrowserLoop(
   // the code, not the model, says where it came from.
   const outcome =
     looped.status === 'completed' && rescueState.started
-      ? rescuedAnswer(looped, rescueState, input.currentPageUrl?.())
+      ? rescuedAnswer(
+          looped,
+          rescueState,
+          input.currentPageUrl?.(),
+          isEnglishIntent(input.userIntent ?? input.intent),
+        )
       : looped;
   if (outcome.status === 'failed') logger.warn({ steps: steps.slice(-120) }, 'browser loop failed');
   // FIX-41: nor the browser's call syntax (「switch_tab(targetTabId=…)」), once its ids are gone.
@@ -450,7 +457,12 @@ export async function runUnifiedBrowserLoop(
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {
     case 'completed':
-      return { ...outcome, summary: strip(plainAnswer(outcome.summary)) };
+      return {
+        ...outcome,
+        summary: strip(
+          plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
+        ),
+      };
     case 'failed':
       return { ...outcome, reason: strip(outcome.reason) };
     case 'awaiting_user':
@@ -841,7 +853,11 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   let rescueBlockedUrl: string | undefined;
   const onRescueWall = () => rescueStarted && input.currentPageUrl?.() === rescueWallUrl;
   const rescueSites = new Set<string>();
-  const startRescue = async (step: number, why: string): Promise<string | null> => {
+  const startRescue = async (
+    step: number,
+    why: string,
+    kind: 'login' | 'blocked' = 'login',
+  ): Promise<string | null> => {
     if (!rescueEligible || rescueStarted || captchaDeclined || step + 4 >= maxSteps) return null;
     rescueStarted = true;
     rescueWallUrl = input.currentPageUrl?.();
@@ -851,6 +867,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     if (input.rescueState) {
       input.rescueState.started = true;
       input.rescueState.blockedUrl = rescueBlockedUrl;
+      input.rescueState.why = why === 'wall' ? kind : 'stuck';
     }
     await Promise.resolve(input.onRescue?.(RESCUE_STATUS[why === 'wall' ? 'wall' : 'stuck'])).catch(
       () => undefined,
@@ -903,7 +920,11 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         if (onRescueWall()) {
           // fall through to the model turn
         } else {
-          const note = await startRescue(step, 'wall');
+          const note = await startRescue(
+            step,
+            'wall',
+            wall.reason === 'permission' ? 'blocked' : 'login',
+          );
           if (!note) return { status: 'awaiting_user', ...wall, steps: step };
           messages.push({ role: 'user', content: note });
         }
@@ -1135,7 +1156,11 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               ? null
               : onRescueWall()
                 ? `答案来自被挡住的页面，不能交付。${RESCUE_NOTE}`
-                : await startRescue(step, 'wall');
+                : await startRescue(
+                    step,
+                    'wall',
+                    blocker.reason === 'permission' ? 'blocked' : 'login',
+                  );
             if (note) {
               results.push(toolResult(call.id, note, true));
               staleTurn = true;
@@ -2117,7 +2142,11 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           reason === 'permission' ||
           (reason === 'other' && /登录|登陆|log\s*in|sign\s*in/i.test(message))
         ) {
-          const note = await startRescue(step, 'wall');
+          const note = await startRescue(
+            step,
+            'wall',
+            reason === 'permission' ? 'blocked' : 'login',
+          );
           if (note) {
             results.push(toolResult(call.id, note, true));
             staleTurn = true;
@@ -2490,7 +2519,11 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             ? null
             : onRescueWall()
               ? `仍是被挡住的页面。${RESCUE_NOTE}`
-              : await startRescue(step, 'wall');
+              : await startRescue(
+                  step,
+                  'wall',
+                  blocker.reason === 'permission' ? 'blocked' : 'login',
+                );
           if (note) {
             results.push(toolResult(call.id, `${outcome.text}\n${note}`));
             staleTurn = true;
@@ -3071,15 +3104,53 @@ export function rescueSiteName(url: string | undefined): string {
  * FIX-57 复审 #1-4: a rescued answer is 部分完成, led by one plain line the code writes:
  * 「这是从[京东手机版](…)查到的，不是你给的京东页面。」 The model's own 「部分完成：」 is folded in.
  */
+/** 复审 #7: an English task gets English from the code too. */
+export function isEnglishIntent(intent: string): boolean {
+  const text = intent.replace(/https?:\/\/\S+/g, ' ');
+  return /[a-z]{3,}/i.test(text) && !/[\u3400-\u9fff]/.test(text);
+}
+
+/** English names for the sites a rescue usually lands on. */
+const RESCUE_SITE_EN: ReadonlyArray<[RegExp, string]> = [
+  [/(?:^|\.)m\.jd\.com$/, 'JD mobile'],
+  [/(?:^|\.)jd\.com$/, 'JD.com'],
+  [/(?:^|\.)amazon\.sg$/, 'Amazon Singapore'],
+  [/(?:^|\.)amazon\.[a-z.]+$/, 'Amazon'],
+  [/(?:^|\.)zhihu\.com$/, 'Zhihu'],
+  [/(?:^|\.)taobao\.com$/, 'Taobao'],
+  [/(?:^|\.)tmall\.com$/, 'Tmall'],
+  [/(?:^|\.)smzdm\.com$/, 'SMZDM'],
+  [/(?:^|\.)bing\.com$/, 'Bing'],
+];
+
+function rescueSiteNameEn(url: string | undefined): string {
+  const host = hostOf(url)?.replace(/^www\./, '');
+  if (!host) return 'another public page';
+  return RESCUE_SITE_EN.find(([re]) => re.test(host))?.[1] ?? host;
+}
+
+/**
+ * 复审 #7 (协调方第 4 次代体验): one line says it all — where it came from, why not the page the
+ * person gave, and that it is only part: 「这是从京东手机版查到的（你给的京东页面要登录），只拿到
+ * 了一部分：」. The model's own source sentences (「以上信息来自…」) go; 「参考了 N 个来源」 is below.
+ */
 export function rescuedAnswer(
   outcome: Extract<UnifiedBrowserOutcome, { status: 'completed' }>,
   rescue: RescueState,
   finalUrl: string | undefined,
+  en = false,
 ): Extract<UnifiedBrowserOutcome, { status: 'completed' }> {
-  const from = rescueSiteName(finalUrl);
+  const from = en ? rescueSiteNameEn(finalUrl) : rescueSiteName(finalUrl);
   const link = finalUrl && /^https?:\/\//.test(finalUrl) ? `[${from}](${finalUrl})` : from;
-  const given = rescueSiteName(rescue.blockedUrl);
-  const lead = `部分完成：这是从${link}查到的，不是你给的${given}页面，只能算部分完成。`;
+  const given = en ? rescueSiteNameEn(rescue.blockedUrl) : rescueSiteName(rescue.blockedUrl);
+  const why = rescue.why ?? 'login';
+  const lead = en
+    ? `部分完成：I got this from ${link} (the ${given} page you gave ${
+        why === 'login' ? 'needs a login' : why === 'blocked' ? 'was blocked' : "didn't open"
+      }), so it's only part of what you asked:`
+    : `部分完成：这是从${link}查到的（你给的${given}页面${
+        why === 'login' ? '要登录' : why === 'blocked' ? '被拦下了' : '没打开'
+      }），只拿到了一部分：`;
   const body = withoutSourceLines(
     outcome.summary.replace(/^\s*(?:\*\*)?部分完成(?:\*\*)?\s*[:：]\s*/, ''),
   );
@@ -3108,11 +3179,15 @@ const SOURCE_LINE_RE =
 const SOURCE_PREFIX_RE =
   /^(\s*)(?:这是|以下(?:是|为)?|下面是)?\s*从\s*(?:\[[^\]]+\]\([^)]*\)|[^\s，。,:：]{1,24})\s*(?:上|中|里)?(?:查到|读到|读取到|获取到?|拿到|看到)的?(?:(?:商品|页面|公开)?(?:信息|内容|数据))?\s*(?:如下)?\s*[:：]\s*(?=\S)/u;
 
+/** 复审 #7: 「以上信息来自 [京东手机版](…)。」 — said by the first line and 「参考了 N 个来源」. */
+const SOURCE_SENTENCE_RE =
+  /\s*(?:以上|上述|这些|上面)(?:的)?(?:信息|内容|数据|结果)?(?:均|都|全部)?(?:来自|出自|取自|来源于)\s*(?:\[[^\]]+\]\([^)]*\)|[A-Za-z\u4e00-\u9fa5][A-Za-z\u4e00-\u9fa5.]{1,15}?)\s*(?:的)?(?:页面|网站|网页)?\s*(?:[。.]|$)|\s*(?:The )?(?:information|details|data) above (?:comes?|came|is) from\s*(?:\[[^\]]+\]\([^)]*\)|[A-Z][\w.]*(?: [A-Z][\w.]*)*)\s*(?:\.|$)/gu;
+
 export function withoutSourceLines(text: string): string {
   return text
     .split('\n')
     .filter((line) => !SOURCE_LINE_RE.test(line))
-    .map((line) => line.replace(SOURCE_PREFIX_RE, '$1'))
+    .map((line) => line.replace(SOURCE_PREFIX_RE, '$1').replace(SOURCE_SENTENCE_RE, ''))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -3149,9 +3224,13 @@ function withoutVerbatimWords(_m: string, space: string, inner: string): string 
  * 协调方第 2 次代体验: a sentence of its own that only says so (「价格均照页面原样记录。」)
  * goes too; a sentence that also says something else stays.
  */
-const VERBATIM_SENTENCE_RE = /(^|[。！!\n])([ \t]*)([^。！!\n]*原样[^。！!\n]*)([。.!！]?)/gu;
+const VERBATIM_SENTENCE_RE =
+  /(^|[。！!\n])([ \t]*)([^。！!\n]*(?:原样|原文|字样)[^。！!\n]*)([。!！]?)/gu;
 const VERBATIM_SENTENCE_ONLY_RE =
   /^(?:以上|上面|这些|所有|下面)?(?:的)?(?:(?:价格|名称|商品名|标题|数据|内容|信息|文字|数字|评分)[和与及、]?)*(?:均|都|皆|全部|全)?(?:是)?(?:照|按|据)?(?:页面|网页|原文)?原样(?:显示|展示|列出|写出?|照录|保留|抄录|记录|摘录)?(?:的)?$/u;
+/** 复审 #7: the same note in other words — 「已按页面原文保留“(1 new offer)”字样」. */
+const META_CLAUSE_RE =
+  /(?:按|照|据)(?:页面|网页)?原文(?:保留|记录|照录|摘录|抄录|列出)?|原文(?:保留|照录|摘录|抄录)|保留[^，,；;]{0,40}?字样|(?:原|英文)字样$/u;
 /** Clauses of a sentence that only say 「照页面原样」 go; the sentence goes if nothing is left. */
 function withoutVerbatimClauses(
   _m: string,
@@ -3163,7 +3242,7 @@ function withoutVerbatimClauses(
   const kept = sentence
     .split(/[，,；;]/u)
     .map((part) => part.trim())
-    .filter((part) => part && !VERBATIM_SENTENCE_ONLY_RE.test(part));
+    .filter((part) => part && !VERBATIM_SENTENCE_ONLY_RE.test(part) && !META_CLAUSE_RE.test(part));
   return kept.length ? `${lead}${space}${kept.join('，')}${end}` : lead;
 }
 
@@ -3174,6 +3253,14 @@ function withoutVerbatimClauses(
 const NO_FEATURED_QUOTE_RE =
   /(?:页面(?:上)?(?:显示|写着|标注|写的是)?[：:]?\s*)?[「“"]([^」”"\n]*No featured offers? available[^」”"\n]*?)[」”"][，,；;]?\s*(?:即|也就是说?|意思是|意即)?[，,]?\s*/giu;
 const NO_FEATURED_PARTS_RE = /((?:S\$|US\$|\$|¥|￥)\s?[\d.,]+)\s*\((\d+) new offers?\)/iu;
+
+/** 复审 #7: 「S$9.43(1 new offer)」 said in words. */
+const NEW_OFFER_RE = /((?:S\$|US\$|\$|¥|￥)\s?[\d.,]*\d)\s*\((\d+) new offers?\)/giu;
+/** 复审 #7: the English 「as shown on the page」 notes and sentences. */
+const EN_VERBATIM_NOTE_RE =
+  /\s*\((?:kept |copied |recorded |listed )?(?:verbatim|as shown(?: on the page)?|exactly as (?:shown|displayed)(?: on the page)?)\)/giu;
+const EN_VERBATIM_SENTENCE_RE =
+  /(^|[.!?]\s+|\n)(?:(?:all |the )?(?:prices?|names?|titles?|details?|figures?)(?: and (?:prices?|names?|titles?))? (?:are|were|have been) (?:recorded |kept |copied |listed |quoted )?(?:verbatim|as shown(?: on the page)?|exactly as (?:shown|displayed)(?: on the page)?)|I (?:kept|copied|quoted) [^.\n]{0,60}? (?:verbatim|as shown on the page))\.?/giu;
 
 /** 复审 #6: 「…有 1 个卖家报价 S$9.43（这款没有主推价，有 1 个卖家报价 S$9.43）」 — a note in
  * brackets that only repeats what the line already said before it goes. */
@@ -3187,13 +3274,19 @@ function withoutRepeatedNotes(line: string): string {
   });
 }
 
-function withoutNoFeaturedQuote(line: string): string {
+function withoutNoFeaturedQuote(line: string, en = false): string {
   if (!/No featured offers? available/i.test(line)) return line;
-  const explained = /主推价|卖家报价/.test(line.replace(NO_FEATURED_QUOTE_RE, ''));
+  const explained = /主推价|卖家报价|seller offer|featured offer/i.test(
+    line.replace(NO_FEATURED_QUOTE_RE, ''),
+  );
+  if (en && !/[「“"]/.test(line)) return line;
   return line.replace(NO_FEATURED_QUOTE_RE, (_m, quote: string) => {
     if (explained) return '';
     const parts = NO_FEATURED_PARTS_RE.exec(quote);
-    return parts ? `没有主推价，有 ${parts[2]} 个卖家报价 ${parts[1]}。` : '';
+    if (!parts) return '';
+    return en
+      ? `no featured offer; ${parts[2]} seller offer${parts[2] === '1' ? '' : 's'} at ${parts[1]}.`
+      : `没有主推价，有 ${parts[2]} 个卖家报价 ${parts[1]}。`;
   });
 }
 
@@ -3210,9 +3303,15 @@ function shortName(name: string): string {
   const cut = Math.max(head.lastIndexOf(' '), head.lastIndexOf(','), head.lastIndexOf('，'));
   if (cut > NAME_HEAD / 2) head = head.slice(0, cut);
   head = head.replace(/[\s,，、;；:：\-–—]+$/u, '');
+  // 复审 #7: never cut inside a bracket (「Cable (6.6ft…」) — cut before it.
+  const open = Math.max(head.lastIndexOf('('), head.lastIndexOf('（'));
+  if (open > Math.max(head.lastIndexOf(')'), head.lastIndexOf('）')) && open > NAME_HEAD / 3)
+    head = head.slice(0, open).replace(/[\s,，、;；:：\-–—]+$/u, '');
   // Two listings often differ only in the last bit (「…, 1M」 / 「…, 2M」) — keep it.
   const tail = /[,，]\s*([^,，]{1,12})$/u.exec(name)?.[1]?.trim();
-  return tail && /\d/.test(tail) && !head.endsWith(tail) ? `${head}…${tail}` : `${head}…`;
+  // 复审 #7: a tail that closes a bracket the head no longer opens (「2M)」) is left off.
+  const keep = tail && /\d/.test(tail) && !/[()（）]/.test(tail) && !head.endsWith(tail);
+  return keep ? `${head}…${tail}` : `${head}…`;
 }
 
 /**
@@ -3269,16 +3368,26 @@ function withoutRepeatedFacts(text: string): string {
   return out.join('\n');
 }
 
-export function plainAnswer(text: string): string {
+export function plainAnswer(text: string, en = false): string {
   const cleaned = text
     .replace(VERBATIM_NOTE_RE, withoutVerbatimWords)
     .replace(VERBATIM_SENTENCE_RE, withoutVerbatimClauses)
-    .replace(
-      NO_FEATURED_RE,
-      (_m, price: string, n: string) => `（这款没有主推价，有 ${n} 个卖家报价 ${price}）`,
+    .replace(EN_VERBATIM_NOTE_RE, '')
+    .replace(EN_VERBATIM_SENTENCE_RE, '$1')
+    .replace(NO_FEATURED_RE, (_m, price: string, n: string) =>
+      en
+        ? ` (no featured offer; ${n} seller offer${n === '1' ? '' : 's'} at ${price})`
+        : `（这款没有主推价，有 ${n} 个卖家报价 ${price}）`,
     )
     .split('\n')
-    .map(withoutNoFeaturedQuote)
+    .map((line) => withoutNoFeaturedQuote(line, en))
+    .map((line) =>
+      line.replace(NEW_OFFER_RE, (_m, price: string, n: string) =>
+        en
+          ? `${price} (${n} seller offer${n === '1' ? '' : 's'})`
+          : `${price}（有 ${n} 个卖家报价）`,
+      ),
+    )
     .map(withoutRepeatedNotes)
     .map((line) =>
       line.replace(

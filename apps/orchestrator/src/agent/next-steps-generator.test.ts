@@ -192,6 +192,28 @@ describe('FIX-57 #4 · next steps', () => {
     expect(NEXT_STEPS_SYSTEM_PROMPT).toContain('收盘后再告诉你三大指数的结果？');
   });
 
+  it('复审 #7: near copies of a request are echoes too; the recent list says it is not to copy', () => {
+    const asked = ['上证指数现在多少点'];
+    const steps = [
+      { label: '上证指数-现在多少点', prompt: '上证指数 - 现在多少点' },
+      { label: '帮我看看上证指数现在多少点？', prompt: '帮我看看上证指数现在多少点' },
+      {
+        label: '收盘后再告诉你三大指数的结果？',
+        prompt: '今天收盘后告诉我上证、深证、创业板的收盘点位',
+      },
+    ];
+    expect(withoutEchoes(asked, steps).map((s) => s.label)).toEqual([
+      '收盘后再告诉你三大指数的结果？',
+    ]);
+    const msg = nextStepsUserMessage({
+      intent: '上证指数现在多少点',
+      outcome: 'completed',
+      summary: '3647.90',
+      recentIntents: ['亚马逊新加坡站 USB C 线价格'],
+    });
+    expect(msg).toContain('用户最近的其他任务（只用来判断偏好，不能照抄）：');
+  });
+
   it('复审 #4: an item id in the query is part of the address; bare retries are banned', () => {
     const walled = ['https://item.taobao.com/item.htm?id=111'];
     const steps = [
