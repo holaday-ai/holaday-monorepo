@@ -1022,6 +1022,8 @@ export function assessCompletionFacts(input: {
       ...page,
       lines,
       norm: lines.join(' '),
+      // FIX-58 复审 #1 必须修 3: 「RMB 9999起」 is the page's 「RMB 9999 起」.
+      tight: lines.join('').replace(/\s+/g, ''),
       values,
       joined,
       loose: looseQuote(joined),
@@ -1118,6 +1120,9 @@ export function assessCompletionFacts(input: {
         eligible.some(
           (page) =>
             page.norm.includes(v) ||
+            (/\d/.test(v) &&
+              v.replace(/\s+/g, '').length >= 4 &&
+              page.tight.includes(v.replace(/\s+/g, ''))) ||
             // A value split over adjacent nodes (「29.89」「in」).
             (/\s/.test(v) && containsToken(page.joined, v)) ||
             // FIX-28 (sa2 core-11, D16): a quote read across adjacent nodes.

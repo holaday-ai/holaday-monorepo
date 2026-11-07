@@ -49,7 +49,7 @@ import {
 import { explainExecutionMode } from '../../agent/intent-classifier.js';
 import { matchLiveFact } from '../../agent/live-fact.js';
 import { DrizzleLlmCallRecorder, type LlmCallRecord } from '../../agent/llm-call-recorder.js';
-import { marketTableAsText } from '../../agent/market-answer.js';
+import { marketTableAsText, withSourceLinksApart } from '../../agent/market-answer.js';
 import { withMediaCallContext } from '../../agent/media-call-recorder.js';
 // Phase 24 RC follow-up — nav-failure safety net. Catches the
 // "false success" case where the agent calls task_done with a body
@@ -4872,9 +4872,12 @@ export const tasksRouter = router({
                       status: 'completed',
                       // FIX-58 P1-2: the same 「原样 / 原文」 cleanup as a browser answer.
                       // FIX-58 P1-10: a market answer's table is said as a sentence.
-                      summary: marketTableAsText(
-                        withoutVerbatimNotes(scrapeOutcome.summary),
-                        input.intent,
+                      // 复审 #1: a source link is set apart from the sentence before it.
+                      summary: withSourceLinksApart(
+                        marketTableAsText(
+                          withoutVerbatimNotes(scrapeOutcome.summary),
+                          input.intent,
+                        ),
                       ),
                     };
                   } else if (

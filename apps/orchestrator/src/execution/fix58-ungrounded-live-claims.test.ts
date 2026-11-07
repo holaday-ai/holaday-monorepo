@@ -63,9 +63,16 @@ describe('FIX-58 P0 · ungrounded live claims', () => {
     ],
     ['根据京东的搜索结果，这款手机卖得很好。', '京东 iPhone 16 Pro 怎么样'],
     ['以上信息来源：淘宝商城。', '帮我看看这件衣服'],
-  ])('a source claim with nothing read fails: %s', (answerText, intent) => {
-    expect(checkUngroundedLiveClaims({ answerText, ledger: ledger(intent) })?.passed).toBe(false);
-  });
+  ])(
+    'a source claim with nothing read is caught (复审 #1: its sentence goes): %s',
+    (answerText, intent) => {
+      expect(checkUngroundedLiveClaims({ answerText, ledger: ledger(intent) })).toMatchObject({
+        passed: false,
+        severity: 'fixable',
+        criterionId: 'generic.ungrounded_side_mention',
+      });
+    },
+  );
 
   it('the same answer passes when something was read', () => {
     expect(
@@ -89,12 +96,13 @@ describe('FIX-58 P0 · ungrounded live claims', () => {
     expect(checkUngroundedLiveClaims({ answerText, ledger: ledger(intent) })).toBeNull();
   });
 
-  it('a value presented as current fails even when the request was not a live fact', () => {
+  it('a value presented as current is caught even when the request was not a live fact', () => {
     const check = checkUngroundedLiveClaims({
       answerText: '这款耳机目前售价 ¥1299，很值得入手。',
       ledger: ledger('推荐一款降噪耳机'),
     });
-    expect(check?.passed).toBe(false);
+    // 复审 #1 建议修: not the value asked for — said as an estimate, not a failure.
+    expect(check).toMatchObject({ passed: false, severity: 'fixable' });
   });
 
   it('the user turn in the core context counts as the user’s own words', () => {

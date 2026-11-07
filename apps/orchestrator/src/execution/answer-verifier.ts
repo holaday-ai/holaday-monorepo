@@ -34,7 +34,6 @@ import {
   type TaskVerificationContext,
   createTaskVerificationContext,
 } from './task-verification-context.js';
-import { renderVerificationUserIntent } from './task-verification-context.js';
 import { evaluateTemplateFill } from './template-fill-consistency.js';
 import { TEXT_URL_RE as URL_RE, trimTextUrl } from './text-urls.js';
 import { checkUngroundedLiveClaims } from './ungrounded-live-claims.js';
@@ -262,9 +261,7 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
     : checkUngroundedLiveClaims({
         answerText,
         ledger,
-        userIntent: inputs.verificationContext
-          ? renderVerificationUserIntent(inputs.verificationContext)
-          : undefined,
+        ...(inputs.verificationContext ? { verificationContext: inputs.verificationContext } : {}),
       });
   if (ungroundedLiveCheck) checks.push(ungroundedLiveCheck);
 

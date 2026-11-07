@@ -2834,7 +2834,13 @@ export function fieldLines(fields: unknown, summary: string): string {
     const { name, value } = field as { name?: unknown; value?: unknown };
     if (typeof name !== 'string' || typeof value !== 'string') continue;
     const text = unescapeLiteralBreaks(value).trim();
-    if (!text || summary.includes(text) || /summary|总结|概述|摘要|说明|备注|note/i.test(name))
+    if (
+      !text ||
+      summary.includes(text) ||
+      // 复审 #1 必须修 3: 「RMB 9999起」 was said as 「RMB 9,999 起」.
+      tightForm(summary).includes(tightForm(text)) ||
+      /summary|总结|概述|摘要|说明|备注|note/i.test(name)
+    )
       continue;
     // DEPLOY-46 (local A/B, A core-11): a value that is only element refs (「e12, e13, e19」) is the
     // browser's own handles, never an answer field.
@@ -3488,6 +3494,50 @@ function saysNothingNew(value: string, said: string): boolean {
   return numbers.length > 0 && numbers.every((n) => said.includes(n));
 }
 
+/**
+ * FIX-58 复审 #1 必须修 3 (「苹果手机多少钱」): what was said once is compared with thousands
+ * separators and spaces taken out — 「RMB 15,999 起」 and 「RMB 15999起」 are the same price.
+ */
+export function tightForm(text: string): string {
+  return text
+    .normalize('NFKC')
+    .replace(/\*\*|`/g, '')
+    .replace(/(\d),(?=\d{3}(?!\d))/g, '$1')
+    .replace(/[:：]/g, ':')
+    .replace(/\s+/g, '')
+    .toLocaleLowerCase();
+}
+
+const LIST_LINE_RE = /^\s*(?:[-*•]|\d+[.、)])\s+(.+)$/u;
+
+/** 复审 #1 必须修 3: a whole list whose every line an earlier list already said goes, block and all. */
+function withoutRepeatedList(text: string): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  const items: string[] = [];
+  for (let i = 0; i < lines.length; ) {
+    if (!LIST_LINE_RE.test(lines[i]!)) {
+      out.push(lines[i]!);
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (j < lines.length && LIST_LINE_RE.test(lines[j]!)) j += 1;
+    const block = lines.slice(i, j).map((line) => tightForm(LIST_LINE_RE.exec(line)?.[1] ?? line));
+    const repeated =
+      block.length >= 2 &&
+      block.every((said) => said.length >= 4 && items.some((item) => item.includes(said)));
+    if (repeated) {
+      while (out.length && !out[out.length - 1]!.trim()) out.pop();
+    } else {
+      out.push(...lines.slice(i, j));
+      items.push(...block);
+    }
+    i = j;
+  }
+  return out.join('\n');
+}
+
 function withoutRepeatedFacts(text: string): string {
   const prose: string[] = [];
   const items = new Map<string, string>();
@@ -3680,7 +3730,7 @@ export function plainAnswer(text: string, en = false): string {
           )
         : line,
     );
-  return withoutRepeatedFacts(withShortNames(cleaned).join('\n'))
+  return withoutRepeatedList(withoutRepeatedFacts(withShortNames(cleaned).join('\n')))
     .replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, '\n\n')
     .trimEnd();
 }

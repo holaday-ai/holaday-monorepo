@@ -1439,8 +1439,14 @@ function decide(intent: string, ctx: { hasFileAttachment: boolean }): RouteDecis
  * Lookups the rules already send to scrape stay there; the scrape lane hands a failed live
  * lookup to the browser instead of generate.
  */
-function liveFactOverride(d: RouteDecision, intent: string): RouteDecision {
-  if (d.mode !== 'generate' || d.source !== 'default' || URL_REGEX.test(intent)) return d;
+function liveFactOverride(
+  d: RouteDecision,
+  intent: string,
+  hasFileAttachment: boolean,
+): RouteDecision {
+  // An attachment is the user's own material: its prices are theirs to work on.
+  if (d.mode !== 'generate' || d.source !== 'default' || hasFileAttachment) return d;
+  if (URL_REGEX.test(intent)) return d;
   const liveFact = matchLiveFact(stripNegatedRoutingClauses(intent));
   return liveFact
     ? {
@@ -1497,7 +1503,7 @@ export async function explainExecutionMode(opts: ClassifyOpts): Promise<Executio
   // generate) still defer to the skill hint when one is installed.
   // This preserves the user's explicit "use this skill" intent for
   // ambiguous prompts while preventing the search-verb foot-gun.
-  const d = liveFactOverride(decide(intent, { hasFileAttachment }), intent);
+  const d = liveFactOverride(decide(intent, { hasFileAttachment }), intent, hasFileAttachment);
   const STRONG_SIGNAL_SOURCES = new Set([
     'kw:explicit-browser',
     'kw:template_fill',

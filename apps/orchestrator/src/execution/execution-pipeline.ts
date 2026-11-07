@@ -1062,6 +1062,7 @@ function runFixLoop(
     verification: initialVerification,
     answerText: inputs.answerText,
     ...(workflowContract ? { workflowContract } : {}),
+    ...(inputs.verificationContext ? { verificationContext: inputs.verificationContext } : {}),
   });
   if (fix.applied.length === 0) {
     // Nothing to fix — keep the original verdict but demote so

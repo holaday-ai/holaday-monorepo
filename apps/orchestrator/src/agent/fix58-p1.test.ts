@@ -177,8 +177,9 @@ describe('P1-9 · the stock card names its source in words', () => {
       source: 'akshare:stock_zh_a_daily(sina,末2行算涨跌幅)',
       fetched_at: '2026-11-07T03:15:00Z',
     } as never);
-    expect(tag).toMatch(/^数据来自新浪财经 · 抓取 /);
-    expect(tag).not.toMatch(/akshare|stock_/i);
+    // 复审 #1: no 「抓取」, like the market card.
+    expect(tag).toMatch(/^数据来自新浪财经 · \d{2}:\d{2}$/);
+    expect(tag).not.toMatch(/akshare|stock_|抓取/i);
   });
 });
 

@@ -174,9 +174,9 @@ export function sourceName(source: string): string {
   return names.length ? [...new Set(names)].join('、') : '公开行情数据';
 }
 
-/** 「数据来自新浪财经 · 抓取 HH:MM」. */
+/** 「数据来自新浪财经 · HH:MM」 — 复审 #1: no 「抓取」, like the market card. */
 export function sourceTag(env: AkEnvelope): string {
-  return `数据来自${sourceName(env.source)} · 抓取 ${fmtClock(env.fetched_at)}`;
+  return `数据来自${sourceName(env.source)} · ${fmtClock(env.fetched_at)}`;
 }
 
 /** 段尾来源短标（prod 简报用），和 sourceTag 同一套人话写法。 */
