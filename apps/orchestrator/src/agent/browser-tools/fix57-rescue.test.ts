@@ -732,3 +732,86 @@ describe('FIX-57 #5 · never routed around', () => {
     expect(RESCUE_GIVE_UP_RE.test('型号不存在')).toBe(false);
   });
 });
+
+/**
+ * DEPLOY-57 第 1.5 步 (协调方判定第 1 步): reg-new-amazon-sg, B tsk_3KAAgHx8fni3zLwSqjb5H, read
+ * 「3. 名称：Belkin Eco … 3.3ft…有 1 个卖家报价 S$9.43」 and then 「- 商品3价格：S$9.43（有 1 个卖家
+ * 报价）（报价）」. The model's own text was not stored (only the cleaned answer is); each of the two
+ * raw lines below gives that exact answer on 3e9d90d0, and the third is the shape the coordinator
+ * names (「；价格：照页面原样记录为 …」).
+ */
+describe('DEPLOY-57 第 1.5 步 · amazon line 3', () => {
+  const head =
+    '在亚马逊新加坡站搜索 usb c cable 后，前三个商品的名称和价格如下：\n\n' +
+    '1. 名称：UGREEN 2 Pack USB C to USB C Charger Cable, Type C 100W PD Fast Charging Cord Compatible with iPhone 15 Pro Max, MacBook Pro, iPad Pro, Dell, Matebook, Chromebook, Pixel, Samsung S23 S22, Switch, 2M；价格：S$12.45\n' +
+    '2. 名称：UGREEN 2 Pack USB C to USB C Charger Cable, Type C 100W PD Fast Charging Cord Compatible with iPhone 15 Pro Max, MacBook Pro, iPad Pro, Dell, Matebook, Chromebook, Pixel, Samsung S23 S22, Switch, 1M；价格：S$10.92\n';
+  const name = '3. 名称：Belkin Eco USB C to USB C 60W Braided Cable 3.3ft iPhone Charger Cord';
+  const field = '\n\n- 商品3价格：S$9.43(1 new offer)（报价）';
+  const lines12 =
+    '1. 名称：UGREEN 2 Pack USB C to USB C Charger Cable, Type C 100W…2M；价格：S$12.45\n' +
+    '2. 名称：UGREEN 2 Pack USB C to USB C Charger Cable, Type C 100W…1M；价格：S$10.92\n';
+  const out = (tail: string) => plainAnswer(`${head}${name}${tail}${field}`);
+
+  const line3 =
+    '3. 名称：Belkin Eco USB C to USB C 60W Braided Cable 3.3ft…；价格：S$9.43（有 1 个卖家报价）';
+  it('the coordinator’s shape: separator, price and offer kept, no 「照页面原样记录为」, no extra line', () => {
+    expect(out('；价格：照页面原样记录为 S$9.43(1 new offer)')).toBe(
+      `在亚马逊新加坡站搜索 usb c cable 后，前三个商品的名称和价格如下：\n\n${lines12}${line3}`,
+    );
+  });
+
+  it.each([
+    '；这款没有主推价，有 1 个卖家报价 S$9.43',
+    '；价格照页面原样记录，这款没有主推价，有 1 个卖家报价 S$9.43',
+  ])('raw that gave the B answer: %s', (tail) => {
+    const text = out(tail);
+    expect(text.split('\n').at(-1)).toBe(
+      '3. 名称：Belkin Eco USB C to USB C 60W Braided Cable 3.3ft…；这款没有主推价，有 1 个卖家报价 S$9.43',
+    );
+    expect(text).not.toMatch(/商品3价格|（报价）|原样/);
+  });
+
+  it('「照页面原样记录为 X」 with no field word before it → 「为 X」', () => {
+    expect(
+      plainAnswer('3. 名称：Belkin Cable；价格：S$9.43，该价格为报价，照页面原样记录为 S$9.43'),
+    ).toBe('3. 名称：Belkin Cable；价格：S$9.43，该价格为报价，为 S$9.43');
+  });
+
+  it('the name is cut, the separator and what follows are not', () => {
+    expect(
+      plainAnswer(
+        '1. Anker USB C to USB C Cable, 60W Fast Charging Cable for MacBook Pro and Samsung Galaxy；这款有 2 个卖家报价 S$12.99',
+      ),
+    ).toBe(
+      '1. Anker USB C to USB C Cable, 60W Fast Charging Cable for…；这款有 2 个卖家报价 S$12.99',
+    );
+  });
+
+  it('a 「商品N价格」 line stays when it says something item N did not', () => {
+    const text = plainAnswer(
+      '1. 名称：Belkin Cable；价格：S$9.43\n2. 名称：Anker Cable；价格：S$12.99\n\n- 商品2价格：S$11.50（会员价）',
+    );
+    expect(text).toContain('- 商品2价格：S$11.50（会员价）');
+    expect(plainAnswer('1. 名称：Belkin Cable；价格：S$9.43\n\n- 商品1价格：S$9.43（报价）')).toBe(
+      '1. 名称：Belkin Cable；价格：S$9.43',
+    );
+    // No item 3 above: nothing to compare with, the line stays.
+    expect(plainAnswer('价格如下。\n\n- 商品3价格：S$9.43')).toContain('- 商品3价格：S$9.43');
+  });
+
+  it('separators of other clauses are kept as written', () => {
+    expect(plainAnswer('价格均照页面原样记录；标题 A，价格 ¥7??9。')).toBe('标题 A，价格 ¥7??9。');
+    expect(plainAnswer('标题 A；价格按页面原文保留为 ¥7??9。')).toBe('标题 A；价格为 ¥7??9。');
+  });
+
+  it('b-p02: the 「未核实」 note names items by the short name', () => {
+    const text = plainAnswer(
+      '1. Anker USB C to USB C Cable, 60W Fast Charging Cable (2-Pack, 6 ft, Black) $9.99\n\n' +
+        '未核实：以下内容未能在已读页面中逐字找到，请自行确认——条目「Anker USB C to USB C Cable, 60W Fast Charging Cable (2-Pack, 6 ft, Black)，价格 $9.99」',
+    );
+    expect(text).toBe(
+      '1. Anker USB C to USB C Cable, 60W Fast Charging Cable… $9.99\n\n' +
+        '未核实：以下内容未能在已读页面中逐字找到，请自行确认——条目「Anker USB C to USB C Cable, 60W Fast Charging Cable…，价格 $9.99」',
+    );
+  });
+});

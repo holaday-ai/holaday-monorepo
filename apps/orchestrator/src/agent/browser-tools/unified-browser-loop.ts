@@ -3254,7 +3254,7 @@ const VERBATIM_SENTENCE_ONLY_RE =
   /^(?:以上|上面|这些|所有|下面)?(?:的)?(?:(?:价格|名称|商品名|标题|数据|内容|信息|文字|数字|评分)[和与及、]?)*(?:均|都|皆|全部|全)?(?:是)?(?:照|按|据)?(?:页面|网页|原文)?原样(?:显示|展示|列出|写出?|照录|保留|抄录|记录|摘录)?(?:的)?$/u;
 /** 复审 #7: the same note in other words — 「已按页面原文保留“(1 new offer)”字样」. */
 const META_CLAUSE_RE =
-  /(?:按|照|据)(?:页面|网页)?原文(?:保留|记录|照录|摘录|抄录|列出)?|原文(?:保留|照录|摘录|抄录)|保留[^，,；;]{0,40}?字样|(?:原|英文)字样$/u;
+  /(?:按|照|据)(?:页面|网页)?(?:原文|原样)(?:保留|记录|照录|摘录|抄录|列出)?|原文(?:保留|照录|摘录|抄录)|保留[^，,；;]{0,40}?字样|(?:原|英文)字样$/u;
 /** 第 0 步核对 1: the subject is a field (价格 / 名称 / 标题…), or there is no subject at all. */
 const FIELD_WORDS = '(?:价格|售价|名称|商品名|标题|数据|字段|数字|评分|报价)';
 const FIELD_SUBJECT_RE = new RegExp(`^(?:${FIELD_WORDS}[和与及、]?)+`, 'u');
@@ -3270,6 +3270,14 @@ const VERBATIM_MODIFIER_RE =
 /** DEPLOY-57 第 0 步 1: only the words — 「价格按页面原文保留为 S$9.43」 → 「价格为 S$9.43」. */
 const META_WORDS_RE =
   /(?:已|均|都|全部)?(?:按|照|据)(?:页面|网页)?(?:原文|原样)(?:保留|记录|照录|摘录|抄录|列出|显示|写)?|(?:原文|原样)(?:保留|照录|摘录|抄录)/gu;
+/** DEPLOY-57 第 1.5 步 2: a clause with no subject that opens with the words (「照页面原样记录为 S$9.43」). */
+const META_LEAD_RE = /^(?:已|均|都|全部)?(?:按|照|据)(?:页面|网页)?(?:原文|原样)/u;
+/** 「价格：照页面原样记录为 S$9.43」 → 「价格：S$9.43」, not 「价格：为 S$9.43」. */
+const withoutMetaWords = (part: string) =>
+  part
+    .replace(META_WORDS_RE, '')
+    .replace(/([：:])\s*为\s*/u, '$1')
+    .trim();
 
 function withoutVerbatimClauses(
   _m: string,
@@ -3278,25 +3286,38 @@ function withoutVerbatimClauses(
   sentence: string,
   end: string,
 ): string {
-  const kept = sentence
-    .split(/[，,；;]/u)
-    .map((part) => part.trim())
-    .map((part) => {
-      if (!part) return part;
+  // DEPLOY-57 第 1.5 步 1: each clause keeps the separator it had (「…Cord；价格：…」 stays 「；」).
+  const pieces = sentence.split(/(\s*[，,；;]\s*)/u);
+  const kept: Array<{ sep: string; text: string }> = [];
+  // A clause that goes leaves its own separator for the next one (「Cord；价格照页面原样记录，这款…」
+  // → 「Cord；这款…」).
+  let dropped: string | null = null;
+  for (let i = 0; i < pieces.length; i += 2) {
+    const raw = pieces[i] ?? '';
+    const part = raw.trim();
+    const sep = i > 0 ? (pieces[i - 1] ?? '') : '';
+    const text = ((): string => {
+      if (!part) return '';
       // Only a note about how fields were written goes whole: 「价格和名称均照页面原样」,
       // 「标题按页面原文保留」, 「已按页面原文保留“(1 new offer)”字样」.
       if (VERBATIM_SENTENCE_ONLY_RE.test(part) || PURE_META_RE.test(part)) return '';
-      if (!META_CLAUSE_RE.test(part)) return part;
+      if (!META_CLAUSE_RE.test(part)) return raw;
       // A field clause that carries a number or a price keeps it; only the words go
       // (「价格按页面原文保留为 S$9.43」 → 「价格为 S$9.43」). A number inside a quote is the note.
+      // 第 1.5 步 2: so does a clause with no subject (「照页面原样记录为 S$9.43」 → 「为 S$9.43」).
       const facts = part.replace(/[“"「『][^”"」』]*[”"」』]/gu, '');
-      if (FIELD_SUBJECT_RE.test(part) && /\d|[¥￥$]/u.test(facts))
-        return part.replace(META_WORDS_RE, '').trim();
+      if ((FIELD_SUBJECT_RE.test(part) || META_LEAD_RE.test(part)) && /\d|[¥￥$]/u.test(facts))
+        return withoutMetaWords(part);
       // Anything else is the answer itself (「原文保留了作者的署名」「评论区原文照录如下：…」).
-      return part;
-    })
-    .filter(Boolean);
-  return kept.length ? `${lead}${space}${kept.join('，')}${end}` : lead;
+      return raw;
+    })();
+    if (text) {
+      kept.push({ sep: dropped ?? sep, text });
+      dropped = null;
+    } else if (dropped === null && i > 0) dropped = sep;
+  }
+  const body = kept.map((k, i) => (i === 0 ? k.text.trimStart() : `${k.sep}${k.text}`)).join('');
+  return kept.length ? `${lead}${space}${body}${end}` : lead;
 }
 
 /**
@@ -3323,10 +3344,15 @@ const noteKey = (text: string) =>
   text.replace(/这款|该商品|该款|此款|这件|仅|只|[\s，,。；;、：:]/gu, '').toLowerCase();
 
 function withoutRepeatedNotes(line: string): string {
-  return line.replace(/[（(]([^（）()\n]{4,})[）)]/gu, (m, inner: string, at: number) => {
-    const key = noteKey(inner);
-    return key.length >= 4 && noteKey(line.slice(0, at)).includes(key) ? '' : m;
-  });
+  return line
+    .replace(/[（(]([^（）()\n]{4,})[）)]/gu, (m, inner: string, at: number) => {
+      const key = noteKey(inner);
+      return key.length >= 4 && noteKey(line.slice(0, at)).includes(key) ? '' : m;
+    })
+    .replace(/[（(]([^（）()\n]{2,4})[）)]/gu, (m, inner: string, at: number, whole: string) =>
+      // DEPLOY-57 第 1.5 步 3: 「S$9.43（有 1 个卖家报价）（报价）」 — the tail says nothing new.
+      NO_INFO_NOTE_RE.test(inner.trim()) && whole.slice(0, at).includes(inner.trim()) ? '' : m,
+    );
 }
 
 function withoutNoFeaturedQuote(line: string, en = false): string {
@@ -3374,8 +3400,12 @@ function shortName(name: string): string {
  * 协调方第 2 次代体验 (京东): a 「- 价格：¥7??9…」 / 「- 标题：「…」」 line that only repeats
  * what the paragraph above already said goes — the fact is said once.
  */
+// DEPLOY-57 第 1.5 步 3: 「- 商品3价格：…」 / 「- 第 3 款价格：…」 name the item they repeat.
 const FACT_LINE_RE =
-  /^\s*([-*•]\s*)?(?:\*\*)?(价格|售价|到手价|标题|商品标题|名称|商品名称?)(?:\*\*)?\s*[：:]\s*(.+)$/u;
+  /^\s*([-*•]\s*)?(?:\*\*)?(?:(?:商品|第)\s*(\d+)\s*(?:款|个|件|条|项)?(?:商品)?\s*的?)?(价格|售价|到手价|标题|商品标题|名称|商品名称?)(?:\*\*)?\s*[：:]\s*(.+)$/u;
+const ITEM_LINE_RE = /^\s*(?:\*\*)?(\d+)[.、)]\s/u;
+/** A bracketed tail with nothing new in it once the line has said the price (「（报价）」). */
+const NO_INFO_NOTE_RE = /^(?:报价|卖家报价|价格|售价|参考价)$/u;
 const PRICE_TOKEN_RE =
   /(?:S\$|US\$|\$|¥|￥)\s?[\d?？.,]*\d[\d?？.,]*|(?:S\$|US\$|\$|¥|￥)\s?\d\?+\d/u;
 
@@ -3395,7 +3425,17 @@ function repeatsOnly(label: string, value: string, said: string): boolean {
     notes.push(inner);
     return '';
   });
-  if (!notes.every((note) => EXPLAIN_ONLY_RE.test(note))) return false;
+  // 第 1.5 步 3: a note the line above already said (「有 1 个卖家报价」), or one with nothing new.
+  const saidKey = noteKey(said);
+  if (
+    !notes.every(
+      (note) =>
+        EXPLAIN_ONLY_RE.test(note) ||
+        NO_INFO_NOTE_RE.test(note.trim()) ||
+        (noteKey(note).length >= 4 && saidKey.includes(noteKey(note))),
+    )
+  )
+    return false;
   if (/价/.test(label)) {
     const prices = rest.match(PRICE_TOKEN_ALL_RE) ?? [];
     if (!prices.length || !prices.every((p) => said.includes(p.replace(/\s+/g, '')))) return false;
@@ -3413,17 +3453,21 @@ function repeatsOnly(label: string, value: string, said: string): boolean {
 
 function withoutRepeatedFacts(text: string): string {
   const prose: string[] = [];
+  const items = new Map<string, string>();
   const out: string[] = [];
   for (const line of text.split('\n')) {
     const m = FACT_LINE_RE.exec(line);
     if (m) {
-      const said = prose.join('\n').replace(/\s+/g, '');
-      if (repeatsOnly(m[2] ?? '', m[3] ?? '', said)) continue;
+      // 第 1.5 步 3: 「- 商品3价格：…」 is checked against item 3 above; none above, it stays.
+      const said = (m[2] ? (items.get(m[2]) ?? '') : prose.join('\n')).replace(/\s+/g, '');
+      if (said && repeatsOnly(m[3] ?? '', m[4] ?? '', said)) continue;
       // A fact said in a line of its own (「商品标题：…」) counts for the lines after it.
-      if (!m[1]) prose.push(line);
+      if (!m[1] && !m[2]) prose.push(line);
     } else if (!/^\s*(?:[-*•]|\d+[.、)])\s/.test(line)) {
       prose.push(line);
     }
+    const item = ITEM_LINE_RE.exec(line);
+    if (item?.[1]) items.set(item[1], line);
     out.push(line);
   }
   return out.join('\n');
@@ -3435,8 +3479,10 @@ function withoutRepeatedFacts(text: string): string {
  * on the next. Only the name before the price is cut; the cut never lands inside a bracket.
  */
 const ITEM_HEAD_RE = /^(\s*(?:(?:\d+[.、)]|[-*•])\s+)?(?:\*\*)?(?:(?:商品)?名称\s*[：:]\s*)?)/u;
+// DEPLOY-57 第 1.5 步 1: the name also ends where Chinese starts (「…Cord；这款没有主推价，…」) —
+// the separator and all after it stay as they are.
 const NAME_END_RE =
-  /\*\*|\s+[—–]\s+|\s*[；;]\s*(?:价格|售价)|\s*(?:价格|售价)\s*[：:]|\s*[：:]\s*(?=(?:S\$|US\$|\$|¥|￥)\s?\d)|\s+(?=(?:S\$|US\$|\$|¥|￥)\s?\d)/u;
+  /\*\*|\s*[；，。、]|\s*;\s*(?=\p{Script=Han})|\s*(?=\p{Script=Han})|\s+[—–]\s+|\s*[；;]\s*(?:价格|售价)|\s*(?:价格|售价)\s*[：:]|\s*[：:]\s*(?=(?:S\$|US\$|\$|¥|￥)\s?\d)|\s+(?=(?:S\$|US\$|\$|¥|￥)\s?\d)/u;
 
 const PRICE_AHEAD_RE = /(?:S\$|US\$|\$|¥|￥)\s?\d/u;
 const PRICE_LINE_RE =
@@ -3487,7 +3533,15 @@ export function plainAnswer(text: string, en = false): string {
         ),
     )
     .map(withoutRepeatedNotes)
-    .map((line, i, lines) => withShortName(line, lines[i + 1]))
+    .map((line, i, lines) =>
+      // DEPLOY-57 第 1.5 步 4: the 「未核实」 note names an item by the same short name.
+      /^\s*未核实[:：]/u.test(line)
+        ? line.replace(
+            /「([^」\n]+)」/gu,
+            (_m, item: string) => `「${withShortName(item, undefined)}」`,
+          )
+        : withShortName(line, lines[i + 1]),
+    )
     .join('\n');
   return withoutRepeatedFacts(cleaned)
     .replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, '\n\n')
