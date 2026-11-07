@@ -193,7 +193,7 @@ describe('b-p02: an honest gap on the page is delivered as 部分完成', () => 
     expect(rejected).toEqual([]);
     expect(outcome).toMatchObject({
       status: 'completed',
-      summary: expect.stringMatching(/^部分完成：第 1 条页面未显示价格/),
+      summary: expect.stringMatching(/^部分完成：第 1 款页面上没显示价格/),
       partial: expect.anything(),
     });
   });

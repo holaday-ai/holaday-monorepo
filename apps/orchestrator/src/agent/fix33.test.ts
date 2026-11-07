@@ -270,7 +270,9 @@ describe('FIX-33 #5 · a browser answer short of the rows asked for is partial',
       originalText: answer,
     });
     expect(verdict.status).toBe('partial_success');
-    expect(verdict.text).toContain('核验提示：第 3 行缺少价格');
+    // FIX-58 P1-1: plain words; the check's own 「要求至少 3 条」 is for operators.
+    expect(verdict.text).toContain('第 3 款没读到价格');
+    expect(verdict.text).not.toMatch(/核验提示|要求至少|可核验/);
   });
   it('a missing source link alone still only annotates', () => {
     expect(

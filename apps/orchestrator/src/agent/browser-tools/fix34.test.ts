@@ -54,7 +54,7 @@ describe('FIX-34 #2 · amazon.sg: each item is checked against its own listing r
     expect(page.text.endsWith(SNAPSHOT_TRUNCATED)).toBe(true);
     const answer = rows('未获取到（快照中该商品的价格区域被截断，未读到具体价格文本）');
     expect(declaredMissingPriceRows(answer, page.text)).toEqual([3]);
-    expect(listPartialNote(rowsContract, answer, page.text)).toMatch(/^部分完成：第 3 条/);
+    expect(listPartialNote(rowsContract, answer, page.text)).toMatch(/^部分完成：第 3 款/);
   });
   it('a carousel heading and rating nodes between the cut item and the cut do not count as its price', () => {
     const tree = [

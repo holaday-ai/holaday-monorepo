@@ -27,6 +27,7 @@
 
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
+import { matchLiveFact } from './live-fact.js';
 import { namedSiteSearch, namedSiteView } from './named-site-search.js';
 
 export type ExecutionMode =
@@ -1431,6 +1432,25 @@ function decide(intent: string, ctx: { hasFileAttachment: boolean }): RouteDecis
   return { mode: 'generate', source: 'default' };
 }
 
+/**
+ * FIX-58 P0: a value that changes (price, stock, ranking, score, weather, quote) asked about a
+ * named site or a concrete product is never written from memory. Where the rules above would
+ * answer it in generate, it is read in the browser — the same road as 「请使用云端浏览器」.
+ * Lookups the rules already send to scrape stay there; the scrape lane hands a failed live
+ * lookup to the browser instead of generate.
+ */
+function liveFactOverride(d: RouteDecision, intent: string): RouteDecision {
+  if (d.mode !== 'generate' || d.source !== 'default' || URL_REGEX.test(intent)) return d;
+  const liveFact = matchLiveFact(stripNegatedRoutingClauses(intent));
+  return liveFact
+    ? {
+        mode: 'browser',
+        source: 'kw:live-fact',
+        match: `${liveFact.subject}…${liveFact.value}`.slice(0, 64),
+      }
+    : d;
+}
+
 /** The routing decision with its reason (rule source + matched text), for task metadata and audits. */
 export interface ExecutionModeDecision {
   mode: ExecutionMode;
@@ -1477,7 +1497,7 @@ export async function explainExecutionMode(opts: ClassifyOpts): Promise<Executio
   // generate) still defer to the skill hint when one is installed.
   // This preserves the user's explicit "use this skill" intent for
   // ambiguous prompts while preventing the search-verb foot-gun.
-  const d = decide(intent, { hasFileAttachment });
+  const d = liveFactOverride(decide(intent, { hasFileAttachment }), intent);
   const STRONG_SIGNAL_SOURCES = new Set([
     'kw:explicit-browser',
     'kw:template_fill',
@@ -1491,6 +1511,7 @@ export async function explainExecutionMode(opts: ClassifyOpts): Promise<Executio
     'kw:search-pattern',
     'kw:search-verb',
     'kw:ecommerce-listing',
+    'kw:live-fact',
   ]);
   if (STRONG_SIGNAL_SOURCES.has(d.source)) {
     cacheSet(key, d.mode, d.source);

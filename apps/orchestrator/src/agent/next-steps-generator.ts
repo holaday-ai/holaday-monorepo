@@ -65,6 +65,30 @@ export interface GenerateNextStepsOptions {
   recentIntents?: readonly string[];
   /** 复审 #3: addresses that stopped the run (never offered again). */
   blockedUrls?: readonly string[];
+  /** Tests only: the time the steps are offered. */
+  now?: Date;
+}
+
+/** FIX-58 P1-5: an English request gets English steps and an English title. */
+export function isEnglishRequest(intent: string): boolean {
+  const text = intent.replace(/https?:\/\/\S+/g, ' ');
+  return !/\p{Script=Han}/u.test(text) && (text.match(/[A-Za-z]{2,}/g) ?? []).length >= 2;
+}
+
+/** FIX-58 P1-8: Saturday or Sunday in Beijing — the A-share market is closed. */
+export function marketClosedToday(now: Date): boolean {
+  const day = new Date(now.getTime() + 8 * 3_600_000).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+const MARKET_WORDS_RE = /指数|股|大盘|板块|行情|收盘|开盘|涨|跌|点位|创业板|沪深|成交/;
+
+/** 「创业板今天也跌了吗」 on a Saturday → 「创业板上个交易日也跌了吗」. */
+export function withoutTodayWhenClosed(steps: readonly NextStep[], now: Date): NextStep[] {
+  if (!marketClosedToday(now)) return [...steps];
+  const fix = (text: string) =>
+    MARKET_WORDS_RE.test(text) ? text.replace(/今天|今日/g, '上个交易日') : text;
+  return steps.map((step) => ({ label: fix(step.label), prompt: fix(step.prompt) }));
 }
 
 const OUTCOME_LABEL: Record<NextStepsOutcome, string> = {
@@ -97,6 +121,12 @@ export function nextStepsUserMessage(opts: Omit<GenerateNextStepsOptions, 'messa
   ];
   return [
     `用户这次的要求：${opts.intent}`,
+    isEnglishRequest(opts.intent)
+      ? '用户用英文提问：title、每条 label 和 prompt 都用英文写，不要出现中文。'
+      : '',
+    marketClosedToday(opts.now ?? new Date())
+      ? '今天是周末，A 股休市：说到行情时用「上个交易日」，不要说「今天涨/跌」。'
+      : '',
     domains.length ? `用户给的链接域名：${domains.join('、')}` : '',
     CROSS_PLATFORM_RE.test(opts.intent)
       ? ''
@@ -137,13 +167,18 @@ export async function generateNextStepsWithTitle(
   } catch {
     return none;
   }
-  return {
-    steps: withoutEchoes(
+  const english = isEnglishRequest(opts.intent);
+  const han = (text: string) => /\p{Script=Han}/u.test(text);
+  const steps = withoutTodayWhenClosed(
+    withoutEchoes(
       [opts.intent, ...(opts.recentIntents ?? [])],
       relevantNextSteps(opts.blockedUrls ?? [], filterNextSteps(opts.intent, parseNextSteps(raw))),
     ),
-    title: parseTaskTitle(raw),
-  };
+    opts.now ?? new Date(),
+  ).filter((step) => !english || (!han(step.label) && !han(step.prompt)));
+  const title = parseTaskTitle(raw);
+  // An English request keeps its own words in the sidebar rather than a Chinese title.
+  return { steps, title: english && title && han(title) ? null : title };
 }
 
 /** The sidebar title from the same JSON: 2–20 chars, no address, no browser preamble. */

@@ -189,9 +189,7 @@ describe('FIX-54 #3 · amazon 「See options」: the offers price the card lists
     expect(rowOfferPrice(BELKIN, page)).toBeNull();
     // Still the honest 部分完成 of FIX-32, and the retreat names no offer to copy.
     expect(reviewListAnswer(contract, UNREAD, page)).toBeNull();
-    expect(listPartialNote(contract, UNREAD, page)).toBe(
-      '部分完成：第 3 条页面未显示价格（答案已如实说明）',
-    );
+    expect(listPartialNote(contract, UNREAD, page)).toBe('部分完成：第 3 款页面上没显示价格。');
   });
 
   it("the card's own offers line, right under its state, is still found (CC's real page)", () => {
@@ -207,9 +205,7 @@ describe('FIX-54 #3 · amazon 「See options」: the offers price the card lists
   it('a 「See options」 card with no offers line is still an honest 部分完成 (FIX-32 kept)', () => {
     const bare = PAGE.replace('S$9.22(2 new offers)\n', '');
     expect(reviewListAnswer(contract, UNREAD, bare)).toBeNull();
-    expect(listPartialNote(contract, UNREAD, bare)).toBe(
-      '部分完成：第 3 条页面未显示价格（答案已如实说明）',
-    );
+    expect(listPartialNote(contract, UNREAD, bare)).toBe('部分完成：第 3 款页面上没显示价格。');
   });
 });
 

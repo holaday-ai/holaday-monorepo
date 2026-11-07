@@ -106,7 +106,7 @@ describe('FIX-35 0b · a named field given as absent is 部分完成, after one 
     expect(seen.join('\n')).toContain('screenshot 看一眼');
     expect(outcome).toMatchObject({
       status: 'completed',
-      summary: expect.stringMatching(/^部分完成：作者 页面上没有读到/),
+      summary: expect.stringMatching(/^部分完成：(?:第 \d+ 条)?(?:页面上)?没读到作者/),
       partial: expect.objectContaining({ missing: '作者' }),
     });
   });
@@ -115,7 +115,7 @@ describe('FIX-35 0b · a named field given as absent is 部分完成, after one 
     expect(rejected).toHaveLength(1);
     expect(outcome).toMatchObject({
       status: 'completed',
-      summary: expect.stringMatching(/^部分完成：作者 页面上没有读到/),
+      summary: expect.stringMatching(/^部分完成：(?:第 \d+ 条)?(?:页面上)?没读到作者/),
       partial: expect.objectContaining({ missing: '作者' }),
     });
   });
@@ -137,7 +137,7 @@ describe('FIX-35 0b · a named field given as absent is 部分完成, after one 
     } as never);
     expect(outcome).toMatchObject({
       status: 'completed',
-      summary: expect.stringMatching(/^部分完成：作者 页面上没有读到/),
+      summary: expect.stringMatching(/^部分完成：(?:第 \d+ 条)?(?:页面上)?没读到作者/),
       partial: expect.objectContaining({ missing: '作者' }),
     });
   });
@@ -233,7 +233,7 @@ describe('FIX-35 0a · b-p02 through the loop: the honest See-options gap is not
     expect(rejected).toEqual([]);
     expect(outcome).toMatchObject({
       status: 'completed',
-      summary: expect.stringMatching(/^部分完成：第 1 条/),
+      summary: expect.stringMatching(/^部分完成：第 1 款/),
     });
   });
 });

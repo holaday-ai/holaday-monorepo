@@ -34,8 +34,10 @@ import {
   type TaskVerificationContext,
   createTaskVerificationContext,
 } from './task-verification-context.js';
+import { renderVerificationUserIntent } from './task-verification-context.js';
 import { evaluateTemplateFill } from './template-fill-consistency.js';
 import { TEXT_URL_RE as URL_RE, trimTextUrl } from './text-urls.js';
+import { checkUngroundedLiveClaims } from './ungrounded-live-claims.js';
 import { isNonDetailUrl, isSiteHomeUrl, urlResourceIdentity } from './url-identity.js';
 import type { VerificationInputCoverage } from './verification-input-budget.js';
 
@@ -252,6 +254,19 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   //    generate-fallback path. No-op for every non-template answer.
   const templateFillCheck = checkTemplateFillConsistency(answerText, inputs.outputFiles ?? []);
   if (templateFillCheck) checks.push(templateFillCheck);
+
+  // 8. FIX-58 P0 (诚实红线): nothing read outside → no source claims, no live values. Every
+  //    lane; deterministic. A plan or clarification is not an answer.
+  const ungroundedLiveCheck = deliveryStage
+    ? null
+    : checkUngroundedLiveClaims({
+        answerText,
+        ledger,
+        userIntent: inputs.verificationContext
+          ? renderVerificationUserIntent(inputs.verificationContext)
+          : undefined,
+      });
+  if (ungroundedLiveCheck) checks.push(ungroundedLiveCheck);
 
   const passed = checks.every((c) => c.passed);
   const result: VerificationResult = {
@@ -1150,7 +1165,8 @@ function checkEcommerceRows(
 }
 
 function declaredPriceGap(rows: number[]): string {
-  return `部分完成：第 ${rows.join('、')} 条页面未显示价格（答案已如实说明）`;
+  // FIX-58 P1-4: plain words, the item named; no note about the answer itself.
+  return `部分完成：第 ${rows.join('、')} 款页面上没显示价格。`;
 }
 
 function isLikelyEcommerceAggregateUrl(url: string): boolean {

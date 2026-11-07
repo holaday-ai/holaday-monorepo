@@ -129,6 +129,16 @@ const FRESH_RESEARCH_SYSTEM =
   '无法确认时，只能把检索结果称为线索并请求补充信息，不得把泛市场新闻、相似名称或相关机构动态写成目标对象的近况。' +
   '不要用“数据暂不可用”代替检索、来源或澄清问题。';
 
+/**
+ * FIX-58 P0 (线上 tsk_pVJkbLniTrmcPdrjJoRm7 编造亚马逊价格): every generate answer, including the
+ * short direct ones that are told to 「务必给出有用的回答」.
+ */
+const LIVE_DATA_HONESTY =
+  '诚实规则（优先于上面所有要求）：价格、库存、销量、排名、比分、天气、行情、汇率这类会变的当前数据，' +
+  '本轮没有通过 web_search 实际拿到结果时，你并不知道——直接说不知道当前数值、建议打开对应网站实时查，' +
+  '不要给出具体数值，不要编商品清单，不要写「数据来自 / 来源 / 根据…搜索结果」这类话。' +
+  '只有本轮 web_search 真实返回的内容才能当作来源。';
+
 const AWAITING_USER_MARKER_RE = /\[AWAITING[_ ]USER[_ ]INPUT\]/i;
 
 function stripAwaitingUserMarker(text: string): string {
@@ -380,9 +390,9 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
         : buildLayeredSystemPrompt(roleId, opts.expertMode) + schemaSuffix;
   const forceFreshResearch =
     !opts.planOnly && !isLightweight && !legacyWorkflow && requiresFreshResearch(opts.intent);
-  const laneInstructions = forceFreshResearch
-    ? `${baseSystem}\n\n${FRESH_RESEARCH_SYSTEM}`
-    : baseSystem;
+  const laneInstructions = `${
+    forceFreshResearch ? `${baseSystem}\n\n${FRESH_RESEARCH_SYSTEM}` : baseSystem
+  }${opts.planOnly ? '' : `\n\n${LIVE_DATA_HONESTY}`}`;
   const instructions =
     laneInstructions +
     (opts.verificationContext

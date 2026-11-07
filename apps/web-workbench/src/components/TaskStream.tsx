@@ -26,6 +26,7 @@ import {
   isEvidenceAttachment,
   liveStatusText,
   normalizeNextSteps,
+  optionsHeader,
   partialLead,
   partialLoginStep,
   processLinkLabel,
@@ -2479,7 +2480,7 @@ function TerminalSummary({
           <p className="m-0">{turn.lead}</p>
           {turn.why && <p className="m-0 text-foreground/80">{turn.why}</p>}
           {turn.options.length > 0 && status === 'failed' && (
-            <p className="m-0 text-foreground/80">我可以这样继续：</p>
+            <p className="m-0 text-foreground/80">{optionsHeader(intent ?? '')}</p>
           )}
         </div>
       )}

@@ -176,3 +176,21 @@ export function namedSiteView(text: string): string | null {
   if (TOPIC_RE.test(text)) return null;
   return VIEW_RE.exec(text)?.[0].trim().slice(0, 40) ?? null;
 }
+
+/** Plain-word brands (target / threads / booking) count only with 「on/at」 or a domain. */
+const NAMED_SITE_ANY_RE = new RegExp(
+  String.raw`(?:${BRAND_ALT.split('|')
+    .filter((b) => !PLAIN_WORD_BRANDS.has(b))
+    .join(
+      '|',
+    )})(?:\.(?:com|cn|co|sg|jp|uk|de|ca|au|in|my|ph|th|vn|tw|hk|net|fr)){0,2}(?:\s*(?:[一-龥]{1,5}|[a-z]{2,12})\s*(?:站|版|分站|区))?|\b(?:on|at)\s+(?:${WORD_BRAND_ALT})\b`,
+  'i',
+);
+
+/**
+ * FIX-58 P0: the named site or store anywhere in the request (「亚马逊新加坡站」「Amazon
+ * Singapore」「京东」), whatever the verb — or null. Same brand list as the site search.
+ */
+export function namedSite(text: string): string | null {
+  return NAMED_SITE_ANY_RE.exec(text)?.[0].trim().slice(0, 40) ?? null;
+}

@@ -249,7 +249,7 @@ it.each(['article_links', 'remediated', 'still_homepage'] as const)(
           // BROWSER-AUTOPILOT-2: a post-hoc list-source criterion annotates the
           // delivered answer instead of failing it (the titles are real).
           expect(outcome, diagnostics).toMatchObject({ status: 'completed' });
-          expect(String(outcome.summary)).toContain('核验提示');
+          expect(String(outcome.summary)).not.toContain('核验提示');
           expect(String(outcome.summary)).toContain('独立来源链接');
         }
       }
