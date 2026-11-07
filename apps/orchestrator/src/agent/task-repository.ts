@@ -5,7 +5,7 @@ import {
   type TaskOrigin,
   newExternalId,
 } from '@holaday/shared-types';
-import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { recordQuotaCharge } from '../quota/platform-failure-refunds.js';
 import { type ConsumeReason, QuotaService } from '../quota/quota-service.js';
@@ -35,6 +35,7 @@ import {
   taskRunnerOutcomeSourceStatuses,
 } from '../task-status.js';
 import { TOOL_CALL_TEXT_ONLY, deliverableAnswer } from './generate-answer-guard.js';
+import { type NextStep, nextStepsJsonSet, validNextSteps } from './next-steps-generator.js';
 import type { PendingConfirm, PlannedStep, TaskState } from './task-controller.js';
 import { runQueueDatabase, runQueueWrite } from './task-queue-persistence.js';
 import { normalizeVideoRetryIntent } from './video/video-retry-policy.js';
@@ -787,21 +788,12 @@ export class TaskRepository {
   async persistCurrentCompletedSuggestions(
     taskExternalId: string,
     summary: string,
-    suggestions: string[],
+    steps: NextStep[],
   ): Promise<boolean> {
-    if (
-      !suggestions.length ||
-      suggestions.length > 3 ||
-      suggestions.some(
-        (item) => typeof item !== 'string' || item.trim().length < 4 || item.length > 40,
-      )
-    )
-      return false;
+    if (!validNextSteps(steps)) return false;
     const result = await this.db
       .update(tasks)
-      .set({
-        result: sql`JSON_SET(${tasks.result}, '$.followUpSuggestions', CAST(${JSON.stringify(suggestions)} AS JSON))`,
-      })
+      .set({ result: nextStepsJsonSet(steps) })
       .where(
         and(
           eq(tasks.externalId, taskExternalId),
@@ -810,6 +802,49 @@ export class TaskRepository {
         ),
       );
     return extractMysqlAffectedRows(result) > 0;
+  }
+
+  /**
+   * FIX-57 #4: next steps for a browser task that ended in any terminal state — written
+   * only while the row is still in that state.
+   */
+  async persistTerminalNextSteps(
+    taskExternalId: string,
+    status: 'completed' | 'partial_success' | 'failed',
+    steps: NextStep[],
+  ): Promise<boolean> {
+    if (!validNextSteps(steps)) return false;
+    const result = await this.db
+      .update(tasks)
+      .set({ result: nextStepsJsonSet(steps) })
+      .where(and(eq(tasks.externalId, taskExternalId), eq(tasks.status, status)));
+    return extractMysqlAffectedRows(result) > 0;
+  }
+
+  /** FIX-57 复审 #1-1d: a generated sidebar title, only where the task has none (renames win). */
+  async setGeneratedTitle(taskExternalId: string, title: string): Promise<boolean> {
+    const result = await this.db
+      .update(tasks)
+      .set({ title })
+      .where(and(eq(tasks.externalId, taskExternalId), isNull(tasks.title)));
+    return extractMysqlAffectedRows(result) > 0;
+  }
+
+  /** FIX-57 #4: the owner's latest other requests, newest first (for next-step continuity). */
+  async recentIntents(taskExternalId: string, limit = 5): Promise<string[]> {
+    const [owner] = await this.db
+      .select({ userId: tasks.userId })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
+    if (!owner) return [];
+    const rows = await this.db
+      .select({ intent: tasks.intent })
+      .from(tasks)
+      .where(and(eq(tasks.userId, owner.userId), ne(tasks.externalId, taskExternalId)))
+      .orderBy(desc(tasks.createdAt))
+      .limit(limit);
+    return rows.map((row) => row.intent ?? '').filter((intent) => intent.trim().length > 0);
   }
 
   async isCurrentCompletedOutcome(taskExternalId: string, summary: string): Promise<boolean> {

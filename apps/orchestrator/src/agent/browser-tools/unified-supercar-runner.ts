@@ -355,7 +355,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         execution: {
           actionKind,
           actionSummary: message,
-          ok: actionKind === 'browser_local_wall',
+          ok: actionKind === 'browser_local_wall' || actionKind === 'browser_rescue',
           message,
           ...(errorCode ? { errorCode } : {}),
           ...(blockerEvidence ? { blockerEvidence } : {}),
@@ -689,6 +689,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           JSON.stringify(event),
         ),
       currentPageUrl: () => tools.page.url(),
+      // FIX-57 #5: the rescue shows as one live status line (a diagnostic tick).
+      rescue: opts.browserRescue ?? true,
+      onRescue: (message) => recordDiagnostic('browser_rescue', undefined, message),
       playbackReceipt: () => tools.playbackReceipt(),
       checkInterruption: async () => {
         const interruption =

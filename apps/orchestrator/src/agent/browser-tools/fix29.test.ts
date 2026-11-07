@@ -600,6 +600,8 @@ describe('Deploy-29 fc-jd: a run whose browser control is lost on a login page',
     const control = new BrowserControl();
     let turn = 0;
     const run = runUnifiedSupercarTask({
+      // FIX-57: this tests the handover itself (as after a rescue is used up).
+      browserRescue: false,
       taskId: `fix29-jd-${failViewport}-${target}`,
       userExternalId: 'fixture-user',
       intent: `打开 ${target} 读商品标题和页面显示的价格`,

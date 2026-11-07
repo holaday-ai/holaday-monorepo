@@ -8,7 +8,7 @@ import { shouldResetComposerOnSelectionChange } from '@/components/composer-rese
 import type { ComposerSubmitResult } from '@/components/composer-submit';
 import { Button } from '@/components/ui/button';
 import type { AwaitingKind } from '@/lib/awaiting-user-copy';
-import { taskDisplayIntent, taskDisplaySource } from '@/lib/task-display-copy';
+import { taskDisplaySource, taskDisplayTitle } from '@/lib/task-display-copy';
 import { taskStatusLabel } from '@/lib/task-status-copy';
 import { useTaskStore } from '@/stores/task-store';
 import type { SidePanelMode } from '@/types/side-panel';
@@ -138,6 +138,13 @@ export function MainPanel({
   const handlePickFromTaskSummary = React.useCallback((text: string) => {
     setPrefillIntent(text);
   }, []);
+  // FIX-57 #4: a picked next step is sent as the next instruction, like typing it.
+  const handleSendFromTaskSummary = React.useCallback(
+    (text: string) => {
+      void onSubmit(text, []);
+    },
+    [onSubmit],
+  );
   // Composer-reset effect. Bumping `composerKey` forces InputArea to
   // remount with a fresh local `value=''`, which is the ONLY way to
   // wipe free-form text the user typed (InputArea's value lives in
@@ -189,8 +196,9 @@ export function MainPanel({
         >
           <Menu className="h-4 w-4" />
         </Button>
-        <div className="ml-2 min-w-0 flex-1 truncate pr-12 text-sm font-medium text-[#595757] dark:text-foreground/85">
-          {task ? taskDisplayIntent(task.intent) : <BrandWordmark className="h-3.5" />}
+        {/* FIX-57 复审 #3: room for both the browser button and the bell on the right. */}
+        <div className="ml-2 min-w-0 flex-1 truncate pr-24 text-sm font-medium text-[#595757] dark:text-foreground/85">
+          {task ? taskDisplayTitle(task, 40) : <BrandWordmark className="h-3.5" />}
         </div>
       </div>
       {showEmptyHome ? (
@@ -254,29 +262,42 @@ export function MainPanel({
               staleVersionFallback={<StaticTaskDetailFallback task={task} />}
             >
               <React.Suspense fallback={<TaskStreamFallback />}>
-                <TaskStream task={task} onPickSuggestion={handlePickFromTaskSummary} />
+                <TaskStream
+                  task={task}
+                  onPickSuggestion={handlePickFromTaskSummary}
+                  onSendSuggestion={handleSendFromTaskSummary}
+                />
               </React.Suspense>
             </LazyLoadBoundary>
           </div>
           {userPlan ? (
             <RoleNudgeBanner plan={userPlan} selectedRoles={userSelectedRoles ?? null} />
           ) : null}
-          <InputArea
-            key={composerKey}
-            onSubmit={onSubmit}
-            busy={busy}
-            inputRef={inputRef}
-            replyMode={replyMode}
-            replyKind={replyKind}
-            followUpTarget={followUpTarget}
-            compact={Boolean(followUpTarget) && !replyMode}
-            quotaExhausted={quotaExhausted}
-            quotaPlan={userPlan}
-            attachmentsAllowed={attachmentsAllowed}
-            attachmentByteCap={attachmentByteCap}
-            prefillIntent={prefillIntent}
-            onPrefillConsumed={() => setPrefillIntent(null)}
-          />
+          {/* FIX-57 #1: the task thread uses the new-task composer itself — same look,
+              attachments, shortcuts and send — so following up reads like talking on. */}
+          <div
+            data-testid="task-thread-composer"
+            className="mx-auto w-full max-w-[760px] px-3 pb-4 sm:px-6 sm:pb-6"
+          >
+            <InputArea
+              key={composerKey}
+              onSubmit={onSubmit}
+              busy={busy}
+              inputRef={inputRef}
+              replyMode={replyMode}
+              replyKind={replyKind}
+              followUpTarget={followUpTarget}
+              quotaExhausted={quotaExhausted}
+              quotaPlan={userPlan}
+              attachmentsAllowed={attachmentsAllowed}
+              attachmentByteCap={attachmentByteCap}
+              prefillIntent={prefillIntent}
+              onPrefillConsumed={() => setPrefillIntent(null)}
+              fullBleed
+              compact
+              approved
+            />
+          </div>
         </>
       )}
     </main>

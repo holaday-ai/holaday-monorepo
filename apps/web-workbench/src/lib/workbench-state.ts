@@ -148,10 +148,17 @@ export function mobileBrowserSheetAutoOpenState(input: {
   mode: SidePanelMode;
   isMobile: boolean;
   autoOpenedKey: string | null;
+  /**
+   * FIX-57 复审 #3 (BOSS run, ~630px): on a narrow screen the browser sheet covered the
+   * conversation for the whole run. It opens by itself only when the person must act
+   * (a verification or login handover); otherwise they open it when they want to watch.
+   */
+  needsUser?: boolean;
 }): { shouldOpen: boolean; autoOpenedKey: string | null } {
   if (
     !input.isMobile ||
     !input.taskId ||
+    input.needsUser === false ||
     (input.mode !== 'browser-live' && input.mode !== 'browser-record')
   ) {
     return { shouldOpen: false, autoOpenedKey: input.autoOpenedKey };
@@ -161,6 +168,19 @@ export function mobileBrowserSheetAutoOpenState(input: {
     return { shouldOpen: false, autoOpenedKey: input.autoOpenedKey };
   }
   return { shouldOpen: true, autoOpenedKey: nextKey };
+}
+
+/**
+ * FIX-57 复审 #3 (BOSS run, ~630px): on a narrow screen a running browser task does not open
+ * the browser workbench (a full-screen sheet there) by itself — the conversation stays in
+ * front until the person taps the browser button or has to act.
+ */
+export function mobileStaysInChat(input: {
+  isMobile: boolean;
+  override: 'open' | 'close' | null;
+  needsUser: boolean;
+}): boolean {
+  return input.isMobile && input.override !== 'open' && !input.needsUser;
 }
 
 export function normalizeTaskActionCount(value: unknown): number {

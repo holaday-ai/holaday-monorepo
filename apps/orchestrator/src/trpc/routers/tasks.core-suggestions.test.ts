@@ -5,8 +5,10 @@ import * as coreExecution from '../../agent/core-task-execution.js';
 import * as planning from '../../agent/core-task-plan.js';
 import { CoreTaskRepository } from '../../agent/core-task-repository.js';
 import * as generation from '../../agent/generate-runner.js';
+import * as suggestions from '../../agent/next-steps-generator.js';
 import * as scraping from '../../agent/scrape-runner.js';
-import * as suggestions from '../../agent/suggestions-generator.js';
+
+const steps = (...labels: string[]) => labels.map((label) => ({ label, prompt: label }));
 import { TaskRepository } from '../../agent/task-repository.js';
 import { env } from '../../config/env.js';
 import * as pipeline from '../../execution/execution-pipeline.js';
@@ -247,7 +249,7 @@ function fixture(lane: 'generate' | 'scrape' | 'resume', persisted = true, follo
           state.recordVersion !== op.recordVersion
         )
           return false;
-        state.result.followUpSuggestions = items;
+        state.result.followUpSuggestions = items.map((item) => item.label);
         return true;
       },
     );
@@ -277,8 +279,8 @@ function fixture(lane: 'generate' | 'scrape' | 'resume', persisted = true, follo
     return 1;
   });
   const suggest = vi
-    .spyOn(suggestions, 'generateSuggestions')
-    .mockResolvedValue(['整理后续执行清单', '比较两种材料结构']);
+    .spyOn(suggestions, 'generateNextSteps')
+    .mockResolvedValue(steps('整理后续执行清单', '比较两种材料结构'));
   const ctx = {
     db,
     logger,
@@ -360,7 +362,7 @@ describe('core task post-completion suggestions', () => {
     '%s publishes suggestions after committed completion without legacy dependencies',
     async (lane) => {
       const f = fixture(lane);
-      let finish!: (items: string[]) => void;
+      let finish!: (items: ReturnType<typeof steps>) => void;
       f.suggest.mockImplementation(
         () =>
           new Promise((resolve) => {
@@ -378,7 +380,7 @@ describe('core task post-completion suggestions', () => {
         }),
       );
       expect(f.frames.some((frame) => frame.type === 'server.supercar.suggestions')).toBe(false);
-      finish(['整理后续执行清单']);
+      finish(steps('整理后续执行清单'));
       await vi.waitFor(() =>
         expect(f.frames).toContainEqual(
           expect.objectContaining({
@@ -433,7 +435,7 @@ describe('core task post-completion suggestions', () => {
     '%s suppresses suggestions if the completed result changes while generation is pending',
     async (lane) => {
       const f = fixture(lane);
-      let finish!: (items: string[]) => void;
+      let finish!: (items: ReturnType<typeof steps>) => void;
       f.suggest.mockImplementation(
         () =>
           new Promise((resolve) => {
@@ -444,7 +446,7 @@ describe('core task post-completion suggestions', () => {
       await vi.waitFor(() => expect(f.suggest).toHaveBeenCalledTimes(1));
       f.state.result = { summary: 'different saved outcome' };
       if (lane !== 'scrape') f.state.recordVersion += 1;
-      finish(['整理后续执行清单']);
+      finish(steps('整理后续执行清单'));
       await new Promise((resolve) => setTimeout(resolve, 15));
       expect(f.frames.some((frame) => frame.type === 'server.supercar.suggestions')).toBe(false);
       expect(f.state.result.summary).toBe('different saved outcome');

@@ -99,7 +99,8 @@ ${FULL_READ_RULE_4}
 10. 用户要 N 条/前 N 个时，答案按 1. 2. 3. 编号列满 N 条；不够就继续滚动、翻页或再读取，确实只有更少时如实写「只找到 M 条」。
 11. 用户要求某种控件（如日期控件）而当前页面没有时，换一个有该控件的页面去操作，不要用别的控件（如 time 时间控件）代替。用户点名了网站时只在这些网站内找（只看表单页，不打开登录、注册、付款页；登录页的账号、密码框不算要填的表单，碰到登录页就退回去换别的页面，不要为此请求登录），都没有就把该网站表单上其余可填的项照样填好（不提交）并截图，再如实说明缺什么，不要换到别的网站；没点名时才换别的公开页面。
 12. 查天气等实时数值时，结果页没有天气卡片就打开一个天气来源页面并读取（snapshot/get_page_text），每个值照该页原样写（页面写「82°」就写「82°」，不自己加单位或换算）；页面上读不到的项写「未读到」，不用搜索摘要或记忆补。
-13. 动作返回 stale_ref（ref 已失效）时，先 snapshot，再用新 ref 把同一个动作重做一次（同一个字段、同一个值），不要改用别的方式代替。`;
+13. 动作返回 stale_ref（ref 已失效）时，先 snapshot，再用新 ref 把同一个动作重做一次（同一个字段、同一个值），不要改用别的方式代替。
+14. summary 是写给用户看的，像跟人说话：不写「照页面原样」「名称：…；价格：…」这类格式说明，不提工具名；不要向用户说明价格、名称是不是按「原样 / 原文」记录的（不写「页面原样价格」「按页面原文保留」这类话），照页面写就是了；商品名太长时只写开头到关键规格那一段再加「…」（截取，不改字）；商品卡片没有主推价、只列了卖家报价时，说「这款没有主推价，有 N 个卖家报价 S$x」。`;
 
 /** The system prompt for the current read mode: rule 4 follows `BROWSER_FULL_PAGE_READ`. */
 export function unifiedBrowserSystemPrompt(): string {
@@ -253,6 +254,15 @@ function withoutClaims(text: string, claims: readonly string[]): string {
   return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/** FIX-57 复审 #1-4: what a rescue routed around, for the loop's single exit. */
+export interface RescueState {
+  started: boolean;
+  /** The address that was walled (the one the user's task led to). */
+  blockedUrl?: string;
+  /** 复审 #7: why the rescue began — said once in the answer's first line. */
+  why?: 'login' | 'blocked' | 'stuck';
+}
+
 export interface UnifiedBrowserLoopInput {
   observationV2?: boolean;
   /**
@@ -312,6 +322,15 @@ export interface UnifiedBrowserLoopInput {
   /** Test seam for withModelRetry (delays, sleep). */
   modelRetry?: Pick<ModelRetryOptions, 'delaysMs' | 'sleep'>;
   onStep?: (step: { index: number; tool: string; ok: boolean }) => void;
+  /**
+   * FIX-57 #5: a read task stopped by a wall first tries other public routes (the
+   * supercar runner turns this on; off, a wall is handed over at once).
+   */
+  rescue?: boolean;
+  /** FIX-57 #5: the run starts routing around a wall (a live status line for the user). */
+  onRescue?: (message: string) => void | Promise<void>;
+  /** FIX-57 复审 #1-4: filled by the loop — what the rescue was routing around (internal). */
+  rescueState?: RescueState;
   /**
    * Called before every browser action and again after a successful one
    * (`after`: the landed page). Irreversible actions park here for the user's
@@ -405,8 +424,10 @@ export async function runUnifiedBrowserLoop(
   const seen = new Set<string>();
   // FIX-51 复审 #3: a failed run's steps, for the log only: tool names and the start of tab ids.
   const steps: string[] = [];
-  const outcome = await browserLoop({
+  const rescueState: RescueState = input.rescueState ?? { started: false };
+  const looped = await browserLoop({
     ...input,
+    rescueState,
     execute: async (action) => {
       const result = await input.execute(action);
       const tab = 'targetTabId' in action ? action.targetTabId : result.tabId;
@@ -418,6 +439,17 @@ export async function runUnifiedBrowserLoop(
       return result;
     },
   });
+  // FIX-57 复审 #1-4 (coordinator): an answer a rescue found elsewhere is never 「完成」 —
+  // the code, not the model, says where it came from.
+  const outcome =
+    looped.status === 'completed' && rescueState.started
+      ? rescuedAnswer(
+          looped,
+          rescueState,
+          input.currentPageUrl?.(),
+          isEnglishIntent(input.userIntent ?? input.intent),
+        )
+      : looped;
   if (outcome.status === 'failed') logger.warn({ steps: steps.slice(-120) }, 'browser loop failed');
   // FIX-41: nor the browser's call syntax (「switch_tab(targetTabId=…)」), once its ids are gone.
   const strip = (text: string) => humanizeToolMentions(stripInternalRefs(text, seen));
@@ -425,7 +457,12 @@ export async function runUnifiedBrowserLoop(
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {
     case 'completed':
-      return { ...outcome, summary: strip(outcome.summary) };
+      return {
+        ...outcome,
+        summary: strip(
+          plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
+        ),
+      };
     case 'failed':
       return { ...outcome, reason: strip(outcome.reason) };
     case 'awaiting_user':
@@ -798,6 +835,62 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
    * to leave it, and no wall in this task is handed to the user again.
    */
   let captchaDeclined = false;
+  /**
+   * FIX-57 #5: a read task stopped by a login / permission wall, or about to give up on a
+   * blocked or broken page, first tries other public routes — once per task, at most
+   * RESCUE_SITES new sites, inside the step limit. Nothing is typed into a wall and no
+   * captcha is touched; an answer from elsewhere names its source (the source-domain
+   * check still delivers it as 部分完成). A wall met again after that is handed over.
+   */
+  const rescueEligible =
+    input.rescue === true && !wantsForm && isReadOnlyIntent(input.userIntent ?? input.intent);
+  let rescueStarted = false;
+  /** The walled page the rescue began on; a wall on another page is a new one. */
+  let rescueWallUrl: string | undefined;
+  let rescueWallSite: string | undefined;
+  /** 复审 #1-2: the address the run opened before the wall — never opened again in a rescue. */
+  let lastNavigateTarget: string | undefined;
+  let rescueBlockedUrl: string | undefined;
+  const onRescueWall = () => rescueStarted && input.currentPageUrl?.() === rescueWallUrl;
+  const rescueSites = new Set<string>();
+  const startRescue = async (
+    step: number,
+    why: string,
+    kind: 'login' | 'blocked' | 'stuck' = why === 'wall' ? 'login' : 'stuck',
+    said?: string,
+  ): Promise<string | null> => {
+    if (!rescueEligible || rescueStarted || captchaDeclined || step + 4 >= maxSteps) return null;
+    rescueStarted = true;
+    rescueWallUrl = input.currentPageUrl?.();
+    rescueBlockedUrl = lastNavigateTarget ?? rescueWallUrl;
+    const host = hostOf(rescueBlockedUrl) ?? hostOf(rescueWallUrl);
+    rescueWallSite = host ? (siteOf(host) ?? host) : undefined;
+    if (input.rescueState) {
+      input.rescueState.started = true;
+      input.rescueState.blockedUrl = rescueBlockedUrl;
+      input.rescueState.why = kind;
+    }
+    // DEPLOY-57 第 0 步 5: why the rescue began, for the first line and for the log.
+    logger.info({ why, kind, said: said?.slice(0, 120) }, 'browser loop: rescue started');
+    await Promise.resolve(input.onRescue?.(RESCUE_STATUS[why === 'wall' ? 'wall' : 'stuck'])).catch(
+      () => undefined,
+    );
+    return `${why === 'wall' ? '这个页面要登录或被网站拦下了。' : '先别结束。'}${RESCUE_NOTE}`;
+  };
+  /** During a rescue the run may open up to RESCUE_SITES sites outside the named one. */
+  const rescueAllows = (url: string | undefined): boolean => {
+    if (!rescueStarted) return false;
+    const host = hostOf(url);
+    if (!host) return false;
+    const site = siteOf(host) ?? host;
+    if (site === rescueWallSite) return false;
+    // A public search page finds the route; it is not one of the routes.
+    if (RESCUE_SEARCH_SITES.includes(site)) return true;
+    if (rescueSites.has(site)) return true;
+    if (rescueSites.size >= RESCUE_SITES) return false;
+    rescueSites.add(site);
+    return true;
+  };
   /** FIX-53 #1: only a wait the person acted in lets an answer say they cleared the wall. */
   let userClearedWall = false;
   let userClaimAsked = false;
@@ -825,8 +918,20 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
       // post-action probe) and the login wall seen here each turn was never handed over.
       // Only a login or permission wall: "page_unreadable" (a page still loading behind a
       // search) is not a wall (coordinator review D1).
-      if (wall && (wall.reason === 'login' || wall.reason === 'permission'))
-        return { status: 'awaiting_user', ...wall, steps: step };
+      if (wall && (wall.reason === 'login' || wall.reason === 'permission')) {
+        // FIX-57 #5: the page the rescue began on is still the wall — the model moves first.
+        if (onRescueWall()) {
+          // fall through to the model turn
+        } else {
+          const note = await startRescue(
+            step,
+            'wall',
+            wall.reason === 'permission' ? 'blocked' : 'login',
+          );
+          if (!note) return { status: 'awaiting_user', ...wall, steps: step };
+          messages.push({ role: 'user', content: note });
+        }
+      }
       if (wall?.reason === 'captcha') {
         const handed = await handCaptcha(wall.message);
         if (handed === undefined) return { status: 'awaiting_user', ...wall, steps: step };
@@ -1047,6 +1152,23 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           if (blocker) {
             const handed =
               blocker.reason === 'captcha' ? await handCaptcha(blocker.message) : undefined;
+            const routed =
+              handed === undefined &&
+              (blocker.reason === 'login' || blocker.reason === 'permission');
+            const note = !routed
+              ? null
+              : onRescueWall()
+                ? `答案来自被挡住的页面，不能交付。${RESCUE_NOTE}`
+                : await startRescue(
+                    step,
+                    'wall',
+                    blocker.reason === 'permission' ? 'blocked' : 'login',
+                  );
+            if (note) {
+              results.push(toolResult(call.id, note, true));
+              staleTurn = true;
+              continue;
+            }
             if (handed === undefined)
               return { status: 'awaiting_user', ...blocker, steps: step + 1 };
             if (handed === 'ended')
@@ -1982,6 +2104,17 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         // FIX-35 复审 #1: a remediation (the 0b screenshot look, the date control) that ends
         // in a failed finish still delivers the answer it held.
         if (partialHeld) return { status: 'completed', ...partialHeld, steps: step + 1 };
+        // FIX-57 #5: giving up on a blocked, broken or empty page — try another public route once.
+        if (!notStarted() && RESCUE_GIVE_UP_RE.test(summary)) {
+          // DEPLOY-57 第 0 步 5: a page that loaded but asked for a login or was blocked is not
+          // 「没打开」 — the model's own give-up words say which it was.
+          const note = await startRescue(step, 'stuck', giveUpKind(summary ?? ''), summary);
+          if (note) {
+            results.push(toolResult(call.id, note, true));
+            staleTurn = true;
+            continue;
+          }
+        }
         // A failed navigation cannot establish a login wall, even if the model guesses one.
         return {
           status: 'failed',
@@ -2007,6 +2140,24 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             steps: step + 1,
           };
         const message = typeof args.message === 'string' ? args.message : '需要你接管浏览器。';
+        // FIX-57 #5: a login / permission stop on a read task first tries another public route
+        // (复审 #3: also when the reason is 「other」 but the message asks for a login).
+        if (
+          reason === 'login' ||
+          reason === 'permission' ||
+          (reason === 'other' && /登录|登陆|log\s*in|sign\s*in/i.test(message))
+        ) {
+          const note = await startRescue(
+            step,
+            'wall',
+            reason === 'permission' ? 'blocked' : 'login',
+          );
+          if (note) {
+            results.push(toolResult(call.id, note, true));
+            staleTurn = true;
+            continue;
+          }
+        }
         if (!input.requestHuman)
           return { status: 'awaiting_user', reason, message, steps: step + 1 };
         const handed = reason === 'captcha' ? await handCaptcha(message) : undefined;
@@ -2127,13 +2278,50 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         );
         continue;
       }
+      // FIX-57 复审 #1-2: once a rescue began, every other site counts against its cap —
+      // links seen on read pages and search hits included — and the blocked address is not
+      // opened again.
+      let rescueOk = false;
+      if (action.tool === 'navigate' && !rescueStarted) lastNavigateTarget = action.url;
+      if (action.tool === 'navigate' && rescueStarted) {
+        const key = pageKey(action.url);
+        if (
+          (rescueBlockedUrl && key === pageKey(rescueBlockedUrl)) ||
+          (rescueWallUrl && key === pageKey(rescueWallUrl))
+        ) {
+          results.push(
+            toolResult(
+              call.id,
+              '这是被挡住的原页面，不要再打开。换别的公开页面，或用已经读到的内容 finish、如实说明缺什么。',
+              true,
+            ),
+          );
+          continue;
+        }
+        const host = hostOf(action.url);
+        const site = host ? (siteOf(host) ?? host) : undefined;
+        if (site && site !== rescueWallSite) {
+          if (!rescueAllows(action.url)) {
+            results.push(
+              toolResult(
+                call.id,
+                `换网站已经到上限（最多 ${RESCUE_SITES} 个）：不要再打开 ${host}。用已经读到的内容 finish，拿不到就如实说明拿到了什么、缺什么。`,
+                true,
+              ),
+            );
+            continue;
+          }
+          rescueOk = true;
+        }
+      }
       // FIX-32 (Deploy-32 b-m01): the user named the site; another site is not a
       // substitute. A link this run saw on a page it read may still be followed.
       if (
         action.tool === 'navigate' &&
         lockedDomains.length > 0 &&
         !onDomains(action.url, lockedDomains) &&
-        !seenOnReadPage(action.url) &&
+        !rescueOk &&
+        !(!rescueStarted && seenOnReadPage(action.url)) &&
         !(input.localFixtures && localTestHost(action.url))
       ) {
         results.push(
@@ -2298,6 +2486,23 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           : `\n关闭弹层后页面跳到了别的内容（${leftFor}），不是任务点名的 ${namedContent}。请 navigate 回 ${namedContent} 再读取，不要用这个页面的内容作答。`;
         staleTurn = true;
       }
+      // FIX-57 复审 #1-2: a click or tab switch that lands on another site counts too.
+      if (rescueStarted && outcome.ok && action.tool !== 'navigate') {
+        const now = input.currentPageUrl?.();
+        const host = hostOf(now);
+        const site = host ? (siteOf(host) ?? host) : undefined;
+        if (site && site !== rescueWallSite && !rescueAllows(now)) {
+          concludeNow = true;
+          results.push(
+            toolResult(
+              call.id,
+              `换网站已经到上限（最多 ${RESCUE_SITES} 个）：这个页面（${host}）不算，不要用它的内容。直接 finish，如实说明拿到了什么、缺什么。`,
+            ),
+          );
+          staleTurn = true;
+          continue;
+        }
+      }
       if (outcome.ok && input.probeBlocker) {
         const blocker = await checkBlocker();
         if (formLoginDetour) {
@@ -2313,6 +2518,22 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         if (blocker) {
           const handed =
             blocker.reason === 'captcha' ? await handCaptcha(blocker.message) : undefined;
+          const routed =
+            handed === undefined && (blocker.reason === 'login' || blocker.reason === 'permission');
+          const note = !routed
+            ? null
+            : onRescueWall()
+              ? `仍是被挡住的页面。${RESCUE_NOTE}`
+              : await startRescue(
+                  step,
+                  'wall',
+                  blocker.reason === 'permission' ? 'blocked' : 'login',
+                );
+          if (note) {
+            results.push(toolResult(call.id, `${outcome.text}\n${note}`));
+            staleTurn = true;
+            continue;
+          }
           if (handed === undefined) return { status: 'awaiting_user', ...blocker, steps: step + 1 };
           if (handed === 'ended')
             return { status: 'failed', reason: '验证码等待已结束，任务未完成。', steps: step + 1 };
@@ -2797,6 +3018,565 @@ function onDomains(url: string | undefined, domains: readonly string[]): boolean
   const host = hostOf(url);
   return !!host && domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
 }
+
+/**
+ * FIX-57 #5: tasks that change something, ask to log in, or want the person's own account
+ * data (another public site cannot show their orders) are never routed around.
+ */
+export const WRITE_INTENT_RE =
+  /订单|我的|账户|账号|个人中心|私信|消息通知|收藏|购物车|领取|领券|抢购|秒杀|兑换|签到|订阅|投票|转发|分享到|加入|绑定|充值|申请|余额|积分|后台|收件箱|inbox|my\s+(?:orders?|account|cart)|提交|下单|购买|加购|加入购物车|付款|支付|结账|发送|发布|发帖|评论|回复|点赞|关注|登录|登陆|注册|预订|预约|报名|投递|填表|填写|表单|上传|删除|修改|取消订单|退款|submit|checkout|purchase|add\s+to\s+cart|log\s*in|sign\s*(?:in|up)|register|\bpost\b|\bsend\b|\bbook\b|upload|delete/i;
+/**
+ * FIX-57 复审 #4 (红线, coordinator): a rescue is for a task that is plainly read-only —
+ * a whitelist, not a list of write words to exclude. Every part of the request must be
+ * reading (读/查/看/列出/搜索/比较价格…), opening a page, or a question (多少/什么…); a
+ * part with any other action (收藏、领取优惠券、抢购…) hands the wall to the person.
+ * WRITE_INTENT_RE stays only as a second net for a write action inside a read part
+ * (「看看能不能领取优惠券」); it never makes a task eligible.
+ */
+const READ_VERB_RE =
+  /读|阅读|查|看|列出|列一下|列举|搜|检索|找|比较|比一下|比价|对比|获取|提取|抓取|总结|汇总|概括|摘要|告诉我|说说|统计|核对|识别|\b(?:read|look\s+up|check|find|search|list|compare|get|show|tell\s+me|what|which|how\s+(?:much|many))\b/i;
+const QUESTION_RE =
+  /多少|几[点元块个天次岁]|什么|哪[个些里家款]|是否|怎么样|如何|价格|价钱|报价|行情|点位|评分|[吗呢][？?]?$/;
+/** Opening, visiting or naming the browser — no action of its own. */
+const NAV_ONLY_RE =
+  /^(?:请|麻烦|帮我|帮忙|给我|你|使用|用|通过|在|到|去|进入|打开|访问|前往|登上|云端|真实|浏览器|一下|这个|那个|页面|网页|网站|链接|地址|[a-z0-9-]+(?:\.[a-z0-9-]+)+\S*|[\s:：])*$/iu;
+/** Parts of a request: split at punctuation and at 「然后/再/并且/接着/之后」. */
+/** 复审 #5: 「读价格后帮我拍下」「… then buy it」 are two parts. */
+const INTENT_PART_RE =
+  /[，,。；;！!？?\n]|然后|并且|接着|之后|以后|随后|顺便|再(?=[一-龥])|(?<![最前然之以背今往落滞售善稍此日先午课饭战])后(?![面台续端缀来])|\b(?:and|then)\b/iu;
+/**
+ * 复审 #5: besides reading and opening a page, a part names no action at all — any of these
+ * (拍下、买、加购、收藏、buy、order…) in any part, even one that also reads, hands it over.
+ */
+const ACTION_RE =
+  /拍下|拍一[个件单]|直接拍|去拍|拍了|就拍|帮我拍|买下|买了|(?:帮我|给我|替我|去|就|我要|我想|直接)买|买(?:一[个件台部]|两|三|它|这)|下单|购买|抢购|秒杀|领取|领券|收藏|关注|加购|加入|删除|修改|发送|发布|发帖|提交|付款|支付|结账|预约|预订|报名|投递|转发|分享|点赞|评论|回复|签到|充值|兑换|绑定|退款|退货|取消|保存到|下载|上传|开通|申请|填写|打卡|订阅|投票|登录|登陆|注册|\b(?:buy|order|purchase|pay|add|like|follow|subscribe|comment|reply|post|share|book|reserve|delete|remove|claim|redeem|download|upload|save|send|submit|checkout|sign\s*(?:in|up)|log\s*in|register)\b/iu;
+const QUOTED_RE = /「[^」]*」|“[^”]*”|"[^"]*"|『[^』]*』/gu;
+
+export function isReadOnlyIntent(intent: string): boolean {
+  // Addresses first: their 「?」「.」 are not sentence breaks.
+  const text = intent
+    .replace(/https?:\/\/\S+/giu, ' 链接 ')
+    .replace(QUOTED_RE, '「」')
+    .trim();
+  if (!text || WRITE_INTENT_RE.test(intent)) return false;
+  const parts = text
+    .split(INTENT_PART_RE)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!parts.some((part) => READ_VERB_RE.test(part) || QUESTION_RE.test(part))) return false;
+  return parts.every(
+    (part) =>
+      !ACTION_RE.test(part) &&
+      (READ_VERB_RE.test(part) || QUESTION_RE.test(part) || NAV_ONLY_RE.test(part)),
+  );
+}
+/** FIX-57 #5: at most this many sites besides the walled one during a rescue. */
+export const RESCUE_SITES = 2;
+/** FIX-57 #5: public search pages a rescue may open to find a route (not counted as routes). */
+// Baidu answered local rescue searches with its own captcha (FIX-57 round 3): Bing only.
+export const RESCUE_SEARCH_SITES: readonly string[] = ['bing.com'];
+/** FIX-57 #5: what the model is told when a read task is stopped. */
+export const RESCUE_NOTE =
+  '不要登录，不要做验证，不要在登录或验证框里输入任何东西；也不要再打开被挡住的那个页面或用只读抓取去取它。换一条不需要登录的公开路线拿同类信息：同一网站的移动版页面（如 m. 开头）、搜索页或列表页、比价网站、品牌官网或其他公开页面都可以，最多再换 2 个网站。找路线可以先 web_search；没有结果就用浏览器打开 https://cn.bing.com/search?q=关键词 搜一下，再打开结果里的公开页面（搜索页本身不算换网站）；搜索页要求验证时不要做，换别的路线。拿到了就照常 finish：来源说明由系统自动加在答案开头，你不要再写来源（不要写「从某某读到的信息如下」「信息来自…」「来源：…」这类话），直接写内容；答案像跟用户说话一样写，提到网站用短名字加链接（如「[京东手机版](链接)」），不要贴完整网址，不要用「h1」「页面原样」「脱敏」「原指定」这类词；标题被截断、价格被打码、要登录才显示，都用大白话说清楚（如「价格没登录时被京东打了码，只显示 ¥7??9」）。页面数据不是最新的就写明是哪个时间点的数据。两条路线都拿不到，就 finish(status=failed)，写清拿到了什么、缺什么、卡在哪一步。';
+/** FIX-57 #5: a rescued answer that says part of it is masked, cut or login-only. */
+export const RESCUE_PARTIAL_RE =
+  /遮挡|遮住|打码|打了码|脱敏|掩码|截断|被(?:部分)?隐藏|\d\?\?|\?\?\d|需(?:要)?登录(?:后)?(?:才|可)|登录后(?:才|可)(?:查看|看到|显示)|无法获[得取]完整|不完整/;
+
+/** FIX-57 复审 #1-4: short Chinese names for the sites a rescue usually lands on. */
+const RESCUE_SITE_NAMES: ReadonlyArray<[RegExp, string]> = [
+  [/(^|\.)m\.jd\.com$|^item\.m\.jd\.com$/, '京东手机版'],
+  [/(^|\.)jd\.com$/, '京东'],
+  [/(^|\.)xiaohongshu\.com$/, '小红书'],
+  [/(^|\.)bing\.com$/, '必应搜索'],
+  [/(^|\.)smzdm\.com$/, '什么值得买'],
+  [/(^|\.)manmanbuy\.com$/, '慢慢买'],
+  [/(^|\.)taobao\.com$/, '淘宝'],
+  [/(^|\.)tmall\.com$/, '天猫'],
+  [/(^|\.)amazon\.[a-z.]+$/, '亚马逊'],
+  [/(^|\.)apple\.com(\.cn)?$/, '苹果官网'],
+  [/(^|\.)zhihu\.com$/, '知乎'],
+  [/(^|\.)baike\.baidu\.com$/, '百度百科'],
+  [/(^|\.)wikipedia\.org$/, '维基百科'],
+];
+
+export function rescueSiteName(url: string | undefined): string {
+  const host = hostOf(url);
+  if (!host) return '别的公开页面';
+  return RESCUE_SITE_NAMES.find(([re]) => re.test(host))?.[1] ?? host;
+}
+
+/**
+ * FIX-57 复审 #1-4: a rescued answer is 部分完成, led by one plain line the code writes:
+ * 「这是从[京东手机版](…)查到的，不是你给的京东页面。」 The model's own 「部分完成：」 is folded in.
+ */
+/** 复审 #7: an English task gets English from the code too. */
+export function isEnglishIntent(intent: string): boolean {
+  const text = intent.replace(/https?:\/\/\S+/g, ' ');
+  return /[a-z]{3,}/i.test(text) && !/[\u3400-\u9fff]/.test(text);
+}
+
+/** English names for the sites a rescue usually lands on. */
+const RESCUE_SITE_EN: ReadonlyArray<[RegExp, string]> = [
+  [/(?:^|\.)m\.jd\.com$/, 'JD mobile'],
+  [/(?:^|\.)jd\.com$/, 'JD.com'],
+  [/(?:^|\.)amazon\.sg$/, 'Amazon Singapore'],
+  [/(?:^|\.)amazon\.[a-z.]+$/, 'Amazon'],
+  [/(?:^|\.)zhihu\.com$/, 'Zhihu'],
+  [/(?:^|\.)taobao\.com$/, 'Taobao'],
+  [/(?:^|\.)tmall\.com$/, 'Tmall'],
+  [/(?:^|\.)smzdm\.com$/, 'SMZDM'],
+  [/(?:^|\.)bing\.com$/, 'Bing'],
+];
+
+function rescueSiteNameEn(url: string | undefined): string {
+  const host = hostOf(url)?.replace(/^www\./, '');
+  if (!host) return 'another public page';
+  return RESCUE_SITE_EN.find(([re]) => re.test(host))?.[1] ?? host;
+}
+
+/**
+ * 复审 #7 (协调方第 4 次代体验): one line says it all — where it came from, why not the page the
+ * person gave, and that it is only part: 「这是从京东手机版查到的（你给的京东页面要登录），只拿到
+ * 了一部分：」. The model's own source sentences (「以上信息来自…」) go; 「参考了 N 个来源」 is below.
+ */
+export function rescuedAnswer(
+  outcome: Extract<UnifiedBrowserOutcome, { status: 'completed' }>,
+  rescue: RescueState,
+  finalUrl: string | undefined,
+  en = false,
+): Extract<UnifiedBrowserOutcome, { status: 'completed' }> {
+  const from = en ? rescueSiteNameEn(finalUrl) : rescueSiteName(finalUrl);
+  const link = finalUrl && /^https?:\/\//.test(finalUrl) ? `[${from}](${finalUrl})` : from;
+  const given = en ? rescueSiteNameEn(rescue.blockedUrl) : rescueSiteName(rescue.blockedUrl);
+  const why = rescue.why ?? 'login';
+  const lead = en
+    ? `部分完成：I got this from ${link} (the ${given} page you gave ${
+        why === 'login' ? 'needs a login' : why === 'blocked' ? 'was blocked' : "didn't open"
+      }), so it's only part of what you asked:`
+    : `部分完成：这是从${link}查到的（你给的${given}页面${
+        why === 'login' ? '要登录' : why === 'blocked' ? '被拦下了' : '没打开'
+      }），只拿到了一部分：`;
+  const body = withoutSourceLines(
+    outcome.summary.replace(/^\s*(?:\*\*)?部分完成(?:\*\*)?\s*[:：]\s*/, ''),
+    { name: from, url: finalUrl },
+  );
+  return {
+    ...outcome,
+    summary: `${lead}\n\n${body}`,
+    partial: outcome.partial ?? {
+      found: 0,
+      wanted: 1,
+      missing: `${given}页面上的内容（用的是${from}的公开信息）`,
+    },
+  };
+}
+
+/**
+ * FIX-57 复审 #2-1: the code says where a rescued answer came from; the model's own source
+ * lines (「从[京东手机版](…)读到的信息如下：」「信息来自…」「来源：…」) would say it twice.
+ */
+// 复审 #3-1: only a pure lead-in (「从[京东手机版](…)读到的信息如下：」) — a line that says
+// when or from where else (「信息来自 2024 年 10 月的页面快照…」「数据来源：国家统计局…」) stays.
+const SOURCE_LINE_RE =
+  /^\s*(?:这是|以下(?:是|为)?|下面是)?\s*从\s*(?:\[[^\]]+\]\([^)]*\)|[^\s，。,:：]{1,24})\s*(?:上|中|里)?(?:查到|读到|读取到|获取到?|拿到|看到)的?(?:(?:商品|页面|公开)?(?:信息|内容|数据))?\s*(?:如下)?\s*[:：]\s*$/u;
+
+// 复审 #3 (代 BOSS 京东): the same lead-in at the start of a line that goes on with the answer
+// (「从京东手机版页面读到的信息：商品标题…」) — only the lead-in goes.
+const SOURCE_PREFIX_RE =
+  /^(\s*)(?:这是|以下(?:是|为)?|下面是)?\s*从\s*(?:\[[^\]]+\]\([^)]*\)|[^\s，。,:：]{1,24})\s*(?:上|中|里)?(?:查到|读到|读取到|获取到?|拿到|看到)的?(?:(?:商品|页面|公开)?(?:信息|内容|数据))?\s*(?:如下)?\s*[:：]\s*(?=\S)/u;
+
+/** 复审 #7: 「以上信息来自 [京东手机版](…)。」 — said by the first line and 「参考了 N 个来源」. */
+const SOURCE_SENTENCE_RE =
+  /\s*(?:以上|上述|这些|上面)(?:的)?(?:信息|内容|数据|结果)?(?:均|都|全部)?(?:来自|出自|取自|来源于)\s*(\[[^\]]+\]\([^)]*\)|[A-Za-z\u4e00-\u9fa5][A-Za-z\u4e00-\u9fa5.]{1,15}?)\s*(?:的)?(?:页面|网站|网页)?\s*(?:[。.]|$)|\s*(?:The )?(?:information|details|data) above (?:comes?|came|is) from\s*(\[[^\]]+\]\([^)]*\)|[A-Z][\w.]*(?: [A-Z][\w.]*)*)\s*(?:\.|$)/gu;
+
+/** DEPLOY-57 第 0 步 6: the source said is the lead's own site (by name or by address). */
+function isLeadSource(said: string, site: { name?: string; url?: string }): boolean {
+  const link = /^\[([^\]]+)\]\(([^)]*)\)$/.exec(said);
+  const name = (link?.[1] ?? said).trim();
+  const host = hostOf(link?.[2])?.replace(/^(?:www|m|item)\./, '');
+  const leadHost = hostOf(site.url)?.replace(/^(?:www|m|item)\./, '');
+  return (!!site.name && name === site.name) || (!!host && !!leadHost && host === leadHost);
+}
+
+export function withoutSourceLines(
+  text: string,
+  lead: { name?: string; url?: string } = {},
+): string {
+  return text
+    .split('\n')
+    .filter((line) => !SOURCE_LINE_RE.test(line))
+    .map((line) =>
+      line
+        .replace(SOURCE_PREFIX_RE, '$1')
+        .replace(SOURCE_SENTENCE_RE, (m, zh?: string, en?: string) =>
+          isLeadSource((zh ?? en ?? '').trim(), lead) ? '' : m,
+        ),
+    )
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * FIX-57 复审 #3 (代 BOSS 亚马逊): the answer is talk, not a data dump — rule 14 asks the model,
+ * and this makes sure: no 「（照页面原样）」 notes, a long product name cut (never reworded)
+ * to its head plus 「…」, and a card with no featured offer said in words.
+ */
+const VERBATIM_NOTE_RE = /(\s*)[（(]([^（）()\n]{0,60}原样[^（）()\n]{0,60})[）)]/gu;
+/** 复审 #4: the 「原样」 words themselves; whatever else a note says (打码、未登录…) stays. */
+const VERBATIM_WORDS_RE =
+  /(?:均|都|皆|全部|全)?(?:照|按|据)?(?:页面|网页|原文)?原样(?:显示|展示|列出|写出?|照录|保留|抄录|记录|摘录)?(?:的)?/gu;
+/** A note part that only says 「(价格和名称均)照页面原样(显示)」. */
+const VERBATIM_ONLY_RE =
+  /^(?:(?:价格|名称|商品名|标题|数据|内容|信息|文字|数字|评分)[和与及、]?)*(?:均|都|皆|全部|全)?(?:照|按|据)?(?:页面|网页|原文)?原样(?:显示|展示|列出|写出?|照录|保留|抄录|记录|摘录)?$/u;
+
+/**
+ * 复审 #4 (诚实): a note that only says 「照页面原样」 goes; in a note that says more
+ * (「页面原样显示，未登录被打码」) only the 原样 words go and the rest stays.
+ */
+function withoutVerbatimWords(_m: string, space: string, inner: string): string {
+  const rest = inner
+    .split(/[，,；;]/u)
+    .map((part) => part.trim())
+    .filter((part) => part && !VERBATIM_ONLY_RE.test(part))
+    .map((part) => part.replace(VERBATIM_WORDS_RE, '').trim())
+    .filter(Boolean)
+    .join('，');
+  return rest ? `${space}（${rest}）` : '';
+}
+/**
+ * 协调方第 2 次代体验: a sentence of its own that only says so (「价格均照页面原样记录。」)
+ * goes too; a sentence that also says something else stays.
+ */
+const VERBATIM_SENTENCE_RE =
+  /(^|[。！!\n])([ \t]*)([^。！!\n]*(?:原样|原文|字样)[^。！!\n]*)([。!！]?)/gu;
+const VERBATIM_SENTENCE_ONLY_RE =
+  /^(?:以上|上面|这些|所有|下面)?(?:的)?(?:(?:价格|名称|商品名|标题|数据|内容|信息|文字|数字|评分)[和与及、]?)*(?:均|都|皆|全部|全)?(?:是)?(?:照|按|据)?(?:页面|网页|原文)?原样(?:显示|展示|列出|写出?|照录|保留|抄录|记录|摘录)?(?:的)?$/u;
+/** 复审 #7: the same note in other words — 「已按页面原文保留“(1 new offer)”字样」. */
+const META_CLAUSE_RE =
+  /(?:按|照|据)(?:页面|网页)?(?:原文|原样)(?:保留|记录|照录|摘录|抄录|列出)?|原文(?:保留|照录|摘录|抄录)|保留[^，,；;]{0,40}?字样|(?:原|英文)字样$/u;
+/** 第 0 步核对 1: the subject is a field (价格 / 名称 / 标题…), or there is no subject at all. */
+const FIELD_WORDS = '(?:价格|售价|名称|商品名|标题|数据|字段|数字|评分|报价)';
+const FIELD_SUBJECT_RE = new RegExp(`^(?:${FIELD_WORDS}[和与及、]?)+`, 'u');
+const PURE_META_RE = new RegExp(
+  `^(?:${FIELD_WORDS}[和与及、]?)*(?:均|都|皆|全部|全)?(?:已)?(?:按|照|据)(?:页面|网页)?(?:原文|原样)(?:保留|记录|照录|摘录|抄录|列出|显示|写)?(?:了)?(?:[“"「『][^”"」』]*[”"」』](?:[与和、及][“"「『][^”"」』]*[”"」』])*)?(?:的)?(?:字样)?$`,
+  'u',
+);
+/** Clauses of a sentence that only say 「照页面原样」 go; the sentence goes if nothing is left. */
+/** DEPLOY-57 第 0 步 2: 「页面原样价格」 → 「价格」 — 页面原样 / 页面原文 used as a modifier. */
+const VERBATIM_MODIFIER_RE =
+  /(?<![按照据])(?:页面|网页)(?:原样|原文)的?(?=[\u4e00-\u9fa5])(?!保留|记录|显示|照录|摘录|抄录|列出|写)/gu;
+
+/** DEPLOY-57 第 0 步 1: only the words — 「价格按页面原文保留为 S$9.43」 → 「价格为 S$9.43」. */
+const META_WORDS_RE =
+  /(?:已|均|都|全部)?(?:按|照|据)(?:页面|网页)?(?:原文|原样)(?:保留|记录|照录|摘录|抄录|列出|显示|写)?|(?:原文|原样)(?:保留|照录|摘录|抄录)/gu;
+/** DEPLOY-57 第 1.5 步 2: a clause with no subject that opens with the words (「照页面原样记录为 S$9.43」). */
+const META_LEAD_RE = /^(?:已|均|都|全部)?(?:按|照|据)(?:页面|网页)?(?:原文|原样)/u;
+/** 「价格：照页面原样记录为 S$9.43」 → 「价格：S$9.43」, not 「价格：为 S$9.43」. */
+const withoutMetaWords = (part: string) =>
+  part
+    .replace(META_WORDS_RE, '')
+    .replace(/([：:])\s*为\s*/u, '$1')
+    .trim();
+
+function withoutVerbatimClauses(
+  _m: string,
+  lead: string,
+  space: string,
+  sentence: string,
+  end: string,
+): string {
+  // DEPLOY-57 第 1.5 步 1: each clause keeps the separator it had (「…Cord；价格：…」 stays 「；」).
+  const pieces = sentence.split(/(\s*[，,；;]\s*)/u);
+  const kept: Array<{ sep: string; text: string }> = [];
+  // A clause that goes leaves its own separator for the next one (「Cord；价格照页面原样记录，这款…」
+  // → 「Cord；这款…」).
+  let dropped: string | null = null;
+  for (let i = 0; i < pieces.length; i += 2) {
+    const raw = pieces[i] ?? '';
+    const part = raw.trim();
+    const sep = i > 0 ? (pieces[i - 1] ?? '') : '';
+    const text = ((): string => {
+      if (!part) return '';
+      // Only a note about how fields were written goes whole: 「价格和名称均照页面原样」,
+      // 「标题按页面原文保留」, 「已按页面原文保留“(1 new offer)”字样」.
+      if (VERBATIM_SENTENCE_ONLY_RE.test(part) || PURE_META_RE.test(part)) return '';
+      if (!META_CLAUSE_RE.test(part)) return raw;
+      // A field clause that carries a number or a price keeps it; only the words go
+      // (「价格按页面原文保留为 S$9.43」 → 「价格为 S$9.43」). A number inside a quote is the note.
+      // 第 1.5 步 2: so does a clause with no subject (「照页面原样记录为 S$9.43」 → 「为 S$9.43」).
+      const facts = part.replace(/[“"「『][^”"」』]*[”"」』]/gu, '');
+      if ((FIELD_SUBJECT_RE.test(part) || META_LEAD_RE.test(part)) && /\d|[¥￥$]/u.test(facts))
+        return withoutMetaWords(part);
+      // Anything else is the answer itself (「原文保留了作者的署名」「评论区原文照录如下：…」).
+      return raw;
+    })();
+    if (text) {
+      kept.push({ sep: dropped ?? sep, text });
+      dropped = null;
+    } else if (dropped === null && i > 0) dropped = sep;
+  }
+  const body = kept.map((k, i) => (i === 0 ? k.text.trimStart() : `${k.sep}${k.text}`)).join('');
+  return kept.length ? `${lead}${space}${body}${end}` : lead;
+}
+
+/**
+ * A card without a featured offer, quoted in English and then explained in Chinese in the
+ * same line: the Chinese stays, the quote goes. Not explained: the quote is said in words.
+ */
+const NO_FEATURED_QUOTE_RE =
+  /(?:页面(?:上)?(?:显示|写着|标注|写的是)?[：:]?\s*)?[「“"]([^」”"\n]*No featured offers? available[^」”"\n]*?)[」”"][，,；;]?\s*(?:即|也就是说?|意思是|意即)?[，,]?\s*/giu;
+const NO_FEATURED_PARTS_RE = /((?:S\$|US\$|\$|¥|￥)\s?[\d.,]+)\s*\((\d+) new offers?\)/iu;
+
+/** 复审 #7: 「S$9.43(1 new offer)」 said in words. */
+const NEW_OFFER_RE = /((?:S\$|US\$|\$|¥|￥)\s?[\d.,]*\d)\s*\((\d+) new offers?\)/giu;
+/** DEPLOY-57 第 0 步 6: 「（S$12.99，2 new offers）」 — the count inside a note. */
+const NEW_OFFER_IN_NOTE_RE = /(?<=[（(，,、；;]\s*)(\d+) new offers?(?=\s*[）),，、；;])/giu;
+/** 复审 #7: the English 「as shown on the page」 notes and sentences. */
+const EN_VERBATIM_NOTE_RE =
+  /\s*\((?:kept |copied |recorded |listed )?(?:verbatim|as shown(?: on the page)?|exactly as (?:shown|displayed)(?: on the page)?)\)/giu;
+const EN_VERBATIM_SENTENCE_RE =
+  /(^|[.!?]\s+|\n)(?:(?:all |the )?(?:prices?|names?|titles?|details?|figures?)(?: and (?:prices?|names?|titles?))? (?:are|were|have been) (?:recorded |kept |copied |listed |quoted )?(?:verbatim|as shown(?: on the page)?|exactly as (?:shown|displayed)(?: on the page)?)|I (?:kept|copied|quoted) [^.\n]{0,60}? (?:verbatim|as shown on the page))\.?/giu;
+
+/** 复审 #6: 「…有 1 个卖家报价 S$9.43（这款没有主推价，有 1 个卖家报价 S$9.43）」 — a note in
+ * brackets that only repeats what the line already said before it goes. */
+const noteKey = (text: string) =>
+  text.replace(/这款|该商品|该款|此款|这件|仅|只|[\s，,。；;、：:]/gu, '').toLowerCase();
+
+function withoutRepeatedNotes(line: string): string {
+  return line
+    .replace(/[（(]([^（）()\n]{4,})[）)]/gu, (m, inner: string, at: number) => {
+      const key = noteKey(inner);
+      return key.length >= 4 && noteKey(line.slice(0, at)).includes(key) ? '' : m;
+    })
+    .replace(/[（(]([^（）()\n]{2,4})[）)]/gu, (m, inner: string, at: number, whole: string) =>
+      // DEPLOY-57 第 1.5 步 3: 「S$9.43（有 1 个卖家报价）（报价）」 — the tail says nothing new.
+      NO_INFO_NOTE_RE.test(inner.trim()) && whole.slice(0, at).includes(inner.trim()) ? '' : m,
+    );
+}
+
+function withoutNoFeaturedQuote(line: string, en = false): string {
+  if (!/No featured offers? available/i.test(line)) return line;
+  const explained = /主推价|卖家报价|seller offer|featured offer/i.test(
+    line.replace(NO_FEATURED_QUOTE_RE, ''),
+  );
+  if (en && !/[「“"]/.test(line)) return line;
+  return line.replace(NO_FEATURED_QUOTE_RE, (_m, quote: string) => {
+    if (explained) return '';
+    const parts = NO_FEATURED_PARTS_RE.exec(quote);
+    if (!parts) return '';
+    return en
+      ? `no featured offer; ${parts[2]} seller offer${parts[2] === '1' ? '' : 's'} at ${parts[1]}.`
+      : `没有主推价，有 ${parts[2]} 个卖家报价 ${parts[1]}。`;
+  });
+}
+
+const NO_FEATURED_RE =
+  /[（(][^（）\n]*?No featured offers? available[^（）\n]*?((?:S\$|US\$|\$|¥|￥)\s?[\d.,]+)\s*\((\d+) new offers?\)[^（）\n]*?[）)]/giu;
+const NAME_HEAD = 56;
+
+function shortName(name: string): string {
+  const chars = Array.from(name);
+  if (chars.length <= NAME_HEAD + 4) return name;
+  let head = chars.slice(0, NAME_HEAD).join('');
+  const cut = Math.max(head.lastIndexOf(' '), head.lastIndexOf(','), head.lastIndexOf('，'));
+  if (cut > NAME_HEAD / 2) head = head.slice(0, cut);
+  head = head.replace(/[\s,，、;；:：\-–—]+$/u, '');
+  // 复审 #7: never cut inside a bracket (「Cable (6.6ft…」) — cut before it.
+  // 第 0 步通过·顺手改: [] and 【】 are brackets too.
+  const lastOf = (marks: string) => Math.max(...Array.from(marks, (m) => head.lastIndexOf(m)));
+  const open = lastOf('(（[【');
+  // 第 0 步核对 2: wherever the bracket opens — 「Anker USB C Cable (240W, …」 → 「Anker USB C Cable…」.
+  if (open > 0 && open > lastOf(')）]】'))
+    head = head.slice(0, open).replace(/[\s,，、;；:：\-–—]+$/u, '');
+  // Two listings often differ only in the last bit (「…, 1M」 / 「…, 2M」) — keep it.
+  const tail = /[,，]\s*([^,，]{1,12})$/u.exec(name)?.[1]?.trim();
+  // 复审 #7: a tail that closes a bracket the head no longer opens (「2M)」) is left off.
+  const keep = tail && /\d/.test(tail) && !/[()（）[\]【】]/u.test(tail) && !head.endsWith(tail);
+  return keep ? `${head}…${tail}` : `${head}…`;
+}
+
+/**
+ * 协调方第 2 次代体验 (京东): a 「- 价格：¥7??9…」 / 「- 标题：「…」」 line that only repeats
+ * what the paragraph above already said goes — the fact is said once.
+ */
+// DEPLOY-57 第 1.5 步 3: 「- 商品3价格：…」 / 「- 第 3 款价格：…」 name the item they repeat.
+const FACT_LINE_RE =
+  /^\s*([-*•]\s*)?(?:\*\*)?(?:(?:商品|第)\s*(\d+)\s*(?:款|个|件|条|项)?(?:商品)?\s*的?)?(价格|售价|到手价|标题|商品标题|名称|商品名称?)(?:\*\*)?\s*[：:]\s*(.+)$/u;
+const ITEM_LINE_RE = /^\s*(?:\*\*)?(\d+)[.、)]\s/u;
+/** A bracketed tail with nothing new in it once the line has said the price (「（报价）」). */
+const NO_INFO_NOTE_RE = /^(?:报价|卖家报价|价格|售价|参考价)$/u;
+const PRICE_TOKEN_RE =
+  /(?:S\$|US\$|\$|¥|￥)\s?[\d?？.,]*\d[\d?？.,]*|(?:S\$|US\$|\$|¥|￥)\s?\d\?+\d/u;
+
+/** A bracketed note that only explains (打码、要登录、截断…) — no new fact of its own. */
+const EXPLAIN_ONLY_RE =
+  /^[^\d¥￥$]*(?:打码|打了码|遮挡|遮住|登录|截断|省略|看不到|隐藏|不全|显示|需要?|才能?)[^\d¥￥$]*$/u;
+const PRICE_TOKEN_ALL_RE = new RegExp(PRICE_TOKEN_RE.source, 'gu');
+
+/**
+ * 复审 #6: a fact line goes only when it says nothing new — every price in it (or its title)
+ * is already in the paragraph above, and what is left is filler or a note that only explains.
+ * 「- 价格：¥7??9，另有 PLUS 价 ¥7??0」 stays.
+ */
+function repeatsOnly(label: string, value: string, said: string): boolean {
+  const notes: string[] = [];
+  let rest = value.replace(/[（(]([^（）()\n]*)[）)]/gu, (_m, inner: string) => {
+    notes.push(inner);
+    return '';
+  });
+  // 第 1.5 步 3: a note the line above already said (「有 1 个卖家报价」), or one with nothing new.
+  const saidKey = noteKey(said);
+  if (
+    !notes.every(
+      (note) =>
+        EXPLAIN_ONLY_RE.test(note) ||
+        NO_INFO_NOTE_RE.test(note.trim()) ||
+        (noteKey(note).length >= 4 && saidKey.includes(noteKey(note))),
+    )
+  )
+    return false;
+  if (/价/.test(label)) {
+    const prices = rest.match(PRICE_TOKEN_ALL_RE) ?? [];
+    if (!prices.length || !prices.every((p) => said.includes(p.replace(/\s+/g, '')))) return false;
+    rest = rest.replace(PRICE_TOKEN_ALL_RE, '');
+  } else {
+    const title = /「([^」]{4,})」/.exec(rest)?.[1] ?? rest.trim();
+    // DEPLOY-57 第 0 步 4: 「…原色...」 is said when 「…原色钛金属」 was — compare without the
+    // trailing ellipsis, as a prefix of what was said.
+    const head = title.replace(/(?:\.{2,}|…+)\s*$/u, '').replace(/\s+/g, '');
+    if (head.length < 4 || !said.includes(head)) return false;
+    rest = rest.replace(/「[^」]*」/u, '').replace(title, '');
+  }
+  return /^[\s，,。.；;、：:约为是显示…]*$/u.test(rest);
+}
+
+function withoutRepeatedFacts(text: string): string {
+  const prose: string[] = [];
+  const items = new Map<string, string>();
+  const out: string[] = [];
+  for (const line of text.split('\n')) {
+    const m = FACT_LINE_RE.exec(line);
+    if (m) {
+      // 第 1.5 步 3: 「- 商品3价格：…」 is checked against item 3 above; none above, it stays.
+      const said = (m[2] ? (items.get(m[2]) ?? '') : prose.join('\n')).replace(/\s+/g, '');
+      if (said && repeatsOnly(m[3] ?? '', m[4] ?? '', said)) continue;
+      // A fact said in a line of its own (「商品标题：…」) counts for the lines after it.
+      if (!m[1] && !m[2]) prose.push(line);
+    } else if (!/^\s*(?:[-*•]|\d+[.、)])\s/.test(line)) {
+      prose.push(line);
+    }
+    const item = ITEM_LINE_RE.exec(line);
+    if (item?.[1]) items.set(item[1], line);
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+/**
+ * DEPLOY-57 第 0 步 3: a long English product name is cut whatever the line looks like —
+ * 「1. <名称> — S$…」, 「名称：<名称>；价格：…」, or the name on its own line with the price
+ * on the next. Only the name before the price is cut; the cut never lands inside a bracket.
+ */
+const ITEM_HEAD_RE = /^(\s*(?:(?:\d+[.、)]|[-*•])\s+)?(?:\*\*)?(?:(?:商品)?名称\s*[：:]\s*)?)/u;
+// DEPLOY-57 第 1.5 步 1: the name also ends where Chinese starts (「…Cord；这款没有主推价，…」) —
+// the separator and all after it stay as they are.
+const NAME_END_RE =
+  /\*\*|\s*[；，。、]|\s*;\s*(?=\p{Script=Han})|\s*(?=\p{Script=Han})|\s+[—–]\s+|\s*[；;]\s*(?:价格|售价)|\s*(?:价格|售价)\s*[：:]|\s*[：:]\s*(?=(?:S\$|US\$|\$|¥|￥)\s?\d)|\s+(?=(?:S\$|US\$|\$|¥|￥)\s?\d)/u;
+
+const PRICE_AHEAD_RE = /(?:S\$|US\$|\$|¥|￥)\s?\d/u;
+const PRICE_LINE_RE =
+  /^\s*(?:[-*•]\s*)?(?:价格|售价|到手价|price)\s*[：:]|^\s*(?:S\$|US\$|\$|¥|￥)\s?\d/iu;
+
+/** Only a product name: a price follows it on the line, or (a list item) on the next line. */
+function withShortName(line: string, next: string | undefined): string {
+  const head = ITEM_HEAD_RE.exec(line)?.[1] ?? '';
+  const rest = line.slice(head.length);
+  if (!/^[A-Za-z0-9]/.test(rest)) return line;
+  const cut = NAME_END_RE.exec(rest);
+  const end = cut?.index ?? rest.length;
+  const priced = cut
+    ? PRICE_AHEAD_RE.test(rest.slice(end))
+    : /\S/.test(head) && next !== undefined && PRICE_LINE_RE.test(next);
+  if (!priced) return line;
+  const name = rest.slice(0, end);
+  const chars = Array.from(name);
+  if (chars.length <= NAME_HEAD + 4) return line;
+  const latin = chars.filter((c) => /[A-Za-z]/.test(c)).length;
+  if (latin / chars.length < 0.5) return line;
+  return `${head}${shortName(name.trimEnd())}${rest.slice(end)}`;
+}
+
+export function plainAnswer(text: string, en = false): string {
+  const cleaned = text
+    .replace(VERBATIM_NOTE_RE, withoutVerbatimWords)
+    .replace(VERBATIM_SENTENCE_RE, withoutVerbatimClauses)
+    .replace(VERBATIM_MODIFIER_RE, '')
+    .replace(EN_VERBATIM_NOTE_RE, '')
+    .replace(EN_VERBATIM_SENTENCE_RE, '$1')
+    .replace(NO_FEATURED_RE, (_m, price: string, n: string) =>
+      en
+        ? ` (no featured offer; ${n} seller offer${n === '1' ? '' : 's'} at ${price})`
+        : `（这款没有主推价，有 ${n} 个卖家报价 ${price}）`,
+    )
+    .split('\n')
+    .map((line) => withoutNoFeaturedQuote(line, en))
+    .map((line) =>
+      line
+        .replace(NEW_OFFER_RE, (_m, price: string, n: string) =>
+          en
+            ? `${price} (${n} seller offer${n === '1' ? '' : 's'})`
+            : `${price}（有 ${n} 个卖家报价）`,
+        )
+        .replace(NEW_OFFER_IN_NOTE_RE, (_m, n: string) =>
+          en ? `${n} seller offer${n === '1' ? '' : 's'}` : `有 ${n} 个卖家报价`,
+        ),
+    )
+    .map(withoutRepeatedNotes)
+    .map((line, i, lines) =>
+      // DEPLOY-57 第 1.5 步 4: the 「未核实」 note names an item by the same short name.
+      /^\s*未核实[:：]/u.test(line)
+        ? line.replace(
+            /「([^」\n]+)」/gu,
+            (_m, item: string) => `「${withShortName(item, undefined)}」`,
+          )
+        : withShortName(line, lines[i + 1]),
+    )
+    .join('\n');
+  return withoutRepeatedFacts(cleaned)
+    .replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, '\n\n')
+    .trimEnd();
+}
+
+/** DEPLOY-57 第 0 步 5: what a give-up says the page did — asked for a login, was blocked, or
+ * did not open. */
+export function giveUpKind(said: string): 'login' | 'blocked' | 'stuck' {
+  // 第 0 步核对: our own checks (「verifier 拦截了答案」) say nothing about the page.
+  const page = said
+    .split(/(?<=[。！？!?；;\n])/u)
+    .filter((part) => !/verifier|质量校验|质量门禁|门禁|结果复核|校验未通过/i.test(part))
+    .join('');
+  // A block first: 「无需登录，但被风控拦截」 was blocked, not a login.
+  if (
+    /拦截|拦下|风控|403|429|请求过多|访问受限|限流|blocked|denied|forbidden|too\s+many\s+requests|rate.?limit/i.test(
+      page,
+    )
+  )
+    return 'blocked';
+  // 第 0 步通过·顺手改: 「需要登录验证」 is a login; 「验证」 alone (a check page) is a block.
+  if (/登录|登陆|log\s*in|sign\s*in/i.test(page)) return 'login';
+  if (/验证/u.test(page)) return 'blocked';
+  return 'stuck';
+}
+
+/** FIX-57 #5: the live status line shown while the run routes around a wall. */
+export const RESCUE_STATUS = {
+  wall: '页面要登录或被拦下了，换个公开来源试试…',
+  stuck: '这条路没走通，换个公开来源再试一次…',
+} as const;
+/** FIX-57 #5: a failed answer about a blocked, broken or empty page (not a refusal). */
+export const RESCUE_GIVE_UP_RE =
+  /登录|拦截|拦下|风控|验证|403|404|429|5\d\d|请求过多|访问受限|限流|无法(?:访问|打开|加载|读取|获取|展示|显示|正常)|打不开|超时|加载(?:失败|不出)|没有(?:显示|展示|加载)|未能?(?:显示|展示|加载|打开|读取|访问)|暂时无法|异常|空白|blocked|denied|forbidden|too\s+many\s+requests|rate.?limit|time(?:d\s*)?out|not\s+(?:available|found|load)|unavailable/i;
 
 /** FAILURE-COPY-1: the task ended before opening any page — not a login question. */
 export const NOT_STARTED = '执行未开始：浏览器还没有打开目标页面就结束了。请重试。';

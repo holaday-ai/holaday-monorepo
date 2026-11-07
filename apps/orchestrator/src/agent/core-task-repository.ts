@@ -19,6 +19,7 @@ import {
   CoreSettlementError,
   assertPreparedCoreSettlement,
 } from './core-task-settlement.js';
+import { type NextStep, nextStepsJsonSet, validNextSteps } from './next-steps-generator.js';
 
 const receiptSchema = z
   .object({
@@ -65,22 +66,14 @@ export class CoreTaskRepository {
       return false;
     }
   }
-  async persistSuggestions(op: CoreSettlement, suggestions: string[]): Promise<boolean> {
+  async persistSuggestions(op: CoreSettlement, suggestions: NextStep[]): Promise<boolean> {
     assertPreparedCoreSettlement(op);
-    if (
-      op.status !== 'completed' ||
-      !suggestions.length ||
-      suggestions.length > 3 ||
-      suggestions.some(
-        (item) => typeof item !== 'string' || item.trim().length < 4 || item.length > 40,
-      )
-    )
-      return false;
+    if (op.status !== 'completed' || !validNextSteps(suggestions)) return false;
     try {
       const updated = await this.db
         .update(tasks)
         .set({
-          result: sql`JSON_SET(${tasks.result}, '$.followUpSuggestions', CAST(${JSON.stringify(suggestions)} AS JSON))`,
+          result: nextStepsJsonSet(suggestions),
         })
         .where(
           and(

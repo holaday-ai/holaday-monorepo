@@ -1,4 +1,5 @@
 import { parseImageTaskMeta } from '@/components/image/image-task-meta';
+import { type NextStepOption, normalizeNextSteps } from '@/lib/assistant-turn';
 import { normaliseAttachmentDownloadUrl } from '@/lib/attachment-download-url';
 import { batchConfirmQuestion, singleConfirmQuestion } from '@/lib/batch-confirm-copy';
 import { getSelectedBrainId } from '@/lib/brain-preference';
@@ -194,7 +195,7 @@ export interface TaskStore {
    * after a task's terminal frame. TaskStream prefers this over the
    * markdown-parsed in-summary block.
    */
-  suggestionsByTask: Record<string, string[]>;
+  suggestionsByTask: Record<string, NextStepOption[]>;
   /** BrowserPanel interactive-mode toggle, shared app-wide so the
    *  terminal summary's "Continue in browser" button can flip it on. */
   browserInteractive: boolean;
@@ -878,18 +879,18 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           displayResultTextForStatus(detailStatus, rawResultText, rawErrorText) ?? undefined;
         const planStatus = normalizeTaskPlanStatus(detail.planStatus);
         const resultObj = isTaskListRecord(detail.result) ? detail.result : {};
-        const savedSuggestions = Array.isArray(resultObj.followUpSuggestions)
-          ? [
-              ...new Set(
-                resultObj.followUpSuggestions
-                  .filter(
-                    (value): value is string =>
-                      typeof value === 'string' && value.trim().length >= 4 && value.length <= 40,
-                  )
-                  .map((value) => value.trim()),
-              ),
-            ].slice(0, 3)
-          : [];
+        // FIX-57 #4: next steps (label + instruction) saved for any terminal state;
+        // older rows only have the short `followUpSuggestions` strings.
+        const savedSuggestions = normalizeNextSteps(
+          Array.isArray(resultObj.nextSteps)
+            ? resultObj.nextSteps
+            : Array.isArray(resultObj.followUpSuggestions)
+              ? resultObj.followUpSuggestions.filter(
+                  (value): value is string =>
+                    typeof value === 'string' && value.trim().length >= 4 && value.length <= 40,
+                )
+              : [],
+        );
         const metadata = isTaskListRecord(resultObj.metadata) ? resultObj.metadata : {};
         const planText =
           safeTaskListText(resultObj.planText) ||
@@ -1132,7 +1133,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               }
             : {}),
           suggestionsByTask:
-            detailStatus === 'completed'
+            detailStatus === 'completed' ||
+            detailStatus === 'partial_success' ||
+            detailStatus === 'failed'
               ? {
                   ...prev.suggestionsByTask,
                   // Only a frame received during this request is newer than
@@ -2692,6 +2695,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           };
           return {
             stepsByTask: { ...prev.stepsByTask, [msg.taskId]: [...existing, next] },
+            // FIX-57 复审 #3 (BOSS run, JD): a search lane that handed over to the browser
+            // left its streamed text on screen (「请你自己登录后告诉我继续」) and hid the
+            // status line. Browser steps supersede it.
+            ...(prev.streamingByTask[msg.taskId] !== undefined
+              ? { streamingByTask: omitRuntimeKey(prev.streamingByTask, msg.taskId) }
+              : {}),
             tasks: prev.tasks.map((t) => {
               if (t.taskId !== msg.taskId) return t;
               const { queuePosition: _queuePosition, ...rest } = t;
@@ -2940,11 +2949,20 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         return;
       }
       if (msg.type === 'server.supercar.suggestions') {
+        const generatedTitle = typeof msg.title === 'string' ? msg.title.trim() : '';
         set((prev) => ({
           suggestionsByTask: {
             ...prev.suggestionsByTask,
-            [msg.taskId]: msg.suggestions,
+            [msg.taskId]: normalizeNextSteps(msg.nextSteps ?? msg.suggestions),
           },
+          // FIX-57 复审 #1-1d: a generated sidebar name, never over the person's own.
+          ...(generatedTitle
+            ? {
+                tasks: prev.tasks.map((t) =>
+                  t.taskId === msg.taskId && !t.title?.trim() ? { ...t, title: generatedTitle } : t,
+                ),
+              }
+            : {}),
         }));
         return;
       }
