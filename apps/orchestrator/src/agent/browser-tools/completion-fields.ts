@@ -31,6 +31,25 @@ const RELATIVE_UNITS: Array<[RegExp, string]> = [
   [/(\d+)\s*月前/g, '$1个月前'],
 ];
 
+/**
+ * 复审 #2 必须修 3: `needle` inside `hay` with whole numbers at both ends — 「S$12.9」 is not said by
+ * 「S$12.99」, 「9 起」 not by 「19 起」.
+ */
+export function includesWhole(hay: string, needle: string): boolean {
+  if (!needle) return false;
+  const tail = /\d+(?:\.\d+)?$/.exec(needle)?.[0] ?? '';
+  for (let at = hay.indexOf(needle); at >= 0; at = hay.indexOf(needle, at + 1)) {
+    const before = hay[at - 1] ?? '';
+    const rest = hay.slice(at + needle.length, at + needle.length + 12);
+    const startCut = /^\d/.test(needle) && /[\d.]/.test(before);
+    // The same number written longer is still the same: 「12.9」 in 「12.90」, 「12」 in 「12.00」.
+    const sameNumber = tail.includes('.') ? /^0+(?![\d.])/.test(rest) : /^\.0+(?![\d.])/.test(rest);
+    const endCut = !!tail && /^\.?\d/.test(rest) && !sameNumber;
+    if (!startCut && !endCut) return true;
+  }
+  return false;
+}
+
 /** Literal `\n` / `\t` that a model double-escaped inside tool arguments. */
 export function unescapeLiteralBreaks(value: string): string {
   return value.replace(/\\r\\n|\\n/g, '\n').replace(/\\t/g, ' ');
@@ -1119,10 +1138,10 @@ export function assessCompletionFacts(input: {
       (v) =>
         eligible.some(
           (page) =>
-            page.norm.includes(v) ||
+            includesWhole(page.norm, v) ||
             (/\d/.test(v) &&
               v.replace(/\s+/g, '').length >= 4 &&
-              page.tight.includes(v.replace(/\s+/g, ''))) ||
+              includesWhole(page.tight, v.replace(/\s+/g, ''))) ||
             // A value split over adjacent nodes (「29.89」「in」).
             (/\s/.test(v) && containsToken(page.joined, v)) ||
             // FIX-28 (sa2 core-11, D16): a quote read across adjacent nodes.

@@ -228,6 +228,13 @@ export function unbackedLiveValues(answer: string, given: string): string[] {
 const WRITING_TASK_RE =
   /文案|海报|广告|宣传|促销|推文|标语|口号|朋友圈|slogan|\bad copy\b|\bposter\b|\bcopy\s?writing\b|\bmarketing copy\b|\badvert/i;
 
+/**
+ * 复审 #2 必须修 2: a story, a script, a poem, copy — its characters open pages (「他已经打开了网页…」
+ * 「I opened the page…」) and nobody claims to have done so.
+ */
+const CREATIVE_TASK_RE =
+  /小说|故事|剧本|剧情|情节|台词|童话|寓言|散文|诗|歌词|段子|小品|相声|文案|海报|广告|\bstor(?:y|ies)\b|\bscripts?\b|\bscreenplay\b|\bpoems?\b|\bpoetry\b|\blyrics\b|\bfiction\b|\bnovel\b|\bfable\b|\b(?:ad|marketing|sales|product)\s+copy\b|\bcopy\b(?!\s+(?:the|this|that|these|those|it|from|of|and)\b)|\bposter\b/i;
+
 interface Assessment {
   pretend: string | null;
   /** The live values the user asked for, invented. */
@@ -238,7 +245,7 @@ interface Assessment {
 }
 
 function assess(answerText: string, request: string, given: string): Assessment {
-  const pretend = pretendedOperation(answerText);
+  const pretend = CREATIVE_TASK_RE.test(request) ? null : pretendedOperation(answerText);
   const values = liveValueMatches(answerText, given);
   const asksLive = !!matchLiveFact(request);
   const writing = WRITING_TASK_RE.test(request);

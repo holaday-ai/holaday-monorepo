@@ -47,6 +47,7 @@ import {
   assessCompletionFacts,
   declaredAbsentFields,
   fieldLabel,
+  includesWhole,
   observedEvidence,
   sameSource,
   unescapeLiteralBreaks,
@@ -2836,9 +2837,9 @@ export function fieldLines(fields: unknown, summary: string): string {
     const text = unescapeLiteralBreaks(value).trim();
     if (
       !text ||
-      summary.includes(text) ||
+      includesWhole(summary, text) ||
       // 复审 #1 必须修 3: 「RMB 9999起」 was said as 「RMB 9,999 起」.
-      tightForm(summary).includes(tightForm(text)) ||
+      includesWhole(tightForm(summary), tightForm(text)) ||
       /summary|总结|概述|摘要|说明|备注|note/i.test(name)
     )
       continue;
@@ -3491,7 +3492,7 @@ const ORPHAN_FIELD_RE =
 
 function saysNothingNew(value: string, said: string): boolean {
   const numbers = value.match(/\d[\d,]*(?:\.\d+)?/g) ?? [];
-  return numbers.length > 0 && numbers.every((n) => said.includes(n));
+  return numbers.length > 0 && numbers.every((n) => includesWhole(said, n));
 }
 
 /**
@@ -3509,6 +3510,8 @@ export function tightForm(text: string): string {
 }
 
 const LIST_LINE_RE = /^\s*(?:[-*•]|\d+[.、)])\s+(.+)$/u;
+/** A heading over a list: a short line ending in a colon (「更便宜的：」「**总结：**」). */
+const LIST_HEADING_RE = /^\s*(?:#{1,6}\s*)?(?:\*\*)?[^\n]{1,30}?[:：](?:\*\*)?\s*$/u;
 
 /** 复审 #1 必须修 3: a whole list whose every line an earlier list already said goes, block and all. */
 function withoutRepeatedList(text: string): string {
@@ -3526,9 +3529,18 @@ function withoutRepeatedList(text: string): string {
     const block = lines.slice(i, j).map((line) => tightForm(LIST_LINE_RE.exec(line)?.[1] ?? line));
     const repeated =
       block.length >= 2 &&
-      block.every((said) => said.length >= 4 && items.some((item) => item.includes(said)));
+      block.every((said) => said.length >= 4 && items.some((item) => includesWhole(item, said)));
     if (repeated) {
       while (out.length && !out[out.length - 1]!.trim()) out.pop();
+      // 复审 #2 必须修 3: the heading right above the removed list goes with it (「总结：」).
+      if (
+        out.length &&
+        LIST_HEADING_RE.test(out[out.length - 1]!) &&
+        !LIST_LINE_RE.test(out[out.length - 1]!)
+      ) {
+        out.pop();
+        while (out.length && !out[out.length - 1]!.trim()) out.pop();
+      }
     } else {
       out.push(...lines.slice(i, j));
       items.push(...block);

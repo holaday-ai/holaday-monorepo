@@ -34,11 +34,26 @@ const WRITING_RE =
 const MATERIAL_RE =
   /附件|附上|(?:以下|如下|下面|下列|上面|上述|这份|这张|这段|我(?:给|发)的)[^，。,.\n]{0,6}?(?:内容|文字|文本|表|数据|清单|列表|信息|材料|报价|价目|价格|商品|链接)|\battach(?:ed|ment)\b|\bthe following\b|\bbelow\b/i;
 
-/** Arithmetic on prices the user gave (「单价 99 元，买 3 个一共多少钱」). */
+/**
+ * Arithmetic on prices the user gave (「单价 99 元，买 3 个一共多少钱」). 复审 #2 必须修 1: a budget or a
+ * cap is no given price — 「亚马逊新加坡站 USB C 线价格，我预算 S$15」「我有 100 元预算，京东上 USB C
+ * 线多少钱」 still look the price up. Only a unit price or an itemised list being summed is the user's.
+ */
 const CALC_RE =
-  /计算|算一下|算算|总价|合计|一共|总共|预算|折后|打完折|加税|含税|平均|\bcalculate\b|\btotal\b|\bbudget\b|\baverage\b/i;
+  /计算|算一下|算算|总价|合计|一共|总共|折后|打完折|加税|含税|平均|\bcalculate\b|\btotal\b|\baverage\b/i;
 const GIVEN_PRICE_RE =
   /(?:单价|原价|现价|售价|价格)\s*[:：]?\s*\d|\d[\d,]*(?:\.\d+)?\s?(?:元|块|美元|新币|港币)|(?:S\$|US\$|\$|¥|￥|€|£)\s?\d/i;
+const AMOUNT = String.raw`(?:S\$|US\$|HK\$|\$|¥|￥|€|£|SGD|USD|RMB|CNY)?\s?\d[\d,]*(?:\.\d+)?\s?(?:k|K|千|万|元|块钱?|美元|新币|新元|港币|刀)?`;
+/** 「预算 S$15」「100 元预算」「200 元以内」「不超过 S$20」「budget of $30」「under $20」. */
+const BUDGET_RE = new RegExp(
+  String.raw`(?:预算(?:是|为|大概|大约|约|有)?|上限(?:是|为)?|最多|不超过|不高于|不要超过|低于|\bbudget(?:\s+(?:is|of))?|\bunder|\bbelow|\bless than|\bup to|\bmax(?:imum)?)\s*[:：]?\s*${AMOUNT}|${AMOUNT}\s*(?:的)?(?:预算|以内|以下|之内|内|封顶|\s?budget\b)`,
+  'giu',
+);
+
+/** The request with its budgets and caps taken out — what is left is the prices it gives. */
+export function withoutBudgets(text: string): string {
+  return text.replace(BUDGET_RE, ' ');
+}
 
 const clausesOf = (text: string) =>
   text
@@ -49,7 +64,7 @@ const clausesOf = (text: string) =>
 /** The request asks something other than a lookup: writing, explaining, the user's material, sums. */
 function notALookup(text: string, value: string): boolean {
   if (MATERIAL_RE.test(text)) return true;
-  if (CALC_RE.test(text) && GIVEN_PRICE_RE.test(text)) return true;
+  if (CALC_RE.test(text) && GIVEN_PRICE_RE.test(withoutBudgets(text))) return true;
   const clauses = clausesOf(text);
   const main = [clauses[0] ?? '', clauses.find((clause) => clause.includes(value)) ?? ''];
   return main.some((clause) => WRITING_RE.test(clause));
