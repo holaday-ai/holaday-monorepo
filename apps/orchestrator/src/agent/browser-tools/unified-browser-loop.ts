@@ -47,6 +47,7 @@ import {
   assessCompletionFacts,
   declaredAbsentFields,
   fieldLabel,
+  includesWhole,
   observedEvidence,
   sameSource,
   unescapeLiteralBreaks,
@@ -1852,7 +1853,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             await rejected(summary, given, `点名字段写成了页面未显示：${absent.join('、')}`);
             // The second look is optional: if it never ends in a finish (steps, model), this
             // answer is still delivered, as the 部分完成 it would have been.
-            const lead = `部分完成：${absent.join('、')} 页面上没有读到。`;
+            const lead = absentLead(absent, answer);
             partialHeld ??= {
               summary: withLimitations(
                 /^\s*部分完成/.test(answer) ? answer : `${lead}\n\n${answer}`,
@@ -1957,7 +1958,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           const pageGap =
             listGap ??
             (absent.length
-              ? `部分完成：${absent.join('、')} 页面上没有读到。`
+              ? absentLead(absent, answer)
               : declined.length
                 ? `部分完成：「${declined.join('、')}」部分未完成。`
                 : frameLead);
@@ -2834,7 +2835,13 @@ export function fieldLines(fields: unknown, summary: string): string {
     const { name, value } = field as { name?: unknown; value?: unknown };
     if (typeof name !== 'string' || typeof value !== 'string') continue;
     const text = unescapeLiteralBreaks(value).trim();
-    if (!text || summary.includes(text) || /summary|总结|概述|摘要|说明|备注|note/i.test(name))
+    if (
+      !text ||
+      includesWhole(summary, text) ||
+      // 复审 #1 必须修 3: 「RMB 9999起」 was said as 「RMB 9,999 起」.
+      includesWhole(tightForm(summary), tightForm(text)) ||
+      /summary|总结|概述|摘要|说明|备注|note/i.test(name)
+    )
       continue;
     // DEPLOY-46 (local A/B, A core-11): a value that is only element refs (「e12, e13, e19」) is the
     // browser's own handles, never an answer field.
@@ -3279,6 +3286,10 @@ const withoutMetaWords = (part: string) =>
     .replace(/([：:])\s*为\s*/u, '$1')
     .trim();
 
+/** FIX-58 P1-2: 「(均)按页面原样」 used as the manner of a verb. */
+const MANNER_RE =
+  /(?:均|都|皆|全部|已)?(?:按|照|据)(?:页面|网页)?(?:原样|原文)(?:地)?(?=[\u4e00-\u9fa5])/gu;
+
 function withoutVerbatimClauses(
   _m: string,
   lead: string,
@@ -3308,6 +3319,9 @@ function withoutVerbatimClauses(
       const facts = part.replace(/[“"「『][^”"」』]*[”"」』]/gu, '');
       if ((FIELD_SUBJECT_RE.test(part) || META_LEAD_RE.test(part)) && /\d|[¥￥$]/u.test(facts))
         return withoutMetaWords(part);
+      // FIX-58 P1-2: 「标题与链接均按页面原样提取如下：」 — 原样 as the manner only; the words go,
+      // the verb stays (「标题与链接提取如下：」).
+      if (MANNER_RE.test(part)) return raw.replace(MANNER_RE, '');
       // Anything else is the answer itself (「原文保留了作者的署名」「评论区原文照录如下：…」).
       return raw;
     })();
@@ -3352,7 +3366,20 @@ function withoutRepeatedNotes(line: string): string {
     .replace(/[（(]([^（）()\n]{2,4})[）)]/gu, (m, inner: string, at: number, whole: string) =>
       // DEPLOY-57 第 1.5 步 3: 「S$9.43（有 1 个卖家报价）（报价）」 — the tail says nothing new.
       NO_INFO_NOTE_RE.test(inner.trim()) && whole.slice(0, at).includes(inner.trim()) ? '' : m,
-    );
+    )
+    .replace(/（([^（）\n]{4,})）/gu, (m, inner: string, at: number, whole: string) => {
+      // FIX-58 P1-7: 「S$9.43（这款没有主推价，有 1 个卖家报价 S$9.43）」 — the price was said
+      // right before the note; the note keeps only what it adds (「（没有主推价，有 1 个卖家报价）」).
+      const before = whole.slice(0, at);
+      const prices = inner.match(PRICE_TOKEN_ALL_RE) ?? [];
+      if (!prices.length || !prices.every((p) => before.includes(p))) return m;
+      const rest = inner
+        .replace(PRICE_TOKEN_ALL_RE, '')
+        .replace(/^(?:这款|该商品|该款|此款)\s*/u, '')
+        .replace(/[\s，,、]+$/u, '')
+        .trim();
+      return rest ? `（${rest}）` : '';
+    });
 }
 
 function withoutNoFeaturedQuote(line: string, en = false): string {
@@ -3406,8 +3433,12 @@ const FACT_LINE_RE =
 const ITEM_LINE_RE = /^\s*(?:\*\*)?(\d+)[.、)]\s/u;
 /** A bracketed tail with nothing new in it once the line has said the price (「（报价）」). */
 const NO_INFO_NOTE_RE = /^(?:报价|卖家报价|价格|售价|参考价)$/u;
-const PRICE_TOKEN_RE =
-  /(?:S\$|US\$|\$|¥|￥)\s?[\d?？.,]*\d[\d?？.,]*|(?:S\$|US\$|\$|¥|￥)\s?\d\?+\d/u;
+/** FIX-58 P1-3: a currency sign, or a code before the amount (「SGD 11.52」 on amazon.com from Singapore). */
+const CURRENCY = String.raw`(?:S\$|US\$|HK\$|\$|¥|￥|(?:SGD|USD|RMB|CNY|HKD|EUR|GBP|JPY|MYR|AUD|CAD)(?=\s?\d))`;
+const PRICE_TOKEN_RE = new RegExp(
+  String.raw`${CURRENCY}\s?[\d?？.,]*\d[\d?？.,]*|${CURRENCY}\s?\d\?+\d`,
+  'u',
+);
 
 /** A bracketed note that only explains (打码、要登录、截断…) — no new fact of its own. */
 const EXPLAIN_ONLY_RE =
@@ -3451,11 +3482,87 @@ function repeatsOnly(label: string, value: string, said: string): boolean {
   return /^[\s，,。.；;、：:约为是显示…]*$/u.test(rest);
 }
 
+/**
+ * FIX-58 P1-6 (reg-new-bestbuy 「- rating：4.8 out of 5 stars」 after the answer): a field line
+ * with no item number whose label is not one of the answer's own fields — a structured field
+ * appended under the answer. It goes when every number in it was already said above.
+ */
+const ORPHAN_FIELD_RE =
+  /^\s*[-*•]\s*(?:\*\*)?([a-z][a-z0-9_]{1,24}|评分|评价数?|库存|销量|评论数)(?:\*\*)?\s*[：:]\s*(.+)$/u;
+
+function saysNothingNew(value: string, said: string): boolean {
+  const numbers = value.match(/\d[\d,]*(?:\.\d+)?/g) ?? [];
+  return numbers.length > 0 && numbers.every((n) => includesWhole(said, n));
+}
+
+/**
+ * FIX-58 复审 #1 必须修 3 (「苹果手机多少钱」): what was said once is compared with thousands
+ * separators and spaces taken out — 「RMB 15,999 起」 and 「RMB 15999起」 are the same price.
+ */
+export function tightForm(text: string): string {
+  return text
+    .normalize('NFKC')
+    .replace(/\*\*|`/g, '')
+    .replace(/(\d),(?=\d{3}(?!\d))/g, '$1')
+    .replace(/[:：]/g, ':')
+    .replace(/\s+/g, '')
+    .toLocaleLowerCase();
+}
+
+const LIST_LINE_RE = /^\s*(?:[-*•]|\d+[.、)])\s+(.+)$/u;
+/** A heading over a list: a short line ending in a colon (「更便宜的：」「**总结：**」). */
+const LIST_HEADING_RE = /^\s*(?:#{1,6}\s*)?(?:\*\*)?[^\n]{1,30}?[:：](?:\*\*)?\s*$/u;
+
+/** 复审 #1 必须修 3: a whole list whose every line an earlier list already said goes, block and all. */
+function withoutRepeatedList(text: string): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  const items: string[] = [];
+  for (let i = 0; i < lines.length; ) {
+    if (!LIST_LINE_RE.test(lines[i]!)) {
+      out.push(lines[i]!);
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (j < lines.length && LIST_LINE_RE.test(lines[j]!)) j += 1;
+    const block = lines.slice(i, j).map((line) => tightForm(LIST_LINE_RE.exec(line)?.[1] ?? line));
+    const repeated =
+      block.length >= 2 &&
+      block.every((said) => said.length >= 4 && items.some((item) => includesWhole(item, said)));
+    if (repeated) {
+      while (out.length && !out[out.length - 1]!.trim()) out.pop();
+      // 复审 #2 必须修 3: the heading right above the removed list goes with it (「总结：」).
+      if (
+        out.length &&
+        LIST_HEADING_RE.test(out[out.length - 1]!) &&
+        !LIST_LINE_RE.test(out[out.length - 1]!)
+      ) {
+        out.pop();
+        while (out.length && !out[out.length - 1]!.trim()) out.pop();
+      }
+    } else {
+      out.push(...lines.slice(i, j));
+      items.push(...block);
+    }
+    i = j;
+  }
+  return out.join('\n');
+}
+
 function withoutRepeatedFacts(text: string): string {
   const prose: string[] = [];
   const items = new Map<string, string>();
   const out: string[] = [];
   for (const line of text.split('\n')) {
+    const orphan = ORPHAN_FIELD_RE.exec(line);
+    // After a numbered list it cannot be told which item it belongs to — it goes too.
+    if (
+      orphan &&
+      !FACT_LINE_RE.test(line) &&
+      (items.size > 0 || saysNothingNew(orphan[2] ?? '', out.join('\n')))
+    )
+      continue;
     const m = FACT_LINE_RE.exec(line);
     if (m) {
       // 第 1.5 步 3: 「- 商品3价格：…」 is checked against item 3 above; none above, it stays.
@@ -3481,39 +3588,132 @@ function withoutRepeatedFacts(text: string): string {
 const ITEM_HEAD_RE = /^(\s*(?:(?:\d+[.、)]|[-*•])\s+)?(?:\*\*)?(?:(?:商品)?名称\s*[：:]\s*)?)/u;
 // DEPLOY-57 第 1.5 步 1: the name also ends where Chinese starts (「…Cord；这款没有主推价，…」) —
 // the separator and all after it stay as they are.
-const NAME_END_RE =
-  /\*\*|\s*[；，。、]|\s*;\s*(?=\p{Script=Han})|\s*(?=\p{Script=Han})|\s+[—–]\s+|\s*[；;]\s*(?:价格|售价)|\s*(?:价格|售价)\s*[：:]|\s*[：:]\s*(?=(?:S\$|US\$|\$|¥|￥)\s?\d)|\s+(?=(?:S\$|US\$|\$|¥|￥)\s?\d)/u;
+const NAME_END_RE = new RegExp(
+  String.raw`\*\*|\s*[；，。、]|\s*;\s*(?=\p{Script=Han})|\s*(?=\p{Script=Han})|\s+[—–]\s+|\s*[；;]\s*(?:价格|售价)|\s*(?:价格|售价)\s*[：:]|\s*[：:]\s*(?=${CURRENCY}\s?\d)|\s+(?=${CURRENCY}\s?\d)`,
+  'u',
+);
 
-const PRICE_AHEAD_RE = /(?:S\$|US\$|\$|¥|￥)\s?\d/u;
-const PRICE_LINE_RE =
-  /^\s*(?:[-*•]\s*)?(?:价格|售价|到手价|price)\s*[：:]|^\s*(?:S\$|US\$|\$|¥|￥)\s?\d/iu;
+const PRICE_AHEAD_RE = new RegExp(String.raw`${CURRENCY}\s?\d`, 'u');
+const PRICE_LINE_RE = new RegExp(
+  String.raw`^\s*(?:[-*•]\s*)?(?:价格|售价|到手价|price)\s*[：:]|^\s*${CURRENCY}\s?\d`,
+  'iu',
+);
+/** FIX-58 P1-3: a row whose price is said to be missing (「— 价格未获取到（…）」) is a product row too. */
+const PRICE_GAP_RE =
+  /价格|售价|未获取|未显示|没读到|没显示|没有显示|\bnot shown\b|\bunavailable\b|\bno price\b/i;
 
-/** Only a product name: a price follows it on the line, or (a list item) on the next line. */
-function withShortName(line: string, next: string | undefined): string {
-  const head = ITEM_HEAD_RE.exec(line)?.[1] ?? '';
-  const rest = line.slice(head.length);
-  if (!/^[A-Za-z0-9]/.test(rest)) return line;
-  const cut = NAME_END_RE.exec(rest);
-  const end = cut?.index ?? rest.length;
-  const priced = cut
-    ? PRICE_AHEAD_RE.test(rest.slice(end))
-    : /\S/.test(head) && next !== undefined && PRICE_LINE_RE.test(next);
-  if (!priced) return line;
-  const name = rest.slice(0, end);
-  const chars = Array.from(name);
-  if (chars.length <= NAME_HEAD + 4) return line;
-  const latin = chars.filter((c) => /[A-Za-z]/.test(c)).length;
-  if (latin / chars.length < 0.5) return line;
-  return `${head}${shortName(name.trimEnd())}${rest.slice(end)}`;
+interface NameCut {
+  head: string;
+  name: string;
+  short: string;
+  after: string;
 }
 
-export function plainAnswer(text: string, en = false): string {
-  const cleaned = text
+/**
+ * Only a product name: a price follows it on the line, or (a list item) on the next line —
+ * or (FIX-58 P1-3) a listed row says its price is missing; a quoted 「未核实」 item is one too.
+ */
+function nameCut(line: string, next: string | undefined, quoted = false): NameCut | null {
+  const head = ITEM_HEAD_RE.exec(line)?.[1] ?? '';
+  const rest = line.slice(head.length);
+  if (!/^[A-Za-z0-9]/.test(rest)) return null;
+  const cut = NAME_END_RE.exec(rest);
+  const end = cut?.index ?? rest.length;
+  const after = rest.slice(end);
+  const listed = /\S/.test(head) || quoted;
+  const priced = cut
+    ? PRICE_AHEAD_RE.test(after) || (listed && PRICE_GAP_RE.test(after))
+    : /\S/.test(head) && next !== undefined && PRICE_LINE_RE.test(next);
+  if (!priced) return null;
+  const name = rest.slice(0, end).trimEnd();
+  const chars = Array.from(name);
+  if (chars.length <= NAME_HEAD + 4) return null;
+  const latin = chars.filter((c) => /[A-Za-z]/.test(c)).length;
+  if (latin / chars.length < 0.5) return null;
+  return { head, name, short: shortName(name), after };
+}
+
+function withShortName(line: string, next: string | undefined, quoted = false): string {
+  const cut = nameCut(line, next, quoted);
+  return cut ? `${cut.head}${cut.short}${cut.after}` : line;
+}
+
+const nameWords = (name: string) => name.split(/[\s,，]+/u).filter(Boolean);
+
+/**
+ * FIX-58 P1-3 (英文 amazon.sg: two rows both 「UGREEN 2 Pack USB C to USB C Charger Cable, Type C
+ * 100W…」): different names that cut to the same words keep what tells them apart — the last
+ * word the others do not have (「…2M」 / 「…1M」).
+ */
+function tellingWord(name: string, others: readonly string[]): string | null {
+  const words = nameWords(name);
+  for (let i = words.length - 1; i >= 0; i -= 1) {
+    const word = words[i]!.replace(/[()（）[\]【】]/gu, '');
+    if (word && others.every((other) => !nameWords(other).includes(words[i]!))) return word;
+  }
+  return null;
+}
+
+function withShortNames(lines: readonly string[]): string[] {
+  const cuts = lines.map((line, i) => nameCut(line, lines[i + 1]));
+  const byShort = new Map<string, NameCut[]>();
+  for (const cut of cuts) if (cut) byShort.set(cut.short, [...(byShort.get(cut.short) ?? []), cut]);
+  return lines.map((line, i) => {
+    const cut = cuts[i];
+    if (!cut) return line;
+    const same = (byShort.get(cut.short) ?? []).filter((other) => other.name !== cut.name);
+    const word = same.length
+      ? tellingWord(
+          cut.name,
+          same.map((other) => other.name),
+        )
+      : null;
+    const short =
+      word && !cut.short.includes(word) ? `${cut.short.replace(/…$/u, '')}…${word}` : cut.short;
+    return `${cut.head}${short}${cut.after}`;
+  });
+}
+
+/**
+ * FIX-58 P1-4: 「部分完成：价格 页面上没有读到。」 says what, not which — and had a stray space.
+ * The numbered item the answer itself marks as missing is named: 「第 3 款没读到价格。」.
+ */
+const MISSING_MARK_RE =
+  /未获取到|未读到|没读到|没有读到|未显示|没显示|没有显示|页面未显示|未找到|没找到|not shown|not found|unavailable/i;
+export function absentLead(absent: readonly string[], answer: string): string {
+  const fields = absent.join('、');
+  const items = answer
+    .split('\n')
+    .map((line) =>
+      /^\s*(?:\*\*)?(\d+)[.、)]\s/.exec(line) && MISSING_MARK_RE.test(line) ? line : null,
+    )
+    .filter((line): line is string => !!line)
+    .filter(
+      (line) =>
+        absent.some((field) => line.includes(field)) || absent.every((field) => /价/.test(field)),
+    )
+    .map((line) => /^\s*(?:\*\*)?(\d+)/.exec(line)![1]!);
+  const unit = absent.every((field) => /价/.test(field)) ? '款' : '条';
+  return items.length
+    ? `部分完成：第 ${[...new Set(items)].join('、')} ${unit}没读到${fields}。`
+    : `部分完成：页面上没读到${fields}。`;
+}
+
+/**
+ * FIX-58 P1-2: only the 「原样 / 原文 / verbatim」 notes — the same cleanup the browser answer
+ * gets, for lanes whose text is not a browser answer (search, scrape).
+ */
+export function withoutVerbatimNotes(text: string): string {
+  return text
     .replace(VERBATIM_NOTE_RE, withoutVerbatimWords)
     .replace(VERBATIM_SENTENCE_RE, withoutVerbatimClauses)
     .replace(VERBATIM_MODIFIER_RE, '')
     .replace(EN_VERBATIM_NOTE_RE, '')
-    .replace(EN_VERBATIM_SENTENCE_RE, '$1')
+    .replace(EN_VERBATIM_SENTENCE_RE, '$1');
+}
+
+export function plainAnswer(text: string, en = false): string {
+  const cleaned = withoutVerbatimNotes(text)
     .replace(NO_FEATURED_RE, (_m, price: string, n: string) =>
       en
         ? ` (no featured offer; ${n} seller offer${n === '1' ? '' : 's'} at ${price})`
@@ -3533,17 +3733,16 @@ export function plainAnswer(text: string, en = false): string {
         ),
     )
     .map(withoutRepeatedNotes)
-    .map((line, i, lines) =>
+    .map((line) =>
       // DEPLOY-57 第 1.5 步 4: the 「未核实」 note names an item by the same short name.
       /^\s*未核实[:：]/u.test(line)
         ? line.replace(
             /「([^」\n]+)」/gu,
-            (_m, item: string) => `「${withShortName(item, undefined)}」`,
+            (_m, item: string) => `「${withShortName(item, undefined, true)}」`,
           )
-        : withShortName(line, lines[i + 1]),
-    )
-    .join('\n');
-  return withoutRepeatedFacts(cleaned)
+        : line,
+    );
+  return withoutRepeatedList(withoutRepeatedFacts(withShortNames(cleaned).join('\n')))
     .replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, '\n\n')
     .trimEnd();
 }

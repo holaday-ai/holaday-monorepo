@@ -338,7 +338,8 @@ describe('复审 #3 · 代 BOSS 体验: the answer reads like talk', () => {
     );
     expect(two).toMatch(/…2M — S\$12\.45/);
     expect(three).toBe(
-      '3. Belkin Eco USB C to USB C 60W Braided Cable 3.3ft… — S$9.43（这款没有主推价，有 1 个卖家报价 S$9.43）',
+      // FIX-58 P1-7: the price said before the note is not said again inside it.
+      '3. Belkin Eco USB C to USB C 60W Braided Cable 3.3ft… — S$9.43（没有主推价，有 1 个卖家报价）',
     );
   });
 

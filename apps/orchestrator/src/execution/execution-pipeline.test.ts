@@ -1650,6 +1650,14 @@ describe('list failures keep a draft that declares its gaps (FIX-BATCH-A)', () =
       intent: '在当前京东降噪耳机搜索页，告诉我前三个商品的名称和价格，并附商品链接。',
       executionMode: 'browser',
     });
+    // FIX-58 P0: a browser run that read the page records where it was (final_url); one that
+    // read nothing may not give prices at all.
+    recordEvidence(taskId, {
+      fact: 'final_url=https://search.jd.com/Search?keyword=降噪耳机',
+      sourceType: 'browser_state',
+      sourceDetail: 'supercar terminal state',
+      confidence: 'observed',
+    });
     const out = await verifyAndFinalize({ taskId, answerText });
     disposeExecution(taskId);
     return out;

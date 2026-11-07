@@ -25,7 +25,14 @@ import { browserReplayStore } from './browser-replay-service.js';
 import { BrowserReplayRecorder } from './browser-replay.js';
 import { browserToolError } from './browser-tool-error.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
+import { UNPLACED_POST_MESSAGE } from './cloud-observation.js';
 import { installDomainEgress } from './domain-egress.js';
+import {
+  type PausedAction,
+  effectPauseQuestion,
+  refName,
+  siteCalled,
+} from './effect-pause-copy.js';
 import { CAPTCHA_SCREENSHOT_STYLE, captchaHandoffEvidence } from './full-page-read.js';
 import {
   type UnifiedToolResult,
@@ -33,7 +40,12 @@ import {
 } from './playwright-unified-executor.js';
 import { siteEntryHint } from './site-entry-hints.js';
 import { createUnifiedActionGate } from './unified-action-gate.js';
-import { NOT_STARTED, runUnifiedBrowserLoop } from './unified-browser-loop.js';
+import {
+  NOT_STARTED,
+  isEnglishIntent,
+  isReadOnlyIntent,
+  runUnifiedBrowserLoop,
+} from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
 /** Ledger entries are capped per task (MAX_ENTRIES_PER_TASK); links take at most this many. */
@@ -102,6 +114,17 @@ function labelForRef(snapshotText: string, ref: string): string | null {
   const match = line?.match(/-\s+([a-z]+)(?:\s+"([^"]*)")?/);
   if (!match) return null;
   return match[2] ? `${match[1]} "${match[2]}"` : (match[1] ?? null);
+}
+
+async function safeTitle(page: { title(): Promise<string> }): Promise<string> {
+  try {
+    return await Promise.race([
+      page.title(),
+      new Promise<string>((resolve) => setTimeout(() => resolve(''), 1500)),
+    ]);
+  } catch {
+    return '';
+  }
 }
 
 function describe(action: UnifiedBrowserAction, label: string | null): string {
@@ -305,6 +328,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
 
   const toolsUsed = new Set<string>();
   let lastSnapshot = '';
+  /** FIX-58 复审 #2 第 4 项: the last action on the page, for the pause wording. */
+  let lastActed: PausedAction | null = null;
+  /** DEPLOY-58 第 0 步 2: what the last action set off, to tell a real submit. */
+  let lastTriggers: ReadonlyArray<{ branch: string; url: string }> = [];
   // FIX-BATCH-A — the contract the verifier will enforce is also the model's
   // output requirement, and the loop gets one remediation turn when a
   // completed list answer misses per-item sources or key fields.
@@ -735,8 +762,15 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         const id = `action-${++replayActionId}`;
         const targetPage = tools.page;
         await replay?.capture(targetPage, id, 'before');
+        if (['click', 'type', 'select', 'navigate'].includes(action.tool))
+          lastActed = {
+            tool: action.tool,
+            label: 'ref' in action && action.ref ? refName(lastSnapshot, action.ref) : null,
+            value: action.tool === 'select' ? action.value : null,
+          };
         const result = await tools.execute(action);
         page = tools.page;
+        lastTriggers = result.effect?.triggers ?? [];
         if (result.ok) opts.executor?.selectTaskPage?.(page);
         await replay?.capture(
           page,
@@ -845,7 +879,20 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       case 'awaiting_user':
         return {
           status: 'awaiting_user',
-          question: outcome.message,
+          question:
+            outcome.reason === 'unexpected_effect'
+              ? effectPauseQuestion({
+                  english: isEnglishIntent(opts.intent),
+                  site: siteCalled(await safeTitle(page), page.url(), isEnglishIntent(opts.intent)),
+                  action: lastActed,
+                  readOnly: isReadOnlyIntent(opts.intent),
+                  background: outcome.message === UNPLACED_POST_MESSAGE,
+                  triggers: [
+                    ...lastTriggers,
+                    ...(tools.observation?.pendingEffect()?.triggers ?? []),
+                  ],
+                })
+              : outcome.message,
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
         };

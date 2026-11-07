@@ -50,7 +50,7 @@ const contract = {
 describe('FIX-35 0a · an item card showing only 「See options」 is an honest gap', () => {
   it('the row’s own state is read before the snapshot’s cut marker → 部分完成', () => {
     expect(declaredMissingPriceRows(ANSWER, PAGE)).toEqual([1]);
-    expect(listPartialNote(contract, ANSWER, PAGE)).toMatch(/^部分完成：第 1 条/);
+    expect(listPartialNote(contract, ANSWER, PAGE)).toMatch(/^部分完成：第 1 款/);
   });
   it('item 1 showing its price: 「未获取到」 is still sent back', () => {
     const priced = PAGE.replace('See options', 'Price, product page\n$9.99');
@@ -217,7 +217,8 @@ describe('FIX-35 复审 #1 · 同时修: r06 / internal notes / failure refs', (
       verifiedText: answer,
       originalText: answer,
     });
-    expect(verdict.text).toContain('核验提示：第 2 条缺少独立来源链接');
+    expect(verdict.text).toContain('第 2 条缺少独立来源链接');
+    expect(verdict.text).not.toContain('核验提示');
   });
 
   it('BENCH d03: the failure copy carries no ref=eNN', () => {
