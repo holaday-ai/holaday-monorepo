@@ -918,12 +918,66 @@ function sensorsRecordOk(record: unknown): boolean {
   } else if (fields.event !== undefined) return false;
   const properties = fields.properties ?? {};
   if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return false;
+  // DEPLOY-58 第 0 步 1: nothing anywhere in the record — the SDK's own ids and `lib`, every
+  // property, `$` ones included — may carry a phone number, an email or an ID number.
+  if (sensorsCarriesPersonal(record)) return false;
   return Object.entries(properties as Record<string, unknown>).every(([key, value]) => {
     if (value !== null && typeof value === 'object') return false;
     if (typeof value === 'string' && value.length > 2048) return false;
     // The SDK's own `$` properties (page, screen, element); the site's custom ones name no input.
-    return key.startsWith('$') || !PERSONAL_KEY_RE.test(key);
+    if (!key.startsWith('$') && (PERSONAL_KEY_RE.test(key) || SENSORS_PERSONAL_KEY_RE.test(key)))
+      return false;
+    // A page address names no person either: 「$url: …?phone=…」.
+    return typeof value !== 'string' || !urlNamesPerson(value);
   });
+}
+
+/**
+ * DEPLOY-58 第 0 步 1 (复审 #3): key names of a person's own data — email, a real / user / contact
+ * name, an ID card, an address, a phone. 「navigation_name」「page_name」 are the page's own labels
+ * (故宫's nav-click and page-leave events carry them), not a person's name.
+ */
+const SENSORS_PERSONAL_KEY_RE =
+  /e-?mail|(?:^|[_-])mail(?:$|[_-])|^name$|(?:^|[_-])(?:real|full|true|user|first|last|nick|contact|customer|buyer|visitor|card|id)_?name$|(?:real|full|user|contact|customer)name|id_?card|idcard|identity_?(?:no|num|number|card)|passport|address|(?:^|[_-])addr(?:$|[_-])|phone|(?:^|[_-])tel(?:$|[_-])|telephone|contact/i;
+/** A mainland mobile number (optionally +86), an email, an 18- or 15-digit ID number. */
+const PERSONAL_FORMAT_RES: readonly RegExp[] = [
+  /(?<![\w.])(?:\+?86[\s-]?)?1[3-9]\d{9}(?![\w])/,
+  /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/,
+  /(?<![\w.])\d{6}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx](?![\w])/,
+  /(?<![\w.])\d{6}\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}(?![\w])/,
+];
+
+function textCarriesPersonal(text: string): boolean {
+  let decoded = text;
+  try {
+    decoded = decodeURIComponent(text);
+  } catch {
+    /* Not URL-encoded. */
+  }
+  return [text, decoded].some((one) => PERSONAL_FORMAT_RES.some((re) => re.test(one)));
+}
+
+function sensorsCarriesPersonal(value: unknown, depth = 0): boolean {
+  if (depth > KEYED_JSON_MAX_DEPTH) return true;
+  if (typeof value === 'string') return textCarriesPersonal(value);
+  if (typeof value === 'number') return /^1[3-9]\d{9}$/.test(String(value));
+  if (!value || typeof value !== 'object') return false;
+  return Object.values(value as Record<string, unknown>).some((one) =>
+    sensorsCarriesPersonal(one, depth + 1),
+  );
+}
+
+/** A page address whose query names a person's data (「?phone=…」「&email=…」「?real_name=…」). */
+function urlNamesPerson(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return [...url.searchParams.keys()].some(
+    (key) => PERSONAL_KEY_RE.test(key) || SENSORS_PERSONAL_KEY_RE.test(key),
+  );
 }
 
 export function sensorsDataBeacon(url: URL, method: string, postData: string): boolean {

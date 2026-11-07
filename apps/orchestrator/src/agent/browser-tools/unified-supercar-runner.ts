@@ -330,6 +330,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   let lastSnapshot = '';
   /** FIX-58 复审 #2 第 4 项: the last action on the page, for the pause wording. */
   let lastActed: PausedAction | null = null;
+  /** DEPLOY-58 第 0 步 2: what the last action set off, to tell a real submit. */
+  let lastTriggers: ReadonlyArray<{ branch: string; url: string }> = [];
   // FIX-BATCH-A — the contract the verifier will enforce is also the model's
   // output requirement, and the loop gets one remediation turn when a
   // completed list answer misses per-item sources or key fields.
@@ -768,6 +770,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           };
         const result = await tools.execute(action);
         page = tools.page;
+        lastTriggers = result.effect?.triggers ?? [];
         if (result.ok) opts.executor?.selectTaskPage?.(page);
         await replay?.capture(
           page,
@@ -884,6 +887,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                   action: lastActed,
                   readOnly: isReadOnlyIntent(opts.intent),
                   background: outcome.message === UNPLACED_POST_MESSAGE,
+                  triggers: [
+                    ...lastTriggers,
+                    ...(tools.observation?.pendingEffect()?.triggers ?? []),
+                  ],
                 })
               : outcome.message,
           iterations: outcome.steps,

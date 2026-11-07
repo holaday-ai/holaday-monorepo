@@ -63,6 +63,37 @@ export function siteCalled(
   }
 }
 
+/**
+ * DEPLOY-58 第 0 步 2 (复审 #3): a control or request that looks like an order, a payment, a booking,
+ * a submit or a confirm. Then the pause does not say it lightly: it may already have gone through.
+ */
+const SUBMIT_LABEL_RE =
+  /下单|提交|支付|付款|结算|购买|立即购|立即抢|预约|预订|订票|购票|抢票|确认|确定|报名|注册|发送|发布|place (?:your )?order|\bpay(?:ment)?\b|check ?out|\bbuy\b|purchase|\bbook(?:ing)?\b|reserve|reservation|\bsubmit\b|\bconfirm\b|sign ?up|\bregister\b|\bsend\b|\bpost\b/i;
+const SUBMIT_TRIGGER_BRANCHES = new Set([
+  'transaction_request',
+  'transaction_navigation',
+  'transaction_popup',
+  'new_transaction_receipt',
+]);
+const SUBMIT_PATH_RE =
+  /order|pay|checkout|booking|reserv|submit|confirm|purchase|ticket|appointment|register|signup/i;
+
+export function looksSubmitted(
+  action: PausedAction | null,
+  triggers: ReadonlyArray<{ branch: string; url: string }> = [],
+): boolean {
+  if (action?.label && SUBMIT_LABEL_RE.test(action.label)) return true;
+  return triggers.some((trigger) => {
+    if (SUBMIT_TRIGGER_BRANCHES.has(trigger.branch)) return true;
+    if (trigger.branch === 'intercepted_submit') return false;
+    try {
+      return SUBMIT_PATH_RE.test(new URL(trigger.url).pathname);
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function effectPauseQuestion(input: {
   english: boolean;
   site: string;
@@ -71,9 +102,12 @@ export function effectPauseQuestion(input: {
   readOnly: boolean;
   /** Every request that paused was a background report nothing could place. */
   background: boolean;
+  /** What paused it (branch and address), to tell a real submit. */
+  triggers?: ReadonlyArray<{ branch: string; url: string }>;
 }): string {
   const { english, site, action, readOnly, background } = input;
   const label = action?.label?.trim();
+  const submitted = looksSubmitted(action, input.triggers);
   if (english) {
     const did =
       action?.tool === 'click'
@@ -90,6 +124,8 @@ export function effectPauseQuestion(input: {
               ? 'opened the page'
               : 'acted on the page';
     const where = site ? ` on ${site}` : '';
+    if (submitted)
+      return `I ${did}${where}. This step may already have gone through (an order or booking may have been created). Please check the screen on the right first, and cancel it if needed.`;
     const what = background
       ? 'the page sent a background request I could not identify'
       : 'the page seems to have submitted a request';
@@ -113,6 +149,8 @@ export function effectPauseQuestion(input: {
             ? '打开了页面'
             : '操作了一下页面';
   const where = site ? `在${site}` : '';
+  if (submitted)
+    return `我${where}${did}，这一步可能已经提交成功了（可能已经生成订单或预约）。请先在右侧画面核对，需要的话去取消。`;
   const what = background ? '页面在后台发出了一个我认不出的请求' : '页面像是提交了一个请求';
   const next = readOnly
     ? '你看一下右侧画面有没有生成预约或订单；没有的话回复「继续」，我接着只读查看。'
