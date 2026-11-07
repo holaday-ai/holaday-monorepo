@@ -24,7 +24,9 @@ import type { EvidenceLedger } from './evidence-ledger.js';
  */
 import type { ExecutionContract } from './execution-contract.js';
 import type { ExpertWorkflowContract } from './expert-workflow-contract.js';
+import type { TaskVerificationContext } from './task-verification-context.js';
 import { TEXT_URL_RE as URL_RE, trimTextUrl } from './text-urls.js';
+import { groundSideMentions } from './ungrounded-live-claims.js';
 
 /**
  * Markdown link `[text](https://...)`. Captured separately from the
@@ -49,7 +51,8 @@ export type AutoFixKind =
   | 'empty_url_fill'
   | 'ecommerce_row_prune'
   | 'duplicate_candidate_link_drop'
-  | 'source_annotation_note';
+  | 'source_annotation_note'
+  | 'ungrounded_mention_fix';
 
 export interface AutoFixOp {
   kind: AutoFixKind;
@@ -62,6 +65,8 @@ export interface AutoFixInputs {
   verification: VerificationResult;
   answerText: string;
   workflowContract?: Pick<ExpertWorkflowContract, 'workflowId' | 'reportSections'>;
+  /** The task's whole request and attachments (FIX-58: the user's own values stay theirs). */
+  verificationContext?: Pick<TaskVerificationContext, 'initialRequest' | 'userTurns' | 'materials'>;
 }
 
 export interface AutoFixOutput {
@@ -138,6 +143,31 @@ export function autoFix(inputs: AutoFixInputs): AutoFixOutput {
     const out = addWorkflowSourceNotes(text, inputs.workflowContract);
     text = out.text;
     ops.push(...out.ops);
+  }
+
+  // 4. FIX-58 复审 #1: a source named in passing goes with its sentence; a live value said on
+  // the side (not the one asked) becomes an estimate. Nothing read, nothing invented.
+  const sideMention = inputs.verification.checks.find(
+    (c) => c.criterionId === 'generic.ungrounded_side_mention' && !c.passed,
+  );
+  if (sideMention) {
+    const out = groundSideMentions({
+      answerText: text,
+      ledger: inputs.ledger,
+      ...(inputs.verificationContext ? { verificationContext: inputs.verificationContext } : {}),
+    });
+    if (out.text !== text && out.text.trim()) {
+      text = out.text;
+      ops.push({
+        kind: 'ungrounded_mention_fix',
+        detail: [
+          out.removed.length ? `removed source sentence: ${out.removed.join(' | ')}` : '',
+          out.estimated.length ? `said as estimate: ${out.estimated.join(' | ')}` : '',
+        ]
+          .filter(Boolean)
+          .join('; '),
+      });
+    }
   }
 
   return { fixed: text, applied: ops };

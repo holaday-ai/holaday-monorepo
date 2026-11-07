@@ -50,7 +50,7 @@ describe('frontend audit regressions', () => {
       'https://',
     );
     expect(formatSourceAttribution('来源 eastmoney:stock-news-search · 抓取 21:06')).toBe(
-      '东方财富 · 抓取于 21:06',
+      '东方财富 · 21:06',
     );
     expect(
       formatSourceAttribution('[原文](https://example.com/eastmoney:stock-news-search)'),

@@ -876,6 +876,149 @@ export function keyedLogCheck(url: URL, postData: string): string | null {
   return keyed[3](postData);
 }
 
+/**
+ * FIX-58 复审 #2 第 4 项 (候选版 tsk_GkAUGCaxSAfwpFDRiSxaR「故宫门票多少钱」): 故宫官网 reports page
+ * views and clicks to 神策 (Sensors Data) by sendBeacon — `POST gugong-pro.datasink.sensorsdata.cn/sa.gif
+ * ?project=…&token=…` with the form `data=<base64 of one JSON event>&ext=crc=<int>`. A click on the
+ * nav link 「导览」 sent two of them and paused a read-only price lookup. Exactly this shape: that
+ * host and path, query keys `project` / `token` only (short tokens), the body keys `data` and `ext`
+ * once each, `ext` a `crc=<int>`, `data` base64 of one JSON event (or a list of up to 10) whose type
+ * is `track` or `profile_set_once`, with the SDK's own top-level keys only, an event name with no
+ * write word and no custom property naming something a person typed — at most 8 KB. The site's
+ * own requests (www.dpm.org.cn, its ticket site) are never this, and still pause.
+ */
+const SENSORS_DATA_ENDPOINTS: ReadonlyArray<readonly [host: string, path: string]> = [
+  ['gugong-pro.datasink.sensorsdata.cn', '/sa.gif'],
+];
+const SENSORS_QUERY_KEYS = new Set(['project', 'token']);
+const SENSORS_EVENT_TYPES = new Set(['track', 'profile_set_once']);
+const SENSORS_TOP_KEYS = new Set([
+  '_flush_time',
+  '_track_id',
+  'anonymous_id',
+  'distinct_id',
+  'event',
+  'identities',
+  'lib',
+  'properties',
+  'time',
+  'type',
+]);
+const SENSORS_MAX_RECORDS = 10;
+
+function sensorsRecordOk(record: unknown): boolean {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return false;
+  const fields = record as Record<string, unknown>;
+  if (!Object.keys(fields).every((key) => SENSORS_TOP_KEYS.has(key))) return false;
+  if (typeof fields.type !== 'string' || !SENSORS_EVENT_TYPES.has(fields.type)) return false;
+  if (fields.type === 'track') {
+    const event = fields.event;
+    if (typeof event !== 'string' || !/^\$?[A-Za-z][\w$]{0,63}$/.test(event)) return false;
+    if (ACTION_WORD_RE.test(event)) return false;
+  } else if (fields.event !== undefined) return false;
+  const properties = fields.properties ?? {};
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return false;
+  // DEPLOY-58 第 0 步 1: nothing anywhere in the record — the SDK's own ids and `lib`, every
+  // property, `$` ones included — may carry a phone number, an email or an ID number.
+  if (sensorsCarriesPersonal(record)) return false;
+  return Object.entries(properties as Record<string, unknown>).every(([key, value]) => {
+    if (value !== null && typeof value === 'object') return false;
+    if (typeof value === 'string' && value.length > 2048) return false;
+    // The SDK's own `$` properties (page, screen, element); the site's custom ones name no input.
+    if (!key.startsWith('$') && (PERSONAL_KEY_RE.test(key) || SENSORS_PERSONAL_KEY_RE.test(key)))
+      return false;
+    // A page address names no person either: 「$url: …?phone=…」.
+    return typeof value !== 'string' || !urlNamesPerson(value);
+  });
+}
+
+/**
+ * DEPLOY-58 第 0 步 1 (复审 #3): key names of a person's own data — email, a real / user / contact
+ * name, an ID card, an address, a phone. 「navigation_name」「page_name」 are the page's own labels
+ * (故宫's nav-click and page-leave events carry them), not a person's name.
+ */
+const SENSORS_PERSONAL_KEY_RE =
+  /e-?mail|(?:^|[_-])mail(?:$|[_-])|^name$|(?:^|[_-])(?:real|full|true|user|first|last|nick|contact|customer|buyer|visitor|card|id)_?name$|(?:real|full|user|contact|customer)name|id_?card|idcard|identity_?(?:no|num|number|card)|passport|address|(?:^|[_-])addr(?:$|[_-])|phone|(?:^|[_-])tel(?:$|[_-])|telephone|contact/i;
+/** A mainland mobile number (optionally +86), an email, an 18- or 15-digit ID number. */
+const PERSONAL_FORMAT_RES: readonly RegExp[] = [
+  /(?<![\w.])(?:\+?86[\s-]?)?1[3-9]\d{9}(?![\w])/,
+  /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/,
+  /(?<![\w.])\d{6}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx](?![\w])/,
+  /(?<![\w.])\d{6}\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}(?![\w])/,
+];
+
+function textCarriesPersonal(text: string): boolean {
+  let decoded = text;
+  try {
+    decoded = decodeURIComponent(text);
+  } catch {
+    /* Not URL-encoded. */
+  }
+  return [text, decoded].some((one) => PERSONAL_FORMAT_RES.some((re) => re.test(one)));
+}
+
+function sensorsCarriesPersonal(value: unknown, depth = 0): boolean {
+  if (depth > KEYED_JSON_MAX_DEPTH) return true;
+  if (typeof value === 'string') return textCarriesPersonal(value);
+  if (typeof value === 'number') return /^1[3-9]\d{9}$/.test(String(value));
+  if (!value || typeof value !== 'object') return false;
+  return Object.values(value as Record<string, unknown>).some((one) =>
+    sensorsCarriesPersonal(one, depth + 1),
+  );
+}
+
+/** A page address whose query names a person's data (「?phone=…」「&email=…」「?real_name=…」). */
+function urlNamesPerson(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return [...url.searchParams.keys()].some(
+    (key) => PERSONAL_KEY_RE.test(key) || SENSORS_PERSONAL_KEY_RE.test(key),
+  );
+}
+
+export function sensorsDataBeacon(url: URL, method: string, postData: string): boolean {
+  if (method !== 'POST') return false;
+  if (
+    !SENSORS_DATA_ENDPOINTS.some(([host, path]) => url.hostname === host && url.pathname === path)
+  )
+    return false;
+  const query = [...url.searchParams];
+  if (
+    query.some(([key, value]) => !SENSORS_QUERY_KEYS.has(key) || !/^[\w.-]{0,64}$/.test(value)) ||
+    new Set(query.map(([key]) => key)).size !== query.length
+  )
+    return false;
+  if (postData.length > KEYED_LOG_BODY_MAX || /^\s*[{[]/.test(postData)) return false;
+  const form = new URLSearchParams(postData);
+  const keys = [...form.keys()];
+  if (keys.length !== 2 || !keys.includes('data') || !keys.includes('ext')) return false;
+  if (!/^crc=-?\d{1,12}$/.test(form.get('ext') ?? '')) return false;
+  const data = (form.get('data') ?? '').replace(/ /g, '+');
+  if (!data || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) return false;
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(Buffer.from(data, 'base64').toString('utf8'));
+  } catch {
+    return false;
+  }
+  const records = Array.isArray(decoded) ? decoded : [decoded];
+  return (
+    records.length > 0 && records.length <= SENSORS_MAX_RECORDS && records.every(sensorsRecordOk)
+  );
+}
+
+function sensorsDataPost(url: URL, request: Request): boolean {
+  try {
+    return sensorsDataBeacon(url, request.method(), request.postData() ?? '');
+  } catch {
+    return false;
+  }
+}
+
 export function anchoredLogPost(url: URL, method: string, postData: string): boolean {
   if (
     method !== 'POST' ||
@@ -1589,7 +1732,8 @@ export class CloudObservation {
       !transactional &&
       (passiveTelemetryRequest(url, r.resourceType()) ||
         bestBuySensorPost(url, r) ||
-        anchoredLogRequest(url, r));
+        anchoredLogRequest(url, r) ||
+        sensorsDataPost(url, r));
     const key = `${r.method()}:${url.origin}${url.pathname}`;
     // Timing alone does not establish causation. Only an instrumented trusted
     // interaction (or its async continuation) can attribute a write to us.

@@ -37,6 +37,8 @@ export const NEXT_STEPS_SYSTEM_PROMPT = `你是用户的私人助理，刚替用
 - 行情、点位这类结果：从结果里最显眼的具体变化出发，例如「创业板今天跌了 2.87%，要我看看是什么带动的吗？」「收盘后再告诉你三大指数的结果？」；只陈述事实和查原因，不预测涨跌、不给买卖建议。
 - 结果是「部分完成」时，第一条必须是补齐缺口的那一步（换个时间/换个方式拿到缺的那部分）。
 - 不要提议重新打开刚被拦下或打不开的那个页面（包括它的电脑版、原链接）；补缺口可以去同一网站的别的页面（如「再打开第 3 条商品页拿价格」）。
+- 不要提已经做完的事：结果里已经排好序、已经列成清单或表格、已经给出的数值，就不要再提议「排个序」「整理成清单」「查一下价格」。
+- 提议不能和结果里写的事实矛盾：结果说所有人都要预约，就不要提议「整理免预约人群清单」；结果说已售罄，就不要提议「帮你下单」。提议前先对一遍结果。
 - 不要给「再试一次？」「重试一下？」这类原样重来的提议：每条提议都要说清换成什么做法、去哪个页面或要什么。
 - 平台要和用户的任务对得上：用户给的链接域名就代表用户在用的平台（如 item.jd.com 就是京东）。不要跳到用户没提过、和任务无关的平台；用户自己说了要比价、跟其他平台比，才可以提其他平台。
 - 用户这次没说比价、也没提到别的平台时，所有提议都只能留在这次任务的网站上，不能出现任何其他平台或网站（用户最近其他任务里的平台也不行）。例如用户只让你在亚马逊查价格，就不要提「和京东同款对比」。
@@ -65,6 +67,30 @@ export interface GenerateNextStepsOptions {
   recentIntents?: readonly string[];
   /** 复审 #3: addresses that stopped the run (never offered again). */
   blockedUrls?: readonly string[];
+  /** Tests only: the time the steps are offered. */
+  now?: Date;
+}
+
+/** FIX-58 P1-5: an English request gets English steps and an English title. */
+export function isEnglishRequest(intent: string): boolean {
+  const text = intent.replace(/https?:\/\/\S+/g, ' ');
+  return !/\p{Script=Han}/u.test(text) && (text.match(/[A-Za-z]{2,}/g) ?? []).length >= 2;
+}
+
+/** FIX-58 P1-8: Saturday or Sunday in Beijing — the A-share market is closed. */
+export function marketClosedToday(now: Date): boolean {
+  const day = new Date(now.getTime() + 8 * 3_600_000).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+const MARKET_WORDS_RE = /指数|股|大盘|板块|行情|收盘|开盘|涨|跌|点位|创业板|沪深|成交/;
+
+/** 「创业板今天也跌了吗」 on a Saturday → 「创业板上个交易日也跌了吗」. */
+export function withoutTodayWhenClosed(steps: readonly NextStep[], now: Date): NextStep[] {
+  if (!marketClosedToday(now)) return [...steps];
+  const fix = (text: string) =>
+    MARKET_WORDS_RE.test(text) ? text.replace(/今天|今日/g, '上个交易日') : text;
+  return steps.map((step) => ({ label: fix(step.label), prompt: fix(step.prompt) }));
 }
 
 const OUTCOME_LABEL: Record<NextStepsOutcome, string> = {
@@ -97,6 +123,12 @@ export function nextStepsUserMessage(opts: Omit<GenerateNextStepsOptions, 'messa
   ];
   return [
     `用户这次的要求：${opts.intent}`,
+    isEnglishRequest(opts.intent)
+      ? '用户用英文提问：title、每条 label 和 prompt 都用英文写，不要出现中文。'
+      : '',
+    marketClosedToday(opts.now ?? new Date())
+      ? '今天是周末，A 股休市：说到行情时用「上个交易日」，不要说「今天涨/跌」。'
+      : '',
     domains.length ? `用户给的链接域名：${domains.join('、')}` : '',
     CROSS_PLATFORM_RE.test(opts.intent)
       ? ''
@@ -137,13 +169,18 @@ export async function generateNextStepsWithTitle(
   } catch {
     return none;
   }
-  return {
-    steps: withoutEchoes(
+  const english = isEnglishRequest(opts.intent);
+  const han = (text: string) => /\p{Script=Han}/u.test(text);
+  const steps = withoutTodayWhenClosed(
+    withoutEchoes(
       [opts.intent, ...(opts.recentIntents ?? [])],
       relevantNextSteps(opts.blockedUrls ?? [], filterNextSteps(opts.intent, parseNextSteps(raw))),
     ),
-    title: parseTaskTitle(raw),
-  };
+    opts.now ?? new Date(),
+  ).filter((step) => !english || (!han(step.label) && !han(step.prompt)));
+  const title = parseTaskTitle(raw);
+  // An English request keeps its own words in the sidebar rather than a Chinese title.
+  return { steps, title: english && title && han(title) ? null : title };
 }
 
 /** The sidebar title from the same JSON: 2–20 chars, no address, no browser preamble. */

@@ -6,14 +6,15 @@ const SOURCES: Record<string, string> = {
   sse: '上海证券交易所',
   szse: '深圳证券交易所',
 };
-/** Only generated attribution lines; never rewrite URLs or ordinary prose. */
+/**
+ * Only generated attribution lines; never rewrite URLs or ordinary prose. FIX-58 复审 #1: the
+ * time follows the source plainly (「东方财富 · 21:06」), like the market card — no 「抓取于」.
+ */
 export function formatSourceAttribution(text: string): string {
   return text.replace(
     /^(来源[：:]?\s+)([a-z][a-z0-9_-]*):[a-z0-9_-]+(\s*·\s*)抓取(?:于)?\s+([^\n]+)$/gim,
     (line, _prefix: string, source: string, separator: string, time: string) =>
-      SOURCES[source.toLowerCase()]
-        ? `${SOURCES[source.toLowerCase()]}${separator}抓取于 ${time}`
-        : line,
+      SOURCES[source.toLowerCase()] ? `${SOURCES[source.toLowerCase()]}${separator}${time}` : line,
   );
 }
 

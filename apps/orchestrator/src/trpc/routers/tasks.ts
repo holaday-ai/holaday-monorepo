@@ -18,7 +18,10 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } 
 import { z } from 'zod';
 import { ashareQaHandlesMode } from '../../agent/a-share/ashare-qa-lane-gate.js';
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
-import { createResponsesWebSearch } from '../../agent/browser-tools/unified-browser-loop.js';
+import {
+  createResponsesWebSearch,
+  withoutVerbatimNotes,
+} from '../../agent/browser-tools/unified-browser-loop.js';
 import {
   createFallbackWebSearch,
   createFirecrawlReadPage,
@@ -44,7 +47,9 @@ import {
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
 import { explainExecutionMode } from '../../agent/intent-classifier.js';
+import { matchLiveFact } from '../../agent/live-fact.js';
 import { DrizzleLlmCallRecorder, type LlmCallRecord } from '../../agent/llm-call-recorder.js';
+import { marketTableAsText, withSourceLinksApart } from '../../agent/market-answer.js';
 import { withMediaCallContext } from '../../agent/media-call-recorder.js';
 // Phase 24 RC follow-up — nav-failure safety net. Catches the
 // "false success" case where the agent calls task_done with a body
@@ -4832,6 +4837,17 @@ export const tasksRouter = router({
                   ) {
                     return;
                   }
+                  // FIX-58 P0: a live fact (price, stock, ranking…) is never answered from
+                  // memory — a lookup that found nothing goes to the browser, not generate.
+                  const liveFactLookup =
+                    scrapeOutcome.status === 'failed' && !!matchLiveFact(input.intent);
+                  if (
+                    liveFactLookup &&
+                    !pageUnreadable &&
+                    (await handOverToBrowser('没搜到实时数据，已自动改用云端浏览器去页面上查'))
+                  ) {
+                    return;
+                  }
 
                   // A1 — scrape failed → fall back to generate. Generate has
                   // zero infra dependencies (no Brave, no Firecrawl) so it's
@@ -4854,11 +4870,21 @@ export const tasksRouter = router({
                   if (scrapeOutcome.status === 'completed') {
                     outcome = {
                       status: 'completed',
-                      summary: scrapeOutcome.summary,
+                      // FIX-58 P1-2: the same 「原样 / 原文」 cleanup as a browser answer.
+                      // FIX-58 P1-10: a market answer's table is said as a sentence.
+                      // 复审 #1: a source link is set apart from the sentence before it.
+                      summary: withSourceLinksApart(
+                        marketTableAsText(
+                          withoutVerbatimNotes(scrapeOutcome.summary),
+                          input.intent,
+                        ),
+                      ),
                     };
                   } else if (
-                    pageUnreadable &&
-                    (scrapeOutcome.source === 'scrape' || scrapeOutcome.failureKind === 'blocked')
+                    (pageUnreadable &&
+                      (scrapeOutcome.source === 'scrape' ||
+                        scrapeOutcome.failureKind === 'blocked')) ||
+                    liveFactLookup
                   ) {
                     // A named page nobody could read is not answered from memory; nor is a
                     // search whose every result was a wall (FIX-32).
@@ -7764,8 +7790,9 @@ export const tasksRouter = router({
                             confidence: 'observed',
                           });
                         }
+                        // FIX-58 P1-2: search answers get the browser answer's 「原样」 cleanup.
                         const answerSummary = appendSearchSourceReferences(
-                          outcome.summary,
+                          withoutVerbatimNotes(outcome.summary),
                           terminalSearchSources,
                         );
                         browserOriginalAnswer = answerSummary;

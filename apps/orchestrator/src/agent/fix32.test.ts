@@ -61,7 +61,7 @@ describe('b-p02: a regional price is a price; a price the page lacks is said, no
     expect(declaredMissingPriceRows(P02_ROUND1, RESULTS_PAGE)).toEqual([1]);
     expect(reviewListAnswer(rowsContract, P02_ROUND1, RESULTS_PAGE)).toBeNull();
     expect(listPartialNote(rowsContract, P02_ROUND1, RESULTS_PAGE)).toBe(
-      '部分完成：第 1 条页面未显示价格（答案已如实说明）',
+      '部分完成：第 1 款页面上没显示价格。',
     );
   });
   it('PR #294 review: the claim needs a page that shows the price missing', () => {

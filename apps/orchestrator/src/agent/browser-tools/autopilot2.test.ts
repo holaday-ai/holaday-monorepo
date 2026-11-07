@@ -68,7 +68,7 @@ describe('1. post-hoc success criteria only annotate a completed browser answer'
     });
     expect(verdict).toMatchObject({
       status: 'completed',
-      text: '答案\n\n核验提示：缺少可点击来源',
+      text: '答案\n\n缺少可点击来源。',
     });
   });
   it('leaves non-completed outcomes to the shared derivation', () => {

@@ -439,6 +439,11 @@ export function isEnglishTask(intent: string): boolean {
   return /[a-z]{3,}/i.test(text) && !/[㐀-鿿]/.test(text);
 }
 
+/** FIX-58 P1-5: the line above a failed task's ways on follows the task's language. */
+export function optionsHeader(intent: string): string {
+  return isEnglishTask(intent) ? "Here's what I can do:" : '我可以这样继续：';
+}
+
 /** 复审 #7: sites by the name a person uses — 「亚马逊新加坡站」 / 「Amazon Singapore」, not amazon.sg. */
 const SITE_WORDS: ReadonlyArray<[RegExp, string, string]> = [
   [/亚马逊新加坡站?|amazon\.sg\b|amazon\s+(?:sg|singapore)/i, '亚马逊新加坡站', 'Amazon Singapore'],

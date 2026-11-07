@@ -311,12 +311,38 @@ export function browserCompletionVerdict(input: {
   );
   // FIX-35 复审 #1 (BENCH n02/t02): a check's English internal detail (「only 0 URL(s) found
   // (global scan)…」) is for operators (`notes`); the user sees the ones written for them.
-  const visible = unique.filter((note) => /\p{Script=Han}/u.test(note));
+  // FIX-58 P1-1 (reg-new-amazon-sg 「核验提示：…要求至少 3 条名称/价格完整的结果」): the check's
+  // own words stay in `notes`; the user reads plain words, once, and only what the answer's
+  // 部分完成 lead does not already say.
+  const visible = kept.trimStart().startsWith('部分完成')
+    ? []
+    : [...new Set(unique.map(plainCheckNote).filter((note): note is string => !!note))];
   return {
     status: input.partial || short ? 'partial_success' : 'completed',
-    text: visible.length ? `${kept}\n\n核验提示：${visible.join('；')}` : kept,
+    text: visible.length ? `${kept}\n\n${visible.join('；')}。` : kept,
     notes: unique,
   };
+}
+
+/** A check's own wording (要求至少 / 解析到 / 可核验 / 链接规则) is for operators. */
+const INTERNAL_CHECK_WORDS_RE =
+  /要求至少|至少需要|解析到|可核验|核验|校验|门禁|唯一(?:商品)?链接|聚合页|品类页|criterion|checker/i;
+
+/** 「第 3 行缺少价格」 → 「第 3 款没读到价格」; a note in the check's own words → null. */
+export function plainCheckNote(note: string): string | null {
+  const text = note.replace(/^部分完成[：:]\s*/, '').trim();
+  if (!/\p{Script=Han}/u.test(text)) return null;
+  const rewritten = text
+    .split(/[；;]/)
+    .map((part) => part.trim())
+    .filter((part) => part && !INTERNAL_CHECK_WORDS_RE.test(part))
+    .map((part) =>
+      part
+        .replace(/第\s*([\d、]+)\s*行缺少(价格|名称|链接)/g, '第 $1 款没读到$2')
+        .replace(/[。.]+$/, ''),
+    )
+    .filter(Boolean);
+  return rewritten.length ? rewritten.join('；') : null;
 }
 
 /**
@@ -1036,6 +1062,7 @@ function runFixLoop(
     verification: initialVerification,
     answerText: inputs.answerText,
     ...(workflowContract ? { workflowContract } : {}),
+    ...(inputs.verificationContext ? { verificationContext: inputs.verificationContext } : {}),
   });
   if (fix.applied.length === 0) {
     // Nothing to fix — keep the original verdict but demote so
