@@ -2,7 +2,11 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { sensorsDataBeacon } from '../agent/browser-tools/cloud-observation.js';
-import { effectPauseQuestion, looksSubmitted } from '../agent/browser-tools/effect-pause-copy.js';
+import {
+  effectPauseQuestion,
+  looksSubmitted,
+  siteCalled,
+} from '../agent/browser-tools/effect-pause-copy.js';
 
 const SA_URL = new URL(
   'https://gugong-pro.datasink.sensorsdata.cn/sa.gif?project=default&token=abc',
@@ -83,12 +87,13 @@ describe('第 0 步 2 · a real submit is not said lightly', () => {
   it.each([
     ['下单', '提交订单'],
     ['支付', '立即支付'],
-    ['预约', '预约参观'],
+    ['预约', '确认预约'],
+    ['购票', '立即购票'],
     ['submit', 'Submit'],
     ['place order', 'Place order'],
     ['pay', 'Pay now'],
-    ['book', 'Book'],
-    ['confirm', 'Confirm'],
+    ['book', 'Book now'],
+    ['confirm', 'Confirm and pay'],
   ])('%s', (_k, label) => {
     expect(looksSubmitted({ tool: 'click', label })).toBe(true);
   });
@@ -115,12 +120,12 @@ describe('第 0 步 2 · a real submit is not said lightly', () => {
     );
     expect(text).not.toMatch(/continue/i);
   });
-  it('a transaction request or an order path counts, whatever the label', () => {
+  it('a transaction trigger counts, whatever the label', () => {
     for (const triggers of [
       [{ branch: 'transaction_request', url: 'https://shop.test/x' }],
       [{ branch: 'transaction_navigation', url: 'https://shop.test/x' }],
-      [{ branch: 'unknown_post', url: 'https://shop.test/api/order/create' }],
-      [{ branch: 'form_submit', url: 'https://shop.test/booking' }],
+      [{ branch: 'transaction_popup', url: '[task popup]' }],
+      [{ branch: 'new_transaction_receipt', url: 'https://shop.test/x' }],
     ])
       expect(
         effectPauseQuestion({
@@ -168,5 +173,112 @@ describe('第 0 步 3 / 4 · prompts', () => {
   });
   it('next steps: never contradict the facts in the result', () => {
     expect(read('../agent/next-steps-generator.ts')).toContain('提议不能和结果里写的事实矛盾');
+  });
+});
+
+/** 协调方核对第 0 步 (16:50 UTC, head d1246a90): read-only navigation is not a real submit. */
+describe('协调方核对 · reading and navigation are never said to have placed an order', () => {
+  const zh = (label: string, triggers: Array<{ branch: string; url: string }> = []) =>
+    effectPauseQuestion({
+      english: false,
+      site: '故宫博物院',
+      action: { tool: 'click', label },
+      readOnly: true,
+      background: false,
+      triggers,
+    });
+  it.each([
+    '预约须知',
+    '门票预订说明',
+    '购票须知',
+    '预约参观',
+    '购票',
+    '预约',
+    '确定',
+    '确认',
+    '注册',
+    '导览',
+    'Booking info',
+    'Booking policy',
+    'Ticket FAQ',
+    'Reservation guide',
+    'Register',
+    'Book',
+    'Confirm',
+    '提交订单说明',
+  ])('「%s」 alone is not a submit', (label) => {
+    expect(looksSubmitted({ tool: 'click', label })).toBe(false);
+    expect(zh(label)).not.toContain('提交成功');
+  });
+  it.each([
+    '立即购票',
+    '提交订单',
+    '确认支付',
+    '确认预约',
+    '立即预约',
+    '去支付',
+    '提交',
+    'Place order',
+    'Place your order',
+    'Pay now',
+    'Pay S$12.90',
+    'Book now',
+    'Submit',
+    'Submit order',
+    'Complete purchase',
+  ])('「%s」 is a submit', (label) => {
+    expect(looksSubmitted({ tool: 'click', label })).toBe(true);
+  });
+  it('an ordinary unexpected POST never counts by its path alone', () => {
+    for (const url of [
+      'https://www.dpm.org.cn/ticket/list',
+      'https://www.dpm.org.cn/api/register',
+      'https://shop.test/api/order/create',
+      'https://shop.test/booking/submit',
+    ])
+      for (const branch of ['unknown_post', 'form_submit', 'mutation_method']) {
+        expect(looksSubmitted({ tool: 'click', label: '导览' }, [{ branch, url }]), url).toBe(
+          false,
+        );
+        expect(zh('导览', [{ branch, url }])).toContain('没有的话回复「继续」');
+      }
+  });
+  it('English names the site in English, else by its address', () => {
+    expect(siteCalled('导览-故宫博物院', 'https://www.dpm.org.cn/Visit.html', true)).toBe(
+      'the Palace Museum website',
+    );
+    expect(siteCalled('故宫博物院 | The Palace Museum', 'https://en.dpm.org.cn/', true)).toBe(
+      'The Palace Museum',
+    );
+    expect(siteCalled('某某景区官网', 'https://www.example.cn/a', true)).toBe('example.cn');
+    expect(siteCalled('导览-故宫博物院', 'https://www.dpm.org.cn/Visit.html')).toBe('故宫博物院');
+    const en = effectPauseQuestion({
+      english: true,
+      site: siteCalled('导览-故宫博物院', 'https://www.dpm.org.cn/Visit.html', true),
+      action: { tool: 'click', label: 'Visit' },
+      readOnly: true,
+      background: false,
+    });
+    expect(en).toContain('on the Palace Museum website');
+    expect(en).not.toMatch(/[㐀-鿿]/);
+  });
+  it('a page address is checked by its query values, not its path', () => {
+    expect(passes(beacon({ $url: 'https://www.dpm.org.cn/13812345678.html' }))).toBe(true);
+    expect(passes(beacon({ $referrer: 'https://www.dpm.org.cn/a/a@b.cn/x' }))).toBe(true);
+    expect(passes(beacon({ $url: 'https://www.dpm.org.cn/x.html?q=13812345678' }))).toBe(false);
+    expect(passes(beacon({ $url: 'https://www.dpm.org.cn/x.html?q=a%40b.cn' }))).toBe(false);
+  });
+  it.each([
+    '+86 138 0013 8000',
+    '138 0013 8000',
+    '138-0013-8000',
+    '+86-138-0013-8000',
+    '+8613800138000',
+  ])('a phone written 「%s」 is recognised', (phone) => {
+    expect(passes(beacon({ $element_content: `联系 ${phone}` }))).toBe(false);
+  });
+  it('a 13-digit time and the observed ids still pass', () => {
+    expect(passes(beacon({ $element_content: '1794060930158' }))).toBe(true);
+    expect(passes(beacon())).toBe(true);
   });
 });

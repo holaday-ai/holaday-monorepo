@@ -939,9 +939,12 @@ function sensorsRecordOk(record: unknown): boolean {
  */
 const SENSORS_PERSONAL_KEY_RE =
   /e-?mail|(?:^|[_-])mail(?:$|[_-])|^name$|(?:^|[_-])(?:real|full|true|user|first|last|nick|contact|customer|buyer|visitor|card|id)_?name$|(?:real|full|user|contact|customer)name|id_?card|idcard|identity_?(?:no|num|number|card)|passport|address|(?:^|[_-])addr(?:$|[_-])|phone|(?:^|[_-])tel(?:$|[_-])|telephone|contact/i;
-/** A mainland mobile number (optionally +86), an email, an 18- or 15-digit ID number. */
+/**
+ * A mainland mobile number (optionally +86, spaces or dashes between the groups:「+86 138 0013 8000」),
+ * an email, an 18- or 15-digit ID number.
+ */
 const PERSONAL_FORMAT_RES: readonly RegExp[] = [
-  /(?<![\w.])(?:\+?86[\s-]?)?1[3-9]\d{9}(?![\w])/,
+  /(?<![\w.+])(?:\+?86[\s-]?)?1[3-9]\d(?:[\s-]?\d{4}){2}(?![\w])/,
   /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/,
   /(?<![\w.])\d{6}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx](?![\w])/,
   /(?<![\w.])\d{6}\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}(?![\w])/,
@@ -957,9 +960,24 @@ function textCarriesPersonal(text: string): boolean {
   return [text, decoded].some((one) => PERSONAL_FORMAT_RES.some((re) => re.test(one)));
 }
 
+/**
+ * 协调方核对第 0 步: a page address is checked by its query values only, never its path — a page
+ * named 「/13812345678.html」 is the site's own, not a person's number.
+ */
+function addressCarriesPersonal(value: string): boolean | null {
+  if (!/^https?:\/\//i.test(value.trim())) return null;
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return null;
+  }
+  return [...url.searchParams.values()].some((one) => textCarriesPersonal(one));
+}
+
 function sensorsCarriesPersonal(value: unknown, depth = 0): boolean {
   if (depth > KEYED_JSON_MAX_DEPTH) return true;
-  if (typeof value === 'string') return textCarriesPersonal(value);
+  if (typeof value === 'string') return addressCarriesPersonal(value) ?? textCarriesPersonal(value);
   if (typeof value === 'number') return /^1[3-9]\d{9}$/.test(String(value));
   if (!value || typeof value !== 'object') return false;
   return Object.values(value as Record<string, unknown>).some((one) =>

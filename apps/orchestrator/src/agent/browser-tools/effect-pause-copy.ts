@@ -45,17 +45,25 @@ const tidy = (text: string) => {
   return one.length > 24 ? `${one.slice(0, 23)}…` : one;
 };
 
-/** The site as a person names it: the page title's site part (「导览-故宫博物院」→「故宫博物院」), else the host. */
-export function siteCalled(
-  title: string | null | undefined,
-  url: string | null | undefined,
-): string {
-  const parts = (title ?? '')
-    .split(/\s*[-|_｜—–·]\s*/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const named = [...parts].reverse().find((part) => part.length >= 2 && part.length <= 16);
-  if (named) return named;
+/**
+ * English names of a few sites whose pages title themselves only in Chinese (协调方核对第 0 步: an
+ * English pause names 「the Palace Museum」, not 「故宫博物院」). Others fall back to the host.
+ */
+const ENGLISH_SITE_NAMES: ReadonlyArray<[RegExp, string]> = [
+  [/(?:^|\.)dpm\.org\.cn$/, 'the Palace Museum website'],
+  [/(?:^|\.)jd\.com$/, 'JD.com'],
+  [/(?:^|\.)taobao\.com$/, 'Taobao'],
+  [/(?:^|\.)tmall\.com$/, 'Tmall'],
+  [/(?:^|\.)ctrip\.com$/, 'Trip.com (Ctrip)'],
+  [/(?:^|\.)amap\.com$/, 'Amap'],
+  [/(?:^|\.)douyin\.com$/, 'Douyin'],
+  [/(?:^|\.)(?:xiaohongshu|rednote)\.com$/, 'Xiaohongshu'],
+  [/(?:^|\.)zhihu\.com$/, 'Zhihu'],
+  [/(?:^|\.)bilibili\.com$/, 'Bilibili'],
+];
+const CJK_RE = /[\u3400-\u9fff\uf900-\ufaff]/;
+
+function hostOf(url: string | null | undefined): string {
   try {
     return url ? new URL(url).hostname.replace(/^www\./, '') : '';
   } catch {
@@ -64,34 +72,70 @@ export function siteCalled(
 }
 
 /**
+ * The site as a person names it: the page title's site part (「导览-故宫博物院」→「故宫博物院」), else
+ * the host. In English: an English title part, else the site's English name, else the host.
+ */
+export function siteCalled(
+  title: string | null | undefined,
+  url: string | null | undefined,
+  english = false,
+): string {
+  const parts = (title ?? '')
+    .split(/\s*[-|_｜—–·]\s*/)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 2 && part.length <= (english ? 32 : 16));
+  const host = hostOf(url);
+  if (!english) return [...parts].reverse()[0] ?? host;
+  const englishPart = [...parts]
+    .reverse()
+    .find((part) => !CJK_RE.test(part) && /[a-z]/i.test(part));
+  if (englishPart) return englishPart;
+  return ENGLISH_SITE_NAMES.find(([re]) => re.test(host))?.[1] ?? host;
+}
+
+/**
  * DEPLOY-58 第 0 步 2 (复审 #3): a control or request that looks like an order, a payment, a booking,
  * a submit or a confirm. Then the pause does not say it lightly: it may already have gone through.
+ *
+ * 协调方核对第 0 步: only a control named for the act counts (「立即购票」「提交订单」「确认支付」
+ * 「确认预约」「Place order」「Pay now」「Book now」「Submit」). A word alone does not:「预约须知」
+ * 「门票预订说明」「Booking info」, a dialog's 「确定」, a menu's 「预约参观」「购票」 are reading
+ * or navigation. Anything named as information (须知 / 说明 / 规则 / 指南 / 详情 / info / policy /
+ * FAQ) never counts.
  */
-const SUBMIT_LABEL_RE =
-  /下单|提交|支付|付款|结算|购买|立即购|立即抢|预约|预订|订票|购票|抢票|确认|确定|报名|注册|发送|发布|place (?:your )?order|\bpay(?:ment)?\b|check ?out|\bbuy\b|purchase|\bbook(?:ing)?\b|reserve|reservation|\bsubmit\b|\bconfirm\b|sign ?up|\bregister\b|\bsend\b|\bpost\b/i;
+const INFO_LABEL_RE =
+  /须知|说明|规则|指南|详情|介绍|政策|帮助|常见问题|\binfo\b|information|\bpolic(?:y|ies)\b|\bfaq\b|\bguide\b|\bhelp\b|\bterms\b|\bdetails?\b|\blearn more\b/i;
+/** A whole label that is itself the act: 「提交」「下单」「支付」「Submit」「Pay」. */
+const SUBMIT_WHOLE_LABEL_RE =
+  /^(?:提交|下单|支付|付款|立即支付|立即付款|submit|pay|place order|place your order|buy now|book now|pay now|send|post)$/i;
+const SUBMIT_ACT_RE =
+  /提交(?:订单|预约|预订|申请|报名|支付)|确认(?:支付|付款|订单|下单|预约|预订|购买|购票|提交|报名)|立即(?:购买|购票|订票|预约|预订|支付|付款|下单|抢购|抢票|报名|注册)|去(?:支付|付款)|马上(?:购买|抢购|预约|下单)|\bplace (?:your )?order\b|\bpay now\b|\bpay (?:s?\$|¥|€|£|rm|usd|sgd)|\bbook now\b|\breserve now\b|\bbuy now\b|\bcomplete (?:purchase|order|booking|payment)\b|\bconfirm (?:and pay|payment|order|booking|purchase|reservation)\b|\bsubmit (?:order|booking|payment|application|request)\b/i;
+/** What paused it was itself a transaction (a checkout or payment request or page, a new receipt). */
 const SUBMIT_TRIGGER_BRANCHES = new Set([
   'transaction_request',
   'transaction_navigation',
   'transaction_popup',
   'new_transaction_receipt',
 ]);
-const SUBMIT_PATH_RE =
-  /order|pay|checkout|booking|reserv|submit|confirm|purchase|ticket|appointment|register|signup/i;
+
+function labelSubmits(label: string): boolean {
+  const one = label
+    .replace(/\s+/g, ' ')
+    .replace(/[…。.!！]+$/, '')
+    .trim();
+  if (!one || INFO_LABEL_RE.test(one)) return false;
+  return SUBMIT_WHOLE_LABEL_RE.test(one) || SUBMIT_ACT_RE.test(one);
+}
 
 export function looksSubmitted(
   action: PausedAction | null,
   triggers: ReadonlyArray<{ branch: string; url: string }> = [],
 ): boolean {
-  if (action?.label && SUBMIT_LABEL_RE.test(action.label)) return true;
-  return triggers.some((trigger) => {
-    if (SUBMIT_TRIGGER_BRANCHES.has(trigger.branch)) return true;
-    if (trigger.branch === 'intercepted_submit') return false;
-    try {
-      return SUBMIT_PATH_RE.test(new URL(trigger.url).pathname);
-    } catch {
-      return false;
-    }
-  });
+  if (action?.label && labelSubmits(action.label)) return true;
+  // An ordinary unexpected POST (「unknown_post」, a form, a method write) never counts by its path
+  // alone: 故宫's 「导览」 may fire `/ticket/list` or `/register`. The path counts only through the
+  // transaction triggers, which the observation already sets from the checkout / payment paths.
+  return triggers.some((trigger) => SUBMIT_TRIGGER_BRANCHES.has(trigger.branch));
 }
 
 export function effectPauseQuestion(input: {

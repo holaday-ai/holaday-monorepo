@@ -883,7 +883,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             outcome.reason === 'unexpected_effect'
               ? effectPauseQuestion({
                   english: isEnglishIntent(opts.intent),
-                  site: siteCalled(await safeTitle(page), page.url()),
+                  site: siteCalled(await safeTitle(page), page.url(), isEnglishIntent(opts.intent)),
                   action: lastActed,
                   readOnly: isReadOnlyIntent(opts.intent),
                   background: outcome.message === UNPLACED_POST_MESSAGE,
