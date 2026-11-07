@@ -1,7 +1,4 @@
-import type {
-  EnergyContentTarget,
-  EnergyExperienceLaunchTarget,
-} from './energy-content-target';
+import type { EnergyContentTarget, EnergyExperienceLaunchTarget } from './energy-content-target';
 import type { EnergyAstrologyPeriod, EnergyExperienceId } from './energy-types';
 
 export type EnergyTargetCommand =

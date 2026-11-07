@@ -1,15 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import type { ExpertWorkflowContract, WorkflowInput } from './expert-workflow-contract.js';
 import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
-import type {
-  ExpertWorkflowContract,
-  WorkflowInput,
-} from './expert-workflow-contract.js';
-import {
-  _internal,
-  buildClarificationQuestion,
-  parseInputs,
-} from './expert-workflow-parser.js';
+import { _internal, buildClarificationQuestion, parseInputs } from './expert-workflow-parser.js';
 
 const W = DOUYIN_REVIEW_WORKFLOW;
 
@@ -46,8 +39,7 @@ describe('coerceNumber', () => {
 
 describe('parseInputs — douyin required fields', () => {
   it('extracts all 5 required fields from a structured input string', () => {
-    const text =
-      'GMV: ¥100000  UV: 20000  订单: 1250  客单价: ¥80  转化率: 6.25%';
+    const text = 'GMV: ¥100000  UV: 20000  订单: 1250  客单价: ¥80  转化率: 6.25%';
     const r = parseInputs(text, W);
     expect(r.extracted).toEqual({
       gmv: 100000,
@@ -61,8 +53,7 @@ describe('parseInputs — douyin required fields', () => {
   });
 
   it('extracts from natural-language sentence', () => {
-    const text =
-      '昨天直播 GMV 是 200000 元，UV 50000，一共 500 单，客单价 400 元，转化率 1%。';
+    const text = '昨天直播 GMV 是 200000 元，UV 50000，一共 500 单，客单价 400 元，转化率 1%。';
     const r = parseInputs(text, W);
     expect(r.extracted.gmv).toBe(200000);
     expect(r.extracted.uv).toBe(50000);

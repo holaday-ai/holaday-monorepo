@@ -20,11 +20,11 @@
  * only invokes this when chrome.storage has no token already.
  */
 
-import { normalizeAccessToken } from './storage.js';
-import { isLocalQaWorkbenchUrl, LOCAL_CHROME_QA, WORKBENCH_URL } from './config.js';
+import { LOCAL_CHROME_QA, WORKBENCH_URL, isLocalQaWorkbenchUrl } from './config.js';
 import { withDeadline } from './deadline.js';
 import { compactLogErrorReason } from './log-error.js';
 import { sanitizePageContextUrl } from './page-context.js';
+import { normalizeAccessToken } from './storage.js';
 
 const TOKEN_KEY = 'holaday.access_token';
 const AUTO_LOGIN_TAB_READ_TIMEOUT_MS = 2_000;
@@ -67,9 +67,7 @@ async function readTokenFromTab(tabId: number, url: string): Promise<string | nu
     if (token && looksLikeAutoLoginToken(token)) {
       return token;
     }
-    console.info(
-      `[holaday] auto-login: tab ${tabId} (${logUrl}) has no token in localStorage`,
-    );
+    console.info(`[holaday] auto-login: tab ${tabId} (${logUrl}) has no token in localStorage`);
     return null;
   } catch (err) {
     console.warn(
@@ -149,10 +147,7 @@ export async function tryAutoLogin(): Promise<string | null> {
       'auto_login_tab_query_timeout',
     );
   } catch (err) {
-    console.warn(
-      '[holaday] auto-login: tabs.query({}) failed',
-      compactLogErrorReason(err),
-    );
+    console.warn('[holaday] auto-login: tabs.query({}) failed', compactLogErrorReason(err));
     return null;
   }
 

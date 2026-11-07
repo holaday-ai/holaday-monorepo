@@ -11,15 +11,18 @@ interface RuntimeMessageOptions {
   retryDelayMs?: number;
 }
 
-type AttemptResult<T> =
-  | { kind: 'ok'; response: T | null }
-  | { kind: 'retryable' };
+type AttemptResult<T> = { kind: 'ok'; response: T | null } | { kind: 'retryable' };
 
 export async function sendRuntimeMessageWithRetry<T>(
   message: unknown,
   options: RuntimeMessageOptions = {},
 ): Promise<T | null> {
-  const attempts = normalizeRuntimeMessageOption(options.attempts, DEFAULT_ATTEMPTS, 1, MAX_ATTEMPTS);
+  const attempts = normalizeRuntimeMessageOption(
+    options.attempts,
+    DEFAULT_ATTEMPTS,
+    1,
+    MAX_ATTEMPTS,
+  );
   const timeoutMs = normalizeRuntimeMessageOption(
     options.timeoutMs,
     DEFAULT_RUNTIME_MESSAGE_TIMEOUT_MS,

@@ -24,14 +24,11 @@ describe('appendSearchSourceReferences', () => {
   });
 
   it('deduplicates provider URLs and never repeats a link already in the answer', () => {
-    const result = appendSearchSourceReferences(
-      '已核对 https://www.cnbc.com/fund-update。',
-      [
-        { title: 'CNBC', url: 'https://www.cnbc.com/fund-update' },
-        { title: 'Yahoo\nFinance', url: 'https://finance.yahoo.com/fund' },
-        { title: 'Yahoo duplicate', url: 'https://finance.yahoo.com/fund' },
-      ],
-    );
+    const result = appendSearchSourceReferences('已核对 https://www.cnbc.com/fund-update。', [
+      { title: 'CNBC', url: 'https://www.cnbc.com/fund-update' },
+      { title: 'Yahoo\nFinance', url: 'https://finance.yahoo.com/fund' },
+      { title: 'Yahoo duplicate', url: 'https://finance.yahoo.com/fund' },
+    ]);
 
     expect(result).toContain('- [Yahoo Finance](https://finance.yahoo.com/fund)');
     expect(result).not.toContain('CNBC](https://www.cnbc.com/fund-update)');

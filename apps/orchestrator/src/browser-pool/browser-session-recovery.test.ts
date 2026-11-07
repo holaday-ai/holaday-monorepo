@@ -100,12 +100,12 @@ describe('BrowserSessionRestoreFlights', () => {
     const flights = new BrowserSessionRestoreFlights();
     const pool = {};
 
-    await expect(
-      flights.run(pool, 'tsk_retry', () => Promise.resolve('first')),
-    ).resolves.toBe('first');
-    await expect(
-      flights.run(pool, 'tsk_retry', () => Promise.resolve('second')),
-    ).resolves.toBe('second');
+    await expect(flights.run(pool, 'tsk_retry', () => Promise.resolve('first'))).resolves.toBe(
+      'first',
+    );
+    await expect(flights.run(pool, 'tsk_retry', () => Promise.resolve('second'))).resolves.toBe(
+      'second',
+    );
   });
 
   it('does not share restore work across browser pools', async () => {
@@ -113,12 +113,8 @@ describe('BrowserSessionRestoreFlights', () => {
     const firstPool = {};
     const secondPool = {};
 
-    const first = flights.run(firstPool, 'tsk_same', () =>
-      Promise.resolve('first'),
-    );
-    const second = flights.run(secondPool, 'tsk_same', () =>
-      Promise.resolve('second'),
-    );
+    const first = flights.run(firstPool, 'tsk_same', () => Promise.resolve('first'));
+    const second = flights.run(secondPool, 'tsk_same', () => Promise.resolve('second'));
 
     expect(second).not.toBe(first);
     await expect(first).resolves.toBe('first');

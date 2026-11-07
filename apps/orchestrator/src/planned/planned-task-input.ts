@@ -7,13 +7,7 @@ const { rrulestr } = rruleModule as {
   rrulestr: (value: string) => { after(date: Date, inclusive?: boolean): Date | null };
 };
 
-export const PLANNED_REPEAT_TYPES = [
-  'once',
-  'daily',
-  'weekly',
-  'monthly',
-  'custom',
-] as const;
+export const PLANNED_REPEAT_TYPES = ['once', 'daily', 'weekly', 'monthly', 'custom'] as const;
 
 export function validatePlannedRepeatRule(
   repeatType: PlannedRepeatType,
@@ -26,9 +20,7 @@ export function validatePlannedRepeatRule(
   try {
     rrulestr(rrule.trim());
   } catch (error) {
-    throw new Error(
-      `重复规则格式错误：${error instanceof Error ? error.message : String(error)}`,
-    );
+    throw new Error(`重复规则格式错误：${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -68,7 +60,16 @@ export const plannedTaskCreateInputSchema = z
     rrule: rruleSchema,
     timezone: z.string().trim().min(1).max(64).default('Asia/Shanghai'),
     endsOn: plannedEndsOnInputSchema,
-    reminderMinutes: z.number().int().min(0).max(60 * 24 * 7).nullable().optional(),
+    reminderMinutes: z
+      .number()
+      .int()
+      .min(0)
+      .max(60 * 24 * 7)
+      .nullable()
+      .optional(),
+    // Batch 10.3 — outcome notification preferences.
+    notifyOnSuccess: z.boolean().optional(),
+    failureNotifyThreshold: z.number().int().min(1).max(10).optional(),
   })
   .superRefine((value, ctx) => {
     if (!value.instruction && value.items.length === 0) {
@@ -117,6 +118,8 @@ export function resolveRequestedSchedule(input: {
   repeatType: PlannedRepeatType;
   rrule: string | null;
   now?: Date;
+  /** Batch 10.3 — plan timezone for rrule wall-clock evaluation. */
+  timezone?: string | null;
 }): { firstRunAt: Date; nextRunAt: Date; adjusted: boolean } {
   const firstRunAt = new Date(input.scheduledAt);
   if (Number.isNaN(firstRunAt.getTime())) throw new Error('执行时间无效');
@@ -132,6 +135,8 @@ export function resolveRequestedSchedule(input: {
       from: input.rrule ? now : nextRunAt,
       rrule: input.rrule,
       repeatType: input.repeatType,
+      anchor: firstRunAt,
+      timezone: input.timezone ?? null,
     });
     if (!next) throw new Error('无法计算下次执行时间，请检查重复规则');
     nextRunAt = next;

@@ -1,3 +1,5 @@
+import { useTaskStore } from '@/stores/task-store';
+import type { UiTask } from '@/types/task';
 // @vitest-environment happy-dom
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -6,9 +8,30 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InputArea } from './InputArea';
 import { ToastProvider } from './ui/toast';
 
-vi.mock('@/lib/trpc', () => ({ trpc: { skills: { list: { query: async () => [] } } } }));
+vi.mock('@/lib/trpc', () => ({
+  trpc: {
+    skills: { list: { query: async () => [] } },
+    models: {
+      list: {
+        query: async () => ({
+          items: [
+            {
+              id: 'qwen',
+              label: '千问',
+              provider: 'alibaba-model-studio',
+              isDefault: true,
+              adminOnly: false,
+              configured: true,
+            },
+          ],
+        }),
+      },
+    },
+  },
+}));
 afterEach(() => {
   cleanup();
+  useTaskStore.setState({ tasks: [], selectedTaskId: null });
   vi.restoreAllMocks();
 });
 function mount(attachmentsAllowed: boolean) {
@@ -23,10 +46,24 @@ function mount(attachmentsAllowed: boolean) {
   return { user: userEvent.setup(), onSubmit };
 }
 describe('composer task choices independent of attachment entitlement', () => {
+  it('exposes exclusive execution mode selection without closing the menu', async () => {
+    const { user } = mount(true);
+    await user.click(screen.getByRole('button', { name: '附件与任务选项' }));
+    const auto = screen.getByRole('menuitemradio', { name: '自动执行' });
+    const plan = screen.getByRole('menuitemradio', { name: '先出方案' });
+    expect(auto.getAttribute('aria-checked')).toBe('true');
+    expect(plan.getAttribute('aria-checked')).toBe('false');
+    await user.click(plan);
+    expect(auto.getAttribute('aria-checked')).toBe('false');
+    expect(plan.getAttribute('aria-checked')).toBe('true');
+    await user.click(auto);
+    expect(auto.getAttribute('aria-checked')).toBe('true');
+    expect(plan.getAttribute('aria-checked')).toBe('false');
+  });
   it('lets a user without attachments select plan mode and submit it', async () => {
     const { user, onSubmit } = mount(false);
     await user.click(screen.getByRole('button', { name: '附件与任务选项' }));
-    await user.click(screen.getByRole('menuitem', { name: '先出方案' }));
+    await user.click(screen.getByRole('menuitemradio', { name: '先出方案' }));
     await user.keyboard('{Escape}');
     await user.type(screen.getByRole('textbox'), '只制定三步计划');
     await user.click(screen.getByRole('button', { name: '发送' }));
@@ -49,5 +86,34 @@ describe('composer task choices independent of attachment entitlement', () => {
     await user.click(screen.getByRole('menuitem', { name: '添加照片和文件' }));
     expect(open).toHaveBeenCalledOnce();
     expect(screen.queryByText(/免费版不支持附件/)).toBeNull();
+  });
+
+  it('shows 千问 as a static model label when it is the only brain', async () => {
+    const { user } = mount(true);
+    await user.click(screen.getByRole('button', { name: '附件与任务选项' }));
+    expect(await screen.findByText('模型')).toBeTruthy();
+    expect(screen.getByText('千问')).toBeTruthy();
+  });
+});
+
+describe('existing task composer and Chrome entry', () => {
+  it.each(['generate', 'image', 'scrape'] as const)(
+    'uses follow-up copy and hides Chrome for %s tasks',
+    (executionMode) => {
+      useTaskStore.setState({
+        selectedTaskId: 'task-existing',
+        tasks: [{ taskId: 'task-existing', status: 'failed', executionMode } as UiTask],
+      });
+      mount(false);
+      expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe(
+        '补充问题或下一步指令...',
+      );
+      expect(screen.queryByText('连接 Chrome')).toBeNull();
+    },
+  );
+  it('does not offer Chrome in an untyped new task', () => {
+    useTaskStore.setState({ selectedTaskId: null, tasks: [] });
+    mount(false);
+    expect(screen.queryByText('连接 Chrome')).toBeNull();
   });
 });

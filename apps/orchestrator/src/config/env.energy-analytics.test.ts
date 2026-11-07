@@ -48,9 +48,9 @@ describe('energy analytics environment contract', () => {
     expect(parser).toBeDefined();
     if (!parser) return;
 
-    expect(() =>
-      parser.parse({ ...BASE_ENV, ENERGY_ANALYTICS_HMAC_SECRET: 'too-short' }),
-    ).toThrow(/at least 32/i);
+    expect(() => parser.parse({ ...BASE_ENV, ENERGY_ANALYTICS_HMAC_SECRET: 'too-short' })).toThrow(
+      /at least 32/i,
+    );
   });
 
   it('accepts shorter privacy retention and a dedicated high-entropy secret', () => {

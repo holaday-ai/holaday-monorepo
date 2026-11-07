@@ -367,14 +367,12 @@ export function decodeToolUse(toolName: string, input: unknown): VisionAction {
       // Never fail the whole task on a missing summary — the model
       // decided "done", we honour that. Empty summary surfaces a
       // placeholder so downstream UI shows something.
-      const summary =
-        (r.success ? r.data.summary : '') || '(commander 未提供摘要)';
+      const summary = (r.success ? r.data.summary : '') || '(commander 未提供摘要)';
       return { kind: 'done', summary };
     }
     case 'task_give_up': {
       const r = giveUpInputSchema.safeParse(input);
-      const reason =
-        (r.success ? r.data.reason : '') || 'Claude 调用 task_give_up 但未提供原因';
+      const reason = (r.success ? r.data.reason : '') || 'Claude 调用 task_give_up 但未提供原因';
       return { kind: 'give_up', reason };
     }
     default:

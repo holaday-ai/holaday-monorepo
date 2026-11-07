@@ -1,18 +1,18 @@
-import { describe, expect, it } from 'vitest';
 import type { UiTask } from '@/types/task';
+import { describe, expect, it } from 'vitest';
 import {
+  type ProjectTaskFilterState,
   emptyProjectTaskFilterState,
   projectFilterChipState,
-  projectTaskFilterAppendPage,
-  projectTaskFilterAfterUnsuccessfulTasksCleared,
   projectTaskFilterAfterTaskDelete,
   projectTaskFilterAfterTaskMove,
+  projectTaskFilterAfterUnsuccessfulTasksCleared,
+  projectTaskFilterAppendPage,
   projectTaskFilterFirstPage,
   projectTaskFilterLoadMoreFailed,
   projectTaskFilterStartLoadMore,
   refreshProjectTaskFilterState,
   resolveProjectFilteredTasks,
-  type ProjectTaskFilterState,
 } from './project-task-filter-state';
 
 describe('project task filter state', () => {
@@ -33,9 +33,7 @@ describe('project task filter state', () => {
       tasks: [task('tsk_a')],
     });
 
-    expect(resolveProjectFilteredTasks('proj_a', active, fallback)).toEqual([
-      task('tsk_a'),
-    ]);
+    expect(resolveProjectFilteredTasks('proj_a', active, fallback)).toEqual([task('tsk_a')]);
     expect(resolveProjectFilteredTasks(null, active, fallback)).toEqual(fallback);
   });
 
@@ -137,19 +135,12 @@ describe('project task filter state', () => {
     expect(
       projectTaskFilterAppendPage(projectTaskFilterStartLoadMore(first, 'proj_a'), {
         projectId: 'proj_a',
-        tasks: [
-          task('tsk_dup', { status: 'completed' }),
-          task('tsk_next'),
-        ],
+        tasks: [task('tsk_dup', { status: 'completed' }), task('tsk_next')],
         nextCursor: null,
       }),
     ).toEqual({
       ...first,
-      tasks: [
-        task('tsk_a'),
-        task('tsk_dup', { status: 'completed' }),
-        task('tsk_next'),
-      ],
+      tasks: [task('tsk_a'), task('tsk_dup', { status: 'completed' }), task('tsk_next')],
       loadingMore: false,
       nextCursor: null,
       hasMore: false,

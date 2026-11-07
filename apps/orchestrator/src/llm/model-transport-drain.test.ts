@@ -238,6 +238,9 @@ it('waits for a retryable response body and refuses a retry after disposal fails
   const held = new Promise<void>((_resolve, reject) => {
     fail = () => reject(new Error('synthetic disposal'));
   });
+  // The diagnostic reader may not request cancellation until its read times out.
+  // Keep this fixture's early rejection observed until production owns cleanup.
+  void held.catch(() => undefined);
   const fetchImpl = vi.fn(
     async () =>
       new Response(
@@ -473,5 +476,83 @@ it.each(['messages', 'responses'] as const)(
     drain.close();
     await vi.waitFor(() => expect(drain.snapshot()).toMatchObject({ idle: true, unknown: 0 }));
     expect(fetchImpl).not.toHaveBeenCalled();
+  },
+);
+
+it('does not dispatch a retry until the previous response reader is released', async () => {
+  let release!: () => void;
+  let cancelStarted!: () => void;
+  const cancellation = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    cancelStarted = resolve;
+  });
+  const previous = new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(8193));
+      },
+      cancel() {
+        cancelStarted();
+        return cancellation;
+      },
+    }),
+    { status: 503 },
+  );
+  let requests = 0;
+  const fetchImpl: typeof fetch = async () => {
+    if (++requests === 1) return previous;
+    expect(previous.body?.locked).toBe(false);
+    return response('messages');
+  };
+  const transport = createQwenMessagesTransport({ route, fetchImpl, retryBaseDelayMs: 0 });
+  const result = transport.messages.create(
+    { model: route.model, max_tokens: 10, messages: [] },
+    { maxRetries: 2 },
+  );
+  void result.catch(() => undefined);
+  await started;
+  // Give a wrongly admitted retry an opportunity to reach the external boundary.
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const requestsBeforeRelease = requests;
+  release();
+  expect(requestsBeforeRelease).toBe(1);
+  await expect(result).resolves.toEqual({ ok: true });
+  expect(requests).toBe(2);
+});
+
+it.each([400, 401, 403, 404, 422])(
+  'does not retry HTTP %s and retains sanitized diagnostics',
+  async (status) => {
+    let requests = 0;
+    const transport = createQwenMessagesTransport({
+      route,
+      retryBaseDelayMs: 0,
+      fetchImpl: async () => {
+        requests++;
+        return new Response(
+          JSON.stringify({
+            error: { code: 'InvalidRequest', message: 'synthetic-only private prompt' },
+          }),
+          { status, headers: { 'x-request-id': 'req-nonretry' } },
+        );
+      },
+    });
+    const error = await transport.messages
+      .create({ model: route.model, max_tokens: 10, messages: [] }, { maxRetries: 2 })
+      .catch((error: unknown) => error);
+    expect(error).toMatchObject({
+      code: 'PROVIDER_ERROR',
+      status,
+      diagnostics: {
+        httpStatus: status,
+        providerCode: 'InvalidRequest',
+        requestId: 'req-nonretry',
+        retryCount: 0,
+      },
+    });
+    expect(JSON.stringify(error)).not.toContain('private prompt');
+    expect(requests).toBe(1);
   },
 );

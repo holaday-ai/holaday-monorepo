@@ -14,17 +14,14 @@ describe('buildSearchSourceLink', () => {
 
   it('builds compact path labels without query noise', () => {
     expect(
-      buildSearchSourceLink(
-        'https://docs.example.com/reports/2026/may?token=secret#section',
-      )?.pathLabel,
+      buildSearchSourceLink('https://docs.example.com/reports/2026/may?token=secret#section')
+        ?.pathLabel,
     ).toBe('reports / 2026');
     expect(buildSearchSourceLink('https://example.com/')?.pathLabel).toBe('首页');
   });
 
   it('keeps malformed path escapes displayable', () => {
-    expect(buildSearchSourceLink('https://example.com/%E0%A4%A')?.pathLabel).toBe(
-      '%E0%A4%A',
-    );
+    expect(buildSearchSourceLink('https://example.com/%E0%A4%A')?.pathLabel).toBe('%E0%A4%A');
   });
 
   it('rejects non-web schemes', () => {
@@ -38,4 +35,13 @@ describe('buildSearchSourceLink', () => {
     expect(buildSearchSourceLink('not a url')).toBeNull();
     expect(buildSearchSourceLink('   ')).toBeNull();
   });
+});
+
+// Exact hosts and genuine subdomains only; lookalikes retain their actual host label.
+import { sourcePublisherName } from './search-source-link';
+it('names known publishers without trusting lookalike hosts', () => {
+  expect(sourcePublisherName('finance.eastmoney.com')).toBe('东方财富');
+  expect(sourcePublisherName('eastmoney.com')).toBe('东方财富');
+  expect(sourcePublisherName('eastmoney.com.evil.test')).toBe('eastmoney.com.evil.test');
+  expect(sourcePublisherName('fake-eastmoney.com')).toBe('fake-eastmoney.com');
 });

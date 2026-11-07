@@ -3,6 +3,7 @@ export const SETTINGS_SECTIONS = [
   { id: 'roles', label: 'AI 视角' },
   { id: 'model-region', label: '数据区域' },
   { id: 'api-keys', label: 'API Key' },
+  { id: 'browser-data', label: '浏览器数据' },
   { id: 'memory', label: 'AI 记忆' },
   { id: 'notifications', label: '通知' },
   { id: 'account', label: '账号' },

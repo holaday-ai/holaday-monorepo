@@ -33,26 +33,25 @@ describe('awaiting user copy', () => {
     });
     expect(awaitingUserCopy('browser_action')).toMatchObject({
       title: '等待你确认',
-      streamBody: '请打开浏览器检查当前页面。确认无误后在下方回复继续；涉及提交、支付、发送、分享、改权限、删除或退订时，HOLA DAY 不会替你点最终确认。',
+      streamBody:
+        '请打开浏览器检查当前页面。确认无误后在下方回复继续；涉及提交、支付、发送、分享、改权限、删除或退订时，HOLA DAY 不会替你点最终确认。',
       panelTitle: '等待你确认',
-      panelBody: '交互模式已开启。请检查当前页面并回复继续；涉及提交、支付、发送、分享、改权限、删除或退订时，最终确认由你手动完成。',
+      panelBody:
+        '交互模式已开启。请检查当前页面并回复继续；涉及提交、支付、发送、分享、改权限、删除或退订时，最终确认由你手动完成。',
       toolbarLabel: '需要确认',
       composerPlaceholder: '确认无误后回复继续，或说明要调整的地方...',
     });
   });
 
   it('shows concrete prompts for clarification and browser confirmation parks', () => {
-    expect(
-      awaitingUserStreamMessage('clarification', '你想订哪一天的机票？'),
-    ).toEqual({
+    expect(awaitingUserStreamMessage('clarification', '你想订哪一天的机票？')).toEqual({
       body: '你想订哪一天的机票？',
       followUp: '在下方输入框回答，任务会继续，不用重新提交。',
     });
-    expect(
-      awaitingUserStreamMessage('browser_action', '请确认是否提交这份申请。'),
-    ).toEqual({
+    expect(awaitingUserStreamMessage('browser_action', '请确认是否提交这份申请。')).toEqual({
       body: '请确认是否提交这份申请。',
-      followUp: '确认无误后在下方回复继续；最终提交、支付、发送、分享、改权限、删除或退订由你手动完成。',
+      followUp:
+        '确认无误后在下方回复继续；最终提交、支付、发送、分享、改权限、删除或退订由你手动完成。',
     });
   });
 
@@ -72,5 +71,39 @@ describe('awaiting user copy', () => {
       toolbarLabel: '需要权限',
       composerPlaceholder: '说明已授权，或提供可访问的替代来源...',
     });
+  });
+});
+
+describe('waiting for the HOLA DAY Chrome extension (FIX-D11)', () => {
+  const connection = { reason: 'extension_offline' as const, publicCloudAllowed: false };
+  it('uses one connection message instead of "当前页面拒绝访问"', () => {
+    const copy = awaitingUserCopy('permission', connection);
+    expect(copy.title).toBe('需要连接 HOLA DAY Chrome 插件');
+    expect(copy.panelBody).toContain('HOLA DAY Chrome 插件');
+    expect(JSON.stringify(copy)).not.toContain('拒绝访问');
+    // Without a connection marker a real permission wait keeps its own copy.
+    expect(awaitingUserCopy('permission').title).toBe('需要权限');
+  });
+  it('offers the public cloud only for non-identity requests', () => {
+    const identity = awaitingUserStreamMessage(
+      'permission',
+      '需要连接 HOLA DAY Chrome 插件：…',
+      connection,
+    );
+    expect(identity.followUp).toContain('不会改用无登录态的云端');
+    const open = awaitingUserStreamMessage('permission', '需要连接 HOLA DAY Chrome 插件：…', {
+      ...connection,
+      publicCloudAllowed: true,
+    });
+    expect(open.followUp).toContain('用公开云端继续（看不到你的个人信息）');
+    // FIX-ROUTING-IDENTITY-2: an identity wait may also continue publicly, saying what it cannot see.
+    const own = awaitingUserStreamMessage('permission', '需要连接 HOLA DAY Chrome 插件：…', {
+      ...connection,
+      publicCloudAllowed: true,
+      identityRequired: true,
+      identityReason: '要读取或操作属于你本人的数据：「我的京东订单」',
+    });
+    expect(own.followUp).toContain('「我的京东订单」');
+    expect(own.followUp).toContain('用公开云端继续（看不到你的个人信息）');
   });
 });

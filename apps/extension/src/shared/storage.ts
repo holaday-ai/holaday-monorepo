@@ -53,9 +53,7 @@ export function normalizeStoredUser(value: unknown): StoredUser | null {
     ...(displayName !== undefined
       ? {
           displayName:
-            displayName === null
-              ? null
-              : displayName.slice(0, MAX_USER_DISPLAY_NAME_CHARS),
+            displayName === null ? null : displayName.slice(0, MAX_USER_DISPLAY_NAME_CHARS),
         }
       : {}),
   };

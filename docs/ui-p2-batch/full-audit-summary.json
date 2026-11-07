@@ -1,0 +1,4859 @@
+{
+  "schemaVersion": 1,
+  "candidate": "1e20af782d1e24968fc4c0e4e529c7e9376771e3",
+  "sourceHash": "b550cb1578d2cb7f69fc547e3d4d489526ee9d828e86e9aa663f67a5a0553f6f",
+  "suiteSourceHash": "e2eb4bc7818f9dc367815e6ad6ec712cc1d39687a6a032c729d5877a5a1f0f17",
+  "seed": "2026-10-09-v2",
+  "startedAt": "2026-10-11T06:15:33.272Z",
+  "mode": "verify",
+  "screenOnly": false,
+  "findings": [
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||UI generate awaiting_us…||0",
+      "box": {
+        "x": 81,
+        "y": 843,
+        "width": 153,
+        "height": 32
+      },
+      "observedUrl": "http://127.0.0.1:62684/?task=tsk_ui_generate_executing",
+      "screenshot": "artifacts/1440-task_generate_executing-control-85.png",
+      "route": "task:generate:executing",
+      "width": 1440
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||生活方式||0",
+      "box": {
+        "x": 604,
+        "y": 340.78125,
+        "width": 256,
+        "height": 150
+      },
+      "route": "/video",
+      "width": 1440,
+      "screenshot": "artifacts/1440-_video.png"
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||产品短片||0",
+      "box": {
+        "x": 334,
+        "y": 340.78125,
+        "width": 256,
+        "height": 150
+      },
+      "observedUrl": "http://127.0.0.1:62684/video",
+      "screenshot": "artifacts/1440-_video-control-80.png",
+      "route": "/video",
+      "width": 1440
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||光影氛围||0",
+      "box": {
+        "x": 874,
+        "y": 340.78125,
+        "width": 256,
+        "height": 150
+      },
+      "observedUrl": "http://127.0.0.1:62684/video",
+      "screenshot": "artifacts/1440-_video-control-106.png",
+      "route": "/video",
+      "width": 1440
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||自然光影||0",
+      "box": {
+        "x": 1144,
+        "y": 319.1875,
+        "width": 256,
+        "height": 150
+      },
+      "observedUrl": "http://127.0.0.1:62684/image",
+      "screenshot": "artifacts/1440-_image-control-41.png",
+      "route": "/image",
+      "width": 1440
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||商品棚拍||0",
+      "box": {
+        "x": 874,
+        "y": 319.1875,
+        "width": 256,
+        "height": 150
+      },
+      "observedUrl": "http://127.0.0.1:62684/image",
+      "screenshot": "artifacts/1440-_image-control-70.png",
+      "route": "/image",
+      "width": 1440
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||UI generate awaiting_us…||0",
+      "box": {
+        "x": 81,
+        "y": 843,
+        "width": 153,
+        "height": 32
+      },
+      "observedUrl": "http://127.0.0.1:62684/?task=tsk_ui_generate_executing",
+      "screenshot": "artifacts/1280-task_generate_executing-control-84.png",
+      "route": "task:generate:executing",
+      "width": 1280
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||生活方式||0",
+      "box": {
+        "x": 564,
+        "y": 340.78125,
+        "width": 216,
+        "height": 150
+      },
+      "route": "/video",
+      "width": 1280,
+      "screenshot": "artifacts/1280-_video.png"
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||产品短片||0",
+      "box": {
+        "x": 334,
+        "y": 340.78125,
+        "width": 216,
+        "height": 150
+      },
+      "observedUrl": "http://127.0.0.1:62684/video",
+      "screenshot": "artifacts/1280-_video-control-80.png",
+      "route": "/video",
+      "width": 1280
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||光影氛围||0",
+      "box": {
+        "x": 794,
+        "y": 340.78125,
+        "width": 216,
+        "height": 150
+      },
+      "observedUrl": "http://127.0.0.1:62684/video",
+      "screenshot": "artifacts/1280-_video-control-106.png",
+      "route": "/video",
+      "width": 1280
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||自然光影||0",
+      "box": {
+        "x": 1024,
+        "y": 319.1875,
+        "width": 216,
+        "height": 150
+      },
+      "observedUrl": "http://127.0.0.1:62684/image",
+      "screenshot": "artifacts/1280-_image-control-41.png",
+      "route": "/image",
+      "width": 1280
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||商品棚拍||0",
+      "box": {
+        "x": 794,
+        "y": 319.1875,
+        "width": 216,
+        "height": 150
+      },
+      "observedUrl": "http://127.0.0.1:62684/image",
+      "screenshot": "artifacts/1280-_image-control-70.png",
+      "route": "/image",
+      "width": 1280
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||UI generate awaiting_us…||0",
+      "box": {
+        "x": 81,
+        "y": 843,
+        "width": 153,
+        "height": 32
+      },
+      "observedUrl": "http://127.0.0.1:62684/?task=tsk_ui_generate_executing",
+      "screenshot": "artifacts/1024-task_generate_executing-control-84.png",
+      "route": "task:generate:executing",
+      "width": 1024
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||生活方式||0",
+      "box": {
+        "x": 500,
+        "y": 332.390625,
+        "width": 152,
+        "height": 135
+      },
+      "route": "/video",
+      "width": 1024,
+      "screenshot": "artifacts/1024-_video.png"
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||光影氛围||0",
+      "box": {
+        "x": 666,
+        "y": 332.390625,
+        "width": 152,
+        "height": 135
+      },
+      "observedUrl": "http://127.0.0.1:62684/video",
+      "screenshot": "artifacts/1024-_video-control-106.png",
+      "route": "/video",
+      "width": 1024
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||细节特写||0",
+      "box": {
+        "x": 832,
+        "y": 332.390625,
+        "width": 152,
+        "height": 135
+      },
+      "observedUrl": "http://127.0.0.1:62684/video",
+      "screenshot": "artifacts/1024-_video-control-90.png",
+      "route": "/video",
+      "width": 1024
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||自然光影||0",
+      "box": {
+        "x": 832,
+        "y": 310.796875,
+        "width": 152,
+        "height": 135
+      },
+      "observedUrl": "http://127.0.0.1:62684/image",
+      "screenshot": "artifacts/1024-_image-control-70.png",
+      "route": "/image",
+      "width": 1024
+    }
+  ],
+  "coverageGaps": [],
+  "seedContracts": [
+    "tasks.unsuccessfulCount",
+    "tasks.detail",
+    "tasks.list",
+    "auth.me",
+    "projects.list",
+    "quota.status",
+    "skills.list",
+    "models.list",
+    "notifications.unreadCount",
+    "watchlists.list",
+    "watchlists.briefingStatus",
+    "stocks.dashboardSnapshot",
+    "stocks.discoveryFeed",
+    "stocks.riskRadar",
+    "astrology.status",
+    "astrology.daily",
+    "astrology.weekly",
+    "energy.home",
+    "energy.reportEvent",
+    "videoOnboarding.status",
+    "videoEditing.capability",
+    "plannedTasks.list",
+    "plannedTasks.calendar",
+    "scheduledTasks.list",
+    "plannedTasks.reportLoadMetric",
+    "files.list",
+    "organizations.list",
+    "admin.dashboard",
+    "taskRecovery.failureContext",
+    "tasks.browserControlState",
+    "local.browser.input",
+    "payment.options",
+    "payment.cnOptions",
+    "notifications.list",
+    "tasks.star",
+    "tasks.create",
+    "apiKeys.list",
+    "memory.list",
+    "notificationChannels.list",
+    "usage.summary",
+    "notifications.markAllRead",
+    "auth.mfaStatus",
+    "auth.logout",
+    "auth.loginOptions",
+    "tasks.moveToProject",
+    "tasks.delete",
+    "tasks.clearUnsuccessful",
+    "scheduledTasks.create",
+    "tasks.reply",
+    "tasks.browserControl",
+    "tasks.localChromeTabs",
+    "tasks.abort",
+    "browserReplay.read",
+    "tasks.browserNav",
+    "browserReplay.remove",
+    "tasks.checkpointBrowserSession",
+    "accountClosure.status",
+    "accountClosure.applicationReceipt",
+    "accountClosure.requestCancellationVerification",
+    "roles.list",
+    "scheduledTasks.update",
+    "scheduledTasks.toggle",
+    "scheduledTasks.runNow",
+    "scheduledTasks.delete",
+    "skills.toggle",
+    "memory.delete",
+    "watchlists.enableDailyBriefing",
+    "payment.ledger",
+    "accountClosure.preview",
+    "memory.clear",
+    "admin.userList",
+    "admin.finance.revenueByPlan",
+    "admin.finance.revenueByMonth",
+    "admin.finance.conversionFunnel",
+    "admin.finance.summary",
+    "admin.partner.overview",
+    "admin.partner.reconciliation",
+    "admin.learning.evolution",
+    "admin.learning.overview",
+    "models.adminList",
+    "models.adminMcpList",
+    "selfCheck.latest",
+    "admin.userDetail",
+    "admin.finance.costBreakdown",
+    "admin.finance.costByDay",
+    "admin.finance.topCostlyTasks",
+    "admin.finance.taskCost",
+    "admin.learning.domainDetail",
+    "models.adminUpdate",
+    "selfCheck.run",
+    "auth.logoutAll",
+    "auth.beginMfaSetup",
+    "auth.sendPasswordChangeCode",
+    "partner.dashboard",
+    "astrology.monthly",
+    "astrology.yearly",
+    "astrology.ranking",
+    "stocks.generateBriefingNow",
+    "stocks.preferenceProfile",
+    "stocks.newsDetail",
+    "stocks.updatePreferenceProfile",
+    "stocks.searchSymbols",
+    "watchlists.remove",
+    "stocks.previewScreening",
+    "stocks.clearPreferenceProfile",
+    "organizations.members",
+    "projects.create",
+    "organizations.create",
+    "projects.delete",
+    "projects.get",
+    "projects.members",
+    "teamTasks.list",
+    "teamTasks.planningOptions",
+    "files.delete",
+    "videoEditing.getProject",
+    "plannedTasks.detail",
+    "plannedTasks.runs",
+    "batchTasks.list",
+    "plannedTasks.runNow",
+    "plannedTasks.toggle",
+    "plannedTasks.removeOccurrence",
+    "plannedTasks.update",
+    "batchTasks.create",
+    "batchTasks.detail",
+    "connections.list"
+  ],
+  "networkWhitelist": [
+    {
+      "rule": "403 /api/trpc/videoEditing.getProject on /video/edit/:projectId",
+      "reason": "Actual backend default-off contract: FORBIDDEN; no license or remote SDK is provisioned"
+    },
+    {
+      "rule": "synthetic external popup landing",
+      "reason": "URL navigation tested through local HTML interception; third-party availability is not tested"
+    },
+    {
+      "rule": "exact five brand PNG assets",
+      "reason": "offline SVG placeholder preserves box geometry; logo pixel fidelity is excluded"
+    }
+  ],
+  "buildHash": "9d6a929e66f271772ace7cc76105626d8ad094adb9fb9d5fb4e432f853491514",
+  "browserVersion": "147.0.7727.15",
+  "platform": "darwin",
+  "selectedCases": null,
+  "selectedWidths": [
+    1440,
+    1280,
+    1024
+  ],
+  "expectedPages": 240,
+  "status": "passed",
+  "finishedAt": "2026-10-11T09:43:58.008Z",
+  "pages": [
+    {
+      "route": "task:generate:executing",
+      "width": 1440,
+      "issues": [
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||UI generate awaiting_us…||0",
+          "box": {
+            "x": 81,
+            "y": 843,
+            "width": 153,
+            "height": 32
+          },
+          "observedUrl": "http://127.0.0.1:62684/?task=tsk_ui_generate_executing",
+          "screenshot": "artifacts/1440-task_generate_executing-control-85.png"
+        }
+      ],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_executing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 136,
+        "disabled": 6,
+        "idempotent": 5,
+        "shared-reference": 10
+      }
+    },
+    {
+      "route": "task:generate:completed",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_completed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 45,
+        "disabled": 1,
+        "idempotent": 6
+      }
+    },
+    {
+      "route": "task:generate:failed",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_failed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 22,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:generate:awaiting_user",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_awaiting_user",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 11,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:generate:cancelled",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_cancelled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 12,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:browser:executing",
+      "width": 1440,
+      "issues": [],
+      "regressions": [
+        {
+          "item": "browser-input-log-clearance",
+          "screenshot": "after-10-1440-executing-input-log.jpg"
+        }
+      ],
+      "canonicalPath": "/?task=tsk_ui_browser_executing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 34,
+        "disabled": 10,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:browser:completed",
+      "width": 1440,
+      "issues": [],
+      "regressions": [
+        {
+          "item": "p2-terminal-plan-hidden",
+          "screenshot": "p2-1440-task_browser_completed.jpg"
+        }
+      ],
+      "canonicalPath": "/?task=tsk_ui_browser_completed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 65,
+        "disabled": 6,
+        "idempotent": 6
+      }
+    },
+    {
+      "route": "task:browser:failed",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_browser_failed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 47,
+        "disabled": 6,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:browser:awaiting_user",
+      "width": 1440,
+      "issues": [],
+      "regressions": [
+        {
+          "item": "browser-input-log-clearance",
+          "screenshot": "after-10-1440-awaiting_user-input-log.jpg"
+        }
+      ],
+      "canonicalPath": "/?task=tsk_ui_browser_awaiting_user",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 39,
+        "passed": 31,
+        "disabled": 10,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:browser:cancelled",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_browser_cancelled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 39,
+        "passed": 44,
+        "disabled": 6,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:scrape:executing",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_scrape_executing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 39,
+        "passed": 15,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:scrape:completed",
+      "width": 1440,
+      "issues": [],
+      "regressions": [
+        {
+          "item": "scheduled-choice-state",
+          "screenshot": "after-4-1440-schedule-choices.jpg"
+        }
+      ],
+      "canonicalPath": "/?task=tsk_ui_scrape_completed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 39,
+        "passed": 47,
+        "disabled": 1,
+        "idempotent": 6
+      }
+    },
+    {
+      "route": "task:scrape:failed",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_scrape_failed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 39,
+        "passed": 26,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:scrape:awaiting_user",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_scrape_awaiting_user",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 39,
+        "passed": 15,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:scrape:cancelled",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_scrape_cancelled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 39,
+        "passed": 16,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:image:executing",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_executing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 39,
+        "passed": 11,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:image:completed",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_completed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 46,
+        "disabled": 1,
+        "idempotent": 6
+      }
+    },
+    {
+      "route": "task:image:failed",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_failed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 23,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:image:awaiting_user",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_awaiting_user",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 12,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:image:cancelled",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_cancelled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 13,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "/account/closure-recovery",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/account/closure-recovery",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 6,
+        "protocol-link": 1,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/login",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/login",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 16,
+        "idempotent": 1,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/register",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/register",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 17,
+        "idempotent": 1,
+        "disabled": 3
+      }
+    },
+    {
+      "route": "/privacy",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/privacy",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 11,
+        "protocol-link": 3
+      }
+    },
+    {
+      "route": "/terms",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/terms",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 3,
+        "protocol-link": 1
+      }
+    },
+    {
+      "route": "/500",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/500",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 3,
+        "protocol-link": 1
+      }
+    },
+    {
+      "route": "/cosmic-preview",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/cosmic-preview",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "idempotent": 6,
+        "passed": 153,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/app",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 21,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "/roles",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings/roles",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37
+      }
+    },
+    {
+      "route": "/tasks",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/history",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 2,
+        "passed": 25
+      }
+    },
+    {
+      "route": "/schedule",
+      "width": 1440,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 3,
+          "screenshot": "after-3-1440.jpg"
+        },
+        {
+          "item": 4,
+          "screenshot": "after-4-1440.jpg"
+        }
+      ],
+      "canonicalPath": "/planned/legacy-scheduled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 100,
+        "idempotent": 5,
+        "disabled": 43
+      }
+    },
+    {
+      "route": "/calendar",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/planned/legacy-scheduled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 185
+      }
+    },
+    {
+      "route": "/experts",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/skills",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 32,
+        "idempotent": 2,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/plugins",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/skills",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 73
+      }
+    },
+    {
+      "route": "/settings/appearance",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#appearance",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 4,
+        "passed": 48
+      }
+    },
+    {
+      "route": "/settings/api-keys",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#api-keys",
+      "visual": {
+        "different": false,
+        "ratio": 0.00015625
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 48,
+        "idempotent": 4
+      }
+    },
+    {
+      "route": "/settings/memory",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#memory",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 48,
+        "idempotent": 4
+      }
+    },
+    {
+      "route": "/settings/notifications",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#notifications",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 48,
+        "idempotent": 4
+      }
+    },
+    {
+      "route": "/settings/account",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#account",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 48,
+        "idempotent": 4
+      }
+    },
+    {
+      "route": "/admin",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "idempotent": 2,
+        "passed": 7
+      }
+    },
+    {
+      "route": "/admin/users",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/users",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 5,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/admin/users/:userId",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/users/usr_ui",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/admin/finance",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/finance",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "idempotent": 1,
+        "passed": 3,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/admin/partners",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/partners",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/admin/learning",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/learning",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 4,
+        "idempotent": 1
+      }
+    },
+    {
+      "route": "/admin/models",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/models",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 13,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/admin/self-check",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/self-check",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/admin/learning/:domain",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/learning/browser",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 2
+      }
+    },
+    {
+      "route": "/",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 62
+      }
+    },
+    {
+      "route": "/profile",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/profile",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "disabled": 2,
+        "protocol-link": 1,
+        "passed": 15
+      }
+    },
+    {
+      "route": "/settings",
+      "width": 1440,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 2,
+          "screenshot": "after-2-1440.jpg"
+        },
+        {
+          "item": "p2-settings-nowrap-cover",
+          "metrics": {
+            "background": "rgb(255, 255, 255)",
+            "cover": "rgb(255, 255, 255)",
+            "coverTop": -9,
+            "coverHeight": 9,
+            "links": [
+              {
+                "label": "外观",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "AI 视角",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "数据区域",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "API Key",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "浏览器数据",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "AI 记忆",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "通知",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "账号",
+                "lines": 1,
+                "nowrap": "nowrap"
+              }
+            ]
+          },
+          "screenshot": "p2-1440-_settings.jpg"
+        }
+      ],
+      "canonicalPath": "/settings",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 49,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "/settings/roles",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings/roles",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37
+      }
+    },
+    {
+      "route": "/partner",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/partner",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/partner/recharge",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/partner#partner-recharge",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/partner/ledger",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/partner#partner-ledger",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/partner/withdraw",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/partner#partner-withdraw",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/plan",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/plan",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 1,
+        "passed": 6,
+        "protocol-link": 2,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/billing",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/billing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 6,
+        "protocol-link": 3
+      }
+    },
+    {
+      "route": "/usage",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/usage",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/cosmic",
+      "width": 1440,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 5,
+          "screenshot": "after-5-1440.jpg"
+        },
+        {
+          "item": "p2-energy-gap",
+          "gap": 34,
+          "screenshot": "p2-1440-_cosmic.jpg"
+        }
+      ],
+      "canonicalPath": "/cosmic",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 6,
+        "passed": 154,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/history",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/history",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 64
+      }
+    },
+    {
+      "route": "/skills",
+      "width": 1440,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 1,
+          "screenshot": "after-1-1440.jpg"
+        }
+      ],
+      "canonicalPath": "/skills",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 73
+      }
+    },
+    {
+      "route": "/stocks",
+      "width": 1440,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 7,
+          "screenshot": "after-7-1440.jpg"
+        }
+      ],
+      "canonicalPath": "/stocks",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 40,
+        "passed": 119,
+        "idempotent": 4,
+        "disabled": 138
+      }
+    },
+    {
+      "route": "/stocks/discovery",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/stocks/discovery",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 13,
+        "disabled": 5
+      }
+    },
+    {
+      "route": "/projects",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/projects",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 26,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/projects/:projectId",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/projects/prj_ui",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 29,
+        "idempotent": 6,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/organizations/invitations/accept",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/organizations/invitations/accept",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/starred",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/starred",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 9
+      }
+    },
+    {
+      "route": "/files",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/files",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 28,
+        "idempotent": 2,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/video",
+      "width": 1440,
+      "issues": [
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||生活方式||0",
+          "box": {
+            "x": 604,
+            "y": 340.78125,
+            "width": 256,
+            "height": 150
+          }
+        },
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||产品短片||0",
+          "box": {
+            "x": 334,
+            "y": 340.78125,
+            "width": 256,
+            "height": 150
+          },
+          "observedUrl": "http://127.0.0.1:62684/video",
+          "screenshot": "artifacts/1440-_video-control-80.png"
+        },
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||光影氛围||0",
+          "box": {
+            "x": 874,
+            "y": 340.78125,
+            "width": 256,
+            "height": 150
+          },
+          "observedUrl": "http://127.0.0.1:62684/video",
+          "screenshot": "artifacts/1440-_video-control-106.png"
+        }
+      ],
+      "regressions": [
+        {
+          "item": 6,
+          "screenshots": [
+            "after-6-1440-video-header.jpg",
+            "after-6-1440-video-upload.jpg"
+          ]
+        }
+      ],
+      "canonicalPath": "/video",
+      "visual": {
+        "different": false,
+        "ratio": 0.0027054398148148146
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 7,
+        "passed": 123,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/video/edit/:projectId",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/video/edit/ved_ui",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37
+      }
+    },
+    {
+      "route": "/image",
+      "width": 1440,
+      "issues": [
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||自然光影||0",
+          "box": {
+            "x": 1144,
+            "y": 319.1875,
+            "width": 256,
+            "height": 150
+          },
+          "observedUrl": "http://127.0.0.1:62684/image",
+          "screenshot": "artifacts/1440-_image-control-41.png"
+        },
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||商品棚拍||0",
+          "box": {
+            "x": 874,
+            "y": 319.1875,
+            "width": 256,
+            "height": 150
+          },
+          "observedUrl": "http://127.0.0.1:62684/image",
+          "screenshot": "artifacts/1440-_image-control-70.png"
+        }
+      ],
+      "regressions": [
+        {
+          "item": 6,
+          "screenshots": [
+            "after-6-1440-image-composer.jpg"
+          ]
+        }
+      ],
+      "canonicalPath": "/image",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 8,
+        "passed": 69,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/planned",
+      "width": 1440,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 3,
+          "route": "/planned"
+        }
+      ],
+      "canonicalPath": "/planned",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 144,
+        "idempotent": 8,
+        "disabled": 3
+      }
+    },
+    {
+      "route": "/planned/legacy-scheduled",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/planned/legacy-scheduled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 185
+      }
+    },
+    {
+      "route": "/planned/legacy-batch",
+      "width": 1440,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 3,
+          "route": "/planned/legacy-batch"
+        }
+      ],
+      "canonicalPath": "/planned/legacy-batch",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 19,
+        "disabled": 4
+      }
+    },
+    {
+      "route": "/scheduled",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/planned/legacy-scheduled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 185
+      }
+    },
+    {
+      "route": "/batch",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/planned",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 192
+      }
+    },
+    {
+      "route": "/batch/:batchId",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/batch/bat_ui",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/connections",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/connections",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "protocol-link": 1
+      }
+    },
+    {
+      "route": "*",
+      "width": 1440,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/__ui_missing__",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 3
+      }
+    },
+    {
+      "route": "task:generate:executing",
+      "width": 1280,
+      "issues": [
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||UI generate awaiting_us…||0",
+          "box": {
+            "x": 81,
+            "y": 843,
+            "width": 153,
+            "height": 32
+          },
+          "observedUrl": "http://127.0.0.1:62684/?task=tsk_ui_generate_executing",
+          "screenshot": "artifacts/1280-task_generate_executing-control-84.png"
+        }
+      ],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_executing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 133,
+        "disabled": 5,
+        "idempotent": 5,
+        "shared-reference": 9
+      }
+    },
+    {
+      "route": "task:generate:completed",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_completed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 36,
+        "passed": 45,
+        "disabled": 1,
+        "idempotent": 6
+      }
+    },
+    {
+      "route": "task:generate:failed",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_failed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 36,
+        "passed": 22,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:generate:awaiting_user",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_awaiting_user",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 36,
+        "passed": 11,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:generate:cancelled",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_cancelled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 36,
+        "passed": 12,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:browser:executing",
+      "width": 1280,
+      "issues": [],
+      "regressions": [
+        {
+          "item": "browser-input-log-clearance",
+          "screenshot": "after-10-1280-executing-input-log.jpg"
+        }
+      ],
+      "canonicalPath": "/?task=tsk_ui_browser_executing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 45,
+        "passed": 36,
+        "disabled": 10,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:browser:completed",
+      "width": 1280,
+      "issues": [],
+      "regressions": [
+        {
+          "item": "p2-terminal-plan-hidden",
+          "screenshot": "p2-1280-task_browser_completed.jpg"
+        }
+      ],
+      "canonicalPath": "/?task=tsk_ui_browser_completed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 65,
+        "disabled": 6,
+        "idempotent": 6
+      }
+    },
+    {
+      "route": "task:browser:failed",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_browser_failed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 47,
+        "disabled": 6,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:browser:awaiting_user",
+      "width": 1280,
+      "issues": [],
+      "regressions": [
+        {
+          "item": "browser-input-log-clearance",
+          "screenshot": "after-10-1280-awaiting_user-input-log.jpg"
+        }
+      ],
+      "canonicalPath": "/?task=tsk_ui_browser_awaiting_user",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 39,
+        "passed": 31,
+        "disabled": 10,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:browser:cancelled",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_browser_cancelled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 39,
+        "passed": 44,
+        "disabled": 6,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:scrape:executing",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_scrape_executing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 15,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:scrape:completed",
+      "width": 1280,
+      "issues": [],
+      "regressions": [
+        {
+          "item": "scheduled-choice-state",
+          "screenshot": "after-4-1280-schedule-choices.jpg"
+        }
+      ],
+      "canonicalPath": "/?task=tsk_ui_scrape_completed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 47,
+        "disabled": 1,
+        "idempotent": 6
+      }
+    },
+    {
+      "route": "task:scrape:failed",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_scrape_failed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 26,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:scrape:awaiting_user",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_scrape_awaiting_user",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 15,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:scrape:cancelled",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_scrape_cancelled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 16,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:image:executing",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_executing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 11,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:image:completed",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_completed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 46,
+        "disabled": 1,
+        "idempotent": 6
+      }
+    },
+    {
+      "route": "task:image:failed",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_failed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 23,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:image:awaiting_user",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_awaiting_user",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 12,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:image:cancelled",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_cancelled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 13,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "/account/closure-recovery",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/account/closure-recovery",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 6,
+        "protocol-link": 1,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/login",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/login",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 16,
+        "idempotent": 1,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/register",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/register",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 17,
+        "idempotent": 1,
+        "disabled": 3
+      }
+    },
+    {
+      "route": "/privacy",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/privacy",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 11,
+        "protocol-link": 3
+      }
+    },
+    {
+      "route": "/terms",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/terms",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 3,
+        "protocol-link": 1
+      }
+    },
+    {
+      "route": "/500",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/500",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 3,
+        "protocol-link": 1
+      }
+    },
+    {
+      "route": "/cosmic-preview",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/cosmic-preview",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "idempotent": 6,
+        "passed": 153,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/app",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 24,
+        "disabled": 2,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "/roles",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings/roles",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37
+      }
+    },
+    {
+      "route": "/tasks",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/history",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 2,
+        "passed": 25
+      }
+    },
+    {
+      "route": "/schedule",
+      "width": 1280,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 3,
+          "screenshot": "after-3-1280.jpg"
+        },
+        {
+          "item": 4,
+          "screenshot": "after-4-1280.jpg"
+        }
+      ],
+      "canonicalPath": "/planned/legacy-scheduled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 100,
+        "idempotent": 5,
+        "disabled": 43
+      }
+    },
+    {
+      "route": "/calendar",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/planned/legacy-scheduled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 185
+      }
+    },
+    {
+      "route": "/experts",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/skills",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 32,
+        "idempotent": 2,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/plugins",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/skills",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 73
+      }
+    },
+    {
+      "route": "/settings/appearance",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#appearance",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 4,
+        "passed": 48
+      }
+    },
+    {
+      "route": "/settings/api-keys",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#api-keys",
+      "visual": {
+        "different": false,
+        "ratio": 0.00017578125
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 48,
+        "idempotent": 4
+      }
+    },
+    {
+      "route": "/settings/memory",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#memory",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 48,
+        "idempotent": 4
+      }
+    },
+    {
+      "route": "/settings/notifications",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#notifications",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 48,
+        "idempotent": 4
+      }
+    },
+    {
+      "route": "/settings/account",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#account",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 48,
+        "idempotent": 4
+      }
+    },
+    {
+      "route": "/admin",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "idempotent": 2,
+        "passed": 7
+      }
+    },
+    {
+      "route": "/admin/users",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/users",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 5,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/admin/users/:userId",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/users/usr_ui",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/admin/finance",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/finance",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "idempotent": 1,
+        "passed": 3,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/admin/partners",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/partners",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/admin/learning",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/learning",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 4,
+        "idempotent": 1
+      }
+    },
+    {
+      "route": "/admin/models",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/models",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 13,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/admin/self-check",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/self-check",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/admin/learning/:domain",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/learning/browser",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 2
+      }
+    },
+    {
+      "route": "/",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 67
+      }
+    },
+    {
+      "route": "/profile",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/profile",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "disabled": 2,
+        "protocol-link": 1,
+        "passed": 15
+      }
+    },
+    {
+      "route": "/settings",
+      "width": 1280,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 2,
+          "screenshot": "after-2-1280.jpg"
+        },
+        {
+          "item": "p2-settings-nowrap-cover",
+          "metrics": {
+            "background": "rgb(255, 255, 255)",
+            "cover": "rgb(255, 255, 255)",
+            "coverTop": -9,
+            "coverHeight": 9,
+            "links": [
+              {
+                "label": "外观",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "AI 视角",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "数据区域",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "API Key",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "浏览器数据",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "AI 记忆",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "通知",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "账号",
+                "lines": 1,
+                "nowrap": "nowrap"
+              }
+            ]
+          },
+          "screenshot": "p2-1280-_settings.jpg"
+        }
+      ],
+      "canonicalPath": "/settings",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 49,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "/settings/roles",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings/roles",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37
+      }
+    },
+    {
+      "route": "/partner",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/partner",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/partner/recharge",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/partner#partner-recharge",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/partner/ledger",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/partner#partner-ledger",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/partner/withdraw",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/partner#partner-withdraw",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/plan",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/plan",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 1,
+        "passed": 6,
+        "protocol-link": 2,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/billing",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/billing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 6,
+        "protocol-link": 3
+      }
+    },
+    {
+      "route": "/usage",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/usage",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/cosmic",
+      "width": 1280,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 5,
+          "screenshot": "after-5-1280.jpg"
+        },
+        {
+          "item": "p2-energy-gap",
+          "gap": 34,
+          "screenshot": "p2-1280-_cosmic.jpg"
+        }
+      ],
+      "canonicalPath": "/cosmic",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 6,
+        "passed": 154,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/history",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/history",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 64
+      }
+    },
+    {
+      "route": "/skills",
+      "width": 1280,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 1,
+          "screenshot": "after-1-1280.jpg"
+        }
+      ],
+      "canonicalPath": "/skills",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 73
+      }
+    },
+    {
+      "route": "/stocks",
+      "width": 1280,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 7,
+          "screenshot": "after-7-1280.jpg"
+        }
+      ],
+      "canonicalPath": "/stocks",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 40,
+        "passed": 119,
+        "idempotent": 4,
+        "disabled": 138
+      }
+    },
+    {
+      "route": "/stocks/discovery",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/stocks/discovery",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 13,
+        "disabled": 5
+      }
+    },
+    {
+      "route": "/projects",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/projects",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 26,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/projects/:projectId",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/projects/prj_ui",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 29,
+        "idempotent": 6,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/organizations/invitations/accept",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/organizations/invitations/accept",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/starred",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/starred",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 9
+      }
+    },
+    {
+      "route": "/files",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/files",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 28,
+        "idempotent": 2,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/video",
+      "width": 1280,
+      "issues": [
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||生活方式||0",
+          "box": {
+            "x": 564,
+            "y": 340.78125,
+            "width": 216,
+            "height": 150
+          }
+        },
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||产品短片||0",
+          "box": {
+            "x": 334,
+            "y": 340.78125,
+            "width": 216,
+            "height": 150
+          },
+          "observedUrl": "http://127.0.0.1:62684/video",
+          "screenshot": "artifacts/1280-_video-control-80.png"
+        },
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||光影氛围||0",
+          "box": {
+            "x": 794,
+            "y": 340.78125,
+            "width": 216,
+            "height": 150
+          },
+          "observedUrl": "http://127.0.0.1:62684/video",
+          "screenshot": "artifacts/1280-_video-control-106.png"
+        }
+      ],
+      "regressions": [
+        {
+          "item": 6,
+          "screenshots": [
+            "after-6-1280-video-header.jpg",
+            "after-6-1280-video-upload.jpg"
+          ]
+        }
+      ],
+      "canonicalPath": "/video",
+      "visual": {
+        "different": false,
+        "ratio": 0.00232421875
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 7,
+        "passed": 123,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/video/edit/:projectId",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/video/edit/ved_ui",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37
+      }
+    },
+    {
+      "route": "/image",
+      "width": 1280,
+      "issues": [
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||自然光影||0",
+          "box": {
+            "x": 1024,
+            "y": 319.1875,
+            "width": 216,
+            "height": 150
+          },
+          "observedUrl": "http://127.0.0.1:62684/image",
+          "screenshot": "artifacts/1280-_image-control-41.png"
+        },
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||商品棚拍||0",
+          "box": {
+            "x": 794,
+            "y": 319.1875,
+            "width": 216,
+            "height": 150
+          },
+          "observedUrl": "http://127.0.0.1:62684/image",
+          "screenshot": "artifacts/1280-_image-control-70.png"
+        }
+      ],
+      "regressions": [
+        {
+          "item": 6,
+          "screenshots": [
+            "after-6-1280-image-composer.jpg"
+          ]
+        }
+      ],
+      "canonicalPath": "/image",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 8,
+        "passed": 69,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/planned",
+      "width": 1280,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 3,
+          "route": "/planned"
+        }
+      ],
+      "canonicalPath": "/planned",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 144,
+        "idempotent": 8,
+        "disabled": 3
+      }
+    },
+    {
+      "route": "/planned/legacy-scheduled",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/planned/legacy-scheduled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 185
+      }
+    },
+    {
+      "route": "/planned/legacy-batch",
+      "width": 1280,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 3,
+          "route": "/planned/legacy-batch"
+        }
+      ],
+      "canonicalPath": "/planned/legacy-batch",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 19,
+        "disabled": 4
+      }
+    },
+    {
+      "route": "/scheduled",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/planned/legacy-scheduled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 185
+      }
+    },
+    {
+      "route": "/batch",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/planned",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 192
+      }
+    },
+    {
+      "route": "/batch/:batchId",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/batch/bat_ui",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/connections",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/connections",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "protocol-link": 1
+      }
+    },
+    {
+      "route": "*",
+      "width": 1280,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/__ui_missing__",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 3
+      }
+    },
+    {
+      "route": "task:generate:executing",
+      "width": 1024,
+      "issues": [
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||UI generate awaiting_us…||0",
+          "box": {
+            "x": 81,
+            "y": 843,
+            "width": 153,
+            "height": 32
+          },
+          "observedUrl": "http://127.0.0.1:62684/?task=tsk_ui_generate_executing",
+          "screenshot": "artifacts/1024-task_generate_executing-control-84.png"
+        }
+      ],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_executing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 133,
+        "disabled": 5,
+        "idempotent": 5,
+        "shared-reference": 9
+      }
+    },
+    {
+      "route": "task:generate:completed",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_completed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 36,
+        "passed": 45,
+        "disabled": 1,
+        "idempotent": 6
+      }
+    },
+    {
+      "route": "task:generate:failed",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_failed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 36,
+        "passed": 22,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:generate:awaiting_user",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_awaiting_user",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 36,
+        "passed": 11,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:generate:cancelled",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_generate_cancelled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 36,
+        "passed": 12,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:browser:executing",
+      "width": 1024,
+      "issues": [],
+      "regressions": [
+        {
+          "item": "browser-input-log-clearance",
+          "screenshot": "after-10-1024-executing-input-log.jpg"
+        }
+      ],
+      "canonicalPath": "/?task=tsk_ui_browser_executing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 45,
+        "passed": 34,
+        "disabled": 10,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:browser:completed",
+      "width": 1024,
+      "issues": [],
+      "regressions": [
+        {
+          "item": "p2-terminal-plan-hidden",
+          "screenshot": "p2-1024-task_browser_completed.jpg"
+        }
+      ],
+      "canonicalPath": "/?task=tsk_ui_browser_completed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 63,
+        "disabled": 6,
+        "idempotent": 6
+      }
+    },
+    {
+      "route": "task:browser:failed",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_browser_failed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 45,
+        "disabled": 6,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:browser:awaiting_user",
+      "width": 1024,
+      "issues": [],
+      "regressions": [
+        {
+          "item": "browser-input-log-clearance",
+          "screenshot": "after-10-1024-awaiting_user-input-log.jpg"
+        }
+      ],
+      "canonicalPath": "/?task=tsk_ui_browser_awaiting_user",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 39,
+        "passed": 29,
+        "disabled": 10,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:browser:cancelled",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_browser_cancelled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 39,
+        "passed": 42,
+        "disabled": 6,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:scrape:executing",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_scrape_executing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 15,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:scrape:completed",
+      "width": 1024,
+      "issues": [],
+      "regressions": [
+        {
+          "item": "scheduled-choice-state",
+          "screenshot": "after-4-1024-schedule-choices.jpg"
+        }
+      ],
+      "canonicalPath": "/?task=tsk_ui_scrape_completed",
+      "visual": {
+        "different": false,
+        "ratio": 6.7138671875e-05
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 47,
+        "disabled": 1,
+        "idempotent": 6
+      }
+    },
+    {
+      "route": "task:scrape:failed",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_scrape_failed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 26,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:scrape:awaiting_user",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_scrape_awaiting_user",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 15,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:scrape:cancelled",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_scrape_cancelled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 16,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:image:executing",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_executing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 11,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:image:completed",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_completed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 46,
+        "disabled": 1,
+        "idempotent": 6
+      }
+    },
+    {
+      "route": "task:image:failed",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_failed",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 23,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:image:awaiting_user",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_awaiting_user",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 12,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "task:image:cancelled",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/?task=tsk_ui_image_cancelled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 13,
+        "disabled": 1,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "/account/closure-recovery",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/account/closure-recovery",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 6,
+        "protocol-link": 1,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/login",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/login",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 16,
+        "idempotent": 1,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/register",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/register",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 17,
+        "idempotent": 1,
+        "disabled": 3
+      }
+    },
+    {
+      "route": "/privacy",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/privacy",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 11,
+        "protocol-link": 3
+      }
+    },
+    {
+      "route": "/terms",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/terms",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 3,
+        "protocol-link": 1
+      }
+    },
+    {
+      "route": "/500",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/500",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "passed": 3,
+        "protocol-link": 1
+      }
+    },
+    {
+      "route": "/cosmic-preview",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/cosmic-preview",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "idempotent": 6,
+        "passed": 153,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/app",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 24,
+        "disabled": 2,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "/roles",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings/roles",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37
+      }
+    },
+    {
+      "route": "/tasks",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/history",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 2,
+        "passed": 25
+      }
+    },
+    {
+      "route": "/schedule",
+      "width": 1024,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 3,
+          "screenshot": "after-3-1024.jpg"
+        },
+        {
+          "item": 4,
+          "screenshot": "after-4-1024.jpg"
+        }
+      ],
+      "canonicalPath": "/planned/legacy-scheduled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 100,
+        "idempotent": 5,
+        "disabled": 43
+      }
+    },
+    {
+      "route": "/calendar",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/planned/legacy-scheduled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 185
+      }
+    },
+    {
+      "route": "/experts",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/skills",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 32,
+        "idempotent": 2,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/plugins",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/skills",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 73
+      }
+    },
+    {
+      "route": "/settings/appearance",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#appearance",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 4,
+        "passed": 48
+      }
+    },
+    {
+      "route": "/settings/api-keys",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#api-keys",
+      "visual": {
+        "different": false,
+        "ratio": 0.0002197265625
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 48,
+        "idempotent": 4
+      }
+    },
+    {
+      "route": "/settings/memory",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#memory",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 48,
+        "idempotent": 4
+      }
+    },
+    {
+      "route": "/settings/notifications",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#notifications",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 48,
+        "idempotent": 4
+      }
+    },
+    {
+      "route": "/settings/account",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings#account",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 48,
+        "idempotent": 4
+      }
+    },
+    {
+      "route": "/admin",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "idempotent": 2,
+        "passed": 7
+      }
+    },
+    {
+      "route": "/admin/users",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/users",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 5,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/admin/users/:userId",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/users/usr_ui",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/admin/finance",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/finance",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "idempotent": 1,
+        "passed": 3,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/admin/partners",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/partners",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/admin/learning",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/learning",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 4,
+        "idempotent": 1
+      }
+    },
+    {
+      "route": "/admin/models",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/models",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 13,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/admin/self-check",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/self-check",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/admin/learning/:domain",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/admin/learning/browser",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 9,
+        "passed": 2
+      }
+    },
+    {
+      "route": "/",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 67
+      }
+    },
+    {
+      "route": "/profile",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/profile",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "disabled": 2,
+        "protocol-link": 1,
+        "passed": 15
+      }
+    },
+    {
+      "route": "/settings",
+      "width": 1024,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 2,
+          "screenshot": "after-2-1024.jpg"
+        },
+        {
+          "item": "p2-settings-nowrap-cover",
+          "metrics": {
+            "background": "rgb(255, 255, 255)",
+            "cover": "rgb(255, 255, 255)",
+            "coverTop": -9,
+            "coverHeight": 9,
+            "links": [
+              {
+                "label": "外观",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "AI 视角",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "数据区域",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "API Key",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "浏览器数据",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "AI 记忆",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "通知",
+                "lines": 1,
+                "nowrap": "nowrap"
+              },
+              {
+                "label": "账号",
+                "lines": 1,
+                "nowrap": "nowrap"
+              }
+            ]
+          },
+          "screenshot": "p2-1024-_settings.jpg"
+        }
+      ],
+      "canonicalPath": "/settings",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 49,
+        "idempotent": 3
+      }
+    },
+    {
+      "route": "/settings/roles",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/settings/roles",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37
+      }
+    },
+    {
+      "route": "/partner",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/partner",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/partner/recharge",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/partner#partner-recharge",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/partner/ledger",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/partner#partner-ledger",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/partner/withdraw",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/partner#partner-withdraw",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/plan",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/plan",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 1,
+        "passed": 6,
+        "protocol-link": 2,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/billing",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/billing",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 6,
+        "protocol-link": 3
+      }
+    },
+    {
+      "route": "/usage",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/usage",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/cosmic",
+      "width": 1024,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 5,
+          "screenshot": "after-5-1024.jpg"
+        },
+        {
+          "item": "p2-energy-gap",
+          "gap": 34,
+          "screenshot": "p2-1024-_cosmic.jpg"
+        }
+      ],
+      "canonicalPath": "/cosmic",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 6,
+        "passed": 154,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/history",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/history",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 64
+      }
+    },
+    {
+      "route": "/skills",
+      "width": 1024,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 1,
+          "screenshot": "after-1-1024.jpg"
+        }
+      ],
+      "canonicalPath": "/skills",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 73
+      }
+    },
+    {
+      "route": "/stocks",
+      "width": 1024,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 7,
+          "screenshot": "after-7-1024.jpg"
+        }
+      ],
+      "canonicalPath": "/stocks",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 40,
+        "passed": 119,
+        "idempotent": 4,
+        "disabled": 138
+      }
+    },
+    {
+      "route": "/stocks/discovery",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/stocks/discovery",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 13,
+        "disabled": 5
+      }
+    },
+    {
+      "route": "/projects",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/projects",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 26,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/projects/:projectId",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/projects/prj_ui",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 29,
+        "idempotent": 6,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/organizations/invitations/accept",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/organizations/invitations/accept",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/starred",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/starred",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 9
+      }
+    },
+    {
+      "route": "/files",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/files",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 28,
+        "idempotent": 2,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/video",
+      "width": 1024,
+      "issues": [
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||生活方式||0",
+          "box": {
+            "x": 500,
+            "y": 332.390625,
+            "width": 152,
+            "height": 135
+          }
+        },
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||光影氛围||0",
+          "box": {
+            "x": 666,
+            "y": 332.390625,
+            "width": 152,
+            "height": 135
+          },
+          "observedUrl": "http://127.0.0.1:62684/video",
+          "screenshot": "artifacts/1024-_video-control-106.png"
+        },
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||细节特写||0",
+          "box": {
+            "x": 832,
+            "y": 332.390625,
+            "width": 152,
+            "height": 135
+          },
+          "observedUrl": "http://127.0.0.1:62684/video",
+          "screenshot": "artifacts/1024-_video-control-90.png"
+        }
+      ],
+      "regressions": [
+        {
+          "item": 6,
+          "screenshots": [
+            "after-6-1024-video-header.jpg",
+            "after-6-1024-video-upload.jpg"
+          ]
+        }
+      ],
+      "canonicalPath": "/video",
+      "visual": {
+        "different": false,
+        "ratio": 0.0015065511067708333
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 7,
+        "passed": 123,
+        "disabled": 2
+      }
+    },
+    {
+      "route": "/video/edit/:projectId",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/video/edit/ved_ui",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37
+      }
+    },
+    {
+      "route": "/image",
+      "width": 1024,
+      "issues": [
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||自然光影||0",
+          "box": {
+            "x": 832,
+            "y": 310.796875,
+            "width": 152,
+            "height": 135
+          },
+          "observedUrl": "http://127.0.0.1:62684/image",
+          "screenshot": "artifacts/1024-_image-control-70.png"
+        }
+      ],
+      "regressions": [
+        {
+          "item": 6,
+          "screenshots": [
+            "after-6-1024-image-composer.jpg"
+          ]
+        }
+      ],
+      "canonicalPath": "/image",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "idempotent": 8,
+        "passed": 69,
+        "disabled": 1
+      }
+    },
+    {
+      "route": "/planned",
+      "width": 1024,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 3,
+          "route": "/planned"
+        }
+      ],
+      "canonicalPath": "/planned",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 144,
+        "idempotent": 8,
+        "disabled": 3
+      }
+    },
+    {
+      "route": "/planned/legacy-scheduled",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/planned/legacy-scheduled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 185
+      }
+    },
+    {
+      "route": "/planned/legacy-batch",
+      "width": 1024,
+      "issues": [],
+      "regressions": [
+        {
+          "item": 3,
+          "route": "/planned/legacy-batch"
+        }
+      ],
+      "canonicalPath": "/planned/legacy-batch",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 38,
+        "passed": 19,
+        "disabled": 4
+      }
+    },
+    {
+      "route": "/scheduled",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/planned/legacy-scheduled",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 185
+      }
+    },
+    {
+      "route": "/batch",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/planned",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 192
+      }
+    },
+    {
+      "route": "/batch/:batchId",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/batch/bat_ui",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 1
+      }
+    },
+    {
+      "route": "/connections",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/connections",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "protocol-link": 1
+      }
+    },
+    {
+      "route": "*",
+      "width": 1024,
+      "issues": [],
+      "regressions": [],
+      "canonicalPath": "/__ui_missing__",
+      "visual": {
+        "different": false,
+        "ratio": 0
+      },
+      "controlStatuses": {
+        "shared-reference": 37,
+        "passed": 3
+      }
+    }
+  ]
+}

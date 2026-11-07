@@ -14,9 +14,9 @@
  * credential does not interrupt a healthy interactive socket.
  */
 
-import * as React from 'react';
 import { getAccessToken } from '@/lib/auth';
 import { hdDebug } from '@/lib/hd-debug';
+import * as React from 'react';
 
 const REFRESH_MS = 45_000;
 

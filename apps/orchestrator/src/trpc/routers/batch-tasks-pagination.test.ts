@@ -2,9 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { batchTasksRouter } from './batch-tasks.js';
 
 function tableName(table: unknown): string {
-  return (
-    (table as Record<symbol, string> | undefined)?.[Symbol.for('drizzle:Name')] ?? ''
-  );
+  return (table as Record<symbol, string> | undefined)?.[Symbol.for('drizzle:Name')] ?? '';
 }
 
 describe('batchTasksRouter.list — keyset pagination', () => {
@@ -138,8 +136,6 @@ describe('batchTasksRouter.list — keyset pagination', () => {
         cursor: { id: 202, createdAt: '2026-08-05T02:00:00.000Z' },
       } as never);
 
-    expect(page.items).toEqual([
-      expect.objectContaining({ batchId: 'bat_201' }),
-    ]);
+    expect(page.items).toEqual([expect.objectContaining({ batchId: 'bat_201' })]);
   });
 });

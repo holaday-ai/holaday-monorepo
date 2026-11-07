@@ -21,16 +21,16 @@ import type {
   FundamentalsRow,
   GoodwillRow,
   IndexRow,
-  IntradayRow,
   InsiderChangeRow,
+  IntradayRow,
   KlineRow,
   MarketPulseRow,
   NorthboundRow,
   PledgeRow,
+  StockNewsRow,
   StockQuoteRow,
   StockRankingRow,
   StockScreeningUniverseRow,
-  StockNewsRow,
   UnlockRow,
   ValuationRow,
   ZtReviewRow,
@@ -79,7 +79,7 @@ export interface AkshareClient {
   /**
    * get_stock_kline(symbol, days?) — 历史 K 线。默认（无 days）末行=当日表现（①盘面）；
    * **days>0** → 近 days 交易日 raw 序列（P3 F走势 本地算，同源不新增数据）。
-  */
+   */
   getStockKline(symbol: string, days?: number): Promise<AkEnvelope<KlineRow>>;
   /** get_stock_quote(symbol) — 实时行情快照；用于当前价/涨跌幅。 */
   getStockQuote(symbol: string): Promise<AkEnvelope<StockQuoteRow>>;
@@ -193,7 +193,9 @@ export class StubAkshareClient implements AkshareClient {
     return Promise.resolve(this.err<SymbolRow>(`akshare:symbol_search(${query})`, this.now()));
   }
   getStockRankings(metric: 'gainers' | 'losers' | 'amount', _limit?: number) {
-    return Promise.resolve(this.err<StockRankingRow>(`akshare:stock_rankings(${metric})`, this.now()));
+    return Promise.resolve(
+      this.err<StockRankingRow>(`akshare:stock_rankings(${metric})`, this.now()),
+    );
   }
   getScreeningUniverse() {
     return Promise.resolve(

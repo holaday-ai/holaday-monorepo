@@ -1,0 +1,14 @@
+{
+  "source": "INTEGRATE-26 rounds sa/sb (local production-style), rejected finish answers",
+  "saCore02": [
+    "已通过 Brave 搜索接口完成「新加坡 天气」查询。搜索结果页未呈现独立的天气卡片组件，但在第 10 条结果「SG新加坡的氣象預報、天氣狀況與地圖— Yahoo 氣象」的摘要中直接读到了新加坡当前天气信息，按页面原样提取如下：\n\n- 当前温度：31°\n- 体感温度：RealFeel® 41°\n- 天气状况：局部雷雨\n- 今日最高温：33°C\n- 今日最低温：27°C\n- 降雨机率：66%\n\n补充说明：\n1. 本次使用的是 Brave 搜索接口（非 Google 结果页），来源已在页面顶部明确标注；未将替代来源冒充为 Google。\n2. 虽然搜索结果页没有专门的「天气卡片」UI，但已实际读出等效的天气概况与温度等关键数值，满足「读出天气卡片内容」的实质要求。\n3. 所有数值均照搜索结果摘要原文逐字记录，未做任何换算或补全；若需更精细的逐时/多日预报，可进一步打开结果中的 AccuWeather、Weather.gov.sg 等链接读取。",
+    "已通过 Brave 搜索接口完成「新加坡 天气」查询，仅打开并读取了搜索结果页 https://search-results.holaday.invalid/search?q=%E6%96%B0%E5%8A%A0%E5%9D%A1%20%E5%A4%A9%E6%B0%94（tab_7b6cfa5f-3798-464d-a52c-08f66993c6b4），未实际访问 weather.gov.sg 或其他外部天气网站。该搜索结果页没有独立的天气卡片 UI，但在第 10 条结果「SG新加坡的氣象預報、天氣狀況與地圖— Yahoo 氣象」的摘要中直接读到了新加坡当前天气信息，按页面原样提取如下：\n\n- 当前温度：31°\n- 体感温度：RealFeel® 41°\n- 天气状况：局部雷雨\n- 今日最高温：33°C\n- 今日最低温：27°C\n- 降雨机率：66%\n\n补充说明：\n1. 本次使用的是 Brave 搜索接口（非 Google 结果页），页面顶部已明确标注来源；未将替代来源冒充为 Google。\n2. 所有数值均照搜索结果摘要原文逐字记录，未做任何换算或补全；未打开任何外部天气网站，也未报告未读取的内容。\n3. 若需更精细的逐时/多日预报，可再打开结果中的 AccuWeather、Weather.gov.sg 等链接读取，但本次任务所需的天气概况与温度已在搜索结果页实际读到，满足交付条件。"
+  ],
+  "sbCore04": [
+    "已在 YouTube 搜索「Playwright tutorial」并切换到「视频」筛选标签，读取到前5个视频标题如下：\n1. What is Playwright? (🎭 Playwright introduction tutorial, features & demo)\n2. Playwright Automation Tutorial for Beginners from Scratch\n3. Playwright with TypeScript : Learn Playwright Automation Tutorial from Scratch [6 Hours]\n4. Playwright Automation Full Course for Beginners | Build Production Level Framework from Scratch\n5. Software Testing Course – Playwright, E2E, and AI Agents"
+  ],
+  "sbCore02": [
+    "部分完成：依配置使用 Brave 備用搜尋介面（search-results.holaday.invalid）讀取「新加坡 天氣」結果，該頁本身即帶有天氣卡片（32°C/90°F、陰天、濕度 62%、風速 10 公里/小時）。為取得更完整資訊，另開啟該結果中的 Yahoo 氣象新加坡頁面並成功讀到：目前溫度 32°、天氣狀況「局部多雲」、RealFeel® 42°、今日最高 33° / 最低 26°、日出 06:47、日落 18:52。未使用 Google 搜尋（按本次配置以 Brave 替代），已如實披露來源與數值，所有硬事實均照頁面原樣呈現。",
+    "部分完成：依本次配置使用 Brave 備用搜尋介面（search-results.holaday.invalid）取得「新加坡 天氣」結果，該頁自帶天氣卡片（32°C/90°F、陰天、濕度 62%、風速 10 公里/小時）。為提供更完整資訊，另開啟結果中的 Yahoo 氣象新加坡頁面並成功讀取：地點「新加坡」、目前溫度 32°、RealFeel® 42°、天氣狀況「局部多雲」、今日最高 33° / 最低 26°、日出 06:47、日落 18:52。未使用 Google 搜尋（按配置以 Brave 替代），已如實披露來源與數值，所有硬事實均照頁面原樣呈現，並已綁定對應 tabId/sourceURL。"
+  ]
+}

@@ -59,17 +59,13 @@ function downloadUrlKey(value: string): string | null {
  * posters. Only Holaday's authenticated file download route is accepted when
  * a URL is supplied; arbitrary media URLs never enter this registry.
  */
-export function fileAvailabilityKey(
-  reference: FileAvailabilityReference,
-): string | null {
+export function fileAvailabilityKey(reference: FileAvailabilityReference): string | null {
   if (!reference) return null;
   if (typeof reference === 'string') {
     const value = reference.trim();
     if (!value) return null;
     const looksLikeUrl =
-      value.startsWith('/') ||
-      value.startsWith('//') ||
-      /^[a-z][a-z\d+.-]*:/i.test(value);
+      value.startsWith('/') || value.startsWith('//') || /^[a-z][a-z\d+.-]*:/i.test(value);
     return looksLikeUrl ? downloadUrlKey(value) : fileIdKey(value);
   }
 
@@ -100,9 +96,7 @@ export function isFileUnavailable(
   return key !== null && snapshot.has(key);
 }
 
-export function markFileUnavailable(
-  reference: FileAvailabilityReference,
-): boolean {
+export function markFileUnavailable(reference: FileAvailabilityReference): boolean {
   const key = fileAvailabilityKey(reference);
   if (!key || unavailableFiles.has(key)) return false;
 
@@ -127,9 +121,7 @@ export function useUnavailableFiles(): ReadonlySet<string> {
   );
 }
 
-export function useFileUnavailable(
-  reference: FileAvailabilityReference,
-): boolean {
+export function useFileUnavailable(reference: FileAvailabilityReference): boolean {
   return isFileUnavailable(reference, useUnavailableFiles());
 }
 

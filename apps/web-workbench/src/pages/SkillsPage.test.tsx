@@ -80,6 +80,7 @@ describe('SkillsPage attachments', () => {
   it('reserves an attachment batch before uploads finish so rapid selections cannot exceed five', async () => {
     renderPage();
 
+    fireEvent.click(await screen.findByRole('button', { name: '描述任务' }));
     const input = await screen.findByLabelText('选择任务附件');
     expect((input as HTMLInputElement).disabled).toBe(false);
     const firstBatch = [1, 2, 3, 4].map(

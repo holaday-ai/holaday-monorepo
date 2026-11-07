@@ -2,16 +2,19 @@ import { inspect } from 'node:util';
 import type { PartnerKycStatus } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
-import { users } from '../db/schema/users.js';
 import {
-  partnerLots,
-  partnerWithdrawalRequests,
   type PartnerKycProfile,
   type PartnerLot,
   type PartnerMembership,
   type PartnerWithdrawalRequest,
+  partnerLots,
+  partnerWithdrawalRequests,
 } from '../db/schema/partner.js';
-import { LedgerIdempotencyConflictError, type CreditLedgerService } from './credit-ledger-service.js';
+import { users } from '../db/schema/users.js';
+import {
+  type CreditLedgerService,
+  LedgerIdempotencyConflictError,
+} from './credit-ledger-service.js';
 import type { KycService } from './kyc-service.js';
 import type { PartnerMembershipService } from './membership-service.js';
 import { evaluatePartnerRisk } from './risk-service.js';
@@ -38,7 +41,10 @@ type FakeWithdrawalInsert = {
 };
 
 type FakeLedgerPostInput = Parameters<CreditLedgerService['postEntry']>[0];
-type FakeLedgerEntry = Omit<FakeLedgerPostInput, 'lotId' | 'amountCreditCents' | 'amountApiUnits' | 'metadata'> & {
+type FakeLedgerEntry = Omit<
+  FakeLedgerPostInput,
+  'lotId' | 'amountCreditCents' | 'amountApiUnits' | 'metadata'
+> & {
   lotId: number | null;
   amountCreditCents: number;
   amountApiUnits: number;
@@ -147,7 +153,8 @@ class FakeWithdrawalDb {
               }
               return chain;
             },
-            limit: async (count: number) => this.selectRows(table, predicateText, selection).slice(0, count),
+            limit: async (count: number) =>
+              this.selectRows(table, predicateText, selection).slice(0, count),
           };
           return {
             ...chain,
@@ -161,15 +168,17 @@ class FakeWithdrawalDb {
     table: unknown,
     predicateText: string,
     selection?: unknown,
-  ): PartnerWithdrawalRequest[] | PartnerLot[] | Array<{ id: number }> | Array<{ totalCreditCents: number }> {
+  ):
+    | PartnerWithdrawalRequest[]
+    | PartnerLot[]
+    | Array<{ id: number }>
+    | Array<{ totalCreditCents: number }> {
     if (table === users) {
       const userId = Number(predicateText.match(/value:\s*(\d+)/)?.[1] ?? 0);
       return userId > 0 ? [{ id: userId }] : [];
     }
     if (table === partnerLots) {
-      return this.lots.filter(
-        (lot) => lot.status === 'frozen' || lot.riskStatus === 'frozen',
-      );
+      return this.lots.filter((lot) => lot.status === 'frozen' || lot.riskStatus === 'frozen');
     }
     if (table !== partnerWithdrawalRequests) return [];
     if (
@@ -207,12 +216,15 @@ class FakeLedgerService implements Pick<CreditLedgerService, 'postEntry' | 'summ
   }
 
   async summarizeUser(userId: number) {
-    const postedBucketDelta = (bucket: FakeLedgerEntry['bucket']) => this.entries
-      .filter((entry) => entry.userId === userId && entry.bucket === bucket)
-      .reduce(
-        (sum, entry) => sum + (entry.direction === 'credit' ? entry.amountCreditCents : -entry.amountCreditCents),
-        0,
-      );
+    const postedBucketDelta = (bucket: FakeLedgerEntry['bucket']) =>
+      this.entries
+        .filter((entry) => entry.userId === userId && entry.bucket === bucket)
+        .reduce(
+          (sum, entry) =>
+            sum +
+            (entry.direction === 'credit' ? entry.amountCreditCents : -entry.amountCreditCents),
+          0,
+        );
     return {
       availableCreditCents: postedBucketDelta('available'),
       lockedCreditCents: 0,
@@ -286,10 +298,13 @@ function fakeKycProfile(overrides: Partial<PartnerKycProfile> = {}): PartnerKycP
   };
 }
 
-function fakeKycService(profile: PartnerKycProfile | null): Pick<KycService, 'getProfile' | 'getStatus'> {
+function fakeKycService(
+  profile: PartnerKycProfile | null,
+): Pick<KycService, 'getProfile' | 'getStatus'> {
   return {
     getProfile: async (userId: number) => (profile?.userId === userId ? profile : null),
-    getStatus: async (userId: number) => (profile?.userId === userId ? (profile.status as PartnerKycStatus) : 'not_started'),
+    getStatus: async (userId: number) =>
+      profile?.userId === userId ? (profile.status as PartnerKycStatus) : 'not_started',
   };
 }
 
@@ -309,13 +324,17 @@ function fakeMembership(overrides: Partial<PartnerMembership> = {}): PartnerMemb
   };
 }
 
-function fakeMembershipService(membership: PartnerMembership | null): Pick<PartnerMembershipService, 'getActiveMembership'> {
+function fakeMembershipService(
+  membership: PartnerMembership | null,
+): Pick<PartnerMembershipService, 'getActiveMembership'> {
   return {
     getActiveMembership: async () => membership,
   };
 }
 
-function fakeWithdrawalRequest(overrides: Partial<PartnerWithdrawalRequest> = {}): PartnerWithdrawalRequest {
+function fakeWithdrawalRequest(
+  overrides: Partial<PartnerWithdrawalRequest> = {},
+): PartnerWithdrawalRequest {
   return {
     id: 1,
     externalId: 'pay_existing_withdrawal',
@@ -394,13 +413,15 @@ function fakeFrozenEntry(overrides: Partial<FakeLedgerEntry> = {}): FakeLedgerEn
   };
 }
 
-function serviceWithDeps(input: {
-  db?: FakeWithdrawalDb;
-  ledger?: FakeLedgerService;
-  kycStatus?: PartnerKycStatus;
-  kycProfile?: PartnerKycProfile | null;
-  membership?: PartnerMembership | null;
-} = {}): { db: FakeWithdrawalDb; ledger: FakeLedgerService; service: WithdrawalService } {
+function serviceWithDeps(
+  input: {
+    db?: FakeWithdrawalDb;
+    ledger?: FakeLedgerService;
+    kycStatus?: PartnerKycStatus;
+    kycProfile?: PartnerKycProfile | null;
+    membership?: PartnerMembership | null;
+  } = {},
+): { db: FakeWithdrawalDb; ledger: FakeLedgerService; service: WithdrawalService } {
   const db = input.db ?? new FakeWithdrawalDb();
   const ledger = input.ledger ?? new FakeLedgerService(2_000_00);
   const kycProfile = Object.hasOwn(input, 'kycProfile')
@@ -409,7 +430,9 @@ function serviceWithDeps(input: {
   const service = new WithdrawalService(db.asDB(), {
     ledger,
     kyc: fakeKycService(kycProfile) as KycService,
-    membership: fakeMembershipService(Object.hasOwn(input, 'membership') ? (input.membership ?? null) : fakeMembership()) as PartnerMembershipService,
+    membership: fakeMembershipService(
+      Object.hasOwn(input, 'membership') ? (input.membership ?? null) : fakeMembership(),
+    ) as PartnerMembershipService,
   });
   return { db, ledger, service };
 }
@@ -550,12 +573,22 @@ describe('withdrawal pure helpers', () => {
   });
 
   it.each([
-    ['negative amount', () => validateWithdrawalRequest({ amountCreditCents: -1, withdrawableCreditCents: 1_000_00 })],
+    [
+      'negative amount',
+      () => validateWithdrawalRequest({ amountCreditCents: -1, withdrawableCreditCents: 1_000_00 }),
+    ],
     [
       'fractional withdrawable credit',
-      () => validateWithdrawalRequest({ amountCreditCents: 500_00, withdrawableCreditCents: 1_000_00.5 }),
+      () =>
+        validateWithdrawalRequest({
+          amountCreditCents: 500_00,
+          withdrawableCreditCents: 1_000_00.5,
+        }),
     ],
-    ['invalid date', () => computeWithdrawalReviewDueAt({ now: new Date(Number.NaN), highRisk: false })],
+    [
+      'invalid date',
+      () => computeWithdrawalReviewDueAt({ now: new Date(Number.NaN), highRisk: false }),
+    ],
   ])('rejects helper validation for %s', (_name, action) => {
     expect(action).toThrow(RangeError);
   });
@@ -634,8 +667,12 @@ describe('WithdrawalService requestWithdrawal', () => {
   it('requires passed KYC before withdrawal', async () => {
     const { db, ledger, service } = serviceWithDeps({ kycStatus: 'review_required' });
 
-    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(WithdrawalGateError);
-    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({ reason: 'kyc_required' });
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(
+      WithdrawalGateError,
+    );
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
+      reason: 'kyc_required',
+    });
     expect(db.rowsCreated).toBe(0);
     expect(ledger.entries).toHaveLength(0);
   });
@@ -645,7 +682,9 @@ describe('WithdrawalService requestWithdrawal', () => {
       kycProfile: fakeKycProfile({ bankCardHash: null }),
     });
 
-    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(WithdrawalGateError);
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(
+      WithdrawalGateError,
+    );
     await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
       reason: 'bank_account_required',
     });
@@ -658,7 +697,9 @@ describe('WithdrawalService requestWithdrawal', () => {
       kycProfile: fakeKycProfile({ bankCardHash: 'bank_fingerprint_other' }),
     });
 
-    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(WithdrawalGateError);
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(
+      WithdrawalGateError,
+    );
     await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
       reason: 'bank_account_mismatch',
     });
@@ -706,7 +747,9 @@ describe('WithdrawalService requestWithdrawal', () => {
   it('requires active partner membership before withdrawal', async () => {
     const { db, ledger, service } = serviceWithDeps({ membership: null });
 
-    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(WithdrawalGateError);
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(
+      WithdrawalGateError,
+    );
     await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
       reason: 'membership_required',
     });
@@ -721,7 +764,9 @@ describe('WithdrawalService requestWithdrawal', () => {
       }),
     });
 
-    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(WithdrawalGateError);
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(
+      WithdrawalGateError,
+    );
     await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
       reason: 'risk_frozen',
     });
@@ -736,7 +781,9 @@ describe('WithdrawalService requestWithdrawal', () => {
       }),
     });
 
-    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(WithdrawalGateError);
+    await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toBeInstanceOf(
+      WithdrawalGateError,
+    );
     await expect(service.requestWithdrawal(validWithdrawalInput)).rejects.toMatchObject({
       reason: 'risk_frozen',
     });
@@ -842,7 +889,9 @@ describe('WithdrawalService requestWithdrawal', () => {
     });
     expect(db.transactionCalls).toBe(1);
     expect(db.lockedUserIds).toEqual([123]);
-    expect(db.wherePredicateTexts.some((predicateText) => predicateText.includes('idempotency_key'))).toBe(true);
+    expect(
+      db.wherePredicateTexts.some((predicateText) => predicateText.includes('idempotency_key')),
+    ).toBe(true);
     expect(ledger.entries).toHaveLength(2);
     expect(ledger.entries).toEqual([
       expect.objectContaining({
@@ -984,8 +1033,16 @@ describe('WithdrawalService requestWithdrawal', () => {
     const row = await service.requestWithdrawal(validWithdrawalInput);
 
     expect(row).toBe(existing);
-    expect(ledger.entries.filter((entry) => entry.idempotencyKey === 'withdrawal:hold:withdrawal-idem-1')).toHaveLength(1);
-    expect(ledger.entries.filter((entry) => entry.idempotencyKey === 'withdrawal:pending:withdrawal-idem-1')).toHaveLength(1);
+    expect(
+      ledger.entries.filter(
+        (entry) => entry.idempotencyKey === 'withdrawal:hold:withdrawal-idem-1',
+      ),
+    ).toHaveLength(1);
+    expect(
+      ledger.entries.filter(
+        (entry) => entry.idempotencyKey === 'withdrawal:pending:withdrawal-idem-1',
+      ),
+    ).toHaveLength(1);
   });
 
   it('rolls back a newly inserted request when a ledger hold conflicts', async () => {

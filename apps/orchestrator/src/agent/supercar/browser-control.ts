@@ -18,6 +18,36 @@ export class BrowserInputOutcomeUnknownError extends Error {
 
 type BrowserAction<T = void> = (signal: AbortSignal) => Promise<T>;
 
+export interface HumanInputLog {
+  count: number;
+  /** Epoch ms of the first and the latest counted input in the window asked for. */
+  firstAt: number | null;
+  lastAt: number | null;
+}
+
+/**
+ * FIX-53 #1 (协调方): what counts as the person acting — a press, a key, text, a navigation.
+ * Moving the pointer, scrolling and a viewport change do not.
+ */
+export type HumanInputKind =
+  | 'mouseDown'
+  | 'mouseUp'
+  | 'mouseMove'
+  | 'scroll'
+  | 'keyDown'
+  | 'keyUp'
+  | 'insertText'
+  | 'navigate'
+  | 'viewport';
+const ACTING_INPUTS: ReadonlySet<HumanInputKind> = new Set([
+  'mouseDown',
+  'keyDown',
+  'insertText',
+  'navigate',
+]);
+/** The times kept, enough for any one wait. */
+const INPUT_TIMES_KEPT = 1_000;
+
 /**
  * One running task's control handoff. A request is NOT a pause receipt:
  * only the runner, at a settled browser-action boundary, calls checkpoint.
@@ -39,6 +69,8 @@ export class BrowserControl {
     this.confirmStop = resolve;
   });
   private waiters = new Set<() => void>();
+  /** FIX-53 #1: when the person acted while holding the lease — evidence, never contents. */
+  private readonly humanInputTimes: number[] = [];
 
   snapshot(): BrowserControlSnapshot {
     return {
@@ -138,11 +170,21 @@ export class BrowserControl {
     return this.snapshot();
   }
 
-  async runHuman<T>(lease: string, action: BrowserAction<T>): Promise<T> {
+  async runHuman<T>(lease: string, action: BrowserAction<T>, kind?: HumanInputKind): Promise<T> {
     if (this.phase !== 'human' || !lease || lease !== this.lease) {
       throw new Error('browser_control_not_owned');
     }
+    if (kind && ACTING_INPUTS.has(kind)) {
+      this.humanInputTimes.push(Date.now());
+      if (this.humanInputTimes.length > INPUT_TIMES_KEPT) this.humanInputTimes.shift();
+    }
     return this.enqueue(action);
+  }
+
+  /** The person's acting inputs since `since` (epoch ms): counts and times only. */
+  humanInputLog(since = 0): HumanInputLog {
+    const times = this.humanInputTimes.filter((at) => at >= since);
+    return { count: times.length, firstAt: times[0] ?? null, lastAt: times.at(-1) ?? null };
   }
 
   /** Accepted input transports register key/button cleanup, including across disconnects. */

@@ -1,12 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
 import type { Logger } from 'pino';
+import { describe, expect, it, vi } from 'vitest';
 import { classifyExecutionMode } from '../intent-classifier.js';
 import { ashareQaHandlesMode } from './ashare-qa-lane-gate.js';
 
 function fakeLogger(): Logger {
   const noop = vi.fn();
   return {
-    info: noop, warn: noop, debug: noop, error: noop, fatal: noop, trace: noop,
+    info: noop,
+    warn: noop,
+    debug: noop,
+    error: noop,
+    fatal: noop,
+    trace: noop,
     child: () => fakeLogger(),
   } as unknown as Logger;
 }

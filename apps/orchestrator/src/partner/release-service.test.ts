@@ -2,14 +2,14 @@ import { inspect } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import {
-  holaCreditLedgerEntries,
-  partnerLots,
-  partnerMonthlyReleases,
   type HolaCreditLedgerEntry,
   type PartnerLot,
   type PartnerMonthlyRelease,
+  holaCreditLedgerEntries,
+  partnerLots,
+  partnerMonthlyReleases,
 } from '../db/schema/partner.js';
-import { calculateMonthlyReleaseWithBudget, ReleaseService } from './release-service.js';
+import { ReleaseService, calculateMonthlyReleaseWithBudget } from './release-service.js';
 
 type FakeReleaseInsert = Omit<PartnerMonthlyRelease, 'id' | 'createdAt'>;
 type FakeLedgerInsert = Omit<HolaCreditLedgerEntry, 'id' | 'createdAt'>;
@@ -32,11 +32,13 @@ class FakeReleaseDb {
   private nextLedgerId: number;
   private lastLedgerIdempotencyKey: string | null = null;
 
-  constructor(input: {
-    lots?: PartnerLot[];
-    releases?: PartnerMonthlyRelease[];
-    ledgerEntries?: HolaCreditLedgerEntry[];
-  } = {}) {
+  constructor(
+    input: {
+      lots?: PartnerLot[];
+      releases?: PartnerMonthlyRelease[];
+      ledgerEntries?: HolaCreditLedgerEntry[];
+    } = {},
+  ) {
     this.lotRows = [...(input.lots ?? [])];
     this.releaseRows = [...(input.releases ?? [])];
     this.ledgerRows = [...(input.ledgerEntries ?? [])];
@@ -59,7 +61,8 @@ class FakeReleaseDb {
               const existing = this.releaseRows.find(
                 (row) =>
                   row.idempotencyKey === releaseValues.idempotencyKey ||
-                  (row.lotId === releaseValues.lotId && row.releaseMonth === releaseValues.releaseMonth),
+                  (row.lotId === releaseValues.lotId &&
+                    row.releaseMonth === releaseValues.releaseMonth),
               );
               if (existing) return;
               this.releaseRows.push({
@@ -78,7 +81,9 @@ class FakeReleaseDb {
           this.lastLedgerIdempotencyKey = ledgerValues.idempotencyKey;
           return {
             onDuplicateKeyUpdate: async (_config: unknown) => {
-              const existing = this.ledgerRows.find((row) => row.idempotencyKey === ledgerValues.idempotencyKey);
+              const existing = this.ledgerRows.find(
+                (row) => row.idempotencyKey === ledgerValues.idempotencyKey,
+              );
               if (existing) return;
               this.ledgerRows.push({
                 id: this.nextLedgerId,
@@ -105,7 +110,10 @@ class FakeReleaseDb {
         values: Partial<
           Pick<
             PartnerLot,
-            'status' | 'releasedPrincipalCreditCents' | 'releasedBonusCreditCents' | 'carryForwardCreditCents'
+            | 'status'
+            | 'releasedPrincipalCreditCents'
+            | 'releasedBonusCreditCents'
+            | 'carryForwardCreditCents'
           >
         >,
       ) => ({
@@ -203,7 +211,9 @@ class FakeReleaseDb {
       if (predicateText.includes('release_month') && releaseMonths.length > 0) {
         rows = rows.filter((row) => releaseMonths.includes(row.releaseMonth));
       }
-      const idempotencyKeys = predicateStrings.filter((value) => value.startsWith('monthly_release:'));
+      const idempotencyKeys = predicateStrings.filter((value) =>
+        value.startsWith('monthly_release:'),
+      );
       if (predicateText.includes('idempotency_key') && idempotencyKeys.length > 0) {
         rows = rows.filter((row) => idempotencyKeys.includes(row.idempotencyKey));
       }
@@ -217,7 +227,7 @@ class FakeReleaseDb {
         predicateText.includes('idempotency_key') &&
         predicateText.includes(this.lastLedgerIdempotencyKey)
           ? this.lastLedgerIdempotencyKey
-          : predicateStrings.find((value) => value.startsWith('monthly_release_')) ?? null;
+          : (predicateStrings.find((value) => value.startsWith('monthly_release_')) ?? null);
       if (!readbackKey) return [...this.ledgerRows];
       return this.ledgerRows.filter((row) => row.idempotencyKey === readbackKey);
     }
@@ -242,7 +252,8 @@ function extractPredicateDates(value: unknown): Date[] {
       dates.push((candidate as { value: Date }).value);
     }
     if ('queryChunks' in candidate) {
-      for (const chunk of (candidate as { queryChunks?: unknown[] }).queryChunks ?? []) visit(chunk);
+      for (const chunk of (candidate as { queryChunks?: unknown[] }).queryChunks ?? [])
+        visit(chunk);
     }
     if ('params' in candidate) {
       for (const param of (candidate as { params?: unknown[] }).params ?? []) visit(param);
@@ -269,7 +280,8 @@ function extractPredicateNumbers(value: unknown): number[] {
       numbers.push((candidate as { value: number }).value);
     }
     if ('queryChunks' in candidate) {
-      for (const chunk of (candidate as { queryChunks?: unknown[] }).queryChunks ?? []) visit(chunk);
+      for (const chunk of (candidate as { queryChunks?: unknown[] }).queryChunks ?? [])
+        visit(chunk);
     }
     if ('params' in candidate) {
       for (const param of (candidate as { params?: unknown[] }).params ?? []) visit(param);
@@ -296,7 +308,8 @@ function extractPredicateStrings(value: unknown): string[] {
       strings.push((candidate as { value: string }).value);
     }
     if ('queryChunks' in candidate) {
-      for (const chunk of (candidate as { queryChunks?: unknown[] }).queryChunks ?? []) visit(chunk);
+      for (const chunk of (candidate as { queryChunks?: unknown[] }).queryChunks ?? [])
+        visit(chunk);
     }
     if ('params' in candidate) {
       for (const param of (candidate as { params?: unknown[] }).params ?? []) visit(param);
@@ -382,14 +395,21 @@ function priorMonthlyReleases(count: number, lotId = 1): PartnerMonthlyRelease[]
 
 describe('partner monthly release pure rules', () => {
   it('releases the full target when budget is enough', () => {
-    expect(calculateMonthlyReleaseWithBudget({ targetCreditCents: 1_500_00, budgetCreditCents: 2_000_00 })).toEqual({
+    expect(
+      calculateMonthlyReleaseWithBudget({
+        targetCreditCents: 1_500_00,
+        budgetCreditCents: 2_000_00,
+      }),
+    ).toEqual({
       releasedCreditCents: 1_500_00,
       carryForwardCreditCents: 0,
     });
   });
 
   it('carries forward the unreleased target when budget is short', () => {
-    expect(calculateMonthlyReleaseWithBudget({ targetCreditCents: 1_500_00, budgetCreditCents: 500_00 })).toEqual({
+    expect(
+      calculateMonthlyReleaseWithBudget({ targetCreditCents: 1_500_00, budgetCreditCents: 500_00 }),
+    ).toEqual({
       releasedCreditCents: 500_00,
       carryForwardCreditCents: 1_000_00,
     });
@@ -415,22 +435,25 @@ describe('ReleaseService releaseEligibleLots', () => {
   it('throws RangeError for invalid months and budgets', async () => {
     const service = new ReleaseService(new FakeReleaseDb().asDB());
 
-    await expect(service.releaseEligibleLots({ releaseMonth: '2026-13', budgetCreditCents: 1 })).rejects.toThrow(
-      RangeError,
-    );
-    await expect(service.releaseEligibleLots({ releaseMonth: '2026-02-01', budgetCreditCents: 1 })).rejects.toThrow(
-      RangeError,
-    );
-    await expect(service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: -1 })).rejects.toThrow(
-      RangeError,
-    );
+    await expect(
+      service.releaseEligibleLots({ releaseMonth: '2026-13', budgetCreditCents: 1 }),
+    ).rejects.toThrow(RangeError);
+    await expect(
+      service.releaseEligibleLots({ releaseMonth: '2026-02-01', budgetCreditCents: 1 }),
+    ).rejects.toThrow(RangeError);
+    await expect(
+      service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: -1 }),
+    ).rejects.toThrow(RangeError);
   });
 
   it('creates a full-budget monthly release, credits withdrawable ledger, and reconciles lot totals', async () => {
     const fakeDb = new FakeReleaseDb({ lots: [fakeLot()] });
     const service = new ReleaseService(fakeDb.asDB());
 
-    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 50_000 });
+    const summary = await service.releaseEligibleLots({
+      releaseMonth: '2026-11',
+      budgetCreditCents: 50_000,
+    });
 
     expect(summary).toEqual({
       releaseMonth: '2026-11',
@@ -448,7 +471,9 @@ describe('ReleaseService releaseEligibleLots', () => {
       carryForwardCreditCents: 0,
       idempotencyKey: 'monthly_release:2026-11:1',
     });
-    expect(fakeDb.ledgerRows.map((row) => [row.entryType, row.bucket, row.amountCreditCents])).toEqual([
+    expect(
+      fakeDb.ledgerRows.map((row) => [row.entryType, row.bucket, row.amountCreditCents]),
+    ).toEqual([
       ['monthly_release_principal', 'withdrawable', 6_667],
       ['monthly_release_bonus', 'withdrawable', 1_334],
     ]);
@@ -487,8 +512,14 @@ describe('ReleaseService releaseEligibleLots', () => {
     });
     const service = new ReleaseService(fakeDb.asDB());
 
-    const first = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 50_000 });
-    const second = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 50_000 });
+    const first = await service.releaseEligibleLots({
+      releaseMonth: '2026-11',
+      budgetCreditCents: 50_000,
+    });
+    const second = await service.releaseEligibleLots({
+      releaseMonth: '2026-11',
+      budgetCreditCents: 50_000,
+    });
 
     expect(first).toMatchObject({
       eligibleLotCount: 1,
@@ -509,7 +540,10 @@ describe('ReleaseService releaseEligibleLots', () => {
     const fakeDb = new FakeReleaseDb({ lots: [fakeLot()] });
     const service = new ReleaseService(fakeDb.asDB());
 
-    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 5_000 });
+    const summary = await service.releaseEligibleLots({
+      releaseMonth: '2026-11',
+      budgetCreditCents: 5_000,
+    });
 
     expect(summary).toEqual({
       releaseMonth: '2026-11',
@@ -538,7 +572,10 @@ describe('ReleaseService releaseEligibleLots', () => {
     const service = new ReleaseService(fakeDb.asDB());
 
     await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 5_000 });
-    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-12', budgetCreditCents: 50_000 });
+    const summary = await service.releaseEligibleLots({
+      releaseMonth: '2026-12',
+      budgetCreditCents: 50_000,
+    });
 
     expect(summary).toEqual({
       releaseMonth: '2026-12',
@@ -582,7 +619,10 @@ describe('ReleaseService releaseEligibleLots', () => {
     });
     const service = new ReleaseService(fakeDb.asDB());
 
-    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-12', budgetCreditCents: 50_000 });
+    const summary = await service.releaseEligibleLots({
+      releaseMonth: '2026-12',
+      budgetCreditCents: 50_000,
+    });
 
     expect(summary).toEqual({
       releaseMonth: '2026-12',
@@ -618,8 +658,14 @@ describe('ReleaseService releaseEligibleLots', () => {
     });
     const service = new ReleaseService(fakeDb.asDB());
 
-    const first = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 50_000 });
-    const second = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 50_000 });
+    const first = await service.releaseEligibleLots({
+      releaseMonth: '2026-11',
+      budgetCreditCents: 50_000,
+    });
+    const second = await service.releaseEligibleLots({
+      releaseMonth: '2026-11',
+      budgetCreditCents: 50_000,
+    });
 
     expect(first).toEqual(second);
     expect(fakeDb.releaseRows).toHaveLength(1);
@@ -643,7 +689,10 @@ describe('ReleaseService releaseEligibleLots', () => {
     });
     const service = new ReleaseService(fakeDb.asDB());
 
-    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 15_000 });
+    const summary = await service.releaseEligibleLots({
+      releaseMonth: '2026-11',
+      budgetCreditCents: 15_000,
+    });
 
     expect(summary).toEqual({
       releaseMonth: '2026-11',
@@ -652,11 +701,20 @@ describe('ReleaseService releaseEligibleLots', () => {
       totalReleasedCreditCents: 15_000,
       remainingBudgetCreditCents: 0,
     });
-    expect(fakeDb.releaseRows.map((row) => [row.lotId, row.principalCreditCents, row.bonusCreditCents, row.carryForwardCreditCents])).toEqual([
+    expect(
+      fakeDb.releaseRows.map((row) => [
+        row.lotId,
+        row.principalCreditCents,
+        row.bonusCreditCents,
+        row.carryForwardCreditCents,
+      ]),
+    ).toEqual([
       [1, 6_667, 1_334, 0],
       [2, 6_667, 332, 1_002],
     ]);
-    expect(fakeDb.ledgerRows.map((row) => [row.lotId, row.entryType, row.amountCreditCents])).toEqual([
+    expect(
+      fakeDb.ledgerRows.map((row) => [row.lotId, row.entryType, row.amountCreditCents]),
+    ).toEqual([
       [1, 'monthly_release_principal', 6_667],
       [1, 'monthly_release_bonus', 1_334],
       [2, 'monthly_release_principal', 6_667],
@@ -676,7 +734,10 @@ describe('ReleaseService releaseEligibleLots', () => {
     });
     const service = new ReleaseService(fakeDb.asDB());
 
-    const summary = await service.releaseEligibleLots({ releaseMonth: '2027-10', budgetCreditCents: 50_000 });
+    const summary = await service.releaseEligibleLots({
+      releaseMonth: '2027-10',
+      budgetCreditCents: 50_000,
+    });
 
     expect(summary).toEqual({
       releaseMonth: '2027-10',
@@ -719,7 +780,10 @@ describe('ReleaseService releaseEligibleLots', () => {
     });
     const service = new ReleaseService(fakeDb.asDB());
 
-    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 50_000 });
+    const summary = await service.releaseEligibleLots({
+      releaseMonth: '2026-11',
+      budgetCreditCents: 50_000,
+    });
 
     expect(summary).toEqual({
       releaseMonth: '2026-11',
@@ -751,7 +815,10 @@ describe('ReleaseService releaseEligibleLots', () => {
     });
     const service = new ReleaseService(fakeDb.asDB());
 
-    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 50_000 });
+    const summary = await service.releaseEligibleLots({
+      releaseMonth: '2026-11',
+      budgetCreditCents: 50_000,
+    });
 
     expect(summary).toEqual({
       releaseMonth: '2026-11',
@@ -781,7 +848,10 @@ describe('ReleaseService releaseEligibleLots', () => {
     const fakeDb = new FakeReleaseDb({ lots: [fakeLot()] });
     const service = new ReleaseService(fakeDb.asDB());
 
-    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 0 });
+    const summary = await service.releaseEligibleLots({
+      releaseMonth: '2026-11',
+      budgetCreditCents: 0,
+    });
 
     expect(summary).toEqual({
       releaseMonth: '2026-11',
@@ -806,7 +876,10 @@ describe('ReleaseService releaseEligibleLots', () => {
     });
     const service = new ReleaseService(fakeDb.asDB());
 
-    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 50_000 });
+    const summary = await service.releaseEligibleLots({
+      releaseMonth: '2026-11',
+      budgetCreditCents: 50_000,
+    });
 
     expect(summary).toEqual({
       releaseMonth: '2026-11',
@@ -840,7 +913,10 @@ describe('ReleaseService releaseEligibleLots', () => {
     });
     const service = new ReleaseService(fakeDb.asDB());
 
-    const summary = await service.releaseEligibleLots({ releaseMonth: '2026-11', budgetCreditCents: 50_000 });
+    const summary = await service.releaseEligibleLots({
+      releaseMonth: '2026-11',
+      budgetCreditCents: 50_000,
+    });
 
     expect(summary).toEqual({
       releaseMonth: '2026-11',

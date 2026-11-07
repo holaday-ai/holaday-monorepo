@@ -39,8 +39,13 @@ const REQUIRED_TABLES = [
   'energy_event_receipts',
   'feedback_cases',
   'llm_calls',
+  'model_catalog',
+  'model_catalog_events',
+  'model_catalog_settings',
   'notifications',
   'notification_channels',
+  'operation_path_replays',
+  'operation_paths',
   'organization_invitations',
   'organization_members',
   'organizations',
@@ -53,6 +58,7 @@ const REQUIRED_TABLES = [
   'planned_tasks',
   'projects',
   'project_members',
+  'quota_refunds',
   'team_milestones',
   'team_work_items',
   'team_work_item_assignments',
@@ -73,8 +79,10 @@ const REQUIRED_TABLES = [
   'stock_dashboard_snapshots',
   ...STOCK_PREFERENCE_REQUIRED_TABLES,
   'stock_risk_monitors',
+  'task_action_captures',
   'task_events',
   'task_files',
+  'task_model_selections',
   'task_quotas',
   'task_steps',
   'tasks',
@@ -92,6 +100,25 @@ const REQUIRED_TABLES = [
 
 const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
   llm_calls: ['cost_status', 'usage_status', 'region', 'provider_request_id'],
+  // Batch 06 (0062) — playbook self-evolution loop.
+  task_action_captures: ['replay_json', 'outcome_json', 'executor_source'],
+  operation_paths: ['template_json', 'generalizer', 'canary_pass_streak'],
+  operation_path_replays: [
+    'external_id',
+    'path_id',
+    'task_id',
+    'outcome',
+    'steps_total',
+    'steps_deterministic',
+    'steps_repaired',
+    'model_calls',
+    'model_calls_saved',
+    'repaired_path_id',
+    'failed_step_index',
+    'failure_reason',
+    'duration_ms',
+    'created_at',
+  ],
   organizations: [
     'external_id',
     'name',
@@ -530,6 +557,7 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'verification_json',
     'verification_passed',
     'failure_level',
+    'public_cloud_continuation_task_id',
   ],
   task_steps: [
     'external_id',
@@ -567,6 +595,10 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'description',
     'reminder_minutes',
     'last_reminder_run',
+    'notify_on_success',
+    'failure_notify_threshold',
+    'consecutive_failures',
+    'pending_task_id',
   ],
   planned_tasks: [
     'external_id',
@@ -582,6 +614,9 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'status',
     'item_count',
     'last_run_status',
+    'notify_on_success',
+    'failure_notify_threshold',
+    'consecutive_failures',
   ],
   planned_task_items: ['external_id', 'planned_task_id', 'seq', 'instruction', 'enabled'],
   planned_task_occurrence_overrides: [
@@ -986,10 +1021,23 @@ async function main(): Promise<void> {
       indexes: indexRows,
       foreignKeys: foreignKeyRows,
     });
-    const nullableUsageColumns = ['prompt_tokens', 'completion_tokens', 'cache_read_tokens', 'cache_write_tokens', 'cost_usd'];
-    const accountingViolations = nullableUsageColumns.filter((column) => !columnRows.some((row) =>
-      row.table_name === 'llm_calls' && row.column_name === column && row.is_nullable === 'YES' && row.column_default === null,
-    ));
+    const nullableUsageColumns = [
+      'prompt_tokens',
+      'completion_tokens',
+      'cache_read_tokens',
+      'cache_write_tokens',
+      'cost_usd',
+    ];
+    const accountingViolations = nullableUsageColumns.filter(
+      (column) =>
+        !columnRows.some(
+          (row) =>
+            row.table_name === 'llm_calls' &&
+            row.column_name === column &&
+            row.is_nullable === 'YES' &&
+            row.column_default === null,
+        ),
+    );
 
     if (
       missingTables.length > 0 ||
@@ -1012,7 +1060,9 @@ async function main(): Promise<void> {
         console.error(`Invalid lifecycle schema: ${lifecycleViolations.join('; ')}`);
       }
       if (accountingViolations.length > 0) {
-        console.error(`LLM accounting columns must allow NULL without zero defaults: ${accountingViolations.join(', ')}`);
+        console.error(
+          `LLM accounting columns must allow NULL without zero defaults: ${accountingViolations.join(', ')}`,
+        );
       }
       console.error('Run the numbered migrations or drizzle push before starting orchestrator.');
       process.exitCode = 1;

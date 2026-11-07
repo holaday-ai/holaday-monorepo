@@ -1,0 +1,106 @@
+{
+  "date": "2026-10-06",
+  "scope": "frontend-only final closeout",
+  "base": "811dd1e6",
+  "pre_closeout_head": "32b9ad02",
+  "delivery_branch": "codex/capability-recovery-ui",
+  "pr": 240,
+  "pr_already_merged": true,
+  "frontend_tests": {
+    "command": "NODE_OPTIONS=--max-old-space-size=2048 pnpm --filter @holaday/web-workbench test --maxWorkers=1 --minWorkers=1",
+    "exit_code": 1,
+    "files": 273,
+    "files_passed": 271,
+    "files_failed": 2,
+    "tests": 2583,
+    "passed": 2580,
+    "baseline_failures": 3,
+    "new_failures": 0,
+    "duration_seconds": 89.92,
+    "failures": [
+      "task-hub-state.test.ts > task hub state helpers > formats dates and errors defensively",
+      "energy-progress.test.ts > energy progress > keeps scoped progress in memory when local storage is unavailable",
+      "energy-progress.test.ts > energy progress > removes saved cards and test actions without deleting completion history"
+    ]
+  },
+  "build": {
+    "command": "NODE_OPTIONS=--max-old-space-size=2048 pnpm --filter @holaday/web-workbench build",
+    "exit_code": 0,
+    "steps": [
+      "eslint src/**/*.{ts,tsx}",
+      "tsc --noEmit",
+      "tsc --noEmit -p tsconfig.node.json",
+      "vite build --config vite.config.ts"
+    ],
+    "warnings": [
+      "Chunks above 700KB",
+      "Outdated caniuse-lite data",
+      "Tailwind ambiguous arbitrary duration/easing classes"
+    ]
+  },
+  "browser": {
+    "environment": "127.0.0.1:4323 real components, fixture queries, mutations rejected",
+    "reference_video": {
+      "width": 540,
+      "animation_seconds": 0.46,
+      "background": "rgba(39, 39, 47, 0.92)",
+      "escape_dialogs_remaining": 0,
+      "focus_return": "添加参考视频",
+      "mobile_width": 366
+    },
+    "storyboard_disclosure": {
+      "seconds": 0.62,
+      "collapsed_inert": true
+    },
+    "image_settings": {
+      "surface": "rgba(41, 42, 50, 0.97)",
+      "selection_background": "rgba(118, 96, 216, 0.17)",
+      "selection_border": "rgb(168, 151, 237)",
+      "focus_return": "生成设置"
+    },
+    "file_preview": {
+      "metadata": true,
+      "fixture_error": 503,
+      "escape_dialogs_remaining": 0,
+      "initial_focus": "dialog surface",
+      "mobile_horizontal_overflow": false
+    },
+    "team_detail": {
+      "mobile_horizontal_overflow": false,
+      "references": "即将上线, no action"
+    },
+    "planned_editor": {
+      "exit_seconds": 0.38,
+      "focus_return": "新建规划",
+      "dirty_discard_checked": true
+    },
+    "energy_player": {
+      "exit_seconds": 0.3,
+      "closed_inert": true,
+      "after_exit_dialogs_remaining": 0,
+      "focus_return": "抽一张相关能量牌"
+    }
+  },
+  "scope_exclusions": [
+    "backend changes",
+    "server changes",
+    "database migrations",
+    "merge",
+    "deployment",
+    "real generation/refund/market-data acceptance"
+  ],
+  "logs": {
+    "phase3-closeout-test.log": {
+      "local_path": "/private/tmp/holaday-ui-fidelity/phase3-closeout-test.log",
+      "sha256": "357d222a3681d3f488d6ea0dd254ff4eebfb6868b478e134d55d0c7409b9106f"
+    },
+    "phase3-closeout-build.log": {
+      "local_path": "/private/tmp/holaday-ui-fidelity/phase3-closeout-build.log",
+      "sha256": "1cb63a9ca7144ad932f5ca7269e4411304e8803d49d1fafce1e67969c91b59a2"
+    },
+    "phase3-energy.log": {
+      "local_path": "/private/tmp/holaday-ui-fidelity/phase3-energy.log",
+      "sha256": "43759802bf7b01cede833481d75240e2761a26fbcc8d9d9223bd8280f9bca9ba"
+    }
+  }
+}

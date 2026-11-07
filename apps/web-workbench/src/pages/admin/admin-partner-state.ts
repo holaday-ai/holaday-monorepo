@@ -1,10 +1,4 @@
-import {
-  asRecord,
-  finiteNumber,
-  nonNegativeNumber,
-  safeArray,
-  safeText,
-} from './admin-shared';
+import { asRecord, finiteNumber, nonNegativeNumber, safeArray, safeText } from './admin-shared';
 
 export type AdminPartnerStatusKind = 'kyc' | 'order' | 'withdrawal' | 'risk';
 export type AdminPartnerQueueName =
@@ -27,11 +21,7 @@ const ADMIN_PARTNER_QUEUE_NAMES = new Set<AdminPartnerQueueName>([
 function beijingDayString(at: Date, daysAgo = 0): string {
   const shifted = new Date(at.getTime() + 8 * 60 * 60 * 1000);
   const day = new Date(
-    Date.UTC(
-      shifted.getUTCFullYear(),
-      shifted.getUTCMonth(),
-      shifted.getUTCDate() - daysAgo,
-    ),
+    Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate() - daysAgo),
   );
   return day.toISOString().slice(0, 10);
 }
@@ -100,8 +90,8 @@ const STATUS_TOKENS: Record<AdminPartnerStatusKind, Record<string, AdminPartnerS
     },
     rejected: {
       label: '已拒绝',
-      textClass: 'text-[#EA1F59]',
-      bgClass: 'bg-[#EA1F59]/10',
+      textClass: 'text-[#FF0061]',
+      bgClass: 'bg-[#FF0061]/10',
     },
   },
   order: {
@@ -112,8 +102,8 @@ const STATUS_TOKENS: Record<AdminPartnerStatusKind, Record<string, AdminPartnerS
     },
     review_required: {
       label: '需复核',
-      textClass: 'text-[#EA1F59]',
-      bgClass: 'bg-[#EA1F59]/10',
+      textClass: 'text-[#FF0061]',
+      bgClass: 'bg-[#FF0061]/10',
     },
     completed: {
       label: '已完成',
@@ -144,8 +134,8 @@ const STATUS_TOKENS: Record<AdminPartnerStatusKind, Record<string, AdminPartnerS
     },
     rejected: {
       label: '已拒绝',
-      textClass: 'text-[#EA1F59]',
-      bgClass: 'bg-[#EA1F59]/10',
+      textClass: 'text-[#FF0061]',
+      bgClass: 'bg-[#FF0061]/10',
     },
     returned: {
       label: '已退回',
@@ -171,8 +161,8 @@ const STATUS_TOKENS: Record<AdminPartnerStatusKind, Record<string, AdminPartnerS
     },
     frozen: {
       label: '已冻结',
-      textClass: 'text-[#EA1F59]',
-      bgClass: 'bg-[#EA1F59]/10',
+      textClass: 'text-[#FF0061]',
+      bgClass: 'bg-[#FF0061]/10',
     },
   },
 };
@@ -192,7 +182,12 @@ export function partnerOrderActionLabel(status: unknown): '确认' | '放行' {
 export function partnerRiskLotQueueAction(row: {
   readonly status: string;
   readonly riskStatus: string;
-}): { action: 'freeze' | 'resume' | 'closed'; label: string; pendingLabel: string; canClose: boolean } {
+}): {
+  action: 'freeze' | 'resume' | 'closed';
+  label: string;
+  pendingLabel: string;
+  canClose: boolean;
+} {
   if (row.status === 'closed') {
     return { action: 'closed', label: '已关闭', pendingLabel: '已关闭', canClose: false };
   }
@@ -209,7 +204,10 @@ export interface PartnerRiskLotCloseResolutionInput {
   readonly resolutionRef?: string;
 }
 
-export function partnerRiskLotActionPayload(action: 'freeze', operatorNote: string): { reason: string };
+export function partnerRiskLotActionPayload(
+  action: 'freeze',
+  operatorNote: string,
+): { reason: string };
 export function partnerRiskLotActionPayload(
   action: 'close',
   operatorNote: string,
@@ -219,12 +217,17 @@ export function partnerRiskLotActionPayload(
   operatorNote: string,
   resolution: PartnerRiskLotCloseResolutionInput,
 ): { reason: string; resolutionKind: PartnerRiskLotCloseResolutionKind; resolutionRef?: string };
-export function partnerRiskLotActionPayload(action: 'resume', operatorNote: string): { note: string };
+export function partnerRiskLotActionPayload(
+  action: 'resume',
+  operatorNote: string,
+): { note: string };
 export function partnerRiskLotActionPayload(
   action: 'freeze' | 'resume' | 'close',
   operatorNote: string,
   resolution?: PartnerRiskLotCloseResolutionInput,
-): { reason: string; resolutionKind?: PartnerRiskLotCloseResolutionKind; resolutionRef?: string } | { note: string } {
+):
+  | { reason: string; resolutionKind?: PartnerRiskLotCloseResolutionKind; resolutionRef?: string }
+  | { note: string } {
   const normalized = operatorNote.trim();
   if (action === 'resume') {
     return { note: normalized || '后台风险恢复' };
@@ -242,29 +245,35 @@ export function partnerRiskLotActionPayload(
 
 export function partnerRiskEventTypeLabel(value: unknown): string {
   const type = typeof value === 'string' ? value : '';
-  return {
-    lot_frozen: '批次冻结',
-    lot_resumed: '批次恢复',
-    lot_closed: '批次关闭',
-  }[type] ?? '风险事件';
+  return (
+    {
+      lot_frozen: '批次冻结',
+      lot_resumed: '批次恢复',
+      lot_closed: '批次关闭',
+    }[type] ?? '风险事件'
+  );
 }
 
 export function partnerRiskEventSeverityLabel(value: unknown): string {
   const severity = typeof value === 'string' ? value : '';
-  return {
-    high: '高',
-    medium: '中',
-    low: '低',
-  }[severity] ?? '未知';
+  return (
+    {
+      high: '高',
+      medium: '中',
+      low: '低',
+    }[severity] ?? '未知'
+  );
 }
 
 export function partnerRiskCloseResolutionKindLabel(value: unknown): string {
   const resolutionKind = typeof value === 'string' ? value : '';
-  return {
-    manual: '人工处理',
-    refund: '退款完成',
-    fraud: '欺诈关闭',
-  }[resolutionKind] ?? '人工处理';
+  return (
+    {
+      manual: '人工处理',
+      refund: '退款完成',
+      fraud: '欺诈关闭',
+    }[resolutionKind] ?? '人工处理'
+  );
 }
 
 export function partnerKycQueueReviewPayload(
@@ -347,8 +356,7 @@ export function normalizeAdminPartnerOverview(value: unknown) {
   const coverage = asRecord(root.coverage);
   const truncatedQueues = safeArray(coverage.truncatedQueues).filter(
     (value): value is AdminPartnerQueueName =>
-      typeof value === 'string' &&
-      ADMIN_PARTNER_QUEUE_NAMES.has(value as AdminPartnerQueueName),
+      typeof value === 'string' && ADMIN_PARTNER_QUEUE_NAMES.has(value as AdminPartnerQueueName),
   );
   return {
     enabled: true as const,
@@ -479,7 +487,9 @@ export function normalizePartnerReconciliation(value: unknown) {
       completedOrderCount: Math.round(nonNegativeNumber(metrics.completedOrderCount)),
       pendingOrderCount: Math.round(nonNegativeNumber(metrics.pendingOrderCount)),
       reviewRequiredOrderCount: Math.round(nonNegativeNumber(metrics.reviewRequiredOrderCount)),
-      completedOrderAmountCnyCents: Math.round(nonNegativeNumber(metrics.completedOrderAmountCnyCents)),
+      completedOrderAmountCnyCents: Math.round(
+        nonNegativeNumber(metrics.completedOrderAmountCnyCents),
+      ),
       membershipRevenueCnyCents: Math.round(nonNegativeNumber(metrics.membershipRevenueCnyCents)),
       rechargePrincipalCnyCents: Math.round(nonNegativeNumber(metrics.rechargePrincipalCnyCents)),
       withdrawalCount: Math.round(nonNegativeNumber(metrics.withdrawalCount)),
@@ -488,14 +498,22 @@ export function normalizePartnerReconciliation(value: unknown) {
       paidWithdrawalCount: Math.round(nonNegativeNumber(metrics.paidWithdrawalCount)),
       rejectedWithdrawalCount: Math.round(nonNegativeNumber(metrics.rejectedWithdrawalCount)),
       returnedWithdrawalCount: Math.round(nonNegativeNumber(metrics.returnedWithdrawalCount)),
-      approvedWithdrawalCreditCents: Math.round(nonNegativeNumber(metrics.approvedWithdrawalCreditCents)),
+      approvedWithdrawalCreditCents: Math.round(
+        nonNegativeNumber(metrics.approvedWithdrawalCreditCents),
+      ),
       paidWithdrawalCreditCents: Math.round(nonNegativeNumber(metrics.paidWithdrawalCreditCents)),
       referralCount: Math.round(nonNegativeNumber(metrics.referralCount)),
       rewardedReferralCount: Math.round(nonNegativeNumber(metrics.rewardedReferralCount)),
       pendingReferralCount: Math.round(nonNegativeNumber(metrics.pendingReferralCount)),
-      directReferralRewardCreditCents: Math.round(nonNegativeNumber(metrics.directReferralRewardCreditCents)),
-      assistedReferralRewardCreditCents: Math.round(nonNegativeNumber(metrics.assistedReferralRewardCreditCents)),
-      totalReferralRewardCreditCents: Math.round(nonNegativeNumber(metrics.totalReferralRewardCreditCents)),
+      directReferralRewardCreditCents: Math.round(
+        nonNegativeNumber(metrics.directReferralRewardCreditCents),
+      ),
+      assistedReferralRewardCreditCents: Math.round(
+        nonNegativeNumber(metrics.assistedReferralRewardCreditCents),
+      ),
+      totalReferralRewardCreditCents: Math.round(
+        nonNegativeNumber(metrics.totalReferralRewardCreditCents),
+      ),
     },
     providerBreakdown: safeArray(root.providerBreakdown).map((raw) => {
       const row = asRecord(raw);
@@ -560,15 +578,24 @@ export type PartnerReconciliationState = ReturnType<typeof normalizePartnerRecon
 function csvCell(value: unknown): string {
   const text = String(value ?? '');
   const safeText = /^[\t\r\n ]*[=+\-@]/.test(text) ? `'${text}` : text;
-  return /[",\n\r]/.test(safeText)
-    ? `"${safeText.replace(/"/g, '""')}"`
-    : safeText;
+  return /[",\n\r]/.test(safeText) ? `"${safeText.replace(/"/g, '""')}"` : safeText;
 }
 
 export function partnerReconciliationCsv(state: PartnerReconciliationState): string {
   if (!state.enabled) return '';
   const rows = [
-    ['rowType', 'externalId', 'userExternalId', 'status', 'kind', 'provider', 'amountCnyCents', 'amountCreditCents', 'providerRef', 'updatedAt'],
+    [
+      'rowType',
+      'externalId',
+      'userExternalId',
+      'status',
+      'kind',
+      'provider',
+      'amountCnyCents',
+      'amountCreditCents',
+      'providerRef',
+      'updatedAt',
+    ],
     ...state.orders.map((row) => [
       'order',
       row.orderExternalId,
@@ -722,5 +749,9 @@ function rowMatches<T extends Record<string, unknown>>(
   row: T,
   keys: ReadonlyArray<keyof T>,
 ): boolean {
-  return keys.some((key) => String(row[key] ?? '').toLowerCase().includes(needle));
+  return keys.some((key) =>
+    String(row[key] ?? '')
+      .toLowerCase()
+      .includes(needle),
+  );
 }

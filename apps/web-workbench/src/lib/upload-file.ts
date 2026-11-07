@@ -85,7 +85,13 @@ async function toUploadError(res: Response, fallback: string): Promise<UploadErr
   }
   return {
     status: res.status,
-    message: body.message ?? (res.status === 413 ? '文件超过大小限制' : res.status === 415 ? '不支持的文件类型' : fallback),
+    message:
+      body.message ??
+      (res.status === 413
+        ? '文件超过大小限制'
+        : res.status === 415
+          ? '不支持的文件类型'
+          : fallback),
     ...(body.error ? { code: body.error } : {}),
   };
 }
@@ -118,7 +124,9 @@ export async function uploadMediaFile(file: File): Promise<UploadedFileMeta> {
   // 2. PUT bytes to R2 (presigned — do NOT attach the auth header)
   const putRes = await fetch(presigned.uploadUrl, {
     method: 'PUT',
-    headers: presigned.requiredHeaders ?? { 'Content-Type': file.type || 'application/octet-stream' },
+    headers: presigned.requiredHeaders ?? {
+      'Content-Type': file.type || 'application/octet-stream',
+    },
     body: file,
   });
   if (!putRes.ok) {

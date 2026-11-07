@@ -26,7 +26,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTaskQueue, type TaskQueue, type EnqueueResult } from './task-queue.js';
+import { type EnqueueResult, type TaskQueue, createTaskQueue } from './task-queue.js';
 
 interface FakeClock {
   now: number;
@@ -286,8 +286,7 @@ describe('createTaskQueue — depth cap', () => {
       onStart: vi.fn(),
     });
     expect(r4.kind).toBe('rejected');
-    if (r4.kind === 'rejected')
-      expect(r4.reason).toMatch(/系统繁忙|队列已满|queue.*full|busy/i);
+    if (r4.kind === 'rejected') expect(r4.reason).toMatch(/系统繁忙|队列已满|queue.*full|busy/i);
     expect(q.size()).toBe(3);
     // (suppress unused pool var lint)
     expect(pool.active).toBe(0);

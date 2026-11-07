@@ -11,10 +11,7 @@ export function shouldOpenScheduledCalendarPopover({
   readonly popoverClosedAt: number;
   readonly now: number;
 }): boolean {
-  return (
-    !quickCreateOpen &&
-    now - popoverClosedAt >= POPOVER_REOPEN_COOLDOWN_MS
-  );
+  return !quickCreateOpen && now - popoverClosedAt >= POPOVER_REOPEN_COOLDOWN_MS;
 }
 
 export function scheduledCalendarSummary({

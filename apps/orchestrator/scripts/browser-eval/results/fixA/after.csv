@@ -1,0 +1,7 @@
+id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,quota403,reason,attempts
+be-31,list_sources,unified,qwen,qwen3.8-max,failed,false,browser,18,320677,14624,481,18,false,"timeout: timeout",1
+be-32,list_sources,unified,qwen,qwen3.8-max,completed,true,none,15,65086,96484,791,15,false,"",1
+be-33,list_sources,unified,qwen,qwen3.8-max,completed,true,none,3,24651,13335,481,3,false,"",1
+be-34,list_sources,unified,qwen,qwen3.8-max,completed,true,none,3,31838,10983,272,3,false,"",1
+be-35,list_sources,unified,qwen,qwen3.8-max,completed,true,none,4,31359,35025,472,4,false,"",1
+be-36,list_sources,unified,qwen,qwen3.8-max,failed,false,browser,26,308672,92233,1446,27,false,"failed: 质量校验未通过：只解析到 0 个唯一商品链接，要求至少 3 个；不要让多行复用同一个列表页或聚合页链接；第 1 行缺少链接；第 2 行缺少链接；第 3 行缺少链接",1

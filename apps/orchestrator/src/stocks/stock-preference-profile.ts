@@ -108,7 +108,13 @@ const MANUAL_DIMENSIONS: ReadonlyArray<{
   { key: 'holdingPeriods', dimension: 'holdingPeriod', title: '主动设置的研究周期' },
 ];
 
-const FIELD_DIMENSIONS: Record<StockScreenField, Exclude<StockPreferenceDimension, 'industry' | 'marketCap' | 'cashFlow' | 'holdingPeriod' | 'market'>> = {
+const FIELD_DIMENSIONS: Record<
+  StockScreenField,
+  Exclude<
+    StockPreferenceDimension,
+    'industry' | 'marketCap' | 'cashFlow' | 'holdingPeriod' | 'market'
+  >
+> = {
   exclude_st: 'events',
   pe_ttm: 'valuation',
   pb: 'valuation',
@@ -164,21 +170,43 @@ function confidence(args: {
   const units = args.screeningRuns * 2 + args.watchlistStocks + args.manualDimensions * 2;
   const score = Math.min(100, units * 10);
   if (units === 0) {
-    return { level: 'insufficient', label: '样本不足', score: 0, basis: '尚无清空后的明确设置或行为样本。' };
+    return {
+      level: 'insufficient',
+      label: '样本不足',
+      score: 0,
+      basis: '尚无清空后的明确设置或行为样本。',
+    };
   }
   if (units >= 8 && args.sourceCount >= 2) {
-    return { level: 'high', label: '高置信度', score, basis: `共有 ${units} 个证据权重，且来自 ${args.sourceCount} 类明确来源。` };
+    return {
+      level: 'high',
+      label: '高置信度',
+      score,
+      basis: `共有 ${units} 个证据权重，且来自 ${args.sourceCount} 类明确来源。`,
+    };
   }
   if (units >= 4 && args.sourceCount >= 2) {
-    return { level: 'medium', label: '中置信度', score, basis: `共有 ${units} 个证据权重，仍需更多重复行为确认。` };
+    return {
+      level: 'medium',
+      label: '中置信度',
+      score,
+      basis: `共有 ${units} 个证据权重，仍需更多重复行为确认。`,
+    };
   }
-  return { level: 'low', label: '低置信度', score, basis: `目前只有 ${units} 个证据权重，只能作为初步观察。` };
+  return {
+    level: 'low',
+    label: '低置信度',
+    score,
+    basis: `目前只有 ${units} 个证据权重，只能作为初步观察。`,
+  };
 }
 
 function sourceCount(sample: StockPreferenceProfileView['sample']): number {
-  return Number(sample.manualDimensions > 0)
-    + Number(sample.screeningRuns > 0)
-    + Number(sample.watchlistStocks > 0);
+  return (
+    Number(sample.manualDimensions > 0) +
+    Number(sample.screeningRuns > 0) +
+    Number(sample.watchlistStocks > 0)
+  );
 }
 
 function countMarkets(rows: StockPreferenceWatchlistInput[]): Map<string, number> {
@@ -198,10 +226,16 @@ export function buildStockPreferenceProfile(args: {
   const now = args.now ?? new Date();
   const windowStart = startOfWindow(now);
   const cutoff = args.clearedAt && args.clearedAt > windowStart ? args.clearedAt : windowStart;
-  const signals = args.signals.filter((signal) => signal.occurredAt >= cutoff && signal.occurredAt <= now);
+  const signals = args.signals.filter(
+    (signal) => signal.occurredAt >= cutoff && signal.occurredAt <= now,
+  );
   const watchlistCutoff = args.clearedAt ?? new Date(0);
-  const watchlist = args.watchlist.filter((row) => row.createdAt > watchlistCutoff && row.createdAt <= now);
-  const manualDimensions = MANUAL_DIMENSIONS.filter(({ key }) => args.manualPreferences[key].length > 0);
+  const watchlist = args.watchlist.filter(
+    (row) => row.createdAt > watchlistCutoff && row.createdAt <= now,
+  );
+  const manualDimensions = MANUAL_DIMENSIONS.filter(
+    ({ key }) => args.manualPreferences[key].length > 0,
+  );
   const sample = {
     screeningRuns: signals.length,
     watchlistStocks: watchlist.length,
@@ -253,7 +287,9 @@ export function buildStockPreferenceProfile(args: {
   }));
   const screeningCounts = new Map<StockPreferenceDimension, number>();
   for (const signal of signals) {
-    const dimensions = new Set(signal.payload.criteria.map((criterion) => FIELD_DIMENSIONS[criterion.field]));
+    const dimensions = new Set(
+      signal.payload.criteria.map((criterion) => FIELD_DIMENSIONS[criterion.field]),
+    );
     for (const dimension of dimensions) {
       screeningCounts.set(dimension, (screeningCounts.get(dimension) ?? 0) + 1);
     }
@@ -327,7 +363,11 @@ export function buildStockPreferenceProfile(args: {
       detail: `当前 ${watchlist.length} 只清空后新增关注中，有 ${largestMarket} 只来自同一市场；这只是结构事实，不代表风险等级。`,
     });
   }
-  if (dimensions.has('volatility') && !dimensions.has('profitability') && !dimensions.has('growth')) {
+  if (
+    dimensions.has('volatility') &&
+    !dimensions.has('profitability') &&
+    !dimensions.has('growth')
+  ) {
     blindSpots.push({
       id: 'price-without-fundamentals',
       title: '价格变化多于经营证据',
@@ -367,13 +407,31 @@ export function buildStockPreferenceProfile(args: {
 
   const basis: StockPreferenceBasis[] = [];
   if (sample.manualDimensions > 0) {
-    basis.push({ id: 'basis-manual', source: 'manual', count: sample.manualDimensions, title: '主动设置', detail: `${sample.manualDimensions} 个维度` });
+    basis.push({
+      id: 'basis-manual',
+      source: 'manual',
+      count: sample.manualDimensions,
+      title: '主动设置',
+      detail: `${sample.manualDimensions} 个维度`,
+    });
   }
   if (sample.screeningRuns > 0) {
-    basis.push({ id: 'basis-screening', source: 'screening', count: sample.screeningRuns, title: '确认后执行的筛选', detail: `近 ${STOCK_PREFERENCE_WINDOW_DAYS} 天 ${sample.screeningRuns} 次` });
+    basis.push({
+      id: 'basis-screening',
+      source: 'screening',
+      count: sample.screeningRuns,
+      title: '确认后执行的筛选',
+      detail: `近 ${STOCK_PREFERENCE_WINDOW_DAYS} 天 ${sample.screeningRuns} 次`,
+    });
   }
   if (sample.watchlistStocks > 0) {
-    basis.push({ id: 'basis-watchlist', source: 'watchlist', count: sample.watchlistStocks, title: '清空后新增关注', detail: `${sample.watchlistStocks} 只` });
+    basis.push({
+      id: 'basis-watchlist',
+      source: 'watchlist',
+      count: sample.watchlistStocks,
+      title: '清空后新增关注',
+      detail: `${sample.watchlistStocks} 只`,
+    });
   }
 
   return {

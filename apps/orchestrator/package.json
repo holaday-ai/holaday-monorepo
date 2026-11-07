@@ -18,6 +18,7 @@
     "test": "node --test scripts/qa-db-safety.test.mjs scripts/qa-report-metadata.test.mjs scripts/release-db-contract.test.mjs scripts/qwen-synthetic-benchmark.test.mjs scripts/qwen-runtime-benchmark.test.mjs && vitest run",
     "test:qwen-only-contract": "node --test scripts/qwen-only-release-contract.test.mjs scripts/qwen-synthetic-benchmark.test.mjs scripts/qwen-runtime-benchmark.test.mjs && node scripts/qwen-only-release-contract.mjs --run",
     "test:watch": "vitest",
+    "route:audit": "tsx scripts/route-audit.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "qa:web": "node scripts/web-ui-qa.mjs",
     "qa:browser-release": "pnpm qa:web && pnpm smoke:browser-egress",
@@ -25,6 +26,7 @@
     "smoke-anthropic": "tsx scripts/smoke-anthropic.ts",
     "smoke:browser-egress": "tsx scripts/smoke-browser-egress.ts",
     "eval": "tsx src/eval/eval-runner.ts",
+    "self-check": "tsx scripts/self-check.ts",
     "eval:release": "tsx src/eval/eval-runner.ts p0-release-gate",
     "eval:smoke": "tsx src/eval/eval-runner.ts p0-smoke",
     "eval:qwen-intl": "node scripts/qwen-synthetic-benchmark.mjs --run",
@@ -45,7 +47,9 @@
     "partner:monthly": "tsx scripts/partner-run-monthly.ts",
     "account-closure:worker": "node dist/account-closure/worker-entry.js",
     "db:studio": "drizzle-kit studio",
-    "clean": "rimraf dist .turbo"
+    "clean": "rimraf dist .turbo",
+    "blocker:audit": "tsx scripts/blocker-audit.ts",
+    "browser:loop-audit": "tsx scripts/browser-loop-audit.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.90.0",
@@ -55,6 +59,7 @@
     "@holaday/skill-sdk": "workspace:*",
     "@trpc/server": "11.0.0",
     "argon2": "0.41.1",
+    "bullmq": "6.3.11",
     "docx": "^9.6.1",
     "docxtemplater": "^3.68.7",
     "dotenv": "16.4.7",
@@ -66,6 +71,8 @@
     "ioredis": "5.4.2",
     "jose": "5.9.6",
     "js-yaml": "^4.1.1",
+    "lodash": "4.18.1",
+    "mammoth": "^1.13.0",
     "multer": "^2.1.1",
     "mysql2": "3.11.5",
     "nanoid": "5.0.9",
@@ -79,6 +86,9 @@
     "pptxgenjs": "^4.0.1",
     "rrule": "^2.8.1",
     "sharp": "^0.34.5",
+    "tldts": "7.4.14",
+    "tsx": "4.19.2",
+    "typescript": "5.7.3",
     "undici": "^8.1.0",
     "ws": "8.18.0",
     "xlsx": "^0.18.5",
@@ -94,8 +104,6 @@
     "@vitest/coverage-v8": "2.1.8",
     "drizzle-kit": "0.31.10",
     "rimraf": "6.0.1",
-    "tsx": "4.19.2",
-    "typescript": "5.7.3",
     "vitest": "2.1.8"
   }
 }

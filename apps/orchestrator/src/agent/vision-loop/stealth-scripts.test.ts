@@ -91,7 +91,9 @@ describe('STEALTH_INIT_SCRIPT', () => {
   it('patches WebGLRenderingContext.getParameter to hide SwiftShader', () => {
     const ctx = makeFakeWindow();
     vm.runInNewContext(STEALTH_INIT_SCRIPT, ctx);
-    const WebGLCtor = ctx.WebGLRenderingContext as new () => { getParameter: (p: number) => string };
+    const WebGLCtor = ctx.WebGLRenderingContext as new () => {
+      getParameter: (p: number) => string;
+    };
     const instance = new WebGLCtor();
     expect(instance.getParameter(37445)).toBe('Intel Inc.');
     expect(instance.getParameter(37446)).toBe('Intel Iris OpenGL Engine');
@@ -130,10 +132,10 @@ describe('STEALTH_INIT_SCRIPT', () => {
 });
 
 describe('isStealthEnabled', () => {
-  it('defaults to true when STEALTH_ENABLED is unset', () => {
+  it('defaults to false when STEALTH_ENABLED is unset (FIX-31: no fingerprint spoofing)', () => {
     const prev = process.env.STEALTH_ENABLED;
     delete process.env.STEALTH_ENABLED;
-    expect(isStealthEnabled()).toBe(true);
+    expect(isStealthEnabled()).toBe(false);
     if (prev !== undefined) process.env.STEALTH_ENABLED = prev;
   });
 

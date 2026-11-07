@@ -1,0 +1,10 @@
+
+ RUN  v2.1.8 /Users/yaleiqi/.codex/worktrees/fix-sidebar-toggle/holaday-monorepo/apps/web-workbench
+
+ ✓ src/components/ui/sidebar-toggle.test.tsx (8 tests) 279ms
+ ✓ src/components/ui/sidebar-accessibility.test.tsx (3 tests) 10ms
+
+ Test Files  2 passed (2)
+      Tests  11 passed (11)
+   Start at  03:34:20
+   Duration  1.47s (transform 166ms, setup 0ms, collect 590ms, tests 289ms, environment 172ms, prepare 71ms)

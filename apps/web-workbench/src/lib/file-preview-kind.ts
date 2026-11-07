@@ -7,10 +7,7 @@ export function filePreviewKind(input: {
   const mime = (input.mime ?? '').toLowerCase();
   const filename = input.filename.toLowerCase();
   if (mime.startsWith('image/')) return 'image';
-  if (
-    mime.startsWith('video/') ||
-    /\.(mp4|mov|webm|m4v)$/i.test(filename)
-  ) {
+  if (mime.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(filename)) {
     return 'video';
   }
   if (mime === 'application/pdf' || filename.endsWith('.pdf')) return 'pdf';

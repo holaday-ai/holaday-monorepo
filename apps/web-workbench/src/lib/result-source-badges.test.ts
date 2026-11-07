@@ -21,7 +21,7 @@ describe('result-source-badges', () => {
       .map((badge) => `${badge.tone} ${badge.dotTone}`)
       .join(' ');
 
-    expect(tones).toContain('#EA1F59');
+    expect(tones).toContain('#FF0061');
     expect(tones).toContain('#57479C');
     expect(tones).toContain('#42C0EF');
     expect(tones).toContain('#FFC910');

@@ -346,6 +346,28 @@ afterEach(() => {
 });
 
 describe('transactional core execution with real runner and review', () => {
+  // FIX-30 review: the always-present source-trust review is not read evidence.
+  it.each([
+    [[], 'failed'],
+    [
+      [{ title: '杭州市', url: 'https://zh.wikipedia.org/wiki/杭州市', provenance: 'web_search' }],
+      'completed',
+    ],
+  ] as const)('「根据维基百科」 with sources %j settles %s', async (sources, status) => {
+    const f = fixture();
+    const claimed = `根据维基百科的杭州市词条，杭州常住人口为 1270 万人。${'该数字为 2025 年统计口径，按常住人口计。'.repeat(8)}`;
+    const stream = f.responses.stream.bind(f.responses);
+    f.responses.stream = async (request) => ({
+      ...(await stream(request)),
+      text: claimed,
+      sources: [...sources],
+    });
+    f.input.blocks = [{ type: 'text', text: '杭州人口多少' }];
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('committed');
+    expect(f.writes.at(-1)?.status).toBe(status);
+  });
+
   it.each(['normal', 'auto', 'expert'] as const)(
     'freezes full legacy rules and enforces semantic review in %s mode',
     async (expertMode) => {
@@ -473,13 +495,37 @@ describe('transactional core execution with real runner and review', () => {
         });
       });
     const started = await startCoreTaskExecution(f.input);
-    expect(await started.completion).toBe('unconfirmed');
-    expect(f.generation).toHaveLength(0);
-    expect(f.writes).toHaveLength(0);
+    // A late display-only plan is dropped; the main generation still runs.
+    expect(await started.completion).toBe('committed');
+    expect(f.generation).toHaveLength(1);
+    expect(f.writes[0]?.status).toBe('completed');
     drain.finish(owner);
     drain.close();
     await vi.waitFor(() => expect(drain.snapshot().active).toBe(0));
-    expect(drain.snapshot()).toMatchObject({ unknown: 1, idle: false });
+    expect(drain.snapshot().active).toBe(0);
+  });
+  it.each(['unconfirmed', 'throws'] as const)(
+    'continues the main generation when the optional plan is %s',
+    async (mode) => {
+      const f = fixture();
+      f.input.beforeGeneration = async () => {
+        if (mode === 'throws') throw new Error('SYNTHETIC_PLAN_DB_ERROR');
+        return 'unconfirmed';
+      };
+      const started = await startCoreTaskExecution(f.input);
+      expect(await started.completion).toBe('committed');
+      expect(f.generation).toHaveLength(1);
+      expect(f.writes[0]?.status).toBe('completed');
+      expect(f.events.some((event) => event.type === 'unconfirmed')).toBe(false);
+    },
+  );
+  it('still stops when the optional plan reports a superseded round', async () => {
+    const f = fixture();
+    f.input.beforeGeneration = async () => 'stale';
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('stale');
+    expect(f.generation).toHaveLength(0);
+    expect(f.writes).toHaveLength(0);
   });
   it('delivers the complete same-round request and materials to both channels then atomically settles', async () => {
     const f = fixture();
@@ -768,7 +814,7 @@ describe('transactional core execution with real runner and review', () => {
     ).not.toThrow();
   });
 
-  it('does not fabricate a terminal receipt or dispatch after registry capacity is exhausted', async () => {
+  it('settles a readable failure without dispatch after registry capacity is exhausted', async () => {
     const f = fixture();
     f.input.registry = new CoreExecutionRegistry(1);
     const existing = f.input.registry.begin({
@@ -786,10 +832,16 @@ describe('transactional core execution with real runner and review', () => {
       },
     });
     const result = await startCoreTaskExecution(f.input);
-    expect(result.ack.state).toBe('acceptedUnconfirmed');
-    expect(await result.completion).toBe('unconfirmed');
+    // A full local registry is a known failure: settle a readable failed
+    // result instead of leaving the task unconfirmed until the reaper runs.
+    expect(await result.completion).toBe('committed');
     expect(f.generation).toHaveLength(0);
-    expect(f.writes).toHaveLength(0);
+    expect(f.writes).toHaveLength(1);
+    expect(f.writes[0]).toMatchObject({
+      status: 'failed',
+      result: { reason: '系统繁忙，任务未能开始执行，请稍后重试。' },
+    });
+    expect(f.writes[0]?.result.summary).toBeUndefined();
     expect(f.input.registry.read(existing)).not.toBeNull();
   });
 
@@ -810,13 +862,14 @@ describe('transactional core execution with real runner and review', () => {
     });
   });
 
-  it('keeps missing regional semantic verification visible instead of certifying full delivery', async () => {
+  it('records missing regional semantic verification without downgrading delivery', async () => {
     const f = fixture();
     f.input.semanticAdapter = undefined;
     const result = await startCoreTaskExecution(f.input);
     expect(await result.completion).toBe('committed');
+    // Recorded as unavailable, but no longer downgraded to partial_success.
     expect(f.writes[0]?.verification.semanticStatus).toBe('unavailable');
-    expect(f.writes[0]?.verificationPassed).toBe(false);
+    expect(f.writes[0]?.status).toBe('completed');
   });
 
   it('absorbs asynchronous notification rejection instead of leaking an unhandled error', async () => {
@@ -895,5 +948,171 @@ describe('transactional core execution with real runner and review', () => {
     expect(f.writes[0]?.verification.issueCodes).toContain('VERIFICATION_INPUT_LIMIT');
     expect(f.writes[0]?.result.planText).toBeUndefined();
     expect(f.writes[0]?.awaitingQuestion).toBeNull();
+  });
+
+  describe('plan / clarification delivery when review cannot fully verify', () => {
+    const XHS_REQUEST =
+      '请做小红书内容选题策划：主题是办公桌收纳，目标人群是一线城市上班族。先给2至5步方案，等我确认后才交付。';
+    const PLAN = `1. 梳理办公桌收纳的常见痛点。\n2. 拆成 5 个选题方向并写出标题。\n3. 每个选题给出封面和正文结构。\n${'补充说明：选题以真实可落地为准。'.repeat(10)}`;
+
+    it.each([
+      ['semantic review unavailable', 'no-semantic'],
+      ['part of the materials unreadable', 'unreadable-material'],
+    ] as const)('delivers the 小红书 plan as awaiting_user when %s', async (_label, mode) => {
+      const f = fixture();
+      f.input.requirements = {
+        ...f.input.requirements,
+        initialRequest: XHS_REQUEST,
+        userTurns: [],
+        phase: 'draft',
+        referencePlan: null,
+      };
+      if (mode === 'no-semantic') f.input.semanticAdapter = undefined;
+      if (mode === 'unreadable-material')
+        f.input.blocks = [
+          ...f.input.blocks,
+          // A remote-URL image cannot be admitted as material (only uploaded bytes are).
+          { type: 'image', source: { type: 'url', url: 'https://example.com/synthetic.png' } },
+        ];
+      const stream = f.responses.stream.bind(f.responses);
+      f.responses.stream = async (request) => ({ ...(await stream(request)), text: PLAN });
+      const result = await startCoreTaskExecution(f.input);
+      expect(await result.completion).toBe('committed');
+      expect(f.writes[0]?.status).toBe('awaiting_user');
+      expect(f.writes[0]?.result.planText).toContain('拆成 5 个选题方向');
+      expect(f.writes[0]?.awaitingQuestion).toContain('拆成 5 个选题方向');
+      // The notice accompanies exactly the plans delivered without a full pass.
+      expect(f.writes[0]?.result.planText?.includes('部分材料未能核验')).toBe(
+        f.writes[0]?.verificationPassed === false,
+      );
+      if (mode === 'unreadable-material') expect(f.writes[0]?.verificationPassed).toBe(false);
+    });
+
+    it('settles a readable failure when the local review itself crashes', async () => {
+      const f = fixture();
+      const review = await import('../execution/generate-outcome-review.js');
+      vi.spyOn(review, 'reviewGenerateOutcome').mockRejectedValueOnce(
+        new Error('SYNTHETIC_REVIEW_BUG'),
+      );
+      const result = await startCoreTaskExecution(f.input);
+      expect(await result.completion).toBe('committed');
+      expect(f.writes[0]).toMatchObject({
+        status: 'failed',
+        result: { reason: '结果核验过程出错，未能保存结果，请重试。' },
+      });
+      expect(JSON.stringify(f.writes[0])).not.toContain('SYNTHETIC_REVIEW_BUG');
+      expect(f.events.some((event) => event.type === 'unconfirmed')).toBe(false);
+    });
+
+    it('keeps a genuinely unknown database commit unconfirmed', async () => {
+      const f = fixture();
+      f.repo.settle = async () => {
+        throw new Error('SYNTHETIC_DB_LOST');
+      };
+      f.repo.readSettlement = async () => {
+        throw new Error('SYNTHETIC_DB_LOST');
+      };
+      const result = await startCoreTaskExecution(f.input);
+      expect(await result.completion).toBe('unconfirmed');
+    });
+  });
+
+  it('appends a fixed server notice to a delivered text result', async () => {
+    const f = fixture();
+    f.input.resultNotice = '（配图生成即将开放，本次先完成文字部分。）';
+    const result = await startCoreTaskExecution(f.input);
+    expect(await result.completion).toBe('committed');
+    expect(
+      f.writes[0]?.result.summary?.endsWith('（配图生成即将开放，本次先完成文字部分。）'),
+    ).toBe(true);
+    // Never part of the model request.
+    expect(JSON.stringify(f.generation)).not.toContain('配图生成即将开放');
+  });
+
+  it('shows an uploaded image to the generation model and the reviewer instead of dropping it', async () => {
+    const f = fixture();
+    const png =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    f.input.blocks = [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
+    ];
+    const result = await startCoreTaskExecution(f.input);
+    expect(await result.completion).toBe('committed');
+    const generationInput = JSON.stringify(f.generation[0]?.input);
+    expect(generationInput).toContain('input_image');
+    expect(generationInput).not.toContain('材料无法完整读取');
+    const review = f.semantic[0];
+    const content = review?.messages[0]?.content;
+    expect(Array.isArray(content) && content.some((block) => block.type === 'image')).toBe(true);
+    // The JSON context carries a descriptor, never the image bytes twice.
+    const text = Array.isArray(content) && content[0]?.type === 'text' ? content[0].text : '';
+    expect(text).not.toContain(png);
+    expect(f.writes[0]?.verification.issueCodes ?? []).not.toContain(
+      'VERIFICATION_MATERIALS_INCOMPLETE',
+    );
+  });
+});
+
+describe('FIX-34 #4 · a generate round with no answer is retried once in the browser', () => {
+  // The Deploy-34 BestBuy shape: the model wrote browser tool syntax instead of an answer.
+  const toolText =
+    '我来帮你打开 Best Buy 查看。\n<invoke name="browser_navigate">\n' +
+    '<parameter name="url">https://www.bestbuy.com</parameter>\n</invoke>';
+  function noAnswer() {
+    const f = fixture();
+    const stream = f.responses.stream.bind(f.responses);
+    f.responses.stream = async (request) => ({ ...(await stream(request)), text: toolText });
+    f.input.blocks = [{ type: 'text', text: '在 bestbuy.com 搜 airpods，告诉我第一个结果的价格' }];
+    return f;
+  }
+
+  it('hands the same task to the browser and leaves the round unsettled', async () => {
+    const f = noAnswer();
+    const handed: string[] = [];
+    f.input.retryInBrowser = async (reason) => {
+      // Announced only after the retry has started (FIX-34 review).
+      expect(f.events.some((e) => e.type === 'rerouted')).toBe(false);
+      handed.push(reason);
+      return true;
+    };
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('handedOver');
+    expect(handed).toHaveLength(1);
+    expect(f.writes).toHaveLength(0);
+    const rerouted = f.events.filter((e) => e.type === 'rerouted');
+    expect(rerouted).toHaveLength(1);
+    expect(rerouted[0]).toMatchObject({ to: 'browser', executionRevision: expect.any(Number) });
+    expect(f.events.some((e) => e.type === 'settled')).toBe(false);
+  });
+
+  it('settles the honest failure when the browser retry cannot start', async () => {
+    const f = noAnswer();
+    f.input.retryInBrowser = async () => false;
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('committed');
+    expect(f.writes).toHaveLength(1);
+    expect(f.writes[0]?.status).toBe('failed');
+    // Nothing was announced: the SPA stays on the generate round's failure.
+    expect(f.events.some((e) => e.type === 'rerouted')).toBe(false);
+  });
+
+  it('without a browser lane the round fails as before', async () => {
+    const f = noAnswer();
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('committed');
+    expect(f.writes[0]?.status).toBe('failed');
+    expect(f.events.some((e) => e.type === 'rerouted')).toBe(false);
+  });
+
+  it('a real answer is never handed over', async () => {
+    const f = fixture();
+    let called = false;
+    f.input.retryInBrowser = async () => {
+      called = true;
+      return true;
+    };
+    const started = await startCoreTaskExecution(f.input);
+    expect(await started.completion).toBe('committed');
+    expect(called).toBe(false);
   });
 });

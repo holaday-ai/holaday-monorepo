@@ -231,8 +231,7 @@ describe('generateVeoVideo', () => {
         body: {
           error: {
             status: 'RESOURCE_EXHAUSTED',
-            message:
-              'You exceeded your current quota, please check your plan and billing details.',
+            message: 'You exceeded your current quota, please check your plan and billing details.',
           },
         },
       },

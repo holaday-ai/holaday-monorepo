@@ -2512,15 +2512,11 @@ const navigationFingerprints = [
 ];
 const canonicalNavigationJSON = (value) => {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return '[' + value.map(canonicalNavigationJSON).join(',') + ']';
-  return (
-    '{' +
-    Object.keys(value)
-      .sort()
-      .map((k) => JSON.stringify(k) + ':' + canonicalNavigationJSON(value[k]))
-      .join(',') +
-    '}'
-  );
+  if (Array.isArray(value)) return `[${value.map(canonicalNavigationJSON).join(',')}]`;
+  return `{${Object.keys(value)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${canonicalNavigationJSON(value[k])}`)
+    .join(',')}}`;
 };
 const navigationDigest = (value) =>
   createHash('sha256').update(canonicalNavigationJSON(value)).digest('hex');
@@ -3352,9 +3348,7 @@ export async function readCutoverDatabaseScope(
     for (const table of ['payments', 'partner_recharge_orders']) {
       const amountColumn = table === 'payments' ? 'amount_cents' : 'amount_cny_cents';
       const currencyColumn = table === 'payments' ? 'currency' : "'CNY'";
-      const where =
-        "(status NOT IN ('completed','failed','refunded','cancelled') OR created_at >= ? OR updated_at >= ?)" +
-        (windowEndMs !== undefined ? ' AND created_at < ?' : '');
+      const where = `(status NOT IN ('completed','failed','refunded','cancelled') OR created_at >= ? OR updated_at >= ?)${windowEndMs !== undefined ? ' AND created_at < ?' : ''}`;
       const scopeParams = [
         since,
         since,

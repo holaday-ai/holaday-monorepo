@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { VideoScript } from './types.js';
 import {
-  runVideoCreation,
   type VideoLaneConfig,
   type VideoLaneContext,
   type VideoLaneServices,
+  runVideoCreation,
 } from './video-lane.js';
-import type { VideoScript } from './types.js';
 
 const CFG: VideoLaneConfig = {
   dashscopeApiKey: 'dk',
@@ -37,8 +37,15 @@ const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 function makeServices() {
   const mocks = {
     synthesizeSpeech: vi.fn(async () => ({ audioUrl: 'https://oss/a.wav', characters: 10 })),
-    generateBrollImage: vi.fn(async () => ({ taskStatus: 'SUCCEEDED', imageUrls: ['https://oss/img.png'] })),
-    runLipSync: vi.fn(async () => ({ videoUrl: 'https://fal/out.mp4', requestId: 'r', elapsedMs: 1 })),
+    generateBrollImage: vi.fn(async () => ({
+      taskStatus: 'SUCCEEDED',
+      imageUrls: ['https://oss/img.png'],
+    })),
+    runLipSync: vi.fn(async () => ({
+      videoUrl: 'https://fal/out.mp4',
+      requestId: 'r',
+      elapsedMs: 1,
+    })),
     downloadToBuffer: vi.fn(async () => ({ buffer: Buffer.from('x'), sizeBytes: 1 })),
     ffprobeDurationMs: vi.fn(async () => 2000),
     renderImageClip: vi.fn(async () => undefined),
@@ -113,7 +120,8 @@ describe('runVideoCreation — happy path wiring', () => {
 
     // ⑥ compose ran; final persisted.
     expect(mocks.runFfmpeg).toHaveBeenCalledTimes(1);
-    const composeArgs = ((mocks.runFfmpeg.mock.calls[0] as unknown[])[0] as { args: string[] }).args;
+    const composeArgs = ((mocks.runFfmpeg.mock.calls[0] as unknown[])[0] as { args: string[] })
+      .args;
     expect(composeArgs.join(' ')).toContain('seg0-clip.mp4');
     expect(composeArgs.join(' ')).toContain('subtitles.srt');
 

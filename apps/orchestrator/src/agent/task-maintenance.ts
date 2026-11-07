@@ -60,12 +60,7 @@ export async function failStaleTasksWithEvents(
       status: tasks.status,
     })
     .from(tasks)
-    .where(
-      and(
-        inArray(tasks.status, params.sourceStatuses),
-        lt(staleColumn, params.cutoff),
-      ),
-    );
+    .where(and(inArray(tasks.status, params.sourceStatuses), lt(staleColumn, params.cutoff)));
 
   let changed = 0;
   for (const candidate of candidates) {
@@ -145,12 +140,7 @@ export async function failTaskWithEventIfStatus(
     const result = await tx
       .update(tasks)
       .set(update)
-      .where(
-        and(
-          eq(tasks.externalId, params.taskExternalId),
-          eq(tasks.status, params.fromStatus),
-        ),
-      );
+      .where(and(eq(tasks.externalId, params.taskExternalId), eq(tasks.status, params.fromStatus)));
     if (extractMysqlAffectedRows(result) === 0) {
       persisted = false;
       return;

@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  exactWebOriginSchema,
+  userBrowserBindingSchema,
+  userBrowserProtocolSchema,
+} from './browser-user-contract.js';
 import { resilientSelectorSchema } from './selector.js';
 
 // Legacy lanes omit these fields. Core text publishers always send both;
@@ -12,12 +17,9 @@ const httpUrlSchema = z
   .string()
   .url()
   .max(2048)
-  .refine(
-    (raw) => /^https?:\/\//i.test(raw),
-    { message: 'expected http(s) URL' },
-  );
+  .refine((raw) => /^https?:\/\//i.test(raw), { message: 'expected http(s) URL' });
 
-const selectedChromeTargetSchema = z.object({
+export const selectedChromeTargetSchema = z.object({
   tabId: z.number().int().nonnegative(),
   expectedUrl: httpUrlSchema,
   selectionId: z.string().uuid(),
@@ -58,22 +60,69 @@ const selectedChromeActionSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({
+      kind: z.literal('scroll'),
+      payload: z
+        .object({
+          deltaX: z.number().min(-4000).max(4000).default(0),
+          deltaY: z.number().min(-4000).max(4000),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('select'),
+      selector: resilientSelectorSchema,
+      payload: z.object({ text: z.string().max(16000) }).strict(),
+      deadlineMs: selectedChromeActionDeadline,
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal('wait'),
       selector: resilientSelectorSchema.optional(),
-      payload: z.object({ ms: z.number().int().min(0).max(10_000) }).strict().optional(),
+      payload: z
+        .object({ ms: z.number().int().min(0).max(10_000) })
+        .strict()
+        .optional(),
       deadlineMs: selectedChromeActionDeadline,
     })
     .strict(),
 ]);
 
 export const selectedChromeSessionCommandSchema = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('open'), target: selectedChromeTargetSchema }).strict(),
+  z
+    .object({
+      op: z.literal('open'),
+      target: selectedChromeTargetSchema,
+      protocol: userBrowserProtocolSchema.optional(),
+      grantedOrigins: z.array(exactWebOriginSchema).min(1).max(20).optional(),
+    })
+    .strict(),
   z.object({ op: z.literal('observe'), sessionId: z.string().uuid() }).strict(),
+  z
+    .object({
+      op: z.literal('describe'),
+      sessionId: z.string().uuid(),
+      action: selectedChromeActionSchema,
+      observationRevision: z.number().int().positive(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('tabs'),
+      sessionId: z.string().uuid(),
+      operation: z.enum(['list', 'new', 'switch']),
+      url: httpUrlSchema.optional(),
+      tabId: z.number().int().nonnegative().optional(),
+    })
+    .strict(),
   z
     .object({
       op: z.literal('act'),
       sessionId: z.string().uuid(),
       action: selectedChromeActionSchema,
+      binding: userBrowserBindingSchema.optional(),
     })
     .strict(),
   z.object({ op: z.literal('close'), sessionId: z.string().uuid() }).strict(),
@@ -94,6 +143,7 @@ export const clientHelloSchema = z.object({
   type: z.literal('client.hello'),
   token: z.string().min(1).max(4096),
   extensionVersion: z.string().max(128).optional(),
+  userBrowserProtocol: userBrowserProtocolSchema.optional(),
   userAgent: z.string().max(512).optional(),
 });
 
@@ -773,6 +823,16 @@ export const serverSupercarWebSearchSchema = z.object({
     .optional(),
 });
 
+export const browserConnectionWaitSchema = z
+  .object({
+    reason: z.enum(['extension_offline', 'selection_required', 'origin_grant_required']),
+    publicCloudAllowed: z.boolean(),
+    /** The task reads the user's own data; `identityReason` names the object matched. */
+    identityRequired: z.boolean().optional(),
+    identityReason: z.string().max(300).optional(),
+  })
+  .strict();
+export type BrowserConnectionWait = z.infer<typeof browserConnectionWaitSchema>;
 export const serverSupercarAwaitingUserSchema = z.object({
   ...executionIdentityFields,
   type: z.literal('server.supercar.awaiting_user'),
@@ -788,6 +848,12 @@ export const serverSupercarAwaitingUserSchema = z.object({
   awaitingKind: z
     .enum(['clarification', 'login', 'captcha', 'permission', 'browser_action', 'video_quote'])
     .optional(),
+  /**
+   * The task waits for the HOLA DAY Chrome extension / page selection.
+   * `publicCloudAllowed` is false when the request needs the user's own
+   * login: the UI must not offer "用公开云端（无登录态）继续" then.
+   */
+  browserConnection: browserConnectionWaitSchema.optional(),
 });
 
 /**
@@ -802,6 +868,16 @@ export const serverSupercarSuggestionsSchema = z.object({
   type: z.literal('server.supercar.suggestions'),
   taskId: z.string(),
   suggestions: z.array(z.string()).max(5),
+  /**
+   * FIX-57 #4: the same steps as offered to the person (assistant voice) with the
+   * instruction each one sends; `suggestions` carries the instructions for older clients.
+   */
+  nextSteps: z
+    .array(z.object({ label: z.string(), prompt: z.string() }))
+    .max(3)
+    .optional(),
+  /** FIX-57 复审 #1-1d: a sidebar title generated from the task (only set when none was). */
+  title: z.string().max(40).optional(),
 });
 
 export const serverSupercarThinkingSchema = z.object({
@@ -835,6 +911,19 @@ export const serverTaskStreamSchema = z.object({
  * "正在分析整理..." between Firecrawl and the LLM-stream. SPA shows
  * this as a small caption above the streaming output.
  */
+/**
+ * FIX-34: a core (generate) round that produced no answer hands the same task to the browser
+ * lane. The client forgets this round's execution identity so the browser lane's events
+ * (which carry none) are shown, and treats the task as a browser task from now on.
+ */
+export const serverTaskReroutedSchema = z.object({
+  ...executionIdentityFields,
+  type: z.literal('server.task.rerouted'),
+  taskId: z.string(),
+  to: z.literal('browser'),
+  message: z.string(),
+});
+
 export const serverTaskProgressSchema = z.object({
   ...executionIdentityFields,
   type: z.literal('server.task.progress'),
@@ -858,14 +947,7 @@ export const serverTaskProgressSchema = z.object({
    *                图片…" not the generic "正在生成回答…"
    */
   subStatus: z
-    .enum([
-      'planning',
-      'browsing',
-      'extracting',
-      'verifying',
-      'generating',
-      'generating_image',
-    ])
+    .enum(['planning', 'browsing', 'extracting', 'verifying', 'generating', 'generating_image'])
     .optional(),
 });
 
@@ -892,14 +974,7 @@ export const serverBatchProgressSchema = z.object({
     .object({
       batchItemId: z.string(),
       seq: z.number().int().nonnegative(),
-      status: z.enum([
-        'pending',
-        'running',
-        'completed',
-        'partial_success',
-        'failed',
-        'cancelled',
-      ]),
+      status: z.enum(['pending', 'running', 'completed', 'partial_success', 'failed', 'cancelled']),
       taskId: z.string().optional(),
       errorMessage: z.string().optional(),
     })
@@ -928,7 +1003,7 @@ export const serverExtensionToolCallSchema = z.object({
   type: z.literal('server.extension.tool_call'),
   taskId: z.string().min(1).max(64),
   requestId: z.string().min(1).max(64),
-  kind: z.enum(['navigate', 'screenshot', 'tabs', 'read', 'session']),
+  kind: z.enum(['navigate', 'screenshot', 'tabs', 'read', 'session', 'session_import']),
   /** `url` is for legacy navigate; `target` is required for read only. */
   args: z
     .object({
@@ -937,6 +1012,10 @@ export const serverExtensionToolCallSchema = z.object({
       target: selectedChromeTargetSchema.optional(),
       /** Selected-tab mutation/observation command. Required by the session handler. */
       session: selectedChromeSessionCommandSchema.optional(),
+      sessionImport: z
+        .object({ grantId: z.string().uuid(), target: selectedChromeTargetSchema })
+        .strict()
+        .optional(),
       /**
        * Optional ms to wait after navigation before reading body text.
        * Default 1500 in the extension if omitted. Range guarded
@@ -976,6 +1055,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverSupercarThinkingSchema,
   serverTaskStreamSchema,
   serverTaskProgressSchema,
+  serverTaskReroutedSchema,
   serverBatchProgressSchema,
   serverExtensionToolCallSchema,
 ]);

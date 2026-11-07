@@ -90,8 +90,9 @@ export const batchTaskItems = mysqlTable(
     seq: int('seq').notNull(),
     prompt: text('prompt').notNull(),
     status: varchar('status', { length: 16 }).notNull().default('pending'),
-    taskId: bigint('task_id', { mode: 'number', unsigned: true })
-      .references(() => tasks.id, { onDelete: 'set null' }),
+    taskId: bigint('task_id', { mode: 'number', unsigned: true }).references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
     errorMessage: text('error_message'),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()

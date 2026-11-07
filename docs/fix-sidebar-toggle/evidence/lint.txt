@@ -1,0 +1,18 @@
+apps/web-workbench/src/components/Sidebar.tsx:983:10 lint/a11y/useSemanticElements ━━━━━━━━━━━━━━━━━
+
+  ! The elements with the following roles can be changed to the following elements:
+    <output>
+
+
+    981 │   if (!hasMore)
+    982 │     return exhaustedCopy ? (
+  > 983 │       <p role="status" className="mx-3 my-2 text-xs text-muted-foreground">
+        │          ^^^^^^^^^^^^^
+    984 │         {exhaustedCopy}
+    985 │       </p>
+
+  i For examples and more information, see WAI-ARIA Roles
+
+
+Checked 5 files in 27ms. No fixes applied.
+Found 1 warning.

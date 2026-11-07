@@ -37,8 +37,7 @@ interface CachedResolution {
   value: Promise<readonly ResolvedAddress[]>;
 }
 
-const PRIVATE_NETWORK_MESSAGE =
-  '为保护账户与服务器安全，不能访问本机、内网或云服务元数据地址。';
+const PRIVATE_NETWORK_MESSAGE = '为保护账户与服务器安全，不能访问本机、内网或云服务元数据地址。';
 const DNS_UNVERIFIED_MESSAGE = '目标网址暂时无法安全解析，请稍后重试。';
 
 /**
@@ -152,7 +151,10 @@ export function isPublicInternetAddress(address: string): boolean {
 }
 
 function normalizeHostname(hostname: string): string {
-  return hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  return hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.$/, '');
 }
 
 function isBlockedHostname(hostname: string): boolean {
@@ -169,9 +171,9 @@ function isBlockedHostname(hostname: string): boolean {
   );
 }
 
-function checkStaticBrowserUrl(rawUrl: string):
-  | { allowed: true; url: URL; host: string }
-  | Extract<BrowserNetworkDecision, { allowed: false }> {
+function checkStaticBrowserUrl(
+  rawUrl: string,
+): { allowed: true; url: URL; host: string } | Extract<BrowserNetworkDecision, { allowed: false }> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -291,13 +293,16 @@ function expandIpv6(address: string): number[] | null {
 
 async function defaultResolver(hostname: string): Promise<readonly ResolvedAddress[]> {
   const addresses = await lookup(hostname, { all: true, verbatim: true });
-  return addresses
-    .filter((entry): entry is { address: string; family: 4 | 6 } =>
-      entry.family === 4 || entry.family === 6,
-    )
-    .map(({ address, family }) => ({ address, family }))
-    // The current production and local runners have reliable IPv4 egress,
-    // while some hosts advertise IPv6 that is not routable from the box.
-    // Prefer IPv4 but retain IPv6-only targets as a valid fallback.
-    .sort((left, right) => left.family - right.family);
+  return (
+    addresses
+      .filter(
+        (entry): entry is { address: string; family: 4 | 6 } =>
+          entry.family === 4 || entry.family === 6,
+      )
+      .map(({ address, family }) => ({ address, family }))
+      // The current production and local runners have reliable IPv4 egress,
+      // while some hosts advertise IPv6 that is not routable from the box.
+      // Prefer IPv4 but retain IPv6-only targets as a valid fallback.
+      .sort((left, right) => left.family - right.family)
+  );
 }

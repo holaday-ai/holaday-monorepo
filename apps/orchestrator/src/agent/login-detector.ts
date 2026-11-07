@@ -150,7 +150,11 @@ export function detectLoginUrl(url: string | null | undefined): LoginSignal {
     return { matched: false, source: 'none' };
   }
   for (const needle of LOGIN_URL_HOST_NEEDLES) {
-    if (host.startsWith(needle) || host.includes(`.${needle}`) || host.startsWith(needle.slice(0, -1) + '.')) {
+    if (
+      host.startsWith(needle) ||
+      host.includes(`.${needle}`) ||
+      host.startsWith(`${needle.slice(0, -1)}.`)
+    ) {
       return { matched: true, source: 'url-host', match: needle };
     }
   }
@@ -271,7 +275,7 @@ const CAPTCHA_TITLE_NEEDLES = [
   'CAPTCHA',
   'captcha',
   "i'm not a robot",
-  "i am not a robot",
+  'i am not a robot',
   'verify you are human',
   'cloudflare',
   'security check',
@@ -279,7 +283,17 @@ const CAPTCHA_TITLE_NEEDLES = [
   '安全验证',
 ];
 
-const CAPTCHA_BODY_NEEDLES = CAPTCHA_TITLE_NEEDLES;
+const CAPTCHA_BODY_NEEDLES = [
+  // BROWSER-AUTOPILOT-2: a bare "cloudflare" in body text is an ordinary word
+  // (a Hacker News headline about cloudflare.com paused core-07); only the
+  // challenge page's own phrases count in the body. Titles keep the bare word.
+  ...CAPTCHA_TITLE_NEEDLES.filter((needle) => needle !== 'cloudflare'),
+  'performance & security by cloudflare',
+  'checking your browser',
+  'unusual traffic',
+  'sign in to confirm you’re not a bot',
+  "sign in to confirm you're not a bot",
+];
 
 /**
  * URL / page signals for "you don't have permission" walls — distinct
@@ -381,9 +395,7 @@ export interface PermissionCheckInputs extends LoginCheckInputs {
  * (always fires); URL / title / body match for sites that return
  * 200 with a "subscribe to read" page.
  */
-export function detectPermissionWall(
-  inputs: PermissionCheckInputs,
-): LoginSignal {
+export function detectPermissionWall(inputs: PermissionCheckInputs): LoginSignal {
   if (inputs.httpStatus === 403) {
     return { matched: true, source: 'url-host', match: 'http-403' };
   }
@@ -440,9 +452,7 @@ export function buildCaptchaParkQuestion(url: string | null | undefined): string
  * paid subscription. Different action: they need to switch context
  * or upgrade, not "log in".
  */
-export function buildPermissionParkQuestion(
-  url: string | null | undefined,
-): string {
+export function buildPermissionParkQuestion(url: string | null | undefined): string {
   const host = friendlyHost(url);
   if (host) {
     return `当前页面（${host}）需要账号权限或会员权限才能访问。请用有权限的账号在浏览器中打开后，回复「继续」我接着干。`;

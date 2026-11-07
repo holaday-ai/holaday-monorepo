@@ -1,11 +1,8 @@
-import { AlertCircle, CheckCircle2, CircleSlash, Loader2, Pin, PinOff, XCircle } from 'lucide-react';
-import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useTaskStore } from '@/stores/task-store';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { supportMailtoHref } from '@/lib/support-links';
 import {
+  type NormalizedTaskHubRow,
   formatTaskHubTime,
   mergeTaskHubRowsById,
   normalizeTaskHubCursor,
@@ -18,12 +15,23 @@ import {
   taskHubRowTitle,
   taskHubRowTone,
   taskHubStatusIconKind,
-  type NormalizedTaskHubRow,
 } from '@/lib/task-hub-state';
 import { taskStatusLabel } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
+import { useTaskStore } from '@/stores/task-store';
+import {
+  AlertCircle,
+  CheckCircle2,
+  CircleSlash,
+  Loader2,
+  Pin,
+  PinOff,
+  XCircle,
+} from 'lucide-react';
+import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 /**
  * 置顶任务 — pinned-task hub. Pin state is server-persisted (the
@@ -168,20 +176,25 @@ export function StarredPage(): JSX.Element {
         <PageLoadingPanel label="置顶任务加载中" description="正在同步固定任务" />
       ) : loadError ? (
         <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-          <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
+          <AlertCircle className="h-8 w-8 text-[#FF0061]" aria-hidden />
           <div className="text-sm font-medium text-foreground/80">{pageErrorCopy.title}</div>
           <div className="max-w-md text-xs leading-5 text-muted-foreground">
             {pageErrorCopy.body}
           </div>
           <div className="mt-1 flex flex-wrap justify-center gap-2">
-            <Button type="button" size="sm" onClick={() => void fetchPage(null, false)} disabled={loading}>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void fetchPage(null, false)}
+              disabled={loading}
+            >
               {loading ? '重试中…' : '重试'}
             </Button>
             <Button
               asChild
               variant="outline"
               size="sm"
-              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
             >
               <a
                 href={supportMailtoHref({
@@ -197,9 +210,7 @@ export function StarredPage(): JSX.Element {
       ) : items.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <Pin className="h-8 w-8 text-muted-foreground/40" />
-          <div className="text-sm font-medium text-foreground/80">
-            还没有置顶任务
-          </div>
+          <div className="text-sm font-medium text-foreground/80">还没有置顶任务</div>
           <div className="text-xs text-muted-foreground">
             在任务列表里右键任意任务，选择「置顶」即可。
           </div>
@@ -227,7 +238,7 @@ export function StarredPage(): JSX.Element {
                     onClick={() => open(t.taskId)}
                     className="min-w-0 flex-1 text-left"
                   >
-                    <div className="truncate text-sm text-foreground group-hover:text-[#EA1F59]">
+                    <div className="truncate text-sm text-foreground group-hover:text-[#FF0061]">
                       {taskHubRowTitle(t)}
                     </div>
                     <div className="mt-0.5 text-[11px] text-muted-foreground">
@@ -249,7 +260,7 @@ export function StarredPage(): JSX.Element {
                     aria-label="取消置顶"
                     title={unpinningIds.has(t.taskId) ? '取消置顶中…' : '取消置顶'}
                     disabled={unpinningIds.has(t.taskId)}
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#EA1F59] disabled:cursor-wait disabled:opacity-50"
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#FF0061] disabled:cursor-wait disabled:opacity-50"
                   >
                     {unpinningIds.has(t.taskId) ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -262,13 +273,13 @@ export function StarredPage(): JSX.Element {
             })}
           </div>
           {loadMoreError && (
-            <div className="mt-4 flex flex-col items-center gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-3 py-2 text-center text-xs text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+            <div className="mt-4 flex flex-col items-center gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#FF0061] bg-white px-3 py-2 text-center text-xs text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
               <div className="font-medium">{loadMoreErrorCopy.title}</div>
               <div className="max-w-md text-muted-foreground">{loadMoreErrorCopy.body}</div>
               <Button
                 variant="outline"
                 size="sm"
-                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                 onClick={() => void fetchPage(cursor, true)}
                 disabled={loading}
               >
@@ -281,7 +292,7 @@ export function StarredPage(): JSX.Element {
               <Button
                 variant="outline"
                 size="sm"
-                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                 onClick={() => void fetchPage(cursor, true)}
                 disabled={loading}
               >
@@ -295,7 +306,9 @@ export function StarredPage(): JSX.Element {
   );
 }
 
-function PinnedStatusIcon({ task }: { task: Pick<PinnedRow, 'awaitingKind' | 'status'> }): JSX.Element {
+function PinnedStatusIcon({
+  task,
+}: { task: Pick<PinnedRow, 'awaitingKind' | 'status'> }): JSX.Element {
   // Surface the exceptional terminal states (awaiting / failed /
   // partial / cancelled) with the same icon vocabulary as the history
   // page so a pinned task's state is spottable at a glance — previously
@@ -312,7 +325,7 @@ function PinnedStatusIcon({ task }: { task: Pick<PinnedRow, 'awaitingKind' | 'st
   }
   if (iconKind === 'failed') {
     return (
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#EA1F59]/45 bg-[#EA1F59]/10 text-[#EA1F59]">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#FF0061]/45 bg-[#FF0061]/10 text-[#FF0061]">
         <XCircle className="h-3.5 w-3.5" />
       </span>
     );
@@ -335,7 +348,7 @@ function PinnedStatusIcon({ task }: { task: Pick<PinnedRow, 'awaitingKind' | 'st
     );
   }
   return (
-    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#EA1F59]">
+    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#FF0061]">
       <Pin className="h-3.5 w-3.5" />
     </span>
   );

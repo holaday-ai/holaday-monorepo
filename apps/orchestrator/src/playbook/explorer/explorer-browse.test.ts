@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-it.each([Number.POSITIVE_INFINITY, Number.NaN, -1])('keeps invalid/unknown runner spend fail-closed (%s)', async (costUsd) => {
-  const explore = makeBrowseExploreSite({ runBrowseTask: async () => ({ status: 'completed', costUsd }) });
-  const result = await explore('example.com');
-  expect(Number.isFinite(result.costUsd)).toBe(false);
-});
+it.each([Number.POSITIVE_INFINITY, Number.NaN, -1])(
+  'keeps invalid/unknown runner spend fail-closed (%s)',
+  async (costUsd) => {
+    const explore = makeBrowseExploreSite({
+      runBrowseTask: async () => ({ status: 'completed', costUsd }),
+    });
+    const result = await explore('example.com');
+    expect(Number.isFinite(result.costUsd)).toBe(false);
+  },
+);
 import {
   type BrowseAction,
   type BrowseRunResult,
@@ -32,11 +37,19 @@ describe('explorerOnBeforeAction — live-veto decision', () => {
   });
   it('A3 login-mode thickens: 转账/分享 blocked ONLY with { loginMode: true }', () => {
     expect(explorerOnBeforeAction({ kind: 'click', label: '转账' }).allowed).toBe(true); // 免登录
-    expect(explorerOnBeforeAction({ kind: 'click', label: '转账' }, { loginMode: true }).allowed).toBe(false);
-    expect(explorerOnBeforeAction({ kind: 'click', label: '分享' }, { loginMode: true }).allowed).toBe(false);
+    expect(
+      explorerOnBeforeAction({ kind: 'click', label: '转账' }, { loginMode: true }).allowed,
+    ).toBe(false);
+    expect(
+      explorerOnBeforeAction({ kind: 'click', label: '分享' }, { loginMode: true }).allowed,
+    ).toBe(false);
     // base-sensitive still blocked in both; benign still allowed in login mode.
-    expect(explorerOnBeforeAction({ kind: 'click', label: '登录' }, { loginMode: true }).allowed).toBe(false);
-    expect(explorerOnBeforeAction({ kind: 'click', label: 'Docs' }, { loginMode: true }).allowed).toBe(true);
+    expect(
+      explorerOnBeforeAction({ kind: 'click', label: '登录' }, { loginMode: true }).allowed,
+    ).toBe(false);
+    expect(
+      explorerOnBeforeAction({ kind: 'click', label: 'Docs' }, { loginMode: true }).allowed,
+    ).toBe(true);
   });
 });
 
@@ -113,9 +126,7 @@ function fakeLoop(actions: BrowseAction[], executed: BrowseAction[], costUsd = 0
   }: {
     onBeforeAction: (
       a: BrowseAction,
-    ) =>
-      | { allowed: boolean; reason?: string }
-      | Promise<{ allowed: boolean; reason?: string }>;
+    ) => { allowed: boolean; reason?: string } | Promise<{ allowed: boolean; reason?: string }>;
   }): Promise<BrowseRunResult> => {
     for (const a of actions) {
       const v = await onBeforeAction(a); // hook is async now (Layer C may call the model)

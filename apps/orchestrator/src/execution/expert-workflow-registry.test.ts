@@ -27,12 +27,8 @@ describe('matchExpertWorkflow — douyin-review', () => {
     // every contradiction-style P0 case through the workflow gate.
     // Now the intent must mention 抖音 + 直播 + 复盘 buckets even
     // when an explicit douyin role is selected.
-    expect(
-      matchExpertWorkflow({ intent: '帮我看看数据', roleId: 'douyin-strategist' }),
-    ).toBeNull();
-    expect(
-      matchExpertWorkflow({ intent: '随便', roleId: 'douyin-operator' }),
-    ).toBeNull();
+    expect(matchExpertWorkflow({ intent: '帮我看看数据', roleId: 'douyin-strategist' })).toBeNull();
+    expect(matchExpertWorkflow({ intent: '随便', roleId: 'douyin-operator' })).toBeNull();
   });
 
   it('explicit douyin role + workflow-shaped intent → still matches', () => {
@@ -85,27 +81,17 @@ describe('matchExpertWorkflow — douyin-review', () => {
 
 describe('matchExpertWorkflow — content-topic', () => {
   it('matches 选题 + 平台名', () => {
-    expect(
-      matchExpertWorkflow({ intent: '小红书 美妆选题' })?.workflowId,
-    ).toBe('content-topic');
-    expect(
-      matchExpertWorkflow({ intent: '抖音爆款选题怎么做' })?.workflowId,
-    ).toBe('content-topic');
-    expect(
-      matchExpertWorkflow({ intent: '帮我做 B站 内容策划' })?.workflowId,
-    ).toBe('content-topic');
+    expect(matchExpertWorkflow({ intent: '小红书 美妆选题' })?.workflowId).toBe('content-topic');
+    expect(matchExpertWorkflow({ intent: '抖音爆款选题怎么做' })?.workflowId).toBe('content-topic');
+    expect(matchExpertWorkflow({ intent: '帮我做 B站 内容策划' })?.workflowId).toBe(
+      'content-topic',
+    );
   });
 
   it('matches 标题 / 内容方向 / 种草 task variants', () => {
-    expect(
-      matchExpertWorkflow({ intent: '小红书 标题策划' })?.workflowId,
-    ).toBe('content-topic');
-    expect(
-      matchExpertWorkflow({ intent: '抖音 内容方向规划' })?.workflowId,
-    ).toBe('content-topic');
-    expect(
-      matchExpertWorkflow({ intent: '小红书种草笔记选题' })?.workflowId,
-    ).toBe('content-topic');
+    expect(matchExpertWorkflow({ intent: '小红书 标题策划' })?.workflowId).toBe('content-topic');
+    expect(matchExpertWorkflow({ intent: '抖音 内容方向规划' })?.workflowId).toBe('content-topic');
+    expect(matchExpertWorkflow({ intent: '小红书种草笔记选题' })?.workflowId).toBe('content-topic');
   });
 
   it('does NOT match without a platform term', () => {
@@ -129,35 +115,25 @@ describe('matchExpertWorkflow — content-topic', () => {
   });
 
   it('English platform aliases (xiaohongshu / bilibili) match', () => {
-    expect(
-      matchExpertWorkflow({ intent: 'xiaohongshu 选题策划' })?.workflowId,
-    ).toBe('content-topic');
-    expect(
-      matchExpertWorkflow({ intent: 'bilibili 爆款标题' })?.workflowId,
-    ).toBe('content-topic');
+    expect(matchExpertWorkflow({ intent: 'xiaohongshu 选题策划' })?.workflowId).toBe(
+      'content-topic',
+    );
+    expect(matchExpertWorkflow({ intent: 'bilibili 爆款标题' })?.workflowId).toBe('content-topic');
   });
 });
 
 describe('matchExpertWorkflow — ecom-daily', () => {
   it('matches 日报 + ECOM term', () => {
-    expect(
-      matchExpertWorkflow({ intent: '电商日报' })?.workflowId,
-    ).toBe('ecom-daily');
-    expect(
-      matchExpertWorkflow({ intent: '帮我做日报，营收 30万' })?.workflowId,
-    ).toBe('ecom-daily');
-    expect(
-      matchExpertWorkflow({ intent: '昨日营收 50万 订单 1500' })?.workflowId,
-    ).toBe('ecom-daily');
+    expect(matchExpertWorkflow({ intent: '电商日报' })?.workflowId).toBe('ecom-daily');
+    expect(matchExpertWorkflow({ intent: '帮我做日报，营收 30万' })?.workflowId).toBe('ecom-daily');
+    expect(matchExpertWorkflow({ intent: '昨日营收 50万 订单 1500' })?.workflowId).toBe(
+      'ecom-daily',
+    );
   });
 
   it('matches relative time + 销售/店铺', () => {
-    expect(
-      matchExpertWorkflow({ intent: '昨日 销售额 100万' })?.workflowId,
-    ).toBe('ecom-daily');
-    expect(
-      matchExpertWorkflow({ intent: '今天店铺数据复盘' })?.workflowId,
-    ).toBe('ecom-daily');
+    expect(matchExpertWorkflow({ intent: '昨日 销售额 100万' })?.workflowId).toBe('ecom-daily');
+    expect(matchExpertWorkflow({ intent: '今天店铺数据复盘' })?.workflowId).toBe('ecom-daily');
   });
 
   it('does NOT match without time term', () => {
@@ -187,9 +163,9 @@ describe('matchExpertWorkflow — ecom-daily', () => {
   });
 
   it('English aliases (yesterday / today) work', () => {
-    expect(
-      matchExpertWorkflow({ intent: 'yesterday 销售额 100万' })?.workflowId,
-    ).toBe('ecom-daily');
+    expect(matchExpertWorkflow({ intent: 'yesterday 销售额 100万' })?.workflowId).toBe(
+      'ecom-daily',
+    );
   });
 });
 
@@ -257,22 +233,22 @@ describe('resolveExpertWorkflowDispatch — new follow-up tasks', () => {
       intent:
         '基于这次抖音直播复盘的诊断和优化建议，帮我生成一份详细的下场直播 SOP，包含开播前准备、节奏节点、话术框架。',
     },
-  ])('does not reuse the $workflowId report schema for its derived action', ({
-    workflowId,
-    intent,
-  }) => {
-    const parentWorkflow = getExpertWorkflowById(workflowId);
-    const matchedWorkflow = matchExpertWorkflow({ intent });
-    expect(matchedWorkflow?.workflowId).toBe(workflowId);
+  ])(
+    'does not reuse the $workflowId report schema for its derived action',
+    ({ workflowId, intent }) => {
+      const parentWorkflow = getExpertWorkflowById(workflowId);
+      const matchedWorkflow = matchExpertWorkflow({ intent });
+      expect(matchedWorkflow?.workflowId).toBe(workflowId);
 
-    const resolved = resolveExpertWorkflowDispatch({
-      matchedWorkflow,
-      parentWorkflow,
-      isFollowUp: true,
-      followUpIntent: intent,
-    });
+      const resolved = resolveExpertWorkflowDispatch({
+        matchedWorkflow,
+        parentWorkflow,
+        isFollowUp: true,
+        followUpIntent: intent,
+      });
 
-    expect(resolved.reportWorkflow).toBeNull();
-    expect(resolved.routingWorkflow?.workflowId).toBe(workflowId);
-  });
+      expect(resolved.reportWorkflow).toBeNull();
+      expect(resolved.routingWorkflow?.workflowId).toBe(workflowId);
+    },
+  );
 });

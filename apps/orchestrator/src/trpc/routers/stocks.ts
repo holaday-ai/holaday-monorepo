@@ -27,6 +27,7 @@ import { stockDashboardSnapshots } from '../../db/schema/stock-dashboard-snapsho
 import { users } from '../../db/schema/users.js';
 import { resolveNewsDetail } from '../../stock-news/article-detail.js';
 import { sourceCoverProxyUrl } from '../../stock-news/source-cover.js';
+import { rememberServedStockSnapshot } from '../../stocks/served-stock-snapshot.js';
 import { recordStockScreeningPreference } from '../../stocks/stock-preference-repository.js';
 import {
   type LatestExpectedTradingDate,
@@ -37,21 +38,21 @@ import {
 } from '../../stocks/stock-trust.js';
 import { protectedProcedure, router } from '../trpc.js';
 import {
+  stockPreferenceProcedures,
+  withStockScreeningPreferenceRecording,
+} from './stocks-preferences.js';
+import { stockRiskMonitorProcedures } from './stocks-risk-monitor.js';
+import {
   createStockRiskRadarHttpClient,
   runTrustedStockRiskRadar,
   stockRiskRadarInputSchema,
 } from './stocks-risk-radar.js';
-import { stockRiskMonitorProcedures } from './stocks-risk-monitor.js';
 import {
   previewStockScreening,
   previewStockScreeningInputSchema,
   runStockScreeningInputSchema,
   runTrustedStockScreening,
 } from './stocks-screening.js';
-import {
-  stockPreferenceProcedures,
-  withStockScreeningPreferenceRecording,
-} from './stocks-preferences.js';
 
 type Db = typeof import('../../db/client.js').db;
 interface MinimalLogger {
@@ -195,13 +196,16 @@ const DASHBOARD_SLOW_SIGNAL_TIMEOUT_MS = 12_000;
 const DASHBOARD_RANKING_TIMEOUT_MS = 12_000;
 const DASHBOARD_DISCOVERY_TIMEOUT_MS = 12_000;
 const MARKET_DISCOVERY_PAGE_SIZES: Record<MarketDiscoveryFeed, number> = {
-  'A股要闻': 30,
-  '美股要闻': 12,
-  '港股要闻': 12,
+  A股要闻: 30,
+  美股要闻: 12,
+  港股要闻: 12,
 };
 const dashboardCache = new Map<string, DashboardCacheEntry>();
 
-function unavailableStock(entry: WatchlistEntry, note = '真实行情暂不可用，未展示走势线'): StockSnapshot {
+function unavailableStock(
+  entry: WatchlistEntry,
+  note = '真实行情暂不可用，未展示走势线',
+): StockSnapshot {
   return {
     symbol: entry.symbol,
     name: entry.displayName ?? entry.symbol,
@@ -239,11 +243,9 @@ async function requireUserId(db: Db, externalUserId: string): Promise<number> {
 
 function dashboardCacheKey(userInternalId: number, watchlist: WatchlistEntry[]): string {
   const signature = watchlist
-    .map((entry) => [
-      entry.symbol.trim().toUpperCase(),
-      entry.market,
-      entry.displayName?.trim() ?? '',
-    ].join(':'))
+    .map((entry) =>
+      [entry.symbol.trim().toUpperCase(), entry.market, entry.displayName?.trim() ?? ''].join(':'),
+    )
     .join('|');
   return `${userInternalId}:${signature}`;
 }
@@ -269,11 +271,13 @@ function isDashboardSnapshot(value: unknown): value is DashboardSnapshot {
 
 function hasDisplayableRealDashboardData(snapshot: DashboardSnapshot): boolean {
   if (snapshot.trust?.mode === 'unavailable') return false;
-  const hasWatchlistData = snapshot.watchlistStocks.some((stockRow) =>
-    stockRow.price !== '—' ||
-    stockRow.spark.length >= 2 ||
-    stockRow.turnoverAmount !== null ||
-    stockRow.volume !== null);
+  const hasWatchlistData = snapshot.watchlistStocks.some(
+    (stockRow) =>
+      stockRow.price !== '—' ||
+      stockRow.spark.length >= 2 ||
+      stockRow.turnoverAmount !== null ||
+      stockRow.volume !== null,
+  );
   return (
     hasWatchlistData ||
     snapshot.marketIndices.length > 0 ||
@@ -286,11 +290,14 @@ function hasDisplayableRealDashboardData(snapshot: DashboardSnapshot): boolean {
 }
 
 function dashboardNeedsWatchlistIntradayRefresh(snapshot: DashboardSnapshot): boolean {
-  const realWatchlistQuotes = snapshot.watchlistStocks.filter((stockRow) =>
-    stockRow.market === 'A' && stockRow.price !== '—');
+  const realWatchlistQuotes = snapshot.watchlistStocks.filter(
+    (stockRow) => stockRow.market === 'A' && stockRow.price !== '—',
+  );
   return (
     realWatchlistQuotes.length > 0 &&
-    realWatchlistQuotes.every((stockRow) => stockRow.sparkKind === 'intraday' && stockRow.spark.length < 2)
+    realWatchlistQuotes.every(
+      (stockRow) => stockRow.sparkKind === 'intraday' && stockRow.spark.length < 2,
+    )
   );
 }
 
@@ -304,10 +311,12 @@ async function loadPersistedDashboardSnapshot(args: {
     const [row] = await args.db
       .select({ snapshotJson: stockDashboardSnapshots.snapshotJson })
       .from(stockDashboardSnapshots)
-      .where(and(
-        eq(stockDashboardSnapshots.userId, args.userInternalId),
-        eq(stockDashboardSnapshots.cacheKeyHash, dashboardPersistedCacheKey(args.cacheKey)),
-      ))
+      .where(
+        and(
+          eq(stockDashboardSnapshots.userId, args.userInternalId),
+          eq(stockDashboardSnapshots.cacheKeyHash, dashboardPersistedCacheKey(args.cacheKey)),
+        ),
+      )
       .limit(1);
     if (!row || !isDashboardSnapshot(row.snapshotJson)) return undefined;
     return markRefreshing(
@@ -392,9 +401,7 @@ function buildPartialDashboardSnapshot(
   message = '行情刷新仍在进行，先展示真实关注列表。',
   snapshotKey = 'partial-dashboard',
 ): DashboardSnapshot {
-  const watchlistStocks = effectiveWatchlist
-    .slice(0, 8)
-    .map((entry) => unavailableStock(entry));
+  const watchlistStocks = effectiveWatchlist.slice(0, 8).map((entry) => unavailableStock(entry));
   const leaderboards = fallbackLeaderboards();
   const snapshot = withFreshness(
     {
@@ -506,7 +513,10 @@ function sparkSeriesFromKline(rows: KlineRow[]): { values: number[]; labels: str
       value: toNum(pick(row, ['收盘', 'close', '最新价'])),
       label: String(pick(row, ['日期', 'date']) ?? '').trim(),
     }))
-    .filter((point): point is { value: number; label: string } => point.value !== null && point.label.length > 0);
+    .filter(
+      (point): point is { value: number; label: string } =>
+        point.value !== null && point.label.length > 0,
+    );
   return series.length >= 2
     ? {
         values: series.map((point) => point.value),
@@ -515,15 +525,19 @@ function sparkSeriesFromKline(rows: KlineRow[]): { values: number[]; labels: str
     : { values: [], labels: [] };
 }
 
-function sparkSeriesFromIntraday(rows: IntradayRow[], now = new Date()): { values: number[]; labels: string[] } {
+function sparkSeriesFromIntraday(
+  rows: IntradayRow[],
+  now = new Date(),
+): { values: number[]; labels: string[] } {
   const rawPoints = rows
     .map((row) => ({
       value: toNum(pick(row, ['最新价', '收盘', 'close', 'price'])),
       label: String(pick(row, ['时间', 'time', 'datetime']) ?? '').trim(),
     }))
-    .filter((point): point is { value: number; label: string } =>
-      point.value !== null &&
-      point.label.length > 0);
+    .filter(
+      (point): point is { value: number; label: string } =>
+        point.value !== null && point.label.length > 0,
+    );
   const series = observedIntradayPointsForNow(rawPoints, now);
   return series.length >= 2
     ? {
@@ -533,7 +547,10 @@ function sparkSeriesFromIntraday(rows: IntradayRow[], now = new Date()): { value
     : { values: [], labels: [] };
 }
 
-function previousCloseFromSeries(series: { values: number[]; labels: string[] }, intradayLabel: string | undefined): number | null {
+function previousCloseFromSeries(
+  series: { values: number[]; labels: string[] },
+  intradayLabel: string | undefined,
+): number | null {
   if (series.values.length === 0) return null;
   const intradayDate = datePart(intradayLabel);
   const lastIndex = series.values.length - 1;
@@ -628,7 +645,11 @@ function observedIntradayPointsForNow(
   return [...byMinute.values()];
 }
 
-function intradayLabelBelongsToObservedSession(label: string, now: Date, tradeDate: string): boolean {
+function intradayLabelBelongsToObservedSession(
+  label: string,
+  now: Date,
+  tradeDate: string,
+): boolean {
   const labelDate = datePart(label);
   const labelMinute = intradayMinuteOfDay(label);
   if (!labelDate || labelMinute === null || labelDate !== tradeDate) return false;
@@ -646,17 +667,17 @@ function observedIntradayStockForNow(stockRow: StockSnapshot, now: Date): StockS
       label,
       value: stockRow.spark[index],
     }))
-    .filter((point): point is { label: string; value: number } =>
-      typeof point.value === 'number' &&
-      Number.isFinite(point.value));
+    .filter(
+      (point): point is { label: string; value: number } =>
+        typeof point.value === 'number' && Number.isFinite(point.value),
+    );
   const points = observedIntradayPointsForNow(rawPoints, now);
   const sparkTradeDate = points.length >= 2 ? datePart(points[points.length - 1]?.label) : null;
   const pointsUnchanged =
     points.length === stockRow.spark.length &&
     points.every(
       (point, index) =>
-        point.label === stockRow.sparkLabels[index] &&
-        point.value === stockRow.spark[index],
+        point.label === stockRow.sparkLabels[index] && point.value === stockRow.spark[index],
     );
   if (pointsUnchanged) {
     return stockRow.sparkTradeDate === sparkTradeDate ? stockRow : { ...stockRow, sparkTradeDate };
@@ -679,10 +700,13 @@ function observedTradeDateFromStocks(stocks: StockSnapshot[]): string | null {
 }
 
 function dashboardWithObservedIntraday(snapshot: DashboardSnapshot, now: Date): DashboardSnapshot {
-  const watchlistStocks = snapshot.watchlistStocks.map((stockRow) => observedIntradayStockForNow(stockRow, now));
+  const watchlistStocks = snapshot.watchlistStocks.map((stockRow) =>
+    observedIntradayStockForNow(stockRow, now),
+  );
   const bySymbol = new Map(watchlistStocks.map((stockRow) => [stockRow.symbol, stockRow]));
-  const starStocks = snapshot.starStocks.map((stockRow) =>
-    bySymbol.get(stockRow.symbol) ?? observedIntradayStockForNow(stockRow, now));
+  const starStocks = snapshot.starStocks.map(
+    (stockRow) => bySymbol.get(stockRow.symbol) ?? observedIntradayStockForNow(stockRow, now),
+  );
   return {
     ...snapshot,
     observedTradeDate: observedTradeDateFromStocks(watchlistStocks),
@@ -693,11 +717,13 @@ function dashboardWithObservedIntraday(snapshot: DashboardSnapshot, now: Date): 
 }
 
 function latestSnapshotDate(values: Array<string | null | undefined>): string | null {
-  return values
-    .map((value) => datePart(value ?? undefined))
-    .filter((value): value is string => value !== null)
-    .sort()
-    .at(-1) ?? null;
+  return (
+    values
+      .map((value) => datePart(value ?? undefined))
+      .filter((value): value is string => value !== null)
+      .sort()
+      .at(-1) ?? null
+  );
 }
 
 function sourceHealth(
@@ -742,7 +768,13 @@ function defaultDashboardSourceHealth(snapshot: DashboardSnapshot, now: Date): S
           indicesPrior?.dataAsOf ?? snapshot.trust?.dataAsOf ?? quoteDataAsOf,
           fetchedAt,
         )
-      : sourceHealth('indices', 'delayed', indicesPrior?.dataAsOf ?? null, fetchedAt, 'NO_INDEX_ROWS'),
+      : sourceHealth(
+          'indices',
+          'delayed',
+          indicesPrior?.dataAsOf ?? null,
+          fetchedAt,
+          'NO_INDEX_ROWS',
+        ),
     newsRows.length > 0
       ? sourceHealth('news', 'healthy', newsDataAsOf, fetchedAt)
       : sourceHealth('news', 'delayed', null, fetchedAt, 'NO_NEWS_ROWS'),
@@ -757,9 +789,7 @@ function defaultDashboardSourceHealth(snapshot: DashboardSnapshot, now: Date): S
 function dashboardEvidenceIds(snapshot: DashboardSnapshot): string[] {
   const quoteEvidence = snapshot.watchlistStocks.flatMap((stockRow) => {
     const tradeDate = latestSnapshotDate([stockRow.sparkTradeDate, stockRow.tradeDate]);
-    return stockRow.price !== '—' && tradeDate
-      ? [`quote:${stockRow.symbol}:${tradeDate}`]
-      : [];
+    return stockRow.price !== '—' && tradeDate ? [`quote:${stockRow.symbol}:${tradeDate}`] : [];
   });
   const newsEvidence = snapshot.news.flatMap((item) => {
     if (!item.url) return [];
@@ -780,11 +810,12 @@ function dashboardWithTrust(args: {
 }): DashboardSnapshot {
   const observed = dashboardWithObservedIntraday(args.snapshot, args.now);
   const sources = args.sources ?? defaultDashboardSourceHealth(observed, args.now);
-  const dataAsOf = args.dataAsOf === undefined
-    ? observed.observedTradeDate ?? observed.trust?.dataAsOf ?? latestSnapshotDate(
-        sources.map((source) => source.dataAsOf),
-      )
-    : args.dataAsOf;
+  const dataAsOf =
+    args.dataAsOf === undefined
+      ? (observed.observedTradeDate ??
+        observed.trust?.dataAsOf ??
+        latestSnapshotDate(sources.map((source) => source.dataAsOf)))
+      : args.dataAsOf;
   const trust = stockSnapshotTrust({
     snapshotKey: args.snapshotKey,
     now: args.now,
@@ -800,11 +831,7 @@ function dashboardWithTrust(args: {
   return dashboardForTrustMode({ ...observed, trust });
 }
 
-function logDashboardTrust(
-  logger: MinimalLogger,
-  snapshot: DashboardSnapshot,
-  now: Date,
-): void {
+function logDashboardTrust(logger: MinimalLogger, snapshot: DashboardSnapshot, now: Date): void {
   const trust = snapshot.trust;
   if (!trust) return;
   const generatedAtMs = new Date(trust.generatedAt).getTime();
@@ -837,7 +864,8 @@ function dashboardForTrustMode(snapshot: DashboardSnapshot): DashboardSnapshot {
         displayName: stockRow.name,
       },
       '该行情快照已超出安全展示窗口，数值已隐藏，正在重新获取。',
-    ));
+    ),
+  );
   return {
     ...snapshot,
     observedTradeDate: null,
@@ -857,7 +885,7 @@ function dashboardReferenceDate(snapshot: DashboardSnapshot): Date {
 }
 
 function latestKline(rows: KlineRow[]): KlineRow | null {
-  return rows.length > 0 ? rows[rows.length - 1] ?? null : null;
+  return rows.length > 0 ? (rows[rows.length - 1] ?? null) : null;
 }
 
 function latestQuote(env: AkEnvelope<StockQuoteRow>): StockQuoteRow | null {
@@ -882,12 +910,21 @@ async function stockSnapshot(
   ]);
   const last = latestKline(dailyEnv.data);
   const quote = latestQuote(quoteEnv);
-  const sparkSeries = seriesEnv.error ? { values: [], labels: [] } : sparkSeriesFromKline(seriesEnv.data);
-  const intradaySeries = intradayEnv.error ? { values: [], labels: [] } : sparkSeriesFromIntraday(intradayEnv.data, now);
+  const sparkSeries = seriesEnv.error
+    ? { values: [], labels: [] }
+    : sparkSeriesFromKline(seriesEnv.data);
+  const intradaySeries = intradayEnv.error
+    ? { values: [], labels: [] }
+    : sparkSeriesFromIntraday(intradayEnv.data, now);
   const hasIntraday = intradaySeries.values.length >= 2;
-  const sparkTradeDate = hasIntraday ? datePart(intradaySeries.labels[intradaySeries.labels.length - 1]) : null;
-  const tradeDate = datePart(String(last ? pick(last, ['日期', 'date']) ?? '' : '')) ?? sparkTradeDate;
-  const latestIntraday = hasIntraday ? intradaySeries.values[intradaySeries.values.length - 1] : null;
+  const sparkTradeDate = hasIntraday
+    ? datePart(intradaySeries.labels[intradaySeries.labels.length - 1])
+    : null;
+  const tradeDate =
+    datePart(String(last ? (pick(last, ['日期', 'date']) ?? '') : '')) ?? sparkTradeDate;
+  const latestIntraday = hasIntraday
+    ? intradaySeries.values[intradaySeries.values.length - 1]
+    : null;
   const close = quote
     ? pick(quote, ['最新价', 'price', '收盘', 'close'])
     : last
@@ -896,7 +933,13 @@ async function stockSnapshot(
   if (close == null) return unavailableStock(entry, 'AkShare 暂未返回该股票行情');
   const sparkBaseline = previousCloseFromSeries(sparkSeries, intradaySeries.labels[0]);
   const changePct =
-    toNum(quote ? pick(quote, ['涨跌幅', 'changePct']) : last ? pick(last, ['涨跌幅', 'changePct']) : null) ??
+    toNum(
+      quote
+        ? pick(quote, ['涨跌幅', 'changePct'])
+        : last
+          ? pick(last, ['涨跌幅', 'changePct'])
+          : null,
+    ) ??
     (typeof sparkBaseline === 'number' && sparkBaseline > 0
       ? (((toNum(close) ?? sparkBaseline) - sparkBaseline) / sparkBaseline) * 100
       : null);
@@ -912,11 +955,13 @@ async function stockSnapshot(
   const klineRows = seriesEnv.error ? [] : seriesEnv.data;
   const averageVolume = averageKlineValue(klineRows, ['成交量', 'volume']);
   const averageTurnoverAmount = averageKlineValue(klineRows, ['成交额', 'amount', 'turnover']);
-  const turnoverRatio = turnoverAmount !== null && averageTurnoverAmount !== null && averageTurnoverAmount > 0
-    ? Number((turnoverAmount / averageTurnoverAmount).toFixed(2))
-    : null;
-  const volumeRatio = turnoverRatio
-    ?? (volume !== null && averageVolume !== null && averageVolume > 0
+  const turnoverRatio =
+    turnoverAmount !== null && averageTurnoverAmount !== null && averageTurnoverAmount > 0
+      ? Number((turnoverAmount / averageTurnoverAmount).toFixed(2))
+      : null;
+  const volumeRatio =
+    turnoverRatio ??
+    (volume !== null && averageVolume !== null && averageVolume > 0
       ? Number((volume / averageVolume).toFixed(2))
       : null);
   return {
@@ -1018,7 +1063,9 @@ function marketTemperature(env: AkEnvelope<MarketPulseRow>) {
     historicalPosition: `${score}%`,
     notes: [
       up || down ? `上涨 ${up} 家，下跌 ${down} 家。` : '涨跌家数暂不可用。',
-      pulse.net_inflow_yi != null ? `主力净流入 ${pulse.net_inflow_yi.toFixed(2)} 亿元。` : '资金流向等待刷新。',
+      pulse.net_inflow_yi != null
+        ? `主力净流入 ${pulse.net_inflow_yi.toFixed(2)} 亿元。`
+        : '资金流向等待刷新。',
     ],
   };
 }
@@ -1068,7 +1115,9 @@ function mapSymbolSearch(env: AkEnvelope<SymbolRow>, query: string) {
 
 function formatAnnouncementTime(value: unknown): string {
   if (typeof value !== 'string' || value.trim() === '') return '公告';
-  const match = /(\d{4})[-/]?(\d{2})[-/]?(\d{2})(?:[ T](\d{2}):?(\d{2})?(?::?(\d{2}))?)?/.exec(value);
+  const match = /(\d{4})[-/]?(\d{2})[-/]?(\d{2})(?:[ T](\d{2}):?(\d{2})?(?::?(\d{2}))?)?/.exec(
+    value,
+  );
   if (!match) return '公告';
   const date = `${match[2]}-${match[3]}`;
   return match[4] ? `${date} ${match[4]}:${match[5] ?? '00'}` : date;
@@ -1076,7 +1125,9 @@ function formatAnnouncementTime(value: unknown): string {
 
 function newsPublishedAt(value: unknown): string | undefined {
   if (typeof value !== 'string' || value.trim() === '') return undefined;
-  const match = /(\d{4})[-/]?(\d{2})[-/]?(\d{2})(?:[ T](\d{2}):?(\d{2})?(?::?(\d{2}))?)?/.exec(value);
+  const match = /(\d{4})[-/]?(\d{2})[-/]?(\d{2})(?:[ T](\d{2}):?(\d{2})?(?::?(\d{2}))?)?/.exec(
+    value,
+  );
   if (!match) return undefined;
   const timestamp = Date.UTC(
     Number(match[1]),
@@ -1103,8 +1154,14 @@ function sourceDeclaredImageUrl(value?: unknown): string | undefined {
 function normalizeDiscoveryEditorialArt(rows: NewsSnapshot[]): NewsSnapshot[] {
   return rows.map((row) => {
     if (row.category !== '公告' && row.category !== '新闻') return row;
-    const sourceCover = row.imageKind === 'source-cover' ? sourceCoverProxyUrl(row.imageUrl) : undefined;
-    const { imageUrl: _imageUrl, imageKind: _imageKind, editorialArtOptions: _options, ...titleFirst } = row;
+    const sourceCover =
+      row.imageKind === 'source-cover' ? sourceCoverProxyUrl(row.imageUrl) : undefined;
+    const {
+      imageUrl: _imageUrl,
+      imageKind: _imageKind,
+      editorialArtOptions: _options,
+      ...titleFirst
+    } = row;
     if (!sourceCover) return titleFirst;
     return { ...titleFirst, imageUrl: sourceCover, imageKind: 'source-cover' as const };
   });
@@ -1112,8 +1169,12 @@ function normalizeDiscoveryEditorialArt(rows: NewsSnapshot[]): NewsSnapshot[] {
 
 function sortNewsNewestFirst(rows: NewsSnapshot[]): NewsSnapshot[] {
   return [...rows].sort((left, right) => {
-    const leftTimestamp = left.publishedAt ? Date.parse(left.publishedAt) : Number.NEGATIVE_INFINITY;
-    const rightTimestamp = right.publishedAt ? Date.parse(right.publishedAt) : Number.NEGATIVE_INFINITY;
+    const leftTimestamp = left.publishedAt
+      ? Date.parse(left.publishedAt)
+      : Number.NEGATIVE_INFINITY;
+    const rightTimestamp = right.publishedAt
+      ? Date.parse(right.publishedAt)
+      : Number.NEGATIVE_INFINITY;
     if (rightTimestamp !== leftTimestamp) return rightTimestamp - leftTimestamp;
     return left.title.localeCompare(right.title, 'zh-CN');
   });
@@ -1137,11 +1198,14 @@ function newsPublicationDay(row: NewsSnapshot): string {
 
 function headlineBigrams(value: string): Set<string> {
   if (value.length < 2) return new Set([value]);
-  return new Set(Array.from({ length: value.length - 1 }, (_, index) => value.slice(index, index + 2)));
+  return new Set(
+    Array.from({ length: value.length - 1 }, (_, index) => value.slice(index, index + 2)),
+  );
 }
 
 function likelySameMarketStory(left: NewsSnapshot, right: NewsSnapshot): boolean {
-  if (left.feed !== right.feed || newsPublicationDay(left) !== newsPublicationDay(right)) return false;
+  if (left.feed !== right.feed || newsPublicationDay(left) !== newsPublicationDay(right))
+    return false;
   const leftHeadline = normalizedMarketHeadline(left);
   const rightHeadline = normalizedMarketHeadline(right);
   if (!leftHeadline || !rightHeadline) return false;
@@ -1149,17 +1213,20 @@ function likelySameMarketStory(left: NewsSnapshot, right: NewsSnapshot): boolean
   const numbers = (value: string) => new Set(value.match(/\d+(?:\.\d+)?%?/g) ?? []);
   const leftNumbers = numbers(leftHeadline);
   const rightNumbers = numbers(rightHeadline);
-  if (leftNumbers.size > 0 && rightNumbers.size > 0 && (
-    leftNumbers.size !== rightNumbers.size || [...leftNumbers].some((token) => !rightNumbers.has(token))
-  )) {
+  if (
+    leftNumbers.size > 0 &&
+    rightNumbers.size > 0 &&
+    (leftNumbers.size !== rightNumbers.size ||
+      [...leftNumbers].some((token) => !rightNumbers.has(token)))
+  ) {
     return false;
   }
   const shorter = leftHeadline.length <= rightHeadline.length ? leftHeadline : rightHeadline;
   const longer = shorter === leftHeadline ? rightHeadline : leftHeadline;
-  if (shorter.length >= 8 && longer.includes(shorter) && shorter.length / longer.length >= 0.65) return true;
-  const anchors = (value: string) => new Set(
-    (value.match(/[a-z]+\d*|\d+(?:\.\d+)?%/g) ?? []).filter((token) => token.length >= 2),
-  );
+  if (shorter.length >= 8 && longer.includes(shorter) && shorter.length / longer.length >= 0.65)
+    return true;
+  const anchors = (value: string) =>
+    new Set((value.match(/[a-z]+\d*|\d+(?:\.\d+)?%/g) ?? []).filter((token) => token.length >= 2));
   const leftAnchors = anchors(leftHeadline);
   const rightAnchors = anchors(rightHeadline);
   const hasSharedAnchor = [...leftAnchors].some((token) => rightAnchors.has(token));
@@ -1167,8 +1234,12 @@ function likelySameMarketStory(left: NewsSnapshot, right: NewsSnapshot): boolean
   const rightTokens = headlineBigrams(rightHeadline);
   let shared = 0;
   for (const token of leftTokens) if (rightTokens.has(token)) shared += 1;
-  const similarity = shared * 2 / (leftTokens.size + rightTokens.size);
-  return similarity >= 0.72 || (shared >= 8 && similarity >= 0.5) || (hasSharedAnchor && similarity >= 0.54);
+  const similarity = (shared * 2) / (leftTokens.size + rightTokens.size);
+  return (
+    similarity >= 0.72 ||
+    (shared >= 8 && similarity >= 0.5) ||
+    (hasSharedAnchor && similarity >= 0.54)
+  );
 }
 
 function dedupeNews(rows: NewsSnapshot[]): NewsSnapshot[] {
@@ -1185,7 +1256,8 @@ function dedupeNews(rows: NewsSnapshot[]): NewsSnapshot[] {
       seenKeys.has(contentKey) ||
       (urlKey && seenKeys.has(urlKey)) ||
       deduped.some((candidate) => likelySameMarketStory(candidate, row))
-    ) continue;
+    )
+      continue;
     seenKeys.add(contentKey);
     if (urlKey) seenKeys.add(urlKey);
     deduped.push(row);
@@ -1194,11 +1266,18 @@ function dedupeNews(rows: NewsSnapshot[]): NewsSnapshot[] {
 }
 
 function sourceBackedDiscovery(rows: NewsSnapshot[]): NewsSnapshot[] {
-  return normalizeDiscoveryEditorialArt(sortNewsNewestFirst(dedupeNews(rows.filter((row) => {
-    if (row.category !== '新闻' && row.category !== '公告') return false;
-    if (!row.title.trim() || !row.source.trim() || !row.url?.trim() || !row.publishedAt) return false;
-    return newsPublishedAt(row.publishedAt) !== undefined;
-  }))));
+  return normalizeDiscoveryEditorialArt(
+    sortNewsNewestFirst(
+      dedupeNews(
+        rows.filter((row) => {
+          if (row.category !== '新闻' && row.category !== '公告') return false;
+          if (!row.title.trim() || !row.source.trim() || !row.url?.trim() || !row.publishedAt)
+            return false;
+          return newsPublishedAt(row.publishedAt) !== undefined;
+        }),
+      ),
+    ),
+  );
 }
 
 function discoveryFeed(row: NewsSnapshot): DiscoveryFeed {
@@ -1206,7 +1285,10 @@ function discoveryFeed(row: NewsSnapshot): DiscoveryFeed {
   return row.category === '公告' ? '重要公告' : '自选股新闻';
 }
 
-function preserveMissingDiscoveryFeeds(current: NewsSnapshot[], previous: NewsSnapshot[]): NewsSnapshot[] {
+function preserveMissingDiscoveryFeeds(
+  current: NewsSnapshot[],
+  previous: NewsSnapshot[],
+): NewsSnapshot[] {
   const currentFeeds = new Set(current.map(discoveryFeed));
   const missingPriorRows = previous.filter((row) => !currentFeeds.has(discoveryFeed(row)));
   return sourceBackedDiscovery([...current, ...missingPriorRows]);
@@ -1247,7 +1329,10 @@ function stockNewsRows(
   return sortNewsNewestFirst(dedupeNews(rowsForStock));
 }
 
-function marketNewsRows(item: MarketNewsInput, limit = MARKET_DISCOVERY_PAGE_SIZES[item.feed]): NewsSnapshot[] {
+function marketNewsRows(
+  item: MarketNewsInput,
+  limit = MARKET_DISCOVERY_PAGE_SIZES[item.feed],
+): NewsSnapshot[] {
   if (item.env.error) return [];
   const rows: NewsSnapshot[] = [];
   for (const row of item.env.data) {
@@ -1312,11 +1397,15 @@ function buildNews(
   for (const item of marketNews) {
     marketSearchRows.push(...marketNewsRows(item));
   }
-  return normalizeDiscoveryEditorialArt(sortNewsNewestFirst(dedupeNews([
-    ...sortNewsNewestFirst(announcementRows),
-    ...sortNewsNewestFirst(watchlistArticleRows),
-    ...sortNewsNewestFirst(marketSearchRows),
-  ])));
+  return normalizeDiscoveryEditorialArt(
+    sortNewsNewestFirst(
+      dedupeNews([
+        ...sortNewsNewestFirst(announcementRows),
+        ...sortNewsNewestFirst(watchlistArticleRows),
+        ...sortNewsNewestFirst(marketSearchRows),
+      ]),
+    ),
+  );
 }
 
 function marketForDiscoveryFeed(feed: MarketDiscoveryFeed): 'cn' | 'us' | 'hk' {
@@ -1351,14 +1440,7 @@ function sourceRowDate(row: unknown): string | null {
   if (!row || typeof row !== 'object') return null;
   const record = row as Record<string, unknown>;
   return latestSnapshotDate([
-    String(
-      record.发布时间 ??
-      record.公告时间 ??
-      record.日期 ??
-      record.date ??
-      record.time ??
-      '',
-    ),
+    String(record.发布时间 ?? record.公告时间 ?? record.日期 ?? record.date ?? record.time ?? ''),
   ]);
 }
 
@@ -1368,11 +1450,12 @@ function envelopeSourceHealth<T>(args: {
   deferred: boolean;
   disabled?: boolean;
 }): StockSourceHealth {
-  const fetchedAt = args.envelopes
-    .map((env) => env.fetched_at)
-    .filter((value): value is string => typeof value === 'string' && value.length > 0)
-    .sort()
-    .at(-1) ?? null;
+  const fetchedAt =
+    args.envelopes
+      .map((env) => env.fetched_at)
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      .sort()
+      .at(-1) ?? null;
   const dataAsOf = latestSnapshotDate(
     args.envelopes.flatMap((env) => env.data.map((row) => sourceRowDate(row))),
   );
@@ -1420,9 +1503,10 @@ async function buildDashboardSnapshot(args: {
   });
   const calendarPromise = latestExpectedTradingDate(client, now);
   const { compact } = cnDateParts(now);
-  const announcementWatchlist = effectiveWatchlist
-    .filter((entry) => entry.market === 'A');
-  const deferredPulse = Promise.resolve(emptyEnvelope<MarketPulseRow>('akshare:market-pulse:deferred'));
+  const announcementWatchlist = effectiveWatchlist.filter((entry) => entry.market === 'A');
+  const deferredPulse = Promise.resolve(
+    emptyEnvelope<MarketPulseRow>('akshare:market-pulse:deferred'),
+  );
   const deferredAnnouncements = Promise.resolve(
     announcementWatchlist.map((entry) => ({
       entry,
@@ -1435,48 +1519,70 @@ async function buildDashboardSnapshot(args: {
       env: emptyEnvelope<StockNewsRow>(`akshare:stock-news:${entry.symbol}:deferred`),
     })),
   );
-  const deferredRankings = Promise.resolve(emptyEnvelope<StockRankingRow>('akshare:rankings:deferred'));
+  const deferredRankings = Promise.resolve(
+    emptyEnvelope<StockRankingRow>('akshare:rankings:deferred'),
+  );
   const deferredMarketNews = Promise.resolve([
-    { feed: 'A股要闻' as const, env: emptyEnvelope<StockNewsRow>('akshare:market-news:cn:deferred') },
-    { feed: '美股要闻' as const, env: emptyEnvelope<StockNewsRow>('akshare:market-news:us:deferred') },
-    { feed: '港股要闻' as const, env: emptyEnvelope<StockNewsRow>('akshare:market-news:hk:deferred') },
+    {
+      feed: 'A股要闻' as const,
+      env: emptyEnvelope<StockNewsRow>('akshare:market-news:cn:deferred'),
+    },
+    {
+      feed: '美股要闻' as const,
+      env: emptyEnvelope<StockNewsRow>('akshare:market-news:us:deferred'),
+    },
+    {
+      feed: '港股要闻' as const,
+      env: emptyEnvelope<StockNewsRow>('akshare:market-news:hk:deferred'),
+    },
   ]);
-  const [indexCn, pulseEnv, stocks, announcements, stockNews, rankingGainers, rankingLosers, rankingAmount, marketNews] = await Promise.all([
+  const [
+    indexCn,
+    pulseEnv,
+    stocks,
+    announcements,
+    stockNews,
+    rankingGainers,
+    rankingLosers,
+    rankingAmount,
+    marketNews,
+  ] = await Promise.all([
     client.getIndexQuote('cn'),
-    includeSlowSignals
-      ? slowSignalClient.getMarketPulse(compact)
-      : deferredPulse,
+    includeSlowSignals ? slowSignalClient.getMarketPulse(compact) : deferredPulse,
     mapWithConcurrency(effectiveWatchlist.slice(0, 8), 3, (entry, index) =>
-      stockSnapshot(client, entry, index, now)),
+      stockSnapshot(client, entry, index, now),
+    ),
     includeSlowSignals
-      ? mapWithConcurrency(
-        announcementWatchlist,
-        3,
-        async (entry) => ({
+      ? mapWithConcurrency(announcementWatchlist, 3, async (entry) => ({
           entry,
           env: await client.getStockAnnouncements(entry.symbol, cnCompactDaysAgo(now, 7), compact),
-        }),
-      )
+        }))
       : deferredAnnouncements,
     includeSlowSignals
-      ? mapWithConcurrency(
-        announcementWatchlist,
-        3,
-        async (entry) => ({
+      ? mapWithConcurrency(announcementWatchlist, 3, async (entry) => ({
           entry,
           env: await discoveryClient.getStockNews(entry.symbol),
-        }),
-      )
+        }))
       : deferredStockNews,
     includeSlowSignals ? rankingClient.getStockRankings('gainers', 8) : deferredRankings,
     includeSlowSignals ? rankingClient.getStockRankings('losers', 8) : deferredRankings,
     includeSlowSignals ? rankingClient.getStockRankings('amount', 8) : deferredRankings,
     includeSlowSignals
-      ? mapWithConcurrency([
-        discoveryClient.getMarketNews('cn', 1, MARKET_DISCOVERY_PAGE_SIZES['A股要闻']).then((env) => ({ feed: 'A股要闻' as const, env })),
-        discoveryClient.getMarketNews('us', 1, MARKET_DISCOVERY_PAGE_SIZES['美股要闻']).then((env) => ({ feed: '美股要闻' as const, env })),
-        discoveryClient.getMarketNews('hk', 1, MARKET_DISCOVERY_PAGE_SIZES['港股要闻']).then((env) => ({ feed: '港股要闻' as const, env })),
-      ], 3, async (promise) => promise)
+      ? mapWithConcurrency(
+          [
+            discoveryClient
+              .getMarketNews('cn', 1, MARKET_DISCOVERY_PAGE_SIZES.A股要闻)
+              .then((env) => ({ feed: 'A股要闻' as const, env })),
+            discoveryClient
+              .getMarketNews('us', 1, MARKET_DISCOVERY_PAGE_SIZES.美股要闻)
+              .then((env) => ({ feed: '美股要闻' as const, env })),
+            discoveryClient
+              .getMarketNews('hk', 1, MARKET_DISCOVERY_PAGE_SIZES.港股要闻)
+              .then((env) => ({ feed: '港股要闻' as const, env })),
+          ],
+          3,
+          async (promise) => promise,
+        )
       : deferredMarketNews,
   ]);
   const sectors = mapSectors(pulseEnv);
@@ -1502,14 +1608,14 @@ async function buildDashboardSnapshot(args: {
       }
     : missingMarketPanels.length === 0
       ? {
-        status: 'fresh',
-        cachedAt: now.toISOString(),
-      }
+          status: 'fresh',
+          cachedAt: now.toISOString(),
+        }
       : {
-        status: 'partial',
-        cachedAt: now.toISOString(),
-        message: `真实行情已先展示，${missingMarketPanels.join('、')}正在后台补齐。`,
-      };
+          status: 'partial',
+          cachedAt: now.toISOString(),
+          message: `真实行情已先展示，${missingMarketPanels.join('、')}正在后台补齐。`,
+        };
   const snapshot = withFreshness(
     {
       updatedAt: now.toISOString(),
@@ -1546,9 +1652,11 @@ async function buildDashboardSnapshot(args: {
     }),
   ];
   const calendar = await calendarPromise;
-  const snapshotKey = args.snapshotKey ?? effectiveWatchlist
-    .map((entry) => `${entry.symbol}:${entry.market}:${entry.displayName ?? ''}`)
-    .join('|');
+  const snapshotKey =
+    args.snapshotKey ??
+    effectiveWatchlist
+      .map((entry) => `${entry.symbol}:${entry.market}:${entry.displayName ?? ''}`)
+      .join('|');
   const trustedSnapshot = dashboardWithTrust({
     snapshot: observed,
     snapshotKey,
@@ -1606,11 +1714,16 @@ async function revalidateDashboardTrust(args: {
   return trustedSnapshot;
 }
 
-function cacheDashboardSnapshot(cacheKey: string, snapshot: DashboardSnapshot, refreshPromise?: Promise<DashboardSnapshot>): void {
+function cacheDashboardSnapshot(
+  cacheKey: string,
+  snapshot: DashboardSnapshot,
+  refreshPromise?: Promise<DashboardSnapshot>,
+): void {
   const safeSnapshot = dashboardWithObservedIntraday(snapshot, dashboardReferenceDate(snapshot));
-  const freshTtl = snapshot.freshness.status === 'partial'
-    ? DASHBOARD_PARTIAL_FRESH_TTL_MS
-    : DASHBOARD_FRESH_TTL_MS;
+  const freshTtl =
+    snapshot.freshness.status === 'partial'
+      ? DASHBOARD_PARTIAL_FRESH_TTL_MS
+      : DASHBOARD_FRESH_TTL_MS;
   dashboardCache.set(cacheKey, {
     snapshot: safeSnapshot,
     freshUntil: Date.now() + freshTtl,
@@ -1619,31 +1732,50 @@ function cacheDashboardSnapshot(cacheKey: string, snapshot: DashboardSnapshot, r
   });
 }
 
-function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: DashboardSnapshot): DashboardSnapshot {
-  if (!previous || (snapshot.freshness.status !== 'fresh' && snapshot.freshness.status !== 'partial')) return snapshot;
+function withPreservedSlowSignals(
+  snapshot: DashboardSnapshot,
+  previous?: DashboardSnapshot,
+): DashboardSnapshot {
+  if (
+    !previous ||
+    (snapshot.freshness.status !== 'fresh' && snapshot.freshness.status !== 'partial')
+  )
+    return snapshot;
   const now = dashboardReferenceDate(snapshot);
-  const snapshotHasWatchlistQuotes = snapshot.watchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2);
-  const previousWatchlistStocks = previous.watchlistStocks.map((stockRow) => observedIntradayStockForNow(stockRow, now));
-  const previousHasWatchlistQuotes = previousWatchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2);
+  const snapshotHasWatchlistQuotes = snapshot.watchlistStocks.some(
+    (stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2,
+  );
+  const previousWatchlistStocks = previous.watchlistStocks.map((stockRow) =>
+    observedIntradayStockForNow(stockRow, now),
+  );
+  const previousHasWatchlistQuotes = previousWatchlistStocks.some(
+    (stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2,
+  );
   const shouldPreserveWatchlistStocks = !snapshotHasWatchlistQuotes && previousHasWatchlistQuotes;
-  const previousStockBySymbol = new Map(previousWatchlistStocks.map((stockRow) => [stockRow.symbol, stockRow]));
+  const previousStockBySymbol = new Map(
+    previousWatchlistStocks.map((stockRow) => [stockRow.symbol, stockRow]),
+  );
   const watchlistStocks = shouldPreserveWatchlistStocks
     ? previousWatchlistStocks
     : snapshot.watchlistStocks.map((stockRow) => {
-      const previousStock = previousStockBySymbol.get(stockRow.symbol);
-      if (stockRow.spark.length >= 2 || !previousStock || previousStock.spark.length < 2) return stockRow;
-      return {
-        ...stockRow,
-        spark: previousStock.spark,
-        sparkLabels: previousStock.sparkLabels,
-        sparkKind: previousStock.sparkKind,
-        sparkBaseline: previousStock.sparkBaseline,
-        sparkTradeDate: previousStock.sparkTradeDate,
-        note: `${stockRow.note}；分时线保留最近一次真实分钟线`,
-      };
-    });
-  const shouldPreserveWatchlistSparks = !shouldPreserveWatchlistStocks && watchlistStocks.some((stockRow, index) => stockRow !== snapshot.watchlistStocks[index]);
-  const shouldPreserveMarketIndices = snapshot.marketIndices.length === 0 && previous.marketIndices.length > 0;
+        const previousStock = previousStockBySymbol.get(stockRow.symbol);
+        if (stockRow.spark.length >= 2 || !previousStock || previousStock.spark.length < 2)
+          return stockRow;
+        return {
+          ...stockRow,
+          spark: previousStock.spark,
+          sparkLabels: previousStock.sparkLabels,
+          sparkKind: previousStock.sparkKind,
+          sparkBaseline: previousStock.sparkBaseline,
+          sparkTradeDate: previousStock.sparkTradeDate,
+          note: `${stockRow.note}；分时线保留最近一次真实分钟线`,
+        };
+      });
+  const shouldPreserveWatchlistSparks =
+    !shouldPreserveWatchlistStocks &&
+    watchlistStocks.some((stockRow, index) => stockRow !== snapshot.watchlistStocks[index]);
+  const shouldPreserveMarketIndices =
+    snapshot.marketIndices.length === 0 && previous.marketIndices.length > 0;
   const shouldPreserveSectors = snapshot.sectors.length === 0 && previous.sectors.length > 0;
   const shouldPreserveTemperature = snapshot.temperature === null && previous.temperature !== null;
   const sourceNews = sourceBackedDiscovery(snapshot.news);
@@ -1654,11 +1786,9 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
     snapshot.leaderboards.gainers.length === 0 &&
     snapshot.leaderboards.losers.length === 0 &&
     snapshot.leaderboards.amount.length === 0 &&
-    (
-      previous.leaderboards.gainers.length > 0 ||
+    (previous.leaderboards.gainers.length > 0 ||
       previous.leaderboards.losers.length > 0 ||
-      previous.leaderboards.amount.length > 0
-    );
+      previous.leaderboards.amount.length > 0);
   if (
     !shouldPreserveWatchlistStocks &&
     !shouldPreserveWatchlistSparks &&
@@ -1667,7 +1797,8 @@ function withPreservedSlowSignals(snapshot: DashboardSnapshot, previous?: Dashbo
     !shouldPreserveTemperature &&
     !shouldPreserveNews &&
     !shouldPreserveLeaderboards
-  ) return snapshot;
+  )
+    return snapshot;
 
   const preservedLabels = [
     shouldPreserveWatchlistStocks ? '关注股票' : null,
@@ -1717,38 +1848,41 @@ function startFullDashboardRefresh(args: {
     now: new Date(),
     includeSlowSignals: true,
     snapshotKey: args.cacheKey,
-  }).then(async (snapshot) => {
-    const now = new Date();
-    const merged = dashboardWithReconciledTrust(
-      withPreservedSlowSignals(snapshot, existing?.snapshot),
-      args.cacheKey,
-      now,
-    );
-    await persistDashboardSnapshot({
-      db: args.db,
-      logger: args.logger,
-      userInternalId: args.userInternalId,
-      cacheKey: args.cacheKey,
-      snapshot: merged,
-    });
-    cacheDashboardSnapshot(args.cacheKey, merged);
-    return merged;
-  }).catch((error) => {
-    args.logger.warn(
-      { error: error instanceof Error ? error.message : String(error) },
-      'stocks-dashboard: full refresh failed',
-    );
-    throw error;
-  }).finally(() => {
-    const latest = dashboardCache.get(args.cacheKey);
-    if (latest?.refreshPromise === fullRefreshPromise) {
-      if (latest.snapshot) {
-        dashboardCache.set(args.cacheKey, { ...latest, refreshPromise: undefined });
-      } else {
-        dashboardCache.delete(args.cacheKey);
+  })
+    .then(async (snapshot) => {
+      const now = new Date();
+      const merged = dashboardWithReconciledTrust(
+        withPreservedSlowSignals(snapshot, existing?.snapshot),
+        args.cacheKey,
+        now,
+      );
+      await persistDashboardSnapshot({
+        db: args.db,
+        logger: args.logger,
+        userInternalId: args.userInternalId,
+        cacheKey: args.cacheKey,
+        snapshot: merged,
+      });
+      cacheDashboardSnapshot(args.cacheKey, merged);
+      return merged;
+    })
+    .catch((error) => {
+      args.logger.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        'stocks-dashboard: full refresh failed',
+      );
+      throw error;
+    })
+    .finally(() => {
+      const latest = dashboardCache.get(args.cacheKey);
+      if (latest?.refreshPromise === fullRefreshPromise) {
+        if (latest.snapshot) {
+          dashboardCache.set(args.cacheKey, { ...latest, refreshPromise: undefined });
+        } else {
+          dashboardCache.delete(args.cacheKey);
+        }
       }
-    }
-  });
+    });
   return fullRefreshPromise;
 }
 
@@ -1774,8 +1908,27 @@ function startDashboardRefresh(args: {
     now: new Date(),
     includeSlowSignals: !quickFirst,
     snapshotKey: args.cacheKey,
-  }).then(async (snapshot) => {
-    if (quickFirst) {
+  })
+    .then(async (snapshot) => {
+      if (quickFirst) {
+        const merged = dashboardWithReconciledTrust(
+          withPreservedSlowSignals(snapshot, existing?.snapshot),
+          args.cacheKey,
+          new Date(),
+        );
+        await persistDashboardSnapshot({
+          db: args.db,
+          logger: args.logger,
+          userInternalId: args.userInternalId,
+          cacheKey: args.cacheKey,
+          snapshot: merged,
+        });
+        cacheDashboardSnapshot(args.cacheKey, merged);
+        const fullRefreshPromise = startFullDashboardRefresh(args);
+        cacheDashboardSnapshot(args.cacheKey, merged, fullRefreshPromise);
+        fullRefreshPromise.catch(() => undefined);
+        return merged;
+      }
       const merged = dashboardWithReconciledTrust(
         withPreservedSlowSignals(snapshot, existing?.snapshot),
         args.cacheKey,
@@ -1789,41 +1942,25 @@ function startDashboardRefresh(args: {
         snapshot: merged,
       });
       cacheDashboardSnapshot(args.cacheKey, merged);
-      const fullRefreshPromise = startFullDashboardRefresh(args);
-      cacheDashboardSnapshot(args.cacheKey, merged, fullRefreshPromise);
-      fullRefreshPromise.catch(() => undefined);
       return merged;
-    }
-    const merged = dashboardWithReconciledTrust(
-      withPreservedSlowSignals(snapshot, existing?.snapshot),
-      args.cacheKey,
-      new Date(),
-    );
-    await persistDashboardSnapshot({
-      db: args.db,
-      logger: args.logger,
-      userInternalId: args.userInternalId,
-      cacheKey: args.cacheKey,
-      snapshot: merged,
-    });
-    cacheDashboardSnapshot(args.cacheKey, merged);
-    return merged;
-  }).catch((error) => {
-    args.logger.warn(
-      { error: error instanceof Error ? error.message : String(error) },
-      'stocks-dashboard: refresh failed',
-    );
-    throw error;
-  }).finally(() => {
-    const latest = dashboardCache.get(args.cacheKey);
-    if (latest?.refreshPromise === refreshPromise) {
-      if (latest.snapshot) {
-        dashboardCache.set(args.cacheKey, { ...latest, refreshPromise: undefined });
-      } else {
-        dashboardCache.delete(args.cacheKey);
+    })
+    .catch((error) => {
+      args.logger.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        'stocks-dashboard: refresh failed',
+      );
+      throw error;
+    })
+    .finally(() => {
+      const latest = dashboardCache.get(args.cacheKey);
+      if (latest?.refreshPromise === refreshPromise) {
+        if (latest.snapshot) {
+          dashboardCache.set(args.cacheKey, { ...latest, refreshPromise: undefined });
+        } else {
+          dashboardCache.delete(args.cacheKey);
+        }
       }
-    }
-  });
+    });
 
   dashboardCache.set(args.cacheKey, {
     snapshot: existing?.snapshot,
@@ -1869,16 +2006,20 @@ async function resolveDashboardSnapshot(args: {
         logger: args.logger,
       })
     : undefined;
-  const cachedHasDisplayableData = observedCached ? hasDisplayableRealDashboardData(observedCached) : false;
-  const shouldRefreshMissingIntraday =
-    observedCached ? dashboardNeedsWatchlistIntradayRefresh(observedCached) : false;
+  const cachedHasDisplayableData = observedCached
+    ? hasDisplayableRealDashboardData(observedCached)
+    : false;
+  const shouldRefreshMissingIntraday = observedCached
+    ? dashboardNeedsWatchlistIntradayRefresh(observedCached)
+    : false;
   if (
     observedCached &&
     cachedHasDisplayableData &&
     cached &&
     cached.freshUntil > nowMs &&
     !shouldRefreshMissingIntraday
-  ) return observedCached;
+  )
+    return observedCached;
 
   const refreshPromise = startDashboardRefresh({
     db: args.db,
@@ -1923,33 +2064,57 @@ export const stocksRouter = router({
     const userInternalId = await requireUserId(ctx.db, ctx.userId);
     const watchlistRows = await listWatchlistForUser(ctx.db, userInternalId);
     const effectiveWatchlist = watchlistRows;
-    return resolveDashboardSnapshot({
+    const snapshot = await resolveDashboardSnapshot({
       db: ctx.db,
       logger: ctx.logger,
       userInternalId,
       watchlistRows,
       effectiveWatchlist,
     });
+    try {
+      await rememberServedStockSnapshot({
+        db: ctx.db,
+        userId: userInternalId,
+        snapshot,
+        logger: ctx.logger,
+      });
+    } catch {
+      ctx.logger.warn(
+        { code: 'SERVED_STOCK_CONTEXT_WRITE_FAILED' },
+        'stocks: cannot issue an unverifiable context',
+      );
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: '股票快照暂时无法验证，请稍后重试。',
+      });
+    }
+    return snapshot;
   }),
 
   discoveryFeed: protectedProcedure
-    .input(z.object({
-      feed: z.enum(['A股要闻', '美股要闻', '港股要闻']),
-      page: z.number().int().min(2).max(100),
-    }))
-    .query(async ({ ctx, input }) => loadMarketDiscoveryFeed({
-      feed: input.feed,
-      page: input.page,
-      logger: ctx.logger,
-    })),
+    .input(
+      z.object({
+        feed: z.enum(['A股要闻', '美股要闻', '港股要闻']),
+        page: z.number().int().min(2).max(100),
+      }),
+    )
+    .query(async ({ ctx, input }) =>
+      loadMarketDiscoveryFeed({
+        feed: input.feed,
+        page: input.page,
+        logger: ctx.logger,
+      }),
+    ),
 
   newsDetail: protectedProcedure
-    .input(z.object({
-      url: z.string().url().max(2_048),
-      sourceName: z.string().trim().min(1).max(160),
-      publishedAt: z.string().trim().min(1).max(80),
-      summary: z.string().trim().max(10_000).optional(),
-    }))
+    .input(
+      z.object({
+        url: z.string().url().max(2_048),
+        sourceName: z.string().trim().min(1).max(160),
+        publishedAt: z.string().trim().min(1).max(80),
+        summary: z.string().trim().max(10_000).optional(),
+      }),
+    )
     .query(async ({ input }) => resolveNewsDetail(input)),
 
   previewScreening: protectedProcedure
@@ -1966,20 +2131,22 @@ export const stocksRouter = router({
         logger: ctx.logger,
       });
       return withStockScreeningPreferenceRecording({
-        run: () => runTrustedStockScreening({
-          db: ctx.db,
-          userId: userInternalId,
-          logger: ctx.logger,
-          client,
-          input,
-        }),
-        record: () => recordStockScreeningPreference({
-          db: ctx.db,
-          userId: userInternalId,
-          snapshotId: input.snapshotId,
-          dataAsOf: input.dataAsOf,
-          criteria: input.criteria,
-        }),
+        run: () =>
+          runTrustedStockScreening({
+            db: ctx.db,
+            userId: userInternalId,
+            logger: ctx.logger,
+            client,
+            input,
+          }),
+        record: () =>
+          recordStockScreeningPreference({
+            db: ctx.db,
+            userId: userInternalId,
+            snapshotId: input.snapshotId,
+            dataAsOf: input.dataAsOf,
+            criteria: input.criteria,
+          }),
         logger: ctx.logger,
         logContext: {
           userId: userInternalId,
@@ -1989,22 +2156,20 @@ export const stocksRouter = router({
       });
     }),
 
-  riskRadar: protectedProcedure
-    .input(stockRiskRadarInputSchema)
-    .query(async ({ ctx, input }) => {
-      const userInternalId = await requireUserId(ctx.db, ctx.userId);
-      const client = createStockRiskRadarHttpClient({
-        baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
-        logger: ctx.logger,
-      });
-      return runTrustedStockRiskRadar({
-        db: ctx.db,
-        userId: userInternalId,
-        logger: ctx.logger,
-        client,
-        input,
-      });
-    }),
+  riskRadar: protectedProcedure.input(stockRiskRadarInputSchema).query(async ({ ctx, input }) => {
+    const userInternalId = await requireUserId(ctx.db, ctx.userId);
+    const client = createStockRiskRadarHttpClient({
+      baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+      logger: ctx.logger,
+    });
+    return runTrustedStockRiskRadar({
+      db: ctx.db,
+      userId: userInternalId,
+      logger: ctx.logger,
+      client,
+      input,
+    });
+  }),
 
   searchSymbols: protectedProcedure
     .input(z.object({ query: z.string().trim().min(1).max(32) }))
@@ -2019,7 +2184,9 @@ export const stocksRouter = router({
     }),
 
   generateBriefingNow: protectedProcedure
-    .input(z.object({ mode: z.enum(['auto', 'premarket', 'postmarket']).default('auto') }).optional())
+    .input(
+      z.object({ mode: z.enum(['auto', 'premarket', 'postmarket']).default('auto') }).optional(),
+    )
     .mutation(async ({ ctx, input }) => {
       const userInternalId = await requireUserId(ctx.db, ctx.userId);
       const client = new HttpAkshareClient({
@@ -2034,11 +2201,15 @@ export const stocksRouter = router({
           hour12: false,
         }).format(now),
       );
-      const mode = input?.mode && input.mode !== 'auto' ? input.mode : hour < 12 ? 'premarket' : 'postmarket';
+      const mode =
+        input?.mode && input.mode !== 'auto' ? input.mode : hour < 12 ? 'premarket' : 'postmarket';
       const markdown =
         mode === 'premarket'
           ? await buildPremarketBriefing({ db: ctx.db, client, now, mode: 'prod' }, userInternalId)
-          : await buildPostmarketBriefing({ db: ctx.db, client, now, mode: 'prod' }, userInternalId);
+          : await buildPostmarketBriefing(
+              { db: ctx.db, client, now, mode: 'prod' },
+              userInternalId,
+            );
       return {
         mode,
         title: mode === 'premarket' ? 'A股盘前简报' : 'A股盘后复盘',

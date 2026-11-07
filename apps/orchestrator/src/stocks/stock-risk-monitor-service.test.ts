@@ -2,15 +2,15 @@ import type { TRPCError } from '@trpc/server';
 import { describe, expect, it, vi } from 'vitest';
 import { plannedTaskItems, plannedTasks } from '../db/schema/planned-tasks.js';
 import { stockRiskMonitors } from '../db/schema/stock-risk-monitors.js';
-import type { ValidatedStockTaskContext } from './stock-task-context.js';
-import type { StockRiskRadarResult } from './stock-risk-radar-service.js';
 import {
+  type StockRiskMonitorRepository,
+  type StockRiskMonitorView,
   createStockRiskMonitor,
   databaseStockRiskMonitorRepository,
   listStockRiskMonitors,
-  type StockRiskMonitorRepository,
-  type StockRiskMonitorView,
 } from './stock-risk-monitor-service.js';
+import type { StockRiskRadarResult } from './stock-risk-radar-service.js';
+import type { ValidatedStockTaskContext } from './stock-task-context.js';
 
 const context: ValidatedStockTaskContext = {
   snapshotId: 'stkshot_1234567890abcdef12345678',
@@ -37,39 +37,37 @@ const radar: StockRiskRadarResult = {
   requestedStockCount: 2,
   checkedStockCount: 2,
   truncated: false,
-  signals: [{
-    signalId: 'signal-pledge',
-    evidenceId: 'evidence-pledge',
-    symbol: '603528',
-    name: '多伦科技',
-    key: 'pledge',
-    label: '质押',
-    severity: '警示',
-    fact: '质押比例达到阈值',
-    trigger: '质押比例达到 30%',
-    whyRelevant: '需要继续观察',
-    observedAt: '2026-08-19',
-    sourceDataAsOf: '2026-08-19',
-    source: 'akshare',
-    fetchedAt: '2026-08-19T09:00:01.000Z',
-    evidenceUrl: null,
-  }],
-  checks: [
-    'pledge',
-    'goodwill',
-    'forecast',
-    'insider',
-    'announcements',
-  ].flatMap((key) => context.snapshotPayload.watchlistStocks.map((stock) => ({
-    symbol: stock.symbol,
-    name: String(stock.name),
-    key: key as 'pledge' | 'goodwill' | 'forecast' | 'insider' | 'announcements',
-    status: 'checked' as const,
-    source: 'akshare',
-    fetchedAt: '2026-08-19T09:00:01.000Z',
-    sourceDataAsOf: '2026-08-19',
-    errorCode: null,
-  }))),
+  signals: [
+    {
+      signalId: 'signal-pledge',
+      evidenceId: 'evidence-pledge',
+      symbol: '603528',
+      name: '多伦科技',
+      key: 'pledge',
+      label: '质押',
+      severity: '警示',
+      fact: '质押比例达到阈值',
+      trigger: '质押比例达到 30%',
+      whyRelevant: '需要继续观察',
+      observedAt: '2026-08-19',
+      sourceDataAsOf: '2026-08-19',
+      source: 'akshare',
+      fetchedAt: '2026-08-19T09:00:01.000Z',
+      evidenceUrl: null,
+    },
+  ],
+  checks: ['pledge', 'goodwill', 'forecast', 'insider', 'announcements'].flatMap((key) =>
+    context.snapshotPayload.watchlistStocks.map((stock) => ({
+      symbol: stock.symbol,
+      name: String(stock.name),
+      key: key as 'pledge' | 'goodwill' | 'forecast' | 'insider' | 'announcements',
+      status: 'checked' as const,
+      source: 'akshare',
+      fetchedAt: '2026-08-19T09:00:01.000Z',
+      sourceDataAsOf: '2026-08-19',
+      errorCode: null,
+    })),
+  ),
 };
 
 function monitor(overrides: Partial<StockRiskMonitorView> = {}): StockRiskMonitorView {
@@ -121,10 +119,12 @@ describe('stock risk monitor service', () => {
     });
 
     expect(result.created).toBe(true);
-    expect(validateContext).toHaveBeenCalledWith(expect.objectContaining({
-      userId: 7,
-      intent: '监控 603528 风险变化',
-    }));
+    expect(validateContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 7,
+        intent: '监控 603528 风险变化',
+      }),
+    );
     expect(repo.createInput).toMatchObject({
       userId: 7,
       symbol: '603528',
@@ -139,35 +139,39 @@ describe('stock risk monitor service', () => {
 
   it('rejects non-current trust before creating a monitor', async () => {
     const repo = repository();
-    await expect(createStockRiskMonitor({
-      userId: 7,
-      input: {
-        snapshotId: context.snapshotId,
-        dataAsOf: context.dataAsOf,
-        trustMode: 'delayed' as 'current',
-        symbol: '603528',
-      },
-      repository: repo,
-      validateContext: vi.fn(async () => context),
-      loadRadar: vi.fn(async () => radar),
-    })).rejects.toMatchObject({ code: 'BAD_REQUEST' } satisfies Partial<TRPCError>);
+    await expect(
+      createStockRiskMonitor({
+        userId: 7,
+        input: {
+          snapshotId: context.snapshotId,
+          dataAsOf: context.dataAsOf,
+          trustMode: 'delayed' as 'current',
+          symbol: '603528',
+        },
+        repository: repo,
+        validateContext: vi.fn(async () => context),
+        loadRadar: vi.fn(async () => radar),
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' } satisfies Partial<TRPCError>);
     expect(repo.createInput).toBeNull();
   });
 
   it('rejects a symbol missing from the owned trusted watchlist', async () => {
     const repo = repository();
-    await expect(createStockRiskMonitor({
-      userId: 7,
-      input: {
-        snapshotId: context.snapshotId,
-        dataAsOf: context.dataAsOf,
-        trustMode: 'current',
-        symbol: '600519',
-      },
-      repository: repo,
-      validateContext: vi.fn(async () => context),
-      loadRadar: vi.fn(async () => radar),
-    })).rejects.toMatchObject({ code: 'BAD_REQUEST', message: '股票不在当前可信关注列表中' });
+    await expect(
+      createStockRiskMonitor({
+        userId: 7,
+        input: {
+          snapshotId: context.snapshotId,
+          dataAsOf: context.dataAsOf,
+          trustMode: 'current',
+          symbol: '600519',
+        },
+        repository: repo,
+        validateContext: vi.fn(async () => context),
+        loadRadar: vi.fn(async () => radar),
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: '股票不在当前可信关注列表中' });
   });
 
   it('returns repository idempotency without manufacturing a second plan', async () => {
@@ -226,15 +230,17 @@ describe('stock risk monitor service', () => {
       [{ id: 77, status: 'archived' }],
       [{ id: 55, plannedTaskId: 77 }],
       [],
-      [{
-        ...archivedRow,
-        plannedTaskInternalId: 101,
-        plannedTaskId: 'plannedTask_replacement',
-        planStatus: 'active',
-        nextRunAt: new Date('2026-08-20T08:30:00.000Z'),
-        lastRunAt: null,
-        lastRunStatus: null,
-      }],
+      [
+        {
+          ...archivedRow,
+          plannedTaskInternalId: 101,
+          plannedTaskId: 'plannedTask_replacement',
+          planStatus: 'active',
+          nextRunAt: new Date('2026-08-20T08:30:00.000Z'),
+          lastRunAt: null,
+          lastRunStatus: null,
+        },
+      ],
       [],
     ];
     const planUpdates: Array<Record<string, unknown>> = [];
@@ -318,23 +324,29 @@ describe('stock risk monitor service', () => {
 
     expect(result).toMatchObject({ created: true, monitor: { status: 'active' } });
     expect(planUpdates).toEqual([]);
-    expect(insertedPlans).toEqual([expect.objectContaining({
-      status: 'active',
-      nextRunAt: new Date('2026-08-20T08:30:00.000Z'),
-      itemCount: 1,
-    })]);
-    expect(monitorUpdates).toContainEqual(expect.objectContaining({
-      plannedTaskId: 101,
-      lastEvaluatedDataAsOf: '2026-08-19',
-      lastUnavailableChecksJson: ['pledge'],
-      lastNotificationFingerprint: null,
-    }));
-    expect(insertedItems).toEqual([expect.objectContaining({
-      plannedTaskId: 101,
-      seq: 0,
-      instruction: '检查 多伦科技（603528）风险变化',
-      enabled: true,
-    })]);
+    expect(insertedPlans).toEqual([
+      expect.objectContaining({
+        status: 'active',
+        nextRunAt: new Date('2026-08-20T08:30:00.000Z'),
+        itemCount: 1,
+      }),
+    ]);
+    expect(monitorUpdates).toContainEqual(
+      expect.objectContaining({
+        plannedTaskId: 101,
+        lastEvaluatedDataAsOf: '2026-08-19',
+        lastUnavailableChecksJson: ['pledge'],
+        lastNotificationFingerprint: null,
+      }),
+    );
+    expect(insertedItems).toEqual([
+      expect.objectContaining({
+        plannedTaskId: 101,
+        seq: 0,
+        instruction: '检查 多伦科技（603528）风险变化',
+        enabled: true,
+      }),
+    ]);
     expect(rowLocks).toBe(2);
   });
 
@@ -382,16 +394,18 @@ describe('stock risk monitor service', () => {
     };
     const repository = databaseStockRiskMonitorRepository(fakeDb as never);
 
-    await expect(repository.createOrGet({
-      userId: 7,
-      symbol: '603528',
-      name: '多伦科技',
-      market: 'A',
-      dataAsOf: '2026-08-19',
-      nextRunAt: new Date('2026-08-20T08:30:00.000Z'),
-      baselineSignals: [],
-      baselineUnavailableChecks: [],
-    })).rejects.toMatchObject({
+    await expect(
+      repository.createOrGet({
+        userId: 7,
+        symbol: '603528',
+        name: '多伦科技',
+        market: 'A',
+        dataAsOf: '2026-08-19',
+        nextRunAt: new Date('2026-08-20T08:30:00.000Z'),
+        baselineSignals: [],
+        baselineUnavailableChecks: [],
+      }),
+    ).rejects.toMatchObject({
       code: 'CONFLICT',
       message: '旧监控仍有尚未完成的运行，请稍后重试',
     });

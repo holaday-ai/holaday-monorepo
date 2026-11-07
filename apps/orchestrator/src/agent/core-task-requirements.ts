@@ -15,7 +15,11 @@ export type CoreAcceptedRequirements = Pick<
   | 'referencePlan'
   | 'referenceContext'
   | 'legacyWorkflow'
-> & { readonly fileIds: readonly string[]; readonly resume?: CoreResumeMetadata };
+> & {
+  readonly fileIds: readonly string[];
+  readonly inputFiles?: readonly { fileId: string; filename: string; mimetype: string }[];
+  readonly resume?: CoreResumeMetadata;
+};
 
 const resumeSchema = z
   .object({
@@ -61,6 +65,18 @@ const requirementsSchema = z
       .array(z.string().min(1).max(32))
       .max(5)
       .refine((ids) => new Set(ids).size === ids.length),
+    inputFiles: z
+      .array(
+        z
+          .object({
+            fileId: z.string().min(1).max(32),
+            filename: z.string().max(255),
+            mimetype: z.string().max(96),
+          })
+          .strict(),
+      )
+      .max(5)
+      .optional(),
     resume: resumeSchema.optional(),
   })
   .strict();
@@ -73,7 +89,12 @@ export function parseCoreRequirements(
   try {
     const parsed = requirementsSchema.safeParse(input);
     if (!parsed.success) throw new CoreRequirementsError();
-    const { fileIds, resume, ...fields } = parsed.data;
+    const { fileIds, inputFiles, resume, ...fields } = parsed.data;
+    if (
+      inputFiles?.some((file) => !fileIds.includes(file.fileId)) ||
+      new Set(inputFiles?.map((file) => file.fileId)).size !== (inputFiles?.length ?? 0)
+    )
+      throw new CoreRequirementsError();
     const context = createTaskVerificationContext({
       ...fields,
       schemaVersion: 1,
@@ -102,6 +123,9 @@ export function parseCoreRequirements(
         : {}),
       ...(context.legacyWorkflow ? { legacyWorkflow: context.legacyWorkflow } : {}),
       fileIds: Object.freeze(fileIds),
+      ...(inputFiles
+        ? { inputFiles: Object.freeze(inputFiles.map((file) => Object.freeze(file))) }
+        : {}),
       ...(resume
         ? {
             resume: Object.freeze({

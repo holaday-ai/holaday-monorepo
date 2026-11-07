@@ -1,0 +1,73 @@
+{
+  "classification": "existing UI P1; nonblocking under TEST-POLICY and RESUME-DEPLOY-16",
+  "baseline": "0cf0c4d71f90f3a5035a5443180099e738570894",
+  "candidate": "0fef8978cd124fc1071c4a08e3ffc8469251bf79",
+  "baselineReport": "baseline-1366-occlusion-run/report.json",
+  "candidateReport": "ui-resume-1366/report.json",
+  "fingerprints": [
+    {
+      "rule": "control-occluded",
+      "severity": "P1",
+      "control": "BUTTON||UI generate failed||0",
+      "box": {
+        "x": 57,
+        "y": 634,
+        "width": 177,
+        "height": 32
+      },
+      "width": 1366,
+      "height": 768
+    },
+    {
+      "rule": "control-occluded",
+      "severity": "P1",
+      "control": "BUTTON||任务菜单||3",
+      "box": {
+        "x": 242,
+        "y": 634,
+        "width": 32,
+        "height": 32
+      },
+      "width": 1366,
+      "height": 768
+    },
+    {
+      "rule": "control-occluded",
+      "severity": "P1",
+      "control": "BUTTON||UI browser completed||0",
+      "box": {
+        "x": 57,
+        "y": 634,
+        "width": 177,
+        "height": 32
+      },
+      "width": 1366,
+      "height": 768
+    },
+    {
+      "rule": "control-occluded",
+      "severity": "P1",
+      "control": "BUTTON||UI generate awaiting_us…||0",
+      "box": {
+        "x": 57,
+        "y": 634,
+        "width": 177,
+        "height": 32
+      },
+      "width": 1366,
+      "height": 768
+    }
+  ],
+  "sameBrowser": "147.0.7727.15",
+  "sameSuiteHash": "30f8d6970b2eb49addf256635681f530b0d8b3660b24403eaf2d27f7a332ace0",
+  "sameControlCount": 157,
+  "baselineSourceMethod": "git archive, standalone source copy; no Git worktree",
+  "observed": "History row bottom clips at fixed footer; identical at x57/x242 y634 at 1366x768",
+  "checkedAt": "2026-10-12T13:36:05.435520+00:00",
+  "unchangedRendererAndScrollSections": {
+    "apps/web-workbench/src/components/TaskListItem.tsx": "63bb4e89f945ef55ddd9d81a8c23d8f002a2a24a39a1444642d60ffe2ffe0cfb",
+    "apps/web-workbench/src/components/Sidebar.tsx": "e7f51b840acd8d03fbfb21b7f72dc651c250baf13f6a961970a2ac314a0529f0",
+    "apps/web-workbench/src/components/ui/sidebar.tsx": "32b0c6e6cb788682ad49be56ae78b84b11f2b44c55b3fd395a6075d2834ad75a"
+  },
+  "menuOrdinalNormalization": "Audit numeric suffix is enumeration index only; same task menu renderer and exact 242,634,32,32 geometry, 1366x768 viewport."
+}

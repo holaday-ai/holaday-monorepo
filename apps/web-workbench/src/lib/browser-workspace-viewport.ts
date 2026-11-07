@@ -3,11 +3,13 @@ export interface BrowserViewportSize {
   height: number;
 }
 
-const MIN_WIDTH = 320;
-const MIN_HEIGHT = 360;
+const MIN_WIDTH = 1280;
+const MIN_HEIGHT = 800;
 const MAX_WIDTH = 1440;
 const MAX_HEIGHT = 1200;
 const RESIZE_NOISE_PX = 6;
+/** The widest mobile viewport a phone sheet asks for. */
+const MOBILE_HOST_MAX = 600;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -45,4 +47,63 @@ export function shouldSendBrowserViewport(
     Math.abs(previous.width - next.width) >= RESIZE_NOISE_PX ||
     Math.abs(previous.height - next.height) >= RESIZE_NOISE_PX
   );
+}
+
+export type BrowserViewportRenderMode = 'auto' | 'desktop' | 'panel';
+
+/**
+ * FIX-33 (BOSS: a w3schools page cut off on the right, only reachable by scrollbars):
+ * the remote page lays out at a desktop width (never the narrow panel width that made
+ * wide pages overflow inside the remote browser) with the panel's aspect ratio, so the
+ * frame scales down to fill the panel width and is seen whole.
+ */
+export function fitDesktopViewportForHost(input: {
+  hostWidth: number;
+  hostHeight: number;
+  /** The phone sheet (not a narrow desktop panel): the site's mobile layout. */
+  mobile?: boolean;
+}): BrowserViewportSize | null {
+  const { hostWidth, hostHeight } = input;
+  if (![hostWidth, hostHeight].every((v) => Number.isFinite(v) && v > 0)) return null;
+  // FIX-34 (FIX-33 review): on a phone the page gets its mobile layout at the sheet's own
+  // size (scale ≈ 1) instead of a desktop page shrunk to ~0.3.
+  if (input.mobile)
+    return {
+      width: clamp(Math.round(hostWidth), 320, MOBILE_HOST_MAX),
+      height: clamp(Math.round(hostHeight), 480, 2400),
+    };
+  const width = clamp(Math.round(hostWidth), 1280, 1920);
+  return { width, height: clamp(Math.round((width * hostHeight) / hostWidth), 600, 2400) };
+}
+
+/** Keep desktop breakpoints, but fill the visible portrait surface instead of
+ * shrinking a landscape page into the top third. Explicit profiles are useful
+ * to callers that need a fixed source viewport (including transport tests). */
+export function browserViewportV2ForHost(input: {
+  hostWidth: number;
+  hostHeight: number;
+  renderMode: BrowserViewportRenderMode;
+  desktopViewport?: BrowserViewportSize;
+}): BrowserViewportSize | null {
+  const { hostWidth, hostHeight, renderMode, desktopViewport } = input;
+  if (![hostWidth, hostHeight].every((v) => Number.isFinite(v) && v > 0)) return null;
+  if (renderMode === 'auto' && desktopViewport) {
+    if (![desktopViewport.width, desktopViewport.height].every((v) => Number.isFinite(v) && v > 0))
+      return null;
+    return {
+      width: clamp(Math.round(desktopViewport.width), 320, 1920),
+      height: clamp(Math.round(desktopViewport.height), 360, 2400),
+    };
+  }
+  if (renderMode === 'panel' || renderMode === 'auto')
+    return {
+      width: clamp(Math.round(hostWidth), 240, 1920),
+      height: clamp(Math.round(hostHeight), 240, 2400),
+    };
+  const portrait = hostHeight > hostWidth;
+  const width = renderMode === 'desktop' || !portrait ? 1280 : 1024;
+  return {
+    width,
+    height: portrait ? clamp(Math.round((width * hostHeight) / hostWidth), 360, 2400) : 800,
+  };
 }

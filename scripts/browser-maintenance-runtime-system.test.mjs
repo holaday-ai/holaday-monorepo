@@ -1,5 +1,5 @@
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { captureMaintenanceProcesses } from './browser-maintenance-runtime-system.mjs';
 const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
 const root = `/opt/holaday-releases/${identity.candidate}`;

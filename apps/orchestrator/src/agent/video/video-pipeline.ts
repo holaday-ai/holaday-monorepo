@@ -21,8 +21,8 @@
  *     (documented at the wiring site), not the orchestration's.
  */
 
-import type { Timeline, SegmentType, VideoScript } from './types.js';
 import { buildSrt, buildTimeline } from './timeline.js';
+import type { SegmentType, Timeline, VideoScript } from './types.js';
 
 export interface PipelineLogger {
   info(obj: unknown, msg?: string): void;

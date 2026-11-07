@@ -1,0 +1,36 @@
+[
+  {
+    "animation": "none",
+    "background": "rgba(0, 0, 0, 0)",
+    "selector": ".workspace",
+    "transition": "grid-template-columns 0.62s cubic-bezier(0.4, 0, 0.2, 1)"
+  },
+  {
+    "animation": "none",
+    "background": "rgba(0, 0, 0, 0)",
+    "selector": ".sidebar .label",
+    "transition": "opacity 0.38s 0.12s, transform 0.46s cubic-bezier(0.4, 0, 0.2, 1) 0.09s, visibility"
+  },
+  {
+    "missing": true,
+    "selector": ".image-tabs"
+  },
+  {
+    "animation": "3s linear infinite edge-orbit, 7.5s linear infinite paused edge-counter",
+    "background": "rgba(0, 0, 0, 0)",
+    "selector": ".shiny-generate",
+    "transition": "box-shadow 0.45s, transform 0.3s"
+  },
+  {
+    "animation": "none",
+    "background": "rgba(0, 0, 0, 0)",
+    "selector": ".project-list",
+    "transition": "opacity 0.38s 0.12s, transform 0.46s cubic-bezier(0.4, 0, 0.2, 1), visibility"
+  },
+  {
+    "animation": "none",
+    "background": "rgba(0, 0, 0, 0)",
+    "selector": ".task-list",
+    "transition": "opacity 0.38s 0.12s, transform 0.46s cubic-bezier(0.4, 0, 0.2, 1), visibility"
+  }
+]

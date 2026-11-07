@@ -1,7 +1,6 @@
 export type QuickCreateRepeatType = 'once' | 'daily' | 'weekly' | 'monthly' | 'custom';
 
-export const QUICK_CREATE_CUSTOM_RRULE_ERROR =
-  '请填写 RRULE，或改用预设频率。';
+export const QUICK_CREATE_CUSTOM_RRULE_ERROR = '请填写 RRULE，或改用预设频率。';
 
 export function quickCreateSubmitLabel(submitting: boolean): string {
   return submitting ? '创建中…' : '创建';
@@ -17,7 +16,6 @@ export function quickCreateRepeatLabel(repeatType: QuickCreateRepeatType): strin
       return '每月重复';
     case 'custom':
       return '自定义重复';
-    case 'once':
     default:
       return '只运行一次';
   }

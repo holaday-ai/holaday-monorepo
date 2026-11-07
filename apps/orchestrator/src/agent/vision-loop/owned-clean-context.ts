@@ -54,7 +54,12 @@ export function createOwnedCleanContext(
         if (lifetime && lifetime.drain.snapshot().unknown > 0)
           throw new Error('BROWSER_OPERATION_UNKNOWN');
         try {
-          context = await browser.newContext(options);
+          context = await browser.newContext({
+            ...options,
+            ...(process.env.BROWSER_DOMAIN_PROXY_ENABLED === 'true'
+              ? { serviceWorkers: 'block' as const }
+              : {}),
+          });
         } catch (error) {
           markUnknown();
           throw error;

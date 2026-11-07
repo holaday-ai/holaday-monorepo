@@ -17,21 +17,14 @@ describe('planned task end dates', () => {
     expect(endDateToExclusiveUtc('2026-11-01', 'America/New_York')).toEqual(
       new Date('2026-11-02T05:00:00.000Z'),
     );
-    expect(
-      exclusiveUtcToEndDate(
-        new Date('2026-11-02T05:00:00.000Z'),
-        'America/New_York',
-      ),
-    ).toBe('2026-11-01');
+    expect(exclusiveUtcToEndDate(new Date('2026-11-02T05:00:00.000Z'), 'America/New_York')).toBe(
+      '2026-11-01',
+    );
   });
 
   it('rejects malformed calendar dates and unknown timezones', () => {
-    expect(() => endDateToExclusiveUtc('2026-02-30', 'Asia/Shanghai')).toThrow(
-      '结束日期无效',
-    );
-    expect(() => endDateToExclusiveUtc('2026-08-31', 'Mars/Base')).toThrow(
-      '时区无效',
-    );
+    expect(() => endDateToExclusiveUtc('2026-02-30', 'Asia/Shanghai')).toThrow('结束日期无效');
+    expect(() => endDateToExclusiveUtc('2026-08-31', 'Mars/Base')).toThrow('时区无效');
   });
 });
 

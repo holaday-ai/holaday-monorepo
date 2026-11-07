@@ -20,8 +20,7 @@
 
 import type Anthropic from '@anthropic-ai/sdk';
 
-const PLACEHOLDER_TEXT =
-  '[执行结果未返回，可能因为超时或系统错误。请基于当前已知信息继续。]';
+const PLACEHOLDER_TEXT = '[执行结果未返回，可能因为超时或系统错误。请基于当前已知信息继续。]';
 
 /**
  * Walk `messages` and ensure every `tool_use` block has a matching
@@ -50,15 +49,13 @@ export function validateMessageChain(
     const msg = out[i];
     if (!msg || msg.role !== 'assistant' || !Array.isArray(msg.content)) continue;
 
-    const toolUses = msg.content.filter(
-      (b): b is Anthropic.ToolUseBlockParam => isToolUseBlock(b),
-    );
+    const toolUses = msg.content.filter((b): b is Anthropic.ToolUseBlockParam => isToolUseBlock(b));
     if (toolUses.length === 0) continue;
 
     const next = out[i + 1];
     if (!next || next.role !== 'user') {
-      const synthResults: Anthropic.ToolResultBlockParam[] = toolUses.map(
-        (tu) => synthesisedToolResult(tu.id),
+      const synthResults: Anthropic.ToolResultBlockParam[] = toolUses.map((tu) =>
+        synthesisedToolResult(tu.id),
       );
       out.splice(i + 1, 0, { role: 'user', content: synthResults });
       continue;
@@ -68,9 +65,7 @@ export function validateMessageChain(
       next.content = [next.content as unknown as Anthropic.TextBlockParam];
     }
     const presentIds = new Set(
-      (next.content as readonly unknown[])
-        .filter(isToolResultBlock)
-        .map((b) => b.tool_use_id),
+      (next.content as readonly unknown[]).filter(isToolResultBlock).map((b) => b.tool_use_id),
     );
     const missing = toolUses.filter((tu) => !presentIds.has(tu.id));
     if (missing.length === 0) continue;
@@ -91,9 +86,7 @@ function isToolUseBlock(block: unknown): block is Anthropic.ToolUseBlockParam {
   );
 }
 
-function isToolResultBlock(
-  block: unknown,
-): block is Anthropic.ToolResultBlockParam {
+function isToolResultBlock(block: unknown): block is Anthropic.ToolResultBlockParam {
   return (
     typeof block === 'object' &&
     block !== null &&

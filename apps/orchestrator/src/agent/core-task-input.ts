@@ -15,7 +15,7 @@ import type { CoreAcceptedRequirements } from './core-task-admission.js';
 export function assertCoreTaskInput(
   input: CoreAcceptedRequirements & { blocks: readonly Anthropic.Beta.BetaContentBlockParam[] },
 ): void {
-  const { blocks, fileIds, resume, ...requirements } = input;
+  const { blocks, fileIds, inputFiles, resume, ...requirements } = input;
   try {
     z.array(z.string().min(1).max(32))
       .max(5)
@@ -34,7 +34,7 @@ export function assertCoreTaskInput(
     });
     if (
       !checkVerificationAdmission(
-        JSON.stringify({ ...requirements, fileIds, ...(resume ? { resume } : {}) }),
+        JSON.stringify({ ...requirements, fileIds, inputFiles, ...(resume ? { resume } : {}) }),
         [],
       ).ok
     )

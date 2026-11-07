@@ -1,33 +1,6 @@
-import {
-  Check,
-  CalendarClock,
-  Clapperboard,
-  Clipboard,
-  Clock,
-  FolderOpen,
-  FolderPlus,
-  ImagePlus,
-  Layers,
-  ListPlus,
-  MoonStar,
-  Pencil,
-  Pin,
-  PinOff,
-  Plus,
-  RotateCcw,
-  Search,
-  Share2,
-  Shield,
-  Sparkles,
-  Trash2,
-  TrendingUp,
-  Wallet,
-  X,
-} from 'lucide-react';
-import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
 import { BrandIcon, BrandWordmark } from '@/components/BrandLogo';
 import { QuotaIndicator } from '@/components/QuotaIndicator';
+import { TaskListItem } from '@/components/TaskListItem';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,7 +12,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
-  Sidebar as SidebarShell,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
@@ -50,12 +22,14 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  Sidebar as SidebarShell,
+  SidebarTrigger,
   useSidebar,
 } from '@/components/ui/sidebar';
-import { TaskListItem } from '@/components/TaskListItem';
 import { useToast } from '@/components/ui/toast';
 import { isCosmicEnabled } from '@/lib/astrology';
 import { copyTextToClipboard } from '@/lib/copy-text';
+import type { ProjectFilterChipState } from '@/lib/project-task-filter-state';
 import {
   deletableTaskIdsForBatchSelection,
   pruneBatchSelection,
@@ -66,11 +40,43 @@ import {
   preloadSidebarFeatureNavItem,
 } from '@/lib/sidebar-feature-nav';
 import { preloadStockTasksPageRoute } from '@/lib/stock-page-preload';
-import type { ProjectFilterChipState } from '@/lib/project-task-filter-state';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiProject, UiTask } from '@/types/task';
 import { bucketByTime, isTaskDeletable } from '@/utils/time-buckets';
+import {
+  CalendarClock,
+  Check,
+  ChevronDown,
+  Clapperboard,
+  Clipboard,
+  Clock,
+  Files,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  ImagePlus,
+  Layers,
+  ListPlus,
+  MoonStar,
+  MoreHorizontal,
+  Pencil,
+  Pin,
+  PinOff,
+  Plus,
+  RotateCcw,
+  Search,
+  Share2,
+  Shield,
+  SlidersHorizontal,
+  Sparkles,
+  Trash2,
+  TrendingUp,
+  Wallet,
+  X,
+} from 'lucide-react';
+import * as React from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 const SIDEBAR_BORDER = 'border-[#DCDDDD] dark:border-white/10';
 
@@ -131,7 +137,6 @@ interface Props {
   mobileOpen?: boolean;
   onMobileClose?: () => void;
   /** Temporarily use the icon rail while a compact inline browser is open. */
-  adaptiveCollapsed?: boolean;
   /**
    * Phase 10 polish — number of tasks the SPA hid because they're
    * older than the user's plan retention window. Drives the
@@ -151,6 +156,7 @@ interface Props {
     hasMore: boolean;
     loadingMore: boolean;
     onLoadMore: () => void;
+    exhaustedCopy?: string;
   };
 }
 
@@ -195,11 +201,11 @@ export function Sidebar({
   userRole = 'user',
   mobileOpen,
   onMobileClose,
-  adaptiveCollapsed = false,
   hiddenTaskCount = 0,
   historyDays,
   pagerOverride,
 }: Props): JSX.Element {
+  const { setOpenMobile, state: sidebarState, forceCollapsed } = useSidebar();
   const togglePin = useTaskStore((s) => s.togglePin);
   const liveSubStatusByTask = useTaskStore((s) => s.subStatusByTask);
   // Belt-and-braces: collapse any duplicate taskId rows the store may
@@ -262,6 +268,8 @@ export function Sidebar({
   // The actual delete fans out through the parent's onDeleteTasks
   // entry which opens a single bulk-confirm modal and uses
   // Promise.allSettled for the network calls.
+  const [historyExpanded, setHistoryExpanded] = React.useState(true);
+  const historyId = React.useId();
   const [batchMode, setBatchMode] = React.useState(false);
   const [batchSelected, setBatchSelected] = React.useState<Set<string>>(new Set());
   const batchDeletableTaskIds = React.useMemo(
@@ -300,31 +308,58 @@ export function Sidebar({
   }, [batchDeletableTaskIds]);
   const deleteSelected = React.useCallback(() => {
     if (selectedBatchDeleteIds.length === 0 || !onDeleteTasks) return;
+    setOpenMobile(false);
+    onMobileClose?.();
     onDeleteTasks(selectedBatchDeleteIds);
     exitBatchMode();
-  }, [exitBatchMode, onDeleteTasks, selectedBatchDeleteIds]);
+  }, [exitBatchMode, onDeleteTasks, onMobileClose, selectedBatchDeleteIds, setOpenMobile]);
 
   // Optimization #4 — shadcn SidebarProvider owns the open/collapse
   // state (cookie-persisted + Cmd+B shortcut + smooth transitions).
   // We just bind mobile open via setOpenMobile so the legacy
   // `mobileOpen` prop continues to drive the Sheet from
   // WorkbenchApp's hamburger button.
-  const { setOpenMobile } = useSidebar();
+  const sidebarIsCompact = sidebarState === 'collapsed';
+  const batchBarRef = React.useRef<HTMLDivElement>(null);
+  const [batchActionSpace, setBatchActionSpace] = React.useState(0);
+  const showBatchBar = batchMode && !sidebarIsCompact;
+  React.useLayoutEffect(() => {
+    const bar = batchBarRef.current;
+    if (!showBatchBar || !bar) {
+      setBatchActionSpace(0);
+      return;
+    }
+    const measure = (): void => {
+      const style = getComputedStyle(bar);
+      const gap = bar.parentElement ? getComputedStyle(bar.parentElement).rowGap : '0';
+      setBatchActionSpace(
+        Math.ceil(
+          bar.getBoundingClientRect().height +
+            (Number.parseFloat(style.marginTop) || 0) +
+            (Number.parseFloat(style.marginBottom) || 0) +
+            (Number.parseFloat(gap) || 0),
+        ),
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [showBatchBar]);
+  const { pathname: sidebarPath } = useLocation();
   React.useEffect(() => {
     setOpenMobile(!!mobileOpen);
   }, [mobileOpen, setOpenMobile]);
 
-  const [menu, setMenu] = React.useState<
-    | {
-        taskId: string;
-        intent: string;
-        projectId: string | null;
-        x: number;
-        y: number;
-        deletable: boolean;
-      }
-    | null
-  >(null);
+  const [menu, setMenu] = React.useState<{
+    taskId: string;
+    intent: string;
+    projectId: string | null;
+    x: number;
+    y: number;
+    deletable: boolean;
+  } | null>(null);
   const [renamingId, setRenamingId] = React.useState<string | null>(null);
   // Radix DropdownMenu owns the outside-click / Escape / focus loop —
   // the previous hand-rolled mousedown + scroll + resize listeners are
@@ -340,16 +375,30 @@ export function Sidebar({
 
   return (
     <>
-      <SidebarShell collapsible="icon" forceCollapsed={adaptiveCollapsed}>
+      <SidebarShell
+        className={cn(
+          'holaday-sidebar',
+          showBatchBar && 'hd-sidebar-batch',
+          /^\/(video|image)\/?$/.test(sidebarPath) && 'dark',
+        )}
+        variant="floating"
+        collapsible="icon"
+      >
         {/* Codex info-architecture rework: the Sidebar reads as four
             stable segments. Header / SidebarNav / SidebarFooter are
             pinned; only the task list scrolls. The visual centre of
             gravity sits on "新任务" + the feature shortcuts; task
             history is a scroll surface, not a status board. */}
-        <SidebarHeader className={cn('shrink-0 gap-2 border-b bg-white/60 backdrop-blur dark:bg-card/70', SIDEBAR_BORDER)}>
-          <div className="flex items-center gap-2 px-1 py-1">
+        <SidebarHeader
+          className={cn(
+            'shrink-0 gap-2 border-b bg-white/60 backdrop-blur dark:bg-card/70',
+            SIDEBAR_BORDER,
+          )}
+        >
+          <div className="holaday-brand flex items-center gap-2 px-1 py-1">
             <BrandIcon />
-            <BrandWordmark className="group-data-[collapsible=icon]:hidden" />
+            <BrandWordmark className="hd-sidebar-wordmark" />
+            <SidebarTrigger className="hd-sidebar-toggle ml-auto shrink-0" />
           </div>
           {/* Brand magenta only on the primary action. */}
           <SidebarMenu>
@@ -358,9 +407,10 @@ export function Sidebar({
                 tooltip="新任务 (/)"
                 onClick={() => {
                   onNewTask();
+                  setOpenMobile(false);
                   onMobileClose?.();
                 }}
-                className="rounded-[8px] bg-[#EA1F59] font-medium text-white shadow-[0_3px_10px_rgba(234,31,89,0.14)] hover:bg-[#EA1F59]/90 hover:text-white data-[active=true]:bg-[#EA1F59] data-[active=true]:text-white"
+                className="holaday-new-task rounded-[8px] bg-[#FF0061] font-medium text-white shadow-[0_3px_10px_rgba(255,0,97,0.14)] hover:bg-[#FF0061]/90 hover:text-white data-[active=true]:bg-[#FF0061] data-[active=true]:text-white"
               >
                 <Plus />
                 <span>新任务</span>
@@ -370,8 +420,12 @@ export function Sidebar({
               <SidebarMenuItem>
                 <SidebarMenuButton
                   tooltip="搜索任务 (⌘K)"
-                  onClick={() => onOpenSearch()}
-                  className="rounded-[8px] border border-transparent text-[#595757] hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/70 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
+                  onClick={() => {
+                    setOpenMobile(false);
+                    onMobileClose?.();
+                    onOpenSearch();
+                  }}
+                  className="rounded-[8px] border border-transparent text-[#595757] hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:text-foreground/70 dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10"
                 >
                   <Search />
                   <span className="flex flex-1 items-center justify-between">
@@ -386,228 +440,254 @@ export function Sidebar({
           </SidebarMenu>
         </SidebarHeader>
 
-        {/* SidebarNav lives INSIDE SidebarContent so it shares the
-            same overflow-y-auto scroll area as the task list. BOSS
-            bug fix — when viewport height ≤ 800px the previous
-            "FeatureNav as a fixed band between header and content"
-            layout ate ~225px, leaving only a few pixels for the
-            task list. Now FeatureNav scrolls along with the task
-            list when space is tight; tall windows behave identically
-            because the content fits and there's no scroll. */}
-        <SidebarContent className="px-0 bg-white/45 dark:bg-transparent">
-            <FeatureNav userRole={userRole} />
-            {projectFilter && (
-              <div
+        {/* Main navigation stays visible; only task history scrolls. */}
+        <FeatureNav
+          userRole={userRole}
+          projects={projectsProp ?? []}
+          onCreateProject={onCreateProject}
+          onNavigate={() => {
+            setOpenMobile(false);
+            onMobileClose?.();
+          }}
+        />
+        <SidebarContent
+          className="hd-task-history-scroll px-0 bg-white/45 dark:bg-transparent"
+          style={{ '--hd-batch-action-space': `${batchActionSpace}px` } as React.CSSProperties}
+        >
+          {projectFilter && (
+            <div
+              className={cn(
+                'mx-2 mb-2 flex items-start gap-2 rounded-md border px-2.5 py-1.5 text-[12px] group-data-[collapsible=icon]:hidden',
+                projectFilter.tone === 'error'
+                  ? 'border-[#FF0061]/35 bg-[#FF0061]/10 dark:border-[#FF0061]/35'
+                  : 'border-[#57479C]/25 bg-[#57479C]/10 dark:border-[#57479C]/40',
+              )}
+            >
+              <FolderOpen
                 className={cn(
-                  'mx-2 mb-2 flex items-start gap-2 rounded-md border px-2.5 py-1.5 text-[12px] group-data-[collapsible=icon]:hidden',
-                  projectFilter.tone === 'error'
-                    ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 dark:border-[#EA1F59]/35'
-                    : 'border-[#57479C]/25 bg-[#57479C]/10 dark:border-[#57479C]/40',
+                  'mt-0.5 h-3.5 w-3.5 shrink-0',
+                  projectFilter.tone === 'error' ? 'text-[#FF0061]' : 'text-[#57479C]',
                 )}
-              >
-                <FolderOpen
-                  className={cn(
-                    'mt-0.5 h-3.5 w-3.5 shrink-0',
-                    projectFilter.tone === 'error'
-                      ? 'text-[#EA1F59]'
-                      : 'text-[#57479C]',
-                  )}
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-foreground">
-                    项目：{projectFilter.name}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-foreground">项目：{projectFilter.name}</div>
+                {projectFilter.detail && (
+                  <div
+                    className={cn(
+                      'mt-0.5 truncate text-[11px]',
+                      projectFilter.tone === 'error' ? 'text-[#FF0061]' : 'text-muted-foreground',
+                    )}
+                  >
+                    {projectFilter.detail}
                   </div>
-                  {projectFilter.detail && (
-                    <div
-                      className={cn(
-                        'mt-0.5 truncate text-[11px]',
-                        projectFilter.tone === 'error'
-                          ? 'text-[#EA1F59]'
-                          : 'text-muted-foreground',
-                      )}
-                    >
-                      {projectFilter.detail}
-                    </div>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onClearProjectFilter?.()}
-                  aria-label="清除项目筛选"
-                  title="清除项目筛选"
-                  className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-white/70 hover:text-foreground dark:hover:bg-white/10"
-                >
-                  <X className="h-3 w-3" />
-                </button>
+                )}
               </div>
-            )}
+              <button
+                type="button"
+                onClick={() => onClearProjectFilter?.()}
+                aria-label="清除项目筛选"
+                title="清除项目筛选"
+                className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-white/70 hover:text-foreground dark:hover:bg-white/10"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
 
-            <div className="px-2 pb-4 group-data-[collapsible=icon]:hidden">
-              {pinnedTasks.length > 0 && (
-                <TaskGroup title="置顶">
-                  {pinnedTasks.map((t) => (
-                    <TaskListItem
-                      key={t.taskId}
-                      task={t}
-                      selected={t.taskId === selectedTaskId}
-                      liveSubStatus={liveSubStatusByTask[t.taskId] ?? null}
-                      renaming={renamingId === t.taskId}
-                      onSelect={(id) => {
-                        onSelectTask(id);
-                        onMobileClose?.();
-                      }}
-                      onContextMenu={(id, e) => {
-                        e.preventDefault();
-                        setMenu({
-                          taskId: id,
-                          intent: t.intent,
-                          projectId: t.projectId ?? null,
-                          x: e.clientX,
-                          y: e.clientY,
-                          deletable: isTaskDeletable(t.status),
-                        });
-                      }}
-                      onRenameCommit={(id, title) => {
-                        setRenamingId(null);
-                        if (onRenameTask && (title.trim() !== (t.title ?? '').trim())) {
-                          void onRenameTask(id, title);
-                        }
-                      }}
-                      onRenameCancel={() => setRenamingId(null)}
-                      batchMode={batchMode}
-                      batchChecked={batchSelected.has(t.taskId)}
-                      batchDisabled={!isTaskDeletable(t.status)}
-                      onBatchToggle={toggleBatchSelect}
-                    />
-                  ))}
-                </TaskGroup>
-              )}
-              {buckets.map((bucket) => (
-                <TaskGroup key={bucket.key} title={bucket.title}>
-                  {bucket.tasks.map((t) => (
-                    <TaskListItem
-                      key={t.taskId}
-                      task={t}
-                      selected={t.taskId === selectedTaskId}
-                      liveSubStatus={liveSubStatusByTask[t.taskId] ?? null}
-                      renaming={renamingId === t.taskId}
-                      onSelect={(id) => {
-                        onSelectTask(id);
-                        onMobileClose?.();
-                      }}
-                      onContextMenu={(id, e) => {
-                        e.preventDefault();
-                        setMenu({
-                          taskId: id,
-                          intent: t.intent,
-                          projectId: t.projectId ?? null,
-                          x: e.clientX,
-                          y: e.clientY,
-                          deletable: isTaskDeletable(t.status),
-                        });
-                      }}
-                      onRenameCommit={(id, title) => {
-                        setRenamingId(null);
-                        if (onRenameTask && (title.trim() !== (t.title ?? '').trim())) {
-                          void onRenameTask(id, title);
-                        }
-                      }}
-                      onRenameCancel={() => setRenamingId(null)}
-                      batchMode={batchMode}
-                      batchChecked={batchSelected.has(t.taskId)}
-                      batchDisabled={!isTaskDeletable(t.status)}
-                      onBatchToggle={toggleBatchSelect}
-                    />
-                  ))}
-                </TaskGroup>
-              ))}
-              {tasks.length === 0 && hiddenTaskCount === 0 && (
-                <div className="mx-1.5 my-4 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-3 py-5 text-center shadow-[0_8px_24px_rgba(89,87,87,0.04)] dark:border-white/10 dark:bg-white/[0.03]">
-                  <div className="mx-auto flex h-7 w-7 items-center justify-center rounded-[8px] border border-[#EA1F59]/15 bg-[#EA1F59]/10 text-[#EA1F59]">
-                    <ListPlus className="h-3.5 w-3.5" />
+          <div className="hd-history-section px-2 pb-4">
+            <div className="hd-history-heading">
+              <button
+                type="button"
+                title={historyExpanded ? '收起任务列表' : '展开任务列表'}
+                aria-expanded={historyExpanded}
+                aria-controls={historyId}
+                onClick={() => setHistoryExpanded((value) => !value)}
+              >
+                <ChevronDown aria-hidden />
+                任务
+              </button>
+              <button
+                type="button"
+                title={batchMode ? '退出批量管理' : '批量管理任务'}
+                aria-pressed={batchMode}
+                onClick={() => {
+                  setHistoryExpanded(true);
+                  setBatchMode((value) => !value);
+                }}
+              >
+                <SlidersHorizontal aria-hidden />
+              </button>
+            </div>
+            <div
+              className="hd-history-fold"
+              data-open={historyExpanded}
+              {...(!historyExpanded ? { inert: '' } : {})}
+              aria-hidden={!historyExpanded}
+            >
+              <div id={historyId}>
+                {pinnedTasks.length > 0 && (
+                  <TaskGroup title="置顶">
+                    {pinnedTasks.map((t) => (
+                      <TaskListItem
+                        key={t.taskId}
+                        task={t}
+                        selected={t.taskId === selectedTaskId}
+                        liveSubStatus={liveSubStatusByTask[t.taskId] ?? null}
+                        renaming={renamingId === t.taskId}
+                        onSelect={(id) => {
+                          onSelectTask(id);
+                          setOpenMobile(false);
+                          onMobileClose?.();
+                        }}
+                        onContextMenu={(id, e) => {
+                          e.preventDefault();
+                          setMenu({
+                            taskId: id,
+                            intent: t.intent,
+                            projectId: t.projectId ?? null,
+                            x: e.clientX,
+                            y: e.clientY,
+                            deletable: isTaskDeletable(t.status),
+                          });
+                        }}
+                        onRenameCommit={(id, title) => {
+                          setRenamingId(null);
+                          if (onRenameTask && title.trim() !== (t.title ?? '').trim()) {
+                            void onRenameTask(id, title);
+                          }
+                        }}
+                        onRenameCancel={() => setRenamingId(null)}
+                        batchMode={batchMode}
+                        batchChecked={batchSelected.has(t.taskId)}
+                        batchDisabled={!isTaskDeletable(t.status)}
+                        onBatchToggle={toggleBatchSelect}
+                      />
+                    ))}
+                  </TaskGroup>
+                )}
+                {buckets.map((bucket) => (
+                  <TaskGroup key={bucket.key} title={bucket.title}>
+                    {bucket.tasks.map((t) => (
+                      <TaskListItem
+                        key={t.taskId}
+                        task={t}
+                        selected={t.taskId === selectedTaskId}
+                        liveSubStatus={liveSubStatusByTask[t.taskId] ?? null}
+                        renaming={renamingId === t.taskId}
+                        onSelect={(id) => {
+                          onSelectTask(id);
+                          setOpenMobile(false);
+                          onMobileClose?.();
+                        }}
+                        onContextMenu={(id, e) => {
+                          e.preventDefault();
+                          setMenu({
+                            taskId: id,
+                            intent: t.intent,
+                            projectId: t.projectId ?? null,
+                            x: e.clientX,
+                            y: e.clientY,
+                            deletable: isTaskDeletable(t.status),
+                          });
+                        }}
+                        onRenameCommit={(id, title) => {
+                          setRenamingId(null);
+                          if (onRenameTask && title.trim() !== (t.title ?? '').trim()) {
+                            void onRenameTask(id, title);
+                          }
+                        }}
+                        onRenameCancel={() => setRenamingId(null)}
+                        batchMode={batchMode}
+                        batchChecked={batchSelected.has(t.taskId)}
+                        batchDisabled={!isTaskDeletable(t.status)}
+                        onBatchToggle={toggleBatchSelect}
+                      />
+                    ))}
+                  </TaskGroup>
+                ))}
+                {tasks.length === 0 && hiddenTaskCount === 0 && (
+                  <div className="mx-1.5 my-4 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-3 py-5 text-center shadow-[0_8px_24px_rgba(89,87,87,0.04)] dark:border-white/10 dark:bg-white/[0.03]">
+                    <div className="mx-auto flex h-7 w-7 items-center justify-center rounded-[8px] border border-[#FF0061]/15 bg-[#FF0061]/10 text-[#FF0061]">
+                      <ListPlus className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="mt-2 text-[12px] font-medium text-[#595757] dark:text-foreground/85">
+                      还没有任务
+                    </div>
+                    <div className="mt-1 text-[11px] leading-4 text-[#ADADAD]">
+                      新任务会出现在这里，方便追问、重命名或批量整理。
+                    </div>
                   </div>
-                  <div className="mt-2 text-[12px] font-medium text-[#595757] dark:text-foreground/85">
-                    还没有任务
-                  </div>
-                  <div className="mt-1 text-[11px] leading-4 text-[#ADADAD]">
-                    新任务会出现在这里，方便追问、重命名或批量整理。
-                  </div>
-                </div>
-              )}
-              {/* Phase 24 RC follow-up — load-more pager so users can
+                )}
+                {/* Phase 24 RC follow-up — load-more pager so users can
                   page past the first 50 tasks. Hidden until the first
                   refresh sets tasksHasMore=true; once the cursor is
                   exhausted the button hides itself again. */}
-              <LoadMoreTasksButton override={pagerOverride} />
-              {hiddenTaskCount > 0 && (
-                <RetentionHint
-                  hiddenCount={hiddenTaskCount}
-                  historyDays={historyDays ?? null}
-                  plan={userPlan}
-                />
-              )}
+                <LoadMoreTasksButton override={pagerOverride} />
+                {hiddenTaskCount > 0 && (
+                  <RetentionHint
+                    hiddenCount={hiddenTaskCount}
+                    historyDays={historyDays ?? null}
+                    plan={userPlan}
+                  />
+                )}
+              </div>
             </div>
+          </div>
+        </SidebarContent>
 
-            </SidebarContent>
-
-            <SidebarFooter className={cn('shrink-0 border-t bg-white/70 px-0 py-2 backdrop-blur group-data-[collapsible=icon]:hidden dark:bg-card/70', SIDEBAR_BORDER)}>
-              {/* O1 — batch action bar / batch entry. When batchMode
+        <SidebarFooter
+          className={cn(
+            'shrink-0 border-t bg-white/70 px-0 py-2 backdrop-blur dark:bg-card/70',
+            SIDEBAR_BORDER,
+          )}
+        >
+          {/* O1 — batch action bar / batch entry. When batchMode
                   is on, render the count + 全选 / 删除选中 / 取消
                   controls; otherwise show a small "批量管理" entry
                   button alongside the quota indicator. */}
-              {batchMode ? (
-                <div className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-[8px] border border-[#57479C]/18 bg-white/75 px-2 py-1.5 text-[11px] text-[#595757] shadow-[0_8px_22px_rgba(87,71,156,0.08)] dark:border-[#57479C]/35 dark:bg-white/[0.04] dark:text-[#DCDDDD]">
-                  <span className="inline-flex items-center gap-1.5 font-medium">
-                    <span className="flex h-4 min-w-4 items-center justify-center rounded-[5px] bg-[#57479C]/10 px-1 text-[10px] text-[#57479C] dark:bg-[#57479C]/25 dark:text-[#DCDDDD]">
-                      {selectedBatchDeleteIds.length}
-                    </span>
-                    已选
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={selectAllVisible}
-                      className="inline-flex h-8 items-center rounded-[6px] px-2 text-[#595757] hover:bg-[#EFEFEF]/70 hover:text-[#57479C] dark:text-[#DCDDDD] dark:hover:bg-white/10"
-                    >
-                      全选
-                    </button>
-                    <button
-                      type="button"
-                      onClick={deleteSelected}
-                      disabled={selectedBatchDeleteIds.length === 0}
-                      className={cn(
-                        'inline-flex h-8 items-center rounded-[6px] px-2 font-medium transition-colors',
-                        selectedBatchDeleteIds.length === 0
-                          ? 'cursor-not-allowed opacity-50'
-                          : 'bg-[#EA1F59] text-white shadow-[0_3px_10px_rgba(234,31,89,0.12)] hover:bg-[#EA1F59]/90',
-                      )}
-                    >
-                      删除
-                    </button>
-                    <button
-                      type="button"
-                      onClick={exitBatchMode}
-                      className="inline-flex h-8 items-center rounded-[6px] px-2 text-[#ADADAD] hover:bg-[#EFEFEF]/70 hover:text-[#595757] dark:hover:bg-white/10"
-                    >
-                      取消
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                onDeleteTasks && (
-                  <div className="mb-1 flex items-center justify-end px-2">
-                    <button
-                      type="button"
-                      onClick={() => setBatchMode(true)}
-                      className="inline-flex h-8 items-center gap-1 rounded-[7px] border border-transparent px-2 text-[11px] text-[#ADADAD] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
-                    >
-                      <Layers className="h-3 w-3" />
-                      批量管理
-                    </button>
-                  </div>
-                )
-              )}
-              {/* Quota strip first — the user's daily/monthly headroom
+          {showBatchBar ? (
+            <div
+              ref={batchBarRef}
+              className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-[8px] border border-[#57479C]/18 bg-white/75 px-2 py-1.5 text-[11px] text-[#595757] shadow-[0_8px_22px_rgba(87,71,156,0.08)] dark:border-[#57479C]/35 dark:bg-white/[0.04] dark:text-[#DCDDDD]"
+            >
+              <span className="inline-flex items-center gap-1.5 font-medium">
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-[5px] bg-[#57479C]/10 px-1 text-[10px] text-[#57479C] dark:bg-[#57479C]/25 dark:text-[#DCDDDD]">
+                  {selectedBatchDeleteIds.length}
+                </span>
+                已选
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={selectAllVisible}
+                  className="inline-flex h-8 items-center rounded-[6px] px-2 text-[#595757] hover:bg-[#EFEFEF]/70 hover:text-[#57479C] dark:text-[#DCDDDD] dark:hover:bg-white/10"
+                >
+                  全选
+                </button>
+                <button
+                  type="button"
+                  onClick={deleteSelected}
+                  disabled={selectedBatchDeleteIds.length === 0}
+                  className={cn(
+                    'inline-flex h-8 items-center rounded-[6px] px-2 font-medium transition-colors',
+                    selectedBatchDeleteIds.length === 0
+                      ? 'cursor-not-allowed opacity-50'
+                      : 'bg-[#FF0061] text-white shadow-[0_3px_10px_rgba(255,0,97,0.12)] hover:bg-[#FF0061]/90',
+                  )}
+                >
+                  删除
+                </button>
+                <button
+                  type="button"
+                  onClick={exitBatchMode}
+                  className="inline-flex h-8 items-center rounded-[6px] px-2 text-[#ADADAD] hover:bg-[#EFEFEF]/70 hover:text-[#595757] dark:hover:bg-white/10"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {/* Quota strip first — the user's daily/monthly headroom
                   is the primary "what can I still do" signal. Refetch
                   key combines tasks.length (bumps on create/delete)
                   with the count of terminal tasks (bumps when any
@@ -616,28 +696,46 @@ export function Sidebar({
                   Sweep P2 fix: length alone missed live updates;
                   the bar would stay stale at 57/100 until the next
                   create. */}
-              <QuotaIndicator
-                refreshKey={`${tasks.length}|${quotaTerminalCount}`}
-              />
-              <div className="px-2 pb-1 pt-1">
-                <ShareInviteRow />
-              </div>
-            </SidebarFooter>
+          <QuotaIndicator
+            compact={sidebarIsCompact}
+            refreshKey={`${tasks.length}|${quotaTerminalCount}`}
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className="hd-sidebar-more" title="更多操作">
+                <MoreHorizontal />
+                <span>更多</span>
+                <small>设置与帮助</small>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" className="w-60">
+              {onDeleteTasks && (
+                <DropdownMenuItem onSelect={() => setBatchMode(true)}>
+                  <Layers className="h-4 w-4" />
+                  批量管理
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem asChild>
+                <Link to="/settings">设置</Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to="/usage">本月用量</Link>
+              </DropdownMenuItem>
+              <ShareInviteRow />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </SidebarFooter>
         {/* SidebarRail — invisible hairline on the right edge that
             users can click to toggle expand/collapse. Lets the icon
             mode feel composable instead of "stuck" without users
             having to discover Cmd+B. */}
-        {!adaptiveCollapsed && <SidebarRail />}
+        {!forceCollapsed && <SidebarRail />}
       </SidebarShell>
 
       <TaskContextMenu
         menu={menu}
         onClose={() => setMenu(null)}
-        pinned={
-          menu
-            ? Boolean(uniqueTasks.find((t) => t.taskId === menu.taskId)?.starred)
-            : false
-        }
+        pinned={menu ? Boolean(uniqueTasks.find((t) => t.taskId === menu.taskId)?.starred) : false}
         onTogglePin={() => {
           if (!menu) return;
           void togglePin(menu.taskId);
@@ -680,6 +778,8 @@ export function Sidebar({
           onDeleteTask
             ? () => {
                 if (!menu || !menu.deletable) return;
+                setOpenMobile(false);
+                onMobileClose?.();
                 void onDeleteTask(menu.taskId);
               }
             : undefined
@@ -690,16 +790,14 @@ export function Sidebar({
 }
 
 interface TaskContextMenuProps {
-  menu:
-    | {
-        taskId: string;
-        intent: string;
-        projectId: string | null;
-        x: number;
-        y: number;
-        deletable: boolean;
-      }
-    | null;
+  menu: {
+    taskId: string;
+    intent: string;
+    projectId: string | null;
+    x: number;
+    y: number;
+    deletable: boolean;
+  } | null;
   onClose(): void;
   pinned: boolean;
   onTogglePin(): void;
@@ -792,25 +890,15 @@ function TaskContextMenu({
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
               <DropdownMenuItem onSelect={() => onMoveToProject(null)}>
-                <Check
-                  className={cn(
-                    'opacity-0',
-                    menu.projectId == null && 'opacity-100',
-                  )}
-                />
+                <Check className={cn('opacity-0', menu.projectId == null && 'opacity-100')} />
                 <span className="text-muted-foreground">无项目</span>
               </DropdownMenuItem>
               {(projects ?? []).length > 0 && <DropdownMenuSeparator />}
               {(projects ?? []).map((p) => {
                 const active = menu.projectId === p.projectId;
                 return (
-                  <DropdownMenuItem
-                    key={p.projectId}
-                    onSelect={() => onMoveToProject(p.projectId)}
-                  >
-                    <Check
-                      className={cn('opacity-0', active && 'opacity-100')}
-                    />
+                  <DropdownMenuItem key={p.projectId} onSelect={() => onMoveToProject(p.projectId)}>
+                    <Check className={cn('opacity-0', active && 'opacity-100')} />
                     <span className="min-w-0 flex-1 truncate">{p.name}</span>
                   </DropdownMenuItem>
                 );
@@ -836,8 +924,7 @@ function TaskContextMenu({
             disabled={!menu.deletable}
             onSelect={onDelete}
             className={cn(
-              menu.deletable &&
-                'text-[#EA1F59] focus:bg-[#EA1F59]/10 focus:text-[#EA1F59]',
+              menu.deletable && 'text-[#FF0061] focus:bg-[#FF0061]/10 focus:text-[#FF0061]',
             )}
           >
             <Trash2 className={menu.deletable ? '' : 'text-muted-foreground'} />
@@ -907,27 +994,39 @@ function LoadMoreTasksButton({
     hasMore: boolean;
     loadingMore: boolean;
     onLoadMore: () => void;
+    exhaustedCopy?: string;
   };
 }): JSX.Element | null {
   // Hooks always run — even when an override is provided — so we
   // don't violate the hooks rules. Cheap reads when unused.
   const storeHasMore = useTaskStore((s) => s.tasksHasMore);
+  const storeLimitReached = useTaskStore((s) => s.tasksVisiblePageLimitReached);
   const storeLoadingMore = useTaskStore((s) => s.loadingMore);
   const storeLoadMore = useTaskStore((s) => s.loadMoreTasks);
-  const hasMore = override ? override.hasMore : storeHasMore;
+  const hasMore = override ? override.hasMore : storeHasMore && !storeLimitReached;
   const loadingMore = override ? override.loadingMore : storeLoadingMore;
   const onLoadMore = override
     ? override.onLoadMore
     : (): void => {
         void storeLoadMore();
       };
-  if (!hasMore) return null;
+  const exhaustedCopy = override
+    ? override.exhaustedCopy
+    : storeLimitReached
+      ? '没有更多可见任务'
+      : undefined;
+  if (!hasMore)
+    return exhaustedCopy ? (
+      <p role="status" className="mx-3 my-2 text-xs text-muted-foreground">
+        {exhaustedCopy}
+      </p>
+    ) : null;
   return (
     <button
       type="button"
       onClick={onLoadMore}
       disabled={loadingMore}
-      className="mx-2 my-2 inline-flex h-8 w-[calc(100%-1rem)] items-center justify-center gap-1.5 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-2 text-center text-xs text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
+      className="mx-2 my-2 inline-flex h-8 w-[calc(100%-1rem)] items-center justify-center gap-1.5 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-2 text-center text-xs text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 hover:text-[#FF0061] disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10"
     >
       <RotateCcw className={cn('h-3 w-3', loadingMore && 'animate-spin')} aria-hidden />
       {loadingMore ? '加载中…' : '加载更多任务'}
@@ -955,9 +1054,9 @@ function RetentionHint({
     <button
       type="button"
       onClick={() => navigate('/plan')}
-      className="group mx-2 mt-3 flex w-[calc(100%-1rem)] items-start gap-2 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-3 py-2 text-left text-[11px] text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
+      className="group mx-2 mt-3 flex w-[calc(100%-1rem)] items-start gap-2 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-3 py-2 text-left text-[11px] text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10"
     >
-      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] border border-[#EA1F59]/15 bg-[#EA1F59]/10 text-[#EA1F59]">
+      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] border border-[#FF0061]/15 bg-[#FF0061]/10 text-[#FF0061]">
         <Clock className="h-3 w-3" aria-hidden />
       </span>
       <div className="min-w-0 flex-1">
@@ -996,8 +1095,8 @@ const FEATURES: readonly FeatureItem[] = [
   { icon: Clapperboard, label: '视频任务', href: '/video' },
   { icon: ImagePlus, label: '图片任务', href: '/image' },
   { icon: CalendarClock, label: '规划任务', href: '/planned' },
-  { icon: FolderOpen, label: '文件库', href: '/files' },
-  { icon: Layers, label: '项目', href: '/projects' },
+  { icon: Files, label: '文件库', href: '/files' },
+  { icon: Folder, label: '项目', href: '/projects' },
   // 收藏 was a top-level nav row but it duplicated what the sidebar
   // already shows: starred tasks bubble to the top of SidebarTasks
   // as the "收藏" group. The /starred route still exists for direct
@@ -1009,16 +1108,41 @@ const FEATURES: readonly FeatureItem[] = [
  * routes render as clickable nav links; disabled rows keep a neutral
  * unavailable label. Compact density (32px row).
  */
-function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
+function FeatureNav({
+  userRole,
+  projects,
+  onCreateProject,
+  onNavigate,
+}: {
+  userRole: 'user' | 'admin';
+  projects: readonly UiProject[];
+  onCreateProject?: () => void;
+  onNavigate?: () => void;
+}): JSX.Element {
   const navigate = useNavigate();
-  // Read pathname directly so the active highlight updates on route
-  // switch without forcing a re-render through props. The shrink-0
-  // wrapper keeps this segment pinned below SidebarHeader while
-  // SidebarContent (the task list) takes the remaining height.
-  const pathname =
-    typeof window !== 'undefined' ? window.location.pathname : '';
+  const { pathname, search } = useLocation();
+  const { setOpen } = useSidebar();
+  const [projectsExpanded, setProjectsExpanded] = React.useState(() => {
+    try {
+      return sessionStorage.getItem('holaday-projects-expanded') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  React.useEffect(() => {
+    try {
+      sessionStorage.setItem('holaday-projects-expanded', String(projectsExpanded));
+    } catch {
+      /* Storage can be disabled. */
+    }
+  }, [projectsExpanded]);
+  const projectListId = React.useId();
+  const visit = (href: string): void => {
+    navigate(href);
+    onNavigate?.();
+  };
   return (
-    <SidebarGroup className="shrink-0 border-b border-[#DCDDDD]/70 dark:border-white/10">
+    <SidebarGroup className="holaday-feature-nav shrink-0">
       <SidebarGroupContent>
         <SidebarMenu>
           {filterSidebarFeatureNavItems(FEATURES, {
@@ -1027,24 +1151,85 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
           }).map((item) => {
             const { icon: Icon, label, href } = item;
             if (href) {
-              const isActive = pathname === href;
+              const isProjects = href === '/projects';
+              const isActive =
+                pathname === href ||
+                pathname.startsWith(`${href}/`) ||
+                (href === '/skills' && pathname === '/plugins') ||
+                (isProjects &&
+                  pathname === '/' &&
+                  Boolean(new URLSearchParams(search).get('project')));
               return (
                 <SidebarMenuItem key={label}>
-                <SidebarMenuButton
-                  tooltip={label}
-                  isActive={isActive}
-                  onPointerEnter={() => preloadSidebarFeatureNavItem(item)}
-                  onFocus={() => preloadSidebarFeatureNavItem(item)}
-                  onClick={() => navigate(href)}
-                  className={cn(
-                    'rounded-[8px] border border-transparent text-[#595757] hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/75 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
-                    isActive &&
-                      'border-[#EA1F59]/25 bg-[#EA1F59]/10 text-[#EA1F59] hover:bg-[#EA1F59]/10',
-                  )}
-                >
+                  <SidebarMenuButton
+                    tooltip={label}
+                    isActive={isActive}
+                    onPointerEnter={() => preloadSidebarFeatureNavItem(item)}
+                    onFocus={() => preloadSidebarFeatureNavItem(item)}
+                    aria-current={isActive ? 'page' : undefined}
+                    aria-expanded={isProjects ? projectsExpanded : undefined}
+                    aria-controls={isProjects ? projectListId : undefined}
+                    onClick={() => {
+                      if (isProjects) {
+                        setOpen(true);
+                        setProjectsExpanded(isActive ? !projectsExpanded : true);
+                        if (!isActive) navigate(href);
+                      } else visit(href);
+                    }}
+                    className={cn(
+                      'rounded-[8px] border border-transparent text-[#595757] hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:text-foreground/75 dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10',
+                      isActive &&
+                        'border-[#FF0061]/25 bg-[#FF0061]/10 text-[#FF0061] hover:bg-[#FF0061]/10',
+                    )}
+                  >
                     <Icon aria-hidden />
                     <span>{label}</span>
+                    {isProjects && (
+                      <ChevronDown
+                        aria-hidden
+                        className={cn(
+                          'ml-auto transition-transform group-data-[collapsible=icon]:hidden',
+                          projectsExpanded && 'rotate-180',
+                        )}
+                      />
+                    )}
                   </SidebarMenuButton>
+                  {isProjects && (
+                    <div
+                      className="hd-project-disclosure group-data-[collapsible=icon]:hidden"
+                      data-open={projectsExpanded}
+                      aria-hidden={!projectsExpanded}
+                    >
+                      <div id={projectListId} className="holaday-project-links">
+                        {projects.map((project) => (
+                          <button
+                            key={project.projectId}
+                            type="button"
+                            tabIndex={projectsExpanded ? 0 : -1}
+                            onClick={() =>
+                              visit(`/projects?project=${encodeURIComponent(project.projectId)}`)
+                            }
+                          >
+                            <FolderOpen aria-hidden />
+                            <span>{project.name}</span>
+                          </button>
+                        ))}
+                        {onCreateProject && (
+                          <button
+                            type="button"
+                            tabIndex={projectsExpanded ? 0 : -1}
+                            onClick={() => {
+                              onCreateProject();
+                              onNavigate?.();
+                            }}
+                          >
+                            <Plus aria-hidden />
+                            <span>新建项目</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </SidebarMenuItem>
               );
             }
@@ -1070,11 +1255,11 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
               <SidebarMenuButton
                 tooltip="管理后台"
                 isActive={pathname.startsWith('/admin')}
-                onClick={() => navigate('/admin')}
+                onClick={() => visit('/admin')}
                 className={cn(
-                  'rounded-[8px] border border-transparent hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
+                  'rounded-[8px] border border-transparent hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10',
                   pathname.startsWith('/admin') &&
-                    'border-[#EA1F59]/25 bg-[#EA1F59]/10 text-[#EA1F59] hover:bg-[#EA1F59]/10',
+                    'border-[#FF0061]/25 bg-[#FF0061]/10 text-[#FF0061] hover:bg-[#FF0061]/10',
                 )}
               >
                 <Shield aria-hidden />
@@ -1110,14 +1295,12 @@ function ShareInviteRow(): JSX.Element {
       onClick={() => void onShare()}
       aria-label="复制邀请链接"
       title="复制邀请链接"
-      className="group flex w-full items-center gap-2.5 rounded-[8px] border border-[#DCDDDD]/60 bg-white/45 px-2.5 py-2 text-left text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:border-white/10 dark:bg-white/[0.04] dark:text-foreground/70 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
+      className="group flex w-full items-center gap-2.5 rounded-[8px] border border-[#DCDDDD]/60 bg-white/45 px-2.5 py-2 text-left text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:border-white/10 dark:bg-white/[0.04] dark:text-foreground/70 dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10"
     >
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-[#EA1F59]/15 bg-[#EA1F59]/10 text-[#EA1F59]">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-[#FF0061]/15 bg-[#FF0061]/10 text-[#FF0061]">
         <Share2 className="h-3.5 w-3.5" aria-hidden />
       </span>
-      <span className="min-w-0 truncate text-[12px] font-medium leading-4">
-        邀请好友
-      </span>
+      <span className="min-w-0 truncate text-[12px] font-medium leading-4">邀请好友</span>
     </button>
   );
 }

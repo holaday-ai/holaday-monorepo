@@ -1,9 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import {
-  pickImageModel,
-  DEFAULT_FLASH_MODEL,
-  DEFAULT_PRO_MODEL,
-} from './model-router.js';
+import { describe, expect, it } from 'vitest';
+import { DEFAULT_FLASH_MODEL, DEFAULT_PRO_MODEL, pickImageModel } from './model-router.js';
 
 describe('pickImageModel', () => {
   it('defaults to NB2 flash for a plain text-to-image ask', () => {

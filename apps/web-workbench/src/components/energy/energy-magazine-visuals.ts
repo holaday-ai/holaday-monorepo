@@ -135,9 +135,7 @@ export const MAGAZINE_ART: readonly MagazineArtAsset[] = [
   },
 ] as const;
 
-export const DIMENSION_MAGAZINE_ART: Readonly<
-  Record<string, `/energy/magazine/${string}.webp`>
-> = {
+export const DIMENSION_MAGAZINE_ART: Readonly<Record<string, `/energy/magazine/${string}.webp`>> = {
   personal: '/energy/magazine/editorial-spark.webp',
   health: '/energy/magazine/editorial-breath.webp',
   profession: '/energy/magazine/fortune-window.webp',
@@ -174,19 +172,12 @@ function stableHash(value: string): number {
 function rotate<T>(values: readonly T[], offset: number): T[] {
   if (values.length === 0) return [];
   const normalizedOffset = offset % values.length;
-  return [
-    ...values.slice(normalizedOffset),
-    ...values.slice(0, normalizedOffset),
-  ];
+  return [...values.slice(normalizedOffset), ...values.slice(0, normalizedOffset)];
 }
 
 function orderedCandidates(item: EnergyContentItem): MagazineArtAsset[] {
-  const preferred = MAGAZINE_ART.filter((asset) =>
-    asset.categories.includes(item.category),
-  );
-  const fallback = MAGAZINE_ART.filter(
-    (asset) => !asset.categories.includes(item.category),
-  );
+  const preferred = MAGAZINE_ART.filter((asset) => asset.categories.includes(item.category));
+  const fallback = MAGAZINE_ART.filter((asset) => !asset.categories.includes(item.category));
   return [
     ...rotate(preferred, stableHash(item.id)),
     ...rotate(fallback, stableHash(`${item.id}:fallback`)),
@@ -199,9 +190,7 @@ export function allocateMagazineVisuals(
 ): AllocatedMagazineItem[] {
   const used = new Set<string>();
   return items.slice(0, 6).map((item, index) => {
-    const visual = orderedCandidates(item).find(
-      (candidate) => !used.has(candidate.imageSrc),
-    );
+    const visual = orderedCandidates(item).find((candidate) => !used.has(candidate.imageSrc));
     if (!visual) {
       throw new Error('magazine artwork catalog cannot allocate a unique batch');
     }
@@ -210,8 +199,7 @@ export function allocateMagazineVisuals(
       item,
       slot: SLOT_BY_INDEX[index] ?? 'landscape',
       visual,
-      zodiacBadgeSrc:
-        item.category === 'zodiac-knowledge' ? zodiacBadgeImage(zodiacSign) : null,
+      zodiacBadgeSrc: item.category === 'zodiac-knowledge' ? zodiacBadgeImage(zodiacSign) : null,
     };
   });
 }

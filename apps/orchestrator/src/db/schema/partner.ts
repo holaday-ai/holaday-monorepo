@@ -127,10 +127,18 @@ export const partnerLots = mysqlTable(
     tierMultiplierBps: int('tier_multiplier_bps', { unsigned: true }).notNull(),
     apiUnits: bigint('api_units', { mode: 'number', unsigned: true }).notNull(),
     bonusCapCreditCents: int('bonus_cap_credit_cents', { unsigned: true }).notNull(),
-    lockedBonusCreditCents: int('locked_bonus_credit_cents', { unsigned: true }).notNull().default(0),
-    releasedPrincipalCreditCents: int('released_principal_credit_cents', { unsigned: true }).notNull().default(0),
-    releasedBonusCreditCents: int('released_bonus_credit_cents', { unsigned: true }).notNull().default(0),
-    carryForwardCreditCents: int('carry_forward_credit_cents', { unsigned: true }).notNull().default(0),
+    lockedBonusCreditCents: int('locked_bonus_credit_cents', { unsigned: true })
+      .notNull()
+      .default(0),
+    releasedPrincipalCreditCents: int('released_principal_credit_cents', { unsigned: true })
+      .notNull()
+      .default(0),
+    releasedBonusCreditCents: int('released_bonus_credit_cents', { unsigned: true })
+      .notNull()
+      .default(0),
+    carryForwardCreditCents: int('carry_forward_credit_cents', { unsigned: true })
+      .notNull()
+      .default(0),
     accumulationStartsAt: datetime('accumulation_starts_at', { mode: 'date', fsp: 3 }).notNull(),
     accumulationEndsAt: datetime('accumulation_ends_at', { mode: 'date', fsp: 3 }).notNull(),
     releaseStartsAt: datetime('release_starts_at', { mode: 'date', fsp: 3 }).notNull(),
@@ -159,7 +167,9 @@ export const holaCreditLedgerEntries = mysqlTable(
     direction: varchar('direction', { length: 8 }).notNull(),
     bucket: varchar('bucket', { length: 32 }).notNull(),
     amountCreditCents: int('amount_credit_cents', { unsigned: true }).notNull().default(0),
-    amountApiUnits: bigint('amount_api_units', { mode: 'number', unsigned: true }).notNull().default(0),
+    amountApiUnits: bigint('amount_api_units', { mode: 'number', unsigned: true })
+      .notNull()
+      .default(0),
     status: varchar('status', { length: 16 }).notNull().default('posted'),
     idempotencyKey: varchar('idempotency_key', { length: 160 }).notNull(),
     metadata: json('metadata'),
@@ -180,7 +190,9 @@ export const apiCostPoolEvents = mysqlTable(
     externalId: externalIdColumn(),
     eventDate: varchar('event_date', { length: 10 }).notNull(),
     source: varchar('source', { length: 32 }).notNull(),
-    costUsdMicros: bigint('cost_usd_micros', { mode: 'number', unsigned: true }).notNull().default(0),
+    costUsdMicros: bigint('cost_usd_micros', { mode: 'number', unsigned: true })
+      .notNull()
+      .default(0),
     fxBps: int('fx_bps', { unsigned: true }).notNull(),
     apiUnits: bigint('api_units', { mode: 'number', unsigned: true }).notNull(),
     idempotencyKey: varchar('idempotency_key', { length: 160 }).notNull(),
@@ -286,7 +298,11 @@ export const partnerActivityEvents = mysqlTable(
   (t) => [
     uniqueIndex('uk_partner_activity_events_external_id').on(t.externalId),
     uniqueIndex('uk_partner_activity_events_idempotency_key').on(t.idempotencyKey),
-    uniqueIndex('uk_partner_activity_events_user_day_type').on(t.userId, t.activityDate, t.eventType),
+    uniqueIndex('uk_partner_activity_events_user_day_type').on(
+      t.userId,
+      t.activityDate,
+      t.eventType,
+    ),
     index('ix_partner_activity_events_user_date').on(t.userId, t.activityDate),
     index('ix_partner_activity_events_date_type').on(t.activityDate, t.eventType),
   ],
@@ -327,7 +343,9 @@ export const partnerMonthlyReleases = mysqlTable(
     releaseMonth: varchar('release_month', { length: 7 }).notNull(),
     principalCreditCents: int('principal_credit_cents', { unsigned: true }).notNull().default(0),
     bonusCreditCents: int('bonus_credit_cents', { unsigned: true }).notNull().default(0),
-    carryForwardCreditCents: int('carry_forward_credit_cents', { unsigned: true }).notNull().default(0),
+    carryForwardCreditCents: int('carry_forward_credit_cents', { unsigned: true })
+      .notNull()
+      .default(0),
     status: varchar('status', { length: 24 }).notNull().default('posted'),
     idempotencyKey: varchar('idempotency_key', { length: 160 }).notNull(),
     metadata: json('metadata'),

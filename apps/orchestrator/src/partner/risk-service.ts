@@ -29,7 +29,10 @@ export function evaluatePartnerRisk(input: {
 }): RiskDecision {
   const kycPassed = assertBoolean(input.kycPassed, 'kycPassed');
   const sameNameBank = assertBoolean(input.sameNameBank, 'sameNameBank');
-  const amountCreditCents = assertNonNegativeSafeInteger(input.amountCreditCents, 'amountCreditCents');
+  const amountCreditCents = assertNonNegativeSafeInteger(
+    input.amountCreditCents,
+    'amountCreditCents',
+  );
   const referralConcentration = assertBoolean(input.referralConcentration, 'referralConcentration');
   const accountFrozen = assertBoolean(input.accountFrozen, 'accountFrozen');
 

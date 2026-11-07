@@ -116,7 +116,10 @@ export function createPayPalAdapter(opts: {
     }
   }
 
-  async function authedFetch(path: string, init: { method: string; body?: string }): Promise<Response> {
+  async function authedFetch(
+    path: string,
+    init: { method: string; body?: string },
+  ): Promise<Response> {
     const token = await getAccessToken();
     return fetch(`${baseUrl}${path}`, {
       method: init.method,
@@ -226,10 +229,7 @@ export function createPayPalAdapter(opts: {
   };
 }
 
-function pickHeader(
-  headers: Record<string, string | string[] | undefined>,
-  name: string,
-): string {
+function pickHeader(headers: Record<string, string | string[] | undefined>, name: string): string {
   const v = headers[name] ?? headers[name.toLowerCase()];
   if (Array.isArray(v)) return v[0] ?? '';
   return v ?? '';
@@ -247,7 +247,8 @@ function parseCaptureFromOrder(json: Record<string, unknown>): {
   currency: string;
   payerEmail: string | null;
 } {
-  const units = (json.purchase_units as unknown as Array<Record<string, unknown>> | undefined) ?? [];
+  const units =
+    (json.purchase_units as unknown as Array<Record<string, unknown>> | undefined) ?? [];
   const unit = units[0] ?? {};
   const payments = (unit.payments as Record<string, unknown> | undefined) ?? {};
   const captures = (payments.captures as Array<Record<string, unknown>> | undefined) ?? [];

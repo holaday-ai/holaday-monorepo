@@ -37,7 +37,15 @@ describe('resolveCtripHotelUrl — deterministic city/date schema', () => {
   });
   it('v2 city map: 成都/重庆/南京/苏州/武汉/西安/厦门/青岛/三亚 resolve to ids', () => {
     const ids: Record<string, number> = {
-      成都: 28, 重庆: 4, 南京: 12, 苏州: 14, 武汉: 477, 西安: 10, 厦门: 25, 青岛: 29, 三亚: 43,
+      成都: 28,
+      重庆: 4,
+      南京: 12,
+      苏州: 14,
+      武汉: 477,
+      西安: 10,
+      厦门: 25,
+      青岛: 29,
+      三亚: 43,
     };
     for (const [city, id] of Object.entries(ids)) {
       const r = resolveCtripHotelUrl({ intent: `携程查${city}酒店`, now: NOW });
@@ -96,7 +104,9 @@ describe('extractCtripHotels', () => {
     expect(hilton?.starLabel).toBe('高档型');
   });
   it('handles comma prices', () => {
-    expect(extractCtripHotels(SH_BODY).find((h) => h.name.includes('香格里拉'))?.priceCNY).toBe(1164);
+    expect(extractCtripHotels(SH_BODY).find((h) => h.name.includes('香格里拉'))?.priceCNY).toBe(
+      1164,
+    );
   });
   it('returns [] for empty / no-hotel text', () => {
     expect(extractCtripHotels('')).toEqual([]);
@@ -107,7 +117,13 @@ describe('extractCtripHotels', () => {
 describe('filterAndFormatHotels — hard price cap', () => {
   it('drops hotels above the cap, sorts asc, caps topN, marks no-booking', () => {
     const hotels = extractCtripHotels(SH_BODY);
-    const r = filterAndFormatHotels({ hotels, city: '上海', url: 'https://hotels.ctrip.com/hotels/list?city=2', maxPriceCNY: 800, topN: 5 });
+    const r = filterAndFormatHotels({
+      hotels,
+      city: '上海',
+      url: 'https://hotels.ctrip.com/hotels/list?city=2',
+      maxPriceCNY: 800,
+      topN: 5,
+    });
     expect(r.table).toBeTruthy();
     expect(r.table).toContain('| 酒店名 | 评分 | 价格(¥) | 位置 | 档次 |');
     expect(r.table).toContain('维也纳'); // ¥468 in
@@ -119,8 +135,15 @@ describe('filterAndFormatHotels — hard price cap', () => {
     expect(r.table!.indexOf('468')).toBeLessThan(r.table!.indexOf('587'));
   });
   it('all-over-cap → reason stating the lowest price seen, no fake table', () => {
-    const expensive = extractCtripHotels('北京王府井希尔顿酒店 豪华型 4.8分 王府井商圈 ¥1,500 起\n北京国贸洲际酒店 豪华型 4.7分 国贸商圈 ¥1,800 起');
-    const r = filterAndFormatHotels({ hotels: expensive, city: '北京', url: 'u', maxPriceCNY: 800 });
+    const expensive = extractCtripHotels(
+      '北京王府井希尔顿酒店 豪华型 4.8分 王府井商圈 ¥1,500 起\n北京国贸洲际酒店 豪华型 4.7分 国贸商圈 ¥1,800 起',
+    );
+    const r = filterAndFormatHotels({
+      hotels: expensive,
+      city: '北京',
+      url: 'u',
+      maxPriceCNY: 800,
+    });
     expect(r.table).toBeUndefined();
     expect(r.reason).toContain('最低价为 ¥1,500');
     expect(r.reason).toContain('未找到符合');
@@ -161,7 +184,13 @@ describe('extractCtripHotels v2 — suffix-free brands + ad filtering', () => {
   });
 
   it('上海 ≤800 filter keeps 全季/亚朵S/汉庭, drops 素凯泰/柏悦', () => {
-    const r = filterAndFormatHotels({ hotels: extractCtripHotels(SH_V2_BODY), city: '上海', url: 'https://hotels.ctrip.com/hotels/list?city=2', maxPriceCNY: 800, topN: 5 });
+    const r = filterAndFormatHotels({
+      hotels: extractCtripHotels(SH_V2_BODY),
+      city: '上海',
+      url: 'https://hotels.ctrip.com/hotels/list?city=2',
+      maxPriceCNY: 800,
+      topN: 5,
+    });
     expect(r.table).toContain('全季');
     expect(r.table).toContain('亚朵S');
     expect(r.table).toContain('汉庭');
@@ -182,7 +211,13 @@ describe('extractCtripHotels v2 — 杭州 fixture (3-5 rows)', () => {
   it('reads 杭州 hotels and applies the ≤800 cap', () => {
     const hotels = extractCtripHotels(HZ_V2_BODY);
     expect(hotels.length).toBe(4);
-    const r = filterAndFormatHotels({ hotels, city: '杭州', url: 'https://hotels.ctrip.com/hotels/list?city=17', maxPriceCNY: 800, topN: 5 });
+    const r = filterAndFormatHotels({
+      hotels,
+      city: '杭州',
+      url: 'https://hotels.ctrip.com/hotels/list?city=17',
+      maxPriceCNY: 800,
+      topN: 5,
+    });
     expect(r.table).toContain('星程'); // ¥320 in
     expect(r.table).toContain('亚朵'); // ¥560 in
     expect(r.table).toContain('国宾馆'); // ¥760 in
@@ -193,12 +228,28 @@ describe('extractCtripHotels v2 — 杭州 fixture (3-5 rows)', () => {
 
 describe('Step 9 — isValidHotelName (promo-label blacklist)', () => {
   it('rejects the exact Step-8 junk names', () => {
-    for (const n of ['百达屋会员价', '优惠74', '特惠一口价', '比收藏时降价', '连续39位住客好评', '立减200', '3项优惠192', '券后价']) {
+    for (const n of [
+      '百达屋会员价',
+      '优惠74',
+      '特惠一口价',
+      '比收藏时降价',
+      '连续39位住客好评',
+      '立减200',
+      '3项优惠192',
+      '券后价',
+    ]) {
       expect(isValidHotelName(n), n).toBe(false);
     }
   });
   it('accepts real hotel / brand names (suffix or not)', () => {
-    for (const n of ['上海五角场希尔顿花园酒店', '亚朵', '全季', '柏悦', '上海素凯泰', '汉庭酒店']) {
+    for (const n of [
+      '上海五角场希尔顿花园酒店',
+      '亚朵',
+      '全季',
+      '柏悦',
+      '上海素凯泰',
+      '汉庭酒店',
+    ]) {
       expect(isValidHotelName(n), n).toBe(true);
     }
   });
@@ -218,8 +269,20 @@ describe('Step 9 — parseHotelJson + validateHotelJson', () => {
   });
   it('good case: real hotels pass through, sorted + capped', () => {
     const items = [
-      { hotelName: '上海外滩亚朵酒店', rating: '4.7', price: 678, location: '外滩', starOrTier: '舒适型' },
-      { hotelName: '上海虹桥全季酒店', rating: 4.5, price: 420, location: '虹桥', starOrTier: '经济型' },
+      {
+        hotelName: '上海外滩亚朵酒店',
+        rating: '4.7',
+        price: 678,
+        location: '外滩',
+        starOrTier: '舒适型',
+      },
+      {
+        hotelName: '上海虹桥全季酒店',
+        rating: 4.5,
+        price: 420,
+        location: '虹桥',
+        starOrTier: '经济型',
+      },
     ];
     const v = validateHotelJson({ items, priceLimit: 800, topN: 5 });
     expect(v.map((h) => h.name)).toEqual(['上海虹桥全季酒店', '上海外滩亚朵酒店']); // price asc
@@ -237,14 +300,17 @@ describe('Step 9 — parseHotelJson + validateHotelJson', () => {
     expect(v.map((h) => h.name)).toEqual(['上海外滩亚朵酒店']);
   });
   it('price-cap: nothing under cap → empty', () => {
-    const items = [{ hotelName: '上海王府酒店', price: 1500 }, { hotelName: '上海国贸酒店', price: 1800 }];
+    const items = [
+      { hotelName: '上海王府酒店', price: 1500 },
+      { hotelName: '上海国贸酒店', price: 1800 },
+    ];
     expect(validateHotelJson({ items, priceLimit: 800 })).toEqual([]);
   });
 });
 
 describe('bodyMatchesCity v2 — dominant city among recommendations', () => {
   it('Shanghai page with a few Beijing recommendations still matches 上海', () => {
-    const mixed = SH_V2_BODY + '\n猜你喜欢 北京王府井希尔顿酒店 ¥1,200 北京三里屯洲际 ¥1,400';
+    const mixed = `${SH_V2_BODY}\n猜你喜欢 北京王府井希尔顿酒店 ¥1,200 北京三里屯洲际 ¥1,400`;
     expect(bodyMatchesCity(mixed, '上海')).toBe(true); // 上海 dominates
     expect(bodyMatchesCity(mixed, '北京')).toBe(false); // not the result city
   });
@@ -264,7 +330,10 @@ describe('parseHotelPriceLimit — natural-language budget parsing (P1 fix)', ()
     ['低于 800', '低于 800'],
     ['价格 800 元以内', '价格 800 元以内'],
     // The exact QA-#6 prompt that produced priceLimit=null before the fix.
-    ['QA-#6 广州 "800 以内"', '我想在广州住一晚，帮我看看携程上 800 以内有哪些靠谱酒店，不要预订。'],
+    [
+      'QA-#6 广州 "800 以内"',
+      '我想在广州住一晚，帮我看看携程上 800 以内有哪些靠谱酒店，不要预订。',
+    ],
   ])('%s → 800', (_label, intent) => {
     expect(parseHotelPriceLimit(intent)).toBe(800);
   });

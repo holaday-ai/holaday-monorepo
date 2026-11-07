@@ -22,8 +22,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { pickInstanceForRoute } from './screencast-proxy.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
+import { pickInstanceForRoute } from './screencast-proxy.js';
 
 function fakeInstance(overrides: Partial<BrowserInstance>): BrowserInstance {
   return {

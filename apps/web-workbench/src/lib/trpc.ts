@@ -1,6 +1,6 @@
-import { createTRPCClient, httpBatchLink } from '@trpc/client';
-import type { AppRouter } from '@holaday/orchestrator/trpc/router';
 import { getAccessToken } from '@/lib/auth';
+import type { AppRouter } from '@holaday/orchestrator/trpc/router';
+import { createTRPCClient, httpBatchLink } from '@trpc/client';
 
 /**
  * tRPC client for the web workbench. Talks to the orchestrator at

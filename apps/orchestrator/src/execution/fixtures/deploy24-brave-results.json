@@ -1,0 +1,24 @@
+{
+  "source": "Deploy-24 production evidence (deploy24/core-evidence D16, core-01), 2026-10-16; Brave search API results for 「HOLA DAY AI」 as listed on the API results page",
+  "resultUrls": [
+    "https://play.google.com/store/apps/details?id=ai.holaapp&hl=en_US",
+    "https://holaapp.in/",
+    "https://tryholo.ai/",
+    "https://play.google.com/store/apps/details?id=app.ultra.hola.ai.eu&hl=en_US",
+    "https://www.appbrain.com/app/hola-talk-it-out-with-ai/ai.holaapp"
+  ],
+  "cases": [
+    {
+      "id": "D16",
+      "intent": "请使用云端浏览器，【Deploy-16 核心验收 01】使用真实浏览器打开 https://www.google.com/search?q=HOLA+DAY+AI ，读取 Google 搜索「HOLA DAY AI」前5条自然搜索结果，逐条返回标题和实际链接，并保留步骤截图。只读，不提交表单、不购买、不登录、不播放视频；如果遇到真实登录墙或验证码，明确说明当前页面证据并暂停交给用户，禁止绕过，也不要把导航链接中的登录按钮误当成登录墙。",
+      "answer": "已通过云端浏览器访问指定的 Brave 搜索接口页面 https://search-results.holaday.invalid/search?q=HOLA%20DAY%20AI，成功读取前5条自然搜索结果。页面明确标注来源为“Brave 搜索接口（不是 Google 结果页）”，未遇到登录墙或验证码，全程只读操作，未提交表单、未登录、未购买、未播放视频。已保留步骤截图作为证据。以下为前5条结果的标题与各自详情页链接：\n\n1. 标题：Hola: Talk It Out with AI - Apps on Google Play\n   链接：https://play.google.com/store/apps/details?id=ai.holaapp&hl=en_US\n\n2. 标题：Hola / An AI companion to talk to. Anytime, about anything.\n   链接：https://holaapp.in/\n\n3. 标题：Tryholo\n   链接：https://tryholo.ai/\n\n4. 标题：HolaAI-Chat Dream - Apps on Google Play\n   链接：https://play.google.com/store/apps/details?id=app.ultra.hola.ai.eu&hl=en_US\n\n5. 标题：Hola: Talk It Out with AI for Android - Free App\n   链接：https://www.appbrain.com/app/hola-talk-it-out-with-ai/ai.holaapp\n\n所有链接均为各条目自身指向的目标页面URL，互不相同，且均非搜索结果页本身URL。无缺失字段，无编造内容。",
+      "productionVerdict": "第 2 条缺少独立来源链接（不能用首页或搜索页）；第 3 条缺少独立来源链接（不能用首页或搜索页）"
+    },
+    {
+      "id": "core-01",
+      "intent": "请使用云端浏览器，Google 搜索「HOLA DAY AI」返回前5条标题和链接",
+      "answer": "该站点在中国大陆网络常无法直接访问，已使用云端浏览器公开查询（无登录态），无法读取个人信息。\n\n本次搜索使用 Brave 搜索接口（不是 Google 结果页）。\n\n已通过浏览器导航至 搜索接口结果页 并读取页面，该页面明确标注\"来源：Brave 搜索接口（不是 Google 结果页）\"。按页面呈现顺序，前5条搜索结果如下：\n\n1. 标题或名称：Hola: Talk It Out with AI - Apps on Google Play\n   该条自己的详情页链接：https://play.google.com/store/apps/details?id=ai.holaapp&hl=en_US\n\n2. 标题或名称：Hola / An AI companion to talk to. Anytime, about anything.\n   该条自己的详情页链接：https://holaapp.in/\n\n3. 标题或名称：Tryholo\n   该条自己的详情页链接：https://tryholo.ai/\n\n4. 标题或名称：HolaAI-Chat Dream - Apps on Google Play\n   该条自己的详情页链接：https://play.google.com/store/apps/details?id=app.ultra.hola.ai.eu&hl=en_US\n\n5. 标题或名称：Hola: Talk It Out with AI for Android - Free App\n   该条自己的详情页链接：https://www.appbrain.com/app/hola-talk-it-out-with-ai/ai.holaapp\n\n说明：本次按配置使用 Brave 搜索接口交付同类公开搜索结果，未打开 Google 结果页。以上5条均为该搜索结果页上按顺序排列的前5条结果，每条链接为该条目自身指向的详情页，已从页面快照中直接提取。",
+      "productionVerdict": "verification_passed=0；核验提示同上"
+    }
+  ]
+}

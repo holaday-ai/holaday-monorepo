@@ -131,6 +131,7 @@ export function TarotExperience({
 
   const draw = React.useCallback(
     (nextMode: CardLabMode): HoladayEnergyCard[] => {
+      if (phase === 'intro') onPhaseChange('active');
       const count = nextMode === 'three' ? 3 : 1;
       const nextCards = drawEnergyCards({
         mode: nextMode,
@@ -146,7 +147,7 @@ export function TarotExperience({
       setSaved(false);
       return nextCards;
     },
-    [seenIds, theme],
+    [seenIds, theme, phase, onPhaseChange],
   );
 
   const reveal = React.useCallback(

@@ -51,8 +51,18 @@ describe('JWT access tokens', () => {
   it('returns null for a tampered token', async () => {
     const { signAccessToken, verifyAccessToken } = await import('./jwt.js');
     const token = await signAccessToken({ sub: 'usr_xyz', plan: 'pro' });
-    const tampered = `${token.slice(0, -2)}xx`;
-    expect(await verifyAccessToken(tampered)).toBeNull();
+    const [header, payload, signature] = token.split('.') as [string, string, string];
+    // Flip one bit of a decoded byte: rewriting the last base64url characters can
+    // leave the signature as it was (the final character's low bits are padding).
+    const bytes = Buffer.from(signature, 'base64url');
+    bytes[0]! ^= 0x01;
+    const badSignature = `${header}.${payload}.${bytes.toString('base64url')}`;
+    expect(await verifyAccessToken(badSignature)).toBeNull();
+    // Claims changed under the original signature.
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    const raised = Buffer.from(JSON.stringify({ ...claims, plan: 'max' })).toString('base64url');
+    expect(await verifyAccessToken(`${header}.${raised}.${signature}`)).toBeNull();
+    expect(await verifyAccessToken(token)).not.toBeNull();
   });
 
   it('returns null for nonsense input', async () => {

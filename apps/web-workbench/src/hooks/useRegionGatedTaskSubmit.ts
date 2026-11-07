@@ -1,7 +1,4 @@
-import {
-  modelTaskSubmitDecision,
-  type ModelDataRegion,
-} from '@/lib/model-data-region-state';
+import { type ModelDataRegion, modelTaskSubmitDecision } from '@/lib/model-data-region-state';
 import * as React from 'react';
 
 interface RegionProfile {

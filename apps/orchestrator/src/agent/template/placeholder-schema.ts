@@ -19,11 +19,11 @@
  */
 
 import {
-  parseNumeric,
+  TBD_MARK,
   evalArithmetic,
+  parseNumeric,
   sumLoopColumn,
   withinDerivationTolerance,
-  TBD_MARK,
 } from './derivation-check.js';
 
 export type PlaceholderKind = 'field' | 'loop';
@@ -119,10 +119,7 @@ const DEFAULT_MAX_LOOP_ROWS = 2000;
 /** Count every placeholder (fields + loop sub-fields), recursively. */
 export function countPlaceholders(schema: PlaceholderSchema): number {
   const count = (fields: readonly PlaceholderField[]): number =>
-    fields.reduce(
-      (acc, f) => acc + 1 + (f.fields ? count(f.fields) : 0),
-      0,
-    );
+    fields.reduce((acc, f) => acc + 1 + (f.fields ? count(f.fields) : 0), 0);
   return count(schema.fields);
 }
 
@@ -216,9 +213,7 @@ export function validateFillJson(
     }
     let rows = raw;
     if (rows.length > maxLoopRows) {
-      warnings.push(
-        `循环 "${f.name}" 有 ${rows.length} 行，超过上限 ${maxLoopRows}，已截断`,
-      );
+      warnings.push(`循环 "${f.name}" 有 ${rows.length} 行，超过上限 ${maxLoopRows}，已截断`);
       rows = rows.slice(0, maxLoopRows);
     }
     const builtRows: FillRow[] = [];
@@ -239,9 +234,7 @@ export function validateFillJson(
         }
         const coerced = coerceScalar(v);
         if (coerced === null) {
-          typeErrors.push(
-            `循环 "${f.name}" 的字段 "${k}" 值无法写入（收到 ${describe(v)}）`,
-          );
+          typeErrors.push(`循环 "${f.name}" 的字段 "${k}" 值无法写入（收到 ${describe(v)}）`);
           continue;
         }
         if (coerced === '') continue;
@@ -305,11 +298,7 @@ export function validateFillJson(
       (arg) => sumLoopColumn(arg, data),
     );
     const claimed = parseNumeric(data[field]);
-    if (
-      computed === null ||
-      claimed === null ||
-      !withinDerivationTolerance(computed, claimed)
-    ) {
+    if (computed === null || claimed === null || !withinDerivationTolerance(computed, claimed)) {
       data[field] = TBD_MARK;
       flagged.push(field);
       warnings.push(

@@ -11,26 +11,26 @@
  * Single `admin.userDetail` query backs everything.
  */
 
+import { pageErrorMessage } from '@/lib/page-error-copy';
+import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import * as React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Cell, Pie, PieChart, Tooltip } from 'recharts';
-import { pageErrorMessage } from '@/lib/page-error-copy';
-import { trpc } from '@/lib/trpc';
-import { cn } from '@/lib/utils';
 import {
   ADMIN_BORDER,
   ADMIN_DIVIDER,
   ADMIN_MAGENTA,
   adminLoadErrorCopy,
   asRecord,
-  formatInteger,
   formatDate,
   formatDateTime,
   formatDurationMs,
+  formatInteger,
   indexedFallback,
-  nullableFiniteNumber,
   nonNegativeNumber,
+  nullableFiniteNumber,
   optionalText,
   safeArray,
   safeText,
@@ -41,14 +41,7 @@ import {
 
 type DetailData = Awaited<ReturnType<typeof trpc.admin.userDetail.query>>;
 
-const PIE_COLORS = [
-  '#EA1F59',
-  '#FFC910',
-  '#42C0EF',
-  '#57479C',
-  '#ADADAD',
-  '#595757',
-];
+const PIE_COLORS = ['#FF0061', '#FFC910', '#42C0EF', '#57479C', '#ADADAD', '#595757'];
 
 export function AdminUserDetailPage(): JSX.Element {
   const mountedRef = useMountedRef();
@@ -87,12 +80,12 @@ export function AdminUserDetailPage(): JSX.Element {
       <div className="mx-auto max-w-5xl px-6 py-10">
         <Link
           to="/admin/users"
-          className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
+          className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#FF0061]"
         >
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
           返回用户列表
         </Link>
-        <div className="mt-4 rounded-[8px] border border-[#EA1F59]/25 border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+        <div className="mt-4 rounded-[8px] border border-[#FF0061]/25 border-l-[#FF0061] bg-white px-4 py-3 text-sm text-[#FF0061] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
           <div className="font-medium">{copy.title}</div>
           <div className="mt-1 text-xs text-[#595757]">{copy.body}</div>
         </div>
@@ -115,7 +108,7 @@ export function AdminUserDetailPage(): JSX.Element {
     <div className="mx-auto max-w-6xl px-6 py-8">
       <Link
         to="/admin/users"
-        className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
+        className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#FF0061]"
       >
         <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
         返回用户列表
@@ -124,37 +117,27 @@ export function AdminUserDetailPage(): JSX.Element {
       <header className="mt-4 flex items-start gap-4">
         <Avatar url={user.avatarUrl} fallback={user.displayName ?? user.email ?? '?'} />
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-semibold">
-            {user.displayName ?? '—'}
-          </h1>
+          <h1 className="truncate text-xl font-semibold">{user.displayName ?? '—'}</h1>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
             {user.email ?? '无邮箱'} {user.phone ? `· ${user.phone}` : ''}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px]">
             <Badge>套餐 · {user.plan}</Badge>
             <Badge>状态 · {user.status}</Badge>
-            {user.role === 'admin' && (
-              <Badge highlight>管理员</Badge>
-            )}
+            {user.role === 'admin' && <Badge highlight>管理员</Badge>}
             <Badge>注册 · {formatDate(user.createdAt)}</Badge>
-            {user.planExpiresAt && (
-              <Badge>套餐到期 · {formatDate(user.planExpiresAt)}</Badge>
-            )}
+            {user.planExpiresAt && <Badge>套餐到期 · {formatDate(user.planExpiresAt)}</Badge>}
           </div>
         </div>
       </header>
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-          <h2 className="text-[11px] font-medium uppercase text-muted-foreground">
-            本月任务数
-          </h2>
+          <h2 className="text-[11px] font-medium uppercase text-muted-foreground">本月任务数</h2>
           <div className="mt-2 text-3xl font-semibold text-foreground">
             {formatInteger(usage.monthTasks)}
           </div>
-          <div className="mt-1 text-[12px] text-muted-foreground">
-            自然月窗口 · 按 UTC 时间统计
-          </div>
+          <div className="mt-1 text-[12px] text-muted-foreground">自然月窗口 · 按 UTC 时间统计</div>
         </section>
         <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] lg:col-span-2">
           <h2 className="mb-2 text-[11px] font-medium uppercase text-muted-foreground">
@@ -192,9 +175,7 @@ export function AdminUserDetailPage(): JSX.Element {
                       const v = typeof value === 'number' ? value : Number(value ?? 0);
                       const payload = (ctx as { payload?: { model?: string } } | undefined)
                         ?.payload;
-                      const pct = totalCalls
-                        ? ((v / totalCalls) * 100).toFixed(1)
-                        : '0';
+                      const pct = totalCalls ? ((v / totalCalls) * 100).toFixed(1) : '0';
                       return [`${v} (${pct}%)`, payload?.model ?? '模型'];
                     }}
                   />
@@ -209,9 +190,7 @@ export function AdminUserDetailPage(): JSX.Element {
                         className="h-2.5 w-2.5 shrink-0 rounded-sm"
                         style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
                       />
-                      <span className="min-w-0 flex-1 truncate text-foreground">
-                        {m.model}
-                      </span>
+                      <span className="min-w-0 flex-1 truncate text-foreground">{m.model}</span>
                       <span className="tabular-nums text-muted-foreground">
                         {formatInteger(m.calls)} · {pct.toFixed(1)}%
                       </span>
@@ -237,6 +216,7 @@ export function AdminUserDetailPage(): JSX.Element {
               <tr className="border-b border-[#EFEFEF] text-left text-[11px] uppercase text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">时间</th>
                 <th className="py-2 pr-3 font-medium">任务</th>
+                <th className="py-2 pr-3 font-medium">模型</th>
                 <th className="py-2 pr-3 font-medium">状态</th>
                 <th className="py-2 pr-3 font-medium">耗时</th>
               </tr>
@@ -244,7 +224,7 @@ export function AdminUserDetailPage(): JSX.Element {
             <tbody>
               {recentTasks.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="py-6 text-center text-muted-foreground">
+                  <td colSpan={5} className="py-6 text-center text-muted-foreground">
                     此用户暂无任务
                   </td>
                 </tr>
@@ -262,6 +242,7 @@ export function AdminUserDetailPage(): JSX.Element {
                       <td className="py-2 pr-3 text-foreground">
                         {truncate(row.title ?? row.intent, 70)}
                       </td>
+                      <td className="py-2 pr-3 text-muted-foreground">{row.model ?? '—'}</td>
                       <td className="py-2 pr-3">
                         <span
                           className={cn(
@@ -326,6 +307,7 @@ function normalizeUserDetail(value: DetailData) {
         intent: optionalText(row.intent),
         status: safeText(row.status, ''),
         durationMs: nullableFiniteNumber(row.durationMs),
+        model: optionalText(row.model),
       };
     }),
   };
@@ -343,7 +325,7 @@ function Badge({
       className={cn(
         'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
         highlight
-          ? 'bg-[rgba(234,31,89,0.12)] text-[#EA1F59]'
+          ? 'bg-[rgba(255,0,97,0.12)] text-[#FF0061]'
           : 'border border-[#DCDDDD] bg-white text-muted-foreground',
       )}
     >
@@ -372,7 +354,7 @@ function Avatar({
   const letter = (fallback || '?').charAt(0).toUpperCase();
   return (
     <div
-      className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-xl font-semibold text-[#EA1F59]"
+      className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-xl font-semibold text-[#FF0061]"
       style={{
         backgroundImage: `linear-gradient(135deg, ${ADMIN_MAGENTA}18 0%, ${ADMIN_DIVIDER} 100%)`,
       }}

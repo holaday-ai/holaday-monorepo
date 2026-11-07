@@ -46,7 +46,7 @@ function coerceNumber(raw: string): number {
     .trim()
     .replace(/[¥￥$,，％%]/g, '')
     .replace(/\s+/g, '');
-  if (!cleaned) return NaN;
+  if (!cleaned) return Number.NaN;
   let multiplier = 1;
   // Order matters: check 亿 before 万 (亿 isn't a suffix of 万).
   if (cleaned.endsWith('亿')) {
@@ -62,9 +62,9 @@ function coerceNumber(raw: string): number {
     multiplier = 100;
     cleaned = cleaned.slice(0, -1);
   }
-  if (!cleaned) return NaN;
+  if (!cleaned) return Number.NaN;
   const n = Number(cleaned);
-  return Number.isFinite(n) ? n * multiplier : NaN;
+  return Number.isFinite(n) ? n * multiplier : Number.NaN;
 }
 
 /**
@@ -130,10 +130,7 @@ function extractOne(
  * fields both pulled from "GMV: 100000"). They're independent —
  * each runs against the full text.
  */
-export function parseInputs(
-  text: string,
-  workflow: ExpertWorkflowContract,
-): ParseInputsResult {
+export function parseInputs(text: string, workflow: ExpertWorkflowContract): ParseInputsResult {
   const extracted: Record<string, string | number> = {};
   const missingRequired: WorkflowInput[] = [];
   const missingOptional: WorkflowInput[] = [];
@@ -184,10 +181,7 @@ export function buildClarificationQuestion(
       lines.push(`- **${input.label}**：你填的是「${rawCapture}」，期望 ${describeType(input)}`);
     }
   }
-  lines.push(
-    '',
-    '可以一次回复全部，或一行一项。',
-  );
+  lines.push('', '可以一次回复全部，或一行一项。');
   return lines.join('\n');
 }
 

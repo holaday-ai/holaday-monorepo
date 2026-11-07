@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import type { UiTask } from '@/types/task';
+import { describe, expect, it } from 'vitest';
 import {
   taskDisplaySource,
   taskDisplayTitle,
@@ -67,12 +67,8 @@ describe('taskDisplayTitle', () => {
   it('does not treat an ordinary question about image settings as routing copy', () => {
     const row = task({ intent: '请解释图片设置：尺寸和压缩率分别有什么影响？' });
 
-    expect(taskDisplaySource(row)).toBe(
-      '请解释图片设置：尺寸和压缩率分别有什么影响？',
-    );
-    expect(taskDisplayTitle(row, 40)).toBe(
-      '解释图片设置：尺寸和压缩率分别有什么影响？',
-    );
+    expect(taskDisplaySource(row)).toBe('请解释图片设置：尺寸和压缩率分别有什么影响？');
+    expect(taskDisplayTitle(row, 40)).toBe('解释图片设置：尺寸和压缩率分别有什么影响？');
   });
 });
 
@@ -84,22 +80,21 @@ describe('taskListItemSubtitle', () => {
     ['failed', '失败 · 6 条记录'],
     ['cancelled', '已取消 · 6 条记录'],
     ['partial_success', '需复核 · 6 条记录'],
-  ] as const)('does not label local Chrome record counts as completed actions: %s', (status, label) => {
-    expect(taskListItemSubtitle(task({ status, tickCount: 6, browserSource: 'local-chrome' }))).toBe(label);
-  });
+  ] as const)(
+    'does not label local Chrome record counts as completed actions: %s',
+    (status, label) => {
+      expect(
+        taskListItemSubtitle(task({ status, tickCount: 6, browserSource: 'local-chrome' })),
+      ).toBe(label);
+    },
+  );
   it('uses the live phase label for executing tasks before step ticks arrive', () => {
-    expect(
-      taskListItemSubtitle(
-        { status: 'executing', tickCount: 0 },
-        'generating',
-      ),
-    ).toBe('正在生成回答');
-    expect(
-      taskListItemSubtitle(
-        { status: 'executing', tickCount: 0 },
-        'verifying',
-      ),
-    ).toBe('正在验证结果');
+    expect(taskListItemSubtitle({ status: 'executing', tickCount: 0 }, 'generating')).toBe(
+      '正在生成回答',
+    );
+    expect(taskListItemSubtitle({ status: 'executing', tickCount: 0 }, 'verifying')).toBe(
+      '正在验证结果',
+    );
   });
 
   it('adds a long-running hint to live task subtitles after two minutes', () => {
@@ -125,12 +120,8 @@ describe('taskListItemSubtitle', () => {
   });
 
   it('keeps the existing executing fallback when no live phase exists', () => {
-    expect(taskListItemSubtitle({ status: 'executing', tickCount: 0 })).toBe(
-      '正在启动…',
-    );
-    expect(taskListItemSubtitle({ status: 'executing', tickCount: 3 })).toBe(
-      '执行中 · 第 3 步',
-    );
+    expect(taskListItemSubtitle({ status: 'executing', tickCount: 0 })).toBe('正在启动…');
+    expect(taskListItemSubtitle({ status: 'executing', tickCount: 3 })).toBe('执行中 · 第 3 步');
   });
 
   it('uses the awaiting kind in task rows so action-needed tasks are scannable', () => {
@@ -180,17 +171,20 @@ describe('taskListItemSubtitle', () => {
   });
 
   it('does not present unknown statuses as executing', () => {
-    expect(taskListItemSubtitle({ status: 'unknown', tickCount: 0 })).toBe(
-      '未知状态',
-    );
+    expect(taskListItemSubtitle({ status: 'unknown', tickCount: 0 })).toBe('未知状态');
   });
 
   it('surfaces partial-success rows as review-needed instead of completed work', () => {
-    expect(taskListItemSubtitle({ status: 'partial_success', tickCount: 0 })).toBe(
-      '需复核',
-    );
-    expect(taskListItemSubtitle({ status: 'partial_success', tickCount: 4 })).toBe(
-      '需复核 · 4 步',
-    );
+    expect(taskListItemSubtitle({ status: 'partial_success', tickCount: 0 })).toBe('需复核');
+    expect(taskListItemSubtitle({ status: 'partial_success', tickCount: 4 })).toBe('需复核 · 4 步');
+  });
+  it('labels a short count delivered by the browser lane 部分完成', () => {
+    expect(
+      taskListItemSubtitle({
+        status: 'partial_success',
+        tickCount: 2,
+        resultText: '部分完成：只找到 4/5 条。\n\n1. …',
+      }),
+    ).toBe('部分完成 · 2 步');
   });
 });

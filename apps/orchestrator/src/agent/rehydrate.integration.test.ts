@@ -188,7 +188,10 @@ describe('pending_confirm_payload + rehydration', () => {
     expect(s1.cursor).toBe(1);
     await repo.applyStepResult(s0, s1, { reason: 'optional screenshot unavailable' }, 'skipped');
 
-    const stepRows = await db.select().from(taskSteps).where(eq(taskSteps.externalId, skippedStepId));
+    const stepRows = await db
+      .select()
+      .from(taskSteps)
+      .where(eq(taskSteps.externalId, skippedStepId));
     expect(stepRows[0]?.status).toBe('skipped');
 
     const fresh = new TaskRepository(db);

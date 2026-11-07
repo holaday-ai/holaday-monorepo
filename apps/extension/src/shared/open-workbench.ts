@@ -26,8 +26,8 @@
  * user's intent.
  */
 
+import { LOCAL_CHROME_QA, WORKBENCH_URL, isLocalQaWorkbenchUrl } from './config.js';
 import { withDeadline } from './deadline.js';
-import { isLocalQaWorkbenchUrl, LOCAL_CHROME_QA, WORKBENCH_URL } from './config.js';
 
 export const WORKBENCH_TAB_MATCH_PATTERNS: readonly string[] = [
   '*://hd-app.orangebench.tech/*',
@@ -234,8 +234,6 @@ export function pickBestTab(tabs: readonly chrome.tabs.Tab[]): chrome.tabs.Tab |
   }
   const anyActive = tabs.find((t) => t.active);
   if (anyActive) return anyActive;
-  const byRecent = [...tabs].sort(
-    (a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0),
-  );
+  const byRecent = [...tabs].sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
   return byRecent[0] ?? tabs[0] ?? null;
 }

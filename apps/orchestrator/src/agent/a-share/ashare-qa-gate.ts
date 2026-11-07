@@ -29,6 +29,13 @@ export const PREDICT_PATTERN =
 export type GateReason = 'advice' | 'predict' | 'ungrounded';
 
 /**
+ * FIX-34：把价格说成「当前价/现价/实时价/目前股价」。上下文里没有实时报价（只有最近收盘）
+ * 时这就是把旧价当今天的价（HARD，不交 judge）。
+ */
+const CURRENT_PRICE_PATTERN =
+  /当前(?:的)?(?:股)?价(?:格)?|现价|实时(?:股)?价(?:格)?|目前(?:的)?股价/;
+
+/**
  * 细分原因（Phase2 ⑦ 意图判官分流用）。`reason` 是对外的粗桶（向后兼容，旧对抗测照断言
  * 'predict'）；`subReason` 把 predict 桶拆细，供第二层 judge 决定能否复核救回：
  *   - SOFT（predict/tension/semantic）：对**未来方向**的推断，regex 易把过去式/状态描述误杀 → 交 judge 复核。
@@ -40,7 +47,8 @@ export type GateSubReason =
   | 'tension'
   | 'semantic'
   | 'technical'
-  | 'ungrounded';
+  | 'ungrounded'
+  | 'stale_price';
 
 export interface GateResult {
   passed: boolean;
@@ -159,6 +167,15 @@ export function complianceGate(interpretation: string, factContext: string): Gat
   const techHit = interpretation.match(TECHNICAL_SIGNAL_PATTERN);
   if (techHit)
     return { passed: false, reason: 'predict', subReason: 'technical', hits: [techHit[0]] };
+
+  const currentWord = interpretation.match(CURRENT_PRICE_PATTERN);
+  if (currentWord && !/实时报价/.test(factContext))
+    return {
+      passed: false,
+      reason: 'ungrounded',
+      subReason: 'stale_price',
+      hits: [currentWord[0]],
+    };
 
   // 接地校验（**数值容差 + 排年份**，容忍 LLM 口语化约数：1981→1981.72、4848→「4800多」、
   // 34→34.47、67.2→67.20）：③/⑦ 的「金额/价格 + 估值数(PE/PB/分位/中位/倍数)」都必须数值接近

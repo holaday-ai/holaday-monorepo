@@ -1,7 +1,7 @@
 import {
+  type MediaIntegrityReport,
   ffprobeDurationMs,
   inspectMediaIntegrity,
-  type MediaIntegrityReport,
 } from './ffmpeg-exec.js';
 
 type DurationProbe = (source: string) => Promise<number>;
@@ -33,8 +33,6 @@ export async function probeCloneReferenceQuoteFacts(
   return {
     durationSeconds: normalizedDurationSeconds(integrity.durationMs),
     hasAudibleAudio:
-      integrity.hasAudio &&
-      integrity.audioMaxVolumeDb !== null &&
-      integrity.audioMaxVolumeDb > -50,
+      integrity.hasAudio && integrity.audioMaxVolumeDb !== null && integrity.audioMaxVolumeDb > -50,
   };
 }

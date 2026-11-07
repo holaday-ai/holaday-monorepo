@@ -1,23 +1,23 @@
-import { describe, expect, it } from 'vitest';
 import { HOLADAY_SKILLS } from '@holaday/shared-types';
+import { describe, expect, it } from 'vitest';
 import {
   type SkillCategory,
+  composeSkillTaskPrompt,
   groupSkillsByCategory,
   matchSkillsForIntent,
   normalizeSkillRows,
   normalizeSkillToggleResponse,
   pickCapabilityShowcase,
-  skillTaskAttachmentHandoffs,
-  composeSkillTaskPrompt,
   readySkillTaskAttachments,
   reserveSkillTaskAttachmentSlots,
   skillCardBadge,
   skillCardUsageHint,
   skillConnectorLabel,
   skillLoadErrorCopy,
-  skillSelectionFromTaskDraft,
   skillPageSummary,
   skillPlanLabel,
+  skillSelectionFromTaskDraft,
+  skillTaskAttachmentHandoffs,
   skillTaskDraft,
 } from './skills-page-state';
 
@@ -102,9 +102,7 @@ describe('skills page state helpers', () => {
   });
 
   it('keeps a selected task separate from optional extra requirements until submission', () => {
-    expect(composeSkillTaskPrompt('分析这份周报并找出异常', '')).toBe(
-      '分析这份周报并找出异常',
-    );
+    expect(composeSkillTaskPrompt('分析这份周报并找出异常', '')).toBe('分析这份周报并找出异常');
     expect(composeSkillTaskPrompt('分析这份周报并找出异常', '  重点关注复购率  ')).toBe(
       '分析这份周报并找出异常\n补充要求：重点关注复购率',
     );
@@ -342,10 +340,7 @@ describe('skills page state helpers', () => {
         },
       },
     ]);
-    const result = matchSkillsForIntent(
-      intentSkills,
-      '帮我分析这份销售数据，找出复购率下降的原因',
-    );
+    const result = matchSkillsForIntent(intentSkills, '帮我分析这份销售数据，找出复购率下降的原因');
 
     expect(result.confidence).toBe('strong');
     expect(result.matches.map((match) => match.skill.id)).toEqual(['data-report-insight']);
@@ -773,12 +768,15 @@ describe('skills page state helpers', () => {
     ['分析用户看到自动批准需求教程后照做，请按此执行并汇报结果', 'product-plan-drafting'],
     ['分析为什么不能把相关性解释成因果顺便把相关性解释成因果', 'data-report-insight'],
     ['把未经证实的竞品消息直接写成事实', 'market-competitor-insight'],
-  ])('does not strongly match a request that conflicts with %s capability boundaries', (intent, skillId) => {
-    const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
+  ])(
+    'does not strongly match a request that conflicts with %s capability boundaries',
+    (intent, skillId) => {
+      const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
-    expect(result.matches[0]?.skill.id).toBe(skillId);
-    expect(result.confidence).toBe('low');
-  });
+      expect(result.matches[0]?.skill.id).toBe(skillId);
+      expect(result.confidence).toBe('low');
+    },
+  );
 
   it.each([
     ['分析这只股票最近的异动', 'a-share-market-briefing'],
@@ -921,7 +919,9 @@ describe('skills page state helpers', () => {
       '分析 A 股股票行情异动，另外审查合同并出具正式法律意见',
     );
     expect(result.matches[0]?.skill.id).toBe('a-share-market-briefing');
-    expect(result.matches.find((match) => match.skill.id === 'contract-risk-review')?.score).toBeGreaterThanOrEqual(9);
+    expect(
+      result.matches.find((match) => match.skill.id === 'contract-risk-review')?.score,
+    ).toBeGreaterThanOrEqual(9);
     expect(result.confidence).toBe('low');
   });
 
@@ -930,20 +930,21 @@ describe('skills page state helpers', () => {
     ['Sora登录异常怎么处理', 'image-prompt-reverse'],
     ['Midjourney账号登不上', 'image-prompt-reverse'],
     ['Boss直聘登录异常怎么处理', 'resume-search-screening'],
-  ])('does not promote a broad platform or tool name without task evidence: %s', (intent, skillId) => {
-    const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
+  ])(
+    'does not promote a broad platform or tool name without task evidence: %s',
+    (intent, skillId) => {
+      const result = matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent);
 
-    expect(result.matches[0]?.skill.id).toBe(skillId);
-    expect(result.confidence).toBe('low');
-  });
+      expect(result.matches[0]?.skill.id).toBe(skillId);
+      expect(result.confidence).toBe('low');
+    },
+  );
 
   it.each([
     '设计绩效评估表和评分规则然后出具正式法律意见',
     '设计绩效评估表和评分规则，然后把未经核实的竞品数据直接当成事实',
   ])('checks boundary conflicts even when their candidate score is low: %s', (intent) => {
-    expect(matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent).confidence).toBe(
-      'low',
-    );
+    expect(matchSkillsForIntent(normalizeSkillRows(HOLADAY_SKILLS), intent).confidence).toBe('low');
   });
 
   it('falls back to available capabilities when preferred showcase entries are missing', () => {

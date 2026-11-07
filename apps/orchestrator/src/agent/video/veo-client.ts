@@ -25,7 +25,15 @@
  */
 
 import { videoParameterIssue } from '@holaday/shared-types';
+import { type GenerateVeoParams, VeoError, type VeoResult } from './veo-types.js';
 import { VideoHttpError, fetchWithTimeout, safeText, sleep } from './video-http.js';
+
+export {
+  type GenerateVeoParams,
+  VeoError,
+  type VeoErrorKind,
+  type VeoResult,
+} from './veo-types.js';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com';
 const DEFAULT_MODEL = 'veo-3.0-fast-generate-001';
@@ -35,76 +43,6 @@ const DEFAULT_MAX_WAIT_MS = 360_000; // Veo can take up to ~6min at peak.
 const DEFAULT_MAX_RETRIES = 4;
 const DEFAULT_RETRY_BASE_MS = 2_000;
 const MAX_RETRY_DELAY_MS = 60_000;
-
-export type VeoErrorKind =
-  | 'no_api_key'
-  | 'invalid_argument'
-  | 'permission_denied'
-  | 'quota_exhausted'
-  | 'http'
-  | 'op_failed'
-  | 'timeout'
-  | 'network'
-  | 'bad_response'
-  | 'no_result';
-
-export class VeoError extends Error {
-  constructor(
-    message: string,
-    readonly kind: VeoErrorKind,
-    readonly status?: number,
-    readonly detail?: string,
-    readonly retryable = true,
-  ) {
-    super(message);
-    this.name = 'VeoError';
-  }
-}
-
-export interface GenerateVeoParams {
-  /** Gemini API key. Empty → no_api_key. */
-  readonly apiKey: string;
-  readonly baseUrl?: string;
-  /** Default veo-3.0-fast-generate-001. */
-  readonly model?: string;
-  readonly prompt: string;
-  /** Optional first-frame composition constraint (Veo 3.1 image-to-video). */
-  readonly startImage?: {
-    readonly data: string;
-    readonly mimeType: 'image/png' | 'image/jpeg';
-  };
-  /** Optional final-frame composition constraint (Veo 3.1 interpolation). */
-  readonly lastFrameImage?: {
-    readonly data: string;
-    readonly mimeType: 'image/png' | 'image/jpeg';
-  };
-  /** Elements that should not appear in the generated video. */
-  readonly negativePrompt?: string;
-  /** Default '9:16' (vertical). */
-  readonly aspectRatio?: '9:16' | '16:9';
-  /** Default 4. MUST be a number (string → 400). */
-  readonly durationSeconds?: number;
-  /** Optional — omit for the model default (720p). */
-  readonly resolution?: '720p' | '1080p';
-  readonly pollIntervalMs?: number;
-  readonly maxWaitMs?: number;
-  /** Transient 408/429/5xx retries per submit or poll request. Default 4. */
-  readonly maxRetries?: number;
-  /** Exponential retry base delay. Default 2000ms. */
-  readonly retryBaseMs?: number;
-  /** Injectable retry wait for deterministic tests. */
-  readonly sleepImpl?: (ms: number) => Promise<void>;
-  readonly fetchImpl?: typeof fetch;
-  readonly signal?: AbortSignal;
-  /** Called on each poll with the elapsed seconds (for WS progress). */
-  readonly onPoll?: (elapsedMs: number) => void;
-}
-
-export interface VeoResult {
-  /** Result video URI (download with the x-goog-api-key header; ~2-day TTL). */
-  readonly videoUri: string;
-  readonly elapsedMs: number;
-}
 
 interface SubmitResponse {
   name?: string;

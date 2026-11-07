@@ -26,7 +26,7 @@
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { DB } from '../db/client.js';
-import { userSiteStats, type NewUserSiteStat } from '../db/schema/user-site-stats.js';
+import { type NewUserSiteStat, userSiteStats } from '../db/schema/user-site-stats.js';
 
 /**
  * Per-sync hard cap. A user's 30-day window typically yields 20-80
@@ -55,12 +55,7 @@ const MAX_VISIT_COUNT = 1_000_000;
  */
 const hostEntrySchema = z.object({
   domain: z.string().min(1).max(253),
-  visitCount: z
-    .number()
-    .int()
-    .nonnegative()
-    .max(MAX_VISIT_COUNT)
-    .default(0),
+  visitCount: z.number().int().nonnegative().max(MAX_VISIT_COUNT).default(0),
   /**
    * ISO 8601 string preferred — z.coerce.date accepts both ISO strings
    * and numeric epoch ms, matching what the extension might send (the
@@ -93,6 +88,7 @@ export type HostEntry = z.infer<typeof hostEntrySchema>;
 export function normaliseDomain(input: string): string | null {
   const raw = input.trim().toLowerCase();
   if (raw.length === 0) return null;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: rejects URLs containing control characters by design
   if (/[\s\x00-\x1f]/.test(raw)) return null;
   if (
     raw.startsWith('chrome://') ||

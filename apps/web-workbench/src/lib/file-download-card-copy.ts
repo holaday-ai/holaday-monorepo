@@ -6,11 +6,7 @@ export type DownloadFileKind =
   | 'document'
   | 'generic';
 
-export type DownloadFileAvailability =
-  | 'available'
-  | 'expired'
-  | 'unavailable'
-  | 'unknown';
+export type DownloadFileAvailability = 'available' | 'expired' | 'unavailable' | 'unknown';
 
 export function classifyDownloadFileKind(filename: string): DownloadFileKind {
   const ext = filename.toLowerCase().split('.').pop() ?? '';
@@ -47,8 +43,8 @@ export function downloadFileMetaLabel(options: {
       : availability === 'expired'
         ? '文件已过期'
         : availability === 'unavailable'
-          ? '文件已失效'
-        : '文件生成后保留 24 小时';
+          ? '文件已不可用'
+          : '文件生成后保留 24 小时';
   return `${downloadFileKindLabel(kind)} · ${options.formattedSize} · ${availabilityLabel}`;
 }
 

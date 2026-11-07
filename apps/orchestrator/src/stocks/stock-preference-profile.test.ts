@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type StockPreferenceSignalInput,
   buildStockPreferenceProfile,
   emptyManualStockPreferences,
-  type StockPreferenceSignalInput,
 } from './stock-preference-profile.js';
 
 const NOW = new Date('2026-08-18T02:00:00.000Z');
@@ -103,15 +103,17 @@ describe('buildStockPreferenceProfile', () => {
     expect(result.state).toBe('ready');
     expect(result.confidence.level).toBe('high');
     expect(result.sample).toEqual({ screeningRuns: 3, watchlistStocks: 5, manualDimensions: 2 });
-    expect(result.facts).toEqual(expect.arrayContaining([
-      expect.objectContaining({ dimension: 'industry', source: 'manual' }),
-      expect.objectContaining({ dimension: 'valuation', source: 'screening' }),
-      expect.objectContaining({ dimension: 'liquidity', source: 'screening' }),
-    ]));
+    expect(result.facts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ dimension: 'industry', source: 'manual' }),
+        expect.objectContaining({ dimension: 'valuation', source: 'screening' }),
+        expect.objectContaining({ dimension: 'liquidity', source: 'screening' }),
+      ]),
+    );
     expect(result.possibleStrengths.length).toBeGreaterThan(0);
-    expect(result.blindSpots).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'market-concentration' }),
-    ]));
+    expect(result.blindSpots).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'market-concentration' })]),
+    );
     expect(result.basis.map((item) => item.source)).toEqual(
       expect.arrayContaining(['manual', 'screening', 'watchlist']),
     );
@@ -126,13 +128,15 @@ describe('buildStockPreferenceProfile', () => {
       watchlist: [],
     });
 
-    expect(result.blindSpots).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'single-factor' }),
-    ]));
+    expect(result.blindSpots).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'single-factor' })]),
+    );
     expect(result.supplementaryViews.map((item) => item.id)).toEqual(
       expect.arrayContaining(['add-liquidity', 'add-cash-flow', 'clarify-holding-period']),
     );
-    expect(JSON.stringify(result)).not.toMatch(/聪明|保守|激进|风险承受|适合|买入|卖出|持有建议|推荐指数|目标价/);
+    expect(JSON.stringify(result)).not.toMatch(
+      /聪明|保守|激进|风险承受|适合|买入|卖出|持有建议|推荐指数|目标价/,
+    );
   });
 
   it('keeps low-volume observations explicitly low confidence', () => {

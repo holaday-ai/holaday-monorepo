@@ -77,18 +77,22 @@ describe('generateSuggestions', () => {
   ])('inherits %s when the model proposes %s', async (restriction, prohibited) => {
     const adapter = buildAdapter(JSON.stringify([prohibited, '整理活动执行清单']));
 
-    await expect(generateSuggestions({
-      messagesAdapter: adapter,
-      intent: `为内部读书交流会拟定组织方案，只在对话中输出文字，${restriction}。`,
-      summary: '已整理活动组织方案。',
-    })).resolves.toEqual(['整理活动执行清单']);
+    await expect(
+      generateSuggestions({
+        messagesAdapter: adapter,
+        intent: `为内部读书交流会拟定组织方案，只在对话中输出文字，${restriction}。`,
+        summary: '已整理活动组织方案。',
+      }),
+    ).resolves.toEqual(['整理活动执行清单']);
   });
 
   it('preserves procurement follow-ups when the user has not prohibited them', async () => {
-    await expect(generateSuggestions({
-      messagesAdapter: buildAdapter('["采购茶歇饮品与轻食","整理活动执行清单"]'),
-      intent: '整理读书交流会方案，并建议采购茶歇所需物品。',
-      summary: '已整理活动组织方案。',
-    })).resolves.toEqual(['采购茶歇饮品与轻食', '整理活动执行清单']);
+    await expect(
+      generateSuggestions({
+        messagesAdapter: buildAdapter('["采购茶歇饮品与轻食","整理活动执行清单"]'),
+        intent: '整理读书交流会方案，并建议采购茶歇所需物品。',
+        summary: '已整理活动组织方案。',
+      }),
+    ).resolves.toEqual(['采购茶歇饮品与轻食', '整理活动执行清单']);
   });
 });

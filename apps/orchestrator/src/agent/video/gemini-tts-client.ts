@@ -1,4 +1,4 @@
-import { fetchWithTimeout, safeText, sleep, VideoHttpError } from './video-http.js';
+import { VideoHttpError, fetchWithTimeout, safeText, sleep } from './video-http.js';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com';
 const DEFAULT_MODEL = 'gemini-2.5-flash-preview-tts';
@@ -110,7 +110,13 @@ export async function synthesizeGeminiSpeech(
   p: SynthesizeGeminiSpeechParams,
 ): Promise<SynthesizeGeminiSpeechResult> {
   if (!p.apiKey.trim()) {
-    throw new GeminiTtsError('GEMINI_API_KEY not configured', 'no_api_key', undefined, undefined, false);
+    throw new GeminiTtsError(
+      'GEMINI_API_KEY not configured',
+      'no_api_key',
+      undefined,
+      undefined,
+      false,
+    );
   }
   const text = p.text.trim();
   if (!text) {
@@ -197,8 +203,9 @@ export async function synthesizeGeminiSpeech(
       'bad_response',
     );
   }
-  const audio = json.candidates?.[0]?.content?.parts?.find((part) => part.inlineData?.data)
-    ?.inlineData;
+  const audio = json.candidates?.[0]?.content?.parts?.find(
+    (part) => part.inlineData?.data,
+  )?.inlineData;
   if (!audio?.data) {
     throw new GeminiTtsError(
       'Gemini TTS returned no audio',

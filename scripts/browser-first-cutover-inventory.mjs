@@ -266,8 +266,17 @@ export function firstCutoverCloudStopScope({ snapshot, name, association, displa
         members: o.members,
         display: Object.fromEntries(
           [
-            'purpose', 'hostname', 'bootId', 'sourcesDigest', 'contextDigest',
-            'roots', 'display', 'members', 'treeDigests', 'clients', 'socketDigest',
+            'purpose',
+            'hostname',
+            'bootId',
+            'sourcesDigest',
+            'contextDigest',
+            'roots',
+            'display',
+            'members',
+            'treeDigests',
+            'clients',
+            'socketDigest',
           ].map((key) => [key, display[key]]),
         ),
       });
@@ -542,6 +551,7 @@ function observeCloudStops({
       live.stopConfigDigest !== manager.stopConfigDigest ||
       !equal(live, { ...manager, pid: 0, status: 'stopped', configDigest: live.configDigest }) ||
       current.processes.some((p) => processes.some((old) => old.pid === p.pid)) ||
+      // biome-ignore lint/complexity/useOptionalChain: a null census must throw (fail closed); `?.` would let it pass
       (cloudCensus !== undefined &&
         cloudCensus.processes.some((p) => processes.some((old) => old.pid === p.pid)))
     )

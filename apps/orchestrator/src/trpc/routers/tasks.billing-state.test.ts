@@ -226,7 +226,7 @@ describe('tasks.create billing order', () => {
     expect(consume).not.toHaveBeenCalled();
   });
 
-  it('persists an explicit video task as migration-unavailable before quota', async () => {
+  it('rejects an explicit video task before quota when video is not enabled', async () => {
     appEnv.VIDEO_CREATION_ENABLED = false;
     const consume = vi
       .spyOn(QuotaService.prototype, 'tryConsume')
@@ -242,14 +242,11 @@ describe('tasks.create billing order', () => {
         intent: '生成一条产品介绍视频',
         videoOptions: { tab: 'normal' },
       }),
-    ).resolves.toMatchObject({
-      status: 'failed',
-      executionMode: 'video_creation',
-    });
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
     expect(consume).not.toHaveBeenCalled();
   });
 
-  it('persists a classified video task as migration-unavailable before quota', async () => {
+  it('rejects a classified video task before quota when providers are not ready', async () => {
     appEnv.VIDEO_CREATION_ENABLED = false;
     const consume = vi
       .spyOn(QuotaService.prototype, 'tryConsume')
@@ -263,15 +260,14 @@ describe('tasks.create billing order', () => {
     await expect(
       tasksRouter.createCaller(makeCreateContext()).create({
         intent: '生成一条产品介绍视频',
+        // Media lanes run only from the explicit /video workbench submission.
+        videoOptions: { tab: 'normal' },
       }),
-    ).resolves.toMatchObject({
-      status: 'failed',
-      executionMode: 'video_creation',
-    });
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
     expect(consume).not.toHaveBeenCalled();
   });
 
-  it('keeps a video task migration-unavailable outside the legacy allowlist', async () => {
+  it('rejects a video task outside the rollout allowlist before quota', async () => {
     appEnv.VIDEO_CREATION_ENABLED = true;
     mutableVideoAllowlist.clear();
     mutableVideoAllowlist.add('usr_someone_else');
@@ -289,10 +285,7 @@ describe('tasks.create billing order', () => {
         intent: '生成一条产品介绍视频',
         videoOptions: { tab: 'normal' },
       }),
-    ).resolves.toMatchObject({
-      status: 'failed',
-      executionMode: 'video_creation',
-    });
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
     expect(consume).not.toHaveBeenCalled();
   });
 });
@@ -433,7 +426,7 @@ describe('video quote billing and execution state', () => {
       },
     },
   ])(
-    'settles a legacy $label quote as migration-unavailable before quota',
+    'refuses an image-version confirmation of a $label quote before quota',
     async ({ metadata }) => {
       const consume = vi
         .spyOn(QuotaService.prototype, 'tryConsume')
@@ -444,9 +437,7 @@ describe('video quote billing and execution state', () => {
           taskId: 'tsk_video_quote',
           choice: 'confirm_image',
         }),
-      ).resolves.toMatchObject({
-        status: 'failed',
-      });
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
       expect(consume).not.toHaveBeenCalled();
     },
   );

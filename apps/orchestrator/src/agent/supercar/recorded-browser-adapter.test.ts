@@ -75,6 +75,41 @@ it.each(['REQUEST_TIMEOUT', 'REQUEST_ABORTED', 'INVALID_RESPONSE'] as const)(
   },
 );
 
+it('FIX-47: an INVALID_RESPONSE keeps its evidence in request_meta, never the prompt', async () => {
+  const ctx = context();
+  const forensics = {
+    kind: 'empty_content' as const,
+    httpStatus: 200,
+    requestId: 'req-1',
+    elapsedMs: 900,
+    model: 'qwen-fixture',
+    requestBytes: 1234,
+    toolCount: 12,
+    messageCount: 9,
+    stopReason: 'end_turn',
+    contentTypes: ['thinking'],
+    usage: { inputTokens: 5000, outputTokens: 0 },
+    responseBytes: 80,
+    body: '{"id":"m","content":[{"type":"thinking"}]}',
+  };
+  const error = new MessagesAdapterError(
+    'INVALID_RESPONSE',
+    'Message provider response is invalid',
+    null,
+    undefined,
+    forensics,
+  );
+  const adapter = { metadata, create: vi.fn().mockRejectedValue(error) };
+  await expect(recordedBrowserAdapter(adapter, ctx).create(request)).rejects.toBe(error);
+  const record = ctx.recorder.record.mock.calls[0]?.[0];
+  expect(record).toMatchObject({
+    status: 'error',
+    errorMessage: 'INVALID_RESPONSE',
+    requestMeta: { iteration: 2, invalidResponse: forensics },
+  });
+  expect(JSON.stringify(record)).not.toContain('private prompt');
+});
+
 it('a rejected recorder does not turn success into provider failure or duplicate the call', async () => {
   const ctx = context();
   ctx.recorder.record.mockRejectedValue(new Error('db unavailable'));

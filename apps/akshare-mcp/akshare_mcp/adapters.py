@@ -1215,14 +1215,60 @@ def _us_indices() -> list[dict[str, Any]]:
     return out
 
 
+_SINA_INDEX_NODE_URL = (
+    "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+    "Market_Center.getHQNodeDataSimple"
+)
+
+
+def _cn_index_ticktimes() -> dict[str, str]:
+    """FIX-35 #3: 新浪指数快照自带的成交时刻（ticktime，只有时分秒），akshare 建表时丢了。
+
+    只读同一个公开行情接口（stock_zh_index_spot_sina 用的那个），取不到就返回空——
+    卡片退回按抓取时刻判断，不影响指数数值本身。
+    """
+    timeout = max(1.0, float(os.environ.get("AKSHARE_MCP_SINA_INDEX_TIMEOUT", "8")))
+    params = {"page": "1", "num": "80", "sort": "symbol", "asc": "1", "node": "dpzs", "_s_r_a": "page"}
+    try:
+        response = requests.get(_SINA_INDEX_NODE_URL, params=params, timeout=timeout)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception:  # noqa: BLE001 - the time is optional; the snapshot stands without it
+        return {}
+    return index_ticktimes(payload)
+
+
+def index_ticktimes(payload: Any) -> dict[str, str]:
+    """新浪 dpzs（大盘指数）节点 JSON → {sh000001: "HH:MM:SS"}（只认三大指数、格式正确的时刻）。"""
+    out: dict[str, str] = {}
+    if not isinstance(payload, list):
+        return out
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("symbol") or "")
+        tick = str(item.get("ticktime") or "")
+        if code in CN_INDEX_CODES and re.fullmatch(r"\d{2}:\d{2}(:\d{2})?", tick):
+            out[code] = tick
+    return out
+
+
 def _cn_indices() -> list[dict[str, Any]]:
-    """G3: A股三大指数实时 spot（sina）。上证指数 / 深证成指 / 创业板指。"""
+    """G3: A股三大指数实时 spot（sina）。上证指数 / 深证成指 / 创业板指。
+
+    FIX-35 #3：补上快照自带的「行情时间」（时分秒；日期以抓取日为准，由调用方判断）。
+    """
     a = _require_ak()
     df = a.stock_zh_index_spot_sina()
     rows = _records(df, limit=500)
     order = {c: i for i, c in enumerate(CN_INDEX_CODES)}
     picked = [r for r in rows if str(r.get("代码")) in order]
     picked.sort(key=lambda r: order.get(str(r.get("代码")), 99))
+    ticks = _cn_index_ticktimes()
+    for r in picked:
+        tick = ticks.get(str(r.get("代码")))
+        if tick:
+            r["行情时间"] = tick
     return picked
 
 

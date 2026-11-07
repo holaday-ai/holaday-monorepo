@@ -1,19 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  ACCEPTED_EXTENSIONS,
+  ACCEPTED_MIMES,
+  FileService,
+  contentDispositionAttachment,
+  decodeUploadFilename,
   isAcceptedUpload,
   isMacroOfficeUpload,
-  decodeUploadFilename,
-  contentDispositionAttachment,
   looksLikeMojibake,
-  ACCEPTED_MIMES,
-  ACCEPTED_EXTENSIONS,
-  FileService,
 } from './file-service.js';
 
-const DOCX_MIME =
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const XLSX_MIME =
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const DOCM_MIME = 'application/vnd.ms-word.document.macroEnabled.12';
 
 describe('upload allowlist — docx must be uploadable (Phase 1 #1 P0)', () => {
@@ -194,7 +192,10 @@ describe('FileService.linkToTask ownership guard', () => {
     } as any;
     const storage = {
       getSignedPutUrl: () =>
-        Promise.resolve({ url: 'https://r2.example/upload', storagePath: 'usr/input/file/clip.mp4' }),
+        Promise.resolve({
+          url: 'https://r2.example/upload',
+          storagePath: 'usr/input/file/clip.mp4',
+        }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
@@ -330,9 +331,7 @@ describe('FileService.linkToTask ownership guard', () => {
     const service = new FileService(db, logger);
     await service.linkToTask(['file_foreign'], 42, 7);
 
-    expect(collectColumnNames(whereClause)).toEqual(
-      new Set(['external_id', 'user_id', 'status']),
-    );
+    expect(collectColumnNames(whereClause)).toEqual(new Set(['external_id', 'user_id', 'status']));
   });
 
   it('does not load pending presigned uploads before upload-confirm activates them', async () => {

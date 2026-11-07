@@ -1,0 +1,137 @@
+[
+  {
+    "width": 1366,
+    "height": 768,
+    "action": "select",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1366x768-select.png"
+  },
+  {
+    "width": 1366,
+    "height": 768,
+    "action": "copy",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1366x768-copy.png"
+  },
+  {
+    "width": 1366,
+    "height": 768,
+    "action": "pin",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1366x768-pin.png"
+  },
+  {
+    "width": 1440,
+    "height": 960,
+    "action": "select",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1440x960-select.png"
+  },
+  {
+    "width": 1440,
+    "height": 960,
+    "action": "copy",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1440x960-copy.png"
+  },
+  {
+    "width": 1440,
+    "height": 960,
+    "action": "pin",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1440x960-pin.png"
+  },
+  {
+    "width": 1280,
+    "height": 960,
+    "action": "select",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1280x960-select.png"
+  },
+  {
+    "width": 1280,
+    "height": 960,
+    "action": "copy",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1280x960-copy.png"
+  },
+  {
+    "width": 1280,
+    "height": 960,
+    "action": "pin",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1280x960-pin.png"
+  },
+  {
+    "width": 1024,
+    "height": 960,
+    "action": "select",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1024x960-select.png"
+  },
+  {
+    "width": 1024,
+    "height": 960,
+    "action": "copy",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1024x960-copy.png"
+  },
+  {
+    "width": 1024,
+    "height": 960,
+    "action": "pin",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1024x960-pin.png"
+  },
+  {
+    "width": 1200,
+    "height": 1000,
+    "action": "select",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1200x1000-select.png"
+  },
+  {
+    "width": 1200,
+    "height": 1000,
+    "action": "copy",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1200x1000-copy.png"
+  },
+  {
+    "width": 1200,
+    "height": 1000,
+    "action": "pin",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [],
+    "screenshot": "after-1200x1000-pin.png"
+  }
+]

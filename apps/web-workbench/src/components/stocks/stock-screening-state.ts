@@ -1,4 +1,9 @@
-export type StockScreeningTrustMode = 'current' | 'delayed' | 'historical' | 'unavailable' | 'unverified';
+export type StockScreeningTrustMode =
+  | 'current'
+  | 'delayed'
+  | 'historical'
+  | 'unavailable'
+  | 'unverified';
 
 export interface EditableStockScreenCriterion {
   id: string;
@@ -54,25 +59,32 @@ function numericCriterionLabel(
 ): string {
   const fieldLabel = FIELD_LABELS[criterion.field] ?? criterion.sourceField;
   if (value === null) {
-    const suffix = criterion.operator === 'lte' || criterion.operator === 'lt'
-      ? '上限'
-      : criterion.operator === 'gte' || criterion.operator === 'gt'
-        ? '下限'
-        : '阈值';
+    const suffix =
+      criterion.operator === 'lte' || criterion.operator === 'lt'
+        ? '上限'
+        : criterion.operator === 'gte' || criterion.operator === 'gt'
+          ? '下限'
+          : '阈值';
     return `${fieldLabel}${suffix}`;
   }
-  const displayValue = criterion.field === 'amount' && Math.abs(value) >= 100_000_000
-    ? `${Number((value / 100_000_000).toFixed(4))}亿元`
-    : criterion.field === 'amount' && Math.abs(value) >= 10_000
-      ? `${Number((value / 10_000).toFixed(4))}万元`
-      : `${value}${criterion.unit ?? ''}`;
+  const displayValue =
+    criterion.field === 'amount' && Math.abs(value) >= 100_000_000
+      ? `${Number((value / 100_000_000).toFixed(4))}亿元`
+      : criterion.field === 'amount' && Math.abs(value) >= 10_000
+        ? `${Number((value / 10_000).toFixed(4))}万元`
+        : `${value}${criterion.unit ?? ''}`;
   return `${fieldLabel}${OPERATOR_LABELS[criterion.operator]} ${displayValue}`;
 }
 
 function criterionValueReady(value: EditableStockScreenCriterion['value']): boolean {
   if (typeof value === 'boolean') return true;
   if (typeof value === 'number') return Number.isFinite(value);
-  return Array.isArray(value) && value.length === 2 && value.every(Number.isFinite) && value[0] <= value[1];
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value.every(Number.isFinite) &&
+    value[0] <= value[1]
+  );
 }
 
 export function canRunStockScreening(
@@ -85,8 +97,8 @@ export function canRunStockScreening(
     /^\d{4}-\d{2}-\d{2}$/.test(trust.dataAsOf ?? '') &&
     criteria.length > 0 &&
     criteria.length <= 20 &&
-    criteria.every((criterion) =>
-      criterion.status === 'ready' && criterionValueReady(criterion.value),
+    criteria.every(
+      (criterion) => criterion.status === 'ready' && criterionValueReady(criterion.value),
     )
   );
 }

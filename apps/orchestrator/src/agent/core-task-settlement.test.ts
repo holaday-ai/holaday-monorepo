@@ -154,7 +154,8 @@ describe('core settlement preparation', () => {
       sourceTrust,
       result: { reason: 'SYNTHETIC_PRIVATE_SOURCE_DETAIL' },
     });
-    expect(op.result).toEqual({ tickCount: 1, reason: '质量校验未通过' });
+    // FIX-30: the fixed reason names what was found, never the private detail.
+    expect(op.result).toEqual({ tickCount: 1, reason: '质量校验未通过：引用来源无法核实' });
     expect(op.verification.failureLevel).toBe('hard_fail');
     expect(op.verification.issueCodes).toContain('SOURCE_TRUST_FAILED');
   });
@@ -357,7 +358,10 @@ describe('core settlement preparation', () => {
       status: 'failed',
       result: { reason: 'SYNTHETIC_PRIVATE_DETAIL' },
     });
-    expect(op.result).toEqual({ reason: '质量校验未通过', tickCount: 1 });
+    expect(op.result).toEqual({
+      reason: '质量校验未通过：没有通过格式或数据规则检查',
+      tickCount: 1,
+    });
     expect(JSON.stringify(op)).not.toContain('SYNTHETIC_PRIVATE_DETAIL');
     expect(op.verificationPassed).toBe(false);
     expect(op.verification.issueCodes).toContain('DETERMINISTIC_CHECK_FAILED');

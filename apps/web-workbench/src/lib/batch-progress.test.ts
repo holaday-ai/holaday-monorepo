@@ -1,10 +1,10 @@
+import { describe, expect, it } from 'vitest';
 import {
+  type BatchProgressFrame,
   applyBatchProgressToDetail,
   applyBatchProgressToRows,
   normalizeBatchProgressFrame,
-  type BatchProgressFrame,
 } from './batch-progress';
-import { describe, expect, it } from 'vitest';
 
 describe('batch progress helpers', () => {
   const frame: BatchProgressFrame = {

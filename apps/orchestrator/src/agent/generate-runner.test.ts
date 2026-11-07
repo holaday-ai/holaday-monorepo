@@ -421,11 +421,11 @@ describe('runGenerateTask — Qwen Responses runtime', () => {
 
   it('uses the three approved built-in tools for fresh research', async () => {
     const adapter = makeAdapter({
-      text: '最新信息',
+      text: '2026-10-09 最新信息',
       sources: [
         {
           title: '官方公告',
-          url: 'https://example.com/news',
+          url: 'https://example.com/news/announcement-1',
           provenance: 'web_search',
         },
       ],
@@ -439,7 +439,7 @@ describe('runGenerateTask — Qwen Responses runtime', () => {
     ]);
     expect(requestAt(adapter).instructions).toContain('必须先调用 web_search');
     expect(outcome.summary).toContain('### 核验来源');
-    expect(outcome.sourceUrls).toEqual(['https://example.com/news']);
+    expect(outcome.sourceUrls).toEqual(['https://example.com/news/announcement-1']);
   });
 
   it('fails a fresh request when the adapter observed no source', async () => {
@@ -455,7 +455,7 @@ describe('runGenerateTask — Qwen Responses runtime', () => {
 
   it('deduplicates and filters unsafe source URLs', async () => {
     const adapter = makeAdapter({
-      text: '最新信息',
+      text: '2026-10-09 最新信息',
       sources: [
         { title: '来源 A', url: 'https://example.com/a', provenance: 'web_search' },
         { title: '重复', url: 'https://example.com/a', provenance: 'web_search' },
@@ -735,4 +735,150 @@ describe('runGenerateTask — lightweight and expert workflows', () => {
     const outcome = await run(makeAdapter({ text: '[AWAITING_USER_INPUT] 请补充目标。' }));
     expect(outcome).toMatchObject({ status: 'awaiting_user', summary: '请补充目标。' });
   });
+});
+
+it('falls back from failed native research to fetched dated articles without loosening provenance', async () => {
+  const adapter = makeAdapter(new ResponsesAdapterError('INVALID_RESPONSE'), {
+    text: '2026-10-09 的文章，具体事实见来源。',
+  });
+  const firecrawl = {
+    search: vi.fn(async () => ({
+      ok: true as const,
+      results: [{ url: 'https://www.36kr.com/p/fixture-1', title: '具体文章', markdown: '' }],
+    })),
+    scrape: vi.fn(async () => ({
+      ok: true as const,
+      url: 'https://www.36kr.com/p/fixture-1',
+      markdown: '发布时间：2026-10-09\n具体文章内容，公开的可核验事实。',
+    })),
+  };
+  const result = await run(adapter, { intent: '今天36kr新闻摘要', firecrawl });
+  expect(firecrawl.search).toHaveBeenCalledTimes(1);
+  expect(firecrawl.scrape).toHaveBeenCalledTimes(1);
+  expect(result).toMatchObject({
+    status: 'completed',
+    sourceUrls: ['https://www.36kr.com/p/fixture-1'],
+  });
+  expect(result.summary).toContain('2026-10-09');
+  expect(requestAt(adapter, 1).tools).toEqual([]);
+  expect(JSON.stringify(requestAt(adapter, 1))).toContain('发布时间：2026-10-09');
+});
+
+it('fails honestly when native research and Firecrawl both fail', async () => {
+  const adapter = makeAdapter(new ResponsesAdapterError('INVALID_RESPONSE'));
+  const result = await run(adapter, {
+    intent: '今天36kr新闻摘要',
+    firecrawl: {
+      search: vi.fn(async () => ({ ok: false as const, error: 'unavailable' })),
+      scrape: vi.fn(),
+    },
+  });
+  expect(result).toMatchObject({ status: 'failed', summary: '' });
+});
+
+it('does not accept an undated search snippet or a homepage as article evidence', async () => {
+  const adapter = makeAdapter({ text: '没有核验来源' });
+  const firecrawl = {
+    search: vi.fn(async () => ({
+      ok: true as const,
+      results: [
+        { url: 'https://www.36kr.com/', markdown: '2026-10-09' },
+        { url: 'https://www.36kr.com/p/fixture-1', markdown: '搜索摘要' },
+      ],
+    })),
+    scrape: vi.fn(async () => ({
+      ok: true as const,
+      url: 'https://www.36kr.com/p/fixture-1',
+      markdown: '没有发布时间的正文',
+    })),
+  };
+  expect(await run(adapter, { intent: '今天36kr新闻摘要', firecrawl })).toMatchObject({
+    status: 'failed',
+  });
+  expect(firecrawl.search).toHaveBeenCalledTimes(1);
+});
+
+it('uses Firecrawl when native news cites only a portal, retaining the article/date gate', async () => {
+  const adapter = makeAdapter(
+    {
+      text: '新闻门户，未找到文章',
+      sources: [{ url: 'https://www.36kr.com/', title: '门户', provenance: 'web_search' }],
+    },
+    { text: '2026-10-09 的可核验文章摘要' },
+  );
+  const firecrawl = {
+    search: vi.fn(async () => ({
+      ok: true as const,
+      results: [{ url: 'https://www.36kr.com/p/fixture-2', markdown: '' }],
+    })),
+    scrape: vi.fn(async () => ({
+      ok: true as const,
+      url: 'https://www.36kr.com/p/fixture-2',
+      markdown: '发布时间：2026-10-09\n真实抓取正文',
+    })),
+  };
+  expect(await run(adapter, { intent: '今天36kr新闻摘要', firecrawl })).toMatchObject({
+    status: 'completed',
+    sourceUrls: ['https://www.36kr.com/p/fixture-2'],
+  });
+  expect(firecrawl.search).toHaveBeenCalledTimes(1);
+});
+
+it.each(['undated', 'continuation failure'])(
+  'falls back from %s native news even with an article URL',
+  async (mode) => {
+    const source = {
+      url: 'https://www.36kr.com/p/native-article',
+      title: '文章',
+      provenance: 'web_search' as const,
+    };
+    const first = {
+      text: mode === 'undated' ? '没有发布日期的新闻' : '2026-10-09 新闻草稿',
+      sources: [source],
+      ...(mode === 'continuation failure'
+        ? { status: 'incomplete' as const, incompleteReason: 'max_output_tokens' as const }
+        : {}),
+    };
+    const adapter =
+      mode === 'undated'
+        ? makeAdapter(first, { text: '2026-10-09 的摘要' })
+        : makeAdapter(first, new ResponsesAdapterError('INVALID_RESPONSE'), {
+            text: '2026-10-09 的摘要',
+          });
+    const firecrawl = {
+      search: vi.fn(async () => ({
+        ok: true as const,
+        results: [{ url: 'https://www.36kr.com/p/dated-article', markdown: '' }],
+      })),
+      scrape: vi.fn(async () => ({
+        ok: true as const,
+        url: 'https://www.36kr.com/p/dated-article',
+        markdown: '发布时间：2026-10-09\n抓取文章正文',
+      })),
+    };
+    expect(await run(adapter, { intent: '今天36kr新闻摘要', firecrawl })).toMatchObject({
+      status: 'completed',
+      sourceUrls: ['https://www.36kr.com/p/dated-article'],
+    });
+    expect(firecrawl.search).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('rejects a native news draft when its continuation and configured fallback both fail', async () => {
+  const adapter = makeAdapter(
+    {
+      text: '2026-10-09 新闻草稿',
+      sources: [
+        { url: 'https://www.36kr.com/p/native-article', title: '文章', provenance: 'web_search' },
+      ],
+      status: 'incomplete',
+      incompleteReason: 'max_output_tokens',
+    },
+    new ResponsesAdapterError('INVALID_RESPONSE'),
+  );
+  const search = vi.fn(async () => ({ ok: false as const, error: 'unavailable' }));
+  expect(
+    await run(adapter, { intent: '今天36kr新闻摘要', firecrawl: { search, scrape: vi.fn() } }),
+  ).toMatchObject({ status: 'failed', summary: '' });
+  expect(search).toHaveBeenCalledTimes(1);
 });

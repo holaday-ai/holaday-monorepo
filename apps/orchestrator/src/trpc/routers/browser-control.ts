@@ -2,11 +2,16 @@ import { TRPCError } from '@trpc/server';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
-import { hasParkedSupercarHandle, supercarReply } from '../../agent/supercar/agent-loop.js';
 import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
 import { BrowserInputOutcomeUnknownError } from '../../agent/supercar/browser-control.js';
+import { captchaHandoffs } from '../../agent/supercar/captcha-handoff.js';
 import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
+import {
+  hasParkedSupercarHandle,
+  supercarReply,
+} from '../../agent/supercar/qwen-only-agent-loop.js';
 import { TaskRepository } from '../../agent/task-repository.js';
+import { browserProfileStore } from '../../browser-profiles/profile-store.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
 import type { Context } from '../context.js';
@@ -100,7 +105,11 @@ export const browserControlProcedure = protectedProcedure
     if (!session)
       throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'browser_runner_unavailable' });
     if (input.action === 'takeover') session.control.requestHuman();
-    else {
+    else if (captchaHandoffs.active(input.taskId, ctx.userId, session.control)) {
+      if (!input.controlLease || session.control.snapshot().lease !== input.controlLease)
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'browser_control_not_owned' });
+      await captchaHandoffs.proceed(input.taskId, ctx.userId, session.control);
+    } else {
       const state = session.control.snapshot();
       if (!input.controlLease || state.lease !== input.controlLease)
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'browser_control_not_owned' });
@@ -145,45 +154,87 @@ export const browserNavProcedure = protectedProcedure
     const session = browserControlSessions.get(instance, ctx.userId, input.taskId);
     if (!session) return { ok: false as const, reason: 'browser_control_not_owned' };
     try {
-      return await session.control.runHuman(input.controlLease ?? '', async (signal) => {
-        const page = await instance.executor.getPage();
-        const options = { timeout: 15_000, waitUntil: 'domcontentloaded' as const };
-        let target = input.url?.trim() ?? '';
-        if (input.direction === 'goto') {
-          if (!target) return { ok: false as const, reason: 'missing_url' };
-          if (!/^[a-z][a-z0-9+.-]*:/i.test(target)) target = `https://${target}`;
-          if (!/^https?:\/\//i.test(target)) return { ok: false as const, reason: 'bad_scheme' };
-          if (!(await defaultBrowserNetworkPolicy.check(target)).allowed)
-            return { ok: false as const, reason: 'blocked_target' };
-        }
-        signal.throwIfAborted();
-        if (ctx.browserPool?.peek(input.taskId ?? '') !== instance || instance.status !== 'ready')
-          throw new Error('browser_session_changed');
-        try {
-          if (input.direction === 'back') {
-            if (!(await page.goBack(options))) return { ok: false as const, reason: 'no_history' };
-          } else if (input.direction === 'forward') {
-            if (!(await page.goForward(options)))
-              return { ok: false as const, reason: 'no_history' };
-          } else if (input.direction === 'goto') await page.goto(target, options);
-          else await page.reload(options);
-          return { ok: true as const };
-        } catch {
-          // A navigation timeout does not establish whether the page changed.
-          void browserControlSessions
-            .quarantine(
-              instance,
-              () =>
-                ctx.browserPool?.release(instance.taskId, 'browser-navigation-unknown') ??
-                Promise.resolve(false),
-            )
-            .catch((error: unknown) =>
-              ctx.logger.warn({ error, taskId: instance.taskId }, 'browser stop unconfirmed'),
-            );
-          throw new BrowserInputOutcomeUnknownError();
-        }
-      });
+      return await session.control.runHuman(
+        input.controlLease ?? '',
+        async (signal) => {
+          const page = await instance.executor.getPage();
+          const options = { timeout: 15_000, waitUntil: 'domcontentloaded' as const };
+          let target = input.url?.trim() ?? '';
+          if (input.direction === 'goto') {
+            if (!target) return { ok: false as const, reason: 'missing_url' };
+            if (!/^[a-z][a-z0-9+.-]*:/i.test(target)) target = `https://${target}`;
+            if (!/^https?:\/\//i.test(target)) return { ok: false as const, reason: 'bad_scheme' };
+            if (!(await defaultBrowserNetworkPolicy.check(target)).allowed)
+              return { ok: false as const, reason: 'blocked_target' };
+          }
+          signal.throwIfAborted();
+          if (ctx.browserPool?.peek(input.taskId ?? '') !== instance || instance.status !== 'ready')
+            throw new Error('browser_session_changed');
+          try {
+            if (input.direction === 'back') {
+              if (!(await page.goBack(options)))
+                return { ok: false as const, reason: 'no_history' };
+            } else if (input.direction === 'forward') {
+              if (!(await page.goForward(options)))
+                return { ok: false as const, reason: 'no_history' };
+            } else if (input.direction === 'goto') await page.goto(target, options);
+            else await page.reload(options);
+            return { ok: true as const };
+          } catch {
+            // A navigation timeout does not establish whether the page changed.
+            void browserControlSessions
+              .quarantine(
+                instance,
+                () =>
+                  ctx.browserPool?.release(instance.taskId, 'browser-navigation-unknown') ??
+                  Promise.resolve(false),
+              )
+              .catch((error: unknown) =>
+                ctx.logger.warn({ error, taskId: instance.taskId }, 'browser stop unconfirmed'),
+              );
+            throw new BrowserInputOutcomeUnknownError();
+          }
+        },
+        'navigate',
+      );
     } catch (error) {
       return { ok: false as const, reason: error instanceof Error ? error.message : 'nav_failed' };
     }
+  });
+
+/**
+ * CAPTCHA-REDUCE-1: the user's persistent cloud browser profile (verification
+ * clearance). `configured` is false when the store is off; clearing is always
+ * safe and only touches the caller's own profile.
+ */
+export const browserProfileStatusProcedure = protectedProcedure.query(() => ({
+  configured: browserProfileStore() !== null,
+}));
+export const browserProfileClearProcedure = protectedProcedure.mutation(async ({ ctx }) => {
+  const store = browserProfileStore();
+  if (store) await store.clear(ctx.userId);
+  return { ok: true as const, configured: store !== null };
+});
+
+export const browserCaptchaProcedure = protectedProcedure
+  .input(taskInput.extend({ action: z.enum(['continue', 'cancel', 'status', 'alternate']) }))
+  .mutation(async ({ ctx, input }) => {
+    const owned = await ownedBrowser(ctx, input.taskId);
+    const session =
+      owned.instance && browserControlSessions.get(owned.instance, ctx.userId, input.taskId);
+    if (!session || !captchaHandoffs.active(input.taskId, ctx.userId, session.control))
+      return { ok: false, state: 'inactive' as const };
+    const status = () => captchaHandoffs.status(input.taskId, ctx.userId, session.control);
+    if (input.action === 'cancel') {
+      captchaHandoffs.cancel(input.taskId, ctx.userId, session.control);
+      return { ok: true, state: 'cancelled' as const };
+    }
+    if (input.action === 'status') return { ok: true, state: 'waiting' as const, ...status() };
+    if (input.action === 'alternate') {
+      // CAPTCHA-REDUCE-1: only offered after repeated failed rounds.
+      const ok = captchaHandoffs.alternate(input.taskId, ctx.userId, session.control);
+      return { ok, state: ok ? ('alternate' as const) : ('waiting' as const), ...status() };
+    }
+    const ok = await captchaHandoffs.proceed(input.taskId, ctx.userId, session.control);
+    return { ok, state: ok ? ('resuming' as const) : ('waiting' as const), ...status() };
   });

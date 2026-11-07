@@ -1,11 +1,12 @@
 import { readFile, readdir } from 'node:fs/promises';
-import { getTableConfig, type MySqlTable } from 'drizzle-orm/mysql-core';
+import { type MySqlTable, getTableConfig } from 'drizzle-orm/mysql-core';
 import { describe, expect, it } from 'vitest';
+import { partnerDailyAllocations as indexedPartnerDailyAllocations } from '../db/schema/index.js';
 import {
   apiCostPoolEvents,
   holaCreditLedgerEntries,
-  partnerDailyAllocations,
   partnerActivityEvents,
+  partnerDailyAllocations,
   partnerKycProfiles,
   partnerLots,
   partnerMemberships,
@@ -15,7 +16,6 @@ import {
   partnerRiskEvents,
   partnerWithdrawalRequests,
 } from '../db/schema/partner.js';
-import { partnerDailyAllocations as indexedPartnerDailyAllocations } from '../db/schema/index.js';
 
 function indexConfig(table: MySqlTable, name: string) {
   return getTableConfig(table).indexes.find((idx) => idx.config.name === name)?.config;
@@ -45,18 +45,30 @@ describe('partner schema contract', () => {
   });
 
   it('pins partner uniqueness indexes', () => {
-    expect(indexConfig(partnerActivityEvents, 'uk_partner_activity_events_user_day_type')?.unique).toBe(true);
-    expect(indexConfig(partnerDailyAllocations, 'uk_partner_daily_allocations_lot_date')?.unique).toBe(true);
+    expect(
+      indexConfig(partnerActivityEvents, 'uk_partner_activity_events_user_day_type')?.unique,
+    ).toBe(true);
+    expect(
+      indexConfig(partnerDailyAllocations, 'uk_partner_daily_allocations_lot_date')?.unique,
+    ).toBe(true);
     expect(indexConfig(partnerLots, 'uk_partner_lots_recharge_order')?.unique).toBe(true);
-    expect(indexConfig(partnerMonthlyReleases, 'uk_partner_monthly_releases_lot_month')?.unique).toBe(true);
-    expect(indexConfig(partnerRechargeOrders, 'uk_partner_recharge_orders_provider_capture')?.unique).toBe(true);
-    expect(indexConfig(partnerWithdrawalRequests, 'uk_partner_withdrawal_requests_idempotency_key')?.unique).toBe(
-      true,
-    );
+    expect(
+      indexConfig(partnerMonthlyReleases, 'uk_partner_monthly_releases_lot_month')?.unique,
+    ).toBe(true);
+    expect(
+      indexConfig(partnerRechargeOrders, 'uk_partner_recharge_orders_provider_capture')?.unique,
+    ).toBe(true);
+    expect(
+      indexConfig(partnerWithdrawalRequests, 'uk_partner_withdrawal_requests_idempotency_key')
+        ?.unique,
+    ).toBe(true);
   });
 
   it('keeps the partner ledger migration additive', async () => {
-    const migration = await readFile(new URL('../../drizzle/0040_partner_ledger.sql', import.meta.url), 'utf8');
+    const migration = await readFile(
+      new URL('../../drizzle/0040_partner_ledger.sql', import.meta.url),
+      'utf8',
+    );
 
     expect(migration.match(/\bCREATE TABLE\b/g)).toHaveLength(11);
     expect(migration).toContain('uk_partner_daily_allocations_lot_date');
@@ -91,7 +103,10 @@ describe('partner schema contract', () => {
   });
 
   it('keeps the partner activity migration additive', async () => {
-    const migration = await readFile(new URL('../../drizzle/0041_partner_activity_events.sql', import.meta.url), 'utf8');
+    const migration = await readFile(
+      new URL('../../drizzle/0041_partner_activity_events.sql', import.meta.url),
+      'utf8',
+    );
 
     expect(migration.match(/\bCREATE TABLE\b/g)).toHaveLength(1);
     expect(migration).toContain('partner_activity_events');

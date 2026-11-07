@@ -178,6 +178,12 @@ export const tasks = mysqlTable(
       .$onUpdate(() => new Date()),
     startedAt: datetime('started_at', { mode: 'date', fsp: 3 }),
     completedAt: datetime('completed_at', { mode: 'date', fsp: 3 }),
+    /**
+     * Public-cloud continuation of this (cancelled) task: `claim:<uuid>` while
+     * the replacement is being created, then the replacement's external id.
+     * Written only by conditional updates; never cleared once linked.
+     */
+    publicCloudContinuationTaskId: varchar('public_cloud_continuation_task_id', { length: 64 }),
   },
   (t) => [
     uniqueIndex('uk_tasks_external_id').on(t.externalId),
@@ -193,6 +199,7 @@ export const tasks = mysqlTable(
     // used by usage / admin KPIs (origin + status + recency).
     index('ix_tasks_origin_user_created').on(t.origin, t.userId, t.createdAt),
     index('ix_tasks_origin_status_created').on(t.origin, t.status, t.createdAt),
+    uniqueIndex('uk_tasks_public_cloud_continuation').on(t.publicCloudContinuationTaskId),
   ],
 );
 

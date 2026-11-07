@@ -1,0 +1,49 @@
+
+ RUN  v2.1.8 /Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench
+
+ ❯ src/components/PlanCard.test.tsx (7 tests | 4 failed) 122ms
+   × terminal task plan visibility > removes stale tracked progress when an executing task becomes completed 21ms
+     → expected <span …(1)></span> to be null
+   × terminal task plan visibility > removes stale tracked progress when an executing task becomes partial_success 14ms
+     → expected <span …(1)></span> to be null
+   × terminal task plan visibility > removes stale tracked progress when an executing task becomes failed 16ms
+     → expected <span …(1)></span> to be null
+   × terminal task plan visibility > removes stale tracked progress when an executing task becomes cancelled 5ms
+     → expected <span …(1)></span> to be null
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/PlanCard.test.tsx > terminal task plan visibility > removes stale tracked progress when an executing task becomes completed
+ FAIL  src/components/PlanCard.test.tsx > terminal task plan visibility > removes stale tracked progress when an executing task becomes partial_success
+ FAIL  src/components/PlanCard.test.tsx > terminal task plan visibility > removes stale tracked progress when an executing task becomes failed
+ FAIL  src/components/PlanCard.test.tsx > terminal task plan visibility > removes stale tracked progress when an executing task becomes cancelled
+AssertionError: expected <span …(1)></span> to be null
+
+- Expected: 
+null
+
++ Received: 
+<span
+  class="block text-sm font-medium text-foreground"
+>
+  执行计划
+</span>
+
+ ❯ src/components/PlanCard.test.tsx:47:42
+     45|       expect(screen.getByText('0/2 阶段完成')).toBeTruthy();
+     46|       view.rerender(<PlanCard {...props} taskStatus={taskStatus} />);
+     47|       expect(screen.queryByText('执行计划')).toBeNull();
+       |                                          ^
+     48|       expect(screen.queryByLabelText('running')).toBeNull();
+     49|       expect(screen.queryByText('0/2 阶段完成')).toBeNull();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 3 passed (7)
+   Start at  22:11:10
+   Duration  2.11s (transform 150ms, setup 0ms, collect 847ms, tests 122ms, environment 402ms, prepare 75ms)
+
+undefined
+/Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/components/PlanCard.test.tsx --maxWorkers=1 --minWorkers=1

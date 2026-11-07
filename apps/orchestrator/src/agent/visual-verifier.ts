@@ -47,9 +47,7 @@ export interface VerifyOptions {
   mediaType?: 'image/png' | 'image/jpeg';
 }
 
-export async function verifyWithVision(
-  opts: VerifyOptions,
-): Promise<VerificationLabel> {
+export async function verifyWithVision(opts: VerifyOptions): Promise<VerificationLabel> {
   if (!opts.client || !opts.screenshotBase64 || !opts.intent) return 'unknown';
   try {
     const response = await opts.client.messages.create({

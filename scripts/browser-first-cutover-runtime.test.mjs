@@ -5485,7 +5485,7 @@ for (const fault of [
     const f = cloudNativeRecoveryFixture();
     const origin = await firstRuntime.readFirstCutoverCloudRecovery(f.input, f.io);
     const historical = structuredClone(origin);
-    let time = 70000;
+    const time = 70000;
     f.io.now = () => time;
     f.current.observedAtMs = time;
     const baseRead = f.io.readFile;

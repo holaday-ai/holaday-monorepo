@@ -4,6 +4,7 @@ import { CnPaymentDialog, type CnProvider, type CnPurchase } from '@/components/
 import { PayPalButton } from '@/components/PayPalButton';
 import { TrustNavigation } from '@/components/TrustNavigation';
 import { Button } from '@/components/ui/button';
+import { ChoiceButton } from '@/components/ui/choice-button';
 import { useToast } from '@/components/ui/toast';
 import { normalizeAuthMeProfile } from '@/lib/auth-me-state';
 import {
@@ -187,25 +188,27 @@ export function PlanPage(): JSX.Element {
       {/* Cycle toggle */}
       <div className="mx-auto mb-7 flex flex-col items-center gap-2">
         <div className="inline-flex rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-          <button
+          <ChoiceButton
+            selected={cycle === 'monthly'}
             type="button"
             onClick={() => setCycle('monthly')}
             className={cn(
               'rounded-md px-4 py-1.5 transition-colors',
               cycle === 'monthly'
-                ? 'bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.06)]'
+                ? 'bg-white text-[#FF0061] shadow-[0_1px_2px_rgba(15,23,42,0.06)]'
                 : 'text-[#595757] hover:text-foreground',
             )}
           >
             {zh ? '按月' : 'Monthly'}
-          </button>
-          <button
+          </ChoiceButton>
+          <ChoiceButton
+            selected={cycle === 'yearly'}
             type="button"
             onClick={() => setCycle('yearly')}
             className={cn(
               'flex items-center gap-1.5 rounded-md px-4 py-1.5 transition-colors',
               cycle === 'yearly'
-                ? 'bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.06)]'
+                ? 'bg-white text-[#FF0061] shadow-[0_1px_2px_rgba(15,23,42,0.06)]'
                 : 'text-[#595757] hover:text-foreground',
             )}
           >
@@ -214,13 +217,13 @@ export function PlanPage(): JSX.Element {
               className={cn(
                 'rounded-full border px-2 py-1 text-[11px] font-medium leading-none',
                 cycle === 'yearly'
-                  ? 'border-[#EA1F59]/30 bg-white text-[#EA1F59]'
+                  ? 'border-[#FF0061]/30 bg-white text-[#FF0061]'
                   : 'border-[#DCDDDD] bg-white text-[#595757]',
               )}
             >
               {zh ? '省 17%' : '-17%'}
             </span>
-          </button>
+          </ChoiceButton>
         </div>
         <p className="text-center text-[12px] leading-5 text-muted-foreground">
           {zh ? MANUAL_RENEWAL_DISCLOSURE_ZH : MANUAL_RENEWAL_DISCLOSURE_EN}
@@ -286,12 +289,12 @@ export function PlanPage(): JSX.Element {
               className={cn(
                 'group relative flex flex-col overflow-hidden rounded-[8px] border bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[transform,border-color,box-shadow]',
                 featured
-                  ? 'border-[#EA1F59]/45 hover:-translate-y-px hover:shadow-[0_8px_24px_rgba(15,23,42,0.07)]'
+                  ? 'border-[#FF0061]/45 hover:-translate-y-px hover:shadow-[0_8px_24px_rgba(15,23,42,0.07)]'
                   : 'border-[#DCDDDD] hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]',
               )}
             >
               {featured && !isCurrent && (
-                <div className="absolute inset-x-0 top-0 h-0.5 bg-[#EA1F59]" />
+                <div className="absolute inset-x-0 top-0 h-0.5 bg-[#FF0061]" />
               )}
               {isCurrent && <div className="absolute inset-x-0 top-0 h-0.5 bg-[#57479C]" />}
 
@@ -302,7 +305,7 @@ export function PlanPage(): JSX.Element {
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   {featured && !isCurrent && (
-                    <span className="rounded-full border border-[#EA1F59]/35 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[#EA1F59]">
+                    <span className="rounded-full border border-[#FF0061]/35 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[#FF0061]">
                       {zh ? '推荐' : 'Recommended'}
                     </span>
                   )}
@@ -370,7 +373,7 @@ export function PlanPage(): JSX.Element {
               <ul className="mb-6 flex-1 space-y-2.5">
                 {features.map((f) => (
                   <li key={f} className="flex items-start gap-2 text-sm">
-                    <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-[#EA1F59]/35 bg-white text-[#EA1F59]">
+                    <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-[#FF0061]/35 bg-white text-[#FF0061]">
                       <Check className="h-3 w-3" />
                     </span>
                     <span className="text-muted-foreground">{f}</span>
@@ -396,7 +399,7 @@ export function PlanPage(): JSX.Element {
                 <Button
                   asChild
                   variant="outline"
-                  className="w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                  className="w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                 >
                   <a
                     href={supportMailtoHref({
@@ -433,7 +436,7 @@ export function PlanPage(): JSX.Element {
                   {cnOpts.alipay && (
                     <Button
                       variant="outline"
-                      className="w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                      className="w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                       onClick={() =>
                         setCnDialog({
                           provider: 'alipay',
@@ -475,7 +478,7 @@ export function PlanPage(): JSX.Element {
                   className={cn(
                     'w-full',
                     !featured &&
-                      'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]',
+                      'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]',
                   )}
                   disabled={paymentCta.disabled}
                   onClick={() => {
@@ -582,7 +585,7 @@ export function PlanPage(): JSX.Element {
                           <Button
                             size="sm"
                             variant="outline"
-                            className="w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                            className="w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                             onClick={() =>
                               setCnDialog({
                                 provider: 'alipay',
@@ -610,7 +613,7 @@ export function PlanPage(): JSX.Element {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="mt-4 w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                        className="mt-4 w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                         onClick={() => setOpenAddonFor(packId)}
                       >
                         {zh ? '购买' : 'Buy'}

@@ -1,3 +1,6 @@
+import type { VerificationResult } from './answer-verifier.js';
+import { isNonDetailUrl } from './answer-verifier.js';
+import type { EvidenceLedger } from './evidence-ledger.js';
 /**
  * Phase 1 — Auto-fix layer for `failureLevel === 'fixable'`.
  *
@@ -20,11 +23,8 @@
  * applied list is empty — caller can decide to escalate.
  */
 import type { ExecutionContract } from './execution-contract.js';
-import type { EvidenceLedger } from './evidence-ledger.js';
-import type { VerificationResult } from './answer-verifier.js';
 import type { ExpertWorkflowContract } from './expert-workflow-contract.js';
-
-const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
+import { TEXT_URL_RE as URL_RE, trimTextUrl } from './text-urls.js';
 
 /**
  * Markdown link `[text](https://...)`. Captured separately from the
@@ -35,17 +35,12 @@ const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
  * an ungrounded URL inside a markdown link, drop the whole link
  * shape and keep just the bare text.
  */
-const MARKDOWN_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
+const MARKDOWN_LINK_RE = new RegExp(String.raw`\[([^\]\n]+)\]\((${URL_RE.source})\)`, 'gu');
 const URL_DROP_EMPTY_FALLBACK =
   '这些网址缺少可验证来源，已从结果中移除。请允许联网检索后再获取可靠链接。';
 const WORKFLOW_SOURCE_NOTE =
   '> 来源说明：[模型假设] 本节内容基于用户输入与模型经验生成，未引用外部实时数据。';
-const WORKFLOW_SOURCE_MARKERS = [
-  '[用户提供]',
-  '[系统计算]',
-  '[模型假设]',
-  '[外部来源]',
-] as const;
+const WORKFLOW_SOURCE_MARKERS = ['[用户提供]', '[系统计算]', '[模型假设]', '[外部来源]'] as const;
 
 export type AutoFixKind =
   | 'url_substitute'
@@ -75,10 +70,7 @@ export interface AutoFixOutput {
 }
 
 export function autoFix(inputs: AutoFixInputs): AutoFixOutput {
-  if (
-    inputs.verification.passed ||
-    inputs.verification.failureLevel !== 'fixable'
-  ) {
+  if (inputs.verification.passed || inputs.verification.failureLevel !== 'fixable') {
     return { fixed: inputs.answerText, applied: [] };
   }
   const ops: AutoFixOp[] = [];
@@ -125,9 +117,7 @@ export function autoFix(inputs: AutoFixInputs): AutoFixOutput {
 
   // 2. Missing required fields — append a補 note.
   const missingFieldsOp = inputs.verification.checks.find(
-    (c) =>
-      !c.passed &&
-      c.detail.startsWith('provided inputs missing from answer'),
+    (c) => !c.passed && c.detail.startsWith('provided inputs missing from answer'),
   );
   if (missingFieldsOp) {
     const out = appendMissingFieldsNote(text, missingFieldsOp.detail);
@@ -182,11 +172,7 @@ function addWorkflowSourceNotes(
   return { text: lines.join('\n'), ops };
 }
 
-function findSectionHeadingLine(
-  lines: readonly string[],
-  title: string,
-  fromIndex = 0,
-): number {
+function findSectionHeadingLine(lines: readonly string[], title: string, fromIndex = 0): number {
   const titleCore = normaliseSectionText(title);
   for (let index = fromIndex; index < lines.length; index += 1) {
     const lineCore = normaliseSectionText(lines[index] ?? '');
@@ -269,8 +255,10 @@ function fixFabricatedUrls(
     });
     // Preserve trailing punctuation that was on `raw` so the
     // surrounding sentence still reads cleanly.
-    return raw.slice(url.length);
+    return `${DROPPED}${raw.slice(url.length)}`;
   });
+
+  if (ops.some((op) => op.kind === 'url_drop')) working = tidyDroppedUrls(working);
 
   if (ops.some((op) => op.kind === 'url_drop') && !hasMeaningfulText(working)) {
     working = URL_DROP_EMPTY_FALLBACK;
@@ -283,11 +271,57 @@ function fixFabricatedUrls(
   return { text: working, ops };
 }
 
-function hasMeaningfulText(text: string): boolean {
-  const withoutListMarkers = text.replace(
-    /^\s*(?:[-*+]|\d+[.)])\s*/gm,
-    '',
+/** Where a dropped URL stood, until `tidyDroppedUrls` has cleaned up around it. */
+const DROPPED = '\u0000dropped-url\u0000';
+const FENCED_BLOCK_RE = /```[\s\S]*?(?:```|$)/g;
+
+/**
+ * FIX-35 复审 #1 (BENCH r06 / l02): a dropped URL left its wrapper behind — 「（如 ``）」, an
+ * empty 「」, and 「链接「」」 in the 未核实 note. 复审 #2: only where a URL was dropped;
+ * fenced code, tables and the rest of the answer stay exactly as written.
+ */
+export function tidyDroppedUrls(text: string): string {
+  if (!text.includes(DROPPED)) return text;
+  let out = '';
+  let from = 0;
+  for (const match of text.matchAll(FENCED_BLOCK_RE)) {
+    const start = match.index ?? 0;
+    out += tidyProse(text.slice(from, start)) + match[0].split(DROPPED).join('');
+    from = start + match[0].length;
+  }
+  return out + tidyProse(text.slice(from));
+}
+
+function tidyProse(text: string): string {
+  if (!text.includes(DROPPED)) return text;
+  const at = DROPPED;
+  return (
+    text
+      .split('\n')
+      .map((line) => {
+        const note = line.match(/^(未核实：[^—\n]*——)(.*)$/);
+        if (!note || !line.includes(at)) return line;
+        const items = note[2]!.split('；').filter((item) => !item.includes(`「${at}`));
+        return items.length ? `${note[1]}${items.join('；')}` : null;
+      })
+      .filter((line): line is string => line !== null)
+      .join('\n')
+      // The URL's wrapper shrinks to the marker, then the marker and one of the spaces around
+      // it go: 「参见 `url` 和」 → 「参见 和」, 「（如 `url`）」 → nothing.
+      .replace(
+        new RegExp(`[（(]\\s*(?:如|例如|e\\.g\\.,?)?\\s*\`[ \\t]*${at}[^\`\\n]*\`\\s*[)）]`, 'g'),
+        at,
+      )
+      .replace(new RegExp(`\`[ \\t]*${at}[^\`\\n]*\``, 'g'), at)
+      .replace(new RegExp(`「\\s*${at}\\s*」`, 'g'), at)
+      .replace(new RegExp(`[ \\t]+${at}(?=[ \\t])`, 'g'), '')
+      .split(at)
+      .join('')
   );
+}
+
+function hasMeaningfulText(text: string): boolean {
+  const withoutListMarkers = text.replace(/^\s*(?:[-*+]|\d+[.)])\s*/gm, '');
   return withoutListMarkers.replace(/[\s\p{P}\p{S}]/gu, '').length > 0;
 }
 
@@ -300,10 +334,7 @@ function hasMeaningfulText(text: string): boolean {
  *   2. Suffix-host match (e.g. `m.example.com` vs `example.com`) → 50 + path
  *   3. Otherwise → no match.
  */
-export function pickSimilarUrl(
-  fabricated: string,
-  grounded: string[],
-): string | undefined {
+export function pickSimilarUrl(fabricated: string, grounded: string[]): string | undefined {
   const fabHost = hostOf(fabricated);
   if (!fabHost || grounded.length === 0) return undefined;
   const fabPath = pathOf(fabricated);
@@ -312,7 +343,11 @@ export function pickSimilarUrl(
     const gHost = hostOf(g);
     if (!gHost) continue;
     const gPath = pathOf(g);
-    if (isStrictParentPath(gPath, fabPath)) {
+    // A shallower page (the homepage included) or a search / listing page is
+    // not the cited item: substituting it turns a per-item source into a
+    // generic link that still "passes" grounding (acceptance A2: three news
+    // links all became https://36kr.com/). Drop the URL instead.
+    if (isStrictParentPath(gPath, fabPath) || (isNonDetailUrl(g) && !isNonDetailUrl(fabricated))) {
       continue;
     }
     let score = 0;
@@ -361,13 +396,13 @@ function pathOverlap(a: string, b: string): number {
 function isStrictParentPath(candidate: string, target: string): boolean {
   const candidateSegs = candidate.split('/').filter(Boolean);
   const targetSegs = target.split('/').filter(Boolean);
-  if (candidateSegs.length === 0) return false;
+  // The root is the parent of every deeper path.
   if (candidateSegs.length >= targetSegs.length) return false;
   return candidateSegs.every((seg, idx) => seg === targetSegs[idx]);
 }
 
 function stripTrailingPunct(url: string): string {
-  return url.replace(/[)\].,;:，。]+$/, '');
+  return trimTextUrl(url);
 }
 
 function fillEmptyJsonUrls(
@@ -476,10 +511,7 @@ function dropRepeatedCandidateLinks(text: string): { text: string; ops: AutoFixO
 }
 
 function looksLikeCandidateResultLine(line: string): boolean {
-  return (
-    looksLikeMarkdownTableRow(line) ||
-    /^\s*(?:\d+[.、)]|[-*+])\s+/.test(line)
-  );
+  return looksLikeMarkdownTableRow(line) || /^\s*(?:\d+[.、)]|[-*+])\s+/.test(line);
 }
 
 function escapeRegExp(value: string): string {
@@ -538,10 +570,7 @@ function uniqueUrls(urls: readonly string[]): string[] {
 // Missing-fields note
 // ---------------------------------------------------------------------------
 
-function appendMissingFieldsNote(
-  text: string,
-  detail: string,
-): { text: string; op?: AutoFixOp } {
+function appendMissingFieldsNote(text: string, detail: string): { text: string; op?: AutoFixOp } {
   // Pattern: 'provided inputs missing from answer: GMV, 客单价'
   const m = detail.match(/answer:\s*(.+)$/);
   if (!m) return { text };

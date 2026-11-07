@@ -11,6 +11,14 @@ export interface RuntimeAction {
   pageUrl?: string | null;
   pageTitle?: string | null;
   pageTxSignal?: string | null;
+  /**
+   * FIX-36 #9: the field sits in a login / verification form or dialog (one with a password
+   * or one-time-code field). With the page fully readable, its account / phone box is in
+   * reach too — typing there is the user's, like the password itself.
+   */
+  credentialForm?: boolean | null;
+  /** FIX-36 复审 #1: a login / sign-up / authorize / 「获取验证码」 control of a login step. */
+  loginControl?: boolean | null;
 }
 
 export interface RuntimeActionVerdict {
@@ -20,13 +28,35 @@ export interface RuntimeActionVerdict {
   requiresTakeover?: boolean;
   awaitingKind?: 'login' | 'permission';
   question?: string;
+  /**
+   * FIX-36 #9: this one action is refused and the task goes on — the agent is told why
+   * (a login form's account box: not typed, and no takeover the task did not ask for).
+   */
+  refuse?: string;
 }
 
 const IRREVERSIBLE_CONTROL_RE =
-  /确认付款|确认支付|立即支付|去支付|付款|支付|提交订单|确认订单|立即下单|下单|购买|立即购买|结算|确认预订|提交预订|立即预订|转账|汇款|提现|充值|永久删除|删除账号|删除账户|删除文件|删除任务|删除项目|清空|发送消息|发送邮件|发送|发布|发表|公开分享|分享给|转发|授权扣款|自动扣费|confirm\w*(?:pay|order|booking)|paynow|proceed\w*pay|place\w*order|submit\w*order|checkout|purchase|buy\w*now|transfer|withdraw|delete|remove|publish|send|share/i;
+  /确认付款|确认支付|立即支付|去支付|付款|支付|提交订单|确认订单|立即下单|下单|购买|立即购买|结算|确认预订|提交预订|立即预订|转账|汇款|提现|充值|永久删除|删除账号|删除账户|删除文件|删除任务|删除项目|清空|发送消息|发送邮件|发送|发布|发表|公开分享|分享给|转发|授权扣款|自动扣费/;
 
-const TRANSACTION_PAGE_RE =
-  /(?:\/|\b)(?:checkout|payment|cashier|order-confirm|booking\/confirm|settlement|pay)(?:\/|\b)|订单提交/i;
+/**
+ * FIX-27 (zb core-07): English control words, as whole words of the label.
+ * Labels are compared without spaces, so a bare substring turned a wiki
+ * preview's 「…locate shared resources…」 into a 「share」 button and paused
+ * a read-only task for confirmation.
+ */
+const IRREVERSIBLE_CONTROL_EN_RE =
+  /\b(?:confirm(?:\s*\w+)?\s*(?:pay(?:ment)?|order|booking)|pay\s*now|proceed(?:\s*\w+){0,2}\s*pay(?:ment)?|place(?:\s*\w+)?\s*order|submit(?:\s*\w+)?\s*order|checkout|purchase|buy(?:\s*\w+)?\s*now|transfer|withdraw|delete|remove|publish|send|share)\b/i;
+
+/**
+ * A label that is one token (「sendmessage」「deleteaccount」「publishpost」) has
+ * no word boundaries to go by: it is matched as before, by substring (PR #286
+ * review). Only text with spaces — prose — is held to whole words.
+ */
+const IRREVERSIBLE_CONTROL_TOKEN_RE =
+  /confirm\w*(?:pay|order|booking)|paynow|proceed\w*pay|place\w*order|submit\w*order|checkout|purchase|buy\w*now|transfer|withdraw|delete|remove|publish|send|share/i;
+
+export const TRANSACTION_PAGE_RE =
+  /(?:\/|\b)(?:checkout|payment|cashier|order[-_/]?confirm|confirm[-_/]?order|order[-_/]?submit|submit[-_/]?order|booking\/confirm|settlement|pay)(?:\/|\b)|订单提交/i;
 
 const TRANSACTION_CONTEXT_RE =
   /订单|支付|付款|结算|收款|交易|预订|银行卡|卡号|cvv|cvc|有效期|收货地址|配送地址|转账|汇款|充值|提现|payment|checkout|cashier|order|booking|settlement|cardnumber|billing|shipping|transfer|withdraw/i;
@@ -49,12 +79,44 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
     };
   }
 
+  // After the password / code box itself (a takeover, above): the login step's other boxes
+  // (typed or selected), and any box whose own label names an account / phone / mailbox.
+  if (
+    (action.kind !== 'navigate' && action.credentialForm) ||
+    (action.kind === 'type' && accountField(action))
+  ) {
+    const reason =
+      // FIX-45 (Deploy-45 core-08): the model read this as the whole form refused and gave up on the
+      // date box; the refusal is this box only.
+      '这个框是登录或验证用的（账号、手机号、邮箱、密码、验证码），不代填，这一步没有执行。同一表单里的其他普通字段（姓名、日期、地址等）可以照常填写。任务确实需要登录才能继续时调用 request_human 请用户接管；否则关掉弹窗（×、「关闭」或 press_key Escape）或换别的页面继续。';
+    return { allowed: false, reason, refuse: reason };
+  }
+  // FIX-36 复审 #1: logging in, signing up or authorizing is the user's, never clicked for them.
+  if (
+    action.kind === 'click' &&
+    (action.loginControl ||
+      [action.label, action.ariaLabel, action.title].some((value) =>
+        STRONG_LOGIN_CONTROL_RE.test(normalize(value)),
+      ))
+  ) {
+    const reason =
+      '这是登录、注册、授权或获取验证码的按钮，不替用户点击，这一步没有执行。任务确实需要登录才能继续时调用 request_human 请用户接管；否则关掉弹窗（×、「关闭」或 press_key Escape）继续。';
+    return { allowed: false, reason, refuse: reason };
+  }
+
   if (action.kind === 'navigate') return { allowed: true };
 
-  const signals = [action.label, action.ariaLabel, action.title, action.placeholder, action.name]
-    .map((value) => normalize(value))
-    .filter(Boolean);
-  const matchedSignal = signals.find((value) => IRREVERSIBLE_CONTROL_RE.test(value));
+  const raw = [action.label, action.ariaLabel, action.title, action.placeholder, action.name];
+  const signals = raw.map((value) => normalize(value)).filter(Boolean);
+  const matchedSignal =
+    signals.find((value) => IRREVERSIBLE_CONTROL_RE.test(value)) ??
+    raw.find(
+      (value) =>
+        !!value?.trim() &&
+        (/\s/.test(value.trim())
+          ? IRREVERSIBLE_CONTROL_EN_RE.test(words(value))
+          : IRREVERSIBLE_CONTROL_TOKEN_RE.test(value)),
+    );
   const neutralTransactionSubmit =
     action.kind === 'click' &&
     isSubmitControl(action) &&
@@ -74,6 +136,22 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
   };
 }
 
+/** A login step's own controls: refused wherever they are (FIX-36 复审 #1). */
+const STRONG_LOGIN_CONTROL_RE =
+  /授权登录|确认授权|同意授权|同意并|一键登录|快捷登录|本机号码|(?:获取|发送|重新发送)(?:短信)?(?:验证码|动态码)/;
+// 复审 #2: a phone / mailbox box is a login field only inside a login block (the page reads
+// that); on its own label only an account / user name is.
+const ACCOUNT_LABEL_RE = /账号|帐号|账户|用户名|登录名|username|account/i;
+const SEARCH_LABEL_RE = /搜索|search|查找|keyword/i;
+
+/** A box whose own signals name an account or user name (not a search box). */
+function accountField(action: RuntimeAction): boolean {
+  if (normalize(action.inputType) === 'search') return false;
+  const signals = [action.label, action.ariaLabel, action.placeholder, action.name].map(normalize);
+  if (signals.some((value) => SEARCH_LABEL_RE.test(value))) return false;
+  return signals.some((value) => ACCOUNT_LABEL_RE.test(value));
+}
+
 export function isAffirmativeActionConfirmation(message: string): boolean {
   const text = normalize(message);
   if (!text || /不要|不执行|不同意|拒绝|取消|等等|等一下|先别|no|cancel|stop/i.test(text)) {
@@ -82,6 +160,11 @@ export function isAffirmativeActionConfirmation(message: string): boolean {
   return /确认(?:执行|继续|下单|支付)?|同意|批准|继续(?:执行|下单|支付)?|可以执行|按计划执行|yes|confirm|approve|proceed/i.test(
     text,
   );
+}
+
+/** Words of a label: 「deleteItem」「send_message」「Buy-Now」 split apart. */
+function words(value: string): string {
+  return value.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
 }
 
 function normalize(value: string | null | undefined): string {

@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-06",
+  "environment": "localhost:4323 real components, mocked queries, writes rejected",
+  "browser_observed": {
+    "new_task_top_1280x720": {
+      "reference": 70,
+      "implementation": 70
+    },
+    "planned_desktop": {
+      "width": 460,
+      "animation_seconds": 0.62,
+      "escape_restores_create_focus": true
+    },
+    "planned_mobile": {
+      "viewport": 390,
+      "document_width": 390,
+      "x": 12,
+      "width": 366,
+      "right": 378,
+      "animation_seconds": 0.62
+    },
+    "media_project_popover": {
+      "background": "rgba(41, 42, 50, 0.97)",
+      "animation_seconds": 0.46
+    },
+    "energy": {
+      "body_height_seconds": 0.56,
+      "cards_height_seconds": 0.56,
+      "opacity_seconds": 0.44,
+      "collapsed_cards_inert": true
+    },
+    "stocks_mobile": {
+      "viewport": 390,
+      "document_width": 390
+    }
+  },
+  "source_verified_only": {
+    "stock_dock_collapse_ms": 620,
+    "stock_dock_opacity_ms": 440,
+    "energy_dialog_enter_ms": 340,
+    "energy_dialog_exit_ms": 300
+  },
+  "limitation": "Not a frame-by-frame equivalence test or authenticated live integration acceptance."
+}

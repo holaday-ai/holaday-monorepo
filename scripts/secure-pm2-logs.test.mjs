@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const helper = resolve(scriptDir, 'secure-pm2-logs.mjs');
@@ -47,7 +47,11 @@ test('secures the actual numbered PM2 worker logs instead of assuming generic na
   const result = spawnSync(
     process.execPath,
     [helper, 'holaday-orchestrator', 'holaday-account-closure-worker'],
-    { input: JSON.stringify(pm2Rows), encoding: 'utf8', env: { ...process.env, PM2_HOME: pm2Home } },
+    {
+      input: JSON.stringify(pm2Rows),
+      encoding: 'utf8',
+      env: { ...process.env, PM2_HOME: pm2Home },
+    },
   );
 
   assert.equal(result.status, 0, result.stderr);

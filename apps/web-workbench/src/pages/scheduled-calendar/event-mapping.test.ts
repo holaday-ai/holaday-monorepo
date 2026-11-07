@@ -1,10 +1,49 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type ScheduledTaskRow,
+  calendarRruleString,
   normalizeScheduledTaskRows,
   pickStatusColor,
   rowToEventInput,
-  type ScheduledTaskRow,
 } from './event-mapping.js';
+
+function localStamp(date: Date): string {
+  const p = (value: number, width = 2) => String(value).padStart(width, '0');
+  return `${p(date.getFullYear(), 4)}${p(date.getMonth() + 1)}${p(date.getDate())}T${p(
+    date.getHours(),
+  )}${p(date.getMinutes())}${p(date.getSeconds())}`;
+}
+
+describe('calendarRruleString', () => {
+  const anchor = new Date('2026-10-05T01:30:00Z');
+
+  it('adds a floating DTSTART from the next run when the rule has none', () => {
+    expect(calendarRruleString('FREQ=DAILY;BYHOUR=9', anchor)).toBe(
+      `DTSTART:${localStamp(anchor)}\nRRULE:FREQ=DAILY;BYHOUR=9`,
+    );
+    expect(calendarRruleString('RRULE:FREQ=DAILY', anchor)).toBe(
+      `DTSTART:${localStamp(anchor)}\nRRULE:FREQ=DAILY`,
+    );
+  });
+
+  it('converts a UTC DTSTART to local wall clock so BYDAY means local weekdays', () => {
+    const out = calendarRruleString(
+      'DTSTART:20261004T230000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE',
+      anchor,
+    );
+    expect(out).toBe(
+      `DTSTART:${localStamp(new Date('2026-10-04T23:00:00Z'))}\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE`,
+    );
+    expect(out).not.toMatch(/Z\n/);
+  });
+
+  it('passes floating / TZID starts through unchanged', () => {
+    const floating = 'DTSTART:20261005T090000\nRRULE:FREQ=DAILY';
+    expect(calendarRruleString(floating, anchor)).toBe(floating);
+    const tzid = 'DTSTART;TZID=Asia/Shanghai:20261005T090000\nRRULE:FREQ=DAILY';
+    expect(calendarRruleString(tzid, anchor)).toBe(tzid);
+  });
+});
 
 function makeRow(over: Partial<ScheduledTaskRow>): ScheduledTaskRow {
   return {
@@ -77,7 +116,7 @@ describe('pickStatusColor', () => {
       new Date('2026-05-16T08:00:00Z'),
       now,
     );
-    expect(c.accent).toBe('#EA1F59');
+    expect(c.accent).toBe('#FF0061');
     expect(c.opacity).toBe(1);
   });
 
@@ -87,7 +126,7 @@ describe('pickStatusColor', () => {
       new Date('2026-05-16T13:00:00Z'),
       now,
     );
-    expect(c.accent).toBe('#EA1F59');
+    expect(c.accent).toBe('#FF0061');
   });
 
   it('active in the future → magenta brand color, full opacity', () => {
@@ -96,8 +135,8 @@ describe('pickStatusColor', () => {
       new Date('2026-05-16T13:00:00Z'),
       now,
     );
-    expect(c.accent).toBe('#EA1F59');
-    expect(c.background).toContain('234, 31, 89');
+    expect(c.accent).toBe('#FF0061');
+    expect(c.background).toContain('255, 0, 97');
     expect(c.opacity).toBe(1);
   });
 
@@ -143,15 +182,23 @@ describe('rowToEventInput', () => {
   });
 
   it('rrule row → emits rrule field + duration object', () => {
-    const events = rowToEventInput(
-      makeRow({ rrule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR' }),
-      { now },
-    );
+    const events = rowToEventInput(makeRow({ rrule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR' }), { now });
     expect(events).toHaveLength(1);
     const ev = events[0]!;
-    expect(ev.rrule).toBe('FREQ=WEEKLY;BYDAY=MO,WE,FR');
+    // Anchored at nextRunAt as a floating (local wall-clock) DTSTART.
+    expect(ev.rrule).toBe(
+      `DTSTART:${localStamp(new Date('2026-05-16T09:00:00Z'))}\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR`,
+    );
     expect(ev.duration).toEqual({ minutes: 30 });
     expect(ev.start).toBeUndefined();
+    // Batch 10.3 — rule occurrences are not draggable, only resizable.
+    expect(ev.startEditable).toBe(false);
+    expect(ev.durationEditable).toBe(true);
+  });
+
+  it('one-shot rows stay draggable', () => {
+    const [ev] = rowToEventInput(makeRow({}), { now });
+    expect(ev).not.toHaveProperty('startEditable');
   });
 
   it('extendedProps carries the full color triple + description + reminder', () => {
@@ -163,9 +210,9 @@ describe('rowToEventInput', () => {
       { now },
     );
     const ext = events[0]?.extendedProps as Record<string, unknown>;
-    expect(ext.accentColor).toBe('#EA1F59');
-    expect(ext.backgroundTint).toContain('234, 31, 89');
-    expect(ext.backgroundTintHover).toContain('234, 31, 89');
+    expect(ext.accentColor).toBe('#FF0061');
+    expect(ext.backgroundTint).toContain('255, 0, 97');
+    expect(ext.backgroundTintHover).toContain('255, 0, 97');
     expect(ext.description).toBe('产品同事每周看的报告');
     expect(ext.reminderMinutes).toBe(15);
     expect(ext.scheduledTaskInternalId).toBe(101);
@@ -207,25 +254,19 @@ describe('rowToEventInput', () => {
   });
 
   it('invalid nextRunAt → empty array (defensive)', () => {
-    const events = rowToEventInput(
-      makeRow({ nextRunAt: 'not-a-date' }),
-      { now },
-    );
+    const events = rowToEventInput(makeRow({ nextRunAt: 'not-a-date' }), { now });
     expect(events).toEqual([]);
   });
 
   it('custom durationMinutes flows into end-time calc', () => {
     const events = rowToEventInput(makeRow({ durationMinutes: 90 }), { now });
-    expect(
-      (events[0]?.end as Date).getTime() - (events[0]?.start as Date).getTime(),
-    ).toBe(90 * 60_000);
+    expect((events[0]?.end as Date).getTime() - (events[0]?.start as Date).getTime()).toBe(
+      90 * 60_000,
+    );
   });
 
   it('clamps recurring event duration before passing it to FullCalendar', () => {
-    const events = rowToEventInput(
-      makeRow({ durationMinutes: 0, rrule: 'FREQ=DAILY' }),
-      { now },
-    );
+    const events = rowToEventInput(makeRow({ durationMinutes: 0, rrule: 'FREQ=DAILY' }), { now });
     expect(events[0]?.duration).toEqual({ minutes: 1 });
     expect((events[0]?.extendedProps as Record<string, unknown>).durationMinutes).toBe(1);
   });

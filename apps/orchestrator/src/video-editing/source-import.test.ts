@@ -285,12 +285,9 @@ describe('video source import', () => {
   });
 
   it('preserves a portrait final-only video as a 9:16 edit document', async () => {
-    const imported = await importOwned(
-      source(),
-      {
-        probeVideoMetadata: async () => ({ durationMs: 12_500, width: 1080, height: 1920 }),
-      },
-    );
+    const imported = await importOwned(source(), {
+      probeVideoMetadata: async () => ({ durationMs: 12_500, width: 1080, height: 1920 }),
+    });
 
     expect(imported.document.aspectRatio).toBe('9:16');
     expect(imported.document.scenes[0]?.sourceEndMs).toBe(12_500);

@@ -42,9 +42,7 @@ export function formatRollForward(at: Date, now = new Date()): string {
     out.setHours(0, 0, 0, 0);
     return out;
   };
-  const diffDays = Math.round(
-    (startOfDay(at).getTime() - startOfDay(now).getTime()) / 86_400_000,
-  );
+  const diffDays = Math.round((startOfDay(at).getTime() - startOfDay(now).getTime()) / 86_400_000);
   const time = at.toLocaleTimeString('zh-CN', {
     hour: '2-digit',
     minute: '2-digit',

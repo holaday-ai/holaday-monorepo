@@ -17,6 +17,7 @@
  * verifiable facts (numbers, URLs, boolean states).
  */
 import { randomUUID } from 'node:crypto';
+import { TEXT_URL_RE as URL_RE } from './text-urls.js';
 
 export type EvidenceSourceType =
   | 'user_input'
@@ -71,9 +72,7 @@ export class EvidenceLedger {
       return '';
     }
     const fact =
-      entry.fact.length > MAX_FACT_CHARS
-        ? entry.fact.slice(0, MAX_FACT_CHARS)
-        : entry.fact;
+      entry.fact.length > MAX_FACT_CHARS ? entry.fact.slice(0, MAX_FACT_CHARS) : entry.fact;
     const id = randomUUID();
     this._entries.push({
       id,
@@ -124,7 +123,7 @@ export class EvidenceLedger {
         continue;
       }
       // Match http(s) URLs liberally; the verifier normalises before compare.
-      const matches = e.fact.match(/https?:\/\/[^\s,;'")\]]+/g);
+      const matches = e.fact.match(URL_RE);
       if (matches) {
         for (const m of matches) urls.add(m);
       }

@@ -1,8 +1,8 @@
-import {
-  createIdempotentMountedVideoEditor,
-  type VideoEditorAdapter,
-} from './video-editor-adapter';
 import type { VideoEditingDocument } from './video-editing-state';
+import {
+  type VideoEditorAdapter,
+  createIdempotentMountedVideoEditor,
+} from './video-editor-adapter';
 
 type CesdkBlockId = number;
 
@@ -31,10 +31,7 @@ interface CesdkBlockApi {
   replaceText(block: CesdkBlockId, text: string): void;
   setTextFontSize(block: CesdkBlockId, size: number): void;
   setTextHorizontalAlignment(block: CesdkBlockId, alignment: 'Center'): void;
-  setTextColor(
-    block: CesdkBlockId,
-    color: { r: number; g: number; b: number; a: number },
-  ): void;
+  setTextColor(block: CesdkBlockId, color: { r: number; g: number; b: number; a: number }): void;
 }
 
 interface CesdkEngine {
@@ -66,11 +63,12 @@ interface CesdkAdapterDependencies {
   loadSdk?: () => Promise<CesdkModule>;
 }
 
-const CANVAS_SIZE: Record<VideoEditingDocument['aspectRatio'], { width: number; height: number }> = {
-  '16:9': { width: 1920, height: 1080 },
-  '9:16': { width: 1080, height: 1920 },
-  '1:1': { width: 1080, height: 1080 },
-};
+const CANVAS_SIZE: Record<VideoEditingDocument['aspectRatio'], { width: number; height: number }> =
+  {
+    '16:9': { width: 1920, height: 1080 },
+    '9:16': { width: 1080, height: 1920 },
+    '1:1': { width: 1080, height: 1080 },
+  };
 
 /**
  * Compile Holaday's immutable, vendor-neutral edit document into a CE.SDK video scene.

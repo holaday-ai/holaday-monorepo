@@ -36,9 +36,9 @@
 import { writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PlaywrightExecutor } from '../apps/orchestrator/src/agent/vision-loop/playwright-executor.js';
 import { runSupercarTask, supercarReply } from '../apps/orchestrator/src/agent/supercar/index.js';
 import { classify } from '../apps/orchestrator/src/agent/vision-loop/domain/classifier.js';
+import { PlaywrightExecutor } from '../apps/orchestrator/src/agent/vision-loop/playwright-executor.js';
 
 type Expectation =
   | 'completed_with_summary'

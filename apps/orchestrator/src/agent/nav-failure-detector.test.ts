@@ -41,23 +41,21 @@ describe('detectNavFailure', () => {
   });
 
   it('SSL — Chinese friendly phrase', () => {
-    const r = detectNavFailure(
-      '该网站证书有问题，无法安全连接。请确认网址是否正确或换一个站点。',
-    );
+    const r = detectNavFailure('该网站证书有问题，无法安全连接。请确认网址是否正确或换一个站点。');
     expect(r.detected).toBe(true);
     expect(r.kind).toBe('ssl');
   });
 
   it('SSL — raw ERR_CERT code', () => {
-    const r = detectNavFailure('page.goto failed: net::ERR_CERT_AUTHORITY_INVALID at https://expired.badssl.com/');
+    const r = detectNavFailure(
+      'page.goto failed: net::ERR_CERT_AUTHORITY_INVALID at https://expired.badssl.com/',
+    );
     expect(r.detected).toBe(true);
     expect(r.kind).toBe('ssl');
   });
 
   it('Timeout — Chinese friendly phrase', () => {
-    const r = detectNavFailure(
-      '页面加载超时，可能网络不稳定或站点响应慢，请稍后重试。',
-    );
+    const r = detectNavFailure('页面加载超时，可能网络不稳定或站点响应慢，请稍后重试。');
     expect(r.detected).toBe(true);
     expect(r.kind).toBe('timeout');
   });

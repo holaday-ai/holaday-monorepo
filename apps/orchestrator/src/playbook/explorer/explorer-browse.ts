@@ -239,8 +239,10 @@ export function makeBrowseExploreSite(
 
     // Cost-source A: the in-process accumulated cost the runner returns (fail-closed;
     // never a DB read-back). Feeds the per-site $5 breaker via ExploreSiteOutcome.costUsd.
-    const costUsd = Number.isFinite(result.costUsd) && result.costUsd >= 0
-      ? result.costUsd : Number.POSITIVE_INFINITY;
+    const costUsd =
+      Number.isFinite(result.costUsd) && result.costUsd >= 0
+        ? result.costUsd
+        : Number.POSITIVE_INFINITY;
 
     if (state.vetoed) {
       return {

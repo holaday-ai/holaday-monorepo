@@ -2,7 +2,7 @@ import { and, eq, isNull, lt, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { userMfaRecoveryCodes } from '../db/schema/user-mfa-recovery-codes.js';
 import { users } from '../db/schema/users.js';
-import { signAccessToken, verifyMfaChallengeToken } from './jwt.js';
+import { verifyMfaChallengeToken } from './jwt.js';
 import {
   decryptMfaSecret,
   encryptMfaSecret,
@@ -13,6 +13,7 @@ import {
   verifyTotp,
 } from './mfa.js';
 import { type LoginResult, issueLoginResult } from './service.js';
+import { issueSessionAccessToken } from './sessions.js';
 
 const SETUP_TTL_MS = 10 * 60 * 1000;
 const LOCK_MINUTES = 5;
@@ -115,7 +116,7 @@ export class MfaService {
         .where(eq(users.id, row.id));
     });
     const updated = await this.user(externalId);
-    return { accessToken: await issueAccess(updated), recoveryCodes };
+    return { accessToken: await issueAccess(this.db, updated), recoveryCodes };
   }
 
   async verifyChallenge(mfaToken: string, code: string): Promise<LoginResult> {
@@ -184,7 +185,7 @@ export class MfaService {
         .where(eq(users.id, row.id));
     });
     const updated = await this.user(externalId);
-    return { accessToken: await issueAccess(updated) };
+    return { accessToken: await issueAccess(this.db, updated) };
   }
 
   private async user(externalId: string): Promise<MfaUserRow> {
@@ -313,9 +314,10 @@ function affectedRows(result: unknown): number {
 }
 
 function issueAccess(
+  database: DB,
   row: Pick<MfaUserRow, 'externalId' | 'plan' | 'authVersion'>,
 ): Promise<string> {
-  return signAccessToken({
+  return issueSessionAccessToken(database, {
     sub: row.externalId,
     plan: row.plan,
     authVersion: row.authVersion,

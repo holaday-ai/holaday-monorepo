@@ -70,8 +70,7 @@ const NON_SPECIFIC_INTENT_TERMS = new Set([
 ]);
 
 const CAPABILITY_TASK_EVIDENCE: Readonly<Record<string, RegExp>> = {
-  'douyin-live-ops':
-    /(?:直播|视频|内容|脚本|投流|流量|广告|涨粉|播放|运营|复盘|数据|发布|剪辑)/,
+  'douyin-live-ops': /(?:直播|视频|内容|脚本|投流|流量|广告|涨粉|播放|运营|复盘|数据|发布|剪辑)/,
   'xiaohongshu-seeding-ops':
     /(?:小红书|笔记|种草|内容|选题|发布|投薯条|投流|流量|运营|标题|封面|互动|数据)/,
   'wechat-article-ops':
@@ -82,16 +81,12 @@ const CAPABILITY_TASK_EVIDENCE: Readonly<Record<string, RegExp>> = {
     /(?:图片|图像|照片|画面|参考图|提示词|prompt|反推|风格|构图|光线|材质|负面词|主体特征|肖像)/,
   'a-share-market-briefing':
     /(?:股票|个股|a股|行情|股市|大盘|涨跌|异动|行业|风险|走势|成交|买入|卖出)/,
-  'contract-risk-review':
-    /(?:合同|条款|协议|签约|谈判|甲方|乙方|法务|审查|法律意见|律师)/,
-  'market-competitor-insight':
-    /(?:竞品|市场|洞察|调研|swot|机会点|定位|规模|趋势|差异化)/,
-  'data-report-insight':
-    /(?:数据|报表|表格|kpi|归因|指标|图表|周报|复购率|相关性|相关关系|因果)/,
+  'contract-risk-review': /(?:合同|条款|协议|签约|谈判|甲方|乙方|法务|审查|法律意见|律师)/,
+  'market-competitor-insight': /(?:竞品|市场|洞察|调研|swot|机会点|定位|规模|趋势|差异化)/,
+  'data-report-insight': /(?:数据|报表|表格|kpi|归因|指标|图表|周报|复购率|相关性|相关关系|因果)/,
   'product-plan-drafting': /(?:产品|需求|prd|方案|原型|功能|用户|验收|mvp)/,
   'project-delivery-management': /(?:项目|推进|里程碑|排期|任务|进度|延期|负责人|依赖)/,
-  'resume-search-screening':
-    /(?:简历|招聘|候选人|人才|面试|jd|岗位|职位|筛选|过滤|录用|录取)/,
+  'resume-search-screening': /(?:简历|招聘|候选人|人才|面试|jd|岗位|职位|筛选|过滤|录用|录取)/,
   'performance-review-design': /(?:绩效|考核|kpi|okr|评估|制度|评分|指标|权重)/,
 };
 
@@ -146,8 +141,7 @@ const SPECIFIC_REGIONAL_ABBREVIATION_TERM =
   '(?:(?:京|沪|津|渝|冀|豫|云|滇|辽|黑|湘|皖|鲁|新|苏|浙|赣|鄂|桂|甘|陇|晋|蒙|陕|秦|吉|闽|贵|黔|青|藏|川|蜀|宁|琼|粤|台|港|澳)籍|外地人|本地人)';
 const SPECIFIC_HEALTH_STATUS_TERM =
   '(?:乙肝|乙型肝炎|甲肝|丙肝|艾滋病?|hiv(?:阳性)?|传染病|精神疾病|抑郁症|癌症|糖尿病|高血压)';
-const SENSITIVE_IDENTITY_TERM =
-  `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|\\d{2}后|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|户口|籍贯|出生地|国籍|外籍|${SPECIFIC_NATIONALITY_TERM}|${SPECIFIC_REGIONAL_ORIGIN_TERM}|${SPECIFIC_REGIONAL_ABBREVIATION_TERM}|政治面貌|中共党员|预备党员|党员|共青团员|团员|群众(?!演员)|民主党派|无党派人士|无党派|健康状况|疾病|${SPECIFIC_HEALTH_STATUS_TERM}|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚|未结婚|没结婚|单身|离异|离婚|丧偶|未育|已育|未生育|没有孩子|无子女|无孩|有娃|有孩子|丁克|不打算生孩子|没有生育打算|不准备生孩子|不想生孩子)`;
+const SENSITIVE_IDENTITY_TERM = `(?:性别|性取向|同性恋|异性恋|双性恋|无性恋|年龄|\\d{1,3}岁(?:以下|以上|以内|以外)?|\\d{2}后|民族|${SPECIFIC_ETHNICITY_TERM}|种族|${SPECIFIC_RACIAL_IDENTITY_TERM}|宗教|${SPECIFIC_RELIGIOUS_IDENTITY_TERM}|残障|残疾|婚姻|婚育|孕育|怀孕|户籍|户口|籍贯|出生地|国籍|外籍|${SPECIFIC_NATIONALITY_TERM}|${SPECIFIC_REGIONAL_ORIGIN_TERM}|${SPECIFIC_REGIONAL_ABBREVIATION_TERM}|政治面貌|中共党员|预备党员|党员|共青团员|团员|群众(?!演员)|民主党派|无党派人士|无党派|健康状况|疾病|${SPECIFIC_HEALTH_STATUS_TERM}|男性|女性|男士|女士|男(?=候选人|人才|简历|员工|人员|生|$)|女(?=候选人|人才|简历|员工|人员|生|$)|孕妇|已婚|未婚|未结婚|没结婚|单身|离异|离婚|丧偶|未育|已育|未生育|没有孩子|无子女|无孩|有娃|有孩子|丁克|不打算生孩子|没有生育打算|不准备生孩子|不想生孩子)`;
 
 const HIRING_ANTI_DISCRIMINATION = new RegExp(
   `^(?:请)?(?:不要|禁止|不得|避免|防止)(?:再)?(?:基于|按照|根据|按|依据|以).{0,4}${SENSITIVE_IDENTITY_TERM}.{0,8}(?:筛选|过滤|招聘|招|找|选择|选|挑|排序|排名|分组|淘汰|拒绝|录用)(?:候选人|人才|简历)?(?:并)?(?:检查|分析|说明|识别|评估)?(?:合规|歧视|风险|问题)?$`,
@@ -166,9 +160,7 @@ const HIRING_DISCRIMINATION_CONFLICTS: readonly RegExp[] = [
   ),
   new RegExp(`(?:只招|只要|仅限|只选|只筛选|仅筛选).{0,6}${SENSITIVE_IDENTITY_TERM}`),
   new RegExp(`(?:只录用|仅录用).{0,6}${SENSITIVE_IDENTITY_TERM}`),
-  new RegExp(
-    `(?:筛选|过滤|挑选|选择|录用|招聘|招|找).{0,4}${SENSITIVE_IDENTITY_TERM}`,
-  ),
+  new RegExp(`(?:筛选|过滤|挑选|选择|录用|招聘|招|找).{0,4}${SENSITIVE_IDENTITY_TERM}`),
   new RegExp(
     `(?:筛掉|过滤掉|排除|拒绝|淘汰|不招|不录用|不要)(?:招聘|录用|选择|筛选|要)?${SENSITIVE_IDENTITY_TERM}`,
   ),
@@ -231,8 +223,7 @@ const CONTENT_PROMISE_POST_NEGATION = /^(?:不了|不到|不住|不能(?!(?:低�
 const CONTENT_PROMISE_REVIEW_START =
   /^(?:(?:请|帮我|替我|给我|麻烦)(?:先|再)?){0,2}(?:分析|检查|审查|复盘|研究|评估)/;
 const CONTENT_PROMISE_CONTRACT_TERM = /(?:合同|条款|协议|约定)/;
-const CONTENT_PROMISE_REFERENCE_PREFIX =
-  /(?:包含|涉及|写有|写着|约定|提到|列明)(?:了|的)?$/;
+const CONTENT_PROMISE_REFERENCE_PREFIX = /(?:包含|涉及|写有|写着|约定|提到|列明)(?:了|的)?$/;
 const CONTENT_PROMISE_ANALYSIS =
   /^(?:分析|说明|解释|检查|审查|评估|复盘|研究).{0,32}(?:保证|承诺|确保|保底|包你|保你).{0,24}(?:风险|问题|后果|原因|边界|可行性|合规)$/;
 const CONTENT_COLLOQUIAL_PROMISE_ANALYSIS =
@@ -547,20 +538,17 @@ export function skillTaskDraft(
     skillId: id,
     skillName: name,
     skillSource,
-    prompt:
-      skillSource === 'suggested'
-        ? prompt
-        : prompt
-          ? `@${name} ${prompt}`
-          : `@${name} `,
+    prompt: skillSource === 'suggested' ? prompt : prompt ? `@${name} ${prompt}` : `@${name} `,
   };
 }
 
-export function skillSelectionFromTaskDraft(draft: {
-  readonly skillId?: unknown;
-  readonly skillName?: unknown;
-  readonly skillSource?: unknown;
-} | null): UiSkillSelection | null {
+export function skillSelectionFromTaskDraft(
+  draft: {
+    readonly skillId?: unknown;
+    readonly skillName?: unknown;
+    readonly skillSource?: unknown;
+  } | null,
+): UiSkillSelection | null {
   if (
     !draft ||
     (draft.skillSource !== undefined &&
@@ -616,15 +604,11 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
     );
     const safeBoundaryScore =
       skill.id === 'data-report-insight' &&
-      (SKILL_BOUNDARY_SAFE_MENTIONS[skill.id] ?? []).some((pattern) =>
-        pattern.test(boundaryIntent),
-      )
+      (SKILL_BOUNDARY_SAFE_MENTIONS[skill.id] ?? []).some((pattern) => pattern.test(boundaryIntent))
         ? 4
         : 0;
     const intentContextScore =
-      (skill.id === 'contract-risk-review' && CONTRACT_REVIEW_INTENT.test(boundaryIntent)
-        ? 4
-        : 0) +
+      (skill.id === 'contract-risk-review' && CONTRACT_REVIEW_INTENT.test(boundaryIntent) ? 4 : 0) +
       (skill.id === 'project-delivery-management' &&
       PROJECT_DELIVERY_RISK_REVIEW.test(boundaryIntent)
         ? 4
@@ -636,8 +620,9 @@ export function matchSkillsForIntent<TSkill extends UiSkill>(
       index,
     };
   });
-  const matches = scoredSkills
-    .sort((left, right) => right.score - left.score || left.index - right.index);
+  const matches = scoredSkills.sort(
+    (left, right) => right.score - left.score || left.index - right.index,
+  );
   const topScore = matches[0]?.score ?? 0;
   const secondScore = matches[1]?.score ?? 0;
   const postContractReviewBoundaryConflict =
@@ -693,9 +678,7 @@ function hasRequiredCapabilityTaskEvidence(
 
 function hasPostContractReviewBoundaryConflict(normalizedIntent: string): boolean {
   const clauses = normalizedIntent
-    .split(
-      /(?:[，,；;。.!！？?]+|顺便|另外|然后|接着|随后|继而|同时|并且|而且|转头|最后|并)/,
-    )
+    .split(/(?:[，,；;。.!！？?]+|顺便|另外|然后|接着|随后|继而|同时|并且|而且|转头|最后|并)/)
     .filter(Boolean);
   return clauses.slice(1).some((clause) => {
     const normalizedClause = normalizeMatchText(clause);
@@ -718,8 +701,7 @@ function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string):
   }
   if (CONTENT_EXECUTION_SKILL_IDS.has(skillId)) {
     return (
-      contentExecutionConflict(normalizedIntent) ||
-      hasUnexemptedContentPromise(normalizedIntent)
+      contentExecutionConflict(normalizedIntent) || hasUnexemptedContentPromise(normalizedIntent)
     );
   }
   if (skillId === 'a-share-market-briefing') {
@@ -746,10 +728,7 @@ function intentViolatesSkillBoundary(skillId: string, normalizedIntent: string):
 
 function hasRiskyReferentialExecution(normalizedIntent: string): boolean {
   if (THIRD_PARTY_REFERENTIAL_ANALYSIS.test(normalizedIntent)) return false;
-  const referentialRanges = findPatternOccurrences(
-    REFERENTIAL_EXECUTION_PHRASE,
-    normalizedIntent,
-  );
+  const referentialRanges = findPatternOccurrences(REFERENTIAL_EXECUTION_PHRASE, normalizedIntent);
   if (referentialRanges.length === 0) return false;
 
   const rawBoundaryPatterns = [
@@ -765,9 +744,7 @@ function hasRiskyReferentialExecution(normalizedIntent: string): boolean {
     const prefix = normalizedIntent.slice(Math.max(0, start - 96), start);
     return (
       hasUnnegatedContentPromise(prefix) ||
-      rawBoundaryPatterns.some(
-        (pattern) => findPatternOccurrences(pattern, prefix).length > 0,
-      )
+      rawBoundaryPatterns.some((pattern) => findPatternOccurrences(pattern, prefix).length > 0)
     );
   });
 }
@@ -796,9 +773,7 @@ function hasUnexemptedPatternConflict(
 
   return conflictRanges.some(
     (conflict) =>
-      !safeRanges.some(
-        (safe) => safe.start < conflict.end && conflict.start < safe.end,
-      ),
+      !safeRanges.some((safe) => safe.start < conflict.end && conflict.start < safe.end),
   );
 }
 
@@ -886,10 +861,7 @@ function findUnnegatedContentPromises(
     const prefix = normalizedIntent.slice(Math.max(0, match.index - 16), match.index);
     const outcomeClause = normalizedIntent
       .slice(match.index + match[0].length, match.index + match[0].length + 18)
-      .split(
-        /(?:但是|但|然而|然后|同时|并且|再|保证|承诺|确保|包你|保你|包(?!含|括))/,
-        1,
-      )[0];
+      .split(/(?:但是|但|然而|然后|同时|并且|再|保证|承诺|确保|包你|保你|包(?!含|括))/, 1)[0];
     if (
       CONTENT_OUTCOME.test(outcomeClause) &&
       !hasNegatedContentPromisePrefix(prefix) &&
@@ -908,14 +880,13 @@ function hasUnnegatedContentPromise(normalizedIntent: string): boolean {
 function hasUnexemptedContentPromise(normalizedIntent: string): boolean {
   if (!hasUnnegatedContentPromise(normalizedIntent)) return false;
   const clauses = splitBoundaryClauses(normalizedIntent);
-  return clauses.some(
-    (clause) =>
-      findUnnegatedContentPromises(clause).some(
-        (promise) =>
-          !CONTENT_PROMISE_ANALYSIS.test(clause) &&
-          !CONTENT_COLLOQUIAL_PROMISE_ANALYSIS.test(clause) &&
-          !isReviewedContractPromise(clause, promise),
-      ),
+  return clauses.some((clause) =>
+    findUnnegatedContentPromises(clause).some(
+      (promise) =>
+        !CONTENT_PROMISE_ANALYSIS.test(clause) &&
+        !CONTENT_COLLOQUIAL_PROMISE_ANALYSIS.test(clause) &&
+        !isReviewedContractPromise(clause, promise),
+    ),
   );
 }
 
@@ -923,10 +894,7 @@ function isReviewedContractPromise(
   clause: string,
   promise: { readonly index: number; readonly length: number },
 ): boolean {
-  if (
-    !CONTENT_PROMISE_REVIEW_START.test(clause) ||
-    !CONTENT_PROMISE_CONTRACT_TERM.test(clause)
-  ) {
+  if (!CONTENT_PROMISE_REVIEW_START.test(clause) || !CONTENT_PROMISE_CONTRACT_TERM.test(clause)) {
     return false;
   }
   const prefix = clause.slice(0, promise.index);
@@ -939,9 +907,7 @@ function isReviewedContractPromise(
 }
 
 function hasNegatedContentPromisePrefix(prefix: string): boolean {
-  return (
-    CONTENT_PROMISE_NEGATION.test(prefix) && !CONTENT_PROMISE_DOUBLE_NEGATION.test(prefix)
-  );
+  return CONTENT_PROMISE_NEGATION.test(prefix) && !CONTENT_PROMISE_DOUBLE_NEGATION.test(prefix);
 }
 
 function scoreSkillIntent(
@@ -999,7 +965,10 @@ function normalizeSkillIntentDocument(skill: UiSkill): string {
 }
 
 function normalizeMatchText(value: string): string {
-  return value.trim().toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, '');
 }
 
 function normalizeBoundaryText(value: string): string {

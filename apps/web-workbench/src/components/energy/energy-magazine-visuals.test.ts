@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { MAGAZINE_ART, allocateMagazineVisuals } from './energy-magazine-visuals';
 import { ENERGY_EXPLORE_CONTENT, type EnergyContentItem } from './explore-content';
-import { allocateMagazineVisuals, MAGAZINE_ART } from './energy-magazine-visuals';
 
 function content(id: string): EnergyContentItem {
   const item = ENERGY_EXPLORE_CONTENT.find((candidate) => candidate.id === id);

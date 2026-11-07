@@ -1,21 +1,15 @@
-import { describe, it, expect } from 'vitest';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
-import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
-import {
-  extractPlaceholders,
-  fill,
-  DocxTemplateError,
-} from './docx-template-engine.js';
+import PizZip from 'pizzip';
+import { describe, expect, it } from 'vitest';
+import { DocxTemplateError, extractPlaceholders, fill } from './docx-template-engine.js';
 
 /** Build a .docx template where each line is a paragraph of literal text. */
 async function buildDocx(lines: string[]): Promise<Buffer> {
   const doc = new Document({
     sections: [
       {
-        children: lines.map(
-          (line) => new Paragraph({ children: [new TextRun(line)] }),
-        ),
+        children: lines.map((line) => new Paragraph({ children: [new TextRun(line)] })),
       },
     ],
   });
@@ -68,9 +62,7 @@ describe('extractPlaceholders (docx)', () => {
   });
 
   it('throws DocxTemplateError on a non-zip buffer', () => {
-    expect(() => extractPlaceholders(Buffer.from('not a docx'))).toThrow(
-      DocxTemplateError,
-    );
+    expect(() => extractPlaceholders(Buffer.from('not a docx'))).toThrow(DocxTemplateError);
   });
 
   it('throws DocxTemplateError with a tag on an unclosed loop', async () => {
@@ -123,8 +115,6 @@ describe('fill (docx)', () => {
   });
 
   it('throws DocxTemplateError on a non-zip buffer', () => {
-    expect(() => fill(Buffer.from('garbage'), { a: 'x' })).toThrow(
-      DocxTemplateError,
-    );
+    expect(() => fill(Buffer.from('garbage'), { a: 'x' })).toThrow(DocxTemplateError);
   });
 });

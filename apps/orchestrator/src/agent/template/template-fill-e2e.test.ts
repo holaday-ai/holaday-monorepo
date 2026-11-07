@@ -1,3 +1,5 @@
+import ExcelJS from 'exceljs';
+import type { Logger } from 'pino';
 /**
  * Messy-material end-to-end fixture (Phase 1 #1) — pinned in CI because this
  * exact scenario caught real bugs during acceptance (2026-06-13): the derived-
@@ -9,19 +11,22 @@
  * runTemplateFillTask, and asserts the per-field outcomes + the downloaded
  * workbook. No network / no live model — so it's a stable regression guard.
  */
-import { describe, it, expect, vi } from 'vitest';
-import type { Logger } from 'pino';
-import ExcelJS from 'exceljs';
+import { describe, expect, it, vi } from 'vitest';
 import {
-  runTemplateFillTask,
   type SaveTemplateFn,
   type TemplateAttachment,
+  runTemplateFillTask,
 } from './template-fill-runner.js';
 
 function fakeLogger(): Logger {
   const noop = vi.fn();
   return {
-    info: noop, warn: noop, debug: noop, error: noop, fatal: noop, trace: noop,
+    info: noop,
+    warn: noop,
+    debug: noop,
+    error: noop,
+    fatal: noop,
+    trace: noop,
     child: () => fakeLogger(),
   } as unknown as Logger;
 }
@@ -31,9 +36,13 @@ function capturingSave(): { save: SaveTemplateFn; captured: { buffer?: Buffer } 
   const save: SaveTemplateFn = async (out) => {
     captured.buffer = out.buffer;
     const a: TemplateAttachment = {
-      fileId: 'file_e2e', downloadUrl: '/api/files/file_e2e/download',
-      filename: out.filename, mimetype: out.mimetype, sizeBytes: out.buffer.length,
-      expiresAt: '2026-06-14T00:00:00.000Z', kind: 'output',
+      fileId: 'file_e2e',
+      downloadUrl: '/api/files/file_e2e/download',
+      filename: out.filename,
+      mimetype: out.mimetype,
+      sizeBytes: out.buffer.length,
+      expiresAt: '2026-06-14T00:00:00.000Z',
+      kind: 'output',
     };
     return a;
   };
@@ -47,7 +56,8 @@ const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.s
 async function buildWeeklyTemplate(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('周报');
-  ws.getCell('A1').value = '{report_title}'; ws.getCell('A1').font = { bold: true, size: 14 };
+  ws.getCell('A1').value = '{report_title}';
+  ws.getCell('A1').font = { bold: true, size: 14 };
   ws.getCell('A2').value = '周次：{week_no}';
   ws.getCell('A3').value = '编制：{author}  日期：{report_date}';
   ws.getCell('A5').value = '本周GMV：{gmv_this}';
@@ -57,11 +67,11 @@ async function buildWeeklyTemplate(): Promise<Buffer> {
   ws.getCell('A9').value = '上周订单：{orders_last}';
   ws.getCell('A10').value = '订单环比：{orders_wow}%';
   ws.getCell('A11').value = '毛利：{gross_profit}'; // derived, unit-confused → [待核对]
-  ws.getCell('A13').value = '{#tasks}';              // multi-row loop → block-duplicated (E10)
+  ws.getCell('A13').value = '{#tasks}'; // multi-row loop → block-duplicated (E10)
   ws.getCell('A14').value = '{task_name} — {task_status}';
   ws.getCell('A15').value = '{/tasks}';
   ws.getCell('A17').value = '任务数：{task_count}';
-  ws.getCell('A18').value = '备注：{remark}';        // missing → blank
+  ws.getCell('A18').value = '备注：{remark}'; // missing → blank
   return Buffer.from((await wb.xlsx.writeBuffer()) as ArrayBuffer);
 }
 
@@ -70,10 +80,18 @@ async function buildWeeklyTemplate(): Promise<Buffer> {
 // the model wrote "20" (dropped 万) → the deterministic re-check must flag it.
 const MODEL_JSON = JSON.stringify({
   fields: {
-    report_title: '第24周经营周报', week_no: '24', author: '张三', report_date: '2026-06-13',
-    gmv_this: '120万', gmv_last: '100万', gmv_wow: '20',
-    orders_this: '1500', orders_last: '1200', orders_wow: '25',
-    gross_profit: '20', task_count: '3',
+    report_title: '第24周经营周报',
+    week_no: '24',
+    author: '张三',
+    report_date: '2026-06-13',
+    gmv_this: '120万',
+    gmv_last: '100万',
+    gmv_wow: '20',
+    orders_this: '1500',
+    orders_last: '1200',
+    orders_wow: '25',
+    gross_profit: '20',
+    task_count: '3',
   },
   loops: {
     tasks: [

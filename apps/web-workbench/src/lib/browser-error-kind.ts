@@ -16,13 +16,13 @@ export type BrowserErrorKind =
   | 'login'
   | 'generic_browser';
 
-export function classifyBrowserErrorKind(
-  raw: string | null | undefined,
-): BrowserErrorKind | null {
+export function classifyBrowserErrorKind(raw: string | null | undefined): BrowserErrorKind | null {
   const text = raw?.trim().toLowerCase();
   if (!text) return null;
 
-  if (/扩展工具调用超时|浏览器扩展响应超时|extension tool.*timeout|browser tool.*timeout/.test(text)) {
+  if (
+    /扩展工具调用超时|浏览器扩展响应超时|extension tool.*timeout|browser tool.*timeout/.test(text)
+  ) {
     return 'extension_timeout';
   }
   if (
@@ -39,7 +39,11 @@ export function classifyBrowserErrorKind(
   ) {
     return 'extension_permission';
   }
-  if (/bad_args|bad_url|invalid url|expected http\(s\) url|只支持.*http|不支持.*网址|网址.*无效|导航地址无效/.test(text)) {
+  if (
+    /bad_args|bad_url|invalid url|expected http\(s\) url|只支持.*http|不支持.*网址|网址.*无效|导航地址无效/.test(
+      text,
+    )
+  ) {
     return 'invalid_url';
   }
   if (
@@ -79,10 +83,18 @@ export function classifyBrowserErrorKind(
   ) {
     return 'transport_closed';
   }
-  if (/err_connection_closed|err_connection_refused|err_connection_reset|err_address_unreachable|err_internet_disconnected|无法连接到(?:该|这个)?站点|无法连接到这个网站/.test(text)) {
+  if (
+    /err_connection_closed|err_connection_refused|err_connection_reset|err_address_unreachable|err_internet_disconnected|无法连接到(?:该|这个)?站点|无法连接到这个网站/.test(
+      text,
+    )
+  ) {
     return 'connection';
   }
-  if (/navigation.*timeout|navigate.*timeout|timeout|timed.?out|err_timed_out|err_connection_timed_out|超时/.test(text)) {
+  if (
+    /navigation.*timeout|navigate.*timeout|timeout|timed.?out|err_timed_out|err_connection_timed_out|超时/.test(
+      text,
+    )
+  ) {
     return 'timeout';
   }
   if (/captcha|recaptcha|hcaptcha|cloudflare|人机|验证码|滑块|are you a (human|robot)/.test(text)) {

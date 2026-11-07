@@ -8,12 +8,12 @@ import { and, eq, gt, gte, lt, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { llmCalls } from '../db/schema/llm-calls.js';
 import {
-  apiCostPoolEvents,
-  partnerDailyAllocations,
-  partnerLots,
   type ApiCostPoolEvent,
   type PartnerDailyAllocation,
   type PartnerLot,
+  apiCostPoolEvents,
+  partnerDailyAllocations,
+  partnerLots,
 } from '../db/schema/partner.js';
 import { PartnerActivityService } from './activity-service.js';
 
@@ -102,7 +102,10 @@ function assertMysqlUnsignedInt(value: number, fieldName: string): number {
   return value;
 }
 
-export function calculateApiUnitsFromUsdCost(input: { costUsdMicros: number; fxBps: number }): number {
+export function calculateApiUnitsFromUsdCost(input: {
+  costUsdMicros: number;
+  fxBps: number;
+}): number {
   const costUsdMicros = BigInt(assertNonNegativeSafeInteger(input.costUsdMicros, 'costUsdMicros'));
   const fxBps = BigInt(assertPositiveSafeInteger(input.fxBps, 'fxBps'));
   const apiUnits =
@@ -119,7 +122,9 @@ export function calculateLotWeight(input: {
 }): number {
   const apiUnits = BigInt(assertNonNegativeSafeInteger(input.apiUnits, 'apiUnits'));
   const ageFactorBps = BigInt(assertPositiveSafeInteger(input.ageFactorBps, 'ageFactorBps'));
-  const activityFactorBps = BigInt(assertPositiveSafeInteger(input.activityFactorBps, 'activityFactorBps'));
+  const activityFactorBps = BigInt(
+    assertPositiveSafeInteger(input.activityFactorBps, 'activityFactorBps'),
+  );
   const riskFactorBps = BigInt(assertPositiveSafeInteger(input.riskFactorBps, 'riskFactorBps'));
   const weight =
     (apiUnits * ageFactorBps * activityFactorBps * riskFactorBps) /
@@ -131,7 +136,10 @@ export function capDailyBonus(input: {
   targetCreditCents: number;
   remainingBonusCreditCents: number;
 }): number {
-  const targetCreditCents = assertNonNegativeSafeInteger(input.targetCreditCents, 'targetCreditCents');
+  const targetCreditCents = assertNonNegativeSafeInteger(
+    input.targetCreditCents,
+    'targetCreditCents',
+  );
   const remainingBonusCreditCents = assertNonNegativeSafeInteger(
     input.remainingBonusCreditCents,
     'remainingBonusCreditCents',
@@ -142,7 +150,8 @@ export function capDailyBonus(input: {
 function sumUsdCostMicros(rows: ReadonlyArray<{ costUsd: string | number | null }>): number {
   let total = 0n;
   for (const row of rows) {
-    if (row.costUsd === null) throw new RangeError('API cost pool incomplete: unpriced or missing usage');
+    if (row.costUsd === null)
+      throw new RangeError('API cost pool incomplete: unpriced or missing usage');
     total += BigInt(parseUsdCostMicros(row.costUsd));
   }
   return toSafeInteger(total, 'costUsdMicros');
@@ -196,8 +205,7 @@ function calculateProportionalShare(input: {
   totalWeight: bigint;
 }): number {
   if (input.budgetCreditCents === 0 || input.lotWeight === 0 || input.totalWeight === 0n) return 0;
-  const share =
-    (BigInt(input.budgetCreditCents) * BigInt(input.lotWeight)) / input.totalWeight;
+  const share = (BigInt(input.budgetCreditCents) * BigInt(input.lotWeight)) / input.totalWeight;
   return toSafeInteger(share, 'targetCreditCents');
 }
 
@@ -205,7 +213,9 @@ function assertAllocationBudget(value: number): number {
   return assertMysqlUnsignedInt(value, 'budgetCreditCents');
 }
 
-function sumLockedBonusCreditCents(rows: ReadonlyArray<{ lockedBonusCreditCents: number }>): number {
+function sumLockedBonusCreditCents(
+  rows: ReadonlyArray<{ lockedBonusCreditCents: number }>,
+): number {
   return rows.reduce((sum, row) => sum + row.lockedBonusCreditCents, 0);
 }
 
@@ -235,11 +245,19 @@ export class AllocationService {
     this.activity = deps.activity ?? new PartnerActivityService(db);
   }
 
-  private async readDailyAllocation(lotId: number, day: string): Promise<PartnerDailyAllocation | undefined> {
+  private async readDailyAllocation(
+    lotId: number,
+    day: string,
+  ): Promise<PartnerDailyAllocation | undefined> {
     const [allocation] = await this.db
       .select()
       .from(partnerDailyAllocations)
-      .where(and(eq(partnerDailyAllocations.lotId, lotId), eq(partnerDailyAllocations.allocationDate, day)))
+      .where(
+        and(
+          eq(partnerDailyAllocations.lotId, lotId),
+          eq(partnerDailyAllocations.allocationDate, day),
+        ),
+      )
       .limit(1);
     return allocation;
   }
@@ -335,7 +353,10 @@ export class AllocationService {
     const weightedLots = await Promise.all(
       lots.map(async (lot) => ({
         lot,
-        weight: weightLot(lot, await this.activity.getActivityFactorBps(lot.userId, allocationDate)),
+        weight: weightLot(
+          lot,
+          await this.activity.getActivityFactorBps(lot.userId, allocationDate),
+        ),
       })),
     );
     const lotAllocationStates: LotAllocationState[] = [];
@@ -355,11 +376,20 @@ export class AllocationService {
         lotIdsToReconcile.add(lot.id);
       }
 
-      lotAllocationStates.push({ lot, weight, idempotencyKey, existingAllocation, allocatedBonusCreditCents });
+      lotAllocationStates.push({
+        lot,
+        weight,
+        idempotencyKey,
+        existingAllocation,
+        allocatedBonusCreditCents,
+      });
     }
 
     const existingLockedBonusCreditCents = sumLockedBonusCreditCents(existingAllocationsForDay);
-    const remainingBudgetForNewAllocations = Math.max(0, budgetCreditCents - existingLockedBonusCreditCents);
+    const remainingBudgetForNewAllocations = Math.max(
+      0,
+      budgetCreditCents - existingLockedBonusCreditCents,
+    );
     const missingAllocationWeight = lotAllocationStates
       .filter((item) => !item.existingAllocation)
       .reduce((sum, item) => sum + BigInt(item.weight), 0n);
@@ -367,7 +397,13 @@ export class AllocationService {
     let totalLockedBonusCreditCents = existingLockedBonusCreditCents;
     let allocationCount = existingAllocationsForDay.length;
 
-    for (const { lot, weight, idempotencyKey, existingAllocation, allocatedBonusCreditCents } of lotAllocationStates) {
+    for (const {
+      lot,
+      weight,
+      idempotencyKey,
+      existingAllocation,
+      allocatedBonusCreditCents,
+    } of lotAllocationStates) {
       let lockedBonusCreditCents = existingAllocation?.lockedBonusCreditCents ?? 0;
 
       if (!existingAllocation) {
@@ -396,7 +432,10 @@ export class AllocationService {
           externalId: newExternalId('payment'),
           lotId: lot.id,
           allocationDate: day,
-          lockedBonusCreditCents: assertMysqlUnsignedInt(lockedBonusCreditCents, 'lockedBonusCreditCents'),
+          lockedBonusCreditCents: assertMysqlUnsignedInt(
+            lockedBonusCreditCents,
+            'lockedBonusCreditCents',
+          ),
           apiUnitsWeight: weight,
           idempotencyKey,
           metadata: null,

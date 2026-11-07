@@ -11,18 +11,14 @@ import {
 describe('normalizePlannedItems', () => {
   it('keeps ordered unique tasks and trims whitespace', () => {
     expect(
-      normalizePlannedItems([
-        '  查询特斯拉股价  ',
-        '生成日报',
-        '查询特斯拉股价',
-        '   ',
-      ]),
+      normalizePlannedItems(['  查询特斯拉股价  ', '生成日报', '查询特斯拉股价', '   ']),
     ).toEqual(['查询特斯拉股价', '生成日报']);
   });
 
   it('rejects more than 50 tasks', () => {
-    expect(() => normalizePlannedItems(Array.from({ length: 51 }, (_, i) => `任务 ${i + 1}`)))
-      .toThrow('最多可规划 50 个任务');
+    expect(() =>
+      normalizePlannedItems(Array.from({ length: 51 }, (_, i) => `任务 ${i + 1}`)),
+    ).toThrow('最多可规划 50 个任务');
   });
 });
 

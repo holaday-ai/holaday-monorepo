@@ -1,13 +1,5 @@
 import { sql } from 'drizzle-orm';
-import {
-  bigint,
-  boolean,
-  datetime,
-  index,
-  int,
-  mysqlTable,
-  varchar,
-} from 'drizzle-orm/mysql-core';
+import { bigint, boolean, datetime, index, int, mysqlTable, varchar } from 'drizzle-orm/mysql-core';
 import { users } from './users.js';
 
 /**

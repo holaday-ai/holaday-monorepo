@@ -7,10 +7,13 @@ import { users } from '../db/schema/users.js';
 import { runOwnedDatabaseQuery } from '../execution/original-database-query.js';
 import { verifyAccessToken, verifyStreamToken } from './jwt.js';
 
+import { isSessionActive } from './sessions.js';
+
 const BEARER_PREFIX = 'Bearer ';
 
 export interface AuthenticatedSession {
   userId: string;
+  sid?: string;
   authVersion: number;
   taskOrigin?: TaskOrigin;
 }
@@ -20,6 +23,7 @@ async function activeUserSession(
   userId: string,
   authVersion: number,
   taskOrigin?: TaskOrigin,
+  sid?: string,
 ): Promise<AuthenticatedSession | null> {
   const [user] = await runOwnedDatabaseQuery(() =>
     database
@@ -35,7 +39,9 @@ async function activeUserSession(
   if (!user || user.status !== 'active' || user.authVersion !== authVersion) {
     return null;
   }
+  if (sid && !(await isSessionActive(database, userId, sid))) return null;
   return {
+    ...(sid ? { sid } : {}),
     userId: user.externalId,
     authVersion: user.authVersion,
     ...(taskOrigin ? { taskOrigin } : {}),
@@ -48,7 +54,7 @@ export async function authenticateAccessTokenSession(
 ): Promise<AuthenticatedSession | null> {
   const claims = await verifyAccessToken(token);
   if (!claims) return null;
-  return activeUserSession(database, claims.sub, claims.authVersion, claims.taskOrigin);
+  return activeUserSession(database, claims.sub, claims.authVersion, claims.taskOrigin, claims.sid);
 }
 
 export async function authenticateBearerSession(
@@ -82,7 +88,13 @@ export async function authenticateStreamOrAccessSession(
 ): Promise<AuthenticatedSession | null> {
   const streamClaims = await verifyStreamToken(token);
   if (streamClaims) {
-    return activeUserSession(database, streamClaims.sub, streamClaims.authVersion);
+    return activeUserSession(
+      database,
+      streamClaims.sub,
+      streamClaims.authVersion,
+      undefined,
+      streamClaims.sid,
+    );
   }
   return authenticateAccessTokenSession(database, token);
 }
@@ -96,7 +108,15 @@ export async function revalidateAuthenticatedSession(
   database: DB,
   session: AuthenticatedSession,
 ): Promise<boolean> {
-  return (await activeUserSession(database, session.userId, session.authVersion)) !== null;
+  return (
+    (await activeUserSession(
+      database,
+      session.userId,
+      session.authVersion,
+      session.taskOrigin,
+      session.sid,
+    )) !== null
+  );
 }
 
 export async function authenticateStreamOrAccessToken(
@@ -113,9 +133,11 @@ export async function bearerAuth(req: Request, _res: Response, next: NextFunctio
       const authenticatedRequest = req as Request & {
         userId?: string;
         userAuthVersion?: number;
+        userSessionId?: string;
         taskOrigin?: TaskOrigin;
       };
       authenticatedRequest.userId = session.userId;
+      if (session.sid) authenticatedRequest.userSessionId = session.sid;
       authenticatedRequest.userAuthVersion = session.authVersion;
       authenticatedRequest.taskOrigin = session.taskOrigin ?? DEFAULT_TASK_ORIGIN;
     }

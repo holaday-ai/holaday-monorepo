@@ -342,10 +342,7 @@ describe('summarizeBatchItemStatuses — split terminal counters', () => {
 
   it('does not count cancelled items as failed', () => {
     expect(
-      summarizeBatchItemStatuses([
-        { status: 'cancelled' },
-        { status: 'cancelled' },
-      ]),
+      summarizeBatchItemStatuses([{ status: 'cancelled' }, { status: 'cancelled' }]),
     ).toMatchObject({
       review: 0,
       failed: 0,
@@ -412,16 +409,12 @@ describe('runWithConcurrency — concurrent dispatch', () => {
 
 describe('runWithConcurrency — partial-failure isolation', () => {
   it('one item throws → other items complete; results carry per-item status', async () => {
-    const results = await runWithConcurrency(
-      ['a', 'fail', 'b'],
-      3,
-      async (item) => {
-        if (item === 'fail') {
-          throw new Error('synthetic dispatch failure');
-        }
-        await new Promise((r) => setTimeout(r, 5));
-      },
-    );
+    const results = await runWithConcurrency(['a', 'fail', 'b'], 3, async (item) => {
+      if (item === 'fail') {
+        throw new Error('synthetic dispatch failure');
+      }
+      await new Promise((r) => setTimeout(r, 5));
+    });
     expect(results).toEqual([
       { ok: true },
       { ok: false, error: 'synthetic dispatch failure' },
@@ -431,15 +424,11 @@ describe('runWithConcurrency — partial-failure isolation', () => {
 
   it('throw at index 0 does not block subsequent indices', async () => {
     const ran: string[] = [];
-    const results = await runWithConcurrency(
-      ['fail-first', 'b', 'c'],
-      2,
-      async (item) => {
-        ran.push(item);
-        if (item === 'fail-first') throw new Error('boom');
-        await new Promise((r) => setTimeout(r, 5));
-      },
-    );
+    const results = await runWithConcurrency(['fail-first', 'b', 'c'], 2, async (item) => {
+      ran.push(item);
+      if (item === 'fail-first') throw new Error('boom');
+      await new Promise((r) => setTimeout(r, 5));
+    });
     expect(results[0]).toEqual({ ok: false, error: 'boom' });
     expect(results[1]).toEqual({ ok: true });
     expect(results[2]).toEqual({ ok: true });
@@ -495,8 +484,24 @@ describe('executeBatch — Codex P5 atomic claim', () => {
       },
       // Two items pending.
       items: [
-        { id: 11, externalId: 'bti_lost', batchId: 1, seq: 0, prompt: 'lost-race', status: 'pending' as string, taskId: null as number | null },
-        { id: 12, externalId: 'bti_won', batchId: 1, seq: 1, prompt: 'won-race', status: 'pending' as string, taskId: null as number | null },
+        {
+          id: 11,
+          externalId: 'bti_lost',
+          batchId: 1,
+          seq: 0,
+          prompt: 'lost-race',
+          status: 'pending' as string,
+          taskId: null as number | null,
+        },
+        {
+          id: 12,
+          externalId: 'bti_won',
+          batchId: 1,
+          seq: 1,
+          prompt: 'won-race',
+          status: 'pending' as string,
+          taskId: null as number | null,
+        },
       ],
       tasks: new Map<number, string>([[201, 'tsk_won']]),
       users: [{ id: 42, externalId: 'usr_test', status: 'active' }],
@@ -537,11 +542,8 @@ describe('executeBatch — Codex P5 atomic claim', () => {
                       .map(([id, externalId]) => ({ id, externalId }));
                   }
                   if (name === 'batch_task_items') {
-                    const pendingFilter =
-                      s.includes("'pending'") || s.includes('"pending"');
-                    return state.items.filter(
-                      (i) => !pendingFilter || i.status === 'pending',
-                    );
+                    const pendingFilter = s.includes("'pending'") || s.includes('"pending"');
+                    return state.items.filter((i) => !pendingFilter || i.status === 'pending');
                   }
                   return [];
                 }
@@ -673,8 +675,6 @@ describe('executeBatch — Codex P5 atomic claim', () => {
 
     // dispatch was NOT called for the lost-race item.
     expect(dispatch).toHaveBeenCalledTimes(1);
-    expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: 'won-race' }),
-    );
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'won-race' }));
   }, 30_000);
 });

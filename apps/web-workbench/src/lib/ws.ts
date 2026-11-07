@@ -1,3 +1,5 @@
+import { getAccessToken } from '@/lib/auth';
+import { hdDebug } from '@/lib/hd-debug';
 import {
   type ClientMessage,
   HEARTBEAT_INTERVAL_MS,
@@ -5,8 +7,6 @@ import {
   WS_SUBPROTOCOL,
   parseServerMessage,
 } from '@holaday/shared-types';
-import { getAccessToken } from '@/lib/auth';
-import { hdDebug } from '@/lib/hd-debug';
 
 /**
  * WebSocket client for the orchestrator. Patterned on the Chrome
@@ -202,17 +202,11 @@ function openSocket(token: string): void {
 
 function isCurrentSocket(socket: WebSocket, generation: number): boolean {
   return (
-    !state.closedByUser &&
-    state.socket === socket &&
-    state.connectionGeneration === generation
+    !state.closedByUser && state.socket === socket && state.connectionGeneration === generation
   );
 }
 
-function sendOnSocket(
-  socket: WebSocket,
-  generation: number,
-  message: ClientMessage,
-): boolean {
+function sendOnSocket(socket: WebSocket, generation: number, message: ClientMessage): boolean {
   if (!isCurrentSocket(socket, generation) || socket.readyState !== WebSocket.OPEN) return false;
   socket.send(JSON.stringify(message));
   return true;
@@ -223,11 +217,7 @@ function scheduleReconnect(generation: number): void {
   const backoff = Math.min(30_000, 500 * 2 ** state.reconnectAttempt);
   const jitter = Math.floor(Math.random() * 250);
   setTimeout(() => {
-    if (
-      state.closedByUser ||
-      state.connectionGeneration !== generation ||
-      state.socket !== null
-    ) {
+    if (state.closedByUser || state.connectionGeneration !== generation || state.socket !== null) {
       return;
     }
     const token = getAccessToken();

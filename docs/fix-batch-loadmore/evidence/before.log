@@ -1,0 +1,21 @@
+{"width":1440,"height":960,"scenario":"batch","p1":1}
+{"width":1366,"height":768,"scenario":"batch","p1":0}
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: No control-occluded P1 after the exact action path
+
+1 !== 0
+
+    at file:///Users/yaleiqi/.codex/worktrees/fix-batch-disabled-row/holaday-monorepo/docs/fix-batch-loadmore/verify.mjs:123:8
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 1,
+  expected: 0,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v25.6.0

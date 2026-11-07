@@ -38,6 +38,7 @@ import {
   withOperationDispatchScope,
 } from '../../execution/owned-operation.js';
 import type { BrowserNetworkPolicy } from '../browser-network-policy.js';
+import { REDACTION_FAILED_COPY, redactPageText } from '../browser-tools/page-redaction.js';
 import { runBrowserOperation } from './browser-operation.js';
 import type { BrowserRequestControl } from './browser-request-guard.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
@@ -449,7 +450,10 @@ export class PlaywrightExecutor {
         context.setDefaultNavigationTimeout(45_000);
         const isActive = () => generation === this.cleanContextGeneration;
         await this.applyNetworkPolicyToContexts(browser, isActive, browserLease);
-        await this.applyStealthToContexts(browser, isActive);
+        // FIX-31 review #2: launchManaged (dev / browser-eval) is gated like connect.
+        if (isStealthEnabled()) {
+          await this.applyStealthToContexts(browser, isActive);
+        }
         this.assertContextGeneration(generation);
         return { ok: true };
       } catch (err) {
@@ -621,9 +625,52 @@ export class PlaywrightExecutor {
    * stops clean mode from leaking into the shared context (adversarial review
    * CAMERA-3/6 blocker: resetPageForTask/reopenActivePage used contexts()[0] directly).
    */
+  private vaultInterruption: string | null = null;
+  /** The session vault stopped this task's logged-in context (reason code only). */
+  markSessionInterrupted(reason: string): void {
+    this.vaultInterruption ??= reason;
+  }
+  get sessionInterruption(): string | null {
+    return this.vaultInterruption;
+  }
+  /** Default-off vault: create an incognito context, never reuse userDataDir/default cookies. */
+  async createSessionVaultContext(
+    options: Parameters<Browser['newContext']>[0],
+  ): Promise<BrowserContext> {
+    if (!this.browser || this.cleanMode || this.connectionSetup || this.disconnection)
+      throw new Error('vault_context_unavailable');
+    const generation = this.cleanContextGeneration;
+    this.cleanMode = true;
+    this.activePage = null;
+    const lease = createOwnedCleanContext(this.browser, options);
+    this.cleanContextLease = lease;
+    try {
+      const context = await lease.ready;
+      this.assertContextGeneration(generation);
+      this.cleanContext = context;
+      context.on('close', () => {
+        if (this.cleanContext === context) {
+          this.cleanContext = null;
+          this.activePage = null;
+        }
+      });
+      return context;
+    } catch {
+      await lease.dispose();
+      throw new Error('vault_context_unavailable');
+    }
+  }
+
   private browseContext(browser: Browser): BrowserContext | undefined {
     if (this.cleanMode) return this.cleanContext ?? undefined;
     return browser.contexts()[0];
+  }
+
+  /** The unified task may select only a live page inside its current owned context. */
+  selectTaskPage(page: Page): void {
+    if (!this.browser || page.isClosed() || page.context() !== this.browseContext(this.browser))
+      throw new Error('browser_page_not_owned');
+    this.activePage = page;
   }
 
   setViewportSize(size: { width: number; height: number } | null): void {
@@ -737,6 +784,8 @@ export class PlaywrightExecutor {
    * just falls back to un-stealthed behaviour.
    */
   private async applyStealthToContexts(browser: Browser, isActive?: () => boolean): Promise<void> {
+    // Checked again here so no caller can inject the spoofing script with the switch off.
+    if (!isStealthEnabled()) return;
     if (isActive?.() === false) throw new Error('CLEAN_CONTEXT_DISPOSED');
     const contexts = browser.contexts();
     for (const ctx of contexts) {
@@ -1133,6 +1182,19 @@ export class PlaywrightExecutor {
         url: safeUrl(page),
         title: '',
         error: `ariaSnapshot failed: ${errMsg(err)}`,
+      };
+    }
+    // Batch 10 fixes: mask password / OTP values before the snapshot reaches
+    // the model; if they cannot be read, return no snapshot at all.
+    try {
+      yaml = await redactPageText(page, yaml);
+    } catch {
+      return {
+        text: '',
+        refs: [],
+        url: safeUrl(page),
+        title: '',
+        error: REDACTION_FAILED_COPY,
       };
     }
     const { text, refs } = annotateAriaSnapshot(yaml);

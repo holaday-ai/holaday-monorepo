@@ -75,7 +75,7 @@ export async function listReadableTabs() {
 }
 
 /** Read in-place. No reload, new tab, foreground switch, cookies or storage APIs. */
-export async function readSelectedTab(target: Target) {
+async function selectedTabState(target: Target) {
   if (!target) throw new Error('target_required');
   const selection = selections.get(target.selectionId);
   if (
@@ -107,6 +107,16 @@ export async function readSelectedTab(target: Target) {
   )
     throw new Error('target_changed');
 
+  return { tab, selection };
+}
+/** Validate the user's selected page without reading its DOM or credentials. */
+export async function validateSelectedTab(target: Target) {
+  return (await selectedTabState(target)).tab;
+}
+
+export async function readSelectedTab(target: Target) {
+  const { tab, selection } = await selectedTabState(target);
+  if (!target) throw new Error('target_required');
   // Metadata and text come from the same document. Check the *raw* URL in-page
   // before reading and again on return; a navigation during dispatch is not a
   // successful read of the selected document. No page-provided code is executed.

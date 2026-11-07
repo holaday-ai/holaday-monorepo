@@ -107,8 +107,7 @@ async function main(): Promise<void> {
     updated += 1;
     // eslint-disable-next-line no-console
     console.info(
-      `[split-skills] ${row.externalId}: roles=${parts.roles.length} skills=${mergedSkills.length}` +
-        (parts.dropped.length > 0 ? ` dropped=${parts.dropped.join(',')}` : ''),
+      `[split-skills] ${row.externalId}: roles=${parts.roles.length} skills=${mergedSkills.length}${parts.dropped.length > 0 ? ` dropped=${parts.dropped.join(',')}` : ''}`,
     );
   }
 

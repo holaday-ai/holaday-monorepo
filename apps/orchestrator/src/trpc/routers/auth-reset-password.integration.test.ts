@@ -117,7 +117,9 @@ describe('tRPC auth.resetPassword', () => {
       const body = (await okRes.json()) as {
         result: { data: { accessToken: string; user: { email: string } } };
       };
-      expect(body.result.data.accessToken).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+      expect(body.result.data.accessToken).toMatch(
+        /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/,
+      );
       expect(body.result.data.user.email).toBe(email);
 
       // New password logs in; old one does not.
