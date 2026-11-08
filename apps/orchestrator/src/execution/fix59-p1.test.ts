@@ -89,6 +89,17 @@ describe('P1-4 · a control is named by one short line, never by the page title'
     });
     expect(copy).toMatch(/^我在高德地图点了一下，/);
   });
+  it('「高德地图 - 导航」, the site and a tagline, is no control name (复审 #1 建议)', () => {
+    const copy = effectPauseQuestion({
+      english: false,
+      site: siteCalled('', 'https://www.amap.com/'),
+      pageTitle: '',
+      action: { tool: 'click', label: '高德地图 - 导航\\n路线规划' },
+      readOnly: true,
+      background: true,
+    });
+    expect(copy).toMatch(/^我在高德地图点了一下，/);
+  });
   it('a real control keeps its name', () => {
     expect(labelIsPageTitle('导览-故宫博物院', '导览-故宫博物院')).toBe(true);
     expect(
@@ -140,7 +151,7 @@ describe('P1-5 · a button that says only the act is a real submit', () => {
     '预约说明',
     'Reservation info',
     'Checkout help',
-    '预约参观',
+    '在线购票须知',
     'Book',
     '导览',
   ])('「%s」 is not', (label) => expect(looksSubmitted({ tool: 'click', label })).toBe(false));
@@ -221,6 +232,36 @@ describe('P1-2 · a value taken out leaves no half-said clause, bracket or line'
     ['an empty field among others', '标题：「春」，作者：，点赞 5', '标题：「春」，点赞 5'],
   ])('%s', (_label, before, after) => expect(withoutDanglingLeads(before)).toBe(after));
 
+  // 复审 #1 必须修 4: what the model wrote itself is left alone — only a value taken out counts.
+  it.each([
+    '这款的特点是，轻便。',
+    '价格便宜，可是，质量一般。',
+    '问题是，页面没有给出库存。',
+    '原因是，京东要求登录。',
+    '特别是，周末人很多。',
+    '页面给出的说明是，以官网为准。',
+  ])('written so by the model, it stays: %s', (text) => {
+    expect(withoutDanglingLeads(text, text)).toBe(text);
+    expect(withoutDanglingLeads(`- 结论：${text}`, `- 结论：${text}`)).toBe(`- 结论：${text}`);
+  });
+  it('a value taken out of the written text is cleaned, the rest of the line is not', () => {
+    const written = '其内部为 TinyMCE 富文本编辑区，frameId 为 frame_3，特点是，轻便。';
+    const shown = '其内部为 TinyMCE 富文本编辑区，frameId 为，特点是，轻便。';
+    expect(withoutDanglingLeads(shown, written)).toBe(
+      '其内部为 TinyMCE 富文本编辑区，特点是，轻便。',
+    );
+  });
+  it('a space left before the comma is a gap whoever wrote it', () => {
+    const text =
+      '- 页面显示的价格：¥7??9（价格没登录时被京东打了码，只显示 ，并提示「登录查看价格」）';
+    expect(withoutDanglingLeads(text, text)).toBe(
+      '- 页面显示的价格：¥7??9（价格没登录时被京东打了码，并提示「登录查看价格」）',
+    );
+  });
+  it('an empty field over the paragraph under it is a heading and stays', () => {
+    const text = '- 优惠：\n未满18周岁免费。';
+    expect(withoutDanglingLeads(text, text)).toBe(text);
+  });
   it.each([
     '评论数页面未显示，点赞 12',
     '前三个商品如下：',
@@ -303,6 +344,14 @@ describe('P1-1 · a price is the tab’s it sits under (故宫 Visit.html)', () 
     const facts = assessCompletionFacts({ summary: G2, pages: [{ text: VISIT }] });
     expect(facts.contradictions.join('\n')).toContain('钟表馆、珍宝馆票价优惠政策');
   });
+  it('a line’s lead before a 「；」 does not cover the next clause', () => {
+    expect(misattributedPrices('钟表馆学生票：5 元；学生票 20 元。', [VISIT])).toEqual([]);
+  });
+  it('a clause naming another tab does not cover the next clause', () => {
+    const said = misattributedPrices('钟表馆学生票 20 元/人；老年人 5 元。', [VISIT]);
+    expect(said.join('\n')).toContain('「20元」在页面上属于「大门票优惠政策」');
+    expect(said.join('\n')).toContain('「5元」');
+  });
   it('named as the main ticket’s, it is sent back too', () => {
     const said = misattributedPrices('大门票优惠：学生票 5 元/人', [VISIT]);
     expect(said[0]).toContain('写成了「大门票优惠政策」的');
@@ -315,6 +364,10 @@ describe('P1-1 · a price is the tab’s it sits under (故宫 Visit.html)', () 
     ['the halls’ discounts, named', '钟表馆、珍宝馆的优惠：学生票 5 元/人，老年人 5 元/人。'],
     ['under a heading that names them', '**珍宝馆、钟表馆优惠：**\n- 学生票：5 元/人'],
     ['a price outside the tabs', '旺季大门票 60 元/人，珍宝馆 10 元/人。'],
+    // 复审 #1 必须修 3: the tab is looked for only in the price's own clause.
+    ['two clauses, each its own tab', '学生票 20 元/人；钟表馆学生票 5 元。'],
+    ['two sentences, each its own tab', '大门票学生票 20 元/人。珍宝馆学生票 5 元/人。'],
+    ['two lines, each its own tab', '- 学生票：20 元/人\n- 钟表馆、珍宝馆学生票：5 元/人'],
   ])('stays: %s', (_label, answer) => expect(misattributedPrices(answer, [VISIT])).toEqual([]));
   it('a snapshot showing only the current slide pairs nothing (no guess)', () => {
     const snapshot = [
@@ -326,5 +379,31 @@ describe('P1-1 · a price is the tab’s it sits under (故宫 Visit.html)', () 
     ].join('\n');
     expect(tabSections(snapshot)).toEqual([]);
     expect(misattributedPrices(G2, [snapshot])).toEqual([]);
+  });
+});
+
+describe('复审 #1 建议 · 「未核实」 never lists what the answer says it did not read', () => {
+  const page = [
+    'UGREEN 2 Pack USB C to USB C Charger Cable, Type C 100W 1M',
+    'S$10.92',
+    'Belkin Eco USB C to USB C 60W Braided Cable 3.3ft iPhone Charger Cord',
+    'See options',
+  ].join('\n');
+  const summary = [
+    '部分完成：第 2 款页面上没显示价格。',
+    '',
+    '1. UGREEN 2 Pack USB C to USB C Charger Cable, Type C 100W 1M — S$10.92',
+    '2. Belkin Eco USB C to USB C 60W Braided Cable 3.3ft… — 价格未获取到（当前页面快照中该商品的价格区域未展示）',
+  ].join('\n');
+  it('reg-new-amazon-sg (FIX-59 本机): the 「价格未获取到」 item is not 未核实', () => {
+    const facts = assessCompletionFacts({ summary, pages: [{ text: page }] });
+    expect(facts.unverified.join('\n')).not.toContain('价格未获取到');
+  });
+  it('a price the page does not show is still 未核实', () => {
+    const facts = assessCompletionFacts({
+      summary: summary.replace('价格未获取到（当前页面快照中该商品的价格区域未展示）', 'S$9.43'),
+      pages: [{ text: page }],
+    });
+    expect(facts.unverified.join('\n') + facts.contradictions.join('\n')).toContain('9.43');
   });
 });

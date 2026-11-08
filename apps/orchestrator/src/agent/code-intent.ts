@@ -10,9 +10,12 @@ const FIX_VERB = '修改|更改|修复|重构|调试|改|修';
 const DEPLOY_VERB = '部署|上线';
 const TECH_WORD =
   'react|typescript|javascript|python|java|golang|go|node(?:\\.js)?|vue|next\\.js|c\\+\\+|c#|php|ruby|rust|swift|kotlin|shell|bash|sql|html|css';
+// 复审 #1 必须修 1: 油猴脚本 / SQL / 宏 / 正则 are code too.
 const CODE_NOUN =
-  '代码|程序|函数|组件|脚本|网站|网页|页面|应用|小程序|系统|插件|扩展|接口|仓库文件|前端|后端|爬虫|api\\b|app\\b|bug\\b';
-const CHINESE_MODIFIER = `(?:(?:简单|新的|完整|小型|基本|浏览器|后台|登录页?|注册|前端|后端|自动化?|爬虫|聊天|管理|数据|命令行)(?:的)?\\s*|(?:${TECH_WORD})\\s*|[\\u4e00-\\u9fff]{1,12}的\\s*)`;
+  '代码|程序|函数|组件|脚本|网站|网页|页面|应用|小程序|系统|插件|扩展|接口|仓库文件|前端|后端|爬虫|油猴脚本|用户脚本|正则表达式|宏|\\bsql\\b|\\buserscript\\b|\\bapi\\b|\\bapp\\b|\\bbug\\b';
+// 复审 #1 必须修 1: any Latin name (「Chrome 插件」) and a short Chinese name right before the code
+// noun (「微信小程序」「计算器程序」「油猴脚本」) are modifiers too.
+const CHINESE_MODIFIER = `(?:(?:简单|新的|完整|小型|基本|浏览器|后台|登录页?|注册|前端|后端|自动化?|爬虫|聊天|管理|数据|命令行)(?:的)?\\s*|(?:${TECH_WORD})\\s*|[a-z][\\w.+#-]{0,19}\\b\\s*|[\\u4e00-\\u9fff]{1,12}的\\s*|[\\u4e00-\\u9fff]{1,4}(?=${CODE_NOUN}))`;
 const chineseAction = new RegExp(
   `(${CREATE_VERB}|${FIX_VERB}|${DEPLOY_VERB})(?:一个|一段|个|一下|这(?:个|些)?|该)?\\s*${CHINESE_MODIFIER}{0,4}(?:${CODE_NOUN})|(?:修复|修改|改|修)(?:这(?:个|些)?|该)?(?:仓库的|代码中的|程序里的)?\\s*bug\\b|建站`,
   'gi',
@@ -24,10 +27,10 @@ const createPr =
 
 /** Words that contain a code noun but name a person, a quality or a non-software thing. */
 const NOT_CODE_WORD =
-  /程序(?:员|猿|媛|化|性)|(?:节目|晚会|婚礼|典礼|会议|议事|法律|法定|诉讼|司法|行政|审批|办事|报销|工作|操作|选举|仲裁)程序|应用(?:题|文)|系统(?:性|化)|脚本杀|网站编辑/g;
+  /改(?:用|为|成|走|去|到|换)|写(?:成|入|进|到|在)|(?:ppt|幻灯片|演示文稿|keynote|word|excel)\s*(?:页面|页)|程序(?:员|猿|媛|化|性)|(?:节目|晚会|婚礼|典礼|会议|议事|法律|法定|诉讼|司法|行政|审批|办事|报销|工作|操作|选举|仲裁)程序|应用(?:题|文)|系统(?:性|化)|脚本杀|网站编辑/g;
 /** What a writing request produces. 片段 alone is not here: 代码片段 is a code snippet. */
 const WRITING_NOUN =
-  /小说|故事|剧本|文案|诗|散文|作文|文章|演讲稿|发言稿|讲稿|致辞|贺词|祝福语|周报|日报|月报|年报|总结|报告|简历|求职信|邮件|信件|段子|歌词|台词|大纲|笔记|推文|帖子|公众号|软文|标题|口号|广告语|宣传语|介绍|简介|摘要|纪要|心得|感想|梗概|提纲|清单|汇总|合集|推荐|说明|文档|方案|策划|计划书|评论|影评|书评|读后感|对联|海报|story|stories|novel|poem|poetry|essay|article|blog|post|copy|caption|tagline|slogan|headline|speech|letter|email|report|summary|review|lyrics|newsletter|announcement/i;
+  /小说|故事|剧本|文案|诗|散文|作文|文章|演讲稿|发言稿|讲稿|致辞|贺词|祝福语|周报|日报|月报|年报|总结|报告|简历|求职信|邮件|信件|段子|歌词|台词|大纲|笔记|推文|帖子|公众号|软文|标题|口号|广告语|宣传语|介绍|描述|草稿|截图|评价|教程|攻略|测评|文字|简介|摘要|纪要|心得|感想|梗概|提纲|清单|汇总|合集|推荐|说明|文档|方案|策划|计划书|评论|影评|书评|读后感|对联|海报|story|stories|novel|poem|poetry|essay|article|blog|post|copy|caption|tagline|slogan|headline|speech|letter|email|report|summary|review|lyrics|newsletter|announcement/i;
 /** After the code noun, these start what the code is for (「写一个 Python 程序来生成周报」), or the
  * next item of a list (「修 bug、整理文档」). */
 const PURPOSE_CUT =
@@ -39,6 +42,26 @@ const TECH_CONTEXT = new RegExp(
   `\\b(?:${TECH_WORD}|js|cli|npm|pip|cron|api|regex)\\b|自动|爬|批处理|定时|命令|运行|代码`,
   'i',
 );
+
+/**
+ * 复审 #1 必须修 2: 「帮我在 WordPress 后台创建一个页面」「打开 X 新建一个页面」 is work on a website —
+ * a browser task — when what it makes is a page, a site or an app there. 「在 VS Code 里写一个函数」
+ * and 「在 GitHub 上修改代码」 stay code.
+ */
+const SITE_OBJECT_RE = /(?:页面|网页|网站|应用|app\b|page|site|website)\s*$/i;
+const ON_A_SITE_RE =
+  /(?:在|到|去|进|进入|打开|登录|登陆)\s*([^，。；]{1,24}?)\s*(?:的)?(?:后台|上|里|中|网站|平台|站点|控制台|管理后台|管理页|账号|店铺)|\b(?:in|on|at|into)\s+(?:the\s+|my\s+)?([\w.]+(?:\s+[\w.]+)?)\s+(?:admin|dashboard|backend|console|site|account|store)\b|\b(?:open|log\s?in(?:to)?|sign\s?in(?:to)?|go\s+to)\s+([\w.]+)|(?:打开|登录|登陆|进入)\s*([^，。；\s]{1,24})|在\s*([a-z][\w.]{1,24})\s/i;
+const LOCAL_TOOL_RE = new RegExp(
+  `\\b(?:${TECH_WORD}|ide|vs\\s?code|vscode|cursor|xcode|terminal|github|gitlab|repo)\\b|编辑器|终端|命令行|项目|仓库|代码|本地|电脑`,
+  'i',
+);
+function worksOnASite(prefix: string, matched: string): boolean {
+  if (!SITE_OBJECT_RE.test(matched)) return false;
+  const m = ON_A_SITE_RE.exec(prefix);
+  if (!m) return false;
+  const where = m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[5] ?? '';
+  return !LOCAL_TOOL_RE.test(where);
+}
 
 function isInformationalReference(prefix: string, suffix: string): boolean {
   return (
@@ -108,6 +131,7 @@ export function looksLikeCodeIntent(intent: string): boolean {
         const prefix = affirmative.slice(0, match.index);
         const suffix = affirmative.slice((match.index ?? 0) + match[0].length);
         if (isInformationalReference(prefix, suffix)) continue;
+        if (pattern !== createPr && worksOnASite(prefix, match[0])) continue;
         if (pattern !== createPr && producesWriting(match, affirmative, lowered)) continue;
         return true;
       }

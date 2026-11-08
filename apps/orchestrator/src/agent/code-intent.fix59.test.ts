@@ -56,3 +56,36 @@ describe('FIX-59 P0: the refusal is plain and offers a way forward', () => {
     expect(copy).not.toMatch(/[㐀-鿿]/);
   });
 });
+
+describe('FIX-59 复审 #1 必须修 1: software of any kind is code', () => {
+  it.each([
+    '帮我写个 Chrome 插件',
+    '写个油猴脚本',
+    '写一段 SQL 查询',
+    '做一个微信小程序',
+    '写一个计算器程序',
+    '帮我写一个浏览器扩展',
+    '写一个正则表达式',
+  ])('code: %s', (intent) => expect(looksLikeCodeIntent(intent)).toBe(true));
+  it.each(['写一个小程序的推广文案', '写个 Chrome 插件的使用说明', '做一个 PPT 页面'])(
+    'not code: %s',
+    (intent) => expect(looksLikeCodeIntent(intent)).toBe(false),
+  );
+});
+
+describe('FIX-59 复审 #1 必须修 2: browser work and writing are not code', () => {
+  it.each([
+    '帮我做一个网页截图',
+    '帮我在 WordPress 后台创建一个页面',
+    '在 Shopify 后台新建一个页面',
+    '打开 Notion 新建一个页面',
+    '写一个 App Store 的应用描述',
+    '写一个 React 组件的教程',
+    '给这个 app 写一段评价',
+    'Create a new page in the WordPress admin',
+  ])('not code: %s', (intent) => expect(looksLikeCodeIntent(intent)).toBe(false));
+  it.each(['在 VS Code 里写一个函数', '在 GitHub 上修改代码', '在本地项目里写一个页面组件'])(
+    'still code: %s',
+    (intent) => expect(looksLikeCodeIntent(intent)).toBe(true),
+  );
+});

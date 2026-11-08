@@ -115,10 +115,18 @@ const tight = (text: string) => text.replace(/\s+/g, '');
 const hasPrice = (text: string, amount: string) =>
   new RegExp(`(?<![\\d.])${amount.replace('.', '\\.')}(?:元|块)`, 'u').test(tight(text));
 
-/** The answer's words around a price: its line, and the heading over that line. */
-function contextOf(lines: readonly string[], at: number): string {
-  const heading = [...lines.slice(0, at)].reverse().find((line) => HEADING_RE.test(line));
-  return `${heading ?? ''}\n${lines[at]}`;
+/**
+ * The answer's words around a price: the clause it sits in (复审 #1 必须修 3: a 「；」「。」 or a line
+ * break ends it — 「学生票 20 元/人；钟表馆学生票 5 元」 names 钟表馆 only for the 5 元), and the
+ * heading over that line.
+ */
+function contextOf(lines: readonly string[], at: number, index: number): string {
+  const line = lines[at]!;
+  const start = Math.max(...['；', ';', '。'].map((sep) => line.lastIndexOf(sep, index))) + 1;
+  const ends = ['；', ';', '。'].map((sep) => line.indexOf(sep, index)).filter((i) => i >= 0);
+  const clause = line.slice(start, ends.length ? Math.min(...ends) : line.length);
+  const heading = [...lines.slice(0, at)].reverse().find((one) => HEADING_RE.test(one));
+  return `${heading ?? ''}\n${clause}`;
 }
 
 /**
@@ -144,7 +152,7 @@ export function misattributedPrices(summary: string, pageTexts: readonly string[
         for (const group of groups) {
           const holders = group.filter((section) => hasPrice(section.text, amount));
           if (!holders.length || holders.length === group.length) continue;
-          const context = contextOf(lines, at);
+          const context = contextOf(lines, at, m.index ?? 0);
           const names = (section: TabSection) => section.keys.some((key) => context.includes(key));
           if (holders.some(names)) continue;
           const other = group.find((section) => !holders.includes(section) && names(section));

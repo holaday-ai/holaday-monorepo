@@ -1357,6 +1357,9 @@ export function assessCompletionFacts(input: {
       if (quotedAsPage(input.summary, fact.value)) unverified.push(`${label}${TRANSLATED_MARK}`);
       continue;
     }
+    // FIX-59 复审 #1 建议: 「— 价格未获取到（页面未显示）」 says what was not read; it is no fact
+    // to check, and the answer already says it is missing.
+    if (NOT_READ_RE.test(fact.value) && !UNREAD_PRICE_TOKEN_RE.test(fact.value)) continue;
     unverified.push(label);
   }
   // FIX-30: every named target answered (core-10), and recent means recent (n03).
@@ -1400,6 +1403,11 @@ export function assessCompletionFacts(input: {
     ...(hedged.length ? { hedgedNames: hedged.slice(0, 4) } : {}),
   };
 }
+
+/** 「价格未获取到」「页面上没显示」「not shown」: the answer says it did not read this. */
+const NOT_READ_RE =
+  /未获取到|没获取到|未能获取|无法获取|未读到|没读到|未读取到|未找到|没找到|未显示|没显示|没有显示|未展示|没有展示|页面上没有|not (?:shown|found|available|listed|displayed)|no price/iu;
+const UNREAD_PRICE_TOKEN_RE = /(?:S\$|US\$|HK\$|\$|¥|￥|SGD|USD|RMB|CNY)\s?\d/u;
 
 /** Marks a translated term in the 未核实 list; `unverifiedNote` gives such terms their own line. */
 const TRANSLATED_MARK = '（译述）';

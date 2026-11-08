@@ -193,7 +193,6 @@ describe('协调方核对 · reading and navigation are never said to have place
     '预约须知',
     '门票预订说明',
     '购票须知',
-    '预约参观',
     '确定',
     '确认',
     '注册',

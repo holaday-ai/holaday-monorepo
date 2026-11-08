@@ -186,8 +186,9 @@ const INFO_LABEL_RE =
 // FIX-59 P1-5: a button that says only 「购票 / 预约 / Buy tickets / Reserve / Checkout」 is the act too.
 const SUBMIT_WHOLE_LABEL_RE =
   /^(?:提交|下单|支付|付款|立即支付|立即付款|购票|购买|预约|预订|订票|订购|结算|去结算|submit|pay|place order|place your order|buy now|book now|pay now|send|post|buy tickets?|get tickets?|reserve|checkout|check out|proceed to checkout)$/i;
+// FIX-59 复审 #1 建议: 「在线购票」「预约参观」「购票入口」「Reserve a table」 are the act too.
 const SUBMIT_ACT_RE =
-  /提交(?:订单|预约|预订|申请|报名|支付)|确认(?:支付|付款|订单|下单|预约|预订|购买|购票|提交|报名)|立即(?:购买|购票|订票|预约|预订|支付|付款|下单|抢购|抢票|报名|注册)|去(?:支付|付款)|马上(?:购买|抢购|预约|下单)|\bplace (?:your )?order\b|\bpay now\b|\bpay (?:s?\$|¥|€|£|rm|usd|sgd)|\bbook now\b|\breserve now\b|\bbuy now\b|\bcomplete (?:purchase|order|booking|payment)\b|\bconfirm (?:and pay|payment|order|booking|purchase|reservation)\b|\bsubmit (?:order|booking|payment|application|request)\b/i;
+  /在线(?:购票|订票|预约|预订|支付)|预约参观|(?:购票|订票|预约|预订)入口|\breserve (?:a|your) (?:table|seat|spot|room|ticket)s?\b|提交(?:订单|预约|预订|申请|报名|支付)|确认(?:支付|付款|订单|下单|预约|预订|购买|购票|提交|报名)|立即(?:购买|购票|订票|预约|预订|支付|付款|下单|抢购|抢票|报名|注册)|去(?:支付|付款)|马上(?:购买|抢购|预约|下单)|\bplace (?:your )?order\b|\bpay now\b|\bpay (?:s?\$|¥|€|£|rm|usd|sgd)|\bbook now\b|\breserve now\b|\bbuy now\b|\bcomplete (?:purchase|order|booking|payment)\b|\bconfirm (?:and pay|payment|order|booking|purchase|reservation)\b|\bsubmit (?:order|booking|payment|application|request)\b/i;
 /** What paused it was itself a transaction (a checkout or payment request or page, a new receipt). */
 const SUBMIT_TRIGGER_BRANCHES = new Set([
   'transaction_request',

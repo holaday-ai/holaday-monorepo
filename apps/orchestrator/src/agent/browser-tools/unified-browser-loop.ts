@@ -455,8 +455,9 @@ export async function runUnifiedBrowserLoop(
   if (outcome.status === 'failed') logger.warn({ steps: steps.slice(-120) }, 'browser loop failed');
   // FIX-41: nor the browser's call syntax (「switch_tab(targetTabId=…)」), once its ids are gone.
   // FIX-59 P1-2: then nothing is left half-said where a value came out.
-  const strip = (text: string) =>
-    withoutDanglingLeads(humanizeToolMentions(stripInternalRefs(text, seen)));
+  // 复审 #1 必须修 4: only lead-ins whose value came out here, compared with the text as written.
+  const strip = (text: string, written = text) =>
+    withoutDanglingLeads(humanizeToolMentions(stripInternalRefs(text, seen)), written);
   // FIX-38 (Deploy-38 core-11): whatever way the loop ends, the user never reads an
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {
@@ -465,6 +466,7 @@ export async function runUnifiedBrowserLoop(
         ...outcome,
         summary: strip(
           plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
+          outcome.summary,
         ),
       };
     case 'failed':
@@ -3646,55 +3648,73 @@ const EMPTY_FIELD_LINE_RE =
   /^\s*(?:[-*•]|\d+[.、)])\s+(?:\*\*)?[^：:\n]{1,30}?(?:\*\*)?\s*[：:]\s*(?:\*\*)?\s*$/u;
 const indentOf = (line: string) => line.match(/^\s*/)?.[0].length ?? 0;
 
-function withoutLeadClauses(text: string, closed: boolean): string {
+/**
+ * 复审 #1 必须修 4: only where a value really came out. A lead-in clause the model itself wrote
+ * (「这款的特点是，轻便。」「问题是，…」) is in its own text as it stands; one whose value was taken
+ * out (「frameId 为，」 from 「frameId 为 frame_3，」) is not. `said` is that original text; without it
+ * every lead-in counts (tests of the rule itself).
+ */
+function withoutLeadClauses(text: string, closed: boolean, said: string | null): string {
   const parts = text.split(/([，,；;。])/u);
   const keep: string[] = [];
+  let dropped = false;
   for (let i = 0; i < parts.length; i += 2) {
     const part = parts[i] ?? '';
-    const sep = parts[i + 1] ?? '';
+    const sep = parts[i + 1] ?? (closed ? '）' : '');
     const last = i + 1 >= parts.length;
     const dangling =
       part.trim() !== '' &&
       (last ? closed && LEAD_END_RE.test(part) : LEAD_END_RE.test(part)) &&
       // The lead-in is all there is to it: no digit, quote or link after its last word.
-      !/[「“"\d]$/u.test(part.trim());
+      !/[「“"\d]$/u.test(part.trim()) &&
+      // A space left before the separator (「只显示 ，」) is the gap a value left, whoever wrote it.
+      (said === null || /\s$/u.test(part) || !said.includes(tightForm(`${part}${sep}`)));
     if (dangling) {
+      dropped = true;
       // The separator before a dropped last clause goes with it.
       if (last && keep.length) keep.pop();
       continue;
     }
-    keep.push(part, ...(sep ? [sep] : []));
+    keep.push(part, ...(parts[i + 1] ? [parts[i + 1]!] : []));
   }
-  return keep.join('').replace(/\s+([，,；;。])/gu, '$1');
+  return dropped ? keep.join('').replace(/\s+([，,；;。])/gu, '$1') : text;
 }
 
-export function withoutDanglingLeads(text: string): string {
+export function withoutDanglingLeads(text: string, original?: string): string {
+  const said = original === undefined ? null : tightForm(original);
   const lines = text.split('\n');
   const out: string[] = [];
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]!;
     if (EMPTY_FIELD_LINE_RE.test(line)) {
-      const next = lines.slice(i + 1).find((one) => one.trim());
-      // A heading over its own sub-list stays.
-      if (!next || indentOf(next) <= indentOf(line) || !/^\s*(?:[-*•]|\d+[.、)])\s/u.test(next))
-        continue;
+      // An empty field (「- opened url：」) goes; a heading over its own sub-list, or over the
+      // paragraph right under it, stays.
+      const next = lines[i + 1];
+      const opensList =
+        next !== undefined &&
+        indentOf(next) > indentOf(line) &&
+        /^\s*(?:[-*•]|\d+[.、)])\s/u.test(next);
+      const opensParagraph =
+        next !== undefined && next.trim() !== '' && !/^\s*(?:[-*•]|\d+[.、)])\s/u.test(next);
+      if (!opensList && !opensParagraph) continue;
     }
-    if (!/[为是示出：:]\s*[，,；;。）)]|[为是示出]\s*(?:\*\*)?\s*$/u.test(line)) {
+    if (!/[为是示出：:]\s*[，,；;。）)]/u.test(line)) {
       out.push(line);
       continue;
     }
     const fixed = line.replace(
       /([（(])([^（）()\n]*)([）)])/gu,
-      (_m, open: string, inner: string, close: string) => {
-        const kept = withoutLeadClauses(inner, true).trim();
-        return kept ? `${open}${kept}${close}` : '';
+      (m, open: string, inner: string, close: string) => {
+        const kept = withoutLeadClauses(inner, true, said);
+        if (kept === inner) return m;
+        return kept.trim() ? `${open}${kept.trim()}${close}` : '';
       },
     );
     const head = /^\s*(?:[-*•]|\d+[.、)])\s+/u.exec(fixed)?.[0] ?? '';
-    const body = withoutLeadClauses(fixed.slice(head.length), false);
+    const body = withoutLeadClauses(fixed.slice(head.length), false, said);
     if (body.trim() || !head) out.push(`${head}${body}`);
   }
-  if (out.length === lines.length) return out.join('\n');
+  if (out.join('\n') === text) return text;
   // A line went: no blank run or trailing blank is left where it was.
   return out
     .join('\n')
