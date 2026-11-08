@@ -7,6 +7,7 @@ import {
   elapsedLabel,
   failureOwnWords,
   failureTurn,
+  isEnglishTask,
   liveStatusText,
   normalizeNextSteps,
   offerKind,
@@ -396,5 +397,18 @@ describe('复审 #3', () => {
     expect(captchaRequestLine('知乎')).toBe(
       '知乎要求先做人机验证，请在浏览器画面里完成（只能你本人操作），完成后我会自动接着做，最多等 10 分钟。',
     );
+  });
+});
+
+describe('FIX-60 P0-2: the task language is the request’s main language', () => {
+  it('a mixed request follows its main language, as the answer does', () => {
+    expect(isEnglishTask('Write a short story about a 程序员')).toBe(true);
+    expect(isEnglishTask('在 BestBuy 搜 usb c cable 告诉我第一个结果')).toBe(false);
+    expect(
+      isEnglishTask('请使用云端浏览器，YouTube 搜索「Playwright tutorial」返回前5个视频标题'),
+    ).toBe(false);
+    expect(
+      isEnglishTask('Summarize https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404'),
+    ).toBe(true);
   });
 });

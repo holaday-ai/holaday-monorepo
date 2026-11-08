@@ -1,3 +1,4 @@
+import { isEnglishRequestText } from '@holaday/shared-types';
 /**
  * FIX-57 #4: next steps that guess what the person wants to do with this result.
  *
@@ -72,9 +73,9 @@ export interface GenerateNextStepsOptions {
 }
 
 /** FIX-58 P1-5: an English request gets English steps and an English title. */
+/** FIX-60 P0-2: the request's main language, as the answer prompts read it. */
 export function isEnglishRequest(intent: string): boolean {
-  const text = intent.replace(/https?:\/\/\S+/g, ' ');
-  return !/\p{Script=Han}/u.test(text) && (text.match(/[A-Za-z]{2,}/g) ?? []).length >= 2;
+  return isEnglishRequestText(intent);
 }
 
 /** FIX-58 P1-8: Saturday or Sunday in Beijing — the A-share market is closed. */

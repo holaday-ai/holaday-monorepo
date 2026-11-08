@@ -1,3 +1,4 @@
+import { replyLanguage, replyLanguageRule } from '@holaday/shared-types';
 import { modelProviderFailureMessage } from '../../llm/provider-error-diagnostics.js';
 /**
  * Supercar agent loop.
@@ -1627,7 +1628,8 @@ async function runSupercarTaskInternal(
   // Phase 10 Tier 1: when enabled, swap the monolithic core prompt for
   // the lean Base + Role + Style layout. Layered prompts cache better
   // (Base is identical across all tasks) and are cheaper per request.
-  const systemPrompt = buildSupercarSystemPrompt({
+  // FIX-60 P0-2: the answer follows the language of the user's own words.
+  const systemPrompt = `${buildSupercarSystemPrompt({
     normalizedCoordinates: opts.messagesAdapter?.metadata.provider === 'alibaba-model-studio',
     domain: opts.domain ?? null,
     intent: opts.intent,
@@ -1639,7 +1641,7 @@ async function runSupercarTaskInternal(
     // basic → office formats fall back to md/csv). Covers the free
     // path too, where create_file isn't even exposed.
     fileFormatGuidance: buildFileFormatGuidance(opts.createFileFormats ?? []),
-  });
+  })}\n\n${replyLanguageRule(replyLanguage(opts.intent))}`;
 
   type MsgParam = Anthropic.Beta.BetaMessageParam;
   type ContentBlockParam = Anthropic.Beta.BetaContentBlockParam;

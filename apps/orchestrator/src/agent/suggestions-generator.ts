@@ -1,3 +1,4 @@
+import { replyLanguage, replyLanguageRule } from '@holaday/shared-types';
 /**
  * Post-task suggestion generator.
  *
@@ -59,7 +60,8 @@ export async function generateSuggestions(opts: GenerateSuggestionsOptions): Pro
       {
         maxTokens: MAX_TOKENS,
         thinking: { type: 'disabled' },
-        system: SYSTEM_PROMPT,
+        // FIX-60 P0-2: the suggestions follow the language of the user's own words.
+        system: `${SYSTEM_PROMPT}\n\n${replyLanguageRule(replyLanguage(opts.intent))}`,
         messages: [{ role: 'user', content: userMsg }],
       },
       { timeoutMs: 4000, maxRetries: 0 },
