@@ -178,10 +178,11 @@ export function siteCalled(
  * 「确认预约」「Place order」「Pay now」「Book now」「Submit」). A word alone does not:「预约须知」
  * 「门票预订说明」「Booking info」, a dialog's 「确定」, a menu's 「预约参观」「购票」 are reading
  * or navigation. Anything named as information (须知 / 说明 / 规则 / 指南 / 详情 / info / policy /
- * FAQ) never counts.
+ * FAQ) never counts. DEPLOY-59 第 0 步 3: nor 流程 / 时间 / guide (「在线购票流程」「预约参观时间」
+ * 「Reserve a table guide」).
  */
 const INFO_LABEL_RE =
-  /须知|说明|规则|指南|详情|介绍|政策|帮助|常见问题|\binfo\b|information|\bpolic(?:y|ies)\b|\bfaq\b|\bguide\b|\bhelp\b|\bterms\b|\bdetails?\b|\blearn more\b/i;
+  /须知|说明|规则|指南|详情|介绍|政策|帮助|常见问题|流程|时间|\binfo\b|information|\bpolic(?:y|ies)\b|\bfaq\b|\bguide\b|\bhelp\b|\bterms\b|\bdetails?\b|\blearn more\b/i;
 /** A whole label that is itself the act: 「提交」「下单」「支付」「Submit」「Pay」. */
 // FIX-59 P1-5: a button that says only 「购票 / 预约 / Buy tickets / Reserve / Checkout」 is the act too.
 const SUBMIT_WHOLE_LABEL_RE =

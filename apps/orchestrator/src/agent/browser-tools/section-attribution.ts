@@ -119,14 +119,29 @@ const hasPrice = (text: string, amount: string) =>
  * The answer's words around a price: the clause it sits in (复审 #1 必须修 3: a 「；」「。」 or a line
  * break ends it — 「学生票 20 元/人；钟表馆学生票 5 元」 names 钟表馆 only for the 5 元), and the
  * heading over that line.
+ *
+ * DEPLOY-59 第 0 步 2: a comma ends it too where a tab is named after it — 「学生票 20 元/人，钟表馆
+ * 学生票 5 元」. From the price's own piece the clause is read back to the nearest piece that names a
+ * tab; pieces after the price never count. A piece that names a tab outranks the heading.
  */
-function contextOf(lines: readonly string[], at: number, index: number): string {
+function contextOf(
+  lines: readonly string[],
+  at: number,
+  index: number,
+  keys: readonly string[],
+): string {
   const line = lines[at]!;
   const start = Math.max(...['；', ';', '。'].map((sep) => line.lastIndexOf(sep, index))) + 1;
-  const ends = ['；', ';', '。'].map((sep) => line.indexOf(sep, index)).filter((i) => i >= 0);
-  const clause = line.slice(start, ends.length ? Math.min(...ends) : line.length);
+  const pieceEnd =
+    [/[，,；;。]/u.exec(line.slice(index))?.index]
+      .filter((i): i is number => i !== undefined)
+      .map((i) => index + i)[0] ?? line.length;
+  const pieces = line.slice(start, pieceEnd).split(/[，,]/u);
+  for (let i = pieces.length - 1; i >= 0; i -= 1) {
+    if (keys.some((key) => pieces[i]!.includes(key))) return pieces.slice(i).join('，');
+  }
   const heading = [...lines.slice(0, at)].reverse().find((one) => HEADING_RE.test(one));
-  return `${heading ?? ''}\n${clause}`;
+  return `${heading ?? ''}\n${pieces.join('，')}`;
 }
 
 /**
@@ -152,7 +167,12 @@ export function misattributedPrices(summary: string, pageTexts: readonly string[
         for (const group of groups) {
           const holders = group.filter((section) => hasPrice(section.text, amount));
           if (!holders.length || holders.length === group.length) continue;
-          const context = contextOf(lines, at, m.index ?? 0);
+          const context = contextOf(
+            lines,
+            at,
+            m.index ?? 0,
+            group.flatMap((section) => section.keys),
+          );
           const names = (section: TabSection) => section.keys.some((key) => context.includes(key));
           if (holders.some(names)) continue;
           const other = group.find((section) => !holders.includes(section) && names(section));

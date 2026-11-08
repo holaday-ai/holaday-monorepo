@@ -8,7 +8,6 @@ describe('FIX-59 P0: only a request for code or software is code', () => {
     '写一个 Python 程序来生成周报',
     '写一个能自动下单的脚本',
     '写一个爬取京东价格的脚本',
-    '帮我写一个 React 组件的单元测试',
     '写一个 python 脚本自动剪辑抖音视频',
     '写一段代码片段',
     'Write a script that generates a weekly report',
@@ -88,4 +87,41 @@ describe('FIX-59 复审 #1 必须修 2: browser work and writing are not code', 
     'still code: %s',
     (intent) => expect(looksLikeCodeIntent(intent)).toBe(true),
   );
+});
+
+describe('DEPLOY-59 第 0 步 1: refuse only when it is certain', () => {
+  // 复审 #2: these went through at 334feca3 and must go through again.
+  it.each(['帮我创建一个 Notion 页面', '帮我在后台修改商品页面的价格', '写一个SQL学习计划'])(
+    'goes through: %s',
+    (intent) => expect(looksLikeCodeIntent(intent)).toBe(false),
+  );
+  it.each([
+    '帮我写个 Chrome 插件',
+    '做一个微信小程序',
+    '写一段 SQL 查询',
+    '写一个计算器程序',
+    '写一个 Python 爬虫程序',
+    '帮我写个登录页的 React 组件',
+    '写一个 Python 程序来生成周报',
+    '帮我做个记账 app',
+  ])('a code head after a making verb is refused: %s', (intent) =>
+    expect(looksLikeCodeIntent(intent)).toBe(true),
+  );
+  it.each([
+    '写一个 SQL 学习计划',
+    '写一个 Chrome 插件的使用教程',
+    '做一个网页截图',
+    '写一个 App Store 的应用描述',
+    '写一份爬虫原理的分析',
+    '做一个小程序推广方案',
+  ])('a writing head goes through: %s', (intent) =>
+    expect(looksLikeCodeIntent(intent)).toBe(false),
+  );
+  // 允许放行: the structure cannot tell these for certain, and the lists are not widened for them.
+  it.each([
+    'Write a Chrome extension',
+    '帮我写一个 React 组件的单元测试',
+    '帮我搭建一个网站',
+    '帮我创建一个网站',
+  ])('允许放行 (not certain): %s', (intent) => expect(looksLikeCodeIntent(intent)).toBe(false));
 });

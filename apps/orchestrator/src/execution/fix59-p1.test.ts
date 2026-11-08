@@ -154,6 +154,11 @@ describe('P1-5 · a button that says only the act is a real submit', () => {
     '在线购票须知',
     'Book',
     '导览',
+    // DEPLOY-59 第 0 步 3
+    '在线购票流程',
+    '预约参观时间',
+    'Reserve a table guide',
+    '购票 FAQ',
   ])('「%s」 is not', (label) => expect(looksSubmitted({ tool: 'click', label })).toBe(false));
 });
 
@@ -352,6 +357,14 @@ describe('P1-1 · a price is the tab’s it sits under (故宫 Visit.html)', () 
     expect(said.join('\n')).toContain('「20元」在页面上属于「大门票优惠政策」');
     expect(said.join('\n')).toContain('「5元」');
   });
+  it('DEPLOY-59 第 0 步 2: written wrong, it is still sent back', () => {
+    const said = misattributedPrices('大门票学生票 5 元/人；钟表馆 5 元', [VISIT]);
+    expect(said.join('\n')).toContain(
+      '「5元」在页面上属于「钟表馆、珍宝馆票价优惠政策」这一栏，答案却把它写成了「大门票优惠政策」的',
+    );
+    const comma = misattributedPrices('大门票学生票 5 元/人，钟表馆学生票 5 元', [VISIT]);
+    expect(comma.join('\n')).toContain('写成了「大门票优惠政策」的');
+  });
   it('named as the main ticket’s, it is sent back too', () => {
     const said = misattributedPrices('大门票优惠：学生票 5 元/人', [VISIT]);
     expect(said[0]).toContain('写成了「大门票优惠政策」的');
@@ -367,6 +380,12 @@ describe('P1-1 · a price is the tab’s it sits under (故宫 Visit.html)', () 
     // 复审 #1 必须修 3: the tab is looked for only in the price's own clause.
     ['two clauses, each its own tab', '学生票 20 元/人；钟表馆学生票 5 元。'],
     ['two sentences, each its own tab', '大门票学生票 20 元/人。珍宝馆学生票 5 元/人。'],
+    // DEPLOY-59 第 0 步 2: a comma before another tab's name ends the clause too.
+    ['a comma, then another tab', '学生票 20 元/人，钟表馆学生票 5 元。'],
+    [
+      'a comma, then another tab named first',
+      '钟表馆、珍宝馆的优惠：学生票 5 元/人，老年人 5 元/人。',
+    ],
     ['two lines, each its own tab', '- 学生票：20 元/人\n- 钟表馆、珍宝馆学生票：5 元/人'],
   ])('stays: %s', (_label, answer) => expect(misattributedPrices(answer, [VISIT])).toEqual([]));
   it('a snapshot showing only the current slide pairs nothing (no guess)', () => {
