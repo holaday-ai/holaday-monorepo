@@ -101,7 +101,8 @@ ${FULL_READ_RULE_4}
 11. 用户要求某种控件（如日期控件）而当前页面没有时，换一个有该控件的页面去操作，不要用别的控件（如 time 时间控件）代替。用户点名了网站时只在这些网站内找（只看表单页，不打开登录、注册、付款页；登录页的账号、密码框不算要填的表单，碰到登录页就退回去换别的页面，不要为此请求登录），都没有就把该网站表单上其余可填的项照样填好（不提交）并截图，再如实说明缺什么，不要换到别的网站；没点名时才换别的公开页面。
 12. 查天气等实时数值时，结果页没有天气卡片就打开一个天气来源页面并读取（snapshot/get_page_text），每个值照该页原样写（页面写「82°」就写「82°」，不自己加单位或换算）；页面上读不到的项写「未读到」，不用搜索摘要或记忆补。
 13. 动作返回 stale_ref（ref 已失效）时，先 snapshot，再用新 ref 把同一个动作重做一次（同一个字段、同一个值），不要改用别的方式代替。
-14. summary 是写给用户看的，像跟人说话：不写「照页面原样」「名称：…；价格：…」这类格式说明，不提工具名；不要向用户说明价格、名称是不是按「原样 / 原文」记录的（不写「页面原样价格」「按页面原文保留」这类话），照页面写就是了；商品名太长时只写开头到关键规格那一段再加「…」（截取，不改字）；商品卡片没有主推价、只列了卖家报价时，说「这款没有主推价，有 N 个卖家报价 S$x」。`;
+14. summary 是写给用户看的，像跟人说话：不写「照页面原样」「名称：…；价格：…」这类格式说明，不提工具名；不要向用户说明价格、名称是不是按「原样 / 原文」记录的（不写「页面原样价格」「按页面原文保留」这类话），照页面写就是了；商品名太长时只写开头到关键规格那一段再加「…」（截取，不改字）；商品卡片没有主推价、只列了卖家报价时，说「这款没有主推价，有 N 个卖家报价 S$x」。
+15. 页面分了标签页或小节（如「大门票优惠政策」「钟表馆、珍宝馆票价优惠政策」）时，每个数字按它在页面上所属的那个标签页或小节来写，写清是哪一项的；轮播、标签切换的页面里，紧跟在标签名后面的那段不一定属于第一个标签。`;
 
 /** The system prompt for the current read mode: rule 4 follows `BROWSER_FULL_PAGE_READ`. */
 export function unifiedBrowserSystemPrompt(): string {
@@ -453,7 +454,10 @@ export async function runUnifiedBrowserLoop(
       : looped;
   if (outcome.status === 'failed') logger.warn({ steps: steps.slice(-120) }, 'browser loop failed');
   // FIX-41: nor the browser's call syntax (「switch_tab(targetTabId=…)」), once its ids are gone.
-  const strip = (text: string) => humanizeToolMentions(stripInternalRefs(text, seen));
+  // FIX-59 P1-2: then nothing is left half-said where a value came out.
+  // 复审 #1 必须修 4: only lead-ins whose value came out here, compared with the text as written.
+  const strip = (text: string, written = text) =>
+    withoutDanglingLeads(humanizeToolMentions(stripInternalRefs(text, seen)), written);
   // FIX-38 (Deploy-38 core-11): whatever way the loop ends, the user never reads an
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {
@@ -462,6 +466,7 @@ export async function runUnifiedBrowserLoop(
         ...outcome,
         summary: strip(
           plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
+          outcome.summary,
         ),
       };
     case 'failed':
@@ -3355,7 +3360,25 @@ const EN_VERBATIM_SENTENCE_RE =
 /** 复审 #6: 「…有 1 个卖家报价 S$9.43（这款没有主推价，有 1 个卖家报价 S$9.43）」 — a note in
  * brackets that only repeats what the line already said before it goes. */
 const noteKey = (text: string) =>
-  text.replace(/这款|该商品|该款|此款|这件|仅|只|[\s，,。；;、：:]/gu, '').toLowerCase();
+  sameMeaning(text)
+    .replace(/这款|该商品|该款|此款|这件|仅|只|[\s，,。；;、：:]/gu, '')
+    .toLowerCase();
+
+/**
+ * FIX-59 P1-3: the same thing said in other words is the same — 「该商品详情页未显示主推价」 and
+ * 「这款没有主推价」 both say 「无主推价」.
+ */
+function sameMeaning(text: string): string {
+  return text
+    .replace(
+      /(?:这款|该款|此款|这件|该商品|此商品|本商品|该条目|这一条|该卖家)?(?:详情页|页面|卡片|列表)?(?:上)?(?:没有|未显示|没显示|不显示|未提供|没给出|未给出|无)(?:主推价|主推价格|featured offers?)/giu,
+      '无主推价',
+    )
+    .replace(
+      /(?:有|共|共有)\s*(\d+)\s*(?:个|位|家)?\s*(?:卖家|商家)\s*(?:报价|出价)/gu,
+      '有$1个卖家报价',
+    );
+}
 
 function withoutRepeatedNotes(line: string): string {
   return line
@@ -3471,6 +3494,12 @@ function repeatsOnly(label: string, value: string, said: string): boolean {
     const prices = rest.match(PRICE_TOKEN_ALL_RE) ?? [];
     if (!prices.length || !prices.every((p) => said.includes(p.replace(/\s+/g, '')))) return false;
     rest = rest.replace(PRICE_TOKEN_ALL_RE, '');
+    // FIX-59 P1-3 (reg-new-amazon-sg): 「- 商品3价格：这款没有主推价，有 1 个卖家报价 S$9.43」 under
+    // item 3's 「该商品详情页未显示主推价，有 1 个卖家报价 S$9.43」 — the same price, the same words
+    // once read for meaning.
+    const restKey = noteKey(rest);
+    if (restKey.length >= 4 && noteKey(said.replace(PRICE_TOKEN_ALL_RE, '')).includes(restKey))
+      return true;
   } else {
     const title = /「([^」]{4,})」/.exec(rest)?.[1] ?? rest.trim();
     // DEPLOY-57 第 0 步 4: 「…原色...」 is said when 「…原色钛金属」 was — compare without the
@@ -3550,10 +3579,30 @@ function withoutRepeatedList(text: string): string {
   return out.join('\n');
 }
 
+/**
+ * FIX-59 P1-3: a field line that went as a repeat takes its 「未核实」 item with it
+ * (「未核实：…——商品3价格「这款没有主推价，有 1 个卖家报价 S$9.43」」), and a note left with no
+ * item goes.
+ */
+function withoutDroppedUnverified(lines: string[], dropped: readonly string[]): string[] {
+  if (!dropped.length) return lines;
+  const keys = dropped.map((value) => tightForm(value));
+  return lines.flatMap((line) => {
+    const m = /^(\s*(?:未核实|译述，未逐字核对)[^—\n]*——)(.+)$/u.exec(line);
+    if (!m) return [line];
+    const kept = m[2]!.split('；').filter((item) => {
+      const quoted = /「([\s\S]*)」\s*$/u.exec(item)?.[1];
+      return !quoted || !keys.includes(tightForm(quoted));
+    });
+    return kept.length ? [`${m[1]}${kept.join('；')}`] : [];
+  });
+}
+
 function withoutRepeatedFacts(text: string): string {
   const prose: string[] = [];
   const items = new Map<string, string>();
   const out: string[] = [];
+  const dropped: string[] = [];
   for (const line of text.split('\n')) {
     const orphan = ORPHAN_FIELD_RE.exec(line);
     // After a numbered list it cannot be told which item it belongs to — it goes too.
@@ -3567,7 +3616,10 @@ function withoutRepeatedFacts(text: string): string {
     if (m) {
       // 第 1.5 步 3: 「- 商品3价格：…」 is checked against item 3 above; none above, it stays.
       const said = (m[2] ? (items.get(m[2]) ?? '') : prose.join('\n')).replace(/\s+/g, '');
-      if (said && repeatsOnly(m[3] ?? '', m[4] ?? '', said)) continue;
+      if (said && repeatsOnly(m[3] ?? '', m[4] ?? '', said)) {
+        dropped.push(m[4] ?? '');
+        continue;
+      }
       // A fact said in a line of its own (「商品标题：…」) counts for the lines after it.
       if (!m[1] && !m[2]) prose.push(line);
     } else if (!/^\s*(?:[-*•]|\d+[.、)])\s/.test(line)) {
@@ -3577,7 +3629,97 @@ function withoutRepeatedFacts(text: string): string {
     if (item?.[1]) items.set(item[1], line);
     out.push(line);
   }
-  return out.join('\n');
+  return withoutDroppedUnverified(out, dropped).join('\n');
+}
+
+/**
+ * FIX-59 P1-2: once a value is taken out (a repeat, an internal id, a moved price), a bracket, a
+ * clause or a list line can be left with only its lead-in — 「（…页面给出的最低报价为）」
+ * 「只显示 ，并提示…」「frameId 为，初始内容…」「- opened url：」. Such a clause goes, and a bracket or a
+ * line with nothing else left goes whole. One rule, not one patch per sentence.
+ *
+ * A lead-in is a clause ending in 为 / 是 / 显示 / 给出 / a colon with nothing after it; 「未显示」
+ * 「认为」「行为」「没有给出」 end a clause in their own right. Only a clause followed by a separator
+ * or a closing bracket counts: a line that ends in a colon is a heading.
+ */
+const LEAD_END_RE =
+  /(?:(?<![认作成称因以行无较更最极颇甚])为|(?<![不但就还或总于要也若果])是|(?<![未没不无])显示|(?<![有未没不])给出|[：:])\s*(?:\*\*)?\s*$/u;
+const EMPTY_FIELD_LINE_RE =
+  /^\s*(?:[-*•]|\d+[.、)])\s+(?:\*\*)?[^：:\n]{1,30}?(?:\*\*)?\s*[：:]\s*(?:\*\*)?\s*$/u;
+const indentOf = (line: string) => line.match(/^\s*/)?.[0].length ?? 0;
+
+/**
+ * 复审 #1 必须修 4: only where a value really came out. A lead-in clause the model itself wrote
+ * (「这款的特点是，轻便。」「问题是，…」) is in its own text as it stands; one whose value was taken
+ * out (「frameId 为，」 from 「frameId 为 frame_3，」) is not. `said` is that original text; without it
+ * every lead-in counts (tests of the rule itself).
+ */
+function withoutLeadClauses(text: string, closed: boolean, said: string | null): string {
+  const parts = text.split(/([，,；;。])/u);
+  const keep: string[] = [];
+  let dropped = false;
+  for (let i = 0; i < parts.length; i += 2) {
+    const part = parts[i] ?? '';
+    const sep = parts[i + 1] ?? (closed ? '）' : '');
+    const last = i + 1 >= parts.length;
+    const dangling =
+      part.trim() !== '' &&
+      (last ? closed && LEAD_END_RE.test(part) : LEAD_END_RE.test(part)) &&
+      // The lead-in is all there is to it: no digit, quote or link after its last word.
+      !/[「“"\d]$/u.test(part.trim()) &&
+      // A space left before the separator (「只显示 ，」) is the gap a value left, whoever wrote it.
+      (said === null || /\s$/u.test(part) || !said.includes(tightForm(`${part}${sep}`)));
+    if (dangling) {
+      dropped = true;
+      // The separator before a dropped last clause goes with it.
+      if (last && keep.length) keep.pop();
+      continue;
+    }
+    keep.push(part, ...(parts[i + 1] ? [parts[i + 1]!] : []));
+  }
+  return dropped ? keep.join('').replace(/\s+([，,；;。])/gu, '$1') : text;
+}
+
+export function withoutDanglingLeads(text: string, original?: string): string {
+  const said = original === undefined ? null : tightForm(original);
+  const lines = text.split('\n');
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    if (EMPTY_FIELD_LINE_RE.test(line)) {
+      // An empty field (「- opened url：」) goes; a heading over its own sub-list, or over the
+      // paragraph right under it, stays.
+      const next = lines[i + 1];
+      const opensList =
+        next !== undefined &&
+        indentOf(next) > indentOf(line) &&
+        /^\s*(?:[-*•]|\d+[.、)])\s/u.test(next);
+      const opensParagraph =
+        next !== undefined && next.trim() !== '' && !/^\s*(?:[-*•]|\d+[.、)])\s/u.test(next);
+      if (!opensList && !opensParagraph) continue;
+    }
+    if (!/[为是示出：:]\s*[，,；;。）)]/u.test(line)) {
+      out.push(line);
+      continue;
+    }
+    const fixed = line.replace(
+      /([（(])([^（）()\n]*)([）)])/gu,
+      (m, open: string, inner: string, close: string) => {
+        const kept = withoutLeadClauses(inner, true, said);
+        if (kept === inner) return m;
+        return kept.trim() ? `${open}${kept.trim()}${close}` : '';
+      },
+    );
+    const head = /^\s*(?:[-*•]|\d+[.、)])\s+/u.exec(fixed)?.[0] ?? '';
+    const body = withoutLeadClauses(fixed.slice(head.length), false, said);
+    if (body.trim() || !head) out.push(`${head}${body}`);
+  }
+  if (out.join('\n') === text) return text;
+  // A line went: no blank run or trailing blank is left where it was.
+  return out
+    .join('\n')
+    .replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, '\n\n')
+    .trimEnd();
 }
 
 /**

@@ -963,7 +963,43 @@ function textCarriesPersonal(text: string): boolean {
 /**
  * 协调方核对第 0 步: a page address is checked by its query values only, never its path — a page
  * named 「/13812345678.html」 is the site's own, not a person's number.
+ *
+ * FIX-59 P1-6: a plain 11-digit value starting 13–19 is an ID as often as a phone
+ * (「?item=13912345678」). It counts as a phone only under a key that names one (phone / mobile / tel /
+ * 手机); a value written as a phone (+86, spaces or dashes) is checked under any key. What follows
+ * 「#」 is checked the same way (「#/detail?phone=…」「#mobile=…」).
  */
+const PHONE_KEY_RE = /phone|mobile|(?:^|[_-])tel(?:$|[_-])|^tel|telephone|msisdn|手机|电话/i;
+const PLAIN_ELEVEN_RE = /^1[3-9]\d{9}$/;
+function paramCarriesPersonal(key: string, value: string): boolean {
+  let decoded = value;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    /* Not URL-encoded. */
+  }
+  const plain = decoded.trim();
+  if (PLAIN_ELEVEN_RE.test(plain)) return PHONE_KEY_RE.test(key);
+  // Within a longer value, a bare 11-digit run is an ID too; a written phone still counts.
+  const withoutBareIds = plain.replace(/(?<![\w.+])1[3-9]\d{9}(?![\w])/g, ' ');
+  return (
+    textCarriesPersonal(withoutBareIds) ||
+    (PHONE_KEY_RE.test(key) && /(?<!\d)1[3-9]\d{9}(?!\d)/.test(plain))
+  );
+}
+function hashParams(hash: string): Array<[string, string]> {
+  const body = hash.replace(/^#/, '');
+  if (!body) return [];
+  const query = body.includes('?')
+    ? body.slice(body.indexOf('?') + 1)
+    : body.includes('=')
+      ? body
+      : '';
+  const pairs: Array<[string, string]> = query ? [...new URLSearchParams(query)] : [];
+  // A hash that is not key=value is a value without a key.
+  if (!query) pairs.push(['', body]);
+  return pairs;
+}
 function addressCarriesPersonal(value: string): boolean | null {
   if (!/^https?:\/\//i.test(value.trim())) return null;
   let url: URL;
@@ -972,7 +1008,9 @@ function addressCarriesPersonal(value: string): boolean | null {
   } catch {
     return null;
   }
-  return [...url.searchParams.values()].some((one) => textCarriesPersonal(one));
+  return [...url.searchParams, ...hashParams(url.hash)].some(([key, one]) =>
+    paramCarriesPersonal(key, one),
+  );
 }
 
 function sensorsCarriesPersonal(value: unknown, depth = 0): boolean {
@@ -993,8 +1031,9 @@ function urlNamesPerson(value: string): boolean {
   } catch {
     return false;
   }
-  return [...url.searchParams.keys()].some(
-    (key) => PERSONAL_KEY_RE.test(key) || SENSORS_PERSONAL_KEY_RE.test(key),
+  // FIX-59 P1-6: the part after 「#」 too (「#/order?mobile=…」).
+  return [...url.searchParams.keys(), ...hashParams(url.hash).map(([key]) => key)].some(
+    (key) => key && (PERSONAL_KEY_RE.test(key) || SENSORS_PERSONAL_KEY_RE.test(key)),
   );
 }
 

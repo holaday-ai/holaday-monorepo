@@ -70,7 +70,9 @@ describe('第 0 步 1 · a 神策 beacon carrying a person’s data pauses', () 
     ['$element_content ID number', { $element_content: '11010519491231002X' }],
     ['$url ?phone=', { $url: 'https://www.dpm.org.cn/Visit.html?phone=x' }],
     ['$url ?email=', { $url: 'https://www.dpm.org.cn/Visit.html?email=x' }],
-    ['$url phone value', { $url: 'https://www.dpm.org.cn/Visit.html?q=13800138000' }],
+    // FIX-59 P1-6: a plain 11-digit value counts under a phone key; a written phone under any key.
+    ['$url phone value', { $url: 'https://www.dpm.org.cn/Visit.html?mobile=13800138000' }],
+    ['$url +86 phone value', { $url: 'https://www.dpm.org.cn/Visit.html?q=%2B8613800138000' }],
     ['$url encoded email', { $url: 'https://www.dpm.org.cn/?q=a%40b.cn' }],
     ['$referrer ?real_name=', { $referrer: 'https://www.dpm.org.cn/?real_name=x' }],
   ])('%s', (_label, patch) => {
@@ -191,9 +193,6 @@ describe('协调方核对 · reading and navigation are never said to have place
     '预约须知',
     '门票预订说明',
     '购票须知',
-    '预约参观',
-    '购票',
-    '预约',
     '确定',
     '确认',
     '注册',
@@ -218,6 +217,12 @@ describe('协调方核对 · reading and navigation are never said to have place
     '立即预约',
     '去支付',
     '提交',
+    // FIX-59 P1-5: a button that says only the act is the act.
+    '购票',
+    '预约',
+    'Buy tickets',
+    'Reserve',
+    'Checkout',
     'Place order',
     'Place your order',
     'Pay now',
@@ -265,7 +270,7 @@ describe('协调方核对 · reading and navigation are never said to have place
   it('a page address is checked by its query values, not its path', () => {
     expect(passes(beacon({ $url: 'https://www.dpm.org.cn/13812345678.html' }))).toBe(true);
     expect(passes(beacon({ $referrer: 'https://www.dpm.org.cn/a/a@b.cn/x' }))).toBe(true);
-    expect(passes(beacon({ $url: 'https://www.dpm.org.cn/x.html?q=13812345678' }))).toBe(false);
+    expect(passes(beacon({ $url: 'https://www.dpm.org.cn/x.html?tel=13812345678' }))).toBe(false);
     expect(passes(beacon({ $url: 'https://www.dpm.org.cn/x.html?q=a%40b.cn' }))).toBe(false);
   });
   it.each([

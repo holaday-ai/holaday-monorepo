@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  awaitingComposerPlaceholder,
   awaitingUserCopy,
   awaitingUserStreamMessage,
   normalizeAwaitingKind,
@@ -105,5 +106,22 @@ describe('waiting for the HOLA DAY Chrome extension (FIX-D11)', () => {
     });
     expect(own.followUp).toContain('「我的京东订单」');
     expect(own.followUp).toContain('用公开云端继续（看不到你的个人信息）');
+  });
+});
+
+describe('FIX-59 P1-8: an English task’s reply box speaks English', () => {
+  it.each([
+    'login',
+    'captcha',
+    'clarification',
+    'permission',
+    'browser_action',
+    'video_quote',
+  ] as const)('%s', (kind) => {
+    const en = awaitingComposerPlaceholder(kind, true);
+    expect(en).not.toMatch(/[㐀-鿿]/);
+    expect(awaitingComposerPlaceholder(kind, false)).toBe(
+      awaitingUserCopy(kind).composerPlaceholder,
+    );
   });
 });

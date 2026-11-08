@@ -101,6 +101,10 @@ describe('FIX-57 #2 · the answer footer', () => {
     expect(answerSourceCount(text)).toBe(2);
     expect(processLinkLabel(2)).toBe('参考了 2 个来源 · 查看过程');
     expect(processLinkLabel(0)).toBe('查看过程');
+    // FIX-59 P1-8: an English task's footer is English.
+    expect(processLinkLabel(2, true)).toBe('2 sources · Show steps');
+    expect(processLinkLabel(1, true)).toBe('1 source · Show steps');
+    expect(processLinkLabel(0, true)).toBe('Show steps');
   });
 
   it('a partial answer says so in words', () => {
