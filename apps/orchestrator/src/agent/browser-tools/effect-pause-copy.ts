@@ -37,13 +37,62 @@ export function refName(snapshot: string, ref: string): string | null {
   return null;
 }
 
+/**
+ * FIX-59 P1-4: a control's name is one line, about 20 characters at most. 高德's logo link carried
+ * the page's whole title with a literal 「\\n」 (「高德地图 — 在线地图查询与路线规划服务\\n …」): only the
+ * first line is kept, and it is cut at about 20.
+ */
+const LABEL_MAX = 20;
 const tidy = (text: string) => {
-  const one = text
+  const first =
+    text
+      .split(/\r?\n|\\n|\\r/)
+      .map((line) => line.trim())
+      .find((line) => line && !/^[…\s.]+$/.test(line)) ?? '';
+  const one = first
     .replace(/\s+/g, ' ')
     .replace(/^["「]|["」]$/g, '')
+    .replace(/\s*…$/, '')
     .trim();
-  return one.length > 24 ? `${one.slice(0, 23)}…` : one;
+  return one.length > LABEL_MAX ? `${one.slice(0, LABEL_MAX - 1)}…` : one;
 };
+
+/** FIX-59 P1-4: the page's own title (or a part of it) is never a control's name. */
+export function labelIsPageTitle(label: string, title: string | null | undefined): boolean {
+  const clean = (text: string) => text.replace(/\s+/g, '').replace(/…$/, '').toLowerCase();
+  const name = clean(label);
+  const whole = clean(title ?? '');
+  if (!name || !whole) return false;
+  if (whole === name || (name.length >= 6 && whole.startsWith(name))) return true;
+  const parts = (title ?? '').split(/\s*[-|_｜—–·]\s*/).map(clean);
+  return parts.length > 1 && name.length >= 6 && parts.join('').startsWith(name);
+}
+
+/**
+ * FIX-59 P1-7: a Chinese task names a site in Chinese (「故宫博物院」), never by its host, and a search
+ * result's title (「Amazon.sg: usb c」) is never the site's name.
+ */
+const CHINESE_SITE_NAMES: ReadonlyArray<[RegExp, string]> = [
+  [/(?:^|\.)dpm\.org\.cn$/, '故宫博物院'],
+  [/(?:^|\.)jd\.com$/, '京东'],
+  [/(?:^|\.)taobao\.com$/, '淘宝'],
+  [/(?:^|\.)tmall\.com$/, '天猫'],
+  [/(?:^|\.)(?:ctrip|trip)\.com$/, '携程'],
+  [/(?:^|\.)amap\.com$/, '高德地图'],
+  [/(?:^|\.)douyin\.com$/, '抖音'],
+  [/(?:^|\.)(?:xiaohongshu|rednote)\.com$/, '小红书'],
+  [/(?:^|\.)zhihu\.com$/, '知乎'],
+  [/(?:^|\.)bilibili\.com$/, '哔哩哔哩'],
+  [/(?:^|\.)baidu\.com$/, '百度'],
+  [/(?:^|\.)y\.qq\.com$/, 'QQ 音乐'],
+  [/(?:^|\.)amazon\.sg$/, '亚马逊新加坡站'],
+  [/(?:^|\.)amazon\.cn$/, '亚马逊中国'],
+  [/(?:^|\.)amazon\.[a-z.]+$/, '亚马逊'],
+  [/(?:^|\.)bestbuy\.com$/, 'Best Buy'],
+  [/(?:^|\.)google\.[a-z.]+$/, 'Google'],
+  [/(?:^|\.)youtube\.com$/, 'YouTube'],
+  [/(?:^|\.)wikipedia\.org$/, '维基百科'],
+];
 
 /**
  * English names of a few sites whose pages title themselves only in Chinese (协调方核对第 0 步: an
@@ -60,6 +109,9 @@ const ENGLISH_SITE_NAMES: ReadonlyArray<[RegExp, string]> = [
   [/(?:^|\.)(?:xiaohongshu|rednote)\.com$/, 'Xiaohongshu'],
   [/(?:^|\.)zhihu\.com$/, 'Zhihu'],
   [/(?:^|\.)bilibili\.com$/, 'Bilibili'],
+  [/(?:^|\.)amazon\.sg$/, 'Amazon Singapore'],
+  [/(?:^|\.)amazon\.[a-z.]+$/, 'Amazon'],
+  [/(?:^|\.)bestbuy\.com$/, 'Best Buy'],
 ];
 const CJK_RE = /[\u3400-\u9fff\uf900-\ufaff]/;
 
@@ -72,25 +124,36 @@ function hostOf(url: string | null | undefined): string {
 }
 
 /**
- * The site as a person names it: the page title's site part (「导览-故宫博物院」→「故宫博物院」), else
- * the host. In English: an English title part, else the site's English name, else the host.
+ * The site as a person names it. FIX-59 P1-7: in Chinese a known site's Chinese name (「故宫博物院」
+ * 「亚马逊新加坡站」), else the page title's site part (「门票-某某景区」→「某某景区」), else the host.
+ * In English an English title part, else the site's English name, else the host. A title part that
+ * reads as a search (「Amazon.sg: usb c」) or a bare domain is never the name.
  */
 export function siteCalled(
   title: string | null | undefined,
   url: string | null | undefined,
   english = false,
 ): string {
+  const host = hostOf(url);
+  const known = (english ? ENGLISH_SITE_NAMES : CHINESE_SITE_NAMES).find(([re]) =>
+    re.test(host),
+  )?.[1];
   const parts = (title ?? '')
     .split(/\s*[-|_｜—–·]\s*/)
     .map((part) => part.trim())
-    .filter((part) => part.length >= 2 && part.length <= (english ? 32 : 16));
-  const host = hostOf(url);
-  if (!english) return [...parts].reverse()[0] ?? host;
+    .filter(
+      (part) =>
+        part.length >= 2 &&
+        part.length <= (english ? 32 : 16) &&
+        !/[:：]/.test(part) &&
+        !/^[\w-]+(?:\.[a-z]{2,})+$/i.test(part),
+    );
+  // A known site's Chinese name beats a title part: 高德's title ends in its slogan.
+  if (!english) return known ?? [...parts].reverse()[0] ?? host;
   const englishPart = [...parts]
     .reverse()
     .find((part) => !CJK_RE.test(part) && /[a-z]/i.test(part));
-  if (englishPart) return englishPart;
-  return ENGLISH_SITE_NAMES.find(([re]) => re.test(host))?.[1] ?? host;
+  return englishPart ?? known ?? host;
 }
 
 /**
@@ -106,8 +169,9 @@ export function siteCalled(
 const INFO_LABEL_RE =
   /须知|说明|规则|指南|详情|介绍|政策|帮助|常见问题|\binfo\b|information|\bpolic(?:y|ies)\b|\bfaq\b|\bguide\b|\bhelp\b|\bterms\b|\bdetails?\b|\blearn more\b/i;
 /** A whole label that is itself the act: 「提交」「下单」「支付」「Submit」「Pay」. */
+// FIX-59 P1-5: a button that says only 「购票 / 预约 / Buy tickets / Reserve / Checkout」 is the act too.
 const SUBMIT_WHOLE_LABEL_RE =
-  /^(?:提交|下单|支付|付款|立即支付|立即付款|submit|pay|place order|place your order|buy now|book now|pay now|send|post)$/i;
+  /^(?:提交|下单|支付|付款|立即支付|立即付款|购票|购买|预约|预订|订票|订购|结算|去结算|submit|pay|place order|place your order|buy now|book now|pay now|send|post|buy tickets?|get tickets?|reserve|checkout|check out|proceed to checkout)$/i;
 const SUBMIT_ACT_RE =
   /提交(?:订单|预约|预订|申请|报名|支付)|确认(?:支付|付款|订单|下单|预约|预订|购买|购票|提交|报名)|立即(?:购买|购票|订票|预约|预订|支付|付款|下单|抢购|抢票|报名|注册)|去(?:支付|付款)|马上(?:购买|抢购|预约|下单)|\bplace (?:your )?order\b|\bpay now\b|\bpay (?:s?\$|¥|€|£|rm|usd|sgd)|\bbook now\b|\breserve now\b|\bbuy now\b|\bcomplete (?:purchase|order|booking|payment)\b|\bconfirm (?:and pay|payment|order|booking|purchase|reservation)\b|\bsubmit (?:order|booking|payment|application|request)\b/i;
 /** What paused it was itself a transaction (a checkout or payment request or page, a new receipt). */
@@ -148,9 +212,13 @@ export function effectPauseQuestion(input: {
   background: boolean;
   /** What paused it (branch and address), to tell a real submit. */
   triggers?: ReadonlyArray<{ branch: string; url: string }>;
+  /** The page's title: a control named like the page itself is left unnamed (FIX-59 P1-4). */
+  pageTitle?: string | null;
 }): string {
-  const { english, site, action, readOnly, background } = input;
-  const label = action?.label?.trim();
+  const { english, site, readOnly, background } = input;
+  const raw = input.action?.label ? tidy(input.action.label) : '';
+  const label = raw && !labelIsPageTitle(raw, input.pageTitle) ? raw : undefined;
+  const action = input.action ? { ...input.action, label: label ?? null } : null;
   const submitted = looksSubmitted(action, input.triggers);
   if (english) {
     const did =

@@ -884,6 +884,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
               ? effectPauseQuestion({
                   english: isEnglishIntent(opts.intent),
                   site: siteCalled(await safeTitle(page), page.url(), isEnglishIntent(opts.intent)),
+                  pageTitle: await safeTitle(page),
                   action: lastActed,
                   readOnly: isReadOnlyIntent(opts.intent),
                   background: outcome.message === UNPLACED_POST_MESSAGE,

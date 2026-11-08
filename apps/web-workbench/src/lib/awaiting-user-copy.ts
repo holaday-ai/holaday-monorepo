@@ -99,6 +99,25 @@ export function normalizeAwaitingKind(
   return kind ?? 'clarification';
 }
 
+/** FIX-59 P1-8: an English task's reply box speaks English. */
+const ENGLISH_COMPOSER_PLACEHOLDER: Record<AwaitingKind, string> = {
+  login: 'Once you have signed in, add any note here...',
+  captcha: 'Once the check is done, add any note here...',
+  clarification: "Answer HOLA DAY's question...",
+  permission: 'Say you have access, or give another source...',
+  browser_action: 'Reply "continue" if it looks right, or say what to change...',
+  video_quote: 'Reply "confirm" to start, or "image version" / "cancel"...',
+};
+
+export function awaitingComposerPlaceholder(
+  kind: UiAwaitingUser['awaitingKind'] | undefined,
+  english: boolean,
+): string {
+  return english
+    ? ENGLISH_COMPOSER_PLACEHOLDER[normalizeAwaitingKind(kind)]
+    : awaitingUserCopy(kind).composerPlaceholder;
+}
+
 export function awaitingUserCopy(
   kind: UiAwaitingUser['awaitingKind'] | undefined,
   browserConnection?: BrowserConnectionWait | null,

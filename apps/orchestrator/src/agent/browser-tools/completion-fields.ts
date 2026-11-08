@@ -2,6 +2,7 @@ import { TEXT_URL_RE } from '../../execution/text-urls.js';
 import { stripInternalRefs } from '../internal-refs.js';
 import { staleForRecentIntent, uncoveredTargets } from './completion-coverage.js';
 import { assessEngagementClaims } from './engagement-counts.js';
+import { misattributedPrices } from './section-attribution.js';
 
 export interface ObservedEvidence {
   text: string;
@@ -1372,6 +1373,14 @@ export function assessCompletionFacts(input: {
     input.pages.map((page) => page.text),
   );
   if (stale) contradictions.push(stale);
+  // FIX-59 P1-1: a price is the tab's or section's it sits under (故宫 5 元 is the halls', not the
+  // main ticket's).
+  contradictions.push(
+    ...misattributedPrices(
+      unescapeLiteralBreaks(input.summary),
+      input.pages.map((page) => unescapeLiteralBreaks(page.text)),
+    ),
+  );
   // FIX-29: a like/comment/favourite/share number must be that counter's, not the icon next to it.
   contradictions.push(
     ...assessEngagementClaims(

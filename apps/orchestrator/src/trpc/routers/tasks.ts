@@ -26,7 +26,7 @@ import {
   createFallbackWebSearch,
   createFirecrawlReadPage,
 } from '../../agent/browser-tools/web-search-fallback.js';
-import { looksLikeCodeIntent } from '../../agent/code-intent.js';
+import { codeIntentRefusal, looksLikeCodeIntent } from '../../agent/code-intent.js';
 import { restoreCoreLegacyWorkflow } from '../../agent/core-legacy-workflow.js';
 import { assertCoreTaskInput } from '../../agent/core-task-input.js';
 import { prepareCoreTaskPlan } from '../../agent/core-task-plan.js';
@@ -1232,8 +1232,8 @@ export const tasksRouter = router({
       if (!inSpecialistContext && looksLikeCodeIntent(input.intent)) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message:
-            'HOLA DAY 专注浏览器任务执行（搜索 / 操作 / 比价 / 抓内容）。代码开发请用 Claude Code 或 Cursor 等专业工具。',
+          // FIX-59 P0: plain words and a way forward, in the task's language.
+          message: codeIntentRefusal(input.intent),
         });
       }
       const [userRow] = await ctx.db

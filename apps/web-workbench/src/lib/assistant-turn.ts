@@ -279,7 +279,12 @@ export function answerSourceCount(text: string): number {
 }
 
 /** The quiet footer under an answer. */
-export function processLinkLabel(sourceCount: number): string {
+export function processLinkLabel(sourceCount: number, en = false): string {
+  // FIX-59 P1-8: an English task's footer is English.
+  if (en)
+    return sourceCount > 0
+      ? `${sourceCount} source${sourceCount === 1 ? '' : 's'} · Show steps`
+      : 'Show steps';
   return sourceCount > 0 ? `参考了 ${sourceCount} 个来源 · 查看过程` : '查看过程';
 }
 
@@ -879,10 +884,10 @@ export function splitUnverifiedNote(
     ? gapOnly
       ? ''
       : opts.en
-        ? "\n\nA few items here I couldn't match word for word on the page — see 「查看过程」."
+        ? "\n\nA few items here I couldn't match word for word on the page — see “Show steps”."
         : '\n\n其中有几项我没在页面上逐字核对到，见「查看过程」。'
     : opts.en
-      ? "\n\nSome details I couldn't match word for word on the page — they're listed under 「查看过程」; worth a look before you rely on them."
+      ? "\n\nSome details I couldn't match word for word on the page — they're listed under “Show steps”; worth a look before you rely on them."
       : '\n\n有些内容我没能在页面上逐字核对到，细节在「查看过程」里，用之前可以再看一眼。';
   const body = `${text.slice(0, m.index).trimEnd()}${said}${text.slice((m.index ?? 0) + m[0].length)}`;
   return { body: body.trim(), unverified: m[1]?.trim() || null };

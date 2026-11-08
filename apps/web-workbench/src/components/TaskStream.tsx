@@ -2489,7 +2489,9 @@ function TerminalSummary({
       {status === 'partial_success' && partial?.lead !== '' && (
         <p className="m-0 mb-2 text-[15px] leading-7 text-foreground/80" data-testid="partial-lead">
           {partial?.lead ??
-            '这次只算部分完成：有的内容还没拿全或没能核实，具体在「查看过程」的核对记录里。'}
+            (isEnglishTask(intent ?? '')
+              ? 'This is only a partial result: some of it is missing or could not be checked — see “Show steps” for the checks.'
+              : '这次只算部分完成：有的内容还没拿全或没能核实，具体在「查看过程」的核对记录里。')}
         </p>
       )}
       {status === 'failed'
@@ -2571,7 +2573,10 @@ function TerminalSummary({
         <NextStepChips steps={nextSteps} onSend={send} onEdit={onSuggestionPick} />
       )}
       <ProcessDisclosure
-        label={processLinkLabel(status === 'failed' ? 0 : answerSourceCount(displayText))}
+        label={processLinkLabel(
+          status === 'failed' ? 0 : answerSourceCount(displayText),
+          isEnglishTask(intent ?? ''),
+        )}
         actions={
           <>
             <button

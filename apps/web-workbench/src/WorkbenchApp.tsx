@@ -390,13 +390,17 @@ export function WorkbenchApp(): JSX.Element {
         skillSelection,
       );
       if ('error' in res) {
+        // FIX-59 P0: the server writes the refusal in plain words and in the task's
+        // language; show it as is. An older server's copy maps to the new words.
         const codeRejected =
           res.error.includes('HOLA DAY 专注浏览器任务') ||
           res.error.includes('代码开发请用') ||
-          res.error.includes('Claude Code 或 Cursor');
+          res.error.includes('Claude Code');
         if (codeRejected) {
           toast.show(
-            'HOLA DAY 专注浏览器任务执行（搜索、填表、数据采集等）。代码开发建议使用 Claude Code 或 Cursor。',
+            res.error.includes('Claude Code') && !res.error.includes('专注浏览器')
+              ? res.error
+              : '写代码不是我最擅长的，你可以用 Claude Code 或 Cursor。如果你是想让我搜索资料、整理文档或者操作网页，我很乐意帮你。',
           );
         } else {
           toast.show(taskActionError('发送失败', res.error), 'error');

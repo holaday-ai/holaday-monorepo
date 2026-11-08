@@ -197,7 +197,8 @@ describe('必须修 4 · 故宫门票: the 神策 beacon is let through by its e
     expect(refName(snapshot, 'e6')).toBe('开放时间');
     expect(refName('- generic [ref=e9]: 参观须知', 'e9')).toBe('参观须知');
     expect(siteCalled('导览-故宫博物院', 'https://www.dpm.org.cn/Visit.html')).toBe('故宫博物院');
-    expect(siteCalled('', 'https://www.dpm.org.cn/Visit.html')).toBe('dpm.org.cn');
+    // FIX-59 P1-7: a Chinese task without a title names the site in Chinese.
+    expect(siteCalled('', 'https://www.dpm.org.cn/Visit.html')).toBe('故宫博物院');
     const zh = effectPauseQuestion({
       english: false,
       site: '故宫博物院',

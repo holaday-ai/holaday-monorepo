@@ -23,7 +23,8 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { useBrainOptions } from '@/hooks/useBrainOptions';
-import { type AwaitingKind, awaitingUserCopy } from '@/lib/awaiting-user-copy';
+import { isEnglishTask } from '@/lib/assistant-turn';
+import { type AwaitingKind, awaitingComposerPlaceholder } from '@/lib/awaiting-user-copy';
 import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
 import {
   detectSkillMentionTrigger,
@@ -206,6 +207,10 @@ export function InputArea({
   const navigate = useNavigate();
   const location = useLocation();
   const hasExistingTask = useTaskStore((s) => Boolean(s.selectedTaskId));
+  // FIX-59 P1-8: on an English task's page the box's hint is English too.
+  const englishTask = useTaskStore((s) =>
+    isEnglishTask(s.tasks.find((task) => task.taskId === s.selectedTaskId)?.intent ?? ''),
+  );
   const showChromePicker = useTaskStore((s) =>
     hasBrowserRecordForWorkbench(s.tasks.find((task) => task.taskId === s.selectedTaskId) ?? null),
   );
@@ -795,9 +800,11 @@ export function InputArea({
           onKeyDown={handleKeyDown}
           placeholder={
             replyMode
-              ? awaitingUserCopy(replyKind).composerPlaceholder
+              ? awaitingComposerPlaceholder(replyKind, englishTask)
               : followUpTarget || hasExistingTask
-                ? '补充问题或下一步指令...'
+                ? englishTask
+                  ? 'Ask a follow-up or say what to do next...'
+                  : '补充问题或下一步指令...'
                 : expertWorkflow
                   ? '补充直播场次、数据来源或你想要的报告形式...'
                   : approved
