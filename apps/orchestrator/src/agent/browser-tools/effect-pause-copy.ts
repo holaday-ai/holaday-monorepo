@@ -57,6 +57,20 @@ const tidy = (text: string) => {
   return one.length > LABEL_MAX ? `${one.slice(0, LABEL_MAX - 1)}…` : one;
 };
 
+/**
+ * FIX-59 P1-4: a name shaped like a page title — 「site — slogan」, one part being the site's name
+ * (高德's logo link: 「高德地图 — 在线地图查询与路线规划服务」) — is no control's name either.
+ */
+export function labelLooksLikeTitle(label: string, site: string): boolean {
+  const parts = label
+    .replace(/…$/, '')
+    .split(/\s+[-|_｜—–·]\s+|\s*[｜—–]\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const name = site.trim();
+  return parts.length >= 2 && name.length >= 2 && parts.some((part) => part === name);
+}
+
 /** FIX-59 P1-4: the page's own title (or a part of it) is never a control's name. */
 export function labelIsPageTitle(label: string, title: string | null | undefined): boolean {
   const clean = (text: string) => text.replace(/\s+/g, '').replace(/…$/, '').toLowerCase();
@@ -217,7 +231,10 @@ export function effectPauseQuestion(input: {
 }): string {
   const { english, site, readOnly, background } = input;
   const raw = input.action?.label ? tidy(input.action.label) : '';
-  const label = raw && !labelIsPageTitle(raw, input.pageTitle) ? raw : undefined;
+  const label =
+    raw && !labelIsPageTitle(raw, input.pageTitle) && !labelLooksLikeTitle(raw, site)
+      ? raw
+      : undefined;
   const action = input.action ? { ...input.action, label: label ?? null } : null;
   const submitted = looksSubmitted(action, input.triggers);
   if (english) {

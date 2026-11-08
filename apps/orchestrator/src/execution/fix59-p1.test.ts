@@ -78,6 +78,17 @@ describe('P1-4 · a control is named by one short line, never by the page title'
     expect(copy).not.toContain('在线地图查询');
     expect(copy).toMatch(/^我在高德地图点了一下，/);
   });
+  it('a title-shaped name is dropped even when the page title differs', () => {
+    const copy = effectPauseQuestion({
+      english: false,
+      site: siteCalled('地点搜索 - 高德地图', 'https://www.amap.com/ssr/search'),
+      pageTitle: '地点搜索 - 高德地图',
+      action: { tool: 'click', label: '高德地图 — 在线地图查询与路线规划服务\\n …' },
+      readOnly: true,
+      background: true,
+    });
+    expect(copy).toMatch(/^我在高德地图点了一下，/);
+  });
   it('a real control keeps its name', () => {
     expect(labelIsPageTitle('导览-故宫博物院', '导览-故宫博物院')).toBe(true);
     expect(
