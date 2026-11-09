@@ -54,7 +54,7 @@ import {
   stopPlannedRunner,
 } from './planned/planned-runner.js';
 import { type TaskQueue, createTaskQueue } from './queue/task-queue.js';
-import { authorizeCaptchaViewportInput } from './streaming/captcha-viewport-action.js';
+import { authorizeHumanViewportInput } from './streaming/captcha-viewport-action.js';
 import { createScreencastProxy } from './streaming/screencast-proxy.js';
 import { createWsServer, loadRehydratedTasks } from './ws/server.js';
 
@@ -963,7 +963,7 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
         // See streaming/screencast-proxy.ts for the protocol contract.
         const screencastProxy = createScreencastProxy({
           pool: browserPool,
-          beforeViewportAction: authorizeCaptchaViewportInput,
+          beforeViewportAction: authorizeHumanViewportInput,
           logger,
           ...(ordinary ? { executionDrain: ordinary.coordinator } : {}),
         });

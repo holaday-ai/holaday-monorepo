@@ -32,6 +32,8 @@ const SENSITIVE_WORDS = [
 ];
 const SENSITIVE_FIELDS = [
   'input[type="password" i]',
+  // FIX-61: fields the user typed into while operating the browser.
+  '[data-hd-human-typed]',
   ...['password', 'one-time-code', 'cc-'].map((token) => `[autocomplete*="${token}" i]`),
   ...['name', 'id', 'aria-label', 'placeholder'].flatMap((attr) =>
     SENSITIVE_WORDS.map((word) => `input[${attr}*="${word}" i],textarea[${attr}*="${word}" i]`),

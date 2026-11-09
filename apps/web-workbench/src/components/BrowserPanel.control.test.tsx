@@ -36,6 +36,7 @@ vi.mock('@/components/CdpScreencastViewport', () => ({
     onStatusChange: (status: string) => void;
     controlLease: string | null;
     viewOnly: boolean;
+    onRequestControl?: () => void;
   }) => {
     const onStatus = React.useRef(props.onStatusChange);
     React.useEffect(() => {
@@ -46,7 +47,12 @@ vi.mock('@/components/CdpScreencastViewport', () => ({
         data-testid="viewport"
         data-lease={props.controlLease ?? ''}
         data-readonly={String(props.viewOnly)}
-      />
+        data-can-request={String(Boolean(props.onRequestControl))}
+      >
+        <button type="button" data-testid="screen" onClick={() => props.onRequestControl?.()}>
+          screen
+        </button>
+      </div>
     );
   },
 }));
@@ -107,13 +113,13 @@ it('local Chrome uses real ownership controls without mounting a cloud viewport'
   expect(screen.getByText('在你的 Chrome 中执行')).toBeTruthy();
   expect(screen.queryByTestId('viewport')).toBeNull();
   await waitFor(() =>
-    expect((screen.getByRole('button', { name: '接管' }) as HTMLButtonElement).disabled).toBe(
+    expect((screen.getByRole('button', { name: '我来操作' }) as HTMLButtonElement).disabled).toBe(
       false,
     ),
   );
-  fireEvent.click(screen.getByRole('button', { name: '接管' }));
-  await screen.findByRole('button', { name: '交还 AI' });
-  fireEvent.click(screen.getByRole('button', { name: '交还 AI' }));
+  fireEvent.click(screen.getByRole('button', { name: '我来操作' }));
+  await screen.findByRole('button', { name: '交还给我' });
+  fireEvent.click(screen.getByRole('button', { name: '交还给我' }));
   await waitFor(() =>
     expect(api.mutate).toHaveBeenLastCalledWith({
       taskId: 'tsk_one',
@@ -153,7 +159,7 @@ it('uses confirmed ownership for both normal and fullscreen controls', async () 
       }),
   );
   const { rerender } = render(<BrowserPanel {...base} />);
-  const takeover = await screen.findByRole('button', { name: '接管浏览器' });
+  const takeover = await screen.findByRole('button', { name: '我来操作' });
   await waitFor(() => expect(takeover.hasAttribute('disabled')).toBe(false));
   fireEvent.click(takeover);
   expect(screen.getByTestId('viewport').dataset.lease).toBe('');
@@ -169,7 +175,7 @@ it('uses confirmed ownership for both normal and fullscreen controls', async () 
     taskId: 'tsk_one',
     controlLease: 'confirmed',
   });
-  fireEvent.click(screen.getByRole('button', { name: '退出浏览器接管' }));
+  fireEvent.click(screen.getByRole('button', { name: '交还给我' }));
   expect(screen.getByTestId('viewport').dataset.lease).toBe('');
   await act(async () => {
     confirm(control('resuming'));
@@ -187,7 +193,7 @@ it('does not automatically retake control while the login banner awaits its stat
   );
   render(<BrowserPanel {...base} awaitingUser awaitingKind="login" />);
   await waitFor(() => expect(screen.getByTestId('viewport').dataset.lease).toBe('login'));
-  fireEvent.click(screen.getByRole('button', { name: '退出浏览器接管' }));
+  fireEvent.click(screen.getByRole('button', { name: '交还给我' }));
   await waitFor(() =>
     expect(api.mutate).toHaveBeenCalledWith({
       taskId: 'tsk_one',
@@ -234,4 +240,33 @@ it('renders a blank browser address as an empty state instead of about:blank', a
   const input = await screen.findByRole('textbox', { name: /浏览器地址栏/ });
   expect((input as HTMLInputElement).value).toBe('');
   expect(input.getAttribute('placeholder')).toBe('尚未打开网页');
+});
+
+it('FIX-61: pressing the screen of a running task takes over and says the assistant paused', async () => {
+  api.mutate.mockResolvedValue(control('human', 'screen'));
+  render(<BrowserPanel {...base} />);
+  await waitFor(() => expect(screen.getByTestId('viewport').dataset.canRequest).toBe('true'));
+  fireEvent.click(screen.getByTestId('screen'));
+  await waitFor(() =>
+    expect(api.mutate).toHaveBeenCalledWith({ taskId: 'tsk_one', action: 'takeover' }),
+  );
+  await waitFor(() => expect(screen.getByTestId('viewport').dataset.lease).toBe('screen'));
+  expect(screen.getByText('你在操作，我先停下；需要我继续时点『交还给我』。')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '交还给我' })).toBeTruthy();
+});
+
+it('FIX-61: a finished task with its browser still open can be used straight from the screen', async () => {
+  useTaskStore.setState((state) => ({
+    tasks: state.tasks.map((task) => ({ ...task, status: 'completed' as const })),
+  }));
+  api.query.mockResolvedValue({ ...control('closed'), mode: 'review' });
+  api.mutate.mockResolvedValue({ ...control('human', 'review-lease'), mode: 'review' });
+  render(<BrowserPanel {...base} taskStatus="completed" />);
+  await waitFor(() => expect(screen.getByTestId('viewport').dataset.canRequest).toBe('true'));
+  expect(screen.getByRole('button', { name: '我来操作' }).textContent).toContain('我来操作');
+  fireEvent.click(screen.getByTestId('screen'));
+  await waitFor(() =>
+    expect(api.mutate).toHaveBeenCalledWith({ taskId: 'tsk_one', action: 'takeover' }),
+  );
+  await waitFor(() => expect(screen.getByTestId('viewport').dataset.lease).toBe('review-lease'));
 });

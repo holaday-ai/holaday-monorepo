@@ -27,7 +27,9 @@ describe('CdpInputHandler owned cancellation', () => {
   it('releases held keys and mouse buttons before AI can observe the handed-back page', async () => {
     const effects: string[] = [];
     const session = {
-      send: async (_method: string, params: { type?: string }) => {
+      send: async (method: string, params: { type?: string }) => {
+        // FIX-61: the typed-field marker is not an input effect.
+        if (method === 'Runtime.evaluate') return;
         effects.push(params.type ?? 'other');
       },
       detach: async () => undefined,
@@ -420,6 +422,8 @@ describe('CdpInputHandler keyboard input', () => {
 
   it('releases a stale Meta modifier before the next plain key when keyup was lost', async () => {
     const { handler, send } = handlerWithSend();
+    // FIX-61: the typed-field marker (Runtime.evaluate) is interleaved; compare input calls only.
+    const inputCalls = () => send.mock.calls.filter(([method]) => method !== 'Runtime.evaluate');
 
     await handler.handle({
       type: 'keyDown',
@@ -449,14 +453,14 @@ describe('CdpInputHandler keyboard input', () => {
       keyCode: 88,
     });
 
-    expect(send).toHaveBeenNthCalledWith(4, 'Input.dispatchKeyEvent', {
+    expect(inputCalls()[3]).toEqual(['Input.dispatchKeyEvent', {
       type: 'keyUp',
       key: 'Meta',
       code: 'MetaLeft',
       windowsVirtualKeyCode: 91,
       modifiers: 0,
-    });
-    expect(send).toHaveBeenNthCalledWith(5, 'Input.dispatchKeyEvent', {
+    }]);
+    expect(inputCalls()[4]).toEqual(['Input.dispatchKeyEvent', {
       type: 'keyDown',
       key: 'x',
       code: 'KeyX',
@@ -464,7 +468,7 @@ describe('CdpInputHandler keyboard input', () => {
       modifiers: 0,
       text: 'x',
       unmodifiedText: 'x',
-    });
+    }]);
   });
 });
 
@@ -570,4 +574,54 @@ it('uses negotiated Retina DPR and retains held buttons through a drag', async (
   send.mockClear();
   await handler.handle({ type: 'viewport', width: 390, height: 600, deviceScaleFactor: 100 });
   expect(send).not.toHaveBeenCalled();
+});
+
+describe('FIX-61 P0: the user viewport must reach the page layout after a task', () => {
+  const evaluateWith = (layout: [number, number]) =>
+    vi.fn(async (method: string, params?: { expression?: string }) => {
+      if (method !== 'Runtime.evaluate') return {};
+      return params?.expression?.includes('innerWidth')
+        ? { result: { value: layout } }
+        : { result: { value: 1 } };
+    });
+
+  it('aligns the agent page when its own emulation keeps the old layout, then re-applies ours', async () => {
+    // Observed locally: frames were 1280x1807 while the page still laid out at
+    // 1280x800 (the agent's Playwright viewport), so every click was refused.
+    const send = evaluateWith([1280, 800]);
+    const setViewportSize = vi.fn(async () => {});
+    const handler = new CdpInputHandler(
+      () => ({ send, detach: async () => {} }) as unknown as CDPSession,
+      pino({ level: 'silent' }),
+      undefined,
+      undefined,
+      true,
+      async () => ({ setViewportSize }) as unknown as Page,
+      2400,
+    );
+    await handler.handle({ type: 'viewport', width: 1280, height: 1807, deviceScaleFactor: 2 });
+    expect(setViewportSize).toHaveBeenCalledWith({ width: 1280, height: 1807 });
+    const overrides = send.mock.calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride');
+    expect(overrides).toHaveLength(2);
+    expect(overrides[1]?.[1]).toEqual(
+      expect.objectContaining({ width: 1280, height: 1807, deviceScaleFactor: 2 }),
+    );
+  });
+
+  it('leaves the agent page alone when the layout already matches', async () => {
+    const send = evaluateWith([1280, 1807]);
+    const setViewportSize = vi.fn(async () => {});
+    const handler = new CdpInputHandler(
+      () => ({ send, detach: async () => {} }) as unknown as CDPSession,
+      pino({ level: 'silent' }),
+      undefined,
+      undefined,
+      true,
+      async () => ({ setViewportSize }) as unknown as Page,
+      2400,
+    );
+    await handler.handle({ type: 'viewport', width: 1280, height: 1807 });
+    expect(setViewportSize).not.toHaveBeenCalled();
+    expect(send.mock.calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride')).toHaveLength(1);
+  });
 });

@@ -25,6 +25,29 @@ import type { CDPSession, Page } from 'playwright';
 const pagePixelRatios = new WeakMap<Page, number>();
 import { BrowserInputOutcomeUnknownError } from '../agent/supercar/browser-control.js';
 
+/**
+ * FIX-61 P0: marks the focused text field (through open shadow roots and
+ * same-origin frames) as typed by the user. The agent's page reads mask the
+ * values of marked fields, so after the user hands the browser back the agent
+ * does not read what the user typed.
+ */
+export const HUMAN_TYPED_ATTRIBUTE = 'data-hd-human-typed';
+export const MARK_HUMAN_TYPED_FIELD = `(() => {
+  let el = document.activeElement;
+  for (let depth = 0; el && depth < 8; depth++) {
+    let inner = null;
+    if (el.shadowRoot && el.shadowRoot.activeElement) inner = el.shadowRoot.activeElement;
+    else if (el.tagName === 'IFRAME') { try { inner = el.contentDocument && el.contentDocument.activeElement; } catch (e) { inner = null; } }
+    if (!inner || inner === el) break;
+    el = inner;
+  }
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+    el.setAttribute('${HUMAN_TYPED_ATTRIBUTE}', '1');
+    return true;
+  }
+  return false;
+})()`;
+
 export type InputMessage =
   | { type: 'mouseMove'; x: number; y: number }
   | {
@@ -239,14 +262,29 @@ export class CdpInputHandler {
                 ? (pagePixelRatios.get(page) ?? observedRatio)
                 : observedRatio;
           if (page) pagePixelRatios.set(page, deviceScaleFactor);
-          await send('Emulation.setDeviceMetricsOverride', {
+          const override = {
             width,
             height,
             deviceScaleFactor,
             mobile: false,
             screenWidth: width,
             screenHeight: height,
-          });
+          };
+          await send('Emulation.setDeviceMetricsOverride', override);
+          // FIX-61 P0: right after a task the agent's own Playwright emulation
+          // (1280x800) still decides the page layout, so the frames were 1807
+          // tall while the page laid out at 800 and every user click was
+          // refused as a stale observation. Align the agent page when ours did
+          // not take, then re-apply ours so the negotiated DPR is kept.
+          if (this.getPage && (await this.layoutDiffers(send, width, height))) {
+            const agentPage = page ?? (await this.getPage().catch(() => undefined));
+            if (agentPage) {
+              await agentPage.setViewportSize({ width, height }).catch((err: unknown) => {
+                this.logger.debug({ err }, 'cdp-input: agent viewport not aligned');
+              });
+              await send('Emulation.setDeviceMetricsOverride', override);
+            }
+          }
           break;
         }
         case 'mouseMove':
@@ -327,6 +365,17 @@ export class CdpInputHandler {
           await send('Input.insertText', { text: msg.text });
           break;
       }
+      if (
+        msg.type === 'insertText' ||
+        (msg.type === 'keyDown' && (printableKeyText(msg) || editingCommands(msg)))
+      ) {
+        // FIX-61 P0: the field the user typed into is masked from every page
+        // text the agent reads afterwards (observation-redaction.ts). Marking
+        // never fails the user's input.
+        await session
+          .send('Runtime.evaluate', { expression: MARK_HUMAN_TYPED_FIELD, returnByValue: true })
+          .catch(() => undefined);
+      }
       this.onInputDispatched?.(msg);
     } catch (err) {
       this.logger.debug(
@@ -340,6 +389,25 @@ export class CdpInputHandler {
     } finally {
       if (timer) clearTimeout(timer);
       signal?.removeEventListener('abort', interrupt);
+    }
+  }
+
+  /** True only when the page reports a layout size other than the one just applied. */
+  private async layoutDiffers(
+    send: CDPSession['send'],
+    width: number,
+    height: number,
+  ): Promise<boolean> {
+    try {
+      const { result } = await send('Runtime.evaluate', {
+        expression: '[window.innerWidth, window.innerHeight]',
+        returnByValue: true,
+      });
+      const size = result?.value as unknown;
+      if (!Array.isArray(size) || size.length !== 2) return false;
+      return size[0] !== width || size[1] !== height;
+    } catch {
+      return false;
     }
   }
 

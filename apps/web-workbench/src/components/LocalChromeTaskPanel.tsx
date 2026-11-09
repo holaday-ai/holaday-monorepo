@@ -75,7 +75,7 @@ export function LocalChromeTaskPanel({
               : stopping
                 ? '正在停止，等待执行结果确认…'
                 : phase === 'human'
-                  ? '已交给你，请在 Chrome 操作，完成后交还 AI。'
+                  ? '你在操作，我先停下；在 Chrome 里操作完，点「交还给我」。'
                   : phase === 'requested'
                     ? '正在等待当前动作结束，请稍候再操作。'
                     : phase === 'resuming'
@@ -113,7 +113,7 @@ export function LocalChromeTaskPanel({
                 void ownership.request(phase === 'human' ? 'return' : 'takeover');
               }}
             >
-              {phase === 'human' ? '交还 AI' : '接管'}
+              {phase === 'human' ? '交还给我' : '我来操作'}
             </Button>
           )}
           <Button

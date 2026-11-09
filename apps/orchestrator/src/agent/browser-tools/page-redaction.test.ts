@@ -1,6 +1,7 @@
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { REDACTION_FAILED_COPY, SENSITIVE_VALUES_EXPRESSION } from './page-redaction.js';
+import { MARK_HUMAN_TYPED_FIELD } from '../../streaming/cdp-input.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 
 const LOGIN_PAGE = `
@@ -101,4 +102,26 @@ describe('cloud executor redaction (unified executor, real Chromium)', () => {
       await page.close();
     }
   }, 60_000);
+
+  it('FIX-61: what the user typed while operating the browser is not read back by the agent', async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(
+        '<input aria-label="搜索" id="q" /><input aria-label="备注" id="note" value="agent-filled-note" /><p>首页</p>',
+      );
+      await page.focus('#q');
+      await page.keyboard.type('holaday private query');
+      // The screencast input path marks the focused field after the user's keystrokes.
+      expect(await page.evaluate(MARK_HUMAN_TYPED_FIELD)).toBe(true);
+      const tools = createPlaywrightUnifiedExecutor(page, { actionTimeoutMs: 2_000 });
+      const snapshot = await tools.execute({ tool: 'snapshot' });
+      expect(snapshot.ok).toBe(true);
+      expect(snapshot.text).not.toContain('holaday private query');
+      expect(snapshot.text).toContain('agent-filled-note');
+      const extracted = await tools.execute({ tool: 'extract', instruction: 'all' });
+      expect(JSON.stringify(extracted)).not.toContain('holaday private query');
+    } finally {
+      await page.close();
+    }
+  });
 });
