@@ -2,7 +2,6 @@ import {
   askedFields,
   declaredAbsentFields,
   everyAskedFieldGiven,
-  missingAskedFields,
 } from './browser-tools/completion-fields.js';
 
 /**
@@ -324,20 +323,4 @@ export function answerNotObtained(answer: string, intent = ''): boolean {
   )
     return true;
   return fields.length >= 2 && empty.length * 2 >= fields.length;
-}
-
-/**
- * FIX-60 P0-1 (DEPLOY-59 dy-1 / reg-dy-2, verbatim 「目标视频页面返回"服务器出现问题 请稍后重试"，未能加载出标题、
- * 作者和互动数据。推荐列表里出现一条…（…点赞 439.5K，评论 3）…缺：目标视频…的标题、作者、点赞/评论/收藏/分享数」):
- * judged by what was asked, not by how the answer says it — most of the fields the request names
- * (标题、作者、点赞数…) have no value of the asked item's own in the answer. Values said of another
- * item (推荐 / 相关 / 其他…) are not the asked item's. A request naming fewer than two fields is
- * left to the other checks.
- */
-export function mostAskedFieldsMissing(answer: string, intent: string): boolean {
-  const asked = askedFields(intent);
-  // One field asked: an answer that just gives it (「**全年全天开放**」) names no field to look up.
-  if (asked.length < 2) return false;
-  const missing = missingAskedFields(intent, answer.replace(/\*\*|__/g, ''));
-  return missing.length * 2 > asked.length;
 }

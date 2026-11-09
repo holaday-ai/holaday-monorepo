@@ -1,4 +1,4 @@
-import { replyLanguage, replyLanguageRule } from '@holaday/shared-types';
+import { replyLanguageRule } from '@holaday/shared-types';
 import {
   type SelectedChromeSessionCommand,
   selectedChromeSessionCommandSchema,
@@ -623,7 +623,7 @@ async function runLoop(input: {
           {
             maxTokens: MAX_MODEL_TOKENS,
             // FIX-60 P0-2: the answer follows the language of the user's own words.
-            system: `${SYSTEM_PROMPT}\n\n${replyLanguageRule(replyLanguage(options.intent))}`,
+            system: `${SYSTEM_PROMPT}\n\n${replyLanguageRule(options.intent)}`,
             messages,
             tools: taskTools(options),
             toolChoice: { type: 'auto' },

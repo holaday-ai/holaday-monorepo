@@ -132,3 +132,198 @@ export function unmatchedVariantPrices(summary: string, pageTexts: readonly stri
   }
   return out;
 }
+
+/**
+ * FIX-60 复审 #1 #3: the detail page's main price can be its default variant's and sit outside
+ * every selector (线上 reg-new-amazon-sg): then `unmatchedVariantPrices` sees it 「shown
+ * elsewhere」 and lets it through. So the search result's card comes along to the detail page:
+ * the card an answer line names (its title, on the search page and again on the detail page) and
+ * that card's 「from」 price (「2 options from S$8.21」「S$8.21 (2 new offers)」) and variant
+ * (colour, length, capacity in its title).
+ *  - A price lower than the card's 「from」 price, with no variant named, is not the searched
+ *    item's: sent back.
+ *  - A variant the answer names that differs from the card's (黑色 for a white card, 1 m for a
+ *    2 m one) is another item's: sent back.
+ */
+const CARD_FROM_RE =
+  /\boptions?\s+from\b|\bnew offers?\b|\boffers?\s+from\b|\bfrom\s+(?:s\$|us\$|\$)|起|个选项|卖家报价/i;
+const CARD_WINDOW = 10;
+const CARD_TITLE_MIN = 15;
+/** Words every cable or phone title shares: they tell no card apart. */
+const GENERIC_TOKENS = new Set([
+  'the',
+  'and',
+  'for',
+  'with',
+  'pack',
+  'cable',
+  'charger',
+  'charging',
+  'fast',
+  'cord',
+  'type',
+  'new',
+  'usb',
+]);
+/** A colour: 「黑色 / 黑款」 (not 红米、金士顿) or the English word. */
+const COLOURS: ReadonlyArray<[RegExp, string]> = [
+  [/黑(?:色|款)|\bblack\b/i, 'black'],
+  [/白(?:色|款)|\bwhite\b/i, 'white'],
+  [/红(?:色|款)|\bred\b/i, 'red'],
+  [/蓝(?:色|款)|\bblue\b/i, 'blue'],
+  [/绿(?:色|款)|\bgreen\b/i, 'green'],
+  [/灰(?:色|款)|\bgr[ae]y\b/i, 'grey'],
+  [/银(?:色|款)|\bsilver\b/i, 'silver'],
+  [/金(?:色|款)|\bgold\b/i, 'gold'],
+  [/粉(?:色|款)|\bpink\b/i, 'pink'],
+  [/紫(?:色|款)|\bpurple\b/i, 'purple'],
+];
+const LENGTH_RE =
+  /(\d+(?:\.\d+)?)\s*(ft|feet|foot|cm|mm|m|meters?|metres?|centimeters?|centimetres?|inch(?:es)?|in|厘米|毫米|米|英尺|英寸)(?![a-z])/gi;
+const CAPACITY_RE = /(\d+(?:\.\d+)?)\s*(gb|tb)\b/gi;
+
+const priceValue = (price: string) => Number(price.replace(/[^\d.]/g, ''));
+const priceCurrency = (price: string) => normalizePrice(price).replace(/[\d.]+$/, '');
+
+function tokensOf(text: string): string[] {
+  return [
+    ...new Set(
+      (
+        text.toLowerCase().match(/[a-z][a-z0-9.+-]{2,}|\d+(?:\.\d+)?(?:ft|m|cm|w|gb|tb|mm)\b/g) ??
+        []
+      )
+        .map((t) => t.replace(/[.,+-]+$/, ''))
+        .filter((t) => t.length >= 3 && !GENERIC_TOKENS.has(t)),
+    ),
+  ];
+}
+
+function colours(text: string): Set<string> {
+  return new Set(COLOURS.filter(([re]) => re.test(text)).map(([, c]) => c));
+}
+
+function lengthsCm(text: string): number[] {
+  const out: number[] = [];
+  for (const m of text.matchAll(LENGTH_RE)) {
+    const n = Number(m[1]);
+    const unit = m[2]!.toLowerCase();
+    const cm = /^(?:ft|feet|foot|英尺)$/.test(unit)
+      ? n * 30.48
+      : /^(?:mm|毫米)$/.test(unit)
+        ? n / 10
+        : /^(?:m|meters?|metres?|米)$/.test(unit)
+          ? n * 100
+          : /^(?:inch(?:es)?|in|英寸)$/.test(unit)
+            ? n * 2.54
+            : n;
+    out.push(cm);
+  }
+  return out;
+}
+
+function capacities(text: string): Set<string> {
+  return new Set(
+    [...text.matchAll(CAPACITY_RE)].map((m) => `${Number(m[1])}${m[2]!.toLowerCase()}`),
+  );
+}
+
+interface Card {
+  title: string;
+  /** The card's 「from」 prices, as written (lowest first). */
+  fromPrices: string[];
+  /** The card's own text, for its variant: its title (the lines under it may be the next card's). */
+  text: string;
+}
+
+/** The card an answer line names: the page title line its words match best, if one does. */
+function cardFor(name: string, pages: readonly string[][]): Card | null {
+  const wanted = tokensOf(name);
+  if (wanted.length < 2) return null;
+  let best: { title: string; score: number } | null = null;
+  let tie = false;
+  for (const lines of pages)
+    for (const line of lines) {
+      if (line.length < CARD_TITLE_MIN || PRICE_RE.test(line)) {
+        PRICE_RE.lastIndex = 0;
+        continue;
+      }
+      PRICE_RE.lastIndex = 0;
+      const have = new Set(tokensOf(line));
+      const hits = wanted.filter((t) => have.has(t)).length;
+      const score = hits / wanted.length;
+      if (hits < 2 || score < 0.6) continue;
+      if (!best || score > best.score) {
+        best = { title: line, score };
+        tie = false;
+      } else if (score === best.score && line !== best.title) tie = true;
+    }
+  if (!best || tie) return null;
+  const fromPrices: string[] = [];
+  for (const lines of pages)
+    lines.forEach((line, i) => {
+      if (line !== best!.title) return;
+      for (const next of lines.slice(i + 1, i + 1 + CARD_WINDOW)) {
+        if (next.length >= 40 && !(next.match(PRICE_RE) ?? []).length) break;
+        if (CARD_FROM_RE.test(next)) fromPrices.push(...(next.match(PRICE_RE) ?? []));
+      }
+    });
+  fromPrices.sort((a, b) => priceValue(a) - priceValue(b));
+  return { title: best.title, fromPrices, text: best.title };
+}
+
+/**
+ * Answer prices that are not the searched card's: lower than its 「from」 price with no variant
+ * named, or under a variant other than the card's. One contradiction per answer line.
+ */
+export function searchCardPriceMismatches(summary: string, pageTexts: readonly string[]): string[] {
+  const pages = pageTexts.map((page) => page.split('\n').map(lineText).filter(Boolean));
+  if (!pages.length) return [];
+  const out: string[] = [];
+  for (const line of summary.split('\n')) {
+    const prices = [...line.matchAll(PRICE_RE)];
+    if (!prices.length) continue;
+    const at = prices[0]!.index ?? 0;
+    const name = line
+      .slice(0, at)
+      .replace(/^\s*(?:[-*+]|\d+[.)、])\s*/, '')
+      .replace(/\*\*/g, '');
+    const card = cardFor(name, pages);
+    if (!card) continue;
+    const beside = besidePrice(line, at);
+    const answerVariant = `${name} ${beside}`;
+    const shown = prices[0]![0];
+    // A variant other than the card's.
+    const cardColours = colours(card.text);
+    const saidColours = colours(answerVariant.replace(card.title, ''));
+    const cardLengths = lengthsCm(card.text);
+    const saidLengths = lengthsCm(beside);
+    const cardCaps = capacities(card.text);
+    const saidCaps = capacities(beside);
+    const otherVariant =
+      (cardColours.size > 0 &&
+        saidColours.size > 0 &&
+        ![...saidColours].some((c) => cardColours.has(c))) ||
+      (cardLengths.length > 0 &&
+        saidLengths.length > 0 &&
+        !saidLengths.some((l) => cardLengths.some((c) => Math.abs(l - c) <= c * 0.07))) ||
+      (cardCaps.size > 0 && saidCaps.size > 0 && ![...saidCaps].some((c) => cardCaps.has(c)));
+    if (otherVariant) {
+      out.push(
+        `答案里「${name.trim().slice(0, 40)}」写的规格和搜索结果那张卡片（「${card.title.slice(0, 60)}」）不是同一款：请用搜索结果里那一款的规格和价格，不能拿商品页上别的规格顶替`,
+      );
+      continue;
+    }
+    // Lower than the card's 「from」 price, with no variant named.
+    const from = card.fromPrices.find((p) => priceCurrency(p) === priceCurrency(shown));
+    if (
+      from &&
+      priceValue(shown) < priceValue(from) &&
+      !VARIANT_WORD_RE.test(beside.replace(/\boptions?\b|\bfrom\b/gi, ''))
+    ) {
+      out.push(
+        `答案里「${name.trim().slice(0, 40)}」的价格「${shown}」比搜索结果那张卡片上的起价「${from}」还低，又没写是哪个规格：商品页默认选中的规格不一定是搜索到的那一款，请用卡片上的价格，或者写明规格`,
+      );
+    }
+  }
+  return out;
+}

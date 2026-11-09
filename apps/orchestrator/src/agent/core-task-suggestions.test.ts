@@ -18,6 +18,8 @@ function fixture(options: { allowed?: boolean; output?: string; failed?: boolean
       QWEN_CORE_ENABLED_LANES: options.allowed === false ? 'generate' : 'generate,suggestions',
       QWEN_MESSAGES_ADAPTER_ENABLED: true,
       QWEN_RESPONSES_ADAPTER_ENABLED: true,
+      // FIX-60: these cases check the region selection step itself (on, as before).
+      MODEL_DATA_REGION_SELECTION_ENABLED: true,
       DASHSCOPE_CN_API_KEY: 'synthetic-cn',
       DASHSCOPE_INTL_API_KEY: 'synthetic-intl',
     },

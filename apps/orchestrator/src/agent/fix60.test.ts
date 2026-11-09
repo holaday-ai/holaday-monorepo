@@ -6,24 +6,40 @@ import {
   isEnglishRequestText,
   replyLanguage,
   replyLanguageRule,
+  replyPlan,
   requestLanguage,
 } from '@holaday/shared-types';
 import { pino } from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 import { scrapedErrorPage, scrapedWall } from '../firecrawl/scraped-page.js';
+import { resolveCoreModelRuntime, unassignedModelDataRegion } from '../llm/core-model-runtime.js';
+import type { MessagesAdapter, NeutralMessagesRequest } from '../llm/messages-adapter.js';
 import type {
   NeutralResponsesRequest,
   NeutralResponsesResult,
   ResponsesAdapter,
 } from '../llm/responses-adapter.js';
+import type { AkshareClient } from './a-share/akshare-client.js';
+import { buildIndexAnswer } from './a-share/ashare-fact-card.js';
+import { isIndexQuery } from './a-share/ashare-qa-matcher.js';
+import type { AkEnvelope, IndexRow } from './a-share/briefing-types.js';
 import { assessCompletionFacts, missingAskedFields } from './browser-tools/completion-fields.js';
 import { effectPauseQuestion } from './browser-tools/effect-pause-copy.js';
 import { isEnglishIntent } from './browser-tools/unified-browser-loop.js';
-import { unmatchedVariantPrices } from './browser-tools/variant-price.js';
+import {
+  searchCardPriceMismatches,
+  unmatchedVariantPrices,
+} from './browser-tools/variant-price.js';
 import { runGenerateTask } from './generate-runner.js';
 import { isEnglishRequest } from './next-steps-generator.js';
-import { answerNotObtained, mostAskedFieldsMissing } from './scrape-answer-check.js';
+import { answerNotObtained } from './scrape-answer-check.js';
+import {
+  type AskedFieldJudge,
+  createAskedFieldJudge,
+  mostFieldsWithoutValue,
+  scrapeAnswerDoubt,
+} from './scrape-field-judge.js';
 import { runScrapeTask } from './scrape-runner.js';
 
 const fixture = (name: string) =>
@@ -82,44 +98,117 @@ describe('FIX-60 P0-1: a scraped error page', () => {
   });
 });
 
-describe('FIX-60 P0-1: most asked fields missing', () => {
-  it('DEPLOY-59 dy-1 and reg-dy-2 answers have none of the asked fields (the other video is not)', () => {
-    expect(missingAskedFields(DOUYIN_INTENT, D59_DY1)).toHaveLength(6);
-    expect(mostAskedFieldsMissing(D59_DY1, DOUYIN_INTENT)).toBe(true);
-    expect(mostAskedFieldsMissing(D59_REG_DY2, DOUYIN_INTENT)).toBe(true);
-    // The wording check missed dy-1 (「未能加载出」) on production and the candidate alike.
-    expect(answerNotObtained(D59_DY1, DOUYIN_INTENT)).toBe(false);
+describe('FIX-60 复审 #1 #1: the asked fields are read for their values, not their names', () => {
+  /** 复审 #1 的两句：值都给了，只是没写「标题」二字。 */
+  const CAT_BOLD = '**猫咪跳舞**，作者小王，12.3万赞';
+  const CAT_SENTENCE = '视频《猫咪跳舞》由 @小王 发布，获赞 12.3 万';
+  const CAT_INTENT = '打开 https://www.douyin.com/video/123 读视频标题、作者和点赞数';
+  const EN_INTENT =
+    'Get the title, author and like count of this video https://www.douyin.com/video/123';
+  const EN_FAILED = 'The page failed to load; I could not read the title, author or likes.';
+
+  const toolAnswer = (fields: Array<[string, boolean]>) => ({
+    id: 'msg_judge',
+    metadata: { provider: 'alibaba-model-studio', model: 'qwen3.8-flash' },
+    content: [
+      {
+        type: 'tool_use' as const,
+        id: 'tu_1',
+        name: 'report_asked_fields',
+        input: { fields: fields.map(([field, has_value]) => ({ field, has_value })) },
+      },
+    ],
+    stopReason: 'tool_use' as const,
+    usage: {
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadInputTokens: null,
+      cacheCreationInputTokens: null,
+      complete: true,
+    },
+  });
+  const judgeAdapter = (create: MessagesAdapter['create']): MessagesAdapter =>
+    ({ metadata: { provider: 'alibaba-model-studio' }, create }) as unknown as MessagesAdapter;
+
+  it('the two natural answers of the review give every value: no doubt, no call, completed', () => {
+    for (const answer of [CAT_BOLD, CAT_SENTENCE]) {
+      expect(scrapeAnswerDoubt(answer, [`${'页面正文。'.repeat(400)}`])).toBeNull();
+      expect(answerNotObtained(answer, CAT_INTENT)).toBe(false);
+    }
   });
 
-  it('a normal short answer with every field is an answer', () => {
-    expect(missingAskedFields(DOUYIN_INTENT, ONLINE_DY1)).toEqual([]);
-    expect(mostAskedFieldsMissing(ONLINE_DY1, DOUYIN_INTENT)).toBe(false);
-    expect(
-      mostAskedFieldsMissing(
-        '这篇小红书笔记的标题是「📍杭州｜西湖一日游攻略（保姆级不费腿版）」，作者是 Clara。',
-        '打开 https://www.xiaohongshu.com/explore/6929ba55000000001e023ef8 读这篇笔记的标题和作者',
-      ),
-    ).toBe(false);
-  });
-
-  it('fields given in a Markdown table, either way round, are given', () => {
-    const keyValue =
-      '这篇笔记的信息：\n\n| 字段 | 内容 |\n|------|------|\n| 标题 | 📍杭州｜西湖一日游攻略 |\n| 作者 | Clara |\n| 点赞数 | 1,572 |';
-    expect(
-      mostAskedFieldsMissing(
-        keyValue,
-        '打开 https://www.xiaohongshu.com/explore/x 读这篇笔记的标题、作者和点赞数',
-      ),
-    ).toBe(false);
-    const headerRow =
-      '**标题**：仙桥洞 真的好美\n\n**作者**：利利的旅行盲盒\n\n**互动数据**：\n| 点赞 | 评论 | 收藏 | 分享 |\n|------|------|------|------|\n| 20 | 2 | 10 | 97 |';
-    expect(missingAskedFields(DOUYIN_INTENT, headerRow)).toEqual([]);
-  });
-
-  it('a request naming one field is left to the other checks (an answer that just gives it)', () => {
-    expect(mostAskedFieldsMissing('**全年全天开放**', '携程上 杭州西湖风景名胜区 的开放时间')).toBe(
-      false,
+  it('the judge is asked with structured output and its verdict decides', async () => {
+    const create = vi.fn(async () =>
+      toolAnswer([
+        ['标题', true],
+        ['作者', true],
+        ['点赞数', true],
+      ]),
     );
+    const judge = createAskedFieldJudge(judgeAdapter(create as never));
+    const verdicts = await judge({ request: CAT_INTENT, answer: CAT_SENTENCE });
+    expect(verdicts).toEqual([
+      { field: '标题', hasValue: true },
+      { field: '作者', hasValue: true },
+      { field: '点赞数', hasValue: true },
+    ]);
+    expect(mostFieldsWithoutValue(verdicts!)).toBe(false);
+    const request = (create.mock.calls[0] as unknown as [NeutralMessagesRequest])[0];
+    expect(request.toolChoice).toEqual({ type: 'tool', name: 'report_asked_fields' });
+    expect(request.temperature).toBe(0);
+    expect(JSON.stringify(request.messages)).toContain('猫咪跳舞');
+  });
+
+  it('English: 「The page failed to load…」 has none of title, author, likes', async () => {
+    expect(scrapeAnswerDoubt(EN_FAILED, ['# Douyin'])).toBe('missing_wording');
+    const judge = createAskedFieldJudge(
+      judgeAdapter(
+        vi.fn(async () =>
+          toolAnswer([
+            ['title', false],
+            ['author', false],
+            ['like count', false],
+          ]),
+        ) as never,
+      ),
+    );
+    const verdicts = await judge({ request: EN_INTENT, answer: EN_FAILED });
+    expect(mostFieldsWithoutValue(verdicts!)).toBe(true);
+  });
+
+  it('a failed, timed-out or malformed call returns null (the previous verdict stands)', async () => {
+    const failing = createAskedFieldJudge(
+      judgeAdapter(
+        vi.fn(async () => {
+          throw new Error('timeout');
+        }) as never,
+      ),
+    );
+    expect(await failing({ request: CAT_INTENT, answer: CAT_BOLD })).toBeNull();
+    const malformed = createAskedFieldJudge(
+      judgeAdapter(
+        vi.fn(async () => ({
+          ...toolAnswer([]),
+          content: [{ type: 'text', text: '{}' }],
+        })) as never,
+      ),
+    );
+    expect(await malformed({ request: CAT_INTENT, answer: CAT_BOLD })).toBeNull();
+  });
+
+  it('doubt: short pages, missing wording, an error message on a page; none for a full page', () => {
+    expect(scrapeAnswerDoubt(D59_DY1, [fixture('douyin-error.md')])).toBe('missing_wording');
+    expect(scrapeAnswerDoubt(D59_REG_DY2, [fixture('douyin-error.md')])).toBe('missing_wording');
+    expect(scrapeAnswerDoubt(ONLINE_DY1, ['服务器出现问题 请稍后重试'])).toBe('page_error_signal');
+    expect(scrapeAnswerDoubt(ONLINE_DY1, ['# 仙桥洞\n\n点赞 20'])).toBe('short_pages');
+    expect(scrapeAnswerDoubt(ONLINE_DY1, [`# 仙桥洞\n\n${'页面正文。'.repeat(400)}`])).toBeNull();
+    // A request naming no field: the judge returns no fields, nothing is missing.
+    expect(mostFieldsWithoutValue([])).toBe(false);
+  });
+
+  it('the wording check alone still misses DEPLOY-59 dy-1 (the judge is what catches it)', () => {
+    expect(answerNotObtained(D59_DY1, DOUYIN_INTENT)).toBe(false);
+    expect(missingAskedFields(DOUYIN_INTENT, ONLINE_DY1)).toEqual([]);
   });
 });
 
@@ -163,7 +252,12 @@ function laneServing(markdown: string, title: string, statusCode?: number): Fire
 const firstInstructions = (adapter: ResponsesAdapter): string =>
   (vi.mocked(adapter.stream).mock.calls[0]?.[0].instructions ?? '').trimEnd();
 
-const scrape = (intent: string, adapter: ResponsesAdapter, firecrawl: FirecrawlLane) =>
+const scrape = (
+  intent: string,
+  adapter: ResponsesAdapter,
+  firecrawl: FirecrawlLane,
+  fieldJudge?: AskedFieldJudge,
+) =>
   runScrapeTask({
     taskId: 'tsk_fix60',
     userId: 'usr_fix60',
@@ -171,6 +265,7 @@ const scrape = (intent: string, adapter: ResponsesAdapter, firecrawl: FirecrawlL
     responsesAdapter: adapter,
     firecrawl,
     logger: pino({ level: 'silent' }),
+    ...(fieldJudge ? { fieldJudge } : {}),
   });
 
 describe('FIX-60 P0-1: the scrape lane', () => {
@@ -187,11 +282,76 @@ describe('FIX-60 P0-1: the scrape lane', () => {
     expect(vi.mocked(adapter.stream)).not.toHaveBeenCalled();
   });
 
-  it('does not complete an answer missing most asked fields, whatever its wording', async () => {
-    // A page that is not an error page, and an answer that says it got none of the asked fields.
-    // Every quote of the answer is on the page, so only the asked fields decide.
-    const page = `服务器出现问题 请稍后重试\n\n接下来播放：赌上 1500 公里路程｜世界最窄酒店，真的能住人吗？ @记录生活的蛋黄派 点赞 439.5K 评论 3\n\n${'抖音页面的其他正文。'.repeat(60)}`;
-    const outcome = await scrape(DOUYIN_INTENT, adapterSaying(D59_DY1), laneServing(page, '抖音'));
+  // A page that is not an error page, and an answer that says it got none of the asked fields.
+  // Every quote of the answer is on the page, so only the asked fields decide.
+  const D59_PAGE = `服务器出现问题 请稍后重试\n\n接下来播放：赌上 1500 公里路程｜世界最窄酒店，真的能住人吗？ @记录生活的蛋黄派 点赞 439.5K 评论 3\n\n${'抖音页面的其他正文。'.repeat(60)}`;
+  const judging = (verdicts: Array<[string, boolean]> | null) =>
+    vi.fn<AskedFieldJudge>(async () =>
+      verdicts ? verdicts.map(([field, hasValue]) => ({ field, hasValue })) : null,
+    );
+
+  it('does not complete an answer the judge reads as missing most asked fields', async () => {
+    const judge = judging([
+      ['标题', false],
+      ['作者', false],
+      ['点赞数', false],
+      ['评论数', false],
+      ['收藏数', false],
+      ['分享数', false],
+    ]);
+    const outcome = await scrape(
+      DOUYIN_INTENT,
+      adapterSaying(D59_DY1),
+      laneServing(D59_PAGE, '抖音'),
+      judge,
+    );
+    expect(outcome.status).toBe('failed');
+    expect(outcome.failureKind).toBe('empty');
+    expect(judge).toHaveBeenCalledWith({ request: DOUYIN_INTENT, answer: expect.any(String) });
+  });
+
+  it('the judge failing leaves the previous verdict: no new failure', async () => {
+    const outcome = await scrape(
+      DOUYIN_INTENT,
+      adapterSaying(D59_DY1),
+      laneServing(D59_PAGE, '抖音'),
+      judging(null),
+    );
+    expect(outcome.status).toBe('completed');
+  });
+
+  it('the review’s natural answers complete with the judge reading every value', async () => {
+    const page = `# 猫咪跳舞\n\n小王\n\n12.3万赞\n\n${'页面正文。'.repeat(40)}`;
+    for (const answer of [
+      '**猫咪跳舞**，作者小王，12.3万赞',
+      '视频《猫咪跳舞》由 @小王 发布，获赞 12.3 万',
+    ]) {
+      const judge = judging([
+        ['标题', true],
+        ['作者', true],
+        ['点赞数', true],
+      ]);
+      const outcome = await scrape(
+        '打开 https://www.douyin.com/video/123 读视频标题、作者和点赞数',
+        adapterSaying(answer),
+        laneServing(page, '抖音'),
+        judge,
+      );
+      expect(outcome.status).toBe('completed');
+    }
+  });
+
+  it('an English request: the judge reads the English answer the same way', async () => {
+    const outcome = await scrape(
+      'Get the title, author and like count of this video https://www.douyin.com/video/123',
+      adapterSaying('The page failed to load; I could not read the title, author or likes.'),
+      laneServing(D59_PAGE, 'Douyin'),
+      judging([
+        ['title', false],
+        ['author', false],
+        ['like count', false],
+      ]),
+    );
     expect(outcome.status).toBe('failed');
     expect(outcome.failureKind).toBe('empty');
   });
@@ -351,5 +511,297 @@ describe('FIX-60 P2: a guide is not the booking', () => {
 
   it('「Reserve a table」 itself still reads as the booking', () => {
     expect(ask('Reserve a table')).toMatch(/may already have gone through/);
+  });
+});
+
+describe('FIX-60 复审 #1 #2: an asked-for language first, then the main language', () => {
+  it('a language the user asks for in so many words wins', () => {
+    expect(requestLanguage('请用英语回答：故宫门票多少钱')).toBe('en');
+    expect(requestLanguage('用英文写一封感谢信')).toBe('en');
+    expect(requestLanguage('介绍一下杭州，answer in English')).toBe('en');
+    expect(requestLanguage('Answer in Chinese: what is the capital of France')).toBe('zh');
+    expect(requestLanguage('Write a haiku about the sea, reply in Chinese please')).toBe('zh');
+    expect(replyPlan('用英文写一封感谢信', 'cn')).toMatchObject({
+      language: 'en',
+      source: 'explicit',
+    });
+  });
+
+  it('a translation: the translation in the target, anything around it in the instruction’s language', () => {
+    const zh = replyPlan('翻译成英文：今天天气很好', 'cn');
+    expect(zh).toMatchObject({ language: 'zh', translation: { target: '英文' } });
+    expect(replyLanguageRule(zh)).toMatch(
+      /^这是翻译任务：译文本身用英文写；译文以外的说明（如果有）用中文/,
+    );
+    expect(replyLanguageRule(zh)).not.toContain('整段回答');
+    const en = replyPlan('translate to Chinese: hello world', 'cn');
+    expect(en).toMatchObject({ language: 'en', translation: { target: 'Chinese' } });
+    expect(replyLanguageRule('translate to Chinese: hello world')).toMatch(
+      /^This is a translation request: write the translation itself in Chinese; .* in English\./,
+    );
+    expect(requestLanguage('Please translate this into English: 你好世界')).toBe('en');
+  });
+
+  it('mixed: product, brand, model and site names do not count; a Chinese verb or particle makes it Chinese', () => {
+    expect(requestLanguage('帮我查 iPhone 16 Pro price')).toBe('zh');
+    expect(requestLanguage('iPhone 16 Pro Max 256GB 多少钱')).toBe('zh');
+    expect(requestLanguage('USB C cable 价格')).toBe('zh');
+    expect(requestLanguage('在 BestBuy 搜 usb c cable')).toBe('zh');
+    expect(requestLanguage('Summarize 这篇文章')).toBe('zh');
+    expect(requestLanguage("What is 故宫's ticket price")).toBe('en');
+    // English grammar plainly carrying the sentence keeps it English.
+    expect(requestLanguage('Write a story about a cat who asks 为什么')).toBe('en');
+    expect(requestLanguage('Show me the price of 华为 Mate 60')).toBe('en');
+    expect(requestLanguage('这个有货吗')).toBe('zh');
+  });
+
+  it('the front end, the next-step suggestions and the browser read it with the same function', () => {
+    for (const text of [
+      '帮我查 iPhone 16 Pro price',
+      "What is 故宫's ticket price",
+      '请用英语回答：故宫门票多少钱',
+      '翻译成英文：今天天气很好',
+    ]) {
+      expect(isEnglishIntent(text)).toBe(isEnglishRequestText(text));
+      expect(isEnglishRequest(text)).toBe(isEnglishRequestText(text));
+    }
+  });
+
+  it('the scrape lane reads the language from the user’s own words, not a follow-up’s context', async () => {
+    const adapter = adapterSaying(
+      'The page says the status code means the resource was not found.',
+    );
+    await runScrapeTask({
+      taskId: 'tsk_fix60',
+      userId: 'usr_fix60',
+      intent: `【上一轮任务】用户问了一个中文问题，回答是中文的长篇内容。\n\n${'上一轮的中文上下文。'.repeat(20)}\n\nSummarize https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404`,
+      userIntent:
+        'Summarize https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404 in English',
+      responsesAdapter: adapter,
+      firecrawl: laneServing(fixture('long-404-article.md'), '404 Not Found - HTTP'),
+      logger: pino({ level: 'silent' }),
+    });
+    expect(firstInstructions(adapter).endsWith(replyLanguageRule('en'))).toBe(true);
+  });
+});
+
+describe('FIX-60 复审 #1 #3: the search card comes along to the detail page', () => {
+  // The detail page's main price is its default (black) variant's and sits outside every
+  // selector; the searched card is the white 200 cm one, 「2 options from S$8.21」.
+  const SEARCH = [
+    '1-48 of 303 results for "usb c cable"',
+    'Belkin Braided USB-A to USB-C Cable, White, 200cm',
+    '4.4 out of 5 stars',
+    '2 options from S$8.21',
+    'Anker USB-C to USB-C Cable 240W, Black, 1.8m',
+    'S$12.99',
+  ].join('\n');
+  const DETAIL = [
+    'Belkin Braided USB-A to USB-C Cable, White, 200cm',
+    'Brand: Belkin',
+    'S$6.86',
+    'Colour Name: Black',
+    'Black',
+    'White',
+    'Size Name: 200 centimeters',
+    '100 centimeters',
+    '200 centimeters',
+    'About this item',
+    'Made with recycled materials and plastic-free packaging, this cable charges and syncs your phone.',
+  ].join('\n');
+  const pages = [SEARCH, DETAIL];
+  const line = (price: string) => `3. Belkin Braided USB-A to USB-C Cable — ${price}`;
+
+  it('the default variant’s S$6.86 outside the selector, below the card’s from price: sent back', () => {
+    // The selector check alone lets it through: the price is shown outside every selector.
+    expect(unmatchedVariantPrices(line('S$6.86'), pages)).toEqual([]);
+    const out = searchCardPriceMismatches(line('S$6.86'), pages);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatch(/S\$6\.86.*起价「S\$8\.21」.*没写是哪个规格/);
+    const facts = assessCompletionFacts({
+      summary: line('S$6.86'),
+      intent: '在亚马逊新加坡站搜 usb c cable，列出前三个的名称和价格',
+      pages: pages.map((text, i) => ({ text, sourceURL: `https://www.amazon.sg/p${i}` })),
+    });
+    expect(facts.contradictions.some((c) => c.includes('起价「S$8.21」'))).toBe(true);
+  });
+
+  it('a variant other than the card’s is sent back (黑色 for the white card, 1 m for 2 m)', () => {
+    expect(
+      searchCardPriceMismatches('3. Belkin Braided USB-A to USB-C Cable — 黑色款 S$6.86', pages),
+    ).toHaveLength(1);
+    expect(
+      searchCardPriceMismatches('3. Belkin Braided USB-A to USB-C Cable — 100cm S$9.10', pages)[0],
+    ).toMatch(/不是同一款/);
+  });
+
+  it('the card’s price, the card’s variant, or a price above its from price is the answer’s', () => {
+    expect(searchCardPriceMismatches(line('2 options from S$8.21'), pages)).toEqual([]);
+    expect(searchCardPriceMismatches(line('S$8.21'), pages)).toEqual([]);
+    expect(
+      searchCardPriceMismatches(
+        '3. Belkin Braided USB-A to USB-C Cable — 白色 200cm S$8.21',
+        pages,
+      ),
+    ).toEqual([]);
+    expect(searchCardPriceMismatches(line('S$9.50'), pages)).toEqual([]);
+    // Another product's line, and a line no card matches, check nothing.
+    expect(
+      searchCardPriceMismatches('4. Anker USB-C to USB-C Cable 240W — S$12.99', pages),
+    ).toEqual([]);
+    expect(searchCardPriceMismatches('5. 某品牌数据线 — S$3.00', pages)).toEqual([]);
+  });
+
+  it('DEPLOY-59 page structure: the earlier fixtures still pass and fail as before', () => {
+    const old = [fixture('amazon-search-full.txt'), fixture('amazon-variant-detail.txt')];
+    expect(
+      searchCardPriceMismatches(ANSWER_VARIANT_WRONG.replace('S$6.86', 'S$8.21'), old),
+    ).toEqual([]);
+    expect(searchCardPriceMismatches(ANSWER_VARIANT_WRONG, old)).toHaveLength(1);
+  });
+});
+
+describe('FIX-60 复审 #1 建议: an error word as a short page’s topic is not an error page', () => {
+  it('a song, an album or a design note named after an error message is a page', () => {
+    expect(
+      scrapedErrorPage(
+        '# Access Denied\n\nAccess Denied 是一首歌，收录于 2019 年的同名专辑。',
+        'Access Denied - 百度百科',
+      ),
+    ).toBeNull();
+    expect(
+      scrapedErrorPage(
+        '# Something Went Wrong\n\nSomething Went Wrong 专辑，共 10 首歌。',
+        'Something Went Wrong',
+      ),
+    ).toBeNull();
+    expect(
+      scrapedErrorPage(
+        '# 404 页面设计\n\n404 页面设计要点：说明原因、给出返回入口。',
+        '404 页面设计',
+      ),
+    ).toBeNull();
+  });
+
+  it('a notice on its own line, or an error status, is still an error page', () => {
+    expect(scrapedErrorPage('页面不存在\n\n返回首页', '页面不存在 - 某站')).toMatch(/页面不存在/);
+    expect(scrapedErrorPage('# Something went wrong\n\nPlease try again later.', 'Oops')).toMatch(
+      /something went wrong/i,
+    );
+    expect(scrapedErrorPage('# Access Denied', 'Access Denied')).toMatch(/access denied/i);
+    expect(scrapedErrorPage('# Access Denied 是一首歌', 'Access Denied', 451)).toBe('HTTP 451');
+  });
+});
+
+describe('FIX-60 复审 #1 建议: the A-share index answer follows an English question', () => {
+  const quote = {
+    data: [
+      { 名称: '上证指数', 最新价: 3689.91, 涨跌幅: 0.1, 时间: '15:00:03' },
+      { 名称: '深证成指', 最新价: 11471.09, 涨跌幅: 1.2, 时间: '15:00:03' },
+      { 名称: '创业板指', 最新价: 2566.8, 涨跌幅: -0.87, 时间: '15:00:03' },
+    ],
+    count: 3,
+    source: 'akshare:stock_zh_index_spot_sina',
+    fetched_at: '2026-11-06T07:05:00Z',
+  } as unknown as AkEnvelope<IndexRow>;
+  const aks = {
+    getTradingDay: () =>
+      Promise.resolve({ data: [{ is_trading_day: true }], count: 1, source: 'x', fetched_at: '' }),
+  } as unknown as AkshareClient;
+
+  it('「How did the Shanghai Composite close today?」 gets the English template', async () => {
+    expect(isIndexQuery('How did the Shanghai Composite close today?')).toBe(true);
+    const md = await buildIndexAnswer({
+      client: aks,
+      now: new Date('2026-11-06T15:30:00+08:00'),
+      quote,
+      intent: 'How did the Shanghai Composite close today?',
+    });
+    expect(md.split('\n')[0]).toMatch(
+      /^The market has closed: the Shanghai Composite closed today at 3,689\.91, up 0\.10%\.$/,
+    );
+    expect(md).toContain(
+      'Also, the Shenzhen Component 11,471.09 (up 1.20%), the ChiNext Index 2,566.80 (down 0.87%).',
+    );
+    expect(md).toContain('Data from Sina Finance');
+    expect(md).not.toMatch(/\p{Script=Han}/u);
+  });
+
+  it('a Chinese question keeps the Chinese answer', async () => {
+    const md = await buildIndexAnswer({
+      client: aks,
+      now: new Date('2026-11-06T15:30:00+08:00'),
+      quote,
+      intent: '上证指数今天收盘多少',
+    });
+    expect(md).toMatch(/^已经收盘了，上证指数今天收在 3,689\.91 点/);
+  });
+});
+
+describe('FIX-60 BOSS 决定: the region selection is off by default', () => {
+  const ENV = {
+    NODE_ENV: 'test' as const,
+    MODEL_RUNTIME_POLICY: 'qwen_only' as const,
+    QWEN_CORE_ROLLOUT_MODE: 'synthetic' as const,
+    QWEN_CORE_ENABLED_LANES: 'generate',
+    QWEN_CORE_ALLOWLIST: 'usr_a',
+    QWEN_MESSAGES_ADAPTER_ENABLED: true,
+    QWEN_RESPONSES_ADAPTER_ENABLED: true,
+    DASHSCOPE_API_KEY: '',
+    DASHSCOPE_WORKSPACE_ID: '',
+    DASHSCOPE_INTL_API_KEY: 'intl-key',
+    DASHSCOPE_INTL_ANTHROPIC_BASE_URL: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+    DASHSCOPE_INTL_RESPONSES_BASE_URL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    DASHSCOPE_INTL_WORKSPACE_ID: '',
+    DASHSCOPE_CN_API_KEY: 'cn-key',
+    DASHSCOPE_CN_ANTHROPIC_BASE_URL: 'https://dashscope.aliyuncs.com/apps/anthropic',
+    DASHSCOPE_CN_RESPONSES_BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    DASHSCOPE_CN_WORKSPACE_ID: '',
+    QWEN_REASONING_MODEL: 'qwen3.8-max',
+    QWEN_STANDARD_MODEL: 'qwen3.7-plus',
+    QWEN_FAST_MODEL: 'qwen3.8-flash',
+    QWEN_CODING_MODEL: 'qwen3-coder-plus',
+    QWEN_VERIFIER_MODEL: 'qwen3.8-flash',
+    QWEN_VERIFY_FAST_MODEL: 'qwen3.8-flash',
+    QWEN_VERIFY_STRICT_MODEL: 'qwen3.8-max',
+    QWEN_VISION_MODEL: 'qwen3.8-max',
+  };
+  const resolve = (environment: object, userRegion: unknown) =>
+    resolveCoreModelRuntime({
+      environment: environment as never,
+      actorExternalId: 'usr_a',
+      lane: 'generate',
+      ownership: { scope: 'personal', userRegion },
+    });
+
+  it('off: an account that never chose runs in the default region (cn unless configured)', () => {
+    expect(resolve(ENV, null)).toMatchObject({ kind: 'ready', region: 'cn' });
+    expect(resolve({ ...ENV, MODEL_DATA_REGION_SELECTION_ENABLED: false }, null)).toMatchObject({
+      kind: 'ready',
+      region: 'cn',
+    });
+    expect(resolve({ ...ENV, MODEL_DATA_REGION_DEFAULT: 'intl' }, null)).toMatchObject({
+      kind: 'ready',
+      region: 'intl',
+    });
+    expect(unassignedModelDataRegion({})).toBe('cn');
+  });
+
+  it('off: an account that chose keeps its choice; an invalid stored value is still refused', () => {
+    expect(resolve(ENV, 'intl')).toMatchObject({ kind: 'ready', region: 'intl' });
+    expect(resolve(ENV, 'cn')).toMatchObject({ kind: 'ready', region: 'cn' });
+    expect(resolve(ENV, 'mars')).toEqual({
+      kind: 'unavailable',
+      reason: 'MODEL_DATA_REGION_UNASSIGNED',
+    });
+  });
+
+  it('on: as before — an account without a region must choose first', () => {
+    const on = { ...ENV, MODEL_DATA_REGION_SELECTION_ENABLED: true };
+    expect(resolve(on, null)).toEqual({
+      kind: 'unavailable',
+      reason: 'MODEL_DATA_REGION_UNASSIGNED',
+    });
+    expect(resolve(on, 'intl')).toMatchObject({ kind: 'ready', region: 'intl' });
   });
 });

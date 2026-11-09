@@ -1,4 +1,4 @@
-import { replyLanguage, replyLanguageRule } from '@holaday/shared-types';
+import { replyLanguageRule } from '@holaday/shared-types';
 import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 import { articleUrl, fetchResearchArticles } from './fresh-research-fallback.js';
 /**
@@ -400,7 +400,8 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
   // FIX-60 P0-2: the answer is in the language of the user's own words this time; the account's
   // region only when they do not tell. Said last, so no Chinese instruction above outweighs it.
   const languageRule = replyLanguageRule(
-    replyLanguage(input.intakeIntent ?? input.intent, opts.responsesAdapter.metadata.region),
+    input.intakeIntent ?? input.intent,
+    opts.responsesAdapter.metadata.region,
   );
   const instructionsBody =
     laneInstructions +

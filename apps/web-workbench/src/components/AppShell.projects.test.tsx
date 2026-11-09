@@ -93,6 +93,7 @@ const AUTH_ME = {
   teamProjectsEnabled: true,
   teamTaskLifecycleEnabled: false,
   modelDataRegion: null,
+  modelDataRegionSelection: false,
 } satisfies RouterOutputs['auth']['me'];
 
 const PERSONAL_PROJECT = {

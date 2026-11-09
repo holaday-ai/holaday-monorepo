@@ -16,6 +16,8 @@ const ENVIRONMENT = {
   QWEN_CORE_ALLOWLIST: 'usr_allowed',
   QWEN_MESSAGES_ADAPTER_ENABLED: true,
   QWEN_RESPONSES_ADAPTER_ENABLED: true,
+  // FIX-60: these cases check the region selection step itself (on, as before).
+  MODEL_DATA_REGION_SELECTION_ENABLED: true,
   DASHSCOPE_API_KEY: '',
   DASHSCOPE_WORKSPACE_ID: '',
   DASHSCOPE_INTL_API_KEY: 'synthetic-intl-key',
@@ -44,6 +46,29 @@ describe('createProductionModelRuntimeWiring', () => {
     expect(Object.keys(wiring)).not.toContain('anthropic');
     expect(Object.keys(wiring)).not.toContain('openai');
     expect(Object.keys(wiring)).not.toContain('google');
+  });
+
+  it('FIX-60 BOSS 决定: with the region selection off, an unassigned account runs in the default region', () => {
+    const off = createProductionModelRuntimeWiring({
+      ...ENVIRONMENT,
+      MODEL_DATA_REGION_SELECTION_ENABLED: false,
+    });
+    expect(
+      off.resolveCore({
+        actorExternalId: 'usr_allowed',
+        lane: 'generate',
+        ownership: { scope: 'personal', userRegion: null },
+      }),
+    ).toMatchObject({ kind: 'ready', region: 'cn' });
+    // A chosen region is kept, a Chinese-region and an international account alike.
+    for (const region of ['cn', 'intl'] as const)
+      expect(
+        off.resolveCore({
+          actorExternalId: 'usr_allowed',
+          lane: 'generate',
+          ownership: { scope: 'personal', userRegion: region },
+        }),
+      ).toMatchObject({ kind: 'ready', region });
   });
 
   it('maps core runtime failures to stable persisted reason codes', () => {

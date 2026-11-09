@@ -15,6 +15,8 @@ const ENVIRONMENT = {
   QWEN_CORE_ALLOWLIST: 'usr_allowed',
   QWEN_MESSAGES_ADAPTER_ENABLED: true,
   QWEN_RESPONSES_ADAPTER_ENABLED: true,
+  // FIX-60: these cases check the region selection step itself (on, as before).
+  MODEL_DATA_REGION_SELECTION_ENABLED: true,
   DASHSCOPE_API_KEY: '',
   DASHSCOPE_WORKSPACE_ID: '',
   DASHSCOPE_INTL_API_KEY: 'intl-private-key',

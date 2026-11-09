@@ -30,6 +30,8 @@ const BASE_ENVIRONMENT: PlanRuntimeEnvironment = {
   QWEN_VISION_MODEL: 'qwen3.8-max',
   QWEN_MESSAGES_ADAPTER_ENABLED: true,
   QWEN_RESPONSES_ADAPTER_ENABLED: true,
+  // FIX-60: these cases check the region selection step itself (on, as before).
+  MODEL_DATA_REGION_SELECTION_ENABLED: true,
 };
 
 function buildAdapter(step: string): MessagesAdapter {

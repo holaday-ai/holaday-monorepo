@@ -73,6 +73,9 @@ it.each([
     QWEN_MESSAGES_ADAPTER_ENABLED: true,
     DASHSCOPE_CN_API_KEY: scenario === 'credentials' ? '' : 'synthetic-cn',
     DASHSCOPE_API_KEY: '',
+    // FIX-60: the 'region' case checks the region selection step itself (on, as before); off,
+    // an unassigned account runs in the default region (fix60.test.ts).
+    MODEL_DATA_REGION_SELECTION_ENABLED: scenario === 'region',
   });
   vi.spyOn(classifier, 'explainExecutionMode').mockResolvedValue({
     mode: isLocal ? 'generate' : 'browser',

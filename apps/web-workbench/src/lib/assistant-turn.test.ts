@@ -401,6 +401,15 @@ describe('复审 #3', () => {
 });
 
 describe('FIX-60 P0-2: the task language is the request’s main language', () => {
+  it('复审 #1 #2: an asked-for language, names that do not count, Chinese verbs and particles', () => {
+    expect(isEnglishTask('帮我查 iPhone 16 Pro price')).toBe(false);
+    expect(isEnglishTask('USB C cable 价格')).toBe(false);
+    expect(isEnglishTask("What is 故宫's ticket price")).toBe(true);
+    expect(isEnglishTask('请用英语回答：故宫门票多少钱')).toBe(true);
+    expect(isEnglishTask('翻译成英文：今天天气很好')).toBe(false);
+    expect(isEnglishTask('translate to Chinese: hello world')).toBe(true);
+  });
+
   it('a mixed request follows its main language, as the answer does', () => {
     expect(isEnglishTask('Write a short story about a 程序员')).toBe(true);
     expect(isEnglishTask('在 BestBuy 搜 usb c cable 告诉我第一个结果')).toBe(false);

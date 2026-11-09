@@ -170,8 +170,12 @@ const INDEX_TERMS = [
 ];
 
 /** 是否指数/大盘级问句（无 6 位个股代码时才算——有代码以个股为准）。 */
+/** FIX-60 复审 #1 建议: the three indexes by their English names, asked in English. */
+const INDEX_EN_RE =
+  /\b(?:shanghai composite|sse composite|shanghai stock exchange composite|shenzhen component|szse component|chinext(?: index)?)\b/i;
+
 export function isIndexQuery(text: string): boolean {
-  return INDEX_TERMS.some((t) => text.includes(t));
+  return INDEX_TERMS.some((t) => text.includes(t)) || INDEX_EN_RE.test(text);
 }
 
 /**

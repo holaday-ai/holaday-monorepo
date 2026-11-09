@@ -316,6 +316,16 @@ const baseEnvSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((value) => value === 'true'),
+  /**
+   * FIX-60 BOSS 决定 (2026-11-09): the 「选择任务处理区域」 dialog and the one-time region choice are
+   * off by default. Off, an account that never chose runs in MODEL_DATA_REGION_DEFAULT (nothing is
+   * written); an account that chose keeps its choice. `true` brings the step back unchanged.
+   */
+  MODEL_DATA_REGION_SELECTION_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  MODEL_DATA_REGION_DEFAULT: z.enum(['cn', 'intl']).default('cn'),
   /** Synthetic benchmark lane only. It is not wired to production task execution. */
   QWEN_SHADOW_EVAL_ENABLED: z
     .enum(['true', 'false'])

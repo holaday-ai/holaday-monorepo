@@ -1,4 +1,4 @@
-import { replyLanguage, replyLanguageRule } from '@holaday/shared-types';
+import { replyLanguageRule } from '@holaday/shared-types';
 import { modelProviderFailureMessage } from '../../llm/provider-error-diagnostics.js';
 /**
  * Supercar agent loop.
@@ -1641,7 +1641,7 @@ async function runSupercarTaskInternal(
     // basic → office formats fall back to md/csv). Covers the free
     // path too, where create_file isn't even exposed.
     fileFormatGuidance: buildFileFormatGuidance(opts.createFileFormats ?? []),
-  })}\n\n${replyLanguageRule(replyLanguage(opts.intent))}`;
+  })}\n\n${replyLanguageRule(opts.intent)}`;
 
   type MsgParam = Anthropic.Beta.BetaMessageParam;
   type ContentBlockParam = Anthropic.Beta.BetaContentBlockParam;

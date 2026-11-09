@@ -153,8 +153,39 @@ export function scrapedErrorPage(
     if (strong) return strong[0];
   }
   if (own.length > ERROR_PAGE_MAX_TEXT) return null;
-  const hit = ERROR_PAGE_RE.exec(own) ?? (title ? ERROR_PAGE_RE.exec(title) : null);
-  return hit ? hit[0] : null;
+  // FIX-60 复审 #1 建议: the error message is the page only as a notice standing on its own line
+  // (「服务器出现问题」「请稍后重试」「404 Not Found」), not as the topic of a short page about it
+  // (「Access Denied 是一首歌」「Something Went Wrong 专辑」「404 页面设计」). The title alone says so
+  // only when the page has next to nothing else to say.
+  // A page that also talks about the message (「Access Denied 是一首歌」 under its 「Access Denied」
+  // heading) is about it, not showing it.
+  const notices = own.split('\n').filter((line) => ERROR_PAGE_RE.test(line));
+  if (notices.some((line) => !bareNotice(line))) return null;
+  const notice = notices.map((line) => ERROR_PAGE_RE.exec(line)).find(Boolean);
+  if (notice) return notice[0];
+  // A title's site suffix (「页面不存在 - 某站」「Access Denied | Example」) is not part of its notice.
+  const titleHead = title?.split(/\s+[-|–—_]\s+|\s*｜\s*/)[0];
+  if (title && titleHead && own.length <= TITLE_ONLY_MAX_TEXT && bareNotice(titleHead)) {
+    const hit = ERROR_PAGE_RE.exec(title);
+    if (hit) return hit[0];
+  }
+  return null;
+}
+
+/** Words an error notice carries beside its message: retry, refresh, go back, an error code. */
+const NOTICE_FILLER_RE =
+  /请|稍后|重试|再试|刷新|返回首页|返回|首页|错误代码|错误码|抱歉|对不起|哎呀|啊哦|please|try again|later|refresh|reload|go back|back to|home(?:page)?|sorry|oops|error code|code|nginx|apache|cloudflare/gi;
+/** Text that is a notice and nothing more: a site name, an error code and punctuation aside. */
+const TITLE_ONLY_MAX_TEXT = 80;
+
+function bareNotice(line: string): boolean {
+  const rest = line
+    .replace(new RegExp(ERROR_PAGE_RE.source, 'gi'), ' ')
+    .replace(NOTICE_FILLER_RE, ' ')
+    .replace(/[\s\p{P}\p{S}\d]+/gu, '')
+    // A site's name after the message (「页面不存在 - 抖音」「Access Denied | Example」).
+    .replace(/^(?:抖音|小红书|微博|知乎|淘宝|京东|bilibili|哔哩哔哩|youtube|amazon)$/i, '');
+  return rest.length === 0;
 }
 
 /** Firecrawl's own reading of the target's answer: these statuses are walls, not pages. */

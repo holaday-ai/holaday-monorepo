@@ -3,7 +3,7 @@ import { stripInternalRefs } from '../internal-refs.js';
 import { staleForRecentIntent, uncoveredTargets } from './completion-coverage.js';
 import { assessEngagementClaims } from './engagement-counts.js';
 import { misattributedPrices } from './section-attribution.js';
-import { unmatchedVariantPrices } from './variant-price.js';
+import { searchCardPriceMismatches, unmatchedVariantPrices } from './variant-price.js';
 
 export interface ObservedEvidence {
   text: string;
@@ -1389,6 +1389,14 @@ export function assessCompletionFacts(input: {
   // item's only when the answer says which, or another page (its search card) shows it too.
   contradictions.push(
     ...unmatchedVariantPrices(
+      unescapeLiteralBreaks(input.summary),
+      input.pages.map((page) => unescapeLiteralBreaks(page.text)),
+    ),
+  );
+  // FIX-60 复审 #1 #3: …and the search card it was found on comes along: not below its 「from」
+  // price without a variant, not another variant than the card's.
+  contradictions.push(
+    ...searchCardPriceMismatches(
       unescapeLiteralBreaks(input.summary),
       input.pages.map((page) => unescapeLiteralBreaks(page.text)),
     ),

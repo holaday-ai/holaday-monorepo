@@ -1,6 +1,5 @@
 import {
   isEnglishRequestText,
-  replyLanguage,
   replyLanguageRule,
   stripToolCallBlocks,
 } from '@holaday/shared-types';
@@ -969,7 +968,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           input.observationV2
             ? '\n当前启用云端读取：每次交互带上 read_page 返回的 observationRevision/tabId/frameId；动作后重新读取，只有实际页面证据才能完成。cursor/ref 过期须重读。'
             : ''
-        }\n\n${replyLanguageRule(replyLanguage(input.userIntent ?? input.intent))}`,
+        }\n\n${replyLanguageRule(input.userIntent ?? input.intent)}`,
         messages: trimImages(compactToolResults(messages, input.fullPageResults)),
         tools: finishOnly
           ? CONTROL_TOOLS.filter((t) => t.name === 'finish')
