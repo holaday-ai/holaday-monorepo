@@ -8,6 +8,7 @@ import {
   replyLanguageRule,
   replyPlan,
   requestLanguage,
+  writingRequest,
 } from '@holaday/shared-types';
 import { pino } from 'pino';
 import { describe, expect, it, vi } from 'vitest';
@@ -517,13 +518,18 @@ describe('FIX-60 P2: a guide is not the booking', () => {
 describe('FIX-60 复审 #1 #2: an asked-for language first, then the main language', () => {
   it('a language the user asks for in so many words wins', () => {
     expect(requestLanguage('请用英语回答：故宫门票多少钱')).toBe('en');
-    expect(requestLanguage('用英文写一封感谢信')).toBe('en');
     expect(requestLanguage('介绍一下杭州，answer in English')).toBe('en');
     expect(requestLanguage('Answer in Chinese: what is the capital of France')).toBe('zh');
     expect(requestLanguage('Write a haiku about the sea, reply in Chinese please')).toBe('zh');
-    expect(replyPlan('用英文写一封感谢信', 'cn')).toMatchObject({
+    expect(replyPlan('请用英语回答：故宫门票多少钱', 'cn')).toMatchObject({
       language: 'en',
       source: 'explicit',
+    });
+    // DEPLOY-60 第 0 步 #1: 「用英文写一封感谢信」 names the letter's language, not the whole
+    // answer's: the letter in English, a note around it in Chinese.
+    expect(replyPlan('用英文写一封感谢信', 'cn')).toMatchObject({
+      language: 'zh',
+      writing: { target: '英文', piece: '感谢信' },
     });
   });
 
@@ -540,6 +546,70 @@ describe('FIX-60 复审 #1 #2: an asked-for language first, then the main langua
       /^This is a translation request: write the translation itself in Chinese; .* in English\./,
     );
     expect(requestLanguage('Please translate this into English: 你好世界')).toBe('en');
+  });
+
+  describe('DEPLOY-60 第 0 步 #1: a piece of writing asked for in a named language', () => {
+    it('the piece in the named language, everything around it in the request’s main language', () => {
+      for (const [text, target, piece] of [
+        ['写一封英文邮件给客户，说明发货延迟两天', '英文', '邮件'],
+        ['帮我写一段英文自我介绍', '英文', '自我介绍'],
+        ['写一份英文简历', '英文', '简历'],
+        ['写一份英文版的简历', '英文', '简历'],
+        ['用英文写一封邮件给客户', '英文', '邮件'],
+      ] as const) {
+        const plan = replyPlan(text, 'cn');
+        expect(plan, text).toMatchObject({ language: 'zh', writing: { target, piece } });
+        const rule = replyLanguageRule(text, 'cn');
+        expect(rule).toBe(
+          `这是写作任务，用户指定了语言：要写的${piece}本身全部用${target}写；${piece}以外的说明（如果有）用中文。名称和数字照原样。`,
+        );
+        // Not 「整段回答都用中文」.
+        expect(rule).not.toContain('整段回答');
+        expect(requestLanguage(text)).toBe('zh');
+      }
+      const en = replyPlan('write a cover letter in Chinese', 'intl');
+      expect(en).toMatchObject({
+        language: 'en',
+        writing: { target: 'Chinese', piece: 'cover letter' },
+      });
+      expect(replyLanguageRule(en)).toMatch(
+        /^This is a writing request .*write the cover letter itself entirely in Chinese; .* in English\./,
+      );
+      expect(isEnglishRequestText('write a cover letter in Chinese')).toBe(true);
+      expect(writingRequest('Draft an English email to my landlord')).toEqual({
+        target: 'English',
+        piece: 'email',
+      });
+    });
+
+    it('no named language, an answer language, or a translation is not a writing request', () => {
+      expect(
+        writingRequest('Write a short story about a programmer working late at night'),
+      ).toBeNull();
+      expect(writingRequest('帮我写一封邮件给客户')).toBeNull();
+      expect(writingRequest('用英文回答：故宫门票多少钱')).toBeNull();
+      expect(writingRequest('翻译成英文：今天天气很好')).toBeNull();
+      expect(writingRequest('帮我查英文介绍')).toBeNull();
+      expect(replyPlan('用英文回答：故宫门票多少钱', 'cn')).toMatchObject({
+        language: 'en',
+        source: 'explicit',
+      });
+      expect(replyPlan('写一封英文邮件给客户', 'cn').translation).toBeUndefined();
+    });
+
+    it('the generate lane ends its instructions with the writing rule', async () => {
+      const adapter = adapterSaying('Dear customer, ...');
+      const intent = '写一封英文邮件给客户，说明发货延迟两天';
+      await runGenerateTask({
+        taskId: 'tsk_fix60',
+        userId: 'usr_fix60',
+        intent,
+        responsesAdapter: adapter,
+        logger: pino({ level: 'silent' }),
+      });
+      expect(firstInstructions(adapter).endsWith(replyLanguageRule(intent))).toBe(true);
+      expect(firstInstructions(adapter)).toContain('邮件本身全部用英文写');
+    });
   });
 
   it('mixed: product, brand, model and site names do not count; a Chinese verb or particle makes it Chinese', () => {
@@ -650,6 +720,36 @@ describe('FIX-60 复审 #1 #3: the search card comes along to the detail page', 
       searchCardPriceMismatches('4. Anker USB-C to USB-C Cable 240W — S$12.99', pages),
     ).toEqual([]);
     expect(searchCardPriceMismatches('5. 某品牌数据线 — S$3.00', pages)).toEqual([]);
+  });
+
+  describe('DEPLOY-60 第 0 步 #2: tied titles are checked, not skipped', () => {
+    // Two cards whose titles the answer's name matches equally well.
+    const TIED = [
+      '1-48 of 303 results for "usb c cable"',
+      'Belkin Braided USB-A to USB-C Cable, White, 200cm',
+      '2 options from S$8.21',
+      'Belkin Braided USB-A to USB-C Cable, Blue, 100cm',
+      '3 options from S$7.50',
+    ].join('\n');
+    const tied = (price: string) => `3. Belkin Braided USB-A to USB-C Cable — ${price}`;
+
+    it('below the lowest from price of the tied cards, no variant named: sent back', () => {
+      const out = searchCardPriceMismatches(tied('S$6.86'), [TIED, DETAIL]);
+      expect(out).toHaveLength(1);
+      expect(out[0]).toMatch(/S\$6\.86.*起价「S\$7\.50」/);
+    });
+
+    it('a variant none of the tied cards is: sent back; one of them is: kept', () => {
+      expect(searchCardPriceMismatches(tied('黑色款 S$6.86'), [TIED])[0]).toMatch(/不是同一款/);
+      expect(searchCardPriceMismatches(tied('蓝色 100cm S$7.50'), [TIED])).toEqual([]);
+      expect(searchCardPriceMismatches(tied('白色 200cm S$8.21'), [TIED])).toEqual([]);
+    });
+
+    it('at or above the lowest from price is kept; a tied card with no from price checks no price', () => {
+      expect(searchCardPriceMismatches(tied('S$7.80'), [TIED])).toEqual([]);
+      const plain = TIED.replace('3 options from S$7.50', 'S$5.00');
+      expect(searchCardPriceMismatches(tied('S$6.86'), [plain])).toEqual([]);
+    });
   });
 
   it('DEPLOY-59 page structure: the earlier fixtures still pass and fail as before', () => {

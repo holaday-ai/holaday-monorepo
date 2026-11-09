@@ -235,12 +235,16 @@ interface Card {
   text: string;
 }
 
-/** The card an answer line names: the page title line its words match best, if one does. */
-function cardFor(name: string, pages: readonly string[][]): Card | null {
+/**
+ * The cards an answer line names: the page title lines its words match best. Several when titles
+ * tie (DEPLOY-60 第 0 步 #2: a tie no longer skips the check — the line is held against every
+ * tied card); none when no title matches well enough.
+ */
+function cardsFor(name: string, pages: readonly string[][]): Card[] {
   const wanted = tokensOf(name);
-  if (wanted.length < 2) return null;
-  let best: { title: string; score: number } | null = null;
-  let tie = false;
+  if (wanted.length < 2) return [];
+  let bestScore = 0;
+  let titles: string[] = [];
   for (const lines of pages)
     for (const line of lines) {
       if (line.length < CARD_TITLE_MIN || PRICE_RE.test(line)) {
@@ -252,23 +256,43 @@ function cardFor(name: string, pages: readonly string[][]): Card | null {
       const hits = wanted.filter((t) => have.has(t)).length;
       const score = hits / wanted.length;
       if (hits < 2 || score < 0.6) continue;
-      if (!best || score > best.score) {
-        best = { title: line, score };
-        tie = false;
-      } else if (score === best.score && line !== best.title) tie = true;
+      if (score > bestScore) {
+        bestScore = score;
+        titles = [line];
+      } else if (score === bestScore && !titles.includes(line)) titles.push(line);
     }
-  if (!best || tie) return null;
-  const fromPrices: string[] = [];
-  for (const lines of pages)
-    lines.forEach((line, i) => {
-      if (line !== best!.title) return;
-      for (const next of lines.slice(i + 1, i + 1 + CARD_WINDOW)) {
-        if (next.length >= 40 && !(next.match(PRICE_RE) ?? []).length) break;
-        if (CARD_FROM_RE.test(next)) fromPrices.push(...(next.match(PRICE_RE) ?? []));
-      }
-    });
-  fromPrices.sort((a, b) => priceValue(a) - priceValue(b));
-  return { title: best.title, fromPrices, text: best.title };
+  return titles.map((title) => {
+    const fromPrices: string[] = [];
+    for (const lines of pages)
+      lines.forEach((line, i) => {
+        if (line !== title) return;
+        for (const next of lines.slice(i + 1, i + 1 + CARD_WINDOW)) {
+          if (next.length >= 40 && !(next.match(PRICE_RE) ?? []).length) break;
+          if (CARD_FROM_RE.test(next)) fromPrices.push(...(next.match(PRICE_RE) ?? []));
+        }
+      });
+    fromPrices.sort((a, b) => priceValue(a) - priceValue(b));
+    return { title, fromPrices, text: title };
+  });
+}
+
+/** Whether the answer's variant is not this card's (colour, length or capacity). */
+function otherVariantThan(card: Card, answerVariant: string, beside: string): boolean {
+  const cardColours = colours(card.text);
+  const saidColours = colours(answerVariant.replace(card.title, ''));
+  const cardLengths = lengthsCm(card.text);
+  const saidLengths = lengthsCm(beside);
+  const cardCaps = capacities(card.text);
+  const saidCaps = capacities(beside);
+  return (
+    (cardColours.size > 0 &&
+      saidColours.size > 0 &&
+      ![...saidColours].some((c) => cardColours.has(c))) ||
+    (cardLengths.length > 0 &&
+      saidLengths.length > 0 &&
+      !saidLengths.some((l) => cardLengths.some((c) => Math.abs(l - c) <= c * 0.07))) ||
+    (cardCaps.size > 0 && saidCaps.size > 0 && ![...saidCaps].some((c) => cardCaps.has(c)))
+  );
 }
 
 /**
@@ -287,34 +311,27 @@ export function searchCardPriceMismatches(summary: string, pageTexts: readonly s
       .slice(0, at)
       .replace(/^\s*(?:[-*+]|\d+[.)、])\s*/, '')
       .replace(/\*\*/g, '');
-    const card = cardFor(name, pages);
-    if (!card) continue;
+    const cards = cardsFor(name, pages);
+    if (!cards.length) continue;
+    const card = cards[0]!;
     const beside = besidePrice(line, at);
     const answerVariant = `${name} ${beside}`;
     const shown = prices[0]![0];
-    // A variant other than the card's.
-    const cardColours = colours(card.text);
-    const saidColours = colours(answerVariant.replace(card.title, ''));
-    const cardLengths = lengthsCm(card.text);
-    const saidLengths = lengthsCm(beside);
-    const cardCaps = capacities(card.text);
-    const saidCaps = capacities(beside);
-    const otherVariant =
-      (cardColours.size > 0 &&
-        saidColours.size > 0 &&
-        ![...saidColours].some((c) => cardColours.has(c))) ||
-      (cardLengths.length > 0 &&
-        saidLengths.length > 0 &&
-        !saidLengths.some((l) => cardLengths.some((c) => Math.abs(l - c) <= c * 0.07))) ||
-      (cardCaps.size > 0 && saidCaps.size > 0 && ![...saidCaps].some((c) => cardCaps.has(c)));
-    if (otherVariant) {
+    // A variant other than the card's (with tied cards: other than every one of them).
+    if (cards.every((c) => otherVariantThan(c, answerVariant, beside))) {
       out.push(
         `答案里「${name.trim().slice(0, 40)}」写的规格和搜索结果那张卡片（「${card.title.slice(0, 60)}」）不是同一款：请用搜索结果里那一款的规格和价格，不能拿商品页上别的规格顶替`,
       );
       continue;
     }
-    // Lower than the card's 「from」 price, with no variant named.
-    const from = card.fromPrices.find((p) => priceCurrency(p) === priceCurrency(shown));
+    // Lower than the card's 「from」 price, with no variant named (with tied cards: lower than the
+    // lowest 「from」 price of them all, and only when every one of them shows one).
+    const froms = cards.map((c) =>
+      c.fromPrices.find((p) => priceCurrency(p) === priceCurrency(shown)),
+    );
+    const from = froms.every(Boolean)
+      ? (froms as string[]).sort((a, b) => priceValue(a) - priceValue(b))[0]
+      : undefined;
     if (
       from &&
       priceValue(shown) < priceValue(from) &&

@@ -10,6 +10,9 @@
  *  2. A translation is not answered 「all in one language」: the translation is in the target
  *     language, anything said around it in the language of the instruction (「翻译成英文：…」 is a
  *     Chinese instruction).
+ *  2b. A piece of writing asked for in a named language (DEPLOY-60 第 0 步 #1: 「写一封英文邮件给
+ *     客户」「帮我写一段英文自我介绍」「write a cover letter in Chinese」) is handled the same way:
+ *     the piece itself in that language, anything said around it in the request's main language.
  *  3. Otherwise the request's main language, read from the user's own words: links, domains,
  *     code and quotes are content, not the request's language; so are product, brand and model
  *     names (「iPhone 16 Pro」「USB」「BestBuy」). A Chinese verb or particle (查、帮我、多少钱、
@@ -30,6 +33,8 @@ export interface ReplyPlan {
   source: 'explicit' | 'request' | 'region';
   /** A translation request: the translation goes in `target` (null: the user did not say). */
   translation?: { target: string | null };
+  /** A piece of writing asked for in a named language: the piece goes in `target`. */
+  writing?: { target: string; piece: string };
 }
 
 const URL_RE = /\bhttps?:\/\/\S+|\bwww\.\S+/gi;
@@ -64,6 +69,31 @@ const EXPLICIT_EN_RE = new RegExp(
 const TRANSLATION_RE = /翻译|翻譯|译成|译为|譯成|\btranslat(?:e|es|ion|ing)\b/i;
 const TRANSLATION_TARGET_RE =
   /(?:翻译|翻譯|译|譯)\s*(?:成|为|為|到)\s*([\p{Script=Han}A-Za-z]{1,6}?(?:文|语|語))|(?:用|成)\s*([\p{Script=Han}]{1,4}(?:文|语|語))\s*(?:翻译|翻譯)|\b(?:in)?to\s+(english|chinese|mandarin|japanese|korean|french|german|spanish|russian|italian|portuguese|arabic|thai|vietnamese|malay|indonesian)\b/iu;
+
+/** Languages a piece of writing can be asked for in. */
+const WRITING_LANG_ZH =
+  '英文|英语|中文|汉语|简体中文|繁体中文|日文|日语|韩文|韩语|法文|法语|德文|德语|西班牙文|西班牙语|俄文|俄语|意大利文|意大利语|葡萄牙文|葡萄牙语|阿拉伯文|阿拉伯语|泰文|泰语|越南文|越南语|马来文|马来语|印尼文|印尼语';
+const WRITING_LANG_EN =
+  'english|chinese|mandarin|japanese|korean|french|german|spanish|russian|italian|portuguese|arabic|thai|vietnamese|malay|indonesian';
+/** Pieces of writing (the product is the piece, not the answer around it). */
+const WRITING_PIECE_ZH =
+  '邮件|电邮|信件|求职信|推荐信|感谢信|道歉信|邀请函|贺卡|信|简历|履历|自我介绍|个人介绍|个人简介|简介|介绍信|介绍|文案|广告语|标语|口号|文章|短文|作文|故事|小说|诗歌|诗|演讲稿|发言稿|讲稿|致辞|祝福语|祝福|产品描述|描述|摘要|总结|报告|段落|一段话|回复|评论|帖子|推文|标题|对话|台词|歌词|通知|公告|声明|合同|协议|提案|计划书|说明书|说明';
+const WRITING_PIECE_EN =
+  'e-?mails?|letters?|cover letters?|resumes?|résumés?|cvs?|bios?|biograph(?:y|ies)|self-introductions?|introductions?|essays?|articles?|stor(?:y|ies)|poems?|speech(?:es)?|posts?|tweets?|captions?|descriptions?|summar(?:y|ies)|reports?|messages?|notes?|announcements?|invitations?|proposals?|scripts?|toasts?|blurbs?|slogans?|headlines?|paragraphs?';
+const WRITING_VERB_ZH = '写|撰写|起草|拟|拟写|编写|写作|准备|生成|做';
+const WRITING_VERB_EN = 'write|draft|compose|prepare|create|produce';
+/**
+ * 「写一封英文邮件」「帮我写一段英文自我介绍」「写一份英文版简历」「用英文写一封邮件」
+ * 「write a cover letter in Chinese」「draft an English email」
+ */
+const WRITING_ZH_RE = new RegExp(
+  `(?:${WRITING_VERB_ZH})[^。！？!?\\n]{0,12}?(${WRITING_LANG_ZH})(?:版本?)?的?\\s*(${WRITING_PIECE_ZH})|(?:用|以)(${WRITING_LANG_ZH})(?:来)?(?:${WRITING_VERB_ZH})[^。！？!?\\n]{0,12}?(${WRITING_PIECE_ZH})`,
+  'u',
+);
+const WRITING_EN_RE = new RegExp(
+  `\\b(?:${WRITING_VERB_EN})\\b[^.!?\\n]{0,40}?\\b(${WRITING_PIECE_EN})\\b[^.!?\\n]{0,40}?\\bin\\s+(${WRITING_LANG_EN})\\b|\\b(?:${WRITING_VERB_EN})\\b[^.!?\\n]{0,20}?\\b(${WRITING_LANG_EN})(?:-language)?\\s+(${WRITING_PIECE_EN})\\b`,
+  'i',
+);
 
 /** Chinese verbs and particles that make a sentence Chinese (复审 #1 #2). */
 const ZH_SIGNAL_RE =
@@ -131,6 +161,30 @@ export function translationRequest(text: string): { target: string | null } | nu
   return { target: target ? target.trim() : null };
 }
 
+/**
+ * A piece of writing asked for in a named language (「写一封英文邮件给客户」 → 英文 / 邮件), or null.
+ * A translation is not one (it has its own rule).
+ */
+export function writingRequest(text: string): { target: string; piece: string } | null {
+  const own = text.replace(CODE_RE, ' ').replace(URL_RE, ' ').replace(QUOTED_RE, ' ');
+  if (TRANSLATION_RE.test(own)) return null;
+  const zh = WRITING_ZH_RE.exec(own);
+  if (zh) {
+    const target = zh[1] ?? zh[3];
+    const piece = zh[2] ?? zh[4];
+    if (target && piece) return { target, piece };
+  }
+  const en = WRITING_EN_RE.exec(own);
+  if (en) {
+    const target = en[2] ?? en[3];
+    const piece = en[1] ?? en[4];
+    if (target && piece) {
+      return { target: target[0]!.toUpperCase() + target.slice(1).toLowerCase(), piece };
+    }
+  }
+  return null;
+}
+
 /** The instruction of a translation request: what comes before the text to translate. */
 function translationInstruction(text: string): string {
   const colon = /[:：\n]/.exec(text);
@@ -163,6 +217,9 @@ function writtenLanguage(text: string): ReplyLanguage | null {
 
 /** The language a request is written in (or asks for), or null when nothing tells. */
 export function requestLanguage(text: string): ReplyLanguage | null {
+  // A piece of writing in a named language: the request's own language is the main language
+  // (「write a cover letter in Chinese」 is an English request), not the piece's.
+  if (writingRequest(text)) return writtenLanguage(text);
   const explicit = explicitReplyLanguage(text);
   if (explicit) return explicit;
   return writtenLanguage(translationRequest(text) ? translationInstruction(text) : text);
@@ -175,13 +232,15 @@ export function requestLanguage(text: string): ReplyLanguage | null {
  */
 export function replyPlan(text: string, region?: string | null): ReplyPlan {
   const translation = translationRequest(text);
-  const explicit = explicitReplyLanguage(text);
+  const writing = translation ? null : writingRequest(text);
+  const explicit = writing ? null : explicitReplyLanguage(text);
   const written = explicit ?? writtenLanguage(translation ? translationInstruction(text) : text);
   const language = written ?? (region === 'cn' ? 'zh' : region ? 'en' : 'zh');
   return {
     language,
     source: explicit ? 'explicit' : written ? 'request' : 'region',
     ...(translation ? { translation } : {}),
+    ...(writing ? { writing } : {}),
   };
 }
 
@@ -215,6 +274,12 @@ export function replyLanguageRule(
     return plan.language === 'en'
       ? `This is a translation request: write the translation itself in ${target ?? 'the language the user asked for'}; anything you say around the translation (a short note, if any) in English. Keep names and numbers as they are.`
       : `这是翻译任务：译文本身用${target ?? '用户要求的目标语言'}写；译文以外的说明（如果有）用中文。名称和数字照原样。`;
+  }
+  if (plan.writing) {
+    const { target, piece } = plan.writing;
+    return plan.language === 'en'
+      ? `This is a writing request for a piece in a named language: write the ${piece} itself entirely in ${target}; anything you say around it (a short note, if any) in English. Keep names and numbers as they are.`
+      : `这是写作任务，用户指定了语言：要写的${piece}本身全部用${target}写；${piece}以外的说明（如果有）用中文。名称和数字照原样。`;
   }
   return plan.language === 'en'
     ? 'Answer language: English. The user wrote this request in English (or asked for English), so write the whole answer — headings, text, lists, notes, follow-up suggestions and failure explanations — in English, even though these instructions and the pages you read may be in Chinese. Keep names, titles, quotes and numbers exactly as the page shows them.'
