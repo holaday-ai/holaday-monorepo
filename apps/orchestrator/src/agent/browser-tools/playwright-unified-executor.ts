@@ -8,6 +8,7 @@ import { ensureExecutionViewport } from './browser-viewport.js';
 import { CloudObservation, pageRoot } from './cloud-observation.js';
 import { SENSITIVE_SCREENSHOT_STYLE, fullPageRead } from './full-page-read.js';
 import { redactPageText } from './page-redaction.js';
+import { dismissSiteGuide } from './site-guides.js';
 import {
   forbidsPlayback,
   installPlaybackGuard,
@@ -560,6 +561,8 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
             timeout: Math.max(timeout, 30_000),
             waitUntil: 'domcontentloaded',
           });
+          // FIX-61 P1-7: a first-visit guide layer (Douyin) is acknowledged; logins are not touched.
+          await dismissSiteGuide(page).catch(() => null);
           // AP3 core-07: a 403 page read as "已打开" kept the model on it until
           // the step limit. Say what the server answered.
           const httpStatus = response?.status() ?? 0;

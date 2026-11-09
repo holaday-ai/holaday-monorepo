@@ -1,4 +1,4 @@
-import { classifyBrowserErrorKind } from './browser-error-kind';
+import { assertedFailureText, classifyBrowserErrorKind } from './browser-error-kind';
 import { humaniseTaskError } from './error-copy';
 
 export interface FriendlyFailure {
@@ -293,8 +293,29 @@ export function classifyFriendlyFailure(
       nextStep: '稍后重新执行，或换一个响应更稳定的网址。',
     };
   }
+  // FIX-61 P1-7 (DEPLOY-60 dy-1): what really stopped the run, in plain words, before any guess it
+  // made about logins. A link the site sent to another page (Douyin's recommendation feed), or a
+  // guide layer over the page, is neither a login nor a check.
   if (
-    /captcha|recaptcha|hcaptcha|验证码|人机|滑块|cloudflare|are you a (human|robot)/.test(haystack)
+    /重定向|跳转到|转到|redirect/i.test(errorText ?? '') &&
+    /推荐|精选|首页|别的页面|other page|feed|home ?page/i.test(errorText ?? '')
+  ) {
+    return {
+      title: '网站把链接转到了别的页面',
+      subtitle: '打开链接后，网站转到了推荐页等别的页面，没有打开你给的那一页。',
+      nextStep: '确认链接还有效后重新执行，或换一个能直接打开的链接。',
+    };
+  }
+  if (/引导层|引导浮层|新手引导|浮层挡|遮罩|overlay/i.test(assertedFailureText(errorText))) {
+    return {
+      title: '页面被一个引导层挡住了',
+      subtitle: '网站在页面上盖了一层引导提示，没能关掉它，挡住了要读的内容。',
+      nextStep: '重新执行；如果还是被挡住，可以点「我来操作」自己关掉它。',
+    };
+  }
+  const asserted = assertedFailureText(errorText).toLowerCase();
+  if (
+    /captcha|recaptcha|hcaptcha|验证码|人机|滑块|cloudflare|are you a (human|robot)/.test(asserted)
   ) {
     return {
       title: '网站要求验证身份',
@@ -302,7 +323,7 @@ export function classifyFriendlyFailure(
       nextStep: '重新执行后在浏览器里完成验证。',
     };
   }
-  if (/login|sign[\s_-]?in|登录|401|未登录|unauthor|凭据|需要授权/.test(haystack)) {
+  if (/login|sign[\s_-]?in|登录|401|未登录|unauthor|凭据|需要授权/.test(asserted)) {
     return {
       title: '需要先登录',
       subtitle: '请重新执行；如果再次停在登录页，请先完成登录。',

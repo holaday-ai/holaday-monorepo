@@ -16,9 +16,29 @@ export type BrowserErrorKind =
   | 'login'
   | 'generic_browser';
 
+/**
+ * FIX-61 P1-7 (DEPLOY-60 dy-1): the run's own guess — 「可能原因：…或需要登录/验证才能访问」 — is not a
+ * login wall it met. Only what a failure states as fact decides login / captcha / blocked; sentences
+ * that guess (可能 / 或许 / 也许 / 建议 / possibly / may / might) are left out.
+ */
+export function assertedFailureText(raw: string | null | undefined): string {
+  const HEDGE = /可能|或许|也许|建议|不排除|\bpossibly\b|\bmay\b|\bmight\b|\bperhaps\b/i;
+  // Each sentence counts up to its first guess: 「…被京东风控拦截，…才可能正常展示」 keeps the
+  // 风控 it states; 「可能原因：…或需要登录」 keeps nothing.
+  return (raw ?? '')
+    .split(/(?<=[。！？!?\n])|(?<=\.)\s+/u)
+    .map((sentence) => {
+      const at = sentence.search(HEDGE);
+      return at < 0 ? sentence : sentence.slice(0, at);
+    })
+    .join('');
+}
+
 export function classifyBrowserErrorKind(raw: string | null | undefined): BrowserErrorKind | null {
-  const text = raw?.trim().toLowerCase();
-  if (!text) return null;
+  const all = raw?.trim().toLowerCase();
+  if (!all) return null;
+  const text = all;
+  const asserted = assertedFailureText(all);
 
   if (
     /扩展工具调用超时|浏览器扩展响应超时|extension tool.*timeout|browser tool.*timeout/.test(text)
@@ -97,10 +117,12 @@ export function classifyBrowserErrorKind(raw: string | null | undefined): Browse
   ) {
     return 'timeout';
   }
-  if (/captcha|recaptcha|hcaptcha|cloudflare|人机|验证码|滑块|are you a (human|robot)/.test(text)) {
+  if (
+    /captcha|recaptcha|hcaptcha|cloudflare|人机|验证码|滑块|are you a (human|robot)/.test(asserted)
+  ) {
     return 'captcha';
   }
-  if (/login|sign[\s_-]?in|登录|401|未登录|unauthor|凭据|需要授权/.test(text)) {
+  if (/login|sign[\s_-]?in|登录|401|未登录|unauthor|凭据|需要授权/.test(asserted)) {
     return 'login';
   }
   if (/browser|chromium|brave|cdp|websocket|浏览器|screencast/.test(text)) {

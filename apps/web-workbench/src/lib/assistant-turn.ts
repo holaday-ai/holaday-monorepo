@@ -11,6 +11,7 @@
  * Honesty is not relaxed: the status and scoring stay what the server recorded; a
  * failed or partial run always says, in plain words, what it did not get.
  */
+import { assertedFailureText } from './browser-error-kind';
 import type { UiStep, UiTask } from '@/types/task';
 import { friendlyHost } from '@/utils/step-humanize';
 import { isEnglishRequestText } from '@holaday/shared-types';
@@ -695,8 +696,32 @@ export function failureTurn(input: {
     : '';
   const others = triedElsewhere ? null : publicSource;
   const title = friendly.title;
-  if (/登录/.test(title) || /风控|拦截|拦下/.test(input.errorText)) {
-    const blocked = /风控|拦截|拦下|403|异常提示/.test(input.errorText);
+  // FIX-61 P1-7 (DEPLOY-60 dy-1): the real cause, not the run's guess about a login.
+  if (title === '网站把链接转到了别的页面') {
+    return {
+      lead: en
+        ? `${site ?? 'The site'} sent the link to another page (such as its recommendations) instead of the one you gave${tried}, ${notGot}.`
+        : `${site ?? '网站'}把这个链接转到了推荐页等别的页面，没打开你给的那一页${tried}，${notGot}。`,
+      why: '',
+      options: [retry, others].filter((o): o is TurnOption => Boolean(o)),
+    };
+  }
+  if (title === '页面被一个引导层挡住了') {
+    return {
+      lead: en
+        ? `A guide layer covered the ${site ?? ''} page and I couldn't close it${tried}, ${notGot}.`.replace(
+            /\s{2,}/g,
+            ' ',
+          )
+        : `${site ?? ''}页面被一个引导层挡住了，我没能关掉它${tried}，${notGot}。`,
+      why: en
+        ? 'You can press 「我来操作」, close it yourself, and hand it back.'
+        : '你可以点「我来操作」自己关掉它，再交还给我接着看。',
+      options: [retry, others].filter((o): o is TurnOption => Boolean(o)),
+    };
+  }
+  if (/登录/.test(title) || /风控|拦截|拦下/.test(assertedFailureText(input.errorText))) {
+    const blocked = /风控|拦截|拦下|403|异常提示/.test(assertedFailureText(input.errorText));
     const login: TurnOption | null = !intent
       ? null
       : en

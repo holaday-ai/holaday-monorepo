@@ -432,3 +432,35 @@ describe('FIX-61 P1-2: an English 未核实 note is folded the same way', () => 
     expect(unverified).toContain('Price「60 yuan」');
   });
 });
+
+describe('FIX-61 P1-7: a failed Douyin read says what really happened', () => {
+  const DY1 =
+    '任务执行失败：无法获取目标视频信息。多次导航至 https://www.douyin.com/video/7507106798919601427 后，页面均被抖音强制重定向到精选推荐页（/jingxuan?modal_id=...），未展示该视频ID对应的详情页。当前页面显示的是推荐视频列表及弹窗内容，未找到视频ID 7507106798919601427 的标题、作者、点赞数、评论数、收藏数和分享数。可能原因：该视频已下架、被删除、设为私密，或需要登录/验证才能访问。建议：简化任务描述后重试。';
+
+  it('a redirect to the recommendation feed is not 「要登录」', () => {
+    const turn = failureTurn({
+      status: 'failed',
+      errorText: DY1,
+      intent: '打开 https://www.douyin.com/video/7507106798919601427 读视频标题、作者，以及点赞数（不播放）',
+      finalUrl: 'https://www.douyin.com/jingxuan?modal_id=7676036453872274731',
+      executionMode: 'browser',
+      canRetry: true,
+    });
+    expect(turn.lead).toContain('把这个链接转到了推荐页');
+    expect(turn.lead).not.toContain('登录');
+    expect(turn.why).not.toContain('登录');
+  });
+
+  it('a guide layer that could not be closed is said as such', () => {
+    const turn = failureTurn({
+      status: 'failed',
+      errorText: '任务执行失败：页面被新手引导浮层挡住，无法读取视频信息。可能需要登录。',
+      intent: '打开抖音视频读标题',
+      finalUrl: 'https://www.douyin.com/video/1',
+      executionMode: 'browser',
+      canRetry: true,
+    });
+    expect(turn.lead).toContain('页面被一个引导层挡住了');
+    expect(turn.lead).not.toContain('要登录');
+  });
+});
