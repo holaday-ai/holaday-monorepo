@@ -100,3 +100,43 @@ it('FIX-61: input waiting for control is dropped when control does not come with
     vi.useRealTimers();
   }
 });
+
+it('FIX-61: on a running task the press only asks for control and is not replayed later', () => {
+  const sent: Array<{ payload: { type: string } }> = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    send(raw: string) {
+      sent.push(JSON.parse(raw));
+    }
+    close() {}
+  }
+  vi.stubGlobal('WebSocket', Socket);
+  const onRequestControl = vi.fn();
+  const props = { wsUrl: 'ws://localhost/screencast-ws/tsk_test', streamToken: 'test' };
+  const { container, rerender } = render(
+    <CdpScreencastViewport
+      {...props}
+      viewOnly
+      controlLease={null}
+      onRequestControl={onRequestControl}
+      replayAfterControl={false}
+    />,
+  );
+  const input = container.querySelector('input');
+  if (!input) throw new Error('input missing');
+  fireEvent.keyDown(input, { key: 'q', code: 'KeyQ', keyCode: 81 });
+  expect(onRequestControl).toHaveBeenCalledTimes(1);
+  rerender(
+    <CdpScreencastViewport
+      {...props}
+      viewOnly={false}
+      controlLease="granted"
+      onRequestControl={onRequestControl}
+      replayAfterControl={false}
+    />,
+  );
+  expect(sent.filter((m) => m.payload?.type === 'keyDown')).toEqual([]);
+  fireEvent.keyDown(input, { key: 'q', code: 'KeyQ', keyCode: 81 });
+  expect(sent.filter((m) => m.payload?.type === 'keyDown')).toHaveLength(1);
+});

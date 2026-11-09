@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   capabilities: vi.fn(),
   mutate: vi.fn(),
   nav: vi.fn(),
+  ensure: vi.fn(),
   refresh: vi.fn(),
   abort: vi.fn(),
 }));
@@ -19,6 +20,7 @@ vi.mock('@/lib/trpc', () => ({
       browserControlState: { query: api.query },
       browserControl: { mutate: api.mutate },
       browserNav: { mutate: api.nav },
+      ensureBrowserSession: { mutate: api.ensure },
       abort: { mutate: api.abort },
     },
   },
@@ -29,7 +31,7 @@ vi.mock('@/lib/use-stream-token', () => ({
 vi.mock('@/lib/ws', () => ({ send: vi.fn() }));
 vi.mock('@/lib/hd-debug', () => ({ hdDebug: vi.fn() }));
 vi.mock('@/components/ui/toast', () => ({
-  useToast: () => ({ error: vi.fn(), success: vi.fn(), info: vi.fn() }),
+  useToast: () => ({ error: vi.fn(), success: vi.fn(), info: vi.fn(), show: vi.fn() }),
 }));
 vi.mock('@/components/CdpScreencastViewport', () => ({
   CdpScreencastViewport: (props: {
@@ -269,4 +271,35 @@ it('FIX-61: a finished task with its browser still open can be used straight fro
     expect(api.mutate).toHaveBeenCalledWith({ taskId: 'tsk_one', action: 'takeover' }),
   );
   await waitFor(() => expect(screen.getByTestId('viewport').dataset.lease).toBe('review-lease'));
+});
+
+it('FIX-61: a released browser that cannot be reopened says so plainly and offers 「重新打开这个页面」', async () => {
+  useTaskStore.setState((state) => ({
+    tasks: state.tasks.map((task) => ({
+      ...task,
+      status: 'completed' as const,
+      finalUrl: 'https://www.google.com/',
+    })),
+  }));
+  api.query.mockResolvedValue({
+    taskId: 'tsk_one',
+    supported: false,
+    mode: 'review',
+    phase: 'closed',
+    lease: null,
+    error: 'session_unavailable',
+  });
+  api.ensure.mockRejectedValue(new Error('restore failed'));
+  render(<BrowserPanel {...base} taskStatus="completed" />);
+  await waitFor(() => expect(screen.getByTestId('viewport').dataset.canRequest).toBe('true'));
+  fireEvent.click(screen.getByTestId('screen'));
+  await waitFor(() => expect(api.ensure).toHaveBeenCalledWith({ taskId: 'tsk_one' }));
+  await screen.findByText('这个页面的浏览器已经关掉了，刚才没能重新打开。');
+  api.ensure.mockResolvedValue({ restored: true });
+  api.mutate.mockResolvedValue({ ...control('human', 'reopened'), mode: 'review' });
+  fireEvent.click(screen.getByRole('button', { name: '重新打开这个页面' }));
+  await waitFor(() =>
+    expect(api.mutate).toHaveBeenCalledWith({ taskId: 'tsk_one', action: 'takeover' }),
+  );
+  expect(api.mutate).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'return' }));
 });

@@ -1842,6 +1842,7 @@ function CloudBrowserPanel({
                     onRequestControl={
                       screenControlAvailable ? handleScreenControlRequest : undefined
                     }
+                    replayAfterControl={taskIsTerminal}
                     viewportV2={viewportV2}
                     fitMode="contain"
                     displayMode={displayMode}

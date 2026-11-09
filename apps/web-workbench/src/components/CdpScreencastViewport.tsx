@@ -82,6 +82,13 @@ interface Props {
    * at most a few seconds) and are delivered once control is granted.
    */
   onRequestControl?: () => void;
+  /**
+   * Deliver the press / keys that asked for control once it is granted. Only
+   * for a page nobody else is changing (a finished task): while the assistant
+   * is still working the page may change before it pauses, so the first press
+   * only asks for control.
+   */
+  replayAfterControl?: boolean;
   onStatusChange?: (status: CdpScreencastStatus) => void;
   /** Fired after the first real frame is painted for the current viewport. */
   onFrameReady?: () => void;
@@ -145,6 +152,7 @@ export function CdpScreencastViewport({
   viewOnly = true,
   controlLease = null,
   onRequestControl,
+  replayAfterControl = true,
   onStatusChange,
   onFrameReady,
   reconnectSignal = 0,
@@ -181,6 +189,8 @@ export function CdpScreencastViewport({
   const deferredInputsRef = React.useRef<DeferredInput[]>([]);
   const onRequestControlRef = React.useRef(onRequestControl);
   onRequestControlRef.current = onRequestControl;
+  const replayAfterControlRef = React.useRef(replayAfterControl);
+  replayAfterControlRef.current = replayAfterControl;
   const lastControlRequestRef = React.useRef(0);
   const invalidateGeometry = React.useCallback(() => {
     geometryRef.current = null;
@@ -342,11 +352,14 @@ export function CdpScreencastViewport({
       // kept for later.
       if ((viewOnlyRef.current || !controlLeaseRef.current) && !requestControl) return;
       const now = Date.now();
-      deferredInputsRef.current = [
-        ...deferredInputsRef.current.filter((item) => now - item.at <= DEFERRED_INPUT_MS),
-        { at: now, build },
-      ].slice(-DEFERRED_INPUT_LIMIT);
-      if (viewOnlyRef.current || !controlLeaseRef.current) {
+      const waitingForControl = viewOnlyRef.current || !controlLeaseRef.current;
+      if (!waitingForControl || replayAfterControlRef.current) {
+        deferredInputsRef.current = [
+          ...deferredInputsRef.current.filter((item) => now - item.at <= DEFERRED_INPUT_MS),
+          { at: now, build },
+        ].slice(-DEFERRED_INPUT_LIMIT);
+      }
+      if (waitingForControl) {
         if (requestControl && now - lastControlRequestRef.current > CONTROL_REQUEST_GAP_MS) {
           lastControlRequestRef.current = now;
           requestControl();
@@ -1093,8 +1106,13 @@ export function CdpScreencastViewport({
             const t = e.changedTouches[0];
             if (!t) return;
             // FIX-61: a tap on a phone takes control the same way a click does.
+            // Suppress the compatibility mouse events, which would move focus to
+            // the page body and leave the phone keyboard with nowhere to type.
+            e.preventDefault();
             const point = { clientX: t.clientX, clientY: t.clientY };
-            hiddenInputRef.current?.focus({ preventScroll: true });
+            const input = hiddenInputRef.current;
+            input?.focus({ preventScroll: true });
+            requestAnimationFrame(() => input?.focus({ preventScroll: true }));
             deliverInput(pointerPayload('mouseDown', point, 0, 1));
             deliverInput(pointerPayload('mouseUp', point, 0, 1));
           }}
