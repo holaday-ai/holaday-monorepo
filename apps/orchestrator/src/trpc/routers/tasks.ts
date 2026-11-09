@@ -286,6 +286,8 @@ import {
   recordTaskModelSelection,
   runWithBrain,
 } from '../../llm/model-catalog.js';
+import { entryRequestFrom } from '../../llm/model-data-region-entry.js';
+import { settleFirstTaskModelDataRegion } from '../../llm/model-data-region-first-task.js';
 import {
   type ModelTaskUnavailableReason,
   createProductionModelRuntimeWiring,
@@ -1255,6 +1257,16 @@ export const tasksRouter = router({
       if (!userRow) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
+      // FIX-60 BOSS 决定: with the region choice off, the first task gives an account without a
+      // region the one of the entry it came in through, written once.
+      userRow.modelDataRegion = await settleFirstTaskModelDataRegion({
+        db: ctx.db,
+        actorExternalId: ctx.userId,
+        current: userRow.modelDataRegion,
+        request: entryRequestFrom(ctx.req),
+        environment: appEnv,
+        logger: ctx.logger,
+      });
       const continuationOf = input.publicCloudContinuationOf;
       if (continuationOf)
         assertPublicCloudContinuationRequest({

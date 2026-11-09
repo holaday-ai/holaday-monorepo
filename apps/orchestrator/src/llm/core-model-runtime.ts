@@ -30,8 +30,9 @@ export interface CoreModelRuntimeEnvironment extends QwenMessagesEnvironment {
   QWEN_RESPONSES_ADAPTER_ENABLED: boolean;
   /**
    * FIX-60 BOSS 决定 (2026-11-09): the 「选择任务处理区域」 step is off unless this is true. Off, an
-   * account (or organization) that never chose a region runs in MODEL_DATA_REGION_DEFAULT; one
-   * that chose keeps its choice. Nothing is written: turning the switch back on asks again.
+   * account's first task writes the region of its entry (llm/model-data-region-first-task.ts);
+   * until then — and for anything run before a first task — an account (or organization) without
+   * a region runs in MODEL_DATA_REGION_DEFAULT. One that chose keeps its choice.
    */
   MODEL_DATA_REGION_SELECTION_ENABLED?: boolean;
   /** The region an unassigned account runs in while the selection step is off (default cn). */
