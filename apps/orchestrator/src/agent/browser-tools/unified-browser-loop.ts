@@ -1,8 +1,12 @@
-import { stripToolCallBlocks } from '@holaday/shared-types';
+import {
+  isEnglishRequestText,
+  replyLanguageRule,
+  stripToolCallBlocks,
+} from '@holaday/shared-types';
 import { siteOf } from '../../browser-pool/egress-learning.js';
 import { logger } from '../../config/logger.js';
 import { namedSiteDomains } from '../../execution/source-domain-consistency.js';
-import { scrapedWall } from '../../firecrawl/scraped-page.js';
+import { scrapedErrorPage, scrapedWall } from '../../firecrawl/scraped-page.js';
 import type {
   MessagesAdapter,
   NeutralInputContentBlock,
@@ -102,7 +106,8 @@ ${FULL_READ_RULE_4}
 12. 查天气等实时数值时，结果页没有天气卡片就打开一个天气来源页面并读取（snapshot/get_page_text），每个值照该页原样写（页面写「82°」就写「82°」，不自己加单位或换算）；页面上读不到的项写「未读到」，不用搜索摘要或记忆补。
 13. 动作返回 stale_ref（ref 已失效）时，先 snapshot，再用新 ref 把同一个动作重做一次（同一个字段、同一个值），不要改用别的方式代替。
 14. summary 是写给用户看的，像跟人说话：不写「照页面原样」「名称：…；价格：…」这类格式说明，不提工具名；不要向用户说明价格、名称是不是按「原样 / 原文」记录的（不写「页面原样价格」「按页面原文保留」这类话），照页面写就是了；商品名太长时只写开头到关键规格那一段再加「…」（截取，不改字）；商品卡片没有主推价、只列了卖家报价时，说「这款没有主推价，有 N 个卖家报价 S$x」。
-15. 页面分了标签页或小节（如「大门票优惠政策」「钟表馆、珍宝馆票价优惠政策」）时，每个数字按它在页面上所属的那个标签页或小节来写，写清是哪一项的；轮播、标签切换的页面里，紧跟在标签名后面的那段不一定属于第一个标签。`;
+15. 页面分了标签页或小节（如「大门票优惠政策」「钟表馆、珍宝馆票价优惠政策」）时，每个数字按它在页面上所属的那个标签页或小节来写，写清是哪一项的；轮播、标签切换的页面里，紧跟在标签名后面的那段不一定属于第一个标签。
+16. 从搜索结果打开商品详情页去补价格时，价格要对准搜索结果里那一款：先用那一款卡片上的价格（没有主推价时就是「N options from 价格」或卖家报价）；详情页有颜色、尺寸、长度、容量等多个规格时，只能用和搜索结果那一款相同规格的价格，并在价格旁写明规格，不能拿详情页默认选中或别的规格的价格顶替。`;
 
 /** The system prompt for the current read mode: rule 4 follows `BROWSER_FULL_PAGE_READ`. */
 export function unifiedBrowserSystemPrompt(): string {
@@ -958,11 +963,12 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
       const request: Parameters<MessagesAdapter['create']>[0] = {
         // The finish turn writes the whole answer: it gets more room than an action turn.
         maxTokens: finishOnly ? FINISH_MAX_TOKENS : 4_096,
-        system:
-          unifiedBrowserSystemPrompt() +
-          (input.observationV2
+        // FIX-60 P0-2: which language the answer is in, said in so many words and last.
+        system: `${unifiedBrowserSystemPrompt()}${
+          input.observationV2
             ? '\n当前启用云端读取：每次交互带上 read_page 返回的 observationRevision/tabId/frameId；动作后重新读取，只有实际页面证据才能完成。cursor/ref 过期须重读。'
-            : ''),
+            : ''
+        }\n\n${replyLanguageRule(input.userIntent ?? input.intent)}`,
         messages: trimImages(compactToolResults(messages, input.fullPageResults)),
         tools: finishOnly
           ? CONTROL_TOOLS.filter((t) => t.name === 'finish')
@@ -2225,6 +2231,18 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             );
             continue;
           }
+          // FIX-60 P0-1: an error page (「服务器出现问题 请稍后重试」, 404, 503) is not the page either.
+          const errorPage = scrapedErrorPage(page.markdown, page.title);
+          if (errorPage) {
+            results.push(
+              toolResult(
+                call.id,
+                `读取到的是报错页（页面提示「${errorPage}」），不是正文；不能把它当作页面内容。请用浏览器重新打开这个页面，或如实说明没拿到什么。`,
+                true,
+              ),
+            );
+            continue;
+          }
           remember(JSON.stringify({ text: page.markdown, sourceURL: page.url }), page.url, true);
           trace.push({ tool: 'read_url', ok: true });
           results.push(
@@ -3122,9 +3140,9 @@ export function rescueSiteName(url: string | undefined): string {
  * 「这是从[京东手机版](…)查到的，不是你给的京东页面。」 The model's own 「部分完成：」 is folded in.
  */
 /** 复审 #7: an English task gets English from the code too. */
+/** FIX-60 P0-2: the request's main language (shared with the answer prompts and the web). */
 export function isEnglishIntent(intent: string): boolean {
-  const text = intent.replace(/https?:\/\/\S+/g, ' ');
-  return /[a-z]{3,}/i.test(text) && !/[\u3400-\u9fff]/.test(text);
+  return isEnglishRequestText(intent);
 }
 
 /** English names for the sites a rescue usually lands on. */

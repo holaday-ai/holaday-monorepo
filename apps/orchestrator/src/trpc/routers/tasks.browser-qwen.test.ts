@@ -46,6 +46,9 @@ it.each([
   'timeout',
   'disabled',
   'region',
+  // FIX-60 BOSS 决定: choice off, no region yet — the first task's entry decides and is written.
+  'entry-cn',
+  'entry-intl',
   'credentials',
   'executor',
   'local',
@@ -71,8 +74,14 @@ it.each([
     QWEN_CORE_ROLLOUT_MODE: scenario === 'disabled' ? 'off' : 'synthetic',
     QWEN_CORE_ENABLED_LANES: 'browser',
     QWEN_MESSAGES_ADAPTER_ENABLED: true,
-    DASHSCOPE_CN_API_KEY: scenario === 'credentials' ? '' : 'synthetic-cn',
-    DASHSCOPE_API_KEY: '',
+    // entry-cn has only the intl key and entry-intl only the cn key: each fails at the
+    // credential check of exactly the region its entry wrote, never the default one.
+    DASHSCOPE_CN_API_KEY:
+      scenario === 'credentials' || scenario === 'entry-cn' ? '' : 'synthetic-cn',
+    DASHSCOPE_API_KEY: scenario === 'entry-cn' ? 'synthetic-intl' : '',
+    // FIX-60: the 'region' case checks the region selection step itself (on, as before); off,
+    // an unassigned account runs in the default region (fix60.test.ts).
+    MODEL_DATA_REGION_SELECTION_ENABLED: scenario === 'region',
   });
   vi.spyOn(classifier, 'explainExecutionMode').mockResolvedValue({
     mode: isLocal ? 'generate' : 'browser',
@@ -280,6 +289,7 @@ it.each([
     } as unknown as ReturnType<typeof storageProvider.getSharedStorageProvider>);
   }
   const broadcast = vi.spyOn(extensionWs, 'broadcastToUser');
+  const regionWrites: unknown[] = [];
   const db = {
     select(projection: Record<string, unknown> = {}) {
       const rows =
@@ -290,7 +300,8 @@ it.each([
                 plan: 'pro',
                 selectedRoles: [],
                 selectedSkills: [],
-                modelDataRegion: scenario === 'region' ? null : 'cn',
+                modelDataRegion:
+                  scenario === 'region' || scenario.startsWith('entry-') ? null : 'cn',
               },
             ]
           : isV2 && 'status' in projection
@@ -343,9 +354,16 @@ it.each([
         return [];
       },
     }),
+    async transaction<T>(operation: (tx: unknown) => Promise<T>): Promise<T> {
+      return await operation(db);
+    },
     update: () => ({
       set: (values: Record<string, unknown>) => ({
         where: async () => {
+          if ('modelDataRegion' in values) {
+            regionWrites.push(values.modelDataRegion);
+            return [{ affectedRows: 1 }];
+          }
           if ((scenario === 'local' || scenario === 'ordinary') && 'evidenceJson' in values) {
             markPersistenceStarted();
             await persistenceGate;
@@ -359,7 +377,24 @@ it.each([
     db,
     logger,
     userId: 'usr_browser_qwen',
-    req: {},
+    req:
+      scenario === 'entry-cn'
+        ? {
+            socket: { remoteAddress: '127.0.0.1' },
+            headers: { 'x-real-ip': '47.99.169.186', host: 'hd-app.orangebench.tech' },
+          }
+        : scenario === 'entry-intl'
+          ? {
+              socket: { remoteAddress: '127.0.0.1' },
+              // A client-set X-Forwarded-For / CF-IPCountry naming the mainland changes nothing.
+              headers: {
+                'x-real-ip': '172.70.214.33',
+                host: 'holaday.ai',
+                'x-forwarded-for': '47.99.169.186',
+                'cf-ipcountry': 'CN',
+              },
+            }
+          : {},
     res: {},
     planner: {},
     playwrightExecutor: scenario === 'executor' || isLocal || isV2 ? null : executor,
@@ -461,7 +496,18 @@ it.each([
     expect(requests).toEqual([]);
     return;
   }
+  if (scenario === 'entry-cn' || scenario === 'entry-intl') {
+    expect(regionWrites).toEqual([scenario === 'entry-cn' ? 'cn' : 'intl']);
+    expect(result.status).toBe('failed');
+    expect(consume).not.toHaveBeenCalled();
+    expect(createAdapter).not.toHaveBeenCalled();
+    expect(terminal.mock.calls.at(-1)?.[1]).toMatchObject({
+      errorCode: 'REGION_SERVICE_NOT_CONFIGURED',
+    });
+    return;
+  }
   if (scenario === 'disabled' || scenario === 'region' || scenario === 'credentials') {
+    expect(regionWrites).toEqual([]);
     expect(result.status).toBe('failed');
     expect(consume).not.toHaveBeenCalled();
     expect(createAdapter).not.toHaveBeenCalled();

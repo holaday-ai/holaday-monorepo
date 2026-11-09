@@ -416,6 +416,7 @@ export function WorkbenchApp(): JSX.Element {
   }, []);
   const regionGatedSubmit = useRegionGatedTaskSubmit({
     region: me?.modelDataRegion ?? null,
+    selectionEnabled: me?.modelDataRegionSelection === true,
     assignRegion: assignModelDataRegion,
     refreshMe,
     submit: submitFreshTask,

@@ -28,6 +28,26 @@ export interface CoreModelRuntimeEnvironment extends QwenMessagesEnvironment {
   QWEN_CORE_ENABLED_LANES: string;
   QWEN_CORE_ALLOWLIST: string;
   QWEN_RESPONSES_ADAPTER_ENABLED: boolean;
+  /**
+   * FIX-60 BOSS 决定 (2026-11-09): the 「选择任务处理区域」 step is off unless this is true. Off, an
+   * account's first task writes the region of its entry (llm/model-data-region-first-task.ts);
+   * until then — and for anything run before a first task — an account (or organization) without
+   * a region runs in MODEL_DATA_REGION_DEFAULT. One that chose keeps its choice.
+   */
+  MODEL_DATA_REGION_SELECTION_ENABLED?: boolean;
+  /** The region an unassigned account runs in while the selection step is off (default cn). */
+  MODEL_DATA_REGION_DEFAULT?: 'cn' | 'intl';
+}
+
+/** The region an account that never chose one runs in, or null when it must choose first. */
+export function unassignedModelDataRegion(
+  environment: Pick<
+    CoreModelRuntimeEnvironment,
+    'MODEL_DATA_REGION_SELECTION_ENABLED' | 'MODEL_DATA_REGION_DEFAULT'
+  >,
+): 'cn' | 'intl' | null {
+  if (environment.MODEL_DATA_REGION_SELECTION_ENABLED === true) return null;
+  return environment.MODEL_DATA_REGION_DEFAULT ?? 'cn';
 }
 
 export interface CoreModelObservation {
@@ -103,10 +123,13 @@ export function resolveCoreModelRuntime(input: CoreModelRuntimeInput): CoreModel
   try {
     region = resolveModelDataRegionOwnership(input.ownership).region;
   } catch (error) {
-    if (error instanceof ModelDataRegionError) {
-      return { kind: 'unavailable', reason: 'MODEL_DATA_REGION_UNASSIGNED' };
-    }
-    throw error;
+    if (!(error instanceof ModelDataRegionError)) throw error;
+    const fallback =
+      error.code === 'INVALID_MODEL_DATA_REGION'
+        ? null
+        : unassignedModelDataRegion(input.environment);
+    if (!fallback) return { kind: 'unavailable', reason: 'MODEL_DATA_REGION_UNASSIGNED' };
+    region = fallback;
   }
 
   try {

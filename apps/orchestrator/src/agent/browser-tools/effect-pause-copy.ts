@@ -43,17 +43,21 @@ export function refName(snapshot: string, ref: string): string | null {
  * first line is kept, and it is cut at about 20.
  */
 const LABEL_MAX = 20;
-const tidy = (text: string) => {
+/** The control's name as one line, whole. */
+const oneLine = (text: string) => {
   const first =
     text
       .split(/\r?\n|\\n|\\r/)
       .map((line) => line.trim())
       .find((line) => line && !/^[…\s.]+$/.test(line)) ?? '';
-  const one = first
+  return first
     .replace(/\s+/g, ' ')
     .replace(/^["「]|["」]$/g, '')
     .replace(/\s*…$/, '')
     .trim();
+};
+const tidy = (text: string) => {
+  const one = oneLine(text);
   return one.length > LABEL_MAX ? `${one.slice(0, LABEL_MAX - 1)}…` : one;
 };
 
@@ -238,7 +242,12 @@ export function effectPauseQuestion(input: {
       ? raw
       : undefined;
   const action = input.action ? { ...input.action, label: label ?? null } : null;
-  const submitted = looksSubmitted(action, input.triggers);
+  // FIX-60 P2: whether it submits is read from the whole name — cut at 20, 「Reserve a table guide」
+  // lost its 「guide」 and read as the booking itself.
+  const submitted = looksSubmitted(
+    action && label ? { ...action, label: oneLine(input.action!.label!) } : action,
+    input.triggers,
+  );
   if (english) {
     const did =
       action?.tool === 'click'

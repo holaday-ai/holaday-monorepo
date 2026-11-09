@@ -13,6 +13,7 @@
  */
 import type { UiStep, UiTask } from '@/types/task';
 import { friendlyHost } from '@/utils/step-humanize';
+import { isEnglishRequestText } from '@holaday/shared-types';
 import { classifyFriendlyFailure } from './failure-copy';
 
 /**
@@ -438,10 +439,12 @@ const INTERNAL_CHECK_RE =
 const LIVE_ASK_RE =
   /价格|价钱|多少钱|报价|售价|库存|有货|现货|实时|现在|今天|最新|price|stock|in stock/i;
 
-/** 复审 #7: the turn speaks the task's language — an English task gets English. */
+/**
+ * 复审 #7: the turn speaks the task's language — an English task gets English. FIX-60 P0-2: the
+ * request's main language, the same rule the answer prompts follow.
+ */
 export function isEnglishTask(intent: string): boolean {
-  const text = intent.replace(/https?:\/\/\S+/g, ' ');
-  return /[a-z]{3,}/i.test(text) && !/[㐀-鿿]/.test(text);
+  return isEnglishRequestText(intent);
 }
 
 /** FIX-58 P1-5: the line above a failed task's ways on follows the task's language. */

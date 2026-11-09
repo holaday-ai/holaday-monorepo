@@ -60,6 +60,7 @@ import { detectNavFailure } from '../../agent/nav-failure-detector.js';
 import { generateNextStepsWithTitle } from '../../agent/next-steps-generator.js';
 import { isExplicitPlanApproval, isPurePlanHold } from '../../agent/plan-mode.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
+import { createAskedFieldJudge } from '../../agent/scrape-field-judge.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
 import {
   type SearchFallbackEvent,
@@ -285,6 +286,8 @@ import {
   recordTaskModelSelection,
   runWithBrain,
 } from '../../llm/model-catalog.js';
+import { entryRequestFrom } from '../../llm/model-data-region-entry.js';
+import { settleFirstTaskModelDataRegion } from '../../llm/model-data-region-first-task.js';
 import {
   type ModelTaskUnavailableReason,
   createProductionModelRuntimeWiring,
@@ -1254,6 +1257,16 @@ export const tasksRouter = router({
       if (!userRow) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
+      // FIX-60 BOSS 决定: with the region choice off, the first task gives an account without a
+      // region the one of the entry it came in through, written once.
+      userRow.modelDataRegion = await settleFirstTaskModelDataRegion({
+        db: ctx.db,
+        actorExternalId: ctx.userId,
+        current: userRow.modelDataRegion,
+        request: entryRequestFrom(ctx.req),
+        environment: appEnv,
+        logger: ctx.logger,
+      });
       const continuationOf = input.publicCloudContinuationOf;
       if (continuationOf)
         assertPublicCloudContinuationRequest({
@@ -4568,6 +4581,21 @@ export const tasksRouter = router({
               );
               const semanticVerifierAdapter =
                 verifierRuntime.kind === 'ready' ? verifierRuntime.messages('verify_strict') : null;
+              // FIX-60 复审 #1 #1: a small model reads, when the scraped answer is in doubt, whether
+              // it gives each asked field's value. The catalog sets every purpose of a lane to that
+              // lane's model (the verifier lane is qwen3.8-max), so the call runs on the plan lane,
+              // whose model is the small one (qwen3.8-flash).
+              const fieldJudgeRuntime = modelRuntimeWiring.resolveCore({
+                actorExternalId: ctx.userId,
+                lane: 'plan',
+                ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
+              });
+              const scrapeFieldJudge =
+                fieldJudgeRuntime.kind === 'ready'
+                  ? createAskedFieldJudge(fieldJudgeRuntime.messages('fast'), {
+                      logger: ctx.logger,
+                    })
+                  : undefined;
               const scrapeUnavailableReasonCode =
                 scrapeRuntime.kind === 'unavailable' ? scrapeRuntime.reasonCode : null;
               const fallbackGenerateUnavailableReasonCode =
@@ -4708,6 +4736,8 @@ export const tasksRouter = router({
                             expertWorkflow || typedWorkflow || isFollowUp
                               ? effectiveIntent
                               : input.intent,
+                          userIntent: input.intent,
+                          ...(scrapeFieldJudge ? { fieldJudge: scrapeFieldJudge } : {}),
                           skillId: dispatchSkillId,
                           expertMode: expertModeOverride,
                           responsesAdapter: scrapeResponsesAdapter,

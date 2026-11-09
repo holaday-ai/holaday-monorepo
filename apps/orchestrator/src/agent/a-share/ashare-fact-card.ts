@@ -11,6 +11,7 @@
  * 纯组合：传输经注入的 AkshareClient → 可用 fake client 完整单测（无需 Vultr）。
  */
 
+import { isEnglishRequestText } from '@holaday/shared-types';
 import type { AkshareClient } from './akshare-client.js';
 import {
   type AnnotateInput,
@@ -668,14 +669,47 @@ export function withoutDataSourceNames(text: string): string {
     .replace(/[ \t]{2,}/g, ' ');
 }
 
+/**
+ * FIX-60 复审 #1 建议: an index question asked in English is answered in English — the same
+ * data, time verdict and source, with the indexes by their English names.
+ */
+const INDEX_EN_NAMES: Readonly<Record<string, string>> = {
+  上证指数: 'Shanghai Composite',
+  深证成指: 'Shenzhen Component',
+  创业板指: 'ChiNext Index',
+};
+const INDEX_EN_FOCUS: ReadonlyArray<[RegExp, string]> = [
+  [/上证|沪指|沪市|shanghai|\bsse\b/i, '上证指数'],
+  [/深证|深成指|深市|shenzhen|\bszse\b/i, '深证成指'],
+  [/创业板|chinext/i, '创业板指'],
+];
+const SOURCE_EN_NAMES: Readonly<Record<string, string>> = {
+  新浪财经: 'Sina Finance',
+  东方财富: 'East Money',
+  同花顺: 'Tonghuashun (10jqka)',
+  百度股市通: 'Baidu Finance',
+  公开行情数据: 'public market data',
+};
+
+function moveWordsEn(v: unknown): string {
+  const n = toNum(v);
+  if (n === null) return 'change not available';
+  if (n === 0) return 'flat';
+  return `${n > 0 ? 'up' : 'down'} ${Math.abs(n).toFixed(2)}%`;
+}
+
 export async function buildIndexAnswer(
   deps: FactCardDeps & { quote?: AkEnvelope<IndexRow>; intent: string },
 ): Promise<string> {
   const now = deps.now ?? new Date();
   const env = deps.quote ?? (await deps.client.getIndexQuote('cn'));
+  const english = isEnglishRequestText(deps.intent);
   if (env.error || env.data.length === 0) {
-    return '我这边暂时没拿到三大指数的行情，稍后再问我一次，或者我去公开的行情页面帮你看。';
+    return english
+      ? "I couldn't get the three main A-share index quotes just now. Ask me again in a moment, or I can check a public quote page for you."
+      : '我这边暂时没拿到三大指数的行情，稍后再问我一次，或者我去公开的行情页面帮你看。';
   }
+  if (english) return buildIndexAnswerEn(deps, env, now);
   const rows = env.data.map((r) => ({
     name: String(pick(r, ['名称']) ?? '指数'),
     point: fmtNum(pick(r, ['最新价', '收盘'])),
@@ -732,6 +766,77 @@ export async function buildIndexAnswer(
   if (t.priorDayClock) lines.push('开盘后（9:30）我可以再帮你看实时点位。');
   lines.push(`数据来自${indexSourceName(env.source)}，可能有几分钟延迟。`);
   lines.push('*仅供参考，不构成投资建议。*');
+  return withoutDataSourceNames(lines.join('\n\n'));
+}
+
+async function buildIndexAnswerEn(
+  deps: FactCardDeps & { intent: string },
+  env: AkEnvelope<IndexRow>,
+  now: Date,
+): Promise<string> {
+  const rows = env.data.map((r) => {
+    const name = String(pick(r, ['名称']) ?? '指数');
+    return {
+      key: name,
+      name: INDEX_EN_NAMES[name] ?? name,
+      point: fmtNum(pick(r, ['最新价', '收盘'])),
+      move: moveWordsEn(pick(r, ['涨跌幅'])),
+    };
+  });
+  const focusKey = INDEX_EN_FOCUS.find(([re]) => re.test(deps.intent))?.[1];
+  const focus = focusKey ? rows.find((r) => r.key === focusKey) : undefined;
+  const others = rows.filter((r) => r !== focus);
+  const t = await indexQuoteTiming(deps.client, env, now);
+  const clock = fmtClock(t.when.toISOString());
+  const todayClose =
+    !!t.ownAt &&
+    beijingIso(t.ownAt) === beijingIso(now) &&
+    beijingMinutes(t.ownAt) >= 15 * 60 &&
+    beijingMinutes(now) >= 15 * 60;
+  let prevDay = 'the previous trading day';
+  if (t.priorDayClock) {
+    const yesterday = beijingIso(new Date(now.getTime() - 24 * 3600_000));
+    if ((await tradingDayKnown(deps.client, yesterday)) === true) prevDay = 'yesterday';
+  }
+  const say = (r: { name: string; point: string; move: string }) => {
+    if (t.day === null) return `the ${r.name} was last quoted at ${r.point}, ${r.move}`;
+    if (t.priorDayClock) return `the ${r.name} closed ${prevDay} at ${r.point}, ${r.move}`;
+    if (t.day === true && !t.stale) return `the ${r.name} is at ${r.point}, ${r.move}`;
+    if (t.day === true) return `the ${r.name} was last quoted at ${r.point}, ${r.move}`;
+    if (todayClose) return `the ${r.name} closed today at ${r.point}, ${r.move}`;
+    return `the ${r.name} closed the last trading day at ${r.point}, ${r.move}`;
+  };
+  const opener = t.priorDayClock
+    ? "The market hasn't opened yet: "
+    : t.day === false
+      ? todayClose
+        ? 'The market has closed: '
+        : "It's outside trading hours: "
+      : '';
+  const when =
+    t.day === null
+      ? ` (read at ${t.stamp} Beijing time; I couldn't confirm whether today is a trading day)`
+      : t.day === true && !t.stale
+        ? ` (intraday, as of ${clock} Beijing time; the market hasn't closed)`
+        : t.day === true
+          ? ` (quote from ${t.stamp} Beijing time, not real-time)`
+          : '';
+  const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+  const lead = (text: string) => (opener ? `${opener}${text}` : capital(text));
+  const short = (r: { name: string; point: string; move: string }) =>
+    `the ${r.name} ${r.point} (${r.move})`;
+  const lines: string[] = [];
+  if (focus) {
+    lines.push(`${lead(say(focus))}${when}.`);
+    if (others.length) lines.push(`Also, ${others.map(short).join(', ')}.`);
+  } else {
+    lines.push(`${lead(rows.map((r) => say(r)).join('; '))}${when}.`);
+  }
+  if (t.priorDayClock)
+    lines.push('After the market opens at 9:30 Beijing time I can check the live level for you.');
+  const source = SOURCE_EN_NAMES[indexSourceName(env.source)] ?? 'public market data';
+  lines.push(`Data from ${source}; it may be delayed by a few minutes.`);
+  lines.push('*For reference only, not investment advice.*');
   return withoutDataSourceNames(lines.join('\n\n'));
 }
 

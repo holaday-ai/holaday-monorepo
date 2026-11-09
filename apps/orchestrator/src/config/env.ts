@@ -316,6 +316,26 @@ const baseEnvSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((value) => value === 'true'),
+  /**
+   * FIX-60 BOSS 决定 (2026-11-09): the 「选择任务处理区域」 dialog and the one-time region choice are
+   * off by default. Off, an account that never chose gets the region of the entry its first task
+   * came in through, written once (see llm/model-data-region-entry.ts); an account that chose keeps
+   * its choice. `true` brings the step back unchanged.
+   */
+  MODEL_DATA_REGION_SELECTION_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  MODEL_DATA_REGION_DEFAULT: z.enum(['cn', 'intl']).default('cn'),
+  /**
+   * Where the Aliyun edge connects to the Vultr nginx from (the nginx writes it into X-Real-IP).
+   * A first task from one of these addresses gives the account cn.
+   */
+  MODEL_DATA_REGION_CN_EDGE_IPS: z.string().default('47.99.169.186'),
+  /** Browser-facing hosts of the international entry: a first task through one of them is intl. */
+  MODEL_DATA_REGION_INTL_HOSTS: z.string().default('holaday.ai,www.holaday.ai'),
+  /** Browser-facing hosts of the mainland entry (a request naming one off the edge is unknown). */
+  MODEL_DATA_REGION_CN_HOSTS: z.string().default('hd-app.orangebench.tech'),
   /** Synthetic benchmark lane only. It is not wired to production task execution. */
   QWEN_SHADOW_EVAL_ENABLED: z
     .enum(['true', 'false'])

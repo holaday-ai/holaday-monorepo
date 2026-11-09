@@ -14,6 +14,12 @@ export interface NormalizedAuthMeProfile {
   readonly teamProjectsEnabled: boolean;
   readonly teamTaskLifecycleEnabled: boolean;
   readonly modelDataRegion: 'cn' | 'intl' | null;
+  /**
+   * FIX-60 BOSS 决定: whether a region must be chosen before the first task. Off (the default,
+   * also when the server does not say) the dialog never opens and the server uses its default
+   * region for an account that never chose.
+   */
+  readonly modelDataRegionSelection: boolean;
 }
 
 export function normalizeAuthMeProfile(value: unknown): NormalizedAuthMeProfile {
@@ -33,6 +39,7 @@ export function normalizeAuthMeProfile(value: unknown): NormalizedAuthMeProfile 
     teamTaskLifecycleEnabled: raw.teamTaskLifecycleEnabled === true,
     modelDataRegion:
       raw.modelDataRegion === 'cn' || raw.modelDataRegion === 'intl' ? raw.modelDataRegion : null,
+    modelDataRegionSelection: raw.modelDataRegionSelection === true,
   };
 }
 

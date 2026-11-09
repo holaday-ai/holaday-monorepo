@@ -17,6 +17,7 @@ describe('auth.me state helpers', () => {
         teamProjectsEnabled: true,
         teamTaskLifecycleEnabled: true,
         modelDataRegion: 'intl',
+        modelDataRegionSelection: true,
       }),
     ).toEqual({
       userId: 'u1',
@@ -31,6 +32,7 @@ describe('auth.me state helpers', () => {
       teamProjectsEnabled: true,
       teamTaskLifecycleEnabled: true,
       modelDataRegion: 'intl',
+      modelDataRegionSelection: true,
     });
   });
 
@@ -48,6 +50,7 @@ describe('auth.me state helpers', () => {
       teamProjectsEnabled: false,
       teamTaskLifecycleEnabled: false,
       modelDataRegion: null,
+      modelDataRegionSelection: false,
     });
     expect(
       normalizeAuthMeProfile({

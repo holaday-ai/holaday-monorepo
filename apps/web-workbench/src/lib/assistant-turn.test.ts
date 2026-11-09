@@ -7,6 +7,7 @@ import {
   elapsedLabel,
   failureOwnWords,
   failureTurn,
+  isEnglishTask,
   liveStatusText,
   normalizeNextSteps,
   offerKind,
@@ -396,5 +397,27 @@ describe('复审 #3', () => {
     expect(captchaRequestLine('知乎')).toBe(
       '知乎要求先做人机验证，请在浏览器画面里完成（只能你本人操作），完成后我会自动接着做，最多等 10 分钟。',
     );
+  });
+});
+
+describe('FIX-60 P0-2: the task language is the request’s main language', () => {
+  it('复审 #1 #2: an asked-for language, names that do not count, Chinese verbs and particles', () => {
+    expect(isEnglishTask('帮我查 iPhone 16 Pro price')).toBe(false);
+    expect(isEnglishTask('USB C cable 价格')).toBe(false);
+    expect(isEnglishTask("What is 故宫's ticket price")).toBe(true);
+    expect(isEnglishTask('请用英语回答：故宫门票多少钱')).toBe(true);
+    expect(isEnglishTask('翻译成英文：今天天气很好')).toBe(false);
+    expect(isEnglishTask('translate to Chinese: hello world')).toBe(true);
+  });
+
+  it('a mixed request follows its main language, as the answer does', () => {
+    expect(isEnglishTask('Write a short story about a 程序员')).toBe(true);
+    expect(isEnglishTask('在 BestBuy 搜 usb c cable 告诉我第一个结果')).toBe(false);
+    expect(
+      isEnglishTask('请使用云端浏览器，YouTube 搜索「Playwright tutorial」返回前5个视频标题'),
+    ).toBe(false);
+    expect(
+      isEnglishTask('Summarize https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404'),
+    ).toBe(true);
   });
 });

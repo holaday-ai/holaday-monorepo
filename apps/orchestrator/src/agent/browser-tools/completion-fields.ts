@@ -3,6 +3,7 @@ import { stripInternalRefs } from '../internal-refs.js';
 import { staleForRecentIntent, uncoveredTargets } from './completion-coverage.js';
 import { assessEngagementClaims } from './engagement-counts.js';
 import { misattributedPrices } from './section-attribution.js';
+import { searchCardPriceMismatches, unmatchedVariantPrices } from './variant-price.js';
 
 export interface ObservedEvidence {
   text: string;
@@ -1384,6 +1385,22 @@ export function assessCompletionFacts(input: {
       input.pages.map((page) => unescapeLiteralBreaks(page.text)),
     ),
   );
+  // FIX-60 P1: a price from a product page's variant selector is that variant's — the searched
+  // item's only when the answer says which, or another page (its search card) shows it too.
+  contradictions.push(
+    ...unmatchedVariantPrices(
+      unescapeLiteralBreaks(input.summary),
+      input.pages.map((page) => unescapeLiteralBreaks(page.text)),
+    ),
+  );
+  // FIX-60 复审 #1 #3: …and the search card it was found on comes along: not below its 「from」
+  // price without a variant, not another variant than the card's.
+  contradictions.push(
+    ...searchCardPriceMismatches(
+      unescapeLiteralBreaks(input.summary),
+      input.pages.map((page) => unescapeLiteralBreaks(page.text)),
+    ),
+  );
   // FIX-29: a like/comment/favourite/share number must be that counter's, not the icon next to it.
   contradictions.push(
     ...assessEngagementClaims(
@@ -1682,8 +1699,12 @@ const VALUE_EDGES_RE = /^[\s*_`「『“"《'‘]+|[\s*_`」』”"》'’]+$/g;
 const OTHER_ITEM_RE = /推荐|相关|其他|其余|另一|别的|跳转/;
 const OTHER_PLACE_WORDS = ['首页', '热门', '第一个视频', '第1个视频'];
 
+/** FIX-60 P0-1: quoted text (a title 「…#抖音推荐官」) is the item's own, not a turn to another one. */
+const QUOTED_SPAN_RE = /「[^」\n]*」|『[^』\n]*』|《[^》\n]*》|“[^”\n]*”|"[^"\n]*"/g;
+
 function otherItemAt(sentence: string, placeWords: string[]): number {
-  const at = [sentence.search(OTHER_ITEM_RE), ...placeWords.map((w) => sentence.indexOf(w))].filter(
+  const bare = sentence.replace(QUOTED_SPAN_RE, (q) => ' '.repeat(q.length));
+  const at = [bare.search(OTHER_ITEM_RE), ...placeWords.map((w) => bare.indexOf(w))].filter(
     (i) => i >= 0,
   );
   return at.length ? Math.min(...at) : -1;
@@ -1699,8 +1720,54 @@ function otherItemAt(sentence: string, placeWords: string[]): number {
 export function everyAskedFieldGiven(intent: string, summary: string): boolean {
   const asked = askedFields(intent);
   if (!asked.length || declaredAbsentFields(intent, summary).length) return false;
+  return missingAskedFields(intent, summary).length === 0;
+}
+
+const TABLE_ROW_RE = /^\s*\|(.+)\|\s*$/;
+const TABLE_RULE_RE = /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+
+/**
+ * FIX-60 P0-1: a Markdown table read as 「字段：值」 lines, both ways — a key–value table
+ * (「| 标题 | 西湖一日游攻略 |」) and a header over values (「| 点赞 | 评论 |」 over 「| 20 | 2 |」).
+ * The other reading of each adds nothing a field is looked up by. Lines outside tables stay.
+ */
+function withTablesAsFields(text: string): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!TABLE_ROW_RE.test(lines[i]!) || !TABLE_RULE_RE.test(lines[i + 1] ?? '')) {
+      out.push(lines[i]!);
+      continue;
+    }
+    const cells = (line: string) =>
+      TABLE_ROW_RE.exec(line)![1]!
+        .split('|')
+        .map((cell) => cell.replace(/\*\*|__/g, '').trim());
+    const header = cells(lines[i]!);
+    let k = i + 2;
+    for (; k < lines.length && TABLE_ROW_RE.test(lines[k]!); k += 1) {
+      const row = cells(lines[k]!);
+      if (row.length >= 2) out.push(`${row[0]}：${row.slice(1).join('，')}`);
+      out.push(header.map((name, c) => `${name}：${row[c] ?? ''}`).join('\n'));
+    }
+    i = k - 1;
+  }
+  return out.join('\n');
+}
+
+/**
+ * FIX-60 P0-1: the fields the request names that the answer gives no value of its own for — a
+ * count without its number, any other field without a value after 「：」「为」「是」, a missing
+ * marker or a placeholder, a value said of another item (推荐 / 相关 / 其他…), or one value said of
+ * every field. The scrape lane counts them against what was asked: most of them missing is not
+ * an answer, whatever the answer's wording.
+ */
+export function missingAskedFields(intent: string, summary: string): string[] {
+  const asked = askedFields(intent);
+  if (!asked.length) return [];
   const placeWords = OTHER_PLACE_WORDS.filter((w) => !intent.includes(w));
-  const own = unescapeLiteralBreaks(summary)
+  const text = withTablesAsFields(unescapeLiteralBreaks(summary));
+  const own = text
     .split(/(?<=[。！？!?\n])/)
     .map((sentence) => {
       const other = otherItemAt(sentence, placeWords);
@@ -1718,11 +1785,13 @@ export function everyAskedFieldGiven(intent: string, summary: string): boolean {
   // them — except 0, a real count.
   const first = values.map((v) => v[0]);
   if (asked.length > 1 && first.every((v) => v && v === first[0]) && !/^0+$/.test(first[0]!))
-    return false;
-  return asked.every((name, i) => {
+    return [...asked];
+  const absent = new Set(declaredAbsentFields(intent, text));
+  return asked.filter((name, i) => {
+    if (absent.has(name)) return true;
     const count = countState(own, name);
-    if (count) return count === 'value';
-    return values[i]!.some(
+    if (count) return count !== 'value';
+    return !values[i]!.some(
       (value) => !!value && !NO_VALUE_RE.test(value) && !PLACEHOLDER_RE.test(value),
     );
   });

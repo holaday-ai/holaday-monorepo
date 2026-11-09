@@ -9,6 +9,7 @@ import { MfaError, MfaService } from '../../auth/mfa-service.js';
 import { authenticateAccessTokenSession } from '../../auth/middleware.js';
 import { AuthError, AuthService } from '../../auth/service.js';
 import { issueSessionAccessToken, revokeAllSessions, revokeSession } from '../../auth/sessions.js';
+import { env as appEnv } from '../../config/env.js';
 import { users } from '../../db/schema/users.js';
 import {
   ModelDataRegionAssignmentError,
@@ -487,6 +488,9 @@ export const authRouter = router({
       // render the "管理后台" sidebar entry + the /admin guard.
       role: row.role as 'user' | 'admin',
       modelDataRegion: row.modelDataRegion,
+      // FIX-60 BOSS 决定: whether the SPA asks for a region before the first task (off by default;
+      // an account that never chose then runs in the deployment's default region).
+      modelDataRegionSelection: appEnv.MODEL_DATA_REGION_SELECTION_ENABLED,
       // Phase 1 #4 — video-creation gradual-rollout gate. The SPA reads
       // this to show/hide the「视频任务」sidebar entry + guard /video.
       // Single source with the tasks.ts fork (agent/video/video-access.ts).

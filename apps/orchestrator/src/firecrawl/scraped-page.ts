@@ -90,6 +90,104 @@ export function scrapedWall(markdown: string, title?: string): string | null {
   return hit && text.length < 600 ? hit[0] : null;
 }
 
+/**
+ * FIX-60 P0-1: wording an error page shows in place of the page — a server error, 「请稍后重试」, a
+ * missing page, a gateway or Cloudflare error. In a long article it is a topic (MDN's 404 page);
+ * as most of a short page it is the page.
+ */
+const ERROR_PAGE_RE =
+  /服务器(?:出现|出了|开)?(?:问题|错误|异常|小差)|服务(?:暂时)?不可用|系统(?:繁忙|异常|错误)|网络(?:不给力|异常|错误|开小差)|请稍后(?:重试|再试)|稍后再试|(?:页面|内容|视频|笔记|商品|文章)(?:不存在|找不到|走丢了?|已(?:被)?删除|已下架|加载失败|出错了?)|出错了|访问出错|\b(?:404|410)\b[^\n]{0,20}?(?:not found|page|页面|找不到)|page not found|this page (?:isn't|is not|could not be) (?:available|found)|\b50[0234]\b[^\n]{0,24}?(?:error|service|bad gateway|gateway|unavailable|internal)|internal server error|bad gateway|service (?:temporarily )?unavailable|gateway time-?out|\berror (?:code:? ?)?(?:5\d\d|10\d\d|52\d)\b|cloudflare ray id|\bray id\b|something went wrong|an error (?:has )?occurred|access denied/i;
+/**
+ * Wording only an error page carries (a Cloudflare error page, a web server's own 5xx page): near
+ * the top of a page that is not long, it is the page whatever its explanation runs to.
+ */
+const STRONG_ERROR_RE =
+  /\berror code:?\s*(?:5\d\d|10\d\d)\b|cloudflare ray id|\b(?:500 internal server error|502 bad gateway|503 service (?:temporarily )?unavailable|504 gateway time-?out)\b/i;
+const STRONG_ERROR_HEAD = 600;
+const STRONG_ERROR_MAX_TEXT = 2000;
+/** An error status (any 4xx / 5xx that `wallStatus` does not already hand over as a wall). */
+const ERROR_STATUS = (code: number | undefined) => code !== undefined && code >= 400;
+/** A page that has little of its own to say: at most this much text outside links and images. */
+const ERROR_PAGE_MAX_TEXT = 400;
+
+/**
+ * The page's own text: links (navigation, a recommended-video list beside a missing video) and
+ * images taken out, repeated lines once.
+ */
+function ownText(markdown: string): string {
+  const lines = markdown
+    .replace(MARKDOWN_IMAGE, '')
+    .replace(MARKDOWN_LINK, '')
+    .split('\n')
+    .map((line) =>
+      line
+        .replace(/^\s{0,3}#{1,6}\s+/, '')
+        .replace(/^\s*(?:[*+-]|>|\d+[.)])\s+/, '')
+        .replace(/\*\*|__|`/g, '')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    )
+    .filter((line) => /[\p{L}\p{N}]/u.test(line));
+  return [...new Set(lines)].join('\n');
+}
+
+/**
+ * FIX-60 P0-1 (DEPLOY-59 dy-1 / reg-dy-2: Douyin answered 「服务器出现问题 请稍后重试」 in place of the
+ * video, beside a list of recommended videos): a fetched "page" that is an error page — an error
+ * status, or a short page (its own text, links aside) whose title or text is an error message. The
+ * scrape then has nothing to answer from: the cloud browser gets the page.
+ * A long page that talks about errors (MDN's 404 article) is a page; so is a short page with no
+ * error message.
+ */
+export function scrapedErrorPage(
+  markdown: string,
+  title?: string,
+  statusCode?: number,
+): string | null {
+  if (ERROR_STATUS(statusCode) && !wallStatus(statusCode)) return `HTTP ${statusCode}`;
+  const own = ownText(markdown);
+  if (own.length <= STRONG_ERROR_MAX_TEXT) {
+    const strong =
+      STRONG_ERROR_RE.exec(own.slice(0, STRONG_ERROR_HEAD)) ??
+      (title ? STRONG_ERROR_RE.exec(title) : null);
+    if (strong) return strong[0];
+  }
+  if (own.length > ERROR_PAGE_MAX_TEXT) return null;
+  // FIX-60 复审 #1 建议: the error message is the page only as a notice standing on its own line
+  // (「服务器出现问题」「请稍后重试」「404 Not Found」), not as the topic of a short page about it
+  // (「Access Denied 是一首歌」「Something Went Wrong 专辑」「404 页面设计」). The title alone says so
+  // only when the page has next to nothing else to say.
+  // A page that also talks about the message (「Access Denied 是一首歌」 under its 「Access Denied」
+  // heading) is about it, not showing it.
+  const notices = own.split('\n').filter((line) => ERROR_PAGE_RE.test(line));
+  if (notices.some((line) => !bareNotice(line))) return null;
+  const notice = notices.map((line) => ERROR_PAGE_RE.exec(line)).find(Boolean);
+  if (notice) return notice[0];
+  // A title's site suffix (「页面不存在 - 某站」「Access Denied | Example」) is not part of its notice.
+  const titleHead = title?.split(/\s+[-|–—_]\s+|\s*｜\s*/)[0];
+  if (title && titleHead && own.length <= TITLE_ONLY_MAX_TEXT && bareNotice(titleHead)) {
+    const hit = ERROR_PAGE_RE.exec(title);
+    if (hit) return hit[0];
+  }
+  return null;
+}
+
+/** Words an error notice carries beside its message: retry, refresh, go back, an error code. */
+const NOTICE_FILLER_RE =
+  /请|稍后|重试|再试|刷新|返回首页|返回|首页|错误代码|错误码|抱歉|对不起|哎呀|啊哦|please|try again|later|refresh|reload|go back|back to|home(?:page)?|sorry|oops|error code|code|nginx|apache|cloudflare/gi;
+/** Text that is a notice and nothing more: a site name, an error code and punctuation aside. */
+const TITLE_ONLY_MAX_TEXT = 80;
+
+function bareNotice(line: string): boolean {
+  const rest = line
+    .replace(new RegExp(ERROR_PAGE_RE.source, 'gi'), ' ')
+    .replace(NOTICE_FILLER_RE, ' ')
+    .replace(/[\s\p{P}\p{S}\d]+/gu, '')
+    // A site's name after the message (「页面不存在 - 抖音」「Access Denied | Example」).
+    .replace(/^(?:抖音|小红书|微博|知乎|淘宝|京东|bilibili|哔哩哔哩|youtube|amazon)$/i, '');
+  return rest.length === 0;
+}
+
 /** Firecrawl's own reading of the target's answer: these statuses are walls, not pages. */
 export function wallStatus(statusCode: number | undefined): boolean {
   return statusCode === 401 || statusCode === 403 || statusCode === 429 || statusCode === 503;
