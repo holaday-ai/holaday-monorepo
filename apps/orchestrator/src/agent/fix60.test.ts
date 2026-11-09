@@ -536,14 +536,12 @@ describe('FIX-60 复审 #1 #2: an asked-for language first, then the main langua
   it('a translation: the translation in the target, anything around it in the instruction’s language', () => {
     const zh = replyPlan('翻译成英文：今天天气很好', 'cn');
     expect(zh).toMatchObject({ language: 'zh', translation: { target: '英文' } });
-    expect(replyLanguageRule(zh)).toMatch(
-      /^这是翻译任务：译文本身用英文写；译文以外的说明（如果有）用中文/,
-    );
+    expect(replyLanguageRule(zh)).toContain('本次是翻译：译文用英文。');
     expect(replyLanguageRule(zh)).not.toContain('整段回答');
     const en = replyPlan('translate to Chinese: hello world', 'cn');
     expect(en).toMatchObject({ language: 'en', translation: { target: 'Chinese' } });
-    expect(replyLanguageRule('translate to Chinese: hello world')).toMatch(
-      /^This is a translation request: write the translation itself in Chinese; .* in English\./,
+    expect(replyLanguageRule('translate to Chinese: hello world')).toContain(
+      'This time it is a translation: the translation is in Chinese.',
     );
     expect(requestLanguage('Please translate this into English: 你好世界')).toBe('en');
   });
@@ -560,9 +558,8 @@ describe('FIX-60 复审 #1 #2: an asked-for language first, then the main langua
         const plan = replyPlan(text, 'cn');
         expect(plan, text).toMatchObject({ language: 'zh', writing: { target, piece } });
         const rule = replyLanguageRule(text, 'cn');
-        expect(rule).toBe(
-          `这是写作任务，用户指定了语言：要写的${piece}本身全部用${target}写；${piece}以外的说明（如果有）用中文。名称和数字照原样。`,
-        );
+        expect(rule).toContain(`本次要写的${piece}用${target}。`);
+        expect(rule).toContain('1. 你对用户说的话');
         // Not 「整段回答都用中文」.
         expect(rule).not.toContain('整段回答');
         expect(requestLanguage(text)).toBe('zh');
@@ -572,9 +569,7 @@ describe('FIX-60 复审 #1 #2: an asked-for language first, then the main langua
         language: 'en',
         writing: { target: 'Chinese', piece: 'cover letter' },
       });
-      expect(replyLanguageRule(en)).toMatch(
-        /^This is a writing request .*write the cover letter itself entirely in Chinese; .* in English\./,
-      );
+      expect(replyLanguageRule(en)).toContain('This time the cover letter is written in Chinese.');
       expect(isEnglishRequestText('write a cover letter in Chinese')).toBe(true);
       expect(writingRequest('Draft an English email to my landlord')).toEqual({
         target: 'English',
@@ -608,7 +603,69 @@ describe('FIX-60 复审 #1 #2: an asked-for language first, then the main langua
         logger: pino({ level: 'silent' }),
       });
       expect(firstInstructions(adapter).endsWith(replyLanguageRule(intent))).toBe(true);
-      expect(firstInstructions(adapter)).toContain('邮件本身全部用英文写');
+      expect(firstInstructions(adapter)).toContain('本次要写的邮件用英文。');
+    });
+  });
+
+  describe('DEPLOY-60 协调方核对 必须修 1: one two-part rule for every request', () => {
+    const ZH_TALK = '1. 你对用户说的话（说明、提问、总结、标题、列表、追问建议、失败说明）用中文。';
+    const ZH_PRODUCE =
+      '2. 用户要你产出的文本（译文、改写或润色后的原文、指定了语言的邮件或文章），用用户指定的语言；没指定时，用原文的语言；没有原文时用中文。';
+    const EN_TALK =
+      '1. What you say to the user (explanations, questions, summaries, headings, lists, follow-up suggestions, failure explanations) is in English';
+    const EN_PRODUCE =
+      '2. Text the user asks you to produce (a translation, a rewritten or polished version of their text, an email or article in a language they name) is in the language the user names; if they name none, in the language of the original text; if there is no original text, in English.';
+
+    it('rewriting or polishing an original: what is said to the user in its language, the text in the original’s', () => {
+      for (const text of [
+        '帮我把这封英文邮件改得更礼貌：Dear John, send me the file now.',
+        '把这段英文改得更地道：I very like it.',
+        '帮我写个英文版的周报',
+      ]) {
+        const rule = replyLanguageRule(text, 'cn');
+        expect(rule, text).toContain(ZH_TALK);
+        expect(rule, text).toContain(ZH_PRODUCE);
+        expect(rule, text).not.toContain('整段');
+        expect(rule, text).not.toContain('Answer language: English');
+      }
+      expect(replyPlan('帮我写个英文版的周报', 'cn').writing).toEqual({
+        target: '英文',
+        piece: '周报',
+      });
+      const polish = replyLanguageRule(
+        'Polish this Chinese paragraph: 我们的产品很好用，大家都喜欢。',
+        'cn',
+      );
+      // The Chinese paragraph outweighs the short English instruction, so what is said around
+      // it is Chinese (detection unchanged); the paragraph itself stays Chinese by part 2 either way.
+      expect(polish).toContain(ZH_TALK);
+      expect(polish).toContain(ZH_PRODUCE);
+      expect(polish).not.toContain('整段');
+      const polishEn = replyLanguageRule(
+        'Polish this Chinese paragraph for me, please, and tell me what you changed: 我们的产品很好用。',
+        'cn',
+      );
+      expect(polishEn).toContain(EN_TALK);
+      expect(polishEn).toContain(EN_PRODUCE);
+      expect(polishEn).not.toMatch(/whole answer|entirely in/);
+    });
+
+    it('every request gets the same two parts: plain questions, asked-for languages, translations, writing', () => {
+      for (const [text, talk, produce] of [
+        ['iPhone 16 Pro Max 256GB 多少钱', ZH_TALK, ZH_PRODUCE],
+        ['用英文回答：故宫门票多少钱', EN_TALK, EN_PRODUCE],
+        ['Write a short story about a programmer working late at night', EN_TALK, EN_PRODUCE],
+        ['翻译成英文：今天天气很好', ZH_TALK, ZH_PRODUCE],
+        ['写一封英文邮件给客户，说明发货延迟两天', ZH_TALK, ZH_PRODUCE],
+        ['write a cover letter in Chinese', EN_TALK, EN_PRODUCE],
+      ] as const) {
+        const rule = replyLanguageRule(text, 'cn');
+        expect(rule, text).toContain(talk);
+        expect(rule, text).toContain(produce);
+        expect(rule, text).not.toMatch(/整段|whole answer|entirely in/);
+      }
+      expect(replyLanguageRule('zh')).toContain(ZH_TALK);
+      expect(replyLanguageRule('en')).toContain(EN_TALK);
     });
   });
 
@@ -745,10 +802,45 @@ describe('FIX-60 复审 #1 #3: the search card comes along to the detail page', 
       expect(searchCardPriceMismatches(tied('白色 200cm S$8.21'), [TIED])).toEqual([]);
     });
 
-    it('at or above the lowest from price is kept; a tied card with no from price checks no price', () => {
+    it('at or above the lowest from price is kept; one tied card with a from price is enough to check', () => {
       expect(searchCardPriceMismatches(tied('S$7.80'), [TIED])).toEqual([]);
+      // 协调方核对 必须修 2: the other tied card shows a plain price, not a from price — the from
+      // price is still checked, and the plain card's own price is still that card's.
       const plain = TIED.replace('3 options from S$7.50', 'S$5.00');
-      expect(searchCardPriceMismatches(tied('S$6.86'), [plain])).toEqual([]);
+      expect(searchCardPriceMismatches(tied('S$6.86'), [plain])[0]).toMatch(
+        /S\$6\.86.*起价「S\$8\.21」/,
+      );
+      expect(searchCardPriceMismatches(tied('S$5.00'), [plain])).toEqual([]);
+    });
+
+    it('协调方核对 必须修 2: a detail page’s heading is not a search card (the Belkin case)', () => {
+      const search = [
+        '1-48 of 303 results for "usb c cable"',
+        'Belkin Braided USB-A to USB-C Cable, White 200cm',
+        '2 options from S$8.21',
+      ].join('\n');
+      const detail = [
+        'Belkin Braided USB-A to USB-C Cable',
+        'Brand: Belkin',
+        'S$6.86',
+        'Colour Name: Black',
+        'Black',
+        'White',
+        'About this item',
+      ].join('\n');
+      const answer = '3. Belkin Braided USB-A to USB-C Cable — S$6.86';
+      const out = searchCardPriceMismatches(answer, [search, detail]);
+      expect(out).toHaveLength(1);
+      expect(out[0]).toMatch(/S\$6\.86.*起价「S\$8\.21」/);
+      // The card's own price, or its variant named, is still the answer's.
+      expect(
+        searchCardPriceMismatches('3. Belkin Braided USB-A to USB-C Cable — S$8.21', [
+          search,
+          detail,
+        ]),
+      ).toEqual([]);
+      // Only a detail page read: its heading is all there is, and no from price to hold to.
+      expect(searchCardPriceMismatches(answer, [detail])).toEqual([]);
     });
   });
 

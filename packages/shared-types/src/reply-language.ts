@@ -77,7 +77,7 @@ const WRITING_LANG_EN =
   'english|chinese|mandarin|japanese|korean|french|german|spanish|russian|italian|portuguese|arabic|thai|vietnamese|malay|indonesian';
 /** Pieces of writing (the product is the piece, not the answer around it). */
 const WRITING_PIECE_ZH =
-  '邮件|电邮|信件|求职信|推荐信|感谢信|道歉信|邀请函|贺卡|信|简历|履历|自我介绍|个人介绍|个人简介|简介|介绍信|介绍|文案|广告语|标语|口号|文章|短文|作文|故事|小说|诗歌|诗|演讲稿|发言稿|讲稿|致辞|祝福语|祝福|产品描述|描述|摘要|总结|报告|段落|一段话|回复|评论|帖子|推文|标题|对话|台词|歌词|通知|公告|声明|合同|协议|提案|计划书|说明书|说明';
+  '邮件|电邮|周报|日报|月报|信件|求职信|推荐信|感谢信|道歉信|邀请函|贺卡|信|简历|履历|自我介绍|个人介绍|个人简介|简介|介绍信|介绍|文案|广告语|标语|口号|文章|短文|作文|故事|小说|诗歌|诗|演讲稿|发言稿|讲稿|致辞|祝福语|祝福|产品描述|描述|摘要|总结|报告|段落|一段话|回复|评论|帖子|推文|标题|对话|台词|歌词|通知|公告|声明|合同|协议|提案|计划书|说明书|说明';
 const WRITING_PIECE_EN =
   'e-?mails?|letters?|cover letters?|resumes?|résumés?|cvs?|bios?|biograph(?:y|ies)|self-introductions?|introductions?|essays?|articles?|stor(?:y|ies)|poems?|speech(?:es)?|posts?|tweets?|captions?|descriptions?|summar(?:y|ies)|reports?|messages?|notes?|announcements?|invitations?|proposals?|scripts?|toasts?|blurbs?|slogans?|headlines?|paragraphs?';
 const WRITING_VERB_ZH = '写|撰写|起草|拟|拟写|编写|写作|准备|生成|做';
@@ -258,6 +258,15 @@ export function isEnglishRequestText(text: string): boolean {
  * The line every answering prompt ends with: which language this answer is in. Last in the
  * prompt so no earlier Chinese instruction or Chinese page text outweighs it. Takes the request
  * itself (and the region for when its words do not tell), or an already-decided language.
+ *
+ * DEPLOY-60 协调方核对 必须修 1: one way of writing it for every request, two parts —
+ *  1. what the answer says to the user (explanations, questions, summaries…) is in the plan's
+ *     language;
+ *  2. text the user asks to be produced (a translation, a rewritten or polished version of their
+ *     text, an e-mail or article in a named language) is in the language the user names; if
+ *     none, the original text's; if there is no original, the plan's language.
+ * Never 「the whole answer in X」: 「帮我把这封英文邮件改得更礼貌：Dear John, …」 keeps the e-mail
+ * English. A translation or a writing request that was recognised adds its target as a reminder.
  */
 export function replyLanguageRule(
   request: ReplyLanguage | ReplyPlan | string,
@@ -269,19 +278,18 @@ export function replyLanguageRule(
       : typeof request === 'string'
         ? replyPlan(request, region)
         : request;
-  if (plan.translation) {
-    const target = plan.translation.target;
-    return plan.language === 'en'
-      ? `This is a translation request: write the translation itself in ${target ?? 'the language the user asked for'}; anything you say around the translation (a short note, if any) in English. Keep names and numbers as they are.`
-      : `这是翻译任务：译文本身用${target ?? '用户要求的目标语言'}写；译文以外的说明（如果有）用中文。名称和数字照原样。`;
+  if (plan.language === 'en') {
+    const reminder = plan.translation
+      ? ` This time it is a translation: the translation is in ${plan.translation.target ?? 'the language the user asked for'}.`
+      : plan.writing
+        ? ` This time the ${plan.writing.piece} is written in ${plan.writing.target}.`
+        : '';
+    return `Answer language:\n1. What you say to the user (explanations, questions, summaries, headings, lists, follow-up suggestions, failure explanations) is in English, even though these instructions and the pages you read may be in Chinese.\n2. Text the user asks you to produce (a translation, a rewritten or polished version of their text, an email or article in a language they name) is in the language the user names; if they name none, in the language of the original text; if there is no original text, in English.${reminder}\nKeep names, titles, quotes and numbers exactly as the page shows them.`;
   }
-  if (plan.writing) {
-    const { target, piece } = plan.writing;
-    return plan.language === 'en'
-      ? `This is a writing request for a piece in a named language: write the ${piece} itself entirely in ${target}; anything you say around it (a short note, if any) in English. Keep names and numbers as they are.`
-      : `这是写作任务，用户指定了语言：要写的${piece}本身全部用${target}写；${piece}以外的说明（如果有）用中文。名称和数字照原样。`;
-  }
-  return plan.language === 'en'
-    ? 'Answer language: English. The user wrote this request in English (or asked for English), so write the whole answer — headings, text, lists, notes, follow-up suggestions and failure explanations — in English, even though these instructions and the pages you read may be in Chinese. Keep names, titles, quotes and numbers exactly as the page shows them.'
-    : '回答语言：中文。用户这次用中文提问（或要求用中文回答），整段回答（标题、正文、列表、说明、追问建议、失败说明）都用中文写；页面上的名称、标题、引文和数字照页面原样写，不翻译。';
+  const reminder = plan.translation
+    ? `本次是翻译：译文用${plan.translation.target ?? '用户要求的目标语言'}。`
+    : plan.writing
+      ? `本次要写的${plan.writing.piece}用${plan.writing.target}。`
+      : '';
+  return `回答语言：\n1. 你对用户说的话（说明、提问、总结、标题、列表、追问建议、失败说明）用中文。\n2. 用户要你产出的文本（译文、改写或润色后的原文、指定了语言的邮件或文章），用用户指定的语言；没指定时，用原文的语言；没有原文时用中文。${reminder}\n页面上的名称、标题、引文和数字照原样写，不翻译。`;
 }

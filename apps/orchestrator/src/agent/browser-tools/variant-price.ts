@@ -231,6 +231,13 @@ interface Card {
   title: string;
   /** The card's 「from」 prices, as written (lowest first). */
   fromPrices: string[];
+  /** Every price shown under the title on a page that is not a product detail page. */
+  shownPrices: string[];
+  /**
+   * The title shows up only on product detail pages (pages with a variant selector): it is the
+   * page's own heading, not a search result's card (DEPLOY-60 协调方核对 必须修 2).
+   */
+  detailOnly: boolean;
   /** The card's own text, for its variant: its title (the lines under it may be the next card's). */
   text: string;
 }
@@ -261,18 +268,24 @@ function cardsFor(name: string, pages: readonly string[][]): Card[] {
         titles = [line];
       } else if (score === bestScore && !titles.includes(line)) titles.push(line);
     }
+  const detailPage = pages.map((lines) => lines.some((line) => VARIANT_LABEL_RE.test(line)));
   return titles.map((title) => {
     const fromPrices: string[] = [];
-    for (const lines of pages)
+    const shownPrices: string[] = [];
+    let onListing = false;
+    pages.forEach((lines, p) =>
       lines.forEach((line, i) => {
         if (line !== title) return;
+        if (!detailPage[p]) onListing = true;
         for (const next of lines.slice(i + 1, i + 1 + CARD_WINDOW)) {
           if (next.length >= 40 && !(next.match(PRICE_RE) ?? []).length) break;
           if (CARD_FROM_RE.test(next)) fromPrices.push(...(next.match(PRICE_RE) ?? []));
+          if (!detailPage[p]) shownPrices.push(...(next.match(PRICE_RE) ?? []));
         }
-      });
+      }),
+    );
     fromPrices.sort((a, b) => priceValue(a) - priceValue(b));
-    return { title, fromPrices, text: title };
+    return { title, fromPrices, shownPrices, detailOnly: !onListing, text: title };
   });
 }
 
@@ -311,8 +324,12 @@ export function searchCardPriceMismatches(summary: string, pageTexts: readonly s
       .slice(0, at)
       .replace(/^\s*(?:[-*+]|\d+[.)、])\s*/, '')
       .replace(/\*\*/g, '');
-    const cards = cardsFor(name, pages);
-    if (!cards.length) continue;
+    const named = cardsFor(name, pages);
+    if (!named.length) continue;
+    // A detail page's own heading is not a search card: with a search card among the tied
+    // titles, only the search cards count (DEPLOY-60 协调方核对 必须修 2).
+    const listed = named.filter((c) => !c.detailOnly);
+    const cards = listed.length ? listed : named;
     const card = cards[0]!;
     const beside = besidePrice(line, at);
     const answerVariant = `${name} ${beside}`;
@@ -324,16 +341,19 @@ export function searchCardPriceMismatches(summary: string, pageTexts: readonly s
       );
       continue;
     }
-    // Lower than the card's 「from」 price, with no variant named (with tied cards: lower than the
-    // lowest 「from」 price of them all, and only when every one of them shows one).
-    const froms = cards.map((c) =>
-      c.fromPrices.find((p) => priceCurrency(p) === priceCurrency(shown)),
+    // Lower than the card's 「from」 price, with no variant named. With tied cards: as soon as one
+    // of them shows a 「from」 price, the lowest of those is checked (必须修 2) — unless the price
+    // is the one another tied search card shows itself.
+    const from = cards
+      .map((c) => c.fromPrices.find((p) => priceCurrency(p) === priceCurrency(shown)))
+      .filter((p): p is string => Boolean(p))
+      .sort((a, b) => priceValue(a) - priceValue(b))[0];
+    const ownCardPrice = cards.some((c) =>
+      c.shownPrices.some((p) => normalizePrice(p) === normalizePrice(shown)),
     );
-    const from = froms.every(Boolean)
-      ? (froms as string[]).sort((a, b) => priceValue(a) - priceValue(b))[0]
-      : undefined;
     if (
       from &&
+      !ownCardPrice &&
       priceValue(shown) < priceValue(from) &&
       !VARIANT_WORD_RE.test(beside.replace(/\boptions?\b|\bfrom\b/gi, ''))
     ) {
