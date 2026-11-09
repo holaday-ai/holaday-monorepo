@@ -215,14 +215,39 @@ function writtenLanguage(text: string): ReplyLanguage | null {
   return byCount;
 }
 
+/**
+ * FIX-61 P1-1: the instruction part of a request — what comes before a colon that introduces
+ * pasted text (「Polish this Chinese paragraph: 我们的产品…」 → 「Polish this Chinese paragraph」).
+ * Colons inside links, e-mail addresses and times (15:00) do not count, and the part before the
+ * colon has to be an instruction of its own (two English words or three Chinese characters);
+ * otherwise the whole request is the instruction.
+ */
+export function instructionPart(text: string): string {
+  const masked = text
+    .replace(URL_RE, (m) => ' '.repeat(m.length))
+    .replace(EMAIL_RE, (m) => ' '.repeat(m.length))
+    .replace(/\d[:：]\d/g, (m) => ' '.repeat(m.length));
+  const colon = /[:：]/.exec(masked);
+  if (!colon || colon.index === 0) return text;
+  const before = text.slice(0, colon.index);
+  const after = text.slice(colon.index + 1).trim();
+  if (!after) return text;
+  const own = ownWords(before);
+  const han = (own.match(HAN_RE) ?? []).length;
+  const words = languageWords(own).length;
+  return han >= 3 || words >= 2 ? before : text;
+}
+
 /** The language a request is written in (or asks for), or null when nothing tells. */
 export function requestLanguage(text: string): ReplyLanguage | null {
   // A piece of writing in a named language: the request's own language is the main language
   // (「write a cover letter in Chinese」 is an English request), not the piece's.
-  if (writingRequest(text)) return writtenLanguage(text);
+  if (writingRequest(text)) return writtenLanguage(instructionPart(text));
   const explicit = explicitReplyLanguage(text);
   if (explicit) return explicit;
-  return writtenLanguage(translationRequest(text) ? translationInstruction(text) : text);
+  return writtenLanguage(
+    translationRequest(text) ? translationInstruction(text) : instructionPart(text),
+  );
 }
 
 /**
@@ -234,7 +259,9 @@ export function replyPlan(text: string, region?: string | null): ReplyPlan {
   const translation = translationRequest(text);
   const writing = translation ? null : writingRequest(text);
   const explicit = writing ? null : explicitReplyLanguage(text);
-  const written = explicit ?? writtenLanguage(translation ? translationInstruction(text) : text);
+  const written =
+    explicit ??
+    writtenLanguage(translation ? translationInstruction(text) : instructionPart(text));
   const language = written ?? (region === 'cn' ? 'zh' : region ? 'en' : 'zh');
   return {
     language,

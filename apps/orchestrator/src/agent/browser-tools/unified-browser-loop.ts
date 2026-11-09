@@ -1770,7 +1770,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               const kept = [
                 summary,
                 fieldLines(args.fields, summary),
-                unverifiedNote(facts.unverified),
+                unverifiedNote(facts.unverified, {
+                english: isEnglishIntent(input.userIntent ?? input.intent),
+              }),
               ]
                 .filter(Boolean)
                 .join('\n\n');
@@ -1830,7 +1832,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             );
             continue;
           }
-          const note = unverifiedNote(facts.unverified);
+          const note = unverifiedNote(facts.unverified, {
+                english: isEnglishIntent(input.userIntent ?? input.intent),
+              });
           // Fields are part of the answer: show the ones the summary leaves out.
           const listed = fieldLines(args.fields, summary);
           let answer = [summary, listed, note].filter(Boolean).join('\n\n');
@@ -2093,7 +2097,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             const answer = [
               summary,
               fieldLines(args.fields, summary),
-              unverifiedNote(facts.unverified),
+              unverifiedNote(facts.unverified, {
+                english: isEnglishIntent(input.userIntent ?? input.intent),
+              }),
             ]
               .filter(Boolean)
               .join('\n\n');
@@ -3606,13 +3612,17 @@ function withoutDroppedUnverified(lines: string[], dropped: readonly string[]): 
   if (!dropped.length) return lines;
   const keys = dropped.map((value) => tightForm(value));
   return lines.flatMap((line) => {
-    const m = /^(\s*(?:未核实|译述，未逐字核对)[^—\n]*——)(.+)$/u.exec(line);
+    const m =
+      /^(\s*(?:未核实|译述，未逐字核对)[^—\n]*——|\s*(?:Not verified|Paraphrased, not checked word for word):[^—\n]* — )(.+)$/u.exec(
+        line,
+      );
     if (!m) return [line];
-    const kept = m[2]!.split('；').filter((item) => {
+    const sep = m[1]!.includes('——') ? '；' : '; ';
+    const kept = m[2]!.split(sep).filter((item) => {
       const quoted = /「([\s\S]*)」\s*$/u.exec(item)?.[1];
       return !quoted || !keys.includes(tightForm(quoted));
     });
-    return kept.length ? [`${m[1]}${kept.join('；')}`] : [];
+    return kept.length ? [`${m[1]}${kept.join(sep)}`] : [];
   });
 }
 

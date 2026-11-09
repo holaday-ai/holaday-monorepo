@@ -1450,8 +1450,19 @@ function englishPage(text: string): boolean {
   return latin >= 200 && hanCount(text) * 50 < latin;
 }
 
+/** FIX-61 P1-2: the 未核实 lines of an English task are English. */
+export const UNVERIFIED_LEAD = '未核实：以下内容未能在已读页面中逐字找到，请自行确认——';
+export const UNVERIFIED_LEAD_EN =
+  'Not verified: these were not found word for word on the pages read; please check them yourself — ';
+const TRANSLATED_LEAD = '译述，未逐字核对：以下内容是对英文页面的中文转述，页面上没有这些字，请自行确认——';
+const TRANSLATED_LEAD_EN =
+  'Paraphrased, not checked word for word: these restate an English page in other words, so the page does not have them; please check them yourself — ';
+
 /** User-visible note for facts that could not be matched word for word. */
-export function unverifiedNote(unverified: readonly string[]): string {
+export function unverifiedNote(
+  unverified: readonly string[],
+  opts: { english?: boolean } = {},
+): string {
   // FIX-38: no element ref in the note; an item that quoted only a ref is no item.
   const quote = /[「“][^」”]*[」”]/u;
   const items = unverified
@@ -1463,10 +1474,11 @@ export function unverifiedNote(unverified: readonly string[]): string {
     .filter((item) => item.endsWith(TRANSLATED_MARK))
     .map((item) => item.slice(0, -TRANSLATED_MARK.length));
   const plain = items.filter((item) => !item.endsWith(TRANSLATED_MARK));
+  const sep = opts.english ? '; ' : '；';
   return [
-    plain.length ? `未核实：以下内容未能在已读页面中逐字找到，请自行确认——${plain.join('；')}` : '',
+    plain.length ? `${opts.english ? UNVERIFIED_LEAD_EN : UNVERIFIED_LEAD}${plain.join(sep)}` : '',
     translated.length
-      ? `译述，未逐字核对：以下内容是对英文页面的中文转述，页面上没有这些字，请自行确认——${translated.join('；')}`
+      ? `${opts.english ? TRANSLATED_LEAD_EN : TRANSLATED_LEAD}${translated.join(sep)}`
       : '',
   ]
     .filter(Boolean)

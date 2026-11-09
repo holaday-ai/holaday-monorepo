@@ -9,7 +9,7 @@
  * the browser if it still disagrees with them.
  */
 
-import { replyLanguageRule } from '@holaday/shared-types';
+import { isEnglishRequestText, replyLanguageRule } from '@holaday/shared-types';
 import type { Logger } from 'pino';
 import { buildPromptSchemaSuffix } from '../execution/execution-contract.js';
 import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
@@ -590,12 +590,16 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
       invented = unsupported.filter((sentence) => TRADING_DATE_RE.test(sentence));
       for (const sentence of unsupported.filter((line) => !TRADING_DATE_RE.test(line)))
         for (const raw of unsupportedDates(sentence, knownDays, dates.today))
-          dateNotes.push(`日期「${raw}」`);
+          dateNotes.push(
+            isEnglishRequestText(opts.userIntent ?? opts.intent) ? `date "${raw}"` : `日期「${raw}」`,
+          );
     }
     const dated = invented.length ? withoutSentences(summary, invented) : summary;
     const unverifiedLine =
       facts.unverified.length || dateNotes.length
-        ? unverifiedNote([...facts.unverified, ...dateNotes])
+        ? unverifiedNote([...facts.unverified, ...dateNotes], {
+            english: isEnglishRequestText(opts.userIntent ?? opts.intent),
+          })
         : '';
     // FIX-30 (BENCH-1 m02/m04/v01/f05/d02/c05): an answer that says the page did
     // not have it (「没拿到」「缺少浏览器环境」, most fields 「页面未显示」) is not a

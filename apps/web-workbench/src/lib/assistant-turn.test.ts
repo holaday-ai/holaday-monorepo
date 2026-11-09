@@ -421,3 +421,14 @@ describe('FIX-60 P0-2: the task language is the request’s main language', () =
     ).toBe(true);
   });
 });
+
+describe('FIX-61 P1-2: an English 未核实 note is folded the same way', () => {
+  it('moves the English note out of the answer body', () => {
+    const { body, unverified } = splitUnverifiedNote(
+      'The ticket is 60 yuan.\n\nNot verified: these were not found word for word on the pages read; please check them yourself — Price「60 yuan」; Hours「8:30」',
+      { en: true },
+    );
+    expect(body).not.toContain('Not verified');
+    expect(unverified).toContain('Price「60 yuan」');
+  });
+});

@@ -1161,7 +1161,7 @@ const NEXT_ACTION_EN =
  * 「，输入 "…" 后重新读取」), or the note on what was not verified: the answer has moved on.
  */
 const NEXT_STEP_RE = new RegExp(
-  String.raw`^\s*(?:未核实|(?:(?:并|然后|接着|随后|接下来|最后|再|之后|另外|同时|and\b|then\b)\s*)?(?:成功|已|也)?\s*(?:在[^，,]{0,10}?[内中里上])?\s*(?:${NEXT_ACTION})|(?:(?:and|then)\s+)*(?:i\s+|we\s+)?(?:${NEXT_ACTION_EN})\b)`,
+  String.raw`^\s*(?:未核实|Not verified:|(?:(?:并|然后|接着|随后|接下来|最后|再|之后|另外|同时|and\b|then\b)\s*)?(?:成功|已|也)?\s*(?:在[^，,]{0,10}?[内中里上])?\s*(?:${NEXT_ACTION})|(?:(?:and|then)\s+)*(?:i\s+|we\s+)?(?:${NEXT_ACTION_EN})\b)`,
   'i',
 );
 /** 协调方决定: 「，随后切回主框架…」「。回到首页…」: still on this page, and what it names is held. */
@@ -1174,7 +1174,7 @@ const AROUND_RE =
 const RUN_NOTE_RE =
   /^\s*(?:(?:并|且|从而|以此|由此)\s*)?(?:确认|证实|证明|表明|说明|验证|(?:浏览器\s*)?(?:可以?|能够?)\s*(?:正常\s*)?(?:点击|聚焦|交互|编辑|访问|操作|呈现|读取))|^\s*(?:which\s+)?(?:confirm(?:s|ing|ed)?|prov(?:es|ing)|verif(?:ies|ying)|indicat(?:es|ing))\b/i;
 const LIST_MARK_RE = /^\s*(?:[-*•]|\d+[.)、）])\s*/;
-const HOST_NOTE_RE = /^\s*(?:未核实|核验提示|部分完成)/;
+const HOST_NOTE_RE = /^\s*(?:未核实|核验提示|部分完成|Not verified:|Paraphrased, not checked)/;
 /** 「，alert 按钮旁还有…」: a part of the task named, and something more said to be there. */
 const SAID_MORE_RE = /还有|另有|还显示|还嵌|\balso\b/i;
 /**

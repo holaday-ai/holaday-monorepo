@@ -859,7 +859,8 @@ export function splitUnverifiedNote(
   opts: { partial?: boolean; en?: boolean } = {},
 ): { body: string; unverified: string | null } {
   const m = text.match(
-    /\n*\s*未核实[:：]\s*以下内容未能在已读页面中逐字找到，请自行确认——([\s\S]*?)(?=\n\s*\n|$)/,
+    // FIX-61 P1-2: an English task's note is English.
+    /\n*\s*(?:未核实[:：]\s*以下内容未能在已读页面中逐字找到，请自行确认——|Not verified: these were not found word for word on the pages read; please check them yourself — )([\s\S]*?)(?=\n\s*\n|$)/,
   );
   if (!m) return { body: text, unverified: null };
   // 第 0 步核对 3: a partial answer's lead says what is missing, not which written items were

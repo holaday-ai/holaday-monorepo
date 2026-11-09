@@ -636,11 +636,11 @@ describe('FIX-60 复审 #1 #2: an asked-for language first, then the main langua
         'Polish this Chinese paragraph: 我们的产品很好用，大家都喜欢。',
         'cn',
       );
-      // The Chinese paragraph outweighs the short English instruction, so what is said around
-      // it is Chinese (detection unchanged); the paragraph itself stays Chinese by part 2 either way.
-      expect(polish).toContain(ZH_TALK);
-      expect(polish).toContain(ZH_PRODUCE);
-      expect(polish).not.toContain('整段');
+      // FIX-61 P1-1: only the instruction (before the colon) decides the talk language, so the
+      // explanation is English; the paragraph itself stays Chinese by part 2.
+      expect(polish).toContain(EN_TALK);
+      expect(polish).toContain(EN_PRODUCE);
+      expect(polish).not.toMatch(/whole answer|entirely in/);
       const polishEn = replyLanguageRule(
         'Polish this Chinese paragraph for me, please, and tell me what you changed: 我们的产品很好用。',
         'cn',
