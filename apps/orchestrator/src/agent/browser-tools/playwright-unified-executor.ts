@@ -260,6 +260,17 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     return playbackReleased;
   };
   const timeout = options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
+  // FIX-61 P1-3 (DEPLOY-60 iPhone): an address that answered 4xx in this task is not opened again
+  // — the run reopened Apple's 404 「iphone-16-pro-max」 buy page four times and timed out.
+  const deadAddresses = new Map<string, number>();
+  const addressKey = (url: string) => {
+    try {
+      const u = new URL(url);
+      return `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/+$/, '')}`;
+    } catch {
+      return url;
+    }
+  };
   const maxSnapshot = options.maxSnapshotChars ?? DEFAULT_MAX_SNAPSHOT_CHARS;
   const maxExtract = options.maxExtractChars ?? DEFAULT_MAX_EXTRACT_CHARS;
   const maxUrlChars = options.maxUrlChars ?? DEFAULT_MAX_URL_CHARS;
@@ -557,6 +568,11 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           };
         }
         case 'navigate': {
+          const dead = deadAddresses.get(addressKey(action.url));
+          if (dead)
+            return fail(
+              `这个地址在本次任务里已经返回过 HTTP ${dead}（页面不存在或拒绝访问），不要再打开同一个地址。${deadAddressHint(action.url)}`,
+            );
           const response = await page.goto(action.url, {
             timeout: Math.max(timeout, 30_000),
             waitUntil: 'domcontentloaded',
@@ -566,13 +582,16 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           // AP3 core-07: a 403 page read as "已打开" kept the model on it until
           // the step limit. Say what the server answered.
           const httpStatus = response?.status() ?? 0;
-          if (httpStatus >= 400)
+          if (httpStatus >= 400) {
+            deadAddresses.set(addressKey(action.url), httpStatus);
+            deadAddresses.set(addressKey(page.url()), httpStatus);
             return {
               ...done(
-                `已打开 ${page.url()}，但服务器返回 HTTP ${httpStatus}（拒绝访问或不存在），页面没有可用内容。用户没有指定网站时换一个公开页面；指定了网站则如实说明无法访问。`,
+                `已打开 ${page.url()}，但服务器返回 HTTP ${httpStatus}（拒绝访问或不存在），页面没有可用内容。用户没有指定网站时换一个公开页面；指定了网站则如实说明无法访问。${deadAddressHint(page.url())}`,
               ),
               url: page.url(),
             };
+          }
           return { ...done(`已打开 ${page.url()}`), url: page.url() };
         }
         case 'extract': {
@@ -837,4 +856,23 @@ function done(text: string): UnifiedToolResult {
 
 function fail(text: string): UnifiedToolResult {
   return { ok: false, text };
+}
+
+/**
+ * FIX-61 P1-3: what a dead product page usually means, and where the run looks next. A brand's
+ * own store answering 404 for a model's buy page usually means that model is no longer sold
+ * there: the store's buy / compare overview says which models it sells, and an answer that it is
+ * no longer sold there (plus any public channel price, with its date and source) is the honest
+ * result — not reopening the same address until the task times out.
+ */
+export function deadAddressHint(url: string): string {
+  let host = '';
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    /* not a URL */
+  }
+  if (/(?:^|\.)apple\.com(?:\.cn)?$/i.test(host))
+    return '这是 Apple 官网：在售机型看 /shop/buy-iphone 或 /iphone/compare/（各容量价格都在上面）；那里没有这一款，就说明官网已不再销售，如实写明，再看公开渠道（如京东手机版商品页）有没有显示价格，拿不到就如实交部分完成。';
+  return '官网上某个商品页不存在，通常是已停售或地址不对：先看该站的购买总页 / 分类页有没有这一款；没有就如实写明，再找公开渠道，拿不到就如实交部分完成。';
 }

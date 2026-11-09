@@ -2672,11 +2672,20 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
       }
       if (outcome.ok && action.tool === 'sections') outline = outlineFrom(outcome.text) ?? outline;
       if (outcome.ok && action.tool === 'list_tabs') noteListedTabs(outcome.text);
-      const staleRedo =
+      const staleAction =
         ['stale_ref', 'stale_context'].includes(outcome.errorCode ?? '') &&
-        ['type', 'select', 'click'].includes(action.tool)
-          ? `\n页面已变化，这个 ref 失效了：先 snapshot，再用新 ref 重做这次 ${action.tool}（同一个元素${action.tool === 'click' ? '' : '、同一个值'}），不要改用别的方式代替。`
-          : '';
+        ['type', 'select', 'click'].includes(action.tool);
+      // FIX-61 P1-4 (local b-m01): told to snapshot first, the run clicked the same stale ref three
+      // times behind 高德's login popup and gave up. The host reads the page itself now and hands
+      // over the fresh refs with the same instruction.
+      const fresh = staleAction
+        ? await input.execute({ tool: 'snapshot' } as UnifiedBrowserAction).catch(() => null)
+        : null;
+      const staleRedo = staleAction
+        ? fresh?.ok
+          ? `\n页面已变化，这个 ref 失效了。宿主刚重新读了页面（下面是新的 snapshot）：用里面的新 ref 重做这次 ${action.tool}（同一个元素${action.tool === 'click' ? '' : '、同一个值'}），不要再用旧 ref。登录提示弹窗挡住时，点弹窗自己的关闭按钮（×）关掉它，不要登录、不要碰验证码。\n\n${fresh.text}`
+          : `\n页面已变化，这个 ref 失效了：先 snapshot，再用新 ref 重做这次 ${action.tool}（同一个元素${action.tool === 'click' ? '' : '、同一个值'}），不要改用别的方式代替。`
+        : '';
       const hostNote = hostNavigate
         ? `你还没有打开任何网页就要结束；宿主先按任务打开了目标网站 ${hostNavigate}。请读取页面后继续原任务。\n`
         : '';
