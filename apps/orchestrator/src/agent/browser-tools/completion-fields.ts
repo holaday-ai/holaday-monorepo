@@ -3,7 +3,11 @@ import { stripInternalRefs } from '../internal-refs.js';
 import { staleForRecentIntent, uncoveredTargets } from './completion-coverage.js';
 import { assessEngagementClaims } from './engagement-counts.js';
 import { misattributedPrices } from './section-attribution.js';
-import { searchCardPriceMismatches, unmatchedVariantPrices } from './variant-price.js';
+import {
+  searchCardPriceMismatches,
+  unmatchedVariantPrices,
+  wrongVariantPrices,
+} from './variant-price.js';
 
 export interface ObservedEvidence {
   text: string;
@@ -709,7 +713,10 @@ export function sameSource(pageUrl: string | undefined, cited: string): boolean 
     const page = new URL(pageUrl);
     const want = new URL(cited);
     const host = (url: URL) => url.hostname.replace(/^www\./, '');
-    const path = (url: URL) => url.pathname.replace(/\/+$/, '') || '/';
+    // FIX-61 P1-5: a product page opened from a result list carries the list's tracking tail
+    // (amazon …/dp/B0F838M628/ref=sr_1_3?…) — the same page the answer cites as …/dp/B0F838M628/.
+    const path = (url: URL) =>
+      url.pathname.replace(/\/ref=[^/]*$/i, '').replace(/\/+$/, '') || '/';
     if (host(page) !== host(want) || path(page) !== path(want)) return false;
     for (const [key, value] of want.searchParams)
       if (page.searchParams.get(key) !== value) return false;
@@ -1401,6 +1408,13 @@ export function assessCompletionFacts(input: {
       input.pages.map((page) => unescapeLiteralBreaks(page.text)),
     ),
   );
+  // FIX-61 P1-6: a price taken from a variant selector, with a colour named, must be that colour's.
+  contradictions.push(
+    ...wrongVariantPrices(
+      unescapeLiteralBreaks(input.summary),
+      input.pages.map((page) => unescapeLiteralBreaks(page.text)),
+    ),
+  );
   // FIX-29: a like/comment/favourite/share number must be that counter's, not the icon next to it.
   contradictions.push(
     ...assessEngagementClaims(
@@ -2033,4 +2047,23 @@ function countState(prose: string, name: string): 'value' | 'doubt' | null {
   }
   const states = [...state.values()];
   return states.includes('doubt') ? 'doubt' : states.length ? 'value' : null;
+}
+
+/**
+ * FIX-61 P1-5 (DEPLOY-60 reg-new-amazon-sg): 「— 未获取到（White / 200 centimeters 显示“2 options from
+ * S$8.21”，无单一主推价）」 is an honest gap that quotes the page — sending it back for a second look
+ * only pushed the run into another variant's price. A gap is explained when the line that says it
+ * was not obtained quotes words a page the run read really shows: deliver it as 部分完成.
+ */
+export function absentExplainedByPage(summary: string, pages: readonly string[]): boolean {
+  const norm = pages.map((page) => normalizeFact(unescapeLiteralBreaks(page)));
+  const lines = unescapeLiteralBreaks(summary)
+    .split('\n')
+    .filter((line) => DECLARED_ABSENT_RE.test(line) || /未获取到|没拿到|拿不到|无单一/.test(line));
+  if (!lines.length) return false;
+  return lines.every((line) =>
+    [...line.matchAll(/[「“"『]([^」”"』]{4,120})[」”"』]/gu)].some((m) =>
+      norm.some((page) => page.includes(normalizeFact(m[1]!))),
+    ),
+  );
 }

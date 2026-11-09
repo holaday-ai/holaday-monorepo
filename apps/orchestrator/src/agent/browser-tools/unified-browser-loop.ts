@@ -55,6 +55,7 @@ import {
   observedEvidence,
   sameSource,
   unescapeLiteralBreaks,
+  absentExplainedByPage,
   unverifiedNote,
 } from './completion-fields.js';
 import { contentIds, namedContentUrl, onNamedContent } from './content-target.js';
@@ -1852,7 +1853,15 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           // The page itself confirms the gap (a listed item showing only 「See options」):
           // an honest 部分完成, not a second look (FIX-35 0a).
           const listGap = input.partialNote?.(summary, observedText) ?? null;
-          if (absent.length && !listGap && !absentLooked && !concludeNow) {
+          // FIX-61 P1-5: a gap the answer explains with the page's own words is honest — no
+          // second look (it pushed reg-new-amazon-sg into another variant's price).
+          const absentExplained =
+            absent.length > 0 &&
+            absentExplainedByPage(
+              summary,
+              pageEvidence.map((page) => page.text),
+            );
+          if (absent.length && !listGap && !absentLooked && !absentExplained && !concludeNow) {
             absentLooked = true;
             // FIX-43 (Deploy-43 reg-dy-2): the run had a screenshot showing 「小喵麻麻」 top right and
             // still wrote 作者「页面未显示」 — the login popup hid the rest of the page from the read.
