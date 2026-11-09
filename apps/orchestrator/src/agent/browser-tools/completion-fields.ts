@@ -715,8 +715,7 @@ export function sameSource(pageUrl: string | undefined, cited: string): boolean 
     const host = (url: URL) => url.hostname.replace(/^www\./, '');
     // FIX-61 P1-5: a product page opened from a result list carries the list's tracking tail
     // (amazon …/dp/B0F838M628/ref=sr_1_3?…) — the same page the answer cites as …/dp/B0F838M628/.
-    const path = (url: URL) =>
-      url.pathname.replace(/\/ref=[^/]*$/i, '').replace(/\/+$/, '') || '/';
+    const path = (url: URL) => url.pathname.replace(/\/ref=[^/]*$/i, '').replace(/\/+$/, '') || '/';
     if (host(page) !== host(want) || path(page) !== path(want)) return false;
     for (const [key, value] of want.searchParams)
       if (page.searchParams.get(key) !== value) return false;
@@ -1468,7 +1467,8 @@ function englishPage(text: string): boolean {
 export const UNVERIFIED_LEAD = '未核实：以下内容未能在已读页面中逐字找到，请自行确认——';
 export const UNVERIFIED_LEAD_EN =
   'Not verified: these were not found word for word on the pages read; please check them yourself — ';
-const TRANSLATED_LEAD = '译述，未逐字核对：以下内容是对英文页面的中文转述，页面上没有这些字，请自行确认——';
+const TRANSLATED_LEAD =
+  '译述，未逐字核对：以下内容是对英文页面的中文转述，页面上没有这些字，请自行确认——';
 const TRANSLATED_LEAD_EN =
   'Paraphrased, not checked word for word: these restate an English page in other words, so the page does not have them; please check them yourself — ';
 

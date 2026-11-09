@@ -1,7 +1,7 @@
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { REDACTION_FAILED_COPY, SENSITIVE_VALUES_EXPRESSION } from './page-redaction.js';
 import { MARK_HUMAN_TYPED_FIELD } from '../../streaming/cdp-input.js';
+import { REDACTION_FAILED_COPY, SENSITIVE_VALUES_EXPRESSION } from './page-redaction.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 
 const LOGIN_PAGE = `

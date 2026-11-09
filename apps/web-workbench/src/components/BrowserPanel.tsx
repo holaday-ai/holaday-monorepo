@@ -1153,7 +1153,9 @@ function CloudBrowserPanel({
     ownership.pending ||
     ownership.state?.phase === 'requested' ||
     ownership.state?.phase === 'resuming' ||
-    (!ownership.supported && !terminalSessionUnavailable && !(taskIsTerminal && terminalCanRestore)) ||
+    (!ownership.supported &&
+      !terminalSessionUnavailable &&
+      !(taskIsTerminal && terminalCanRestore)) ||
     ownership.error === 'input_outcome_unknown' ||
     (ownership.state?.phase === 'closed' && !taskIsTerminal);
   const inputFallbackMode = browserInputFallbackMode({

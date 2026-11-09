@@ -260,8 +260,7 @@ export function replyPlan(text: string, region?: string | null): ReplyPlan {
   const writing = translation ? null : writingRequest(text);
   const explicit = writing ? null : explicitReplyLanguage(text);
   const written =
-    explicit ??
-    writtenLanguage(translation ? translationInstruction(text) : instructionPart(text));
+    explicit ?? writtenLanguage(translation ? translationInstruction(text) : instructionPart(text));
   const language = written ?? (region === 'cn' ? 'zh' : region ? 'en' : 'zh');
   return {
     language,

@@ -8,13 +8,13 @@ import { ensureExecutionViewport } from './browser-viewport.js';
 import { CloudObservation, pageRoot } from './cloud-observation.js';
 import { SENSITIVE_SCREENSHOT_STYLE, fullPageRead } from './full-page-read.js';
 import { redactPageText } from './page-redaction.js';
-import { dismissSiteGuide } from './site-guides.js';
 import {
   forbidsPlayback,
   installPlaybackGuard,
   readPlayback,
   releasePlaybackGuard,
 } from './playback-guard.js';
+import { dismissSiteGuide } from './site-guides.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
 /** One tool result for the model: text always, an image only for `screenshot`. */

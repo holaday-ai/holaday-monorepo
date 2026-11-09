@@ -453,22 +453,28 @@ describe('CdpInputHandler keyboard input', () => {
       keyCode: 88,
     });
 
-    expect(inputCalls()[3]).toEqual(['Input.dispatchKeyEvent', {
-      type: 'keyUp',
-      key: 'Meta',
-      code: 'MetaLeft',
-      windowsVirtualKeyCode: 91,
-      modifiers: 0,
-    }]);
-    expect(inputCalls()[4]).toEqual(['Input.dispatchKeyEvent', {
-      type: 'keyDown',
-      key: 'x',
-      code: 'KeyX',
-      windowsVirtualKeyCode: 88,
-      modifiers: 0,
-      text: 'x',
-      unmodifiedText: 'x',
-    }]);
+    expect(inputCalls()[3]).toEqual([
+      'Input.dispatchKeyEvent',
+      {
+        type: 'keyUp',
+        key: 'Meta',
+        code: 'MetaLeft',
+        windowsVirtualKeyCode: 91,
+        modifiers: 0,
+      },
+    ]);
+    expect(inputCalls()[4]).toEqual([
+      'Input.dispatchKeyEvent',
+      {
+        type: 'keyDown',
+        key: 'x',
+        code: 'KeyX',
+        windowsVirtualKeyCode: 88,
+        modifiers: 0,
+        text: 'x',
+        unmodifiedText: 'x',
+      },
+    ]);
   });
 });
 
@@ -622,6 +628,8 @@ describe('FIX-61 P0: the user viewport must reach the page layout after a task',
     );
     await handler.handle({ type: 'viewport', width: 1280, height: 1807 });
     expect(setViewportSize).not.toHaveBeenCalled();
-    expect(send.mock.calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride')).toHaveLength(1);
+    expect(
+      send.mock.calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride'),
+    ).toHaveLength(1);
   });
 });

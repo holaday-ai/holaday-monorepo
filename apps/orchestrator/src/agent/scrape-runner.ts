@@ -591,7 +591,9 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
       for (const sentence of unsupported.filter((line) => !TRADING_DATE_RE.test(line)))
         for (const raw of unsupportedDates(sentence, knownDays, dates.today))
           dateNotes.push(
-            isEnglishRequestText(opts.userIntent ?? opts.intent) ? `date "${raw}"` : `日期「${raw}」`,
+            isEnglishRequestText(opts.userIntent ?? opts.intent)
+              ? `date "${raw}"`
+              : `日期「${raw}」`,
           );
     }
     const dated = invented.length ? withoutSentences(summary, invented) : summary;

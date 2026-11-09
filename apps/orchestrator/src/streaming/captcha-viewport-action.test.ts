@@ -88,7 +88,12 @@ it('FIX-61: the user who took over (no CAPTCHA) can type and click; a returned l
     input.controlLease = lease;
     const typed = await authorizeHumanViewportInput(instance, input);
     expect(typed.decision).toEqual({ kind: 'allow', sensitive: false });
-    expect(typed.request).toMatchObject({ actor: 'human', lane: 'cdp', lease, runId: 'takeover:tsk_takeover' });
+    expect(typed.request).toMatchObject({
+      actor: 'human',
+      lane: 'cdp',
+      lease,
+      runId: 'takeover:tsk_takeover',
+    });
     expect(JSON.stringify(typed)).not.toContain('holaday');
     const click = await authorizeHumanViewportInput(instance, {
       ...input,

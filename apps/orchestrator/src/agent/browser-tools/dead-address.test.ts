@@ -16,7 +16,11 @@ describe('FIX-61 P1-3: a page that answered 404 is not reopened', () => {
     let hits = 0;
     await page.route('https://www.apple.com.cn/**', (route) => {
       hits += 1;
-      return route.fulfill({ status: 404, contentType: 'text/html', body: '<title>未找到页面</title>' });
+      return route.fulfill({
+        status: 404,
+        contentType: 'text/html',
+        body: '<title>未找到页面</title>',
+      });
     });
     try {
       const tools = createPlaywrightUnifiedExecutor(page, { actionTimeoutMs: 5_000 });

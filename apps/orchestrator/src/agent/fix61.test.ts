@@ -1,13 +1,24 @@
 // FIX-61 P1: leftovers from DEPLOY-60.
-import { instructionPart, requestLanguage, replyPlan } from '@holaday/shared-types';
+import { instructionPart, replyPlan, requestLanguage } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 
 describe('FIX-61 P1-1: the talk language comes from the instruction, not pasted text', () => {
   it('a pasted paragraph after a colon does not decide the language', () => {
-    expect(requestLanguage('Polish this Chinese paragraph: 我们的产品很好用，客户都说方便，价格也合理。')).toBe('en');
-    expect(requestLanguage('帮我把这段改得更礼貌：Dear John, send me the file now, I need it today.')).toBe('zh');
-    expect(requestLanguage('总结一下这段：The quick brown fox jumps over the lazy dog many times.')).toBe('zh');
-    expect(replyPlan('Summarize this for me: 今天开会讨论了第三季度的销售目标和新产品的上市时间。', 'cn').language).toBe('en');
+    expect(
+      requestLanguage(
+        'Polish this Chinese paragraph: 我们的产品很好用，客户都说方便，价格也合理。',
+      ),
+    ).toBe('en');
+    expect(
+      requestLanguage('帮我把这段改得更礼貌：Dear John, send me the file now, I need it today.'),
+    ).toBe('zh');
+    expect(
+      requestLanguage('总结一下这段：The quick brown fox jumps over the lazy dog many times.'),
+    ).toBe('zh');
+    expect(
+      replyPlan('Summarize this for me: 今天开会讨论了第三季度的销售目标和新产品的上市时间。', 'cn')
+        .language,
+    ).toBe('en');
   });
 
   it('colons in links, e-mail addresses and times are not a pasted-text boundary', () => {
@@ -15,17 +26,25 @@ describe('FIX-61 P1-1: the talk language comes from the instruction, not pasted 
       'Open https://example.com/a and tell me the title',
     );
     expect(instructionPart('明天 15:00 开会，帮我写个提醒')).toBe('明天 15:00 开会，帮我写个提醒');
-    expect(requestLanguage('Open https://gs.ctrip.com/html5/you/sight/hangzhou14/49894.html and tell me the opening hours')).toBe('en');
+    expect(
+      requestLanguage(
+        'Open https://gs.ctrip.com/html5/you/sight/hangzhou14/49894.html and tell me the opening hours',
+      ),
+    ).toBe('en');
   });
 
   it('a short label before the colon is not an instruction of its own', () => {
-    expect(instructionPart('问题：What is the capital of France?')).toBe('问题：What is the capital of France?');
+    expect(instructionPart('问题：What is the capital of France?')).toBe(
+      '问题：What is the capital of France?',
+    );
     expect(instructionPart('Q: 故宫门票多少钱')).toBe('Q: 故宫门票多少钱');
   });
 });
 
 describe('FIX-61 P1-2: the 未核实 line follows the task language', async () => {
-  const { unverifiedNote, UNVERIFIED_LEAD_EN } = await import('./browser-tools/completion-fields.js');
+  const { unverifiedNote, UNVERIFIED_LEAD_EN } = await import(
+    './browser-tools/completion-fields.js'
+  );
   it('an English task gets an English note; Chinese stays the default', () => {
     const en = unverifiedNote(['Release date「17y ago」', 'Price「S$8.21」'], { english: true });
     expect(en).toBe(`${UNVERIFIED_LEAD_EN}Release date「17y ago」; Price「S$8.21」`);
@@ -78,8 +97,11 @@ describe('FIX-61 P1-5/P1-6: the checker does not push a correct or honest answer
     expect(out).toHaveLength(1);
     expect(out[0]).toMatch(/S\$6\.86.*white.*black/);
     expect(
-      assessCompletionFacts({ summary: wrong, intent: '在亚马逊新加坡站搜 usb c cable，列出前三个的名称和价格', pages: [detailPage] })
-        .contradictions.some((c) => c.includes('S$6.86') && c.includes('black')),
+      assessCompletionFacts({
+        summary: wrong,
+        intent: '在亚马逊新加坡站搜 usb c cable，列出前三个的名称和价格',
+        pages: [detailPage],
+      }).contradictions.some((c) => c.includes('S$6.86') && c.includes('black')),
     ).toBe(true);
     // The variant's own price, or the black one named as black, is fine.
     expect(wrongVariantPrices('3. Belkin … — 黑色款 S$6.86', [detail])).toEqual([]);
@@ -92,6 +114,37 @@ describe('FIX-61 P1-5/P1-6: the checker does not push a correct or honest answer
     expect(absentExplainedByPage(honest, [detail])).toBe(true);
     // A gap with no page words behind it (a login popup over the author) still gets its look.
     expect(absentExplainedByPage('作者：页面未显示', [detail])).toBe(false);
-    expect(absentExplainedByPage('价格：未获取到（页面写着「Only 3 left」）', [detail])).toBe(false);
+    expect(absentExplainedByPage('价格：未获取到（页面写着「Only 3 left」）', [detail])).toBe(
+      false,
+    );
+  });
+});
+
+describe('FIX-61: the rescue lead says 「你给的」 only for a page the request named', async () => {
+  const { requestNamesSite } = await import('./browser-tools/unified-browser-loop.js');
+  it('names the site only when the request does', () => {
+    expect(
+      requestNamesSite(
+        '打开 https://item.jd.com/100142621606.html 读价格',
+        'https://item.jd.com/1.html',
+      ),
+    ).toBe(true);
+    expect(
+      requestNamesSite('iPhone 16 Pro Max 256GB 多少钱', 'https://www.jd.com/jiage/1.html'),
+    ).toBe(false);
+  });
+});
+
+describe('FIX-61: named counts the browser answer leaves out are not 完成', async () => {
+  const { missingAskedFields } = await import('./browser-tools/completion-fields.js');
+  it('the local dy-1 answer misses comments, favourites and shares', () => {
+    const intent =
+      '打开 https://www.douyin.com/video/7507106798919601427 读视频标题、作者，以及点赞数、评论数、收藏数、分享数（不播放）';
+    const answer =
+      '已打开抖音视频页，读到公开信息如下：\n\n- 视频标题：仙桥洞 真的好美\n- 作者：利利的旅行盲盒\n- 点赞数：20';
+    const left = missingAskedFields(intent, answer).filter(
+      (f) => /数$/.test(f) && !answer.includes(f.replace(/数$/, '')),
+    );
+    expect(left.sort()).toEqual(['分享数', '收藏数', '评论数'].sort());
   });
 });

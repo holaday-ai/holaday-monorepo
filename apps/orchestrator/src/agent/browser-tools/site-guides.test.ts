@@ -35,7 +35,9 @@ describe('FIX-61 P1-7: a site guide layer is acknowledged; a login is never touc
         <div onclick="document.getElementById('login').remove()">我知道了</div></div>`);
       expect(await dismissSiteGuide(page, 'https://www.douyin.com/video/1')).toBeNull();
       expect(await page.locator('#login').count()).toBe(1);
-      await page.setContent('<div><p>guide</p><div id="b" onclick="this.remove()">我知道了</div></div>');
+      await page.setContent(
+        '<div><p>guide</p><div id="b" onclick="this.remove()">我知道了</div></div>',
+      );
       expect(await dismissSiteGuide(page, 'https://www.example.com/')).toBeNull();
       expect(await page.locator('#b').count()).toBe(1);
     } finally {

@@ -38,7 +38,11 @@ export async function dismissSiteGuide(page: Page, url = page.url()): Promise<st
           // The box the button belongs to: the nearest ancestor holding more than the button's
           // own words (the guide's text, or a login dialog's).
           let near: HTMLElement | null = el.parentElement;
-          for (let i = 0; i < 6 && near && (near.innerText ?? '').trim().length <= text.length + 4; i += 1)
+          for (
+            let i = 0;
+            i < 6 && near && (near.innerText ?? '').trim().length <= text.length + 4;
+            i += 1
+          )
             near = near.parentElement;
           if (near && off.test(near.innerText ?? '')) continue;
           el.click();

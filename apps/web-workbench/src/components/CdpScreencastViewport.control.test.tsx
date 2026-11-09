@@ -50,7 +50,12 @@ it('FIX-61: typing on a view-only screen asks for control and is delivered once 
   const onRequestControl = vi.fn();
   const props = { wsUrl: 'ws://localhost/screencast-ws/tsk_test', streamToken: 'test' };
   const { container, rerender } = render(
-    <CdpScreencastViewport {...props} viewOnly controlLease={null} onRequestControl={onRequestControl} />,
+    <CdpScreencastViewport
+      {...props}
+      viewOnly
+      controlLease={null}
+      onRequestControl={onRequestControl}
+    />,
   );
   const input = container.querySelector('input');
   if (!input) throw new Error('input missing');
@@ -93,7 +98,12 @@ it('FIX-61: input waiting for control is dropped when control does not come with
     fireEvent.keyDown(input, { key: 'p', code: 'KeyP', keyCode: 80 });
     vi.advanceTimersByTime(4_500);
     rerender(
-      <CdpScreencastViewport {...props} viewOnly={false} controlLease="late" onRequestControl={vi.fn()} />,
+      <CdpScreencastViewport
+        {...props}
+        viewOnly={false}
+        controlLease="late"
+        onRequestControl={vi.fn()}
+      />,
     );
     expect(sent.filter((m) => m.payload?.type === 'keyDown')).toEqual([]);
   } finally {

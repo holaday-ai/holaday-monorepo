@@ -48,14 +48,15 @@ import {
 import { completionDiagnostic } from './completion-diagnostic.js';
 import {
   type ObservedEvidence,
+  absentExplainedByPage,
   assessCompletionFacts,
   declaredAbsentFields,
   fieldLabel,
   includesWhole,
+  missingAskedFields,
   observedEvidence,
   sameSource,
   unescapeLiteralBreaks,
-  absentExplainedByPage,
   unverifiedNote,
 } from './completion-fields.js';
 import { contentIds, namedContentUrl, onNamedContent } from './content-target.js';
@@ -456,6 +457,7 @@ export async function runUnifiedBrowserLoop(
           rescueState,
           input.currentPageUrl?.(),
           isEnglishIntent(input.userIntent ?? input.intent),
+          requestNamesSite(input.userIntent ?? input.intent, rescueState.blockedUrl),
         )
       : looped;
   if (outcome.status === 'failed') logger.warn({ steps: steps.slice(-120) }, 'browser loop failed');
@@ -1772,8 +1774,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
                 summary,
                 fieldLines(args.fields, summary),
                 unverifiedNote(facts.unverified, {
-                english: isEnglishIntent(input.userIntent ?? input.intent),
-              }),
+                  english: isEnglishIntent(input.userIntent ?? input.intent),
+                }),
               ]
                 .filter(Boolean)
                 .join('\n\n');
@@ -1834,8 +1836,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             continue;
           }
           const note = unverifiedNote(facts.unverified, {
-                english: isEnglishIntent(input.userIntent ?? input.intent),
-              });
+            english: isEnglishIntent(input.userIntent ?? input.intent),
+          });
           // Fields are part of the answer: show the ones the summary leaves out.
           const listed = fieldLines(args.fields, summary);
           let answer = [summary, listed, note].filter(Boolean).join('\n\n');
@@ -1844,12 +1846,24 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           const saysPartial = /^\s*(?:部分完成|partially completed)/i.test(summary);
           // FIX-35 0b (Deploy-35 dy-2): a field the user named, written as 「页面未显示」, is
           // looked for once on a screenshot; still absent, the answer is 部分完成.
-          const absent = declaredAbsentFields(
+          const declaredAbsent = declaredAbsentFields(
             input.userIntent ?? input.intent,
             summary,
             args.fields,
             pageEvidence.map((page) => page.text),
           );
+          // FIX-61 (local dy-1 run): the answer gave title, author and likes and left out the
+          // comments, favourites and shares the user named — and went as 完成. A named field the
+          // answer does not give at all is treated like one written as 页面未显示.
+          // Only counts (评论数 / 收藏数 …) the answer never mentions: a title or price written
+          // naturally (「Apple iPhone 16 Pro，价格 ¥7999」) is a value, label or not.
+          const leftOut = missingAskedFields(input.userIntent ?? input.intent, summary).filter(
+            (field) =>
+              !declaredAbsent.includes(field) &&
+              /数$/.test(field) &&
+              !summary.includes(field.replace(/数$/, '')),
+          );
+          const absent = [...declaredAbsent, ...leftOut];
           // The page itself confirms the gap (a listed item showing only 「See options」):
           // an honest 部分完成, not a second look (FIX-35 0a).
           const listGap = input.partialNote?.(summary, observedText) ?? null;
@@ -1874,7 +1888,11 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             const readText = textRead
               ? ''
               : '请先 get_page_text 读一次页面正文（弹窗挡住时 snapshot 读不到它后面的页面，正文读取不受影响）；';
-            await rejected(summary, given, `点名字段写成了页面未显示：${absent.join('、')}`);
+            await rejected(
+              summary,
+              given,
+              `点名字段写成了页面未显示或没写出来：${absent.join('、')}`,
+            );
             // The second look is optional: if it never ends in a finish (steps, model), this
             // answer is still delivered, as the 部分完成 it would have been.
             const lead = absentLead(absent, answer);
@@ -1888,9 +1906,12 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             results.push(
               toolResult(
                 call.id,
-                shot
-                  ? `${absent.join('、')} 写成了页面未显示，但登录弹窗打开时，弹窗后面的页面常读不到（名字常在页面右上角或标题旁）。${readText}${textRead ? '请' : '仍读不到再'}点弹窗自己的关闭按钮（×，不要按 Esc）关掉它，再 snapshot 重读；仍读不到就再 screenshot，截图里看得到就照截图原样写（注明「截图读取」），确实看不到再写「页面未显示」。其余内容不变，再 finish。`
-                  : `${absent.join('、')} 写成了页面未显示，但还没看过页面截图（登录弹窗等可能挡住了文字，名字常在页面角落）。${readText}${textRead ? '请先' : '仍读不到再'} screenshot 看一眼：截图里看得到就照截图原样写（注明「截图读取」）；确实看不到再写「页面未显示」。其余内容不变，再 finish。`,
+                (leftOut.length
+                  ? `答案里没有写出 ${leftOut.join('、')}（用户点名要的）：先在页面里找到它们照原样写；确实没有再写「页面未显示」。`
+                  : '') +
+                  (shot
+                    ? `${absent.join('、')} 写成了页面未显示，但登录弹窗打开时，弹窗后面的页面常读不到（名字常在页面右上角或标题旁）。${readText}${textRead ? '请' : '仍读不到再'}点弹窗自己的关闭按钮（×，不要按 Esc）关掉它，再 snapshot 重读；仍读不到就再 screenshot，截图里看得到就照截图原样写（注明「截图读取」），确实看不到再写「页面未显示」。其余内容不变，再 finish。`
+                    : `${absent.join('、')} 写成了页面未显示，但还没看过页面截图（登录弹窗等可能挡住了文字，名字常在页面角落）。${readText}${textRead ? '请先' : '仍读不到再'} screenshot 看一眼：截图里看得到就照截图原样写（注明「截图读取」）；确实看不到再写「页面未显示」。其余内容不变，再 finish。`),
                 true,
               ),
             );
@@ -3198,16 +3219,18 @@ export function rescuedAnswer(
   rescue: RescueState,
   finalUrl: string | undefined,
   en = false,
+  /** FIX-61: the request names the blocked page's site; otherwise it is not 「你给的」 page. */
+  userGave = true,
 ): Extract<UnifiedBrowserOutcome, { status: 'completed' }> {
   const from = en ? rescueSiteNameEn(finalUrl) : rescueSiteName(finalUrl);
   const link = finalUrl && /^https?:\/\//.test(finalUrl) ? `[${from}](${finalUrl})` : from;
   const given = en ? rescueSiteNameEn(rescue.blockedUrl) : rescueSiteName(rescue.blockedUrl);
   const why = rescue.why ?? 'login';
   const lead = en
-    ? `部分完成：I got this from ${link} (the ${given} page you gave ${
+    ? `部分完成：I got this from ${link} (the ${given} page${userGave ? ' you gave' : ''} ${
         why === 'login' ? 'needs a login' : why === 'blocked' ? 'was blocked' : "didn't open"
       }), so it's only part of what you asked:`
-    : `部分完成：这是从${link}查到的（你给的${given}页面${
+    : `部分完成：这是从${link}查到的（${userGave ? '你给的' : ''}${given}页面${
         why === 'login' ? '要登录' : why === 'blocked' ? '被拦下了' : '没打开'
       }），只拿到了一部分：`;
   const body = withoutSourceLines(
@@ -4068,4 +4091,12 @@ function withoutPageContent(messages: NeutralMessage[], scope: 'last' | 'all'): 
         ),
     };
   });
+}
+
+/** FIX-61: whether the request itself names the site of `url` (its address or its domain). */
+export function requestNamesSite(intent: string, url: string | undefined): boolean {
+  const host = hostOf(url)?.replace(/^www\./, '');
+  if (!host) return false;
+  const base = host.split('.').slice(-2).join('.');
+  return intent.toLowerCase().includes(base.toLowerCase());
 }

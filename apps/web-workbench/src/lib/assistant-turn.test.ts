@@ -441,7 +441,8 @@ describe('FIX-61 P1-7: a failed Douyin read says what really happened', () => {
     const turn = failureTurn({
       status: 'failed',
       errorText: DY1,
-      intent: '打开 https://www.douyin.com/video/7507106798919601427 读视频标题、作者，以及点赞数（不播放）',
+      intent:
+        '打开 https://www.douyin.com/video/7507106798919601427 读视频标题、作者，以及点赞数（不播放）',
       finalUrl: 'https://www.douyin.com/jingxuan?modal_id=7676036453872274731',
       executionMode: 'browser',
       canRetry: true,

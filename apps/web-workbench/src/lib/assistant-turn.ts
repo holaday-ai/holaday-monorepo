@@ -1,3 +1,6 @@
+import type { UiStep, UiTask } from '@/types/task';
+import { friendlyHost } from '@/utils/step-humanize';
+import { isEnglishRequestText } from '@holaday/shared-types';
 /**
  * FIX-57 — the task page reads like a chat with your own assistant.
  *
@@ -12,9 +15,6 @@
  * failed or partial run always says, in plain words, what it did not get.
  */
 import { assertedFailureText } from './browser-error-kind';
-import type { UiStep, UiTask } from '@/types/task';
-import { friendlyHost } from '@/utils/step-humanize';
-import { isEnglishRequestText } from '@holaday/shared-types';
 import { classifyFriendlyFailure } from './failure-copy';
 
 /**
