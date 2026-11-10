@@ -315,10 +315,17 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
               streamer?.invalidateObservation();
               return;
             }
+            // FIX-61 复审 #2 #2: keys and text carry no position (see KEY_INPUT_FRAME_GRACE_MS).
+            const inputKind =
+              message.type === 'keyDown' ||
+              message.type === 'keyUp' ||
+              message.type === 'insertText'
+                ? ('keyboard' as const)
+                : ('pointer' as const);
             if (
               ('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y))) ||
               viewportPending ||
-              !frameGuard.validate(envelope.observation)
+              !frameGuard.validate(envelope.observation, Date.now(), inputKind)
             ) {
               streamer?.requestFrameRefresh();
               throw new Error('browser_observation_expired');
@@ -334,7 +341,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             // Recheck after the asynchronous policy: resize/navigation may have happened.
             if (
               !streamer.matchesPage(await args.instance.executor.getPage()) ||
-              !frameGuard.validate(envelope.observation)
+              !frameGuard.validate(envelope.observation, Date.now(), inputKind)
             )
               throw new Error('browser_observation_expired');
             if (

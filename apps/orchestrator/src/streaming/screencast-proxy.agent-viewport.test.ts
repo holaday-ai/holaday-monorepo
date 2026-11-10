@@ -80,7 +80,8 @@ it('watching never resizes the agent page; takeover aligns it; handback restores
     // a task: frames requested at one size, the page laid out at 1280x800).
     await agentResize({ width: 1281, height: 800 });
     await agentResize({ width: 1280, height: 800 });
-    expect(await layout()).toEqual([1280, 800]);
+    // Settles within a frame or two; read at once it raced the stream on a busy machine.
+    await vi.waitFor(async () => expect(await layout()).toEqual([1280, 800]), { timeout: 3000 });
     const appliedBefore = applied;
 
     // The user takes control: their screen size is applied again right away, so the page
