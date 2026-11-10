@@ -1167,6 +1167,13 @@ function CloudBrowserPanel({
     setActivityVisible(false);
     setCjkFallbackOpen(false);
   }, [activeTaskId]);
+  // FIX-61 复审 #2 #2: a takeover the server refuses is said out loud, not left as 「仅观察」.
+  const takeOver = React.useCallback(() => {
+    void requestOwnership('takeover').then((granted) => {
+      if (granted === false && mountedRef.current)
+        toast.show('没能接管浏览器，请稍后再点一次画面或「我来操作」', 'error');
+    });
+  }, [requestOwnership, toast]);
   // FIX-61 P0: a released / expired browser is reopened on the same task and
   // page, then handed to the user. If that fails the panel says so in plain
   // words and offers 「重新打开这个页面」.
@@ -1184,9 +1191,9 @@ function CloudBrowserPanel({
       }
       setInteractive(true);
       previousIntent.current = true;
-      void requestOwnership('takeover');
+      takeOver();
     });
-  }, [requestOwnership, restoreTerminalSession, setInteractive]);
+  }, [takeOver, restoreTerminalSession, setInteractive]);
   const handleUserTakeoverClick = React.useCallback(() => {
     if (controlDisabled) return;
     const next = browserControl.nextInteractive;
@@ -1200,7 +1207,8 @@ function CloudBrowserPanel({
     }
     setInteractive(next);
     previousIntent.current = next;
-    void requestOwnership(next ? 'takeover' : 'return');
+    if (next) takeOver();
+    else void requestOwnership('return');
     if (browserControl.focusFollowUp) onRequestAgentHelp?.();
   }, [
     browserControl,
@@ -1212,6 +1220,7 @@ function CloudBrowserPanel({
     setInteractive,
     controlDisabled,
     requestOwnership,
+    takeOver,
   ]);
   // FIX-61 P0: pressing or typing on the screen IS the takeover. The viewport
   // holds the pressed point / keys until control is granted, then delivers them.
@@ -1233,11 +1242,11 @@ function CloudBrowserPanel({
     }
     setInteractive(true);
     previousIntent.current = true;
-    void requestOwnership('takeover');
+    takeOver();
   }, [
     ownership.supported,
     reopenAndTakeOver,
-    requestOwnership,
+    takeOver,
     setInteractive,
     taskIsTerminal,
     terminalSessionUnavailable,

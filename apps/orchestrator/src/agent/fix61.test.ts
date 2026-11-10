@@ -133,6 +133,21 @@ describe('FIX-61: the rescue lead says 「你给的」 only for a page the reque
       requestNamesSite('iPhone 16 Pro Max 256GB 多少钱', 'https://www.jd.com/jiage/1.html'),
     ).toBe(false);
   });
+
+  it('复审 #2 顺手记: the iPhone task (no 京东 page given) leads without 「你给的」', async () => {
+    const { rescuedAnswer } = await import('./browser-tools/unified-browser-loop.js');
+    const intent = 'iPhone 16 Pro Max 256GB 多少钱';
+    const blockedUrl = 'https://www.jd.com/jiage/17329e1409472516f8b3f.html';
+    const out = rescuedAnswer(
+      { status: 'completed', summary: '部分完成：官网写着「于授权经销商处有售」。' } as never,
+      { started: true, blockedUrl, why: 'login' },
+      'https://www.apple.com.cn/iphone/compare/',
+      false,
+      requestNamesSite(intent, blockedUrl),
+    );
+    expect(out.summary).toContain('（京东页面要登录）');
+    expect(out.summary).not.toContain('你给的');
+  });
 });
 
 describe('FIX-61: named counts the browser answer leaves out are not 完成', async () => {

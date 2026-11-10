@@ -4117,10 +4117,11 @@ export function requestNamesSite(intent: string, url: string | undefined): boole
 }
 
 /**
- * FIX-61 复审 #1 #3: the named counts the answer really leaves out. `doubt` comes from the
- * field-name rule; the judge (FIX-60's `{field, has_value}` reading) keeps a field only when it
- * reads no value for it, or gives no verdict on it. No judge, or a failed call: the doubt stands
- * as before — the judge never adds a field the rule did not doubt.
+ * FIX-61 复审 #1 #3 / 复审 #2 #1: the named counts the answer really leaves out. `doubt` comes
+ * from the field-name rule and is only a doubt: a field counts as left out only when the judge
+ * (FIX-60's `{field, has_value}` reading) says plainly that the answer gives no value for it.
+ * No judge, an empty reading, a failed call (欠费, timeout), or no verdict on that field: the
+ * doubt is dropped, as before FIX-61 — the judge never adds a field the rule did not doubt.
  */
 export async function confirmLeftOut(
   judge: AskedFieldJudge | undefined,
@@ -4128,12 +4129,12 @@ export async function confirmLeftOut(
   answer: string,
   doubt: readonly string[],
 ): Promise<string[]> {
-  if (!doubt.length || !judge) return [...doubt];
+  if (!doubt.length || !judge) return [];
   const verdicts = await judge({ request, answer }).catch(() => null);
-  if (!verdicts) return [...doubt];
+  if (!verdicts?.length) return [];
   const key = (field: string) => field.replace(/[\s「」『』"“”'‘’]/g, '').replace(/数$/, '');
   return doubt.filter((field) => {
     const said = verdicts.find((v) => key(v.field) === key(field));
-    return !said || !said.hasValue;
+    return said !== undefined && !said.hasValue;
   });
 }

@@ -347,10 +347,36 @@ export function partialLead(text: string, en = false): { lead: string | null; bo
   };
 }
 
+/** Sites an answer names in words, with the hosts they are (FIX-61 复审 #2: whose login it is). */
+const NAMED_SITES: ReadonlyArray<[RegExp, RegExp]> = [
+  [/京东/, /(^|\.)jd\.com$/],
+  [/淘宝/, /(^|\.)taobao\.com$/],
+  [/天猫/, /(^|\.)tmall\.com$/],
+  [/拼多多/, /(^|\.)(pinduoduo|yangkeduo)\.com$/],
+  [/抖音/, /(^|\.)douyin\.com$/],
+  [/小红书/, /(^|\.)xiaohongshu\.com$/],
+  [/微博/, /(^|\.)weibo\.(com|cn)$/],
+  [/知乎/, /(^|\.)zhihu\.com$/],
+  [/B ?站|哔哩哔哩|bilibili/i, /(^|\.)bilibili\.com$/],
+  [/苹果|apple/i, /(^|\.)apple\.com(\.cn)?$/],
+  [/亚马逊|amazon/i, /(^|\.)amazon\.[a-z.]+$/],
+  [/携程/, /(^|\.)ctrip\.com$/],
+  [/美团/, /(^|\.)meituan\.com$/],
+  [/大众点评/, /(^|\.)dianping\.com$/],
+  [/闲鱼/, /(^|\.)goofish\.com$/],
+];
+const LOGIN_WORDS =
+  /需(?:要)?登录|没登录|未登录|登录后(?:才|可)?(?:能)?(?:看|显示|查看)|要登录才|页面要登录|log ?in|sign ?in/i;
+
 /**
  * 协调方第 2 次代体验 (京东): a partial answer that stopped at a login (masked price, login-only
  * text) offers the most useful next step first — you log in, I read it properly. Same
  * handover as the failed turn; the person logs in, never me.
+ *
+ * FIX-61 复审 #2: only for the site that asked for the login. A rescued answer names it in its
+ * lead (「…查到的（你给的京东页面要登录）」) — the page it ended on (苹果官网) needed none. Without
+ * that lead, the login must be about the page the task is on: a login sentence that names only
+ * another site (「京东等电商平台需要登录」 on apple.com.cn) offers nothing.
  */
 export function partialLoginStep(input: {
   text: string;
@@ -359,29 +385,51 @@ export function partialLoginStep(input: {
 }): NextStepOption | null {
   const intent = input.intent.trim();
   if (!intent) return null;
-  if (
-    !/需(?:要)?登录|没登录|未登录|登录后(?:才|可)?(?:能)?(?:看|显示|查看)|要登录才|log ?in|sign ?in/i.test(
-      input.text,
-    )
-  )
-    return null;
+  if (!LOGIN_WORDS.test(input.text)) return null;
   // 复审 #7: an English task gets the step in English.
   if (isEnglishTask(intent)) {
-    const site = taskSite(intent, input.finalUrl, true);
+    const rescued = input.text.match(/\(the (.{1,40}?) page(?: you gave)? needs a login\)/i)?.[1];
+    const site =
+      rescued ??
+      (loginIsHere(input.text, input.finalUrl) ? taskSite(intent, input.finalUrl, true) : null);
     if (!site) return null;
     const what = /price|cost|how much/i.test(intent) ? 'the exact price' : 'the full page';
     return {
       label: `Log in to ${site} in the browser and I'll read ${what}`,
-      prompt: `I'll log in to ${site} myself in the browser. Reopen the page, pause at the login page, and continue once I've logged in: ${intent}`,
+      prompt: rescued
+        ? `I'll log in to ${site} myself in the browser. Open the ${site} page that needed the login, pause at the login page, and continue once I've logged in: ${intent}`
+        : `I'll log in to ${site} myself in the browser. Reopen the page, pause at the login page, and continue once I've logged in: ${intent}`,
     };
   }
-  const site = siteName(null, intent) ?? siteName(input.finalUrl, '');
+  const rescued = input.text.match(/（(?:你给的)?([^（）\s]{1,20}?)页面要登录）/)?.[1];
+  const site =
+    rescued ??
+    (loginIsHere(input.text, input.finalUrl)
+      ? (siteName(null, intent) ?? siteName(input.finalUrl, ''))
+      : null);
   if (!site) return null;
   const what = /价格|价钱|多少钱|报价|price/i.test(intent) ? '准确价格' : '完整内容';
   return {
     label: `你在浏览器里登录${site}，我帮你读${what}`,
-    prompt: `我会在浏览器里自己登录${site}。请重新打开刚才的页面，遇到登录页就暂停，等我登录好再继续：${intent}`,
+    prompt: rescued
+      ? `我会在浏览器里自己登录${site}。请打开刚才要登录的${site}页面，遇到登录页就暂停，等我登录好再继续：${intent}`
+      : `我会在浏览器里自己登录${site}。请重新打开刚才的页面，遇到登录页就暂停，等我登录好再继续：${intent}`,
   };
+}
+
+/** Some sentence about a login is about the page the task is on, or names no site at all. */
+function loginIsHere(text: string, finalUrl: string | null | undefined): boolean {
+  const host =
+    hostOf(finalUrl)
+      ?.replace(/^www\./, '')
+      .toLowerCase() ?? null;
+  return text
+    .split(/[。！？!?\n；;]/)
+    .filter((sentence) => LOGIN_WORDS.test(sentence))
+    .some((sentence) => {
+      const named = NAMED_SITES.filter(([words]) => words.test(sentence));
+      return named.length === 0 || (host !== null && named.some(([, hosts]) => hosts.test(host)));
+    });
 }
 
 /** The site a task is on, by its short Chinese name when known (「知乎」, not 「zhihu.com」). */
