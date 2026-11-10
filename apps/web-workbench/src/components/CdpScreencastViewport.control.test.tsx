@@ -242,3 +242,56 @@ it('FIX-61 复审 #2 #2: held input on a still page asks for a fresh frame once 
   rerender(<CdpScreencastViewport {...props} viewOnly={false} controlLease="granted" />);
   expect(sent.filter((m) => m.type === 'observe').length).toBeGreaterThan(0);
 });
+
+it('FIX-61 复审 #2 #2: frames arriving faster than one decode never starve the screen — the newest waiting frame paints next', () => {
+  const sockets: Array<{ onmessage: ((e: { data: string }) => void) | null }> = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    constructor() {
+      sockets.push(this);
+    }
+    send() {}
+    close() {}
+  }
+  const images: Array<{ src: string; onload: (() => void) | null; width: number; height: number }> =
+    [];
+  class FakeImage {
+    src = '';
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    width = 10;
+    height = 10;
+    constructor() {
+      images.push(this);
+    }
+  }
+  vi.stubGlobal('WebSocket', Socket);
+  vi.stubGlobal('Image', FakeImage);
+  render(
+    <CdpScreencastViewport
+      wsUrl="ws://localhost/screencast-ws/tsk_test"
+      streamToken="test"
+      viewOnly
+      controlLease={null}
+    />,
+  );
+  const socket = sockets.at(-1);
+  if (!socket?.onmessage) throw new Error('socket not connected');
+  const frame = (data: string) =>
+    socket.onmessage?.({ data: JSON.stringify({ type: 'frame', data, metadata: {} }) });
+  frame('f1');
+  for (const n of [2, 3, 4, 5]) frame(`f${n}`);
+  // One decode in flight; the four frames behind it did not cancel it.
+  expect(images).toHaveLength(1);
+  expect(images[0]?.src).toContain('f1');
+  images[0]?.onload?.();
+  // Then the newest waiting frame only (f2-f4 were superseded while waiting).
+  expect(images).toHaveLength(2);
+  expect(images[1]?.src).toContain('f5');
+  images[1]?.onload?.();
+  expect(images).toHaveLength(2);
+  frame('f6');
+  expect(images).toHaveLength(3);
+});

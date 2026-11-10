@@ -215,6 +215,17 @@ export function CdpScreencastViewport({
   // Per-frame <img> + connection/frame sequence guards so async decodes cannot
   // paint stale pixels after a newer frame, reconnect, wsUrl change, or unmount.
   const imgRef = React.useRef<HTMLImageElement | null>(null);
+  // FIX-61 复审 #2 #2: one decode at a time, the newest waiting frame next. Each new frame
+  // used to cancel the decode in flight, so a page animating faster than one decode (a
+  // carousel at ~50fps, a 1280x1747 JPEG) painted nothing until it stopped: the screen and
+  // the observation its input names fell behind, and the server refused that input.
+  const decodingImgRef = React.useRef<HTMLImageElement | null>(null);
+  const pendingFrameRef = React.useRef<{
+    base64: string;
+    connectionSeq: number;
+    geometry: BrowserFrameGeometry | undefined;
+    onPaint: () => void;
+  } | null>(null);
   const frameSeqRef = React.useRef(0);
   const connectionSeqRef = React.useRef(0);
   const mountedRef = React.useRef(false);
@@ -766,6 +777,8 @@ export function CdpScreencastViewport({
         /* ignore */
       }
       wsRef.current = null;
+      decodingImgRef.current = null;
+      pendingFrameRef.current = null;
     };
   }, [hasStreamToken, reconnectSignal, wsUrl, viewportV2, invalidateGeometry]);
 
@@ -777,15 +790,34 @@ export function CdpScreencastViewport({
     geometry: BrowserFrameGeometry | undefined,
     onPaint: () => void,
   ): void {
+    if (decodingImgRef.current) {
+      pendingFrameRef.current = { base64, connectionSeq, geometry, onPaint };
+      return;
+    }
     if (imgRef.current) {
       imgRef.current.onload = null;
       imgRef.current.onerror = null;
     }
     const img = new Image();
     imgRef.current = img;
+    decodingImgRef.current = img;
     const frameSeq = ++frameSeqRef.current;
     const observationEpoch = observationEpochRef.current;
+    const settle = (): void => {
+      if (decodingImgRef.current !== img) return;
+      decodingImgRef.current = null;
+      const next = pendingFrameRef.current;
+      pendingFrameRef.current = null;
+      if (next) drawFrameRef.current(next.base64, next.connectionSeq, next.geometry, next.onPaint);
+    };
     img.onload = () => {
+      try {
+        paintDecoded();
+      } finally {
+        settle();
+      }
+    };
+    const paintDecoded = (): void => {
       if (
         !shouldPaintCdpFrame({
           mounted: mountedRef.current,
@@ -835,6 +867,7 @@ export function CdpScreencastViewport({
       requestAnimationFrame(() => sourceDimsRecomputeRef.current?.());
     };
     img.onerror = () => {
+      settle();
       if (
         !shouldPaintCdpFrame({
           mounted: mountedRef.current,
