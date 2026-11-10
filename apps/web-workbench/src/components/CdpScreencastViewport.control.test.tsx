@@ -5,6 +5,7 @@ import { CdpScreencastViewport } from './CdpScreencastViewport';
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 it('requires and transmits the current lease on actual viewport keyboard input', () => {
@@ -294,4 +295,147 @@ it('FIX-61 复审 #2 #2: frames arriving faster than one decode never starve the
   expect(images).toHaveLength(2);
   frame('f6');
   expect(images).toHaveLength(3);
+});
+
+/**
+ * DEPLOY-61 第 0 步 #2: an ended task's screen whose size the server has not applied yet (the
+ * assistant's 1280x800 page is shown). The user presses on it; taking control applies this
+ * screen's size, then a fresh frame comes and the held press is delivered or not.
+ */
+async function heldPressAcrossTakeover(host: { width: number; height: number; mobile: boolean }) {
+  const sent: Array<{
+    type?: string;
+    payload?: { type: string; width?: number; height?: number };
+  }> = [];
+  const sockets: Array<{ onmessage: ((e: { data: string }) => void) | null }> = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    constructor() {
+      sockets.push(this);
+    }
+    send(raw: string) {
+      sent.push(JSON.parse(raw));
+    }
+    close() {}
+  }
+  const images: Array<{ onload: (() => void) | null }> = [];
+  class FakeImage {
+    src = '';
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    width = 100;
+    height = 60;
+    constructor() {
+      images.push(this);
+    }
+  }
+  vi.stubGlobal('WebSocket', Socket);
+  vi.stubGlobal('Image', FakeImage);
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    drawImage() {},
+  } as never);
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(host.width);
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(host.height);
+  const onRequestControl = vi.fn();
+  const onHeldInputDropped = vi.fn();
+  const props = {
+    wsUrl: 'ws://localhost/screencast-ws/tsk_test',
+    streamToken: 'test',
+    viewportV2: true,
+    replayAfterControl: true,
+    mobileViewport: host.mobile,
+    onHeldInputDropped,
+  };
+  const { container, rerender } = render(
+    <CdpScreencastViewport
+      {...props}
+      viewOnly
+      controlLease={null}
+      onRequestControl={onRequestControl}
+    />,
+  );
+  const socket = sockets.at(-1);
+  if (!socket?.onmessage) throw new Error('socket not connected');
+  const receive = (m: unknown) => socket.onmessage?.({ data: JSON.stringify(m) });
+  receive({ type: 'viewport-v2-ready', controlReady: true });
+  let n = 0;
+  const frame = (cssWidth: number, cssHeight: number) => {
+    n++;
+    receive({
+      type: 'frame',
+      data: `f${n}`,
+      metadata: {},
+      geometry: {
+        frameId: `f${n}`,
+        tabId: 't',
+        viewportRevision: n,
+        cssWidth,
+        cssHeight,
+        imageWidth: 100,
+        imageHeight: 60,
+        pageScaleFactor: 1,
+        offsetTop: 0,
+        scrollOffset: { x: 0, y: 0 },
+        capturedAt: Date.now(),
+      },
+    });
+    images.at(-1)?.onload?.();
+  };
+  const viewports = () => sent.filter((m) => m.payload?.type === 'viewport');
+  await vi.waitFor(() => expect(viewports().length).toBe(1));
+  // The server does not apply a watcher's size on an ended task: the frames still show the
+  // assistant's 1280x800 page, and that is what the user presses on.
+  frame(1280, 800);
+  const canvas = container.querySelector('canvas');
+  if (!canvas) throw new Error('canvas missing');
+  canvas.setPointerCapture = () => {};
+  canvas.releasePointerCapture = () => {};
+  canvas.getBoundingClientRect = () =>
+    ({ left: 0, top: 0, x: 0, y: 0, width: 100, height: 60, right: 100, bottom: 60 }) as DOMRect;
+  const pointer = {
+    clientX: 20,
+    clientY: 30,
+    button: 0,
+    detail: 1,
+    pointerId: 1,
+    pointerType: 'mouse',
+  };
+  fireEvent.pointerDown(canvas, pointer);
+  fireEvent.pointerUp(canvas, pointer);
+  expect(onRequestControl).toHaveBeenCalledTimes(1);
+  // Control arrives; the screen re-sends its size, the server applies it, a fresh frame comes.
+  rerender(<CdpScreencastViewport {...props} viewOnly={false} controlLease="granted" />);
+  await vi.waitFor(() => expect(viewports().length).toBe(2));
+  const size = viewports()[1]?.payload;
+  receive({ type: 'viewport-applied', width: size?.width, height: size?.height });
+  frame(size?.width ?? 0, size?.height ?? 0);
+  return {
+    size,
+    pointer: sent.filter((m) => /^mouse/.test(m.payload?.type ?? '')),
+    onHeldInputDropped,
+  };
+}
+
+it('DEPLOY-61: the press that asked for control is not delivered once the page was re-laid out at a phone width', async () => {
+  const { size, pointer, onHeldInputDropped } = await heldPressAcrossTakeover({
+    width: 390,
+    height: 760,
+    mobile: true,
+  });
+  expect(size?.width).not.toBe(1280);
+  expect(pointer).toEqual([]);
+  expect(onHeldInputDropped).toHaveBeenCalledTimes(1);
+});
+
+it('DEPLOY-61: at the same page width (desktop: only the height follows the panel) it is delivered', async () => {
+  const { size, pointer, onHeldInputDropped } = await heldPressAcrossTakeover({
+    width: 640,
+    height: 420,
+    mobile: false,
+  });
+  expect(size?.width).toBe(1280);
+  expect(pointer.map((m) => m.payload?.type)).toEqual(['mouseDown', 'mouseUp']);
+  expect(onHeldInputDropped).not.toHaveBeenCalled();
 });

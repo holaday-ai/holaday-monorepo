@@ -15,7 +15,7 @@ export function createOwnedScreencastInputBridge(options: {
   viewportV2?: boolean;
   peek: (taskId: string) => BrowserInstance | null;
   onViewportApplied?: (viewport: AppliedBrowserViewport) => void;
-  onViewportRequested?: () => void;
+  onViewportRequested?: (envelope: InputEnvelope) => void;
   beforeDispatch?: (envelope: InputEnvelope, signal?: AbortSignal) => Promise<void>;
   releasePressed?: (signal: AbortSignal) => Promise<void>;
   executionDrain?: ExecutionAdmission;

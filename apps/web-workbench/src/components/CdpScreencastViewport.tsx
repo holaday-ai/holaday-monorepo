@@ -62,6 +62,8 @@ export type CdpScreencastStatus = 'idle' | 'connecting' | 'connected' | 'disconn
 interface DeferredInput {
   at: number;
   build: () => InputPayload | null;
+  /** DEPLOY-61: the page width (CSS px) of the frame the user acted on, when known. */
+  layoutWidth?: number;
 }
 const GEOMETRY_FRESH_MS = 5000;
 const DEFERRED_INPUT_MS = 4000;
@@ -89,6 +91,11 @@ interface Props {
    * only asks for control.
    */
   replayAfterControl?: boolean;
+  /**
+   * DEPLOY-61: held input was not delivered because taking control re-laid the page out at
+   * another width (a phone screen) — the same point would now hit something else.
+   */
+  onHeldInputDropped?: () => void;
   onStatusChange?: (status: CdpScreencastStatus) => void;
   /** Fired after the first real frame is painted for the current viewport. */
   onFrameReady?: () => void;
@@ -152,6 +159,7 @@ export function CdpScreencastViewport({
   viewOnly = true,
   controlLease = null,
   onRequestControl,
+  onHeldInputDropped,
   replayAfterControl = true,
   onStatusChange,
   onFrameReady,
@@ -189,6 +197,11 @@ export function CdpScreencastViewport({
   const deferredInputsRef = React.useRef<DeferredInput[]>([]);
   const onRequestControlRef = React.useRef(onRequestControl);
   onRequestControlRef.current = onRequestControl;
+  const onHeldInputDroppedRef = React.useRef(onHeldInputDropped);
+  onHeldInputDroppedRef.current = onHeldInputDropped;
+  // DEPLOY-61: the page width of the newest painted frame, even while its geometry is not yet
+  // accepted for input (a view-only screen whose size the server has not applied).
+  const paintedLayoutWidthRef = React.useRef<number | undefined>(undefined);
   const replayAfterControlRef = React.useRef(replayAfterControl);
   replayAfterControlRef.current = replayAfterControl;
   const lastControlRequestRef = React.useRef(0);
@@ -345,6 +358,22 @@ export function CdpScreencastViewport({
     const now = Date.now();
     const pending = deferredInputsRef.current;
     deferredInputsRef.current = [];
+    // DEPLOY-61: held input is mapped against the frame current when sent. When taking control
+    // re-laid the page out at another width (a phone screen), that point now shows something
+    // else: deliver nothing rather than press it, and let the user press again.
+    const width = geometryRef.current?.cssWidth;
+    if (
+      width !== undefined &&
+      pending.some(
+        (item) =>
+          now - item.at <= DEFERRED_INPUT_MS &&
+          item.layoutWidth !== undefined &&
+          item.layoutWidth !== width,
+      )
+    ) {
+      onHeldInputDroppedRef.current?.();
+      return;
+    }
     for (const item of pending) {
       if (now - item.at > DEFERRED_INPUT_MS) continue;
       const payload = item.build();
@@ -376,7 +405,11 @@ export function CdpScreencastViewport({
       if (!waitingForControl || replayAfterControlRef.current) {
         deferredInputsRef.current = [
           ...deferredInputsRef.current.filter((item) => now - item.at <= DEFERRED_INPUT_MS),
-          { at: now, build },
+          {
+            at: now,
+            build,
+            layoutWidth: geometryRef.current?.cssWidth ?? paintedLayoutWidthRef.current,
+          },
         ].slice(-DEFERRED_INPUT_LIMIT);
       }
       if (waitingForControl) {
@@ -838,6 +871,7 @@ export function CdpScreencastViewport({
       if (canvas.width !== img.width) canvas.width = img.width;
       if (canvas.height !== img.height) canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
+      if (viewportV2 && geometry?.cssWidth) paintedLayoutWidthRef.current = geometry.cssWidth;
       if (viewportV2) {
         geometryRef.current =
           observationEpoch === observationEpochRef.current &&

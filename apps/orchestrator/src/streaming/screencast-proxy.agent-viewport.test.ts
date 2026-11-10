@@ -114,3 +114,91 @@ it('watching never resizes the agent page; takeover aligns it; handback restores
     vi.unstubAllEnvs();
   }
 }, 20000);
+
+/**
+ * DEPLOY-61 第 0 步 #2: the screen re-sends its size itself once it has the lease. The server's
+ * lease watch applied it a second time, opening a second 「尺寸待定」 window right where the click
+ * that asked for control is delivered (refused as stale: the first click only took over). Now
+ * the watch steps in only when no viewport with the new lease arrived within a second.
+ */
+it('a screen that re-sends its size with the new lease is applied once, not twice', async () => {
+  vi.stubEnv('BROWSER_VIEWPORT_V2', 'true');
+  const browser = await chromium.launch({ headless: true, args: ['--renderer-process-limit=2'] });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  await page.setContent('<p>fixture</p>');
+  const instance = {
+    taskId: 'tsk_lease_viewport_once',
+    userId: 'usr_lease_viewport_once',
+    status: 'ready',
+    executor: { getPage: async () => page },
+  } as unknown as BrowserInstance;
+  const binding = browserControlSessions.start(instance);
+  const server = createServer();
+  const proxy = createScreencastProxy({
+    pool: { peek: () => instance, touch: () => {} } as unknown as BrowserPool,
+    logger: pino({ level: 'silent' }),
+    authenticateToken: async () => instance.userId,
+    beforeViewportAction: async () => {
+      throw new Error('not used');
+    },
+  });
+  server.on('upgrade', proxy.handleUpgrade);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const addr = server.address() as { port: number };
+  const ws = new WebSocket(
+    `ws://127.0.0.1:${addr.port}/screencast-ws/${instance.taskId}?token=fixture&viewportV2=1`,
+  );
+  let applied = 0;
+  let frames = 0;
+  ws.on('message', (raw) => {
+    const m = JSON.parse(String(raw));
+    if (m.type === 'viewport-applied') applied++;
+    if (m.type === 'frame') frames++;
+  });
+  const viewport = (controlLease?: string) =>
+    ws.send(
+      JSON.stringify({
+        type: 'input',
+        ...(controlLease ? { controlLease } : {}),
+        payload: { type: 'viewport', width: 1280, height: 805, deviceScaleFactor: 1 },
+      }),
+    );
+  let parked: Promise<unknown> | null = null;
+  try {
+    await once(ws, 'open');
+    await vi.waitFor(() => expect(frames).toBeGreaterThan(0), { timeout: 5000 });
+    viewport();
+    await new Promise((r) => setTimeout(r, 200));
+    // The assistant reaches its next action boundary: the queued resize is applied there.
+    await binding.control.checkpoint(async () => undefined);
+    await vi.waitFor(() => expect(applied).toBe(1), { timeout: 5000 });
+
+    // Takeover; the screen learns its lease and re-sends its size right away (as the workbench
+    // does) — applied once, and nothing more from the watch.
+    binding.control.requestHuman();
+    parked = binding.control.checkpoint(async () => undefined);
+    const lease = binding.control.snapshot().lease;
+    expect(lease).toBeTruthy();
+    viewport(lease!);
+    await vi.waitFor(() => expect(applied).toBe(2), { timeout: 5000 });
+    await new Promise((r) => setTimeout(r, 1_800));
+    expect(applied).toBe(2);
+
+    // A screen that does not re-send still gets its size applied by the watch, a bit later.
+    binding.control.returnToAgent(lease!);
+    await parked;
+    binding.control.requestHuman();
+    parked = binding.control.checkpoint(async () => undefined);
+    expect(binding.control.snapshot().lease).toBeTruthy();
+    await vi.waitFor(() => expect(applied).toBe(3), { timeout: 5000 });
+  } finally {
+    ws.close();
+    await once(ws, 'close');
+    binding.control.close();
+    await parked;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await browser.close();
+    vi.unstubAllEnvs();
+  }
+}, 30000);

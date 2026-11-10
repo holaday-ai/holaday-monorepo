@@ -1172,6 +1172,11 @@ function CloudBrowserPanel({
     setCjkFallbackOpen(false);
   }, [activeTaskId]);
   // FIX-61 复审 #2 #2: a takeover the server refuses is said out loud, not left as 「仅观察」.
+  // DEPLOY-61: taking control re-laid the page out at the phone's width, so the press that
+  // asked for it was not delivered (it would have hit something else).
+  const handleHeldInputDropped = React.useCallback(() => {
+    toast.show('已由你操作；页面按你的屏幕重新排版了，刚才那一下没有发出，请再点一次', 'info');
+  }, [toast]);
   const takeOver = React.useCallback(() => {
     void requestOwnership('takeover').then((granted) => {
       if (granted === false && mountedRef.current)
@@ -1858,6 +1863,7 @@ function CloudBrowserPanel({
                       screenControlAvailable ? handleScreenControlRequest : undefined
                     }
                     replayAfterControl={taskIsTerminal}
+                    onHeldInputDropped={handleHeldInputDropped}
                     viewportV2={viewportV2}
                     fitMode="contain"
                     displayMode={displayMode}

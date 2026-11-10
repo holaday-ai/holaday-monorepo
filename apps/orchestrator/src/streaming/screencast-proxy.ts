@@ -72,6 +72,13 @@ export type RoutePickResult =
 const TASK_ID_PREFIX = 'tsk_';
 /** How often a live screen checks whether its user just took control. */
 const LEASE_WATCH_MS = 300;
+/**
+ * DEPLOY-61 第 0 步 #2: the screen re-sends its size itself once it learns its lease. Applying it
+ * a second time from the watch below put a second 「尺寸待定」 window right where the click that
+ * asked for control is delivered, and that click was refused as stale (first click only took
+ * over). The watch is now a fallback for a screen that did not re-send within this long.
+ */
+const LEASE_VIEWPORT_FALLBACK_MS = 1_000;
 
 export function pickInstanceForRoute(args: {
   urlArg: string;
@@ -271,6 +278,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     let inputHandler: CdpInputHandler | null = null;
     let stopped = false;
     let viewportPending = false;
+    // The newest lease a viewport message from this screen carried (DEPLOY-61 第 0 步 #2).
+    let viewportLease: string | null = null;
     const humanLease = (): string | null => {
       const control = browserControlSessions
         .get(args.instance, args.instance.userId, args.instance.taskId)
@@ -298,13 +307,13 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         streamer && args.viewportV2 ? streamer.runWithStableViewport(action) : action(),
       viewportV2: args.viewportV2,
       maxViewportHeight: args.viewportV2 ? 2400 : 1600,
-      onViewportRequested: args.viewportV2
-        ? () => {
-            viewportPending = true;
-            invalidate();
-            streamer?.invalidateObservation();
-          }
-        : undefined,
+      onViewportRequested: (envelope) => {
+        if (typeof envelope.controlLease === 'string') viewportLease = envelope.controlLease;
+        if (!args.viewportV2) return;
+        viewportPending = true;
+        invalidate();
+        streamer?.invalidateObservation();
+      },
       beforeDispatch: args.viewportV2
         ? async (envelope, signal) => {
             if (!streamer?.matchesPage(await args.instance.executor.getPage())) {
@@ -501,15 +510,26 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       await inputBridge.attach(inputHandler);
       // When the user takes control, apply their screen size once so the page
       // they are about to press lays out like the frames they see.
+      // A screen that re-sends its size with the new lease (the workbench does) is not applied
+      // twice; the watch only steps in when none arrived within LEASE_VIEWPORT_FALLBACK_MS.
       let seenLease = humanLease();
+      let awaitingLease: { lease: string; since: number } | null = null;
       const leaseWatch = setInterval(() => {
         if (stopped) {
           clearInterval(leaseWatch);
           return;
         }
         const lease = humanLease();
-        if (lease && lease !== seenLease) void inputBridge.reapplyViewport().catch(() => {});
+        if (lease && lease !== seenLease) awaitingLease = { lease, since: Date.now() };
         seenLease = lease;
+        if (!awaitingLease) return;
+        if (lease !== awaitingLease.lease || viewportLease === awaitingLease.lease) {
+          awaitingLease = null;
+          return;
+        }
+        if (Date.now() - awaitingLease.since < LEASE_VIEWPORT_FALLBACK_MS) return;
+        awaitingLease = null;
+        void inputBridge.reapplyViewport().catch(() => {});
       }, LEASE_WATCH_MS);
       leaseWatch.unref?.();
       args.ws.once('close', () => clearInterval(leaseWatch));
