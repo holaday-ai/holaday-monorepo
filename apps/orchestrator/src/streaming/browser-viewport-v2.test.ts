@@ -129,7 +129,7 @@ it('DEPLOY-61 #1: Enter and Space on a stale frame are refused after focus moved
   expect(ok({ type: 'mouseDown' })).toBe(false);
   expect(
     g.validate(
-      { ...frame, frameId: 'dialog', capturedAt: 1100 },
+      { ...frame, frameId: 'dialog' },
       at,
       frameGraceFor({ type: 'keyDown', key: 'Enter' }),
     ),
