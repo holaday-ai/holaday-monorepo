@@ -315,12 +315,14 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
               streamer?.invalidateObservation();
               return;
             }
-            // FIX-61 复审 #2 #2: keys and text carry no position (see KEY_INPUT_FRAME_GRACE_MS).
+            // FIX-61 复审 #2 #2: keys, text and the release of a press (see
+            // LENIENT_INPUT_FRAME_GRACE_MS in browser-viewport-v2.ts).
             const inputKind =
               message.type === 'keyDown' ||
               message.type === 'keyUp' ||
-              message.type === 'insertText'
-                ? ('keyboard' as const)
+              message.type === 'insertText' ||
+              message.type === 'mouseUp'
+                ? ('lenient' as const)
                 : ('pointer' as const);
             if (
               ('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y))) ||

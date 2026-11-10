@@ -12,10 +12,12 @@ const INPUT_FRAME_TRANSIT_MS = 250;
 // FIX-61 复审 #2 #2: keys carry no position — they go to the focused element, which the
 // action gate binds at dispatch. A screen that paints the newest frame late (a large frame on
 // a busy machine or phone) still names the previous one, and every key typed meanwhile was
-// refused silently (「holaday」 arrived as 「h」). Keys accept a superseded frame of the SAME
-// tab and revision for as long as a frame is fresh at all; any navigation, resize or tab
-// change still clears it. Pointer input keeps the 250ms bound.
-const KEY_INPUT_FRAME_GRACE_MS = BROWSER_FRAME_MAX_AGE_MS;
+// refused silently (「holaday」 arrived as 「h」). A mouse-up ends a press the server already
+// accepted: refusing it left the button held in the browser, and at handback the browser was
+// stopped as 「input outcome unknown」. Both accept a superseded frame of the SAME tab and
+// revision for as long as a frame is fresh at all; any navigation, resize or tab change still
+// clears it. Presses, moves and scrolls keep the 250ms bound.
+const LENIENT_INPUT_FRAME_GRACE_MS = BROWSER_FRAME_MAX_AGE_MS;
 const SUPERSEDED_FRAMES_KEPT = 512;
 export class BrowserFrameGuard {
   private frame: BrowserFrameGeometry | null = null;
@@ -31,7 +33,7 @@ export class BrowserFrameGuard {
     ) {
       this.recent.set(previous.frameId, { frame: previous, supersededAt: frame.capturedAt });
       for (const [id, entry] of this.recent)
-        if (frame.capturedAt - entry.supersededAt > KEY_INPUT_FRAME_GRACE_MS)
+        if (frame.capturedAt - entry.supersededAt > LENIENT_INPUT_FRAME_GRACE_MS)
           this.recent.delete(id);
       while (this.recent.size > SUPERSEDED_FRAMES_KEPT)
         this.recent.delete(this.recent.keys().next().value!);
@@ -45,11 +47,11 @@ export class BrowserFrameGuard {
   validate(
     ref: BrowserFrameReference | undefined,
     now = Date.now(),
-    input: 'pointer' | 'keyboard' = 'pointer',
+    input: 'pointer' | 'lenient' = 'pointer',
   ): boolean {
     if (!ref || !this.frame) return false;
     const prior = this.recent.get(ref.frameId);
-    const grace = input === 'keyboard' ? KEY_INPUT_FRAME_GRACE_MS : INPUT_FRAME_TRANSIT_MS;
+    const grace = input === 'lenient' ? LENIENT_INPUT_FRAME_GRACE_MS : INPUT_FRAME_TRANSIT_MS;
     const f =
       ref.frameId === this.frame.frameId
         ? this.frame
