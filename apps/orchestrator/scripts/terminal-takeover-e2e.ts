@@ -38,6 +38,11 @@ const out = process.env.TERMINAL_TAKEOVER_E2E_OUTPUT;
 if (!out) throw Error('TERMINAL_TAKEOVER_E2E_OUTPUT required');
 await mkdir(out, { recursive: true });
 const status = process.argv.find((a) => a.startsWith('--status='))?.slice(9) ?? 'partial_success';
+// --blip: the browser is still open and the screen connected, but the control state briefly
+// reports session_unavailable (seen live right after a handback), so the panel runs its
+// 「恢复浏览器」 path on a browser that is already there (restored: false).
+const blip = process.argv.includes('--blip');
+const tag = `${status}${blip ? '-blip' : ''}`;
 const webPort = Number(process.env.TERMINAL_TAKEOVER_WEB_PORT ?? 4329);
 const apiPort = Number(process.env.TERMINAL_TAKEOVER_API_PORT ?? 4328);
 const logger = pino({ level: process.env.E2E_TRACE ? 'debug' : 'silent' });
@@ -88,6 +93,10 @@ const pool = {
   peek: (id: string) => (id === taskId ? instance : null),
   peekActiveForUser: (id: string) => (id === 'usr_fixture' ? instance : null),
 };
+let blipping = blip;
+if (blip) await reopen();
+// What the control procedures see; the screencast proxy always sees `pool`.
+const controlPool = { ...pool, peek: (id: string) => (blipping ? null : pool.peek(id)) };
 const row = { status, userExternalId: 'usr_fixture', userId: 1 };
 const query = {
   from: () => query,
@@ -103,8 +112,10 @@ const appRouter = router({
       .input(z.object({ taskId: z.string() }))
       .mutation(async () => {
         effects.push('ensure');
+        blipping = false;
         const restored = !instance;
         if (restored) await reopen();
+        effects.push(restored ? 'restored' : 'already-open');
         return { status: 'ready' as const, restored, url: page?.url() ?? FINAL_URL };
       }),
     checkpointBrowserSession: publicProcedure.input(z.any()).mutation(() => ({ ok: true })),
@@ -125,7 +136,12 @@ app.use(
   createExpressMiddleware({
     router: appRouter,
     createContext: () =>
-      ({ userId: 'usr_fixture', db: { select: () => query }, browserPool: pool, logger }) as never,
+      ({
+        userId: 'usr_fixture',
+        db: { select: () => query },
+        browserPool: controlPool,
+        logger,
+      }) as never,
   }),
 );
 const server = createServer(app);
@@ -228,8 +244,8 @@ try {
   await ui.getByText('画面实时同步').first().waitFor({ timeout: 30000 });
   await ui.waitForTimeout(1200);
   const opened = { header: await header(), effects: [...effects] };
-  await ui.screenshot({ path: `${out}/1-reopened-${status}.png` });
-  assert.ok(effects.includes('ensure'), 'the released browser was not reopened');
+  await ui.screenshot({ path: `${out}/1-reopened-${tag}.png` });
+  if (!blip) assert.ok(effects.includes('ensure'), 'the released browser was not reopened');
 
   // 2. Click the 「iPhone」 link on the screen once: control is taken by itself and that same
   // click lands (the page is still: no frame comes by itself after the takeover).
@@ -238,7 +254,7 @@ try {
   assert.ok(page!.url().endsWith('/iphone'), `the link click did not land: ${page!.url()}`);
   await ui.waitForTimeout(800);
   const afterClick = { header: await header(), url: page!.url() };
-  await ui.screenshot({ path: `${out}/2-link-clicked-${status}.png` });
+  await ui.screenshot({ path: `${out}/2-link-clicked-${tag}.png` });
   const session = browserControlSessions.get(instance!, 'usr_fixture', taskId);
   assert.equal(session?.control.snapshot().phase, 'human', 'the user does not hold control');
 
@@ -258,16 +274,17 @@ try {
     header: await header(),
     value: await page!.$eval('#q', (el) => (el as HTMLInputElement).value),
   };
-  await ui.screenshot({ path: `${out}/3-typed-${status}.png` });
+  await ui.screenshot({ path: `${out}/3-typed-${tag}.png` });
   assert.deepEqual(errors, []);
-  const result = { status, ok: true, opened, afterClick, typed, effects, errors };
-  await writeFile(`${out}/result-${status}.json`, JSON.stringify(result, null, 2));
+  if (blip) assert.ok(effects.includes('already-open'), 'the restore path did not run');
+  const result = { status, blip, ok: true, opened, afterClick, typed, effects, errors };
+  await writeFile(`${out}/result-${tag}.json`, JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
 } catch (error) {
   console.error(String(error));
-  await ui.screenshot({ path: `${out}/failure-${status}.png` }).catch(() => {});
+  await ui.screenshot({ path: `${out}/failure-${tag}.png` }).catch(() => {});
   await writeFile(
-    `${out}/result-${status}.json`,
+    `${out}/result-${tag}.json`,
     JSON.stringify(
       { status, ok: false, error: String(error), header: await header().catch(() => ''), effects },
       null,

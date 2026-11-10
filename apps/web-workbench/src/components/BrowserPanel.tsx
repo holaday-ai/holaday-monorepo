@@ -831,10 +831,14 @@ function CloudBrowserPanel({
         setTerminalConnectTimedOut(false);
         setVncAttemptFails(0);
         setShowReconnect(false);
-        setVncStatus('idle');
         setTerminalRecoveryState('ready');
         setTerminalRecoveryAttempt(0);
+        // FIX-61 复审 #2 #2: only a remounted stream starts over at 「idle」. The CDP screen is
+        // not remounted and reports only changes of its own status: forcing 「idle」 under a
+        // socket that stays connected left the panel 「not connected」 for good — it showed
+        // 「连接恢复较慢…重连」 and ignored the control it had just been given.
         if (shouldRemountBrowserStreamAfterRestore({ usingCdp })) {
+          setVncStatus('idle');
           setReconnectEpoch((epoch) => epoch + 1);
         }
         if (announce) {
