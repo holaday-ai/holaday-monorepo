@@ -1,6 +1,7 @@
 import { pino } from 'pino';
 import type { CDPSession, Page } from 'playwright';
 import { describe, expect, it, vi } from 'vitest';
+import { BrowserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { BrowserControl } from '../agent/supercar/browser-control.js';
 import { CdpInputHandler } from './cdp-input.js';
 import { DeferredScreencastInputBridge } from './screencast-input-bridge.js';
@@ -582,54 +583,129 @@ it('uses negotiated Retina DPR and retains held buttons through a drag', async (
   expect(send).not.toHaveBeenCalled();
 });
 
-describe('FIX-61 P0: the user viewport must reach the page layout after a task', () => {
-  const evaluateWith = (layout: [number, number]) =>
+describe('FIX-61 P0 + 复审 #1: the user viewport reaches the layout only under the lease', () => {
+  const evaluateWith = (layout: () => [number, number]) =>
     vi.fn(async (method: string, params?: { expression?: string }) => {
       if (method !== 'Runtime.evaluate') return {};
       return params?.expression?.includes('innerWidth')
-        ? { result: { value: layout } }
+        ? { result: { value: layout() } }
         : { result: { value: 1 } };
     });
-
-  it('aligns the agent page when its own emulation keeps the old layout, then re-applies ours', async () => {
-    // Observed locally: frames were 1280x1807 while the page still laid out at
-    // 1280x800 (the agent's Playwright viewport), so every click was refused.
-    const send = evaluateWith([1280, 800]);
-    const setViewportSize = vi.fn(async () => {});
+  /** The agent's Playwright page: its own viewport decides the layout. */
+  const agentPage = () => {
+    let size = { width: 1280, height: 800 };
+    const page = {
+      viewportSize: () => size,
+      setViewportSize: vi.fn(async (next: { width: number; height: number }) => {
+        size = next;
+      }),
+    };
+    return { page, layout: (): [number, number] => [size.width, size.height] };
+  };
+  const setup = () => {
+    const sessions = new BrowserControlSessions();
+    const instance = { taskId: 'tsk_a', userId: 'usr_a' };
+    const { page, layout } = agentPage();
+    const send = evaluateWith(layout);
+    const human = () =>
+      sessions.get(instance, 'usr_a', 'tsk_a')?.control.snapshot().phase === 'human';
     const handler = new CdpInputHandler(
       () => ({ send, detach: async () => {} }) as unknown as CDPSession,
       pino({ level: 'silent' }),
       undefined,
       undefined,
       true,
-      async () => ({ setViewportSize }) as unknown as Page,
+      async () => page as unknown as Page,
+      2400,
+      {
+        mayAlign: human,
+        onAligned: (restore) => sessions.noteAgentViewportChanged(instance, restore),
+      },
+    );
+    return { sessions, instance, page, send, handler };
+  };
+  const phone = { type: 'viewport' as const, width: 390, height: 760, deviceScaleFactor: 2 };
+
+  it('someone only watching a running task never resizes the assistant page', async () => {
+    const { sessions, instance, page, handler } = setup();
+    sessions.start(instance);
+    await handler.handle(phone);
+    expect(page.setViewportSize).not.toHaveBeenCalled();
+    expect(page.viewportSize()).toEqual({ width: 1280, height: 800 });
+  });
+
+  it('a handler without the lease check never resizes the agent page', async () => {
+    const { page, layout } = agentPage();
+    const send = evaluateWith(layout);
+    const handler = new CdpInputHandler(
+      () => ({ send, detach: async () => {} }) as unknown as CDPSession,
+      pino({ level: 'silent' }),
+      undefined,
+      undefined,
+      true,
+      async () => page as unknown as Page,
       2400,
     );
+    await handler.handle(phone);
+    expect(page.setViewportSize).not.toHaveBeenCalled();
+  });
+
+  it('aligns after takeover, then puts back 1280x800 at handback before the assistant observes', async () => {
+    const { sessions, instance, page, send, handler } = setup();
+    const { control } = sessions.start(instance);
+    control.requestHuman();
+    const order: string[] = [];
+    const boundary = control.checkpoint(async () => {
+      order.push(`observe@${page.viewportSize().width}x${page.viewportSize().height}`);
+    });
+    await Promise.resolve();
+    const lease = control.snapshot().lease;
+    expect(lease).toBeTruthy();
+
+    // Observed locally: frames 1280x1807 while the page still laid out at 1280x800.
     await handler.handle({ type: 'viewport', width: 1280, height: 1807, deviceScaleFactor: 2 });
-    expect(setViewportSize).toHaveBeenCalledWith({ width: 1280, height: 1807 });
+    expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 1280, height: 1807 });
     const overrides = send.mock.calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride');
     expect(overrides).toHaveLength(2);
     expect(overrides[1]?.[1]).toEqual(
       expect.objectContaining({ width: 1280, height: 1807, deviceScaleFactor: 2 }),
     );
+    // A second resize under the same lease keeps the task's own size to restore.
+    await handler.handle(phone);
+    expect(page.viewportSize()).toEqual({ width: 390, height: 760 });
+
+    control.returnToAgent(lease!);
+    await boundary;
+    expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 1280, height: 800 });
+    expect(order).toEqual(['observe@1280x800']);
+  });
+
+  it('a follow-up run restores the size a review lease left behind', async () => {
+    const { sessions, instance, page, handler } = setup();
+    sessions.start(instance).finish();
+    const review = sessions.review(instance);
+    await Promise.resolve();
+    expect(review.control.snapshot().phase).toBe('human');
+    await handler.handle(phone);
+    expect(page.viewportSize()).toEqual({ width: 390, height: 760 });
+
+    // The user sends a follow-up without handing back.
+    const { control } = sessions.start(instance);
+    await control.checkpoint(async () => {});
+    expect(page.viewportSize()).toEqual({ width: 1280, height: 800 });
   });
 
   it('leaves the agent page alone when the layout already matches', async () => {
-    const send = evaluateWith([1280, 1807]);
-    const setViewportSize = vi.fn(async () => {});
-    const handler = new CdpInputHandler(
-      () => ({ send, detach: async () => {} }) as unknown as CDPSession,
-      pino({ level: 'silent' }),
-      undefined,
-      undefined,
-      true,
-      async () => ({ setViewportSize }) as unknown as Page,
-      2400,
-    );
-    await handler.handle({ type: 'viewport', width: 1280, height: 1807 });
-    expect(setViewportSize).not.toHaveBeenCalled();
+    const { sessions, instance, page, send, handler } = setup();
+    const { control } = sessions.start(instance);
+    control.requestHuman();
+    void control.checkpoint(async () => {});
+    await Promise.resolve();
+    await handler.handle({ type: 'viewport', width: 1280, height: 800 });
+    expect(page.setViewportSize).not.toHaveBeenCalled();
     expect(
       send.mock.calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride'),
     ).toHaveLength(1);
+    control.close();
   });
 });

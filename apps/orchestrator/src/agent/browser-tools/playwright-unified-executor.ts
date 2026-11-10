@@ -260,13 +260,15 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     return playbackReleased;
   };
   const timeout = options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
-  // FIX-61 P1-3 (DEPLOY-60 iPhone): an address that answered 4xx in this task is not opened again
-  // — the run reopened Apple's 404 「iphone-16-pro-max」 buy page four times and timed out.
+  // FIX-61 P1-3 (DEPLOY-60 iPhone): an address whose page does not exist (404 / 410) is not
+  // opened again in this task — the run reopened Apple's 404 「iphone-16-pro-max」 buy page four
+  // times and timed out. 复审 #1: the query is part of the address (`/s?k=a` and `/s?k=b` are two
+  // pages), and a refusal, a rate limit or a server error is never recorded.
   const deadAddresses = new Map<string, number>();
   const addressKey = (url: string) => {
     try {
       const u = new URL(url);
-      return `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/+$/, '')}`;
+      return `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/+$/, '')}${u.search}`;
     } catch {
       return url;
     }
@@ -571,7 +573,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           const dead = deadAddresses.get(addressKey(action.url));
           if (dead)
             return fail(
-              `这个地址在本次任务里已经返回过 HTTP ${dead}（页面不存在或拒绝访问），不要再打开同一个地址。${deadAddressHint(action.url)}`,
+              `这个地址在本次任务里已经返回过 HTTP ${dead}（页面不存在），不要再打开同一个地址。${deadAddressHint(action.url)}`,
             );
           const response = await page.goto(action.url, {
             timeout: Math.max(timeout, 30_000),
@@ -582,12 +584,23 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           // AP3 core-07: a 403 page read as "已打开" kept the model on it until
           // the step limit. Say what the server answered.
           const httpStatus = response?.status() ?? 0;
-          if (httpStatus >= 400) {
+          if (pageDoesNotExist(httpStatus)) {
             deadAddresses.set(addressKey(action.url), httpStatus);
             deadAddresses.set(addressKey(page.url()), httpStatus);
             return {
               ...done(
-                `已打开 ${page.url()}，但服务器返回 HTTP ${httpStatus}（拒绝访问或不存在），页面没有可用内容。用户没有指定网站时换一个公开页面；指定了网站则如实说明无法访问。${deadAddressHint(page.url())}`,
+                `已打开 ${page.url()}，但服务器返回 HTTP ${httpStatus}（页面不存在），页面没有可用内容。用户没有指定网站时换一个公开页面；指定了网站则如实说明无法访问。${deadAddressHint(page.url())}`,
+              ),
+              url: page.url(),
+            };
+          }
+          if (httpStatus >= 400) {
+            const passing = httpStatus === 429 || httpStatus >= 500;
+            return {
+              ...done(
+                passing
+                  ? `已打开 ${page.url()}，但服务器返回 HTTP ${httpStatus}（访问太频繁或服务器暂时出错），页面没有可用内容。可以过一会儿再打开一次；仍然不行，用户没有指定网站时换一个公开页面，指定了网站则如实说明无法访问。`
+                  : `已打开 ${page.url()}，但服务器返回 HTTP ${httpStatus}（拒绝访问），页面没有可用内容。用户没有指定网站时换一个公开页面；指定了网站则如实说明无法访问。`,
               ),
               url: page.url(),
             };
@@ -856,6 +869,11 @@ function done(text: string): UnifiedToolResult {
 
 function fail(text: string): UnifiedToolResult {
   return { ok: false, text };
+}
+
+/** FIX-61 复审 #1: only 「this page does not exist」 stops a reopen; 403 / 429 / 5xx may pass. */
+export function pageDoesNotExist(httpStatus: number): boolean {
+  return httpStatus === 404 || httpStatus === 410;
 }
 
 /**

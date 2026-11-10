@@ -741,6 +741,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       ]
         .filter(Boolean)
         .join('\n\n'),
+      ...(opts.askedFieldJudge ? { fieldJudge: opts.askedFieldJudge } : {}),
       ...(contract && guidance
         ? {
             reviewFinish: (summary: string, pageText?: string) =>

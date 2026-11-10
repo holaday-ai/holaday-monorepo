@@ -21,6 +21,7 @@ import {
 } from '../../llm/model-call-retry.js';
 import { asksForToolCallExample } from '../generate-answer-guard.js';
 import { stripInternalRefs } from '../internal-refs.js';
+import type { AskedFieldJudge } from '../scrape-field-judge.js';
 import { namedAddressHosts } from '../scrape-runner.js';
 import { SEARCH_RESULTS_ORIGIN } from '../search-fallback/search-results-page.js';
 import { humanizeToolMentions } from '../text-sanitizer.js';
@@ -361,6 +362,12 @@ export interface UnifiedBrowserLoopInput {
    * page itself has (「价格：未获取到（仅显示 See options）」), or null.
    */
   partialNote?: (summary: string, pageText?: string) => string | null;
+  /**
+   * FIX-61 复审 #1 #3: FIX-60's small-model field reading. Asked only when a named count looks
+   * left out; it can clear that doubt (「12.3万赞」 is the likes), never add one. Null keeps the
+   * previous verdict.
+   */
+  fieldJudge?: AskedFieldJudge;
   /**
    * Offline audits only: named sites are served from a loopback fixture, so the site lock
    * lets local test hosts through. Production never sets it (PR #295 review).
@@ -1857,11 +1864,19 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           // answer does not give at all is treated like one written as 页面未显示.
           // Only counts (评论数 / 收藏数 …) the answer never mentions: a title or price written
           // naturally (「Apple iPhone 16 Pro，价格 ¥7999」) is a value, label or not.
-          const leftOut = missingAskedFields(input.userIntent ?? input.intent, summary).filter(
+          const leftOutDoubt = missingAskedFields(input.userIntent ?? input.intent, summary).filter(
             (field) =>
               !declaredAbsent.includes(field) &&
               /数$/.test(field) &&
               !summary.includes(field.replace(/数$/, '')),
+          );
+          // 复审 #1 #3: the field name minus 「数」 is only a doubt — 「12.3万赞」「获赞 12.3 万」 give
+          // the likes. The small model reads the answer once; a failed call keeps the doubt.
+          const leftOut = await confirmLeftOut(
+            input.fieldJudge,
+            input.userIntent ?? input.intent,
+            summary,
+            leftOutDoubt,
           );
           const absent = [...declaredAbsent, ...leftOut];
           // The page itself confirms the gap (a listed item showing only 「See options」):
@@ -4099,4 +4114,26 @@ export function requestNamesSite(intent: string, url: string | undefined): boole
   if (!host) return false;
   const base = host.split('.').slice(-2).join('.');
   return intent.toLowerCase().includes(base.toLowerCase());
+}
+
+/**
+ * FIX-61 复审 #1 #3: the named counts the answer really leaves out. `doubt` comes from the
+ * field-name rule; the judge (FIX-60's `{field, has_value}` reading) keeps a field only when it
+ * reads no value for it, or gives no verdict on it. No judge, or a failed call: the doubt stands
+ * as before — the judge never adds a field the rule did not doubt.
+ */
+export async function confirmLeftOut(
+  judge: AskedFieldJudge | undefined,
+  request: string,
+  answer: string,
+  doubt: readonly string[],
+): Promise<string[]> {
+  if (!doubt.length || !judge) return [...doubt];
+  const verdicts = await judge({ request, answer }).catch(() => null);
+  if (!verdicts) return [...doubt];
+  const key = (field: string) => field.replace(/[\s「」『』"“”'‘’]/g, '').replace(/数$/, '');
+  return doubt.filter((field) => {
+    const said = verdicts.find((v) => key(v.field) === key(field));
+    return !said || !said.hasValue;
+  });
 }

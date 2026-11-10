@@ -48,6 +48,9 @@ export const MARK_HUMAN_TYPED_FIELD = `(() => {
   return false;
 })()`;
 
+/** The size the cloud browser's agent page starts a task with. */
+export const AGENT_LAUNCH_VIEWPORT = { width: 1280, height: 800 } as const;
+
 export type InputMessage =
   | { type: 'mouseMove'; x: number; y: number }
   | {
@@ -175,6 +178,16 @@ export class CdpInputHandler {
     private readonly preserveDeviceScaleFactor = false,
     private readonly getPage?: () => Promise<Page>,
     private readonly maxViewportHeight = 1600,
+    /**
+     * FIX-61 复审 #1: the agent page is resized to the user's screen only
+     * while the user holds the control lease. Someone just watching never
+     * changes the assistant's layout; `onAligned` receives the restore to run
+     * before the assistant acts again.
+     */
+    private readonly agentViewport?: {
+      mayAlign: () => boolean;
+      onAligned: (restore: () => Promise<void>) => void;
+    },
   ) {}
 
   /**
@@ -276,12 +289,28 @@ export class CdpInputHandler {
           // tall while the page laid out at 800 and every user click was
           // refused as a stale observation. Align the agent page when ours did
           // not take, then re-apply ours so the negotiated DPR is kept.
-          if (this.getPage && (await this.layoutDiffers(send, width, height))) {
+          if (
+            this.getPage &&
+            this.agentViewport?.mayAlign() &&
+            (await this.layoutDiffers(send, width, height))
+          ) {
             const agentPage = page ?? (await this.getPage().catch(() => undefined));
-            if (agentPage) {
-              await agentPage.setViewportSize({ width, height }).catch((err: unknown) => {
-                this.logger.debug({ err }, 'cdp-input: agent viewport not aligned');
-              });
+            if (agentPage && this.agentViewport.mayAlign()) {
+              const original = agentPage.viewportSize() ?? AGENT_LAUNCH_VIEWPORT;
+              const aligned = await agentPage.setViewportSize({ width, height }).then(
+                () => true,
+                (err: unknown) => {
+                  this.logger.debug({ err }, 'cdp-input: agent viewport not aligned');
+                  return false;
+                },
+              );
+              if (aligned) {
+                this.agentViewport.onAligned(async () => {
+                  await agentPage.setViewportSize(original).catch((err: unknown) => {
+                    this.logger.debug({ err }, 'cdp-input: agent viewport not restored');
+                  });
+                });
+              }
               await send('Emulation.setDeviceMetricsOverride', override);
             }
           }

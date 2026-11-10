@@ -66,6 +66,8 @@ export type RoutePickResult =
   | { kind: 'no-active'; reason: string };
 
 const TASK_ID_PREFIX = 'tsk_';
+/** How often a live screen checks whether its user just took control. */
+const LEASE_WATCH_MS = 300;
 
 export function pickInstanceForRoute(args: {
   urlArg: string;
@@ -265,6 +267,12 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     let inputHandler: CdpInputHandler | null = null;
     let stopped = false;
     let viewportPending = false;
+    const humanLease = (): string | null => {
+      const control = browserControlSessions
+        .get(args.instance, args.instance.userId, args.instance.taskId)
+        ?.control.snapshot();
+      return control?.phase === 'human' ? control.lease : null;
+    };
     const frameGuard = new BrowserFrameGuard();
     const confirmations = new BrowserActionConfirmations();
     const invalidate = () => {
@@ -475,8 +483,29 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         args.viewportV2,
         () => executor.getPage(),
         args.viewportV2 ? 2400 : 1600,
+        {
+          // FIX-61 复审 #1: only the lease holder's screen may resize the
+          // assistant's page; a viewer only gets frames.
+          mayAlign: () => humanLease() !== null,
+          onAligned: (restore) =>
+            browserControlSessions.noteAgentViewportChanged(args.instance, restore),
+        },
       );
       await inputBridge.attach(inputHandler);
+      // When the user takes control, apply their screen size once so the page
+      // they are about to press lays out like the frames they see.
+      let seenLease = humanLease();
+      const leaseWatch = setInterval(() => {
+        if (stopped) {
+          clearInterval(leaseWatch);
+          return;
+        }
+        const lease = humanLease();
+        if (lease && lease !== seenLease) void inputBridge.reapplyViewport().catch(() => {});
+        seenLease = lease;
+      }, LEASE_WATCH_MS);
+      leaseWatch.unref?.();
+      args.ws.once('close', () => clearInterval(leaseWatch));
 
       // Keep the pool's idle GC happy — every active screencast
       // counts as activity on its bound task even when the agent

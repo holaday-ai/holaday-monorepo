@@ -6177,12 +6177,26 @@ export const tasksRouter = router({
                 const unifiedReadPage = scrapeBrowserRetry
                   ? undefined
                   : createFirecrawlReadPage(ctx.firecrawl);
+                // FIX-61 复审 #1 #3: FIX-60's small-model field reading (plan lane = the small
+                // model), asked only when a named count looks left out of a browser answer.
+                const browserFieldJudgeRuntime = modelRuntimeWiring.resolveCore({
+                  actorExternalId: ctx.userId,
+                  lane: 'plan',
+                  ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
+                });
+                const askedFieldJudge =
+                  browserFieldJudgeRuntime.kind === 'ready'
+                    ? createAskedFieldJudge(browserFieldJudgeRuntime.messages('fast'), {
+                        logger: ctx.logger,
+                      })
+                    : undefined;
                 let captchaPrivacy = false;
                 let captchaNeedsRelease = false;
                 let pauseCaptchaWatchdog = () => {};
                 let resumeCaptchaWatchdog = () => {};
                 const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
                   browserCapabilities: taskBrowserCapabilities,
+                  ...(askedFieldJudge ? { askedFieldJudge } : {}),
                   ...(unifiedWebSearch ? { unifiedWebSearch } : {}),
                   ...(unifiedWebSearchAfterWall ? { unifiedWebSearchAfterWall } : {}),
                   ...(unifiedReadPage ? { unifiedReadPage } : {}),
