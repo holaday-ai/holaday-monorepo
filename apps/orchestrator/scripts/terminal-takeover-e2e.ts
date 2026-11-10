@@ -7,7 +7,12 @@
  * canvas: the panel reopens the browser on the task's page, takes control by itself, and the
  * link click and the search-box typing land on the page.
  *
- * Run from apps/orchestrator: TERMINAL_TAKEOVER_E2E_OUTPUT=<dir> pnpm exec tsx scripts/terminal-takeover-e2e.ts
+ * The click that asks for control must itself land (one click, no retry) on a still page.
+ *
+ * Run from apps/orchestrator (the config loader needs these three set; nothing connects to them):
+ *   DATABASE_URL=mysql://fixture@127.0.0.1:1/none REDIS_URL=redis://127.0.0.1:1 \
+ *   JWT_SECRET=local-fixture-only-local-fixture-only-0000 TERMINAL_TAKEOVER_E2E_OUTPUT=<dir> \
+ *   pnpm exec tsx scripts/terminal-takeover-e2e.ts [--status=partial_success|completed|failed]
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -148,6 +153,37 @@ await ui.route('**/*', (route) =>
   new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort(),
 );
 const errors: string[] = [];
+if (process.env.E2E_WS_TRACE)
+  ui.on('websocket', (socket) => {
+    const t0 = Date.now();
+    socket.on('framesent', (e) => {
+      try {
+        const m = JSON.parse(String(e.payload));
+        console.log(
+          JSON.stringify({
+            ms: Date.now() - t0,
+            sent: m.type,
+            p: m.payload?.type ?? m.width ?? '',
+            lease: !!m.controlLease,
+          }),
+        );
+      } catch {}
+    });
+    socket.on('framereceived', (e) => {
+      try {
+        const m = JSON.parse(String(e.payload));
+        console.log(
+          JSON.stringify({
+            ms: Date.now() - t0,
+            recv: m.type,
+            w: m.width ?? m.geometry?.cssWidth,
+            h: m.height ?? m.geometry?.cssHeight,
+            r: m.reason ?? m.error,
+          }),
+        );
+      } catch {}
+    });
+  });
 ui.on('pageerror', (e) => errors.push(e.message));
 const header = async () =>
   ui.evaluate(() =>
@@ -195,11 +231,10 @@ try {
   await ui.screenshot({ path: `${out}/1-reopened-${status}.png` });
   assert.ok(effects.includes('ensure'), 'the released browser was not reopened');
 
-  // 2. Click the 「iPhone」 link on the screen: control is taken by itself and the click lands.
-  for (let attempt = 0; attempt < 3 && !page!.url().endsWith('/iphone'); attempt++) {
-    await clickOnScreen('#iphone');
-    await page!.waitForURL(/\/iphone$/, { timeout: 5000 }).catch(() => {});
-  }
+  // 2. Click the 「iPhone」 link on the screen once: control is taken by itself and that same
+  // click lands (the page is still: no frame comes by itself after the takeover).
+  await clickOnScreen('#iphone');
+  await page!.waitForURL(/\/iphone$/, { timeout: 8000 }).catch(() => {});
   assert.ok(page!.url().endsWith('/iphone'), `the link click did not land: ${page!.url()}`);
   await ui.waitForTimeout(800);
   const afterClick = { header: await header(), url: page!.url() };

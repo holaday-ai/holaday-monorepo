@@ -192,6 +192,8 @@ export function CdpScreencastViewport({
   const replayAfterControlRef = React.useRef(replayAfterControl);
   replayAfterControlRef.current = replayAfterControl;
   const lastControlRequestRef = React.useRef(0);
+  const controlRequestInFlight = (now: number): boolean =>
+    lastControlRequestRef.current > 0 && now - lastControlRequestRef.current <= DEFERRED_INPUT_MS;
   const invalidateGeometry = React.useCallback(() => {
     geometryRef.current = null;
     observationEpochRef.current++;
@@ -348,10 +350,17 @@ export function CdpScreencastViewport({
         return;
       }
       const requestControl = onRequestControlRef.current;
-      // Without a way to ask for control, input made without a lease is never
-      // kept for later.
-      if ((viewOnlyRef.current || !controlLeaseRef.current) && !requestControl) return;
       const now = Date.now();
+      // Without a way to ask for control, input made without a lease is never
+      // kept for later — unless this screen has just asked for it (FIX-61 复审 #2 #2: the
+      // panel withdraws onRequestControl while that request is in flight, and the press
+      // that asked, and its release, must still land once control arrives).
+      if (
+        (viewOnlyRef.current || !controlLeaseRef.current) &&
+        !requestControl &&
+        !controlRequestInFlight(now)
+      )
+        return;
       const waitingForControl = viewOnlyRef.current || !controlLeaseRef.current;
       if (!waitingForControl || replayAfterControlRef.current) {
         deferredInputsRef.current = [
@@ -377,13 +386,28 @@ export function CdpScreencastViewport({
     },
     [canDeliverNow, sendInput, viewportV2],
   );
+  // FIX-61 复审 #2 #2: held input waits for a fresh frame, and a still page (apple.com.cn)
+  // sends none by itself — the press that asked for control expired unsent. Ask for one.
+  const askFrameForDeferred = React.useCallback((): void => {
+    if (!viewportV2 || deferredInputsRef.current.length === 0) return;
+    const ws = wsRef.current;
+    if (ws?.readyState !== WebSocket.OPEN) return;
+    try {
+      ws.send(JSON.stringify({ type: 'observe' }));
+    } catch {
+      /* closing */
+    }
+  }, [viewportV2]);
+  const askFrameForDeferredRef = React.useRef(askFrameForDeferred);
+  askFrameForDeferredRef.current = askFrameForDeferred;
   // Control just arrived (or was lost): deliver what waited, or ask for a frame.
   React.useEffect(() => {
     if (viewOnly || !controlLease) {
-      if (!onRequestControl) deferredInputsRef.current = [];
+      if (!onRequestControl && !controlRequestInFlight(Date.now())) deferredInputsRef.current = [];
       return;
     }
     flushDeferredRef.current();
+    askFrameForDeferredRef.current();
   }, [viewOnly, controlLease, onRequestControl]);
 
   const lastDprRef = React.useRef(0);
@@ -657,8 +681,10 @@ export function CdpScreencastViewport({
         }
         if (viewportV2 && msg.type === 'viewport-applied') {
           const pending = requestedViewportRef.current;
-          if (pending && pending.width === msg.width && pending.height === msg.height)
+          if (pending && pending.width === msg.width && pending.height === msg.height) {
             viewportPendingRef.current = false;
+            askFrameForDeferredRef.current();
+          }
           return;
         }
         // Optimization #3 R2 — `Page.frameNavigated` events from
@@ -876,7 +902,10 @@ export function CdpScreencastViewport({
   } | null>(null);
   // FIX-61 P0: a view-only screen that may ask for control still accepts the
   // press / keys and hands them to deliverInput, which asks for control.
-  const acceptsInput = !viewOnly || Boolean(onRequestControl);
+  // FIX-61 复审 #2 #2: and right after it asked (the panel withdraws onRequestControl while the
+  // request is in flight), so the release / keys that follow the asking press are not lost.
+  const acceptsInput = (): boolean =>
+    !viewOnly || Boolean(onRequestControl) || controlRequestInFlight(Date.now());
   // Mouse handlers
   const onMouseMove = (e: React.MouseEvent) => {
     if (viewOnly || !canDeliverNow()) return;
@@ -903,7 +932,7 @@ export function CdpScreencastViewport({
     };
   };
   const onMouseDown = (e: React.MouseEvent) => {
-    if (!acceptsInput) return;
+    if (!acceptsInput()) return;
     retainScreencastInputFocus({
       event: e,
       input: hiddenInputRef.current,
@@ -913,7 +942,7 @@ export function CdpScreencastViewport({
     );
   };
   const onMouseUp = (e: React.MouseEvent) => {
-    if (!acceptsInput) return;
+    if (!acceptsInput()) return;
     deliverInput(
       pointerPayload('mouseUp', { clientX: e.clientX, clientY: e.clientY }, e.button, e.detail),
     );
@@ -928,7 +957,7 @@ export function CdpScreencastViewport({
   // Keyboard handlers — fire on the hidden input so the canvas
   // doesn't fight the browser for default-action handling.
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!acceptsInput) return;
+    if (!acceptsInput()) return;
     const transition = cdpKeyTransition(inputBridgeStateRef.current, {
       phase: 'down',
       key: e.key,
@@ -949,7 +978,7 @@ export function CdpScreencastViewport({
     deliverInput(() => payload);
   };
   const onKeyUp = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!acceptsInput) return;
+    if (!acceptsInput()) return;
     const transition = cdpKeyTransition(inputBridgeStateRef.current, {
       phase: 'up',
       key: e.key,
@@ -971,7 +1000,7 @@ export function CdpScreencastViewport({
   // We send insertText, NOT a sequence of keys, so the IME's
   // candidate selection lands verbatim in Brave's focused element.
   const onCompositionEnd = (e: React.CompositionEvent<HTMLInputElement>) => {
-    if (!acceptsInput) return;
+    if (!acceptsInput()) return;
     const transition = cdpCompositionEndTransition(inputBridgeStateRef.current, e.data);
     inputBridgeStateRef.current = transition.state;
     const payload = transition.payload;
@@ -982,7 +1011,7 @@ export function CdpScreencastViewport({
   // Catch-all for non-composition typing into the hidden input
   // (e.g. paste). Forward as insertText too.
   const onHiddenInputInput = (e: React.FormEvent<HTMLInputElement>) => {
-    if (!acceptsInput) return;
+    if (!acceptsInput()) return;
     const native = e.nativeEvent as InputEvent;
     const target = e.currentTarget;
     const transition = cdpTextInputTransition(inputBridgeStateRef.current, {
@@ -1102,7 +1131,7 @@ export function CdpScreencastViewport({
           onTouchEnd={(e) => {
             const touch = touchRef.current;
             touchRef.current = null;
-            if (!viewportV2 || !acceptsInput || !touch || touch.moved) return;
+            if (!viewportV2 || !acceptsInput() || !touch || touch.moved) return;
             const t = e.changedTouches[0];
             if (!t) return;
             // FIX-61: a tap on a phone takes control the same way a click does.

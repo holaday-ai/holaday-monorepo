@@ -150,3 +150,95 @@ it('FIX-61: on a running task the press only asks for control and is not replaye
   fireEvent.keyDown(input, { key: 'q', code: 'KeyQ', keyCode: 81 });
   expect(sent.filter((m) => m.payload?.type === 'keyDown')).toHaveLength(1);
 });
+
+it('FIX-61 复审 #2 #2: the press that asks for control and its release both land, though the panel withdraws the request while it is in flight', () => {
+  const sent: Array<{ controlLease?: string; payload: { type: string } }> = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    send(raw: string) {
+      sent.push(JSON.parse(raw));
+    }
+    close() {}
+  }
+  vi.stubGlobal('WebSocket', Socket);
+  const onRequestControl = vi.fn();
+  const props = { wsUrl: 'ws://localhost/screencast-ws/tsk_test', streamToken: 'test' };
+  const { container, rerender } = render(
+    <CdpScreencastViewport
+      {...props}
+      viewOnly
+      controlLease={null}
+      onRequestControl={onRequestControl}
+    />,
+  );
+  const canvas = container.querySelector('canvas');
+  if (!canvas) throw new Error('canvas missing');
+  fireEvent.mouseDown(canvas, { clientX: 20, clientY: 30, button: 0, detail: 1 });
+  expect(onRequestControl).toHaveBeenCalledTimes(1);
+  // BrowserPanel: the takeover is pending, so it no longer offers onRequestControl.
+  rerender(<CdpScreencastViewport {...props} viewOnly controlLease={null} />);
+  fireEvent.mouseUp(canvas, { clientX: 20, clientY: 30, button: 0, detail: 1 });
+  expect(sent.filter((m) => /^mouse/.test(m.payload?.type))).toEqual([]);
+  rerender(<CdpScreencastViewport {...props} viewOnly={false} controlLease="granted" />);
+  const pointer = sent.filter((m) => /^mouse/.test(m.payload?.type));
+  expect(pointer.map((m) => m.payload.type)).toEqual(['mouseDown', 'mouseUp']);
+  expect(pointer.every((m) => m.controlLease === 'granted')).toBe(true);
+});
+
+it('FIX-61 复审 #2 #2: a press nobody asked control for is still not kept', () => {
+  const sent: Array<{ payload: { type: string } }> = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    send(raw: string) {
+      sent.push(JSON.parse(raw));
+    }
+    close() {}
+  }
+  vi.stubGlobal('WebSocket', Socket);
+  const props = { wsUrl: 'ws://localhost/screencast-ws/tsk_test', streamToken: 'test' };
+  const { container, rerender } = render(
+    <CdpScreencastViewport {...props} viewOnly controlLease={null} />,
+  );
+  const canvas = container.querySelector('canvas');
+  if (!canvas) throw new Error('canvas missing');
+  fireEvent.mouseDown(canvas, { clientX: 5, clientY: 5, button: 0, detail: 1 });
+  fireEvent.mouseUp(canvas, { clientX: 5, clientY: 5, button: 0, detail: 1 });
+  rerender(<CdpScreencastViewport {...props} viewOnly={false} controlLease="later" />);
+  expect(sent.filter((m) => /^mouse/.test(m.payload?.type))).toEqual([]);
+});
+
+it('FIX-61 复审 #2 #2: held input on a still page asks for a fresh frame once control arrives', () => {
+  const sent: Array<{ type?: string; payload?: { type: string } }> = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    send(raw: string) {
+      sent.push(JSON.parse(raw));
+    }
+    close() {}
+  }
+  vi.stubGlobal('WebSocket', Socket);
+  const onRequestControl = vi.fn();
+  const props = {
+    wsUrl: 'ws://localhost/screencast-ws/tsk_test',
+    streamToken: 'test',
+    viewportV2: true,
+  };
+  const { container, rerender } = render(
+    <CdpScreencastViewport
+      {...props}
+      viewOnly
+      controlLease={null}
+      onRequestControl={onRequestControl}
+    />,
+  );
+  const input = container.querySelector('input');
+  if (!input) throw new Error('input missing');
+  fireEvent.keyDown(input, { key: 'h', code: 'KeyH', keyCode: 72 });
+  expect(onRequestControl).toHaveBeenCalledTimes(1);
+  expect(sent.filter((m) => m.type === 'observe')).toEqual([]);
+  rerender(<CdpScreencastViewport {...props} viewOnly={false} controlLease="granted" />);
+  expect(sent.filter((m) => m.type === 'observe').length).toBeGreaterThan(0);
+});
