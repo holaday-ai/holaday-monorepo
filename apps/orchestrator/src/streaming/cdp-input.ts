@@ -139,6 +139,25 @@ function printableKeyText(m: {
   return m.key;
 }
 
+/**
+ * DEPLOY-61: the text a key generates when dispatched. Enter carries no printable `key`, and a
+ * CDP keyDown without `text` raises no keypress: a focused button was not activated and a form
+ * was not submitted (「输入 holaday 并回车」 did nothing). Enter sends '\r' as Puppeteer does.
+ * Only printable keys mark the field as user-typed (printableKeyText below).
+ */
+function dispatchKeyText(m: {
+  key?: string;
+  code?: string;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+}): string | undefined {
+  const printable = printableKeyText(m);
+  if (printable) return printable;
+  if (m.altKey || m.ctrlKey || m.metaKey) return undefined;
+  return m.key === 'Enter' || m.code === 'Enter' || m.code === 'NumpadEnter' ? '\r' : undefined;
+}
+
 function editingCommands(m: {
   key?: string;
   ctrlKey?: boolean;
@@ -360,7 +379,7 @@ export class CdpInputHandler {
         case 'keyDown': {
           const reportedModifiers = modifiersBitmask(msg) | modifierBit(msg);
           await this.releaseStaleModifiers(send, reportedModifiers);
-          const text = printableKeyText(msg);
+          const text = dispatchKeyText(msg);
           const commands = editingCommands(msg);
           await send('Input.dispatchKeyEvent', {
             type: 'keyDown',

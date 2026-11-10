@@ -9,16 +9,51 @@ export const BROWSER_FRAME_MAX_AGE_MS = 5_000;
 // A just-painted frame can be superseded while its human input is in flight.
 // Keep only a 250ms bounded transport grace within the SAME target/revision.
 const INPUT_FRAME_TRANSIT_MS = 250;
-// FIX-61 复审 #2 #2: keys carry no position — they go to the focused element, which the
+// FIX-61 复审 #2 #2: most keys carry no position — they go to the focused element, which the
 // action gate binds at dispatch. A screen that paints the newest frame late (a large frame on
 // a busy machine or phone) still names the previous one, and every key typed meanwhile was
 // refused silently (「holaday」 arrived as 「h」). A mouse-up ends a press the server already
 // accepted: refusing it left the button held in the browser, and at handback the browser was
 // stopped as 「input outcome unknown」. Both accept a superseded frame of the SAME tab and
 // revision for as long as a frame is fresh at all; any navigation, resize or tab change still
-// clears it. Presses, moves and scrolls keep the 250ms bound.
+// clears it. Presses, moves, scrolls and keys that activate the focused element (Enter, Space —
+// see frameGraceFor) keep the 250ms bound.
 const LENIENT_INPUT_FRAME_GRACE_MS = BROWSER_FRAME_MAX_AGE_MS;
 const SUPERSEDED_FRAMES_KEPT = 512;
+
+/**
+ * FIX-61 DEPLOY-61 第 0 步 #1 (safety): which frame grace a human input gets. Keys that ACTIVATE
+ * the focused element — Enter (incl. the numpad one) and Space — keep the 250ms bound: a change
+ * inside the page (a confirm dialog, focus moving to 「确认支付」) does not bump the viewport
+ * revision, so a user looking at an older frame could otherwise fire a button they never saw.
+ * Other keys, text and the release of an accepted press stay lenient. Exported for the proxy.
+ */
+export function frameGraceFor(message: {
+  type: string;
+  key?: string;
+  code?: string;
+  keyCode?: number;
+}): 'pointer' | 'lenient' {
+  if (message.type === 'keyDown') return activatesFocused(message) ? 'pointer' : 'lenient';
+  return message.type === 'keyUp' || message.type === 'insertText' || message.type === 'mouseUp'
+    ? 'lenient'
+    : 'pointer';
+}
+
+function activatesFocused(m: { key?: string; code?: string; keyCode?: number }): boolean {
+  const key = m.key;
+  const code = m.code;
+  return (
+    key === 'Enter' ||
+    key === ' ' ||
+    key === 'Spacebar' ||
+    code === 'Enter' ||
+    code === 'NumpadEnter' ||
+    code === 'Space' ||
+    m.keyCode === 13 ||
+    m.keyCode === 32
+  );
+}
 export class BrowserFrameGuard {
   private frame: BrowserFrameGeometry | null = null;
   private recent = new Map<string, { frame: BrowserFrameGeometry; supersededAt: number }>();

@@ -352,6 +352,32 @@ describe('CdpInputHandler keyboard input', () => {
     });
   });
 
+  it('DEPLOY-61: Enter (and the numpad one) carries a carriage return so it submits and activates', async () => {
+    const { handler, send } = handlerWithSend();
+    await handler.handle({ type: 'keyDown', key: 'Enter', code: 'Enter', keyCode: 13 });
+    await handler.handle({ type: 'keyDown', key: 'Enter', code: 'NumpadEnter', keyCode: 13 });
+    await handler.handle({
+      type: 'keyDown',
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      metaKey: true,
+    });
+    const downs = send.mock.calls
+      .filter(
+        ([method, params]) => method === 'Input.dispatchKeyEvent' && params?.type === 'keyDown',
+      )
+      .map(([, params]) => params);
+    expect(downs[0]).toMatchObject({
+      key: 'Enter',
+      code: 'Enter',
+      text: '\r',
+      unmodifiedText: '\r',
+    });
+    expect(downs[1]).toMatchObject({ code: 'NumpadEnter', text: '\r', unmodifiedText: '\r' });
+    expect(downs[2]).not.toHaveProperty('text');
+  });
+
   it('does not insert text for keyboard shortcuts', async () => {
     const { handler, send } = handlerWithSend();
 

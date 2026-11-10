@@ -41,7 +41,11 @@ import type { BrowserPool } from '../browser-pool/index.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
 import { db } from '../db/client.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
-import { BrowserActionConfirmations, BrowserFrameGuard } from './browser-viewport-v2.js';
+import {
+  BrowserActionConfirmations,
+  BrowserFrameGuard,
+  frameGraceFor,
+} from './browser-viewport-v2.js';
 import { CdpInputHandler } from './cdp-input.js';
 import { CdpStreamer } from './cdp-streamer.js';
 import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
@@ -315,15 +319,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
               streamer?.invalidateObservation();
               return;
             }
-            // FIX-61 复审 #2 #2: keys, text and the release of a press (see
-            // LENIENT_INPUT_FRAME_GRACE_MS in browser-viewport-v2.ts).
-            const inputKind =
-              message.type === 'keyDown' ||
-              message.type === 'keyUp' ||
-              message.type === 'insertText' ||
-              message.type === 'mouseUp'
-                ? ('lenient' as const)
-                : ('pointer' as const);
+            // FIX-61 复审 #2 #2 / DEPLOY-61 #1: keys, text and the release of a press are lenient;
+            // Enter and Space activate the focused element and keep 250ms (frameGraceFor).
+            const inputKind = frameGraceFor(message);
             if (
               ('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y))) ||
               viewportPending ||
